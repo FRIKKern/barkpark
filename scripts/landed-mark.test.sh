@@ -54,7 +54,7 @@ echo
 # ── MUTANT: the idempotency read is disarmed ────────────────────────────────
 echo "── MUTANT: MUT-IDEMPOTENT replaced by an unconditional false"
 MUTANT="$TMP/landed-mark.mut.sh"
-ANCHOR='    if all(w in labels for w in wanted):'
+ANCHOR='    if all(w in labels for w in wanted) and commit_known:'
 HITS="$(grep -cF -- "$ANCHOR" "$SUBJECT")"
 if [ "$HITS" != "1" ]; then
   echo "landed-mark.test: CANNOT MUTATE — the MUT-IDEMPOTENT anchor matched ${HITS} time(s), not 1." >&2
@@ -64,7 +64,7 @@ fi
 ok "the MUT-IDEMPOTENT anchor matched exactly once"
 
 # `python` false, not shell false: the anchor is inside the embedded helper.
-sed 's/^    if all(w in labels for w in wanted):$/    if False:/' "$SUBJECT" > "$MUTANT"
+sed 's/^    if all(w in labels for w in wanted) and commit_known:$/    if False:/' "$SUBJECT" > "$MUTANT"
 if cmp -s "$SUBJECT" "$MUTANT"; then
   echo "landed-mark.test: CANNOT MUTATE — the scratch copy is byte-identical to the original." >&2
   exit 2

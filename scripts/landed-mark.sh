@@ -83,38 +83,74 @@
 #   `add` and never `remove`.
 #
 # WHAT THE MARK IS
-#   content.labels gains two entries, once:
+#   content.labels gains two entries, once (POST /v1/tasks/:id/labels):
 #       landed-on-main            the class, so a board filter finds the whole
 #                                 population in one query
 #       landed:pr-<n>@<sha10>     the fact — which PR, which commit
-#   Nothing else is written. Not lifecycle_status, not the claim, not the
-#   assignee, not the criteria array.
+#   content.landed gains the same fact as a SENTENCE (POST /v1/tasks/:id/landed):
+#       commits: [<sha>]  prs: ["<n>"]  notes: ["landed on main as <sha> by PR #<n>"]
+#   and, ONLY where the server's own merge-shaped permit allows it, exactly one
+#   acceptance criterion flips to met=true with that note as its evidence.
+#   Nothing else is written by either door. Not lifecycle_status, not the claim,
+#   not the assignee, not the criteria array wholesale, never a second criterion.
 #
-# WHAT IS STILL MISSING, AS A REQUEST (task-2e16f1390ffc064f, for lead-cli)
+# THE REQUEST WAS GRANTED — AND BOTH DOORS ARE NOW CALLED, NOT ONE
 # ----------------------------------------------------------------------------
-# A label carries a fact; it cannot carry a SENTENCE, and it cannot flip a
-# criterion. So when a row has an acceptance criterion whose own text is about
-# the PR merging, this script raises a ::notice naming the criterion and saying
-# why it did not stamp it — and stops. Closing that gap needs ONE server-side
-# verb, and it should be filed as a request rather than guessed at:
+# This section used to be a REQUEST: a label carries a fact, it cannot carry a
+# SENTENCE and it cannot flip a criterion, so the script raised a ::notice and
+# stopped. PR #15090 built the verb that closes the gap:
 #
 #     POST /v1/tasks/:doc_id/landed
-#     body  {"commit": "<sha>", "pr": <n>, "note": "<sentence>",
-#            "criterion": <index|null>}
-#     auth  a token with WRITE on the task dataset. NO claim, NO epoch — the
-#           whole point is that the caller is CI, which can never be the holder.
-#     does  unions `commit`/`pr`/`note` into content.landed the way
-#           Tasks.Close.merge_landed/2 already unions prs/files/capability_slugs,
-#           and — when `criterion` is given AND that criterion's own text is
-#           merge-shaped AND it is not already met — sets met=true with `note`
-#           as evidence. Refuses on any other criterion index, so the verb can
-#           never become a general non-holder stamp.
+#     body  {"commit": "<sha>", "pr": "<n>", "note": "<sentence>",
+#            "criterion": <zero-based index|null>}
+#     auth  a token with WRITE on the task dataset. NO claim, NO epoch.
+#     does  unions commit/pr/note into content.landed through the SAME
+#           Tasks.Internal.merge_landed/2 a close uses, and — when `criterion`
+#           is given and that criterion is MERGE-SHAPED and not already met —
+#           sets met=true with `note` as its evidence.
 #     event `task.landed`, carrying the caller token id.
 #
-# Until that exists, the label IS the mark and the ::notice is the handover.
+# It shipped, and for four days NOTHING CALLED IT. The producer half of the gap
+# task-2279167dd00ec347 measured on the consumer side: a facility that exists
+# and is unconsumed. This script now calls it.
+#
+# WHY BOTH DOORS AND NOT A SWITCH TO THE NEW ONE. The obvious reading of "make
+# landed-mark.sh call /landed instead of /labels" is WRONG, and the module doc
+# of Barkpark.Tasks.Landed says so itself: "It cannot touch lifecycle_status,
+# the claim, disposition, LABELS, or any other criterion." /landed writes
+# content.landed. It cannot write a label, by design and on purpose.
+#
+# That matters because the label is the only QUERYABLE spelling. The reader,
+# scripts/landed-open-report.sh, finds landed-but-open rows by walking the
+# ledger for the `landed-on-main` class label; there is no server-side filter
+# over content.landed. Dropping the /labels POST would have blinded that reader
+# on the day it shipped, and turned 400-odd findable rows back into rows only a
+# 3,000-PR-body scrape can see. So:
+#
+#     /labels  FIRST  — the queryable mark. If this fails, nothing else runs.
+#     /landed  SECOND — the sentence, and the one criterion the server permits.
+#
+# The order is the failure mode talking. Labels-then-no-sentence leaves a row
+# that is still FINDABLE. Sentence-then-no-labels leaves a row carrying a fact
+# nothing queries — invisible, which is the exact defect this file exists to
+# remove, reintroduced one layer down.
+#
+# THE SERVER OWNS THE PERMIT, NOT THIS SCRIPT. `merge_shaped?/1` is mirrored in
+# the helper below so a --dry-run can print what will happen, but the mirror is
+# not trusted to be exhaustive: it cannot see a future server rule, and here the
+# predicate gates a PERMIT rather than a refusal, so erring permissive would be
+# a SILENT fabricated done. A 409 (`criterion_not_merge_shaped`,
+# `criterion_already_met`) is therefore EXPECTED traffic: the script retries
+# without the criterion so the landing sentence still lands, and raises the
+# ::notice as the handover to whoever holds the claim.
 #
 # IDEMPOTENT BY READ, NOT BY LUCK. A re-run on the same sha reads the row first
-# and skips the write entirely when both labels are already on it. The labels
+# and skips BOTH writes when the two labels are already on it AND
+# content.landed.commits already carries this sha. Both halves, because a row
+# marked before the /landed door existed has the labels and no sentence — a
+# guard reading only the labels would call that row finished and leave every
+# pre-existing row half-marked forever. A HALF-marked row is exactly what a
+# re-run should finish. The labels
 # verb is union-add, so a duplicate call would be harmless to the ROW — but it
 # would still emit a second `task.relabeled` event, and an event feed that
 # reports a landing three times is a feed a reader stops trusting. So the skip
@@ -274,22 +310,44 @@ def cmd_plan(argv):
 
     criteria = content.get("acceptance_criteria")
     criteria = list(criteria) if isinstance(criteria, list) else []
+
+    # MERGE-SHAPED, MIRRORING THE SERVER'S PERMIT EXACTLY.
+    # Barkpark.Tasks.Landed.merge_shaped?/1 permits a criterion when it carries
+    # `merge_gate: true`, OR when the author declared NO merge_gate flag and the
+    # wording matches. An explicit `merge_gate: false` VETOES, and no prose match
+    # may override an author who wrote it — because here the predicate gates a
+    # PERMIT, not a refusal, so a false positive is a SILENT fabricated done.
+    # This mirror exists so a dry run can print what the server will do; the
+    # server is still the authority, and its 409s are handled, not prevented.
     hit = -1
     for i, c in enumerate(criteria):
-        if isinstance(c, dict) and MERGE_RE.search(str(c.get("criterion") or "")):
+        if not isinstance(c, dict) or c.get("met") is True:
+            continue
+        flag = c.get("merge_gate")
+        if flag is False:
+            continue
+        if flag is True or (flag is None and MERGE_RE.search(str(c.get("criterion") or ""))):
             hit = i
             break
-    # A merge-shaped criterion is REPORTED, never written: POST /v1/tasks/:id/
-    # stamp is holder+epoch fenced and CI holds no claim, so the flip is a 409
-    # by construction. See the header's REQUEST section.
-    unstampable = ""
-    if hit >= 0 and not criteria[hit].get("met"):
-        unstampable = str(criteria[hit].get("criterion") or "")[:120]
+    unstampable = str(criteria[hit].get("criterion") or "")[:120] if hit >= 0 else ""
+
+    # WHAT `content.landed` ALREADY HOLDS. The landing sentence goes through
+    # POST /v1/tasks/:id/landed, whose union is by VALUE, so the idempotency
+    # read has to cover it too — otherwise a re-run skips the labels (already
+    # there) and still fires a second `task.landed` event.
+    landed = content.get("landed")
+    landed = landed if isinstance(landed, dict) else {}
+    commits = landed.get("commits")
+    commits = commits if isinstance(commits, list) else []
+    commit_known = sha in commits
 
     # MUT-IDEMPOTENT: the whole no-second-write guarantee is this one
     # condition. scripts/landed-mark.test.sh replaces it with `if False:` in
     # a scratch copy and requires the selftest's re-run assertions to go RED.
-    if all(w in labels for w in wanted):
+    # BOTH halves must already be on the row: labels present AND this commit
+    # already in content.landed.commits. A row carrying only one of them is
+    # HALF-marked, and a re-run is exactly what should finish it.
+    if all(w in labels for w in wanted) and commit_known:
         print(json.dumps({"action": "noop", "reason": "already marked with %s" % short,
                           "unstampable": unstampable, "criterion_index": hit}))
         return 0
@@ -301,8 +359,23 @@ def cmd_plan(argv):
         "unstampable": unstampable,
         "add": [w for w in wanted if w not in labels],
         "body": {"add": wanted},
+        # THE SECOND DOOR. `pr` is a STRING on this verb (capabilities says so);
+        # sending the int would be a 422 on a payload that looks right.
+        "landed_skip": commit_known,
+        "landed_body": landed_body(sha, pr, sentence, hit),
     }))
     return 0
+
+
+def landed_body(sha, pr, sentence, hit):
+    body = {"commit": sha, "note": sentence}
+    if pr:
+        body["pr"] = str(pr)
+    if hit >= 0:
+        # ZERO-BASED, and `note` is REQUIRED with it — the note IS the evidence
+        # the flip writes. Both are already true above.
+        body["criterion"] = hit
+    return body
 
 
 def cmd_field(argv):
@@ -333,7 +406,35 @@ def cmd_apply_fixture(argv):
     return 0
 
 
-CMDS = {"plan": cmd_plan, "field": cmd_field, "apply-fixture": cmd_apply_fixture}
+# The /landed fixture applier — mirrors Tasks.Internal.merge_landed/2 (union by
+# value, per key) and Tasks.Landed's single-criterion flip, so the hermetic
+# selftest's SECOND run reads the state its FIRST run wrote. Idempotency proven
+# against a row that really changed, not a stub that always says "already done".
+def cmd_apply_landed_fixture(argv):
+    rowpath, payload = argv[0], json.load(open(argv[1]))
+    row = json.load(open(rowpath))
+    doc, content = row_content(row)
+    landed = content.get("landed")
+    landed = dict(landed) if isinstance(landed, dict) else {}
+    for src, key in (("commit", "commits"), ("pr", "prs"), ("note", "notes")):
+        v = payload.get(src)
+        if v:
+            landed[key] = union(landed.get(key), [v])
+    content["landed"] = landed
+    idx = payload.get("criterion")
+    crit = content.get("acceptance_criteria")
+    if isinstance(idx, int) and isinstance(crit, list) and 0 <= idx < len(crit):
+        if isinstance(crit[idx], dict) and crit[idx].get("met") is not True:
+            crit[idx]["met"] = True
+            crit[idx]["evidence"] = payload.get("note") or ""
+    doc["content"] = content
+    doc["rev"] = doc.get("rev", "") + "+"
+    json.dump(row, open(rowpath, "w"))
+    return 0
+
+
+CMDS = {"plan": cmd_plan, "field": cmd_field, "apply-fixture": cmd_apply_fixture,
+        "apply-landed-fixture": cmd_apply_landed_fixture}
 sys.exit(CMDS[sys.argv[1]](sys.argv[2:]))
 PYEOF
 
@@ -371,6 +472,28 @@ ledger_post() { # $1 task id, $2 body file, $3 out file -> echoes an HTTP-ish co
   fi
   curl -sS -m 30 -o "$out" -w '%{http_code}' \
     -X POST "${LEDGER_BASE%/}/v1/tasks/${id}/labels" \
+    -H "Authorization: Bearer ${LEDGER_TOKEN:-}" \
+    -H "Content-Type: application/json" \
+    --data-binary "@${body}" 2>/dev/null || echo 000
+}
+
+# THE SECOND DOOR — POST /v1/tasks/:id/landed. Same token, same no-claim,
+# no-epoch shape as /labels; a DIFFERENT blast radius (content.landed and at
+# most one merge-shaped criterion). Kept as its own function so the fixture
+# door records it under its own log and the selftest can assert the two writes
+# independently.
+ledger_post_landed() { # $1 task id, $2 body file, $3 out file
+  local id="$1" body="$2" out="$3"
+  if [ -n "$FIXTURE_DIR" ]; then
+    if [ -n "${LANDED_MARK_FIXTURE_LANDED_CODE:-}" ]; then echo "$LANDED_MARK_FIXTURE_LANDED_CODE"; return 0; fi
+    if [ -n "$HTTP_STUB_CODE" ]; then echo "$HTTP_STUB_CODE"; return 0; fi
+    cat "$body" >> "$FIXTURE_DIR/landed.log"; printf '\n' >> "$FIXTURE_DIR/landed.log"
+    python3 "$PYHELPER" apply-landed-fixture "$FIXTURE_DIR/rows/$id.json" "$body"
+    echo '{"ok":true}' > "$out"; echo 200
+    return 0
+  fi
+  curl -sS -m 30 -o "$out" -w '%{http_code}' \
+    -X POST "${LEDGER_BASE%/}/v1/tasks/${id}/landed" \
     -H "Authorization: Bearer ${LEDGER_TOKEN:-}" \
     -H "Content-Type: application/json" \
     --data-binary "@${body}" 2>/dev/null || echo 000
@@ -417,7 +540,76 @@ pr_number_from_subject() { # squash convention: "subject (#1234)"
 }
 
 # ── mark ─────────────────────────────────────────────────────────────────────
-MARKED=0; NOOP=0; SKIPPED=0; SCANNED=0; PLANNED=0
+MARKED=0; NOOP=0; SKIPPED=0; SCANNED=0; PLANNED=0; LANDINGS=0
+
+# THE SENTENCE HALF — POST /v1/tasks/:id/landed, fired AFTER the labels write.
+#
+# ORDER IS DELIBERATE AND IT IS NOT ARBITRARY. If the labels land and this
+# fails, the row is still FINDABLE: scripts/landed-open-report.sh queries the
+# `landed-on-main` label, so a lead still sees the row. If this landed and the
+# labels failed, the row would carry a sentence nothing queries — invisible,
+# which is the defect landed-mark.sh exists to remove, reintroduced one layer
+# down. So the queryable mark goes first and this is the enrichment.
+#
+# NEVER FATAL. Same rule as the whole file: the code is already on main, a red
+# here cannot unland it, and only 401/403 is loud (it means every future run is
+# a silent no-op). A 409 is the SERVER EXERCISING ITS PERMIT — `criterion_not_
+# merge_shaped` or `criterion_already_met` — and the right response is to retry
+# WITHOUT the criterion and keep the sentence, then hand the criterion to a
+# human by ::notice. The local mirror of merge_shaped?/1 is deliberately not
+# trusted to be exhaustive: it cannot see a future server rule, and guessing
+# wrong in the permissive direction would be a silent fabricated done.
+post_landing() { # $1 id, $2 plan file, $3 criterion index, $4 criterion text, $5 sha
+  local id="$1" planf="$2" idx="$3" ctext="$4" sha="$5"
+  local lbody louf skip
+
+  skip="$(python3 -c 'import json,sys; print("1" if json.load(open(sys.argv[1])).get("landed_skip") else "0")' "$planf")"
+  if [ "$skip" = "1" ]; then
+    note "${id}: content.landed already records ${sha:0:10} — the sentence is not written twice."
+    return 0
+  fi
+
+  lbody="$(mktemp -t landed-mark-landedbody.XXXXXX)"
+  louf="$(mktemp -t landed-mark-landedout.XXXXXX)"
+  python3 -c 'import json,sys; json.dump(json.load(open(sys.argv[1]))["landed_body"], open(sys.argv[2],"w"))' "$planf" "$lbody"
+
+  with_retry ledger_post_landed "$id" "$lbody" "$louf"
+  case "$RC_CODE" in
+    401|403) rm -f "$lbody" "$louf"; die_auth "$RC_CODE" "POST /v1/tasks/${id}/landed" ;;
+    2??)
+      if [ "$idx" != "-1" ] && [ -n "$ctext" ]; then
+        note "${id}: landing recorded and criterion ${idx} flipped by the server."
+      else
+        note "${id}: landing recorded in content.landed."
+      fi
+      LANDINGS=$((LANDINGS + 1)); rm -f "$lbody" "$louf"; return 0 ;;
+    409|422)
+      # The permit was refused. Drop the criterion, keep the sentence — the
+      # landing is a fact regardless of whether any criterion may be flipped.
+      if [ "$idx" != "-1" ]; then
+        python3 -c '
+import json,sys
+b=json.load(open(sys.argv[1])); b.pop("criterion", None)
+json.dump(b, open(sys.argv[1],"w"))' "$lbody"
+        with_retry ledger_post_landed "$id" "$lbody" "$louf"
+        case "$RC_CODE" in
+          2??) LANDINGS=$((LANDINGS + 1))
+               note "${id}: landing recorded without the criterion flip." ;;
+          *)   warn "recording the landing for ${id} returned HTTP ${RC_CODE} — skipped, not failed." ;;
+        esac
+        # NOT a failure and NOT silence. The row HAS a criterion this landing
+        # looks like it satisfies, the server declined to flip it, and the
+        # handover to whoever holds the claim is this line.
+        echo "::notice title=A merge-gated criterion still needs a holder::landed-mark: ${id} criterion ${idx} reads \"${ctext}\" — this landing looks like it satisfies it, but POST /v1/tasks/${id}/landed refused the flip (HTTP ${RC_CODE}: the criterion is not merge-shaped by the server rule, or somebody already met it). The landing sentence was recorded; flipping the criterion needs the claim holder."
+      else
+        warn "recording the landing for ${id} returned HTTP ${RC_CODE} — skipped, not failed."
+      fi
+      rm -f "$lbody" "$louf"; return 0 ;;
+    *)
+      warn "recording the landing for ${id} returned HTTP ${RC_CODE} — the LABEL is on the row, so the landing is still findable. Skipped, not failed."
+      rm -f "$lbody" "$louf"; return 0 ;;
+  esac
+}
 
 mark_one() { # $1 task id, $2 sha, $3 pr
   local id="$1" sha="$2" pr="$3"
@@ -461,10 +653,7 @@ mark_one() { # $1 task id, $2 sha, $3 pr
     local verb="plan"; [ "$DRY_RUN" = "1" ] && verb="would mark"
     note "${verb} ${id} (${lifecycle}): note — \"${evidence}\" as label(s) ${adds}"
     if [ -n "$unstampable" ]; then
-      # NOT a failure and NOT silence. The row HAS a criterion this landing
-      # satisfies and CI is structurally barred from stamping it, so the notice
-      # is the handover to whoever holds the claim.
-      echo "::notice title=A merge-gated criterion still needs a holder::landed-mark: ${id} criterion ${idx} reads \"${unstampable}\" — this landing satisfies it, but POST /v1/tasks/${id}/stamp is holder+epoch fenced and CI holds no claim, so only the label was written. Stamping it needs the claim holder, or the non-holder landed verb requested in scripts/landed-mark.sh."
+      note "${id}: criterion ${idx} is merge-shaped — the /landed call below will ask the server to flip it."
     fi
 
     if [ "$DRY_RUN" = "1" ]; then
@@ -480,7 +669,9 @@ mark_one() { # $1 task id, $2 sha, $3 pr
       401|403) rm -f "$rowf" "$planf" "$bodyf" "$outf"; die_auth "$RC_CODE" "POST /v1/tasks/${id}/labels" ;;
       2??)
         note "marked ${id}: ${evidence}"
-        MARKED=$((MARKED + 1)); rm -f "$rowf" "$planf" "$bodyf" "$outf"; return 0 ;;
+        MARKED=$((MARKED + 1))
+        post_landing "$id" "$planf" "$idx" "$unstampable" "$sha"
+        rm -f "$rowf" "$planf" "$bodyf" "$outf"; return 0 ;;
       412|409)
         # A holder wrote the row between our read and our write. The rev CAS did
         # its job — re-read and re-plan rather than clobber their stamp.
@@ -538,7 +729,7 @@ run_mark() {
   if [ "$DRY_RUN" = "1" ]; then
     note "DRY RUN — scanned ${SCANNED} commit(s): ${PLANNED} would be marked, ${NOOP} already marked, ${SKIPPED} skipped. Nothing was written."
   else
-    note "scanned ${SCANNED} commit(s): ${MARKED} marked, ${NOOP} already marked, ${SKIPPED} skipped."
+    note "scanned ${SCANNED} commit(s): ${MARKED} marked, ${LANDINGS} landing(s) recorded, ${NOOP} already marked, ${SKIPPED} skipped."
   fi
 }
 
@@ -629,7 +820,7 @@ mkcommit() { # $1 dir, $2 message
   git -C "$1" rev-parse HEAD
 }
 mkledger() { # $1 dir
-  mkdir -p "$1/rows"; : > "$1/writes.log"
+  mkdir -p "$1/rows"; : > "$1/writes.log"; : > "$1/landed.log"
 }
 mkrow() { # $1 ledgerdir, $2 id, $3 lifecycle, $4 assignee, $5 criterion-text ("" = none)
   python3 - "$1/rows/$2.json" "$2" "$3" "$4" "$5" <<'PY'
@@ -687,7 +878,7 @@ OUT="$(run "$R2" "$L2" --sha "$S2" --before "$BASE2")"
 # the idempotency read disarmed — measured, this exact assertion survived the
 # mutant until it was tightened.
 has "$OUT" "task-bbb1: already marked with" "a re-run over the same shas reports already-marked"
-has "$OUT" "0 marked, 2 already marked" "the re-run tally is 0 marked"
+has "$OUT" "0 marked, 0 landing(s) recorded, 2 already marked" "the re-run tally is 0 marked"
 check "a re-run wrote NOTHING NEW (still 2)" "$(writes_in "$L2")" "2"
 
 # 4. No trailer at all is the COMMON case and must be silent, exit 0.
@@ -705,9 +896,11 @@ mkrow "$L4" task-ccc1 in_progress builder-q "The PR merged to main and CI is gre
 mkrow "$L4" task-ccc2 in_progress builder-q "Some other checkable condition entirely."
 S4a="$(mkcommit "$R4" "$(printf 'fix(c): crit (#21)\n\nTask: task-ccc1\n')")"
 OUT="$(run "$R4" "$L4" --sha "$S4a")"
-has "$OUT" "::notice" "a criterion whose text says 'merged to main' raises the holder notice"
-has "$OUT" "holder+epoch fenced" "the notice says WHY CI cannot stamp it, not just that it did not"
-has "$OUT" "marked task-ccc1" "the label mark still lands on a row CI cannot stamp"
+has "$OUT" "criterion 1 flipped by the server" "a criterion whose text says 'merged to main' is flipped through /landed"
+has "$OUT" "marked task-ccc1" "the label mark lands alongside the landing sentence"
+hasnt "$OUT" "::notice" "no holder handover is raised when the server ACCEPTED the flip"
+check "the flip really reached the row" \
+  "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["doc"]["content"]["acceptance_criteria"][1].get("met"))' "$L4/rows/task-ccc1.json")" "True"
 S4b="$(mkcommit "$R4" "$(printf 'fix(c): note (#22)\n\nTask: task-ccc2\n')")"
 OUT="$(run "$R4" "$L4" --sha "$S4b")"
 has "$OUT" "note —" "a row with no merge-shaped criterion gets the label and nothing else"
@@ -721,6 +914,58 @@ hasnt "$(cat "$L4/writes.log")" '"lifecycle_status"' "the write NEVER touches li
 hasnt "$(cat "$L4/writes.log")" '"claim"' "the write NEVER touches the claim"
 hasnt "$(cat "$L4/writes.log")" '"acceptance_criteria"' "the write NEVER rewrites the criteria array"
 hasnt "$(cat "$L4/writes.log")" 'remove' "the write only ADDS labels — it can never strip one"
+
+# 6b. THE SECOND DOOR IS ACTUALLY CALLED, and it carries what /landed accepts.
+#     Before this, scripts/landed-mark.sh POSTed only /labels and the verb built
+#     for it in PR #15090 had no caller at all.
+has "$(cat "$L4/landed.log")" '"commit"' "the /landed body carries the commit"
+has "$(cat "$L4/landed.log")" '"pr": "21"' "the /landed body sends pr as a STRING — the int is a 422 on a payload that looks right"
+has "$(cat "$L4/landed.log")" '"note"' "the /landed body carries the sentence — the thing a label cannot hold"
+has "$(cat "$L4/landed.log")" '"criterion": 1' "the merge-shaped criterion index is sent, ZERO-BASED"
+hasnt "$(cat "$L4/landed.log")" '"lifecycle_status"' "the /landed body NEVER touches lifecycle_status"
+hasnt "$(cat "$L4/landed.log")" '"labels"' "the /landed body NEVER touches labels — that is the other door's job"
+check "the row with NO merge-shaped criterion still got a landing sentence" \
+  "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["doc"]["content"]["landed"]["commits"]))' "$L4/rows/task-ccc2.json")" "1"
+check "and NO criterion index was sent for it" \
+  "$(grep -c '"criterion"' "$L4/landed.log")" "1"
+
+# 6c. IDEMPOTENT ACROSS BOTH DOORS. A re-run of the same sha writes NEITHER.
+#     The old guard read the labels only, so a row already labelled would still
+#     have fired a second task.landed event on every re-run.
+BEFORE_L="$(wc -c < "$L4/landed.log")"
+OUT="$(run "$R4" "$L4" --sha "$S4a")"
+has "$OUT" "already marked with" "a re-run of the same sha is a noop"
+check "the re-run wrote nothing to /landed either" "$(wc -c < "$L4/landed.log")" "$BEFORE_L"
+
+# 6d. THE HALF-MARKED ROW. Labels present, content.landed empty — the exact
+#     state every row marked before the /landed door existed is in. A re-run
+#     must FINISH it, not read the labels and call it done.
+python3 - "$L4/rows/task-ccc2.json" <<'PYX'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p))
+d["doc"]["content"].pop("landed", None)
+json.dump(d, open(p, "w"))
+PYX
+BEFORE_L="$(wc -c < "$L4/landed.log")"
+OUT="$(run "$R4" "$L4" --sha "$S4b")"
+hasnt "$OUT" "already marked with" "a row with the labels but no content.landed is NOT treated as marked"
+if [ "$(wc -c < "$L4/landed.log")" -gt "$BEFORE_L" ]; then
+  ok "a half-marked row gets its landing sentence backfilled"
+else
+  bad "a half-marked row got no /landed write — every pre-#15090 row stays half-marked forever"
+fi
+
+# 6e. THE SERVER REFUSES THE FLIP. The local mirror of merge_shaped?/1 cannot
+#     see a future server rule, so a 409 must degrade to "sentence, no flip,
+#     handover by notice" — never to a lost landing and never to a red.
+R4b="$TMPROOT/r4b"; L4b="$TMPROOT/l4b"; mkrepo "$R4b"; mkledger "$L4b"
+mkrow "$L4b" task-ccc3 in_progress builder-q "The PR merged to main and CI is green."
+S4c="$(mkcommit "$R4b" "$(printf 'fix(c): refused (#23)\n\nTask: task-ccc3\n')")"
+OUT="$(LANDED_MARK_FIXTURE_LANDED_CODE=409 run "$R4b" "$L4b" --sha "$S4c")"; RC=$?
+check "a 409 from /landed still exits 0 — a merge is never undone by a refusal" "$RC" "0"
+has "$OUT" "::notice" "a refused flip raises the holder handover"
+has "$OUT" "needs the claim holder" "the handover says who can finish it"
+has "$OUT" "marked task-ccc3" "the LABEL still landed, so the row is still findable by the reader"
 
 # 7. THE 401 ARM. A broken secret must be loud and non-zero — a mechanism that
 #    fails quiet is the defect this script removes, reintroduced.
