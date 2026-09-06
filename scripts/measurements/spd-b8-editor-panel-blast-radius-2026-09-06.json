@@ -1,0 +1,879 @@
+{
+  "tool": "scratchpad instrument (spd-b8): blast-radius.mjs + confirm-clips.mjs, both importing resolvePlaywright from scripts/studio-desk-measure.mjs",
+  "task": "spd-b8-editor-panel-blast-radius",
+  "generated_at": "2026-09-06T10:55:07.686Z",
+  "question": "Do Sheets, Graph and the Media explorer clip horizontally under the shared bare `.editor-panel` 560px floor at 1024 / 900 / 720 / 640 (x900)?",
+  "mode": "deployed",
+  "slot": "guerrilla (deployed). READ-ONLY: navigation plus getComputedStyle/getBoundingClientRect; no control that creates, saves, deletes or publishes was pressed, and no document was created.",
+  "provenance": {
+    "base": "https://guerrilla.barkpark.cloud",
+    "served_sha_pre": {
+      "read_at": "2026-09-06T10:55:07.686Z",
+      "served_sha": "17f4adba1c5948be250050aabfadab79ef3b4432",
+      "method": "ssh root@157.180.90.121 \"cd /opt/barkpark && git rev-parse HEAD\""
+    },
+    "browser": {
+      "engine": "chromium",
+      "version": "147.0.7727.15"
+    },
+    "footer_build": "Barkpark v0.2.26.2058 · 17f4adba1",
+    "served_sha_post": {
+      "read_at": "2026-09-06T10:55:59.656Z",
+      "served_sha": "17f4adba1c5948be250050aabfadab79ef3b4432"
+    }
+  },
+  "method": {
+    "verdict_rule": "CLIPS iff any of three independent witnesses fires: .pane-layout scrollWidth > clientWidth; any .pane-layout child's right edge > innerWidth; documentElement.scrollWidth > innerWidth. Otherwise FITS.",
+    "surfaces_found_by": "navigation only - the desk's Structure rows (Sheets -> the single existing sheet doc sheet-798717; Papers -> an existing paper, then the reserved graph/<doc_id> segment) and the mediaAsset nav path.",
+    "width_buckets_on_main": "phone <640 | narrow 640-1023 | standard 1024-1279 | wide >=1280 (root.html.heex EDGES=[640,1024,1280]). All four measured widths are narrow or standard, so the phone override (min-width:0 on .editor-panel) never applies at any of them.",
+    "cold_reload_policy": "two cold loads (fresh browser, fresh context, fresh login ticket) for each cell that read CLIPS."
+  },
+  "rows": [
+    {
+      "surface": "sheets",
+      "viewport": {
+        "width": 1024,
+        "height": 900
+      },
+      "bucket": "standard",
+      "url": "/w/default/p/default/d/production/studio/sheet/sheet-798717",
+      "panel_class": "editor-panel sheet-editor",
+      "expected_class_present": true,
+      "panel_rect": {
+        "x": 304,
+        "width": 720,
+        "right": 1024
+      },
+      "panel_computed": {
+        "min-width": "560px",
+        "container-type": "normal",
+        "position": "relative",
+        "overflow-x": "hidden",
+        "overflow-y": "hidden",
+        "flex": "1 1 0%"
+      },
+      "pane_layout_computed": {
+        "overflow-x": "auto",
+        "overflow-y": "hidden",
+        "display": "flex"
+      },
+      "pane_layout_scroll_width": 1024,
+      "pane_layout_client_width": 1024,
+      "doc_scroll_width": 1024,
+      "inner_width": 1024,
+      "children": [
+        {
+          "cls": "pane-column pane-column--collapsed",
+          "x": 0,
+          "width": 44,
+          "right": 44,
+          "collapsed": true
+        },
+        {
+          "cls": "pane-column bp-doc-list",
+          "x": 44,
+          "width": 260,
+          "right": 304,
+          "collapsed": false
+        },
+        {
+          "cls": "editor-panel sheet-editor",
+          "x": 304,
+          "width": 720,
+          "right": 1024,
+          "collapsed": false
+        }
+      ],
+      "max_child_right": 1024,
+      "witnesses": {
+        "pane_layout_overruns": false,
+        "child_right_exceeds_viewport": false,
+        "document_overruns": false
+      },
+      "verdict": "FITS",
+      "screenshot": "sheets-1024.png"
+    },
+    {
+      "surface": "sheets",
+      "viewport": {
+        "width": 900,
+        "height": 900
+      },
+      "bucket": "narrow",
+      "url": "/w/default/p/default/d/production/studio/sheet/sheet-798717",
+      "panel_class": "editor-panel sheet-editor",
+      "expected_class_present": true,
+      "panel_rect": {
+        "x": 44,
+        "width": 856,
+        "right": 900
+      },
+      "panel_computed": {
+        "min-width": "560px",
+        "container-type": "normal",
+        "position": "relative",
+        "overflow-x": "hidden",
+        "overflow-y": "hidden",
+        "flex": "1 1 0%"
+      },
+      "pane_layout_computed": {
+        "overflow-x": "auto",
+        "overflow-y": "hidden",
+        "display": "flex"
+      },
+      "pane_layout_scroll_width": 900,
+      "pane_layout_client_width": 900,
+      "doc_scroll_width": 900,
+      "inner_width": 900,
+      "children": [
+        {
+          "cls": "pane-column pane-column--collapsed",
+          "x": 0,
+          "width": 44,
+          "right": 44,
+          "collapsed": true
+        },
+        {
+          "cls": "editor-panel sheet-editor",
+          "x": 44,
+          "width": 856,
+          "right": 900,
+          "collapsed": false
+        }
+      ],
+      "max_child_right": 900,
+      "witnesses": {
+        "pane_layout_overruns": false,
+        "child_right_exceeds_viewport": false,
+        "document_overruns": false
+      },
+      "verdict": "FITS",
+      "screenshot": "sheets-900.png"
+    },
+    {
+      "surface": "sheets",
+      "viewport": {
+        "width": 720,
+        "height": 900
+      },
+      "bucket": "narrow",
+      "url": "/w/default/p/default/d/production/studio/sheet/sheet-798717",
+      "panel_class": "editor-panel sheet-editor",
+      "expected_class_present": true,
+      "panel_rect": {
+        "x": 44,
+        "width": 676,
+        "right": 720
+      },
+      "panel_computed": {
+        "min-width": "560px",
+        "container-type": "normal",
+        "position": "relative",
+        "overflow-x": "hidden",
+        "overflow-y": "hidden",
+        "flex": "1 1 0%"
+      },
+      "pane_layout_computed": {
+        "overflow-x": "auto",
+        "overflow-y": "hidden",
+        "display": "flex"
+      },
+      "pane_layout_scroll_width": 720,
+      "pane_layout_client_width": 720,
+      "doc_scroll_width": 720,
+      "inner_width": 720,
+      "children": [
+        {
+          "cls": "pane-column pane-column--collapsed",
+          "x": 0,
+          "width": 44,
+          "right": 44,
+          "collapsed": true
+        },
+        {
+          "cls": "editor-panel sheet-editor",
+          "x": 44,
+          "width": 676,
+          "right": 720,
+          "collapsed": false
+        }
+      ],
+      "max_child_right": 720,
+      "witnesses": {
+        "pane_layout_overruns": false,
+        "child_right_exceeds_viewport": false,
+        "document_overruns": false
+      },
+      "verdict": "FITS",
+      "screenshot": "sheets-720.png"
+    },
+    {
+      "surface": "sheets",
+      "viewport": {
+        "width": 640,
+        "height": 900
+      },
+      "bucket": "narrow",
+      "url": "/w/default/p/default/d/production/studio/sheet/sheet-798717",
+      "panel_class": "editor-panel sheet-editor",
+      "expected_class_present": true,
+      "panel_rect": {
+        "x": 44,
+        "width": 596,
+        "right": 640
+      },
+      "panel_computed": {
+        "min-width": "560px",
+        "container-type": "normal",
+        "position": "relative",
+        "overflow-x": "hidden",
+        "overflow-y": "hidden",
+        "flex": "1 1 0%"
+      },
+      "pane_layout_computed": {
+        "overflow-x": "auto",
+        "overflow-y": "hidden",
+        "display": "flex"
+      },
+      "pane_layout_scroll_width": 640,
+      "pane_layout_client_width": 640,
+      "doc_scroll_width": 640,
+      "inner_width": 640,
+      "children": [
+        {
+          "cls": "pane-column pane-column--collapsed",
+          "x": 0,
+          "width": 44,
+          "right": 44,
+          "collapsed": true
+        },
+        {
+          "cls": "editor-panel sheet-editor",
+          "x": 44,
+          "width": 596,
+          "right": 640,
+          "collapsed": false
+        }
+      ],
+      "max_child_right": 640,
+      "witnesses": {
+        "pane_layout_overruns": false,
+        "child_right_exceeds_viewport": false,
+        "document_overruns": false
+      },
+      "verdict": "FITS",
+      "screenshot": "sheets-640.png"
+    },
+    {
+      "surface": "graph",
+      "viewport": {
+        "width": 1024,
+        "height": 900
+      },
+      "bucket": "standard",
+      "url": "/w/default/p/default/d/production/studio/graph/pds-w23-triage-round-2026-09-06",
+      "panel_class": "editor-panel graph-editor",
+      "expected_class_present": true,
+      "panel_rect": {
+        "x": 260,
+        "width": 764,
+        "right": 1024
+      },
+      "panel_computed": {
+        "min-width": "560px",
+        "container-type": "inline-size",
+        "position": "relative",
+        "overflow-x": "hidden",
+        "overflow-y": "hidden",
+        "flex": "1 1 0%"
+      },
+      "pane_layout_computed": {
+        "overflow-x": "auto",
+        "overflow-y": "hidden",
+        "display": "flex"
+      },
+      "pane_layout_scroll_width": 1024,
+      "pane_layout_client_width": 1024,
+      "doc_scroll_width": 1024,
+      "inner_width": 1024,
+      "children": [
+        {
+          "cls": "pane-column",
+          "x": 0,
+          "width": 260,
+          "right": 260,
+          "collapsed": false
+        },
+        {
+          "cls": "editor-panel graph-editor",
+          "x": 260,
+          "width": 764,
+          "right": 1024,
+          "collapsed": false
+        }
+      ],
+      "max_child_right": 1024,
+      "witnesses": {
+        "pane_layout_overruns": false,
+        "child_right_exceeds_viewport": false,
+        "document_overruns": false
+      },
+      "verdict": "FITS",
+      "screenshot": "graph-1024.png"
+    },
+    {
+      "surface": "graph",
+      "viewport": {
+        "width": 900,
+        "height": 900
+      },
+      "bucket": "narrow",
+      "url": "/w/default/p/default/d/production/studio/graph/pds-w23-triage-round-2026-09-06",
+      "panel_class": "editor-panel graph-editor",
+      "expected_class_present": true,
+      "panel_rect": {
+        "x": 44,
+        "width": 856,
+        "right": 900
+      },
+      "panel_computed": {
+        "min-width": "560px",
+        "container-type": "inline-size",
+        "position": "relative",
+        "overflow-x": "hidden",
+        "overflow-y": "hidden",
+        "flex": "1 1 0%"
+      },
+      "pane_layout_computed": {
+        "overflow-x": "auto",
+        "overflow-y": "hidden",
+        "display": "flex"
+      },
+      "pane_layout_scroll_width": 900,
+      "pane_layout_client_width": 900,
+      "doc_scroll_width": 900,
+      "inner_width": 900,
+      "children": [
+        {
+          "cls": "pane-column pane-column--collapsed",
+          "x": 0,
+          "width": 44,
+          "right": 44,
+          "collapsed": true
+        },
+        {
+          "cls": "editor-panel graph-editor",
+          "x": 44,
+          "width": 856,
+          "right": 900,
+          "collapsed": false
+        }
+      ],
+      "max_child_right": 900,
+      "witnesses": {
+        "pane_layout_overruns": false,
+        "child_right_exceeds_viewport": false,
+        "document_overruns": false
+      },
+      "verdict": "FITS",
+      "screenshot": "graph-900.png"
+    },
+    {
+      "surface": "graph",
+      "viewport": {
+        "width": 720,
+        "height": 900
+      },
+      "bucket": "narrow",
+      "url": "/w/default/p/default/d/production/studio/graph/pds-w23-triage-round-2026-09-06",
+      "panel_class": "editor-panel graph-editor",
+      "expected_class_present": true,
+      "panel_rect": {
+        "x": 44,
+        "width": 676,
+        "right": 720
+      },
+      "panel_computed": {
+        "min-width": "560px",
+        "container-type": "inline-size",
+        "position": "relative",
+        "overflow-x": "hidden",
+        "overflow-y": "hidden",
+        "flex": "1 1 0%"
+      },
+      "pane_layout_computed": {
+        "overflow-x": "auto",
+        "overflow-y": "hidden",
+        "display": "flex"
+      },
+      "pane_layout_scroll_width": 720,
+      "pane_layout_client_width": 720,
+      "doc_scroll_width": 720,
+      "inner_width": 720,
+      "children": [
+        {
+          "cls": "pane-column pane-column--collapsed",
+          "x": 0,
+          "width": 44,
+          "right": 44,
+          "collapsed": true
+        },
+        {
+          "cls": "editor-panel graph-editor",
+          "x": 44,
+          "width": 676,
+          "right": 720,
+          "collapsed": false
+        }
+      ],
+      "max_child_right": 720,
+      "witnesses": {
+        "pane_layout_overruns": false,
+        "child_right_exceeds_viewport": false,
+        "document_overruns": false
+      },
+      "verdict": "FITS",
+      "screenshot": "graph-720.png"
+    },
+    {
+      "surface": "graph",
+      "viewport": {
+        "width": 640,
+        "height": 900
+      },
+      "bucket": "narrow",
+      "url": "/w/default/p/default/d/production/studio/graph/pds-w23-triage-round-2026-09-06",
+      "panel_class": "editor-panel graph-editor",
+      "expected_class_present": true,
+      "panel_rect": {
+        "x": 44,
+        "width": 596,
+        "right": 640
+      },
+      "panel_computed": {
+        "min-width": "560px",
+        "container-type": "inline-size",
+        "position": "relative",
+        "overflow-x": "hidden",
+        "overflow-y": "hidden",
+        "flex": "1 1 0%"
+      },
+      "pane_layout_computed": {
+        "overflow-x": "auto",
+        "overflow-y": "hidden",
+        "display": "flex"
+      },
+      "pane_layout_scroll_width": 640,
+      "pane_layout_client_width": 640,
+      "doc_scroll_width": 640,
+      "inner_width": 640,
+      "children": [
+        {
+          "cls": "pane-column pane-column--collapsed",
+          "x": 0,
+          "width": 44,
+          "right": 44,
+          "collapsed": true
+        },
+        {
+          "cls": "editor-panel graph-editor",
+          "x": 44,
+          "width": 596,
+          "right": 640,
+          "collapsed": false
+        }
+      ],
+      "max_child_right": 640,
+      "witnesses": {
+        "pane_layout_overruns": false,
+        "child_right_exceeds_viewport": false,
+        "document_overruns": false
+      },
+      "verdict": "FITS",
+      "screenshot": "graph-640.png"
+    },
+    {
+      "surface": "media",
+      "viewport": {
+        "width": 1024,
+        "height": 900
+      },
+      "bucket": "standard",
+      "url": "/w/default/p/default/d/production/studio/mediaAsset",
+      "panel_class": "editor-panel media-explorer-panel",
+      "expected_class_present": true,
+      "panel_rect": {
+        "x": 464,
+        "width": 560,
+        "right": 1024
+      },
+      "panel_computed": {
+        "min-width": "560px",
+        "container-type": "inline-size",
+        "position": "relative",
+        "overflow-x": "hidden",
+        "overflow-y": "hidden",
+        "flex": "1 1 0%"
+      },
+      "pane_layout_computed": {
+        "overflow-x": "auto",
+        "overflow-y": "hidden",
+        "display": "flex"
+      },
+      "pane_layout_scroll_width": 1024,
+      "pane_layout_client_width": 1024,
+      "doc_scroll_width": 1024,
+      "inner_width": 1024,
+      "children": [
+        {
+          "cls": "pane-column pane-column--collapsed",
+          "x": 0,
+          "width": 44,
+          "right": 44,
+          "collapsed": true
+        },
+        {
+          "cls": "pane-column",
+          "x": 44,
+          "width": 210.09,
+          "right": 254.09,
+          "collapsed": false
+        },
+        {
+          "cls": "pane-column pane-column--last bp-doc-list",
+          "x": 254.09,
+          "width": 209.91,
+          "right": 464,
+          "collapsed": false
+        },
+        {
+          "cls": "editor-panel media-explorer-panel",
+          "x": 464,
+          "width": 560,
+          "right": 1024,
+          "collapsed": false
+        }
+      ],
+      "max_child_right": 1024,
+      "witnesses": {
+        "pane_layout_overruns": false,
+        "child_right_exceeds_viewport": false,
+        "document_overruns": false
+      },
+      "verdict": "FITS",
+      "screenshot": "media-1024.png"
+    },
+    {
+      "surface": "media",
+      "viewport": {
+        "width": 900,
+        "height": 900
+      },
+      "bucket": "narrow",
+      "url": "/w/default/p/default/d/production/studio/mediaAsset",
+      "panel_class": "editor-panel media-explorer-panel",
+      "expected_class_present": true,
+      "panel_rect": {
+        "x": 340,
+        "width": 560,
+        "right": 900
+      },
+      "panel_computed": {
+        "min-width": "560px",
+        "container-type": "inline-size",
+        "position": "relative",
+        "overflow-x": "hidden",
+        "overflow-y": "hidden",
+        "flex": "1 1 0%"
+      },
+      "pane_layout_computed": {
+        "overflow-x": "auto",
+        "overflow-y": "hidden",
+        "display": "flex"
+      },
+      "pane_layout_scroll_width": 900,
+      "pane_layout_client_width": 900,
+      "doc_scroll_width": 900,
+      "inner_width": 900,
+      "children": [
+        {
+          "cls": "pane-column pane-column--collapsed",
+          "x": 0,
+          "width": 44,
+          "right": 44,
+          "collapsed": true
+        },
+        {
+          "cls": "pane-column pane-column--collapsed",
+          "x": 44,
+          "width": 44,
+          "right": 88,
+          "collapsed": true
+        },
+        {
+          "cls": "pane-column pane-column--last bp-doc-list",
+          "x": 88,
+          "width": 252,
+          "right": 340,
+          "collapsed": false
+        },
+        {
+          "cls": "editor-panel media-explorer-panel",
+          "x": 340,
+          "width": 560,
+          "right": 900,
+          "collapsed": false
+        }
+      ],
+      "max_child_right": 900,
+      "witnesses": {
+        "pane_layout_overruns": false,
+        "child_right_exceeds_viewport": false,
+        "document_overruns": false
+      },
+      "verdict": "FITS",
+      "screenshot": "media-900.png"
+    },
+    {
+      "surface": "media",
+      "viewport": {
+        "width": 720,
+        "height": 900
+      },
+      "bucket": "narrow",
+      "url": "/w/default/p/default/d/production/studio/mediaAsset",
+      "panel_class": "editor-panel media-explorer-panel",
+      "expected_class_present": true,
+      "panel_rect": {
+        "x": 228,
+        "width": 560,
+        "right": 788
+      },
+      "panel_computed": {
+        "min-width": "560px",
+        "container-type": "inline-size",
+        "position": "relative",
+        "overflow-x": "hidden",
+        "overflow-y": "hidden",
+        "flex": "1 1 0%"
+      },
+      "pane_layout_computed": {
+        "overflow-x": "auto",
+        "overflow-y": "hidden",
+        "display": "flex"
+      },
+      "pane_layout_scroll_width": 788,
+      "pane_layout_client_width": 720,
+      "doc_scroll_width": 720,
+      "inner_width": 720,
+      "children": [
+        {
+          "cls": "pane-column pane-column--collapsed",
+          "x": 0,
+          "width": 44,
+          "right": 44,
+          "collapsed": true
+        },
+        {
+          "cls": "pane-column pane-column--collapsed",
+          "x": 44,
+          "width": 44,
+          "right": 88,
+          "collapsed": true
+        },
+        {
+          "cls": "pane-column pane-column--last bp-doc-list",
+          "x": 88,
+          "width": 140,
+          "right": 228,
+          "collapsed": false
+        },
+        {
+          "cls": "editor-panel media-explorer-panel",
+          "x": 228,
+          "width": 560,
+          "right": 788,
+          "collapsed": false
+        }
+      ],
+      "max_child_right": 788,
+      "witnesses": {
+        "pane_layout_overruns": true,
+        "child_right_exceeds_viewport": true,
+        "document_overruns": false
+      },
+      "verdict": "CLIPS",
+      "screenshot": "media-720.png"
+    },
+    {
+      "surface": "media",
+      "viewport": {
+        "width": 640,
+        "height": 900
+      },
+      "bucket": "narrow",
+      "url": "/w/default/p/default/d/production/studio/mediaAsset",
+      "panel_class": "editor-panel media-explorer-panel",
+      "expected_class_present": true,
+      "panel_rect": {
+        "x": 228,
+        "width": 560,
+        "right": 788
+      },
+      "panel_computed": {
+        "min-width": "560px",
+        "container-type": "inline-size",
+        "position": "relative",
+        "overflow-x": "hidden",
+        "overflow-y": "hidden",
+        "flex": "1 1 0%"
+      },
+      "pane_layout_computed": {
+        "overflow-x": "auto",
+        "overflow-y": "hidden",
+        "display": "flex"
+      },
+      "pane_layout_scroll_width": 788,
+      "pane_layout_client_width": 640,
+      "doc_scroll_width": 640,
+      "inner_width": 640,
+      "children": [
+        {
+          "cls": "pane-column pane-column--collapsed",
+          "x": 0,
+          "width": 44,
+          "right": 44,
+          "collapsed": true
+        },
+        {
+          "cls": "pane-column pane-column--collapsed",
+          "x": 44,
+          "width": 44,
+          "right": 88,
+          "collapsed": true
+        },
+        {
+          "cls": "pane-column pane-column--last bp-doc-list",
+          "x": 88,
+          "width": 140,
+          "right": 228,
+          "collapsed": false
+        },
+        {
+          "cls": "editor-panel media-explorer-panel",
+          "x": 228,
+          "width": 560,
+          "right": 788,
+          "collapsed": false
+        }
+      ],
+      "max_child_right": 788,
+      "witnesses": {
+        "pane_layout_overruns": true,
+        "child_right_exceeds_viewport": true,
+        "document_overruns": false
+      },
+      "verdict": "CLIPS",
+      "screenshot": "media-640.png"
+    }
+  ],
+  "cold_reload_confirmation": {
+    "generated_at": "2026-09-06T10:56:34.227Z",
+    "served_sha": "7f2462273ef539984823e19d3407de50083d7fce",
+    "runs": [
+      {
+        "round": 1,
+        "cell": "media@720",
+        "before": {
+          "sw": 884,
+          "cw": 720,
+          "sl": 0,
+          "panel_right": 884
+        },
+        "after": {
+          "sl": 164,
+          "panel_right": 720
+        },
+        "overrun": 164,
+        "scroller_live": true,
+        "panel_right_edge_reachable": true,
+        "overflow_x": "auto",
+        "inner": 720,
+        "bucket": "narrow",
+        "shot": "cold-media-720-r1.png"
+      },
+      {
+        "round": 1,
+        "cell": "media@640",
+        "before": {
+          "sw": 884,
+          "cw": 640,
+          "sl": 0,
+          "panel_right": 884
+        },
+        "after": {
+          "sl": 244,
+          "panel_right": 640
+        },
+        "overrun": 244,
+        "scroller_live": true,
+        "panel_right_edge_reachable": true,
+        "overflow_x": "auto",
+        "inner": 640,
+        "bucket": "narrow",
+        "shot": "cold-media-640-r1.png"
+      },
+      {
+        "round": 2,
+        "cell": "media@720",
+        "before": {
+          "sw": 788,
+          "cw": 720,
+          "sl": 0,
+          "panel_right": 788
+        },
+        "after": {
+          "sl": 68,
+          "panel_right": 720
+        },
+        "overrun": 68,
+        "scroller_live": true,
+        "panel_right_edge_reachable": true,
+        "overflow_x": "auto",
+        "inner": 720,
+        "bucket": "narrow",
+        "shot": "cold-media-720-r2.png"
+      },
+      {
+        "round": 2,
+        "cell": "media@640",
+        "before": {
+          "sw": 788,
+          "cw": 640,
+          "sl": 0,
+          "panel_right": 788
+        },
+        "after": {
+          "sl": 148,
+          "panel_right": 640
+        },
+        "overrun": 148,
+        "scroller_live": true,
+        "panel_right_edge_reachable": true,
+        "overflow_x": "auto",
+        "inner": 640,
+        "bucket": "narrow",
+        "shot": "cold-media-640-r2.png"
+      }
+    ]
+  },
+  "findings": {
+    "sheets": "FITS at 1024/900/720/640. The sheet pane collapses its list columns to a single 44px strip, so the row is 44 + panel and the panel takes the remainder (596px at 640) - above its own 560px floor at every measured width.",
+    "graph": "FITS at 1024/900/720/640, identical row shape to Sheets (44px strip + panel; 596px at 640).",
+    "media": "FITS at 1024 and 900; OVERRUNS at 720 and 640. Row shape at both: 44 (strip) + 44 (strip) + 140 (.pane-column--last.bp-doc-list at its narrow floor clamp(140px,18vw,260px)) + 560 (.editor-panel pinned at exactly its floor) = 788. Overrun 68px at 720 and 148px at 640, reproduced on two cold loads each.",
+    "the_rows_stated_mechanism_is_stale": ".pane-layout on origin/main is 'overflow-x: auto; overflow-y: hidden', NOT 'overflow: hidden'. Measured: overflowX computes to 'auto'; scrollLeft moves 0 -> the full overrun (68px at 720, 148px at 640); after scrolling, the panel's right edge sits at exactly innerWidth. The overrun is a live, reachable horizontal scroller - the row's 'content can become unreachable' mechanism does not hold on main.",
+    "media_panel_is_at_its_floor_not_above_it": "The media panel measures exactly 560.00px at all four widths - it is pinned BY the floor. The other 228px of the 788px row is desk chrome the narrow bucket keeps (two 44px strips + a 140px list column), which is .pane-column's floor, not .editor-panel's.",
+    "sheet_carve_out_is_live": "container-type computes to 'normal' on .editor-panel.sheet-editor and 'inline-size' on graph and media - the D33/D42 carve-out behaves as documented on the deployed build.",
+    "incidental": "The media panel's <bp-asset-explorer> body rendered blank in every cell including 1024 (the visible asset rows live in the adjacent .bp-doc-list column). Not this task's question; recorded because it means the 560px the floor reserves on this surface was, on this build, reserving empty space."
+  }
+}

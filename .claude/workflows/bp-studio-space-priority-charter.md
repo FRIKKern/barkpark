@@ -2981,3 +2981,64 @@ in-flight row is transparent to hit-testing, so a second press lands on whatever
 `blocks: []` honesty residue D235 named: the sentence still says "This **paper**" to someone editing a
 **session**, carries neither the id nor the type, and is painted the same faint grey the owner read as
 inert.
+
+## spd-b8 amendment (THE SHARED `.editor-panel` FLOOR IS MEASURED, 2026-09-06) — D271
+
+*Numbered D271, not D270: D270 is already allocated by open draft PR #16382, so this amendment starts after it
+to avoid a collision.*
+
+- **D271 — THE BARE `.editor-panel` 560px FLOOR IS ACCEPTED FOR SHEETS, GRAPH AND MEDIA. It is measured, it
+  clips nothing, and the one overrun it participates in is a LIVE SCROLLER owned by `.pane-column`, not by the
+  floor.** Measured on deployed guerrilla at served sha `17f4adba1c5948be250050aabfadab79ef3b4432` (pre and post
+  bracket identical; footer `Barkpark v0.2.26.2058 · 17f4adba1`), Chromium 147.0.7727.15, three surfaces × four
+  viewports × 900 tall, navigation-only, raw JSON at
+  `scripts/measurements/spd-b8-editor-panel-blast-radius-2026-09-06.json`.
+
+  | surface | 1024 | 900 | 720 | 640 |
+  |---|---|---|---|---|
+  | Sheets (`.editor-panel.sheet-editor`, `sheet/sheet-798717`) | 720px · 1024/1024 · **FITS** | 856px · 900/900 · **FITS** | 676px · 720/720 · **FITS** | 596px · 640/640 · **FITS** |
+  | Graph (`.editor-panel.graph-editor`, `graph/<paper id>`) | 764px · 1024/1024 · **FITS** | 856px · 900/900 · **FITS** | 676px · 720/720 · **FITS** | 596px · 640/640 · **FITS** |
+  | Media (`.editor-panel.media-explorer-panel`, `mediaAsset`) | 560px · 1024/1024 · **FITS** | 560px · 900/900 · **FITS** | 560px · **788/720** · **OVERRUNS** | 560px · **788/640** · **OVERRUNS** |
+
+  (cells read *panel `getBoundingClientRect().width` · `.pane-layout` scrollWidth/clientWidth · verdict*.
+  `min-width: 560px`, `position: relative` computed on all twelve; `container-type` computed `inline-size` on
+  graph and media and `normal` on the sheet — D33/D42's carve-out is live on the deployed build.)
+
+  **THE ROW'S STATED MECHANISM IS STALE AND THIS IS THE HEADLINE.** `spd-b8` was filed in July against
+  `.pane-layout { overflow: hidden }`, from which it derived "the sum of pane floors exceeding the viewport makes
+  the desk CLIP horizontally rather than crush, and content can become unreachable". On origin/main the rule is
+  **`.pane-layout { display: flex; flex: 1; overflow-x: auto; overflow-y: hidden; }`** — a scroller on the
+  overrun axis. Measured, not inferred: `overflowX` computes to `auto`; `scrollLeft` moves from 0 to the full
+  overrun (68px at 720, 148px at 640); and after that scroll the panel's right edge sits at **exactly**
+  `innerWidth`. Nothing is unreachable at any measured width. The valve is the "it costs nothing when nothing
+  overflows" clause the layout comment already claims, and this is the first measurement that exercises it.
+
+  **WHAT THE MEDIA OVERRUN ACTUALLY IS.** 44 (collapsed strip) + 44 (collapsed strip) + 140
+  (`.pane-column--last.bp-doc-list`, at the bottom of `min-width: clamp(140px, 18vw, 260px)`) + 560
+  (`.editor-panel`, pinned at exactly its floor) = 788, invariant at both 720 and 640 and reproduced on two cold
+  loads each. Sheets and Graph escape it for a structural reason, not a lucky one: opening a document collapses
+  the list panes to ONE 44px strip, so their row is `44 + panel` and the panel takes the remainder — 596px at
+  640, comfortably above its own floor. Media has no document open, so the desk keeps a full list column, and it
+  is that column plus two strips — 228px of `.pane-column` chrome — that the viewport cannot hold beside a 560px
+  panel. **Scoping `min-width` off `.media-explorer-panel` would remove the overrun** (560 → 492 at 720) and is
+  therefore the tempting move; it is refused, because the floor is not the party at fault and removing it buys a
+  narrower media panel at every width in exchange for making one selector two.
+
+  **SO THE RESIDUE IS FILED WHERE IT BELONGS, AND IT IS NOT THIS TASK'S FILE.** The open question left standing
+  is whether the narrow bucket should keep a 140px list column beside a floored content pane at all — a
+  `.pane-column` / bucket-policy question (its phone sibling, `html[data-width-bucket="phone"] .pane-layout:has(>
+  .editor-panel) .pane-column { display: none }`, already answers it below 640 by hiding the column outright).
+  `spd-b6-sub500-phone-proof` is the neighbouring row. Nothing in `root.html.heex` changes under D271 and no
+  colour gate is spent.
+
+  **NON-VACUITY.** The instrument's verdict is three independent witnesses (`.pane-layout` scrollWidth >
+  clientWidth; any child's right edge > innerWidth; `documentElement.scrollWidth` > innerWidth), and it is not a
+  detector that can only say FITS: it printed CLIPS on 2 of 12 cells, on the surface with the widest chrome, at
+  the two narrowest widths, twice each from cold. `view_edit_parity_test.exs` + `studio_components_pane_test.exs`
+  are 52 tests / 0 failures on the branch, which is true by construction — D271 changes no CSS.
+
+  **D29 AND D42's CENSUS LINE NUMBERS ARE ALL STALE; the roster is not.** Derived from origin/main rather than
+  from the row: paper `studio_live/components.ex:194` (row said `:98`), media `:1627` (`:797`), beta `:1692`
+  (`:861`), classic `studio_components/editor.ex:552` (`:367`), graph `live/studio/graph_view.ex:113` (correct),
+  sheet `live/studio/sheet_grid.ex:2589` (`:2478`). Six roots, exactly as D42 corrected D29 — cite the roster by
+  name, never by the line.
