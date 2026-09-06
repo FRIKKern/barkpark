@@ -24,8 +24,19 @@ name: security
 #                   the baseline is regenerated IN CI (matched toolchain) or the
 #                   30 real high/medium findings are remediated (task-c9d6d29cc0059d2a),
 #                   then flip to blocking.
-#   2. mix-audit  — dependency CVE scan over mix.lock. BLOCKING (no
-#                   continue-on-error). The 8 pre-existing CVEs (mint ×4,
+#   2. mix-audit  — dependency CVE scan over mix.lock. No continue-on-error, so
+#                   a red DOES fail `Security gate` — but `Security gate` is not
+#                   a required context, so no merge is stopped by it anywhere.
+#                   Its `name:` said "blocking" until 2026-09-06 and was renamed
+#                   to "non-blocking" for exactly that reason: a check must not
+#                   advertise an authority branch protection never gave it. Its
+#                   status row is in .github/required-checks.json (S6, leaf of
+#                   the excluded `Security gate`). Whether a CVE audit should
+#                   ever gate a merge is not decided here — it is owner-queue
+#                   item 47 / cch-w12-bl-cve-gate-is-oracle-blind; the honest
+#                   fix if that lands "yes" is to register `Security gate`, not
+#                   to re-title this job.
+#                   The 8 pre-existing CVEs (mint ×4,
 #                   postgrex, phoenix, decimal, esaml) were remediated by a dep
 #                   bump (task-726cab56d9a84551): 7 cleared by version bumps; the
 #                   8th, esaml (XXE), has no upstream fix and is mitigated by
@@ -646,8 +657,12 @@ jobs:
 
 
   mix-audit:
-    name: Dependency CVE audit (mix_audit over mix.lock, blocking)
-    # BLOCKING (no continue-on-error). The 8 pre-existing CVEs were remediated by
+    name: Dependency CVE audit (mix_audit over mix.lock, non-blocking)
+    # No continue-on-error, so this job's red fails `Security gate` — which is
+    # NOT a required context, so no merge is blocked by it anywhere. See the
+    # header note above and the S6 row in .github/required-checks.json (this
+    # job is not on any merge path; nothing here is a merge gate).
+    # The 8 pre-existing CVEs were remediated by
     # a dep bump (task-726cab56d9a84551): 7 cleared outright — mint 1.7.1→1.9.1,
     # postgrex 0.22.0→0.22.3, phoenix 1.8.5→1.8.9, decimal 2.3.0→3.1.1 (the last
     # via ecto 3.13.5→3.13.6 + ex_json_schema 0.11.2→0.11.5, which relaxed
@@ -712,7 +727,7 @@ jobs:
         env:
           STEP_OUTCOMES: ${{ toJSON(steps) }}
           STEP_NAMES: "{\"s1\": \"Fetch deps\", \"s2\": \"mix deps.audit (scans mix.lock against the advisory DB)\"}"
-          JOB_NAME: "Dependency CVE audit (mix_audit over mix.lock, blocking)"
+          JOB_NAME: "Dependency CVE audit (mix_audit over mix.lock, non-blocking)"
           WORKFLOW_FILE: security.yml
           GITHUB_TOKEN: ${{ github.token }}
         # absolute path: jobs with defaults.run.working-directory (api/) ran the

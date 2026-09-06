@@ -24697,6 +24697,66 @@ test("cch-w50-s3: the cancel copy promises a BOUNDED restore and no stop it cann
     "the past-due banner's promise is backed by recover_subscription and must not be swept up");
 });
 
+// ── cch-w55-bl · THE CANCEL COPY NAMES STRIPE, AND NAMES NO DATE ────────────
+// The three grace-cancel sentences used to end at "the end of the current
+// billing period". That boundary is one this control plane neither REACHES nor
+// STORES:
+//
+//   * NO CLOCK. Nothing in cloud/lib reads `cancel_at_period_end` —
+//     Billing.entitled?/1 returns true on %Subscription{status: "active"}
+//     unconditionally, and there is no billing crontab row. The only link to
+//     the boundary is Stripe posting `customer.subscription.deleted`, which is
+//     why promise_actor_manifest_test.exs's "billing_lapsed"/:cancel_at_period_end
+//     row pins that clock as {:external_only, :stripe}.
+//   * NO VALUE. Charter D672 makes `current_period_end` the TRIAL expiry and
+//     nothing else, and both paid-activation sites write it nil, so
+//     billingPeriodLine's "Access until {date}" arm is UNREACHABLE for a paid
+//     plan. The prose was carrying a date nothing beside it could print.
+//
+// So the copy now attributes the ending to STRIPE and says outright that the
+// date is not held here — matching billingStatusLabel/billingStatusBadge, which
+// have always said "Cancels at period end"/"Ending" with no date. Pinned over
+// source bytes because neither cancel surface is reachable through
+// __bpTestHook. The negative arm is the one that can lose: it reds the day
+// somebody restores the bare boundary phrasing.
+test("cch-w55-bl: the cancel copy names Stripe as the ender and disclaims a date it has no value for", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const blurbStart = src.indexOf("function renderBillingCancel");
+  const modalStart = src.indexOf("function openCancelPlanModal");
+  assert.ok(blurbStart !== -1 && modalStart > blurbStart, "both cancel surfaces were located");
+  const blurb = src.slice(blurbStart, modalStart);
+  const modal = src.slice(modalStart, modalStart + 4000);
+
+  // The section blurb and the modal sub-line: Stripe is named as the actor that
+  // ends the plan, and the sentence disclaims the date in the same breath.
+  for (const [where, text] of [["blurb", blurb], ["modal", modal]]) {
+    assert.match(text,
+      /until Stripe ends it at the close of your billing period &mdash; that date lives with Stripe, not here, so no date is shown\./,
+      where + ": the ending is attributed to Stripe and the missing date is stated");
+  }
+
+  // The cancel-success toast lives inside openCancelPlanModal's 200 arm.
+  assert.match(modal,
+    /Your access continues until Stripe ends the plan at the close of your billing period\. We don't hold that date here, so no date is shown\./,
+    "toast: the same two clauses, in the voice the toast can carry");
+
+  // THE ARM THAT LOSES. No cancel surface may go back to promising a bare
+  // boundary with no actor and no value behind it.
+  for (const [where, text] of [["blurb", blurb], ["modal", modal]]) {
+    assert.ok(!/until the end of the current billing period/.test(text),
+      where + ": the bare boundary phrasing named a date this plane never stores and a day no " +
+        "internal clock reaches — it must not come back");
+  }
+
+  // AND THE DATELESS SIBLINGS STAY DATELESS. billingStatusLabel/Badge are the
+  // shape the prose was rewritten to match; if they ever grow a date, the prose
+  // above is wrong again and this pin should be revisited with them.
+  assert.ok(src.includes('if (sub.cancel_at_period_end) return "Cancels at period end";'),
+    "billingStatusLabel still says it without a date");
+  assert.ok(src.includes('if (sub.cancel_at_period_end) return "Ending";'),
+    "billingStatusBadge still says it without a date");
+});
+
 // ── cch-w51-s2 · THE BACKUP SENTINEL, PINNED ACROSS THE EPIC FENCE ──────────
 //
 // Wave 51 s1 (#10613) made the Timeline empty state say, in the console's own

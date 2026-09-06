@@ -18931,7 +18931,7 @@
     }
     showBillingSection("#billing-cancel-section", true);
     body.innerHTML =
-      '<p class="set-purpose">Cancelling keeps your plan until the end of the current billing period. After that your instances are suspended &mdash; not deleted. Resubscribing brings them back, up to your new plan&rsquo;s instance limit.</p>' +
+      '<p class="set-purpose">Cancelling keeps your plan until Stripe ends it at the close of your billing period &mdash; that date lives with Stripe, not here, so no date is shown. After that your instances are suspended &mdash; not deleted. Resubscribing brings them back, up to your new plan&rsquo;s instance limit.</p>' +
       '<button class="btn btn-danger" id="plan-cancel" type="button">Cancel plan&hellip;</button>';
     var cb = $("#plan-cancel");
     if (cb) cb.addEventListener("click", openCancelPlanModal);
@@ -18949,7 +18949,7 @@
   function openCancelPlanModal() {
     var body = openModal(
       '<h2 class="modal-title" id="modal-title">Cancel your plan?</h2>' +
-      '<p class="modal-sub">Your plan stays active until the end of the current billing period. After that your instances are suspended &mdash; not deleted. Resubscribing brings them back, up to your new plan&rsquo;s instance limit.</p>' +
+      '<p class="modal-sub">Your plan stays active until Stripe ends it at the close of your billing period &mdash; that date lives with Stripe, not here, so no date is shown. After that your instances are suspended &mdash; not deleted. Resubscribing brings them back, up to your new plan&rsquo;s instance limit.</p>' +
       '<div class="field"><label class="label" for="cancel-pw">Confirm your password</label>' +
         '<input class="form-input" id="cancel-pw" type="password" autocomplete="current-password" /></div>' +
       '<div class="cm-error" id="cancel-err" role="alert" hidden><p class="cm-error-msg" id="cancel-err-msg"></p></div>' +
@@ -18974,11 +18974,16 @@
         if (r.status === 200) {
           closeModal();
           toast({ kind: "success", title: "Plan cancelled",
-            body: "Your access continues until the end of the current billing period." });
+            body: "Your access continues until Stripe ends the plan at the close of your billing period. We don't hold that date here, so no date is shown." });
           // The cancel response carries {status, cancel_at_period_end} but NOT
-          // current_period_end — re-poll the real subscription so the plan card's
-          // billingPeriodLine renders the honest "Access until {date}". The server
-          // also pushed a "subscription" SSE event; this makes the update
+          // current_period_end — re-poll the real subscription so the plan card
+          // picks up the flag and billingStatusLabel/billingStatusBadge flip to
+          // "Cancels at period end"/"Ending". NOT for billingPeriodLine's "Access
+          // until {date}" arm: charter D672 makes current_period_end the TRIAL
+          // expiry and nothing else (subscription.ex's @moduledoc), and both
+          // paid-activation sites write it nil, so that arm is UNREACHABLE on a
+          // paid plan and the dateless label is the whole honest answer. The
+          // server also pushed a "subscription" SSE event; this makes the update
           // deterministic for the acting tab.
           loadSubscription().then(function () {
             if (currentView() === "billing") renderBilling();

@@ -324,7 +324,11 @@ is harmless:
   invisible to that census by construction**. The same mechanism loses rows in
   the other direction with no report: four names once enumerated there
   (`PR task gate self-test`, `Re-land advisory`, `Filebase aesthetics gate`,
-  `Boundary gate`) have silently left the list on regeneration. Read an absence
+  `Boundary gate`) have silently left the list on regeneration. Three of those
+  four carry written rows again as of 2026-09-06 — `PR task gate self-test`
+  earlier, `Re-land advisory` and `Boundary gate` in the every-rendered-name
+  census pass; `Filebase aesthetics gate` did not render on that sample and is
+  still unledgered. Read an absence
   from that file as "the sample did not see it", never as "no such gate exists";
   the ceiling is now filed there under **S4 PATHS-FILTERED** with that mechanism
   written into its reason. **That hand-added row now survives a regeneration,
@@ -473,7 +477,8 @@ The fourth, `PR references an active task`, is **exempt by construction** in the
 path-gating sense: its workflow carries no `paths:` filter and no `changes`
 dispatcher, so it executes on every PR. `Security gate`, `Compose smoke` and `Go
 gate` emit the same notice but are not required — a red one of the three cannot
-block a merge, so those greens are the weakest on this roster. `Go gate` is step 2
+block a merge and never could, so those greens are the weakest on this roster.
+`Go gate` is step 2
 of the sequence in go-tests.yml's header; step 3 (register `Go gate`, never the
 leaf `go vet + test`) has not landed. If `Compose smoke` or `Go gate` is ever
 promoted to a required context, its `no` above must flip to `yes` in the same PR:

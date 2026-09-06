@@ -1617,21 +1617,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </div>
       <% "stage" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-stage-contextual-editor">
-          <div class="bp-paper-contextual-preview" data-test-id="paper-stage-preview">
-            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
-          </div>
           <%= case Blocks.stage_form_state(@block) do %>
             <% {:ok, state} -> %>
+              <% parts = RenderComponents.stage_article_parts(@block) %>
+              <form id={"stage-form-" <> @id} class="bp-paper-edit-form bp-paper-stage-form"
+                phx-submit="paper-edit-block" phx-change="paper-block-autosave"
+                phx-debounce="500" data-test-id="paper-stage-editor">
+                <input type="hidden" name="block_id" value={@id} />
+                <div class="bp-paper-contextual-preview" data-test-id="paper-stage-preview">
+                  <div class={"bp-pnode" <> parts.source_class}>
+                    <div :if={parts.kind != ""} class="bp-pnode__k"><%= parts.kind %></div>
+                    <div class="bp-pnode__t">
+                      <textarea id={"stage-title-" <> @id} name="stage-title" rows="1"
+                        class="bp-paper-inline-text" aria-label="Stage title" placeholder="Stage title"
+                        phx-hook="BarkparkPaperAutoSize"><%= state.title %></textarea>
+                    </div>
+                    <div class="bp-pnode__d">
+                      <textarea id={"stage-detail-" <> @id} name="stage-detail" rows="1"
+                        class="bp-paper-inline-text" aria-label="Stage detail" placeholder="Add detail"
+                        phx-hook="BarkparkPaperAutoSize"><%= state.detail %></textarea>
+                    </div>
+                    <div :if={parts.files != ""} class="bp-pnode__f"><%= parts.files %></div>
+                    <%= raw(parts.source_html) %>
+                  </div>
+                </div>
               <details id={"stage-controls-" <> @id}
                 class="bp-paper-contextual-controls bp-paper-contextual-controls--stage"
                 phx-mounted={JS.ignore_attributes("open")}>
                 <summary class="bp-paper-contextual-toggle">Configure stage</summary>
                 <div class="bp-paper-contextual-panel">
-                  <form id={"stage-form-" <> @id} class="bp-paper-edit-form"
-                    phx-submit="paper-edit-block" phx-change="paper-block-autosave"
-                    phx-debounce="500" data-test-id="paper-stage-editor">
-                    <input type="hidden" name="block_id" value={@id} />
-                    <%= for {field, label, value} <- [{"kind", "Kind", state.kind}, {"title", "Title", state.title}, {"detail", "Detail", state.detail}, {"files", "Files", state.files}] do %>
+                    <%= for {field, label, value} <- [{"kind", "Kind", state.kind}, {"files", "Files", state.files}] do %>
                       <label class="bp-paper-edit-fieldlabel" for={"stage-#{field}-#{@id}"}><%= label %></label>
                       <input id={"stage-#{field}-#{@id}"} type="text" name={"stage-" <> field}
                         class="bp-paper-edit-text" value={value} />
@@ -1644,10 +1659,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     <label class="bp-paper-edit-fieldlabel" for={"stage-source-text-" <> @id}>Source reference</label>
                     <input id={"stage-source-text-" <> @id} type="text" name="stage-source-text"
                       class="bp-paper-edit-text" value={state.source_text} />
-                  </form>
                 </div>
               </details>
+              </form>
             <% {:error, _} -> %>
+              <div class="bp-paper-contextual-preview" data-test-id="paper-stage-preview">
+                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+              </div>
               <p class="bp-paper-edit-readonly">This Stage's authored fields need an unambiguous shape before editing; original content is preserved.</p>
           <% end %>
         </div>

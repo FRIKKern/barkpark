@@ -455,11 +455,12 @@ defmodule Barkpark.PortableDoc.Render.Components do
   `bp-pipe-scroll`/`bp-pipe` wrapper (a `section` of stages composes the flow).
   """
   def stage_html(block) when is_map(block) do
-    k = block |> Slots.stage_field_text("kind") |> escape_html()
-    t = block |> Slots.stage_field_text("title") |> escape_html()
-    d = block |> Slots.stage_field_text("detail") |> escape_html()
-    f = block |> get("files") |> stringish() |> escape_html()
-    {src_class, src_html} = pnode_source(block)
+    parts = stage_article_parts(block)
+    k = escape_html(parts.kind)
+    t = escape_html(parts.title)
+    d = escape_html(parts.detail)
+    f = escape_html(parts.files)
+    {src_class, src_html} = {parts.source_class, parts.source_html}
     k_html = if k == "", do: "", else: ~s|<div class="bp-pnode__k">#{k}</div>|
     t_html = if t == "", do: "", else: ~s|<div class="bp-pnode__t">#{t}</div>|
     d_html = if d == "", do: "", else: ~s|<div class="bp-pnode__d">#{d}</div>|
@@ -468,6 +469,20 @@ defmodule Barkpark.PortableDoc.Render.Components do
   end
 
   def stage_html(_), do: ""
+
+  @doc "Authoritative Stage fields and source chrome shared by the reader and inline editor."
+  def stage_article_parts(block) when is_map(block) do
+    {source_class, source_html} = pnode_source(block)
+
+    %{
+      kind: Slots.stage_field_text(block, "kind"),
+      title: Slots.stage_field_text(block, "title"),
+      detail: Slots.stage_field_text(block, "detail"),
+      files: block |> get("files") |> stringish(),
+      source_class: source_class,
+      source_html: source_html
+    }
+  end
 
   @doc """
   Render a `notes` block: an annotated list — a short label chip beside a line

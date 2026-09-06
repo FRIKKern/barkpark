@@ -62,6 +62,19 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   # manifest==pipeline equality is pinned by
   # `BarkparkWeb.Contract.CapabilitiesTierParityTest`.
   #
+  # `seat_capabilities/3` is the SEAT DECISION off a PRELOADED `%Membership{}`
+  # row, added by `arpss-w10-bl-collapse-the-caps-fork-into-tenancy-auth` so the
+  # Studio capability gate stops recomposing the decision from `permits?/2` and
+  # `role_permits?/3` while keeping its PDS-D634 one-load property. It is NOT in
+  # `driven/2`, for `role_permits?/3`'s reason carried through the row: its
+  # decision folds `permits?/2` (which takes no id) and the built-in role
+  # resolver (workspace-id-INDEPENDENT by design), so a blanket
+  # "malformed -> denial" row here would force the same authorization TIGHTENING
+  # this file's anti-tightening lock forbids. Its own totality is pinned twice:
+  # `seat_capabilities_test.exs` in this directory drives the malformed / nil /
+  # foreign-row shapes directly, and the wave-10 parity table drives it
+  # end-to-end through `Caps.derive/1` on the same shapes.
+  #
   # `workspace_owner?/2` is the OWNER-ONLY SEAT added by
   # `arpss-w10-bl-chat-hosts-owner-literal-seat-fork`: chat-host enrollment
   # spelled its rule as a literal `membership_role(p, ws) == "owner"` in a
@@ -85,6 +98,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
     permits?: 2,
     role_for_permissions: 1,
     role_permits?: 3,
+    seat_capabilities: 3,
     tier_of: 1,
     valid_role_names: 1,
     workspace_admin?: 2,
@@ -168,7 +182,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   end
 
   describe "public surface pin" do
-    test "Auth exports exactly the 20 pinned {name, arity} tuples" do
+    test "Auth exports exactly the 21 pinned {name, arity} tuples" do
       assert Enum.sort(Auth.__info__(:functions)) == Enum.sort(@public_surface)
     end
   end

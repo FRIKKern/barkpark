@@ -25,9 +25,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # HTTP 500 on /studio/rest and /studio/plugins). The literal `name="…"` sites
   # in this file stay literal — the icons tripwire owns those.
   alias BarkparkWeb.Icons
-  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths}
+  alias BarkparkWeb.Studio.StudioLive.Shared
   alias Phoenix.LiveView.JS
 
   # ── In-Studio live paper view (function component) ──────────────────────────
@@ -1620,6 +1620,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           dataset={@dataset}
           is_draft={@editor_is_draft}
           write_capable={sheet_write_capable?(assigns)}
+          write_authz={Shared.sheet_authz_ctx(assigns)}
           live_session={true}
           chrome={:studio}
           user_id={@user_id}
@@ -2054,134 +2055,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
   # ── the SheetGrid capability prop ───────────────────────────────────────────
   #
-  # May the socket's principal WRITE the mounted desk? This does NOT re-state
-  # the rule — it CALLS the one owner, `Caps.write_capable?/2`, which the
-  # socket-level deny-gate also calls. The component-targeted path never reaches
-  # that hook (a `phx-target`ed event runs the COMPONENT socket's lifecycle), so
-  # a fork here would be a security rule maintained in two places; the review of
-  # pds-w41-caps-component-gate collapsed it into one.
+  # May the socket's principal WRITE the mounted sheet? This does NOT state the
+  # rule — it CALLS the one owner in `Shared`, whose authorizing twin
+  # (`sheet_write_capable?/1`) the COMPONENT's own write seam calls. The component-targeted path never
+  # reaches the socket-level deny-gate (a `phx-target`ed event runs the
+  # COMPONENT socket's lifecycle), so a fork here would be a security rule
+  # maintained in two places.
   #
-  # `@caps` is the freshly-derived map StudioLive re-assigns on every grant
-  # change and expiry tick (`grep -n 'defp refresh_caps' lib/barkpark_web/live/studio/studio_live.ex`),
-  # so an expired grant drops the write prop on the next render.
+  # pds-w42 — WHAT CHANGED, AND WHAT DELIBERATELY DID NOT.
   #
-  # pds-w41-livescope-component-bypass — THE SECOND QUESTION: *which* sheet.
+  # THE PROP IS NO LONGER THE ONLY COPY. A cid-targeted event does not re-render
+  # the parent, so any value computed HERE is as old as the last parent render
+  # by the time the component authorizes a write.
+  # `write_authz={Shared.sheet_authz_ctx(assigns)}` carries the authorization
+  # INPUTS into the component, whose write seam re-derives them
+  # (`Shared.sheet_write_capable?/1`, over freshly-read membership and grant
+  # rows) before any mutation. THAT is what makes the mount-snapshot window
+  # zero.
   #
-  # `Caps.write_capable?/2` answers "may this PRINCIPAL write this DESK". It
-  # takes no target and cannot get one, and it must not: it is also the
-  # socket-level deny-gate's predicate, and widening it would move a second
-  # surface that has no doc to reason about. But for a GRANT-graded socket the
-  # per-TARGET containment IS the authorization, and the desk answer is strictly
-  # too broad — `Caps.derive/1` computes `write` through `Access.admits_desk?/3`,
-  # which OVERWRITES the requested scope's `type`/`doc_id` with the GRANT'S OWN
-  # before validating (its documented job — a desk cannot name a doc). So a
-  # DOC-scoped write grant self-satisfies at desk granularity and this prop used
-  # to arrive `true` on EVERY sheet of the desk.
-  #
-  # Reproduced by run on origin/main: a signed-in non-member holding a write
-  # grant naming ONE sheet, mounting a DIFFERENT sheet on the same desk (read
-  # reach from a second, read-only grant), wrote it through `phx-target` at
-  # `#sheet-grid-…` while the SAME socket's `save` was HALTED by
-  # `LiveScope`'s `:live_scope_write_scope`. A granularity gap, not a missing
-  # gate: socket route doc-granular, component route desk-granular.
-  #
-  # NOT a fourth `attach_hook`: a `phx-target`ed event carries a component cid
-  # and LiveView runs the COMPONENT socket's lifecycle for it, so the parent's
-  # hook list is never consulted on that branch — that IS the bug. The narrowing
-  # has to travel in as the prop, exactly as `Shared.Paper.grant_target_denied?/3`
-  # travelled it into the paper door for the same finding on the paper surface.
-  #
-  # ARMED ONLY FOR GRANT-DERIVED WRITE. A membership-derived socket carries no
-  # `caller_context` and no `write_gate?`, so `grant_graded?/1` is false and this
-  # arm returns `false` without looking at anything — the member path and the
-  # anonymous public-demo path are byte-identical (no new denial, no new query).
-  defp sheet_write_capable?(assigns) do
-    Caps.write_capable?(assigns, Map.get(assigns, :caps) || %{}) and
-      not sheet_grant_target_denied?(assigns)
-  end
-
-  defp sheet_grant_target_denied?(assigns) do
-    grant_graded?(assigns) and not grant_admits_sheet?(assigns)
-  end
-
-  # The two assigns that mean "this socket's write descends from a GRANT":
-  # `LiveScope.assign_grant_scope/2` sets `caller_context`, and
-  # `attach_write_gate/2` sets `write_gate?`. Same pair `Caps.restricted?/1` and
-  # `Shared.Paper.grant_graded?/1` read.
-  defp grant_graded?(assigns) do
-    not is_nil(Map.get(assigns, :caller_context)) or Map.get(assigns, :write_gate?) == true
-  end
-
-  # `Access.validate/3` — the SAME containment ladder `attach_write_gate/2`'s
-  # `write_target_permitted?/4` walks, over the SAME grant set it captured, so
-  # the two routes now answer this target identically. Deliberately NOT
-  # `Access.admits_desk?/3`: that helper is the mechanism this closes.
-  #
-  # The grants come from `caller_context` rather than a fresh reload because
-  # this runs in RENDER, not in an event handler — a `Repo` round trip per
-  # render is not a thing to add to a hot path, and it would buy nothing:
-  # expiry truth already arrives through `@caps` (a grant that expired makes
-  # `caps.write` false and the `and` above short-circuits), while a grant ADDED
-  # mid-session leaves this set stale-NARROW, which over-restricts and never
-  # under-restricts — the same disposition `attach_write_gate/2` documents for
-  # its own captured ctx.
-  defp grant_admits_sheet?(assigns) do
-    case sheet_write_target(assigns) do
-      %{} = target ->
-        Enum.any?(
-          grant_ctx_grants(assigns),
-          &(Barkpark.Access.validate(&1, :write, target) == :ok)
-        )
-
-      nil ->
-        false
-    end
-  end
-
-  defp grant_ctx_grants(assigns) do
-    case Map.get(assigns, :caller_context) do
-      %{grants: grants} when is_list(grants) -> grants
-      _ -> []
-    end
-  end
-
-  # The desk levels come from the MOUNT and the leaf levels from the SHEET the
-  # component is about to write — the same broad→narrow ladder
-  # `LiveScope.write_target/3` feeds `Access.validate/3`, including its
-  # `Content.published_id/1` normalisation so a draft id is matched against the
-  # grant by its published identity.
-  #
-  # FAIL-CLOSED on an unresolvable target (no workspace / project / dataset, or
-  # a sheet doc with no type or doc_id): `nil` here denies for a grant-graded
-  # socket, matching `write_target/3`'s `:error -> halt`. Inert for every other
-  # socket, which never reaches this.
-  defp sheet_write_target(assigns) do
-    ws = Map.get(assigns, :current_workspace)
-    proj = Map.get(assigns, :current_project)
-    dataset = Map.get(assigns, :dataset)
-    doc = Map.get(assigns, :sheet_doc)
-    type = sheet_doc_field(doc, :type)
-    doc_id = sheet_doc_field(doc, :doc_id)
-
-    if is_map(ws) and is_binary(Map.get(ws, :id)) and is_map(proj) and
-         is_binary(Map.get(proj, :id)) and is_binary(dataset) and is_binary(type) and
-         is_binary(doc_id) do
-      %{
-        workspace_id: ws.id,
-        project_id: proj.id,
-        dataset: dataset,
-        type: type,
-        doc_id: Content.published_id(doc_id)
-      }
-    end
-  end
-
-  # Read TOTALLY: the sheet doc is a `%Content.Document{}` on the live path but a
-  # bare map in unit fixtures, so `doc.type` would raise a KeyError on a shape
-  # that has always been legal here. A missing key yields nil, which
-  # `sheet_write_target/1` treats as unresolvable (fail-closed).
-  defp sheet_doc_field(doc, key) when is_map(doc), do: Map.get(doc, key)
-  defp sheet_doc_field(_doc, _key), do: nil
+  # THIS LINE STAYS A SNAPSHOT, ON PURPOSE. `render/1` is a hot path and a
+  # `Repo` round trip per parent render is not a thing to add to it — the
+  # prohibition this file has always carried. Deriving here would only SHORTEN
+  # the window, and against the pds-w42 repro (revoke, then write, with no
+  # intervening parent event) it would not fire at all. So the prop is a UI
+  # AFFORDANCE: a stale-TRUE one costs a denied write at the seam, never a
+  # persisted one.
+  defp sheet_write_capable?(assigns), do: Shared.sheet_write_capable_snapshot?(assigns)
 
   # The expected fields STILL recommendable for the current Beta block list,
   # rendered into `data-expected-fields` for the slash menu's EXPECTED group.

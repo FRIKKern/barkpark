@@ -8,12 +8,29 @@
 
 set -e
 
+# ── DEPLOY OUTCOME RECORD (the receipt channel) ──────────────────────────────
+# `git pull` exits 0 whatever this hook does — the fast-forward has already
+# landed by the time we run, and a hook failure cannot un-land it. So the
+# CALLER (`make deploy`) has no channel at all to learn what happened here,
+# which is exactly why its receipt used to assert "cleaned _build/prod,
+# recompiled, and restarted" over EVERY outcome — including "this is a laptop
+# and nothing was attempted", which printed byte-identically to a failed
+# rebuild.
+#
+# This is that channel: one word in the GIT DIR (never the work tree, never
+# committed, never pushed). `make deploy` deletes the file BEFORE `git pull`,
+# so a MISSING file can only mean "this hook did not run" — a state the caller
+# must also refuse to call a deploy.
+BP_OUTCOME_FILE="$(git rev-parse --git-dir 2>/dev/null || echo .git)/barkpark-deploy-outcome"
+record_outcome() { printf '%s\n' "$1" > "$BP_OUTCOME_FILE" 2>/dev/null || true; }
+
 # SERVER-ONLY guard. `make hooks` enables .githooks on laptops too (for the
 # pre-commit format check), and this hook must never nuke _build / prod-compile
 # / systemctl-restart on a dev machine. Only the box actually running the
 # barkpark systemd service is the deploy target; everyone else gets a pointer.
 if ! command -v systemctl >/dev/null 2>&1 \
    || ! systemctl list-unit-files barkpark.service 2>/dev/null | grep -q '^barkpark\.service'; then
+  record_outcome skipped:not-the-barkpark-server
   echo "[post-merge] Not the barkpark server — for a local refresh run: make update"
   exit 0
 fi
@@ -24,6 +41,7 @@ fi
 # suppressed (core.hooksPath=/dev/null), so hitting this guard means a STRAY
 # `git pull` — no-op and point at the right tool.
 if [ -d .slots ]; then
+  record_outcome skipped:blue-green-slot-layout
   echo "[post-merge] blue/green slot layout detected — deploys go through deploy/instance-deploy.sh; skipping the legacy in-place rebuild."
   exit 0
 fi
@@ -35,9 +53,35 @@ echo "[post-merge] Auto-deploying..."
 # builders over api/_build_next). A failed build leaves api/_build/prod
 # untouched and skips the restart — and this hook still exits 0, because a
 # `git pull` must never report failure over a deferrable rebuild.
-if bash scripts/deploy-rebuild.sh; then
-  echo "[post-merge] Done."
-else
-  echo "[post-merge] WARN: deploy-rebuild failed (see above) — old build still serving. Fix and re-run: make rebuild"
-fi
+rc=0
+bash scripts/deploy-rebuild.sh || rc=$?
+case "$rc" in
+  0)
+    record_outcome rebuilt
+    echo "[post-merge] Done."
+    ;;
+  15)
+    # The engine's typed "systemd accepted the restart, the app never answered
+    # 200" refusal. The new build IS installed — this is NOT a build failure and
+    # must not be reported as one.
+    record_outcome unverified
+    echo "[post-merge] WARN: the new build is installed and systemd accepted the restart, but the app never answered — see above. Check: make logs"
+    ;;
+  1)
+    record_outcome failed:build
+    echo "[post-merge] WARN: deploy-rebuild failed (build) — old build still serving. Fix and re-run: make rebuild"
+    ;;
+  13)
+    record_outcome failed:migrate
+    echo "[post-merge] WARN: deploy-rebuild failed (migrate; swap aborted) — old build still serving. Fix and re-run: make rebuild"
+    ;;
+  3)
+    record_outcome skipped:blue-green-slot-layout
+    echo "[post-merge] blue/green slot layout — deploys go through deploy/instance-deploy.sh."
+    ;;
+  *)
+    record_outcome "failed:rc-$rc"
+    echo "[post-merge] WARN: deploy-rebuild failed (rc $rc) — old build still serving. Fix and re-run: make rebuild"
+    ;;
+esac
 exit 0

@@ -795,7 +795,8 @@ defmodule Barkpark.Content.Lifecycle do
   #   * `acceptance_criteria` — stamp (already fenced by `criteria_fence/2`)
   #   * `close_reason`       — close.ex:1232
   #   * `close_override`     — close.ex:1310
-  #   * `disposition`        — close.ex:1642, stage.ex (@disposition_key)
+  #   * `disposition`        — close.ex (`advance_disposition_on_close/2`),
+  #                            stage.ex (@disposition_key)
   #   * `reopen_trigger`     — stage.ex (@reopen_trigger_key)
   #   * `engagement`         — stage.ex:717
   #   * `landed`             — internal.ex:493

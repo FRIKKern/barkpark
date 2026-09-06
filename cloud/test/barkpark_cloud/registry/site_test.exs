@@ -72,25 +72,63 @@ defmodule BarkparkCloud.Registry.SiteTest do
   end
 
   describe "kind-gated framework legality (charter D2)" do
-    test "static allows astro, hugo, and static" do
-      for fw <- ~w(astro hugo static) do
+    # ssw8-bl-accepted-frameworks-no-implementation: KIND-legality and
+    # SHIPPED-ness are two different questions, and these tests used to conflate
+    # them — `static+hugo` is kind-legal (a hugo site is a static site) and is
+    # NOT creatable (nothing builds it). The vocabulary assertion stays, on
+    # `frameworks_for_kind/1`; the creatability assertion moves to the shipped
+    # sublist. Weakening the door to keep the old `cs.valid?` green would have
+    # been the wrong repair.
+    test "static's kind-legal vocabulary is astro, hugo, static — and only astro/static are creatable" do
+      assert Site.frameworks_for_kind("static") == ~w(astro hugo static)
+
+      for fw <- ~w(astro static) do
         cs = changeset(kind: "static", framework: fw)
-        assert cs.valid?, "static+#{fw} should be legal: #{inspect(errors_on(cs))}"
+        assert cs.valid?, "static+#{fw} should be creatable: #{inspect(errors_on(cs))}"
       end
+
+      cs = changeset(kind: "static", framework: "hugo")
+      refute cs.valid?
+      assert %{framework: [msg]} = errors_on(cs)
+      assert msg =~ "no shipped builder"
     end
 
-    test "container allows nextjs, nuxt, and sveltekit" do
-      for fw <- ~w(nextjs nuxt sveltekit) do
+    test "container's kind-legal vocabulary is nextjs, nuxt, sveltekit — and only nextjs is creatable" do
+      assert Site.frameworks_for_kind("container") == ~w(nextjs nuxt sveltekit)
+
+      cs = changeset(kind: "container", framework: "nextjs")
+      assert cs.valid?, inspect(errors_on(cs))
+
+      for fw <- ~w(nuxt sveltekit) do
         cs = changeset(kind: "container", framework: fw)
-        assert cs.valid?, "container+#{fw} should be legal: #{inspect(errors_on(cs))}"
+        refute cs.valid?, "container+#{fw} has no shipped builder and must be refused"
+        assert %{framework: [msg]} = errors_on(cs)
+        assert msg =~ "no shipped builder"
       end
     end
 
-    test "node allows nextjs, nuxt, and sveltekit (site-spawner W7 — the container frameworks)" do
-      for fw <- ~w(nextjs nuxt sveltekit) do
+    test "node reuses the container vocabulary (site-spawner W7) and its creatable sublist" do
+      assert Site.frameworks_for_kind("node") == ~w(nextjs nuxt sveltekit)
+
+      cs = changeset(kind: "node", framework: "nextjs")
+      assert cs.valid?, inspect(errors_on(cs))
+
+      for fw <- ~w(nuxt sveltekit) do
         cs = changeset(kind: "node", framework: fw)
-        assert cs.valid?, "node+#{fw} should be legal: #{inspect(errors_on(cs))}"
+        refute cs.valid?, "node+#{fw} has no shipped builder and must be refused"
       end
+    end
+
+    # The two refusals are DIFFERENT facts and must not collapse into one
+    # message: "astro is not valid for a container site" (a kind mistake — pick
+    # another kind) is not "sveltekit has no shipped builder" (a timing fact —
+    # nothing you can pick fixes it today).
+    test "a kind-illegal framework reports the KIND error, not the shipped one" do
+      cs = changeset(kind: "container", framework: "astro")
+      refute cs.valid?
+      assert %{framework: [msg]} = errors_on(cs)
+      assert msg =~ "is not valid for a container site"
+      refute msg =~ "no shipped builder"
     end
 
     test "astro (a static framework) on a node site is rejected" do

@@ -224,6 +224,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   alias Barkpark.Plugins.Sheets.Session
   alias Barkpark.Plugins.Sheets.Structure
   alias BarkparkWeb.Studio.SheetGrid.{Cells, Filter, Geometry, GridData, Ops}
+  alias BarkparkWeb.Studio.StudioLive.Shared
   alias BarkparkWeb.Studio.TokensGen
 
   # The tokenized Studio control kit (studio-ui-premium): every popover/toolbar
@@ -308,6 +309,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        # draft byte. `chrome` carries none, so it defaults to this component's
        # home surface; both hosts pass all three explicitly anyway.
        write_capable: false,
+       # pds-w42 — the INPUTS the parent's write predicate needs, so this
+       # component can re-ask it on its own seam instead of trusting a value
+       # computed at the parent's last render. `nil` (the reader host, and any
+       # host that does not pass it) keeps the plain `write_capable` answer.
+       write_authz: nil,
        live_session: false,
        chrome: :studio,
        user_id: nil,
@@ -424,6 +430,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           :dataset,
           :is_draft,
           :write_capable,
+          :write_authz,
           :live_session,
           :chrome,
           :user_id,
@@ -1582,6 +1589,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # Ref-less ops (structure/tabs/undo) track nothing and pass straight through.
   defp commit(socket, pos, value) do
     socket
+    |> refresh_write_capable()
     |> note_own_refs([Sheets.format_ref(pos)])
     |> Ops.commit(pos, value)
   end
@@ -1590,9 +1598,34 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     refs = for %{"ref" => ref} <- ops, do: ref
 
     socket
+    |> refresh_write_capable()
     |> note_own_refs(refs)
     |> Ops.send_ops(ops)
   end
+
+  # pds-w42 — THE SECOND DERIVATION, AT THE INSTANT OF THE WRITE.
+  #
+  # `write_capable` arrives as a PROP, and a prop is only as fresh as the
+  # parent's last render. A `phx-target`ed event does NOT re-render the parent
+  # (that is the same property that makes the socket-level `Caps` deny-gate
+  # unreachable here), so between a mid-session revocation and this event there
+  # may be no render at all — re-deriving in the parent narrows that window,
+  # it does not close it. This closes it: every mutation in this module rides
+  # `commit/3` or `send_ops/2` (never `Ops.*` directly), and both re-ask
+  # `Shared.sheet_write_capable?/1` — the SAME predicate, over freshly-read
+  # membership and grant rows — before `Ops.send_ops/2`'s last wall reads the
+  # assign. A revocation that halts the socket-level `save` halts this too.
+  #
+  # NARROWING ONLY, NEVER WIDENING: the fresh answer is ANDed with the prop, so
+  # a host that never passes `write_authz` (the public `SheetsReaderLive`) and a
+  # host whose prop already said `false` are byte-identical to before — no new
+  # query, no new permission.
+  defp refresh_write_capable(%{assigns: %{write_capable: false}} = socket), do: socket
+
+  defp refresh_write_capable(%{assigns: %{write_authz: %{} = ctx}} = socket),
+    do: assign(socket, write_capable: Shared.sheet_write_capable?(ctx))
+
+  defp refresh_write_capable(socket), do: socket
 
   defp note_own_refs(socket, []), do: socket
 

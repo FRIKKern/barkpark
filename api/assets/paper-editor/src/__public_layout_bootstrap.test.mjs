@@ -25,7 +25,7 @@ function installDefinitions(window, { elements = true } = {}) {
   window.BarkparkPaperEditorHooks = Object.fromEntries([
     "BarkparkPaperEditToggle", "BarkparkPaperEditor", "BarkparkPaperCanvas",
     "BarkparkFieldBlockBridge", "BarkparkFieldBridge",
-    "BarkparkPaperSortable", "BarkparkPaperContextMenu",
+    "BarkparkPaperSortable", "BarkparkPaperContextMenu", "BarkparkPaperAutoSize",
   ].map((name) => [name, { mounted() {} }]));
   if (elements) {
     for (const name of [

@@ -399,11 +399,21 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
   # discriminating. The cost is real: a new deferred promise reds this file
   # until somebody resolves its three columns. That cost IS the direction.
   @promised_sentences %{
-    "Cancelling keeps your plan until the end of the current billing period." =>
+    # cch-w55-bl: these three no longer name a bare "end of the current billing
+    # period". The register's own row says the CLOCK here is {:external_only,
+    # :stripe} and that a paid plan stores NO period end (charter D672 —
+    # `current_period_end` is the trial expiry and nothing else), so the old
+    # phrasing promised a boundary this plane neither reaches nor holds. The
+    # sentences now name STRIPE as the thing that ends the plan and say, in the
+    # copy itself, that the date is not held here — which is exactly what
+    # `billingStatusLabel`/`billingStatusBadge` already show ("Cancels at period
+    # end" / "Ending", dateless). Same register key: the clock and effect
+    # verdicts did not move, only the promise's honesty about them.
+    "Cancelling keeps your plan until Stripe ends it at the close of your billing period — that date lives with Stripe, not here, so no date is shown." =>
       {"billing_lapsed", :cancel_at_period_end},
-    "Your plan stays active until the end of the current billing period." =>
+    "Your plan stays active until Stripe ends it at the close of your billing period — that date lives with Stripe, not here, so no date is shown." =>
       {"billing_lapsed", :cancel_at_period_end},
-    "Your access continues until the end of the current billing period." =>
+    "Your access continues until Stripe ends the plan at the close of your billing period." =>
       {"billing_lapsed", :cancel_at_period_end},
     "When the trial ends, the instance is torn down." => {"trial", :expire_teardown},
     "Yours when the trial ends" => {"trial", :expire_teardown},

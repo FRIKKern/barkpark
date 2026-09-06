@@ -5,7 +5,8 @@ package cloudclient
 // cliChipHtml("bp cloud update " + instance)) with no backing code behind it.
 //
 // It POSTs the control plane's admin-gated self-update relay
-// (POST /v1/barkparks/:id/self-update, cloud/lib/barkpark_cloud/web/router.ex:3816).
+// (POST /v1/barkparks/:id/self-update, the `post "/v1/barkparks/:id/self-update"`
+// route in cloud/lib/barkpark_cloud/web/router.ex).
 // The control plane relays POST /v1/admin/self-update to the box server-side with
 // the STORED admin token (the token never reaches this client) and RELAYS the
 // instance's verdict with its semantics intact — so every outcome this file
