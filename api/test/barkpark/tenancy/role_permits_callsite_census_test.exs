@@ -1,6 +1,8 @@
 defmodule Barkpark.Tenancy.RolePermitsCallsiteCensusTest do
   @moduledoc """
-  CALL-SITE CENSUS for `Barkpark.Tenancy.Auth.role_permits?/3`.
+  CALL-SITE CENSUS for the two DOORS onto the workspace-blind role resolver:
+  `Barkpark.Tenancy.Auth.role_permits?/3` and
+  `Barkpark.Tenancy.Auth.seat_capabilities/3`.
 
   ## The ruling this file is the durable venue for
 
@@ -30,15 +32,38 @@ defmodule Barkpark.Tenancy.RolePermitsCallsiteCensusTest do
   This census is that tripwire: it reds on the day such a caller lands and makes
   its author state the provenance.
 
-  ## The census, re-derived from `main` (see @expected_callsites)
+  ## Why TWO names, since arpss-w10-bl-collapse-the-caps-fork-into-tenancy-auth
 
-  The row that commissioned this pin claimed THREE sites at
-  `auth.ex:186`, `caps.ex:220`, `caps.ex:249`. Re-derived here: there are FOUR,
-  and none of those three line numbers survives. `caps.ex` grew a third site
+  That slice deleted `caps.ex`'s three `role_permits?/3` sites and replaced them
+  with `Tenancy.Auth.seat_capabilities/3`, which resolves the role's action set
+  ONCE per membership row. Censusing only `role_permits?/3` after that change
+  would have SHRUNK the tripwire to a single in-module site while the reachable
+  surface stayed the same size — the census would have gone quiet by being
+  outrun, the exact failure mode it exists to prevent. So the predicate names
+  both doors.
+
+  `seat_capabilities/3` is the safer door and the count says why, but it is not
+  free of the hazard: it takes a `%Membership{}` STRUCT, and a struct can be
+  hand-built. Its own answer to that is structural rather than census-based —
+  the clause heads bind `%Membership{workspace_id: workspace_id}` to the
+  `workspace_id` ARGUMENT, so a fabricated row that names no workspace, or names
+  a different one, falls to the all-false catch-all. The census still pins WHO
+  calls it, because "which membership load produced this row" is a question only
+  the call site can answer.
+
+  ## The census, re-derived (see @expected_callsites)
+
+  The row that commissioned this pin claimed THREE `role_permits?/3` sites at
+  `auth.ex:186`, `caps.ex:220`, `caps.ex:249`. Re-derived at the time: FOUR, and
+  none of those three line numbers survived. `caps.ex` had grown a third site
   (`role_admits_admin?/2`) when arpss-w10/D22 moved the Studio TOKEN arm onto
-  the membership seat. All four still hold a loaded row, so the count moved
-  without the invariant moving — which is exactly the drift a prose statement
-  cannot detect and this file can.
+  the membership seat. The collapse then moved all three `caps.ex` sites onto
+  the new arity, leaving FOUR again with a different shape: ONE
+  `role_permits?/3` site (the chokepoint's own user arm) and THREE
+  `seat_capabilities/3` sites (all in `caps.ex`, all over a row it loaded
+  itself). The count stood still while the whole Studio half changed hands —
+  which is why the entries below are keyed by FUNCTION and carry PROVENANCE, not
+  a count alone.
 
   ## Mechanism
 
@@ -63,40 +88,47 @@ defmodule Barkpark.Tenancy.RolePermitsCallsiteCensusTest do
         "without reaching the predicate. This site was `authorize/3` until the membership/capability arms " <>
         "were reported apart (task-abc2992adeb04fac); authorize/3 is now a collapse of this function and " <>
         "calls no predicate itself, so the site MOVED without the provenance moving.",
-    {"lib/barkpark_web/studio/caps.ex", "membership_authorizes?"} =>
-      "Caps.derive/1: `memberships = load_memberships(principals, ws_id)` -> Tenancy.Auth.membership/2 per " <>
-        "principal. This clause matches `%{role: role}` and is guarded `when is_binary(role)`; the FIRST " <>
-        "clause `membership_authorizes?(_principal, nil, _ws_id, _action), do: false` denies a non-member " <>
-        "before it. ws_id is `socket.assigns[:current_workspace].id` — a loaded struct, never a raw param.",
-    {"lib/barkpark_web/studio/caps.ex", "account_admin_from"} =>
-      "Caps.derive/1 -> admin_from/3 over the SAME load_memberships/2 rows. Clause head is " <>
-        "`%Barkpark.Accounts.User{}, %{role: role}, ws_id when is_binary(role) and is_binary(ws_id)`; the " <>
-        "catch-all `account_admin_from(_,_,_), do: false` takes a nil membership.",
-    {"lib/barkpark_web/studio/caps.ex", "role_admits_admin?"} =>
-      "Two feeders, both membership-derived. (a) token_admin_from/3, pattern-matched on `%{role: role}` " <>
-        "from load_memberships/2. (b) token_admin_seat?/2 in admin?/1, which passes " <>
-        "`Tenancy.Auth.membership_role(token, ws_id)` — a role string that EXISTS only when membership/2 " <>
-        "returned a row, and is nil otherwise, which the `when is_binary(role)` guard sends to the " <>
-        "`false` catch-all."
+    {"lib/barkpark_web/studio/caps.ex", "derive"} =>
+      "Caps.derive/1 passes the row it just loaded: `load_memberships(principals, ws_id)` -> " <>
+        "Tenancy.Auth.membership/2 per principal, and the SAME ws_id is the third argument, so the " <>
+        "clause heads' `%Membership{workspace_id: workspace_id}` binding holds by construction. A nil " <>
+        "membership (non-member) takes the all-false catch-all. ws_id is " <>
+        "`socket.assigns[:current_workspace].id` — a loaded struct, never a raw param.",
+    {"lib/barkpark_web/studio/caps.ex", "token_admin_seat?"} =>
+      "Caps.admin?/1's token arm: `Tenancy.Auth.membership(token, ws_id)` is loaded INLINE at the call " <>
+        "and handed straight in with the same ws_id. It is reached only after " <>
+        "`Tenancy.Auth.permits?(token, :admin)`, so a read-only token never loads at all; a non-member " <>
+        "loads nil and takes the catch-all.",
+    {"lib/barkpark_web/studio/caps.ex", "account_admin_seat?"} =>
+      "Caps.admin?/1's account arm: same shape — `Tenancy.Auth.membership(user, ws_id)` loaded inline " <>
+        "and passed with the same ws_id. Guarded `is_binary(id) and is_binary(ws_id)`, so a nil-id user " <>
+        "or an unresolved workspace denies without a load."
   }
 
   # A second call added INSIDE an already-pinned function would not change the
   # keyed set, so the raw expression count is pinned alongside it.
   @expected_call_count 4
 
+  # The two doors, named once. `role_permits?/3` answers ONE action from the
+  # resolver; `seat_capabilities/3` answers all three off one resolution. Both
+  # inherit the built-in map's workspace-id-independence, so both need the
+  # provenance rule.
+  @resolver_doors ~w(role_permits? seat_capabilities)
+
   describe "role_permits?/3 call-site census" do
     test "the call-site set on lib/ is exactly the pinned set, each with stated membership provenance" do
       assert MapSet.new(callsites(), fn {path, fun, _line} -> {path, fun} end) ==
                MapSet.new(Map.keys(@expected_callsites)),
              """
-             The set of functions calling Tenancy.Auth.role_permits?/3 changed.
+             The set of functions calling Tenancy.Auth.role_permits?/3 or
+             Tenancy.Auth.seat_capabilities/3 changed.
 
              Found:    #{inspect(Enum.sort(Enum.map(callsites(), fn {p, f, l} -> "#{p}:#{l} in #{f}" end)), pretty: true)}
              Expected: #{inspect(Enum.sort(Map.keys(@expected_callsites)), pretty: true)}
 
-             role_permits?/3 answers TRUE for a built-in role name REGARDLESS of the
-             workspace id, by design (see the module doc). That is safe only while every
-             caller already holds a successfully loaded, non-nil %Membership{} row.
+             Both doors answer TRUE for a built-in role name REGARDLESS of the workspace
+             id, by design (see the module doc). That is safe only while every caller
+             already holds a successfully loaded, non-nil %Membership{} row.
 
              If you added a caller: state, in @expected_callsites above, WHICH membership
              load guards it. If you cannot — if the role string or the workspace id can
@@ -175,8 +207,10 @@ defmodule Barkpark.Tenancy.RolePermitsCallsiteCensusTest do
   end
 
   defp call_expression?(line) do
-    String.contains?(line, "role_permits?(") and
-      not Regex.match?(~r/^\s*(defp?\s+|@spec\s+)role_permits\?\(/, line)
+    Enum.any?(@resolver_doors, fn door ->
+      String.contains?(line, door <> "(") and
+        not Regex.match?(~r/^\s*(defp?\s+|@spec\s+)#{Regex.escape(door)}\(/, line)
+    end)
   end
 
   defp enclosing_function(path, idx) do
