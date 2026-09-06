@@ -1,6 +1,6 @@
 {
-  "population": 386,
-  "mapped": 370,
+  "population": 389,
+  "mapped": 372,
   "unmapped": [
     {
       "path": "api/assets/paper-editor/src/__callout_parity.test.mjs",
@@ -52,6 +52,10 @@
     },
     {
       "path": "scripts/branch-owner.sh",
+      "why": "no scan site found (no readdir, glob, find, ls-files or repo-relative literal)"
+    },
+    {
+      "path": "scripts/measurements/check-prediction.test.mjs",
       "why": "no scan site found (no readdir, glob, find, ls-files or repo-relative literal)"
     },
     {
@@ -771,197 +775,197 @@
         {
           "kind": "dir",
           "p": "cloud/priv/static",
-          "evidence": "cloud/priv/static/__app.test.mjs:2752"
+          "evidence": "cloud/priv/static/__app.test.mjs:2756"
         },
         {
           "kind": "dir",
           "p": "cloud/priv/static/__preview__",
-          "evidence": "cloud/priv/static/__app.test.mjs:2753"
+          "evidence": "cloud/priv/static/__app.test.mjs:2757"
         },
         {
           "kind": "file",
           "p": "cloud/config/config.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:3166"
+          "evidence": "cloud/priv/static/__app.test.mjs:3170"
         },
         {
           "kind": "file",
           "p": "internal/taskboard/testdata/styleguide_lifecycle.txt",
-          "evidence": "cloud/priv/static/__app.test.mjs:8608"
+          "evidence": "cloud/priv/static/__app.test.mjs:8612"
         },
         {
           "kind": "file",
           "p": "internal/pdrender/testdata/styleguide_tokens.txt",
-          "evidence": "cloud/priv/static/__app.test.mjs:8609"
+          "evidence": "cloud/priv/static/__app.test.mjs:8613"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:9253"
+          "evidence": "cloud/priv/static/__app.test.mjs:9257"
         },
         {
           "kind": "file",
           "p": "lib/containerd/io.containerd.runtime.v2.task",
-          "evidence": "cloud/priv/static/__app.test.mjs:11686"
+          "evidence": "cloud/priv/static/__app.test.mjs:11690"
         },
         {
           "kind": "file",
           "p": "internal/cli/cloud_instance_top_cmd.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:11722"
+          "evidence": "cloud/priv/static/__app.test.mjs:11726"
         },
         {
           "kind": "file",
           "p": "internal/cloudclient/client.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:11775"
+          "evidence": "cloud/priv/static/__app.test.mjs:11779"
         },
         {
           "kind": "file",
           "p": "internal/cli/cloud_status_cmd.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:11910"
+          "evidence": "cloud/priv/static/__app.test.mjs:11914"
         },
         {
           "kind": "file",
           "p": "web/router.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:13398"
+          "evidence": "cloud/priv/static/__app.test.mjs:13402"
         },
         {
           "kind": "file",
           "p": "deploy/lib/site-deploy-common.sh",
-          "evidence": "cloud/priv/static/__app.test.mjs:14542"
+          "evidence": "cloud/priv/static/__app.test.mjs:14546"
         },
         {
           "kind": "file",
           "p": "deploy/site-deploy-node.sh",
-          "evidence": "cloud/priv/static/__app.test.mjs:14543"
+          "evidence": "cloud/priv/static/__app.test.mjs:14547"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/registry.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:14556"
+          "evidence": "cloud/priv/static/__app.test.mjs:14560"
         },
         {
           "kind": "file",
           "p": "internal/builder/builder.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:14583"
+          "evidence": "cloud/priv/static/__app.test.mjs:14587"
         },
         {
           "kind": "file",
           "p": "deploy/i.test",
-          "evidence": "cloud/priv/static/__app.test.mjs:14973"
+          "evidence": "cloud/priv/static/__app.test.mjs:14977"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/sold_capability_manifest_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:15263"
+          "evidence": "cloud/priv/static/__app.test.mjs:15267"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/billing_test_mode_console_mirror_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:15509"
+          "evidence": "cloud/priv/static/__app.test.mjs:15513"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/sites/auto_deploy_worker.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:17343"
+          "evidence": "cloud/priv/static/__app.test.mjs:17347"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/notifications/transport_manifest_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:17728"
+          "evidence": "cloud/priv/static/__app.test.mjs:17732"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/notifications/withhold_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:17842"
+          "evidence": "cloud/priv/static/__app.test.mjs:17846"
         },
         {
           "kind": "file",
           "p": "cloud/notifications.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18230"
+          "evidence": "cloud/priv/static/__app.test.mjs:18234"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/notifications.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18236"
+          "evidence": "cloud/priv/static/__app.test.mjs:18240"
         },
         {
           "kind": "file",
           "p": "cloud/notifications/render.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18272"
+          "evidence": "cloud/priv/static/__app.test.mjs:18276"
         },
         {
           "kind": "file",
           "p": "cloud/notifications/email_settings.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18273"
+          "evidence": "cloud/priv/static/__app.test.mjs:18277"
         },
         {
           "kind": "file",
           "p": "cloud/push.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18274"
+          "evidence": "cloud/priv/static/__app.test.mjs:18278"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/push.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18282"
+          "evidence": "cloud/priv/static/__app.test.mjs:18286"
         },
         {
           "kind": "file",
           "p": "lib/barkpark_cloud/web/router.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:19962"
+          "evidence": "cloud/priv/static/__app.test.mjs:19966"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/app.js",
-          "evidence": "cloud/priv/static/__app.test.mjs:20132"
+          "evidence": "cloud/priv/static/__app.test.mjs:20136"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/web/router.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:21480"
+          "evidence": "cloud/priv/static/__app.test.mjs:21484"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/web/auth.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:22494"
+          "evidence": "cloud/priv/static/__app.test.mjs:22498"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/failure_copy_support_channel_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:22710"
+          "evidence": "cloud/priv/static/__app.test.mjs:22714"
         },
         {
           "kind": "dir",
           "p": "internal/agent",
-          "evidence": "cloud/priv/static/__app.test.mjs:24148"
+          "evidence": "cloud/priv/static/__app.test.mjs:24152"
         },
         {
           "kind": "file",
           "p": "scripts/console-path-escape-check.sh",
-          "evidence": "cloud/priv/static/__app.test.mjs:24149"
+          "evidence": "cloud/priv/static/__app.test.mjs:24153"
         },
         {
           "kind": "file",
           "p": "internal/agent/report.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:24149"
+          "evidence": "cloud/priv/static/__app.test.mjs:24153"
         },
         {
           "kind": "file",
           "p": "cloud/priv/audit-actions.json",
-          "evidence": "cloud/priv/static/__app.test.mjs:25675"
+          "evidence": "cloud/priv/static/__app.test.mjs:25679"
         },
         {
           "kind": "file",
           "p": "test/barkpark_cloud/accounts/role_agreement_census_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:26981"
+          "evidence": "cloud/priv/static/__app.test.mjs:26985"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts/authz.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:26991"
+          "evidence": "cloud/priv/static/__app.test.mjs:26995"
         },
         {
           "kind": "file",
           "p": "lib/barkpark_cloud/accounts/authz.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:27013"
+          "evidence": "cloud/priv/static/__app.test.mjs:27017"
         }
       ]
     },
@@ -1500,42 +1504,42 @@
         {
           "kind": "file",
           "p": "cloud/priv/static/app.js",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:504"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:515"
         },
         {
           "kind": "dir",
           "p": "cloud/priv/static/__preview__",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:2506"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:2517"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/registry.ex",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:2769"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:2780"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts/user.ex",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:3158"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:3169"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/failure_copy.ex",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:3840"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:3857"
         },
         {
           "kind": "file",
           "p": "cloud/config/runtime.exs",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:4888"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:4905"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/app.css",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6344"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6371"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/scenarios.mjs",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6388"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6415"
         }
       ]
     },
@@ -1683,6 +1687,11 @@
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts/user.ex",
           "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2734"
+        },
+        {
+          "kind": "file",
+          "p": "internal/agent/report.go",
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:3954"
         }
       ]
     },
@@ -1871,7 +1880,7 @@
         {
           "kind": "file",
           "p": "deploy/i.test",
-          "evidence": "cloud/priv/static/__preview__/smoke.mjs:3819"
+          "evidence": "cloud/priv/static/__preview__/smoke.mjs:3833"
         }
       ]
     },
@@ -4969,27 +4978,27 @@
         {
           "kind": "file",
           "p": "scripts/main-gate-watch.test.sh",
-          "evidence": "scripts/cron-overdue-probe.sh:89"
+          "evidence": "scripts/cron-overdue-probe.sh:91"
         },
         {
           "kind": "file",
           "p": "scripts/absent-context-census.sh",
-          "evidence": "scripts/cron-overdue-probe.sh:121"
+          "evidence": "scripts/cron-overdue-probe.sh:124"
         },
         {
           "kind": "file",
           "p": ".github/workflows/task-lease-renew.yml",
-          "evidence": "scripts/cron-overdue-probe.sh:384"
+          "evidence": "scripts/cron-overdue-probe.sh:398"
         },
         {
           "kind": "file",
           "p": ".github/workflows/some-other.yml",
-          "evidence": "scripts/cron-overdue-probe.sh:391"
+          "evidence": "scripts/cron-overdue-probe.sh:405"
         },
         {
           "kind": "file",
           "p": "scripts/ci-measure.sh",
-          "evidence": "scripts/cron-overdue-probe.sh:427"
+          "evidence": "scripts/cron-overdue-probe.sh:441"
         }
       ]
     },
@@ -7939,6 +7948,11 @@
           "kind": "file",
           "p": "scripts/measurements/check-prediction.mjs",
           "evidence": "scripts/measurements/check-prediction.mjs:8"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/measurements/spd-1280-prior-observation-adjudication-2026-09-06.md",
+          "evidence": "scripts/measurements/check-prediction.mjs:668"
         }
       ]
     },
@@ -11083,6 +11097,43 @@
           "kind": "file",
           "p": "scripts/measurements/open-leg-repro.mjs",
           "evidence": "scripts/studio-desk-measure.mjs:2032"
+        }
+      ]
+    },
+    {
+      "path": "scripts/studio-inspector-frame-sample.mjs",
+      "run": "node scripts/studio-inspector-frame-sample.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "scripts/studio-desk-measure.mjs",
+          "evidence": "scripts/studio-inspector-frame-sample.mjs:5"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/studio-inspector-frame-sample.mjs",
+          "evidence": "scripts/studio-inspector-frame-sample.mjs:21"
+        },
+        {
+          "kind": "file",
+          "p": "config/barkpark/config.json",
+          "evidence": "scripts/studio-inspector-frame-sample.mjs:253"
+        }
+      ]
+    },
+    {
+      "path": "scripts/studio-inspector-frame-sample.test.mjs",
+      "run": "node --test scripts/studio-inspector-frame-sample.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "scripts/studio-inspector-frame-sample.mjs",
+          "evidence": "scripts/studio-inspector-frame-sample.test.mjs:3"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/studio-inspector-frame-sample.test.mjs",
+          "evidence": "scripts/studio-inspector-frame-sample.test.mjs:20"
         }
       ]
     },
