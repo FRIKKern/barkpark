@@ -1970,7 +1970,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <div class="bp-paper-contextual-preview" data-test-id="paper-gauge-list-preview">
             <%= raw(Render.render_block(@block, %{style: :article})) %>
           </div>
-          <details id={"gauge-list-controls-" <> @id} class="bp-paper-contextual-controls"
+          <details id={"gauge-list-controls-" <> @id}
+                   class="bp-paper-contextual-controls bp-paper-contextual-controls--gauge-list"
                    phx-mounted={JS.ignore_attributes("open")}>
             <summary class="bp-paper-contextual-toggle">Configure gauge list</summary>
             <div class="bp-paper-contextual-panel">

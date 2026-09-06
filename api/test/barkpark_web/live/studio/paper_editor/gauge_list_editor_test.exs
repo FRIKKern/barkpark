@@ -26,6 +26,13 @@ defmodule BarkparkWeb.Studio.PaperEditor.GaugeListEditorTest do
       assert html =~ "Configure gauge list"
       assert html =~ "Passing"
 
+      refute Enum.empty?(
+               LazyHTML.query(
+                 tree,
+                 "details.bp-paper-contextual-controls--gauge-list:not([open])"
+               )
+             )
+
       assert tree |> LazyHTML.query("input[name='gauge-count']") |> LazyHTML.attribute("value") ==
                ["1"]
 
