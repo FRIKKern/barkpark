@@ -466,6 +466,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
       when is_binary(slug) and is_binary(expandable_id),
       do: slug <> "-expandable-" <> expandable_id
 
+  @doc false
+  @spec steps_run_slug(String.t(), String.t(), String.t()) :: String.t()
+  def steps_run_slug(slug, steps_id, row_id)
+      when is_binary(slug) and is_binary(steps_id) and is_binary(row_id),
+      do:
+        slug <> "-steps-" <> Base.url_encode64(Jason.encode!([steps_id, row_id]), padding: false)
+
   @doc """
   Pair each `{:run, blocks}` segment from `partition_runs/1` with its run ORDINAL
   (0, 1, 2 … over runs in document order). `{:block, _}` boundaries pass through

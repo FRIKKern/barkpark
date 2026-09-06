@@ -1090,6 +1090,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         run_entries(PaperCanvas.expandable_run_slug(root_slug, id), children) ++
           nested_canvas_echo_runs(root_slug, children)
 
+      %{"type" => "steps", "id" => id, "steps" => rows}
+      when is_binary(id) and is_list(rows) ->
+        Enum.flat_map(rows, fn
+          %{"id" => row_id} = row when is_binary(row_id) and row_id != "" ->
+            children = expandable_children(row)
+
+            run_entries(PaperCanvas.steps_run_slug(root_slug, id, row_id), children) ++
+              nested_canvas_echo_runs(root_slug, children)
+
+          _ ->
+            []
+        end)
+
       _ ->
         []
     end)
@@ -1110,6 +1123,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   def expandable_render_blocks(_blocks), do: []
 
   defp expandable_children(%{"children" => children}) when is_list(children), do: children
+  defp expandable_children(%{"children" => children}) when children not in [nil, false], do: []
   defp expandable_children(%{"blocks" => blocks}) when is_list(blocks), do: blocks
   defp expandable_children(_block), do: []
 
