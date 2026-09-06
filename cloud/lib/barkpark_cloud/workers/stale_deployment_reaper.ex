@@ -21,8 +21,15 @@ defmodule BarkparkCloud.Workers.StaleDeploymentReaper do
   reusing the same `Registry.deployment_stale_after_seconds/0` threshold and
   `Registry.max_deploy_claims/0` budget throughout.
 
+  ONE horizon is deliberately not that pair: a PREBUILT row minted by charter
+  D86's mint-then-upload lane waits on the CLIENT'S off-box build, not on any
+  worker of ours, so pass (0d) terminates it on
+  `Registry.prebuilt_upload_grace_seconds/0` (60 minutes) with a reason that
+  names the missing upload — never the refused-spawn reason, which would accuse
+  a driver this lane never starts.
+
   Idempotent: a sweep that finds nothing returns
-  `{:ok, %{failed: 0, requeued: 0, released: 0, pushing_failed: 0, no_source_failed: 0, spawn_failed: 0, resumed: 0}}`
+  `{:ok, %{failed: 0, requeued: 0, released: 0, pushing_failed: 0, no_source_failed: 0, spawn_failed: 0, upload_missing_failed: 0, resumed: 0}}`
   and never raises. The `unique`
   window (60s) collapses a slow sweep plus the next cron tick to one in-flight
   job instead of stacking, and each status-guarded pass no-ops on a row a
