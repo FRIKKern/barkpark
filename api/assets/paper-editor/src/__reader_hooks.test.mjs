@@ -396,6 +396,86 @@ settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
 await tick();
 rangeForm.remove();
 
+// Text-backed TOC and criteria numerics validate before a fallback save. An
+// invalid draft stays in the DOM through debounce and an immediate View click.
+const tocForm = window.document.createElement('form');
+tocForm.className = 'bp-paper-edit-form';
+tocForm.setAttribute('phx-change', 'paper-block-autosave');
+tocForm.setAttribute('phx-debounce', '0');
+tocForm.setAttribute('data-test-id', 'paper-toc-editor');
+tocForm.innerHTML = '<input name="block_id" value="toc-1"><input name="depth" value="2"><input name="toc-0-level" value="3">';
+window.document.querySelector('main').append(tocForm);
+const tocLevel = tocForm.querySelector('[name="toc-0-level"]');
+tocLevel.value = 'not-a-number';
+calls.length = 0;
+tocLevel.dispatchEvent(new window.Event('input', {bubbles:true}));
+click();
+await tick();
+assert.deepEqual(calls, [], 'invalid TOC level is blocked before debounced autosave');
+assert.equal(tocLevel.value, 'not-a-number', 'invalid TOC draft remains available to correct');
+assert.deepEqual(calls, [], 'immediate View cannot send or discard an invalid TOC draft');
+assert.equal(tocLevel.value, 'not-a-number');
+assert.match(tocLevel.validationMessage, /positive whole number/);
+tocLevel.value = '4';
+tocLevel.dispatchEvent(new window.Event('input', {bubbles:true}));
+assert.equal(tocLevel.validationMessage, '', 'correcting a TOC number clears custom validity immediately');
+await tick();
+assert.deepEqual(calls, ['paper-block-autosave']);
+assert.equal(replies[0].payload['toc-0-level'], '4');
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+tocForm.remove();
+
+const criteriaForm = window.document.createElement('form');
+criteriaForm.className = 'bp-paper-edit-form';
+criteriaForm.setAttribute('phx-change', 'paper-block-autosave');
+criteriaForm.setAttribute('phx-debounce', '0');
+criteriaForm.setAttribute('data-test-id', 'paper-criteria-progress-editor');
+criteriaForm.innerHTML = '<input name="block_id" value="criteria-1"><input name="criterion-0-met" value="3"><input name="criterion-0-total" value="5">';
+window.document.querySelector('main').append(criteriaForm);
+const criteriaMet = criteriaForm.querySelector('[name="criterion-0-met"]');
+criteriaMet.value = 'not-a-number';
+calls.length = 0;
+criteriaMet.dispatchEvent(new window.Event('input', {bubbles:true}));
+criteriaMet.dispatchEvent(new window.Event('change', {bubbles:true}));
+await tick();
+assert.deepEqual(calls, [], 'invalid criteria value is blocked before debounced autosave');
+assert.equal(criteriaMet.value, 'not-a-number', 'invalid criteria draft is not repainted away');
+criteriaMet.value = '.5';
+criteriaMet.dispatchEvent(new window.Event('input', {bubbles:true}));
+await tick();
+assert.deepEqual(calls, [], 'client decimal grammar rejects values the server parser rejects');
+criteriaMet.value = '2.5';
+criteriaMet.dispatchEvent(new window.Event('input', {bubbles:true}));
+assert.equal(criteriaMet.validationMessage, '', 'correcting a criteria number clears custom validity immediately');
+await tick();
+assert.deepEqual(calls, ['paper-block-autosave']);
+assert.equal(replies[0].payload['criterion-0-met'], '2.5');
+assert.equal(replies[0].payload['criterion-0-total'], '5');
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+criteriaForm.remove();
+
+// The server preserves unchanged legacy numeric shapes. Inputs expose their
+// original wire representation through defaultValue, so those no-op values
+// must pass even when they are not valid new numbers.
+const legacyTocForm = window.document.createElement('form');
+legacyTocForm.className = 'bp-paper-edit-form';
+legacyTocForm.setAttribute('phx-change', 'paper-block-autosave');
+legacyTocForm.setAttribute('phx-debounce', '0');
+legacyTocForm.setAttribute('data-test-id', 'paper-toc-editor');
+legacyTocForm.innerHTML = '<input name="block_id" value="legacy-toc"><input name="depth" value=""><input name="toc-0-level" value="2x">';
+window.document.querySelector('main').append(legacyTocForm);
+calls.length = 0;
+legacyTocForm.querySelector('[name="toc-0-level"]').dispatchEvent(new window.Event('input', {bubbles:true}));
+await tick();
+assert.deepEqual(calls, ['paper-block-autosave'], 'unchanged malformed and blank legacy numerics pass through');
+assert.equal(replies[0].payload.depth, '');
+assert.equal(replies[0].payload['toc-0-level'], '2x');
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+legacyTocForm.remove();
+
 // Typing during a form save must create a later snapshot, not disappear when
 // the earlier acknowledgement arrives or when View is clicked immediately.
 calls.length = 0;

@@ -30,6 +30,8 @@
     "paper-add-property",
     "paper-edit-block",
   ]);
+  const PAPER_POSITIONAL_COLLECTION_PARAM =
+    /^(note|tab|param|ref|bar|toc|criterion)-(?:count|action|\d+-)/;
   const paperExitCoordinators = new WeakMap();
 
   // Collection forms use positional field names. After a reorder LiveView can
@@ -67,7 +69,39 @@
   // stored min/max attributes would reject a coherent new range, while only
   // validating on the server lets a failed patch repaint away the local draft.
   function bpPaperValidateAuthoringForm(form) {
-    if (form.getAttribute?.("data-test-id") !== "paper-field-number-editor") return;
+    const editor = form.getAttribute?.("data-test-id");
+
+    if (editor === "paper-toc-editor" || editor === "paper-criteria-progress-editor") {
+      const fields = [...form.elements].filter((field) => {
+        const name = field.name || "";
+        return editor === "paper-toc-editor"
+          ? name === "depth" || /^toc-\d+-level$/.test(name)
+          : /^criterion-\d+-(met|total)$/.test(name);
+      });
+      const positiveInteger = (value) => /^[+-]?\d+$/.test(value) && Number(value) > 0;
+      const finiteNumber = (value) =>
+        /^[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value) &&
+        Number.isFinite(Number(value));
+
+      fields.forEach((field) => {
+        field.setCustomValidity?.("");
+        // A malformed authored legacy value is a valid no-op. Once changed,
+        // apply the same fail-closed numeric shape expected by the server.
+        if (field.value === field.defaultValue) return;
+        const value = field.value.trim();
+        const valid = editor === "paper-toc-editor"
+          ? positiveInteger(value)
+          : finiteNumber(value);
+        if (!valid) {
+          field.setCustomValidity?.(editor === "paper-toc-editor"
+            ? "Enter a positive whole number."
+            : "Enter a number.");
+        }
+      });
+      return;
+    }
+
+    if (editor !== "paper-field-number-editor") return;
     const fields = Object.fromEntries(["value", "min", "max", "step"].map((name) =>
       [name, form.querySelector(`[name="${name}"]`)]));
     Object.values(fields).forEach((field) => field?.setCustomValidity(""));
@@ -221,6 +255,103 @@
       }
     }
     return params;
+  }
+
+  function bpPaperFallbackFormSnapshot(form, identity) {
+    const controls = [...form.elements].filter((control) => control.name);
+    const editable = controls.filter((control) =>
+      !["hidden", "submit", "button", "reset", "image"].includes(control.type));
+    const signature = controls.map((control) =>
+      `${control.tagName}:${control.type}:${control.name}`).join("\n");
+    const counts = controls.filter((control) =>
+      /^(note|tab|param|ref|bar|toc|criterion)-count$/.test(control.name));
+    const blockId = controls.find((control) => control.name === "block_id")?.value ?? null;
+    return {
+      form,
+      formId: form.id,
+      editor: form.getAttribute("data-test-id"),
+      documentKey: identity.key,
+      documentRevision: identity.rev,
+      blockId,
+      signature,
+      controlRefs: controls,
+      countValues: counts.map((control) => [control.name, control.value]),
+      fields: editable.map((control) => ({
+        control,
+        value: control.value,
+        checked: control.checked,
+        selected: control.tagName === "SELECT"
+          ? [...control.options].map((option) => option.selected)
+          : null,
+      })),
+    };
+  }
+
+  function bpPaperRestoreFallbackForm(snapshot, form, identity, main) {
+    if (!snapshot || snapshot.form !== form || !form.isConnected || !main.contains(form) ||
+        snapshot.formId !== form.id || snapshot.editor !== form.getAttribute("data-test-id") ||
+        snapshot.documentKey !== identity.key || snapshot.documentRevision !== identity.rev) {
+      return false;
+    }
+    const controls = [...form.elements].filter((control) => control.name);
+    const blockId = controls.find((control) => control.name === "block_id")?.value ?? null;
+    const signature = controls.map((control) =>
+      `${control.tagName}:${control.type}:${control.name}`).join("\n");
+    const counts = controls.filter((control) =>
+      /^(note|tab|param|ref|bar|toc|criterion)-count$/.test(control.name));
+    const countValues = counts.map((control) => [control.name, control.value]);
+    if (snapshot.blockId !== blockId || snapshot.signature !== signature ||
+        JSON.stringify(snapshot.countValues) !== JSON.stringify(countValues) ||
+        controls.length !== snapshot.controlRefs.length ||
+        controls.some((control, index) => control !== snapshot.controlRefs[index]) ||
+        snapshot.fields.some(({ control }) => !control.isConnected || control.form !== form)) {
+      return false;
+    }
+    snapshot.fields.forEach(({ control, value, checked, selected }) => {
+      if (selected) {
+        [...control.options].forEach((option, index) => {
+          option.selected = selected[index] === true;
+        });
+      } else if (control.type === "checkbox" || control.type === "radio") {
+        control.checked = checked;
+      } else {
+        control.value = value;
+      }
+    });
+    return true;
+  }
+
+  function bpPaperPositionalCollectionEntry(entry) {
+    return Object.keys(entry?.payload || {}).some((key) =>
+      PAPER_POSITIONAL_COLLECTION_PARAM.test(key));
+  }
+
+  function bpPaperConflictDraft(entry, snapshot) {
+    const identity = snapshot ? {
+      documentKey: snapshot.documentKey,
+      documentRevision: snapshot.documentRevision,
+      formId: snapshot.formId,
+      editor: snapshot.editor,
+      blockId: snapshot.blockId,
+    } : {
+      documentKey: entry?.documentKey ?? null,
+      documentRevision: entry?.authoredRev ?? null,
+      blockId: entry?.payload?.block_id ?? null,
+    };
+    const structure = snapshot ? {
+      fieldSignature: snapshot.signature,
+      collectionCounts: snapshot.countValues,
+    } : null;
+    const values = snapshot
+      ? snapshot.fields.map(({ control, value, checked, selected }) => ({
+        name: control.name,
+        type: control.type,
+        value,
+        ...(control.type === "checkbox" || control.type === "radio" ? { checked } : {}),
+        ...(selected ? { selected } : {}),
+      }))
+      : Object.entries(entry?.payload || {}).map(([name, value]) => ({ name, value }));
+    return { identity, structure, values };
   }
 
   function bpPaperExitCoordinator(hook) {
@@ -567,15 +698,22 @@
           banner = document.createElement("div");
           banner.dataset.bpPaperConflict = "true";
           banner.setAttribute("role", "alert");
-          banner.innerHTML = '<span>Save paused — this document changed elsewhere. Your edits are still here.</span> <button type="button" data-action="review">Review</button> <button type="button" data-action="keep">Keep mine</button> <button type="button" data-action="latest">Use latest</button> <span data-conflict-detail hidden></span>';
+          banner.innerHTML = '<span>Save paused — this document changed elsewhere. Your edits are still here.</span> <button type="button" data-action="review">Review</button> <button type="button" data-action="keep">Keep mine</button> <button type="button" data-action="latest">Use latest</button> <div data-conflict-detail hidden><span data-conflict-message></span><pre data-conflict-draft aria-label="Unsaved draft payload"></pre></div>';
           const root = main.querySelector(".bp-paper-editor") || main;
           root.prepend(banner);
           banner.addEventListener("click", (event) => {
             const action = event.target.closest?.("[data-action]")?.dataset.action;
             if (action === "review") {
               const detail = banner.querySelector("[data-conflict-detail]");
+              const head = mutationQueue[0];
+              const positional = bpPaperPositionalCollectionEntry(head);
               detail.hidden = false;
-              detail.textContent = `Server revision ${String(conflict.currentRev ?? "unknown")}. Keep mine retries your edits on that revision; Use latest discards them.`;
+              detail.querySelector("[data-conflict-message]").textContent = positional
+                ? `Server revision ${String(conflict.currentRev ?? "unknown")}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft.`
+                : `Server revision ${String(conflict.currentRev ?? "unknown")}. Keep mine retries your edits on that revision; Use latest discards them.`;
+              const snapshot = sources.get(head?.source)?.formSnapshot;
+              detail.querySelector("[data-conflict-draft]").textContent =
+                JSON.stringify(bpPaperConflictDraft(head, snapshot), null, 2);
               main.dispatchEvent(new CustomEvent("bp-paper-conflict-review", {
                 detail: { documentKey, conflict: conflict.reply }, bubbles: true,
               }));
@@ -586,10 +724,17 @@
             }
           });
         }
+        const positional = bpPaperPositionalCollectionEntry(mutationQueue[0]);
+        const keep = banner.querySelector('[data-action="keep"]');
+        keep.disabled = positional;
+        keep.setAttribute("aria-disabled", String(positional));
+        keep.title = positional ? "Row positions may have changed; review or use latest." : "";
       };
       coordinator._keepMine = () => {
         const head = mutationQueue[0];
-        if (!head || conflict?.currentRev == null) return false;
+        if (!head || conflict?.currentRev == null || bpPaperPositionalCollectionEntry(head)) {
+          return false;
+        }
         const replacementId = bpPaperRequestId();
         if (!replacementId) return false;
         mutationById.delete(head.requestId);
@@ -708,12 +853,50 @@
             coordinator._pumpMutations();
             coordinator._reloadIfClean();
           } else {
+            const validationReply =
+              reply?.saved === false && reply?.request_id === entry.requestId &&
+              reply?.rejected === "validation";
+            const matchingValidationRevision =
+              validationReply && reply.current_rev === entry.ifRev;
+            const record = sources.get(entry.source);
+            const currentIdentity = identityFor(entry.source);
+            const unchangedRevisionBase = matchingValidationRevision &&
+              record?.formSnapshot?.documentRevision === entry.ifRev &&
+              currentIdentity.rev === entry.ifRev && confirmedRevision === entry.ifRev &&
+              !quarantinedEchoes.some((echo) =>
+                (!echo.documentKey || echo.documentKey === entry.documentKey) &&
+                echo.rev !== entry.ifRev);
+            const restored = unchangedRevisionBase &&
+              entry.source.matches?.(".bp-paper-edit-form[phx-change]") &&
+              bpPaperRestoreFallbackForm(
+                record?.formSnapshot,
+                entry.source,
+                currentIdentity,
+                main,
+              );
             entry.onResult?.(false, reply);
-            mutationQueue.forEach((queued) => coordinator._resolveWaiters(queued, false));
-            if (reply?.conflict === true && reply?.request_id === entry.requestId) {
-              coordinator._setConflict(reply);
-            } else {
+            if (restored && mutationQueue[0] === entry) {
+              const newerVersion = record?.version > (entry.formVersion ?? record.version);
+              mutationQueue.shift();
+              mutationById.delete(entry.requestId);
+              if (record?.mutationEntry === entry) record.mutationEntry = null;
+              coordinator._resolveWaiters(entry, false);
               mutationPaused = true;
+              if (newerVersion) coordinator._scheduleFallback(entry.source);
+            } else if (validationReply) {
+              mutationQueue.forEach((queued) => coordinator._resolveWaiters(queued, false));
+              coordinator._setConflict(
+                { ...reply, conflict: true },
+                entry.source,
+                entry.documentKey,
+              );
+            } else {
+              mutationQueue.forEach((queued) => coordinator._resolveWaiters(queued, false));
+              if (reply?.conflict === true && reply?.request_id === entry.requestId) {
+                coordinator._setConflict(reply);
+              } else {
+                mutationPaused = true;
+              }
             }
           }
         });
@@ -732,6 +915,10 @@
             !source.matches?.(".bp-paper-edit-form[phx-change]")) return;
         coordinator.markDirty(source);
         if (source.matches?.(".bp-paper-edit-form[phx-change]")) {
+          recordFor(source).formSnapshot = bpPaperFallbackFormSnapshot(
+            source,
+            identityFor(source),
+          );
           // Native submit validates before dispatching a submit event. Clear
           // stale errors as the author corrects inputs, not after debounce.
           bpPaperValidateAuthoringForm(source);
