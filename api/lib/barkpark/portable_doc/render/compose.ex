@@ -1276,22 +1276,11 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # unstyled child text. The children are composed at THIS call site (render_blocks
   # threads style only — evergreen-nested, charter D1/D8).
   def compose_block(%{"type" => "terminal"} = b, :article) do
-    title = b |> Map.get("title", "") |> stringish() |> Util.escape_html()
-    footer = b |> Map.get("footer", "") |> stringish()
+    parts = terminal_article_parts(b)
     body = b |> container_children() |> render_blocks(:article)
 
-    live =
-      if Map.get(b, "live") in [true, "true", "live"],
-        do: ~s|<span class="bp-term__live">live</span>|,
-        else: ""
-
-    foot =
-      if footer == "",
-        do: "",
-        else: ~s|<div class="bp-term__foot">#{Util.escape_html(footer)}</div>|
-
     html =
-      ~s|<div class="bp-term"><div class="bp-term__bar"><span class="bp-term__dots"><i></i><i></i><i></i></span><span class="bp-term__title">#{title}</span>#{live}</div><div class="bp-term__body">#{body}</div>#{foot}</div>|
+      ~s|<div class="bp-term">#{parts.bar_html}<div class="bp-term__body">#{body}</div>#{parts.footer_html}</div>|
 
     %{"kind" => "_raw", "html" => html}
   end
@@ -2032,6 +2021,30 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp stringish(nil), do: ""
   defp stringish(v) when is_number(v) or is_atom(v), do: to_string(v)
   defp stringish(_), do: ""
+
+  @doc """
+  Canonical, escaped Terminal chrome for reader and contextual authoring.
+  The body remains owned by each caller so editing never paints it twice.
+  """
+  def terminal_article_parts(block) when is_map(block) do
+    title = block |> Map.get("title", "") |> stringish() |> Util.escape_html()
+    footer = block |> Map.get("footer", "") |> stringish()
+
+    live =
+      if Map.get(block, "live") in [true, "true", "live"],
+        do: ~s|<span class="bp-term__live">live</span>|,
+        else: ""
+
+    %{
+      bar_html:
+        ~s|<div class="bp-term__bar"><span class="bp-term__dots"><i></i><i></i><i></i></span><span class="bp-term__title">#{title}</span>#{live}</div>|,
+      footer_html:
+        if(footer == "",
+          do: "",
+          else: ~s|<div class="bp-term__foot">#{Util.escape_html(footer)}</div>|
+        )
+    }
+  end
 
   defp asciicast_rows(block) do
     case Map.get(block, "rows") do
