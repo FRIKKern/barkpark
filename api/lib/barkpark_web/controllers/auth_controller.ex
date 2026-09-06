@@ -442,21 +442,32 @@ defmodule BarkparkWeb.AuthController do
   end
 
   def logout(conn, _params) do
-    slo_url =
+    {slo_url, revoked} =
       case bearer_or_cookie(conn) do
         nil ->
-          nil
+          {nil, 0}
 
         token ->
           # Capture the session's SAML birth context BEFORE revoking, so a
           # SAML-born logout can hand back the IdP LogoutRequest URL (SLO).
           slo = saml_slo_url(token)
           audit_logout(token)
-          Accounts.revoke_user_session_token(token)
-          slo
+          {:ok, n} = Accounts.revoke_user_session_token(token)
+          {slo, n}
       end
 
-    body = if slo_url, do: %{ok: true, slo_url: slo_url}, else: %{ok: true}
+    # `revoked` is the NUMBER OF ROWS the revoke actually stamped, read out of
+    # Accounts.revoke_user_session_token/1's {:ok, n} (PDS-D523) — the same
+    # count the Studio sign-out sibling forks its flash on. Until now this
+    # receipt asserted success over a count it discarded: "a live session died"
+    # and "there was nothing left to revoke" arrived byte-identical. The `ok`
+    # and `slo_url` keys are unchanged — a logout that stamps nothing is still
+    # a success, the cookie is dropped either way — so `revoked` is purely
+    # additive and no client that reads only `ok` breaks.
+    body =
+      if slo_url,
+        do: %{ok: true, revoked: revoked, slo_url: slo_url},
+        else: %{ok: true, revoked: revoked}
 
     conn
     |> clear_session()
