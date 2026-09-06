@@ -490,7 +490,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"blockquote", "Blockquote"},
          {"divider", "Divider"},
          {"section", "Section"},
-         {"steps", "Steps"}
+         {"steps", "Steps"},
+         {"tabs", "Tabs"}
        ]},
       {"Article chrome",
        [
@@ -1075,6 +1076,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
       _ ->
         ""
+    end)
+  end
+
+  defp beta_node_text(%{"type" => "tabs", "tabs" => tabs}) when is_list(tabs) do
+    Enum.map_join(tabs, " ", fn
+      %{"blocks" => blocks} when is_list(blocks) -> beta_node_text(blocks)
+      _ -> ""
     end)
   end
 
@@ -1794,6 +1802,132 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             </div>
           </details>
         </div>
+      <% "tabs" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-tabs-editor">
+          <%= if editable_tabs?(@block) do %>
+            <div class="bp-tabs bp-tabs--editor" data-test-id="paper-tabs-preview">
+              <section
+                :for={{row, index} <- Enum.with_index(editable_tab_rows(@block))}
+                class="bp-tabs__section"
+                data-tab-row-id={row["id"]}
+                aria-label={tab_label(row, index)}
+              >
+                <p class="bp-tabs__label">
+                  <%= tab_label(row, index) %>
+                </p>
+                <div class="bp-tabs__panel">
+                  <%= for segment <- tab_body_segments(row, @canvas_enabled) do %>
+                    <%= case segment do %>
+                      <% {:run, run_blocks, ordinal} -> %>
+                        <.canvas_run
+                          slug={PaperCanvas.tabs_run_slug(@root_slug, @id, row["id"])}
+                          run_blocks={run_blocks}
+                          run_ordinal={ordinal}
+                          dataset={@dataset}
+                          api_token_raw={@api_token_raw}
+                          scope_prefix={@scope_prefix}
+                          picker_browse={@picker_browse}
+                          doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                          paper_rev={@doc_type == "paper" && @paper_rev}
+                          document_rev={@doc_type != "paper" && @document_rev}
+                          container_id={@id}
+                          container_kind="tabs"
+                          container_row_id={row["id"]}
+                        />
+                      <% {:block, child} -> %>
+                        <.paper_block_fields
+                          block={child}
+                          dataset={@dataset}
+                          api_token_raw={@api_token_raw}
+                          scope_prefix={@scope_prefix}
+                          picker_browse={@picker_browse}
+                          doc_type={@doc_type}
+                          paper_rev={@paper_rev}
+                          document_rev={@document_rev}
+                          root_slug={@root_slug}
+                          doc_key={@doc_key}
+                          canvas_enabled={@canvas_enabled}
+                          paper_links={@paper_links}
+                        />
+                    <% end %>
+                  <% end %>
+                </div>
+              </section>
+            </div>
+            <details
+              id={"paper-tabs-controls-" <> @id}
+              class="bp-paper-contextual-controls bp-paper-contextual-controls--tabs"
+              phx-mounted={JS.ignore_attributes("open")}
+            >
+              <summary class="bp-paper-contextual-toggle">Configure tabs</summary>
+              <div class="bp-paper-contextual-panel">
+                <form
+                  id={"tabs-form-" <> @id}
+                  class="bp-paper-edit-form"
+                  phx-submit="paper-edit-block"
+                  phx-change="paper-block-autosave"
+                  phx-debounce="500"
+                >
+                  <input type="hidden" name="block_id" value={@id} />
+                  <input type="hidden" name="panel-count" value={length(editable_tab_rows(@block))} />
+                  <input type="hidden" name="panel-new-row-id" value={Blocks.new_block_id()} />
+                  <input type="hidden" name="panel-new-child-id" value={Blocks.new_block_id()} />
+                  <fieldset :for={{row, index} <- Enum.with_index(editable_tab_rows(@block))}
+                            class="bp-paper-edit-form">
+                    <legend>Panel <%= index + 1 %></legend>
+                    <input type="hidden" name={"panel-#{index}-id"} value={row["id"]} />
+                    <label class="bp-paper-edit-fieldlabel">
+                      Label
+                      <input
+                        type="text"
+                        name={"panel-#{index}-label"}
+                        value={row["label"] || ""}
+                        class="bp-paper-edit-text"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      name="panel-action"
+                      value={"up:" <> row["id"]}
+                      disabled={index == 0}
+                      class="btn btn-ghost btn-sm"
+                    >Move up</button>
+                    <button
+                      type="submit"
+                      name="panel-action"
+                      value={"down:" <> row["id"]}
+                      disabled={index == length(editable_tab_rows(@block)) - 1}
+                      class="btn btn-ghost btn-sm"
+                    >Move down</button>
+                    <button
+                      type="submit"
+                      name="panel-action"
+                      value={"remove:" <> row["id"]}
+                      class="btn btn-destructive btn-sm"
+                    >Remove panel</button>
+                    <button
+                      :if={empty_tab_body?(row)}
+                      type="submit"
+                      name="panel-action"
+                      value={"add-body:" <> row["id"]}
+                      class="btn btn-ghost btn-sm"
+                    >Add paragraph</button>
+                  </fieldset>
+                  <button type="submit" name="panel-action" value="add" class="btn btn-ghost btn-sm">
+                    Add panel
+                  </button>
+                </form>
+              </div>
+            </details>
+          <% else %>
+            <div class="bp-paper-contextual-preview" data-test-id="paper-tabs-preview">
+              <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+            </div>
+            <p class="bp-paper-edit-readonly">
+              Panel identities or body data need repair before editing; original content is preserved.
+            </p>
+          <% end %>
+        </div>
       <% "steps" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-steps-editor">
           <%= if not editable_steps?(@block) do %>
@@ -2431,6 +2565,41 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     if canvas_enabled,
       do: children |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals(),
       else: Enum.map(Enum.filter(children, &is_map/1), &{:block, &1})
+  end
+
+  defp editable_tab_rows(%{"tabs" => rows}) when is_list(rows),
+    do: Enum.filter(rows, &(is_map(&1) and is_binary(&1["id"]) and String.trim(&1["id"]) != ""))
+
+  defp editable_tab_rows(_block), do: []
+
+  defp editable_tabs?(%{"tabs" => rows} = block) when is_list(rows) do
+    editable = editable_tab_rows(block)
+    ids = Enum.map(editable, & &1["id"])
+
+    length(editable) == length(rows) and length(Enum.uniq(ids)) == length(ids) and
+      Enum.all?(editable, fn row ->
+        (is_nil(row["label"]) or is_binary(row["label"])) and
+          (not Map.has_key?(row, "blocks") or is_nil(row["blocks"]) or
+             (is_list(row["blocks"]) and Enum.all?(row["blocks"], &is_map/1)))
+      end)
+  end
+
+  defp editable_tabs?(block), do: Map.get(block, "tabs") == nil
+
+  defp tab_label(%{"label" => label}, index) when is_binary(label) do
+    if String.trim(label) == "", do: "Tab #{index + 1}", else: label
+  end
+
+  defp tab_label(_row, index), do: "Tab #{index + 1}"
+
+  defp empty_tab_body?(row), do: Map.get(row, "blocks") in [nil, []]
+
+  defp tab_body_segments(row, canvas_enabled) do
+    blocks = if is_list(row["blocks"]), do: row["blocks"], else: []
+
+    if canvas_enabled,
+      do: blocks |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals(),
+      else: Enum.map(Enum.filter(blocks, &is_map/1), &{:block, &1})
   end
 
   # Tolerant readers for the image block's `src` / `role` (t13). A raw-API

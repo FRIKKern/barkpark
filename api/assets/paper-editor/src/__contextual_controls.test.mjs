@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const shell = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
+const surface = readFileSync(new URL("../../paper-surface/paper-surface.css", import.meta.url), "utf8");
 const luminance = hex => hex.match(/\w\w/g).map(value => parseInt(value, 16) / 255)
   .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
   .reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
@@ -23,17 +24,23 @@ assert.match(actions?.[1] ?? "", /flex-direction:\s*row/, "row actions remain a 
 const buttons = shell.match(/\.bp-paper-contextual-panel button\s*\{([^}]*)\}/);
 assert.match(buttons?.[1] ?? "", /min-height:\s*2rem/, "public controls have explicit usable button sizing");
 
-const gaugeOpen = shell.match(/\.bp-paper-contextual-controls--gauge-list\[open\]\s*\{([^}]*)\}/);
+const gaugeOpen = shell.match(/\.bp-paper-contextual-controls--gauge-list\[open\],\s*\.bp-paper-contextual-controls--tabs\[open\]\s*\{([^}]*)\}/);
 assert.ok(gaugeOpen, "an open gauge disclosure has a bounded gauge-only layout override");
 assert.match(gaugeOpen[1], /position:\s*relative/, "open gauge controls participate in document flow");
 assert.match(gaugeOpen[1], /width:\s*100%/, "open gauge controls use the available editor width");
 assert.match(gaugeOpen[1], /max-width:\s*none/, "open gauge controls are not capped to the floating-panel width");
-const gaugePanel = shell.match(/\.bp-paper-contextual-controls--gauge-list\[open\]\s*>\s*\.bp-paper-contextual-panel\s*\{([^}]*)\}/);
+const gaugePanel = shell.match(/\.bp-paper-contextual-controls--gauge-list\[open\]\s*>\s*\.bp-paper-contextual-panel,\s*\.bp-paper-contextual-controls--tabs\[open\]\s*>\s*\.bp-paper-contextual-panel\s*\{([^}]*)\}/);
 assert.ok(gaugePanel, "the gauge-only open panel overrides overlay scrolling");
 assert.match(gaugePanel[1], /max-height:\s*none/, "open gauge rows are not clipped to an overlay viewport");
 assert.match(gaugePanel[1], /overflow:\s*visible/, "open gauge rows do not create a nested scroll region");
 assert.match(shell, /\.bp-paper-contextual-controls\s*\{[^}]*position:\s*absolute/s,
   "closed contextual controls retain zero-flow floating geometry");
+const readerTabs = surface.match(/\.bp-paper-surface \.bp-tabs,\s*\.bp-paper-surface \.bp-code-tabs\s*\{([^}]*)\}/);
+assert.match(readerTabs?.[1] ?? "", /overflow:\s*hidden/,
+  "canonical reader tabs retain their clipped rounded shell");
+const editorTabs = surface.match(/\.bp-paper-surface \.bp-tabs--editor\s*\{([^}]*)\}/);
+assert.match(editorTabs?.[1] ?? "", /overflow:\s*visible/,
+  "stacked editor tabs cannot clip nested contextual controls");
 
 for (const [name, css] of [["standalone", styles], ["host shell", shell]]) {
   let checked = 0;

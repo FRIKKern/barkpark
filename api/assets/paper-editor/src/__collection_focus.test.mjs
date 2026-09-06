@@ -93,6 +93,95 @@ async function scenario({
   }
 }
 
+async function stableRowScenario({
+  prefix = "panel",
+  action = "up:row:two",
+  saved = true,
+  moveFocus = false,
+}) {
+  const dom = new JSDOM(`<main data-paper-doc-key="production:paper:focus" data-paper-rev="1">
+    <button id="toggle" data-editing="true">View</button>
+    <div id="paper-editor">
+      <form id="stable-rows" phx-submit="paper-edit-block">
+        <input type="hidden" name="block_id" value="tabs">
+        <input type="hidden" name="${prefix}-count" value="2">
+        <input type="hidden" name="${prefix}-new-row-id" value="row:new:three">
+        <input type="hidden" name="${prefix}-0-id" value="row:one">
+        <input name="${prefix}-0-label" value="First">
+        <button type="submit" name="${prefix}-action" value="remove:row:one">Remove first</button>
+        <input type="hidden" name="${prefix}-1-id" value="row:two">
+        <input name="${prefix}-1-label" value="Second">
+        <button id="stable-submitter" type="submit" name="${prefix}-action" value="${action}">Act</button>
+        <button type="submit" name="${prefix}-action" value="add">Add</button>
+      </form>
+    </div>
+    <button id="stable-elsewhere">Another control</button>
+  </main>`, { url: "http://localhost/" });
+  const { window } = dom;
+  vm.runInContext(source, vm.createContext({
+    window, document: window.document, CustomEvent: window.CustomEvent,
+    FormData: window.FormData, setTimeout, clearTimeout,
+  }));
+  let send;
+  let resolve;
+  const hook = {
+    ...window.BarkparkPaperEditorHooks.BarkparkPaperEditToggle,
+    el: window.document.getElementById("toggle"),
+    pushEvent: (event, payload) => {
+      send = { event, payload };
+      return new Promise(done => { resolve = done; });
+    },
+  };
+  hook.mounted();
+  try {
+    const form = window.document.getElementById("stable-rows");
+    const submitter = window.document.getElementById("stable-submitter");
+    submitter.focus();
+    form.dispatchEvent(new window.SubmitEvent("submit", { bubbles: true, cancelable: true, submitter }));
+    await tick();
+    assert.equal(send.payload[`${prefix}-action`], action);
+    assert.equal(window.document.activeElement, submitter, "stable-row focus waits for acknowledgement");
+
+    if (moveFocus) window.document.getElementById("stable-elsewhere").focus();
+    if (saved && action === "up:row:two") {
+      form.elements.namedItem(`${prefix}-0-id`).value = "row:two";
+      form.elements.namedItem(`${prefix}-0-label`).value = "Second";
+      form.elements.namedItem(`${prefix}-1-id`).value = "row:one";
+      form.elements.namedItem(`${prefix}-1-label`).value = "First";
+    }
+    if (saved && action === "add") {
+      const id = window.document.createElement("input");
+      id.type = "hidden";
+      id.name = `${prefix}-2-id`;
+      id.value = "row:new:three";
+      const label = window.document.createElement("input");
+      label.name = `${prefix}-2-label`;
+      form.append(id, label);
+      form.elements.namedItem(`${prefix}-count`).value = "3";
+    }
+    if (saved && action === "remove:row:two") {
+      form.elements.namedItem(`${prefix}-1-id`).remove();
+      form.elements.namedItem(`${prefix}-1-label`).remove();
+      submitter.remove();
+      form.elements.namedItem(`${prefix}-count`).value = "1";
+    }
+    resolve({ saved, request_id: send.payload.request_id, ...(saved ? { rev: 2 } : {}) });
+    await tick();
+
+    if (moveFocus) {
+      assert.equal(window.document.activeElement.id, "stable-elsewhere", "stable rows never steal focus");
+    } else if (!saved) {
+      assert.equal(window.document.activeElement, submitter, "failed stable-row save keeps current focus");
+    } else {
+      const expected = action === "add" ? `${prefix}-2-label` : `${prefix}-0-label`;
+      assert.equal(window.document.activeElement.name, expected, "focus follows stable row identity");
+    }
+  } finally {
+    hook.destroyed();
+    window.close();
+  }
+}
+
 await scenario({});
 await scenario({ action: "add" });
 await scenario({ action: "remove:1" });
@@ -106,4 +195,11 @@ for (const prefix of ["toc", "criterion", "gauge"]) {
 await scenario({ prefix: "gauge", hookName: "BarkparkPaperSortable" });
 await scenario({ prefix: "gauge", saved: false });
 await scenario({ prefix: "gauge", moveFocus: true });
+for (const prefix of ["panel", "step"]) {
+  await stableRowScenario({ prefix });
+  await stableRowScenario({ prefix, action: "add" });
+  await stableRowScenario({ prefix, action: "remove:row:two" });
+  await stableRowScenario({ prefix, saved: false });
+  await stableRowScenario({ prefix, moveFocus: true });
+}
 console.log("PASS collection focus: reorder, add, remove, failure, and no focus stealing");

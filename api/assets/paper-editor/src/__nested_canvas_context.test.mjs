@@ -98,9 +98,9 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
   dom.window.close();
 }
 
-{
+for (const kind of ["steps", "tabs"]) {
   const { dom, window, wrapper, canvas, bridge, pending } = mountCanvas(
-    'data-paper-container-kind="steps" data-paper-container-id="procedure-1" ' +
+    `data-paper-container-kind="${kind}" data-paper-container-id="procedure-1" ` +
       'data-paper-container-row-id="row-1" data-paper-container-run="2"',
   );
   canvas.blocks = [{ id: "step-a" }, { id: "step-b" }];
@@ -113,7 +113,7 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.equal(pending.length, 1);
   const original = structuredClone(pending[0].payload);
-  assert.equal(original.container_kind, "steps");
+  assert.equal(original.container_kind, kind);
   assert.equal(original.container_id, "procedure-1");
   assert.equal(original.container_row_id, "row-1");
   assert.deepEqual(original.container_run_ids, ["step-a", "step-b"]);
@@ -136,7 +136,7 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(
     structuredClone(pending[0].payload),
     original,
-    "retry freezes the original steps parent, row, run, revision and request ID",
+    `retry freezes the original ${kind} parent, row, run, revision and request ID`,
   );
 
   pending[0].resolve({ saved: true, request_id: original.request_id, rev: 8 });
@@ -180,6 +180,8 @@ for (const [attributes, confirmedBlocks] of [
   ['data-paper-container-kind="unknown" data-paper-container-id="procedure" data-paper-container-row-id="row-1" data-paper-container-run="1"', [{ id: "a" }]],
   ['data-paper-container-kind="expandable" data-paper-container-id="details" data-paper-container-run="1"', [{ id: "a" }]],
   ['data-paper-container-kind="steps" data-paper-container-id="procedure" data-paper-container-row-id="   " data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="tabs" data-paper-container-id="panels" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="tabs" data-paper-container-id="panels" data-paper-container-row-id="   " data-paper-container-run="1"', [{ id: "a" }]],
 ]) {
   const { dom, window, wrapper, canvas, bridge, pending, errors } = mountCanvas(attributes);
   canvas.blocks = confirmedBlocks;
@@ -200,4 +202,4 @@ for (const [attributes, confirmedBlocks] of [
   dom.window.close();
 }
 
-console.log("nested canvas context: expandable/steps retry + top-level + 11 fail-closed cases passed");
+console.log("nested canvas context: expandable/steps/tabs retry + top-level + 13 fail-closed cases passed");

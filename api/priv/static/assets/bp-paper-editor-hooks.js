@@ -31,7 +31,7 @@
     "paper-edit-block",
   ]);
   const PAPER_POSITIONAL_COLLECTION_PARAM =
-    /^(note|tab|param|ref|bar|toc|criterion|gauge)-(?:count|action|\d+-)/;
+    /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step)-(?:count|action|\d+-)/;
   const PAPER_TRANSIENT_SAVE_STATUSES = new Set([
     "", "Auto-saved", "✓ Auto-saved", "Saving…",
     "Unsaved changes — fix invalid fields.",
@@ -45,28 +45,60 @@
   // Restore the operated row only after acknowledgement, without stealing focus
   // from a user who has moved elsewhere while the request was in flight.
   function bpPaperCollectionFocus(form, submitter) {
-    const match = /^(note|tab|param|ref|bar|toc|criterion|gauge)-action$/.exec(submitter?.name || "");
+    const match = /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step)-action$/.exec(submitter?.name || "");
     if (!match || document.activeElement !== submitter) return () => {};
     const prefix = match[1];
     const count = Number(form.elements.namedItem(`${prefix}-count`)?.value);
-    const action = /^(add|up|down|remove)(?::(\d+))?$/.exec(submitter.value || "");
+    const stableRows = prefix === "panel" || prefix === "step";
+    const action = stableRows
+      ? /^(add|up|down|remove)(?::(.+))?$/.exec(submitter.value || "")
+      : /^(add|up|down|remove)(?::(\d+))?$/.exec(submitter.value || "");
     if (!Number.isSafeInteger(count) || count < 0 || !action) return () => {};
-    const kind = action[1], index = Number(action[2]);
-    if (kind !== "add" && (!Number.isSafeInteger(index) || index < 0 || index >= count)) return () => {};
+    const kind = action[1];
+    const beforeIds = stableRows
+      ? Array.from({ length: count }, (_unused, index) =>
+          form.elements.namedItem(`${prefix}-${index}-id`)?.value)
+      : [];
+    const rowId = stableRows
+      ? (kind === "add"
+          ? form.elements.namedItem(`${prefix}-new-row-id`)?.value
+          : action[2])
+      : null;
+    const index = stableRows ? beforeIds.indexOf(action[2]) : Number(action[2]);
+    if (stableRows &&
+        (beforeIds.some(id => typeof id !== "string" || id === "") ||
+          new Set(beforeIds).size !== beforeIds.length ||
+          typeof rowId !== "string" || rowId === "" ||
+          (kind !== "add" && (index < 0 || beforeIds.lastIndexOf(action[2]) !== index)))) return () => {};
+    if (!stableRows && kind !== "add" &&
+        (!Number.isSafeInteger(index) || index < 0 || index >= count)) return () => {};
     const nextCount = count + (kind === "add" ? 1 : kind === "remove" ? -1 : 0);
-    const nextIndex = kind === "add" ? count : kind === "up" ? index - 1
-      : kind === "down" ? index + 1 : Math.min(index, nextCount - 1);
     return () => {
       if (!form.isConnected ||
           (document.activeElement !== submitter &&
             !(document.activeElement === document.body && !submitter.isConnected)) ||
           Number(form.elements.namedItem(`${prefix}-count`)?.value) !== nextCount) return;
+      const afterIds = stableRows
+        ? Array.from({ length: nextCount }, (_unused, rowIndex) =>
+            form.elements.namedItem(`${prefix}-${rowIndex}-id`)?.value)
+        : [];
+      if (stableRows &&
+          (afterIds.some(id => typeof id !== "string" || id === "") ||
+            new Set(afterIds).size !== afterIds.length)) return;
+      const nextIndex = stableRows
+        ? (kind === "remove" ? Math.min(index, nextCount - 1) : afterIds.indexOf(rowId))
+        : kind === "add" ? count : kind === "up" ? index - 1
+          : kind === "down" ? index + 1 : Math.min(index, nextCount - 1);
+      if (nextCount > 0 &&
+          (!Number.isSafeInteger(nextIndex) || nextIndex < 0 || nextIndex >= nextCount)) return;
       const controls = [...form.elements];
-      const field = controls.find(control =>
+      const field = nextCount > 0 && controls.find(control =>
         control.name?.startsWith(`${prefix}-${nextIndex}-`) &&
         !control.disabled && control.type !== "hidden");
       const fallback = controls.find(control => control.name === `${prefix}-action` &&
-        control.value === (nextCount ? `remove:${nextIndex}` : "add") && !control.disabled);
+        control.value === (nextCount
+          ? `remove:${stableRows ? afterIds[nextIndex] : nextIndex}`
+          : "add") && !control.disabled);
       (field || fallback)?.focus();
     };
   }
@@ -77,12 +109,14 @@
   function bpPaperValidateAuthoringForm(form) {
     const editor = form.getAttribute?.("data-test-id");
 
-    if (editor === "paper-toc-editor" || editor === "paper-criteria-progress-editor") {
+    if (["paper-toc-editor", "paper-criteria-progress-editor", "paper-gauge-list-editor"].includes(editor)) {
       const fields = [...form.elements].filter((field) => {
         const name = field.name || "";
         return editor === "paper-toc-editor"
           ? name === "depth" || /^toc-\d+-level$/.test(name)
-          : /^criterion-\d+-(met|total)$/.test(name);
+          : editor === "paper-gauge-list-editor"
+            ? name === "max" || /^gauge-\d+-value$/.test(name)
+            : /^criterion-\d+-(met|total)$/.test(name);
       });
       const positiveInteger = (value) => /^[+-]?\d+$/.test(value) && Number(value) > 0;
       const finiteNumber = (value) =>
@@ -95,13 +129,17 @@
         // apply the same fail-closed numeric shape expected by the server.
         if (field.value === field.defaultValue) return;
         const value = field.value.trim();
+        const gaugeMaximum = editor === "paper-gauge-list-editor" && field.name === "max";
         const valid = editor === "paper-toc-editor"
           ? positiveInteger(value)
-          : finiteNumber(value);
+          : gaugeMaximum
+            ? field.value === "" || (finiteNumber(value) && Number(value) > 0)
+            : finiteNumber(value);
         if (!valid) {
           field.setCustomValidity?.(editor === "paper-toc-editor"
             ? "Enter a positive whole number."
-            : "Enter a number.");
+            : gaugeMaximum ? "Enter a number greater than zero, or leave blank for automatic."
+              : "Enter a number.");
         }
       });
       return;
@@ -270,7 +308,13 @@
     const signature = controls.map((control) =>
       `${control.tagName}:${control.type}:${control.name}`).join("\n");
     const counts = controls.filter((control) =>
-      /^(note|tab|param|ref|bar|toc|criterion|gauge)-count$/.test(control.name));
+      /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step)-count$/.test(control.name));
+    const stableRowIds = ["panel", "step"].flatMap((prefix) => {
+      const count = Number(form.elements.namedItem(`${prefix}-count`)?.value);
+      if (!Number.isSafeInteger(count) || count < 0) return [];
+      return [[prefix, Array.from({ length: count }, (_unused, index) =>
+        form.elements.namedItem(`${prefix}-${index}-id`)?.value ?? null)]];
+    });
     const blockId = controls.find((control) => control.name === "block_id")?.value ?? null;
     return {
       form,
@@ -282,6 +326,7 @@
       signature,
       controlRefs: controls,
       countValues: counts.map((control) => [control.name, control.value]),
+      stableRowIds,
       fields: editable.map((control) => ({
         control,
         value: control.value,
@@ -304,10 +349,17 @@
     const signature = controls.map((control) =>
       `${control.tagName}:${control.type}:${control.name}`).join("\n");
     const counts = controls.filter((control) =>
-      /^(note|tab|param|ref|bar|toc|criterion|gauge)-count$/.test(control.name));
+      /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step)-count$/.test(control.name));
     const countValues = counts.map((control) => [control.name, control.value]);
+    const stableRowIds = ["panel", "step"].flatMap((prefix) => {
+      const count = Number(form.elements.namedItem(`${prefix}-count`)?.value);
+      if (!Number.isSafeInteger(count) || count < 0) return [];
+      return [[prefix, Array.from({ length: count }, (_unused, index) =>
+        form.elements.namedItem(`${prefix}-${index}-id`)?.value ?? null)]];
+    });
     if (snapshot.blockId !== blockId || snapshot.signature !== signature ||
         JSON.stringify(snapshot.countValues) !== JSON.stringify(countValues) ||
+        JSON.stringify(snapshot.stableRowIds) !== JSON.stringify(stableRowIds) ||
         controls.length !== snapshot.controlRefs.length ||
         controls.some((control, index) => control !== snapshot.controlRefs[index]) ||
         snapshot.fields.some(({ control }) => !control.isConnected || control.form !== form)) {
@@ -347,6 +399,7 @@
     const structure = snapshot ? {
       fieldSignature: snapshot.signature,
       collectionCounts: snapshot.countValues,
+      stableRowIds: snapshot.stableRowIds,
     } : null;
     const values = snapshot
       ? snapshot.fields.map(({ control, value, checked, selected }) => ({
@@ -1552,13 +1605,13 @@
           }
           const legacyContext = hasContainerId && hasLegacyRunMarker &&
             !hasContainerKind && !hasContainerRowId;
-          const stepsContext = hasContainerId && hasLegacyRunMarker &&
-            hasContainerKind && containerKind === "steps" &&
+          const rowContext = hasContainerId && hasLegacyRunMarker &&
+            hasContainerKind && ["steps", "tabs"].includes(containerKind) &&
             hasContainerRowId && containerRowId.trim() !== "";
-          if (!legacyContext && !stepsContext) return { wire: {}, invalid: true };
+          if (!legacyContext && !rowContext) return { wire: {}, invalid: true };
           return {
             wire: Object.freeze({
-              ...(stepsContext ? {
+              ...(rowContext ? {
                 container_kind: containerKind,
                 container_row_id: containerRowId,
               } : {}),

@@ -1129,6 +1129,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   defp nested_canvas_echo_runs(root_slug, blocks) do
     Enum.flat_map(blocks, fn
+      %{"type" => "tabs", "id" => id, "tabs" => rows}
+      when is_binary(id) and is_list(rows) ->
+        Enum.flat_map(rows, fn
+          %{"id" => row_id} = row when is_binary(row_id) and row_id != "" ->
+            children = tab_children(row)
+
+            run_entries(PaperCanvas.tabs_run_slug(root_slug, id, row_id), children) ++
+              nested_canvas_echo_runs(root_slug, children)
+
+          _ ->
+            []
+        end)
+
       %{"type" => "expandable", "id" => id} = block when is_binary(id) ->
         children = expandable_children(block)
 
@@ -1156,6 +1169,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   @doc false
   def expandable_render_blocks(blocks) when is_list(blocks) do
     Enum.flat_map(blocks, fn
+      %{"type" => "tabs", "tabs" => rows} = block when is_list(rows) ->
+        children = Enum.flat_map(rows, &tab_children/1)
+        [block | expandable_render_blocks(children)]
+
       %{"type" => "expandable"} = block ->
         children = expandable_children(block)
         [block | expandable_render_blocks(children)]
@@ -1170,6 +1187,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   def expandable_render_blocks(_blocks), do: []
+
+  defp tab_children(%{"blocks" => blocks}) when is_list(blocks), do: blocks
+  defp tab_children(_row), do: []
 
   defp expandable_children(%{"children" => children}) when is_list(children), do: children
   defp expandable_children(%{"children" => children}) when children not in [nil, false], do: []

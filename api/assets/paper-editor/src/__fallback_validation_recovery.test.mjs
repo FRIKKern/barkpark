@@ -79,6 +79,36 @@ const tocMarkup = `
   </form>
 `;
 
+for (const [name, value, valid] of [
+  ["max", "0", false], ["max", "-1", false], ["max", "invalid", false],
+  ["max", "", true], ["max", "120", true],
+  ["gauge-0-value", "invalid", false], ["gauge-0-value", "", false],
+  ["gauge-0-value", "2.5", true],
+]) {
+  const env = mountedForm(`
+    <form id="gauges" class="bp-paper-edit-form" phx-change="paper-block-autosave"
+          phx-debounce="0" data-test-id="paper-gauge-list-editor">
+      <input type="hidden" name="block_id" value="gauges">
+      <input type="hidden" name="gauge-count" value="1">
+      <input name="max" value="100">
+      <input name="gauge-0-value" value="70">
+    </form>
+  `);
+  const field = env.form.elements.namedItem(name);
+  field.value = value;
+  field.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  await tick();
+  assert.equal(env.calls.length, valid ? 1 : 0, `${name}=${JSON.stringify(value)} has matching numeric validation`);
+  if (valid) {
+    env.settle({ saved: true, request_id: env.calls[0].payload.request_id, rev: 8 });
+    await tick();
+  } else {
+    assert.ok(field.validationMessage, "invalid gauges explain the field constraint");
+    assert.equal(field.value, value, "invalid local input remains available for correction");
+  }
+  env.close();
+}
+
 // A matching validation refusal restores the latest local snapshot after a
 // same-form LiveView repaint, then retires only that rejected request.
 {
@@ -247,6 +277,51 @@ await unsafeValidationScenario((env) => {
 });
 
 await unsafeValidationScenario(() => {}, 8);
+
+// Stable-row collection snapshots must not restore positional field values when
+// LiveView has reordered the same rows without changing the collection count.
+// The hidden row-id vector is the structure fence for Steps and plain Tabs.
+for (const prefix of ["panel", "step"]) {
+  const env = mountedForm(`
+    <form id="${prefix}-form" class="bp-paper-edit-form" phx-change="paper-block-autosave"
+          phx-debounce="0" data-test-id="paper-${prefix}-editor">
+      <input type="hidden" name="block_id" value="container">
+      <input type="hidden" name="${prefix}-count" value="2">
+      <input type="hidden" name="${prefix}-0-id" value="row:one">
+      <input name="${prefix}-0-label" value="First">
+      <input type="hidden" name="${prefix}-1-id" value="row:two">
+      <input name="${prefix}-1-label" value="Second">
+    </form>
+  `);
+  const first = env.form.elements.namedItem(`${prefix}-0-label`);
+  first.value = "Draft for first";
+  first.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  await tick();
+  const rejected = env.calls[0].payload;
+
+  env.form.elements.namedItem(`${prefix}-0-id`).value = "row:two";
+  env.form.elements.namedItem(`${prefix}-0-label`).value = "Second";
+  env.form.elements.namedItem(`${prefix}-1-id`).value = "row:one";
+  env.form.elements.namedItem(`${prefix}-1-label`).value = "First";
+  env.settle({
+    saved: false,
+    request_id: rejected.request_id,
+    rejected: "validation",
+    current_rev: rejected.if_rev,
+  });
+  await tick();
+
+  assert.equal(
+    env.form.elements.namedItem(`${prefix}-0-label`).value,
+    "Second",
+    `${prefix} snapshot is not restored onto a different stable row`,
+  );
+  assert.equal(env.calls.length, 1, `${prefix} reordered snapshot is not resubmitted`);
+  const banner = env.window.document.querySelector("[data-bp-paper-conflict]");
+  assert.ok(banner, `${prefix} reorder enters explicit conflict review`);
+  assert.equal(banner.querySelector('[data-action="keep"]').disabled, true);
+  env.close();
+}
 
 // A newer input captured after the mounted carrier advances belongs to a
 // different base even when the validation receipt still matches the queued

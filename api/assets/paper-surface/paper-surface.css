@@ -2006,6 +2006,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    (no-JS degrade); hydration hides the non-active ones, so the strip must
    read as controls and the active tab must be visibly marked. */
 .bp-paper-surface .bp-tabs, .bp-paper-surface .bp-code-tabs { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
+.bp-paper-surface .bp-tabs--editor { overflow: visible; }
 .bp-paper-surface .bp-tabs__strip, .bp-paper-surface .bp-code-tabs__strip { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px 0; background: var(--paper-bg-deep); border-bottom: 1px solid var(--paper-chrome-border); }
 .bp-paper-surface .bp-tabs__tab, .bp-paper-surface .bp-code-tabs__tab { appearance: none; background: none; border: none; border-bottom: var(--bp-rule-hairline) solid transparent; padding: 6px 12px 7px; font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); cursor: pointer; }
 .bp-paper-surface .bp-tabs__tab--active, .bp-paper-surface .bp-code-tabs__tab--active { color: var(--paper-ink); border-bottom-color: var(--paper-accent); font-weight: 700; }

@@ -117,6 +117,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end
   end
 
+  def build_block_patch(%{"type" => "tabs"} = block, params) do
+    case validate_tabs_form(block, params) do
+      {:ok, rows, submitted, action} -> build_tabs_patch(rows, submitted, action, params)
+      {:error, _reason} -> %{}
+    end
+  end
+
   # ── article-chrome blocks (barkpark-54kh) ──
   # eyebrow: single text input → flat "text" string (render reads `text`).
   def build_block_patch(%{"type" => "eyebrow"}, params) do
@@ -276,6 +283,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     case validate_steps_form(block, params) do
       {:ok, rows, submitted, action} ->
         {:ok, build_steps_patch(block, rows, submitted, action, params)}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  def validate_block_patch(%{"type" => "tabs"} = block, params) do
+    case validate_tabs_form(block, params) do
+      {:ok, rows, submitted, action} ->
+        {:ok, build_tabs_patch(rows, submitted, action, params)}
 
       {:error, _reason} = error ->
         error
@@ -920,6 +937,305 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   defp malformed_steps, do: {:error, {:malformed_collection, "steps"}}
 
+  defp validate_tabs_form(block, params) do
+    if tab_form_params?(params) do
+      with {:ok, rows} <- stored_tab_rows(block),
+           true <- Enum.all?(rows, &valid_tab_row?/1),
+           true <- unique_tab_row_ids?(rows),
+           true <- exact_submitted_count?(params["panel-count"], length(rows)),
+           :ok <- validate_tab_param_names(params, length(rows)),
+           {:ok, submitted} <- submitted_tab_rows(params, rows),
+           true <- Enum.map(submitted, &elem(&1, 0)) == Enum.map(rows, &Map.fetch!(&1, "id")),
+           {:ok, action} <- validate_tab_action(params["panel-action"], block, rows, params) do
+        {:ok, rows, submitted, action}
+      else
+        {:error, _reason} = error -> error
+        _ -> malformed_tabs()
+      end
+    else
+      {:ok, [], [], nil}
+    end
+  end
+
+  defp build_tabs_patch([], [], nil, _params), do: %{}
+
+  defp build_tabs_patch(rows, submitted, action, params) do
+    labeled =
+      Enum.zip(rows, submitted)
+      |> Enum.map(fn {row, {_id, label}} ->
+        put_form_param_preserving_shape(row, %{"label" => label}, "label", "label")
+      end)
+
+    updated = apply_tab_action(labeled, action, params)
+    if updated == rows, do: %{}, else: %{"tabs" => updated}
+  end
+
+  defp tab_form_params?(params) do
+    Enum.any?(Map.keys(params), &(is_binary(&1) and String.starts_with?(&1, "panel-")))
+  end
+
+  defp stored_tab_rows(block) do
+    case Map.fetch(block, "tabs") do
+      :error -> {:ok, []}
+      {:ok, nil} -> {:ok, []}
+      {:ok, rows} when is_list(rows) -> {:ok, rows}
+      _ -> malformed_tabs()
+    end
+  end
+
+  defp valid_tab_row?(%{"id" => id} = row) when is_binary(id) and id != "" do
+    label = Map.get(row, "label")
+
+    String.trim(id) != "" and (is_nil(label) or is_binary(label)) and
+      case Map.fetch(row, "blocks") do
+        :error -> true
+        {:ok, nil} -> true
+        {:ok, blocks} when is_list(blocks) -> Enum.all?(blocks, &is_map/1)
+        _ -> false
+      end
+  end
+
+  defp valid_tab_row?(_row), do: false
+
+  defp unique_tab_row_ids?(rows) do
+    ids = Enum.map(rows, &Map.fetch!(&1, "id"))
+    length(ids) == MapSet.size(MapSet.new(ids))
+  end
+
+  defp validate_tab_param_names(params, count) do
+    allowed =
+      MapSet.new(~w(panel-count panel-action panel-new-row-id panel-new-child-id))
+      |> then(fn allowed ->
+        if count == 0 do
+          allowed
+        else
+          Enum.reduce(0..(count - 1), allowed, fn index, acc ->
+            acc
+            |> MapSet.put("panel-#{index}-id")
+            |> MapSet.put("panel-#{index}-label")
+          end)
+        end
+      end)
+
+    unexpected? =
+      Enum.any?(Map.keys(params), fn key ->
+        is_binary(key) and String.starts_with?(key, "panel-") and
+          not MapSet.member?(allowed, key)
+      end)
+
+    if unexpected?, do: malformed_tabs(), else: :ok
+  end
+
+  defp submitted_tab_rows(params, rows) do
+    rows
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {_row, index}, {:ok, acc} ->
+      case {Map.fetch(params, "panel-#{index}-id"), Map.fetch(params, "panel-#{index}-label")} do
+        {{:ok, id}, {:ok, label}} when is_binary(id) and is_binary(label) ->
+          {:cont, {:ok, [{id, label} | acc]}}
+
+        _ ->
+          {:halt, malformed_tabs()}
+      end
+    end)
+    |> case do
+      {:ok, submitted} -> {:ok, Enum.reverse(submitted)}
+      error -> error
+    end
+  end
+
+  defp validate_tab_action(action, _block, _rows, _params) when action in [nil, ""],
+    do: {:ok, nil}
+
+  defp validate_tab_action("add", block, _rows, params) do
+    case validate_new_tab_id(params["panel-new-row-id"], block) do
+      :ok -> {:ok, :add}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp validate_tab_action("remove:" <> id, _block, rows, _params) do
+    with {:ok, {:remove, ^id}} <- validate_existing_tab_action(:remove, id, rows),
+         %{} = row <- Enum.find(rows, &(Map.get(&1, "id") == id)),
+         nil <- locked_tab_descendant_id(row) do
+      {:ok, {:remove, id}}
+    else
+      locked_id when is_binary(locked_id) ->
+        {:error, {:locked_block, locked_id, "remove-block"}}
+
+      {:error, _reason} = error ->
+        error
+
+      _ ->
+        malformed_tabs()
+    end
+  end
+
+  defp validate_tab_action("up:" <> id, _block, rows, _params),
+    do: validate_existing_tab_action(:up, id, rows)
+
+  defp validate_tab_action("down:" <> id, _block, rows, _params),
+    do: validate_existing_tab_action(:down, id, rows)
+
+  defp validate_tab_action("add-body:" <> id, block, rows, params) do
+    with {:ok, {:add_body, ^id}} <- validate_existing_tab_action(:add_body, id, rows),
+         :ok <- validate_new_tab_id(params["panel-new-child-id"], block),
+         %{} = row <- Enum.find(rows, &(Map.get(&1, "id") == id)),
+         {:ok, _updated} <- add_first_tab_body(row, params["panel-new-child-id"]) do
+      {:ok, {:add_body, id}}
+    else
+      {:error, _reason} = error -> error
+      _ -> malformed_tabs()
+    end
+  end
+
+  defp validate_tab_action(_action, _block, _rows, _params), do: malformed_tabs()
+
+  defp validate_existing_tab_action(kind, id, rows) do
+    if is_binary(id) and Enum.any?(rows, &(Map.get(&1, "id") == id)),
+      do: {:ok, {kind, id}},
+      else: malformed_tabs()
+  end
+
+  defp apply_tab_action(rows, nil, _params), do: rows
+
+  defp apply_tab_action(rows, :add, params) do
+    rows ++ [%{"id" => params["panel-new-row-id"], "label" => "", "blocks" => []}]
+  end
+
+  defp apply_tab_action(rows, {:remove, id}, _params),
+    do: Enum.reject(rows, &(Map.get(&1, "id") == id))
+
+  defp apply_tab_action(rows, {direction, id}, _params) when direction in [:up, :down] do
+    index = Enum.find_index(rows, &(Map.get(&1, "id") == id))
+    move_at_index(rows, index, if(direction == :up, do: -1, else: 1))
+  end
+
+  defp apply_tab_action(rows, {:add_body, id}, params) do
+    index = Enum.find_index(rows, &(Map.get(&1, "id") == id))
+    {:ok, row} = add_first_tab_body(Enum.at(rows, index), params["panel-new-child-id"])
+    List.replace_at(rows, index, row)
+  end
+
+  defp validate_new_tab_id(id, block) when is_binary(id) do
+    cond do
+      String.trim(id) == "" -> malformed_tabs()
+      MapSet.member?(tab_tree_ids(block), id) -> {:error, {:duplicate_id, id}}
+      true -> :ok
+    end
+  end
+
+  defp validate_new_tab_id(_id, _block), do: malformed_tabs()
+
+  defp tab_tree_ids(value), do: collect_tab_tree_ids(value, MapSet.new())
+
+  defp collect_tab_tree_ids(values, ids) when is_list(values),
+    do: Enum.reduce(values, ids, &collect_tab_tree_ids/2)
+
+  defp collect_tab_tree_ids(%{} = value, ids) do
+    ids = collect_authored_identity(value, ids)
+
+    case value do
+      %{"type" => "tabs"} ->
+        case Map.get(value, "tabs") do
+          rows when is_list(rows) ->
+            Enum.reduce(rows, ids, fn
+              row, acc when is_map(row) ->
+                acc = collect_authored_identity(row, acc)
+
+                case Map.get(row, "blocks") do
+                  blocks when is_list(blocks) -> collect_tab_tree_ids(blocks, acc)
+                  _ -> acc
+                end
+
+              _row, acc ->
+                acc
+            end)
+
+          _opaque ->
+            ids
+        end
+
+      %{"type" => "steps", "steps" => rows} when is_list(rows) ->
+        Enum.reduce(rows, ids, fn
+          row, acc when is_map(row) ->
+            acc = collect_authored_identity(row, acc)
+            acc = collect_tab_tree_ids(Map.get(row, "children"), acc)
+            collect_tab_tree_ids(Map.get(row, "blocks"), acc)
+
+          _row, acc ->
+            acc
+        end)
+
+      %{"type" => "expandable"} ->
+        ids = collect_tab_tree_ids(Map.get(value, "children"), ids)
+        collect_tab_tree_ids(Map.get(value, "blocks"), ids)
+
+      %{"blocks" => blocks} when is_list(blocks) ->
+        collect_tab_tree_ids(blocks, ids)
+
+      _ ->
+        ids
+    end
+  end
+
+  defp collect_tab_tree_ids(_value, ids), do: ids
+
+  defp collect_authored_identity(%{"id" => id}, ids) when is_binary(id) and id != "",
+    do: MapSet.put(ids, id)
+
+  defp collect_authored_identity(_value, ids), do: ids
+
+  defp locked_tab_descendant_id(row) do
+    case Map.get(row, "blocks") do
+      blocks when is_list(blocks) -> locked_visible_block_id(blocks)
+      _ -> nil
+    end
+  end
+
+  defp locked_visible_block_id(values) when is_list(values),
+    do: Enum.find_value(values, &locked_visible_block_id/1)
+
+  defp locked_visible_block_id(%{"locked" => true} = block), do: Map.get(block, "id") || ""
+
+  defp locked_visible_block_id(%{} = block) do
+    case block do
+      %{"type" => "section", "blocks" => blocks} when is_list(blocks) ->
+        locked_visible_block_id(blocks)
+
+      %{"type" => "expandable"} ->
+        locked_visible_block_id(visible_body_children(block))
+
+      %{"type" => "steps", "steps" => rows} when is_list(rows) ->
+        Enum.find_value(rows, fn
+          row when is_map(row) -> locked_visible_block_id(visible_body_children(row))
+          _row -> nil
+        end)
+
+      %{"type" => "tabs", "tabs" => rows} when is_list(rows) ->
+        Enum.find_value(rows, fn
+          %{"blocks" => blocks} when is_list(blocks) -> locked_visible_block_id(blocks)
+          _row -> nil
+        end)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp locked_visible_block_id(_value), do: nil
+
+  defp add_first_tab_body(row, child_id) do
+    case Map.fetch(row, "blocks") do
+      :error -> {:ok, Map.put(row, "blocks", [default_block("paragraph", child_id)])}
+      {:ok, nil} -> {:ok, Map.put(row, "blocks", [default_block("paragraph", child_id)])}
+      {:ok, []} -> {:ok, Map.put(row, "blocks", [default_block("paragraph", child_id)])}
+      _ -> malformed_tabs()
+    end
+  end
+
+  defp malformed_tabs, do: {:error, {:malformed_collection, "tabs"}}
+
   defp move_at_index(items, index, offset) when is_integer(index) do
     target = index + offset
 
@@ -1409,6 +1725,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
               _ -> nil
             end)
 
+          Map.get(b, "type") == "tabs" and is_list(b["tabs"]) ->
+            Enum.find_value(b["tabs"], fn
+              %{"blocks" => blocks} when is_list(blocks) -> find_paper_block(blocks, id)
+              _row -> nil
+            end)
+
           true ->
             nil
         end
@@ -1740,6 +2062,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
         %{
           "id" => row_id,
           "title" => "Step 1",
+          "blocks" => [default_block("paragraph", row_id <> "-0")]
+        }
+      ]
+    }
+  end
+
+  def default_block("tabs", id) do
+    row_id = id <> "-tab-0"
+
+    %{
+      "id" => id,
+      "type" => "tabs",
+      "tabs" => [
+        %{
+          "id" => row_id,
+          "label" => "Tab 1",
           "blocks" => [default_block("paragraph", row_id <> "-0")]
         }
       ]
