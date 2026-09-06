@@ -3,20 +3,28 @@ defmodule BarkparkWeb.Plugs.ScimMediaType do
   The SCIM media type, both directions (RFC 7644 §3.1: *"the SCIM protocol uses
   the HTTP media type `application/scim+json`"*).
 
-  This plug replaces `plug(:accepts, ["json"])` on the `:scim` pipeline, because
-  that plug REFUSED the SCIM media type. Phoenix's accept negotiation resolves
-  an `Accept` header through `MIME.extensions/1`; `application/scim+json` is not
-  a registered type in this app's `:mime` config, so `MIME.extensions/1`
-  returned `[]`, no format matched `["json"]`, and Phoenix raised
-  `Phoenix.NotAcceptableError` → **406**. An IdP that asks for SCIM's own media
-  type by name got a 406 from a SCIM server.
+  This plug replaces `plug(:accepts, ["json"])` on the `:scim` pipeline. The gap
+  it closes is the RESPONSE side: every SCIM answer went out as
+  `application/json`, so a client that keys on the media type never saw SCIM's
+  own.
+
+  MEASURED, not assumed, about the request side: `:accepts` did NOT reject
+  `application/scim+json`. `:mime` resolves the structured `+json` suffix, so
+  `MIME.extensions("application/scim+json")` already returned `["json"]` and the
+  header negotiated fine. A moduledoc here previously claimed the opposite (a
+  `Phoenix.NotAcceptableError` → 406 for SCIM's own media type); that premise is
+  false — reverting the pipeline to `plug(:accepts, ["json"])` leaves
+  `scim_conformance_test.exs`'s "Accept: application/scim+json is served" test
+  GREEN. It is kept as a regression guard on this plug, not as evidence of a
+  bug it fixed.
 
   ## Requests
 
   Accepted `Accept` values: absent, `*/*`, `application/*`, `application/json`,
   `application/scim+json` — with `;q=`/parameters and comma-separated lists
   tolerated, since a client only has to offer ONE type we can serve. Anything
-  else is refused with a SCIM Error envelope (406), not an HTML exception page.
+  else is refused with a SCIM Error envelope (406) rather than the HTML
+  exception page `:accepts` raises — the one behaviour change on this side.
 
   Request BODIES need nothing here: `Plug.Parsers.JSON` already decodes any
   `application/*+json` subtype (`plug/lib/plug/parsers/json.ex`), so a `POST` /
