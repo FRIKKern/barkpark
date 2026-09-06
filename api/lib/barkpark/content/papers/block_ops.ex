@@ -44,6 +44,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content.Papers.CanvasRunContext
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
+  alias Barkpark.PortableDoc.TableEditing
   alias Barkpark.Preview
   alias Barkpark.Repo.IdempotencyStore
 
@@ -659,6 +660,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          :ok <- require_editor_op_revision(op, if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
+         :ok <- preflight_table_editor_ops(blocks, [op]),
          {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev),
          {:ok, applied_op} <- lower_editor_block_op(blocks, op),
          # Doctrine backstop (pdd-t20): the OP layer enforces the paper
@@ -696,7 +698,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # encrypted field. No-op when nothing in the "paper" schema is marked;
          # fail closed (HIGH-3) when a marked block cannot be sealed.
          {:ok, new_blocks} <- encrypt_paper_blocks(new_blocks, dataset, doc.workspace_id),
-         {:ok, affected} <- locate_paper_affected(applied_op, new_blocks) do
+         {:ok, affected} <- locate_paper_affected(applied_op, new_blocks),
+         :ok <- table_write_or_noop(doc, op, blocks, patched, affected) do
       op_kind = Map.get(op, "op")
       rev = paper_next_rev(doc)
       # Carry the doc's stored article marker into the render so both the
@@ -770,6 +773,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
       end
     else
       nil -> {:error, :not_found}
+      {:table_noop, receipt} -> {:ok, receipt}
       {:error, _reason} = err -> err
     end
   end
@@ -1066,6 +1070,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          :ok <- require_editor_ops_revision(ops, if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
          {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
+         :ok <- preflight_table_editor_ops(blocks, ops),
          {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev),
          {:ok, folded, block_ids} <- fold_paper_ops_in_context(blocks, ops, opts),
          # Same quality-gate RATCHET as the single-op path, applied to the
@@ -1087,11 +1092,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # fail closed (HIGH-3) when a marked block cannot be sealed.
          {:ok, new_blocks} <- encrypt_paper_blocks(normalized, dataset, doc.workspace_id) do
       cond do
-        ops == [] or (trusted_form_noop? and folded == blocks) ->
-          # Nothing changed. Trusted block forms still pass their exact empty
-          # patch through the normal revision/context/Patch fences above before
-          # sharing the empty-batch receipt: current rev, no paper write or
-          # broadcast. Canonical op callers retain their existing semantics.
+        ops == [] or
+            (folded == blocks and
+               (trusted_form_noop? or Enum.all?(ops, &table_editor_op?/1))) ->
+          # Trusted block forms and private Table intents still pass through
+          # revision/context/Patch fences before sharing the empty-batch receipt:
+          # current rev, no write or broadcast. Canonical ops keep their semantics.
           {:ok,
            %{
              slug: slug,
@@ -1742,6 +1748,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          :ok <- require_editor_op_revision(op, if_rev),
          :ok <- check_document_if_rev(doc, if_rev),
          {:ok, blocks} <- resolve_document_blocks_for_edit(doc, type, dataset),
+         :ok <- preflight_table_editor_ops(blocks, [op]),
          {:ok, blocks} <- project_document_op_ids(blocks, if_rev),
          {:ok, applied_op} <- lower_editor_block_op(blocks, op),
          {:ok, new_blocks} <- Patch.apply_patch(blocks, applied_op),
@@ -2478,14 +2485,129 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp lower_editor_block_op(_blocks, %{"op" => "patch-card-body"} = op),
     do: {:error, {:invalid_op, op}}
 
+  defp lower_editor_block_op(blocks, %{"op" => kind, "id" => id, "shape" => shape} = op)
+       when kind in ["patch-table-cells", "patch-table-structure"] and is_binary(id) do
+    payload_key = if kind == "patch-table-cells", do: "cells", else: "action"
+
+    if exact_map_keys?(op, ["op", "id", "shape", payload_key]) do
+      case paper_blocks_with_id(blocks, id) do
+        [%{"type" => "table"} = table] ->
+          with :ok <- table_normalization_safe(blocks),
+               {:ok, updated} <- merge_table_editor_op(table, shape, kind, op[payload_key]) do
+            # Only the owned grid fields can change. Preserve head absence on
+            # cell edits; explicit removal is represented by head: [].
+            patch = Map.take(updated, ["rows", "head"])
+            {:ok, %{"op" => "patch-block", "id" => id, "patch" => patch}}
+          else
+            {:error, _reason} -> {:error, {:invalid_op, op}}
+          end
+
+        [] ->
+          {:error, {:block_not_found, id, kind}}
+
+        [_other_type] ->
+          {:error, {:type_mismatch, id, kind}}
+
+        _duplicates ->
+          {:error, {:duplicate_id, id, kind}}
+      end
+    else
+      {:error, {:invalid_op, op}}
+    end
+  end
+
+  defp lower_editor_block_op(_blocks, %{"op" => kind} = op)
+       when kind in ["patch-table-cells", "patch-table-structure"],
+       do: {:error, {:invalid_op, op}}
+
   defp lower_editor_block_op(_blocks, op), do: {:ok, op}
 
-  # Card body edits are authoritative read/merge/write operations, not ordinary
-  # shallow patches. They must always carry an optimistic revision fence so the
-  # slots map used for lowering cannot overwrite newer Card chrome or bypass the
-  # safe identity projection reserved for revision-fenced editor writes.
-  defp require_editor_op_revision(%{"op" => "patch-card-body"}, nil),
-    do: {:error, :precondition_failed}
+  defp merge_table_editor_op(table, shape, "patch-table-cells", cells),
+    do: TableEditing.merge_cells(table, shape, cells)
+
+  defp merge_table_editor_op(table, shape, "patch-table-structure", action),
+    do: TableEditing.apply_action(table, shape, action)
+
+  # Private Table intents address already-authored Tables, never IDs synthesized
+  # by the general legacy editor projection. Run this on the full raw document
+  # before narrowing a canvas context or minting any IDs. A newly added Table
+  # must first settle its normal creation operation before these intents apply.
+  defp preflight_table_editor_ops(blocks, ops) do
+    table_ops = Enum.filter(ops, &table_editor_op?/1)
+
+    Enum.reduce_while(table_ops, :ok, fn op, :ok ->
+      id = op["id"]
+
+      if is_binary(id) and id != "" and String.trim(id) == id and
+           match?([%{"type" => "table"}], paper_blocks_with_id(blocks, id)) do
+        {:cont, :ok}
+      else
+        {:halt, {:error, {:invalid_op, op}}}
+      end
+    end)
+    |> case do
+      :ok when table_ops != [] -> table_normalization_safe(blocks)
+      result -> result
+    end
+  end
+
+  # The write pipeline normalizes the entire document. A Table edit must not
+  # silently migrate a different, legacy Table. Compare exact Table terms at
+  # authored paths, including descendants traversed by the normalizer but not
+  # addressed by today's editor. Opaque metadata is harmless if unchanged.
+  defp table_normalization_safe(blocks) do
+    persisted_shape = blocks |> ensure_block_ids() |> normalize_render_shapes()
+
+    if table_snapshot(blocks, []) == table_snapshot(persisted_shape, []),
+      do: :ok,
+      else: {:error, :table_normalization_would_change_authored_data}
+  end
+
+  defp table_snapshot(value, path) when is_map(value) do
+    own = if value["type"] == "table", do: [{path, value}], else: []
+
+    own ++
+      (value
+       |> Enum.sort_by(&elem(&1, 0))
+       |> Enum.flat_map(fn {key, child} -> table_snapshot(child, path ++ [key]) end))
+  end
+
+  defp table_snapshot(value, path) when is_list(value) do
+    value
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {child, index} -> table_snapshot(child, path ++ [index]) end)
+  end
+
+  defp table_snapshot(_value, _path), do: []
+
+  defp table_editor_op?(%{"op" => kind}),
+    do: kind in ["patch-table-cells", "patch-table-structure"]
+
+  defp table_editor_op?(_op), do: false
+
+  defp table_write_or_noop(doc, op, before, after_blocks, affected) do
+    if table_editor_op?(op) and before == after_blocks do
+      {:table_noop,
+       %{
+         block: affected.block,
+         block_id: affected.block_id,
+         position: affected.position,
+         op_kind: op["op"],
+         fragment_html: nil,
+         rev: paper_current_rev(doc),
+         no_op: true
+       }}
+    else
+      :ok
+    end
+  end
+
+  # Authoritative Card/Table read/merge/write operations require a revision fence
+  # before payload parsing. Table coordinates cannot be safely rebased, and Card
+  # slots must not overwrite newer chrome or bypass safe identity projection.
+  defp require_editor_op_revision(%{"op" => op}, nil)
+       when op in ["patch-card-body", "patch-table-cells", "patch-table-structure"],
+       do: {:error, :precondition_failed}
 
   defp require_editor_op_revision(_op, _if_rev), do: :ok
 
