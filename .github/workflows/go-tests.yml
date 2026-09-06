@@ -154,40 +154,25 @@ on:
 
 concurrency:
   # main-collapse: harness-ok — publishes no context in
-  # .github/required-checks.json, performs no action (no deploy, no release, no
-  # mint or revoke), watches nothing. task-e376642d6d69fa3f.
+  # .github/required-checks.json, performs no action, watches nothing.
+  # task-e376642d6d69fa3f; the long form is in
+  # scripts/main-run-concurrency-check.sh, § THE MAIN-COLLAPSE MARKER.
   #
-  # WHAT THIS TRADES, said plainly. Every main push shares ONE group and
-  # cancel-in-progress is the literal `true`, so a burst of merges leaves a
-  # single run, on the NEWEST sha, and the intermediate commits get no verdict
-  # from this workflow. That is a deliberate loss of bisectability, bought
-  # because main-push runs were 40%->52%->67%->57% of the whole Actions queue
-  # across four samples on 2026-09-06 (~17 un-collapsible runs per merge at 18
-  # merges/hour), sitting in front of every PR run. It is only sound because
-  # nothing merges on this workflow's names and nothing depends on its having
-  # run: for a REQUIRED context, or for anything that deploys/releases/renews/
-  # watches, the same marker is REFUSED by scripts/main-run-concurrency-check.sh
-  # and scripts/never-cancel-main-check.sh, which re-derive both facts from
-  # .github/required-checks.json and their denylist rather than trusting it.
+  # Every main push shares ONE group. GitHub holds at most one pending plus one
+  # running run per group, so each merge evicts only the PENDING intermediate —
+  # the newest sha always holds that slot, and a RUNNING main run always
+  # completes (cancel-in-progress keeps the never-cancel-main guard; D12 is not
+  # waived here). The queue therefore holds at most one run of this workflow
+  # instead of one per merge; main-push runs were 40%->52%->67%->57% of the
+  # whole Actions queue across four samples on 2026-09-06, in front of every PR
+  # run. THE RESIDUAL: an intermediate sha gets no verdict from this workflow.
+  # Sound only because nothing merges on its names — for a required context, or
+  # anything that deploys/releases/renews/watches, the marker is REFUSED by
+  # scripts/main-run-concurrency-check.sh, which re-derives both facts.
   #
-  #
-  # HISTORY, KEPT BECAUSE IT IS STILL TRUE AND IS NOW A PRICE, NOT A BUG. This
-  # stanza used to read: one group per PUSH SHA on main, per REF everywhere
-  # else — because a shared main group meant every merge evicted the previous
-  # main run before a runner picked it up (measured 2026-09-02 on this
-  # workflow: 13 of main's last 20 runs cancelled, 2 succeeded), and
-  # `cancel-in-progress: false` does not save it, since eviction happens in the
-  # PENDING queue and not to the RUNNING job. None of that has been refuted.
-  # What changed is the VERDICT on the price: this workflow publishes `Go gate`
-  # and `go vet + test`, neither of which appears in
-  # .github/required-checks.json, so an unmeasured intermediate commit here
-  # blocks nothing and is worth the queue slot. elixir.yml, cloud.yml,
-  # console-harness.yml and security.yml keep the per-sha shape for exactly the
-  # reason this comment gave.
-  #
-  # PRs are unchanged: they keep their own per-ref group and still supersede.
+  # PRs are unchanged: their own per-ref group, and they still supersede.
   group: go-tests-${{ github.ref == 'refs/heads/main' && 'main' || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   changes:
