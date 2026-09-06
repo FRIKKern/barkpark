@@ -39,12 +39,9 @@ barkpark/plugins/onixedit/bokbasen/status.ex	by-pk-document-get	fresh = Repo.get
 barkpark/plugins/tasks.ex	by-pk-document-get	case Barkpark.Repo.get(Barkpark.Content.Document, to_pk) do
 barkpark/plugins/tickets/attachments.ex	fail-open-scope	Content.Scope.scope_to_workspace_or_global(
 barkpark/search/documents_retriever.ex	fail-open-scope	|> scope_to_workspace_or_global(workspace_id, project_id)
-barkpark/tasks/compactor.ex	by-pk-document-get	case Repo.get(Document, doc_id) do
-barkpark/tasks/compactor.ex	by-pk-document-get	with %Document{} = doc <- Repo.get(Document, doc_id) || {:error, :not_found},
 barkpark/tasks/fence.ex	by-pk-document-get	case Repo.get(Document, doc_uuid) do
 barkpark/tasks/move.ex	by-pk-document-get	case Repo.get(Document, task_uuid) do
 barkpark/tasks/mutations.ex	by-pk-document-get	case Repo.get(Document, task_id) do
 barkpark/tasks/mutations.ex	by-pk-document-get	case Repo.get(Document, task_id) do
 barkpark/tasks/release.ex	by-pk-document-get	case Repo.get(Document, task_id) do
-barkpark/tasks/ttl_sweeper.ex	by-pk-document-get	case Repo.get(Document, doc_id) do
 barkpark/webhooks.ex	fail-open-scope	Scope.scope_to_workspace_or_global(

@@ -19,8 +19,8 @@ defmodule Barkpark.Tasks.TwinOneRuleTest do
   What is NOT red here, stated so nobody reads green as coverage it does not
   have: the by-id task doors were ALREADY published-spelling-first, so rule 1 is
   a REGRESSION pin on those doors, not a repair of them. The door that reads
-  draft-first is the GitHub mirror's `Link.fetch_task/3` (link.ex:228-232, out of
-  this fence) — see the PR body.
+  draft-first is the GitHub mirror's `Link.fetch_task/3` (link.ex, `defp
+  fetch_task`, out of this fence) — see the PR body.
   """
 
   use Barkpark.DataCase, async: false
