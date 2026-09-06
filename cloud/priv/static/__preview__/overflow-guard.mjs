@@ -473,6 +473,20 @@ const SITE = "5b2c1e00-0000-4000-8000-0000000000c1";
 //                  `<span class="v">` TEXT, so the rail exists and carries zero
 //                  `.status-pill`. Only the SITE rail emits one, through
 //                  `railRowHtml("Content binding", siteBindingPill(...))`.
+// cch-w19-bl-w13-rail-pill-pooled-zero-check — THE `.site-row` COVERAGE
+// BOUNDARY OF THIS LEG, DECLARED RATHER THAN LEFT TO BE DISCOVERED. The filing
+// asked for site-row pills to be measured "on the site-rollback and site-states
+// routes". They cannot be: BOTH of those routes are `#site/<id>` — the site
+// DETAIL page (`view: "view-site"`) — and `.site-row` is a LIST element. It is
+// emitted at exactly two sites in app.js, neither of them reachable from any of
+// the six BAND_ROUTES: `siteRow` (the compact row, `#instance/<id>` Sites tab)
+// and `globalSiteRow` (`.site-row--global`, the `#sites` list). So the honest
+// answer here is not an exemption but a REFERRAL: site-row pills are measured
+// by `W50-site-row-three-hosts-cruel-by-fixture`, which already drives BOTH row
+// builders, and which now declares and asserts each track's site-pill
+// population per row in both directions. This leg owns the RAIL pill; W50 owns
+// the ROW pill; neither silently owns both.
+//
 // So each route declares BOTH facts and BOTH are asserted per cell in BOTH
 // directions: a route that owes a rail and renders none reds, and a route
 // declared bare that starts rendering one reds too — the FLEET_KNOWN precedent
@@ -1746,6 +1760,14 @@ async function main() {
       // cchi-w23: the sub-populations this leg ASSERTS ON, counted so a zero can
       // be refused and printed rather than inferred from a shrinking total.
       let railsSeen = 0, railLabels = 0;
+      // cch-w19-bl-w13: THE CENSUS IS AN ARTIFACT, not a total. The per-cell
+      // refusals above already hold every route to what it declares, but the
+      // only thing this leg PRINTED about the rail population was one summed
+      // ok-line — and a reader cannot check a sum. One row per route x theme,
+      // carrying the measured rail and pill counts beside the DECLARED ones,
+      // is what makes "which routes contribute real assertions and which
+      // contribute none" a table somebody can read instead of a claim.
+      const census = [];
       for (const r of BAND_ROUTES) {
         for (const theme of ["light", "dark"]) {
           // Enter at 900 — ABOVE the band — so a route that only renders at one
@@ -1756,6 +1778,7 @@ async function main() {
             `document.querySelector('${r.ready}') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='${r.view}';})()`,
           );
           const row = [];
+          let cellRails = 0, cellPillsSum = 0, blindCells = 0;
           for (const width of BAND_WIDTHS) {
             await setViewport(width);
             const m = await evalJs(
@@ -1808,6 +1831,11 @@ async function main() {
             // declares what it owes at BAND_ROUTES and every cell is held to it.
             railsSeen += m.rails;
             const cellPills = m.rp.length;
+            cellRails += m.rails;
+            cellPillsSum += cellPills;
+            // A cell that asserts NOTHING about a rail pill, counted so the
+            // census can print it rather than leaving it to subtraction.
+            if (cellPills === 0) blindCells++;
             if (r.rail && m.rails === 0) {
               fail(D, `${r.name}/${theme}@${width}: zero \`.detail-rail\` in a route declared to render one — the rail stopped rendering, so every rail assertion below measured nothing. This is not a pass.`);
             } else if (!r.rail && m.rails > 0) {
@@ -1849,10 +1877,29 @@ async function main() {
                 fail(D, `${r.name}/${theme}@${width} .status-pill-label: the label box is ${p.lh}px tall inside a ${p.ph}px pill`);
               }
             }
-            row.push(`${width}:${m.sw}${over > 0 ? "!" : ""}`);
+            row.push(`${width}:${m.sw}${over > 0 ? "!" : ""}/${cellPills}p`);
           }
+          census.push({
+            name: r.name, theme, widths: BAND_WIDTHS.length,
+            rails: cellRails, pills: cellPillsSum, blind: blindCells,
+            owesRail: r.rail, owesPill: r.railPill, why: r.railWhy,
+          });
           process.stdout.write(`   ${r.name}/${theme}  ${row.join(" ")}\n`);
         }
+      }
+      // THE CENSUS TABLE (cch-w19-bl-w13 criterion 1). Printed UNCONDITIONALLY,
+      // before the pass/fail branch below, because the run that most needs a
+      // readable population table is the one that just went red.
+      process.stdout.write(
+        `\n   ${D} — RAIL-PILL CENSUS, ${BAND_ROUTES.length} routes x 2 themes x ${BAND_WIDTHS.length} widths, MEASURED:\n` +
+        `   ${"route".padEnd(16)}${"theme".padEnd(7)}${"cells".padEnd(7)}${"rails".padEnd(7)}${"pills".padEnd(7)}${"blind".padEnd(7)}declared\n`,
+      );
+      for (const c of census) {
+        process.stdout.write(
+          `   ${c.name.padEnd(16)}${c.theme.padEnd(7)}${String(c.widths).padEnd(7)}` +
+          `${String(c.rails).padEnd(7)}${String(c.pills).padEnd(7)}${String(c.blind).padEnd(7)}` +
+          `rail:${c.owesRail} railPill:${c.owesPill}${c.why ? " — " + c.why : ""}\n`,
+        );
       }
       // AUDITED: an empty list is not a clean list. If the rail stops rendering
       // a pill this leg would score 0 rail defects and read as a pass. The
@@ -7105,6 +7152,23 @@ async function main() {
     //    the population is PRINTED per cell, so "8 rows" is a number a reader
     //    can check rather than a promise. Zero rows is a REFUSAL, not a pass.
     //
+    //    AND THE ROW'S DEPLOY-STATUS PILL (cch-w19-bl-w13-rail-pill-pooled-zero-
+    //    check, criterion 4). `site-status` / `siteStatusPill` appeared ZERO
+    //    times in this whole file before this leg carried them: W13 owns the
+    //    RAIL pill and none of its six BAND_ROUTES renders a `.site-row` at all
+    //    (its two `#site/<id>` routes are the site DETAIL page), so the capsule
+    //    `globalSiteRow` paints on every row of #sites was measured by nothing.
+    //    Each TRACK now DECLARES its site-pill population and every row is held
+    //    to it in BOTH directions — `sites` owes exactly one `.site-status
+    //    .status-pill` with a non-empty label per row (siteStatusPill has no
+    //    silent branch, so that is a builder contract, not a fixture property),
+    //    and the compact track is declared bare and asserted bare, its
+    //    payload-conditional binding chips counted and printed separately so
+    //    "the status pill vanished" and "a chip appeared" can never cancel out.
+    //    The per-track zero refusal is the net that survives an edit flipping
+    //    every `sitePill: true` off; it is scoped PER TRACK because a total
+    //    pooled across two builders is the exact defect this row was filed on.
+    //
     //    THE KIND CORPUS IS SCORED IN THE SAME RUN, under the same assertion,
     //    and its numbers are printed beside the cruel ones. Seven kind rows
     //    reading clean while the cruel two also read clean is the only thing
@@ -7153,6 +7217,15 @@ async function main() {
           ready: "#sites-body .site-row",
           builder: "globalSiteRow",
           hosts: ".site-name (the 255-char NAME) + .site-host (the 253-char domain / the 66-char one-label host)",
+          // cch-w19-bl-w13 criterion 4 — THE SITE-ROW PILL, DECLARED PER TRACK
+          // AND ASSERTED PER ROW IN BOTH DIRECTIONS, the BAND_ROUTES precedent.
+          // globalSiteRow OWES one: `siteStatusPill(s)` has no silent branch —
+          // a site with no freshnessModel still returns the neutral "Not
+          // deployed" capsule — so `<div class="site-status">` + exactly one
+          // `.status-pill` inside it is a CONTRACT of the builder, not a
+          // property of the fixture.
+          sitePill: true,
+          sitePillWhy: null,
         },
         {
           scen: "sites-on-instance",
@@ -7161,6 +7234,16 @@ async function main() {
           ready: "#instance-sites .site-row",
           builder: "siteRow (compact — THE SCREEN THAT SHREDDED)",
           hosts: ".site-name (the 253-char DOMAIN / the 66-char one-label host) + .site-meta .mono (the 511-char repo@branch span)",
+          // The compact builder emits NO `.site-status` wrapper at all. Its
+          // only `.status-pill` is the binding chip, and that one is
+          // payload-conditional (`siteBindingChip` returns "" when
+          // `siteBindingModel(s).silent`), so "every compact row carries a
+          // pill" would be a claim about the FIXTURE, not about the builder.
+          // What IS a contract is the absence of `.site-status`, and that is
+          // what is asserted — so the day the compact row grows a status host,
+          // this annotation reds instead of quietly widening the leg's meaning.
+          sitePill: false,
+          sitePillWhy: "the compact siteRow emits no `.site-status` wrapper — its only `.status-pill` is the payload-conditional binding chip (siteBindingChip -> siteBindingPill, \"\" when the binding model is silent), which no row is obliged to carry",
         },
       ];
       for (const t of TRACKS) {
@@ -7189,6 +7272,12 @@ async function main() {
         `because a clip-only scorer reads a shredded 0px box as clean\n`,
       );
       let cells = 0, hostCells = 0, hostSpill = 0, pageOver = 0, tall = 0, cruelSeen = 0, maxRowH = 0;
+      // cch-w19-bl-w13 criterion 4. `sitePills` is the population the owing
+      // track is held to; `sitePillLabels` is its second-order half; `chipPills`
+      // is the binding chips, counted so they can be PRINTED and never mistaken
+      // for the status pill. Keyed by track name, because a leg-level total
+      // across two tracks is exactly the pooled shape this row was filed about.
+      const sitePillCensus = new Map(TRACKS.map((t) => [t.name || t.scen, { pills: 0, labels: 0, chips: 0, rows: 0, cells: 0 }]));
       for (const t of TRACKS) {
         for (const theme of ["light", "dark"]) {
           // Enter at the WIDEST driven width and walk down, so a screen that
@@ -7215,7 +7304,20 @@ async function main() {
               `    [].slice.call(row.querySelectorAll(sel)).forEach(function(el){` +
               `      hosts.push({sel:sel,tag:el.tagName.toLowerCase(),sw:el.scrollWidth,cw:el.clientWidth,` +
               `        h:Math.round(el.getBoundingClientRect().height),len:(el.textContent||'').length});});});` +
-              `  return {id:row.getAttribute('data-id'),h:Math.round(row.getBoundingClientRect().height),hosts:hosts};});` +
+              // cch-w19-bl-w13 criterion 4: the row's OWN pill population,
+              // split by host. `ssp` is the declared/asserted one; `apl` is
+              // every `.status-pill` in the row, so the binding chips stay
+              // COUNTED AND PRINTED rather than folded into a total that would
+              // then be unable to tell "the status pill vanished" from "a
+              // binding chip appeared". `lbl` carries the second-order lesson
+              // from W13's `hasLabel`: a capsule with no `.status-pill-label`
+              // is half-rendered, and half-rendered is a finding, not a skip.
+              `  var ssp=[].slice.call(row.querySelectorAll('.site-status .status-pill'));` +
+              `  return {id:row.getAttribute('data-id'),h:Math.round(row.getBoundingClientRect().height),hosts:hosts,` +
+              `    sst:row.querySelectorAll('.site-status').length,` +
+              `    ssp:ssp.length,apl:row.querySelectorAll('.status-pill').length,` +
+              `    lbl:ssp.filter(function(p){var l=p.querySelector('.status-pill-label');` +
+              `      return !!l && (l.textContent||'').trim().length>0;}).length};});` +
               `return {psw:d.scrollWidth,pcw:d.clientWidth,view:v?v.id:'none',theme:d.getAttribute('data-theme'),rows:rows};})()`,
             );
             cells++;
@@ -7241,6 +7343,8 @@ async function main() {
               continue;
             }
             cruelSeen++;
+            const sc = sitePillCensus.get(t.name || t.scen);
+            sc.cells++;
             // (1) THE CELLS — every host of every row, cruel AND kind, under
             // one assertion. This is the half W26 cannot make.
             const cruel = m.rows.filter((r) => CRUEL_IDS.includes(r.id));
@@ -7263,6 +7367,33 @@ async function main() {
                 const worst = r.hosts.reduce((a, b) => (!a || b.h > a.h ? b : a), null);
                 fail(D, `${t.scen}/${theme}@${width}: the ${which} .site-row ${r.id} is ${r.h}px tall against a ${ROW_HEIGHT_CEILING}px viewport — one list row no longer fits one screen, which is the SHRED failure (its tallest host is ${worst ? worst.sel + " at " + worst.h + "px for " + worst.len + " characters" : "unknown"}). A clip-only scorer reads this cell as clean`);
               }
+              // (2b) THE ROW'S OWN STATUS PILL, PER ROW AND IN BOTH DIRECTIONS
+              // (cch-w19-bl-w13 criterion 4). Before this, `site-status` and
+              // `siteStatusPill` appeared ZERO times anywhere in this file: the
+              // pill `globalSiteRow` renders on every row of the `#sites` list
+              // was measured by no leg, so it could stop rendering entirely and
+              // the whole guard stayed green. It is asserted per ROW, not per
+              // cell and not per leg, for the reason this row was filed: a
+              // population summed over two builders cannot tell a builder that
+              // dropped its pill from a builder that never had one.
+              sc.rows++;
+              sc.pills += r.ssp;
+              sc.labels += r.lbl;
+              sc.chips += r.apl - r.ssp;
+              if (t.sitePill) {
+                if (r.sst !== 1) {
+                  fail(D, `${t.scen}/${theme}@${width}: the ${which} .site-row ${r.id} has ${r.sst} \`.site-status\` hosts, expected exactly 1 — ${t.builder} declares one on every row (siteStatusPill has no silent branch), so the status column has moved or gone and every pill assertion on this row measured nothing`);
+                }
+                if (r.ssp !== 1) {
+                  fail(D, `${t.scen}/${theme}@${width}: the ${which} .site-row ${r.id} carries ${r.ssp} \`.site-status .status-pill\`, expected exactly 1 — ${t.builder} renders one unconditionally. Zero is not a clean row, it is an unmeasured one; more than one means the status column silently doubled`);
+                } else if (r.lbl !== 1) {
+                  fail(D, `${t.scen}/${theme}@${width}: the ${which} .site-row ${r.id}'s \`.site-status .status-pill\` carries no \`.status-pill-label\` with text — the capsule renders as an empty dot, so the deploy state this column exists to say is not said (the W13 \`hasLabel\` lesson: half-rendered is a finding, not a skip)`);
+                }
+              } else {
+                if (r.sst > 0) {
+                  fail(D, `${t.scen}/${theme}@${width}: the ${which} .site-row ${r.id} has ${r.sst} \`.site-status\` hosts on a track declared to render NONE (${t.sitePillWhy}) — the annotation at TRACKS has gone stale. Update it rather than letting an unasserted status column ride along`);
+                }
+              }
             }
             // (3) THE PAGE. The cell half and the page half fail on different
             // trees; a leg carrying only one of them has been green on a
@@ -7284,6 +7415,8 @@ async function main() {
             const c = worstOf(cruel), k = worstOf(kind);
             line.push(
               `${width}:${m.rows.length}r pg${m.psw}/${m.pcw} ` +
+              `pill${m.rows.reduce((a, r) => a + r.ssp, 0)}/${m.rows.length}` +
+              `+${m.rows.reduce((a, r) => a + (r.apl - r.ssp), 0)}chip ` +
               `CRUEL[${cruel.length}r ${c.len}ch ${c.host ? c.host.sw + "/" + c.host.cw : "-"} h${c.h}] ` +
               `kind[${kind.length}r ${k.len}ch ${k.host ? k.host.sw + "/" + k.host.cw : "-"} h${k.h}]`,
             );
@@ -7291,7 +7424,49 @@ async function main() {
           process.stdout.write(`   ${t.scen}/${theme}  ${line.join("  ")}\n`);
         }
       }
+      // cch-w19-bl-w13 criterion 4, THE NON-VACUITY NET. The per-row refusals
+      // above are the real assertion; this one is what survives an edit that
+      // flips every `sitePill: true` off, or a fixture that stops populating
+      // the owing track entirely. It is scoped PER TRACK on purpose — a total
+      // pooled across both builders is the exact shape this row was filed about.
+      for (const t of TRACKS) {
+        const sc = sitePillCensus.get(t.name || t.scen);
+        if (!t.sitePill) continue;
+        if (sc.cells === 0) {
+          fail(D, `${t.scen}: zero cells reached the site-pill assertion on a track declared to carry one — ${t.builder}'s status pill was measured NOWHERE in this run, so its per-row refusals proved nothing`);
+        } else if (sc.pills === 0) {
+          fail(D, `${t.scen}: zero \`.site-status .status-pill\` across ${sc.rows} rows in ${sc.cells} cells — ${t.builder} stopped rendering the deploy-status column entirely. An empty set satisfies every per-row shape assertion above; this is not a pass`);
+        }
+      }
+      // THE SITE-ROW PILL CENSUS, printed UNCONDITIONALLY (the W13 precedent
+      // added by this same row): a red run is the run whose population table a
+      // reader most needs.
+      process.stdout.write(
+        `\n   ${D} — SITE-ROW PILL CENSUS, per track, MEASURED:\n` +
+        `   ${"track".padEnd(20)}${"cells".padEnd(7)}${"rows".padEnd(7)}${"pills".padEnd(7)}${"labels".padEnd(8)}${"chips".padEnd(7)}declared\n`,
+      );
+      for (const t of TRACKS) {
+        const sc = sitePillCensus.get(t.name || t.scen);
+        process.stdout.write(
+          `   ${t.scen.padEnd(20)}${String(sc.cells).padEnd(7)}${String(sc.rows).padEnd(7)}` +
+          `${String(sc.pills).padEnd(7)}${String(sc.labels).padEnd(8)}${String(sc.chips).padEnd(7)}` +
+          `sitePill:${t.sitePill}${t.sitePillWhy ? " — " + t.sitePillWhy : ""}\n`,
+        );
+      }
       if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `THE ROW'S DEPLOY-STATUS PILL IS MEASURED AT LAST (cch-w19-bl-w13 criterion 4): before this leg carried ` +
+          `it, \`site-status\` and \`siteStatusPill\` appeared ZERO times in this whole file, so the capsule ` +
+          `\`globalSiteRow\` paints on every row of #sites could stop rendering and every leg stayed green. ` +
+          TRACKS.map((t) => {
+            const sc = sitePillCensus.get(t.name || t.scen);
+            return t.sitePill
+              ? `${t.scen} OWES one per row and rendered ${sc.pills}/${sc.rows} (${sc.labels} of them with a non-empty \`.status-pill-label\`)`
+              : `${t.scen} is declared bare and asserted bare per row (${t.sitePillWhy}), measured ${sc.pills} \`.site-status .status-pill\` and ${sc.chips} binding chip(s) — counted and printed, never folded into the total`;
+          }).join("; ") +
+          `. Both directions RED: a track that owes a pill and renders none, and a bare track that grows a ` +
+          `\`.site-status\`, are findings rather than a moved number`,
+        );
         okLine(
           `${cells} / ${cells} cells clean across ${ROW_WIDTHS.join("/")} in both themes on BOTH row builders — ` +
           `${hostCells} .site-name / .site-host / .site-meta .mono cells measured by querySelectorAll over EVERY ` +
