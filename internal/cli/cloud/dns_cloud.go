@@ -143,7 +143,7 @@ func hcloudZoneRRSetListArgv(zone string) []string {
 func (c *CloudDNS) UpsertRecord(ctx context.Context, rec Record) error {
 	argv := hcloudZoneRRSetArgv(rec)
 	if out, err := c.run(ctx, argv[0], argv[1:]...); err != nil {
-		return fmt.Errorf("hcloud zone rrset set-records %q: %w: %s", Fqdn(rec.Name, rec.Zone), err, strings.TrimSpace(out))
+		return fmt.Errorf("hcloud zone rrset replace-records %q: %w: %s", Fqdn(rec.Name, rec.Zone), err, strings.TrimSpace(out))
 	}
 	if rec.TTL > 0 {
 		ttlArgv := hcloudZoneRRSetTTLArgv(rec)
