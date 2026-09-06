@@ -1,0 +1,124 @@
+<!doctype html>
+<!--
+  studio-inflight-overlap.html — the in-flight press, isolated.
+
+  A STANDALONE, OFFLINE reproduction of what happens to a SECOND press while a
+  first one is still in flight, driven by
+  `scripts/studio-inflight-guard-control.mjs`. It exists so the fall-through
+  reported by spd-w19-click-loading-falls-through can be reproduced, and its
+  fix mutation-proved, without a deployed build, an ssh key, or a network.
+
+  NOTHING ABOUT THE GUARD IS COPIED INTO THIS FILE. The control script reads
+  the guard's two halves — the `.phx-click-loading` CSS declaration and the
+  JS fenced BP-INFLIGHT-GUARD-BEGIN/END — out of
+  `api/lib/barkpark_web/layouts/root.html.heex` AT RUN TIME, from whichever git
+  ref it was pointed at, and injects them into the placeholders below. That is
+  the whole point: a hand-copied rule would drift, and a drifted fixture proves
+  the fixture, not the shipped guard.
+
+  WHAT IS REAL HERE AND WHAT IS MODELLED
+    · REAL: the DOM overlap, the browser's hit testing, event capture/bubble
+      ordering, `preventDefault`, `stopImmediatePropagation`, and the guard
+      itself (injected verbatim).
+    · MODELLED: LiveView's client. `__lvBindClick` below is a faithful, minimal
+      stand-in for `live_socket.js` bindClick — a WINDOW listener in the BUBBLE
+      phase (live_socket.js:830-833), an early return when the target element
+      already carries `data-phx-ref-src` (live_socket.js:857-859, the drop
+      branch the press-answer hook names), and the synchronous stamping of
+      `phx-click-loading` + `data-phx-ref-src` on push. It records every frame
+      it would put on the socket into `window.__frames` as
+      `{type:"click", event, id}` — matched on `type:"click"`, never counted.
+
+  THE TWO SCENARIOS, both a "real overlap" in the sense the task means — an
+  in-flight control sitting over a DIFFERENT phx-click element:
+
+    A. STACKED ROWS. `#row-over` (phx-click="open-paper") is painted over
+       `#row-under` (phx-click="delete-dataset") at the same rect. Press
+       `#row-over` twice back to back.
+    B. NESTED ACTION. `#row-over` contains `#row-menu`
+       (phx-click="row-menu"), a header action inside the row. Press the row,
+       then press the action while the row is in flight.
+
+  Scenario B is the one that discriminates the GUARD from the mere removal of
+  `pointer-events: none`: the nested action carries no ref of its own, so
+  LiveView's drop branch does not cover it.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>in-flight overlap fixture</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px system-ui, sans-serif; }
+    #studio-panes { position: relative; width: 640px; height: 320px; }
+    .row {
+      position: absolute; left: 40px; width: 400px; height: 80px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 12px; border: 1px solid #888;
+    }
+    /* The overlap. Same rect, #row-over on top — the shape the task names. */
+    #row-under { top: 40px; z-index: 1; background: #ddd; }
+    #row-over  { top: 40px; z-index: 2; background: #bcd; }
+    #row-menu  { padding: 4px 10px; }
+    #row-side  { top: 180px; z-index: 1; background: #cdb; }
+  </style>
+
+  <!-- INJECTED-CSS-BEGIN -->
+  <style id="bp-injected-css"></style>
+  <!-- INJECTED-CSS-END -->
+</head>
+<body>
+  <div id="studio-panes">
+    <div id="row-under" class="row" phx-click="delete-dataset" tabindex="0">underneath: delete-dataset</div>
+    <div id="row-over" class="row" phx-click="open-paper" tabindex="0">
+      <span id="row-over-label">in flight: open-paper</span>
+      <button id="row-menu" type="button" phx-click="row-menu">menu</button>
+    </div>
+    <button id="row-side" class="row" type="button" phx-click="side-action">not in flight: side-action</button>
+  </div>
+
+  <div id="bp-press-answer" class="bp-press-answer"></div>
+
+  <script>
+    // ── the LiveView client, modelled ─────────────────────────────────────
+    window.__frames = [];
+    window.__dropped = [];
+
+    window.__lvBindClick = function (ev) {
+      var t = ev.target;
+      if (!t || !t.closest) return;
+      var el = t.closest("[phx-click]");
+      if (!el) return;
+      // live_socket.js:857-859 — a press on an element that already holds a
+      // ref is DISCARDED: no frame, no exception, no trace.
+      if (el.hasAttribute("data-phx-ref-src")) {
+        window.__dropped.push(el.id);
+        return;
+      }
+      window.__frames.push({
+        type: "click",
+        event: el.getAttribute("phx-click"),
+        id: el.id
+      });
+      // What LiveView stamps synchronously when the press goes on the wire.
+      el.classList.add("phx-click-loading");
+      el.setAttribute("data-phx-ref-src", "1");
+    };
+    // WINDOW, BUBBLE — exactly where LiveView puts it.
+    window.addEventListener("click", window.__lvBindClick, false);
+
+    // The server never answers in this fixture: the in-flight window is held
+    // open for the whole run, which is the state under test.
+    window.__settle = function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.classList.remove("phx-click-loading");
+      el.removeAttribute("data-phx-ref-src");
+    };
+  </script>
+
+  <!-- INJECTED-GUARD-BEGIN -->
+  <script id="bp-injected-guard"></script>
+  <!-- INJECTED-GUARD-END -->
+</body>
+</html>
