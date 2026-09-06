@@ -33,7 +33,7 @@ defmodule BarkparkCloud.Workers.ContentWebhookReconcilerTest do
 
     bp
     |> Ecto.Changeset.change(
-      url: "https://acme.barkpark.cloud",
+      url: "https://bp-#{n}.barkpark.cloud",
       git_commit: "abc123",
       admin_token_encrypted: Vault.encrypt("instance-admin-token")
     )
@@ -205,16 +205,22 @@ defmodule BarkparkCloud.Workers.ContentWebhookReconcilerTest do
              "the reachable site must still be repaired after the unreachable one failed"
     end
 
-    test "a site whose barkpark row is gone is `skipped`, not a crash" do
+    test "a site whose box is not live yet is `skipped`, and never counted as healthy" do
+      # `skipped` is its OWN bucket rather than folded into `present` on purpose:
+      # a site the sweep could not even attempt is not a site with a working
+      # trigger, and a tally that says otherwise is the same false green this
+      # whole row exists to remove.
       bp = live_bp()
       StudioLinkFakeHttpClient.program([])
       site = bound_site(bp)
 
-      site |> Ecto.Changeset.change(barkpark_id: Ecto.UUID.generate()) |> Repo.update!()
+      bp |> Ecto.Changeset.change(url: nil) |> Repo.update!()
       StudioLinkFakeHttpClient.program(box_listing([]))
 
       assert {:ok, tally} = perform_job(ContentWebhookReconciler, %{})
       assert tally == %{swept: 1, registered: 0, present: 0, skipped: 1, errored: 0}
+      assert writes(:post) == []
+      assert Registry.publish_trigger(Repo.reload!(site)) == :present
     end
   end
 

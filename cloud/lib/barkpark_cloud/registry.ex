@@ -5822,7 +5822,13 @@ defmodule BarkparkCloud.Registry do
   # leave every later site unreconciled and would look, from the job row, exactly
   # like a sweep that found nothing to do.
   defp reconcile_one_content_webhook(%Site{} = site) do
-    with %Barkpark{} = barkpark <- get_barkpark(site.barkpark_id),
+    # The box's URL is checked HERE, not left to `do_ensure_content_webhook/4`'s
+    # `else -> :noop`, so that `:noop` can only ever mean "the row already
+    # exists". Folding a box that is not live yet into `present` would report a
+    # site the sweep could not even attempt as a site with a working trigger —
+    # the same false green this whole repair exists to remove.
+    with %Barkpark{url: url} = barkpark when is_binary(url) and url != "" <-
+           get_barkpark(site.barkpark_id),
          {:ok, secret} when is_binary(secret) <- reveal_site_content_secret(site) do
       do_ensure_content_webhook(barkpark, site, secret, :reconcile)
     else

@@ -1573,7 +1573,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 330 -> 335 (dr-w10-s1): `BoxDeployRate` lands in internal/cloudclient with
   # five NEW json tag names — `sites_deploying`, `box_caused`, `absorption`,
   # `deploy_rate` and `rate` — measured by this file's own arm, never summed.
-  @go_tag_pinned 335
+  # 335 -> 336 (dr-w11): `SpawnSite.PublishTrigger` adds ONE new json tag name,
+  # `publish_trigger` — the derived "does a content publish reach this site at
+  # all" verdict. It is a NEW name in the package (no other struct declares it),
+  # so the floor moves and the multiplicity register does not. Measured by this
+  # file's own arm's printed right-hand column, never summed.
+  @go_tag_pinned 336
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)

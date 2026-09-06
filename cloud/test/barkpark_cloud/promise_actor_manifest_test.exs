@@ -1621,7 +1621,8 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     # ArrearsWorker slips past a heuristic and the register would keep claiming
     # ABSENT while the clock had arrived.
     assert {:ok, detail} = crontab_agrees()
-    assert detail =~ "17 rows"
+    # dr-w11: 17 -> 18 (ContentWebhookReconciler).
+    assert detail =~ "18 rows"
     assert length(configured_crontab()) == length(@scheduled_crontab)
   end
 
