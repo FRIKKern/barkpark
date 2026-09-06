@@ -1,6 +1,6 @@
 {
-  "population": 390,
-  "mapped": 373,
+  "population": 393,
+  "mapped": 376,
   "unmapped": [
     {
       "path": "api/assets/paper-editor/src/__callout_parity.test.mjs",
@@ -1534,27 +1534,27 @@
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/registry/site.ex",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:5729"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:5850"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/web/router_site_domain_format_legal_cap_test.exs",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:5738"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:5859"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/web/router.ex",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:5748"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:5869"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/app.css",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6444"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6565"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/scenarios.mjs",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6488"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6609"
         }
       ]
     },
@@ -5049,7 +5049,7 @@
         {
           "kind": "file",
           "p": ".github/workflows/deploy.yml",
-          "evidence": "scripts/crown-reconcile.sh:1572"
+          "evidence": "scripts/crown-reconcile.sh:1664"
         }
       ]
     },
@@ -5065,47 +5065,47 @@
         {
           "kind": "file",
           "p": "scripts/crown-reconcile.test.sh",
-          "evidence": "scripts/crown-reconcile.test.sh:98"
+          "evidence": "scripts/crown-reconcile.test.sh:103"
         },
         {
           "kind": "file",
           "p": ".github/workflows/crown-reconcile.yml",
-          "evidence": "scripts/crown-reconcile.test.sh:108"
+          "evidence": "scripts/crown-reconcile.test.sh:113"
         },
         {
           "kind": "file",
           "p": ".github/required-checks.json",
-          "evidence": "scripts/crown-reconcile.test.sh:109"
+          "evidence": "scripts/crown-reconcile.test.sh:114"
         },
         {
           "kind": "file",
           "p": "cloud/lib/runtime.ex",
-          "evidence": "scripts/crown-reconcile.test.sh:919"
+          "evidence": "scripts/crown-reconcile.test.sh:934"
         },
         {
           "kind": "file",
           "p": "docs/readme.md",
-          "evidence": "scripts/crown-reconcile.test.sh:919"
+          "evidence": "scripts/crown-reconcile.test.sh:934"
         },
         {
           "kind": "file",
           "p": "lib/crown-reconcile/graced.txt",
-          "evidence": "scripts/crown-reconcile.test.sh:1335"
+          "evidence": "scripts/crown-reconcile.test.sh:1413"
         },
         {
           "kind": "file",
           "p": "scripts/file-ci-failure-issue.sh",
-          "evidence": "scripts/crown-reconcile.test.sh:1644"
+          "evidence": "scripts/crown-reconcile.test.sh:1722"
         },
         {
           "kind": "file",
           "p": ".github/workflows/shell-harnesses.yml",
-          "evidence": "scripts/crown-reconcile.test.sh:1807"
+          "evidence": "scripts/crown-reconcile.test.sh:1885"
         },
         {
           "kind": "file",
           "p": "lib/crown-reconcile/graced.txt.tmp",
-          "evidence": "scripts/crown-reconcile.test.sh:1868"
+          "evidence": "scripts/crown-reconcile.test.sh:1946"
         }
       ]
     },
@@ -7869,8 +7869,23 @@
         },
         {
           "kind": "file",
+          "p": ".github/workflows/security.yml",
+          "evidence": "scripts/main-red-breaker.sh:97"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/security-gate-shape.test.sh",
+          "evidence": "scripts/main-red-breaker.sh:103"
+        },
+        {
+          "kind": "file",
           "p": ".github/workflows/architecture.yml",
-          "evidence": "scripts/main-red-breaker.sh:116"
+          "evidence": "scripts/main-red-breaker.sh:136"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark/content/validation.ex",
+          "evidence": "scripts/main-red-breaker.sh:633"
         }
       ]
     },
@@ -7932,6 +7947,16 @@
           "kind": "file",
           "p": "api/lib/barkpark/validation.ex",
           "evidence": "scripts/main-red-breaker.test.sh:479"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark/content/validation.ex",
+          "evidence": "scripts/main-red-breaker.test.sh:645"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark/tenancy/workspace_bundle.ex",
+          "evidence": "scripts/main-red-breaker.test.sh:677"
         }
       ]
     },
@@ -11116,6 +11141,43 @@
       ]
     },
     {
+      "path": "scripts/studio-desk-drill-pane.test.mjs",
+      "run": "node --test scripts/studio-desk-drill-pane.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "scripts/studio-desk-drill-pane.test.mjs",
+          "evidence": "scripts/studio-desk-drill-pane.test.mjs:27"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/node-test-floor.mjs",
+          "evidence": "scripts/studio-desk-drill-pane.test.mjs:28"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/studio-desk-measure.mjs",
+          "evidence": "scripts/studio-desk-drill-pane.test.mjs:36"
+        }
+      ]
+    },
+    {
+      "path": "scripts/studio-desk-instrument-reliability.test.mjs",
+      "run": "node --test scripts/studio-desk-instrument-reliability.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "scripts/studio-desk-instrument-reliability.test.mjs",
+          "evidence": "scripts/studio-desk-instrument-reliability.test.mjs:26"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/studio-desk-measure.mjs",
+          "evidence": "scripts/studio-desk-instrument-reliability.test.mjs:49"
+        }
+      ]
+    },
+    {
       "path": "scripts/studio-desk-measure.mjs",
       "run": "node scripts/studio-desk-measure.mjs",
       "scans": [
@@ -11126,13 +11188,44 @@
         },
         {
           "kind": "file",
+          "p": "scripts/studio-desk-compare.mjs",
+          "evidence": "scripts/studio-desk-measure.mjs:243"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/studio-desk-instrument-reliability.test.mjs",
+          "evidence": "scripts/studio-desk-measure.mjs:264"
+        },
+        {
+          "kind": "file",
           "p": "config/barkpark/config.json",
-          "evidence": "scripts/studio-desk-measure.mjs:918"
+          "evidence": "scripts/studio-desk-measure.mjs:1418"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/studio-desk-drill-pane.test.mjs",
+          "evidence": "scripts/studio-desk-measure.mjs:2364"
         },
         {
           "kind": "file",
           "p": "scripts/measurements/open-leg-repro.mjs",
-          "evidence": "scripts/studio-desk-measure.mjs:2032"
+          "evidence": "scripts/studio-desk-measure.mjs:2590"
+        }
+      ]
+    },
+    {
+      "path": "scripts/studio-desk-sha-pin.test.mjs",
+      "run": "node --test scripts/studio-desk-sha-pin.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "scripts/studio-desk-sha-pin.test.mjs",
+          "evidence": "scripts/studio-desk-sha-pin.test.mjs:29"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/studio-desk-measure.mjs",
+          "evidence": "scripts/studio-desk-sha-pin.test.mjs:42"
         }
       ]
     },
@@ -12896,7 +12989,7 @@
         {
           "kind": "dir",
           "p": "tooling/grip/test",
-          "evidence": "tooling/grip/test/inloop-gate.test.mjs:397"
+          "evidence": "tooling/grip/test/inloop-gate.test.mjs:404"
         }
       ]
     },
@@ -12937,97 +13030,97 @@
         {
           "kind": "dir",
           "p": "tooling/grip/test",
-          "evidence": "tooling/grip/test/leads.test.mjs:98"
+          "evidence": "tooling/grip/test/leads.test.mjs:97"
         },
         {
           "kind": "file",
           "p": "api/lib/x.ex",
-          "evidence": "tooling/grip/test/leads.test.mjs:112"
+          "evidence": "tooling/grip/test/leads.test.mjs:129"
         },
         {
           "kind": "file",
           "p": "api/lib/y.ex",
-          "evidence": "tooling/grip/test/leads.test.mjs:113"
+          "evidence": "tooling/grip/test/leads.test.mjs:130"
         },
         {
           "kind": "file",
           "p": "internal/cli/task_cmd.go",
-          "evidence": "tooling/grip/test/leads.test.mjs:147"
+          "evidence": "tooling/grip/test/leads.test.mjs:164"
         },
         {
           "kind": "file",
           "p": "api/lib/barkpark.ex",
-          "evidence": "tooling/grip/test/leads.test.mjs:227"
+          "evidence": "tooling/grip/test/leads.test.mjs:244"
         },
         {
           "kind": "file",
           "p": "js/packages/core/package.json",
-          "evidence": "tooling/grip/test/leads.test.mjs:344"
+          "evidence": "tooling/grip/test/leads.test.mjs:361"
         },
         {
           "kind": "file",
           "p": "web/package.json",
-          "evidence": "tooling/grip/test/leads.test.mjs:346"
+          "evidence": "tooling/grip/test/leads.test.mjs:363"
         },
         {
           "kind": "file",
           "p": "internal/cli/x.go",
-          "evidence": "tooling/grip/test/leads.test.mjs:385"
+          "evidence": "tooling/grip/test/leads.test.mjs:402"
         },
         {
           "kind": "file",
           "p": "api/lib/a.ex",
-          "evidence": "tooling/grip/test/leads.test.mjs:792"
+          "evidence": "tooling/grip/test/leads.test.mjs:809"
         },
         {
           "kind": "file",
           "p": "api/lib/b.ex",
-          "evidence": "tooling/grip/test/leads.test.mjs:793"
+          "evidence": "tooling/grip/test/leads.test.mjs:810"
         },
         {
           "kind": "file",
           "p": "api/lib/c.ex",
-          "evidence": "tooling/grip/test/leads.test.mjs:794"
+          "evidence": "tooling/grip/test/leads.test.mjs:811"
         },
         {
           "kind": "file",
           "p": "api/test/x.ex",
-          "evidence": "tooling/grip/test/leads.test.mjs:795"
+          "evidence": "tooling/grip/test/leads.test.mjs:812"
         },
         {
           "kind": "dir",
           "p": "api",
-          "evidence": "tooling/grip/test/leads.test.mjs:802"
+          "evidence": "tooling/grip/test/leads.test.mjs:819"
         },
         {
           "kind": "file",
           "p": "api/lib/gate.ex",
-          "evidence": "tooling/grip/test/leads.test.mjs:906"
+          "evidence": "tooling/grip/test/leads.test.mjs:923"
         },
         {
           "kind": "file",
           "p": "scripts/pr-task-gate.sh",
-          "evidence": "tooling/grip/test/leads.test.mjs:906"
+          "evidence": "tooling/grip/test/leads.test.mjs:923"
         },
         {
           "kind": "file",
           "p": "api/lib/z.ex",
-          "evidence": "tooling/grip/test/leads.test.mjs:907"
+          "evidence": "tooling/grip/test/leads.test.mjs:924"
         },
         {
           "kind": "file",
           "p": "scripts/a.sh",
-          "evidence": "tooling/grip/test/leads.test.mjs:946"
+          "evidence": "tooling/grip/test/leads.test.mjs:963"
         },
         {
           "kind": "file",
           "p": "scripts/b.sh",
-          "evidence": "tooling/grip/test/leads.test.mjs:947"
+          "evidence": "tooling/grip/test/leads.test.mjs:964"
         },
         {
           "kind": "file",
           "p": "scripts/c.sh",
-          "evidence": "tooling/grip/test/leads.test.mjs:948"
+          "evidence": "tooling/grip/test/leads.test.mjs:965"
         }
       ]
     },
