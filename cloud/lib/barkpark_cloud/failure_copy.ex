@@ -660,6 +660,18 @@ defmodule BarkparkCloud.FailureCopy do
       String.contains?(reason, "no content binding") ->
         "This site isn't bound to any content yet. Create it with --dataset <workspace>/<project>/<dataset>."
 
+      # ssw9: the deploy reaper's pass (0d) — a PREBUILT deploy was minted
+      # (charter D86 mint-then-upload) and its `dist/` never arrived, so the
+      # control plane held a build id nobody ever claimed with bytes. Its cure is
+      # the client's own upload, which is why it must never fall into the
+      # "no build source" clause above (that copy names a repo and `bp deploy`,
+      # neither of which is the missing thing) nor the generic
+      # "exceeded max … attempts" retry clause below (nothing attempted
+      # anything). Keyed on the reason's distinctive token; the output carries
+      # none of it, so a second client-side `failureCopy()` pass is idempotent.
+      String.contains?(reason, "prebuilt artifact was never uploaded") ->
+        "This deploy was minted for an off-box build, but its files never arrived. Run bp cloud site deploy <site> --prebuilt <dist> again."
+
       String.contains?(reason, "no build source") ->
         "This site has no build source yet. Connect a repo or run bp deploy."
 
