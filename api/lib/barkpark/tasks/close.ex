@@ -46,6 +46,14 @@ defmodule Barkpark.Tasks.Close do
   #     a row that HAS children (TASK-SYSTEM.md §5 "Decisions and goals may omit
   #     them"; schema.ex: "a goal is a root task, a phase is a task with
   #     children") — as are `cancelled` and `blocked` closes.
+  #   * CANCEL REASON (task-650d7844d8fe7199) — a `cancelled` close whose reason
+  #     is absent, empty or whitespace-only is REFUSED (`:cancel_reason_required`).
+  #     Every gate above exempts `cancelled` by name, which is right on its own
+  #     and wrong in combination: for a cancel the reason is the ENTIRE record,
+  #     and it was the one field a caller could omit. Measured 2026-09-06: two
+  #     real rows cancelled with `""` in one minute, rc=0, `close_reason` absent.
+  #     `done` and `blocked` are exempt BY NAME. There is NO override and NO
+  #     default — the escape hatch is to pass the reason.
   #
   # NONE OF THIS IS AUTHORIZATION. `worker_id` arrives as a client-supplied body
   # param (`tasks_controller.ex` close/2), never from the api_token, so a caller
@@ -540,6 +548,11 @@ defmodule Barkpark.Tasks.Close do
                          landed,
                          overrides.close_reason
                        ),
+                     # LAST of the honesty gates, after D291, because the two
+                     # are disjoint by STATUS — D291 fires only on `done`, this
+                     # only on `cancelled` — so no caller can ever be shown the
+                     # wrong one of the pair, whichever order they sit in.
+                     :ok <- check_cancel_reason(new_status, reason),
                      {:ok, updated} <-
                        apply_close_update(
                          doc,
@@ -850,6 +863,75 @@ defmodule Barkpark.Tasks.Close do
   defp check_close_artifact(%Document{}, status, _reason, _landed, _override)
        when status in ~w(cancelled blocked),
        do: {:ok, nil}
+
+  # ─── THE CANCEL REASON GATE (task-650d7844d8fe7199) ──────────────────────
+  #
+  # Every gate above this one EXEMPTS `cancelled` BY NAME — the criteria gate
+  # (D289) and the close artifact gate (D291) — because abandoning the
+  # acceptance criteria is precisely what cancelling MEANS, and main's ruling on
+  # task-ce0c0ffff6edde23 offers "cancel with the reason" as the honest exit
+  # from D291. Those exemptions are right. Their COMBINED effect was not: on a
+  # cancel the reason is not one record among several, it is the ENTIRE record,
+  # and it was the one field a caller was allowed to omit.
+  #
+  # MEASURED 2026-09-06 ~05:27Z, twice inside one minute, on real rows: a
+  # scripting fault expanded `$(cat reason.txt)` to the empty string and
+  #
+  #     bp task close task-e1920c0a8cd3013b lead-cli 1 cancelled "" --yes
+  #
+  # returned rc=0 and printed `✓ the store holds it — lifecycle_status=cancelled`.
+  # Read back: lifecycle `cancelled`, `close_reason` ABSENT, and no record
+  # anywhere of why the work was abandoned. `apply_close_update/9` writes
+  # `close_reason` only for a non-empty binary (blank never clobbers a stored
+  # value — right for a replay, and the reason this landed silently), so a blank
+  # reason on a first close writes NOTHING and says so to nobody. That is the
+  # absent-vs-zero collapse this tree refuses everywhere else, on the one status
+  # whose reason nothing else backs.
+  #
+  # BLANK MEANS ABSENT **OR** WHITESPACE-ONLY. `nil` and `""` are the shapes the
+  # measured fault produced; `" "` is the same fault with a stray space and is
+  # strictly worse, because today it DOES write — storing a space as the whole
+  # justification for abandoning a task. A gate that refuses "" and accepts " "
+  # would be a gate you can typo your way past.
+  #
+  # SCOPED TO `cancelled` ONLY, and `blocked` is deliberately NOT included even
+  # though the filing invited it. Three facts say they are different shapes:
+  # `blocked` is an HONEST PARTIAL — the work continues, so no final record is
+  # due yet (the same reasoning that exempts it from the acknowledgement gate);
+  # `@terminal_for_disposition` is `~w(done cancelled)`, so the ledger itself
+  # does not count a block as an ending; and the Studio board DRAGS to blocked
+  # through `Board.restage_plan/4` -> `{:close, "blocked"}` with NO reason and
+  # no affordance to type one, so refusing blank there would break a shipped UI
+  # path that has no fix available to its user. `done` is untouched: it is
+  # governed by the criteria gate and the close artifact gate, and refusing
+  # blank there would break the lead seal closes whose record is the landed
+  # digest.
+  #
+  # NO OVERRIDE, and that is not an oversight. Every other gate here is
+  # REFUSE-UNLESS-YOU-SAY-WHY because its escape hatch costs a sentence the
+  # caller may not have. This gate's escape hatch IS that sentence: the fix is
+  # to pass the reason, so an override would be a second way to spell "no
+  # reason". And NO DEFAULT — synthesizing "cancelled" would manufacture a
+  # record nobody wrote, which is worse than a refusal.
+  #
+  # A REPLAY NEVER REACHES HERE. `idempotent_replay?/3` answers an already-
+  # terminal row above, before this `with` chain opens, so re-closing a row
+  # cancelled long ago (blank reason and all) still returns its stored receipt.
+  defp check_cancel_reason("cancelled", reason) do
+    if blank_reason?(reason), do: {:error, :cancel_reason_required}, else: :ok
+  end
+
+  # `done` and `blocked` — exempt BY NAME, never by falling through a catch-all.
+  # `close_with_receipt/3` refuses anything outside the three terminal statuses
+  # before the txn opens, so these two are the whole remainder.
+  defp check_cancel_reason(status, _reason) when status in ~w(done blocked), do: :ok
+
+  # Anything that is not a binary carrying a non-whitespace character is blank.
+  # `nil` (the field omitted) and `""` (the measured fault) are the same fact —
+  # no reason was given — and the ledger has no business telling them apart here.
+  defp blank_reason?(reason) do
+    not (is_binary(reason) and String.trim(reason) != "")
+  end
 
   # The container exemptions live in `Tasks.CriteriaExemption` — ONE definition,
   # because the claim-time gate (task-9554c64bf51a0f81) consults the same

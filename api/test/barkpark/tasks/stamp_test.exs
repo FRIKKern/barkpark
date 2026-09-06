@@ -1244,7 +1244,12 @@ defmodule Barkpark.Tasks.StampTest do
       Close.close(task.id, "closer",
         observed_epoch: epoch,
         lifecycle_status: status,
-        criteria_override: "closing with criteria unproven on purpose"
+        criteria_override: "closing with criteria unproven on purpose",
+        # A `cancelled` close needs a reason (task-650d7844d8fe7199) — on a
+        # cancel every other close gate is exempt by name, so the reason is the
+        # entire record. `done` ignores it here; passing it unconditionally
+        # keeps this fixture one shape rather than two.
+        reason: "closed by the stamp test fixture, in state #{status}"
       )
 
     assert closed.content["lifecycle_status"] == status

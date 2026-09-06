@@ -1122,6 +1122,10 @@ defmodule BarkparkWeb.TasksControllerTest do
           worker_id: "test-worker",
           observed_epoch: 1,
           lifecycle_status: "cancelled",
+          # task-650d7844d8fe7199: a cancelled close needs a reason — a
+          # cancel is exempt by name from every other close gate, so the
+          # reason is its whole record.
+          reason: "cancelled by the controller test fixture",
           criteria: [%{index: 0, met: false, evidence: ""}]
         })
 
@@ -1140,6 +1144,10 @@ defmodule BarkparkWeb.TasksControllerTest do
           worker_id: "test-worker",
           observed_epoch: 1,
           lifecycle_status: "cancelled",
+          # task-650d7844d8fe7199: a cancelled close needs a reason — a
+          # cancel is exempt by name from every other close gate, so the
+          # reason is its whole record.
+          reason: "cancelled by the controller test fixture",
           criteria: [%{index: 0, met: false}]
         })
 
@@ -1288,6 +1296,10 @@ defmodule BarkparkWeb.TasksControllerTest do
           worker_id: "test-worker",
           observed_epoch: 1,
           lifecycle_status: "cancelled",
+          # task-650d7844d8fe7199: a cancelled close needs a reason — a
+          # cancel is exempt by name from every other close gate, so the
+          # reason is its whole record.
+          reason: "cancelled by the controller test fixture",
           criteria: [%{index: 0, met: false, evidence: 123}]
         })
 
@@ -1915,7 +1927,10 @@ defmodule BarkparkWeb.TasksControllerTest do
           worker_id: "worker-1",
           observed_epoch: epoch,
           lifecycle_status: status,
-          criteria_override: "closing with criteria unproven on purpose"
+          criteria_override: "closing with criteria unproven on purpose",
+          # A `cancelled` close needs a reason (task-650d7844d8fe7199). Passed
+          # for every status so this fixture stays one shape; `done` ignores it.
+          reason: "closed #{status} by the controller test fixture"
         })
 
       resp = conn |> authed() |> post("/v1/tasks/#{doc_id}/close", close_body)
@@ -2160,7 +2175,11 @@ defmodule BarkparkWeb.TasksControllerTest do
         Jason.encode!(%{
           worker_id: "test-worker",
           observed_epoch: 1,
-          lifecycle_status: "cancelled"
+          lifecycle_status: "cancelled",
+          # task-650d7844d8fe7199: a cancelled close needs a reason — a
+          # cancel is exempt by name from every other close gate, so the
+          # reason is its whole record.
+          reason: "cancelled by the controller test fixture"
         })
 
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)

@@ -464,7 +464,10 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
       {:ok, cancelled} =
         Tasks.close(claimed.id, "worker-C",
           observed_epoch: claimed.content["claim"]["epoch"],
-          lifecycle_status: "cancelled"
+          lifecycle_status: "cancelled",
+          # A cancel needs a reason (task-650d7844d8fe7199) — every other close
+          # gate exempts `cancelled` by name, so the reason is its whole record.
+          reason: "cancelled by the sweeper fixture — a terminal row must not be swept"
         )
 
       _ = age_claim!(cancelled, 999_999)
