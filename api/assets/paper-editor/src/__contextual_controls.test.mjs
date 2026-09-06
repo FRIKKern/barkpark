@@ -41,6 +41,16 @@ assert.match(readerTabs?.[1] ?? "", /overflow:\s*hidden/,
 const editorTabs = surface.match(/\.bp-paper-surface \.bp-tabs--editor\s*\{([^}]*)\}/);
 assert.match(editorTabs?.[1] ?? "", /overflow:\s*visible/,
   "stacked editor tabs cannot clip nested contextual controls");
+const nestedTabsOpen = shell.match(/\.bp-tabs--editor \.bp-paper-contextual-controls\[open\]\s*\{([^}]*)\}/);
+assert.match(nestedTabsOpen?.[1] ?? "", /position:\s*relative/,
+  "an open nested Tabs control participates in its panel's document flow");
+assert.match(nestedTabsOpen?.[1] ?? "", /width:\s*100%/,
+  "an open nested Tabs control uses the panel width");
+const nestedTabsPanel = shell.match(/\.bp-tabs--editor \.bp-paper-contextual-controls\[open\]\s*>\s*\.bp-paper-contextual-panel\s*\{([^}]*)\}/);
+assert.match(nestedTabsPanel?.[1] ?? "", /max-height:\s*none/,
+  "nested Tabs controls do not clip tall authored collections");
+assert.match(nestedTabsPanel?.[1] ?? "", /overflow:\s*visible/,
+  "nested Tabs controls do not overlay following editor actions through a scroll viewport");
 
 for (const [name, css] of [["standalone", styles], ["host shell", shell]]) {
   let checked = 0;
