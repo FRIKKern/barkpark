@@ -371,10 +371,34 @@ def landed_body(sha, pr, sentence, hit):
     body = {"commit": sha, "note": sentence}
     if pr:
         body["pr"] = str(pr)
-    if hit >= 0:
-        # ZERO-BASED, and `note` is REQUIRED with it — the note IS the evidence
-        # the flip writes. Both are already true above.
-        body["criterion"] = hit
+    # DELIBERATELY NOT SENT: `criterion`. See task-48ff3f84e68aecbb.
+    #
+    # The server's permit for a landed criterion flip holds NO claim, NO
+    # worker_id and NO epoch, and it permits the flip whenever the criterion
+    # merely LOOKS merge-shaped — including on `merge_gate: true`. But
+    # `merge_gate: true` is set by LEADS to mean "the LEAD closes this, not the
+    # builder", and it is carried by criteria demanding things a merge cannot
+    # discharge (a live browser demo, an operator action). ONE BOOLEAN, TWO
+    # MEANINGS, and the permit reads the wrong one. Once the last unmet
+    # criterion flips this way the criteria gate has nothing left to refuse:
+    # a SILENT FABRICATED `done`, with no holder's name on it.
+    #
+    # This script runs from .github/workflows/landed-mark.yml on push-to-main.
+    # Sending `criterion` from here does not merely expose that defect, it ARMS
+    # it on EVERY MERGE — turning "somebody must deliberately type the command"
+    # into "it happens automatically". So the landing SENTENCE goes through
+    # this door and the criterion NEVER does. The row that still looks
+    # satisfiable is handed to its claim holder by ::notice instead, which is
+    # the honest half of what the flip was for.
+    #
+    # DO NOT re-add this, not behind a condition and not "just for
+    # merge_gate:true rows" — that predicate IS the bug. The fix belongs on the
+    # server (task-48ff3f84e68aecbb, which requires a both-directions proof: a
+    # permit that refuses everything is not a fix). `hit` is still computed and
+    # still drives the ::notice; only the wire field is withheld.
+    #
+    # selftest section 4 asserts this by BYTE — a landed POST body carrying
+    # "criterion" reds the suite. The prohibition is load-bearing, not prose.
     return body
 
 
@@ -578,7 +602,10 @@ post_landing() { # $1 id, $2 plan file, $3 criterion index, $4 criterion text, $
     401|403) rm -f "$lbody" "$louf"; die_auth "$RC_CODE" "POST /v1/tasks/${id}/landed" ;;
     2??)
       if [ "$idx" != "-1" ] && [ -n "$ctext" ]; then
-        note "${id}: landing recorded and criterion ${idx} flipped by the server."
+        # The sentence landed; the criterion was never offered. See
+        # task-48ff3f84e68aecbb and the comment in landed_body().
+        note "${id}: landing recorded in content.landed; criterion ${idx} deliberately NOT flipped."
+        echo "::notice title=A merge-gated criterion still needs a holder::landed-mark: ${id} criterion ${idx} reads \"${ctext}\" — this landing looks like it satisfies it, and the landing sentence WAS recorded. The criterion was deliberately not flipped: the server's landed permit carries no claim and reads merge_gate:true as \"a merge discharges this\" when leads set it to mean \"the LEAD closes this\" (task-48ff3f84e68aecbb). Flipping it needs the claim holder."
       else
         note "${id}: landing recorded in content.landed."
       fi
@@ -896,11 +923,20 @@ mkrow "$L4" task-ccc1 in_progress builder-q "The PR merged to main and CI is gre
 mkrow "$L4" task-ccc2 in_progress builder-q "Some other checkable condition entirely."
 S4a="$(mkcommit "$R4" "$(printf 'fix(c): crit (#21)\n\nTask: task-ccc1\n')")"
 OUT="$(run "$R4" "$L4" --sha "$S4a")"
-has "$OUT" "criterion 1 flipped by the server" "a criterion whose text says 'merged to main' is flipped through /landed"
+has "$OUT" "criterion 1 deliberately NOT flipped" "a merge-shaped criterion is NOT flipped through /landed (task-48ff3f84e68aecbb)"
+has "$OUT" "still needs a holder" "…and it is handed to the claim holder by ::notice instead"
 has "$OUT" "marked task-ccc1" "the label mark lands alongside the landing sentence"
-hasnt "$OUT" "::notice" "no holder handover is raised when the server ACCEPTED the flip"
-check "the flip really reached the row" \
-  "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["doc"]["content"]["acceptance_criteria"][1].get("met"))' "$L4/rows/task-ccc1.json")" "True"
+has "$OUT" "::notice" "the holder handover IS raised even on a 2xx — the sentence lands, the criterion is withheld"
+# THE ARM THAT MATTERS: the criterion is still UNMET in the ledger after a
+# landing that "looks like" it satisfies it. This is the fabricated-done that
+# task-48ff3f84e68aecbb describes, asserted absent at the row rather than at
+# the wire — if a future change re-adds the field, THIS reds even if the body
+# check above is somehow satisfied.
+check "the criterion is STILL UNMET on the row — no fabricated done (task-48ff3f84e68aecbb)" \
+  "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["doc"]["content"]["acceptance_criteria"][1].get("met"))' "$L4/rows/task-ccc1.json")" "False"
+# positive control: the row was really read back, so "False" is a value and not a failed read
+check "positive control: the fixture row was read back and has its criteria" \
+  "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["doc"]["content"]["acceptance_criteria"]))' "$L4/rows/task-ccc1.json")" "2"
 S4b="$(mkcommit "$R4" "$(printf 'fix(c): note (#22)\n\nTask: task-ccc2\n')")"
 OUT="$(run "$R4" "$L4" --sha "$S4b")"
 has "$OUT" "note —" "a row with no merge-shaped criterion gets the label and nothing else"
@@ -921,13 +957,15 @@ hasnt "$(cat "$L4/writes.log")" 'remove' "the write only ADDS labels — it can 
 has "$(cat "$L4/landed.log")" '"commit"' "the /landed body carries the commit"
 has "$(cat "$L4/landed.log")" '"pr": "21"' "the /landed body sends pr as a STRING — the int is a 422 on a payload that looks right"
 has "$(cat "$L4/landed.log")" '"note"' "the /landed body carries the sentence — the thing a label cannot hold"
-has "$(cat "$L4/landed.log")" '"criterion": 1' "the merge-shaped criterion index is sent, ZERO-BASED"
+hasnt "$(cat "$L4/landed.log")" '"criterion"' "THE ARM: no landed POST body carries a criterion field, on ANY row (task-48ff3f84e68aecbb)"
+check "positive control: the landed POST body was actually written and read" \
+  "$(grep -c '"commit"' "$L4/landed.log")" "2"
 hasnt "$(cat "$L4/landed.log")" '"lifecycle_status"' "the /landed body NEVER touches lifecycle_status"
 hasnt "$(cat "$L4/landed.log")" '"labels"' "the /landed body NEVER touches labels — that is the other door's job"
 check "the row with NO merge-shaped criterion still got a landing sentence" \
   "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["doc"]["content"]["landed"]["commits"]))' "$L4/rows/task-ccc2.json")" "1"
-check "and NO criterion index was sent for it" \
-  "$(grep -c '"criterion"' "$L4/landed.log")" "1"
+check "and NO criterion index was sent for it either — ZERO across BOTH rows" \
+  "$(grep -c '"criterion"' "$L4/landed.log")" "0"
 
 # 6c. IDEMPOTENT ACROSS BOTH DOORS. A re-run of the same sha writes NEITHER.
 #     The old guard read the labels only, so a row already labelled would still
