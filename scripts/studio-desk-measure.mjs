@@ -21,7 +21,9 @@
 //   node scripts/studio-desk-measure.mjs --sha=<sha>    # REFUSE unless the box serves it
 //   node scripts/studio-desk-measure.mjs --help
 //
-// (`BP_DESK_DOC` is the env form of `--doc`. Default: DEFAULT_DOC below.
+// (`BP_DESK_DOC` is the env form of `--doc`. With neither, the drill resolves
+//  the NEWEST paper in the pane it just opened and records which one — there is
+//  no committed slug to age off; see `resolveDocTarget` below.
 //  `BP_DESK_SHA` is the env form of `--sha`/`--ref`. Unpinned by default: a run
 //  without it measures whatever guerrilla serves and records it in served_sha.)
 //
@@ -306,10 +308,13 @@
 //  - "~80% deterministic." 19 of 22 raw, 19 of 19 outside a deploy window, with
 //    every completed run reproducing at tolerance zero.
 //
-// STILL OPEN, and NOT this file's to fix: the committed DEFAULT_DOC has aged
-// off the Papers pane's newest-100 window, so the no-flag invocation now aborts
-// 1 of 1 with a correctly-worded drill error naming it. Every run above passed
-// --doc explicitly.
+// CLOSED SINCE (task-7f44670cf2d7bd53), and it was this file's to fix after all: the committed
+// DEFAULT_DOC had aged off the Papers pane's newest-100 window, so the no-flag
+// invocation aborted 1 of 1 with a correctly-worded drill error naming a slug the
+// reader had no way to replace. Every run above therefore passed --doc
+// explicitly. There is now no committed slug: the default RESOLVES the newest
+// row of the Papers pane the drill has already proven it entered, and the run
+// records `measured_doc` + `measured_doc_source`. See `resolveDocTarget`.
 //
 // ── Playwright resolution ────────────────────────────────────────────────────
 // playwright 1.59.1 + chromium-1217 are cached, but they live in the JS
@@ -426,7 +431,14 @@ USAGE
 
 OPTIONS
   --json              JSON matrix only — suppress the human table on stdout.
-  --doc=<slug>        Measure a NAMED document (default: ${DEFAULT_DOC}).
+  --doc=<slug>        Measure a NAMED document.
+  --doc=newest        THE DEFAULT. Measure the newest row of the Papers pane,
+                      resolved at run time from the list the drill just opened
+                      — never from a committed slug, which ages off the
+                      newest-100 window and turns a bare run into an abort
+                      (task-7f44670cf2d7bd53). The run records measured_doc and
+                      measured_doc_source; an EMPTY pane REFUSES by name
+                      rather than falling back to the root pane.
   --doc=any           Drill the first Papers row that opens a paper surface.
   --out <path>        Write the COMPLETE run JSON (all rows + run-level
                       provenance) to <path>, creating parent directories.
@@ -479,7 +491,8 @@ ENVIRONMENT
   BP_DESK_BROWSER     bundled (default) | chrome — see BROWSER above.
   BP_DESK_RETRIES     Env form of --retries.
   BP_DESK_SHA         Env form of --sha/--ref.
-  BP_DESK_DOC         Env form of --doc.
+  BP_DESK_DOC         Env form of --doc. Empty or unset means the default,
+                      \`newest\`; the flag wins over it.
                       (BP_DESK_DESTINATION_CONTROL is GONE. It pointed at a
                       control that summons the Tier-3 destination; no such
                       control has ever existed, because the destination is
@@ -494,26 +507,116 @@ NOTES
 `;
 }
 
-/** The COMMITTED default drill target (D97). It must be a document that exists,
- *  is published, and is not being rewritten by a concurrent wave — so it is one
- *  of this epic's OWN sealed wave Papers, never "whatever is newest". If it ever
- *  falls off the Papers pane's first page the run fails LOUDLY naming it, which
- *  is the correct outcome: pass `--doc=<slug>` and the matrix says which
- *  document it measured. */
-const DEFAULT_DOC = 'studio-space-priority-desk-browser-2026-07-19';
-
 /** `--doc=any` re-enables the old first-row drill, but skipping rows that do not
  *  open a paper surface rather than dying on the first one that does not. */
 const ANY_DOC = 'any';
 
-function resolveDocTarget() {
-  const flag = process.argv.find((a) => a.startsWith('--doc='));
-  const raw = (flag ? flag.slice('--doc='.length) : process.env.BP_DESK_DOC || DEFAULT_DOC).trim();
-  if (!raw) die('--doc= was passed with an empty value — name a document slug, or `any`');
-  const source = flag ? '--doc flag' : (process.env.BP_DESK_DOC ? 'BP_DESK_DOC env' : 'committed default');
-  return raw === ANY_DOC
-    ? { mode: 'any', slug: null, source }
-    : { mode: 'named', slug: raw, source };
+/** `--doc=newest` — THE DEFAULT, and a MODE rather than a slug. */
+const NEWEST_DOC = 'newest';
+
+/**
+ * THERE IS NO COMMITTED DEFAULT SLUG, AND ITS ABSENCE IS THIS BLOCK (task-7f44670cf2d7bd53).
+ *
+ * WHAT WAS HERE. `DEFAULT_DOC = 'studio-space-priority-desk-browser-2026-07-19'`
+ * — one of this epic's own sealed wave Papers, chosen under D97 because a NAMED
+ * target cannot be moved under the drill by a concurrent wave the way "the first
+ * row" can. That reasoning was right about determinism and wrong about time. The
+ * Papers pane is a newest-first window of ~100 rows and this epic's own waves
+ * publish into it continuously, so a fixed slug does not stay reachable: it aged
+ * out, and a bare `node scripts/studio-desk-measure.mjs --json` then aborted
+ * 1 of 1 — not a flake, a standing outage — with a correctly-worded drill error
+ * naming a slug the reader had no way to replace. Every run of the N=22
+ * characterisation above had to pass `--doc` explicitly. An instrument whose
+ * documented invocation always fails reads as a broken instrument.
+ *
+ * WHY NOT JUST A NEWER SLUG. Because the next one ages off on the same clock,
+ * and all a hand-bumped constant buys is the date of the next outage. A dated
+ * literal in this position is a defect whatever date it carries, which is why
+ * `studio-desk-default-doc.test.mjs` FAILS if one reappears in this file.
+ *
+ * WHAT REPLACES IT. The default is a mode, `newest`, resolved AT RUN TIME from
+ * the Papers pane the drill has already proven it entered (`waitForNewPane` —
+ * D138's failure C was a ROOT-pane read misdiagnosed for seven weeks as a
+ * partially-loaded list). Reachability stops being a claim about the past: the
+ * slug is read as the newest row's own `phx-value-id`, out of the very list the
+ * click is about to be made in, seconds earlier. What D97 actually forbids is a
+ * run that cannot say WHICH document it measured, and that is bought here
+ * exactly as a named target buys it — the landed URL is asserted to carry the
+ * resolved slug, and `measured_doc` / `measured_doc_source` /
+ * `measured_doc_reachability` are recorded in the run and in the flattened
+ * artifact beside `served_sha` and `requested_sha`.
+ *
+ * AND IT REFUSES RATHER THAN DRIFTING. An empty list is the one input that could
+ * turn "newest" into "whatever pane I happen to be looking at" — the root-pane
+ * read again, wearing a resolver's clothes. `resolveNewestPaperSlug` throws a
+ * named MeasureError instead of returning anything at all.
+ *
+ * PRECEDENCE, unchanged in the two forms that already existed:
+ * `--doc=` beats `BP_DESK_DOC` beats the default.
+ *
+ * PURE, and injected rather than read from `process`, for the same reason
+ * `parseShaPin` is: the precedence is the part that rots, and a resolver that
+ * can only be exercised through a 30-60s authenticated sweep is a resolver
+ * nobody re-checks.
+ */
+export function resolveDocTarget(argv = process.argv, env = process.env) {
+  const flag = argv.find((a) => typeof a === 'string' && a.startsWith('--doc='));
+  if (flag !== undefined) return classifyDocTarget(flag.slice('--doc='.length), '--doc=');
+  const fromEnv = env.BP_DESK_DOC;
+  if (typeof fromEnv === 'string' && fromEnv.trim() !== '') return classifyDocTarget(fromEnv, 'BP_DESK_DOC');
+  return { mode: 'newest', slug: null, source: 'default', resolution: 'newest-paper' };
+}
+
+/** One request string -> a target. `resolution` is what the ARTIFACT records as
+ *  `measured_doc_source`: how the measured document came to be chosen, which for
+ *  `newest`/`any` is NOT the same question as where the request came from. */
+function classifyDocTarget(raw, source) {
+  const slug = String(raw).trim();
+  if (!slug) {
+    die(`${source} was passed with an empty value — name a document slug, or \`newest\` (the default: ` +
+        `the newest row of the Papers pane, resolved at run time), or \`any\` (the first row that opens ` +
+        `a paper surface). Omitting it entirely is also \`newest\`.`);
+  }
+  if (slug === NEWEST_DOC) return { mode: 'newest', slug: null, source, resolution: 'newest-paper' };
+  if (slug === ANY_DOC) return { mode: 'any', slug: null, source, resolution: 'first-openable-row' };
+  return { mode: 'named', slug, source, resolution: source };
+}
+
+/**
+ * The newest row's slug, from the `phx-value-id`s the Papers pane rendered.
+ *
+ * The list is ordered newest-first (D97 established that while arguing against
+ * relying on it), so "newest" is `rows[0]` — but only among rows that actually
+ * carry a slug, because a row without one cannot be clicked by id and cannot be
+ * asserted against the landed URL, which is the whole determinism story.
+ *
+ * ZERO IS A REFUSAL, NEVER A FALLBACK. A caller that got `null` here would go on
+ * to measure whatever surface happened to be on screen — the root pane, whose
+ * rows are document TYPES — and label it a desk fact. That is the exact confound
+ * this instrument exists to make unreachable, so the empty case throws a
+ * MeasureError naming what it saw and what to pass instead.
+ */
+export function resolveNewestPaperSlug(rowSlugs) {
+  const rows = Array.isArray(rowSlugs) ? rowSlugs : [];
+  const usable = rows.filter((s) => typeof s === 'string' && s.trim() !== '');
+  if (usable.length === 0) {
+    die(`INSTRUMENT FAILURE (drill) — this says NOTHING about the desk's layout.\n\n` +
+        `  THE PAPERS PANE OFFERED NO DOCUMENT TO MEASURE: ${rows.length} row(s) were read from the ` +
+        `pane and ${rows.length === 0 ? 'none exist' : 'not one carries a phx-value-id'}, so there is ` +
+        `no newest paper to resolve the default to.\n\n` +
+        `  REFUSING TO FALL BACK. The next thing on screen is the root pane, whose rows are document ` +
+        `TYPES rather than documents; measuring it would produce a full matrix of numbers about the ` +
+        `wrong surface and label them a desk fact. A pane with no papers is an environment fact, and ` +
+        `it is reported as one.\n\n` +
+        `  Pass --doc=<slug> to name a document, or --doc=any to take the first row that opens a ` +
+        `paper surface, or publish a Paper into this workspace.`);
+  }
+  return {
+    slug: usable[0].trim(),
+    source: 'newest-paper',
+    rows_considered: rows.length,
+    rows_with_slug: usable.length,
+  };
 }
 
 /** The nine widths, DESCENDING (D80). 500 is the floor this matrix commits to;
@@ -1063,7 +1166,7 @@ function overlayShouldBeAbsolute(rec) {
   return typeof rec.panel_px === 'number' && rec.panel_px <= OVERLAY_ABSOLUTE_MAX_PANEL_PX;
 }
 
-const STATE_IDS = STATES.map((s) => s.id);
+export const STATE_IDS = STATES.map((s) => s.id);
 const stateById = (id) => STATES.find((s) => s.id === id) ?? null;
 
 /** Which states apply at a given width, restricted to the ones this run is
@@ -1563,17 +1666,70 @@ async (faceOverride) => {
   else surface.style.removeProperty('min-inline-size');
   const floorBinds = Math.abs(widthWithFloor - widthWithoutFloor) > 0.5;
 
+  // The container the floor's own gate asks about. The served rule is
+  //
+  //     .editor-with-preview .editor-panel-main.bp-paper-body {
+  //       container-type: inline-size; container-name: content; }
+  //     @container content (min-width: 720px) {
+  //       .editor-panel .bp-paper-surface {
+  //         min-inline-size: calc(55ch + 2 * var(--paper-gutter)); } }
+  //
+  // so where that gate is CLOSED the declaration never applies, min-inline-size
+  // resolves to 0px, and there is no in-floor ch to derive OR to diverge. That
+  // is not a quiet null: it is the reason two thirds of this matrix cannot
+  // produce a drift warning at all, and it is recorded rather than inferred.
+  // 'containerName' is READ from the computed style — if the container ever
+  // stops being declared here, the artifact says so instead of the reader
+  // guessing from a zero.
+  const containerCs = body ? getComputedStyle(body) : null;
+  const containerName = containerCs ? String(containerCs.containerName || '') : null;
+  // 'container-type: inline-size' queries the CONTENT box, so subtract the
+  // container's own padding from clientWidth (which includes it).
+  const containerContentPx = (body && containerCs)
+    ? body.clientWidth - px(containerCs.paddingLeft) - px(containerCs.paddingRight)
+    : null;
+
   // The browser's own in-floor ch, derived from the resolved floor. We only
-  // ever see the USED px value, never the authored formula, so the formula is
-  // an ASSUMPTION and is named as one. spd-w5-measure-lever-moves is chartered
-  // to change it (to calc(55ch + 2 * var(--paper-gutter)), or to retire it), at
-  // which point this derivation goes quietly wrong — so the divergence against
-  // the probe is checked below and a drift beyond tolerance is REPORTED, not
-  // absorbed. Printed ALONGSIDE the probe, never instead of it.
+  // ever see the USED px value, never the authored formula — but every INPUT
+  // to that formula is computable, so nothing here is assumed:
+  //
+  //   55            the multiplier, verbatim from the served declaration
+  //   2 * gutter    READ from the surface's computed '--paper-gutter'
+  //
+  // The addend was a hardcoded 80 until spd-w8-followup. 80 is '2 * 40px', and
+  // '--paper-gutter' is redeclared BY VIEWPORT @media — 40px, then 24px below
+  // 767px, then 16px below 479px (root.html.heex) — so 80 was right only in the
+  // widest band. In the 24px band the addend is 48, and assuming 80 subtracts
+  // 32px too much: at viewport 764 / user-opened, the one cell of this matrix
+  // where the 24px gutter and an OPEN container gate coexist, that manufactured
+  // the instrument's only three drift warnings (-5.3% / -5.8% / -6.3%, i.e.
+  // exactly -32 / (55 * probe_px_per_ch), one per face). The derivation now
+  // reads the token, so the same arithmetic holds in all three bands and a
+  // future gutter change cannot rot it again.
   const FLOOR_CH_MULTIPLIER = 55;
-  const FLOOR_ADDEND_PX = 80;
+  // The served gate: @container content (min-width: 720px). Kept beside the
+  // multiplier so the whole floor declaration is one readable block.
+  const FLOOR_CONTAINER_GATE_PX = 720;
+  const gutterTokenRaw = String(sCs.getPropertyValue('--paper-gutter') || '').trim();
+  const gutterTokenPx = gutterTokenRaw ? px(gutterTokenRaw) : null;
+  // Fallback is the READ padding (D72/D78), never a literal: the surface's
+  // 'padding' consumes the SAME token as the floor, so the two are the same
+  // number by construction and measure_parity_test.exs guards both halves.
+  const gutterFromToken = Number.isFinite(gutterTokenPx) && gutterTokenPx > 0;
+  const floorGutterPx = gutterFromToken ? gutterTokenPx : (padL + padR) / 2;
+  const floorGutterSource = gutterFromToken
+    ? 'READ: getComputedStyle(.bp-paper-surface).getPropertyValue("--paper-gutter")'
+    : 'READ (fallback): (paddingLeft + paddingRight) / 2 — --paper-gutter resolved empty';
+  const FLOOR_ADDEND_PX = 2 * floorGutterPx;
   const chInFloorPx = (minInlinePx && minInlinePx > FLOOR_ADDEND_PX)
     ? (minInlinePx - FLOOR_ADDEND_PX) / FLOOR_CH_MULTIPLIER
+    : null;
+  // The floor this row EXPECTS, built only from things measured in this row:
+  // the ch probe taken under this row's own forced face, and the computed
+  // gutter. Published beside the resolved px so the two can be compared
+  // without re-deriving anything by hand.
+  const expectedFloorPx = chProbePx
+    ? (FLOOR_CH_MULTIPLIER * chProbePx) + FLOOR_ADDEND_PX
     : null;
 
   // ── the content box. clientWidth excludes borders and includes padding.
@@ -2004,9 +2160,20 @@ async (faceOverride) => {
       probe_method: 'span[style="width:1ch"] inserted as a CHILD of .bp-paper-surface',
       in_floor_px_per_ch: round(chInFloorPx, 4),
       in_floor_method: minInlinePx
-        ? \`(resolved min-inline-size - \${FLOOR_ADDEND_PX}) / \${FLOOR_CH_MULTIPLIER}\`
-        : 'min-inline-size resolved to 0 — no in-floor ch to derive',
-      in_floor_formula_assumed: \`calc(\${FLOOR_CH_MULTIPLIER}ch + \${FLOOR_ADDEND_PX}px)\`,
+        ? \`(resolved min-inline-size - 2 * \${floorGutterPx}px READ gutter) / \${FLOOR_CH_MULTIPLIER}\`
+        : 'min-inline-size resolved to 0 — the @container content (min-width: 720px) gate is ' +
+          'closed here, so the floor declaration never applied and there is no in-floor ch to derive',
+      // Named '_assumed' for continuity with every committed artifact, but the
+      // only thing still assumed is the multiplier: the addend is READ.
+      in_floor_formula_assumed: \`calc(\${FLOOR_CH_MULTIPLIER}ch + 2 * var(--paper-gutter))\`,
+      in_floor_gutter_px: floorGutterPx,
+      in_floor_gutter_source: floorGutterSource,
+      in_floor_addend_px: FLOOR_ADDEND_PX,
+      expected_floor_px: round(expectedFloorPx, 3),
+      expected_floor_method: \`\${FLOOR_CH_MULTIPLIER} * probe_px_per_ch + 2 * READ --paper-gutter — \` +
+                             'every input measured in THIS row, no literal addend',
+      expected_vs_resolved_floor_delta_px:
+        (expectedFloorPx !== null && minInlinePx) ? round(minInlinePx - expectedFloorPx, 3) : null,
       divergence_pct: (chProbePx && chInFloorPx) ? round(((chInFloorPx - chProbePx) / chProbePx) * 100, 4) : null,
     },
     gutter: {
@@ -2083,6 +2250,19 @@ async (faceOverride) => {
       bind_test: 'measured, then min-inline-size forced to 0px inline and re-measured, then restored — a width change IS the bind',
       width_with_floor_px: round(widthWithFloor),
       width_without_floor_px: round(widthWithoutFloor),
+      // WHY the floor resolved to what it did. A 0px min-inline-size is not a
+      // missing measurement — it is the container gate answering NO.
+      container_query_selector: '.editor-panel-main.bp-paper-body',
+      container_name_computed: containerName,
+      container_content_box_px: round(containerContentPx, 3),
+      container_gate_min_px: FLOOR_CONTAINER_GATE_PX,
+      container_gate_open: containerContentPx === null ? null : containerContentPx >= FLOOR_CONTAINER_GATE_PX,
+      container_gate_note:
+        'the floor lives inside @container content (min-width: 720px) on the READING COLUMN\\'s own ' +
+        'box (charter D113/D114). Gate closed => the declaration never applies => min-inline-size 0 ' +
+        '=> in_floor_px_per_ch null and no divergence can be computed in this row at all.',
+      gutter_px_read: floorGutterPx,
+      gutter_px_source: floorGutterSource,
     },
     overflow: {
       scroller: '.editor-body.bp-paper-body',
@@ -2206,6 +2386,12 @@ export const PAGE_MEASURE_CHROME = /* js */ `
       probe_method: 'not taken — the ch probe is inserted as a CHILD of ' +
                     '${READING_COLUMN_SELECTOR}, which is not on screen in this state',
       in_floor_px_per_ch: null, in_floor_method: 'not derived', in_floor_formula_assumed: null,
+      in_floor_gutter_px: null,
+      in_floor_gutter_source: 'not read — no surface to read --paper-gutter from',
+      in_floor_addend_px: null,
+      expected_floor_px: null,
+      expected_floor_method: 'not derived — no ch probe and no gutter in this state',
+      expected_vs_resolved_floor_delta_px: null,
       divergence_pct: null,
     },
     gutter: { padding_left_px: null, padding_right_px: null, total_px: null,
@@ -2240,7 +2426,12 @@ export const PAGE_MEASURE_CHROME = /* js */ `
       'disease (D31/D39) with its sign flipped.',
     floor: { min_inline_size_raw: null, min_inline_size_px: null, binds: null,
              bind_test: 'not run — no surface to force min-inline-size on',
-             width_with_floor_px: null, width_without_floor_px: null },
+             width_with_floor_px: null, width_without_floor_px: null,
+             container_query_selector: '.editor-panel-main.bp-paper-body',
+             container_name_computed: null, container_content_box_px: null,
+             container_gate_min_px: 720, container_gate_open: null,
+             container_gate_note: 'not read — no reading column on screen in this state',
+             gutter_px_read: null, gutter_px_source: 'not read — no surface on screen' },
     overflow: { scroller: '.editor-body.bp-paper-body', scroll_width: null, client_width: null,
                 horizontal_scroll: null, overflow_px: null },
     panes: {
@@ -2421,13 +2612,56 @@ async function tryOpenRow(page, row, { timeoutMs = 20_000 } = {}) {
  *  this very script. A named target is matched on `[phx-value-id]` — the slug
  *  the row carries — and the landed URL is asserted to carry that same slug, so
  *  the matrix cannot claim a document it did not measure. */
-async function drillToDocument(page, base, target) {
+async function drillToDocument(page, base, requestedTarget) {
   const pane = await openPapersPane(page, base);
   const rows = pane.locator('[phx-click="select"]');
   const rowCount = await rows.count();
+
+  // THE DEFAULT RESOLVES HERE, INSIDE THE PANE THE DRILL PROVED IT ENTERED, and
+  // never from a committed slug (task-7f44670cf2d7bd53 — see resolveDocTarget). It runs BEFORE
+  // the generic empty-list check because `resolveNewestPaperSlug` owns that case
+  // for this mode and says the one thing the generic message cannot: that the
+  // refusal is a refusal to fall back to the root pane.
+  //
+  // Once resolved it becomes an ordinary NAMED target, so the newest row goes
+  // through the same re-locate-per-attempt click, the same three-attempt budget
+  // and — the part that matters — the same assertion that the landed URL
+  // carries the slug we claim to have measured.
+  let target = requestedTarget;
+  let newest = null;
+  if (target.mode === 'newest') {
+    const slugs = await rows.evaluateAll((els) => els.map((e) => e.getAttribute('phx-value-id')));
+    newest = resolveNewestPaperSlug(slugs);
+    target = {
+      mode: 'named',
+      slug: newest.slug,
+      source: target.source,
+      resolution: 'newest-paper',
+      requested_mode: 'newest',
+    };
+  }
+
   if (rowCount === 0) {
     drillDie('the Papers list pane rendered no [phx-click="select"] document row — nothing to open.');
   }
+
+  /** WHY THE RUN CARRIES THIS AND NOT JUST A SLUG. "Which document" and "why was
+   *  it reachable" are different questions, and only the second one survives the
+   *  document itself ageing off the window. Recorded next to served_sha /
+   *  requested_sha in the flattened artifact. */
+  const docProvenance = () => ({
+    measured_doc_source: target.resolution,
+    measured_doc_requested_from: requestedTarget.source,
+    measured_doc_reachability: newest
+      ? `RESOLVED AT RUN TIME: the newest of the ${newest.rows_considered} row(s) the Papers pane ` +
+        `rendered in this very run (${newest.rows_with_slug} carried a phx-value-id), read seconds ` +
+        `before the click. It cannot have aged off a window it was just read from.`
+      : requestedTarget.mode === 'any'
+        ? `--doc=any: the first of the ${rowCount} rendered rows that opened a paper surface.`
+        : `NAMED explicitly via ${requestedTarget.source} and found among the ${rowCount} rows this ` +
+          `run's Papers pane rendered; the landed URL was asserted to carry the same slug.`,
+    newest_resolution: newest,
+  });
 
   // `select` is the document-open event. The pane header's own buttons
   // (airdrop-open / access-open / new-document) are NOT it — clicking those
@@ -2455,7 +2689,9 @@ async function drillToDocument(page, base, target) {
           `\n    A Papers list is ~100 rows, newest first. A handful of rows named after ` +
           `\n    document TYPES (paper / sheet / rest / ...) means this is the ROOT pane and the ` +
           `\n    drill never entered the list at all.` +
-          `\n    If the target has simply aged off the 100-row window, pass --doc=<slug> with one of these.`);
+          `\n    If the target has simply aged off the 100-row window, pass --doc=<slug> with one of ` +
+          `\n    these — or --doc=newest (the DEFAULT since task-7f44670cf2d7bd53), which resolves the newest row of ` +
+          `\n    this same list and so cannot age off it.`);
       }
       const landed = await tryOpenRow(page, named);
       if (landed) {
@@ -2465,7 +2701,13 @@ async function drillToDocument(page, base, target) {
             `clicked the row for "${target.slug}" but landed on "${slugInUrl}" (${landed}). ` +
             `Refusing to label this run with a document it did not open.`);
         }
-        return { path: landed, slug: slugInUrl, attempts: attempt, rows_in_list: rowCount };
+        return {
+          path: landed,
+          slug: slugInUrl,
+          attempts: attempt,
+          rows_in_list: rowCount,
+          ...docProvenance(),
+        };
       }
       attempts.push(`attempt ${attempt}: clicked the row, no .bp-paper-surface appeared`);
       await page.goto(`${base}/w/default/p/default/d/production/studio`, { waitUntil: 'domcontentloaded' });
@@ -2493,6 +2735,7 @@ async function drillToDocument(page, base, target) {
         attempts: i + 1,
         rows_in_list: rowCount,
         skipped_rows: skipped,
+        ...docProvenance(),
       };
     }
     skipped.push(slug ?? '(no phx-value-id)');
@@ -3297,8 +3540,15 @@ async function main() {
     doc_target_note:
       'The drill targets a NAMED document (D97). It used to click the first row of a Papers list ' +
       'that concurrent waves rewrite live, which made a failed run indistinguishable from a desk ' +
-      'fact. `--doc=<slug>` / BP_DESK_DOC override the committed default; `--doc=any` restores ' +
-      'first-row behaviour, skipping rows that open no paper surface.',
+      'fact. There is no longer a COMMITTED default slug: one aged off the newest-100 window and ' +
+      'made the bare invocation abort 1 of 1 (task-7f44670cf2d7bd53), and any replacement literal would age off ' +
+      'on the same clock. The default `newest` resolves the newest row of the Papers pane the ' +
+      'drill just opened, then proceeds as a named target — same click, same assertion that the ' +
+      'landed URL carries the slug — and an EMPTY pane refuses by name rather than falling back ' +
+      'to the root pane. `--doc=<slug>` / BP_DESK_DOC name a document; `--doc=any` restores ' +
+      'first-row behaviour, skipping rows that open no paper surface. Which document was chosen, ' +
+      'by which source, and why it was reachable are in measured_doc / measured_doc_source / ' +
+      'measured_doc_reachability.',
     provenance,
     // What the CALLER asked to measure, null when unpinned. `served_sha` says
     // what was measured; this says what was intended, so a reader never has to
@@ -3357,7 +3607,24 @@ async function main() {
     const docPath = drill.path;
     run.drill = drill;
     run.measured_url = srv.base + docPath;
+    // `measured_document` is the long-standing name and stays, byte-identical,
+    // for every reader of a committed run in scripts/measurements/.
+    // `measured_doc` is its short form and carries the two fields that make it
+    // auditable: WHICH source chose it, and WHY that document was reachable.
     run.measured_document = drill.slug;
+    run.measured_doc = drill.slug;
+    run.measured_doc_source = drill.measured_doc_source ?? null;
+    run.measured_doc_reachability = drill.measured_doc_reachability ?? null;
+
+    // A BREADCRUMB ON STDERR, THE MOMENT IT IS KNOWN. The run JSON is written at
+    // the very end, so a failure in any later stage (the b29 probe navigates
+    // again, and the provenance bracket can still refuse) took the answer to
+    // "which document did it measure" down with it — the exact question a
+    // resolved default has to keep answering. stderr, never stdout: `--json`
+    // promises stdout is nothing but the matrix.
+    process.stderr.write(
+      `\n  [drill] measured_doc ${run.measured_doc} · source ${run.measured_doc_source}\n` +
+      `          ${run.measured_doc_reachability}\n\n`);
 
     /** One measurement against whatever is currently on screen, under one forced
      *  face. Shared by the sweep, the round trip and the positive control, so
@@ -3470,20 +3737,26 @@ async function main() {
               `inflates ch and would hand the next verifier a free overturn. Availability: ` +
               JSON.stringify(rec.font.face_available));
         }
-        // The in-floor ch derivation ASSUMES the authored formula is
-        // `calc(55ch + 80px)`; the browser only ever exposes the used px. The
-        // two ch readings agree to ~0.107% today (D83). A drift past 2% means
-        // the assumption has rotted — almost certainly because the floor's
-        // formula changed (spd-w5-measure-lever-moves is chartered to change
-        // it) — so it is REPORTED rather than silently published as a number.
+        // The in-floor ch derivation takes the served formula's SHAPE
+        // (`calc(55ch + 2 * var(--paper-gutter))`) and reads its gutter from
+        // computed style; the browser only ever exposes the used px. The two ch
+        // readings agree to ~0.107% today (D83). Until spd-w8-followup the
+        // addend was the literal 80, which is `2 * 40px` — right in the widest
+        // gutter band and 32px wrong in the 24px band, so this check fired at
+        // the single cell (764 / user-opened) where the narrow gutter and an
+        // open container gate coexist. That was the check doing its job. With
+        // the gutter READ, a drift past 2% now means the MULTIPLIER moved off
+        // 55 or the formula's shape changed — reported, never absorbed.
         const drift = rec.ch.divergence_pct;
         if (drift !== null && Math.abs(drift) > 2) {
           run.warnings.push(
             `viewport ${width}px / ${stateId} / face "${face.id}": in-floor ch diverges from the ` +
-            `probe by ${drift}% (assumed formula ${rec.ch.in_floor_formula_assumed}, resolved ` +
-            `${rec.floor.min_inline_size_raw}). The floor's authored formula has probably changed — ` +
-            `\`in_floor_px_per_ch\` in these rows is derived from a stale assumption. The probe ch ` +
-            `(and every ch in the table above) is unaffected.`);
+            `probe by ${drift}% (formula ${rec.ch.in_floor_formula_assumed}, gutter read as ` +
+            `${rec.ch.in_floor_gutter_px}px so addend ${rec.ch.in_floor_addend_px}px, resolved ` +
+            `${rec.floor.min_inline_size_raw}, expected ${rec.ch.expected_floor_px}px). The floor's ` +
+            `authored formula has probably changed SHAPE (the gutter is read, so a gutter change ` +
+            `alone cannot cause this) — \`in_floor_px_per_ch\` in these rows is derived from a stale ` +
+            `assumption. The probe ch (and every ch in the table above) is unaffected.`);
         }
         // D138 FAILURE A, RULED ON. This used to be a bare warning and the row
         // was published with its verdicts intact — i.e. a ch computed through a
@@ -3853,6 +4126,9 @@ function writeRunArtifact(run, outPath) {
     sweep_direction: run.sweep_direction,
     doc_target: run.doc_target,
     measured_document: run.measured_document ?? null,
+    measured_doc: run.measured_doc ?? run.measured_document ?? null,
+    measured_doc_source: run.measured_doc_source ?? null,
+    measured_doc_reachability: run.measured_doc_reachability ?? null,
     drill_attempts: run.drill?.attempts ?? null,
     drill_rows_in_list: run.drill?.rows_in_list ?? null,
     non_vacuity_guard: summariseNonVacuity(run),
@@ -4021,7 +4297,7 @@ export function printTable(run) {
   L('  STUDIO DESK — LIVE MEASURE MATRIX');
   L('  ' + '='.repeat(118));
   L(`  target        ${run.target}`);
-  L(`  document      ${run.measured_document}`);
+  L(`  document      ${run.measured_document}   (${run.measured_doc_source ?? 'source not recorded'})`);
   L(`  landed as     ${run.landed_authenticated_url}`);
   L(`  measured url  ${run.measured_url}`);
   L(`  served SHA    ${run.provenance.served_sha}   (read live over ssh)`);

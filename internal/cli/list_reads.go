@@ -65,12 +65,10 @@ var listReadCommands = map[string]bool{
 	"share.token-ls":        true, // share_controller.ex   -> tokens
 	"tag.browse":            true, // query_controller.ex   -> result.tags
 	"tag.docs":              true, // query_controller.ex   -> result.documents
-	"token.ls":              true, // member_controller.ex  -> tokens
 	"webhook.deliveries":    true, // webhook_controller.ex  -> deliveries
 	"webhook.ls":            true, // webhook_controller.ex  -> webhooks
 	"workspace.dataset-ls":  true, // workspace_controller.ex -> datasets
 	"workspace.ls":          true, // workspace_controller.ex -> workspaces
-	"workspace.member-ls":   true, // member_controller.ex   -> members
 	"workspace.project-ls":  true, // workspace_controller.ex -> projects
 }
 

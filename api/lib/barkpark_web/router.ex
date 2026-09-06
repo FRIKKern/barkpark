@@ -2705,6 +2705,23 @@ defmodule BarkparkWeb.Router do
     # 503 unless BARKPARK_SITE_DEPLOY_APPLY=1. See Barkpark.Sites.DeployRunner.
     post("/site-deploy", SiteDeployController, :trigger)
     get("/site-deploy", SiteDeployController, :status)
+
+    # Lift a workspace suspension — the operator verb `Content.Errors` and the
+    # PlaygroundReaper moduledoc both promised and nothing implemented, so
+    # `Quota.reinstate/1` had ZERO callers in lib/ and a playground suspended by
+    # its TTL could only be rescued from iex or SQL (task-7ab3d03b49606f83).
+    #
+    # THE RULING (orchestrator, binding), verbatim: "OPTION (a) —
+    # instance-operator only. The reinstate route rides the admin tier:
+    # `pipe_through([:api, :require_admin, :require_platform_operator])`, exactly
+    # like the `/v1/status/incidents` and `/v1/admin/*` groups in
+    # api/lib/barkpark_web/router.ex (~line 2077 and 2145 on origin/main). NO
+    # workspace-owner self-reinstate path. Reasoning: the playground expired BY
+    # POLICY, and a self-service loop around a TTL lets the subject of a limit
+    # lift it, which is not a permit widening — it is removing the limit. The
+    # smallest permit that fixes the actual defect (a suspended workspace being
+    # unrescuable inside its own grace window)."
+    post("/workspaces/:slug/reinstate", WorkspaceReinstateController, :create)
   end
 
   # ── Webhooks — requires admin token ────────────────────────────────────

@@ -2981,3 +2981,152 @@ in-flight row is transparent to hit-testing, so a second press lands on whatever
 `blocks: []` honesty residue D235 named: the sentence still says "This **paper**" to someone editing a
 **session**, carries neither the id nor the type, and is painted the same faint grey the owner read as
 inert.
+
+## Decisions — `spd-b42` (the DEFAULT-state forced-Georgia shortfall)
+
+- **D270 — `spd-b42`'S ARITHMETIC IS STALE AND ITS TRIM BUYS ZERO PIXELS: THE BINDER OF THE WIDE READING MEASURE
+  IS NO LONGER THE DOCK, IT IS A 660px SURFACE CAP THAT ARRIVED FROM ANOTHER EPIC.** The task was filed on
+  2026-07-20 against D120's bracketed table (forced Georgia at 18px, probe-derived 11.0469 px/ch, same face:
+  **viewport 1280 → content 596px = 53.95ch**, **viewport 1024 → 599px = 54.22ch**, **viewport 700 → 567px =
+  51.33ch**) and its brief derived a fix from `content = panel − dock − 2 × --paper-gutter`, i.e. 976 − 300 − 80
+  = 596 at viewport 1280. **That model no longer describes the deployed sheet.** On 2026-08-12,
+  `pe-w1-reader-editorial-typography` (#11626, `3968dbc16`) landed `max-width: 660px` on `.bp-paper-surface` — a
+  deliberate editorial measure of 580px, ~69 characters per line at 18px on the NATIVE face, replacing an
+  effective 720px. It is not a pane rule, not an inspector rule, and `wide_geometry_lock_test.exs`'s
+  `pane_family?/1` never saw it, so a 16px change to the wide desk's reading measure at viewport 1280 shipped
+  green through this epic's own layout lock.
+
+  **MEASURED, NOT ARGUED (two bracketed runs, deployed `8a05efce1055e97549605779462430cf8afc4753`, slot blue,
+  `--doc=pds-w23-triage-round-2026-09-06`, 54 of 54 rows, provenance bracket MATCHED, positive control RAN and
+  the guard FIRED so the zero is DESK-FIXED-proven rather than a broken check, `xscroll` no in every row).**
+  The DEFAULT-state forced-Georgia rows now read: **1440 → 608px = 55.04ch MEET (floor bound)**, **1280 → 580px
+  = 52.50ch FAIL**, **1024 → 580px = 52.50ch FAIL**, **900 → 608px = 55.04ch MEET (floor bound)**, **800 →
+  580px = 52.50ch FAIL**, **764 → 612px = 55.40ch MEET**, **700 → 567px = 51.33ch FAIL**. Every one of those ch
+  figures is forced Georgia at 18px over a same-face `width: 1ch` probe at 11.0469 px/ch; no cross-face
+  division anywhere (D83/D86). `surface_max_width_px` reads **660** in every row where the cap binds, and
+  `content_px` is a flat **580** at viewport 1440, 1280, 1024, 900 and 800 alike — the tell that the pane, the
+  column and the inspector have stopped being the binder at all.
+
+  **THREE CONSEQUENCES, IN ORDER OF WHAT THEY COST.**
+
+  1. **THE TRIM IS REFUSED, BECAUSE IT IS WORTH ZERO PIXELS.** At viewport 1280 the reading column is 676px
+     (pane 976 − a 300px dock) and the cap clips the surface to 660px, so trimming the dock to 288px takes the
+     column to 688px and the surface stays **660px** — `content_px` stays 580, the ch stays 52.50 and the row
+     stays FAIL. Same at viewport 1024: the column is already 679px (pane 720 − the 41px `spd-b29` strip),
+     the cap binds, and a 32px strip takes it to 688px with the surface still at 660. A 12px trim of shipped
+     inspector chrome and a 9px trim of the strip for **zero reader pixels** is exactly the change D77/D93/D103
+     forbid being sold as a measure fix, and D149 refused this trim once already. **This PR therefore ships NO
+     dock or strip trim** — a change measured at zero reader pixels is not shipped as a measure fix. Whether the
+     trim is refused for good, and what replaces it, is the owner's call (recommendation below).
+
+  2. **THE ONLY MECHANISM IN THE SHEET THAT BEATS THE CAP IS THE PROTECTED FLOOR, AND IT IS UNREACHABLE AT THE
+     FAILING WIDTHS.** `min-inline-size: calc(55ch + 2 × var(--paper-gutter))` resolves to 687.63px under
+     forced Georgia and OVERRIDES `max-width` (a min beats a max), which is precisely why viewport 1440 and 900
+     MEET at 608px while 1280 does not: their reading columns are 836px and 815px, both over the
+     `@container content (min-width: 720px)` gate, while 1280's is 676px and 1024's is 679px. So the lever at
+     viewport 1280 is not "trim the dock to 288" but **"get the reading column to 720px", i.e. a dock of 256px
+     or less** — a 44px trim, which is the move D149 refused outright as an epic-criterion-2 breach when it was
+     put at 260px. **At viewport 1024 the gate can never fire at all: the pane IS 720px, so the column is
+     720 − (any in-flow inspector) and is below the gate for every inspector wider than zero.** Lowering the
+     720px gate instead is refused by measurement, not taste: at a 676px column the floor would resolve to
+     687.63px inside it and overflow by 11.6px, which is D85's measured defect and D125's ruling.
+
+  3. **THE FAILING SET IS BIGGER THAN THE TASK SAYS, AND ONE OF ITS MEMBERS IS OWNED BY NOBODY.** Of D107's
+     seven desktop rows, forced Georgia now fails at **FOUR** — 1280, 1024, 800 and 700 — where D120 recorded
+     three. **Viewport 800 is new since D120 and is a direct consequence of the cap**: its reading
+     column is 715px (pane 756 − the 41px strip), comfortably over 660, so the surface used to fill the column
+     and now stops at the cap. DERIVED, not measured, and labelled as such: 715 − 80 = 635px of content =
+     57.48ch forced Georgia at 18px before the cap, against the 580px = 52.50ch the instrument reads today. Separately, the NATIVE
+     face now fails at viewport 640 (507px = 50.70ch); 640 is already an owned shortfall (D100 as amended by
+     D106), but it was owned as a Georgia-and-Source-Serif problem, and the native face joining it is new
+     information the shortfall accounting should carry.
+
+  **WHAT THE REAL QUESTION IS, STATED SO THE SUCCESSOR CANNOT DRIFT OFF IT.** Two shipped bars are in direct
+  conflict at every width where the cap binds. `pe-w1`'s editorial bar says the measure is 580px because ~69
+  CPL at 18px is the readable band on the native face. This epic's bar says the measure is ≥55ch for the widest
+  forced face, which for Georgia at 18px is 607.58px of content — a 687.58px surface, 27.58px wider than the
+  cap allows. **Both cannot hold. No inspector width, gutter or container gate resolves it, because the binder
+  is neither the inspector nor the gutter.** The three shapes that could are each a ruling rather than a trim:
+  raise the cap for the paper EDIT surface only (and part company with the public reader that
+  `measure_parity_test.exs` exists to keep it identical to); make the bar face-relative (which is D107's
+  gerrymandering unless it is fixed before the table is seen); or accept the shortfall for wide serif faces at
+  the widths where the editorial cap binds, on the record, the way viewport 640 is accepted.
+
+  **RECOMMENDATION — NOT A RULING. Lane-authored decisions are proposed here and ratified by the owner
+  (owner-queue item 41, 2026-09-06); a lane may not both propose and ratify.** What the measurement establishes
+  as FACT: no in-flow inspector width makes viewport 1280 or 1024 reach 55ch under forced Georgia while the 660px
+  cap stands, and viewport 700 remains arithmetically foreclosed for a second, independent reason (its column is
+  615px, under the cap, so the D126 in-flow ceiling of 0.42px is still the binder there). So `spd-b42`'s
+  criteria 1 and 2 are not closable by any change inside its own scope. **lead-studio recommends** that the owner
+  rule the third shape above: forced Georgia at 18px in the DEFAULT state becomes an owned shortfall at viewport
+  1280, 1024, 800 and 700, on the same footing as viewport 640 (D100/D106) — because pe-w1 already chose 580px as
+  the editorial measure, and the other two shapes either break the measure parity that `measure_parity_test.exs`
+  exists to keep or are D107's gerrymander. Until the owner rules, `spd-b42` is BLOCKED ON OWNER, its claim held. What the slice ships instead is this decision plus the missing tripwire:
+  `.bp-paper-surface`'s `max-width` and `--paper-gutter` are now pinned by value in
+  `wide_geometry_lock_test.exs`, mutation-proven (660 → 720 reds the lock naming the geometry, restore greens
+  it), so the next cross-epic change to the wide desk's reading measure reds this epic's own lock instead of
+  passing it. **The re-measure command, for anyone who wants to check this rather than believe it:**
+  `node scripts/studio-desk-measure.mjs --sha=$(ssh root@157.180.90.121 'cd /opt/barkpark && git rev-parse HEAD') --doc=pds-w23-triage-round-2026-09-06 --positive-control --out <path>`.
+  Note that the committed `DEFAULT_DOC` (`studio-space-priority-desk-browser-2026-07-19`) has aged off the
+  100-row Papers window and now fails the drill loudly, exactly as D97 designed it to.
+
+## spd-b8 amendment (THE SHARED `.editor-panel` FLOOR IS MEASURED, 2026-09-06) — D271
+
+*Numbered D271, not D270: D270 is already allocated by open draft PR #16382, so this amendment starts after it
+to avoid a collision.*
+
+- **D271 — THE BARE `.editor-panel` 560px FLOOR IS ACCEPTED FOR SHEETS, GRAPH AND MEDIA. It is measured, it
+  clips nothing, and the one overrun it participates in is a LIVE SCROLLER owned by `.pane-column`, not by the
+  floor.** Measured on deployed guerrilla at served sha `17f4adba1c5948be250050aabfadab79ef3b4432` (pre and post
+  bracket identical; footer `Barkpark v0.2.26.2058 · 17f4adba1`), Chromium 147.0.7727.15, three surfaces × four
+  viewports × 900 tall, navigation-only, raw JSON at
+  `scripts/measurements/spd-b8-editor-panel-blast-radius-2026-09-06.json`.
+
+  | surface | 1024 | 900 | 720 | 640 |
+  |---|---|---|---|---|
+  | Sheets (`.editor-panel.sheet-editor`, `sheet/sheet-798717`) | 720px · 1024/1024 · **FITS** | 856px · 900/900 · **FITS** | 676px · 720/720 · **FITS** | 596px · 640/640 · **FITS** |
+  | Graph (`.editor-panel.graph-editor`, `graph/<paper id>`) | 764px · 1024/1024 · **FITS** | 856px · 900/900 · **FITS** | 676px · 720/720 · **FITS** | 596px · 640/640 · **FITS** |
+  | Media (`.editor-panel.media-explorer-panel`, `mediaAsset`) | 560px · 1024/1024 · **FITS** | 560px · 900/900 · **FITS** | 560px · **788/720** · **OVERRUNS** | 560px · **788/640** · **OVERRUNS** |
+
+  (cells read *panel `getBoundingClientRect().width` · `.pane-layout` scrollWidth/clientWidth · verdict*.
+  `min-width: 560px`, `position: relative` computed on all twelve; `container-type` computed `inline-size` on
+  graph and media and `normal` on the sheet — D33/D42's carve-out is live on the deployed build.)
+
+  **THE ROW'S STATED MECHANISM IS STALE AND THIS IS THE HEADLINE.** `spd-b8` was filed in July against
+  `.pane-layout { overflow: hidden }`, from which it derived "the sum of pane floors exceeding the viewport makes
+  the desk CLIP horizontally rather than crush, and content can become unreachable". On origin/main the rule is
+  **`.pane-layout { display: flex; flex: 1; overflow-x: auto; overflow-y: hidden; }`** — a scroller on the
+  overrun axis. Measured, not inferred: `overflowX` computes to `auto`; `scrollLeft` moves from 0 to the full
+  overrun (68px at 720, 148px at 640); and after that scroll the panel's right edge sits at **exactly**
+  `innerWidth`. Nothing is unreachable at any measured width. The valve is the "it costs nothing when nothing
+  overflows" clause the layout comment already claims, and this is the first measurement that exercises it.
+
+  **WHAT THE MEDIA OVERRUN ACTUALLY IS.** 44 (collapsed strip) + 44 (collapsed strip) + 140
+  (`.pane-column--last.bp-doc-list`, at the bottom of `min-width: clamp(140px, 18vw, 260px)`) + 560
+  (`.editor-panel`, pinned at exactly its floor) = 788, invariant at both 720 and 640 and reproduced on two cold
+  loads each. Sheets and Graph escape it for a structural reason, not a lucky one: opening a document collapses
+  the list panes to ONE 44px strip, so their row is `44 + panel` and the panel takes the remainder — 596px at
+  640, comfortably above its own floor. Media has no document open, so the desk keeps a full list column, and it
+  is that column plus two strips — 228px of `.pane-column` chrome — that the viewport cannot hold beside a 560px
+  panel. **Scoping `min-width` off `.media-explorer-panel` would remove the overrun** (560 → 492 at 720) and is
+  therefore the tempting move; it is refused, because the floor is not the party at fault and removing it buys a
+  narrower media panel at every width in exchange for making one selector two.
+
+  **SO THE RESIDUE IS FILED WHERE IT BELONGS, AND IT IS NOT THIS TASK'S FILE.** The open question left standing
+  is whether the narrow bucket should keep a 140px list column beside a floored content pane at all — a
+  `.pane-column` / bucket-policy question (its phone sibling, `html[data-width-bucket="phone"] .pane-layout:has(>
+  .editor-panel) .pane-column { display: none }`, already answers it below 640 by hiding the column outright).
+  `spd-b6-sub500-phone-proof` is the neighbouring row. Nothing in `root.html.heex` changes under D271 and no
+  colour gate is spent.
+
+  **NON-VACUITY.** The instrument's verdict is three independent witnesses (`.pane-layout` scrollWidth >
+  clientWidth; any child's right edge > innerWidth; `documentElement.scrollWidth` > innerWidth), and it is not a
+  detector that can only say FITS: it printed CLIPS on 2 of 12 cells, on the surface with the widest chrome, at
+  the two narrowest widths, twice each from cold. `view_edit_parity_test.exs` + `studio_components_pane_test.exs`
+  are 52 tests / 0 failures on the branch, which is true by construction — D271 changes no CSS.
+
+  **D29 AND D42's CENSUS LINE NUMBERS ARE ALL STALE; the roster is not.** Derived from origin/main rather than
+  from the row: paper `studio_live/components.ex:194` (row said `:98`), media `:1627` (`:797`), beta `:1692`
+  (`:861`), classic `studio_components/editor.ex:552` (`:367`), graph `live/studio/graph_view.ex:113` (correct),
+  sheet `live/studio/sheet_grid.ex:2589` (`:2478`). Six roots, exactly as D42 corrected D29 — cite the roster by
+  name, never by the line.

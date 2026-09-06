@@ -277,9 +277,40 @@ export function bpBase(over) {
         slot_units_truncated: null,
         reported_at: null,
       },
+      // dr-w10-s1 — the per-box deploy vital. Always present on the wire: when
+      // a box owns no sites (six of eight prod boxes), router.ex's
+      // merge_deploy_rate/2 fallback puts `no_deploy_surface/0` — THIS all-nil
+      // sentinel, key for key, with rate/absorption/box_caused each the shape
+      // DeployLedger.rate(0, 0) returns. Same HONESTY LAW as `pressure` above:
+      // a refusal carries `pct: null` and `refused: true`, never a 0.0 that
+      // would read as a box with a perfect deploy record.
+      deploy_rate: {
+        window: null,
+        sites: 0,
+        sites_deploying: 0,
+        rate: DEPLOY_RATE_UNMEASURED(),
+        absorption: DEPLOY_RATE_UNMEASURED(),
+        box_caused: DEPLOY_RATE_UNMEASURED(),
+      },
     },
     over,
   );
+}
+
+// DeployLedger.rate(0, 0) — the refusing shape, byte for byte. A function so
+// each of the three slots above gets its OWN object: one shared reference would
+// let a scenario's override of `rate` silently move `absorption` too.
+function DEPLOY_RATE_UNMEASURED() {
+  return {
+    sample: 0,
+    pct: null,
+    numerator: 0,
+    min_sample: 200,
+    refused: true,
+    reason: "sample 0 below min_sample 200",
+    basis:
+      "attempted rows in the window: failed + deferred + live + in_flight + cancelled + residual (never-attempted tombstones excluded, D19)",
+  };
 }
 
 const liveInstance = bpBase({

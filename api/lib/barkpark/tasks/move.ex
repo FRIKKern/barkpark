@@ -51,6 +51,7 @@ defmodule Barkpark.Tasks.Move do
       emit_broadcasts: 1
     ]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.{Document, DraftId, Scope}
   alias Barkpark.Repo
 
@@ -73,7 +74,7 @@ defmodule Barkpark.Tasks.Move do
       when is_binary(task_uuid) and (is_binary(new_parent_doc_id) or is_nil(new_parent_doc_id)) do
     result =
       Repo.transaction(fn ->
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_uuid}"])
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_uuid)])
 
         case Repo.get(Document, task_uuid) do
           nil ->

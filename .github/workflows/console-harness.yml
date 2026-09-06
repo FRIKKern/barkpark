@@ -371,8 +371,55 @@ jobs:
       - name: Syntax-check the shipped console client
         run: node --check cloud/priv/static/app.js
 
-      - name: Run console harness
-        run: node --test cloud/priv/static/__app.test.mjs
+      # NEVER A BARE `node --test` (task-2c39c3b9e1f925c2). A file that still
+      # LOADS but registers ZERO tests is reported by node as one passing test
+      # — "ok 1 - <path>", "# pass 1", exit 0 — so deleting every assertion in
+      # this harness took 1333 passes to 1 and left the REQUIRED Console gate
+      # GREEN. That was measured, not theorised. A COMMITTED test tally is the
+      # only assertion here that does not derive from the tree it measures, and
+      # so the only one a gutted tree cannot satisfy.
+      #
+      # WHY NOT scripts/node-test-floor.mjs, the repo's wrapper for exactly this
+      # defect: it expands its patterns with fs.globSync, i.e. node >= 22
+      # (architecture.yml:73 pins 22 for that reason), and THIS job runs node 20
+      # by declaration — cloud/priv/static/__node-version says 20 and
+      # scripts/console-runtime-pin-check.sh reds any drift from it. Bumping the
+      # console harness's runtime is a separate, deliberate decision and is not
+      # smuggled in by a CI floor. The idiom below is this repo's node-20 form of
+      # the same floor, lifted from hundesteder.yml's MIN_TESTS step: sum every
+      # `# pass N` summary FIELD-wise (NF == 3, numeric third field), which reads
+      # both the TAP and the spec shapes and sums per-file tallies rather than
+      # last-wins; an unparseable log yields 0 and is REFUSED, never read as a
+      # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
+      # status, so without it `tee` would launder a red suite into a green step.
+      #
+      # FLOOR 1333 — derived by measurement on 2026-09-06 (`node --test
+      # cloud/priv/static/__app.test.mjs` -> `# pass 1333`), the same number the
+      # filing's independent transcript recorded. Exact rather than padded: the
+      # threat this pins is DELETION, the comparison is `-lt`, so adding tests
+      # never reds and removing one always does. Removing tests on purpose means
+      # editing this literal, which is the point of a literal.
+      - name: Run console harness (1333-test tally, never bare `node --test`)
+        run: |
+          set -euo pipefail
+          # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
+          # workflow's `path-escape` job already uses: a guard that fails toward
+          # green must be made to lose on a known input before its green means
+          # anything. The known input is the exact TAP a GUTTED file emits — node
+          # counts the FILE as one passing test, `# pass 1`. Two things are asserted
+          # about it: the parser below still reads 1 out of it (hundesteder.yml's
+          # version of this awk once used an unguarded $(NF-1), printed EMPTY, and
+          # turned every comparison after it into a no-op), and 1 is UNDER this
+          # step's literal, i.e. the literal is still capable of refusing a gutting.
+          gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -lt 1333 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against floor 1333 — this floor can no longer lose"; exit 1; }
+          node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
+          tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
+          if [ "${tally:-0}" -lt 1333 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed floor is 1333 — a test file that still LOADS but registers nothing exits 0 as one passing test, so this is what a gutted harness looks like. Restore the tests, or lower this literal deliberately."
+            exit 1
+          fi
+          echo "console harness: ${tally} tests, floor 1333 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It
@@ -507,7 +554,31 @@ jobs:
           : > "$log"
           printf '#!/bin/sh\necho "$*" >> %s\nexec /usr/bin/curl "$@"\n' "$log" > "$shim/curl"
           chmod +x "$shim/curl"
-          PATH="$shim:$PATH" node --test cloud/priv/static/__preview__/seal-predicate.test.mjs
+          # NEVER A BARE `node --test` (task-2c39c3b9e1f925c2) — see the console
+          # harness step above for the whole reasoning: a file that still LOADS
+          # but registers ZERO tests is reported by node as one passing test and
+          # exits 0, so this required gate stayed green over a gutted suite. The
+          # committed tally below is the one number here that does not derive
+          # from the tree it measures. scripts/node-test-floor.mjs, the repo's
+          # wrapper for this, needs node >= 22 (fs.globSync) and this job is
+          # pinned to node 20 by cloud/priv/static/__node-version.
+          #
+          # FLOOR 101 — derived 2026-09-06 from this file's registrations: 101
+          # top-level `test(` calls, and NO nested or loop-generated ones (an
+          # unanchored grep for `test(` finds the same 101), so 101 is the count
+          # the runner reports. Exact: growth never reds (`-lt`), deletion does.
+          # Same self-test as the console harness step above: the parser must still
+          # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
+          # step's literal, or this floor has gone blind and its green means nothing.
+          gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -lt 101 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against floor 101 — this floor can no longer lose"; exit 1; }
+          PATH="$shim:$PATH" node --test cloud/priv/static/__preview__/seal-predicate.test.mjs 2>&1 | tee /tmp/seal-predicate-tests.txt
+          tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/seal-predicate-tests.txt)
+          if [ "${tally:-0}" -lt 101 ]; then
+            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed floor is 101 — a test file that still LOADS but registers nothing exits 0 as one passing test, so this is what a gutted harness looks like. Restore the tests, or lower this literal deliberately."
+            exit 1
+          fi
+          echo "seal predicate tests: ${tally} tests, floor 101 — the pin re-earned"
           if [ -s "$log" ]; then
             echo "::error title=Seal predicate suite reached the NETWORK::The Console gate is a required context; a suite that curls a host this repo does not own is green only while that host is up. Calls recorded:"
             cat "$log"
@@ -583,19 +654,22 @@ jobs:
       #     has-an-importer.
       #
       # NOT members, checked rather than assumed: serve.mjs, scenarios.mjs,
+      # attention-scenarios.mjs (imported by overflow-guard.mjs, #16372),
       # font-pin.mjs, bringup-retry.mjs, defect-selection.mjs,
       # exit-vocabulary.mjs, ready-host-paint.mjs, seal-predicate.mjs and
       # mock.js carry no `run:` line of their own but are IMPORTED by
       # instruments that do, so their bytes execute on every console run.
       # (smoke.mjs, member-authority-sweep.mjs, breakpoint-sweep.mjs,
       # cssom-parity.mjs, overflow-guard.mjs, fixtures/ready-host-paint/proof.mjs
-      # and four `.test.mjs` suites are invoked outright, above — they were never
+      # and five `.test.mjs` suites — seal-predicate, breakpoint-sweep,
+      # bringup-retry, ready-host-paint and, since task-e3bd53c0df306521,
+      # attention-scenarios — are invoked outright, above; they were never
       # candidates.) Together with the members named here that is every
       # executable file in this directory, accounted for one by one; the class
       # is enumerated, not sampled.
       #
-      # RE-DERIVE, never inherit — this list is dated (2026-09-05, origin/main
-      # 6c6e88821) and the honest predicate is per-file, not a grep over prose:
+      # RE-DERIVE, never inherit — this list is dated (2026-09-06, origin/main
+      # 1083fec5a; previously 2026-09-05 / 6c6e88821) and the honest predicate is per-file, not a grep over prose:
       #
       #   git grep -nE '(^|[^#[:alnum:]_-])(node|bash|sh)[[:space:]]+[^|;&]*__preview__/' \
       #     -- .github/ scripts/ Makefile package.json
@@ -635,8 +709,47 @@ jobs:
           echo "::error title=console-unit ${v} — breakpoint-sweep.mjs::breakpoint-sweep.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
           exit 1
 
-      - name: Responsive sweep unit tests
-        run: node --test cloud/priv/static/__preview__/breakpoint-sweep.test.mjs
+      # Same floor as the console harness step above, same reason, same idiom:
+      # a bare `node --test` on a file that registers nothing exits 0 reporting
+      # the FILE as one passing test. FLOOR 69 — measured 2026-09-06 on this
+      # tree; exact, so a deletion reds and growth does not.
+      - name: Responsive sweep unit tests (69-test tally)
+        run: |
+          set -euo pipefail
+          # Same self-test as the console harness step above: the parser must still
+          # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
+          # step's literal, or this floor has gone blind and its green means nothing.
+          gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -lt 69 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against floor 69 — this floor can no longer lose"; exit 1; }
+          node --test cloud/priv/static/__preview__/breakpoint-sweep.test.mjs 2>&1 | tee /tmp/breakpoint-sweep-tests.txt
+          tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/breakpoint-sweep-tests.txt)
+          if [ "${tally:-0}" -lt 69 ]; then
+            echo "::error::responsive sweep unit tests: ran ${tally:-0} test(s), the committed floor is 69 — a test file that still LOADS but registers nothing exits 0 as one passing test, so this is what a gutted harness looks like. Restore the tests, or lower this literal deliberately."
+            exit 1
+          fi
+          echo "responsive sweep unit tests: ${tally} tests, floor 69 — the pin re-earned"
+
+      # THE ATTENTION-SCENARIO AXIS'S OWN TESTS (#16372, wired by task-e3bd53c0df306521).
+      # attention-scenarios.mjs derives the scenario axis at run time from app.js's
+      # own filterFleet through a vm sandbox (19 scenarios / 304 cells, replacing a
+      # hardcoded 3 / 48) with an empty-read refusal, a positive control and a
+      # both-exit-code proof; overflow-guard.mjs imports it. Its suite was born on
+      # 2026-09-06 and no `run:` step reached it — the "written, not wired" shape
+      # that produced 14 of 66 orphaned scripts/ self-tests. Same tally floor as the
+      # steps above: 7 tests on origin/main 1083fec5a, 2026-09-06 (re-derive with
+      # `node --test cloud/priv/static/__preview__/attention-scenarios.test.mjs`).
+      - name: Attention-scenario axis unit tests (7-test tally)
+        run: |
+          set -euo pipefail
+          gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -lt 7 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against floor 7 — this floor can no longer lose"; exit 1; }
+          node --test cloud/priv/static/__preview__/attention-scenarios.test.mjs 2>&1 | tee /tmp/attention-scenarios-tests.txt
+          tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/attention-scenarios-tests.txt)
+          if [ "${tally:-0}" -lt 7 ]; then
+            echo "::error::attention-scenario axis unit tests: ran ${tally:-0} test(s), the committed floor is 7 — a test file that still LOADS but registers nothing exits 0 as one passing test, so this is what a gutted harness looks like. Restore the tests, or lower this literal deliberately."
+            exit 1
+          fi
+          echo "attention-scenario axis unit tests: ${tally} tests, floor 7 — the pin re-earned"
 
       # THE BRING-UP RETRY'S OWN TESTS (deploy-reliability wave 8).
       #
@@ -653,8 +766,25 @@ jobs:
       # The load-bearing assertion in it is the fail-closed one: N consecutive
       # refusals still REFUSE. If that ever regressed, a required Console gate
       # could go green over a run that measured nothing.
-      - name: Bring-up retry unit tests (the refusal path a green run never visits)
-        run: node --test cloud/priv/static/__preview__/bringup-retry.test.mjs
+      # Same floor as the console harness step above, same reason, same idiom:
+      # a bare `node --test` on a file that registers nothing exits 0 reporting
+      # the FILE as one passing test. FLOOR 12 — measured 2026-09-06 on this
+      # tree; exact, so a deletion reds and growth does not.
+      - name: Bring-up retry unit tests (the refusal path a green run never visits, 12-test tally)
+        run: |
+          set -euo pipefail
+          # Same self-test as the console harness step above: the parser must still
+          # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
+          # step's literal, or this floor has gone blind and its green means nothing.
+          gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -lt 12 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against floor 12 — this floor can no longer lose"; exit 1; }
+          node --test cloud/priv/static/__preview__/bringup-retry.test.mjs 2>&1 | tee /tmp/bringup-retry-tests.txt
+          tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/bringup-retry-tests.txt)
+          if [ "${tally:-0}" -lt 12 ]; then
+            echo "::error::bring-up retry unit tests: ran ${tally:-0} test(s), the committed floor is 12 — a test file that still LOADS but registers nothing exits 0 as one passing test, so this is what a gutted harness looks like. Restore the tests, or lower this literal deliberately."
+            exit 1
+          fi
+          echo "bring-up retry unit tests: ${tally} tests, floor 12 — the pin re-earned"
 
       # THE RENDERED-HOST FLOOR'S OWN TESTS (task-e72560e947dba4e6).
       #
@@ -678,8 +808,25 @@ jobs:
       # The REAL-BROWSER half lives in fixtures/ready-host-paint/proof.mjs and
       # runs in the browser job below, because the defect is a computed-opacity
       # read only a rendering engine performs.
-      - name: Rendered-host floor unit tests (the settle a green run never visits)
-        run: node --test cloud/priv/static/__preview__/ready-host-paint.test.mjs
+      # Same floor as the console harness step above, same reason, same idiom:
+      # a bare `node --test` on a file that registers nothing exits 0 reporting
+      # the FILE as one passing test. FLOOR 35 — measured 2026-09-06 on this
+      # tree; exact, so a deletion reds and growth does not.
+      - name: Rendered-host floor unit tests (the settle a green run never visits, 35-test tally)
+        run: |
+          set -euo pipefail
+          # Same self-test as the console harness step above: the parser must still
+          # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
+          # step's literal, or this floor has gone blind and its green means nothing.
+          gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -lt 35 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against floor 35 — this floor can no longer lose"; exit 1; }
+          node --test cloud/priv/static/__preview__/ready-host-paint.test.mjs 2>&1 | tee /tmp/ready-host-paint-tests.txt
+          tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/ready-host-paint-tests.txt)
+          if [ "${tally:-0}" -lt 35 ]; then
+            echo "::error::rendered-host floor unit tests: ran ${tally:-0} test(s), the committed floor is 35 — a test file that still LOADS but registers nothing exits 0 as one passing test, so this is what a gutted harness looks like. Restore the tests, or lower this literal deliberately."
+            exit 1
+          fi
+          echo "rendered-host floor unit tests: ${tally} tests, floor 35 — the pin re-earned"
 
       # The SPA's design contract, machine-checked (charter GR5): dead classes,
       # undefined tokens, WCAG contrast across every theme identity, offline-purity,

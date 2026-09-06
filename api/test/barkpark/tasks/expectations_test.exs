@@ -20,6 +20,7 @@ defmodule Barkpark.Tasks.ExpectationsTest do
   use Oban.Testing, repo: Barkpark.Repo
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
+  alias Barkpark.Content.Graph
   alias Barkpark.EdgeProjector.ProjectorWorker
   alias Barkpark.Tasks.Expectations
 
@@ -236,5 +237,110 @@ defmodule Barkpark.Tasks.ExpectationsTest do
   test "an unknown paper id yields an empty view, never an error", %{scope: scope} do
     assert %{tasks: [], truncated: false} =
              Expectations.driven_tasks(uniq("no-such-paper"), view_opts(scope))
+  end
+
+  # ── 5. The drop is COUNTED (task-464b89f30e3f8e41) ──────────────────────────
+  #
+  # `reverse_referencers/2` and `entries/3` do NOT clamp identically: the walk
+  # hydrates through `Content.Graph`'s keyed read, the per-task hydration adds
+  # `Content.Query.get_documents_by_ids/3`'s `scope_to_dataset/3` +
+  # `restrict_to_visible_types/3`. A referencer that clears the first and fails
+  # the second used to vanish with no trace — a SHORT answer that reported
+  # itself complete. Measured live 2026-09-06: three real `content_edges` rows
+  # (api-read-path-security-sweep -> two papers, authoring-excellence -> one)
+  # were absent from every `GET /v1/graph/<paper>/tasks` while present in
+  # `GET /v1/graph/<paper>`, and the filed diagnosis blamed the projector.
+  test "a referencer that does not hydrate under the read's scope is reported in :unhydrated",
+       %{scope: scope} do
+    slug = uniq("unhydrated-paper")
+    task_id = uniq("unhydrated-task")
+    mk_paper!(slug)
+
+    mk_task!(task_id, scope, %{
+      "design_doc" => slug,
+      "acceptance_criteria" => [%{"criterion" => "listed", "met" => false}]
+    })
+
+    publish_task!(task_id, scope)
+    drain_projector!()
+
+    # NON-VACUITY: the edge is real and the task DOES hydrate under its own
+    # scope — so a later empty answer is the clamp, not a missing fixture.
+    complete = Expectations.driven_tasks(slug, view_opts(scope))
+    assert Enum.map(complete.tasks, & &1.doc_id) == [task_id]
+    assert complete.unhydrated == []
+
+    # The SAME edge, re-hydrated under a scope the source document cannot
+    # satisfy. The answer is short — and says so.
+    referencers = Graph.reverse_referencers(Content.published_id(slug), view_opts(scope))
+    assert Enum.any?(referencers, &(&1.from_doc_id == task_id))
+
+    short =
+      Expectations.driven_tasks_from_referencers(
+        referencers,
+        Keyword.put(view_opts(scope), :dataset, uniq("no-such-dataset"))
+      )
+
+    assert short.tasks == []
+    assert short.unhydrated == [task_id]
+    refute short.truncated
+  end
+
+  # ── 6. doc_id is not unique across types (task-464b89f30e3f8e41) ────────────
+  #
+  # `documents.doc_id` is unique per (scope, TYPE): a `tag` document and a
+  # `task` document may share a name — and epic roots routinely do, because the
+  # epic's name is also its tag. MEASURED on prod: the `wave_paper` + `papers`
+  # edges of the task `api-read-path-security-sweep` are anchored on a
+  # `type: "tag"` document of the SAME doc_id, which is why the reader (rightly)
+  # refuses them.
+  #
+  # HONEST LIMIT OF THIS TEST. It is a NON-REGRESSION pin, not a catch: it
+  # proves a same-named tag document does not displace the task, but this
+  # fixture cannot force the shadow. `get_documents_by_ids/3` has no `order_by`,
+  # and here the TASK row wins the doc_id key anyway (verified by probe:
+  # "BATCH WINNER: task"), so removing `resolve_task/4`'s type-pinned retry
+  # leaves this test GREEN across seeds 1-3. The retry is kept as a cheap,
+  # scope-preserving guard for the ordering this fixture cannot reproduce —
+  # it widens no clamp — and is documented as unproven rather than claimed.
+  test "a task whose doc_id is also a tag document still lists (non-regression pin)",
+       %{scope: scope} do
+    slug = uniq("shadowed-paper")
+    task_id = uniq("shadowed-task")
+    mk_paper!(slug)
+
+    mk_task!(task_id, scope, %{
+      "design_doc" => slug,
+      "acceptance_criteria" => [%{"criterion" => "listed", "met" => false}]
+    })
+
+    publish_task!(task_id, scope)
+    drain_projector!()
+
+    # The collision: a PUBLISHED tag document carrying the SAME doc_id.
+    {:ok, _tag} =
+      Content.create_document(
+        "tag",
+        %{"doc_id" => task_id, "title" => "TAG #{task_id}", "content" => %{"kind" => "tag"}},
+        @dataset,
+        scope
+      )
+
+    {:ok, _} = Content.publish_document(task_id, "tag", @dataset, scope)
+
+    # NON-VACUITY: both rows really exist under this scope, so the batch read
+    # genuinely has two candidates for the one doc_id key.
+    assert {:ok, %{type: "task"}} =
+             Content.get_document(task_id, "task", @dataset, view_opts(scope))
+
+    assert {:ok, %{type: "tag"}} =
+             Content.get_document(task_id, "tag", @dataset, view_opts(scope))
+
+    result = Expectations.driven_tasks(slug, view_opts(scope))
+
+    assert Enum.map(result.tasks, & &1.doc_id) == [task_id]
+    assert result.unhydrated == []
+    # The TASK's title, never the tag's — proof the type-pinned read won.
+    assert [%{title: "Task " <> _}] = result.tasks
   end
 end

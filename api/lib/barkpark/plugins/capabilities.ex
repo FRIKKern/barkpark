@@ -2143,6 +2143,34 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # Lift a workspace suspension (task-7ab3d03b49606f83). The operator verb
+      # `Content.Errors` and the PlaygroundReaper moduledoc both promised —
+      # `Quota.reinstate/1` had zero callers in lib/ until this route existed, so
+      # a playground suspended by its TTL was rescuable only from iex or SQL.
+      #
+      # auth_tier "admin" is the ENFORCED pipeline tier
+      # (`BarkparkWeb.Plugs.RequireAdmin`), which is what
+      # `CapabilitiesTierParityTest` compares against. The route ALSO rides
+      # `RequirePlatformOperator`, a config-backed instance-operator allowlist
+      # that narrows `admin` further on an armed instance — the manifest
+      # vocabulary has no rung for that narrowing, exactly as it has none for the
+      # `/v1/admin/self-update`, `/v1/admin/site-deploy` and
+      # `/v1/status/incidents` siblings on the identical pipeline. A non-operator
+      # admin therefore gets 403 `required: "platform_operator"` from a verb the
+      # manifest advertises at "admin"; that is the same contract those siblings
+      # already have, not a new one.
+      core_cmd(
+        "workspace.reinstate",
+        "workspace",
+        "reinstate",
+        "Lift a workspace suspension (instance-operator only). Re-arms an elapsed playground TTL.",
+        "POST",
+        "/v1/admin/workspaces/:slug/reinstate",
+        "admin",
+        args: [arg("slug", true, "string", "Workspace slug (from workspace ls).")],
+        writes: true,
+        default_output: "json"
+      ),
       core_cmd(
         "token.ls",
         "token",

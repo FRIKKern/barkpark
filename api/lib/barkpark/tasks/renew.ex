@@ -114,7 +114,8 @@ defmodule Barkpark.Tasks.Renew do
     * the blast radius: one key, named above.
 
   Write shape is the renewal family's: per-task advisory lock on
-  `task:<doc_id>` — the STRING key `TtlSweeper` and `Pulse` use, so a renew and
+  `task:<uuid>` (`LockKey.task/1`) — the key `TtlSweeper`, `Pulse` and
+  `Tasks.close/3` all use, so a renew and
   a reap of the same row serialize — in-lock re-read, rev-CAS through
   `Internal.fenced_content_write/4`, a durable `task.lease_renewed`
   mutation_event carrying the caller token id, post-commit broadcast.
@@ -147,6 +148,7 @@ defmodule Barkpark.Tasks.Renew do
       emit_broadcasts: 1
     ]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.Document
   alias Barkpark.Repo
 
@@ -209,20 +211,21 @@ defmodule Barkpark.Tasks.Renew do
 
     result =
       Repo.transaction(fn ->
-        # Read once for the lock key, lock, re-read: doc_id is immutable so the
-        # pre-lock read is safe for keying, and the row state we gate on must
-        # be read UNDER the lock or a reap committing in between could race us.
-        # global-read: by-PK read for the renewal-family lock key
+        # Lock FIRST, then read. `task_id` IS the document's uuid PRIMARY KEY,
+        # so the converged `task:<uuid>` key needs no pre-lock read — the
+        # read-for-the-key/re-read dance existed only because the key was
+        # built from the `doc_id` SLUG, a DIFFERENT lock from the one
+        # close/release/stage/sweeper take (task-eal-bl-lock-key-convergence).
+        # The row state gated on below is read UNDER the lock, so a reap
+        # committing in between cannot race us.
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_id)])
+
+        # global-read: in-lock by-PK read — tenancy resolved at the controller (doc_id -> task.id), the same posture as Pulse and Close.
         case Repo.get(Document, task_id) do
           nil ->
             {:error, :not_found}
 
-          %Document{doc_id: doc_id} ->
-            _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:" <> doc_id])
-
-            # global-read: in-lock re-read of the same PK row (see above)
-            doc = Repo.get!(Document, task_id)
-
+          %Document{} = doc ->
             case check_claimed(doc) do
               :ok -> apply_renew(doc, pr, state, reason, now, caller_token_id)
               {:error, err} -> {:error, err}

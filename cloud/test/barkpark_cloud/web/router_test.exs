@@ -484,7 +484,12 @@ defmodule BarkparkCloud.Web.RouterTest do
       young_fixture = Enum.find(fixture_rows, &(&1["name"] == "Zeta"))
       empty_fixture = Enum.find(fixture_rows, &(&1["name"] == "alpha"))
 
-      assert length(fixture_rows) == 16
+      # 16 -> 18 (dr-w10-s1 / dr-w24-followup): the fixture gained `df-1` (the
+      # recorded guerrilla deploy_rate shape → deploys_failing, rank 5) and
+      # `div-1` (commit_ancestry "diverged" → diverged, rank 6). This count is a
+      # FRESHNESS pin on the producer-backed fixture, so it moves WITH the
+      # fixture, in the same commit, and never by widening it to `>=`.
+      assert length(fixture_rows) == 18
 
       assert Enum.all?(fixture_rows, &Map.has_key?(&1, "queued_deploy_age_seconds")),
              "every Go ranking row must preserve the field the producer always emits"

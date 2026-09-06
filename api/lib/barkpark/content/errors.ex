@@ -78,6 +78,14 @@ defmodule Barkpark.Content.Errors do
     # The unscoped-WRITE ruling (task-6fa023cdabdc5f6a, main 2026-09-05).
     "workspace_scope_required" =>
       "This write named no workspace and your credential could mean more than one (or none), so it was refused rather than attributed to a tenant nobody chose. Say where it goes: send the write to /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset, or use a token bound to a single workspace. details.workspaces lists the slugs this credential can write to.",
+    # THE ONE RULE's refusal (task-49eef068420df918 + task-baf9b74a0ffc83f4) —
+    # `Barkpark.Tasks.TwinResolver`: a task doc_id living in more than one
+    # dataset of one workspace/project, asked for by a caller who named none.
+    "ambiguous_dataset" =>
+      "This task id exists in more than one dataset in this workspace/project, so the door refused rather than pick one for you. Name the dataset you mean (?dataset=<name> on the task route), or collapse the twin — details.datasets lists every dataset that holds the id.",
+    # The PRODUCER half of the same rule — `Barkpark.Tasks.DatasetTwinFence`.
+    "dataset_twin" =>
+      "A task with this _id already exists in another dataset of this workspace/project, and a second copy would make the id ambiguous for every by-id reader. Write to the dataset that already holds it (details.datasets), use a different _id, or — if a genuinely separate copy is intended — resend with content.dataset_twin_intended: true.",
     # quota_exceeded stays the LAST entry: scaffy/commands/add-error-shape.scaffy
     # anchors its hint-append on this exact comma-free tail.
     "quota_exceeded" =>
@@ -773,6 +781,36 @@ defmodule Barkpark.Content.Errors do
       message: Map.get(payload, :message, "task duplicates an existing task"),
       status: 409,
       details: Map.take(payload, [:similar, :advise])
+    }
+
+  # THE ONE RULE, READ SIDE (task-49eef068420df918 + task-baf9b74a0ffc83f4).
+  # `Barkpark.Tasks.TwinResolver` RAISES this rather than picking a row when a
+  # task doc_id lives in more than one dataset and the caller named none. 409 —
+  # the `conflict` family: a resource-STATE collision, never a server fault, so
+  # it must not collapse to `internal_error` on the RenderErrors path (the
+  # pass-through clause in `BarkparkWeb.ErrorJSON` is what keeps this body).
+  # `details.datasets` is the caller's remedy: it names every dataset that holds
+  # the id, which is exactly what `?dataset=` needs.
+  defp build({:error, %Barkpark.Tasks.AmbiguousTwinError{} = e}),
+    do: %{
+      code: "ambiguous_dataset",
+      message: e.message,
+      status: 409,
+      details: %{doc_id: e.doc_id, datasets: e.datasets}
+    }
+
+  # THE ONE RULE, PRODUCER SIDE (task-49eef068420df918 C2).
+  # `Barkpark.Tasks.DatasetTwinFence` refuses a task birth that would put an
+  # existing (doc_id, type) into a SECOND dataset of the same workspace+project
+  # — the 2026-08-07 sequence that made the eleven live twins. 409, same family
+  # as `duplicate_task`: the row is not invalid, the LEDGER state collides.
+  defp build({:error, {:dataset_twin, payload}}) when is_map(payload),
+    do: %{
+      code: "dataset_twin",
+      message:
+        Map.get(payload, :message, "task id already exists in another dataset of this project"),
+      status: 409,
+      details: Map.take(payload, [:doc_id, :datasets, :dataset, :advise])
     }
 
   # Publish dedup wall (authoring-excellence E4): a publish near-duplicates an

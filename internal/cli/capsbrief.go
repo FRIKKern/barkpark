@@ -41,6 +41,15 @@ type briefLegend struct {
 	Flag    []string `json:"flag"`
 }
 
+// briefLegendKey is the top-level key that MARKS a document as the rendered
+// brief. It is the briefDoc.Legend json tag, restated as a const because a Go
+// struct tag cannot reference one — TestBriefLegendKeyMatchesRender pins the
+// two together. The manifest FILE loader (renderedBriefView, load.go) reads
+// this key to tell an operator they handed it the rendering instead of the
+// manifest, so a rename here without a rename there silently returns the old
+// internal-field-name error.
+const briefLegendKey = "legend"
+
 // briefDoc is the top-level BRIEF-KEEP-LIST v1 document. Typed (not a map) so
 // the JSON key order is pinned by the struct and two renders of the same
 // manifest are byte-identical.

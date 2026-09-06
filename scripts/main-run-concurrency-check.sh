@@ -65,6 +65,59 @@
 #     SHORTER; it cannot rot into a blanket waiver.
 # The acceptance for retiring this ledger is an EMPTY list, not a longer one.
 #
+# THE MAIN-COLLAPSE MARKER — the one declared exemption, and its syntax.
+# (task-e376642d6d69fa3f; measured 2026-09-06, orchestrate/ci-diet-main-push-fanout.md)
+#
+# Per-sha keying is right for a workflow whose per-commit verdict is worth a
+# queue slot. Measured on 2026-09-06 it is not free: 18 merges/hour x ~17
+# un-collapsible runs put main-push runs at 40% -> 52% -> 67% -> 57% of the
+# whole Actions queue across four samples, in front of every PR run. Roughly
+# half of those runs certify nothing anybody merges on.
+#
+# So a workflow MAY declare itself collapsible, with a comment line inside its
+# concurrency block, in EXACTLY this shape (the regex is `MARKER_RE` in scan()):
+#
+#     concurrency:
+#       # main-collapse: harness-ok - <one-line ground> (<task id>)
+#       group: <name>-${{ github.ref == 'refs/heads/main' && 'main' || github.ref }}
+#       cancel-in-progress: true
+#
+# One shared group for every main push plus cancel-in-progress, so a burst of
+# merges leaves ONE run, on the newest sha. Per-commit resolution is knowingly
+# traded for queue.
+#
+# THE MARKER IS A CLAIM, NOT A PERMISSION. scan() re-derives both facts it
+# asserts and REFUSES it otherwise, so it cannot become a waiver:
+#   (i)  the workflow publishes NO job name listed in
+#        .github/required-checks.json `protection.required_status_checks.checks`
+#        — READ from that file, never typed here. A required context is what a
+#        merge is decided on, so its main run must stay per-sha and bisectable.
+#   (ii) its basename matches no `DENY_PATTERNS` entry — deploy/release/
+#        landed-mark/*-watch/task-lease-renew/cron-overdue-probe/
+#        crown-reconcile/scaffy-catalog-drift. A collapsed run of a workflow
+#        that DEPLOYS is a skipped deploy; of a WATCHER, a blind window.
+#  (iii) and the shape itself must actually collapse: the group must branch on
+#        refs/heads/main (PRs keep their own group) and cancel-in-progress must
+#        be the literal `true`. A shared main group WITHOUT cancellation only
+#        queues every merge behind one slot — strictly worse than per-sha.
+# An unmarked workflow is judged exactly as before this marker existed.
+#
+# THE DENYLIST IS NOT A SHRINK-ONLY LEDGER, and the difference matters. A
+# GRANDFATHERED line waives a defect, so it may only ever be deleted; a
+# DENY_PATTERNS line refuses a waiver, so adding one is always safe and deleting
+# one is the dangerous edit. Its honesty comes from a POSITIVE CONTROL in
+# --selftest (case 19): every pattern must match at least one workflow in the
+# live tree (a typo protects nothing), every live deploy/release/renew/watch
+# workflow must be covered by some pattern, and the whole eligibility block must
+# be BYTE-IDENTICAL in scripts/never-cancel-main-check.sh — two gates that
+# disagree about one marker is the same waiver by another door.
+#
+# scripts/never-cancel-main-check.sh (D12) reads the same marker for the same
+# reason: `cancel-in-progress: true` on push-to-main is its single red, and the
+# collapse needs exactly that. It evaluates the marker ONLY when that literal
+# true is present, so it keeps reddening for exactly one reason; a marker
+# planted with the wrong shape elsewhere is THIS gate to catch.
+#
 # USAGE
 #   bash scripts/main-run-concurrency-check.sh
 #   bash scripts/main-run-concurrency-check.sh --selftest
@@ -169,13 +222,118 @@ PY
 # NO APOSTROPHES OR BACKTICKS IN THE PYTHON BLOCK (bash 3.2 heredoc-in-subst).
 scan() {
   python3 - "$1" <<'PY'
-import sys
+import sys, os, re, json, fnmatch
 
 try:
     import yaml
 except ImportError:
     print("HARNESS-UNAVAILABLE: PyYAML not importable; this is NOT a verdict on the workflow")
     sys.exit(2)
+
+
+# ── THE COLLAPSE MARKER (task-e376642d6d69fa3f) ────────────────────────────
+# A workflow may declare itself COLLAPSIBLE on main: one shared group for every
+# main push, cancel-in-progress true, so a burst of merges leaves one run on the
+# newest sha. That is a DELIBERATE loss of per-commit resolution, and it is only
+# safe for a workflow that certifies nothing anybody merges on and does nothing
+# anybody depends on having happened. The declaration is a comment line in the
+# workflow, EXACTLY:
+#
+#     # main-collapse: harness-ok - <one-line ground> (<task id>)
+#
+# matched by MARKER_RE below. It is a CLAIM, not a permission: this function
+# re-derives the two facts the claim asserts and REFUSES the marker when either
+# is false, so planting the marker on elixir.yml or on deploy.yml reds rather
+# than waives.
+MARKER_RE = re.compile(r"^[ \t]*#[ \t]*main-collapse:[ \t]*harness-ok\b")
+
+
+def has_marker(path):
+    try:
+        with open(path) as fh:
+            for line in fh:
+                if MARKER_RE.match(line):
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+def required_contexts():
+    """The required set, READ from .github/required-checks.json - never typed.
+
+    Returns None when the file cannot be read, which callers turn into
+    HARNESS-UNAVAILABLE: an unreadable authority is not an empty required set.
+    """
+    try:
+        with open(".github/required-checks.json") as fh:
+            spec = json.load(fh)
+        checks = spec["protection"]["required_status_checks"]["checks"]
+        return set(str(c["context"]) for c in checks)
+    except Exception:
+        return None
+
+
+# THE ACTION/WATCHER DENYLIST. Not a shrink-only ledger like GRANDFATHERED - the
+# safe direction here is the OPPOSITE. A grandfather line waives a defect, so it
+# must only ever be deleted; a denylist line REFUSES a waiver, so adding one is
+# always safe and deleting one is the dangerous edit. What keeps it honest is a
+# POSITIVE CONTROL in --selftest: every pattern must match at least one file in
+# the live tree (a typo protects nothing), and every live workflow that deploys,
+# releases, renews or watches must be matched by some pattern.
+DENY_PATTERNS = [
+    "deploy.yml",           # performs the production deploy
+    "release.yml",          # publishes packages
+    "release-artifact.yml", # builds and uploads a release artifact
+    "cli-release.yml",      # publishes the CLI
+    "landed-mark.yml",      # WRITES to the task ledger for the pushed sha
+    "*-watch.yml",          # breakglass / main-gate / stale-verdict: a skipped watch is a blind window
+    "task-lease-renew.yml", # a skipped renewal lets a claim lapse
+    "cron-overdue-probe.yml",
+    "crown-reconcile.yml",
+    "scaffy-catalog-drift.yml",  # its own job name calls it a post-merge watcher
+]
+
+
+def denied(basename):
+    for pat in DENY_PATTERNS:
+        if fnmatch.fnmatch(basename, pat):
+            return pat
+    return None
+
+
+def job_names(doc):
+    jobs = doc.get("jobs")
+    if not isinstance(jobs, dict):
+        return []
+    out = []
+    for key, val in jobs.items():
+        if isinstance(val, dict) and isinstance(val.get("name"), str):
+            out.append(val["name"])
+        else:
+            out.append(str(key))
+    return out
+
+
+def marker_verdict(path, doc):
+    """(ok, reason). Only called when the marker is PRESENT."""
+    base = os.path.basename(path)
+    pat = denied(base)
+    if pat is not None:
+        return (False, "it matches the action/watcher denylist pattern %r - a "
+                       "collapsed run of a workflow that deploys, releases, "
+                       "renews or watches is a skipped action or a blind "
+                       "window, never a saved CI slot" % pat)
+    req = required_contexts()
+    if req is None:
+        return (None, "REQUIRED-SET-UNREADABLE")
+    published = [n for n in job_names(doc) if n in req]
+    if published:
+        return (False, "it publishes required context(s) %s - branch protection "
+                       "merges on that name, so its main runs must stay per-sha "
+                       "and bisectable" % sorted(published))
+    return (True, "publishes no required context and is not on the action/watcher denylist")
+
 
 path = sys.argv[1]
 try:
@@ -203,15 +361,61 @@ cip = conc.get("cancel-in-progress", False)
 
 GUARD = "${{ github.ref != 'refs/heads/main' }}".replace("'", chr(39))
 findings = []
-if "github.sha" not in group or "refs/heads/main" not in group:
+per_sha = "github.sha" in group and "refs/heads/main" in group
+cip_ok = cip is False or (isinstance(cip, str) and cip.strip() == GUARD)
+
+marked = has_marker(path)
+collapse_ok = False
+if marked:
+    verdict, reason = marker_verdict(path, doc)
+    if verdict is None:
+        print("HARNESS-UNAVAILABLE: %s carries the main-collapse marker but "
+              ".github/required-checks.json could not be read, so the marker "
+              "cannot be re-derived; this is NOT a verdict" % path)
+        sys.exit(2)
+    if verdict is False:
+        findings.append(
+            "the main-collapse marker is REFUSED on %s: %s. Delete the marker "
+            "line and keep the per-sha group." % (os.path.basename(path), reason)
+        )
+    else:
+        collapse_ok = True
+
+if collapse_ok and not per_sha:
+    # THE COLLAPSED SHAPE. One group for every main push, and cancel-in-progress
+    # true so the burst leaves exactly one run on the NEWEST sha. Per-commit
+    # resolution is knowingly traded away; nothing merges on this name.
+    if "refs/heads/main" not in group:
+        findings.append(
+            "concurrency.group %r carries the main-collapse marker but does not "
+            "branch on refs/heads/main, so PR refs would share the main group "
+            "too. Expected <name>-${{ github.ref == %s && %s || github.ref }}."
+            % (group, chr(39) + "refs/heads/main" + chr(39), chr(39) + "main" + chr(39))
+        )
+    if cip is not True:
+        findings.append(
+            "concurrency.cancel-in-progress is %r on a main-collapse workflow; "
+            "the collapse only drains the queue when it is the literal true "
+            "(otherwise the shared group merely QUEUES every merge behind one "
+            "slot, which is strictly worse than per-sha)." % (cip,)
+        )
+elif not per_sha:
     findings.append(
         "concurrency.group %r is not per push sha on main. GitHub keeps ONE "
         "not-yet-started run per group, so under merge cadence each merge evicts "
         "the pending main run before a runner picks it up (measured 2026-09-02: "
         "37 of 40 main runs cancelled). Expected an expression mentioning "
-        "github.sha under a refs/heads/main condition." % group
+        "github.sha under a refs/heads/main condition, or the main-collapse "
+        "marker if this workflow publishes no required context and performs no "
+        "action." % group
     )
-if cip is not False and (not isinstance(cip, str) or cip.strip() != GUARD):
+    if not cip_ok:
+        findings.append(
+            "concurrency.cancel-in-progress is %r, neither the literal false nor the "
+            "never-cancel-main guard %r; a bare true cancels a RUNNING main run."
+            % (cip, GUARD)
+        )
+elif not cip_ok:
     findings.append(
         "concurrency.cancel-in-progress is %r, neither the literal false nor the "
         "never-cancel-main guard %r; a bare true cancels a RUNNING main run."
@@ -221,10 +425,17 @@ if cip is not False and (not isinstance(cip, str) or cip.strip() != GUARD):
 print("target: %s" % path)
 print("group: %s" % group)
 print("cancel-in-progress: %r" % (cip,))
+if marked:
+    print("main-collapse marker: present")
 for f in findings:
     print("FAIL " + f)
 if not findings:
-    print("OK a queued main run cannot be evicted, and a running one cannot be cancelled")
+    if collapse_ok and not per_sha:
+        print("OK main-collapse declared and re-derived: one main group, newest "
+              "sha wins; publishes no required context, not on the "
+              "action/watcher denylist")
+    else:
+        print("OK a queued main run cannot be evicted, and a running one cannot be cancelled")
 PY
 }
 
@@ -266,7 +477,7 @@ run_gate() {
     fi
   fi
 
-  local RC=0 SEEN=0 CLEAN=0 GRAND=0 TARGET BASE SCAN_STATUS RESULT
+  local RC=0 SEEN=0 CLEAN=0 GRAND=0 COLLAPSED=0 TARGET BASE SCAN_STATUS RESULT
   for TARGET in $TARGETS; do
     SEEN=$((SEEN + 1))
     BASE="$(basename "$TARGET")"
@@ -297,7 +508,12 @@ run_gate() {
         RC=1
         continue
       fi
-      CLEAN=$((CLEAN + 1))
+      if grep -q '^OK main-collapse declared' <<<"$RESULT"; then
+        COLLAPSED=$((COLLAPSED + 1))
+        echo "MAIN-COLLAPSE ${BASE}: one main group, newest sha wins — declared by its marker and re-derived (no required context, not an action or watcher)"
+      else
+        CLEAN=$((CLEAN + 1))
+      fi
     fi
   done
 
@@ -318,7 +534,7 @@ run_gate() {
     exit 1
   fi
   if [ "$MODE" = discovery ]; then
-    echo "main-run-concurrency gate OK — ${SEEN} main-triggered workflow(s) with a concurrency block discovered: ${CLEAN} keep one group per main sha and never cancel main, ${GRAND} grandfathered as known debt."
+    echo "main-run-concurrency gate OK — ${SEEN} main-triggered workflow(s) with a concurrency block discovered: ${CLEAN} keep one group per main sha and never cancel main, ${COLLAPSED} declare main-collapse (one main group, newest sha wins), ${GRAND} grandfathered as known debt."
   else
     echo "main-run-concurrency gate OK — ${SEEN} workflow(s) keep one group per main sha and never cancel main."
   fi
@@ -496,6 +712,142 @@ selftest() {
     ok "every GRANDFATHERED entry names a workflow that exists"
   else
     bad "GRANDFATHERED names files that do not exist:$missing"
+  fi
+
+  # ── THE MAIN-COLLAPSE MARKER: CAN-LOSE ARMS (task-e376642d6d69fa3f) ──────
+  # The marker relaxes the per-sha rule. A relaxation that cannot be REFUSED is
+  # a waiver, so every arm here plants the marker on a fixture that must not get
+  # it. Arm (13) is the positive control: without it a gate hard-wired to refuse
+  # every marker would pass (14)-(17) while making the declaration useless.
+  write_marked() {
+    # write_marked <dir> <name> <marker:yes|no> <group> <cip> <job-name>
+    local dir="$1" name="$2" marker="$3" group="$4" cip="$5" jobname="$6"
+    mkdir -p "$dir"
+    {
+      echo "name: ${name%.yml}"
+      echo "on:"
+      echo "  pull_request:"
+      echo "  push:"
+      echo "    branches: [main]"
+      echo "concurrency:"
+      [ "$marker" = yes ] && echo "  # main-collapse: harness-ok - fixture (task-e376642d6d69fa3f)"
+      echo "  group: $group"
+      echo "  cancel-in-progress: $cip"
+      echo "jobs:"
+      echo "  a:"
+      echo "    name: $jobname"
+      echo "    runs-on: ubuntu-latest"
+      echo "    steps:"
+      echo "      - run: true"
+    } > "$dir/$name"
+  }
+  # shellcheck disable=SC2016
+  local COLLAPSED='fixture-${{ github.ref == '"'"'refs/heads/main'"'"' && '"'"'main'"'"' || github.ref }}'
+
+  # (13) POSITIVE CONTROL: marked, collapsed group, cancel true, publishes no
+  #      required context, clean name -> GREEN, and the line says main-collapse.
+  local d13="$tmp/r13"; write_marked "$d13" "harnessy.yml" yes "$COLLAPSED" "true" "Harness arm"
+  rc=0; out="$(MAIN_CONCURRENCY_ROOT="$d13" bash "$0" 2>&1)" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    ok "a MARKED, clean, collapsed workflow GREENS (the marker is usable at all)"
+  else
+    bad "a marked clean collapsed workflow must green (rc=$rc)" "$(head -3 <<<"$out" | tr '\n' ' ')"
+  fi
+
+  # (14) CAN-LOSE: same shape, but the workflow publishes the REQUIRED context
+  #      `Elixir gate`. Branch protection merges on that name, so the marker
+  #      must be refused. Only the job name differs from (13).
+  local d14="$tmp/r14"; write_marked "$d14" "harnessy.yml" yes "$COLLAPSED" "true" "Elixir gate"
+  rc=0; out="$(MAIN_CONCURRENCY_ROOT="$d14" bash "$0" 2>&1)" || rc=$?
+  if [ "$rc" -eq 1 ] && grep -q 'marker is REFUSED' <<<"$out" && grep -q 'Elixir gate' <<<"$out"; then
+    ok "the marker on a workflow publishing a REQUIRED context is refused, naming the context"
+  else
+    bad "marker + required context must red (rc=$rc)" "$(head -4 <<<"$out" | tr '\n' ' ')"
+  fi
+
+  # (15) CAN-LOSE: the denylist by NAME. deploy.yml performs the production
+  #      deploy; a collapsed run is a SKIPPED DEPLOY. Driven in explicit mode so
+  #      the GRANDFATHERED ledger cannot absorb the verdict.
+  local d15="$tmp/r15"; write_marked "$d15" "deploy.yml" yes "$COLLAPSED" "true" "Harness arm"
+  rc=0; out="$(MAIN_CONCURRENCY_TARGETS="$d15/deploy.yml" bash "$0" 2>&1)" || rc=$?
+  if [ "$rc" -eq 1 ] && grep -q 'action/watcher denylist' <<<"$out"; then
+    ok "the marker on a deploy.yml-named workflow is refused by the action/watcher denylist"
+  else
+    bad "marker + deploy.yml must red (rc=$rc)" "$(head -4 <<<"$out" | tr '\n' ' ')"
+  fi
+
+  # (16) CAN-LOSE: the *-watch.yml pattern. A collapsed watch is a blind window.
+  local d16="$tmp/r16"; write_marked "$d16" "pretend-watch.yml" yes "$COLLAPSED" "true" "Harness arm"
+  rc=0; out="$(MAIN_CONCURRENCY_ROOT="$d16" bash "$0" 2>&1)" || rc=$?
+  if [ "$rc" -eq 1 ] && grep -q 'action/watcher denylist' <<<"$out"; then
+    ok "the marker on a *-watch.yml workflow is refused by the denylist pattern"
+  else
+    bad "marker + *-watch.yml must red (rc=$rc)" "$(head -4 <<<"$out" | tr '\n' ' ')"
+  fi
+
+  # (17) TODAY'S BEHAVIOUR IS UNCHANGED WITHOUT THE MARKER: a shared main group
+  #      with no marker reds exactly as it did before this feature existed.
+  local d17="$tmp/r17"; write_marked "$d17" "harnessy.yml" no "$COLLAPSED" "true" "Harness arm"
+  rc=0; out="$(MAIN_CONCURRENCY_ROOT="$d17" bash "$0" 2>&1)" || rc=$?
+  if [ "$rc" -eq 1 ] && grep -q 'is not per push sha on main' <<<"$out"; then
+    ok "a shared-main group WITHOUT the marker still reds (the pre-existing rule is intact)"
+  else
+    bad "unmarked shared-main group must red (rc=$rc)" "$(head -4 <<<"$out" | tr '\n' ' ')"
+  fi
+
+  # (18) A marked workflow that keeps `cancel-in-progress` guarded does not
+  #      collapse anything - the shared group would merely QUEUE every merge
+  #      behind one slot. That is strictly worse than per-sha, so it reds.
+  # shellcheck disable=SC2016
+  local d18="$tmp/r18"; write_marked "$d18" "harnessy.yml" yes "$COLLAPSED" '${{ github.ref != '"'"'refs/heads/main'"'"' }}' "Harness arm"
+  rc=0; out="$(MAIN_CONCURRENCY_ROOT="$d18" bash "$0" 2>&1)" || rc=$?
+  if [ "$rc" -eq 1 ] && grep -q 'only drains the queue when it is the literal true' <<<"$out"; then
+    ok "a marked, shared-main group that does NOT cancel reds (a queue is not a collapse)"
+  else
+    bad "marked + non-true cancel must red (rc=$rc)" "$(head -4 <<<"$out" | tr '\n' ' ')"
+  fi
+
+  # (19) DENYLIST POSITIVE CONTROL + CROSS-SCRIPT IDENTITY. A denylist entry that
+  #      matches no file in the live tree protects nothing (a typo, or a renamed
+  #      workflow), and the two gates must carry the SAME eligibility block or
+  #      one of them can be talked into a waiver the other refuses.
+  local ctl
+  ctl="$(python3 - scripts/main-run-concurrency-check.sh scripts/never-cancel-main-check.sh <<'PYCTL'
+import ast, glob, os, re, sys
+
+def block(path):
+    text = open(path).read()
+    m = re.search(r"^MARKER_RE = re\.compile.*?^    return \(True, \"publishes no required context.*?\n", text, re.S | re.M)
+    return m.group(0) if m else None
+
+a, b = block(sys.argv[1]), block(sys.argv[2])
+if a is None or b is None:
+    print("CTL-FAIL: the shared eligibility block was not found in %s" % ("gate 1" if a is None else "gate 2"))
+    sys.exit(0)
+if a != b:
+    print("CTL-FAIL: the eligibility block DIFFERS between the two gates - they can disagree about the same marker")
+    sys.exit(0)
+m = re.search(r"^DENY_PATTERNS = \[.*?^\]", a, re.S | re.M)
+pats = ast.literal_eval(m.group(0).split("=", 1)[1].strip())
+live = [os.path.basename(p) for p in glob.glob(".github/workflows/*.yml")]
+import fnmatch
+dead = [p for p in pats if not any(fnmatch.fnmatch(f, p) for f in live)]
+if dead:
+    print("CTL-FAIL: denylist pattern(s) match no workflow in the live tree: %s" % dead)
+    sys.exit(0)
+uncovered = [f for f in sorted(live)
+             if ("watch" in f or f.startswith("release") or f in ("deploy.yml", "cli-release.yml", "task-lease-renew.yml"))
+             and not any(fnmatch.fnmatch(f, p) for p in pats)]
+if uncovered:
+    print("CTL-FAIL: live action/watcher workflow(s) not covered by any denylist pattern: %s" % uncovered)
+    sys.exit(0)
+print("CTL-OK %d pattern(s), all matching the live tree; eligibility block identical in both gates" % len(pats))
+PYCTL
+)"
+  if grep -q '^CTL-OK' <<<"$ctl"; then
+    ok "denylist positive control: $ctl"
+  else
+    bad "denylist positive control failed" "$ctl"
   fi
 
   echo ""

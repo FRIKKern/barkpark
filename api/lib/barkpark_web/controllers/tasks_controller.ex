@@ -9,7 +9,11 @@ defmodule BarkparkWeb.TasksController do
       flat or under the `filter[<key>]=` container; an unsupported filter key
       is a 400, never a silently unfiltered page)
     * `GET    /v1/tasks/ready`              — `Tasks.ready/1` (filter container: `parent`/`parent_id`/`phase_id`,
-      all naming the ONE parent axis `ready_query/1` has; any other key is a 400)
+      all naming the ONE parent axis `ready_query/1` has; any other key is a 400).
+      `?dataset=` narrows the page to ONE dataset; with none named the page spans EVERY
+      dataset in the caller's workspace/project scope and SAYS so (`page.dataset`,
+      `page.datasets`, `page.dataset_scope`), and a doc_id living in more than one of them
+      is withheld and named once in `page.dataset_ambiguous` (TwinResolver rule 3)
     * `GET    /v1/tasks/prime`              — one-call agent rehydration (in_progress + ready head + recent events + counts;
       filter container: `worker` only)
     * `GET    /v1/tasks/:doc_id`            — single-task fetch (w7-08)
@@ -96,6 +100,7 @@ defmodule BarkparkWeb.TasksController do
   alias Barkpark.Content.Graph
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.QueueGate
+  alias Barkpark.Tasks.TwinResolver
   alias Barkpark.Tasks.Validation
   alias BarkparkWeb.AnonPerspective
   alias BarkparkWeb.ReadPerspective
@@ -138,9 +143,23 @@ defmodule BarkparkWeb.TasksController do
       limit = Params.parse_limit(params["limit"], Tasks.Queue.ready_default_limit(), 1000)
       offset = Params.parse_offset(params["offset"])
 
+      # `?dataset=` — HONOURED here since task-0084e191d406de96; it was parsed
+      # nowhere and `Queue.maybe_filter_dataset/2` no-opped on the nil, so a
+      # ready page for `?dataset=aker-brygge` and one for `?dataset=production`
+      # were the SAME 1000 rows (measured live on guerrilla 2026-09-06). Read
+      # exactly like `request_dataset/1` EXCEPT for its default: there is none.
+      # A ready page with no dataset named spans every dataset in the caller's
+      # workspace/project scope — defaulting to "production" here would silently
+      # hide another dataset's claimable work from the queue agents work from,
+      # which is a bigger change than this row is allowed to make. What changes
+      # is that the span is now STATED (`page.dataset*` below) instead of being
+      # an unstated global.
+      dataset = ready_dataset_param(params)
+
       opts =
         []
         |> Params.put_opt(:phase_id, phase_id)
+        |> Params.put_opt(:dataset, dataset)
         |> Params.put_opt(:limit, limit)
         |> Params.put_opt(:offset, offset)
         |> Params.put_opt(:order, order)
@@ -148,7 +167,12 @@ defmodule BarkparkWeb.TasksController do
 
       docs = Tasks.ready(opts)
 
-      json(conn, task_list_response(docs, conn, params, limit: limit, offset: offset))
+      body =
+        docs
+        |> task_list_response(conn, params, limit: limit, offset: offset)
+        |> put_ready_dataset_scope(docs, dataset, Tasks.dataset_ambiguous(opts))
+
+      json(conn, body)
     else
       {:error, :invalid_ready_order} ->
         bad_request(conn, "order must be closure_nearest when set")
@@ -181,6 +205,55 @@ defmodule BarkparkWeb.TasksController do
   # exactly-full last page; that errs toward "look again", the safe direction.
   # ADDITIVE ONLY — `ok`, `docs` and `help` keep their names and shapes, so the
   # SDK, the Studio and the taskboard read byte-identical fields.
+  # `?dataset=` on the ready route. Fails SOFT on a non-binary spelling
+  # (`?dataset[]=production`), like `request_dataset/1` — a malformed selector
+  # must not 500 a queue read — but carries NO default: see `ready/2`.
+  defp ready_dataset_param(params) do
+    case params["dataset"] do
+      dataset when is_binary(dataset) -> dataset
+      _ -> nil
+    end
+  end
+
+  # WHAT THIS PAGE SPANS, SAID OUT LOUD (task-0084e191d406de96 C0/C1).
+  #
+  # Two facts a ready page never carried, both about datasets:
+  #
+  #   * `page.dataset` / `page.datasets` / `page.dataset_scope` — the dataset the
+  #     caller NAMED (nil when none) and the datasets this page actually spans.
+  #     A silently-global default is the thing the C0 criterion forbids; the
+  #     default is unchanged, it is now STATED.
+  #   * `page.dataset_ambiguous` — every doc_id withheld because it lives in
+  #     more than one dataset of this scope, listed ONCE with the dataset set it
+  #     spans. That is `Barkpark.Tasks.TwinResolver` rule 3 at a listing: the
+  #     by-id doors answer it with a 409 naming both datasets, and a listing
+  #     cannot (one ambiguous id must not deny the caller the other forty-nine
+  #     rows), so the refusal is scoped to the row and named instead of hidden.
+  #
+  # IN `page`, NOT IN `help[]`. A read envelope carries no `help[]` on this
+  # route by rule (axi-s4 R5 — "help[] rides ONLY mutation successes", pinned by
+  # tasks_controller_test.exs), and the brief-truncation line is that rule's one
+  # standing exception, not an opening. A dataset fact a caller ACTS on belongs
+  # in the structured block it can read without string-matching anyway.
+  #
+  # READY ONLY, deliberately: `task_list_response/4`'s other caller is the index,
+  # which is not twin-collapsed and whose envelope stays byte-identical.
+  defp put_ready_dataset_scope(body, docs, dataset, ambiguous) do
+    spans = docs |> Enum.map(& &1.dataset) |> Enum.uniq() |> Enum.sort()
+
+    page =
+      body
+      |> Map.fetch!(:page)
+      |> Map.merge(%{
+        dataset: dataset,
+        datasets: spans,
+        dataset_scope: if(dataset, do: "named", else: "all-datasets-in-scope"),
+        dataset_ambiguous: ambiguous
+      })
+
+    Map.put(body, :page, page)
+  end
+
   defp task_list_response(docs, conn, params, page_opts) do
     docs = seal_docs(docs, conn)
 
@@ -1573,7 +1646,9 @@ defmodule BarkparkWeb.TasksController do
     case resolve_graph_root(id, conn) do
       {:ok, %Document{} = root} ->
         opts = scope_opts(conn) |> Keyword.put(:dataset, root.dataset)
-        %{tasks: tasks, truncated: truncated} = Tasks.driven_tasks(root.doc_id, opts)
+
+        %{tasks: tasks, truncated: truncated, unhydrated: unhydrated} =
+          Tasks.driven_tasks(root.doc_id, opts)
 
         json(conn, %{
           ok: true,
@@ -1581,7 +1656,13 @@ defmodule BarkparkWeb.TasksController do
           root: Content.published_id(root.doc_id),
           tasks: Enum.map(tasks, &render_driven_task/1),
           count: length(tasks),
-          truncated: truncated
+          truncated: truncated,
+          # A citing task whose edge was read but whose document did not
+          # hydrate under this read's scope. `truncated` cannot carry it (the
+          # node budget never bit), and a short list that reports itself
+          # complete is how three real citations stayed invisible for two
+          # weeks — task-464b89f30e3f8e41. Always present, `[]` when clean.
+          unhydrated: unhydrated
         })
 
       {:error, :not_found} ->
@@ -1939,10 +2020,30 @@ defmodule BarkparkWeb.TasksController do
   # type list): flip a schema to private and the very next corpus read drops
   # it.
   #
-  # Phantom nodes are deliberately NOT filtered. A phantom is a referenced-but-
-  # absent id with `title == id`, and a public document's reference field already
-  # exposes that same id through the allowed `GET /v1/data/doc` route — so
-  # dropping them would cost the dangling-edge signal without closing anything.
+  # Phantom nodes are deliberately NOT filtered — and that is now a MEASUREMENT,
+  # not the shipped-as-is argument it used to be. A phantom is a referenced-but-
+  # absent id with `title == id`, so for a public-read caller it can name a
+  # private-type or an unpublished document. The question "is that a NEW leak?"
+  # is answered per field shape by
+  # `test/barkpark_web/controllers/graph_phantom_id_exposure_test.exs`
+  # (dr-bl-graph-phantom-id-exposure, measured 2026-09-06), which drives ONE
+  # public-read token at both routes and prints every response body:
+  #
+  #   shape                   | id via GET /v1/data/doc | phantom here | verdict
+  #   ------------------------|-------------------------|--------------|--------
+  #   `reference`             | YES                     | YES          | no new leak
+  #   `arrayOf` of `reference`| YES                     | YES          | no new leak
+  #   PortableDoc inline ref  | YES                     | NO           | never extracted
+  #
+  # The third row is the one the filing did not predict: `Edges.extract_field_edges/2`
+  # has exactly two clauses (`reference`, `arrayOf`-of-`reference`) plus a `[]`
+  # catch-all, so an inline PortableDoc ref produces no edge and therefore no
+  # phantom at all. Every phantom this endpoint CAN emit carries an id the same
+  # caller already reads off the referring document on the allowed doc route, so
+  # dropping or hashing them would cost the dangling-edge signal without closing
+  # anything. The test asserts the RELATIONSHIP (phantom ⇒ id already readable),
+  # so narrowing the doc route later reds it here rather than silently voiding
+  # this ruling.
   defp visible_schemas(schemas, conn) do
     Barkpark.Content.Schema.visible_schemas(
       schemas,
@@ -2500,22 +2601,21 @@ defmodule BarkparkWeb.TasksController do
   # Disambiguation: if BOTH `t1` and `drafts.t1` exist (a task that was
   # published and still has a live draft), the exact match on `t1` wins —
   # the caller gets the published row, consistent with "exact match first".
+  #
+  # ── THE ONE RULE (task-49eef068420df918 + task-baf9b74a0ffc83f4) ─────────
+  # The exact-then-`drafts.`-fallback dance above is now ONE query decided by
+  # `Barkpark.Tasks.TwinResolver` — read that moduledoc for the rule. The
+  # observable deltas: a `drafts.` twin can no longer answer for a doc_id whose
+  # published row exists but was filtered out by nothing (it never should have),
+  # and a doc_id living in two datasets is REFUSED (409 naming both) instead of
+  # answered from whichever dataset sorts first. `?dataset=` on the task doors is
+  # honoured as the caller's disambiguator — it used to be ignored here.
   defp find_task_by_doc_id(doc_id, conn) do
     scope = scope_opts(conn)
     workspace_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
 
-    case fetch_task_exact(doc_id, workspace_id, project_id) do
-      {:ok, _} = hit ->
-        hit
-
-      {:error, :not_found} ->
-        if String.starts_with?(doc_id, "drafts.") do
-          {:error, :not_found}
-        else
-          fetch_task_exact("drafts." <> doc_id, workspace_id, project_id)
-        end
-    end
+    fetch_task_exact(doc_id, workspace_id, project_id, dataset: conn.params["dataset"])
   end
 
   # Single-doc fetch by exact doc_id string, scoped to workspace + project.
@@ -2549,27 +2649,29 @@ defmodule BarkparkWeb.TasksController do
   # A `LIMIT 1` here can only ever CHANGE the outcome for a doc_id that has
   # more than one row in scope — the shape that used to raise. A doc_id with
   # exactly one row (every ordinary task) reads byte-identically.
-  defp fetch_task_exact(doc_id, workspace_id, project_id) do
-    base =
-      from(d in Document,
-        where: d.doc_id == ^doc_id and d.type == "task",
-        order_by: [
-          asc: fragment("CASE WHEN ? = 'published' THEN 0 ELSE 1 END", d.status),
-          asc: d.dataset,
-          asc: d.id
-        ],
-        limit: 1
-      )
-
-    query =
-      base
-      |> Params.maybe_filter_workspace(workspace_id)
-      |> Params.maybe_filter_project(project_id)
-
-    case Repo.one(query) do
-      nil -> {:error, :not_found}
-      %Document{} = doc -> {:ok, doc}
-    end
+  # THE REPAIR (task-49eef068420df918 + task-baf9b74a0ffc83f4). The total order
+  # above bought determinism and paid for it with a SILENT WRONG ROW: the tie it
+  # broke by `asc: d.dataset` is precisely the tie the caller named nothing to
+  # break. `Barkpark.Tasks.TwinResolver` owns the rule now (published wins, a
+  # draft twin never wins over a published row, and an unnamed cross-dataset tie
+  # is REFUSED at 409 rather than picked). A doc_id with exactly one row in scope
+  # — every ordinary task — still reads byte-identically.
+  #
+  # The scoping stays EXACTLY as it was (`Params.maybe_filter_*`, fail-open on
+  # nil): `Tasks.Claim` scopes fail-CLOSED through `Scope.scope_to_workspace/3`,
+  # and unifying the two is a different row's work, so the resolver takes the
+  # caller's scoping rather than imposing one.
+  defp fetch_task_exact(doc_id, workspace_id, project_id, opts) do
+    TwinResolver.resolve(
+      doc_id,
+      fn q ->
+        q
+        |> Params.maybe_filter_workspace(workspace_id)
+        |> Params.maybe_filter_project(project_id)
+      end,
+      &Repo.all/1,
+      opts
+    )
   end
 
   # ─── rail-l1: rail-awareness envelope extras ────────────────────────────

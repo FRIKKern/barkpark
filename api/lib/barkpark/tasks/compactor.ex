@@ -72,8 +72,11 @@ defmodule Barkpark.Tasks.Compactor do
 
   ## Per-task advisory lock — the SAME key as `Tasks.close/3` + `TtlSweeper`
 
-  `pg_advisory_xact_lock(hashtext('task:' || doc_id))` — identical key
-  to `Tasks.close/3` and `Barkpark.Tasks.TtlSweeper`. This means a
+  `pg_advisory_xact_lock(hashtext('task:' || uuid))` —
+  `Barkpark.Tasks.LockKey.task/1` on the candidate's UUID PRIMARY KEY,
+  identical to `Tasks.close/3` and `Barkpark.Tasks.TtlSweeper`. (The
+  candidate query selects `%Document{id: …}`; the value was once bound to
+  a parameter named `doc_id`, which read as the SLUG family.) This means a
   compaction NEVER interleaves with a late claim/close/sweep on the
   same task; the three lifecycle writers serialize per-task without
   contending on row locks. Closes on DIFFERENT tasks pass through
@@ -118,6 +121,7 @@ defmodule Barkpark.Tasks.Compactor do
 
   import Ecto.Query
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.{Document, MutationEvent, Revision}
   alias Barkpark.Repo
   alias Barkpark.Tasks.Internal
@@ -162,8 +166,8 @@ defmodule Barkpark.Tasks.Compactor do
     cfg = resolve_config(opts)
     candidates = eligible_query(cfg) |> Repo.all()
 
-    Enum.reduce(candidates, %{compacted: 0, skipped: 0}, fn %Document{id: doc_id}, acc ->
-      case compact_one(doc_id, cfg) do
+    Enum.reduce(candidates, %{compacted: 0, skipped: 0}, fn %Document{id: task_uuid}, acc ->
+      case compact_one(task_uuid, cfg) do
         :compacted -> %{acc | compacted: acc.compacted + 1}
         :skipped -> %{acc | skipped: acc.skipped + 1}
       end
@@ -209,16 +213,17 @@ defmodule Barkpark.Tasks.Compactor do
 
   # ─── Compaction (the per-task locked unit) ────────────────────────────────
 
-  defp compact_one(doc_id, cfg) do
+  defp compact_one(task_uuid, cfg) do
     result =
       Repo.transaction(fn ->
         # Per-task advisory lock — SAME key as Tasks.close/3 and TtlSweeper.
         # A concurrent close on the same task waits here; a concurrent
         # sweep on the same task waits here; compactions on DIFFERENT
         # tasks pass through unimpeded.
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{doc_id}"])
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_uuid)])
 
-        case Repo.get(Document, doc_id) do
+        # global-read: in-lock by-PK re-read of a candidate the compactor's own cross-tenant eligibility scan selected — internal Oban worker, tenancy resolved by eligible_query/1, same posture as TtlSweeper's reap re-read.
+        case Repo.get(Document, task_uuid) do
           nil ->
             :skipped
 
@@ -452,10 +457,13 @@ defmodule Barkpark.Tasks.Compactor do
       compaction_snapshot (wrong action), or its doc_id does not match.
     * `{:error, :stale_claim}` — CAS failed under the lock (rare).
 
-  Per-task protected by the SAME `pg_advisory_xact_lock` key as
-  `Tasks.close/3` / `TtlSweeper` / `compact_one/2`, so a restore never
-  interleaves with a concurrent claim, close, sweep, or compaction on
-  the same task.
+  Per-task protected by the SAME `pg_advisory_xact_lock` key
+  (`LockKey.task/1`, on the uuid) as `Tasks.close/3` / `TtlSweeper` /
+  `compact_one/2`, so a restore never interleaves with a concurrent
+  close, sweep, or compaction on the same task. A targeted CLAIM also
+  takes that key, but only after it has resolved the slug to a uuid — its
+  first, pre-resolution lock is `task:<doc_id>` and excludes claims
+  only.
   """
   @spec restore(binary(), binary()) ::
           {:ok, Document.t()}
@@ -480,12 +488,13 @@ defmodule Barkpark.Tasks.Compactor do
     end
   end
 
-  defp do_restore(doc_id, snapshot_revision_id) do
+  defp do_restore(task_uuid, snapshot_revision_id) do
     result =
       Repo.transaction(fn ->
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{doc_id}"])
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_uuid)])
 
-        with %Document{} = doc <- Repo.get(Document, doc_id) || {:error, :not_found},
+        # global-read: in-lock by-PK read of the uuid restore/2 cast — an internal maintenance path with no workspace_id thread, the same posture as compact_one/2 above.
+        with %Document{} = doc <- Repo.get(Document, task_uuid) || {:error, :not_found},
              %Revision{} = rev <-
                Repo.get(Revision, snapshot_revision_id) || {:error, :revision_not_found},
              :ok <- check_snapshot(rev, doc) do

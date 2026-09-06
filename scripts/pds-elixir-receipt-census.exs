@@ -518,8 +518,14 @@ defmodule PDS.Census do
     # `derived` half of this census's own D448-DRIFT-REFUSES line, run locally from
     # the repo root on the change's own tree, engine printed live by that run:
     #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
-    write: 57,
-    read: 27,
+    # RE-DERIVED BY RUN 2026-09-06 (task-184760672ff3414b, Github.Adopt written PUBLISHED-first
+    # through Tasks.Internal.fenced_content_write/4, no draft fork, no collapse): write-routed
+    # 57 -> 59 and read-routed 27 -> 25 — the two adopt receipts now sit under a def that
+    # reaches the fenced write. Conserved rows unmoved (textual 109 / ast 100 / phantom 9 /
+    # consumer 4 / emitted 96 / unrouted 12); the route closes at 10 as before. Reverting the
+    # three adopt files alone returns all eight rows to == (proven in the PR).
+    write: 59,
+    read: 25,
     unrouted: 12
   }
 
@@ -592,7 +598,12 @@ defmodule PDS.Census do
   # checked against the run: ROUTE-DEPTH-IS-CLOSURE reds if @route_depth stops being the
   # depth the table closes at, so neither literal can drift into a lie.
   @evidence_depth 6
-  @route_depth 12
+  # RE-DERIVED 2026-09-06 (12 -> 10): Plugins.Github.Link.put/4 now writes the published
+  # task row through Tasks.Internal.fenced_content_write/4 instead of forking a draft
+  # and collapsing it (collapse_draft_twin/5 deleted), so the longest write chain lost
+  # two hops and the table went flat at 10 — write 78 / read 15 / unrouted 3, identical
+  # at 12/14/16. Read off the run, not typed; ROUTE-DEPTH-IS-CLOSURE reds if it moves.
+  @route_depth 10
   @sweep [1, 2, 3, 4, 5, 6]
 
   # DEPTHS PAST THE CENSUS DEPTH, MEASURED RATHER THAN ASSERTED. The claim "the route
@@ -850,6 +861,17 @@ defmodule PDS.Census do
     # refusal): it buys exactly this ONE member and imports unbounded FALSE JUDGED through
     # shared render/fallback helpers that every branch reaches, error branches included.
     {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger, :status_only_receipt},
+    # WorkspaceReinstateController.create (task-7ab3d03b49606f83) — the operator verb
+    # that lifts a workspace suspension. `status_only_receipt` is the class prose
+    # exactly: create/2 renders the STORED row it just wrote (slug, suspended,
+    # suspended_reason, suspended_at, tier, expires_at, ttl_extended, read back off the
+    # %Workspace{} Quota.reinstate/1 and Quota.set_expires_at/2 returned) and simply does
+    # not spell the `ok: true` literal this lens greps for. It is the wave-40 sentence,
+    # not the retired wave-38 one: this route does NOT claim success by status alone —
+    # `suspended: false` in the body IS the flag the write cleared, and `ttl_extended`
+    # reports whether the second write happened. Classified by the arriving change, not
+    # judged by it.
+    {:post, "/v1/admin/workspaces/:slug/reinstate", "BarkparkWeb.WorkspaceReinstateController", :create, :status_only_receipt},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create, :status_only_receipt},
     {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login, :status_only_receipt},
     {:post, "/v1/auth/login-tickets", "BarkparkWeb.LoginTicketController", :create, :status_only_receipt},
@@ -1052,6 +1074,7 @@ defmodule PDS.Census do
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim} => {"BarkparkWeb.AccessController.claim/2", 2, "9774625"},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback} => {"BarkparkWeb.SelfUpdateController.rollback/2", 1, "123741443"},
     {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger} => {"BarkparkWeb.SiteDeployController.trigger/2", 1, "51850737"},
+    {:post, "/v1/admin/workspaces/:slug/reinstate", "BarkparkWeb.WorkspaceReinstateController", :create} => {"BarkparkWeb.WorkspaceReinstateController.create/2", 1, "25110011"},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create} => {"BarkparkWeb.AppTokenController.create/2", 1, "77961954"},
     {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login} => {"BarkparkWeb.AuthController.login/2", 2, "133988271"},
     {:post, "/v1/auth/login-tickets", "BarkparkWeb.LoginTicketController", :create} => {"BarkparkWeb.LoginTicketController.create/2", 1, "18892729"},

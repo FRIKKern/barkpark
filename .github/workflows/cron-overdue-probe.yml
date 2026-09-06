@@ -15,6 +15,23 @@
 # probe's own bound (90 minutes for a */30 workflow) is deliberately looser than
 # an hour so that neither arm alone produces a false red.
 #
+# AND THIS PROBE NOW FIRES WHAT IT WATCHES (2026-09-06, task-f94a1d96238b18e4).
+# The bound above is 3x a DECLARED schedule, and GitHub does not deliver the
+# declared schedule: main-gate-watch.yml's */30 arrives every 2.1-4.7 h (14
+# consecutive runs, 2026-09-05T07:48Z..2026-09-06T08:02Z). So this job reddened
+# main by construction between deliveries — push:main run 34025016921 printed
+# "newest run is 92m old, bound is 3x = 90m" and exited 1 with nothing wrong.
+# The fix is not a looser bound (a dead main-gate-watch would then hide for 15 h)
+# but a probe that does what its own table claims: for a CRON-ONLY critical
+# workflow past bound it now runs `gh workflow run <file> --ref main`, prints the
+# dispatched run id, and reds only if the dispatch fails or the run never shows.
+# That is why the permissions block below asks for `actions: write`. A workflow
+# that carries a push: arm is NOT dispatched — past bound, it still screams.
+# Nor does it dispatch on top of a run already in flight: main-gate-watch's
+# concurrency group keeps one pending run and a newer one cancels the older, so
+# five rapid dispatches during development left four `cancelled` runs — a tip
+# with no verdict, the exact thing that watch reports.
+#
 # WHY NO NAME IN HERE CAN ENTER THE REQUIRED SET. The probe job carries
 # `if: github.event_name != 'pull_request'`, so its name never renders on a PR
 # head the required-checks generator samples, and the pull_request trigger below
@@ -48,10 +65,26 @@ on:
 
 permissions:
   contents: read
-  # The probe asks the Actions API when each watched workflow last ran. Without
-  # this the read 403s and the probe reports UNKNOWN (exit 3) rather than
-  # guessing — correct, and useless. Grant it.
-  actions: read
+  # The probe asks the Actions API when each watched workflow last ran, and
+  # since task-f94a1d96238b18e4 it also FIRES a cron-only critical workflow that
+  # is past its bound (`gh workflow run <file> --ref main`) rather than only
+  # shouting about it. `actions: write` is what that dispatch needs; it subsumes
+  # the read, and the two cannot both be named — a duplicate key would make
+  # GitHub reject the file and the probe would never run at all.
+  #
+  # THE REPO DEFAULT IS READ-ONLY and that is not a blocker: the repository
+  # setting (`gh api repos/FRIKKern/barkpark/actions/permissions/workflow` →
+  # `default_workflow_permissions: read`) sets the DEFAULT for a workflow that
+  # declares nothing, and an explicit `permissions:` block raises the scope for
+  # this workflow alone. Eleven workflows in this tree already rely on that —
+  # `issues: write` in crown-reconcile.yml, `contents: write` in cli-release.yml
+  # — and they work. Least privilege is kept the same way they keep it: this
+  # block grants ONE extra scope, on a workflow that never runs on a fork PR
+  # (`if: github.event_name != 'pull_request'`).
+  #
+  # If this ever 403s, the probe does not go quiet: the dispatch fails, and a
+  # failed dispatch is a SCREAM (exit 1) naming the workflow it could not fire.
+  actions: write
 
 concurrency:
   group: cron-overdue-probe-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
@@ -86,7 +119,7 @@ jobs:
           bash scripts/cron-overdue-probe.sh --repo "${{ github.repository }}" || rc=$?
           case "$rc" in
             0) exit 0 ;;
-            1) echo "::error::A CRITICAL-CADENCE WORKFLOW IS SILENT past 3x its schedule interval (named above). GitHub cron is best-effort delivery and this is what its failure looks like: no red anywhere, because the watch never ran. The remedy is that workflow's push/dispatch fallback, never a re-run of this probe."; exit 1 ;;
+            1) echo "::error::A CRITICAL-CADENCE WORKFLOW IS SILENT AND COULD NOT BE FIRED (named above). Lag alone is no longer this verdict: a cron-only critical workflow past its bound is DISPATCHED by this probe (workflow_dispatch, run id printed above), so reaching exit 1 means one of four things — the dispatch was refused, the dispatched run never appeared, a workflow that HAS a push: arm has gone quiet anyway, or a critical workflow has no run row at all. Read which one is printed above; a re-run of this probe is not the remedy."; exit 1 ;;
             2) echo "::error::THE TABLE AND THE TREE DISAGREE — a workflow carries a schedule: trigger with no classification line, or a critical cadence has no trigger fallback. An unclassified schedule is one nobody has decided about; classify it in scripts/cron-overdue-probe.sh."; exit 1 ;;
             3) echo "::error::UNKNOWN — the Actions run list could not be read, so this probe does not know whether anything fired. That is not a pass."; exit 1 ;;
             *) echo "::error::cron-overdue-probe.sh exited $rc, which is not a verdict it defines"; exit 1 ;;

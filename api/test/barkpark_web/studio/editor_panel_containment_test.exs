@@ -266,11 +266,137 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   # Strip CSS comments so prose about `position: fixed` is never censused.
   defp decommented(css), do: Regex.replace(~r|/\*.*?\*/|s, css, "")
 
-  # The declarations of the bare `.editor-panel { … }` rule (not `.editor-panel.x`,
-  # not a descendant selector) — brace-matched from the source.
-  defp editor_panel_block(css) do
-    [_, block] = Regex.run(~r/\n\s*\.editor-panel\s*\{(.*?)\}/s, css)
-    block
+  # ── Every rule that can style an `.editor-panel` ELEMENT (spd-b17) ────────
+  #
+  # spd-b10 extracted ONE block with `Regex.run(~r/\n\s*\.editor-panel\s*\{…/)`
+  # and banned the containing-block triggers inside it. Two shapes escaped that,
+  # both mutation-proven on origin/main (8→16 tests, 0 failures with a real bug
+  # in the file):
+  #
+  #   * `html[data-width-bucket="narrow"] .editor-panel { transform: … }` — the
+  #     regex allows only whitespace before `.editor-panel`, so every prefixed
+  #     selector was invisible. This desk is bucket-driven, so it is the single
+  #     most likely shape for future motion work.
+  #   * a SECOND bare `.editor-panel { … }` after the canonical one — `Regex.run`
+  #     returns the first match only, so anything later was never inspected.
+  #
+  # So the ban now runs over EVERY rule whose selector list names `.editor-panel`
+  # as its SUBJECT — bare, prefixed by any ancestor, in a comma list, and inside
+  # `@media`/`@container` bodies — while the non-vacuity guard stays pinned to the
+  # canonical spd-s1 container rule so its message keeps meaning what it says.
+  @panel_class "editor-panel"
+
+  # The sources whose CSS can style the panel, with how to reach the CSS in each.
+  defp panel_css_sources, do: [{@root, :heex}, {@root_shell_css, :css}]
+
+  # A .heex is not a stylesheet: its <script> bodies and EEx are full of braces
+  # that would derail a brace scanner. Keep only the `<style>` bodies, blanking
+  # everything else CHARACTER-wise but keeping every newline, so a reported line
+  # number is the real line number in the real file.
+  defp css_text(text, :css), do: text
+
+  defp css_text(text, :heex) do
+    # Line-based on purpose: the CSS below carries PROSE about the layout's
+    # `<style>` blocks (four mentions inside comments), so a parity split on the
+    # tag text scrambles which side of the sheet is CSS. The real tags sit alone
+    # on their own line; a mention never does. Each line maps to exactly one
+    # output line, so a reported line number is the real file's line number.
+    text
+    |> String.split("\n")
+    |> Enum.map_reduce(false, fn line, inside ->
+      trimmed = String.trim(line)
+
+      cond do
+        Regex.match?(~r/^<style[^>]*>$/, trimmed) -> {"", true}
+        trimmed == "</style>" -> {"", false}
+        inside -> {line, true}
+        true -> {"", false}
+      end
+    end)
+    |> elem(0)
+    |> Enum.join("\n")
+  end
+
+  # `decommented/1` DELETES the newlines inside a block comment, which would
+  # shift every line number this scanner reports (a plant at 1975 was named as
+  # 1480). This one keeps the comment's newlines and drops only its text.
+  defp decommented_keeping_lines(css) do
+    Regex.replace(~r|/\*.*?\*/|s, css, fn match ->
+      String.duplicate("\n", length(String.split(match, "\n")) - 1)
+    end)
+  end
+
+  # Every style rule in a stylesheet as {selector, block, line}. Brace-matched,
+  # so a rule nested in an `@media`/`@container` body is returned under its OWN
+  # selector and the at-rule prelude itself is never mistaken for one.
+  defp css_rules(css) do
+    css
+    |> decommented_keeping_lines()
+    |> String.graphemes()
+    |> Enum.reduce({"", 1, [], []}, fn ch, {buf, line, stack, rules} ->
+      line = if ch == "\n", do: line + 1, else: line
+
+      case ch do
+        "{" ->
+          {"", line, [{collapse_ws(buf), line} | stack], rules}
+
+        "}" ->
+          case stack do
+            [{prelude, at_line} | rest] ->
+              rules =
+                if String.starts_with?(prelude, "@"),
+                  do: rules,
+                  else: [{prelude, buf, at_line} | rules]
+
+              {"", line, rest, rules}
+
+            [] ->
+              {"", line, [], rules}
+          end
+
+        _ ->
+          {buf <> ch, line, stack, rules}
+      end
+    end)
+    |> elem(3)
+    |> Enum.reverse()
+  end
+
+  # Collapse every functional pseudo-class ARGUMENT away — `:has(> .editor-panel)`
+  # names the panel without the rule styling one, and `:not(.sheet-editor)` must
+  # not eat the compound it hangs off.
+  defp strip_functional_args(sel) do
+    stripped = Regex.replace(~r/\([^()]*\)/, sel, "()")
+    if stripped == sel, do: sel, else: strip_functional_args(stripped)
+  end
+
+  # A rule styles the panel when the SUBJECT (rightmost compound) of any selector
+  # in its list carries the `.editor-panel` class token. `.editor-panel-main` is a
+  # different class and must not match; `.editor-panel .editor-body` styles the
+  # BODY, not the panel.
+  defp targets_panel?(selector) do
+    selector
+    |> split_selector_list()
+    |> Enum.any?(fn sel ->
+      sel
+      |> strip_functional_args()
+      |> String.split(~r/[\s>+~]+/, trim: true)
+      |> List.last()
+      |> case do
+        nil -> false
+        subject -> Regex.match?(~r/\.#{@panel_class}(?![\w-])/, subject)
+      end
+    end)
+  end
+
+  defp panel_rules(css),
+    do: Enum.filter(css_rules(css), fn {sel, _b, _l} -> targets_panel?(sel) end)
+
+  # {path, selector, block, line} for every panel-subject rule the Studio loads.
+  defp loaded_panel_rules do
+    for {path, kind} <- panel_css_sources(),
+        {sel, block, line} <- path |> File.read!() |> css_text(kind) |> panel_rules(),
+        do: {path, sel, block, line}
   end
 
   # Every selector whose rule block declares `position: fixed`. Walks the sheet
@@ -486,23 +612,43 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   end
 
   describe "the containing-block trigger ban (the REAL hazard)" do
-    test "the .editor-panel rule declares none of contain/transform/filter/will-change/backdrop-filter/perspective" do
-      block = editor_panel_block(root_css())
+    test "no rule targeting .editor-panel declares contain/transform/filter/will-change/backdrop-filter/perspective" do
+      rules = loaded_panel_rules()
 
-      # Non-vacuity: prove we grabbed the RIGHT block before asserting absence.
-      assert block =~ "container-type: inline-size",
-             "the matched .editor-panel block is not the spd-s1 container rule"
+      # Non-vacuity, pinned to the CANONICAL rule so this message stays true even
+      # when a second `.editor-panel { … }` rule exists (spd-b17): the ban below
+      # is only worth anything if the extractor still reaches the spd-s1 rule.
+      canonical =
+        Enum.find(rules, fn {_path, _sel, block, _line} ->
+          String.contains?(block, "container-type: inline-size")
+        end)
 
-      assert block =~ "min-width: 560px", "the matched block is missing the D4 content floor"
-      assert block =~ "position: relative", "the matched block is missing the positioning context"
+      assert canonical,
+             "no rule targeting `.editor-panel` carries `container-type: inline-size` — " <>
+               "the spd-s1 container rule is gone, or this extractor stopped seeing it " <>
+               "(#{length(rules)} panel-subject rule(s) found)"
 
-      for prop <- @containing_block_triggers do
+      {_path, canonical_sel, canonical_block, _line} = canonical
+
+      assert collapse_ws(canonical_sel) == ".editor-panel",
+             "the spd-s1 container rule is no longer the bare `.editor-panel` rule " <>
+               "(matched `#{canonical_sel}`)"
+
+      assert canonical_block =~ "min-width: 560px",
+             "the spd-s1 container rule is missing the D4 content floor"
+
+      assert canonical_block =~ "position: relative",
+             "the spd-s1 container rule is missing the positioning context"
+
+      for {path, selector, block, line} <- rules,
+          prop <- @containing_block_triggers do
         refute Regex.match?(~r/(^|[\s;])#{Regex.escape(prop)}\s*:/, block),
                """
-               `.editor-panel` declares `#{prop}:`.
+               `#{selector}` declares `#{prop}:` — #{Path.relative_to_cwd(path)}:#{line}
 
-               Unlike `container-type` (measured harmless in Blink — see the
-               moduledoc), `#{prop}` establishes a containing block for every
+               That rule's subject IS an `.editor-panel` element. Unlike
+               `container-type` (measured harmless in Blink — see the moduledoc),
+               `#{prop}` establishes a containing block for every
                `position: fixed` descendant in EVERY engine. The Sheets
                right-click menu (sheet_grid.ex cell_menu_style/1) and the asset
                explorer's toast + New-folder modal would then resolve against the
@@ -520,6 +666,88 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
                Regex.match?(~r/(^|[\s;])#{Regex.escape(prop)}\s*:/, planted)
              end),
              "the trigger matcher cannot see a transform — the ban above is vacuous"
+    end
+
+    # POSITIVE CONTROLS for spd-b17. Both shapes below passed the spd-b10
+    # extractor with a real containing-block trigger in the file. They are run on
+    # an inline sheet rather than the live one so they keep proving the extractor
+    # sees them after the layout stops carrying an example.
+    @panel_rule_fixture """
+    .editor-panel {
+      flex: 1; position: relative; min-width: 560px;
+      container-type: inline-size;
+    }
+    .editor-panel.sheet-editor { container-type: normal; }
+    html[data-width-bucket="narrow"] .editor-panel { transform: translateX(0); }
+    .editor-panel { will-change: transform; }
+    @media (min-width: 900px) {
+      html[data-editor-focus="beta"] .editor-panel { filter: none; }
+    }
+    .something, .editor-panel:not(.sheet-editor) { perspective: 1px; }
+
+    /* NOT panel-subject: the panel is an ancestor, an argument, or a prefix. */
+    .editor-panel .bp-paper-surface { transform: none; }
+    .editor-panel > .editor-body { contain: layout; }
+    .pane-layout:has(> .editor-panel) { transform: none; }
+    .editor-with-preview .editor-panel-main { will-change: transform; }
+    """
+
+    test "the extractor sees a BUCKET-PREFIXED .editor-panel rule (spd-b17 hole 1)" do
+      selectors = for {sel, _b, _l} <- panel_rules(@panel_rule_fixture), do: sel
+
+      assert ~s(html[data-width-bucket="narrow"] .editor-panel) in selectors,
+             "a bucket-prefixed panel rule is invisible to the extractor — " <>
+               "the escape hole spd-b17 closed is back. Saw: #{inspect(selectors)}"
+    end
+
+    test "the extractor sees a LATER DUPLICATE bare .editor-panel rule (spd-b17 hole 2)" do
+      bare =
+        for {sel, block, _l} <- panel_rules(@panel_rule_fixture),
+            collapse_ws(sel) == ".editor-panel",
+            do: block
+
+      assert length(bare) == 2,
+             "the extractor stops at the first bare `.editor-panel` rule — " <>
+               "a later duplicate escapes the ban (spd-b17 hole 2). Found #{length(bare)}"
+
+      assert Enum.any?(bare, &String.contains?(&1, "will-change")),
+             "the LATER of the two bare rules was not collected"
+    end
+
+    test "the extractor reaches rules inside @media / @container bodies" do
+      selectors = for {sel, _b, _l} <- panel_rules(@panel_rule_fixture), do: sel
+
+      assert ~s(html[data-editor-focus="beta"] .editor-panel) in selectors,
+             "a panel rule nested in an @media body is invisible. Saw: #{inspect(selectors)}"
+
+      assert Enum.any?(selectors, &(&1 =~ ~r/^\.something,/)),
+             "a comma list whose SECOND selector is the panel is invisible"
+    end
+
+    test "the extractor does NOT claim rules whose subject is not the panel" do
+      selectors = for {sel, _b, _l} <- panel_rules(@panel_rule_fixture), do: sel
+
+      for not_panel <- [
+            ".editor-panel .bp-paper-surface",
+            ".editor-panel > .editor-body",
+            ".pane-layout:has(> .editor-panel)",
+            ".editor-with-preview .editor-panel-main"
+          ] do
+        refute not_panel in selectors,
+               "`#{not_panel}` does not style an `.editor-panel` element, but the " <>
+                 "extractor claims it — the ban would fire on innocent rules"
+      end
+    end
+
+    test "the ban runs over every panel rule the Studio actually loads" do
+      rules = loaded_panel_rules()
+
+      assert length(rules) >= 3,
+             "only #{length(rules)} panel-subject rule(s) found in the live sheets — " <>
+               "the extractor has gone blind"
+
+      assert Enum.any?(rules, fn {_p, sel, _b, _l} -> sel =~ "data-width-bucket" end),
+             "the live sheet's bucket-prefixed `.editor-panel` rules are not being collected"
     end
   end
 

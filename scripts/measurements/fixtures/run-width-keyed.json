@@ -1,0 +1,52 @@
+{
+ "__synthetic__": "SYNTHETIC FIXTURE \u2014 hand-authored for check-prediction.test.mjs. NOT a measurement, never a desk fact.",
+ "round_trip": {
+  "ran": true,
+  "protocol": "default -> open -> dismiss (synthetic)",
+  "cells": 1,
+  "identical_cells": 1,
+  "returns_bit_identical": true,
+  "widths": [
+   {
+    "width": 1280,
+    "open_clicks": 1,
+    "dismiss_clicks": 1,
+    "bucket_precondition_ok": true,
+    "expected_raw_band": "wide",
+    "real_inner_width": 1280,
+    "faces": [
+     {
+      "face": "native",
+      "identical": true,
+      "diffs": [],
+      "before": {
+       "content_px": 596,
+       "content_ch": 59.6,
+       "px_per_ch": 10.0,
+       "visible_content_px": 596,
+       "visible_ch": 59.6,
+       "gutter_px": 80
+      },
+      "after": {
+       "content_px": 596,
+       "content_ch": 59.6,
+       "px_per_ch": 10.0,
+       "visible_content_px": 596,
+       "visible_ch": 59.6,
+       "gutter_px": 80
+      }
+     }
+    ]
+   }
+  ],
+  "compared_fields": [
+   "content_px",
+   "content_ch",
+   "px_per_ch",
+   "visible_content_px",
+   "visible_ch",
+   "gutter_px"
+  ]
+ },
+ "rows": []
+}

@@ -204,7 +204,11 @@ defmodule Barkpark.Tasks do
   See `Barkpark.Tasks.Expectations.driven_tasks/2`.
   """
   @spec driven_tasks(binary(), keyword()) ::
-          %{tasks: [Expectations.driven_task()], truncated: boolean()}
+          %{
+            tasks: [Expectations.driven_task()],
+            truncated: boolean(),
+            unhydrated: [String.t()]
+          }
   defdelegate driven_tasks(paper_id, opts \\ []), to: Expectations
 
   # ─── W7a step 2: typed dep graph (extracted → Barkpark.Tasks.Edges) ──────
@@ -314,6 +318,17 @@ defmodule Barkpark.Tasks do
   """
   @spec ready(keyword()) :: [Document.t()]
   defdelegate ready(opts \\ []), to: Queue
+
+  @doc """
+  The doc_ids a dataset-less `ready/1` WITHHELD because they live in more than
+  one dataset of this scope, each with the dataset set it spans.
+
+  `Barkpark.Tasks.TwinResolver` rule 3 at a LISTING: the queue does not pick a
+  dataset the caller did not name, and the ids it therefore cannot place are
+  named rather than dropped. `[]` when the caller named a `:dataset`.
+  """
+  @spec dataset_ambiguous(keyword()) :: [%{doc_id: String.t(), datasets: [String.t()]}]
+  defdelegate dataset_ambiguous(opts), to: Queue
 
   @doc """
   One-call agent-rehydration reads for `GET /v1/tasks/prime`: `in_progress`
@@ -439,7 +454,9 @@ defmodule Barkpark.Tasks do
 
   Five things, in one Postgres transaction:
 
-    1. **Advisory lock** — `pg_advisory_xact_lock(hashtext('task:' || doc_id))`
+    1. **Advisory lock** — `pg_advisory_xact_lock(hashtext('task:' || uuid))`,
+       built by `Barkpark.Tasks.LockKey.task/1` from the document's UUID
+       PRIMARY KEY (NOT its `doc_id` slug — see that module) —
        serializes ALL concurrent close attempts on the same task; one wins,
        the rest queue inside the lock and then fail CAS (because the winner
        already bumped `rev`). Per-task scope — closes on DIFFERENT tasks do

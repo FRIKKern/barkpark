@@ -100,6 +100,18 @@
 #       birth instant beside it — never a BEHIND                      → exit 0
 #       and a window with NOTHING BUT such runs has no denominator     → exit 2
 #
+#   (y) CANCELLED IS A CLASS, AND IT POINTS BOTH WAYS: one fixture holds
+#       a cancelled run that delivered nothing (a superseded push) and a
+#       cancelled run that DELIVERED (its recorder died with the cancel);
+#       both are named, the existing totals do not move, a window with
+#       nothing cancelled prints the same clause with zeroes, and a
+#       MUTATED SCRIPT with the split dropped loses both names   → 0, 0, 0
+#   (z) THE RUN LISTING PAGES TO THE WINDOW START: 101 runs inside the
+#       window are a COUNT, not a floor — the same 101 rows from a
+#       listing that stopped SHORT still print `N+` with the residual,
+#       and a MUTATED SCRIPT that keys the floor on row count again
+#       calls the WHOLE listing a floor                          → 0, 0, 0
+#
 #   bash scripts/crown-reconcile.test.sh
 
 set -uo pipefail
@@ -204,15 +216,22 @@ runs_add() { # <name> <base-json> <id> <sha> <status> <conclusion|null> <created
   echo "$out"
 }
 
-# A page that FILLED — 100 rows — without reaching the window start, which is
-# what the live reconciler reads on a busy day. Two real delivering runs plus
-# enough in-flight filler to hit the cap, with ids offset so a row can name a
-# run BELOW the page minimum: the shape a run that fell off the page produces.
+# A listing that stopped SHORT of the window start, which is what the live
+# reconciler gets when the pager hits its cap on a very busy day. Two real
+# delivering runs plus enough in-flight filler to fill a page, with ids offset so
+# a row can name a run BELOW the listing minimum: the shape a run that fell off
+# the listing produces.
+#
+# `"truncated": true` is the fixture-only handle fetch_runs reads for this. It
+# has to be STATED now: a fixture is one file and cannot page, and since the
+# listing pages to the window start, row count alone no longer means truncation —
+# that is precisely the (b2) arm below, where the same 100+ rows WITHOUT this key
+# are an exact count. Dropping it here would make every arm below vacuous.
 runs_filled() { # <name> <first-id> <shaA:created> <shaB:created> <filler-sha> <filler-created>
   local out="$TMP/$1.json" base="$2" fsha="$5" fcreated="$6"
   local a="${3%%:*}" acr="${3#*:}" b="${4%%:*}" bcr="${4#*:}"
   {
-    printf '{"workflow_runs":['
+    printf '{"truncated":true,"workflow_runs":['
     printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"}' "$base" "$a" "$acr"
     printf ',{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"}' "$((base + 1))" "$b" "$bcr"
     local i=2
@@ -335,6 +354,12 @@ seed_state() { # <path>
   printf '# crown-reconcile re-ask list — "<sha> <first-seen-epoch>". Written %s.\n' "$NOW" > "$1"
 }
 CR_NOSEED=0
+# A MUTATION OF THE SCRIPT ITSELF, not of a fixture. Most arms here move one
+# field of a fixture and watch the verdict follow; two arms below have to move
+# the SCRIPT instead, because what they guard is a sentence the script prints and
+# a condition it tests, and no fixture can delete either. CR_ALT points run_cr at
+# a mutated copy for exactly one probe and is cleared straight after.
+CR_ALT=""
 run_cr() { # <expected-rc> <label> [args…]
   local want="$1" label="$2"; shift 2
   local out rc state
@@ -347,7 +372,7 @@ run_cr() { # <expected-rc> <label> [args…]
   out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY \
     PATH="$SANDBOX_PATH" \
     CROWN_STATE_FILE="$state" \
-    bash "$CR" --now "$NOW" "$@" 2>&1)"
+    bash "${CR_ALT:-$CR}" --now "$NOW" "$@" 2>&1)"
   rc=$?
   printf '%s\n' "$out" > "$TMP/last.out"
   if [ "$rc" = "$want" ]; then
@@ -1967,6 +1992,211 @@ if grep -qF 'first_run=1' "$WF"; then
 else
   bad "$WF never emits first_run=1, so the script will read the claim as unmade"
 fi
+
+# ── the script-mutation helper, used by (y) and (z) below ────────────────────
+# A copy of crown-reconcile.sh with ONE literal replaced. The copy lives beside a
+# symlinked .github so `$REPO_ROOT/.github/workflows/deploy.yml` still resolves —
+# a mutation must fail for the reason it names, not because it moved house.
+#
+# THE MUTATION IS ASSERTED TO HAVE APPLIED, twice over: the anchor must match
+# EXACTLY ONE line (an anchor that matched nothing would produce a "red" that is
+# really an unchanged script passing an assertion it was always going to pass),
+# and the copy must actually DIFFER from the original.
+MUTREPO="$TMP/mutrepo"; mkdir -p "$MUTREPO/scripts"
+ln -sfn "$REPO_ROOT/.github" "$MUTREPO/.github" 2>/dev/null || true
+# Sets MUT_OUT to the copy's path. It does NOT print it: ok()/bad() write to
+# stdout, so a `$(mutate_cr …)` would swallow its own verdicts into the path.
+MUT_OUT=""
+mutate_cr() { # <name> <literal-anchor> <literal-replacement> -> sets MUT_OUT
+  local out="$MUTREPO/scripts/cr-$1.sh" n
+  n="$(grep -cF -- "$2" "$CR")"
+  if [ "$n" = "1" ]; then
+    ok "the $1 mutation anchor matches EXACTLY ONE line of the script"
+  else
+    bad "the $1 mutation anchor matched $n line(s), not 1 — the red it is meant to produce would be a default, not a difference"
+  fi
+  awk -v a="$2" -v b="$3" '{ i = index($0, a); if (i > 0) { $0 = substr($0, 1, i - 1) b substr($0, i + length(a)) } print }' "$CR" > "$out"
+  if cmp -s "$CR" "$out"; then
+    bad "the $1 mutation changed NOTHING — the copy is byte-identical to the script"
+  else
+    ok "the $1 mutation APPLIED — the copy differs from the script"
+  fi
+  MUT_OUT="$out"
+}
+
+section "(n4) THE DEFERRED RE-READ RE-ASKS THE IN-FLIGHT ALIBI THE SERVING ARM GRANTS"
+# THE LIVE DEFECT, in fixture form. The SERVING arm defers while
+# `serving_run_in_flight` names a non-terminal run for that exact sha; the
+# deferred re-read did NOT re-ask it, and skipped only $GRACED_THIS_RUN. So the
+# instant the box moved to a newer sha, a graced sha whose own deploy run was
+# STILL RUNNING lost its alibi and was accused: 373df8e7a, graced 09:58:01, its
+# run 34025636906 in_progress since 09:47:30, fired GRACED-UNRECORDED at
+# 11:00:18 — a red at a deploy nobody had finished.
+#
+# Run 3 is the in-flight deploy for the graced sha. ONE FIELD separates the two
+# run pages below (status/conclusion), so the verdict change is that field's and
+# nothing else's.
+RUNS_N4_FLIGHT="$(runs_add runs-n4-flight "$RUNS_BASE" 3 "$SHA_D" in_progress null "$IN2")"
+RUNS_N4_DONE="$(runs_add runs-n4-done "$RUNS_BASE" 3 "$SHA_D" completed failure "$IN2")"
+JOBS_N4="$(jobs_legs jobs-n4 "1:success:success" "2:success:success" "3:failure:failure")"
+CR_STATE="$TMP/state-reask-inflight.txt"; rm -f "$CR_STATE"
+run_cr 4 "run N: $SHA_D is served and unrecorded while its own run 3 is in flight — graced" \
+  --runs-fixture "$RUNS_N4_FLIGHT" --jobs-fixture "$JOBS_N4" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FRESH"
+if grep -q "^$SHA_D " "$CR_STATE" 2>/dev/null; then
+  ok "the graced sha reached the re-ask list, so the next run has something to re-ask"
+else
+  bad "the graced sha never reached the re-ask list at $CR_STATE — every arm below would be vacuous"
+  [ -f "$CR_STATE" ] && sed 's/^/       | /' "$CR_STATE" >&2
+fi
+
+# THE ARM ITSELF: the box has moved on to $SHA_A, so $SHA_D is no longer
+# $GRACED_THIS_RUN and reaches the deferred re-read — with its run STILL
+# in_progress. It must be HELD (rc 4), not accused.
+run_cr 4 "run N+1: the box now serves $SHA_A, and run 3 for the graced $SHA_D is STILL RUNNING" \
+  --runs-fixture "$RUNS_N4_FLIGHT" --jobs-fixture "$JOBS_N4" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+not_saw "GRACED-UNRECORDED:" "a deploy nobody has finished is not accused of failing to record"
+saw "GRACE HELD" "the deferral is NAMED, not silent"
+saw "deploy.yml run 3 for that exact sha is STILL RUNNING" "it names the run that is the alibi"
+saw "NOT YET DUE" "and the run exits 4 — not yet due, rather than a page"
+if grep -q "^$SHA_D " "$CR_STATE" 2>/dev/null; then
+  ok "the held sha STAYS on the re-ask list — a deferral is a debt, not a dismissal"
+else
+  bad "the held sha was dropped from the re-ask list — the accusation became unmakeable"
+fi
+
+# MUTATION: remove the re-ask. The identical fixture must then produce the live
+# red, which is what makes the arm above a DIFFERENCE and not a default.
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+mutate_cr drop-reask-inflight \
+  'if [ -n "$gflight" ] && [ "$gage" -lt "$SERVING_INFLIGHT_CAP_SECONDS" ]; then # MUT:G-REASK-INFLIGHT' \
+  'if [ -n "" ] && [ "$gage" -lt "$SERVING_INFLIGHT_CAP_SECONDS" ]; then # MUT:G-REASK-INFLIGHT'
+CR_ALT="$MUT_OUT"
+run_cr 1 "the SAME in-flight fixture, against a script whose deferred re-read never re-asks" \
+  --runs-fixture "$RUNS_N4_FLIGHT" --jobs-fixture "$JOBS_N4" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+CR_ALT=""
+saw "GRACED-UNRECORDED: 1 sha(s)" "without the re-ask the in-flight deploy is accused — the live 373df8e7a red, reproduced"
+not_saw "GRACE HELD" "…and nothing holds it"
+
+# THE OTHER DIRECTION: the alibi must EXPIRE. Same sha, same list, same crown —
+# run 3 is now completed and recorded nothing, so the accusation fires.
+run_cr 1 "run N+2: run 3 has finished and $SHA_D still has no cp row" \
+  --runs-fixture "$RUNS_N4_DONE" --jobs-fixture "$JOBS_N4" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+saw "GRACED-UNRECORDED: 1 sha(s)" "a finished run is no alibi — the deferred accusation fires"
+saw "$SHA_D" "it names the sha the earlier runs held"
+not_saw "GRACE HELD" "and nothing is held any more"
+CR_STATE=""
+
+section "(y) the POPULATION names CANCELLED runs in BOTH directions"
+# A cancelled run was never omitted from this population — run_delivers does not
+# consult the run's own conclusion — but it was counted ANONYMOUSLY, under a
+# parenthetical claiming "delivered nothing" means a docs-only merge. Most of
+# that class is a SUPERSEDED PUSH. And the other direction is the dangerous one:
+# a run whose leg concluded success and which was then cancelled DELIVERED, with
+# its record-delivery job cancelled alongside it — the shape SERVING-UNRECORDED
+# came from. One fixture holds one run of each kind, beside an ordinary one.
+RUNS_Y="$(runs_json runs-y "$SHA_A:$IN1")"
+RUNS_Y="$(runs_add runs-y-cn "$RUNS_Y" 2 "$SHA_B" completed cancelled "$IN2")"
+RUNS_Y="$(runs_add runs-y-cd "$RUNS_Y" 3 "$SHA_C" completed cancelled "$IN2")"
+# run 2: cancelled before either leg concluded — CANCELLED_NONDELIVERING.
+# run 3: the instance leg concluded success and the run was cancelled anyway —
+#        CANCELLED_DELIVERING, a delivery whose recorder died with the cancel.
+JOBS_Y="$(jobs_legs jobs-y "1:success:success" "2:cancelled:cancelled" "3:cancelled:success")"
+CROWN_Y="$(crown_json crown-y \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_C" instance false "$IN2" 3)")"
+run_cr 0 "one ordinary run, one cancelled-nondelivering, one cancelled-delivering" \
+  --runs-fixture "$RUNS_Y" --jobs-fixture "$JOBS_Y" --crown-fixture "$CROWN_Y" --health-fixture "$HEALTH_BASE"
+# THE EXISTING TOTALS ARE UNCHANGED BY THE SPLIT — this is the half that keeps
+# the new clause from being paid for with a moved denominator.
+saw "POPULATION: 3 completed deploy.yml run(s)" "all three runs are still in the population"
+saw "2 of them DELIVERED" "the cancelled-but-delivering run is still counted as DELIVERING"
+saw "1 delivered nothing" "the cancelled-before-any-leg run is still counted as NONDELIVERING"
+saw "1 were CANCELLED_NONDELIVERING" "the superseded push is named, not pooled under 'a docs-only merge'"
+saw "1 of the 2 that DELIVERED are CANCELLED_DELIVERING" "the delivered-then-cancelled run is named in the OTHER direction too"
+
+# NON-VACUITY: an ordinary window with NO cancelled run prints the clause with
+# zeroes, so the two counts above are a measurement and not a constant.
+run_cr 0 "the base window, where nothing was cancelled" $(base_args)
+saw "0 were CANCELLED_NONDELIVERING" "with nothing cancelled the count is 0, so the arm above measured something"
+saw "0 of the 2 that DELIVERED are CANCELLED_DELIVERING" "…in both directions"
+
+# MUTATION: drop the split. The clause is the only place these two classes are
+# ever said, so silencing its `say` is exactly "the split was dropped".
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+mutate_cr drop-cancelled-split \
+  'say "  CANCELLED, NAMED IN BOTH DIRECTIONS:' \
+  ': "  CANCELLED, NAMED IN BOTH DIRECTIONS:'
+CR_ALT="$MUT_OUT"
+run_cr 0 "the same fixture, against a script whose split was dropped" \
+  --runs-fixture "$RUNS_Y" --jobs-fixture "$JOBS_Y" --crown-fixture "$CROWN_Y" --health-fixture "$HEALTH_BASE"
+CR_ALT=""
+not_saw "CANCELLED_NONDELIVERING" "without the split the superseded push is anonymous again — the assertions above are differences, not defaults"
+not_saw "CANCELLED_DELIVERING" "…and so is the delivered-then-cancelled run"
+
+section "(z) the run listing PAGES to the window start — 101 rows is a COUNT, not a floor"
+# `per_page=100` with no `page=` was ONE page read as if it were the 24h window,
+# and it was short on 7 of 24 active days in the 30-day sample (2026-09-02: 246
+# runs). fetch_runs now pages. A fixture is one file and cannot page, so it
+# states for itself whether the listing it stands for reached the window start:
+# WITHOUT `"truncated": true` a 101-row fixture is the WHOLE listing.
+runs_bulk() { # <name> <first-id> <count> <sha:created> <filler-sha> <filler-created> <truncated:true|false>
+  local out="$TMP/$1.json" base="$2" count="$3" fsha="$5" fcreated="$6" trunc="$7"
+  local a="${4%%:*}" acr="${4#*:}"
+  {
+    printf '{'
+    [ "$trunc" = "true" ] && printf '"truncated":true,'
+    printf '"workflow_runs":['
+    printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"}' "$base" "$a" "$acr"
+    local i=1
+    while [ "$i" -lt "$count" ]; do
+      printf ',{"id":%d,"head_sha":"%s","conclusion":null,"status":"in_progress","created_at":"%s"}' \
+        "$((base + i))" "$fsha" "$fcreated"
+      i=$((i + 1))
+    done
+    printf ']}'
+  } > "$out"
+  fixture_ok "$out"
+  echo "$out"
+}
+# 101 runs, every one of them created INSIDE the window, oldest still newer than
+# the cutoff — the exact shape that used to print `+` on row count alone.
+RUNS_Z_WHOLE="$(runs_bulk runs-z-whole 700 101 "$SHA_A:$IN1" "$SHA_D" "$IN2" false)"
+RUNS_Z_SHORT="$(runs_bulk runs-z-short 700 101 "$SHA_A:$IN1" "$SHA_D" "$IN2" true)"
+JOBS_Z="$(jobs_json jobs-z "700:success")"
+CROWN_Z="$(crown_json crown-z \
+  "$(row "$SHA_A" cp false "$IN1" 700)" \
+  "$(row "$SHA_A" instance false "$IN1" 700)")"
+if [ "$(jq '.workflow_runs | length' "$RUNS_Z_WHOLE")" -ge 101 ]; then
+  ok "the fixture really holds 101+ runs inside the window — more than one page"
+else
+  bad "the (z) fixture holds fewer than 101 runs, so it cannot exercise the page boundary at all"
+fi
+run_cr 0 "101 runs in the window, listing complete" \
+  --runs-fixture "$RUNS_Z_WHOLE" --jobs-fixture "$JOBS_Z" --crown-fixture "$CROWN_Z" --health-fixture "$HEALTH_BASE"
+not_saw "TRUNCATION RESIDUAL" "a listing that reached the window start states no residual"
+not_saw "is a FLOOR" "…and does not call its population a floor"
+saw "POPULATION: 1 completed deploy.yml run(s)" "the population is a COUNT — no plus sign on 101 rows"
+
+# ONE DIFFERENCE: the same 101 rows, from a listing that stopped SHORT. The floor
+# language is not deleted, it is confined to the case that really is one.
+run_cr 0 "the same 101 runs, from a listing that stopped short of the window start" \
+  --runs-fixture "$RUNS_Z_SHORT" --jobs-fixture "$JOBS_Z" --crown-fixture "$CROWN_Z" --health-fixture "$HEALTH_BASE"
+saw "POPULATION: 1+ completed deploy.yml run(s)" "a listing that stopped short still prints its population as N+"
+saw "TRUNCATION RESIDUAL" "…and still states the residual, naming the oldest run id it examined"
+saw "the BEHIND denominator above is a floor" "…and still labels the BEHIND denominator a floor"
+
+# MUTATION: key the floor on row count again, the way one page did. The COMPLETE
+# listing then lies about itself.
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+mutate_cr floor-on-row-count \
+  '[ "${RUNS_LIST_COMPLETE:-1}" != "1" ]' \
+  '[ "${PAGE_ROWS:-0}" -ge 100 ]'
+CR_ALT="$MUT_OUT"
+run_cr 0 "the COMPLETE 101-run listing, against a script that keys the floor on row count" \
+  --runs-fixture "$RUNS_Z_WHOLE" --jobs-fixture "$JOBS_Z" --crown-fixture "$CROWN_Z" --health-fixture "$HEALTH_BASE"
+CR_ALT=""
+saw "POPULATION: 1+ completed deploy.yml run(s)" "row-count keying calls a whole listing a floor — which is the bug, and proves the arm above is a difference"
 
 section "(q) the re-ask boundary is STATED in the script, not only implemented"
 # A deferral whose retirement rule lives only in code is a rule the next reader

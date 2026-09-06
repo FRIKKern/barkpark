@@ -730,13 +730,34 @@ defmodule Barkpark.Plugins.Tasks do
         summary:
           "List claimable tasks: lifecycle open or blocked (blocked is claimable by design), " <>
             "dependencies and queue gate cleared, published or unpaired draft, " <>
-            "twin-collapsed to the published row — priority order by default.",
+            "twin-collapsed to the published row — priority order by default. " <>
+            "DATASET SCOPE: with no --dataset the page spans EVERY dataset in the caller's " <>
+            "workspace/project scope and page.datasets says which; --dataset narrows it. " <>
+            "A doc_id living in more than one dataset of that scope is WITHHELD and listed " <>
+            "once in page.dataset_ambiguous — the queue will not pick a dataset you did not " <>
+            "name (Barkpark.Tasks.TwinResolver rule 3); name one to get the row.",
         http: %{method: "GET", path_template: "/v1/tasks/ready"},
         auth_tier: "read",
         args: [],
         flags: [
           %{name: "limit", type: "int", summary: "Max tasks to return.", default: 50},
           %{name: "offset", type: "int", summary: "Ready-queue row offset.", default: 0},
+          # The ENDPOINT knob, declared (task-0084e191d406de96). `?dataset=` is
+          # honoured by `TasksController.ready/2` as of this row; declaring it
+          # here is what makes the CLI's own forward a three-line change rather
+          # than a special case, because `-d/--dataset` is a GLOBAL value flag —
+          # `parseGlobals` consumes it wherever it appears, so `flags["dataset"]`
+          # is never populated and `applyQuery` cannot forward it from the flag
+          # loop (internal/cli/run.go, the same trap documented there for
+          # limit/offset). Until that Go forward lands, `bp task ready --dataset`
+          # still sends no `?dataset=`; the HTTP route honours it either way.
+          %{
+            name: "dataset",
+            type: "string",
+            summary:
+              "Narrow the ready page to ONE dataset. Absent: every dataset in the " <>
+                "caller's workspace/project scope (page.datasets says which)."
+          },
           %{
             name: "order",
             type: "string",
