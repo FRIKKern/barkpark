@@ -129,6 +129,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The convergence step below resolves the sha the control plane SERVES,
+          # which is behind main's tip whenever a deploy is late — exactly the
+          # case the step exists to catch. A depth-1 clone cannot resolve it, and
+          # deploy-convergence-check.sh then refuses HARNESS-UNAVAILABLE (exit 2)
+          # instead of answering. Measured 2026-09-06 run 34008234523: served
+          # 92c45fc17 'is not a commit in this clone' — six of eight runs since
+          # 2026-09-05T07:48Z died there, alternating with green whenever the box
+          # happened to serve the exact tip. deploy.yml's own convergence job
+          # sets the same depth for the same reason.
+          fetch-depth: 0
 
       # The scream's own tripwire, first. If the read stops being able to fail —
       # on a RED tip AND on a tip with no verdict at all — the watch below is
@@ -171,9 +182,16 @@ jobs:
           if [ -z "$tip" ] || [ -z "$served" ]; then
             echo "::warning::the control plane did not say what it serves (or main was unreadable) — UNCHECKED, not green"; exit 0
           fi
+          # rc captured on the same line: GitHub's default `run:` shell is
+          # `bash -e {0}`, and `set -uo pipefail` does not switch -e off, so a
+          # bare non-zero exit killed this step BEFORE the case below ever ran —
+          # the refusal arm (exit 2) reddened the job as an unexplained failure,
+          # and the same shape would have hidden a real STRANDED verdict's
+          # message. Same idiom as the watch step above.
+          rc=0
           bash scripts/deploy-convergence-check.sh converged --label "control plane (barkpark.cloud)" --target cp \
-            --served "$served" --tip "$tip" --grace-seconds 900
-          case $? in
+            --served "$served" --tip "$tip" --grace-seconds 900 || rc=$?
+          case "$rc" in
             0) echo "control plane: converged (serves ${served:0:10}, main tip ${tip:0:10})" ;;
             1) echo "::error::CONTROL PLANE STRANDED — barkpark.cloud serves ${served:0:10}, main's newest deploy-relevant commit is newer (tip ${tip:0:10}). Every merge since is not in production."; exit 1 ;;
             *) echo "::warning::the convergence comparison refused — UNCHECKED, not green" ;;
