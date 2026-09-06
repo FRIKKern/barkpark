@@ -11,6 +11,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   alias Barkpark.Content.Papers.CanvasRunContext
   alias BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor
 
+  @card_form_fields ~w(card-tone card-title card-media-src card-media-alt card-action-label card-action-href card-action-priority)
+  @card_tones ["", "info", "ok", "warn", "danger"]
+  @card_action_priorities ["primary", "secondary"]
+
   @doc false
   def block_form_source(params), do: Map.drop(params, ["if_rev", "request_id"])
 
@@ -32,6 +36,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   @doc false
   def structure_child_locked?(child), do: not is_nil(locked_visible_block_id(child))
+
+  @doc false
+  def card_form_state(%{"type" => "card"} = block) do
+    with {:ok, tone} <- optional_card_text(block, "tone"),
+         {:ok, slots} <- card_slots(block),
+         {:ok, title} <- card_slot(slots, "title", &valid_card_title?/1),
+         {:ok, _body} <- card_slot(slots, "body", &valid_card_body?/1),
+         {:ok, media} <- card_slot(slots, "media", &valid_card_media?/1),
+         {:ok, action} <- card_slot(slots, "action", &valid_card_action?/1) do
+      {:ok,
+       %{
+         tone: tone || "",
+         title: card_element_text(title, "text", ""),
+         media_src: card_element_text(media, "src", ""),
+         media_alt: card_element_text(media, "alt", ""),
+         action_label: card_element_text(action, "label", ""),
+         action_href: card_element_text(action, "href", ""),
+         action_priority: card_element_text(action, "priority", "secondary")
+       }}
+    else
+      _ -> {:error, :malformed_card}
+    end
+  end
+
+  def card_form_state(_block), do: {:error, :malformed_card}
 
   @doc false
   # Build the patch map for a block from the submitted form params. Only the
@@ -143,6 +172,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
       end
     else
       %{}
+    end
+  end
+
+  def build_block_patch(%{"type" => "card"} = block, params) do
+    case card_chrome_patch(block, params) do
+      {:ok, patch} -> patch
+      {:error, _reason} -> %{}
     end
   end
 
@@ -288,6 +324,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
       {:ok, build_block_patch(block, params)}
     end
   end
+
+  def validate_block_patch(%{"type" => "card"} = block, params),
+    do: card_chrome_patch(block, params)
 
   def validate_block_patch(%{"type" => "section"} = block, params) do
     section_structure_patch(block, params)
@@ -747,6 +786,220 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     |> put_form_param_preserving_shape(params, prefix <> "label", "label")
     |> put_number_form_field(item, params, prefix <> "met", "met")
     |> put_number_form_field(item, params, prefix <> "total", "total")
+  end
+
+  defp card_chrome_patch(block, params) do
+    with {:ok, state} <- card_form_state(block),
+         :ok <- validate_card_form_params(params, state) do
+      patch = put_card_tone_patch(%{}, state, params)
+      slots = if is_map(block["slots"]), do: block["slots"], else: %{}
+
+      {slots, changed?} =
+        {slots, false}
+        |> put_card_title_slot(state, params)
+        |> put_card_media_slot(state, params)
+        |> put_card_action_slot(state, params)
+
+      {:ok, if(changed?, do: Map.put(patch, "slots", slots), else: patch)}
+    end
+  end
+
+  defp validate_card_form_params(params, state) do
+    known = MapSet.new(@card_form_fields)
+    known_present? = Enum.any?(@card_form_fields, &Map.has_key?(params, &1))
+
+    unexpected? =
+      Enum.any?(Map.keys(params), fn key ->
+        is_binary(key) and String.starts_with?(key, "card-") and not MapSet.member?(known, key)
+      end)
+
+    binary_values? =
+      Enum.all?(@card_form_fields, fn key ->
+        not Map.has_key?(params, key) or is_binary(params[key])
+      end)
+
+    tone_valid? =
+      not Map.has_key?(params, "card-tone") or params["card-tone"] == state.tone or
+        params["card-tone"] in @card_tones
+
+    priority_valid? =
+      not Map.has_key?(params, "card-action-priority") or
+        params["card-action-priority"] == state.action_priority or
+        params["card-action-priority"] in @card_action_priorities
+
+    if known_present? and not unexpected? and binary_values? and tone_valid? and priority_valid?,
+      do: :ok,
+      else: {:error, :invalid_card_form}
+  end
+
+  defp put_card_tone_patch(patch, state, params) do
+    case Map.fetch(params, "card-tone") do
+      {:ok, submitted} when submitted != state.tone ->
+        Map.put(patch, "tone", if(submitted == "", do: nil, else: submitted))
+
+      _ ->
+        patch
+    end
+  end
+
+  defp put_card_title_slot({slots, changed?}, state, params) do
+    case Map.fetch(params, "card-title") do
+      {:ok, submitted} when submitted != state.title ->
+        case card_slot_element(slots, "title") do
+          %{} = title ->
+            {Map.put(slots, "title", [Map.put(title, "text", submitted)]), true}
+
+          nil when submitted != "" ->
+            {Map.put(slots, "title", [%{"type" => "heading", "text" => submitted}]), true}
+
+          nil ->
+            {slots, changed?}
+        end
+
+      _ ->
+        {slots, changed?}
+    end
+  end
+
+  defp put_card_media_slot({slots, changed?}, state, params) do
+    src = Map.get(params, "card-media-src", state.media_src)
+    alt = Map.get(params, "card-media-alt", state.media_alt)
+    src_changed? = Map.has_key?(params, "card-media-src") and src != state.media_src
+    alt_changed? = Map.has_key?(params, "card-media-alt") and alt != state.media_alt
+
+    cond do
+      src == state.media_src and alt == state.media_alt ->
+        {slots, changed?}
+
+      media = card_slot_element(slots, "media") ->
+        updated =
+          media
+          |> put_card_element_field(src_changed?, "src", src)
+          |> put_card_element_field(alt_changed?, "alt", alt)
+
+        {Map.put(slots, "media", [updated]), true}
+
+      src != "" ->
+        media =
+          %{"type" => "image", "src" => src}
+          |> put_card_element_field(alt_changed?, "alt", alt)
+
+        {Map.put(slots, "media", [media]), true}
+
+      true ->
+        {slots, changed?}
+    end
+  end
+
+  defp put_card_action_slot({slots, changed?}, state, params) do
+    label = Map.get(params, "card-action-label", state.action_label)
+    href = Map.get(params, "card-action-href", state.action_href)
+    priority = Map.get(params, "card-action-priority", state.action_priority)
+
+    label_changed? =
+      Map.has_key?(params, "card-action-label") and label != state.action_label
+
+    href_changed? = Map.has_key?(params, "card-action-href") and href != state.action_href
+
+    priority_changed? =
+      Map.has_key?(params, "card-action-priority") and priority != state.action_priority
+
+    cond do
+      label == state.action_label and href == state.action_href and
+          priority == state.action_priority ->
+        {slots, changed?}
+
+      action = card_slot_element(slots, "action") ->
+        updated =
+          action
+          |> put_card_element_field(label_changed?, "label", label)
+          |> put_card_element_field(href_changed?, "href", href)
+          |> put_card_action_priority(priority_changed?, priority)
+
+        {Map.put(slots, "action", [updated]), true}
+
+      label != "" or href != "" ->
+        action =
+          %{"type" => "action", "label" => label, "href" => href}
+          |> put_card_action_priority(priority_changed?, priority)
+
+        {Map.put(slots, "action", [action]), true}
+
+      true ->
+        {slots, changed?}
+    end
+  end
+
+  defp put_card_element_field(element, true, key, value), do: Map.put(element, key, value)
+  defp put_card_element_field(element, false, _key, _value), do: element
+
+  defp put_card_action_priority(action, true, "secondary"), do: Map.delete(action, "priority")
+  defp put_card_action_priority(action, true, priority), do: Map.put(action, "priority", priority)
+  defp put_card_action_priority(action, false, _priority), do: action
+
+  defp card_slots(block) do
+    case Map.fetch(block, "slots") do
+      :error -> {:ok, %{}}
+      {:ok, nil} -> {:ok, %{}}
+      {:ok, slots} when is_map(slots) -> {:ok, slots}
+      _ -> {:error, :malformed_card}
+    end
+  end
+
+  defp card_slot(slots, name, validator) do
+    case Map.fetch(slots, name) do
+      :error -> {:ok, nil}
+      {:ok, nil} -> {:ok, nil}
+      {:ok, []} -> {:ok, nil}
+      {:ok, [%{} = element]} -> if validator.(element), do: {:ok, element}, else: :error
+      _ -> :error
+    end
+  end
+
+  defp card_slot_element(slots, name) do
+    case Map.get(slots, name) do
+      [%{} = element] -> element
+      _ -> nil
+    end
+  end
+
+  defp valid_card_title?(element),
+    do: element["type"] == "heading" and optional_card_text?(element, "text")
+
+  defp valid_card_body?(element),
+    do:
+      element["type"] == "paragraph" and
+        (not Map.has_key?(element, "content") or is_nil(element["content"]) or
+           is_list(element["content"]))
+
+  defp valid_card_media?(element),
+    do:
+      element["type"] in [nil, "image"] and optional_card_text?(element, "src") and
+        optional_card_text?(element, "alt")
+
+  defp valid_card_action?(element),
+    do:
+      element["type"] == "action" and optional_card_text?(element, "label") and
+        optional_card_text?(element, "href") and optional_card_text?(element, "priority")
+
+  defp optional_card_text(map, key) do
+    case Map.fetch(map, key) do
+      :error -> {:ok, nil}
+      {:ok, nil} -> {:ok, nil}
+      {:ok, value} when is_binary(value) -> {:ok, value}
+      _ -> :error
+    end
+  end
+
+  defp optional_card_text?(map, key), do: match?({:ok, _value}, optional_card_text(map, key))
+
+  defp card_element_text(nil, _key, default), do: default
+
+  defp card_element_text(element, key, default) do
+    case Map.get(element, key) do
+      value when is_binary(value) -> value
+      _ -> default
+    end
   end
 
   defp section_structure_patch(block, params) do

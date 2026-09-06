@@ -33,6 +33,119 @@ defmodule BarkparkWeb.Studio.StudioBetaSectionColumnsEditingTest do
     %{conn: Plug.Test.init_test_session(conn, %{"api_token" => raw})}
   end
 
+  test "generic Beta edits nested grid Card fields without replacing sibling slots", %{conn: conn} do
+    cards =
+      for index <- 1..3 do
+        %{
+          "id" => "card:#{index}",
+          "type" => "card",
+          "span" => 1,
+          "order" => 3 - index,
+          "unknown" => index,
+          "slots" => %{
+            "title" => [
+              %{"type" => "heading", "level" => 3, "text" => "Original", "unknown" => "title"}
+            ],
+            "body" => [%{"type" => "paragraph", "content" => text("Body"), "unknown" => "body"}],
+            "action" => [
+              %{
+                "type" => "action",
+                "label" => "Read",
+                "href" => "/papers/original",
+                "unknown" => "action"
+              }
+            ],
+            "custom" => [%{"opaque" => [1, 2]}]
+          }
+        }
+      end
+
+    section = %{
+      "id" => "card-grid",
+      "type" => "section",
+      "layout" => %{"mode" => "grid", "tracks" => 3},
+      "blocks" => cards
+    }
+
+    doc = legacy_document!("cards", [section])
+    before = stored_document(doc.doc_id)
+    {view, path} = mount_beta(conn, doc.doc_id)
+    assert has_element?(view, "[data-test-id='paper-card-editor']")
+    refute render(view) =~ "card blocks are not editable yet"
+    assert stored_document(doc.doc_id) == before
+
+    request = Ecto.UUID.generate()
+
+    params = %{
+      "block_id" => "card:2",
+      "card-title" => "Beta edited card",
+      "card-tone" => "info",
+      "card-action-label" => "Read evidence",
+      "card-action-href" => "/papers/evidence",
+      "request_id" => request,
+      "if_rev" => socket_of(view).assigns.editor_doc.rev
+    }
+
+    render_hook(view, "paper-block-autosave", params)
+    assert_reply(view, %{saved: true, replayed: false, request_id: ^request})
+    saved = stored_document(doc.doc_id)
+    [saved_section] = saved.content["blocks"]
+    [first, edited, third] = saved_section["blocks"]
+    assert first == Enum.at(cards, 0)
+    assert third == Enum.at(cards, 2)
+    original = Enum.at(cards, 1)
+    assert Map.drop(edited, ["tone", "slots"]) == Map.drop(original, ["tone", "slots"])
+    assert edited["slots"]["body"] == original["slots"]["body"]
+    assert edited["slots"]["custom"] == original["slots"]["custom"]
+
+    assert edited["slots"]["title"] == [
+             Map.put(hd(original["slots"]["title"]), "text", "Beta edited card")
+           ]
+
+    assert edited["slots"]["action"] == [
+             Map.merge(hd(original["slots"]["action"]), %{
+               "label" => "Read evidence",
+               "href" => "/papers/evidence"
+             })
+           ]
+
+    assert Map.drop(saved_section, ["blocks"]) == Map.drop(section, ["blocks"])
+    render_hook(view, "paper-block-autosave", params)
+    assert_reply(view, %{saved: true, replayed: true, request_id: ^request})
+    assert stored_document(doc.doc_id) == saved
+
+    body_request = Ecto.UUID.generate()
+
+    body_params = %{
+      "op" => "patch-card-body",
+      "id" => "card:2",
+      "content" => text("Beta body preserves newer card fields"),
+      "request_id" => body_request,
+      "if_rev" => socket_of(view).assigns.editor_doc.rev
+    }
+
+    render_hook(view, "paper-op", body_params)
+    assert_reply(view, %{saved: true, replayed: false, request_id: ^body_request})
+    body_saved = stored_document(doc.doc_id)
+
+    expected_blocks =
+      update_in(
+        saved.content["blocks"],
+        [Access.at(0), "blocks", Access.at(1), "slots", "body", Access.at(0), "content"],
+        fn _ -> body_params["content"] end
+      )
+
+    assert body_saved.content["blocks"] == expected_blocks
+    assert body_saved.rev != saved.rev
+    render_hook(view, "paper-op", body_params)
+    assert_reply(view, %{saved: true, replayed: true, request_id: ^body_request})
+    assert stored_document(doc.doc_id) == body_saved
+    {:ok, reloaded, _} = live(conn, path)
+    reloaded |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
+    assert has_element?(reloaded, "[data-test-id='paper-card-editor']")
+    assert stored_document(doc.doc_id) == body_saved
+  end
+
   test "generic Beta appends to empty containers with replay and stale-source protection", %{
     conn: conn
   } do

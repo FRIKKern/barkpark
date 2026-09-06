@@ -1319,6 +1319,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     """
   end
 
+  attr(:block, :map, required: true)
+
+  defp card_body_editor(assigns) do
+    ~H"""
+    <div
+      phx-update="ignore"
+      id={"paper-ed-" <> Map.fetch!(@block, "id")}
+      phx-hook="BarkparkPaperEditor"
+      class="bp-paper-edit-wc"
+      data-test-id="paper-card-body-editor"
+    >
+      <bp-paper-editor
+        data-editor-mode="card-body"
+        data-block={Jason.encode!(@block)}
+      ></bp-paper-editor>
+    </div>
+    """
+  end
+
   # Per-block-type edit fields. Rich bodies use the canonical WC so its
   # PortableDoc conversion preserves marks and links while text changes.
   # Ordinary forms remain for scalar chrome such as callout tone/title/fold.
@@ -1451,6 +1470,65 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-field-caption"
           />
         </form>
+      <% "card" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-card-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-card-preview">
+            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+          </div>
+          <%= case Blocks.card_form_state(@block) do %>
+            <% {:ok, state} -> %>
+              <.card_body_editor block={@block} />
+              <details
+                id={"card-controls-" <> @id}
+                class="bp-paper-contextual-controls bp-paper-contextual-controls--card"
+                phx-mounted={JS.ignore_attributes("open")}
+              >
+                <summary class="bp-paper-contextual-toggle">Configure card</summary>
+                <div class="bp-paper-contextual-panel">
+                  <form
+                    id={"card-form-" <> @id}
+                    class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block"
+                    phx-change="paper-block-autosave"
+                    phx-debounce="500"
+                    data-test-id="paper-card-editor"
+                  >
+                    <input type="hidden" name="block_id" value={@id} />
+                    <label class="bp-paper-edit-fieldlabel" for={"card-tone-" <> @id}>Tone</label>
+                    <select id={"card-tone-" <> @id} name="card-tone" class="bp-paper-edit-select">
+                      <option
+                        :for={{value, label} <- card_tone_options(state.tone)}
+                        value={value}
+                        selected={value == state.tone}
+                      ><%= label %></option>
+                    </select>
+                    <label class="bp-paper-edit-fieldlabel" for={"card-title-" <> @id}>Title</label>
+                    <input id={"card-title-" <> @id} type="text" name="card-title" class="bp-paper-edit-text" value={state.title} />
+                    <label class="bp-paper-edit-fieldlabel" for={"card-media-src-" <> @id}>Media source</label>
+                    <input id={"card-media-src-" <> @id} type="text" name="card-media-src" class="bp-paper-edit-text" value={state.media_src} />
+                    <label class="bp-paper-edit-fieldlabel" for={"card-media-alt-" <> @id}>Media description</label>
+                    <input id={"card-media-alt-" <> @id} type="text" name="card-media-alt" class="bp-paper-edit-text" value={state.media_alt} />
+                    <label class="bp-paper-edit-fieldlabel" for={"card-action-label-" <> @id}>Action label</label>
+                    <input id={"card-action-label-" <> @id} type="text" name="card-action-label" class="bp-paper-edit-text" value={state.action_label} />
+                    <label class="bp-paper-edit-fieldlabel" for={"card-action-href-" <> @id}>Action destination</label>
+                    <input id={"card-action-href-" <> @id} type="text" name="card-action-href" class="bp-paper-edit-text" value={state.action_href} />
+                    <label class="bp-paper-edit-fieldlabel" for={"card-action-priority-" <> @id}>Action priority</label>
+                    <select id={"card-action-priority-" <> @id} name="card-action-priority" class="bp-paper-edit-select">
+                      <option
+                        :for={{value, label} <- card_priority_options(state.action_priority)}
+                        value={value}
+                        selected={value == state.action_priority}
+                      ><%= label %></option>
+                    </select>
+                  </form>
+                </div>
+              </details>
+            <% {:error, :malformed_card} -> %>
+              <p class="bp-paper-edit-readonly">
+                This Card's known slots are malformed and cannot be edited here; original content is preserved.
+              </p>
+          <% end %>
+        </div>
       <% "figure" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-figure-editor">
           <%= if editable_figure_child?(@block) do %>
@@ -3261,6 +3339,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   defp form_kind_options(block),
     do: Enum.uniq([form_kind(block), "grill", "questionnaire"])
+
+  defp card_tone_options(current) do
+    preserve_card_option(
+      [
+        {"", "Default"},
+        {"info", "Info"},
+        {"ok", "OK"},
+        {"warn", "Warning"},
+        {"danger", "Danger"}
+      ],
+      current
+    )
+  end
+
+  defp card_priority_options(current) do
+    preserve_card_option([{"primary", "Primary"}, {"secondary", "Secondary"}], current)
+  end
+
+  defp preserve_card_option(options, current) do
+    if Enum.any?(options, fn {value, _label} -> value == current end) do
+      options
+    else
+      [{current, current <> " (current)"} | options]
+    end
+  end
 
   defp form_kind_label("grill"), do: "Form"
   defp form_kind_label("questionnaire"), do: "Questionnaire"

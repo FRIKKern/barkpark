@@ -765,6 +765,7 @@
           const identity = identityFor(source);
           record = {
             version: 0,
+            dirtyToken: null,
             active: 0,
             dirty: false,
             timer: null,
@@ -813,7 +814,7 @@
           paperExitCoordinators.delete(main);
         },
         markDirty(source) {
-          if (!source) return;
+          if (!source) return null;
           captureHistoryPosition();
           const record = recordFor(source);
           if (record.authoredRev === undefined) {
@@ -822,7 +823,9 @@
               : record.documentRevision;
           }
           record.version += 1;
+          record.dirtyToken = {};
           record.dirty = true;
+          return record.dirtyToken;
         },
         beginSave(source) {
           if (!source) return null;
@@ -849,6 +852,22 @@
             record.dirty = false;
           }
           if (!record.dirty && record.active === 0) sources.delete(token.source);
+        },
+        settleNoop(source, expectedToken) {
+          const record = sources.get(source);
+          if (!record || record.dirty !== true || record.active !== 0 ||
+              expectedToken == null || record.dirtyToken !== expectedToken ||
+              mutationQueue.some((entry) => entry.source === source) ||
+              conflict?.source === source) return false;
+          clearTimeout(record.timer);
+          sources.delete(source);
+          renderSaveStatus();
+          if (!coordinator._maybeAdoptPendingIdentity()) {
+            coordinator._flushQuarantinedIfClean();
+          }
+          coordinator._pumpMutations();
+          coordinator._reloadIfClean();
+          return true;
         },
         hasUnsaved() {
           for (const record of sources.values()) {
@@ -1421,6 +1440,7 @@
 
       coordinator._onInput = (event) => {
         const target = event.target;
+        if (target.closest?.('bp-paper-editor[data-editor-mode="card-body"]')) return;
         const source = target.closest?.("form[data-paper-field-flush]") ||
           target.closest?.(PAPER_FLUSH_TARGETS) ||
           target.closest?.(".bp-paper-edit-form[phx-change]");
@@ -1831,10 +1851,22 @@
           return pending;
         };
         this._onOp = (e) => {
-          this._exitCoordinator?.markDirty(this.el);
+          if (!e.target?.matches?.('bp-paper-editor[data-editor-mode="card-body"]')) {
+            this._exitCoordinator?.markDirty(this.el);
+          }
           pushOp(e.detail);
         };
         this.el.addEventListener("bp-op", this._onOp);
+        this._onLocalChange = (e) => {
+          if (!e.target?.matches?.('bp-paper-editor[data-editor-mode="card-body"]') ||
+              !e.detail || typeof e.detail !== "object") return;
+          e.detail.token = this._exitCoordinator?.markDirty(this.el) || null;
+        };
+        this.el.addEventListener("bp-local-change", this._onLocalChange);
+        this._onNoop = (e) => {
+          this._exitCoordinator?.settleNoop(this.el, e.detail?.token);
+        };
+        this.el.addEventListener("bp-noop", this._onNoop);
         this._onFlushPending = (event) => {
           this.el.querySelector("bp-paper-editor")?.flushPendingChanges?.();
           if (!this._pendingSaves.size && this._mutationEntries.length) {
@@ -1940,6 +1972,8 @@
       },
       destroyed() {
         this.el.removeEventListener("bp-op", this._onOp);
+        this.el.removeEventListener("bp-local-change", this._onLocalChange);
+        this.el.removeEventListener("bp-noop", this._onNoop);
         this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
         this.el.removeEventListener("bp-slash-insert", this._onSlash);
         bpReleasePaperExitCoordinator(this);

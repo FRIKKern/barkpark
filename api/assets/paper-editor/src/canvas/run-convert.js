@@ -696,7 +696,11 @@ function blockToNode(block) {
       // (present-only). card-node.js declares the bpCard node, so getJSON() round-
       // trips the body + the chrome attrs. node.type is the NODE name (bpCard), not
       // the bpType (card).
-      return cardBlockToNode(block, bpId, bpType);
+      if (cardBlockEditable(block)) return cardBlockToNode(block, bpId, bpType);
+      return {
+        type: "bpOpaque",
+        attrs: { bpId, bpType, bpBlock: deepClone(block) },
+      };
     }
 
     if (isCanvasStageType(bpType)) {
@@ -1014,17 +1018,18 @@ function sectionLayoutPatch(nextNode) {
 // emit a fine-grained patch-block per child whose INTERIOR changed — keyed by the
 // childId (patch.ex resolves nested ids). Reuses the SAME per-kind change-detectors as
 // the top-level patch pass. Returns an ordered op list.
-function sectionChildPatchOps(prevNode, nextNode) {
+function sectionChildPatchOps(prevNode, nextNode, prevBlock) {
   const ops = [];
   const prevChildren = (prevNode && prevNode.content) || [];
   const nextChildren = (nextNode && nextNode.content) || [];
+  const prevBlocks = Array.isArray(prevBlock && prevBlock.blocks) ? prevBlock.blocks : [];
   for (let i = 0; i < nextChildren.length; i++) {
     const nextChild = nextChildren[i];
     const prevChild = prevChildren[i];
     const cid = nextChild && nextChild.attrs && nextChild.attrs.bpId;
     if (cid == null) continue; // an identical seq means every child has an id
     const cls = classifyNode(nextChild);
-    const patch = childInteriorPatch(cls, prevChild, nextChild, cid);
+    const patch = childInteriorPatch(cls, prevChild, nextChild, cid, prevBlocks[i]);
     if (patch) ops.push({ op: "patch-block", id: cid, patch });
   }
   return ops;
@@ -1035,7 +1040,7 @@ function sectionChildPatchOps(prevNode, nextNode) {
 // Returns null when unchanged (or a no-interior kind: atom / read-only / fleet /
 // opaque never report an interior change). A nested container is impossible (v1
 // forbids it), so there is no recursive container case here.
-function childInteriorPatch(cls, prevChild, nextChild, cid) {
+function childInteriorPatch(cls, prevChild, nextChild, cid, prevBlock) {
   if (cls.isContent) {
     // callout OR note (the notes-grid split) — sub-route by node type.
     if (isNoteType(nextChild && nextChild.type)) {
@@ -1050,7 +1055,9 @@ function childInteriorPatch(cls, prevChild, nextChild, cid) {
   if (cls.isCard) {
     // STEP 4: a card child of a grid section — diff body + chrome; emit the slots+tone
     // patch when it changed (the same detector/builder the top-level pass uses).
-    return cardNodeChanged(prevChild, nextChild) ? cardNodeToPatch(nextChild) : null;
+    return cardNodeChanged(prevChild, nextChild)
+      ? cardNodeToPatch(nextChild, prevBlock)
+      : null;
   }
   if (cls.isStage) {
     // A stage child of a section (a pipeline flow) — diff the five scalars; emit the
@@ -1447,12 +1454,62 @@ function cardAction(block) {
   return Array.isArray(s) && s.length && s[0] ? s[0] : null;
 }
 
+function optionalCardText(element, key) {
+  return !Object.prototype.hasOwnProperty.call(element, key) ||
+    element[key] == null || typeof element[key] === "string";
+}
+
+function cardSlotSupported(slots, name, validate) {
+  if (!Object.prototype.hasOwnProperty.call(slots, name) || slots[name] == null ||
+      (Array.isArray(slots[name]) && slots[name].length === 0)) return true;
+  return Array.isArray(slots[name]) && slots[name].length === 1 &&
+    isPlainObject(slots[name][0]) && validate(slots[name][0]);
+}
+
+function cardBodyContentSupported(block, content) {
+  try {
+    if (canonicalJSON(tiptapInlineToPd(inlineArrayToTiptap(content))) ===
+        canonicalJSON(content)) return true;
+  } catch (_) {
+    return false;
+  }
+  // The slash-menu's unsaved Card default intentionally uses the editor-wide
+  // empty-text sentinel. It normalizes to [] when inserted; no persisted Card is
+  // granted that lossy exception.
+  return block.id == null && content.length === 1 &&
+    canonicalJSON(content[0]) === canonicalJSON({ type: "text", value: "" });
+}
+
+// A malformed Card cannot be edited without normalizing or truncating authored
+// data. Keep it on the established opaque/read-only path instead.
+function cardBlockEditable(block) {
+  if (!isPlainObject(block) || block.type !== "card") return false;
+  if (!optionalCardText(block, "tone")) return false;
+  if (block.slots == null) return true;
+  if (!isPlainObject(block.slots)) return false;
+  const slots = block.slots;
+  return cardSlotSupported(slots, "title", (element) =>
+    element.type === "heading" && optionalCardText(element, "text")) &&
+    cardSlotSupported(slots, "body", (element) => {
+      if (element.type !== "paragraph" ||
+          !(element.content == null || Array.isArray(element.content))) return false;
+      const content = element.content || [];
+      return cardBodyContentSupported(block, content);
+    }) &&
+    cardSlotSupported(slots, "media", (element) =>
+      (element.type == null || element.type === "image") &&
+      optionalCardText(element, "src") && optionalCardText(element, "alt")) &&
+    cardSlotSupported(slots, "action", (element) =>
+      element.type === "action" && optionalCardText(element, "label") &&
+      optionalCardText(element, "href") && optionalCardText(element, "priority"));
+}
+
 // cardBlockToNode(block) → { type:"bpCard", attrs:{…}, content:[inline…] }
 // The body slot inline → TipTap inline nodes via the shared serializer (the callout
 // body path). Chrome → attrs, PRESENT-ONLY (tone/title/media/action omitted when
 // absent) so an untouched card's getJSON re-projection matches and emits zero ops.
 function cardBlockToNode(block, bpId, bpType) {
-  const attrs = { bpId, bpType: bpType || "card" };
+  const attrs = { bpId, bpType: bpType || "card", bpBlock: deepClone(block) };
   const title = cardTitle(block);
   if (title != null) attrs.title = title;
   if (block && block.tone != null) attrs.tone = block.tone; // PRESENT-ONLY (no default)
@@ -1467,18 +1524,86 @@ function cardBlockToNode(block, bpId, bpType) {
   return node;
 }
 
-// cardNodeToSlots(node) → the reconstructed slots map. body ALWAYS present (a card is
-// slots-native, its body slot is the contentDOM); title/media/action threaded ONLY
-// when present so the rebuild is byte-identical to a card that never entered the canvas.
-function cardNodeToSlots(node) {
+// Overlay the live editable surfaces onto the exact authoritative slots map. Known
+// singleton elements keep their IDs and opaque metadata; untouched absent/null/[]
+// representations stay byte-exact.
+function cardNodeSlotOverlay(node, sourceBlock) {
+  const attrs = (node && node.attrs) || {};
+  const sourceSlots = isPlainObject(sourceBlock && sourceBlock.slots)
+    ? sourceBlock.slots
+    : {};
+  const slots = deepClone(sourceSlots);
+  let changed = false;
+
+  const sourceTitle = cardTitle(sourceBlock);
+  const nextTitle = attrs.title == null || attrs.title === "" ? null : attrs.title;
+  if (nextTitle !== sourceTitle) {
+    changed = true;
+    if (nextTitle != null) {
+      const title = Array.isArray(sourceSlots.title) && sourceSlots.title.length === 1
+        ? deepClone(sourceSlots.title[0])
+        : { type: "heading" };
+      slots.title = [{ ...title, text: nextTitle }];
+    } else if (Array.isArray(sourceSlots.title) && sourceSlots.title.length === 1) {
+      slots.title = [{ ...deepClone(sourceSlots.title[0]), text: "" }];
+    }
+  }
+
+  const sourceContent = cardBodyInline(sourceBlock);
+  const nextContent = tiptapInlineToPd((node && node.content) || []);
+  if (canonicalJSON(nextContent) !== canonicalJSON(sourceContent)) {
+    changed = true;
+    const body = Array.isArray(sourceSlots.body) && sourceSlots.body.length === 1
+      ? deepClone(sourceSlots.body[0])
+      : { type: "paragraph" };
+    slots.body = [{ ...body, content: nextContent }];
+  }
+
+  const sourceMedia = cardMedia(sourceBlock);
+  if (canonicalJSON(attrs.media == null ? null : attrs.media) !==
+      canonicalJSON(sourceMedia == null ? null : sourceMedia)) {
+    changed = true;
+    if (attrs.media != null) {
+      const media = sourceMedia == null ? {} : deepClone(sourceMedia);
+      slots.media = [{ ...media, ...deepClone(attrs.media) }];
+    } else if (sourceMedia != null) {
+      slots.media = [{ ...deepClone(sourceMedia), src: "" }];
+    }
+  }
+
+  const sourceAction = cardAction(sourceBlock);
+  if (canonicalJSON(attrs.action == null ? null : attrs.action) !==
+      canonicalJSON(sourceAction == null ? null : sourceAction)) {
+    changed = true;
+    if (attrs.action != null) {
+      const action = {
+        ...(sourceAction == null ? {} : deepClone(sourceAction)),
+        ...deepClone(attrs.action),
+      };
+      if (!Object.prototype.hasOwnProperty.call(attrs.action, "priority")) {
+        delete action.priority;
+      }
+      slots.action = [action];
+    } else if (sourceAction != null) {
+      const action = { ...deepClone(sourceAction), label: "", href: "" };
+      delete action.priority;
+      slots.action = [action];
+    }
+  }
+  return { slots, changed };
+}
+
+function cardNodeToSlots(node, sourceBlock) {
+  if (sourceBlock) return cardNodeSlotOverlay(node, sourceBlock).slots;
   const attrs = (node && node.attrs) || {};
   const slots = {};
   if (attrs.title != null && attrs.title !== "") {
     slots.title = [{ type: "heading", text: attrs.title }];
   }
-  slots.body = [
-    { type: "paragraph", content: tiptapInlineToPd((node && node.content) || []) },
-  ];
+  slots.body = [{
+    type: "paragraph",
+    content: tiptapInlineToPd((node && node.content) || []),
+  }];
   if (attrs.media != null) slots.media = [deepClone(attrs.media)];
   if (attrs.action != null) slots.action = [deepClone(attrs.action)];
   return slots;
@@ -1489,24 +1614,37 @@ function cardNodeToSlots(node) {
 // cardBlockToNode). tone threaded ONLY when present (present-only, byte-fidelity).
 function cardNodeToBlock(node, id) {
   const attrs = (node && node.attrs) || {};
-  const block = { id, type: "card", slots: cardNodeToSlots(node) };
-  if (attrs.tone != null) block.tone = attrs.tone;
+  const sourceBlock = isPlainObject(attrs.bpBlock) ? attrs.bpBlock : null;
+  const block = sourceBlock
+    ? deepClone(sourceBlock)
+    : { id, type: "card", slots: cardNodeToSlots(node) };
+  block.id = id;
+  block.type = "card";
+  if (sourceBlock) {
+    const overlay = cardNodeSlotOverlay(node, sourceBlock);
+    if (overlay.changed) block.slots = overlay.slots;
+    const sourceTone = sourceBlock.tone == null ? null : sourceBlock.tone;
+    const nextTone = attrs.tone == null ? null : attrs.tone;
+    if (nextTone !== sourceTone) block.tone = nextTone;
+  } else if (attrs.tone != null) {
+    block.tone = attrs.tone;
+  }
   return block;
 }
 
-// The mutable-fields PATCH for a card. patch-block is a SHALLOW Map.merge (patch.ex
-// merge_block) — a top-level key is REPLACED wholesale or preserved, never deleted.
-// So we emit the WHOLE rebuilt `slots` map (a cleared title/media/action simply drops
-// that slot key ⇒ the removal LANDS via the wholesale replace) + `tone` EXPLICITLY
-// (null when cleared, so a tone-clear reverts to the no-modifier legacy look instead
-// of leaving the stale tone). The callout removal-safe precedent, adapted to a
-// slots-native block.
-function cardNodeToPatch(node) {
+// The mutable-fields PATCH for a card. patch-block is a shallow top-level merge, so
+// emit `slots` only when a slot surface changed, and `tone` only when tone changed.
+// This prevents a tone-only edit from normalizing the authoritative slot shapes and
+// prevents a body-only edit from materializing tone:null.
+function cardNodeToPatch(node, sourceBlock) {
   const attrs = (node && node.attrs) || {};
-  return {
-    slots: cardNodeToSlots(node),
-    tone: attrs.tone == null ? null : attrs.tone,
-  };
+  const patch = {};
+  const overlay = cardNodeSlotOverlay(node, sourceBlock || {});
+  if (overlay.changed) patch.slots = overlay.slots;
+  const sourceTone = sourceBlock && sourceBlock.tone != null ? sourceBlock.tone : null;
+  const nextTone = attrs.tone == null ? null : attrs.tone;
+  if (nextTone !== sourceTone) patch.tone = nextTone;
+  return patch;
 }
 
 // True when a card node's body OR chrome (tone/title/media/action) changed — an
@@ -1517,14 +1655,9 @@ function cardNodeChanged(prevNode, nextNode) {
 }
 
 function stableCardKey(node) {
-  const a = (node && node.attrs) || {};
-  return canonicalJSON({
-    tone: a.tone == null ? null : a.tone,
-    title: a.title == null || a.title === "" ? null : a.title,
-    media: a.media == null ? null : a.media,
-    action: a.action == null ? null : a.action,
-    content: node.content || null,
-  });
+  const block = cardNodeToBlock(node, null);
+  delete block.id;
+  return canonicalJSON(block);
 }
 
 // ── stage ⇄ canvas control-atom node (the pipeline-node twin) ────────────────
@@ -3329,7 +3462,7 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
               patch: sectionTitlePatch(entry.node),
             });
           }
-          for (const childOp of sectionChildPatchOps(prevNode, entry.node)) {
+          for (const childOp of sectionChildPatchOps(prevNode, entry.node, prevBlock)) {
             ops.push(childOp);
           }
         }
@@ -3445,15 +3578,14 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
 
     if (entry.isCard) {
       // STEP 4 card WIDGET: diff body + chrome (tone/title/media/action); emit ONE
-      // patch-block carrying the rebuilt slots map + explicit tone when anything
-      // changed. An UNCHANGED card emits NO op (canonical compare). The whole-slots
-      // replace makes a cleared title/media/action removal LAND; explicit tone makes
-      // a tone-clear land (patch-block can't delete a key otherwise).
+      // patch-block carrying only changed top-level fields. A slot edit overlays onto
+      // the authoritative slots map; tone is independent. An unchanged card emits no
+      // op, and a tone clear lands as explicit null.
       if (cardNodeChanged(prevNode, entry.node)) {
         ops.push({
           op: "patch-block",
           id: entry.id,
-          patch: cardNodeToPatch(entry.node),
+          patch: cardNodeToPatch(entry.node, prevBlock),
         });
       }
       continue;

@@ -79,6 +79,33 @@ const CARD_ACTION_NO_PRIORITY = (id = "cw-np") => ({
   },
 });
 
+// A canonical slots-native card carrying opaque slot data and metadata on the
+// editable title/body slot elements. Canvas edits may replace the known values,
+// but must not erase the rest of this authoritative slot map.
+const CARD_WITH_SLOT_METADATA = (id = "cw-meta") => ({
+  id,
+  type: "card",
+  tone: "warn",
+  unknown_card: { keep: true },
+  slots: {
+    title: [{
+      type: "heading",
+      text: "Metadata title",
+      level: 3,
+      unknown_title: { keep: true },
+    }],
+    body: [{
+      id: "body-paragraph",
+      type: "paragraph",
+      unknown_body: { keep: true },
+      content: [{ type: "text", value: "Metadata body" }],
+    }],
+    media: [{ type: "image", src: "/metadata.png", unknown_media: { keep: true } }],
+    action: [{ type: "action", label: "Read", href: "/read", unknown_action: { keep: true } }],
+    unknown_slot: [{ type: "future-card-slot", byte: "exact" }],
+  },
+});
+
 // A grid section holding two cards (the model's real proof).
 const SECTION_OF_CARDS = () => ({
   id: "s-1",
@@ -205,6 +232,64 @@ check("card docToBlocks: a card round-trips blocks→node→docToBlocks BYTE-EQU
   assert.deepEqual(docToBlocks(runToTiptap([BARE_CARD()])), [BARE_CARD()]);
 });
 
+check("card slot fidelity: opaque slots and title/body metadata round-trip exactly at top level and nested", () => {
+  const top = [CARD_WITH_SLOT_METADATA()];
+  const nested = [{
+    id: "section-meta",
+    type: "section",
+    blocks: [CARD_WITH_SLOT_METADATA("cw-meta-nested")],
+  }];
+  for (const [label, blocks] of [["top-level", top], ["nested", nested]]) {
+    const doc = runToTiptap(blocks);
+    assert.equal(runToOps(blocks, doc).length, 0, `${label} untouched Card emits zero ops`);
+    assert.deepEqual(docToBlocks(doc), blocks, `${label} Card projects without metadata loss`);
+    assert.equal(
+      reconcileServerEcho(blocks, doc.content).ownEcho,
+      true,
+      `${label} exact authoritative slots remain an own echo`,
+    );
+  }
+});
+
+check("card slot fidelity: an authoritative opaque-slot change is not mistaken for an own echo", () => {
+  const live = runToTiptap([CARD_WITH_SLOT_METADATA()]);
+  const server = CARD_WITH_SLOT_METADATA();
+  server.slots.unknown_slot[0].byte = "server authority";
+  assert.equal(
+    reconcileServerEcho([server], live.content).ownEcho,
+    false,
+    "unknown slot authority must repaint before a later Card edit can overwrite it",
+  );
+});
+
+check("card slot fidelity: explicit tone:null is byte-exact top-level and nested, and differs from absent tone", () => {
+  const card = {
+    id: "cw-null-tone",
+    type: "card",
+    tone: null,
+    slots: null,
+    unknown_card: { keep: true },
+  };
+  const fixtures = [
+    [card],
+    [{ id: "section-null-tone", type: "section", blocks: [{ ...card, id: "cw-null-tone-nested" }] }],
+  ];
+  for (const blocks of fixtures) {
+    const doc = runToTiptap(blocks);
+    assert.equal(runToOps(blocks, doc).length, 0);
+    assert.deepEqual(docToBlocks(doc), blocks);
+  }
+
+  const withoutTone = { ...card };
+  delete withoutTone.tone;
+  const liveWithoutTone = runToTiptap([withoutTone]);
+  assert.equal(
+    reconcileServerEcho([card], liveWithoutTone.content).ownEcho,
+    false,
+    "explicit null authority must not be mistaken for an absent-tone echo",
+  );
+});
+
 // ── FULLY-POPULATED SLOTS (cd-9: media + action editable, type keys intact) ────
 check("card: a card with POPULATED media+action slots round-trips BYTE-EQUAL (type keys intact)", () => {
   const doc = runToTiptap([CARD_FULL()]);
@@ -302,6 +387,34 @@ check("card runToOps: editing the BODY → ONE patch-block{slots} carrying the n
   assert.equal(folded[0].slots.title[0].text, "Card");
 });
 
+check("card slot fidelity: a body edit retains opaque slots and title/body element metadata", () => {
+  for (const nested of [false, true]) {
+    const card = CARD_WITH_SLOT_METADATA(nested ? "cw-meta-nested" : "cw-meta");
+    const blocks = nested
+      ? [{ id: "section-meta", type: "section", blocks: [card] }]
+      : [card];
+    const doc = runToTiptap(blocks);
+    const cardNode = nested ? doc.content[0].content[0] : doc.content[0];
+    cardNode.content = [{ type: "text", text: "Edited metadata body" }];
+    const ops = runToOps(blocks, doc);
+    assert.equal(ops.length, 1, `${nested ? "nested" : "top-level"} edit emits one op`);
+    assert.equal(ops[0].op, "patch-block");
+    assert.equal(ops[0].id, card.id);
+    assert.deepEqual(ops[0].patch.slots.unknown_slot, card.slots.unknown_slot);
+    assert.equal(ops[0].patch.slots.title[0].level, 3);
+    assert.deepEqual(ops[0].patch.slots.title[0].unknown_title, { keep: true });
+    assert.equal(ops[0].patch.slots.body[0].id, "body-paragraph");
+    assert.deepEqual(ops[0].patch.slots.body[0].unknown_body, { keep: true });
+    assert.equal(ops[0].patch.slots.body[0].content[0].value, "Edited metadata body");
+    assert.deepEqual(ops[0].patch.slots.media[0].unknown_media, { keep: true });
+    assert.deepEqual(ops[0].patch.slots.action[0].unknown_action, { keep: true });
+    const folded = assertFolds(blocks, doc, ops, `${nested ? "nested" : "top-level"} metadata body edit`);
+    const foldedCard = nested ? folded[0].blocks[0] : folded[0];
+    assert.deepEqual(foldedCard.unknown_card, card.unknown_card);
+    assert.deepEqual(foldedCard.slots, ops[0].patch.slots);
+  }
+});
+
 check("card runToOps: swapping the TONE → ONE patch-block carrying the new tone", () => {
   const blocks = [CARD()];
   const doc = runToTiptap(blocks);
@@ -324,7 +437,7 @@ check("card runToOps: editing the TITLE → ONE patch-block{slots} carrying the 
   assert.equal(folded[0].slots.title[0].text, "Renamed");
 });
 
-// ── REMOVALS LAND (whole-slots replace + explicit tone — the callout precedent) ─
+// ── CLEARS LAND while authored slot metadata remains intact ──────────────────
 check("card runToOps: CLEARING the tone → patch-block emits tone:null EXPLICITLY (removal lands)", () => {
   const blocks = [CARD()];
   const doc = runToTiptap(blocks);
@@ -336,15 +449,104 @@ check("card runToOps: CLEARING the tone → patch-block emits tone:null EXPLICIT
   assert.equal(folded[0].tone, null, "the tone reverts to no-modifier, not the stale value");
 });
 
-check("card runToOps: CLEARING the title → the whole-slots replace DROPS the title slot (removal lands)", () => {
-  const blocks = [CARD()];
+check("card runToOps: CLEARING the title retains its authored element metadata and empties text", () => {
+  const blocks = [CARD_WITH_SLOT_METADATA()];
   const doc = runToTiptap(blocks);
   doc.content[0].attrs = { ...doc.content[0].attrs, title: null };
   const ops = runToOps(blocks, doc);
   assert.equal(ops.length, 1);
-  assert.ok(!("title" in ops[0].patch.slots), "the rebuilt slots has NO title key (cleared)");
+  assert.equal(ops[0].patch.slots.title[0].text, "");
+  assert.equal(ops[0].patch.slots.title[0].level, 3);
+  assert.deepEqual(ops[0].patch.slots.title[0].unknown_title, { keep: true });
+  assert.deepEqual(ops[0].patch.slots.unknown_slot, blocks[0].slots.unknown_slot);
   const folded = assertFolds(blocks, doc, ops, "card title clear");
-  assert.ok(folded[0].slots.title == null, "the title slot is gone after the whole-slots replace");
+  assert.equal(folded[0].slots.title[0].text, "");
+});
+
+check("card slot fidelity: known slot clears land without deleting opaque slots or body metadata", () => {
+  const blocks = [CARD_WITH_SLOT_METADATA()];
+  const doc = runToTiptap(blocks);
+  doc.content[0].attrs = {
+    ...doc.content[0].attrs,
+    title: null,
+    media: null,
+    action: null,
+  };
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].patch.slots.title[0].text, "");
+  assert.equal(ops[0].patch.slots.title[0].level, 3);
+  assert.deepEqual(ops[0].patch.slots.title[0].unknown_title, { keep: true });
+  assert.equal(ops[0].patch.slots.media[0].src, "");
+  assert.deepEqual(ops[0].patch.slots.media[0].unknown_media, { keep: true });
+  assert.equal(ops[0].patch.slots.action[0].label, "");
+  assert.equal(ops[0].patch.slots.action[0].href, "");
+  assert.ok(!("priority" in ops[0].patch.slots.action[0]));
+  assert.deepEqual(ops[0].patch.slots.action[0].unknown_action, { keep: true });
+  assert.deepEqual(ops[0].patch.slots.unknown_slot, blocks[0].slots.unknown_slot);
+  assert.equal(ops[0].patch.slots.body[0].id, "body-paragraph");
+  assert.deepEqual(ops[0].patch.slots.body[0].unknown_body, { keep: true });
+});
+
+check("card slot fidelity: media/action edits overlay known fields without deleting element metadata", () => {
+  const blocks = [CARD_WITH_SLOT_METADATA()];
+  const doc = runToTiptap(blocks);
+  doc.content[0].attrs = {
+    ...doc.content[0].attrs,
+    media: { type: "image", src: "/edited.png" },
+    action: { type: "action", label: "Edited", href: "/edited" },
+  };
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].patch.slots.media[0].src, "/edited.png");
+  assert.deepEqual(ops[0].patch.slots.media[0].unknown_media, { keep: true });
+  assert.equal(ops[0].patch.slots.action[0].label, "Edited");
+  assert.deepEqual(ops[0].patch.slots.action[0].unknown_action, { keep: true });
+});
+
+check("card slot fidelity: a tone-only edit emits only tone and preserves exact empty slot representations", () => {
+  const blocks = [{
+    id: "cw-empty-shapes",
+    type: "card",
+    tone: "info",
+    slots: {
+      title: null,
+      body: null,
+      media: [],
+      action: null,
+      unknown_slot: { keep: true },
+    },
+  }];
+  const doc = runToTiptap(blocks);
+  doc.content[0].attrs = { ...doc.content[0].attrs, tone: "warn" };
+  const ops = runToOps(blocks, doc);
+  assert.deepEqual(ops, [{ op: "patch-block", id: "cw-empty-shapes", patch: { tone: "warn" } }]);
+});
+
+check("card slot fidelity: a body edit on a tone-less Card does not write tone:null", () => {
+  const blocks = [CARD_WITH_SLOT_METADATA()];
+  delete blocks[0].tone;
+  const doc = runToTiptap(blocks);
+  doc.content[0].content = [{ type: "text", text: "Tone-less edit" }];
+  const ops = runToOps(blocks, doc);
+  assert.deepEqual(Object.keys(ops[0].patch), ["slots"]);
+});
+
+check("card slot fidelity: malformed known slots stay opaque and byte-exact", () => {
+  const malformed = [
+    { id: "bad-tone", type: "card", tone: { future: true }, slots: {} },
+    { id: "bad-slots", type: "card", slots: "opaque" },
+    { id: "bad-many", type: "card", slots: { body: [{ type: "paragraph", content: [] }, { type: "paragraph", content: [] }] } },
+    { id: "bad-title", type: "card", slots: { title: [{ type: "paragraph", text: "Wrong" }] } },
+    { id: "bad-body", type: "card", slots: { body: [{ type: "heading", text: "Wrong" }] } },
+    { id: "bad-media", type: "card", slots: { media: [{ type: "video", src: "/wrong" }] } },
+    { id: "bad-action", type: "card", slots: { action: [{ type: "link", href: "/wrong" }] } },
+    { id: "bad-inline", type: "card", slots: { body: [{ type: "paragraph", content: [{ type: "text", value: "No", unknown: true }] }] } },
+  ];
+  const doc = runToTiptap(malformed);
+  assert.ok(doc.content.every((node) => node.type === "bpOpaque"));
+  assert.equal(runToOps(malformed, doc).length, 0);
+  assert.deepEqual(docToBlocks(doc), malformed);
 });
 
 // ── FINE-GRAINED: a card INSIDE a grid section → patch-block{childId} (stable seq) ─

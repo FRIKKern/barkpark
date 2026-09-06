@@ -386,6 +386,90 @@ export function blockToTiptap(block) {
   }
 }
 
+function jsonEqual(left, right) {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) &&
+      left.length === right.length && left.every((value, index) => jsonEqual(value, right[index]));
+  }
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length &&
+    leftKeys.every((key, index) => key === rightKeys[index] && jsonEqual(left[key], right[key]));
+}
+
+function deepClone(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+// Strict projection for the Card contextual editor's explicit BODY mode.
+// This deliberately does not make Card an ordinary per-block prose type:
+// callers must opt into this projection and preserve the full Card separately.
+export function cardBodyProjection(card) {
+  const emptyDoc = { type: "doc", content: [{ type: "paragraph" }] };
+  if (!card || typeof card !== "object" || Array.isArray(card) || card.type !== "card") {
+    return { editable: false, content: [], doc: emptyDoc };
+  }
+  const slots = card.slots;
+  if (!(slots == null || (typeof slots === "object" && !Array.isArray(slots)))) {
+    return { editable: false, content: [], doc: emptyDoc };
+  }
+  const body = slots == null ? undefined : slots.body;
+  let paragraph = null;
+  if (!(body == null || (Array.isArray(body) && body.length === 0))) {
+    if (!Array.isArray(body) || body.length !== 1) {
+      return { editable: false, content: [], doc: emptyDoc };
+    }
+    paragraph = body[0];
+    if (!paragraph || typeof paragraph !== "object" || Array.isArray(paragraph) || paragraph.type !== "paragraph") {
+      return { editable: false, content: [], doc: emptyDoc };
+    }
+  }
+  const rawContent = paragraph == null ? undefined : paragraph.content;
+  if (!(rawContent == null || Array.isArray(rawContent))) {
+    return { editable: false, content: [], doc: emptyDoc };
+  }
+  const content = rawContent == null ? [] : rawContent;
+  let tiptapInline;
+  try {
+    tiptapInline = inlineArrayToTiptap(content);
+  } catch (_error) {
+    return { editable: false, content: [], doc: emptyDoc };
+  }
+  if (!jsonEqual(tiptapInlineToPd(tiptapInline), content)) {
+    return { editable: false, content: [], doc: emptyDoc };
+  }
+  const node = { type: "paragraph" };
+  if (tiptapInline.length) node.content = tiptapInline;
+  return { editable: true, content: deepClone(content), doc: { type: "doc", content: [node] } };
+}
+
+export function cardBodyTiptapDocSupported(editorJSON) {
+  const content = editorJSON && editorJSON.content;
+  if (!Array.isArray(content) || content.length !== 1 || content[0].type !== "paragraph") return false;
+  const inline = content[0].content || [];
+  return jsonEqual(inlineArrayToTiptap(tiptapInlineToPd(inline)), inline);
+}
+
+export function cardBodyContentMatches(content, sourceCard) {
+  const projection = cardBodyProjection(sourceCard);
+  return projection.editable && jsonEqual(content, projection.content);
+}
+
+export function buildCardBodyOp(editorJSON, sourceCard, force = false) {
+  const projection = cardBodyProjection(sourceCard);
+  if (!projection.editable || !cardBodyTiptapDocSupported(editorJSON)) return null;
+  const nextContent = tiptapInlineToPd(editorJSON.content[0].content || []);
+  if (!force && jsonEqual(nextContent, projection.content)) return null;
+
+  // This is intentionally not patch-block{slots}: slots are a shallow Patch
+  // field, so sending a captured map could overwrite concurrent Card chrome.
+  // The server resolves this intent against the authoritative Card and changes
+  // only its body paragraph's content.
+  return { op: "patch-card-body", id: sourceCard.id, content: nextContent };
+}
+
 // tiptapToBlock(editorJSON, blockId, blockType) → portable-doc patch fields for
 // the block, in the EXACT shape patch-block's `patch` map expects.
 //

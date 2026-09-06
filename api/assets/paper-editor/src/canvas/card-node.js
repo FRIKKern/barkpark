@@ -163,6 +163,11 @@ export const Card = Node.create({
         parseHTML: (el) => el.getAttribute("data-bp-type") || BP_CARD_BP_TYPE,
         renderHTML: (attrs) => ({ "data-bp-type": attrs.bpType || BP_CARD_BP_TYPE }),
       },
+      // bpBlock — the authoritative Card, carried so editing one known surface
+      // never erases opaque top-level/slot keys or metadata on slot elements.
+      // The editable title/body/media/action attrs remain the live values; the
+      // converter overlays them onto this deep-cloned preservation baseline.
+      bpBlock: jsonAttr("bpBlock", "data-bp-block"),
       // tone — PRESENT-ONLY (info|ok|warn|danger). DIVERGES from callout: a tone-less
       // card renders NO data-tone and NO modifier class (byte-matches a legacy item);
       // it must NOT gain "info" or it would emit a spurious op on round-trip.
