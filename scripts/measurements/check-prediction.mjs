@@ -16,6 +16,40 @@
 //                          banned-scalar hygiene rule. NEVER a desk fact either way.
 //   exit 3  UNEVALUATED  — the run produced no evidence for or against (the round trip did
 //                          not run). This is DISTINCT from both pass and wrong-prediction.
+//   exit 4  STALE-PRIOR  — the ONLY failures are absolute figures registered on a
+//                          `prior-observation` basis, in cells whose before[] and after[]
+//                          AGREED. The round trip is clean; a registered absolute is not.
+//
+// ── Design rule 4: A STALE PRIOR IS NOT A FIDELITY FAILURE ───────────────────
+//
+// Collapsing these into one exit code is a real defect, and it has already
+// misled a reader once. `spd-bracketed-deployed-run{1,2}-2026-07-22.json`
+// exited 1 with 24 misses, ALL of them the same absolute figure at viewport
+// 1280 — while the same run returned 27 of 27 cells unchanged with zero self-
+// inconsistencies. A reader seeing only `exit 1` reads "the round trip failed".
+// It did not. The prediction's own `this_prediction_can_fail` case (3) already
+// names this shape; the checker just could not say it.
+//
+// So the two are now separated, three ways at once — a labelled verdict line, a
+// distinct exit code (4), and a `failure_class` field in `--json`:
+//
+//   STALE-PRIOR   every miss is kind FIELD, basis `prior-observation`, and sits
+//                 in a cell that round-tripped. Nothing here bears on fidelity.
+//   FIDELITY-FAIL anything else: a ROUND_TRIP/STRUCTURAL/RULING miss, a self-
+//                 inconsistency, a miss on a recomputed/arithmetic/ruling basis,
+//                 or a prior-observation miss in a cell that did NOT come back.
+//
+// STALE-PRIOR means ADJUDICATE, not "the desk moved". It says only that a
+// registered absolute and the run disagree while the trip stayed clean — which
+// can be desk drift OR the instrument measuring a different state. The 1280
+// case above turned out to be the SECOND: see
+// `spd-1280-prior-observation-adjudication-2026-09-06.md`. Treating STALE-PRIOR
+// as automatic permission to rewrite the baseline would have laundered an
+// instrument defect into the record.
+//
+// D184 gates on `round_trip.ran && returns_bit_identical`, NEVER on this exit
+// code — so both are recomputed here and reported in `stats`, to make gating on
+// the right thing possible without reading the artefact's own summary scalars.
 //
 // ── Why this file is SPLIT from the prediction it checks ─────────────────────
 //
@@ -60,6 +94,7 @@ const EXIT_GREEN = 0;
 const EXIT_MISMATCH = 1;
 const EXIT_INPUT_FAILURE = 2;
 const EXIT_UNEVALUATED = 3;
+const EXIT_STALE_PRIOR = 4;
 
 /**
  * THE HYGIENE RULE, and it lives HERE rather than in the prediction on purpose:
@@ -92,7 +127,7 @@ function die(msg) {
 function usage() {
   process.stderr.write(
     'usage: node scripts/measurements/check-prediction.mjs <prediction.json> <artefact.json> [--json]\n' +
-    '       exit 0 green · exit 1 mismatch · exit 2 input failure · exit 3 unevaluated\n');
+    '       exit 0 green · exit 1 fidelity-fail · exit 2 input failure · exit 3 unevaluated · exit 4 stale-prior\n');
 }
 
 /** A missing, EMPTY or unparseable file is an INPUT FAILURE and says so in those
@@ -414,6 +449,13 @@ function main() {
             kind: 'FIELD', key, field: `${name} (${legName})`,
             basis: spec.basis ?? 'unstated', predicted: spec.predicted, observed: got,
             detail: spec.miss_reads_as ?? spec.derivation ?? null,
+            // Recomputed, never read: did THIS cell's before[] and after[] agree?
+            // A prior-observation miss only reads as staleness when they did.
+            legs_agreed: re.unchanged,
+            // Kept separately from the display `field` so classification never
+            // has to parse a human-readable string back apart.
+            field_name: name,
+            leg: legName,
           });
         }
       }
@@ -465,15 +507,72 @@ function main() {
   }
 
   const failures = misses.length + inconsistencies.length;
+
+  // D184's two gate inputs, RECOMPUTED — never copied out of the artefact's own
+  // summary scalars, which is the whole reason this file exists. A gate may read
+  // these; it must not read the exit code.
+  const roundTripRan = rt?.ran === true;
+  const returnsBitIdentical = roundTripRan && cellsChecked > 0 && cellsUnchanged === cellsChecked;
+
+  // A miss is STALE-PRIOR-shaped only if it is an absolute figure in a cell that
+  // CAME BACK, and it is either
+  //
+  //   (a) registered on a `prior-observation` basis — the registered absolute
+  //       itself; or
+  //   (b) registered on a `recomputed` basis in the SAME cell and SAME leg as a
+  //       prior-observation miss — i.e. an arithmetic CONSEQUENCE of (a), not
+  //       independent evidence.
+  //
+  // (b) is not a loophole, and refusing it would make this verdict unreachable
+  // in practice. The prediction derives `content_ch` as `content_px / px_per_ch`
+  // and `visible_ch` as `visible_content_px / px_per_ch` within one face, so a
+  // stale px absolute drags its ch twin with it every single time: the real 1280
+  // case is 12 prior-observation misses and 12 recomputed ones, always paired.
+  // The safety rail is that STALE-PRIOR additionally demands ZERO self-
+  // inconsistencies, and `recomputeDerivedCh` raises one for exactly the leg
+  // whose ch figure does NOT equal its own px divided by its own px_per_ch. So
+  // an independently-wrong ch — the case (b) must never swallow — is a
+  // SELF_INCONSISTENT and forces FIDELITY-FAIL. `px_per_ch` itself is basis
+  // `arithmetic` and is in NEITHER set: real font drift stays a fidelity fail.
+  //
+  // Every other shape — a ROUND_TRIP/STRUCTURAL/RULING miss, a ruling-basis
+  // miss, or a prior-observation miss whose legs DISAGREED — is fidelity.
+  const priorObservationLegs = new Set(
+    misses
+      .filter((m) => m.kind === 'FIELD' && m.basis === 'prior-observation' && m.legs_agreed === true)
+      .map((m) => `${m.key}\u0000${m.leg}`));
+
+  const isStalePriorShaped = (m) =>
+    m.kind === 'FIELD' &&
+    m.legs_agreed === true &&
+    (m.basis === 'prior-observation' ||
+      (m.basis === 'recomputed' && priorObservationLegs.has(`${m.key}\u0000${m.leg}`)));
+
+  const stalePriorMisses = misses.filter(isStalePriorShaped);
+  const allFailuresAreStalePrior =
+    failures > 0 &&
+    inconsistencies.length === 0 &&
+    stalePriorMisses.length === misses.length &&
+    returnsBitIdentical;
+
+  const verdict = failures === 0 ? 'GREEN' : allFailuresAreStalePrior ? 'STALE-PRIOR' : 'FIDELITY-FAIL';
+  const exit = failures === 0 ? EXIT_GREEN : allFailuresAreStalePrior ? EXIT_STALE_PRIOR : EXIT_MISMATCH;
+
   return report({
-    verdict: failures === 0 ? 'GREEN' : 'MISMATCH',
-    exit: failures === 0 ? EXIT_GREEN : EXIT_MISMATCH,
+    verdict,
+    exit,
+    failure_class: failures === 0 ? null : allFailuresAreStalePrior ? 'STALE-PRIOR' : 'FIDELITY-FAIL',
     pred, artefact,
     stats: {
       cells_checked: cellsChecked,
       cells_returned_unchanged: cellsUnchanged,
       reached_widths: reachedWidths.length,
       field_comparisons: cellsChecked * fieldNames.length,
+      round_trip_ran: roundTripRan,
+      returns_bit_identical: returnsBitIdentical,
+      stale_prior_misses: stalePriorMisses.length,
+      stale_prior_misses_direct: stalePriorMisses.filter((m) => m.basis === 'prior-observation').length,
+      stale_prior_misses_derived: stalePriorMisses.filter((m) => m.basis !== 'prior-observation').length,
     },
     misses, inconsistencies, rulings,
   });
@@ -484,6 +583,7 @@ function report(r) {
     process.stdout.write(JSON.stringify({
       verdict: r.verdict,
       exit: r.exit,
+      failure_class: r.failure_class ?? null,
       reason: r.reason ?? null,
       prediction: r.pred.file,
       artefact: r.artefact?.file ?? null,
@@ -512,7 +612,9 @@ function report(r) {
   out.write(`  cells checked            : ${s.cells_checked}\n`);
   out.write(`  cells returned unchanged : ${s.cells_returned_unchanged}   (recomputed from raw before/after)\n`);
   out.write(`  reached widths           : ${s.reached_widths}\n`);
-  out.write(`  field comparisons        : ${s.field_comparisons}\n\n`);
+  out.write(`  field comparisons        : ${s.field_comparisons}\n`);
+  out.write(`  round_trip.ran           : ${s.round_trip_ran}   (recomputed)\n`);
+  out.write(`  returns_bit_identical    : ${s.returns_bit_identical}   (recomputed — D184 gates on THESE TWO, never on the exit code)\n\n`);
 
   for (const r2 of r.rulings ?? []) {
     const tag = { HELD: 'HELD', VIOLATED: 'VIOLATED', NOT_EXERCISED: 'NOT EXERCISED', NO_IMPLEMENTATION: 'NO IMPLEMENTATION' }[r2.status];
@@ -541,14 +643,37 @@ function report(r) {
       out.write(`      basis     : ${m.basis}\n`);
       out.write(`      predicted : ${JSON.stringify(m.predicted)}\n`);
       out.write(`      observed  : ${JSON.stringify(m.observed)}\n`);
+      if (m.legs_agreed !== undefined) {
+        out.write(`      legs      : before/after ${m.legs_agreed ? 'AGREED (this cell round-tripped)' : 'DISAGREED'}\n`);
+      }
       if (m.detail) out.write(`      reads as  : ${m.detail}\n`);
       out.write('\n');
     }
   }
 
-  out.write(r.verdict === 'GREEN'
-    ? '  VERDICT: GREEN (exit 0) — the prediction held at tolerance zero.\n\n'
-    : `  VERDICT: MISMATCH (exit 1) — ${r.misses.length} miss(es), ${r.inconsistencies.length} self-inconsistency(ies).\n\n`);
+  if (r.verdict === 'GREEN') {
+    out.write('  VERDICT: GREEN (exit 0) — the prediction held at tolerance zero.\n\n');
+  } else if (r.verdict === 'STALE-PRIOR') {
+    out.write(`  VERDICT: STALE-PRIOR (exit 4) — ${r.misses.length} miss(es), ALL of them absolute figures\n` +
+              `           in cells that CAME BACK: ${r.stats.stale_prior_misses_direct} registered on a\n` +
+              `           \`prior-observation\` basis, ${r.stats.stale_prior_misses_derived} recomputed FROM one in the same leg.\n\n` +
+              '    THIS IS NOT A FIDELITY FAILURE. The round trip ran and every checked cell returned\n' +
+              '    bit-identical (see returns_bit_identical above, recomputed). What disagrees is a\n' +
+              '    REGISTERED ABSOLUTE and the run — the prediction\'s own this_prediction_can_fail\n' +
+              '    case (3). The frozen prediction must NOT be edited to agree with the run.\n\n' +
+              '    STALE-PRIOR means ADJUDICATE, not "the desk moved". Two causes produce this exact\n' +
+              '    shape and only evidence tells them apart: the desk genuinely changed since the\n' +
+              '    prior observation, OR the instrument measured a DIFFERENT STATE than the one the\n' +
+              '    prior observation describes. Worked example of the second:\n' +
+              '    scripts/measurements/spd-1280-prior-observation-adjudication-2026-09-06.md\n\n');
+  } else {
+    out.write(`  VERDICT: FIDELITY-FAIL (exit 1) — ${r.misses.length} miss(es), ` +
+              `${r.inconsistencies.length} self-inconsistency(ies).\n\n` +
+              '    At least one failure is NOT a clean prior-observation divergence: a round-trip,\n' +
+              '    structural or ruling miss, a self-inconsistency, a miss on a recomputed/arithmetic\n' +
+              '    basis, or a prior-observation miss in a cell whose legs DISAGREED. The reading\n' +
+              '    column did not simply drift underneath a stale absolute.\n\n');
+  }
   process.exit(r.exit);
 }
 
