@@ -99,6 +99,14 @@ defmodule Barkpark.Tasks.EventsStagedPayloadTest do
   # The fixture is a REAL overwrite driven through the REAL verb: a first note,
   # then a second that displaces it. `superseded_note` on the SECOND event is
   # the first note's text — that is the thing a recovery sweep needs to read.
+  #
+  # The second stage passes `supersede: true` because it MUST: #16582 made a
+  # `:note` that would displace a different non-blank `disposition_reason` a
+  # 409 `note_would_supersede` unless the caller opts in per call. Passing the
+  # flag is not a workaround for the refusal — it is the only door to the
+  # behaviour under test. `superseded_note` exists precisely so a deliberate
+  # displacement stays recoverable, so the recovery channel can only be
+  # exercised through a deliberate displacement.
   defp overwrite_fixture!(conn, scope) do
     doc_id = uniq("evt-payload")
     task = mk_task!(doc_id, scope)
@@ -109,7 +117,7 @@ defmodule Barkpark.Tasks.EventsStagedPayloadTest do
     baseline = Repo.one(from(e in MutationEvent, select: max(e.id))) || 0
 
     stage!(conn, doc_id, %{state: "considering", note: @first_note})
-    stage!(conn, doc_id, %{state: "researching", note: @second_note})
+    stage!(conn, doc_id, %{state: "researching", note: @second_note, supersede: true})
     {task.doc_id, baseline}
   end
 
