@@ -177,8 +177,11 @@ var codeExit = map[string]int{
 	// top-level `message` the server computes (tasks_controller/params.ex
 	// criteria_hint/2) and `bodyMessage` prints in place of this token.
 	"close_reason_needs_artifact": exitValidation,
-	"rate_limited":                exitRateLimit,
-	"internal_error":              exitServer,
+	// task-650d7844d8fe7199: a `cancelled` close with a blank reason. Same code
+	// as its siblings — the request is wrong and re-sending it cannot help.
+	"cancel_reason_required": exitValidation,
+	"rate_limited":           exitRateLimit,
+	"internal_error":         exitServer,
 
 	// ── The API-parity backfill (task-2a774c5536503306) ───────────────────
 	//

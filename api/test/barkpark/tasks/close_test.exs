@@ -170,7 +170,11 @@ defmodule Barkpark.Tasks.CloseTest do
       assert {:ok, closed} =
                Close.close(task.id, "w",
                  observed_epoch: 0,
-                 lifecycle_status: "cancelled"
+                 lifecycle_status: "cancelled",
+                 # task-650d7844d8fe7199: a cancel needs a reason — every
+                 # other close gate exempts `cancelled` by name, so the
+                 # reason is its whole record.
+                 reason: "cancelled by the close test fixture"
                )
 
       assert closed.content["lifecycle_status"] == "cancelled"
@@ -408,6 +412,10 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "cancelled",
+                 # task-650d7844d8fe7199: a cancel needs a reason — every
+                 # other close gate exempts `cancelled` by name, so the
+                 # reason is its whole record.
+                 reason: "cancelled by the close test fixture",
                  criteria: [%{"index" => 0, "met" => false, "evidence" => ""}]
                )
 
@@ -438,6 +446,10 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "cancelled",
+                 # task-650d7844d8fe7199: a cancel needs a reason — every
+                 # other close gate exempts `cancelled` by name, so the
+                 # reason is its whole record.
+                 reason: "cancelled by the close test fixture",
                  criteria: [%{"index" => 0, "met" => false}]
                )
 
@@ -463,6 +475,10 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "cancelled",
+                 # task-650d7844d8fe7199: a cancel needs a reason — every
+                 # other close gate exempts `cancelled` by name, so the
+                 # reason is its whole record.
+                 reason: "cancelled by the close test fixture",
                  criteria: [%{"index" => 0, "met" => false, "evidence" => 123}]
                )
 
@@ -594,6 +610,10 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "cancelled",
+                 # task-650d7844d8fe7199: a cancel needs a reason — every
+                 # other close gate exempts `cancelled` by name, so the
+                 # reason is its whole record.
+                 reason: "cancelled by the close test fixture",
                  criteria: [%{"index" => 2, "met" => false, "evidence" => "never got there"}]
                )
 
@@ -1173,6 +1193,10 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "lead-w",
                  observed_epoch: 0,
                  lifecycle_status: "cancelled",
+                 # task-650d7844d8fe7199: a cancel needs a reason — every
+                 # other close gate exempts `cancelled` by name, so the
+                 # reason is its whole record.
+                 reason: "cancelled by the close test fixture",
                  landed: %{"prs" => [456]}
                )
 
@@ -1782,7 +1806,11 @@ defmodule Barkpark.Tasks.CloseTest do
       task = mk_task!(uniq("crit-gate-cancelled"), scope, %{"acceptance_criteria" => @unproven})
 
       assert {:ok, closed} =
-               Close.close(task.id, "w", observed_epoch: 0, lifecycle_status: "cancelled")
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "cancelled",
+                 reason: "cancelled by the close test fixture"
+               )
 
       assert closed.content["lifecycle_status"] == "cancelled"
       assert closed.content["acceptance_criteria"] == @unproven, "criteria untouched"
@@ -2173,7 +2201,11 @@ defmodule Barkpark.Tasks.CloseTest do
       task = mk_task!(uniq("claimless-anon"), scope)
 
       assert {:ok, _} =
-               Close.close(task.id, "w-anon", observed_epoch: 0, lifecycle_status: "cancelled")
+               Close.close(task.id, "w-anon",
+                 observed_epoch: 0,
+                 lifecycle_status: "cancelled",
+                 reason: "cancelled by the close test fixture"
+               )
 
       assert [ev] = events(task.doc_id, "task.closed")
       assert ev.document["closed_by"] == "w-anon"

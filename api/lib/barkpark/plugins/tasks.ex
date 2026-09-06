@@ -896,7 +896,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "close",
         summary:
-          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Four honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted), and a done close of a kind:task row with ZERO acceptance criteria whose reason names no PR+sha and pastes no run (409 close_reason_needs_artifact) — each with a loud on-the-record --set override (criteria_override / holder_override / ack_override / close_reason_override), and none of them discharges another; see the set flag.",
+          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Five honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted), and a done close of a kind:task row with ZERO acceptance criteria whose reason names no PR+sha and pastes no run (409 close_reason_needs_artifact), and a cancelled close whose reason is absent, empty or whitespace-only (409 cancel_reason_required — a cancel is exempt by name from every other gate, so its reason is its whole record; there is no override, the fix is to pass the reason). The first four each carry a loud on-the-record --set override (criteria_override / holder_override / ack_override / close_reason_override), and none of them discharges another; see the set flag.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
         auth_tier: "write",
         args: [
@@ -992,6 +992,13 @@ defmodule Barkpark.Plugins.Tasks do
                 "name, as are cancelled and blocked closes. The way through is --set " <>
                 "close_reason_override=\"<why it is done with no artifact>\", recorded as " <>
                 "close_override.close_reason; criteria_override does NOT discharge it. " <>
+                "THE CANCEL REASON GATE (task-650d7844d8fe7199): a cancelled close whose reason " <>
+                "is absent, empty or whitespace-only is REFUSED — 409 cancel_reason_required. " <>
+                "Every gate above EXEMPTS cancelled by name, which is right on its own and wrong " <>
+                "in combination: for a cancel the reason is not one record among several, it is " <>
+                "the ENTIRE record of why the work stopped. There is NO override and no default " <>
+                "reason is invented — the fix is to pass the reason as the fifth positional. " <>
+                "done and blocked closes are EXEMPT by name. " <>
                 "A blank reason is NOT an override for any of " <>
                 "the four keys. " <>
                 "--set observed_rev=<rev> pins the strict full-rev CAS and BYPASSES the default " <>

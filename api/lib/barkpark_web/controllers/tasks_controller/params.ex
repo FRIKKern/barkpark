@@ -1502,6 +1502,23 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|children are exempt. To close done anyway, on the record: --set close_reason_override="<why it is done | <>
         ~s|with no artifact>".|
 
+  # THE CANCEL REASON REFUSAL (task-650d7844d8fe7199). Unlike every other hint
+  # here this one names NO override, because there is none and inventing the
+  # expectation of one would be the whole defect again: the fix is a sentence,
+  # and a caller who has none has nothing to record. It must say WHY a cancel is
+  # the one status this binds on, or it reads as an arbitrary new required field.
+  def criteria_hint(:cancel_reason_required, :close),
+    do:
+      ~s|a `cancelled` close needs a reason and this one carried none (absent, empty, or whitespace-only). | <>
+        ~s|A cancel is EXEMPT BY NAME from every other close gate — the criteria gate (D289) and the close | <>
+        ~s|artifact gate (D291) both wave it through, because abandoning the acceptance criteria is what | <>
+        ~s|cancelling MEANS — so the reason is not one record among several, it is the ENTIRE record of why | <>
+        ~s|this work stopped. Pass it as the FIFTH positional: | <>
+        ~s|`bp task close <id> <worker> <epoch> cancelled "<why this work is being abandoned>"`. | <>
+        ~s|There is no override, on purpose: the escape hatch IS the sentence. `done` and `blocked` closes | <>
+        ~s|are unaffected — a `done` close is governed by the criteria and artifact gates, and a `blocked` | <>
+        ~s|close is an honest partial whose record is not yet due.|
+
   def criteria_hint({:sentinel_worker_id, worker}, _surface),
     do:
       ~s|"#{worker}" is not a worker id — it is a missing value wearing a worker's clothes (empty, "None", | <>
