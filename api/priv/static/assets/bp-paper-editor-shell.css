@@ -1586,6 +1586,9 @@
   width: var(--bp-evidence-width, 100%);
   box-sizing: border-box;
 }
+.bp-section__cell > .bp-paper-edit-wc:first-child .bp-paper-editor-body .ProseMirror > :first-child {
+  margin-top: 0;
+}
 .bp-expandable__body > .bp-paper-edit-canvas:first-child .bp-paper-editor-body .ProseMirror > :first-child {
   margin-top: 0;
 }
@@ -1602,11 +1605,13 @@
 .bp-paper-contextual-controls[open] { opacity: 1; pointer-events: auto; }
 .bp-paper-contextual-controls--gauge-list[open],
 .bp-paper-contextual-controls--tabs[open],
+.bp-paper-contextual-controls--section[open],
 .bp-paper-contextual-controls--form[open] {
   position: relative; inset: auto; width: 100%; max-width: none;
 }
 .bp-paper-contextual-controls--gauge-list[open] > .bp-paper-contextual-panel,
 .bp-paper-contextual-controls--tabs[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--section[open] > .bp-paper-contextual-panel,
 .bp-paper-contextual-controls--form[open] > .bp-paper-contextual-panel {
   max-height: none; overflow: visible;
 }

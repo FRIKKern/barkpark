@@ -91,6 +91,14 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
 
     assert css =~
              ~S|.bp-paper-edit-block[data-block-type="section"]:has([data-paper-section-editor-frame].bp-section--wide)|
+
+    assert css =~
+             ~S|.bp-section__cell > .bp-paper-edit-wc:first-child .bp-paper-editor-body .ProseMirror > :first-child {
+  margin-top: 0;
+}|
+
+    assert css =~ ".bp-paper-contextual-controls--section[open]"
+    assert css =~ ".bp-paper-contextual-controls--section[open] > .bp-paper-contextual-panel"
   end
 
   test "stack Section keeps reader chrome and mounts maximal contextual canvas runs" do
@@ -105,6 +113,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
     tree = LazyHTML.from_fragment(html)
 
     assert html =~ ~s(data-test-id="paper-section-editor")
+    assert html =~ "bp-paper-contextual-controls--section"
     assert html =~ ~s(data-paper-section-editor-frame)
     assert html =~ ~s(<hr class="bp-hr" style="border-top-width:1px")
     assert html =~ ~s(<span style="font-weight:bold">Overview</span>)

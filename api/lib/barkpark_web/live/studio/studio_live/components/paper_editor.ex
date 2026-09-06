@@ -1943,7 +1943,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 <%= if SectionLayout.stack_rules?(@block, :article) do %><hr class="bp-hr" style="border-top-width:1px" /><% end %>
               <% end %>
             </div>
-            <details id={"section-controls-" <> @id} class="bp-paper-contextual-controls" phx-mounted={JS.ignore_attributes("open")}>
+            <details id={"section-controls-" <> @id} class="bp-paper-contextual-controls bp-paper-contextual-controls--section" phx-mounted={JS.ignore_attributes("open")}>
               <summary class="bp-paper-contextual-toggle">Configure section</summary>
               <div class="bp-paper-contextual-panel">
                 <form id={"section-form-" <> @id} name="section-config" class="bp-paper-edit-form" phx-submit="paper-edit-block" phx-change="paper-block-autosave" phx-debounce="500" data-test-id="paper-section-config-editor">
