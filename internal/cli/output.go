@@ -50,6 +50,13 @@ type writer struct {
 	// own claim, so the claim-state read-back must not speak for it.
 	// Per-invocation, never a package global: one writer per bp run.
 	lastErrorCode string
+
+	// credentialSent records whether the request just dispatched carried an
+	// Authorization header. Per-invocation, like lastErrorCode. It reaches
+	// apiError in handleResponseHinted so a 401 refusal can tell the two cases
+	// apart: no credential (go get one) versus a credential the server
+	// rejected (getting another one changes nothing).
+	credentialSent bool
 }
 
 func newWriter(stdout, stderr io.Writer) *writer {
