@@ -15,6 +15,7 @@ draft-published-id	published_id
 engine-error-vocabulary	error_values
 envelope-dek	active_dek
 error-response-emit	emit
+failure-caption-clamp	caption
 field-encryption	encrypted?
 field-encryption-chokepoint	encrypt_marked
 fleet-presence-staleness	roster

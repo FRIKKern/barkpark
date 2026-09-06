@@ -1013,11 +1013,11 @@ defmodule BarkparkCloud.Sites.Deploy do
   # RAISES (22001) inside the terminal transition, which would lose the very
   # failure it was trying to record. Clamped here, once, for both terminal
   # writers.
-  defp short_detail(reason) when is_binary(reason) do
-    if String.length(reason) > 255, do: String.slice(reason, 0, 254) <> "…", else: reason
-  end
-
-  defp short_detail(reason), do: reason
+  # ONE OWNER (task-9e17071084bc5466): the arithmetic moved to
+  # `FailureCopy.caption/1` when the two transition routes were about to become
+  # its THIRD copy. This name stays as the local reading aid; the clamp itself
+  # is shared, so the three terminal paths cannot drift to different lengths.
+  defp short_detail(reason), do: FailureCopy.caption(reason)
 
   # The graced-refusal ledger, carried on `ctx` (a plain map) so the loop's two
   # budgets keep their arities. It is CLEARED by any poll that reached the box —

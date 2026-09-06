@@ -9377,6 +9377,16 @@ defmodule BarkparkCloud.Web.Router do
             |> maybe_put(:image_tag, params["image_tag"])
             |> maybe_put(:build_log_url, params["build_log_url"])
             |> maybe_put(:failure_reason, params["failure_reason"])
+            # THE SIXTH TERMINAL DETAIL PRODUCER (task-9e17071084bc5466).
+            # `detail` is latest-wins and this route never rewrote it, so a
+            # builder that POSTed "Fetching your source…" to
+            # /v1/builder/deployments/:id/detail and then filed a FAILED
+            # transition left the row wearing the caption as its only
+            # human-readable text. Measured over the whole population on
+            # 2026-09-06: 23 such rows, every one of them from this path.
+            # `detail` now rides the SAME write as `failure_reason`, so the two
+            # cannot be set apart.
+            |> put_failure_detail(params)
             |> maybe_put_datetime(:became_live_at, params["became_live_at"])
             # Explicit null-clearing handoff between stages. The builder, when
             # transitioning a row to `pushing`, explicitly sends `claim_worker:
@@ -9639,6 +9649,11 @@ defmodule BarkparkCloud.Web.Router do
                 |> maybe_put(:status, params["status"])
                 |> maybe_put(:image_tag, params["image_tag"])
                 |> maybe_put(:failure_reason, params["failure_reason"])
+                # THE SIXTH TERMINAL DETAIL PRODUCER, other half
+                # (task-9e17071084bc5466) — see the builder route above. The
+                # on-box agent files the terminal transition for a box build,
+                # and left `detail` untouched for exactly the same reason.
+                |> put_failure_detail(params)
                 |> maybe_put(:build_log_url, params["build_log_url"])
                 |> maybe_put_datetime(:became_live_at, params["became_live_at"])
 
@@ -13467,6 +13482,39 @@ defmodule BarkparkCloud.Web.Router do
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  # THE TERMINAL-FAILURE CAPTION, written on the SAME attrs map as
+  # `failure_reason` so no transition can set one without the other
+  # (task-9e17071084bc5466).
+  #
+  # SCOPED TO `failed`, and that is deliberate. `detail` is the live caption of
+  # a deploy IN FLIGHT, and mid-flight it is the truth — "Building your site…"
+  # is exactly what a queued→building transition should leave standing. Only a
+  # TERMINAL failure turns that caption into a lie, because nothing will ever
+  # overwrite it again. A `live` transition is left alone for the same reason:
+  # its own writer already captions it.
+  #
+  # A FAILURE THAT NAMES NO CAUSE STILL GETS WORDS. The parent epic's rule is a
+  # cause or a NAMED UNKNOWN, never a caption and never blank — so a terminal
+  # `failed` with an absent, nil or whitespace-only `failure_reason` is filed
+  # with `FailureCopy.no_reason_caption/0` rather than being left wearing
+  # whatever the UI last said.
+  defp put_failure_detail(map, %{"status" => "failed"} = params) do
+    caption =
+      case params["failure_reason"] do
+        reason when is_binary(reason) ->
+          if String.trim(reason) == "",
+            do: FailureCopy.no_reason_caption(),
+            else: FailureCopy.caption(reason)
+
+        _absent ->
+          FailureCopy.no_reason_caption()
+      end
+
+    Map.put(map, :detail, caption)
+  end
+
+  defp put_failure_detail(map, _params), do: map
 
   # Handoff helpers: only the null-clear is accepted. The wire MUST include the
   # key explicitly (with value null) — a body that omits the key leaves the

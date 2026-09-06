@@ -28,6 +28,7 @@ defmodule BarkparkCloud.Registry do
   alias BarkparkCloud.Billing
   alias BarkparkCloud.Billing.Subscription
   alias BarkparkCloud.GitHub.CommitDistance
+  alias BarkparkCloud.FailureCopy
   alias BarkparkCloud.Notifications
   alias BarkparkCloud.Workers.DeploymentAlertWorker
 
@@ -8987,15 +8988,11 @@ defmodule BarkparkCloud.Registry do
   # (20260806110000), so nothing here can raise 22001 — but the column is still
   # the one-line caption under a status pill, and `failure_reason` (`:text`) is
   # where the whole story lives untruncated. 255 mirrors
-  # `Sites.Deploy.short_detail/1` deliberately: the two terminal paths must not
-  # render the same failure at two different lengths. Knowingly duplicated rather
-  # than shared, to keep this change inside one module; folding both onto one
-  # `FailureCopy` helper is a follow-up, not a silent fork.
-  defp failure_detail(reason) when is_binary(reason) do
-    if String.length(reason) > 255, do: String.slice(reason, 0, 254) <> "…", else: reason
-  end
-
-  defp failure_detail(reason), do: reason
+  # `Sites.Deploy.short_detail/1` deliberately: the terminal paths must not
+  # render the same failure at two different lengths. THAT FOLLOW-UP HAS LANDED
+  # (task-9e17071084bc5466): both this and `short_detail/1` now delegate to
+  # `FailureCopy.caption/1`, which is the single owner of the clamp.
+  defp failure_detail(reason), do: FailureCopy.caption(reason)
 
   # cch-w30-bl — THE ONE POST-COMMIT DISPATCH BOTH FENCED WRITERS CALL.
   #
