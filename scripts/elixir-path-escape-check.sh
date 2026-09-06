@@ -106,6 +106,10 @@ design/**
 .github/workflows/elixir.yml
 scripts/elixir-path-escape-check.sh
 scripts/elixir-path-escape-check.test.sh
+scripts/elixir-impacted-tests.sh
+scripts/elixir-impacted-tests.test.sh
+scripts/elixir-main-red-attribution.sh
+scripts/elixir-main-red-attribution.test.sh
 scripts/gate-announces-skips.test.sh
 scripts/prod-build-cache-guard.sh'
 
