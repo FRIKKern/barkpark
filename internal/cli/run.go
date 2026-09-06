@@ -1565,11 +1565,25 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 	// when the command's own manifest says it accepts it. `paginated: true`
 	// stays in the disjunction because those seven commands take limit/offset
 	// as protocol whether or not they also enumerate them as flags.
-	if g.limitSet && (cmd.Paginated || commandDeclaresFlag(cmd, "limit")) {
-		q.Set("limit", strconv.Itoa(g.limit))
-	}
-	if g.offsetSet && (cmd.Paginated || commandDeclaresFlag(cmd, "offset")) {
-		q.Set("offset", strconv.Itoa(g.offset))
+	//
+	// The trap is not limit/offset's — it is EVERY global value flag's, because
+	// parseGlobals eats them all. -d/--dataset walked into it next: security
+	// declared `dataset` on task.ready and taught the route to honour
+	// `?dataset=`, and `bp task ready --dataset x` still sent nothing, so the
+	// caller read an UNFILTERED page as a filtered one. So the loop below is the
+	// rule itself, driven by globalQueryForwards (globals.go) rather than by one
+	// hand-written pair of ifs per flag — the next global joins the table and
+	// applyQuery does not change.
+	forwarded := map[string]bool{}
+	for _, gf := range globalQueryForwards(g) {
+		if !gf.set {
+			continue
+		}
+		if !commandDeclaresFlag(cmd, gf.name) && !(gf.paginatedProtocol && cmd.Paginated) {
+			continue
+		}
+		q.Set(gf.name, gf.value)
+		forwarded[gf.name] = true
 	}
 
 	// Declared positional args that belong in the query string (e.g. search.query
@@ -1590,14 +1604,16 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 		if clientOnly[f.Name] || f.Type == "file" || commandFlagBelongsInBody(cmd, f.Name) {
 			continue
 		}
-		// limit/offset are already resolved above from the globals, which is the
-		// ONLY place they can arrive from (parseGlobals consumes them wherever
+		// A global value flag is already resolved above, and the globals are the
+		// ONLY place it can arrive from (parseGlobals consumes them wherever
 		// they appear, so `flags` never holds them). Skipping the name we
 		// already set keeps that provable rather than assumed: were a caller to
 		// populate both, `q.Add` here would append a SECOND scalar `limit=` and
 		// Plug would keep one of the two by decode order — the duplicate-key
-		// coin-flip the repeatable-flag branch below exists to avoid.
-		if (f.Name == "limit" || f.Name == "offset") && q.Has(f.Name) {
+		// coin-flip the repeatable-flag branch below exists to avoid. Keyed on
+		// the forwarded set, not on a literal limit/offset pair, so the guard
+		// covers dataset and the next global for free.
+		if forwarded[f.Name] {
 			continue
 		}
 		if f.Type == "bool" {

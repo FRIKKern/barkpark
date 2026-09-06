@@ -518,8 +518,14 @@ defmodule PDS.Census do
     # `derived` half of this census's own D448-DRIFT-REFUSES line, run locally from
     # the repo root on the change's own tree, engine printed live by that run:
     #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
-    write: 57,
-    read: 27,
+    # RE-DERIVED BY RUN 2026-09-06 (task-184760672ff3414b, Github.Adopt written PUBLISHED-first
+    # through Tasks.Internal.fenced_content_write/4, no draft fork, no collapse): write-routed
+    # 57 -> 59 and read-routed 27 -> 25 — the two adopt receipts now sit under a def that
+    # reaches the fenced write. Conserved rows unmoved (textual 109 / ast 100 / phantom 9 /
+    # consumer 4 / emitted 96 / unrouted 12); the route closes at 10 as before. Reverting the
+    # three adopt files alone returns all eight rows to == (proven in the PR).
+    write: 59,
+    read: 25,
     unrouted: 12
   }
 
@@ -592,7 +598,12 @@ defmodule PDS.Census do
   # checked against the run: ROUTE-DEPTH-IS-CLOSURE reds if @route_depth stops being the
   # depth the table closes at, so neither literal can drift into a lie.
   @evidence_depth 6
-  @route_depth 12
+  # RE-DERIVED 2026-09-06 (12 -> 10): Plugins.Github.Link.put/4 now writes the published
+  # task row through Tasks.Internal.fenced_content_write/4 instead of forking a draft
+  # and collapsing it (collapse_draft_twin/5 deleted), so the longest write chain lost
+  # two hops and the table went flat at 10 — write 78 / read 15 / unrouted 3, identical
+  # at 12/14/16. Read off the run, not typed; ROUTE-DEPTH-IS-CLOSURE reds if it moves.
+  @route_depth 10
   @sweep [1, 2, 3, 4, 5, 6]
 
   # DEPTHS PAST THE CENSUS DEPTH, MEASURED RATHER THAN ASSERTED. The claim "the route

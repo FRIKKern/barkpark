@@ -74,6 +74,19 @@ defmodule BarkparkWeb.ErrorJSON do
        }),
        do: {:error, e}
 
+  # SAME pass-through, for the task doors' one typed refusal
+  # (`Barkpark.Tasks.AmbiguousTwinError`, THE ONE RULE — see
+  # `Barkpark.Tasks.TwinResolver`). Its `Plug.Exception` status is already 409;
+  # this clause is what keeps the BODY canonical, so a caller reading
+  # `error.code` sees `ambiguous_dataset` with `details.datasets` — the one fact
+  # that lets it retry with `?dataset=` — instead of a generic `internal_error`
+  # that reads as a server fault and invites a blind retry forever.
+  defp reason_for_template(_template, %{
+         kind: :error,
+         reason: %Barkpark.Tasks.AmbiguousTwinError{} = e
+       }),
+       do: {:error, e}
+
   defp reason_for_template(_template, assigns) do
     # A BINARY reason is carried verbatim as the message under the SAME
     # `internal_error` code (Errors.build/1); anything else falls back to the

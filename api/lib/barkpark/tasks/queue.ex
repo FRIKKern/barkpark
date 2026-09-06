@@ -323,10 +323,245 @@ defmodule Barkpark.Tasks.Queue do
       )
 
     base
+    |> maybe_collapse_cross_dataset_twins(dataset)
     |> maybe_filter_dataset(dataset)
     |> maybe_filter_phase(phase_id)
     |> Scope.scope_to_workspace(workspace_id, project_id)
     |> apply_order(order)
+  end
+
+  # ── Axis 5: CROSS-DATASET twin resolution (task-0084e191d406de96) ──────────
+  #
+  # THE SAME RULE axis 3 applies inside one dataset, applied ACROSS datasets —
+  # and it is not a second rule: it is `Barkpark.Tasks.TwinResolver`'s, stated
+  # once in that module's moduledoc and cited from every task door since
+  # PR #16474. Rules 1 and 2 pick the row (published spelling and published
+  # status win; `dataset` is NEVER a tiebreak); rule 3 REFUSES when more than
+  # one row survives at the winning tier and the caller named no dataset.
+  #
+  # WHY THIS EXISTS. `documents` is unique on `(doc_id, type, dataset_id)`, so
+  # one task doc_id may live in two datasets of one workspace+project (eleven
+  # such pairs measured live on guerrilla 2026-09-06). Axis 3's collapse
+  # requires `o.dataset == d.dataset` BY DESIGN — a dataset is a real tenant
+  # boundary and a same-id row in another dataset is not a shadow of this one —
+  # so a twinned id contributed TWO rows to ONE ready page, and `bp task next`
+  # could claim whichever copy the order happened to reach first. That is the
+  # silent-wrong-row read #16474 closed at the by-id doors, one door over.
+  #
+  # THE MECHANISM. Each row carries the resolver's TIER (@twin_tier_sql):
+  # published spelling AND `status: published` = 2, published spelling = 1,
+  # `drafts.` twin = 0. A row is suppressed when a row of the same
+  # `drafts.`-stripped doc_id, same workspace+project, in a DIFFERENT dataset,
+  # ties or beats its tier. Both consequences are the rule:
+  #
+  #   * a UNIQUE winning tier leaves exactly ONE row — rules 1+2, and no
+  #     comparison of dataset STRINGS decides which;
+  #   * a TIE at the winning tier suppresses BOTH — rule 3. The queue does not
+  #     pick a dataset the caller did not name. The withheld ids are not hidden:
+  #     `dataset_ambiguous/1` names each once with the dataset set it spans, and
+  #     `GET /v1/tasks/ready` renders that in `page.dataset_ambiguous` — in the
+  #     `page` block, NOT in `help[]`, which on this route rides mutation
+  #     successes only (axi-s4 R5, pinned by tasks_controller_test.exs).
+  #     `?dataset=` is the way through — the same way out the by-id 409 hints at.
+  #
+  # ACTIVE ONLY WHEN THE CALLER NAMED NO DATASET. `?dataset=` IS the
+  # disambiguation, so a dataset-scoped read sees its own dataset's row
+  # unchanged and there is nothing left to be ambiguous about.
+  #
+  # `Tasks.Claim.claim/2` rides this same query, so an ambiguous id is not
+  # handed out by `bp task next` either. Deliberate, and it is rule 3 at the
+  # write door: `Tasks.claim_by_id/3` already refuses such an id with a 409, and
+  # a queue that offered what the claim door refuses would be exactly the
+  # ready/claim disagreement this module exists to prevent.
+  @twin_tier_sql "CASE WHEN ? NOT LIKE 'drafts.%' AND ? = 'published' THEN 2 " <>
+                   "WHEN ? NOT LIKE 'drafts.%' THEN 1 ELSE 0 END"
+
+  defp maybe_collapse_cross_dataset_twins(query, dataset) when is_binary(dataset), do: query
+
+  defp maybe_collapse_cross_dataset_twins(query, nil) do
+    from([doc: d] in query, where: not exists(cross_dataset_twin_at_tier(:gte)))
+  end
+
+  @doc """
+  The task doc_ids axis 5 WITHHELD from a dataset-less ready page, each with the
+  dataset set it spans — the LISTING half of `TwinResolver` rule 3.
+
+  A by-id door answers rule 3 with a 409. A ready page cannot: it is a many-row
+  answer, and refusing the whole page over one ambiguous id would deny the
+  caller the forty-nine rows that are not ambiguous at all. So the refusal is
+  scoped to the ROW it is about — the id contributes no row to the page, and
+  appears exactly ONCE here, naming the datasets the caller may choose between.
+
+  Returns `[]` whenever the caller named a `:dataset` (nothing is ambiguous
+  then), otherwise a doc_id-sorted list of
+  `%{doc_id: String.t(), datasets: [String.t()]}`.
+
+  DELIBERATELY CHEAPER THAN `ready_query/1`. This probe carries the IDENTITY
+  predicates (type, kind, claimable lifecycle, the ghost-disposition gate) plus
+  the scope and phase filters, and NOT the dependency, blocks-edge or queue-gate
+  axes: ambiguity is a property of the ID, not of readiness, and a second full
+  evaluation of the expensive gates merely to describe the first is the cost the
+  correlated rewrite of those gates exists to avoid. It can therefore name an id
+  that would ALSO have been gated out for another reason — over-reporting toward
+  "look again", the safe direction for a fact whose only action is to name a
+  dataset.
+  """
+  def dataset_ambiguous(opts) do
+    case Keyword.get(opts, :dataset) do
+      dataset when is_binary(dataset) ->
+        []
+
+      _ ->
+        opts
+        |> dataset_ambiguous_query()
+        |> Repo.all()
+        |> Enum.group_by(& &1.doc_id, & &1.dataset)
+        |> Enum.map(fn {doc_id, datasets} ->
+          %{doc_id: doc_id, datasets: datasets |> Enum.uniq() |> Enum.sort()}
+        end)
+        |> Enum.filter(&(length(&1.datasets) > 1))
+        |> Enum.sort_by(& &1.doc_id)
+    end
+  end
+
+  defp dataset_ambiguous_query(opts) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+    phase_id = Keyword.get(opts, :phase_id)
+
+    from(d in Document,
+      as: :doc,
+      where: d.type == "task",
+      where: fragment("?->>'kind'", d.content) == "task",
+      where: fragment("?->>'lifecycle_status'", d.content) in ^@ready_lifecycle_statuses,
+      where: fragment("?->>'disposition' IS DISTINCT FROM 'closed'", d.content),
+      # A sibling in another dataset TIES this row's tier …
+      where: exists(cross_dataset_twin_at_tier(:eq)),
+      # … and none beats it. Together: this row sits at the winning tier and the
+      # winner is not unique — precisely the tie rule 3 refuses to break.
+      where: not exists(cross_dataset_twin_at_tier(:gt)),
+      select: %{
+        doc_id: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
+        dataset: d.dataset
+      }
+    )
+    |> maybe_filter_phase(phase_id)
+    |> Scope.scope_to_workspace(workspace_id, project_id)
+  end
+
+  # The correlated sibling probe. ONE definition, three comparisons: `:gte` is
+  # the suppression axis ("someone else ties or beats me"), `:eq`/`:gt` are the
+  # two halves of "I sit at the winning tier and share it". Written once so the
+  # page's suppression and the page's explanation cannot drift apart — a forked
+  # copy of a scope predicate is precisely how this class keeps coming back
+  # (see the `Media.Delivery.Search` note above).
+  defp cross_dataset_twin_at_tier(op) do
+    from(o in Document, where: ^cross_dataset_twin_condition(op), select: 1)
+  end
+
+  defp cross_dataset_twin_condition(:gte) do
+    dynamic(
+      [o],
+      ^cross_dataset_twin_base() and ^twin_tier_dynamic(:gte)
+    )
+  end
+
+  defp cross_dataset_twin_condition(:eq) do
+    dynamic(
+      [o],
+      ^cross_dataset_twin_base() and ^twin_tier_dynamic(:eq)
+    )
+  end
+
+  defp cross_dataset_twin_condition(:gt) do
+    dynamic(
+      [o],
+      ^cross_dataset_twin_base() and ^twin_tier_dynamic(:gt)
+    )
+  end
+
+  defp twin_tier_dynamic(:gte) do
+    dynamic(
+      [o],
+      fragment(@twin_tier_sql, o.doc_id, o.status, o.doc_id) >=
+        fragment(
+          @twin_tier_sql,
+          parent_as(:doc).doc_id,
+          parent_as(:doc).status,
+          parent_as(:doc).doc_id
+        )
+    )
+  end
+
+  defp twin_tier_dynamic(:eq) do
+    dynamic(
+      [o],
+      fragment(@twin_tier_sql, o.doc_id, o.status, o.doc_id) ==
+        fragment(
+          @twin_tier_sql,
+          parent_as(:doc).doc_id,
+          parent_as(:doc).status,
+          parent_as(:doc).doc_id
+        )
+    )
+  end
+
+  defp twin_tier_dynamic(:gt) do
+    dynamic(
+      [o],
+      fragment(@twin_tier_sql, o.doc_id, o.status, o.doc_id) >
+        fragment(
+          @twin_tier_sql,
+          parent_as(:doc).doc_id,
+          parent_as(:doc).status,
+          parent_as(:doc).doc_id
+        )
+    )
+  end
+
+  # SAME id (`drafts.`-stripped), SAME workspace+project, DIFFERENT dataset.
+  #
+  # THE `regexp_replace` ON THE INNER COLUMN IS THE SARGABLE FORM HERE, and it is
+  # counter-intuitive enough to be worth the lines, because the obvious review
+  # note is "a function on the inner column forbids an index — rewrite it as an
+  # equality on the bare column". That note is right in general and WRONG on this
+  # table: migration 20260901180000 built `documents_task_ready_dep_idx`, a
+  # PARTIAL EXPRESSION index on exactly
+  #
+  #     (regexp_replace(doc_id, '^drafts\\.', ''), workspace_id,
+  #      content->>'lifecycle_status', dataset, project_id)  WHERE type = 'task'
+  #
+  # for the dependency gate's identical probe. This predicate is therefore an
+  # `Index Cond` on that index, and the four trailing columns resolve most of the
+  # surrounding scope filter inside the index instead of on the heap. Axis 3's
+  # collapse above is the same shape for the same reason.
+  #
+  # MEASURED, not assumed — 6,002 candidate rows, three runs of each form on one
+  # test DB, `EXPLAIN (ANALYZE, BUFFERS)` over `Repo.to_sql(:all, ready_query/1)`:
+  #
+  #   * THIS form → `Index Scan using documents_task_ready_dep_idx on documents sd0`,
+  #     `Index Cond: (regexp_replace(doc_id, '^drafts\\.', '') = regexp_replace(d0.doc_id, ...))`
+  #     — 118 / 129 / 136 ms.
+  #   * The "sargable" rewrite (`o.doc_id = strip(parent) OR o.doc_id =
+  #     'drafts.' || strip(parent)`) → also index-driven, a `BitmapOr` of two
+  #     `documents_doc_id_type_dataset_id_index` probes — but 212 / 226 / 233 ms,
+  #     because that index carries NONE of the scope columns and every candidate
+  #     then pays a heap recheck (`Heap Blocks: exact=6002`).
+  #
+  # 1.8x slower for the same rows. 20260901180000's moduledoc states the general
+  # law this is one instance of: re-costing this probe onto a different index
+  # measured 3.2 s there. Do NOT "fix" the function call away without re-running
+  # that comparison and quoting both plans.
+  defp cross_dataset_twin_base do
+    dynamic(
+      [o],
+      o.type == "task" and
+        fragment("regexp_replace(?, '^drafts\\.', '')", o.doc_id) ==
+          fragment("regexp_replace(?, '^drafts\\.', '')", parent_as(:doc).doc_id) and
+        o.dataset != parent_as(:doc).dataset and
+        fragment("? IS NOT DISTINCT FROM ?", o.workspace_id, parent_as(:doc).workspace_id) and
+        fragment("? IS NOT DISTINCT FROM ?", o.project_id, parent_as(:doc).project_id)
+    )
   end
 
   defp apply_order(query, :closure_nearest) do

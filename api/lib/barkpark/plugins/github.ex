@@ -302,9 +302,11 @@ defmodule Barkpark.Plugins.Github do
     fn doc_id, dataset, _mode ->
       # Normalize the collapse-annotated `{:ok, doc, collapse}` variant (D23)
       # back to `{:ok, doc}` for the Studio modal path — `confirm_modal_real`
-      # keys on the 2-tuple and the adopt itself committed; a rejected
-      # draft-twin collapse is a CLI/HTTP-surfaced diagnostic, not a Studio
-      # dead-end (the button is convenience over the CLI verb).
+      # keys on the 2-tuple. `Adopt.adopt/3` no longer PRODUCES that 3-tuple
+      # (task-184760672ff3414b removed the draft-twin collapse that could be
+      # refused after the adopt had committed); the clause is kept as a total
+      # match so an older Adopt build, or a re-introduced annotated variant,
+      # still cannot dead-end the Studio button.
       case Barkpark.Plugins.Github.Adopt.adopt(doc_id, dataset, opts) do
         {:ok, doc, _collapse} -> {:ok, doc}
         other -> other
