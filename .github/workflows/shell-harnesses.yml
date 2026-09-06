@@ -318,6 +318,34 @@ on:
       - ".github/workflows/task-lease-renew.yml"
       - "scripts/task-lease-sweep.sh"
       - "scripts/task-lease-sweep.test.sh"
+      # ── ORPHAN SWEEP III (task-8780f3b465edea5b, 2026-09-06) ────────────────
+      # Three harnesses that no workflow ran, each adjudicated by an ACTUAL RUN
+      # in a scratch worktree at 776c91142 before being wired — all three are
+      # sub-second and hermetic, which is why they are wired rather than
+      # exempted (a slow or environment-dependent proof gets the header marker
+      # instead; see scripts/selftest-wiring-census.sh):
+      #   local-update.test.sh                 0 s, 18 passed 0 failed
+      #   pdf-efficiency-proof.test.sh         1 s, 22 passed 0 failed (python3 stub on 127.0.0.1)
+      #   refute-on-absence-capture-log-check.test.sh  4 s, 9 of 9 arms
+      # The GATE itself — refute-on-absence-capture-log-check.sh, not just its
+      # selftest — is run here too: api/test/barkpark/tenancy/auth_principal_kind_test.exs:45
+      # says it "pins the combination", and until this lane existed nothing ran it.
+      - "scripts/local-update.sh"
+      - "scripts/local-update.test.sh"
+      - "scripts/pdf-efficiency-proof.sh"
+      - "scripts/pdf-efficiency-proof.test.sh"
+      - "scripts/refute-on-absence-capture-log-check.sh"
+      - "scripts/refute-on-absence-capture-log-check.test.sh"
+      # ── THE CENSUS (task-8780f3b465edea5b c0/c1) ────────────────────────────
+      # The three globs are the point: they are how a harness added TOMORROW
+      # reaches this workflow without anyone remembering to add a line here.
+      # HONEST LIMIT: GitHub's `*` does not cross `/`, so a new test under
+      # scripts/measurements/ does not trigger the PR arm — the push-to-main arm
+      # catches it, and the census resolves that directory correctly either way.
+      - "scripts/selftest-wiring-census.sh"
+      - "scripts/*.test.sh"
+      - "scripts/*.test.mjs"
+      - "scripts/*_test.sh"
   push:
     branches: [main]
     paths:
@@ -508,6 +536,35 @@ on:
       - "scripts/task-lease-sweep.sh"
       - "scripts/task-lease-sweep.test.sh"
 
+      # ── ORPHAN SWEEP III (task-8780f3b465edea5b, 2026-09-06) ────────────────
+      # Three harnesses that no workflow ran, each adjudicated by an ACTUAL RUN
+      # in a scratch worktree at 776c91142 before being wired — all three are
+      # sub-second and hermetic, which is why they are wired rather than
+      # exempted (a slow or environment-dependent proof gets the header marker
+      # instead; see scripts/selftest-wiring-census.sh):
+      #   local-update.test.sh                 0 s, 18 passed 0 failed
+      #   pdf-efficiency-proof.test.sh         1 s, 22 passed 0 failed (python3 stub on 127.0.0.1)
+      #   refute-on-absence-capture-log-check.test.sh  4 s, 9 of 9 arms
+      # The GATE itself — refute-on-absence-capture-log-check.sh, not just its
+      # selftest — is run here too: api/test/barkpark/tenancy/auth_principal_kind_test.exs:45
+      # says it "pins the combination", and until this lane existed nothing ran it.
+      - "scripts/local-update.sh"
+      - "scripts/local-update.test.sh"
+      - "scripts/pdf-efficiency-proof.sh"
+      - "scripts/pdf-efficiency-proof.test.sh"
+      - "scripts/refute-on-absence-capture-log-check.sh"
+      - "scripts/refute-on-absence-capture-log-check.test.sh"
+      # ── THE CENSUS (task-8780f3b465edea5b c0/c1) ────────────────────────────
+      # The three globs are the point: they are how a harness added TOMORROW
+      # reaches this workflow without anyone remembering to add a line here.
+      # HONEST LIMIT: GitHub's `*` does not cross `/`, so a new test under
+      # scripts/measurements/ does not trigger the PR arm — the push-to-main arm
+      # catches it, and the census resolves that directory correctly either way.
+      - "scripts/selftest-wiring-census.sh"
+      - "scripts/*.test.sh"
+      - "scripts/*.test.mjs"
+      - "scripts/*_test.sh"
+
 permissions:
   contents: read
 
@@ -579,6 +636,8 @@ jobs:
       fleet-coordination-harnesses: ${{ steps.sets.outputs.fleet-coordination-harnesses }}
       compose-smoke-dispatcher: ${{ steps.sets.outputs.compose-smoke-dispatcher }}
       workflow-trigger-coverage: ${{ steps.sets.outputs.workflow-trigger-coverage }}
+      orphan-harnesses: ${{ steps.sets.outputs.orphan-harnesses }}
+      selftest-wiring-census: ${{ steps.sets.outputs.selftest-wiring-census }}
       dispatch-selftest: ${{ steps.sets.outputs.dispatch-selftest }}
     steps:
       - uses: actions/checkout@v4
@@ -751,6 +810,17 @@ jobs:
           workflow-trigger-coverage scripts/workflow-trigger-coverage.test.sh
           workflow-trigger-coverage .github/workflows/*.yml
           dispatch-selftest scripts/shell-harnesses-dispatch.test.sh
+          orphan-harnesses scripts/local-update.sh
+          orphan-harnesses scripts/local-update.test.sh
+          orphan-harnesses scripts/pdf-efficiency-proof.sh
+          orphan-harnesses scripts/pdf-efficiency-proof.test.sh
+          orphan-harnesses scripts/refute-on-absence-capture-log-check.sh
+          orphan-harnesses scripts/refute-on-absence-capture-log-check.test.sh
+          selftest-wiring-census scripts/selftest-wiring-census.sh
+          selftest-wiring-census scripts/*.test.sh
+          selftest-wiring-census scripts/*.test.mjs
+          selftest-wiring-census scripts/*_test.sh
+          selftest-wiring-census .github/workflows/*.yml
           '
           self=".github/workflows/shell-harnesses.yml"
 
@@ -1956,3 +2026,66 @@ jobs:
         run: bash -n scripts/shell-harnesses-dispatch.test.sh
       - name: partition invariants + dispatcher fixture matrix (incl. mutation arm)
         run: bash scripts/shell-harnesses-dispatch.test.sh
+
+  orphan-harnesses:
+    needs: [changes]
+    if: needs.changes.outputs.orphan-harnesses == 'true'
+    # ORPHAN SWEEP III (task-8780f3b465edea5b). Three harnesses that no workflow
+    # executed, each RUN before being wired rather than wired on inspection —
+    # the row that filed this asked for exactly that, and two of its own guesses
+    # were wrong: local-update.test.sh was recorded as "exceeded a 90 s cap, NOT
+    # verified" (it is 0 s, 18/18) and pdf-efficiency-proof.test.sh as a
+    # "live-journey harness" out of budget (it is hermetic — a python3 stub on
+    # 127.0.0.1 — and 1 s, 22/22).
+    #
+    # The last step runs the GATE, not its selftest. That is the point of the
+    # tenant: scripts/refute-on-absence-capture-log-check.sh appears in no
+    # workflow, no Makefile and no script, yet
+    # api/test/barkpark/tenancy/auth_principal_kind_test.exs:45 says it "pins the
+    # combination". A PIN NOTHING RUNS IS NOT A PIN. This makes the sentence
+    # true for edits to the gate itself; making it true for edits to api/test/**
+    # needs a step in elixir.yml beside unreachable-assert-message-check.sh
+    # (elixir.yml:940), which is the api lane's call, not this one's.
+    name: orphan harnesses (local-update · pdf-efficiency-proof · refute-on-absence)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "local-update.test.sh (measured 0 s / 18 assertions)"
+        run: bash scripts/local-update.test.sh
+
+      - name: "pdf-efficiency-proof.test.sh (measured 1 s / 22 assertions, hermetic stub)"
+        run: bash scripts/pdf-efficiency-proof.test.sh
+
+      - name: "refute-on-absence-capture-log-check.test.sh (measured 4 s / 9 arms)"
+        run: bash scripts/refute-on-absence-capture-log-check.test.sh
+
+      - name: "the GATE itself, over the real api/test tree"
+        run: bash scripts/refute-on-absence-capture-log-check.sh
+
+  selftest-wiring-census:
+    needs: [changes]
+    if: needs.changes.outputs.selftest-wiring-census == 'true'
+    # THE DURABLE ARM (task-8780f3b465edea5b c0/c1): every scripts/ self-test is
+    # executed by CI or carries a machine-readable exemption, and a harness added
+    # tomorrow with neither reds HERE rather than accumulating in silence. The
+    # census resolves execution over four routes (direct, glob, a wired parent's
+    # --selftest, an ExUnit door) because the hand-run basename grep that filed
+    # this row was wrong in BOTH directions — the script's own header carries the
+    # list of faults.
+    name: selftest wiring census
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # The selftest FIRST: it plants an unlisted, unexempted harness in a
+      # scratch copy and requires the census to red and to name it, then adds
+      # the exemption marker and requires green. A census that cannot lose would
+      # pass the step below over any tree at all.
+      - name: Prove the census can fail (--selftest)
+        run: bash scripts/selftest-wiring-census.sh --selftest
+
+      - name: The census over this tree
+        run: bash scripts/selftest-wiring-census.sh --list

@@ -37,6 +37,13 @@
 //                The surface's IDENTICAL is now asserted too: it is the fact
 //                that the cap, not the dock rule, is what sets the column.
 //
+// MANUAL PROOF — not wired: browser-coupled (three real Chromium launches), so
+// it does not belong in the dep-free node-test-floor job; run by hand with:
+//   node --test scripts/__studio-wide-deletion-diff.test.mjs
+// last run 2026-09-06 — 21 pass / 0 fail (PR #16393, 92b9db0da; task-f95e5255f9059cb7).
+// That line is the machine-readable exemption scripts/selftest-wiring-census.sh
+// reads; the prose below is the same statement for a human.
+//
 // ── CI STATUS — OWNER-RUN, NOT GATED (checked 2026-09-06) ────────────────────
 // `grep -rn '__studio-wide-deletion-diff\|studio-wide' .github/workflows`
 // returns NOTHING: no workflow runs this file, on any trigger. It is therefore
