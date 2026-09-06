@@ -22838,6 +22838,98 @@ test("cch-w40-bl: domain_not_pointed is RENDERED via textContent on the live arm
   assert.equal(errEl.textContent.indexOf("barkpark.cloud domains are supported"), -1,
     "the false sentence is gone from the rendered arm");
 });
+// ── cch-w40-bl · THE SITE-URL 422 STOPS BLAMING INPUT THAT WAS CORRECT ───────
+//
+// PRECONDITION, MUTATION-PROVEN on pre-fix bytes: replacing the toast title in
+// `newSubmitSiteUrl` with "MUTANT-D" left this suite at 1350 tests / 1350 pass /
+// 0 fail — a BYTE-IDENTICAL (empty) failure set. The copy lived inline in a DOM
+// handler with zero hook reach, so no assertion could see it. The fix extracts a
+// pure `siteUrlFailureCopy(status, data)` in the *FailureCopy + __bpTestHook
+// pattern (peer: attachDomainFailureCopy, extracted by #11899) and pins it here.
+//
+// POST /v1/barkparks/:id/site-url emits THREE distinct 422 shapes; the shipped
+// sentence "That doesn't look like a URL" / "Enter your site's full https://
+// address." answered ALL of them:
+//   url_required      router.ex:3776       — no url in the request
+//   invalid_url       router.ex:3810-3811  — not an http(s) origin. THE ONLY slug
+//                                            the shipped sentence was true for.
+//   invalid {details} router.ex:3838-3842  — the CHANGESET arm. The router's own
+//     comment: "The wire succeeded but the audit insert did not — audit/3 refuses
+//     to report an unrecorded success. The instance-side wiring is idempotent (a
+//     re-POST converges), so the honest move is a 422 the operator can simply
+//     retry." The URL was FINE and the webhook IS live.
+
+test("cch-w40-bl: siteUrlFailureCopy is exported (the extraction that made the copy pinnable)", () => {
+  assert.equal(typeof hooks.siteUrlFailureCopy, "function",
+    "siteUrlFailureCopy must be exported — without it the site-url 422 copy is unpinnable inline");
+});
+
+test("cch-w40-bl: the audit-insert 422 says the wire SUCCEEDED and offers the retry idempotency earns", () => {
+  const f = hooks.siteUrlFailureCopy;
+  const c = f(422, { error: "invalid", details: { site_url: ["is invalid"] } });
+
+  // THE DEFECT, PINNED: the operator's URL was correct. Neither half of the old
+  // sentence may appear on this slug.
+  assert.equal(/look like a URL/.test(c.title + " " + c.body), false,
+    "the audit-insert 422 must not tell the operator their URL is malformed");
+  assert.equal(/full https:\/\/ address/.test(c.title + " " + c.body), false,
+    "and must not send them back to re-type an address that was accepted");
+
+  // What it MUST say: the wire landed, and retrying is safe.
+  assert.match(c.body, /webhook is live|URL is fine/,
+    "the copy states what actually happened — the wire succeeded");
+  assert.match(c.title + " " + c.body, /retry|again/i,
+    "and offers the retry the router's idempotency makes honest");
+});
+
+test("cch-w40-bl: the truth table — three 422 slugs, three sentences, and only invalid_url blames the input", () => {
+  const f = hooks.siteUrlFailureCopy;
+
+  const required = f(422, { error: "url_required" });
+  const invalidUrl = f(422, { error: "invalid_url" });
+  const auditFail = f(422, { error: "invalid", details: {} });
+
+  // MUTATION: collapse the three arms back into one (the pre-fix shape) and THIS
+  // assertion reds specifically for the changeset/audit-insert slug — all three
+  // would return the same object.
+  assert.notEqual(auditFail.title, invalidUrl.title,
+    "a failed audit insert and a malformed URL are different events and must not share a title");
+  assert.notEqual(auditFail.body, invalidUrl.body,
+    "and must not share a body — the audit-insert arm names a SUCCESSFUL wire");
+  assert.notEqual(required.title, auditFail.title,
+    "a missing URL is not a failed audit insert either");
+
+  // The ONE slug that earns the shipped sentence keeps it, verbatim.
+  assert.equal(invalidUrl.title, "That doesn't look like a URL");
+  assert.equal(invalidUrl.body, "Enter your site's full https:// address.");
+
+  // The input slugs get NO retry offer — retrying the same bytes converges on
+  // the same refusal, so "retry" there would be a second false remedy.
+  for (const [name, c] of [["url_required", required], ["invalid_url", invalidUrl]]) {
+    assert.equal(/retry/i.test(c.title + " " + c.body), false,
+      name + " must not offer a retry — the same bytes get the same 422");
+  }
+
+  // Every arm answers with a rendered pair, never undefined.
+  for (const [name, c] of [["url_required", required], ["invalid_url", invalidUrl],
+                           ["invalid", auditFail]]) {
+    assert.equal(typeof c.title, "string", name + " has a title");
+    assert.equal(typeof c.body, "string", name + " has a body");
+    assert.ok(c.title.length > 0 && c.body.length > 0, name + " renders both halves");
+  }
+});
+
+test("cch-w40-bl: a non-422 failure and an unseen 422 slug fall through to friendly(), not to a URL lecture", () => {
+  const f = hooks.siteUrlFailureCopy;
+  for (const [status, data] of [[500, {}], [0, null], [409, { error: "not_live" }],
+                                [422, { error: "some_unseen_slug" }]]) {
+    const c = f(status, data);
+    assert.equal(c.title, "Couldn't wire revalidation", status + " uses the generic title");
+    assert.equal(typeof c.body, "string", status + " renders a body");
+    assert.equal(/look like a URL/.test(c.title + " " + c.body), false,
+      status + " must not blame the URL for a refusal that never mentioned it");
+  }
+});
 
 // cch-w37-s1 — THE SERVER'S EXACT PER-FIELD ERROR STOPS LOSING TO A GENERIC.
 //

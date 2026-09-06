@@ -1232,14 +1232,6 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "to details or a fence admission — then this becomes reader-owed."
     },
     %{
-      code: "invalid_url",
-      site: "router.ex POST /v1/barkparks/:id/site-url (instance_deprovisioning? guard family)",
-      reason:
-        "Console-reachable: the site-url form submits a URL the server judges " <>
-          "malformed; the form caller's fallback renders. Flip: a wave rules a " <>
-          "what-a-valid-url-is sentence owed."
-    },
-    %{
       code: "no_archives",
       site: "router.ex resurrect (POST /v1/resurrect)",
       reason:
@@ -1355,13 +1347,6 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
         "Guard-shielded: the console submits steps from its own onboarding model; " <>
           "an unknown step is a raw-request or drift state. Flip: step names " <>
           "drift between client and server."
-    },
-    %{
-      code: "url_required",
-      site: "router.ex POST /v1/barkparks/:id/site-url",
-      reason:
-        "Guard-shielded: the site-url form requires input before submit; an empty " <>
-          "URL is a raw-request state. Flip: the form guard is removed."
     },
     %{
       code: "vercel_error",

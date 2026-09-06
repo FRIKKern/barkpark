@@ -9715,6 +9715,63 @@
     return friendly(data, "Something went wrong — please try again.");
   }
 
+  // cch-w40-bl: THE SITE-URL 422 STOPS BLAMING INPUT THAT WAS CORRECT.
+  //
+  // `newSubmitSiteUrl` answered EVERY 422 from POST /v1/barkparks/:id/site-url
+  // with "That doesn't look like a URL" / "Enter your site's full https://
+  // address." The route emits THREE distinct 422 shapes, and only ONE of them
+  // is about the URL the operator typed:
+  //   422 url_required  (router.ex:3776) — the request carried no url at all.
+  //   422 invalid_url   (router.ex:3810) — not an http(s) origin. THE ONE slug
+  //        the shipped sentence was ever true for.
+  //   422 invalid {details} (router.ex:3838-3842) — the CHANGESET arm, whose own
+  //        comment reads verbatim: "The wire succeeded but the audit insert did
+  //        not — audit/3 refuses to report an unrecorded success. The
+  //        instance-side wiring is idempotent (a re-POST converges), so the
+  //        honest move is a 422 the operator can simply retry."
+  //        The site URL IS wired and the webhook IS live. Telling that operator
+  //        to re-type their URL states the wrong cause AND prescribes the wrong
+  //        remedy. Idempotency is the ONLY reason "retry" is honest here — it is
+  //        offered on this slug and on NEITHER of the input slugs, where retrying
+  //        the same bytes converges on the same refusal.
+  //   Any other status / unseen slug — friendly(), same fall-through as
+  //   attachDomainFailureCopy (the pattern this mirrors, extracted by #11899).
+  //
+  // `invalid` is a shared slug elsewhere in the API, but on THIS route it has
+  // exactly one emitter: the changeset arm above. Peers: attachDomainFailureCopy,
+  // siteCreateFailureCopy, siteDeleteFailureCopy — same *FailureCopy + hook shape.
+  function siteUrlFailureCopy(status, data) {
+    data = data || {};
+    var code = data.error;
+    if (code && typeof code === "object") code = code.code;
+
+    if (status === 422) {
+      if (code === "url_required") {
+        return {
+          title: "Enter your site URL",
+          body: "The request didn't carry a URL. Enter your site's full https:// address."
+        };
+      }
+      if (code === "invalid_url") {
+        return {
+          title: "That doesn't look like a URL",
+          body: "Enter your site's full https:// address."
+        };
+      }
+      if (code === "invalid") {
+        // The wire SUCCEEDED. Do not send this operator back to the input.
+        return {
+          title: "Revalidation is wired — we couldn't record it",
+          body: "Your site URL is fine and the webhook is live. We couldn't write the audit entry, so we can't confirm it. Wiring again is safe — press Wire revalidation to retry."
+        };
+      }
+    }
+    return {
+      title: "Couldn't wire revalidation",
+      body: friendly(data, "Please try again.")
+    };
+  }
+
   function attachDomain(bp) {
     var value = (($("#domain-input") || {}).value || "").trim();
     var errEl = $("#domain-error");
@@ -23740,10 +23797,10 @@
       btn.disabled = false; btn.textContent = "Wire revalidation";
       if (r.ok) {
         toast({ kind: "success", title: "Revalidation wired", body: "Content changes will now refresh your live site." });
-      } else if (r.status === 422) {
-        toast({ kind: "error", title: "That doesn't look like a URL", body: "Enter your site's full https:// address." });
       } else {
-        toast({ kind: "error", title: "Couldn't wire revalidation", body: friendly(r.data, "Please try again.") });
+        // One funnel, per-slug: an audit-insert 422 no longer reads as bad input.
+        var copy = siteUrlFailureCopy(r.status, r.data);
+        toast({ kind: "error", title: copy.title, body: copy.body });
       }
     });
   }
@@ -27672,6 +27729,10 @@
       // 422 ternary answered every slug "Only <name>.barkpark.cloud …", discarding
       // the domain_not_pointed remedy the plane measured. Pinned per-slug below.
       attachDomainFailureCopy: attachDomainFailureCopy,
+      // cch-w40-bl: the site-url wire's failure copy, pure now — the inline 422
+      // arm told an operator whose URL was CORRECT (audit insert failed, wire
+      // succeeded) to re-type it. Pinned per-slug below.
+      siteUrlFailureCopy: siteUrlFailureCopy,
       // cch-w46-s2: the decommission post-click arm had ZERO hook reach, so its
       // unconditional "Try again" into a permanent 403 could not be seen from the
       // harness at all. The terminality predicate is pure; runDecommission is the
