@@ -92,7 +92,13 @@ defmodule Barkpark.Tasks.QueueReadySetIdentityTest do
     mid_b = mk!("rsi-mid-b-#{u}", scope, %{"priority" => 1}, at: 300)
 
     # axis 2 — a dependency that IS satisfied (a same-scope `done` task).
-    done_dep = mk!("rsi-done-dep-#{u}", scope, %{"lifecycle_status" => "done"}, at: 50)
+    done_dep =
+      mk!(
+        "rsi-done-dep-#{u}",
+        scope,
+        %{"close_reason" => "fixture: closed through the verb", "lifecycle_status" => "done"},
+        at: 50
+      )
 
     deps_ok =
       mk!(
@@ -122,7 +128,14 @@ defmodule Barkpark.Tasks.QueueReadySetIdentityTest do
       )
 
     # axis 1 — the blocks-edge gate, in both directions.
-    done_target = mk!("rsi-edge-done-target-#{u}", scope, %{"lifecycle_status" => "done"}, at: 60)
+    done_target =
+      mk!(
+        "rsi-edge-done-target-#{u}",
+        scope,
+        %{"close_reason" => "fixture: closed through the verb", "lifecycle_status" => "done"},
+        at: 60
+      )
+
     open_target = mk!("rsi-edge-open-target-#{u}", scope, %{"priority" => 1}, at: 800)
 
     edge_ok = mk!("rsi-edge-ok-#{u}", scope, %{"priority" => 1}, at: 500)

@@ -945,7 +945,7 @@ defmodule BarkparkWeb.MutateControllerTest do
 
     # ── The exemption's price, measured rather than asserted away ───────────
 
-    test "RESIDUAL HARM: one forged FRESH create unblocks a dependent in Tasks.Queue.ready",
+    test "CLOSED: a forged FRESH create no longer unblocks a dependent in Tasks.Queue.ready",
          %{conn: conn} do
       {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
       scope = [workspace_id: ws.id, project_id: project.id, dataset: "test"]
@@ -960,23 +960,36 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert "drafts.cchw2-ac7-control" in before_ids
       refute "drafts.cchw2-ac7-dependent" in before_ids
 
-      # A dangling dependency fails CLOSED, and `Queue.ready` satisfies a
-      # dependency on exactly one signal: a same-scope task with
-      # lifecycle_status == "done". Forging that row is a plain `create`, which
-      # this slice deliberately leaves exempt — so the dependent flips to ready
-      # with zero attribution anywhere in the ledger.
+      # THE FORGERY STILL LANDS — `create` on a fresh id stays exempt, and that
+      # exemption is structural: a birth has no prior revision to assert
+      # against. Nothing on the write path changed.
       assert mutate(conn, [
                %{"create" => task_doc("cchw2-ac7-dep", %{"lifecycle_status" => "done"})}
              ]).status == 200
 
       after_ids = ready_doc_ids(scope)
-      assert "drafts.cchw2-ac7-control" in after_ids
-      assert "drafts.cchw2-ac7-dependent" in after_ids
 
-      # NO COMPENSATING CONTROL SHIPS IN THIS SLICE. Closing this needs an
-      # attribution requirement on task BIRTHS, which is a different fence
-      # (`create` has no prior revision to assert against). Recorded here so the
-      # exemption stays visible instead of reading as "handled".
+      # THE CONTROL STILL APPEARS, so a `ready` query that silently returned []
+      # cannot make the refutation below pass vacuously. This assertion is what
+      # separates "the fix works" from "the query broke".
+      assert "drafts.cchw2-ac7-control" in after_ids
+
+      # AND THE DEPENDENT DOES NOT. cch-w3-task-birth-attribution closed this on
+      # the READ side: a done row satisfies a dependent only if it ALSO carries
+      # close provenance (claim.closed_by, claim.closed_at, or a non-empty
+      # close_reason). The forged row carries none of them, so it no longer
+      # manufactures a completion.
+      #
+      # This assertion was `assert ... in after_ids` until the fix — the test
+      # existed to MEASURE the exemption's price rather than assert it away, and
+      # it fails against the pre-fix tree in exactly that direction.
+      refute "drafts.cchw2-ac7-dependent" in after_ids
+
+      # THE HONEST PATH IS UNAFFECTED: closing that blocker through
+      # `Barkpark.Tasks.close/3` writes all three provenance fields, and the
+      # dependent becomes ready — pinned in
+      # test/barkpark/tasks/dependency_satisfaction_test.exs rather than here,
+      # because this file is about the mutate door.
     end
 
     # ── The sanctioned path is never collateral damage ──────────────────────
