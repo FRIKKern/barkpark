@@ -13,7 +13,12 @@ defmodule Barkpark.Auth.LoginTicketSweeperTest do
   These tests pin three things:
 
     * WHAT AN UN-SWEPT ROW HOLDS — measured, not argued. This is the criterion
-      the row exists to settle, and it is deliberately first.
+      the row exists to settle, and it is deliberately first. The SPENT arm of
+      that measurement was INVERTED by task-62e7b342b85e88fe: the consume now
+      deletes the row it wins, so the 201 #16543 recorded from a spent row is
+      now a 401 with nothing to present. The EXPIRED-BUT-UNUSED arm still reads
+      201 — it has no consume to hook, and its residue is an accepted decision
+      recorded in `Barkpark.Auth.LoginTicketSweeper`'s moduledoc.
     * the sweep is BOUNDED per statement (`sweep_login_tickets_batch/1`), so a
       cold first pass over a never-swept table is not one giant transaction;
     * it is SCHEDULED — the crontab entry exists and names this worker. An
@@ -69,10 +74,34 @@ defmodule Barkpark.Auth.LoginTicketSweeperTest do
     back_date!(raw, seconds_ago)
   end
 
-  # A ticket minted and consumed — `used_at` stamped, row retained.
-  defp spent! do
+  # A ticket minted and consumed. Since task-62e7b342b85e88fe the winning
+  # consume DELETES the row, so this leaves NOTHING behind — that is the point.
+  defp consumed! do
     {:ok, raw} = Auth.mint_login_ticket(@bearer)
     {:ok, @bearer} = Auth.consume_login_ticket(raw)
+    raw
+  end
+
+  # A row in the shape the PRE-#16555 consume left behind: `used_at` stamped,
+  # row retained, bearer still bound. Written directly because no code path
+  # produces this shape any more — but rows like it exist in every database
+  # deployed before the consume started deleting, and the sweeper's
+  # `used_at IS NOT NULL` arm exists for exactly them. Using `consumed!/0` here
+  # would make every sweeper assertion below vacuous (nothing left to sweep).
+  defp legacy_spent!(seconds_ago \\ 0) do
+    raw = "bplt_legacy_" <> Ecto.UUID.generate()
+    at = DateTime.add(DateTime.utc_now(), -seconds_ago, :second)
+
+    {:ok, _} =
+      %LoginTicket{}
+      |> LoginTicket.changeset(%{
+        ticket_hash: Auth.hash_ticket(raw),
+        api_token: @bearer,
+        expires_at: at,
+        used_at: at
+      })
+      |> Repo.insert()
+
     raw
   end
 
@@ -90,18 +119,53 @@ defmodule Barkpark.Auth.LoginTicketSweeperTest do
   # ── C0: the retention question, settled by running it ───────────────────
 
   describe "the retention question — what an un-swept row actually holds" do
-    test "a SPENT row's api_token still authenticates, and it is a decrypt-on-load",
+    test "a CONSUMED ticket leaves NO row and NO recoverable bearer — 401, not 201",
          %{conn: conn} do
-      raw = spent!()
+      # THE INVERSE OF #16543's MEASUREMENT, on the same route with the same
+      # controls (task-62e7b342b85e88fe). #16543 recorded that a spent row's
+      # `api_token` came back decrypted from a plain load and minted a fresh
+      # ticket (201). The consume now DELETES the row, so the same probe must
+      # find nothing and the route must answer 401.
+      raw = consumed!()
+
+      # Whatever a reader CAN recover for this ticket is what gets presented.
+      # After the change that is nothing, so the ticket string itself is the
+      # most an attacker holds; before it, this was the live bearer.
       r = row(raw)
+      recovered = r && r.api_token
+      probed = probe(conn, recovered || raw)
 
-      # The row survives the consume — "spent" means stamped, not deleted.
-      assert r != nil
-      assert r.used_at != nil
+      # NEGATIVE CONTROL — the route really does enforce auth, so a 401 below
+      # cannot be "this route rejects everything for an unrelated reason"...
+      garbage = probe(conn, "not-a-real-token-zzzzzz")
+      none = post(conn, "/v1/auth/login-tickets")
+      assert garbage.status == 401
+      assert none.status == 401
 
-      # DECRYPT-ON-LOAD, confirmed rather than assumed: the bytes at rest are
-      # ciphertext, and a plain Ecto load through the schema hands back the
-      # plaintext bearer. So the consume path is not the only reader.
+      # ...and POSITIVE CONTROL — the same bearer value, known-good, same
+      # route, same shape of request — so a 401 below cannot be "the route is
+      # down" or "my request was malformed".
+      control = probe(conn, @bearer)
+      assert control.status == 201
+
+      # No arm was rate-limited: a 429 read as an auth failure would invert
+      # this conclusion.
+      for c <- [probed, garbage, none, control], do: refute(c.status == 429)
+
+      # THE FINDING, inverted. Reverting the consume to a `used_at` stamp reds
+      # HERE, printing the bearer it recovered and the 201 that bearer bought.
+      assert recovered == nil,
+             "a consumed ticket still yields a bearer from login_tickets: #{inspect(recovered)} — presenting it to POST /v1/auth/login-tickets returned #{probed.status} (201 means it minted a fresh handoff ticket)"
+
+      assert probed.status == 401,
+             "expected 401 for whatever remains of a consumed ticket, got #{probed.status}"
+
+      # ...and nothing at all survives the consume — not the row, not the
+      # ciphertext under it. (Asserted AFTER the finding above so a regression
+      # reds on the message that names the bearer and the status, not on a
+      # bare struct dump.)
+      assert row(raw) == nil
+
       ciphertext =
         from(t in "login_tickets",
           where: t.ticket_hash == ^Auth.hash_ticket(raw),
@@ -109,35 +173,7 @@ defmodule Barkpark.Auth.LoginTicketSweeperTest do
         )
         |> Repo.one()
 
-      assert is_binary(ciphertext)
-      refute ciphertext == @bearer
-      refute String.contains?(ciphertext, @bearer)
-      assert r.api_token == @bearer
-
-      # Present the recovered bearer to a route that REQUIRES a token.
-      recovered = probe(conn, r.api_token)
-
-      # NEGATIVE CONTROL — the route really does enforce auth, so a success
-      # above cannot be "this route is public".
-      garbage = probe(conn, "not-a-real-token-zzzzzz")
-      none = post(conn, "/v1/auth/login-tickets")
-      assert garbage.status == 401
-      assert none.status == 401
-
-      # POSITIVE CONTROL — the same bearer value, known-good, same route, same
-      # shape of request. Without it, "it does not authenticate" and "my
-      # request was malformed" would be the same observation.
-      control = probe(conn, @bearer)
-      assert control.status == 201
-
-      # No arm was rate-limited: a 429 read as an auth failure would invert
-      # this conclusion.
-      for c <- [recovered, garbage, none, control], do: refute(c.status == 429)
-
-      # THE FINDING. The bearer recovered from a spent row does not merely
-      # authenticate — it mints a fresh login-handoff ticket. `sweep_login_tickets/0`'s
-      # docstring used to say a dead row "carries no live secret"; it does.
-      assert recovered.status == 201
+      assert ciphertext == nil
     end
 
     test "an EXPIRED-BUT-UNUSED row's api_token still authenticates too", %{conn: conn} do
@@ -162,9 +198,25 @@ defmodule Barkpark.Auth.LoginTicketSweeperTest do
       assert recovered.status == 201
     end
 
-    test "consuming a ticket does not revoke the bound token — which is why the row matters" do
-      raw = spent!()
-      assert {:ok, _} = Auth.verify_token(row(raw).api_token)
+    test "consuming does not revoke the bound token — which is why the row must not survive it" do
+      # The reason the retention question had teeth: the consume cannot revoke
+      # the bound token (it is the operator's real long-lived api_token). So
+      # the ONLY lever is not to keep it — which the consume now pulls.
+      raw = consumed!()
+      assert {:ok, _} = Auth.verify_token(@bearer)
+      assert row(raw) == nil
+    end
+
+    test "a row spent by the PRE-#16555 stamping consume is still swept, and is unconsumable" do
+      # The backstop arm: rows in deployed databases that the old consume
+      # stamped instead of deleting. They still hold the bearer, so the sweeper
+      # must still take them — and the consume must still refuse them.
+      raw = legacy_spent!()
+      assert row(raw).api_token == @bearer
+      assert Auth.consume_login_ticket(raw) == {:error, :invalid}
+
+      assert %{deleted: 1} = LoginTicketSweeper.sweep()
+      refute present?(raw)
     end
   end
 
@@ -210,8 +262,8 @@ defmodule Barkpark.Auth.LoginTicketSweeperTest do
   # ── the worker ──────────────────────────────────────────────────────────
 
   describe "LoginTicketSweeper.sweep/1 — the worker" do
-    test "a tick removes spent and expired-unused rows and keeps the live one" do
-      spent = spent!()
+    test "a tick removes legacy-spent and expired-unused rows and keeps the live one" do
+      spent = legacy_spent!()
       expired = expired_unused!(300)
       live = live!()
 
@@ -238,7 +290,7 @@ defmodule Barkpark.Auth.LoginTicketSweeperTest do
     end
 
     test "perform/1 drives the same sweep" do
-      spent = spent!()
+      spent = legacy_spent!()
       assert {:ok, %{deleted: 1}} = LoginTicketSweeper.perform(%Oban.Job{args: %{}})
       refute present?(spent)
     end
@@ -272,6 +324,6 @@ defmodule Barkpark.Auth.LoginTicketSweeperTest do
     # The cadence is the retention floor here (60s TTL, no grace window), so an
     # hourly slot would not be an equivalent wire. Pin per-minute.
     assert elem(entry, 0) == "* * * * *",
-           "expected a per-minute schedule: with a 60s TTL and no grace window the cadence IS the retention floor"
+           "expected a per-minute schedule: with a 60s TTL and no grace window the cadence IS the retention floor for the EXPIRED-BUT-UNUSED arm (the spent arm is held by the consume's delete, task-62e7b342b85e88fe)"
   end
 end

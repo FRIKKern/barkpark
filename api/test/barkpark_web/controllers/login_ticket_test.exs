@@ -8,6 +8,9 @@ defmodule BarkparkWeb.LoginTicketTest do
     * consume sets `session["api_token"]` to the RAW bound token + redirects
     * the minted session actually passes the LiveAuth `:admin` mount
     * single-use RACE: N concurrent consumes → EXACTLY ONE wins (no double-spend)
+    * the WINNING consume DELETES the row, so the bound bearer stops being
+      recoverable from `login_tickets` at the consume — not at the next
+      sweeper tick (task-62e7b342b85e88fe; #16543 measured the old window)
     * expiry is enforced
     * unknown / used / expired all return the SAME failure — no oracle
     * hardening headers on the one-time-link response (no-store, no-referrer)
@@ -148,6 +151,29 @@ defmodule BarkparkWeb.LoginTicketTest do
       assert length(winners) == 1
       assert length(losers) == 24
       assert [{:ok, @admin_token}] = winners
+
+      # NO LOSER EVER SEES THE BEARER. The consume deletes the row it wins, so
+      # the CAS is now "the row is gone" rather than "used_at is set" — this
+      # pins that the stronger claim still holds under the same race, and that
+      # a loser's result carries no trace of the token (not in an :ok tuple,
+      # not in an error payload).
+      refute Enum.any?(losers, fn r -> inspect(r) =~ @admin_token end)
+
+      # ...and the row itself is gone the moment the race resolves.
+      refute ticket_row(ticket)
+    end
+
+    test "the winning consume DELETES the row — no bearer left to recover" do
+      # The durable half of the retention question (task-62e7b342b85e88fe).
+      # #16543 proved a SPENT row's `api_token` decrypted on a plain load and
+      # minted a fresh ticket; there is no spent row to load any more.
+      {:ok, ticket} = Auth.mint_login_ticket(@admin_token)
+      assert ticket_row(ticket)
+
+      assert {:ok, @admin_token} = Auth.consume_login_ticket(ticket)
+
+      refute ticket_row(ticket)
+      assert Auth.consume_login_ticket(ticket) == {:error, :invalid}
     end
 
     test "expiry is enforced at the atomic claim" do
@@ -156,9 +182,16 @@ defmodule BarkparkWeb.LoginTicketTest do
       assert {:error, :invalid} = Auth.consume_login_ticket(ticket)
     end
 
-    test "sweep prunes spent and expired rows, keeps live ones" do
-      {:ok, spent} = Auth.mint_login_ticket(@admin_token)
-      {:ok, _} = Auth.consume_login_ticket(spent)
+    test "sweep prunes expired rows (and legacy spent ones), keeps live ones" do
+      # A consumed ticket no longer reaches the sweep at all — the consume
+      # deleted it (task-62e7b342b85e88fe). The sweep's remaining work is the
+      # EXPIRED-BUT-UNUSED arm, plus rows stamped by the pre-#16555 consume,
+      # which exist in already-deployed databases. Both are exercised here.
+      {:ok, consumed} = Auth.mint_login_ticket(@admin_token)
+      {:ok, _} = Auth.consume_login_ticket(consumed)
+      refute ticket_row(consumed)
+
+      legacy_spent = legacy_spent_row!()
 
       {:ok, expired} = Auth.mint_login_ticket(@admin_token)
       expire_ticket(expired)
@@ -169,10 +202,29 @@ defmodule BarkparkWeb.LoginTicketTest do
 
       # Row-precise assertions (count-only would be vacuous under any
       # pre-existing rows): both dead rows gone, the live one kept.
-      refute ticket_row(spent)
+      refute ticket_row(legacy_spent)
       refute ticket_row(expired)
       assert ticket_row(live)
     end
+  end
+
+  # A row in the shape the PRE-#16555 stamping consume left behind. No code
+  # path produces it any more, so it is written directly.
+  defp legacy_spent_row! do
+    raw = "bplt_legacy_" <> Ecto.UUID.generate()
+    at = DateTime.utc_now() |> DateTime.add(-120) |> DateTime.truncate(:microsecond)
+
+    {:ok, _} =
+      %LoginTicket{}
+      |> LoginTicket.changeset(%{
+        ticket_hash: Auth.hash_ticket(raw),
+        api_token: @admin_token,
+        expires_at: at,
+        used_at: at
+      })
+      |> Repo.insert()
+
+    raw
   end
 
   defp ticket_row(raw_ticket) do

@@ -19,30 +19,63 @@ defmodule Barkpark.Auth.LoginTicketSweeper do
   as a `Barkpark.EncryptedBinary` (Cloak AES-GCM) field, so `consume_login_ticket/1`
   can drop the raw token into the browser session.
 
-  Consuming the ticket stamps `used_at`. It does NOT delete the row and it does
-  NOT revoke the bound token — it cannot, because the bound token is the
-  operator's real long-lived api_token, which is the whole point of the
-  handoff. So every un-swept row is a retained re-entry credential.
+  Consuming the ticket does NOT revoke the bound token — it cannot, because the
+  bound token is the operator's real long-lived api_token, which is the whole
+  point of the handoff. So every retained row is a retained re-entry credential.
 
   `Barkpark.Auth.LoginTicketSweeperTest` measures this rather than arguing it:
-  a plain Ecto load of a SPENT row and of an EXPIRED-BUT-UNUSED row returns the
-  bearer in plaintext (the bytes at rest are ciphertext — also asserted), and
-  presenting it to `POST /v1/auth/login-tickets` returns **201** where a
-  garbage bearer and no bearer both return 401. The recovered bearer does not
-  merely authenticate; it mints a fresh handoff ticket.
+  a plain Ecto load of an EXPIRED-BUT-UNUSED row returns the bearer in
+  plaintext (the bytes at rest are ciphertext — also asserted), and presenting
+  it to `POST /v1/auth/login-tickets` returns **201** where a garbage bearer
+  and no bearer both return 401. The recovered bearer does not merely
+  authenticate; it mints a fresh handoff ticket.
+
+  ## THIS WORKER IS NOT THE RETENTION BOUNDARY FOR SPENT ROWS
+
+  It was, for one release, and that was the wrong place for it
+  (task-62e7b342b85e88fe, the durable half of task-e4d5cc40193a3ef5 / #16543).
+  `Auth.consume_login_ticket/1` now DELETES the row it wins instead of stamping
+  `used_at` on it, so a successful consume leaves nothing behind and the
+  retention window for a CONSUMED ticket is **zero**, not one tick. Nothing
+  about this worker's cadence bounds that any more, and no future change to the
+  cadence may be reasoned about as if it did.
+
+  What still reaches the `used_at IS NOT NULL` half of the predicate is exactly
+  two things: rows stamped by the pre-#16555 consume, which exist in any
+  already-deployed database until this worker takes them, and any future
+  regression that reintroduces a stamping consume. Both are backstops, not the
+  design.
+
+  ## The accepted residue: EXPIRED-BUT-UNUSED
+
+  A ticket that is minted and then never consumed has NO consume event to hook,
+  so nothing but a sweep can remove it. That arm is this worker's, and its
+  window is a DECISION, recorded here rather than left to fall out of the
+  cadence:
+
+  > **ACCEPTED RESIDUE — up to ~120 seconds.** A minted-and-abandoned login
+  > ticket's bearer stays recoverable from `login_tickets` for at most its 60s
+  > TTL plus one tick of this per-minute worker (60s) = **~2 minutes**. It is
+  > accepted because the row is only reachable by an actor who already holds
+  > database or backup access, the bearer it holds is the operator's own token
+  > (which that actor could reach by other means at that access level), and the
+  > alternative — a delete-on-expiry trigger or a sub-minute cadence — buys a
+  > sub-two-minute improvement against that same actor. Shortening the tick,
+  > not lengthening it, is the direction any revision may take.
 
   ## Why every minute
 
   The TTL is **60 seconds**, and unlike `Barkpark.PreviewToken.Sweeper` there
-  is no grace window at all: a row is eligible the moment it is spent, or 60s
-  after it is minted if it never was. Nothing downstream of the sweep sets a
-  floor — so THE CADENCE IS THE RETENTION FLOOR, one for one.
+  is no grace window at all: an unconsumed row is eligible 60s after it is
+  minted. Nothing downstream of the sweep sets a floor — so THE CADENCE IS THE
+  RETENTION FLOOR FOR THE EXPIRED-BUT-UNUSED ARM, one for one. (For the spent
+  arm it is not: see above — the consume deletes.)
 
   That is the whole argument, and it is why this worker does not copy its
   siblings' hourly slot. Hourly would leave a live re-entry credential readable
   for up to ~1h past a documented 60-second life — the cadence would be 60x the
   TTL it is supposed to enforce. Per-minute takes the worst case to ~2 minutes
-  (one TTL plus one tick of lateness), which is the property that matters. The
+  (one TTL plus one tick of lateness), which is the accepted residue above. The
   other per-minute slots (webhook/audit/playground/task-TTL) are the ones where
   lateness IS the cost; this one belongs with them, not with the housekeeping
   GCs at `:17` and `:43`.
