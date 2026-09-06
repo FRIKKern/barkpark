@@ -153,7 +153,7 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
   end
 
   # ── task-6716af864218081b — the flat `/media` read block: the `scope "/media"`
-  # that pipes through `[:api, :strict_bearer_media_read]` in BarkparkWeb.Router
+  # that pipes through `[:api, :api_strict_bearer]` in BarkparkWeb.Router
 
   describe "flat /media — a decayed bearer must be refused, not tenant-swapped" do
     test "GET /media", %{raw_dead: raw_dead, default_file: default_file} do
@@ -245,7 +245,7 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
   end
 
   # ── task-79e10984bbb23734 — the flat `/v1/media` block: the `scope "/v1/media"`
-  # that pipes through `[:api, :strict_bearer_media_read]` in BarkparkWeb.Router
+  # that pipes through `[:api, :api_strict_bearer]` in BarkparkWeb.Router
 
   describe "flat /v1/media — a decayed bearer must be refused on all ten routes" do
     test "the nine GETs", %{raw_dead: raw_dead, default_file: default_file} do

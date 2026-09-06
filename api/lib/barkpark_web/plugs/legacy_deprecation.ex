@@ -18,8 +18,8 @@ defmodule BarkparkWeb.Plugs.LegacyDeprecation do
   removed and NOT clamped this shift: `deploy.sh`, the docker-compose
   healthcheck and `cloud/support.go` probe `/api/schemas` as a liveness path, so
   a strict clamp on the shared pipeline would change what a stale-keyed prober
-  sees on a liveness endpoint (blast radius also noted at the
-  `:strict_bearer_media_read` pipeline in `router.ex`). Anyone widening
+  sees on a liveness endpoint (blast radius also noted above the `/media`
+  scope in `router.ex`, which rides `:api_strict_bearer`). Anyone widening
   `strict_on_presented` onto this route owns that blast radius.
   """
   import Plug.Conn
