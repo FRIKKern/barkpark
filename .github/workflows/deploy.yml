@@ -309,8 +309,15 @@ jobs:
         run: |
           install -m 600 /dev/null /tmp/deploy_key
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
-          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
-          SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
+          # ServerAliveInterval=30 x ServerAliveCountMax=90 = a 45-MINUTE tolerance for a
+          # silent remote, comfortably over the longest on-box lock wait (30 min, deploy/
+          # instance-deploy.sh and cp-deploy.sh; the site engines wait 20). Without the pair
+          # the runner's NAT dropped an ssh session that sat idle behind the deploy lock
+          # after ~5 min: ssh exited 255 and the run was recorded as a FAILED production
+          # deploy for queueing (10 of the last 14 failed main runs, 2026-09-05..06).
+          # scripts/deploy-concurrency-check.sh reds if any SSH=/SCP= here loses the pair.
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
+          SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
           $SCP deploy/cp-deploy.sh bp-provisioner "root@${CP_HOST}:/tmp/"
           $SSH "root@${CP_HOST}" 'bash /tmp/cp-deploy.sh /tmp/bp-provisioner'
       - name: Smoke test
@@ -467,7 +474,7 @@ jobs:
         run: |
           install -m 600 /dev/null /tmp/deploy_key
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
-          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ConnectTimeout=20"
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
           sha=""
           if out="$($SSH "root@${GUERRILLA_HOST}" 'cat /opt/barkpark/.instance-deploy-last')"; then
             sha="$(printf '%s' "$out" | tr -d '[:space:]')"
@@ -490,8 +497,8 @@ jobs:
         run: |
           install -m 600 /dev/null /tmp/deploy_key
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
-          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
-          SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
+          SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
           $SCP deploy/instance-deploy.sh "root@${GUERRILLA_HOST}:/tmp/"
           # The remote env assignment is quoted on the REMOTE side too, so a
           # malformed secret can only ever land in the script's validated variable
@@ -650,7 +657,7 @@ jobs:
         run: |
           install -m 600 /dev/null /tmp/deploy_key
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
-          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ConnectTimeout=20"
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
           sha=""
           serving_since=""
           # Both fields come out KEYED, never as bare positional lines: `cat`
@@ -1309,7 +1316,7 @@ jobs:
 
           install -m 600 /dev/null /tmp/deploy_key
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
-          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ConnectTimeout=20"
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
 
           # The POST is issued FROM the control plane, over the SSH this workflow
           # already holds, so the bearer never leaves the box and no new GitHub
