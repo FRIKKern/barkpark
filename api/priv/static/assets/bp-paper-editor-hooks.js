@@ -31,7 +31,7 @@
     "paper-edit-block",
   ]);
   const PAPER_POSITIONAL_COLLECTION_PARAM =
-    /^(note|tab|param|ref|bar|toc|criterion)-(?:count|action|\d+-)/;
+    /^(note|tab|param|ref|bar|toc|criterion|gauge)-(?:count|action|\d+-)/;
   const PAPER_TRANSIENT_SAVE_STATUSES = new Set([
     "", "Auto-saved", "✓ Auto-saved", "Saving…",
     "Unsaved changes — fix invalid fields.",
@@ -45,7 +45,7 @@
   // Restore the operated row only after acknowledgement, without stealing focus
   // from a user who has moved elsewhere while the request was in flight.
   function bpPaperCollectionFocus(form, submitter) {
-    const match = /^(note|tab|param|ref|bar|toc|criterion)-action$/.exec(submitter?.name || "");
+    const match = /^(note|tab|param|ref|bar|toc|criterion|gauge)-action$/.exec(submitter?.name || "");
     if (!match || document.activeElement !== submitter) return () => {};
     const prefix = match[1];
     const count = Number(form.elements.namedItem(`${prefix}-count`)?.value);
@@ -270,7 +270,7 @@
     const signature = controls.map((control) =>
       `${control.tagName}:${control.type}:${control.name}`).join("\n");
     const counts = controls.filter((control) =>
-      /^(note|tab|param|ref|bar|toc|criterion)-count$/.test(control.name));
+      /^(note|tab|param|ref|bar|toc|criterion|gauge)-count$/.test(control.name));
     const blockId = controls.find((control) => control.name === "block_id")?.value ?? null;
     return {
       form,
@@ -304,7 +304,7 @@
     const signature = controls.map((control) =>
       `${control.tagName}:${control.type}:${control.name}`).join("\n");
     const counts = controls.filter((control) =>
-      /^(note|tab|param|ref|bar|toc|criterion)-count$/.test(control.name));
+      /^(note|tab|param|ref|bar|toc|criterion|gauge)-count$/.test(control.name));
     const countValues = counts.map((control) => [control.name, control.value]);
     if (snapshot.blockId !== blockId || snapshot.signature !== signature ||
         JSON.stringify(snapshot.countValues) !== JSON.stringify(countValues) ||

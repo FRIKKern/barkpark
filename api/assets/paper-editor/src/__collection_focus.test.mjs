@@ -6,18 +6,27 @@ import { JSDOM } from "jsdom";
 const source = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8");
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
-async function scenario({ action = "up:1", saved = true, moveFocus = false, prefix = "tab" }) {
+async function scenario({
+  action = "up:1",
+  saved = true,
+  moveFocus = false,
+  prefix = "tab",
+  hookName = "BarkparkPaperEditToggle",
+}) {
   const dom = new JSDOM(`<main data-paper-doc-key="production:paper:focus" data-paper-rev="1">
     <button id="toggle" data-editing="true">View</button>
-    <form id="tabs" phx-submit="paper-edit-block">
-      <input type="hidden" name="block_id" value="tabs">
-      <input type="hidden" name="tab-count" value="2">
-      <input name="tab-0-label" value="First">
-      <button type="submit" name="tab-action" value="remove:0">Remove first</button>
-      <input name="tab-1-label" value="Second">
-      <button id="submitter" type="submit" name="tab-action" value="${action}">Act</button>
-      <button type="submit" name="tab-action" value="add">Add</button>
-    </form><button id="elsewhere">Another control</button>
+    <div id="paper-editor">
+      <form id="tabs" phx-submit="paper-edit-block">
+        <input type="hidden" name="block_id" value="tabs">
+        <input type="hidden" name="tab-count" value="2">
+        <input name="tab-0-label" value="First">
+        <button type="submit" name="tab-action" value="remove:0">Remove first</button>
+        <input name="tab-1-label" value="Second">
+        <button id="submitter" type="submit" name="tab-action" value="${action}">Act</button>
+        <button type="submit" name="tab-action" value="add">Add</button>
+      </form>
+    </div>
+    <button id="elsewhere">Another control</button>
   </main>`, { url: "http://localhost/" });
   const { window } = dom;
   for (const control of window.document.querySelectorAll("[name]")) {
@@ -30,8 +39,10 @@ async function scenario({ action = "up:1", saved = true, moveFocus = false, pref
   let send;
   let resolve;
   const hook = {
-    ...window.BarkparkPaperEditorHooks.BarkparkPaperEditToggle,
-    el: window.document.getElementById("toggle"),
+    ...window.BarkparkPaperEditorHooks[hookName],
+    el: window.document.getElementById(
+      hookName === "BarkparkPaperSortable" ? "paper-editor" : "toggle",
+    ),
     pushEvent: (event, payload) => {
       send = { event, payload };
       return new Promise(done => { resolve = done; });
@@ -87,9 +98,12 @@ await scenario({ action: "add" });
 await scenario({ action: "remove:1" });
 await scenario({ saved: false });
 await scenario({ moveFocus: true });
-for (const prefix of ["toc", "criterion"]) {
+for (const prefix of ["toc", "criterion", "gauge"]) {
   await scenario({ prefix });
   await scenario({ prefix, action: "add" });
   await scenario({ prefix, action: "remove:1" });
 }
+await scenario({ prefix: "gauge", hookName: "BarkparkPaperSortable" });
+await scenario({ prefix: "gauge", saved: false });
+await scenario({ prefix: "gauge", moveFocus: true });
 console.log("PASS collection focus: reorder, add, remove, failure, and no focus stealing");
