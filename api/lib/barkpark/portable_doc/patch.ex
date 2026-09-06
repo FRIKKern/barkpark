@@ -24,7 +24,8 @@ defmodule Barkpark.PortableDoc.Patch do
   (with `"blocks"` retained as a compatibility alias); each `steps` row uses
   the same visible-body aliases. A `figure` has exactly one canonical child
   block under its singular map-valued `"child"` key; its other keys are not
-  treated as child collections.
+  treated as child collections. A `columns` block stores `"columns"` as a list
+  of column block-lists; scalar rows and scalar elements are retained opaquely.
 
   ## The six ops
 
@@ -43,8 +44,9 @@ defmodule Barkpark.PortableDoc.Patch do
   `replace-block`, and `remove-block` recurse into `section` and `expandable`
   children, each visible `steps` row body, and each plain `tabs` row's canonical
   `blocks` list, plus a `figure`'s canonical child and that child's visible
-  descendants, at any depth. `patch-block` and a map-valued `replace-block`
-  may target the figure child. `append-block` is top-level only.
+  descendants, and map children within each valid `columns` list, at any depth.
+  `patch-block` and a map-valued `replace-block` may target the figure child.
+  `append-block` is top-level only.
 
   `move-block` is **top-level only** (the paper editor reorders the top-level
   block list; nested-within-section reorder is not in scope). It is a pure
@@ -453,6 +455,12 @@ defmodule Barkpark.PortableDoc.Patch do
         %{"type" => "expandable"} ->
           authored_alias_ids(block)
 
+        %{"type" => "columns", "columns" => columns} when is_list(columns) ->
+          Enum.flat_map(columns, fn
+            children when is_list(children) -> authored_ids(children)
+            _opaque -> []
+          end)
+
         %{"type" => "figure", "child" => child} when is_map(child) ->
           authored_block_ids(child)
 
@@ -522,7 +530,7 @@ defmodule Barkpark.PortableDoc.Patch do
   # replace protection.
   defp locked_at_id?(blocks, id) do
     Enum.any?(blocks, fn block ->
-      (block_id(block) == id and Map.get(block, "locked") == true) or
+      (block_id(block) == id and block_locked?(block)) or
         Enum.any?(visible_child_lists(block), &locked_at_id?(&1, id))
     end)
   end
@@ -616,6 +624,12 @@ defmodule Barkpark.PortableDoc.Patch do
           {next_rows, flag} -> {Map.put(block, "tabs", next_rows), flag}
         end
 
+      {:columns, columns} ->
+        case transform_columns(columns, id, fun, []) do
+          {nil, _flag} -> {nil, false}
+          {next_columns, flag} -> {Map.put(block, "columns", next_columns), flag}
+        end
+
       {:figure, child} ->
         case transform_with_flag([child], id, fun) do
           {nil, _flag} ->
@@ -670,6 +684,21 @@ defmodule Barkpark.PortableDoc.Patch do
   defp transform_tabs_rows([row | rest], id, fun, acc),
     do: transform_tabs_rows(rest, id, fun, [row | acc])
 
+  defp transform_columns([], _id, _fun, _acc), do: {nil, false}
+
+  defp transform_columns([children | rest], id, fun, acc) when is_list(children) do
+    case transform_with_flag(children, id, fun) do
+      {nil, _flag} ->
+        transform_columns(rest, id, fun, [children | acc])
+
+      {next_children, flag} ->
+        {Enum.reverse([next_children | acc]) ++ rest, flag}
+    end
+  end
+
+  defp transform_columns([opaque | rest], id, fun, acc),
+    do: transform_columns(rest, id, fun, [opaque | acc])
+
   defp visible_child_lists(block) do
     case visible_child_container(block) do
       {:blocks, _key, children} ->
@@ -692,6 +721,9 @@ defmodule Barkpark.PortableDoc.Patch do
           %{"blocks" => children} when is_list(children) -> [children]
           _row -> []
         end)
+
+      {:columns, columns} ->
+        Enum.filter(columns, &is_list/1)
 
       {:figure, child} ->
         [[child]]
@@ -717,6 +749,10 @@ defmodule Barkpark.PortableDoc.Patch do
 
   defp visible_child_container(%{"type" => "tabs", "tabs" => rows}) when is_list(rows),
     do: {:tabs, rows}
+
+  defp visible_child_container(%{"type" => "columns", "columns" => columns})
+       when is_list(columns),
+       do: {:columns, columns}
 
   defp visible_child_container(%{"type" => "figure", "child" => child}) when is_map(child),
     do: {:figure, child}
@@ -754,6 +790,9 @@ defmodule Barkpark.PortableDoc.Patch do
 
   defp block_id(block) when is_map(block), do: Map.get(block, "id")
   defp block_id(_block), do: nil
+
+  defp block_locked?(block) when is_map(block), do: Map.get(block, "locked") == true
+  defp block_locked?(_block), do: false
 
   # Minimal per-type coercion for field-* LEAF blocks (P2.1). Only the
   # `"value"` key is touched, and only for field-boolean (string "true"/"false"

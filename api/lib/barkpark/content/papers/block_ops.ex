@@ -2471,6 +2471,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end)
   end
 
+  defp paper_child_lists(%{"type" => "columns", "columns" => columns})
+       when is_list(columns),
+       do: Enum.filter(columns, &is_list/1)
+
   defp paper_child_lists(%{"type" => "figure", "child" => child}) when is_map(child),
     do: [[child]]
 
@@ -2501,19 +2505,22 @@ defmodule Barkpark.Content.Papers.BlockOps do
     * NESTED — recursion covers `"blocks"` lists, expandable `"children"`, each
       steps row's reader-visible body, and each plain-tabs row's canonical
       `"blocks"`, plus the singular map-valued `"child"` of a `figure` and its
-      visible descendants. Steps and tabs rows gain stable row ids; hidden /
-      opaque aliases remain untouched. A figure with a missing, nil, scalar, or
-      array child is opaque, as are any figure `"children"` / `"blocks"`
-      compatibility keys. Composite / arrayOf inline children under `"items"` /
-      `"content"` are NOT recursed. Child prefixes use the parent's (or row's)
-      ensured id, keeping minted ids deterministic.
+      visible descendants, and map children inside each list row of an exact
+      `columns.columns` list. Steps and tabs rows gain stable row ids; columns
+      do not gain synthetic row identities. Scalar column rows/elements and
+      hidden / opaque aliases remain untouched. A figure with a missing, nil,
+      scalar, or array child is opaque, as are any figure or columns
+      `"children"` / `"blocks"` compatibility keys. Composite / arrayOf inline
+      children under `"items"` / `"content"` are NOT recursed. Child prefixes
+      use the parent's (or row/column index's) ensured id, keeping minted ids
+      deterministic.
 
   Collision-safe across the authored tree. Before minting, every present
-  non-blank block, steps-row, tabs-row, and canonical figure-child id is
-  reserved globally, including ids in hidden steps `children` / `blocks`
-  aliases. Only reader-visible paths are projected, but a minted positional id
-  can never collide with authored identity elsewhere in the document. If taken,
-  a deterministic suffix
+  non-blank block, steps-row, tabs-row, canonical figure-child, and valid column
+  descendant id is reserved globally, including ids in hidden steps `children`
+  / `blocks` aliases. Only reader-visible paths are projected, but a minted
+  positional id can never collide with authored identity elsewhere in the
+  document. If taken, a deterministic suffix
   (`-<k>`, k incrementing from 1) is appended until free.
 
   Idempotent: re-running over an already-id-bearing list is a no-op (a present
@@ -2535,11 +2542,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   @doc """
-  Project stable ids only when every authored block, steps-row, tabs-row, and
-  canonical figure-child identity is unambiguous across the full visible tree.
-  Hidden steps body aliases participate in the duplicate fence even though only
-  the reader-visible alias is projected; malformed and compatibility-only
-  figure child aliases remain opaque.
+  Project stable ids only when every authored block, steps-row, tabs-row,
+  canonical figure-child, and valid column-descendant identity is unambiguous
+  across the full visible tree. Hidden steps body aliases participate in the
+  duplicate fence even though only the reader-visible alias is projected;
+  malformed and compatibility-only figure/columns aliases remain opaque.
   """
   @spec project_block_ids_safely(list()) ::
           {:ok, list()} | {:error, {:duplicate_id, String.t()}}
@@ -2587,6 +2594,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
         %{"type" => "expandable"} ->
           ensure_visible_body_ids(block, id, taken)
+
+        %{"type" => "columns", "columns" => columns} when is_list(columns) ->
+          {columns, taken} = ensure_column_ids(columns, id, taken)
+          {Map.put(block, "columns", columns), taken}
+
+        %{"type" => "columns"} ->
+          {block, taken}
 
         %{"type" => "figure", "child" => child} when is_map(child) ->
           {child, taken} = ensure_block_id(child, id <> "-child", 0, taken)
@@ -2656,6 +2670,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end)
   end
 
+  defp ensure_column_ids(columns, prefix, taken) do
+    columns
+    |> Enum.with_index()
+    |> Enum.map_reduce(taken, fn
+      {children, index}, taken when is_list(children) ->
+        ensure_block_ids(children, prefix <> "-column-" <> Integer.to_string(index), taken)
+
+      {opaque, _index}, taken ->
+        {opaque, taken}
+    end)
+  end
+
   defp ensure_visible_body_ids(container, prefix, taken) do
     case visible_body_key(container) do
       nil ->
@@ -2684,6 +2710,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
         %{"type" => "expandable"} ->
           authored_body_alias_ids(block)
+
+        %{"type" => "columns", "columns" => columns} when is_list(columns) ->
+          Enum.flat_map(columns, fn
+            children when is_list(children) -> authored_tree_ids(children)
+            _opaque -> []
+          end)
+
+        %{"type" => "columns"} ->
+          []
 
         %{"type" => "figure", "child" => child} when is_map(child) ->
           authored_block_tree_ids(child)
