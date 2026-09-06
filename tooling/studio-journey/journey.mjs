@@ -248,6 +248,7 @@ function parseArgs(argv) {
     out: null,
     keep: false,
     dataset: process.env.JOURNEY_DATASET || DATASET,
+    legs: process.env.JOURNEY_LEGS || "abc",
     help: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -265,10 +266,19 @@ function parseArgs(argv) {
       case "--out": opts.out = value(); break;
       case "--keep": opts.keep = true; break;
       case "--dataset": opts.dataset = value(); break;
+      case "--legs": opts.legs = value(); break;
       case "--help":
       case "-h": opts.help = true; break;
       default: throw new Error(`unknown flag ${a}`);
     }
+  }
+  // --legs is how a run reaches LEG C WITHOUT LEG A. LEG A creates a real
+  // document; on a host other people are using, "just run the whole thing" is
+  // not free, and the desk-row census needs none of it. An unknown letter is a
+  // GUARD, never a silently narrower run.
+  opts.legs = String(opts.legs).toLowerCase().replace(/[\s,]/g, "");
+  if (!/^[abc]+$/.test(opts.legs) || new Set(opts.legs).size !== opts.legs.length) {
+    throw new Error(`--legs wants some subset of "abc", each letter at most once (got "${opts.legs}")`);
   }
   if (opts.selfTestSite && !["good", "rot"].includes(opts.selfTestSite)) {
     throw new Error(`--self-test-site must be good or rot (got ${opts.selfTestSite})`);
@@ -294,6 +304,13 @@ const USAGE = `journey — browser proof that a person can ADD A THING in the St
   --keep              do NOT delete the document LEG A created (default: it
                       self-cleans, so a re-run never litters the dataset)
   --dataset <ds>      dataset to drive (default ${DATASET})
+  --legs <abc>        run only these legs (default abc). \`--legs c\` is the
+                      desk-row census ALONE: it never creates a document, so it
+                      is the mode for a shared/production host. When a runs, it
+                      establishes the session; when it does not, a minimal AUTH
+                      beat mints the same ticket and asserts the same admin
+                      discriminator first — a census of an anonymous desk is not
+                      a census of the desk.
 
   exit 0 clean · 1 a LEG A product failure · 2 environment/usage guard
 `;
@@ -1550,6 +1567,40 @@ function inventoryVerdict(rec) {
   return { status: FAIL, detail: `${rec.tag} matches .pane-item but is neither <a> nor <button> — it is not in the tab order, which is exactly what "the buttons look inert" felt like.` };
 }
 
+/** The session, WITHOUT LEG A. Same ticket mint, same desk navigation, same
+ *  5xx guard and the same admin discriminator LEG A's AUTH beat asserts — and
+ *  nothing else, so `--legs c` creates no document. It is a full gating beat
+ *  on purpose: a census recorded against a login wall or an anonymous desk
+ *  would call every row dead for a reason that is not about the rows. */
+async function authOnly(page, ctx, ledger, run) {
+  const ticket = await mintTicket(ctx);
+  await page.goto(`${ctx.base}/login/ticket/${encodeURIComponent(ticket)}`);
+  await page.goto(ctx.base + DESK_PATH);
+  const docStatus = page.lastDocument?.status ?? null;
+  if (docStatus != null && docStatus >= 500) {
+    guard(
+      `the host served HTTP ${docStatus} for ${DESK_PATH} (${page.lastDocument.url}). ` +
+        `That is the deployment failing, not the Studio failing — no product claim can be made from it. Re-run.`,
+    );
+  }
+  const landed = await poll(async () => {
+    const n = await page.count(".pane-item, [phx-click='shares-open'], form[action*='login']");
+    return n > 0 ? n : null;
+  }, SETTLE_CAP, "desk or login painted");
+  const shares = await page.count("[phx-click='shares-open']");
+  const authUrl = await page.url();
+  run.auth_probe = { url: authUrl, http_status: docStatus, leg_a_skipped: true };
+  const checks = [
+    check("the desk painted something", landed.value ? PASS : FAIL,
+      landed.value ? `${landed.value} anchor node(s) in ${ms(landed.waited)}` : `nothing in ${ms(landed.waited)} at ${authUrl}`),
+    check("identity discriminator [phx-click=shares-open] == 1 (admin)", shares === 1 ? PASS : FAIL,
+      shares === 1
+        ? "the shares_admin?-gated bar button is present — this session is the admin one"
+        : `count=${shares} — 0 means the session degraded to anonymous. NOT a product defect.`),
+  ];
+  ledger.add("AUTH", rollup(checks), String(authUrl).replace(ctx.base, ""), checks);
+}
+
 async function legC(page, ctx, ledger, run) {
   const t0 = Date.now();
   const deadline = t0 + LEG_C_BUDGET;
@@ -2232,7 +2283,7 @@ function startFixture() {
 // ─────────────────────────────────────────────────────────────────────────────
 const MARK = { [PASS]: "✓", [FAIL]: "✗", [PENDING]: "·" };
 
-function report(ledger, { base, mode, wall, pre, post }) {
+function report(ledger, { base, mode, wall, pre, post, legs = "abc" }) {
   const lines = [`\n   ${mode}  ${base}`, `   served ${pre.commit} → ${post.commit}${pre.commit === post.commit ? "" : "  ** MOVED **"}\n`];
   for (const beat of ledger.beats) {
     const tag = beat.gating ? "" : "  (report-only)";
@@ -2242,7 +2293,11 @@ function report(ledger, { base, mode, wall, pre, post }) {
     }
   }
   const g = ledger.gatingBeats;
-  lines.push(`\n   LEG A ${g.filter((b) => b.status === PASS).length}/${g.length} beats PASS · ${(wall / 1000).toFixed(1)}s wall`);
+  // NAME WHAT WAS TALLIED. With `--legs c` the gating beats are AUTH alone, and
+  // printing them under "LEG A" would report a census run as a create-journey
+  // run — the exact species of lie this harness exists to stop.
+  const gatedLabel = String(legs).includes("a") ? "LEG A" : `legs=${legs} gating`;
+  lines.push(`\n   ${gatedLabel} ${g.filter((b) => b.status === PASS).length}/${g.length} beats PASS · ${(wall / 1000).toFixed(1)}s wall`);
   return lines.join("\n") + "\n";
 }
 
@@ -2328,14 +2383,17 @@ async function journeyOne(cdp, ctx, opts) {
   };
   const pre = await servedCommit(ctx);
   const t0 = Date.now();
+  const legs = new Set(String(opts?.legs ?? "abc"));
+  run.legs = [...legs].join("");
   try {
-    await legA(page, ctx, ledger, run);
-    await legB(page, ctx, ledger, run);
+    if (legs.has("a")) await legA(page, ctx, ledger, run);
+    else await authOnly(page, ctx, ledger, run);
+    if (legs.has("b")) await legB(page, ctx, ledger, run);
     // LAST, and report-only: it presses every desk row, so it must not be able
     // to disturb the document LEG A typed into before PERSIST/RELOAD have read
     // it back. It presses nothing that creates a document, so the litter sweep
     // below still holds after it.
-    await legC(page, ctx, ledger, run);
+    if (legs.has("c")) await legC(page, ctx, ledger, run);
   } catch (err) {
     if (err instanceof Guard) throw err;
     // A harness-side throw must still produce a ledger: the beats that already
@@ -2575,7 +2633,7 @@ async function main() {
     const srv = readServer();
     const ctx = { ...srv, dataset: opts.dataset };
     const { ledger, run, wall, pre, post } = await withChrome((cdp) => journeyOne(cdp, ctx, opts));
-    process.stdout.write(report(ledger, { base: ctx.base, mode: opts.report ? "REPORT" : "STRICT", wall, pre, post }));
+    process.stdout.write(report(ledger, { base: ctx.base, mode: opts.report ? "REPORT" : "STRICT", wall, pre, post, legs: opts.legs }));
     if (run.cleanup) {
       const c = run.cleanup;
       process.stdout.write(
@@ -2602,10 +2660,14 @@ async function main() {
     }
 
     if (ledger.clean) {
-      process.stdout.write(`\nJOURNEY PASS — a person can create a document, type a heading and a paragraph, and it persists.\n`);
+      process.stdout.write(
+        opts.legs.includes("a")
+          ? `\nJOURNEY PASS — a person can create a document, type a heading and a paragraph, and it persists.\n`
+          : `\nLEGS ${opts.legs.toUpperCase()} PASS — every gating beat that RAN is green. LEG A did not run, so nothing here claims a person can create a document.\n`,
+      );
       process.exit(0);
     }
-    const summary = `\nJOURNEY ${ledger.failed.length ? "FAIL" : "UNPROVEN"} — ${ledger.failed.length} LEG A beats failed, ${ledger.pending.length} unproven.\n`;
+    const summary = `\nJOURNEY ${ledger.failed.length ? "FAIL" : "UNPROVEN"} — ${ledger.failed.length} gating beats failed, ${ledger.pending.length} unproven.\n`;
     if (opts.report) {
       process.stdout.write(
         summary + `Report mode: exiting 0 on purpose — this run TELLS you what is broken, it does not gate on it.\n` +

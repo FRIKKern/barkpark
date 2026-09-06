@@ -239,6 +239,37 @@ jobs:
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/failure-copy-scrub-order-check.sh
 
+      # ── the DNS step VOCABULARY pin (dr-w22-bl-internal-cli-…-gates) ──────
+      # Same job, and for the same three reasons the scrub-order tripwire above
+      # gives — `path-escape` is in `cloud-gate`'s `needs:` so a red here reds
+      # the REQUIRED `Cloud gate`; it is DELIBERATELY UNFILTERED so the pin
+      # cannot go dark on the PR that breaks it; and a wired parent `--selftest`
+      # is what keeps this script out of shell-harnesses.yml's census by that
+      # census's own doctrine.
+      #
+      # WHAT IT BUYS THAT NOTHING ELSE DID. `FailureCopy.@dns_step` classifies a
+      # DNS failure by VERB, and every verb in it is a transcription of a Go
+      # `fmt.Errorf` prefix emitted by internal/cli/cloud/dns.go,
+      # internal/cli/cloud/dns_cloud.go and internal/hetzner/dns.go. Before this
+      # step, NO assertion anywhere read those Go bytes: `failure_copy_test.exs`
+      # pins a HAND-TRANSCRIBED corpus, so it proves the clause matches its own
+      # fixtures and nothing about what the readers emit — and that test's own
+      # comment records the same defect one iteration back, three pinned strings
+      # "no producer anywhere emits". Rename a verb on the Go side today and the
+      # console silently starts calling a DOMAIN failure a SERVER-CAPACITY one,
+      # with every gate green. This is the derivation that can lose.
+      #
+      # Harness FIRST, subject second — the house selftest-first idiom.
+      - name: Harness (the DNS vocabulary pin must be able to fail)
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/cli-dns-step-vocabulary-check.sh --selftest
+
+      - name: Every DNS step verb the Go readers emit is classified
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/cli-dns-step-vocabulary-check.sh
+
   compile:
     name: Cloud control-plane (compile + format)
     needs: changes

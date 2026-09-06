@@ -387,6 +387,21 @@ config :barkpark, Oban,
        # by construction (`Idempotency.sweep_batch/1`), so a cold first pass
        # over a long-unswept table cannot become one giant transaction.
        {"17 * * * *", Barkpark.Idempotency.Sweeper},
+       # clk-bl-idempotency-preview-token-sweeps-have-no-caller, PreviewToken
+       # half — GC for the `preview_token_jti` replay-protection table.
+       # `PreviewToken.sweep/1` has existed since the table was created and,
+       # until this entry, was called by NOTHING outside its own test: one row
+       # per preview request, retained forever, on a table `record_jti/1`
+       # writes and `revoked?/1` reads on every preview request. Hourly (not
+       # per-minute) because the retention FLOOR is the 1h `@grace_seconds`
+       # window, not the cadence — sweeping more often cannot evict a row any
+       # sooner, so hourly bounds the table at ~2h of preview traffic for 1/60
+       # the statements. Offset from :17 so the two hourly GCs never open their
+       # range deletes in the same tick. The predicate is served by the
+       # `expires_at` index created with the table — no migration. Runs on the
+       # static `default` queue; the worker bounds one tick by construction
+       # (`PreviewToken.sweep_batch/1`).
+       {"43 * * * *", Barkpark.PreviewToken.Sweeper},
        # perfect-plan-build W2c (D28) — two-stage TTL reaper for ephemeral
        # playground workspaces: Stage 1 suspends at `expires_at`, Stage 2
        # swept-deletes at `expires_at + 24h` grace. Tenancy is core (not a

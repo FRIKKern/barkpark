@@ -43,13 +43,15 @@ defmodule BarkparkWeb.InteractionReceiptTest do
   `:require_admin`; `:api` authenticates through `Plugs.OptionalToken`, so an
   ANONYMOUS caller reaches both arms.
 
-  `:2190` and `:2416` carry the SAME controller actions but live inside
+  The SAME controller actions are mounted again inside
   `scope "/w/:workspace_slug/p/:project_slug"` on `pipe_through(:scoped_api)` —
   the workspace-scoped mirror. Their full paths are prefixed with the two
   slugs, so nothing in this file dispatches to them and their pipeline is NOT
-  the one these cases prove anything about. That mirror is unpinned here and
-  deliberately so; naming it as though it were the flat route would be a
-  reachability claim that does not descend from the request the test issues.
+  the one these cases prove anything about; naming it as though it were the
+  flat route would be a reachability claim that does not descend from the
+  request the test issues. `scoped_search_intel_receipt_test.exs` pins that
+  mirror separately, and its contract differs: `:scoped_api` refuses an
+  anonymous caller 403.
 
   Every case below posts WITHOUT an authorization header, and the first two
   tests prove that anonymity is real rather than assumed — a run, not a read.
@@ -114,7 +116,8 @@ defmodule BarkparkWeb.InteractionReceiptTest do
 
       refute resp.status in [401, 403, 404],
              "POST /v1/data/search/#{@dataset}/interaction must be reachable anonymously " <>
-               "(router.ex:1655 in scope \"/v1/data\", pipe_through [:api, :api_grant_read] — " <>
+               "(the `:search_interaction` mount in scope \"/v1/data\", pipe_through " <>
+               "[:api, :api_grant_read] — " <>
                "no :require_token/:require_admin), got #{resp.status}"
 
       assert resp.status == 200
@@ -129,7 +132,8 @@ defmodule BarkparkWeb.InteractionReceiptTest do
 
       refute resp.status in [401, 403, 404],
              "POST /v1/media/#{@dataset}/search/interaction must be reachable anonymously " <>
-               "(router.ex:2111 in scope \"/v1/media\", pipe_through :api — " <>
+               "(the V1.MediaController `:search_interaction` mount in scope \"/v1/media\", " <>
+               "pipe_through :api — " <>
                "no :require_token/:require_admin), got #{resp.status}"
 
       assert resp.status == 200

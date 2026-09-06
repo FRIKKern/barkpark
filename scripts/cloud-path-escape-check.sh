@@ -249,6 +249,33 @@ set -euo pipefail
 #       match. Before this line a deploy.yml-only PR dispatched NOTHING in this
 #       set: the recorder could land, or vanish, with no code gate at all.
 #
+# internal/cli/cloud/dns.go, internal/cli/cloud/dns_cloud.go —
+# dr-w22-bl-internal-cli-trips-zero-required-gates. These two CLI-side DNS
+# readers EMIT the step errors that `FailureCopy.@dns_step` classifies, and
+# `scripts/cli-dns-step-vocabulary-check.sh` (wired into cloud.yml's UNFILTERED
+# `path-escape` job, already in `Cloud gate`'s `needs:`) derives the verb
+# vocabulary from their `fmt.Errorf` bytes and asserts it equals the classifier's
+# alternation, both directions. That makes them INPUTS to a Cloud-gate
+# assertion: rename a verb there and the console starts calling a DOMAIN failure
+# a SERVER-CAPACITY one.
+#
+# THEY ARE REDUNDANT UNDER `internal/**` ABOVE, AND DECLARED ANYWAY, for the
+# same reason the four exact `internal/…` entries below are kept: the dispatch
+# claim and the ruling that earns it live together, and a set that stops
+# explaining itself is one deletion from a hole. THE COST IS ZERO, MEASURED, not
+# asserted: `internal/**` (dr-w26-s4) already matches every path under
+# internal/, so these two lines newly dispatch NOTHING. Over the last 60 days 3
+# commits touched these two files, and all 3 already dispatched `cloud=true`
+# through `internal/**`. If `internal/**` is ever narrowed, these lines are what
+# keeps the vocabulary pin's own inputs dispatched — which is the case they are
+# really written for.
+#
+# EXACT FILES, never `internal/cli/cloud/**` (D270). The guard reads the two
+# files that emit a `hetzner dns …` / `hcloud zone rrset …` prefix and nothing
+# else in that package; the directory glob would bill the CLI epic for edits the
+# vocabulary pin cannot see, and the guard's own `--list` prints the census that
+# says which files those are.
+#
 # cloud/priv/audit-actions.json — cch-w69-s1. The audit verb table, REDUNDANT
 # under `cloud/**` and declared anyway, by name, because it used to live at
 # design/audit-actions.json as a declared cross-tree read: audit_event.ex
@@ -277,6 +304,8 @@ deploy/site-deploy.sh
 deploy/site-deploy-node.sh
 internal/**
 internal/caddyfile/caddyfile.go
+internal/cli/cloud/dns.go
+internal/cli/cloud/dns_cloud.go
 internal/cli/cloud/providers_capabilities.json
 internal/cloudclient/**
 internal/provisioner/**

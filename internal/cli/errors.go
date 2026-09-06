@@ -42,6 +42,16 @@ type apiError struct {
 	// the first thing lost. Raw bytes survive every shape and re-serialize
 	// byte-identically into the -o json / -o yaml envelope.
 	details json.RawMessage
+	// credentialSent records whether the request that earned this refusal
+	// actually carried a credential (an Authorization header). It exists for
+	// ONE decision: a 401 must never tell a caller to obtain a credential they
+	// already sent. `bp auth me` with a saved instance token was answered
+	// "authentication required — set BARKPARK_API_TOKEN or run: bp setup …",
+	// which named a remedy the caller had already applied — the real gate is a
+	// login SESSION, which the server said in its own message and the CLI threw
+	// away. Set from the dispatched request's headers (run.go), so it is a fact
+	// about what was sent, not a guess from config.
+	credentialSent bool
 }
 
 // codeExit is the SINGLE canonical error.code -> exit mapping (contract spine
@@ -1070,6 +1080,16 @@ func (e apiError) hint() string {
 	case "rate_limited":
 		return "retry with backoff"
 	case "unauthorized":
+		// Telling someone to go get a token is only useful when they did not
+		// send one. When they DID, minting another changes nothing: the
+		// credential reached the server and the server refused it, so the cause
+		// is elsewhere — a route gated on a login session rather than a bearer
+		// (`bp auth me`), a token minted for a different server, or an expired
+		// one. Naming the remedy they already applied is what made the original
+		// refusal unactionable.
+		if e.credentialSent {
+			return "the request DID carry a credential and the server still refused it, so minting another will not help — this refusal's own message names the gate; check `bp whoami` for the identity this token actually has, and note that some routes require an interactive login session rather than an API token"
+		}
 		return "set BARKPARK_API_TOKEN or run `bp setup --target connect`"
 	case "forbidden", "cors_forbidden", "csrf_required":
 		return "token needs write/admin — check `bp whoami`"
@@ -1173,6 +1193,19 @@ func (e apiError) errorMessage() string {
 		}
 		return "not found"
 	case "unauthorized":
+		// The SERVER's message outranks the local constant, exactly as it does
+		// for not_found and forbidden two cases over. The constant used to win
+		// unconditionally, so a 401 whose body said "a valid login session is
+		// required" (GET /v1/auth/me sits behind require_user, not behind the
+		// bearer) rendered as "set BARKPARK_API_TOKEN" — the ONE fact that
+		// explains the refusal, dropped, and replaced by advice that cannot fix
+		// it. The generic line survives only where the server said nothing.
+		if e.message != "" {
+			return "unauthorized: " + e.message
+		}
+		if e.credentialSent {
+			return "unauthorized: the credential sent with this request was rejected"
+		}
 		return "authentication required — set BARKPARK_API_TOKEN or run: bp setup --target connect --server <url> --token <token>"
 	case "forbidden", "cors_forbidden", "csrf_required":
 		if e.message != "" {

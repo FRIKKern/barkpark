@@ -111,6 +111,7 @@ on:
     paths:
       - "scripts/crown-reconcile.sh"
       - "scripts/crown-reconcile.test.sh"
+      - "scripts/crown-waiver.test.sh"
       - ".github/workflows/crown-reconcile.yml"
       # An INPUT to the harness. crown-reconcile.test.sh reads this file and
       # fails if `crown-reconcile` ever appears in it — so an edit to the
@@ -153,6 +154,15 @@ jobs:
       # the verdict below is decoration — and this run says so first.
       - name: Prove the verdict can lose (crown-reconcile.test.sh)
         run: bash scripts/crown-reconcile.test.sh
+
+      # The DATED WAIVER's own two-direction proof: before its expiry the one
+      # named sha is not a red and says so out loud; after it, the accusation
+      # returns with no code change; and a second unrecorded sha is never
+      # covered. It also runs the whole thing under a GNU-shaped and a
+      # BSD-shaped date(1), because a time-gated waiver parsed without a shape
+      # check is inert on one platform and live on the other.
+      - name: Prove the dated waiver expires (crown-waiver.test.sh)
+        run: bash scripts/crown-waiver.test.sh
 
       # ── THE RE-ASK LIST HAS TO OUTLIVE THIS VM ────────────────────────────
       #
