@@ -1508,11 +1508,13 @@ defmodule BarkparkCloud.Notifications do
   BEFORE it touches the changeset — the `Registry.connect_provider/3` pattern.
   Passing `creds: nil` keeps any previously-sealed credentials (a pure toggle).
 
-  THE SSRF BOUNDARY IS HERE, at SAVE time: a `webhook` channel whose URL resolves
-  to a private / loopback / link-local / cloud-metadata address is REJECTED before
-  it is ever stored (`SafeUrl.check/1`), not merely at send time. `Channels.Webhook`
-  re-checks at send for DNS-rebind defense in depth, but a save-time reject means a
-  poisoned URL never persists in the first place.
+  THE SSRF BOUNDARY IS HERE, at SAVE time, for EVERY url-bearing channel — not the
+  literal `webhook` alone. `discord`, `slack` and `webhook` all carry the same
+  `%{"url" => …}` credential and all three are URL-controlled by the operator, so
+  the guard keys on that shape: a URL resolving to a private / loopback /
+  link-local / cloud-metadata address is REJECTED before it is ever stored
+  (`SafeUrl.check/1`). Send time re-checks the same shape for DNS-rebind defense in
+  depth, but a save-time reject means a poisoned URL never persists at all.
   """
   @spec put_channel(Team.t() | binary(), String.t(), boolean(), map() | nil) ::
           {:ok, EmailSettings.t()} | {:error, Ecto.Changeset.t()}
@@ -1529,23 +1531,28 @@ defmodule BarkparkCloud.Notifications do
     end
   end
 
-  # Save-time SSRF guard for the generic webhook channel. The first-party channels
-  # post to known provider domains and are not user-URL-controlled, so they skip.
-  defp validate_channel_url("webhook", %{"url" => url}) when is_binary(url) do
+  # Save-time SSRF guard, keyed on the CREDENTIAL SHAPE rather than the type name.
+  # `discord`, `slack` and `webhook` all carry the same `%{"url" => …}` plaintext
+  # credential (see `ChannelConfig`'s moduledoc) and all three are user-URL-
+  # controlled — a Slack/Discord incoming webhook IS a URL the operator pastes.
+  # Matching on the literal "webhook" fenced one of the three; matching on the
+  # `"url"` key fences every url-bearing type, including one added later.
+  defp validate_channel_url(type, %{"url" => url}) when is_binary(url) do
     case SafeUrl.check(url) do
       :ok -> :ok
-      {:error, reason} -> {:error, channel_url_error(reason)}
+      {:error, reason} -> {:error, channel_url_error(type, reason)}
     end
   end
 
   defp validate_channel_url(_type, _creds), do: :ok
 
   # An invalid changeset the router renders as 422 — a save-time SSRF/URL reject
-  # never persists a poisoned webhook channel.
-  defp channel_url_error(reason) do
+  # never persists a poisoned channel. The message names the type the operator
+  # typed, so a refused `slack` save does not read as a complaint about a webhook.
+  defp channel_url_error(type, reason) do
     %EmailSettings{}
     |> Ecto.Changeset.change()
-    |> Ecto.Changeset.add_error(:channels, "include an unsafe webhook url", reason: reason)
+    |> Ecto.Changeset.add_error(:channels, "include an unsafe #{type} url", reason: reason)
   end
 
   @doc """
@@ -1694,6 +1701,7 @@ defmodule BarkparkCloud.Notifications do
 
   defp do_deliver_chat(team_id, %ChannelConfig{type: type} = cfg, event, payload) do
     with {:ok, creds} <- reveal_credentials(cfg),
+         :ok <- check_credential_url(creds),
          {:ok, url, body, headers} <- shape(type, creds, event, payload, team_id: team_id) do
       post_chat(team_id, type, event, url, body, headers)
     else
@@ -1703,9 +1711,17 @@ defmodule BarkparkCloud.Notifications do
     end
   end
 
-  # PURE envelope builder — dispatch on channel `type` to the right shaper. The
-  # generic `webhook` type is the only one routed through `SafeUrl` (send-time
-  # DNS-rebind defense, inside `Channels.Webhook`).
+  # Send-time SSRF re-check for EVERY url-bearing credential — the DNS-rebind
+  # defense. Keyed on the credential shape, not on the type name, so discord,
+  # slack and webhook are all covered here (and so is a url-bearing type added
+  # later); a credential with no `"url"` — telegram, pushover — passes through.
+  # `Channels.Webhook` keeps its own check as defense in depth.
+  defp check_credential_url(%{"url" => url}) when is_binary(url), do: SafeUrl.check(url)
+  defp check_credential_url(_creds), do: :ok
+
+  # PURE envelope builder — dispatch on channel `type` to the right shaper. Every
+  # url-bearing credential has already passed `check_credential_url/1` in
+  # `do_deliver_chat/4` before a shaper runs.
   defp shape(type, creds, event, payload, opts) do
     case type do
       "discord" -> Channels.Discord.shape(creds, event, payload)

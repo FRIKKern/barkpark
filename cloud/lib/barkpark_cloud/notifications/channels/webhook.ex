@@ -4,11 +4,14 @@ defmodule BarkparkCloud.Notifications.Channels.Webhook do
   notification. POSTs a flat JSON envelope (`event`, `team_id`, `payload`,
   `timestamp`) to an OPERATOR-SUPPLIED URL (`creds["url"]`).
 
-  Because the URL is arbitrary, this is the ONE channel gated by
+  Because the URL is arbitrary, it is gated by
   `BarkparkCloud.Notifications.SafeUrl` — re-checked HERE at send time (not just at
   `put_channel` validation), the defense-in-depth Coolify applies in
   `SendWebhookJob`. A URL that passed validation but now resolves to a private
-  address (DNS rebinding) is blocked at the last moment.
+  address (DNS rebinding) is blocked at the last moment. This is no longer the ONE
+  gated channel: `Notifications.do_deliver_chat/4` runs the same check on every
+  credential carrying a `"url"`, so Slack and Discord are covered too. The check
+  here is kept as belt-and-braces for this shaper's own contract.
   """
   alias BarkparkCloud.Notifications.{Render, SafeUrl}
 
