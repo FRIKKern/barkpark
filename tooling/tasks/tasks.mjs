@@ -137,6 +137,18 @@ async function fetchTasks() {
   if (!r.ok) { e(`[tasks] task query failed ${r.status} — is Barkpark up at ${HOST}?`); process.exit(2); }
   const j = JSON.parse(r.body);
   const arr = j.result?.documents || j.documents || (Array.isArray(j.result) ? j.result : Array.isArray(j) ? j : []);
+  // TRUNCATION IS NOT ABSENCE. LIMIT defaults to 200 while the ledger holds
+  // thousands of task rows, so a run that reports no cycle has usually not
+  // looked at the corpus at all. Measured 2026-09-06 against guerrilla:
+  // limit=1000 answers 500 server-side, so the cap cannot simply be raised —
+  // the run has to SAY how much of the corpus it read. If the endpoint hands
+  // back a total (or has_more), quote it; otherwise say the cap was hit.
+  const total = j.total ?? j.result?.total ?? j.count ?? j.meta?.total ?? null;
+  const hasMore = j.has_more ?? j.result?.has_more ?? (j.next_cursor || j.result?.next_cursor ? true : null);
+  if (arr.length >= LIMIT || hasMore === true) {
+    if (total != null) e(`  ⚠ showing ${arr.length} of ${total} — an absent cycle warning is not proof (${HOST} dataset=${SRC_DATASET}).`);
+    else e(`  ⚠ LIMIT=${LIMIT} reached; the corpus may be larger — an absent cycle warning is not proof (${HOST} dataset=${SRC_DATASET}).`);
+  }
   // real tasks only: kind:task / kind:phase / kind:epic — skip events and anything draft-shaped.
   return arr.filter((t) => t && t._id && (t.kind === "task" || (t.labels || []).some((l) => /^kind:(task|phase|epic|goal)$/.test(l)) || t.kind === undefined && t.title));
 }
@@ -242,7 +254,12 @@ function build(tasks) {
   }
   // tasks with real file evidence first, then by impact
   out.sort((a, b) => (b.actualFiles.length - a.actualFiles.length) || (b.impact - a.impact) || a.id.localeCompare(b.id));
-  if (cyclic.size) process.stderr.write(`  ⚠ parent_id CYCLE in task data through: ${[...cyclic].join(", ")} — rollups near the cycle are partial; fix the ledger\n`);
+  // NAME THE LEDGER. This script's baked default host is localhost:4000
+  // (barkpark-env.mjs DEFAULT_HOST), so a cycle seen here is a LOCAL-dev cycle
+  // unless the host below says otherwise. A 2026-07 filing reported "gate-e is
+  // its own ancestor" as a prod defect; guerrilla held no such node in any of
+  // its 8,948 raw task rows. The host is part of the finding, not context.
+  if (cyclic.size) process.stderr.write(`  ⚠ parent_id CYCLE in task data through: ${[...cyclic].join(", ")} — rollups near the cycle are partial; fix the ledger at ${HOST} (dataset=${SRC_DATASET}) — quote that host when filing, a local cycle is not a prod defect\n`);
   return out;
 }
 
