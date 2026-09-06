@@ -140,7 +140,15 @@ scheduled_files() {
   local f
   for f in "$WORKFLOWS_DIR"/*.yml; do
     [ -f "$f" ] || continue
-    if sed 's/#.*//' "$f" | grep -qE '^[[:space:]]{2}schedule:[[:space:]]*$'; then
+    # ONE grep over the FILE, never `sed … | grep -q`: grep -q exits on its first
+    # match, sed then takes SIGPIPE writing the rest of a long workflow, and under
+    # `set -o pipefail` the pipeline reads as "no match" — so a long file whose
+    # schedule: sits near the top (required-checks-drift.yml) dropped out of the
+    # tree on some runs and c1 reported it as "classified but carries no schedule"
+    # (main run 34015146623: `sed: couldn't write 108 items to stdout: Broken
+    # pipe`, 19 files found, then 20 on the next). The trailing group is the
+    # comment sed used to strip.
+    if grep -qE '^[[:space:]]{2}schedule:[[:space:]]*(#.*)?$' "$f"; then
       basename "$f"
     fi
   done | sort
@@ -183,7 +191,10 @@ check_fallbacks() {
     [ "$class" = "critical" ] || continue
     wf="$WORKFLOWS_DIR/$file"
     if [ ! -f "$wf" ]; then echo "REFUSED: $file is classified critical and does not exist" >&2; rc=2; continue; fi
-    if sed 's/#.*//' "$wf" | grep -qE '^[[:space:]]{2}push:[[:space:]]*$'; then
+    # Same shape as scheduled_files: one grep over the file, no sed|grep -q pipe
+    # (the SIGPIPE flip made c7 report every critical workflow as push-less on
+    # a shell with pipefail — measured on this repo's own tree, 4 false REFUSEDs).
+    if grep -qE '^[[:space:]]{2}push:[[:space:]]*(#.*)?$' "$wf"; then
       echo "  ok   $file (critical, every ${_interval}m) carries a push: trigger — cron is not its only way to fire"
       continue
     fi
