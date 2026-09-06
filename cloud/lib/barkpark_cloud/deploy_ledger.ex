@@ -2488,4 +2488,132 @@ defmodule BarkparkCloud.DeployLedger do
   end
 
   def decode_cursor(_other), do: :error
+
+  ## ── The per-BOX rate (dr-w10 S1) ──────────────────────────────────────────
+  #
+  # Everything above this line answers "what is failing across the fleet".
+  # Nothing above it could answer "IS THIS BOX SICK", because the census folds by
+  # `site_id` and `barkpark_id` appeared ZERO times in this module — the join that
+  # names the box (`deployments.site_id -> sites.barkpark_id`) sat one hop away in
+  # the same database, read by nothing. So `bp cloud status` printed `ok` for a
+  # box that failed 46.28% of its 1,290 terminal deploys in 24 h, from a bare
+  # `default:` arm that read no vital at all. This is the read that ends that.
+  #
+  # `agency/1` and `@agency` above are REUSED, not duplicated: the exhaustive
+  # class -> agency map with its `:ambiguous` fallback landed separately (#11368)
+  # and is the only permitted source for `box_caused` (charter D148 — never a
+  # substring regex over `failure_reason`).
+
+  @doc """
+  The per-BOX deploy vital over a PINNED half-open window, keyed by barkpark id.
+
+  ONE grouped query for the whole page — `sites LEFT JOIN deployments` grouped by
+  `(barkpark_id, site_id, stage, status, failure_reason)` — never a per-row
+  lookup: that is the N+1 the fleet route already paid for once.
+
+  Each node carries, INSEPARABLY (charter D107/D136/D148):
+
+    * `rate` — the TERMINAL failure rate through the existing `rate/2`
+      (numerator `failed`, denominator `failed + live`), so `sample`,
+      `min_sample`, `refused`, `basis` and the refusal `reason` ride INSIDE the
+      number by construction and no consumer can print a percentage without the
+      denominator it came from.
+    * `absorption` — deferrals over every ATTEMPTED row in the window, the same
+      denominator `census/3` gives its `deferred` line, so the box node and the
+      fleet census mean the same thing by the word. A terminal rate that halves
+      because a busy box started deferring is absorption, not recovery, and the
+      two must never be readable apart.
+    * `box_caused` — the box-caused share OF the failure numerator, off
+      `agency/1`. The price of a raw rate is that it accuses the box for a
+      customer's broken build; this is that price, paid out loud.
+    * `sites` — how many sites this box could deploy AT ALL (its deploy SURFACE,
+      counted from `sites`, not from rows), and `sites_deploying` — how many
+      actually produced a terminal row in the window.
+
+  `sites` is the surface and NOT the row count on purpose (charter D149): a box
+  with no sites has nothing to deploy and has not failed to report, while a box
+  WITH sites and no measurable sample is a silence. Collapsing those two into one
+  number is how 6 of 8 boxes end up wearing a permanent alarm nobody reads. Both
+  counts ride so a consumer can tell them apart without a second query.
+
+  A barkpark with NO sites at all is absent from the returned map — the caller
+  renders its own "nothing to deploy" sentinel rather than this module inventing
+  a rate for a box that cannot have one.
+  """
+  @spec box_rates([Ecto.UUID.t()], DateTime.t(), DateTime.t()) :: %{Ecto.UUID.t() => map()}
+  def box_rates(barkpark_ids, from, to)
+
+  def box_rates([], %DateTime{} = _from, %DateTime{} = _to), do: %{}
+
+  def box_rates(barkpark_ids, %DateTime{} = from, %DateTime{} = to) when is_list(barkpark_ids) do
+    # LEFT join, and the window bound lives in the ON clause: moved to WHERE it
+    # would become an inner join and a box whose sites simply did not deploy in
+    # the window would vanish — reading as "no deploy surface" (verdict
+    # unchanged) instead of "asked too little to score" (a silence), which is
+    # exactly the conflation this slice exists to end.
+    Repo.all(
+      from(s in Site,
+        left_join: d in Deployment,
+        on: d.site_id == s.id and d.inserted_at >= ^from and d.inserted_at < ^to,
+        where: s.barkpark_id in ^barkpark_ids,
+        group_by: [s.barkpark_id, s.id, d.stage, d.status, d.failure_reason],
+        select: %{
+          barkpark_id: s.barkpark_id,
+          site_id: s.id,
+          stage: d.stage,
+          status: d.status,
+          failure_reason: d.failure_reason,
+          count: count(d.id)
+        }
+      )
+    )
+    |> Enum.map(fn g -> Map.put(g, :class, classify(g)) end)
+    |> Enum.group_by(& &1.barkpark_id)
+    |> Map.new(fn {barkpark_id, groups} ->
+      {barkpark_id, box_node(barkpark_id, groups, from, to)}
+    end)
+  end
+
+  defp box_node(barkpark_id, groups, from, to) do
+    # The LEFT join emits one all-nil row per site that deployed nothing in the
+    # window (count 0, status nil -> class nil). Those rows are the SURFACE count
+    # and nothing else, so every tally below runs on the real ones.
+    rows = Enum.filter(groups, &(&1.count > 0))
+
+    {_not_attempted, attempted} = Enum.split_with(rows, &not_attempted?(&1.class))
+    {deferred, settled} = Enum.split_with(attempted, &deferred?(&1.class))
+    failed_rows = Enum.filter(settled, & &1.class)
+
+    failed = total(failed_rows)
+    # From `settled`, not from `rows`: `not_attempted?/1`'s own contract is that
+    # those classes "never enter a rate denominator" (D19), and reading `live`
+    # off the unfiltered set would only be safe by accident.
+    live = total(Enum.filter(settled, &(&1.status == "live")))
+    box_caused = total(Enum.filter(failed_rows, &(agency(&1.class) == :box)))
+
+    %{
+      barkpark_id: barkpark_id,
+      # The window travels WITH the number. The fleet route pins it per request,
+      # so a consumer can age the reading instead of trusting it blindly — and
+      # can never compare two rates taken over different populations (D3).
+      window: %{from: from, to: to},
+      sites: groups |> Enum.map(& &1.site_id) |> Enum.uniq() |> length(),
+      sites_deploying:
+        rows
+        |> Enum.filter(&(&1.status in ["failed", "live"]))
+        |> Enum.map(& &1.site_id)
+        |> Enum.uniq()
+        |> length(),
+      # THE RUNG'S NUMBER: raw terminal, denominated on settled outcomes only.
+      # `rate/2` refuses below `min_sample/0` — so a box that barely deploys
+      # answers "we could not measure", never a percentage nobody should act on.
+      rate: rate_basis(failed, failed + live, @basis_terminal),
+      # Denominated on ATTEMPTED, exactly like `census/3`'s deferred line: put
+      # NOT-ATTEMPTED tombstones in this denominator and absorption is DILUTED,
+      # so a cap quietly swallowing the fleet's rebuilds reads as less absorption
+      # than it is — the comforting direction, and therefore the forbidden one.
+      absorption: rate_basis(total(deferred), total(attempted), @basis_attempted),
+      box_caused: rate_basis(box_caused, failed, @basis_failed)
+    }
+  end
 end

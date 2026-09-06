@@ -110,6 +110,8 @@ func TestAttentionBucket(t *testing.T) {
 	cases := map[string]string{
 		"removal_failed": "attention", "failed": "attention", "suspended": "attention",
 		"degraded": "attention",
+		// dr-w10-s1 / dr-w24-followup — ranks 5 and 6, both attention
+		"deploys_failing": "attention", "diverged": "attention",
 		// the D69 additions
 		"strained": "attention", "filling": "attention", "unreported": "attention",
 		// the jpf-w1 D7 addition — a stalled queue is a thing to LOOK AT
@@ -134,12 +136,16 @@ func TestAttentionBucket(t *testing.T) {
 	}
 }
 
-// TestAttentionLadderIsTwelveRungs pins the ladder itself — order and length —
+// TestAttentionLadderIsFourteenRungs pins the ladder itself — order and length —
 // so a rung inserted at the wrong height (which silently re-buckets its
 // neighbours) fails here rather than in an operator's terminal.
-func TestAttentionLadderIsTwelveRungs(t *testing.T) {
+func TestAttentionLadderIsFourteenRungs(t *testing.T) {
 	want := []string{
 		"removal_failed", "failed", "suspended", "degraded",
+		// dr-w10-s1 / dr-w24-followup, inserted at 5 and 6 by the orchestrator's
+		// 2026-09-06 ruling: a CONFIRMED failure outranks every "may be heading
+		// somewhere bad" rung below it.
+		"deploys_failing", "diverged",
 		"strained", "filling", "unreported", "deploy_stalled", "behind",
 		"removing", "provisioning", "ok",
 	}
@@ -158,11 +164,13 @@ func TestAttentionLadderIsTwelveRungs(t *testing.T) {
 		bucket string
 	}{
 		{"removal_failed", 1, "attention"},
-		{"deploy_stalled", 8, "attention"}, // jpf-w1 D7: after unreported, before behind
-		{"behind", 9, "attention"},         // the LAST attention rung
-		{"removing", 10, "in-flight"},
-		{"provisioning", 11, "in-flight"},
-		{"ok", 12, "healthy"}, // the ONLY healthy rung
+		{"deploys_failing", 5, "attention"}, // dr-w10-s1: directly under degraded
+		{"diverged", 6, "attention"},        // dr-w24-followup: immediately behind it
+		{"deploy_stalled", 10, "attention"}, // jpf-w1 D7: after unreported, before behind
+		{"behind", 11, "attention"},         // the LAST attention rung
+		{"removing", 12, "in-flight"},
+		{"provisioning", 13, "in-flight"},
+		{"ok", 14, "healthy"}, // the ONLY healthy rung
 	} {
 		if got := attentionRank(c.state); got != c.rank {
 			t.Errorf("attentionRank(%q) = %d, want %d", c.state, got, c.rank)
@@ -590,7 +598,12 @@ func loadAttentionFixture(t *testing.T) attentionFixture {
 func TestRankBarkparksFixture(t *testing.T) {
 	f := loadAttentionFixture(t)
 	wantFixtureOrder := []string{
-		"rf-1", "fail-1", "susp-1", "deg-1", "deg-2", "strain-1",
+		"rf-1", "fail-1", "susp-1", "deg-1", "deg-2",
+		// dr-w10-s1 / dr-w24-followup: the two new rungs, between degraded and
+		// strained. df-1 carries the RECORDED guerrilla shape (46.28% of 1,290
+		// terminal rows); div-1 an ancestry the plane graded `diverged`.
+		"df-1", "div-1",
+		"strain-1",
 		"fill-1", "unrep-1", "stall-1", "beh-1", "rem-1", "rem-2",
 		"prov-1", "alpha", "ok-1", "Zeta",
 	}
@@ -603,6 +616,12 @@ func TestRankBarkparksFixture(t *testing.T) {
 			t.Fatalf("producer-backed fixture row %q omits queued_deploy_age_seconds", b.Name)
 		}
 		byName[b.Name] = b
+	}
+	if got := attentionStatus(byName["df-1"]); got != "deploys_failing" {
+		t.Fatalf("fixture's 46.28%%-of-1290 row status = %q, want deploys_failing", got)
+	}
+	if got := attentionStatus(byName["div-1"]); got != "diverged" {
+		t.Fatalf("fixture's diverged-ancestry row status = %q, want diverged", got)
 	}
 	if got := attentionStatus(byName["stall-1"]); got != "deploy_stalled" {
 		t.Fatalf("fixture's 420s row status = %q, want deploy_stalled", got)
@@ -730,10 +749,13 @@ func TestRunCloudStatusJSON(t *testing.T) {
 		t.Fatalf("buckets = %+v", resp.Buckets)
 	}
 	// Ranked most-urgent-first, ranks 1-based per the decision-32 fixture:
-	// failed (2) < degraded (4) < strained (5) < filling (6) < ok (12).
+	// failed (2) < degraded (4) < strained (7) < filling (8) < ok (14).
+	// The ORDER is unchanged by dr-w10-s1's two insertions at 5 and 6 — that is
+	// the point of an insertion: every pre-existing state keeps its relative
+	// position and its bucket, and only the integers moved.
 	wantOrder := []string{"dead-box", "slow-box", "hot-box", "full-box", "ok-box"}
 	wantStatus := []string{"failed", "degraded", "strained", "filling", "ok"}
-	wantRank := []int{2, 4, 5, 6, 12}
+	wantRank := []int{2, 4, 7, 8, 14}
 	for i := range wantOrder {
 		if resp.Barkparks[i].Name != wantOrder[i] || resp.Barkparks[i].Status != wantStatus[i] || resp.Barkparks[i].Rank != wantRank[i] {
 			t.Fatalf("row %d = %s/%s/rank %d, want %s/%s/rank %d", i,
@@ -1035,8 +1057,14 @@ func TestStatusDeployCensusRefusalNamesItself(t *testing.T) {
 // three, and the ONLY threshold the deploy line consults is the census's own
 // min_sample off the wire.
 func TestStatusDeployIsAGaugeNotAFence(t *testing.T) {
-	if len(attentionRankOrder) != 12 {
-		t.Fatalf("the ladder grew a rung beyond the charter's twelve: %v", attentionRankOrder)
+	// dr-w10-s1 moved this number from 12 to 14, and D330 is NOT reopened by it:
+	// D330 ruled that the deploy CENSUS reading (statusDeployLine/deployMarker,
+	// the assertions below) ships as a gauge with no rung — and it still does,
+	// byte for byte. The two rungs added here are a DIFFERENT instrument: the
+	// per-box `deploy_rate` node this PR puts on the wire, ratified at rank 5 by
+	// charter D202 and by the orchestrator's 2026-09-06 ruling.
+	if len(attentionRankOrder) != 14 {
+		t.Fatalf("the ladder is no longer the charter's fourteen: %v", attentionRankOrder)
 	}
 	// The floor is read, never carried: a census that sends min_sample 999 moves
 	// the refusal, which a hardcoded fence could not do.
@@ -1922,7 +1950,10 @@ func TestStatusDeployMarkerRidesTheOkRowWithItsWindow(t *testing.T) {
 	if !strings.Contains(stdout, "HEALTHY (2)") {
 		t.Fatalf("the marker must move no bucket:\n%s", stdout)
 	}
-	if len(attentionRankOrder) != 12 {
+	// The CENSUS MARKER adds no rung — that is D330 and it still holds. The
+	// ladder's fourteen is dr-w10-s1's per-box `deploy_rate` rung plus
+	// dr-w24-followup's `diverged`, neither of which this marker can reach.
+	if len(attentionRankOrder) != 14 {
 		t.Fatalf("the marker must add no rung: %v", attentionRankOrder)
 	}
 

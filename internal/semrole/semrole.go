@@ -118,7 +118,15 @@ func For(status string) string {
 	// LOOK AT, not one that has failed. NAMING TRAP the state dodges: "queued"
 	// is already an info/blue token in this very switch, so the stalled state
 	// needed its own word to get its own tone.
+	// "deploys_failing" (dr-w10-s1, charter D202) and "diverged"
+	// (dr-w24-followup) enter at ranks 5 and 6, between "degraded" (4, warn) and
+	// "strained" (7, warn), and take warn for the SAME monotonicity reason: the
+	// tone ladder may never have a rung shouting louder than the more urgent
+	// rung above it, and rank 4 is warn. That the rung means "this box does not
+	// work right now" is carried by its RANK, which is what sorts the screen —
+	// not by a danger tone that would invert the ladder.
 	case "degraded", "unknown", "suspended", "inactive", "near_limit",
+		"deploys_failing", "diverged",
 		"strained", "filling", "unreported", "deploy_stalled", "unavailable":
 		return "warn"
 	// "over_limit" is a usage meter at or past its plan quota — a hard ceiling
