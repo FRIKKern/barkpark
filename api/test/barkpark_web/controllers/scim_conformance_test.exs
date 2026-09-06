@@ -24,7 +24,7 @@ defmodule BarkparkWeb.ScimConformanceTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Accounts, Repo, Scim, Tenancy}
-  alias Barkpark.Tenancy.Membership
+  alias Barkpark.Tenancy.{Membership, Role}
   import Ecto.Query
 
   @patch_op "urn:ietf:params:scim:api:messages:2.0:PatchOp"
@@ -234,6 +234,48 @@ defmodule BarkparkWeb.ScimConformanceTest do
              |> get("/scim/v2/Groups/#{gid}")
              |> json_response(200)
              |> member_values() == [user.id]
+    end
+
+    # THE MULTI-FIELD PROOF the classify-time refusals above cannot give: this
+    # body is well-formed, so it reaches the WRITE layer, where its FIRST field
+    # (displayName) is applicable and its SECOND (members) is not — the group's
+    # mapped role is valid in ws1 only, so granting it across a two-workspace
+    # org fails `Membership.changeset/3`. The rename must not survive the
+    # refusal.
+    test "a replace whose second field refuses leaves the first field unwritten" do
+      %{org: org, ws: ws1, token: token} = org_with_ws("nopartial")
+      {:ok, ws2} = Tenancy.create_workspace(%{slug: "nopartial-ws2", name: "WS2"})
+      {:ok, _ws2} = Tenancy.assign_workspace_to_organization(ws2, org.id)
+
+      # Valid in ws1 ONLY: org-wide existence lets the group be created, but the
+      # org-wide grant refuses rather than attach it to a ws2 membership.
+      {:ok, _role} =
+        Repo.insert(Role.changeset(%Role{}, %{name: "ws1-editor", workspace_id: ws1.id}))
+
+      user = provision(token, "np@nopartial.com")
+      gid = create_group(token, "Editors", "ws1-editor") |> Map.fetch!("id")
+
+      body =
+        Jason.encode!(%{
+          "schemas" => [@patch_op],
+          "Operations" => [
+            %{
+              "op" => "replace",
+              "value" => %{"displayName" => "Renamed", "members" => [%{"value" => user.id}]}
+            }
+          ]
+        })
+
+      resp = scim(token) |> patch("/scim/v2/Groups/#{gid}", body) |> json_response(400)
+      assert resp["schemas"] == [@error_urn]
+      assert resp["scimType"] == "invalidValue"
+
+      # NEITHER field landed: the name is the one it was created with, and the
+      # membership the refused grant named never moved. Read STORED rows.
+      after_body = scim(token) |> get("/scim/v2/Groups/#{gid}") |> json_response(200)
+      assert after_body["displayName"] == "Editors"
+      assert member_values(after_body) == []
+      assert Repo.get!(Barkpark.Scim.Group, gid).display_name == "Editors"
     end
 
     test "an unauthenticated path-less PATCH is 401, never 400 or 200" do

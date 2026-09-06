@@ -10,6 +10,7 @@ defmodule BarkparkWeb.ScimGroupsController do
   """
   use BarkparkWeb, :controller
 
+  alias Barkpark.Repo
   alias Barkpark.Scim
   alias BarkparkWeb.ScimPatch
   alias BarkparkWeb.ScimResponse
@@ -172,23 +173,60 @@ defmodule BarkparkWeb.ScimGroupsController do
 
   defp whole_resource(_org, group, nil), do: {:ok, group, []}
 
+  # ONE write, not two. `Scim.update_group/3` COMMITS before
+  # `Scim.replace_group_members/3` is even called, so a reconcile that refuses
+  # (`:invalid_role` — the group's mapped role fails the membership changeset in
+  # at least one of the org's workspaces) left the rename standing: a `400` over
+  # a resource the request HAD changed, which is exactly the partial write a
+  # path-less whole-resource replace must never produce. Both writes ride one
+  # transaction, so the refusal rolls the rename back too and the no-partial-
+  # write guarantee `ScimPatch.classify/1` gives the malformed shapes extends to
+  # the ones only the write layer can see. Every mutation still goes THROUGH
+  # `Barkpark.Scim`; the transaction only decides whether they all stand.
   defp whole_resource(org, group, attrs) do
-    with {:ok, updated} <- Scim.update_group(org, group, attrs) do
-      # `members` is reconciled ONLY when the operation actually named it. A
-      # path-less replace carries "a list of attributes to be replaced" — the
-      # ones it names, not the ones it omits — so `{"displayName":"X"}` must not
-      # silently empty the group the way `member_ids(attrs["members"]) == []`
-      # would have.
-      case Map.fetch(attrs, "members") do
-        :error ->
-          {:ok, updated, []}
+    Repo.transaction(fn ->
+      case Scim.update_group(org, group, attrs) do
+        {:error, %Ecto.Changeset{} = cs} ->
+          Repo.rollback(cs)
 
-        {:ok, members} ->
-          case Scim.replace_group_members(org, updated, member_ids(members)) do
-            {:ok, %{unmatched: unmatched}} -> {:ok, updated, unmatched}
-            {:error, :invalid_role} = err -> err
+        {:ok, updated} ->
+          # `members` is reconciled ONLY when the operation actually named it. A
+          # path-less replace carries "a list of attributes to be replaced" —
+          # the ones it names, not the ones it omits — so `{"displayName":"X"}`
+          # must not silently empty the group the way
+          # `member_ids(attrs["members"]) == []` would have.
+          case Map.fetch(attrs, "members") do
+            :error ->
+              {updated, []}
+
+            {:ok, members} ->
+              case Scim.replace_group_members(org, updated, member_ids(members)) do
+                {:ok, %{unmatched: unmatched}} -> {updated, unmatched}
+                # Unreachable in practice — see the `:rollback` note below —
+                # but kept so the refusal is still explicit if the inner write
+                # ever stops rolling back to signal it.
+                {:error, :invalid_role} -> Repo.rollback(:invalid_role)
+              end
           end
       end
+    end)
+    |> case do
+      {:ok, {updated, unmatched}} ->
+        {:ok, updated, unmatched}
+
+      # `Scim.set_member_role/3` signals an invalid role by rolling ITS OWN
+      # transaction back. Nested in ours that rollback unwinds past
+      # `replace_group_members/3` entirely, and Ecto reports the reason it
+      # cannot carry across the boundary as the atom `:rollback`. On this path
+      # that is the one and only inner rollback — `replace_group_members/3`
+      # returns `{:ok, _}` or `{:error, :invalid_role}` and nothing else — so it
+      # renders as the same `invalidValue` refusal the un-nested call produced,
+      # with the rename now rolled back alongside the grants.
+      {:error, :rollback} ->
+        {:error, :invalid_role}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
