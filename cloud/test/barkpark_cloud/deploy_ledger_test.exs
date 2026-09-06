@@ -1901,12 +1901,28 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert Enum.sum(Enum.map(census.classes, & &1.count)) == 3
       refute Enum.any?(census.deferred, &(&1.class == "UNCLASSIFIED"))
 
-      # THE HOLE, PINNED: it does sit in `volume`, so it dilutes the rate. 4
-      # attempted, 3 failed = 75%, not 100%. The day cancelled rows appear, this
-      # number moves and this assertion is what says so.
+      # THE RULING (dr-cancelled-row-dilutes-the-rate, 2026-09-06), replacing the
+      # "THE HOLE, PINNED" tripwire that used to sit here. A cancelled attempt is
+      # NEITHER a failure nor a success — the same argument D19 made for
+      # GITHUB_PUSH_UNBUILDABLE — so it is OUT of the TERMINAL denominator
+      # (`terminal_failure_rate`, D170b/D172: failed + live only), and 3 failed
+      # of 3 terminal is the honest arithmetic — the PERCENTAGE refuses here
+      # because n=3 is under `@min_sample`, so the pin is numerator/sample, not
+      # pct. It STAYS in `volume` and in the
+      # attempted-basis `failure_rate` on purpose: that basis names cancelled
+      # rows in its own sentence, and moving a row out of a published
+      # denominator is exactly the vacuous green D43 forbids. And it is never
+      # DROPPED: `census.cancelled` is its own line, so a reader can see the
+      # attempt that was stopped rather than infer it from a gap.
       assert census.volume == 4
       assert census.failure_rate.numerator == 3
       assert census.failure_rate.sample == 4
+      assert census.terminal_failure_rate.numerator == 3
+      assert census.terminal_failure_rate.sample == 3
+      assert census.terminal_failure_rate.refused
+      assert census.terminal_failure_rate.pct == nil
+      assert census.cancelled == 1
+      assert census.live == 0
     end
 
     test "GITHUB_PUSH_UNBUILDABLE is OUT of the denominator and in its own bucket", %{site: site} do
