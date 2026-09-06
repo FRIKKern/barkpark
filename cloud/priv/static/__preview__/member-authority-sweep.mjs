@@ -432,7 +432,14 @@ const PIN_MEMBER_SCENARIOS = 9;
 // paints, so a member never reaches the code this fixture drives. 122 was
 // RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the committed
 // corpus grew to 122 scenario(s), pinned at 121"), never by adding one.
-const PIN_TOTAL_SCENARIOS = 123;
+// 123 -> 124 (cch-w50-bl): `billing-forever`, the corpus's first fixture on the
+// admin-granted `forever` comp tier. The member slice STAYS at 9 — the case the
+// note above forbids bumping: its actor is the team OWNER, and it cannot widen
+// the member axis by construction either, since renderBillingManage's comp arm
+// and renderCurrentPlan both sit behind renderBilling's own owner fence. 124 was
+// RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the committed
+// corpus grew to 124 scenario(s), pinned at 123"), never by adding one.
+const PIN_TOTAL_SCENARIOS = 124;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;

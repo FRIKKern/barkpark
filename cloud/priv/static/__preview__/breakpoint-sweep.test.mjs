@@ -976,13 +976,25 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // create a 14th. Both integers were RE-DERIVED by RUNNING `node
   // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
   // PRINTED, never by adding one to the line above.
-  assert.equal(r.total, 123);
+  // cch-w50-bl moves it by ONE: `billing-forever`, the corpus's first fixture on
+  // the admin-granted `forever` comp tier — a plan the server CAN mint
+  // (Billing.Subscription's @plans, Billing.grant_forever/1) that no scenario had
+  // ever booted, which is why planName painting its raw slug and the
+  // Manage-billing section silently vanishing were both invisible here. Total
+  // 123 -> 124, residue 99 -> 100. CELLS (25), distinctCovered (24) and families
+  // (13) are DELIBERATELY UNMOVED: it lands in the residue, not a cell, and its
+  // familyOf is `hash:#billing` — a family that already had eight members, so it
+  // cannot create a 14th. Both integers were RE-DERIVED by RUNNING `node
+  // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
+  // PRINTED (`124 scenarios · 24 distinct covered by 25 cells · 100 residue over
+  // 13 families`), never by adding one to the line above.
+  assert.equal(r.total, 124);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 99, "99 is the RESIDUE, not the census");
+  assert.equal(r.residue, 100, "100 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 99, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 100, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

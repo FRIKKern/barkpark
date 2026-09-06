@@ -92,6 +92,7 @@ defmodule BarkparkCloud.BillingClientMirrorTest do
 
   alias BarkparkCloud.Billing
   alias BarkparkCloud.Billing.PlanLimits
+  alias BarkparkCloud.Billing.Subscription
   alias BarkparkCloud.Workers.TrialExpiryWorker
 
   # The PINNED tier set the CONSOLE declares. Declared by NEITHER side (see the
@@ -109,6 +110,43 @@ defmodule BarkparkCloud.BillingClientMirrorTest do
   # console ever grows a trial tier, or a mirrored tier loses its card, the
   # coverage test below reds instead of the mirror quietly covering less.
   @unmirrored_seam_plans ~w(trial)
+
+  # ── cch-w50-bl · THE PLAN VOCABULARY ──────────────────────────────────────
+  #
+  # `Subscription.plans/0` is the set of plan strings the SERVER can mint; the
+  # console's PLAN_CATALOG is the set it OFFERS. Nothing compared them before
+  # this, so `forever` — a plan `Billing.grant_forever/1` writes onto real teams —
+  # had no catalog row, `catalogPlan("forever")` answered null, and every console
+  # surface downstream of it degraded silently: the plan chip and the card title
+  # painted the RAW LOWERCASE SLUG at a human, and the feature list rendered
+  # empty. A sixth plan added to `@plans` tomorrow would do the same, and nothing
+  # anywhere would red.
+  #
+  # DECLARED HERE, and deliberately not derived from either side — for the same
+  # reason `@pinned_plans` is (see the moduledoc). A guard that derived "the
+  # plans with no catalog row" from the two sides it is comparing goes GREEN by
+  # construction: whatever it finds IS the answer. This literal is the third
+  # opinion. Adding a plan server-side reds; deleting a catalog tier reds;
+  # deciding a plan should now be offered means editing THIS line, in the open.
+  #
+  # WHY THESE TWO ARE ABSENT ON PURPOSE, and why the fix was NOT a catalog row:
+  #
+  #   * `trial` — granted automatically at signup (`Billing.grant_trial/1`).
+  #     Unpriced, so `Billing.checkout/2` refuses it. Nobody buys it.
+  #   * `forever` — the admin-only comp (`mix barkpark_cloud.grant_forever TEAM`).
+  #     Also unpriced and also refused by checkout.
+  #
+  # PLAN_CATALOG is not a naming table, it is the OFFER table, and three
+  # consumers iterate it wholesale: `renderBillingTiers` wires every entry's
+  # `[data-plan]` to `subscribe()`, `launchPlanGridHtml` renders the non-free
+  # entries on the launch runway, and THIS FILE pins the tier set and requires
+  # every catalog plan to be a `PlanLimits.overridable` env seam — which
+  # `forever` (`@fixed`, deliberately unmovable) is not. A `forever` row would
+  # therefore have shipped a working Subscribe button for a comp tier with no
+  # Stripe price AND reddened this guard. app.js's `PLAN_NAMES` — a separate
+  # non-offer table read only by `planName`/`planDisplay` — is where the two
+  # unpurchasable plans get their human name; it names, and sells nothing.
+  @non_catalog_plans ~w(trial forever)
 
   # cch-w50-s5 — THE ADVANCE-NOTICE SCHEDULE, in whole days, longest first.
   # Declared HERE for the same reason @pinned_plans is (see the moduledoc): a
@@ -277,6 +315,53 @@ defmodule BarkparkCloud.BillingClientMirrorTest do
     for row <- report do
       assert is_integer(row.client_instances),
              "plan #{row.plan} carries no integer `instances` on the client (got #{inspect(row.client_instances)})"
+    end
+  end
+
+  test "PLAN VOCABULARY: every plan the SERVER can mint is either offered by the console or declared unofferable" do
+    # BOTH SIDES BY RUNNING: `Subscription.plans/0` is called from this booted
+    # BEAM (it is the same module attribute `validate_inclusion` enforces on
+    # every insert), and the catalog comes out of `app.js` evaluated in a
+    # node:vm. No regex over either source text.
+    server_plans = Subscription.plans()
+    catalog_plans = Enum.map(client_catalog!(), &Map.fetch!(&1, "plan"))
+
+    # Non-vacuity — asserted on the CLIENT side only, deliberately. An empty
+    # catalog would make `uncovered` the whole server enum and `orphans` empty,
+    # i.e. it would fail loudly rather than silently, but the explicit refute
+    # says so where a reader looks. The SERVER side needs no such check and
+    # cannot usefully carry one: `Subscription.plans/0` returns a compile-time
+    # module attribute, so `server_plans == []` is statically decidable and
+    # Elixir's type checker rejects it as an always-false comparison. A guard
+    # that cannot go blind does not need a blindness check.
+    refute catalog_plans == [], "the console catalog came back empty — the client side went blind"
+
+    uncovered = server_plans -- (catalog_plans ++ @non_catalog_plans)
+
+    assert uncovered == [],
+           "the server can mint #{inspect(uncovered)}, which the console neither offers nor declares unofferable. " <>
+             "A plan with no PLAN_CATALOG row makes catalogPlan/1 answer null, which paints the RAW SLUG as the " <>
+             "plan name and renders an EMPTY feature list. Either add it to PLAN_CATALOG (an OFFER — it needs a " <>
+             "Stripe price and a PlanLimits.overridable seam) or add it to app.js's PLAN_NAMES and to " <>
+             "@non_catalog_plans here (a NAME — it sells nothing)."
+
+    # THE OTHER DIRECTION. A console tier for a plan the server cannot mint is an
+    # offer whose checkout `validate_inclusion` would reject on insert.
+    orphans = catalog_plans -- server_plans
+
+    assert orphans == [],
+           "the console offers #{inspect(orphans)}, which Subscription's @plans does not admit — a tier no team can ever hold"
+
+    # AND THE DECLARATION ITSELF CANNOT ROT. Every plan named unofferable must
+    # still be a real server plan and must still be absent from the catalog —
+    # otherwise a stale line here silently widens the escape hatch above.
+    for plan <- @non_catalog_plans do
+      assert plan in server_plans,
+             "@non_catalog_plans names #{inspect(plan)}, which the server cannot mint at all — a stale exemption"
+
+      refute plan in catalog_plans,
+             "@non_catalog_plans names #{inspect(plan)}, but the console now OFFERS it. If that is intended, delete " <>
+               "the line here; leaving it makes the exemption cover a plan that no longer needs one."
     end
   end
 

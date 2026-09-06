@@ -18598,6 +18598,53 @@
     return PLAN_CATALOG.filter(function (x) { return x.plan === plan; })[0] || null;
   }
 
+  // ── PLAN_NAMES — the NON-OFFER half of the plan vocabulary (cch-w50-bl) ────
+  //
+  // The server mints five plans (Billing.Subscription's `@plans ~w(free trial
+  // supporter support_plus forever)`); PLAN_CATALOG carries three. The two it
+  // does NOT carry are not oversights — they are plans the console must never
+  // OFFER:
+  //
+  //   * `trial`  — granted automatically at signup. Nobody buys it.
+  //   * `forever` — the admin-only comp licence (Billing.grant_forever/1, `mix
+  //     barkpark_cloud.grant_forever TEAM`). It has no Stripe price id at all.
+  //
+  // Until this table, "not in the catalog" also meant "has no name", and
+  // planName() painted the RAW LOWERCASE SLUG at a human — `forever` in the
+  // sidebar plan chip (#ws-plan), in the current-plan card title and in the
+  // dunning head. Three teams on the live plane read that.
+  //
+  // WHY THIS IS A SEPARATE TABLE AND NOT A FOURTH PLAN_CATALOG ROW. PLAN_CATALOG
+  // is the OFFER table, and three consumers iterate it WHOLESALE:
+  //   1. renderBillingTiers maps every entry through tierCardHtml and wires
+  //      `[data-plan]` → subscribe(), so a `forever` row would put a working
+  //      Subscribe button on an admin-only tier with no price to check out.
+  //   2. launchPlanGridHtml renders `PLAN_CATALOG.filter(!t.free)` on the launch
+  //      runway — the same offer, a second time.
+  //   3. billing_client_mirror_test.exs pins the catalog's tier set AND requires
+  //      every catalog plan to be a `PlanLimits.overridable` env seam; `forever`
+  //      is `@fixed`, deliberately not overridable, so a catalog row would red
+  //      that guard and the only way to green it would be to invent an env seam
+  //      for a ceiling no operator should move.
+  // A name is not an offer. This table names; it sells nothing.
+  //
+  // The two halves together are the console's whole plan vocabulary, and
+  // billing_client_mirror_test.exs's PLAN VOCABULARY guard reds if the server
+  // grows a sixth plan that neither half covers.
+  var PLAN_NAMES = [
+    { plan: "trial", name: "Trial" },
+    { plan: "forever", name: "Forever" }
+  ];
+
+  // The display record for ANY server plan — the catalog row if the plan is one
+  // we sell, otherwise its non-offer name. Null only for a plan neither half
+  // knows, which is the case the cross-layer guard exists to make impossible.
+  function planDisplay(plan) {
+    return catalogPlan(plan) ||
+      PLAN_NAMES.filter(function (x) { return x.plan === plan; })[0] ||
+      null;
+  }
+
   // Per-plan feature bullets — rendered with a ✓ under a button that POSTs
   // /v1/billing/checkout, i.e. sold. EVERY bullet here must name a capability
   // that some signal in this control plane can be shown to run, and
@@ -18705,11 +18752,52 @@
   // Pure: does the team hold a REAL paid subscription (a catalog plan that isn't
   // Free) in a state the Stripe portal can act on? A trial (plan "trial", not in
   // the catalog) and Free both answer false — neither has a portal to open or a
-  // plan to cancel. Reuses catalogPlan verbatim.
+  // plan to cancel. Reuses catalogPlan verbatim — DELIBERATELY the offer table
+  // and not planDisplay, see the ruling below.
+  //
+  // ── cch-w50-bl · THE `forever` DISAGREEMENT, RULED ─────────────────────────
+  //
+  // launchEntitled() says `if (s.plan === "forever") return true;` and this
+  // function says false. That looks like a contradiction and is not: the two
+  // functions answer DIFFERENT questions.
+  //
+  //   * launchEntitled asks "may this team run instances?" — yes, permanently.
+  //   * billingHasPaidPlan asks "is there a Stripe object here for the portal or
+  //     the cancel route to act on?" — and for a comp team the answer is NO, on
+  //     the server, provably:
+  //       · Billing.grant_forever/1 writes the `forever` row carrying NO gateway
+  //         ids (that is the point — the Stripe lifecycle webhooks are keyed on
+  //         customer id, so they can never lapse a comp).
+  //       · Billing.billing_portal_url/2 matches
+  //         `%Subscription{gateway_customer_id: cus} when is_binary(cus)`; a comp
+  //         row falls to the catch-all → `{:error, :no_subscription}` →
+  //         POST /v1/billing/portal answers 422 {"error":"no_subscription"}.
+  //       · Billing.request_cancel/2 matches
+  //         `%Subscription{gateway_subscription_id: sid} when is_binary(sid)`;
+  //         same catch-all → POST /v1/billing/cancel answers 422 too.
+  //
+  // So widening this predicate to admit `forever` would have shipped TWO buttons
+  // that 422 every time they are pressed — a Manage-billing button that cannot
+  // open a portal and a password-reconfirm modal that cannot cancel. That is a
+  // worse lie than the hidden section, not a fix.
+  //
+  // What was actually wrong was the SILENCE. The section simply vanished and the
+  // comp owner was told nothing. renderBillingManage now renders a button-free
+  // explanation for a comp team (the same button-free .set-section grammar the
+  // non-owner arm already uses), so the fact is STATED instead of hidden. The
+  // Cancel section stays gone — there is nothing to cancel, and its own copy
+  // ("keeps your plan until the end of the current billing period") is false for
+  // a licence with no billing period at all.
   function billingHasPaidPlan(sub) {
     if (!sub || (sub.status !== "active" && sub.status !== "past_due")) return false;
     var t = catalogPlan(sub.plan);
     return !!t && !t.free;
+  }
+
+  // Pure: is this the admin-granted comp licence? A team whose entitlement is
+  // permanent and whose billing surface has nothing to act on. Node-pinned.
+  function billingIsComp(sub) {
+    return !!sub && sub.status === "active" && sub.plan === "forever";
   }
 
   // GR33 anatomy: billing is an ACTION page composed of .set-section cards — the
@@ -18883,7 +18971,7 @@
                 : '<span class="plan-rec">') + esc(billingStatusBadge(sub)) + "</span>"
             : "") +
         "</div>" +
-        planFeatsHtml(catalogPlan(plan)) +
+        planFeatsHtml(planDisplay(plan)) +
         (sub ? '<p class="plan-meta dim">Status: ' + esc(billingStatusLabel(sub)) + "</p>" : "") +
         (periodLine ? '<p class="plan-meta dim">' + esc(periodLine) + "</p>" : "") +
       "</div>";
@@ -18897,6 +18985,17 @@
   function renderBillingManage(owner) {
     var body = $("#billing-manage");
     if (!body) return;
+    // cch-w50-bl — the comp arm runs BEFORE the owner gate, deliberately: having
+    // nothing to manage is a fact about the TEAM, not about the reader's role.
+    // Telling a comp team's member "Only the team owner can manage billing" would
+    // point them at an owner who has no portal either. Both roles get the same
+    // true sentence. See the ruling over billingHasPaidPlan for why this is prose
+    // and not a button.
+    if (billingIsComp(subCache)) {
+      showBillingSection("#billing-manage-section", true);
+      body.innerHTML = '<p class="set-purpose">Your team is on a complimentary licence from Barkpark. There is no card, no invoice, no renewal and no billing period behind it &mdash; so there is nothing here to update, and nothing to cancel. It does not lapse.</p>';
+      return;
+    }
     if (!owner) {
       showBillingSection("#billing-manage-section", true);
       body.innerHTML = '<p class="set-purpose">Only the team owner can manage billing.</p>';
@@ -19158,7 +19257,7 @@
             : '<span class="plan-rec">') +
             esc(billingStatusBadge(sub)) + "</span></div>" +
         '<p class="plan-tagline">Your current subscription.</p>' +
-        planFeatsHtml(catalogPlan(sub.plan)) +
+        planFeatsHtml(planDisplay(sub.plan)) +
         '<p class="plan-meta dim">Status: ' + esc(billingStatusLabel(sub)) +
           (sub.started_at ? " &middot; since " + esc(fmtWhen(sub.started_at)) : "") + "</p>" +
         (periodLine ? '<p class="plan-meta dim">' + esc(periodLine) + "</p>" : "") +
@@ -20015,8 +20114,12 @@
     });
   }
 
+  // cch-w50-bl: reads the WHOLE vocabulary (catalog ∪ PLAN_NAMES), not just the
+  // offer table. The bare-slug fallback survives only for a plan the console has
+  // never heard of — a state the PLAN VOCABULARY guard in
+  // billing_client_mirror_test.exs reds on before it can ship.
   function planName(plan) {
-    var t = catalogPlan(plan);
+    var t = planDisplay(plan);
     return t ? t.name : (plan || "—");
   }
 
@@ -28190,6 +28293,10 @@
       notifCanManage: notifCanManage,
       canManageOnboarding: canManageOnboarding,
       billingHasPaidPlan: billingHasPaidPlan,
+      billingIsComp: billingIsComp,
+      planNames: PLAN_NAMES.slice(),
+      planDisplay: planDisplay,
+      planName: planName,
       readOnlyPlanCardHtml: readOnlyPlanCardHtml,
       suspendedDay: suspendedDay,
       dunningBannerHtml: dunningBannerHtml,

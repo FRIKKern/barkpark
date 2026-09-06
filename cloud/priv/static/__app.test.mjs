@@ -17947,6 +17947,95 @@ test("billingCanManage (launchCheckoutAuthority's helper) / billingHasPaidPlan: 
   assert.equal(hooks.billingHasPaidPlan({ plan: "free", status: "active" }), false);
   assert.equal(hooks.billingHasPaidPlan({ plan: "supporter", status: "canceled" }), false, "canceled has no live portal");
   assert.equal(hooks.billingHasPaidPlan(null), false);
+  // cch-w50-bl — THE COMP TIER IS DELIBERATELY FALSE HERE, and that is a RULING,
+  // not an oversight. launchEntitled({plan:"forever"}) is true (asserted
+  // elsewhere in this file) while this answers false, because the two ask
+  // different questions: "may this team run instances?" vs "is there a Stripe
+  // object for the portal/cancel routes to act on?". `Billing.grant_forever/1`
+  // writes the row with NO gateway ids, so `Billing.billing_portal_url/2`
+  // (matches on `gateway_customer_id`) and `Billing.request_cancel/2` (matches
+  // on `gateway_subscription_id`) BOTH fall to their catch-all and both routes
+  // answer 422 no_subscription. Widening this predicate would ship two buttons
+  // that cannot work. What changed instead is that the comp owner is now TOLD —
+  // see the billingIsComp test below and the `billing-forever` smoke arm.
+  assert.equal(hooks.billingHasPaidPlan({ plan: "forever", status: "active" }), false,
+    "a comp licence has no Stripe customer and no Stripe subscription — there is no portal to open and nothing to cancel");
+});
+
+// ── cch-w50-bl · THE PLAN VOCABULARY, AND THE COMP TIER ─────────────────────
+test("planName: every plan the server can mint has a HUMAN name — the raw slug never reaches a human", () => {
+  // The offer table names its own three.
+  assert.equal(hooks.planName("free"), "Free");
+  assert.equal(hooks.planName("supporter"), "Supporter");
+  assert.equal(hooks.planName("support_plus"), "Support++");
+  // THE DEFECT: these two are NOT in PLAN_CATALOG (they are unpurchasable), so
+  // planName used to return the argument unchanged and the console painted
+  // `forever` — a machine slug — into the sidebar plan chip, the current-plan
+  // card title and the dunning head. Three teams on the live plane read that.
+  assert.equal(hooks.planName("forever"), "Forever", "the comp tier is named, not slugged");
+  assert.equal(hooks.planName("trial"), "Trial", "the signup grant is named too — same class, same table");
+  // The fallback survives only for a plan the console has never heard of. The
+  // PLAN VOCABULARY guard in cloud/test/barkpark_cloud/billing_client_mirror_test.exs
+  // is what makes that state unshippable: it compares Subscription.plans/0
+  // against the catalog BY RUNNING and reds on any plan neither half covers.
+  assert.equal(hooks.planName("nonesuch"), "nonesuch");
+  assert.equal(hooks.planName(""), "—");
+  assert.equal(hooks.planName(null), "—");
+});
+
+test("PLAN_NAMES names exactly the two unpurchasable plans, and NEVER overlaps the offer table", () => {
+  const names = hooks.planNames;
+  assert.ok(Array.isArray(names) && names.length > 0, "PLAN_NAMES must be a non-empty array — an empty one names nothing and this test would be vacuous");
+  // Compared as a JOINED STRING, not with deepStrictEqual: `hooks.planNames`
+  // crosses the node:vm realm boundary, so its Array prototype is not this
+  // realm's and deepStrictEqual reds on two identically-valued arrays.
+  assert.equal(names.map((x) => x.plan).sort().join(","), "forever,trial",
+    "the non-offer half of the vocabulary is exactly `trial` and `forever` — the two plans Billing.checkout/2 refuses. " +
+    "This literal is the client twin of @non_catalog_plans in billing_client_mirror_test.exs; moving one without the other reds there.");
+  for (const n of names) {
+    assert.ok(typeof n.name === "string" && n.name.length > 0, `${n.plan} needs a display name`);
+    assert.notEqual(n.name, n.plan, `${n.plan}'s "name" is its own slug — that is the defect, spelled in the table`);
+  }
+  // THE SEPARATION THAT MATTERS: naming a plan must never OFFER it. A row in
+  // both tables would mean renderBillingTiers wires a Subscribe button for it
+  // and launchPlanGridHtml sells it on the runway.
+  const catalog = hooks.planCatalog.map((t) => t.plan);
+  for (const n of names) {
+    assert.ok(!catalog.includes(n.plan),
+      `${n.plan} is in BOTH tables — PLAN_CATALOG is iterated wholesale into Subscribe buttons, so a named plan that lands there becomes a purchasable one`);
+  }
+  // planDisplay is the union, and it is the union BY RUNNING, not by assumption.
+  for (const p of catalog.concat(names.map((x) => x.plan))) {
+    assert.ok(hooks.planDisplay(p), `planDisplay must resolve ${p}`);
+  }
+  assert.equal(hooks.planDisplay("pro"), null, "a plan in neither half resolves to nothing — the fallback path stays reachable");
+});
+
+test("billingIsComp: the admin-granted `forever` licence, and nothing else", () => {
+  assert.equal(hooks.billingIsComp({ plan: "forever", status: "active" }), true);
+  assert.equal(hooks.billingIsComp({ plan: "supporter", status: "active" }), false);
+  assert.equal(hooks.billingIsComp({ plan: "free", status: "active" }), false);
+  assert.equal(hooks.billingIsComp({ plan: "trial", status: "active" }), false, "a trial is time-boxed — it is not a comp");
+  // grant_forever/1 writes the row `active`; a canceled row is not a live comp.
+  assert.equal(hooks.billingIsComp({ plan: "forever", status: "canceled" }), false);
+  assert.equal(hooks.billingIsComp(null), false);
+  assert.equal(hooks.billingIsComp(undefined), false);
+});
+
+test("currentPlanCardHtml: the comp tier renders a NAMED plan with the real feature bullets", () => {
+  const comp = hooks.currentPlanCardHtml({ plan: "forever", status: "active", started_at: "2026-01-05T12:00:00.000Z" });
+  assert.ok(comp.includes('<span class="plan-name">Forever</span>'), "the card names the comp tier");
+  assert.ok(!/>forever</.test(comp), "and never paints the enum value at a human");
+  // planFeatsHtml(planDisplay(plan)) — it used to be catalogPlan(plan), which is
+  // null for a comp team, so planFeatsHtml returned "" and the card carried an
+  // EMPTY feature list under a real plan name.
+  assert.equal((comp.match(/<li><span class="ck">/g) || []).length, 2,
+    "the comp card carries the same two-bullet manifest as every other tier — an empty <ul> was the defect");
+  // The member twin takes the SAME path through the SAME models (the cch-w55-s3
+  // lesson: a fix scoped to the owner card leaves the member reading the defect).
+  const member = hooks.readOnlyPlanCardHtml({ plan: "forever", status: "active" });
+  assert.ok(member.includes('<span class="plan-name">Forever</span>'), "the non-owner twin names it too");
+  assert.equal((member.match(/<li><span class="ck">/g) || []).length, 2, "and carries the same bullets");
 });
 
 test("readOnlyPlanCardHtml: the non-owner view is a button-free summary reusing the pure models (GR36 plain-member law)", () => {

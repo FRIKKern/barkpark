@@ -2853,6 +2853,61 @@ const EXPECTATIONS = {
     },
   },
 
+  // THE COMP OWNER (cch-w50-bl) — the `forever` tier, on RENDERED BYTES.
+  // Every assertion below reds on origin/main: there, planName("forever") had no
+  // catalog row to read and returned the RAW LOWERCASE SLUG, planFeatsHtml(null)
+  // returned "", and billingHasPaidPlan(forever) === false hid the Manage-billing
+  // section with no explanation. This is the fixture that made those three
+  // reachable at all — `grep forever scenarios.mjs` was empty before it.
+  "billing-forever": {
+    what: "the comp owner — `forever` renders as a NAMED plan with real bullets, and the Manage section STATES why there is nothing to manage or cancel",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+
+      // (1) THE NAME. A human name, and the machine slug nowhere in the card.
+      assert.ok(box.includes('<span class="plan-name">Forever</span>'),
+        "the comp card must name the tier, not print its enum value");
+      assert.ok(!/>forever</.test(box),
+        "the raw lowercase slug must not be painted at a human anywhere in the card");
+
+      // (2) THE BULLETS. planFeatsHtml(planDisplay(plan)) — an empty <ul> was the
+      // defect; the count is pinned so a silent drop back to "" reds here.
+      assert.ok(box.includes("Automated provisioning &amp; updates"), "bullet 1 must render for a comp team");
+      assert.ok(box.includes("Custom domains with automatic TLS"), "bullet 2 must render for a comp team");
+      assert.equal((box.match(/<li><span class="ck">/g) || []).length, 2,
+        "the comp card carries the SAME post-s1 two-bullet manifest — an empty feature list was the defect");
+
+      // Not the upsell arm: an active non-free plan takes renderCurrentPlan.
+      assert.ok(!box.includes('id="plan-continue"'), "an entitled comp team must never be shown the upsell CTA");
+
+      // (3) THE RULING, ON BYTES. The Manage-billing section is VISIBLE and
+      // carries prose, NOT a button: POST /v1/billing/portal answers 422
+      // no_subscription for a row with no gateway_customer_id, so a live button
+      // would be an affordance that cannot work. Silence was the defect; a dead
+      // button would be a worse one.
+      assert.equal(reg.get("billing-manage-section").hidden, false,
+        "the comp owner must be TOLD why there is no portal — the section vanishing with no explanation is the defect");
+      const manage = reg.get("billing-manage").innerHTML || "";
+      assert.ok(manage.includes("complimentary licence"),
+        "the Manage section must state the comp fact in words");
+      assert.ok(!manage.includes(">Manage billing<"),
+        "no portal button: POST /v1/billing/portal answers 422 no_subscription for a comp row (no gateway_customer_id)");
+      assert.ok(!manage.includes("Only the team owner can manage billing"),
+        "the comp arm runs before the owner gate — the owner must not be told to ask the owner");
+
+      // (4) CANCEL stays retired, and for the SAME server reason:
+      // Billing.request_cancel/2 needs a gateway_subscription_id a comp row has
+      // no such thing as. Its own copy ("until the end of the current billing
+      // period") is false for a licence with no period.
+      assert.equal(reg.get("billing-cancel-section").hidden, true,
+        "there is nothing to cancel: request_cancel/2 matches on gateway_subscription_id, which a comp row never carries");
+
+      // (5) GR20: a comp team is neither trial nor past-due, so no topbar chip.
+      assert.equal(reg.get("billing-chip").hidden, true, "a comp team mounts no topbar billing chip");
+    },
+  },
+
   // ── cch-w49-s7 · THE CORPUS ASSERTION ─────────────────────────────────────
   // THE OFFER THE SERVER CAN ONLY REFUSE. With the plane declaring
   // `unconfigured`, Billing.checkout/2 answers {:error, :billing_not_configured}
