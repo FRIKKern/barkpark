@@ -166,10 +166,30 @@ defmodule BarkparkWeb.TasksIdPrefixLookupTest do
 
     test "the lookup's predicate CAN ride that index (seq scans disabled)" do
       # REACHABILITY, not a today-speedup — the same framing the trgm and
-      # ready-queue index migrations use. On a handful of test rows the planner
-      # correctly prefers a seq scan; forcing it off proves the predicate is
-      # index-ELIGIBLE, which is exactly what `text_pattern_ops` buys and what a
-      # DEFAULT-collation btree could not do for `LIKE 'x%'` at all.
+      # ready-queue index migrations use. Forcing seq scans off proves the
+      # predicate is index-ELIGIBLE, which is exactly what `text_pattern_ops`
+      # buys and what a DEFAULT-collation btree could not do for `LIKE 'x%'`.
+      #
+      # WHY THIS TEST SEEDS AND ANALYZES (it reddened main once already, at
+      # 9fbc403e2, and stayed red for three consecutive Elixir-gate runs):
+      # `enable_seqscan = off` does not leave the target index as the only
+      # option — it leaves every OTHER index available. On a `documents` table
+      # holding a handful of task rows the planner happily takes the broad
+      # `documents_type_dataset_index` with a Filter, because at that size the
+      # filter is free. The assertion then rests on a planner COST comparison
+      # driven by table statistics, and `documents` is the SHARED test table
+      # every concurrent test writes into: green on a branch, red on main, with
+      # no code change between them.
+      #
+      # So the test now controls its own statistics. Inside this test's
+      # (rolled-back) sandbox transaction it inserts a mass of `type = 'task'`
+      # rows whose doc_ids spread across the whole byte range, keeps the probed
+      # prefix genuinely selective (3 rows in ~2000), and ANALYZEs so the
+      # planner costs the two candidates against THIS distribution rather than
+      # against whatever another agent's test left behind. A broad `type`-
+      # leading index must now read every task row; the prefix index reads three.
+      seed_task_rows!()
+
       Repo.query!("SET LOCAL enable_seqscan = off")
 
       plan =
@@ -183,5 +203,34 @@ defmodule BarkparkWeb.TasksIdPrefixLookupTest do
 
       assert plan =~ @index, "expected the prefix index in the plan, got:\n" <> plan
     end
+  end
+
+  # ~2000 `type = 'task'` rows, byte-spread doc_ids (md5 hex, so the btree
+  # histogram covers the whole key space) plus exactly 3 rows under the probed
+  # `idpfx-plan-` stem — a selectivity of ~0.15%, low enough that reading the
+  # prefix index beats reading every task row through a type-leading index.
+  # Raw SQL, not `Content.create_document/4`: this is fixture MASS, it must not
+  # pay the write path, and it must skip the GENERATED ALWAYS columns.
+  # Everything here dies with the sandbox transaction.
+  defp seed_task_rows! do
+    Repo.query!("""
+    INSERT INTO documents (id, doc_id, type, dataset, title, status, content, rev, inserted_at, updated_at)
+    SELECT gen_random_uuid(),
+           'idpfxstat-' || md5(i::text) || '-' || i,
+           'task', 'production', 'prefix-plan stats seed', 'published', '{}'::jsonb, 'seed-rev',
+           now(), now()
+      FROM generate_series(1, 2000) AS i
+    """)
+
+    Repo.query!("""
+    INSERT INTO documents (id, doc_id, type, dataset, title, status, content, rev, inserted_at, updated_at)
+    SELECT gen_random_uuid(),
+           'idpfx-plan-' || i,
+           'task', 'production', 'prefix-plan stats seed (a hit)', 'published', '{}'::jsonb, 'seed-rev',
+           now(), now()
+      FROM generate_series(1, 3) AS i
+    """)
+
+    Repo.query!("ANALYZE documents")
   end
 end
