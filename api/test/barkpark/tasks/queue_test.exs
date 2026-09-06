@@ -484,7 +484,12 @@ defmodule Barkpark.Tasks.QueueTest do
     test "all dependencies done => ready", %{scope: scope} do
       phase_id = "phase-dep-ok-#{System.unique_integer([:positive])}"
       dep_id = "dep-done-#{System.unique_integer([:positive])}"
-      _dep = mk_task!(dep_id, scope, @dataset, %{"lifecycle_status" => "done"})
+
+      _dep =
+        mk_task!(dep_id, scope, @dataset, %{
+          "close_reason" => "fixture: closed through the verb",
+          "lifecycle_status" => "done"
+        })
 
       main =
         mk_task!("main-dep-ok-#{System.unique_integer([:positive])}", scope, @dataset, %{
@@ -583,13 +588,21 @@ defmodule Barkpark.Tasks.QueueTest do
 
       # dep stored bare + done, referenced WITH the drafts. prefix.
       bare_dep = "dep-bare-#{u}"
-      _bare = mk_task!(bare_dep, scope, @dataset, %{"lifecycle_status" => "done"})
+
+      _bare =
+        mk_task!(bare_dep, scope, @dataset, %{
+          "close_reason" => "fixture: closed through the verb",
+          "lifecycle_status" => "done"
+        })
 
       # dep stored WITH drafts. + done, referenced bare.
       drafts_dep_base = "dep-drafted-#{u}"
 
       _drafted =
-        mk_task!("drafts." <> drafts_dep_base, scope, @dataset, %{"lifecycle_status" => "done"})
+        mk_task!("drafts." <> drafts_dep_base, scope, @dataset, %{
+          "close_reason" => "fixture: closed through the verb",
+          "lifecycle_status" => "done"
+        })
 
       main =
         mk_task!("main-dep-prefix-#{u}", scope, @dataset, %{
@@ -605,7 +618,10 @@ defmodule Barkpark.Tasks.QueueTest do
       dep_id = "dep-dataset-#{System.unique_integer([:positive])}"
 
       _done_elsewhere =
-        mk_task!(dep_id, scope, @dataset_alt, %{"lifecycle_status" => "done"})
+        mk_task!(dep_id, scope, @dataset_alt, %{
+          "close_reason" => "fixture: closed through the verb",
+          "lifecycle_status" => "done"
+        })
 
       _open_here = mk_task!(dep_id, scope, @dataset, %{"lifecycle_status" => "open"})
 
@@ -630,7 +646,10 @@ defmodule Barkpark.Tasks.QueueTest do
       dep_id = "dep-project-#{System.unique_integer([:positive])}"
 
       _done_elsewhere =
-        mk_task!(dep_id, other_scope, @dataset, %{"lifecycle_status" => "done"})
+        mk_task!(dep_id, other_scope, @dataset, %{
+          "close_reason" => "fixture: closed through the verb",
+          "lifecycle_status" => "done"
+        })
 
       _open_here = mk_task!(dep_id, scope, @dataset, %{"lifecycle_status" => "open"})
 
@@ -683,7 +702,11 @@ defmodule Barkpark.Tasks.QueueTest do
               dataset: dataset,
               title: dep_id,
               status: "draft",
-              content: %{"kind" => "task", "lifecycle_status" => "done"},
+              content: %{
+                "kind" => "task",
+                "close_reason" => "fixture: closed through the verb",
+                "lifecycle_status" => "done"
+              },
               workspace_id: scope[:workspace_id],
               project_id: scope[:project_id],
               inserted_at: now,
@@ -766,8 +789,21 @@ defmodule Barkpark.Tasks.QueueTest do
   defp set_lifecycle!(doc, status) do
     doc = Repo.get!(Document, doc.id)
 
+    # cch-w3-task-birth-attribution: a done row satisfies a dependent only if it
+    # ALSO carries close provenance, because `lifecycle_status` alone is
+    # forgeable by a fresh create. A fixture that flips to "done" is simulating
+    # a CLOSE, so it writes what a close writes.
+    content =
+      doc.content
+      |> Map.put("lifecycle_status", status)
+      |> then(fn c ->
+        if status == "done" and c["close_reason"] in [nil, ""],
+          do: Map.put(c, "close_reason", "fixture: closed through the verb"),
+          else: c
+      end)
+
     doc
-    |> Ecto.Changeset.change(content: Map.put(doc.content, "lifecycle_status", status))
+    |> Ecto.Changeset.change(content: content)
     |> Repo.update!()
   end
 

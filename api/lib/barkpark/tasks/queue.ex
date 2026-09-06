@@ -239,6 +239,11 @@ defmodule Barkpark.Tasks.Queue do
                            THEN done.workspace_id IS NULL
                            ELSE done.workspace_id = ? END
                   AND done.content->>'lifecycle_status' = 'done'
+                  AND (
+                    COALESCE(NULLIF(BTRIM(done.content->'claim'->>'closed_by'), ''), '') <> ''
+                    OR COALESCE(NULLIF(BTRIM(done.content->'claim'->>'closed_at'), ''), '') <> ''
+                    OR COALESCE(NULLIF(BTRIM(done.content->>'close_reason'), ''), '') <> ''
+                  )
                   AND done.dataset = ?
                   AND done.project_id IS NOT DISTINCT FROM ?
                   AND regexp_replace(done.doc_id, '^drafts\\.', '') =

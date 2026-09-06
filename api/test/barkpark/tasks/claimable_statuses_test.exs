@@ -76,7 +76,18 @@ defmodule Barkpark.Tasks.ClaimableStatusesTest do
   # The create validator only admits valid lifecycle values; flips to other
   # states go through a raw update (same helper shape as tasks_ready_test.exs).
   defp set_lifecycle!(doc, new_status) do
-    new_content = Map.put(doc.content, "lifecycle_status", new_status)
+    # cch-w3-task-birth-attribution: a done row satisfies a dependent only if it
+    # ALSO carries close provenance, because `lifecycle_status` alone is
+    # forgeable by a fresh create. A fixture that flips to "done" is simulating
+    # a CLOSE, so it writes what a close writes.
+    new_content =
+      doc.content
+      |> Map.put("lifecycle_status", new_status)
+      |> then(fn c ->
+        if new_status == "done" and c["close_reason"] in [nil, ""],
+          do: Map.put(c, "close_reason", "fixture: closed through the verb"),
+          else: c
+      end)
 
     doc
     |> Ecto.Changeset.change(content: new_content)
