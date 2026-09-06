@@ -58,7 +58,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "lineage-node" => ~w(title overline source),
     "chart" => ~w(id kind caption min max xlabels),
     "series" => ~w(label),
-    "step" => ~w(title),
+    "step" => ~w(id title),
     "tag" => ~w(tag strength),
     "item" => [],
     "li" => [],
@@ -629,14 +629,19 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   defp build_block("steps", attrs, sc, cur) do
     builder = fn step_attrs, sc, cur ->
       if sc do
-        {:ok, %{"blocks" => []} |> put_attr("title", step_attrs) |> Map.put_new("blocks", []),
+        {:ok, %{"blocks" => []} |> put_attr("id", step_attrs) |> put_attr("title", step_attrs),
          cur}
       else
         {blocks, errors, cur} = block_seq(cur, "step")
 
         case expect_close("step", cur, errors) do
-          {[], cur} -> {:ok, %{"blocks" => blocks} |> put_attr("title", step_attrs), cur}
-          {errors, cur} -> {:error, errors, cur}
+          {[], cur} ->
+            {:ok,
+             %{"blocks" => blocks} |> put_attr("id", step_attrs) |> put_attr("title", step_attrs),
+             cur}
+
+          {errors, cur} ->
+            {:error, errors, cur}
         end
       end
     end

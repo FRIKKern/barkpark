@@ -149,14 +149,38 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp block(%{"type" => "steps"} = b, d) do
     items =
       Enum.map(alias_get(b, ["steps", "items"]) || [], fn s ->
-        # A step's body is canonically `blocks`; the corpus also spells it
-        # `content` (a nested block list, not inline nodes).
-        case alias_get(s, ["blocks", "content"]) || [] do
+        # Match the reader's visible `children` body, including an explicitly
+        # empty list. BPML canonicalizes it to `blocks`; older `content` bodies
+        # remain accepted as nested blocks, not inline nodes.
+        body =
+          case Map.get(s, "children") do
+            children when is_list(children) -> children
+            absent when absent in [nil, false] -> alias_get(s, ["blocks", "content"]) || []
+            _ -> raise(UnprintableError.new(:block, "steps"))
+          end
+
+        # BPML can spell one body only. Refuse a distinct authored shadow
+        # rather than exposing hidden content or deleting it on pull/push.
+        conflicting_body? =
+          Enum.any?(["children", "blocks", "content"], fn key ->
+            value = Map.get(s, key)
+            value not in [nil, false, "", [], %{}] and value != body
+          end)
+
+        if not is_list(body) or conflicting_body?,
+          do: raise(UnprintableError.new(:block, "steps"))
+
+        case body do
           [] ->
-            "#{pad(d + 1)}<step#{attr_str(s, ["title"])}/>"
+            "#{pad(d + 1)}<step#{attr_str(s, ["id", "title"])}/>"
 
           children ->
-            wrap("step", attr_str(s, ["title"]), Enum.map(children, &block(&1, d + 2)), d + 1)
+            wrap(
+              "step",
+              attr_str(s, ["id", "title"]),
+              Enum.map(children, &block(&1, d + 2)),
+              d + 1
+            )
         end
       end)
 
