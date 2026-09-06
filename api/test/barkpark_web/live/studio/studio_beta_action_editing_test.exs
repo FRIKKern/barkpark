@@ -74,6 +74,7 @@ defmodule BarkparkWeb.Studio.StudioBetaActionEditingTest do
       )
 
       assert_reply(view, %{saved: true, request_id: ^no_op})
+      assert socket_of(view).assigns.save_status == "Auto-saved"
       assert stored_document(doc.doc_id) == before_noop
     end
 
@@ -90,6 +91,7 @@ defmodule BarkparkWeb.Studio.StudioBetaActionEditingTest do
 
     render_hook(view, "paper-block-autosave", params)
     assert_reply(view, %{saved: true, replayed: false, request_id: ^request, rev: saved_rev})
+    assert socket_of(view).assigns.save_status == "Auto-saved"
 
     [saved_section] = stored_blocks(doc.doc_id)
     [before_section] = blocks
@@ -113,6 +115,7 @@ defmodule BarkparkWeb.Studio.StudioBetaActionEditingTest do
     replay |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
     render_hook(replay, "paper-block-autosave", params)
     assert_reply(replay, %{saved: true, replayed: true, request_id: ^request, rev: ^saved_rev})
+    assert socket_of(replay).assigns.save_status == "Auto-saved"
     assert stored_blocks(doc.doc_id) == [saved_section]
     assert has_element?(replay, "#action-label-beta-action[value='Open the Beta result']")
 
@@ -126,6 +129,12 @@ defmodule BarkparkWeb.Studio.StudioBetaActionEditingTest do
     })
 
     assert_reply(replay, %{saved: false, request_id: ^forged})
+    assert socket_of(replay).assigns.save_status == "Save failed"
+    assert stored_blocks(doc.doc_id) == [saved_section]
+
+    render_hook(replay, "paper-block-autosave", params)
+    assert_reply(replay, %{saved: true, replayed: true, request_id: ^request, rev: ^saved_rev})
+    assert socket_of(replay).assigns.save_status == "Auto-saved"
     assert stored_blocks(doc.doc_id) == [saved_section]
   end
 

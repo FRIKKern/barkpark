@@ -1289,6 +1289,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           {:ok, _result} ->
             socket
             |> sync_editor_blocks()
+            |> assign(save_status: "Auto-saved")
             |> assign(last_paper_save_ok?: true)
             |> then(fn saved ->
               assign(saved,
@@ -1355,6 +1356,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       {:ok, receipt, outcome} ->
         socket
         |> sync_editor_blocks()
+        |> assign(save_status: "Auto-saved")
         |> assign(last_paper_save_ok?: true)
         |> assign(
           last_paper_save_result: %{
