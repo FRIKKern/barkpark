@@ -17,9 +17,17 @@ defmodule Barkpark.Tasks.ClaimCrossDatasetTest do
   stamped, closed or released either — all three are claim-fenced.
 
   RED-WITHOUT / GREEN-WITH. Every test here raises `Ecto.MultipleResultsError`
-  on the unfixed resolver. The determinism test additionally guards the
-  half-fix: `limit: 1` without a TOTAL order stops the raise and starts
-  returning an arbitrary row, which is the worse defect.
+  on the unfixed resolver.
+
+  ## SUPERSEDED IN PART (task-49eef068420df918, THE ONE RULE)
+
+  This file used to assert that the tie was broken by `dataset` ASC and that
+  repeated calls named the SAME row. That order was the defect one level up: it
+  made the claim land on the alphabetically-first dataset's copy — for the eleven
+  live twins, the EMPTY one — silently. `Barkpark.Tasks.TwinResolver` now REFUSES
+  an unnamed cross-dataset tie instead of picking, so the three twin tests below
+  assert the refusal. The property this file was filed for is intact and still
+  asserted: no `Ecto.MultipleResultsError`, ever — a typed 409 is not a 500.
   """
 
   use Barkpark.DataCase, async: false
@@ -67,6 +75,10 @@ defmodule Barkpark.Tasks.ClaimCrossDatasetTest do
   # order. That arm is inherited verbatim from `fetch_task_exact/3`, where
   # #15551 already covers it; here the tie falls through to `dataset` ASC,
   # which is what the determinism and ordering tests below assert.
+  # `dataset_twin_intended` on the SECOND create: `Tasks.DatasetTwinFence` now
+  # refuses exactly this birth (that is its own test), and a fixture that must
+  # BUILD the shape under measurement is the stated-intent escape's reason to
+  # exist. Without it this file could no longer construct a twin at all.
   defp mk_in_both!(scope, doc_id) do
     for dataset <- [@primary, @secondary] do
       {:ok, draft} =
@@ -78,6 +90,7 @@ defmodule Barkpark.Tasks.ClaimCrossDatasetTest do
             "content" => %{
               "kind" => "task",
               "lifecycle_status" => "open",
+              "dataset_twin_intended" => true,
               "acceptance_criteria" => [
                 %{"criterion" => "the fixture is claimable", "met" => false, "evidence" => ""}
               ]
@@ -92,64 +105,55 @@ defmodule Barkpark.Tasks.ClaimCrossDatasetTest do
   end
 
   describe "a targeted claim of a doc_id that lives in two datasets" do
-    test "does not raise — it resolves to one row and claims it", %{scope: scope} do
+    test "does not raise — it REFUSES, and names every dataset that holds the id",
+         %{scope: scope} do
       doc_id = uniq("cross-claim")
-      [a, b] = mk_in_both!(scope, doc_id)
+      [_a, _b] = mk_in_both!(scope, doc_id)
 
-      # THE DEFECT. On origin/main before this fix, Repo.one/1 over two matching
-      # rows raises Ecto.MultipleResultsError and the caller sees a 500.
-      assert {:ok, %Document{} = claimed} = Tasks.claim_by_id(doc_id, "worker-cross", scope)
-      assert claimed.id in [a.id, b.id], "resolved a row that is not one of the two twins"
-      assert %{"claim" => %{"worker" => "worker-cross"}} = claimed.content
+      # THE ORIGINAL DEFECT, still pinned: on origin/main before #15551's sibling
+      # fix, `Repo.one/1` over two matching rows raised Ecto.MultipleResultsError
+      # and the caller saw a 500.
+      e =
+        assert_raise Barkpark.Tasks.AmbiguousTwinError, fn ->
+          Tasks.claim_by_id(doc_id, "worker-cross", scope)
+        end
+
+      assert e.datasets == Enum.sort([@primary, @secondary])
+      assert Plug.Exception.status(e) == 409
     end
 
-    test "resolves DETERMINISTICALLY — repeated calls name the same row", %{scope: scope} do
+    test "the refusal is STABLE — the same call refuses the same way every time",
+         %{scope: scope} do
       doc_id = uniq("cross-determinism")
       [_a, _b] = mk_in_both!(scope, doc_id)
 
-      # `limit: 1` alone stops the raise and starts returning an arbitrary row.
-      # A claim that lands on a different dataset's copy per connection is a
-      # worse defect than the 500, so the order must be TOTAL, not merely
-      # present. Same worker re-claiming is a renewal, so this is legal and the
-      # row identity is the thing under test.
-      assert {:ok, %Document{id: first}} = Tasks.claim_by_id(doc_id, "worker-cross", scope)
-      assert {:ok, %Document{id: second}} = Tasks.claim_by_id(doc_id, "worker-cross", scope)
-      assert {:ok, %Document{id: third}} = Tasks.claim_by_id(doc_id, "worker-cross", scope)
+      for _ <- 1..3 do
+        e =
+          assert_raise Barkpark.Tasks.AmbiguousTwinError, fn ->
+            Tasks.claim_by_id(doc_id, "worker-cross", scope)
+          end
 
-      assert first == second and second == third,
-             "the targeted-claim resolver returned different rows for the same doc_id"
+        assert e.datasets == Enum.sort([@primary, @secondary])
+      end
     end
 
-    test "breaks the tie by the ORDER, not by insertion accident", %{scope: scope} do
+    test "NEITHER copy is claimed — no dataset order decides a write", %{scope: scope} do
       doc_id = uniq("cross-published")
       twins = mk_in_both!(scope, doc_id)
 
-      # Both twins are drafts, so the published-first arm ties and `dataset`
-      # ASC decides. The fixture inserts `production` FIRST and `aker-brygge`
-      # second, so insertion order and dataset order DISAGREE: a resolver that
-      # returned "whatever came first" would answer `production` here.
-      expected = Enum.min_by(twins, & &1.dataset)
-      assert expected.dataset == @secondary
+      # The old order claimed @secondary here ("aker-brygge" sorts first) while
+      # the fixture inserts @primary FIRST — insertion order and dataset order
+      # disagree on purpose. The rule's answer is that neither is written.
+      assert_raise Barkpark.Tasks.AmbiguousTwinError, fn ->
+        Tasks.claim_by_id(doc_id, "worker-cross", scope)
+      end
 
-      assert {:ok, %Document{id: id, dataset: ds}} =
-               Tasks.claim_by_id(doc_id, "worker-cross", scope)
-
-      assert id == expected.id
-      assert ds == @secondary, "the dataset arm of the order did not decide the tie"
+      for twin <- twins do
+        after_refusal = Repo.get!(Document, twin.id)
+        assert after_refusal.content["lifecycle_status"] == "open"
+        refute after_refusal.content["claim"]
+      end
     end
-
-    # HONEST LIMIT OF THIS FILE, measured rather than assumed. Disarming the
-    # order and limit entirely reds three of these four tests with
-    # `Ecto.MultipleResultsError` — the defect verbatim. But keeping `limit: 1`
-    # and dropping only the `dataset`/`id` tiebreak (leaving published-first
-    # alone) leaves all four GREEN: with two heap rows Postgres happened to
-    # return the same one anyway. So this suite proves the RAISE is fixed and
-    # does NOT prove the order is total. The total order is defended by the
-    # canonical rule it copies (`Content.Graph.resolve_doc/3`,
-    # `@canonical capability:slug-resolve`, and `fetch_task_exact/3`) and by
-    # the reasoning that a partial order trades a loud 500 for a silent
-    # alternating answer — not by a red test. Stated here so nobody reads
-    # green as coverage it does not have.
 
     test "an ordinary single-dataset row is unaffected", %{scope: scope} do
       doc_id = uniq("single-dataset")
