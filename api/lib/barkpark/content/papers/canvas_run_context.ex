@@ -11,6 +11,12 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
           | %{
               container_kind: String.t(),
               container_id: String.t(),
+              container_column_index: non_neg_integer(),
+              container_run_ids: [String.t()]
+            }
+          | %{
+              container_kind: String.t(),
+              container_id: String.t(),
               container_row_id: String.t(),
               container_run_ids: [String.t()]
             }
@@ -23,12 +29,15 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
          {:ok, run_ids, _run_present?} <- context_field(context, :container_run_ids),
          {:ok, kind, kind_present?} <- context_field(context, :container_kind),
          {:ok, row_id, row_present?} <- context_field(context, :container_row_id),
+         {:ok, column_index, column_present?} <-
+           context_field(context, :container_column_index),
          true <- valid_base?(container_id, run_ids) do
       cond do
-        not kind_present? and not row_present? ->
+        not kind_present? and not row_present? and not column_present? ->
           {:ok, %{container_id: container_id, container_run_ids: run_ids}}
 
-        kind in ["steps", "tabs"] and kind_present? and row_present? and nonblank?(row_id) ->
+        kind in ["steps", "tabs"] and kind_present? and row_present? and
+          not column_present? and nonblank?(row_id) ->
           {:ok,
            %{
              container_kind: kind,
@@ -37,11 +46,30 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
              container_run_ids: run_ids
            }}
 
-        kind == "figure" and kind_present? and not row_present? and length(run_ids) == 1 ->
+        kind == "figure" and kind_present? and not row_present? and not column_present? and
+            length(run_ids) == 1 ->
           {:ok,
            %{
              container_kind: kind,
              container_id: container_id,
+             container_run_ids: run_ids
+           }}
+
+        kind == "section" and kind_present? and not row_present? and not column_present? ->
+          {:ok,
+           %{
+             container_kind: kind,
+             container_id: container_id,
+             container_run_ids: run_ids
+           }}
+
+        kind == "columns" and kind_present? and not row_present? and column_present? and
+            valid_column_index?(column_index) ->
+          {:ok,
+           %{
+             container_kind: kind,
+             container_id: container_id,
+             container_column_index: column_index,
              container_run_ids: run_ids
            }}
 
@@ -130,8 +158,25 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
        ),
        do: unique_tabs_row(blocks, container_id, row_id)
 
-  defp unique_container_run(blocks, %{container_id: container_id}),
-    do: unique_expandable(blocks, container_id)
+  defp unique_container_run(
+         blocks,
+         %{container_kind: "section", container_id: container_id}
+       ),
+       do: unique_section(blocks, container_id)
+
+  defp unique_container_run(
+         blocks,
+         %{
+           container_kind: "columns",
+           container_id: container_id,
+           container_column_index: column_index
+         }
+       ),
+       do: unique_column(blocks, container_id, column_index)
+
+  defp unique_container_run(blocks, %{container_id: container_id} = context)
+       when not is_map_key(context, :container_kind),
+       do: unique_expandable(blocks, container_id)
 
   defp unique_figure(
          blocks,
@@ -163,6 +208,45 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
       [_one] -> {:error, :canvas_run_container_children_invalid}
       [] -> {:error, :canvas_run_container_not_found}
       [_first | _rest] -> {:error, :canvas_run_container_ambiguous}
+    end
+  end
+
+  defp unique_section(blocks, container_id) do
+    case find_containers(blocks, "section", container_id, []) do
+      [%{alias: "blocks"} = match] -> {:ok, match}
+      [_one] -> {:error, :canvas_run_container_children_invalid}
+      [] -> {:error, :canvas_run_container_not_found}
+      [_first | _rest] -> {:error, :canvas_run_container_ambiguous}
+    end
+  end
+
+  defp unique_column(blocks, container_id, column_index) do
+    case find_containers(blocks, "columns", container_id, []) do
+      [%{columns: columns, path: path}] when is_list(columns) ->
+        case Enum.fetch(columns, column_index) do
+          {:ok, children} when is_list(children) ->
+            {:ok,
+             %{
+               path: path ++ ["columns"],
+               alias: {:column, column_index},
+               children: children
+             }}
+
+          {:ok, _invalid} ->
+            {:error, :canvas_run_container_children_invalid}
+
+          :error ->
+            {:error, :canvas_run_container_column_not_found}
+        end
+
+      [_one] ->
+        {:error, :canvas_run_container_children_invalid}
+
+      [] ->
+        {:error, :canvas_run_container_not_found}
+
+      [_first | _rest] ->
+        {:error, :canvas_run_container_ambiguous}
     end
   end
 
@@ -288,6 +372,16 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
   defp container_match(%{"type" => "figure"} = block, path),
     do: %{path: path, child: Map.get(block, "child")}
 
+  defp container_match(%{"type" => "section"} = block, path) do
+    case Map.get(block, "blocks") do
+      blocks when is_list(blocks) -> %{path: path, alias: "blocks", children: blocks}
+      _invalid -> %{path: path, alias: nil, children: []}
+    end
+  end
+
+  defp container_match(%{"type" => "columns"} = block, path),
+    do: %{path: path, columns: Map.get(block, "columns")}
+
   defp container_match(block, path) do
     {alias_key, children} = effective_children(block)
     %{path: path, alias: alias_key, children: children}
@@ -316,6 +410,16 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
   defp recursive_child_entries(%{"type" => "section", "blocks" => blocks})
        when is_list(blocks),
        do: [{["blocks"], blocks}]
+
+  defp recursive_child_entries(%{"type" => "columns", "columns" => columns})
+       when is_list(columns) do
+    columns
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {children, index} when is_list(children) -> [{["columns", {:column, index}], children}]
+      {_opaque, _index} -> []
+    end)
+  end
 
   defp recursive_child_entries(%{"type" => "steps", "steps" => rows}) when is_list(rows) do
     rows
@@ -372,6 +476,11 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
         row
       end
     end)
+  end
+
+  defp put_path(current, [{:column, index} | rest], replacement)
+       when is_list(current) and is_integer(index) do
+    List.update_at(current, index, &put_path(&1, rest, replacement))
   end
 
   defp put_path(current, [{:singular, key} | rest], replacement)
@@ -451,6 +560,9 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
   defp all_child_lists(%{"type" => "section", "blocks" => blocks}) when is_list(blocks),
     do: [blocks]
 
+  defp all_child_lists(%{"type" => "columns", "columns" => columns}) when is_list(columns),
+    do: Enum.filter(columns, &is_list/1)
+
   defp all_child_lists(%{"type" => "steps", "steps" => rows}) when is_list(rows) do
     Enum.flat_map(rows, fn
       row when is_map(row) ->
@@ -506,4 +618,7 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
   end
 
   defp nonblank?(value), do: is_binary(value) and String.trim(value) != ""
+
+  defp valid_column_index?(value),
+    do: is_integer(value) and value >= 0 and value <= 9_007_199_254_740_991
 end
