@@ -4068,11 +4068,22 @@ defmodule BarkparkCloud.DeployLedgerTest do
       cancelled_row = Enum.find(d.sites, &(&1.site_id == cancelled_site.id))
       assert cancelled_row.cancelled == 2
       refute cancelled_row.still_waiting
+
+      # THE BUCKET IS ON THE WIRE EVEN WHEN IT IS EMPTY. A `cancelled` key that
+      # only appeared on rows that had one would be indistinguishable from a
+      # bucket never wired; the genuine waiter's row must carry a literal 0.
+      waiting_row = Enum.find(d.sites, &(&1.site_id == waiting_site.id))
+      assert waiting_row.cancelled == 0
     end
 
     test "the emitted key set is PINNED — the Go reader decodes every key", %{site: site} do
       delivery_40pct!(site)
       d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+
+      # No row in this fixture is cancelled, and the bucket still reads 0 at
+      # both levels — present, never absent (dr-w11-bl-cancelled-rows-count-as-waiting).
+      assert d.cancelled == 0
+      assert Enum.all?(d.sites, &(&1.cancelled == 0))
 
       assert Enum.sort(Map.keys(d)) == [
                :as_of,
