@@ -8,6 +8,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   shapes in `Barkpark.PortableDoc.Render.compose_block/1,2`.
   """
 
+  alias BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor
+
   @doc false
   # Build the patch map for a block from the submitted form params. Only the
   # editable field(s) for that block type are included; `id`/`type` are locked
@@ -149,7 +151,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     |> put_video_captions(block, params)
   end
 
-  # Unknown / non-editable block type (image, table, divider) → no-op patch.
+  def build_block_patch(%{"type" => type} = block, params)
+      when type in ["diff", "filetree", "footnote", "code-tabs"],
+      do: TechnicalBlockEditor.build_patch(block, params)
+
+  # Types authored through other editor paths do not use this form patch builder.
   def build_block_patch(_block, _params), do: %{}
 
   @doc false
@@ -174,6 +180,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
       _ -> {:error, :invalid_number}
     end
   end
+
+  def validate_block_patch(%{"type" => type} = block, params)
+      when type in ["diff", "filetree", "footnote", "code-tabs"],
+      do: TechnicalBlockEditor.validate_patch(block, params)
 
   def validate_block_patch(block, params), do: {:ok, build_block_patch(block, params)}
 
@@ -688,6 +698,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def default_block("equation", id),
     do: %{"id" => id, "type" => "equation", "tex" => "", "display" => true}
+
+  def default_block("diff", id),
+    do: %{"id" => id, "type" => "diff", "diff" => "", "file" => "", "lang" => ""}
+
+  def default_block("filetree", id),
+    do: %{"id" => id, "type" => "filetree", "text" => "", "legend" => ""}
+
+  def default_block("footnote", id),
+    do: %{"id" => id, "type" => "footnote", "notes" => []}
+
+  def default_block("code-tabs", id),
+    do: %{"id" => id, "type" => "code-tabs", "tabs" => [], "syncKey" => ""}
 
   def default_block("video", id),
     do: %{"id" => id, "type" => "video", "src" => "", "poster" => "", "captions" => []}

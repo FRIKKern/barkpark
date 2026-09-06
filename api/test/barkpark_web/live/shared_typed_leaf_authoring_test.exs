@@ -249,6 +249,69 @@ defmodule BarkparkWeb.SharedTypedLeafAuthoringTest do
     assert has_element?(remounted, "#field-number-value-#{number["id"]}[value=\"8.5\"]")
   end
 
+  test "technical forms persist through both hosts and reject stale collection counts", ctx do
+    path = "/w/#{ctx.ws.slug}/p/#{ctx.project.slug}/papers/#{ctx.slug}"
+    {:ok, public, _} = live(ctx.conn, path)
+    render_click(public, "paper-toggle-edit", %{})
+
+    for id <- ~w(diff filetree footnote code-tabs) do
+      assert has_element?(public, "#technical-block-form-#{id}")
+    end
+
+    save_form(public, "diff", %{"diff" => "-old\n+new\n", "file" => "a.ex", "lang" => "elixir"})
+
+    save_form(public, "filetree", %{"text" => "src/\n└── a.ex ● changed", "legend" => "● changed"})
+
+    save_form(public, "footnote", %{"note-count" => "1", "note-0-text" => "Edited note"})
+
+    save_form(public, "code-tabs", %{
+      "tab-count" => "1",
+      "tab-0-value" => "new code",
+      "syncKey" => "examples"
+    })
+
+    assert by_id(stored_blocks(ctx), "diff")["diff"] == "-old\n+new\n"
+    assert by_id(stored_blocks(ctx), "filetree")["text"] == "src/\n└── a.ex ● changed"
+
+    assert [%{"id" => "fn1", "text" => "Edited note", "unknown" => "note-meta"}] =
+             by_id(stored_blocks(ctx), "footnote")["notes"]
+
+    assert [%{"code" => "new code", "unknown" => "tab-meta"}] =
+             by_id(stored_blocks(ctx), "code-tabs")["tabs"]
+
+    conn = Plug.Test.init_test_session(recycle(ctx.conn), %{"api_token" => ctx.raw})
+
+    {:ok, studio, _} =
+      live(conn, "/w/#{ctx.ws.slug}/p/#{ctx.project.slug}/d/production/studio/paper/#{ctx.slug}")
+
+    if has_element?(studio, ~s([data-test-id="paper-edit-toggle"])),
+      do: studio |> element(~s([data-test-id="paper-edit-toggle"])) |> render_click()
+
+    save_form(studio, "code-tabs", %{"tab-count" => "1", "tab-action" => "add"})
+    assert length(by_id(stored_blocks(ctx), "code-tabs")["tabs"]) == 2
+
+    for view <- [public, studio] do
+      before = stored_paper(ctx)
+      request = Ecto.UUID.generate()
+
+      render_hook(view, "paper-edit-block", %{
+        "block_id" => "code-tabs",
+        "tab-count" => "0",
+        "request_id" => request,
+        "if_rev" => mutation_rev(view)
+      })
+
+      assert_reply(view, %{saved: false, request_id: ^request})
+      assert stored_paper(ctx).rev == before.rev
+      assert stored_paper(ctx).content == before.content
+    end
+
+    conn = Plug.Test.init_test_session(recycle(ctx.conn), %{"api_token" => ctx.raw})
+    {:ok, reloaded, _} = live(conn, path)
+    render_click(reloaded, "paper-toggle-edit", %{})
+    assert socket_of(reloaded).assigns.edit_blocks == stored_blocks(ctx)
+  end
+
   defp save_form(view, block_id, params) do
     request_id = Ecto.UUID.generate()
 
@@ -286,6 +349,27 @@ defmodule BarkparkWeb.SharedTypedLeafAuthoringTest do
 
   defp fixture_blocks do
     [
+      %{"id" => "diff", "type" => "diff", "diff" => "old", "unknown" => "diff-meta"},
+      %{"id" => "filetree", "type" => "filetree", "text" => "src/", "unknown" => "tree-meta"},
+      %{
+        "id" => "footnote",
+        "type" => "footnote",
+        "notes" => [
+          %{"id" => "fn1", "text" => "Original", "unknown" => "note-meta"}
+        ]
+      },
+      %{
+        "id" => "code-tabs",
+        "type" => "code-tabs",
+        "tabs" => [
+          %{
+            "label" => "Legacy",
+            "language" => "text",
+            "code" => "old code",
+            "unknown" => "tab-meta"
+          }
+        ]
+      },
       %{
         "id" => "number",
         "type" => "field-number",

@@ -22,6 +22,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # the editor never authors halt copy, it mirrors the server reason verbatim).
   import BarkparkWeb.StudioComponents.Editor, only: [paper_halt_banner: 1]
 
+  import BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor,
+    only: [technical_block_editor: 1]
+
   alias Barkpark.Content.Papers.Template
   alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
   alias BarkparkWeb.Studio.StudioLive.Blocks
@@ -486,6 +489,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"pullquote", "Pullquote"}
        ]},
       {"Visual", [{"diagram", "Diagram"}, {"equation", "Equation"}]},
+      {"Technical",
+       [
+         {"diff", "Diff"},
+         {"filetree", "File tree"},
+         {"footnote", "Footnotes"},
+         {"code-tabs", "Code tabs"}
+       ]},
       {"Basic fields",
        [
          {"field-string", "String"},
@@ -1180,6 +1190,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
     ~H"""
     <%= case @type do %>
+      <% t when t in ["diff", "filetree", "footnote", "code-tabs"] -> %>
+        <.technical_block_editor block={@block} id={@id} />
       <%!-- Rich-text blocks are edited by the
             <bp-paper-editor> Web Component. The phx-update="ignore" wrapper
             keeps LiveView from re-diffing the WC's internal DOM (preserving
