@@ -450,7 +450,10 @@ test("the SHIPPED accepted-until-fixed.json satisfies its own loader", () => {
   // an allowlist, and a list that ships unparseable would take the gate to a
   // FAULT on every run of every PR.
   const entries = loadAcceptedEntries(_read(ACCEPTED_PATH, "utf8"));
-  assert.ok(entries.length > 0, "the shipped list must not be empty while the debt is real");
+  // An EMPTY list is the documented end-state ("the durable fix is a SHORTER
+  // list, never a longer one"), and arm (a) reds any unlisted identity, so
+  // emptiness cannot silence the gate. What must hold is that it LOADS.
+  assert.ok(Array.isArray(entries), "the shipped list must load through its own loader");
   for (const e of entries) assert.match(e.row, /^task-[0-9a-f]+$/);
 });
 
