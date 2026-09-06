@@ -6,7 +6,8 @@ defmodule Barkpark.PortableDoc.Bpml.Diff do
   vocabulary stays the only write path.
 
   Pure and self-verifying: `derive/2` id-keys both lists (minting ids for new
-  blocks via the same `BlockOps.ensure_block_ids/1` every write path uses),
+  blocks via the same `BlockIds.ensure_block_ids/1` every write path uses —
+  `Content.Papers.BlockOps.ensure_block_ids/1` is a delegate to it),
   emits removes → then a single left-to-right walk that inserts, moves and
   replaces — and then PROVES the batch by replaying it through
   `Patch.apply_patches/2`: a batch that does not reproduce the target
@@ -16,7 +17,7 @@ defmodule Barkpark.PortableDoc.Bpml.Diff do
   obviously correct at the cost of coarser ops.
   """
 
-  alias Barkpark.Content.Papers.BlockOps
+  alias Barkpark.PortableDoc.BlockIds
   alias Barkpark.PortableDoc.Patch
 
   @doc """
@@ -28,7 +29,7 @@ defmodule Barkpark.PortableDoc.Bpml.Diff do
   @spec derive([map()], [map()]) ::
           {:ok, [map()], [op :: map()]} | {:error, :diff_verification_failed}
   def derive(old, new) when is_list(old) and is_list(new) do
-    new = BlockOps.ensure_block_ids(new)
+    new = BlockIds.ensure_block_ids(new)
 
     if old == new do
       {:ok, new, []}
