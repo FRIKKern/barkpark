@@ -315,6 +315,56 @@ defmodule BarkparkCloud.Registry.SiteTest do
       assert Ecto.Changeset.get_field(cs, :serving_mode) == "cf_proxied"
     end
   end
+
+  ## ssw8-persist-binding-verdict (charter D73) — THE VERDICT IS A COLUMN.
+  ##
+  ## `content_bound` on the wire was `not is_nil(read_token_encrypted)` — "a token
+  ## was minted", which every content-bound site has. It is now DERIVED from this
+  ## persisted verdict, so the changeset is the door that keeps the value legal.
+
+  describe "content_binding_verdict (ssw8): the persisted create-time verdict" do
+    test "defaults to never_checked — nobody has looked, and that is its OWN value" do
+      cs = changeset(kind: "container", framework: "nextjs")
+      assert cs.valid?
+      # NOT nil, and NOT a nullable `bound`: a NULL a reader rounds up to
+      # "probably fine" is exactly the un-backed field this column retires.
+      assert Ecto.Changeset.get_field(cs, :content_binding_verdict) == "never_checked"
+      assert Ecto.Changeset.get_field(cs, :content_binding_checked_at) == nil
+    end
+
+    test "accepts each of the four honest verdicts, and the checked-at stamp" do
+      at = ~U[2026-09-06 12:00:00.000000Z]
+
+      for verdict <- Site.binding_verdicts() do
+        cs =
+          changeset(
+            kind: "container",
+            framework: "nextjs",
+            content_binding_verdict: verdict,
+            content_binding_checked_at: at
+          )
+
+        assert cs.valid?, "#{verdict} must be a legal verdict"
+        assert Ecto.Changeset.get_field(cs, :content_binding_verdict) == verdict
+        assert Ecto.Changeset.get_field(cs, :content_binding_checked_at) == at
+      end
+
+      assert Enum.sort(Site.binding_verdicts()) ==
+               ~w(bound never_checked not_applicable unverified)
+    end
+
+    test "a verdict outside the enum is a validation error, never a silent bad row" do
+      cs = changeset(kind: "container", framework: "nextjs", content_binding_verdict: "probably")
+      refute cs.valid?
+      assert {"is invalid", _} = cs.errors[:content_binding_verdict]
+    end
+
+    test "an explicit nil verdict is refused — the derivation has no reading for it" do
+      cs = changeset(kind: "container", framework: "nextjs", content_binding_verdict: nil)
+      refute cs.valid?
+      assert {"can't be blank", _} = cs.errors[:content_binding_verdict]
+    end
+  end
 end
 
 defmodule BarkparkCloud.Registry.SitePersistenceTest do
