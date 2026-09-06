@@ -23,8 +23,7 @@ defmodule Barkpark.Tasks.Claim do
   alias Barkpark.Repo
   alias Barkpark.Tasks.Blockers
   alias Barkpark.Tasks.CriteriaExemption
-  alias Barkpark.Tasks.DependencySatisfaction
-  alias Barkpark.Tasks.{Edges, ExecutionPolicy, Queue, QueueGate, Validation, WorkDigest}
+  alias Barkpark.Tasks.{ExecutionPolicy, Queue, QueueGate, Validation, WorkDigest}
 
   @event_task_claimed "task.claimed"
   # Derived at compile time from the ONE claimability source of truth

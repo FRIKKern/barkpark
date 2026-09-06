@@ -70,27 +70,27 @@ defmodule Barkpark.Tasks.Queue do
   # dataset, project_id. The interpolated predicate names its `done` alias and
   # consumes NO binds, so it cannot shift them.
   @declared_deps_sql """
-NOT EXISTS (
-  SELECT 1
-  FROM jsonb_array_elements_text(
-         CASE WHEN jsonb_typeof(?->'dependencies') = 'array'
-              THEN ?->'dependencies'
-              ELSE '[]'::jsonb END
-       ) AS dep(id)
-  WHERE 0 = (
-    SELECT count(*)
-    FROM documents AS done
-    WHERE done.type = 'task'
-      AND CASE WHEN ?::boolean
-               THEN done.workspace_id IS NULL
-               ELSE done.workspace_id = ? END
-      AND #{DependencySatisfaction.sql_fragment("done")}
-      AND done.dataset = ?
-      AND done.project_id IS NOT DISTINCT FROM ?
-      AND regexp_replace(done.doc_id, '^drafts\\.', '') =
-          regexp_replace(dep.id, '^drafts\\.', '')
+  NOT EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(
+           CASE WHEN jsonb_typeof(?->'dependencies') = 'array'
+                THEN ?->'dependencies'
+                ELSE '[]'::jsonb END
+         ) AS dep(id)
+    WHERE 0 = (
+      SELECT count(*)
+      FROM documents AS done
+      WHERE done.type = 'task'
+        AND CASE WHEN ?::boolean
+                 THEN done.workspace_id IS NULL
+                 ELSE done.workspace_id = ? END
+        AND #{DependencySatisfaction.sql_fragment("done")}
+        AND done.dataset = ?
+        AND done.project_id IS NOT DISTINCT FROM ?
+        AND regexp_replace(done.doc_id, '^drafts\\.', '') =
+            regexp_replace(dep.id, '^drafts\\.', '')
+    )
   )
-)
   """
 
   @ready_default_limit 50
