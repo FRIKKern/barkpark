@@ -54,6 +54,16 @@ defmodule Barkpark.Tasks.Expectations do
   stubbed and no title leaks — but the reader can no longer report a partial
   answer as a complete one, and a `Logger.warning` names the ids.
 
+  ## doc_id is not unique across types
+
+  One measured cause of that miss is a NAME COLLISION, not a scope refusal:
+  `documents.doc_id` is unique per (scope, type), so a `tag` document and a
+  `task` document can both be `authoring-excellence`. The batch hydration is
+  TYPELESS and keys its result by doc_id, so the two rows collapse and the
+  last one wins — a task whose name is also a tag drops out of its own
+  paper's list. `resolve_task/4` re-reads such a miss TYPE-PINNED under the
+  identical clamp stack; see its comment.
+
   ## Bounding
 
   One inbound hop (no traversal), capped at the graph engine's existing
@@ -176,12 +186,38 @@ defmodule Barkpark.Tasks.Expectations do
 
     doc_ids
     |> Enum.reduce({[], []}, fn doc_id, {kept, missed} ->
-      case Map.get(docs_by_id, doc_id) do
+      case resolve_task(docs_by_id, doc_id, dataset, opts) do
         %{type: "task"} = doc -> {[entry(doc, Map.fetch!(kinds_by_doc, doc_id)) | kept], missed}
-        _ -> {kept, [doc_id | missed]}
+        nil -> {kept, [doc_id | missed]}
       end
     end)
     |> then(fn {kept, missed} -> {Enum.reverse(kept), Enum.reverse(missed)} end)
+  end
+
+  # `doc_id` is NOT unique across types — a `tag` document and a `task`
+  # document can both be named `authoring-excellence`. The batch read is
+  # TYPELESS and keys its result `Map.new(fn d -> {d.doc_id, d} end)`, so when
+  # both rows come back the LAST one wins: a task whose name is also a tag can
+  # be shadowed out of its own paper's driven-task list, with no error and no
+  # short-read signal (task-464b89f30e3f8e41).
+  #
+  # We know the type we want. So a batch entry that is missing OR is some other
+  # type is re-read TYPE-PINNED through `get_document/4`, which carries the
+  # SAME clamp stack (dataset + tenancy + owner + grants) plus `type == "task"`
+  # — no scope is widened, a shadowed row is simply asked for by its real
+  # identity. Bounded: the retry runs only on the batch's misses, normally
+  # none. A genuine scope miss still returns nil and lands in `unhydrated`.
+  defp resolve_task(docs_by_id, doc_id, dataset, opts) do
+    case Map.get(docs_by_id, doc_id) do
+      %{type: "task"} = doc ->
+        doc
+
+      _shadowed_or_absent ->
+        case Content.get_document(doc_id, "task", dataset, opts) do
+          {:ok, %{type: "task"} = doc} -> doc
+          _ -> nil
+        end
+    end
   end
 
   # One hydrated task entry.
