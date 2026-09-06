@@ -1597,7 +1597,30 @@
   box-shadow: 0 4px 14px hsl(var(--bp-shadow-hsl) / 0.10);
 }
 .bp-paper-contextual-panel > .bp-paper-edit-form { display: grid; gap: 0.65rem; }
-.bp-paper-contextual-panel .bp-paper-edit-fieldlabel { min-width: 0; color: var(--paper-ink-soft); }
+.bp-paper-contextual-panel .bp-paper-edit-fieldlabel {
+  display: grid; gap: 0.3rem; min-width: 0; color: var(--paper-ink-soft);
+}
+.bp-paper-contextual-panel fieldset.bp-paper-edit-form {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.45rem;
+  min-inline-size: 0; margin: 0; padding: 0.75rem;
+  border: 1px solid var(--paper-rule); border-radius: 4px;
+}
+.bp-paper-contextual-panel :is(input[type="text"], input[type="number"], textarea, select) {
+  width: 100%; min-width: 0; box-sizing: border-box;
+}
+.bp-paper-contextual-panel .bp-paper-edit-actions {
+  flex-direction: row; flex-wrap: wrap; gap: 0.4rem;
+}
+.bp-paper-contextual-panel button {
+  min-height: 2rem; padding: 0.35rem 0.65rem;
+  font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.8125rem;
+  line-height: 1.3; color: var(--paper-ink-soft); background: transparent;
+  border: 1px solid var(--paper-rule); border-radius: 4px; cursor: pointer;
+}
+.bp-paper-contextual-panel button:hover:not(:disabled) {
+  color: var(--paper-ink); background: var(--paper-accent-soft);
+}
+.bp-paper-contextual-panel button:disabled { opacity: 0.45; cursor: default; }
 .bp-paper-contextual-panel :is(summary, button, input, textarea, select):focus-visible {
   outline: 2px solid var(--paper-accent); outline-offset: 2px;
 }

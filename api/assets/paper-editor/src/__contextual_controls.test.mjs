@@ -13,6 +13,15 @@ const labels = shell.match(/\.bp-paper-contextual-panel \.bp-paper-edit-fieldlab
 assert.ok(labels, "shared shell scopes the configuration-label rule");
 assert.match(labels[1], /color:\s*var\(--paper-ink-soft\)/,
   "small form labels use readable text, not faint decorative text");
+assert.match(labels[1], /display:\s*grid/, "wrapped field labels stack their inputs");
+const rows = shell.match(/\.bp-paper-contextual-panel fieldset\.bp-paper-edit-form\s*\{([^}]*)\}/);
+assert.ok(rows, "collection rows have a scoped layout instead of inherited inline flex");
+assert.match(rows[1], /display:\s*grid/, "each authored row field has its own line");
+assert.match(rows[1], /min-inline-size:\s*0/, "fieldset intrinsic width cannot force panel overflow");
+const actions = shell.match(/\.bp-paper-contextual-panel \.bp-paper-edit-actions\s*\{([^}]*)\}/);
+assert.match(actions?.[1] ?? "", /flex-direction:\s*row/, "row actions remain a compact wrapping group");
+const buttons = shell.match(/\.bp-paper-contextual-panel button\s*\{([^}]*)\}/);
+assert.match(buttons?.[1] ?? "", /min-height:\s*2rem/, "public controls have explicit usable button sizing");
 
 for (const [name, css] of [["standalone", styles], ["host shell", shell]]) {
   let checked = 0;
