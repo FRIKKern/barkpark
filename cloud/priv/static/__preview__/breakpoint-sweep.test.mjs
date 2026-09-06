@@ -138,19 +138,24 @@ test("app.css's declared axis is exactly the sweep's BREAKPOINTS, with nothing u
   const r = parseMediaBreakpoints(APP_CSS);
   assert.deepEqual(r.breakpoints, BREAKPOINTS);
   assert.deepEqual(r.unresolved, []);
-  // 18 widths. cch-w16-s8 dropped 900 from BREAKPOINTS with the CSS rule that
+  // 21 widths. cch-w16-s8 dropped 900 from BREAKPOINTS with the CSS rule that
   // declared it — the ONLY width that left is 901, since 900 is still walked as
   // 899+1 — taking this to 12. W17-S6 then added `@media (max-width: 830px)`
   // for the past-due money message, which brings 829/830/831 and takes it to 15.
   // W20-S8 added `@media (min-width: 621px) and (max-width: 740px)` for that
   // SAME message in the shell-fold band, which brings 739/740/741 and takes it
   // to 18 — the prelude's lower edge costs nothing, since 620 was already
-  // declared and 621 is walked as 620+1.
+  // declared and 621 is walked as 620+1. cch-w18-bl then re-derived the W20-S9
+  // attention-name band's upper edge from 899 to 904 — the old edge was driven
+  // against a fixture string the control plane does not write, and on the real
+  // "Health unknown · Agent offline" the name column is cut from 900 through 904
+  // — which brings 903/904/905 and takes it to 21. 903 and 905 are genuinely
+  // new; 904 is not walked as 903+1 because 903 is itself only 904-1.
   // THIS LITERAL IS THE POINT: a CSS slice that adds or removes a breakpoint has
   // to come here and say which widths it moved. Leg A refuses either way, and it
   // DID refuse W17-S6's first draft ("UNCOVERED breakpoint 830px") and W20-S8's
   // ("UNCOVERED breakpoint 740px — the boundary walk is missing 739, 740, 741").
-  assert.deepEqual(WIDTHS, [619, 620, 621, 719, 720, 721, 739, 740, 741, 767, 768, 769, 829, 830, 831, 898, 899, 900]);
+  assert.deepEqual(WIDTHS, [619, 620, 621, 719, 720, 721, 739, 740, 741, 767, 768, 769, 829, 830, 831, 898, 899, 900, 903, 904, 905]);
 });
 
 test("the raw grep over-counts @media — comment-stripping is why the parser does not", () => {
@@ -584,8 +589,8 @@ test("the DEFAULT loop is ONE height, and the decision carries its own render co
   // instead of quietly stale.
   const one = CELLS.length * THEMES.length * 1 * WIDTHS.length;
   const all = CELLS.length * THEMES.length * HEIGHTS.length * WIDTHS.length;
-  assert.equal(one, 900);
-  assert.equal(all, 2700);
+  assert.equal(one, 1050);
+  assert.equal(all, 3150);
   const reason = HEIGHT_REASONS[RENDER_HEIGHT];
   assert.ok(reason.includes(String(one)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state the default-loop render count ${one}`);
   assert.ok(reason.includes(String(all)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state what walking all ${HEIGHTS.length} heights costs (${all})`);
@@ -723,7 +728,7 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
   const r = coverageReport({ css, html: INDEX_HTML });
   assert.equal(r.ok, false);
   assert.deepEqual(r.phantomBreakpoints, [740]);
-  assert.deepEqual(r.breakpoints, [620, 720, 768, 830, 899], "the mutation really did remove it — otherwise the refusal above is vacuous");
+  assert.deepEqual(r.breakpoints, [620, 720, 768, 830, 899, 904], "the mutation really did remove it — otherwise the refusal above is vacuous");
   // and the unmutated tree is clean, so this is the mutation talking
   assert.deepEqual(coverageReport({ css: APP_CSS, html: INDEX_HTML }).phantomBreakpoints, []);
 });

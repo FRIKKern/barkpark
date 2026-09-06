@@ -2935,7 +2935,21 @@ const EXPECTATIONS = {
       assert.ok(body.includes("Needs attention"), "the attention section heading renders");
       assert.ok(body.includes("attention-row"), "an attention row renders");
       assert.ok(body.includes(">Reporting</a>"), "the degraded box is named + linked");
-      assert.ok(/Health down|Agent offline/.test(body), "the row carries the real status reason");
+      // cch-w18-bl: the EXACT sentence, not an OR over two halves. The old
+      // disjunction was satisfied by "Agent offline" ALONE, so it held this
+      // fixture to nothing at all about its health word — and the word it
+      // served was "down", a pair the server does not organically produce
+      // (`Registry.mark_offline/1` writes "unknown" DELIBERATELY, and the
+      // shipped agent hard-codes agent_status "online"). Every pixel pin taken
+      // off this row — overflow-guard's W18-overview-card-pill and
+      // GR109-attention-row-dead-rule both walk it — is a statement about THIS
+      // string's rendered width, so the string is pinned here: flipping the
+      // fixture back to "down" reds this line rather than silently
+      // re-shortening the sentence three characters underneath the pins.
+      assert.ok(
+        body.includes("Health unknown · Agent offline"),
+        "the row carries the production-dominant status reason verbatim",
+      );
       assert.ok(body.includes("View instance"), "the row offers View instance");
       assert.ok(body.includes("fleet-open-studio"), "the row offers a working Open Studio");
       const grid = (reg.get("overview-instances") || {}).innerHTML || "";

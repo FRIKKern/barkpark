@@ -201,16 +201,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  The fresh-CDP-target-per-cell requirement is what BUYS liveness, and it
 //  costs roughly a second per cell (0.73s measured). The full render leg is
-//  25 cells x 2 themes x ONE height x 18 boundary widths = 900 renders: budget
+//  25 cells x 2 themes x ONE height x 21 boundary widths = 1050 renders: budget
 //  MINUTES. The height axis multiplies that and is therefore OPT-IN — all three
 //  declared HEIGHTS make it 2700 renders (32.9 min), the number that decided
 //  the default loop (HEIGHT_REASONS[800]). The width numeral here is
-//  the DERIVED boundary walk (`WIDTHS.length`, printed by `--census` as "18
+//  the DERIVED boundary walk (`WIDTHS.length`, printed by `--census` as "21
 //  boundary widths"), not the 15 that this file's residue prose still repeats —
 //  that stale numeral has no arm and is owned by
 //  cch-w63-bl-the-derived-width-axis-has-no-arm-and-its-prose-propagated.
-//  Measured, not assumed: `--render --cell inst-update-refused` reports 36
-//  renders for ONE cell (18 x 2). The theme axis DOUBLED that, for an
+//  Measured, not assumed: `--render --cell inst-update-refused` reports 42
+//  renders for ONE cell (21 x 2). The theme axis DOUBLED that, for an
 //  axis stated above to be coverage rather than yield — slice it with
 //  `--theme light` when you are chasing a width, not a mode. Two traps proven the hard way: Page.navigate to
 //  a URL differing only in its hash is a SAME-DOCUMENT navigation, so injected
@@ -304,7 +304,7 @@ export function boundaryWalk(breakpoints) {
 // LOWER edge costs no entry: 620 is already declared, and 621 is walked as
 // 620+1.
 //
-// Derived from app.css: 620, 720, 740, 768, 830, 899. Declared here as the sweep's
+// Derived from app.css: 620, 720, 740, 768, 830, 899, 904. Declared here as the sweep's
 // committed axis so Leg A can refuse when the stylesheet grows a breakpoint
 // this list does not carry — and, since cch-w15's phantom half, when it loses
 // one. 900 LEFT THIS LIST because cch-w16-s8 deleted app.css's only
@@ -313,7 +313,17 @@ export function boundaryWalk(breakpoints) {
 // parsed as the boundary 899, which is why 899 stays. THE WIDTH 900 IS STILL
 // DRIVEN — boundaryWalk emits 899+1 — so the only width this shrink costs is
 // 901.
-export const BREAKPOINTS = [620, 720, 740, 768, 830, 899];
+// 904 JOINED THE LIST via cch-w18-bl. The W20-S9 attention-name band's upper
+// edge was `max-width: 899px`, a number DRIVEN against a fixture string the
+// control plane does not write: `Registry.mark_offline/1` writes
+// `health_status: "unknown"` deliberately, so a degraded box serves "Health
+// unknown · Agent offline", three characters and +21px longer than the "Health
+// down · Agent offline" the fixture used to carry. On the real string the name
+// column is cut from 900 through 904 (67/62 at 900, 67/66 at 904, clean from
+// 905), so the band's edge was RE-DERIVED to 904 and this axis grew with it.
+// Leg A refusing here is the design working: a breakpoint the stylesheet
+// declares and this list does not is a set of widths nothing drives.
+export const BREAKPOINTS = [620, 720, 740, 768, 830, 899, 904];
 export const WIDTHS = boundaryWalk(BREAKPOINTS);
 
 const INST = IDS.liveInstance;
@@ -374,7 +384,7 @@ export const HEIGHTS = [390, 667, 800];
 export const HEIGHT_REASONS = {
   390: "LANDSCAPE. 720x390 is the binding height for the fold bar — the shipped 34vh cap read 0.4836 of H here while passing casual inspection at 800, so a height set without it cannot see the defect cch-w15-s1 fixed.",
   667: "SHORT PORTRAIT. iPhone SE / small-phone portrait: the shortest height at which the folded shell is a normal reading posture rather than an edge case.",
-  800: "THE DRIVEN DEFAULT, AND THE DEFAULT LOOP IS ONE HEIGHT — DECIDED, WITH THE NUMBER. Leg B renders at 800 unless --height says otherwise, and every Q3 number this epic quotes was taken there. Walking all three declared heights by default would take the full leg from 25 cells x 2 themes x 1 height x 18 widths = 900 renders (11.0 min at the measured 0.73s/cell) to 2700 (32.9 min), on an axis whose only measured yield so far is the fold number Q3 already prints at every height it is asked for. So the height axis is OPT-IN (--height 390,667,800), the declared set is what --height will accept, and 390/667 are no longer declared-and-undrivable: cch-w16-bl-legb-drives-one-of-three-heights.",
+  800: "THE DRIVEN DEFAULT, AND THE DEFAULT LOOP IS ONE HEIGHT — DECIDED, WITH THE NUMBER. Leg B renders at 800 unless --height says otherwise, and every Q3 number this epic quotes was taken there. Walking all three declared heights by default would take the full leg from 25 cells x 2 themes x 1 height x 21 widths = 1050 renders (12.8 min at the measured 0.73s/cell) to 3150 (38.3 min), on an axis whose only measured yield so far is the fold number Q3 already prints at every height it is asked for. So the height axis is OPT-IN (--height 390,667,800), the declared set is what --height will accept, and 390/667 are no longer declared-and-undrivable: cch-w16-bl-legb-drives-one-of-three-heights.",
 };
 // THE EPIC'S HEIGHTS DISAGREE, AND THIS IS THE DISAGREEMENT STATED RATHER THAN
 // HIDDEN: modal-oracle/overflow-guard commit to 900, the fold identity is
@@ -2022,7 +2032,7 @@ async function legRender(rep) {
     const total = cells.length * themes.length * heights.length * widths.length;
     out(`\n>> render     ${cells.length} cells x ${themes.length} themes x ${heights.length} height${heights.length > 1 ? "s" : ""} [${heights.join(",")}] x ${widths.length} widths = ${total} renders — MINUTES, not seconds\n`);
     if (!heightFilter) {
-      out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 25x2x1x18 = 900 renders (11.0 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 2700 (32.9 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
+      out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 25x2x1x21 = 1050 renders (12.8 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 3150 (38.3 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
     }
     const dead = [], q1f = [], q2f = [], q3f = [], notes = [], honest = [];
     const tierCtaF = [], tierCtaSeen = [];
