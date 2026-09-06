@@ -767,6 +767,8 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; text-align: left; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; font-weight: 600; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); background: var(--paper-bg-deep); white-space: nowrap; }
 .bp-paper-surface .bp-table__td { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; vertical-align: top; line-height: 1.45; }
 .bp-paper-surface .bp-table tr:last-child .bp-table__td { border-bottom: 0; }
+/* Match the empty editable cell's caret line without adding authored text or width. */
+.bp-paper-surface .bp-table :is(.bp-table__th, .bp-table__td):empty::before { content: "\200b"; visibility: hidden; }
 
 /* Sheet CHROME (band + cell rules). Author DATA — col width, per-cell
    b/i/bg/al, engine-error red/bold — stays INLINE on the <td> (sheets_parity). */
