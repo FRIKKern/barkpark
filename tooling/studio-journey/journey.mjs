@@ -2061,7 +2061,15 @@ async function pressCensusRow(page, rec, deadline) {
     }
   }
   const waited = Date.now() - t0;
-  const wire = page.wireVerdict(wireMark);
+  // A PLAIN ANCHOR IS NOT A SOCKET PRESS. `plugin_link` rows navigate by href
+  // and carry no phx-click at all (components.ex: "A real anchor ON PURPOSE"),
+  // so ZERO click frames is the CORRECT behaviour there, not a discard. Reading
+  // the tap for them would print "NOT SENT" over a row that is working exactly
+  // as designed — an instrument answering a question the row never asked.
+  const wire =
+    rec.kind === "plugin_link"
+      ? { verdict: "N/A", frames: null, detail: "N/A — a plain anchor navigates by href and never puts a click frame on the socket" }
+      : page.wireVerdict(wireMark);
   // THE COUNTS ARE IN THE RECORD AND THEY DECIDE NOTHING. They are the drift a
   // snapshot diff used to call an answer, which is how the dead #item-sheet was
   // credited with its neighbour's URL 900 ms later.
@@ -3072,7 +3080,13 @@ async function selfTest(opts) {
       // way of going quietly blind: if the tap ever stops seeing the socket it
       // returns CANNOT READ for EVERY row, and every sentence it writes stays
       // grammatical. So CANNOT READ is a self-test failure on both sites.
-      if (rec.wire === "CANNOT READ" || rec.wire === null) {
+      // Only rows this census actually PRESSED, and only rows whose press is a
+      // socket push: `add_btn` / `section_header` are inventoried and never
+      // pressed, and `plugin_link` navigates by href. Asserting a wire reading
+      // on those would be asserting an instrument against a question they do
+      // not pose.
+      const wireApplies = rec.presses > 0 && rec.kind !== "plugin_link";
+      if (wireApplies && (rec.wire === "CANNOT READ" || rec.wire === null)) {
         problems.push(
           `${site}: census row "${rec.key}" came back with NO WIRE READING (${rec.wire}) — ` +
             `the tap saw no /live/websocket socket, so the SENT / NOT SENT distinction was asserted nowhere on this run`,
@@ -3080,19 +3094,19 @@ async function selfTest(opts) {
       }
       // The two verdicts, pinned to the two shapes the fixture builds. Without
       // BOTH of these the instrument could be stuck on one answer and stay green.
-      if (site === "rot" && rec.key === SELF_TEST_REFSTUCK_KEY && rec.wire !== "NOT SENT") {
+      if (wireApplies && site === "rot" && rec.key === SELF_TEST_REFSTUCK_KEY && rec.wire !== "NOT SENT") {
         problems.push(
           `rot: "${rec.key}" carries data-phx-ref-src, so its press is discarded IN THE BROWSER and the wire ` +
             `must read NOT SENT — it read ${rec.wire}. Either the drop gate stopped firing or the tap counts frames it should not.`,
         );
       }
-      if (site === "rot" && rec.outcome === FAIL && rec.key !== SELF_TEST_REFSTUCK_KEY && rec.wire === "NOT SENT") {
+      if (wireApplies && site === "rot" && rec.outcome === FAIL && rec.key !== SELF_TEST_REFSTUCK_KEY && rec.wire === "NOT SENT") {
         problems.push(
           `rot: "${rec.key}" is dead SERVER-side (the fixture answers it with nothing) and its press does go out, ` +
             `so the wire must read SENT — it read NOT SENT. The tap is not seeing frames the browser sent.`,
         );
       }
-      if (site === "good" && rec.outcome === PASS && rec.wire !== "SENT") {
+      if (wireApplies && site === "good" && rec.outcome === PASS && rec.wire !== "SENT") {
         problems.push(
           `good: "${rec.key}" ANSWERED, so its press was necessarily on the wire — the wire read ${rec.wire}`,
         );
