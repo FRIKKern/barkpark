@@ -97,28 +97,64 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
     end
   end
 
+  # RECEIPT LAW (pds w39) — the LiveView half (`pds-w40-bl-item-share-silent-noop`).
+  #
+  # This handler used to call `Links.revoke/1` as a BARE STATEMENT and discard
+  # its return on BOTH paths: the operator clicked Revoke and was told nothing
+  # at all, success or failure — a `silent_no_op`, structurally invisible to any
+  # lens keyed on receipt TEXT because there was no text. The FAILURE half was
+  # bound by the tenancy-confinement sibling
+  # (`arpss-item-share-revoke-unscoped-revoke`, the comment block below); this
+  # binds the SUCCESS half.
+  #
+  # The rule is the one the HTTP twin already states verbatim at
+  # `ShareLinkController.revoke/2` — "RECEIPT LAW (pds w39): `Links.revoke/1`
+  # returns the UPDATED link" — where `revoked`/`revoked_at` both descend from
+  # the returned row's own stamp, a value the request never carries. The two
+  # doors onto this surface are now the SAME rule: what the operator is told
+  # DESCENDS FROM THE WRITE RETURN, never from the `phx-value-id` they clicked
+  # and never from the re-read list (`Shared.load_item_links/3` below is a fresh
+  # STORE READ and is not, on its own, a receipt for anything).
+  #
+  # Success is a FLASH and failure stays `item_share_error` on purpose: the
+  # popover renders `@error` in place (`StudioComponents.Modals`, which has no
+  # notice slot and is not this slice's file), and a success message belongs
+  # where it survives the row disappearing from the list it describes.
   def item_share_revoke(%{"id" => id}, socket) do
     if Caps.admin?(socket) do
-      error =
+      {error, receipt} =
         case revoke_scoped(socket, id) do
-          {:ok, _link} -> nil
-          _ -> "Could not revoke the link."
+          {:ok, link} -> {nil, revoked_receipt(link)}
+          _ -> {"Could not revoke the link.", nil}
         end
 
-      {:noreply,
-       assign(socket,
-         item_share_links:
-           Shared.load_item_links(
-             socket,
-             socket.assigns[:item_share],
-             socket.assigns[:item_share_fresh] || %{}
-           ),
-         item_share_error: error
-       )}
+      socket =
+        assign(socket,
+          item_share_links:
+            Shared.load_item_links(
+              socket,
+              socket.assigns[:item_share],
+              socket.assigns[:item_share_fresh] || %{}
+            ),
+          item_share_error: error
+        )
+
+      {:noreply, if(receipt, do: put_flash(socket, :info, receipt), else: socket)}
     else
       {:noreply, put_flash(socket, :error, "Admin access required to share items.")}
     end
   end
+
+  # The sentence the operator reads, derived from the ROW `revoke/1` returned.
+  # The second clause is the LiveView spelling of the HTTP twin's
+  # `revoked: not is_nil(revoked.revoked_at)`: an `{:ok, row}` whose stamp did
+  # not land is reported as what it is, rather than being rounded up to
+  # "revoked" by the mere fact that the call did not error.
+  defp revoked_receipt(%{revoked_at: %DateTime{} = at}),
+    do: "Link revoked #{DateTime.to_iso8601(at)}. It no longer opens."
+
+  defp revoked_receipt(_link),
+    do: "Revoke returned a link that is not marked revoked — it may still open."
 
   # ── tenancy confinement on revoke (arpss-item-share-revoke-unscoped-revoke) ─
   #
