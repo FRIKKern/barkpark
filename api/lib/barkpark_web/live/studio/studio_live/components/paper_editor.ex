@@ -474,6 +474,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"list", "List"},
          {"callout", "Callout"},
          {"code", "Code"},
+         {"blockquote", "Blockquote"},
          {"divider", "Divider"},
          {"section", "Section"}
        ]},
@@ -484,7 +485,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"ingress", "Ingress"},
          {"pullquote", "Pullquote"}
        ]},
-      {"Visual", [{"diagram", "Diagram"}]},
+      {"Visual", [{"diagram", "Diagram"}, {"equation", "Equation"}]},
       {"Basic fields",
        [
          {"field-string", "String"},
@@ -493,12 +494,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"field-boolean", "Boolean"},
          {"field-select", "Select"},
          {"field-datetime", "Date & time"},
-         {"field-color", "Color"}
+         {"field-color", "Color"},
+         {"field-number", "Number"}
        ]},
       {"Media & reference",
        [
          {"field-image", "Image"},
-         {"field-reference", "Reference"}
+         {"field-reference", "Reference"},
+         {"video", "Video"}
        ]},
       {"Structured",
        [
@@ -1265,6 +1268,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-field-caption"
           />
         </form>
+      <% "equation" -> %>
+        <form
+          id={"equation-form-" <> @id}
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+          data-test-id="paper-equation-editor"
+        >
+          <input type="hidden" name="block_id" value={@id} />
+          <label class="bp-paper-edit-fieldlabel" for={"equation-tex-" <> @id}>TeX source</label>
+          <textarea
+            id={"equation-tex-" <> @id}
+            name="tex"
+            class="bp-paper-edit-textarea bp-paper-edit-code"
+            rows="3"
+            data-test-id="paper-field-equation-tex"
+          ><%= Blocks.form_value(Map.get(@block, "tex")) %></textarea>
+          <label class="bp-paper-edit-check">
+            <input type="checkbox" name="display" value="true"
+                   checked={Map.get(@block, "display") == true} />
+            Display equation
+          </label>
+        </form>
       <%!-- Article-chrome blocks. Eyebrow + byline remain flat scalar inputs;
             ingress + pullquote use the same rich body WC as paragraphs. --%>
       <% "eyebrow" -> %>
@@ -1304,6 +1331,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% "ingress" -> %>
         <.rich_body_editor block={@block} />
       <% "pullquote" -> %>
+        <.rich_body_editor block={@block} />
+      <% "blockquote" -> %>
+        <form
+          id={"blockquote-form-" <> @id}
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+          data-test-id="paper-blockquote-editor"
+        >
+          <input type="hidden" name="block_id" value={@id} />
+          <label class="bp-paper-edit-fieldlabel" for={"blockquote-cite-" <> @id}>Attribution</label>
+          <input
+            id={"blockquote-cite-" <> @id}
+            type="text"
+            name="cite"
+            class="bp-paper-edit-text"
+            value={Blocks.form_value(Blocks.blockquote_cite_value(@block))}
+            placeholder="Author or source (optional)"
+            data-test-id="paper-field-blockquote-cite"
+          />
+        </form>
         <.rich_body_editor block={@block} />
       <% "section" -> %>
         <form
@@ -1586,6 +1635,53 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                  style="width:36px;height:36px;border:1px solid var(--input);border-radius:6px;cursor:pointer;background:transparent;" />
         </div>
 
+      <% "field-number" -> %>
+        <form
+          id={"field-number-form-" <> @id}
+          class="bp-paper-edit-form bp-paper-edit-field"
+          phx-change="paper-edit-block"
+          phx-submit="paper-edit-block"
+          data-test-id="paper-field-number-editor"
+        >
+          <input type="hidden" name="block_id" value={@id} />
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-label-" <> @id}>Label</label>
+          <input id={"field-number-label-" <> @id} type="text" name="label"
+                 class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "label"))} />
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-value-" <> @id}>Value</label>
+          <input
+            id={"field-number-value-" <> @id}
+            type="number"
+            name="value"
+            class="bp-paper-edit-text"
+            value={Blocks.form_value(Map.get(@block, "value"))}
+            step="any"
+            aria-describedby={"field-number-hint-" <> @id}
+            data-test-id="paper-field-field-number"
+          />
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-min-" <> @id}>Minimum</label>
+          <input id={"field-number-min-" <> @id} type="number" name="min"
+                 class="bp-paper-edit-text" step="any"
+                 value={Blocks.form_value(Map.get(@block, "min"))} />
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-max-" <> @id}>Maximum</label>
+          <input id={"field-number-max-" <> @id} type="number" name="max"
+                 class="bp-paper-edit-text" step="any"
+                 value={Blocks.form_value(Map.get(@block, "max"))} />
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-step-" <> @id}>Step</label>
+          <input id={"field-number-step-" <> @id} type="number" name="step"
+                 class="bp-paper-edit-text" min="0" step="any"
+                 value={Blocks.form_value(Map.get(@block, "step"))} />
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-unit-" <> @id}>Unit</label>
+          <input id={"field-number-unit-" <> @id} type="text" name="unit"
+                 class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "unit"))} />
+          <small id={"field-number-hint-" <> @id} class="bp-paper-edit-kind">
+            Enter a valid number<%= case Blocks.form_value(Map.get(@block, "unit")) do
+              "" -> ""
+              unit -> " in #{unit}"
+            end %>.
+          </small>
+          <button type="submit" class="btn btn-primary btn-sm">Save number field</button>
+        </form>
+
       <%!-- field-reference / field-image PICKER blocks (P2.2). The Edit control
             is an existing picker Web Component (bp-reference-picker /
             bp-media-picker) rather than a native control. Each WC owns its own
@@ -1635,6 +1731,94 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             </output>
           <% end %>
         </div>
+
+      <% "video" -> %>
+        <form
+          id={"video-form-" <> @id}
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+          data-test-id="paper-video-editor"
+        >
+          <input type="hidden" name="block_id" value={@id} />
+          <input type="hidden" name="caption-count" value={length(Blocks.video_captions(@block))} />
+          <label class="bp-paper-edit-fieldlabel" for={"video-src-" <> @id}>Video source</label>
+          <input
+            id={"video-src-" <> @id}
+            type="text"
+            name="src"
+            class="bp-paper-edit-text"
+            value={Blocks.form_value(Map.get(@block, "src"))}
+            placeholder="/media/video.mp4 or https://…"
+            data-test-id="paper-field-video-src"
+          />
+          <label class="bp-paper-edit-fieldlabel" for={"video-poster-" <> @id}>Poster image</label>
+          <input
+            id={"video-poster-" <> @id}
+            type="text"
+            name="poster"
+            class="bp-paper-edit-text"
+            value={Blocks.form_value(Map.get(@block, "poster"))}
+            placeholder="Optional poster URL"
+            data-test-id="paper-field-video-poster"
+          />
+          <label class="bp-paper-edit-check">
+            <input type="checkbox" name="loop" value="true" checked={Map.get(@block, "loop") == true} />
+            Loop playback
+          </label>
+
+          <fieldset
+            :for={{caption, index} <- Enum.with_index(Blocks.video_captions(@block))}
+            class="bp-paper-edit-form"
+            data-test-id="paper-video-caption-row"
+            data-caption-index={index}
+          >
+            <legend>Caption track <%= index + 1 %></legend>
+            <div :if={is_map(caption)} class="bp-paper-edit-form">
+              <label class="bp-paper-edit-fieldlabel" for={"video-caption-lang-#{@id}-#{index}"}>
+                Language
+              </label>
+              <input
+                id={"video-caption-lang-#{@id}-#{index}"}
+                type="text"
+                name={"caption-#{index}-lang"}
+                class="bp-paper-edit-text"
+                value={Blocks.form_value(Blocks.video_caption_value(caption, "lang"))}
+                placeholder="en"
+              />
+              <label class="bp-paper-edit-fieldlabel" for={"video-caption-src-#{@id}-#{index}"}>
+                Caption file
+              </label>
+              <input
+                id={"video-caption-src-#{@id}-#{index}"}
+                type="text"
+                name={"caption-#{index}-src"}
+                class="bp-paper-edit-text"
+                value={Blocks.form_value(Blocks.video_caption_value(caption, "src"))}
+                placeholder="/captions/en.vtt"
+              />
+            </div>
+            <p :if={!is_map(caption)} class="bp-paper-edit-readonly">
+              This legacy caption entry is retained until removed.
+            </p>
+            <button
+              type="submit"
+              name="caption-action"
+              value={"remove:#{index}"}
+              class="btn btn-destructive btn-sm"
+              data-test-id="paper-video-caption-remove"
+            >Remove caption track</button>
+          </fieldset>
+
+          <button
+            type="submit"
+            name="caption-action"
+            value="add"
+            class="btn btn-ghost btn-sm"
+            data-test-id="paper-video-caption-add"
+          >Add caption track</button>
+        </form>
 
       <%!-- IMAGE content blocks (t13, pd-doctrine rule 1). The seeded locked
             `role: "featured"` image (Content.Papers.Template) is a `type:"image"`

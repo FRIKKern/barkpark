@@ -121,8 +121,61 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     |> put_bar_chart_bars(block, params)
   end
 
+  def build_block_patch(%{"type" => "field-number"} = block, params) do
+    case validate_block_patch(block, params) do
+      {:ok, patch} -> patch
+      {:error, _reason} -> %{}
+    end
+  end
+
+  def build_block_patch(%{"type" => "blockquote"} = block, params) do
+    case Map.fetch(params, "cite") do
+      {:ok, cite} -> blockquote_cite_patch(block, optional_string(cite))
+      :error -> %{}
+    end
+  end
+
+  def build_block_patch(%{"type" => "equation"}, params) do
+    %{}
+    |> put_param(params, "tex", "")
+    |> Map.put("display", parse_bool(params["display"]))
+  end
+
+  def build_block_patch(%{"type" => "video"} = block, params) do
+    %{}
+    |> put_param(params, "src", "")
+    |> put_param(params, "poster", "")
+    |> Map.put("loop", parse_bool(params["loop"]))
+    |> put_video_captions(block, params)
+  end
+
   # Unknown / non-editable block type (image, table, divider) → no-op patch.
   def build_block_patch(_block, _params), do: %{}
+
+  @doc false
+  def validate_block_patch(%{"type" => "field-number"} = block, params) do
+    with {:ok, value} <- parse_effective_number(block, params, "value"),
+         {:ok, min} <- parse_effective_number(block, params, "min"),
+         {:ok, max} <- parse_effective_number(block, params, "max"),
+         {:ok, step} <- parse_effective_number(block, params, "step"),
+         true <- is_nil(step) or step > 0,
+         true <- is_nil(min) or is_nil(max) or min <= max,
+         true <- is_nil(value) or is_nil(min) or value >= min,
+         true <- is_nil(value) or is_nil(max) or value <= max do
+      {:ok,
+       %{}
+       |> put_if_fetched(params, "label", "")
+       |> put_if_fetched(params, "unit", "")
+       |> put_if_parsed(params, "value", value)
+       |> put_if_parsed(params, "min", min)
+       |> put_if_parsed(params, "max", max)
+       |> put_if_parsed(params, "step", step)}
+    else
+      _ -> {:error, :invalid_number}
+    end
+  end
+
+  def validate_block_patch(block, params), do: {:ok, build_block_patch(block, params)}
 
   @doc false
   # A callout title is optional; an empty string drops it back to untitled.
@@ -222,6 +275,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   defp put_bar_chart_bars(patch, _block, _params), do: patch
 
+  defp put_video_captions(patch, block, %{"caption-count" => count} = params) do
+    captions = video_captions(block)
+
+    if exact_submitted_count?(count, length(captions)) do
+      submitted_captions =
+        captions
+        |> Enum.with_index()
+        |> Enum.map(fn {original, index} ->
+          prefix = "caption-#{index}-"
+
+          if is_map(original) and Enum.any?(Map.keys(params), &String.starts_with?(&1, prefix)) do
+            original
+            |> put_param(params, prefix <> "lang", "", "lang")
+            |> put_param(params, prefix <> "src", "", "src")
+          else
+            original
+          end
+        end)
+        |> apply_caption_action(params["caption-action"])
+
+      Map.put(patch, "captions", submitted_captions)
+    else
+      patch
+    end
+  end
+
+  defp put_video_captions(patch, _block, _params), do: patch
+
   defp apply_bar_action(bars, "add"), do: bars ++ [%{"label" => "", "value" => 0}]
 
   defp apply_bar_action(bars, "remove:" <> index) do
@@ -230,12 +311,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   defp apply_bar_action(bars, _action), do: bars
 
+  defp apply_caption_action(captions, "add"),
+    do: captions ++ [%{"lang" => "", "src" => ""}]
+
+  defp apply_caption_action(captions, "remove:" <> index),
+    do: delete_at_valid_index(captions, index)
+
+  defp apply_caption_action(captions, _action), do: captions
+
   defp submitted_indices(count, existing_count) do
     case count |> to_int(0) |> max(0) |> min(existing_count) do
       0 -> []
       count -> 0..(count - 1)
     end
   end
+
+  defp exact_submitted_count?(count, expected) when is_binary(count) do
+    case Integer.parse(count) do
+      {^expected, ""} -> true
+      _ -> false
+    end
+  end
+
+  defp exact_submitted_count?(_count, _expected), do: false
 
   defp delete_at_valid_index(items, index) do
     case Integer.parse(index) do
@@ -261,6 +359,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     else
       map
     end
+  end
+
+  defp put_if_fetched(map, params, key, default) do
+    case Map.fetch(params, key) do
+      {:ok, value} -> Map.put(map, key, value || default)
+      :error -> map
+    end
+  end
+
+  defp put_if_parsed(map, params, key, value) do
+    if Map.has_key?(params, key), do: Map.put(map, key, value), else: map
   end
 
   defp put_optional_number(map, params, key) do
@@ -290,6 +399,50 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   end
 
   defp parse_number(_value, default), do: default
+
+  defp parse_submitted_number(value) when value in [nil, ""], do: {:ok, nil}
+  defp parse_submitted_number(value) when is_integer(value) or is_float(value), do: {:ok, value}
+
+  defp parse_submitted_number(value) when is_binary(value) do
+    trimmed = String.trim(value)
+
+    case Integer.parse(trimmed) do
+      {number, ""} ->
+        {:ok, number}
+
+      _ ->
+        case Float.parse(trimmed) do
+          {number, ""} -> {:ok, number}
+          _ -> :error
+        end
+    end
+  end
+
+  defp parse_submitted_number(_value), do: :error
+
+  defp parse_number_param(params, key) do
+    case Map.fetch(params, key) do
+      {:ok, value} -> parse_submitted_number(value)
+      :error -> {:ok, nil}
+    end
+  end
+
+  defp parse_effective_number(block, params, key) do
+    if Map.has_key?(params, key) do
+      parse_number_param(params, key)
+    else
+      parse_submitted_number(Map.get(block, key))
+    end
+  end
+
+  defp optional_string(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp optional_string(_value), do: nil
 
   defp put_optional_patch(map, params, key) do
     if Map.has_key?(params, key) do
@@ -455,6 +608,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def paper_link_ref_value(_ref, _key), do: nil
 
   @doc false
+  def blockquote_cite_value(block) when is_map(block) do
+    Map.get(block, "cite") || Map.get(block, "attribution") || ""
+  end
+
+  @doc false
+  def video_caption_value(caption, key) when is_map(caption), do: Map.get(caption, key, "")
+  def video_caption_value(_caption, _key), do: ""
+
+  @doc false
+  def video_captions(block) when is_map(block) do
+    case Map.get(block, "captions") do
+      captions when is_list(captions) -> captions
+      _ -> []
+    end
+  end
+
+  @doc false
+  def form_value(value) when is_binary(value) or is_number(value), do: value
+  def form_value(_value), do: ""
+
+  defp blockquote_cite_patch(block, cite) do
+    cond do
+      Map.has_key?(block, "cite") and Map.has_key?(block, "attribution") ->
+        %{"cite" => cite, "attribution" => nil}
+
+      Map.has_key?(block, "attribution") ->
+        %{"attribution" => cite}
+
+      true ->
+        %{"cite" => cite}
+    end
+  end
+
+  @doc false
   # A fresh block of `type` with sensible empty defaults, in the EXACT shape
   # Render.compose_block/1 (and, for field/composite blocks, the field-block
   # editors) expect. Every type the add-block menu offers (P3.1) has a clause
@@ -499,6 +686,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def default_block("diagram", id),
     do: %{"id" => id, "type" => "diagram", "source" => "", "caption" => ""}
 
+  def default_block("equation", id),
+    do: %{"id" => id, "type" => "equation", "tex" => "", "display" => true}
+
+  def default_block("video", id),
+    do: %{"id" => id, "type" => "video", "src" => "", "poster" => "", "captions" => []}
+
   # ── article-chrome blocks (render-only until now; barkpark-54kh) ──
   # These mirror the Render.compose_block/2 shapes verbatim (render.ex):
   #   eyebrow   → flat "text" string
@@ -516,6 +709,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def default_block("pullquote", id),
     do: %{"id" => id, "type" => "pullquote", "content" => []}
+
+  def default_block("blockquote", id),
+    do: %{"id" => id, "type" => "blockquote", "content" => [], "cite" => nil}
 
   def default_block("divider", id),
     do: %{"id" => id, "type" => "divider"}
@@ -571,6 +767,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def default_block("field-color", id),
     do: %{"id" => id, "type" => "field-color", "label" => "Color", "value" => "#000000"}
+
+  def default_block("field-number", id),
+    do: %{"id" => id, "type" => "field-number", "label" => "Number", "value" => nil}
 
   def default_block("field-select", id),
     do: %{

@@ -348,9 +348,16 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   @doc "Form submit / autosave on one block → a `patch-block` op."
   def edit_block(socket, %{"block_id" => id} = params) when is_binary(id) do
-    patch = Blocks.build_block_patch(block_by_id(socket, id), params)
+    case Blocks.validate_block_patch(block_by_id(socket, id), params) do
+      {:ok, patch} ->
+        apply_op(
+          socket,
+          write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params)
+        )
 
-    apply_op(socket, write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params))
+      {:error, _reason} ->
+        failed_save(socket, params["request_id"])
+    end
   end
 
   def edit_block(socket, params), do: failed_save(socket, is_map(params) && params["request_id"])

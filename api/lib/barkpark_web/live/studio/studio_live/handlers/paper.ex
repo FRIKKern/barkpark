@@ -50,29 +50,39 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
   def paper_edit_block(%{"block_id" => id} = params, socket) do
     block = Shared.paper_block_by_id(socket, id)
-    patch = Blocks.build_block_patch(block, params)
 
-    paper_reply(
-      Shared.paper_op(
-        socket,
-        write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params)
-      )
-    )
+    case Blocks.validate_block_patch(block, params) do
+      {:ok, patch} ->
+        paper_reply(
+          Shared.paper_op(
+            socket,
+            write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params)
+          )
+        )
+
+      {:error, _reason} ->
+        failed_reply(socket, params)
+    end
   end
 
   def paper_edit_block(params, socket), do: failed_reply(socket, params)
 
   def paper_block_autosave(%{"block_id" => id} = params, socket) do
     block = Shared.paper_block_by_id(socket, id)
-    patch = Blocks.build_block_patch(block, params)
 
-    socket =
-      Shared.paper_op(
-        socket,
-        write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params)
-      )
+    case Blocks.validate_block_patch(block, params) do
+      {:ok, patch} ->
+        socket =
+          Shared.paper_op(
+            socket,
+            write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params)
+          )
 
-    paper_reply(socket)
+        paper_reply(socket)
+
+      {:error, _reason} ->
+        failed_reply(socket, params)
+    end
   end
 
   def paper_block_autosave(params, socket), do: failed_reply(socket, params)
@@ -672,6 +682,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
   defp failed_reply(socket, params) do
     request_id = if is_map(params), do: params["request_id"]
+
+    socket =
+      assign(socket,
+        save_status: "Save failed",
+        last_paper_save_ok?: false,
+        last_paper_save_result: %{saved: false, request_id: request_id}
+      )
+
     {:reply, %{saved: false, request_id: request_id}, socket}
   end
 

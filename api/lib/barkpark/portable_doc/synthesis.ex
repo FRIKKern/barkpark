@@ -54,6 +54,7 @@ defmodule Barkpark.PortableDoc.Synthesis do
     "slug" => "field-slug",
     "text" => "field-text",
     "richText" => "field-text",
+    "number" => "field-number",
     "boolean" => "field-boolean",
     "datetime" => "field-datetime",
     "color" => "field-color",
