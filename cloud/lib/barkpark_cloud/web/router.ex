@@ -106,6 +106,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/operator/autoupdate/resume operator  resume fleet autoupdate (console)
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
       GET     /v1/operator/warm-pool operator  warm-pool status (console read)
+      GET     /v1/operator/barkparks/without-agent-token operator  boxes holding NO live agent token (disarmed vs down), each row with its remedy
       GET     /v1/operator/deploy-ledger/census operator  fleet deploy ledger: class + site counts and the failure rate WITH its denominator, over a pinned window
       GET     /v1/deliveries       user(s)+worker  the platform's OWN per-sha delivery record — what was delivered, on whose run, and the clocks around it (?sha= narrows; a pinned window otherwise). PAT-reachable on purpose (D385/D412)
       GET     /v1/deploy-ledger/census user(s)  the SAME deploy ledger, scoped to the caller's own team sites (+ a scope line naming the team slug); the read a non-operator can actually reach
@@ -4489,6 +4490,39 @@ defmodule BarkparkCloud.Web.Router do
         barkparks: Enum.map(Registry.all_barkparks(), &operator_fleet_json/1),
         staging_gate_open: Registry.staging_gate_open?()
       })
+    end
+  end
+
+  # GET /v1/operator/barkparks/without-agent-token → 200
+  # {barkparks: [...], count: n} — THE DISARMED-BOX CENSUS
+  # (task-5cc3689cb0ab6637), the companion read to the mass-revoke fix.
+  #
+  # A box with no live agent token reads HEALTHY everywhere else: the row is
+  # intact, `suspended` is false, `autoupdate_enabled` is true. It just stops
+  # beating, and `agent_status` drifts to "offline" via StalenessWorker — the
+  # SAME symptom a genuinely dead host shows. This is the only surface that
+  # separates DISARMED from DOWN, and it exists now because
+  # `AgentRetentionWorker` prunes tokens 30 days past `revoked_at`, after which
+  # the evidence is gone and the population is unrecoverable even as a question.
+  #
+  # Thin, like every other handler in this seam: one read over
+  # `Registry.barkparks_without_live_agent_token/0`, zero business logic here.
+  #
+  # EVERY ROW NAMES ITS REMEDY, not just a count. A census that answers "7" is
+  # a number an operator cannot act on; `remedy` is per-row and stated in the
+  # imperative, and `last_revoked_at` is what tells "disarmed at T" from "never
+  # armed" — see the RULING on `Registry.revoke_agent_token/1` for why the
+  # remedy can never be an automatic re-mint (the only channel that can deliver
+  # a fresh token is the provision claim, and the box's own live channel is
+  # authenticated by the token it no longer has).
+  get "/v1/operator/barkparks/without-agent-token" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      rows = Enum.map(Registry.barkparks_without_live_agent_token(), &no_agent_token_json/1)
+      json(conn, 200, %{barkparks: rows, count: length(rows)})
     end
   end
 
@@ -11783,9 +11817,26 @@ defmodule BarkparkCloud.Web.Router do
   # and carries no time dimension at all, and widening it to carry one would put
   # a latency estimator's censoring policy inside a counter. Two reads, two
   # honest shapes, one envelope.
+
   defp deploy_census_json(from, to) do
     DeployLedger.census(from, to)
     |> Map.put(:delivery, DeployLedger.delivery(from, to))
+  end
+
+  # One row of the disarmed-box census (task-5cc3689cb0ab6637). The Registry
+  # query already returns a map, so this adds exactly the thing a query cannot
+  # know: the REMEDY, in the imperative, on EVERY row — a census that answers
+  # "7" is a number an operator cannot act on. `token_count`,
+  # `revoked_token_count` and `last_revoked_at` ride along from the query
+  # because they are what distinguishes a box that WAS armed and was disarmed
+  # at T from one that was NEVER armed — the distinction AgentRetentionWorker's
+  # 30-day prune is about to erase.
+  defp no_agent_token_json(row) do
+    Map.put(
+      row,
+      :remedy,
+      "re-provision or resurrect the box to mint a fresh agent token; nothing clears revoked_at"
+    )
   end
 
   defp provider_json(p) do
@@ -13492,6 +13543,26 @@ defmodule BarkparkCloud.Web.Router do
       # is emitted so the FIRST poll refusal is legible the day it lands, not
       # because it distinguishes anything in the corpus we have.
       refusal_phase: DeployLedger.refusal_phase(d.failure_reason),
+      # THE REFUSAL, UNFUSED (task-f156b5e43bfbfe91). `failure_reason` above is
+      # one prose line with the box's typed code and its human sentence FUSED
+      # into it — so every reader took it apart again by substring, and app.js
+      # ran a SECOND humanize pass over the result. These two keys carry the
+      # halves the box actually sent, split once, in `FailureCopy`:
+      #
+      #   * `failure_code`    — the box's own `error.code` (`E_ABSOLUTE_PATH`,
+      #     `already_running`, `feature_not_configured`). This is what a user
+      #     greps, files a bug about, or branches on.
+      #   * `failure_message` — the sentence that tells them what to fix, with
+      #     the `[box request_id: …]` journal stamp lifted out of it.
+      #
+      # BOTH are nil whenever the row is not a box refusal, and nil individually
+      # when the box sent only one half — never coerced, for the same reason
+      # `refusal_phase` above is not coerced to "start".
+      #
+      # ADDITIVE: `failure_reason` is byte-unchanged and stays the fallback for
+      # every consumer that has not moved yet.
+      failure_code: FailureCopy.typed_refusal_code(d.failure_reason),
+      failure_message: FailureCopy.typed_refusal_message(d.failure_reason),
       # deploy-reliability W13 S3: the WAIT, as data. W12 shipped the writer
       # (`Sites.Deploy.defer/3`) and no reader at all — these three columns
       # populated into a serializer that did not mention them, so the only way

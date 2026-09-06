@@ -454,6 +454,13 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		out.errf("bp: warning: %s", warning)
 	}
 
+	// Whether this dispatch actually carries a credential — read off the
+	// RESOLVED headers, not re-derived from config, so it is true exactly when
+	// the server saw a bearer. A 401 refusal reads it (renderError → hint) to
+	// avoid naming a remedy the caller already applied. Set before both the
+	// paginated walk and the single send, so every refusal path sees it.
+	out.credentialSent = req.headers["Authorization"] != ""
+
 	// --dry-run: print the resolved request and exit 0 WITHOUT sending (A1).
 	if g.dryRun {
 		return dryRun(out, cmd, req.url, req.headers, req.body)
@@ -2469,6 +2476,10 @@ func handleResponseHinted(out *writer, m *manifest.Manifest, cmd manifest.Comman
 		return exitOK
 	}
 	ae := classifyError(status, respBody)
+	// Did the request that earned this refusal carry a credential? A 401 that
+	// says "set BARKPARK_API_TOKEN" to a caller who sent one names a remedy
+	// they already applied.
+	ae.credentialSent = out.credentialSent
 	// Record WHICH refusal this was, for the client-side wrappers that layer a
 	// second read on top of a failed dispatch (runTaskClaim). They only get an
 	// exit code back from runCommand, and exit 6 covers the whole task

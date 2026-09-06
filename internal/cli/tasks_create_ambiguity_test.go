@@ -23,7 +23,7 @@ import (
 
 // withCreateMutationsStub overrides the file-local injection seam for the
 // duration of one test and restores the real sender on cleanup.
-func withCreateMutationsStub(t *testing.T, fn func(manifest.Context, []map[string]any) (int, []byte, error)) {
+func withCreateMutationsStub(t *testing.T, fn keyedMutationSender) {
 	t.Helper()
 	orig := sendCreateTaskMutations
 	sendCreateTaskMutations = fn
@@ -31,7 +31,7 @@ func withCreateMutationsStub(t *testing.T, fn func(manifest.Context, []map[strin
 }
 
 func TestRunTaskCreateTransportErrorCarriesAmbiguityCaveat(t *testing.T) {
-	withCreateMutationsStub(t, func(manifest.Context, []map[string]any) (int, []byte, error) {
+	withCreateMutationsStub(t, func(manifest.Context, []map[string]any, string) (int, []byte, error) {
 		return 0, nil, fmt.Errorf("dial tcp: i/o timeout")
 	})
 
@@ -143,7 +143,7 @@ func TestSendCreateTaskMutationsDefaultsToRealSender(t *testing.T) {
 	defer ts.Close()
 	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
 
-	status, body, err := sendCreateTaskMutations(ctx, []map[string]any{{"create": map[string]any{"_type": "task", "title": "t"}}})
+	status, body, err := sendCreateTaskMutations(ctx, []map[string]any{{"create": map[string]any{"_type": "task", "title": "t"}}}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

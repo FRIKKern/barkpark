@@ -366,7 +366,8 @@ defmodule BarkparkWeb.StudioChromeTest do
   # :admin)` on the mounted workspace.
   #
   # MediaLive is the surface under test on purpose: StudioLive's own
-  # `mount.ex:122` overwrites `shares_admin?` from `Caps.admin?/1` after every
+  # `mount.ex` (`shares_admin?: Caps.admin?(socket)` in the mount assigns)
+  # overwrites `shares_admin?` from `Caps.admin?/1` after every
   # on_mount, so the chrome value is only OBSERVABLE on the other chrome
   # surfaces (Media / ApiTester / Settings / tmux / chat / plugin admin).
   #

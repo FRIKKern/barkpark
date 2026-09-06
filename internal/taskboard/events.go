@@ -329,12 +329,21 @@ func (m Model) handleEventsResult(msg eventsResultMsg) (Model, tea.Cmd) {
 		m.relistOwed = true
 		return m, m.armNextPoll(wait)
 	}
-	m.relistOwed = false
 	next := m.armNextPoll(m.pollEvery)
 	relist := m.tickRefetchCmd()
 	if relist == nil {
+		// The heavy pair is already out — and it is OLDER than this delta: it
+		// was issued before the event existed, so it cannot carry it. The
+		// events were CONSUMED above (the cursor advanced past them), so the
+		// next poll sees an empty page and would call the board idle. HOLD the
+		// delta instead: relistOwed keeps `delta` true on the next poll, which
+		// keeps the interval at the floor and re-tries the re-list the moment
+		// the outstanding fetch clears. Dropping it here is what left a stamped
+		// criteria ladder stale while the interval doubled toward 30s.
+		m.relistOwed = true
 		return m, next
 	}
+	m.relistOwed = false
 	m.lastRelistAt = m.now()
 	m.fetchInFlight = true
 	return m, tea.Batch(relist, next)
@@ -354,11 +363,17 @@ func (m *Model) armNextPoll(d time.Duration) tea.Cmd {
 }
 
 // tickRefetchCmd is the TICK-DRIVEN re-list, and the one place the no-overlap
-// rule is enforced for the heavy pair: a delta that lands while a previous
-// snapshot fetch is still out is DROPPED, not queued. Dropping is safe and
-// queueing is not — the in-flight fetch reads the same server state a moment
-// later, and on guerrilla a 9 MB list can take seconds, so queueing is exactly
-// how one slow read turns into a backlog of them.
+// rule is enforced for the heavy pair: it REFUSES (returns nil) while a
+// snapshot fetch is still out, because queueing a second 9 MB list behind a
+// slow one is exactly how one slow read turns into a backlog of them.
+//
+// A refusal is NOT a licence to forget. The in-flight fetch was issued before
+// the delta existed and reads server state from BEFORE it, so it cannot carry
+// the change — the earlier claim that "the in-flight fetch reads the same
+// server state a moment later" was false for precisely the case that matters.
+// Every caller that consumed a delta must therefore HOLD it (relistOwed) on a
+// nil answer and re-try; only handleBackstop may drop, because its unconditional
+// timer consumed nothing and fires again on its own.
 //
 // Keystroke-driven refetches (the post-claim/close reconcile) deliberately do
 // NOT ride this guard: those are rare, user-initiated, and must land.

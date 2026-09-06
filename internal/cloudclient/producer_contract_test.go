@@ -268,7 +268,12 @@ func TestProducerExtractorIsNotBlind(t *testing.T) {
 	// and `health_exit_code` (the served-slot truth, nullable health). `port` left
 	// dormantTags in the same change — the producer now sends it, so the waiver
 	// was stale and this guard said so on main (measured 2026-09-02).
-	const producerKeyCount = 34 // deployment_json/1's 32 + site_deployment_json/3's stages + url
+	// 34 -> 36 (#16511, task-f156b5e43bfbfe91): deployment_json/1 gained
+	// `failure_code` and `failure_message` — the fused refusal string unfused
+	// into a typed code + message beside the composite `failure_reason`. This
+	// pin was the only consumer that noticed; it reddened main's Go gate from
+	// 3d238fdd8 (2026-09-06 17:21Z) until this line moved.
+	const producerKeyCount = 36 // deployment_json/1's 34 + site_deployment_json/3's stages + url
 	if len(producer) != producerKeyCount {
 		direction := "WIDE — it is matching identifiers that are not top-level keys, " +
 			"which can mask a dormant field"

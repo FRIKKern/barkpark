@@ -281,6 +281,8 @@ on:
       - "scripts/compose-smoke-dispatch.test.sh"
       - ".github/workflows/compose-smoke.yml"
       - "scripts/env-census.py"
+      - "scripts/compose-smoke.sh"
+      - "scripts/compose-smoke.test.sh"
       - "scripts/workflow-trigger-coverage.sh"
       - "scripts/workflow-trigger-coverage.test.sh"
       # FLEET COORDINATION (task-f89c2aed221d9fdb). Three subjects and three
@@ -508,6 +510,8 @@ on:
       - "scripts/compose-smoke-dispatch.test.sh"
       - ".github/workflows/compose-smoke.yml"
       - "scripts/env-census.py"
+      - "scripts/compose-smoke.sh"
+      - "scripts/compose-smoke.test.sh"
       - "scripts/workflow-trigger-coverage.sh"
       - "scripts/workflow-trigger-coverage.test.sh"
       # FLEET COORDINATION (task-f89c2aed221d9fdb). Mirrored from
@@ -822,6 +826,8 @@ jobs:
           compose-smoke-dispatcher scripts/compose-smoke-dispatch.test.sh
           compose-smoke-dispatcher .github/workflows/compose-smoke.yml
           compose-smoke-dispatcher scripts/env-census.py
+          compose-smoke-dispatcher scripts/compose-smoke.sh
+          compose-smoke-dispatcher scripts/compose-smoke.test.sh
           workflow-trigger-coverage scripts/workflow-trigger-coverage.sh
           workflow-trigger-coverage scripts/workflow-trigger-coverage.test.sh
           workflow-trigger-coverage .github/workflows/*.yml
@@ -1983,6 +1989,15 @@ jobs:
         run: bash -n scripts/compose-smoke-dispatch.test.sh
       - name: the dispatcher can fire on every root the census reads
         run: bash scripts/compose-smoke-dispatch.test.sh
+      # GREEN-ARM CAUSE ATTRIBUTION (task-98b3df6eab045a78, PR #16509). The
+      # harness ships a fake `docker` on PATH, so it needs no daemon and no
+      # image build. It refuses to pass vacuously: 27 unconditional cases with
+      # an internal count floor of 22, and its mutation proof asserts the
+      # anchor matched exactly three times before it can read as a catch.
+      - name: Syntax-check the green-arm cause harness
+        run: bash -n scripts/compose-smoke.test.sh
+      - name: Green-arm cause attribution
+        run: bash scripts/compose-smoke.test.sh
   # ── WORKFLOW TRIGGER COVERAGE (task-8556d43c305b2747) ──────────────────────
   # A path filter alternative that matches nothing can never fire, and the
   # workflow still reads as gated. twoslash.yml gated on apps/docs/** — zero of

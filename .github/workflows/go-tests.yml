@@ -147,6 +147,88 @@ on:
       # #963->#969-class gap as above.
       - "docs/setup/CODEX.md"
       - "docs/setup/AGENTS-MD.md"
+      # ── CROSS-TREE READS OUTSIDE internal/ (task-bb930319aeac0266) ─────────
+      # Measured 2026-09-06 after TWO Go main-reds in one day, both through the
+      # same hole: the Go suite reads source and fixtures under api/ and
+      # cloud/lib/, and this list carried NOT ONE of them. #16366 (9eb1aac5e,
+      # the manifest `paginated` flag) and #16474 (80770b8ae, two new API error
+      # codes) were api/-only diffs; both reported `go-tests: success` by
+      # SKIPPING, and main went red on the next push run. A gate that declined
+      # to measure reported passing.
+      #
+      # NOT `api/**` — that is 1620 of the last 4958 commits on main (33%) and
+      # would hand every Elixir PR the Go suite, undoing the CI diet. The whole
+      # block below is 542 of 4958 (11%). Each entry is a MEASURED read and
+      # names the test that makes it; scripts/go-path-escape-check.sh
+      # re-derives the census from the tree and reds when a read escapes this
+      # list, so this block cannot silently fall behind again.
+      #
+      # api/ — the Elixir source the Go parity gates read as the authority.
+      # errors.ex: internal/cli/errors_api_parity_test.go pins `codeExit` against
+      # known_codes/0 (this is the #16474 read), and errors_ambiguous_split_test.go
+      # asserts the retired ambiguous codes are gone.
+      - "api/lib/barkpark/content/errors.ex"
+      # mutations.ex: internal/cli/mutate_shapes_test.go derives the mutation
+      # shapes the server accepts from apply_one/3 and pins the CLI's help to them.
+      - "api/lib/barkpark/content/mutations.ex"
+      # plugins/**: internal/cli/list_reads_test.go reads capabilities.ex, and
+      # paginate_all_test.go + query_pagination_flags_test.go WALK this directory
+      # for every plugin manifest (this is the #16366 read). A directory, because
+      # the two walkers read the whole tree, not one pinned file — 224 of the last
+      # 4958 commits (4.5%).
+      - "api/lib/barkpark/plugins/**"
+      # tiers.ex: internal/pdrender/elixir_parity_test.go pins the Go renderer's
+      # tier table against the Elixir source's.
+      - "api/lib/barkpark/portable_doc/tiers.ex"
+      # chat fixtures: internal/chat/fold_test.go + running_fold_test.go read
+      # chat_fold_labels.json, rail_glyph_lock_test.go reads
+      # chat_rail_agent_glyphs.json, and reduce_test.go reads every transcript
+      # under api/test/fixtures/claude_chat/. Fixture-only edits carry no .go diff.
+      - "api/test/support/fixtures/chat_fold_labels.json"
+      - "api/test/support/fixtures/chat_rail_agent_glyphs.json"
+      - "api/test/fixtures/claude_chat/**"
+      # cloud/lib — the control plane's source, read the same way. metrics.ex:
+      # internal/cli/cloud_instance_top_vitals_test.go. telemetry.ex:
+      # cloud_instance_top_scalars_test.go. usage.ex: cloud_status_cmd_test.go.
+      # web/router.ex: cloud_deliveries_cmd_test.go and
+      # internal/cloudclient/producer_contract_test.go census the routes the CLI
+      # calls against the ones the plane declares. Exact files, never
+      # cloud/lib/** (377 commits / 60d).
+      - "cloud/lib/barkpark_cloud/metrics.ex"
+      - "cloud/lib/barkpark_cloud/telemetry.ex"
+      - "cloud/lib/barkpark_cloud/usage.ex"
+      - "cloud/lib/barkpark_cloud/web/router.ex"
+      # Onramp corpus: internal/cli/movement_doctrine_test.go reads all ten of
+      # these docs from DISK and asserts each carries the movement doctrine
+      # verbatim; onramp_cmd_test.go additionally pins the ZED.md json stanza and
+      # the two agent-config files byte-for-byte. CODEX.md and AGENTS-MD.md are
+      # already declared above; these are the rest of the same corpus, which the
+      # earlier carve-out missed.
+      - ".claude/CLAUDE-BARKPARK.md"
+      - ".cursor/rules/barkpark-tasks.mdc"
+      - "docs/setup/AGENT-ONRAMPS.md"
+      - "docs/setup/CLAUDE-CODE.md"
+      - "docs/setup/COPILOT.md"
+      - "docs/setup/CURSOR-CLOUD.md"
+      - "docs/setup/CURSOR.md"
+      - "docs/setup/GEMINI-CLI.md"
+      - "docs/setup/REMOTE.md"
+      - "docs/setup/TASK-SYSTEM.md"
+      - "docs/setup/WINDSURF.md"
+      - "docs/setup/ZED.md"
+      # deploy/: internal/cli/cloud/warmpool_test.go byte-compares the committed
+      # systemd unit and the runtime installer against what the warm-pool image
+      # build emits. Exact files, never deploy/**.
+      - "deploy/site-runtime-install.sh"
+      - "deploy/systemd/barkpark-agent.service"
+      # Starter manifests: internal/template/template_test.go's TestRealManifests
+      # loads and validates every checked-in barkpark.template.json and asserts
+      # its referenced schema/seed paths exist. templates/place-directory is
+      # already covered by templates/** above; these two are not.
+      - "js/packages/create-barkpark-app/templates/blog-starter/barkpark.template.json"
+      - "js/packages/create-barkpark-app/templates/website-starter/barkpark.template.json"
+      # A change to the ratchet itself must run the suite it guards.
+      - "scripts/go-path-escape-check.sh"
   pull_request:
     # NO `paths:` KEY, EVER — see THE SKIP SHIM above. The path decision for a
     # pull_request is made by the `changes` job below, which derives it from the
@@ -211,6 +293,29 @@ jobs:
           # miss it, which this step treats as a hard failure.
           fetch-depth: 0
 
+      # THE READ RATCHET (task-bb930319aeac0266). Runs BEFORE the path verdict,
+      # in the always-running dispatcher, so it renders on every event and
+      # cannot itself be skipped. It re-derives from the tree every path the Go
+      # suite reads outside internal/ and fails when one is not covered by the
+      # `on.push.paths` list this same job parses two steps down — i.e. it
+      # asserts the declaration below is a SUPERSET of what the suite reads.
+      #
+      # A red here fails `changes`, which the `Go gate` aggregator treats as a
+      # failure (its allow-set accepts a skip only against a gate value of
+      # literally 'false'). That is the intended polarity: a dispatcher whose
+      # declaration is known to be incomplete must not publish a verdict.
+      #
+      # `--selftest` first, on its own line, because the ratchet passing on a
+      # clean tree and the ratchet being ALIVE are different facts: a scanner
+      # whose regexes stopped matching reports "0 uncovered reads" and exits 0.
+      # The selftest drives one synthetic read per authoring form and prints its
+      # own assertion count.
+      - name: Go cross-tree read ratchet (selftest, then check)
+        run: |
+          set -euo pipefail
+          bash scripts/go-path-escape-check.sh --selftest
+          bash scripts/go-path-escape-check.sh --check
+
       - id: sets
         name: Compute the changed-path set
         run: |
@@ -274,8 +379,8 @@ jobs:
             echo "::error::dispatcher: the parsed path set does not contain the sentinel 'go.mod'. Either the parser broke or the trigger lost it. Refusing to emit a verdict."
             exit 1
           fi
-          if [ "$n" -lt 10 ]; then
-            echo "::error::dispatcher: parsed only ${n} path glob(s) from ${wf}; the declared list has been 15 since #15007. A truncated parse makes every PR look Go-free. Refusing to emit a verdict."
+          if [ "$n" -lt 30 ]; then
+            echo "::error::dispatcher: parsed only ${n} path glob(s) from ${wf}; the declared list is 44 since task-bb930319aeac0266 (was 15 since #15007). A truncated parse makes every PR look Go-free. Refusing to emit a verdict."
             exit 1
           fi
 

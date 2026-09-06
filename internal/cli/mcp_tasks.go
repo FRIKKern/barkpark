@@ -848,7 +848,13 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 	for k, v := range body {
 		createOp[k] = v
 	}
-	status, respBody, err := sendTaskMutations(ctx, []map[string]any{{"create": createOp}})
+	// The headless twin of `bp task create` is its own INVOCATION, so it mints
+	// its own key base — and splits it PER LEG for the same reason the CLI does:
+	// both legs POST the same path, and the plug's key does not include the body,
+	// so a shared key would replay the create response and the publish would
+	// silently never run (legKey, tasks_create_idempotency.go).
+	idemBase := newIdempotencyKey()
+	status, respBody, err := sendTaskMutations(ctx, []map[string]any{{"create": createOp}}, legKey(idemBase, "create"))
 	if err != nil {
 		return mcpTextError(fmt.Sprintf("task_create: %v", err))
 	}
@@ -864,7 +870,7 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 	warnBody := respBody // fold advisories from the last successful step (publish preferred)
 	if publish {
 		pubOp := map[string]any{"publish": map[string]any{"id": bareID, "type": "task"}}
-		pStatus, pBody, pErr := sendTaskMutations(ctx, []map[string]any{pubOp})
+		pStatus, pBody, pErr := sendTaskMutations(ctx, []map[string]any{pubOp}, legKey(idemBase, "publish"))
 		if pErr != nil {
 			return mcpTextError(fmt.Sprintf("task_create: created %s but publish failed: %v%s", draftID, pErr, orphanedDraftRemedyText(draftID, bareID)))
 		}

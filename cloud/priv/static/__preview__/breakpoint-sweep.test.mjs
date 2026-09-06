@@ -976,13 +976,13 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // create a 14th. Both integers were RE-DERIVED by RUNNING `node
   // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
   // PRINTED, never by adding one to the line above.
-  assert.equal(r.total, 122);
+  assert.equal(r.total, 123);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 98, "98 is the RESIDUE, not the census");
+  assert.equal(r.residue, 99, "99 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 98, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 99, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
