@@ -178,6 +178,53 @@ defmodule Barkpark.Tasks.BriefMirrorTest do
       assert purpose_text(BriefMirror.maybe_resync_task_brief(no_description, "task")) == "keep"
     end
 
+    test "a stale row's FIRST write carries a one-time brief correction — a known, deliberate side effect" do
+      # Pinned because it is surprising and it is load-bearing for anyone
+      # reading a `doc_changed_since_claim` 409 after this ships.
+      #
+      # `brief` is a work-digest field (Barkpark.Tasks.WorkDigest @fields),
+      # alongside `description` and `acceptance_criteria`. For a row whose brief
+      # is already IN SYNC, this changes nothing: the re-sync is a no-op unless
+      # one of those two source fields moved, and both already trip the digest
+      # on their own, so no write trips the fence that would not have before.
+      #
+      # The exception is a row whose brief is ALREADY STALE. There, a write that
+      # touches no work-defining field at all — appending a
+      # `disposition_reason`, say — now also carries the correction, so the
+      # brief sub-digest moves and a claim holder closing afterwards can see
+      # `doc_changed_since_claim` naming `brief`. That is a true report, not a
+      # false one: the brief they read WAS stale and has been corrected, which
+      # is exactly what the fence exists to tell them. It is one-time per stale
+      # row, and the documented recovery (re-read, then close pinning
+      # observed_rev) applies unchanged.
+      stale =
+        task(%{
+          "description" => "the current description",
+          "disposition_reason" => "note one",
+          "brief" => brief([purpose("a stale brief from create time")])
+        })
+
+      unrelated_write = put_in(stale, ["content", "disposition_reason"], "note one + note two")
+      resynced = BriefMirror.maybe_resync_task_brief(unrelated_write, "task")
+
+      assert purpose_text(resynced) == "the current description",
+             "the one-time correction did not happen on an unrelated write"
+
+      refute resynced["content"]["brief"] == unrelated_write["content"]["brief"],
+             "the brief must be reported as changed — a silent correction is the defect, not the fix"
+
+      # And the no-op case: an in-sync row's unrelated write changes nothing.
+      in_sync =
+        task(%{
+          "description" => "the current description",
+          "disposition_reason" => "note one",
+          "brief" => brief([purpose("the current description")])
+        })
+
+      assert BriefMirror.maybe_resync_task_brief(in_sync, "task") == in_sync,
+             "an in-sync row must be untouched, or every write would trip the claim fence"
+    end
+
     test "it is total: non-task types and unexpected shapes pass through untouched" do
       for {attrs, type} <- [
             {task(%{"description" => "new", "brief" => brief([purpose("stale")])}), "paper"},
