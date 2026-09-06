@@ -1422,11 +1422,15 @@ defmodule Barkpark.Tasks.Close do
     Enum.filter(files, &(&1 in held))
   end
 
+  # cch-w3-task-birth-attribution: a blocker must be done AND attributable —
+  # the same predicate the ready queue and the claim door use. See
+  # Tasks.DependencySatisfaction for why this is a read-side narrowing rather
+  # than a guard on the birth path.
   defp all_blockers_done?(%Document{} = dep) do
     dep.id
     |> Edges.dependencies(kind: :blocks)
     |> Enum.all?(fn %Document{content: c} ->
-      Map.get(c, "lifecycle_status") == "done"
+      Barkpark.Tasks.DependencySatisfaction.satisfied?(c)
     end)
   end
 

@@ -22,6 +22,7 @@ defmodule Barkpark.Tasks.Claim do
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
   alias Barkpark.Tasks.CriteriaExemption
+  alias Barkpark.Tasks.DependencySatisfaction
   alias Barkpark.Tasks.{Edges, ExecutionPolicy, Queue, QueueGate, Validation, WorkDigest}
 
   @event_task_claimed "task.claimed"
@@ -255,9 +256,13 @@ defmodule Barkpark.Tasks.Claim do
   defp check_deps_satisfied(%Document{} = doc) do
     deps = Edges.dependencies(doc.id, kind: :blocks)
 
+    # cch-w3-task-birth-attribution: a blocker must be done AND attributable.
+    # `lifecycle_status` alone is forgeable by a fresh create, which births are
+    # structurally exempt from guarding — so the check moved to the READ side.
+    # ONE definition, three call sites; see Tasks.DependencySatisfaction.
     all_done? =
       Enum.all?(deps, fn %Document{content: c} ->
-        Map.get(c || %{}, "lifecycle_status") == "done"
+        DependencySatisfaction.satisfied?(c || %{})
       end)
 
     if all_done?, do: :ok, else: {:error, :blocked_by_unsatisfied_deps}
