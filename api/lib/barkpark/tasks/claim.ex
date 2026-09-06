@@ -21,6 +21,7 @@ defmodule Barkpark.Tasks.Claim do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
+  alias Barkpark.Tasks.Blockers
   alias Barkpark.Tasks.CriteriaExemption
   alias Barkpark.Tasks.DependencySatisfaction
   alias Barkpark.Tasks.{Edges, ExecutionPolicy, Queue, QueueGate, Validation, WorkDigest}
@@ -254,18 +255,21 @@ defmodule Barkpark.Tasks.Claim do
   end
 
   defp check_deps_satisfied(%Document{} = doc) do
-    deps = Edges.dependencies(doc.id, kind: :blocks)
-
     # cch-w3-task-birth-attribution: a blocker must be done AND attributable.
     # `lifecycle_status` alone is forgeable by a fresh create, which births are
     # structurally exempt from guarding — so the check moved to the READ side.
-    # ONE definition, three call sites; see Tasks.DependencySatisfaction.
-    all_done? =
-      Enum.all?(deps, fn %Document{content: c} ->
-        DependencySatisfaction.satisfied?(c || %{})
-      end)
-
-    if all_done?, do: :ok, else: {:error, :blocked_by_unsatisfied_deps}
+    # ONE definition of that predicate; see Tasks.DependencySatisfaction.
+    #
+    # This door used to read ONLY `Edges.dependencies/2`, while the ready queue
+    # gated on the `blocks` edges AND `content.dependencies`. A dependency
+    # written only into `content.dependencies` was therefore withheld by the
+    # queue and waved through here — the row never surfaced in `task ready`,
+    # but a targeted `bp task claim` took it anyway. `Tasks.Blockers` is the ONE
+    # blocker SET both doors now read; see its moduledoc for why it is a union
+    # and which store is authoritative.
+    if Blockers.all_satisfied?(doc),
+      do: :ok,
+      else: {:error, :blocked_by_unsatisfied_deps}
   end
 
   # Resource claims: a targeted claim may carry
