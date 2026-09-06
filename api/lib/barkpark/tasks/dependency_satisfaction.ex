@@ -127,24 +127,55 @@ defmodule Barkpark.Tasks.DependencySatisfaction do
 
   def has_provenance?(_), do: false
 
+  # The ONE SQL text, written against a `?` placeholder for the blocker's
+  # `content` jsonb. Both SQL shapes below are DERIVED from it by substitution,
+  # so there is no second place to edit:
+  #
+  #   * `content_sql_fragment/0` — the `?`-placeholder form, for an Ecto
+  #     `fragment/n` that binds `b.content` positionally (the ready query's
+  #     blocks-EDGE gate, which joins the blocker and has no stable SQL alias).
+  #   * `sql_fragment/1`         — the same text with `?` replaced by
+  #     `<alias>.content`, for raw SQL that names its own alias (the ready
+  #     query's `content.dependencies` gate, aliased `done`).
+  @content_sql """
+  ?->>'lifecycle_status' = 'done'
+  AND (
+    COALESCE(NULLIF(BTRIM(?->'claim'->>'closed_by'), ''), '') <> ''
+    OR COALESCE(NULLIF(BTRIM(?->'claim'->>'closed_at'), ''), '') <> ''
+    OR COALESCE(NULLIF(BTRIM(?->>'close_reason'), ''), '') <> ''
+  )
+  """
+
   @doc """
-  The SQL half, as one fragment over an aliased `done` row.
+  The SQL half in `?`-placeholder form — FOUR binds, all the same `content`
+  jsonb, in order.
+
+  Ecto's `fragment/n` needs a compile-time literal, so a caller reads this into
+  a module attribute (`@dep_satisfied_sql DependencySatisfaction.content_sql_fragment()`)
+  and interpolates that. That is what makes the ready query's edge gate the
+  SAME predicate as `satisfied?/1` rather than a hand-typed neighbour of it.
+  """
+  @spec content_sql_fragment() :: String.t()
+  def content_sql_fragment, do: @content_sql
+
+  @doc """
+  How many `?` binds `content_sql_fragment/0` consumes. Pinned by test so a
+  future edit to the predicate cannot silently change a caller's arity.
+  """
+  @spec content_sql_bind_count() :: pos_integer()
+  def content_sql_bind_count, do: length(String.split(@content_sql, "?")) - 1
+
+  @doc """
+  The SQL half, as one fragment over a row under the given SQL alias (default
+  `done`). Derived from `@content_sql` — never typed twice.
 
   MUST stay equivalent to `satisfied?/1`. `dependency_satisfaction_test.exs`
   drives both over the same fixtures; if you change one and not the other, that
   test is what tells you.
   """
-  @spec sql_fragment() :: String.t()
-  def sql_fragment do
-    """
-    done.content->>'lifecycle_status' = 'done'
-    AND (
-      COALESCE(NULLIF(BTRIM(done.content->'claim'->>'closed_by'), ''), '') <> ''
-      OR COALESCE(NULLIF(BTRIM(done.content->'claim'->>'closed_at'), ''), '') <> ''
-      OR COALESCE(NULLIF(BTRIM(done.content->>'close_reason'), ''), '') <> ''
-    )
-    """
-  end
+  @spec sql_fragment(String.t()) :: String.t()
+  def sql_fragment(alias_name \\ "done") when is_binary(alias_name),
+    do: String.replace(@content_sql, "?", alias_name <> ".content")
 
   @doc """
   Why a specific blocker does not satisfy — the sentence a caller sees.

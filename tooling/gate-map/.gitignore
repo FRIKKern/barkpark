@@ -1,0 +1,4 @@
+# The derived map is never committed: a committed snapshot is staled by any
+# merge that adds a file under POPULATION_GLOBS, which reds main for a third
+# party (task-294d79c9345d59dd). `--derive > gate-map.json` locally is fine.
+gate-map.json

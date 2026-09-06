@@ -12,6 +12,7 @@ defmodule BarkparkWeb.ScimUsersController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Scim
+  alias BarkparkWeb.ScimPatch
   alias BarkparkWeb.ScimResponse
 
   @user_schema "urn:ietf:params:scim:schemas:core:2.0:User"
@@ -64,28 +65,47 @@ defmodule BarkparkWeb.ScimUsersController do
   end
 
   # PATCH /scim/v2/Users/:id — the deprovision signal is active:false.
+  #
+  # The signal reaches us three ways, and only the first two used to be read:
+  # a top-level `active` field (PUT), a PATCH op with `path: "active"`, and —
+  # Azure AD's habit — a PATH-LESS `replace` whose `value` is the whole
+  # resource (`{"op":"replace","value":{"active":false}}`). That third shape hit
+  # `deactivating?/1`'s `path` comparison, failed it, and returned `200` with
+  # `"active": true` for a user the IdP had just disabled: a deprovision the
+  # directory believed had happened and that had not. `ScimPatch.classify/1`
+  # folds it into `whole_resource`, which is read alongside the other two.
   def update(conn, %{"id" => id} = params) do
     org = conn.assigns.scim_org
 
-    case Scim.get_org_user(org, id) do
-      nil ->
-        ScimResponse.error(conn, 404, "user not found in this organization")
+    # Body shape is judged BEFORE the resource is touched, so a refused PATCH
+    # cannot have half-applied.
+    with {:ok, patch} <- ScimPatch.classify(params) do
+      case Scim.get_org_user(org, id) do
+        nil ->
+          ScimResponse.error(conn, 404, "user not found in this organization")
 
-      user ->
-        with_precondition(conn, user, fn conn ->
-          if deactivating?(params) do
-            {:ok, _summary} = Scim.deprovision_user(org, user)
-            # READ THE ANSWER BACK. `active` was a literal `false` chosen by this
-            # clause, so the body was byte-identical whether the deprovision took
-            # or matched nothing (PDS-D503). Re-derive it from the stored rows.
-            json(conn, render_user(conn, user, Scim.org_user_active?(org, user)))
-          else
-            conn
-            |> ScimResponse.with_etag(ScimResponse.version(user.updated_at))
-            |> json(render_user(conn, user))
-          end
-        end)
+        user ->
+          apply_update(conn, org, user, params, patch)
+      end
+    else
+      {:error, scim_type, detail} -> ScimResponse.error(conn, 400, detail, scim_type)
     end
+  end
+
+  defp apply_update(conn, org, user, params, patch) do
+    with_precondition(conn, user, fn conn ->
+      if deactivating?(params) or inactive?(patch.whole_resource) do
+        {:ok, _summary} = Scim.deprovision_user(org, user)
+        # READ THE ANSWER BACK. `active` was a literal `false` chosen by this
+        # clause, so the body was byte-identical whether the deprovision took
+        # or matched nothing (PDS-D503). Re-derive it from the stored rows.
+        json(conn, render_user(conn, user, Scim.org_user_active?(org, user)))
+      else
+        conn
+        |> ScimResponse.with_etag(ScimResponse.version(user.updated_at))
+        |> json(render_user(conn, user))
+      end
+    end)
   end
 
   # PUT /scim/v2/Users/:id — replace; honour active:false as deprovision.
@@ -154,6 +174,11 @@ defmodule BarkparkWeb.ScimUsersController do
   end
 
   defp deactivating?(_), do: false
+
+  # The whole-resource half of the same signal: a path-less `replace`/`add`
+  # whose merged attribute map carries `active: false` (RFC 7644 §3.5.2.3).
+  defp inactive?(%{} = attrs), do: Map.get(attrs, "active") in [false, "false"]
+  defp inactive?(_), do: false
 
   # filter=userName eq "alice@example.com"
   defp parse_username_filter(nil), do: nil

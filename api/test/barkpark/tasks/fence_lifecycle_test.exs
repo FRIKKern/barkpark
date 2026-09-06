@@ -154,7 +154,11 @@ defmodule Barkpark.Tasks.FenceLifecycleTest do
         assert {:ok, _} =
                  Close.close(holder.id, "w-holder",
                    observed_epoch: epoch_of(holder),
-                   lifecycle_status: status
+                   lifecycle_status: status,
+                   # task-650d7844d8fe7199: a `cancelled` close needs a reason.
+                   # Passed for every status in the loop so the three arms stay
+                   # one shape; `done` and `blocked` ignore it.
+                   reason: "closed #{status} by the fence lifecycle fixture"
                  )
 
         assert reload(holder).content["lifecycle_status"] == status

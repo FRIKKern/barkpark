@@ -2079,6 +2079,11 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/members",
         "scoped_admin",
+        flags: [
+          flag("limit", "int", "Max seats to return.", default: 100),
+          flag("offset", "int", "Seats to skip.", default: 0)
+        ],
+        paginated: true,
         writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
@@ -2146,6 +2151,11 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/tokens",
         "scoped_admin",
+        flags: [
+          flag("limit", "int", "Max tokens to return.", default: 100),
+          flag("offset", "int", "Tokens to skip.", default: 0)
+        ],
+        paginated: true,
         writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"

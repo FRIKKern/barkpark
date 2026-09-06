@@ -43,9 +43,11 @@ defmodule Barkpark.SeedsCleanTest do
     capture_io(fn -> Seeds.run(:clean) end)
   end
 
+  # Mirrors Seeds.Clean.admin_token_present?/1: the seed scope's workspace is
+  # the fence, and list_tokens/2 hands back secret-free maps.
   defp admin_tokens do
-    @dataset
-    |> Auth.list_tokens()
+    Barkpark.Tenancy.get_default_workspace().id
+    |> Auth.list_tokens(@dataset)
     |> Enum.filter(fn t -> is_nil(t.revoked_at) and Auth.has_permission?(t, "admin") end)
   end
 
@@ -90,7 +92,15 @@ defmodule Barkpark.SeedsCleanTest do
     # Bound to the Default workspace WITH a membership row (without it,
     # ResolveWorkspace 403s every scoped route).
     refute is_nil(token.workspace_id)
-    assert TenancyAuth.member?(token, token.workspace_id)
+    assert TenancyAuth.member?(token.id, token.workspace_id, :api_token)
+
+    # SECRET-FREE listing: the door must never hand back token_hash (nor any
+    # other secret-bearing key). Reds if list_tokens/2 goes back to Repo.all
+    # over whole %ApiToken{} structs.
+    refute Map.has_key?(token, :token_hash)
+
+    assert Map.keys(token) |> Enum.sort() ==
+             ~w(dataset expires_at id inserted_at kind label last_used_at name permissions revoked_at workspace_id)a
 
     # The generated raw token is printed ONCE in the store-it-now banner.
     assert [_pre, raw] = Regex.run(~r/(bp_admin_[A-Za-z0-9_-]{32})/, output)

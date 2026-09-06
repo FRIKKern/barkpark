@@ -95,13 +95,23 @@ defmodule BarkparkCloud.Web.RouterPatTest do
       refute body["pat"]["token"]
     end
 
-    test "422 no_team when the user has no team" do
+    test "403 no_team when the user has no team — the gate shape, not a 422" do
       user = user_fixture()
       {:ok, session} = Accounts.create_user_session_token(user)
 
+      # cch-w40-bl: minting a PAT resolves its team inline (bare require_user),
+      # and its refusal used to be `422 {"error":"no_team"}` — the status that
+      # says "your body was unprocessable" handed to a caller whose body was
+      # fine and who simply holds no grant. It now speaks the same shape
+      # Auth.gate_role/4 has emitted since cch-w38-s2.
       conn = call(:post, "/v1/tokens", %{name: "ci-key"}, session)
-      assert conn.status == 422
-      assert decode(conn)["error"] == "no_team"
+      assert conn.status == 403
+
+      assert decode(conn) == %{
+               "error" => "forbidden",
+               "reason" => "no_team",
+               "scope" => "team"
+             }
     end
 
     test "422 invalid for a too-short name" do

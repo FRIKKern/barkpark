@@ -2836,6 +2836,40 @@ if ! mkdir -p "$(dirname "$LOCK")" 2>/dev/null; then
   # Unwritable /var/lock (dev box) — fall back to a tmp lock so we still serialize.
   LOCK="${TMPDIR:-/tmp}/barkpark-site-deploy-$SITE_SLUG.lock"
 fi
+# ---- Queued-lock heartbeat (task-8811b4b25c529dbe) --------------------------
+# A SILENT wait is what killed the CI leg, never the deploy itself. `flock -w
+# <budget> 9` carries no bytes on the ssh session that started this script, and
+# the GitHub runner's NAT tears an idle session down after roughly five minutes:
+# ssh exits 255, the step fails, and the run is recorded as a FAILED production
+# deploy for the crime of queueing. Measured on main 2026-09-05..06: ten of the
+# last fourteen failed deploy.yml runs died exactly that way, every one of them
+# after logging the "holds the lock" line above.
+#
+# So wait in heartbeat-sized STEPS instead of one long silent one. The contract
+# is identical to `flock -w <budget> 9` -- return 0 the moment the lock is
+# taken, non-zero once the budget is exhausted, and the TOTAL budget is
+# unchanged (the steps sum to it exactly) -- but a line lands at most every
+# $BARKPARK_LOCK_HEARTBEAT_SECS, so the session carries bytes AND a human
+# reading the log sees a QUEUE rather than a hang.
+#
+# The env var exists ONLY so deploy/*_test.sh can drive this at 1 s; nothing on
+# a box sets it. A non-numeric or sub-second value falls back to 60 rather than
+# spinning.
+queue_for_deploy_lock() {
+  local budget="$1" label="${2:-the deploy lock}" beat waited=0 step
+  beat="${BARKPARK_LOCK_HEARTBEAT_SECS:-60}"
+  case "$beat" in ''|*[!0-9]*) beat=60 ;; esac
+  [ "$beat" -lt 1 ] && beat=60
+  while [ "$waited" -lt "$budget" ]; do
+    step=$(( budget - waited ))
+    [ "$step" -gt "$beat" ] && step="$beat"
+    flock -w "$step" 9 && return 0
+    waited=$(( waited + step ))
+    log "still queued for $label — ${waited}s waited of ${budget}s max"
+  done
+  return 1
+}
+
 exec 9>"$LOCK"
 if ! flock -n 9; then
   if [ "$MODE" != deploy ]; then
@@ -2843,7 +2877,7 @@ if ! flock -n 9; then
     exit 23
   fi
   log "another deploy holds the lock for '$SITE_SLUG' — queueing (max 20 min)"
-  flock -w 1200 9 || { log "gave up waiting for the site deploy lock"; exit 15; }
+  queue_for_deploy_lock 1200 "the site deploy lock for '$SITE_SLUG'" || { log "gave up waiting for the site deploy lock"; exit 15; }
 fi
 
 mkdir -p "$RELEASES"

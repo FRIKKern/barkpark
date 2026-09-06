@@ -14,12 +14,15 @@ defmodule Barkpark.Tasks.PulseTest do
     5. NO epoch fence: a pulse after a foreign epoch bump (L4 fence shape)
        still succeeds and keeps bumping monotonically.
     6. REAPED lease (the charter-pinned hazard case): TTL sweep reaps the
-       claim → the old holder's pulse is {:error, :not_holder} — the row
+       claim → the old holder's pulse is {:error, {:not_in_progress, "open"}}
+       — the row
        stays open/worker-nil, NO silent re-claim, no digest restamp, no
        task.pulse event, no claim.now.
-    7. Released lease → :not_holder. Closed task → :not_holder (close keeps
-       claim.worker, so this proves the live-lease gate, not just the
-       holder match). Foreign worker on a live claim → :not_holder.
+    7. Released lease → {:not_in_progress, "open"}. Closed task →
+       {:not_in_progress, "done"} (close keeps claim.worker, so this proves
+       the live-lease gate, not just the holder match). Foreign worker on a
+       LIVE claim → :not_holder — the holder fault keeps its own token
+       (task-b6fcc8e2f57e1cd5).
     8. Unknown uuid → :not_found.
     9. Read path: render_doc / render_doc_with_counts (GET show + list
        envelopes) surface claim.now with its ts.
@@ -211,7 +214,7 @@ defmodule Barkpark.Tasks.PulseTest do
     end
   end
 
-  describe "pulse/3 — a lost lease refuses (:not_holder), never a silent re-claim" do
+  describe "pulse/3 — a lost lease refuses (naming the state), never a silent re-claim" do
     test "REAPED lease: the old holder's pulse is refused and the row stays reaped",
          %{scope: scope} do
       Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
@@ -229,7 +232,9 @@ defmodule Barkpark.Tasks.PulseTest do
 
       # The crashed worker comes back and pulses — THE hazard case: a thin
       # claim_by_id delegate would silently RE-CLAIM here with a fresh digest.
-      assert {:error, :not_holder} =
+      # task-b6fcc8e2f57e1cd5: the refusal NAMES the state now. A reap lands
+      # the row on "open" (worker cleared), so the state gate fires first.
+      assert {:error, {:not_in_progress, "open"}} =
                Tasks.pulse_by_id(doc.id, "w-crashed", text: "i'm alive!")
 
       after_content = reload(doc).content
@@ -241,17 +246,19 @@ defmodule Barkpark.Tasks.PulseTest do
       assert pulse_events(doc.doc_id) == []
     end
 
-    test "RELEASED lease → :not_holder", %{scope: scope} do
+    test "RELEASED lease → {:not_in_progress, \"open\"}", %{scope: scope} do
       doc = claimed_task!(scope, "w-hold")
       epoch = reload(doc).content["claim"]["epoch"]
 
       {:ok, _} = Tasks.release(doc.id, "w-hold", observed_epoch: epoch)
 
-      assert {:error, :not_holder} = Tasks.pulse_by_id(doc.id, "w-hold", text: "late pulse")
+      assert {:error, {:not_in_progress, "open"}} =
+               Tasks.pulse_by_id(doc.id, "w-hold", text: "late pulse")
+
       refute Map.has_key?(reload(doc).content["claim"], "now")
     end
 
-    test "CLOSED task → :not_holder (close keeps claim.worker — the live-lease gate catches it)",
+    test "CLOSED task → {:not_in_progress, \"done\"} (close keeps claim.worker — the state gate catches it)",
          %{scope: scope} do
       doc = claimed_task!(scope, "w-hold")
       epoch = reload(doc).content["claim"]["epoch"]
@@ -259,7 +266,9 @@ defmodule Barkpark.Tasks.PulseTest do
       {:ok, _} = Tasks.close(doc.id, "w-hold", observed_epoch: epoch)
       assert reload(doc).content["claim"]["worker"] == "w-hold"
 
-      assert {:error, :not_holder} = Tasks.pulse_by_id(doc.id, "w-hold", text: "post-close")
+      assert {:error, {:not_in_progress, "done"}} =
+               Tasks.pulse_by_id(doc.id, "w-hold", text: "post-close")
+
       assert reload(doc).content["lifecycle_status"] == "done"
       refute Map.has_key?(reload(doc).content["claim"], "now")
     end

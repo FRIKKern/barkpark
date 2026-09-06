@@ -584,4 +584,257 @@ if mutate "19g legacy ';' ambiguity guard" '            log_ambiguous = True' ' 
   [ $? -eq 0 ] && PASS=$((PASS+1))
 fi
 
+# ── 20. M5(i) — MAIN'S NEWEST RUN SKIPPED THE JOB (task-e65c78b1cd214237 c1) ─
+# security.yml's sobelow job carries `if: needs.changes.outputs.api == 'true'`,
+# and security.yml's own header records that a job skipped by a job-level `if:`
+# PUBLISHES a check run with conclusion `skipped`. So one non-api merge to main
+# is enough for main's NEWEST completed run to hold this job as `skipped` while
+# the run one merge older was failing the very step the PR fails. `skipped` is
+# neither a pass nor an absence — it is a run with nothing to say — so the
+# selection now WALKS BACK (bounded) to the newest run in which a job of this
+# name actually EXECUTED (conclusion success or failure).
+# MEASURED 2026-09-06: 160 of 160 newest completed security.yml push runs on
+# main ran the job, so this shape is LATENT today rather than the mechanism
+# behind the six mislabels of 2026-09-05 (those were M1, the matrix-leg name).
+runs_walk="$TMP/runs-walk.json"; cat > "$runs_walk" <<'J'
+{"workflow_runs":[{"id":900001,"conclusion":"success","head_sha":"1111aaaabbbb","updated_at":"2026-09-06T07:00:00Z"},{"id":900002,"conclusion":"failure","head_sha":"2222ccccdddd","updated_at":"2026-09-06T06:00:00Z"}]}
+J
+jobsdir="$TMP/jobsdir"; mkdir -p "$jobsdir"
+# 900001 — the newest run: the job is PRESENT and `skipped` (its dispatcher said
+# no api/ path changed). Zero evidence about main at that step.
+cat > "$jobsdir/900001.json" <<'J'
+{"jobs":[{"id":9001,"name":"Doc budgets + anchors","conclusion":"skipped","steps":[]}]}
+J
+# 900002 — one merge older: the job RAN and failed on our step.
+cp "$main_red_s2" "$jobsdir/900002.json"
+walk_run() { # $1 = subject override (or "")
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$out_s2" STEP_NAMES="$NAMES" JOB_NAME="Doc budgets + anchors" \
+      WORKFLOW_FILE="doc-gates.yml" GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t \
+      GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_RUNS_FIXTURE="$runs_walk" MAIN_RED_BREAKER_JOBS_DIR="$jobsdir"
+    bash "${1:-$SUBJECT}" 2>&1; echo "RC=$?" )
+}
+out="$(walk_run)"
+has "$out" "INHERITED-FROM-MAIN" "20) M5: a job SKIPPED on main's newest run is walked past to the run that ran it => inherited"
+has "$out" "Main run 900002" "20) and the verdict names the run it actually compared against"
+has "$out" "Walked back past 1 newer main run" "20) and says how many runs it walked past, and why"
+has "$out" "RC=0" "20) rc 0"
+case "$out" in *"the red is this PR's own"*) bad "20) blamed the author over a skipped job" ;; *) ok "20) does not blame the author" ;; esac
+# 20b. the walk is BOUNDED and it FAILS HONESTLY: if no run in the window ran
+#      the job, the newest informative run is kept and the verdict is
+#      undetermined — never an invented green.
+jobsdir2="$TMP/jobsdir2"; mkdir -p "$jobsdir2"
+cp "$jobsdir/900001.json" "$jobsdir2/900001.json"; cp "$jobsdir/900001.json" "$jobsdir2/900002.json"
+out="$( (export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$out_s2" STEP_NAMES="$NAMES" JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE="doc-gates.yml" GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_RUNS_FIXTURE="$runs_walk" MAIN_RED_BREAKER_JOBS_DIR="$jobsdir2"; bash "$SUBJECT" 2>&1; echo "RC=$?") )"
+has "$out" "OWNERSHIP-UNDETERMINED" "20b) no run in the window executed the job => undetermined, not green"
+has "$out" "EXECUTED in any of the newest 2 informative main run" "20b) and the walk says it found none"
+has "$out" "RC=1" "20b) rc 1"
+
+# ── 21. M5(ii) — THE SOBELOW FINDING SHAPE IS INVISIBLE TO THE NORMALISER ────
+# (task-e65c78b1cd214237 c2.) Sobelow prints neither FAIL nor ERROR nor an
+# ##[error] annotation for a finding — it prints a `<Detector>: <message> - <N>
+# Confidence` header and four UNINDENTED File:/Line:/Function:/Variable: rows,
+# so the START regex missed the header and the indentation rule dropped the
+# rows. The signature set for the whole sobelow job collapsed to the runner's
+# own `Process completed with exit code 1`, which is byte-identical on every red
+# anywhere: the subset test then found nothing our side had that main lacked and
+# a BRAND-NEW finding inherited main's unrelated red. Vacuous, and vacuous in
+# the dangerous direction.
+# These two fixtures are the REAL logs, byte-for-byte including the ANSI colour:
+#   main run 33968984175 job 101314071568 (the red main carried on 2026-09-05)
+#   PR   run 33969823799 job 101316469061 (plugins3/writes-failclosed)
+# Both report DOS.StringToAtom in lib/barkpark/content/validation.ex, at the
+# same Sobelow-reported line (the normaliser erases the digits either way).
+sob_main_log="$TMP/sob-main.log"; sob_ours_same="$TMP/sob-ours-same.txt"; sob_ours_diff="$TMP/sob-ours-diff.txt"
+python3 - "$SEMI_STEP" "$sob_main_log" "$sob_ours_same" "$sob_ours_diff" <<'PY'
+import io, sys
+step = sys.argv[1]
+job = "Sobelow static analysis (regression gate, baseline .sobelow-skips)"
+E = "\x1b"
+def w(path, lines):
+    io.open(path, "w", encoding="utf-8").write("".join(l + "\n" for l in lines))
+w(sys.argv[2], [
+  "2026-09-05T13:29:19.4819840Z %s[32mDOS.StringToAtom: Unsafe `String.to_atom` - Low Confidence%s[0m" % (E, E),
+  "2026-09-05T13:29:19.4821335Z File: lib/barkpark/content/validation.ex",
+  "2026-09-05T13:29:19.4822496Z Line: 188",
+  "2026-09-05T13:29:19.4823318Z Function: get_in_field:187",
+  "2026-09-05T13:29:19.4823799Z Variable: key",
+  "2026-09-05T13:29:20.0000000Z ##[error]Process completed with exit code 1.",
+  "2026-09-05T13:29:21.0000000Z main-red-breaker: MAIN-FAILED-STEP in '%s': %s" % (job, step),
+])
+# the PR's own capture: the SAME finding, a later clock, the line drifted 188->190.
+w(sys.argv[3], [
+  "2026-09-05T13:48:00.0136121Z %s[32mDOS.StringToAtom: Unsafe `String.to_atom` - Low Confidence%s[0m" % (E, E),
+  "2026-09-05T13:48:00.0137235Z File: lib/barkpark/content/validation.ex",
+  "2026-09-05T13:48:00.0138180Z Line: 190",
+  "2026-09-05T13:48:00.0138850Z Function: get_in_field:187",
+  "2026-09-05T13:48:00.0139280Z Variable: key",
+  "2026-09-05T13:48:22.0000000Z ##[error]Process completed with exit code 1.",
+])
+# a DIFFERENT finding, also real: PR #16339 run 34018729630 job 101448180182,
+# SQL.Query in a function (relation_bytes) that does not exist on main at all.
+w(sys.argv[4], [
+  "2026-09-06T07:34:12.1245117Z %s[32mSQL.Query: SQL injection - Low Confidence%s[0m" % (E, E),
+  "2026-09-06T07:34:12.1245818Z File: lib/barkpark/tenancy/workspace_bundle.ex",
+  "2026-09-06T07:34:12.1246288Z Line: 972",
+  "2026-09-06T07:34:12.1246669Z Function: relation_bytes:962",
+  "2026-09-06T07:34:12.1247119Z Variable: sql",
+  "2026-09-06T07:34:22.5925004Z ##[error]Process completed with exit code 1.",
+])
+PY
+out="$(semi_run "$sob_main_log" "$sob_ours_same")"
+has "$out" "INHERITED-FROM-MAIN" "21a) the SAME Sobelow finding on both sides inherits"
+has "$out" "Signature matched too" "21a) and the signature was actually compared, not assumed"
+has "$out" "RC=0" "21a) rc 0"
+out="$(semi_run "$sob_main_log" "$sob_ours_diff")"
+has "$out" "NOT with the same failure signature" "21b) a DIFFERENT Sobelow finding in the same step is the PR's own"
+has "$out" "workspace_bundle.ex" "21b) and it prints the finding that differs"
+has "$out" "RC=1" "21b) rc 1"
+case "$out" in *INHERITED-FROM-MAIN*) bad "21b) waved a fresh Sobelow finding through as inherited" ;; *) ok "21b) does not inherit a fresh finding" ;; esac
+
+# 19h. MUTATION on M5's walk-back: always take the newest informative run (the
+#      pre-M5 selection) -> arm 20 must stop inheriting.
+if mutate "19h M5 run walk-back" 'if job_executed "$MAIN_JOBS" "$JOB_NAME"; then' 'if true; then' 1; then
+  ( out="$(walk_run "$TMP/mut-subject.sh")"
+    case "$out" in *INHERITED-FROM-MAIN*) echo "  FAIL  19h) MUTATION SURVIVED: still inherited with the walk-back removed"; exit 1 ;; *) echo "  PASS  19h) without the walk-back the SKIPPED job is taken and arm 20 breaks — the arm is not vacuous" ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+# 19i. MUTATION on the Sobelow fold: make the finding header unmatchable (the
+#      pre-M5 normaliser) -> arm 21b must stop calling the fresh finding OWN,
+#      because both sides collapse to `Process completed with exit code #`.
+if mutate "19i Sobelow finding-shape fold" "SOBELOW = re.compile(r'^[A-Z][A-Za-z0-9]*\.[A-Za-z0-9_]+:\s.+\s-\s(?:High|Medium|Low) Confidence\s*\$')" "SOBELOW = re.compile(r'^(?!x)x')" 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(semi_run "$sob_main_log" "$sob_ours_diff")"
+    case "$out" in *"NOT with the same failure signature"*) echo "  FAIL  19i) MUTATION SURVIVED: still caught the fresh finding without the fold"; exit 1 ;; *) echo "  PASS  19i) without the Sobelow fold a BRAND-NEW finding inherits main's red — the fold is load-bearing, arm 21b is not vacuous" ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# ── 22. M6 — A RED THE HOST CAUSED IS NEITHER INHERITED NOR OWN ─────────────
+# (task-572a62485cb1f8da; the measurement is task-f21e6a627ca13ef8's.)
+# compose-smoke's green/refusal arms die intermittently at BEAM boot with
+# `sys_sigaltstack(): Internal error: Failed to set alternate signal stack`.
+# It is a HOST property: every crash since the hardware census step landed ran
+# on INTEL(R) XEON(R) PLATINUM 8573C (34020171927, 34020897938, 34020905909),
+# 0 of 7 clean census runs did; over 85 runs, 9 of 16 in Azure westus3+
+# centralus crashed and 0 of 69 elsewhere. Six PR runs were told the red was
+# theirs — and TWO of the three accused arms took the PASSED path, which never
+# compares signatures at all. So the check cannot live inside the signature
+# clause: it has to run BEFORE both attribution routes, on this PR's own body.
+#
+# The capture below is the REAL one, verbatim from run 33981944988's job
+# 'Smoke arms (census, green boot, refusal boot — one image build)', step
+# 'Green arm (compose up → healthy → exec wget /api/schemas + /login)'.
+RL_DATA="$ROOT/scripts/main-red-breaker.runner-local.json"
+sigalt_cap="$TMP/our-sigaltstack.txt"; cat > "$sigalt_cap" <<'L'
+2026-09-05T17:48:38.4918340Z »» green arm: waiting up to 600s for the api healthcheck (first boot = migrations + seeds)
+2026-09-05T17:48:38.7472355Z ── api container logs ──
+2026-09-05T17:48:38.7599882Z sys/unix/sys_signal_stack.c:101:sys_sigaltstack(): Internal error: Failed to set alternate signal stack
+2026-09-05T17:48:38.7600992Z Aborted (core dumped)
+2026-09-05T17:48:38.7601807Z sys/unix/sys_signal_stack.c:101:sys_sigaltstack(): Internal error: Failed to set alternate signal stack
+2026-09-05T17:48:38.7603582Z ────────────────────────
+2026-09-05T17:48:38.7604555Z FAIL  green arm: api container is not cleanly running (running=true restarts=1 health=starting) — with valid generated secrets a boot must never crash or restart
+2026-09-05T17:48:38.7605263Z »» cleanup: docker compose -p bp-smoke-green down
+2026-09-05T17:48:39.1238005Z ##[error]Process completed with exit code 1.
+L
+# The SAME step failing for a reason the tree owns: same wording, same shape,
+# NO sigaltstack lines. Nothing about this may change.
+plain_cap="$TMP/our-plain-greenarm.txt"; cat > "$plain_cap" <<'L'
+2026-09-05T17:48:38.4918340Z »» green arm: waiting up to 600s for the api healthcheck (first boot = migrations + seeds)
+2026-09-05T17:48:38.7472355Z ── api container logs ──
+2026-09-05T17:48:38.7599882Z ** (Mix) Could not start application barkpark: exited in: Barkpark.Application.start(:normal, [])
+2026-09-05T17:48:38.7603582Z ────────────────────────
+2026-09-05T17:48:38.7604555Z FAIL  green arm: api container is not cleanly running (running=true restarts=1 health=starting) — with valid generated secrets a boot must never crash or restart
+2026-09-05T17:48:39.1238005Z ##[error]Process completed with exit code 1.
+L
+# An entry with the RIGHT pattern and no date, no measurement. The tripwire: an
+# allowlist that grows stops discriminating, so an entry that cannot say WHEN
+# and HOW it was measured must buy its author nothing at all.
+bad_data="$TMP/runner-local-bad.json"; cat > "$bad_data" <<'J'
+{"signatures":[{"id":"undated-sigaltstack","pattern":"sys_sigaltstack\\(\\): Internal error: Failed to set alternate signal stack"}]}
+J
+rl_run() { # $1 outcomes, $2 main jobs fixture, $3 OUR capture, $4 MAIN job log (or ""), $5 data file, $6 subject override
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$1" STEP_NAMES="$NAMES" JOB_NAME="Doc budgets + anchors" \
+      WORKFLOW_FILE="compose-smoke.yml" GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t \
+      GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_FIXTURE="$2" BREAKER_ERROR_LOG="$3" \
+      MAIN_RED_BREAKER_RUNNER_LOCAL_DATA="$5"
+    [ -n "${4:-}" ] && export MAIN_RED_BREAKER_LOG_FIXTURE="$4"
+    bash "${6:-$SUBJECT}" 2>&1; echo "RC=$?" )
+}
+# 22a. THE PASSED PATH — main RAN this step and PASSED it. This is the branch
+#      that accused runs 34018218144 and 34018443211, and it reaches its verdict
+#      without ever reading an error message.
+out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$RL_DATA")"
+has "$out" "RUNNER-LOCAL" "22a) real sigaltstack capture + main GREEN on the step => RUNNER-LOCAL"
+has "$out" "beam-sigaltstack-boot-abort" "22a) names the data-file entry that matched"
+has "$out" "PLATINUM 8573C" "22a) and the host measurement that justified the entry"
+has "$out" "task-572a62485cb1f8da" "22a) and the row that filed it"
+has "$out" "::warning" "22a) a warning annotation, so it is not silently green"
+has "$out" "RC=0" "22a) rc 0 — a host crash does not red the PR's check"
+case "$out" in *"the red is this PR's own"*|*"a step main does not"*) bad "22a) ACCUSED THE PR of a runner-local crash" ;; *) ok "22a) makes no ownership claim against the PR" ;; esac
+case "$out" in *INHERITED-FROM-MAIN*) bad "22a) claimed INHERITED — it is neither" ;; *) ok "22a) does not claim INHERITED either" ;; esac
+# 22a2. THE SIGNATURE PATH — main is red on the very same step, with a different
+#       failure body (crash log lines vary run to run: that is how run
+#       34019839592 was accused). Same verdict, and no comparison was needed.
+out="$(rl_run "$out_s2" "$main_red_s2" "$sigalt_cap" "$main_log_15650" "$RL_DATA")"
+has "$out" "RUNNER-LOCAL" "22a2) same step red on main with a DIFFERENT body => still RUNNER-LOCAL"
+has "$out" "RC=0" "22a2) rc 0"
+case "$out" in *"NOT with the same failure signature"*) bad "22a2) fell through to the signature clause and blamed the PR" ;; *) ok "22a2) settled before the signature comparison" ;; esac
+# 22b. THE CONTROL — the same step, the same wording, WITHOUT the signature.
+#      Attributed exactly as before this change. If this ever stops failing, M6
+#      has become an 'ignore compose-smoke' switch.
+out="$(rl_run "$out_s2" "$main_green" "$plain_cap" "" "$RL_DATA")"
+has "$out" "failed on a step main does not" "22b) no signature => attributed exactly as today"
+has "$out" "RC=1" "22b) rc 1"
+case "$out" in *RUNNER-LOCAL*) bad "22b) excused a red that carries no runner-local signature" ;; *) ok "22b) does not excuse an unsigned red" ;; esac
+# 22c. THE TRIPWIRE — an entry with the right pattern but no date and no
+#      measurement is REFUSED, and it buys nothing: the red is attributed
+#      exactly as it would have been with no data file at all.
+out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$bad_data")"
+has "$out" "REFUSED entry 'undated-sigaltstack'" "22c) an entry with no date/measurement is refused by name"
+has "$out" "no ISO date" "22c) and says the date is missing"
+has "$out" "no measurement" "22c) and says the measurement is missing"
+has "$out" "failed on a step main does not" "22c) the refused entry suppresses nothing"
+has "$out" "RC=1" "22c) rc 1"
+case "$out" in *"RUNNER-LOCAL —"*) bad "22c) a dateless, measurement-free entry silenced an accusation" ;; *) ok "22c) the allowlist cannot be widened without a measurement" ;; esac
+# 22d. ORDERING AS A TEXTUAL INVARIANT. 22a/22a2 pass only because the M6 block
+#      runs before BOTH attribution routes; a later refactor could move it and
+#      still leave those arms green on one path. Pin the order in the file.
+rl_ln="$(grep -n 'RUNNER-LOCAL — ' "$SUBJECT" | head -1 | cut -d: -f1)"
+own_ln="$(grep -n "failed on a step main does not" "$SUBJECT" | tail -1 | cut -d: -f1)"
+sig_ln="$(grep -n "NOT with the same failure signature" "$SUBJECT" | tail -1 | cut -d: -f1)"
+if [ -n "$rl_ln" ] && [ "$rl_ln" -lt "$own_ln" ] && [ "$rl_ln" -lt "$sig_ln" ]; then ok "22d) the RUNNER-LOCAL verdict (line $rl_ln) precedes BOTH the PASSED path ($own_ln) and the signature path ($sig_ln)"; else bad "22d) the RUNNER-LOCAL verdict does not precede both attribution routes (rl=$rl_ln passed=$own_ln sig=$sig_ln)"; fi
+# 22e. every shipped entry carries a date and a measurement — the data file the
+#      repo ships must itself pass the loader's tripwire.
+python3 - "$RL_DATA" <<'PY' && ok "22e) every entry in the shipped data file carries an ISO date and a measurement" || bad "22e) the shipped data file has an entry the loader would refuse"
+import json, re, sys
+d = json.load(open(sys.argv[1]))
+sigs = d["signatures"]
+assert sigs, "no signatures"
+for e in sigs:
+    assert re.match(r'^\d{4}-\d{2}-\d{2}$', e.get("date", "")), e.get("id")
+    assert len(e.get("measurement", "")) >= 40, e.get("id")
+    assert e.get("pattern"), e.get("id")
+    re.compile(e["pattern"])
+PY
+
+# 19j. MUTATION — delete the check IN THE WRONG DIRECTION: make the signature
+#      match everything. 22b must go red, i.e. an ordinary red gets excused.
+if mutate "19j runner-local signature match" '        if rx.search(body):' '        if True:' 1; then
+  ( out="$(rl_run "$out_s2" "$main_green" "$plain_cap" "" "$RL_DATA" "$TMP/mut-subject.sh")"
+    case "$out" in *RUNNER-LOCAL*) echo "  PASS  19j) matching everything excuses a red with no signature — 22b is not vacuous" ;; *) echo "  FAIL  19j) MUTATION SURVIVED: still attributed the unsigned red"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+# 19k. MUTATION — remove the RUNNER-LOCAL verdict entirely. 22a must go back to
+#      the sentence that accused four PRs.
+if mutate "19k runner-local verdict" 'if [ -n "$RL_ID" ]; then' 'if false; then' 1; then
+  ( out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$RL_DATA" "$TMP/mut-subject.sh")"
+    case "$out" in *"a step main does not"*) echo "  PASS  19k) without the verdict the sigaltstack crash is blamed on the PR — 22a is not vacuous" ;; *) echo "  FAIL  19k) MUTATION SURVIVED: still refused to blame"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+# 19l. MUTATION — drop the date/measurement tripwire. 22c must go red: the
+#      undated entry would then silence a real accusation.
+if mutate "19l runner-local data tripwire" '    if why:' '    if False:' 1; then
+  ( out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$bad_data" "$TMP/mut-subject.sh")"
+    case "$out" in *RUNNER-LOCAL*) echo "  PASS  19l) without the tripwire an undated entry DOES suppress the accusation — 22c is not vacuous" ;; *) echo "  FAIL  19l) MUTATION SURVIVED: the undated entry still bought nothing"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]

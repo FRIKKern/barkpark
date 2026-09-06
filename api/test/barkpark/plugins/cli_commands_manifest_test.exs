@@ -501,7 +501,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert text =~ "close_override.criteria"
       # The override is accept-unmet-on-the-record: it never flips a criterion.
       assert text =~ "met=false"
-      # The exemptions, by name (check_criteria_proven/4 exempts them BY NAME).
+      # The exemptions, by name (check_criteria_proven/6 exempts them BY NAME).
       assert text =~ "cancelled"
       assert text =~ "blocked"
       assert text =~ ~r/EXEMPT/

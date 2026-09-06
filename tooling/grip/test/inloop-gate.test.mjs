@@ -271,7 +271,14 @@ test("the code says out loud that this gates the wave's fact flow, not every rep
 // say DIFFERENT things — that asymmetry is the whole ruling, so parse them
 // apart rather than grepping the file as one blob.
 function verifyPromptBranches() {
-  const at = SOURCE.indexOf("never touch main${q.needs_worktree ?");
+  // 2026-09-06: anchor on the TERNARY, not on a fused prefix. This used to look
+  // for the literal "never touch main${q.needs_worktree ?" — the two were
+  // adjacent when this was written, and 2dfb6239b (2026-09-02, #15508, charter
+  // D17 "the wave walks its own lifecycle graph") inserted the sanctioned
+  // `bp task stage … researching` carve-out sentence between them. The ternary
+  // and both of its branches are unchanged in substance; only the text in front
+  // of it moved, so every assertion below stands as written.
+  const at = SOURCE.indexOf("${q.needs_worktree ? '");
   assert.notEqual(at, -1, "the verifier prompt's needs_worktree ternary moved or was rewritten — relocate by pattern");
   const end = SOURCE.indexOf("}", at);
   assert.notEqual(end, -1, "the ternary never closes");
@@ -416,7 +423,11 @@ test("the two verifier branches disagree on the carve-out, and BOTH say why", ()
   const at = src.indexOf("${q.needs_worktree");
   assert.ok(at > 0, "the verifier prompt's branch point moved");
   const ternary = src.slice(at, src.indexOf("}`", at));
-  assert.match(ternary, /carve-out below is DENIED to you/, "the worktree branch must deny the carve-out explicitly");
+  // 2026-09-06: the positional word "below" is gone from the prompt (2dfb6239b,
+  // #15508 reworded it to "…carve-out described in other runs is DENIED to
+  // you"), so the anchor no longer pins WHERE the carve-out is described — it
+  // still pins that the worktree branch names the carve-out AND denies it.
+  assert.match(ternary, /carve-out[^']*is DENIED to you/, "the worktree branch must deny the carve-out explicitly");
   assert.match(ternary, /distinct filesystem path that Decide[^`]*never sees/, "the denial must carry its reason, or it reads as an arbitrary rule to route around");
   assert.match(ternary, /you may WRITE re-derivation recipe rows under tooling\/grip\/ledger\//, "the shared-checkout branch must grant the carve-out");
   assert.match(ternary, /You never commit them/, "the grant must state that Decide, not the verifier, commits");

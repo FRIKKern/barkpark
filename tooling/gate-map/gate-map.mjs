@@ -27,9 +27,16 @@
 //
 // WHAT THIS IS AND IS NOT
 // -----------------------
-//   · It DERIVES the map by reading each instrument's scan sites, then checks
-//     the committed snapshot against a fresh derivation on every run. A drifted
-//     snapshot is a REFUSAL (exit 3), never a quietly different answer.
+//   · It DERIVES the map by reading each instrument's scan sites, EVERY RUN.
+//     There is no committed snapshot. There was one, and it was a treadmill:
+//     any merge adding a file under POPULATION_GLOBS invalidated it, so two
+//     PRs that were each green apart — one adding an instrument, one holding a
+//     freshly derived snapshot — reded MAIN together, and every open PR then
+//     inherited a refusal it did not cause (measured 2026-09-06: #16320 +
+//     #16321, and again at main 222cd2eca; task-294d79c9345d59dd). A registry
+//     that must be re-derived by hand after somebody ELSE's merge is a gate
+//     that fires on the wrong person. The truth is now computed at check time,
+//     which is ~1 s, and staleness is structurally impossible.
 //   · An instrument it cannot classify is listed as UNMAPPED and COUNTED. It is
 //     never dropped. An unmapped instrument is an admission, not a pass.
 //   · The extraction is deliberately CONSERVATIVE: a directory scan maps to
@@ -48,7 +55,7 @@
 // USAGE
 //   node tooling/gate-map/gate-map.mjs --population
 //   node tooling/gate-map/gate-map.mjs --verify
-//   node tooling/gate-map/gate-map.mjs --derive > tooling/gate-map/gate-map.json
+//   node tooling/gate-map/gate-map.mjs --derive          # a snapshot for READING; nothing consumes it
 //   node tooling/gate-map/gate-map.mjs --for a/b.mjs c/d.sh
 //   node tooling/gate-map/gate-map.mjs --for-file <list.txt>
 //   node tooling/gate-map/gate-map.mjs --for <files…> --run
@@ -59,7 +66,6 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-export const MAP_PATH = path.join(REPO, "tooling", "gate-map", "gate-map.json");
 
 // ── THE POPULATION ───────────────────────────────────────────────────────────
 // Committed checks only — `git ls-files`, never a working-tree walk, so an
@@ -74,14 +80,20 @@ export const POPULATION_GLOBS = [
   "*.test.mjs",
 ];
 
-export function population(root = REPO) {
+// `globs` is a parameter only so the selftests can measure this function on a
+// mutated population (an empty glob, a collapsed one). CI always uses the default.
+export function population(root = REPO, globs = POPULATION_GLOBS) {
   const out = new Set();
-  for (const g of POPULATION_GLOBS) {
+  for (const g of globs) {
+    // NOT `try { … } catch { continue }`: a git that fails here used to make
+    // the glob contribute nothing and the whole map silently shorter — the
+    // vacuity the snapshot's diff used to (accidentally) catch. Now that the
+    // map is derived every run, a failed listing must be LOUD.
     let listed = "";
     try {
       listed = execFileSync("git", ["-C", root, "ls-files", "--", g], { encoding: "utf8" });
-    } catch {
-      continue;
+    } catch (e) {
+      throw new Error(`gate-map: \`git ls-files -- ${g}\` failed in ${root}: ${e.message}`);
     }
     for (const l of listed.split("\n")) if (l.trim()) out.add(l.trim());
   }
@@ -171,8 +183,8 @@ export function runCommandFor(rel) {
   return `bash ${rel}`;
 }
 
-export function derive(root = REPO) {
-  const pop = population(root);
+export function derive(root = REPO, globs = POPULATION_GLOBS) {
+  const pop = population(root, globs);
   const instruments = [];
   const unmapped = [];
   for (const rel of pop) {
@@ -221,10 +233,12 @@ export function requiredFor(changedFiles, map) {
   return req.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-// ── THE SNAPSHOT IS RE-EARNED, EVERY RUN ─────────────────────────────────────
-// A committed map nobody re-derives rots into a list of paths. `verify` diffs
-// the snapshot against a fresh derivation: a vanished instrument, a new one, or
-// a moved scan set is a REFUSAL. A shorter answer is the wave-16 failure again.
+// ── DIFFING TWO MAPS ─────────────────────────────────────────────────────────
+// `verify` diffs a SUPPLIED map against a fresh derivation. No committed
+// snapshot is passed to it any more — the CLI derives — so this exists for one
+// purpose: the selftests in gate-map.test.mjs mutate a derived map (plant an
+// entry, remove __css_check, narrow a scan set) and this must refuse each one.
+// That is how the derivation proves it can still LOSE.
 export function verify(map, root = REPO) {
   const fresh = derive(root);
   const problems = [];
@@ -259,8 +273,66 @@ export function instrumentsUnderPrefix(prefix, map) {
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
-export function loadMap(p = MAP_PATH) {
-  return JSON.parse(fs.readFileSync(p, "utf8"));
+// The map, derived from the tree in front of you. Every CLI path calls this;
+// nothing reads a file from disk.
+export function currentMap(root = REPO) {
+  return derive(root);
+}
+
+// ── THE FLOOR: what a DERIVED map can still get wrong ────────────────────────
+// Deleting the snapshot deletes staleness, and with it the one diff that would
+// have shown a derivation going quietly EMPTY. So `--verify` now checks the
+// derivation itself, on four properties that can only be broken by a diff that
+// REMOVES something — i.e. always the offending PR's own diff, never a third
+// party's merge:
+//
+//   1. every POPULATION_GLOBS entry still matches ≥1 committed file (a glob
+//      that stops matching is how the population shrinks in silence);
+//   2. the population clears a floor (a wholesale collapse — broken git, a
+//      rewritten `population()` — rather than a legitimate deletion of one file);
+//   3. mapped + unmapped === population (nothing is dropped on the floor);
+//   4. THE WAVE-16 EDGE still resolves: a slice touching only breakpoint-sweep
+//      composes __css_check, via the directory readdir no import graph can see.
+//      This is the semantic reason the tool exists, and it is the check that a
+//      refactor of scanSites() would break.
+//
+// ADDING an instrument moves none of these. That is the whole point.
+export const POPULATION_FLOOR = 350;
+const EDGE_SLICE = "cloud/priv/static/__preview__/breakpoint-sweep.mjs";
+const EDGE_READER = "cloud/priv/static/__css_check.mjs";
+
+export function verifyDerivation(root = REPO, globs = POPULATION_GLOBS) {
+  const problems = [];
+  for (const g of globs) {
+    let listed = "";
+    try {
+      listed = execFileSync("git", ["-C", root, "ls-files", "--", g], { encoding: "utf8" });
+    } catch (e) {
+      problems.push(`glob ${g}: git ls-files failed (${e.message})`);
+      continue;
+    }
+    if (!listed.split("\n").some((l) => l.trim())) {
+      problems.push(`POPULATION_GLOBS entry matches NO committed file: ${g} — the population is silently short by whatever it used to hold`);
+    }
+  }
+  let map = null;
+  try {
+    map = derive(root, globs);
+  } catch (e) {
+    problems.push(`derivation threw: ${e.message}`);
+    return { ok: false, problems, map: null };
+  }
+  if (map.population < POPULATION_FLOOR) {
+    problems.push(`population ${map.population} is under the floor ${POPULATION_FLOOR} — the derivation collapsed, this is not one deleted file`);
+  }
+  if (map.mapped + map.unmapped.length !== map.population) {
+    problems.push(`mapped ${map.mapped} + unmapped ${map.unmapped.length} != population ${map.population} — an instrument was dropped, neither mapped nor admitted`);
+  }
+  const edge = requiredFor([EDGE_SLICE], map).map((r) => r.path);
+  if (!edge.includes(EDGE_READER)) {
+    problems.push(`THE WAVE-16 EDGE is gone: a slice touching ${EDGE_SLICE} no longer composes ${EDGE_READER} (composed: ${edge.join(", ") || "nothing"})`);
+  }
+  return { ok: problems.length === 0, problems, map };
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
@@ -279,21 +351,21 @@ function main(argv) {
     return 0;
   }
   if (has("--verify")) {
-    const v = verify(loadMap());
+    const v = verifyDerivation();
     if (!v.ok) {
-      console.error("REFUSED: the committed gate-map no longer describes the tree");
+      console.error("REFUSED: the derivation itself is broken — the composed gate would be short, not wrong-by-staleness.");
       for (const p of v.problems) console.error(`  ${p}`);
-      console.error("Re-derive with --derive > tooling/gate-map/gate-map.json and read the diff.");
+      console.error("Each of these is caused by a diff that REMOVED something. Restore it, or move the floor deliberately in gate-map.mjs.");
       return 3;
     }
-    console.log(`gate-map.json still describes the tree (${loadMap().mapped} mapped, ${loadMap().unmapped.length} unmapped)`);
+    console.log(`derivation ok (${v.map.population} instruments, ${v.map.mapped} mapped, ${v.map.unmapped.length} unmapped, floor ${POPULATION_FLOOR}, wave-16 edge resolves)`);
     return 0;
   }
 
   const pf = argv.indexOf("--prefix");
   if (pf !== -1) {
     const prefix = argv[pf + 1];
-    const list = instrumentsUnderPrefix(prefix, loadMap());
+    const list = instrumentsUnderPrefix(prefix, currentMap());
     console.log(`PREFIX ${prefix}  ->  ${list.length} instrument(s)`);
     for (const i of list) console.log(`  ${i.path}\n      ${i.via.map((v) => `${v.kind} ${v.p} (${v.evidence})`).join("\n      ")}`);
     return 0;
@@ -316,13 +388,13 @@ function main(argv) {
     return 2;
   }
 
-  const map = loadMap();
-  const v = verify(map);
+  const v = verifyDerivation();
   if (!v.ok) {
-    console.error("REFUSED: the committed gate-map no longer describes the tree — the composed gate would be a guess.");
+    console.error("REFUSED: the derivation is broken — the composed gate would be a guess.");
     for (const p of v.problems) console.error(`  ${p}`);
     return 3;
   }
+  const map = v.map;
   const req = requiredFor(files, map);
   console.log(`SLICE  ${files.length} changed file(s)`);
   for (const f of files) console.log(`  ${f}`);
