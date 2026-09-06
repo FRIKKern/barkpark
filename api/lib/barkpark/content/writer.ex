@@ -33,6 +33,7 @@ defmodule Barkpark.Content.Writer do
 
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, Synthesis}
   alias Barkpark.Preview
+  alias Barkpark.Tasks.BriefMirror
   alias Barkpark.Tasks.Stage
   alias Barkpark.Tasks.Transitions
 
@@ -242,7 +243,13 @@ defmodule Barkpark.Content.Writer do
            # continuous canvas keys its diff on block id, and an id-less block
            # projects to bpId:null → spurious insert-after → duplicate-block
            # corruption on the next edit. Additive (present ids preserved), idempotent.
-           |> maybe_ensure_block_ids(),
+           |> maybe_ensure_block_ids()
+           # A task brief's `purpose-copy` and `criteria-list` blocks are composed
+           # from `description` and `acceptance_criteria`; only the CLI create path
+           # ever composed them, so every later edit froze the brief a dispatched
+           # worker reads first. Re-derive on every write, matching by exact block
+           # id and preserving every other block untouched.
+           |> BriefMirror.maybe_resync_task_brief(type),
          :ok <- validate_task_kind(type, attrs),
          :ok <- refuse_malformed_label_spine(type, attrs) do
       do_create_document(type, attrs, dataset, doc_id, opts)
@@ -797,7 +804,10 @@ defmodule Barkpark.Content.Writer do
            # XSS hardening (mirror of create_after_dedup): scrub a verbatim
            # content["body_html"] on the patch/autosave path so poisoned markup
            # never persists as a draft that publish later promotes unchanged.
-           |> maybe_sanitize_paper_body_html(type),
+           |> maybe_sanitize_paper_body_html(type)
+           # Same brief re-sync as the create path — this is the door a `patch`
+           # comes through, and the one the drift was measured on.
+           |> BriefMirror.maybe_resync_task_brief(type),
          :ok <- validate_task_kind(type, attrs) do
       do_upsert_document(type, attrs, dataset, doc_id, opts)
     end
