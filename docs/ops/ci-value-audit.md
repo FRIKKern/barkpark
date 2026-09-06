@@ -4,6 +4,22 @@
 Cost is measured in `docs/ops/ci-cost-baseline.md`. This is the other half: **value**. Produced by
 `bash scripts/ci-measure.sh --value-audit --since 2026-08-03` (30 days, pull_request runs).
 
+## CORRECTED 2026-09-06 — every row reading `300` is a CEILING, not a count
+
+The collector paged three times at `per_page=100`, newest first, and said nothing when the third page
+came back full. A `300` row therefore covers its newest 300 runs — **0.51 d** for `task-lease-renew`,
+**0.73 d** for `doc-gates` — while `windows-smoke`'s one row covers all 30 d. Direction survives
+(`doc-gates` is understated if anything); **no row-to-row ratio below is supported.** Fixed: the
+collector pages to the window, prints `span_d`, and puts a loud cap notice ABOVE the table when a
+workflow hits GitHub's own 1000-item ceiling. Arms `t1`-`t3`.
+
+**The classifier now reads the assumption instead of assuming it.** The retraction below reached this
+prose on 2026-09-03 and never the instrument, which printed `FLAKE-DOMINANT` for `pr-task-gate` for
+three more days. A workflow reading `github.event.pull_request.{body,title,labels}` — derived from
+the workflow file, not a typed list; `pr-task-gate`, `reland-check`, `task-lease-renew` today — is
+verdicted `INPUTS-OUTSIDE-SHA`, never `FLAKE-DOMINANT`. Arms `v7`-`v7c`. **Honest limit:** a gate
+reading the task ledger is the same class and is not yet detected.
+
 ## The classification rule
 
 | bucket | rule |
@@ -19,31 +35,12 @@ keep those buckets apart, and v1 reds if the classifier is mutated to merge them
 
 ## CORRECTED 2026-09-03 — the first headline here was WRONG
 
-**This file first said "three of the four required contexts are flake-dominant". That was wrong, and
-the error was in the rule, not the arithmetic.**
-
-The rule read: *nothing about the code changed between the red and the green, so the red carried no
-information.* It has an unstated assumption — **that the check's input is the code.** That holds for
-`elixir`, `cloud` and `console-harness`. It is false for `pr-task-gate`, whose inputs are the **PR
-description and the ledger**, neither of which is in any commit. When an author fixes a missing
-`Task:` trailer and re-runs, **the rerun IS the fix**, on the same sha, and this file scored it as a
-flake.
-
-Measured over the full 15-day population (1,207 PR reds) rather than the capped 300-run window:
-
-| claim in the first pass | corrected |
-|---|---|
-| `pr-task-gate` flake-dominant, 8 of 24 | **flake rate 4 of 107 = 3.7%** — only the INFRA/ledger-unreachable class (runs 32838427181, 32671727320, 32340738580, 32315588293). 21 of its 34 rerun-greens said "no task reference found" and the author edited the PR body. |
-| `cloud` 7 rerun-greens | **0 flakes.** All seven were reruns of **CANCELLED** attempts — three of them one dispatcher-cancellation event. A cancelled attempt produced no verdict, so there is no red to explain. |
-| the gates do not earn their keep | **they do.** On the honest subset (red and green heads ≤2 commits apart) the catch rate is `cloud` 18/20, `elixir` 28/39, `console-harness` 4/5. |
-
-**Why the ≤2-commit subset is the honest one:** median commits between a red head and the next green
-head is 35 for `elixir` and 27 for `pr-task-gate`. A 35-commit gap contains the whole rest of the PR,
-so "the diff touched source" is true by construction and proves nothing.
-
-**The diff test is INAPPLICABLE to `pr-task-gate`, not failed by it.** 5 of its 19 tight-gap cases have
-a literally empty diff — a force-pushed commit-message amend, which is exactly what fixing a trailer
-looks like.
+"Three of the four required contexts are flake-dominant" was wrong, and the error was in the
+rule, not the arithmetic: it assumed the check's input is the code. The full correction — the
+3.7% `pr-task-gate` flake rate, `cloud`'s seven cancelled-attempt reruns, the honest ≤2-commit
+catch rates, and why the diff test is INAPPLICABLE to `pr-task-gate` rather than failed by it —
+is preserved verbatim in [ci-value-audit-history.md](ci-value-audit-history.md). The rule it
+produced is now enforced by the classifier, not just written down (see above).
 
 ## What the real flake list is
 
@@ -67,10 +64,9 @@ generally.
 
 ## The lesson worth more than the numbers
 
-A classification rule carries assumptions about **what its subject consumes**. "Nothing changed, so the
-red meant nothing" is only true for a check whose input is the thing that did not change. Before
-applying a uniform rule across a roster, ask what each member reads — `pr-task-gate` reads a ledger and
-a PR body, and it was the one case the rule inverted.
+A classification rule carries assumptions about **what its subject consumes**. "Nothing changed, so
+the red meant nothing" holds only for a check whose input is the thing that did not change. It cost
+three days to learn that fixing the prose does not fix the instrument.
 
 ## Full table
 
@@ -79,7 +75,7 @@ a PR body, and it was the one case the rule inverted.
 | `doc-gates.yml` | 300 | 56 | 0 | 0 | 56 | RED-UNRESOLVED |
 | `js-tests.yml` | 171 | 45 | 0 | 45 | 0 | CATCH-CANDIDATE |
 | `go-format.yml` | 300 | 31 | 0 | 27 | 4 | CATCH-CANDIDATE |
-| `pr-task-gate.yml` | 300 | 24 | 8 | 7 | 17 | FLAKE-DOMINANT |
+| `pr-task-gate.yml` | 300 | 24 | 8 | 7 | 17 | INPUTS-OUTSIDE-SHA |
 | `compose-smoke.yml` | 300 | 21 | 1 | 1 | 20 | CATCH-CANDIDATE |
 | `elixir.yml` | 300 | 18 | 8 | 10 | 8 | CATCH-CANDIDATE |
 | `security.yml` | 300 | 13 | 1 | 2 | 11 | CATCH-CANDIDATE |
@@ -101,26 +97,10 @@ a PR body, and it was the one case the rule inverted.
 | `go-tests.yml` | 300 | 0 | 2 | 0 | 0 | NEVER-RED |
 | `reland-check.yml` | 300 | 0 | 2 | 0 | 0 | NEVER-RED |
 | `task-lease-renew.yml` | 300 | 0 | 3 | 0 | 0 | NEVER-RED |
-| `twoslash.yml` | 170 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `typedoc.yml` | 168 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `paper-editor.yml` | 68 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `ci.yml` | 67 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `search-template-gates.yml` | 59 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `deploy-harnesses.yml` | 56 | 0 | 0 | 0 | 0 | NEVER-RED |
 | `stale-verdict-watch.yml` | 49 | 0 | 1 | 0 | 0 | NEVER-RED |
-| `pdrender-wasm.yml` | 41 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `create-quickstart-smoke.yml` | 24 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `astro-search-finder-test.yml` | 21 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `astro-finder-drift.yml` | 17 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `connectors.yml` | 11 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `sdk-tests.yml` | 8 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `weekly-changelog.yml` | 5 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `main-gate-watch.yml` | 4 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `research-coverage-suite.yml` | 4 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `web-fork-drift.yml` | 4 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `plugin-node.yml` | 3 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `breakglass-watch.yml` | 2 | 0 | 0 | 0 | 0 | NEVER-RED |
-| `windows-smoke.yml` | 1 | 0 | 0 | 0 | 0 | NEVER-RED |
+
+**NEVER-RED with nothing else in any column** (runs, and zero reds / rerun-greens /
+candidates / unresolved): `twoslash.yml` 170, `typedoc.yml` 168, `paper-editor.yml` 68, `ci.yml` 67, `search-template-gates.yml` 59, `deploy-harnesses.yml` 56, `pdrender-wasm.yml` 41, `create-quickstart-smoke.yml` 24, `astro-search-finder-test.yml` 21, `astro-finder-drift.yml` 17, `connectors.yml` 11, `sdk-tests.yml` 8, `weekly-changelog.yml` 5, `main-gate-watch.yml` 4, `research-coverage-suite.yml` 4, `web-fork-drift.yml` 4, `plugin-node.yml` 3, `breakglass-watch.yml` 2, `windows-smoke.yml` 1.
 
 ## Flake evidence
 
