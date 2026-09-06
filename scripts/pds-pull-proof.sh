@@ -139,6 +139,7 @@ FULL_BUDGET="${PDS_FULL_EXPORT_BUDGET:-1}"
 FULL_MIN_MEM_MB="${PDS_FULL_EXPORT_MIN_MEM_MB:-2200}"
 FULL_LOCK_OWNED=""
 FULL_WHY=""            # why acquisition aborted, if it did
+FULL_META_WHY=""       # which full_meta_ok expectation failed, if one did
 FULL_RSS_LINE=""       # the measured RSS sentence (method + baseline + peak)
 
 # ── output helpers ───────────────────────────────────────────────────────────
@@ -1339,14 +1340,86 @@ step_2() {
 # content-API downtime. Any cgroup figure that appears anywhere is labelled
 # CUMULATIVE-SINCE-BOOT. The survey's numbers are never reprinted as this run's.
 
+# full_meta_ok — 0 = the on-disk bundle at $FULL_TAR is a USABLE FULL bundle.
+# On 1 it sets $FULL_META_WHY to the ONE expectation that failed, by name.
+#
+# PDS-D261 / pds-bl-w16-full-meta-permissive-default. This predicate used to be
+# `[ -s "$FULL_TAR" ]` plus `case "$p" in ""|full) return 0`, where `$p` came
+# from manifest_field — which returns the EMPTY STRING on EVERY failure path:
+# a body that is not a tar, a tar with no manifest.json member, a manifest that
+# is not JSON. So "" meant BOTH "an engine that predates the profile field" AND
+# "this file is not a bundle at all", and the legacy branch accepted the second.
+#
+# MEASURED on origin/main before this change (scripts/pds-pull-proof_test.sh
+# replays every shape): a 3096-byte HTML proxy error page, a 21-byte JSON error
+# body, a gzip that is not a tar, a 512-byte truncated tar, a valid tar with no
+# members, a tar carrying only manifest.json and no tables, and a tar whose
+# members are all zero bytes were ALL accepted as full bundles. The ONLY refusals
+# were a 0-byte file and an explicitly non-full profile string. That is a
+# predicate that cannot fail on the shapes it exists to catch — and it sits on
+# the reuse path (`if full_meta_ok` in acquire_full_bundle), which has no HTTP
+# code and no byte floor, over a bundle parked in world-writable /tmp.
+#
+# The predicate now asserts what the CONSUMERS need, no more: step 3 extracts
+# `manifest.json tables/documents.copy` out of this exact tar and step 4 hands
+# it to pds-secret-scan.sh. The legacy pre-profile accept SURVIVES, but only for
+# a manifest that PARSED and genuinely carries no `profile` key — an unreadable
+# manifest is not a legacy engine.
 full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
-  [ -s "$FULL_TAR" ] || return 1
-  local p
-  p="$(manifest_field "$FULL_TAR" profile)"
+  FULL_META_WHY=""
+  local d p sz
+
+  if [ ! -f "$FULL_TAR" ]; then
+    FULL_META_WHY="there is no file at $FULL_TAR"
+    return 1
+  fi
+  if [ ! -s "$FULL_TAR" ]; then
+    FULL_META_WHY="$FULL_TAR is 0 bytes"
+    return 1
+  fi
+
+  sz="$(wc -c <"$FULL_TAR" 2>/dev/null | tr -d ' ')"
+  if ! tar -tf "$FULL_TAR" >/dev/null 2>&1; then
+    FULL_META_WHY="$FULL_TAR (${sz:-?} bytes) is not a readable tar archive — an error page, a truncated download or any non-tar body reaches this predicate looking exactly like a bundle, and every downstream extraction off it would read as an EMPTY bundle rather than a failed one"
+    return 1
+  fi
+
+  d="$(mktemp -d "${TMPDIR:-/tmp}/pds-fm.XXXXXX")"
+  TMP_DIRS="$TMP_DIRS $d"
+
+  if ! tar -xf "$FULL_TAR" -C "$d" manifest.json 2>/dev/null || [ ! -s "$d/manifest.json" ]; then
+    FULL_META_WHY="$FULL_TAR is a readable tar but carries no non-empty manifest.json member, so it is not a bp-export-v1 bundle at all"
+    return 1
+  fi
+
+  p="$(python3 -c '
+import json, sys
+try:
+    m = json.load(open(sys.argv[1]))
+except Exception:
+    print("__UNPARSED__"); raise SystemExit(0)
+if not isinstance(m, dict):
+    print("__UNPARSED__"); raise SystemExit(0)
+v = m.get("profile")
+print("__ABSENT__" if v is None else v)' "$d/manifest.json" 2>/dev/null || printf '__UNPARSED__')"
+
   case "$p" in
-    ""|full) return 0 ;;   # "" = an engine that predates the profile field
-    *) return 1 ;;
+    __UNPARSED__)
+      FULL_META_WHY="manifest.json is present but is not a JSON object — its profile cannot be read, and an UNREADABLE manifest is not the legacy pre-profile engine the absent-profile branch exists for"
+      return 1 ;;
+    __ABSENT__|full)
+      : ;;   # absent = an engine that predates the profile field (legacy accept)
+    *)
+      FULL_META_WHY="the manifest declares profile=[$p], not [full] — a $p bundle is not a full-fidelity control"
+      return 1 ;;
   esac
+
+  if ! tar -xf "$FULL_TAR" -C "$d" tables/documents.copy 2>/dev/null || [ ! -s "$d/tables/documents.copy" ]; then
+    FULL_META_WHY="the bundle carries no non-empty tables/documents.copy member — step 3's ticket-deny control and step 4's scan both read exactly that member, and a zero over an absent member is vacuous, not clean"
+    return 1
+  fi
+
+  return 0
 }
 
 full_meta_field() { # key -> the value recorded in the .meta sidecar (empty if absent)
@@ -1376,6 +1449,14 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   # A mismatch therefore does NOT reuse: it falls through to the five
   # conditions, which either buy a fresh bundle within budget or ABORT saying
   # the staleness out loud (severable — it costs steps 3 and 4 only).
+  if ! full_meta_ok && [ -e "$FULL_TAR" ]; then
+    # A file IS parked at the run-stable path and it is NOT a usable bundle.
+    # Silence here is what let a non-tar body be reused as a full-fidelity
+    # control for as long as it sat on disk (PDS-D261). $FULL_DIR defaults to
+    # world-writable /tmp, so this branch is reachable without any bad export.
+    info "full bundle     PARKED FILE REFUSED — $FULL_META_WHY. Not reused; falling through to the five conditions."
+  fi
+
   if full_meta_ok; then
     local meta_sha
     meta_sha="$(full_meta_field served_sha)"
@@ -1557,7 +1638,7 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     return 1
   fi
   if ! full_meta_ok; then
-    FULL_WHY="the export succeeded but the bundle is not a readable full-profile bp-export-v1 bundle (manifest profile='$(manifest_field "$FULL_TAR" profile)')"
+    FULL_WHY="the export returned HTTP 200 and $bytes bytes, but what came back is not a usable full-profile bp-export-v1 bundle: $FULL_META_WHY"
     [ -n "$FULL_LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null && FULL_LOCK_OWNED=""
     return 1
   fi

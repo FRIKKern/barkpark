@@ -235,6 +235,8 @@ scripts/check-deployyml-filters.sh
 scripts/pds-door-census.sh
 scripts/pds-elixir-receipt-census.exs
 scripts/pds-published-artifact-door.sh
+scripts/pds-pull-proof.sh
+scripts/pds-pull-proof_test.sh
 scripts/pds-published-artifact-door_test.sh
 scripts/pds-record-parity.test.sh
 scripts/pds-status-only-residue.exs
