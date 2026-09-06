@@ -2244,6 +2244,15 @@ defmodule BarkparkCloud.Web.Router do
       # prefetch shape — one GROUP BY query for the whole page, never a per-row
       # lookup (the N+1 this domain already paid for once).
       qmap = Registry.queued_deploy_age_map(ids)
+      # dr-w10-s1: the DEPLOY vital rides the SAME prefetch shape — ONE grouped
+      # `sites LEFT JOIN deployments` for the whole page. The window is pinned
+      # HERE, once, and travels inside every node (never re-derived per row), so
+      # the whole page reports one comparable population and a consumer can age
+      # the reading. 24 h is the window every measurement in this epic was taken
+      # on, and the same width `bp cloud status` already asks the census for.
+      deploy_to = DateTime.utc_now()
+      deploy_from = DateTime.add(deploy_to, -24, :hour)
+      rmap = DeployLedger.box_rates(ids, deploy_from, deploy_to)
 
       json(conn, 200, %{
         barkparks:
@@ -2254,7 +2263,8 @@ defmodule BarkparkCloud.Web.Router do
                 pmap[barkpark.id],
                 dmap[barkpark.id],
                 hmap[barkpark.id],
-                qmap[barkpark.id]
+                qmap[barkpark.id],
+                rmap[barkpark.id]
               )
 
             if all_teams? do
@@ -10892,7 +10902,20 @@ defmodule BarkparkCloud.Web.Router do
   # has no queued container deployment and pass nothing. nil means NONE QUEUED
   # — clients own the stalled threshold (charter D6), the payload only carries
   # the raw number.
-  defp barkpark_json(bp, provision \\ nil, deprovision \\ nil, pressure \\ nil, queued_age \\ nil) do
+  # `deploy_rate` is the PREFETCHED per-box deploy vital
+  # (`DeployLedger.box_rates/3`), passed in for exactly the reason `pressure` is:
+  # the write call sites serialize a box that by construction has never deployed,
+  # and an internal lookup would put a grouped join on those write paths. nil →
+  # the `deploy_rate` key renders all-nil with `sites: 0`, which a consumer reads
+  # as "this box has no deploy surface", never as "measured, and it is fine".
+  defp barkpark_json(
+         bp,
+         provision \\ nil,
+         deprovision \\ nil,
+         pressure \\ nil,
+         queued_age \\ nil,
+         deploy_rate \\ nil
+       ) do
     base = %{
       id: bp.id,
       name: bp.name,
@@ -11044,6 +11067,38 @@ defmodule BarkparkCloud.Web.Router do
     |> merge_provision_steps(provision)
     |> merge_provision_console(provision)
     |> merge_pressure(pressure)
+    |> merge_deploy_rate(deploy_rate)
+  end
+
+  # dr-w10-s1: the box's own DEPLOY failure rate on the fleet row — the vital
+  # `bp cloud status` needed to stop printing `ok` for a box that failed 46.28%
+  # of its 1,290 terminal deploys in 24 h.
+  #
+  # Mirrors `merge_pressure/2` exactly, and for the same reason: a MEASURED
+  # clause and an all-nil SENTINEL clause, so the key is always present and a
+  # consumer branches on the VALUES rather than on the key's existence.
+  #
+  # The sentinel is not "unmeasured" — it is "NOTHING TO MEASURE": it fires only
+  # for a barkpark with no sites at all, which `box_rates/3` deliberately omits.
+  # `sites: 0` is what says so, and it is the difference between a box that has
+  # nothing to deploy (verdict unchanged, wearing a marker) and a box with sites
+  # whose sample is too small to score (a silence) — charter D149. Fold those
+  # together and 6 of 8 boxes wear a permanent alarm nobody reads.
+  defp merge_deploy_rate(map, %{rate: _} = node), do: Map.put(map, :deploy_rate, node)
+
+  defp merge_deploy_rate(map, _), do: Map.put(map, :deploy_rate, no_deploy_surface())
+
+  defp no_deploy_surface do
+    empty = DeployLedger.rate(0, 0)
+
+    %{
+      window: nil,
+      sites: 0,
+      sites_deploying: 0,
+      rate: empty,
+      absorption: empty,
+      box_caused: empty
+    }
   end
 
   # dr-w4-s4: the host's LIVE resource pressure on the fleet row. Until now

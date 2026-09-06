@@ -3,7 +3,7 @@ defmodule BarkparkCloud.PayloadKeySetCensus.Extract do
   The Side-A extractor: the LITERAL map keys a serializer emits, read off the
   Elixir AST (`Code.string_to_quoted!/1`), never off a regex.
 
-  Why not a regex: a regex over `barkpark_json/5`'s base map literal sees 35
+  Why not a regex: a regex over `barkpark_json/6`'s base map literal sees 35
   keys. The function's actual payload is 56 — the other 21 are added by the
   `merge_*` pipeline it pipes the base through. A regex is 38% blind to the very
   thing this census exists to check, and blind SILENTLY.
@@ -698,7 +698,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       suspension and emitted by no serializer, so a reader could say a box was
       suspended and why but never SINCE WHEN — and the console papered over the
       gap with `sub.current_period_end`, a future renewal day rendered as a past
-      suspension day. cch-w54-bl wired it into `barkpark_json/5`, the arm
+      suspension day. cch-w54-bl wired it into `barkpark_json/6`, the arm
       refused until its allowlist row died, and the floor fell 25 -> 24.
 
   A GREEN SCHEMA ARM DOES NOT MEAN THE WIRE IS CONNECTED, and the counterexample
@@ -852,16 +852,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # because the declaration must stay possible, not because anything uses it.
   @pairs [
     %{
-      name: "barkpark_json/5",
+      name: "barkpark_json/6",
       file: @router,
-      entry: {:barkpark_json, 5},
+      entry: {:barkpark_json, 6},
       schema: @barkpark_schema,
       go: "Barkpark"
     },
     %{
-      name: "barkpark_json/5 pressure",
+      name: "barkpark_json/6 pressure",
       file: @router,
-      entry: {:barkpark_json, 5},
+      entry: {:barkpark_json, 6},
       nested: "pressure",
       go: "Pressure"
     },
@@ -962,13 +962,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # real consumer that simply is not a Go struct, or a real emitter that is not
   # one of the serializers Side A walks.
   @reconciled [
-    {"barkpark_json/5", :unread, "provision_steps",
+    {"barkpark_json/6", :unread, "provision_steps",
      "BROWSER-ONLY. The /new page's refresh-durable provisioning narration (dwb-14); app.js reads provision_steps/provision_console at 17 call sites. `bp` narrates provisioning off its own poll, so decoding a live step list into a Go struct would be a SECOND renderer of the same bytes."},
-    {"barkpark_json/5", :unread, "provision_console",
+    {"barkpark_json/6", :unread, "provision_console",
      "BROWSER-ONLY, same reader as provision_steps above (dwb-16)."},
     {"site_deployment_json/3", :unread, "console",
      "BROWSER-ONLY. gh-5's live build console; the CLI streams its own lines from the deploy stream rather than re-rendering this list."},
-    {"barkpark_json/5", :phantom, "team",
+    {"barkpark_json/6", :phantom, "team",
      "EMITTED, outside Side A's scope by design. /v1/barkparks Map.put's `team` onto the row in its all_teams? arm (router.ex:2077), i.e. in the ROUTE, not in the base serializer this census walks. The same one-level bound that stops the walk over-collecting a helper's private shapes also makes this key invisible — and `Barkpark.Team` is decoded and read (client_test.go:208), so the read lands."}
   ]
 
@@ -976,17 +976,17 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # to RECONCILED to make a red go away — the whole point of the split is that
   # "we decided this is fine" and "nobody has looked" are different sentences.
   @known_open [
-    {"barkpark_json/5", :unread, "region",
+    {"barkpark_json/6", :unread, "region",
      "dr-w11-payload-divergence-close — launch placement the fleet table cannot show."},
-    {"barkpark_json/5", :unread, "server_type",
+    {"barkpark_json/6", :unread, "server_type",
      "dr-w11-payload-divergence-close — launch size, same gap as region."},
-    {"barkpark_json/5", :unread, "unreachable_count",
+    {"barkpark_json/6", :unread, "unreachable_count",
      "dr-w11-payload-divergence-close — the consecutive-miss counter behind health_status. `bp` prints the health VERDICT with none of its evidence."},
-    {"barkpark_json/5", :unread, "unreachable_notification_sent",
+    {"barkpark_json/6", :unread, "unreachable_notification_sent",
      "dr-w11-payload-divergence-close — the once-per-outage alert latch, unread."},
-    {"barkpark_json/5", :unread, "autoupdate_triggered_at",
+    {"barkpark_json/6", :unread, "autoupdate_triggered_at",
      "dr-w11-payload-divergence-close — the in-flight rollout marker; without it a CLI status can print a stale cached verdict over a landing rollout."},
-    {"barkpark_json/5", :unread, "custom_host",
+    {"barkpark_json/6", :unread, "custom_host",
      "dr-w11-payload-divergence-close — the attached platform-zone host."},
     # THIS ROW IS A HOLE MOVING, NOT A HOLE TRADED FOR ANOTHER. `suspended_at`
     # was a Side C row (UNSERIALIZED: written by every suspension, emitted by no
@@ -996,7 +996,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # client does not decode it yet. The console — the reader this fix exists
     # for — reads it from the same payload immediately, so the browser half is
     # closed; only `bp` is still blind.
-    {"barkpark_json/5", :unread, "suspended_at",
+    {"barkpark_json/6", :unread, "suspended_at",
      "cch-w54-bl-suspended-at-is-written-but-never-serialized closed the SERIALIZER half; task-85c531c2adbf0dff is the live tracker for THIS half. The billing-suspension stamp is EMITTED since cch-w54-bl and decoded by nobody: internal/cloudclient's Barkpark struct declares the `Suspended` and `SuspendedReason` fields (json:\"suspended\" / json:\"suspended_reason\") and stops there, so `bp` can still say a box is suspended and why but never SINCE WHEN. Cited by FIELD rather than by line because this struct is appended to constantly and a line number here would rot within the week. Adding the third field is a one-line change in internal/, outside the cloud/-only fence of the PR that emitted the key; it is filed rather than smuggled."},
     # THE THREE FLEET ROWS SAID SOMETHING FALSE (corrected by hand, dr-w27-s2).
     # They read as "decoded by NOBODY", and all three are decoded today by
@@ -1016,15 +1016,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # or json:"transition" either (`grep -rn 'json:"previous_sha"' internal/cli`
     # returns nothing), so the rollback verdict stays newly-unread under the
     # widened union too. Three correct sentences cost less than 212 blind spots.
-    {"barkpark_json/5", :unread, "fleet_role",
+    {"barkpark_json/6", :unread, "fleet_role",
      "dr-w11-payload-divergence-close — Personal Dev Fleet group record (PDF-D61). No CLIENT struct decodes it; `bp` DOES, at internal/cli/cloud_support_cmd.go:1460 (json:\"fleet_role\"), which is outside this arm's internal/cloudclient union root."},
-    {"barkpark_json/5", :unread, "fleet_parent_id",
+    {"barkpark_json/6", :unread, "fleet_parent_id",
      "dr-w11-payload-divergence-close — the main this box binds to. No CLIENT struct decodes it; `bp` DOES, at internal/cli/cloud_support_cmd.go:1461 (json:\"fleet_parent_id\"), outside this arm's union root."},
-    {"barkpark_json/5", :unread, "fleet_token_id",
+    {"barkpark_json/6", :unread, "fleet_token_id",
      "dr-w11-payload-divergence-close — the opaque revocation-token id (not a secret). No CLIENT struct decodes it; `bp` DOES, at internal/cli/cloud_support_cmd.go:1462 (json:\"fleet_token_id\"), outside this arm's union root."},
-    {"barkpark_json/5 pressure", :unread, "p95_ms",
+    {"barkpark_json/6 pressure", :unread, "p95_ms",
      "dr-w11-payload-divergence-close — charter D131's p95 vital. The Pressure struct's own doc comment asserts its tags are @unmetered_pressure VERBATIM; that sentence is now false by two keys."},
-    {"barkpark_json/5 pressure", :unread, "req_per_s",
+    {"barkpark_json/6 pressure", :unread, "req_per_s",
      "dr-w11-payload-divergence-close — charter D103's DENOMINATOR. It rides WITH err_5xx_per_s precisely so nobody prints an error share without the volume it came from — and err_5xx_per_s IS decoded while this is not, which is the exact shape D103 forbids."},
     {"site_deployment_json/3", :unread, "preview_host",
      "dr-w11-payload-divergence-close — gh-6 preview identity. SiteDeployment decodes Branch and Environment but neither preview key, so a CLI preview deploy cannot name the surface it just built."},
@@ -1063,7 +1063,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # the key this ruling was filed about is no longer silent. A divergence
     # found later still lands here as an :unread/:phantom row, case by case. ──
     {"DeployLedger.census/3", :phantom, "scope",
-     "dr-w18-bl-route-added-keys-escape-the-census — A WALKER BLIND SPOT, NOT A DEAD KEY. `scope` IS emitted, but by the ROUTE (router.ex:3613 `Map.put(census, :scope, census_scope(team, scoped))`), not by `DeployLedger.census/3`, which this pair walks and which has ZERO `scope` hits. This is the SECOND instance of the identical shape (`barkpark_json/5`/`team`, blessed @reconciled at a time when it was the only one), and a second instance is the argument for fixing the walker rather than blessing the divergence again: filed as the CLOSER above. Deliberately KNOWN OPEN, not RECONCILED — nothing here is intentional divergence; the census simply cannot see where the key is written."}
+     "dr-w18-bl-route-added-keys-escape-the-census — A WALKER BLIND SPOT, NOT A DEAD KEY. `scope` IS emitted, but by the ROUTE (router.ex:3613 `Map.put(census, :scope, census_scope(team, scoped))`), not by `DeployLedger.census/3`, which this pair walks and which has ZERO `scope` hits. This is the SECOND instance of the identical shape (`barkpark_json/6`/`team`, blessed @reconciled at a time when it was the only one), and a second instance is the argument for fixing the walker rather than blessing the divergence again: filed as the CLOSER above. Deliberately KNOWN OPEN, not RECONCILED — nothing here is intentional divergence; the census simply cannot see where the key is written."}
   ]
 
   # MERGE RESOLUTION (wave-18 review, dr-w18-s2 rebased onto origin/main).
@@ -1189,7 +1189,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # THREE. Note which two rode free — it is NOT the pair a reader would
   # guess, which is the whole reason this number is measured and not derived.
   # The emitted floor does NOT move: this branch writes no serializer.
-  # W24 S2 (commit distance reaches the CLI): `barkpark_json/5` gains THREE keys
+  # W24 S2 (commit distance reaches the CLI): `barkpark_json/6` gains THREE keys
   # (commit_distance, commit_ancestry, commit_distance_checked_at) and
   # `cloudclient.Barkpark` gains the three matching json tags. Every number below
   # RE-MEASURED by the 999-technique on this branch — the four refusals printed
@@ -1346,7 +1346,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # refusals printed "157 emitted key(s) collected" and "289 json tag(s) found in
   # internal/cloudclient".
   #
-  # 158 -> 159 (cch-w54-bl): `barkpark_json/5` gains `suspended_at`, the
+  # 158 -> 159 (cch-w54-bl): `barkpark_json/6` gains `suspended_at`, the
   # billing-suspension stamp that every suspension wrote and no serializer
   # emitted. ONE name on ONE pair, so this pin and the two barkpark-family pins
   # below all move by exactly one and the Go-tag floor does not move at all (no
@@ -1366,7 +1366,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # the PIN CO-EDIT arm's own expression on this tree ("159 -> 161"), never
   # derived from the diff.
   #
-  # 161 -> 162 (dr-w22-bl): `barkpark_json/5` gains `git_commit_first_seen_at` —
+  # 161 -> 162 (dr-w22-bl): `barkpark_json/6` gains `git_commit_first_seen_at` —
   # SINCE WHEN the box has served the sha beside it — and `cloudclient.Barkpark`
   # gains the matching json tag in the SAME commit, so no :unread row is needed
   # and none is added.
@@ -1416,7 +1416,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # MEASURED by the PIN CO-EDIT arm on this branch, which printed `162 -> 165` after the rebase onto the slot_units pin above;
   # that the arithmetic happens to agree is the coincidence the comment above
   # warns about, not the method.
-  @emitted_pinned 165
+  # 165 -> 166 (dr-w10-s1, the deploy verdict): `barkpark_json/6` gains ONE key,
+  # `deploy_rate` — the per-box deploy vital `DeployLedger.box_rates/3` puts on
+  # the fleet row so `bp cloud status` can stop printing `ok` for a box failing
+  # 46.28% of its terminal deploys. ONE key, not six: `merge_deploy_rate/2`
+  # emits a single nested node exactly as `merge_pressure/2` does, and the
+  # walker counts the map key, not the node's interior. The serializer's arity
+  # moved 5 -> 6 in the same change (the fifth prefetch argument), which is why
+  # every `barkpark_json/5` name in this file is now `/6`.
+  @emitted_pinned 166
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -1562,7 +1570,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `value` 4 -> 5, so the SITE register below moves by four rows as well.
   # Measured by this file's own arms on the rebased tree (their printed
   # right-hand column), never summed.
-  @go_tag_pinned 330
+  # 330 -> 335 (dr-w10-s1): `BoxDeployRate` lands in internal/cloudclient with
+  # five NEW json tag names — `sites_deploying`, `box_caused`, `absorption`,
+  # `deploy_rate` and `rate` — measured by this file's own arm, never summed.
+  @go_tag_pinned 335
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1753,7 +1764,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "site_id" => 5,
     # MetricsSpace.Sites joined the three existing `sites` declarations —
     # the deployed-sites section of the host-space report (W6 S4).
-    "sites" => 4,
+    # 4 -> 5 (dr-w10-s1): `BoxDeployRate.Sites` is a fifth declaration of a name
+    # the package already had — it rides free on the NAME union, so
+    # `@go_tag_pinned` does not move for it and this row does.
+    "sites" => 5,
     "slug" => 7,
     "source" => 3,
     "stage" => 3,
@@ -1802,7 +1816,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "usage" => 2,
     "value" => 5,
     "volume" => 2,
-    "window" => 2,
+    # 2 -> 3 (dr-w10-s1): `BoxDeployRate.Window` — the pinned window travels WITH
+    # the number it denominates, so it is declared a third time.
+    "window" => 3,
     "workspace" => 2
   }
 
@@ -1838,7 +1854,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 62 -> 63: the `runaway_procs` key merge_pressure/2 now emits (see
   # @emitted_pinned above) is inside the barkpark_json family.
   # 64 -> 65 and 47 -> 48 (cch-w54-bl): `suspended_at` lands in the base map
-  # literal of `barkpark_json/5`, which BOTH walkers reach — the blind walker's
+  # literal of `barkpark_json/6`, which BOTH walkers reach — the blind walker's
   # miss is the guarded merge_* clauses, not the base map — so this is the case
   # where the two counts legitimately move together. That is not the pair
   # tracking each other: the INVARIANT below (`seeing - blind == 14`, the
@@ -1854,14 +1870,18 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # direction — the pressure block is exactly what the blind walker cannot see.
   #
   # 67 -> 68 and 48 -> 49 (dr-w22-bl): `git_commit_first_seen_at` lands in the
-  # BASE MAP LITERAL of `barkpark_json/5`, which BOTH walkers reach — so unlike
+  # BASE MAP LITERAL of `barkpark_json/6`, which BOTH walkers reach — so unlike
   # `slot_units` directly above, this key moves the pair TOGETHER. The two cases
   # now sit adjacent in this file, which is the clearest statement of what the
   # pair measures: the gap between them is the guarded `merge_*` clauses and
   # nothing else, and the arm's invariant (`seeing - blind == 14`) is unmoved by
   # either key. `suspended_at` was the same shape as this one.
-  @barkpark_family_keys 68
-  @barkpark_family_keys_blind 49
+  # 68/49 -> 69/50 (dr-w10-s1): `deploy_rate` is emitted by the guarded
+  # `merge_deploy_rate/2` clause AND is a plain map key, so BOTH walkers see it
+  # and the pair moves together — the invariant `seeing - blind == 14` is
+  # unmoved, which is exactly what a key of this shape must do.
+  @barkpark_family_keys 69
+  @barkpark_family_keys_blind 50
 
   # ---------------------------------------------------------------------------
 
@@ -1899,7 +1919,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # ---------------------------------------------------------------------------
 
   test "the extractor sees the merge_* PIPELINE, not just the base map literal" do
-    p = Extract.payload(@router, {:barkpark_json, 5})
+    p = Extract.payload(@router, {:barkpark_json, 6})
 
     assert p.unresolvable == []
 
@@ -1912,10 +1932,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # so it must stay a literal number that moves when either side does — the
     # seven pipeline keys are re-listed by name below precisely so a base-literal
     # growth like this one cannot be mistaken for the pipeline being seen.
-    assert MapSet.size(p.top) == 49
+    #
+    # 49 -> 50 (dr-w10-s1): `deploy_rate` is the EIGHTH pipeline key —
+    # `merge_deploy_rate/2`, the guarded twin of `merge_pressure/2`. It is
+    # re-listed by name below for the same reason `pressure` is.
+    assert MapSet.size(p.top) == 50
 
     for key <- ~w(provision_status provision_error deprovision_status deprovision_error
-                  provision_steps provision_console pressure) do
+                  provision_steps provision_console pressure deploy_rate) do
       assert key in p.top, "#{key} is added by the merge_* pipeline and was not collected"
     end
   end
@@ -2537,38 +2561,38 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # THE THREE COMMIT_* ROWS THAT USED TO OPEN THIS LIST ARE GONE, and their
   # absence is the arm's first receipt. `commit_distance`, `commit_ancestry` and
   # `commit_distance_checked_at` were the headline hole this arm was built to
-  # name; dr-w24-s2 wired all three into `barkpark_json/5` in the SAME WAVE, so
+  # name; dr-w24-s2 wired all three into `barkpark_json/6` in the SAME WAVE, so
   # the rows died in the same commit as the emit, exactly as the arm's own
   # refusal text demands ("no longer unserialized … DELETE the allowlist row").
   # The arm closed a hole and then deleted its own paperwork; that is what it is
   # supposed to do.
   @schema_allowlist [
-    {"barkpark_json/5", "template",
+    {"barkpark_json/6", "template",
      "RULED — bootstrap custody. The schema comment states these ride the Vault encrypt-at-rest seam and are NEVER serialized in barkpark_json; they are revealed only through the team-admin-gated /bootstrap route."},
-    {"barkpark_json/5", "bootstrap_workspace",
+    {"barkpark_json/6", "bootstrap_workspace",
      "RULED — bootstrap custody, same /bootstrap route and same ruling as template above."},
-    {"barkpark_json/5", "bootstrap_project",
+    {"barkpark_json/6", "bootstrap_project",
      "RULED — bootstrap custody, same /bootstrap route and same ruling as template above."},
-    {"barkpark_json/5", "bootstrap_dataset",
+    {"barkpark_json/6", "bootstrap_dataset",
      "RULED — bootstrap custody, same /bootstrap route; its two token siblings need no row at all, they are carried by the *_encrypted class rule."},
-    {"barkpark_json/5", "vercel_project_id",
+    {"barkpark_json/6", "vercel_project_id",
      "RULED — zero-paste Vercel handoff (task-4e4a53b101a97051). The schema comment says plainly it is NEVER serialized in barkpark_json and is revealed through the team-admin-gated claim route instead."},
-    {"barkpark_json/5", "vercel_deploy_url",
+    {"barkpark_json/6", "vercel_deploy_url",
      "RULED — same custody as vercel_project_id above; display state for the claim page, not a fleet-row vital."},
-    {"barkpark_json/5", "vercel_claim_minted_at",
+    {"barkpark_json/6", "vercel_claim_minted_at",
      "RULED — the 24h-expiry stamp of the ENCRYPTED claim code. Emitting it without the code it dates would be a countdown to nothing."},
     # THE `suspended_at` ROW IS GONE, and its death is this arm's second
     # receipt. It read "dr-w24-s4 KNOWN OPEN — `suspended` and `suspended_reason`
     # ARE emitted, so `bp` can say a box is suspended and why but never SINCE
-    # WHEN". cch-w54-bl wired it into `barkpark_json/5`, so the row died in the
+    # WHEN". cch-w54-bl wired it into `barkpark_json/6`, so the row died in the
     # same commit as the emit, exactly as the arm's own refusal text demands.
     # The three commit_* rows went the same way in dr-w24-s2. That is twice now
     # that this list has shrunk by a fix rather than grown by a discovery.
-    {"barkpark_json/5", "apply_arming",
+    {"barkpark_json/6", "apply_arming",
      "dr-w24-s4 KNOWN OPEN, and the arm found it on its own first run against this tree. The ARMING verdict (armed | unarmed | NULL = not measured) does reach a wire — `operator_fleet_json/1` (router.ex:10377) emits it on the operator arming roster — but NOT the fleet row every `bp cloud` reader decodes, and `grep -rn apply_arming internal/` is EMPTY, so no Go struct decodes it from either route. `operator_fleet_json/1` is not a censused pair, so no arm in this file can say that second half; this row is where it is written down."},
-    {"barkpark_json/5", "apply_arming_checked_at",
+    {"barkpark_json/6", "apply_arming_checked_at",
      "dr-w24-s4 KNOWN OPEN — the freshness stamp of apply_arming, same custody and same measurement as its twin above. Without it an `unarmed` verdict cannot be told from one taken a month ago, which is the whole reason the column exists beside the verdict."},
-    {"barkpark_json/5", "updated_at",
+    {"barkpark_json/6", "updated_at",
      "RULED — deliberately off the wire: it moves on every hourly status poll, so a renderer diffing it would report 'something changed' about a box nothing happened to. `inserted_at` IS emitted, under its wire name created_at."},
     {"site_deployment_json/3", "claim_worker",
      "dr-w24-s4 KNOWN OPEN — which builder claimed this deployment. Lease bookkeeping today; it becomes a wire vital the moment two builders can race, which is the failure mode this epic exists for."},
@@ -2606,7 +2630,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   #     macro-generated schema is the live version of that mutation.
   #   * @schema_unserialized_floor — the columns with no emitted key, allowlist
   #     included. It moves DOWN when a hole is closed, which is the point: wiring
-  #     one commit_* column into `barkpark_json/5` moves it and forces the
+  #     one commit_* column into `barkpark_json/6` moves it and forces the
   #     allowlist row's deletion in the SAME commit.
   #
   # BOTH NUMBERS ARE RE-MEASURED ON THIS TREE, not carried from the branch this
@@ -2618,15 +2642,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   #
   # THE HISTORY, because both moved for reasons worth knowing:
   #   * @schema_unserialized_floor went 26 -> 23 when dr-w24-s2 wired the three
-  #     commit_* keys into `barkpark_json/5` — DOWN, because a hole closed, and
+  #     commit_* keys into `barkpark_json/6` — DOWN, because a hole closed, and
   #     the three allowlist rows died in the same commit as the emit.
   #   * It went 23 -> 25 on the rebase, and the arm named the cause ITSELF on its
   #     first run against today's tree: `apply_arming` and `apply_arming_checked_at`
-  #     (#13003, landed the same day as this reland) are columns `barkpark_json/5`
+  #     (#13003, landed the same day as this reland) are columns `barkpark_json/6`
   #     does not carry. That is the arm doing its job on a hole it was not built
   #     for, FOURTEEN DAYS after it was written (2026-08-08 -> 2026-08-22). See their rows above.
   #   * It went 25 -> 24 when cch-w54-bl wired `suspended_at` into
-  #     `barkpark_json/5` — DOWN again, and for the same reason as the first
+  #     `barkpark_json/6` — DOWN again, and for the same reason as the first
   #     move: a hole closed and its allowlist row died in the same commit as the
   #     emit. Side C has now named two holes that got fixed (commit_* and
   #     suspended_at) and found two it was not built for (the apply_arming
@@ -2833,7 +2857,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   test "THE FIX DIRECTION REDS TOO: emitting an allowlisted column forces its row's deletion" do
     # Not hypothetical and not a synthetic fixture: this runs the REAL assertion
     # over the REAL payload plus one key, which is exactly what wiring
-    # `apply_arming` into `barkpark_json/5` would look like from Side C. The
+    # `apply_arming` into `barkpark_json/6` would look like from Side C. The
     # allowlist row must die in the same commit as the emit — and it has now
     # happened for real TWICE: dr-w24-s2 emitted the three commit_* columns and
     # cch-w54-bl emitted `suspended_at`, and this arm refused each time until
@@ -3000,8 +3024,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     end)
   end
 
-  defp barkpark, do: Enum.find(@pairs, &(&1.name == "barkpark_json/5"))
-  defp pressure, do: Enum.find(@pairs, &(&1.name == "barkpark_json/5 pressure"))
+  defp barkpark, do: Enum.find(@pairs, &(&1.name == "barkpark_json/6"))
+  defp pressure, do: Enum.find(@pairs, &(&1.name == "barkpark_json/6 pressure"))
 
   defp platform_delivery, do: Enum.find(@pairs, &(&1.name == "PlatformDelivery.to_json/1"))
 

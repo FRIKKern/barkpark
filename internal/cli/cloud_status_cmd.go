@@ -117,6 +117,20 @@ func attentionStatus(b cloudclient.Barkpark) string {
 	// pre-contract producer, not evidence that the deploy queue is healthy.
 	case live && b.QueuedDeployAgeSecondsMissing:
 		return "degraded"
+	// dr-w10-s1: THE DEPLOY VERDICT. Above every capacity rung below it because
+	// a confirmed failure outranks a "may be heading somewhere bad" — see
+	// attentionRankOrder's block for the orchestrator's 2026-09-06 ruling. The
+	// three-way split lives in deployVerdict/1 and NOTHING here falls through to
+	// `ok` by accident: a box with a deploy surface either fires this arm, or
+	// carries a marker saying which of the other two arms it took.
+	case live && deploysFailing(b):
+		return "deploys_failing"
+	// dr-w24-followup: the box serves a sha that is NOT an ancestor of main and
+	// main is not an ancestor of it — it has left the release train. Ranked
+	// immediately behind deploys_failing by the same ruling: a fact about the
+	// box's code, not its capacity, and not itself a failed deploy.
+	case live && divergedByCommits(b):
+		return "diverged"
 	case live && strained(b):
 		return "strained"
 	case live && filling(b):
@@ -199,6 +213,165 @@ const queuedDeployStalledAfterSeconds = 300
 // the vitals fences keep: an alarm may only fire on a number it was given).
 func deployStalled(b cloudclient.Barkpark) bool {
 	return b.QueuedDeployAgeSeconds != nil && *b.QueuedDeployAgeSeconds >= queuedDeployStalledAfterSeconds
+}
+
+// --- the deploy verdict (dr-w10-s1) ------------------------------------------
+//
+// THE DEFECT THIS ENDS, measured 2026-08-07: guerrilla failed 46.28% of its
+// 1,290 terminal deploys in 24h and this screen printed `ok` for it, off a bare
+// `default:` arm that read no deploy vital at all — because none was on the
+// wire. `box_rates/3` + `merge_deploy_rate/2` put it there; this is the reader.
+//
+// deploysFailingPercent is the fence, charter D150: ABOVE the 9.5% site-caused
+// floor (so a fleet of ordinary broken customer builds cannot trip it) and BELOW
+// 25.58% (guerrilla's raw rate with the three search* sites removed), so the
+// verdict survives the composition crack in BOTH directions. It is a client-side
+// number on purpose — the control plane serves the raw rate and its denominator,
+// exactly as every other fence on this screen is owned here.
+const deploysFailingPercent = 20.0
+
+// deployVerdictKind is the THREE-WAY split the row's C7 asks for, stated as a
+// closed enum so no box can reach a verdict by fallthrough.
+//
+//	deployNoSurface — the box owns no sites AT ALL. It has nothing to deploy and
+//	  therefore has not failed to report: verdict UNCHANGED, and it wears a
+//	  detail marker saying so. Six of eight prod boxes are this. Folding them
+//	  into "unmetered" would put a permanent alarm on 75% of the fleet.
+//	deployUnmetered — the box HAS sites and the rate node refused or is absent
+//	  (sample below min_sample, or a control plane that predates the vital).
+//	  A SILENCE, not a green — and, per charter D69 and the orchestrator's
+//	  2026-09-06 ruling, a DETAIL MARKER rather than a rung.
+//	deployMeasured — a real percentage, with the denominator it came from.
+type deployVerdictKind int
+
+const (
+	deployNoSurface deployVerdictKind = iota
+	deployUnmetered
+	deployMeasured
+)
+
+// deployVerdict is the whole three-way match, in one place, so the rung, the
+// marker and the tests all read the SAME decision. pct is meaningful only for
+// deployMeasured.
+//
+// A nil node is deployNoSurface and not deployUnmetered on purpose: nil means
+// the control plane never sent the key (an older CP), and an older CP has not
+// told us this box has sites — inventing a silence for it would alarm every box
+// on every fleet running a CP from before this slice.
+func deployVerdict(b cloudclient.Barkpark) (deployVerdictKind, float64) {
+	d := b.DeployRate
+	switch {
+	case d == nil || d.Sites == 0:
+		return deployNoSurface, 0
+	case d.Rate.Refused || d.Rate.Pct == nil:
+		return deployUnmetered, 0
+	default:
+		return deployMeasured, *d.Rate.Pct
+	}
+}
+
+// deploysFailing is the rung's predicate: MEASURED, and at or over the fence.
+// An unmetered box never fires it — an alarm may only fire on a number it was
+// actually given.
+func deploysFailing(b cloudclient.Barkpark) bool {
+	kind, pct := deployVerdict(b)
+	return kind == deployMeasured && pct >= deploysFailingPercent
+}
+
+// deploysFailingReason renders the WHY, and it never prints a percentage without
+// the denominator that produced it: a rate with no sample is a number with no
+// population. box_caused rides along because the price of a RAW rate (charter
+// D148) is that it accuses the box for a customer's broken build — this is that
+// price paid out loud, on the row.
+func deploysFailingReason(b cloudclient.Barkpark) string {
+	if !deploysFailing(b) {
+		return ""
+	}
+	d := b.DeployRate
+	s := fmt.Sprintf("deploys failing %s%% of %d terminal (fence %s%%, %d site(s))",
+		trimFloat(round1(*d.Rate.Pct)), d.Rate.Sample,
+		trimFloat(deploysFailingPercent), d.SitesDeploying)
+	if d.BoxCaused.Pct != nil {
+		s += fmt.Sprintf(" · %s%% box-caused", trimFloat(round1(*d.BoxCaused.Pct)))
+	}
+	if w := boxDeployWindowPhrase(d); w != "" {
+		s += " over " + w
+	}
+	return s
+}
+
+// boxDeployRateMarker is the DETAIL LINE for the two non-measuring arms — the
+// SIXTH marker on this screen, keeping the contract the five before it keep
+// (unmetered / runaway / err5xx / slotUnit / deploy census): it rides on top of
+// whatever the status said, on ANY row including `ok`, and moves no status, no
+// rank and no bucket.
+//
+// It exists because the two absences are DIFFERENT FACTS and the screen must
+// never let either read as a green. It is silent for a MEASURED box under the
+// fence — a box whose deploys are landing has no happening to report, which is
+// the same policy runawayMarker and err5xxMarker keep.
+func boxDeployRateMarker(b cloudclient.Barkpark) string {
+	kind, _ := deployVerdict(b)
+	d := b.DeployRate
+	switch kind {
+	case deployNoSurface:
+		if d == nil {
+			return "" // an older control plane said nothing at all — not a fact about this box
+		}
+		return "no deploy surface — this box owns no sites, so it has nothing to deploy"
+	case deployUnmetered:
+		s := fmt.Sprintf("deploys unmetered — %d site(s), %d terminal row(s) against a floor of %d",
+			d.Sites, d.Rate.Sample, d.Rate.MinSample)
+		if r := strings.TrimSpace(d.Rate.Reason); r != "" {
+			s += " (" + r + ")"
+		}
+		if w := boxDeployWindowPhrase(d); w != "" {
+			s += " over " + w
+		}
+		return s
+	default:
+		return ""
+	}
+}
+
+// boxDeployWindowPhrase names the window the control plane PINNED for this
+// reading. A rate on a row that does not carry its window is a number with no
+// population (dr-w13-bl-10129-window-is-pinned-by-nothing), so every sentence
+// above quotes it whenever the plane sent one.
+func boxDeployWindowPhrase(d *cloudclient.BoxDeployRate) string {
+	if d == nil || d.Window == nil {
+		return ""
+	}
+	from, ferr := time.Parse(time.RFC3339, d.Window.From)
+	to, terr := time.Parse(time.RFC3339, d.Window.To)
+	if ferr != nil || terr != nil {
+		// The plane sent SOMETHING we cannot parse. Quote it verbatim rather
+		// than dropping it: an unparseable window is still the population, and
+		// silently omitting it turns the rate back into a number with none.
+		return d.Window.From + " → " + d.Window.To
+	}
+	return deployCensusWindowPhrase(from, to)
+}
+
+// --- diverged (dr-w24-followup) ----------------------------------------------
+
+// divergedByCommits reports the control plane's `commit_ancestry` = "diverged":
+// the sha the box serves is not an ancestor of main AND main is not an ancestor
+// of it. Until this slice the value was RENDERED (the BEHIND column prints it)
+// and RANKED BY NOTHING — the box still classified `ok` and sat in HEALTHY.
+func divergedByCommits(b cloudclient.Barkpark) bool {
+	return strings.TrimSpace(b.CommitAncestry) == "diverged"
+}
+
+// divergedDetail says the thing the BEHIND column cannot: WHY a diverged box is
+// worth looking at. It never quotes a distance — a diverged sha has no
+// well-defined "behind by N", which is exactly why the plane grades it
+// separately from `behind`.
+func divergedDetail(b cloudclient.Barkpark) string {
+	if !divergedByCommits(b) {
+		return ""
+	}
+	return "diverged from main — the sha this box serves is on neither side of main's history"
 }
 
 func queuedDeployAgeMarker(b cloudclient.Barkpark) string {
@@ -548,23 +721,46 @@ func round1(n float64) float64 { return math.Round(n*10) / 10 }
 // urgent first. Index+1 is the charter rank (1–12), exactly as the decision-32
 // fixture pins it. The pre-existing states keep their RELATIVE order and every
 // one of them keeps its bucket — only the integers moved.
+//
+// dr-w10-s1 / dr-w24-followup INSERT TWO RUNGS AT 5 AND 6, and the reasoning is
+// the orchestrator's ruling of 2026-09-06 ("LADDER: RULED (A)"), quoted:
+//
+//	deploys_failing goes in AFTER degraded (rank 5); unmetered stays a DETAIL
+//	MARKER, not a rung; diverged joins BEHIND deploys_failing.
+//
+// A CONFIRMED FAILURE OUTRANKS AN AMBIGUOUS OR CAPACITY SIGNAL. `strained`,
+// `filling`, `unreported` and `behind` all say "this box may be heading
+// somewhere bad"; `deploys_failing` says "this box DOES NOT WORK RIGHT NOW" —
+// a measured, customer-visible outcome, which is why it sits above all four and
+// directly under `degraded` (charter D202 fixed the same rank on the same
+// reasoning). `diverged` sits immediately behind it: a box serving a sha that is
+// not an ancestor of main has left the release train, which is a fact about the
+// box's code and not about its capacity, but it is not itself a failed deploy.
+//
+// `unmetered` is NOT here, deliberately, and that respects charter D69 rather
+// than reopening it: D69 already ruled a measurement gap is a DETAIL LINE (see
+// unmeteredMarker), and boxDeployRateMarker keeps that ruling for the deploy
+// vital. A rung for "we could not read it" would put 6 of 8 boxes in a
+// permanent alarm nobody reads.
 var attentionRankOrder = []string{
-	"removal_failed", // 1
-	"failed",         // 2
-	"suspended",      // 3
-	"degraded",       // 4
-	"strained",       // 5
-	"filling",        // 6
-	"unreported",     // 7
-	"deploy_stalled", // 8 (jpf-w1 D7 — after the box-condition rungs, before behind)
-	"behind",         // 9
-	"removing",       // 10
-	"provisioning",   // 11
-	"ok",             // 12
+	"removal_failed",  // 1
+	"failed",          // 2
+	"suspended",       // 3
+	"degraded",        // 4
+	"deploys_failing", // 5 (dr-w10-s1 / D202 — a measured, customer-visible outcome)
+	"diverged",        // 6 (dr-w24-followup — off the release train, behind deploys_failing)
+	"strained",        // 7
+	"filling",         // 8
+	"unreported",      // 9
+	"deploy_stalled",  // 10 (jpf-w1 D7 — after the box-condition rungs, before behind)
+	"behind",          // 11
+	"removing",        // 12
+	"provisioning",    // 13
+	"ok",              // 14
 }
 
 // attentionRank is the sort key for a status label — its charter rank, 1 (most
-// urgent) through 12 (ok), matching the decision-32 fixture byte-for-byte. An
+// urgent) through 14 (ok), matching the decision-32 fixture byte-for-byte. An
 // unknown label ranks past the end (never panics) and so sorts last.
 func attentionRank(status string) int {
 	for i, s := range attentionRankOrder {
@@ -576,8 +772,8 @@ func attentionRank(status string) int {
 }
 
 // attentionBucket groups a status into the three charter buckets: attention
-// (ranks 1–9: removal_failed…behind), in-flight (10–11: removing/provisioning),
-// healthy (12: ok). The bucket strings are the decision-32 fixture's, verbatim —
+// (ranks 1–11: removal_failed…behind), in-flight (12–13: removing/provisioning),
+// healthy (14: ok). The bucket strings are the decision-32 fixture's, verbatim —
 // note "in-flight" is hyphenated there, so it is hyphenated here and in -o json.
 //
 // The boundary is stated as a MEMBERSHIP switch, not as a rank comparison, so a
@@ -591,9 +787,10 @@ func attentionBucket(status string) string {
 	case "ok":
 		return "healthy"
 	default:
-		// removal_failed, failed, suspended, degraded, strained, filling,
-		// unreported, deploy_stalled, behind — and any unknown label defensively
-		// surfaces in the attention bucket rather than hiding.
+		// removal_failed, failed, suspended, degraded, deploys_failing,
+		// diverged, strained, filling, unreported, deploy_stalled, behind — and
+		// any unknown label defensively surfaces in the attention bucket rather
+		// than hiding.
 		return "attention"
 	}
 }
@@ -622,6 +819,10 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 		reason = strainedReason(b)
 	case "filling":
 		reason = fillingReason(b)
+	case "deploys_failing":
+		reason = deploysFailingReason(b)
+	case "diverged":
+		reason = divergedDetail(b)
 	case "deploy_stalled":
 		reason = deployStalledReason(b)
 	case "behind":
@@ -637,8 +838,8 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 	// FAILED blue is correctly `ok` and still needs the sentence). Joined with
 	// the same separator the strained reason uses for its swap clause, and every
 	// empty one drops out rather than leaving a dangling dot.
-	parts := make([]string, 0, 6)
-	for _, s := range []string{reason, queuedDeployAgeMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b)} {
+	parts := make([]string, 0, 7)
+	for _, s := range []string{reason, queuedDeployAgeMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
 		if s != "" {
 			parts = append(parts, s)
 		}
