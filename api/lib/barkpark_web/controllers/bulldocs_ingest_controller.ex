@@ -251,8 +251,15 @@ defmodule BarkparkWeb.BulldocsIngestController do
       paper ->
         # The paper-level integer rev — the same value the ops if_rev guard
         # compares (content["rev"]), and the same one pull anchors in
-        # x-paper-rev. NEVER the row's _rev hash.
-        current_rev = to_string(get_in(paper.content || %{}, ["rev"]))
+        # x-paper-rev. NEVER the row's _rev hash. Derived by the ONE owner,
+        # `Content.Papers.op_rev/1`, that the pull route reads too: deriving it
+        # here independently is how `to_string(nil)` turned a revless paper's
+        # ABSENT rev into `""` and then rendered it as a mismatch ("paper is at
+        # rev , your copy anchored on …") against the very anchor pull handed
+        # out. A revless paper anchors on 0 and pushes clean; an UNREADABLE rev
+        # is a distinct refusal below, never a comparand.
+        rev_read = Content.Papers.op_rev(paper)
+        current_rev = with {:ok, rev} <- rev_read, do: to_string(rev)
         current_blocks = get_in(paper.content || %{}, ["blocks"]) || []
         unprintable = unprintable_current(current_blocks)
 
@@ -275,6 +282,22 @@ defmodule BarkparkWeb.BulldocsIngestController do
                   "this paper's current blocks cannot be printed as BPML, so a BPML document cannot describe them — syncing would delete everything outside the kernel: #{unprintable}",
                 hint:
                   "edit this paper with block ops (or bp bulldocs publish); BPML sync works once every block is inside the kernel vocabulary"
+              }
+            })
+
+          # A failed READ is NOT a mismatch. Ordered before the comparison so
+          # the comparison is only ever reached with a rev we actually read.
+          match?({:error, _}, rev_read) ->
+            {:error, {:unreadable_rev, field}} = rev_read
+
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{
+                code: "paper_rev_unreadable",
+                message:
+                  "cannot read the op-anchor rev of paper #{paper.doc_id}: #{field} is present but not an integer — refusing to compare your baseRev against a failed read",
+                hint: "this paper's #{field} is corrupt; repair it before pushing a working copy"
               }
             })
 
