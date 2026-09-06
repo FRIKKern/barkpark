@@ -199,9 +199,11 @@
     .bp-paper-edit-text { flex: 1 1 200px; min-width: 120px; }
     .bp-paper-edit-textarea { flex: 1 1 100%; width: 100%; }
     .bp-paper-edit-form input[type="text"],
+    .bp-paper-edit-form input[type="number"],
     .bp-paper-edit-form textarea,
     .bp-paper-edit-form select,
     .bp-paper-edit-field input[type="text"],
+    .bp-paper-edit-field input[type="number"],
     .bp-paper-edit-field textarea,
     .bp-paper-edit-field select {
       font-family: var(--paper-font-serif); color: var(--paper-ink);
@@ -210,9 +212,11 @@
       border-radius: 0; padding: 4px 2px; font-size: 18px; line-height: 1.55;
     }
     .bp-paper-edit-form input[type="text"]:focus,
+    .bp-paper-edit-form input[type="number"]:focus,
     .bp-paper-edit-form textarea:focus,
     .bp-paper-edit-form select:focus,
     .bp-paper-edit-field input[type="text"]:focus,
+    .bp-paper-edit-field input[type="number"]:focus,
     .bp-paper-edit-field textarea:focus,
     .bp-paper-edit-field select:focus {
       outline: none; border-bottom-color: var(--paper-accent);

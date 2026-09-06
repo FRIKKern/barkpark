@@ -174,6 +174,20 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # selector capture and defeat the exact selector match.
   defp strip_comments(css), do: String.replace(css, ~r|/\*.*?\*/|s, "")
 
+  test "numeric authoring controls share text control styling and focus feedback" do
+    css = edit_css()
+
+    for surface <- ["bp-paper-edit-form", "bp-paper-edit-field"], suffix <- ["", ":focus"] do
+      text = declarations_for(css, surface, ~s(input[type="text"]#{suffix}))
+      number = declarations_for(css, surface, ~s(input[type="number"]#{suffix}))
+
+      assert map_size(text) > 0
+
+      assert number == text,
+             "#{surface} numeric controls must retain the same theme and focus feedback as text controls"
+    end
+  end
+
   # ── 1. VIEW emits bare, single-source-styled semantic HTML ─────────────────
   # If the article renderer ever re-introduced an inline `style=` on a prose
   # element, that element would stop tracking the shared `--bp-*` tokens and
