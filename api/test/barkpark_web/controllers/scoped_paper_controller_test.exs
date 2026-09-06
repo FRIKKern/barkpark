@@ -498,11 +498,13 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
 
     assert get_resp_header(conn, "x-barkpark-paper-revision") == [paper.released_revision_id]
 
-    # http-edge-truth D9: weak, 7-day-bucketed validator — W/"sha256:<digest>.<bucket>".
+    # http-edge-truth D9: weak validator over content + compiled shell build,
+    # bounded by the 7-day token-safety bucket.
     bucket = div(System.os_time(:second), 604_800)
+    build_digest = EpicFleet.canonical_digest(Barkpark.BuildInfo.info())
 
     assert get_resp_header(conn, "etag") == [
-             ~s(W/"sha256:#{EpicFleet.canonical_digest(paper.content)}.#{bucket}")
+             ~s(W/"sha256:#{EpicFleet.canonical_digest(paper.content)}.#{build_digest}.#{bucket}")
            ]
   end
 
