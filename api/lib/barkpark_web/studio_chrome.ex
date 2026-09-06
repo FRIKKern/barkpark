@@ -114,6 +114,7 @@ defmodule BarkparkWeb.StudioChrome do
   alias Barkpark.{Content, Tenancy}
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.ScopeResolver
+  alias BarkparkWeb.Studio.StudioLive.Shared
 
   @studio_live BarkparkWeb.Studio.StudioLive
 
@@ -523,15 +524,20 @@ defmodule BarkparkWeb.StudioChrome do
     end
   end
 
-  defp can_reach?(socket, %{id: ws_id}) do
-    case socket.assigns[:api_token] do
-      %Barkpark.Auth.ApiToken{} = token ->
-        Tenancy.Auth.member?(token, ws_id)
-
-      _ ->
-        match?(%{id: ^ws_id}, socket.assigns[:current_workspace])
-    end
-  end
+  # DELEGATION, deliberately — see `Shared.can_reach_workspace?/2`
+  # (@canonical capability:studio-workspace-reachability). This was a
+  # byte-identical second copy of that body, and an unpinned one: tightening the
+  # scope switcher's reachability rule there left THIS arm admitting
+  # (`arpss-w10-bl-member-only-predicate-drift-pairs`). Keep it a one-liner.
+  #
+  # NOT merged with `can_create_in?/2` seven lines above, and that is the
+  # ruling, not an oversight: `can_create_in?/2` asks membership of the
+  # principal's OWN kind for BOTH arms precisely so the account arm does NOT
+  # inherit this predicate's anonymous "is this the workspace I am already
+  # mounted in?" fallback — a fallback every mounted account session answers yes
+  # to. Folding them together would silently re-open that hole on the create
+  # gate.
+  defp can_reach?(socket, workspace), do: Shared.can_reach_workspace?(socket, workspace)
 
   defp project_for(%{id: ws_id}) do
     default =

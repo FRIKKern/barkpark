@@ -973,7 +973,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     end
   end
 
-  @doc false
+  @doc """
+  May THIS socket's principal REACH `workspace` — i.e. may the scope switcher
+  offer it, and may a scope handler navigate there?
+
+  THE SINGLE OWNER of that question. `StudioChrome.can_reach?/2` used to carry a
+  byte-identical copy (token -> `member?/2`; anything else -> identity match on
+  the mounted `current_workspace`), one rule in two files with nothing pinning
+  them together, so tightening the switcher's answer in one left the other
+  admitting (`arpss-w10-bl-member-only-predicate-drift-pairs`). The chrome
+  delegates here now.
+
+  The non-token arm is deliberately an IDENTITY match, not membership: an
+  anonymous/public-demo socket may re-reach the workspace it is already mounted
+  in and no other. That fallback is the reason
+  `StudioChrome.can_create_in?/2` is a SEPARATE predicate and NOT folded into
+  this one — a create gate that inherited "am I already mounted here?" would
+  gate nothing for a mounted anonymous session. Both directions are pinned by
+  `test/barkpark_web/live/studio/workspace_reachability_parity_test.exs`.
+
+  Benign-by-composition, not by this answer alone: the destination mount
+  re-gates. This is the affordance, not the boundary.
+
+  @canonical capability:studio-workspace-reachability aka:can_reach?,can_reach_workspace?,scope switcher reachability,switch-workspace gate
+  """
   def can_reach_workspace?(socket, %{id: ws_id} = _workspace) do
     case socket.assigns[:api_token] do
       %Barkpark.Auth.ApiToken{} = token ->

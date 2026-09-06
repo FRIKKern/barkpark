@@ -111,6 +111,31 @@ defmodule BarkparkWeb.Studio.Caps do
   # ── event classification (default-DENY: unclassified ⇒ :deny) ───────────────
 
   # Safe: navigation, read, and purely-local UI toggles. No capability required.
+  #
+  # `airdrop-suggest` IS DISPOSITIONED HERE, NOT OVERLOOKED
+  # (`arpss-w10-bl-member-only-predicate-drift-pairs`). It drives the airdrop
+  # recipient typeahead, and its companions `airdrop-open` / `airdrop-create`
+  # sit one set below on `:read` — so classifying it `:none` looks like a gap.
+  # It stays, for two reasons and with the residual exposure stated:
+  #
+  #   * MOVING IT TO `:read` WOULD CHANGE NOTHING. `gate/3` answers `{:cont, _}`
+  #     for `:none` and `:read` with the SAME clause; only `:write` (which a
+  #     principal-LESS socket still passes) and `:admin`/`:deny` deny. A
+  #     tier bump to `:read` here would be a no-op that reads like a fix.
+  #   * WHAT IT ACTUALLY EXPOSES IS NARROWER THAN "account enumeration".
+  #     `Handlers.Airdrop.airdrop_suggest/2` calls
+  #     `Accounts.search_by_email_prefix/3` joined on MEMBERSHIP of the socket's
+  #     `current_workspace` — it can never reach an account outside that one
+  #     workspace's roster. An empty prefix returns `[]` (no roster dump), LIKE
+  #     metacharacters are escaped, and the result is capped at 8.
+  #
+  # ACCEPTED RESIDUAL: an anonymous public-demo socket, whose
+  # `current_workspace` is the seeded Default, can prefix-probe the member
+  # emails OF THAT WORKSPACE, 8 per probe. Accepted because the public-demo
+  # posture is intentionally open and the seeded Default roster is not secret.
+  # The remedy IF that posture ever changes is NOT a tier bump but a
+  # capability check in the handler itself (`Caps.derive(socket).read`), which
+  # is the only place in this path that can tell an anonymous socket apart.
   @safe_events ~w(
     select select-group select-desk select-pane expand-pane
     switch-workspace switch-project switch-dataset toggle-create
