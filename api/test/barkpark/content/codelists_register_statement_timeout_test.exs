@@ -26,6 +26,9 @@ defmodule Barkpark.Content.CodelistsRegisterStatementTimeoutTest do
 
   @nodes 3_000
 
+  # A statement the 1 ms wall below is guaranteed to cancel (57014).
+  @cancellable "SELECT count(*) FROM generate_series(1, 5000000)"
+
   defp thema_sized_values do
     for i <- 1..@nodes do
       %{
@@ -66,6 +69,70 @@ defmodule Barkpark.Content.CodelistsRegisterStatementTimeoutTest do
              )
   end
 
+  test "a lift the inbound wall cancels is retried inside its savepoint, and the transaction survives" do
+    # THE FLAKE, made deterministic. On push:main run 33967719694 (sha
+    # 1600379b9, 2026-09-05T13:02Z) the test above went red with 57014 raised
+    # at `Barkpark.Repo.set_local_statement_timeout!/1` (repo.ex:160) — the
+    # `SET LOCAL` that LIFTS the wall was cancelled BY the wall, before the
+    # ~3,000-row INSERT it protects ever ran. Racing a real 1 ms wall against a
+    # real `SET` is the coin-flip that made it a flake, so this injects the
+    # same failure at the same seam: attempt 1 is a statement the 1 ms wall is
+    # GUARANTEED to cancel, issued with the SAME `mode: :savepoint` the lift
+    # itself uses; attempt 2 is the real lift.
+    {:ok, attempts} = Agent.start_link(fn -> 0 end)
+    Repo.query!("SET statement_timeout = '1ms'")
+
+    assert {:ok, "0"} =
+             Repo.transaction(fn ->
+               Repo.retry_on_query_canceled(fn ->
+                 case Agent.get_and_update(attempts, &{&1, &1 + 1}) do
+                   0 -> Repo.query!(@cancellable, [], mode: :savepoint)
+                   _ -> Repo.set_local_statement_timeout!(:infinity)
+                 end
+               end)
+
+               %{rows: [[in_force]]} = Repo.query!("SHOW statement_timeout")
+               in_force
+             end)
+
+    assert Agent.get(attempts, & &1) == 2
+  end
+
+  test "mode: :savepoint is load-bearing — without it the cancelled attempt aborts the transaction" do
+    # The mirror of the test above, and the non-vacuity guard for the retry:
+    # the SAME injected 57014, differing ONLY in that attempt 0 does not carry
+    # `mode: :savepoint`. DBConnection marks the transaction :aborted the moment
+    # an unguarded query in it errors, so the retry never gets to run — the
+    # retry ALONE does not save the lift; the savepoint is what makes the retry
+    # reachable.
+    #
+    # It also pins `mode: :savepoint` on the lift's OWN query in
+    # `Repo.set_local_statement_timeout!/1`, which is attempt 1 here: with the
+    # option DBConnection refuses the statement locally
+    # (`DBConnection.TransactionError`); delete the option from repo.ex and the
+    # statement reaches the server instead, which answers `Postgrex.Error` 25P02
+    # `in_failed_sql_transaction` — a different exception, so this assertion
+    # goes RED. That matters because the sandbox does NOT hand us the option:
+    # `Ecto.Adapters.SQL.Sandbox.maybe_savepoint/2` appends `mode: :savepoint`
+    # only when `not in_transaction?`, and the lift ALWAYS runs inside
+    # register/3's transaction. (Corrected: the predecessor WIP claimed the
+    # opposite — that the sandbox made the option invisible.)
+    {:ok, attempts} = Agent.start_link(fn -> 0 end)
+    Repo.query!("SET statement_timeout = '1ms'")
+
+    assert_raise DBConnection.TransactionError, fn ->
+      Repo.transaction(fn ->
+        Repo.retry_on_query_canceled(fn ->
+          case Agent.get_and_update(attempts, &{&1, &1 + 1}) do
+            # no `mode: :savepoint` — the only difference from the test above
+            0 -> Repo.query!(@cancellable)
+            _ -> Repo.set_local_statement_timeout!(:infinity)
+          end
+        end)
+      end)
+    end
+  end
+
   test "the 1 ms wall really does cancel a statement of that size on this connection" do
     # Non-vacuity guard for the test above: the same wall, the same shape, run
     # WITHOUT register/3's opt-out, must be cancelled by the server — otherwise
@@ -73,6 +140,6 @@ defmodule Barkpark.Content.CodelistsRegisterStatementTimeoutTest do
     Repo.query!("SET statement_timeout = '1ms'")
 
     assert {:error, %Postgrex.Error{postgres: %{code: :query_canceled}}} =
-             Repo.query("SELECT count(*) FROM generate_series(1, 5000000)")
+             Repo.query(@cancellable)
   end
 end
