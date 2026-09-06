@@ -214,12 +214,13 @@ defmodule Barkpark.Plugins.Github.AdoptTest do
     end
   end
 
-  describe "draft-twin collapse rejected by the publish wall (D23)" do
-    # Publish an intake task whose ONE weighted tag is registered, then UNregister
-    # the tag: the adopt collapse-republish now trips the E3 unknown_tag wall.
-    # The adopt side effects are already committed on the draft (a 422 would lie),
-    # so the return stays {:ok, …} — but carries a machine-readable `collapse`
-    # detail AND the discarded reason is LOGGED, never swallowed.
+  describe "the published-first flip forks no draft twin (task-184760672ff3414b)" do
+    # Publish an intake task whose ONE weighted tag is registered. On main the
+    # adopt of this row went through `Content.upsert_document/4` (which ALWAYS
+    # draft-prefixes) and then collapsed the twin back with
+    # `Content.publish_document/4`; UNregistering the tag made that collapse trip
+    # the E3 unknown_tag wall and the twin was left live for ever. There is no
+    # collapse now: the flip is written straight onto the published row.
     defp published_intake_with_tag!(number, tag, scope) do
       Barkpark.LabelFixtures.register_tags!(@dataset, [tag])
 
@@ -240,7 +241,7 @@ defmodule Barkpark.Plugins.Github.AdoptTest do
           %{
             "tag" => tag,
             "strength" => 90,
-            "rationale" => "Registered fixture tag for the collapse-wall test path."
+            "rationale" => "Registered fixture tag for the published-first test path."
           }
         ])
 
@@ -262,42 +263,149 @@ defmodule Barkpark.Plugins.Github.AdoptTest do
       )
     end
 
-    test "a rejected collapse returns {:ok, doc, collapse} + logs the discarded reason",
+    test "C0: adopting a PUBLISHED intake writes NO drafts.<id> twin", %{scope: scope} do
+      tag = "adopt-nofork-tag-#{System.unique_integer([:positive])}"
+      doc_id = published_intake_with_tag!(209, tag, scope)
+
+      # Precondition: no twin before the adopt, so the assertion below cannot
+      # pass vacuously against a row that never existed either way.
+      assert {:error, :not_found} =
+               Content.get_document(Content.draft_id(doc_id), "task", @dataset, scope)
+
+      assert {:ok, doc} = Adopt.adopt(doc_id, @dataset, opts(scope))
+
+      # The flip landed on the PUBLISHED row itself…
+      assert doc.status == "published"
+      assert Link.get(doc)["state"] == "adopted"
+      refute "needs-human" in doc.content["labels"]
+      assert "src:github" in doc.content["labels"]
+
+      # …and no draft twin was minted along the way. On main the upsert forks one
+      # here and the collapse publishes it back; a refused collapse strands it.
+      assert {:error, :not_found} =
+               Content.get_document(Content.draft_id(doc_id), "task", @dataset, scope)
+
+      {:ok, published} = Content.get_document(doc_id, "task", @dataset, scope)
+      assert Link.get(published)["state"] == "adopted"
+      refute "needs-human" in published.content["labels"]
+    end
+
+    test "the write does not go through the publish door — an unregistered tag no longer " <>
+           "strands a twin, and the row's other content survives byte for byte",
          %{scope: scope} do
-      tag = "collapse-wall-tag-#{System.unique_integer([:positive])}"
+      tag = "adopt-wall-tag-#{System.unique_integer([:positive])}"
       doc_id = published_intake_with_tag!(207, tag, scope)
       unregister_tag!(tag)
 
-      {result, log} =
-        with_log(fn -> Adopt.adopt(doc_id, @dataset, opts(scope)) end)
-
-      # HTTP-shaped: the adopt committed (a 422-after-commit would lie), so it is
-      # STILL :ok — now carrying the collapse detail instead of swallowing it.
-      assert {:ok, doc, %{published: false, error: error}} = result
-      assert %{code: "unknown_tag"} = error
-      assert Link.get(doc)["state"] == "adopted"
-
-      # The discarded reason is no longer silent.
-      assert log =~ "collapse publish"
-      assert log =~ "rejected"
-
-      # The published perspective was NOT overwritten (the label strip lives on
-      # the un-collapsed draft), so the published row still holds needs-human.
-      {:ok, published} = Content.get_document(doc_id, "task", @dataset, scope)
-      assert "needs-human" in published.content["labels"]
-    end
-
-    test "a CLEAN collapse (tag still registered) stays a plain {:ok, doc}", %{scope: scope} do
-      tag = "collapse-clean-tag-#{System.unique_integer([:positive])}"
-      doc_id = published_intake_with_tag!(208, tag, scope)
+      {:ok, before} = Content.get_document(doc_id, "task", @dataset, scope)
 
       assert {:ok, doc} = Adopt.adopt(doc_id, @dataset, opts(scope))
       assert Link.get(doc)["state"] == "adopted"
 
-      # The collapse succeeded: no permanent draft twin, published row adopted.
+      # No collapse to refuse, so no stranded twin — the failure mode this row
+      # was filed for.
+      assert {:error, :not_found} =
+               Content.get_document(Content.draft_id(doc_id), "task", @dataset, scope)
+
+      # Only labels + github moved. Everything else the published row carried is
+      # preserved verbatim (the erasure `link_put_erasure_test.exs` forbids).
+      assert Map.drop(doc.content, ["labels", "github"]) ==
+               Map.drop(before.content, ["labels", "github"])
+    end
+
+    test "C1: a lost rev fence is REFUSED loudly and machine-readably, never a bare {:ok, doc}",
+         %{scope: scope} do
+      tag = "adopt-fence-tag-#{System.unique_integer([:positive])}"
+      doc_id = published_intake_with_tag!(210, tag, scope)
+
       {:ok, published} = Content.get_document(doc_id, "task", @dataset, scope)
-      assert Link.get(published)["state"] == "adopted"
-      refute "needs-human" in published.content["labels"]
+
+      # The row moved under us: the struct the arm is fenced on carries a rev the
+      # table no longer holds. This is the shape `Tasks.Renew` produces on a
+      # claimed task — the exact condition that used to refuse the collapse.
+      stale = %{published | rev: "0000deadbeef0000"}
+
+      {result, log} =
+        with_log(fn -> Adopt.adopt_published(stale, @dataset, opts(scope)) end)
+
+      assert {:error, {:adopt_refused, detail}} = result
+      assert detail.gate == "rev_fence"
+      assert detail.doc_id == doc_id
+      assert log =~ "[error]"
+      assert log =~ "github adopt: flip for #{doc_id} hit rev_fence"
+
+      # NOTHING committed: no ledger write and no backlink comment, so the error
+      # does not lie about a side effect.
+      {:ok, untouched} = Content.get_document(doc_id, "task", @dataset, scope)
+      assert untouched.rev == published.rev
+      assert Link.get(untouched)["state"] == "intake"
+      refute_receive {:comment, _, _, _}
+    end
+
+    test "a twin some OTHER writer left behind is NAMED, not published over", %{scope: scope} do
+      tag = "adopt-twin-tag-#{System.unique_integer([:positive])}"
+      doc_id = published_intake_with_tag!(211, tag, scope)
+
+      # A foreign draft twin beside the published row, carrying content the
+      # published row does not have.
+      {:ok, published} = Content.get_document(doc_id, "task", @dataset, scope)
+
+      {:ok, _} =
+        Content.upsert_document(
+          "task",
+          %{
+            "doc_id" => doc_id,
+            "title" => published.title,
+            "content" => Map.put(published.content, "foreign_marker", "do not publish me")
+          },
+          @dataset,
+          scope
+        )
+
+      {result, log} = with_log(fn -> Adopt.adopt(doc_id, @dataset, opts(scope)) end)
+
+      assert {:ok, doc} = result
+      assert doc.status == "published"
+      assert Link.get(doc)["state"] == "adopted"
+
+      # The twin is named at error level…
+      assert log =~ "[error]"
+      assert log =~ "github adopt: flip for #{doc_id} hit draft_twin_present"
+
+      # …and left alone: it was NOT published over the row.
+      refute Map.has_key?(doc.content, "foreign_marker")
+
+      {:ok, twin} = Content.get_document(Content.draft_id(doc_id), "task", @dataset, scope)
+      assert twin.content["foreign_marker"] == "do not publish me"
+    end
+  end
+
+  describe "C2: a NEVER-published intake is left a draft (adoption never force-publishes)" do
+    # DECISION (task-184760672ff3414b C2): the never-published arm KEEPS today's
+    # behaviour. Adoption clears the `needs-human` gate and flips ownership only
+    # (moduledoc D6 — it does not even set a claim); publishing is a human
+    # authoring act, and force-publishing here would push a draft that has never
+    # faced the publish door out under the operator's name. Rejected option:
+    # publish-on-adopt, which would make `bp github adopt` an authoring verb and
+    # would put the E3 tag/label walls back in adoption's path — the very
+    # refusable door this row removed. Same arm `Link.put/4` kept in #16479.
+    test "adopt of a draft-only intake flips the DRAFT and publishes nothing", %{scope: scope} do
+      born_intake(212, scope)
+
+      # Wave-3 birth leaves the intake unpublished.
+      assert {:error, :not_found} = Content.get_document("gh-212", "task", @dataset, scope)
+
+      assert {:ok, doc} = Adopt.adopt("gh-212", @dataset, opts(scope))
+
+      assert doc.status == "draft"
+      assert Link.get(doc)["state"] == "adopted"
+      refute "needs-human" in doc.content["labels"]
+
+      # Still no published row — adoption did not force-publish under the human.
+      assert {:error, :not_found} = Content.get_document("gh-212", "task", @dataset, scope)
+
+      draft = fetch_draft("gh-212", scope)
+      assert Link.get(draft)["state"] == "adopted"
     end
   end
 end
