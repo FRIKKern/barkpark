@@ -137,11 +137,40 @@ defmodule Barkpark.Tenancy.Quota do
   Lift a suspension: clear the flag/reason/timestamp. Additive counterpart to
   `suspend/2`; does NOT emit an audit line here (reserved for a future
   reinstate-audit slice). Returns `{:ok, %Workspace{}}`.
+
+  Called by `BarkparkWeb.WorkspaceReinstateController`
+  (`POST /v1/admin/workspaces/:slug/reinstate`, instance-operator only). NOTE
+  what it deliberately does NOT do: it never touches `expires_at`, so on a
+  `tier = "playground"` row whose TTL has already elapsed the reaper's stage-1
+  predicate still matches and the next tick re-suspends it. A caller lifting a
+  TTL suspension must pair this with `set_expires_at/2` — the controller does.
   """
   @spec reinstate(Workspace.t()) :: {:ok, Workspace.t()} | {:error, Ecto.Changeset.t()}
   def reinstate(%Workspace{} = ws) do
     ws
     |> Ecto.Changeset.change(%{suspended: false, suspended_reason: nil, suspended_at: nil})
+    |> Repo.update()
+  end
+
+  @doc """
+  Move (or clear) the workspace's TTL — the `expires_at` the playground reaper
+  scans.
+
+  The companion `reinstate/1` needs: `PlaygroundReaper.run_suspend_stage/1`
+  selects on `tier = 'playground' AND expires_at < now() AND NOT suspended`, so
+  clearing `suspended` alone leaves the row eligible again and the next tick (one
+  a minute) re-suspends it. A caller that lifts a TTL suspension must therefore
+  also move the TTL, or the rescue lasts under 60 seconds.
+
+  Same raw-changeset write as `set_quota/2` and `reinstate/1` (`change/2` writes
+  the field directly). `nil` clears the TTL to "never expires". Emits no audit
+  line. Returns `{:ok, %Workspace{}}` or `{:error, Ecto.Changeset.t()}`.
+  """
+  @spec set_expires_at(Workspace.t(), DateTime.t() | nil) ::
+          {:ok, Workspace.t()} | {:error, Ecto.Changeset.t()}
+  def set_expires_at(%Workspace{} = ws, at) when is_nil(at) or is_struct(at, DateTime) do
+    ws
+    |> Ecto.Changeset.change(%{expires_at: at})
     |> Repo.update()
   end
 
