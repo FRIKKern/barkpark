@@ -6,7 +6,7 @@ import { JSDOM } from "jsdom";
 const source = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8");
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
-async function scenario({ action = "up:1", saved = true, moveFocus = false }) {
+async function scenario({ action = "up:1", saved = true, moveFocus = false, prefix = "tab" }) {
   const dom = new JSDOM(`<main data-paper-doc-key="production:paper:focus" data-paper-rev="1">
     <button id="toggle" data-editing="true">View</button>
     <form id="tabs" phx-submit="paper-edit-block">
@@ -20,6 +20,9 @@ async function scenario({ action = "up:1", saved = true, moveFocus = false }) {
     </form><button id="elsewhere">Another control</button>
   </main>`, { url: "http://localhost/" });
   const { window } = dom;
+  for (const control of window.document.querySelectorAll("[name]")) {
+    control.name = control.name.replace(/^tab-/, `${prefix}-`);
+  }
   vm.runInContext(source, vm.createContext({
     window, document: window.document, CustomEvent: window.CustomEvent,
     FormData: window.FormData, setTimeout, clearTimeout,
@@ -42,25 +45,25 @@ async function scenario({ action = "up:1", saved = true, moveFocus = false }) {
     form.dispatchEvent(new window.SubmitEvent("submit", { bubbles: true, cancelable: true, submitter }));
     await tick();
     assert.equal(send.event, "paper-edit-block");
-    assert.equal(send.payload["tab-action"], action);
+    assert.equal(send.payload[`${prefix}-action`], action);
     assert.equal(window.document.activeElement, submitter, "focus waits for a save result");
 
     if (moveFocus) window.document.getElementById("elsewhere").focus();
     if (saved && action === "up:1") {
       // LiveView updates indexed rows in place, retaining the old-index button.
-      form.elements.namedItem("tab-0-label").value = "Second";
-      form.elements.namedItem("tab-1-label").value = "First";
+      form.elements.namedItem(`${prefix}-0-label`).value = "Second";
+      form.elements.namedItem(`${prefix}-1-label`).value = "First";
     }
     if (saved && action === "add") {
       const input = window.document.createElement("input");
-      input.name = "tab-2-label";
+      input.name = `${prefix}-2-label`;
       form.append(input);
-      form.elements.namedItem("tab-count").value = "3";
+      form.elements.namedItem(`${prefix}-count`).value = "3";
     }
     if (saved && action === "remove:1") {
-      form.elements.namedItem("tab-1-label").remove();
+      form.elements.namedItem(`${prefix}-1-label`).remove();
       submitter.remove();
-      form.elements.namedItem("tab-count").value = "1";
+      form.elements.namedItem(`${prefix}-count`).value = "1";
     }
     resolve({ saved, request_id: send.payload.request_id, ...(saved ? { rev: 2 } : {}) });
     await tick();
@@ -70,7 +73,7 @@ async function scenario({ action = "up:1", saved = true, moveFocus = false }) {
     } else if (!saved) {
       assert.equal(window.document.activeElement, submitter, "failed save must not pretend the row moved");
     } else {
-      const expected = action === "add" ? "tab-2-label" : "tab-0-label";
+      const expected = action === "add" ? `${prefix}-2-label` : `${prefix}-0-label`;
       assert.equal(window.document.activeElement.name, expected, "focus follows the operated row, not its old index");
     }
   } finally {
@@ -84,4 +87,9 @@ await scenario({ action: "add" });
 await scenario({ action: "remove:1" });
 await scenario({ saved: false });
 await scenario({ moveFocus: true });
+for (const prefix of ["toc", "criterion"]) {
+  await scenario({ prefix });
+  await scenario({ prefix, action: "add" });
+  await scenario({ prefix, action: "remove:1" });
+}
 console.log("PASS collection focus: reorder, add, remove, failure, and no focus stealing");

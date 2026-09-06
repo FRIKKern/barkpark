@@ -493,7 +493,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"ingress", "Ingress"},
          {"pullquote", "Pullquote"}
        ]},
-      {"Visual", [{"diagram", "Diagram"}, {"equation", "Equation"}, {"route", "Route"}]},
+      {"Visual",
+       [
+         {"diagram", "Diagram"},
+         {"equation", "Equation"},
+         {"route", "Route"},
+         {"toc", "Table of contents"},
+         {"criteria-progress", "Criteria progress"}
+       ]},
       {"Technical",
        [
          {"diff", "Diff"},
@@ -1415,6 +1422,153 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 </datalist>
                 <button type="submit" name="param-action" value="add" class="btn btn-ghost btn-sm"
                         data-test-id="paper-api-endpoint-param-add">Add parameter</button>
+              </form>
+            </div>
+          </details>
+        </div>
+      <% "toc" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-toc-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-toc-preview">
+            <%= raw(Render.render_block(@block, %{style: :article})) %>
+          </div>
+          <details id={"toc-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure table of contents</summary>
+            <div class="bp-paper-contextual-panel">
+              <form
+                id={"toc-form-" <> @id}
+                class="bp-paper-edit-form"
+                phx-submit="paper-edit-block"
+                phx-change="paper-block-autosave"
+                phx-debounce="500"
+                data-test-id="paper-toc-editor"
+              >
+                <input type="hidden" name="block_id" value={@id} />
+                <input type="hidden" name="toc-count" value={length(Blocks.toc_items(@block))} />
+                <label class="bp-paper-edit-fieldlabel" for={"toc-depth-" <> @id}>Visible depth</label>
+                <input id={"toc-depth-" <> @id} type="text" inputmode="numeric" name="depth"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "depth"))} />
+                <label class="bp-paper-edit-check" for={"toc-numbered-" <> @id}>
+                  <input type="hidden" name="numbered" value="false" />
+                  <input id={"toc-numbered-" <> @id} type="checkbox" name="numbered" value="true"
+                         checked={Blocks.strict_boolean_field?(@block, "numbered")} />
+                  Number entries
+                </label>
+                <label class="bp-paper-edit-check" for={"toc-sticky-" <> @id}>
+                  <input type="hidden" name="sticky" value="false" />
+                  <input id={"toc-sticky-" <> @id} type="checkbox" name="sticky" value="true"
+                         checked={Blocks.strict_boolean_field?(@block, "sticky")} />
+                  Sticky in article view
+                </label>
+
+                <fieldset
+                  :for={{item, index} <- Enum.with_index(Blocks.toc_items(@block))}
+                  class="bp-paper-edit-form"
+                  data-test-id="paper-toc-row"
+                  data-toc-index={index}
+                >
+                  <legend>Entry <%= index + 1 %></legend>
+                  <%= if is_map(item) do %>
+                    <label class="bp-paper-edit-fieldlabel" for={"toc-#{index}-text-#{@id}"}>Text</label>
+                    <input id={"toc-#{index}-text-#{@id}"} type="text" name={"toc-#{index}-text"}
+                           class="bp-paper-edit-text" value={Blocks.form_value(Map.get(item, "text"))} />
+                    <label class="bp-paper-edit-fieldlabel" for={"toc-#{index}-level-#{@id}"}>Level</label>
+                    <input id={"toc-#{index}-level-#{@id}"} type="text" inputmode="numeric"
+                           name={"toc-#{index}-level"} class="bp-paper-edit-text"
+                           value={Blocks.form_value(Map.get(item, "level"))} />
+                    <label class="bp-paper-edit-fieldlabel" for={"toc-#{index}-anchor-#{@id}"}>Anchor</label>
+                    <input id={"toc-#{index}-anchor-#{@id}"} type="text" name={"toc-#{index}-anchor"}
+                           class="bp-paper-edit-text bp-paper-edit-code"
+                           value={Blocks.form_value(Map.get(item, "anchor"))} />
+                  <% else %>
+                    <p class="bp-paper-edit-readonly" data-test-id="paper-toc-legacy-row">
+                      Legacy entry retained until explicitly removed.
+                    </p>
+                  <% end %>
+                  <div class="bp-paper-edit-actions">
+                    <button type="submit" name="toc-action" value={"up:#{index}"}
+                            class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                    <button type="submit" name="toc-action" value={"down:#{index}"}
+                            class="btn btn-ghost btn-sm"
+                            disabled={index == length(Blocks.toc_items(@block)) - 1}>Move down</button>
+                    <button type="submit" name="toc-action" value={"remove:#{index}"}
+                            class="btn btn-destructive btn-sm">Remove entry</button>
+                  </div>
+                </fieldset>
+
+                <button type="submit" name="toc-action" value="add" class="btn btn-ghost btn-sm"
+                        data-test-id="paper-toc-add">Add entry</button>
+              </form>
+            </div>
+          </details>
+        </div>
+      <% "criteria-progress" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-criteria-progress-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-criteria-progress-preview">
+            <%= raw(Render.render_block(@block, %{style: :article})) %>
+          </div>
+          <details id={"criteria-progress-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure criteria progress</summary>
+            <div class="bp-paper-contextual-panel">
+              <form
+                id={"criteria-progress-form-" <> @id}
+                class="bp-paper-edit-form"
+                phx-submit="paper-edit-block"
+                phx-change="paper-block-autosave"
+                phx-debounce="500"
+                data-test-id="paper-criteria-progress-editor"
+              >
+                <input type="hidden" name="block_id" value={@id} />
+                <input type="hidden" name="criterion-count"
+                       value={length(Blocks.criteria_progress_rows(@block))} />
+                <label class="bp-paper-edit-fieldlabel" for={"criteria-progress-detail-" <> @id}>Detail</label>
+                <input id={"criteria-progress-detail-" <> @id} type="text" name="detail"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "detail"))}
+                       list={"criteria-progress-detail-options-" <> @id} />
+                <datalist id={"criteria-progress-detail-options-" <> @id}>
+                  <option value="rows"></option>
+                  <option value="total"></option>
+                </datalist>
+
+                <fieldset
+                  :for={{row, index} <- Enum.with_index(Blocks.criteria_progress_rows(@block))}
+                  class="bp-paper-edit-form"
+                  data-test-id="paper-criteria-progress-row"
+                  data-criterion-index={index}
+                >
+                  <legend>Criterion <%= index + 1 %></legend>
+                  <%= if is_map(row) do %>
+                    <label class="bp-paper-edit-fieldlabel" for={"criterion-#{index}-label-#{@id}"}>Label</label>
+                    <input id={"criterion-#{index}-label-#{@id}"} type="text"
+                           name={"criterion-#{index}-label"} class="bp-paper-edit-text"
+                           value={Blocks.form_value(Map.get(row, "label"))} />
+                    <label class="bp-paper-edit-fieldlabel" for={"criterion-#{index}-met-#{@id}"}>Met</label>
+                    <input id={"criterion-#{index}-met-#{@id}"} type="text" inputmode="decimal"
+                           name={"criterion-#{index}-met"} class="bp-paper-edit-text"
+                           value={Blocks.form_value(Map.get(row, "met"))} />
+                    <label class="bp-paper-edit-fieldlabel" for={"criterion-#{index}-total-#{@id}"}>Total</label>
+                    <input id={"criterion-#{index}-total-#{@id}"} type="text" inputmode="decimal"
+                           name={"criterion-#{index}-total"} class="bp-paper-edit-text"
+                           value={Blocks.form_value(Map.get(row, "total"))} />
+                  <% else %>
+                    <p class="bp-paper-edit-readonly" data-test-id="paper-criteria-progress-legacy-row">
+                      Legacy row retained until explicitly removed.
+                    </p>
+                  <% end %>
+                  <div class="bp-paper-edit-actions">
+                    <button type="submit" name="criterion-action" value={"up:#{index}"}
+                            class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                    <button type="submit" name="criterion-action" value={"down:#{index}"}
+                            class="btn btn-ghost btn-sm"
+                            disabled={index == length(Blocks.criteria_progress_rows(@block)) - 1}>Move down</button>
+                    <button type="submit" name="criterion-action" value={"remove:#{index}"}
+                            class="btn btn-destructive btn-sm">Remove criterion</button>
+                  </div>
+                </fieldset>
+
+                <button type="submit" name="criterion-action" value="add" class="btn btn-ghost btn-sm"
+                        data-test-id="paper-criteria-progress-add">Add criterion</button>
               </form>
             </div>
           </details>

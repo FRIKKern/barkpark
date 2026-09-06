@@ -37,7 +37,7 @@
   // Restore the operated row only after acknowledgement, without stealing focus
   // from a user who has moved elsewhere while the request was in flight.
   function bpPaperCollectionFocus(form, submitter) {
-    const match = /^(note|tab|param|ref|bar)-action$/.exec(submitter?.name || "");
+    const match = /^(note|tab|param|ref|bar|toc|criterion)-action$/.exec(submitter?.name || "");
     if (!match || document.activeElement !== submitter) return () => {};
     const prefix = match[1];
     const count = Number(form.elements.namedItem(`${prefix}-count`)?.value);

@@ -305,6 +305,180 @@ defmodule BarkparkWeb.TechnicalBlocksLiveTest do
         assert stored(ctx) == before
       end
     end
+
+    test "#{host} toc and criteria progress fields persist through a fresh mount", ctx do
+      replace_blocks(ctx, progress_navigation_blocks())
+      view = mount_editor(ctx, @host)
+
+      assert has_element?(view, "#toc-form-toc")
+      assert has_element?(view, "#criteria-progress-form-criteria")
+
+      save(view, "toc", %{
+        "depth" => "4",
+        "numbered" => "true",
+        "sticky" => "true",
+        "toc-count" => "2",
+        "toc-0-text" => "Overview",
+        "toc-0-level" => "3",
+        "toc-0-anchor" => "overview"
+      })
+
+      save(view, "criteria", %{
+        "detail" => "total",
+        "criterion-count" => "2",
+        "criterion-0-label" => "Published",
+        "criterion-0-met" => "2.5",
+        "criterion-0-total" => "6"
+      })
+
+      assert stored(ctx)["toc"] == %{
+               "id" => "toc",
+               "type" => "toc",
+               "depth" => 4,
+               "numbered" => true,
+               "sticky" => true,
+               "items" => [
+                 %{
+                   "text" => "Overview",
+                   "level" => 3,
+                   "anchor" => "overview",
+                   "source_key" => "keep-toc"
+                 },
+                 "legacy toc entry"
+               ]
+             }
+
+      assert stored(ctx)["criteria"] == %{
+               "id" => "criteria",
+               "type" => "criteria-progress",
+               "detail" => "total",
+               "rows" => [
+                 %{
+                   "label" => "Published",
+                   "met" => 2.5,
+                   "total" => 6,
+                   "source_key" => "keep-criterion"
+                 },
+                 "legacy criterion"
+               ]
+             }
+
+      expected = stored(ctx)
+      reloaded = mount_editor(ctx, @host)
+      assert stored(ctx) == expected
+
+      assert has_element?(reloaded, ~s(#toc-form-toc input[name="depth"][value="4"]))
+
+      assert has_element?(
+               reloaded,
+               ~s(#toc-form-toc input[name="numbered"][type="checkbox"][checked])
+             )
+
+      assert has_element?(
+               reloaded,
+               ~s(#toc-form-toc input[name="toc-0-text"][value="Overview"])
+             )
+
+      assert has_element?(
+               reloaded,
+               ~s(#criteria-progress-form-criteria input[name="detail"][value="total"])
+             )
+
+      assert has_element?(
+               reloaded,
+               ~s(#criteria-progress-form-criteria input[name="criterion-0-met"][value="2.5"])
+             )
+    end
+
+    test "#{host} toc and criteria progress rows add, reorder, and remove", ctx do
+      replace_blocks(ctx, progress_navigation_blocks())
+      view = mount_editor(ctx, @host)
+
+      submit(view, "toc", %{"toc-count" => "2", "toc-action" => "add"})
+
+      submit(view, "toc", %{
+        "toc-count" => "3",
+        "toc-2-text" => "Added",
+        "toc-2-level" => "2",
+        "toc-2-anchor" => "added",
+        "toc-action" => "up:2"
+      })
+
+      assert [original_toc, added_toc, "legacy toc entry"] = stored(ctx)["toc"]["items"]
+      assert original_toc["source_key"] == "keep-toc"
+      assert added_toc == %{"text" => "Added", "level" => 2, "anchor" => "added"}
+
+      submit(view, "toc", %{"toc-count" => "3", "toc-action" => "remove:2"})
+
+      submit(view, "criteria", %{
+        "criterion-count" => "2",
+        "criterion-action" => "add"
+      })
+
+      submit(view, "criteria", %{
+        "criterion-count" => "3",
+        "criterion-2-label" => "Added",
+        "criterion-2-met" => "1.5",
+        "criterion-2-total" => "2",
+        "criterion-action" => "up:2"
+      })
+
+      assert [original_criterion, added_criterion, "legacy criterion"] =
+               stored(ctx)["criteria"]["rows"]
+
+      assert original_criterion["source_key"] == "keep-criterion"
+      assert added_criterion == %{"label" => "Added", "met" => 1.5, "total" => 2}
+
+      submit(view, "criteria", %{
+        "criterion-count" => "3",
+        "criterion-action" => "remove:2"
+      })
+
+      expected = stored(ctx)
+      reloaded = mount_editor(ctx, @host)
+      assert stored(ctx) == expected
+      assert has_element?(reloaded, ~s(#toc-form-toc input[name="toc-count"][value="2"]))
+
+      assert has_element?(
+               reloaded,
+               ~s(#criteria-progress-form-criteria input[name="criterion-count"][value="2"])
+             )
+
+      assert has_element?(reloaded, ~s(#toc-form-toc input[name="toc-1-text"][value="Added"]))
+
+      assert has_element?(
+               reloaded,
+               ~s(#criteria-progress-form-criteria input[name="criterion-1-label"][value="Added"])
+             )
+    end
+
+    test "#{host} rejects invalid toc and criteria progress numbers and counts", ctx do
+      replace_blocks(ctx, progress_navigation_blocks())
+      view = mount_editor(ctx, @host)
+      before = stored(ctx)
+
+      for {id, params} <- [
+            {"toc", %{"depth" => "0"}},
+            {"toc", %{"toc-count" => "2", "toc-0-level" => "invalid"}},
+            {"toc", %{"toc-count" => "1", "toc-action" => "remove:0"}},
+            {"criteria", %{"criterion-count" => "2", "criterion-0-met" => "NaN"}},
+            {"criteria", %{"criterion-count" => "1", "criterion-action" => "remove:0"}}
+          ] do
+        request_id = Ecto.UUID.generate()
+        render_hook(view, "paper-block-autosave", wire(view, id, params, request_id))
+        assert_reply(view, %{saved: false, request_id: ^request_id})
+        assert stored(ctx) == before
+      end
+
+      reloaded = mount_editor(ctx, @host)
+      assert stored(ctx) == before
+      assert has_element?(reloaded, ~s(#toc-form-toc input[name="depth"][value="2"]))
+
+      assert has_element?(
+               reloaded,
+               ~s(#criteria-progress-form-criteria input[name="criterion-0-met"][value="1"])
+             )
+    end
   end
 
   defp mount_editor(ctx, :studio) do
@@ -339,6 +513,52 @@ defmodule BarkparkWeb.TechnicalBlocksLiveTest do
   end
 
   defp stored(ctx), do: Map.new(Content.paper_blocks(ctx.slug, @dataset), &{&1["id"], &1})
+
+  defp replace_blocks(ctx, blocks) do
+    {:ok, _paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: ctx.slug,
+          dataset: @dataset,
+          blocks: blocks
+        })
+      )
+  end
+
+  defp progress_navigation_blocks do
+    [
+      %{
+        "id" => "toc",
+        "type" => "toc",
+        "depth" => 2,
+        "numbered" => false,
+        "sticky" => false,
+        "items" => [
+          %{
+            "text" => "Before",
+            "level" => 1,
+            "anchor" => "before",
+            "source_key" => "keep-toc"
+          },
+          "legacy toc entry"
+        ]
+      },
+      %{
+        "id" => "criteria",
+        "type" => "criteria-progress",
+        "detail" => "rows",
+        "rows" => [
+          %{
+            "label" => "Before",
+            "met" => 1,
+            "total" => 4,
+            "source_key" => "keep-criterion"
+          },
+          "legacy criterion"
+        ]
+      }
+    ]
+  end
 
   defp seed_blocks do
     [

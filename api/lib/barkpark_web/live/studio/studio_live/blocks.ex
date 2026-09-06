@@ -69,6 +69,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     |> put_api_endpoint_params(block, params)
   end
 
+  def build_block_patch(%{"type" => "toc"} = block, params) do
+    %{}
+    |> put_positive_integer_form_field(block, params, "depth")
+    |> put_strict_boolean_form_field(block, params, "numbered")
+    |> put_strict_boolean_form_field(block, params, "sticky")
+    |> put_toc_items(block, params)
+  end
+
+  def build_block_patch(%{"type" => "criteria-progress"} = block, params) do
+    %{}
+    |> put_fetched_form_fields(block, params, ~w(detail))
+    |> put_criteria_progress_rows(block, params)
+  end
+
   # ── article-chrome blocks (barkpark-54kh) ──
   # eyebrow: single text input → flat "text" string (render reads `text`).
   def build_block_patch(%{"type" => "eyebrow"}, params) do
@@ -198,6 +212,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def validate_block_patch(%{"type" => "api-endpoint"} = block, params) do
     with :ok <- validate_collection_count(block, params, "params", "param") do
+      {:ok, build_block_patch(block, params)}
+    end
+  end
+
+  def validate_block_patch(%{"type" => "toc"} = block, params) do
+    with :ok <- validate_collection_count(block, params, "items", "toc"),
+         :ok <- validate_positive_integer_form_field(block, params, "depth", "depth"),
+         :ok <- validate_toc_item_levels(block, params) do
+      {:ok, build_block_patch(block, params)}
+    end
+  end
+
+  def validate_block_patch(%{"type" => "criteria-progress"} = block, params) do
+    with :ok <- validate_collection_count(block, params, "rows", "criterion"),
+         :ok <- validate_criteria_progress_numbers(block, params) do
       {:ok, build_block_patch(block, params)}
     end
   end
@@ -361,6 +390,77 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end
   end
 
+  defp put_toc_items(patch, block, params) do
+    put_editor_collection(
+      patch,
+      block,
+      params,
+      "items",
+      "toc",
+      &update_toc_item/3,
+      %{"text" => "", "level" => 1, "anchor" => ""}
+    )
+  end
+
+  defp update_toc_item(item, params, index) do
+    prefix = "toc-#{index}-"
+
+    item
+    |> put_form_param_preserving_shape(params, prefix <> "text", "text")
+    |> put_positive_integer_form_field(item, params, prefix <> "level", "level")
+    |> put_form_param_preserving_shape(params, prefix <> "anchor", "anchor")
+  end
+
+  defp put_criteria_progress_rows(patch, block, params) do
+    put_editor_collection(
+      patch,
+      block,
+      params,
+      "rows",
+      "criterion",
+      &update_criteria_progress_row/3,
+      %{"label" => "", "met" => 0, "total" => 1}
+    )
+  end
+
+  defp update_criteria_progress_row(item, params, index) do
+    prefix = "criterion-#{index}-"
+
+    item
+    |> put_form_param_preserving_shape(params, prefix <> "label", "label")
+    |> put_number_form_field(item, params, prefix <> "met", "met")
+    |> put_number_form_field(item, params, prefix <> "total", "total")
+  end
+
+  defp put_editor_collection(patch, block, params, field, prefix, update, default) do
+    count = params[prefix <> "-count"]
+
+    with {:ok, items} <- stored_collection(block, field),
+         true <- exact_submitted_count?(count, length(items)) do
+      updated =
+        items
+        |> Enum.with_index()
+        |> Enum.map(fn
+          {item, index} when is_map(item) -> update.(item, params, index)
+          {item, _index} -> item
+        end)
+        |> apply_collection_action(params[prefix <> "-action"], default)
+
+      if updated == items, do: patch, else: Map.put(patch, field, updated)
+    else
+      _ -> patch
+    end
+  end
+
+  defp apply_collection_action(items, "add", default), do: items ++ [default]
+
+  defp apply_collection_action(items, "remove:" <> index, _default),
+    do: delete_at_valid_index(items, index)
+
+  defp apply_collection_action(items, "up:" <> index, _default), do: move_at(items, index, -1)
+  defp apply_collection_action(items, "down:" <> index, _default), do: move_at(items, index, 1)
+  defp apply_collection_action(items, _action, _default), do: items
+
   defp update_api_endpoint_param(item, params, index) do
     prefix = "param-#{index}-"
 
@@ -449,6 +549,53 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
         else
           _ -> {:error, {:malformed_collection, field_name}}
         end
+    end
+  end
+
+  defp validate_toc_item_levels(block, params) do
+    validate_collection_numbers(block, params, "items", "toc", ["level"], true)
+  end
+
+  defp validate_criteria_progress_numbers(block, params) do
+    validate_collection_numbers(block, params, "rows", "criterion", ["met", "total"], false)
+  end
+
+  defp validate_collection_numbers(block, params, field, prefix, keys, positive?) do
+    with {:ok, items} <- stored_collection(block, field) do
+      items
+      |> Enum.with_index()
+      |> Enum.reduce_while(:ok, fn
+        {item, index}, :ok when is_map(item) ->
+          valid? =
+            Enum.all?(keys, fn key ->
+              param = "#{prefix}-#{index}-#{key}"
+
+              not Map.has_key?(params, param) or
+                form_wire_value(Map.get(item, key)) == params[param] or
+                valid_submitted_number?(params[param], positive?)
+            end)
+
+          if valid?, do: {:cont, :ok}, else: {:halt, {:error, {:invalid_number, field}}}
+
+        {_item, _index}, :ok ->
+          {:cont, :ok}
+      end)
+    end
+  end
+
+  defp validate_positive_integer_form_field(block, params, field, error_field) do
+    if not Map.has_key?(params, field) or form_wire_value(Map.get(block, field)) == params[field] or
+         valid_submitted_number?(params[field], true) do
+      :ok
+    else
+      {:error, {:invalid_number, error_field}}
+    end
+  end
+
+  defp valid_submitted_number?(value, positive?) do
+    case parse_submitted_number(value) do
+      {:ok, number} when is_number(number) -> not positive? or (is_integer(number) and number > 0)
+      _ -> false
     end
   end
 
@@ -786,6 +933,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def api_endpoint_param_required?(_param), do: false
 
   @doc false
+  def toc_items(block) when is_map(block), do: collection_form_items(block, "items")
+
+  @doc false
+  def criteria_progress_rows(block) when is_map(block), do: collection_form_items(block, "rows")
+
+  @doc false
+  def strict_boolean_field?(block, field) when is_map(block), do: strict_true?(block, field)
+
+  defp collection_form_items(block, field) do
+    case Map.get(block, field) do
+      nil -> []
+      items when is_list(items) -> items
+      item -> [item]
+    end
+  end
+
+  @doc false
   def form_value(value) when is_binary(value) or is_number(value), do: value
   def form_value(_value), do: ""
 
@@ -802,6 +966,50 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end)
   end
 
+  defp put_strict_boolean_form_field(map, block, params, field) do
+    if Map.has_key?(params, field) do
+      submitted = parse_bool(params[field])
+
+      if strict_true?(block, field) == submitted,
+        do: map,
+        else: Map.put(map, field, submitted)
+    else
+      map
+    end
+  end
+
+  defp put_positive_integer_form_field(map, block, params, field) do
+    put_positive_integer_form_field(map, block, params, field, field)
+  end
+
+  defp put_positive_integer_form_field(map, block, params, param, field) do
+    put_parsed_form_number(map, block, params, param, field, true)
+  end
+
+  defp put_number_form_field(map, block, params, param, field) do
+    put_parsed_form_number(map, block, params, param, field, false)
+  end
+
+  defp put_parsed_form_number(map, block, params, param, field, positive?) do
+    cond do
+      not Map.has_key?(params, param) ->
+        map
+
+      form_wire_value(Map.get(block, field)) == params[param] ->
+        map
+
+      true ->
+        case parse_submitted_number(params[param]) do
+          {:ok, number}
+          when is_number(number) and (not positive? or (is_integer(number) and number > 0)) ->
+            Map.put(map, field, number)
+
+          _ ->
+            map
+        end
+    end
+  end
+
   defp put_form_param_preserving_shape(item, params, param, field) do
     put_form_param_preserving_shape(item, item, params, param, field)
   end
@@ -816,6 +1024,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   defp form_wire_value(value) when is_integer(value), do: Integer.to_string(value)
   defp form_wire_value(value) when is_float(value), do: Float.to_string(value)
   defp form_wire_value(_value), do: ""
+
+  defp strict_true?(block, field), do: Map.get(block, field) == true
 
   defp blockquote_cite_patch(block, cite) do
     cond do
@@ -888,6 +1098,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
       "elevation" => "",
       "duration" => "",
       "caption" => ""
+    }
+
+  def default_block("toc", id),
+    do: %{
+      "id" => id,
+      "type" => "toc",
+      "items" => [],
+      "depth" => 2,
+      "numbered" => false,
+      "sticky" => false
+    }
+
+  def default_block("criteria-progress", id),
+    do: %{
+      "id" => id,
+      "type" => "criteria-progress",
+      "rows" => [],
+      "detail" => "rows"
     }
 
   def default_block("diff", id),
