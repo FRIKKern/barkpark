@@ -213,6 +213,101 @@
 // Also: resolved font family per face, selector match counts, sweep direction,
 // scrollbar width, and the landed authenticated URL.
 //
+// ── Reliability — D138 CHARACTERISED (N=22, 2026-09-06) ─────────────────────
+//
+// D138 said "the instrument is ~80% deterministic and nobody knows why" and
+// named two undiagnosed failures. This is the measurement that replaces the
+// guess, and the three rulings that follow from it.
+//
+// THE SWEEP. 22 consecutive invocations against deployed guerrilla, each with
+// --retries=0 so the numbers are RAW per-invocation rates rather than the
+// retried ones, stderr captured on every single invocation, all on bundled
+// Chromium 147.0.7727.15, all drilling one named document. The classification:
+//
+//     outcome                     count      note
+//     completed, 54 rows          19 of 22
+//     abort: provenance-bracket    2 of 22   a deploy landed under the sweep
+//     abort: browser-race          1 of 22   execution context destroyed
+//
+// ALL THREE ABORTS FELL INSIDE ONE 6m44s WINDOW, 07:11:11Z-07:17:55Z, during
+// which the served SHA moved a99e366f2 -> 0a3886ac6 and the live slot rotated
+// blue -> green. Outside that window: 19 of 19 clean. The instrument is not
+// ~80% deterministic. It is deterministic, and it fails while the thing it
+// measures is being replaced underneath it — which is the correct behaviour and
+// exactly what the provenance bracket exists to force.
+//
+// REPRODUCTION. Within a served SHA, all 54 rows reproduce field for field at
+// tolerance zero in 19 of 19 completed runs (scripts/studio-desk-compare.mjs,
+// mechanical, keyed, zero tolerance). ACROSS the SHA boundary the only per-row
+// fields that differ are `served_sha` and `slot_active` — the provenance
+// stamps. Not one geometry field moved across two deployed builds and both
+// slots.
+//
+// ── RULING 1 — a substituted face withdraws its row's verdicts ───────────────
+//
+// RATE. Zero substitutions in 684 forced-face rows across the 19 completed runs
+// (36 forced rows per run: two overridden faces x nine widths x two states).
+// With D138's own prior observation that is ONE substitution in ~30 completed
+// runs. The honest form is a proportion of runs, and it is small.
+//
+// REACHABILITY INTO D107's SEVEN — PROVEN POSSIBLE, and not by waiting for it.
+// A sweep that never sees the flake proves nothing about where it can land, and
+// one that happens to see it at 1280 would settle the question by luck. It is
+// settled by reading the path: the face is forced and resolved by one stretch
+// of PAGE_MEASURE that reads no viewport quantity at all — no innerWidth, no
+// matchMedia, no bucket — and `face_applied` is `winner === wantedFamilies[0]`
+// with no width term. Same code, same inputs, at every one of the nine widths.
+// A substitution possible at 640 is possible at 1280. Both facts are pinned in
+// scripts/studio-desk-instrument-reliability.test.mjs.
+//
+// SO: rare, and able to land on a ruling cell. A run with `face_applied:false`
+// in a forced row does NOT fail — the row does. Its 55ch verdicts go to NULL
+// (never FALSE: FALSE would say "this desk fails 55ch on Georgia" when Georgia
+// was never on screen), its px measurements stand, and the run carries
+// `face_override_integrity`. Killing 53 good rows to withdraw one would produce
+// the zero-byte run D138 forbids. A CONSUMER that wants a gate passes
+// --fail-on-face-substitution, which exits 2 AFTER the artifact is written; the
+// instrument itself keeps no gate authority (D81).
+//
+// ── RULING 2 — bounded retries belong IN the instrument, on a NAMED list ─────
+//
+// Yes, and the list matters more than the bound. The wave-9 brief authorised
+// retries on ONE abort, so an operator who met any other had to deviate to do
+// the obviously right thing. RETRYABLE_ABORTS is the list — six entries, five
+// with throw sites in this file and one (`browser-race`) classified at the
+// retry layer because playwright raises it, not us. --retries=N defaults to 2.
+// Every failed attempt's stderr is printed IN FULL before the next attempt
+// starts: failure B went seven weeks undiagnosed for exactly one reason, that
+// its stderr was suppressed, and a retry loop that swallowed what it retried
+// would rebuild that hole where nobody would think to look.
+//
+// ── RULING 3 — the browser is provenance ────────────────────────────────────
+//
+// BP_DESK_BROWSER, defaulting to the bundled Chromium; a missing browser fails
+// by name with `npx playwright install chromium`; every run records
+// browser_policy / browser_channel / browser_version. See the block above
+// resolvePlaywright().
+//
+// ── WHAT D138 GOT WRONG, on the evidence ────────────────────────────────────
+//
+//  - "failure C ... The list had rendered only four rows at drill time — a
+//    PARTIALLY-LOADED Papers list, not a missing document." Not a partial list.
+//    Those four strings are document TYPES: the drill was reading the ROOT
+//    pane, because `openPapersPane` waited for QUIESCENCE (800ms of stillness)
+//    after clicking, and the pre-click desk is already still. The Papers pane
+//    renders exactly 100 rows. Fixed by the edge-triggered `waitForNewPane`,
+//    pinned by studio-desk-drill-pane.test.mjs, and 0 of 22 invocations in this
+//    sweep aborted in the drill.
+//  - "failure B, UNDIAGNOSED." Diagnosed. It is playwright's `Execution context
+//    was destroyed` under a blue/green rotation — see isRetryableBrowserRace().
+//  - "~80% deterministic." 19 of 22 raw, 19 of 19 outside a deploy window, with
+//    every completed run reproducing at tolerance zero.
+//
+// STILL OPEN, and NOT this file's to fix: the committed DEFAULT_DOC has aged
+// off the Papers pane's newest-100 window, so the no-flag invocation now aborts
+// 1 of 1 with a correctly-worded drill error naming it. Every run above passed
+// --doc explicitly.
+//
 // ── Playwright resolution ────────────────────────────────────────────────────
 // playwright 1.59.1 + chromium-1217 are cached, but they live in the JS
 // monorepo's node_modules, and this script sits in scripts/ — and is routinely
