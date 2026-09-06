@@ -2647,23 +2647,51 @@ async function main() {
       // 900 is the DECIDING width — the only one above the 768 escape, and the
       // only cell that can refuse `break-word`.
       const RAIL_WIDTHS = [320, 390, 900];
-      const { SCENARIOS, RAIL_FAIL_CRUEL_DETAIL, RAIL_FAIL_KIND_DETAIL } = await import("./scenarios.mjs");
+      const {
+        SCENARIOS, RAIL_FAIL_CRUEL_DETAIL, RAIL_FAIL_KIND_DETAIL,
+        RAIL_FAIL_CLASSIFIED_CAPTION, RAIL_FAIL_CLASSIFYING_DETAIL,
+      } = await import("./scenarios.mjs");
       const sc = SCENARIOS["site-deploy-rail-failed"];
+      // task-877bfc465162e104: THE THIRD TRACK. `RAIL_FAIL_CLASSIFYING_DETAIL` is
+      // the one capture in this corpus that MOVES under `FailureCopy.humanize/1`,
+      // and the control plane applies that fold at every display boundary — so the
+      // string this rail actually paints is `RAIL_FAIL_CLASSIFIED_CAPTION`, a
+      // THIRD length between the cruel 240 and the kind ~130, word-broken like the
+      // control but longer. It was exported and routed nowhere, so no cell in this
+      // file had ever measured it. It rides its OWN scenario rather than a third
+      // site on the fixture above, because that fixture's readers (this leg's
+      // `sites[1]`, and smoke's) pick their control POSITIONALLY.
+      const scClassified = SCENARIOS["site-deploy-rail-failed-classified"];
       // The routes are DERIVED from the fixture, never transcribed: a pasted
       // uuid rots silently into "the sites list rendered instead".
       if (!sc || !sc.deepLink || !sc.data || !Array.isArray(sc.data.sites) || sc.data.sites.length < 2) {
         return die(`${D}: SCENARIOS["site-deploy-rail-failed"] no longer carries a deepLink and two sites — the cruel rail and its control cannot both be reached, so nothing was measured`);
       }
+      if (!scClassified || !scClassified.deepLink) {
+        return die(`${D}: SCENARIOS["site-deploy-rail-failed-classified"] no longer carries a deepLink — the CLASSIFIED track cannot be reached, so the only fixture whose caption differs from the box's own bytes goes unmeasured`);
+      }
+      // ANTI-VACUITY BEFORE THE FIRST NAV: if the fold stopped moving this string,
+      // the third track is measuring the cruel/kind shape again under a new name.
+      if (RAIL_FAIL_CLASSIFIED_CAPTION === RAIL_FAIL_CLASSIFYING_DETAIL) {
+        return die(`${D}: RAIL_FAIL_CLASSIFIED_CAPTION is byte-identical to RAIL_FAIL_CLASSIFYING_DETAIL — the classified track no longer carries a classified string, so its cells would be green by construction`);
+      }
       const RAIL_ROUTES = [
-        { name: "cruel", hash: sc.deepLink, detail: RAIL_FAIL_CRUEL_DETAIL, cruel: true },
-        { name: "kind", hash: "#site/" + sc.data.sites[1].id, detail: RAIL_FAIL_KIND_DETAIL, cruel: false },
+        { name: "cruel", scen: "site-deploy-rail-failed", hash: sc.deepLink, detail: RAIL_FAIL_CRUEL_DETAIL, cruel: true },
+        { name: "kind", scen: "site-deploy-rail-failed", hash: "#site/" + sc.data.sites[1].id, detail: RAIL_FAIL_KIND_DETAIL, cruel: false },
+        { name: "classified", scen: "site-deploy-rail-failed-classified", hash: scClassified.deepLink, detail: RAIL_FAIL_CLASSIFIED_CAPTION, cruel: false },
       ];
       process.stdout.write(
         `\n${D} — the cruel rail x ${RAIL_WIDTHS.length} widths x 2 themes (${RAIL_WIDTHS.length * 2} cells)` +
-        ` + the same axis on the KIND control; PAGE and BOX asserted in every cell` +
-        ` (cruel detail ${RAIL_FAIL_CRUEL_DETAIL.length} chars, control ${RAIL_FAIL_KIND_DETAIL.length})\n`,
+        ` + the same axis on the KIND control and on the CLASSIFIED caption; PAGE and BOX asserted in every cell` +
+        ` (cruel detail ${RAIL_FAIL_CRUEL_DETAIL.length} chars, control ${RAIL_FAIL_KIND_DETAIL.length},` +
+        ` classified ${RAIL_FAIL_CLASSIFIED_CAPTION.length} — folded from a ${RAIL_FAIL_CLASSIFYING_DETAIL.length}-char capture)\n`,
       );
-      let cells = 0, kindCells = 0, boxesSeen = 0, pageOver = 0, boxOver = 0;
+      let cells = 0, kindCells = 0, classifiedCells = 0, boxesSeen = 0, pageOver = 0, boxOver = 0;
+      // Per-track box population. A track that rendered ZERO footers across every
+      // cell prints a clean row of `0box` failures per cell today; this counter is
+      // what makes the ABSENCE fatal as a single named refusal too, on every track
+      // rather than only the two the leg was born with.
+      const boxesByTrack = new Map(RAIL_ROUTES.map((r) => [r.name, 0]));
       for (const r of RAIL_ROUTES) {
         for (const theme of ["light", "dark"]) {
           // Enter at the WIDEST width — the rail mounts once, on load, from the
@@ -2671,7 +2699,7 @@ async function main() {
           // renders its footer on a phone layout.
           await setViewport(RAIL_WIDTHS[RAIL_WIDTHS.length - 1]);
           await nav(
-            `${BASE}/?scen=site-deploy-rail-failed&theme=${theme}${r.hash}`,
+            `${BASE}/?scen=${r.scen}&theme=${theme}${r.hash}`,
             `document.querySelector('.deploy-rail-fail') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`,
           );
           const row = [];
@@ -2701,7 +2729,7 @@ async function main() {
               `return {sw:d.scrollWidth, cw:d.clientWidth, view:v?v.id:'none', fs:fs, wide:wide,` +
               ` theme:d.getAttribute('data-theme')};})()`,
             );
-            if (r.cruel) cells++; else kindCells++;
+            if (r.cruel) cells++; else if (r.name === "classified") classifiedCells++; else kindCells++;
             // (1) THE ROUTE. Without this the whole table is phantom.
             if (m.view !== "view-site") {
               fail(D, `${r.name}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-site" — the hash did not route, so nothing below this line measures the deploy rail`);
@@ -2724,6 +2752,7 @@ async function main() {
             // own, so the producer's cap can move without touching this file.
             for (const f of m.fs) {
               boxesSeen++;
+              boxesByTrack.set(r.name, boxesByTrack.get(r.name) + 1);
               if (f.t !== r.detail) {
                 fail(D, `${r.name}/${theme}@${width} .deploy-rail-fail: rendered ${f.len} chars that are not the fixture's ${r.name} detail (${r.detail.length} chars) — the box under measurement is holding some other string`);
                 continue;
@@ -2827,11 +2856,30 @@ async function main() {
         }
       }
 
+      // THE PER-TRACK NON-VACUITY REFUSAL. A track whose scenario stopped
+      // rendering a rail at ALL widths would otherwise leave this leg printing a
+      // table of `0box` cells under a headline that still counts its cells.
+      for (const [name, seen] of boxesByTrack) {
+        if (seen === 0) {
+          fail(D, `${name}: ZERO .deploy-rail-fail boxes were measured across all ${RAIL_WIDTHS.length} widths in both themes — that track's fixture rendered no rail anywhere, so its cells prove nothing. This is not a pass.`);
+        }
+      }
+
       if (!failures.some((f) => f.defect === D)) {
         okLine(
           `${cells} / ${cells} cruel cells clean across ${RAIL_WIDTHS.join("/")} in both themes, plus ${kindCells} ` +
-          `KIND-control cells on the same axis (${boxesSeen} .deploy-rail-fail box(es) measured — every one on the ` +
-          `page, not a pinned selector); ${pageOver} pages scrolling sideways, ${boxOver} boxes spilling their own border`,
+          `KIND-control cells and ${classifiedCells} CLASSIFIED-caption cells on the same axis (${boxesSeen} ` +
+          `.deploy-rail-fail box(es) measured — every one on the page, not a pinned selector; per track ` +
+          `${[...boxesByTrack].map(([n, c]) => `${n}:${c}`).join(" ")}); ${pageOver} pages scrolling sideways, ` +
+          `${boxOver} boxes spilling their own border`,
+        );
+        okLine(
+          `THE THIRD TRACK IS A THIRD LENGTH, not a rename: the classified caption is ` +
+          `${RAIL_FAIL_CLASSIFIED_CAPTION.length} chars against the cruel ${RAIL_FAIL_CRUEL_DETAIL.length} and the ` +
+          `control ${RAIL_FAIL_KIND_DETAIL.length}, and it is the ONLY fixture in the corpus whose caption is not the ` +
+          `bytes the box emitted — the control plane folds a failed stage's detail through ` +
+          `Sites.Deploy.stage_caption/2 before the browser sees it, and the wave-26 pair passes through that fold ` +
+          `unchanged. A leg driven on those two alone cannot tell a rail that classifies from one that does not`,
         );
         okLine(
           `BOTH assertions are load-bearing and each refuses a DIFFERENT half of the remedy, both driven: reverting ` +
