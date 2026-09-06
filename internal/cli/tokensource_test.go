@@ -366,7 +366,7 @@ func TestTierHiddenRefusalNamesTheCredential(t *testing.T) {
 	tree := &manifest.Tree{} // an empty tree: `task` is hidden at this tier
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
-	if code := suggestUnknownNoun(w, tree, "none", "task", prov); code != exitUsage {
+	if code := suggestUnknownNoun(w, tree, "none", "task", prov, ""); code != exitUsage {
 		t.Fatalf("exit = %d, want exitUsage", code)
 	}
 	human := stderr.String()
@@ -384,7 +384,7 @@ func TestTierHiddenRefusalNamesTheCredential(t *testing.T) {
 	var mOut, mErr bytes.Buffer
 	mw := newWriter(&mOut, &mErr)
 	mw.output = "json"
-	suggestUnknownNoun(mw, tree, "none", "task", prov)
+	suggestUnknownNoun(mw, tree, "none", "task", prov, "")
 	machine := mOut.String() + mErr.String()
 	for _, want := range []string{"hidden at your auth tier", "env:BARKPARK_TOKEN", "unset BARKPARK_TOKEN"} {
 		if !strings.Contains(machine, want) {
@@ -404,7 +404,7 @@ func TestTierHiddenRefusalStillTellsAnAnonymousCallerToLogIn(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
-	suggestUnknownNoun(w, &manifest.Tree{}, "none", "task", prov)
+	suggestUnknownNoun(w, &manifest.Tree{}, "none", "task", prov, "")
 	if !strings.Contains(stderr.String(), "barkpark login") {
 		t.Errorf("an unshadowed caller lost the login advice:\n%s", stderr.String())
 	}
