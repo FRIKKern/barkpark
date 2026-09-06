@@ -883,18 +883,46 @@ step_0c() {
 # STEP 1 — THE PULL
 # ═════════════════════════════════════════════════════════════════════════════
 
-# manifest_field <tar> <key> -> the value, or the empty string. Extracts ONLY
-# manifest.json, never the whole bundle.
+# manifest_field <tar> <key> -> the value on stdout. Extracts ONLY manifest.json,
+# never the whole bundle.
+#
+# THE EXIT CODE IS THE ANSWER TO A SECOND QUESTION (PDS-D261). This function used
+# to `printf '\n'; return 0` on EVERY failure it has, so its caller could not tell
+# "this bundle's manifest genuinely carries no such key" — the legacy pre-profile
+# engine — from "this file is not a bundle and nothing could be read out of it".
+# Collapsing those two into one empty string is what let `case "$p" in ""|full)`
+# accept an HTML error page as a full-fidelity bundle.
+#
+#   0 = the manifest was read and the key is PRESENT (its value is on stdout)
+#   1 = the manifest was read and the key is ABSENT  (stdout empty)
+#   2 = NOTHING could be read: no extractable manifest.json, or it is not a JSON
+#       object (stdout empty)
+#
+# stdout is unchanged for every existing caller — a caller that ignores the exit
+# code behaves exactly as before. Callers that must tell 1 from 2 read $?.
 manifest_field() {
-  local tar="$1" key="$2" d
+  local tar="$1" key="$2" d out rc
   d="$(mktemp -d "${TMPDIR:-/tmp}/pds-mf.XXXXXX")"
   TMP_DIRS="$TMP_DIRS $d"
-  tar -xf "$tar" -C "$d" manifest.json 2>/dev/null || { printf '\n'; return 0; }
-  KEY="$key" python3 -c '
-import json,os,sys
-d=json.load(open(sys.argv[1]))
-v=d.get(os.environ["KEY"])
-print("" if v is None else v)' "$d/manifest.json" 2>/dev/null || printf '\n'
+  if ! tar -xf "$tar" -C "$d" manifest.json 2>/dev/null || [ ! -s "$d/manifest.json" ]; then
+    printf '\n'
+    return 2
+  fi
+  out="$(KEY="$key" python3 -c '
+import json, os, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    raise SystemExit(2)
+if not isinstance(d, dict):
+    raise SystemExit(2)
+v = d.get(os.environ["KEY"])
+if v is None:
+    raise SystemExit(1)
+print(v)' "$d/manifest.json" 2>/dev/null)"
+  rc=$?
+  printf '%s\n' "$out"
+  return "$rc"
 }
 
 # WHAT pds-w1-pull-cli ACTUALLY SHIPPED (corrected at wave-3 review). This step
@@ -978,10 +1006,14 @@ step_1() {
   # A workspace-grain bundle wearing a dev command line is the silent-wrong-
   # answer hazard of this whole wave: it imports fine, and every census below
   # then measures a workspace, not the dataset the transcript claims.
-  local m_ds m_profile
-  m_profile="$(manifest_field "$tar" profile)"
-  m_ds="$(manifest_field "$tar" dataset)"
-  info "manifest        profile='${m_profile:-<absent>}' dataset='${m_ds:-<absent>}' (asked for profile=dev dataset=$SOURCE_DS)"
+  local m_ds m_profile m_prc=0 m_drc=0 m_note
+  m_profile="$(manifest_field "$tar" profile)" || m_prc=$?
+  m_ds="$(manifest_field "$tar" dataset)" || m_drc=$?
+  # rc 2 is NOT "the field is absent" — it is "nothing was readable here". Saying
+  # <absent> for both is the conflation PDS-D261 removed from full_meta_ok.
+  m_note=""
+  [ "$m_prc" -eq 2 ] && m_note=" — manifest UNREADABLE (no extractable manifest.json, or it is not a JSON object), so neither field below is an absence, it is a non-answer"
+  info "manifest        profile='${m_profile:-$([ "$m_prc" -eq 2 ] && echo '<unreadable>' || echo '<absent>')}' dataset='${m_ds:-$([ "$m_drc" -eq 2 ] && echo '<unreadable>' || echo '<absent>')}' (asked for profile=dev dataset=$SOURCE_DS)$m_note"
   if [ -z "$m_ds" ]; then
     abort 1 "pds-w4-pull-dataset-flag" \
       "the exported manifest carries NO dataset field — this is a WORKSPACE-GRAIN bundle wearing a dataset command line. Refusing to import it: every per-type census downstream would silently describe the whole workspace while the transcript claimed dataset=$SOURCE_DS (PDS-D61/D62). The bundle is on disk at $tar if you want to look."
@@ -1367,7 +1399,7 @@ step_2() {
 # manifest is not a legacy engine.
 full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
   FULL_META_WHY=""
-  local d p sz
+  local d p sz kind prc=0
 
   if [ ! -f "$FULL_TAR" ]; then
     FULL_META_WHY="there is no file at $FULL_TAR"
@@ -1380,7 +1412,10 @@ full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
 
   sz="$(wc -c <"$FULL_TAR" 2>/dev/null | tr -d ' ')"
   if ! tar -tf "$FULL_TAR" >/dev/null 2>&1; then
-    FULL_META_WHY="$FULL_TAR (${sz:-?} bytes) is not a readable tar archive — an error page, a truncated download or any non-tar body reaches this predicate looking exactly like a bundle, and every downstream extraction off it would read as an EMPTY bundle rather than a failed one"
+    # An operator has to tell a proxy error page from a truncated download from a
+    # gzip, and the byte count alone does not: name the type AND the size.
+    kind="$(file -b "$FULL_TAR" 2>/dev/null | tr -d '\n')"
+    FULL_META_WHY="$FULL_TAR is not a readable tar archive — \`tar -tf\` refused it. What is actually on disk: ${sz:-?} bytes, file(1) says [${kind:-unidentifiable}]. An error page, a truncated download or any non-tar body reaches this predicate looking exactly like a bundle, and every downstream extraction off it would read as an EMPTY bundle rather than a failed one"
     return 1
   fi
 
@@ -1392,26 +1427,21 @@ full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
     return 1
   fi
 
-  p="$(python3 -c '
-import json, sys
-try:
-    m = json.load(open(sys.argv[1]))
-except Exception:
-    print("__UNPARSED__"); raise SystemExit(0)
-if not isinstance(m, dict):
-    print("__UNPARSED__"); raise SystemExit(0)
-v = m.get("profile")
-print("__ABSENT__" if v is None else v)' "$d/manifest.json" 2>/dev/null || printf '__UNPARSED__')"
-
-  case "$p" in
-    __UNPARSED__)
+  # manifest_field's EXIT CODE is what makes the legacy accept safe: 1 is "the
+  # manifest was read and carries no profile key" (the pre-profile engine), 2 is
+  # "nothing was readable". The old predicate saw the same empty string for both.
+  p="$(manifest_field "$FULL_TAR" profile)" || prc=$?
+  case "$prc" in
+    2)
       FULL_META_WHY="manifest.json is present but is not a JSON object — its profile cannot be read, and an UNREADABLE manifest is not the legacy pre-profile engine the absent-profile branch exists for"
       return 1 ;;
-    __ABSENT__|full)
-      : ;;   # absent = an engine that predates the profile field (legacy accept)
+    1)
+      : ;;   # key absent from a manifest that PARSED — the legacy accept
     *)
-      FULL_META_WHY="the manifest declares profile=[$p], not [full] — a $p bundle is not a full-fidelity control"
-      return 1 ;;
+      if [ "$p" != "full" ]; then
+        FULL_META_WHY="the manifest declares profile=[$p], not [full] — a $p bundle is not a full-fidelity control"
+        return 1
+      fi ;;
   esac
 
   if ! tar -xf "$FULL_TAR" -C "$d" tables/documents.copy 2>/dev/null || [ ! -s "$d/tables/documents.copy" ]; then

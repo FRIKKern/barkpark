@@ -158,6 +158,56 @@ refuse '0-byte body                         [refused before]'  "$FIX/zero.tar"  
 refuse 'absent file                         [refused before]'  "$FIX/does-not-exist.tar" 'there is no file at'
 refuse 'dev-profile bundle                  [refused before]'  "$DEV"               'not [full]'
 
+# ── the refusal NAMES WHAT ARRIVED ──────────────────────────────────────────
+# A byte count alone cannot separate a proxy error page from a truncated
+# download: both are "some bytes that are not a tar". The refusal must carry
+# file(1)'s identification AND the size, verbatim, so an operator reading a
+# transcript knows which failure they are looking at.
+names_what_arrived() { # <arm> <fixture>
+  local arm="$1" f="$2" want_kind want_sz
+  want_kind="$(file -b "$f" 2>/dev/null | tr -d '\n')"
+  want_sz="$(wc -c <"$f" | tr -d ' ')"
+  FULL_TAR="$f"; FULL_META_WHY=""
+  if full_meta_ok; then bad "$arm" "accepted $f — cannot check a refusal that did not happen"; return; fi
+  case "$FULL_META_WHY" in
+    *"$want_kind"*) ;;
+    *) bad "$arm" "the refusal does not name what file(1) sees ('$want_kind') — an operator cannot tell a proxy error page from a truncated download. Got: $FULL_META_WHY"; return ;;
+  esac
+  case "$FULL_META_WHY" in
+    *"$want_sz bytes"*) ok "$arm  — names [$want_kind] at $want_sz bytes" ;;
+    *) bad "$arm" "the refusal does not carry the byte count ($want_sz). Got: $FULL_META_WHY" ;;
+  esac
+}
+
+printf 'pds-pull-proof_test: the refusal identifies WHAT arrived, not just THAT it was wrong\n'
+names_what_arrived 'HTML error page is identified as such' "$FIX/html.tar"
+names_what_arrived 'a gzip is identified as a gzip'        "$FIX/gz.tar"
+
+# ── manifest_field's THREE return paths ─────────────────────────────────────
+# The predicate above is only safe because its reader stopped collapsing two
+# different answers into one empty string. Pinned directly, on its own.
+mf() { # <arm> <tar> <key> <expected rc> <expected stdout>
+  local arm="$1" tar="$2" key="$3" want_rc="$4" want_out="$5" out rc
+  out="$(manifest_field "$tar" "$key")"; rc=$?
+  out="$(printf '%s' "$out" | tr -d '\n')"
+  if [ "$rc" != "$want_rc" ]; then
+    bad "$arm" "manifest_field returned rc=$rc, expected $want_rc (stdout='$out'). Collapsing key-absent and unreadable into one code is the PDS-D261 conflation."
+    return
+  fi
+  if [ "$out" != "$want_out" ]; then
+    bad "$arm" "manifest_field printed '$out', expected '$want_out' — the stdout contract every existing caller reads must not have moved"
+    return
+  fi
+  ok "$arm  (rc=$rc, stdout='$out')"
+}
+
+printf 'pds-pull-proof_test: manifest_field — the exit code distinguishes what the empty string could not\n'
+mf 'key PRESENT       -> rc 0 + the value' "$GOOD"       profile 0 full
+mf 'key ABSENT        -> rc 1 + empty'     "$LEGACY"     profile 1 ''
+mf 'manifest NOT JSON -> rc 2 + empty'     "$BADJSON"    profile 2 ''
+mf 'no manifest member-> rc 2 + empty'     "$FIX/no-members.tar" profile 2 ''
+mf 'not a tar at all  -> rc 2 + empty'     "$FIX/html.tar"       profile 2 ''
+
 printf 'pds-pull-proof_test: ACCEPT arms — the predicate must still say YES to a real bundle\n'
 accept 'a genuine full-profile bundle' "$GOOD"
 accept 'the LEGACY pre-profile engine (manifest parses, no profile key)' "$LEGACY"
@@ -183,7 +233,7 @@ fi
 
 printf '\n'
 if [ "$fails" -eq 0 ]; then
-  printf 'pds-pull-proof_test: PASS (16 arms: 13 refuse, 2 accept, 1 discrimination)\n'
+  printf 'pds-pull-proof_test: PASS (23 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination)\n'
   exit 0
 fi
 printf 'pds-pull-proof_test: FAIL — %s arm(s)\n' "$fails"

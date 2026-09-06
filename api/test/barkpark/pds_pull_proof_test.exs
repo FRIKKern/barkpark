@@ -60,7 +60,10 @@ defmodule Barkpark.PdsPullProofTest do
              "member-less tar, an empty manifest, an unparseable manifest, a JSON-array " <>
              "manifest, and two bundles with no usable tables/documents.copy), two ACCEPT arms " <>
              "(a genuine full bundle and the legacy pre-profile engine), and one arm asserting " <>
-             "the refusals name FOUR DIFFERENT expectations. A red in the first group means the " <>
+             "the refusals name FOUR DIFFERENT expectations, plus five pinning
+             manifest_field's three return paths (key present / key absent /
+             nothing readable) — the conflation that made the permissive default
+             possible. A red in the first group means the " <>
              "permissive default came back; a red in the second means the tightening turned " <>
              "into an always-refuse, which is the same defect with a new mechanism.\n#{out}"
 
@@ -70,15 +73,16 @@ defmodule Barkpark.PdsPullProofTest do
 
     # Non-vacuity: a harness whose fixtures stopped building would print a
     # tidy PASS over zero arms. The count is asserted, not assumed.
-    assert out =~ "PASS (16 arms: 13 refuse, 2 accept, 1 discrimination)",
+    assert out =~
+             "PASS (23 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination)",
            "the harness passed with an arm count this door does not recognise. If arms were " <>
              "added or removed deliberately, update this assertion in the same commit — an " <>
              "unpinned count lets a shrinking harness keep printing PASS.\n#{out}"
 
     ok_lines = out |> String.split("\n") |> Enum.count(&String.starts_with?(&1, "  ok   "))
 
-    assert ok_lines == 16,
-           "expected 16 `ok` arm lines, counted #{ok_lines}. A pass prints a real count; a " <>
+    assert ok_lines == 23,
+           "expected 23 `ok` arm lines, counted #{ok_lines}. A pass prints a real count; a " <>
              "green with no arms means the harness never ran its assertions.\n#{out}"
   end
 end
