@@ -58,6 +58,6 @@ jobs:
       - name: Run the suites through the floor
         run: |
           set -euo pipefail
-          node scripts/node-test-floor.mjs --floor 7 \
+          node scripts/node-test-floor.mjs --floor 8 \
             'scripts/studio-desk-*.test.mjs' \
             'scripts/measurements/*.test.mjs'

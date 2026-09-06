@@ -1666,17 +1666,70 @@ async (faceOverride) => {
   else surface.style.removeProperty('min-inline-size');
   const floorBinds = Math.abs(widthWithFloor - widthWithoutFloor) > 0.5;
 
+  // The container the floor's own gate asks about. The served rule is
+  //
+  //     .editor-with-preview .editor-panel-main.bp-paper-body {
+  //       container-type: inline-size; container-name: content; }
+  //     @container content (min-width: 720px) {
+  //       .editor-panel .bp-paper-surface {
+  //         min-inline-size: calc(55ch + 2 * var(--paper-gutter)); } }
+  //
+  // so where that gate is CLOSED the declaration never applies, min-inline-size
+  // resolves to 0px, and there is no in-floor ch to derive OR to diverge. That
+  // is not a quiet null: it is the reason two thirds of this matrix cannot
+  // produce a drift warning at all, and it is recorded rather than inferred.
+  // 'containerName' is READ from the computed style — if the container ever
+  // stops being declared here, the artifact says so instead of the reader
+  // guessing from a zero.
+  const containerCs = body ? getComputedStyle(body) : null;
+  const containerName = containerCs ? String(containerCs.containerName || '') : null;
+  // 'container-type: inline-size' queries the CONTENT box, so subtract the
+  // container's own padding from clientWidth (which includes it).
+  const containerContentPx = (body && containerCs)
+    ? body.clientWidth - px(containerCs.paddingLeft) - px(containerCs.paddingRight)
+    : null;
+
   // The browser's own in-floor ch, derived from the resolved floor. We only
-  // ever see the USED px value, never the authored formula, so the formula is
-  // an ASSUMPTION and is named as one. spd-w5-measure-lever-moves is chartered
-  // to change it (to calc(55ch + 2 * var(--paper-gutter)), or to retire it), at
-  // which point this derivation goes quietly wrong — so the divergence against
-  // the probe is checked below and a drift beyond tolerance is REPORTED, not
-  // absorbed. Printed ALONGSIDE the probe, never instead of it.
+  // ever see the USED px value, never the authored formula — but every INPUT
+  // to that formula is computable, so nothing here is assumed:
+  //
+  //   55            the multiplier, verbatim from the served declaration
+  //   2 * gutter    READ from the surface's computed '--paper-gutter'
+  //
+  // The addend was a hardcoded 80 until spd-w8-followup. 80 is '2 * 40px', and
+  // '--paper-gutter' is redeclared BY VIEWPORT @media — 40px, then 24px below
+  // 767px, then 16px below 479px (root.html.heex) — so 80 was right only in the
+  // widest band. In the 24px band the addend is 48, and assuming 80 subtracts
+  // 32px too much: at viewport 764 / user-opened, the one cell of this matrix
+  // where the 24px gutter and an OPEN container gate coexist, that manufactured
+  // the instrument's only three drift warnings (-5.3% / -5.8% / -6.3%, i.e.
+  // exactly -32 / (55 * probe_px_per_ch), one per face). The derivation now
+  // reads the token, so the same arithmetic holds in all three bands and a
+  // future gutter change cannot rot it again.
   const FLOOR_CH_MULTIPLIER = 55;
-  const FLOOR_ADDEND_PX = 80;
+  // The served gate: @container content (min-width: 720px). Kept beside the
+  // multiplier so the whole floor declaration is one readable block.
+  const FLOOR_CONTAINER_GATE_PX = 720;
+  const gutterTokenRaw = String(sCs.getPropertyValue('--paper-gutter') || '').trim();
+  const gutterTokenPx = gutterTokenRaw ? px(gutterTokenRaw) : null;
+  // Fallback is the READ padding (D72/D78), never a literal: the surface's
+  // 'padding' consumes the SAME token as the floor, so the two are the same
+  // number by construction and measure_parity_test.exs guards both halves.
+  const gutterFromToken = Number.isFinite(gutterTokenPx) && gutterTokenPx > 0;
+  const floorGutterPx = gutterFromToken ? gutterTokenPx : (padL + padR) / 2;
+  const floorGutterSource = gutterFromToken
+    ? 'READ: getComputedStyle(.bp-paper-surface).getPropertyValue("--paper-gutter")'
+    : 'READ (fallback): (paddingLeft + paddingRight) / 2 — --paper-gutter resolved empty';
+  const FLOOR_ADDEND_PX = 2 * floorGutterPx;
   const chInFloorPx = (minInlinePx && minInlinePx > FLOOR_ADDEND_PX)
     ? (minInlinePx - FLOOR_ADDEND_PX) / FLOOR_CH_MULTIPLIER
+    : null;
+  // The floor this row EXPECTS, built only from things measured in this row:
+  // the ch probe taken under this row's own forced face, and the computed
+  // gutter. Published beside the resolved px so the two can be compared
+  // without re-deriving anything by hand.
+  const expectedFloorPx = chProbePx
+    ? (FLOOR_CH_MULTIPLIER * chProbePx) + FLOOR_ADDEND_PX
     : null;
 
   // ── the content box. clientWidth excludes borders and includes padding.
@@ -2107,9 +2160,20 @@ async (faceOverride) => {
       probe_method: 'span[style="width:1ch"] inserted as a CHILD of .bp-paper-surface',
       in_floor_px_per_ch: round(chInFloorPx, 4),
       in_floor_method: minInlinePx
-        ? \`(resolved min-inline-size - \${FLOOR_ADDEND_PX}) / \${FLOOR_CH_MULTIPLIER}\`
-        : 'min-inline-size resolved to 0 — no in-floor ch to derive',
-      in_floor_formula_assumed: \`calc(\${FLOOR_CH_MULTIPLIER}ch + \${FLOOR_ADDEND_PX}px)\`,
+        ? \`(resolved min-inline-size - 2 * \${floorGutterPx}px READ gutter) / \${FLOOR_CH_MULTIPLIER}\`
+        : 'min-inline-size resolved to 0 — the @container content (min-width: 720px) gate is ' +
+          'closed here, so the floor declaration never applied and there is no in-floor ch to derive',
+      // Named '_assumed' for continuity with every committed artifact, but the
+      // only thing still assumed is the multiplier: the addend is READ.
+      in_floor_formula_assumed: \`calc(\${FLOOR_CH_MULTIPLIER}ch + 2 * var(--paper-gutter))\`,
+      in_floor_gutter_px: floorGutterPx,
+      in_floor_gutter_source: floorGutterSource,
+      in_floor_addend_px: FLOOR_ADDEND_PX,
+      expected_floor_px: round(expectedFloorPx, 3),
+      expected_floor_method: \`\${FLOOR_CH_MULTIPLIER} * probe_px_per_ch + 2 * READ --paper-gutter — \` +
+                             'every input measured in THIS row, no literal addend',
+      expected_vs_resolved_floor_delta_px:
+        (expectedFloorPx !== null && minInlinePx) ? round(minInlinePx - expectedFloorPx, 3) : null,
       divergence_pct: (chProbePx && chInFloorPx) ? round(((chInFloorPx - chProbePx) / chProbePx) * 100, 4) : null,
     },
     gutter: {
@@ -2186,6 +2250,19 @@ async (faceOverride) => {
       bind_test: 'measured, then min-inline-size forced to 0px inline and re-measured, then restored — a width change IS the bind',
       width_with_floor_px: round(widthWithFloor),
       width_without_floor_px: round(widthWithoutFloor),
+      // WHY the floor resolved to what it did. A 0px min-inline-size is not a
+      // missing measurement — it is the container gate answering NO.
+      container_query_selector: '.editor-panel-main.bp-paper-body',
+      container_name_computed: containerName,
+      container_content_box_px: round(containerContentPx, 3),
+      container_gate_min_px: FLOOR_CONTAINER_GATE_PX,
+      container_gate_open: containerContentPx === null ? null : containerContentPx >= FLOOR_CONTAINER_GATE_PX,
+      container_gate_note:
+        'the floor lives inside @container content (min-width: 720px) on the READING COLUMN\\'s own ' +
+        'box (charter D113/D114). Gate closed => the declaration never applies => min-inline-size 0 ' +
+        '=> in_floor_px_per_ch null and no divergence can be computed in this row at all.',
+      gutter_px_read: floorGutterPx,
+      gutter_px_source: floorGutterSource,
     },
     overflow: {
       scroller: '.editor-body.bp-paper-body',
@@ -2309,6 +2386,12 @@ export const PAGE_MEASURE_CHROME = /* js */ `
       probe_method: 'not taken — the ch probe is inserted as a CHILD of ' +
                     '${READING_COLUMN_SELECTOR}, which is not on screen in this state',
       in_floor_px_per_ch: null, in_floor_method: 'not derived', in_floor_formula_assumed: null,
+      in_floor_gutter_px: null,
+      in_floor_gutter_source: 'not read — no surface to read --paper-gutter from',
+      in_floor_addend_px: null,
+      expected_floor_px: null,
+      expected_floor_method: 'not derived — no ch probe and no gutter in this state',
+      expected_vs_resolved_floor_delta_px: null,
       divergence_pct: null,
     },
     gutter: { padding_left_px: null, padding_right_px: null, total_px: null,
@@ -2343,7 +2426,12 @@ export const PAGE_MEASURE_CHROME = /* js */ `
       'disease (D31/D39) with its sign flipped.',
     floor: { min_inline_size_raw: null, min_inline_size_px: null, binds: null,
              bind_test: 'not run — no surface to force min-inline-size on',
-             width_with_floor_px: null, width_without_floor_px: null },
+             width_with_floor_px: null, width_without_floor_px: null,
+             container_query_selector: '.editor-panel-main.bp-paper-body',
+             container_name_computed: null, container_content_box_px: null,
+             container_gate_min_px: 720, container_gate_open: null,
+             container_gate_note: 'not read — no reading column on screen in this state',
+             gutter_px_read: null, gutter_px_source: 'not read — no surface on screen' },
     overflow: { scroller: '.editor-body.bp-paper-body', scroll_width: null, client_width: null,
                 horizontal_scroll: null, overflow_px: null },
     panes: {
@@ -3649,20 +3737,26 @@ async function main() {
               `inflates ch and would hand the next verifier a free overturn. Availability: ` +
               JSON.stringify(rec.font.face_available));
         }
-        // The in-floor ch derivation ASSUMES the authored formula is
-        // `calc(55ch + 80px)`; the browser only ever exposes the used px. The
-        // two ch readings agree to ~0.107% today (D83). A drift past 2% means
-        // the assumption has rotted — almost certainly because the floor's
-        // formula changed (spd-w5-measure-lever-moves is chartered to change
-        // it) — so it is REPORTED rather than silently published as a number.
+        // The in-floor ch derivation takes the served formula's SHAPE
+        // (`calc(55ch + 2 * var(--paper-gutter))`) and reads its gutter from
+        // computed style; the browser only ever exposes the used px. The two ch
+        // readings agree to ~0.107% today (D83). Until spd-w8-followup the
+        // addend was the literal 80, which is `2 * 40px` — right in the widest
+        // gutter band and 32px wrong in the 24px band, so this check fired at
+        // the single cell (764 / user-opened) where the narrow gutter and an
+        // open container gate coexist. That was the check doing its job. With
+        // the gutter READ, a drift past 2% now means the MULTIPLIER moved off
+        // 55 or the formula's shape changed — reported, never absorbed.
         const drift = rec.ch.divergence_pct;
         if (drift !== null && Math.abs(drift) > 2) {
           run.warnings.push(
             `viewport ${width}px / ${stateId} / face "${face.id}": in-floor ch diverges from the ` +
-            `probe by ${drift}% (assumed formula ${rec.ch.in_floor_formula_assumed}, resolved ` +
-            `${rec.floor.min_inline_size_raw}). The floor's authored formula has probably changed — ` +
-            `\`in_floor_px_per_ch\` in these rows is derived from a stale assumption. The probe ch ` +
-            `(and every ch in the table above) is unaffected.`);
+            `probe by ${drift}% (formula ${rec.ch.in_floor_formula_assumed}, gutter read as ` +
+            `${rec.ch.in_floor_gutter_px}px so addend ${rec.ch.in_floor_addend_px}px, resolved ` +
+            `${rec.floor.min_inline_size_raw}, expected ${rec.ch.expected_floor_px}px). The floor's ` +
+            `authored formula has probably changed SHAPE (the gutter is read, so a gutter change ` +
+            `alone cannot cause this) — \`in_floor_px_per_ch\` in these rows is derived from a stale ` +
+            `assumption. The probe ch (and every ch in the table above) is unaffected.`);
         }
         // D138 FAILURE A, RULED ON. This used to be a bare warning and the row
         // was published with its verdicts intact — i.e. a ch computed through a
