@@ -315,6 +315,15 @@ on:
       - "scripts/fixtures/landed-mark/**"
       - "scripts/pr-task-gate.sh"
       - ".github/workflows/landed-mark.yml"
+      # THE READER HALF (task-2279167dd00ec347). landed-mark.sh WRITES the
+      # landing back-link; landed-open-report.sh is the only thing that reads
+      # it. They share this lane because they share one contract — the label
+      # spelling `landed-on-main` / `landed:pr-<n>@<sha10>`. A PR that changes
+      # the writer's spelling without the reader is exactly the PR that must
+      # red here, and it cannot if the two are wired to different jobs.
+      - "scripts/landed-open-report.sh"
+      - "scripts/landed-open-report.test.sh"
+      - "scripts/lib/landed_open_report.py"
       # ── TASK LEASE RENEW (task-16e56d05b809dd39) ────────────────────────────
       # Per file, D26 — plus scripts/pr-task-gate.sh for the SAME reason the
       # landed-mark block above names it: that file OWNS the `Task:` trailer
@@ -544,6 +553,15 @@ on:
       - "scripts/fixtures/landed-mark/**"
       - "scripts/pr-task-gate.sh"
       - ".github/workflows/landed-mark.yml"
+      # THE READER HALF (task-2279167dd00ec347). landed-mark.sh WRITES the
+      # landing back-link; landed-open-report.sh is the only thing that reads
+      # it. They share this lane because they share one contract — the label
+      # spelling `landed-on-main` / `landed:pr-<n>@<sha10>`. A PR that changes
+      # the writer's spelling without the reader is exactly the PR that must
+      # red here, and it cannot if the two are wired to different jobs.
+      - "scripts/landed-open-report.sh"
+      - "scripts/landed-open-report.test.sh"
+      - "scripts/lib/landed_open_report.py"
       # The renew lane's harness, on the push arm too: a lane wired on PRs only
       # goes dark the moment a merge lands.
       - "scripts/task-lease-renew.sh"
@@ -823,6 +841,9 @@ jobs:
           landed-mark scripts/fixtures/landed-mark/**
           landed-mark scripts/pr-task-gate.sh
           landed-mark .github/workflows/landed-mark.yml
+          landed-mark scripts/landed-open-report.sh
+          landed-mark scripts/landed-open-report.test.sh
+          landed-mark scripts/lib/landed_open_report.py
           doc-gates-paths-parity scripts/doc-gates-paths-parity-check.sh
           doc-gates-paths-parity .github/workflows/doc-gates.yml
           merge-gate-bridge scripts/github-webhook-subscription-parity.sh
@@ -1836,6 +1857,25 @@ jobs:
           fi
           grep -q "scanned 5 commit(s); 3 row(s)" <<<"$out" || {
             echo "the scan count moved — the fixture and the instrument disagree" >&2; exit 1; }
+      - name: landed-open-report.sh + harness syntax check
+        run: |
+          bash -n scripts/landed-open-report.sh
+          bash -n scripts/landed-open-report.test.sh
+          python3 -c "import ast,sys; ast.parse(open('scripts/lib/landed_open_report.py').read())"
+      - name: the READER's selftest is green, then nine arms are DISARMED and red
+        # The consumer for the back-link this job's writer produces. Its own
+        # selftest proves it SEES (a live landed row present, a done one and an
+        # unlabelled one absent, PARENT and GATE? rows listed AND flagged) and
+        # that a failed read never prints like a zero. The mutation harness
+        # then breaks nine arms one at a time in scratch copies and requires
+        # the selftest to go red for each — a guard whose selftest survives the
+        # guard being deleted is theatre.
+        #
+        # Hermetic: fixture pages on disk, no network, no token, no bp. There
+        # is no live arm to skip into, so this cannot rot into a green skip.
+        run: |
+          bash scripts/landed-open-report.sh --selftest
+          bash scripts/landed-open-report.test.sh
 
   doc-gates-paths-parity:
     needs: [changes]
