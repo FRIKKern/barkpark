@@ -39,6 +39,7 @@ import Typography from "@tiptap/extension-typography";
 // NodeSelection ONTO a divider/code/diagram/field atom). @tiptap/pm re-exports the
 // PM core modules, so this is the canonical TipTap-vanilla import (no extra dep).
 import { TextSelection, NodeSelection, Plugin } from "@tiptap/pm/state";
+import { Fragment, Slice } from "@tiptap/pm/model";
 import { Extension } from "@tiptap/core";
 
 // PURE S0 projector + op-mapper — used verbatim (do NOT reinvent the diff).
@@ -281,6 +282,48 @@ function ensureStyles() {
   link.rel = "stylesheet";
   link.href = "/assets/bp-paper-editor.css";
   (document.head || document.documentElement).appendChild(link);
+}
+
+function isFigureSingletonCanvas(host) {
+  const context = host.closest("[data-paper-container-kind]");
+  return context?.getAttribute("data-paper-container-kind") === "figure" &&
+    host._blocks.length === 1;
+}
+
+// A Figure owns one singular child MAP, while a normal canvas owns a list. Keep
+// ProseMirror from manufacturing list-shaped operations for that one special host:
+// content edits may change the child, but the direct node and its authored identity
+// must survive. Programmatic server echoes bypass this alongside the other vetoes.
+function transactionVetoesFigureSingleton(tr, state, host) {
+  if (!tr.docChanged || !isFigureSingletonCanvas(host)) return false;
+  if (tr.doc.childCount !== 1) {
+    host._showFigureConstraint();
+    return true;
+  }
+
+  const expectedId = host._blocks[0]?.id ?? state.doc.firstChild?.attrs?.bpId;
+  const after = tr.doc.firstChild;
+  const replacesChild = expectedId != null && expectedId !== after.attrs?.bpId;
+  if (replacesChild) host._showFigureConstraint();
+  return replacesChild;
+}
+
+function figurePastePlan(slice) {
+  const direct = [];
+  slice.content.forEach((node) => direct.push(node));
+  if (direct.length > 0 && direct.every((node) => node.isText)) {
+    return { native: true };
+  }
+  if (slice.content.childCount !== 1) return { blocked: true };
+  const paragraph = slice.content.firstChild;
+  if (paragraph.type.name !== "paragraph") return { blocked: true };
+
+  let compatible = true;
+  paragraph.content.forEach((node) => {
+    if (!node.isText) compatible = false;
+  });
+  if (!compatible) return { blocked: true };
+  return { inline: new Slice(Fragment.from(paragraph.content), 0, 0) };
 }
 
 // Strip null-valued bpId/bpType from NON-top-level nodes before the diff.
@@ -565,6 +608,7 @@ class BpPaperCanvas extends HTMLElement {
                     state,
                     parseConstraints(host.getAttribute("data-constraints")),
                   ) &&
+                  !transactionVetoesFigureSingleton(tr, state, host) &&
                   // Gyldendal parity E1: a FIELD canvas carries the field's declared
                   // vocabulary on data-vocabulary (twin of data-constraints). A user
                   // edit that would introduce an out-of-vocabulary node / heading
@@ -820,6 +864,7 @@ class BpPaperCanvas extends HTMLElement {
         // menu is open). When ALL popups are closed every keystroke falls through to
         // TipTap unchanged, so cross-block caret / split / merge are untouched.
         handleKeyDown: (_view, event) => this._onKeyDown(event),
+        handlePaste: (view, event, slice) => this._onPaste(view, event, slice),
         // pdd-t2: the doctrine template-lock veto. Reject any transaction that
         // deletes or moves a locked mandated block (returning false from
         // filterTransaction drops the whole tx). Content edits inside a locked
@@ -832,6 +877,7 @@ class BpPaperCanvas extends HTMLElement {
         // never race the Editor construction.
       },
       onUpdate: () => {
+        this._clearFigureConstraint();
         this._scheduleEmit();
         // P4 mutual-exclusion chain (ported from ../index.js's onUpdate ~174-193):
         // callout shorthand FIRST → wikilink → tag → slash. AT MOST ONE fires per
@@ -1236,7 +1282,54 @@ class BpPaperCanvas extends HTMLElement {
       }
     }
 
+    if (
+      this._editable &&
+      isFigureSingletonCanvas(this) &&
+      event.key === "Enter" &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      this._editor.state.selection.$from.depth === 1 &&
+      ["paragraph", "heading"].includes(
+        this._editor.state.selection.$from.parent.type.name,
+      )
+    ) {
+      event.preventDefault();
+      this._showFigureConstraint();
+      return true;
+    }
+
     return false;
+  }
+
+  _onPaste(view, _event, slice) {
+    if (!this._editable || !isFigureSingletonCanvas(this)) return false;
+    const plan = figurePastePlan(slice);
+    if (plan.native) return false;
+    if (plan.blocked) {
+      this._showFigureConstraint(
+        "A Figure keeps one content block. Paste one paragraph at a time; lists and blocks stay on the clipboard.",
+      );
+      return true;
+    }
+    view.dispatch(view.state.tr.replaceSelection(plan.inline).scrollIntoView());
+    return true;
+  }
+
+  _showFigureConstraint(message = "A Figure keeps one content block. Enter cannot split or remove it.") {
+    let notice = this.querySelector("[data-bp-figure-constraint]");
+    if (!notice) {
+      notice = document.createElement("div");
+      notice.dataset.bpFigureConstraint = "";
+      notice.className = "bp-canvas-constraint-notice";
+      notice.setAttribute("role", "status");
+      this.appendChild(notice);
+    }
+    notice.textContent = message;
+  }
+
+  _clearFigureConstraint() {
+    this.querySelector("[data-bp-figure-constraint]")?.remove();
   }
 
   // The DOMRect of the current caret, used to position the popup at the cursor.
@@ -1793,6 +1886,12 @@ class BpPaperCanvas extends HTMLElement {
   //                   emits the bp-canvas-ops for exactly the user's source-mode edits.
   toggleSourceMode() {
     if (!this._editor || !this._editable) return;
+    if (isFigureSingletonCanvas(this)) {
+      this._showFigureConstraint(
+        "Markdown source is unavailable inside a Figure because it could create extra blocks.",
+      );
+      return;
+    }
     if (this._mode === "rich") this._enterSourceMode();
     else this._exitSourceMode();
   }

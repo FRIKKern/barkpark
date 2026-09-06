@@ -258,7 +258,9 @@ const tocMarkup = `
 // LiveView can paint the Figure child acknowledgement (including the new
 // document revision) before the coordinator consumes the matching push reply.
 // A caption authored in that window belongs after the child write and must
-// advance onto its acknowledged base instead of becoming an external conflict.
+// advance onto its acknowledged base. The Public reader then refetches and
+// emits a source-less echo at that same revision; it is a duplicate, not an
+// external change that can turn the retained caption into a conflict.
 {
   const env = mountedForm(`
     <div id="figure-echo-carrier" data-paper-doc-key="production:paper:validation" data-paper-rev="7">
