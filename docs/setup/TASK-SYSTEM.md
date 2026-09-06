@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: task-system-guide | budget: 4000tok -->
 # The Task System
 
-Barkpark as your AI's task board: agents claim work over HTTP, you steer the queue in Studio, every change broadcasts live. Tasks are plain `type:task` docs — no second store; claims are atomic and fenced.
+Barkpark as your AI's task board: agents claim work over HTTP, you steer the queue in Studio, live. Tasks are plain `type:task` docs — no second store; claims are atomic and fenced.
 
 ## What you get
 
@@ -156,13 +156,13 @@ Everything is a task. The pattern:
 
 ### How to organize tasks (follow these when creating ANY task)
 
-A scattered board is a defect — make every new task fit the structure:
+A scattered board is a defect — make every task fit the structure:
 
 1. **Every task belongs to a goal.** No floating orphans — give related tasks a goal parent (`parent_id`); nest goals under epics for bigger missions.
 2. **Goals are MISSIONS, named as the outcome a human wants** — e.g. *"Sheets reaches Excel parity"* — never after provenance/process (`loop`, `cleanup`, `misc`) or a label.
 3. **Group by ancestry** — tasks sharing a goal nest beneath it; the parent tree is the spine.
 4. **Labels** (`content.labels`): `proj:<mission>` (required), `phase:<goal|design|decision|build|verify>`, `kind:<deferred|low|…>`, plus gates `needs-human`/`decision`/`security`.
-5. **Real work tasks carry `acceptance_criteria`** — 1–3 checkable conditions that define done. **State a CHECK TO RE-RUN, not a predicted state** — "X is in state Y" has a shelf life and nothing re-checks it. Decisions and goals may omit them; a row with none closes `done` only if `close_reason` names the PR + sha or pastes the run. Merge gates need `merge_gate:true` — a `landed` close flips only the flag; wording alone warns.
+5. **Real work tasks carry `acceptance_criteria`** — 1–3 checkable conditions. **State a CHECK TO RE-RUN, not a predicted state** — "X is in state Y" has a shelf life; nothing re-checks it. Name REAL test files: `mix test` refuses a missing path. Decisions/goals may omit them; a row with none closes `done` only if `close_reason` names the PR + sha or the run. Merge gates need `merge_gate:true` — a `landed` close flips only the flag; wording alone warns.
 6. **Blockers are explicit** — `blocks` edges keep a gated task out of "ready"; one waiting on a human carries `needs-human`/`decision`.
 
 ## Workspaces, projects, datasets — experiment without mess
