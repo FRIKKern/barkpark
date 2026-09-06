@@ -367,6 +367,34 @@ settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
 await tick();
 numericForm.remove();
 
+// Numeric configuration has an authored range, not stale stored min/max attrs.
+const rangeForm = window.document.createElement('form');
+rangeForm.className = 'bp-paper-edit-form';
+rangeForm.setAttribute('phx-change', 'paper-edit-block');
+rangeForm.setAttribute('phx-debounce', '0');
+rangeForm.setAttribute('data-test-id', 'paper-field-number-editor');
+rangeForm.innerHTML = '<input name="block_id" value="range-1"><input type="number" name="value" value="12"><input type="number" name="min" value="1"><input type="number" name="max" value="9"><input type="number" name="step" value="1">';
+window.document.querySelector('main').append(rangeForm);
+const rangeValue = rangeForm.querySelector('[name=value]');
+calls.length = 0;
+rangeValue.dispatchEvent(new window.Event('input', {bubbles:true}));
+await tick();
+click();
+await tick();
+assert.deepEqual(calls, [], 'out-of-range draft never reaches server repaint or exits');
+assert.equal(rangeValue.value, '12', 'invalid authored value remains available to correct');
+assert.equal(rangeForm.querySelector('[name=max]').value, '9');
+assert.match(rangeValue.validationMessage, /at most 9/);
+rangeForm.querySelector('[name=max]').value = '15';
+rangeForm.querySelector('[name=max]').dispatchEvent(new window.Event('input', {bubbles:true}));
+await tick();
+assert.deepEqual(calls, ['paper-edit-block'], 'coherent newly authored range can save');
+assert.equal(replies[0].payload.value, '12');
+assert.equal(replies[0].payload.max, '15');
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+rangeForm.remove();
+
 // Typing during a form save must create a later snapshot, not disappear when
 // the earlier acknowledgement arrives or when View is clicked immediately.
 calls.length = 0;

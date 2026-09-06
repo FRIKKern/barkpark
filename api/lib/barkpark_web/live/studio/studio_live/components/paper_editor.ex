@@ -1651,6 +1651,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <form
           id={"field-number-form-" <> @id}
           class="bp-paper-edit-form bp-paper-edit-field"
+          phx-update="ignore"
           phx-change="paper-edit-block"
           phx-submit="paper-edit-block"
           data-test-id="paper-field-number-editor"

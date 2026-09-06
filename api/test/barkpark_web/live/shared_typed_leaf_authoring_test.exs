@@ -66,6 +66,7 @@ defmodule BarkparkWeb.SharedTypedLeafAuthoringTest do
     render_click(public, "paper-toggle-edit", %{})
 
     assert has_element?(public, "#field-number-form-number")
+    assert has_element?(public, ~s(#field-number-form-number[phx-update="ignore"]))
     assert has_element?(public, ~s(#field-number-form-number[phx-change="paper-edit-block"]))
     assert has_element?(public, "#blockquote-form-quote")
     assert has_element?(public, "#equation-form-equation")

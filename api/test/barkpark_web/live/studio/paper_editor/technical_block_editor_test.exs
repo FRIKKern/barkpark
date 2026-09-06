@@ -180,7 +180,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.TechnicalBlockEditorTest do
       block = %{"type" => "code-tabs", "tabs" => tabs}
       [first, second] = tabs
 
-      assert %{"tabs" => [_, _, %{"label" => "", "language" => "", "value" => ""}]} =
+      assert %{"tabs" => [_, _, %{"label" => "Code", "language" => "", "value" => ""}]} =
                TechnicalBlockEditor.build_patch(block, %{
                  "tab-count" => "2",
                  "tab-action" => "add"

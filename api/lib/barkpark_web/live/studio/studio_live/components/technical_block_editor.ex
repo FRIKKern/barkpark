@@ -279,7 +279,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
   end
 
   defp new_note, do: %{"id" => "", "text" => ""}
-  defp new_tab, do: %{"label" => "", "language" => "", "value" => ""}
+  defp new_tab, do: %{"label" => "Code", "language" => "", "value" => ""}
 
   defp collection(block, key) do
     case Map.get(block, key) do

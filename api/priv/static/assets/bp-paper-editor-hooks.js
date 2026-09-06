@@ -31,6 +31,26 @@
     "paper-edit-block",
   ]);
   const paperExitCoordinators = new WeakMap();
+
+  // Validate the currently authored numeric constraints together. Mirroring
+  // stored min/max attributes would reject a coherent new range, while only
+  // validating on the server lets a failed patch repaint away the local draft.
+  function bpPaperValidateAuthoringForm(form) {
+    if (form.getAttribute?.("data-test-id") !== "paper-field-number-editor") return;
+    const fields = Object.fromEntries(["value", "min", "max", "step"].map((name) =>
+      [name, form.querySelector(`[name="${name}"]`)]));
+    Object.values(fields).forEach((field) => field?.setCustomValidity(""));
+    const number = (name) => fields[name]?.value.trim() ? Number(fields[name].value) : null;
+    const value = number("value"), min = number("min"), max = number("max"), step = number("step");
+    if (step != null && step <= 0) fields.step?.setCustomValidity("Step must be greater than zero.");
+    if (min != null && max != null && min > max) {
+      fields.max?.setCustomValidity("Maximum must be at least the minimum.");
+    } else if (value != null && min != null && value < min) {
+      fields.value?.setCustomValidity(`Value must be at least ${min}.`);
+    } else if (value != null && max != null && value > max) {
+      fields.value?.setCustomValidity(`Value must be at most ${max}.`);
+    }
+  }
   const PAPER_HISTORY_POSITION = "__bpPaperHistoryPosition";
 
   function bpPaperOwnedHistoryPosition(state) {
@@ -694,6 +714,7 @@
         if (record.active > 0) return record.pending || Promise.resolve(false);
         driver ||= [...members].find((member) => typeof member.pushEventTo === "function");
         if (!driver || !source.isConnected) return Promise.resolve(false);
+        bpPaperValidateAuthoringForm(source);
         if (source.checkValidity?.() === false) {
           source.reportValidity?.();
           return Promise.resolve(false);
@@ -915,6 +936,11 @@
         }
         event.preventDefault();
         event.stopImmediatePropagation();
+        bpPaperValidateAuthoringForm(form);
+        if (form.checkValidity?.() === false) {
+          form.reportValidity?.();
+          return;
+        }
         const driver = [...members].find((member) =>
           typeof member.pushEventTo === "function" || typeof member.pushEvent === "function",
         );
