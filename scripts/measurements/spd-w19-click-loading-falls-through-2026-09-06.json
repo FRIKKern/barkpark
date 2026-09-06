@@ -2,9 +2,9 @@
   "fixture": "scripts/fixtures/studio-inflight-overlap.html",
   "heex": "api/lib/barkpark_web/layouts/root.html.heex",
   "playwright": "1.59.1",
-  "generated_at": "2026-09-06T17:00:14.457Z",
-  "head_sha": "9f8943814f9a0f3eeb6bbb44bb67da6066527a4a",
-  "origin_main_sha": "9546c0b3043b2524468b07f40f0eb6f00be79043",
+  "generated_at": "2026-09-06T17:24:40.793Z",
+  "head_sha": "21f4d428fb2b8bc697588e8f9d6d83a896d46b52",
+  "origin_main_sha": "3d238fdd818651e0bbb862f6f7a1855fcbe1bb29",
   "runs": [
     {
       "ref": "origin/main",
