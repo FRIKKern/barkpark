@@ -25,10 +25,22 @@
 # so a Go failure cannot abort the restart — the past half-deploy incident
 # stays fixed).
 #
+# THE ONE THING THAT DOES FOLLOW THE RESTART is the health probe, and it is
+# allowed to because it makes no claim it has not measured. `systemctl restart`
+# returning 0 means systemd ACCEPTED the unit — never that the app serves; the
+# old "Done. Service restarted." descended from nothing but that acceptance.
+# The probe is the shape already proven in deploy/instance-deploy.sh (a bounded
+# `curl -w %{http_code}` == 200 loop with a typed refusal). In the endpoint flow
+# the cgroup SIGTERM may kill the probe mid-loop — that prints NO receipt at
+# all, which is silence, not a false claim, and is the correct failure mode.
+#
 # Exit codes: 0 deployed (or service simply not running) · 1 build failed
 # (api/_build/prod untouched, still restartable, NO restart) · 13 migrate
 # failed (same guarantee: swap aborted, old code keeps serving, NO restart —
-# instance-deploy.sh's exit-13 convention) · 3 slot box.
+# instance-deploy.sh's exit-13 convention) · 15 RESTART UNVERIFIED (the swap
+# and the migrate SUCCEEDED and the new build IS installed; systemd accepted
+# the restart and the app never answered 200 — do not report this as a build
+# failure) · 3 slot box.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -40,7 +52,11 @@ if [ -d "$REPO/.slots" ]; then
 fi
 
 # Source ASDF (Hetzner needs the shims) + .env, exactly like the hook did.
-export PATH="/root/.asdf/bin:/root/.asdf/shims:/usr/local/go/bin:$PATH"
+# The prefix is overridable ONLY so the hermetic harness
+# (scripts/deploy-receipt-failure.test.sh) can keep a real Go/Elixir toolchain
+# from reaching around its stub PATH. Prod never sets it — the default is the
+# byte-identical prod prefix.
+export PATH="${BP_DEPLOY_PATH_PREFIX:-/root/.asdf/bin:/root/.asdf/shims:/usr/local/go/bin}:$PATH"
 if [ -f /root/.asdf/asdf.sh ]; then . /root/.asdf/asdf.sh; fi
 if [ -f .env ]; then set -a; source .env; set +a; fi
 export MIX_ENV=prod
@@ -188,10 +204,35 @@ fi
 # verified" — post-restart death is exactly what a consumer of this file
 # detects (applied record + box not serving the recorded sha).
 write_status restart applied
+
+# The probe target and its bound. Defaults are the prod values; the harness
+# shrinks the loop so the refusal arm is provable in ~0s.
+BP_HEALTH_URL="${BP_HEALTH_URL:-http://localhost:4000/api/schemas}"
+BP_HEALTH_ATTEMPTS="${BP_HEALTH_ATTEMPTS:-40}"
+BP_HEALTH_SLEEP="${BP_HEALTH_SLEEP:-3}"
+
 if systemctl is-active barkpark > /dev/null 2>&1; then
   echo "[deploy-rebuild] Restarting service..."
   sudo systemctl restart barkpark
-  echo "[deploy-rebuild] Done. Service restarted."
+  # Ported from deploy/instance-deploy.sh's post-flip probe: bounded
+  # http_code==200 loop, ok flag, typed refusal. Until this loop answers 200
+  # NOTHING here may say the service is up.
+  echo "[deploy-rebuild] Restarted — probing $BP_HEALTH_URL for HTTP 200 (up to $BP_HEALTH_ATTEMPTS attempts)..."
+  probe_code=000
+  probe_i=0
+  while [ "$probe_i" -lt "$BP_HEALTH_ATTEMPTS" ]; do
+    probe_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$BP_HEALTH_URL" 2>/dev/null || echo 000)"
+    if [ "$probe_code" = "200" ]; then break; fi
+    probe_i=$((probe_i + 1))
+    sleep "$BP_HEALTH_SLEEP"
+  done
+  if [ "$probe_code" = "200" ]; then
+    echo "[deploy-rebuild] Done. Service restarted and answering ($BP_HEALTH_URL -> HTTP 200)."
+  else
+    write_status restart unverified
+    echo "[deploy-rebuild] RESTART UNVERIFIED — systemd accepted the restart but $BP_HEALTH_URL never answered 200 in $BP_HEALTH_ATTEMPTS attempts (last: '$probe_code'). The new build IS installed; the app is NOT known to be serving. Check: make logs"
+    exit 15
+  fi
 else
   echo "[deploy-rebuild] Service not running. Start with: systemctl start barkpark"
 fi

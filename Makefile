@@ -3,6 +3,12 @@
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
 
+# `make deploy`'s own post-rebuild liveness poll. Defaults are the prod values;
+# scripts/deploy-receipt-failure.test.sh shrinks them so the refusal arm is
+# provable offline in ~0s.
+BP_DEPLOY_POLL_ATTEMPTS ?= 20
+BP_DEPLOY_POLL_SLEEP ?= 2
+
 # ── Server operations (run on Hetzner VPS) ───────────────────────────────────
 
 rebuild: ## Rebuild Phoenix + TUI after code changes, restart service
@@ -251,11 +257,56 @@ deploy: ## Deploy: pull main — the .githooks/post-merge hook does the clean re
 	@# bin/barkpark launcher script (fixed — the TUI now builds to bin/barkpark-tui —
 	@# but a server that clobbered it before the fix still needs the restore). The
 	@# hook regenerates go.sum, so discarding the server-local versions is safe.
+	@#
+	@# THE RECEIPT DESCENDS FROM THE HOOK'S OWN OUTCOME RECORD, not from hope.
+	@# `git pull` exits 0 whatever the hook does, so this recipe used to assert
+	@# "cleaned _build/prod, recompiled, and restarted" over three states it had
+	@# never observed — and printed BYTE-IDENTICALLY when the hook no-opped on a
+	@# laptop, when the rebuild failed, and when everything worked. The hook now
+	@# writes one word to $$(git rev-parse --git-dir)/barkpark-deploy-outcome; we
+	@# delete it FIRST so "missing" can only mean "the hook did not run", and every
+	@# outcome gets its own receipt and its own exit code. `@sleep 8` + a
+	@# `|| echo ">> Warming up"` curl is gone: that curl was TAKEN, FAILED, and
+	@# laundered into a reassurance.
 	-@git checkout -- bin/barkpark bin/barkpark-pg go.sum 2>/dev/null
+	@rm -f "$$(git rev-parse --git-dir 2>/dev/null || echo .git)/barkpark-deploy-outcome"
 	git pull
-	@echo ">> Pulled. .githooks/post-merge cleaned _build/prod, recompiled, and restarted."
-	@sleep 8
-	@curl -s --max-time 5 http://localhost:4000/api/schemas > /dev/null && echo ">> API is live!" || echo ">> Warming up — check: make logs"
+	@set -e; \
+	outfile="$$(git rev-parse --git-dir 2>/dev/null || echo .git)/barkpark-deploy-outcome"; \
+	if [ ! -f "$$outfile" ]; then \
+	  echo ">> Pulled, but the post-merge hook recorded NO outcome — it never ran (is core.hooksPath=.githooks? run: make hooks). NOTHING was cleaned, recompiled or restarted."; \
+	  exit 1; \
+	fi; \
+	outcome="$$(cat "$$outfile" 2>/dev/null | head -1)"; \
+	case "$$outcome" in \
+	  rebuilt) ;; \
+	  unverified) \
+	    echo ">> Pulled and REBUILT, but the deploy is NOT VERIFIED — systemd accepted the restart and the app never answered 200. The new build IS installed; it is not known to be serving. Check: make logs"; \
+	    exit 1 ;; \
+	  failed:*) \
+	    echo ">> Pulled, but the post-merge REBUILD FAILED ($${outcome#failed:}) — api/_build/prod is untouched and the OLD build is still serving. Nothing was restarted. Re-run: make rebuild"; \
+	    exit 1 ;; \
+	  skipped:*) \
+	    echo ">> Pulled. NO rebuild was attempted here — the post-merge hook skipped it ($${outcome#skipped:}). Nothing was cleaned, recompiled or restarted. For a local refresh run: make update"; \
+	    exit 1 ;; \
+	  *) \
+	    echo ">> Pulled, but the outcome record is unreadable ('$$outcome'). Refusing to claim a deploy."; \
+	    exit 1 ;; \
+	esac; \
+	echo ">> Pulled. The post-merge hook cleaned _build/prod, recompiled and restarted (recorded outcome: $$outcome)."; \
+	code=000; i=0; \
+	while [ "$$i" -lt "$(BP_DEPLOY_POLL_ATTEMPTS)" ]; do \
+	  code="$$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:4000/api/schemas 2>/dev/null || echo 000)"; \
+	  if [ "$$code" = "200" ]; then break; fi; \
+	  i=$$((i + 1)); \
+	  sleep "$(BP_DEPLOY_POLL_SLEEP)"; \
+	done; \
+	if [ "$$code" = "200" ]; then \
+	  echo ">> API is live (/api/schemas -> HTTP 200)."; \
+	else \
+	  echo ">> DEPLOY UNVERIFIED — the rebuild reported success but http://localhost:4000/api/schemas never answered 200 in $(BP_DEPLOY_POLL_ATTEMPTS) attempts (last: '$$code'). Check: make logs"; \
+	  exit 1; \
+	fi
 
 # ── Domain cutover (prod env-only change, no code redeploy) ──────────────────
 # Safely update PHX_HOST/PHX_SCHEME on the running prod server and restart.
