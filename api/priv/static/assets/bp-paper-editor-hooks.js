@@ -32,6 +32,12 @@
   ]);
   const PAPER_POSITIONAL_COLLECTION_PARAM =
     /^(note|tab|param|ref|bar|toc|criterion)-(?:count|action|\d+-)/;
+  const PAPER_TRANSIENT_SAVE_STATUSES = new Set([
+    "", "Auto-saved", "✓ Auto-saved", "Saving…",
+    "Unsaved changes — fix invalid fields.",
+    "Save paused — review required.",
+    "Save paused — retry required.",
+  ]);
   const paperExitCoordinators = new WeakMap();
 
   // Collection forms use positional field names. After a reorder LiveView can
@@ -383,6 +389,31 @@
         main.querySelector("[data-paper-doc-key]");
       let documentKey = initialCarrier?.dataset.paperDocKey || null;
       let confirmedRevision = bpPaperRevisionFrom(initialCarrier);
+
+      const setSaveStatus = (text, force = false) => {
+        const status = main.querySelector(
+          '[data-test-id="bp-paper-footer-save"][role="status"]',
+        );
+        if (status && (force || PAPER_TRANSIENT_SAVE_STATUSES.has(status.textContent.trim()))) {
+          status.textContent = text;
+        }
+      };
+
+      const renderSaveStatus = (acknowledged = false) => {
+        const invalidFallback = [...sources].some(([source, record]) =>
+          record.dirty && source.isConnected &&
+          source.matches?.(".bp-paper-edit-form[phx-change]") &&
+          source.checkValidity?.() === false);
+        if (conflict) return setSaveStatus("Save paused — review required.");
+        if (invalidFallback) {
+          return setSaveStatus("Unsaved changes — fix invalid fields.");
+        }
+        if (mutationPaused) return setSaveStatus("Save paused — retry required.");
+        if (coordinator.hasUnsaved() || mutationActive || mutationQueue.length) {
+          return setSaveStatus("Saving…");
+        }
+        setSaveStatus(acknowledged ? "✓ Auto-saved" : "", acknowledged);
+      };
 
       const identityFor = (source) => {
         const carrier = source?.closest?.("[data-paper-doc-key]");
@@ -899,6 +930,7 @@
               }
             }
           }
+          renderSaveStatus(saved);
         });
       };
 
@@ -922,6 +954,7 @@
           // Native submit validates before dispatching a submit event. Clear
           // stale errors as the author corrects inputs, not after debounce.
           bpPaperValidateAuthoringForm(source);
+          renderSaveStatus();
           // Own the legacy form's debounce so the actual autosave reply clears
           // the exit guard. Let target/form listeners run, but do not also let
           // LiveView's window-level phx-change binding enqueue a duplicate.
@@ -955,6 +988,7 @@
             },
           });
         record.mutationEntry = mutation.entry || record.mutationEntry;
+        renderSaveStatus();
         let snapshotSaved = false;
         const pending = mutation.promise
           .then((saved) => {

@@ -406,12 +406,17 @@ tocForm.setAttribute('data-test-id', 'paper-toc-editor');
 tocForm.innerHTML = '<input name="block_id" value="toc-1"><input name="depth" value="2"><input name="toc-0-level" value="3">';
 window.document.querySelector('main').append(tocForm);
 const tocLevel = tocForm.querySelector('[name="toc-0-level"]');
+const footerSaveStatus = window.document.querySelector('[data-test-id="bp-paper-footer-save"]');
+footerSaveStatus.textContent = '✓ Auto-saved';
 tocLevel.value = 'not-a-number';
 calls.length = 0;
 tocLevel.dispatchEvent(new window.Event('input', {bubbles:true}));
 click();
 await tick();
 assert.deepEqual(calls, [], 'invalid TOC level is blocked before debounced autosave');
+assert.doesNotMatch(footerSaveStatus.textContent, /Auto-saved/,
+  'a newly invalid local draft cannot leave the previous saved claim visible');
+assert.match(footerSaveStatus.textContent, /unsaved/i);
 assert.equal(tocLevel.value, 'not-a-number', 'invalid TOC draft remains available to correct');
 assert.deepEqual(calls, [], 'immediate View cannot send or discard an invalid TOC draft');
 assert.equal(tocLevel.value, 'not-a-number');
@@ -419,11 +424,64 @@ assert.match(tocLevel.validationMessage, /positive whole number/);
 tocLevel.value = '4';
 tocLevel.dispatchEvent(new window.Event('input', {bubbles:true}));
 assert.equal(tocLevel.validationMessage, '', 'correcting a TOC number clears custom validity immediately');
+assert.match(footerSaveStatus.textContent, /saving/i,
+  'a corrected valid draft reports its pending save truthfully');
 await tick();
 assert.deepEqual(calls, ['paper-block-autosave']);
 assert.equal(replies[0].payload['toc-0-level'], '4');
 settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
 await tick();
+assert.match(footerSaveStatus.textContent, /Auto-saved/,
+  'the matching acknowledgement restores the saved status');
+
+// A successful older receipt can repaint the server's saved label while a
+// newer local draft exists. Derive the footer from all coordinator state after
+// the receipt instead of trusting that paint.
+calls.length = 0;
+tocLevel.value = '5';
+tocLevel.dispatchEvent(new window.Event('input', {bubbles:true}));
+await tick();
+assert.deepEqual(calls, ['paper-block-autosave']);
+tocLevel.value = 'not-a-number';
+tocLevel.dispatchEvent(new window.Event('input', {bubbles:true}));
+footerSaveStatus.textContent = '✓ Auto-saved';
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+assert.match(footerSaveStatus.textContent, /unsaved/i,
+  'an older success repaint cannot mask a newer invalid draft');
+assert.doesNotMatch(footerSaveStatus.textContent, /Auto-saved/);
+tocLevel.value = '6';
+tocLevel.dispatchEvent(new window.Event('input', {bubbles:true}));
+await tick();
+assert.deepEqual(calls, ['paper-block-autosave', 'paper-block-autosave']);
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+assert.match(footerSaveStatus.textContent, /Auto-saved/);
+
+// A receipt for one fallback form is not a global saved claim while another
+// form remains queued behind it.
+const secondTocForm = tocForm.cloneNode(true);
+secondTocForm.querySelector('[name="block_id"]').value = 'toc-2';
+window.document.querySelector('main').append(secondTocForm);
+const secondTocLevel = secondTocForm.querySelector('[name="toc-0-level"]');
+calls.length = 0;
+tocLevel.value = '7';
+tocLevel.dispatchEvent(new window.Event('input', {bubbles:true}));
+await tick();
+secondTocLevel.value = '8';
+secondTocLevel.dispatchEvent(new window.Event('input', {bubbles:true}));
+await tick();
+assert.deepEqual(calls, ['paper-block-autosave'], 'the second form queues behind the active save');
+footerSaveStatus.textContent = '✓ Auto-saved';
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+assert.deepEqual(calls, ['paper-block-autosave', 'paper-block-autosave']);
+assert.match(footerSaveStatus.textContent, /saving/i,
+  'the first receipt cannot claim all forms are saved while a second save is active');
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+assert.match(footerSaveStatus.textContent, /Auto-saved/);
+secondTocForm.remove();
 tocForm.remove();
 
 const criteriaForm = window.document.createElement('form');
@@ -541,13 +599,19 @@ fallbackText.value = 'Fallback after disconnect';
 fallbackText.dispatchEvent(new window.Event('input', {bubbles:true}));
 calls.length = 0;
 click();
+footerSaveStatus.textContent = 'Save failed';
 replies.shift().reject(new Error('form disconnected'));
 await tick();
 assert.deepEqual(calls, ['paper-block-autosave'], 'failed fallback form save keeps Edit open');
+assert.equal(footerSaveStatus.textContent, 'Save failed',
+  'a generic failed receipt preserves the authoritative server failure');
 assert.equal(toggle.el.disabled, false);
 calls.length = 0;
+footerSaveStatus.textContent = 'Read-only';
 click();
 assert.deepEqual(calls, ['paper-block-autosave'], 'the next View retries the failed fallback form');
+assert.equal(footerSaveStatus.textContent, 'Read-only',
+  'a retry attempt cannot replace an authoritative read-only status');
 assert.equal(replies[0].payload.text, 'Fallback after disconnect');
 settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
 await tick();
@@ -575,9 +639,49 @@ assert.equal(bridge._opsQueue[0].requestId, expiredRequestId);
 assert.equal(toggle.el.disabled, false);
 assert.equal(saveErrors.at(-1).code, 'paper_ops_retry_expired');
 assert.match(window.document.querySelector('[data-test-id="bp-paper-footer-save"]').textContent, /one hour/i);
+const expiryWarning = footerSaveStatus.textContent;
+const terminalWarningForm = window.document.createElement('form');
+terminalWarningForm.className = 'bp-paper-edit-form';
+terminalWarningForm.setAttribute('phx-change', 'paper-block-autosave');
+terminalWarningForm.setAttribute('phx-debounce', '0');
+terminalWarningForm.innerHTML = '<input name="block_id" value="terminal-warning"><input name="text" value="before">';
+window.document.querySelector('main').append(terminalWarningForm);
+terminalWarningForm.querySelector('[name="text"]').value = 'after';
+terminalWarningForm.querySelector('[name="text"]').dispatchEvent(
+  new window.Event('input', {bubbles:true}));
+assert.equal(footerSaveStatus.textContent, expiryWarning,
+  'fallback input cannot replace the terminal copy-before-reload warning');
 
 bridge.destroyed();
 toggle.destroyed();
+
+// Conflict/paused state outranks a newly valid fallback input. Isolate it from
+// the terminal warning above so each status ownership rule is proven directly.
+footerSaveStatus.textContent = '';
+const conflictWrapper = window.document.createElement('div');
+conflictWrapper.setAttribute('phx-hook', 'BarkparkPaperCanvas');
+conflictWrapper.innerHTML = '<bp-paper-canvas></bp-paper-canvas>';
+window.document.querySelector('main').append(conflictWrapper);
+const conflictBridge = {...hooks.BarkparkPaperCanvas, el:conflictWrapper,
+  handleEvent: () => {}, pushEvent: () => Promise.resolve({})};
+conflictBridge.mounted();
+const conflictedForm = window.document.createElement('form');
+conflictedForm.className = 'bp-paper-edit-form';
+conflictedForm.setAttribute('phx-change', 'paper-block-autosave');
+conflictedForm.setAttribute('phx-debounce', '0');
+conflictedForm.innerHTML = '<input name="block_id" value="conflicted"><input name="text" value="before">';
+window.document.querySelector('main').append(conflictedForm);
+conflictBridge._bpPaperExitCoordinator._setConflict(
+  {conflict:true, current_rev:99}, conflictedForm, 'production:paper:probe');
+const conflictedInput = conflictedForm.querySelector('[name="text"]');
+conflictedInput.value = 'after';
+conflictedInput.dispatchEvent(new window.Event('input', {bubbles:true}));
+assert.match(footerSaveStatus.textContent, /paused/i,
+  'valid input during conflict preserves the paused status');
+assert.doesNotMatch(footerSaveStatus.textContent, /saving/i);
+conflictBridge.destroyed();
+conflictWrapper.remove();
+conflictedForm.remove();
 
 // Plain-HTTP readers may expose getRandomValues without randomUUID. Build a
 // standards-shaped UUIDv4 from that cryptographic source and save normally.
@@ -633,6 +737,18 @@ noUuidWrapper.dispatchEvent(new window.CustomEvent('bp-canvas-ops', {
 assert.deepEqual(noUuidCalls, [], 'a batch without a secure request ID is never sent');
 assert.equal(noUuidBridge._opsQueue.length, 1, 'the unsent batch remains recoverable in the mounted editor');
 assert.match(window.document.querySelector('[data-test-id="bp-paper-footer-save"]').textContent, /edits are still here/i);
+const unretryableWarning = footerSaveStatus.textContent;
+const unretryableForm = window.document.createElement('form');
+unretryableForm.className = 'bp-paper-edit-form';
+unretryableForm.setAttribute('phx-change', 'paper-block-autosave');
+unretryableForm.setAttribute('phx-debounce', '0');
+unretryableForm.innerHTML = '<input name="block_id" value="unretryable"><input name="text" value="before">';
+window.document.querySelector('main').append(unretryableForm);
+unretryableForm.querySelector('[name="text"]').value = 'after';
+unretryableForm.querySelector('[name="text"]').dispatchEvent(
+  new window.Event('input', {bubbles:true}));
+assert.equal(footerSaveStatus.textContent, unretryableWarning,
+  'fallback input cannot replace an unretryable-operations warning');
 noUuidBridge.destroyed();
 dom.window.close();
 console.log('PASS reader canvas: late paint, flush-before-view, save reply, refusal, in-flight save, teardown');
