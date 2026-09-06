@@ -803,6 +803,38 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert body["error"]["hint"] =~ "Retry"
     end
 
+    test "503 storage_unavailable when a tar member cannot be written — a DISTINCT reason from database_unavailable (PDS-D209)",
+         %{conn: conn} do
+      raw_admin = "ws-export-enospc-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Full Disk WS"}, admin_token(raw_admin))
+
+      # The STORAGE-side fault seam (Archive.tar_member_source/1), mirroring the
+      # engine's :export_copy_fault. It points `:erl_tar.add/4` at a path that
+      # does not exist, so erl_tar RETURNS {:error, {path, :enoent}} — the same
+      # RETURN shape a real ENOSPC produces on a full disk. A seam that raised
+      # instead would stay green over the `:ok = :erl_tar.add(…)` match this
+      # slice deletes, which is the whole defect.
+      Application.put_env(:barkpark, :export_tar_fault, "/nonexistent/bp-export-enospc-probe")
+      on_exit(fn -> Application.delete_env(:barkpark, :export_tar_fault) end)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/#{target.slug}/export")
+
+      assert resp.status == 503
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "export_transport_failed"
+      assert body["error"]["reason"] == "storage_unavailable"
+      # The point of the slice: the storage half is TOLD APART from the DB half.
+      refute body["error"]["reason"] == "database_unavailable"
+      assert body["error"]["message"] != ""
+      assert body["error"]["hint"] =~ "Retry"
+    end
+
     # ── THE 404 FOLD (gfr-s2-export-error-folded-into-404) ────────────────
     # export/2 used to end in `{:error, _} -> {:error, :not_found}`, comment and
     # all: "fold any error into 404 rather than leak an engine tuple". So an

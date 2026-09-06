@@ -260,7 +260,25 @@ defmodule BarkparkWeb.WorkspaceController do
   `application/x-tar`; there is no Accept negotiation on this route.
 
   A COPY that dies mid-dump answers 503 `export_transport_failed` + a retry hint (PDS-D43),
-  never the old bare 500 `internal_error / unknown error`.
+  never the old bare 500 `internal_error / unknown error`. The envelope's
+  `reason` names WHICH half failed, because they are different retries:
+
+    * `database_unavailable` — the DB link dropped or the COPY was cancelled
+      (`DBConnection.ConnectionError`, or a `Postgrex.Error` narrowed to
+      `:query_canceled`; which of the two a timeout produces is a measured
+      race, so nothing pins it). Retrying the same bundle can succeed.
+    * `storage_unavailable` (PDS-D209) — the box could not WRITE the bundle:
+      a spill, a tar member or the free-space preflight refused. Retrying the
+      same bundle will fail the same way; narrow it or free disk. Raised as
+      the engine's typed `WorkspaceBundle.BundleIoError`, because `:erl_tar`
+      RETURNS `{:error, :enospc}` rather than raising and a real ENOSPC used
+      to reach here as a `MatchError` — the exact bare 500 this docstring
+      claimed to have eliminated.
+
+  The free-space preflight runs inside `export_to_file/2`, BEFORE the first
+  spill byte and therefore before `send_file/3`. That ordering is the whole
+  point: once `send_file/3` has put 200 + Content-Length on the wire no 503
+  envelope is producible at all, and a mid-send failure can only truncate.
 
   Any OTHER engine error answers a logged 500 `internal_error`, never 404. A
   404 on this route means the workspace is genuinely absent — an unknown slug,
@@ -409,6 +427,41 @@ defmodule BarkparkWeb.WorkspaceController do
     # engine bug would turn every future export defect into a polite "retry".
     e in DBConnection.ConnectionError ->
       {:error, {:export_failed, "database_unavailable", Exception.message(e)}}
+
+    # PDS-D209, THE STORAGE HALF. `database_unavailable` and this are DIFFERENT
+    # RETRIES and a caller that cannot tell them apart cannot act: one says
+    # "try again, the link dropped", the other says "the box is out of disk —
+    # retrying the same bundle will fail the same way; narrow it or free space".
+    # Same 503 envelope, distinct `reason`.
+    #
+    # Typed on the engine's own `BundleIoError`, NOT on `File.Error` and NOT a
+    # bare `rescue e ->`: the dominant real failure is not a File.Error at all
+    # (`:erl_tar` RETURNS `{:error, :enospc}`), and a rescue wide enough to
+    # catch File.Error is wide enough to swallow an engine bug — the exact
+    # narrowness the comment above says is deliberate. The engine raises this
+    # type ONLY at IO sites and at the free-space preflight.
+    e in WorkspaceBundle.BundleIoError ->
+      {:error, {:export_failed, "storage_unavailable", Exception.message(e)}}
+
+    # A COPY cancelled by a statement timeout is a MEASURED RACE between
+    # Postgres's cancel and the pool's kill: the same configuration produced
+    # `DBConnection.ConnectionError` (rescued above) on some runs and
+    # `Postgrex.Error{postgres: %{code: :query_canceled}}` on others, and the
+    # second escaped to a bare 500. Both are the same event to a caller, so
+    # both answer `database_unavailable`. NARROWED to `:query_canceled` inside
+    # the clause — every other Postgrex.Error is a real engine fault and is
+    # re-raised with its original stacktrace, so it still crashes loudly.
+    #
+    # No test pins WHICH class a timeout produces; such a test would flake by
+    # construction.
+    e in Postgrex.Error ->
+      case e do
+        %Postgrex.Error{postgres: %{code: :query_canceled}} ->
+          {:error, {:export_failed, "database_unavailable", Exception.message(e)}}
+
+        _other ->
+          reraise e, __STACKTRACE__
+      end
   end
 
   # The filename names the grain the caller actually asked for, so two pulls of
