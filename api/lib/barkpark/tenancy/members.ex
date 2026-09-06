@@ -90,29 +90,74 @@ defmodule Barkpark.Tenancy.Members do
   to clean it up, and silently hiding it would make the roster lie about who
   can reach the workspace.
 
-  Ordered owners first, then admins, then members, then alphabetically by
-  identity — the order an administrator reads.
+  Ordered owners first, then admins, then members, then custom roles — the
+  order an administrator reads — and within a role band by `inserted_at`, then
+  `id`. That ORDER IS TOTAL AND COMPUTED IN THE DATABASE, which is what makes
+  `:limit`/`:offset` paging safe: a page boundary lands in the same place on
+  every request, so page 2 neither repeats nor skips a row from page 1. The
+  secondary key used to be the identity, downcased — an Elixir-side sort over
+  values that live in two OTHER tables (users, api_tokens), so it could only
+  ever be applied AFTER loading the whole roster. Keeping it would have meant
+  keeping the unbounded read this function exists to bound.
+
+  `opts`: `:limit` (a page size; no limit means every row, which is what the
+  in-process callers that are not the HTTP surface still want) and `:offset`.
+  Pair it with `count_members/1` for the grand total.
   """
-  @spec list_members(binary()) :: [member_row()]
-  def list_members(workspace_id) when is_binary(workspace_id) do
+  @spec list_members(binary(), keyword()) :: [member_row()]
+  def list_members(workspace_id, opts \\ [])
+
+  def list_members(workspace_id, opts) when is_binary(workspace_id) and is_list(opts) do
     case Repo.uuid_or_nil(workspace_id) do
       nil ->
         []
 
       uuid ->
-        memberships =
-          Repo.all(from(m in Membership, where: m.workspace_id == ^uuid))
+        memberships = uuid |> roster_query() |> paged(opts) |> Repo.all()
 
         users = identities(memberships, "user")
         tokens = identities(memberships, "api_token")
 
-        memberships
-        |> Enum.map(&decorate(&1, users, tokens))
-        |> Enum.sort_by(&{role_rank(&1.role), String.downcase(&1.identity || "~")})
+        Enum.map(memberships, &decorate(&1, users, tokens))
     end
   end
 
-  def list_members(_), do: []
+  def list_members(_, _), do: []
+
+  @doc """
+  How many seats the workspace has — the grand total behind a `list_members/2`
+  page, so a client can tell a short page from the last one.
+  """
+  @spec count_members(binary()) :: non_neg_integer()
+  def count_members(workspace_id) when is_binary(workspace_id) do
+    case Repo.uuid_or_nil(workspace_id) do
+      nil -> 0
+      uuid -> Repo.aggregate(from(m in Membership, where: m.workspace_id == ^uuid), :count)
+    end
+  end
+
+  def count_members(_), do: 0
+
+  # Owners, then admins, then members, then custom roles — the ranking the
+  # Elixir-side `role_rank/1` used to apply, now expressed in SQL so it
+  # survives a LIMIT instead of needing the whole roster — tie-broken by
+  # inserted_at
+  # and then the row id — which is unique, so the order is TOTAL. A partial
+  # order here would make offset paging drop and duplicate rows silently.
+  defp roster_query(workspace_uuid) do
+    from(m in Membership,
+      where: m.workspace_id == ^workspace_uuid,
+      order_by: [
+        asc:
+          fragment(
+            "CASE ? WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'member' THEN 2 ELSE 3 END",
+            m.role
+          ),
+        asc: m.inserted_at,
+        asc: m.id
+      ]
+    )
+  end
 
   @doc """
   Seat a HUMAN in the workspace by e-mail.
@@ -253,37 +298,86 @@ defmodule Barkpark.Tenancy.Members do
   the row carries id, label, permissions, kind and lifecycle stamps only.
   """
   @spec list_workspace_tokens(binary()) :: [map()]
-  def list_workspace_tokens(workspace_id) when is_binary(workspace_id) do
+  def list_workspace_tokens(workspace_id, opts \\ [])
+
+  def list_workspace_tokens(workspace_id, opts) when is_binary(workspace_id) and is_list(opts) do
     case Repo.uuid_or_nil(workspace_id) do
       nil ->
         []
 
       uuid ->
         Repo.all(
-          from(t in ApiToken,
-            join: m in Membership,
-            on: m.principal_id == t.id and m.principal_type == "api_token",
-            where: m.workspace_id == ^uuid,
-            order_by: [desc: t.inserted_at],
-            select: %{
-              id: t.id,
-              label: t.label,
-              name: t.name,
-              kind: t.kind,
-              permissions: t.permissions,
-              dataset: t.dataset,
-              role: m.role,
-              revoked_at: t.revoked_at,
-              expires_at: t.expires_at,
-              last_used_at: t.last_used_at,
-              inserted_at: t.inserted_at
-            }
+          paged(
+            from(t in ApiToken,
+              join: m in Membership,
+              on: m.principal_id == t.id and m.principal_type == "api_token",
+              where: m.workspace_id == ^uuid,
+              # `desc: t.inserted_at` ALONE is a partial order — two tokens
+              # minted in the same microsecond can swap places between the two
+              # requests that read page 1 and page 2, which silently drops one
+              # and repeats the other. `asc: t.id` makes it total.
+              order_by: [desc: t.inserted_at, asc: t.id],
+              select: %{
+                id: t.id,
+                label: t.label,
+                name: t.name,
+                kind: t.kind,
+                permissions: t.permissions,
+                dataset: t.dataset,
+                role: m.role,
+                revoked_at: t.revoked_at,
+                expires_at: t.expires_at,
+                last_used_at: t.last_used_at,
+                inserted_at: t.inserted_at
+              }
+            ),
+            opts
           )
         )
     end
   end
 
-  def list_workspace_tokens(_), do: []
+  def list_workspace_tokens(_, _), do: []
+
+  @doc """
+  How many tokens hold a seat here — the grand total behind a
+  `list_workspace_tokens/2` page.
+  """
+  @spec count_workspace_tokens(binary()) :: non_neg_integer()
+  def count_workspace_tokens(workspace_id) when is_binary(workspace_id) do
+    case Repo.uuid_or_nil(workspace_id) do
+      nil ->
+        0
+
+      uuid ->
+        Repo.aggregate(
+          from(t in ApiToken,
+            join: m in Membership,
+            on: m.principal_id == t.id and m.principal_type == "api_token",
+            where: m.workspace_id == ^uuid
+          ),
+          :count
+        )
+    end
+  end
+
+  def count_workspace_tokens(_), do: 0
+
+  # A page window applied IN THE DATABASE. `:limit` absent means "every row" —
+  # the in-process callers keep the old whole-list behaviour, while the HTTP
+  # surface always passes one.
+  defp paged(query, opts) do
+    query =
+      case Keyword.get(opts, :limit) do
+        limit when is_integer(limit) and limit > 0 -> from(q in query, limit: ^limit)
+        _ -> query
+      end
+
+    case Keyword.get(opts, :offset) do
+      offset when is_integer(offset) and offset > 0 -> from(q in query, offset: ^offset)
+      _ -> query
+    end
+  end
 
   @doc """
   True when the token holds a seat in this workspace.
@@ -406,11 +500,6 @@ defmodule Barkpark.Tenancy.Members do
       inserted_at: m.inserted_at
     }
   end
-
-  defp role_rank("owner"), do: 0
-  defp role_rank("admin"), do: 1
-  defp role_rank("member"), do: 2
-  defp role_rank(_custom), do: 3
 
   defp normalize_email(email) do
     case String.trim(email) do

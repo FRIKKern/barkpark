@@ -15,6 +15,15 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
   the published row ungated. The PRESERVATION tests are green on origin/main and
   must STAY green — an unpaired draft must keep its own edges, or the fix would
   make a real blocker vanish instead of moving it.
+
+  ENDPOINT SHAPE (task-8f9d3ea8926f387f). The tests hand `Tasks.add_dep/3` the
+  `%Document{}` structs, exactly as the one production writer
+  (`TasksController.add_edge/2`) does after its scoped pre-flight, because the
+  twin lookup derives its scope from the struct and never reads an endpoint
+  back by primary key (a by-PK `Repo.get(Document, id)` carries no tenant
+  clause — `scripts/tenant-scope-check.sh`). A bare uuid is stored as given;
+  the "endpoint shape" block pins both halves of that contract and the
+  workspace axis of the twin fence.
   """
 
   use Barkpark.DataCase, async: false
@@ -119,7 +128,7 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
 
       # The caller names the DRAFT twin — which is what a client holding a
       # drafts.<id> uuid does today.
-      assert {:ok, %Edge{}} = Tasks.add_dep(dependent.id, draft.id, :blocks)
+      assert {:ok, %Edge{}} = Tasks.add_dep(dependent, draft, :blocks)
 
       assert [{_from, to}] = edge_endpoints(dependent.id)
 
@@ -135,7 +144,7 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
       {draft, published} = mk_twins!(scope, slug)
       blocker = mk_draft!(scope, uniq("blocker"))
 
-      assert {:ok, %Edge{}} = Tasks.add_dep(draft.id, blocker.id, :blocks)
+      assert {:ok, %Edge{}} = Tasks.add_dep(draft, blocker, :blocks)
 
       # `from_id` is the row the ready query correlates on
       # (`e.from_id == parent_as(:doc).id`), so a draft-bound FROM endpoint
@@ -154,7 +163,7 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
       draft = mk_draft!(scope, uniq("lonely"))
       dependent = mk_draft!(scope, uniq("dependent"))
 
-      assert {:ok, %Edge{}} = Tasks.add_dep(dependent.id, draft.id, :blocks)
+      assert {:ok, %Edge{}} = Tasks.add_dep(dependent, draft, :blocks)
       assert [{_from, to}] = edge_endpoints(dependent.id)
       assert to == draft.id
     end
@@ -163,7 +172,7 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
       {_d, blocker} = mk_twins!(scope, uniq("published-blocker"))
       dependent = mk_draft!(scope, uniq("dependent"))
 
-      assert {:ok, %Edge{}} = Tasks.add_dep(dependent.id, blocker.id, :blocks)
+      assert {:ok, %Edge{}} = Tasks.add_dep(dependent, blocker, :blocks)
       assert [{_from, to}] = edge_endpoints(dependent.id)
       assert to == blocker.id
     end
@@ -178,9 +187,18 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
       # An unpublished `drafts.<slug>` there would make this test pass for the
       # wrong reason: the lookup would find nothing whether or not the dataset
       # scope existed, and dropping the scope would not red it.
+      # `dataset_twin_intended` — `Tasks.DatasetTwinFence` (THE ONE RULE's
+      # producer half, task-49eef068420df918) now refuses a task birth of an id
+      # that already lives in a sibling dataset. This fixture BUILDS that shape
+      # deliberately, which is what the stated-intent escape is for.
       foreign_content =
         Barkpark.LabelFixtures.with_registered_labels(
-          %{"kind" => "task", "lifecycle_status" => "open", "description" => @desc},
+          %{
+            "kind" => "task",
+            "lifecycle_status" => "open",
+            "description" => @desc,
+            "dataset_twin_intended" => true
+          },
           "aker-brygge"
         )
 
@@ -206,10 +224,81 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
       # The twin lookup is scoped on every axis the uniqueness index carries.
       # Adopting a foreign dataset's row would silently move a blocker across
       # a tenancy boundary.
-      assert {:ok, %Edge{}} = Tasks.add_dep(dependent.id, draft.id, :blocks)
+      assert {:ok, %Edge{}} = Tasks.add_dep(dependent, draft, :blocks)
       assert [{_from, to}] = edge_endpoints(dependent.id)
       assert to == draft.id
       refute to == foreign.id
+    end
+  end
+
+  describe "endpoint shape — structs canonicalise, uuids are stored as given" do
+    test "a same-slug PUBLISHED row in ANOTHER workspace is never adopted as the twin" do
+      # Both rows are WORKSPACE-ONLY (no project) on purpose. `fetch_twin/2`
+      # scopes on workspace_id AND project_id, and a project can never belong
+      # to two workspaces, so with projects set the project clause alone would
+      # fence the foreign row and dropping the WORKSPACE clause could not red
+      # this test. With project nil on both sides the workspace clause is the
+      # only thing between the draft and the other tenant's published row —
+      # remove `scope_twin(:workspace_id, …)` and `to == foreign.id`.
+      slug = uniq("cross-workspace")
+      ws_a = TenancyFixtures.create_workspace!()
+      ws_b = TenancyFixtures.create_workspace!()
+      scope_a = [workspace_id: ws_a.id]
+      scope_b = [workspace_id: ws_b.id]
+
+      draft = mk_draft!(scope_a, slug)
+      assert %Document{workspace_id: draft_ws} = draft
+      assert draft_ws == ws_a.id
+      assert is_nil(draft.project_id)
+
+      foreign_content =
+        Barkpark.LabelFixtures.with_registered_labels(
+          %{"kind" => "task", "lifecycle_status" => "open", "description" => @desc},
+          @dataset
+        )
+
+      {:ok, _} =
+        Content.create_document(
+          "task",
+          %{
+            "doc_id" => slug,
+            "title" => "a same-slug row in another workspace",
+            "content" => foreign_content
+          },
+          @dataset,
+          scope_b
+        )
+
+      {:ok, foreign} = Content.publish_document(slug, "task", @dataset, scope_b)
+
+      assert foreign.doc_id == slug,
+             "the foreign row must be PUBLISHED or the workspace fence is never exercised"
+
+      assert foreign.workspace_id == ws_b.id
+      assert is_nil(foreign.project_id)
+
+      dependent = mk_draft!(scope_a, uniq("dependent"))
+
+      assert {:ok, %Edge{}} = Tasks.add_dep(dependent, draft, :blocks)
+      assert [{_from, to}] = edge_endpoints(dependent.id)
+      assert to == draft.id
+      refute to == foreign.id
+    end
+
+    test "a bare uuid endpoint is stored AS GIVEN — no read back, no twin swap",
+         %{scope: scope} do
+      # This is the other half of removing the by-PK read: with only an id in
+      # hand there is no tenant-scoped way to learn the row's scope, so the
+      # module does not try. A caller that wants canonicalisation passes the
+      # struct it resolved. Pinning this keeps the contract explicit rather
+      # than letting a future "helpful" `Repo.get(Document, id)` creep back in.
+      {draft, published} = mk_twins!(scope, uniq("blocker"))
+      dependent = mk_draft!(scope, uniq("dependent"))
+
+      assert {:ok, %Edge{}} = Tasks.add_dep(dependent.id, draft.id, :blocks)
+      assert [{_from, to}] = edge_endpoints(dependent.id)
+      assert to == draft.id
+      refute to == published.id
     end
   end
 
@@ -307,7 +396,7 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
       {draft, published_blocker} = mk_twins!(scope, slug)
       dependent = mk_draft!(scope, uniq("dependent"))
 
-      assert {:ok, %Edge{}} = Tasks.add_dep(dependent.id, draft.id, :blocks)
+      assert {:ok, %Edge{}} = Tasks.add_dep(dependent, draft, :blocks)
 
       # The blocker is not done, so the dependent must NOT be ready. Before the
       # fix the edge bound to the draft uuid, the ready query correlated on the

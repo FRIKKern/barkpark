@@ -179,6 +179,18 @@ defmodule BarkparkWeb.AccessController do
         |> put_status(:created)
         |> json(%{grant: render_grant(grant), token: raw})
 
+      # The two arms of the no-escalation gate are reported APART. A grantor that
+      # is not a member of the body's workspace hears so — telling it
+      # "capabilities you do not hold" pointed it at a permission change when
+      # what it needed was an invitation, and a grantor holding `admin` cannot
+      # fail the capability arm at all. Both arms stay 403; only the sentence
+      # differs, so no existence oracle is opened.
+      {:error, :not_a_member} ->
+        forbidden(
+          conn,
+          "you are not a member of that workspace, so you cannot mint a grant in it"
+        )
+
       {:error, :forbidden} ->
         forbidden(conn, "you cannot mint a grant conferring capabilities you do not hold")
 

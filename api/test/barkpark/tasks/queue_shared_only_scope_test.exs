@@ -189,7 +189,13 @@ defmodule Barkpark.Tasks.QueueSharedOnlyScopeTest do
       {n, _} =
         Repo.update_all(
           from(d in Document, where: d.id == ^dep.id),
-          set: [content: %{"kind" => "task", "lifecycle_status" => "done"}]
+          set: [
+            content: %{
+              "kind" => "task",
+              "close_reason" => "fixture: closed through the verb",
+              "lifecycle_status" => "done"
+            }
+          ]
         )
 
       assert n == 1, "the dependency was not marked done; the release arm below is vacuous"

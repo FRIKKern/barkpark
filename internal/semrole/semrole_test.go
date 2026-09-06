@@ -22,6 +22,9 @@ var cloudTokens = []string{
 	// jpf-w1 D7: a queued deployment no builder claimed for 5 minutes. Its own
 	// word because "queued" is already pinned info/blue three lines up.
 	"deploy_stalled",
+	// dr-w10-s1 / dr-w24-followup: the deploy verdict and the off-the-train
+	// sha, ranks 5 and 6. Warn, not danger — see For's own monotonicity note.
+	"deploys_failing", "diverged",
 	// The usage-meter STATE token for a read that was attempted and FAILED
 	// (dr-w3-s6 followup): before this entry it fell to the neutral default and
 	// painted identically to the deliberate "unmetered".
@@ -49,7 +52,11 @@ func TestForCloudVocabulary(t *testing.T) {
 		// deploy_stalled is warn, NOT the info tone "queued" carries: waiting is
 		// news, waiting five minutes with no builder is an alarm.
 		"deploy_stalled": "warn", "DEPLOY_STALLED": "warn",
-		"failed": "danger", "error": "danger", "offline": "danger", "removal_failed": "danger",
+		// deploys_failing and diverged are warn for ladder monotonicity: rank 4
+		// (degraded) is warn, so ranks 5 and 6 may not shout louder.
+		"deploys_failing": "warn", "DEPLOYS_FAILING": "warn", " diverged ": "warn",
+		"diverged": "warn",
+		"failed":   "danger", "error": "danger", "offline": "danger", "removal_failed": "danger",
 		// Usage-meter quota states: near_limit warns, over_limit is danger.
 		"near_limit": "warn", "NEAR_LIMIT": "warn", " over_limit ": "danger", "over_limit": "danger",
 		// A meter whose read FAILED is a broken instrument — warn, and tonally

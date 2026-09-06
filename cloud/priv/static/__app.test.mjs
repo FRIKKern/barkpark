@@ -2233,7 +2233,11 @@ test("gr-p5-2fa: the width override is :has()-SCOPED — the shared 420px modal 
 // its own node-22 job in console-harness.yml); the five-tier seam
 // (`--tiers5`) covers the widths where a three-tier corpus is blind entirely.
 // Neither half subsumes the other: measured, a 200px floor passes the FULL
-// 13-width render leg exit 0, and this test refuses it.
+// 18-width render leg exit 0, and this test refuses it. (18 is DERIVED, not
+// transcribed: `WIDTHS` imported from __preview__/breakpoint-sweep.mjs is the
+// boundary walk over 6 breakpoints [620,720,740,768,830,899] and has 18
+// entries. This line read "13-width" for three axis moves running — re-derive
+// it by import whenever you touch it, never copy it from a brief.)
 test("cch-w16-s1: the .tier-grid floor is >= 230px — a tidy-down re-cuts the Free CTA", () => {
   const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
   // The FIRST rule whose selector list is exactly `.tier-grid` — the base
@@ -4257,20 +4261,31 @@ const MIXED = [
   { name: "healthy-a", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },       // ok (9), tiebreak before healthy-b
 ];
 
-test("attentionRank matches the decision-32 fixture rank for each state", () => {
-  // jpf-w1-queue-age-alarm: these are the FIXTURE ranks (attention_order.json),
-  // no longer a private 1–9 numbering — 5 and 6 are strained/filling, which
-  // this console does not classify yet (the named gap in ATTENTION_RANK).
+test("attentionRank ranks the classified states in the decision-32 ORDER", () => {
+  // cch-w63 — STATED AS AN ORDER, NOT AS NINE INTEGERS. Ruling A inserts two
+  // rungs (`deploys_failing` after `degraded`, `diverged` behind it), which
+  // moves EVERY absolute number below `degraded` without changing a single
+  // fact about urgency. A test written as `assert.equal(rank, 7)` reds on that
+  // insertion and says "7 became 9" — a renumbering, not a defect — while a
+  // test written as an order reds only when urgency actually moves. The
+  // absolute agreement with the shared fixture is asserted ONCE, structurally,
+  // by the D32 test below; here we pin what the numbers MEAN.
   const rankByName = Object.fromEntries(MIXED.map((b) => [b.name, hooks.attentionRank(b)]));
-  assert.equal(rankByName["gone-fail"], 1);
-  assert.equal(rankByName["prov-fail"], 2);
-  assert.equal(rankByName["susp"], 3);
-  assert.equal(rankByName["Alpha-degraded"], 4);
-  assert.equal(rankByName["never-said"], 7);
-  assert.equal(rankByName["behind-1"], 9);
-  assert.equal(rankByName["removing-x"], 10);
-  assert.equal(rankByName["prov"], 11);
-  assert.equal(rankByName["healthy-a"], 12);
+  const ORDER = ["gone-fail", "prov-fail", "susp", "Alpha-degraded", "never-said",
+    "behind-1", "removing-x", "prov", "healthy-a"];
+  for (const name of ORDER) {
+    assert.equal(typeof rankByName[name], "number",
+      name + " has no rank — classifyBp returned a state outside the ladder");
+  }
+  for (let i = 1; i < ORDER.length; i += 1) {
+    assert.ok(rankByName[ORDER[i - 1]] < rankByName[ORDER[i]],
+      ORDER[i - 1] + " (rank " + rankByName[ORDER[i - 1]] + ") must outrank " +
+      ORDER[i] + " (rank " + rankByName[ORDER[i]] + ")");
+  }
+  // …and the ends are pinned absolutely, so a ladder that collapsed to a
+  // constant — which satisfies no strict `<` — cannot be what greened this.
+  assert.equal(rankByName["gone-fail"], 1, "removal_failed is rung 1");
+  assert.equal(rankByName["healthy-a"], [...hooks.ATTENTION_LADDER].length, "ok is the last rung");
 });
 
 // cch-w34-s6 (charter D332(b)), stated as an ORDERING, not just as numbers:
@@ -4360,11 +4375,74 @@ test("filterFleet returns exactly one bucket; null bucket → the whole list (co
 // "in-flight". This is the verify_probes.json pattern (C8 below): read the
 // committed fixture, hold the SPA's vocabulary to it byte-for-byte.
 
-test("D32: the SPA attention vocabulary matches attention_order.json", () => {
-  const fixture = JSON.parse(
-    fs.readFileSync(new URL("./__fixtures__/attention_order.json", import.meta.url), "utf8"),
-  );
-  const states = fixture.states;
+// cch-w63 — THE SEQUENCE, DERIVED FROM THE FIXTURE, COMPARED AS AN ORDER.
+//
+// This test used to compare the SPA's rank INTEGERS to the fixture's rank
+// integers. That worked only while nobody inserted a rung. Ruling A inserts two
+// (`deploys_failing` at 5, `diverged` at 6) and shifts nine, so an integer-keyed
+// comparison reds on the fixture's side of the change and would have to be
+// hand-renumbered to match — which is retyping the ladder, the very thing the
+// criterion forbids.
+//
+// So the comparison is now: THE SPA'S LADDER, RESTRICTED TO THE STATES THE
+// FIXTURE CARRIES, IS THE FIXTURE'S ORDER. Both sides are derived — the SPA
+// side from `ATTENTION_LADDER`, the fixture side from `attention_order.json`
+// sorted by its own `rank` — and NEITHER is typed out here. Swap any two rungs
+// on either side and this reds; renumber both consistently and it stays green,
+// which is correct, because a renumbering carries no meaning.
+//
+// The restriction is what lets this branch be honest on a main that does not
+// yet carry the deploy-side fixture change: the two crossing rungs are named,
+// bounded, and the assertion is IDENTICAL before and after they land.
+const ATTENTION_FIXTURE = JSON.parse(
+  fs.readFileSync(new URL("./__fixtures__/attention_order.json", import.meta.url), "utf8"),
+);
+
+// The rungs the SPA orders that the shared fixture does not carry YET. This is
+// a CROSSING list, not an allowlist that may grow: these two land in
+// attention_order.json with the deploy-side half of ruling A, at which point
+// both sides of the assertion below are empty and it keeps holding unchanged.
+// A THIRD name minted in app.js alone reds `spaOnly`, because the expected side
+// is derived from the fixture's own contents rather than restated.
+const LADDER_CROSSING = ["deploys_failing", "diverged"];
+
+// `unmetered` is a Go DETAIL MARKER (cloud_status_cmd.go `unmeteredMarker`),
+// never a rung. If it ever appears as a ladder state on either side, the
+// ordering assertion is not what catches it — this is.
+// DEPLOY_NODE builds the `deploy_rate` node the control plane serializes
+// (router.ex merge_deploy_rate/2 over DeployLedger.box_rates/3), so every
+// witness below is a SERVER SHAPE and not a hand-tuned object the predicate
+// happens to like. `refused` follows the ledger's own rule — a sample under
+// min_sample 200 refuses and carries `pct: null`, never a comforting 0.0. A
+// function declaration, so it is hoisted above the tests that use it.
+function DEPLOY_NODE(pct, sample, over) {
+  const refused = sample < 200;
+  return Object.assign({
+    window: { from: "2026-09-05T00:00:00Z", to: "2026-09-06T00:00:00Z" },
+    sites: 11,
+    sites_deploying: 11,
+    rate: {
+      sample,
+      pct: refused ? null : pct,
+      numerator: refused ? 0 : Math.round((pct / 100) * sample),
+      min_sample: 200,
+      refused,
+      reason: refused ? "sample " + sample + " below min_sample 200" : null,
+    },
+    absorption: { sample, pct: refused ? null : 0, numerator: 0, min_sample: 200, refused, reason: null },
+    box_caused: { sample: 100, pct: 80, numerator: 80, min_sample: 200, refused: false, reason: null },
+  }, over || {});
+}
+
+test("D32: `unmetered` is a marker, not a rung, on either side of the ladder", () => {
+  assert.ok(!ATTENTION_FIXTURE.states.some((st) => st.state === "unmetered"),
+    "attention_order.json minted `unmetered` as a rung — it is a detail marker");
+  assert.ok(![...hooks.ATTENTION_LADDER].some((r) => r.state === "unmetered"),
+    "the SPA ladder minted `unmetered` as a rung — it is a detail marker");
+});
+
+test("D32: the SPA ladder is attention_order.json's ORDER, derived on both sides", () => {
+  const states = ATTENTION_FIXTURE.states;
 
   // FAIL CLOSED ON AN EMPTY CORPUS: a fixture that parses to zero states must
   // red here, never green a loop that asserted nothing. The floor states the
@@ -4373,54 +4451,97 @@ test("D32: the SPA attention vocabulary matches attention_order.json", () => {
     "attention_order.json carries " + (Array.isArray(states) ? states.length : 0) +
     " states — the decision-32 vocabulary is at least twelve; an empty fixture would green every loop below vacuously");
 
-  // The BUCKET STRINGS, from the fixture side — including the hyphenated
-  // "in-flight" this file used to misspell as "inflight". Compared against a
-  // literal, not against the SPA, so both-empty can never scan green.
+  // The fixture's own ranks must be a dense 1..N with no gap or repeat, or
+  // "sorted by rank" is not a well-defined sequence to compare against.
+  const fixtureRanks = states.map((st) => st.rank).slice().sort((a, b) => a - b);
+  assert.deepEqual(fixtureRanks, states.map((_, i) => i + 1),
+    "attention_order.json ranks are not a dense 1..N sequence");
+
+  const fixtureOrder = states.slice().sort((a, b) => a.rank - b.rank).map((st) => st.state);
+  // `[...]` is NOT cosmetic: `hooks.*` lives in the node:vm sandbox, so its
+  // Array.prototype.map returns a SANDBOX-realm Array. assert.deepEqual
+  // compares prototypes and rejects it against a host-realm array even when
+  // every element matches — the diff prints two identical lists.
+  const ladderOrder = [...hooks.ATTENTION_LADDER].map((r) => r.state);
+
+  // ── THE ASSERTION. Restricted to what the fixture carries; nothing retyped.
+  const fixtureHas = new Set(fixtureOrder);
+  const ladderRestricted = ladderOrder.filter((st) => fixtureHas.has(st));
+  assert.deepEqual(ladderRestricted, fixtureOrder,
+    "the SPA ladder order disagrees with attention_order.json:\n  SPA     " +
+    ladderRestricted.join(" > ") + "\n  fixture " + fixtureOrder.join(" > "));
+
+  // Non-vacuity: the restriction must not have thrown the corpus away.
+  assert.equal(ladderRestricted.length, fixtureOrder.length);
+  assert.ok(ladderRestricted.length >= 12,
+    "the restricted comparison ran over only " + ladderRestricted.length + " rungs");
+
+  // ── the ONLY SPA rungs the fixture lacks are the named crossing pair, and
+  // the expected side is DERIVED from the fixture, so this stays true both
+  // before and after the deploy-side change lands.
+  const spaOnly = ladderOrder.filter((st) => !fixtureHas.has(st));
+  assert.deepEqual(spaOnly, LADDER_CROSSING.filter((st) => !fixtureHas.has(st)),
+    "the SPA orders a state attention_order.json does not carry, and it is not the named crossing pair: " +
+    JSON.stringify(spaOnly));
+
+  // …and no fixture state is missing from the SPA ladder in the other direction.
+  assert.deepEqual(fixtureOrder.filter((st) => !ladderOrder.includes(st)), [],
+    "attention_order.json carries a state the SPA ladder does not order");
+
+  // ── BUCKETS, keyed by STATE (not by an absolute rank, which shifts).
   assert.deepEqual([...new Set(states.map((st) => st.bucket))],
     ["attention", "in-flight", "healthy"]);
-
-  // …and from the SPA side: the three strings bucketOfRank can produce are the
-  // fixture's three, verbatim.
-  assert.equal(hooks.bucketOfRank(1), "attention");
-  assert.equal(hooks.bucketOfRank(10), "in-flight");
-  assert.equal(hooks.bucketOfRank(12), "healthy");
-
-  // KNOWN GAP, pinned to exactly two names: fixture states the SPA does not
-  // classify yet (their inputs — load/disk vitals — have no classifyBp arm).
-  // A THIRD state missing from ATTENTION_RANK reds this test; so does closing
-  // the gap without deleting its entry here.
-  const SPA_GAP = ["strained", "filling"];
-  const ranks = { ...hooks.ATTENTION_RANK };
-  assert.deepEqual(states.map((st) => st.state).filter((k) => !(k in ranks)), SPA_GAP,
-    "fixture states missing from the SPA ladder must be exactly the named gap");
-
-  // Every state the SPA ranks: fixture-listed, on the FIXTURE's rank, in the
-  // FIXTURE's bucket. This is the assertion that reds if either side renumbers
-  // alone — the drift this slice found (1–9 vs 1–11) could never have shipped
-  // through it.
   for (const st of states) {
-    if (SPA_GAP.includes(st.state)) continue;
-    assert.equal(ranks[st.state], st.rank,
-      st.state + ": SPA rank " + ranks[st.state] + " != fixture rank " + st.rank);
-    assert.equal(hooks.bucketOfRank(st.rank), st.bucket,
-      st.state + ": SPA bucket for rank " + st.rank + " != fixture bucket " + st.bucket);
+    assert.equal(hooks.bucketOfRank(hooks.ATTENTION_RANK[st.state]), st.bucket,
+      st.state + ": SPA bucket " + hooks.bucketOfRank(hooks.ATTENTION_RANK[st.state]) +
+      " != fixture bucket " + st.bucket);
   }
+  // bucketOfRank has no guessing fallback: an off-ladder rank is undefined,
+  // never a real bucket name that would scan green.
+  assert.equal(hooks.bucketOfRank([...hooks.ATTENTION_LADDER].length + 1), undefined);
+  assert.equal(hooks.bucketOfRank(0), undefined);
 
-  // No SPA state outside the fixture: a rung minted here alone is the same
-  // drift in the other direction.
-  for (const k of Object.keys(ranks)) {
-    assert.ok(states.some((st) => st.state === k),
-      "SPA state " + k + " is not in attention_order.json");
-  }
+  // ── THE NAMED CLASSIFIER GAP: rungs the SPA ORDERS but cannot PRODUCE.
+  // Closing one without deleting its entry reds here, and so does a fifth.
+  assert.deepEqual(
+    ladderOrder.filter((st) => !hooks.attentionKinds.includes(st)),
+    [...hooks.ATTENTION_ORDER_ONLY],
+    "the ladder rungs classifyBp cannot produce must be exactly the named gap");
+  // THE LITERAL IS THE POINT. The deepEqual above compares the implementation
+  // against ITSELF (ladder minus kinds, versus the list the implementation
+  // publishes) and therefore cannot fail on its own; this line is the half that
+  // can. Each entry earns its place with a reason the implementation does not
+  // control — and the full ladder is attention_order.json's, not this list's:
+  //   strained — needs the host's load vitals; no fleet row carries them.
+  //   filling  — needs the host's disk vitals; likewise absent from the row.
+  // A rung whose inputs ARE on the payload does not belong here: it belongs in
+  // classifyBp. dr-w10-s1's `deploys_failing` and dr-w24-followup's `diverged`
+  // left this list the moment their arms landed, which is the only way out of it.
+  assert.deepEqual([...hooks.ATTENTION_ORDER_ONLY], ["strained", "filling"],
+    "the ORDER-ONLY list must be exactly the rungs whose INPUTS are missing from " +
+    "the fleet payload — a rung added here to make a test pass is a widened gap, " +
+    "not a fix");
 
-  // The row this slice adds, by name: present in the fixture AND in the SPA,
-  // warn-toned, attention-bucketed, between unreported and behind.
-  const stalled = states.find((st) => st.state === "deploy_stalled");
-  assert.ok(stalled, "deploy_stalled missing from the fixture");
-  assert.equal(stalled.tone, "warn");
-  assert.equal(stalled.bucket, "attention");
-  assert.ok(ranks.unreported < ranks.deploy_stalled && ranks.deploy_stalled < ranks.behind,
+  // ── RULING A's SHAPE, as ordering claims over the ladder (fixture-independent,
+  // so they hold on a main that has not taken the fixture change yet).
+  const at = (st) => ladderOrder.indexOf(st);
+  assert.ok(at("degraded") + 1 === at("deploys_failing"),
+    "ruling A: deploys_failing sits IMMEDIATELY after degraded");
+  assert.ok(at("deploys_failing") + 1 === at("diverged"),
+    "ruling A: diverged sits immediately behind deploys_failing");
+  assert.ok(at("unreported") < at("deploy_stalled") && at("deploy_stalled") < at("behind"),
     "deploy_stalled must sit after unreported and before behind");
+  assert.equal(ladderOrder[ladderOrder.length - 1], "ok", "ok is the last rung");
+  assert.equal(ladderOrder.length, 14, "ruling A's ladder is fourteen rungs");
+
+  // The crossing rungs carry the fixture's own metadata the day it arrives —
+  // asserted only WHEN it arrives, so this never claims a fact about a file
+  // that does not hold it yet.
+  for (const st of states) {
+    if (!LADDER_CROSSING.includes(st.state)) continue;
+    assert.equal(st.bucket, "attention", st.state + " must be an attention-bucket rung");
+    assert.equal(st.tone, "warn", st.state + " must be warn-toned");
+  }
 });
 
 // ── the PREDICATE gets a cross-surface asserter too (dr-w25) ────────────────
@@ -4439,7 +4560,17 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
   const fixture = JSON.parse(
     fs.readFileSync(new URL("./__fixtures__/attention_order.json", import.meta.url), "utf8"),
   );
-  const SPA_GAP = ["strained", "filling"]; // same named gap the D32 test pins
+  // cch-w63: the gap is READ FROM THE SPA (`ATTENTION_ORDER_ONLY`), not
+  // restated here — a second hand-typed copy is how the two drift. The D32 test
+  // above pins that list against the ladder; this one only consumes it.
+  // Pinned, not derived: reading the gap off the code under test would make the
+  // witness set below shrink in lockstep with any widening of the gap, and this
+  // test could never fail. Same two entries, same reasons, as the D32 test:
+  //   strained — the host's load vitals are not on the fleet payload.
+  //   filling  — the host's disk vitals are not on the fleet payload.
+  const SPA_GAP = ["strained", "filling"];
+  assert.deepEqual([...hooks.ATTENTION_ORDER_ONLY], SPA_GAP,
+    "the implementation's ORDER-ONLY list drifted from the gap this test pins");
   const expected = fixture.states.map((st) => st.state).filter((k) => !SPA_GAP.includes(k));
   assert.ok(expected.length >= 10,
     "derived from a fixture carrying only " + expected.length + " classifiable states — an empty corpus would green every loop below");
@@ -4451,6 +4582,12 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
     failed: { provision_status: "failed" },
     suspended: { host: "h", suspended: true },
     degraded: { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
+    // dr-w10-s1: the recorded guerrilla row — 46.28% of 1,290 terminal deploys,
+    // which printed `ok` with an empty detail before the arm landed.
+    deploys_failing: { ...LIVE, deploy_rate: DEPLOY_NODE(46.28, 1290) },
+    // dr-w24-followup: rendered by the BEHIND column since dr-w24-s2, ranked by
+    // nothing until the arm landed.
+    diverged: { ...LIVE, commit_ancestry: "diverged", commit_distance: 12 },
     unreported: { host: "h", last_seen_at: null },
     deploy_stalled: { ...LIVE, queued_deploy_age_seconds: 420 },
     behind: { ...LIVE, update_state: "behind" },
@@ -4463,9 +4600,12 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
 
   for (const state of expected) {
     assert.equal(hooks.classifyBp(WITNESS[state]), state, state + " must be reachable from classifyBp");
-    const rank = fixture.states.find((st) => st.state === state).rank;
-    assert.equal(hooks.attentionRank(WITNESS[state]), rank,
-      state + ": classifyBp's witness ranks " + hooks.attentionRank(WITNESS[state]) + ", fixture says " + rank);
+    // cch-w63: the witness's rank is its LADDER POSITION, not the fixture's
+    // integer — the two agree by the D32 order test above, and asserting the
+    // integer here a second time only re-reds on a renumbering.
+    assert.equal(hooks.attentionRank(WITNESS[state]), hooks.ATTENTION_RANK[state],
+      state + ": classifyBp's witness ranks " + hooks.attentionRank(WITNESS[state]) +
+      ", the ladder puts " + state + " at " + hooks.ATTENTION_RANK[state]);
   }
 
   // THE ROW THIS SLICE REPAIRS — the production payload, verbatim: the control
@@ -4475,8 +4615,7 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
   const tagCurrentCommitBehind = { ...LIVE, update_state: "current", commit_ancestry: "behind", commit_distance: 2493 };
   assert.equal(hooks.classifyBp(tagCurrentCommitBehind), "behind",
     "a box the plane measured behind main must not classify live-green because its release tag grades itself current");
-  assert.equal(hooks.attentionRank(tagCurrentCommitBehind),
-    fixture.states.find((st) => st.state === "behind").rank);
+  assert.equal(hooks.attentionRank(tagCurrentCommitBehind), hooks.ATTENTION_RANK.behind);
   assert.equal(hooks.bucketOf(tagCurrentCommitBehind), "attention");
 
   // …and the RENDERED heading an operator reads (criterion 1's paste).
@@ -4506,6 +4645,96 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
   // A non-live box is never re-ranked by commit ancestry — suspended outranks it.
   assert.equal(hooks.classifyBp({ host: "h", suspended: true, commit_ancestry: "behind" }), "suspended");
   assert.equal(hooks.classifyBp({ ...LIVE, last_seen_at: null, commit_ancestry: "behind" }), "unreported");
+});
+
+// ── the deploy verdict + diverged, client side (dr-w10-s1 / dr-w24-followup) ──
+//
+// The tests above pin the LADDER; these pin the PREDICATE. The distinction is
+// the whole reason these exist: lead-console-6's mirror put both rungs on the
+// ladder with correct ranks and buckets while classifyBp could return NEITHER,
+// so every ladder assertion passed over a console that still classified a
+// 46%-failing box `ok` and filed it under HEALTHY.
+
+test("dr-w10-s1: a box failing 46.28% of 1,290 terminal deploys is deploys_failing, never ok", () => {
+  const LIVE = { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" };
+  // THE RECORDED ROW: guerrilla, 2026-08-07. It printed `ok` with an empty
+  // detail on both surfaces because neither read a deploy vital at all.
+  const guerrilla = { ...LIVE, deploy_rate: DEPLOY_NODE(46.28, 1290) };
+  assert.notEqual(hooks.classifyBp(guerrilla), "ok",
+    "a box failing 46.28% of 1,290 terminal deploys must never classify ok");
+  assert.equal(hooks.classifyBp(guerrilla), "deploys_failing");
+  assert.equal(hooks.bucketOf(guerrilla), "attention");
+  const s = hooks.statusOf(guerrilla);
+  assert.equal(s.label, "Deploys failing");
+  assert.equal(s.role, "warn");
+  // The detail NEVER prints a percentage without the denominator it came from.
+  assert.match(s.detail, /46\.3% of 1290 terminal/);
+  assert.match(s.detail, /fence 20%/);
+  assert.match(s.detail, /80% box-caused/);
+
+  // THE FENCE, probed on both sides — 20.0 is inclusive, 19.99 is not.
+  assert.equal(hooks.DEPLOYS_FAILING_PCT, 20.0);
+  assert.equal(hooks.classifyBp({ ...LIVE, deploy_rate: DEPLOY_NODE(19.99, 900) }), "ok");
+  assert.equal(hooks.classifyBp({ ...LIVE, deploy_rate: DEPLOY_NODE(20.0, 900) }), "deploys_failing");
+
+  // A sicker box outranks it: the rung sits UNDER degraded, not over it.
+  assert.equal(hooks.classifyBp({ ...guerrilla, health_status: "down" }), "degraded");
+  // And a non-live box is never re-ranked by a deploy rate.
+  assert.equal(hooks.classifyBp({ ...guerrilla, suspended: true }), "suspended");
+});
+
+test("dr-w10-s1: the OTHER TWO arms of the three-way verdict never alarm and never green-wash", () => {
+  const LIVE = { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" };
+  // THE LEDGER REFUSED — the box HAS sites and the sample is under the floor.
+  // A silence is not a failure: it must NOT fire the rung. Per charter D69 it
+  // is a detail line, so the state stays `ok`.
+  const refused = { ...LIVE, deploy_rate: DEPLOY_NODE(0, 55) };
+  assert.equal(refused.deploy_rate.rate.refused, true, "the witness must actually refuse");
+  assert.equal(refused.deploy_rate.rate.pct, null, "a refusal carries no pct — never a 0.0");
+  assert.equal(hooks.deployVerdict(refused).kind, "not_measured");
+  assert.equal(hooks.classifyBp(refused), "ok");
+  // NO SURFACE — zero sites. Nothing to deploy, so nothing failed.
+  const nosurface = { ...LIVE, deploy_rate: DEPLOY_NODE(0, 0, { sites: 0, sites_deploying: 0 }) };
+  assert.equal(hooks.deployVerdict(nosurface).kind, "no_surface");
+  assert.equal(hooks.classifyBp(nosurface), "ok");
+  // OLDER CONTROL PLANE — no node at all. Not a fact about this box.
+  assert.equal(hooks.deployVerdict(LIVE).kind, "no_surface");
+  assert.equal(hooks.classifyBp(LIVE), "ok");
+  // …and none of the three ever produce a reason sentence, which is what would
+  // put a permanent alarm on the six of eight prod boxes that own no sites.
+  for (const row of [refused, nosurface, LIVE]) {
+    assert.equal(hooks.deploysFailingReason(row), "");
+    assert.equal(hooks.deploysFailing(row), false);
+  }
+  // A MEASURED zero is a number, not a silence — the `== null` that keeps them
+  // apart is the arm a truthiness check would break.
+  assert.equal(hooks.deployVerdict({ ...LIVE, deploy_rate: DEPLOY_NODE(0, 900) }).kind, "measured");
+});
+
+test("dr-w24-followup: a diverged box is RANKED, not just rendered", () => {
+  const LIVE = { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" };
+  const diverged = { ...LIVE, commit_ancestry: "diverged", commit_distance: 12 };
+  assert.equal(hooks.classifyBp(diverged), "diverged");
+  assert.equal(hooks.bucketOf(diverged), "attention");
+  const s = hooks.statusOf(diverged);
+  assert.equal(s.label, "Diverged");
+  assert.equal(s.role, "warn");
+  // The detail never quotes a distance — a diverged sha has no well-defined
+  // "behind by N", which is why the plane grades it separately from `behind`.
+  assert.equal(s.detail, "diverged from main — the sha this box serves is on neither side of main's history");
+  assert.doesNotMatch(s.detail, /12/);
+
+  // NON-REGRESSION, the other ancestry values are untouched.
+  assert.equal(hooks.classifyBp({ ...LIVE, commit_ancestry: "current", commit_distance: 0 }), "ok");
+  assert.equal(hooks.classifyBp({ ...LIVE, commit_ancestry: "ahead_of_main", commit_distance: 3 }), "ok");
+  assert.equal(hooks.classifyBp({ ...LIVE, commit_ancestry: "behind", commit_distance: 9 }), "behind");
+  assert.equal(hooks.classifyBp(LIVE), "ok");
+  // A distance with no ancestry (older control plane) never alarms.
+  assert.equal(hooks.classifyBp({ ...LIVE, commit_distance: 12 }), "ok");
+  // A non-live box is never re-ranked by ancestry — suspended outranks it.
+  assert.equal(hooks.classifyBp({ host: "h", suspended: true, commit_ancestry: "diverged" }), "suspended");
+  // deploys_failing outranks diverged when a box is both.
+  assert.equal(hooks.classifyBp({ ...diverged, deploy_rate: DEPLOY_NODE(46.28, 1290) }), "deploys_failing");
 });
 
 // ── deploy_stalled (jpf-w1 D6/D7): the queued-age alarm, client side ────────
@@ -4638,7 +4867,8 @@ test("cch-w34-s6: the unknown state names EVIDENCE ONLY — no remediation, no n
 test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls through to a calm label", () => {
   // charter D33: a MAP[state] || "…" tail announces the CALMEST word over the
   // most severe state. The enum is pinned, and every member has an explicit arm.
-  const KINDS = ["removal_failed", "failed", "suspended", "degraded", "unreported",
+  const KINDS = ["removal_failed", "failed", "suspended", "degraded",
+    "deploys_failing", "diverged", "unreported",
     "deploy_stalled", "behind", "removing", "provisioning", "ok"];
   assert.deepEqual([...hooks.attentionKinds].sort(), KINDS.slice().sort(),
     "a new fleet state was added without a statusOf arm (or one was removed)");
@@ -4647,6 +4877,8 @@ test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls
     failed: { provision_status: "failed" },
     suspended: { host: "h", suspended: true },
     degraded: { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
+    deploys_failing: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", deploy_rate: DEPLOY_NODE(46.28, 1290) },
+    diverged: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", commit_ancestry: "diverged", commit_distance: 12 },
     unreported: { host: "h", last_seen_at: null },
     deploy_stalled: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", queued_deploy_age_seconds: 420 },
     behind: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind" },
@@ -5016,6 +5248,58 @@ test("failureCopy maps a known builder reason to friendly copy", () => {
 test("failureCopy passes an unrecognized reason through unchanged", () => {
   assert.equal(hooks.failureCopy("some brand new builder error"), "some brand new builder error");
   assert.equal(hooks.failureCopy(""), "");
+});
+
+// ── task-f156b5e43bfbfe91: a TYPED REFUSAL never reaches failureCopy ─────────
+// The server split the fused refusal into `failure_code` + `failure_message`
+// and stopped rewriting the composite in W11. The browser kept a SECOND
+// humanize pass. These pin the guard that ends it.
+//
+// MUTATION-PROVED: delete the `if (typedRefusal(reason)) return reason;` line
+// from app.js's failureCopy and the first test below reds on
+// "The build source couldn't be fetched." — the canned copy a producer-authored
+// tar entry name earns today by containing four common English words.
+
+const ABS_PATH_REFUSAL =
+  'the instance refused the deploy (HTTP 400): E_ABSOLUTE_PATH — entry "/quota/index.html" is an absolute path — refused';
+
+test("failureCopy: a typed E_* refusal passes through VERBATIM, never re-humanized", () => {
+  assert.equal(hooks.failureCopy(ABS_PATH_REFUSAL), ABS_PATH_REFUSAL);
+
+  // THE COLLISION THIS GUARD EXISTS FOR. The entry name is producer-authored,
+  // so it can contain any clause token app.js matches on. Without the guard,
+  // failureCopy's "artifact_url is empty" / "unsupported artifact scheme" /
+  // "no build source" arms are all reachable from a tar path.
+  const collide =
+    'the instance refused the deploy (HTTP 400): E_BAD_NAME — entry "/no build source/index.html" is not a safe name — refused';
+  assert.equal(hooks.failureCopy(collide), collide);
+
+  const traversal =
+    'the instance refused the deploy (HTTP 400): E_PATH_TRAVERSAL — entry "../unsupported artifact scheme/x" escapes the root — refused';
+  assert.equal(hooks.failureCopy(traversal), traversal);
+});
+
+test("typedRefusal: E_* code, either box caption, and nothing else", () => {
+  assert.equal(hooks.typedRefusal(ABS_PATH_REFUSAL), true);
+  assert.equal(hooks.typedRefusal("the instance refused the deploy (HTTP 409)"), true);
+  assert.equal(hooks.typedRefusal("the instance refused the build poll (HTTP 500)"), true);
+  // A provider code that merely ENDS in E_ is not a typed refusal — `_` is a
+  // word character, so there is no boundary inside SERVER_LIMIT_EXCEEDED. Same
+  // rule as the Elixir @typed_code regex.
+  assert.equal(hooks.typedRefusal("SERVER_LIMIT_EXCEEDED at the provider"), false);
+  assert.equal(hooks.typedRefusal("npm run build exited 1"), false);
+  assert.equal(hooks.typedRefusal(""), false);
+  assert.equal(hooks.typedRefusal(null), false);
+  assert.equal(hooks.typedRefusal(42), false);
+});
+
+test("failureCopy: the github-push family still maps — the guard is not a blanket bypass", () => {
+  // A guard that swallowed everything would be indistinguishable from deleting
+  // failureCopy. The four ordinary arms must still fire.
+  assert.equal(
+    hooks.failureCopy("this site has no build source configured"),
+    "This site has no build source yet. Connect a repo or run bp deploy.",
+  );
 });
 
 // ── dwb-webhook-deploy-artifact-gap: the born-failed GitHub-push copy + tone ──
@@ -10083,9 +10367,98 @@ test("S7: launchProviderTabsHtml marks exactly the active provider pressed", () 
 const CAP_FIXTURE = JSON.parse(
   fs.readFileSync(new URL("./__fixtures__/providers_capabilities.json", import.meta.url), "utf8"),
 );
+// ── cchi-w55-s2: the gap copy is DERIVED from failure_copy.ex, never retyped ──
+// The overlay below used to be a HAND-TYPED short stub ("Hetzner has no pause
+// primitive.", "Adopt needs an existing resource-group import.") — neither of
+// which the server has ever emitted. That made this BLOCKING harness blind to
+// the exact defect cch-w55-s2 fixed: both of its mutations (the gap sentence
+// reverted to the false "archive it instead" copy, and the false remedy clause
+// re-added to the true sentence) reddened only the preview smoke, while this
+// file stayed rc=0. A fixture that agrees with itself proves nothing.
+//
+// So the sentences come from the ONE place that owns them —
+// FailureCopy.capability_gap_reason/2 in cloud/lib/barkpark_cloud/
+// failure_copy.ex, the same function the conduit calls at
+// router.ex `{capability, FailureCopy.capability_gap_reason(kind, capability)}`.
+// Editing the Elixir copy now moves every assertion below with it, and a stub
+// cannot be reintroduced here without deleting the reader.
+//
+// IT REFUSES RATHER THAN PASSING. An empty read, a zero-clause extraction, or a
+// missing (kind, capability) key throws by name instead of yielding "" and
+// greening — a census that goes quiet exactly when the file it reads was
+// restructured is worse than no census at all.
+const FAILURE_COPY_EX_URL = new URL("../../lib/barkpark_cloud/failure_copy.ex", import.meta.url);
+
+// A `def capability_gap_reason(<kind>, "<capability>") do` head whose whole body
+// is a single string literal on the next line. `_kind` (the generic fallbacks)
+// is keyed under "_kind"; a named kind keys under itself. Clause bodies that are
+// NOT a bare literal are simply not extracted — this reader claims only what it
+// can read, and the required-key check below turns any such miss into a refusal
+// rather than a silent empty.
+const GAP_CLAUSE_RE =
+  /def\s+capability_gap_reason\(\s*(?:"([a-z0-9_]+)"|_kind)\s*,\s*"([a-z0-9_]+)"\s*\)\s+do\s*\n\s*"((?:[^"\\]|\\.)*)"\s*\n\s*end/g;
+
+function capabilityGapReasons() {
+  const src = fs.readFileSync(FAILURE_COPY_EX_URL, "utf8");
+  if (!src.trim()) {
+    throw new Error("REFUSED: cloud/lib/barkpark_cloud/failure_copy.ex read empty — " +
+      "the capability-gap fixtures cannot be derived, so this harness will not green");
+  }
+  const out = {};
+  GAP_CLAUSE_RE.lastIndex = 0;
+  let m;
+  while ((m = GAP_CLAUSE_RE.exec(src))) {
+    const kind = m[1] || "_kind";
+    (out[kind] ||= {})[m[2]] = m[3].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+  if (Object.keys(out).length === 0) {
+    throw new Error("REFUSED: no capability_gap_reason/2 clause matched in failure_copy.ex — " +
+      "the clause shape changed and this reader went blind");
+  }
+  return out;
+}
+
+const GAP_REASONS = capabilityGapReasons();
+
+function gapReason(kind, capability) {
+  const s = GAP_REASONS[kind] && GAP_REASONS[kind][capability];
+  if (typeof s !== "string" || s === "") {
+    throw new Error(`REFUSED: failure_copy.ex has no literal capability_gap_reason(${JSON.stringify(kind)}, ` +
+      `${JSON.stringify(capability)}) clause — the fixture cannot be derived`);
+  }
+  return s;
+}
+
+// The two SERVER sentences this file's capability-gap scenarios render.
+const HETZNER_PAUSE_GAP = gapReason("hetzner", "pause");
+const AZURE_ADOPT_GAP = gapReason("azure", "adopt");
+
+// THE REMEDY LOCK — a rule, not a literal, and the arm that makes this harness
+// able to lose. Derivation alone is a tautology: flip the Elixir sentence to a
+// lie and a derived fixture flips with it, still green. So the derived
+// hetzner/pause sentence is held to the SHAPE cch-w55-s2 established — deletion
+// is the only charge-stopping act on this plane, and archiving/snapshotting/
+// powering-off are NOT remedies (`runNeutralArchive` collects a bundle without
+// touching power or existence, and a snapshot bills per GB per month, so the old
+// "archive it instead" copy strictly INCREASED the bill). Either cch-w55-s2
+// mutation reintroduces that vocabulary, and this reds.
+const FALSE_PAUSE_REMEDY_RE = /archiv|snapshot|power(ing)?\s+(it\s+)?(down|off)|turn(ing)?\s+it\s+off|shut(ting)?\s+(it\s+)?down|stop(ping)?\s+the\s+server/i;
+
+test("cchi-w55-s2: the derived hetzner/pause gap sentence names deletion and offers NO archive/snapshot remedy", () => {
+  assert.match(HETZNER_PAUSE_GAP, /Delet/,
+    "the server sentence must name deletion — the only act that stops a Hetzner charge");
+  assert.doesNotMatch(HETZNER_PAUSE_GAP, FALSE_PAUSE_REMEDY_RE,
+    "the server sentence must not offer archive/snapshot/power-off as a way to stop the charge: " +
+    JSON.stringify(HETZNER_PAUSE_GAP));
+  // Non-vacuity: the rule must actually reject the copy cch-w55-s2 retracted, or
+  // the assertion above would pass on an empty string just as happily.
+  assert.match("Hetzner bills a stopped server, so archive it instead.", FALSE_PAUSE_REMEDY_RE);
+  assert.match(HETZNER_PAUSE_GAP + " Archive it to stop paying.", FALSE_PAUSE_REMEDY_RE);
+});
+
 const CAP_GAPS = {
-  hetzner: { pause: "Hetzner has no pause primitive." },
-  azure: { adopt: "Adopt needs an existing resource-group import." },
+  hetzner: { pause: HETZNER_PAUSE_GAP },
+  azure: { adopt: AZURE_ADOPT_GAP },
 };
 const CAP_PAYLOAD = {
   providers: Object.fromEntries(
@@ -10216,7 +10589,7 @@ test("S11b: hetzner model — CLI affordances, a disabled verb with the SERVER r
   assert.equal(byVerb.audit.mode, "cli");
   // capability false → disabled, carrying Hetzner's OWN gap reason verbatim.
   assert.equal(byVerb.pause.mode, "disabled");
-  assert.equal(byVerb.pause.reason, "Hetzner has no pause primitive.");
+  assert.equal(byVerb.pause.reason, HETZNER_PAUSE_GAP);
   // decommission is always the live console action.
   assert.equal(byVerb.decommission.mode, "live");
   assert.equal(byVerb.decommission.resourceName, "web");
@@ -10227,7 +10600,7 @@ test("S11b: azure model — the one false verb is disabled with its SERVER reaso
   const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, bp);
   const byVerb = Object.fromEntries(plain(m.actions).map((a) => [a.verb, a]));
   assert.equal(byVerb.adopt.mode, "disabled");
-  assert.equal(byVerb.adopt.reason, "Adopt needs an existing resource-group import.");
+  assert.equal(byVerb.adopt.reason, AZURE_ADOPT_GAP);
   // GR71 note: this arm used to also assert azure `audit` was a false verb with
   // no gap. The committed fixture says azure audit is TRUE — the hand-copied
   // payload had drifted. Deriving from the fixture corrected it, so the
@@ -10265,7 +10638,8 @@ test("S11b: lifecycleActionRowHtml renders the pill class, CLI chip, disabled re
   assert.match(html, /Live/);
   assert.match(html, /bp cloud instance archive web/); // CLI affordance verbatim
   assert.match(html, /via the bp CLI/);
-  assert.match(html, /Hetzner has no pause primitive\./); // server-owned reason
+  assert.ok(html.includes(hooks.esc(HETZNER_PAUSE_GAP)), // server-owned reason, escaped as the SPA escapes it
+    "the disabled-verb row must carry the derived server sentence verbatim");
   assert.match(html, /data-life-verb="decommission"/); // the live, wired verb
   assert.match(html, /btn-danger/);
 });
@@ -10513,9 +10887,9 @@ test("S11b: lifecycleOptimistic applies the decommissioned pill then rolls back 
 // scenario fixture. hetzner/azure are prod (matrix columns); fake is dev-tier.
 const PROV_CAP = {
   providers: {
-    hetzner: { tier: "prod", gaps: { pause: "Hetzner has no pause primitive." },
+    hetzner: { tier: "prod", gaps: { pause: HETZNER_PAUSE_GAP },
       capabilities: { core: true, catalog: false, labels: true, pause: false, archive: true, resurrect: true, decommission: true, adopt: true, audit: true } },
-    azure: { tier: "prod", gaps: { adopt: "Adopt needs an existing resource-group import." },
+    azure: { tier: "prod", gaps: { adopt: AZURE_ADOPT_GAP },
       capabilities: { core: true, catalog: true, labels: true, pause: true, archive: true, resurrect: true, decommission: true, adopt: false, audit: false } },
     fake: { tier: "dev", gaps: {},
       capabilities: { core: true, catalog: true, labels: true, pause: true, archive: true, resurrect: true, decommission: true, adopt: true, audit: true } },
@@ -10789,8 +11163,8 @@ test("gr-p4: capability matrix — 9 verbs, prod columns only, server-owned gaps
   assert.equal(m.verbs.length, 9);
   // false WITH a server gap → the reason is the server's own, verbatim
   assert.equal(m.cells.pause.hetzner.ok, false);
-  assert.equal(m.cells.pause.hetzner.reason, "Hetzner has no pause primitive.");
-  assert.equal(m.cells.adopt.azure.reason, "Adopt needs an existing resource-group import.");
+  assert.equal(m.cells.pause.hetzner.reason, HETZNER_PAUSE_GAP);
+  assert.equal(m.cells.adopt.azure.reason, AZURE_ADOPT_GAP);
   // false with NO gap → a bare cell, NO reason (never padded, no default_gap)
   assert.equal(m.cells.catalog.hetzner.ok, false);
   assert.equal(m.cells.catalog.hetzner.reason, "");
@@ -10811,7 +11185,8 @@ test("gr-p4: capability matrix render — mark on yes, dash + verbatim reason on
   assert.ok(html.indexOf(">Fake<") === -1); // dev-tier filtered from the render
   assert.match(html, /cap-mark/); // a supported mark
   assert.match(html, /cap-dash/); // an unsupported dash
-  assert.match(html, /Hetzner has no pause primitive\./); // reason verbatim
+  assert.ok(html.includes(hooks.esc(HETZNER_PAUSE_GAP)), // reason verbatim, SPA-escaped
+    "the matrix cell must carry the derived server sentence verbatim");
   // honest degrade states
   assert.match(hooks.capabilityMatrixHtml(hooks.capabilityMatrixModel(undefined)), /Checking provider capabilities/);
   assert.match(hooks.capabilityMatrixHtml(hooks.capabilityMatrixModel(null)), /unavailable/);
@@ -16309,7 +16684,8 @@ test("GR24: the bp CLI card — title, 4 copyable commands, the SERVER pause sen
     assert.match(html, new RegExp("bp cloud instance " + verb + " web"));
   }
   // the pause verb leaves the grid: its SERVER-OWNED gap reason IS the foot sentence.
-  assert.match(html, /inst-life-footnote">Hetzner has no pause primitive\.</);
+  assert.ok(html.includes('inst-life-footnote">' + hooks.esc(HETZNER_PAUSE_GAP) + "<"),
+    "the CLI-card foot sentence IS the derived server gap reason");
   assert.doesNotMatch(html, /<button[^>]*disabled[^>]*>Pause</); // no dead Pause control in the grid
   // the destroy-tier verb anchors the foot with the typed-confirm ellipsis.
   assert.match(html, /cli-card-foot/);
@@ -16635,6 +17011,61 @@ test("gr-p3: deployFailHtml — the v4 red-bordered panel with dot; blocked keep
   assert.equal(hooks.deployFailHtml(null), "");
   // Escaped server copy.
   assert.doesNotMatch(hooks.deployFailHtml("<img src=x>"), /<img src=x>/);
+});
+
+test("task-f156b5e43bfbfe91: deployFailHtml renders the STRUCTURED halves, not the composite", () => {
+  const typed = {
+    code: "E_ABSOLUTE_PATH",
+    message: 'entry "/quota/index.html" is an absolute path — refused',
+  };
+  const html = hooks.deployFailHtml(ABS_PATH_REFUSAL, false, typed);
+
+  // The code is a TOKEN on screen, in its own element.
+  assert.match(html, /<strong>E_ABSOLUTE_PATH<\/strong>/);
+  assert.match(html, /is an absolute path/);
+  // and the caption prose the server fused in front of it is GONE from the panel.
+  assert.doesNotMatch(html, /the instance refused the deploy/);
+
+  // Code with no message: the code alone, no dangling separator.
+  const codeOnly = hooks.deployFailHtml(
+    "the instance refused the deploy (HTTP 409): already_running",
+    true,
+    { code: "already_running", message: null },
+  );
+  assert.match(codeOnly, /<strong>already_running<\/strong>/);
+  assert.doesNotMatch(codeOnly, /—\s*<\/span>/);
+
+  // Message with no code: the sentence, unwrapped.
+  const msgOnly = hooks.deployFailHtml("x", false, { code: null, message: "the box said no" });
+  assert.match(msgOnly, /<span>the box said no<\/span>/);
+
+  // BOTH HALVES ARE ESCAPED — the message is a REMOTE CAPTURE and the code is
+  // the box's own string; neither is trusted markup.
+  const xss = hooks.deployFailHtml("x", false, {
+    code: "<img src=x>",
+    message: "<script>alert(1)</script>",
+  });
+  assert.doesNotMatch(xss, /<img src=x>/);
+  assert.doesNotMatch(xss, /<script>/);
+
+  // NO STRUCTURE → the composite path is byte-for-byte what it was.
+  assert.equal(hooks.deployFailHtml("npm run build exited 1", false, { code: null, message: null }),
+    hooks.deployFailHtml("npm run build exited 1"));
+});
+
+test("task-f156b5e43bfbfe91: deployTypedRefusal reads the two wire keys, and only those", () => {
+  // Field-by-field, not deepEqual: the object is minted inside app.js's own
+  // realm, so its prototype is not this module's Object.prototype and
+  // deepStrictEqual reds on "same structure but not reference-equal".
+  const got = hooks.deployTypedRefusal({ failure_code: "E_X", failure_message: "boom" });
+  assert.equal(got.code, "E_X");
+  assert.equal(got.message, "boom");
+  // A legacy row (the whole pre-split corpus) carries neither, and the reader
+  // must say so rather than invent a code from the prose.
+  const legacy = hooks.deployTypedRefusal({ failure_reason: ABS_PATH_REFUSAL });
+  assert.equal(legacy.code, undefined);
+  assert.equal(legacy.message, undefined);
+  assert.equal(hooks.deployTypedRefusal(null), null);
 });
 
 test("gr-p3: a cancelled row states its state through the pill, no invented copy", () => {
@@ -17312,6 +17743,19 @@ test("gr-p3: previewRow meta carries preview env + provenance + duration; failed
   assert.match(html, /deploy-fail-dot/);
 });
 
+// ── TDZ HOIST (cch-bl-tdz-ledger-two-real-crossings) ────────────────────────
+// `ME_OWNER` and `FORBIDDEN_GENERIC` used to be declared ~3 600 and ~5 100
+// lines BELOW the second depth-0 `await` on the next screen, and both are read
+// by tests registered ~14 000 lines ABOVE it. That is a real temporal-dead-zone
+// crossing: it stays latent only because that await re-imports a module the
+// first one already cached, so node never actually suspends there. Give that
+// import any real async work and both reads throw ReferenceError. Declaring
+// them here — above the suspension point — closes the window for good, and
+// empties `scripts/console-tdz-order-check.mjs`'s LATENT ledger (removed in the
+// same commit; a ledger entry that matches nothing is fatal by design).
+const ME_OWNER = { role: "owner", team: { id: "t1", name: "Acme Inc" }, user: { id: "u1", email: "ada@acme.com" }, team_authority: { team_id: "t1", role: "owner", admin: true, owner: true } };
+const FORBIDDEN_GENERIC = "You don't have permission to do that, and the refusal didn't say which role would allow it.";
+
 // ── cch-w28-bl · A REFUSED PUBLISH SPEAKS ───────────────────────────────────
 // `Sites.AutoDeployWorker.refuse/1` mints a TERMINAL row at status "cancelled"
 // carrying a full actionable sentence — the `bp cloud site deploy … --prebuilt`
@@ -17870,6 +18314,132 @@ test("G-04 notifDeliveryRowHtml: recipient + toned pill + meta + verbatim error"
   assert.match(chat, /204 OK/);
   assert.match(chat, /wh-del-status--ok/);
   assert.doesNotMatch(chat, /wh-del-err/);
+});
+
+// ── dr-w26 / cch-w63: status_meaning RENDERS WHERE THE CHIP IS ───────────────
+//
+// `sent` means the mail transport ACCEPTED the message, not that it arrived.
+// The control plane ships that sentence on the delivery payload
+// (`Notifications.Delivery.status_meaning/1` via the cloud router's
+// `delivery_json/1`); the console's job is to put it beside the word, in the
+// same row, so a reader cannot pick up the chip without the caveat.
+//
+// THE SURFACE SET IS DERIVED, NOT ASSUMED. Exactly TWO functions in app.js emit
+// a `.wh-del-status` pill:
+//
+//   grep -n 'wh-del-status wh-del-status--' cloud/priv/static/app.js
+//     → notifDeliveryRowHtml  (the CONTROL-PLANE notification log — the payload
+//                              #16336 adds the field to)
+//     → deliveryRowHtml       (the INSTANCE webhook log — a different producer,
+//                              `render_delivery`, which has no such field today)
+//
+// Both are covered below, and the second is covered precisely because it does
+// NOT have the field: an absent key must leave that row byte-identical.
+//
+// The test that fails if a THIRD paint site appears is the count assertion in
+// the first case — a source grep, not a render, because a new emitter would
+// otherwise ship uncovered exactly the way this one nearly did.
+
+test("dr-w26: exactly two functions paint the delivery status chip, and the meaning rides in both", () => {
+  const pills = (APP_SRC.match(/wh-del-status wh-del-status--/g) || []).length;
+  assert.equal(pills, 2,
+    "the delivery status chip is painted " + pills + " times; the meaning must ride in EVERY one — " +
+    "re-derive the surface set and cover the new emitter");
+  // …and every pill emission is followed by the meaning helper BEFORE the row's
+  // next element, so "two sites" and "two covered sites" are the same claim.
+  // Measured, not guessed: the helper sits 223 and 351 source characters after
+  // the two pill markers (the gap is the rationale comment at each call site),
+  // and the window below is short enough that ONE site cannot reach the OTHER —
+  // the two are ~8,100 characters apart. A window that spanned both would let a
+  // single wired site green a missing one.
+  const idx = [];
+  for (let at = APP_SRC.indexOf("wh-del-status wh-del-status--"); at !== -1;
+       at = APP_SRC.indexOf("wh-del-status wh-del-status--", at + 1)) idx.push(at);
+  assert.equal(idx.length, 2);
+  assert.ok(idx[1] - idx[0] > 1000, "the two paint sites are far apart — the window below is site-local");
+  for (const at of idx) {
+    const window = APP_SRC.slice(at, at + 1000);
+    assert.ok(window.includes("deliveryStatusMeaningHtml(d)"),
+      "a status pill at offset " + at + " is painted without the meaning beside it");
+  }
+});
+
+test("dr-w26: a `sent` row renders the chip word and the meaning ADJACENT, in the same row", () => {
+  const MEANING =
+    "Accepted by the mail transport — NOT confirmed delivered to the recipient.";
+  const row = hooks.notifDeliveryRowHtml({
+    recipient: "alerts@acme.com", event: "deploy.failed", channel: "email",
+    status: "sent", status_meaning: MEANING, attempts: 1, http_status: null,
+    inserted_at: "2026-08-08T23:00:00Z",
+  });
+  // BOTH WORDS, and both inside the one `.wh-del-row` — not a tooltip, not a
+  // detail pane, not a second card.
+  assert.match(row, /wh-del-status--ok[^>]*>Sent</);
+  assert.match(row, /wh-del-meaning/);
+  assert.ok(row.includes("Accepted by the mail transport"),
+    "the payload's sentence is not rendered");
+
+  // ADJACENCY, stated structurally: the meaning span opens immediately after
+  // the status span closes, with nothing between them. A caveat two cells away
+  // is a caveat that reads as being about something else.
+  assert.match(row, /<\/span><span class="wh-del-meaning">/);
+  const rowStart = row.indexOf('<div class="wh-del-row">');
+  const rowEnd = row.indexOf("</div>", rowStart);
+  assert.ok(row.indexOf("wh-del-meaning") > rowStart && row.indexOf("wh-del-meaning") < rowEnd,
+    "the meaning escaped the delivery row");
+
+  // NO SECOND AUTHOR: the console does not own this sentence. If app.js ever
+  // grows its own copy of it, the two drift and the caveat stops matching the
+  // status the server actually stamped.
+  assert.ok(!APP_SRC.includes("Accepted by the mail transport"),
+    "app.js authors its own copy of the meaning — it must render the payload's");
+
+  // The sentence is ESCAPED, never injected.
+  const evil = hooks.notifDeliveryRowHtml({ status: "sent", status_meaning: '<img src=x onerror=1>' });
+  assert.ok(!evil.includes("<img"), "status_meaning is interpolated unescaped");
+  assert.match(evil, /&lt;img/);
+});
+
+test("dr-w26: a payload WITHOUT status_meaning renders the row unchanged — no undefined, no empty qualifier", () => {
+  const base = {
+    recipient: "alerts@acme.com", event: "deploy.failed", channel: "email",
+    status: "sent", attempts: 1, http_status: null, inserted_at: "2026-08-08T23:00:00Z",
+  };
+  // THE CONTROL: byte-identical to what this row rendered before the field
+  // existed. An older control plane, and every row written before #16336, take
+  // this path — a blank qualifier would read exactly like a confident claim.
+  for (const absent of [base, { ...base, status_meaning: null }, { ...base, status_meaning: "" }]) {
+    const row = hooks.notifDeliveryRowHtml(absent);
+    assert.ok(!row.includes("wh-del-meaning"), "an empty qualifier span was emitted");
+    assert.ok(!row.includes("undefined"), "the row rendered the string 'undefined'");
+    assert.ok(!row.includes("null"), "the row rendered the string 'null'");
+    assert.match(row, /wh-del-status--ok[^>]*>Sent</, "the chip itself must be unchanged");
+  }
+  // …and the with/without rows differ ONLY by the meaning span.
+  const withIt = hooks.notifDeliveryRowHtml({ ...base, status_meaning: "Accepted, not delivered." });
+  assert.equal(withIt.replace(/<span class="wh-del-meaning">[^<]*<\/span>/, ""),
+    hooks.notifDeliveryRowHtml(base),
+    "adding status_meaning changed something other than the meaning span");
+});
+
+test("dr-w26: the INSTANCE webhook row is untouched today and carries the meaning the day its producer grows one", () => {
+  // `deliveryRowHtml` renders the instance's own delivery log (`render_delivery`),
+  // a DIFFERENT producer with no status_meaning field. Today it must render
+  // exactly as before — this is the regression guard for the second surface.
+  const inst = { id: "d1", status: "success", status_code: 200, attempt: 1, delivered_at: "2026-08-08T23:00:00Z" };
+  assert.ok(!hooks.deliveryRowHtml(inst, "acme", "production").includes("wh-del-meaning"),
+    "the webhook row invented a meaning its producer never sent");
+  // …and it is wired, so the day that producer ships the field nobody has to
+  // find this call site again.
+  assert.match(hooks.deliveryRowHtml({ ...inst, status_meaning: "Accepted by the endpoint." }, "acme", "production"),
+    /wh-del-meaning">Accepted by the endpoint\./);
+});
+
+test("dr-w26: deliveryStatusMeaningHtml is total and never emits an empty element", () => {
+  for (const d of [undefined, null, {}, { status_meaning: null }, { status_meaning: "" }])
+    assert.equal(hooks.deliveryStatusMeaningHtml(d), "");
+  assert.equal(hooks.deliveryStatusMeaningHtml({ status_meaning: "x" }),
+    '<span class="wh-del-meaning">x</span>');
 });
 
 // ── cch-w52-s3: THE CARRIER SEGMENT ──────────────────────────────────────────
@@ -20980,7 +21550,8 @@ async function driveMe(status, payload) {
 // same commit — otherwise the floor deletion reds cch-w41-s3 below, whose
 // ME_ADMIN is the only admin fixture in the whole harness. admin/owner mirror
 // Authz: owner is both, admin is admin-not-owner, member is neither.
-const ME_OWNER = { role: "owner", team: { id: "t1", name: "Acme Inc" }, user: { id: "u1", email: "ada@acme.com" }, team_authority: { team_id: "t1", role: "owner", admin: true, owner: true } };
+// ME_OWNER is declared above the second top-level `await` (the `__preview__/scenarios.mjs`
+// re-import under "A REFUSED PUBLISH SPEAKS") — see cch-bl-tdz-ledger-two-real-crossings.
 const ME_MEMBER = { role: "member", team: { id: "t1", name: "Acme Inc" }, user: { id: "u2", email: "lin@acme.com" }, team_authority: { team_id: "t1", role: "member", admin: false, owner: false } };
 const MEMBER_NOTE = "Members can create read-only tokens. Ask an admin for write, deploy, or root.";
 
@@ -22447,7 +23018,8 @@ test("cch-w66-bl: the other four create refusals get console voice, and only the
 // the fence must still beat — and keeps the retired-string check beside it as a
 // cheap ratchet against a revert.
 const FORBIDDEN_BILLING = "Only the team owner can manage billing.";
-const FORBIDDEN_GENERIC = "You don't have permission to do that, and the refusal didn't say which role would allow it.";
+// FORBIDDEN_GENERIC is declared above the second top-level `await` (the `__preview__/scenarios.mjs`
+// re-import under "A REFUSED PUBLISH SPEAKS") — see cch-bl-tdz-ledger-two-real-crossings.
 const ADMIN_SENTENCE = "You need the admin role on this team — an admin on this team can grant it.";
 const OUTRANKED_SENTENCE = "You can only act on members whose role is below your own, and this member's is not.";
 const CANNOT_GRANT_SENTENCE = "You can't grant a role above your own — that has to come from someone who already holds it on this team.";
@@ -25703,6 +26275,56 @@ test("cch-w65: humanAction serves cloud/priv/audit-actions.json — every label,
   // The fallback is the whole reason a null row is honest rather than a hole: an
   // action the SPA has never heard of still renders instead of disappearing.
   assert.equal(hooks.humanAction("site.invented_by_a_future_slice"), "site.invented_by_a_future_slice");
+});
+
+// ── cch-w62-bl: the instance-lifecycle verbs read as sentences in the TITLE ───
+// The row this test closes measured the Timeline's title slot rendering a raw
+// dotted machine token for every verb this epic ships. `tlvEntryTitle` is the
+// SHIPPED renderer for that slot (app.js: the `source === "audit"` arm returns
+// `actor + " " + humanAction(type)`), and `tlvRowHtml` escapes its return into
+// `<span class="tlv-title">` — so driving it here drives what an operator sees,
+// not a copy of it.
+//
+// BEFORE (what main rendered, and what this asserts can no longer happen):
+//   ops@acme.com barkpark.self_update_triggered
+//   ops@acme.com barkpark.rollback_triggered
+//   ops@acme.com barkpark.resurrected
+//   ops@acme.com barkpark.studio_link_minted
+//   ops@acme.com barkpark.domain_attached
+// AFTER (asserted below):
+//   ops@acme.com triggered a self-update
+//   ops@acme.com triggered a rollback
+//   ops@acme.com resurrected a Barkpark
+//   ops@acme.com minted a Studio sign-in link
+//   ops@acme.com attached a domain to a Barkpark
+test("cch-w62-bl: tlvEntryTitle renders a sentence for the instance-lifecycle verbs that were raw slugs", () => {
+  const AFTER = {
+    "barkpark.self_update_triggered": "ops@acme.com triggered a self-update",
+    "barkpark.rollback_triggered": "ops@acme.com triggered a rollback",
+    "barkpark.resurrected": "ops@acme.com resurrected a Barkpark",
+    "barkpark.studio_link_minted": "ops@acme.com minted a Studio sign-in link",
+    "barkpark.domain_attached": "ops@acme.com attached a domain to a Barkpark",
+  };
+  assert.ok(Object.keys(AFTER).length >= 3, "the row asks for at least three verbs");
+
+  for (const [type, expected] of Object.entries(AFTER)) {
+    const entry = { source: "audit", actor: "ops@acme.com", type: type, at: "2026-09-06T10:00:00Z" };
+    const title = hooks.tlvEntryTitle(entry);
+    assert.equal(title, expected, `${type} must read as a sentence in the title slot`);
+    // The negative half, stated as its own assertion so a future regression to
+    // the fallback reds HERE and not only on the equality above.
+    assert.ok(!title.includes(type),
+      `${type}: the title still carries the raw dotted machine token — humanAction fell through to ACTION_LABELS[a] || a`);
+    // And the sentence actually reaches the DOM the operator reads.
+    assert.match(hooks.tlvRowHtml(entry), new RegExp('class="tlv-title">' + expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+
+  // The control: a verb the table has never heard of still renders raw, because
+  // D582's fallback is the reason a null row is honest rather than a hole.
+  assert.equal(
+    hooks.tlvEntryTitle({ source: "audit", actor: "ops@acme.com", type: "barkpark.invented_by_a_future_slice" }),
+    "ops@acme.com barkpark.invented_by_a_future_slice",
+  );
 });
 
 // ── cch-w62: friendly() unwraps the nested envelope + the fenced detail rung ──

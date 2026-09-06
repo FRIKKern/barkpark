@@ -1,21 +1,26 @@
 // gate-map.test.mjs — the composer's own harness. It is built to LOSE: a
-// planted map entry, a removed instrument, and a scan set that stops seeing
-// cloud/priv/static all red it. A green here means the derivation still finds
-// the edge wave 16 shipped past.
+// planted map entry, a removed instrument, a scan set that stops seeing
+// cloud/priv/static, an empty population glob and a collapsed population all
+// red it. A green here means the derivation still finds the edge wave 16
+// shipped past — and that no committed snapshot has crept back in to make a
+// third party's merge red main (task-294d79c9345d59dd).
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   REPO,
-  MAP_PATH,
+  POPULATION_GLOBS,
+  POPULATION_FLOOR,
+  verifyDerivation,
+  currentMap,
   population,
   scanSites,
   derive,
   matches,
   requiredFor,
   verify,
-  loadMap,
   instrumentsUnderPrefix,
   runCommandFor,
   NEEDS_ARGV,
@@ -71,7 +76,7 @@ test("relative dynamic imports and new URL reads are derived as file scan sites"
 });
 
 test("THE COMPOSITION: a slice touching only breakpoint-sweep.mjs REQUIRES __css_check", () => {
-  const req = requiredFor([SWEEP], loadMap());
+  const req = requiredFor([SWEEP], currentMap());
   const paths = req.map((r) => r.path);
   assert.ok(paths.includes(CSS), `composed gate = ${paths.join(", ")}`);
   assert.ok(paths.includes(SWEEP), "the edited instrument runs too");
@@ -82,7 +87,7 @@ test("THE COMPOSITION: a slice touching only breakpoint-sweep.mjs REQUIRES __css
 });
 
 test("the prefix view answers the row: cloud/priv/static/** names every instrument it listed", () => {
-  const list = instrumentsUnderPrefix("cloud/priv/static", loadMap()).map((i) => i.path);
+  const list = instrumentsUnderPrefix("cloud/priv/static", currentMap()).map((i) => i.path);
   for (const need of [
     "cloud/priv/static/__css_check.mjs",
     "cloud/priv/static/__app.test.mjs",
@@ -102,17 +107,17 @@ test("a slice that touches nothing any instrument scans composes an EMPTY gate",
   // NOT a docs/ path: the doc gates walk docs/ as a subtree, so a docs file is
   // legitimately non-empty. (First draft of this test used one and reded —
   // correctly. Kept as the positive case below.)
-  const req = requiredFor(["scratch-nowhere/unscanned-fixture.txt"], loadMap());
+  const req = requiredFor(["scratch-nowhere/unscanned-fixture.txt"], currentMap());
   assert.equal(req.length, 0, `composed ${req.map((r) => r.path).join(", ")}`);
 });
 
 test("a docs/ edit is NOT empty — the doc gates walk that subtree", () => {
-  const req = requiredFor(["docs/cards/cli.md"], loadMap()).map((r) => r.path);
+  const req = requiredFor(["docs/cards/cli.md"], currentMap()).map((r) => r.path);
   assert.ok(req.some((p) => /docs-anchors-check|check-doc-budgets/.test(p)), `composed ${req.join(", ")}`);
 });
 
 test("SELFTEST — a PLANTED map entry is refused", () => {
-  const map = loadMap();
+  const map = currentMap();
   const planted = JSON.parse(JSON.stringify(map));
   planted.instruments.push({
     path: "cloud/priv/static/__preview__/does-not-exist.mjs",
@@ -125,7 +130,7 @@ test("SELFTEST — a PLANTED map entry is refused", () => {
 });
 
 test("SELFTEST — a REMOVED instrument is refused, never a quietly shorter answer", () => {
-  const map = loadMap();
+  const map = currentMap();
   const shortened = JSON.parse(JSON.stringify(map));
   shortened.instruments = shortened.instruments.filter((i) => i.path !== CSS);
   const v = verify(shortened);
@@ -134,7 +139,7 @@ test("SELFTEST — a REMOVED instrument is refused, never a quietly shorter answ
 });
 
 test("SELFTEST — a MOVED scan set is refused", () => {
-  const map = loadMap();
+  const map = currentMap();
   const moved = JSON.parse(JSON.stringify(map));
   const css = moved.instruments.find((i) => i.path === CSS);
   css.scans = css.scans.filter((s) => s.p !== "cloud/priv/static/__preview__");
@@ -143,13 +148,94 @@ test("SELFTEST — a MOVED scan set is refused", () => {
   assert.ok(v.problems.some((p) => /scan set moved/.test(p)), v.problems.join("; "));
 });
 
-test("the COMMITTED snapshot still describes the tree", () => {
-  const v = verify(loadMap());
-  assert.equal(v.ok, true, v.problems.slice(0, 8).join("\n"));
+// ── THE TREADMILL, AND WHY IT CANNOT HAPPEN AGAIN ───────────────────────────
+// task-294d79c9345d59dd. The snapshot was committed, so two PRs that were each
+// green apart reded MAIN together: PR A merged an instrument under
+// POPULATION_GLOBS, PR B carried a snapshot derived before A. Neither diff
+// touched the other's files, so there was no conflict and no pre-merge signal
+// anywhere. This test reproduces that exact sequence and asserts the SHIPPED
+// check survives it.
+test("THE TWO-PR SEQUENCE: a map derived before another lane's merge no longer reds anything", () => {
+  const live = currentMap();
+  // PR A's merge, as the tree sees it: some instrument exists here and now.
+  const landed = live.instruments.map((i) => i.path).find((p) => /\.test\.mjs$/.test(p));
+  assert.ok(landed, "the tree derives at least one *.test.mjs instrument");
+
+  // PR B's base, i.e. a snapshot derived one merge ago: identical except it
+  // predates `landed`. THIS IS WHAT USED TO BE COMMITTED.
+  const stale = JSON.parse(JSON.stringify(live));
+  stale.instruments = stale.instruments.filter((i) => i.path !== landed);
+  stale.mapped -= 1;
+  stale.population -= 1;
+
+  // The OLD behaviour, still exercised: diffed against the tree, that stale map
+  // is a refusal — and it appeared on MAIN, on nobody's diff.
+  const old = verify(stale);
+  assert.equal(old.ok, false, "a map missing a landed instrument must still diff as stale");
+  assert.ok(old.problems.some((p) => p.includes(landed)), old.problems.slice(0, 5).join("; "));
+
+  // The NEW behaviour: nothing consumes a snapshot, so that same staleness is
+  // unreachable. The shipped check derives, and it is green.
+  const v = verifyDerivation();
+  assert.equal(v.ok, true, v.problems.join("\n"));
+  assert.ok(v.map.instruments.some((i) => i.path === landed), `${landed} is in the derived map`);
+});
+
+test("NO COMMITTED SNAPSHOT — re-committing one re-introduces the treadmill", () => {
+  // TRACKED, not merely present: `--derive > tooling/gate-map/gate-map.json` is
+  // still a fine thing to do locally to read the map, and tooling/gate-map/
+  // .gitignore keeps that scratch copy out of the index. What must never come
+  // back is a COMMITTED one.
+  const tracked = spawnSync("git", ["-C", REPO, "ls-files", "--", "tooling/gate-map/gate-map.json"], {
+    encoding: "utf8",
+  });
+  assert.equal(tracked.status, 0, tracked.stderr);
+  assert.equal(
+    tracked.stdout.trim(),
+    "",
+    "tooling/gate-map/gate-map.json is committed again. Any merge adding a file under POPULATION_GLOBS then stales it and reds main for a third party (task-294d79c9345d59dd)."
+  );
+});
+
+test("THE WIRED COMMAND: `gate-map.mjs --verify` exits 0 on this tree, with no snapshot to read", () => {
+  // Both .github/workflows/pr-meta.yml and .github/workflows/shell-harnesses.yml
+  // run this exact argv. Asserting the exported function is not enough — the
+  // CLI path is what CI executes.
+  const r = spawnSync(process.execPath, ["tooling/gate-map/gate-map.mjs", "--verify"], {
+    cwd: REPO,
+    encoding: "utf8",
+  });
+  const out = (r.stdout || "") + (r.stderr || "");
+  assert.equal(r.status, 0, out);
+  assert.match(out, /derivation ok \(\d+ instruments/, out);
+});
+
+// ── THE FLOOR IS BUILT TO LOSE ──────────────────────────────────────────────
+// Deleting the snapshot deleted staleness AND the diff that would have shown a
+// derivation collapsing. These are the replacements, and each is mutated here.
+test("SELFTEST — a POPULATION_GLOBS entry that matches nothing is refused", () => {
+  const v = verifyDerivation(REPO, [...POPULATION_GLOBS, "scripts/*.no-such-extension"]);
+  assert.equal(v.ok, false, "a glob matching no committed file must refuse");
+  assert.ok(v.problems.some((p) => /no-such-extension/.test(p)), v.problems.join("; "));
+});
+
+test("SELFTEST — a population that collapsed under the floor is refused", () => {
+  // One glob only: a legitimate slice of the population, far under the floor —
+  // this is the shape a broken `population()` or a broken git would produce.
+  const v = verifyDerivation(REPO, ["tooling/**/check*.mjs"]);
+  assert.equal(v.ok, false, "a collapsed population must refuse");
+  assert.ok(v.problems.some((p) => /under the floor/.test(p)), v.problems.join("; "));
+});
+
+test("the floor sits BELOW today's population — it detects collapse, not growth", () => {
+  const pop = currentMap().population;
+  assert.ok(pop > POPULATION_FLOOR, `population ${pop} <= floor ${POPULATION_FLOOR}`);
+  // And the headroom is real: adding instruments can never approach it.
+  assert.ok(POPULATION_FLOOR > 0, "the floor is not vacuous");
 });
 
 test("UNMAPPED instruments are counted and listed, never dropped", () => {
-  const map = loadMap();
+  const map = currentMap();
   assert.ok(Array.isArray(map.unmapped), "unmapped is a list");
   assert.equal(map.mapped + map.unmapped.length, map.population,
     `mapped ${map.mapped} + unmapped ${map.unmapped.length} != population ${map.population}`);
@@ -170,11 +256,12 @@ test("run commands match how CI invokes each shape", () => {
   assert.equal(runCommandFor("x/y.sh"), "bash x/y.sh");
 });
 
-test("the snapshot on disk is the derivation, byte for byte", () => {
-  const onDisk = JSON.parse(fs.readFileSync(MAP_PATH, "utf8"));
-  const fresh = derive();
-  assert.equal(onDisk.population, fresh.population);
-  assert.equal(onDisk.mapped, fresh.mapped);
+test("currentMap() IS the derivation — there is no other source", () => {
+  const a = currentMap();
+  const b = derive();
+  assert.equal(a.population, b.population);
+  assert.equal(a.mapped, b.mapped);
+  assert.deepEqual(a.instruments.map((i) => i.path), b.instruments.map((i) => i.path));
 });
 
 test("NEEDS-INVOCATION is told apart from a finding (both shapes measured on this tree)", () => {

@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  122 scenarios, 24 rendered, 98 in a COMMITTED residue literal.
+//   SCENARIO  123 scenarios, 24 rendered, 99 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -185,13 +185,18 @@
 //          clipping ones (and form controls) at rect.right, since that is all
 //          they paint. Measured on origin/main at 769: #fleet-body +21,
 //          div.fleet-row +20 — the exact cells this sub-case exists for.
-//   Q3 BELOW THE FOLD      ONE number — the viewport y of `.content` — against
-//      a fraction of viewport height, not a general rule. It measures 745.88px
-//      at every width <= 720 and 56 above. Slice S2 fixes that; THIS slice must
-//      not wait for it, so Q3 ships with a NAMED PIN in the shape
-//      overflow-guard.mjs uses for FLEET_ROW_RESIDUAL: an explicit allowance
-//      citing cch-w13-bl-folded-shell-nav-wall that reds if the number GROWS.
-//      Pin removal is the follow-up row cch-w14-bl-sweep-navwall-pin-removal.
+//   Q3 BELOW THE FOLD      TWO numbers, against a fraction of viewport height:
+//      the SCREEN's own start (the first painted box of the live `section.view`,
+//      minus the folded chrome stacked above `.content`) and, separately, the
+//      FOLDED CHROME itself against a pinned ceiling. It used to be one number —
+//      the raw viewport y of `.content` — and at 320 that number is 344.5-378.5
+//      against a 320px budget, i.e. the shell alone busts the budget and NO
+//      screen can pass: a guard that can only lose. Splitting it keeps both
+//      halves able to fail (a screen that pushes its first box 320px down reds
+//      Q3; a shell that grows past SHELL_CHROME_CEILING reds the chrome pin).
+//      The full measurement and the ruling it implements are at
+//      SHELL_CHROME_SELECTORS below (cch-w24-bl-q3-fold-budget-is-a-shell-
+//      property-at-320).
 //
 //  DO NOT RAISE app.css:4241. Wave 13 measured that raising the shell fold
 //  RELOCATES the cliff and exports a 746px nav wall to every tablet.
@@ -201,16 +206,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  The fresh-CDP-target-per-cell requirement is what BUYS liveness, and it
 //  costs roughly a second per cell (0.73s measured). The full render leg is
-//  25 cells x 2 themes x ONE height x 18 boundary widths = 900 renders: budget
+//  25 cells x 2 themes x ONE height x 21 boundary widths = 1050 renders: budget
 //  MINUTES. The height axis multiplies that and is therefore OPT-IN — all three
 //  declared HEIGHTS make it 2700 renders (32.9 min), the number that decided
 //  the default loop (HEIGHT_REASONS[800]). The width numeral here is
-//  the DERIVED boundary walk (`WIDTHS.length`, printed by `--census` as "18
+//  the DERIVED boundary walk (`WIDTHS.length`, printed by `--census` as "21
 //  boundary widths"), not the 15 that this file's residue prose still repeats —
 //  that stale numeral has no arm and is owned by
 //  cch-w63-bl-the-derived-width-axis-has-no-arm-and-its-prose-propagated.
-//  Measured, not assumed: `--render --cell inst-update-refused` reports 36
-//  renders for ONE cell (18 x 2). The theme axis DOUBLED that, for an
+//  Measured, not assumed: `--render --cell inst-update-refused` reports 42
+//  renders for ONE cell (21 x 2). The theme axis DOUBLED that, for an
 //  axis stated above to be coverage rather than yield — slice it with
 //  `--theme light` when you are chasing a width, not a mode. Two traps proven the hard way: Page.navigate to
 //  a URL differing only in its hash is a SAME-DOCUMENT navigation, so injected
@@ -304,7 +309,7 @@ export function boundaryWalk(breakpoints) {
 // LOWER edge costs no entry: 620 is already declared, and 621 is walked as
 // 620+1.
 //
-// Derived from app.css: 620, 720, 740, 768, 830, 899. Declared here as the sweep's
+// Derived from app.css: 620, 720, 740, 768, 830, 899, 904. Declared here as the sweep's
 // committed axis so Leg A can refuse when the stylesheet grows a breakpoint
 // this list does not carry — and, since cch-w15's phantom half, when it loses
 // one. 900 LEFT THIS LIST because cch-w16-s8 deleted app.css's only
@@ -313,7 +318,17 @@ export function boundaryWalk(breakpoints) {
 // parsed as the boundary 899, which is why 899 stays. THE WIDTH 900 IS STILL
 // DRIVEN — boundaryWalk emits 899+1 — so the only width this shrink costs is
 // 901.
-export const BREAKPOINTS = [620, 720, 740, 768, 830, 899];
+// 904 JOINED THE LIST via cch-w18-bl. The W20-S9 attention-name band's upper
+// edge was `max-width: 899px`, a number DRIVEN against a fixture string the
+// control plane does not write: `Registry.mark_offline/1` writes
+// `health_status: "unknown"` deliberately, so a degraded box serves "Health
+// unknown · Agent offline", three characters and +21px longer than the "Health
+// down · Agent offline" the fixture used to carry. On the real string the name
+// column is cut from 900 through 904 (67/62 at 900, 67/66 at 904, clean from
+// 905), so the band's edge was RE-DERIVED to 904 and this axis grew with it.
+// Leg A refusing here is the design working: a breakpoint the stylesheet
+// declares and this list does not is a set of widths nothing drives.
+export const BREAKPOINTS = [620, 720, 740, 768, 830, 899, 904];
 export const WIDTHS = boundaryWalk(BREAKPOINTS);
 
 const INST = IDS.liveInstance;
@@ -374,7 +389,7 @@ export const HEIGHTS = [390, 667, 800];
 export const HEIGHT_REASONS = {
   390: "LANDSCAPE. 720x390 is the binding height for the fold bar — the shipped 34vh cap read 0.4836 of H here while passing casual inspection at 800, so a height set without it cannot see the defect cch-w15-s1 fixed.",
   667: "SHORT PORTRAIT. iPhone SE / small-phone portrait: the shortest height at which the folded shell is a normal reading posture rather than an edge case.",
-  800: "THE DRIVEN DEFAULT, AND THE DEFAULT LOOP IS ONE HEIGHT — DECIDED, WITH THE NUMBER. Leg B renders at 800 unless --height says otherwise, and every Q3 number this epic quotes was taken there. Walking all three declared heights by default would take the full leg from 25 cells x 2 themes x 1 height x 18 widths = 900 renders (11.0 min at the measured 0.73s/cell) to 2700 (32.9 min), on an axis whose only measured yield so far is the fold number Q3 already prints at every height it is asked for. So the height axis is OPT-IN (--height 390,667,800), the declared set is what --height will accept, and 390/667 are no longer declared-and-undrivable: cch-w16-bl-legb-drives-one-of-three-heights.",
+  800: "THE DRIVEN DEFAULT, AND THE DEFAULT LOOP IS ONE HEIGHT — DECIDED, WITH THE NUMBER. Leg B renders at 800 unless --height says otherwise, and every Q3 number this epic quotes was taken there. Walking all three declared heights by default would take the full leg from 25 cells x 2 themes x 1 height x 21 widths = 1050 renders (12.8 min at the measured 0.73s/cell) to 3150 (38.3 min), on an axis whose only measured yield so far is the fold number Q3 already prints at every height it is asked for. So the height axis is OPT-IN (--height 390,667,800), the declared set is what --height will accept, and 390/667 are no longer declared-and-undrivable: cch-w16-bl-legb-drives-one-of-three-heights.",
 };
 // THE EPIC'S HEIGHTS DISAGREE, AND THIS IS THE DISAGREEMENT STATED RATHER THAN
 // HIDDEN: modal-oracle/overflow-guard commit to 900, the fold identity is
@@ -421,16 +436,16 @@ export function familyOf(scen) {
 // render it. These are REASONS, not an allowlist: the allowlist is the 96
 // name-keyed entries below, which is what makes a 121st scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
-  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 26 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
-  "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 12 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all), and cch-w12-followup-login-fixture-gap's `activity-identity-change` (the corpus's ONLY successful-login fixture, a DRIVE through three states rather than a screen — smoke.mjs steps it from Activity to signed out to signed in as another team, and a transition is not a width) — over a grid already walked at all 15 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
-  "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 13 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 15 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg. `deploy-detail-cruel` (cch-deploy-detail-render-has-no-cap) is the family's OTHER cruel twin and is here for the same reason wearing the other axis: its 2,000-character live sub-caption is bounded VERTICALLY, and a fixture built to be 81 line-boxes tall would red every width of the walk for a height this sweep does not measure. It is driven at 320/390/620/900/1024/1440 x 2 themes by overflow-guard's W34-deploy-detail-render-bound leg. `site-deploy-rail-live` (cch-w29-bl) is the family's THIRD instrument fixture and the only one that is not cruel at all: it renders the rail's OTHER footer — `.deploy-rail-live`, which no scenario in this harness had ever produced — carrying the site's ordinary 55-character live URL. It is here rather than in a cell because what it exists to measure is one ANCHOR's wrap against its own container at phone widths, which is overflow-guard's axis and not a width walk over a .detail-grid the two cells already sweep at all 15 widths. It is driven at 320/360/390 x 2 themes by overflow-guard's W29-deploy-rail-live-url-wrap leg.",
-  "hash:#settings": "The settings screens are swept by EIGHT cells across billing/providers/notifications/tokens/members. These 8 are member-role, ACTOR-IDENTITY, empty-state and cruel-content variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 15 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
+  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 26 vary the CONTENT of a panel already rendered at all 18 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
+  "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 12 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all), and cch-w12-followup-login-fixture-gap's `activity-identity-change` (the corpus's ONLY successful-login fixture, a DRIVE through three states rather than a screen — smoke.mjs steps it from Activity to signed out to signed in as another team, and a transition is not a width) — over a grid already walked at all 18 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
+  "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 14 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 18 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 3 routes (cruel + kind control + the classified caption), by overflow-guard's W25-deploy-rail-fail-wrap leg. `site-deploy-rail-failed-classified` (task-877bfc465162e104) is the third of those routes and the family's FOURTH instrument fixture: it renders the same `.deploy-rail-fail` box carrying the one capture in this corpus whose caption MOVES between the box and the browser (`FailureCopy.humanize/1` classifies it; the wave-26 pair passes through unchanged), and its classified sentence is a DIFFERENT length from both, which is content length again — overflow-guard's axis, not this sweep's. `deploy-detail-cruel` (cch-deploy-detail-render-has-no-cap) is the family's OTHER cruel twin and is here for the same reason wearing the other axis: its 2,000-character live sub-caption is bounded VERTICALLY, and a fixture built to be 81 line-boxes tall would red every width of the walk for a height this sweep does not measure. It is driven at 320/390/620/900/1024/1440 x 2 themes by overflow-guard's W34-deploy-detail-render-bound leg. `site-deploy-rail-live` (cch-w29-bl) is the family's THIRD instrument fixture and the only one that is not cruel at all: it renders the rail's OTHER footer — `.deploy-rail-live`, which no scenario in this harness had ever produced — carrying the site's ordinary 55-character live URL. It is here rather than in a cell because what it exists to measure is one ANCHOR's wrap against its own container at phone widths, which is overflow-guard's axis and not a width walk over a .detail-grid the two cells already sweep at all 18 widths. It is driven at 320/360/390 x 2 themes by overflow-guard's W29-deploy-rail-live-url-wrap leg.",
+  "hash:#settings": "The settings screens are swept by EIGHT cells across billing/providers/notifications/tokens/members. These 8 are member-role, ACTOR-IDENTITY, empty-state and cruel-content variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 18 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
   "hash:#": "Routes whose head is a bare `#` — `#/invitations/accept` and `#/auth/reset`. These render a single centred card over the sign-in surface: no shell, no grid, nothing for a breakpoint to fold.",
   "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner. `account-modal-cruel-identity` (cch-w23-bl-cruel-identity-own-scenario) is the family's CRUEL twin, wearing the same axis `fleet-cruel-content` and `deploy-detail-cruel` do: its `.am-name` is a 158-character email local part at the server's own `validate_length(:email, max: 160)` cap, and content length is overflow-guard's axis, not this sweep's. It is driven at 320/360/390/430/620/900/1440 x 2 themes by overflow-guard's W23-account-modal-identity-bounded leg, beside `account-modal` as the kind control.",
   "path:/activate": "The device-activation page is not part of the console shell at all — a different document with its own layout, outside this sweep's screen axis.",
   "path:/new": "The launch/theater page is likewise its own document outside the shell.",
-  "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 8 vary member-role, cancelling copy, the portal return, cch-w39-s1's `billing-me-unreadable` and its one-shot recovery twin `billing-me-recovers`, and cch-w50-s4's two never-before-minted billing ACTORS (`billing-free-owner`, the unsubscribed owner renderPlanState routes to the upsell card, and `billing-support-plus`, the third catalog tier rendering as a CURRENT plan) inside those same panels — the unreadable pair swaps the Manage section's one-line copy for a single .empty-state block, and the upsell card is the same .card.plan-card the trial-tiers cell already walks at all 15 widths, one .plan-rec badge and one full-width button wider than nothing.",
-  "hash:#operator": "The operator console is swept by two cells (console, halted). These 5 vary zero-staging / denied / route-unreadable / me-unreadable / me-recovers states of the same panels — cch-w37-s6's `operator-me-unreadable` renders ONE empty-state block in place of the four cards, a geometry the two cells already walk at all 15 widths, and cch-w37-bl's `operator-me-recovers` is a CLICK fixture: it boots into that same empty-state block and, after the press smoke.mjs drives, settles on the console geometry the `console` cell already sweeps. Neither end state is new to this sweep; only the transition between them is, and a transition is not a width.",
+  "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 8 vary member-role, cancelling copy, the portal return, cch-w39-s1's `billing-me-unreadable` and its one-shot recovery twin `billing-me-recovers`, and cch-w50-s4's two never-before-minted billing ACTORS (`billing-free-owner`, the unsubscribed owner renderPlanState routes to the upsell card, and `billing-support-plus`, the third catalog tier rendering as a CURRENT plan) inside those same panels — the unreadable pair swaps the Manage section's one-line copy for a single .empty-state block, and the upsell card is the same .card.plan-card the trial-tiers cell already walks at all 18 widths, one .plan-rec badge and one full-width button wider than nothing.",
+  "hash:#operator": "The operator console is swept by two cells (console, halted). These 5 vary zero-staging / denied / route-unreadable / me-unreadable / me-recovers states of the same panels — cch-w37-s6's `operator-me-unreadable` renders ONE empty-state block in place of the four cards, a geometry the two cells already walk at all 18 widths, and cch-w37-bl's `operator-me-recovers` is a CLICK fixture: it boots into that same empty-state block and, after the press smoke.mjs drives, settles on the console geometry the `console` cell already sweeps. Neither end state is new to this sweep; only the transition between them is, and a transition is not a width.",
   "hash:#notifications": "Notifications are swept by two cells (configured, deliveries-error). These 2 are the empty and member-role variants of #notif-matrix.",
   "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 2 are the same table with different CONTENT: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg.",
   "hash:#signup": "The logged-out signup screen: no authed shell, and the sign-in surface is a single centred card with no grid to fold.",
@@ -471,7 +486,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // cch-w38-s1 moved it: `panel-overview-member` is the 105th scenario and the
 // 80th residue entry — residue for the same reason its owner twin
 // `panel-overview` is a CELL: it varies the CONTENT of a panel the four
-// instance cells already walk at all 15 widths, not its geometry.
+// instance cells already walk at all 18 widths, not its geometry.
 // cch-w45-s1 moved it by TWO: `members-admin-actor` and
 // `members-peer-owner` — the first fixtures in which the acting principal is
 // not the roster's row 0, so the first able to ask a rank-relative predicate
@@ -674,7 +689,7 @@ export const SCENARIO_RESIDUE = {
   "overview-never-reported": "hash:#overview",
   "overview-member-empty-fleet": "hash:#overview",
   // cch-w12-followup-login-fixture-gap — a DRIVE fixture, not a screen. It boots
-  // the same #overview grid the two cells already walk at all 15 widths and then
+  // the same #overview grid the two cells already walk at all 18 widths and then
   // moves through three states smoke.mjs steps it through by hand (Activity →
   // signed out → signed in as another team → Activity), none of which is a
   // width. What it exists to produce is the only thing this corpus could not:
@@ -682,7 +697,7 @@ export const SCENARIO_RESIDUE = {
   // with an account change across it. Its terminal geometry is the `activity`
   // cell's, which this sweep already renders.
   "activity-identity-change": "hash:#overview",
-  // hash:#site — 13
+  // hash:#site — 14
   "deploy-detail-cruel": "hash:#site",
   "promote-failure": "hash:#site",
   "promote-in-flight": "hash:#site",
@@ -690,6 +705,7 @@ export const SCENARIO_RESIDUE = {
   "promote-migrated": "hash:#site",
   "shell-site": "hash:#site",
   "site-deploy-rail-failed": "hash:#site",
+  "site-deploy-rail-failed-classified": "hash:#site",
   "site-deploy-rail-live": "hash:#site",
   "site-binding-bound": "hash:#site",
   "site-binding-unknown": "hash:#site",
@@ -801,6 +817,95 @@ export function selectCells(all, filter) {
 // clears the bar on its own: `max-height: calc(40vh - 60px)` cancels the 56px
 // topbar and makes contentTop = 0.4H - 4 an identity at every height.
 export const FOLD_FRACTION = 0.4;
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Q3 MEASURES THE SCREEN, AND THE SHELL IS PINNED SEPARATELY
+//  (cch-w24-bl-q3-fold-budget-is-a-shell-property-at-320, lane ruling option (b))
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE DEFECT, AS MEASURED ON origin/main @327ffd96b, `--render --widths 320`:
+//    sites/dark@320x800          .content starts 344.5px down (budget 320px)  ✗
+//    billing-trial/dark@320x800  .content starts 378.5px down (budget 320px)  ✗
+//  Both of those numbers are SHELL, not screen. The same run, instrumented:
+//    aside.sidebar   top 0    bottom 260    (the `max-height: calc(40vh - 60px)` cap)
+//    header.topbar   top 260  bottom 344.5  (h 84.5 — the topbar WRAPS at 320)
+//                    top 260  bottom 378.5  (h 118.5 on billing-trial — the
+//                                            trial chip adds a third wrapped line)
+//    main.content    top 344.5 / 378.5      — EXACTLY the topbar's bottom, 0px gap
+//  So at 320 the folded chrome alone spends 344.5-378.5px of a 320px budget and
+//  no screen can pass: a guard that can only lose, which is the mirror of this
+//  epic's usual defect and just as dishonest.
+//
+//  WHAT THE RULING SAID, AND WHERE IT DOES NOT SURVIVE CONTACT. Option (b) is
+//  "`.content` top offset MINUS the measured folded-chrome height". Taken
+//  literally that is IDENTICALLY ZERO at every width, because the measurement
+//  above shows `.content`'s top IS the chrome's bottom — there is no gap between
+//  them to measure. A number that is 0 by construction is a guard that cannot
+//  fail, so Q3 anchors one box lower: the FIRST PAINTED BOX of the live
+//  `section.view`. That is still ONE number and still the fold question; it is
+//  not the "tall row displaces its siblings" question, which this row does not
+//  buy (that is cch-w24-bl-nothing-pins-height-against-a-cruel-string).
+//
+//    Q3 SCREEN TOP = first painted box of the live view  -  folded chrome bottom
+//
+//  MEASURED, origin/main @327ffd96b: 24px at 320 (sites, overview-fleet,
+//  billing-trial alike — `header.view-head` at 368.5/402.5 over a chrome bottom
+//  of 344.5/378.5) and 32px at 900. Against a 320px budget that is a bar with
+//  room in it that a screen can still bust: put 400px above a view's first row
+//  and Q3 reds, at every width, chrome or no chrome.
+//
+//  AND THE SHELL GETS ITS OWN NUMBER. Isolating the screen would otherwise
+//  DELETE the finding — the shell cost at 320 is exactly what this row found
+//  nobody watching — so the folded chrome is printed on every run and pinned,
+//  in the shape overflow-guard.mjs's FLEET_ROW_RESIDUAL uses: an explicit
+//  allowance that reds if the number GROWS.
+export const SHELL_CHROME_SELECTORS = ["aside.sidebar", "header.topbar"];
+
+// PINNED TO WHAT THE INSTRUMENT PRINTS, NEVER TO ARITHMETIC. Re-measured on
+// origin/main @327ffd96b with `--render --widths 320 --cell sites,billing-trial,
+// overview-fleet`: the folded chrome bottom is 344.5 on sites and overview-fleet
+// and 378.5 on billing-trial. THE ROW'S FILING QUOTES 344.5 AS THE CHROME COST
+// AT 320 AND THAT IS THE NARROWER OF THE TWO — pinning there would red
+// billing-trial on the first run, re-creating the unreachable-budget defect this
+// row exists to remove. The ceiling is the WORST printed value: 378.5.
+export const SHELL_CHROME_CEILING = 378.5;
+
+// One ceiling covers the whole width axis: above the fold breakpoint the sidebar
+// is a left COLUMN, not a stacked strip, so it is not folded-above `.content`
+// and the chrome bottom is the topbar's 56 — far under the pin. A width-relative
+// ceiling would hide a shell that grows in step with it.
+//
+// WHAT THIS PIN DOES NOT CATCH, SAID PLAINLY. It is one number, taken at
+// RENDER_HEIGHT (800) — the height the default loop drives and the only height
+// any of this row's measurements were taken at. The chrome's sidebar half is
+// height-RELATIVE (`max-height: calc(40vh - 60px)`), so at the opt-in smaller
+// heights the folded chrome is smaller and the pin has slack: driven at
+// `--height 390` the same worst cell measures 152, not 378.5. The half that
+// actually moved between screens is the topbar (84.5 on sites, 118.5 on
+// billing-trial — it WRAPS at 320), and that half is height-independent, so it
+// is exactly the growth this catches. A per-height pin is a bigger axis than
+// this row bought; the identity that governs the sidebar half at every height
+// already has its own guard in breakpoint-sweep.test.mjs ("the folded shell
+// clears the fold bar at EVERY height, as an identity").
+export const CHROME_PIN_ROW = "cch-w24-bl-q3-fold-budget-is-a-shell-property-at-320";
+
+// The verdict, as a pure function, so both halves are unit-testable without a
+// browser. `chromeBottom` is 0 when nothing is stacked above `.content` — the
+// number then degenerates to the raw offset the old Q3 read, which is the honest
+// failure mode: a probe that stops finding the chrome reports a WORSE number,
+// never a better one.
+export function foldVerdict({ contentTop, anchorTop, chromeBottom, vh, ceiling = SHELL_CHROME_CEILING, fraction = FOLD_FRACTION }) {
+  const budget = Math.round(fraction * vh);
+  const top = anchorTop == null ? contentTop : anchorTop;
+  const screenTop = top == null ? null : Math.round((top - (chromeBottom || 0)) * 100) / 100;
+  return {
+    budget,
+    screenTop,
+    chromeBottom: chromeBottom || 0,
+    ceiling,
+    foldOver: screenTop != null && screenTop > budget,
+    chromeOver: (chromeBottom || 0) > ceiling,
+  };
+}
 
 // Q2's named hiding utilities. A className regex would swallow any class with
 // "hidden" as a substring (`.is-hidden-until-hover` is not hidden), so the list
@@ -1472,11 +1577,36 @@ function cellProbeJs(cell) {
   //   · display:-webkit-box paints ONLY its live -webkit-line-clamp ellipsis
   //     (driven: clamp vs plain overflow:hidden twins differ); a clamp
   //     declared on any other display does nothing.
-  // KNOWN LIMIT (owned by cchi-w23-bl-d253-inert-ellipsis-correction-five-
-  // sites, the break-opportunity upgrade): a block host whose overflowing
-  // line holds ONLY atomic inlines (an inline-block child, sw 202 > cw 60)
-  // paints no "…" yet is exempted here — a declaration-computed predicate
-  // cannot see it; the measured upgrade that row owns can.
+  // KNOWN LIMIT, AND IT STAYS HERE ON PURPOSE (cchi-w23-bl-d253-inert-
+  // ellipsis-correction-five-sites, the break-opportunity upgrade). A block
+  // host whose overflowing line holds ONLY atomic inlines (an inline-block
+  // child) paints no "…" yet is exempted here. CONFIRMED on the GATING-PLATFORM
+  // re-run of D253's decoded-pixel probe (Ubuntu 24.04.4 LTS, Google Chrome
+  // 151.0.7922.71): white-space nowrap + text-overflow ellipsis over one
+  // inline-block child, sw 408 / cw 200, inks to x=199 — the box edge — so no
+  // marker painted at all. (Byte-identical pixel hash 2ebf2e95 on a Chromium
+  // 152 / Debian 12 second run: this host is engine behaviour, not a build.)
+  //
+  // THE CORRECTION LANDED IN overflow-guard.mjs's MEMBERS LEG, NOT HERE, and
+  // the reason is the shape of this function, not the size of the job. The
+  // measured predicate needs a MIN-CONTENT WIDTH and a TEXT-RUN WIDTH per
+  // element: a hidden width:min-content clone appended into the element's own
+  // parent, plus Range rects over its text nodes. The members leg spends that
+  // on the handful of .set-row-name elements in 44 cells. cueOf above runs
+  // over EVERY element of EVERY page at EVERY width — a forced-layout clone and
+  // a Range walk per element would turn a declaration read into an O(n) reflow
+  // storm, and this sweep's whole value is that it is cheap enough to run over
+  // everything.
+  //
+  // SO THE PREDICATE HERE IS DELIBERATELY THE CONSERVATIVE HALF. It is exact on
+  // the two cases it CAN decide from declarations alone (a flex/grid box has no
+  // line boxes to ellipsize; a display:-webkit-box paints only its live clamp),
+  // and on everything else it says "assume it paints" — which EXEMPTS, i.e.
+  // stays SILENT, rather than accusing. The residue is therefore a MISS, never
+  // a false red: an atomic-inline line reaches CLIP_NO_CUE and is not reported.
+  // inertEllipsis is recorded on every CLIP_NO_CUE row above precisely so a
+  // reader can see which exemptions rode on a declaration this function did not
+  // measure.
   function ellipsisCanPaint(cs){
     if (cs.display==='-webkit-box')
       return !!cs.webkitLineClamp && cs.webkitLineClamp!=='none';
@@ -1527,9 +1657,53 @@ function cellProbeJs(cell) {
   }
 
   // ── Q3 below the fold ──────────────────────────────────────────────────────
+  // THREE numbers now, not one (cch-w24-bl-q3-fold-budget-is-a-shell-property-
+  // at-320): the raw .content offset this probe always read, the FOLDED CHROME
+  // bottom under it, and the live view's first painted box. The verdict is
+  // computed on the node side by foldVerdict(); the probe only measures.
   var content=document.querySelector('.content');
-  var q3={top: content ? Math.round(content.getBoundingClientRect().top*100)/100 : null,
-          vh: window.innerHeight};
+  var r2=function(n){return Math.round(n*100)/100;};
+  var q3={top: content ? r2(content.getBoundingClientRect().top) : null,
+          vh: window.innerHeight,
+          chromeBottom: 0, chromeParts: [], anchorTop: null, anchorSel: null};
+  if (content) {
+    var cTop=content.getBoundingClientRect().top;
+    // FOLDED-ABOVE, not "present": above the fold breakpoint the sidebar is a
+    // left COLUMN whose bottom is the viewport floor, and counting it there
+    // would report the whole page as chrome. A chrome box counts only when it
+    // is STACKED above .content — bottom at or before the content's top.
+    var CHROME=${JSON.stringify(SHELL_CHROME_SELECTORS)};
+    for (var ci=0; ci<CHROME.length; ci++) {
+      var ce=document.querySelector(CHROME[ci]);
+      if (!ce) continue;
+      var cr=ce.getBoundingClientRect();
+      if (cr.height<=0) continue;
+      if (cr.bottom<=cTop+0.5) {
+        q3.chromeParts.push({sel:CHROME[ci], top:r2(cr.top), bottom:r2(cr.bottom), h:r2(cr.height)});
+        if (cr.bottom>q3.chromeBottom) q3.chromeBottom=r2(cr.bottom);
+      }
+    }
+    // The SCREEN's own start: the first painted descendant of the live view.
+    // .content's top is the chrome's bottom to the pixel, so anchoring there
+    // measures a constant zero; anchoring on the view's own first box is what
+    // makes the fold question about the screen.
+    var live=content.querySelector('section.view:not([hidden])');
+    if (live) {
+      var kids=live.querySelectorAll('*');
+      for (var ki=0; ki<kids.length; ki++) {
+        var kr=kids[ki].getBoundingClientRect();
+        if (kr.width>0 && kr.height>0) {
+          q3.anchorTop=r2(kr.top);
+          q3.anchorSel=kids[ki].tagName.toLowerCase()+(kids[ki].id?('#'+kids[ki].id):'')+(kids[ki].className?('.'+String(kids[ki].className).trim().split(/\s+/).join('.')):'');
+          break;
+        }
+      }
+      // A live view that painted NOTHING falls back to the view box itself, and
+      // then to .content — never to "no number".
+      if (q3.anchorTop==null) { var lr=live.getBoundingClientRect(); if (lr.height>0) { q3.anchorTop=r2(lr.top); q3.anchorSel='section.view#'+live.id; } }
+    }
+    if (q3.anchorTop==null) { q3.anchorTop=r2(cTop); q3.anchorSel='.content'; }
+  }
 
   // ── the theme this page ACTUALLY loaded ────────────────────────────────────
   // Reported, not assumed. The ?theme= param is seeded into localStorage by mock.js
@@ -2022,9 +2196,12 @@ async function legRender(rep) {
     const total = cells.length * themes.length * heights.length * widths.length;
     out(`\n>> render     ${cells.length} cells x ${themes.length} themes x ${heights.length} height${heights.length > 1 ? "s" : ""} [${heights.join(",")}] x ${widths.length} widths = ${total} renders — MINUTES, not seconds\n`);
     if (!heightFilter) {
-      out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 25x2x1x18 = 900 renders (11.0 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 2700 (32.9 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
+      out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 25x2x1x21 = 1050 renders (12.8 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 3150 (38.3 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
     }
     const dead = [], q1f = [], q2f = [], q3f = [], notes = [], honest = [];
+    // The shell's own pin, alongside Q3's screen number — this row's whole
+    // point is that isolating the screen must not DELETE the shell finding.
+    const chromeF = [];
     const tierCtaF = [], tierCtaSeen = [];
     const bgSeen = new Map();
     const t0 = Date.now();
@@ -2032,6 +2209,7 @@ async function legRender(rep) {
 
     const heightSeen = new Set();
     const q3Worst = new Map();
+    const chromeWorst = new Map();
     for (const cell of cells) {
      for (const theme of themes) {
       for (const height of heights) {
@@ -2126,11 +2304,22 @@ async function legRender(rep) {
             // QUOTED WHETHER IT PASSES OR NOT. Q3 used to print only on
             // failure, so the fold number at a height was invisible unless it
             // was already over budget — and "no Q3 line" read the same as
-            // "the height was never driven".
+            // "the height was never driven". The chrome pin below prints on the
+            // same terms, for the same reason.
+            const v = foldVerdict({ contentTop: top, anchorTop: m.q3.anchorTop, chromeBottom: m.q3.chromeBottom, vh: m.q3.vh });
             const w = q3Worst.get(height);
-            if (!w || top > w.top) q3Worst.set(height, { top, budget: Math.round(FOLD_FRACTION * m.q3.vh), cell: cell.name, theme, width });
-            if (top > FOLD_FRACTION * m.q3.vh) {
-              q3f.push({ cell: cell.name, theme, width, height, top, budget: Math.round(FOLD_FRACTION * m.q3.vh) });
+            if (!w || v.screenTop > w.screenTop) {
+              q3Worst.set(height, { ...v, top, anchorSel: m.q3.anchorSel, cell: cell.name, theme, width });
+            }
+            const cw = chromeWorst.get(height);
+            if (!cw || v.chromeBottom > cw.chromeBottom) {
+              chromeWorst.set(height, { chromeBottom: v.chromeBottom, parts: m.q3.chromeParts, cell: cell.name, theme, width });
+            }
+            if (v.foldOver) {
+              q3f.push({ cell: cell.name, theme, width, height, top, anchorSel: m.q3.anchorSel, ...v });
+            }
+            if (v.chromeOver) {
+              chromeF.push({ cell: cell.name, theme, width, height, chromeBottom: v.chromeBottom, ceiling: v.ceiling, parts: m.q3.chromeParts });
             }
           }
           // ── the tier-CTA tense probe (billing-trial only) ────────────────
@@ -2192,7 +2381,12 @@ async function legRender(rep) {
       process.exit(2);
     }
     out(`   ✓ heights — ${hd.driven.length}/${hd.asked.length} declared height(s) DRIVEN and read back from window.innerHeight: ${hd.driven.join(", ")}\n`);
-    out(`   ✓ Q3 fold — worst .content top per height: ${[...q3Worst].sort((a, b) => a[0] - b[0]).map(([h, w]) => `${h}px -> ${w.top} against a ${w.budget}px budget (${FOLD_FRACTION} of H) [${w.cell}/${w.theme}@${w.width}]`).join(" · ")}\n`);
+    out(`   ✓ Q3 fold — worst SCREEN top per height (first painted box of the live view, minus the folded chrome under it): ${[...q3Worst].sort((a, b) => a[0] - b[0]).map(([h, w]) => `${h}px -> ${w.screenTop} against a ${w.budget}px budget (${FOLD_FRACTION} of H) [${w.cell}/${w.theme}@${w.width}: ${w.anchorSel} at ${w.chromeBottom} + ${w.screenTop}]`).join(" · ")}\n`);
+    // THE SHELL'S OWN NUMBER, PRINTED EVERY RUN. Q3 measuring the screen would
+    // otherwise retire this row's actual finding — nobody was watching what the
+    // folded chrome costs — so the chrome is quoted here whether it passes or
+    // not, with the boxes it is made of, and pinned at SHELL_CHROME_CEILING.
+    out(`   ✓ folded chrome — worst per height, against a ${SHELL_CHROME_CEILING}px ceiling (${CHROME_PIN_ROW}): ${[...chromeWorst].sort((a, b) => a[0] - b[0]).map(([h, w]) => `${h}px -> ${w.chromeBottom} [${w.cell}/${w.theme}@${w.width}${w.parts.length ? `: ${w.parts.map((x) => `${x.sel} ${x.h}`).join(" + ")}` : " — NOTHING stacked above .content"}]`).join(" · ")}\n`);
 
     for (const f of q1f) out(`   ✗ Q1 SIDEWAYS  ${f.cell}/${f.theme}@${f.width}: scrollWidth ${f.sw} > viewport ${f.cw}\n`);
     for (const f of q2f) {
@@ -2206,7 +2400,8 @@ async function legRender(rep) {
       }
       else out(`   ✗ Q2 CUT_BY_VIEWPORT  ${f.cell}/${f.theme}@${f.width}: ${f.sel} extends ${f.cut}px past the viewport\n`);
     }
-    for (const f of q3f) out(`   ✗ Q3 BELOW THE FOLD  ${f.cell}/${f.theme}@${f.width}x${f.height}: .content starts ${f.top}px down (budget ${f.budget}px)\n`);
+    for (const f of q3f) out(`   ✗ Q3 BELOW THE FOLD  ${f.cell}/${f.theme}@${f.width}x${f.height}: the screen's first box (${f.anchorSel}) starts ${f.screenTop}px below the folded chrome (budget ${f.budget}px) — .content at ${f.top}, chrome bottom ${f.chromeBottom}\n`);
+    for (const f of chromeF) out(`   ✗ SHELL CHROME OVER PIN  ${f.cell}/${f.theme}@${f.width}x${f.height}: the folded chrome ends ${f.chromeBottom}px down, over the ${f.ceiling}px ceiling (${f.parts.map((x) => `${x.sel} ${x.h}`).join(" + ") || "no stacked chrome"}). The pin is what the instrument PRINTED on origin/main; a shell that grows reds here — re-measure and move it deliberately, or shrink the shell.\n`);
     // WHY THE ZERO IS NOT A BLIND SPOT. CUE_STUCK went from 78 notes to 0 on
     // `--cell operator --widths 390,619,720`, and a note count that falls to
     // zero is indistinguishable from a probe that stopped looking — unless it
@@ -2241,9 +2436,9 @@ async function legRender(rep) {
       out(`   ✗ TIER CTA CLIPPED  billing-trial/${f.theme}@${f.width} (${f.tense} trial): ${String(f.plan).trim()} "${f.text}" ${f.sw}>${f.cw}\n`);
     }
 
-    const failed = q1f.length + q2f.length + q3f.length + tierCtaF.length;
+    const failed = q1f.length + q2f.length + q3f.length + chromeF.length + tierCtaF.length;
     if (failed) {
-      out(`\n>> verdict    ${failed} measured defects (Q1 ${q1f.length} · Q2 ${q2f.length} · Q3 ${q3f.length} · tier CTA ${tierCtaF.length}) — exit 1\n`);
+      out(`\n>> verdict    ${failed} measured defects (Q1 ${q1f.length} · Q2 ${q2f.length} · Q3 ${q3f.length} · chrome pin ${chromeF.length} · tier CTA ${tierCtaF.length}) — exit 1\n`);
       return 1;
     }
     out(`\n>> verdict    clean across ${total} cells — exit 0\n`);

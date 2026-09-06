@@ -1,11 +1,11 @@
 <!-- doc-tier: agent | canonical-for: cli-error-exit-mapping | budget: 2500tok -->
 # Barkpark CLI — Error-code ↔ Exit-code Table (M0 frozen)
 
-> **Status:** DECIDED at M0. This is the single canonical mapping. For any CODED
-> error the CLI maps the envelope's `code` string — **never** re-derives an exit
-> code from the HTTP status. The ONE exception is a body with no decodable coded
-> error at all (a non-JSON gateway/proxy page), where status is the only signal —
-> see the fallback note below. (Contract spine rule #3: *one error↔exit table*.)
+> **Status:** DECIDED at M0. The single canonical mapping. For any CODED error
+> the CLI maps the envelope's `code` string — **never** re-derives an exit code
+> from the HTTP status. The ONE exception is a body with no decodable coded error
+> at all (a non-JSON gateway/proxy page), where status is the only signal — see
+> the fallback note. (Contract spine rule #3: *one error↔exit table*.)
 
 ## How the mapping works
 
@@ -15,42 +15,38 @@ Every coded error from the Barkpark API arrives in the v1 envelope shape:
 { "error": { "code": "<string>", "message": "<string>", "details": { … }, "request_id": "…" } }
 ```
 
-The CLI reads `error.code` and looks it up in the table below to pick its process
-exit code. The HTTP status is carried only on the response status line and is
-recorded here for reference — **it is NOT the lookup key.** Two reasons this is
-load-bearing:
+The CLI reads `error.code` and looks it up in the table below to pick its exit
+code. The HTTP status is recorded here for reference — **it is NOT the lookup
+key.** Two reasons that is load-bearing:
 
-1. The same HTTP status maps to multiple distinct `code`s (409 covers both
-   `rev_mismatch` and `conflict`; 422 covers `validation_failed`,
-   `invalid_paper`, `invalid_op`, and the dynamic patch-engine codes). The exit
-   code distinguishes them; the status cannot.
-2. A `code` is a stable contract string; a status can drift (e.g. a 412 added
-   later for `precondition_failed`). Keying on `code` keeps the CLI stable.
+1. One HTTP status maps to many distinct `code`s (409 covers `rev_mismatch` and
+   `conflict`; 422 covers `validation_failed`, `invalid_paper`, `invalid_op` and
+   the patch-engine codes). The exit code separates them; the status cannot.
+2. A `code` is a stable contract string; a status can drift (a 412 added later
+   for `precondition_failed`). Keying on `code` keeps the CLI stable.
 
-When `error.code` is absent or unknown (see "Codes with no `error.code`" below),
-the CLI falls back to **exit 1** (generic/unexpected). The SOLE exception: a body
-that decodes to no known error shape at all — a non-JSON gateway/proxy page (nginx
-502·503·504 HTML, a plain-text load-balancer banner) — carries no `code`, so as a
-last resort the CLI keys the bucket off the HTTP status (5xx→`8`, 429→`7`,
+When `error.code` is absent or unknown, the CLI falls back to **exit 1**. SOLE
+exception: a body that decodes to no known error shape at all — a non-JSON
+gateway/proxy page (nginx 502·503·504 HTML, a load-balancer banner) — carries no
+`code`, so as a last resort the CLI keys off the HTTP status (5xx→`8`, 429→`7`,
 401/403→`3`, 404/410→`4`, other 4xx→`2`, else→`1`) and caps the raw body to ~200
-chars so an HTML page never spews to stderr. A JSON envelope whose `code` is merely
-unknown still falls to exit 1.
+chars so an HTML page never spews to stderr. A JSON envelope whose `code` is
+merely unknown still falls to exit 1.
 
-**Compound reason tokens.** The tasks API mints reasons that carry their detail
+**Compound reason tokens.** The tasks API mints reasons carrying their detail
 inline — `not_holder:<worker>`, `not_in_progress:<status>`, `criteria_unmet:<i,j>`,
-`acknowledgement_unposted:<issue>`,
-`invalid_lifecycle:<s>`, `sentinel_worker_id:<w>`. The CLI looks up the literal
-token first, then the family name before the first `:` (`reasonKey` /
-`lookupExit` in `internal/cli/errors.go`). This is a lookup on the reason STRING
-only — it still never reads the HTTP status. `lookupExit` is the ONE consult, shared
-by the coded envelope, the `{"ok":false,"reason":…}` shape and the bare-string
-`{"error":"<token>"}` shape, so a token cannot mean two exit codes depending on
-which envelope carried it.
+`acknowledgement_unposted:<issue>`, `invalid_lifecycle:<s>`,
+`sentinel_worker_id:<w>`. The CLI looks up the literal token first, then the
+family name before the first `:` (`reasonKey` / `lookupExit`,
+`internal/cli/errors.go`) — a lookup on the reason STRING, never the status.
+`lookupExit` is the ONE consult, shared by the coded envelope, the
+`{"ok":false,"reason":…}` shape and the bare-string `{"error":"<token>"}` shape,
+so a token cannot mean two exit codes depending on which envelope carried it.
 
 **Retryability is what 5 vs 6 encodes** for the stamp/close family: `6` means the
 world moved (re-read/re-claim, then retry); `5` means the request itself is wrong
-and retrying it verbatim can never work. A wrapper that branches on the exit code
-alone gets the right behaviour without parsing the message.
+and a verbatim retry can never work. A wrapper branching on the exit code alone
+gets the right behaviour without parsing the message.
 
 ## The stable exit-code scheme
 
@@ -70,121 +66,135 @@ alone gets the right behaviour without parsing the message.
 | `7` | rate-limited | Throttled; honor `Retry-After` (ADDITIVE). |
 | `8` | server (5xx) | Server-side `internal_error` / 5xx fallthrough (ADDITIVE). |
 
-The handbook (§29) enumerated only `0` success · `1` other/network/timeout · `2` usage/unknown
-command · `3` auth · `4` not-found · `5` validation. This table keeps those six
-EXACTLY and adds `6` (conflict), `7` (rate-limited), `8` (server) as a strict
-superset — categories the handbook left folded into the generic bucket are now
-broken out without redefining any handbook code.
+The handbook (§29) enumerated only `0`–`5`. This table keeps those six EXACTLY
+and adds `6`/`7`/`8` as a strict superset — categories the handbook folded into
+the generic bucket, broken out without redefining any handbook code.
 
 ## The canonical table
 
-The `code` column is sourced **verbatim** from the API's real enumerated error
-codes (`Barkpark.Content.Errors.build/1` plus the direct emitters). HTTP status
-is the status the API actually returns for that code.
+The `code` column is **verbatim** from the API's enumerated codes
+(`Barkpark.Content.Errors.build/1` plus the direct emitters); HTTP status is what
+the API actually returns for that code.
 
 | `code` | HTTP status | Exit | Meaning | CLI message guidance |
 |---|---|---|---|---|
 | *(no error; success)* | 2xx | `0` | Command succeeded. | Print the result (or the minimal receipt on writes). |
 | `not_found` | 404 | `4` | Resource (doc/media/task/etc.) does not exist. | `not found: <noun> <id>` — suggest `barkpark <noun> ls`. |
-| `schema_unknown` | 404 | `4` | Named schema/type is not registered. | `unknown schema: <name>` — suggest `barkpark schema ls`. |
-| `unauthorized` | 401 | `3` | Missing or invalid credential. | `authentication required` — suggest `barkpark login`. |
-| `unauthorized` (+`reason:"replay"`) | 401 | `3` | Idempotency-key replay rejected. | `request replayed; retry with a fresh idempotency key`. |
+| `schema_unknown` | 404 | `4` | Named schema/type is not registered. | `unknown schema: <name>` — suggest `barkpark schema ls`. || `unauthorized` | 401 | `3` | Missing or invalid credential. | `authentication required` — suggest `barkpark login`. |
+| `unauthorized` (+`reason:"replay"`) | 401 | `3` | Idempotency-key replay rejected. | `request replayed; retry with a fresh key`. |
 | `forbidden` | 403 | `3` | Authenticated but lacks permission. | `forbidden: token lacks <tier> for this command`. |
 | `cors_forbidden` | 403 | `3` | Origin not allowed (browser-origin path). | `origin not permitted` — rare from the CLI; treat as auth. |
 | `csrf_required` | 403 | `3` | CSRF token missing (session-cookie path). | `csrf required` — rare from the CLI; treat as auth. |
 | `forbidden_field` | 422 | `3` | Filter/order over a field the caller may not read. | `forbidden field: <field>` — use a token that can read it (keys on code, not the 422). |
-| `malformed` | 400 | `2` | Request body/args were invalid. | `bad request: <message>` — name the offending arg. |
+| `malformed` | 400 | `2` | Request body/args were invalid. | `bad request: <message>` — name the arg. |
 | `invalid_filter` | 400 | `2` | Unknown filter operator, or a `filter[<key>]` the route cannot honour (`GET /v1/tasks`). | `invalid filter operator: <op>` — print the valid set from the message. |
-| `validation_failed` | 422 | `5` | Document failed schema validation. | `validation failed` — print `details`/`errors` field paths. |
+| `validation_failed` | 422 | `5` | Document failed schema validation. | `validation failed` — print `details`/`errors` paths. |
 | `invalid_paper` | 422 | `5` | Bulldocs paper payload invalid. | `invalid paper: <message>`. |
 | `malformed_op` | 422 | `5` | Bulldocs block-op malformed. | `malformed op: <message>`. |
 | `invalid_op` | 422 | `5` | Bulldocs/PortableDoc op rejected. | `invalid op: <message>`. |
 | `block_not_found` | 422 | `5` | Patch target block id absent (dynamic). | `block not found: <block_id>`. |
 | `type_mismatch` | 422 | `5` | Patch op type mismatch (dynamic). | `type mismatch in op`. |
 | `duplicate_id` | 422 | `5` | Patch would create a duplicate block id (dynamic). | `duplicate id: <id>`. |
-| `invalid_path` | 422 | `5` | Blob push rejected: the relative path failed the server-blob allowlist (traversal / absolute / malformed segment), refused before any disk write. | `invalid blob path: <path>` — the sidecar path must be the server-generated `YYYY/MM/<slug>-<hex8>.<ext>` shape. |
-| `empty_body` | 422 | `5` | Blob push rejected: zero-byte body (commonly a mislabeled content-type that `Plug.Parsers` consumed). | `empty blob body` — send the raw bytes as `application/octet-stream`. |
+| `invalid_path` | 422 | `5` | Blob push rejected: the relative path failed the server-blob allowlist (traversal / absolute / malformed segment), before any disk write. | `invalid blob path: <path>` — the sidecar path must be the server-generated `YYYY/MM/<slug>-<hex8>.<ext>` shape. |
+| `empty_body` | 422 | `5` | Blob push rejected: zero-byte body (usually a mislabeled content-type `Plug.Parsers` consumed). | `empty blob body` — send raw bytes as `application/octet-stream`. |
 | `rev_mismatch` | 409 | `6` | Optimistic-concurrency revision mismatch. | `conflict: document changed; re-fetch and retry`. |
 | `precondition_failed` | 412 | `6` | `ifRev` precondition failed (carries `expected`/`actual`). | `precondition failed: expected rev <e>, got <a>`. |
 | `conflict` | 409 | `6` | Generic write conflict. | `conflict: <message>` — retry or re-fetch. |
-| `halted` | 409 | `6` | Plugin lifecycle veto (canonical envelope). | `halted: <message>` — the plugin's reason. The bare-string `{"error":"halted"}` shape is also handled (see below); both bucket to `6`. |
-| `fenced_off` · `stale_claim` · `not_ready` · `blocked_by_unsatisfied_deps` · `resource_conflict` · `already_claimed`† | 409 | `6` | Task claim/close contention (`/v1/tasks/*` `ok:false` reasons). †`already_claimed` is a defensive CLI mapping (`internal/cli/errors.go`) for forward compatibility — the API does not currently emit it; the five confirmed server-side reasons are the other codes in this row. | Re-claim / re-fetch; `resource_conflict` carries `conflicts[]` naming the holders. |
-| `not_holder` · `not_in_progress` | 409 | `6` | Stamp/close refused: the lease moved (another worker holds the claim) or the task left `in_progress`. The server mints these COMPOUND — `not_holder:<worker>`, `not_in_progress:<status>` (`tasks_controller/params.ex` `reason_to_string/1`); the CLI keys on the part before the first `:`. | `re-read with bp task get, re-claim under your worker id, then retry` — RETRYABLE. |
-| `doc_changed_since_claim` · `claimed_has_worker` | 409 | `6` | The task's brief changed under your claim, or the claim is held by a named worker. | Re-read / reconcile, then retry (the CLI hint names the recovery). |
-| `acknowledgement_unposted` | 409 | `5` | The task was born from an OUTSIDER's GitHub issue (`gh-<num>`) and its `ack_gate` acceptance criterion is unmet, so a `done`/`cancelled` close would end the row with the reporter never told. Mints compound as `acknowledgement_unposted:<issue>`. | Post the outcome on the issue and stamp the criterion with the comment URL — or `--set ack_override="<why the reporter is not being told>"`. NOT retryable as sent: nothing moved, and `criteria_override` does not discharge it. |
-| `criteria_mismatch` · `criteria_index_out_of_range` · `criterion_text_required` · `note_required` | 409/422 | `5` | Stamp payload guards: the `--criterion-text` does not match the row at `--criterion N`, the index is off the end, a `--met` arrived without its text, or a `--miss` without a note. | `fix the flag and re-send` — NOT retryable as sent. |
-| `criteria_unmet` | 409 | `5` | A `done` close over acceptance criteria that are unmet ON THE TASK AS STORED — criteria flipped in the same close command do not count. Mints compound as `criteria_unmet:<i,j>` naming the 0-based indices. | `bp task stamp` each criterion, or close on the record with `--set criteria_override="<why it is done anyway>"`. NOT retryable as sent: nothing moved, and the fix is outside the request. |
-| `invalid_lifecycle` | 409 | `5` | The close names a terminal status the transition table disallows (`tasks/close.ex`). Mints compound as `invalid_lifecycle:<s>`. | `send an allowed status` — a different status is a different request, so a verbatim retry can never succeed. |
-| `sentinel_worker_id` | 409 | `5` | The worker id is a placeholder rather than an identity — `none`, `null`, `nil`, `-` (`tasks/internal.ex`). Mints compound as `sentinel_worker_id:<w>`. | `pass the worker id that holds the claim` — NOT retryable as sent. |
-| `merge_gated_criterion` | 409 | `5` | A builder `--met` on a criterion the LEAD closes when the PR merges (`tasks/stamp.ex`). Minted BARE, with no `:<detail>` suffix. | `--merge-gated` if you are the lead closing the gate, or set `"merge_gate": false` on the criterion if the match was on its prose. NOT retryable as sent. |
-| `illegal_transition` | 422 | `5` | A lifecycle stage the task cannot make from its current state (`tasks_controller.ex` `put_status(:unprocessable_entity)`). Also arrives as a BARE-STRING `{"error":"illegal_transition"}` from the cloud router; both shapes bucket to `5`. | `the transition is impossible from this state` — the one member of this family that a retry can NEVER satisfy. |
-| `share_expired` | 410 | `4` | Media collection share link expired/gone. | `share expired` — treat as gone (not-found bucket). |
+| `halted` | 409 | `6` | Plugin lifecycle veto (canonical envelope). | `halted: <message>` — the plugin's reason. The bare-string shape is handled too (below); both bucket to `6`. |
+| `fenced_off` · `stale_claim` · `not_ready` · `blocked_by_unsatisfied_deps` · `resource_conflict` · `already_claimed`† | 409 | `6` | Task claim/close contention (`/v1/tasks/*` `ok:false` reasons). †`already_claimed` is a defensive CLI mapping (`internal/cli/errors.go`) the API does not currently emit; the other five are the confirmed server-side reasons. | Re-claim / re-fetch; `resource_conflict` carries `conflicts[]` naming the holders. |
+| `not_holder` · `not_in_progress` | 409 | `6` | Stamp/close refused: the lease moved (another worker holds the claim) or the task left `in_progress`. Minted COMPOUND — `not_holder:<worker>`, `not_in_progress:<status>` (`tasks_controller/params.ex`); the CLI keys on the part before the first `:`. | `bp task get`, re-claim under your worker id, retry — RETRYABLE. |
+| `doc_changed_since_claim` · `claimed_has_worker` | 409 | `6` | The brief changed under your claim, or a named worker holds it. | Re-read / reconcile, then retry (the CLI hint names the recovery). |
+| `acknowledgement_unposted` | 409 | `5` | The task was born from an OUTSIDER's GitHub issue (`gh-<num>`) and its `ack_gate` criterion is unmet, so a `done`/`cancelled` close would end the row with the reporter never told. Compound: `acknowledgement_unposted:<issue>`. | Post the outcome on the issue and stamp the criterion with the comment URL — or `--set ack_override="<why not>"`. NOT retryable as sent; `criteria_override` does not discharge it. |
+| `criteria_mismatch` · `criteria_index_out_of_range` · `criterion_text_required` · `note_required` | 409/422 | `5` | Stamp payload guards: `--criterion-text` does not match the row at `--criterion N`, the index is off the end, a `--met` came without its text, or a `--miss` without a note. | Fix the flag and re-send — NOT retryable as sent. |
+| `criteria_unmet` | 409 | `5` | A `done` close over criteria unmet ON THE TASK AS STORED — criteria flipped in the same close do not count. Compound: `criteria_unmet:<i,j>` naming the 0-based indices. | `bp task stamp` each criterion, or close on the record with `--set criteria_override="<why anyway>"`. NOT retryable as sent: the fix is outside the request. |
+| `invalid_lifecycle` | 409 | `5` | The close names a terminal status the transition table disallows (`tasks/close.ex`). Compound: `invalid_lifecycle:<s>`. | Send an allowed status — a different status is a different request, so a verbatim retry never succeeds. |
+| `sentinel_worker_id` | 409 | `5` | The worker id is a placeholder, not an identity — `none`, `null`, `nil`, `-` (`tasks/internal.ex`). Compound: `sentinel_worker_id:<w>`. | Pass the worker id that holds the claim — NOT retryable as sent. |
+| `merge_gated_criterion` | 409 | `5` | A builder `--met` on a criterion the LEAD closes when the PR merges (`tasks/stamp.ex`). Minted BARE, no `:<detail>` suffix. | `--merge-gated` if you are the lead closing the gate, or set `"merge_gate": false` if the match was on its prose. NOT retryable as sent. |
+| `illegal_transition` | 422 | `5` | A lifecycle stage the task cannot make from its current state (`tasks_controller.ex`). Also arrives BARE-STRING as `{"error":"illegal_transition"}` from the cloud router; both bucket to `5`. | `the transition is impossible from this state` — the one member of this family a retry can NEVER satisfy. |
+| `share_expired` | 410 | `4` | Media collection share link expired/gone. | `share expired` — treat as gone. |
 | `rate_limited` | 429 | `7` | Throttled. | `rate limited; retry after <Retry-After>s`. |
-| `rate_limited` (+`details.retry_after`) | 429 | `7` | Throttled with explicit retry hint. | Same; use `details.retry_after` for the backoff. |
-| `internal_error` | 500 | `8` | Server-side failure. | `server error (<request_id>)` — surface `request_id` for support. |
+| `rate_limited` (+`details.retry_after`) | 429 | `7` | Throttled with an explicit hint. | Same; back off on `details.retry_after`. |
+| `internal_error` | 500 | `8` | Server-side failure. | `server error (<request_id>)` — surface it for support. |
+| `label_spine` | 422 | `5` | Publish wall: description/weighted tags break the spine; `details` is `{field, rule, fix, index}`. `bp task create --publish` pre-empts it client-side, same code and shape. | Fix the named field. NOT retryable. |
+| `unknown_tag` | 422 | `5` | Publish wall: a weighted tag is not a published `type:tag` doc; `details` is `{unknown, suggestions}` (+`registry_size` on the client pre-empt). | `bp doc ls tag --all`, use a registered name. NOT retryable. |
+| `duplicate_of` · `duplicate_task` | 409 | `6` | Publish wall: near-duplicates a published doc; `details.duplicate_of` names the incumbent. | Extend it, or declare `content.supersedes`/`distinct_from` with that id. |
+| `tag_registry_unreadable` | *(client-only)* | `2` | CLIENT-ONLY: `bp task create --publish` could not read the tag registry authoritatively, so tags went unchecked. No server emits it; `details.unchecked_tags` lists them. | Retry when the read works, or file as a draft. Nothing was created. |
+
+## Which STREAM the refusal goes to
+
+The exit code is half the contract; WHERE the answer lands is the other half,
+keyed on the resolved output shape, never the verb:
+
+| `-o` shape | stdout | stderr |
+|---|---|---|
+| `json` / `yaml` | the `{ok:false, error:{code,message,details,hint,request_id}}` envelope — **exactly one document** | silent |
+| `table` / `minimal` | *(empty)* | the human line, `details`, the hint, `code`/`request_id` under `-v` |
+
+This holds for EVERY refusal, the publish-wall rows included — even the two
+`bp task create --publish` mints with no server round trip. It is why
+`bp … -o json > out.json` is parseable: a non-zero exit always leaves a body
+there, never zero bytes. A verb with a cleanup side effect (the create's refused
+publish leg discards the draft it just made) folds that outcome INTO the one
+envelope as `details.draft_discarded` / `details.discard_error` rather than
+emitting a second document — `json.load` reads the first value and stops. Worked
+consumer: `bp_probe` in `scripts/pds-charter-ledger-sweep.sh` runs
+`json.loads(p.stdout)` and reads `d["error"]["code"]`.
 
 ## Codes that don't cleanly fit — proposed buckets
 
-The reader enumeration found a handful of real wire shapes that are **not** the
-canonical `{code, message}` object. The CLI must still produce a deterministic
-exit code for them. Proposed mappings:
+A handful of real wire shapes are **not** the canonical `{code, message}` object.
+The CLI must still produce a deterministic exit code for them:
 
 | Real shape | HTTP | Where | Proposed exit | Rationale |
 |---|---|---|---|---|
-| `{"error":"halted","reason":…}` | 409 | mutate / legacy / history lifecycle-veto | `6` (conflict) | `error` is a bare string, not a coded object — there is no `error.code`. A lifecycle veto is semantically a conflict (the write was refused), so bucket it as **6** (the additive conflict code). The CLI special-cases the literal string `"halted"` since the key is `error`, not `error.code`. |
-| `{"ok":false,"reason":"invalid_edge",…}` | (tasks) | `tasks_controller` add-edge | `2` (usage) | Different schema entirely (`ok`/`reason`), and `invalid_edge` is absent from `codeExit`, so the `{"ok":false}` branch's table MISS falls to `exitUsage` — bucket **2**, the usage/bad-args bucket of the scheme above, NOT the validation bucket (`5`). A reason the table DOES know keys normally (a `not_found` reason lands on `4`). |
+| `{"error":"halted","reason":…}` | 409 | mutate / legacy / history lifecycle-veto | `6` (conflict) | `error` is a bare string, so there is no `error.code`; the CLI special-cases the literal `"halted"`. A veto is a refused write, i.e. a conflict → **6**. |
+| `{"ok":false,"reason":"invalid_edge",…}` | (tasks) | `tasks_controller` add-edge | `2` (usage) | A different schema (`ok`/`reason`), and `invalid_edge` is absent from `codeExit`, so the table MISS falls to `exitUsage` — **2** (usage), NOT validation (`5`). A reason the table DOES know keys normally (`not_found` → `4`). |
 | `{"ok":false,"error":"not_found","id":…}` | (intents) | `bulldocs_intents_controller` | `4` (not-found) | `error` is a string `"not_found"`, not `error.code`. Map the string value to the same bucket as the canonical `not_found` → **4**. |
 | plugin-settings bare strings: `"not_found"` | — | `plugin_settings_controller` | `4` | String-valued `error`; map `"not_found"` → **4**. |
 | plugin-settings bare strings: `"invalid"`, `"settings_object_required"` | — | `plugin_settings_controller` | `2` | String-valued `error`; both are client-side validation → **2**. |
-| `{"error":{"message":…}}` with **no `code`** | — | `search_controller`, `v1/media_controller` ("from and to are required", "synonym not found", "validation failed") | `2` (or `4` if the message is a not-found) | No `error.code` to key on. Default these to **2** (usage/validation); the CLI MAY downgrade to **4** when the message text is a recognizable not-found. Flagged as a server inconsistency to be normalized into the coded envelope later. |
+| `{"error":{"message":…}}` with **no `code`** | — | `search_controller`, `v1/media_controller` ("from and to are required", "synonym not found", "validation failed") | `2` (or `4` if the message is a not-found) | Nothing to key on: default **2**, and the CLI MAY downgrade to **4** on a recognizable not-found message. A server inconsistency to normalize into the coded envelope later. |
 
 > **Internal-only codes — NOT exit-mapped.** `"legacy"` and `"unknown"` appear as
-> the `code` field *inside* a v2 validation *violation* object (the
-> `errors`/`warnings`/`infos` tree), never as the top-level `error.code`. They are
-> per-violation labels for display, not process-exit signals. The CLI uses the
-> top-level `validation_failed` → exit `5` and renders these violation codes in the
-> message body.
+> the `code` *inside* a v2 validation violation object (the
+> `errors`/`warnings`/`infos` tree), never as top-level `error.code` — display
+> labels, not exit signals. The CLI keys on the top-level `validation_failed`
+> → exit `5` and renders them in the message body.
 
 ## The table above is a WORKED SUBSET — `codeExit` is the authority
 
 The per-code table is hand-maintained and enumerates the codes worth explaining.
-It is **not** the full vocabulary, and treating it as one is what broke this
-contract once already: `internal/cli/errors.go` `codeExit` mirrored the table
-rather than the API, so every code the API grew after the table was written
-exited `1` (generic). Measured at the repair: **61 of the API's 81 public codes
-had no bucket** — `mfa_required` (a 401) was indistinguishable from a network
-timeout, and a script branching `if rc -eq 3; then bp login; fi` never fired.
+It is **not** the full vocabulary, and treating it as one broke this contract
+once: `codeExit` mirrored the table rather than the API, so every code the API
+grew afterwards exited `1`. Measured at the repair: **61 of the API's 81 public
+codes had no bucket** — `mfa_required` (a 401) read as a network timeout, and a
+script branching `if rc -eq 3; then bp login; fi` never fired.
 
 Two rules keep it closed:
 
 1. **`codeExit` must be a superset of `Barkpark.Content.Errors.known_codes/0`.**
    `TestCodeExitCoversKnownAPICodes` (`internal/cli/errors_api_parity_test.go`)
-   parses the API source and fails when a code has neither a bucket nor a named
-   exclusion. Adding a public code to the API without touching the CLI now reds.
-2. **Bucket by the status the emitter actually returns**, never by the code's
-   name: `400` → `2`, `401`/`403` → `3`, `404` → `4`, `409`/`412` → `6`,
-   `402`/`413`/`422` → `5`, `429` → `7`, `5xx` → `8`. Two live codes read against
-   this rule — `source_not_found` answers **422** (not 404) and
-   `payload_too_large` answers **413** — and both follow the status, because
-   bucketing on the name is the guesswork the table exists to end.
+   parses the API source and reds when a code has neither a bucket nor a named
+   exclusion — so a new public code cannot land CLI-blind.
+2. **Bucket by the status the emitter actually returns**, never the code's name:
+   `400`→`2`, `401`/`403`→`3`, `404`→`4`, `409`/`412`→`6`, `402`/`413`/`422`→`5`,
+   `429`→`7`, `5xx`→`8`. Two live codes read against this rule —
+   `source_not_found` answers **422** (not 404), `payload_too_large` **413** —
+   and both follow the status; bucketing on the name is the guesswork this table
+   exists to end.
 
-The "code, never status" rule at the top of `errors.go` is unchanged: the CLI
-still reads only `error.code` at runtime. The status is what the *maintainer*
-consults when choosing a bucket, once.
+The "code, never status" rule is unchanged: the CLI reads only `error.code` at
+runtime. The status is what the *maintainer* consults when choosing a bucket.
 
 ### Deliberate non-members
 
-Two members of `known_codes/0` are excluded on purpose, listed with reasons in
-`codeExitNotWireBucketable`. `hollow_paper` and `structure` are never a
-top-level `error.code` at all — they are violation entries nested inside another
-response's body.
+Two members of `known_codes/0` are excluded on purpose, with reasons in
+`codeExitNotWireBucketable`: `hollow_paper` and `structure` are never a
+top-level `error.code` — they are violation entries nested in another body.
 
 The other exclusion kind is now **empty**, and that is the point. `export_failed`,
-`invalid_mode` and `session_unavailable` were each emitted at **two different
-statuses** with opposite retryability, so no exit code could be honest about
-both arms — `8` would spin a retry wrapper forever on the permanent arm, `5`
-would abandon a recoverable one. The API has since split each into one code per
-arm, so all six carry a real bucket:
+`invalid_mode` and `session_unavailable` were each emitted at **two statuses**
+with opposite retryability, so no exit code could be honest about both arms. The
+API has since split each into one code per arm, so all six carry a real bucket:
 
 | Retired token | Retryable arm | Permanent arm |
 |---|---|---|
@@ -197,47 +207,41 @@ token — not in a new entry here.
 
 ## Envelope-version note (does not change the table)
 
-The v2 envelope (opt-in via `Accept-Version: 2`) only reshapes the
-`validation_failed` **422** body — it swaps the flat `details` map for an
+The v2 envelope (opt-in via `Accept-Version: 2`) reshapes only the
+`validation_failed` **422** body, swapping the flat `details` map for an
 `errors`/`warnings`/`infos` JSON-pointer tree. The top-level `error.code` is
-identical across versions, so the exit-code mapping above is version-invariant.
-Every other code/status is byte-identical between v1 and v2.
+identical across versions, so the mapping above is version-invariant; every
+other code/status is byte-identical between v1 and v2.
 
 ## A 2xx body can carry its own failure verdict — `webhook test-send`
 
-One route breaks the "only `error.code` sets the exit code" rule on purpose,
-and the break is DELIBERATE, not a gap: `POST /v1/webhooks/:dataset/:id/test-send`
-(`webhook_controller.ex` `test_send/2`) always answers HTTP 200 with the
-delivery outcome *inside* the body — `{"delivery":{"status":"ok"|"failed_giveup", …}}`
-— so the Studio SPA can show an immediate result without an error envelope to
-parse. `webhook replay` answers the identical `{"delivery": …}` shape for the
-same reason (confirmed by source: both routes drive `Dispatcher`'s single
+One route breaks the "only `error.code` sets the exit code" rule DELIBERATELY.
+`POST /v1/webhooks/:dataset/:id/test-send` (`webhook_controller.ex`
+`test_send/2`) always answers HTTP 200 with the outcome *inside* the body —
+`{"delivery":{"status":"ok"|"failed_giveup", …}}` — so the Studio SPA gets an
+immediate result with no error envelope to parse. `webhook replay` answers the
+identical shape for the same reason (both drive `Dispatcher`'s single
 synchronous attempt, `webhooks/dispatcher.ex` `record_single_attempt/3`, which
 resolves to exactly one of `ok` or `failed_giveup` — never `pending`).
 
 **The default, decided (task-60887badc1d2900f, option (a)): exit 0 stands.**
-`bp webhook test-send <id>` against an endpoint that just refused the
-connection still exits `0` — the human-readable `delivery: failed_giveup: …`
-line is the truth, the exit code is not, and that is the tradeoff this table
-keeps: a 2xx body is not allowed to mint a SECOND source of exit codes for
-every route, only this one opts in, explicitly, per command.
+`bp webhook test-send <id>` against an endpoint that refused the connection still
+exits `0` — the `delivery: failed_giveup: …` line is the truth, the exit code is
+not. A 2xx body may not mint a SECOND source of exit codes; only this route opts
+in, explicitly.
 
-`webhook.test-send` alone carries the opt-in escape hatch for the one caller
-the printed line cannot reach — a script: `--fail-on-failed-delivery`. Passed,
-and the body's `delivery.status` is anything other than `"ok"`, the CLI exits
-`1` (`exitGeneric` — the existing "other/network/timeout" bucket, which is
-exactly what a refused/timed-out test probe is) instead of `0`; the rendered
-output is byte-identical either way, only the process exit code changes.
-Unset, or the delivery succeeded, behaviour is untouched: exit `0`, same
-stdout. `webhook replay` does not carry this flag — the shared shape is noted
-above for the next reader, not extended here.
+`webhook.test-send` alone carries the escape hatch for the caller the printed
+line cannot reach — a script: `--fail-on-failed-delivery`. Passed, and with
+`delivery.status` anything but `"ok"`, the CLI exits `1` (`exitGeneric`, which is
+what a refused test probe is) instead of `0`; output is byte-identical either
+way. Unset, or on success, behaviour is untouched. `webhook replay` lacks the flag.
 
 ## Schema field references
 
 This document keys off the v1 error **envelope** (`error.code`, `error.message`,
-`error.details`, `error.request_id`), which is the API wire contract — distinct
-from the capabilities **manifest**. Where it touches the manifest, it uses the
-frozen field names from `manifest.schema.json`: each command's required
+`error.details`, `error.request_id`) — the API wire contract, distinct from the
+capabilities **manifest**. Where it touches the manifest it uses the frozen field
+names from `manifest.schema.json`: each command's required
 `auth_tier` is what the CLI sends a credential for, and `dry_run: false` is why
 `--dry-run` degrades to client-side request-printing (see `m0-decisions.md`).
 The manifest's per-command `default_output: "minimal"` governs the receipt the

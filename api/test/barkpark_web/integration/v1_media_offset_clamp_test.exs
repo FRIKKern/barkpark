@@ -28,7 +28,7 @@ defmodule BarkparkWeb.Integration.V1MediaOffsetClampTest do
   @absurd "5000000"
 
   test "GET /v1/media/:dataset/search clamps offset for a TOKENLESS caller", %{conn: conn} do
-    # No Authorization header at all: `[:api, :strict_bearer_media_read]` only
+    # No Authorization header at all: `[:api, :api_strict_bearer]` only
     # rejects a PRESENTED-but-unverifiable bearer, so this is the anonymous
     # reach the row names. A 200 here is also the control — if this door ever
     # starts refusing anonymous callers the assertion below stops meaning

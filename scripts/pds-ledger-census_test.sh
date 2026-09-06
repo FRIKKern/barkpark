@@ -24,7 +24,7 @@
 #
 # EXIT CODES UNDER TEST (from the census)
 #   0 coherent census    1 round-done predicate false    2 fail closed
-#   3 usage              4 snapshot incoherent
+#   3 usage              4 snapshot incoherent            5 cannot authenticate
 #
 # usage: bash scripts/pds-ledger-census_test.sh
 
@@ -767,6 +767,202 @@ build_healthy "$FIVEHUNDRED"
 page "$FIVEHUNDRED" 1 500 '{"ok":false,"error":{"code":"internal"}}'
 expect_status_matching "a 500 is never a leaf" 2 "a non-2xx is never a leaf" \
   run --page-limit 4 --fixture-dir "$FIVEHUNDRED"
+echo
+
+# =============================================================================
+# CLAUSE 10 — A REJECTED CREDENTIAL IS ITS OWN OUTCOME (EXIT 5), AND IT NAMES
+# ITS SOURCE.
+#
+# THE 500 FIXTURE DIRECTLY ABOVE IS THIS BLOCK'S CONTROL, and it is why the
+# checks below are not merely "the census reds on a 401". Before clause 10, a
+# 401 and a 500 produced the SAME exit code and the SAME sentence; a fixture
+# asserting only redness passed identically in both worlds and proved nothing.
+# What is asserted here is the DISCRIMINATION: 500 -> 2 (above), 401 -> 5, and
+# the 401 must NOT carry the generic non-2xx sentence, because reaching that arm
+# is exactly the collapse being undone.
+# =============================================================================
+echo "clause 10 — a rejected credential is exit 5, not exit 2"
+
+UNAUTH0="$TMP/unauth-offset-0"
+build_healthy "$UNAUTH0"
+page "$UNAUTH0" 0 401 '{"error":{"code":"unauthorized","message":"missing or invalid token"}}'
+expect_status_matching "401 at offset 0 is CANNOT AUTHENTICATE, not fail-closed" 5 \
+  "the credential this census resolved was REJECTED" \
+  run --page-limit 4 --fixture-dir "$UNAUTH0"
+# THE DISCRIMINATOR, ASSERTED NEGATIVELY. If a future edit deletes the 401 arm,
+# the status falls through to the generic non-2xx `die` — which is still RED, so
+# an exit-code-only check could rot into passing on the wrong reason. This one
+# cannot: the generic sentence must be ABSENT.
+expect_output_lacks "a 401 never reaches the generic non-2xx arm" \
+  "a non-2xx is never a leaf" \
+  run --page-limit 4 --fixture-dir "$UNAUTH0"
+# The refusal must NAME the credential source. A fixture sends none, and saying
+# so is a different claim from naming one — the label is still printed.
+expect_output_contains "the refusal names the credential SOURCE" "credential source:" \
+  run --page-limit 4 --fixture-dir "$UNAUTH0"
+# ...and it must say, in the run's own words, that no board was produced. "Cannot
+# authenticate" being mistaken for "the board is empty" is the whole reason this
+# state was given its own exit code.
+expect_output_contains "the refusal says zero rows were reported" \
+  "zero rows were read" \
+  run --page-limit 4 --fixture-dir "$UNAUTH0"
+
+# A 403 is the same fault wearing a different number. An arm that hardcoded 401
+# would let a scope-refused token read as a transport failure.
+UNAUTH403="$TMP/unauth-403"
+build_healthy "$UNAUTH403"
+page "$UNAUTH403" 1 403 '{"error":{"code":"forbidden"}}'
+expect_status_matching "403 on a later page is CANNOT AUTHENTICATE too" 5 \
+  "HTTP 403" \
+  run --page-limit 4 --fixture-dir "$UNAUTH403"
+
+# THE ANCHOR READ IS A SECOND DOOR, and it had its own non-2xx arm. A 401 there
+# is the same fault and must produce the same outcome — otherwise the exit code
+# means "cannot authenticate on the paged read specifically", which is not a
+# state anyone can act on.
+UNAUTHANCHOR="$TMP/unauth-anchor"
+build_healthy "$UNAUTHANCHOR"
+paper "$UNAUTHANCHOR" pds-wave-unauth-fixture 401 '{"error":{"code":"unauthorized"}}'
+expect_status_matching "401 on the anchor Paper read is exit 5, not 2" 5 \
+  "the anchor Paper" \
+  run --page-limit 4 --fixture-dir "$UNAUTHANCHOR" --anchor-from-paper pds-wave-unauth-fixture
+# The CONTROL for that door, beside it: a 404 on the SAME read is still exit 2.
+# Without this line the anchor arm could be rotted into "any anchor failure is 5"
+# and nothing would notice.
+ANCHOR404X="$TMP/unauth-anchor-control"
+build_healthy "$ANCHOR404X"
+paper "$ANCHOR404X" pds-wave-unauth-fixture 404 '{"ok":false,"error":{"code":"not_found"}}'
+expect_status_matching "a 404 on the anchor read is still fail-closed (exit 2)" 2 \
+  "refusing to fall back to" \
+  run --page-limit 4 --fixture-dir "$ANCHOR404X" --anchor-from-paper pds-wave-unauth-fixture
+
+# CLAUSE 10(c): the credential is on the GREEN path too. A label that appears
+# only in a refusal is one no reader can compare against a working run — and the
+# fixture transport's own label must say it sent NO credential, never a name.
+#
+# THE INDENT IS LOAD-BEARING, AND IT WAS EARNED BY A MUTATION THAT SURVIVED. The
+# first version of this check matched the bare substring `credential  none
+# (--fixture-dir` — which the clause-9 blind-spot block ALREADY prints, six
+# spaces deep, further down the same output. Deleting the header line entirely
+# left the selftest GREEN. The needle is therefore anchored to the HEADER's
+# two-space indent at a line start, so it can only be satisfied by the line this
+# check is about.
+expect_output_contains "a healthy run prints the credential source" \
+  $'\n  credential  none (--fixture-dir cans the transport' \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+
+# --- THE PRECEDENCE NO FIXTURE CAN REACH ------------------------------------
+#
+# Every check above runs under --fixture-dir, which builds FixtureTransport and
+# resolves NO credential at all: `resolve_credential` is dead code to all of
+# them, exactly as `_request` was before the lazy-import arm. It is also the
+# function the filed defect is ABOUT. So it is exercised directly, as a pure
+# function of (argv, environ, config path), against a config file written here —
+# never against the operator's real ~/.config/barkpark/config.json, and never
+# over the network.
+#
+# THE ORDER IS PINNED IN BOTH DIRECTIONS. It would be trivial to "fix" the filed
+# row by making the config win, and every check that only asserted "the working
+# token is used" would go green over that silent substitution — the failure mode
+# clause 9(a) refuses. So the env-over-config precedence is asserted to HOLD, and
+# what is asserted as NEW is that the winner is NAMED.
+CRED_PROBE="$TMP/credential-probe.py"
+cat > "$CRED_PROBE" <<'CREDEOF'
+import json
+import os
+import re
+import sys
+
+census, config_path = sys.argv[1], sys.argv[2]
+with open(census, encoding="utf-8") as handle:
+    text = handle.read()
+
+# The census is a bash wrapper around ONE python heredoc. Extract it rather than
+# importing the .sh — and refuse loudly if the heredoc shape ever changes, so
+# this arm cannot go quietly vacuous the way a `try: import` would.
+match = re.search(r"<<'PYEOF'\n(.*)\nPYEOF\n", text, re.S)
+if not match:
+    print("BLIND: no <<'PYEOF' ... PYEOF heredoc in %s -- this arm is checking nothing" % census)
+    sys.exit(2)
+
+ns = {"__name__": "_pds_census_probe"}
+exec(compile(match.group(1), census, "exec"), ns)
+
+resolve = ns.get("resolve_credential")
+if resolve is None:
+    print("BLIND: resolve_credential is gone from %s -- the precedence is untested again" % census)
+    sys.exit(2)
+
+with open(config_path, "w", encoding="utf-8") as handle:
+    json.dump({"server": "https://config.invalid", "token": "bppat_from_config"}, handle)
+
+failures = []
+
+
+def check(label, got, want):
+    if got != want:
+        failures.append("%s: got %r, want %r" % (label, got, want))
+    else:
+        print("  ok    %-52s %s" % (label, want))
+
+
+# (1) THE FILED DEFECT ITSELF: a STALE env token beats a WORKING config token,
+#     and that precedence is deliberately UNCHANGED. What must be true is that
+#     the winner is named, so the refusal downstream can say whose token died.
+env = {"BARKPARK_TOKEN": "bp_admin_stale", "BARKPARK_SERVER": "https://env.invalid"}
+server, token, cred = resolve(None, None, env, config_path)
+check("env token wins over the config token", token, "bp_admin_stale")
+check("and the env source is NAMED", cred, ns["CREDENTIAL_ENV"])
+
+# (2) argv beats the environment, and says so.
+server, token, cred = resolve(None, "tok_from_argv", env, config_path)
+check("--token beats the environment", token, "tok_from_argv")
+check("and the argv source is NAMED", cred, ns["CREDENTIAL_ARGV"])
+
+# (3) with no env token the config is read, and IT is named. This is the run the
+#     operator gets from `env -u BARKPARK_TOKEN`.
+server, token, cred = resolve(None, None, {}, config_path)
+check("no env token falls through to the bp config", token, "bppat_from_config")
+check("and the config source is NAMED", cred, ns["CREDENTIAL_CONFIG"])
+check("and the config server comes with it", server, "https://config.invalid")
+
+# (4) NOTHING ANYWHERE is a usage error upstream, not a mystery: no token, and
+#     no source name invented for one.
+os.remove(config_path)
+server, token, cred = resolve(None, None, {}, config_path)
+check("no credential anywhere yields no token", token, None)
+check("and no source is invented for it", cred, None)
+
+# (5) THE SOURCE IS NEVER THE SECRET. Whatever the label says, it must not carry
+#     the token — the refusal path prints this string to a terminal and a log.
+for label in (ns["CREDENTIAL_ARGV"], ns["CREDENTIAL_ENV"], ns["CREDENTIAL_CONFIG"]):
+    if "bp_admin_stale" in label or "bppat_from_config" in label or "tok_from_argv" in label:
+        failures.append("credential label %r leaks a token" % label)
+print("  ok    %-52s %s" % ("no credential label carries a secret", "3 labels"))
+
+if failures:
+    print("PRECEDENCE FAILURES:")
+    for entry in failures:
+        print("  %s" % entry)
+    sys.exit(1)
+print("credential precedence holds (9 assertions)")
+CREDEOF
+
+expect_credential_precedence() {
+  local label=$1
+  CHECKS=$((CHECKS + 1))
+  local got=0 out
+  out=$(python3 -I "$CRED_PROBE" "$CENSUS" "$TMP/probe-config.json" 2>&1) || got=$?
+  if [[ $got -ne 0 ]]; then
+    printf 'SELFTEST FAIL: %s — exit %d\n%s\n' "$label" "$got" "$out" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  printf '%s\n' "$out"
+  printf '  ok    %-52s %s\n' "$label" "$(printf '%s' "$out" | tail -1)"
+}
+
+expect_credential_precedence "credential precedence is argv > env > bp config, and named"
 echo
 
 # =============================================================================
@@ -2085,6 +2281,23 @@ subset is proven by DIFFING TWO RUNS rather than by pinning an id -- same seed,
 same rows; different seed, different rows -- and its membership is printed in
 full, because a sample nobody can enumerate names a number instead of the rows
 behind it.
+
+CLAUSE 10 IS PROVEN BY DISCRIMINATION, NOT BY REDNESS. A 401 and a 500 used to
+produce the same exit code and the same sentence, so a fixture asserting only
+"the census reds on a 401" passed identically before and after the fix. What is
+pinned here is the SPLIT: 500 -> 2 and 404-on-the-anchor -> 2 (both controls,
+beside the new checks), 401/403 -> 5 on both doors, and the 401 must NOT carry
+the generic `a non-2xx is never a leaf` sentence — asserted NEGATIVELY, because
+deleting the arm leaves the run red for the wrong reason. The credential
+PRECEDENCE (argv > env > bp config) is the one decision --fixture-dir can never
+reach, so it is exercised as a pure function against a config file written here:
+the env-over-config order is asserted to HOLD (a "fix" that silently preferred
+the working config would be the unreproducible-report failure clause 9(a)
+refuses), what is new is that the winner is NAMED, and no label may carry the
+token. One mutation here SURVIVED its first version and is recorded above the
+check it broke: the green-path credential needle matched the clause-9 blind-spot
+block six spaces deeper down the same output, so deleting the header line left
+the selftest green. The needle is now anchored to the header's own indent.
 
 THE PAGED READ HAS A TOTAL ORDER: `order=_createdAt:asc`, reported back as
 `page_order` so the discipline can be read rather than believed. Both traps are

@@ -67,6 +67,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       # discipline focus_pane_idx keeps. Seeded false so an initial load
       # never steals focus.
       focus_doc_on_open: false,
+      # ── Navigation receipt + its named failure ──────────────────────────
+      # (spd-w18-bl-select-detects-dead-destination). `pending_select` is the
+      # receipt `Scope.select/2` writes before its `push_patch`; the
+      # destination's own `handle_params` settles it. `nav_error` is what the
+      # user is SHOWN when the destination raised — the whole point of the
+      # receipt is that this desk never answers a click with silence. Both
+      # seeded here so the shell can read `@nav_error` on the very first
+      # render (an absent assign does not degrade in a HEEx comprehension, it
+      # raises KeyError — the lesson `sidebar_user_opened` below records).
+      pending_select: nil,
+      nav_error: nil,
       # ── Inspector summon flag (spd-b39, the Tier-2 ladder) ──────────────
       # Whether the user ASKED for the Document inspector, as opposed to it
       # being open because the bucket defaults it open. `sidebar_assigns/1`

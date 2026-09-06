@@ -61,8 +61,8 @@
 //      against the wrong face. At 1280 that floor never applies — the `content`
 //      container is 676px, under the 720px query — and the tool measures
 //      `surface_min_inline_size: 0px` there. At 1440 it DOES apply and resolves
-//      to 565.01px, far under the 720px `max-width` that actually binds. That
-//      565.01px is NOT a desk fact: it is this harness's fallback face, and the
+//      to 508.24px, far under the 660px `max-width` that actually binds. That
+//      508.24px is NOT a desk fact: it is this harness's fallback face, and the
 //      deployed face would resolve it elsewhere. It is reported only to show
 //      the floor is INERT at both widths — which is why the px numbers are
 //      trustworthy here and nowhere else, and why a face-sensitive question
@@ -89,7 +89,11 @@
 //      Identical `selectorText`. Different rules. A deletion set built by
 //      prefix — "delete everything starting `.bp-doc-sidebar`" — or by bare
 //      selectorText match takes BOTH, and the run comes back DIFFERENT with
-//      `inspector_flex: "0 0 300px" -> "0 1 auto"` and surface 676 -> 720. That
+//      `inspector_flex: "0 0 300px" -> "0 1 auto"` and the reading column
+//      `editor_body` 676 -> 873.14 at 1280. (Before the 2026-09-06 re-freeze
+//      that signature was quoted as "surface 676 -> 720"; since the 660px cap
+//      binds on BOTH sides of the deletion, `surface_border_box` now stays 660
+//      and `editor_body` is the field that shows the widening.) That
 //      is a real measurement of a rule nobody meant to delete, reported as
 //      evidence about a rule that was never tested. So every entry in a
 //      deletion set names its enclosing at-rule condition (or `null` for top
@@ -99,14 +103,43 @@
 //      not been shown able to fail.
 //
 // ── FIDELITY ─────────────────────────────────────────────────────────────────
-// The BEFORE numbers reproduce the committed deployed artifact
-// (`scripts/measurements/spd-visible-table-2026-07-20.json`) at tolerance zero:
+// The BEFORE numbers, at tolerance zero:
+//
+//   1280 -> panel 976  / surface_border_box 660 / content 580
+//   1440 -> panel 1136 / surface_border_box 660 / content 580
+//
+// `--check-fidelity` asserts them. If they do not reproduce, THE MODEL IS
+// WRONG, not the desk — fix the DOM here before believing any diff it prints.
+//
+// ── THE 2026-09-06 RE-FREEZE ─────────────────────────────────────────────────
+// The rows above are NOT the rows this file shipped with. The original freeze
+// came from `scripts/measurements/spd-visible-table-2026-07-20.json` (charter
+// D156) and read:
 //
 //   1280 -> panel 976  / surface_border_box 676 / content 596
 //   1440 -> panel 1136 / surface_border_box 720 / content 640
 //
-// `--check-fidelity` asserts them. If they do not reproduce, THE MODEL IS
-// WRONG, not the desk — fix the DOM here before believing any diff it prints.
+// THE DESK MOVED, DELIBERATELY; THE MODEL WAS NOT WRONG WHEN IT WAS FROZEN.
+// Commit 3968dbc16 — `feat(paper): the reader reads its own type token, and the
+// roles keep their ratio` (#11626, pe-w1-reader-editorial-typography,
+// 2026-08-12) — changed `.bp-paper-surface { max-width: 720px }` to `660px`,
+// because the 640px measure was sized for 16px prose and ran ~87 characters per
+// line at the 18px the type token had always specified. The gutter token did
+// not move: `--paper-gutter: 40px` a side, so content = cap - 80.
+//
+// The arithmetic of which rows that binds — the cap binds wherever the reading
+// column (`editor_body`, the `.editor-panel-main.bp-paper-body` box) exceeds
+// the cap, and clips it to cap/cap-80:
+//
+//   width  editor_body   old cap 720            new cap 660
+//   1280   676           676 < 720 -> uncapped  676 > 660 -> 660 / 580
+//   1440   836           836 > 720 -> 720 / 640 836 > 660 -> 660 / 580
+//
+// So BOTH wide rows move, for two different reasons: 1280 was uncapped and is
+// now capped (676 -> 660, a 16px shift); 1440 was already capped and follows
+// the cap down (720 -> 660). `panel` is unmoved at both widths — the rail model
+// is untouched, which is the tell that this was a reading-column change and not
+// a chrome change.
 //
 // STANDING LAW observed here: every ch figure names its face, font-size and
 // probe-derived px/ch (so this file emits none at all); `viewport 640` and
@@ -135,11 +168,13 @@ const WIDTHS = [1280, 1440];
  *  is what keeps the model honest. 1280 - 304 = 976; 1440 - 304 = 1136. */
 const RAIL_MODEL = [44, 260];
 
-/** The committed wide rows, for `--check-fidelity`. Source: charter D156 and
- *  `scripts/measurements/spd-visible-table-2026-07-20.json`. */
+/** The committed wide rows, for `--check-fidelity`. Re-frozen 2026-09-06 on the
+ *  660px cap (see "THE 2026-09-06 RE-FREEZE" in the header). The pre-cap
+ *  freeze (D156 / `spd-visible-table-2026-07-20.json`) read 1280 -> 676/596 and
+ *  1440 -> 720/640; both rows now clip to the same 660/580 reading column. */
 const FIDELITY = {
-  1280: { panel: 976, surface_border_box: 676, content: 596 },
-  1440: { panel: 1136, surface_border_box: 720, content: 640 },
+  1280: { panel: 976, surface_border_box: 660, content: 580 },
+  1440: { panel: 1136, surface_border_box: 660, content: 580 },
 };
 
 /** Asserted present in the built DOM before any number is trusted. */

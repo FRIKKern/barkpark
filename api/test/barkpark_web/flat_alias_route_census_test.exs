@@ -229,6 +229,20 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "instance-operational, no tenant rows: drives Barkpark.Sites.DeployRunner for one " <>
          "SITE SLUG on this box; a slug is a deploy target, not a tenant. Source carries no " <>
          "scope marker at all."},
+    # WorkspaceReinstateController.create
+    {"POST", "/v1/admin/workspaces/:slug/reinstate"} =>
+      {:global,
+       "instance-operator primitive (task-7ab3d03b49606f83): it lifts a POLICY suspension the " <>
+         "PlaygroundReaper's TTL imposed, so the :slug names the SUBJECT of the operator's " <>
+         "action, never the caller's own tenancy — and there is deliberately no membership " <>
+         "re-derivation, because confining the verb to the caller's workspace would BE the " <>
+         "defect (a self-service loop round a TTL removes the limit rather than widening a " <>
+         "permit). The permit comes from the pipeline instead: [:api, :require_admin, " <>
+         ":require_platform_operator], the same instance-operator door as the five " <>
+         "/v1/admin/* rows above, and RequireAdminRouteCensusTest classifies it " <>
+         ":instance_global for the identical reason. It touches ONLY the named workspaces row " <>
+         "(Quota.reinstate/1 + set_expires_at/2) and no tenant CONTENT at all. Source carries " <>
+         "no scope marker at all."},
     # AppTokenController.delete
     {"DELETE", "/v1/auth/app-tokens"} =>
       {:workspace_derived,

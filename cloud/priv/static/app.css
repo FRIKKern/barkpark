@@ -2529,16 +2529,28 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   flex: 0 0 auto;
 }
 .set-row-main { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
-/* `overflow-wrap: anywhere` is what makes the `text-overflow: ellipsis` beside
-   it honest rather than decorative. An email is ONE unbreakable word, so with
-   the default `white-space: normal` the ellipsis can never paint (it needs a
-   line that is forbidden to wrap) and `overflow: hidden` silently swallowed
-   whatever did not fit — measured at 77px of "rex@acme.com" gone at 390px,
-   with no cue, on the row whose Remove button destroys that person's access.
-   `anywhere` also lowers this column's min-content contribution, which is what
-   lets `min-width: 0` on `.set-row-main` above actually yield. (The sibling
-   `.set-row-key` that used the same idiom went with the team env-var page,
-   ruled 2026-09-02; `.set-row-note` below is the surviving twin.) */
+/* `overflow-wrap: anywhere` is what makes this column honest, and the REASON
+   first written here was wrong. It said the ellipsis "can never paint" beside
+   the default `white-space: normal` because it "needs a line that is forbidden
+   to wrap". Charter D253 refuted that by decoding PNGs, and the probe was
+   re-run on the GATING PLATFORM (Ubuntu 24.04.4 LTS, Google Chrome
+   151.0.7922.71) for cchi-w23-bl-d253-inert-ellipsis-correction-five-sites:
+   twin 200px boxes over one unbreakable run ink to x=199 under `clip` and stop
+   at x=193 under `ellipsis`, PIXEL-IDENTICAL to the `nowrap` control. An unbreakable run wider
+   than its box overflows the LINE and IS cued, whatever `white-space` says.
+   What `overflow-wrap: anywhere` actually buys is the opposite and better
+   thing: an email is ONE unbreakable word, and `anywhere` gives it break
+   opportunities, so the text WRAPS and the 77px of "rex@acme.com" measured gone
+   at 390px is never clipped in the first place — no cue is needed because
+   nothing is hidden. (Driven on the same probe: with `anywhere` live the box
+   measures scrollWidth 200 / clientWidth 200 where the bare host measures
+   303/200.) `anywhere` also lowers this column's min-content contribution,
+   which is what lets `min-width: 0` on `.set-row-main` above actually yield.
+   The `text-overflow: ellipsis` below is kept as the FALLBACK for content
+   `anywhere` cannot break — it is not decoration, and it is not the mechanism
+   this rule relies on. (The sibling `.set-row-key` that used the same idiom
+   went with the team env-var page, ruled 2026-09-02; `.set-row-note` below is
+   the surviving twin.) */
 .set-row-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; }
 .set-row-meta { font-size: var(--text-xs); color: var(--muted-text); font-family: var(--mono); }
 /* W22-S3 — the note was the SOLE `.set-row-main` child without `overflow-wrap`.
@@ -3728,7 +3740,11 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    the money message unrendered — while row[0] in the SAME DOM at the SAME
    instant read 170/245 (30.6%). It clips at 320/360/375/390 and again at 769;
    `overview-attention` clips at 320, at 769 (117/165, the worst single tablet
-   cell) and at 800 (148/165). Light and dark are byte-identical in every cell:
+   cell) and at 800 (148/165) — those three cells are a DATED pre-remedy record
+   against the OLD "Health down" fixture string and its 165px clamp; cch-w18-bl
+   moved that fixture to the production-dominant "Health unknown · Agent offline"
+   (clamp 186px), and on the current bytes overflow-guard drives this host at
+   148/148 and 186/186 with zero truncation. Light and dark are byte-identical in every cell:
    theme is not an axis for this row. Three of these rows ship on the landing
    screen, and the row that hides the most was the one no instrument had ever
    read — GR109 asked with `querySelector`, so it could only ever have seen
@@ -3802,6 +3818,22 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    still cut at 880 and clean from 890 — so it is 769-899, not the 769-830
    this row was filed as, and 899 is already this harness's band edge.
 
+   THE UPPER EDGE WAS DRIVEN ON A FIXTURE STRING THE SERVER DOES NOT WRITE
+   (cch-w18-bl). "Driven, not assumed" is only as good as what it was driven
+   AGAINST: 899 came from `overview-attention` carrying "Health down · Agent
+   offline", and `Registry.mark_offline/1` writes `health_status: "unknown"`
+   DELIBERATELY, so the sentence a degraded box really serves is "Health unknown
+   · Agent offline" — three characters, +21px of pill. Re-driven on the flipped
+   fixture, 1px apart, light and dark identical: row0 `.attention-name` reads
+   67/62 at 900, 67/63 at 901, 67/64 at 902, 67/65 at 903, 67/66 at 904 and is
+   CLEAN from 905 — five widths of clipped instance name that sat immediately
+   ABOVE the old edge and could never be seen while the fixture was short. The
+   edge is therefore 904, and it is re-derived rather than adjusted: the leg's
+   NAME_WIDTHS carries 900 (the worst re-derived cell, inside the band) and 905
+   (the first naturally-clean width, OUTSIDE it), so widening this band further
+   reds rather than passes. mixed-fleet is untouched — its reason string did not
+   move — and every cell at 320-899 is byte-identical to before the flip.
+
    THREE THINGS TOGETHER, and the order is the point:
      `min-width` on the name column is the floor — it is what makes the wrap
      fire at all, because `flex-wrap` alone is dead against `min-width: 0`
@@ -3824,7 +3856,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    the 64 driven row-cells outside this band is byte-identical to origin/main,
    the 320-768 stack included. Above it, the ellipsis on `.attention-name` is
    the right treatment on its own. */
-@media (min-width: 769px) and (max-width: 899px) {
+@media (min-width: 769px) and (max-width: 904px) {
   .attention-row { flex-wrap: wrap; row-gap: 10px; }
   .attention-main { min-width: 12rem; }
   .attention-acts { margin-left: auto; }
@@ -4318,6 +4350,21 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .wh-del-status--ok { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); color: var(--ok-strong); }
 .wh-del-status--danger { background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.28); color: var(--danger); }
 .wh-del-status--info { background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.28); color: var(--info); }
+/* dr-w26 — the status chip's CAVEAT, in the chip's own row. `sent` means the
+   mail transport ACCEPTED the message, not that it was delivered, and the
+   sentence that says so ships on the payload (`status_meaning`). It sits
+   IMMEDIATELY after the pill and is allowed to wrap — a truncated caveat is a
+   caveat nobody finishes reading, and the row already wraps for `.wh-del-err`.
+   Muted and un-toned on purpose: it qualifies the pill, it does not compete
+   with it for the eye. No `--tone` variants, so no value space for
+   __css_check's E15 to police. */
+.wh-del-meaning {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted-text);
+}
 .wh-del-meta { font-size: 12px; color: var(--muted-text); }
 .wh-del-spacer { flex: 1 1 auto; }
 .wh-del-when { font-size: 12px; color: var(--muted-text); }
@@ -6753,7 +6800,11 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    Pays `cch-w16-bl-attention-pill-detail-truncated-front-screen`. On merged-main
    bytes the LANDING route hid the reason: `.instance-card-head
    .status-pill-detail` rendered 56 of 165px of "Health down · Agent offline" at
-   320 (66.1% unreadable), 96/165 at 360, 126/165 at 390 — and on `mixed-fleet`
+   320 (66.1% unreadable), 96/165 at 360, 126/165 at 390 — a DATED record, taken
+   pre-remedy against the OLD fixture string, whose 165px clamp cch-w18-bl has
+   since moved to 186px by serving the production-dominant "Health unknown ·
+   Agent offline"; the defect on the string the server actually writes was
+   correspondingly WIDER at every width — and on `mixed-fleet`
    45 of 237px of "Payment failed — subscription past due" (81.0%), still cut at
    430 where the attention fixture is already clean. Light and dark are
    byte-identical in every cell: theme is not an axis for this row.
@@ -6797,10 +6848,22 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    +54 at 320 and is 16px TALLER at 360/390, which is why `flex-wrap` is
    load-bearing and not decoration.
 
-   THE BOUNDARY IS A PROPERTY OF THE STRING (D206). 42px-at-320 / 24px-from-620
-   holds for the fixture "Health down · Agent offline". The production-dominant
-   "Health unknown · Agent offline" is three characters longer, is 42px at 360
-   too, and moves the wrap boundary from 425/430 to 450/460. overflow-guard's
+   THE BOUNDARY IS A PROPERTY OF THE STRING (D206), AND THE FIXTURE NOW SERVES
+   THE SERVER'S STRING (cch-w18-bl). This block was authored against the fixture
+   "Health down · Agent offline" — a pair the control plane does not organically
+   produce, because `Registry.mark_offline/1` writes `health_status: "unknown"`
+   DELIBERATELY and the shipped agent hard-codes `AgentStatus: "online"`. The
+   fixture was flipped to "Health unknown · Agent offline" and both boundaries
+   were DRIVEN 1px apart on `overview-attention`, light and dark identical:
+
+     "Health down · Agent offline"     42px <=343, 24px >=344   (343/344)
+     "Health unknown · Agent offline"  42px <=364, 24px >=365   (364/365)
+
+   Three characters bought +21px of boundary — the same +21 the attention-row
+   detail's clamped scrollWidth moves (165 -> 186). So the pill is 42px at 320
+   AND at 360 now, and 24px from 390 up on the sweep's grid; the sentence above
+   that predicted "425/430 to 450/460" was never driven and was wrong by ~80px
+   on both sides, which is the whole reason no height is pinned. overflow-guard's
    W18-overview-card-pill leg therefore asserts INVARIANTS at every width
    (detail.scrollWidth == clientWidth, pill.scrollHeight <= pill.clientHeight,
    detail.bottom <= pill.bottom) and pins no height at all.

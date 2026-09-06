@@ -9,9 +9,11 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
@@ -675,5 +677,123 @@ func TestPauseResumeRouting(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "resumed") {
 		t.Errorf("resume receipt missing: %s", stdout)
+	}
+}
+
+// task-688ebffc4b0aa50a — the by-name trap on the AZURE arm. Same law, same
+// zone: `azure decommission` deleted (and verified) the fqdn's first label only,
+// so the go-live `<label>-<teamid>` sibling at the same address outlived the VM
+// while the receipt reported no residue. The sweep must take both names at the
+// released address and spare a bystander sitting somewhere else.
+func TestAzureDecommissionSweepsSiblingAtSameIPBystanderSurvives(t *testing.T) {
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+
+	azFake := cloud.NewFakeProvider()
+	if _, err := azFake.Create(context.Background(), cloud.ServerSpec{Name: "web-1"}); err != nil {
+		t.Fatalf("seed fake vm: %v", err)
+	}
+	oldBuilder := azureProviderBuilder
+	azureProviderBuilder = func(map[string]string) (cloud.CloudProvider, error) { return azFake, nil }
+	t.Cleanup(func() { azureProviderBuilder = oldBuilder })
+
+	cp := newFakeCP(t, []cpBarkpark{{
+		ID: "row-az", Slug: "web-1", DNSLabel: "web-1",
+		URL: "https://web-1.barkpark.cloud", Mode: "managed",
+	}})
+
+	var mu sync.Mutex
+	zone := map[string]string{
+		"web-1":          "20.0.0.9",
+		"web-1-506f035e": "20.0.0.9",
+		"bystander":      "20.0.0.77",
+	}
+	f.mux.HandleFunc("DELETE /zones/barkpark.cloud/rrsets/{name}/A", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		delete(zone, r.PathValue("name"))
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"action":{"id":91,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("GET /zones/barkpark.cloud/rrsets", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		names := make([]string, 0, len(zone))
+		for n := range zone {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		parts := make([]string, 0, len(names))
+		for _, n := range names {
+			parts = append(parts, `{"id":"`+n+`/A","name":"`+n+`","type":"A","records":[{"value":"`+zone[n]+`"}]}`)
+		}
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"rrsets":[`+strings.Join(parts, ",")+`]}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":91,"status":"success"}]}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "json", "instance", "decommission", "--provider", "azure",
+		"web-1.barkpark.cloud", "--control-url", cp.srv.URL, "--worker-token", "wtok")
+
+	mu.Lock()
+	_, platformLeft := zone["web-1"]
+	_, siblingLeft := zone["web-1-506f035e"]
+	_, bystanderLeft := zone["bystander"]
+	mu.Unlock()
+
+	if platformLeft {
+		t.Error("the platform A record web-1.barkpark.cloud survived the teardown")
+	}
+	if siblingLeft {
+		t.Error("the go-live sibling web-1-506f035e.barkpark.cloud survived at the released VM address — a by-name delete left it standing (task-688ebffc4b0aa50a)")
+	}
+	if !bystanderLeft {
+		t.Error("the by-value sweep took bystander.barkpark.cloud at a DIFFERENT address — the sweep is too wide")
+	}
+	if code != exitOK {
+		t.Fatalf("azure decommission exit=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	var report map[string]any
+	_ = json.Unmarshal([]byte(stdout), &report)
+	if report["ok"] != true {
+		t.Errorf("report.ok = %v, want true (residue: %v)", report["ok"], report["residue"])
+	}
+}
+
+// task-688ebffc4b0aa50a — the azure VERIFY leg on its own seam. The command-level
+// test above cannot reach it: azure's sweep and its verify read the SAME zone
+// with the same credential, so whenever the sweep succeeds the verify is
+// necessarily clean, and a mutation that blinds the verify alone stays green
+// through the command. So the leg is driven directly, against a zone that still
+// holds a sibling at the released address: it must NAME that survivor, and it
+// must NOT re-report the platform label the by-name check above already covers.
+func TestAzureVerifyGoneNamesSiblingAtReleasedIP(t *testing.T) {
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+
+	f.mux.HandleFunc("GET /zones/barkpark.cloud/rrsets", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"rrsets":[
+			{"id":"web-1/A","name":"web-1","type":"A","records":[{"value":"20.0.0.9"}]},
+			{"id":"web-1-506f035e/A","name":"web-1-506f035e","type":"A","records":[{"value":"20.0.0.9"}]},
+			{"id":"bystander/A","name":"bystander","type":"A","records":[{"value":"20.0.0.77"}]}
+		]}`)
+	})
+
+	dns := newHetznerClient("test-token").HCloud()
+	out := newWriter(io.Discard, io.Discard)
+	residue := azureVerifyGone(out, cloud.NewFakeProvider(), dns, nil,
+		"web-1.barkpark.cloud", "web-1", "web-1", "barkpark.cloud", "20.0.0.9")
+
+	joined := strings.Join(residue, " | ")
+	if !strings.Contains(joined, "web-1-506f035e.barkpark.cloud still resolves to the released box IP 20.0.0.9") {
+		t.Errorf("the by-value leg did not name the surviving sibling: %s", joined)
+	}
+	if strings.Contains(joined, "bystander") {
+		t.Errorf("a record at a DIFFERENT address was reported as residue: %s", joined)
+	}
+	// The platform label is reported ONCE, by the by-name check — the by-value
+	// leg must skip it rather than double-count the same record.
+	if n := strings.Count(joined, "web-1.barkpark.cloud"); n != 1 {
+		t.Errorf("the platform record is reported %d times, want exactly 1: %s", n, joined)
 	}
 }

@@ -576,6 +576,34 @@ func waitSiteDeployLive(out *writer, cfg *Config, ref, id string, deferred cloud
 	return exitGeneric
 }
 
+// warnPrebuiltAmbientToken is the D7 shadow guard on the ONE deploy lane that
+// can carry it. The managed lane cannot: `bp cloud site deploy` is an HTTP call
+// that sends no environment, the control plane builds the build env as a closed
+// literal (`cloud/lib/barkpark_cloud/sites/deploy.ex` deploy_payload/4), and the
+// box's DeployRunner then set-from-request-or-REMOVES every BUILD_ALLOW key
+// (`api/lib/barkpark/sites/deploy_runner.ex` @build_env_keys) — so an ambient
+// BARKPARK_TOKEN in the caller's shell is structurally absent from that build.
+// `--prebuilt` is the exception: the build already happened in a shell bp did
+// not launch, and these bytes are shipped as-is. bp cannot scrub a compiled
+// artifact, so it says what it sees.
+//
+// It WARNS rather than refuses on purpose. The ambient token at upload time is a
+// proxy for the shell the build ran in, not a measurement of it — the build may
+// have happened elsewhere, or in CI, or already scrubbed. Refusing on a proxy
+// would stop a correct deploy on a shell that has the variable exported
+// permanently, which is the common case; the warning names the remedy instead so
+// a caller who IS affected can act on it in one line.
+func warnPrebuiltAmbientToken(out *writer, ref, dir string, lookup func(string) (string, bool)) {
+	shadowed, tail := ambientTokenShadow(lookup)
+	if !shadowed {
+		return
+	}
+	out.progressf(
+		"! BARKPARK_TOKEN is set in this shell (%s). These bytes were built somewhere bp did not launch, so if that build saw this token it read the dataset with YOUR credential rather than the site's per-site read token — and bp cannot scrub an artifact it is only uploading.", tail)
+	out.progressf(
+		"  If the build ran in this shell, rebuild it clean and re-ship to THIS deployment: `env -u BARKPARK_TOKEN npm run build` then `bp cloud site deploy %s --prebuilt %s --deployment <id>` (the id is printed below).", hzCell(ref), hzCell(dir))
+}
+
 // runCloudSitePrebuiltDeploy is `bp cloud site deploy <site> --prebuilt <dir>` —
 // the lane where the build ALREADY HAPPENED off the serving box (charter D85)
 // and only the output travels. It is two calls, and the order is forced:
@@ -600,6 +628,7 @@ func waitSiteDeployLive(out *writer, cfg *Config, ref, id string, deferred cloud
 // refusal names the deployment it minted, and the second run passes it back with
 // `--deployment <id>`: no new mint, the same build id, the upload lands.
 func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deploymentID string, force, follow bool) int {
+	warnPrebuiltAmbientToken(out, ref, dir, os.LookupEnv)
 	dep, code := resolvePrebuiltDeployment(out, cfg, ref, id, deploymentID, force)
 	if code != exitOK {
 		return code
@@ -2402,6 +2431,12 @@ func spawnSiteMap(s cloudclient.SpawnSite) map[string]any {
 		"project":   s.Project,
 		"dataset":   s.Dataset,
 	}
+	// dr-w11: echoed only when the control plane sent it — an empty string means
+	// a CP that predates the field, and inventing "absent" for it would
+	// manufacture the very fault this key exists to report.
+	if pt := strings.TrimSpace(s.PublishTrigger); pt != "" {
+		m["publish_trigger"] = pt
+	}
 	if s.BarkparkID != "" {
 		m["barkpark_id"] = s.BarkparkID
 	}
@@ -2427,6 +2462,40 @@ func spawnSiteMap(s cloudclient.SpawnSite) map[string]any {
 		m["current_deployment_id"] = s.CurrentDeploymentID
 	}
 	return m
+}
+
+// sitePublishTriggerLine renders the control plane's `publish_trigger` verdict as
+// the sentence a site owner can act on, or "" when there is nothing honest to say.
+//
+// THREE VERDICTS, THREE DIFFERENT FACTS, and collapsing any two would re-create
+// the silence this row exists to break:
+//
+//   - "absent" is a FAULT and gets a sentence naming the consequence, not the
+//     mechanism — a reader does not need to know what a webhook is to understand
+//     that publishing will not update this site.
+//   - "not_applicable" is NOT a fault: a container site binds no content dataset,
+//     so no trigger is owed and printing a warning there would train owners to
+//     ignore the row on the sites where it means something.
+//   - "present" says CONFIGURED, deliberately not "verified live on the box" —
+//     the control plane derives it from the site row and makes no cross-host
+//     call, and a claim of liveness it cannot back is exactly the kind of green
+//     tick that let this fault survive eight weeks.
+//
+// An unrecognised word from a newer control plane is echoed VERBATIM rather than
+// dropped or bucketed into one of the three above.
+func sitePublishTriggerLine(trigger string) string {
+	switch t := strings.ToLower(strings.TrimSpace(trigger)); t {
+	case "":
+		return ""
+	case "absent":
+		return "no publish trigger — content publishes never reach this site"
+	case "not_applicable":
+		return "not applicable — this site binds no content dataset"
+	case "present":
+		return "present — a publish on the bound dataset triggers a rebuild"
+	default:
+		return hzCell(t)
+	}
 }
 
 // spawnSiteStatusMap is the KV view of a site's status header (the human table
@@ -2455,6 +2524,19 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 	// header stays exactly as it was.
 	if dt := strings.TrimSpace(s.DocType); dt != "" {
 		m["doc type"] = hzCell(dt)
+	}
+	// dr-w11: THE PUBLISH TRIGGER, and it is the one row on this header that can
+	// say a site is unreachable by content at all. `bp cloud site status` is the
+	// surface a site owner runs, and for eight of guerrilla's thirteen sites it
+	// printed a clean header over a site no publish could ever reach: no webhook
+	// exists on the box, so no deploy is ever attempted, so the deploy ledger has
+	// nothing to report and every count on this page is honestly zero. An absence
+	// nothing measures reads exactly like health.
+	//
+	// Guarded like every other optional row: a control plane that predates the
+	// field sends "" and the header is unchanged, rather than inventing "absent".
+	if line := sitePublishTriggerLine(s.PublishTrigger); line != "" {
+		m["publish trigger"] = line
 	}
 	// Runtime target + slot port (charter D62): a node site advertises the node-slot
 	// SSR runtime and the port its live process is bound to, so a user reading

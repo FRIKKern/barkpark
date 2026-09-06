@@ -1389,6 +1389,20 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|Claim it first (`bp task claim <id> <worker>`) and stamp with the epoch that returns. The | <>
         ~s|post-close --miss / --withdraw exemption applies only to a done or cancelled row.|
 
+  # THE PULSE'S STATE REFUSAL (task-b6fcc8e2f57e1cd5). A keep-alive loop's ONLY
+  # success signal is the pulse's exit code, so its FAILURE has to say which of
+  # the two lost-lease situations it hit: the row moved (re-claim), or the claim
+  # is someone else's (stand down). `not_holder` alone said neither. Name the
+  # state the row actually carries and the one verb that fixes it.
+  def criteria_hint({:not_in_progress, status}, :pulse),
+    do:
+      ~s|this row is #{status}, not in_progress — a pulse renews a LIVE claim, and this row no longer | <>
+        ~s|has one. Nothing was written: no now-line, no epoch bump, so the epoch you hold is unchanged. | <>
+        ~s|A stale `claim.worker` can OUTLIVE the lease (a `bp task stage <id> open` moves the row and | <>
+        ~s|leaves the claim map behind), which is why presence of your worker id here proves nothing. | <>
+        ~s|Re-claim it — `bp task claim <id> <worker>` — and use the epoch THAT returns for the next | <>
+        ~s|stamp/close. If your loop treated the earlier pulses as proof the claim was held, they were not.|
+
   def criteria_hint(:criterion_not_met, :stamp),
     do:
       ~s|this criterion is already met=false, so there is no stamped proof to withdraw and nothing was | <>
@@ -1501,6 +1515,23 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|have carried and stamp them, or close it `cancelled` with the reason. Goals, decisions and rows with | <>
         ~s|children are exempt. To close done anyway, on the record: --set close_reason_override="<why it is done | <>
         ~s|with no artifact>".|
+
+  # THE CANCEL REASON REFUSAL (task-650d7844d8fe7199). Unlike every other hint
+  # here this one names NO override, because there is none and inventing the
+  # expectation of one would be the whole defect again: the fix is a sentence,
+  # and a caller who has none has nothing to record. It must say WHY a cancel is
+  # the one status this binds on, or it reads as an arbitrary new required field.
+  def criteria_hint(:cancel_reason_required, :close),
+    do:
+      ~s|a `cancelled` close needs a reason and this one carried none (absent, empty, or whitespace-only). | <>
+        ~s|A cancel is EXEMPT BY NAME from every other close gate — the criteria gate (D289) and the close | <>
+        ~s|artifact gate (D291) both wave it through, because abandoning the acceptance criteria is what | <>
+        ~s|cancelling MEANS — so the reason is not one record among several, it is the ENTIRE record of why | <>
+        ~s|this work stopped. Pass it as the FIFTH positional: | <>
+        ~s|`bp task close <id> <worker> <epoch> cancelled "<why this work is being abandoned>"`. | <>
+        ~s|There is no override, on purpose: the escape hatch IS the sentence. `done` and `blocked` closes | <>
+        ~s|are unaffected — a `done` close is governed by the criteria and artifact gates, and a `blocked` | <>
+        ~s|close is an honest partial whose record is not yet due.|
 
   def criteria_hint({:sentinel_worker_id, worker}, _surface),
     do:

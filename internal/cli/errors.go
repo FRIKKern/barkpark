@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/apierr"
@@ -42,6 +44,16 @@ type apiError struct {
 	// the first thing lost. Raw bytes survive every shape and re-serialize
 	// byte-identically into the -o json / -o yaml envelope.
 	details json.RawMessage
+	// credentialSent records whether the request that earned this refusal
+	// actually carried a credential (an Authorization header). It exists for
+	// ONE decision: a 401 must never tell a caller to obtain a credential they
+	// already sent. `bp auth me` with a saved instance token was answered
+	// "authentication required — set BARKPARK_API_TOKEN or run: bp setup …",
+	// which named a remedy the caller had already applied — the real gate is a
+	// login SESSION, which the server said in its own message and the CLI threw
+	// away. Set from the dispatched request's headers (run.go), so it is a fact
+	// about what was sent, not a guess from config.
+	credentialSent bool
 }
 
 // codeExit is the SINGLE canonical error.code -> exit mapping (contract spine
@@ -112,8 +124,12 @@ var codeExit = map[string]int{
 	// so a retry wrapper could not tell "the world moved, re-claim and retry"
 	// apart from "your arguments are wrong, give up". They split by RETRYABILITY:
 	//   6 (conflict): the lease/state moved under you — re-read, re-claim, retry.
-	"not_holder":              exitConflict,
-	"not_in_progress":         exitConflict,
+	"not_holder":      exitConflict,
+	"not_in_progress": exitConflict,
+	// One id, one row (#16474): the twin resolver REFUSES an ambiguous task id and
+	// the producer fence refuses a second copy — both answer 409.
+	"ambiguous_dataset":       exitConflict,
+	"dataset_twin":            exitConflict,
 	"doc_changed_since_claim": exitConflict,
 	"claimed_has_worker":      exitConflict,
 	//   5 (validation): the REQUEST is wrong — never retryable as sent.
@@ -177,8 +193,11 @@ var codeExit = map[string]int{
 	// top-level `message` the server computes (tasks_controller/params.ex
 	// criteria_hint/2) and `bodyMessage` prints in place of this token.
 	"close_reason_needs_artifact": exitValidation,
-	"rate_limited":                exitRateLimit,
-	"internal_error":              exitServer,
+	// task-650d7844d8fe7199: a `cancelled` close with a blank reason. Same code
+	// as its siblings — the request is wrong and re-sending it cannot help.
+	"cancel_reason_required": exitValidation,
+	"rate_limited":           exitRateLimit,
+	"internal_error":         exitServer,
 
 	// ── The API-parity backfill (task-2a774c5536503306) ───────────────────
 	//
@@ -375,7 +394,77 @@ func exitForCode(code string) int {
 	return e
 }
 
-// classifyError decodes an error response body into an apiError with the mapped
+// requestIDHeader is the response header Plug.RequestId stamps on EVERY reply
+// the API sends, error or not. It is the id an operator quotes to correlate a
+// failure against the server's logs.
+const requestIDHeader = "X-Request-Id"
+
+// requestIDFromHeader reads the correlation id off a response header set.
+// http.Header canonicalises keys, so the wire casing (`x-request-id`) does not
+// matter here.
+func requestIDFromHeader(h http.Header) string {
+	if h == nil {
+		return ""
+	}
+	return strings.TrimSpace(h.Get(requestIDHeader))
+}
+
+// lastResponse holds the header set of the most recent HTTP response this
+// process received. It exists because the request id lives in TWO places and
+// only one of them is reliable: the API stamps `x-request-id` on every reply at
+// the endpoint, before the router, while the BODY field `request_id` is written
+// per-emitter — and dozens of hand-built error envelopes never write it. The
+// JS SDK already resolves this the right way round (body field first, response
+// header second) and therefore reports an id where bp reported none, on the
+// same response.
+//
+// Recorded at the ONE send every dispatch path funnels through rather than
+// threaded through ~40 classifyError call sites, none of which asked for a
+// header and most of which sit behind three-value helpers (doRequest,
+// doRequestStream) that discard it by design. Every response overwrites it,
+// including one with no such header (which clears it), so the value can only
+// ever describe the latest reply — never a stale one from an earlier command.
+var lastResponse struct {
+	mu     sync.Mutex
+	header http.Header
+}
+
+// noteResponseHeader records a response's headers for the request-id fallback.
+// Called on every send, with whatever came back — including nil.
+func noteResponseHeader(h http.Header) {
+	lastResponse.mu.Lock()
+	lastResponse.header = h
+	lastResponse.mu.Unlock()
+}
+
+// lastResponseHeader returns the headers of the most recent response, or nil
+// when this process has not made a request yet.
+func lastResponseHeader() http.Header {
+	lastResponse.mu.Lock()
+	defer lastResponse.mu.Unlock()
+	return lastResponse.header
+}
+
+// classifyError decodes an error response body and, when that body carries no
+// request_id, falls back to the `x-request-id` header of the response it came
+// from. Body first: an emitter that wrote the field meant that exact id, and a
+// proxy could in principle rewrite the header.
+func classifyError(status int, body []byte) apiError {
+	return classifyErrorWithHeader(status, body, lastResponseHeader())
+}
+
+// classifyErrorWithHeader is classifyError with the response headers passed
+// explicitly, for callers that hold them (and for tests that must not depend on
+// process-wide state).
+func classifyErrorWithHeader(status int, body []byte, hdr http.Header) apiError {
+	ae := classifyErrorBody(status, body)
+	if ae.requestID == "" {
+		ae.requestID = requestIDFromHeader(hdr)
+	}
+	return ae
+}
+
+// classifyErrorBody decodes an error response body into an apiError with the mapped
 // exit code. It handles, in order:
 //
 //   - the canonical envelope {"error":{"code":…,"message":…,"request_id":…}}
@@ -387,7 +476,10 @@ func exitForCode(code string) int {
 //
 // (See docs/cli/error-exit-table.md "Codes that don't cleanly fit".) Anything it
 // cannot recognise becomes exitGeneric with the raw body as the message.
-func classifyError(status int, body []byte) apiError {
+//
+// This is the body-only decode; classifyError layers the header fallback on
+// top of it.
+func classifyErrorBody(status int, body []byte) apiError {
 	// First: the canonical {"error": <object>} envelope, read through
 	// internal/apierr — the ONE parser every surface shares. The struct that
 	// used to live here was copied into seven other decoders that then drifted
@@ -1063,6 +1155,16 @@ func (e apiError) hint() string {
 	case "rate_limited":
 		return "retry with backoff"
 	case "unauthorized":
+		// Telling someone to go get a token is only useful when they did not
+		// send one. When they DID, minting another changes nothing: the
+		// credential reached the server and the server refused it, so the cause
+		// is elsewhere — a route gated on a login session rather than a bearer
+		// (`bp auth me`), a token minted for a different server, or an expired
+		// one. Naming the remedy they already applied is what made the original
+		// refusal unactionable.
+		if e.credentialSent {
+			return "the request DID carry a credential and the server still refused it, so minting another will not help — this refusal's own message names the gate; check `bp whoami` for the identity this token actually has, and note that some routes require an interactive login session rather than an API token"
+		}
 		return "set BARKPARK_API_TOKEN or run `bp setup --target connect`"
 	case "forbidden", "cors_forbidden", "csrf_required":
 		return "token needs write/admin — check `bp whoami`"
@@ -1166,6 +1268,19 @@ func (e apiError) errorMessage() string {
 		}
 		return "not found"
 	case "unauthorized":
+		// The SERVER's message outranks the local constant, exactly as it does
+		// for not_found and forbidden two cases over. The constant used to win
+		// unconditionally, so a 401 whose body said "a valid login session is
+		// required" (GET /v1/auth/me sits behind require_user, not behind the
+		// bearer) rendered as "set BARKPARK_API_TOKEN" — the ONE fact that
+		// explains the refusal, dropped, and replaced by advice that cannot fix
+		// it. The generic line survives only where the server said nothing.
+		if e.message != "" {
+			return "unauthorized: " + e.message
+		}
+		if e.credentialSent {
+			return "unauthorized: the credential sent with this request was rejected"
+		}
 		return "authentication required — set BARKPARK_API_TOKEN or run: bp setup --target connect --server <url> --token <token>"
 	case "forbidden", "cors_forbidden", "csrf_required":
 		if e.message != "" {

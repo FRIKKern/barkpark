@@ -1,9 +1,9 @@
-<!-- doc-tier: cold | canonical-for: ci-workflow-verdicts-history | budget: 900tok -->
+<!-- doc-tier: cold | canonical-for: ci-workflow-verdicts-history | budget: 1400tok -->
 # CI workflow venue verdicts — dated corrections (history)
 
 > HISTORICAL RECORD (2026-09-03) — the correction below was written on that date against the runs it names. Re-derive from current runs; never quote the recorded counts as current.
 
-Moved verbatim out of [ci-workflow-verdicts.md](ci-workflow-verdicts.md) on 2026-09-05 when that page crossed its 2000tok header (8611 B > 8000 B); the live roster and its standing verdicts stay there.
+Moved verbatim out of [ci-workflow-verdicts.md](ci-workflow-verdicts.md) — the 2026-09-03 correction on 2026-09-05, the 2026-09-05 `search-template-gates` record on 2026-09-06 — each time that page crossed its 2000tok header. The live roster, the standing verdicts, and the operational residue of each record (venue, owner, issue key, the fence-collision recipe) stay there. `doc-tier: cold` is budget-exempt by design (`scripts/check-doc-budgets.sh`), so the header here is declarative.
 
 ## CORRECTED 2026-09-03 — `architecture` was GREEN AND BLIND
 
@@ -53,3 +53,28 @@ their silence.
 required, and carry no written rationale — they are the two strongest RETIRE-OR-MOVE candidates once
 `architecture` can see again.
 
+## ADDED 2026-09-05 (task-bc9fe6dc29d0b979) — `search-template-gates.yml` gains a main arm
+
+Not a move: the PR arm and its `paths:` list are unchanged. `search-template-gates.yml` was
+`pull_request`-only, so `gh run list --workflow=search-template-gates.yml --branch main` returned an
+EMPTY list — main was never measured, and #16174 merged at 12:20Z while `Vendored SDK freshness` was
+red, shipping a stale vendored `barkpark-core.tgz` to every scaffolded user. Trigger change
+authorised by main under task-33742276cf0a35b1.
+
+| workflow | venue now | owner | issue key |
+|---|---|---|---|
+| `search-template-gates.yml` | push:main (path-UNFILTERED) + the unchanged PR arm | lead-gates | `search-template-gates-main` |
+
+The main arm is deliberately path-unfiltered: the vendored tarballs are a FROZEN artifact that rots
+against a moving source tree, so a `paths:` filter would only move the vacuous green one hop, from
+"main is never measured" to "main is not measured when untouched". It stays ADVISORY — it reds its
+own check-run and cannot stop a merge. **If it is ever promoted to required, register an AGGREGATOR
+context, never one of the paths-filtered leaf job names**: a required context that emits no check run
+on a filtered-out PR waits for status forever.
+
+**Fence collision — the trigger and the remedy live in different trees.** `Vendored SDK freshness`
+fires on `js/packages/{core,react}/**`, but its only remedy writes to `templates/**`:
+`bash scripts/recut-vendor-tarballs.sh`, then commit the re-cut `templates/*/vendor/*.tgz` and
+`templates/VENDOR-STAMP.json`. The SDK lane must run that script **in the same PR** as the
+js/packages change; a lane fenced out of `templates/**` cannot green this gate and will wrongly
+conclude the gate is broken.

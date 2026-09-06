@@ -426,6 +426,14 @@ func runAzureInstanceDecommission(out *writer, g globals, args []string) int {
 	ctx := cloudInstanceCtx()
 	report := map[string]any{"provider": cloud.ProviderAzure, "fqdn": fqdn, "vm": vmName, "warning": azureUnrecoverableWarning}
 
+	// The box address, read from the platform A record BEFORE anything is torn
+	// down — the only handle the by-value DNS sweep below has, and the VM's
+	// public IP is gone the moment step 1 runs (task-688ebffc4b0aa50a).
+	boxIP := ""
+	if pre, perr := instLookupA(ctx, dns, fzone, label); perr == nil && len(pre) > 0 {
+		boxIP = strings.TrimSpace(pre[0])
+	}
+
 	// 1. Compute: delete the VM + NIC + PublicIP (idempotent; 404-tolerant).
 	if derr := p.Delete(ctx, vmName); derr != nil {
 		return useError(out, "failed", "azure decommission "+fqdn+": delete compute: "+derr.Error(), exitGeneric)
@@ -453,13 +461,21 @@ func runAzureInstanceDecommission(out *writer, g globals, args []string) int {
 		out.info("no WORKER_TOKEN — registry row (if any) is NOT touched; infra teardown only")
 	}
 
-	// 3. DNS: delete the A record in the hetzner-hosted zone (idempotent).
-	if derr := instDeleteA(ctx, dns, fzone, label); derr != nil {
+	// 3. DNS: sweep the hetzner-hosted zone BY VALUE, not by name (PDF-D101,
+	//    task-688ebffc4b0aa50a). Deleting the fqdn's first label alone leaves the
+	//    go-live `<label>-<teamid>` sibling and any attached custom host pointing
+	//    at an address Azure is about to hand to somebody else — and the by-name
+	//    verify below then reads clean. Azure boxes have no managed co-tenant on
+	//    a hetzner-zone address, so the sweep is unconditionally exclusive here;
+	//    an unknown IP degrades to the historical by-name delete.
+	swept, derr := instTeardownDNS(ctx, dns, fzone, label, boxIP, true)
+	if derr != nil {
 		return useError(out, "failed", "azure decommission "+fqdn+": dns delete: "+derr.Error(), exitGeneric)
 	}
+	report["dns_deleted"] = swept
 
 	// 4. VERIFY no residue across compute + DNS + registry.
-	residue := azureVerifyGone(out, p, dns, cp, fqdn, vmName, label, fzone)
+	residue := azureVerifyGone(out, p, dns, cp, fqdn, vmName, label, fzone, boxIP)
 	report["residue"] = residue
 	report["ok"] = len(residue) == 0
 	if out.emitStructured(report) {
@@ -481,7 +497,7 @@ func runAzureInstanceDecommission(out *writer, g globals, args []string) int {
 
 // azureVerifyGone re-reads compute (the managed VM list), DNS, and the registry
 // and lists every survivor of an azure decommission.
-func azureVerifyGone(out *writer, p cloud.CloudProvider, dns *hcloud.Client, cp *cpFleet, fqdn, vmName, label, zone string) []string {
+func azureVerifyGone(out *writer, p cloud.CloudProvider, dns *hcloud.Client, cp *cpFleet, fqdn, vmName, label, zone, ip string) []string {
 	ctx := cloudInstanceCtx()
 	var residue []string
 	servers, err := p.List(ctx)
@@ -499,6 +515,21 @@ func azureVerifyGone(out *writer, p cloud.CloudProvider, dns *hcloud.Client, cp 
 		residue = append(residue, "could not verify DNS: "+derr.Error())
 	} else if len(values) > 0 {
 		residue = append(residue, fmt.Sprintf("DNS A %s.%s still resolves to %s", label, zone, strings.Join(values, ", ")))
+	}
+	// BY VALUE: a survivor at the released address under ANOTHER name is named
+	// here rather than silently passing as delta zero (task-688ebffc4b0aa50a).
+	if strings.TrimSpace(ip) != "" {
+		names, verr := instARecordNamesByValue(ctx, dns, zone, ip)
+		if verr != nil {
+			residue = append(residue, "could not verify DNS by value: "+verr.Error())
+		} else {
+			for _, n := range names {
+				if n == hzRRSetName(label) {
+					continue // already reported by the by-name check above
+				}
+				residue = append(residue, fmt.Sprintf("DNS A %s still resolves to the released box IP %s", cloud.Fqdn(hzLabelOfRRSetName(n), zone), ip))
+			}
+		}
 	}
 	if cp != nil {
 		rows, lerr := cp.List()

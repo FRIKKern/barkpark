@@ -261,11 +261,29 @@ defmodule Barkpark.Plugins.Tasks do
   end
 
   # A fresh task (no prior row) with no criteria: warn, never block.
+  #
+  # THE SAME LESSON `warn_unflagged_merge_gates/1` LEARNED SIX CLAUSES BELOW.
+  # The Logger line alone let 163 of 975 rows (16.7%) be born with zero
+  # criteria in one week on this lane — its only reader was the server
+  # journal, which no task author ever sees. 63 of those closed as done with
+  # an EMPTY criteria list, which reads to every completeness audit as fully
+  # proven, because 0-of-0 is vacuously complete. `Warnings.put/3` rides the
+  # mutate SUCCESS envelope (`warnings: [...]`), which the bp CLI prints to
+  # stderr (emitWarnings) and Studio folds into its save flash — so the author
+  # is told AT BIRTH, before the claim-time criteria gate or the close-time
+  # artifact gate can bite. Collect-only-when-listening: a caller with no open
+  # collector drops it.
+  #
+  # STILL AN ADVISORY, NEVER A HALT. Whether a zero-criteria create should be
+  # REFUSED is a separate owner policy call (a hard requirement would have
+  # blocked all 163 of those creates); this clause changes the CHANNEL only.
   defp warn_if_create_zero(nil) do
-    Logger.warning(
-      "task quality gate: a new task is being saved with zero acceptance_criteria — " <>
+    message =
+      "a new task is being saved with zero acceptance_criteria — " <>
         "consider adding at least one measurable criterion (soft warning, save proceeds)"
-    )
+
+    Logger.warning("task quality gate: " <> message)
+    Barkpark.Content.Warnings.put("zero_acceptance_criteria", message, "warning")
 
     :ok
   end
@@ -712,13 +730,34 @@ defmodule Barkpark.Plugins.Tasks do
         summary:
           "List claimable tasks: lifecycle open or blocked (blocked is claimable by design), " <>
             "dependencies and queue gate cleared, published or unpaired draft, " <>
-            "twin-collapsed to the published row — priority order by default.",
+            "twin-collapsed to the published row — priority order by default. " <>
+            "DATASET SCOPE: with no --dataset the page spans EVERY dataset in the caller's " <>
+            "workspace/project scope and page.datasets says which; --dataset narrows it. " <>
+            "A doc_id living in more than one dataset of that scope is WITHHELD and listed " <>
+            "once in page.dataset_ambiguous — the queue will not pick a dataset you did not " <>
+            "name (Barkpark.Tasks.TwinResolver rule 3); name one to get the row.",
         http: %{method: "GET", path_template: "/v1/tasks/ready"},
         auth_tier: "read",
         args: [],
         flags: [
           %{name: "limit", type: "int", summary: "Max tasks to return.", default: 50},
           %{name: "offset", type: "int", summary: "Ready-queue row offset.", default: 0},
+          # The ENDPOINT knob, declared (task-0084e191d406de96). `?dataset=` is
+          # honoured by `TasksController.ready/2` as of this row; declaring it
+          # here is what makes the CLI's own forward a three-line change rather
+          # than a special case, because `-d/--dataset` is a GLOBAL value flag —
+          # `parseGlobals` consumes it wherever it appears, so `flags["dataset"]`
+          # is never populated and `applyQuery` cannot forward it from the flag
+          # loop (internal/cli/run.go, the same trap documented there for
+          # limit/offset). Until that Go forward lands, `bp task ready --dataset`
+          # still sends no `?dataset=`; the HTTP route honours it either way.
+          %{
+            name: "dataset",
+            type: "string",
+            summary:
+              "Narrow the ready page to ONE dataset. Absent: every dataset in the " <>
+                "caller's workspace/project scope (page.datasets says which)."
+          },
           %{
             name: "order",
             type: "string",
@@ -878,7 +917,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "close",
         summary:
-          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Four honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted), and a done close of a kind:task row with ZERO acceptance criteria whose reason names no PR+sha and pastes no run (409 close_reason_needs_artifact) — each with a loud on-the-record --set override (criteria_override / holder_override / ack_override / close_reason_override), and none of them discharges another; see the set flag.",
+          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Five honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted), and a done close of a kind:task row with ZERO acceptance criteria whose reason names no PR+sha and pastes no run (409 close_reason_needs_artifact), and a cancelled close whose reason is absent, empty or whitespace-only (409 cancel_reason_required — a cancel is exempt by name from every other gate, so its reason is its whole record; there is no override, the fix is to pass the reason). The first four each carry a loud on-the-record --set override (criteria_override / holder_override / ack_override / close_reason_override), and none of them discharges another; see the set flag.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
         auth_tier: "write",
         args: [
@@ -974,6 +1013,13 @@ defmodule Barkpark.Plugins.Tasks do
                 "name, as are cancelled and blocked closes. The way through is --set " <>
                 "close_reason_override=\"<why it is done with no artifact>\", recorded as " <>
                 "close_override.close_reason; criteria_override does NOT discharge it. " <>
+                "THE CANCEL REASON GATE (task-650d7844d8fe7199): a cancelled close whose reason " <>
+                "is absent, empty or whitespace-only is REFUSED — 409 cancel_reason_required. " <>
+                "Every gate above EXEMPTS cancelled by name, which is right on its own and wrong " <>
+                "in combination: for a cancel the reason is not one record among several, it is " <>
+                "the ENTIRE record of why the work stopped. There is NO override and no default " <>
+                "reason is invented — the fix is to pass the reason as the fifth positional. " <>
+                "done and blocked closes are EXEMPT by name. " <>
                 "A blank reason is NOT an override for any of " <>
                 "the four keys. " <>
                 "--set observed_rev=<rev> pins the strict full-rev CAS and BYPASSES the default " <>

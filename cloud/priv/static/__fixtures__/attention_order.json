@@ -3,12 +3,14 @@
  {"state":"failed","rank":2,"bucket":"attention","tone":"danger","glyph":"x","label":"failed"},
  {"state":"suspended","rank":3,"bucket":"attention","tone":"warn","glyph":"!","label":"suspended"},
  {"state":"degraded","rank":4,"bucket":"attention","tone":"warn","glyph":"!","label":"degraded"},
- {"state":"strained","rank":5,"bucket":"attention","tone":"warn","glyph":"!","label":"under load"},
- {"state":"filling","rank":6,"bucket":"attention","tone":"warn","glyph":"!","label":"disk filling"},
- {"state":"unreported","rank":7,"bucket":"attention","tone":"warn","glyph":"?","label":"never reported"},
- {"state":"deploy_stalled","rank":8,"bucket":"attention","tone":"warn","glyph":"!","label":"deploy stalled"},
- {"state":"behind","rank":9,"bucket":"attention","tone":"info","glyph":"^","label":"update available"},
- {"state":"removing","rank":10,"bucket":"in-flight","tone":"info","glyph":"~","label":"removing"},
- {"state":"provisioning","rank":11,"bucket":"in-flight","tone":"info","glyph":"~","label":"provisioning"},
- {"state":"ok","rank":12,"bucket":"healthy","tone":"ok","glyph":"*","label":"live"}
+ {"state":"deploys_failing","rank":5,"bucket":"attention","tone":"warn","glyph":"!","label":"deploys failing"},
+ {"state":"diverged","rank":6,"bucket":"attention","tone":"warn","glyph":"!","label":"diverged"},
+ {"state":"strained","rank":7,"bucket":"attention","tone":"warn","glyph":"!","label":"under load"},
+ {"state":"filling","rank":8,"bucket":"attention","tone":"warn","glyph":"!","label":"disk filling"},
+ {"state":"unreported","rank":9,"bucket":"attention","tone":"warn","glyph":"?","label":"never reported"},
+ {"state":"deploy_stalled","rank":10,"bucket":"attention","tone":"warn","glyph":"!","label":"deploy stalled"},
+ {"state":"behind","rank":11,"bucket":"attention","tone":"info","glyph":"^","label":"update available"},
+ {"state":"removing","rank":12,"bucket":"in-flight","tone":"info","glyph":"~","label":"removing"},
+ {"state":"provisioning","rank":13,"bucket":"in-flight","tone":"info","glyph":"~","label":"provisioning"},
+ {"state":"ok","rank":14,"bucket":"healthy","tone":"ok","glyph":"*","label":"live"}
 ]}

@@ -507,6 +507,265 @@ defmodule BarkparkWeb.MemberControllerTest do
     end
   end
 
+  describe "pagination (roster + inventory)" do
+    # THE POINT OF THE ROW: both endpoints used to be `def index(conn, _params)`
+    # / `def tokens(conn, _params)` over an unbounded `Repo.all`. Every
+    # assertion below fails against that shape.
+    test "the roster answers ONE DEFAULT PAGE, not the whole workspace", %{
+      ws: ws,
+      project: project,
+      admin_raw: admin_raw
+    } do
+      # 101 extra seats, so the workspace holds MORE than the default page (100)
+      # even counting only what this test seeded. Seats are written directly
+      # rather than through `add_user_member/3`: the roster row is the
+      # membership, and a principal with no user row still gets a row (with
+      # identity: nil), which is exactly the case the module documents.
+      seat_principals!(ws, 101)
+
+      body = req(admin_raw) |> get("#{base(ws, project)}/members") |> json_response(200)
+
+      assert length(body["members"]) == 100,
+             "the default page must be exactly 100 rows, got #{length(body["members"])}"
+
+      assert body["limit"] == 100
+      assert body["offset"] == 0
+      assert body["count"] == 100
+      assert body["total"] >= 102
+      assert body["hasMore"], "a workspace with more than 100 seats must report hasMore"
+      assert body["nextOffset"] == 100
+    end
+
+    test "consecutive pages neither repeat nor skip a seat, and the last page closes",
+         %{ws: ws, project: project, admin_raw: admin_raw} do
+      seat_principals!(ws, 6)
+
+      page1 = get_page(admin_raw, "#{base(ws, project)}/members", 3, 0)
+      page2 = get_page(admin_raw, "#{base(ws, project)}/members", 3, 3)
+
+      ids1 = Enum.map(page1["members"], & &1["principal_id"])
+      ids2 = Enum.map(page2["members"], & &1["principal_id"])
+
+      assert length(ids1) == 3
+      assert length(ids2) == 3
+
+      assert ids1 -- ids2 == ids1,
+             "page 2 repeated a row from page 1: #{inspect(ids1 -- (ids1 -- ids2))}"
+
+      # NO GAP: the two pages together are the first six rows of the unpaged
+      # order. Read the whole roster (this workspace holds 7 seats) and compare.
+      all = get_page(admin_raw, "#{base(ws, project)}/members", 1000, 0)
+      assert Enum.map(all["members"], & &1["principal_id"]) |> Enum.take(6) == ids1 ++ ids2
+
+      # The final page reports itself as final rather than dangling a nextOffset
+      # onto an empty page.
+      last = get_page(admin_raw, "#{base(ws, project)}/members", 1000, 0)
+      refute last["hasMore"]
+      refute Map.has_key?(last, "nextOffset")
+      assert last["total"] == length(last["members"])
+    end
+
+    test "out-of-range and malformed limit/offset are CLAMPED, never a 500", %{
+      ws: ws,
+      project: project,
+      admin_raw: admin_raw
+    } do
+      seat_principals!(ws, 3)
+      path = "#{base(ws, project)}/members"
+
+      # limit 0 and a negative limit clamp UP to 1 (the query_controller floor).
+      assert %{"limit" => 1, "members" => [_]} = get_page(admin_raw, path, 0, 0)
+      assert %{"limit" => 1} = get_page(admin_raw, path, -7, 0)
+
+      # An absurd limit clamps DOWN to the 1000 ceiling, and the echoed value
+      # reports what the query used — a paginator that trusted the request
+      # value would compute the wrong next offset.
+      assert %{"limit" => 1000} = get_page(admin_raw, path, 99_999, 0)
+
+      # A negative offset clamps to 0; the ceiling is 100_000.
+      assert %{"offset" => 0} = get_page(admin_raw, path, 10, -5)
+      assert %{"offset" => 100_000, "members" => []} = get_page(admin_raw, path, 10, 999_999)
+
+      # Garbage falls back to the defaults instead of raising. `limit[]=1`
+      # reaches Plug as a LIST, which is the shape that raises
+      # FunctionClauseError -> 500 in a parser without a catch-all.
+      assert %{"limit" => 100, "offset" => 0} =
+               req(admin_raw) |> get("#{path}?limit=abc&offset=xyz") |> json_response(200)
+
+      assert %{"limit" => 100} = req(admin_raw) |> get("#{path}?limit[]=1") |> json_response(200)
+    end
+
+    test "the token inventory pages the same way", %{
+      ws: ws,
+      project: project,
+      admin_raw: admin_raw
+    } do
+      seat_tokens!(ws, 4)
+      path = "#{base(ws, project)}/tokens"
+
+      full = get_page(admin_raw, path, 1000, 0)
+      # 4 seeded + the fixture's own admin token.
+      assert full["total"] == 5
+      assert length(full["tokens"]) == 5
+      refute full["hasMore"]
+
+      page1 = get_page(admin_raw, path, 2, 0)
+      page2 = get_page(admin_raw, path, 2, 2)
+
+      assert length(page1["tokens"]) == 2
+      assert page1["total"] == 5
+      assert page1["hasMore"]
+      assert page1["nextOffset"] == 2
+
+      ids = Enum.map(page1["tokens"] ++ page2["tokens"], & &1["id"])
+      assert ids == Enum.uniq(ids), "a token appeared on two pages"
+      assert ids == full["tokens"] |> Enum.map(& &1["id"]) |> Enum.take(4)
+
+      # Still no secret material, on a paged read as much as on the whole list.
+      refute page1 |> Jason.encode!() |> String.contains?("token_hash")
+    end
+
+    # THE TENANCY RAIL, ON EVERY PAGE. A limit/offset bolted onto an UNSCOPED
+    # query would satisfy every assertion above while paging through the whole
+    # instance. So: seed a second workspace with both kinds of row and walk
+    # A's pages to exhaustion, asserting B never appears on any of them.
+    test "no page of A's roster or inventory ever carries a row from B", %{
+      ws: ws,
+      project: project,
+      admin_raw: admin_raw,
+      other_ws: other_ws
+    } do
+      b_seats = seat_principals!(other_ws, 5)
+      b_tokens = seat_tokens!(other_ws, 5)
+      seat_principals!(ws, 5)
+
+      a_member_ids =
+        walk_pages(admin_raw, "#{base(ws, project)}/members", "members", "principal_id")
+
+      a_token_ids = walk_pages(admin_raw, "#{base(ws, project)}/tokens", "tokens", "id")
+
+      assert a_member_ids != [], "the walk read nothing — the rail assertion would be vacuous"
+      assert a_token_ids != []
+
+      for id <- b_seats do
+        refute id in a_member_ids, "B's seat #{id} appeared on a page of A's roster"
+      end
+
+      for id <- b_tokens do
+        refute id in a_token_ids, "B's token #{id} appeared on a page of A's inventory"
+      end
+    end
+
+    # THE MANIFEST AND THE ROUTE, PINNED TOGETHER, IN BOTH DIRECTIONS. The
+    # `paginated` bit is the only switch the Go CLI reads before it will page
+    # (`--all`), warn about truncation, or arm the unreadable_list_page refusal
+    # — so a manifest entry that claims pagination over a route that ignores
+    # limit is a lie the CLI acts on, and a route that pages under an entry
+    # that denies it drops `--limit` before the request is built.
+    #
+    # Direction 1 (manifest -> route) is this test: for every entry claiming
+    # `paginated`, the live route must honour ?limit=.
+    # Direction 2 (route -> manifest) is
+    # `Barkpark.Plugins.CapabilitiesPaginationFlagTest`, whose whole-manifest
+    # guard fails any read declaring --limit AND --offset while flagged
+    # `paginated: false`.
+    test "workspace.member-ls and token.ls declare pagination AND the route honours it", %{
+      ws: ws,
+      project: project,
+      admin_raw: admin_raw
+    } do
+      by_id =
+        Map.new(
+          Barkpark.Plugins.Capabilities.manifest("admin", project: false)["commands"],
+          &{&1["id"], &1}
+        )
+
+      seat_principals!(ws, 2)
+      seat_tokens!(ws, 2)
+
+      for {id, envelope_key, suffix} <- [
+            {"workspace.member-ls", "members", "/members"},
+            {"token.ls", "tokens", "/tokens"}
+          ] do
+        cmd = Map.fetch!(by_id, id)
+
+        assert cmd["paginated"],
+               "#{id} is `paginated: false` in capabilities.ex while its route pages — " <>
+                 "`bp #{String.replace(id, ".", " ")} --limit` would be dropped before the request is built"
+
+        flag_names = Enum.map(cmd["flags"] || [], & &1["name"])
+        assert "limit" in flag_names, "#{id} must offer --limit"
+        assert "offset" in flag_names, "#{id} must offer --offset"
+
+        limit_flag = Enum.find(cmd["flags"], &(&1["name"] == "limit"))
+
+        assert limit_flag["default"] == 100,
+               "#{id} --limit default #{inspect(limit_flag["default"])} does not match the server's 100"
+
+        # The route under test is the one the manifest entry NAMES — a drift
+        # test that hard-coded the path would keep passing after the entry was
+        # re-pointed somewhere else.
+        assert String.ends_with?(cmd["http"]["path_template"], "/v1" <> suffix),
+               "#{id} points at #{cmd["http"]["path_template"]}, not /v1#{suffix}"
+
+        path = base(ws, project) <> suffix
+
+        body = req(admin_raw) |> get("#{path}?limit=1") |> json_response(200)
+
+        assert length(body[envelope_key]) == 1,
+               "#{id} is `paginated: true` in the manifest but #{path} ignored ?limit=1 " <>
+                 "(returned #{length(body[envelope_key])} rows)"
+
+        assert body["total"] > 1, "the ?limit= assertion above would be vacuous with one row"
+        assert body["hasMore"]
+      end
+    end
+  end
+
+  # Seats `n` principals directly. Returns their principal ids.
+  defp seat_principals!(ws, n) do
+    for _ <- 1..n do
+      id = Ecto.UUID.generate()
+      {:ok, _} = TenancyAuth.create_membership(ws.id, id, "member", "user")
+      id
+    end
+  end
+
+  # Mints `n` tokens and seats each. Returns their ids.
+  defp seat_tokens!(ws, n) do
+    for _ <- 1..n do
+      raw = "paged-#{System.unique_integer([:positive])}"
+
+      {:ok, token} =
+        Auth.create_token(raw, "paged-#{System.unique_integer([:positive])}", @dataset, ["read"])
+
+      {:ok, _} = TenancyAuth.create_membership(ws.id, token.id, "member", "api_token")
+      token.id
+    end
+  end
+
+  defp get_page(raw, path, limit, offset) do
+    req(raw) |> get("#{path}?limit=#{limit}&offset=#{offset}") |> json_response(200)
+  end
+
+  # Walks every page to exhaustion, following the server's own nextOffset, and
+  # returns the collected ids. Bounded so a hasMore that never clears fails as
+  # a loop rather than hanging the suite.
+  defp walk_pages(raw, path, envelope_key, id_key),
+    do: walk_pages(raw, path, envelope_key, id_key, 0, [], 0)
+
+  defp walk_pages(_raw, path, _key, _id_key, _offset, _acc, 50),
+    do: flunk("#{path} never reported a final page — hasMore stayed true for 50 pages")
+
+  defp walk_pages(raw, path, envelope_key, id_key, offset, acc, guard) do
+    body = get_page(raw, path, 2, offset)
+    acc = acc ++ Enum.map(body[envelope_key], & &1[id_key])
+
+    if body["hasMore"],
+      do: walk_pages(raw, path, envelope_key, id_key, body["nextOffset"], acc, guard + 1),
+      else: acc
+  end
+
   defp owner_row(ws_id) do
     Repo.one(
       from(m in Membership,

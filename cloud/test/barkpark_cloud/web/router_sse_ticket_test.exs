@@ -53,7 +53,7 @@ defmodule BarkparkCloud.Web.RouterSseTicketTest do
 
   # A teamless user + a live session token. Teamless ON PURPOSE: every
   # /v1/events assertion below then answers SYNCHRONOUSLY (401 = credential
-  # refused, 422 no_team = credential accepted and resolved a real user). A user
+  # refused, 403 no_team = credential accepted and resolved a real user). A user
   # WITH a team parks in the SSE receive loop and would hang the test.
   defp user_with_token do
     user = user_fixture()
@@ -178,10 +178,12 @@ defmodule BarkparkCloud.Web.RouterSseTicketTest do
       {_user, token} = user_with_token()
       ticket = json_body(call(:post, "/v1/auth/sse-ticket", %{}, token))["ticket"]
 
-      # First use resolves a real user (422 no_team = past auth, teamless).
+      # First use resolves a real user (403 no_team = past auth, teamless —
+      # cch-w40-bl converged this inline emitter on the gate's shape, so the
+      # discriminator is the CAUSE, `reason`, not the status).
       first = call(:get, "/v1/events?ticket=#{ticket}")
-      assert first.status == 422
-      assert json_body(first)["error"] == "no_team"
+      assert first.status == 403
+      assert json_body(first)["reason"] == "no_team"
 
       # The replay — the shape of an attacker reading the URL out of an access
       # log, or of the browser's own native retry re-sending the frozen URL.

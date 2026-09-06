@@ -158,8 +158,11 @@ than `status=sent`.
 To prove the *logging* itself end-to-end without any of the rest of the
 stack, `./check-maillog.sh --live` builds this image, boots a throwaway
 container, submits an authenticated message over 587 and asserts a real
-`status=sent` line comes out of `docker logs`. It needs a working Docker
-daemon and about a minute; without `--live` it runs the static config
+`status=sent` line comes out of `docker logs`. `--recreate` goes one step
+further: it destroys that container and boots a new one on the same named
+volume, and asserts the earlier delivery line is still readable — the
+dr-w26 guard (see "Surviving a deploy" below). Both need a working Docker
+daemon and about a minute; without either flag it runs the static config
 assertions only, which is what CI executes.
 
 ## Reading the delivery log
@@ -168,19 +171,61 @@ Postfix logs to syslog by default and **this image has no syslog daemon**,
 so until the `maillog_file` line in `entrypoint.sh` existed, the relay
 emitted the entrypoint's DKIM banner and nothing else for its entire
 lifetime — no `status=sent`, no `status=deferred`, no `status=bounced`,
-ever. `maillog_file = /dev/stdout` (Postfix 3.4+; bookworm ships 3.7.x)
-routes logging through the `postlogd` service, whose stdout is inherited
-from the `postfix start-fg` master at PID 1, i.e. `docker logs`. Override
-with `MAILLOG_FILE` if you would rather write to a file on a mounted
-volume. If `master.cf` ever loses its `postlog unix-dgram` entry, Postfix
-FATALs at boot ("missing 'postlog' service in master.cf") instead of
-silently logging nothing again.
+ever. `maillog_file` (Postfix 3.4+; bookworm ships 3.7.x) routes logging
+through the `postlogd` service. If `master.cf` ever loses its
+`postlog unix-dgram` entry, Postfix FATALs at boot ("missing 'postlog'
+service in master.cf") instead of silently logging nothing again.
 
-Container logs are capped at 10 MB × 5 files (`logging:` on the `postfix`
-service in `cloud/docker-compose.yml`), so this history is roughly the last
-few weeks at current volume, not forever. `docker logs` also does not
-survive a container *recreate* — anything you need past a deploy has to be
-copied out first.
+The log lands in **two** places, and they are not equivalent:
+
+| Sink | Read it with | Survives a deploy? |
+|---|---|---|
+| `/var/log/postfix/maillog` on the `postfix_log` volume (`MAILLOG_FILE`) | `docker exec cloud-postfix-1 cat /var/log/postfix/maillog` | **Yes** |
+| `docker logs cloud-postfix-1` (the entrypoint tails the file to stdout) | `docker logs …` | No |
+
+`docker logs` is the convenient one and every recipe below still uses it.
+It is capped at 10 MB × 5 files (`logging:` on the `postfix` service in
+`cloud/docker-compose.yml`); the file on the volume is capped by the
+entrypoint's own rotator at `MAILLOG_MAX_BYTES` × 2 generations
+(`maillog` + `maillog.1`, 10 MB each by default).
+
+### Surviving a deploy (dr-w26)
+
+`docker logs` is **per container** — json-file state under
+`/var/lib/docker/containers/<container-id>/`, deleted with the container.
+A control-plane deploy recreates this service on any image or config change
+(`deploy/cp-deploy.sh`, `compose_up_repair "db/postfix up" db postfix`), so
+every capped generation goes with it.
+
+This is not theoretical — but read the 2026-08-08 datum carefully, because
+the obvious reading of it is wrong. The 23:51Z cutover recreated
+`cloud-postfix-1`, and `docker logs cloud-postfix-1 | grep -c .` read 7 lines
+afterwards. That is **not** a deploy deleting that day's maillog. On that box
+`postconf maillog_file` was EMPTY and no syslog daemon was running, so Postfix
+wrote no per-message log at all — the 30 outage alerts sent earlier that day
+never had a server-side record to lose (`tooling/grip/ledger/digest-delivered-and-freeze-date-w27-2026-08-09.md`,
+R3). The 7 lines are the entire output that container ever produced.
+
+So 2026-08-08 was a **missing writer**, closed by the `maillog_file` line in
+`entrypoint.sh`; `notification_deliveries` said `status=sent`, which is the
+mailer's *acceptance* and not a delivery
+(`Notifications.Delivery.status_meaning/1`), and there was never an artefact
+to check it against. **That batch is unrecoverable.**
+
+The durability hole is the second, independent half — and now that a writer
+exists it is live: the next recreate *would* take its whole output. That is
+what this section fixes, forward only.
+
+The `postfix_log` volume is the fix: named volumes are not touched by a
+recreate, exactly like `postfix_queue` and `postfix_dkim`. `check-maillog.sh`
+asserts the pairing statically (default `MAILLOG_FILE` must sit on a
+declared named volume) and `--recreate` proves it live.
+
+If you need the durable copy past its rotation window, copy it out:
+
+```bash
+docker cp cloud-postfix-1:/var/log/postfix/maillog ./maillog-$(date +%F)
+```
 
 ### Did this message reach the destination MX?
 

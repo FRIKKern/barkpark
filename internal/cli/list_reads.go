@@ -54,6 +54,7 @@ var listReadCommands = map[string]bool{
 	"graph.show":            true, // tasks_controller.ex  -> nodes
 	"graph.tasks":           true, // tasks_controller.ex  -> tasks
 	"media.search-synonyms": true, // v1/media_controller.ex -> result (bare array)
+	"paper.access":          true, // paper_access_controller.ex -> access
 	"plugin.ls":             true, // plugins_controller.ex  -> plugins
 	"schema.ls":             true, // schema_controller.ex   -> schemas
 	"search.synonyms":       true, // search_controller.ex  -> result (bare array)
@@ -64,12 +65,10 @@ var listReadCommands = map[string]bool{
 	"share.token-ls":        true, // share_controller.ex   -> tokens
 	"tag.browse":            true, // query_controller.ex   -> result.tags
 	"tag.docs":              true, // query_controller.ex   -> result.documents
-	"token.ls":              true, // member_controller.ex  -> tokens
 	"webhook.deliveries":    true, // webhook_controller.ex  -> deliveries
 	"webhook.ls":            true, // webhook_controller.ex  -> webhooks
 	"workspace.dataset-ls":  true, // workspace_controller.ex -> datasets
 	"workspace.ls":          true, // workspace_controller.ex -> workspaces
-	"workspace.member-ls":   true, // member_controller.ex   -> members
 	"workspace.project-ls":  true, // workspace_controller.ex -> projects
 }
 

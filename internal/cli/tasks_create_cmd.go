@@ -128,7 +128,16 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		}
 	}
 
-	httpStatus, respBody, err := sendCreateTaskMutations(ctx, mutations)
+	// ONE KEY BASE PER INVOCATION, SPLIT PER LEG. Minted here — after every
+	// refusal that can be pronounced without a write, so a run that never sends
+	// never burns one. The publish follow-up derives its own key from the same
+	// base: the plug hashes (key, token, method, PATH) and NOT the body, and both
+	// legs POST the same path, so sharing one key would replay the create's
+	// response and the publish would silently never run (legKey says this at
+	// length, tasks_create_idempotency.go).
+	idemBase := newIdempotencyKey()
+
+	httpStatus, respBody, _, err := sendMutationsIdempotent(sendCreateTaskMutations, ctx, mutations, legKey(idemBase, "create"))
 	if err != nil {
 		// TRANSPORT ERROR (the DBConnection-under-fleet-load class, run.go's 30s
 		// client timeout being the common trigger): the request may never have
@@ -220,7 +229,7 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		// from clearing. It is NAMED instead — renderOrphanedDraftRemedy prints the
 		// `drafts.` id, the consequence, and both exits.
 		pubOp := map[string]any{"publish": map[string]any{"id": bareID, "type": "task"}}
-		pStatus, pBody, pErr := sendTaskMutations(ctx, []map[string]any{pubOp})
+		pStatus, pBody, _, pErr := sendMutationsIdempotent(sendTaskMutations, ctx, []map[string]any{pubOp}, legKey(idemBase, "publish"))
 		if pErr != nil {
 			// RESIDUE, NOT DEBRIS TO SWEEP. A transport error means the publish
 			// may have LANDED and only the response was lost, so discarding here
@@ -246,6 +255,18 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 					title: title, detail: mutateErrorMessage(pStatus, pBody),
 				})
 				renderTaskCreateResidue(out, residuePublishAmbiguousServerFault, draftID, bareID)
+				return code
+			}
+			// UNDER -o json/yaml THE REFUSAL IS THE ANSWER, and it goes to
+			// STDOUT as one envelope. The human arm below prints the refusal,
+			// the duplicate resume, and then the discard's own outcome as
+			// separate stderr blocks; a machine caller cannot be handed three
+			// documents (json.load reads the FIRST value and stops), so the
+			// discard runs QUIETLY first and its outcome rides inside the one
+			// envelope's details as draft_discarded/discard_error. Exit code is
+			// unchanged: exitGeneric, exactly what discardCreatedTaskDraft
+			// returns on every one of its arms.
+			if code, machine := renderCreatePublishRefusalEnvelope(out, ctx, pStatus, pBody, draftID, bareID); machine {
 				return code
 			}
 			out.userErr("task create: created %s but publish failed: %s", draftID, mutateErrorMessage(pStatus, pBody))
@@ -368,15 +389,8 @@ func renderTaskCreateResidue(out *writer, class, draftID, bareID string) {
 // not do what was asked), but the two paths differ in what is left on the
 // server, and both say which.
 func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID string) int {
-	op := map[string]any{"discardDraft": map[string]any{"id": bareID, "type": "task"}}
-	status, body, err := sendTaskMutations(ctx, []map[string]any{op})
-	switch {
-	case err != nil:
-		out.errf("  the follow-up discard never reached the server (%v)", err)
-		renderTaskCreateResidue(out, residueDiscardFailed, draftID, bareID)
-		return exitGeneric
-	case status < 200 || status >= 300:
-		out.errf("  the follow-up discard was refused: %s", mutateErrorMessage(status, body))
+	if why := discardCreatedTaskDraftQuiet(ctx, bareID); why != "" {
+		out.errf("  %s", why)
 		renderTaskCreateResidue(out, residueDiscardFailed, draftID, bareID)
 		return exitGeneric
 	}
@@ -385,11 +399,79 @@ func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID 
 	return exitGeneric
 }
 
+// discardCreatedTaskDraftQuiet is the MUTATION half of discardCreatedTaskDraft
+// with no rendering at all: it returns "" when the draft is gone, and otherwise
+// the one sentence saying why it is still there. It exists because the two
+// output shapes need the same side effect and DIFFERENT renderings — stderr
+// prose for a human, a `discard_error` key inside one JSON envelope for a
+// script — and doing the discard in two places is how the two drift.
+func discardCreatedTaskDraftQuiet(ctx manifest.Context, bareID string) string {
+	op := map[string]any{"discardDraft": map[string]any{"id": bareID, "type": "task"}}
+	status, body, err := sendTaskMutations(ctx, []map[string]any{op}, "")
+	switch {
+	case err != nil:
+		return fmt.Sprintf("the follow-up discard never reached the server (%v)", err)
+	case status < 200 || status >= 300:
+		return "the follow-up discard was refused: " + mutateErrorMessage(status, body)
+	}
+	return ""
+}
+
+// renderCreatePublishRefusalEnvelope is the -o json/yaml answer to a publish leg
+// the server definitively REFUSED (a 4xx: the publish wall's unknown_tag /
+// label_spine / duplicate_of, or any rule this binary predates). It performs the
+// same cleanup the human path does — the draft this run created seconds ago is
+// the whole row, so it is discarded — and then writes ONE envelope to stdout
+// carrying the server's own code, message, hint and details, plus the four
+// client-side facts a caller cannot get from the server's body: which draft was
+// created, which bare id it would have become, whether the cleanup succeeded,
+// and the incumbent id when the refusal was a duplicate.
+//
+// The second return says whether the machine shape was taken at all; false means
+// the caller must print its human block, unchanged.
+func renderCreatePublishRefusalEnvelope(out *writer, ctx manifest.Context, status int, body []byte, draftID, bareID string) (int, bool) {
+	if out.output != "json" && out.output != "yaml" {
+		return 0, false
+	}
+	ae := classifyError(status, body)
+	discardErr := discardCreatedTaskDraftQuiet(ctx, bareID)
+
+	payload := map[string]any{
+		"draft_id":        draftID,
+		"task_id":         bareID,
+		"draft_discarded": discardErr == "",
+	}
+	if discardErr != "" {
+		payload["discard_error"] = discardErr
+		payload["residue"] = residueDiscardFailed
+	}
+	if incumbent := incumbentTaskID(body); incumbent != "" {
+		payload["duplicate_of"] = incumbent
+	}
+	if d := normalizeDetails(ae.details); d != nil {
+		payload["server_details"] = d
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		raw = nil
+	}
+	msg := "task create: created " + draftID + " but publish failed: " + ae.errorMessage()
+	renderErrorEnvelopeDetailed(out, ae.code, msg, ae.requestID, ae.hint(), json.RawMessage(raw))
+	return exitGeneric, true
+}
+
 // renderTagRegistryUnreadableRefusal is the fail-closed answer to a tag registry
 // this client could not read. It refuses BEFORE the create, so it carries the
 // same "nothing was created" guarantee renderPublishWallRefusal does, and it is
 // exitUsage for the same reason: no request was sent.
 func renderTagRegistryUnreadableRefusal(out *writer, body map[string]any) int {
+	if renderErrorEnvelopeDetailed(out, tagRegistryUnreadableCode,
+		"task create --publish: refused before writing anything — the tag registry could not be read, so the tags on this row could NOT be checked",
+		"",
+		"nothing was created — no draft was left behind. Retry once `"+tagRegistryCommand+"` works, or file it as a draft now (`bp task create …` without --publish) and publish when the read works.",
+		tagRegistryUnreadableDetails(body)) {
+		return exitUsage
+	}
 	out.userErr("task create --publish: refused before writing anything — the tag registry could not be read, so the tags on this row could NOT be checked")
 	out.errf("  code:  %s", tagRegistryUnreadableCode)
 	if names := wallTagNames(body); len(names) > 0 {
@@ -403,6 +485,22 @@ func renderTagRegistryUnreadableRefusal(out *writer, body map[string]any) int {
 	out.errf("           bp doc publish task <id> --yes")
 	out.errf("  nothing was created — no draft was left behind.")
 	return exitUsage
+}
+
+// tagRegistryUnreadableDetails is the machine payload for the fail-closed
+// registry refusal: the tag names that could NOT be checked. A caller cannot
+// re-derive them from the exit code, and they are exactly the list to re-check
+// once the registry read works.
+func tagRegistryUnreadableDetails(body map[string]any) json.RawMessage {
+	names := wallTagNames(body)
+	if len(names) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(map[string]any{"unchecked_tags": names})
+	if err != nil {
+		return nil
+	}
+	return json.RawMessage(raw)
 }
 
 // tagRegistryUnreadableCode names the refusal. It is deliberately NOT one of the
@@ -530,7 +628,6 @@ func renderTaskCreated(out *writer, draftID string, rec taskCreateRecord, warnin
 	if out.machineOut() {
 		receipt := map[string]any{
 			"id":               bareID,
-			"draft":            draftID,
 			"status":           status,
 			"lifecycle_status": nil,
 			// pds-bl-task-create-draft-at-rc0 — THE FIELD A SCRIPT CAN BRANCH ON.
@@ -539,6 +636,28 @@ func renderTaskCreated(out *writer, draftID string, rec taskCreateRecord, warnin
 			// word for ready. on_board answers the only question a caller of a
 			// verb named "create the task" is actually asking.
 			"on_board": onBoard,
+		}
+		// task-ee33b6f088b35bdb — THE RECEIPT NAMED A DOCUMENT THAT DOES NOT
+		// EXIST. `draft` was emitted unconditionally off the CREATE leg's id, so
+		// a SUCCESSFUL `--publish` printed
+		// {"draft":"drafts.task-N","status":"published","on_board":true} — and
+		// publishing CONSUMES the draft, so `bp doc get task drafts.task-N
+		// --perspective raw` on that very id answers not_found (run against
+		// guerrilla on the probe row task-ccd184a652f95f76). Every other field
+		// here descends from the record the server PERSISTED (PDS wave 48); this
+		// one descended from a leg whose document no longer existed by the time
+		// the line was printed.
+		//
+		// It is the create path's own sin one field over: a TRUE-LOOKING LINE
+		// pointing somewhere empty. A caller sweeping orphan drafts reads
+		// `draft` and files `bp doc discard-draft` against a phantom; a caller
+		// stashing it as the handle to its own row keeps an id that resolves to
+		// nothing. The key is emitted only when the draft is KNOWN to exist —
+		// that is exactly `rec.draft` on an echoed `_draft` (the same evidence
+		// `status` and `on_board` are read off), never inferred from the create
+		// leg and never guessed when the server echoed no `_draft` at all.
+		if rec.hasDraft && rec.draft {
+			receipt["draft"] = draftID
 		}
 		if len(warnings) > 0 {
 			receipt["warnings"] = warnings
@@ -671,9 +790,14 @@ func taskCriterionTexts(value any) []any {
 // brief). Tests override this file-local variable to simulate a transport
 // error or a 5xx without touching the shared sendTaskMutations helper, which
 // the MCP task_create tool also calls.
-var sendCreateTaskMutations = sendTaskMutations
+//
+// idempotencyKey, when non-empty, rides as the Idempotency-Key header the
+// mutate door honours (tasks_create_idempotency.go). Empty means "no key" —
+// the pre-existing behaviour for every caller that has no invocation-scoped key
+// to spend.
+var sendCreateTaskMutations keyedMutationSender = sendTaskMutations
 
-func sendTaskMutations(ctx manifest.Context, mutations []map[string]any) (int, []byte, error) {
+func sendTaskMutations(ctx manifest.Context, mutations []map[string]any, idempotencyKey string) (int, []byte, error) {
 	endpoint := apiclient.ScopedURL(ctx.Server, ctx.Workspace, ctx.Project, "/v1/data/mutate/"+ctx.Dataset)
 	body, err := json.Marshal(map[string]any{"mutations": mutations})
 	if err != nil {
@@ -682,6 +806,9 @@ func sendTaskMutations(ctx manifest.Context, mutations []map[string]any) (int, [
 	headers := map[string]string{"Content-Type": "application/json"}
 	if ctx.Token != "" {
 		headers["Authorization"] = "Bearer " + ctx.Token
+	}
+	if idempotencyKey != "" {
+		headers[idempotencyHeader] = idempotencyKey
 	}
 	return doRequest("POST", endpoint, headers, body)
 }

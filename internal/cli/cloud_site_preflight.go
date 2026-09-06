@@ -38,6 +38,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -78,9 +79,11 @@ var runSiteSelfTest = func(ctx context.Context, script string) (string, error) {
 // failure), the honest "loud on failure, silent on success" build UX.
 var runSiteBuild = func(ctx context.Context, dir string) (string, error) {
 	var full bytes.Buffer
+	buildEnv := scrubbedBuildEnv(os.Environ())
 	for _, step := range [][]string{{"ci"}, {"run", "build"}} {
 		cmd := exec.CommandContext(ctx, "npm", step...)
 		cmd.Dir = dir
+		cmd.Env = buildEnv
 		var buf bytes.Buffer
 		cmd.Stdout = &buf
 		cmd.Stderr = &buf
@@ -91,6 +94,47 @@ var runSiteBuild = func(ctx context.Context, dir string) (string, error) {
 		}
 	}
 	return full.String(), nil
+}
+
+// siteBuildScrubKeys are the env vars preflight REMOVES from its own `npm`
+// child. It is the D7 ambient-token contract, enforced rather than advised.
+//
+// WHY ONLY THESE THREE, and not the whole BUILD_ALLOW set. On the managed path
+// the box's DeployRunner set-from-request-or-REMOVES every BUILD_ALLOW key
+// (api/lib/barkpark/sites/deploy_runner.ex `@build_env_keys` /
+// `resolved_build_vars/1`), because the request supplies the value for each one.
+// Preflight has no request: it is offline by construction, so it cannot supply
+// BARKPARK_API_URL / BARKPARK_DATASET / … and scrubbing them would break every
+// local build for a hazard that is not theirs. These three are the ones the box
+// NEVER takes from the ambient environment AND that change what the build sees:
+//
+//   - BARKPARK_TOKEN — the D7 hazard itself. An ambient one (in practice the
+//     operator's `bp_admin_*` credential) outranks the per-site READ token the
+//     box injects, so the local build reads the dataset with the WRONG, broader
+//     credential and its green does not predict the box's build.
+//   - BARKPARK_BUILD_ID / BARKPARK_CONTENT_REV — the engine derives both and
+//     DeployRunner removes any ambient value for exactly this reason (the same
+//     comment sits above `@build_env_keys`). A stale ambient one would bake a
+//     marker HEALTH later asserts BY VALUE, so the marker scan would pass on a
+//     build id the deployment never minted.
+//
+// This is a REMOVAL, not a grant: it can only narrow what the build sees.
+var siteBuildScrubKeys = []string{"BARKPARK_TOKEN", "BARKPARK_BUILD_ID", "BARKPARK_CONTENT_REV"}
+
+// scrubbedBuildEnv returns environ with every siteBuildScrubKeys entry dropped.
+// Passed as cmd.Env, an absent key is genuinely UNSET for the child (Go has no
+// "remove" form once you supply a slice — omission IS the removal), which is the
+// Go analogue of Erlang's `{~c"NAME", false}` in the Port path.
+func scrubbedBuildEnv(environ []string) []string {
+	out := make([]string, 0, len(environ))
+	for _, kv := range environ {
+		name, _, ok := strings.Cut(kv, "=")
+		if ok && slices.Contains(siteBuildScrubKeys, name) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // findSiteDeployScripts resolves the two engine scripts:
@@ -367,14 +411,24 @@ func runOneSelfTest(out *writer, name, script string) preflightCheck {
 	return c
 }
 
-// checkEnvContract flags the D7 shadow hazard: an ambient BARKPARK_TOKEN would
-// reach npm through BUILD_ALLOW and shadow the per-site token the box injects.
+// checkEnvContract flags the D7 shadow hazard: an ambient BARKPARK_TOKEN
+// outranks the per-site READ token the box injects, so a build that sees it
+// reads the dataset with the operator's credential rather than the site's.
+//
+// The check still FAILS the preflight, and deliberately so — but it no longer
+// stands alone. Preflight's own `npm` child is scrubbed of the token
+// (scrubbedBuildEnv), so the verb can no longer warn about a hazard and then
+// commit it sixty lines later. What survives the scrub is everything preflight
+// does not launch: a build you run by hand, and the bytes `--prebuilt` ships.
+// Those are what this check is now about, and the message says so.
 func checkEnvContract(lookup func(string) (string, bool)) preflightCheck {
 	c := preflightCheck{name: "env-contract (BUILD_ALLOW scrub)"}
 	if shadowed, tail := ambientTokenShadow(lookup); shadowed {
-		c.observed = fmt.Sprintf("BARKPARK_TOKEN is set in your shell (%s) — it would flow into the build and SHADOW the per-site token", tail)
-		c.expected = "no ambient BARKPARK_TOKEN — the box injects the per-site token at deploy time"
-		c.next = "unset BARKPARK_TOKEN in this shell before deploying (unset BARKPARK_TOKEN), or run preflight in a clean env"
+		c.observed = fmt.Sprintf(
+			"BARKPARK_TOKEN is set in your shell (%s). Preflight's own build ran WITHOUT it, but any build you run yourself in this shell reads the dataset with that credential instead of the site's",
+			tail)
+		c.expected = "no ambient BARKPARK_TOKEN — the box injects the per-site read token at deploy time, so the build never needs one from you"
+		c.next = "re-run in a clean env: `env -u BARKPARK_TOKEN bp cloud site preflight …` (and use the same prefix for a hand-run `npm run build` whose output you ship with `bp cloud site deploy --prebuilt`)"
 		return c
 	}
 	c.ok = true

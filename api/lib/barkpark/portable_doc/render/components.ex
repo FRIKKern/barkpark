@@ -24,7 +24,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
   alias Barkpark.Chat.ToolRows
-  alias Barkpark.Papers.TextDiff
+  alias Barkpark.PortableDoc.TextDiff
   alias Barkpark.PortableDoc.Render.StatusVocab
   alias Barkpark.PortableDoc.Slots
 
@@ -665,7 +665,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
   # inline `ChatToolRenderer.tool_diff/todo_card` HEEx in `chat_live.ex`.
   #
   # The pure derivations are REUSED verbatim — NO new diff/parse engine is invented:
-  # `Barkpark.Papers.TextDiff.diff_lines/2` (the ONE line diff), `ChatToolRenderer.
+  # `Barkpark.PortableDoc.TextDiff.diff_lines/2` (the ONE line diff), `ChatToolRenderer.
   # classify/1` (shape dispatch), `ChatToolRenderer.parse_todos/1` +
   # `ChatToolRenderer.todo_glyph/1` (the living checklist), and the "thought for ~N
   # tokens" count label. Output stays byte-faithful to today's `chat_tool_renderer.ex`.

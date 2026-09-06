@@ -1,0 +1,159 @@
+# elixir-main-red-attribution — did the pull request that landed this actually
+# RUN the test main just failed on?
+#
+# spec-authority: advisory-ok — this workflow reports on a red that already
+# happened. It renders no check run on any pull request head, it is registered
+# in no required set, and nothing here can stop or start a merge. Its output is
+# a routed GitHub issue for a human to read.
+#
+# WHY IT EXISTS. scripts/elixir-impacted-tests.sh narrows the ExUnit set a pull
+# request runs, and every argument for that narrowing rests on one claim:
+# anything the selection misses is caught on main, per sha, before it can
+# compound. That claim is only worth something if somebody MEASURES the misses.
+# Without this file the first symptom of a blind selector is a week of
+# confusing reds that nobody attributes to the selector at all.
+#
+# WHY `workflow_run` AND NOT A SCHEDULE. The opposite of the reasoning in
+# main-gate-watch.yml, and deliberately so. That file needs a LEVEL trigger
+# because its question — "does main's tip carry a verdict?" — has an answer even
+# when nothing ran. This file's question is about a SPECIFIC failed run and its
+# log, so it is an edge question, and `workflow_run` hands it the run id it
+# needs. The residual is the same one `workflow_run` always carries: an `elixir`
+# run that is CANCELLED (collapsed out of the pending queue, as the concurrency
+# comment in elixir.yml documents) produces no failure to attribute, and this
+# file is silent about it. That is correct — a collapsed run measured nothing,
+# so it cannot have measured too little.
+#
+# WHY IT FILES THROUGH scripts/file-ci-failure-issue.sh. That instrument is
+# already the repo's routed, deduped, harnessed path from a CI red to a human
+# (eight callers), it uses the built-in token, and its own header records why a
+# ledger POST is the wrong tool here: the shape those workflows copy returns
+# HTTP 200 while creating a DRAFT nothing reads. Its idempotency key is set to
+# a value of this file's own so a run of alarms here can never collide with, or
+# be mistaken for, any other alert in the repo.
+name: elixir-main-red-attribution
+
+on:
+  workflow_run:
+    workflows: [elixir]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  # Per upstream run. Two reds on main are two independent questions and neither
+  # should evict the other.
+  group: elixir-main-red-attribution-${{ github.event.workflow_run.id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  attribute:
+    name: Attribute the red (advisory)
+    # Only a FAILED upstream run has anything to attribute. `workflow_dispatch`
+    # is allowed through so the harness below can be run on demand.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The MERGE COMMIT the upstream run judged, with its first parent, so
+          # `git diff HEAD^1 HEAD` reproduces the file set the pull request
+          # landed. A squash merge has exactly one parent and that parent is
+          # main's previous tip, so the two-dot diff IS the pull request's own
+          # file set — the same identity the mix-test selection step relies on,
+          # arrived at from the other end.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 2
+
+      # HARNESS FIRST, and unconditionally. This job runs only on a red, which
+      # is rare — so without a harness the reporter could rot for months and its
+      # first live firing would be its first execution ever (charter D26). The
+      # matrix costs seconds and includes the forced-miss case that is the only
+      # reason this file exists.
+      - name: The attribution reporter must be able to report a miss
+        run: bash scripts/elixir-main-red-attribution.test.sh
+
+      - name: Reconstruct what the pull request would have run
+        id: attribute
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -uo pipefail
+
+          # The upstream log. `gh run view --log-failed` prints only the failed
+          # steps, which is exactly the ExUnit output this needs, and it does
+          # NOT contain the workflow source — the trap where `grep error::`
+          # matches a script that merely ECHOES the string.
+          log="$RUNNER_TEMP/elixir-red.log"
+          rc=0
+          gh run view "$RUN_ID" --repo "$GH_REPO" --log-failed >"$log" 2>&1 || rc=$?
+          if [ "$rc" -ne 0 ] || [ ! -s "$log" ]; then
+            echo "::warning title=Attribution could not read the upstream log::gh run view exited ${rc} with $(wc -c <"$log" 2>/dev/null || echo 0) bytes for run ${RUN_ID}. No verdict."
+            echo "verdict=UNREADABLE" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The pull request's file set. HEAD^1 is main's previous tip on a
+          # squash merge; if it is absent the reconstruction is impossible and
+          # this says so instead of guessing.
+          diff="$RUNNER_TEMP/elixir-red.diff"
+          if ! git rev-parse --verify --quiet 'HEAD^1' >/dev/null; then
+            echo "::warning title=Attribution could not reconstruct the diff::HEAD^1 is not resolvable at $(git rev-parse HEAD). No verdict."
+            echo "verdict=UNREADABLE" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git -c core.quotepath=false diff -z --name-only --no-renames 'HEAD^1' HEAD | tr '\0' '\n' >"$diff"
+
+          out=""
+          arc=0
+          out="$(bash scripts/elixir-main-red-attribution.sh --log "$log" --diff "$diff" 2>&1)" || arc=$?
+          printf '%s\n' "$out"
+          {
+            echo "## Elixir main-red attribution"
+            echo
+            echo "Merge sha \`$(git rev-parse HEAD)\`, upstream run \`${RUN_ID}\`."
+            echo
+            echo '```'
+            printf '%s\n' "$out"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+          v="$(grep -o 'verdict=[A-Z_]*' <<<"$out" | head -1 | cut -d= -f2)"
+          echo "verdict=${v:-UNREADABLE}" >>"$GITHUB_OUTPUT"
+          echo "rc=${arc}" >>"$GITHUB_OUTPUT"
+          {
+            echo 'detail<<ATTRIBUTION_EOF'
+            echo "Merge sha: $(git rev-parse HEAD)"
+            echo "Upstream elixir run: ${RUN_ID}"
+            echo ""
+            printf '%s\n' "$out"
+            echo 'ATTRIBUTION_EOF'
+          } >>"$GITHUB_OUTPUT"
+
+          # This step never reds. The alarm is the issue filed below, and a red
+          # here would be a second, quieter alarm about the first one.
+          exit 0
+
+      # THE ROW. Filed only on a measured miss candidate — every other verdict
+      # (COVERED, SELECTION_ALL, NOT_A_TEST_FAILURE, UNREADABLE) leaves the
+      # ledger alone, because an alert that fires on every red on main is an
+      # alert nobody reads by the end of the week.
+      - name: File the selector-miss row
+        if: steps.attribute.outputs.verdict == 'SKIPPED'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CI_FAILURE_KEY: elixir-pr-test-selector-miss
+          CI_FAILURE_LABEL: ci-failure
+          CI_FAILURE_DETAIL: ${{ steps.attribute.outputs.detail }}
+        run: bash scripts/file-ci-failure-issue.sh

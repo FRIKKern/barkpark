@@ -240,7 +240,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
         {:noreply, push_patch(socket, to: Shared.studio_path(socket, path, slug, desk: desk))}
 
       :ok ->
-        Lifecycle.finish_handle_params(socket, dataset, path, desk, uri, params)
+        # spd-w18-bl-select-detects-dead-destination: the transition runs
+        # INSIDE the navigation receipt `Scope.select/2` wrote, so a
+        # destination that raises settles that receipt as a named failure
+        # instead of killing the process silently. With no receipt open
+        # (mount, back/forward, scope switch) this is a bare call.
+        Scope.settle_pending_select(socket, fn socket ->
+          Lifecycle.finish_handle_params(socket, dataset, path, desk, uri, params)
+        end)
     end
   end
 

@@ -422,7 +422,12 @@ defmodule Barkpark.Content.Mutations do
        when is_map_key(patch, "setIfMissing") or is_map_key(patch, "unset") or
               is_map_key(patch, "inc") or is_map_key(patch, "dec") or
               is_map_key(patch, "append") or is_map_key(patch, "prepend") do
-    with {:ok, existing} <- get_patch_base(id, type, dataset, opts),
+    # [bare-id-refusal] task-eeaf3a622b6c74c7 — `id`/`_id` under set/setIfMissing
+    # address nothing here; refuse BEFORE the read so the answer does not depend
+    # on whether the document exists. See Writer.refuse_bare_id/2.
+    with :ok <- Writer.refuse_bare_id(Map.get(patch, "set"), :patch),
+         :ok <- Writer.refuse_bare_id(Map.get(patch, "setIfMissing"), :patch),
+         {:ok, existing} <- get_patch_base(id, type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(patch)) do
       protected = ~w(title status _id _type _rev)
       set_fields = Map.get(patch, "set", %{})
@@ -460,7 +465,9 @@ defmodule Barkpark.Content.Mutations do
          dataset,
          opts
        ) do
-    with {:ok, existing} <- get_patch_base(id, type, dataset, opts),
+    # [bare-id-refusal] task-eeaf3a622b6c74c7 — see the ops arm above.
+    with :ok <- Writer.refuse_bare_id(fields, :patch),
+         {:ok, existing} <- get_patch_base(id, type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(patch)) do
       warn_on_nested_content(fields)
 
@@ -558,16 +565,31 @@ defmodule Barkpark.Content.Mutations do
   # — `ifRevisionID` is undefined there, so this guard would degrade from a
   # FENCE into an unconditional ban on filing an already-`done` row and break
   # the dataset importer the substrate anticipates (migration 20260528100000).
-  # That is what this nil head encodes, and it is why the residual harm below is
-  # named rather than closed.
+  # That is what this nil head encodes, and the exemption is DELIBERATE.
   #
-  # RESIDUAL HARM, MEASURED (not hand-waved): a forged FRESH create carrying
-  # `lifecycle_status: "done"` is still accepted, and `Tasks.Queue.ready` gates
-  # dependency satisfaction on exactly that value (queue.ex, `done_tasks` CTE) —
-  # so one forged create of a dependency id flips a dependent task from
-  # not-ready to ready. There is NO compensating control in this slice; the fix
-  # is an attribution requirement on task births, which is a separate fence.
-  # `test "AC7 residual harm"` pins the harm so it cannot be quietly forgotten.
+  # THE EXEMPTION'S PRICE, AND WHERE IT WAS PAID (cch-w3-task-birth-attribution).
+  # The forgery still LANDS: a fresh `create` carrying `lifecycle_status: "done"`
+  # is accepted here, and nothing on this write path stops it. What it no longer
+  # BUYS is a completion. `Tasks.Queue.ready` once gated dependency satisfaction
+  # on that value alone, so one forged create of a dependency id flipped a
+  # dependent task from not-ready to ready. The fix landed on the READ side: a
+  # done row now satisfies a dependent only if it ALSO carries close provenance
+  # — `claim.closed_by`, `claim.closed_at`, or a non-empty `close_reason`
+  # (queue.ex, the `ready_done_tasks` CTE; the same disjunction `QueueGate`
+  # applies in `closed?/1`). A forged birth carries none of the three.
+  #
+  # Pinned by `test "CLOSED: a forged FRESH create no longer unblocks a
+  # dependent in Tasks.Queue.ready"` in
+  # test/barkpark_web/controllers/mutate_controller_test.exs, which asserts that
+  # the forgery still WRITES and that the dependent stays unready, against a
+  # dependency-free control that keeps the refutation from passing vacuously.
+  # The exemption itself is pinned beside it by `test "the FRESH-create
+  # exemption is intact: an importer can still file an already-done task"`.
+  #
+  # THE OTHER DELIBERATE DOOR is `source: :sync` in the cond below: replication
+  # mirrors an upstream close verbatim, because a replica must be able to
+  # reflect a close it did not perform. Both doors are CHOSEN. Neither is a
+  # claim that what walks through them is attributed — see the warning above.
   defp ensure_task_close_is_cas("task", nil, _merged, _attrs, _opts), do: :ok
 
   defp ensure_task_close_is_cas("task", existing, merged, patch, opts) do
@@ -648,8 +670,9 @@ defmodule Barkpark.Content.Mutations do
   #     `apply_mutations` entirely — this is a door guard, not a row invariant;
   #   * the sanctioned `Barkpark.Tasks.*` modules, which are deliberately
   #     upstream of it and keep full authority over a claim's lifetime;
-  #   * the FRESH-CREATE exemption above and its measured residual harm — a
-  #     forged birth has no claim to drop, so this guard cannot see it.
+  #   * the FRESH-CREATE exemption above — a forged birth has no claim to
+  #     drop, so this guard cannot see it (what that exemption does and no
+  #     longer buys is written out beside the exemption itself).
   #
   # SUBSTITUTION IS NOW IN SCOPE (cch-w3, epic decision D52 residue). Wave 2
   # declared "a claim REPLACED by a different claim map is out of scope"; wave 3

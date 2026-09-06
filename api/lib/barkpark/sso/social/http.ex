@@ -5,7 +5,9 @@ defmodule Barkpark.Sso.Social.HTTP do
   provider (config `:social_http`). Default is a `Req`-backed client.
   """
   @callback post_form(String.t(), map()) :: {:ok, map()} | {:error, term()}
-  @callback get_bearer(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  # A JSON array body is legitimate here: github's GET /user/emails — the only
+  # place the per-address `verified` flag lives — answers with a list.
+  @callback get_bearer(String.t(), String.t()) :: {:ok, map() | list()} | {:error, term()}
 
   def impl, do: Application.get_env(:barkpark, :social_http, __MODULE__.ReqClient)
   def post_form(url, params), do: impl().post_form(url, params)
@@ -44,7 +46,7 @@ defmodule Barkpark.Sso.Social.HTTP do
 
       # Same isolation + explicit 10s cap for the userinfo fetch (see post_form/2).
       case Req.get(url, headers: headers, finch: Barkpark.Auth.Finch, receive_timeout: 10_000) do
-        {:ok, %{status: s, body: b}} when s in 200..299 and is_map(b) -> {:ok, b}
+        {:ok, %{status: s, body: b}} when s in 200..299 and (is_map(b) or is_list(b)) -> {:ok, b}
         {:ok, %{status: s}} -> {:error, {:http_status, s}}
         {:error, e} -> {:error, e}
       end

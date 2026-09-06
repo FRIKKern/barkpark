@@ -11,12 +11,14 @@ defmodule Barkpark.Plugins.Github.LinkPutErasureTest do
   used to replace the published content WHOLESALE — `met: true` back to
   `false`, evidence to `""`, `{:ok, _}` returned, nothing logged.
 
-  Today the criteria fence at the publish door (`gate_task_publish/2`,
-  source-blind since pds-bl-sync-source-bypasses-publish-door; `:github`
-  always fell through to it) REFUSES that collapse, and the rejection is
-  LOGGED with the task id and the exact proof it would have destroyed
-  (authoring-excellence D23). These tests pin all of it at the chokepoint
-  BOTH automatic arms funnel through:
+  Today there is no collapse to refuse: `Link.put/4` is PUBLISHED-FIRST
+  (task-aa8f25be2c04d391), so the bookkeeping stamp is written onto the
+  published row through the rev-fenced task-write primitive and never mints or
+  republishes a draft. A twin that some OTHER writer left behind is reported at
+  error level with the task id and left alone — publishing it is exactly the
+  erasure this file exists to forbid. (The criteria fence at the publish door,
+  `gate_task_publish/2`, still stands behind that as the second wall.) These
+  tests pin all of it at the chokepoint BOTH automatic arms funnel through:
 
     * MirrorJob arm — `mirror_job.ex` `stamp/4` → `Link.put/4`. The arm that
       CAN reach a `pds-*` row (it mirrors task documents wholesale).
@@ -129,7 +131,7 @@ defmodule Barkpark.Plugins.Github.LinkPutErasureTest do
   end
 
   test "MIRRORJOB SHAPE: the automatic bookkeeping Link.put cannot erase the stamp — " <>
-         "refused at the publish door, LOGGED with the id and the proof at stake",
+         "it never publishes the twin, and NAMES the fork at error level",
        %{scope: scope} do
     doc_id = stamped_task_with_stale_draft!("lp-mirror", scope)
 
@@ -138,18 +140,22 @@ defmodule Barkpark.Plugins.Github.LinkPutErasureTest do
         Link.put(doc_id, @dataset, %{"repo" => "o/r", "issue" => 7, "state" => "open"}, scope)
       end)
 
-    # The put keeps its contract (the bookkeeping landed on the draft)…
-    assert {:ok, _doc} = result
+    # The put keeps its contract (the bookkeeping landed on the PUBLISHED row)…
+    assert {:ok, doc} = result
+    assert %{"repo" => "o/r", "issue" => 7} = Link.get(doc)
+    assert doc.status == "published"
 
-    # …the published proof SURVIVED the automatic collapse…
+    # …the published proof SURVIVED (nothing was republished over it)…
     assert [%{"met" => true, "evidence" => "run output pasted"}] =
              published_criteria!(doc_id, scope)
 
-    # …and the refusal is LOGGED with the task id and what it would have
-    # overwritten (criterion 1 of the row) — not the old silent {:ok, _}.
-    assert log =~ "draft-twin collapse publish for #{doc_id} rejected"
-    assert log =~ "clear the `met: true` flag"
-    assert log =~ "acceptance criterion 0"
+    # …the stale twin is still there, untouched — the stamp did not publish it…
+    assert {:ok, twin} = Content.get_document(Content.draft_id(doc_id), "task", @dataset, scope)
+    assert Link.get(twin) == nil
+
+    # …and the fork is NAMED at error level with the task id, not swallowed.
+    assert log =~ "[error]"
+    assert log =~ "bookkeeping stamp for #{doc_id} hit draft_twin_present"
   end
 
   test "DETACH SHAPE: the inbound-webhook arm's exact payload is fence-covered identically",
@@ -168,7 +174,7 @@ defmodule Barkpark.Plugins.Github.LinkPutErasureTest do
     assert [%{"met" => true, "evidence" => "run output pasted"}] =
              published_criteria!(doc_id, scope)
 
-    assert log =~ "draft-twin collapse publish for #{doc_id} rejected"
+    assert log =~ "bookkeeping stamp for #{doc_id} hit draft_twin_present"
   end
 
   test "control: with NO stale draft the collapse still converges cleanly (the fence " <>
@@ -197,6 +203,6 @@ defmodule Barkpark.Plugins.Github.LinkPutErasureTest do
 
     assert {:ok, doc} = result
     assert doc.content["github"]["repo"] == "o/r"
-    refute log =~ "collapse publish"
+    refute log =~ "draft_twin_present"
   end
 end

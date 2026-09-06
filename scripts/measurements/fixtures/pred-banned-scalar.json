@@ -1,0 +1,67 @@
+{
+ "__synthetic__": "SYNTHETIC FIXTURE \u2014 hand-authored for check-prediction.test.mjs. NOT a measurement, never a desk fact.",
+ "round_trip": {
+  "compared_fields": {
+   "predicted": [
+    "content_px",
+    "content_ch",
+    "px_per_ch",
+    "visible_content_px",
+    "visible_ch",
+    "gutter_px"
+   ],
+   "basis": "ruling"
+  },
+  "row_count": {
+   "predicted": 1,
+   "basis": "artefact-self-report",
+   "derivation": "the artefact's own census of itself \u2014 a BANNED SCALAR, quoted here on purpose"
+  },
+  "rows": {
+   "viewport 1280 / default / face native": {
+    "viewport_px": 1280,
+    "inspector_state": "default",
+    "face": "native",
+    "round_trip_returns_unchanged": {
+     "predicted": true,
+     "basis": "recomputed",
+     "derivation": "this cell's own before[] and after[], field by field"
+    },
+    "fields": {
+     "content_px": {
+      "predicted": 596,
+      "basis": "prior-observation",
+      "source": "SYNTHETIC",
+      "miss_reads_as": "the registered absolute and the run disagree"
+     },
+     "content_ch": {
+      "predicted": 59.6,
+      "basis": "recomputed",
+      "derivation": "content_px / px_per_ch, within this face only"
+     },
+     "px_per_ch": {
+      "predicted": 10.0,
+      "basis": "arithmetic",
+      "derivation": "the face constant",
+      "miss_reads_as": "REAL FONT DRIFT"
+     },
+     "visible_content_px": {
+      "predicted": 596,
+      "basis": "prior-observation",
+      "source": "SYNTHETIC"
+     },
+     "visible_ch": {
+      "predicted": 59.6,
+      "basis": "recomputed",
+      "derivation": "visible_content_px / px_per_ch"
+     },
+     "gutter_px": {
+      "predicted": 80,
+      "basis": "prior-observation",
+      "source": "SYNTHETIC"
+     }
+    }
+   }
+  }
+ }
+}

@@ -181,6 +181,56 @@ jobs:
           fi
           echo "tooling/lib: ${tally} tests, floor 9 — pin re-earned"
 
+      # ── gate-map derivation floor (task-ad66cdcf1fcc452a, task-294d79c9345d59dd)
+      # WHAT THIS USED TO BE, AND WHY IT ISN'T. Until task-294d79c9345d59dd this
+      # step verified a COMMITTED snapshot (tooling/gate-map/gate-map.json)
+      # against the tree. That snapshot was a treadmill: any merge adding a file
+      # under POPULATION_GLOBS staled it, so two PRs that were each green apart
+      # reded MAIN together and every open PR inherited the refusal — measured
+      # three times in 24 h. The snapshot is gone; the map is derived every run.
+      # `--verify` now checks the DERIVATION (no glob went empty, the population
+      # clears a floor, nothing was dropped, the wave-16 edge still resolves) —
+      # properties only a diff that REMOVES something can break, so this step can
+      # only ever red on the diff that caused it.
+      #
+      # THE VENUE ARGUMENT. `--verify` already runs in shell-harnesses.yml, but
+      # that workflow's twin `paths:` lists name only tooling/gate-map/* — while
+      # POPULATION_GLOBS are repo-wide (`*.test.sh`, `*.test.mjs`,
+      # `scripts/*.sh`, `scripts/*.mjs`, `cloud/priv/static/**.mjs`,
+      # `tooling/**/check*.mjs`). So a PR that ADDS an instrument never triggered
+      # the verify: 17 paper-editor/scripts instruments landed with no pre-merge
+      # datapoint, the refusal appeared on main, and every later PR inherited a
+      # red it did not cause. A tripwire that only ever fires on someone else's
+      # diff points at the wrong person.
+      #
+      # The other repair was `**/*.test.mjs` + `**/*.test.sh` on shell-harnesses'
+      # twin paths arms. That fans that ENTIRE workflow — twenty-odd harness jobs
+      # behind one dispatcher — out to every PR that touches any test file, to buy
+      # one ~2 s node call. The venue rule is per JOB: a cheap check whose input is
+      # the PR's own tree belongs in a job that already boots on every PR. This job
+      # is exactly that, and it holds three other checks here for the same reason.
+      #
+      # THE FILTER THIS DEPENDS ON IS THIS FILE'S OWN. `on.pull_request` here
+      # carries no `paths:`, which is what makes the coverage total; adding one
+      # later would blind this step silently, so the step asserts its own venue
+      # before it measures.
+      # spec-authority: advisory-ok — this step reports on the PR; pr-meta is not
+      # in .github/required-checks.json, so a red here informs the author and
+      # stops nothing. The word `gate-map` above is a FILE NAME, not a claim.
+      - name: "gate-map: the derivation is live and non-vacuous (no committed snapshot)"
+        run: |
+          set -euo pipefail
+          # The venue assertion: read this workflow's `on:` block (top-level key
+          # to the next top-level key) and refuse if a `paths:`/`paths-ignore:`
+          # predicate ever appears in it.
+          if awk '/^on:/{inblock=1;next} /^[^[:space:]#]/{inblock=0} inblock' \
+               .github/workflows/pr-meta.yml | grep -qE '^[[:space:]]*paths(-ignore)?:'; then
+            echo "::error::pr-meta.yml grew a paths: predicate on its trigger — the gate-map verify below then stops covering POPULATION_GLOBS and this step becomes green-because-it-never-ran. Remove the filter or move this step to another unfiltered pull_request venue."
+            exit 1
+          fi
+          echo "venue ok: pr-meta.yml's pull_request trigger is unfiltered, so every POPULATION_GLOBS path reaches this step"
+          node --check tooling/gate-map/gate-map.mjs
+          node tooling/gate-map/gate-map.mjs --verify
       - name: No symlink is committed to this repo
         run: bash scripts/committed-symlink-check.sh
 
@@ -217,6 +267,17 @@ jobs:
 
       - name: No shimmed workflow filters its own pull_request trigger
         run: bash scripts/shim-trigger-filter-check.sh
+
+      # The PR-path CI inventory's own derivations — required/feeds-required,
+      # the venue rule, and the real-compute accounting that refuses to count a
+      # run which never executed a step. OFFLINE and ~1 s: --selftest touches
+      # no network and reads no run history, it drives the pure functions over
+      # planted fixtures. It is wired HERE, in the same job as the three
+      # selftests above, for the reason this file already gives for them: a
+      # harness nobody executes reads as coverage and is silence. It guards
+      # scripts/ci-pr-inventory.py, which produces .github/ci-pr-inventory.md.
+      - name: Prove the CI inventory's derivations can fail (--selftest)
+        run: python3 scripts/ci-pr-inventory.py --selftest
 
       # ── aesthetics-guard (ADVISORY) ───────────────────────────────────────────
       # `!cancelled()` and not `success()`: a red from either gate above must not

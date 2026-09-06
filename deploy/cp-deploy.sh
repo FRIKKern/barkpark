@@ -15,6 +15,45 @@
 # Consequence: migrations must be backward-compatible (expand/contract) for
 # the seconds both slots overlap. Go is NOT installed on barkpark-cp, so the
 # provisioner is cross-built by the runner and passed in.
+# ---- PRIVATE COPY: a run must only ever execute ITS OWN bytes --------------
+# The CD workflow scps this script to a SHARED path on the box (/tmp/<name>.sh)
+# and runs `bash /tmp/<name>.sh`. bash reads a script INCREMENTALLY, by byte
+# offset, from an fd it keeps open WHILE executing it — so when a later run's
+# scp rewrites that path under a still-running bash (routine here: every queued
+# run queues on the box while newer merges keep arriving), the
+# running shell reads shifted bytes of a DIFFERENT file and dies mid-deploy on
+# a parse error. Observed on barkpark-cp: "line 329: return: can only `return'
+# from a function or sourced script" then "line 334: what: unbound variable"
+# (run 34021843141), and "line 383: syntax error near unexpected token `)'"
+# (run 34025907184) — function bodies executed as top-level code, the signature
+# of a script rewritten under a running bash.
+#
+# So: before anything else, re-exec from a private copy whose name no other run
+# knows; the shared path may then be rewritten freely. The copy lives OUTSIDE
+# any checkout on purpose — these deploy scripts run git reset --hard /
+# checkout in the app dir, which would eat a copy kept there — and it unlinks
+# itself the moment it
+# starts, so nothing accumulates in /tmp even if the run is killed (bash holds
+# the fd open and keeps reading through it after the unlink).
+# The guard carries the copy's PATH, not a bare 1, so an inherited
+# BARKPARK_DEPLOY_PRIVATE_COPY can never make a non-copy invocation delete the
+# real script. Copy failure is a WARNING, never a refusal: the shared path is
+# what we have today, and a deploy that refuses to run is worse than one that
+# runs with the old exposure.
+if [ "${BARKPARK_DEPLOY_PRIVATE_COPY:-}" = "$0" ]; then
+  rm -f "$0" 2>/dev/null || true
+  unset BARKPARK_DEPLOY_PRIVATE_COPY
+elif [ -f "$0" ] && [ -r "$0" ]; then
+  __bp_self="$(mktemp "${TMPDIR:-/tmp}/bp-deploy-self.XXXXXX" 2>/dev/null)" || __bp_self=""
+  if [ -n "$__bp_self" ] && cat "$0" > "$__bp_self" 2>/dev/null; then
+    export BARKPARK_DEPLOY_PRIVATE_COPY="$__bp_self"
+    exec bash "$__bp_self" "$@"
+  fi
+  [ -n "$__bp_self" ] && rm -f "$__bp_self" 2>/dev/null
+  echo "[private-copy] WARNING: could not copy $0 aside; running from the shared path, where a concurrent rewrite can corrupt this run" >&2
+fi
+# ---- end PRIVATE COPY ------------------------------------------------------
+
 set -uo pipefail
 
 APP="${BARKPARK_APP_DIR:-/opt/barkpark}"
@@ -26,10 +65,44 @@ log() { echo "[cp-deploy $(date -u +%H:%M:%S)] $*"; }
 compose() { docker compose -f "$COMPOSE_FILE" --profile blue --profile green "$@"; }
 
 # Serialize overlapping runs (back-to-back merges, manual + CD).
+# ---- Queued-lock heartbeat (task-8811b4b25c529dbe) --------------------------
+# A SILENT wait is what killed the CI leg, never the deploy itself. `flock -w
+# <budget> 9` carries no bytes on the ssh session that started this script, and
+# the GitHub runner's NAT tears an idle session down after roughly five minutes:
+# ssh exits 255, the step fails, and the run is recorded as a FAILED production
+# deploy for the crime of queueing. Measured on main 2026-09-05..06: ten of the
+# last fourteen failed deploy.yml runs died exactly that way, every one of them
+# after logging the "holds the lock" line above.
+#
+# So wait in heartbeat-sized STEPS instead of one long silent one. The contract
+# is identical to `flock -w <budget> 9` -- return 0 the moment the lock is
+# taken, non-zero once the budget is exhausted, and the TOTAL budget is
+# unchanged (the steps sum to it exactly) -- but a line lands at most every
+# $BARKPARK_LOCK_HEARTBEAT_SECS, so the session carries bytes AND a human
+# reading the log sees a QUEUE rather than a hang.
+#
+# The env var exists ONLY so deploy/*_test.sh can drive this at 1 s; nothing on
+# a box sets it. A non-numeric or sub-second value falls back to 60 rather than
+# spinning.
+queue_for_deploy_lock() {
+  local budget="$1" label="${2:-the deploy lock}" beat waited=0 step
+  beat="${BARKPARK_LOCK_HEARTBEAT_SECS:-60}"
+  case "$beat" in ''|*[!0-9]*) beat=60 ;; esac
+  [ "$beat" -lt 1 ] && beat=60
+  while [ "$waited" -lt "$budget" ]; do
+    step=$(( budget - waited ))
+    [ "$step" -gt "$beat" ] && step="$beat"
+    flock -w "$step" 9 && return 0
+    waited=$(( waited + step ))
+    log "still queued for $label — ${waited}s waited of ${budget}s max"
+  done
+  return 1
+}
+
 exec 9>"$LOCK"
 if ! flock -n 9; then
   log "another deploy holds the lock — queueing (max 30 min)"
-  flock -w 1800 9 || { log "gave up waiting for the deploy lock"; exit 15; }
+  queue_for_deploy_lock 1800 || { log "gave up waiting for the deploy lock"; exit 15; }
 fi
 
 cd "$APP" || { log "no $APP"; exit 10; }
@@ -61,6 +134,63 @@ docker tag cloud-control_plane:latest cloud-control_plane:rollback 2>/dev/null \
   && log "tagged rollback image" || log "no current image to tag (first deploy?)"
 
 git checkout -- . 2>/dev/null || true
+# ---- Probe origin BEFORE the pull and NAME the cause (task-a14a2f489452e95d).
+# 2026-09-02 13:58Z-19:28Z every control-plane deploy died at the pull below with
+# a bare "pull failed" (exit 11) while git's own stderr said
+#     fatal: could not read Username for 'https://github.com': No such device or address
+#     fatal: expected flush after ref listing
+# THREE unrelated faults print that same first line, and the outage ran three
+# hours because the deploy log named none of them:
+#   PROTOCOL PIN STALE     — the pull's protocol.version=0 pin (see the block
+#                            below) is itself what origin now refuses, while the
+#                            default handshake succeeds from this box
+#   REMOTE UNAUTHENTICATED — origin still serves anonymous reads, so this box's
+#                            remote URL or credential helper is the broken part
+#   REPO PRIVATE (or moved) — anonymous info/refs answers 401/404 (CLAUDE.md
+#                            past-mistake #9): the box needs an authenticated
+#                            remote before the repo can be private
+# ls-remote is the same ref-listing handshake as the pull without a working-tree
+# write, and it runs WITH THE PULL'S OWN protocol pin — a green probe therefore
+# means the pull gets the same answer. Probing unpinned would have failed on the
+# very box the pin was added for and turned this guard into the outage.
+# On failure the differential runs (an unpinned retry, then an anonymous curl of
+# info/refs), git's stderr is quoted VERBATIM, and the verdict lands in the log
+# AND in an ::error:: line so the check-run summary carries the reason rather
+# than a naked exit code.
+# `timeout` is coreutils: present on the box, absent on a stock Mac running the harness.
+PROBE_TIMEOUT="$(command -v timeout || command -v gtimeout || true)"
+# shellcheck disable=SC2069  # `2>&1 >/dev/null` is deliberate and in this order: stderr
+# takes the caller's stdout (the capture) and stdout goes to /dev/null, so the probe
+# yields git's stderr ALONE. The order shellcheck suggests would capture the ref list.
+probe_ls_remote() { ${PROBE_TIMEOUT:+$PROBE_TIMEOUT 60} git -c core.hooksPath=/dev/null "$@" ls-remote --exit-code -h origin main 2>&1 >/dev/null; }
+log "git ls-remote origin (probe before pull, same protocol pin as the pull)"
+PROBE_ERR="$(probe_ls_remote -c protocol.version=0)"
+PROBE_RC=$?
+if [ "$PROBE_RC" -ne 0 ]; then
+  case "$PROBE_ERR" in
+    *"could not read Username"*|*"Authentication failed"*|*"Repository not found"*|*" 403"*|*" 401"*)
+      if probe_ls_remote >/dev/null 2>&1; then
+        PROBE_WHY="PROTOCOL PIN STALE: origin refuses the pinned protocol.version=0 handshake but the default one succeeds from this box ($(git --version 2>/dev/null)) — drop the pin on the pull below"
+      else
+        ORIGIN_URL="$(git remote get-url origin 2>/dev/null)"
+        INFO_REFS_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "${ORIGIN_URL%.git}.git/info/refs?service=git-upload-pack" 2>/dev/null || echo 000)"
+        case "$INFO_REFS_CODE" in
+          200) PROBE_WHY="REMOTE UNAUTHENTICATED: origin answers anonymous info/refs 200, so this box's remote or credential helper is broken, not the repo" ;;
+          401|404) PROBE_WHY="REPO PRIVATE (or moved): anonymous info/refs answers $INFO_REFS_CODE — this box needs an authenticated remote before the repo can be private (CLAUDE.md past-mistake #9)" ;;
+          *) PROBE_WHY="origin unreachable while probing info/refs (curl $INFO_REFS_CODE): network, DNS or a GitHub outage" ;;
+        esac
+      fi ;;
+    *)
+      case "$PROBE_RC" in
+        124) PROBE_WHY="origin did not answer within 60 s (network, DNS or a GitHub outage)" ;;
+        *)   PROBE_WHY="origin refused the ref listing (network, DNS, or a moved/renamed repo)" ;;
+      esac ;;
+  esac
+  log "pull refused before it ran — $PROBE_WHY"
+  printf '%s\n' "$PROBE_ERR" | sed 's/^/    git: /'
+  echo "::error::cp-deploy: pull refused — $PROBE_WHY — $(printf '%s' "$PROBE_ERR" | head -1)"
+  exit 11
+fi
 log "git pull"
 # protocol.version=0 IS LOAD-BEARING — do not delete it as cargo cult because you
 # cannot reproduce the failure from a modern box. THE OUTAGE IT ENDS (2026-09-02):

@@ -18,11 +18,14 @@ defmodule Barkpark.Tasks.Claim do
       emit_broadcasts: 1
     ]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
+  alias Barkpark.Tasks.Blockers
   alias Barkpark.Tasks.CriteriaExemption
-  alias Barkpark.Tasks.{Edges, ExecutionPolicy, Queue, QueueGate, Validation, WorkDigest}
+  alias Barkpark.Tasks.TwinResolver
+  alias Barkpark.Tasks.{ExecutionPolicy, Queue, QueueGate, Validation, WorkDigest}
 
   @event_task_claimed "task.claimed"
   # Derived at compile time from the ONE claimability source of truth
@@ -76,15 +79,24 @@ defmodule Barkpark.Tasks.Claim do
 
     result =
       Repo.transaction(fn ->
-        # Advisory lock (per-doc_id) — serializes concurrent targeted claims for
-        # the same row; keyed off doc_id (unique within tenancy) since we don't
-        # yet know the uuid. Resource-carrying claims ALSO take a global
-        # resources lock so two concurrent claims of different tasks cannot both
-        # pass the overlap scan and land conflicting resource sets.
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:" <> doc_id])
+        # PRE-RESOLUTION advisory lock (per-doc_id) — serializes concurrent
+        # targeted claims for the same slug; keyed off doc_id since we don't
+        # yet know the uuid. THIS LOCK EXCLUDES CLAIMS ONLY. It hashes to a
+        # different integer than `task:<uuid>`, which is the key close,
+        # release, move, stage, stamp, the sweeper and the compactor take, so
+        # it fences NOTHING in that family. `fetch_task_by_doc_id/3` below
+        # takes the `task:<uuid>` lock as soon as it has resolved the uuid and
+        # BEFORE it takes the row lock — that is what makes a claim mutually
+        # exclusive with a close.
+        #
+        # Resource-carrying claims ALSO take a global resources lock so two
+        # concurrent claims of different tasks cannot both pass the overlap
+        # scan and land conflicting resource sets.
+        _ =
+          Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task_doc_id(doc_id)])
 
         if resources != [] do
-          _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task-resources"])
+          _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.resources()])
         end
 
         case fetch_task_by_doc_id(doc_id, workspace_id, project_id) do
@@ -127,22 +139,51 @@ defmodule Barkpark.Tasks.Claim do
   end
 
   # Everything is a task: the TARGETED claim_by_id path fetches by doc_id on
-  # `type == "task"`. Resolution: try the exact doc_id first; when no row is
-  # found AND the caller did NOT supply a `drafts.` prefix, retry with
-  # `"drafts." <> doc_id` (tasks created via mutate land as drafts.<id>). An
-  # explicit `drafts.` prefix is exact — the fallback is never applied in
-  # reverse. If both `t1` and `drafts.t1` exist, the exact `t1` match wins.
+  # `type == "task"`. Resolution is `Barkpark.Tasks.TwinResolver`'s ONE RULE —
+  # a bare id means either spelling, a published row always outranks its
+  # `drafts.` twin, an explicit `drafts.` prefix is exact (never resolved in
+  # reverse), and a cross-dataset tie the caller did not name is REFUSED.
+  #
+  # THREE STEPS, AND THE ORDER IS THE INVARIANT (task-eal-bl-lock-key-convergence):
+  #
+  #   1. Resolve the slug to a uuid with a PLAIN read (no `FOR UPDATE`). The
+  #      caller already holds `task:<doc_id>`, so no other targeted claim for
+  #      this slug can be resolving concurrently.
+  #   2. Take `task:<uuid>` — the converged per-task advisory key every
+  #      post-resolution writer uses.
+  #   3. Only then take the `FOR UPDATE` row lock, by PK.
+  #
+  # Steps 2 and 3 may not be swapped. Every other writer takes the advisory
+  # lock BEFORE it touches the row; a claim that took the row lock first would
+  # be the one participant acquiring the pair in the opposite order, which is
+  # a textbook deadlock (claim holds row R and waits for advisory A while a
+  # close holds A and waits for R). `FOR UPDATE` is preserved — it is what
+  # makes the claim a CAS.
   defp fetch_task_by_doc_id(doc_id, workspace_id, project_id) do
-    case fetch_task_exact_locked(doc_id, workspace_id, project_id) do
-      {:ok, _} = hit ->
-        hit
+    with {:ok, %Document{id: task_uuid}} <-
+           resolve_task_by_doc_id(doc_id, workspace_id, project_id) do
+      _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_uuid)])
 
-      {:error, :not_found} ->
-        if String.starts_with?(doc_id, "drafts.") do
-          {:error, :not_found}
-        else
-          fetch_task_exact_locked("drafts." <> doc_id, workspace_id, project_id)
-        end
+      # global-read: by-PK row lock inside the per-task advisory lock, on the uuid resolve_task_by_doc_id/3 just returned from a workspace/project-scoped query — the tenancy decision was made there, this re-reads the same row.
+      lock_task_row(task_uuid)
+    end
+  end
+
+  # THE ONE RULE (task-49eef068420df918 + task-baf9b74a0ffc83f4): the
+  # exact-then-`drafts.`-fallback dance is one query decided by
+  # `Barkpark.Tasks.TwinResolver`. Every claim-fenced verb — pulse, stamp, stage,
+  # close, release — resolves through here, so rule 4 ("no task verb writes to a
+  # `drafts.<id>` twin while a published row exists") is this one call site.
+  defp resolve_task_by_doc_id(doc_id, workspace_id, project_id) do
+    fetch_task_exact(doc_id, workspace_id, project_id)
+  end
+
+  defp lock_task_row(task_uuid) do
+    query = from(d in Document, where: d.id == ^task_uuid, lock: "FOR UPDATE")
+
+    case Repo.one(query) do
+      nil -> {:error, :not_found}
+      %Document{} = doc -> {:ok, doc}
     end
   end
 
@@ -170,32 +211,28 @@ defmodule Barkpark.Tasks.Claim do
   # same call returns the same row across every pooled connection. A partial
   # order would trade a 500 for a silently alternating answer, which is worse.
   #
-  # `FOR UPDATE` is preserved: this is the targeted-claim path and the row lock
-  # is what makes the claim a CAS. A fix that dropped it would trade a 500 for
-  # a lost update.
-  defp fetch_task_exact_locked(doc_id, workspace_id, project_id) do
-    base =
-      from(d in Document,
-        where: d.doc_id == ^doc_id and d.type == "task",
-        order_by: [
-          asc: fragment("CASE WHEN ? = 'published' THEN 0 ELSE 1 END", d.status),
-          asc: d.dataset,
-          asc: d.id
-        ],
-        limit: 1,
-        lock: "FOR UPDATE"
-      )
-
+  # The `FOR UPDATE` row lock this function once carried moved to
+  # `lock_task_row/1`, which runs AFTER the `task:<uuid>` advisory lock — see
+  # the ordering note on `fetch_task_by_doc_id/3`. The row lock is still taken
+  # on the targeted-claim path and is still what makes the claim a CAS.
+  #
+  # THE REPAIR (task-49eef068420df918 + task-baf9b74a0ffc83f4): `asc: d.dataset`
+  # under a `limit: 1` traded the 500 for a SILENT WRONG ROW — the claim landing
+  # on whichever dataset sorts first, which for the eleven live twins is the
+  # EMPTY copy. `Barkpark.Tasks.TwinResolver` owns the rule now: published wins,
+  # a `drafts.` twin never outranks a published row, and an unnamed cross-dataset
+  # tie is REFUSED (409, naming both datasets) rather than picked. A claim is a
+  # write; picking a row for the writer is the one thing this door must not do.
+  defp fetch_task_exact(doc_id, workspace_id, project_id) do
     # Tenancy: route through the ONE shared helper (fail-CLOSED on nil) so the
     # targeted-claim fetch shares the exact workspace/project semantics as the
     # ready-queue path (Queue.ready_query → Scope.scope_to_workspace). A nil
     # workspace_id yields zero rows, never every tenant's rows.
-    query = Scope.scope_to_workspace(base, workspace_id, project_id)
-
-    case Repo.one(query) do
-      nil -> {:error, :not_found}
-      %Document{} = doc -> {:ok, doc}
-    end
+    TwinResolver.resolve(
+      doc_id,
+      &Scope.scope_to_workspace(&1, workspace_id, project_id),
+      &Repo.all/1
+    )
   end
 
   # ── THE CLAIM-TIME CRITERIA DOOR (task-9554c64bf51a0f81) ─────────────────
@@ -253,14 +290,21 @@ defmodule Barkpark.Tasks.Claim do
   end
 
   defp check_deps_satisfied(%Document{} = doc) do
-    deps = Edges.dependencies(doc.id, kind: :blocks)
-
-    all_done? =
-      Enum.all?(deps, fn %Document{content: c} ->
-        Map.get(c || %{}, "lifecycle_status") == "done"
-      end)
-
-    if all_done?, do: :ok, else: {:error, :blocked_by_unsatisfied_deps}
+    # cch-w3-task-birth-attribution: a blocker must be done AND attributable.
+    # `lifecycle_status` alone is forgeable by a fresh create, which births are
+    # structurally exempt from guarding — so the check moved to the READ side.
+    # ONE definition of that predicate; see Tasks.DependencySatisfaction.
+    #
+    # This door used to read ONLY `Edges.dependencies/2`, while the ready queue
+    # gated on the `blocks` edges AND `content.dependencies`. A dependency
+    # written only into `content.dependencies` was therefore withheld by the
+    # queue and waved through here — the row never surfaced in `task ready`,
+    # but a targeted `bp task claim` took it anyway. `Tasks.Blockers` is the ONE
+    # blocker SET both doors now read; see its moduledoc for why it is a union
+    # and which store is authoritative.
+    if Blockers.all_satisfied?(doc),
+      do: :ok,
+      else: {:error, :blocked_by_unsatisfied_deps}
   end
 
   # Resource claims: a targeted claim may carry

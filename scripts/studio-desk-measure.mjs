@@ -18,9 +18,14 @@
 //   node scripts/studio-desk-measure.mjs --doc=<slug>   # measure a NAMED document
 //   node scripts/studio-desk-measure.mjs --doc=any      # first row that opens
 //   node scripts/studio-desk-measure.mjs --out <path>   # ALSO save the run JSON
+//   node scripts/studio-desk-measure.mjs --sha=<sha>    # REFUSE unless the box serves it
 //   node scripts/studio-desk-measure.mjs --help
 //
-// (`BP_DESK_DOC` is the env form of `--doc`. Default: DEFAULT_DOC below.)
+// (`BP_DESK_DOC` is the env form of `--doc`. With neither, the drill resolves
+//  the NEWEST paper in the pane it just opened and records which one — there is
+//  no committed slug to age off; see `resolveDocTarget` below.
+//  `BP_DESK_SHA` is the env form of `--sha`/`--ref`. Unpinned by default: a run
+//  without it measures whatever guerrilla serves and records it in served_sha.)
 //
 // A run that is not written to disk survives only as terminal scrollback, and
 // this epic has already lost one 54-row sweep that way (D131) — it exists now
@@ -213,6 +218,104 @@
 // Also: resolved font family per face, selector match counts, sweep direction,
 // scrollbar width, and the landed authenticated URL.
 //
+// ── Reliability — D138 CHARACTERISED (N=22, 2026-09-06) ─────────────────────
+//
+// D138 said "the instrument is ~80% deterministic and nobody knows why" and
+// named two undiagnosed failures. This is the measurement that replaces the
+// guess, and the three rulings that follow from it.
+//
+// THE SWEEP. 22 consecutive invocations against deployed guerrilla, each with
+// --retries=0 so the numbers are RAW per-invocation rates rather than the
+// retried ones, stderr captured on every single invocation, all on bundled
+// Chromium 147.0.7727.15, all drilling one named document. The classification:
+//
+//     outcome                     count      note
+//     completed, 54 rows          19 of 22
+//     abort: provenance-bracket    2 of 22   a deploy landed under the sweep
+//     abort: browser-race          1 of 22   execution context destroyed
+//
+// ALL THREE ABORTS FELL INSIDE ONE 6m44s WINDOW, 07:11:11Z-07:17:55Z, during
+// which the served SHA moved a99e366f2 -> 0a3886ac6 and the live slot rotated
+// blue -> green. Outside that window: 19 of 19 clean. The instrument is not
+// ~80% deterministic. It is deterministic, and it fails while the thing it
+// measures is being replaced underneath it — which is the correct behaviour and
+// exactly what the provenance bracket exists to force.
+//
+// REPRODUCTION. Within a served SHA, all 54 rows reproduce field for field at
+// tolerance zero in 19 of 19 completed runs (scripts/studio-desk-compare.mjs,
+// mechanical, keyed, zero tolerance). ACROSS the SHA boundary the only per-row
+// fields that differ are `served_sha` and `slot_active` — the provenance
+// stamps. Not one geometry field moved across two deployed builds and both
+// slots.
+//
+// ── RULING 1 — a substituted face withdraws its row's verdicts ───────────────
+//
+// RATE. Zero substitutions in 684 forced-face rows across the 19 completed runs
+// (36 forced rows per run: two overridden faces x nine widths x two states).
+// With D138's own prior observation that is ONE substitution in ~30 completed
+// runs. The honest form is a proportion of runs, and it is small.
+//
+// REACHABILITY INTO D107's SEVEN — PROVEN POSSIBLE, and not by waiting for it.
+// A sweep that never sees the flake proves nothing about where it can land, and
+// one that happens to see it at 1280 would settle the question by luck. It is
+// settled by reading the path: the face is forced and resolved by one stretch
+// of PAGE_MEASURE that reads no viewport quantity at all — no innerWidth, no
+// matchMedia, no bucket — and `face_applied` is `winner === wantedFamilies[0]`
+// with no width term. Same code, same inputs, at every one of the nine widths.
+// A substitution possible at 640 is possible at 1280. Both facts are pinned in
+// scripts/studio-desk-instrument-reliability.test.mjs.
+//
+// SO: rare, and able to land on a ruling cell. A run with `face_applied:false`
+// in a forced row does NOT fail — the row does. Its 55ch verdicts go to NULL
+// (never FALSE: FALSE would say "this desk fails 55ch on Georgia" when Georgia
+// was never on screen), its px measurements stand, and the run carries
+// `face_override_integrity`. Killing 53 good rows to withdraw one would produce
+// the zero-byte run D138 forbids. A CONSUMER that wants a gate passes
+// --fail-on-face-substitution, which exits 2 AFTER the artifact is written; the
+// instrument itself keeps no gate authority (D81).
+//
+// ── RULING 2 — bounded retries belong IN the instrument, on a NAMED list ─────
+//
+// Yes, and the list matters more than the bound. The wave-9 brief authorised
+// retries on ONE abort, so an operator who met any other had to deviate to do
+// the obviously right thing. RETRYABLE_ABORTS is the list — six entries, five
+// with throw sites in this file and one (`browser-race`) classified at the
+// retry layer because playwright raises it, not us. --retries=N defaults to 2.
+// Every failed attempt's stderr is printed IN FULL before the next attempt
+// starts: failure B went seven weeks undiagnosed for exactly one reason, that
+// its stderr was suppressed, and a retry loop that swallowed what it retried
+// would rebuild that hole where nobody would think to look.
+//
+// ── RULING 3 — the browser is provenance ────────────────────────────────────
+//
+// BP_DESK_BROWSER, defaulting to the bundled Chromium; a missing browser fails
+// by name with `npx playwright install chromium`; every run records
+// browser_policy / browser_channel / browser_version. See the block above
+// resolvePlaywright().
+//
+// ── WHAT D138 GOT WRONG, on the evidence ────────────────────────────────────
+//
+//  - "failure C ... The list had rendered only four rows at drill time — a
+//    PARTIALLY-LOADED Papers list, not a missing document." Not a partial list.
+//    Those four strings are document TYPES: the drill was reading the ROOT
+//    pane, because `openPapersPane` waited for QUIESCENCE (800ms of stillness)
+//    after clicking, and the pre-click desk is already still. The Papers pane
+//    renders exactly 100 rows. Fixed by the edge-triggered `waitForNewPane`,
+//    pinned by studio-desk-drill-pane.test.mjs, and 0 of 22 invocations in this
+//    sweep aborted in the drill.
+//  - "failure B, UNDIAGNOSED." Diagnosed. It is playwright's `Execution context
+//    was destroyed` under a blue/green rotation — see isRetryableBrowserRace().
+//  - "~80% deterministic." 19 of 22 raw, 19 of 19 outside a deploy window, with
+//    every completed run reproducing at tolerance zero.
+//
+// CLOSED SINCE (task-7f44670cf2d7bd53), and it was this file's to fix after all: the committed
+// DEFAULT_DOC had aged off the Papers pane's newest-100 window, so the no-flag
+// invocation aborted 1 of 1 with a correctly-worded drill error naming a slug the
+// reader had no way to replace. Every run above therefore passed --doc
+// explicitly. There is now no committed slug: the default RESOLVES the newest
+// row of the Papers pane the drill has already proven it entered, and the run
+// records `measured_doc` + `measured_doc_source`. See `resolveDocTarget`.
+//
 // ── Playwright resolution ────────────────────────────────────────────────────
 // playwright 1.59.1 + chromium-1217 are cached, but they live in the JS
 // monorepo's node_modules, and this script sits in scripts/ — and is routinely
@@ -301,6 +404,11 @@ function resolveOutPath(argv = process.argv.slice(2)) {
  *  milliseconds rather than after a ~30-60s authenticated sweep (D115). */
 let OUT_PATH = null;
 
+/** The requested revision, parsed at the ENTRYPOINT for both of `OUT_PATH`'s
+ *  reasons above: `parseShaPin` calls `die`, and parsing argv at module scope
+ *  would couple IMPORT of this file to the importer's command line. */
+let SHA_PIN = null;
+
 /** Function, not a const string: it interpolates DEFAULT_DOC, which is declared
  *  below this point and would be in its temporal dead zone at module init. */
 function usage() {
@@ -323,12 +431,28 @@ USAGE
 
 OPTIONS
   --json              JSON matrix only — suppress the human table on stdout.
-  --doc=<slug>        Measure a NAMED document (default: ${DEFAULT_DOC}).
+  --doc=<slug>        Measure a NAMED document.
+  --doc=newest        THE DEFAULT. Measure the newest row of the Papers pane,
+                      resolved at run time from the list the drill just opened
+                      — never from a committed slug, which ages off the
+                      newest-100 window and turns a bare run into an abort
+                      (task-7f44670cf2d7bd53). The run records measured_doc and
+                      measured_doc_source; an EMPTY pane REFUSES by name
+                      rather than falling back to the root pane.
   --doc=any           Drill the first Papers row that opens a paper surface.
   --out <path>        Write the COMPLETE run JSON (all rows + run-level
                       provenance) to <path>, creating parent directories.
                       Committed runs live in scripts/measurements/. Without
                       this the table exists only as terminal scrollback (D131).
+  --sha=<sha>         PIN the run to a deployed revision. Before anything is
+  --ref=<sha>         measured, the SHA the box actually serves is read over
+                      ssh and compared; a mismatch REFUSES — non-zero, naming
+                      both SHAs — with zero rows emitted and nothing written.
+                      Abbreviated SHAs match by prefix. Without this a run
+                      measures whatever guerrilla serves right now and says so
+                      only afterwards, in served_sha (charter D73). \`--sha\`
+                      does not deploy, serve or check out anything: it only
+                      refuses to measure a build you did not ask for.
   --no-round-trip     Skip the round-trip pass (default -> open -> dismiss on
                       the SAME page instance, asserting the reading column comes
                       back bit-identical per width and face). It costs a second
@@ -338,10 +462,37 @@ OPTIONS
                       render, so the non-vacuity guard is seen to FIRE in the
                       same run. Without it, "no scrim because the desk was
                       fixed" and "the guard never ran" produce an identical zero.
+  --retries=N         Bounded retries on the NAMED retryable aborts only
+                      (default 2, so up to three attempts; 0 disables).
+                      Retryable: ${RETRYABLE_ABORTS.map((a) => a.id).join(', ')}.
+                      Every failed attempt's stderr is printed IN FULL before
+                      the next attempt starts. A terminal failure is never
+                      retried at any N.
+  --fail-on-face-substitution
+                      Exit 2 if any forced-face row measured a different face
+                      (D138 failure A). The artifact is still written and those
+                      rows' 55ch verdicts are already NULL — this only turns the
+                      finding into a non-zero exit for a caller that wants a
+                      gate. The instrument itself has no gate authority (D81).
   -h, --help          This text.
 
+BROWSER (provenance, not a detail — \`ch\` is a font measurement)
+  Policy: \`${browserPolicy().id}\` (${browserPolicy().source}) — ${browserPolicy().what}.
+${Object.entries(BROWSER_POLICIES).map(([id, p]) =>
+  `    BP_DESK_BROWSER=${id.padEnd(8)} ${p.what}\n      if missing: ${p.fix}`).join('\n')}
+  A missing browser fails by NAME with the install command above, never as a raw
+  \`browserType.launch: Executable doesn't exist\` trace — that read as an
+  instrument bug to every wave-11 verifier, and the ones who worked around it by
+  forcing system Chrome measured on a different browser than the committed
+  artifacts, with nothing in either artifact saying so. Every run now records
+  \`browser_policy\`, \`browser_channel\` and \`browser_version\`.
+
 ENVIRONMENT
-  BP_DESK_DOC         Env form of --doc.
+  BP_DESK_BROWSER     bundled (default) | chrome — see BROWSER above.
+  BP_DESK_RETRIES     Env form of --retries.
+  BP_DESK_SHA         Env form of --sha/--ref.
+  BP_DESK_DOC         Env form of --doc. Empty or unset means the default,
+                      \`newest\`; the flag wins over it.
                       (BP_DESK_DESTINATION_CONTROL is GONE. It pointed at a
                       control that summons the Tier-3 destination; no such
                       control has ever existed, because the destination is
@@ -356,26 +507,116 @@ NOTES
 `;
 }
 
-/** The COMMITTED default drill target (D97). It must be a document that exists,
- *  is published, and is not being rewritten by a concurrent wave — so it is one
- *  of this epic's OWN sealed wave Papers, never "whatever is newest". If it ever
- *  falls off the Papers pane's first page the run fails LOUDLY naming it, which
- *  is the correct outcome: pass `--doc=<slug>` and the matrix says which
- *  document it measured. */
-const DEFAULT_DOC = 'studio-space-priority-desk-browser-2026-07-19';
-
 /** `--doc=any` re-enables the old first-row drill, but skipping rows that do not
  *  open a paper surface rather than dying on the first one that does not. */
 const ANY_DOC = 'any';
 
-function resolveDocTarget() {
-  const flag = process.argv.find((a) => a.startsWith('--doc='));
-  const raw = (flag ? flag.slice('--doc='.length) : process.env.BP_DESK_DOC || DEFAULT_DOC).trim();
-  if (!raw) die('--doc= was passed with an empty value — name a document slug, or `any`');
-  const source = flag ? '--doc flag' : (process.env.BP_DESK_DOC ? 'BP_DESK_DOC env' : 'committed default');
-  return raw === ANY_DOC
-    ? { mode: 'any', slug: null, source }
-    : { mode: 'named', slug: raw, source };
+/** `--doc=newest` — THE DEFAULT, and a MODE rather than a slug. */
+const NEWEST_DOC = 'newest';
+
+/**
+ * THERE IS NO COMMITTED DEFAULT SLUG, AND ITS ABSENCE IS THIS BLOCK (task-7f44670cf2d7bd53).
+ *
+ * WHAT WAS HERE. `DEFAULT_DOC = 'studio-space-priority-desk-browser-2026-07-19'`
+ * — one of this epic's own sealed wave Papers, chosen under D97 because a NAMED
+ * target cannot be moved under the drill by a concurrent wave the way "the first
+ * row" can. That reasoning was right about determinism and wrong about time. The
+ * Papers pane is a newest-first window of ~100 rows and this epic's own waves
+ * publish into it continuously, so a fixed slug does not stay reachable: it aged
+ * out, and a bare `node scripts/studio-desk-measure.mjs --json` then aborted
+ * 1 of 1 — not a flake, a standing outage — with a correctly-worded drill error
+ * naming a slug the reader had no way to replace. Every run of the N=22
+ * characterisation above had to pass `--doc` explicitly. An instrument whose
+ * documented invocation always fails reads as a broken instrument.
+ *
+ * WHY NOT JUST A NEWER SLUG. Because the next one ages off on the same clock,
+ * and all a hand-bumped constant buys is the date of the next outage. A dated
+ * literal in this position is a defect whatever date it carries, which is why
+ * `studio-desk-default-doc.test.mjs` FAILS if one reappears in this file.
+ *
+ * WHAT REPLACES IT. The default is a mode, `newest`, resolved AT RUN TIME from
+ * the Papers pane the drill has already proven it entered (`waitForNewPane` —
+ * D138's failure C was a ROOT-pane read misdiagnosed for seven weeks as a
+ * partially-loaded list). Reachability stops being a claim about the past: the
+ * slug is read as the newest row's own `phx-value-id`, out of the very list the
+ * click is about to be made in, seconds earlier. What D97 actually forbids is a
+ * run that cannot say WHICH document it measured, and that is bought here
+ * exactly as a named target buys it — the landed URL is asserted to carry the
+ * resolved slug, and `measured_doc` / `measured_doc_source` /
+ * `measured_doc_reachability` are recorded in the run and in the flattened
+ * artifact beside `served_sha` and `requested_sha`.
+ *
+ * AND IT REFUSES RATHER THAN DRIFTING. An empty list is the one input that could
+ * turn "newest" into "whatever pane I happen to be looking at" — the root-pane
+ * read again, wearing a resolver's clothes. `resolveNewestPaperSlug` throws a
+ * named MeasureError instead of returning anything at all.
+ *
+ * PRECEDENCE, unchanged in the two forms that already existed:
+ * `--doc=` beats `BP_DESK_DOC` beats the default.
+ *
+ * PURE, and injected rather than read from `process`, for the same reason
+ * `parseShaPin` is: the precedence is the part that rots, and a resolver that
+ * can only be exercised through a 30-60s authenticated sweep is a resolver
+ * nobody re-checks.
+ */
+export function resolveDocTarget(argv = process.argv, env = process.env) {
+  const flag = argv.find((a) => typeof a === 'string' && a.startsWith('--doc='));
+  if (flag !== undefined) return classifyDocTarget(flag.slice('--doc='.length), '--doc=');
+  const fromEnv = env.BP_DESK_DOC;
+  if (typeof fromEnv === 'string' && fromEnv.trim() !== '') return classifyDocTarget(fromEnv, 'BP_DESK_DOC');
+  return { mode: 'newest', slug: null, source: 'default', resolution: 'newest-paper' };
+}
+
+/** One request string -> a target. `resolution` is what the ARTIFACT records as
+ *  `measured_doc_source`: how the measured document came to be chosen, which for
+ *  `newest`/`any` is NOT the same question as where the request came from. */
+function classifyDocTarget(raw, source) {
+  const slug = String(raw).trim();
+  if (!slug) {
+    die(`${source} was passed with an empty value — name a document slug, or \`newest\` (the default: ` +
+        `the newest row of the Papers pane, resolved at run time), or \`any\` (the first row that opens ` +
+        `a paper surface). Omitting it entirely is also \`newest\`.`);
+  }
+  if (slug === NEWEST_DOC) return { mode: 'newest', slug: null, source, resolution: 'newest-paper' };
+  if (slug === ANY_DOC) return { mode: 'any', slug: null, source, resolution: 'first-openable-row' };
+  return { mode: 'named', slug, source, resolution: source };
+}
+
+/**
+ * The newest row's slug, from the `phx-value-id`s the Papers pane rendered.
+ *
+ * The list is ordered newest-first (D97 established that while arguing against
+ * relying on it), so "newest" is `rows[0]` — but only among rows that actually
+ * carry a slug, because a row without one cannot be clicked by id and cannot be
+ * asserted against the landed URL, which is the whole determinism story.
+ *
+ * ZERO IS A REFUSAL, NEVER A FALLBACK. A caller that got `null` here would go on
+ * to measure whatever surface happened to be on screen — the root pane, whose
+ * rows are document TYPES — and label it a desk fact. That is the exact confound
+ * this instrument exists to make unreachable, so the empty case throws a
+ * MeasureError naming what it saw and what to pass instead.
+ */
+export function resolveNewestPaperSlug(rowSlugs) {
+  const rows = Array.isArray(rowSlugs) ? rowSlugs : [];
+  const usable = rows.filter((s) => typeof s === 'string' && s.trim() !== '');
+  if (usable.length === 0) {
+    die(`INSTRUMENT FAILURE (drill) — this says NOTHING about the desk's layout.\n\n` +
+        `  THE PAPERS PANE OFFERED NO DOCUMENT TO MEASURE: ${rows.length} row(s) were read from the ` +
+        `pane and ${rows.length === 0 ? 'none exist' : 'not one carries a phx-value-id'}, so there is ` +
+        `no newest paper to resolve the default to.\n\n` +
+        `  REFUSING TO FALL BACK. The next thing on screen is the root pane, whose rows are document ` +
+        `TYPES rather than documents; measuring it would produce a full matrix of numbers about the ` +
+        `wrong surface and label them a desk fact. A pane with no papers is an environment fact, and ` +
+        `it is reported as one.\n\n` +
+        `  Pass --doc=<slug> to name a document, or --doc=any to take the first row that opens a ` +
+        `paper surface, or publish a Paper into this workspace.`);
+  }
+  return {
+    slug: usable[0].trim(),
+    source: 'newest-paper',
+    rows_considered: rows.length,
+    rows_with_slug: usable.length,
+  };
 }
 
 /** The nine widths, DESCENDING (D80). 500 is the floor this matrix commits to;
@@ -404,8 +645,108 @@ const READING_COLUMN_SELECTOR = '.bp-paper-surface';
 // moment it is needed. A `ReferenceError: Cannot access 'die'` instead of a
 // named MeasureError is the same class of defect this wave is closing.
 
-class MeasureError extends Error {}
-const die = (msg) => { throw new MeasureError(msg); };
+/**
+ * THE ONE FAILURE TYPE — now carrying a RETRY CLASS.
+ *
+ * D138's "the instrument is ~80% deterministic" was never one fault. Every
+ * zero-byte exit is an INSTRUMENT FAILURE (never a desk fact), but they split
+ * cleanly in two, and the split is what an operator actually needs:
+ *
+ *   RETRYABLE — the harness lost a race it can win on the next try, and nothing
+ *     about the run's own logic is in question: a drill abort, an unreachable
+ *     [data-user-opened] marker, a provenance bracket broken by a deploy landing
+ *     under the sweep. Re-running is the CORRECT response, not a deviation.
+ *
+ *   TERMINAL — re-running changes nothing: a banned generic-serif fallback, a
+ *     non-vacuity guard failure, a malformed --out, an unparseable in-page
+ *     source, a browser that is not installed. These want a human.
+ *
+ * The class is on the ERROR, at the throw site, because that is the only place
+ * that knows. `--retries=N` (below) then acts on it, so "bounded retries on the
+ * NAMED fail-closed aborts" is a property of the instrument rather than of
+ * operator discipline — which is exactly what the wave-9 brief left unwritten
+ * and what an operator meeting a NEW abort had no authority to do.
+ */
+export class MeasureError extends Error {
+  constructor(msg, { retryable = false, abortId = null } = {}) {
+    super(msg);
+    this.retryable = retryable;
+    this.abortId = abortId;
+  }
+}
+const die = (msg, opts) => { throw new MeasureError(msg, opts); };
+
+/**
+ * THE RETRYABLE ABORTS, ENUMERATED BY NAME.
+ *
+ * The wave-9 brief authorised bounded retries on ONE abort — the
+ * `[data-user-opened]` marker — so an operator who met any of the other four
+ * had no written authority to re-run and had to deviate to do the right thing.
+ * A list of one is not a policy. This is the list, and `dieRetryable()` is the
+ * only way onto it: an id not in this table throws at the throw site, so the
+ * table cannot silently fall behind the code (see
+ * `scripts/studio-desk-instrument-reliability.test.mjs`).
+ *
+ * Every one of these writes ZERO BYTES and exits non-zero. That is by design
+ * (D138: a partial matrix is not a matrix) and it is exactly why they must be
+ * retried rather than reported: a retryable abort is the absence of a
+ * measurement, not a measurement of an absence.
+ */
+export const RETRYABLE_ABORTS = [
+  { id: 'drill',                why: 'the drill never reached a document to measure — pane/list/row race' },
+  { id: 'user-opened-marker',   why: 'real clicks never produced [data-user-opened] on .bp-doc-sidebar' },
+  { id: 'user-opened-vanished', why: 'the [data-user-opened] marker vanished mid-sweep' },
+  { id: 'element-vanished',     why: 'a required element vanished between the settle and the measure' },
+  { id: 'provenance-bracket',   why: 'the deployment moved under the sweep — a deploy, not a desk fact' },
+  // NOT thrown by this file. Playwright raises it, out of whatever `evaluate`
+  // was in flight, when the page navigates or the target closes underneath —
+  // which is what a blue/green slot rotation does to an open sweep. It reaches
+  // the retry layer as a plain Error, so `isRetryableBrowserRace()` classifies
+  // it there rather than at a throw site this file does not own.
+  { id: 'browser-race',         why: "playwright's execution context died under a navigation or restart",
+    classified_at: 'the retry layer — playwright throws it, not this file' },
+];
+const RETRYABLE_ABORT_IDS = new Set(RETRYABLE_ABORTS.map((a) => a.id));
+
+/**
+ * THE ABORT D138 CALLED "FAILURE B" AND COULD NOT DIAGNOSE, CAUGHT.
+ *
+ * Failure B was one zero-byte exit-1 whose operator suppressed stderr, so its
+ * text is gone and it has sat undiagnosed since. The N=22 characterisation
+ * sweep of 2026-09-06 reproduced it WITH stderr intact:
+ *
+ *     page.evaluate: Execution context was destroyed, most likely because of a
+ *     navigation
+ *         at waitForDeskSettled (studio-desk-measure.mjs)
+ *         at async runB29Probes
+ *
+ * It arrived in the same minutes as two `provenance-bracket` aborts reporting a
+ * LIVE SLOT CHANGE — i.e. guerrilla was rotating blue/green under the sweep. A
+ * restart navigates the open page, playwright's execution context dies inside
+ * whichever `evaluate` was in flight, and the run exits 1 having written
+ * nothing. That is the same deploy-under-the-sweep race the bracket catches at
+ * the END of a run, reaching us EARLIER, through a different door.
+ *
+ * It is not a MeasureError — playwright throws it — so without this it counts
+ * as TERMINAL and burns the run. Matching on the message is narrow on purpose:
+ * these three strings are playwright's own vocabulary for "the thing you were
+ * talking to went away", and nothing about the desk is implied by any of them.
+ */
+export function isRetryableBrowserRace(err) {
+  if (err instanceof MeasureError) return false;
+  return /Execution context was destroyed|Target (page, context or browser has been )?closed|Navigation (failed because page was closed|to .* is interrupted)/i
+    .test(String(err?.message ?? ''));
+}
+
+/** A fail-closed abort the operator is AUTHORISED to re-run, BY NAME. */
+const dieRetryable = (id, msg) => {
+  if (!RETRYABLE_ABORT_IDS.has(id)) {
+    throw new MeasureError(
+      `internal: "${id}" is not in RETRYABLE_ABORTS. An abort earns a retry by being NAMED in that ` +
+      `table, never by being thrown from a convenient helper.`);
+  }
+  throw new MeasureError(msg, { retryable: true, abortId: id });
+};
 
 /**
  * THE WIDTH BANDS, as ONE table — mirroring the pre-paint stamp in
@@ -699,6 +1040,86 @@ function withdrawVerdictsForBucketPrecondition(rec, pre) {
 }
 
 /**
+ * THE FACE-SUBSTITUTION WITHDRAWAL — D138 failure A, ruled on.
+ *
+ * WHAT FAILURE A IS. `PAGE_MEASURE` forces a face by setting
+ * `--paper-font-serif` INLINE on `.bp-paper-surface`, then reads
+ * `getComputedStyle(surface).fontFamily` back as `declared_stack`. If a
+ * LiveView patch replaces or re-attributes that node between the set and the
+ * read, the inline custom property is gone and the surface is back on the
+ * DEPLOYED stack — which is precisely what D138 recorded: `declared_stack` fell
+ * back to the native stack, `face_applied` went true -> false, and every
+ * ch-derived figure moved with it while the layout box did not move at all
+ * (`visible_content_px` and `content_px` identical to the digit). Nothing about
+ * that mechanism is width-bound: it is a race with a DOM patch, and a patch can
+ * land at any of the nine widths. See RULING 1 in this file's header for the
+ * reachability argument and the run evidence.
+ *
+ * THE RULING, IN CODE. Same shape as the bucket precondition, for the same
+ * reason: the row measured something other than what it names, so its 55ch
+ * verdicts go to NULL — never FALSE. FALSE would say "this desk fails 55ch on
+ * Georgia" when Georgia was never on screen. The measurements themselves stay:
+ * they are real observations of whatever face won. And it is NOT a `die()`: a
+ * mid-sweep abort writes zero bytes, which D138 rules an instrument failure
+ * rather than a desk fact, so killing 53 good rows to withdraw one is the wrong
+ * trade. The RUN-level gate lives in `face_override_integrity` and
+ * `--fail-on-face-substitution`.
+ */
+export function withdrawVerdictsForFaceSubstitution(rec, face) {
+  return {
+    ...rec,
+    face_applied_ok: false,
+    content_meets_55ch: null,
+    visible_meets_55ch: null,
+    verdicts_withdrawn_for_face_substitution: {
+      content_meets_55ch: rec.content_meets_55ch ?? null,
+      visible_meets_55ch: rec.visible_meets_55ch ?? null,
+      requested_primary: rec.font.requested_primary,
+      resolved_family: rec.font.resolved_family,
+      forced_to: face.override,
+      declared_stack: rec.font.declared_stack,
+      reason:
+        'FACE SUBSTITUTION. The forced face did not win: this row\'s ch is a conversion through a ' +
+        'DIFFERENT face than the one it names, so its 55ch verdicts are NULL, never FALSE (D138 ' +
+        'failure A, same rule as D171/D185 and D127 part 2). The px measurements are untouched.',
+    },
+  };
+}
+
+/** The run-level accumulator behind `--fail-on-face-substitution`. */
+export function emptyFaceIntegrity() {
+  return {
+    forced_rows_checked: 0,
+    substitutions: [],
+    clean: true,
+    ruling:
+      'A forced-face row whose face did not apply has its 55ch verdicts withdrawn to NULL and is ' +
+      'listed here. The INSTRUMENT still exits 0 (D81: it has no gate authority); a CONSUMER that ' +
+      'wants a gate passes --fail-on-face-substitution, which exits non-zero AFTER the artifact is ' +
+      'written, so the gate reds without ever producing the zero-byte run D138 forbids.',
+  };
+}
+
+export function recordFaceSubstitution(run, where, rec, face) {
+  const acc = run.face_override_integrity ??= emptyFaceIntegrity();
+  acc.forced_rows_checked += 1;
+  if (rec.font.face_applied) return rec;
+  acc.clean = false;
+  acc.substitutions.push({
+    where,
+    requested_primary: rec.font.requested_primary,
+    resolved_family: rec.font.resolved_family,
+    declared_stack: rec.font.declared_stack,
+    probe_px_per_ch: rec.ch?.probe_px_per_ch ?? null,
+  });
+  run.warnings.push(
+    `FACE SUBSTITUTION at ${where}: asked for ${rec.font.requested_primary}, resolved ` +
+    `${rec.font.resolved_family} — this row's ch is NOT the named face, so BOTH its 55ch verdicts ` +
+    `are withdrawn to NULL. The px measurements stand.`);
+  return withdrawVerdictsForFaceSubstitution(rec, face);
+}
+
+/**
  * D186 — THE OVERLAY ASSERTION, NARROWED RATHER THAN DELETED.
  *
  * D108 turned on a real desk observation: below `wide`, an explicitly-opened
@@ -745,7 +1166,7 @@ function overlayShouldBeAbsolute(rec) {
   return typeof rec.panel_px === 'number' && rec.panel_px <= OVERLAY_ABSOLUTE_MAX_PANEL_PX;
 }
 
-const STATE_IDS = STATES.map((s) => s.id);
+export const STATE_IDS = STATES.map((s) => s.id);
 const stateById = (id) => STATES.find((s) => s.id === id) ?? null;
 
 /** Which states apply at a given width, restricted to the ones this run is
@@ -838,6 +1259,85 @@ export function resolvePlaywright() {
       `Set BP_PLAYWRIGHT_FROM=<path to a package.json that can require("playwright")>.`);
 }
 
+/**
+ * THE BROWSER IS PROVENANCE TOO.
+ *
+ * `resolvePlaywright()` is careful about which *library* it loads and then the
+ * next line used to be a bare `pw.chromium.launch()` — no channel, no preflight,
+ * nothing in the artifact saying which browser produced the numbers. Two costs,
+ * both paid:
+ *
+ *   1. A FRESH HOST FAILS AS THOUGH THE INSTRUMENT WERE BROKEN. Every wave-11
+ *      verifier hit `browserType.launch: Executable doesn't exist at
+ *      ~/Library/Caches/ms-playwright/chromium_headless_shell-1200/…`, which
+ *      reads as an instrument bug, not a missing prerequisite. They worked
+ *      around it by forcing `channel: 'chrome'` by hand — i.e. they measured on
+ *      a DIFFERENT browser than the committed artifacts did, and nothing in
+ *      either artifact says so.
+ *   2. A SUCCESSFUL RUN IS PROVENANCE-AMBIGUOUS. Bundled Chromium and system
+ *      Chrome are different builds with different font stacks; `ch` is a font
+ *      measurement. "Which browser" is not a detail here.
+ *
+ * So: an explicit POLICY, defaulting to the bundled browser (the reproducible
+ * one), overridable to system Chrome by name, recorded in the artifact either
+ * way, and a launch failure translated into the exact command that fixes it.
+ */
+export const BROWSER_POLICIES = {
+  bundled: {
+    channel: null,
+    what: "playwright's own pinned Chromium — the reproducible default",
+    fix: 'npx playwright install chromium',
+  },
+  chrome: {
+    channel: 'chrome',
+    what: 'the system Google Chrome install (what the wave-11 verifiers fell back to by hand)',
+    fix: 'install Google Chrome, or unset BP_DESK_BROWSER to use the bundled Chromium',
+  },
+};
+
+export function browserPolicy(env = process.env) {
+  const raw = (env.BP_DESK_BROWSER ?? 'bundled').trim();
+  const chosen = BROWSER_POLICIES[raw];
+  if (!chosen) {
+    die(`BP_DESK_BROWSER="${raw}" is not a browser policy. Known: ` +
+        Object.keys(BROWSER_POLICIES).join(', ') + '.');
+  }
+  return {
+    id: raw,
+    channel: chosen.channel,
+    what: chosen.what,
+    fix: chosen.fix,
+    source: env.BP_DESK_BROWSER ? 'BP_DESK_BROWSER' : 'default',
+  };
+}
+
+/** True for the ONE failure that is a missing prerequisite rather than a bug. */
+export function isMissingBrowserError(err) {
+  const m = String(err?.message ?? err ?? '');
+  return /Executable doesn't exist|playwright install|Chromium distribution|Chrome distribution|channel .* is not installed/i.test(m);
+}
+
+/** The message a fresh verifier should get instead of a raw stack. */
+export function missingBrowserMessage(err, policy) {
+  return `NO BROWSER — nothing was measured, and this says nothing about the desk.\n\n` +
+    `  Policy "${policy.id}" (${policy.source}): ${policy.what}.\n` +
+    `  Fix it with:\n\n      ${policy.fix}\n\n` +
+    `  Or choose the other policy: BP_DESK_BROWSER=` +
+    `${Object.keys(BROWSER_POLICIES).filter((k) => k !== policy.id).join('|')}. ` +
+    `Both are recorded in the artifact, so a run always says which browser measured it.\n\n` +
+    `  Playwright said:\n    ${String(err?.message ?? err).split('\n')[0]}`;
+}
+
+/** Launch under the policy, and turn the one prerequisite failure into a fix. */
+export async function launchMeasureBrowser(pw, policy, launch = (opts) => pw.chromium.launch(opts)) {
+  try {
+    return await launch(policy.channel ? { channel: policy.channel } : {});
+  } catch (err) {
+    if (isMissingBrowserError(err)) die(missingBrowserMessage(err, policy));
+    throw err;
+  }
+}
+
 // ── provenance (queried, never assumed — D71) ────────────────────────────────
 
 function ssh(cmd) {
@@ -910,6 +1410,109 @@ export function compareProvenance(pre, post) {
         : `Combined with the SHA change above, this is a deploy.`));
   }
   return out;
+}
+
+/**
+ * THE REQUESTED REVISION (`--sha=` / `--ref=`), CHECKED BEFORE ANY ROW EXISTS.
+ *
+ * The bracket above catches the deployment moving DURING a sweep. It cannot
+ * catch the deployment having ALREADY moved before the sweep started, because
+ * a run that never says which build it wanted cannot be wrong about it. That
+ * is charter D73's whole cost: D60 accused D40 of narrating fiction because a
+ * later grep found the cited rule gone, when spd-s4 had simply replaced it in
+ * the meantime — and settling it took git archaeology instead of one line in
+ * an artifact.
+ *
+ * So a caller can now NAME the build it intends to measure. If the box serves
+ * a different one, the run REFUSES — non-zero, by name, with both SHAs — and
+ * it refuses at the PRE half of the bracket, before a browser is launched and
+ * long before a row is emitted. Nothing is written, because a matrix of the
+ * wrong build is worse than no matrix (D138: a partial matrix is not a matrix;
+ * this is its sibling — a matrix of the wrong revision is not a measurement of
+ * yours).
+ *
+ * This is the CHEAP form the task authorised and deliberately not the other
+ * one: it does not serve the ref locally, check anything out, or move the
+ * deployment. It only refuses to pretend. `--sha` with no deploy of your own
+ * is a no-op on a matching box and a loud stop on a moved one.
+ *
+ * NOT retryable. A moved deployment is not a race the harness lost; re-running
+ * it verbatim reproduces the same refusal until someone deploys or changes the
+ * requested SHA.
+ */
+export function parseShaPin(argv = process.argv, env = process.env) {
+  const ALIASES = ['--sha', '--ref'];
+  let raw = null;
+  let source = null;
+  for (const flag of ALIASES) {
+    const eq = argv.find((a) => typeof a === 'string' && a.startsWith(`${flag}=`));
+    if (eq !== undefined) { raw = eq.slice(flag.length + 1); source = `${flag}=`; break; }
+    const i = argv.indexOf(flag);
+    if (i !== -1) {
+      raw = argv[i + 1];
+      if (raw === undefined) die(`${flag} was passed with no value — name the commit the box must be serving, e.g. ${flag}=5aad3b917`);
+      if (typeof raw === 'string' && raw.startsWith('-')) {
+        die(`${flag} was followed by \`${raw}\`, which is another flag, not a SHA. Pass the commit: ${flag}=<sha>`);
+      }
+      source = flag;
+      break;
+    }
+  }
+  if (raw === null || raw === undefined) {
+    // Env form, for the same reason BP_DESK_DOC exists: a sweep driven from a
+    // script that already knows the SHA should not have to rewrite its argv.
+    const fromEnv = env.BP_DESK_SHA;
+    if (fromEnv === undefined || String(fromEnv).trim() === '') return null;
+    raw = fromEnv;
+    source = 'BP_DESK_SHA';
+  }
+  const requested = String(raw).trim();
+  if (!requested) die(`${source} was passed with an empty value — name the commit the box must be serving, or omit the flag`);
+  // Abbreviated is fine (that is what a human copies out of `git log`), but it
+  // must be a SHA. A branch name would be checked against a 40-hex string and
+  // could only ever refuse, which is a refusal about the ARGUMENT dressed up as
+  // a refusal about the deployment.
+  if (!/^[0-9a-f]{7,40}$/i.test(requested)) {
+    die(`${source} must be a hex commit SHA, 7 to 40 characters (got ${JSON.stringify(requested)}). ` +
+        `A branch or tag name is NOT accepted: the box reports \`git rev-parse HEAD\`, a 40-hex string, so a ` +
+        `name could only ever mismatch — a refusal about your argument wearing the costume of a refusal about ` +
+        `the deployment. Resolve it yourself: ${source.replace(/[= ]$/, '')}=$(git rev-parse <ref>).`);
+  }
+  return { requested: requested.toLowerCase(), source };
+}
+
+/**
+ * THE COMPARISON. Pure, so it can be exercised without ssh, a browser or a box.
+ *
+ * The served SHA is whatever `git rev-parse HEAD` printed on the box: 40 hex
+ * characters. The requested one is whatever a human pasted, commonly the short
+ * form. So a PREFIX match counts, in the one direction that is sound — the
+ * requested value is a prefix of the served one. (The mirror direction is
+ * accepted too, for a hypothetical abbreviated served read, and it costs one
+ * clause.) `startsWith` on the shorter of the two, never a substring test:
+ * `includes` would match a SHA in the middle of another and that is not a
+ * revision identity.
+ */
+export function shaPinMatches(requested, served) {
+  const a = String(requested ?? '').trim().toLowerCase();
+  const b = String(served ?? '').trim().toLowerCase();
+  if (!a || !b) return false;
+  return a.length <= b.length ? b.startsWith(a) : a.startsWith(b);
+}
+
+/** Refuse, by name, before anything is measured. No-op when nothing was pinned. */
+export function assertServedShaPinned(pin, served) {
+  if (!pin) return;
+  if (shaPinMatches(pin.requested, served)) return;
+  die(
+    `SERVED SHA IS NOT THE PINNED SHA — nothing was measured, and this says nothing about the desk.\n\n` +
+    `    requested (${pin.source})  ${pin.requested}\n` +
+    `    served    (ssh git rev-parse HEAD)  ${served || '<empty>'}\n\n` +
+    `  The box is serving a different build than the one this run was pinned to, so every row it could ` +
+    `produce would carry your intent and the box's code and nothing would say they disagreed. That is the ` +
+    `confound charter D73 paid for in git archaeology, and it is refused here rather than recorded there.\n\n` +
+    `  This is NOT a retryable abort: re-running reproduces it exactly until the deployment moves. Either ` +
+    `deploy ${pin.requested} to the box, or drop the pin and let the run measure ${served} on the record.`);
 }
 
 // ── auth (D24e login-ticket flow) ────────────────────────────────────────────
@@ -1063,17 +1666,70 @@ async (faceOverride) => {
   else surface.style.removeProperty('min-inline-size');
   const floorBinds = Math.abs(widthWithFloor - widthWithoutFloor) > 0.5;
 
+  // The container the floor's own gate asks about. The served rule is
+  //
+  //     .editor-with-preview .editor-panel-main.bp-paper-body {
+  //       container-type: inline-size; container-name: content; }
+  //     @container content (min-width: 720px) {
+  //       .editor-panel .bp-paper-surface {
+  //         min-inline-size: calc(55ch + 2 * var(--paper-gutter)); } }
+  //
+  // so where that gate is CLOSED the declaration never applies, min-inline-size
+  // resolves to 0px, and there is no in-floor ch to derive OR to diverge. That
+  // is not a quiet null: it is the reason two thirds of this matrix cannot
+  // produce a drift warning at all, and it is recorded rather than inferred.
+  // 'containerName' is READ from the computed style — if the container ever
+  // stops being declared here, the artifact says so instead of the reader
+  // guessing from a zero.
+  const containerCs = body ? getComputedStyle(body) : null;
+  const containerName = containerCs ? String(containerCs.containerName || '') : null;
+  // 'container-type: inline-size' queries the CONTENT box, so subtract the
+  // container's own padding from clientWidth (which includes it).
+  const containerContentPx = (body && containerCs)
+    ? body.clientWidth - px(containerCs.paddingLeft) - px(containerCs.paddingRight)
+    : null;
+
   // The browser's own in-floor ch, derived from the resolved floor. We only
-  // ever see the USED px value, never the authored formula, so the formula is
-  // an ASSUMPTION and is named as one. spd-w5-measure-lever-moves is chartered
-  // to change it (to calc(55ch + 2 * var(--paper-gutter)), or to retire it), at
-  // which point this derivation goes quietly wrong — so the divergence against
-  // the probe is checked below and a drift beyond tolerance is REPORTED, not
-  // absorbed. Printed ALONGSIDE the probe, never instead of it.
+  // ever see the USED px value, never the authored formula — but every INPUT
+  // to that formula is computable, so nothing here is assumed:
+  //
+  //   55            the multiplier, verbatim from the served declaration
+  //   2 * gutter    READ from the surface's computed '--paper-gutter'
+  //
+  // The addend was a hardcoded 80 until spd-w8-followup. 80 is '2 * 40px', and
+  // '--paper-gutter' is redeclared BY VIEWPORT @media — 40px, then 24px below
+  // 767px, then 16px below 479px (root.html.heex) — so 80 was right only in the
+  // widest band. In the 24px band the addend is 48, and assuming 80 subtracts
+  // 32px too much: at viewport 764 / user-opened, the one cell of this matrix
+  // where the 24px gutter and an OPEN container gate coexist, that manufactured
+  // the instrument's only three drift warnings (-5.3% / -5.8% / -6.3%, i.e.
+  // exactly -32 / (55 * probe_px_per_ch), one per face). The derivation now
+  // reads the token, so the same arithmetic holds in all three bands and a
+  // future gutter change cannot rot it again.
   const FLOOR_CH_MULTIPLIER = 55;
-  const FLOOR_ADDEND_PX = 80;
+  // The served gate: @container content (min-width: 720px). Kept beside the
+  // multiplier so the whole floor declaration is one readable block.
+  const FLOOR_CONTAINER_GATE_PX = 720;
+  const gutterTokenRaw = String(sCs.getPropertyValue('--paper-gutter') || '').trim();
+  const gutterTokenPx = gutterTokenRaw ? px(gutterTokenRaw) : null;
+  // Fallback is the READ padding (D72/D78), never a literal: the surface's
+  // 'padding' consumes the SAME token as the floor, so the two are the same
+  // number by construction and measure_parity_test.exs guards both halves.
+  const gutterFromToken = Number.isFinite(gutterTokenPx) && gutterTokenPx > 0;
+  const floorGutterPx = gutterFromToken ? gutterTokenPx : (padL + padR) / 2;
+  const floorGutterSource = gutterFromToken
+    ? 'READ: getComputedStyle(.bp-paper-surface).getPropertyValue("--paper-gutter")'
+    : 'READ (fallback): (paddingLeft + paddingRight) / 2 — --paper-gutter resolved empty';
+  const FLOOR_ADDEND_PX = 2 * floorGutterPx;
   const chInFloorPx = (minInlinePx && minInlinePx > FLOOR_ADDEND_PX)
     ? (minInlinePx - FLOOR_ADDEND_PX) / FLOOR_CH_MULTIPLIER
+    : null;
+  // The floor this row EXPECTS, built only from things measured in this row:
+  // the ch probe taken under this row's own forced face, and the computed
+  // gutter. Published beside the resolved px so the two can be compared
+  // without re-deriving anything by hand.
+  const expectedFloorPx = chProbePx
+    ? (FLOOR_CH_MULTIPLIER * chProbePx) + FLOOR_ADDEND_PX
     : null;
 
   // ── the content box. clientWidth excludes borders and includes padding.
@@ -1504,9 +2160,20 @@ async (faceOverride) => {
       probe_method: 'span[style="width:1ch"] inserted as a CHILD of .bp-paper-surface',
       in_floor_px_per_ch: round(chInFloorPx, 4),
       in_floor_method: minInlinePx
-        ? \`(resolved min-inline-size - \${FLOOR_ADDEND_PX}) / \${FLOOR_CH_MULTIPLIER}\`
-        : 'min-inline-size resolved to 0 — no in-floor ch to derive',
-      in_floor_formula_assumed: \`calc(\${FLOOR_CH_MULTIPLIER}ch + \${FLOOR_ADDEND_PX}px)\`,
+        ? \`(resolved min-inline-size - 2 * \${floorGutterPx}px READ gutter) / \${FLOOR_CH_MULTIPLIER}\`
+        : 'min-inline-size resolved to 0 — the @container content (min-width: 720px) gate is ' +
+          'closed here, so the floor declaration never applied and there is no in-floor ch to derive',
+      // Named '_assumed' for continuity with every committed artifact, but the
+      // only thing still assumed is the multiplier: the addend is READ.
+      in_floor_formula_assumed: \`calc(\${FLOOR_CH_MULTIPLIER}ch + 2 * var(--paper-gutter))\`,
+      in_floor_gutter_px: floorGutterPx,
+      in_floor_gutter_source: floorGutterSource,
+      in_floor_addend_px: FLOOR_ADDEND_PX,
+      expected_floor_px: round(expectedFloorPx, 3),
+      expected_floor_method: \`\${FLOOR_CH_MULTIPLIER} * probe_px_per_ch + 2 * READ --paper-gutter — \` +
+                             'every input measured in THIS row, no literal addend',
+      expected_vs_resolved_floor_delta_px:
+        (expectedFloorPx !== null && minInlinePx) ? round(minInlinePx - expectedFloorPx, 3) : null,
       divergence_pct: (chProbePx && chInFloorPx) ? round(((chInFloorPx - chProbePx) / chProbePx) * 100, 4) : null,
     },
     gutter: {
@@ -1583,6 +2250,19 @@ async (faceOverride) => {
       bind_test: 'measured, then min-inline-size forced to 0px inline and re-measured, then restored — a width change IS the bind',
       width_with_floor_px: round(widthWithFloor),
       width_without_floor_px: round(widthWithoutFloor),
+      // WHY the floor resolved to what it did. A 0px min-inline-size is not a
+      // missing measurement — it is the container gate answering NO.
+      container_query_selector: '.editor-panel-main.bp-paper-body',
+      container_name_computed: containerName,
+      container_content_box_px: round(containerContentPx, 3),
+      container_gate_min_px: FLOOR_CONTAINER_GATE_PX,
+      container_gate_open: containerContentPx === null ? null : containerContentPx >= FLOOR_CONTAINER_GATE_PX,
+      container_gate_note:
+        'the floor lives inside @container content (min-width: 720px) on the READING COLUMN\\'s own ' +
+        'box (charter D113/D114). Gate closed => the declaration never applies => min-inline-size 0 ' +
+        '=> in_floor_px_per_ch null and no divergence can be computed in this row at all.',
+      gutter_px_read: floorGutterPx,
+      gutter_px_source: floorGutterSource,
     },
     overflow: {
       scroller: '.editor-body.bp-paper-body',
@@ -1706,6 +2386,12 @@ export const PAGE_MEASURE_CHROME = /* js */ `
       probe_method: 'not taken — the ch probe is inserted as a CHILD of ' +
                     '${READING_COLUMN_SELECTOR}, which is not on screen in this state',
       in_floor_px_per_ch: null, in_floor_method: 'not derived', in_floor_formula_assumed: null,
+      in_floor_gutter_px: null,
+      in_floor_gutter_source: 'not read — no surface to read --paper-gutter from',
+      in_floor_addend_px: null,
+      expected_floor_px: null,
+      expected_floor_method: 'not derived — no ch probe and no gutter in this state',
+      expected_vs_resolved_floor_delta_px: null,
       divergence_pct: null,
     },
     gutter: { padding_left_px: null, padding_right_px: null, total_px: null,
@@ -1740,7 +2426,12 @@ export const PAGE_MEASURE_CHROME = /* js */ `
       'disease (D31/D39) with its sign flipped.',
     floor: { min_inline_size_raw: null, min_inline_size_px: null, binds: null,
              bind_test: 'not run — no surface to force min-inline-size on',
-             width_with_floor_px: null, width_without_floor_px: null },
+             width_with_floor_px: null, width_without_floor_px: null,
+             container_query_selector: '.editor-panel-main.bp-paper-body',
+             container_name_computed: null, container_content_box_px: null,
+             container_gate_min_px: 720, container_gate_open: null,
+             container_gate_note: 'not read — no reading column on screen in this state',
+             gutter_px_read: null, gutter_px_source: 'not read — no surface on screen' },
     overflow: { scroller: '.editor-body.bp-paper-body', scroll_width: null, client_width: null,
                 horizontal_scroll: null, overflow_px: null },
     panes: {
@@ -1827,11 +2518,52 @@ async function waitForDeskSettled(page, { quietMs = 800, timeoutMs = 20_000 } = 
  *  evidence about the desk, which is how a non-measurement gets recorded as a
  *  measurement. */
 const drillDie = (msg, seen) =>
-  die(`INSTRUMENT FAILURE (drill) — this says NOTHING about the desk's layout; ` +
+  dieRetryable('drill', `INSTRUMENT FAILURE (drill) — this says NOTHING about the desk's layout; ` +
       `the harness never reached a document to measure.\n\n  ${msg}` +
       (seen ? `\n\n  What the drill saw:\n${seen}` : '') +
       `\n\n  This is not a measurement and must not be recorded as one. Re-run, or pass ` +
       `--doc=<slug> to name a different document (--doc=any takes the first row that opens).`);
+
+/** How the drill counts pane columns. A template string for the same reason
+ *  PAGE_MEASURE is one — it is evaluated IN THE PAGE. */
+export const PANE_COUNT = /* js */ `() => document.querySelectorAll('.pane-column').length`;
+
+/**
+ * EDGE-TRIGGERED, because quiescence is not arrival.
+ *
+ * `waitForDeskSettled()` is a QUIESCENCE detector: it returns as soon as its
+ * structural signature has held still for `quietMs` (800ms) with the socket
+ * connected. It structurally cannot tell "settled because the patch finished"
+ * from "settled because the patch has not started" — and the pre-click desk is
+ * already, trivially, still. Measured live against guerrilla on 2026-09-06 at
+ * served sha 9a837ed38: after a real click on the "Papers" type row the second
+ * `.pane-column` appears between t+1000ms and t+2000ms, i.e. AFTER the 800ms
+ * quiet window has already fired. `openPapersPane` then read
+ * `.pane-column.last()` and got the ROOT pane back.
+ *
+ * That is charter D138's "failure C" and its stderr has been misread ever
+ * since: the drill reported `4 rows rendered. First 8 slugs: paper / sheet /
+ * plugin-doclist-75745103 / rest` and the ledger row calls that "a PARTIALLY-
+ * LOADED Papers list". It is not. Those five strings are DOCUMENT TYPES — the
+ * root pane's own rows, which reach `[phx-click="select"]` through the `_`
+ * catch-all `pane_item` in `studio_live/components.ex:1485`, exactly like a
+ * document row does. A Papers list has 100 rows, never 4. The drill was
+ * reading the wrong pane and naming the right one.
+ *
+ * So: read the count BEFORE the click and wait for it to GROW. `now` is
+ * injectable so the wait can be proven without a browser — see
+ * `scripts/studio-desk-drill-pane.test.mjs`.
+ */
+export async function waitForNewPane(page, before, opts = {}) {
+  const { timeoutMs = 20_000, pollMs = 100, now = () => Date.now() } = opts;
+  const started = now();
+  for (;;) {
+    const panes = await page.evaluate((src) => eval(`(${src})`)(), PANE_COUNT);
+    if (panes > before) return { grew: true, panes, waited_ms: now() - started };
+    if (now() - started >= timeoutMs) return { grew: false, panes, waited_ms: now() - started };
+    await page.waitForTimeout(pollMs);
+  }
+}
 
 /** Open the Papers list pane. Returns the pane locator. */
 async function openPapersPane(page, base) {
@@ -1842,7 +2574,15 @@ async function openPapersPane(page, base) {
   if (await typeItem.count() === 0) {
     drillDie('the root desk rendered no "Papers" entry to drill into.');
   }
+  const panesBefore = await page.evaluate((src) => eval(`(${src})`)(), PANE_COUNT);
   await typeItem.click();
+  const grown = await waitForNewPane(page, panesBefore);
+  if (!grown.grew) {
+    drillDie(
+      `clicking the "Papers" type row never added a pane column — ${panesBefore} before the click, ` +
+      `${grown.panes} still after ${grown.waited_ms}ms. Every row the drill could have read would ` +
+      `have come from the ROOT pane, whose rows are document TYPES and not documents.`);
+  }
   await waitForDeskSettled(page);
   return page.locator('.pane-column').last();
 }
@@ -1872,13 +2612,56 @@ async function tryOpenRow(page, row, { timeoutMs = 20_000 } = {}) {
  *  this very script. A named target is matched on `[phx-value-id]` — the slug
  *  the row carries — and the landed URL is asserted to carry that same slug, so
  *  the matrix cannot claim a document it did not measure. */
-async function drillToDocument(page, base, target) {
+async function drillToDocument(page, base, requestedTarget) {
   const pane = await openPapersPane(page, base);
   const rows = pane.locator('[phx-click="select"]');
   const rowCount = await rows.count();
+
+  // THE DEFAULT RESOLVES HERE, INSIDE THE PANE THE DRILL PROVED IT ENTERED, and
+  // never from a committed slug (task-7f44670cf2d7bd53 — see resolveDocTarget). It runs BEFORE
+  // the generic empty-list check because `resolveNewestPaperSlug` owns that case
+  // for this mode and says the one thing the generic message cannot: that the
+  // refusal is a refusal to fall back to the root pane.
+  //
+  // Once resolved it becomes an ordinary NAMED target, so the newest row goes
+  // through the same re-locate-per-attempt click, the same three-attempt budget
+  // and — the part that matters — the same assertion that the landed URL
+  // carries the slug we claim to have measured.
+  let target = requestedTarget;
+  let newest = null;
+  if (target.mode === 'newest') {
+    const slugs = await rows.evaluateAll((els) => els.map((e) => e.getAttribute('phx-value-id')));
+    newest = resolveNewestPaperSlug(slugs);
+    target = {
+      mode: 'named',
+      slug: newest.slug,
+      source: target.source,
+      resolution: 'newest-paper',
+      requested_mode: 'newest',
+    };
+  }
+
   if (rowCount === 0) {
     drillDie('the Papers list pane rendered no [phx-click="select"] document row — nothing to open.');
   }
+
+  /** WHY THE RUN CARRIES THIS AND NOT JUST A SLUG. "Which document" and "why was
+   *  it reachable" are different questions, and only the second one survives the
+   *  document itself ageing off the window. Recorded next to served_sha /
+   *  requested_sha in the flattened artifact. */
+  const docProvenance = () => ({
+    measured_doc_source: target.resolution,
+    measured_doc_requested_from: requestedTarget.source,
+    measured_doc_reachability: newest
+      ? `RESOLVED AT RUN TIME: the newest of the ${newest.rows_considered} row(s) the Papers pane ` +
+        `rendered in this very run (${newest.rows_with_slug} carried a phx-value-id), read seconds ` +
+        `before the click. It cannot have aged off a window it was just read from.`
+      : requestedTarget.mode === 'any'
+        ? `--doc=any: the first of the ${rowCount} rendered rows that opened a paper surface.`
+        : `NAMED explicitly via ${requestedTarget.source} and found among the ${rowCount} rows this ` +
+          `run's Papers pane rendered; the landed URL was asserted to carry the same slug.`,
+    newest_resolution: newest,
+  });
 
   // `select` is the document-open event. The pane header's own buttons
   // (airdrop-open / access-open / new-document) are NOT it — clicking those
@@ -1892,12 +2675,23 @@ async function drillToDocument(page, base, target) {
       if (await named.count() === 0) {
         const visible = await rows.evaluateAll(
           (els) => els.slice(0, 8).map((e) => e.getAttribute('phx-value-id')));
+        // WHICH pane produced these rows is part of the evidence. Without it,
+        // a root-pane read (5 type rows) and a real Papers list (100 document
+        // rows) print the same sentence — which is how D138's "failure C" was
+        // diagnosed as a partially-loaded list for seven weeks.
+        const paneCount = await page.evaluate((src) => eval(`(${src})`)(), PANE_COUNT);
         drillDie(
           `the Papers list has no row with phx-value-id="${target.slug}" ` +
           `(target came from the ${target.source}).`,
-          `    ${rowCount} rows rendered. First 8 slugs:\n` +
+          `    ${paneCount} pane column(s) on screen; the last one rendered ${rowCount} ` +
+          `[phx-click="select"] rows. First 8 phx-value-ids:\n` +
           visible.map((s) => `      ${s}`).join('\n') +
-          `\n    If the target has simply aged off the list, pass --doc=<slug> with one of these.`);
+          `\n    A Papers list is ~100 rows, newest first. A handful of rows named after ` +
+          `\n    document TYPES (paper / sheet / rest / ...) means this is the ROOT pane and the ` +
+          `\n    drill never entered the list at all.` +
+          `\n    If the target has simply aged off the 100-row window, pass --doc=<slug> with one of ` +
+          `\n    these — or --doc=newest (the DEFAULT since task-7f44670cf2d7bd53), which resolves the newest row of ` +
+          `\n    this same list and so cannot age off it.`);
       }
       const landed = await tryOpenRow(page, named);
       if (landed) {
@@ -1907,7 +2701,13 @@ async function drillToDocument(page, base, target) {
             `clicked the row for "${target.slug}" but landed on "${slugInUrl}" (${landed}). ` +
             `Refusing to label this run with a document it did not open.`);
         }
-        return { path: landed, slug: slugInUrl, attempts: attempt, rows_in_list: rowCount };
+        return {
+          path: landed,
+          slug: slugInUrl,
+          attempts: attempt,
+          rows_in_list: rowCount,
+          ...docProvenance(),
+        };
       }
       attempts.push(`attempt ${attempt}: clicked the row, no .bp-paper-surface appeared`);
       await page.goto(`${base}/w/default/p/default/d/production/studio`, { waitUntil: 'domcontentloaded' });
@@ -1935,6 +2735,7 @@ async function drillToDocument(page, base, target) {
         attempts: i + 1,
         rows_in_list: rowCount,
         skipped_rows: skipped,
+        ...docProvenance(),
       };
     }
     skipped.push(slug ?? '(no phx-value-id)');
@@ -2032,7 +2833,7 @@ export const OPEN_CONTROLS = [
 // only way to see the D178 fix hold. `scripts/measurements/open-leg-repro.mjs`.
 export async function openInspectorByRealClick(page, { maxClicks = 3, fatal = true } = {}) {
   const unreachable = (reason) => {
-    if (fatal) die(reason);
+    if (fatal) dieRetryable('user-opened-marker', reason);
     return { reached: false, skip_reason: reason };
   };
 
@@ -2667,9 +3468,15 @@ async function main() {
   // PRE half of the bracket (D97). The POST half runs after the sweep and a
   // difference fails the run — see compareProvenance().
   const provenance = readProvenance();
+  // THE PIN, CHECKED HERE AND NOWHERE LATER: this is the earliest point at
+  // which the served SHA is known, and it is still before the browser launches,
+  // before the ticket is minted and long before a row exists. A refusal from
+  // here writes zero bytes, which is the whole point.
+  assertServedShaPinned(SHA_PIN, provenance.served_sha);
   const srv = readGuerrillaServer();
 
-  const browser = await pw.chromium.launch();
+  const browserPolicyChosen = browserPolicy();
+  const browser = await launchMeasureBrowser(pw, browserPolicyChosen);
   const ctx = await browser.newContext({ viewport: { width: WIDTHS[0], height: 900 } });
   const page = await ctx.newPage();
 
@@ -2679,6 +3486,13 @@ async function main() {
     contract: 'prints a matrix, or exits non-zero naming the failed selector — no gate authority',
     playwright_version: pwVersion,
     playwright_resolved_from: resolvedFrom,
+    // WHICH BROWSER MEASURED THIS. `ch` is a font measurement and bundled
+    // Chromium is not system Chrome, so a run that does not name its browser
+    // cannot be compared to one that does.
+    browser_policy: browserPolicyChosen.id,
+    browser_policy_source: browserPolicyChosen.source,
+    browser_channel: browserPolicyChosen.channel,
+    browser_version: browser.version(),
     node_version: process.version,
     platform: `${os.platform()} ${os.arch()}`,
     platform_note:
@@ -2726,9 +3540,21 @@ async function main() {
     doc_target_note:
       'The drill targets a NAMED document (D97). It used to click the first row of a Papers list ' +
       'that concurrent waves rewrite live, which made a failed run indistinguishable from a desk ' +
-      'fact. `--doc=<slug>` / BP_DESK_DOC override the committed default; `--doc=any` restores ' +
-      'first-row behaviour, skipping rows that open no paper surface.',
+      'fact. There is no longer a COMMITTED default slug: one aged off the newest-100 window and ' +
+      'made the bare invocation abort 1 of 1 (task-7f44670cf2d7bd53), and any replacement literal would age off ' +
+      'on the same clock. The default `newest` resolves the newest row of the Papers pane the ' +
+      'drill just opened, then proceeds as a named target — same click, same assertion that the ' +
+      'landed URL carries the slug — and an EMPTY pane refuses by name rather than falling back ' +
+      'to the root pane. `--doc=<slug>` / BP_DESK_DOC name a document; `--doc=any` restores ' +
+      'first-row behaviour, skipping rows that open no paper surface. Which document was chosen, ' +
+      'by which source, and why it was reachable are in measured_doc / measured_doc_source / ' +
+      'measured_doc_reachability.',
     provenance,
+    // What the CALLER asked to measure, null when unpinned. `served_sha` says
+    // what was measured; this says what was intended, so a reader never has to
+    // reconstruct the difference from prose (D73).
+    requested_sha: SHA_PIN?.requested ?? null,
+    requested_sha_source: SHA_PIN?.source ?? null,
     provenance_note:
       'BRACKETED (D97): `provenance` is the PRE-sweep read and `provenance_post` the POST-sweep ' +
       'read of the same two facts. `provenance_bracket.matched` false means the run FAILED — a ' +
@@ -2759,6 +3585,7 @@ async function main() {
     // absent precondition and a satisfied one must never read the same.
     bucket_precondition: emptyBucketPrecondition(),
     warnings: [],
+    face_override_integrity: emptyFaceIntegrity(),
     rows: [],
   };
 
@@ -2780,7 +3607,24 @@ async function main() {
     const docPath = drill.path;
     run.drill = drill;
     run.measured_url = srv.base + docPath;
+    // `measured_document` is the long-standing name and stays, byte-identical,
+    // for every reader of a committed run in scripts/measurements/.
+    // `measured_doc` is its short form and carries the two fields that make it
+    // auditable: WHICH source chose it, and WHY that document was reachable.
     run.measured_document = drill.slug;
+    run.measured_doc = drill.slug;
+    run.measured_doc_source = drill.measured_doc_source ?? null;
+    run.measured_doc_reachability = drill.measured_doc_reachability ?? null;
+
+    // A BREADCRUMB ON STDERR, THE MOMENT IT IS KNOWN. The run JSON is written at
+    // the very end, so a failure in any later stage (the b29 probe navigates
+    // again, and the provenance bracket can still refuse) took the answer to
+    // "which document did it measure" down with it — the exact question a
+    // resolved default has to keep answering. stderr, never stdout: `--json`
+    // promises stdout is nothing but the matrix.
+    process.stderr.write(
+      `\n  [drill] measured_doc ${run.measured_doc} · source ${run.measured_doc_source}\n` +
+      `          ${run.measured_doc_reachability}\n\n`);
 
     /** One measurement against whatever is currently on screen, under one forced
      *  face. Shared by the sweep, the round trip and the positive control, so
@@ -2852,7 +3696,7 @@ async function main() {
           rec = withdrawVerdictsForBucketPrecondition(rec, bucketPre);
         }
         if (rec.fatal) {
-          die(`a required element vanished mid-measure at viewport ${width}px, state "${stateId}", ` +
+          dieRetryable('element-vanished', `a required element vanished mid-measure at viewport ${width}px, state "${stateId}", ` +
               `face ${face.id}: ${JSON.stringify(rec.counts)}`);
         }
         // A no-reading-column row has no ch, no face resolution, no hit-test and
@@ -2893,26 +3737,35 @@ async function main() {
               `inflates ch and would hand the next verifier a free overturn. Availability: ` +
               JSON.stringify(rec.font.face_available));
         }
-        // The in-floor ch derivation ASSUMES the authored formula is
-        // `calc(55ch + 80px)`; the browser only ever exposes the used px. The
-        // two ch readings agree to ~0.107% today (D83). A drift past 2% means
-        // the assumption has rotted — almost certainly because the floor's
-        // formula changed (spd-w5-measure-lever-moves is chartered to change
-        // it) — so it is REPORTED rather than silently published as a number.
+        // The in-floor ch derivation takes the served formula's SHAPE
+        // (`calc(55ch + 2 * var(--paper-gutter))`) and reads its gutter from
+        // computed style; the browser only ever exposes the used px. The two ch
+        // readings agree to ~0.107% today (D83). Until spd-w8-followup the
+        // addend was the literal 80, which is `2 * 40px` — right in the widest
+        // gutter band and 32px wrong in the 24px band, so this check fired at
+        // the single cell (764 / user-opened) where the narrow gutter and an
+        // open container gate coexist. That was the check doing its job. With
+        // the gutter READ, a drift past 2% now means the MULTIPLIER moved off
+        // 55 or the formula's shape changed — reported, never absorbed.
         const drift = rec.ch.divergence_pct;
         if (drift !== null && Math.abs(drift) > 2) {
           run.warnings.push(
             `viewport ${width}px / ${stateId} / face "${face.id}": in-floor ch diverges from the ` +
-            `probe by ${drift}% (assumed formula ${rec.ch.in_floor_formula_assumed}, resolved ` +
-            `${rec.floor.min_inline_size_raw}). The floor's authored formula has probably changed — ` +
-            `\`in_floor_px_per_ch\` in these rows is derived from a stale assumption. The probe ch ` +
-            `(and every ch in the table above) is unaffected.`);
+            `probe by ${drift}% (formula ${rec.ch.in_floor_formula_assumed}, gutter read as ` +
+            `${rec.ch.in_floor_gutter_px}px so addend ${rec.ch.in_floor_addend_px}px, resolved ` +
+            `${rec.floor.min_inline_size_raw}, expected ${rec.ch.expected_floor_px}px). The floor's ` +
+            `authored formula has probably changed SHAPE (the gutter is read, so a gutter change ` +
+            `alone cannot cause this) — \`in_floor_px_per_ch\` in these rows is derived from a stale ` +
+            `assumption. The probe ch (and every ch in the table above) is unaffected.`);
         }
-        if (face.override && !rec.font.face_applied) {
-          run.warnings.push(
-            `viewport ${width}px / ${stateId} / face "${face.id}": asked for ` +
-            `${rec.font.requested_primary}, resolved ${rec.font.resolved_family} — ` +
-            `this row's ch is NOT the named face.`);
+        // D138 FAILURE A, RULED ON. This used to be a bare warning and the row
+        // was published with its verdicts intact — i.e. a ch computed through a
+        // face nobody asked for could carry a 55ch FALSE into a ruling cell.
+        // Now the verdicts are withdrawn to NULL and the run carries a
+        // machine-readable integrity block. See
+        // `withdrawVerdictsForFaceSubstitution` and RULING 1 in the header.
+        if (face.override) {
+          rec = recordFaceSubstitution(run, `viewport ${width}px / ${stateId} / face "${face.id}"`, rec, face);
         }
 
         // ── THE NON-VACUITY GUARD IS FATAL (D31/D39/D112). Where the scrim
@@ -3046,7 +3899,7 @@ async function main() {
       const stillOpen = await page.evaluate(() =>
         !!document.querySelector('.bp-doc-sidebar[data-user-opened]'));
       if (!stillOpen) {
-        die(`INSTRUMENT FAILURE — the [data-user-opened] marker vanished at viewport ${width}px, ` +
+        dieRetryable('user-opened-vanished', `INSTRUMENT FAILURE — the [data-user-opened] marker vanished at viewport ${width}px, ` +
             `between rows of the user-opened sweep. Every row after this would be a DEFAULT-state ` +
             `measurement labelled "user-opened", which is the exact class of mislabelling this ` +
             `axis was added to prevent. This says nothing about the desk's layout.`);
@@ -3137,7 +3990,7 @@ async function main() {
     method: 'served SHA + active slot read over ssh immediately before the browser launched and immediately after the sweep',
   };
   if (mismatches.length) {
-    die(`PROVENANCE BRACKET FAILED — the deployment moved UNDER the sweep, so all ` +
+    dieRetryable('provenance-bracket', `PROVENANCE BRACKET FAILED — the deployment moved UNDER the sweep, so all ` +
         `${run.rows.length} records carry a provenance stamp this run cannot support. ` +
         `Discarding the matrix.\n\n` +
         mismatches.map((m) => `  - ${m}`).join('\n\n') +
@@ -3185,6 +4038,7 @@ async function main() {
   if (OUT_PATH) writeRunArtifact(run, OUT_PATH);
 
   process.stdout.write(JSON.stringify(run, null, 2) + '\n');
+  return run;
 }
 
 /** Persist the COMPLETE run — every row plus a flattened run-level provenance
@@ -3264,6 +4118,7 @@ function writeRunArtifact(run, outPath) {
         }
       : null,
     served_sha: run.provenance?.served_sha ?? null,
+    requested_sha: run.requested_sha ?? null,
     slot_active: run.provenance?.slot_active ?? null,
     provenance_pre_read_at: run.provenance?.read_at ?? null,
     provenance_post_read_at: run.provenance_post?.read_at ?? null,
@@ -3271,10 +4126,14 @@ function writeRunArtifact(run, outPath) {
     sweep_direction: run.sweep_direction,
     doc_target: run.doc_target,
     measured_document: run.measured_document ?? null,
+    measured_doc: run.measured_doc ?? run.measured_document ?? null,
+    measured_doc_source: run.measured_doc_source ?? null,
+    measured_doc_reachability: run.measured_doc_reachability ?? null,
     drill_attempts: run.drill?.attempts ?? null,
     drill_rows_in_list: run.drill?.rows_in_list ?? null,
     non_vacuity_guard: summariseNonVacuity(run),
     warnings: run.warnings,
+    face_override_integrity: run.face_override_integrity,
     unsettled_rows: run.rows.filter((r) => !r.settle?.settled).length,
   };
 
@@ -3438,7 +4297,7 @@ export function printTable(run) {
   L('  STUDIO DESK — LIVE MEASURE MATRIX');
   L('  ' + '='.repeat(118));
   L(`  target        ${run.target}`);
-  L(`  document      ${run.measured_document}`);
+  L(`  document      ${run.measured_document}   (${run.measured_doc_source ?? 'source not recorded'})`);
   L(`  landed as     ${run.landed_authenticated_url}`);
   L(`  measured url  ${run.measured_url}`);
   L(`  served SHA    ${run.provenance.served_sha}   (read live over ssh)`);
@@ -3829,15 +4688,95 @@ if (INVOKED_DIRECTLY && (process.argv.includes('--help') || process.argv.include
   process.exit(0);
 }
 
+/**
+ * BOUNDED RETRIES, ON THE NAMED ABORTS ONLY (RULING 2, this file's header).
+ *
+ * `--retries=N` / `BP_DESK_RETRIES`. Default 2, so the default invocation makes
+ * at most three attempts. A TERMINAL failure is never retried, at any N: it
+ * would burn two more authenticated sweeps to reprint the same sentence.
+ *
+ * Every failed attempt's stderr is written BEFORE the next one starts. That is
+ * the whole discipline D138 lost — failure B has no diagnosis today for exactly
+ * one reason, that its operator suppressed stderr and the text is gone — and a
+ * retry loop that swallows the attempts it retried would rebuild that hole
+ * inside the instrument, where nobody would even think to look for it.
+ */
+export function parseRetries(argv = process.argv, env = process.env) {
+  const flag = argv.find((a) => typeof a === 'string' && a.startsWith('--retries='));
+  const raw = flag ? flag.slice('--retries='.length) : (env.BP_DESK_RETRIES ?? '2');
+  const n = Number(raw);
+  if (!/^\d+$/.test(String(raw).trim()) || !Number.isInteger(n) || n < 0 || n > 10) {
+    die(`--retries must be a whole number 0..10 (got ${JSON.stringify(raw)}). 0 means "one attempt, ` +
+        `no retries" — the pre-2026-09 behaviour.`);
+  }
+  return n;
+}
+
+export async function runWithRetries(attemptFn, retries, { onRetry = () => {} } = {}) {
+  const attempts = [];
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const value = await attemptFn(attempt);
+      return { value, attempts, attempt };
+    } catch (err) {
+      const browserRace = isRetryableBrowserRace(err);
+      const retryable = browserRace || (err instanceof MeasureError && err.retryable === true);
+      const abortId = browserRace ? 'browser-race' : (err?.abortId ?? null);
+      attempts.push({ attempt, retryable, abort_id: abortId, message: err?.message ?? String(err) });
+      if (!retryable || attempt > retries) {
+        err.attempts = attempts;
+        throw err;
+      }
+      onRetry({ attempt, retries, abort_id: abortId, message: err.message });
+    }
+  }
+}
+
 if (INVOKED_DIRECTLY) {
+  const FAIL_ON_FACE_SUBSTITUTION = process.argv.includes('--fail-on-face-substitution');
   // `resolveOutPath` runs INSIDE this chain so a malformed `--out` lands in the
   // same handler as every other MeasureError — one failure shape, by name.
   Promise.resolve()
-    .then(() => { OUT_PATH = resolveOutPath(); })
-    .then(main)
+    .then(() => { OUT_PATH = resolveOutPath(); SHA_PIN = parseShaPin(); })
+    .then(() => runWithRetries(main, parseRetries(), {
+      onRetry: ({ attempt, retries, abort_id, message }) => {
+        process.stderr.write(
+          `\nATTEMPT ${attempt} FAILED — retryable abort "${abort_id}". Its stderr, in full, ` +
+          `because a swallowed one is how D138's failure B lost its diagnosis:\n\n${message}\n\n` +
+          `  Retrying (attempt ${attempt + 1} of ${retries + 1}). ` +
+          `Pass --retries=0 to make the first abort final.\n\n`);
+      },
+    }))
+    .then(({ value: run, attempt }) => {
+      if (attempt > 1) {
+        process.stderr.write(
+          `\n  [retry] this matrix came from attempt ${attempt}. The failed attempts' stderr is above ` +
+          `and is part of this run's record.\n`);
+      }
+      const integrity = run?.face_override_integrity;
+      if (FAIL_ON_FACE_SUBSTITUTION && integrity && !integrity.clean) {
+        process.stderr.write(
+          `\nFACE SUBSTITUTION — ${integrity.substitutions.length} of ${integrity.forced_rows_checked} ` +
+          `forced-face row(s) measured a face nobody asked for, and --fail-on-face-substitution was ` +
+          `passed.\n\n` +
+          integrity.substitutions.map((x) =>
+            `  - ${x.where}: asked ${x.requested_primary}, got ${x.resolved_family}`).join('\n') +
+          `\n\n  Their 55ch verdicts are already NULL in the artifact, which HAS been written — this ` +
+          `exit is a gate signal, not a lost run. Re-run; if it recurs at the same cell it is not a ` +
+          `race.\n\n`);
+        process.exit(2);
+      }
+    })
     .catch((err) => {
       process.stderr.write('\nMEASURE FAILED — no matrix was produced.\n\n');
       process.stderr.write((err instanceof MeasureError ? err.message : (err?.stack || String(err))) + '\n\n');
+      if ((err instanceof MeasureError && err.retryable) || isRetryableBrowserRace(err)) {
+        process.stderr.write(
+          `  RETRYABLE ABORT "${err.abortId ?? 'browser-race'}" — this is a race the harness lost, not a fact about the ` +
+          `desk, and re-running is the CORRECT response rather than a deviation ` +
+          `(${(err.attempts || []).length} attempt(s) made). The full list of retryable aborts is ` +
+          `RETRYABLE_ABORTS in this file.\n\n`);
+      }
       process.exit(1);
     });
 }

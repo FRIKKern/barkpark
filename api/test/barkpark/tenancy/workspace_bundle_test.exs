@@ -1417,7 +1417,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       end
     end
 
-    test "unpack/1 KEEPS its binary contract, so the 25 cross-tenant refutes stay real" do
+    test "unpack/1 KEEPS its binary contract, so the 24 cross-tenant refutes stay real" do
       %{ws_a: ws_a} = seed_two_workspaces!()
       {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
       {_manifest, dumps} = Archive.unpack(bundle)
@@ -1436,7 +1436,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       fake_path_shape = Map.new(dumps, fn {t, _} -> {t, "/tmp/tables/#{t}.copy"} end)
       refute fake_path_shape["documents"] =~ ws_a.id
 
-      # THE COUNT, STATED. Twenty-five `refute dumps[…] =~ …` cross-tenant
+      # THE COUNT, STATED. Twenty-four `refute dumps[…] =~ …` cross-tenant
       # isolation tripwires ride this contract across the two bundle suites. If a
       # future change flips `unpack/1` to paths, they all go quietly green — so
       # the count is pinned here, in the same file, next to the reason.
@@ -1446,6 +1446,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       # never travels, two that neither workspace's unattributable
       # `preview_token_jti` rows do, and two more proving a dataset-scoped pull
       # neither widens nor leaks. Raised deliberately, not to make a red go away.
+      #
+      # 25 -> 24 (plugin_doc_state RULED :deny, 2026-09-02): the dev-profile
+      # cascade refute `refute dev_dumps["plugin_doc_state"] =~ ticket_marker`
+      # was RETIRED, not deleted — the table is now denied WHOLE, so the key is
+      # absent from `dumps` entirely and a subscript refute would read `nil`.
+      # Its replacement is STRICTLY STRONGER and does not ride this contract:
+      # `refute Map.has_key?(dev_dumps, "plugin_doc_state")` plus two refutes
+      # over the RAW tar bytes, which cannot go vacuous under a path flip.
+      # Lowered deliberately; no cross-tenant coverage was given up.
       counted =
         for file <- [
               "test/barkpark/tenancy/workspace_bundle_test.exs",
@@ -1458,8 +1467,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
           n -> n + 1
         end
 
-      assert counted == 25,
-             "expected 25 `refute …dumps[…]` cross-tenant tripwires riding unpack/1's " <>
+      assert counted == 24,
+             "expected 24 `refute …dumps[…]` cross-tenant tripwires riding unpack/1's " <>
                "binary contract; found #{counted}. If you added or removed one, update this " <>
                "count deliberately — do not delete the assertion."
     end

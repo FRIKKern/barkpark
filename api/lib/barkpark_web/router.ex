@@ -183,7 +183,7 @@ defmodule BarkparkWeb.Router do
 
   # SCIM 2.0 directory-sync — org-scoped bearer, no tenancy shim (era-w4).
   pipeline :scim do
-    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ScimMediaType)
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(BarkparkWeb.Plugs.RequireScimToken)
@@ -916,40 +916,6 @@ defmodule BarkparkWeb.Router do
   # RequireBearerOrSessionToken's `x-requested-with` check; bearer callers are
   # token-auth. protect_from_forgery cannot apply (no Phoenix CSRF token on API /
   # Web-Component uploads).
-  # Presented-but-UNVERIFIABLE bearer → 401, on the two FLAT media READ blocks
-  # (task-6716af864218081b for `/media`, task-79e10984bbb23734 for `/v1/media`).
-  #
-  # Both blocks ride bare `:api`, whose `OptionalToken` runs in its default
-  # fail-soft mode and SWALLOWS a revoked/expired/unknown bearer: the conn
-  # continued anonymous, `DeriveWorkspaceFromToken` had no `:api_token` to
-  # derive from, and `AssignDefaultScope` stamped the seeded Default workspace.
-  # A caller holding a decayed workspace-B token got a 200 describing ANOTHER
-  # TENANT's media library, with no signal that its credential had died.
-  #
-  # Layered as a SECOND pipeline rather than added to `:api`, deliberately:
-  # `:api` backs the whole flat `/v1` surface plus every `[:api, :require_token]`
-  # composite, and widening it would clamp far more than the two blocks that
-  # were actually traced. The opt is a no-op once `:api` has already assigned
-  # `:api_token`, so a valid bearer pays nothing.
-  #
-  # SEVERITY, held deliberately: integrity/mislead, NOT confidentiality. Both
-  # privilege gates on these controllers key on
-  # `Barkpark.Media.Storage.Access.authenticated?/1`, which is FALSE for a
-  # decayed bearer — `visibility_clamp_opts/1` pins the read to the public tier
-  # and `render_opts/3` withholds signed URLs — so a decayed bearer reads
-  # nothing an anonymous caller could not. What it closes is the SILENCE.
-  #
-  # The plug and its `strict_on_presented` opt are owned by the `fix-tenant-swap`
-  # lane (PR #14318), which mounts the same opt on `:api_grant_read`. Reused
-  # here rather than forked; see that lane's note at `:api_grant_read` for why
-  # the capability is an opt on `OptionalToken` and not a standalone plug.
-  #
-  # NOT a liveness surface: `deploy.sh`, the docker-compose healthcheck and
-  # `cloud/` all probe `/api/schemas`, never a media path (grep in the PR body).
-  pipeline :strict_bearer_media_read do
-    plug(BarkparkWeb.Plugs.OptionalToken, strict_on_presented: true)
-  end
-
   pipeline :media_mutate do
     plug(:fetch_session)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
@@ -1982,7 +1948,9 @@ defmodule BarkparkWeb.Router do
     # Discovery (RFC 7644 §4) — an IdP probes these before it provisions.
     get("/ServiceProviderConfig", ScimDiscoveryController, :service_provider_config)
     get("/ResourceTypes", ScimDiscoveryController, :resource_types)
+    get("/ResourceTypes/:id", ScimDiscoveryController, :show_resource_type)
     get("/Schemas", ScimDiscoveryController, :schemas)
+    get("/Schemas/:id", ScimDiscoveryController, :show_schema)
 
     post("/Users", ScimUsersController, :create)
     get("/Users", ScimUsersController, :index)
@@ -2703,6 +2671,23 @@ defmodule BarkparkWeb.Router do
     # 503 unless BARKPARK_SITE_DEPLOY_APPLY=1. See Barkpark.Sites.DeployRunner.
     post("/site-deploy", SiteDeployController, :trigger)
     get("/site-deploy", SiteDeployController, :status)
+
+    # Lift a workspace suspension — the operator verb `Content.Errors` and the
+    # PlaygroundReaper moduledoc both promised and nothing implemented, so
+    # `Quota.reinstate/1` had ZERO callers in lib/ and a playground suspended by
+    # its TTL could only be rescued from iex or SQL (task-7ab3d03b49606f83).
+    #
+    # THE RULING (orchestrator, binding), verbatim: "OPTION (a) —
+    # instance-operator only. The reinstate route rides the admin tier:
+    # `pipe_through([:api, :require_admin, :require_platform_operator])`, exactly
+    # like the `/v1/status/incidents` and `/v1/admin/*` groups in
+    # api/lib/barkpark_web/router.ex (~line 2077 and 2145 on origin/main). NO
+    # workspace-owner self-reinstate path. Reasoning: the playground expired BY
+    # POLICY, and a self-service loop around a TTL lets the subject of a limit
+    # lift it, which is not a permit widening — it is removing the limit. The
+    # smallest permit that fixes the actual defect (a suspended workspace being
+    # unrescuable inside its own grace window)."
+    post("/workspaces/:slug/reinstate", WorkspaceReinstateController, :create)
   end
 
   # ── Webhooks — requires admin token ────────────────────────────────────
@@ -2784,7 +2769,7 @@ defmodule BarkparkWeb.Router do
   # WHY `*` IS THE RIGHT ANSWER AND NOT A SHORTCUT (the ruling's premise, and
   # the thing a reviewer must re-check if these pipelines ever change): CORS
   # protects CREDENTIALED cross-origin reads. Neither `:api` nor
-  # `:strict_bearer_media_read` mounts `:fetch_session` or
+  # `:api_strict_bearer` mounts `:fetch_session` or
   # `OptionalSessionToken`, so `:current_user` is never assigned on these four
   # routes and `Media.Storage.Access.account_member?/1` — the ONLY
   # session-reading arm of `authenticated?/1` — is false by construction. Each
@@ -2814,8 +2799,44 @@ defmodule BarkparkWeb.Router do
   end
 
   # ── Media — upload requires token, serving is public ────────────────────
+  # Presented-but-UNVERIFIABLE bearer → 401, on the two FLAT media READ blocks:
+  # `/media` just below (task-6716af864218081b) and `/v1/media` further down
+  # (task-79e10984bbb23734). Both ride `:api_strict_bearer` — the single
+  # strict-bearer pipeline declared beside `:api` at the top of this file, also
+  # worn by the federated-search scope. It was ONE plug with one opt behind two
+  # byte-identical pipeline names until task-627ca2d7be08d22c folded the media
+  # copy (`:strict_bearer_media_read`) into it; the behaviour on these scopes is
+  # unchanged by that fold.
+  #
+  # Bare `:api` alone runs `OptionalToken` in its default fail-soft mode and
+  # SWALLOWS a revoked/expired/unknown bearer: the conn continued anonymous,
+  # `DeriveWorkspaceFromToken` had no `:api_token` to derive from, and
+  # `AssignDefaultScope` stamped the seeded Default workspace. A caller holding
+  # a decayed workspace-B token got a 200 describing ANOTHER TENANT's media
+  # library, with no signal that its credential had died.
+  #
+  # Layered as a SECOND pipeline rather than added to `:api`, deliberately:
+  # `:api` backs the whole flat `/v1` surface plus every `[:api, :require_token]`
+  # composite, and widening it would clamp far more than the blocks that were
+  # actually traced. The opt is a no-op once `:api` has already assigned
+  # `:api_token`, so a valid bearer pays nothing.
+  #
+  # SEVERITY, held deliberately: integrity/mislead, NOT confidentiality. Both
+  # privilege gates on these controllers key on
+  # `Barkpark.Media.Storage.Access.authenticated?/1`, which is FALSE for a
+  # decayed bearer — `visibility_clamp_opts/1` pins the read to the public tier
+  # and `render_opts/3` withholds signed URLs — so a decayed bearer reads
+  # nothing an anonymous caller could not. What it closes is the SILENCE.
+  #
+  # The plug and its `strict_on_presented` opt are owned by the `fix-tenant-swap`
+  # lane (PR #14318), which mounts the same opt on `:api_grant_read`. See that
+  # lane's note at `:api_grant_read` for why the capability is an opt on
+  # `OptionalToken` and not a standalone plug.
+  #
+  # NOT a liveness surface: `deploy.sh`, the docker-compose healthcheck and
+  # `cloud/` all probe `/api/schemas`, never a media path.
   scope "/media", BarkparkWeb do
-    pipe_through([:media_public_cors, :api, :strict_bearer_media_read])
+    pipe_through([:media_public_cors, :api, :api_strict_bearer])
 
     get("/renditions/:id/:preset", MediaController, :serve_rendition)
     get("/", MediaController, :index)
@@ -2875,7 +2896,7 @@ defmodule BarkparkWeb.Router do
   end
 
   scope "/v1/media", BarkparkWeb do
-    pipe_through([:api, :strict_bearer_media_read])
+    pipe_through([:api, :api_strict_bearer])
 
     get("/:dataset/search/suggestions", V1.MediaController, :search_suggestions)
     post("/:dataset/search/interaction", V1.MediaController, :search_interaction)

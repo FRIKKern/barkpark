@@ -848,7 +848,13 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 	for k, v := range body {
 		createOp[k] = v
 	}
-	status, respBody, err := sendTaskMutations(ctx, []map[string]any{{"create": createOp}})
+	// The headless twin of `bp task create` is its own INVOCATION, so it mints
+	// its own key base — and splits it PER LEG for the same reason the CLI does:
+	// both legs POST the same path, and the plug's key does not include the body,
+	// so a shared key would replay the create response and the publish would
+	// silently never run (legKey, tasks_create_idempotency.go).
+	idemBase := newIdempotencyKey()
+	status, respBody, err := sendTaskMutations(ctx, []map[string]any{{"create": createOp}}, legKey(idemBase, "create"))
 	if err != nil {
 		return mcpTextError(fmt.Sprintf("task_create: %v", err))
 	}
@@ -864,7 +870,7 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 	warnBody := respBody // fold advisories from the last successful step (publish preferred)
 	if publish {
 		pubOp := map[string]any{"publish": map[string]any{"id": bareID, "type": "task"}}
-		pStatus, pBody, pErr := sendTaskMutations(ctx, []map[string]any{pubOp})
+		pStatus, pBody, pErr := sendTaskMutations(ctx, []map[string]any{pubOp}, legKey(idemBase, "publish"))
 		if pErr != nil {
 			return mcpTextError(fmt.Sprintf("task_create: created %s but publish failed: %v%s", draftID, pErr, orphanedDraftRemedyText(draftID, bareID)))
 		}
@@ -878,7 +884,6 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 	// the server accepted — so a birth-as-considering is visible in the receipt.
 	receipt := map[string]any{
 		"id":               bareID,
-		"draft":            draftID,
 		"status":           docStatus,
 		"lifecycle_status": body["lifecycle_status"],
 		// pds-bl-task-create-draft-at-rc0 — the agent-facing twin of the CLI
@@ -888,6 +893,11 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 		"on_board": docStatus == "published",
 	}
 	if docStatus != "published" {
+		// task-ee33b6f088b35bdb — the MCP twin of the CLI receipt's defect:
+		// `draft` was emitted unconditionally, so a successful publish named a
+		// `drafts.` id the publish had just consumed (not_found on read-back).
+		// The key is present only while the draft is the document that exists.
+		receipt["draft"] = draftID
 		receipt["publish_command"] = taskPublishCommand(bareID)
 		receipt["not_on_board"] = "a draft is invisible to task_ready and cannot be claimed — publish it with publish_command, or pass publish:true to task_create"
 	}

@@ -833,14 +833,17 @@ func TestProvisionOneShot_LogsFailedCleanup(t *testing.T) {
 	r, w, _ := os.Pipe()
 	origStderr := os.Stderr
 	os.Stderr = w
+	// Drain concurrently: a darwin pipe buffers only 512 bytes (64 KiB on Linux),
+	// so reading only after the call returns deadlocks once the code under test
+	// writes more warning text than the buffer holds.
+	stderrCh := make(chan string, 1)
+	go func() { var b strings.Builder; io.Copy(&b, r); stderrCh <- b.String() }()
 
 	_, err := wp.ProvisionOneShot(context.Background(), acmeSpec())
 
 	w.Close()
 	os.Stderr = origStderr
-	var buf strings.Builder
-	io.Copy(&buf, r)
-	logged := buf.String()
+	logged := <-stderrCh
 
 	if err == nil {
 		t.Fatal("ProvisionOneShot: want the (health) provision error, got nil")
@@ -1746,14 +1749,17 @@ func TestProvision_SitePlaneFailureDoesNotFailGoLive(t *testing.T) {
 	r, w, _ := os.Pipe()
 	origStderr := os.Stderr
 	os.Stderr = w
+	// Drain concurrently: a darwin pipe buffers only 512 bytes (64 KiB on Linux),
+	// so reading only after the call returns deadlocks once the code under test
+	// writes more warning text than the buffer holds.
+	stderrCh := make(chan string, 1)
+	go func() { var b strings.Builder; io.Copy(&b, r); stderrCh <- b.String() }()
 
 	live, err := wp.Provision(context.Background(), spec)
 
 	w.Close()
 	os.Stderr = origStderr
-	var buf strings.Builder
-	io.Copy(&buf, r)
-	warning := buf.String()
+	warning := <-stderrCh
 
 	if err != nil {
 		t.Fatalf("a failed site-plane install must NOT fail the go-live, got err: %v", err)
@@ -2203,5 +2209,99 @@ func TestSecretsInstallStepArmsSelfUpdateApply(t *testing.T) {
 				t.Fatalf("strip list misses the arm flag — a re-run would duplicate the line:\n%s", script)
 			}
 		})
+	}
+}
+
+// enabledTestRelay is a fully-specified, shell-safe relay — the ENABLED arm of the
+// per-provision mail narration (task-6c815cd398a99534). It must satisfy
+// MailRelay.Validate (host/user/password alphabets) or Enabled() is false and the
+// "enabled" arm would silently test the disabled path instead.
+func enabledTestRelay() MailRelay {
+	return MailRelay{Host: "smtp.relay.example", Port: "587", Username: "bp@example.com", Password: "relaypassword123"}
+}
+
+// captureProgress collects every Progress detail a chain narrates. The chain tees
+// these to the provisioner's console emitter, which POSTs each one to the job's
+// APPEND-ONLY persisted console — so what is captured here is exactly what a
+// later reader of the provision record sees.
+func captureProgress(wp *WarmPool) *[]string {
+	var lines []string
+	wp.Progress = func(step, status, detail string) {
+		if detail != "" {
+			lines = append(lines, step+": "+status+" — "+detail)
+		}
+	}
+	return &lines
+}
+
+// assignWithMail runs one full AssignWarm go-live with the given relay and returns
+// every narrated progress detail. Uses the AssignWarm path because it drives the
+// REAL configureHost chain (secrets-install included), so a narration that is never
+// CALLED fails here — a pure-function test of the string would not.
+func assignWithMail(t *testing.T, mail MailRelay) []string {
+	t.Helper()
+	spec := acmeSpec()
+	wp, prov, _, _, _ := warmAssignPool(greenGate(spec.healthTarget()))
+	wp.Mail = mail
+	lines := captureProgress(wp)
+
+	ctx := context.Background()
+	host, err := CreateWarmServer(ctx, prov, warmSpec())
+	if err != nil {
+		t.Fatalf("seed warm box: %v", err)
+	}
+	if _, err := wp.AssignWarm(ctx, host, spec); err != nil {
+		t.Fatalf("AssignWarm: %v", err)
+	}
+	return *lines
+}
+
+// TestGoLive_NarratesMailRelayDisabled is the DEFECT arm: SMTP_RELAY_* unset is a
+// valid worker config that provisions a mail-DEAD instance (magic-link,
+// password-reset and verify-email answer OK and deliver nothing). Before this
+// signal existed the go-live said NOTHING about it — the only statement was one
+// worker-startup stderr line in a journal the provisioning operator never reads.
+// The go-live must SAY it, per provision, and name what to set.
+func TestGoLive_NarratesMailRelayDisabled(t *testing.T) {
+	lines := assignWithMail(t, MailRelay{})
+	joined := strings.Join(lines, "\n")
+
+	if !strings.Contains(joined, "Mail relay NOT CONFIGURED") {
+		t.Fatalf("a mail-DEAD go-live narrated no mail-relay signal; narration:\n%s", joined)
+	}
+	// The signal is only useful if it names the fix — an operator reading the
+	// console must not have to go find which env vars are missing.
+	for _, want := range []string{"SMTP_RELAY_HOST", "SMTP_RELAY_USERNAME", "SMTP_RELAY_PASSWORD"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the disabled-mail narration does not name %s (what to set); narration:\n%s", want, joined)
+		}
+	}
+	// It must not claim the opposite.
+	if strings.Contains(joined, "Mail relay ENABLED") {
+		t.Errorf("an unset relay narrated ENABLED; narration:\n%s", joined)
+	}
+}
+
+// TestGoLive_NarratesMailRelayEnabled is the NEGATIVE-DIRECTION arm: the signal
+// must not be a blanket "no mail" warning stapled onto every provision. A
+// configured relay narrates ENABLED, names the relay host, and NEVER emits the
+// mail-dead wording — otherwise an operator learns to ignore the line.
+func TestGoLive_NarratesMailRelayEnabled(t *testing.T) {
+	mail := enabledTestRelay()
+	if !mail.Enabled() {
+		t.Fatalf("fixture relay is not Enabled() — the enabled arm would test the disabled path: %v", mail.Validate())
+	}
+	lines := assignWithMail(t, mail)
+	joined := strings.Join(lines, "\n")
+
+	if !strings.Contains(joined, "Mail relay ENABLED via smtp.relay.example:587") {
+		t.Fatalf("a mail-enabled go-live did not narrate the relay; narration:\n%s", joined)
+	}
+	if strings.Contains(joined, "NOT CONFIGURED") || strings.Contains(joined, "deliver NOTHING") {
+		t.Errorf("a configured relay narrated the mail-dead wording; narration:\n%s", joined)
+	}
+	// The SASL password is not a console value.
+	if strings.Contains(joined, mail.Password) {
+		t.Errorf("the relay password leaked into the narration:\n%s", joined)
 	}
 }

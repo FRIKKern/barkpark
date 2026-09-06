@@ -170,7 +170,11 @@ defmodule Barkpark.Tasks.CloseTest do
       assert {:ok, closed} =
                Close.close(task.id, "w",
                  observed_epoch: 0,
-                 lifecycle_status: "cancelled"
+                 lifecycle_status: "cancelled",
+                 # task-650d7844d8fe7199: a cancel needs a reason — every
+                 # other close gate exempts `cancelled` by name, so the
+                 # reason is its whole record.
+                 reason: "cancelled by the close test fixture"
                )
 
       assert closed.content["lifecycle_status"] == "cancelled"
@@ -408,6 +412,10 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "cancelled",
+                 # task-650d7844d8fe7199: a cancel needs a reason — every
+                 # other close gate exempts `cancelled` by name, so the
+                 # reason is its whole record.
+                 reason: "cancelled by the close test fixture",
                  criteria: [%{"index" => 0, "met" => false, "evidence" => ""}]
                )
 
@@ -438,6 +446,10 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "cancelled",
+                 # task-650d7844d8fe7199: a cancel needs a reason — every
+                 # other close gate exempts `cancelled` by name, so the
+                 # reason is its whole record.
+                 reason: "cancelled by the close test fixture",
                  criteria: [%{"index" => 0, "met" => false}]
                )
 
@@ -463,6 +475,10 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "cancelled",
+                 # task-650d7844d8fe7199: a cancel needs a reason — every
+                 # other close gate exempts `cancelled` by name, so the
+                 # reason is its whole record.
+                 reason: "cancelled by the close test fixture",
                  criteria: [%{"index" => 0, "met" => false, "evidence" => 123}]
                )
 
@@ -594,6 +610,10 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "cancelled",
+                 # task-650d7844d8fe7199: a cancel needs a reason — every
+                 # other close gate exempts `cancelled` by name, so the
+                 # reason is its whole record.
+                 reason: "cancelled by the close test fixture",
                  criteria: [%{"index" => 2, "met" => false, "evidence" => "never got there"}]
                )
 
@@ -1173,6 +1193,10 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "lead-w",
                  observed_epoch: 0,
                  lifecycle_status: "cancelled",
+                 # task-650d7844d8fe7199: a cancel needs a reason — every
+                 # other close gate exempts `cancelled` by name, so the
+                 # reason is its whole record.
+                 reason: "cancelled by the close test fixture",
                  landed: %{"prs" => [456]}
                )
 
@@ -1633,7 +1657,7 @@ defmodule Barkpark.Tasks.CloseTest do
 
       task = mk_task!(uniq("crit-gate-selfflip"), scope, %{"acceptance_criteria" => @unproven})
 
-      # This is the whole point of the seat (close.ex, `check_criteria_proven/4`
+      # This is the whole point of the seat (close.ex, `check_criteria_proven/6`
       # in do_close_txn's `with` chain, on the doc read under the advisory lock):
       # a payload that flips every criterion met=true is measured against the
       # PRE-merge state, so it cannot satisfy the gate it is being judged by.
@@ -1660,6 +1684,88 @@ defmodule Barkpark.Tasks.CloseTest do
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "open"
       assert reloaded.content["acceptance_criteria"] == @unproven, "no partial criteria write"
+    end
+
+    # ─── BOTH DIRECTIONS OF THE FLIP (task-c652c3ba8129c607) ───────────────
+    #
+    # The test ABOVE is the false->true arm: the closer may not prove its own
+    # homework. The two below are the mirror, which sailed straight through
+    # until this row — the gate read only the BEFORE snapshot, so a criterion
+    # stamped `met: true` and LOWERED to false by the closing write left the
+    # row `done` with an unmet criterion and NO `close_override` at all.
+    # Reproduced on prod row task-8e3942fa840b8bf3 before the fix: close rc=0,
+    # lifecycle `done`, criterion `met: false`, `close_override` absent from the
+    # raw read-back, one advisory warning and nothing else.
+    #
+    # The two fixtures below are DISTINCT by construction and asserted so: the
+    # false->true fixture stores index 1 UNMET, the true->false fixture stores
+    # every criterion MET. If they were ever the same list neither test would
+    # be measuring the direction it names.
+
+    @all_met [
+      %{"criterion" => "A: built", "met" => true, "evidence" => "PR #1"},
+      %{"criterion" => "B: proven", "met" => true, "evidence" => "PR #2"}
+    ]
+
+    test "the two direction fixtures are distinct — @unproven stores an unmet row, @all_met does not",
+         %{scope: _scope} do
+      refute @unproven == @all_met
+
+      assert Enum.any?(@unproven, &(Map.get(&1, "met") != true)),
+             "@unproven must store an unmet row"
+
+      assert Enum.all?(@all_met, &(Map.get(&1, "met") == true)),
+             "@all_met must store no unmet row"
+    end
+
+    test "a closer that LOWERS a met criterion to false in the closing command hits the gate",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-gate-lower"), scope, %{"acceptance_criteria" => @all_met})
+
+      # The mirror of the test above. Pre-write the row is fully proven, so the
+      # BEFORE snapshot alone says "nothing unmet, pass" — and the same write
+      # then lowers index 1. The gate must measure the union of both snapshots,
+      # so this is refused naming the index the close is about to un-prove.
+      assert {:error, {:criteria_unmet, [1]}} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [%{"index" => 1, "met" => false, "criterion" => "B: proven"}]
+               )
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["lifecycle_status"] == "open", "the close must not land"
+      assert reloaded.content["acceptance_criteria"] == @all_met, "no partial criteria write"
+      assert reloaded.rev == task.rev, "rev untouched on refusal"
+    end
+
+    test "the lowering close is APPEALABLE — criteria_override lands it and records the unmet row",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-gate-lower-ovr"), scope, %{"acceptance_criteria" => @all_met})
+
+      # The refusal above is a refusal, not a wall. This is the whole reason the
+      # union arm gates a REFUSAL rather than forbidding the flip outright: the
+      # closer with a real reason to lower a lock and close anyway says so ON
+      # THE RECORD, and `close_override.criteria` is that record — the exact key
+      # whose absence was the defect.
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [%{"index" => 1, "met" => false, "criterion" => "B: proven"}],
+                 criteria_override: "review refuted the proof; closing done anyway"
+               )
+
+      assert closed.content["lifecycle_status"] == "done"
+      record = get_in(closed.content, ["close_override", "criteria"])
+      assert record, "closing over an unmet criterion must mint close_override.criteria"
+      assert record["reason"] == "review refuted the proof; closing done anyway"
+      assert Enum.map(record["unmet"], & &1["index"]) == [1]
+      assert Enum.at(closed.content["acceptance_criteria"], 1)["met"] == false
     end
 
     test "a fully-proven task closes with no override and no record", %{scope: scope} do
@@ -1700,7 +1806,11 @@ defmodule Barkpark.Tasks.CloseTest do
       task = mk_task!(uniq("crit-gate-cancelled"), scope, %{"acceptance_criteria" => @unproven})
 
       assert {:ok, closed} =
-               Close.close(task.id, "w", observed_epoch: 0, lifecycle_status: "cancelled")
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "cancelled",
+                 reason: "cancelled by the close test fixture"
+               )
 
       assert closed.content["lifecycle_status"] == "cancelled"
       assert closed.content["acceptance_criteria"] == @unproven, "criteria untouched"
@@ -2022,6 +2132,101 @@ defmodule Barkpark.Tasks.CloseTest do
 
       assert [_, %{"met" => true, "evidence" => "no index"}] =
                closed.content["acceptance_criteria"]
+    end
+  end
+
+  # ── THE CLAIMLESS CLOSE RECORDED NOBODY (pds-bl-close-audit-gaps) ───────────
+  #
+  # `apply_close_update/9` stamps `closed_by` only inside its
+  # `%{"claim" => claim} when is_map(claim)` arm. A row that was NEVER claimed
+  # falls to `_ ->`, which writes `lifecycle_status` and nothing else — so the
+  # close, and the `task.closed` event it emits, named no closer at all.
+  #
+  # MEASURED on the guerrilla ledger 2026-09-06, whole population: of 8,606
+  # `type:task` rows, 6,617 are terminal and 139 of those carry no claim map at
+  # all (84 done, 53 cancelled, 2 blocked). NON-VACUITY for that count: 6,332
+  # rows DO carry `claim.closed_by` and 6,803 carry a claim map, so the probe
+  # can see the field and the 139 is a real absence. Three of the 139 were
+  # closed in the trailing 14 days — the hole is live, not historical.
+  #
+  # EVERY ONE OF THE 139 IS LEGITIMATELY CLAIMLESS. Container/root rows (13 of
+  # them carry children) and killed backlog rows nobody ever picked up are
+  # supposed to close without a lease; `cancelled` and `blocked` are exempt
+  # from the criteria gate BY NAME for exactly that reason. A LEAD sealing
+  # somebody else's row is NOT in this set — that row HAS a claim, so it takes
+  # the claim arm and `closed_by` is already stamped there.
+  #
+  # SO THE FIX RECORDS THE CLOSER WITHOUT INVENTING A HOLDER. "Never claimed"
+  # and "closed by nobody" are two different facts and the ledger has to keep
+  # telling them apart, so the identity goes where an audit actually reads
+  # it — onto the `task.closed` mutation event, beside the `caller_token_id`
+  # stamp already there — and the DOCUMENT keeps saying, truthfully, that this
+  # row was never held. Synthesising a claim map instead would also silently
+  # convert `idempotent_replay?/3` — which deliberately refuses to answer a
+  # replay on a claimless row, because an unidentifiable second caller must not
+  # be handed a success receipt — into exactly that receipt.
+  describe "close/3 — every close names its closer on the task.closed event" do
+    test "a NEVER-CLAIMED task's close names the closer on its event", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("claimless"), scope)
+      refute Map.has_key?(task.content, "claim"), "fixture must reach the `_ ->` arm"
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w-claimless",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 caller_token_id: "tok-claimless"
+               )
+
+      assert [ev] = events(task.doc_id, "task.closed")
+
+      assert ev.document["closed_by"] == "w-claimless",
+             "a claimless close must still name a closer on the event"
+
+      # The token stamp that was already there is untouched — the two actors
+      # stay distinguishable (asserted worker vs authenticated bearer).
+      assert ev.document["caller_token_id"] == "tok-claimless"
+
+      # AND THE ROW IS STILL HONESTLY CLAIMLESS. No holder was invented.
+      refute Map.has_key?(closed.content, "claim")
+      assert Repo.get!(Document, task.id).content["claim"] == nil
+    end
+
+    test "a claimless close with NO api_token names the worker and omits the token", %{
+      scope: scope
+    } do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("claimless-anon"), scope)
+
+      assert {:ok, _} =
+               Close.close(task.id, "w-anon",
+                 observed_epoch: 0,
+                 lifecycle_status: "cancelled",
+                 reason: "cancelled by the close test fixture"
+               )
+
+      assert [ev] = events(task.doc_id, "task.closed")
+      assert ev.document["closed_by"] == "w-anon"
+      refute Map.has_key?(ev.document, "caller_token_id")
+    end
+
+    test "a CLAIMED close carries the same event stamp beside claim.closed_by", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("claimed"), scope, %{
+          "lifecycle_status" => "in_progress",
+          "claim" => %{"worker" => "w-held", "epoch" => 1}
+        })
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w-held", observed_epoch: 1, lifecycle_status: "done")
+
+      assert closed.content["claim"]["closed_by"] == "w-held"
+      assert [ev] = events(task.doc_id, "task.closed")
+      assert ev.document["closed_by"] == "w-held"
     end
   end
 end

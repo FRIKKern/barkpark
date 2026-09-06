@@ -348,6 +348,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         holder: holder,
         worker: worker,
         epoch: epoch,
+        caller_token_id: caller_token_id(socket),
         scope: [workspace_id: ws_id]
       })
     else
@@ -456,7 +457,11 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   defp run_restage(socket, {:close, status}, ctx) do
     socket = optimistic_move(socket, ctx.prev, status, ctx.worker)
 
-    case Tasks.close(ctx.task_id, ctx.worker, observed_epoch: ctx.epoch, lifecycle_status: status) do
+    case Tasks.close(ctx.task_id, ctx.worker,
+           observed_epoch: ctx.epoch,
+           lifecycle_status: status,
+           caller_token_id: ctx.caller_token_id
+         ) do
       {:ok, _} ->
         {:noreply, socket}
 
@@ -560,6 +565,26 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     case socket.assigns[:current_user] do
       %{email: email} when is_binary(email) and email != "" -> "studio:" <> email
       _ -> "studio:admin"
+    end
+  end
+
+  # THE OTHER HALF OF THE RECORD (pds-bl-close-audit-gaps). `worker_of/1` above
+  # returns a name the CALLER chose — the board picks it, `bp` picks its own,
+  # and `Tasks.close/3` takes it as a plain string with no bearer binding
+  # (close.ex's moduledoc: "NONE OF THIS IS AUTHORIZATION"). The api_token id is
+  # the one component of a close record that an actor cannot choose for itself,
+  # and every task mutation over HTTP already carries it
+  # (`TasksController.caller_token_id/1`). A board-driven close is the same
+  # write through the same primitive, so it carries the same stamp.
+  #
+  # `nil` for an account-session mount that resolved a User instead of a token,
+  # and for the disconnected render: `caller_stamp/1` then omits the key, which
+  # is the existing "no bearer authenticated" shape rather than a borrowed one.
+  # Mirrors the controller helper exactly — metadata only, never authorization.
+  defp caller_token_id(socket) do
+    case socket.assigns[:api_token] do
+      %{id: id} -> id
+      _ -> nil
     end
   end
 

@@ -227,6 +227,121 @@ defmodule BarkparkCloud.FailureCopy do
 
   def typed_refusal?(_other), do: false
 
+  # ---------------------------------------------------------------------------
+  # THE SPLIT (site-spawner, task-f156b5e43bfbfe91)
+  # ---------------------------------------------------------------------------
+  #
+  # `Sites.Deploy.box_refusal/3` FUSES the box's two halves into one prose line:
+  #
+  #     the instance refused the deploy (HTTP 400): E_ABSOLUTE_PATH — entry
+  #     "/quota/index.html" is an absolute path — refused
+  #
+  # `typed_refusal?/1` (above) stops that string from being REWRITTEN, which is
+  # the hazard W11 closed. It does not stop the next reader from taking the
+  # string apart again, and every one of them does: `app.js` ran its own
+  # `failureCopy()` over it, and `internal/cli` carries regexes over the English.
+  # Substring archaeology over prose is how a reworded clause silently zeroes a
+  # count (`refusal_phase`'s own doc says the same about `deferral_depth`).
+  #
+  # So the two halves are recovered ONCE, here, and travel as separate JSON keys
+  # (`failure_code` / `failure_message` on `deployment_json/1`). The composite
+  # `failure_reason` is unchanged, byte for byte: every existing consumer keeps
+  # reading exactly what it read before, and the structured pair is ADDITIVE.
+  #
+  # WHY A DERIVATION AND NOT A COLUMN. The honest shape is two columns written
+  # at the moment `box_refusal/3` still HAS both halves in hand. That needs a
+  # migration, and it cannot repair the 14,000+ refusal rows already written —
+  # which is the corpus every reader actually reads. This derivation covers new
+  # and old rows alike; a later column can shadow it without changing the wire.
+  #
+  # ANCHORED ON THE CAPTION, never floating (the same rule
+  # `DeployLedger.@refusal` states): a build log that happens to PRINT
+  # "the instance refused the deploy (HTTP 500)" in its own output must not be
+  # taken apart as if the control plane had written it.
+  #
+  # SCRUBBED, BY CONSTRUCTION. The split runs over `raw/1`'s output
+  # (`strip_ansi |> scrub`), never over the column. A refusal message is a remote
+  # capture and can carry a credential; a structured twin field derived from the
+  # unscrubbed column would be exactly the "eighth channel added later ships
+  # unscrubbed" leak the module doc names — and it would sit beside
+  # `failure_reason_raw`, which redacts the very same bytes.
+  @refusal_caption ~r/^(?:the build completed and staged; the deploy then failed at [A-Z]+ — )?the instance refused the (?:deploy|build poll) \((?:HTTP )?\d{3}\): (.+)$/s
+
+  # The box journal join `box_refusal/3` stamps onto the END of the detail. It is
+  # a machine handle, not part of what the box SAID, and it already travels whole
+  # in `failure_reason` — so it is lifted out of the human half rather than
+  # rendered inside a sentence. Matched anywhere, because `with_graced_note/2`
+  # can append after it.
+  @request_id_stamp ~r/ \[box request_id: [^\]]*\]/
+
+  # What can be a CODE: a bare identifier. `E_ABSOLUTE_PATH`, `already_running`,
+  # `feature_not_configured` — the box's own `error.code`. A detail with a space
+  # in it is a sentence, and a sentence is never a code.
+  @code_shape ~r/^[A-Za-z][A-Za-z0-9_]*$/
+
+  # The separator `box_refusal/3` writes BETWEEN the two halves: `"#{code} — #{message}"`.
+  # Split on the FIRST one only — nine of the extractor's messages carry their
+  # own em dash (`… is an absolute path — refused`), and those belong to the
+  # MESSAGE.
+  @half_separator " — "
+
+  @doc """
+  A box refusal SPLIT into `{code, message}` — the typed code the box chose and
+  the human sentence it wrote — out of the fused `failure_reason`.
+
+  `{nil, nil}` when the reason is not a box refusal at all, or carries no detail
+  beyond the caption (a bare `the instance refused the deploy (HTTP 409)`, which
+  43% of the 409 corpus is). `{code, nil}` when the box sent a code and no
+  message; `{nil, message}` when it sent prose that is not a code. Both halves
+  are `raw/1`-scrubbed.
+  """
+  @spec typed_refusal_fields(term()) :: {String.t() | nil, String.t() | nil}
+  def typed_refusal_fields(reason) when is_binary(reason) do
+    with [_, detail] <- Regex.run(@refusal_caption, raw(reason)),
+         trimmed = detail |> String.replace(@request_id_stamp, "") |> String.trim(),
+         true <- trimmed != "" do
+      split_halves(trimmed)
+    else
+      _ -> {nil, nil}
+    end
+  end
+
+  def typed_refusal_fields(_other), do: {nil, nil}
+
+  defp split_halves(detail) do
+    case String.split(detail, @half_separator, parts: 2) do
+      [code, message] ->
+        if Regex.match?(@code_shape, code),
+          do: {code, blank_to_nil(message)},
+          else: {nil, detail}
+
+      [only] ->
+        if Regex.match?(@code_shape, only), do: {only, nil}, else: {nil, only}
+    end
+  end
+
+  defp blank_to_nil(s) do
+    case String.trim(s) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  @doc """
+  The CODE half of a box refusal — `typed_refusal_fields/1`'s first element.
+
+  Its own function so `deployment_json/1` reads it the way it reads
+  `DeployLedger.refusal_phase/1`: one named call per key, off the RAW column.
+  """
+  @spec typed_refusal_code(term()) :: String.t() | nil
+  def typed_refusal_code(reason), do: reason |> typed_refusal_fields() |> elem(0)
+
+  @doc """
+  The MESSAGE half of a box refusal — `typed_refusal_fields/1`'s second element.
+  """
+  @spec typed_refusal_message(term()) :: String.t() | nil
+  def typed_refusal_message(reason), do: reason |> typed_refusal_fields() |> elem(1)
+
   @redaction "[redacted]"
 
   # STATUS PROSE in a value position — never a credential. A remote capture says
@@ -433,6 +548,42 @@ defmodule BarkparkCloud.FailureCopy do
   def raw(value), do: value |> strip_ansi() |> scrub()
 
   @doc """
+  Clamp a failure string to the one-line CAPTION length the `deployments.detail`
+  column is read at — 255, with an ellipsis in the 255th position.
+
+  THE ONE OWNER OF THIS CLAMP. `failure_reason` is `:text` and holds the whole
+  story untruncated; `detail` is the caption rendered under the status pill, and
+  the terminal paths must not render the SAME failure at two different lengths.
+  This function existed three times before it existed once: as
+  `Sites.Deploy.short_detail/1`, as `Registry.failure_detail/1` (added by
+  PR #14571 and knowingly disclosed there as a duplicate — "folding both onto
+  one `FailureCopy` helper is a follow-up, not a silent fork"), and it was about
+  to be written a third time for the two transition routes. That third copy is
+  the point the duplication was ruled to stop, so both prior copies now delegate
+  here and no call site carries its own arithmetic.
+
+  Non-binaries — `nil` above all — pass through unchanged, because a caller that
+  has no reason to render must not be handed the string "nil".
+  """
+  # @canonical capability:failure-caption-clamp aka:short_detail,failure_detail,detail-clamp,255
+  @spec caption(term()) :: term()
+  def caption(reason) when is_binary(reason) do
+    if String.length(reason) > 255, do: String.slice(reason, 0, 254) <> "…", else: reason
+  end
+
+  def caption(other), do: other
+
+  @doc """
+  The caption for a failure that named NO cause — a NAMED UNKNOWN, never a blank
+  and never the progress caption the deploy happened to be wearing when it died.
+
+  The parent epic's rule is that a failure's final `detail` is a cause or a named
+  unknown; a row that says nothing at all is the defect, not the absence of one.
+  """
+  @spec no_reason_caption() :: String.t()
+  def no_reason_caption, do: "the deploy failed and no reason was reported"
+
+  @doc """
   Map a raw internal deploy/provision failure string to human-facing copy, with
   secret-shaped substrings redacted.
 
@@ -623,6 +774,18 @@ defmodule BarkparkCloud.FailureCopy do
       # no clause, so a second client-side `failureCopy()` pass is idempotent.
       String.contains?(reason, "no content binding") ->
         "This site isn't bound to any content yet. Create it with --dataset <workspace>/<project>/<dataset>."
+
+      # ssw9: the deploy reaper's pass (0d) — a PREBUILT deploy was minted
+      # (charter D86 mint-then-upload) and its `dist/` never arrived, so the
+      # control plane held a build id nobody ever claimed with bytes. Its cure is
+      # the client's own upload, which is why it must never fall into the
+      # "no build source" clause above (that copy names a repo and `bp deploy`,
+      # neither of which is the missing thing) nor the generic
+      # "exceeded max … attempts" retry clause below (nothing attempted
+      # anything). Keyed on the reason's distinctive token; the output carries
+      # none of it, so a second client-side `failureCopy()` pass is idempotent.
+      String.contains?(reason, "prebuilt artifact was never uploaded") ->
+        "This deploy was minted for an off-box build, but its files never arrived. Run bp cloud site deploy <site> --prebuilt <dist> again."
 
       String.contains?(reason, "no build source") ->
         "This site has no build source yet. Connect a repo or run bp deploy."

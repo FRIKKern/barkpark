@@ -202,6 +202,19 @@ type Barkpark struct {
 	VerifiedReachable *bool  `json:"verify_reachable"`
 	LastVerifiedAt    string `json:"last_verified_at"`
 
+	// DeployRate is the box's OWN deploy vital (dr-w10-s1) — the terminal
+	// failure rate over the control plane's pinned window, with the absorption
+	// and box-caused companions that make it readable, and the site counts that
+	// say whether the box had anything to deploy at all.
+	//
+	// A POINTER on purpose, and the distinction is the whole slice: nil means the
+	// control plane never sent the vital (an older CP — we could not ask), which
+	// is NOT the same as a CP that sent `sites: 0` (this box has no deploy
+	// surface) and NOT the same as a CP that sent a refusing rate (it has sites
+	// and we could not score them). Collapsing those three is how a fleet view
+	// ends up printing `ok` for a box failing 46% of its deploys.
+	DeployRate *BoxDeployRate `json:"deploy_rate"`
+
 	// Pressure is the host's LIVE resource pressure off the latest health beat
 	// (dr-w4-s4 put it on the wire; this field is what finally CONSUMES it).
 	// A POINTER because a control plane that predates the block omits the key
@@ -367,6 +380,32 @@ type SlotUnit struct {
 	// reformatted. nil on a unit systemd has no timestamp for, which is what a
 	// never-started unit reports.
 	StateSince *string `json:"state_since"`
+}
+
+// BoxDeployRate is one barkpark's deploy vital off the fleet row.
+//
+// Rate is the RAW TERMINAL failure rate (failed / (failed + live)) over the
+// window the control plane pinned — raw, per charter D148, because it depends
+// only on `deployments.status`, an enum, while every regex-derived subset can be
+// silenced by rewording an error message or retiring three sites. The price of
+// raw is that it accuses the box for a customer's broken build; BoxCaused is
+// that price paid out loud, and Absorption is the companion that stops a rate
+// halved by deferrals from reading as a repair.
+//
+// Sites is the deploy SURFACE (how many sites this box could deploy at all),
+// SitesDeploying how many actually produced a terminal row in the window. A box
+// with Sites == 0 has nothing to deploy and has not failed to report.
+//
+// Every Pct inside is *float64 (DeployRate's own discipline): a refusing node
+// sends JSON null and a float64 would decode that as 0.0 — the one number this
+// screen must never invent.
+type BoxDeployRate struct {
+	Rate           DeployRate          `json:"rate"`
+	Absorption     DeployRate          `json:"absorption"`
+	BoxCaused      DeployRate          `json:"box_caused"`
+	Sites          int                 `json:"sites"`
+	SitesDeploying int                 `json:"sites_deploying"`
+	Window         *DeployCensusWindow `json:"window"`
 }
 
 // Provider is a connected cloud account (e.g. a Hetzner token) the control plane
@@ -1666,21 +1705,35 @@ type Site struct {
 	LastDeployment *SiteDeploymentEmbed `json:"last_deployment"`
 }
 
-// SiteDeploymentEmbed is the four-key slice of a deployment that GET /v1/sites
-// embeds per site. The keyset is deliberately narrow and is fenced by the
-// search-template D24 honesty law: status, trigger and the two timestamps, and
-// NOTHING else — no console URL, no build_log_url, no content_rev, and no
-// environment key (the query is already `environment == "production"`).
+// SiteDeploymentEmbed is the slice of a deployment that GET /v1/sites embeds
+// per site. The keyset is deliberately narrow and is fenced by the
+// search-template D24 honesty law: status, trigger, the two timestamps and the
+// CAUSE PAIR, and NOTHING else — no console URL, no build_log_url, no
+// content_rev, no failure_reason_raw, and no environment key (the query is
+// already `environment == "production"`).
 //
 // Do not widen this struct to chase a field the wire does not carry: an absent
 // key decoded into a zero value is exactly the "measured empty" lie this epic
 // exists to remove. `Trigger` is a POINTER for that reason — the control plane
 // genuinely sends null for a deployment nobody attributed.
+//
+// FailureClass and FailureReason are the WHY the fleet list could not say.
+// Both are POINTERS for the same reason `Trigger` is: the control plane sends
+// an explicit null on a row that did not fail, and a `""` decoded out of a
+// missing key would be indistinguishable from "the server told us there was no
+// cause". A nil here means EITHER the deploy did not fail OR the server
+// predates the embed — never "the cause is empty".
+//
+// FailureReason is the HUMANIZED string (router.ex folds it through
+// `FailureCopy.humanize/1`, the scrub carrier). The raw capture is deliberately
+// not on this surface, so there is nothing here to redact a second time.
 type SiteDeploymentEmbed struct {
-	Status     string  `json:"status"`
-	Trigger    *string `json:"trigger"`
-	InsertedAt string  `json:"inserted_at"`
-	UpdatedAt  string  `json:"updated_at"`
+	Status        string  `json:"status"`
+	Trigger       *string `json:"trigger"`
+	InsertedAt    string  `json:"inserted_at"`
+	UpdatedAt     string  `json:"updated_at"`
+	FailureClass  *string `json:"failure_class"`
+	FailureReason *string `json:"failure_reason"`
 }
 
 // Deployment is one build-and-release of a Site, as returned by the
@@ -2107,7 +2160,17 @@ type SpawnSite struct {
 	// search-template W10: the featured content type the site's build reads.
 	// Declared here or json.Unmarshal drops it silently — the tag's omitempty is
 	// decode-irrelevant (SpawnSite is never marshalled) and kept for symmetry.
-	DocType             string          `json:"doc_type,omitempty"`
+	DocType string `json:"doc_type,omitempty"`
+	// dr-w11: does a content publish on this site's dataset reach it at all?
+	// "present" | "absent" | "not_applicable", derived server-side by
+	// Registry.publish_trigger/1. Declared HERE or json.Unmarshal drops it in
+	// silence — the exact failure that let eight of guerrilla's thirteen sites
+	// carry no content-publish trigger while `bp cloud site status` printed a
+	// header indistinguishable from the five that did. NOT omitempty on the read
+	// side by intent of the render: an EMPTY string means the control plane
+	// predates the field, which the renderer treats as "say nothing", never as
+	// "absent" — a fabricated absence would be its own silent lie.
+	PublishTrigger      string          `json:"publish_trigger,omitempty"`
 	Port                int             `json:"port,omitempty"`
 	PortBase            int             `json:"port_base,omitempty"`
 	CurrentDeploymentID string          `json:"current_deployment_id"`
@@ -2926,13 +2989,19 @@ type DeployDeliveryCensored struct {
 
 // DeployDeliverySite is one site's slice of the delivery window: how many rows
 // were measured, how many were delivered, how many are still waiting, how many
-// the clock could not reach at all, and the oldest wait still running.
+// the clock could not reach at all, how many a human cancelled, and the oldest
+// wait still running.
+//
+// A site can appear here with Sample 0 and Cancelled > 0 — every row it filed in
+// the window was stopped by hand. That is a real, reportable state, and it is
+// NOT still waiting.
 type DeployDeliverySite struct {
 	SiteID               string   `json:"site_id"`
 	Sample               int      `json:"sample"`
 	Delivered            int      `json:"delivered"`
 	Censored             int      `json:"censored"`
 	Unmetered            int      `json:"unmetered"`
+	Cancelled            int      `json:"cancelled"`
 	StillWaiting         bool     `json:"still_waiting"`
 	OldestWaitingSeconds *float64 `json:"oldest_waiting_seconds"`
 	AsOf                 string   `json:"as_of"`
@@ -2951,6 +3020,12 @@ type DeployDeliverySite struct {
 // became_live_at). It is reported, never subtracted in silence: the whole reason
 // this node exists is that a number which improves because rows stopped being
 // counted is the vacuous green this epic refuses.
+//
+// Cancelled is the sibling cohort nobody is WAITING on — deploys a human
+// deliberately stopped. Those rows are excluded from Sample/Delivered/Censored
+// and counted here instead, for the same reason Unmetered is counted rather
+// than dropped, and so the still-waiting cohort a reader alerts on can never
+// accuse a team of waiting on a deploy it cancelled itself.
 type DeployDelivery struct {
 	Window      DeployDeliveryWindow   `json:"window"`
 	AsOf        string                 `json:"as_of"`
@@ -2963,6 +3038,7 @@ type DeployDelivery struct {
 	Max         DeployDeliveryQuantile `json:"max"`
 	Censored    DeployDeliveryCensored `json:"censored"`
 	Unmetered   int                    `json:"unmetered"`
+	Cancelled   int                    `json:"cancelled"`
 	MinSample   int                    `json:"min_sample"`
 	Sites       []DeployDeliverySite   `json:"sites"`
 }

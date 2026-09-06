@@ -222,6 +222,21 @@ defmodule BarkparkCloud.SitesDeployStageCaptionTest do
       assert FailureCopy.humanize(derived) ==
                "This site's Barkpark read token was rejected, so the build couldn't fetch its content. Mint a fresh read token for the site in Barkpark, save it on the site, then deploy the site again."
 
+      # task-877bfc465162e104 WIRED THAT SENTENCE INTO A SCENARIO, so the JS side
+      # now commits BOTH ends of the fold: `RAIL_FAIL_CLASSIFYING_DETAIL` (the
+      # capture) and `RAIL_FAIL_CLASSIFIED_CAPTION` (what the wire delivers, and
+      # what `.deploy-rail-fail` paints). The preview fixture is the ONLY place
+      # the classified string is committed outside this file, and a preview that
+      # renders a caption the control plane would never send is a preview that
+      # certifies nothing — so it is read out of scenarios.mjs and recomputed
+      # here rather than trusted.
+      assert FailureCopy.humanize(derived) == scenarios_const("RAIL_FAIL_CLASSIFIED_CAPTION"),
+             """
+             the committed preview caption drifted from the fold that produces it:
+               humanize/1 = #{FailureCopy.humanize(derived)}
+               scenarios.mjs (RAIL_FAIL_CLASSIFIED_CAPTION) = #{scenarios_const("RAIL_FAIL_CLASSIFIED_CAPTION")}
+             """
+
       # …and the wave-26 pair does NOT move. A rail-vs-row parity assertion built
       # on either one passes whether the fix exists or not.
       for name <- ~w(RAIL_FAIL_KIND_DETAIL railCruelStem) do

@@ -33,6 +33,10 @@
 # asserts red on the hazardous shape and green on each safe one. It plants
 # nothing in the tree.
 #
+# 2026-09-06 (task-e376642d6d69fa3f): the main-collapse workflows share ONE main group
+# but keep the guard expression above, so this gate needs no marker path — the
+# collapse is judged by scripts/main-run-concurrency-check.sh alone. A shared group
+# evicts the PENDING run; a bare `true` would kill the RUNNING one, which is D12.
 # Usage: scripts/never-cancel-main-check.sh [--selftest]
 set -euo pipefail
 cd "$(dirname "$0")/.."

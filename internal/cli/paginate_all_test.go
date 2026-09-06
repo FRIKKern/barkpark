@@ -263,6 +263,8 @@ var paginatedEnvelopeKeys = map[string]string{
 	"media.collection-assets": "hits",
 	"search.query":            "documents",
 	"ticket.inbox":            "tickets",
+	"token.ls":                "tokens",  // member_controller.ex
+	"workspace.member-ls":     "members", // member_controller.ex
 }
 
 // TestPaginatedCommandsUseKnownEnvelopeKeys is the companion guard to the

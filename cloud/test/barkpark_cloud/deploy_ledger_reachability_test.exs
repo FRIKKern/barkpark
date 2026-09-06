@@ -356,14 +356,16 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
      "router.ex parses ?from/?to before census/3; the refusal arm is what stops an unbounded scan."},
     {:delivery, 3, :reachable,
      "THE D136 delivery estimator, ROUTED AT LAST. Its UNREACHABLE row said \"PR #10401 adds the caller; when it merges this row moves to :reachable and the move is the proof\" — this is that move. `Web.Router.deploy_census_json/2` (router.ex:9489) puts it on the operator census envelope, so `renderDeployDelivery`'s `d == nil` \"NOT MEASURED\" arm stops being the only arm that ever executes."},
+    {:rate, 2, :reachable,
+     "the D34 rate constructor. WAS :internal_only (three uses inside census/3 and delivery/3, public only because the payload census pairs it with the Go `DeployRate` struct); dr-w10-s1 gives it an external caller. `Web.Router`'s `no_deploy_surface/0` builds the all-nil `deploy_rate` sentinel with `DeployLedger.rate(0, 0)` rather than hand-writing a map, so the sentinel a consumer destructures is the SAME SHAPE as a real refusing rate BY CONSTRUCTION — hand-writing it is how a sentinel and its measured twin drift apart, which is the defect `@unmetered_pressure`'s own shape test exists to catch."},
+    {:box_rates, 3, :reachable,
+     "THE PER-BOX DEPLOY VITAL (dr-w10-s1). Its ONE caller is `Web.Router`'s GET /v1/barkparks handler, which prefetches it beside the pmap/dmap/hmap/qmap trio and threads it into `barkpark_json/6` — so the number that says a box is failing 46.28% of its terminal deploys reaches the fleet row instead of sitting one JOIN away in the same database, read by nothing. It is public for that route and for nothing else; its bucket is :reachable from the day it lands, which is the whole D136 point (server key + Go field + rendered column in ONE PR)."},
     {:refusal_phase, 1, :reachable,
      "start-vs-poll refusal phase, ROUTED AT LAST — the same closer as delivery/3 above, landed by the same PR. `site_deployment_json/3` reads it off the RAW failure_reason, so start-vs-poll is legible over HTTP instead of living only in this suite."},
 
     # -- INTERNAL_ONLY — over-public, alive ------------------------------------
     {:classify, 2, :internal_only,
      "the (stage, reason) arm. `classify/1` delegates to it; no other module reaches it. `defp` plus a public wrapper would say the same thing more honestly."},
-    {:rate, 2, :internal_only,
-     "the D34 rate constructor, used three times inside census/3 and delivery/3. Public because the payload census pairs it with the Go `DeployRate` struct."},
     {:label, 1, :internal_only,
      "class -> human one-liner, used once while building the census class table."},
     {:deferred?, 1, :internal_only,

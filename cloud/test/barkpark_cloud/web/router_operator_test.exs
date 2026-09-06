@@ -7,7 +7,9 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
   `Notifications.platform_admin_emails/0` allowlist that feeds `/v1/me`'s
   `platform_operator` boolean.
 
-  Proves the fail-closed 401/403/200 matrix across all six endpoints, that the
+  Proves the fail-closed 401/403/200 matrix across all SEVEN endpoints (the
+  seventh, `/v1/operator/barkparks/without-agent-token`, is the disarmed-box
+  census — task-5cc3689cb0ab6637), that the
   deliveries surface returns the receipts a REAL `deliver_fleet_digest/1` run
   writes and nothing else (never a team-scoped alert row, never an identity
   email), the fleet shape, and the warm-pool shape.
@@ -53,7 +55,8 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
     {:post, "/v1/operator/autoupdate/resume"},
     {:get, "/v1/operator/fleet"},
     {:get, "/v1/operator/deliveries"},
-    {:get, "/v1/operator/warm-pool"}
+    {:get, "/v1/operator/warm-pool"},
+    {:get, "/v1/operator/barkparks/without-agent-token"}
   ]
 
   # The kill-switch trio on BOTH sides of the principal boundary. The operator
@@ -556,5 +559,49 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
     conn = call(:get, "/v1/operator/warm-pool", token)
     assert conn.status == 200
     assert json_body(conn) == %{"ready" => Registry.count_ready_warm_servers()}
+  end
+
+  ## 6. The disarmed-box census — GET /v1/operator/barkparks/without-agent-token
+  ##
+  ## task-5cc3689cb0ab6637. The auth matrix above already covers this path (it
+  ## is in @endpoints), so these tests are about the PAYLOAD: that the route
+  ## reports the boxes the Registry census reports, and that every row names
+  ## the REMEDY rather than leaving the operator with a count.
+
+  test "GET /v1/operator/barkparks/without-agent-token reports the disarmed boxes, and each row names its remedy" do
+    {operator, team} = operator_fixture()
+    token = session_token(operator)
+
+    disarmed = barkpark_fixture(team)
+    {:ok, pt, _t} = Registry.mint_agent_token(disarmed, "report:health")
+    {:ok, _} = Registry.revoke_agent_token(pt)
+
+    live = barkpark_fixture(team)
+    {:ok, _pt, _t} = Registry.mint_agent_token(live, "report:health")
+
+    conn = call(:get, "/v1/operator/barkparks/without-agent-token", token)
+    assert conn.status == 200
+    body = json_body(conn)
+
+    slugs = Enum.map(body["barkparks"], & &1["slug"])
+    assert disarmed.slug in slugs
+    refute live.slug in slugs
+    assert body["count"] == length(body["barkparks"])
+
+    row = Enum.find(body["barkparks"], &(&1["slug"] == disarmed.slug))
+
+    # The remedy is on the ROW, in the imperative — a census that answers only
+    # a number is a number an operator cannot act on.
+    assert row["remedy"] =~ "re-provision"
+    assert row["remedy"] =~ "resurrect"
+
+    # And the fields that separate DISARMED from NEVER ARMED ride with it.
+    assert row["revoked_token_count"] == 1
+    assert row["last_revoked_at"]
+    assert row["agent_status"] == disarmed.agent_status
+    assert row["suspended"] == false
+
+    # EVERY row names its remedy, not just the one under test.
+    assert Enum.all?(body["barkparks"], &is_binary(&1["remedy"]))
   end
 end

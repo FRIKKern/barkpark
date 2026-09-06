@@ -260,19 +260,24 @@ defmodule BarkparkCloud.DeployLedgerTenancyTest do
     end
   end
 
-  ## ── 2. A teamless caller: 422, not 404 ────────────────────────────────────
+  ## ── 2. A teamless caller: 403 no_team, not 404 ────────────────────────────
 
   describe "a teamless caller" do
-    test "gets 422 no_team — a 404 would lie about a route that exists" do
+    test "gets 403 no_team — a 404 would lie about a route that exists" do
       # THE REASON, in one line: every 404 nil-team arm in this router belongs to
       # a PATH-ID route, where 404 correctly conflates "wrong team" with "no such
       # id". This route has NO path id, so 404 would deny the route itself.
+      #
+      # cch-w40-bl: the STATUS is 403, not 422. Holding no team is an AUTHORITY
+      # answer — the body was fine, the caller simply holds no grant — and this
+      # inline emitter now speaks the same shape `Auth.gate_role/4` has emitted
+      # since cch-w38-s2, so one condition has exactly one wire answer.
       user = user_fixture()
 
       conn = call("/v1/deploy-ledger/census?#{@window}", session_token(user))
 
-      assert conn.status == 422
-      assert body(conn) == %{"error" => "no_team"}
+      assert conn.status == 403
+      assert body(conn) == %{"error" => "forbidden", "reason" => "no_team", "scope" => "team"}
     end
   end
 

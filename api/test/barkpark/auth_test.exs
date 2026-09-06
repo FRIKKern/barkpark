@@ -341,4 +341,121 @@ defmodule Barkpark.AuthTest do
       assert Repo.get(ApiToken, token.id).last_used_at == first
     end
   end
+
+  describe "list_tokens/2 — the workspace fence on the dataset-keyed listing" do
+    # THE DEFECT THIS PINS: `dataset` is a per-tenant STRING. Two workspaces
+    # both holding a "production" token is the NORMAL shape of an instance, and
+    # the old `list_tokens/1` keyed on that string alone — so it answered with
+    # every workspace's credentials while reading like the tenant inventory.
+    test "answers only the named workspace when a second workspace holds a token in the SAME dataset" do
+      ws_a = workspace("fence-a-" <> Ecto.UUID.generate())
+      ws_b = workspace("fence-b-" <> Ecto.UUID.generate())
+
+      mine =
+        insert_token("fence-mine-" <> Ecto.UUID.generate(), %{
+          dataset: "production",
+          workspace_id: ws_a.id
+        })
+
+      theirs =
+        insert_token("fence-theirs-" <> Ecto.UUID.generate(), %{
+          dataset: "production",
+          workspace_id: ws_b.id
+        })
+
+      ids = Auth.list_tokens(ws_a.id, "production") |> Enum.map(& &1.id)
+
+      assert mine.id in ids
+
+      refute theirs.id in ids,
+             "CROSS-TENANT LEAK: workspace B's token answered workspace A's listing"
+
+      # And symmetrically, so the assertion cannot pass by returning nothing.
+      other_ids = Auth.list_tokens(ws_b.id, "production") |> Enum.map(& &1.id)
+      assert theirs.id in other_ids
+      refute mine.id in other_ids
+    end
+
+    test "the dataset still narrows within the workspace" do
+      ws = workspace("fence-ds-" <> Ecto.UUID.generate())
+
+      prod =
+        insert_token("fence-prod-" <> Ecto.UUID.generate(), %{
+          dataset: "production",
+          workspace_id: ws.id
+        })
+
+      staging =
+        insert_token("fence-stg-" <> Ecto.UUID.generate(), %{
+          dataset: "staging",
+          workspace_id: ws.id
+        })
+
+      assert [%{id: prod_id}] = Auth.list_tokens(ws.id, "production")
+      assert prod_id == prod.id
+
+      assert [%{id: staging_id}] = Auth.list_tokens(ws.id, "staging")
+      assert staging_id == staging.id
+    end
+
+    # NO PERMISSIVE NIL ARM: a caller that forgets the fence gets a denial, not
+    # the Default workspace's credentials.
+    test "a nil or malformed workspace id answers [] — it never falls back to Default" do
+      ws = workspace("fence-nil-" <> Ecto.UUID.generate())
+
+      insert_token("fence-nilt-" <> Ecto.UUID.generate(), %{
+        dataset: "production",
+        workspace_id: ws.id
+      })
+
+      assert Auth.list_tokens(nil, "production") == []
+      assert Auth.list_tokens("not-a-uuid", "production") == []
+    end
+
+    # SECRET-FREE: rows are maps built from an explicit select list, mirroring
+    # Tenancy.Members.list_workspace_tokens/1. Reds the moment the door goes
+    # back to Repo.all over whole %ApiToken{} structs.
+    test "no returned row carries token_hash (or any secret key)" do
+      ws = workspace("fence-secret-" <> Ecto.UUID.generate())
+
+      insert_token("fence-secret-t-" <> Ecto.UUID.generate(), %{
+        dataset: "production",
+        workspace_id: ws.id
+      })
+
+      rows = Auth.list_tokens(ws.id, "production")
+      assert length(rows) == 1
+
+      for row <- rows do
+        refute Map.has_key?(row, :token_hash)
+        refute is_struct(row, ApiToken)
+
+        assert Enum.sort(Map.keys(row)) ==
+                 ~w(dataset expires_at id inserted_at kind label last_used_at name permissions revoked_at workspace_id)a
+      end
+    end
+
+    # The seed bootstrap's predicate reads :permissions and :revoked_at off
+    # these rows (Seeds.Clean.admin_token_present?/1) — the select list must
+    # keep feeding it.
+    test "the returned shape still serves has_permission?/2 and the revoked_at guard" do
+      ws = workspace("fence-shape-" <> Ecto.UUID.generate())
+
+      insert_token("fence-shape-t-" <> Ecto.UUID.generate(), %{
+        dataset: "production",
+        workspace_id: ws.id,
+        permissions: ["read", "write", "admin"]
+      })
+
+      assert [row] = Auth.list_tokens(ws.id, "production")
+      assert is_nil(row.revoked_at)
+      assert Auth.has_permission?(row, "admin")
+
+      # And a row is revocable by id (revoke_token/1's binary clause) — the map
+      # shape is NOT a %ApiToken{}, so the struct clause no longer applies.
+      assert {:ok, _} = Auth.revoke_token(row.id)
+      assert [%{revoked_at: revoked}] = Auth.list_tokens(ws.id, "production")
+      refute is_nil(revoked)
+    end
+  end
 end

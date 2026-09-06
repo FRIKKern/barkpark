@@ -91,6 +91,12 @@ func runTaskClose(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	if code, refused := refuseCloseSealSentence(out, cmd, tail); refused {
 		return code
 	}
+	// A `cancelled` close with a blank reason is refused here too, for the same
+	// reason and with the same wording as the server's. See
+	// refuseBlankCancelReason.
+	if code, refused := refuseBlankCancelReason(out, cmd, tail); refused {
+		return code
+	}
 
 	rc := runCommand(out, g, ctx, m, cmd, tail)
 
@@ -331,6 +337,77 @@ func refuseCloseSealSentence(out *writer, cmd manifest.Command, tail []string) (
 	return exitValidation, true
 }
 
+// ── a cancel with no reason ─────────────────────────────────────────────────
+
+// refuseBlankCancelReason catches the fault measured on the ledger 2026-09-06
+// (task-650d7844d8fe7199): a scripting slip expanded `$(cat reason.txt)` to the
+// empty string and
+//
+//	bp task close task-e1920c0a8cd3013b lead-cli 1 cancelled "" --yes
+//
+// exited 0, printed `✓ the store holds it — lifecycle_status=cancelled`, and
+// stored NO close_reason at all. It happened twice inside one minute on real
+// rows, and the only repair left afterwards was an append-only stamp note on a
+// criterion — which is not where anyone looks for a cancel reason.
+//
+// WHY A CANCEL AND NOT EVERY CLOSE. A `cancelled` close is exempt BY NAME from
+// every other close-time gate on the server (Tasks.Close: the criteria gate
+// D289 and the close artifact gate D291 both wave it through, because
+// abandoning the acceptance criteria is what cancelling MEANS). So on a cancel
+// the reason is not one record among several — it is the entire record. `done`
+// is governed by those gates and `blocked` is an honest partial whose record is
+// not yet due; neither is touched here, and the Studio board's drag-to-blocked
+// sends no reason at all.
+//
+// SERVER-SIDE IS THE AUTHORITY — Tasks.Close refuses this with
+// `cancel_reason_required` no matter which surface asks (bp, MCP task_close,
+// Studio, raw HTTP). This local arm exists for the same reason
+// refuseCloseSealSentence's does: the operator gets the diagnosis without a
+// round trip, nothing is written, and the exit code is exitValidation, the SAME
+// code the server's refusal carries (errors.go), so a retry wrapper reads the
+// local refusal exactly as it reads the remote one.
+//
+// It does NOT coerce and it invents no default: a reason this CLI wrote is not
+// a record of anything, and "cancelled" as a cancel reason is a sentence
+// pretending to be an explanation.
+//
+// An invocation splitArgs/bindArgs cannot resolve is not this bug — the
+// dispatch's own usage error is the better message — so it falls through.
+func refuseBlankCancelReason(out *writer, cmd manifest.Command, tail []string) (int, bool) {
+	pos, _, err := splitArgs(cmd, tail)
+	if err != nil {
+		return 0, false
+	}
+	argMap, err := bindArgs(cmd, pos)
+	if err != nil {
+		return 0, false
+	}
+	// An omitted status defaults to `done` on the server, so only an EXPLICIT
+	// `cancelled` is this gate's business.
+	if strings.TrimSpace(argMap["lifecycle_status"]) != "cancelled" {
+		return 0, false
+	}
+	// Blank means absent, empty, OR whitespace-only — matching the server's
+	// blank_reason?/1 exactly. A gate that refuses "" and accepts " " is a gate
+	// you can typo your way past, and " " does land today.
+	if strings.TrimSpace(argMap["reason"]) != "" {
+		return 0, false
+	}
+	docID := strings.TrimSpace(argMap["doc_id"])
+	worker := strings.TrimSpace(argMap["worker_id"])
+	epoch := strings.TrimSpace(argMap["observed_epoch"])
+
+	out.userErr("close REFUSED before it was sent — a `cancelled` close carried no reason")
+	out.errf("  a cancel is EXEMPT BY NAME from every other close gate (the criteria gate and the close")
+	out.errf("  artifact gate both wave it through), so its reason is the ENTIRE record of why the work stopped.")
+	out.errf("  the reason is the FIFTH positional:")
+	out.errf("    bp task close %s %s %s cancelled \"<why this work is being abandoned>\"", docID, worker, epoch)
+	out.errf("  there is no override, on purpose: the escape hatch IS the sentence.")
+	out.errf("  nothing was sent: the server would have answered `cancel_reason_required` (exit %d) and written nothing.", exitValidation)
+	out.errf("  `done` and `blocked` closes are unaffected.")
+	return exitValidation, true
+}
+
 // ── a stale_claim that landed ───────────────────────────────────────────────
 
 // closeLandedDespiteStaleClaim performs the ONE extra read the `stale_claim`
@@ -437,8 +514,8 @@ func renderCloseVerdict(out *writer, req closeRequest, stored taskboard.SealRow,
 // papered over.
 //
 // `Tasks.Close.close_with_receipt/3` has an idempotent-replay arm
-// (api/lib/barkpark/tasks/close.ex:441, `{:already_closed, doc}`), reached when
-// the row is ALREADY terminal and `idempotent_replay?/3` (close.ex:565) says
+// (api/lib/barkpark/tasks/close.ex, the `{:already_closed, doc}` arm), reached
+// when the row is ALREADY terminal and `idempotent_replay?/3` (close.ex:idempotent_replay?/3) says
 // yes. That predicate compares exactly two things — `claim.closed_by == worker`
 // and `lifecycle_status == new_status` — and NOTHING ELSE. The reason is not in
 // it. So a second close by the same worker to the same seal with a DIFFERENT

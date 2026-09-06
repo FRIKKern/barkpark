@@ -1117,6 +1117,95 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
                "A capacity or quota limit was reached at the hosting provider"
     end
 
+    # THE SPLIT, END TO END (task-f156b5e43bfbfe91).
+    #
+    # W11 (the test above) proved the fused string is not REWRITTEN. It is still
+    # fused, and every reader downstream took it apart by substring — app.js ran
+    # a second humanize pass over it, `internal/cli` carries regexes over the
+    # English. This asserts the halves the box actually sent arrive as their own
+    # keys, off the SAME driven refusal, in the SAME response as the unchanged
+    # composite.
+    #
+    # MUTATION-PROVED: drop either `failure_code`/`failure_message` line from
+    # `deployment_json/1` and this reds on nil; change the composite and the
+    # `failure_reason` assertion reds instead — the two halves of back-compat
+    # cannot be satisfied by touching one place.
+    test "E_ABSOLUTE_PATH arrives SPLIT: failure_code + failure_message, composite unchanged" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 400,
+           %{
+             "error" => %{
+               "code" => "E_ABSOLUTE_PATH",
+               "message" => ~s(entry "/quota/index.html" is an absolute path — refused)
+             }
+           }}
+      )
+
+      assert {:ok, :failed} = Sites.Deploy.run(d.id)
+
+      raw = Registry.get_deployment(d.id).failure_reason
+      dep = rendered_deployment(site, d, token)
+
+      # THE TYPED HALF — what a user greps, branches on, or files a bug about.
+      assert dep["failure_code"] == "E_ABSOLUTE_PATH"
+
+      # THE HUMAN HALF — what tells them what to fix. The producer-controlled
+      # entry name survives INSIDE it, and the caption prose is NOT in it.
+      assert dep["failure_message"] ==
+               ~s(entry "/quota/index.html" is an absolute path — refused)
+
+      refute dep["failure_message"] =~ "the instance refused"
+      refute dep["failure_message"] =~ "HTTP 400"
+
+      # BACK-COMPAT, BYTE FOR BYTE. Every consumer that has not moved yet reads
+      # exactly the string it read before the split — including the caption and
+      # both halves fused, in that order.
+      assert dep["failure_reason"] == raw
+
+      assert dep["failure_reason"] ==
+               ~s|the instance refused the deploy (HTTP 400): E_ABSOLUTE_PATH — entry "/quota/index.html" is an absolute path — refused|
+
+      # And the two structured keys REASSEMBLE the detail half of the composite:
+      # this is what makes the pair a SPLIT and not a second, drifting source.
+      assert String.contains?(
+               dep["failure_reason"],
+               dep["failure_code"] <> " — " <> dep["failure_message"]
+             )
+    end
+
+    # A NON-REFUSAL ROW CARRIES NEITHER KEY — never coerced, for the same reason
+    # `refusal_phase` is not coerced to "start". A build that died in `npm run
+    # build` has no typed code, and a `failure_code` of "" or of the whole
+    # sentence would be a claim the box never made.
+    test "a build failure that is not a box refusal renders both split keys as nil" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+
+      {:ok, _} =
+        Registry.transition_deployment(d, %{
+          status: "failed",
+          failure_reason: "BUILD failed (exit 12): npm run build"
+        })
+
+      dep = rendered_deployment(site, d, token)
+
+      assert dep["failure_code"] == nil
+      assert dep["failure_message"] == nil
+      assert dep["failure_reason"] =~ "BUILD failed"
+    end
+
     test "a PATH TRAVERSAL is never rendered as a network timeout" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
@@ -1319,8 +1408,13 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert site_json["dataset"] == "production"
       assert site_json["url"] == "#{@instance_url}/sites/blog/"
 
-      # A 201 MEANS content-bound: the token was minted and encrypted at rest.
-      assert site_json["content_bound"] == true
+      # A 201 MEANS the token was minted and encrypted at rest. ssw8: it does NOT
+      # mean `content_bound` — this create's binding read is unprogrammed, so the
+      # box answers a shape the control plane cannot interpret and the verdict is
+      # `unverified`. `content_bound` is now DERIVED from that verdict, so it is
+      # an honest unknown here rather than the old "a token exists" true.
+      assert site_json["content_bound"] == nil
+      assert site_json["content_binding_verdict"] == "unverified"
       site = Registry.get_site(site_json["id"])
       assert is_binary(site.read_token_encrypted)
       assert {:ok, "bpt_public_read_minted"} = Registry.reveal_site_read_token(site)
@@ -1891,6 +1985,174 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       [site] = Registry.list_sites_for_team(team)
       assert {:ok, "bpt_caller_supplied"} = Registry.reveal_site_read_token(site)
       refute conn.resp_body =~ "bpt_caller_supplied"
+    end
+
+    ## ssw8-persist-binding-verdict (charter D73) — THE VERDICT SURVIVES THE 201.
+    ##
+    ## The read above already happens; its verdict used to live in the create
+    ## RESPONSE and nowhere else. Every later surface — list, detail, console,
+    ## `bp` — read `content_bound`, which was literally
+    ## `not is_nil(read_token_encrypted)`: "a token was minted", which every
+    ## content-bound site has. So a PROVEN site and a pre-W8 site were byte
+    ## identical on the wire, and the field discriminated nothing.
+
+    test "a PROVEN binding persists verdict=bound + checked_at, and content_bound reads TRUE from that" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}},
+        "/w/acme/p/blog/v1/data/query/production/paper" =>
+          {:ok,
+           %{status: 200, body: ~s({"result":{"count":1,"total":100,"documents":[{"_id":"p1"}]}})}}
+      })
+
+      before = DateTime.utc_now()
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production",
+            doc_type: "paper"
+          },
+          token
+        )
+
+      assert conn.status == 201
+      body = json_body(conn)
+
+      # The ROW remembers what the read saw — not just the response body.
+      site = Registry.get_site(body["site"]["id"])
+      assert site.content_binding_verdict == "bound"
+      assert %DateTime{} = site.content_binding_checked_at
+      assert DateTime.compare(site.content_binding_checked_at, before) in [:gt, :eq]
+
+      # …and the wire says so on the CREATE response…
+      assert body["site"]["content_bound"] == true
+      assert body["site"]["content_binding_verdict"] == "bound"
+      assert body["site"]["content_binding_checked_at"]
+
+      # …and on every LATER read, which is the whole point: the 201 is not the
+      # only surface that can tell a proven binding from an unchecked one.
+      later = json_body(call(:get, "/v1/sites/#{site.id}", nil, token))["site"]
+      assert later["content_bound"] == true
+      assert later["content_binding_verdict"] == "bound"
+    end
+
+    test "a token exists but the verdict is never_checked → content_bound is UNKNOWN, never true" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      # A pre-W8 row: fully bound, token at rest, and nobody ever read it back.
+      # This is the exact shape the old derivation reported as `content_bound:
+      # true`, and it is the shape the criterion forbids from reading true.
+      {:ok, site} =
+        Registry.create_site(bp, %{
+          name: "Legacy",
+          slug: "legacy",
+          kind: "static",
+          framework: "astro",
+          bootstrap_workspace: "acme",
+          bootstrap_project: "blog",
+          bootstrap_dataset: "production",
+          read_token: "bpt_legacy_at_rest"
+        })
+
+      # The premise of the mutation: the token IS there. The old derivation had
+      # everything it needed to answer `true`.
+      assert is_binary(site.read_token_encrypted)
+      assert site.content_binding_verdict == "never_checked"
+      assert site.content_binding_checked_at == nil
+
+      json = json_body(call(:get, "/v1/sites/#{site.id}", nil, token))["site"]
+
+      # An HONEST UNKNOWN — JSON null, which the console reads as "unknown"
+      # (app.js only renders a promise for a literal boolean). Never `true`,
+      # and deliberately not `false` either: nobody looked.
+      assert json["content_bound"] == nil
+      assert json["content_binding_verdict"] == "never_checked"
+      assert json["content_binding_checked_at"] == nil
+    end
+
+    test "an UNVERIFIED read persists unverified — content_bound stays unknown, not a promise" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}},
+        # A 200 the control plane cannot interpret is a control-plane blind spot,
+        # not a verdict on the user's content (charter D75) — so the site is
+        # created, and the row says the read could not be confirmed.
+        "/w/acme/p/blog/v1/data/query/production/post" =>
+          {:ok, %{status: 200, body: ~s({"shape":"we do not know"})}}
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            framework: "astro",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production"
+          },
+          token
+        )
+
+      assert conn.status == 201
+      body = json_body(conn)
+      assert body["content_binding"]["status"] == "unverified"
+
+      site = Registry.get_site(body["site"]["id"])
+      assert site.content_binding_verdict == "unverified"
+      # The attempt HAPPENED, so it is stamped — "we tried at T and could not
+      # tell" is a different fact from "nobody ever looked".
+      assert %DateTime{} = site.content_binding_checked_at
+
+      # A token was minted, so the OLD derivation answered `true` here. It must
+      # not: an unverified binding is unknown.
+      assert is_binary(site.read_token_encrypted)
+      assert body["site"]["content_bound"] == nil
+      assert body["site"]["content_binding_verdict"] == "unverified"
+    end
+
+    test "a CONTAINER site persists not_applicable — content_bound is a definite FALSE, unstamped" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      conn =
+        call(:post, "/v1/sites", %{barkpark_id: bp.id, name: "api", kind: "container"}, token)
+
+      assert conn.status == 201
+      body = json_body(conn)
+
+      site = Registry.get_site(body["site"]["id"])
+      assert site.content_binding_verdict == "not_applicable"
+      # Nothing was READ, so nothing is stamped — a timestamp here would be a
+      # fabricated observation.
+      assert site.content_binding_checked_at == nil
+
+      # A container site HAS no content binding, and that is knowable without
+      # reading anything — so this one is a definite false, not an unknown.
+      assert body["site"]["content_bound"] == false
+      assert body["site"]["content_binding_verdict"] == "not_applicable"
     end
 
     # A container site has no binding, so the 201 must invent no verdict about one.
@@ -3720,6 +3982,92 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert retry.status == 200
       assert json_body(retry)["status"] == "already_uploaded"
       assert Registry.get_deployment(dep["id"]).status == "queued"
+    end
+  end
+
+  ## dr-w11 — THE PUBLISH TRIGGER IS ON THE WIRE, ON EVERY SITE-SHAPED ROUTE.
+  ##
+  ## Eight of guerrilla's thirteen sites had no content-publish webhook, and the
+  ## payload described them EXACTLY like the five that did. `publish_trigger` is
+  ## the key that ends that: derived by `Registry.publish_trigger/1`, emitted by
+  ## the ONE `site_json/2` every site-shaped route pipes, so `bp`, the SPA and
+  ## the console gain it together rather than one surface at a time.
+
+  describe "site payload: publish_trigger (dr-w11)" do
+    test "EVERY site-shaped route carries it — create, list and read" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}}
+      })
+
+      created =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "trigger-blog",
+            kind: "static",
+            framework: "astro",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production"
+          },
+          token
+        )
+
+      assert created.status == 201
+      assert json_body(created)["site"]["publish_trigger"] == "present"
+      site_id = json_body(created)["site"]["id"]
+
+      listed = call(:get, "/v1/sites", nil, token)
+      assert listed.status == 200
+      row = Enum.find(json_body(listed)["sites"], &(&1["id"] == site_id))
+      assert row["publish_trigger"] == "present"
+
+      read = call(:get, "/v1/sites/#{site_id}", nil, token)
+      assert read.status == 200
+      assert json_body(read)["site"]["publish_trigger"] == "present"
+    end
+
+    test "a site with no minted secret reads `absent` — the state no surface could report" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+      site = static_site(bp)
+
+      # The six of guerrilla's eight that no sweep can repair: content-bound,
+      # production dataset, and no content-publish secret was ever minted, so
+      # their per-site receiver 404s every delivery it could ever get.
+      site
+      |> Ecto.Changeset.change(content_webhook_secret_encrypted: nil)
+      |> BarkparkCloud.Repo.update!()
+
+      read = call(:get, "/v1/sites/#{site.id}", nil, token)
+      assert read.status == 200
+      assert json_body(read)["site"]["publish_trigger"] == "absent"
+    end
+
+    test "a container site reads `not_applicable` — an absence that is not a fault" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      {:ok, site} =
+        Registry.create_site(bp, %{
+          name: "App #{System.unique_integer([:positive])}",
+          slug: "app-#{System.unique_integer([:positive])}",
+          kind: "container",
+          framework: "nextjs"
+        })
+
+      read = call(:get, "/v1/sites/#{site.id}", nil, token)
+      assert read.status == 200
+      assert json_body(read)["site"]["publish_trigger"] == "not_applicable"
     end
   end
 end

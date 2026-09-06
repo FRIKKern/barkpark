@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -120,8 +121,8 @@ func loadManifestUncached(g globals, ctx manifest.Context) (*manifest.Manifest, 
 		// misdiagnosed failure traded for a transient one. The file override is
 		// for running before /v1/capabilities is deployed; it is NOT a
 		// workaround for a refusal, which is what the on-disk cache is for.
-		return nil, fmt.Errorf("acquire manifest from %s%s: %w (hint: to run before /v1/capabilities is deployed, set BARKPARK_MANIFEST=<file> or pass --manifest <file> — the file must have been fetched WITH your credential, since a manifest fetched anonymously carries auth_tier \"none\" and hides every command you are entitled to)",
-			ctx.Server, manifest.CapabilitiesPath, err)
+		return nil, fmt.Errorf("acquire manifest from %s%s: %w (hint: to run before /v1/capabilities is deployed, set BARKPARK_MANIFEST=<file> or pass --manifest <file> — write that file with `%s` WHILE THE SERVER IS HEALTHY and WITH your credential, since a manifest fetched anonymously carries auth_tier \"none\" and hides every command you are entitled to; plain `bp capabilities -o json` writes the RENDERED brief view, which is NOT loadable)",
+			ctx.Server, manifest.CapabilitiesPath, err, manifestCaptureCmd)
 	}
 	return m, nil
 }
@@ -135,14 +136,55 @@ func manifestOverridePath(g globals) string {
 	return os.Getenv("BARKPARK_MANIFEST")
 }
 
+// manifestCaptureCmd is THE single command that writes a file
+// --manifest/BARKPARK_MANIFEST can load, and it is the ONLY string any hint
+// about the escape hatch may name (task-9f726e783347b60e). `bp capabilities
+// -o json` — the obvious guess, and what the old hint left the reader to
+// invent — emits the legend-compressed BRIEF rendering (capsbrief.go), which
+// the strict manifest decoder rejects with an internal Go field name. `--full`
+// is the existing opt-out that makes runCapabilities print the manifest
+// document itself, and that document round-trips through manifest.Parse: every
+// modelled field carries a json tag and the one unmodelled field
+// (Command.WritesDeclared) is `json:"-"`.
+const manifestCaptureCmd = "bp capabilities --full -o json > <file>"
+
 func loadManifestFile(path string) (*manifest.Manifest, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read manifest file %s: %w", path, err)
+	}
+	// Name the MISTAKE, not the field. A brief document fails manifest.Parse
+	// anyway, but it fails as `json: unknown field "legend"` (or, depending on
+	// decode order, `cannot unmarshal array into Go struct field
+	// Manifest.commands of type manifest.commandFields`) — a sentence about
+	// bp's internals that tells a stuck operator nothing about what they did or
+	// what to do instead. The brief is refused rather than adapted BECAUSE IT
+	// CANNOT DRIVE THE CLI: its command tuples carry noun/verb/summary/
+	// auth_tier/writes/args/flags and no `http` block at all, so not one
+	// command in it has a method or a path_template to call. Accepting it would
+	// buy a manifest that loads and then fails on every single dispatch.
+	if renderedBriefView(body) {
+		return nil, fmt.Errorf("manifest file %s is the RENDERED `bp capabilities -o json` view, not a capabilities manifest: that rendering is legend-compressed and drops every command's http method and path template, so no command in it can be dispatched. Write a loadable file with `%s`", path, manifestCaptureCmd)
 	}
 	m, err := manifest.Parse(body)
 	if err != nil {
 		return nil, fmt.Errorf("parse manifest file %s: %w", path, err)
 	}
 	return m, nil
+}
+
+// renderedBriefView reports whether body is the BRIEF-KEEP-LIST v1 rendering
+// `bp capabilities -o json` emits (briefDoc, capsbrief.go) rather than a server
+// capabilities document. The discriminator is the top-level legend header:
+// briefDoc always emits it (no omitempty) and manifest.Manifest has no such
+// field, so presence is exact in both directions. A body that is not even JSON
+// is not the brief — it falls through to manifest.Parse, whose error is then
+// the right one.
+func renderedBriefView(body []byte) bool {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(body, &top); err != nil {
+		return false
+	}
+	_, ok := top[briefLegendKey]
+	return ok
 }

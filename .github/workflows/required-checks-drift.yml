@@ -126,6 +126,14 @@ permissions:
   pull-requests: read
 
 concurrency:
+  # NOT main-collapsed (task-e376642d6d69fa3f, 2026-09-06). #16500 collapsed this
+  # workflow with the other harness arms and reddened `Shell harnesses` on main
+  # within the hour: this file hosts the stale-tree regression check, and
+  # scripts/stale-tree-ci-wiring.test.sh pins its concurrency to the per-sha
+  # form so that EVERY main sha gets that verdict — a reland or a stale tree
+  # landing between two merges must not lose its reading to an eviction. The
+  # per-sha shape is the same trade the collapse rejects elsewhere, kept here on
+  # purpose; the other five harness workflows carry the marker, this one does not.
   group: required-checks-drift-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # Mirror elixir.yml: cancel superseded PR runs, never cancel main.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}

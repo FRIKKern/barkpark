@@ -15,6 +15,10 @@ defmodule Barkpark.Auth do
   # tiny — single-use + short TTL are the two mitigations for consuming on GET.
   @login_ticket_ttl_seconds 60
 
+  # Upper bound on rows one `sweep_login_tickets_batch/1` statement removes, so
+  # a cold first pass over a never-swept table is not one giant transaction.
+  @default_sweep_batch_limit 5_000
+
   # P5 share-edit token TTL policy (owner decision 2026-06-09): default 7 days,
   # hard cap 1 year. Write access is higher-risk than the anonymous read share,
   # so an edit token always expires.
@@ -181,10 +185,39 @@ defmodule Barkpark.Auth do
   def consume_login_ticket(_), do: {:error, :invalid}
 
   @doc """
-  Delete expired or spent login tickets. Best-effort GC — returns the count
-  removed. A spent/expired row carries no live secret (its api_token is only
-  reachable by a WINNING consume, which never happens again), so retention is a
-  hygiene concern, not a security one.
+  Delete expired or spent login tickets. Returns the count removed.
+
+  A SPENT OR EXPIRED ROW STILL HOLDS A LIVE CREDENTIAL. An earlier version of
+  this docstring argued the opposite — that a dead row "carries no live secret
+  (its api_token is only reachable by a WINNING consume, which never happens
+  again), so retention is a hygiene concern, not a security one". That was a
+  claim about the CONSUME PATH, and it was wrong about the row. Measured, not
+  reasoned (`Barkpark.Auth.LoginTicketSweeperTest`, "the retention question"):
+
+    * `api_token` is a `Barkpark.EncryptedBinary` field, so a plain
+      `Repo.one/1` load DECRYPTS the column — the consume path is not the only
+      reader. The bytes at rest are ciphertext (verified), but every reader
+      holding the Cloak key gets the plaintext bearer back: a dump, a replica,
+      a backup, any code with `Repo`.
+    * Presenting that recovered bearer to `POST /v1/auth/login-tickets` (a
+      route that returns 401 for a garbage bearer and for no bearer) returns
+      **201** — from a SPENT row and from an EXPIRED-BUT-UNUSED row alike. It
+      does not merely authenticate; it mints a fresh handoff ticket.
+    * Consuming a ticket does not revoke the bound token. It cannot: the bound
+      token is the operator's real long-lived api_token, which is the entire
+      point of the handoff.
+    * The expired-but-unused arm is in this sweep's predicate
+      (`expires_at <= now` with `used_at` still nil) and was never consumed at
+      all, so a reachability-through-consume argument never even reaches it.
+
+  So retention here is a SECURITY concern: every un-swept row is a re-entry
+  credential retained forever against a documented 60-second life. That is why
+  `Barkpark.Auth.LoginTicketSweeper` runs this every minute — the cadence is
+  the retention floor, not a housekeeping preference.
+
+  Unbounded: deletes the whole eligible backlog in one statement. Production
+  drives `sweep_login_tickets_batch/1` instead; this form is kept for tests and
+  for a deliberate one-shot purge.
   """
   @spec sweep_login_tickets() :: non_neg_integer()
   def sweep_login_tickets do
@@ -196,6 +229,44 @@ defmodule Barkpark.Auth do
       |> Repo.delete_all()
 
     count
+  end
+
+  @doc """
+  ONE BOUNDED PASS of `sweep_login_tickets/0` — deletes at most
+  `:login_ticket, :sweep_batch_limit` rows (default #{@default_sweep_batch_limit}),
+  OLDEST first, and returns how many it removed.
+
+  `sweep_login_tickets/0` is a single unbounded DELETE. That is fine for a
+  table swept regularly; it is not fine for the first pass over a table that
+  has never been swept at all, which is exactly the state `login_tickets` was
+  in (`Barkpark.Auth.LoginTicketSweeper` explains why). The subquery picks the
+  oldest `limit` eligible ids and the outer DELETE removes just those, so one
+  statement is bounded no matter how deep the backlog is. Returning 0 means
+  "nothing eligible left" and is the loop's terminator.
+
+  Same predicate as the unbounded form — `used_at IS NOT NULL OR expires_at <=
+  now` — so the two are never eligible for different rows. "Oldest" is
+  `expires_at ASC`, the column the create migration indexed.
+  """
+  @spec sweep_login_tickets_batch(DateTime.t()) :: non_neg_integer()
+  def sweep_login_tickets_batch(now \\ DateTime.utc_now()) do
+    victims =
+      from t in LoginTicket,
+        where: not is_nil(t.used_at) or t.expires_at <= ^now,
+        order_by: [asc: t.expires_at],
+        limit: ^sweep_batch_limit(),
+        select: t.id
+
+    {count, _} =
+      from(t in LoginTicket, where: t.id in subquery(victims))
+      |> Repo.delete_all()
+
+    count
+  end
+
+  defp sweep_batch_limit do
+    Application.get_env(:barkpark, :login_ticket, [])
+    |> Keyword.get(:sweep_batch_limit, @default_sweep_batch_limit)
   end
 
   @doc false
@@ -770,10 +841,59 @@ defmodule Barkpark.Auth do
     end
   end
 
-  def list_tokens(dataset) do
-    ApiToken
-    |> where([t], t.dataset == ^dataset)
-    |> Repo.all()
+  @doc """
+  Tokens bound to `dataset` **inside `workspace_id`** — SECRET-FREE rows.
+
+  THE FENCE IS THE FIRST ARGUMENT, and it is not optional. `dataset` is a
+  per-tenant STRING: every workspace on an instance has a `"production"`, so
+  the old dataset-only `list_tokens/1` answered "every token on the box that
+  happens to share this dataset name" while reading like the tenant inventory.
+  It took no actor, crossed every workspace, and returned whole `%ApiToken{}`
+  structs — `token_hash` included. Nothing on a request path called it, which
+  is exactly why it had to be closed BEFORE one did.
+
+  Two rails, both load-bearing:
+
+    * `workspace_id` is REQUIRED and a nil/malformed id answers `[]` — it never
+      falls back to the Default workspace. A fence with a permissive nil arm is
+      not a fence: the next caller that forgets to thread a workspace would get
+      the Default tenant's credentials instead of a denial.
+    * The select list is SECRET-FREE, mirroring the fenced twin
+      `Barkpark.Tenancy.Members.list_workspace_tokens/1` ("Secrets are never
+      selected"). Rows come back as MAPS, not structs, so `token_hash` cannot
+      be reached even by accident. A consequence worth stating: these rows are
+      NOT `%ApiToken{}`, so `revoke_token/1` must be called with `row.id` (its
+      binary-id clause), never with the row.
+
+  `Members.list_workspace_tokens/1` remains the workspace ROSTER (it joins
+  memberships and carries the seat `role`). This door is the narrower
+  dataset-within-workspace question the seed bootstrap and the cloud warmpool
+  provisioning recipe ask.
+  """
+  @spec list_tokens(binary() | nil, binary()) :: [map()]
+  def list_tokens(workspace_id, dataset) do
+    case Repo.uuid_or_nil(workspace_id) do
+      nil ->
+        []
+
+      uuid ->
+        ApiToken
+        |> where([t], t.dataset == ^dataset and t.workspace_id == ^uuid)
+        |> select([t], %{
+          id: t.id,
+          label: t.label,
+          name: t.name,
+          kind: t.kind,
+          permissions: t.permissions,
+          dataset: t.dataset,
+          workspace_id: t.workspace_id,
+          revoked_at: t.revoked_at,
+          expires_at: t.expires_at,
+          last_used_at: t.last_used_at,
+          inserted_at: t.inserted_at
+        })
+        |> Repo.all()
+    end
   end
 
   # ── PAT fast-follow: self-service Personal Access Tokens ───────────────

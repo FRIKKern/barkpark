@@ -1,0 +1,367 @@
+{
+  "what": "D138 characterisation sweep \u2014 spd-instrument-nondeterminism-characterised criterion 0",
+  "generated_at": "2026-09-06T07:34:06Z",
+  "method": {
+    "invocations": 22,
+    "flags": "--json --retries=0 --doc=pds-w23-triage-round-2026-09-06 --out <path>",
+    "why_retries_zero": "RAW per-invocation rates. With the default --retries=2 a retryable abort is absorbed and the underlying rate becomes unobservable \u2014 which is the number D138 asked for.",
+    "stderr_captured": "every invocation, without exception (failure B went undiagnosed for seven weeks because one operator suppressed it)",
+    "instrument_sha256": "56254773ffc45924e7c5f02f122dbc1cec2d97135a6edfb68cf6d8e9babb2638",
+    "instrument_note": "byte-identical to scripts/studio-desk-measure.mjs at commit cd49aeefb; run from a pinned copy so editing the worktree could not change the instrument mid-sweep",
+    "browser": "bundled chromium 147.0.7727.15 (browser_policy=bundled)",
+    "target": "https://guerrilla.barkpark.cloud"
+  },
+  "outcome_table": {
+    "completed_54_rows": 19,
+    "abort_provenance_bracket": 2,
+    "abort_browser_race": 1,
+    "abort_drill": 0,
+    "of": 22
+  },
+  "the_finding": "All three aborts fall inside one 6m44s window, 07:11:11Z-07:17:55Z, in which the served SHA moved a99e366f2 -> 0a3886ac6 and the live slot rotated blue -> green. Outside that window: 19 of 19 clean. The instrument is not ~80% deterministic; it fails while the deployment it measures is replaced underneath it, which is what the provenance bracket exists to force.",
+  "face_override": {
+    "forced_face_rows_measured": 684,
+    "substitutions": 0,
+    "rate": "0 substitutions in 684 forced-face rows across 19 completed runs; with D138's own prior observation, 1 substitution in ~30 completed runs",
+    "reachability_into_d107_seven": "PROVEN POSSIBLE, mechanically: the force -> resolve stretch of PAGE_MEASURE reads no viewport quantity, and face_applied has no width term. Pinned in scripts/studio-desk-instrument-reliability.test.mjs."
+  },
+  "reproduction": {
+    "tool": "scripts/studio-desk-compare.mjs (mechanical, keyed, tolerance zero)",
+    "within_served_sha": "all 54 rows reproduce field for field in 19 of 19 completed runs",
+    "across_the_sha_boundary": "the only per-row fields that differ are served_sha and slot_active \u2014 the provenance stamps. No geometry field moved.",
+    "header_only_divergence": "r10 is DIVERGENT against its own segment on the provenance header alone (the blue unit was still deactivating); its 54 rows are identical."
+  },
+  "invocations": [
+    {
+      "invocation": 1,
+      "exit_code": 0,
+      "stdout_bytes": 764387,
+      "started_at": "2026-09-06T07:05:02Z",
+      "ended_at": "2026-09-06T07:06:15Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "a99e366f2cd498248881eae25904fc46967e63fa",
+      "slot_active": [
+        "blue"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 2,
+      "exit_code": 0,
+      "stdout_bytes": 764387,
+      "started_at": "2026-09-06T07:06:15Z",
+      "ended_at": "2026-09-06T07:07:27Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "a99e366f2cd498248881eae25904fc46967e63fa",
+      "slot_active": [
+        "blue"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 3,
+      "exit_code": 0,
+      "stdout_bytes": 764387,
+      "started_at": "2026-09-06T07:07:27Z",
+      "ended_at": "2026-09-06T07:08:39Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "a99e366f2cd498248881eae25904fc46967e63fa",
+      "slot_active": [
+        "blue"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 4,
+      "exit_code": 0,
+      "stdout_bytes": 764387,
+      "started_at": "2026-09-06T07:08:39Z",
+      "ended_at": "2026-09-06T07:09:52Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "a99e366f2cd498248881eae25904fc46967e63fa",
+      "slot_active": [
+        "blue"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 5,
+      "exit_code": 0,
+      "stdout_bytes": 764390,
+      "started_at": "2026-09-06T07:09:52Z",
+      "ended_at": "2026-09-06T07:11:11Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "a99e366f2cd498248881eae25904fc46967e63fa",
+      "slot_active": [
+        "blue"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 6,
+      "exit_code": 1,
+      "stdout_bytes": 0,
+      "started_at": "2026-09-06T07:11:11Z",
+      "ended_at": "2026-09-06T07:12:25Z",
+      "outcome": "provenance-bracket",
+      "stderr": "fatal: not a git repository (or any parent up to mount point /Volumes)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n\nMEASURE FAILED \u2014 no matrix was produced.\n\nPROVENANCE BRACKET FAILED \u2014 the deployment moved UNDER the sweep, so all 54 records carry a provenance stamp this run cannot support. Discarding the matrix.\n\n  - SERVED SHA CHANGED MID-SWEEP: a99e366f2cd498248881eae25904fc46967e63fa (read 2026-09-06T07:11:12.662Z) -> 0a3886ac6c274974ae4b012afbe5e6fed82ac475 (read 2026-09-06T07:12:25.577Z). A deploy landed inside the measurement window. Rows measured before it describe one build and rows after it describe another, and NOTHING in the matrix says which is which \u2014 this is precisely the silent misattribution the bracket exists to catch.\n\n  Window: 2026-09-06T07:11:12.662Z -> 2026-09-06T07:12:25.577Z (73s). Every row carries its own `measured_at`, so a partial salvage is possible \u2014 but this harness will not do it silently. Wait for the deploy to finish and re-run.\n\n  RETRYABLE ABORT \"provenance-bracket\" \u2014 this is a race the harness lost, not a fact about the desk, and re-running is the CORRECT response rather than a deviation (1 attempt(s) made). The full list of retryable aborts is RETRYABLE_ABORTS in this file."
+    },
+    {
+      "invocation": 7,
+      "exit_code": 0,
+      "stdout_bytes": 764393,
+      "started_at": "2026-09-06T07:12:25Z",
+      "ended_at": "2026-09-06T07:13:50Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "0a3886ac6c274974ae4b012afbe5e6fed82ac475",
+      "slot_active": [
+        "blue"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 8,
+      "exit_code": 1,
+      "stdout_bytes": 0,
+      "started_at": "2026-09-06T07:13:50Z",
+      "ended_at": "2026-09-06T07:15:47Z",
+      "outcome": "browser-race",
+      "stderr": "fatal: not a git repository (or any parent up to mount point /Volumes)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n\nMEASURE FAILED \u2014 no matrix was produced.\n\npage.evaluate: Execution context was destroyed, most likely because of a navigation\n    at waitForDeskSettled (/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark--claude-worktrees-media-anon-read-clamp/57cf53dc-13a5-495c-9ff5-3dd5018724cd/scratchpad/orchestrate/tmp/studio5-w1/pinned/scripts/studio-desk-measure.mjs:2050:28)\n    at async runB29Probes (/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark--claude-worktrees-media-anon-read-clamp/57cf53dc-13a5-495c-9ff5-3dd5018724cd/scratchpad/orchestrate/tmp/studio5-w1/pinned/scripts/studio-desk-measure.mjs:2891:3)\n    at async main (/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark--claude-worktrees-media-anon-read-clamp/57cf53dc-13a5-495c-9ff5-3dd5018724cd/scratchpad/orchestrate/tmp/studio5-w1/pinned/scripts/studio-desk-measure.mjs:3438:22)\n    at async runWithRetries (/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark--claude-worktrees-media-anon-read-clamp/57cf53dc-13a5-495c-9ff5-3dd5018724cd/scratchpad/orchestrate/tmp/studio5-w1/pinned/scripts/studio-desk-measure.mjs:4179:21)"
+    },
+    {
+      "invocation": 9,
+      "exit_code": 1,
+      "stdout_bytes": 0,
+      "started_at": "2026-09-06T07:15:47Z",
+      "ended_at": "2026-09-06T07:17:55Z",
+      "outcome": "provenance-bracket",
+      "stderr": "fatal: not a git repository (or any parent up to mount point /Volumes)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n\nMEASURE FAILED \u2014 no matrix was produced.\n\nPROVENANCE BRACKET FAILED \u2014 the deployment moved UNDER the sweep, so all 54 records carry a provenance stamp this run cannot support. Discarding the matrix.\n\n  - LIVE SLOT CHANGED MID-SWEEP: [blue] (read 2026-09-06T07:15:48.630Z) -> [green] (read 2026-09-06T07:17:55.008Z). The SHA held, so this is most likely a benign same-SHA rotation \u2014 but the app RESTARTED under the sweep, so earlier rows were served by a different process than later ones and this run cannot certify a single serving state.\n\n  Window: 2026-09-06T07:15:48.630Z -> 2026-09-06T07:17:55.008Z (126s). Every row carries its own `measured_at`, so a partial salvage is possible \u2014 but this harness will not do it silently. Wait for the deploy to finish and re-run.\n\n  RETRYABLE ABORT \"provenance-bracket\" \u2014 this is a race the harness lost, not a fact about the desk, and re-running is the CORRECT response rather than a deviation (1 attempt(s) made). The full list of retryable aborts is RETRYABLE_ABORTS in this file."
+    },
+    {
+      "invocation": 10,
+      "exit_code": 0,
+      "stdout_bytes": 764578,
+      "started_at": "2026-09-06T07:17:55Z",
+      "ended_at": "2026-09-06T07:19:16Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "0a3886ac6c274974ae4b012afbe5e6fed82ac475",
+      "slot_active": [
+        "green"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 11,
+      "exit_code": 0,
+      "stdout_bytes": 764448,
+      "started_at": "2026-09-06T07:19:16Z",
+      "ended_at": "2026-09-06T07:20:35Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "0a3886ac6c274974ae4b012afbe5e6fed82ac475",
+      "slot_active": [
+        "green"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 12,
+      "exit_code": 0,
+      "stdout_bytes": 764448,
+      "started_at": "2026-09-06T07:20:35Z",
+      "ended_at": "2026-09-06T07:21:52Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "0a3886ac6c274974ae4b012afbe5e6fed82ac475",
+      "slot_active": [
+        "green"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 13,
+      "exit_code": 0,
+      "stdout_bytes": 764448,
+      "started_at": "2026-09-06T07:21:52Z",
+      "ended_at": "2026-09-06T07:23:06Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "0a3886ac6c274974ae4b012afbe5e6fed82ac475",
+      "slot_active": [
+        "green"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 14,
+      "exit_code": 0,
+      "stdout_bytes": 764448,
+      "started_at": "2026-09-06T07:23:06Z",
+      "ended_at": "2026-09-06T07:24:18Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "0a3886ac6c274974ae4b012afbe5e6fed82ac475",
+      "slot_active": [
+        "green"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 15,
+      "exit_code": 0,
+      "stdout_bytes": 764451,
+      "started_at": "2026-09-06T07:24:18Z",
+      "ended_at": "2026-09-06T07:25:30Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "0a3886ac6c274974ae4b012afbe5e6fed82ac475",
+      "slot_active": [
+        "green"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 16,
+      "exit_code": 0,
+      "stdout_bytes": 764448,
+      "started_at": "2026-09-06T07:25:30Z",
+      "ended_at": "2026-09-06T07:26:42Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "0a3886ac6c274974ae4b012afbe5e6fed82ac475",
+      "slot_active": [
+        "green"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 17,
+      "exit_code": 0,
+      "stdout_bytes": 764448,
+      "started_at": "2026-09-06T07:26:42Z",
+      "ended_at": "2026-09-06T07:27:57Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "0a3886ac6c274974ae4b012afbe5e6fed82ac475",
+      "slot_active": [
+        "green"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 18,
+      "exit_code": 0,
+      "stdout_bytes": 764449,
+      "started_at": "2026-09-06T07:27:57Z",
+      "ended_at": "2026-09-06T07:29:10Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "0a3886ac6c274974ae4b012afbe5e6fed82ac475",
+      "slot_active": [
+        "green"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 19,
+      "exit_code": 0,
+      "stdout_bytes": 764448,
+      "started_at": "2026-09-06T07:29:10Z",
+      "ended_at": "2026-09-06T07:30:25Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "0a3886ac6c274974ae4b012afbe5e6fed82ac475",
+      "slot_active": [
+        "green"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 20,
+      "exit_code": 0,
+      "stdout_bytes": 764448,
+      "started_at": "2026-09-06T07:30:25Z",
+      "ended_at": "2026-09-06T07:31:42Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "0a3886ac6c274974ae4b012afbe5e6fed82ac475",
+      "slot_active": [
+        "green"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 21,
+      "exit_code": 0,
+      "stdout_bytes": 764448,
+      "started_at": "2026-09-06T07:31:42Z",
+      "ended_at": "2026-09-06T07:32:53Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "0a3886ac6c274974ae4b012afbe5e6fed82ac475",
+      "slot_active": [
+        "green"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    },
+    {
+      "invocation": 22,
+      "exit_code": 0,
+      "stdout_bytes": 764448,
+      "started_at": "2026-09-06T07:32:53Z",
+      "ended_at": "2026-09-06T07:34:06Z",
+      "outcome": "completed",
+      "rows": 54,
+      "served_sha": "0a3886ac6c274974ae4b012afbe5e6fed82ac475",
+      "slot_active": [
+        "green"
+      ],
+      "forced_face_rows": 36,
+      "face_substitutions": 0,
+      "warnings": 3
+    }
+  ]
+}

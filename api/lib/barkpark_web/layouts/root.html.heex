@@ -3913,12 +3913,28 @@
     .phx-disconnected { opacity: 0.7; }
     [data-phx-main] { min-height: 100%; }
 
-    /* In-flight click/submit guard. LiveView stamps `phx-click-loading` /
-       `phx-submit-loading` on the triggering element while its server event is
-       in flight; dimming + killing pointer-events blocks a second re-fire of a
-       heavy or non-idempotent mutation (publish, duplicate, delete) on a slow
-       link. No JS — the classes come from the LV client. */
-    .phx-click-loading, .phx-submit-loading { pointer-events: none; opacity: 0.6; }
+    /* In-flight click/submit guard — THE VISUAL HALF ONLY. LiveView stamps
+       `phx-click-loading` / `phx-submit-loading` on the triggering element
+       while its server event is in flight; the dim says "this one is working".
+
+       `pointer-events: none` USED TO LIVE ON THIS LINE and was removed by
+       spd-w19-click-loading-falls-through. It never swallowed the second
+       press: it made the in-flight element TRANSPARENT TO HIT-TESTING, so an
+       impatient second press was delivered to whatever sits UNDERNEATH —
+       wherever an in-flight control overlaps a DIFFERENT phx-click element
+       (stacked rows, a header action over a row, an overlay) that fires a
+       server event the user never aimed at, and neither LiveView nor the
+       press-answer hook can see it, because the press never reaches the
+       intended element at all.
+
+       The BLOCKING half is now the capture-phase listener fenced as
+       BP-INFLIGHT-GUARD-BEGIN/END in the app script below: the element stays
+       in the hit-test and the activation is swallowed, so the worst case is a
+       press that goes nowhere (which the press-answer region names) rather
+       than a press that goes somewhere WRONG. Never `phx-disable-with`
+       (charter D225). Both halves are driven together by
+       `scripts/studio-inflight-guard-control.mjs`. */
+    .phx-click-loading, .phx-submit-loading { opacity: 0.6; }
 
     /* The WORDS half of that guard (spd-w19 / charter D263). The tint above is
        wordless, silent to assistive tech, and UNBOUNDED (PUSH_TIMEOUT is
@@ -5837,6 +5853,56 @@
 
     // BarkparkPaperContextMenu (and its bpPaperCtxMenu* module helpers) now
     // live in /assets/bp-paper-editor-hooks.js, merged in above.
+
+    // ── IN-FLIGHT ACTIVATION GUARD (spd-w19-click-loading-falls-through) ──
+    //
+    // The blocking half of the in-flight guard whose visual half is
+    // `.phx-click-loading, .phx-submit-loading { opacity: .6 }` in the sheet
+    // above. It replaces that rule's former `pointer-events: none`, which
+    // blocked activation ONLY by removing the in-flight element from hit
+    // testing — so the press it was meant to eat was instead DELIVERED TO
+    // WHATEVER SAT UNDERNEATH, firing a server event the user never aimed at.
+    //
+    // DOCUMENT, CAPTURE PHASE, and both are load-bearing. LiveView binds its
+    // own click on `window` in the BUBBLE phase (live_socket.js:830-833), so a
+    // document-capture listener runs strictly first and
+    // `stopImmediatePropagation()` there ends the event for every later
+    // listener in any phase — including the press-answer hook's own bubble
+    // listener on #studio-panes. DOCUMENT, not the desk root, because the CSS
+    // rule this replaces was global: scoping the guard to #studio-panes would
+    // leave every other surface (the studio-tab strip, the top bar, forms, the
+    // Papers editor) with no re-fire protection at all.
+    //
+    // `preventDefault()` as well as the propagation stop, because a swallowed
+    // press must not take the DEFAULT action either — a link navigation, a
+    // checkbox toggle, an implicit form submit — all of which
+    // `pointer-events: none` also suppressed. Keyboard activation reaches this
+    // listener as a synthetic click on the same element, so an in-flight
+    // control is blocked from the keyboard too, and a control that is NOT
+    // in-flight matches nothing here and is untouched.
+    //
+    // THE WORDS. When the blocked control is inside #studio-panes the
+    // press-answer region says the same sentence the press-answer hook's
+    // discard branch says (D263), because this listener now runs BEFORE that
+    // hook and would otherwise have turned a named drop back into silence.
+    // Outside the desk this guard is silent — the press-answer slice covers
+    // #studio-panes only, and a guard is not the place to widen it.
+    //
+    // BP-INFLIGHT-GUARD-BEGIN
+    document.addEventListener("click", function (ev) {
+      var t = ev.target;
+      if (!t || !t.closest) return;
+      var blocked = t.closest(".phx-click-loading, .phx-submit-loading");
+      if (!blocked) return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      var desk = document.getElementById("studio-panes");
+      var region = document.getElementById("bp-press-answer");
+      if (!desk || !region || !desk.contains(blocked)) return;
+      var say = "Still working on your last press — that one was not sent.";
+      if (region.textContent !== say) region.textContent = say;
+    }, true);
+    // BP-INFLIGHT-GUARD-END
 
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
       params: {

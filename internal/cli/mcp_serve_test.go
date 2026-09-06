@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -58,6 +57,12 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	os.Stdout = w
 	restore := func() { os.Stdout = origStdout }
 	defer restore()
+	// Drain the pipe concurrently. A darwin pipe's buffer starts at 512 bytes
+	// (Linux gives 64 KiB), so a reader that only runs after the code under test
+	// returns turns the very failure this asserts on — a stray write to
+	// os.Stdout — into a deadlock instead of an assertion.
+	stdoutCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); stdoutCh <- b }()
 
 	// A stand-in Barkpark API. Routes by path so one server backs every tool call.
 	// closeBody captures what the task_close handler actually POSTed, so the
@@ -411,10 +416,9 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	ss.Close()
 	w.Close()
 	restore()
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	if buf.Len() != 0 {
-		t.Fatalf("bp MCP code wrote %d bytes to os.Stdout (corrupts a real stdio protocol stream): %q", buf.Len(), buf.String())
+	buf := <-stdoutCh
+	if len(buf) != 0 {
+		t.Fatalf("bp MCP code wrote %d bytes to os.Stdout (corrupts a real stdio protocol stream): %q", len(buf), buf)
 	}
 }
 
@@ -621,6 +625,74 @@ func TestMCPTaskCreateSurfacesWarnings(t *testing.T) {
 	}
 	if receipt.Warnings[0]["code"] != "label_norm" || receipt.Warnings[0]["message"] != "tags: advisory norm is 2–4" {
 		t.Fatalf("receipt.warnings[0] = %v, want the {label_norm, …} advisory intact", receipt.Warnings[0])
+	}
+	// task-ee33b6f088b35bdb — the publish CONSUMED drafts.task-1, so a receipt
+	// that still names it points at a document that does not exist. The CLI
+	// twin (renderTaskCreated) is locked by
+	// TestTaskCreateJSONReceiptNamesADraftOnlyWhenOneExists; this is the MCP
+	// side of the same mirror.
+	if receipt.Draft != "" {
+		t.Fatalf("a SUCCESSFUL publish receipt still carries draft = %q; publishing consumes the draft, so that id resolves to nothing", receipt.Draft)
+	}
+}
+
+// TestMCPTaskCreateDraftReceiptNamesTheDraft is the other arm of the mirror
+// above: WITHOUT publish the draft is the only document there is, and its id is
+// the caller's sole handle for publish_command / discard. Asserted separately so
+// the publish arm cannot go green by dropping the key everywhere.
+func TestMCPTaskCreateDraftReceiptNamesTheDraft(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		if strings.Contains(req.URL.Path, "/v1/data/mutate") {
+			io.WriteString(rw, `{"results":[{"id":"drafts.task-7"}]}`)
+			return
+		}
+		rw.WriteHeader(http.StatusNotFound)
+		io.WriteString(rw, `{"error":{"code":"not_found"}}`)
+	}))
+	defer ts.Close()
+
+	m, err := manifest.Parse([]byte(mcpTestManifest))
+	if err != nil {
+		t.Fatalf("parse manifest: %v", err)
+	}
+	ctx := manifest.Context{Server: ts.URL, Token: "tok"}
+	srv := mcp.NewServer(&mcp.Implementation{Name: "barkpark-tasks", Version: "test"}, nil)
+	if err := registerTaskTools(srv, globals{yes: true}, ctx, m); err != nil {
+		t.Fatalf("registerTaskTools: %v", err)
+	}
+	serverT, clientT := mcp.NewInMemoryTransports()
+	bg := context.Background()
+	ss, err := srv.Connect(bg, serverT, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer ss.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0"}, nil)
+	cs, err := client.Connect(bg, clientT, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer cs.Close()
+
+	res, err := cs.CallTool(bg, &mcp.CallToolParams{
+		Name:      "task_create",
+		Arguments: map[string]any{"title": "a draft task", "publish": false},
+	})
+	if err != nil {
+		t.Fatalf("CallTool task_create: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("task_create unexpectedly IsError: %s", mcpContentText(res))
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(mcpContentText(res)), &raw); err != nil {
+		t.Fatalf("receipt did not parse: %v (%q)", err, mcpContentText(res))
+	}
+	if raw["status"] != "draft" {
+		t.Fatalf("receipt.status = %v, want draft — this arm must be the no-publish path", raw["status"])
+	}
+	if raw["draft"] != "drafts.task-7" {
+		t.Fatalf("draft receipt draft = %v (present=%v), want drafts.task-7 — the draft exists and the receipt must name it", raw["draft"], raw["draft"] != nil)
 	}
 }
 

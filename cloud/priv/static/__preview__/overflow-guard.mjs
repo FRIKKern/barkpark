@@ -184,6 +184,7 @@ import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
 import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
 import { assertReadyHostsPaint as assertFloor } from "./ready-host-paint.mjs";
 import { selectDefects } from "./defect-selection.mjs";
+import { attentionScenarios } from "./attention-scenarios.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
@@ -253,13 +254,24 @@ const DEFECTS = [
 // clientHeight 22` and the sentence paints 24.00px BELOW the capsule. Driven,
 // not predicted: that negative control is this leg's mutation proof.
 //
-// HEIGHTS ARE REPORTED, NOT PINNED. The remedy takes the pill to 42px at 320
-// and back to 24px from 620 up ON THIS FIXTURE, and both numbers are in the
-// slice's evidence — but the wrap boundary is a property of the STRING, not of
-// the CSS: the production-dominant "Health unknown · Agent offline" is three
-// characters longer and moves the boundary from 425/430 to 450/460 and 360 to
-// 42px. A leg that pinned 24 at 430 would pass on the fixture and red on what
-// the server serves, so the pins live in the PR and the INVARIANTS live here.
+// HEIGHTS ARE REPORTED, NOT PINNED, and cch-w18-bl is why the rule earned its
+// caps. The wrap boundary is a property of the fixture STRING, not of the CSS,
+// and until that row the fixture served a string production does not organically
+// produce: `health_status: "down"`, where `Registry.mark_offline/1` writes
+// "unknown" DELIBERATELY. Both boundaries are now DRIVEN, 1px apart, on this
+// leg's own host (`overview-attention`, `.instance-card-head .status-pill`,
+// light and dark byte-identical):
+//
+//    "Health down · Agent offline"     wraps <=343, one line >=344  (343/344)
+//    "Health unknown · Agent offline"  wraps <=364, one line >=365  (364/365)
+//
+// +21px, the same +21 the attention-row detail's clamped scrollWidth moves
+// (165 -> 186). Three characters of string bought 21 pixels of boundary, so a
+// leg that pinned "24px at 360" would have passed on the old fixture and RED on
+// what the server serves — the fixture now serves the server's string, and the
+// pins still live in the PR while the INVARIANTS live here. The block comment
+// this replaced predicted "425/430 to 450/460"; that prediction was never
+// driven and is wrong by ~80px on both sides. Predictions are not pins.
 const CARD_WIDTHS = [320, 360, 390, 430, 620, 769, 800];
 const CARD_SCENS = ["overview-attention", "mixed-fleet"];
 
@@ -290,7 +302,27 @@ const CARD_SCENS = ["overview-attention", "mixed-fleet"];
 // `min-height: 24px` are the declarations that carry it, and a horizontal-only
 // guard certifies both wrong fixes.
 const ATT_WIDTHS = [320, 360, 375, 390, 430, 620, 769, 800];
-const ATT_SCENS = ["mixed-fleet", "overview-attention", "overview-past-due"];
+// THE SCENARIO AXIS IS NO LONGER TYPED HERE (cch-w66). It used to read
+// `const ATT_SCENS = ["mixed-fleet", "overview-attention", "overview-past-due"]`
+// — three names against a corpus that renders `.attention-row` in NINETEEN
+// scenarios carrying 25 rows. Sixteen scenarios and 22 of the 25 rows were
+// outside the guard, `fleet-v4` (4 rows) and `fleet-usage` (2 rows) among them,
+// and nothing in the file could ever say so: a literal cannot notice a name it
+// does not contain. The filed row's own census said FOUR, undercounting by ~5x,
+// which is the point — a hand-maintained roster is wrong on the day it is
+// written and silent about it forever after.
+//
+// The set is now DERIVED from the SHIPPED classifier — app.js's own
+// `filterFleet(list, "attention")`, the single expression `#overview` builds its
+// queue with — read off scenarios.mjs at leg time. See attention-scenarios.mjs
+// for the derivation, the unauthed exclusion, and the two refusals it owes
+// (empty set, lost positive control). The three old names survive ONLY as that
+// positive control, never as the axis.
+//
+// The route stays pinned to `#overview` below and the landed view id is still
+// asserted per cell: the widening is on the SCENARIO axis alone, so a scenario
+// whose own deepLink points at `#fleet` or `#instance/...` (most of the sixteen
+// newcomers do) is still measured where the attention queue actually lives.
 
 // W15-S4: THE LEG THAT EXISTS BECAUSE THIS FILE WAS BLIND TO ITS OWN SUBJECT.
 // Every leg above asserts documentElement.scrollWidth — the PAGE. On the tree
@@ -441,6 +473,20 @@ const SITE = "5b2c1e00-0000-4000-8000-0000000000c1";
 //                  `<span class="v">` TEXT, so the rail exists and carries zero
 //                  `.status-pill`. Only the SITE rail emits one, through
 //                  `railRowHtml("Content binding", siteBindingPill(...))`.
+// cch-w19-bl-w13-rail-pill-pooled-zero-check — THE `.site-row` COVERAGE
+// BOUNDARY OF THIS LEG, DECLARED RATHER THAN LEFT TO BE DISCOVERED. The filing
+// asked for site-row pills to be measured "on the site-rollback and site-states
+// routes". They cannot be: BOTH of those routes are `#site/<id>` — the site
+// DETAIL page (`view: "view-site"`) — and `.site-row` is a LIST element. It is
+// emitted at exactly two sites in app.js, neither of them reachable from any of
+// the six BAND_ROUTES: `siteRow` (the compact row, `#instance/<id>` Sites tab)
+// and `globalSiteRow` (`.site-row--global`, the `#sites` list). So the honest
+// answer here is not an exemption but a REFERRAL: site-row pills are measured
+// by `W50-site-row-three-hosts-cruel-by-fixture`, which already drives BOTH row
+// builders, and which now declares and asserts each track's site-pill
+// population per row in both directions. This leg owns the RAIL pill; W50 owns
+// the ROW pill; neither silently owns both.
+//
 // So each route declares BOTH facts and BOTH are asserted per cell in BOTH
 // directions: a route that owes a rail and renders none reds, and a route
 // declared bare that starts rendering one reds too — the FLEET_KNOWN precedent
@@ -1278,10 +1324,23 @@ async function main() {
       // BUTTONS land; they say nothing about whether the row still tells the
       // operator WHY the box needs attention. This half does, on both axes.
       const D109 = "GR109-attention-row-dead-rule";
+      // DERIVED, not typed — see the note by ATT_WIDTHS. attentionScenarios()
+      // THROWS on an empty read and on a lost positive control, so a derivation
+      // that silently narrows to nothing cannot reach the sweep below and be
+      // printed as "0 / 0 cells clean". die() carries that to the environment
+      // exit code, which is where a broken instrument belongs.
+      let ATT_SCENS;
+      try {
+        const { SCENARIOS } = await import("./scenarios.mjs");
+        ATT_SCENS = attentionScenarios(SCENARIOS);
+      } catch (e) {
+        return die(`${D109}: ${e && e.message ? e.message : e}`);
+      }
       const attCellCount = ATT_SCENS.length * ATT_WIDTHS.length * 2;
       process.stdout.write(
         `   attention-row pill — ${ATT_SCENS.length} scenarios x ${ATT_WIDTHS.length} widths x 2 themes` +
-        ` (${attCellCount} cells; EVERY .attention-row iterated — .status-pill-detail width, .status-pill height, detail bottom edge)\n`,
+        ` (${attCellCount} cells; EVERY .attention-row iterated — .status-pill-detail width, .status-pill height, detail bottom edge)\n` +
+        `   scenario axis DERIVED from app.js filterFleet(list,"attention") over scenarios.mjs — ${ATT_SCENS.length} scenario(s): ${ATT_SCENS.join(", ")}\n`,
       );
       let attCells = 0, attPills = 0, attClipped = 0, attTall = 0, attOutside = 0, attPageOver = 0;
       for (const scen of ATT_SCENS) {
@@ -1360,7 +1419,7 @@ async function main() {
       } else if (!failures.some((f) => f.defect === D109)) {
         okLine(
           `${attCells} / ${attCells} attention-row cells clean (${attPills} pills measured on BOTH axes, every row iterated) across ` +
-          `${ATT_WIDTHS.join("/")} on ${ATT_SCENS.join(" + ")}, both themes, route pinned #overview; ` +
+          `${ATT_WIDTHS.join("/")} on the ${ATT_SCENS.length} DERIVED attention scenarios (${ATT_SCENS.join(" + ")}), both themes, route pinned #overview; ` +
           `${attClipped} truncated reasons, ${attTall} chips shorter than their own text, ` +
           `${attOutside} details painting below their pill, ${attPageOver} pages scrolling sideways. ` +
           `Per-cell clientWidth/scrollWidth pairs are printed above; no pixel literal is pinned here — ` +
@@ -1701,6 +1760,14 @@ async function main() {
       // cchi-w23: the sub-populations this leg ASSERTS ON, counted so a zero can
       // be refused and printed rather than inferred from a shrinking total.
       let railsSeen = 0, railLabels = 0;
+      // cch-w19-bl-w13: THE CENSUS IS AN ARTIFACT, not a total. The per-cell
+      // refusals above already hold every route to what it declares, but the
+      // only thing this leg PRINTED about the rail population was one summed
+      // ok-line — and a reader cannot check a sum. One row per route x theme,
+      // carrying the measured rail and pill counts beside the DECLARED ones,
+      // is what makes "which routes contribute real assertions and which
+      // contribute none" a table somebody can read instead of a claim.
+      const census = [];
       for (const r of BAND_ROUTES) {
         for (const theme of ["light", "dark"]) {
           // Enter at 900 — ABOVE the band — so a route that only renders at one
@@ -1711,6 +1778,7 @@ async function main() {
             `document.querySelector('${r.ready}') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='${r.view}';})()`,
           );
           const row = [];
+          let cellRails = 0, cellPillsSum = 0, blindCells = 0;
           for (const width of BAND_WIDTHS) {
             await setViewport(width);
             const m = await evalJs(
@@ -1763,6 +1831,11 @@ async function main() {
             // declares what it owes at BAND_ROUTES and every cell is held to it.
             railsSeen += m.rails;
             const cellPills = m.rp.length;
+            cellRails += m.rails;
+            cellPillsSum += cellPills;
+            // A cell that asserts NOTHING about a rail pill, counted so the
+            // census can print it rather than leaving it to subtraction.
+            if (cellPills === 0) blindCells++;
             if (r.rail && m.rails === 0) {
               fail(D, `${r.name}/${theme}@${width}: zero \`.detail-rail\` in a route declared to render one — the rail stopped rendering, so every rail assertion below measured nothing. This is not a pass.`);
             } else if (!r.rail && m.rails > 0) {
@@ -1804,10 +1877,29 @@ async function main() {
                 fail(D, `${r.name}/${theme}@${width} .status-pill-label: the label box is ${p.lh}px tall inside a ${p.ph}px pill`);
               }
             }
-            row.push(`${width}:${m.sw}${over > 0 ? "!" : ""}`);
+            row.push(`${width}:${m.sw}${over > 0 ? "!" : ""}/${cellPills}p`);
           }
+          census.push({
+            name: r.name, theme, widths: BAND_WIDTHS.length,
+            rails: cellRails, pills: cellPillsSum, blind: blindCells,
+            owesRail: r.rail, owesPill: r.railPill, why: r.railWhy,
+          });
           process.stdout.write(`   ${r.name}/${theme}  ${row.join(" ")}\n`);
         }
+      }
+      // THE CENSUS TABLE (cch-w19-bl-w13 criterion 1). Printed UNCONDITIONALLY,
+      // before the pass/fail branch below, because the run that most needs a
+      // readable population table is the one that just went red.
+      process.stdout.write(
+        `\n   ${D} — RAIL-PILL CENSUS, ${BAND_ROUTES.length} routes x 2 themes x ${BAND_WIDTHS.length} widths, MEASURED:\n` +
+        `   ${"route".padEnd(16)}${"theme".padEnd(7)}${"cells".padEnd(7)}${"rails".padEnd(7)}${"pills".padEnd(7)}${"blind".padEnd(7)}declared\n`,
+      );
+      for (const c of census) {
+        process.stdout.write(
+          `   ${c.name.padEnd(16)}${c.theme.padEnd(7)}${String(c.widths).padEnd(7)}` +
+          `${String(c.rails).padEnd(7)}${String(c.pills).padEnd(7)}${String(c.blind).padEnd(7)}` +
+          `rail:${c.owesRail} railPill:${c.owesPill}${c.why ? " — " + c.why : ""}\n`,
+        );
       }
       // AUDITED: an empty list is not a clean list. If the rail stops rendering
       // a pill this leg would score 0 rail defects and read as a pass. The
@@ -2555,23 +2647,51 @@ async function main() {
       // 900 is the DECIDING width — the only one above the 768 escape, and the
       // only cell that can refuse `break-word`.
       const RAIL_WIDTHS = [320, 390, 900];
-      const { SCENARIOS, RAIL_FAIL_CRUEL_DETAIL, RAIL_FAIL_KIND_DETAIL } = await import("./scenarios.mjs");
+      const {
+        SCENARIOS, RAIL_FAIL_CRUEL_DETAIL, RAIL_FAIL_KIND_DETAIL,
+        RAIL_FAIL_CLASSIFIED_CAPTION, RAIL_FAIL_CLASSIFYING_DETAIL,
+      } = await import("./scenarios.mjs");
       const sc = SCENARIOS["site-deploy-rail-failed"];
+      // task-877bfc465162e104: THE THIRD TRACK. `RAIL_FAIL_CLASSIFYING_DETAIL` is
+      // the one capture in this corpus that MOVES under `FailureCopy.humanize/1`,
+      // and the control plane applies that fold at every display boundary — so the
+      // string this rail actually paints is `RAIL_FAIL_CLASSIFIED_CAPTION`, a
+      // THIRD length between the cruel 240 and the kind ~130, word-broken like the
+      // control but longer. It was exported and routed nowhere, so no cell in this
+      // file had ever measured it. It rides its OWN scenario rather than a third
+      // site on the fixture above, because that fixture's readers (this leg's
+      // `sites[1]`, and smoke's) pick their control POSITIONALLY.
+      const scClassified = SCENARIOS["site-deploy-rail-failed-classified"];
       // The routes are DERIVED from the fixture, never transcribed: a pasted
       // uuid rots silently into "the sites list rendered instead".
       if (!sc || !sc.deepLink || !sc.data || !Array.isArray(sc.data.sites) || sc.data.sites.length < 2) {
         return die(`${D}: SCENARIOS["site-deploy-rail-failed"] no longer carries a deepLink and two sites — the cruel rail and its control cannot both be reached, so nothing was measured`);
       }
+      if (!scClassified || !scClassified.deepLink) {
+        return die(`${D}: SCENARIOS["site-deploy-rail-failed-classified"] no longer carries a deepLink — the CLASSIFIED track cannot be reached, so the only fixture whose caption differs from the box's own bytes goes unmeasured`);
+      }
+      // ANTI-VACUITY BEFORE THE FIRST NAV: if the fold stopped moving this string,
+      // the third track is measuring the cruel/kind shape again under a new name.
+      if (RAIL_FAIL_CLASSIFIED_CAPTION === RAIL_FAIL_CLASSIFYING_DETAIL) {
+        return die(`${D}: RAIL_FAIL_CLASSIFIED_CAPTION is byte-identical to RAIL_FAIL_CLASSIFYING_DETAIL — the classified track no longer carries a classified string, so its cells would be green by construction`);
+      }
       const RAIL_ROUTES = [
-        { name: "cruel", hash: sc.deepLink, detail: RAIL_FAIL_CRUEL_DETAIL, cruel: true },
-        { name: "kind", hash: "#site/" + sc.data.sites[1].id, detail: RAIL_FAIL_KIND_DETAIL, cruel: false },
+        { name: "cruel", scen: "site-deploy-rail-failed", hash: sc.deepLink, detail: RAIL_FAIL_CRUEL_DETAIL, cruel: true },
+        { name: "kind", scen: "site-deploy-rail-failed", hash: "#site/" + sc.data.sites[1].id, detail: RAIL_FAIL_KIND_DETAIL, cruel: false },
+        { name: "classified", scen: "site-deploy-rail-failed-classified", hash: scClassified.deepLink, detail: RAIL_FAIL_CLASSIFIED_CAPTION, cruel: false },
       ];
       process.stdout.write(
         `\n${D} — the cruel rail x ${RAIL_WIDTHS.length} widths x 2 themes (${RAIL_WIDTHS.length * 2} cells)` +
-        ` + the same axis on the KIND control; PAGE and BOX asserted in every cell` +
-        ` (cruel detail ${RAIL_FAIL_CRUEL_DETAIL.length} chars, control ${RAIL_FAIL_KIND_DETAIL.length})\n`,
+        ` + the same axis on the KIND control and on the CLASSIFIED caption; PAGE and BOX asserted in every cell` +
+        ` (cruel detail ${RAIL_FAIL_CRUEL_DETAIL.length} chars, control ${RAIL_FAIL_KIND_DETAIL.length},` +
+        ` classified ${RAIL_FAIL_CLASSIFIED_CAPTION.length} — folded from a ${RAIL_FAIL_CLASSIFYING_DETAIL.length}-char capture)\n`,
       );
-      let cells = 0, kindCells = 0, boxesSeen = 0, pageOver = 0, boxOver = 0;
+      let cells = 0, kindCells = 0, classifiedCells = 0, boxesSeen = 0, pageOver = 0, boxOver = 0;
+      // Per-track box population. A track that rendered ZERO footers across every
+      // cell prints a clean row of `0box` failures per cell today; this counter is
+      // what makes the ABSENCE fatal as a single named refusal too, on every track
+      // rather than only the two the leg was born with.
+      const boxesByTrack = new Map(RAIL_ROUTES.map((r) => [r.name, 0]));
       for (const r of RAIL_ROUTES) {
         for (const theme of ["light", "dark"]) {
           // Enter at the WIDEST width — the rail mounts once, on load, from the
@@ -2579,7 +2699,7 @@ async function main() {
           // renders its footer on a phone layout.
           await setViewport(RAIL_WIDTHS[RAIL_WIDTHS.length - 1]);
           await nav(
-            `${BASE}/?scen=site-deploy-rail-failed&theme=${theme}${r.hash}`,
+            `${BASE}/?scen=${r.scen}&theme=${theme}${r.hash}`,
             `document.querySelector('.deploy-rail-fail') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`,
           );
           const row = [];
@@ -2609,7 +2729,7 @@ async function main() {
               `return {sw:d.scrollWidth, cw:d.clientWidth, view:v?v.id:'none', fs:fs, wide:wide,` +
               ` theme:d.getAttribute('data-theme')};})()`,
             );
-            if (r.cruel) cells++; else kindCells++;
+            if (r.cruel) cells++; else if (r.name === "classified") classifiedCells++; else kindCells++;
             // (1) THE ROUTE. Without this the whole table is phantom.
             if (m.view !== "view-site") {
               fail(D, `${r.name}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-site" — the hash did not route, so nothing below this line measures the deploy rail`);
@@ -2632,6 +2752,7 @@ async function main() {
             // own, so the producer's cap can move without touching this file.
             for (const f of m.fs) {
               boxesSeen++;
+              boxesByTrack.set(r.name, boxesByTrack.get(r.name) + 1);
               if (f.t !== r.detail) {
                 fail(D, `${r.name}/${theme}@${width} .deploy-rail-fail: rendered ${f.len} chars that are not the fixture's ${r.name} detail (${r.detail.length} chars) — the box under measurement is holding some other string`);
                 continue;
@@ -2735,11 +2856,30 @@ async function main() {
         }
       }
 
+      // THE PER-TRACK NON-VACUITY REFUSAL. A track whose scenario stopped
+      // rendering a rail at ALL widths would otherwise leave this leg printing a
+      // table of `0box` cells under a headline that still counts its cells.
+      for (const [name, seen] of boxesByTrack) {
+        if (seen === 0) {
+          fail(D, `${name}: ZERO .deploy-rail-fail boxes were measured across all ${RAIL_WIDTHS.length} widths in both themes — that track's fixture rendered no rail anywhere, so its cells prove nothing. This is not a pass.`);
+        }
+      }
+
       if (!failures.some((f) => f.defect === D)) {
         okLine(
           `${cells} / ${cells} cruel cells clean across ${RAIL_WIDTHS.join("/")} in both themes, plus ${kindCells} ` +
-          `KIND-control cells on the same axis (${boxesSeen} .deploy-rail-fail box(es) measured — every one on the ` +
-          `page, not a pinned selector); ${pageOver} pages scrolling sideways, ${boxOver} boxes spilling their own border`,
+          `KIND-control cells and ${classifiedCells} CLASSIFIED-caption cells on the same axis (${boxesSeen} ` +
+          `.deploy-rail-fail box(es) measured — every one on the page, not a pinned selector; per track ` +
+          `${[...boxesByTrack].map(([n, c]) => `${n}:${c}`).join(" ")}); ${pageOver} pages scrolling sideways, ` +
+          `${boxOver} boxes spilling their own border`,
+        );
+        okLine(
+          `THE THIRD TRACK IS A THIRD LENGTH, not a rename: the classified caption is ` +
+          `${RAIL_FAIL_CLASSIFIED_CAPTION.length} chars against the cruel ${RAIL_FAIL_CRUEL_DETAIL.length} and the ` +
+          `control ${RAIL_FAIL_KIND_DETAIL.length}, and it is the ONLY fixture in the corpus whose caption is not the ` +
+          `bytes the box emitted — the control plane folds a failed stage's detail through ` +
+          `Sites.Deploy.stage_caption/2 before the browser sees it, and the wave-26 pair passes through that fold ` +
+          `unchanged. A leg driven on those two alone cannot tell a rail that classifies from one that does not`,
         );
         okLine(
           `BOTH assertions are load-bearing and each refuses a DIFFERENT half of the remedy, both driven: reverting ` +
@@ -3720,8 +3860,14 @@ async function main() {
               `  if(dr.bottom>pr.bottom+0.5) out.out.push({i:i,db:+dr.bottom.toFixed(2),pb:+pr.bottom.toFixed(2),t:(det.textContent||'').slice(0,48)});` +
               `});` +
               // REPORTED, NEVER ASSERTED: `.attention-row`'s pill is a DIFFERENT
-              // host in the SAME DOM, clipping in a DIFFERENT band (148/165 at
-              // 320, 117/165 at 769) and owned by task-802585b77fc136b1. It is
+              // host in the SAME DOM, in a DIFFERENT band, owned by
+              // task-802585b77fc136b1. Driven on the current fixture and the
+              // current bytes it does not clip at all — 148/148 at 320 and
+              // 186/186 from 360 up on `overview-attention` — where the pre-W20-S6
+              // record in app.css reads 148/165 and 117/165 against the OLD
+              // "Health down" string's 165px clamp. Both halves of that pair
+              // moved (the remedy landed; cch-w18-bl moved the string), which is
+              // exactly why this band is printed and not judged. It is
               // printed so this slice's "we did not disturb it" is a number a
               // reader can check, and it is NOT judged here — asserting another
               // slice's open row would red this leg on merged main.
@@ -5209,10 +5355,18 @@ async function main() {
     //          shrinkable column — the role chip, Change role and Remove never
     //          yield, so the column holding WHO the row is about absorbs the
     //          whole deficit.
-    //      (b) `.set-row-name` declares `overflow: hidden; text-overflow:
-    //          ellipsis` and never `white-space: nowrap`, so the ellipsis is
-    //          INERT: an email is a single unbreakable word, it overflows a
-    //          21px column, and `overflow: hidden` hides it with NO cue.
+    //      (b) `.set-row-name` declared `overflow: hidden; text-overflow:
+    //          ellipsis` on a column that could not fit an email, and hid the
+    //          overflow. The MECHANISM first written here — "and never
+    //          `white-space: nowrap`, so the ellipsis is INERT" — is REFUTED
+    //          (charter D253, re-driven on Linux; see the predicate below): an
+    //          unbreakable run wider than its box paints the "…" whatever
+    //          `white-space` says. What was actually wrong is narrower and
+    //          worse: at the measured widths the identity did not merely lose a
+    //          cue, it lost 77px of `rex@acme.com` at 390 — and the FIX that
+    //          landed, `overflow-wrap: anywhere`, works by giving the run break
+    //          opportunities so it wraps and never overflows the line at all,
+    //          not by making a declared ellipsis paint.
     //      (c) there is no `@media` anywhere in app.css touching `.set-row*` —
     //          the roster has ONE layout at every width.
     //
@@ -5234,12 +5388,16 @@ async function main() {
     //    button at all.
     //
     //    THE CUE PREDICATE IS THE POINT, and it is deliberately not "does the
-    //    element declare text-overflow: ellipsis". `text-overflow` paints only
-    //    when the line cannot wrap, i.e. when `white-space` computes to a
-    //    non-wrapping value. Declaring it beside `white-space: normal` is a
-    //    sentence, not a cue — which is exactly the pre-fix state. So a row
-    //    passes when the identity FITS (scrollWidth <= clientWidth) or when a
-    //    cue can ACTUALLY PAINT, never when one is merely declared.
+    //    element declare text-overflow: ellipsis". It is also not "does
+    //    `white-space` compute to a non-wrapping value" — that was this leg's
+    //    first answer and charter D253 refuted it at the pixel. `text-overflow`
+    //    paints when the overflowing LINE has no break opportunity that fits
+    //    the box and carries a text run to truncate; `white-space` is one of
+    //    several inputs to that, not the test. So the predicate MEASURES a
+    //    min-content width and a text-run width per row (see the block comment
+    //    at the predicate itself for the driven pixels) and a row passes when
+    //    the identity FITS (scrollWidth <= clientWidth) or when a cue can
+    //    ACTUALLY PAINT, never when one is merely declared.
     //
     //    FONT PINNED (D218, paid by cch-w22-s1): `nav()` now load()s EVERY
     //    declared @font-face, awaits `document.fonts.ready` and check()s each
@@ -5308,7 +5466,58 @@ async function main() {
               `  });` +
               `  var n=r.getElementsByClassName('set-row-name')[0];` +
               `  if(n){var cs=getComputedStyle(n);` +
+              // ── THE BREAK-OPPORTUNITY MEASUREMENT (charter D253) ──────────
+              // `mw` is the element's MIN-CONTENT width, taken off a hidden
+              // `width:min-content` clone appended into the element's OWN
+              // parent so every inherited value that decides breaking — font,
+              // `white-space`, `overflow-wrap`, `word-break`, `hyphens` — is
+              // the real one rather than a UA default. `position:absolute`
+              // lifts it out of the flex line so the measurement cannot
+              // perturb the row it is measuring, and it is removed in the same
+              // turn. min-content is the narrowest box the content can occupy:
+              // `mw > clientWidth` means NO break opportunity fits inside the
+              // box, so the overflow is on the LINE and something truncates.
+              // `mw <= clientWidth` means the text CAN wrap — the overflow is
+              // then VERTICAL, `overflow: hidden` eats whole lines, and no
+              // `text-overflow` marker is ever reached.
+              `    var cl=n.cloneNode(true);` +
+              // cssText is APPENDED, never assigned. `cloneNode(true)` copies
+              // the style ATTRIBUTE, and assigning cssText would delete it —
+              // an element whose `overflow-wrap`/`white-space` is set INLINE
+              // would then be measured under the class cascade alone and read
+              // a min-content it does not have. Driven on the D253 probe's
+              // host D (`overflow-wrap: anywhere` declared inline): assigning
+              // measured mw 304 — the run's FULL width, i.e. the declaration
+              // gone — while appending measures mw 9, one glyph of its own
+              // font, which is what the same declaration produces from a class
+              // on the live `.set-row-name` rows (mw 13 in that font).
+              // The overrides still win because every one of them is
+              // !important and comes last in the same declaration block.
+              `    cl.style.cssText+=';position:absolute!important;left:-99999px!important;top:0!important;visibility:hidden!important;width:min-content!important;max-width:none!important;min-width:0!important;height:auto!important;overflow:visible!important;flex:0 0 auto!important;';` +
+              `    n.parentNode.appendChild(cl);` +
+              `    var mw=Math.ceil(cl.getBoundingClientRect().width);` +
+              `    cl.parentNode.removeChild(cl);` +
+              // `tw` is the widest TEXT run on the element — a line holding
+              // only atomic inlines has nothing to ellipsize (driven below), so
+              // a break-opportunity test alone would still exempt it. Range
+              // rects over the text nodes reachable through `display:inline`
+              // only: an inline-block/flex/grid child is an ATOM, its inner
+              // text cannot be the truncation point of this element's line.
+              `    var tw=0;` +
+              `    (function walk(e){` +
+              `      for(var k=0;k<e.childNodes.length;k++){var ch=e.childNodes[k];` +
+              `        if(ch.nodeType===3){` +
+              `          if(!(ch.nodeValue||'').trim()) continue;` +
+              `          var rg=document.createRange();rg.selectNodeContents(ch);` +
+              `          var rl=rg.getClientRects();` +
+              `          for(var q=0;q<rl.length;q++) tw=Math.max(tw,rl[q].width);` +
+              `        } else if(ch.nodeType===1){` +
+              `          var d=getComputedStyle(ch).display;` +
+              `          if(d==='inline'||d==='contents') walk(ch);` +
+              `        }` +
+              `      }})(n);` +
               `    rec.name={sw:n.scrollWidth,cw:n.clientWidth,ws:cs.whiteSpace,te:cs.textOverflow,` +
+              `      mw:mw,tw:Math.round(tw*100)/100,` +
               // `overflow` IS THE THIRD LEG OF THE CUE (cch-w29-s3). `ellipsis`
               // paints only where the box actually clips; the model arm below
               // (`ov:cs.overflow`) has always read it, this arm never did.
@@ -5362,19 +5571,71 @@ async function main() {
               }
               const n = r.name;
               if (!n) continue;
-              // A CUE THAT CAN ACTUALLY PAINT, ON ALL THREE LEGS. `text-overflow`
-              // is inert unless the line is forbidden to wrap AND the box itself
-              // clips — declaring `ellipsis` beside `white-space: normal` is a
-              // sentence, and so is declaring it beside `overflow: visible`,
-              // where the text simply spills past the box in full view of
-              // nothing. `pre-wrap` and `pre-line` WRAP, so they are not on the
-              // white-space list; `visible` is the ONLY computed overflow value
-              // that suppresses the ellipsis, which is why this leg tests for it
-              // by name rather than for "some kind of clip" (cch-w29-s3) — and
-              // it tests the X AXIS, because that is the only one a single-line
-              // ellipsis truncates on and the shorthand can legally read
-              // "visible clip" while the horizontal axis does not clip at all.
-              const cuePaints = n.te === "ellipsis" && (n.ws === "nowrap" || n.ws === "pre") && n.ox !== "visible";
+              // A CUE THAT CAN ACTUALLY PAINT — MEASURED, NOT READ OFF THE
+              // DECLARATIONS. This leg used to ask `white-space` whether the
+              // line was forbidden to wrap. Charter D253 REFUTED that by
+              // decoding PNGs, and the probe was RE-RUN ON THE GATING PLATFORM
+              // for this correction — D253's own pixels were Chrome/150 on
+              // macOS and the gate machine is ubuntu, so its caveat was
+              // UNDISCHARGED until here. Twin 200px boxes holding one
+              // unbreakable run, Ubuntu 24.04.4 LTS / kernel 6.8.0-117-generic,
+              // Google Chrome 151.0.7922.71, decoded to the rightmost inked
+              // column:
+              //
+              //   clip     / white-space:normal    ink to x=199  hash 68225e2f
+              //   ellipsis / white-space:normal    ink to x=193  hash c5e77c70
+              //   ellipsis / white-space:nowrap    ink to x=193  hash c5e77c70
+              //
+              // The SAME four verdicts came off a second engine build on a
+              // different distro (Chromium 152.0.7977.82 / Debian 12 bookworm):
+              // identical inkRightX on every host, different hashes only because
+              // the two builds hint the glyphs differently. So the result is a
+              // property of the layout engine, not of one container image.
+              //
+              // The `normal` host is PIXEL-IDENTICAL to the `nowrap` control and
+              // differs from `clip`, so the "…" painted with `white-space:
+              // normal` — exactly what D253 measured, reproduced on ubuntu. The
+              // rule is not about `white-space` at all. `text-overflow` is inert
+              // when the text CAN WRAP inside the box: the overflow is then
+              // VERTICAL and `overflow: hidden` eats whole lines with no cue.
+              //
+              // So the predicate asks for a BREAK OPPORTUNITY, measured:
+              //
+              //   (1) the marker is declared            te === "ellipsis"
+              //   (2) the box clips on the X axis       ox !== "visible"
+              //   (3) NO break point fits the box       mw > cw   (min-content)
+              //   (4) there is TEXT on that line        tw > 0
+              //
+              // (2) stays because `visible` is the ONLY computed overflow value
+              // that suppresses the ellipsis, and it is read on the X AXIS by
+              // name: the shorthand can legally serialise "visible clip" while
+              // the horizontal axis — the only one a single-line ellipsis
+              // truncates on — does not clip at all (cch-w29-s3).
+              //
+              // (3) is the leg `white-space` was standing in for, and standing
+              // in for WRONGLY in both directions. `white-space: normal` with an
+              // unbreakable run has min-content 303 > 200 and DOES paint (the
+              // old predicate called it inert — too STRICT). `overflow-wrap:
+              // anywhere`, which `.set-row-name` now carries, drops min-content
+              // to about one character, so the text wraps, `scrollWidth` never
+              // exceeds `clientWidth`, and the host does not reach this arm at
+              // all (driven: sw 200 / cw 200 on the same probe).
+              //
+              // (4) closes the limit `ellipsisCanPaint` in breakpoint-sweep.mjs
+              // records and names this row as the owner of. DRIVEN on the same
+              // Linux run: a `nowrap` + `ellipsis` box whose overflowing line
+              // holds ONE atomic inline (an inline-block child, sw 408 / cw 200)
+              // inks to x=199 — the box edge — so NO "…" painted. A line with
+              // nothing to truncate cannot be ellipsized however the
+              // declarations read, and a break-opportunity test alone would
+              // still have exempted it.
+              //
+              // A ZERO `mw` — a min-content clone that failed to measure — makes
+              // (3) false and therefore FLAGS the row rather than exempting it,
+              // and `mw` is printed in both the failure sentence and the clean
+              // cell string, so an instrument that stopped measuring reds loudly
+              // instead of certifying quietly.
+              const cuePaints = n.te === "ellipsis" && n.ox !== "visible" && n.mw > n.cw && n.tw > 0;
               if (n.sw > n.cw && !cuePaints) {
                 clipped++;
                 // THE SENTENCE NAMES THE LEG THAT ACTUALLY FAILED. Blaming
@@ -5383,10 +5644,14 @@ async function main() {
                 // inside the instrument that polices it, so all three computed
                 // values are printed and the trailing clause is chosen by which
                 // leg is the one standing between the reader and a paintable cue.
-                const why = n.ox === "visible"
+                const why = n.te !== "ellipsis"
+                  ? `no ellipsis is declared at all, so there is no marker to paint`
+                  : n.ox === "visible"
                   ? `ellipsis is inert while overflow-x computes "visible" — the box does not clip horizontally, so nothing truncates and nothing paints`
-                  : `ellipsis is inert unless white-space forbids wrapping`;
-                fail(D, `${scen}/${theme}@${width} row${r.i} \`.set-row-name\` "${n.t}": scrollWidth ${n.sw} > clientWidth ${n.cw} — ${n.sw - n.cw}px of the identity is hidden with NO cue that can paint (computed white-space "${n.ws}", text-overflow "${n.te}", overflow "${n.ov}", overflow-x "${n.ox}"; ${why}). This is WHO the row's Remove button acts on`);
+                  : n.mw <= n.cw
+                  ? `ellipsis is inert because the text CAN wrap inside this box — min-content ${n.mw}px fits clientWidth ${n.cw}px, so the overflow is vertical and \`overflow: hidden\` eats whole lines silently. white-space is NOT the test (charter D253: an unbreakable run paints "…" under white-space: normal, driven on Linux)`
+                  : `ellipsis is inert because the overflowing line carries no text run to truncate (widest text rect ${n.tw}px) — an atomic inline cannot be ellipsized`;
+                fail(D, `${scen}/${theme}@${width} row${r.i} \`.set-row-name\` "${n.t}": scrollWidth ${n.sw} > clientWidth ${n.cw} — ${n.sw - n.cw}px of the identity is hidden with NO cue that can paint (measured min-content ${n.mw}px vs clientWidth ${n.cw}px, widest text run ${n.tw}px; computed text-overflow "${n.te}", overflow "${n.ov}", overflow-x "${n.ox}", white-space "${n.ws}" — REPORTED, never the test; ${why}). This is WHO the row's Remove button acts on`);
               }
             }
             // The cell string carries the NUMBERS, not a verdict glyph: the
@@ -5396,7 +5661,7 @@ async function main() {
             // from the clean line alone, which is what makes a green here
             // quotable rather than merely trusted.
             const rm = m.rows.flatMap((r) => r.btns.map((b) => b.right)).join(",");
-            const id = m.rows.map((r) => (r.name ? `${r.name.cw}/${r.name.sw}` : "-")).join(",");
+            const id = m.rows.map((r) => (r.name ? `${r.name.cw}/${r.name.sw}m${r.name.mw}t${r.name.tw}` : "-")).join(",");
             row.push(
               `${width}:${m.rows.length}r/${withBtns}a psw${m.psw}` +
               (rm ? ` act[${rm}]<=${m.pcw}` : ` act[none]`) +
@@ -5411,7 +5676,9 @@ async function main() {
           `${cells} / ${cells} cells clean — ${rowsSeen} \`#members-body .set-row\` iterated in total ` +
           `(${actionRows} of them carrying an action cluster, asserted non-zero per cell) across ` +
           `${MEM_WIDTHS.join("/")} x light+dark on ${MEM_SCENS.join(" + ")}: ${offScreen} controls past the ` +
-          `viewport edge, ${clipped} identities hidden with no cue that can paint, ${pageOver} pages ` +
+          `viewport edge, ${clipped} identities hidden with no cue that can paint — where "can paint" is ` +
+          `MEASURED per row (min-content width vs clientWidth, plus a non-zero text run on the overflowing ` +
+          `line), never inferred from a white-space declaration (charter D253) — ${pageOver} pages ` +
           `scrolling sideways. Every row is walked, never sampled — row 0 is the self row, has no buttons, ` +
           `and is clean on the PRE-FIX bytes, so a sampled leg certifies the screen off the one row that works`,
         );
@@ -5680,7 +5947,112 @@ async function main() {
           // person is meant to READ AT A GLANCE is a short phrase, and a
           // 64-character one is already past that.
           kindMax: 64,
+          // ── THE HEIGHT AXIS (cch-w24-bl-nothing-pins-height-against-a-
+          //    cruel-string). Every assertion above this line is a WIDTH
+          //    assertion, and the w24-s2 remedy that ended the sideways drag
+          //    paid for it in VERTICAL ink: `.bp-tl-fail` went from 60px tall
+          //    to 399px at 320, and the header pill to 348px with its detail
+          //    at 342px over 19 line boxes. Nothing hid and nothing lied — and
+          //    NO instrument in this epic would have noticed if 19 became 220.
+          //
+          //    NOT A CLAMP AND NOT A PIXEL PIN (lane ruling 2026-09-06, D240 /
+          //    D206). A person reaches this screen while something is already
+          //    broken, so the whole error stays visible — no `Show more`, no
+          //    smaller type. And a number like `399` pins a property of the
+          //    FIXTURE STRING, which D206 already refused once on the overview
+          //    pill: change the fixture and the guard reds without a defect.
+          //    What is asserted instead is a TIGHT FIT — the box may be exactly
+          //    as tall as the line boxes its own text painted, plus its own
+          //    padding and border, and no taller:
+          //        height <= lines x line-height + padding-y + border-y
+          //    Both sides are MEASURED in the same cell (line boxes off a Range
+          //    walk over the host's text nodes, the D253 instrument; the
+          //    line-height and box metrics off getComputedStyle on the host),
+          //    so a longer cruel string moves both together and stays green
+          //    while VERTICAL WASTE — a stray min-height, a per-line margin, a
+          //    second copy of the box — moves only the left side and reds.
+          //
+          //    THREE HOSTS, not the two in `sel`, because the pill's height is
+          //    authored on the pill and spent by its detail: `.detail-title-row
+          //    .status-pill` carries `min-height: 24px` and `padding: 2px 0`
+          //    (app.css, the `.instance-card-head` comma head) while the text
+          //    lives in `.status-pill-detail`. A bound on the detail alone
+          //    would score clean on a capsule that stacked 24px of its own.
+          heights: [".bp-tl-fail", ".detail-title-row .status-pill", ".detail-title-row .status-pill-detail"],
           predicate: "a person whose instance failed to provision can open its own screen, READ the whole reason, and still use the console — instead of getting an ellipsis in the header and a page dragged 3.7k pixels sideways",
+        },
+        // ── cch-w23-bl-site-domains-cruel-family: THE SITE LIST'S TWO CAPS ───
+        //    The first families added to this table since the s4 shape landed,
+        //    and they are added HERE rather than as a fourth instrument because
+        //    the shape is what they needed: a cap citation, a class from the
+        //    vocabulary, a cruelMin/kindMax axis and a person-facing predicate.
+        //
+        //    THE CORPUS HAD TO MOVE FIRST, and that is the row's clause 4:
+        //    `fleet-cruel-content` — the cruel side of every row above — shipped
+        //    `sites: []`, so BOTH caps were unreachable from this leg no matter
+        //    what was written here. `cruelFleetSites` in scenarios.mjs is that
+        //    repair; without it these two rows would fail their own "zero
+        //    NON-EMPTY selector" refusal rather than measure anything.
+        //
+        //    THE KIND CONTROL IS `mixed-fleet` AT `#sites`, the same control the
+        //    three rows above use, driven at ITS OWN hash: the scenario's
+        //    deepLink is `#fleet`, and its two ordinary sites (`acme-web` /
+        //    `acme-blog`, hosts `acme.com` / `blog.acme.com`) are what a person's
+        //    site list normally looks like — 8-13 characters against caps of 255
+        //    and 253. kindMax stays 64, the ceiling every row in this table uses.
+        {
+          hash: "#sites", view: "view-sites", sel: ".site-host", ready: "#sites-body .site-row",
+          scopes: ".site-main, .site-row",
+          scens: [
+            { scen: "fleet-cruel-content", hash: "#sites" },
+            { scen: "mixed-fleet", hash: "#sites" },
+          ],
+          // NOT a validate_length — which is the whole point of the row.
+          cap: "site.domains — every entry <= 253 AND matching @domain_format, enforced by validate_domains/1's validate_change (registry/site.ex; re-derive: grep -n 'defp validate_domains\\|@domain_format' cloud/lib/barkpark_cloud/registry/site.ex). A validate_length census over site.ex sees the 255-char NAME and NOTHING here (D252)",
+          // FORMAT-LEGAL, not plain CRUEL: the cruel value on this family is
+          // constrained by a REGEX as well as a length, so the admissible
+          // maximum is a CONSTRUCTION (63.63.63.61) rather than a repeat count.
+          // A length-only generator (`String.duplicate("q", 253)`, or any single
+          // 212-char label) is refused 422 by the same clause, and a builder who
+          // measured only that would file a FALSE NONE-POSSIBLE on this family
+          // (charter D269). The construction, its 422 twin at 254, and the
+          // 212-char trap are proven against the SERVER by
+          // cloud/test/barkpark_cloud/web/router_site_domain_format_legal_cap_test.exs.
+          class: "FORMAT-LEGAL",
+          cruelMin: 253,
+          kindMax: 64,
+          // MEMBER-REACHABLE, re-derived by symbol on this tree rather than
+          // inherited from the filing: `post "/v1/sites/:id/domains"` calls the
+          // 2-ARITY `with_team_site(conn, fun)`, which delegates to
+          // `with_team_site(conn, :session, fun)`, whose `:session` branch is a
+          // bare `Auth.require_user(conn, [])` — NO `{:ability, "write"}`, no
+          // role gate, against sibling site routes that pass one. Re-derive:
+          // grep -n 'defp with_team_site' cloud/lib/barkpark_cloud/web/router.ex
+          // APPEND-ORDER, and it is why the fixture row is domainless at rest:
+          // `add_site_domain/2` writes `Enum.uniq(existing ++ [norm])`, both row
+          // builders paint `domains[0]`, so the cruel value is list-visible only
+          // on a site whose array was empty. Recorded beside the fixture.
+          predicate: "a person reading their site list can see WHICH HOSTNAME each site answers on — a domain any team member can attach through POST /v1/sites/:id/domains with no role gate, at a length the server itself accepts",
+        },
+        {
+          hash: "#sites", view: "view-sites", sel: ".site-name", ready: "#sites-body .site-row",
+          scopes: ".site-main, .site-row",
+          scens: [
+            { scen: "fleet-cruel-content", hash: "#sites" },
+            { scen: "mixed-fleet", hash: "#sites" },
+          ],
+          cap: "site.name <= 255 (validate_length(:name, min: 1, max: 255) in Site.changeset/2, registry/site.ex)",
+          // CRUEL, not INADMISSIBLE like `.instance-card-name` above: the site
+          // name and the site SLUG are separate cast fields (`validate_length(:slug,
+          // max: 63)` is its own clause), so a 255-char name does NOT have to
+          // survive a 63-char slug derivation the way an instance name does.
+          // Nothing truncates it, and no role gate stands in front of the create
+          // route — so this row IS a reachability claim, where the row above it
+          // in this table deliberately is not.
+          class: "CRUEL",
+          cruelMin: 255,
+          kindMax: 64,
+          predicate: "a person on the sites list can tell their sites apart by the name they typed — the whole name, not the leading fragment that happened to fit",
         },
       ];
       // Per-scenario hash, normalized once. A row may hand `scens` a bare
@@ -5738,11 +6110,16 @@ async function main() {
       // header with it instead of leaving it lying about what was measured.
       const CRUEL_SCENS = [...new Set(CRUEL_ROUTES.flatMap((r) => cruelCells(r).map((c) => c.scen)))];
       const cellCount = CRUEL_ROUTES.reduce((n, r) => n + cruelCells(r).length, 0) * CRUEL_WIDTHS.length * 2;
+      const HEIGHT_HOSTS = [...new Set(CRUEL_ROUTES.flatMap((r) => r.heights || []))];
       process.stdout.write(
         `\n${D} — ${CRUEL_SCENS.length} scenarios x ${CRUEL_ROUTES.length} routes x ${CRUEL_WIDTHS.length} widths x 2 themes` +
-        ` (${cellCount} cells; ${CRUEL_ROUTES.map((r) => r.sel).join(" + ")} scrollWidth vs clientWidth, + documentElement.scrollWidth vs clientWidth)\n`,
+        ` (${cellCount} cells; ${CRUEL_ROUTES.map((r) => r.sel).join(" + ")} scrollWidth vs clientWidth, + documentElement.scrollWidth vs clientWidth` +
+        `${HEIGHT_HOSTS.length ? `, + a TIGHT-FIT HEIGHT bound on ${HEIGHT_HOSTS.join(" / ")}` : ""})\n`,
       );
+      // A PIXEL, and the comment above the assertion says why it is a pixel.
+      const HEIGHT_SLACK = 1;
       let cells = 0, seen = 0, spilled = 0, pageOver = 0, wentKind = 0, wentCruel = 0;
+      let heightsSeen = 0, tooTall = 0;
       for (const route of CRUEL_ROUTES) {
         for (const cell of cruelCells(route)) {
           const scen = cell.scen;
@@ -5760,13 +6137,14 @@ async function main() {
               `document.querySelector('${route.ready}') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='${route.view}';})()`,
             );
             const row = [];
+            const hRow = {};
             for (const width of CRUEL_WIDTHS) {
               await setViewport(width);
               const m = await evalJs(
                 `(function(){` +
                 `var v=document.querySelector('section.view:not([hidden])');` +
                 `var d=document.documentElement;` +
-                `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,n:0,bad:[],worst:0,longest:0};` +
+                `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,n:0,bad:[],worst:0,longest:0,hb:[]};` +
                 `[].slice.call(document.querySelectorAll(${JSON.stringify(route.sel)})).forEach(function(e,i){` +
                 // A node with no text can never clip and must not be counted as
                 // a measured assertion (the vacuous-green vector W20-S3 named on
@@ -5787,6 +6165,47 @@ async function main() {
                 `  var scope=(sc&&sc.classList.length)?('.'+sc.classList[0]):(sc?sc.tagName.toLowerCase():'<outside every declared scope>');` +
                 `  var cs=getComputedStyle(e);` +
                 `  if(e.scrollWidth>e.clientWidth) out.bad.push({i:i,len:t.length,sw:e.scrollWidth,cw:e.clientWidth,t:t.slice(0,28),scope:scope,ow:cs.overflowWrap,ws:cs.whiteSpace,te:cs.textOverflow,ov:cs.overflow});` +
+                `});` +
+                // ── THE TIGHT-FIT HEIGHT WALK ────────────────────────────────
+                // `lines` is the number of LINE BOXES this host's own text
+                // actually painted at this width, taken as the set of distinct
+                // client-rect tops of a Range over every non-blank text node
+                // under it (the D253 instrument). The set is shared across text
+                // nodes ON PURPOSE: `<b>Setup failed.</b>` and the machine
+                // string that follows it sit on the SAME first line box, and
+                // counting per-node would credit the box a line it never
+                // painted — an allowance a real regression could hide in.
+                // Rects are keyed at quarter-pixel resolution because a
+                // fractional line-height puts successive tops at .25 steps.
+                `[].slice.call(${JSON.stringify(route.heights || [])}).forEach(function(hsel){` +
+                `  [].slice.call(document.querySelectorAll(hsel)).forEach(function(e,i){` +
+                `    var t=(e.textContent||'').trim(); if(!t) return;` +
+                `    var hs=getComputedStyle(e);` +
+                // `line-height: normal` computes to the literal string, which
+                // parseFloat reads as NaN. Chrome's normal is font-dependent,
+                // so it is MEASURED off the tallest painted line box rather
+                // than guessed at a 1.2 ratio that no engine promises.
+                `    var lh=parseFloat(hs.lineHeight); var lhSrc=isFinite(lh)?'computed':'measured';` +
+                `    var pad=parseFloat(hs.paddingTop)+parseFloat(hs.paddingBottom);` +
+                `    var bor=parseFloat(hs.borderTopWidth)+parseFloat(hs.borderBottomWidth);` +
+                `    var w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT,null);` +
+                `    var tops={},lines=0,tallest=0,n;` +
+                `    while((n=w.nextNode())){` +
+                `      if(!(n.nodeValue||'').trim()) continue;` +
+                `      var rg=document.createRange(); rg.selectNodeContents(n);` +
+                `      var rs=rg.getClientRects();` +
+                `      for(var k=0;k<rs.length;k++){` +
+                `        if(rs[k].width<=0&&rs[k].height<=0) continue;` +
+                `        if(rs[k].height>tallest) tallest=rs[k].height;` +
+                `        var key=Math.round(rs[k].top*4);` +
+                `        if(!tops[key]){tops[key]=1;lines++;}` +
+                `      }` +
+                `    }` +
+                `    if(!isFinite(lh)) lh=tallest;` +
+                `    var h=e.getBoundingClientRect().height;` +
+                `    var r2=function(x){return Math.round(x*100)/100;};` +
+                `    out.hb.push({sel:hsel,i:i,len:t.length,h:r2(h),lines:lines,lh:r2(lh),lhSrc:lhSrc,pad:r2(pad),bor:r2(bor),need:r2(lines*lh+pad+bor),mh:hs.minHeight});` +
+                `  });` +
                 `});` +
                 `return out;})()`,
               );
@@ -5826,8 +6245,45 @@ async function main() {
                 fail(D, `${scen}/${theme}@${width}${cell.hash} el${b.i} in \`${b.scope}\` (matched \`${route.sel}\`): scrollWidth ${b.sw} > clientWidth ${b.cw} — ${Math.round((1 - b.cw / b.sw) * 100)}% of a ${b.len}-character value ("${b.t}…") is not rendered. Computed ON THE MEASURED ELEMENT: overflow-wrap "${b.ow}", white-space "${b.ws}", text-overflow "${b.te}", overflow "${b.ov}". The scope named here is the wrapper a remedy has to be authored against — not the row's selector`);
               }
               row.push(`${width}:${m.n}x${m.worst}${m.bad.length ? "!" + m.bad.length : ""}${m.psw > m.pcw ? "P" + (m.psw - m.pcw) : ""}`);
+              // ── THE HEIGHT ASSERTION, one line per host per width ─────────
+              if ((route.heights || []).length) {
+                // ANTI-VACUITY: a route that DECLARES height hosts and paints
+                // none of them measured nothing. The kind control's detail
+                // screen renders no `.bp-tl-fail` (the live instance did not
+                // fail), so the refusal is against the UNION of the row's
+                // hosts, never against each one — the per-host zero is the
+                // honest answer on a screen where that host does not belong.
+                if (m.hb.length === 0) {
+                  fail(D, `${scen}/${theme}@${width}${cell.hash}: the row declares height hosts (${route.heights.join(", ")}) and NONE of them rendered with text — the tight-fit bound measured nothing here, which is a refusal, not a pass`);
+                }
+                for (const b of m.hb) {
+                  heightsSeen++;
+                  (hRow[b.sel] = hRow[b.sel] || {})[width] = `${b.h}/${b.need}(${b.lines}L)`;
+                  if (b.lines === 0) {
+                    fail(D, `${scen}/${theme}@${width}${cell.hash} \`${b.sel}\` el${b.i}: ${b.len} characters of text painted ZERO line boxes — the Range walk found no rects, so \`need\` is a floor of ${b.need}px that nothing derived and the bound below cannot lose`);
+                    continue;
+                  }
+                  // HEIGHT_SLACK is subpixel only: a line box top can land on a
+                  // fraction Chrome rounds when it stacks the box, so a bound at
+                  // exactly `need` can red by a rounding tick on a clean tree.
+                  // It is a PIXEL of tolerance, not room for a regression — the
+                  // cheapest real waste on these hosts is `min-height: 24px`.
+                  if (b.h > b.need + HEIGHT_SLACK) {
+                    tooTall++;
+                    fail(D, `${scen}/${theme}@${width}${cell.hash} \`${b.sel}\` el${b.i}: measured height ${b.h}px against a tight fit of ${b.need}px (${b.lines} line boxes x ${b.lh}px ${b.lhSrc} line-height + ${b.pad}px padding + ${b.bor}px border) — ${Math.round((b.h - b.need) * 100) / 100}px of VERTICAL WASTE this host's own ${b.len}-character text does not account for. min-height computes "${b.mh}". A longer error would move BOTH numbers; only layout moves this one`);
+                  }
+                }
+              }
             }
             process.stdout.write(`   ${cell.hash} ${scen}/${theme}  ${row.join(" ")}\n`);
+            // BOTH NUMBERS PRINTED, per host per width (`height/tight-fit`), so
+            // a reviewer reads the fit itself and not merely the verdict — and
+            // so a bound that started passing because the text stopped painting
+            // is readable as a `need` that collapsed.
+            for (const hsel of route.heights || []) {
+              const cells2 = CRUEL_WIDTHS.map((w) => `${w}:${(hRow[hsel] || {})[w] || "-"}`).join(" ");
+              process.stdout.write(`      H ${hsel}  ${cells2}\n`);
+            }
           }
         }
       }
@@ -5851,6 +6307,17 @@ async function main() {
           `row's kind ceiling (${CRUEL_ROUTES.map((r) => r.kindMax).join("/")}) — ${wentKind} cruel fixtures had gone kind, ${wentCruel} kind ` +
           `controls had gone cruel. Before this, both halves of the axis were a REGEX OVER THE SCENARIO NAME, and a ` +
           `control driven cruel scored a clean sweep under a header still calling it the kind corpus`,
+        );
+        okLine(
+          `HEIGHT is bounded too, and as a TIGHT FIT rather than a pixel: ${heightsSeen} host measurements across ` +
+          `${HEIGHT_HOSTS.join(" / ")} each satisfied \`height <= lines x line-height + padding-y + border-y\` within ` +
+          `${HEIGHT_SLACK}px, ${tooTall} carrying vertical waste. Both numbers are printed per host per width on the H ` +
+          `lines above (\`height/tight-fit(NL)\`), so the fit is readable and a \`need\` that COLLAPSED — the text stopped ` +
+          `painting — is readable with it. This is the axis nothing in this epic asserted: the w24-s2 remedy ended a ` +
+          `3.7k-pixel sideways drag by spending it vertically (\`.bp-tl-fail\` 60px to 399px at 320) and no instrument ` +
+          `could have told 19 line boxes from 220. A LONGER error moves both sides together and stays green (D206: a ` +
+          `pixel pin would pin the fixture string); only LAYOUT waste — a min-height, a per-line margin, a second copy ` +
+          `of the box — moves the measured side alone`,
         );
         okLine(
           `each finding names the WRAPPER SCOPE it measured (${CRUEL_ROUTES.map((r) => r.scopes).join(" | ")}) rather than the ` +
@@ -6212,7 +6679,14 @@ async function main() {
       // BLOCK-SCOPED on purpose (precedent: `const D` above): these widths are
       // this row's band, not a shared vocabulary, and hoisting them into the
       // constants region is how two slices start editing one line.
-      const NAME_WIDTHS = [320, 430, 768, 769, 800, 830, 860, 890, 900, 1000];
+      // cch-w18-bl: 900 and 905 STRADDLE the re-derived band edge. The
+      // production-dominant reason string is +21px, which pushed this column's
+      // cut to 900-904 — five widths that sat just ABOVE the old 899 edge and
+      // were invisible while the fixture served the shorter "Health down"
+      // string. 900 is the worst re-derived cell (67/62) and lives INSIDE the
+      // widened band; 905 is the first naturally-clean width and lives OUTSIDE
+      // it, so a band widened past its evidence reds here instead of passing.
+      const NAME_WIDTHS = [320, 430, 768, 769, 800, 830, 860, 890, 900, 905, 1000];
       const NAME_SCENS = ["overview-attention", "mixed-fleet"];
       const cellCount = NAME_SCENS.length * NAME_WIDTHS.length * 2;
       process.stdout.write(
@@ -6299,9 +6773,12 @@ async function main() {
           `action buttons, ${pageOver} pages scrolling sideways`,
         );
         okLine(
-          `769-899 is the DRIVEN band (mixed-fleet was cut through 860, overview-attention through 880); ` +
-          `768 and 900/1000 are carried as SHOULDERS — they were already clean on origin/main, so they cannot ` +
-          `detect a band block leaking sideways, only a remedy that breaks the stack or the desktop row`,
+          `769-904 is the DRIVEN band (mixed-fleet was cut through 860; overview-attention through 880 on the ` +
+          `OLD short fixture string and through 904 on the production-dominant one this fixture now serves — ` +
+          `cch-w18-bl re-derived that upper edge rather than adjusting it). 900 is INSIDE the band and was a ` +
+          `measured 67/62 cut before the edge moved; 905 is the first naturally-clean width and is the shoulder ` +
+          `that catches a band widened past its own evidence. 768 and 1000 are the outer shoulders — already ` +
+          `clean on origin/main, so they detect a remedy that breaks the stack or the desktop row, never a leak`,
         );
       }
     }
@@ -6850,6 +7327,23 @@ async function main() {
     //    the population is PRINTED per cell, so "8 rows" is a number a reader
     //    can check rather than a promise. Zero rows is a REFUSAL, not a pass.
     //
+    //    AND THE ROW'S DEPLOY-STATUS PILL (cch-w19-bl-w13-rail-pill-pooled-zero-
+    //    check, criterion 4). `site-status` / `siteStatusPill` appeared ZERO
+    //    times in this whole file before this leg carried them: W13 owns the
+    //    RAIL pill and none of its six BAND_ROUTES renders a `.site-row` at all
+    //    (its two `#site/<id>` routes are the site DETAIL page), so the capsule
+    //    `globalSiteRow` paints on every row of #sites was measured by nothing.
+    //    Each TRACK now DECLARES its site-pill population and every row is held
+    //    to it in BOTH directions — `sites` owes exactly one `.site-status
+    //    .status-pill` with a non-empty label per row (siteStatusPill has no
+    //    silent branch, so that is a builder contract, not a fixture property),
+    //    and the compact track is declared bare and asserted bare, its
+    //    payload-conditional binding chips counted and printed separately so
+    //    "the status pill vanished" and "a chip appeared" can never cancel out.
+    //    The per-track zero refusal is the net that survives an edit flipping
+    //    every `sitePill: true` off; it is scoped PER TRACK because a total
+    //    pooled across two builders is the exact defect this row was filed on.
+    //
     //    THE KIND CORPUS IS SCORED IN THE SAME RUN, under the same assertion,
     //    and its numbers are printed beside the cruel ones. Seven kind rows
     //    reading clean while the cruel two also read clean is the only thing
@@ -6898,6 +7392,15 @@ async function main() {
           ready: "#sites-body .site-row",
           builder: "globalSiteRow",
           hosts: ".site-name (the 255-char NAME) + .site-host (the 253-char domain / the 66-char one-label host)",
+          // cch-w19-bl-w13 criterion 4 — THE SITE-ROW PILL, DECLARED PER TRACK
+          // AND ASSERTED PER ROW IN BOTH DIRECTIONS, the BAND_ROUTES precedent.
+          // globalSiteRow OWES one: `siteStatusPill(s)` has no silent branch —
+          // a site with no freshnessModel still returns the neutral "Not
+          // deployed" capsule — so `<div class="site-status">` + exactly one
+          // `.status-pill` inside it is a CONTRACT of the builder, not a
+          // property of the fixture.
+          sitePill: true,
+          sitePillWhy: null,
         },
         {
           scen: "sites-on-instance",
@@ -6906,6 +7409,16 @@ async function main() {
           ready: "#instance-sites .site-row",
           builder: "siteRow (compact — THE SCREEN THAT SHREDDED)",
           hosts: ".site-name (the 253-char DOMAIN / the 66-char one-label host) + .site-meta .mono (the 511-char repo@branch span)",
+          // The compact builder emits NO `.site-status` wrapper at all. Its
+          // only `.status-pill` is the binding chip, and that one is
+          // payload-conditional (`siteBindingChip` returns "" when
+          // `siteBindingModel(s).silent`), so "every compact row carries a
+          // pill" would be a claim about the FIXTURE, not about the builder.
+          // What IS a contract is the absence of `.site-status`, and that is
+          // what is asserted — so the day the compact row grows a status host,
+          // this annotation reds instead of quietly widening the leg's meaning.
+          sitePill: false,
+          sitePillWhy: "the compact siteRow emits no `.site-status` wrapper — its only `.status-pill` is the payload-conditional binding chip (siteBindingChip -> siteBindingPill, \"\" when the binding model is silent), which no row is obliged to carry",
         },
       ];
       for (const t of TRACKS) {
@@ -6934,6 +7447,12 @@ async function main() {
         `because a clip-only scorer reads a shredded 0px box as clean\n`,
       );
       let cells = 0, hostCells = 0, hostSpill = 0, pageOver = 0, tall = 0, cruelSeen = 0, maxRowH = 0;
+      // cch-w19-bl-w13 criterion 4. `sitePills` is the population the owing
+      // track is held to; `sitePillLabels` is its second-order half; `chipPills`
+      // is the binding chips, counted so they can be PRINTED and never mistaken
+      // for the status pill. Keyed by track name, because a leg-level total
+      // across two tracks is exactly the pooled shape this row was filed about.
+      const sitePillCensus = new Map(TRACKS.map((t) => [t.name || t.scen, { pills: 0, labels: 0, chips: 0, rows: 0, cells: 0 }]));
       for (const t of TRACKS) {
         for (const theme of ["light", "dark"]) {
           // Enter at the WIDEST driven width and walk down, so a screen that
@@ -6960,7 +7479,20 @@ async function main() {
               `    [].slice.call(row.querySelectorAll(sel)).forEach(function(el){` +
               `      hosts.push({sel:sel,tag:el.tagName.toLowerCase(),sw:el.scrollWidth,cw:el.clientWidth,` +
               `        h:Math.round(el.getBoundingClientRect().height),len:(el.textContent||'').length});});});` +
-              `  return {id:row.getAttribute('data-id'),h:Math.round(row.getBoundingClientRect().height),hosts:hosts};});` +
+              // cch-w19-bl-w13 criterion 4: the row's OWN pill population,
+              // split by host. `ssp` is the declared/asserted one; `apl` is
+              // every `.status-pill` in the row, so the binding chips stay
+              // COUNTED AND PRINTED rather than folded into a total that would
+              // then be unable to tell "the status pill vanished" from "a
+              // binding chip appeared". `lbl` carries the second-order lesson
+              // from W13's `hasLabel`: a capsule with no `.status-pill-label`
+              // is half-rendered, and half-rendered is a finding, not a skip.
+              `  var ssp=[].slice.call(row.querySelectorAll('.site-status .status-pill'));` +
+              `  return {id:row.getAttribute('data-id'),h:Math.round(row.getBoundingClientRect().height),hosts:hosts,` +
+              `    sst:row.querySelectorAll('.site-status').length,` +
+              `    ssp:ssp.length,apl:row.querySelectorAll('.status-pill').length,` +
+              `    lbl:ssp.filter(function(p){var l=p.querySelector('.status-pill-label');` +
+              `      return !!l && (l.textContent||'').trim().length>0;}).length};});` +
               `return {psw:d.scrollWidth,pcw:d.clientWidth,view:v?v.id:'none',theme:d.getAttribute('data-theme'),rows:rows};})()`,
             );
             cells++;
@@ -6986,6 +7518,8 @@ async function main() {
               continue;
             }
             cruelSeen++;
+            const sc = sitePillCensus.get(t.name || t.scen);
+            sc.cells++;
             // (1) THE CELLS — every host of every row, cruel AND kind, under
             // one assertion. This is the half W26 cannot make.
             const cruel = m.rows.filter((r) => CRUEL_IDS.includes(r.id));
@@ -7008,6 +7542,33 @@ async function main() {
                 const worst = r.hosts.reduce((a, b) => (!a || b.h > a.h ? b : a), null);
                 fail(D, `${t.scen}/${theme}@${width}: the ${which} .site-row ${r.id} is ${r.h}px tall against a ${ROW_HEIGHT_CEILING}px viewport — one list row no longer fits one screen, which is the SHRED failure (its tallest host is ${worst ? worst.sel + " at " + worst.h + "px for " + worst.len + " characters" : "unknown"}). A clip-only scorer reads this cell as clean`);
               }
+              // (2b) THE ROW'S OWN STATUS PILL, PER ROW AND IN BOTH DIRECTIONS
+              // (cch-w19-bl-w13 criterion 4). Before this, `site-status` and
+              // `siteStatusPill` appeared ZERO times anywhere in this file: the
+              // pill `globalSiteRow` renders on every row of the `#sites` list
+              // was measured by no leg, so it could stop rendering entirely and
+              // the whole guard stayed green. It is asserted per ROW, not per
+              // cell and not per leg, for the reason this row was filed: a
+              // population summed over two builders cannot tell a builder that
+              // dropped its pill from a builder that never had one.
+              sc.rows++;
+              sc.pills += r.ssp;
+              sc.labels += r.lbl;
+              sc.chips += r.apl - r.ssp;
+              if (t.sitePill) {
+                if (r.sst !== 1) {
+                  fail(D, `${t.scen}/${theme}@${width}: the ${which} .site-row ${r.id} has ${r.sst} \`.site-status\` hosts, expected exactly 1 — ${t.builder} declares one on every row (siteStatusPill has no silent branch), so the status column has moved or gone and every pill assertion on this row measured nothing`);
+                }
+                if (r.ssp !== 1) {
+                  fail(D, `${t.scen}/${theme}@${width}: the ${which} .site-row ${r.id} carries ${r.ssp} \`.site-status .status-pill\`, expected exactly 1 — ${t.builder} renders one unconditionally. Zero is not a clean row, it is an unmeasured one; more than one means the status column silently doubled`);
+                } else if (r.lbl !== 1) {
+                  fail(D, `${t.scen}/${theme}@${width}: the ${which} .site-row ${r.id}'s \`.site-status .status-pill\` carries no \`.status-pill-label\` with text — the capsule renders as an empty dot, so the deploy state this column exists to say is not said (the W13 \`hasLabel\` lesson: half-rendered is a finding, not a skip)`);
+                }
+              } else {
+                if (r.sst > 0) {
+                  fail(D, `${t.scen}/${theme}@${width}: the ${which} .site-row ${r.id} has ${r.sst} \`.site-status\` hosts on a track declared to render NONE (${t.sitePillWhy}) — the annotation at TRACKS has gone stale. Update it rather than letting an unasserted status column ride along`);
+                }
+              }
             }
             // (3) THE PAGE. The cell half and the page half fail on different
             // trees; a leg carrying only one of them has been green on a
@@ -7029,6 +7590,8 @@ async function main() {
             const c = worstOf(cruel), k = worstOf(kind);
             line.push(
               `${width}:${m.rows.length}r pg${m.psw}/${m.pcw} ` +
+              `pill${m.rows.reduce((a, r) => a + r.ssp, 0)}/${m.rows.length}` +
+              `+${m.rows.reduce((a, r) => a + (r.apl - r.ssp), 0)}chip ` +
               `CRUEL[${cruel.length}r ${c.len}ch ${c.host ? c.host.sw + "/" + c.host.cw : "-"} h${c.h}] ` +
               `kind[${kind.length}r ${k.len}ch ${k.host ? k.host.sw + "/" + k.host.cw : "-"} h${k.h}]`,
             );
@@ -7036,7 +7599,49 @@ async function main() {
           process.stdout.write(`   ${t.scen}/${theme}  ${line.join("  ")}\n`);
         }
       }
+      // cch-w19-bl-w13 criterion 4, THE NON-VACUITY NET. The per-row refusals
+      // above are the real assertion; this one is what survives an edit that
+      // flips every `sitePill: true` off, or a fixture that stops populating
+      // the owing track entirely. It is scoped PER TRACK on purpose — a total
+      // pooled across both builders is the exact shape this row was filed about.
+      for (const t of TRACKS) {
+        const sc = sitePillCensus.get(t.name || t.scen);
+        if (!t.sitePill) continue;
+        if (sc.cells === 0) {
+          fail(D, `${t.scen}: zero cells reached the site-pill assertion on a track declared to carry one — ${t.builder}'s status pill was measured NOWHERE in this run, so its per-row refusals proved nothing`);
+        } else if (sc.pills === 0) {
+          fail(D, `${t.scen}: zero \`.site-status .status-pill\` across ${sc.rows} rows in ${sc.cells} cells — ${t.builder} stopped rendering the deploy-status column entirely. An empty set satisfies every per-row shape assertion above; this is not a pass`);
+        }
+      }
+      // THE SITE-ROW PILL CENSUS, printed UNCONDITIONALLY (the W13 precedent
+      // added by this same row): a red run is the run whose population table a
+      // reader most needs.
+      process.stdout.write(
+        `\n   ${D} — SITE-ROW PILL CENSUS, per track, MEASURED:\n` +
+        `   ${"track".padEnd(20)}${"cells".padEnd(7)}${"rows".padEnd(7)}${"pills".padEnd(7)}${"labels".padEnd(8)}${"chips".padEnd(7)}declared\n`,
+      );
+      for (const t of TRACKS) {
+        const sc = sitePillCensus.get(t.name || t.scen);
+        process.stdout.write(
+          `   ${t.scen.padEnd(20)}${String(sc.cells).padEnd(7)}${String(sc.rows).padEnd(7)}` +
+          `${String(sc.pills).padEnd(7)}${String(sc.labels).padEnd(8)}${String(sc.chips).padEnd(7)}` +
+          `sitePill:${t.sitePill}${t.sitePillWhy ? " — " + t.sitePillWhy : ""}\n`,
+        );
+      }
       if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `THE ROW'S DEPLOY-STATUS PILL IS MEASURED AT LAST (cch-w19-bl-w13 criterion 4): before this leg carried ` +
+          `it, \`site-status\` and \`siteStatusPill\` appeared ZERO times in this whole file, so the capsule ` +
+          `\`globalSiteRow\` paints on every row of #sites could stop rendering and every leg stayed green. ` +
+          TRACKS.map((t) => {
+            const sc = sitePillCensus.get(t.name || t.scen);
+            return t.sitePill
+              ? `${t.scen} OWES one per row and rendered ${sc.pills}/${sc.rows} (${sc.labels} of them with a non-empty \`.status-pill-label\`)`
+              : `${t.scen} is declared bare and asserted bare per row (${t.sitePillWhy}), measured ${sc.pills} \`.site-status .status-pill\` and ${sc.chips} binding chip(s) — counted and printed, never folded into the total`;
+          }).join("; ") +
+          `. Both directions RED: a track that owes a pill and renders none, and a bare track that grows a ` +
+          `\`.site-status\`, are findings rather than a moved number`,
+        );
         okLine(
           `${cells} / ${cells} cells clean across ${ROW_WIDTHS.join("/")} in both themes on BOTH row builders — ` +
           `${hostCells} .site-name / .site-host / .site-meta .mono cells measured by querySelectorAll over EVERY ` +

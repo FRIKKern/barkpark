@@ -88,6 +88,7 @@ defmodule Barkpark.Tasks.Fleet do
 
   import Ecto.Query, only: [from: 2]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
@@ -488,7 +489,7 @@ defmodule Barkpark.Tasks.Fleet do
       Repo.transaction(fn ->
         _ =
           Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [
-            "listener:" <> logical_id
+            LockKey.listener(logical_id)
           ])
 
         # In-lock re-read: beats serialize on the advisory lock, so the CAS

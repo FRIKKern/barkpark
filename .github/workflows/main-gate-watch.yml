@@ -66,8 +66,17 @@ name: main-gate-watch
 
 on:
   schedule:
-    # Every 30 minutes. GitHub queues cron under load, so treat this as "within
-    # ~30-45 minutes", never "at :00 and :30".
+    # Declared every 30 minutes. DELIVERED every 2.1-4.7 HOURS: measured
+    # 2026-09-05T07:48Z..2026-09-06T08:02Z over 14 consecutive scheduled runs
+    # (33953540483 .. 34020746620), never once at the declared cadence. This is
+    # GitHub's cron delivery for this repo, not queueing under load — the
+    # sibling .github/workflows/task-lease-renew.yml measured the same 2-5 h on
+    # 2026-09-03 for its */20 arm. So a verdict here is 2-5 h stale by
+    # construction, and "the schedule did not fire" is NOT this workflow being
+    # broken. What to do with a stale verdict: read the newest COMPLETED run on
+    # the newest sha (gh run list --workflow main-gate-watch.yml --limit 1), or
+    # fire workflow_dispatch; do NOT add a push: arm — see below. A bare number
+    # re-rots: if you re-measure, replace the figures AND the date.
     - cron: "*/30 * * * *"
   workflow_dispatch:
   # THERE IS NO `push:` TRIGGER, AND ADDING ONE IS A REGRESSION (wave 60, D721).
@@ -77,7 +86,9 @@ on:
   # Production record: 2 of 2 push runs FAILED on tip 026c5b1d78 (MISSING x3)
   # while main was in fact green; the byte-identical script on the SAME sha 36
   # minutes later printed ok/ok/ok, rc=0. The schedule arm IS the trigger, and the
-  # header above already accepts a ~30-45 minute verdict lag.
+  # header above already accepts a multi-hour verdict lag (measured 2.1-4.7 h;
+  # the lease-renew sibling compensates with push: because ITS job is safe on an
+  # empty payload — this one is not, for the reason stated in this paragraph).
   # `scripts/main-gate-watch.test.sh` §11 reds if a push: trigger comes back, and
   # §3b carries the empty-payload fixture — which since wave 61 reports WAITING
   # while a run on the tip is in flight, and MISSING once every run is terminal.
@@ -107,7 +118,7 @@ permissions:
   # would go stale against the live rule with nobody the wiser — so it runs with
   # `secrets.BREAKGLASS_TOKEN` when present and falls back to `github.token`.
   # If that secret is removed, rotated or revoked, the fallback keeps the job
-  # RUNNABLE and it then reds every 30 minutes on the protection read (exit 3).
+  # RUNNABLE and it then reds on every scheduled run on the protection read (exit 3).
   # That red is the honest state of a watch that cannot read what it watches. It
   # is not a false alarm to silence, and the fix is to restore the secret, never
   # to soften the classification.
@@ -129,6 +140,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The convergence step below resolves the sha the control plane SERVES,
+          # which is behind main's tip whenever a deploy is late — exactly the
+          # case the step exists to catch. A depth-1 clone cannot resolve it, and
+          # deploy-convergence-check.sh then refuses HARNESS-UNAVAILABLE (exit 2)
+          # instead of answering. Measured 2026-09-06 run 34008234523: served
+          # 92c45fc17 'is not a commit in this clone' — six of eight runs since
+          # 2026-09-05T07:48Z died there, alternating with green whenever the box
+          # happened to serve the exact tip. deploy.yml's own convergence job
+          # sets the same depth for the same reason.
+          fetch-depth: 0
 
       # The scream's own tripwire, first. If the read stops being able to fail —
       # on a RED tip AND on a tip with no verdict at all — the watch below is
@@ -145,7 +167,7 @@ jobs:
           bash scripts/main-gate-watch.sh --repo "${{ github.repository }}" --branch main || rc=$?
           case "$rc" in
             0) exit 0 ;;
-            1) echo "::error::MAIN'S TIP DOES NOT CARRY A GREEN VERDICT on every watched required context (RED, or MISSING — never judged). This run fails, and it will keep failing every 30 minutes until the tip is green."; exit 1 ;;
+            1) echo "::error::MAIN'S TIP DOES NOT CARRY A GREEN VERDICT on every watched required context (RED, or MISSING — never judged). This run fails, and it will keep failing on every scheduled run (delivered every 2-5 h, see the schedule header) until the tip is green."; exit 1 ;;
             # WAITING is neither a pass nor a scream: a context is still in
             # flight. Reddening here would false-red every fresh push to main
             # for as long as CI takes, which is how a watch gets muted.
@@ -171,9 +193,16 @@ jobs:
           if [ -z "$tip" ] || [ -z "$served" ]; then
             echo "::warning::the control plane did not say what it serves (or main was unreadable) — UNCHECKED, not green"; exit 0
           fi
+          # rc captured on the same line: GitHub's default `run:` shell is
+          # `bash -e {0}`, and `set -uo pipefail` does not switch -e off, so a
+          # bare non-zero exit killed this step BEFORE the case below ever ran —
+          # the refusal arm (exit 2) reddened the job as an unexplained failure,
+          # and the same shape would have hidden a real STRANDED verdict's
+          # message. Same idiom as the watch step above.
+          rc=0
           bash scripts/deploy-convergence-check.sh converged --label "control plane (barkpark.cloud)" --target cp \
-            --served "$served" --tip "$tip" --grace-seconds 900
-          case $? in
+            --served "$served" --tip "$tip" --grace-seconds 900 || rc=$?
+          case "$rc" in
             0) echo "control plane: converged (serves ${served:0:10}, main tip ${tip:0:10})" ;;
             1) echo "::error::CONTROL PLANE STRANDED — barkpark.cloud serves ${served:0:10}, main's newest deploy-relevant commit is newer (tip ${tip:0:10}). Every merge since is not in production."; exit 1 ;;
             *) echo "::warning::the convergence comparison refused — UNCHECKED, not green" ;;

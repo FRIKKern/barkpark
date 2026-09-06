@@ -446,6 +446,25 @@
 #     examined at all, so it cannot be counted. The population already prints as
 #     `N+` for exactly this reason; the residual is now SAID beside it rather
 #     than left for a reader to infer from a plus sign.
+#
+# THE RUN LISTING PAGES TO THE WINDOW START (task-300fe0d74442acf3).
+#
+# Both of the above were mitigations for a truncation that was never necessary.
+# `per_page=100` with no `page=` was ONE page read as if it were the 24h window,
+# and it was short on 7 of 24 active days in the 30-day sample (2026-09-02: 246
+# runs). fetch_runs now pages — newest-first, stopping at the first short page or
+# at the first page reaching back past the WIDE cutoff, capped at RUNS_PAGE_CAP
+# pages — so the ordinary busy day is a COUNT and the two mitigations above fire
+# only when the cap or a dead page really did cut the listing short. The cost is
+# one extra request on a day with more than 100 runs.
+#
+# THE POPULATION NAMES CANCELLED RUNS IN BOTH DIRECTIONS. `run_delivers` does not
+# consult a run's own conclusion, which is correct — a run whose only failing leg
+# is the other one still put code on a box — but it left cancelled runs counted
+# ANONYMOUSLY under a parenthetical that says "a docs-only merge skips both".
+# CANCELLED_NONDELIVERING (a superseded push) and CANCELLED_DELIVERING (delivered
+# and then cancelled, so the record-delivery job died with it) are now printed by
+# name off the conclusion already on the page.
 
 set -uo pipefail
 
@@ -607,6 +626,67 @@ WIDE_EPOCH=$((CUTOFF_EPOCH - GRACE_HOURS * 3600))
 iso_of() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null; }
 CUTOFF_ISO="$(iso_of "$CUTOFF_EPOCH")"
 NOW_ISO="$(iso_of "$NOW_EPOCH")"
+
+# ── THE DATED, SELF-EXPIRING WAIVER FOR ONE SHA ──────────────────────────────
+#
+# WHY IT EXISTS. PR #16471 closed a crown-recorder gap: rows_for's half-open
+# range could drop a delivered sha PERMANENTLY once the next deploy's `prev`
+# moved past it. That fix is FORWARD-ONLY — it stops the NEXT drop and cannot
+# manufacture the row that was already lost — so exactly ONE pre-fix specimen
+# survives it: 28f8e109c58c285f3fd60d6645b4df20467c05e6, graced 2026-09-06
+# 08:32:19Z and never recorded. Every crown-reconcile run on main since the
+# merge has fired GRACED-UNRECORDED on that one sha and nothing else.
+#
+# WHO OWNS THE REAL REMEDY. Not this file. The honest fix is a backfill POST to
+# /v1/internal/platform-deliveries, which needs a live WORKER_TOKEN and a write
+# to the control-plane box — both owner-only by standing rule. It is queued with
+# the owner as task-9c8fccd9e8a77773. This waiver buys the hours until then; it
+# does not settle the debt, and it is not a licence to skip it.
+#
+# WHAT HAPPENS AT EXPIRY. Nothing has to happen. Past WAIVER_EXPIRES_ISO the
+# predicate below is false and the sha is accused again exactly as it is today —
+# no config change, no cleanup PR, no allowlist that quietly outlives its excuse.
+# The instant is pinned to the sha's own 86400s REASK_MAX_SECONDS retirement
+# (first seen 08:32:19Z 2026-09-06, so it ages off the re-ask list ~08:32:19Z
+# 2026-09-07): the waiver CANNOT outlive the condition it excuses, because the
+# condition retires within seconds of it.
+#
+# IT IS LOUD. A waived sha still prints — by sha, with its expiry and the seconds
+# left — so nobody reads a silent green.
+WAIVED_SHA="28f8e109c58c285f3fd60d6645b4df20467c05e6"
+WAIVER_EXPIRES_ISO="2026-09-07T08:32:00Z"
+# THE PLATFORM TRAP THIS PARSE IS GUARDED AGAINST. `date -u -d ""` returns rc 1
+# on BSD/macOS and rc 0 WITH TODAY'S MIDNIGHT on GNU/Linux, and GNU also accepts
+# a relative grammar ("next year", "+1 day") that BSD refuses outright. A
+# malformed constant here would therefore be INERT on a mac and a real — possibly
+# far-future — instant on the CI runner: the difference between "expired" and
+# "waived forever", decided by which date(1) the machine happens to have. So the
+# literal is SHAPE-CHECKED before any date(1) sees it, at the STRICTER contract
+# (exactly YYYY-MM-DDTHH:MM:SSZ — no fraction, no offset, no relative grammar),
+# and anything that fails the shape, fails the parse, or lands non-numeric leaves
+# the expiry at 0, which makes the waiver INERT on every platform. It fails
+# CLOSED: the accusation is the default, and the waiver is what must be earned.
+case "$WAIVER_EXPIRES_ISO" in
+  [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z)
+    WAIVER_EXPIRES_EPOCH="$(epoch_of "$WAIVER_EXPIRES_ISO" 2>/dev/null || true)" ;;
+  *)
+    WAIVER_EXPIRES_EPOCH="" ;;
+esac
+case "$WAIVER_EXPIRES_EPOCH" in
+  ''|*[!0-9]*) WAIVER_EXPIRES_EPOCH=0 ;;
+esac
+if [ "$WAIVER_EXPIRES_EPOCH" = "0" ]; then
+  warn "WAIVER INERT: the dated waiver's expiry constant ($WAIVER_EXPIRES_ISO) is not an unambiguous UTC instant, so nothing is waived and $WAIVED_SHA is judged normally."
+fi
+# TRUE only for that ONE sha, and only before that ONE instant. String equality,
+# never a prefix or a pattern: it can suppress nothing else, and no sha it was
+# not written for can inherit its silence.
+waived_now() { # <sha> -> 0 if this exact sha is waived AND the waiver is still live
+  [ "$1" = "$WAIVED_SHA" ] || return 1
+  [ "$WAIVER_EXPIRES_EPOCH" -gt 0 ] || return 1
+  [ "$NOW_EPOCH" -lt "$WAIVER_EXPIRES_EPOCH" ] || return 1
+  return 0
+}
 
 # ── the named silences ───────────────────────────────────────────────────────
 # The ONLY way UNREADABLE is set. A condition that mutes part of the comparison
@@ -906,10 +986,34 @@ say_reader() {
 }
 
 # ── the runs ─────────────────────────────────────────────────────────────────
+# ONE PAGE OF 100 WAS BEING READ AS "THE WINDOW". It is not. On 7 of 24 active
+# days in the 30-day sample the deploy.yml run list on main exceeded 100 rows
+# (2026-09-02: 246), and on those days every number below — POPULATION, and the
+# BEHIND denominator that hangs off it — was a floor wearing a plus sign. The
+# listing now PAGES until it has actually reached back past the window it is
+# about, so on an ordinary day the population is a COUNT, and the floor language
+# is reserved for the one case that really is one: the page cap was hit first.
+RUNS_PAGE_CAP=12
+# 1 when the listing reached the window start (a short page, or a page whose
+# oldest run predates the wide cutoff); 0 when it stopped early and the numbers
+# below are a floor. Set by fetch_runs, read by the FLOOR test.
+RUNS_LIST_COMPLETE=1
+RUNS_PAGES_READ=0
 fetch_runs() { # -> writes $WORK/runs-raw.json, 0 ok / 2 could not read
   if [ "$FIXTURE_MODE" = "1" ]; then
     [ -f "$RUNS_FIXTURE" ] || { warn "  runs fixture is unreadable: $RUNS_FIXTURE"; return 2; }
     cp "$RUNS_FIXTURE" "$WORK/runs-raw.json"
+    # A FIXTURE IS ONE FILE AND CANNOT PAGE, so it states for itself whether the
+    # listing it stands for reached the window start: `"truncated": true` means
+    # the pager gave up before it did. Without that key a fixture is the WHOLE
+    # listing, however many rows it holds — which is exactly what pagination
+    # buys, and is why a 101-row fixture is now a count and not a floor.
+    RUNS_PAGES_READ=1
+    if jq -e '.truncated == true' "$WORK/runs-raw.json" >/dev/null 2>&1; then
+      RUNS_LIST_COMPLETE=0
+    else
+      RUNS_LIST_COMPLETE=1
+    fi
     return 0
   fi
   command -v gh >/dev/null 2>&1 || { warn "CONFIG: gh is required to enumerate deploy.yml runs"; return 3; }
@@ -918,12 +1022,41 @@ fetch_runs() { # -> writes $WORK/runs-raw.json, 0 ok / 2 could not read
   # on the box, and `status=success` meant those bytes were never fetched at
   # all. The POPULATION is still bounded by construction: the jq that builds
   # .examined/.wide filters `.status == "completed"` itself, so a run that has not
-  # finished is never examined and never reaches a jobs lookup. The only other
-  # reader of this file is PAGE_ROWS/PAGE_OLDEST, which counts the raw page and
-  # already discloses truncation as `N+`.
-  if ! gh api "repos/$REPO/actions/workflows/deploy.yml/runs?branch=main&per_page=100" \
-    > "$WORK/runs-raw.json" 2>"$WORK/runs-err.txt"; then
-    warn "  could not list deploy.yml runs: $(head -1 "$WORK/runs-err.txt")"
+  # finished is never examined and never reaches a jobs lookup.
+  local page=1 rows oldest
+  : > "$WORK/runs-pages.jsonl"
+  RUNS_LIST_COMPLETE=0
+  RUNS_PAGES_READ=0
+  while [ "$page" -le "$RUNS_PAGE_CAP" ]; do
+    if ! gh api "repos/$REPO/actions/workflows/deploy.yml/runs?branch=main&per_page=100&page=$page" \
+      > "$WORK/runs-page.json" 2>"$WORK/runs-err.txt"; then
+      # A FIRST page that does not answer is the old total failure. A LATER page
+      # that does not answer is a SHORTER listing, not a missing one — it is
+      # reported as the floor it is rather than thrown away.
+      if [ "$page" = "1" ]; then
+        warn "  could not list deploy.yml runs: $(head -1 "$WORK/runs-err.txt")"
+        return 2
+      fi
+      warn "  page $page of the deploy.yml run list did not answer ($(head -1 "$WORK/runs-err.txt")) — the listing stops short of the window start and the population below is a FLOOR"
+      break
+    fi
+    RUNS_PAGES_READ=$((RUNS_PAGES_READ + 1))
+    rows="$(jq '.workflow_runs | length' "$WORK/runs-page.json" 2>/dev/null || echo 0)"
+    case "${rows:-}" in ''|*[!0-9]*) rows=0 ;; esac
+    jq -c '.workflow_runs[]?' "$WORK/runs-page.json" >> "$WORK/runs-pages.jsonl" 2>/dev/null
+    # A short page IS the end of the list.
+    if [ "$rows" -lt 100 ]; then RUNS_LIST_COMPLETE=1; break; fi
+    # Runs come back newest-first, so once a page reaches back past the WIDE
+    # cutoff — the widest instant any question below asks about — there is
+    # nothing older left to want.
+    oldest="$(jq -r '[.workflow_runs[] | .created_at | fromdateiso8601] | min // 0' "$WORK/runs-page.json" 2>/dev/null || echo 0)"
+    case "${oldest:-}" in ''|*[!0-9]*) oldest=0 ;; esac
+    if [ "$oldest" -le "$WIDE_EPOCH" ]; then RUNS_LIST_COMPLETE=1; break; fi
+    page=$((page + 1))
+  done
+  jq -s '{workflow_runs: .}' "$WORK/runs-pages.jsonl" > "$WORK/runs-raw.json" 2>/dev/null
+  if [ ! -s "$WORK/runs-raw.json" ]; then
+    warn "  the deploy.yml run pages did not re-assemble into a runs payload"
     return 2
   fi
   return 0
@@ -975,6 +1108,31 @@ run_delivers() { # <run-id> -> 0 delivers / 1 does not / 2 could not read
   return 1
 }
 
+# ONE READ PER RUN, PER INVOCATION. Every run inside the examined window is asked
+# about TWICE — once to build the delivering population, once to build the wider
+# ALIBI set below — and the two answers came from two separate jobs-API calls.
+# That is what produced the 6-of-24 false WRONG on main: run 33985744753's first
+# read succeeded (the POPULATION line of run 34012723514 printed `0 unreadable`,
+# so it was IN the 90 that delivered) and its second read did not, which struck
+# its id out of the alibi set and made a TRUE row a ghost. The second read buys
+# nothing — the answer cannot change inside one invocation — so it is not made.
+# This is the CURE; the UNREADABLE-ALIBI class below is the guarantee that holds
+# even when the one remaining read is the one that fails.
+run_delivers_cached() { # <run-id> -> 0 delivers / 1 does not / 2 could not read
+  local id="$1" rc
+  local f="$WORK/verdict-$id.rc"
+  if [ -f "$f" ]; then
+    RUN_LEG_MIXED=0
+    rc="$(cat "$f")"
+    case "$rc" in ''|*[!0-9]*) rc=2 ;; esac
+    return "$rc"
+  fi
+  run_delivers "$id"
+  rc=$?
+  printf '%s' "$rc" > "$f"
+  return "$rc"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 select_reader || exit 3
 [ "$READER" = "ssh" ] && write_remote_reader
@@ -1022,7 +1180,8 @@ fi
 jq --argjson cut "$CUTOFF_EPOCH" --argjson wide "$WIDE_EPOCH" \
   '[.workflow_runs[]
     | select(.status == "completed")
-    | {id: (.id | tostring), sha: .head_sha, created: .created_at, at: (.created_at | fromdateiso8601)}]
+    | {id: (.id | tostring), sha: .head_sha, created: .created_at, at: (.created_at | fromdateiso8601),
+       concl: (.conclusion // "none")}]
    | {examined: [.[] | select(.at >= $cut)], wide: [.[] | select(.at >= $wide)]}' \
   "$WORK/runs-raw.json" > "$WORK/runs.json" 2>/dev/null
 if [ ! -s "$WORK/runs.json" ]; then
@@ -1033,14 +1192,17 @@ if [ ! -s "$WORK/runs.json" ]; then
 fi
 
 COMPLETED_COUNT="$(jq '.examined | length' "$WORK/runs.json")"
-# One page of 100 is the bound. The population is a FLOOR only when that page
-# BOTH filled AND failed to reach back past the cutoff — a filled page whose
-# oldest run predates the window has seen the whole window and is exact. Printed
-# as `N+`, never rounded down silently.
+# THE PAGE CAP IS THE BOUND, NOT ONE PAGE OF 100. fetch_runs now pages until the
+# listing reaches back past the window, so a busy day whose run list runs to 246
+# rows is a COUNT. The population is a FLOOR only when the pager stopped early
+# — cap hit, or a later page that did not answer — AND the rows it did get still
+# do not reach the cutoff. Row count alone is no longer evidence of truncation:
+# keying on `>= 100` printed `N+` on every busy day the pager had in fact read
+# whole. Printed as `N+`, never rounded down silently.
 PAGE_ROWS="$(jq '.workflow_runs | length' "$WORK/runs-raw.json" 2>/dev/null || echo 0)"
 PAGE_OLDEST="$(jq -r '[.workflow_runs[] | .created_at | fromdateiso8601] | min // 0' "$WORK/runs-raw.json" 2>/dev/null || echo 0)"
-if [ "${PAGE_ROWS:-0}" -ge 100 ] && [ "${PAGE_OLDEST:-0}" -gt "$CUTOFF_EPOCH" ]; then
-  warn "  note: the 100-run page filled without reaching the window start — the population below is a FLOOR, printed as N+"
+if [ "${RUNS_LIST_COMPLETE:-1}" != "1" ] && [ "${PAGE_OLDEST:-0}" -gt "$CUTOFF_EPOCH" ]; then
+  warn "  note: the run listing stopped after ${RUNS_PAGES_READ} page(s) (${PAGE_ROWS} run(s)) without reaching the window start — the population below is a FLOOR, printed as N+"
   FLOOR="+"
 else
   FLOOR=""
@@ -1065,17 +1227,32 @@ NONTERMINAL_RUNS="$(awk 'NF' "$WORK/nonterminal-runs.txt" | wc -l | tr -d ' ')"
 JOBS_UNREADABLE=0
 NONDELIVERING=0
 MIXED_LEG=0
-while IFS=' ' read -r id sha at; do
+# CANCELLED IS A CLASS, AND IT POINTS BOTH WAYS. Cancelled runs were never
+# omitted from this population — `run_delivers` does not consult the run's own
+# conclusion — but they were counted ANONYMOUSLY, and the parenthetical below
+# actively mislabelled them: it told the reader that "delivered nothing" means a
+# docs-only merge, when most of that class is a SUPERSEDED PUSH cancelled before
+# a single job started. The other direction is the dangerous one: a run whose
+# instance or control-plane leg concluded success and which was then cancelled
+# DELIVERED — it put code on a box — and its record-delivery job was cancelled
+# with it, so the crown may hold no row for a delivery that happened. That is the
+# exact shape SERVING-UNRECORDED came from. The conclusion is already on the
+# page; naming the two costs two counters in a loop that already runs.
+CANCELLED_NONDELIVERING=0
+CANCELLED_DELIVERING=0
+while IFS=' ' read -r id sha at concl; do
   [ -n "$id" ] || continue
-  run_delivers "$id"
+  run_delivers_cached "$id"
   case $? in
     0) printf '%s %s %s\n' "$id" "$sha" "$at" >> "$WORK/delivering.txt"
-       [ "$RUN_LEG_MIXED" = "1" ] && MIXED_LEG=$((MIXED_LEG + 1)) ;;
-    1) NONDELIVERING=$((NONDELIVERING + 1)) ;;
+       [ "$RUN_LEG_MIXED" = "1" ] && MIXED_LEG=$((MIXED_LEG + 1))
+       [ "$concl" = "cancelled" ] && CANCELLED_DELIVERING=$((CANCELLED_DELIVERING + 1)) ;;
+    1) NONDELIVERING=$((NONDELIVERING + 1))
+       [ "$concl" = "cancelled" ] && CANCELLED_NONDELIVERING=$((CANCELLED_NONDELIVERING + 1)) ;;
     *) JOBS_UNREADABLE=$((JOBS_UNREADABLE + 1))
        reason "run $id: its job list could not be read — it is NOT counted as reconciled" ;;
   esac
-done < <(jq -r '.examined[] | "\(.id) \(.sha) \(.at)"' "$WORK/runs.json")
+done < <(jq -r '.examined[] | "\(.id) \(.sha) \(.at) \(.concl)"' "$WORK/runs.json")
 
 DELIVERING="$(awk 'NF' "$WORK/delivering.txt" | wc -l | tr -d ' ')"
 
@@ -1085,19 +1262,36 @@ DELIVERING="$(awk 'NF' "$WORK/delivering.txt" | wc -l | tr -d ' ')"
 # ALIBI for a row, never as a population this verdict reports a rate over.
 : > "$WORK/wide-shas.txt"
 : > "$WORK/wide-runs.txt"
+# THREE ANSWERS, NOT TWO. `if run_delivers "$id"` folded rc 2 — the jobs list
+# could not be READ — into rc 1 — the run delivered NOTHING. Those are opposite
+# statements: one is a fact about the deploy, the other is a fact about this
+# script's own reading. Folding them struck an unreadable run's id out of the
+# alibi set with no trace, and the very next block then reported the honest crown
+# row that names it as WRONG. An unreadable alibi is now its own set, counted and
+# named, and a row it covers is DEFERRED rather than accused.
+: > "$WORK/wide-unreadable.txt"
+WIDE_UNREADABLE=0
 while IFS=' ' read -r id sha; do
   [ -n "$id" ] || continue
-  if run_delivers "$id"; then
-    printf '%s\n' "$sha" >> "$WORK/wide-shas.txt"
-    printf '%s\n' "$id" >> "$WORK/wide-runs.txt"
-  fi
+  run_delivers_cached "$id"
+  case $? in
+    0) printf '%s\n' "$sha" >> "$WORK/wide-shas.txt"
+       printf '%s\n' "$id" >> "$WORK/wide-runs.txt" ;;
+    1) ;;
+    *) WIDE_UNREADABLE=$((WIDE_UNREADABLE + 1))
+       printf '%s %s\n' "$id" "$sha" >> "$WORK/wide-unreadable.txt" ;;
+  esac
 done < <(jq -r '.wide[] | "\(.id) \(.sha)"' "$WORK/runs.json")
+sort -u -k1,1 "$WORK/wide-unreadable.txt" > "$WORK/wide-unreadable-sorted.txt"
+awk 'NF {print $1}' "$WORK/wide-unreadable-sorted.txt" | sort -u > "$WORK/wide-unreadable-runs.txt"
+awk 'NF {print $2}' "$WORK/wide-unreadable-sorted.txt" | sort -u > "$WORK/wide-unreadable-shas.txt"
 
 say ""
 say "POPULATION: ${COMPLETED_COUNT}${FLOOR} completed deploy.yml run(s) on main in the window — a run DELIVERED when its control-plane OR instance job concluded success, WHATEVER the run's overall conclusion, because a run whose only failing job is the other leg still put code on a box; ${DELIVERING} of them DELIVERED, ${MIXED_LEG} of those delivered with the OTHER leg FAILED, ${NONDELIVERING} delivered nothing (no leg concluded success — a docs-only merge skips both), ${JOBS_UNREADABLE} unreadable."
+say "  CANCELLED, NAMED IN BOTH DIRECTIONS: of the ${NONDELIVERING} that delivered nothing, ${CANCELLED_NONDELIVERING} were CANCELLED_NONDELIVERING — a superseded push, not a docs-only merge, and the parenthetical above is wrong about them; and ${CANCELLED_DELIVERING} of the ${DELIVERING} that DELIVERED are CANCELLED_DELIVERING — a leg concluded success and the run was cancelled anyway, so those runs put code on a box while their record-delivery job died with the cancel, and the crown may hold no row for a delivery that happened."
 say "WATERMARK: the run list was sampled at ${RUNLIST_ISO} and the crown is read after it — ${NONTERMINAL_RUNS} run(s) on the page were NON-TERMINAL at that instant, page run ids span ${MIN_RUN_ID}..${MAX_RUN_ID}. A row written by a run that was not terminal then is excluded from BOTH sides as WRITTEN-IN-FLIGHT rather than accused, and is judged normally by the next run."
 if [ "$FLOOR" = "+" ]; then
-  say "  TRUNCATION RESIDUAL, stated rather than left to the plus sign: the 100-run page did not reach the window start, so runs older than id ${MIN_RUN_ID} were never examined. A delivering run that fell off the page CANNOT be counted BEHIND by this run — the BEHIND denominator above is a floor, and its silence is a blind spot, not a clean reading."
+  say "  TRUNCATION RESIDUAL, stated rather than left to the plus sign: the run listing was paged ${RUNS_PAGES_READ} time(s) and still stopped short of the window start, so runs older than id ${MIN_RUN_ID} were never examined. A delivering run that fell off the page CANNOT be counted BEHIND by this run — the BEHIND denominator above is a floor, and its silence is a blind spot, not a clean reading."
 fi
 
 # ── BEHIND: a delivering run whose head sha the crown has no row for ─────────
@@ -1149,6 +1343,11 @@ INFLIGHT_EXPIRED=0
 # the oldest run we could see, so it can be neither found nor ruled out. These
 # go through reason(), so they land in rc 2 and still page.
 TRUNC_UNJUDGED=0
+# Rows whose stated deliverer's JOB LIST could not be read. Not a tolerance and
+# not a WRONG: the alibi was never READ, so it was never absent. Each is printed
+# by name with the run it names, subtracted from the WRONG denominator, and put
+# through reason() so the run lands in rc 2 (SILENCE) and still pages.
+UNREADABLE_ALIBI=0
 # The quiescence count, for the QUIET WINDOW arm below (charter D597). Distinct
 # from ROWS_EXAMINED on purpose: an in-window row seen down the no-alibi branch
 # was COUNTED but never CLASSIFIED — there is no alibi source to judge it
@@ -1160,6 +1359,7 @@ QUIET_ROWS_READ=0
 # reason() call would silently tolerate nothing, or everything.
 NOALIBI_REASON="no delivering run in the widened window — the reverse direction has no alibi source and was NOT checked"
 : > "$WORK/wrong.txt"
+: > "$WORK/unreadable-alibi.txt"
 : > "$WORK/inflight.txt"
 : > "$WORK/inflight-expired.txt"
 sort -u "$WORK/wide-shas.txt" > "$WORK/wide-shas-sorted.txt"
@@ -1272,6 +1472,31 @@ elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
                continue
              fi ;;
         esac
+      fi
+      # ── AN ALIBI THAT WAS NEVER READ IS NOT AN ALIBI THAT IS ABSENT ─────
+      # The alibi set above is built by asking the jobs API once per run. When
+      # that read FAILS the run is not "a run that delivered nothing" — it is a
+      # run this script has no opinion about, and accusing a row that names it
+      # is accusing the crown of this script's own read failure. That is the
+      # 6-of-24 false WRONG on main (task-a8bb36d8622be137). Disjoint from the
+      # three arms above by construction: every id here came off the SAME
+      # completed-run page, so it is neither non-terminal, nor above the page
+      # maximum, nor below its minimum.
+      _cannot_read_alibi=0
+      if [ "$run" != "-" ]; then
+        grep -qx "$run" "$WORK/wide-unreadable-runs.txt" && _cannot_read_alibi=1
+      else
+        grep -qx "$sha" "$WORK/wide-unreadable-shas.txt" && _cannot_read_alibi=1
+      fi
+      if [ "$_cannot_read_alibi" = "1" ]; then
+        UNREADABLE_ALIBI=$((UNREADABLE_ALIBI + 1))
+        printf '%s %s\n' "$sha" "${run:--}" >> "$WORK/unreadable-alibi.txt"
+        if [ "$run" != "-" ]; then
+          reason "row $sha: the job list of run $run — the run this row names as its deliverer — could NOT be read, so whether it delivered is UNKNOWN. The row is NOT counted clean and NOT counted as a ghost — an alibi that was never read is not an alibi that is absent."
+        else
+          reason "row $sha: it names no delivering run, and the job list of the run carrying that head sha could NOT be read, so whether it delivered is UNKNOWN. The row is NOT counted clean and NOT counted as a ghost."
+        fi
+        continue
       fi
       WRONG=$((WRONG + 1))
       printf '%s %s\n' "$sha" "$run" >> "$WORK/wrong.txt"
@@ -1400,6 +1625,7 @@ fi
 # question is asked of the CROWN, not of the box, so it survives the box moving
 # on to another sha — which is precisely what made 4c8314c94 unaccusable.
 GRACED_RED=0
+WAIVED_COUNT=0
 : > "$WORK/graced.txt"
 : > "$WORK/reask-keep.txt"
 while IFS=' ' read -r gsha gts; do
@@ -1407,6 +1633,27 @@ while IFS=' ' read -r gsha gts; do
   gage=$((NOW_EPOCH - gts))
   if [ "$gsha" = "$GRACED_THIS_RUN" ]; then
     # Its grace window is still open and this run already said so by name.
+    printf '%s %s\n' "$gsha" "$gts" >> "$WORK/reask-keep.txt"
+    continue
+  fi
+  # THE ALIBI THE SERVING ARM ALREADY GRANTS, ASKED ONE LOOP LATER. The SERVING
+  # arm defers while `serving_run_in_flight` names a non-terminal run for that
+  # exact sha; this loop did not re-ask it, so the moment the box moved on to a
+  # newer sha the graced sha lost its alibi and was accused — 373df8e7a, graced
+  # 09:58:01, its run 34025636906 in_progress since 09:47:30, fired
+  # GRACED-UNRECORDED at 11:00:18. That is a red at a deploy nobody has
+  # finished, which is precisely the shape the IN-FLIGHT arm exists to refuse.
+  # The box moving on does not finish that run, and the recorder has not had its
+  # turn until it does.
+  #
+  # Bounded by the SAME cap the SERVING arm uses, charged the same way (against
+  # first-seen), so a HUNG run stops being an alibi and this can never defer
+  # forever; past the cap it falls straight through to the accusation below.
+  # `serving_run_in_flight` reads $WORK/runs-raw.json — the deploy.yml run page
+  # this script already fetched — so this adds no API call and no credential.
+  gflight="$(serving_run_in_flight "$gsha")"
+  if [ -n "$gflight" ] && [ "$gage" -lt "$SERVING_INFLIGHT_CAP_SECONDS" ]; then # MUT:G-REASK-INFLIGHT
+    defer "GRACE HELD: the graced sha $gsha still has no cp row, but deploy.yml run ${gflight} for that exact sha is STILL RUNNING — the recorder has not had its turn, so the deferred accusation is held rather than fired at a deploy in progress (first seen $(iso_of "$gts"))"
     printf '%s %s\n' "$gsha" "$gts" >> "$WORK/reask-keep.txt"
     continue
   fi
@@ -1419,6 +1666,16 @@ while IFS=' ' read -r gsha gts; do
     [ -n "$grows" ] || grows=0
     if [ "$grows" -gt 0 ]; then
       say "  note: the graced sha $gsha was recorded after all — retired from the re-ask list"
+      continue
+    fi
+    # THE DATED WAIVER, applied at the ONE point the accusation is counted. It
+    # is checked AFTER the crown was actually asked — a waived sha that got its
+    # row still retires cleanly above — and it keeps the sha on the re-ask list,
+    # so the instant the waiver expires this same loop accuses it again.
+    if waived_now "$gsha"; then
+      WAIVED_COUNT=$((WAIVED_COUNT + 1))
+      say "  WAIVED (expires ${WAIVER_EXPIRES_ISO}, $((WAIVER_EXPIRES_EPOCH - NOW_EPOCH))s from now): the graced sha $gsha has no cp row and WOULD be accused. It is the one pre-fix specimen of the forward-only recorder fix (#16471), which cannot backfill a row already lost; the real remedy is the owner-queue backfill, task-9c8fccd9e8a77773. This waiver names that sha literally and suppresses nothing else, and past ${WAIVER_EXPIRES_ISO} it is INERT — the accusation returns with no code change."
+      printf '%s %s\n' "$gsha" "$gts" >> "$WORK/reask-keep.txt"
       continue
     fi
     GRACED_RED=$((GRACED_RED + 1))
@@ -1474,6 +1731,26 @@ if [ "$TRUNC_UNJUDGED" -gt 0 ]; then
   say "TRUNCATED-UNJUDGEABLE: ${TRUNC_UNJUDGED} crown row(s) name a delivering run older than the oldest run on the truncated page (minimum id ${MIN_RUN_ID}). A run that fell off a bounded page is not a ghost, so they are an UNREADABLE condition by name — counted in neither direction, never counted clean, and this run exits 2."
   say ""
 fi
+if [ "$WIDE_UNREADABLE" -gt 0 ]; then
+  say "ALIBI SET INCOMPLETE: ${WIDE_UNREADABLE} run(s) in the widened alibi window could not have their JOB LIST read. None of them is counted as a run that delivered nothing — a read that did not happen is not a fact about the deploy:"
+  while IFS=' ' read -r uid usha; do
+    [ -n "$uid" ] || continue
+    say "    run ${uid}  (head ${usha}) — its job list could not be read, so this run can neither alibi a row nor be ruled out as its deliverer"
+  done < "$WORK/wide-unreadable-sorted.txt"
+  say ""
+fi
+if [ "$UNREADABLE_ALIBI" -gt 0 ]; then
+  say "UNREADABLE-ALIBI: ${UNREADABLE_ALIBI} of ${ROWS_EXAMINED} crown row(s) name a deliverer whose job list could NOT be read. They are DEFERRED, not accused — this run exits 2, and the next run, whose read is a fresh one, judges them normally:"
+  while IFS=' ' read -r usha urun; do
+    [ -n "$usha" ] || continue
+    if [ "${urun:--}" = "-" ]; then
+      say "    ${usha} — names no run, and the run carrying that head sha could not have its job list read"
+    else
+      say "    ${usha}  (run ${urun}) — that run's job list could not be read; it is neither an alibi nor a ghost"
+    fi
+  done < "$WORK/unreadable-alibi.txt"
+  say ""
+fi
 if [ "$BEHIND" -gt 0 ]; then
   say "BEHIND: ${BEHIND} of ${RECONCILABLE} delivering run(s) examined ($(pct "$BEHIND" "$RECONCILABLE")) delivered a sha the crown has NO row for:"
   while IFS=' ' read -r sha id; do
@@ -1484,7 +1761,7 @@ fi
 # watermark excluded, and rows a truncated page made unjudgeable, are printed
 # above with their own counts — an exemption has to be a denominator a reader
 # can subtract, never a quieter one.
-JUDGED_ROWS=$((ROWS_EXAMINED - INFLIGHT_ROWS - TRUNC_UNJUDGED))
+JUDGED_ROWS=$((ROWS_EXAMINED - INFLIGHT_ROWS - TRUNC_UNJUDGED - UNREADABLE_ALIBI))
 [ "$JUDGED_ROWS" -lt 0 ] && JUDGED_ROWS=0
 if [ "$WRONG" -gt 0 ]; then
   say "WRONG: ${WRONG} of ${JUDGED_ROWS} crown row(s) examined ($(pct "$WRONG" "$JUDGED_ROWS")) were written by no delivering run:"
@@ -1505,6 +1782,9 @@ fi
 if [ "$SERVING_RED" -gt 0 ]; then
   say "SERVING-UNRECORDED: barkpark.cloud reports it is SERVING ${SERVING_SHA} and the crown has no cp row for it — production is running a commit its own record has never heard of."
 fi
+if [ "$WAIVED_COUNT" -gt 0 ]; then
+  say "GRACED-WAIVED: ${WAIVED_COUNT} sha(s) had no cp row and were NOT counted, under the dated waiver in this script that expires ${WAIVER_EXPIRES_ISO} ($((WAIVER_EXPIRES_EPOCH - NOW_EPOCH))s from now). This run is therefore not a clean green on those shas — it is a green that a waiver bought, and the waiver retires itself."
+fi
 if [ "$GRACED_RED" -gt 0 ]; then
   say "GRACED-UNRECORDED: ${GRACED_RED} sha(s) were granted the serving grace on an earlier run and STILL have no cp row. The grace was a DEFERRAL, and this is the deferred accusation — it fires whether or not the box still serves them:"
   while IFS=' ' read -r gsha gts; do
@@ -1514,7 +1794,7 @@ fi
 
 if [ "$BEHIND" -gt 0 ] || [ "$WRONG" -gt 0 ] || [ "$SERVING_RED" -gt 0 ] || [ "$GRACED_RED" -gt 0 ]; then
   say ""
-  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${JUDGED_ROWS} rows, serving-unrecorded=${SERVING_RED}, graced-unrecorded=${GRACED_RED}, predates-writer=${PREDATES}/${DELIVERING}, written-in-flight=${INFLIGHT_ROWS}/${ROWS_EXAMINED}, written-in-flight-expired=${INFLIGHT_EXPIRED}, truncated-unjudgeable=${TRUNC_UNJUDGED}, reader=$(reader_answered), re-ask-list=${STATE_STATE}."
+  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${JUDGED_ROWS} rows, serving-unrecorded=${SERVING_RED}, graced-unrecorded=${GRACED_RED}, predates-writer=${PREDATES}/${DELIVERING}, written-in-flight=${INFLIGHT_ROWS}/${ROWS_EXAMINED}, written-in-flight-expired=${INFLIGHT_EXPIRED}, truncated-unjudgeable=${TRUNC_UNJUDGED}, unreadable-alibi=${UNREADABLE_ALIBI}, reader=$(reader_answered), re-ask-list=${STATE_STATE}."
   exit 1
 fi
 

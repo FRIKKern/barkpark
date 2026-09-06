@@ -100,8 +100,8 @@ defmodule BarkparkCloud.Web.RouterEventsRefusalTouchTest do
 
       conn = get("/v1/events", token)
 
-      assert conn.status == 422
-      assert Jason.decode!(conn.resp_body)["error"] == "no_team"
+      assert conn.status == 403
+      assert Jason.decode!(conn.resp_body)["reason"] == "no_team"
 
       assert stamp_of(user) == backdated, """
       the 422 advanced last_used_at — the sessions card will print this refused \
@@ -170,8 +170,8 @@ defmodule BarkparkCloud.Web.RouterEventsRefusalTouchTest do
 
       # Teamless, so the redemption answers synchronously: 422 proves the ticket
       # WAS redeemed (401 would mean it never resolved a user at all).
-      assert conn.status == 422
-      assert Jason.decode!(conn.resp_body)["error"] == "no_team"
+      assert conn.status == 403
+      assert Jason.decode!(conn.resp_body)["reason"] == "no_team"
 
       assert stamp_of(user) == backdated, """
       ticket redemption moved the session row's last_used_at. If that ever \

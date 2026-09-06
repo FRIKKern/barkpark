@@ -55,6 +55,12 @@
 #       never `github.sha`, which is only what triggered a run. Reds when a
 #       deploy-relevant commit reachable from `--tip` is absent from `--served`.
 #
+#   adjudicate --stranded true|false [--unchecked true|false]
+#              [--in-flight-source ok|unknown]   # stdin: "run_id sha status" lines
+#       Turns the per-leg findings into the JOB'S CONCLUSION. Exits 1 — the run
+#       goes red — only for "stranded and no deploy is in flight". See the block
+#       above the mode for why an in-flight deploy is a delay and not a waiver.
+#
 #   --selftest
 #       Hermetic. Builds real git repos in mktemp, reproduces the 2026-07-19
 #       shape, and proves the naive wall-clock rule gets it WRONG.
@@ -506,6 +512,139 @@ RANGE_EOF
   return 1
 }
 
+# ── mode: adjudicate ─────────────────────────────────────────────────────────
+#
+# THE BOUNDARY THIS FILE EXISTS TO DRAW (task-103b5cc5ec4a8ccd).
+#
+# `converged` answers one leg: does THIS box serve what it is owed. It cannot
+# answer the question the JOB has to answer, which is whether the run should
+# CONCLUDE non-zero — because a red that fires on every ordinary in-flight
+# deploy is waived inside a day, and a tripwire that is waived has stopped
+# discriminating. So the verdict is decided here, once, from two facts:
+#
+#   STRANDED      at least one leg came back rc=1 from `converged`.
+#   IN FLIGHT     another deploy.yml run on main is queued or in_progress
+#                 right now — one that has not yet had its chance to move the
+#                 box. Read on stdin as "run_id sha status" lines, the same
+#                 shape `survivor` takes, so it is testable with no network.
+#
+# THE RULE, and it is the whole mode:
+#
+#   not stranded                    -> 0   converged
+#   stranded AND a deploy in flight -> 0   NOT-CONVERGED-YET. Suppressed.
+#   stranded AND nothing in flight  -> 1   the run must go red.
+#
+# WHY SUPPRESSION IS NOT A WAIVER, which is the part that matters. Suppression
+# silences THIS run's exit code and NOTHING ELSE: the caller still emits
+# converged=false, so report-convergence-failure still files (or appends to) the
+# convergence issue on the very same run. A strand is therefore never silent —
+# it is loud on every run, and RED as soon as no deploy is left running to
+# explain it. An ordinary in-flight deploy can delay the red; it can never
+# cancel it, because the next run re-asks with that deploy finished.
+#
+# WHY "ANY IN-FLIGHT RUN" AND NOT A CLEVERER TEST. A descendancy test on the
+# in-flight run's sha does not discriminate — a docs-only run after a strand
+# also carries a descendant of the served sha and also deploys nothing — so it
+# would buy precision it cannot actually deliver while adding a way to be wrong.
+# The honest reading is coarse and stated: something is running, so the picture
+# is still moving, so do not conclude from it yet.
+#
+# AN UNREADABLE RUN LIST IS TREATED AS IN FLIGHT, deliberately and out loud.
+# "I could not look" must not manufacture an outage report any more than it may
+# green one: the issue still files (converged=false is the caller's), only the
+# exit code is withheld. That is the same law as this file's rc=2.
+mode_adjudicate() {
+  local stranded="" label="production" source="ok" unchecked="false"
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --stranded)         stranded="${2:-}"; shift 2 ;;
+      --unchecked)        unchecked="${2:-}"; shift 2 ;;
+      --in-flight-source) source="${2:-}"; shift 2 ;;
+      --label)            label="${2:-}"; shift 2 ;;
+      *) warn "HARNESS-UNAVAILABLE: unknown argument '$1'"; return 2 ;;
+    esac
+  done
+
+  case "$stranded" in
+    true|false) : ;;
+    *) warn "HARNESS-UNAVAILABLE: --stranded must be exactly 'true' or 'false' (got '$stranded')"
+       warn "A missing verdict is not 'false' — that default is how a gate greens on its own breakage."
+       return 2 ;;
+  esac
+  case "$unchecked" in true|false) : ;; *)
+    warn "HARNESS-UNAVAILABLE: --unchecked must be 'true' or 'false' (got '$unchecked')"; return 2 ;;
+  esac
+  case "$source" in ok|unknown) : ;; *)
+    warn "HARNESS-UNAVAILABLE: --in-flight-source must be 'ok' or 'unknown' (got '$source')"; return 2 ;;
+  esac
+
+  # stdin is optional and routinely empty — that is the "nothing is coming"
+  # case, and it must read as zero rows rather than as a hang. The caller always
+  # redirects (`< file` or `</dev/null`); a bare terminal invocation gets the
+  # same treatment because `read` on a closed stdin simply ends the loop.
+  local flight=0 line rid rsha rstatus
+  while IFS= read -r line; do
+    case "$line" in ''|'#'*) continue ;; esac
+    # shellcheck disable=SC2086
+    set -- $line
+    rid="${1:-?}"; rsha="${2:-?}"; rstatus="${3:-?}"
+    case "$rstatus" in
+      queued|in_progress|waiting|requested|pending)
+        flight=$((flight + 1))
+        say "IN FLIGHT: run $rid on $rsha is $rstatus — a deploy that has not had its turn yet"
+        ;;
+      *)
+        say "not in flight: run $rid on $rsha is '$rstatus' — a terminal run explains nothing"
+        ;;
+    esac
+  done
+
+  say ""
+  say "ADJUDICATION for $label"
+  say "  stranded:          $stranded"
+  say "  unchecked legs:    $unchecked"
+  say "  deploys in flight: $flight"
+
+  if [ "$stranded" != "true" ]; then
+    if [ "$unchecked" = "true" ]; then
+      say ""
+      say "NOT STRANDED, but at least one leg was UNCHECKED. UNCHECKED is an absence of"
+      say "evidence and is reported as one — it is not a finding, so it does not red here."
+    fi
+    say ""
+    say "VERDICT: CONVERGED — no leg reported a strand. Exit 0."
+    return 0
+  fi
+
+  if [ "$source" = "unknown" ]; then
+    say ""
+    say "VERDICT: STRANDED, and the in-flight lookup itself failed — the exit code is WITHHELD."
+    say "The finding is not: the caller still reports converged=false and the convergence issue"
+    say "still files on this run. Only the conclusion waits for a run that could actually look."
+    return 0
+  fi
+
+  if [ "$flight" -gt 0 ]; then
+    say ""
+    say "VERDICT: NOT CONVERGED **YET** — ${flight} deploy run(s) are still queued or running,"
+    say "and any of them resets the box to origin/main's tip. This is the ordinary in-flight"
+    say "case and it stays GREEN, which is what keeps this gate from being waived."
+    say "It is NOT silent: converged=false is still emitted, so the convergence issue files on"
+    say "this run, and the next run re-asks with those deploys finished. A delay, never a pass."
+    return 0
+  fi
+
+  say ""
+  say "VERDICT: STRANDED AND NOTHING IS COMING. No deploy run is queued or in progress, so"
+  say "no further work exists that would carry the missing commit — a docs-only tail triggers"
+  say "nothing at all. This run CONCLUDES NON-ZERO, by name, which is the entire point of"
+  say "task-103b5cc5ec4a8ccd: an instrument that cannot fail cannot inform."
+  say ""
+  say "REPAIR: Actions -> Deploy (production) -> Run workflow, against main, targets: both."
+  return 1
+}
+
 # ── selftest ─────────────────────────────────────────────────────────────────
 
 # A real git repo, plus a real deploy.yml-shaped filter file. No network, no gh,
@@ -843,6 +982,7 @@ main() {
       mode_survivor
       ;;
     converged) shift; mode_converged "$@" ;;
+    adjudicate) shift; mode_adjudicate "$@" ;;
     filters)
       # PRINT WHAT THE SCRIPT DERIVES, and refuse when it derives nothing. The
       # relevance sets are read out of deploy.yml rather than copied, which is
@@ -868,6 +1008,8 @@ main() {
       say "usage: deploy-convergence-check.sh survivor            # stdin: 'run_id sha started_at'"
       say "       deploy-convergence-check.sh converged --served SHA --tip SHA [--target cp|instance]"
       say "                                             [--owed-before ISO|--grace-seconds N] [--label L]"
+      say "       deploy-convergence-check.sh adjudicate --stranded true|false [--unchecked true|false]"
+      say "                                             [--in-flight-source ok|unknown]   # stdin: 'run_id sha status'"
       say "       deploy-convergence-check.sh filters [DEPLOY_YML]   # what it derives, and refuse if nothing"
       say "       deploy-convergence-check.sh --selftest"
       return 2

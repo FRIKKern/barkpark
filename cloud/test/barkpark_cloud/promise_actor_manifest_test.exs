@@ -181,7 +181,7 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
 
   # THE CRONTAB, PINNED HERE AND COMPARED BY EQUALITY. Declared by neither the
   # console nor the config: that is the only reason an ABSENT clock verdict can
-  # lose. Sixteen rows today (cch-w30-bl added the PAT expiry warning).
+  # lose. Seventeen rows today (task-d5f8c2634f323169 added the warm-claim reaper).
   @scheduled_crontab [
     {"* * * * *", BarkparkCloud.Workers.StaleProvisionJobReaper},
     {"* * * * *", BarkparkCloud.Workers.DeviceAuthReaper},
@@ -189,6 +189,7 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     {"* * * * *", BarkparkCloud.Workers.SseTicketReaper},
     {"* * * * *", BarkparkCloud.Workers.OAuthExchangeReaper},
     {"* * * * *", BarkparkCloud.Workers.StaleDeploymentReaper},
+    {"* * * * *", BarkparkCloud.Workers.StaleWarmClaimReaper},
     {"* * * * *", BarkparkCloud.Health.StalenessWorker},
     {"0 * * * *", BarkparkCloud.Workers.TrialExpiryWorker},
     {"17 * * * *", BarkparkCloud.Workers.UpdateStatusWorker},
@@ -198,7 +199,12 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     {"45 3 * * *", BarkparkCloud.Workers.ArchiveRetentionWorker},
     {"0 6 * * *", BarkparkCloud.Workers.DailyDigestWorker},
     {"10 7 * * *", BarkparkCloud.Workers.TokenExpiryWarningWorker},
-    {"41 * * * *", BarkparkCloud.Sites.TemplateFreshnessWorker}
+    {"41 * * * *", BarkparkCloud.Sites.TemplateFreshnessWorker},
+    # dr-w11 (17 -> 18 rows): the hourly content-publish webhook reconcile. It is
+    # UNRELATED to every `:crontab_absent` verdict in this register — it registers
+    # a box endpoint, it touches no promise clock — so it is pinned here in the
+    # same commit that adds it, per the classification rule in `crontab_agrees/0`.
+    {"53 * * * *", BarkparkCloud.Workers.ContentWebhookReconciler}
   ]
 
   # THE REGISTER. Each key is a promise the console makes about a future act;
@@ -1615,7 +1621,8 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     # ArrearsWorker slips past a heuristic and the register would keep claiming
     # ABSENT while the clock had arrived.
     assert {:ok, detail} = crontab_agrees()
-    assert detail =~ "16 rows"
+    # dr-w11: 17 -> 18 (ContentWebhookReconciler).
+    assert detail =~ "18 rows"
     assert length(configured_crontab()) == length(@scheduled_crontab)
   end
 

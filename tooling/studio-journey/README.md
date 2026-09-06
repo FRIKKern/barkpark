@@ -15,10 +15,21 @@ seeing is not evidence. This is.
 ## Run it
 
 ```bash
-scripts/studio-journey-smoke.sh self-test   # offline: no network, no credentials
-scripts/studio-journey-smoke.sh live        # deployed host, real verdict
-scripts/studio-journey-smoke.sh report      # deployed host, never exits 1
+scripts/studio-journey-smoke.sh self-test              # offline: no network, no credentials
+scripts/studio-journey-smoke.sh live                   # deployed host, real verdict
+scripts/studio-journey-smoke.sh report                 # deployed host, never exits 1
+scripts/studio-journey-smoke.sh report --legs c        # the CENSUS ALONE — creates nothing
 ```
+
+`--legs <abc>` selects which legs run (default `abc`). **`--legs c` is the mode
+for a host other people are using**: LEG A creates a real document, and the
+desk-row census needs none of it. With `a` absent, an `authOnly` beat mints the
+same ticket, makes the same desk navigation, applies the same 5xx guard and
+asserts the same admin discriminator LEG A's AUTH beat does — a census recorded
+against a login wall would call every row dead for a reason that is not about
+the rows. An unknown letter is a GUARD, never a silently narrower run. The run
+summary names what it tallied (`legs=c gating 1/1 beats PASS`), because printing
+a census run under "LEG A" would report it as a create-journey run.
 
 Credentials for `live`/`report` come from `~/.config/barkpark/config.json` (the
 `guerrilla` entry that `bp login` wrote) or, where there is no such file, from
@@ -92,6 +103,14 @@ airdrop/access buttons open a modal over the desk. None of those three carries a
 `<div>` at its only desk call site — dead by construction. Each inventory row
 *asserts its own reason*, so the day one of them stops being true the row reds and
 says "re-decide" rather than quietly staying green.
+
+**`LEG_C_MAX_ROWS` is not a safety margin on a real desk, it is a blindfold.**
+Measured on deployed guerrilla, 2026-09-06: the desk opens with 7 `.pane-item`
+rows, and the first press grows the roster by ~100 `.pane-doc-item` rows. At the
+default 40 the census reported **0 inventoried** and `587 further row(s) beyond
+LEG_C_MAX_ROWS=40` — the `add_btn` and `section_header` rows the leg exists to
+inventory never entered the roster at all. The same run at `LEG_C_MAX_ROWS=900`
+took 5.4 s and inventoried 21. Raise it on a real desk.
 
 Bounded by a hard `LEG_C_BUDGET` (default 90 s, `LEG_C_BUDGET_MS`); per-row
 `LEG_C_ROW_CAP_MS` (default 3 s) and `LEG_C_MAX_ROWS` (default 40). Anything the

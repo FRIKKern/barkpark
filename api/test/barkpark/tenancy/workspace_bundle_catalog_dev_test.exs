@@ -84,11 +84,30 @@ defmodule Barkpark.Tenancy.WorkspaceBundleCatalogDevTest do
     test "the content plane copies: triad roots + content + config" do
       for table <-
             ~w(workspaces projects datasets media_files roles role_permissions
-               schema_definitions content_edges task_edges plugin_doc_state
+               schema_definitions content_edges task_edges
                paper_events authoring_exemptions search_surface_config
                search_synonyms) do
         assert Catalog.dev_action(table) == :copy,
                "#{table} is dev-relevant content/config and must copy"
+      end
+    end
+
+    test "RULED 2026-09-02: plugin_doc_state is :deny — an unreviewed opaque payload never travels" do
+      # The one classification in this partition that is a RULING rather than a
+      # census reading. plugin_doc_state is a (plugin_name, doc_id, key) ->
+      # value:map scratch bag with no declared safe-key contract and no reader
+      # or writer anywhere in api/lib; @dev_scrub is empty, so :copy would have
+      # shipped whatever the first plugin decides to stash in `value`.
+      assert Catalog.dev_partition()["plugin_doc_state"] == :deny
+      assert Catalog.dev_action("plugin_doc_state") == :deny
+      assert "plugin_doc_state" in Catalog.dev_deny_tables()
+      refute "plugin_doc_state" in Catalog.dev_copy_tables()
+
+      # …and the deny is NARROW: its bundle-reachable siblings, including the
+      # other traveling composite-PK table, are untouched by the ruling.
+      for still_copied <- ~w(content_edges task_edges authoring_exemptions paper_events) do
+        assert Catalog.dev_action(still_copied) == :copy,
+               "#{still_copied} must NOT have been swept up by the plugin_doc_state deny"
       end
     end
   end
@@ -172,10 +191,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundleCatalogDevTest do
   describe "single-column-PK assertion (PDS-D8 merge arbiter)" do
     # HONESTY NOTE vs the brief's "94/94 single-column PK": the live census is
     # 94/94 base tables WITH a primary key but only 86/94 single-column —
-    # plugin_doc_state (3-col) and authoring_exemptions (2-col) are traveling
-    # composites. The merge arbiter is `order_columns` (the FULL pk list), so a
-    # reviewed composite is a valid `ON CONFLICT (a, b) DO UPDATE` arbiter; the
-    # sentinel stays fail-closed on NO-pk tables and UNreviewed composites.
+    # plugin_doc_state (3-col) and authoring_exemptions (2-col). Since the
+    # 2026-09-02 ruling denied plugin_doc_state, authoring_exemptions is the
+    # only TRAVELING composite, which is what the no-rot test below pins. The
+    # merge arbiter is `order_columns` (the FULL pk list), so a reviewed
+    # composite is a valid `ON CONFLICT (a, b) DO UPDATE` arbiter; the sentinel
+    # stays fail-closed on NO-pk tables and UNreviewed composites.
     defp pk_arity(table) do
       %{rows: [[arity]]} =
         Repo.query!(

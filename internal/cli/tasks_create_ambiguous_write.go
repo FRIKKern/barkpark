@@ -145,7 +145,7 @@ func renderAmbiguousWrite(out *writer, a ambiguousWrite) int {
 //
 // The second half of the defect: once an ambiguous first attempt has landed a
 // row, the operator's natural retry meets the dedup wall
-// (api/lib/barkpark/content/errors.ex:741 → 409 `duplicate_of`, details
+// (api/lib/barkpark/content/errors.ex:duplicate_of → 409 `duplicate_of`, details
 // {duplicate_of, similar, advise}). That refusal NAMES the incumbent, and the
 // CLI printed it as one more line in a generic details blob — indistinguishable
 // from a fresh "somebody else already filed this" conflict. It is not: on this

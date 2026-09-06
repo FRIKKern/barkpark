@@ -277,9 +277,40 @@ export function bpBase(over) {
         slot_units_truncated: null,
         reported_at: null,
       },
+      // dr-w10-s1 — the per-box deploy vital. Always present on the wire: when
+      // a box owns no sites (six of eight prod boxes), router.ex's
+      // merge_deploy_rate/2 fallback puts `no_deploy_surface/0` — THIS all-nil
+      // sentinel, key for key, with rate/absorption/box_caused each the shape
+      // DeployLedger.rate(0, 0) returns. Same HONESTY LAW as `pressure` above:
+      // a refusal carries `pct: null` and `refused: true`, never a 0.0 that
+      // would read as a box with a perfect deploy record.
+      deploy_rate: {
+        window: null,
+        sites: 0,
+        sites_deploying: 0,
+        rate: DEPLOY_RATE_UNMEASURED(),
+        absorption: DEPLOY_RATE_UNMEASURED(),
+        box_caused: DEPLOY_RATE_UNMEASURED(),
+      },
     },
     over,
   );
+}
+
+// DeployLedger.rate(0, 0) — the refusing shape, byte for byte. A function so
+// each of the three slots above gets its OWN object: one shared reference would
+// let a scenario's override of `rate` silently move `absorption` too.
+function DEPLOY_RATE_UNMEASURED() {
+  return {
+    sample: 0,
+    pct: null,
+    numerator: 0,
+    min_sample: 200,
+    refused: true,
+    reason: "sample 0 below min_sample 200",
+    basis:
+      "attempted rows in the window: failed + deferred + live + in_flight + cancelled + residual (never-attempted tombstones excluded, D19)",
+  };
 }
 
 const liveInstance = bpBase({
@@ -648,6 +679,44 @@ const CRUEL_SITE_NAME = atLength("site name",
 const CRUEL_SITE_SLUG = atLength("site slug",
   "acmecorporateplatformproductioncontentdeliveryedgegatewaynode01", 63);
 // 253 = validate_domains/1's cap, as 63 + 63 + 63 + 61 unbroken labels.
+//
+// cch-w23-bl-site-domains-cruel-family — THE CONSTRUCTION IS THE FIXTURE, AND
+// A LENGTH-ONLY GENERATOR FILES A FALSE REFUSAL ON IT (charter D269).
+//
+//   THE CAP IS NOT A `validate_length`. `validate_domains/1` is a
+//   `validate_change(changeset, :domains, …)` that rejects any entry failing
+//   `String.length(d) <= 253 and Regex.match?(@domain_format, d)`
+//   (registry/site.ex — re-derive by symbol:
+//   `grep -n 'defp validate_domains\|@domain_format' cloud/lib/barkpark_cloud/registry/site.ex`).
+//   A census that greps `validate_length` over site.ex sees the 255-char NAME
+//   and NOTHING here — the census blindness D252 names, on this epic's best
+//   member-reachable family.
+//
+//   WHY THE FOUR LABELS, AND NOT `String.duplicate("q", 253)`. A cruel string
+//   on this family must be a LEGAL HOSTNAME. `@domain_format` is
+//   `^label(\.label)+$` with `label = [a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?` — so
+//   at least one dot is MANDATORY and no label may exceed 63 octets. A
+//   212-character SINGLE label (the shape a length-only generator emits: one
+//   token sized to bite the widest driven viewport) is refused 422 by the very
+//   same clause, and a builder who measured only that would record a FALSE
+//   NONE-POSSIBLE on the family. The ADMISSIBLE MAXIMUM is
+//   `63 + "." + 63 + "." + 63 + "." + 61 = 253` -> 200, persisting as `[253]`;
+//   254 (the same shape with a 62-char tail) -> 422. Both halves are PROVEN
+//   against the server, not assumed, by
+//   cloud/test/barkpark_cloud/web/router_site_domain_format_legal_cap_test.exs,
+//   which reads THESE BYTES for its labels so a retune here reds there.
+//
+//   THE APPEND-ORDER REFUSAL, AND WHY EVERY CRUEL SITE BELOW IS DOMAINLESS
+//   AT REST. `Registry.add_site_domain/2` writes `Enum.uniq(existing ++ [norm])`
+//   (registry.ex — `grep -n 'def add_site_domain' cloud/lib/barkpark_cloud/registry.ex`;
+//   the filing cited :4818, it is :6584/:6602 on this tree), so a member's
+//   cruel domain lands at `domains[N]`, LAST. Both row builders paint
+//   `(s.domains && s.domains[0])` and nothing else (app.js `globalSiteRow` /
+//   `siteRow`), so on a site that already answers on `acme.com` the cruel value
+//   is INVISIBLE to the list. The family is cruel-REACHABLE in a list view only
+//   on a site whose `domains` was `[]` when the member pushed — so every cruel
+//   site fixture here carries the cruel domain ALONE, at index 0, which is the
+//   post-state of exactly that site.
 const CRUEL_SITE_DOMAIN = atLength("site domain", [
   CRUEL_SITE_SLUG,
   "northerneuropeanregionalstaticassetoriginforacmecommerceeu0231x",
@@ -923,6 +992,56 @@ const sitesListRows = [
   }),
 ];
 
+// ── cch-w23-bl-site-domains-cruel-family: THE SITE HALF OF `fleet-cruel-content`
+//
+// CLAUSE 4, VERBATIM, AND THIS LIST IS THE REPAIR. Before this diff the cruelty
+// ledger's only cruel-NAMED corpus (`fleet-cruel-content`, the fixture every
+// CRUEL_ROUTES row uses as its cruel side) shipped `sites: []`. So the two site
+// caps — `domains[]` at 253 and `name` at 255 — COULD NOT BE MADE CRUEL by any
+// route row at all: `#sites` on that scenario rendered an empty list, and the
+// leg's own "zero NON-EMPTY selector" refusal is the only thing that would have
+// fired. Across the other 100+ scenarios the longest domain is 15 characters
+// (`guides.acme.com`) and the longest site name 13 (`acme-previews`).
+//
+// TWO ROWS, AND THE SECOND ONE IS THE REASON THE FIRST PROVES ANYTHING. The
+// cruel row carries the 255-char name and the 253-char FORMAT-LEGAL domain; the
+// kind neighbour sits in the SAME DOM with an 8-char name and a 12-char host, so
+// a bound that fixes the cruel row by shredding ordinary content is visible in
+// the same cell rather than in a different fixture's run — the standing doctrine
+// of this scenario (see its header) applied to the site list.
+//
+// DOMAINLESS AT REST, ON PURPOSE (the append-order refusal recorded above
+// CRUEL_SITE_DOMAIN): `add_site_domain/2` appends, and both row builders paint
+// `domains[0]` only, so a cruel domain is list-visible ONLY on a site that had
+// none. `domains` here is the cruel value ALONE — the post-state of a member
+// pushing it at a site whose array was `[]`.
+//
+// `barkpark_id` DEFAULTS TO `IDS.liveInstance` (see `site()`), which is
+// deliberate and load-bearing: the CRUEL_ROUTES detail row drives THIS scenario
+// at `#instance/<…c2>` (the FAILED box), whose Sites card filters by instance —
+// so these rows paint on `#sites` and on the LIVE box's workspace, and never on
+// the screen that row measures.
+const cruelFleetSites = [
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000cb",
+    name: CRUEL_SITE_NAME,
+    slug: CRUEL_SITE_SLUG,
+    domains: [CRUEL_SITE_DOMAIN],
+    framework: "nextjs", github_repo: "acme/platform", github_branch: "main",
+    github_webhook_configured: true,
+    current_deployment_id: depOf(9),
+    last_deployment: lastDeploy("live", "manual", 1200),
+  }),
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000cc",
+    name: "acme-docs", slug: "acme-docs", domains: ["docs.acme.com"],
+    framework: "astro", github_repo: "acme/docs", github_branch: "main",
+    github_webhook_configured: true,
+    current_deployment_id: depOf(3),
+    last_deployment: lastDeploy("live", "content-auto", 600),
+  }),
+];
+
 // ── deployments (deployment_json) ───────────────────────────────────────────
 // Envelope from router.ex deployment_json/1: id, site_id, status, git_ref,
 // artifact_url, image_tag, build_log_url, failure_reason, became_live_at,
@@ -1146,14 +1265,44 @@ export const RAIL_FAIL_KIND_DETAIL = railEmitDetail(
 // `sites_deploy_stage_caption_test.exs` reads BOTH ends and reds when either
 // moves — that test, not this comment, is what keeps the fixture honest.
 //
-// NOT YET ROUTED INTO A SCENARIO: `smoke.mjs`'s cch-w10 census guard hard-fails
-// on any scenario with no paired EXPECTATIONS row, and smoke.mjs is outside this
-// slice's file fence. Wiring a third rail-fail scenario onto it is filed as
-// task-877bfc465162e104.
+// ROUTED BY task-877bfc465162e104 (below): `site-deploy-rail-failed-classified`
+// renders it, and smoke.mjs carries the paired EXPECTATIONS row the cch-w10
+// census guard demands. Until that slice it was exported and reachable from
+// nowhere — asserted only by `sites_deploy_stage_caption_test.exs`, rendered by
+// no preview, no smoke and no overflow leg.
 export const RAIL_FAIL_CLASSIFYING_DETAIL = railEmitDetail(
   "FATAL: 401 Unauthorized from https://guerrilla.barkpark.cloud/w/acme/p/blog" +
   " — the site read token is invalid",
 );
+// THE STRING THE WIRE ACTUALLY DELIVERS FOR THAT CAPTURE, and the reason the
+// classifying fixture is worth a scenario at all.
+//
+// A preview fixture models the JSON the SPA RECEIVES, not the bytes the box
+// emitted. For a FAILED stage those are two different strings: the control plane
+// folds the stage detail through `Sites.Deploy.stage_caption/2`
+// (cloud/lib/barkpark_cloud/sites/deploy.ex:134), whose `failed` arm is
+// `FailureCopy.humanize/1`, at all three display boundaries a person can reach —
+// `deployment_json/1`'s console entry (router.ex:11494), `site_deployment_json/3`'s
+// stages (router.ex:13577) and the `site.deploy.stage` SSE payload
+// (deploy.ex:1181). `mountDeployRail` seeds the rail ledger from that console
+// `detail` and `deployRailHtml` prints it into `.deploy-rail-fail` verbatim, so
+// the caption a person watches is the CLASSIFIED cause.
+//
+// THE WAVE-26 PAIR CANNOT SHOW THIS. `RAIL_FAIL_CRUEL_DETAIL` and
+// `RAIL_FAIL_KIND_DETAIL` come back from `humanize/1` BYTE-IDENTICAL (asserted in
+// `sites_deploy_stage_caption_test.exs`), so committing them as rail details was
+// right AND indistinguishable from committing the raw capture. This constant is
+// the only fixture in the corpus where the fold is observable — a rail rendered
+// off the RAW capture and a rail rendered off the wire are different pixels here
+// and nowhere else.
+//
+// DERIVED, NEVER PASTED: it is `FailureCopy.humanize(RAIL_FAIL_CLASSIFYING_DETAIL)`,
+// and `sites_deploy_stage_caption_test.exs` reads BOTH constants out of this file
+// and reds if either drifts from the Elixir producer.
+export const RAIL_FAIL_CLASSIFIED_CAPTION =
+  "This site's Barkpark read token was rejected, so the build couldn't fetch its" +
+  " content. Mint a fresh read token for the site in Barkpark, save it on the" +
+  " site, then deploy the site again.";
 
 // The CRUEL rail: a deployment the control plane still calls `building` whose
 // SSE narration already carries BUILD failed. That pairing is the honest
@@ -1192,6 +1341,40 @@ const depRailFailedKind = deployment({
     { stage: "BUILD", status: "done", detail: "npm ci && npm run build (astro static)", at: tMinus(40) },
     { stage: "STAGE", status: "done", detail: "", at: tMinus(30) },
     { stage: "HEALTH", status: "failed", detail: RAIL_FAIL_KIND_DETAIL, at: tMinus(8) },
+  ],
+});
+// THE CLASSIFYING RAIL (task-877bfc465162e104): the same stage machine as the
+// CRUEL twin above, on the same site, with the one capture in this corpus whose
+// caption MOVES between the box and the browser. Its BUILD `detail` is the
+// CLASSIFIED sentence rather than the raw FATAL line because that is what the
+// control plane puts on the wire — see the ledger beside
+// `RAIL_FAIL_CLASSIFIED_CAPTION`. A fixture carrying the raw capture here would
+// model a channel that does not exist.
+//
+// IT LIVES IN ITS OWN SCENARIO, not as a third site on `site-deploy-rail-failed`:
+// that fixture's smoke row and overflow leg both read `data.sites[1]`
+// POSITIONALLY, and wave 23's cross-slice defect was exactly a new row moving a
+// positional reader out from under itself.
+//
+// NO `line` CONSOLE ENTRY IS COMMITTED. The raw capture does survive one element
+// away in the real product (`console_entry/1` folds it into `line`, and
+// `deployConsoleHtml` renders it), but the two rail fixtures above carry stage
+// entries only, and adding the 108-char capture with its 45-char URL run to THIS
+// fixture's console would put an unmeasured string on the page the W25 leg
+// asserts the page width of. The rail is what this fixture exists to render.
+const depRailFailedClassifying = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000d8",
+  site_id: IDS.siteWeb,
+  status: "building",
+  git_ref: "3c8d51ae9f04b27d6e1a83c50f9b7d2e4a6c081f",
+  branch: "main",
+  detail: "building",
+  inserted_at: tMinus(96),
+  updated_at: tMinus(4),
+  console: [
+    { stage: "PLAN", status: "done", detail: "release 20260802T094402Z-3c8d51a, blue → green", at: tMinus(96) },
+    { stage: "BUILD", status: "started", detail: "", at: tMinus(92) },
+    { stage: "BUILD", status: "failed", detail: RAIL_FAIL_CLASSIFIED_CAPTION, at: tMinus(7) },
   ],
 });
 
@@ -3504,6 +3687,36 @@ export const SCENARIOS = {
       },
     },
   },
+  // task-877bfc465162e104: THE DEPLOY RAIL, FAILED WITH A CLASSIFIED CAUSE — the
+  // third rail-fail fixture, and the only one whose caption is not the box's own
+  // bytes. `RAIL_FAIL_CLASSIFYING_DETAIL` (the producer's FATAL 401 line) is the
+  // one capture in this corpus that MOVES under `FailureCopy.humanize/1`; the
+  // control plane applies that fold at every display boundary, so the string this
+  // rail renders is the classified sentence and the raw capture appears nowhere on
+  // the screen. Before this scenario the constant was exported and routed nowhere:
+  // no preview, no smoke row, no overflow cell ever rendered it, so the harness
+  // could not tell a rail that classifies from one that does not.
+  //
+  // ONE SITE ON PURPOSE. The cruel fixture's two-site shape exists so its cruel
+  // string and its KIND control share a route; this fixture's control is the CRUEL
+  // fixture itself, one scenario over on the same screen and the same widths.
+  // Driven by overflow-guard's W25-deploy-rail-fail-wrap leg as its third track.
+  "site-deploy-rail-failed-classified": {
+    label: "Deploy rail — a stage FAILED and the control plane CLASSIFIED the cause before the browser saw it",
+    authed: true,
+    deepLink: "#site/" + IDS.siteWeb,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [webSiteInFlight],
+      audit: [],
+      deployments: [depRailFailedClassifying, depCurrent, depPrior],
+      deploymentsBySite: {
+        [IDS.siteWeb]: [depRailFailedClassifying, depCurrent, depPrior],
+      },
+    },
+  },
   // cch-w29-bl: THE DEPLOY RAIL, LIVE — the OTHER footer, and the first fixture
   // in this harness to render `.deploy-rail-live` at all (see the ledger beside
   // `depRailLive` in the fixtures above for why the state is honest and where
@@ -3947,7 +4160,20 @@ export const SCENARIOS = {
           // different address formats on the most-seen screen in the product.
           url: "https://reporting-5b2c1e.barkpark.cloud",
           host: "reporting-5b2c1e.barkpark.cloud",
-          health_status: "down",
+          // cch-w18-bl: PRODUCTION-DOMINANT, not "down". `Health.StalenessWorker`
+          // -> `Registry.mark_offline/1` writes `health_status: "unknown"`
+          // DELIBERATELY ("NOT `down` — we cannot probe; the agent is simply
+          // silent", registry.ex) and the shipped agent hard-codes
+          // `AgentStatus: "online"` (internal/agent/report.go), so the pair a
+          // degraded box actually serves is unknown+offline and the sentence
+          // statusOf renders is "Health unknown · Agent offline" — THREE
+          // characters longer than the "Health down · Agent offline" this
+          // fixture used to serve. Every pin taken off this fixture is a
+          // statement about the string, so the string has to be the server's.
+          // classifyBp is unchanged by the flip: host set, last_seen_at set,
+          // health != "up" -> `degraded`, rank 4, bucket `attention`, role
+          // `warn` — the same queue, the same amber card, a longer sentence.
+          health_status: "unknown",
           agent_status: "offline",
           version: "0.9.2",
           last_seen_at: tMinus(1200),
@@ -4099,15 +4325,21 @@ export const SCENARIOS = {
   // above) into `.status-pill-detail`, a host the two typed strings above never
   // reach. Its name and slug are deliberately KIND so the error is the only
   // variable, and `liveInstance` stays the kind control for both axes.
+  //
+  // cch-w23-bl-site-domains-cruel-family adds the SITE half (`cruelFleetSites`,
+  // derived above): this fixture is the cruel side of EVERY CRUEL_ROUTES row,
+  // and it shipped `sites: []` — so the two site caps could not be made cruel by
+  // any route row. `#sites` on this scenario now paints the 255-char site NAME
+  // and the 253-char FORMAT-LEGAL domain beside an ordinary neighbour.
   "fleet-cruel-content": {
-    label: "Cruel content — a 253-char custom domain, a 255-char name and a 512-char single-token provision error, all server-legal",
+    label: "Cruel content — a 253-char custom domain, a 255-char name, a 512-char single-token provision error and the site list's own 255/253 pair, all server-legal",
     authed: true,
     deepLink: "#fleet",
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [cruelInstance, cruelProvisionErrorInstance, liveInstance],
       subscription: activeSub,
-      sites: [],
+      sites: cruelFleetSites,
       audit: [],
     },
   },

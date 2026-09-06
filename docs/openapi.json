@@ -104,6 +104,7 @@
             "properties": {
               "code": {
                 "enum": [
+                  "ambiguous_dataset",
                   "batch_too_large",
                   "blob_path_conflict",
                   "bpml",
@@ -119,6 +120,7 @@
                   "cors_forbidden",
                   "create_wall",
                   "csrf_required",
+                  "dataset_twin",
                   "deploy_runner_unavailable",
                   "duplicate_of",
                   "duplicate_task",
@@ -2368,6 +2370,15 @@
             }
           },
           {
+            "description": "Narrow the ready page to ONE dataset. Absent: every dataset in the caller's workspace/project scope (page.datasets says which).",
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Optional closure_nearest campaign order: fewest unmet criteria, then oldest, then logical task id.",
             "in": "query",
             "name": "order",
@@ -2403,7 +2414,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List claimable tasks: lifecycle open or blocked (blocked is claimable by design), dependencies and queue gate cleared, published or unpaired draft, twin-collapsed to the published row — priority order by default.",
+        "summary": "List claimable tasks: lifecycle open or blocked (blocked is claimable by design), dependencies and queue gate cleared, published or unpaired draft, twin-collapsed to the published row — priority order by default. DATASET SCOPE: with no --dataset the page spans EVERY dataset in the caller's workspace/project scope and page.datasets says which; --dataset narrows it. A doc_id living in more than one dataset of that scope is WITHHELD and listed once in page.dataset_ambiguous — the queue will not pick a dataset you did not name (Barkpark.Tasks.TwinResolver rule 3); name one to get the row.",
         "tags": [
           "task"
         ],
@@ -3715,6 +3726,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Max seats to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Seats to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -9298,7 +9327,26 @@
     "/v1/members": {
       "get": {
         "operationId": "workspace.member-ls",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Max seats to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Seats to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -10028,7 +10076,26 @@
     "/v1/tokens": {
       "get": {
         "operationId": "token.ls",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Max tokens to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Tokens to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -10708,6 +10775,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Max tokens to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Tokens to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -14140,6 +14225,75 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/v1/admin/workspaces/{slug}/reinstate": {
+      "post": {
+        "operationId": "workspace.reinstate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Lift a workspace suspension (instance-operator only). Re-arms an elapsed playground TTL.",
+        "tags": [
+          "workspace"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/media/{dataset}/collections/{id}/members": {
       "post": {
         "operationId": "media.add-member",
@@ -15952,7 +16106,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Four honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted), and a done close of a kind:task row with ZERO acceptance criteria whose reason names no PR+sha and pastes no run (409 close_reason_needs_artifact) — each with a loud on-the-record --set override (criteria_override / holder_override / ack_override / close_reason_override), and none of them discharges another; see the set flag.",
+        "summary": "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Five honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted), and a done close of a kind:task row with ZERO acceptance criteria whose reason names no PR+sha and pastes no run (409 close_reason_needs_artifact), and a cancelled close whose reason is absent, empty or whitespace-only (409 cancel_reason_required — a cancel is exempt by name from every other gate, so its reason is its whole record; there is no override, the fix is to pass the reason). The first four each carry a loud on-the-record --set override (criteria_override / holder_override / ack_override / close_reason_override), and none of them discharges another; see the set flag.",
         "tags": [
           "task"
         ],

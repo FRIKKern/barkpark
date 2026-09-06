@@ -28,6 +28,7 @@ defmodule BarkparkCloud.Registry do
   alias BarkparkCloud.Billing
   alias BarkparkCloud.Billing.Subscription
   alias BarkparkCloud.GitHub.CommitDistance
+  alias BarkparkCloud.FailureCopy
   alias BarkparkCloud.Notifications
   alias BarkparkCloud.Workers.DeploymentAlertWorker
 
@@ -95,6 +96,32 @@ defmodule BarkparkCloud.Registry do
   # renders it without a new clause over there.
   @spawn_refused_reason "exceeded max deploy start attempts — the deploy driver was never spawned (the control plane refused the child), so this build was never claimed; deploy again to retry"
 
+  # THE MINT THAT NEVER GOT ITS BYTES (pass 0d, ssw9-bl-stale-reaper-prebuilt-mint).
+  # A PREBUILT row (charter D86/D87) is minted by `POST /v1/sites/:id/deploy
+  # {"source":"prebuilt"}` and deliberately starts NO driver — `Web.Router`'s
+  # `start_box_build(true, _)` returns `:ok` without spawning one, because the
+  # client must first build OFF the box with the minted `build_id` baked in and
+  # then PUT the tarball to the artifact route, which is what starts the driver.
+  #
+  # So the row sits `queued` with `claim_epoch == 0`, `claimed_at` nil and
+  # `artifact_sha256` nil — the SAME shape a refused driver spawn leaves behind,
+  # which is why pass (0c) used to reap it and stamp @spawn_refused_reason. That
+  # sentence is a LIE for this row in both halves: nothing refused a spawn (there
+  # was no spawn to refuse — this lane starts none by design), and "deploy again
+  # to retry" sends its owner to look at the control plane's build capacity when
+  # the missing thing is their own upload (a failed local build, a killed CI job,
+  # a closed laptop). Same for pass (0a)'s "no build source": a prebuilt row's
+  # build source is the dist the client holds, not an artifact_url or a repo.
+  #
+  # Word choice is load-bearing three ways: it must NOT carry "exceeded max" +
+  # "attempts" (that is `FailureCopy`'s generic retry class AND, anchored,
+  # `DeployLedger.classify/2`'s STALE_LEASE — neither is true here), it must NOT
+  # carry "no build source" (pass 0a's token, whose copy names a repo and
+  # `bp deploy`), and it MUST carry the distinctive token
+  # "prebuilt artifact was never uploaded" that `FailureCopy.classify/1`'s own
+  # clause keys on so the dashboard and CLI render the missing upload and its cure.
+  @prebuilt_upload_missing_reason "the prebuilt artifact was never uploaded — this deploy was minted for an off-box build and its bytes never arrived; run `bp cloud site deploy <site> --prebuilt <dist>` again"
+
   # Stale-claim recovery. A claimed job whose `claimed_at` is older than this is
   # treated as abandoned (the worker crashed, or its succeed/fail report failed in
   # transit and — per the worker contract — it tore down its half-built box and
@@ -151,6 +178,24 @@ defmodule BarkparkCloud.Registry do
   # Overridable via `config :barkpark_cloud, :max_deploy_claims`.
   @default_max_deploy_claims 5
 
+  # THE MINT→UPLOAD GRACE WINDOW (pass 0d). What has to happen between a prebuilt
+  # mint and its upload is THE CLIENT'S WHOLE BUILD: `site-deploy.sh` bakes
+  # BARKPARK_BUILD_ID into the bytes and HEALTH asserts the served marker BY
+  # VALUE, so the id has to be minted BEFORE the build runs. The window therefore
+  # has to cover a cold `npm ci` + framework build on whatever machine the client
+  # is on, plus a tarball of up to `max_artifact_bytes` over its uplink — minutes
+  # normally, tens of minutes on a cold CI runner.
+  #
+  # It is deliberately NOT expressed in the reaper's other horizons: both
+  # `deployment_stale_after_seconds/0` (15m) and the `max_deploy_claims/0`
+  # product (75m) measure a BUILDER'S LEASE ON OUR OWN FLEET, and reusing either
+  # would silently re-time a client's build whenever fleet tuning moved. 60
+  # minutes is roughly 4x the slowest cold CI build this lane is sized for and is
+  # still a BOUND: past it the client is gone, and the row is the zombie
+  # `create_failed_deployment/3` exists to avoid. Overridable via
+  # `config :barkpark_cloud, :prebuilt_upload_grace_seconds`.
+  @default_prebuilt_upload_grace_seconds 60 * 60
+
   # gh-6: max concurrent branch previews per site — bounded resource. When a push
   # to a NEW branch would exceed this, the oldest preview branch is evicted
   # (its deployments cancelled + host de-registered) before the new one is minted,
@@ -204,6 +249,13 @@ defmodule BarkparkCloud.Registry do
   # `node` fetches the same content and serves it via SSR — both go stale when the
   # content or the template moves. `container` binds no dataset and is excluded.
   @content_bound_kinds ~w(static node)
+
+  # dr-w11: how many sites ONE `reconcile_content_webhooks/1` tick may touch. Each
+  # site costs a cross-host list read against its box plus, at most, one POST, so
+  # the bound is what keeps an hourly fleet sweep from turning into an unbounded
+  # fan-out the moment the fleet grows. 25 comfortably covers today's 13 sites in
+  # a single tick and still walks the whole roster within an hour at 10x that.
+  @content_webhook_reconcile_limit 25
 
   ## Barkparks
 
@@ -2917,7 +2969,8 @@ defmodule BarkparkCloud.Registry do
 
   @doc """
   The latest deployment per site id in `ids`, as a SLIM freshness map
-  `%{site_id => %{status:, trigger:, inserted_at:, updated_at:}}`. One query via
+  `%{site_id => %{status:, trigger:, inserted_at:, updated_at:, stage:,
+  failure_reason:}}`. One query via
   Postgres `DISTINCT ON (site_id) ... ORDER BY site_id, inserted_at DESC` (the
   `[:site_id, :inserted_at]` index already backs it — no migration) so the
   dashboard fleet list can render an at-a-glance freshness badge — amber while a
@@ -2925,10 +2978,20 @@ defmodule BarkparkCloud.Registry do
   WITHOUT an N+1 per row.
 
   Mirrors `latest_provision_status_map/1` in shape and intent. HONESTY LAW
-  (charter D24): only `status`, `trigger`, and the two timestamps ride along —
+  (charter D24): `status`, `trigger`, and the two timestamps ride along —
   NEVER `console`, `build_log_url`, `content_rev`, or any build internal. Sites
   with no deployment are simply absent (nil-honest at the caller). Empty `ids` →
   empty map (no query).
+
+  THE CAUSE PAIR (`stage` + the RAW `failure_reason`) rides too, and it is NOT a
+  widening of the honesty law — it is the INPUT the caller needs to obey it.
+  `DeployLedger.classify/1` reads `status`, `stage` AND the RAW `failure_reason`;
+  a select carrying only a subset classifies EVERY row `UNCLASSIFIED` while
+  looking like it works, which is the exact failure this pair exists to prevent.
+  Both are INTERNAL: `failure_reason` here is the unscrubbed capture off the
+  column, so the ONLY caller (`GET /v1/sites`) must fold it through
+  `FailureCopy.humanize/1` — the same scrub boundary `deployment_json/1` uses on
+  the per-site route — and must never hand this map to a reader verbatim.
 
   PRODUCTION ONLY (cch-w14-s6). Branch previews are excluded — the badge names
   the site's PRODUCTION state, which is the only thing the fleet row claims.
@@ -2945,7 +3008,9 @@ defmodule BarkparkCloud.Registry do
             status: String.t(),
             trigger: String.t() | nil,
             inserted_at: DateTime.t(),
-            updated_at: DateTime.t()
+            updated_at: DateTime.t(),
+            stage: String.t() | nil,
+            failure_reason: String.t() | nil
           }
         }
   def latest_deployment_status_map([]), do: %{}
@@ -2956,12 +3021,20 @@ defmodule BarkparkCloud.Registry do
       where: d.environment == "production",
       order_by: [asc: d.site_id, desc: d.inserted_at, desc: d.id],
       distinct: d.site_id,
-      select: {d.site_id, d.status, d.trigger, d.inserted_at, d.updated_at}
+      select:
+        {d.site_id, d.status, d.trigger, d.inserted_at, d.updated_at, d.stage, d.failure_reason}
     )
     |> Repo.all()
-    |> Map.new(fn {site_id, status, trigger, inserted_at, updated_at} ->
+    |> Map.new(fn {site_id, status, trigger, inserted_at, updated_at, stage, failure_reason} ->
       {site_id,
-       %{status: status, trigger: trigger, inserted_at: inserted_at, updated_at: updated_at}}
+       %{
+         status: status,
+         trigger: trigger,
+         inserted_at: inserted_at,
+         updated_at: updated_at,
+         stage: stage,
+         failure_reason: failure_reason
+       }}
     end)
   end
 
@@ -3092,6 +3165,28 @@ defmodule BarkparkCloud.Registry do
   @spec max_deploy_claims() :: pos_integer()
   def max_deploy_claims do
     Application.get_env(:barkpark_cloud, :max_deploy_claims, @default_max_deploy_claims)
+  end
+
+  @doc """
+  Seconds a MINTED PREBUILT deployment may wait for its artifact upload before
+  `reap_stale_deployments/0` pass (0d) terminates it with
+  `"#{@prebuilt_upload_missing_reason}"`.
+
+  This is the mint→upload gap of charter D86's mint-then-upload lane, and it is a
+  CLIENT-side budget, not a fleet one: the caller has to run its whole off-box
+  build with the minted `build_id` baked in and then upload the tarball. Sized at
+  #{@default_prebuilt_upload_grace_seconds}s (60 minutes) — see the constant for
+  why that is neither `deployment_stale_after_seconds/0` nor the
+  `max_deploy_claims/0` product. Overridable via
+  `config :barkpark_cloud, :prebuilt_upload_grace_seconds`.
+  """
+  @spec prebuilt_upload_grace_seconds() :: pos_integer()
+  def prebuilt_upload_grace_seconds do
+    Application.get_env(
+      :barkpark_cloud,
+      :prebuilt_upload_grace_seconds,
+      @default_prebuilt_upload_grace_seconds
+    )
   end
 
   ## Warm pool (dwb-10)
@@ -5462,6 +5557,88 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  THE DISARMED-BOX CENSUS: every Barkpark holding NO live (unrevoked, unexpired)
+  agent token, newest-revocation first. Read-only; it writes nothing and heals
+  nothing.
+
+  WHY THIS EXISTS (task-5cc3689cb0ab6637, the companion to the mass-revoke fix
+  that removed `revoke_all_agent_tokens_for_user/1` — see the RULING on
+  `revoke_agent_token/1` above). A box in this state looks HEALTHY in every
+  other projection: the row is intact, `suspended` is false,
+  `autoupdate_enabled` is true. It simply stops beating, and the only symptom
+  is `agent_status` drifting to "offline" via `StalenessWorker` — which is
+  indistinguishable from a host that is genuinely down. Nothing anywhere
+  answered "is this box DISARMED or is it DOWN?", so an operator diagnosing it
+  had no reason to suspect a credential rather than a machine.
+
+  IT IS URGENT RATHER THAN NICE because `AgentRetentionWorker` prunes tokens 30
+  days past `revoked_at`. Once those rows are deleted the evidence that a box
+  was disarmed — as opposed to broken — is gone, and the population becomes
+  unanswerable even as a question.
+
+  LIVENESS IS THE SAME PREDICATE `verify_agent_token/1` APPLIES, and
+  deliberately so: `is_nil(revoked_at) and (is_nil(expires_at) or expires_at >
+  now)`. A box whose only token EXPIRED is just as dark as one whose token was
+  revoked — the agent presents it, `verify_agent_token/1` returns nil, every
+  `/v1/agent/*` and `/v1/builder/*` route 401s — so an expired-but-unrevoked
+  token counts as NOT live here. If these two predicates ever diverge this
+  census starts lying in the direction that hides boxes.
+
+  THE `t.id` NULL-GUARD IS LOAD-BEARING. This is a LEFT JOIN, so a barkpark
+  with zero tokens still produces one row whose token columns are all NULL —
+  and `is_nil(revoked_at) and is_nil(expires_at)` is TRUE of that phantom row.
+  Without `not is_nil(t.id)` inside the live-count filter, every never-minted
+  box would count ONE live token and the census would report exactly the
+  opposite of its name.
+
+  EACH ROW CARRIES WHAT AN OPERATOR NEEDS TO ACT, not just an id:
+  `agent_status` and `suspended` (is this box even supposed to be beating?),
+  `token_count` and `revoked_token_count` and `last_revoked_at` — which is what
+  tells DISARMED (was armed, revoked at T) from NEVER ARMED (no token ever
+  minted), the distinction the 30-day prune is about to erase.
+
+  There is NO automatic re-mint here and none is constructible: the only channel
+  that can deliver a fresh agent token is the provision claim, and the box's own
+  live channel is authenticated by the token it no longer has. See the RULING on
+  `revoke_agent_token/1`.
+  """
+  @spec barkparks_without_live_agent_token() :: [map()]
+  def barkparks_without_live_agent_token do
+    now = DateTime.utc_now()
+
+    from(b in Barkpark,
+      left_join: t in AgentToken,
+      on: t.barkpark_id == b.id,
+      group_by: b.id,
+      having:
+        count(
+          fragment(
+            "CASE WHEN ? IS NOT NULL AND ? IS NULL AND (? IS NULL OR ? > ?) THEN 1 END",
+            t.id,
+            t.revoked_at,
+            t.expires_at,
+            t.expires_at,
+            ^now
+          )
+        ) == 0,
+      order_by: [desc_nulls_last: max(t.revoked_at), asc: b.slug],
+      select: %{
+        id: b.id,
+        slug: b.slug,
+        name: b.name,
+        team_id: b.team_id,
+        agent_status: b.agent_status,
+        suspended: b.suspended,
+        last_seen_at: b.last_seen_at,
+        token_count: count(t.id),
+        revoked_token_count: count(fragment("CASE WHEN ? IS NOT NULL THEN 1 END", t.revoked_at)),
+        last_revoked_at: max(t.revoked_at)
+      }
+    )
+    |> Repo.all()
+  end
+
   ## Sites — hosted websites running co-located with a Barkpark.
 
   @doc """
@@ -5617,9 +5794,12 @@ defmodule BarkparkCloud.Registry do
   makes registration repeatable.
 
   Re-enable tradeoff, made deliberately: the PUT overrides a human who disabled
-  the hook by hand. This runs only on site create and EXPLICIT backfill — never
-  on any schedule — so a repair run asserting "this site's auto-deploy hook is
-  live" is the operator's intent.
+  the hook by hand. It runs on site create and EXPLICIT backfill — this entry
+  point — so a repair run asserting "this site's auto-deploy hook is live" is the
+  operator's intent. The HOURLY `ContentWebhookReconciler` deliberately does NOT
+  reach that write: it calls `reconcile_content_webhooks/1`, whose `:reconcile`
+  mode POSTs a MISSING row and no-ops on a row that exists, so the schedule can
+  never silently re-enable a hook a person turned off.
 
   Returns `:ok` (registered/updated), `:noop` (nothing to register — no secret,
   no dataset, box not live) or `:error` (the box refused, or the backfill could
@@ -5637,8 +5817,153 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  The population `reconcile_content_webhooks/1` sweeps: every site that SHOULD
+  carry a content-publish webhook on its box.
+
+  "Should" is read off the Site row and nothing else — the same three conditions
+  `maybe_mint_content_secret/1` used when it decided to mint the secret in the
+  first place, plus the secret itself:
+
+    * `kind` in `#{inspect(@content_bound_kinds)}` — a `container` site has no
+      content binding at all and must never be touched,
+    * a non-blank `bootstrap_dataset` — with no dataset there is no box dataset
+      to hang a webhook on,
+    * a `content_webhook_secret_encrypted` — `ensure_content_webhook/2` REVEALS
+      the secret and never MINTS one, so a content-bound site that carries none
+      is a `:noop` no matter how often it is swept. Those sites are outside this
+      sweep's reach BY CONSTRUCTION and are the reason the visibility half
+      exists: `publish_trigger/1` reports them `:absent`.
+
+  Ordered oldest-first so the sweep is stable across ticks, and `limit`-bounded so
+  one tick makes a bounded number of cross-host box calls.
+  """
+  @spec list_content_webhook_sites(pos_integer()) :: [Site.t()]
+  def list_content_webhook_sites(limit \\ @content_webhook_reconcile_limit)
+      when is_integer(limit) and limit > 0 do
+    Site
+    |> where([s], s.kind in ^@content_bound_kinds)
+    |> where([s], not is_nil(s.bootstrap_dataset) and s.bootstrap_dataset != "")
+    |> where([s], not is_nil(s.content_webhook_secret_encrypted))
+    |> order_by([s], asc: s.inserted_at)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
+  ONE bounded, idempotent reconcile pass over `list_content_webhook_sites/1`:
+  every site that should have a content-publish webhook and does not gets one.
+
+  THE HOLE THIS CLOSES (dr-w11-bl-eight-sites-never-autodeploy). Registration ran
+  on site create and on an explicit human backfill only. A site whose create-time
+  registration failed — guerrilla's `auto-proof` 422'd inside a 20-minute defect
+  window on 2026-07-14 and its `updated_at` still equals its `inserted_at` to the
+  microsecond — therefore stayed unregistered FOREVER, and every content publish
+  on its dataset reached nothing. Nothing swept, and nothing reported the absence
+  either, so the site looked healthy from every surface.
+
+  NARROWER THAN THE BACKFILL, ON PURPOSE. `:reconcile` mode POSTs a row that is
+  genuinely ABSENT and no-ops on a row that already exists — it never issues the
+  re-enabling PUT, because a schedule cannot infer an operator's intent to
+  override a human who disabled a hook by hand (see `ensure_content_webhook/2`).
+
+  NEVER RAISES, AND ONE BAD BOX DOES NOT STOP THE SWEEP. Each site is reduced
+  independently: an unreachable box, an unreadable webhook list, a non-2xx write
+  and a site whose barkpark row is gone all land in `:error`/`:skipped` and the
+  next site is still attempted. Returns a tally
+  `%{swept: n, registered: n, present: n, skipped: n, errored: n}` — `swept` is
+  the denominator (charter D3) and the four buckets partition it.
+  """
+  @spec reconcile_content_webhooks(pos_integer()) :: %{
+          swept: non_neg_integer(),
+          registered: non_neg_integer(),
+          present: non_neg_integer(),
+          skipped: non_neg_integer(),
+          errored: non_neg_integer()
+        }
+  def reconcile_content_webhooks(limit \\ @content_webhook_reconcile_limit)
+      when is_integer(limit) and limit > 0 do
+    zero = %{swept: 0, registered: 0, present: 0, skipped: 0, errored: 0}
+
+    limit
+    |> list_content_webhook_sites()
+    |> Enum.reduce(zero, fn site, acc ->
+      acc = Map.update!(acc, :swept, &(&1 + 1))
+
+      case reconcile_one_content_webhook(site) do
+        :ok -> Map.update!(acc, :registered, &(&1 + 1))
+        :noop -> Map.update!(acc, :present, &(&1 + 1))
+        :skipped -> Map.update!(acc, :skipped, &(&1 + 1))
+        :error -> Map.update!(acc, :errored, &(&1 + 1))
+      end
+    end)
+  end
+
+  # One site's pass. Every failure mode is CAUGHT here rather than allowed to
+  # abort the fold — a fleet sweep that dies on the first unreachable box would
+  # leave every later site unreconciled and would look, from the job row, exactly
+  # like a sweep that found nothing to do.
+  defp reconcile_one_content_webhook(%Site{} = site) do
+    # The box's URL is checked HERE, not left to `do_ensure_content_webhook/4`'s
+    # `else -> :noop`, so that `:noop` can only ever mean "the row already
+    # exists". Folding a box that is not live yet into `present` would report a
+    # site the sweep could not even attempt as a site with a working trigger —
+    # the same false green this whole repair exists to remove.
+    with %Barkpark{url: url} = barkpark when is_binary(url) and url != "" <-
+           get_barkpark(site.barkpark_id),
+         {:ok, secret} when is_binary(secret) <- reveal_site_content_secret(site) do
+      do_ensure_content_webhook(barkpark, site, secret, :reconcile)
+    else
+      _ -> :skipped
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "content-publish webhook reconcile for site #{site.id} raised: #{Exception.message(e)}"
+      )
+
+      :error
+  end
+
+  @doc """
+  Does a content publish on this site's dataset reach it at all?
+
+  DERIVED, NEVER STORED — there is no column for it and there must not be one:
+  the truth lives on the box, and a stamped column would go stale the moment
+  someone deleted a webhook by hand. This reads the Site row alone (no box call —
+  it is computed inside a serializer):
+
+    * `:not_applicable` — a `container` site, or a site with no bound dataset.
+      There is no content binding, so no trigger is owed and its absence is not a
+      fault.
+    * `:absent` — content-bound, but no content-publish secret was ever minted.
+      The per-site receiver 404s every delivery it could ever get (deliberately
+      indistinguishable from an unknown site), so a publish CANNOT reach this
+      site, and `reconcile_content_webhooks/1` cannot repair it either:
+      `ensure_content_webhook/2` reveals a secret, it never mints one.
+    * `:present` — the secret exists, which is what makes registration possible
+      and what the create path and the hourly reconcile both act on.
+
+  THE HONEST BOUND, stated because a status field that overclaims is worse than
+  none: `:present` says this site is CONFIGURED to receive content-publish
+  triggers, not that the row is live on the box this second. Confirming the box
+  row costs a cross-host call this serializer must not make; the hourly
+  reconciler is what keeps `:present` true.
+  """
+  @spec publish_trigger(Site.t()) :: :present | :absent | :not_applicable
+  def publish_trigger(%Site{} = site) do
+    dataset = site.bootstrap_dataset
+
+    cond do
+      site.kind not in @content_bound_kinds -> :not_applicable
+      not (is_binary(dataset) and dataset != "") -> :not_applicable
+      is_nil(site.content_webhook_secret_encrypted) -> :absent
+      true -> :present
+    end
+  end
+
   defp do_ensure_content_webhook(%Barkpark{} = barkpark, %Site{} = site, secret, mode)
-       when is_binary(secret) and mode in [:create, :backfill] do
+       when is_binary(secret) and mode in [:create, :backfill, :reconcile] do
     with box_url when is_binary(box_url) and box_url != "" <- barkpark.url,
          dataset when is_binary(dataset) and dataset != "" <- site.bootstrap_dataset,
          url when is_binary(url) <- content_receiver_url(site) do
@@ -5690,6 +6015,18 @@ defmodule BarkparkCloud.Registry do
       base = "/v1/webhooks/#{URI.encode(dataset)}"
 
       case find_content_webhook(barkpark, dataset, name) do
+        # THE SCHEDULED MODE DOES NOT WRITE OVER A ROW THAT EXISTS. The PUT above
+        # deliberately re-enables a hook a human disabled by hand, and that
+        # tradeoff was justified in the moduledoc by "this runs only on create
+        # and EXPLICIT backfill — a repair run is the operator's intent". The
+        # per-hour `ContentWebhookReconciler` breaks that premise, so `:reconcile`
+        # is a strictly NARROWER mode: it closes ONLY the hole this row names — a
+        # site whose row was never created at all — and leaves every existing row
+        # exactly as the operator left it. `bp cloud webhook reconcile` and the
+        # explicit backfill still carry the re-assert.
+        {:ok, _id} when mode == :reconcile ->
+          :noop
+
         {:ok, id} ->
           relay_webhook_write(barkpark, site, :put, base <> "/" <> URI.encode(id), body)
 
@@ -8316,6 +8653,19 @@ defmodule BarkparkCloud.Registry do
   the row stays `claim_epoch == 0` and comes back next sweep. Pass (0c) of
   `reap_stale_deployments/0` is the bound — it terminates such a row once the
   re-attempts have burned the same budget a claimed row gets.
+
+  ## The PREBUILT mint is NOT an orphan (ssw9-bl-stale-reaper-prebuilt-mint)
+
+  A prebuilt row awaiting its upload wears the never-claimed shape exactly —
+  `queued`, `claim_epoch == 0`, `claimed_at` nil, past the lease horizon while
+  the client is still building — but it is not an orphan: it has no driver
+  BY DESIGN (charter D86 starts none until the artifact route hands the bytes
+  over), and re-driving it would ship a prebuilt run with NO artifact. The box
+  refuses that run and the 202-echo check turns the refusal into a failed
+  deployment, so re-driving it does not rescue the row, it KILLS a client's
+  build mid-upload with a box refusal. Excluded here; pass (0d) of
+  `reap_stale_deployments/0` is its bound instead, on its own client-sized
+  window and with a reason that names the missing upload.
   """
   @spec list_orphaned_static_deployments() :: [Deployment.t()]
   def list_orphaned_static_deployments do
@@ -8333,6 +8683,7 @@ defmodule BarkparkCloud.Registry do
           (d.claim_epoch > 0 or d.inserted_at < ^never_claimed_before),
       order_by: [asc: d.inserted_at]
     )
+    |> where(^not_awaiting_prebuilt_upload())
     |> Repo.all()
   end
 
@@ -8674,6 +9025,30 @@ defmodule BarkparkCloud.Registry do
     |> Map.new(fn {id, oldest} -> {id, max(DateTime.diff(now, oldest, :second), 0)} end)
   end
 
+  # THE ONE OWNER of "this row is a prebuilt mint still waiting for its bytes"
+  # (ssw9). THREE queries below need it and they need it to mean the same thing:
+  # pass (0a) and pass (0c) must NOT reap such a row (their reasons are lies for
+  # it — see @prebuilt_upload_missing_reason), and pass (0d) reaps exactly it,
+  # once its grace window is spent. Three hand-written copies of a predicate is
+  # how two of them end up disagreeing after the third is edited.
+  #
+  # Applied as its OWN `where/2` at each call site rather than as a conjunct
+  # inside a `from` — Ecto expands a dynamic only when it IS the whole filter
+  # expression (`Builder.Filter.filter!/6` matches on a bare `%DynamicExpr{}`),
+  # so `... and ^predicate()` compiles fine and then raises
+  # `invalid dynamic expression` at RUN time, from the reaper's Oban job.
+  #
+  # `coalesce(d.source, "box-build")` rather than a bare `d.source != "prebuilt"`
+  # on purpose: `source` was ADDED in W9, so a pre-W9 row can hold SQL NULL, and
+  # `NULL != 'prebuilt'` is NULL, not true — a bare comparison would silently
+  # drop every legacy row out of the passes that must still see it. The column
+  # default is "box-build", which is exactly what a NULL means.
+  defp awaiting_prebuilt_upload do
+    dynamic([d], coalesce(d.source, "box-build") == "prebuilt" and is_nil(d.artifact_sha256))
+  end
+
+  defp not_awaiting_prebuilt_upload, do: dynamic([d], not (^awaiting_prebuilt_upload()))
+
   @doc """
   oban-substrate: proactively recover deployments wedged past the staleness
   threshold, the deploy-queue twin of `reap_stale_provision_jobs/0`. This is what
@@ -8724,6 +9099,17 @@ defmodule BarkparkCloud.Registry do
       (`queued_deploy_age_map/1` is that class's read-only alarm). Run after
       (0a)/(0b) so an un-buildable row still dies with the reason that names its
       own cure, never this one.
+    * (0d) FAIL a `queued` PREBUILT row whose artifact was NEVER UPLOADED
+      (`artifact_sha256` nil) once `prebuilt_upload_grace_seconds/0` has passed
+      since the mint (ssw9-bl-stale-reaper-prebuilt-mint). Charter D86's
+      mint-then-upload lane mints such a row and starts NO driver on purpose, so
+      it wears the exact shape (0c) reaps — `queued`, `claim_epoch == 0`,
+      `claimed_at` nil — while nothing has refused anything: the client simply
+      never uploaded. (0a) and (0c) therefore EXCLUDE it (their reasons name a
+      missing repo and a refused spawn; both are lies here) and this pass owns
+      it, with its own client-sized window and a reason that names the missing
+      upload. NOT kind-scoped — `prebuilt_enabled` is per-site with no kind
+      guard on the deploy route.
     * (i) FAIL a stale `building` row whose `claim_epoch` has reached
       `max_deploy_claims/0` — terminal, so a permanently-crashing build stops
       looping. Run before the requeue pass so an exhausted row terminates
@@ -8743,11 +9129,37 @@ defmodule BarkparkCloud.Registry do
       (clear claim_worker / claimed_at only — status STAYS `pushing`) so
       `claim_pending_deployment_for_barkpark/2` re-matches them for a fresh agent
       (a transient blip is still retried).
+    * (v) FAIL an UNCLAIMED `pushing` row nobody has touched for a full claim
+      budget (task-bbe3ecbf50c733e3) — the terminal bound pass (iv) was missing.
+      (iii) and (iv) both require `not is_nil(d.claim_worker)`, and (iv) itself
+      writes `claim_worker: nil` while LEAVING the status at `pushing`, so the
+      row it just released matches NEITHER pass again: a box that never comes
+      back can no longer burn `claim_epoch`, `claim_epoch` never reaches
+      `max_deploy_claims/0`, and the row is invisible to the whole sweep
+      FOREVER. The builder's handoff (`Web.Router`'s `put_handoff_claim_worker/2`
+      sends `claim_worker: null` + `claim_epoch: 0`) leaves the identical shape,
+      so a handed-off row no box ever claims wedges the same way. Its cost is
+      not cosmetic: `deployments_active_site_env_index` is partial on
+      `status IN ('queued','building','pushing') AND environment = 'production'`,
+      so ONE wedged row blocks every future production deploy for that site and
+      `Sites.AutoDeployWorker` defers behind it on an unbounded 60s loop. The
+      budget is TIME, mirroring pass (0c) for the same reason: a row with no
+      claim on it has no epoch to count, so it is given exactly what a claimed
+      row is given — `max_deploy_claims/0` leases of
+      `deployment_stale_after_seconds/0` — measured from `updated_at`, which
+      pass (iv) stamps on release. A box that DOES come back inside that window
+      re-claims (bumping `claim_epoch`), and if it dies again (iv) releases it
+      with a fresh `updated_at`: the transient-blip retry is unbounded for a box
+      that keeps returning, and only permanent silence terminates. Stamped with
+      @instance_unreachable_reason — the SAME fault pass (iii) names, so its
+      count is summed into `pushing_failed` rather than minted as a new key
+      (the (0a)/(0b) → `no_source_failed` precedent: one fault, one number).
 
   Each pass is a status-guarded `update_all`, so a race with a concurrent claim
   simply no-ops on rows the other path already moved. Returns
   `%{failed: n, requeued: n, released: n, pushing_failed: n, no_source_failed: n,
-  spawn_failed: n}`; an empty sweep returns all-zeros and never raises.
+  spawn_failed: n, upload_missing_failed: n}`; an empty sweep returns all-zeros
+  and never raises.
 
   `spawn_failed` is deliberately its OWN key rather than another summand of
   `no_source_failed` (which pairs 0a and 0b): "the driver was never spawned" and
@@ -8761,7 +9173,8 @@ defmodule BarkparkCloud.Registry do
           released: non_neg_integer(),
           pushing_failed: non_neg_integer(),
           no_source_failed: non_neg_integer(),
-          spawn_failed: non_neg_integer()
+          spawn_failed: non_neg_integer(),
+          upload_missing_failed: non_neg_integer()
         }
   def reap_stale_deployments do
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
@@ -8792,6 +9205,7 @@ defmodule BarkparkCloud.Registry do
             is_nil(s.github_repo),
         select: {d.id, d.site_id}
       )
+      |> where(^not_awaiting_prebuilt_upload())
       |> Repo.update_all(
         set: [
           status: "failed",
@@ -8856,11 +9270,48 @@ defmodule BarkparkCloud.Registry do
             d.inserted_at < ^spawn_budget_before,
         select: {d.id, d.site_id}
       )
+      |> where(^not_awaiting_prebuilt_upload())
       |> Repo.update_all(
         set: [
           status: "failed",
           failure_reason: @spawn_refused_reason,
           detail: failure_detail(@spawn_refused_reason),
+          updated_at: now
+        ]
+      )
+
+    # (0d) THE MINT THAT NEVER GOT ITS BYTES (ssw9-bl-stale-reaper-prebuilt-mint).
+    # A prebuilt row is minted with no driver by design and waits for the client
+    # to upload its `dist/`; until then it is `queued`, `claim_epoch == 0`,
+    # `artifact_sha256` nil — indistinguishable BY SHAPE from a refused driver
+    # spawn, which is why (0c) above used to reap it and accuse a spawn that
+    # never happened. Both (0a) and (0c) now exclude it; this pass is the bound
+    # that keeps excluding it from being a zombie.
+    #
+    # NOT kind-scoped, unlike (0a)/(0c): `prebuilt_enabled` is a per-SITE opt-in
+    # with no kind guard on the deploy route, so a container site can mint a
+    # prebuilt row too, and its fault is identical.
+    #
+    # Its own window — `prebuilt_upload_grace_seconds/0`, not the fleet's lease
+    # or claim budget — because what it waits on is the CLIENT'S build, not any
+    # worker of ours. `d.status == "queued"` keeps a human-cancelled row and a
+    # row whose upload DID arrive (the artifact route starts the driver, which
+    # claims it out of `queued`) out by construction; `is_nil(artifact_sha256)`
+    # is the second, independent proof that no bytes ever landed.
+    prebuilt_grace_before =
+      DateTime.add(now, -prebuilt_upload_grace_seconds(), :second)
+
+    {upload_missing_failed, upload_missing_rows} =
+      from(d in Deployment,
+        where: d.status == "queued" and d.inserted_at < ^prebuilt_grace_before,
+        select: {d.id, d.site_id}
+      )
+      |> where(^awaiting_prebuilt_upload())
+      |> Repo.update_all(
+        set: [
+          status: "failed",
+          failure_reason: @prebuilt_upload_missing_reason,
+          detail: failure_detail(@prebuilt_upload_missing_reason),
           updated_at: now
         ]
       )
@@ -8902,7 +9353,7 @@ defmodule BarkparkCloud.Registry do
     # exhausts its budget; without this it would be re-released every sweep and
     # never fail (the eternal-spinner class this reaper exists to kill). Run
     # before the release pass so an exhausted row terminates instead of releasing.
-    {pushing_failed, pushing_rows} =
+    {claimed_pushing_failed, pushing_rows} =
       from(d in Deployment,
         where:
           d.status == "pushing" and not is_nil(d.claim_worker) and
@@ -8932,6 +9383,78 @@ defmodule BarkparkCloud.Registry do
       )
       |> Repo.update_all(set: [claim_worker: nil, claimed_at: nil, updated_at: now])
 
+    # (v) THE RELEASED ROW NOBODY EVER CAME BACK FOR (task-bbe3ecbf50c733e3).
+    #
+    # Pass (iv) directly above is the hole. It clears `claim_worker` and LEAVES
+    # the status at `pushing`, and both (iii) and (iv) are gated on
+    # `not is_nil(d.claim_worker)` — so the row (iv) just released matches
+    # neither of them ever again. The premise (iv) is written on is "the on-box
+    # agent will re-claim it", and re-claiming is the ONLY thing that bumps
+    # `claim_epoch` (`claim_pending_deployment_for_barkpark/2`), which is the
+    # only thing that can ever satisfy (iii). A box that is permanently gone
+    # therefore leaves the row `pushing` with a NULL claim_worker forever,
+    # invisible to every pass: the eternal spinner this sweep exists to kill,
+    # wearing the sweep's own uniform.
+    #
+    # It is NOT invisible to the database. `deployments_active_site_env_index` is
+    # partial on `status IN ('queued','building','pushing') AND environment =
+    # 'production'`, so one wedged row refuses every future production deploy for
+    # that site; `Sites.AutoDeployWorker.drive/2` then takes the
+    # `{:duplicate, _}` arm into `defer_behind_running_build/2`, which mints no
+    # row and (with no `deferred` head to count) never leaves its 60s base
+    # backoff. Zero deploys, zero failures, a climbing `coalesced_attempts`.
+    #
+    # THE SAME SHAPE ARRIVES A SECOND WAY, and this pass is deliberately keyed on
+    # the shape rather than on "was released by (iv)": the builder's handoff
+    # (`Web.Router`'s `put_handoff_claim_worker/2` / `put_handoff_claim_epoch/2`)
+    # transitions building → pushing with `claim_worker: null` + `claim_epoch: 0`
+    # on purpose, so the agent's claim query matches it. A handed-off row whose
+    # box never claims it wedges identically, and a predicate that could only see
+    # (iv)'s rows would leave that twin behind.
+    #
+    # THE BUDGET IS TIME, not attempts — pass (0c)'s reasoning exactly. A row
+    # with no claim on it has no epoch to burn, so it is given what a claimed row
+    # is given: `max_deploy_claims/0` leases of
+    # `deployment_stale_after_seconds/0`, measured from `updated_at` (pass (iv)
+    # stamps it on release; the handoff changeset stamps it too, and any progress
+    # write on the row pushes it out again). This PRESERVES the retry (iv) exists
+    # for: a box that comes back inside the window re-claims, and if it then dies
+    # (iv) releases it again with a FRESH `updated_at` — so a box that keeps
+    # returning is retried without bound, and (iii)'s epoch budget still
+    # terminates a box that returns only to fail. Only unbroken silence ends here.
+    #
+    # Disjoint from (iv) by construction (`is_nil` vs `not is_nil` on the same
+    # column), so the pass order between the two is irrelevant; and a row
+    # released in THIS sweep carries `updated_at == now`, far inside the window.
+    #
+    # @instance_unreachable_reason, not a new one: the fault is the fault (iii)
+    # already names — the box never took delivery. Its count is summed into
+    # `pushing_failed` for the same reason (0a) and (0b) sum into
+    # `no_source_failed`: one fault, one number, and the worker's asserted return
+    # shape is unchanged.
+    handoff_budget_before =
+      DateTime.add(now, -(max_claims * deployment_stale_after_seconds()), :second)
+
+    {abandoned_pushing_failed, abandoned_pushing_rows} =
+      from(d in Deployment,
+        where:
+          d.status == "pushing" and is_nil(d.claim_worker) and
+            d.updated_at < ^handoff_budget_before,
+        select: {d.id, d.site_id}
+      )
+      |> Repo.update_all(
+        set: [
+          status: "failed",
+          failure_reason: @instance_unreachable_reason,
+          detail: failure_detail(@instance_unreachable_reason),
+          claim_worker: nil,
+          claimed_at: nil,
+          updated_at: now
+        ]
+      )
+
+    pushing_failed = claimed_pushing_failed + abandoned_pushing_failed
+
     # notifications (wave 28 S6): the reaper is the OTHER half of the covering
     # set. These four passes are bare `Repo.update_all` writes — no changeset, no
     # callback — so they never touch `transition_deployment_fenced/4`, and a
@@ -8947,8 +9470,10 @@ defmodule BarkparkCloud.Registry do
       {container_rows, @no_build_source_reason},
       {static_rows, @no_content_binding_reason},
       {spawn_rows, @spawn_refused_reason},
+      {upload_missing_rows, @prebuilt_upload_missing_reason},
       {failed_rows, @stale_builder_reason},
-      {pushing_rows, @instance_unreachable_reason}
+      {pushing_rows, @instance_unreachable_reason},
+      {abandoned_pushing_rows, @instance_unreachable_reason}
     ]
     |> Enum.flat_map(fn {rows, reason} ->
       Enum.map(rows || [], fn {id, site_id} -> {site_id, reason, %{deployment_id: id}} end)
@@ -8961,7 +9486,8 @@ defmodule BarkparkCloud.Registry do
       released: released,
       pushing_failed: pushing_failed,
       no_source_failed: no_source_failed,
-      spawn_failed: spawn_failed
+      spawn_failed: spawn_failed,
+      upload_missing_failed: upload_missing_failed
     }
   end
 
@@ -8987,15 +9513,11 @@ defmodule BarkparkCloud.Registry do
   # (20260806110000), so nothing here can raise 22001 — but the column is still
   # the one-line caption under a status pill, and `failure_reason` (`:text`) is
   # where the whole story lives untruncated. 255 mirrors
-  # `Sites.Deploy.short_detail/1` deliberately: the two terminal paths must not
-  # render the same failure at two different lengths. Knowingly duplicated rather
-  # than shared, to keep this change inside one module; folding both onto one
-  # `FailureCopy` helper is a follow-up, not a silent fork.
-  defp failure_detail(reason) when is_binary(reason) do
-    if String.length(reason) > 255, do: String.slice(reason, 0, 254) <> "…", else: reason
-  end
-
-  defp failure_detail(reason), do: reason
+  # `Sites.Deploy.short_detail/1` deliberately: the terminal paths must not
+  # render the same failure at two different lengths. THAT FOLLOW-UP HAS LANDED
+  # (task-9e17071084bc5466): both this and `short_detail/1` now delegate to
+  # `FailureCopy.caption/1`, which is the single owner of the clamp.
+  defp failure_detail(reason), do: FailureCopy.caption(reason)
 
   # cch-w30-bl — THE ONE POST-COMMIT DISPATCH BOTH FENCED WRITERS CALL.
   #

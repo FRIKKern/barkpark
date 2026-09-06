@@ -62,6 +62,37 @@
 # pin slides the moment anyone inserts a line above it, and the gate then names
 # files the PR never touched. Counts are immune to that.
 #
+# THE EMPTY BASELINE IS LEGITIMATE — AND THAT IS WHY THE CORPUS NEEDS A FLOOR.
+# ---------------------------------------------------------------------------
+# .github/unreachable-assert-message.allow holds four comment lines and ZERO
+# data rows. That is not rot: the 54 sites the header above records were all
+# fixed, the census is now 0, and a ratchet grandfathering nothing is exactly
+# right. What it cost is the back-stop. The FELL arm iterates the baseline, so
+# with no rows it iterates nothing; the NEW/GROWN arm iterates the scan, so with
+# no files it iterates nothing either. Both loops agree that an EMPTY CORPUS is
+# a clean tree — measured 2026-09-06 on origin/main 500ab52fd:
+#
+#     $ mv api/test api/tests_renamed
+#     $ scripts/unreachable-assert-message-check.sh; echo rc=$?
+#     unreachable-assert-message-check: OK — 0 site(s) at or below baseline,
+#       0 file(s) scanned, 0 parse failures
+#     rc=0
+#
+# The verdict was derived from a file list derived from the tree being judged,
+# so absence of the tree was indistinguishable from absence of the defect. Two
+# things now stand between that and a green, and neither is computed from the
+# tree:
+#
+#   1. A MISSING or EMPTY corpus REFUSES (exit 3), naming the directory. Shape
+#      copied verbatim from the best-guarded sibling, refute-on-absence-capture-
+#      log-check.sh — do not invent a third dialect for this.
+#   2. SCAN_FLOOR, a COMMITTED LITERAL below, catches the case a zero-check
+#      cannot: partial deletion. Half the tree gone still scans hundreds of
+#      files and still reports a clean census. The floor is the only number here
+#      that does not come from the tree, which is the only reason it can be
+#      wrong when the tree shrinks. Same doctrine, same words, as
+#      scripts/node-test-floor.mjs `--floor`.
+#
 # Usage:
 #   scripts/unreachable-assert-message-check.sh            # check (CI + gate)
 #   scripts/unreachable-assert-message-check.sh --list     # print every site, file:line
@@ -75,6 +106,22 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCANDIR="${UNREACHABLE_ASSERT_SCANDIR:-$ROOT/api/test}"
 BASELINE="${UNREACHABLE_ASSERT_BASELINE:-$ROOT/.github/unreachable-assert-message.allow}"
 
+# SCAN_FLOOR — a COMMITTED LITERAL, deliberately not derived.
+#
+# DERIVATION (re-derive and re-commit when you edit this line): on origin/main
+# 2fe7ddd3a, 2026-09-06, `scripts/unreachable-assert-message-check.sh` printed
+# "1494 file(s) scanned" over api/test. 1200 is that number less ~20% headroom,
+# so ordinary churn — a directory consolidated, a plugin's suite retired — does
+# not red the required Elixir gate, while a corpus gutted to a fraction does.
+# Raise it when api/test grows past ~1500 and the margin stops meaning anything;
+# NEVER lower it to make a red go away without saying which files legitimately
+# left. A floor computed from the tree it checks agrees with a gutted tree by
+# construction, which is the whole defect this closes.
+#
+# Overridable ONLY so --selftest can drive synthetic trees of two or three
+# files. CI passes nothing, so CI gets the literal.
+SCAN_FLOOR="${UNREACHABLE_ASSERT_SCAN_FLOOR:-1200}"
+
 command -v elixir >/dev/null 2>&1 || {
   echo "unreachable-assert-message-check: elixir is not on PATH — REFUSING." >&2
   echo "  This gate parses Elixir with Code.string_to_quoted/2; without the" >&2
@@ -82,6 +129,19 @@ command -v elixir >/dev/null 2>&1 || {
   echo "  never read is the failure it exists to prevent." >&2
   exit 3
 }
+
+# REFUSE, NEVER DEGRADE — the corpus itself. A scan tree that is missing or
+# unreadable is exit 3, distinctly from a RED (1). Shape copied from
+# scripts/refute-on-absence-capture-log-check.sh. Checked BEFORE the scanner is
+# written, so the refusal does not depend on anything the scan produces.
+if [ ! -d "$SCANDIR" ] || [ ! -r "$SCANDIR" ]; then
+  echo "unreachable-assert-message-check: REFUSING — scan corpus is not a readable directory:" >&2
+  echo "    $SCANDIR" >&2
+  echo "  A verdict over a corpus that was never opened is not a verdict. This" >&2
+  echo "  gate previously printed OK on \"0 file(s) scanned\" here. Fix the path," >&2
+  echo "  or fix the caller." >&2
+  exit 3
+fi
 
 SCANNER="$(mktemp -t uamc-scan-XXXXXX).exs"
 trap 'rm -f "$SCANNER"' EXIT
@@ -132,9 +192,19 @@ run_scan() {
 }
 
 # --- selftest ---------------------------------------------------------------
-# Four arms against synthetic trees in a TEMP dir. Arm (0) is what stops the
-# other three passing vacuously: a scanner that always reports "clean" would
-# satisfy a naive can-it-red test while measuring nothing.
+# Arms (0) and (a)-(d) drive SYNTHETIC trees in a TEMP dir. Arm (0) is what
+# stops the others passing vacuously: a scanner that always reports "clean"
+# would satisfy a naive can-it-red test while measuring nothing.
+#
+# Arms (e)-(h) drive the REAL corpus path, on a SCRATCH COPY of api/test made
+# here — never the live tree, which these arms mutate. They exist because five
+# synthetic arms proved only that the gate reds over trees the harness itself
+# planted; not one of them ever touched $ROOT/api/test, so every one of them
+# stayed green through the transcript in the header where the real corpus was
+# renamed away and the gate said OK. An arm that cannot lose when the protected
+# thing is gutted is not evidence. Each of (f)-(h) ASSERTS ITS MUTATION APPLIED
+# before reading a verdict — a mutation that silently did not happen turns a
+# can-it-fail arm back into a can-it-pass arm.
 if [ "${1:-}" = "--selftest" ]; then
   TMP="$(mktemp -d)"
   trap 'rm -f "$SCANNER"; rm -rf "$TMP"' EXIT
@@ -164,7 +234,7 @@ defmodule CleanTest do
 end
 EX
   printf '0\n' > "$TMP/baseline"
-  if UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline" \
+  if UNREACHABLE_ASSERT_SCAN_FLOOR=1 UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline" \
      bash "$0" >/dev/null 2>&1; then
     arm "ok" "(0) clean tree passes — bare match-assert and == are NOT flagged"
   else
@@ -181,7 +251,7 @@ defmodule BadTest do
   end
 end
 EX
-  out="$(UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline" \
+  out="$(UNREACHABLE_ASSERT_SCAN_FLOOR=1 UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline" \
         bash "$0" 2>&1 || true)"
   if grep -q "bad_test.exs" <<<"$out"; then
     arm "ok" "(a) a NEW defective site reds, naming bad_test.exs"
@@ -195,8 +265,8 @@ EX
   #     matches nothing — which reads as "the ratchet does not grandfather"
   #     when the truth is "the baseline names a file that does not exist".
   #     Generating it here also exercises --baseline, which CI never runs.
-  UNREACHABLE_ASSERT_SCANDIR="$TMP/test" bash "$0" --baseline > "$TMP/baseline2" 2>/dev/null
-  if UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline2" \
+  UNREACHABLE_ASSERT_SCAN_FLOOR=1 UNREACHABLE_ASSERT_SCANDIR="$TMP/test" bash "$0" --baseline > "$TMP/baseline2" 2>/dev/null
+  if UNREACHABLE_ASSERT_SCAN_FLOOR=1 UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline2" \
      bash "$0" >/dev/null 2>&1; then
     arm "ok" "(b) a site AT baseline passes — the ratchet grandfathers, it does not demand zero"
   else
@@ -206,7 +276,7 @@ EX
   # (c) a count that FELL below baseline must RED, telling you to lower it.
   #     Same generated baseline with the count inflated, so the path is real.
   awk '/^#/{print; next} {printf "%d %s\n", $1 + 4, $2}' "$TMP/baseline2" > "$TMP/baseline3"
-  out="$(UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline3" \
+  out="$(UNREACHABLE_ASSERT_SCAN_FLOOR=1 UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline3" \
         bash "$0" 2>&1 || true)"
   if grep -qi "lower the baseline\|ratchet" <<<"$out"; then
     arm "ok" "(c) a FIXED site reds until the baseline is lowered — the ratchet cannot rust"
@@ -216,7 +286,7 @@ EX
 
   # (d) an UNPARSEABLE file must RED, not be silently skipped.
   printf 'defmodule Broken do\n  test "x" do\n    assert (((\n' > "$TMP/test/broken_test.exs"
-  out="$(UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline2" \
+  out="$(UNREACHABLE_ASSERT_SCAN_FLOOR=1 UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline2" \
         bash "$0" 2>&1 || true)"
   if grep -q "broken_test.exs" <<<"$out"; then
     arm "ok" "(d) an unparseable file REFUSES by name — never a silent skip"
@@ -224,12 +294,79 @@ EX
     arm "FAIL" "(d) an unparseable file was skipped silently — the scanner reports a tree it never read"
   fi
 
+  # ---- REAL corpus path, on a scratch copy -------------------------------
+  # cp -R, find and mv only: POSIX on both the macOS box this is written on and
+  # the ubuntu runner it is judged on. No `cp -a`, no GNU-only flags.
+  REAL="$TMP/real/test"
+  mkdir -p "$TMP/real"
+  if cp -R "$ROOT/api/test" "$REAL" 2>/dev/null; then
+    real_n="$(find "$REAL" \( -name '*.ex' -o -name '*.exs' \) -type f | wc -l | tr -d ' ')"
+
+    # (e) the real corpus, copied intact, must PASS at the COMMITTED floor.
+    #     No floor override here — this is the arm that would red if SCAN_FLOOR
+    #     were ever raised above what api/test actually holds.
+    if UNREACHABLE_ASSERT_SCANDIR="$REAL" bash "$0" >/dev/null 2>&1; then
+      arm "ok" "(e) the REAL corpus ($real_n files) passes at the committed floor $SCAN_FLOOR"
+    else
+      arm "FAIL" "(e) the REAL corpus REDDENED at floor $SCAN_FLOOR — the floor outran api/test, or the tree is dirty"
+    fi
+
+    # (f) corpus MOVED AWAY (the realistic cause: a rename) must REFUSE.
+    mv "$REAL" "$TMP/real/moved"
+    if [ ! -d "$REAL" ] && [ -d "$TMP/real/moved" ]; then
+      rc_f=0; out="$(UNREACHABLE_ASSERT_SCANDIR="$REAL" bash "$0" 2>&1)" || rc_f=$?
+      if [ "$rc_f" != 0 ] && grep -q "REFUSING" <<<"$out" && grep -qF "$REAL" <<<"$out"; then
+        arm "ok" "(f) a MOVED corpus refuses (rc $rc_f), naming the directory — this is the case that printed OK"
+      else
+        arm "FAIL" "(f) a MOVED corpus did not refuse (rc $rc_f) — the gate still reads absence as clean"
+      fi
+    else
+      arm "FAIL" "(f) MUTATION DID NOT APPLY — the corpus was not moved, so this arm proved nothing"
+    fi
+    mv "$TMP/real/moved" "$REAL"
+
+    # (g) corpus PRESENT but EMPTIED must REFUSE on the zero-file scan.
+    mkdir -p "$TMP/emptied"
+    if [ -d "$TMP/emptied" ] && [ -z "$(find "$TMP/emptied" -type f)" ]; then
+      rc_g=0; out="$(UNREACHABLE_ASSERT_SCANDIR="$TMP/emptied" bash "$0" 2>&1)" || rc_g=$?
+      if [ "$rc_g" != 0 ] && grep -q "0 file(s) scanned" <<<"$out"; then
+        arm "ok" "(g) an EMPTIED corpus refuses (rc $rc_g) on the zero-file scan"
+      else
+        arm "FAIL" "(g) an EMPTIED corpus was read as a clean tree (rc $rc_g)"
+      fi
+    else
+      arm "FAIL" "(g) MUTATION DID NOT APPLY — the emptied corpus is not empty"
+    fi
+
+    # (h) corpus PARTLY deleted — the case a zero-check cannot catch — must
+    #     refuse on the FLOOR. Keep 5 files; assert the deletion landed.
+    find "$REAL" \( -name '*.ex' -o -name '*.exs' \) -type f | sort | tail -n +6 | while read -r f; do
+      rm -f "$f"
+    done
+    left_n="$(find "$REAL" \( -name '*.ex' -o -name '*.exs' \) -type f | wc -l | tr -d ' ')"
+    if [ "$left_n" -lt "$real_n" ] && [ "$left_n" -gt 0 ]; then
+      rc_h=0; out="$(UNREACHABLE_ASSERT_SCANDIR="$REAL" bash "$0" 2>&1)" || rc_h=$?
+      if [ "$rc_h" != 0 ] && grep -q "below floor" <<<"$out"; then
+        arm "ok" "(h) a corpus cut from $real_n to $left_n files refuses on the floor (rc $rc_h)"
+      else
+        arm "FAIL" "(h) a corpus cut from $real_n to $left_n files still reported clean (rc $rc_h)"
+      fi
+    else
+      arm "FAIL" "(h) MUTATION DID NOT APPLY — files went $real_n -> $left_n"
+    fi
+  else
+    arm "FAIL" "(e-h) could not copy $ROOT/api/test — the real-corpus arms could not run"
+    arm "FAIL" "(f) not run"
+    arm "FAIL" "(g) not run"
+    arm "FAIL" "(h) not run"
+  fi
+
   echo
   if [ "$fails" -gt 0 ]; then
-    echo "SELFTEST FAILED: $fails of 5 arms failed"
+    echo "SELFTEST FAILED: $fails of 9 arms failed"
     exit 1
   fi
-  echo "SELFTEST PASSED: 5 of 5 arms"
+  echo "SELFTEST PASSED: 9 of 9 arms"
   exit 0
 fi
 
@@ -239,6 +376,30 @@ SCAN_OUT="$(run_scan)"
 PARSE_FAILS="$(printf '%s\n' "$SCAN_OUT" | awk -F'\t' '$1=="PARSE_FAIL"{print $2}')"
 SCANNED="$(printf '%s\n' "$SCAN_OUT" | awk -F'\t' '$1=="SCANNED"{print $2}')"
 NFAIL="$(printf '%s\n' "$SCAN_OUT" | awk -F'\t' '$1=="PARSE_FAILURES"{print $2}')"
+
+# THE BACK-STOP THE COMMENT-ONLY BASELINE LEFT MISSING. Placed BEFORE --list and
+# --baseline on purpose: `--baseline` over an empty corpus would emit an empty
+# allow-file and cement the blindness as the committed truth.
+if [ "${SCANNED:-0}" -eq 0 ]; then
+  echo "unreachable-assert-message-check: REFUSING — 0 file(s) scanned:" >&2
+  echo "    $SCANDIR" >&2
+  echo "  The corpus is empty, so \"0 site(s)\" says nothing about the defect —" >&2
+  echo "  it is absence of the tree, not absence of the finding. Neither loop in" >&2
+  echo "  this gate can tell those apart on its own: NEW/GROWN iterates the scan" >&2
+  echo "  and FELL iterates a baseline that legitimately holds zero rows." >&2
+  exit 3
+fi
+
+if [ "$SCANNED" -lt "$SCAN_FLOOR" ]; then
+  echo "unreachable-assert-message-check: REFUSING — corpus below floor:" >&2
+  echo "    scanned $SCANNED file(s) under $SCANDIR, floor is $SCAN_FLOOR" >&2
+  echo "  A partly-deleted corpus still scans cleanly, because every count here" >&2
+  echo "  is derived from the tree being judged. The floor is the one number" >&2
+  echo "  that is not, so it is the one thing that can be wrong when the tree" >&2
+  echo "  shrinks. If the shrink is legitimate, say WHICH files left and lower" >&2
+  echo "  SCAN_FLOOR in this script with a fresh derivation and date." >&2
+  exit 3
+fi
 
 if [ "${1:-}" = "--list" ]; then
   printf '%s\n' "$SCAN_OUT" | awk -F'\t' '$1=="HIT"{printf "%s:%s\n", $2, $3}'
@@ -298,7 +459,7 @@ done < "$TMPD/base"
 
 TOTAL="$(awk '{s+=$1} END{print s+0}' "$TMPD/now")"
 if [ "$rc" = 0 ]; then
-  echo "unreachable-assert-message-check: OK — $TOTAL site(s) at or below baseline, $SCANNED file(s) scanned, 0 parse failures"
+  echo "unreachable-assert-message-check: OK — $TOTAL site(s) at or below baseline, $SCANNED file(s) scanned (floor $SCAN_FLOOR), 0 parse failures"
 else
   echo "" >&2
   echo "  FIX: bind first, then assert on a boolean, so assert/2 can use the message:" >&2

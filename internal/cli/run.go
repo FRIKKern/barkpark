@@ -454,6 +454,13 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		out.errf("bp: warning: %s", warning)
 	}
 
+	// Whether this dispatch actually carries a credential — read off the
+	// RESOLVED headers, not re-derived from config, so it is true exactly when
+	// the server saw a bearer. A 401 refusal reads it (renderError → hint) to
+	// avoid naming a remedy the caller already applied. Set before both the
+	// paginated walk and the single send, so every refusal path sees it.
+	out.credentialSent = req.headers["Authorization"] != ""
+
 	// --dry-run: print the resolved request and exit 0 WITHOUT sending (A1).
 	if g.dryRun {
 		return dryRun(out, cmd, req.url, req.headers, req.body)
@@ -1565,11 +1572,25 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 	// when the command's own manifest says it accepts it. `paginated: true`
 	// stays in the disjunction because those seven commands take limit/offset
 	// as protocol whether or not they also enumerate them as flags.
-	if g.limitSet && (cmd.Paginated || commandDeclaresFlag(cmd, "limit")) {
-		q.Set("limit", strconv.Itoa(g.limit))
-	}
-	if g.offsetSet && (cmd.Paginated || commandDeclaresFlag(cmd, "offset")) {
-		q.Set("offset", strconv.Itoa(g.offset))
+	//
+	// The trap is not limit/offset's — it is EVERY global value flag's, because
+	// parseGlobals eats them all. -d/--dataset walked into it next: security
+	// declared `dataset` on task.ready and taught the route to honour
+	// `?dataset=`, and `bp task ready --dataset x` still sent nothing, so the
+	// caller read an UNFILTERED page as a filtered one. So the loop below is the
+	// rule itself, driven by globalQueryForwards (globals.go) rather than by one
+	// hand-written pair of ifs per flag — the next global joins the table and
+	// applyQuery does not change.
+	forwarded := map[string]bool{}
+	for _, gf := range globalQueryForwards(g) {
+		if !gf.set {
+			continue
+		}
+		if !commandDeclaresFlag(cmd, gf.name) && !(gf.paginatedProtocol && cmd.Paginated) {
+			continue
+		}
+		q.Set(gf.name, gf.value)
+		forwarded[gf.name] = true
 	}
 
 	// Declared positional args that belong in the query string (e.g. search.query
@@ -1590,14 +1611,16 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 		if clientOnly[f.Name] || f.Type == "file" || commandFlagBelongsInBody(cmd, f.Name) {
 			continue
 		}
-		// limit/offset are already resolved above from the globals, which is the
-		// ONLY place they can arrive from (parseGlobals consumes them wherever
+		// A global value flag is already resolved above, and the globals are the
+		// ONLY place it can arrive from (parseGlobals consumes them wherever
 		// they appear, so `flags` never holds them). Skipping the name we
 		// already set keeps that provable rather than assumed: were a caller to
 		// populate both, `q.Add` here would append a SECOND scalar `limit=` and
 		// Plug would keep one of the two by decode order — the duplicate-key
-		// coin-flip the repeatable-flag branch below exists to avoid.
-		if (f.Name == "limit" || f.Name == "offset") && q.Has(f.Name) {
+		// coin-flip the repeatable-flag branch below exists to avoid. Keyed on
+		// the forwarded set, not on a literal limit/offset pair, so the guard
+		// covers dataset and the next global for free.
+		if forwarded[f.Name] {
 			continue
 		}
 		if f.Type == "bool" {
@@ -1785,6 +1808,9 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 				if err := checkSetKeyNesting(kv, key); err != nil {
 					return nil, nil, "", err
 				}
+				if err := checkSetIDKeyRouting(cmd, kv, key); err != nil {
+					return nil, nil, "", err
+				}
 				// `--set 'content:={…}'` on a patch double-nests to
 				// content.content. The server only WARNS (Warnings advisory,
 				// mutations.ex warn_on_nested_content/1) and still returns a
@@ -1806,6 +1832,9 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 			if err := checkSetKeyNesting(kv, key); err != nil {
 				return nil, nil, "", err
 			}
+			if err := checkSetIDKeyRouting(cmd, kv, key); err != nil {
+				return nil, nil, "", err
+			}
 			setTarget[key] = kv[eq+1:]
 		}
 	}
@@ -1816,6 +1845,30 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 		obj["unset"] = unsetKeys
 	}
 
+	// BEFORE ADDING A GUARD HERE, READ internal/cli/set_key_nesting_test.go.
+	// Three of its cases pin a ruling that exists nowhere else in the repo, one
+	// stating it in a comment verbatim: "the CORRECT spelling still lands — the
+	// refusal is not a wall." A bare `--set description=NEW` patch on a type:task
+	// document is a SUPPORTED operation. The author who built the dotted-key
+	// nesting refusal above deliberately fenced it that way, and those tests are
+	// the only record of that decision.
+	//
+	// It has already killed one approved design. A task's `brief` mirrors its
+	// `description`, and a client-side guard refusing a description-only task
+	// patch was built here to stop the two drifting apart — it worked, and it red
+	// those three contracts. The reason is structural rather than incidental:
+	// buildBody holds only the patch, never the current document, so client-side
+	// the only moves are to refuse the edit or to clobber the brief's other
+	// blocks. Neither is acceptable, and no amount of care with the message
+	// changes that.
+	//
+	// The mirror is kept in step SERVER-side instead, at the writer chokepoint
+	// that does hold the document: Barkpark.Tasks.BriefMirror
+	// (api/lib/barkpark/tasks/brief_mirror.ex, @canonical
+	// capability:task-brief-mirror-resync), wired into create_document/4 and
+	// upsert_document/4. That also covers the MCP bridge, LiveView and raw HTTP,
+	// which a CLI guard never could.
+	//
 	// A mutation command (doc publish/unpublish/delete) wraps its body-arg object
 	// into the mutate batch shape: {mutations: [{<op>: {type, id, …}}]}.
 	if cmd.MutationOp != "" {
@@ -1869,6 +1922,59 @@ func checkSetKeyNesting(kv, key string) error {
 	}
 	head := key[:strings.Index(key, ".")]
 	return setNestingError(kv, key, head+":={…}")
+}
+
+// ── `--set id=…` is never the document id (task-a1c40938ef1e94cc) ──────────
+//
+// `bp doc create task --set id=my-chosen-id` exited 0 and put the document at a
+// GENERATED address (`task-e9e41ef2841a0f51`). The id the caller named was not
+// applied: on the create family the server reads the address from `_id` (or
+// `doc_id`) INSIDE the payload —
+//
+//	api/lib/barkpark/content/mutations.ex apply_one/3:
+//	  id = attrs["_id"] || attrs["doc_id"]
+//
+// — and a bare `id` is not in `Writer.@reserved_in`, so `from_envelope/1` folds
+// it into `content` as an ordinary field. The write therefore reports success
+// twice over (exit 0, a rev, a content field that reads back) while the row
+// lives somewhere the caller cannot name, and the caller's own follow-up
+// `bp doc get <type> my-chosen-id` answers a misleading `not_found`.
+//
+// A patch has the same trap one door along: it addresses the document by its
+// positional `<id>` argument, and `--set` fields ride the mutate op's `set`,
+// which is shallow-merged into content — so `--set id=…` there is a content
+// field too, never the address, and `--set _id=…` is junk for the same reason.
+//
+// The escape hatch for a document type that really does own a scalar content
+// field named `id` is `--file`, which sends the body verbatim; and a junk `id`
+// key an unpatched bp already stored is removable with `--set id:=null` on a
+// patch, which routes to `unset` BEFORE this guard runs (see the call site).
+const setIDKeyMechanism = "is not the document id"
+
+// setCreateFamilyOps are the mutation ops whose payload carries its own address
+// under `_id`. Kept as a set rather than `!= "patch"` so a future op that
+// addresses differently does not inherit the create hint by default.
+var setCreateFamilyOps = map[string]bool{
+	"create": true, "createOrReplace": true, "createIfNotExists": true, "replace": true,
+}
+
+// checkSetIDKeyRouting refuses a `--set` key the write will never route to the
+// document id. Scoped to mutation commands: only they have an address to miss.
+func checkSetIDKeyRouting(cmd manifest.Command, kv, key string) error {
+	switch {
+	case setCreateFamilyOps[cmd.MutationOp] && key == "id":
+		return fmt.Errorf("invalid --set %q: %q %s here — `bp %s %s` keys the document as `_id` inside the payload, "+
+			"and a bare `id` is merged INTO content as an ordinary field while the row gets a GENERATED id. "+
+			"Use --set '_id=…' to choose the address (or --file to send a body verbatim if you really meant a content field named %q)",
+			kv, key, setIDKeyMechanism, cmd.Noun, cmd.Verb, key)
+	case cmd.MutationOp == "patch" && (key == "id" || key == "_id"):
+		return fmt.Errorf("invalid --set %q: %q %s here — `bp %s %s <type> <id>` addresses the document by its `<id>` argument, "+
+			"and --set fields are merged INTO content, so %q would land as an ordinary content field and move nothing. "+
+			"Drop it (or --file to send a body verbatim if you really meant a content field named %q); "+
+			"`--set %s:=null` deletes such a key if an older bp already stored one",
+			kv, key, setIDKeyMechanism, cmd.Noun, cmd.Verb, key, key, key)
+	}
+	return nil
 }
 
 // setSupportsUnset reports whether this command's wire shape has a place to put
@@ -2206,6 +2312,9 @@ func doRequestStreamCT(method, rawURL string, headers map[string]string, body io
 		return 0, nil, "", err
 	}
 	defer resp.Body.Close()
+	// Record the correlation id the API stamps on every reply, so a refusal
+	// whose hand-built body omitted request_id still renders one.
+	noteResponseHeader(resp.Header)
 	ct := resp.Header.Get("Content-Type")
 	respBody, err := readCapped(resp.Body, maxResponseBytes)
 	if err != nil {
@@ -2287,6 +2396,10 @@ func doRequestUsing(client *http.Client, method, rawURL string, headers map[stri
 		return 0, nil, "", nil, err
 	}
 	defer resp.Body.Close()
+	// Same recording as the streaming send: this is the ONE seam doRequest,
+	// doRequestCT and doRequestFull all funnel through, and the first two throw
+	// the headers away on the way back to their ~40 call sites.
+	noteResponseHeader(resp.Header)
 	ct := resp.Header.Get("Content-Type")
 	respBody, err := readCapped(resp.Body, maxResponseBytes)
 	if err != nil {
@@ -2370,6 +2483,10 @@ func handleResponseHinted(out *writer, m *manifest.Manifest, cmd manifest.Comman
 		return exitOK
 	}
 	ae := classifyError(status, respBody)
+	// Did the request that earned this refusal carry a credential? A 401 that
+	// says "set BARKPARK_API_TOKEN" to a caller who sent one names a remedy
+	// they already applied.
+	ae.credentialSent = out.credentialSent
 	// Record WHICH refusal this was, for the client-side wrappers that layer a
 	// second read on top of a failed dispatch (runTaskClaim). They only get an
 	// exit code back from runCommand, and exit 6 covers the whole task

@@ -92,6 +92,7 @@ lib/barkpark/tenancy/workspace_bundle.ex	export
 lib/barkpark/tenancy/workspace_bundle.ex	import_bundle_file
 lib/barkpark/tenancy/workspace_bundle.ex	insert_on_conflict
 lib/barkpark/tenancy/workspace_bundle.ex	merge_upsert
+lib/barkpark/tenancy/workspace_bundle.ex	open_spill!
 lib/barkpark/tenancy/workspace_bundle.ex	release_member
 lib/barkpark/tenancy/workspace_bundle.ex	restore_member_fks!
 lib/barkpark/tenancy/workspace_bundle.ex	run_copy_out

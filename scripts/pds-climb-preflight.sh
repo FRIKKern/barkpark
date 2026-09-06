@@ -23,10 +23,17 @@
 #
 # THE FIVE CHECKS
 #   1 WORKTREE (PDS-D225)   HEAD == origin/main, tree clean, harness blob frozen
-#                           at e219e97… — verified with `git rev-parse`, NEVER
-#                           shasum (PDS-D154: shasum reads b9eb6e3a… on the same
-#                           bytes and a verifier reaching for it concludes the
-#                           freeze broke).
+#                           — verified with `git rev-parse`, NEVER shasum
+#                           (PDS-D154: shasum reads b9eb6e3a… on the same bytes
+#                           and a verifier reaching for it concludes the freeze
+#                           broke). THE FREEZE VALUE IS DERIVED AT RUN TIME from
+#                           `origin/main:scripts/pds-pull-proof.sh`, never a
+#                           hand-edited literal: a pinned default goes false on
+#                           the next harness commit and then refuses for a
+#                           reason that reads as tampering. The wave-9/10 value
+#                           e219e97c… survives only as the LAST-RESORT fallback
+#                           when origin/main is unresolvable, and the refusal it
+#                           produces says so in those words.
 #   2 BUDGET (PDS-D224)     the required PDS_FULL_EXPORT_BUDGET is DERIVED from
 #                           the attempts file read at run time: spent + 2. Never
 #                           a literal — the store is HOST-LOCAL (PDS-D156) and a
@@ -48,6 +55,8 @@
 # USAGE
 #   scripts/pds-climb-preflight.sh            report, exit 0 (the default)
 #   scripts/pds-climb-preflight.sh --strict   exit 0 GO · 2 GO-WITH-WARN · 1 otherwise
+#   scripts/pds-climb-preflight.sh --selftest hermetic arms over the freeze
+#                                             resolver; no ssh, no gh, no network
 #   scripts/pds-climb-preflight.sh --help
 #
 # The default exits 0 even on NO-GO ON PURPOSE: this script is committed and
@@ -62,7 +71,10 @@
 #   PDS_SOURCE_SSH           default root@157.180.90.121
 #   PDS_SOURCE_SSH_KEY       default ~/.ssh/barkpark_indx
 #   PDS_DEPLOYED_SHA         skip the SSH probe and assert this sha instead
-#   PDS_CLIMB_FREEZE_BLOB    the expected harness blob (PDS-D154's value)
+#   PDS_CLIMB_FREEZE_BLOB    the PER-CLIMB freeze override. Unset (the normal
+#                            case) the freeze is DERIVED from origin/main; set,
+#                            it pins the climb to a value you chose, and the
+#                            transcript says which of the two it read.
 #
 # REPOINTING PDS_FULL_EXPORT_DIR FOR A REAL CLIMB IS FORBIDDEN (PDS-D223) — it
 # hides a spend rather than paying it. The override exists so the warn path of
@@ -76,7 +88,56 @@ SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="$(cd -P -- "$SCRIPT_DIR/.." && pwd)"
 
 HARNESS_REL="scripts/pds-pull-proof.sh"
-FREEZE_BLOB="${PDS_CLIMB_FREEZE_BLOB:-e219e97ccf7f33797c86a2b84d998d599b6bda31}"
+
+# THE FREEZE IS A MEASUREMENT, NOT A MEMORY.
+#
+# This line was a hand-edited literal default — FREEZE_BLOB set from the
+# override with the wave-9/10 blob as its shell-default operand. It went false
+# on 2026-07-20, the first time anyone committed to the harness after wave 9/10,
+# and it stayed false and SILENT for ~48 days while check 1 refused every
+# worktree with "THE HARNESS IS NOT FROZEN" — which reads as tampering rather
+# than as "this instrument default expired". Re-pinning the literal buys the
+# same bug back on the next harness commit, so the value is now DERIVED from the
+# ref the climb is actually cut from.
+#
+# Precedence, highest first:
+#   1  $PDS_CLIMB_FREEZE_BLOB      — the PER-CLIMB override, taken verbatim
+#   2  origin/main:$HARNESS_REL    — DERIVED, the normal path
+#   3  $FREEZE_BLOB_HISTORICAL     — LAST RESORT, and every refusal built on it
+#                                    names itself a historical wave-9/10 value
+#                                    and names the override.
+FREEZE_BLOB_HISTORICAL="e219e97ccf7f33797c86a2b84d998d599b6bda31"
+FREEZE_BLOB=""
+FREEZE_SOURCE=""
+
+resolve_freeze_blob() {
+  if [ -n "${PDS_CLIMB_FREEZE_BLOB:-}" ]; then
+    FREEZE_BLOB="$PDS_CLIMB_FREEZE_BLOB"
+    FREEZE_SOURCE="OVERRIDE — PDS_CLIMB_FREEZE_BLOB, set for this climb"
+    return 0
+  fi
+  # --verify, AND a hex-shape test on the result. Measured while building the
+  # selftest: bare `git rev-parse origin/main:scripts/pds-pull-proof.sh` on a
+  # repo with no such ref exits 128 but ECHOES ITS OWN ARGUMENT ON STDOUT (the
+  # "not a rev, so it must be a path" fallback), so `2>/dev/null || true` reads
+  # back the literal string `origin/main:scripts/pds-pull-proof.sh`, a non-empty
+  # value that is not a blob and that no real blob equals. That silently
+  # resurrects the same class of bug this whole change removes — a freeze value
+  # nothing measured. --verify suppresses the echo; the regex refuses anything
+  # that is not 40 hex characters even if a future git changes its mind.
+  FREEZE_BLOB="$(git -C "$REPO_ROOT" rev-parse --verify --quiet "refs/remotes/origin/main:$HARNESS_REL" 2>/dev/null || true)"
+  case "$FREEZE_BLOB" in
+    *[!0-9a-f]* | "") FREEZE_BLOB="" ;;
+  esac
+  [ "${#FREEZE_BLOB}" -eq 40 ] || FREEZE_BLOB=""
+  if [ -n "$FREEZE_BLOB" ]; then
+    FREEZE_SOURCE="DERIVED — git rev-parse refs/remotes/origin/main:$HARNESS_REL, read just now"
+    return 0
+  fi
+  FREEZE_BLOB="$FREEZE_BLOB_HISTORICAL"
+  FREEZE_SOURCE="FALLBACK — the historical wave-9/10 literal; origin/main is unresolvable here, so NOTHING in this run measured the freeze"
+  return 0
+}
 
 FULL_DIR_DEFAULT="/tmp/pds-full-export"
 FULL_DIR="${PDS_FULL_EXPORT_DIR:-$FULL_DIR_DEFAULT}"
@@ -97,11 +158,17 @@ TRIGGER_PATHS='^(cloud|api|internal|deploy|templates|connectors)/|^\.github/work
 INSTANCE_PATHS='^(api|internal|deploy|connectors)/'
 
 STRICT=0
+SELFTEST=0
+# The help window is 2..HEADER_LAST. It is a LITERAL and it drifts the moment
+# anyone edits the header, so --selftest arm (f) asserts the last line in the
+# window is still the closing line of the header rather than shell code.
+HEADER_LAST=82
 case "${1:-}" in
   --strict) STRICT=1 ;;
-  -h|--help|help) sed -n '2,70p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  --selftest) SELFTEST=1 ;;
+  -h|--help|help) sed -n "2,${HEADER_LAST}p" "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   "") ;;
-  *) printf 'usage: %s [--strict|--help]\n' "$SELF" >&2; exit 3 ;;
+  *) printf 'usage: %s [--strict|--selftest|--help]\n' "$SELF" >&2; exit 3 ;;
 esac
 
 # ── output ───────────────────────────────────────────────────────────────────
@@ -149,11 +216,19 @@ check_worktree() {
   info "$HARNESS_REL blob"
   info "  measured (git rev-parse) $blob"
   info "  frozen at (PDS-D154) ... $FREEZE_BLOB"
+  # RECORDED IN THE CLIMB TRANSCRIPT: a freeze you cannot trace to its source is
+  # indistinguishable from a freeze someone typed in from memory.
+  info "  freeze source .......... $FREEZE_SOURCE"
 
   state=GO; detail="clean origin/main worktree, harness blob matches the freeze"
   if [ "$blob" != "$FREEZE_BLOB" ]; then
     state=NO-GO
-    detail="THE HARNESS IS NOT FROZEN at this HEAD — do not climb. PDS-D159: a rehearsal red is a FILED TASK, never a harness edit."
+    detail="THE HARNESS IS NOT FROZEN at this HEAD — do not climb. PDS-D159: a rehearsal red is a FILED TASK, never a harness edit. Freeze source: $FREEZE_SOURCE."
+    case "$FREEZE_SOURCE" in
+      FALLBACK*)
+        detail="$detail READ THAT SOURCE BEFORE CONCLUDING TAMPERING: the value this refusal compared against is the DEFAULT — a HISTORICAL wave-9/10 value ($FREEZE_BLOB_HISTORICAL) — not a reading of any tree, because origin/main could not be resolved here. Fetch origin and re-run so the freeze is DERIVED, or set PDS_CLIMB_FREEZE_BLOB to the per-climb freeze you actually mean."
+        ;;
+    esac
   elif [ "$head_sha" = unresolved ] || [ "$origin_sha" = unresolved ]; then
     state=NO-GO
     detail="HEAD or origin/main is unresolvable here — the climb needs a checkout whose provenance rung 0b can assert against."
@@ -409,6 +484,179 @@ check_prewarm_ready() {
   verdict 5 "PRE-WARM" "$state" "$detail"
 }
 
+# ── --selftest — the freeze resolver, proved hermetically ────────────────────
+#
+# HERMETIC BY CONSTRUCTION: every arm runs against a throwaway git repo built by
+# this function. No ssh, no gh, no network, no read of $FULL_DIR, and it never
+# touches the real REPO_ROOT except to grep this file's own source.
+#
+# EVERY ARM ASSERTS A COUNT, and every count is taken by grepping a FILE. A
+# `printf ... | grep -q` arm cannot be trusted here: under `set -o pipefail` a
+# short-circuiting grep kills printf and the pipeline reports 141, and an arm
+# written as `grep -q ... || fail` silently passes on EMPTY output — the exact
+# way a guard becomes decoration.
+
+ST_FAIL=0
+ST_RUN=0
+
+st_eq() { # label want got
+  ST_RUN=$((ST_RUN + 1))
+  if [ "$2" = "$3" ]; then
+    printf '  PASS  %s\n' "$1"
+  else
+    ST_FAIL=$((ST_FAIL + 1))
+    printf '  FAIL  %s\n          want: %s\n          got:  %s\n' "$1" "$2" "$3"
+  fi
+}
+
+st_ne() { # label not-want got
+  ST_RUN=$((ST_RUN + 1))
+  if [ "$2" != "$3" ]; then
+    printf '  PASS  %s\n' "$1"
+  else
+    ST_FAIL=$((ST_FAIL + 1))
+    printf '  FAIL  %s\n          must differ from: %s\n' "$1" "$2"
+  fi
+}
+
+st_count() { # label file want-count fixed-needle
+  local n
+  # grep -c on a FILE, never a pipe; `|| true` because grep exits 1 on zero
+  # matches and 0 is a legitimate expected count here.
+  n="$(grep -c -F -- "$4" "$2" 2>/dev/null || true)"
+  [ -n "$n" ] || n=0
+  st_eq "$1 (count of: $4)" "$3" "$n"
+}
+
+st_count_re() { # label file want-count ere-needle
+  local n
+  n="$(grep -c -E -- "$4" "$2" 2>/dev/null || true)"
+  [ -n "$n" ] || n=0
+  st_eq "$1 (ERE count of: $4)" "$3" "$n"
+}
+
+st_mkrepo() { # dir first-content [second-content]
+  mkdir -p "$1/scripts"
+  git -C "$1" init -q
+  printf '%s\n' "$2" >"$1/$HARNESS_REL"
+  git -C "$1" add -A
+  git -C "$1" -c user.name=selftest -c user.email=selftest@example.invalid \
+      commit -qm "fixture 1"
+  git -C "$1" update-ref refs/remotes/origin/main HEAD
+  if [ "${3:-}" != "" ]; then
+    printf '%s\n' "$3" >"$1/$HARNESS_REL"
+    git -C "$1" add -A
+    git -C "$1" -c user.name=selftest -c user.email=selftest@example.invalid \
+        commit -qm "fixture 2"   # origin/main deliberately LEFT BEHIND at 1
+  fi
+}
+
+run_selftest() {
+  local tmp r_ok r_drift r_noorigin out want got
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/pds-preflight-selftest.XXXXXX")"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" EXIT
+
+  say ""
+  rule
+  say "PDS CROWN-CLIMB PREFLIGHT — SELFTEST (freeze resolution)"
+  rule
+
+  r_ok="$tmp/ok"
+  r_drift="$tmp/drift"
+  r_noorigin="$tmp/noorigin"
+  st_mkrepo "$r_ok" "harness fixture ALPHA"
+  st_mkrepo "$r_drift" "harness fixture ALPHA" "harness fixture BRAVO"
+  st_mkrepo "$r_noorigin" "harness fixture CHARLIE"
+  git -C "$r_noorigin" update-ref -d refs/remotes/origin/main
+
+  # ── (a) DERIVED is the normal path, and it is a MEASUREMENT ────────────────
+  want="$(git -C "$r_ok" rev-parse "refs/remotes/origin/main:$HARNESS_REL")"
+  # FIXTURE TWINS MUST BE DISTINCT FIRST: if the derived value happened to equal
+  # the historical literal, arm (a) would pass for a script that still hardcodes.
+  st_ne "(a0) fixture blob is DISTINCT from the historical literal" \
+        "$FREEZE_BLOB_HISTORICAL" "$want"
+  got="$( REPO_ROOT="$r_ok"; unset PDS_CLIMB_FREEZE_BLOB; resolve_freeze_blob; printf '%s' "$FREEZE_BLOB" )"
+  st_eq "(a1) freeze is DERIVED from origin/main:$HARNESS_REL" "$want" "$got"
+  got="$( REPO_ROOT="$r_ok"; unset PDS_CLIMB_FREEZE_BLOB; resolve_freeze_blob; printf '%s' "${FREEZE_SOURCE%% *}" )"
+  st_eq "(a2) the transcript labels that source DERIVED" "DERIVED" "$got"
+
+  # ── (b) the per-climb override still wins ──────────────────────────────────
+  got="$( REPO_ROOT="$r_ok"; PDS_CLIMB_FREEZE_BLOB=0000000000000000000000000000000000000000; resolve_freeze_blob; printf '%s' "$FREEZE_BLOB" )"
+  st_eq "(b1) PDS_CLIMB_FREEZE_BLOB outranks the derivation" \
+        "0000000000000000000000000000000000000000" "$got"
+  got="$( REPO_ROOT="$r_ok"; PDS_CLIMB_FREEZE_BLOB=0000000000000000000000000000000000000000; resolve_freeze_blob; printf '%s' "${FREEZE_SOURCE%% *}" )"
+  st_eq "(b2) the transcript labels that source OVERRIDE" "OVERRIDE" "$got"
+
+  # ── (c) a DERIVED refusal must NOT blame a historical value ────────────────
+  out="$tmp/derived-refusal.txt"
+  ( REPO_ROOT="$r_drift"; unset PDS_CLIMB_FREEZE_BLOB; resolve_freeze_blob; check_worktree ) >"$out" 2>&1
+  st_count "(c1) a drifted harness still refuses" "$out" 1 "THE HARNESS IS NOT FROZEN"
+  st_count "(c2) the refusal names its freeze source" "$out" 1 "Freeze source: DERIVED"
+  st_count "(c3) a DERIVED refusal never blames wave-9/10" "$out" 0 "HISTORICAL wave-9/10"
+
+  # ── (d) the FALLBACK refusal explains ITSELF ───────────────────────────────
+  # This is the whole point of the row: the shape that refused for ~48 days said
+  # only "not frozen". If the derivation is impossible, the refusal must say the
+  # value is historical and name the override.
+  out="$tmp/fallback-refusal.txt"
+  ( REPO_ROOT="$r_noorigin"; unset PDS_CLIMB_FREEZE_BLOB; resolve_freeze_blob; check_worktree ) >"$out" 2>&1
+  st_count "(d1) fallback path is labelled FALLBACK" "$out" 1 "Freeze source: FALLBACK"
+  st_count "(d2) the refusal says the default is HISTORICAL wave-9/10" "$out" 1 "HISTORICAL wave-9/10"
+  st_count "(d3) the refusal names the per-climb override" "$out" 1 "set PDS_CLIMB_FREEZE_BLOB"
+  # TWO lines, and the count is pinned at 2 on purpose: the `frozen at` info
+  # line AND the refusal detail. A reader who sees only the info line cannot
+  # tell a measured freeze from a remembered one, so both must carry it.
+  st_count "(d5) the historical value appears on BOTH the info line and the refusal" "$out" 2 "$FREEZE_BLOB_HISTORICAL"
+
+  # ── (g) the GO path records the freeze in the transcript too ───────────────
+  # Arms (c)/(d) read the REFUSAL detail, so deleting the transcript info line
+  # left them all green — measured, as MUT-3. The record has to be asserted on
+  # the path where check 1 PASSES, because that is the transcript a climb ships.
+  out="$tmp/go-transcript.txt"
+  ( REPO_ROOT="$r_ok"; unset PDS_CLIMB_FREEZE_BLOB; resolve_freeze_blob; check_worktree ) >"$out" 2>&1
+  st_count "(g0) this arm really is the GO path" "$out" 0 "THE HARNESS IS NOT FROZEN"
+  st_count "(g1) a PASSING check 1 still records the freeze source" "$out" 1 "freeze source .......... DERIVED"
+  # 2: `measured` and `frozen at`. On the GO path they are EQUAL by definition,
+  # and the count pins that they are both printed rather than one collapsed away.
+  st_count "(g2) ...beside both the measured and the frozen value" "$out" 2 "$want"
+
+  # ── (e) the rot-by-construction shape cannot come back ─────────────────────
+  # The defect was a NON-EMPTY shell default on the override. `${VAR:-}` (empty)
+  # is the legal guard and must not trip this. Needle assembled in two pieces so
+  # the arm does not match its own source line.
+  local rot
+  rot='PDS_CLIMB_FREEZE_BLOB'
+  rot="$rot:-[0-9a-f]"
+  st_count_re "(e1) no hand-pinned blob default survives in this file" "$0" 0 "$rot"
+  st_count "(e2) the historical value survives ONLY as the named fallback" "$0" 1 "FREEZE_BLOB_HISTORICAL=\"$FREEZE_BLOB_HISTORICAL\""
+
+  # ── (f) --help's line window still ends on the header ──────────────────────
+  # HEADER_LAST is a literal; this arm is what makes editing the header above
+  # safe, because the window silently swallowing shell code is otherwise mute.
+  out="$tmp/header-window.txt"
+  sed -n "${HEADER_LAST}p" "$0" >"$out"
+  st_count_re "(f1) HEADER_LAST is inside the comment header" "$out" 1 '^#'
+  sed -n "$((HEADER_LAST + 1))p" "$0" >"$out"
+  st_count_re "(f2) HEADER_LAST is the LAST header line" "$out" 0 '^#'
+
+  printf '\n'
+  rule
+  if [ "$ST_FAIL" -eq 0 ]; then
+    say "SELFTEST: PASS — $ST_RUN assertion(s), 0 failed."
+    rule
+    return 0
+  fi
+  say "SELFTEST: FAIL — $ST_FAIL of $ST_RUN assertion(s) failed."
+  rule
+  return 1
+}
+
+if [ "$SELFTEST" -eq 1 ]; then
+  run_selftest
+  exit $?
+fi
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 say ""
@@ -421,6 +669,7 @@ say "The invocation it clears is:  scripts/pds-pull-proof.sh --all"
 say "(--step IS NOT A FLAG. The parser at pds-pull-proof.sh:2574-2603 accepts only"
 say " --plan|--all|--only <ids>|--help and exits 3 having run NOTHING.)"
 
+resolve_freeze_blob
 resolve_deployed_sha
 check_worktree
 check_budget

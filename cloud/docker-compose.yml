@@ -231,15 +231,45 @@ services:
       - postfix_dkim:/etc/opendkim/keys
       - postfix_queue:/var/spool/postfix
       - postfix_tls:/etc/postfix/tls
+      # dr-w26 — THE DURABLE DELIVERY LOG. Postfix writes its maillog here
+      # (MAILLOG_FILE in cloud/postfix/entrypoint.sh, default
+      # /var/log/postfix/maillog) and the entrypoint ALSO tails it to stdout.
+      # This volume is the copy that survives a container recreate; see the
+      # `logging:` comment below for what it is surviving.
+      - postfix_log:/var/log/postfix
     restart: unless-stopped
-    # The relay now writes Postfix's delivery log to stdout (maillog_file in
-    # cloud/postfix/entrypoint.sh) — that log IS the server-side answer to
-    # "did this message reach the destination MX". Before that change this
-    # container emitted ~1 KB total for its whole lifetime, so the default
-    # UNCAPPED json-file driver was harmless; now it grows with every
-    # message and would fill the boot disk unbounded. Cap it explicitly.
-    # 10 MB x 5 is weeks of headroom at this volume (~3400 messages in two
-    # months) while keeping enough history for the README's lookup one-liner.
+    # The relay writes Postfix's delivery log to the postfix_log volume above
+    # AND streams it to stdout — that log IS the server-side answer to "did
+    # this message reach the destination MX".
+    #
+    # dr-w26 — WHY THIS BLOCK IS NO LONGER THE ANSWER ON ITS OWN. json-file
+    # logs are PER CONTAINER: they live under
+    # /var/lib/docker/containers/<container-id>/ and are DELETED with the
+    # container. A control-plane deploy that recreates this service
+    # (deploy/cp-deploy.sh `compose_up_repair "db/postfix up" db postfix` —
+    # any image or config change is enough) mints a new id, so every capped
+    # generation here goes with it. That is measured, not feared: the
+    # 2026-08-08 23:51Z cutover recreated cloud-postfix-1, and afterwards
+    # `docker logs cloud-postfix-1 | grep -c .` read 7 lines.
+    #
+    # READ THAT DATUM PRECISELY — it is NOT "a deploy deleted that day's
+    # maillog". On that box at that time `postconf maillog_file` was EMPTY and
+    # no syslog daemon was running, so Postfix wrote NO per-message log at all;
+    # the 30 outage alerts of 2026-08-08 had no server-side record to lose.
+    # That was a MISSING WRITER, and the maillog_file line in
+    # cloud/postfix/entrypoint.sh is what closed it. The 7 lines are the whole
+    # output that container ever produced.
+    #
+    # The durability hole is the SECOND, still-open half, and it is why this
+    # block exists: now that a writer exists, the next recreate WOULD take
+    # every generation of its output with it. Fixed forward, not backward —
+    # the 2026-08-08 batch stays unrecoverable.
+    #
+    # The cap STAYS anyway, for the sink it actually governs: stdout is now a
+    # convenience mirror, and 10 MB x 5 keeps it from filling the boot disk
+    # between deploys. The durable answer is postfix_log, and
+    # cloud/postfix/check-maillog.sh asserts the mount exists so this pairing
+    # cannot silently come apart again.
     logging:
       driver: json-file
       options:
@@ -287,3 +317,5 @@ volumes:
   postfix_dkim:
   postfix_queue:
   postfix_tls:
+  # dr-w26 — outlives a container recreate, which is the whole point.
+  postfix_log:

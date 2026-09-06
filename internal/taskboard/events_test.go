@@ -627,3 +627,88 @@ func firstEventsResult(t *testing.T, msgs []tea.Msg) eventsResultMsg {
 	t.Fatalf("no eventsResultMsg among %d messages", len(msgs))
 	return eventsResultMsg{}
 }
+
+// TestPoll_DeltaDuringInFlightFetch_OwesAReList pins the fix for
+// task-ea47f91eb42c505f: a stamped criteria ladder that never repainted while
+// the pane kept breathing.
+//
+// The mechanism is a CONSUMED-then-DROPPED delta. handleEventsResult advances
+// the cursor past the page's events (they are consumed) and then asks
+// tickRefetchCmd for a re-list; that refuses while a snapshot fetch is out. The
+// in-flight fetch was issued BEFORE the event, so it cannot carry it — and the
+// next poll sees an empty page, calls the board idle, and doubles the interval
+// toward the 30s ceiling. The row stays stale until an unrelated write.
+//
+// The invariant: a delta consumed while a fetch is in flight leaves relistOwed
+// set, holds the interval at the floor, and produces a re-list on the first
+// poll after the fetch clears — even though that poll's page is EMPTY.
+func TestPoll_DeltaDuringInFlightFetch_OwesAReList(t *testing.T) {
+	cs := newCountingServer(t)
+
+	cases := []struct {
+		name  string
+		event TaskEvent
+	}{
+		{"a criterion stamp", TaskEvent{ID: 7, Event: "task.criterion", DocID: "t-1", Rev: "r"}},
+		{"a claim", TaskEvent{ID: 7, Event: "task.claim", DocID: "t-1", Rev: "r"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := pollModel(cs, steadyClock())
+			// A snapshot fetch is already out, issued before the event below.
+			m.fetchInFlight = true
+			m.pollEvery = maxPollEvery
+
+			// Poll 1: the event lands while the fetch is in flight.
+			m, cmd := m.handleEventsResult(eventsResultMsg{
+				gen:  m.eventsGen,
+				page: TaskEventsPage{OK: true, Events: []TaskEvent{c.event}, Cursor: c.event.ID},
+			})
+			for _, out := range runCmd(cmd) {
+				if _, ok := out.(snapshotMsg); ok {
+					t.Fatal("a re-list was queued behind an in-flight snapshot fetch")
+				}
+			}
+			if m.eventCursor != c.event.ID {
+				t.Fatalf("cursor = %d, want %d — the event was consumed", m.eventCursor, c.event.ID)
+			}
+			if !m.relistOwed {
+				t.Fatal("a delta consumed during an in-flight fetch was DROPPED (relistOwed false): the next poll sees an empty page and the ladder stays stale")
+			}
+			if m.pollEvery != basePollEvery {
+				t.Fatalf("interval after an owed delta = %v, want the floor %v", m.pollEvery, basePollEvery)
+			}
+
+			// The outstanding fetch completes and reopens the gate.
+			m, _ = m.applySnapshot(snapshotMsg{err: errors.New("read failed")})
+			if m.fetchInFlight {
+				t.Fatal("the completed fetch left the re-list gate shut")
+			}
+
+			// Poll 2: the feed is EMPTY — the cursor already moved past the
+			// event. Only the owed bit can still produce the re-list.
+			m, cmd = m.handleEventsResult(eventsResultMsg{
+				gen:  m.eventsGen,
+				page: TaskEventsPage{OK: true, Cursor: c.event.ID},
+			})
+			sawSnapshot := false
+			for _, out := range runCmd(cmd) {
+				if _, ok := out.(snapshotMsg); ok {
+					sawSnapshot = true
+				}
+			}
+			if !sawSnapshot {
+				t.Fatal("the owed re-list never fired: the consumed delta is lost for good")
+			}
+			if m.relistOwed {
+				t.Fatal("the owed re-list fired but the owed bit was not cleared — the board would re-list forever")
+			}
+			if !m.fetchInFlight {
+				t.Fatal("the owed re-list did not mark the new fetch in flight")
+			}
+			if m.pollEvery != basePollEvery {
+				t.Fatalf("interval on the owed poll = %v, want the floor %v", m.pollEvery, basePollEvery)
+			}
+		})
+	}
+}

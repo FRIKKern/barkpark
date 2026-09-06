@@ -8,8 +8,9 @@ can block it or finishes under 60 s.** Owner of every verdict is lead-gates unle
 magnitude here (1,428 to 0), duration one (3.82 to 0.05 min). Sorting by `min/exec` starts you on
 the cheapest half.
 
-`PR`/`push` are an exact census (2026-08-30..09-02). `min/exec` is sampled from six recent PR runs
-and is thin for anything that skips often.
+`PR` is an exact census of **four days** (2026-08-30..09-02) — a count, never a workflow property:
+see the 2026-09-06 correction. `min/exec` is sampled from six recent PR runs, thin for anything that
+skips often. `push` counts live with the census in `ci-cost-baseline.md`.
 
 | verdict | means |
 |---|---|
@@ -17,57 +18,71 @@ and is thin for anything that skips often.
 | KEEP-CHEAP | under 60 s per execution — venue not worth a sign-off |
 | CANDIDATE | over 60 s but infrequent; move for per-PR latency, not job-minutes |
 | MOVE | ruled and in flight |
-| DORMANT | declared PR-triggered, fired 0 times — stale declaration, not saved minutes |
+| DORMANT | fired 0 times in a window of at least 3x its observed firing period (see below) |
 | UNMEASURED | every sampled job was zero-step; re-measure over 20+ runs before ruling |
 
-| workflow | PR | push | min/exec | verdict |
-|---|---|---|---|---|
-| `pr-task-gate.yml` | 1428 | 0 | 0.0 | KEEP-REQ |
-| `cloud.yml` | 1227 | 626 | 0.4 | KEEP-REQ |
-| `compose-smoke.yml` | 1227 | 626 | 0.0 | UNMEASURED |
-| `console-harness.yml` | 1227 | 626 | 0.34 | KEEP-REQ |
-| `elixir.yml` | 1227 | 626 | 1.25 | KEEP-REQ |
-| `reland-check.yml` | 1227 | 0 | 0.0 | UNMEASURED |
-| `required-checks-drift.yml` | 1227 | 626 | 0.0 | MOVE |
-| `security.yml` | 1227 | 626 | 0.35 | KEEP-CHEAP |
-| `doc-gates.yml` | 1115 | 546 | 0.0 | UNMEASURED |
-| `architecture.yml` | 807 | 0 | 0.27 | KEEP-CHEAP |
-| `go-tests.yml` | 515 | 120 | 0.48 | KEEP-CHEAP |
-| `pr-meta.yml` | 407 | 155 | 0.0 | UNMEASURED |
-| `task-lease-renew.yml` | 308 | 0 | 0.27 | KEEP-CHEAP |
-| `go-format.yml` | 212 | 109 | 0.44 | KEEP-CHEAP |
-| `shell-harnesses.yml` | 193 | 382 | 0.33 | KEEP-CHEAP |
-| `twoslash.yml` | 53 | 0 | 1.45 | MOVE (2026-09-05) |
-| `js-tests.yml` | 51 | 27 | 1.59 | CANDIDATE |
-| `typedoc.yml` | 51 | 26 | 0.92 | KEEP-CHEAP |
-| `mobile.yml` | 43 | 14 | 1.24 | CANDIDATE |
-| `grip-suite.yml` | 40 | 27 | 2.7 | MOVE (2026-09-05) |
-| `ci.yml` | 33 | 14 | 1.2 | CANDIDATE |
-| `search-template-gates.yml` | 33 | 0 | 0.18 | KEEP-CHEAP |
-| `sheet-grid-js.yml` | 33 | 12 | 0.0 | UNMEASURED |
-| `deploy-harnesses.yml` | 32 | 0 | 3.82 | MOVE (2026-09-05) |
-| `paper-editor.yml` | 28 | 7 | 0.0 | UNMEASURED |
-| `crown-reconcile.yml` | 26 | 626 | 0.0 | UNMEASURED |
-| `pdrender-wasm.yml` | 23 | 10 | 0.47 | KEEP-CHEAP |
-| `stale-verdict-watch.yml` | 19 | 626 | 0.46 | KEEP-CHEAP |
-| `create-quickstart-smoke.yml` | 14 | 5 | 0.0 | UNMEASURED |
-| `search-starter-smoke.yml` | 10 | 7 | 1.09 | CANDIDATE |
-| `astro-finder-drift.yml` | 5 | 2 | 0.16 | KEEP-CHEAP |
-| `web-fork-drift.yml` | 4 | 2 | 0.42 | KEEP-CHEAP |
-| `astro-search-finder-test.yml` | 3 | 2 | 0.21 | KEEP-CHEAP |
-| `connectors.yml` | 3 | 1 | 1.48 | CANDIDATE |
-| `plugin-node.yml` | 3 | 1 | 0.05 | KEEP-CHEAP |
-| `research-coverage-suite.yml` | 3 | 3 | 0.25 | KEEP-CHEAP |
-| `breakglass-watch.yml` | 2 | 626 | 0.21 | KEEP-CHEAP |
-| `chronicle-paper.yml` | 2 | 0 | 0.45 | KEEP-CHEAP |
-| `weekly-changelog.yml` | 2 | 0 | 0.47 | KEEP-CHEAP |
-| `bp-graph-drift.yml` | 1 | 1 | 0.12 | KEEP-CHEAP |
-| `sdk-tests.yml` | 1 | 1 | 0.28 | KEEP-CHEAP |
-| `hundesteder.yml` | 0 | 0 | 0.53 | DORMANT |
-| `main-gate-watch.yml` | 0 | 0 | 0.11 | DORMANT |
-| `studio-journey-smoke.yml` | 0 | 0 | 1.68 | DORMANT |
-| `vendored-assets.yml` | 0 | 0 | 0.28 | DORMANT |
-| `windows-smoke.yml` | 0 | 0 | 0.33 | DORMANT |
+| workflow | PR | min/exec | verdict |
+|---|---|---|---|
+| `pr-task-gate.yml` | 1428 | 0.0 | KEEP-REQ |
+| `cloud.yml` | 1227 | 0.4 | KEEP-REQ |
+| `compose-smoke.yml` | 1227 | 0.0 | UNMEASURED |
+| `console-harness.yml` | 1227 | 0.34 | KEEP-REQ |
+| `elixir.yml` | 1227 | 1.25 | KEEP-REQ |
+| `reland-check.yml` | 1227 | 0.0 | UNMEASURED |
+| `required-checks-drift.yml` | 1227 | 0.0 | MOVE |
+| `security.yml` | 1227 | 0.35 | KEEP-CHEAP |
+| `doc-gates.yml` | 1115 | 0.0 | UNMEASURED |
+| `architecture.yml` | 807 | 0.27 | KEEP-CHEAP |
+| `go-tests.yml` | 515 | 0.48 | KEEP-CHEAP |
+| `pr-meta.yml` | 407 | 0.0 | UNMEASURED |
+| `task-lease-renew.yml` | 308 | 0.27 | KEEP-CHEAP |
+| `go-format.yml` | 212 | 0.44 | KEEP-CHEAP |
+| `shell-harnesses.yml` | 193 | 0.33 | KEEP-CHEAP |
+| `twoslash.yml` | 53 | 1.45 | MOVE (2026-09-05) |
+| `js-tests.yml` | 51 | 1.59 | CANDIDATE |
+| `typedoc.yml` | 51 | 0.92 | KEEP-CHEAP |
+| `mobile.yml` | 43 | 1.24 | CANDIDATE |
+| `grip-suite.yml` | 40 | 2.7 | MOVE (2026-09-05) |
+| `ci.yml` | 33 | 1.2 | CANDIDATE |
+| `search-template-gates.yml` | 33 | 0.18 | KEEP-CHEAP |
+| `sheet-grid-js.yml` | 33 | 0.0 | UNMEASURED |
+| `deploy-harnesses.yml` | 32 | 3.82 | MOVE (2026-09-05) |
+| `paper-editor.yml` | 28 | 0.0 | UNMEASURED |
+| `crown-reconcile.yml` | 26 | 0.0 | UNMEASURED |
+| `pdrender-wasm.yml` | 23 | 0.47 | KEEP-CHEAP |
+| `stale-verdict-watch.yml` | 19 | 0.46 | KEEP-CHEAP |
+| `create-quickstart-smoke.yml` | 14 | 0.0 | UNMEASURED |
+| `search-starter-smoke.yml` | 10 | 1.09 | CANDIDATE |
+| `astro-finder-drift.yml` | 5 | 0.16 | KEEP-CHEAP |
+| `web-fork-drift.yml` | 4 | 0.42 | KEEP-CHEAP |
+| `astro-search-finder-test.yml` | 3 | 0.21 | KEEP-CHEAP |
+| `connectors.yml` | 3 | 1.48 | CANDIDATE |
+| `plugin-node.yml` | 3 | 0.05 | KEEP-CHEAP |
+| `research-coverage-suite.yml` | 3 | 0.25 | KEEP-CHEAP |
+| `breakglass-watch.yml` | 2 | 0.21 | KEEP-CHEAP |
+| `chronicle-paper.yml` | 2 | 0.45 | KEEP-CHEAP |
+| `weekly-changelog.yml` | 2 | 0.47 | KEEP-CHEAP |
+| `bp-graph-drift.yml` | 1 | 0.12 | KEEP-CHEAP |
+| `sdk-tests.yml` | 1 | 0.28 | KEEP-CHEAP |
+| `hundesteder.yml` | 0 | 0.53 | KEEP-CHEAP |
+| `main-gate-watch.yml` | 0 | 0.11 | KEEP-CHEAP |
+| `studio-journey-smoke.yml` | 0 | 1.68 | CANDIDATE |
+| `vendored-assets.yml` | 0 | 0.28 | KEEP-CHEAP |
+| `windows-smoke.yml` | 0 | 0.33 | KEEP-CHEAP |
+
+## CORRECTED 2026-09-06 — the five DORMANT rows were a FOUR-DAY artifact
+
+Those five zeros are true for `2026-08-30..09-02` and are **not** evidence of dormancy: four days
+cannot establish it for a workflow firing a few times a month. Over 30 days (runs API, twice,
+independently) all five fired — `hundesteder` **14 runs / 4 reds**, `vendored-assets` **6 / 2** (the
+family whose blind spot shipped a stale tarball at #16174), `main-gate-watch` 7/0, `windows-smoke`
+3/0, `studio-journey-smoke` 2/0. **Retire none: a retire on the old label would have deleted two
+gates that demonstrably refused.**
+
+The durable half is in the tool. `ci-measure.sh --census` no longer drops zero-run workflows from its
+table; it adjudicates each against a 90-day lookback and **refuses** DORMANT unless the window is at
+least `3x` the observed firing period, naming the window it would need. Every verdict carries its
+window inline, so none is quotable bare. On the original 4-day window it refuses all five (`d1`-`d3`).
 
 ## CORRECTED 2026-09-03 — `architecture` was GREEN AND BLIND
 
@@ -87,29 +102,19 @@ STAY (they test the code the PR touches). Watcher = the `Report main-push failur
 
 ## ADDED 2026-09-05 (task-bc9fe6dc29d0b979) — `search-template-gates.yml` gains a main arm
 
-Not a move: the PR arm and its `paths:` list are unchanged. `search-template-gates.yml` was
-`pull_request`-only, so `gh run list --workflow=search-template-gates.yml --branch main` returned an
-EMPTY list — main was never measured, and #16174 merged at 12:20Z while `Vendored SDK freshness` was
-red, shipping a stale vendored `barkpark-core.tgz` to every scaffolded user. Trigger change
-authorised by main under task-33742276cf0a35b1.
+Venue now **push:main (path-UNFILTERED) + the unchanged PR arm**, owner lead-gates, issue key
+`search-template-gates-main`. It was `pull_request`-only, so main was never measured and #16174
+merged while `Vendored SDK freshness` was red, shipping a stale vendored `barkpark-core.tgz` to every
+scaffolded user. It stays ADVISORY. **If promoted to required, register an AGGREGATOR context, never
+a paths-filtered leaf job name** — one that emits no check run on a filtered-out PR waits forever.
+Why the main arm is path-unfiltered is in
+[ci-workflow-verdicts-history.md](ci-workflow-verdicts-history.md).
 
-| workflow | venue now | owner | issue key |
-|---|---|---|---|
-| `search-template-gates.yml` | push:main (path-UNFILTERED) + the unchanged PR arm | lead-gates | `search-template-gates-main` |
-
-The main arm is deliberately path-unfiltered: the vendored tarballs are a FROZEN artifact that rots
-against a moving source tree, so a `paths:` filter would only move the vacuous green one hop, from
-"main is never measured" to "main is not measured when untouched". It stays ADVISORY — it reds its
-own check-run and cannot stop a merge. **If it is ever promoted to required, register an AGGREGATOR
-context, never one of the paths-filtered leaf job names**: a required context that emits no check run
-on a filtered-out PR waits for status forever.
-
-**Fence collision — the trigger and the remedy live in different trees.** `Vendored SDK freshness`
-fires on `js/packages/{core,react}/**`, but its only remedy writes to `templates/**`:
+**Fence collision — trigger and remedy live in different trees.** `Vendored SDK freshness` fires on
+`js/packages/{core,react}/**`, but its only remedy writes to `templates/**`:
 `bash scripts/recut-vendor-tarballs.sh`, then commit the re-cut `templates/*/vendor/*.tgz` and
-`templates/VENDOR-STAMP.json`. The SDK lane must run that script **in the same PR** as the
-js/packages change; a lane fenced out of `templates/**` cannot green this gate and will wrongly
-conclude the gate is broken.
+`templates/VENDOR-STAMP.json` **in the same PR**. A lane fenced out of `templates/**` cannot green
+this gate and will wrongly conclude it is broken.
 
 ## The three that need words
 

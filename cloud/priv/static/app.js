@@ -4263,6 +4263,36 @@
     return "via " + c;
   }
 
+  // dr-w26 — THE WORD AND WHAT IT MEASURED, TOGETHER, WHERE THE CHIP IS.
+  //
+  // `status: "sent"` on a delivery row means the mail transport ACCEPTED the
+  // message at the submission hop. It is NOT a delivery confirmation — Barkpark
+  // has no receipt feed for email, and `http_status` is NULL on every email row
+  // by construction. Reading the bare chip as "arrived" is what made the
+  // 2026-08-08 outage alerts look audited when nothing had audited them.
+  //
+  // The control plane now ships the sentence beside the word
+  // (`Notifications.Delivery.status_meaning/1`, serialized by the cloud router's
+  // `delivery_json/1`). The console RENDERS it and does not OWN it: no copy map
+  // lives here, because a second author for one sentence is how the caveat and
+  // the word drift apart — the exact failure the field exists to end. Whatever
+  // the payload says is what an operator reads, escaped and verbatim.
+  //
+  // IT IS NOT A TOOLTIP AND NOT A DETAIL PANE. A caveat you have to hover or
+  // click for is a caveat the person who misread the chip never sees, so it
+  // renders in the SAME ROW, immediately after the status pill.
+  //
+  // ABSENT MEANS ABSENT. A payload with no `status_meaning` — an older control
+  // plane, or the instance-served webhook log, which has no such field —
+  // renders the row EXACTLY as before: empty string, no element, no "undefined",
+  // no empty qualifier span. A blank caveat and a confident claim look the same
+  // to a reader, so we emit neither.
+  function deliveryStatusMeaningHtml(d) {
+    var m = d && d.status_meaning != null ? String(d.status_meaning) : "";
+    if (m === "") return "";
+    return '<span class="wh-del-meaning">' + esc(m) + "</span>";
+  }
+
   // One delivery-log row in the webhook-deliveries visual grammar (`.wh-del-*`):
   // recipient leads (mono), a toned status pill, then channel · event · attempts,
   // the relative time, and — on a failure — the verbatim last_error on its own line.
@@ -4283,6 +4313,9 @@
     return '<div class="wh-del-row">' +
       '<span class="wh-del-event">' + recipient + "</span>" +
       '<span class="wh-del-status wh-del-status--' + tone + '">' + esc(notifDeliveryStatusLabel(d)) + "</span>" +
+      // dr-w26: the meaning rides IMMEDIATELY after the pill, same row, same
+      // cell run — this is the surface the control plane actually feeds.
+      deliveryStatusMeaningHtml(d) +
       '<span class="wh-del-meta">' + meta + "</span>" +
       '<span class="wh-del-spacer"></span>' +
       '<span class="wh-del-when">' + esc(fmtWhen(d.inserted_at)) + "</span>" +
@@ -6594,9 +6627,10 @@
   // ------------------------------------------------ status + attention (pure)
   // classifyBp collapses the fleet fields GET /v1/barkparks already returns
   // (provision/deprovision status, suspended, health_status, agent_status,
-  // update_state, last_seen_at, queued_deploy_age_seconds) into exactly ONE of
-  // the TEN ranked states this console classifies (of the decision-32
-  // fixture's twelve — see the ATTENTION_RANK gap note) of charter
+  // update_state, last_seen_at, queued_deploy_age_seconds, commit_ancestry,
+  // deploy_rate) into exactly ONE of the TWELVE ranked states this console
+  // classifies (of the decision-32 fixture's fourteen — see the ladder's
+  // ORDER-ONLY note) of charter
   // decision 15 — the single attention-order spec. Both statusOf (the pill) and
   // attentionRank/bucketOf (the queue + rollup) derive from it, so the pill's
   // colour and the queue's order can never disagree. This is the JS twin of
@@ -6626,6 +6660,20 @@
     // not a lesser one; the ladder below is where its urgency is expressed.
     if (live && bp.last_seen_at == null) return "unreported";      // 7
     if (live && !healthy) return "degraded";                       // 4
+    // dr-w10-s1: THE DEPLOY VERDICT, the Go twin's arm verbatim
+    // (cloud_status_cmd.go attentionStatus `case live && deploysFailing(b)`).
+    // ABOVE every capacity rung below it — a CONFIRMED failure outranks a "may
+    // be heading somewhere bad" (the orchestrator's 2026-09-06 ruling). Only a
+    // MEASURED rate at or over the fence fires it: a node that is absent or that
+    // the ledger refused to grade is a SILENCE and stays a detail line, never a
+    // rung (charter D69).
+    if (live && deploysFailing(bp)) return "deploys_failing";      // 5
+    // dr-w24-followup: the box serves a sha on neither side of main's history.
+    // Immediately behind deploys_failing by the same ruling — a fact about the
+    // box's CODE, not its capacity, and not itself a failed deploy. Until this
+    // slice it was rendered by commitBehindCell and ranked by nothing, so a
+    // diverged box classified `ok` and sat in HEALTHY.
+    if (live && divergedByCommits(bp)) return "diverged";          // 6
     // jpf-w1 D7: a queued deployment no builder has claimed for 5 minutes.
     // AFTER degraded/unreported — a sick box's stuck queue is a SYMPTOM, so
     // the box's own condition outranks it — and BEFORE behind. The threshold
@@ -6651,24 +6699,79 @@
     return "ok";                                                // 12
   }
 
-  // The rank number per decision 15 (1 = most urgent … 12 = ok), BYTE-EQUAL to
-  // the decision-32 fixture (__fixtures__/attention_order.json) — the node
-  // harness asserts every entry here against that file, which is how the SPA
-  // stops drifting silently (until jpf-w1-queue-age-alarm, Go was the
-  // fixture's only asserter and this ladder had wandered to its own 1–9
-  // numbering). KNOWN GAP, named where it lives: ranks 5 (strained) and
-  // 6 (filling) are fixture states this console does not classify yet — the
-  // holes keep every shared state on its fixture rank, and the harness pins
-  // the gap to exactly those two so a third missing state reds the suite.
-  // jpf-w1 D7 adds deploy_stalled at 8: after the box-condition rungs
-  // (degraded/unreported — a sick box's stuck queue is a symptom), before
-  // behind (a deploy nobody builds beats passive update drift).
-  var ATTENTION_RANK = {
-    removal_failed: 1, failed: 2, suspended: 3, degraded: 4,
-    unreported: 7,
-    deploy_stalled: 8,
-    behind: 9, removing: 10, provisioning: 11, ok: 12,
-  };
+  // ── THE LADDER IS AN ORDER, NOT A HAND-TYPED NUMBERING (dr-w10 ruling A) ──
+  //
+  // This array IS the attention ladder of charter decision 15 / decision 32,
+  // in rung order, and the SPA's rank numbers are its POSITIONS — nothing here
+  // repeats a literal 1…14. That is the whole point of the shape: ruling A
+  // inserts `deploys_failing` after `degraded` and `diverged` behind it, which
+  // under the old hand-written `{removal_failed: 1, …, ok: 12}` map meant
+  // RENUMBERING nine unrelated entries by hand — and a renumbering typo is
+  // invisible to review and silent at runtime. An insertion here is one line.
+  //
+  // The cross-surface truth is `__fixtures__/attention_order.json` (owned by
+  // the deploy epic, charter D57; Go reads it too). The node harness holds THIS
+  // array to THAT file as an ORDERED SEQUENCE, restricted to the states the
+  // fixture carries — so the two agree on ORDER, which is the thing that has
+  // meaning, rather than on absolute integers, which are a rendering of order
+  // and drift the moment either side inserts a rung. `unmetered` is a Go DETAIL
+  // MARKER, not a rung, and deliberately does not appear here.
+  //
+  // The bucket rides ON THE RUNG, not on a `r <= 9` threshold: the old
+  // thresholds were three magic integers that an insertion silently
+  // invalidates (inserting two attention rungs turns `<= 9` into a boundary
+  // that files `deploy_stalled` under "in-flight" while every test still reads
+  // the words it expects).
+  var ATTENTION_LADDER = [
+    { state: "removal_failed",  bucket: "attention" },
+    { state: "failed",          bucket: "attention" },
+    { state: "suspended",       bucket: "attention" },
+    { state: "degraded",        bucket: "attention" },
+    { state: "deploys_failing", bucket: "attention" },
+    { state: "diverged",        bucket: "attention" },
+    { state: "strained",        bucket: "attention" },
+    { state: "filling",         bucket: "attention" },
+    { state: "unreported",      bucket: "attention" },
+    { state: "deploy_stalled",  bucket: "attention" },
+    { state: "behind",          bucket: "attention" },
+    { state: "removing",        bucket: "in-flight" },
+    { state: "provisioning",    bucket: "in-flight" },
+    { state: "ok",              bucket: "healthy" },
+  ];
+
+  // THE NAMED GAP, and it is a gap in the CLASSIFIER, not in the ladder.
+  // These rungs are ORDERED here (so every other state sits on its true rung)
+  // and are not yet PRODUCED by classifyBp, because their inputs are not on the
+  // fleet payload this console reads: `strained` and `filling` need the load and
+  // disk vitals, and no fleet row carries them. Naming them HERE is what keeps
+  // the closed-enum guard honest: a rung added to the ladder that is NOT named
+  // here must have a classifyBp arm and a statusOf arm, or the enum test reds.
+  // (The name says what these rungs ARE — ORDERED ONLY. It deliberately
+  // avoids the word the dr-w1-s2 guard forbids in this file: that token is a
+  // deploy-LEDGER failure class, and app.js must never name one.)
+  //
+  // `deploys_failing` and `diverged` were ORDER-ONLY for exactly one commit —
+  // the mirror carried the ladder before the classifier could produce either —
+  // and are now CLASSIFIED (see the two arms in classifyBp). A gap list is a
+  // confession, not a lever: the way out of it is a classifyBp arm, never a
+  // longer list.
+  var ATTENTION_ORDER_ONLY = ["strained", "filling"];
+
+  // Derived, never hand-maintained: rank = 1-based position; bucket = the rung's.
+  var ATTENTION_RANK = {};
+  var ATTENTION_BUCKET_BY_RANK = {};
+  ATTENTION_LADDER.forEach(function (rung, i) {
+    ATTENTION_RANK[rung.state] = i + 1;
+    ATTENTION_BUCKET_BY_RANK[i + 1] = rung.bucket;
+  });
+
+  // The states classifyBp can actually RETURN — the ladder minus the named gap.
+  // This is what `attentionKinds` exports and what the closed-enum test pins, so
+  // "ordered" and "classified" can never be silently conflated again.
+  var ATTENTION_KINDS = ATTENTION_LADDER
+    .map(function (rung) { return rung.state; })
+    .filter(function (state) { return ATTENTION_ORDER_ONLY.indexOf(state) < 0; });
+
   function attentionRank(bp) { return ATTENTION_RANK[classifyBp(bp)]; }
 
   // Sort comparator: most urgent first, tiebreak on name ascending,
@@ -6681,16 +6784,18 @@
     return an < bn ? -1 : an > bn ? 1 : 0;
   }
 
-  // Buckets (decision 15 / decision 32): attention = ranks 1–9
-  // (removal_failed…behind), in-flight = 10–11 (removing/provisioning),
-  // healthy = 12 (ok) — the SAME boundaries as the Go twin's attentionBucket.
-  // The bucket STRING is the fixture's, hyphenated: "in-flight", not the
-  // "inflight" this file used to emit while nothing held it to the fixture
-  // (the #fleet/inflight deep-link segment keeps its old spelling — that is a
-  // URL, not vocabulary — and parseFleetFilter maps it to the canonical
-  // bucket).
+  // The bucket of a rank, READ OFF THE RUNG (see the ladder note above). The
+  // bucket STRING is the fixture's, hyphenated: "in-flight", not the "inflight"
+  // this file used to emit while nothing held it to the fixture (the
+  // #fleet/inflight deep-link segment keeps its old spelling — that is a URL,
+  // not vocabulary — and parseFleetFilter maps it to the canonical bucket).
+  //
+  // NO FALLBACK ARM ON PURPOSE: a rank outside the ladder is not a bucket this
+  // function may guess at, and `|| "attention"` would file an unknown state
+  // under a real bucket and scan green. classifyBp is total over ATTENTION_KINDS,
+  // so every rank reaching here is a ladder position by construction.
   function bucketOfRank(r) {
-    return r <= 9 ? "attention" : r <= 11 ? "in-flight" : "healthy";
+    return ATTENTION_BUCKET_BY_RANK[r];
   }
   function bucketOf(bp) {
     return bucketOfRank(attentionRank(bp));
@@ -6791,6 +6896,14 @@
       if (missed) parts.push(missed);
       return { role: "warn", label: "Degraded", detail: parts.join(" · ") || "Needs attention" };
     }
+    // dr-w10-s1: warn, and the detail carries the DENOMINATOR — a percentage
+    // with no population is a number nobody can argue with. box_caused rides
+    // along: the price of a RAW rate (charter D148) is that it accuses the box
+    // for a customer's broken build, and this pays that price out loud.
+    if (kind === "deploys_failing") return { role: "warn", label: "Deploys failing", detail: deploysFailingReason(bp) };
+    // dr-w24-followup: warn, and the detail says the thing the BEHIND column
+    // cannot — WHY a diverged box is worth looking at. Never a distance.
+    if (kind === "diverged") return { role: "warn", label: "Diverged", detail: divergedDetail(bp) };
     // jpf-w1 D7: warn, never the info/blue tone "queued" would get — waiting
     // is news, waiting five minutes with no builder is an alarm. The detail
     // NAMES THE AGE off the payload's own number (the criterion's "queued 7m"),
@@ -6950,6 +7063,89 @@
     if (detail) return detail;
     var cell = commitBehindCell(bp);
     return cell ? "vs main: " + cell : "";
+  }
+
+  // ── diverged (dr-w24-followup): RENDERED since dr-w24-s2, RANKED BY NOTHING ─
+  //
+  // `commit_ancestry === "diverged"` means the sha this box serves is not an
+  // ancestor of main AND main is not an ancestor of it — the box has left the
+  // release train. commitBehindCell has printed "diverged N" since dr-w24-s2, so
+  // the fact was VISIBLE and the box still classified `ok` in HEALTHY. The Go
+  // twin (cloud_status_cmd.go divergedByCommits/divergedDetail) ranks it at 6;
+  // this is the same predicate and the same sentence, so the two surfaces cannot
+  // disagree about one payload.
+  //
+  // The detail NEVER quotes a distance: a diverged sha has no well-defined
+  // "behind by N", which is exactly why the control plane grades it separately
+  // from `behind`.
+  function divergedByCommits(bp) {
+    return String((bp && bp.commit_ancestry) || "").trim() === "diverged";
+  }
+  function divergedDetail(bp) {
+    if (!divergedByCommits(bp)) return "";
+    return "diverged from main — the sha this box serves is on neither side of main's history";
+  }
+
+  // ── the deploy verdict (dr-w10-s1), client side ────────────────────────────
+  //
+  // `deploy_rate` is the per-box deploy vital the control plane serializes on
+  // EVERY fleet row (router.ex merge_deploy_rate/2): a measured node, or the
+  // all-nil `no_deploy_surface/0` sentinel. Read here exactly as the Go twin
+  // reads it (cloud_status_cmd.go deployVerdict/deploysFailing), because a fence
+  // that differs between the two surfaces is a fence nobody owns.
+  //
+  // THREE-WAY AND CLOSED — no box reaches a verdict by fallthrough:
+  //   NO SURFACE — the node is absent (an older control plane said nothing at
+  //     all) or the box owns zero sites. Nothing to deploy, so nothing failed.
+  //   NOT MEASURED — the box HAS sites and the rate refused or carries no pct
+  //     (sample under the ledger's floor). A SILENCE, and per charter D69 a
+  //     DETAIL LINE, never a rung — which is why there is no such state here.
+  //   MEASURED — a real percentage, with the denominator it came from.
+  //
+  // NOTE ON NAMING: these are the CONSOLE's three words for an absence. The
+  // ledger's own failure taxonomy is never re-derived in this file (the dr-w1-s2
+  // guard scans app.js for exactly that), and no percentage below is computed
+  // from a count — `pct` is the ledger's number, carried, not recomputed.
+  var DEPLOY_NO_SURFACE = "no_surface";
+  var DEPLOY_NOT_MEASURED = "not_measured";
+  var DEPLOY_MEASURED = "measured";
+  // The fence, charter D150: ABOVE the 9.5% site-caused floor (so a fleet of
+  // ordinary broken customer builds cannot trip it) and BELOW 25.58%. Owned on
+  // the client, like every other fence on this screen, and BYTE-EQUAL to the Go
+  // twin's deploysFailingPercent.
+  var DEPLOYS_FAILING_PCT = 20.0;
+  function deployVerdict(bp) {
+    var d = bp && bp.deploy_rate;
+    if (!d || !d.rate || d.sites === 0 || d.sites == null) return { kind: DEPLOY_NO_SURFACE, pct: null };
+    // `== null` and not truthiness: a MEASURED 0.0% is a number, not a silence.
+    if (d.rate.refused === true || d.rate.pct == null) return { kind: DEPLOY_NOT_MEASURED, pct: null };
+    return { kind: DEPLOY_MEASURED, pct: d.rate.pct };
+  }
+  // The rung's predicate: MEASURED, and at or over the fence. A box the ledger
+  // could not measure never fires it — an alarm may only fire on a number it was
+  // actually given.
+  function deploysFailing(bp) {
+    var v = deployVerdict(bp);
+    return v.kind === DEPLOY_MEASURED && v.pct >= DEPLOYS_FAILING_PCT;
+  }
+  function deployPct1(n) {
+    return String(Math.round(n * 10) / 10);
+  }
+  // The WHY, and it never prints a percentage without the denominator that
+  // produced it: a rate with no sample is a number with no population.
+  // `box_caused` rides along because the price of a RAW rate (charter D148) is
+  // that it accuses the box for a customer's broken build — this is that price
+  // paid out loud, on the row. Verbatim the Go twin's deploysFailingReason.
+  function deploysFailingReason(bp) {
+    if (!deploysFailing(bp)) return "";
+    var d = bp.deploy_rate;
+    var s = "deploys failing " + deployPct1(d.rate.pct) + "% of " + d.rate.sample +
+      " terminal (fence " + deployPct1(DEPLOYS_FAILING_PCT) + "%, " +
+      (d.sites_deploying == null ? 0 : d.sites_deploying) + " site(s))";
+    if (d.box_caused && d.box_caused.pct != null) {
+      s += " · " + deployPct1(d.box_caused.pct) + "% box-caused";
+    }
+    return s;
   }
 
   // ── slot_units (#14886): IS THE BLUE/GREEN DEPLOY PAIR INTACT ───────────────
@@ -12362,6 +12558,11 @@
     return '<div class="wh-del-row">' +
       '<span class="wh-del-event">' + (evId !== null ? "event #" + esc(evId) : "&mdash;") + "</span>" +
       '<span class="wh-del-status wh-del-status--' + tone + '">' + esc(label) + "</span>" +
+      // dr-w26: the SECOND surface painting this chip. Its rows come from the
+      // INSTANCE (`render_delivery`), which carries no `status_meaning` today,
+      // so this emits nothing — and will render the sentence the day that
+      // producer grows one, rather than needing to be found again.
+      deliveryStatusMeaningHtml(d) +
       (meta ? '<span class="wh-del-meta">' + meta + "</span>" : "") +
       '<span class="wh-del-spacer"></span>' +
       '<span class="wh-del-when">' + when + "</span>" +
@@ -15080,8 +15281,39 @@
   // the deploy-side twin of friendly()/ERRORS for API errors. Substring match on
   // the RAW reason; unrecognized reasons pass through verbatim (still esc'd at
   // the call site, so escaping is unchanged).
+  // A TYPED REFUSAL IS NEVER RE-HUMANIZED (task-f156b5e43bfbfe91) — the browser
+  // twin of `BarkparkCloud.FailureCopy.typed_refusal?/1`.
+  //
+  // The server stopped rewriting these strings in W11; app.js kept running a
+  // SECOND humanize pass over whatever arrived. W11's review argued the second
+  // pass was structurally safe because every clause below matches a LONG,
+  // DISTINCTIVE phrase that no producer-authored tar entry name can collide
+  // with — true today, and it is an argument about the current clause list, not
+  // a property of the function. FailureCopy's own doc states the standing debt:
+  // "If a short token is ever added to app.js, it needs this guard mirrored
+  // there." This is that mirror, so the safety stops depending on nobody ever
+  // adding a short clause.
+  //
+  // Deliberately a SUPERSET of the Elixir predicate by one caption: the poll
+  // phase ("the instance refused the build poll") is a box refusal too, and the
+  // server-side guard — whose @box_refusal constant names only the deploy
+  // caption — does not cover it. Widening HERE cannot make the server rewrite
+  // anything; it only means one more shape reaches the reader in the box's own
+  // words. No clause below matches a poll caption today, so nothing changes for
+  // it until one does, which is the point of a guard.
+  function typedRefusal(reason) {
+    if (!reason || typeof reason !== "string") return false;
+    return reason.indexOf("the instance refused the deploy") !== -1 ||
+      reason.indexOf("the instance refused the build poll") !== -1 ||
+      /\bE_[A-Z][A-Z0-9_]*\b/.test(reason);
+  }
+
   function failureCopy(reason) {
     if (!reason) return reason;
+    // FIRST, before any clause: the box already said, precisely and in human
+    // words, what it refused and why. Canned copy can only replace a true
+    // statement with a false one.
+    if (typedRefusal(reason)) return reason;
     if (isGithubPushBlocked(reason))
       return "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy.";
     if (reason.indexOf("no build source") !== -1)
@@ -15110,12 +15342,43 @@
   // when the reason family isn't github-push — a REFUSAL is a decision, not a
   // crash, and crash-red would misname it. Callers pass it for terminal
   // `cancelled` rows; every existing single-arg call is unchanged.
-  function deployFailHtml(reason, refused) {
-    if (!reason) return "";
+  // THE STRUCTURED HALVES (task-f156b5e43bfbfe91). `deployment_json/1` now emits
+  // the box's typed code and its human sentence as SEPARATE keys —
+  // `failure_code` / `failure_message` — beside the unchanged composite
+  // `failure_reason`. When they are present the panel renders THEM: the code in
+  // its own element (a person greps and files bugs about that token, so it gets
+  // to be a token on screen instead of a prefix buried in prose) and the message
+  // beside it. `<strong>` rather than a new class, so this needs no CSS.
+  //
+  // A row with a code and no message renders the code alone; a row with neither
+  // falls back to `reason`, which is every non-refusal failure and every legacy
+  // shape. Both halves are escaped exactly as `reason` was.
+  //
+  // failureCopy() is NOT in this path at all when the structured halves are
+  // present — the server already split what it split, and re-mapping the pieces
+  // is the archaeology this key pair exists to end.
+  function deployFailStructuredHtml(typed) {
+    if (!typed) return "";
+    var code = typed.code, message = typed.message;
+    if (!code && !message) return "";
+    if (!code) return "<span>" + esc(message) + "</span>";
+    return "<span><strong>" + esc(code) + "</strong>" +
+      (message ? " — " + esc(message) : "") + "</span>";
+  }
+
+  function deployFailHtml(reason, refused, typed) {
+    var structured = deployFailStructuredHtml(typed);
+    if (!reason && !structured) return "";
     return '<div class="deploy-fail' +
       (refused || failureTone(reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' +
       '<span class="deploy-fail-dot" aria-hidden="true"></span>' +
-      "<span>" + esc(failureCopy(reason)) + "</span></div>";
+      (structured || "<span>" + esc(failureCopy(reason)) + "</span>") + "</div>";
+  }
+
+  // The structured pair off a deployment row, in the shape deployFailHtml wants.
+  // One reader so the two render sites cannot drift.
+  function deployTypedRefusal(d) {
+    return d ? { code: d.failure_code, message: d.failure_message } : null;
   }
 
   // cch-w28-bl: a REFUSED deployment. Sites.AutoDeployWorker.refuse/1 mints a
@@ -15184,8 +15447,9 @@
   // The panel a terminal row renders: the failure family as before, plus the
   // refusal family. One helper so previewRow and deployRow cannot drift.
   function deployTerminalFailHtml(d, st) {
-    if (st === "failed") return deployFailHtml(d.failure_reason);
-    if (deployIsRefusal(d, st)) return deployFailHtml(deployRefusalCopy(d), true);
+    if (st === "failed") return deployFailHtml(d.failure_reason, false, deployTypedRefusal(d));
+    if (deployIsRefusal(d, st))
+      return deployFailHtml(deployRefusalCopy(d), true, deployTypedRefusal(d));
     return "";
   }
 
@@ -19813,7 +20077,7 @@
   // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
     /* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-    // 33 of the 56 declared verbs have no entry here: they render
+    // 2 of the 56 declared verbs have no entry here: they render
     // as their raw dotted slug through humanAction's fallback below, each one
     // declared unlabelled ON PURPOSE with a reason in cloud/priv/audit-actions.json
     // (charter D582 — ugly, not false).
@@ -19829,19 +20093,50 @@
     "site.created": "created a site",
     "site.deleted": "deleted a site",
     "site.deploy_requested": "requested a deploy",
+    "site.artifact_uploaded": "uploaded a build artifact",
     "site.env_changed": "replaced a site's environment",
     "site.domain_added": "added a domain",
+    "site.domain_removed": "removed a domain",
     "site.github_connected": "connected a repo",
+    "site.github_disconnected": "disconnected a repo",
+    "site.cloudflare_bound": "bound a domain to Cloudflare",
     "site.rolled_back": "rolled back a site",
+    "deployment.promoted": "promoted a deployment to production",
+    "webhook.created": "created a webhook",
+    "webhook.updated": "updated a webhook",
+    "webhook.deleted": "deleted a webhook",
+    "webhook.rotated": "rotated a webhook signing secret",
+    "webhook.replayed": "replayed a webhook delivery",
+    "webhook.test_sent": "sent a test webhook delivery",
     "barkpark.go_live": "launched a Barkpark",
     "barkpark.deleted": "removed a Barkpark",
+    "barkpark.retry_requested": "requested a retry",
+    "barkpark.verify_requested": "requested a verification",
+    "barkpark.studio_link_minted": "minted a Studio sign-in link",
+    "barkpark.app_token_minted": "minted an app token on a Barkpark",
+    "barkpark.app_token_revoked": "revoked an app token on a Barkpark",
+    "barkpark.site_url_set": "set a Barkpark's site URL",
+    "barkpark.self_update_triggered": "triggered a self-update",
+    "barkpark.rollback_triggered": "triggered a rollback",
     "barkpark.autoupdate_changed": "changed autoupdate",
     "barkpark.agent_key_delivered": "delivered a model key to a support box",
+    "barkpark.domain_attached": "attached a domain to a Barkpark",
+    "barkpark.vercel_deploy_triggered": "triggered a Vercel deploy",
+    "barkpark.resurrected": "resurrected a Barkpark",
+    "barkpark.push_relay_provisioned": "provisioned a git push relay",
     // cch-w63-s8. The row a REFUSED write leaves: the plane declined to send an
     // instance write because the box answered our stored admin credential 401.
     // The actor tried; the request never left. The expanded detail carries the
     // wire word (reason: "identity_refused") and which write it was.
     "barkpark.credentials_refused": "was refused — the instance rejected our access credential",
+    "provider.connected": "connected a provider credential",
+    "provider.disconnected": "disconnected a provider credential",
+    "github.installation_connected": "connected a GitHub App installation",
+    "github.installation_disconnected": "disconnected a GitHub App installation",
+    "github.repo_pushed": "pushed a repo to GitHub",
+    "notifications.settings_changed": "changed notification settings",
+    "notifications.channels_changed": "changed notification channels",
+    "notifications.events_changed": "changed which events notify",
     "twofa.enabled": "enabled two-factor authentication",
     "twofa.disabled": "disabled two-factor authentication"
     /* END GENERATED: audit action labels */
@@ -27138,7 +27433,8 @@
       renderActivateEntry: renderActivateEntry, renderActivateConfirm: renderActivateConfirm,
       renderActivateResult: renderActivateResult, renderActivateError: renderActivateError,
       renderActivateRateLimited: renderActivateRateLimited,
-      failureCopy: failureCopy, failureTone: failureTone, liveEventTypes: Object.keys(TYPE_ACTIONS),
+      failureCopy: failureCopy, failureTone: failureTone, typedRefusal: typedRefusal,
+      liveEventTypes: Object.keys(TYPE_ACTIONS),
       // cch-w1-refetch-storm: the SSE→Overview refetch path, exported so the
       // harness can COUNT the requests one event actually costs. These are
       // impure (they fetch and paint), unlike every pure helper above — the
@@ -27311,7 +27607,18 @@
       // harness asserts statusOf is total over.
       lastSeenText: lastSeenText, missedChecksText: missedChecksText,
       neverReportedEvidence: neverReportedEvidence,
-      attentionKinds: Object.keys(ATTENTION_RANK),
+      // The states classifyBp can RETURN (ladder minus the named gap) — NOT
+      // Object.keys(ATTENTION_RANK), which is now every ORDERED rung including
+      // the four this console does not classify yet.
+      attentionKinds: ATTENTION_KINDS,
+      ATTENTION_LADDER: ATTENTION_LADDER, ATTENTION_ORDER_ONLY: ATTENTION_ORDER_ONLY,
+      // dr-w10-s1 / dr-w24-followup: the two predicates the new rungs stand on,
+      // exported so the harness can probe the FENCE and the three-way verdict
+      // directly rather than only through classifyBp's answer.
+      deployVerdict: deployVerdict, deploysFailing: deploysFailing,
+      deploysFailingReason: deploysFailingReason,
+      divergedByCommits: divergedByCommits, divergedDetail: divergedDetail,
+      DEPLOYS_FAILING_PCT: DEPLOYS_FAILING_PCT,
       attentionRank: attentionRank, attentionCompare: attentionCompare,
       bucketOf: bucketOf, bucketOfRank: bucketOfRank, ATTENTION_RANK: ATTENTION_RANK,
       fleetSummary: fleetSummary, filterFleet: filterFleet,
@@ -27351,6 +27658,7 @@
       webhookEventsHtml: webhookEventsHtml, webhookBannerHtml: webhookBannerHtml,
       webhookCardHtml: webhookCardHtml, deliveryTone: deliveryTone,
       deliveryStatusLabel: deliveryStatusLabel, deliveryRowHtml: deliveryRowHtml,
+      deliveryStatusMeaningHtml: deliveryStatusMeaningHtml,
       replayToastBody: replayToastBody, hookToggleState: hookToggleState,
       // GR80 leg 3: the webhook test-send verdict helpers (pure).
       testSendToastBody: testSendToastBody, testSendAccepted: testSendAccepted,
@@ -27963,7 +28271,7 @@
       // detail markup (siteDetailHtml) so the harness can pin the domains mount,
       // the read-only Scale row and the mono repo button. The site domains DOM
       // mount (loadSiteDomains) + 4s poll are smoke+browser-verified.
-      deployFailHtml: deployFailHtml,
+      deployFailHtml: deployFailHtml, deployTypedRefusal: deployTypedRefusal,
       deployDuration: deployDuration,
       siteStatusChip: siteStatusChip,
       siteDetailHtml: siteDetailHtml,

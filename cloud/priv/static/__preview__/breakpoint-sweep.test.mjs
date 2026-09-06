@@ -25,6 +25,7 @@ import {
   parseHeightClause, parseThemeMembers, accentIdentities, axisCoverage,
   familyOf, scenarioReport,
   BREAKPOINTS, WIDTHS, CELLS, COVERED_VIEWS, FOLD_FRACTION,
+  SHELL_CHROME_SELECTORS, SHELL_CHROME_CEILING, CHROME_PIN_ROW, foldVerdict,
   HIDING_UTILITIES, THEMES, HEIGHTS, HEIGHT_REASONS, RENDER_HEIGHT,
   RENDER_HEIGHTS_DEFAULT, heightDriveReport, cueAxisOfMask, cueStuckVerdict,
   selectNames,
@@ -138,19 +139,24 @@ test("app.css's declared axis is exactly the sweep's BREAKPOINTS, with nothing u
   const r = parseMediaBreakpoints(APP_CSS);
   assert.deepEqual(r.breakpoints, BREAKPOINTS);
   assert.deepEqual(r.unresolved, []);
-  // 18 widths. cch-w16-s8 dropped 900 from BREAKPOINTS with the CSS rule that
+  // 21 widths. cch-w16-s8 dropped 900 from BREAKPOINTS with the CSS rule that
   // declared it — the ONLY width that left is 901, since 900 is still walked as
   // 899+1 — taking this to 12. W17-S6 then added `@media (max-width: 830px)`
   // for the past-due money message, which brings 829/830/831 and takes it to 15.
   // W20-S8 added `@media (min-width: 621px) and (max-width: 740px)` for that
   // SAME message in the shell-fold band, which brings 739/740/741 and takes it
   // to 18 — the prelude's lower edge costs nothing, since 620 was already
-  // declared and 621 is walked as 620+1.
+  // declared and 621 is walked as 620+1. cch-w18-bl then re-derived the W20-S9
+  // attention-name band's upper edge from 899 to 904 — the old edge was driven
+  // against a fixture string the control plane does not write, and on the real
+  // "Health unknown · Agent offline" the name column is cut from 900 through 904
+  // — which brings 903/904/905 and takes it to 21. 903 and 905 are genuinely
+  // new; 904 is not walked as 903+1 because 903 is itself only 904-1.
   // THIS LITERAL IS THE POINT: a CSS slice that adds or removes a breakpoint has
   // to come here and say which widths it moved. Leg A refuses either way, and it
   // DID refuse W17-S6's first draft ("UNCOVERED breakpoint 830px") and W20-S8's
   // ("UNCOVERED breakpoint 740px — the boundary walk is missing 739, 740, 741").
-  assert.deepEqual(WIDTHS, [619, 620, 621, 719, 720, 721, 739, 740, 741, 767, 768, 769, 829, 830, 831, 898, 899, 900]);
+  assert.deepEqual(WIDTHS, [619, 620, 621, 719, 720, 721, 739, 740, 741, 767, 768, 769, 829, 830, 831, 898, 899, 900, 903, 904, 905]);
 });
 
 test("the raw grep over-counts @media — comment-stripping is why the parser does not", () => {
@@ -364,6 +370,108 @@ test("the fold bar is a real bar: it still REFUSES the 34vh shape this slice rep
   // measured wall, and it is 2.27x the budget at H=800.
   assert.ok(745.88 > FOLD_FRACTION * 800,
     "the nav wall the deleted pin allowed must still be a Q3 defect");
+});
+
+// ── Q3 MEASURES THE SCREEN; THE FOLDED SHELL IS PINNED SEPARATELY ────────────
+//
+// cch-w24-bl-q3-fold-budget-is-a-shell-property-at-320. The two tests above are
+// about the CSS shape at the widths the boundary walk drives (619 and up). At
+// 320 — a width the walk does not reach, and the one people actually hold — the
+// SHIPPED numbers are these, measured on origin/main @327ffd96b with
+// `--render --widths 320 --cell sites,billing-trial,overview-fleet`:
+//
+//   cell            aside.sidebar   header.topbar   .content   view-head
+//   sites             0 → 260        260 → 344.5      344.5      368.5
+//   overview-fleet    0 → 260        260 → 344.5      344.5      368.5
+//   billing-trial     0 → 260        260 → 378.5      378.5      402.5
+//
+// `.content`'s top IS the topbar's bottom, to the pixel. So the old Q3 — the raw
+// `.content` offset against 0.4H = 320 — was measuring the SHELL, was over
+// budget on every screen tried, and no screen could have passed it.
+const W24_AT_320 = {
+  sites:          { chromeBottom: 344.5, contentTop: 344.5, anchorTop: 368.5 },
+  "overview-fleet": { chromeBottom: 344.5, contentTop: 344.5, anchorTop: 368.5 },
+  "billing-trial":{ chromeBottom: 378.5, contentTop: 378.5, anchorTop: 402.5 },
+};
+const V = (m, over = {}) => foldVerdict({ vh: 800, ...m, ...over });
+
+test("THE ROW'S DEFECT: the OLD Q3 shape is unreachable at 320 on every screen measured", () => {
+  // Anti-vacuity for everything below: if this ever passes, the split stopped
+  // being a fix and started being a loosening.
+  for (const [name, m] of Object.entries(W24_AT_320)) {
+    assert.ok(m.contentTop > FOLD_FRACTION * 800,
+      `${name}: the raw .content offset ${m.contentTop} must still bust the ${FOLD_FRACTION * 800}px budget — that IS the defect this row filed`);
+  }
+});
+
+test("Q3 now measures the SCREEN: the same cells clear the budget with room, and the shell is what was over", () => {
+  for (const [name, m] of Object.entries(W24_AT_320)) {
+    const v = V(m);
+    assert.equal(v.screenTop, 24, `${name}: the screen's first box starts 24px below the folded chrome at 320`);
+    assert.equal(v.foldOver, false, `${name}: a 24px screen contribution must not read as below the fold`);
+    assert.equal(v.budget, 320);
+  }
+  // At 900 the sidebar is a left COLUMN, so nothing is stacked above .content
+  // and the chrome is the 56px topbar: measured screenTop 32.
+  const wide = V({ chromeBottom: 56, contentTop: 56, anchorTop: 88 });
+  assert.equal(wide.screenTop, 32);
+  assert.equal(wide.foldOver, false);
+  assert.equal(wide.chromeOver, false, "one ceiling covers the whole width axis — the unfolded chrome is far under it");
+});
+
+test("MUTATION — push a screen's first box past the budget and Q3 REDS", () => {
+  // The browser-side mutation is `.view-head { margin-top: 400px }`; this is the
+  // same arithmetic without a Chrome. 344.5 + 24 + 400 = 768.5.
+  const pushed = V({ ...W24_AT_320.sites, anchorTop: 768.5 });
+  assert.equal(pushed.screenTop, 424);
+  assert.equal(pushed.foldOver, true, "a screen that puts 424px above its own first box must be a Q3 defect");
+  assert.equal(pushed.chromeOver, false, "and it must NOT be blamed on the shell — the chrome did not move");
+  // The bar is where it is claimed to be, on both sides of the edge.
+  assert.equal(V({ ...W24_AT_320.sites, anchorTop: 344.5 + 320 }).foldOver, false, "exactly at budget is not over");
+  assert.equal(V({ ...W24_AT_320.sites, anchorTop: 344.5 + 320.5 }).foldOver, true, "half a pixel over IS over");
+});
+
+test("MUTATION — grow the shell and the CHROME PIN reds, at the pixel", () => {
+  // The browser-side mutation is `.topbar { padding-block: 8px }`; here it is
+  // the number. The pin sits exactly ON the worst value origin/main prints, in
+  // the FLEET_ROW_RESIDUAL shape this file already cites: it reds if the number
+  // GROWS, by any amount.
+  assert.equal(V({ ...W24_AT_320["billing-trial"], chromeBottom: SHELL_CHROME_CEILING }).chromeOver, false,
+    "the shipped worst must be exactly AT the pin, not under it — slack is a shell that can grow unwatched");
+  assert.equal(V({ ...W24_AT_320["billing-trial"], chromeBottom: SHELL_CHROME_CEILING + 0.5 }).chromeOver, true,
+    "half a pixel of shell growth must red the pin");
+  assert.equal(V({ ...W24_AT_320["billing-trial"], chromeBottom: SHELL_CHROME_CEILING + 16 }).chromeOver, true);
+});
+
+test("THE PIN IS THE WORST PRINTED NUMBER, NOT THE ONE THE FILING QUOTED", () => {
+  // What the filing got wrong: it quotes 344.5 as "the folded chrome cost at
+  // 320". That is the NARROWER of the two shipped values — billing-trial prints
+  // 378.5 at the same width. A 344.5 pin would red billing-trial on the first
+  // run, re-creating the unreachable-budget defect this row exists to remove.
+  const printed = Object.values(W24_AT_320).map((m) => m.chromeBottom);
+  assert.equal(Math.max(...printed), SHELL_CHROME_CEILING,
+    "the ceiling must BE a value the instrument printed on origin/main — never arithmetic, never the narrower one");
+  for (const [name, m] of Object.entries(W24_AT_320)) {
+    assert.equal(V(m).chromeOver, false, `${name}: no shipped cell may be over the pin on the day it lands`);
+    assert.equal(foldVerdict({ vh: 800, ...m, ceiling: 344.5 }).chromeOver, name === "billing-trial",
+      `pinning at the filing's 344.5 would have refused billing-trial — which is why it is not the pin`);
+  }
+});
+
+test("a probe that loses the chrome reports a WORSE number, never a better one", () => {
+  // chromeBottom 0 is what a renamed .topbar/.sidebar produces. The verdict then
+  // degenerates to the raw offset the old Q3 read — 402.5 at 320, over budget —
+  // so the failure mode of the measurement is a RED, not a silent green.
+  const blind = V({ ...W24_AT_320["billing-trial"], chromeBottom: 0 });
+  assert.equal(blind.screenTop, 402.5);
+  assert.equal(blind.foldOver, true, "losing the chrome must not be able to look like a pass");
+});
+
+test("the chrome selectors and the pin's row are NAMED, so the number can be re-derived", () => {
+  assert.deepEqual(SHELL_CHROME_SELECTORS, ["aside.sidebar", "header.topbar"],
+    "the folded chrome is an enumerated list — a class regex would sweep in a screen's own header");
+  assert.equal(CHROME_PIN_ROW, "cch-w24-bl-q3-fold-budget-is-a-shell-property-at-320",
+    "a pin without the row that set it is a number nobody can move deliberately");
 });
 
 // ── Q2's named lists ─────────────────────────────────────────────────────────
@@ -584,8 +692,8 @@ test("the DEFAULT loop is ONE height, and the decision carries its own render co
   // instead of quietly stale.
   const one = CELLS.length * THEMES.length * 1 * WIDTHS.length;
   const all = CELLS.length * THEMES.length * HEIGHTS.length * WIDTHS.length;
-  assert.equal(one, 900);
-  assert.equal(all, 2700);
+  assert.equal(one, 1050);
+  assert.equal(all, 3150);
   const reason = HEIGHT_REASONS[RENDER_HEIGHT];
   assert.ok(reason.includes(String(one)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state the default-loop render count ${one}`);
   assert.ok(reason.includes(String(all)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state what walking all ${HEIGHTS.length} heights costs (${all})`);
@@ -723,7 +831,7 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
   const r = coverageReport({ css, html: INDEX_HTML });
   assert.equal(r.ok, false);
   assert.deepEqual(r.phantomBreakpoints, [740]);
-  assert.deepEqual(r.breakpoints, [620, 720, 768, 830, 899], "the mutation really did remove it — otherwise the refusal above is vacuous");
+  assert.deepEqual(r.breakpoints, [620, 720, 768, 830, 899, 904], "the mutation really did remove it — otherwise the refusal above is vacuous");
   // and the unmutated tree is clean, so this is the mutation talking
   assert.deepEqual(coverageReport({ css: APP_CSS, html: INDEX_HTML }).phantomBreakpoints, []);
 });
@@ -868,13 +976,13 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // create a 14th. Both integers were RE-DERIVED by RUNNING `node
   // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
   // PRINTED, never by adding one to the line above.
-  assert.equal(r.total, 122);
+  assert.equal(r.total, 123);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 98, "98 is the RESIDUE, not the census");
+  assert.equal(r.residue, 99, "99 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 98, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 99, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

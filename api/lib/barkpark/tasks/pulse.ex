@@ -31,7 +31,10 @@ defmodule Barkpark.Tasks.Pulse do
   # `work_digest` + `work_field_digests` stay untouched so the L2 close-fence
   # still catches a brief edited under the claim.
   #
-  # Lock family (charter D6): advisory key `task:<doc_id>` STRING — the
+  # Lock family: advisory key `task:<uuid>` via `LockKey.task/1` — the
+  # converged key. It was `task:<doc_id>` STRING until
+  # task-eal-bl-lock-key-convergence, which meant a pulse and a close did NOT
+  # exclude each other. Historical note (charter D6) — the
   # renewal family (claim / ttl_sweeper / compactor) — so a pulse serializes
   # with the TTL sweeper's reap of the same row. The key is the ROW's doc_id
   # (read before locking, re-read after), matching the sweeper's key exactly.
@@ -52,6 +55,7 @@ defmodule Barkpark.Tasks.Pulse do
       emit_broadcasts: 1
     ]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.Document
   alias Barkpark.Repo
 
@@ -73,9 +77,12 @@ defmodule Barkpark.Tasks.Pulse do
 
   No `:observed_epoch` — pulse deliberately has no epoch fence (see moduledoc).
 
-  Returns `{:ok, doc}`, or `{:error, :not_found | :not_holder | :stale_claim}`.
-  `:not_holder` covers every lost-lease shape: reaped (worker cleared),
-  released, closed (no longer `in_progress`), or held by someone else.
+  Returns `{:ok, doc}`, or
+  `{:error, :not_found | {:not_in_progress, status} | :not_holder | :stale_claim}`.
+  `{:not_in_progress, status}` is every lost-lease shape that moved the ROW —
+  reaped, released, closed, staged back to open — and it names the state it
+  found. `:not_holder` is reserved for the HOLDER fault: a live `in_progress`
+  claim owned by someone else.
   """
   def pulse(task_id, worker_id, opts \\ []) when is_binary(task_id) and is_binary(worker_id) do
     text = Keyword.fetch!(opts, :text)
@@ -84,25 +91,24 @@ defmodule Barkpark.Tasks.Pulse do
 
     result =
       Repo.transaction(fn ->
-        # Read once for the lock key, lock, then RE-read: the advisory lock
-        # (renewal family, `task:<doc_id>` string — the sweeper's exact key)
-        # must be held before the row state we gate on is read, or a reap
-        # committing between our read and our write could race the holder
-        # check. doc_id is immutable, so the pre-lock read is safe for keying.
-        # Tenancy was resolved at the controller (doc_id -> task.id); the
-        # holder check below binds the caller to this exact row (same
+        # Lock FIRST, then read. `task_id` IS the document's uuid PRIMARY KEY,
+        # so the converged `task:<uuid>` key is available with no pre-lock
+        # read at all — the read-for-the-key/re-read dance this used to do
+        # existed only because the key was built from the `doc_id` SLUG, which
+        # is a DIFFERENT lock from the one close/release/stage/sweeper take
+        # (task-eal-bl-lock-key-convergence). The row state gated on below is
+        # read under the lock, so a reap cannot commit between the read and
+        # the write. Tenancy was resolved at the controller (doc_id ->
+        # task.id); the holder check binds the caller to this exact row (same
         # accepted posture as Claim.do_renew and Close's re-read).
-        # global-read: by-PK read for the renewal-family lock key
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_id)])
+
+        # global-read: in-lock by-PK read — tenancy resolved at the controller (doc_id -> task.id), holder check below binds the caller to this row.
         case Repo.get(Document, task_id) do
           nil ->
             {:error, :not_found}
 
-          %Document{doc_id: doc_id} ->
-            _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:" <> doc_id])
-
-            # global-read: in-lock re-read of the same PK row (see above)
-            doc = Repo.get!(Document, task_id)
-
+          %Document{} = doc ->
             with :ok <- check_live(doc),
                  :ok <- check_holder(doc, worker_id) do
               apply_pulse(doc, worker_id, text, criterion, caller_token_id)
@@ -123,15 +129,39 @@ defmodule Barkpark.Tasks.Pulse do
     end
   end
 
-  # A pulse needs a LIVE lease. Anything not in_progress (reaped rows flip to
-  # "open" with worker cleared; released rows likewise; closed rows are
-  # done/cancelled — close keeps `claim.worker` for the dossier, so the holder
-  # check alone would wrongly pass) is a lost lease → `:not_holder`, the ONE
-  # honest answer the charter pins for every lost-lease shape.
+  # A pulse needs a LIVE lease. Anything not in_progress is a lost lease, and
+  # the refusal NAMES the state it found: `{:error, {:not_in_progress, status}}`
+  # (wire token `not_in_progress:<status>`, the shape `stamp` has always used).
+  #
+  # WHY IT IS NO LONGER THE BARE `:not_holder` (task-b6fcc8e2f57e1cd5). Charter
+  # D7 pinned ONE token for every lost-lease shape, and that collapse is what
+  # made a keep-alive loop unreadable: `:not_holder` is ALSO what a thief gets,
+  # so the token could not tell the departed holder (whose remedy is
+  # `bp task claim`) from an intruder (whose remedy is to back off). Measured
+  # 2026-09-06: task-ee33b6f088b35bdb and task-8f9d3ea8926f387f both read
+  # `lifecycle_status: "open"` with `claim.worker` STILL SET — the shape
+  # `Tasks.Stage.do_stage/8` leaves behind, because stage writes
+  # lifecycle_status + the engagement lease + the adjudication triple and never
+  # `content.claim` (the TtlSweeper reap and `release` are the OTHER shape:
+  # both clear `claim.worker` to nil). The state is the one fact the caller
+  # cannot derive from a refusal, so the refusal carries it.
+  #
+  # The stale claim itself is NOT fixed here, deliberately. `stage` leaving
+  # `content.claim` untouched is a documented property of that verb (the
+  # false-done reopen recipe reopens a done row and KEEPS its claim on purpose),
+  # and cross-reference pds-bl-null-expiry-claims-repo-wide: 6,850 of 8,617 open
+  # rows already carry a claim object, median age 27 days. `claim.worker` is
+  # therefore a RECEIPT, not a lease, repo-wide — so the honest remedy is to
+  # stop letting the pulse's success signal imply the lease, which is what this
+  # refusal does, rather than to chase every writer that leaves the receipt.
+  #
+  # The HOLDER fault keeps `:not_holder` (see `check_holder/2` below): a live
+  # in_progress claim held by someone else is not a state problem, and the two
+  # must stay distinguishable — that is the whole point of this split.
   defp check_live(%Document{content: content}) do
     case Map.get(content || %{}, "lifecycle_status") do
       "in_progress" -> :ok
-      _ -> {:error, :not_holder}
+      status -> {:error, {:not_in_progress, status || "unknown"}}
     end
   end
 

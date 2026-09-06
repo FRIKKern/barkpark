@@ -221,6 +221,53 @@ entries in `.github/required-checks.json`. `strict: false` means a PR is not
 forced to be up-to-date with `main` before merge. To make another check binding,
 add its context to `.github/required-checks.json` and apply — never hand-PUT.
 
+### A pull request runs the IMPACTED ExUnit set; main runs all of it
+
+`Test (Elixir …)` no longer runs all 1,458 ExUnit files on a pull request. A
+step before it, `Which tests does this pull request need?`, computes the
+impacted subset with `scripts/elixir-impacted-tests.sh`; the `Test` step reads
+that answer from a file and runs either the list or the whole suite. Replayed
+over the last 40 api/-touching commits on main: 12 select everything, the rest a
+median of ~200 files.
+
+**Nothing about a push to main changed.** The dispatcher already emits every path
+set `true` on a non-pull_request event, and the selection step returns `ALL` on
+one, so every merge is still measured at its own sha, and `elixir-nightly.yml`
+still runs the whole suite with the excluded tags. That is what makes narrowing
+the PR side survivable: a PR-time selector reads compile-time edges and cannot
+see a runtime-only caller, so main-per-sha plus the nightly is the net under it.
+
+**The fail-safe is a polarity, not a list.** Exactly two path shapes can narrow —
+`api/lib/**/*.ex` and `api/test/**/*_test.exs`. Everything else selects `ALL`,
+along with an empty diff, an unresolvable `HEAD^1`, a failed `mix xref`, a lib
+file with no module in it, and a missing or empty selection file. Nothing is
+enumerated, so a new kind of path can only ever make this run more. Since an
+empty `xref` graph is legitimate for a leaf and catastrophic from a broken
+instrument, a positive control over `lib/barkpark/repo.ex` runs first: no
+dependents there and the whole run falls back to `ALL`.
+
+**The ALWAYS set** rides every narrowed selection — the tests a compile closure
+structurally cannot reach. Source-scanning censuses are DERIVED from the tree on
+every run, so one added tomorrow is in the net tomorrow; the runtime-registry
+tests (plugin registry, plugin routes, capabilities manifest, the route and
+authz censuses) are pinned with a reason each, and `--check-pins` reds when one
+is renamed rather than letting the net shrink silently.
+
+**Proof it can still catch.** `--selftest`, 47 cases, runs on the unfiltered
+`path-escape` job. Its section 4 replays nine real merged fixes: feeding the
+selector only the lib file each one touched selects the test that proves the
+fix, with the compile closure DISABLED — so the convention and by-name mappers
+alone are enough for them.
+
+**When it is wrong, something says so.** `elixir-main-red-attribution.yml` fires
+on a red `elixir` run on main, reconstructs the pull request's file set from the
+merge commit, re-runs the selector, and files a routed row through
+`scripts/file-ci-failure-issue.sh` naming the merge sha when a failing test is
+outside the answer. Its reconstruction runs without a build, so it under-reports
+what the pull request ran: a `COVERED` verdict is certain, a `SKIPPED` verdict is
+a candidate worth a look. Every selection is uploaded as an artifact — the only
+record of what a given sha actually executed.
+
 ### Blocking, required, and the difference
 
 **"Not required" and "cannot stop a merge" are different properties, and this

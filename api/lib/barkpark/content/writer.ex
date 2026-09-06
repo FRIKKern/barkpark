@@ -33,6 +33,7 @@ defmodule Barkpark.Content.Writer do
 
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, Synthesis}
   alias Barkpark.Preview
+  alias Barkpark.Tasks.BriefMirror
   alias Barkpark.Tasks.Stage
   alias Barkpark.Tasks.Transitions
 
@@ -196,7 +197,8 @@ defmodule Barkpark.Content.Writer do
     # its full reasoning. All four create-family verbs (create /
     # createOrReplace / createIfNotExists / replace) funnel through this one
     # function, so both gates cover the family rather than one instance.
-    with :ok <- refuse_orphan_top_level_keys(attrs),
+    with :ok <- refuse_bare_id(attrs, :create),
+         :ok <- refuse_orphan_top_level_keys(attrs),
          :ok <- refuse_colliding_status(attrs) do
       do_create_document_from_attrs(type, attrs, dataset, opts)
     end
@@ -242,7 +244,13 @@ defmodule Barkpark.Content.Writer do
            # continuous canvas keys its diff on block id, and an id-less block
            # projects to bpId:null → spurious insert-after → duplicate-block
            # corruption on the next edit. Additive (present ids preserved), idempotent.
-           |> maybe_ensure_block_ids(),
+           |> maybe_ensure_block_ids()
+           # A task brief's `purpose-copy` and `criteria-list` blocks are composed
+           # from `description` and `acceptance_criteria`; only the CLI create path
+           # ever composed them, so every later edit froze the brief a dispatched
+           # worker reads first. Re-derive on every write, matching by exact block
+           # id and preserving every other block untouched.
+           |> BriefMirror.maybe_resync_task_brief(type),
          :ok <- validate_task_kind(type, attrs),
          :ok <- refuse_malformed_label_spine(type, attrs) do
       do_create_document(type, attrs, dataset, doc_id, opts)
@@ -408,6 +416,22 @@ defmodule Barkpark.Content.Writer do
     with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <-
            ensure_close_reason_lands_with_a_close(type, attrs, dataset, doc_id, prev_doc, opts),
+         # THE DRAFT-ONLY TERMINAL FENCE (task-e49058a7f2b46a63). The publish
+         # door's transition gate runs AT PUBLISH, so a row that never
+         # publishes never meets it — and for a never-published row the draft
+         # IS the row of record. Lives in `Barkpark.Tasks` beside the one
+         # transition table it complements, called from here exactly like
+         # `Tasks.Dedup.check_new_task/5` below.
+         :ok <-
+           Barkpark.Tasks.DraftTerminalFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
+         # THE ONE RULE, PRODUCER SIDE (task-49eef068420df918). A task BIRTH of
+         # an id that already lives in a sibling dataset of this
+         # workspace+project is refused: the task doors take a bare id and no
+         # dataset, so the second copy makes the id ambiguous for every by-id
+         # reader. Lives in `Barkpark.Tasks` beside the resolver that states the
+         # rule; called from here exactly like the fence above.
+         :ok <-
+           Barkpark.Tasks.DatasetTwinFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
@@ -797,7 +821,10 @@ defmodule Barkpark.Content.Writer do
            # XSS hardening (mirror of create_after_dedup): scrub a verbatim
            # content["body_html"] on the patch/autosave path so poisoned markup
            # never persists as a draft that publish later promotes unchanged.
-           |> maybe_sanitize_paper_body_html(type),
+           |> maybe_sanitize_paper_body_html(type)
+           # Same brief re-sync as the create path — this is the door a `patch`
+           # comes through, and the one the drift was measured on.
+           |> BriefMirror.maybe_resync_task_brief(type),
          :ok <- validate_task_kind(type, attrs) do
       do_upsert_document(type, attrs, dataset, doc_id, opts)
     end
@@ -907,6 +934,22 @@ defmodule Barkpark.Content.Writer do
     with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <-
            ensure_close_reason_lands_with_a_close(type, attrs, dataset, doc_id, prev_doc, opts),
+         # THE DRAFT-ONLY TERMINAL FENCE (task-e49058a7f2b46a63). The publish
+         # door's transition gate runs AT PUBLISH, so a row that never
+         # publishes never meets it — and for a never-published row the draft
+         # IS the row of record. Lives in `Barkpark.Tasks` beside the one
+         # transition table it complements, called from here exactly like
+         # `Tasks.Dedup.check_new_task/5` below.
+         :ok <-
+           Barkpark.Tasks.DraftTerminalFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
+         # THE ONE RULE, PRODUCER SIDE (task-49eef068420df918). A task BIRTH of
+         # an id that already lives in a sibling dataset of this
+         # workspace+project is refused: the task doors take a bare id and no
+         # dataset, so the second copy makes the id ambiguous for every by-id
+         # reader. Lives in `Barkpark.Tasks` beside the resolver that states the
+         # rule; called from here exactly like the fence above.
+         :ok <-
+           Barkpark.Tasks.DatasetTwinFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
@@ -1831,6 +1874,83 @@ defmodule Barkpark.Content.Writer do
   @document_columns ~w(workspace_id project_id dataset_id owner_id)
 
   @collide_exempt @reserved_in ++ ~w(ifMatch ifRevisionID) ++ @document_columns
+
+  # [bare-id-refusal] task-eeaf3a622b6c74c7: a top-level `id` is NOT an address
+  # on this door, and until now it was not an error either.
+  #
+  # The create family reads its address as `attrs["_id"] || attrs["doc_id"]`
+  # (mutations.ex `apply_one/3`) and `@reserved_in` lists neither `id` nor any
+  # other unknown flat key — so `from_envelope/1`'s flat branch folded a bare
+  # `id` INTO content as an ordinary field while `generate_id/1` minted the row
+  # a DIFFERENT address. The write then reported success twice over (a 200, a
+  # rev, an `id` that reads back inside content) while the row lived somewhere
+  # the caller could not name, and the caller's own follow-up read of the id it
+  # chose answered `not_found`. The CLI refuses this client-side since #16432;
+  # every other door (raw HTTP mutate, MCP, LiveView) reached the fold.
+  #
+  # DECISION — refuse, do not alias. Aliasing `id` onto `_id` would INVENT an
+  # address for a caller who may have meant a content field, and would silently
+  # re-home documents that today store an `id` field and read it back. This
+  # envelope's address key is `_id`; the refusal says so, in the same words the
+  # CLI already uses ("is not the document id here"), so the two doors teach one
+  # rule. Unknown NON-reserved keys are untouched: folding them into content is
+  # the flat envelope's whole job.
+  #
+  # NOT the legacy `POST /api/documents/:type` door: `LegacyController.do_create/4`
+  # reads `attrs["id"]` AS the address and drops it from content before calling
+  # `upsert_document/4`, so a bare `id` is unambiguous there and never reaches
+  # this guard.
+  @doc false
+  def refuse_bare_id(attrs, door)
+
+  def refuse_bare_id(%{} = attrs, :create) do
+    if Map.has_key?(attrs, "id") do
+      {:error,
+       bare_id_changeset(
+         "`id` is not the document id here — this envelope keys the document as `_id`, " <>
+           "and a bare top-level `id` is folded INTO content as an ordinary field while the " <>
+           "row gets a GENERATED id. Send `_id` to choose the address, or move `id` inside a " <>
+           "`content` map if you really meant a content field named `id`."
+       )}
+    else
+      :ok
+    end
+  end
+
+  # A patch addresses the document by the op's own `id`, and `set` /
+  # `setIfMissing` fields are shallow-merged into content — so NEITHER `id` nor
+  # `_id` is addressable there. `_id` was silently DROPPED (it is in the patch
+  # arm's `protected` list) and `id` was silently STORED; both moved nothing and
+  # both said nothing. `unset` is deliberately not guarded: `unset: ["id"]` is
+  # how a caller removes a junk key an unpatched writer already stored.
+  def refuse_bare_id(%{} = fields, :patch) do
+    case Enum.filter(~w(id _id), &Map.has_key?(fields, &1)) do
+      [] ->
+        :ok
+
+      [key | _] ->
+        {:error,
+         bare_id_changeset(
+           "`#{key}` is not the document id here — a patch addresses the document by the op's " <>
+             "own `id`, and `set`/`setIfMissing` fields are merged INTO content, so `#{key}` " <>
+             "would move nothing. Drop it (a create/createOrReplace carrying a nested `content` " <>
+             "map is the way to store a content field named `#{key}`); `unset: [\"#{key}\"]` " <>
+             "deletes such a key if an older writer already stored one."
+         )}
+    end
+  end
+
+  # Malformed op payloads (a non-map `setIfMissing`, say) are ignored rather
+  # than fatal everywhere else in this path; keep that.
+  def refuse_bare_id(_attrs, _door), do: :ok
+
+  # Same `validation_failed` / `unknown_fields` envelope the orphan-key refusal
+  # uses, so a machine consumer keys on one field for both routing refusals.
+  defp bare_id_changeset(message) do
+    %Document{}
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.add_error(:unknown_fields, message)
+  end
 
   defp refuse_orphan_top_level_keys(%{} = attrs) do
     if is_map(Map.get(attrs, "content")) do

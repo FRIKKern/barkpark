@@ -15,7 +15,8 @@ defmodule Barkpark.Plugins.Media.MediaDeleteSavepointReproductionTest do
 
       (DBConnection.TransactionError) transaction is not started
       (CaseClauseError) no case clause matching: {:error, :rollback}
-        lib/barkpark/media.ex:680 Barkpark.Media.delete_file/2
+        lib/barkpark/media.ex Barkpark.Media.delete_file/2  (captured trace; the
+        line number it carried is dropped so the anchor is the function)
 
   The chain, every link in a dependency this repo vendors:
 

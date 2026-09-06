@@ -69,6 +69,9 @@ services:
       - BARKPARK_OPERATOR_TOKEN_IDS
       # Paper access-log retention (edit-on-the-link slice 4; read in api/config/runtime.exs)
       - BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS
+      # Per-dataset schema ENFORCEMENT opt-in (comma-separated slugs or `all`; #16147,
+      # read in api/config/runtime.exs). Unset = advise-only, the default.
+      - BARKPARK_SCHEMA_ENFORCE_DATASETS
       # Core web / endpoint
       - BARKPARK_ADMIN_TOKEN
       - BARKPARK_DEPLOYMENT_DIGEST

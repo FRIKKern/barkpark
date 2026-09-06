@@ -171,6 +171,17 @@ make_flip_fakes() {
   cat > "$dir/docker" <<'EOF'
 #!/usr/bin/env bash
 echo "docker $*" >> "$DOCKERLOG"
+# CLOBBER HOOK (private-copy case). `docker version` is the first outside
+# command the deploy runs, so this fires while the script is barely started and
+# has hundreds of lines still unread: it rewrites the script FILE the harness
+# invoked with garbage that is longer than the original, exactly as a later
+# run's scp does on the box. A script executing from its own private copy never
+# notices; one executing from the shared path reads the garbage at its next
+# buffer refill and dies on a parse error.
+if [ -n "${CLOBBER_TARGET:-}" ] && [ ! -f "$DSTATE/clobbered" ]; then
+  : > "$DSTATE/clobbered"
+  awk 'BEGIN{for(i=0;i<8000;i++) printf "this is not bash ) ) ( ;; done fi %d\n", i}' > "$CLOBBER_TARGET"
+fi
 slot_port() { case "$1" in
   control_plane_blue) printf '%s' "${PORT_BLUE:-4100}" ;;
   control_plane_green) printf '%s' "${PORT_GREEN:-4101}" ;;
@@ -270,11 +281,18 @@ EOF
   # Fake curl, URL-aware — the three probes must be drivable INDEPENDENTLY:
   #   --resolve …           the PUBLIC post-flip probe   -> PUBLIC_HEALTH_CODE
   #   …/v1/auth/login       the pre-flip DB probe        -> DB_CODE
+  #   …/info/refs           the origin probe differential -> CURL_INFO_REFS
   #   otherwise             the pre-flip '/' boot probe  -> HEALTH_CODE
   # so a slot that boots perfectly on its own port can still be driven to fail
-  # the public probe, which is the whole point of the post-flip gate.
+  # the public probe, which is the whole point of the post-flip gate. There is
+  # exactly ONE curl fake on purpose: a second `cat > "$dir/curl"` further down
+  # make_flip_fakes would silently clobber this one and turn every health probe
+  # into a real network call (it did — every post-flip case exited 14).
   cat > "$dir/curl" <<'EOF'
 #!/usr/bin/env bash
+for a in "$@"; do
+  case "$a" in *info/refs*) printf '%s' "${CURL_INFO_REFS:-200}"; exit 0 ;; esac
+done
 for a in "$@"; do
   case "$a" in --resolve) printf '%s' "${PUBLIC_HEALTH_CODE:-200}"; exit 0 ;; esac
 done
@@ -295,6 +313,37 @@ while [ "$i" -lt "${#args[@]}" ]; do
   esac
 done
 [ "$sub" = "rev-parse" ] && { echo "${FAKE_SHA:-deadbeefcafe}"; exit 0; }
+# The origin probe (task-a14a2f489452e95d). GIT_ORIGIN_FAIL selects which fault
+# origin has, and the ls-remote arm answers DIFFERENTLY depending on whether the
+# caller pinned protocol.version=0 — that asymmetry is the whole differential:
+#   auth   — both handshakes get the exact Username prompt stderr from the outage
+#   v0only — the PINNED handshake is refused, the default one works (stale pin)
+#   v2only — the DEFAULT handshake is refused, the pinned one works (barkpark-cp
+#            on git 2.34.1, i.e. the box the pull's pin exists for: must stay green)
+#   net    — DNS/connection failure, no auth wording at all
+[ "$sub" = "--version" ] && { echo "git version ${FAKE_GIT_VERSION:-2.34.1}"; exit 0; }
+[ "$sub" = "remote" ] && { echo "https://github.com/example/barkpark.git"; exit 0; }
+auth_refusal() {
+  echo "fatal: could not read Username for 'https://github.com': No such device or address" >&2
+  echo "fatal: expected flush after ref listing" >&2
+  exit 128
+}
+if [ "$sub" = "ls-remote" ]; then
+  v0=0; for a in "$@"; do [ "$a" = "protocol.version=0" ] && v0=1; done
+  case "${GIT_ORIGIN_FAIL:-}" in
+    auth)   auth_refusal ;;
+    v0only) [ "$v0" = 1 ] && auth_refusal ;;
+    v2only) [ "$v0" = 0 ] && auth_refusal ;;
+    net)    echo "fatal: unable to access 'https://github.com/x/y.git/': Could not resolve host: github.com" >&2; exit 128 ;;
+  esac
+  echo "${FAKE_SHA:-deadbeefcafe}	refs/heads/main"; exit 0
+fi
+# The pull carries the v0 pin, so it only fails where the PINNED handshake fails.
+if [ "$sub" = "pull" ]; then
+  case "${GIT_ORIGIN_FAIL:-}" in
+    auth|v0only) echo "fatal: could not read Username for 'https://github.com': No such device or address" >&2; exit 1 ;;
+  esac
+fi
 exit 0
 EOF
 
@@ -421,7 +470,7 @@ run_flip() {
       BARKPARK_PROVISIONER_UNIT="$FTMP/nonexistent-provisioner.service" \
       BARKPARK_PROVISIONER_BIN="$FTMP/usr-local-bin-barkpark-provisioner" \
       DOCKERLOG="$DOCKERLOG" GITLOG="$GITLOG" SYSCTLLOG="$SYSCTLLOG" DSTATE="$DSTATE" \
-      "$@" bash "$SCRIPT" ${PROV_ARG:+"$PROV_ARG"} > "$FTMP/out.log" 2>&1
+      "$@" bash "${RUN_SCRIPT:-$SCRIPT}" ${PROV_ARG:+"$PROV_ARG"} > "$FTMP/out.log" 2>&1
   echo "$?"
 }
 
@@ -435,6 +484,7 @@ with_provisioner() {
 }
 
 PROV_ARG=""
+RUN_SCRIPT=""   # cases run the repo script unless one opts into a copy
 upstream() { grep -oE 'reverse_proxy [^ ]+' "$CADDY" | head -1 | awk '{print $2}'; }
 
 # ---- Case 1: a healthy deploy flips blue(:4100) -> green(:4101) and retires blue
@@ -457,6 +507,43 @@ check "healthy: old blue slot retired AFTER the flip" "[ ! -f '$DSTATE/running.4
 check "healthy: the unrelated :9100 upstream survived the flip sed, exactly once" "collateral_intact"
 check "healthy: exactly one slot upstream in the file (the flip rewrote one line, not many)" \
   "[ \"\$(grep -c 'localhost:410[01]' '$CADDY')\" = '1' ]"
+
+# ---- Case 1b: QUEUED behind the deploy lock — the wait must not be SILENT
+# (task-8811b4b25c529dbe). MEASURED on main 2026-09-05..06: ten of the last
+# fourteen failed deploy.yml runs died with `client_loop: send disconnect:
+# Broken pipe` / exit 255, every one AFTER logging the "holds the lock" line.
+# The deploy was fine; the ssh session carrying it was idle for the length of
+# the lock wait and the runner NAT dropped it. A heartbeat is what puts bytes on
+# that session — and what lets a human reading the log tell a queue from a hang.
+#
+# The fake flock refuses `-n` (someone holds it) and times out THREE `-w` waits
+# before granting, so the wait crosses more than two heartbeat intervals with
+# the interval driven down to 1 s. Nothing here sleeps: the budget arithmetic is
+# what is under test, not the clock.
+setup_flip localhost:4100
+cat > "$FAKEBIN/flock" <<'FLOCKEOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  -n) exit 1 ;;
+  -w) n=$(cat "$FLOCK_TRIES" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$FLOCK_TRIES"
+      [ "$n" -le "${FLOCK_BLOCK_N:-0}" ] && exit 1
+      exit 0 ;;
+esac
+exit 0
+FLOCKEOF
+chmod +x "$FAKEBIN/flock"
+: > "$FTMP/flock.tries"
+rc="$(run_flip "FLOCK_TRIES=$FTMP/flock.tries" FLOCK_BLOCK_N=3 BARKPARK_LOCK_HEARTBEAT_SECS=1)"
+check "queued: the deploy still completes once the lock frees" "[ '$rc' = '0' ]"
+check "queued: the queueing line is still logged"  "grep -q 'another deploy holds the lock' '$FTMP/out.log'"
+check "queued: at least one HEARTBEAT while waiting (the ssh session carries bytes)" \
+  "[ \"\$(grep -c 'still queued for the deploy lock' '$FTMP/out.log')\" -ge 1 ]"
+check "queued: one heartbeat PER interval, not one for the whole wait" \
+  "[ \"\$(grep -c 'still queued for the deploy lock' '$FTMP/out.log')\" = '3' ]"
+check "queued: the heartbeat names seconds waited AND the unchanged 1800s budget" \
+  "grep -qE 'still queued for the deploy lock — [0-9]+s waited of 1800s max' '$FTMP/out.log'"
+check "queued: the lock was actually taken, not bypassed (the flip happened)" \
+  "[ \"\$(upstream)\" = 'localhost:4101' ]"
 
 # ---- Case 2: the PUBLIC post-flip probe fails -> flip REVERTED, old slot kept
 # ROOT CAUSE this guards: this curl was captured into $code, logged, and never
@@ -769,6 +856,62 @@ check "the failing signature is recorded in the script (the ref-listing line)" \
 check "the box's git version is recorded next to the pin" \
   "grep -q 'git 2.34.1' '$SCRIPT'"
 
+# ---- Case 19b: the origin probe NAMES which of THREE faults hides behind the one
+# "could not read Username" line (task-a14a2f489452e95d). 2026-09-02: three hours
+# of bare "pull failed". The probe must run the pull's OWN protocol pin, quote
+# git's stderr verbatim, run the differential (unpinned retry, anonymous
+# info/refs), name a verdict, emit an ::error:: line, exit 11, and never pull.
+setup_flip localhost:4100
+: > "$GITLOG"
+rc="$(run_flip GIT_ORIGIN_FAIL=auth CURL_INFO_REFS=401)"
+check "private-repo probe: exit 11" "[ '$rc' = '11' ]"
+check "private-repo probe: verdict names REPO PRIVATE and past-mistake #9" \
+  "grep -q 'REPO PRIVATE' '$FTMP/out.log' && grep -q 'past-mistake #9' '$FTMP/out.log'"
+check "private-repo probe: git stderr quoted VERBATIM, prefixed" \
+  "grep -q \"git: fatal: could not read Username for 'https://github.com': No such device or address\" '$FTMP/out.log'"
+check "private-repo probe: the second stderr line survives too" \
+  "grep -q 'git: fatal: expected flush after ref listing' '$FTMP/out.log'"
+check "private-repo probe: ::error:: carries the verdict for the check-run summary" \
+  "grep -q '::error::cp-deploy: pull refused — REPO PRIVATE' '$FTMP/out.log'"
+check "private-repo probe: the probe ran the pull's own protocol pin" \
+  "grep -qE 'git .*protocol.version=0 .*ls-remote' '$GITLOG'"
+check "private-repo probe: the pull itself never ran" "! grep -qE 'git .*pull --ff-only' '$GITLOG'"
+check "private-repo probe: no bare 'pull failed' line survives" "! grep -q '] pull failed' '$FTMP/out.log'"
+: > "$GITLOG"
+rc="$(run_flip GIT_ORIGIN_FAIL=auth CURL_INFO_REFS=200)"
+check "unauthenticated-remote probe: anonymous info/refs 200 → REMOTE UNAUTHENTICATED, exit 11" \
+  "[ '$rc' = '11' ] && grep -q 'REMOTE UNAUTHENTICATED' '$FTMP/out.log' && ! grep -q 'REPO PRIVATE' '$FTMP/out.log'"
+: > "$GITLOG"
+rc="$(run_flip GIT_ORIGIN_FAIL=v0only CURL_INFO_REFS=200)"
+check "stale-pin probe: v0 refused but the default handshake works → PROTOCOL PIN STALE, exit 11" \
+  "[ '$rc' = '11' ] && grep -q 'PROTOCOL PIN STALE' '$FTMP/out.log' && ! grep -qE 'REPO PRIVATE|REMOTE UNAUTHENTICATED' '$FTMP/out.log'"
+: > "$GITLOG"
+rc="$(run_flip GIT_ORIGIN_FAIL=net)"
+check "network probe: exit 11 with the network classification, none of the three auth verdicts" \
+  "[ '$rc' = '11' ] && grep -q 'origin refused the ref listing (network' '$FTMP/out.log' && ! grep -qE 'PROTOCOL PIN STALE|REMOTE UNAUTHENTICATED|REPO PRIVATE' '$FTMP/out.log'"
+# NEGATIVE ARM 1 — the probe must not refuse the very box the pin above exists for.
+# GIT_ORIGIN_FAIL=v2only is barkpark-cp's 2026-09-02 git 2.34.1: protocol v2
+# refused, v0 fine. A probe that did not carry the pin would red here.
+: > "$GITLOG"
+rc="$(run_flip GIT_ORIGIN_FAIL=v2only)"
+check "pinned box (v2 refused, v0 fine): the probe passes and the deploy proceeds" "[ '$rc' = '0' ]"
+check "pinned box: the pull still ran" "grep -qE 'git .*pull --ff-only' '$GITLOG'"
+check "pinned box: no refusal verdict was printed" \
+  "! grep -q 'pull refused before it ran' '$FTMP/out.log'"
+# NEGATIVE ARM 2 — a healthy origin leaves the pull path behaviourally identical:
+# the deploy still exits 0, still flips, and the probe adds exactly ONE log line.
+# Fresh setup_flip: the arm above already consumed one flip (4100 -> 4101), and a
+# second deploy from that state flips BACK, so re-asserting 4101 needs a reset.
+setup_flip localhost:4100
+: > "$GITLOG"
+rc="$(run_flip)"
+check "healthy origin: the probe passes and the pull runs" \
+  "[ '$rc' = '0' ] && grep -qE 'git .*pull --ff-only' '$GITLOG'"
+check "healthy origin: the flip still landed" "[ \"\$(upstream)\" = 'localhost:4101' ]"
+check "healthy origin: the probe adds exactly one log line, no ::error::" \
+  "[ \"\$(grep -c 'git ls-remote origin (probe before pull' '$FTMP/out.log')\" = 1 ] && ! grep -q '::error::' '$FTMP/out.log'"
+rm -rf "$FTMP"
+
 # ===========================================================================
 # THE PROVISIONER RESTART GATE
 # (dr-w20-bl-provisioner-restart-cannot-fail-the-deploy / dr-w19 criterion 2)
@@ -884,13 +1027,72 @@ check "the recipe retags the rollback image (both slots are :latest in compose)"
 check "the script still saves that rollback tag before the pull" \
   "grep -q '^docker tag cloud-control_plane:latest cloud-control_plane:rollback' '$SCRIPT'"
 
+# ---- Case 25 (dr-private-copy): the script file is REWRITTEN under the running
+# bash and the deploy still completes on the ORIGINAL bytes.
+#
+# ROOT CAUSE: deploy.yml scps this script to the SHARED /tmp/cp-deploy.sh on
+# barkpark-cp and runs `bash /tmp/cp-deploy.sh`. bash reads a script by byte
+# offset from an fd it keeps open while executing, so a later run's scp — normal
+# under our merge cadence, where queued runs sit on the deploy lock — rewrites
+# that file under a running deploy, which then reads shifted bytes of a
+# DIFFERENT file. Observed twice in nine runs: run 34021843141 "line 329:
+# return: can only `return' from a function or sourced script" / "line 334: what:
+# unbound variable", run 34025907184 "line 383: syntax error near unexpected
+# token `)'" — function bodies executed as top-level code.
+#
+# The case runs a COPY of the script (never the repo file) and has the fake
+# docker rewrite that copy on the deploy's FIRST outside command. The clobber is
+# asserted to have actually landed, so a hook that silently stopped firing reds
+# here instead of passing vacuously.
+setup_flip localhost:4100
+RUN_SCRIPT="$FTMP/cp-deploy.shared.sh"
+cp "$SCRIPT" "$RUN_SCRIPT"
+rc="$(run_flip CLOBBER_TARGET="$RUN_SCRIPT")"
+check "clobber: the harness actually rewrote the script file mid-run (non-vacuity)" \
+  "[ -f '$DSTATE/clobbered' ] && grep -q 'this is not bash' '$RUN_SCRIPT'"
+check "clobber: the rewritten file is no longer the script" \
+  "! grep -q 'BARKPARK_DEPLOY_PRIVATE_COPY' '$RUN_SCRIPT'"
+check "clobber: exit 0 — the run completed on its own bytes"  "[ '$rc' = '0' ]"
+check "clobber: no bash parse error in the run's output" \
+  "! grep -qE 'syntax error|unexpected token|can only .return. from a function' '$FTMP/out.log'"
+check "clobber: the flip still happened (:4101)"  "[ \"\$(upstream)\" = 'localhost:4101' ]"
+check "clobber: green slot booted"                "[ -f '$DSTATE/running.4101' ]"
+check "clobber: old blue slot retired"            "[ ! -f '$DSTATE/running.4100' ]"
+check "clobber: the private copy left nothing behind in TMPDIR" \
+  "[ -z \"\$(find \"${TMPDIR:-/tmp}\" -maxdepth 1 -name 'bp-deploy-self.*' -print -quit 2>/dev/null)\" ]"
+RUN_SCRIPT=""
+
+# ---- Static: the private-copy preamble, in EVERY sibling the CD workflows scp
+# to a shared /tmp path and then `bash`. Derived from the workflows, not from
+# memory: .github/workflows/deploy.yml scps cp-deploy.sh (control plane) and
+# instance-deploy.sh (guerrilla); .github/workflows/cp-ops.yml streams
+# site-runtime-install.sh. A new script joining that list without the preamble
+# is the same defect again, so the count is asserted, not just the presence.
+echo
+echo "private-copy preamble across the scp'd siblings (dr-private-copy)"
+SIBLINGS="cp-deploy.sh instance-deploy.sh site-runtime-install.sh"
+for sib in $SIBLINGS; do
+  check "$sib re-execs from a private copy before doing anything" \
+    "grep -q 'exec bash \"\$__bp_self\" \"\\\$@\"' '$HERE/$sib'"
+  check "$sib guards the copy on the copy's own PATH (an inherited flag cannot delete the real script)" \
+    "grep -q '\\[ \"\${BARKPARK_DEPLOY_PRIVATE_COPY:-}\" = \"\$0\" \\]' '$HERE/$sib'"
+  check "$sib puts the copy outside any checkout (mktemp in TMPDIR), never beside itself" \
+    "grep -q 'mktemp \"\${TMPDIR:-/tmp}/bp-deploy-self.XXXXXX\"' '$HERE/$sib'"
+  check "$sib unlinks the copy as it starts, so a killed run leaks nothing" \
+    "grep -q 'rm -f \"\$0\" 2>/dev/null' '$HERE/$sib'"
+  check "$sib warns rather than refusing when the copy cannot be made" \
+    "grep -q 'private-copy. WARNING' '$HERE/$sib'"
+  check "$sib runs the preamble BEFORE its set -.uo pipefail line" \
+    "[ \"\$(grep -n 'BARKPARK_DEPLOY_PRIVATE_COPY' '$HERE/$sib' | head -1 | cut -d: -f1)\" -lt \"\$(grep -n '^set -[eu]' '$HERE/$sib' | head -1 | cut -d: -f1)\" ]"
+done
+
 echo
 # NON-VACUITY FLOOR. Asserted BEFORE the verdict: `fails -eq 0` is satisfied
 # just as well by a run that executed nothing at all. The floor is a lower
 # bound, never an exact total — checks are added over time and an exact count
 # would red on every addition, which trains people to bump the number instead
 # of reading it.
-MIN_CHECKS=125
+MIN_CHECKS=155
 echo "checks executed: $checks_ran (floor $MIN_CHECKS)"
 if [ "$checks_ran" -lt "$MIN_CHECKS" ]; then
   echo "  FAIL: only $checks_ran checks ran (floor $MIN_CHECKS) — this harness went VACUOUS; a green here would be meaningless"

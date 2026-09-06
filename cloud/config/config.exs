@@ -297,6 +297,14 @@ config :barkpark_cloud, Oban,
        # "building" (crashed builder) or "pushing" (crashed on-box agent) so one
        # crashed worker never strands a site's deploys behind an eternal spinner.
        {"* * * * *", BarkparkCloud.Workers.StaleDeploymentReaper},
+       # warm-pool twin of the two reapers above (task-d5f8c2634f323169). Recovery
+       # of a leaked `warm_servers` claim was LAZY — `reap_stale_warm_claims/0`
+       # ran only from INSIDE the two claim transactions — and the provisioner
+       # defaults WARM_POOL_SIZE to 0, so with the pool disabled, the provisioner
+       # down or mid-deploy, nothing claimed and nothing reaped. A leaked
+       # claimed/retiring row is a real billed Hetzner box the plane no longer
+       # tracks. Same threshold as the lazy path; this adds only the clock.
+       {"* * * * *", BarkparkCloud.Workers.StaleWarmClaimReaper},
        # health-status: the per-minute silent-agent staleness sweep (the
        # ServerManagerJob analog). Rides the same :maintenance queue as the
        # reaper above — cheap index range-scans that must not stampede.
@@ -358,7 +366,20 @@ config :barkpark_cloud, Oban,
        # sweeps, and it rides :site_deploy (concurrency 1) rather than
        # :maintenance — a sweep that starts builds belongs behind the same serial
        # gate the debounced auto-deploy uses.
-       {"41 * * * *", BarkparkCloud.Sites.TemplateFreshnessWorker}
+       {"41 * * * *", BarkparkCloud.Sites.TemplateFreshnessWorker},
+       # dr-w11: re-register the content-publish webhook of any site that should
+       # have one and does not. Registration used to run on site create and on an
+       # explicit human backfill ONLY, so a create-time failure (guerrilla's
+       # `auto-proof` 422'd inside a 20-minute defect window on 2026-07-14) left
+       # that site unable to auto-deploy FOREVER, silently — `sites` carries no
+       # column recording registration state, so nothing could even find it.
+       # Hourly rather than per-minute because each swept site costs a cross-host
+       # webhook LIST against its box and the fault it repairs is a create-time
+       # one-shot measured in weeks. Bounded per tick
+       # (`@content_webhook_reconcile_limit`) and offset to :53 so it never
+       # stampedes the :00 / :07 / :17 / :41 sweeps. Rides :maintenance, not
+       # :site_deploy — it registers an endpoint, it never starts a build.
+       {"53 * * * *", BarkparkCloud.Workers.ContentWebhookReconciler}
      ]}
   ]
 

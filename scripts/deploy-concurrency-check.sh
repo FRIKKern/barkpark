@@ -34,6 +34,24 @@
 # evaluates to false today and to something else the day a branch is added. This
 # gate pins the deploy workflow to the literal.
 #
+# LEG TWO, SAME PROPERTY, MEASURED 2026-09-05..06 (task-8811b4b25c529dbe). Not
+# being EVICTED is worthless if the queued run is reported failed for queueing.
+# Ten of the last fourteen failed deploy.yml runs on main died only in the
+# instance job with `client_loop: send disconnect: Broken pipe` and exit 255,
+# every one of them after logging "another deploy holds the lock — queueing".
+# The on-box wait is silent, so the ssh session carries no bytes and the runner
+# NAT drops it after roughly five minutes. The client-side half of that fix is
+# a keepalive on EVERY ssh/scp option string in the workflow:
+#
+#   -o ServerAliveInterval=30 -o ServerAliveCountMax=90     (= 45 min tolerance)
+#
+# and 45 min must stay comfortably over the longest on-box lock wait, which is
+# 1800 s (deploy/instance-deploy.sh, deploy/cp-deploy.sh). This gate reds if any
+# SSH=/SCP= string in the target loses the pair or drops the product under that
+# floor. The on-box half — a heartbeat line while queued — lives in the deploy
+# scripts and is guarded by deploy/cp-deploy_test.sh and
+# deploy/instance-deploy_test.sh.
+#
 # WHAT MAKES THE EXTRA RUNS SAFE is not this file: deploy/instance-deploy.sh and
 # deploy/cp-deploy.sh open the deploy lock, log "another deploy holds the lock —
 # queueing (max 30 min)" and flock -w 1800, then pull AFTER taking it ("git fetch
@@ -44,7 +62,7 @@
 #
 # EXIT CODES
 #   0  the stanza cannot drop a queued deploy
-#   1  FINDING — it can; the reason is named
+#   1  FINDING — it can, or an ssh/scp string lost its keepalive; the reason is named
 #   2  CANNOT MEASURE — no python3/PyYAML, no target file, no concurrency block,
 #      or a bad flag. Never a vacuous green: a stanza that could not be read is
 #      not a stanza that passed.
@@ -178,4 +196,66 @@ if grep -q '^FAIL ' <<<"$RESULT"; then
   exit 1
 fi
 
-echo "deploy-concurrency gate OK — ${TARGET} keeps one group per push sha and never cancels."
+# ---------------------------------------------------------------------------
+# LEG TWO: the ssh client keepalive on every SSH=/SCP= string.
+#
+# Deliberately a TEXT scan, not a YAML one: these assignments live inside `run:`
+# script bodies, so the parser hands them back as one opaque string per step and
+# a structural read would have to re-lex the shell anyway.
+#
+# LOCK_WAIT_FLOOR is the longest on-box `flock` budget the workflow can be
+# waiting behind (instance-deploy.sh / cp-deploy.sh, 1800 s). Interval x count
+# must EXCEED it, so a session queued for the whole budget is never dropped
+# mid-wait. 30 x 90 = 2700 s leaves 15 minutes of headroom.
+LOCK_WAIT_FLOOR=1800
+KA_N=0
+KA_FINDINGS=""
+
+while IFS= read -r line; do
+  case "$line" in
+    *SSH=\"ssh\ *|*SCP=\"scp\ *) : ;;
+    *) continue ;;
+  esac
+  KA_N=$((KA_N + 1))
+  interval=""; countmax=""
+  case "$line" in
+    *ServerAliveInterval=*) interval="${line#*ServerAliveInterval=}"; interval="${interval%%[! 0-9]*}"; interval="${interval%% *}" ;;
+  esac
+  case "$line" in
+    *ServerAliveCountMax=*) countmax="${line#*ServerAliveCountMax=}"; countmax="${countmax%%[! 0-9]*}"; countmax="${countmax%% *}" ;;
+  esac
+  trimmed="${line#"${line%%[![:space:]]*}"}"
+  if [ -z "$interval" ] || [ -z "$countmax" ]; then
+    KA_FINDINGS="${KA_FINDINGS}FAIL ssh/scp string without a ServerAliveInterval + ServerAliveCountMax pair: ${trimmed}
+"
+    continue
+  fi
+  window=$((interval * countmax))
+  if [ "$window" -le "$LOCK_WAIT_FLOOR" ]; then
+    KA_FINDINGS="${KA_FINDINGS}FAIL keepalive window ${interval}x${countmax}=${window}s does not exceed the ${LOCK_WAIT_FLOOR}s on-box lock wait: ${trimmed}
+"
+  fi
+done < "$TARGET"
+
+if [ "$KA_N" -eq 0 ]; then
+  echo "ssh keepalive: no SSH=/SCP= strings in ${TARGET} — nothing to check"
+else
+  echo "ssh keepalive: ${KA_N} ssh/scp string(s) checked against a ${LOCK_WAIT_FLOOR}s lock wait"
+fi
+
+if [ -n "$KA_FINDINGS" ]; then
+  printf '%s' "$KA_FINDINGS"
+  echo "" >&2
+  echo "deploy-concurrency gate FAILED — a queued deploy can be reported FAILED for queueing." >&2
+  echo "" >&2
+  echo "Every ssh/scp option string in ${TARGET} must carry:" >&2
+  echo "    -o ServerAliveInterval=30 -o ServerAliveCountMax=90" >&2
+  echo "" >&2
+  echo "The on-box deploy waits up to ${LOCK_WAIT_FLOOR}s for the deploy lock and the" >&2
+  echo "session is silent while it does. Without a keepalive the runner NAT drops it" >&2
+  echo "after ~5 min, ssh exits 255, and a run that was merely QUEUED is recorded as a" >&2
+  echo "failed production deploy (10 of the last 14 failed main runs, 2026-09-05..06)." >&2
+  exit 1
+fi
+
+echo "deploy-concurrency gate OK — ${TARGET} keeps one group per push sha, never cancels, and keeps every ssh session alive through a queued deploy."

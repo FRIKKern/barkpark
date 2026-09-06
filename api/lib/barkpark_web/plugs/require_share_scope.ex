@@ -77,6 +77,29 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
       so a member or flat caller carries no assign and is unaffected — the
       fence narrows the share surface and nothing else.
 
+  ## Ruling: a `:media` share is THE anonymous path (task-8627e1a3f974693d)
+
+  RULED 2026-09-06, do not re-derive: route admission on the scoped media
+  surface never reads an asset's `bp_visibility` (`git grep bp_visibility`
+  over `api/lib/barkpark_web/plugs` is empty by design). `bp_visibility` is a
+  serve-time NARROWING applied after admission (`MediaController`
+  `visibility_clamp_opts/1`), never an admission WIDENING — publishing an
+  asset `public` cannot open a door no plug asks about. So a website that
+  needs anonymous `<img>` loads of a NON-Default tenant's media (the flat
+  `/media/*` routes are anonymous but pinned to the seeded Default workspace)
+  gets them ONE way: a `:read` share on the scope for the `:media` surface,
+  granted by this plug — GET/HEAD only, dataset-fenced via `:share_dataset`,
+  with the per-asset clamp still applied because an anonymous caller is not
+  `Barkpark.Media.Storage.Access.authenticated?/1`. The SDK's scoped
+  `client.imageUrl` already emits the scoped rendition URL that resolves once
+  the share exists. Widening admission on a document field was refused
+  because it would be a second source of truth for "public" beside shares.
+  KNOWN OVER-PROMISE, deliberately left visible: an asset marked `public`
+  inside a scope that is NOT shared is readable only by members and
+  public-read tokens — the label says more than the route grants, and any
+  affordance that lets an operator "publish this scope's media" must create
+  the `:media` share, not flip asset visibility.
+
   Pipeline placement: runs BEFORE `BarkparkWeb.Plugs.ResolveWorkspace` (and
   `ResolveProject`). It only ever ADDS assigns on the public-share path; it
   never halts. The non-shared path leaves the conn assigns identical to what a

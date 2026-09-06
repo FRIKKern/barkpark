@@ -46,6 +46,14 @@ defmodule Barkpark.Tasks.Close do
   #     a row that HAS children (TASK-SYSTEM.md §5 "Decisions and goals may omit
   #     them"; schema.ex: "a goal is a root task, a phase is a task with
   #     children") — as are `cancelled` and `blocked` closes.
+  #   * CANCEL REASON (task-650d7844d8fe7199) — a `cancelled` close whose reason
+  #     is absent, empty or whitespace-only is REFUSED (`:cancel_reason_required`).
+  #     Every gate above exempts `cancelled` by name, which is right on its own
+  #     and wrong in combination: for a cancel the reason is the ENTIRE record,
+  #     and it was the one field a caller could omit. Measured 2026-09-06: two
+  #     real rows cancelled with `""` in one minute, rc=0, `close_reason` absent.
+  #     `done` and `blocked` are exempt BY NAME. There is NO override and NO
+  #     default — the escape hatch is to pass the reason.
   #
   # NONE OF THIS IS AUTHORIZATION. `worker_id` arrives as a client-supplied body
   # param (`tasks_controller.ex` close/2), never from the api_token, so a caller
@@ -74,9 +82,11 @@ defmodule Barkpark.Tasks.Close do
       check_worker_id: 1
     ]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Plugins.Github.Acknowledgement
   alias Barkpark.Repo
+  alias Barkpark.Tasks.Blockers
   alias Barkpark.Tasks.Criteria
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.WorkDigest
@@ -241,7 +251,7 @@ defmodule Barkpark.Tasks.Close do
 
     result =
       Repo.transaction(fn ->
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_id)])
 
         # global-read: task-close by-PK — task_id IS the Document PK; tenancy is resolved by the caller's CAS claim (worker+epoch) inside this per-task advisory-locked txn, not a workspace_id thread (internal-worker posture).
         case Repo.get(Document, task_id) do
@@ -426,10 +436,12 @@ defmodule Barkpark.Tasks.Close do
        ) do
     result =
       Repo.transaction(fn ->
-        # 1. Advisory lock — per-task. hashtext('task:' || doc_id) gives a
-        #    deterministic int4 key; pg_advisory_xact_lock takes an int4 or
-        #    bigint and auto-releases at COMMIT/ROLLBACK.
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
+        # 1. Advisory lock — per-task, on `LockKey.task/1` = 'task:' <> the
+        #    document's UUID PRIMARY KEY (`task_id` here IS the uuid; it is
+        #    NOT the doc_id slug). hashtext gives a deterministic int4 key;
+        #    pg_advisory_xact_lock takes an int4 or bigint and auto-releases
+        #    at COMMIT/ROLLBACK.
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_id)])
 
         # global-read: task-close by-PK — task_id IS the Document PK; tenancy is resolved by the caller's CAS claim (worker+epoch) inside this per-task advisory-locked txn, not a workspace_id thread (internal-worker posture).
         #
@@ -522,6 +534,7 @@ defmodule Barkpark.Tasks.Close do
                        check_criteria_proven(
                          doc,
                          new_status,
+                         criteria,
                          landed,
                          overrides.criteria,
                          overrides.acknowledgement
@@ -540,6 +553,11 @@ defmodule Barkpark.Tasks.Close do
                          landed,
                          overrides.close_reason
                        ),
+                     # LAST of the honesty gates, after D291, because the two
+                     # are disjoint by STATUS — D291 fires only on `done`, this
+                     # only on `cancelled` — so no caller can ever be shown the
+                     # wrong one of the pair, whichever order they sit in.
+                     :ok <- check_cancel_reason(new_status, reason),
                      {:ok, updated} <-
                        apply_close_update(
                          doc,
@@ -558,13 +576,49 @@ defmodule Barkpark.Tasks.Close do
                          ),
                          caller_token_id
                        ) do
+                  # THE CLOSER IS NAMED ON EVERY CLOSE (pds-bl-close-audit-gaps).
+                  #
+                  # `apply_close_update/9` stamps `closed_by` into the CLAIM, so
+                  # a row that was never claimed took its `_ ->` arm and the
+                  # whole close — document and event alike — named nobody.
+                  # Measured on the guerrilla ledger 2026-09-06: 139 of 6,617
+                  # terminal rows carry no claim map at all (84 done, 53
+                  # cancelled, 2 blocked), three of them closed inside the
+                  # trailing 14 days. The count is an absence, not a blind
+                  # probe: 6,332 rows DO carry `claim.closed_by`.
+                  #
+                  # EVERY ONE OF THOSE 139 IS LEGITIMATELY CLAIMLESS — container
+                  # and root rows, and killed backlog rows nobody ever picked
+                  # up, which is why `cancelled` and `blocked` are exempt from
+                  # the criteria gate BY NAME. (A LEAD sealing somebody else's
+                  # row is NOT among them: that row HAS a claim, so it takes the
+                  # claim arm and `holder_override` records the foreign seal.)
+                  # "Never claimed" and "closed by nobody" are DIFFERENT FACTS
+                  # and the ledger has to keep telling them apart, so the
+                  # identity is recorded HERE, on the event an audit reads,
+                  # beside the `caller_token_id` stamp already on it — and the
+                  # DOCUMENT goes on saying, truthfully, that nobody ever held
+                  # this row.
+                  #
+                  # SYNTHESISING A CLAIM WOULD HAVE BEEN THE DESTRUCTIVE FIX. It
+                  # erases the never-held fact a container row depends on, and
+                  # it silently converts `idempotent_replay?/3` — which refuses
+                  # to answer a replay on a claimless row precisely so an
+                  # unidentifiable second caller is not handed a success
+                  # receipt — into exactly that receipt.
+                  #
+                  # Both actors stay distinguishable and stay labelled for what
+                  # they are: `closed_by` is the name the caller ASSERTED (a
+                  # client-supplied body param — see the moduledoc), while
+                  # `caller_token_id` is the bearer the server AUTHENTICATED.
+                  # Metadata only; nothing here authorizes anything.
                   ev =
                     insert_mutation_event!(
                       updated,
                       @event_task_closed,
                       observed_rev,
                       "api",
-                      caller_stamp(caller_token_id)
+                      Map.put(caller_stamp(caller_token_id), "closed_by", worker_id)
                     )
 
                   unblocked = cascade_unblock_dependents!(updated)
@@ -683,8 +737,55 @@ defmodule Barkpark.Tasks.Close do
   # a closer asserting its own proof; the marker + the merge artifact ARE the
   # proof, and counting them would refuse every lead seal close and re-break the
   # exact ritual D288 protects.
-  defp check_criteria_proven(%Document{} = doc, "done", landed, override_reason, ack_override) do
-    case unmet_after_autostamp(doc, landed, ack_override) do
+  #
+  # BOTH DIRECTIONS, NOT ONE (task-c652c3ba8129c607). "Measured on the doc AS
+  # READ" was written to defeat ONE direction of the flip — a closer raising an
+  # unmet criterion to `met: true` in the closing write and grading its own
+  # homework. It does defeat that. But a predicate that reads only the BEFORE
+  # snapshot is blind to the write it is gating, so the MIRROR sailed through:
+  # stamp a criterion `met: true`, then close `done` with
+  # `--set criteria:=[{"index":0,"met":false}]`. The gate reads the pre-write
+  # row (nothing unmet), passes, and the SAME rev-CAS write lowers the lock.
+  # REPRODUCED VERBATIM on prod row task-8e3942fa840b8bf3 (2026-09-06):
+  # close rc=0, `lifecycle_status: "done"`, criterion stored `met: false`, and
+  # NO `close_override` key on the raw read-back at all. The server's only
+  # answer was the post-write advisory `acceptance_criteria: 0/1 met`. That is
+  # not a false-done in the usual direction — the row reads honestly unmet —
+  # it is an ATTRIBUTION hole: `close_override.criteria` exists precisely to
+  # record WHO closed over an unmet criterion and WHY, and this path produces
+  # the same outcome with none of it.
+  #
+  # So the unmet set is the UNION of the two snapshots: unmet BEFORE the write
+  # (the original defence — a criterion this close is about to raise still
+  # counts, because the closer may not prove its own homework) and unmet AFTER
+  # the close's own `criteria` payload is merged in (the new arm — a criterion
+  # this close is about to LOWER counts too, because the row ENDS unmet). Union,
+  # never replacement: measuring only the post-merge state would hand the
+  # false->true closer exactly the pass D289 was built to deny.
+  #
+  # WHY THE UNION AND NOT THE TWO NARROWER FIXES. Refusing a `true -> false`
+  # flip inside `merge_criteria` would be the exact mirror of the existing
+  # `flips_met_true?/1` rule, but it gates on the SHAPE of the write (a flip)
+  # rather than on the OUTCOME (a `done` row carrying an unmet criterion), and
+  # it offers no override — the closer with a real reason to lower a lock and
+  # close anyway would have no way to say so ON THE RECORD, which is the very
+  # thing missing here. Promoting the post-write `0/1 met` advisory to the 409
+  # its own text describes is smaller still, but that advisory is computed from
+  # the STORED row after the write has already committed, and it cannot see
+  # `criteria_override` — promoting it verbatim would refuse the overridden
+  # closes D289 deliberately permits. This arm widens a predicate that gates a
+  # REFUSAL, and that refusal is appealable by `criteria_override` — the one
+  # key whose absence IS the defect. A wide predicate gating a refusal is cheap
+  # and appealable; a wide predicate gating a permit fabricates.
+  defp check_criteria_proven(
+         %Document{} = doc,
+         "done",
+         criteria,
+         landed,
+         override_reason,
+         ack_override
+       ) do
+    case unmet_across_close(doc, criteria, landed, ack_override) do
       [] ->
         {:ok, nil}
 
@@ -697,9 +798,38 @@ defmodule Barkpark.Tasks.Close do
   end
 
   # Exempt BY NAME — not by falling through a catch-all.
-  defp check_criteria_proven(%Document{}, status, _landed, _override, _ack_override)
+  defp check_criteria_proven(%Document{}, status, _criteria, _landed, _override, _ack_override)
        when status in ~w(cancelled blocked),
        do: {:ok, nil}
+
+  # The union of the pre-write and post-merge unmet sets, keyed by index and
+  # returned in index order (the `criteria_unmet` refusal prints these, and a
+  # refusal whose indices arrive in write order rather than row order reads as
+  # a different bug).
+  #
+  # The post-merge snapshot runs the SAME `unmet_after_autostamp/3` against a
+  # doc whose content has the close's payload merged in, so both arms inherit
+  # the merge-gate and acknowledgement deductions identically — a criterion the
+  # autostamp is about to prove must not be counted by either arm.
+  #
+  # A merge error here yields the PRE-write set alone rather than crashing:
+  # `check_criteria_payload/2` runs AHEAD of this gate in the same `with` chain
+  # and already dry-ran the identical merge, so a malformed payload has aborted
+  # the close with its own named error before this line is ever reached. This
+  # clause exists so the union is total, not because the error is reachable.
+  defp unmet_across_close(%Document{content: content} = doc, criteria, landed, ack_override) do
+    before = unmet_after_autostamp(doc, landed, ack_override)
+
+    after_merge =
+      case merge_criteria(content || %{}, criteria) do
+        {:ok, merged} -> unmet_after_autostamp(%{doc | content: merged}, landed, ack_override)
+        {:error, _reason} -> []
+      end
+
+    (before ++ after_merge)
+    |> Enum.uniq_by(&Map.get(&1, "index"))
+    |> Enum.sort_by(&Map.get(&1, "index"))
+  end
 
   # ACKNOWLEDGEMENT GATE — the reporter loop.
   #
@@ -814,6 +944,75 @@ defmodule Barkpark.Tasks.Close do
   defp check_close_artifact(%Document{}, status, _reason, _landed, _override)
        when status in ~w(cancelled blocked),
        do: {:ok, nil}
+
+  # ─── THE CANCEL REASON GATE (task-650d7844d8fe7199) ──────────────────────
+  #
+  # Every gate above this one EXEMPTS `cancelled` BY NAME — the criteria gate
+  # (D289) and the close artifact gate (D291) — because abandoning the
+  # acceptance criteria is precisely what cancelling MEANS, and main's ruling on
+  # task-ce0c0ffff6edde23 offers "cancel with the reason" as the honest exit
+  # from D291. Those exemptions are right. Their COMBINED effect was not: on a
+  # cancel the reason is not one record among several, it is the ENTIRE record,
+  # and it was the one field a caller was allowed to omit.
+  #
+  # MEASURED 2026-09-06 ~05:27Z, twice inside one minute, on real rows: a
+  # scripting fault expanded `$(cat reason.txt)` to the empty string and
+  #
+  #     bp task close task-e1920c0a8cd3013b lead-cli 1 cancelled "" --yes
+  #
+  # returned rc=0 and printed `✓ the store holds it — lifecycle_status=cancelled`.
+  # Read back: lifecycle `cancelled`, `close_reason` ABSENT, and no record
+  # anywhere of why the work was abandoned. `apply_close_update/9` writes
+  # `close_reason` only for a non-empty binary (blank never clobbers a stored
+  # value — right for a replay, and the reason this landed silently), so a blank
+  # reason on a first close writes NOTHING and says so to nobody. That is the
+  # absent-vs-zero collapse this tree refuses everywhere else, on the one status
+  # whose reason nothing else backs.
+  #
+  # BLANK MEANS ABSENT **OR** WHITESPACE-ONLY. `nil` and `""` are the shapes the
+  # measured fault produced; `" "` is the same fault with a stray space and is
+  # strictly worse, because today it DOES write — storing a space as the whole
+  # justification for abandoning a task. A gate that refuses "" and accepts " "
+  # would be a gate you can typo your way past.
+  #
+  # SCOPED TO `cancelled` ONLY, and `blocked` is deliberately NOT included even
+  # though the filing invited it. Three facts say they are different shapes:
+  # `blocked` is an HONEST PARTIAL — the work continues, so no final record is
+  # due yet (the same reasoning that exempts it from the acknowledgement gate);
+  # `@terminal_for_disposition` is `~w(done cancelled)`, so the ledger itself
+  # does not count a block as an ending; and the Studio board DRAGS to blocked
+  # through `Board.restage_plan/4` -> `{:close, "blocked"}` with NO reason and
+  # no affordance to type one, so refusing blank there would break a shipped UI
+  # path that has no fix available to its user. `done` is untouched: it is
+  # governed by the criteria gate and the close artifact gate, and refusing
+  # blank there would break the lead seal closes whose record is the landed
+  # digest.
+  #
+  # NO OVERRIDE, and that is not an oversight. Every other gate here is
+  # REFUSE-UNLESS-YOU-SAY-WHY because its escape hatch costs a sentence the
+  # caller may not have. This gate's escape hatch IS that sentence: the fix is
+  # to pass the reason, so an override would be a second way to spell "no
+  # reason". And NO DEFAULT — synthesizing "cancelled" would manufacture a
+  # record nobody wrote, which is worse than a refusal.
+  #
+  # A REPLAY NEVER REACHES HERE. `idempotent_replay?/3` answers an already-
+  # terminal row above, before this `with` chain opens, so re-closing a row
+  # cancelled long ago (blank reason and all) still returns its stored receipt.
+  defp check_cancel_reason("cancelled", reason) do
+    if blank_reason?(reason), do: {:error, :cancel_reason_required}, else: :ok
+  end
+
+  # `done` and `blocked` — exempt BY NAME, never by falling through a catch-all.
+  # `close_with_receipt/3` refuses anything outside the three terminal statuses
+  # before the txn opens, so these two are the whole remainder.
+  defp check_cancel_reason(status, _reason) when status in ~w(done blocked), do: :ok
+
+  # Anything that is not a binary carrying a non-whitespace character is blank.
+  # `nil` (the field omitted) and `""` (the measured fault) are the same fact —
+  # no reason was given — and the ledger has no business telling them apart here.
+  defp blank_reason?(reason) do
+    not (is_binary(reason) and String.trim(reason) != "")
+  end
 
   # The container exemptions live in `Tasks.CriteriaExemption` — ONE definition,
   # because the claim-time gate (task-9554c64bf51a0f81) consults the same
@@ -1164,7 +1363,7 @@ defmodule Barkpark.Tasks.Close do
 
   # THE TRACE (cch-w66-s2). An autostamped criterion used to be indistinguishable
   # from a hand-proven one: `unmet_after_autostamp/2` deducts the gate from the
-  # D289 unmet set, so `check_criteria_proven/4` returns `{:ok, nil}` and NO
+  # D289 unmet set, so `check_criteria_proven/6` returns `{:ok, nil}` and NO
   # `close_override` is minted — the deduction erased itself. This key is that
   # deduction's receipt, in `close_override`'s shape and by its precedent: ONE
   # content key a re-read answers "was this criterion PROVEN, or merely asserted?"
@@ -1422,13 +1621,17 @@ defmodule Barkpark.Tasks.Close do
     Enum.filter(files, &(&1 in held))
   end
 
-  defp all_blockers_done?(%Document{} = dep) do
-    dep.id
-    |> Edges.dependencies(kind: :blocks)
-    |> Enum.all?(fn %Document{content: c} ->
-      Map.get(c, "lifecycle_status") == "done"
-    end)
-  end
+  # cch-w3-task-birth-attribution: a blocker must be done AND attributable —
+  # the same predicate the ready queue and the claim door use. See
+  # Tasks.DependencySatisfaction for why this is a read-side narrowing rather
+  # than a guard on the birth path.
+  #
+  # The cascade-unblock also used to read ONLY the `blocks` edges, so a row held
+  # back by `content.dependencies` could be flipped from `blocked` to `open`
+  # here by the close of an unrelated blocker — the queue would then keep
+  # withholding it, and nothing would say why. `Tasks.Blockers` is the ONE
+  # blocker set; the queue, the claim door and this sweep all read it.
+  defp all_blockers_done?(%Document{} = dep), do: Blockers.all_satisfied?(dep)
 
   # `done` and `cancelled` are terminal; `blocked` is an honest partial and the
   # row is still live work, so its disposition is left alone. The guard is on

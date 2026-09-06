@@ -538,7 +538,11 @@ func adminTokenStep(token string) CaddyStep {
 	// changeset) — NEVER the token itself — so the failure is diagnosable without
 	// leaking the secret into stderr/journal.
 	const elixir = `scope = Barkpark.Seeds.Shared.ensure_default_scope(); ` +
-		`Barkpark.Auth.list_tokens(scope.dataset) |> Enum.filter(&Barkpark.Auth.has_permission?(&1, "admin")) |> Enum.each(&Barkpark.Auth.revoke_token/1); ` +
+		// list_tokens/2 is workspace-FENCED (its first arg) and returns secret-free
+		// MAPS, not %ApiToken{} structs — hence revoke_token(&1.id), which is the
+		// binary-id clause. Same rows as before on a freshly provisioned box: the
+		// baked seed admin token is minted under this very Default scope.
+		`Barkpark.Auth.list_tokens(scope.workspace_id, scope.dataset) |> Enum.filter(&Barkpark.Auth.has_permission?(&1, "admin")) |> Enum.each(&Barkpark.Auth.revoke_token(&1.id)); ` +
 		`case Barkpark.Auth.create_token(System.fetch_env!("BP_TOK"), "barkpark cloud admin", scope.dataset, ["read", "write", "admin"], scope.workspace_id) do {:ok, _} -> :ok; other -> IO.inspect(other, label: "admin-token create failed"); System.halt(1) end`
 	script := `set -a; . /opt/barkpark/.env; set +a; export BP_TOK='` + token + `'; . /root/.asdf/asdf.sh && cd /opt/barkpark/api && mix run -e '` + elixir + `'`
 	return CaddyStep{
@@ -812,6 +816,26 @@ func (m MailRelay) Validate() error {
 		return fmt.Errorf("SMTP_RELAY_PASSWORD has an unexpected shape; refusing to interpolate it into a shell command")
 	}
 	return nil
+}
+
+// mailRelayNarration is the per-provision, human-readable statement of THIS
+// instance's transactional-mail fate (task-6c815cd398a99534). SMTP_RELAY_* unset
+// is a VALID worker config (Validate returns nil for a fully-empty relay), so the
+// secrets-install step silently skips SMTP injection and the box comes up
+// mail-DEAD: magic-link, password-reset and verify-email all answer 200 and
+// deliver nothing. The worker states its relay state ONCE at startup, on stderr,
+// in a journal the provisioning operator is not reading — so a whole fleet can be
+// provisioned mail-dead in silence. This line is narrated at the secrets-install
+// boundary of EVERY go-live instead, and the DISABLED arm names what to set.
+//
+// Narration ONLY: the install SCRIPT is unchanged either way — a disabled relay
+// still emits no SMTP_* line, exactly as TestSecretsInstallStep_NoMailWhenDisabled
+// rules. The password is never named here (only host:port, both non-secret).
+func (m MailRelay) mailRelayNarration() string {
+	if m.Enabled() {
+		return fmt.Sprintf("Mail relay ENABLED via %s:%s — magic-link, password-reset and verify-email will deliver.", m.Host, m.port())
+	}
+	return "Mail relay NOT CONFIGURED — this instance is provisioned WITHOUT SMTP: magic-link, password-reset and verify-email will answer OK and deliver NOTHING. Set SMTP_RELAY_HOST + SMTP_RELAY_USERNAME + SMTP_RELAY_PASSWORD in the provisioner env (/etc/barkpark-provisioner.env), restart barkpark-provisioner, and re-provision."
 }
 
 // secretsInstallStep builds the per-instance step that installs ALL minted
@@ -1428,6 +1452,16 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 		wp.progress("configure", "failed", "secrets")
 		return LiveServer{}, fmt.Errorf("secrets: %w", err)
 	}
+
+	// 5b. mail-relay narration — state THIS provision's mail fate now that the
+	// .env is written (task-6c815cd398a99534). Fires on BOTH arms so the console
+	// never has to be read as an absence: enabled names the relay host, disabled
+	// names the mail-dead outcome and the env vars that fix it. It rides the same
+	// Progress hook as every other caption, so the provisioner tees it to the job's
+	// APPEND-ONLY persisted console (POST .../console → provision_jobs.console) —
+	// which is what makes the status queryable after the go-live, not only live.
+	// PURE TELEMETRY (wp.progress is nil-safe): it cannot fail a provision.
+	wp.progress("configure", "progress", wp.Mail.mailRelayNarration())
 
 	// 6. migrate — run the mix ecto.migrate step through the same per-host runner.
 	// RedactEnvSecrets: the step does `. /opt/barkpark/.env`, so a migrate failure

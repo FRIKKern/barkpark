@@ -21,8 +21,28 @@ defmodule BarkparkCloud.Workers.StaleDeploymentReaper do
   reusing the same `Registry.deployment_stale_after_seconds/0` threshold and
   `Registry.max_deploy_claims/0` budget throughout.
 
+  THE RELEASE ITSELF NEEDED A BOUND (task-bbe3ecbf50c733e3). Releasing a
+  "pushing" claim clears `claim_worker` but leaves the status at "pushing", and
+  the two passes that could terminate such a row are both gated on
+  `not is_nil(claim_worker)` — so a box that never comes back left the row
+  invisible to every pass FOREVER, holding
+  `deployments_active_site_env_index` and refusing that site's every future
+  production deploy while `Sites.AutoDeployWorker` deferred behind it on an
+  unbounded 60s loop. Pass (v) is that bound: an UNCLAIMED "pushing" row
+  untouched for a whole `max_deploy_claims/0` × `deployment_stale_after_seconds/0`
+  budget is failed as unreachable (counted in `pushing_failed` — same fault as
+  pass (iii)). A box that returns inside the window still re-claims and
+  finishes, so the transient-blip retry is intact.
+
+  ONE horizon is deliberately not that pair: a PREBUILT row minted by charter
+  D86's mint-then-upload lane waits on the CLIENT'S off-box build, not on any
+  worker of ours, so pass (0d) terminates it on
+  `Registry.prebuilt_upload_grace_seconds/0` (60 minutes) with a reason that
+  names the missing upload — never the refused-spawn reason, which would accuse
+  a driver this lane never starts.
+
   Idempotent: a sweep that finds nothing returns
-  `{:ok, %{failed: 0, requeued: 0, released: 0, pushing_failed: 0, no_source_failed: 0, spawn_failed: 0, resumed: 0}}`
+  `{:ok, %{failed: 0, requeued: 0, released: 0, pushing_failed: 0, no_source_failed: 0, spawn_failed: 0, upload_missing_failed: 0, resumed: 0}}`
   and never raises. The `unique`
   window (60s) collapses a slow sweep plus the next cron tick to one in-flight
   job instead of stacking, and each status-guarded pass no-ops on a row a

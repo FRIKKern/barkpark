@@ -253,9 +253,21 @@ defmodule Barkpark.PdsDoorCensusTest do
     # keep an older number. The count below is RE-DERIVED by running the census on
     # the merged tree — never by adding this slice's delta to main's figure.
     # WITH-HARNESSES denominator rather than being excluded to keep this 3.
-    assert out =~ ~r/harnesses\s+: 5 /,
-           "the derived harness count moved off 5. Harness-hood is derived from the " <>
-             "*_test.sh / *.test.sh name; if a sixth harness landed, say so on purpose.\n#{out}"
+    # A THIRD slice lands one: scripts/pds-pull-proof_test.sh, the offline harness
+    # for full_meta_ok (PDS-D261). It is a harness by the same derived *_test.sh
+    # rule and it rides a required gate through api/test/barkpark/pds_pull_proof_test.exs,
+    # so it belongs in the WITH-HARNESSES denominator. Excluding it to keep the 5
+    # is the one move this pin exists to refuse. RE-DERIVED by running the census
+    # on this tree — it prints `harnesses : 6` and names the file — never by
+    # adding this slice's delta to main's figure.
+    assert out =~ ~r/harnesses\s+: 6 /,
+           "the derived harness count moved off 6. Harness-hood is derived from the " <>
+             "*_test.sh / *.test.sh name; if a seventh harness landed, say so on purpose.\n#{out}"
+
+    assert out =~ "pds-pull-proof_test.sh",
+           "the census stopped naming pds-pull-proof_test.sh among its derived harnesses. " <>
+             "The count above would still read 6 if a DIFFERENT harness had replaced it, so " <>
+             "the count alone does not pin which files it counted.\n#{out}"
   end
 
   test "it RIDES ITS OWN DOOR: its own row is THROUGH in its own output", ctx do
