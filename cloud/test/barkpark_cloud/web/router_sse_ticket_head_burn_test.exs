@@ -11,9 +11,10 @@ defmodule BarkparkCloud.Web.RouterSseTicketHeadBurnTest do
       stashes nothing — by the time a route runs, HEAD-ness is destroyed.
 
   Composed, a bare `HEAD /v1/events?ticket=<live>` from any unfurler, uptime
-  checker or `curl -I` ran the whole redemption: it answered 422 (auth SUCCEEDED
-  — 422 `no_team` is this suite's teamless "the credential resolved a real user"
-  discriminator), stamped `revoked_at`, and the user's own EventSource then got
+  checker or `curl -I` ran the whole redemption: it answered the teamless refusal
+  (auth SUCCEEDED — the `no_team` refusal is this suite's teamless "the credential
+  resolved a real user" discriminator; it was 422 until cch-w40-bl converged the
+  inline emitters on the gate's 403 shape), stamped `revoked_at`, and the user's own EventSource then got
   401 on a ticket it had never redeemed. `consume_sse_ticket/1` takes a BARE
   BINARY and is structurally method-blind, so no amount of care inside
   `Accounts` could have caught it.
@@ -56,7 +57,7 @@ defmodule BarkparkCloud.Web.RouterSseTicketHeadBurnTest do
   end
 
   # Teamless ON PURPOSE (same reason as `router_sse_ticket_test.exs`): every
-  # /v1/events answer is then SYNCHRONOUS — 401 = credential refused, 422
+  # /v1/events answer is then SYNCHRONOUS — 401 = credential refused, 403
   # no_team = credential accepted and burned. A user WITH a team parks in the
   # SSE receive loop; that path gets its own out-of-process test below.
   defp teamless_user_with_ticket do
@@ -95,8 +96,9 @@ defmodule BarkparkCloud.Web.RouterSseTicketHeadBurnTest do
 
       conn = call(:head, "/v1/events?ticket=#{ticket}")
 
-      # 422 here is the BURN signature: auth ran, the ticket resolved a user,
-      # and the no_team branch answered. 405 is the fence.
+      # A no_team answer here would be the BURN signature: auth ran, the ticket
+      # resolved a user, and the no_team branch answered (403 since cch-w40-bl,
+      # 422 before it). 405 is the fence.
       assert conn.status == 405, """
       expected the side-effecting-GET fence to refuse this HEAD with 405, got \
       #{conn.status}. A 422 means `Plug.Head` rewrote the method and the stream \
@@ -121,10 +123,12 @@ defmodule BarkparkCloud.Web.RouterSseTicketHeadBurnTest do
              "the HEAD probe stamped revoked_at — it spent a ticket the real EventSource never redeemed"
 
       # And the credential is not merely unstamped, it is still REDEEMABLE:
-      # 422 no_team = it resolved a real user (401 would mean it was spent).
+      # 403 no_team = it resolved a real user (401 would mean it was spent).
+      # cch-w40-bl converged this inline emitter on the gate shape, so the
+      # discriminator is the CAUSE (`reason`), not the status.
       after_head = call(:get, "/v1/events?ticket=#{ticket}")
-      assert after_head.status == 422
-      assert json_body(after_head)["error"] == "no_team"
+      assert after_head.status == 403
+      assert json_body(after_head)["reason"] == "no_team"
 
       # That legitimate GET is what burns it — single-use is untouched.
       assert [%UserToken{revoked_at: %DateTime{}}] = sse_tokens(user)
@@ -159,9 +163,10 @@ defmodule BarkparkCloud.Web.RouterSseTicketHeadBurnTest do
              "the HEAD reached the auth layer — the fence is running too late"
 
       # Control: the same credential on a real GET DOES reach the auth layer —
-      # 422 no_team is this suite's "the header resolved a real user" signal, so
-      # the assertion above measures the fence and not a dead fixture.
-      assert call(:get, "/v1/events", token).status == 422
+      # 403 no_team is this suite's "the header resolved a real user" signal, so
+      # the assertion above measures the fence and not a dead fixture (cch-w40-bl
+      # moved it from 422 to the gate's 403 shape).
+      assert call(:get, "/v1/events", token).status == 403
 
       # And the refused GET leaves the stamp alone, which is the point of
       # cch-w12-bl: `require_user_sse` defers its touch to
