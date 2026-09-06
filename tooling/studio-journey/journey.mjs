@@ -195,6 +195,25 @@ const KILL_POLL_CAP = 2000;
 // brief's own reasoning warns about; LEG_C_BUDGET_MS moves it either way.
 const LEG_C_BUDGET = Number(process.env.LEG_C_BUDGET_MS || 150000);
 const LEG_C_ROW_CAP = Number(process.env.LEG_C_ROW_CAP_MS || 3000); // per-row, SOFT
+// `LEG_C_MAX_ROWS` CAPS EACH KIND, NOT THE ROSTER — and that is the whole fix
+// for spd-w19-census-maxrows-crowds-inventory. Measured on served c81b8e66d
+// (production guerrilla, 2026-09-06): the desk opens with 7 `.pane-item` rows
+// and NO doc rows, and the first press grows the roster by ~100
+// `.pane-doc-item` rows. `CENSUS_FN` enumerates `.pane-doc-item` FIRST (the
+// most specific shape has to claim its elements before a broader selector can),
+// so under a ROSTER-WIDE cap of 40 those ~100 doc rows consumed every remaining
+// slot and the `add_btn` / `section_header` rows the leg exists to INVENTORY
+// never entered the roster at all: the census reported `0 inventoried` and `587
+// further row(s) beyond LEG_C_MAX_ROWS=40`, which reads exactly like "this desk
+// has no inventory rows".
+//
+// A roster-wide cap makes coverage a function of DOM ORDER: the most numerous
+// kind decides which kinds are censused. Per-kind, every kind the desk offers
+// is represented no matter how many members another kind has, and the run stays
+// bounded — the ceiling is `LEG_C_MAX_ROWS × (number of kinds)`, and only the
+// four PRESSABLE kinds cost time at all (inventory rows are asserted, never
+// pressed). Raising the default instead would have bought coverage by removing
+// the bound; that is not the same fix.
 const LEG_C_MAX_ROWS = Number(process.env.LEG_C_MAX_ROWS || 40);
 const LEG_C_PRESS_ATTEMPTS = 2;
 
@@ -1426,6 +1445,10 @@ const CENSUS_FN = `(function(){
   return {
     rows: out,
     url: location.pathname + location.search,
+    // The ABSOLUTE url, because it is what a row's recovery navigates back to.
+    // \`ctx.base + url\` would be wrong on the fixture, whose base carries a
+    // \`/good\` or \`/rot\` path prefix that \`location.pathname\` already includes.
+    full_url: location.href,
     panes: document.querySelectorAll(".pane-column").length,
     doc_rows: document.querySelectorAll(".pane-doc-item").length,
     item_rows: document.querySelectorAll(".pane-item").length
@@ -1609,8 +1632,8 @@ async function legC(page, ctx, ledger, run) {
    *  before the socket joins and the first press after that is dropped on the
    *  floor with no error anywhere — which is why the row after an anchor needed
    *  two presses. Re-arming is a predicate, never a sleep. */
-  const backToDesk = async () => {
-    await page.goto(ctx.base + DESK_PATH);
+  const backToDesk = async (absoluteUrl) => {
+    await page.goto(absoluteUrl || ctx.base + DESK_PATH);
     const rows = await poll(async () => (await page.count(".pane-item")) > 0 || null, SETTLE_CAP, "desk rows painted");
     const live = await poll(async () => {
       const s = await page.evaluate(
@@ -1626,20 +1649,54 @@ async function legC(page, ctx, ledger, run) {
 
   const roster = [];
   const byKey = new Map();
-  let overflow = 0;
+  // PER KIND, not per roster — see LEG_C_MAX_ROWS. `overflowByKind` is what makes
+  // a dropped row legible: "0 inventoried" could previously mean either "this
+  // desk has no inventory rows" or "the inventory kinds were crowded out", and
+  // the printed output could not tell the two apart. Now every drop names its
+  // kind, so the second reading is impossible to mistake for the first.
+  const takenByKind = new Map();
+  const overflowByKind = new Map();
+  const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
   const absorb = async () => {
     const c = await page.evaluate(`${CENSUS_FN}()`);
     if (!c || c.__throw || !Array.isArray(c.rows)) return null;
     for (const r of c.rows) {
       if (byKey.has(r.key)) continue;
-      if (roster.length >= LEG_C_MAX_ROWS) { overflow++; continue; }
-      const rec = { ...r, outcome: null, witness: null, detail: null, presses: 0, waited_ms: 0 };
+      if ((takenByKind.get(r.kind) || 0) >= LEG_C_MAX_ROWS) { bump(overflowByKind, r.kind); continue; }
+      bump(takenByKind, r.kind);
+      // WHERE THIS ROW WAS SEEN. A press replaces the pane its siblings live in,
+      // so by the time a sibling's turn comes its node is gone; navigating back
+      // to the URL the row was ENUMERATED at re-renders the pane that held it.
+      const rec = { ...r, enum_url: c.full_url || null, outcome: null, witness: null, detail: null, presses: 0, waited_ms: 0, recovered: false };
       byKey.set(r.key, rec);
       roster.push(rec);
     }
     return c;
   };
   const first = await absorb();
+
+  /** THE COVERAGE FIX for spd-w19-census-doc-row-coverage. Measured on served
+   *  c81b8e66d: the desk grew 236 `.pane-doc-item` rows, ONE was measured, and
+   *  the other 235 all reported "the row was gone from the desk when its turn
+   *  came" — 5.4s of a 480s budget, `truncated:false`. It was never budget: a
+   *  doc-row press replaces the pane its siblings live in, so the roster held
+   *  235 stale node references. A census that can only ever see one row of the
+   *  most numerous kind cannot be diffed against a later census for that kind.
+   *
+   *  The recovery is a RE-NAVIGATION, not a re-ordering: pressing doc rows in
+   *  some pane-aware order still loses every sibling after the first press, and
+   *  re-querying the roster only renames the problem (the node is gone, not
+   *  stale-named). Going back to the row's own enumeration URL rebuilds the pane
+   *  the row lived in, which is exactly what a person does. It is attempted ONCE
+   *  per row and only when the row is actually missing, so a present row costs
+   *  nothing, and a row that is STILL missing afterwards says so — recovery
+   *  turning a genuinely-vanished row green is the one thing it must not do. */
+  const recoverRow = async (rec) => {
+    if (!rec.enum_url || Date.now() >= deadline) return null;
+    const back = await backToDesk(rec.enum_url);
+    rec.recovered = true;
+    return `re-navigated to the URL this row was enumerated at (rows=${back.rows} socket=${back.live})`;
+  };
 
   // The roster GROWS while it is walked, and that is the point: on the real desk
   // the document rows do not exist until a Structure row has been pressed, so a
