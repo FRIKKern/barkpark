@@ -25709,6 +25709,56 @@ test("cch-w65: humanAction serves cloud/priv/audit-actions.json — every label,
   assert.equal(hooks.humanAction("site.invented_by_a_future_slice"), "site.invented_by_a_future_slice");
 });
 
+// ── cch-w62-bl: the instance-lifecycle verbs read as sentences in the TITLE ───
+// The row this test closes measured the Timeline's title slot rendering a raw
+// dotted machine token for every verb this epic ships. `tlvEntryTitle` is the
+// SHIPPED renderer for that slot (app.js: the `source === "audit"` arm returns
+// `actor + " " + humanAction(type)`), and `tlvRowHtml` escapes its return into
+// `<span class="tlv-title">` — so driving it here drives what an operator sees,
+// not a copy of it.
+//
+// BEFORE (what main rendered, and what this asserts can no longer happen):
+//   ops@acme.com barkpark.self_update_triggered
+//   ops@acme.com barkpark.rollback_triggered
+//   ops@acme.com barkpark.resurrected
+//   ops@acme.com barkpark.studio_link_minted
+//   ops@acme.com barkpark.domain_attached
+// AFTER (asserted below):
+//   ops@acme.com triggered a self-update
+//   ops@acme.com triggered a rollback
+//   ops@acme.com resurrected a Barkpark
+//   ops@acme.com minted a Studio sign-in link
+//   ops@acme.com attached a domain to a Barkpark
+test("cch-w62-bl: tlvEntryTitle renders a sentence for the instance-lifecycle verbs that were raw slugs", () => {
+  const AFTER = {
+    "barkpark.self_update_triggered": "ops@acme.com triggered a self-update",
+    "barkpark.rollback_triggered": "ops@acme.com triggered a rollback",
+    "barkpark.resurrected": "ops@acme.com resurrected a Barkpark",
+    "barkpark.studio_link_minted": "ops@acme.com minted a Studio sign-in link",
+    "barkpark.domain_attached": "ops@acme.com attached a domain to a Barkpark",
+  };
+  assert.ok(Object.keys(AFTER).length >= 3, "the row asks for at least three verbs");
+
+  for (const [type, expected] of Object.entries(AFTER)) {
+    const entry = { source: "audit", actor: "ops@acme.com", type: type, at: "2026-09-06T10:00:00Z" };
+    const title = hooks.tlvEntryTitle(entry);
+    assert.equal(title, expected, `${type} must read as a sentence in the title slot`);
+    // The negative half, stated as its own assertion so a future regression to
+    // the fallback reds HERE and not only on the equality above.
+    assert.ok(!title.includes(type),
+      `${type}: the title still carries the raw dotted machine token — humanAction fell through to ACTION_LABELS[a] || a`);
+    // And the sentence actually reaches the DOM the operator reads.
+    assert.match(hooks.tlvRowHtml(entry), new RegExp('class="tlv-title">' + expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+
+  // The control: a verb the table has never heard of still renders raw, because
+  // D582's fallback is the reason a null row is honest rather than a hole.
+  assert.equal(
+    hooks.tlvEntryTitle({ source: "audit", actor: "ops@acme.com", type: "barkpark.invented_by_a_future_slice" }),
+    "ops@acme.com barkpark.invented_by_a_future_slice",
+  );
+});
+
 // ── cch-w62: friendly() unwraps the nested envelope + the fenced detail rung ──
 // D740: five route families (31 emitters in router.ex — self-update, rollback,
 // the webhook proxy, PATCH /autoupdate, PATCH /admin channel) send
