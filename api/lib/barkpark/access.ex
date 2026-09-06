@@ -50,15 +50,27 @@ defmodule Barkpark.Access do
   SHA-256 hash is persisted).
 
   No-escalation gate: every requested capability is authorized against
-  `principal` in the grant's workspace via `Barkpark.Tenancy.Auth.authorize/3`.
-  If the grantor lacks any requested capability (or the principal is
-  unrecognised, or the workspace is missing), returns `{:error, :forbidden}`.
+  `principal` in the grant's workspace via
+  `Barkpark.Tenancy.Auth.authorize_with_reason/3`.
+
+  That gate is a TWO-ARM predicate — membership AND capability — and the two
+  arms are reported apart, because collapsing them made the refusal name the
+  wrong remedy (a grantor holding `admin` cannot fail the capability arm, so
+  what failed was membership):
+
+    * `{:error, :not_a_member}` — the grantor has no membership in the grant's
+      workspace, whatever capabilities it holds elsewhere.
+    * `{:error, :forbidden}` — the grantor IS a member but lacks a requested
+      capability, or the capability is unknown, or the principal is
+      unrecognised, or the workspace is missing. `:forbidden` keeps its old
+      meaning so existing callers read unchanged.
+
   Changeset failures (e.g. an unknown capability, missing required scope)
   return `{:error, %Ecto.Changeset{}}`.
   """
   @spec mint(principal(), map()) ::
           {:ok, %{grant: Grant.t(), token: String.t()}}
-          | {:error, :forbidden | Ecto.Changeset.t()}
+          | {:error, :forbidden | :not_a_member | Ecto.Changeset.t()}
   def mint(principal, attrs) when is_map(attrs) do
     with {:ok, grantor_id} <- principal_id(principal),
          workspace_id when is_binary(workspace_id) <- fetch(attrs, :workspace_id),
@@ -91,6 +103,7 @@ defmodule Barkpark.Access do
           {:error, changeset}
       end
     else
+      {:error, :not_a_member} -> {:error, :not_a_member}
       _ -> {:error, :forbidden}
     end
   end
@@ -472,14 +485,24 @@ defmodule Barkpark.Access do
   # No-escalation gate: a grantor can only confer capabilities it itself holds.
   # Each capability maps to an authz action; an unknown capability (or any
   # authorize denial) fails the whole mint, closed.
+  #
+  # The denial CARRIES which arm refused. `authorize_with_reason/3` is the same
+  # decision `authorize/3` makes (the latter is a collapse of the former), so
+  # no second membership predicate is introduced here — only the reason the one
+  # chokepoint already computed is preserved instead of discarded.
   defp authorize_capabilities(principal, workspace_id, caps)
        when is_binary(workspace_id) and is_list(caps) and caps != [] do
     Enum.reduce_while(caps, :ok, fn cap, :ok ->
-      with {:ok, action} <- cap_to_action(cap),
-           :ok <- Auth.authorize(principal, workspace_id, action) do
-        {:cont, :ok}
-      else
-        _ -> {:halt, {:error, :forbidden}}
+      case cap_to_action(cap) do
+        {:ok, action} ->
+          case Auth.authorize_with_reason(principal, workspace_id, action) do
+            :ok -> {:cont, :ok}
+            {:error, :not_a_member} -> {:halt, {:error, :not_a_member}}
+            {:error, _} -> {:halt, {:error, :forbidden}}
+          end
+
+        :error ->
+          {:halt, {:error, :forbidden}}
       end
     end)
   end

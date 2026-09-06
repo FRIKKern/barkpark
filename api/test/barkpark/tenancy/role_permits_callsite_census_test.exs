@@ -57,10 +57,12 @@ defmodule Barkpark.Tenancy.RolePermitsCallsiteCensusTest do
   # this site. Every entry's provenance must name a loaded, non-nil membership
   # row; a site that cannot state one is a live hole, not a census entry.
   @expected_callsites %{
-    {"lib/barkpark/tenancy/auth.ex", "authorize"} =>
-      "authorize/3's %User{} arm: `case membership(user, workspace_id) do %Membership{role: role} ->` — " <>
-        "the role is destructured out of the loaded struct; the `nil ->` arm returns {:error, :forbidden} " <>
-        "without reaching the predicate.",
+    {"lib/barkpark/tenancy/auth.ex", "authorize_with_reason"} =>
+      "authorize_with_reason/3's %User{} arm: `case membership(user, workspace_id) do %Membership{role: role} ->` — " <>
+        "the role is destructured out of the loaded struct; the `nil ->` arm returns {:error, :not_a_member} " <>
+        "without reaching the predicate. This site was `authorize/3` until the membership/capability arms " <>
+        "were reported apart (task-abc2992adeb04fac); authorize/3 is now a collapse of this function and " <>
+        "calls no predicate itself, so the site MOVED without the provenance moving.",
     {"lib/barkpark_web/studio/caps.ex", "membership_authorizes?"} =>
       "Caps.derive/1: `memberships = load_memberships(principals, ws_id)` -> Tenancy.Auth.membership/2 per " <>
         "principal. This clause matches `%{role: role}` and is guarded `when is_binary(role)`; the FIRST " <>

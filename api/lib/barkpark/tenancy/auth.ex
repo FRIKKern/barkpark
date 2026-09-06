@@ -395,26 +395,64 @@ defmodule Barkpark.Tenancy.Auth do
   still fail `workspace_admin?(tok, B)`.
   """
   @spec authorize(principal(), binary(), action()) :: :ok | {:error, :forbidden}
-  def authorize(%ApiToken{} = token, workspace_id, action)
+  def authorize(principal, workspace_id, action) do
+    case authorize_with_reason(principal, workspace_id, action) do
+      :ok -> :ok
+      {:error, _reason} -> {:error, :forbidden}
+    end
+  end
+
+  @doc """
+  The SAME decision as `authorize/3`, but it names WHICH arm of the conjunction
+  refused.
+
+  `authorize/3` answers a two-arm predicate — membership AND capability — with
+  one atom, so every caller that renders the refusal has to guess which half
+  failed, and the guess is often backwards (a token holding `admin` cannot fail
+  the capability half, so what failed was membership). This variant is the ONE
+  place that decision is made; `authorize/3` is a thin collapse of it, so the
+  two can never drift apart.
+
+    * `{:error, :not_a_member}` — the principal has no membership in the
+      workspace. The remedy is a workspace invitation.
+    * `{:error, :missing_capability}` — the principal IS a member, but its
+      permissions (tokens) or role (users) do not satisfy `action`. The remedy
+      is a permission/role change.
+    * `{:error, :forbidden}` — the principal shape is unrecognised, or the
+      workspace id / action is malformed. No arm applies.
+
+  Grants only ADD access, so a `CallerContext` whose grants authorize is `:ok`;
+  when they do not, the membership arm's reason is what the caller hears.
+  """
+  @spec authorize_with_reason(principal(), binary(), action()) ::
+          :ok | {:error, :not_a_member | :missing_capability | :forbidden}
+  def authorize_with_reason(%ApiToken{id: id} = token, workspace_id, action)
       when is_binary(workspace_id) and action in [:read, :write, :admin] do
-    if member?(token, workspace_id) and permits?(token, action) do
-      :ok
-    else
-      {:error, :forbidden}
+    cond do
+      not resolvable?(id, workspace_id) -> {:error, :forbidden}
+      not member?(token, workspace_id) -> {:error, :not_a_member}
+      not permits?(token, action) -> {:error, :missing_capability}
+      true -> :ok
     end
   end
 
   # User principal: the GRANT is the membership ROLE (users carry no
   # permissions[] array). A non-member is denied; a member is allowed when its
   # role satisfies the action. Same chokepoint, same total contract as tokens.
-  def authorize(%User{} = user, workspace_id, action)
+  def authorize_with_reason(%User{id: id} = user, workspace_id, action)
       when is_binary(workspace_id) and action in [:read, :write, :admin] do
-    case membership(user, workspace_id) do
-      %Membership{role: role} ->
-        if role_permits?(role, workspace_id, action), do: :ok, else: {:error, :forbidden}
+    if resolvable?(id, workspace_id) do
+      case membership(user, workspace_id) do
+        %Membership{role: role} ->
+          if role_permits?(role, workspace_id, action),
+            do: :ok,
+            else: {:error, :missing_capability}
 
-      nil ->
-        {:error, :forbidden}
+        nil ->
+          {:error, :not_a_member}
+      end
+    else
+      {:error, :forbidden}
     end
   end
 
@@ -425,22 +463,37 @@ defmodule Barkpark.Tenancy.Auth do
   # membership check runs first and unchanged, so a member's decision is never
   # altered. The grant check delegates to `Barkpark.Access.validate/3` (single
   # source of scope/capability/expiry truth — never reimplemented here).
-  def authorize(%Barkpark.Content.CallerContext{} = ctx, workspace_id, action)
+  def authorize_with_reason(%Barkpark.Content.CallerContext{} = ctx, workspace_id, action)
       when is_binary(workspace_id) and action in [:read, :write, :admin] do
-    cond do
-      membership_authorizes?(ctx, workspace_id, action) == :ok -> :ok
-      grants_authorize?(ctx, workspace_id, action) -> :ok
-      true -> {:error, :forbidden}
+    case membership_authorizes?(ctx, workspace_id, action) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        if grants_authorize?(ctx, workspace_id, action), do: :ok, else: {:error, reason}
     end
   end
 
-  def authorize(_token, _workspace_id, _action), do: {:error, :forbidden}
+  def authorize_with_reason(_token, _workspace_id, _action), do: {:error, :forbidden}
+
+  # `membership/2` answers `nil` for BOTH "no such row" and "that id could never
+  # name a row" (nil, empty string, non-UUID) — it fails closed rather than
+  # raising. `authorize/3` could not tell those apart and did not need to: both
+  # are `:forbidden`. A reason-bearing denial DOES need to: calling a malformed
+  # principal id "not a member" would state a fact about a workspace seat that
+  # was never actually queried. So the ids are cast FIRST, and anything that
+  # cannot resolve gets the bare `:forbidden` — no arm applies.
+  defp resolvable?(principal_id, workspace_id) do
+    is_binary(principal_id) and
+      not is_nil(Repo.uuid_or_nil(principal_id)) and
+      not is_nil(Repo.uuid_or_nil(workspace_id))
+  end
 
   # Reconstruct the bare principal from the ctx and run the EXISTING authorize
   # arms, so a folded member's decision is byte-identical to today.
   defp membership_authorizes?(%{principal_type: :user, user_id: uid}, workspace_id, action)
        when is_binary(uid),
-       do: authorize(%User{id: uid}, workspace_id, action)
+       do: authorize_with_reason(%User{id: uid}, workspace_id, action)
 
   defp membership_authorizes?(
          %{principal_type: :api_token, token_id: tid, roles: roles},
@@ -448,7 +501,7 @@ defmodule Barkpark.Tenancy.Auth do
          action
        )
        when is_binary(tid) and is_list(roles),
-       do: authorize(%ApiToken{id: tid, permissions: roles}, workspace_id, action)
+       do: authorize_with_reason(%ApiToken{id: tid, permissions: roles}, workspace_id, action)
 
   defp membership_authorizes?(_ctx, _workspace_id, _action), do: {:error, :forbidden}
 

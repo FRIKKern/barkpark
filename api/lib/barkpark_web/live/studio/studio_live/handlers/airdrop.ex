@@ -138,6 +138,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Airdrop do
                  airdrop_caps: held_capabilities(principal, ws.id)
                )}
 
+            {:error, :not_a_member} ->
+              {:noreply, assign(socket, airdrop_error: "You are not a member of that workspace.")}
+
             {:error, :forbidden} ->
               {:noreply, assign(socket, airdrop_error: "You can only share access you hold.")}
 
