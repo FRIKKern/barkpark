@@ -480,6 +480,59 @@
 #       Absorbing those four into a build failure, or loosening the clause until
 #       they vanish, both throw the measurement away.
 #
+# CLAUSE 10 -- A REJECTED CREDENTIAL IS ITS OWN OUTCOME, AND IT NAMES ITS SOURCE.
+#
+# THE DEFECT THIS CLAUSE CLOSES. Clause 9 named the credential in the drafts
+# blind-spot block, which is rendered AFTER the corpus read. A credential that
+# the server REJECTS never gets that far: the paged read dies at offset 0 and
+# every credential label in this file is still unwritten. Measured 2026-09-06 on
+# this box, both sides re-run rather than quoted:
+#
+#   - `bash scripts/pds-ledger-census.sh` with the shell's BARKPARK_TOKEN
+#     (`bp_admin_...`, expired) -> exit 2,
+#     `FAIL CLOSED: HTTP 401 at offset 0 -- a non-2xx is never a leaf`.
+#   - `env -u BARKPARK_TOKEN bash scripts/pds-ledger-census.sh` -> exit 0,
+#     8187-row corpus, 733-row closure, open denominator 230.
+#
+# WHAT IT DID, STATED PRECISELY, BECAUSE THE TWO FAULTS ARE NOT THE SAME CRIME.
+# It REFUSED. It did not authenticate as a lesser principal and report a smaller
+# board -- the status-first discipline of clause 3 already makes that impossible,
+# and this measurement is the proof that it does: zero rows were reported, not
+# fewer rows. No census figure ever quoted is suspect on this account. The defect
+# is narrower and entirely about the OPERATOR: the refusal named a status and an
+# offset and nothing else, so a dead token and a dead server produced the same
+# line and the same exit code, and the reader was left to guess which. That guess
+# is what `env -u BARKPARK_TOKEN` was rediscovered by hand, run after run.
+#
+# THE CONTRACT, IN THREE PARTS:
+#
+#   (a) A 401/403 ON ANY READ IS EXIT 5, NEVER 2. A third state collapsed into
+#       one of the other two is how an instrument stops being able to say what
+#       is wrong. "Cannot authenticate" is distinct from success (0), from "the
+#       round is not done" (1), and from every other transport or shape failure
+#       (2).
+#
+#   (b) THE REFUSAL NAMES THE CREDENTIAL SOURCE -- NEVER THE SECRET. The line
+#       says which of `--token (argv)`, `BARKPARK_TOKEN (environment)` or
+#       `~/.config/barkpark/config.json (bp login)` supplied what was rejected,
+#       and names the remedy for the case this box keeps hitting: a stale env
+#       token shadowing a working config, which is the SAME precedence trap that
+#       makes every campaign run `bp` as `env -u BARKPARK_TOKEN`.
+#
+#   (c) AND SO DOES THE SUCCESSFUL RUN. `credential` is a line in the census
+#       header on every run, beside `source`. A label that appears only on
+#       failure cannot be compared against a working run -- and a reader who has
+#       never seen the label cannot recognise it when it finally appears.
+#
+# REFUSED, ON THE RECORD: RETRYING WITH THE CONFIG TOKEN AFTER A 401. It was the
+# other half of the filed row's OR, and it is refused because clause 9(a) already
+# ruled it: the census reads with ONE credential, the caller's, and never reaches
+# for a second one behind their back. A run that silently succeeds under an
+# identity the operator did not choose produces a board the operator cannot
+# reproduce -- which is a worse fault than the one being fixed, dressed as a
+# convenience. The precedence (argv, then env, then config) is UNCHANGED; what
+# changes is that it is now legible and its rejection is loud.
+#
 # EXIT CODES
 #   0  census produced, coherent, and (if asked) the round-done predicate holds
 #   1  --assert-round-done predicate is FALSE — the round is not done
@@ -488,6 +541,11 @@
 #      undercount used to be able to dodge.
 #   3  usage error
 #   4  SNAPSHOT INCOHERENT: the board moved inside the named window. Re-run.
+#   5  CANNOT AUTHENTICATE: the credential the census resolved was REJECTED by
+#      the server (401/403). It is its OWN exit code and not a 2, because
+#      "I could not reach the board" and "I was not allowed to read the board"
+#      are different faults with different remedies, and an operator who cannot
+#      tell them apart debugs the wrong one. See CLAUSE 10.
 #
 # USAGE
 #   scripts/pds-ledger-census.sh [--root SLUG] [--page-limit N] [--pace SECS]
@@ -659,6 +717,10 @@ EXIT_ROUND_NOT_DONE = 1
 EXIT_FAIL_CLOSED = 2
 EXIT_USAGE = 3
 EXIT_INCOHERENT = 4
+# CLAUSE 10: a rejected credential is its own outcome. It is NOT EXIT_FAIL_CLOSED
+# -- "I could not read the board" and "I was not allowed to read the board" have
+# different remedies, and one exit code for both makes the operator guess.
+EXIT_UNAUTHENTICATED = 5
 
 
 class LensAbsent(Exception):
@@ -678,12 +740,84 @@ def die(code, msg, detail=None):
         EXIT_FAIL_CLOSED: "FAIL CLOSED",
         EXIT_USAGE: "USAGE",
         EXIT_INCOHERENT: "SNAPSHOT INCOHERENT",
+        EXIT_UNAUTHENTICATED: "CANNOT AUTHENTICATE",
     }.get(code, "FAILED")
     print("pds-ledger-census: %s: %s" % (label, msg), file=sys.stderr)
     if detail:
         for line in detail:
             print("  %s" % line, file=sys.stderr)
     sys.exit(code)
+
+
+# CLAUSE 10(a)+(b). The ONE place a rejected credential becomes an outcome. Every
+# read routes its 401/403 here rather than through the generic non-2xx arm, so
+# the third state cannot be re-collapsed into EXIT_FAIL_CLOSED by a later edit
+# that only touches one call site.
+UNAUTHENTICATED_STATUSES = (401, 403)
+
+CREDENTIAL_ARGV = "--token (argv)"
+CREDENTIAL_ENV = "BARKPARK_TOKEN (environment)"
+CREDENTIAL_CONFIG = "~/.config/barkpark/config.json (bp login)"
+
+
+def resolve_credential(argv_server, argv_token, environ, config_path):
+    """(server, token, credential_source) -- argv, then the environment, then bp's config.
+
+    THE PRECEDENCE IS DELIBERATELY UNCHANGED, and this function exists to make
+    that a fact anyone can re-derive rather than a claim in a comment. The trap
+    it makes legible: a STALE `BARKPARK_TOKEN` in the shell wins over a WORKING
+    token in ~/.config/barkpark/config.json, which is the same env-over-config
+    order `bp` itself has, and the reason every campaign invokes `bp` as
+    `env -u BARKPARK_TOKEN`. The census does not silently repair that -- a run
+    that succeeds under an identity the caller did not choose is unreproducible
+    (clause 9(a)) -- it NAMES the winner, so the refusal downstream can say which
+    credential was rejected.
+
+    Returns credential=None only when no token was found anywhere, which is the
+    usage error the caller reports; there is no state in which a token is on the
+    wire and its source is unnamed.
+    """
+    server = argv_server or environ.get("BARKPARK_SERVER")
+    token = argv_token or environ.get("BARKPARK_TOKEN")
+    credential = (CREDENTIAL_ARGV if argv_token
+                  else CREDENTIAL_ENV if token else None)
+    if (not server or not token) and os.path.exists(config_path):
+        with open(config_path) as fh:
+            data = json.load(fh)
+        server = server or data.get("server")
+        if not token and data.get("token"):
+            token = data.get("token")
+            credential = CREDENTIAL_CONFIG
+    return server, token, credential
+
+
+def refuse_unauthenticated(transport, status, where, body):
+    """Exit 5, naming the credential SOURCE that was rejected -- never the secret.
+
+    `where` is the read that was refused, in the operator's words ("page at
+    offset 0", "the anchor Paper `x`"), because a run that fails on the anchor
+    and a run that fails at offset 0 have the same remedy but not the same story.
+    """
+    source = transport.describe_credential() or "<unrecorded>"
+    detail = [
+        "credential source: %s   (the SOURCE is named, never the token)" % source,
+        "body: %s" % body[:300].decode("utf-8", "replace"),
+        "THIS IS NOT A DEAD SERVER AND NOT AN EMPTY BOARD -- zero rows were read,",
+        "and none were reported. Exit 5 exists so those three cannot be confused.",
+    ]
+    if source and source.startswith("BARKPARK_TOKEN"):
+        detail.append(
+            "REMEDY: BARKPARK_TOKEN shadows ~/.config/barkpark/config.json. If `bp login` "
+            "has written a working token there, re-run as "
+            "`env -u BARKPARK_TOKEN bash scripts/pds-ledger-census.sh` -- the census will "
+            "NOT reach for that second credential on its own (clause 9(a)).")
+    else:
+        detail.append(
+            "REMEDY: re-run `bp login`, or pass a valid --token. The census reads with "
+            "ONE credential, the one you chose, and never substitutes another.")
+    die(EXIT_UNAUTHENTICATED,
+        "HTTP %d on %s -- the credential this census resolved was REJECTED" % (status, where),
+        detail)
 
 
 # --- transport ----------------------------------------------------------------
@@ -849,6 +983,11 @@ def fetch_page(transport, dataset, doctype, page_index, offset, limit, pace, ret
                   % (offset, backoff, attempt, retries), file=sys.stderr)
             time.sleep(backoff)
             continue
+        # CLAUSE 10(a): the rejected credential is scored BEFORE the generic
+        # non-2xx arm, or it disappears into exit 2 with every other transport
+        # fault -- which is precisely the collapse this clause exists to undo.
+        if status in UNAUTHENTICATED_STATUSES:
+            refuse_unauthenticated(transport, status, "the page at offset %d" % offset, body)
         if status < 200 or status >= 300:
             die(EXIT_FAIL_CLOSED,
                 "HTTP %d at offset %d -- a non-2xx is never a leaf and never an "
@@ -1131,6 +1270,8 @@ def resolve_anchor_from_paper(transport, dataset, slug):
     """
     path = "/v1/data/doc/%s/paper/%s" % (dataset, slug)
     status, body = transport.get_doc(path, slug)
+    if status in UNAUTHENTICATED_STATUSES:
+        refuse_unauthenticated(transport, status, "the anchor Paper `%s`" % slug, body)
     if status < 200 or status >= 300:
         die(EXIT_FAIL_CLOSED,
             "HTTP %d resolving the anchor Paper `%s` -- refusing to fall back to "
@@ -2047,6 +2188,10 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
                % (report["instant"]["started"], report["instant"]["finished"],
                   report["instant"]["seconds"]))
     out.append("  source      %s" % source)
+    # CLAUSE 10(c): the credential SOURCE is a property of the read, so it is
+    # printed on the GREEN path too. A label that only ever appears in a refusal
+    # is one no reader can compare against a run that worked.
+    out.append("  credential  %s" % (report.get("credential") or "<unrecorded>"))
     out.append("  root        %s" % root)
     if report.get("round_anchor"):
         out.append("  round       born %s  (anchor: %s)"
@@ -2480,25 +2625,15 @@ def main(argv):
             die(EXIT_USAGE, "--fixture-dir %s is not a directory" % args.fixture_dir)
         transport = FixtureTransport(args.fixture_dir)
     else:
-        # CLAUSE 9: ONE CREDENTIAL, AND IT SAYS WHICH. The precedence below is
-        # unchanged (argv, then env, then the bp config) -- what is new is that
-        # the WINNER is named and carried, so a run that comes back UNREAD can
-        # be acted on. The census never resolves a SECOND, draft-capable token
-        # behind the caller's back: a report whose lens depends on a credential
-        # the caller did not choose is a report nobody can reproduce.
-        server = args.server or os.environ.get("BARKPARK_SERVER")
-        token = args.token or os.environ.get("BARKPARK_TOKEN")
-        credential = ("--token (argv)" if args.token
-                      else "BARKPARK_TOKEN (environment)" if token else None)
-        if not server or not token:
-            config = os.path.expanduser("~/.config/barkpark/config.json")
-            if os.path.exists(config):
-                with open(config) as fh:
-                    data = json.load(fh)
-                server = server or data.get("server")
-                if not token and data.get("token"):
-                    token = data.get("token")
-                    credential = "~/.config/barkpark/config.json (bp login)"
+        # CLAUSE 9 + 10: ONE CREDENTIAL, AND IT SAYS WHICH. The resolution lives
+        # in resolve_credential() -- a pure function of argv, the environment and
+        # a config path -- because it is the ONE decision in this file that
+        # --fixture-dir can never exercise: a fixture run builds
+        # FixtureTransport and resolves no credential at all. A precedence
+        # nothing can test is a precedence that drifts.
+        server, token, credential = resolve_credential(
+            args.server, args.token, os.environ,
+            os.path.expanduser("~/.config/barkpark/config.json"))
         if not server or not token:
             die(EXIT_USAGE,
                 "no server/token: pass --server/--token, set BARKPARK_SERVER/"
@@ -2586,6 +2721,7 @@ def main(argv):
     report["pages"] = pages
     report["page_limit"] = args.page_limit
     report["source"] = transport.describe()
+    report["credential"] = transport.describe_credential()
     report["page_order"] = PAGE_ORDER
 
     # THE PREDICATE IS COMPUTED BEFORE THE EMIT, and it is PURE (it prints
