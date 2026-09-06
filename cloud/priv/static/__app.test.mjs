@@ -10315,9 +10315,98 @@ test("S7: launchProviderTabsHtml marks exactly the active provider pressed", () 
 const CAP_FIXTURE = JSON.parse(
   fs.readFileSync(new URL("./__fixtures__/providers_capabilities.json", import.meta.url), "utf8"),
 );
+// ── cchi-w55-s2: the gap copy is DERIVED from failure_copy.ex, never retyped ──
+// The overlay below used to be a HAND-TYPED short stub ("Hetzner has no pause
+// primitive.", "Adopt needs an existing resource-group import.") — neither of
+// which the server has ever emitted. That made this BLOCKING harness blind to
+// the exact defect cch-w55-s2 fixed: both of its mutations (the gap sentence
+// reverted to the false "archive it instead" copy, and the false remedy clause
+// re-added to the true sentence) reddened only the preview smoke, while this
+// file stayed rc=0. A fixture that agrees with itself proves nothing.
+//
+// So the sentences come from the ONE place that owns them —
+// FailureCopy.capability_gap_reason/2 in cloud/lib/barkpark_cloud/
+// failure_copy.ex, the same function the conduit calls at
+// router.ex `{capability, FailureCopy.capability_gap_reason(kind, capability)}`.
+// Editing the Elixir copy now moves every assertion below with it, and a stub
+// cannot be reintroduced here without deleting the reader.
+//
+// IT REFUSES RATHER THAN PASSING. An empty read, a zero-clause extraction, or a
+// missing (kind, capability) key throws by name instead of yielding "" and
+// greening — a census that goes quiet exactly when the file it reads was
+// restructured is worse than no census at all.
+const FAILURE_COPY_EX_URL = new URL("../../lib/barkpark_cloud/failure_copy.ex", import.meta.url);
+
+// A `def capability_gap_reason(<kind>, "<capability>") do` head whose whole body
+// is a single string literal on the next line. `_kind` (the generic fallbacks)
+// is keyed under "_kind"; a named kind keys under itself. Clause bodies that are
+// NOT a bare literal are simply not extracted — this reader claims only what it
+// can read, and the required-key check below turns any such miss into a refusal
+// rather than a silent empty.
+const GAP_CLAUSE_RE =
+  /def\s+capability_gap_reason\(\s*(?:"([a-z0-9_]+)"|_kind)\s*,\s*"([a-z0-9_]+)"\s*\)\s+do\s*\n\s*"((?:[^"\\]|\\.)*)"\s*\n\s*end/g;
+
+function capabilityGapReasons() {
+  const src = fs.readFileSync(FAILURE_COPY_EX_URL, "utf8");
+  if (!src.trim()) {
+    throw new Error("REFUSED: cloud/lib/barkpark_cloud/failure_copy.ex read empty — " +
+      "the capability-gap fixtures cannot be derived, so this harness will not green");
+  }
+  const out = {};
+  GAP_CLAUSE_RE.lastIndex = 0;
+  let m;
+  while ((m = GAP_CLAUSE_RE.exec(src))) {
+    const kind = m[1] || "_kind";
+    (out[kind] ||= {})[m[2]] = m[3].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+  if (Object.keys(out).length === 0) {
+    throw new Error("REFUSED: no capability_gap_reason/2 clause matched in failure_copy.ex — " +
+      "the clause shape changed and this reader went blind");
+  }
+  return out;
+}
+
+const GAP_REASONS = capabilityGapReasons();
+
+function gapReason(kind, capability) {
+  const s = GAP_REASONS[kind] && GAP_REASONS[kind][capability];
+  if (typeof s !== "string" || s === "") {
+    throw new Error(`REFUSED: failure_copy.ex has no literal capability_gap_reason(${JSON.stringify(kind)}, ` +
+      `${JSON.stringify(capability)}) clause — the fixture cannot be derived`);
+  }
+  return s;
+}
+
+// The two SERVER sentences this file's capability-gap scenarios render.
+const HETZNER_PAUSE_GAP = gapReason("hetzner", "pause");
+const AZURE_ADOPT_GAP = gapReason("azure", "adopt");
+
+// THE REMEDY LOCK — a rule, not a literal, and the arm that makes this harness
+// able to lose. Derivation alone is a tautology: flip the Elixir sentence to a
+// lie and a derived fixture flips with it, still green. So the derived
+// hetzner/pause sentence is held to the SHAPE cch-w55-s2 established — deletion
+// is the only charge-stopping act on this plane, and archiving/snapshotting/
+// powering-off are NOT remedies (`runNeutralArchive` collects a bundle without
+// touching power or existence, and a snapshot bills per GB per month, so the old
+// "archive it instead" copy strictly INCREASED the bill). Either cch-w55-s2
+// mutation reintroduces that vocabulary, and this reds.
+const FALSE_PAUSE_REMEDY_RE = /archiv|snapshot|power(ing)?\s+(it\s+)?(down|off)|turn(ing)?\s+it\s+off|shut(ting)?\s+(it\s+)?down|stop(ping)?\s+the\s+server/i;
+
+test("cchi-w55-s2: the derived hetzner/pause gap sentence names deletion and offers NO archive/snapshot remedy", () => {
+  assert.match(HETZNER_PAUSE_GAP, /Delet/,
+    "the server sentence must name deletion — the only act that stops a Hetzner charge");
+  assert.doesNotMatch(HETZNER_PAUSE_GAP, FALSE_PAUSE_REMEDY_RE,
+    "the server sentence must not offer archive/snapshot/power-off as a way to stop the charge: " +
+    JSON.stringify(HETZNER_PAUSE_GAP));
+  // Non-vacuity: the rule must actually reject the copy cch-w55-s2 retracted, or
+  // the assertion above would pass on an empty string just as happily.
+  assert.match("Hetzner bills a stopped server, so archive it instead.", FALSE_PAUSE_REMEDY_RE);
+  assert.match(HETZNER_PAUSE_GAP + " Archive it to stop paying.", FALSE_PAUSE_REMEDY_RE);
+});
+
 const CAP_GAPS = {
-  hetzner: { pause: "Hetzner has no pause primitive." },
-  azure: { adopt: "Adopt needs an existing resource-group import." },
+  hetzner: { pause: HETZNER_PAUSE_GAP },
+  azure: { adopt: AZURE_ADOPT_GAP },
 };
 const CAP_PAYLOAD = {
   providers: Object.fromEntries(
@@ -10448,7 +10537,7 @@ test("S11b: hetzner model — CLI affordances, a disabled verb with the SERVER r
   assert.equal(byVerb.audit.mode, "cli");
   // capability false → disabled, carrying Hetzner's OWN gap reason verbatim.
   assert.equal(byVerb.pause.mode, "disabled");
-  assert.equal(byVerb.pause.reason, "Hetzner has no pause primitive.");
+  assert.equal(byVerb.pause.reason, HETZNER_PAUSE_GAP);
   // decommission is always the live console action.
   assert.equal(byVerb.decommission.mode, "live");
   assert.equal(byVerb.decommission.resourceName, "web");
@@ -10459,7 +10548,7 @@ test("S11b: azure model — the one false verb is disabled with its SERVER reaso
   const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, bp);
   const byVerb = Object.fromEntries(plain(m.actions).map((a) => [a.verb, a]));
   assert.equal(byVerb.adopt.mode, "disabled");
-  assert.equal(byVerb.adopt.reason, "Adopt needs an existing resource-group import.");
+  assert.equal(byVerb.adopt.reason, AZURE_ADOPT_GAP);
   // GR71 note: this arm used to also assert azure `audit` was a false verb with
   // no gap. The committed fixture says azure audit is TRUE — the hand-copied
   // payload had drifted. Deriving from the fixture corrected it, so the
@@ -10497,7 +10586,8 @@ test("S11b: lifecycleActionRowHtml renders the pill class, CLI chip, disabled re
   assert.match(html, /Live/);
   assert.match(html, /bp cloud instance archive web/); // CLI affordance verbatim
   assert.match(html, /via the bp CLI/);
-  assert.match(html, /Hetzner has no pause primitive\./); // server-owned reason
+  assert.ok(html.includes(hooks.esc(HETZNER_PAUSE_GAP)), // server-owned reason, escaped as the SPA escapes it
+    "the disabled-verb row must carry the derived server sentence verbatim");
   assert.match(html, /data-life-verb="decommission"/); // the live, wired verb
   assert.match(html, /btn-danger/);
 });
@@ -10745,9 +10835,9 @@ test("S11b: lifecycleOptimistic applies the decommissioned pill then rolls back 
 // scenario fixture. hetzner/azure are prod (matrix columns); fake is dev-tier.
 const PROV_CAP = {
   providers: {
-    hetzner: { tier: "prod", gaps: { pause: "Hetzner has no pause primitive." },
+    hetzner: { tier: "prod", gaps: { pause: HETZNER_PAUSE_GAP },
       capabilities: { core: true, catalog: false, labels: true, pause: false, archive: true, resurrect: true, decommission: true, adopt: true, audit: true } },
-    azure: { tier: "prod", gaps: { adopt: "Adopt needs an existing resource-group import." },
+    azure: { tier: "prod", gaps: { adopt: AZURE_ADOPT_GAP },
       capabilities: { core: true, catalog: true, labels: true, pause: true, archive: true, resurrect: true, decommission: true, adopt: false, audit: false } },
     fake: { tier: "dev", gaps: {},
       capabilities: { core: true, catalog: true, labels: true, pause: true, archive: true, resurrect: true, decommission: true, adopt: true, audit: true } },
@@ -11021,8 +11111,8 @@ test("gr-p4: capability matrix — 9 verbs, prod columns only, server-owned gaps
   assert.equal(m.verbs.length, 9);
   // false WITH a server gap → the reason is the server's own, verbatim
   assert.equal(m.cells.pause.hetzner.ok, false);
-  assert.equal(m.cells.pause.hetzner.reason, "Hetzner has no pause primitive.");
-  assert.equal(m.cells.adopt.azure.reason, "Adopt needs an existing resource-group import.");
+  assert.equal(m.cells.pause.hetzner.reason, HETZNER_PAUSE_GAP);
+  assert.equal(m.cells.adopt.azure.reason, AZURE_ADOPT_GAP);
   // false with NO gap → a bare cell, NO reason (never padded, no default_gap)
   assert.equal(m.cells.catalog.hetzner.ok, false);
   assert.equal(m.cells.catalog.hetzner.reason, "");
@@ -11043,7 +11133,8 @@ test("gr-p4: capability matrix render — mark on yes, dash + verbatim reason on
   assert.ok(html.indexOf(">Fake<") === -1); // dev-tier filtered from the render
   assert.match(html, /cap-mark/); // a supported mark
   assert.match(html, /cap-dash/); // an unsupported dash
-  assert.match(html, /Hetzner has no pause primitive\./); // reason verbatim
+  assert.ok(html.includes(hooks.esc(HETZNER_PAUSE_GAP)), // reason verbatim, SPA-escaped
+    "the matrix cell must carry the derived server sentence verbatim");
   // honest degrade states
   assert.match(hooks.capabilityMatrixHtml(hooks.capabilityMatrixModel(undefined)), /Checking provider capabilities/);
   assert.match(hooks.capabilityMatrixHtml(hooks.capabilityMatrixModel(null)), /unavailable/);
@@ -16541,7 +16632,8 @@ test("GR24: the bp CLI card — title, 4 copyable commands, the SERVER pause sen
     assert.match(html, new RegExp("bp cloud instance " + verb + " web"));
   }
   // the pause verb leaves the grid: its SERVER-OWNED gap reason IS the foot sentence.
-  assert.match(html, /inst-life-footnote">Hetzner has no pause primitive\.</);
+  assert.ok(html.includes('inst-life-footnote">' + hooks.esc(HETZNER_PAUSE_GAP) + "<"),
+    "the CLI-card foot sentence IS the derived server gap reason");
   assert.doesNotMatch(html, /<button[^>]*disabled[^>]*>Pause</); // no dead Pause control in the grid
   // the destroy-tier verb anchors the foot with the typed-confirm ellipsis.
   assert.match(html, /cli-card-foot/);
