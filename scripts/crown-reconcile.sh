@@ -627,6 +627,67 @@ iso_of() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +
 CUTOFF_ISO="$(iso_of "$CUTOFF_EPOCH")"
 NOW_ISO="$(iso_of "$NOW_EPOCH")"
 
+# ── THE DATED, SELF-EXPIRING WAIVER FOR ONE SHA ──────────────────────────────
+#
+# WHY IT EXISTS. PR #16471 closed a crown-recorder gap: rows_for's half-open
+# range could drop a delivered sha PERMANENTLY once the next deploy's `prev`
+# moved past it. That fix is FORWARD-ONLY — it stops the NEXT drop and cannot
+# manufacture the row that was already lost — so exactly ONE pre-fix specimen
+# survives it: 28f8e109c58c285f3fd60d6645b4df20467c05e6, graced 2026-09-06
+# 08:32:19Z and never recorded. Every crown-reconcile run on main since the
+# merge has fired GRACED-UNRECORDED on that one sha and nothing else.
+#
+# WHO OWNS THE REAL REMEDY. Not this file. The honest fix is a backfill POST to
+# /v1/internal/platform-deliveries, which needs a live WORKER_TOKEN and a write
+# to the control-plane box — both owner-only by standing rule. It is queued with
+# the owner as task-9c8fccd9e8a77773. This waiver buys the hours until then; it
+# does not settle the debt, and it is not a licence to skip it.
+#
+# WHAT HAPPENS AT EXPIRY. Nothing has to happen. Past WAIVER_EXPIRES_ISO the
+# predicate below is false and the sha is accused again exactly as it is today —
+# no config change, no cleanup PR, no allowlist that quietly outlives its excuse.
+# The instant is pinned to the sha's own 86400s REASK_MAX_SECONDS retirement
+# (first seen 08:32:19Z 2026-09-06, so it ages off the re-ask list ~08:32:19Z
+# 2026-09-07): the waiver CANNOT outlive the condition it excuses, because the
+# condition retires within seconds of it.
+#
+# IT IS LOUD. A waived sha still prints — by sha, with its expiry and the seconds
+# left — so nobody reads a silent green.
+WAIVED_SHA="28f8e109c58c285f3fd60d6645b4df20467c05e6"
+WAIVER_EXPIRES_ISO="2026-09-07T08:32:00Z"
+# THE PLATFORM TRAP THIS PARSE IS GUARDED AGAINST. `date -u -d ""` returns rc 1
+# on BSD/macOS and rc 0 WITH TODAY'S MIDNIGHT on GNU/Linux, and GNU also accepts
+# a relative grammar ("next year", "+1 day") that BSD refuses outright. A
+# malformed constant here would therefore be INERT on a mac and a real — possibly
+# far-future — instant on the CI runner: the difference between "expired" and
+# "waived forever", decided by which date(1) the machine happens to have. So the
+# literal is SHAPE-CHECKED before any date(1) sees it, at the STRICTER contract
+# (exactly YYYY-MM-DDTHH:MM:SSZ — no fraction, no offset, no relative grammar),
+# and anything that fails the shape, fails the parse, or lands non-numeric leaves
+# the expiry at 0, which makes the waiver INERT on every platform. It fails
+# CLOSED: the accusation is the default, and the waiver is what must be earned.
+case "$WAIVER_EXPIRES_ISO" in
+  [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z)
+    WAIVER_EXPIRES_EPOCH="$(epoch_of "$WAIVER_EXPIRES_ISO" 2>/dev/null || true)" ;;
+  *)
+    WAIVER_EXPIRES_EPOCH="" ;;
+esac
+case "$WAIVER_EXPIRES_EPOCH" in
+  ''|*[!0-9]*) WAIVER_EXPIRES_EPOCH=0 ;;
+esac
+if [ "$WAIVER_EXPIRES_EPOCH" = "0" ]; then
+  warn "WAIVER INERT: the dated waiver's expiry constant ($WAIVER_EXPIRES_ISO) is not an unambiguous UTC instant, so nothing is waived and $WAIVED_SHA is judged normally."
+fi
+# TRUE only for that ONE sha, and only before that ONE instant. String equality,
+# never a prefix or a pattern: it can suppress nothing else, and no sha it was
+# not written for can inherit its silence.
+waived_now() { # <sha> -> 0 if this exact sha is waived AND the waiver is still live
+  [ "$1" = "$WAIVED_SHA" ] || return 1
+  [ "$WAIVER_EXPIRES_EPOCH" -gt 0 ] || return 1
+  [ "$NOW_EPOCH" -lt "$WAIVER_EXPIRES_EPOCH" ] || return 1
+  return 0
+}
+
 # ── the named silences ───────────────────────────────────────────────────────
 # The ONLY way UNREADABLE is set. A condition that mutes part of the comparison
 # has to say which one it was, in the exit-2 sentence itself and not only in a
@@ -1564,6 +1625,7 @@ fi
 # question is asked of the CROWN, not of the box, so it survives the box moving
 # on to another sha — which is precisely what made 4c8314c94 unaccusable.
 GRACED_RED=0
+WAIVED_COUNT=0
 : > "$WORK/graced.txt"
 : > "$WORK/reask-keep.txt"
 while IFS=' ' read -r gsha gts; do
@@ -1604,6 +1666,16 @@ while IFS=' ' read -r gsha gts; do
     [ -n "$grows" ] || grows=0
     if [ "$grows" -gt 0 ]; then
       say "  note: the graced sha $gsha was recorded after all — retired from the re-ask list"
+      continue
+    fi
+    # THE DATED WAIVER, applied at the ONE point the accusation is counted. It
+    # is checked AFTER the crown was actually asked — a waived sha that got its
+    # row still retires cleanly above — and it keeps the sha on the re-ask list,
+    # so the instant the waiver expires this same loop accuses it again.
+    if waived_now "$gsha"; then
+      WAIVED_COUNT=$((WAIVED_COUNT + 1))
+      say "  WAIVED (expires ${WAIVER_EXPIRES_ISO}, $((WAIVER_EXPIRES_EPOCH - NOW_EPOCH))s from now): the graced sha $gsha has no cp row and WOULD be accused. It is the one pre-fix specimen of the forward-only recorder fix (#16471), which cannot backfill a row already lost; the real remedy is the owner-queue backfill, task-9c8fccd9e8a77773. This waiver names that sha literally and suppresses nothing else, and past ${WAIVER_EXPIRES_ISO} it is INERT — the accusation returns with no code change."
+      printf '%s %s\n' "$gsha" "$gts" >> "$WORK/reask-keep.txt"
       continue
     fi
     GRACED_RED=$((GRACED_RED + 1))
@@ -1709,6 +1781,9 @@ if [ -n "$SERVING_INFLIGHT_EXPIRED" ]; then
 fi
 if [ "$SERVING_RED" -gt 0 ]; then
   say "SERVING-UNRECORDED: barkpark.cloud reports it is SERVING ${SERVING_SHA} and the crown has no cp row for it — production is running a commit its own record has never heard of."
+fi
+if [ "$WAIVED_COUNT" -gt 0 ]; then
+  say "GRACED-WAIVED: ${WAIVED_COUNT} sha(s) had no cp row and were NOT counted, under the dated waiver in this script that expires ${WAIVER_EXPIRES_ISO} ($((WAIVER_EXPIRES_EPOCH - NOW_EPOCH))s from now). This run is therefore not a clean green on those shas — it is a green that a waiver bought, and the waiver retires itself."
 fi
 if [ "$GRACED_RED" -gt 0 ]; then
   say "GRACED-UNRECORDED: ${GRACED_RED} sha(s) were granted the serving grace on an earlier run and STILL have no cp row. The grace was a DEFERRAL, and this is the deferred accusation — it fires whether or not the box still serves them:"
