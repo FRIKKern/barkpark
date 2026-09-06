@@ -530,7 +530,6 @@ func renderTaskCreated(out *writer, draftID string, rec taskCreateRecord, warnin
 	if out.machineOut() {
 		receipt := map[string]any{
 			"id":               bareID,
-			"draft":            draftID,
 			"status":           status,
 			"lifecycle_status": nil,
 			// pds-bl-task-create-draft-at-rc0 — THE FIELD A SCRIPT CAN BRANCH ON.
@@ -539,6 +538,28 @@ func renderTaskCreated(out *writer, draftID string, rec taskCreateRecord, warnin
 			// word for ready. on_board answers the only question a caller of a
 			// verb named "create the task" is actually asking.
 			"on_board": onBoard,
+		}
+		// task-ee33b6f088b35bdb — THE RECEIPT NAMED A DOCUMENT THAT DOES NOT
+		// EXIST. `draft` was emitted unconditionally off the CREATE leg's id, so
+		// a SUCCESSFUL `--publish` printed
+		// {"draft":"drafts.task-N","status":"published","on_board":true} — and
+		// publishing CONSUMES the draft, so `bp doc get task drafts.task-N
+		// --perspective raw` on that very id answers not_found (run against
+		// guerrilla on the probe row task-ccd184a652f95f76). Every other field
+		// here descends from the record the server PERSISTED (PDS wave 48); this
+		// one descended from a leg whose document no longer existed by the time
+		// the line was printed.
+		//
+		// It is the create path's own sin one field over: a TRUE-LOOKING LINE
+		// pointing somewhere empty. A caller sweeping orphan drafts reads
+		// `draft` and files `bp doc discard-draft` against a phantom; a caller
+		// stashing it as the handle to its own row keeps an id that resolves to
+		// nothing. The key is emitted only when the draft is KNOWN to exist —
+		// that is exactly `rec.draft` on an echoed `_draft` (the same evidence
+		// `status` and `on_board` are read off), never inferred from the create
+		// leg and never guessed when the server echoed no `_draft` at all.
+		if rec.hasDraft && rec.draft {
+			receipt["draft"] = draftID
 		}
 		if len(warnings) > 0 {
 			receipt["warnings"] = warnings
