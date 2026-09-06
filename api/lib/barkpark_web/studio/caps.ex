@@ -292,6 +292,24 @@ defmodule BarkparkWeb.Studio.Caps do
     # ONE load per principal, ONE decision per principal, made by the chokepoint
     # that owns it. `seat_capabilities/3` reads :read/:write/:admin off the row
     # this module already holds — no recomposition here, and no second query.
+    #
+    # THIS IS THE PAIRING THAT MUST NOT SLIP, and it is why
+    # `seat_capabilities/3` binds `principal_type`/`principal_id` in its clause
+    # heads. `principals` is a LIST — a token AND a user on a dual-principal
+    # socket — and `load_memberships/2` returns `{principal, membership}` already
+    # zipped. Nothing here can currently hand it a crossed pair, and that is the
+    # point: if a future edit to this loop (a `Enum.zip/2` over two separately
+    # built lists, a reorder, a filter applied to one side only) ever paired MY
+    # row with YOUR principal, the function would answer off the WRONG SEAT —
+    # silently. No raise, no red, no log, because both halves are individually
+    # well-formed. The binding in the callee turns that slip into an all-false
+    # catch-all instead of an escalation.
+    #
+    # So the guard on the other end is deliberate and is NOT dead code, even
+    # though nothing reaches it today (`grep -rn seat_capabilities api/lib` on
+    # the pre-#16586 tree: zero callers; this loop is the first). Deleting it
+    # because "nothing produces a crossed pair" removes the only thing that
+    # makes that still true. Added on lead-studio-10's review.
     seats =
       for {principal, membership} <- load_memberships(principals, ws_id),
           do: Tenancy.Auth.seat_capabilities(principal, membership, ws_id)
