@@ -187,9 +187,18 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
       # An unpublished `drafts.<slug>` there would make this test pass for the
       # wrong reason: the lookup would find nothing whether or not the dataset
       # scope existed, and dropping the scope would not red it.
+      # `dataset_twin_intended` — `Tasks.DatasetTwinFence` (THE ONE RULE's
+      # producer half, task-49eef068420df918) now refuses a task birth of an id
+      # that already lives in a sibling dataset. This fixture BUILDS that shape
+      # deliberately, which is what the stated-intent escape is for.
       foreign_content =
         Barkpark.LabelFixtures.with_registered_labels(
-          %{"kind" => "task", "lifecycle_status" => "open", "description" => @desc},
+          %{
+            "kind" => "task",
+            "lifecycle_status" => "open",
+            "description" => @desc,
+            "dataset_twin_intended" => true
+          },
           "aker-brygge"
         )
 
