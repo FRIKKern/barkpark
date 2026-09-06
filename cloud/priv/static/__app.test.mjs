@@ -18117,6 +18117,132 @@ test("G-04 notifDeliveryRowHtml: recipient + toned pill + meta + verbatim error"
   assert.doesNotMatch(chat, /wh-del-err/);
 });
 
+// ── dr-w26 / cch-w63: status_meaning RENDERS WHERE THE CHIP IS ───────────────
+//
+// `sent` means the mail transport ACCEPTED the message, not that it arrived.
+// The control plane ships that sentence on the delivery payload
+// (`Notifications.Delivery.status_meaning/1` via the cloud router's
+// `delivery_json/1`); the console's job is to put it beside the word, in the
+// same row, so a reader cannot pick up the chip without the caveat.
+//
+// THE SURFACE SET IS DERIVED, NOT ASSUMED. Exactly TWO functions in app.js emit
+// a `.wh-del-status` pill:
+//
+//   grep -n 'wh-del-status wh-del-status--' cloud/priv/static/app.js
+//     → notifDeliveryRowHtml  (the CONTROL-PLANE notification log — the payload
+//                              #16336 adds the field to)
+//     → deliveryRowHtml       (the INSTANCE webhook log — a different producer,
+//                              `render_delivery`, which has no such field today)
+//
+// Both are covered below, and the second is covered precisely because it does
+// NOT have the field: an absent key must leave that row byte-identical.
+//
+// The test that fails if a THIRD paint site appears is the count assertion in
+// the first case — a source grep, not a render, because a new emitter would
+// otherwise ship uncovered exactly the way this one nearly did.
+
+test("dr-w26: exactly two functions paint the delivery status chip, and the meaning rides in both", () => {
+  const pills = (APP_SRC.match(/wh-del-status wh-del-status--/g) || []).length;
+  assert.equal(pills, 2,
+    "the delivery status chip is painted " + pills + " times; the meaning must ride in EVERY one — " +
+    "re-derive the surface set and cover the new emitter");
+  // …and every pill emission is followed by the meaning helper BEFORE the row's
+  // next element, so "two sites" and "two covered sites" are the same claim.
+  // Measured, not guessed: the helper sits 223 and 351 source characters after
+  // the two pill markers (the gap is the rationale comment at each call site),
+  // and the window below is short enough that ONE site cannot reach the OTHER —
+  // the two are ~8,100 characters apart. A window that spanned both would let a
+  // single wired site green a missing one.
+  const idx = [];
+  for (let at = APP_SRC.indexOf("wh-del-status wh-del-status--"); at !== -1;
+       at = APP_SRC.indexOf("wh-del-status wh-del-status--", at + 1)) idx.push(at);
+  assert.equal(idx.length, 2);
+  assert.ok(idx[1] - idx[0] > 1000, "the two paint sites are far apart — the window below is site-local");
+  for (const at of idx) {
+    const window = APP_SRC.slice(at, at + 1000);
+    assert.ok(window.includes("deliveryStatusMeaningHtml(d)"),
+      "a status pill at offset " + at + " is painted without the meaning beside it");
+  }
+});
+
+test("dr-w26: a `sent` row renders the chip word and the meaning ADJACENT, in the same row", () => {
+  const MEANING =
+    "Accepted by the mail transport — NOT confirmed delivered to the recipient.";
+  const row = hooks.notifDeliveryRowHtml({
+    recipient: "alerts@acme.com", event: "deploy.failed", channel: "email",
+    status: "sent", status_meaning: MEANING, attempts: 1, http_status: null,
+    inserted_at: "2026-08-08T23:00:00Z",
+  });
+  // BOTH WORDS, and both inside the one `.wh-del-row` — not a tooltip, not a
+  // detail pane, not a second card.
+  assert.match(row, /wh-del-status--ok[^>]*>Sent</);
+  assert.match(row, /wh-del-meaning/);
+  assert.ok(row.includes("Accepted by the mail transport"),
+    "the payload's sentence is not rendered");
+
+  // ADJACENCY, stated structurally: the meaning span opens immediately after
+  // the status span closes, with nothing between them. A caveat two cells away
+  // is a caveat that reads as being about something else.
+  assert.match(row, /<\/span><span class="wh-del-meaning">/);
+  const rowStart = row.indexOf('<div class="wh-del-row">');
+  const rowEnd = row.indexOf("</div>", rowStart);
+  assert.ok(row.indexOf("wh-del-meaning") > rowStart && row.indexOf("wh-del-meaning") < rowEnd,
+    "the meaning escaped the delivery row");
+
+  // NO SECOND AUTHOR: the console does not own this sentence. If app.js ever
+  // grows its own copy of it, the two drift and the caveat stops matching the
+  // status the server actually stamped.
+  assert.ok(!APP_SRC.includes("Accepted by the mail transport"),
+    "app.js authors its own copy of the meaning — it must render the payload's");
+
+  // The sentence is ESCAPED, never injected.
+  const evil = hooks.notifDeliveryRowHtml({ status: "sent", status_meaning: '<img src=x onerror=1>' });
+  assert.ok(!evil.includes("<img"), "status_meaning is interpolated unescaped");
+  assert.match(evil, /&lt;img/);
+});
+
+test("dr-w26: a payload WITHOUT status_meaning renders the row unchanged — no undefined, no empty qualifier", () => {
+  const base = {
+    recipient: "alerts@acme.com", event: "deploy.failed", channel: "email",
+    status: "sent", attempts: 1, http_status: null, inserted_at: "2026-08-08T23:00:00Z",
+  };
+  // THE CONTROL: byte-identical to what this row rendered before the field
+  // existed. An older control plane, and every row written before #16336, take
+  // this path — a blank qualifier would read exactly like a confident claim.
+  for (const absent of [base, { ...base, status_meaning: null }, { ...base, status_meaning: "" }]) {
+    const row = hooks.notifDeliveryRowHtml(absent);
+    assert.ok(!row.includes("wh-del-meaning"), "an empty qualifier span was emitted");
+    assert.ok(!row.includes("undefined"), "the row rendered the string 'undefined'");
+    assert.ok(!row.includes("null"), "the row rendered the string 'null'");
+    assert.match(row, /wh-del-status--ok[^>]*>Sent</, "the chip itself must be unchanged");
+  }
+  // …and the with/without rows differ ONLY by the meaning span.
+  const withIt = hooks.notifDeliveryRowHtml({ ...base, status_meaning: "Accepted, not delivered." });
+  assert.equal(withIt.replace(/<span class="wh-del-meaning">[^<]*<\/span>/, ""),
+    hooks.notifDeliveryRowHtml(base),
+    "adding status_meaning changed something other than the meaning span");
+});
+
+test("dr-w26: the INSTANCE webhook row is untouched today and carries the meaning the day its producer grows one", () => {
+  // `deliveryRowHtml` renders the instance's own delivery log (`render_delivery`),
+  // a DIFFERENT producer with no status_meaning field. Today it must render
+  // exactly as before — this is the regression guard for the second surface.
+  const inst = { id: "d1", status: "success", status_code: 200, attempt: 1, delivered_at: "2026-08-08T23:00:00Z" };
+  assert.ok(!hooks.deliveryRowHtml(inst, "acme", "production").includes("wh-del-meaning"),
+    "the webhook row invented a meaning its producer never sent");
+  // …and it is wired, so the day that producer ships the field nobody has to
+  // find this call site again.
+  assert.match(hooks.deliveryRowHtml({ ...inst, status_meaning: "Accepted by the endpoint." }, "acme", "production"),
+    /wh-del-meaning">Accepted by the endpoint\./);
+});
+
+test("dr-w26: deliveryStatusMeaningHtml is total and never emits an empty element", () => {
+  for (const d of [undefined, null, {}, { status_meaning: null }, { status_meaning: "" }])
+    assert.equal(hooks.deliveryStatusMeaningHtml(d), "");
+  assert.equal(hooks.deliveryStatusMeaningHtml({ status_meaning: "x" }),
+    '<span class="wh-del-meaning">x</span>');
+});
+
 // ── cch-w52-s3: THE CARRIER SEGMENT ──────────────────────────────────────────
 //
 // THIS SLICE AUTHORS ITS OWN PIN, DELIBERATELY. The Console gate was measured

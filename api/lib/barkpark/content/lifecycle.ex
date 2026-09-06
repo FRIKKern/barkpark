@@ -388,6 +388,9 @@ defmodule Barkpark.Content.Lifecycle do
       # title). So the draft is discarded HERE, in the same operation that
       # refused it, and the caller is told where the surviving copy is.
       #
+      # ONE EXCEPTION, on the discard itself: a draft carrying a LIVE
+      # `content.claim` is KEPT — see `discard_draft_refused_as_duplicate/5`.
+      #
       # THE OTHER FOUR REFUSALS DELIBERATELY KEEP THE DRAFT:
       #
       #   * `label_spine`, `unknown_tag`, `invalid_epic_paper_quality` are
@@ -429,7 +432,89 @@ defmodule Barkpark.Content.Lifecycle do
   # vanished) does NOT become the caller's error: the publish was refused on its
   # merits and that is the answer the caller must see. The draft simply stays,
   # and the census's population is the place that shows it.
+  # ── THE REFUSAL ARM OF THE SAME CONTRACT (task-8e9005bee4d20ed5) ──────────
+  #
+  # A `type:task` draft can carry `content.claim` — the map `Tasks.Claim`
+  # writes and `Tasks.Close` CAS's on — and discarding THAT draft deletes a
+  # LIVE lease: the worker holding it has no row left to pulse, to close, or
+  # even to read, and no event anywhere says where its work went. Observed
+  # 2026-09-06 (request_id GNK2icDy2EdMC2EAACHB): a draft-only task, claimed,
+  # then published into a near-duplicate refusal; afterwards the bare id, the
+  # `drafts.` id and `bp task ls` all answered 404/empty. A REFUSAL destroyed
+  # a claimed row.
+  #
+  # Same ruling as the SUCCESS arm (`task_door_field_fence/2`,
+  # task-9b5e1a6a688d27fc): the DOCUMENT door is the one that must yield. A
+  # publish that names no task-door field carries no authorial intent about
+  # the claim, so it may neither silently rewrite it (success arm) nor destroy
+  # it (here). The pair therefore holds ONE contract: a publish never destroys
+  # or silently rewrites task-door state.
+  #
+  # REJECTED: keep the discard and RELEASE the claim ourselves, emitting a task
+  # event that names the surviving copy. That makes the document door WRITE
+  # task-door state on a path the author never asked for — the exact coupling
+  # the success arm's ruling forbids — and it still destroys the draft's own
+  # content (brief, criteria, description) that the claimed work was about.
+  #
+  # Not stamping `:refused_draft_id` is load-bearing:
+  # `Mutations.compensating_discard/4` fires ONLY on that key, so the batch
+  # door (`POST /v1/data/mutate`) leaves the claimed draft standing too — one
+  # answer at both doors, exactly as the discard path itself is arranged.
+  #
+  # The stranded-draft census this discard bounds is unaffected in kind: a
+  # CLAIMED draft is not an orphan — a named worker is holding it, and when the
+  # lease lapses `Tasks.TtlSweeper` clears the claim, after which the very next
+  # publish discards the draft normally.
   defp discard_draft_refused_as_duplicate(%Document{} = draft, payload, type, dataset, opts) do
+    case claim_holder(draft) do
+      nil ->
+        discard_refused_duplicate_draft(draft, payload, type, dataset, opts)
+
+      worker ->
+        {:error, {:duplicate_of, annotate_claimed_survivor(payload, draft, worker)}}
+    end
+  end
+
+  # The worker holding this draft's claim, or nil when the draft carries none.
+  # Keyed on `claim.worker` (the field `Tasks.Close` CAS's against together with
+  # the epoch) rather than on the claim map's mere presence: a swept or released
+  # claim can leave an empty/worker-less map behind, and that is not a lease.
+  defp claim_holder(%Document{content: content}) when is_map(content) do
+    case Map.get(content, "claim") do
+      %{"worker" => worker} when is_binary(worker) ->
+        if String.trim(worker) == "", do: nil, else: worker
+
+      _ ->
+        nil
+    end
+  end
+
+  defp claim_holder(_draft), do: nil
+
+  defp annotate_claimed_survivor(%{message: message} = payload, %Document{} = draft, worker)
+       when is_binary(message) do
+    Map.put(
+      payload,
+      :message,
+      message <>
+        " The refused draft #{draft.doc_id} was KEPT, not discarded: it carries a live " <>
+        "`content.claim` held by #{inspect(worker)}#{claim_epoch_phrase(draft)}. Discarding it " <>
+        "would destroy that lease along with the work it names, leaving nothing to pulse, " <>
+        "close or read. The TASK door owns the claim: release it with " <>
+        "`bp task release <id> <worker> <epoch>` (or let the lease lapse), then publish again " <>
+        "and the refused draft is discarded normally."
+    )
+  end
+
+  defp annotate_claimed_survivor(payload, _draft, _worker), do: payload
+
+  defp claim_epoch_phrase(%Document{content: %{"claim" => %{"epoch" => epoch}}})
+       when is_integer(epoch),
+       do: " at epoch #{epoch}"
+
+  defp claim_epoch_phrase(_draft), do: ""
+
+  defp discard_refused_duplicate_draft(%Document{} = draft, payload, type, dataset, opts) do
     payload = payload |> Map.put(:refused_draft_id, draft.doc_id) |> annotate_discard(draft)
 
     case fenced_delete(draft) do
@@ -678,8 +763,103 @@ defmodule Barkpark.Content.Lifecycle do
         {:error, {:invalid_task_content, stale_claim_error(pub_content)}}
 
       true ->
-        criteria_fence(pub_content, draft_content)
+        with :ok <- criteria_fence(pub_content, draft_content) do
+          task_door_field_fence(pub_content, draft_content)
+        end
     end
+  end
+
+  # ── WHICH DOOR IS WRONG: THE DOCUMENT DOOR (task-9b5e1a6a688d27fc) ─────────
+  #
+  # Two doors write one row. The TASK door (`Barkpark.Tasks.{Claim,Pulse,Renew,
+  # Release,Fence,Move,Stamp,Stage,Close,TtlSweeper}`) writes the published row
+  # in place, rev-CAS'd, through the sanctioned verbs. The DOCUMENT door (draft
+  # patch + `publish_document/4`) copies the draft's content WHOLESALE onto the
+  # published row — see `publish_after_gate/5`'s `"content" => pub_content`.
+  #
+  # The document door is the one that must yield: a publish that does not NAME
+  # a task-door field has no authorial intent about it, so it may not change it.
+  # Publish cannot simply MERGE the live values back in — that would invent an
+  # edit the author never wrote, and it is the same class of silent repair the
+  # title-divergence gate above refuses to make — so, exactly like
+  # `stale_claim?/2`, the seam REFUSES and names the verb that owns the field.
+  #
+  # THE FIELDS, ENUMERATED FROM THE TASK WRITE PATH, not from a brief. Every
+  # TOP-LEVEL `content` key `api/lib/barkpark/tasks/*.ex` writes:
+  #
+  #   * `claim`              — claim/pulse/renew/release/fence/move/close/ttl_sweeper
+  #                            (already fenced by `stale_claim?/2`; `closed_by`
+  #                            and `closed_at` live INSIDE it, so they ride it)
+  #   * `lifecycle_status`   — claim/close/fence/move/stamp/ttl_sweeper
+  #                            (already fenced by `Transitions.legal?/2` above)
+  #   * `acceptance_criteria` — stamp (already fenced by `criteria_fence/2`)
+  #   * `close_reason`       — close.ex:1232
+  #   * `close_override`     — close.ex:1310
+  #   * `disposition`        — close.ex:1642, stage.ex (@disposition_key)
+  #   * `reopen_trigger`     — stage.ex (@reopen_trigger_key)
+  #   * `engagement`         — stage.ex:717
+  #   * `landed`             — internal.ex:493
+  #
+  # The first three already had a gate. THE LAST SIX HAD NONE: a draft minted
+  # DURING or AFTER a close carries the claim byte-identical, so `stale_claim?/2`
+  # waves it through; `done -> done` is table-legal; preserved criteria pass the
+  # criteria fence — and the publish then lands with `close_reason` gone, the
+  # deferral's `reopen_trigger` gone, the `landed` merge record gone. rc=0, no
+  # warning. This fence closes exactly that residue, on the SAME keys the api
+  # patch door already fences for `disposition`/`reopen_trigger`
+  # (`Content.Mutations.ensure_disposition_via_verb/4`) — the publish door was
+  # simply never taught them.
+  #
+  # SCOPE, deliberately narrow:
+  #   * only a published value that is PRESENT (non-nil) is protected — a task
+  #     that never carried the key is free to gain one through any write;
+  #   * `:sync` never reaches here (it takes the mirror-verbatim branch in
+  #     `ensure_task_publish_transition_legal/5`), matching the transition and
+  #     claim checks: a replica must be able to mirror an upstream close;
+  #   * a draft carrying the value BYTE-IDENTICAL passes untouched, which is
+  #     every draft derived from the current published content — the
+  #     patch-then-publish idiom, the met-flip republish, the github collapse.
+  #
+  # Same `{:invalid_task_content, %{field => [msg]}}` family (422
+  # `validation_failed`) the two gates beside it use — no new error code, no new
+  # controller branch, and the message names the verb that owns the field.
+  @task_door_owned_fields ~w(close_reason close_override disposition reopen_trigger engagement landed)
+
+  @task_door_field_verbs %{
+    "close_reason" => "`bp task close <id> <worker> <epoch> --reason <why>`",
+    "close_override" => "`bp task close <id> <worker> <epoch> --criteria-override <why>`",
+    "disposition" => "`bp task stage <id> <state> --disposition <open|parked|closed>`",
+    "reopen_trigger" => "`bp task stage <id> <state> --reopen-trigger <condition>`",
+    "engagement" => "`bp task stage <id> <state>`",
+    "landed" => "`bp task close <id> <worker> <epoch>` (the landing record)"
+  }
+
+  defp task_door_field_fence(pub_content, draft_content) do
+    Enum.find_value(@task_door_owned_fields, :ok, fn field ->
+      was = Map.get(pub_content, field)
+      now = Map.get(draft_content, field)
+
+      if not is_nil(was) and now != was do
+        {:error, {:invalid_task_content, task_door_field_error(field, was, now)}}
+      end
+    end)
+  end
+
+  defp task_door_field_error(field, was, now) do
+    verb = Map.fetch!(@task_door_field_verbs, field)
+    act = if is_nil(now), do: "erase", else: "overwrite"
+
+    %{
+      field => [
+        "publish refused: this draft would #{act} `content.#{field}`, which the TASK door owns. " <>
+          "The published row holds #{inspect(was)}; this draft carries #{inspect(now)}. " <>
+          "Publishing copies a draft's content over the published row WHOLESALE, so a draft " <>
+          "that simply predates (or never saw) the write is indistinguishable from an author " <>
+          "asking to clear the field — and this one names no such intent. Only the sanctioned " <>
+          "verb writes it: #{verb}. Rebase this draft on the current published row " <>
+          "(`bp doc discard-draft` then re-patch, or carry the value verbatim) and publish again."
+      ]
+    }
   end
 
   # The criteria fence as a standalone gate: the ONE check that applies to

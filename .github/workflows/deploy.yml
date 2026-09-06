@@ -318,8 +318,15 @@ jobs:
           # scripts/deploy-concurrency-check.sh reds if any SSH=/SCP= here loses the pair.
           SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
           SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
-          $SCP deploy/cp-deploy.sh bp-provisioner "root@${CP_HOST}:/tmp/"
-          $SSH "root@${CP_HOST}" 'bash /tmp/cp-deploy.sh /tmp/bp-provisioner'
+          # PER-RUN paths: /tmp/cp-deploy.sh is SHARED, and bash reads a script by
+          # byte offset while executing it, so a later run's scp rewrote it under a
+          # running deploy (runs 34021843141, 34025907184 died on parse errors).
+          # The script also re-execs from a private copy of itself; this closes the
+          # same door for the provisioner BINARY, which cannot self-protect.
+          R="${GITHUB_RUN_ID}"
+          $SCP deploy/cp-deploy.sh "root@${CP_HOST}:/tmp/cp-deploy.$R.sh"
+          $SCP bp-provisioner "root@${CP_HOST}:/tmp/bp-provisioner.$R"
+          $SSH "root@${CP_HOST}" "bash /tmp/cp-deploy.$R.sh /tmp/bp-provisioner.$R; rc=\$?; rm -f /tmp/cp-deploy.$R.sh /tmp/bp-provisioner.$R; exit \$rc"
       - name: Smoke test
         # Through Caddy, not a direct port — blue/green means the live slot
         # alternates between :4100 and :4101; the domain always hits it.
@@ -499,11 +506,13 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
           SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
           SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
-          $SCP deploy/instance-deploy.sh "root@${GUERRILLA_HOST}:/tmp/"
+          # PER-RUN path — same clobber class as the control-plane leg above.
+          R="${GITHUB_RUN_ID}"
+          $SCP deploy/instance-deploy.sh "root@${GUERRILLA_HOST}:/tmp/instance-deploy.$R.sh"
           # The remote env assignment is quoted on the REMOTE side too, so a
           # malformed secret can only ever land in the script's validated variable
           # — never split into extra words of the remote command line.
-          $SSH "root@${GUERRILLA_HOST}" "BARKPARK_CLOUD_EGRESS_IPS='${CP_HOST}' bash /tmp/instance-deploy.sh"
+          $SSH "root@${GUERRILLA_HOST}" "BARKPARK_CLOUD_EGRESS_IPS='${CP_HOST}' bash /tmp/instance-deploy.$R.sh; rc=\$?; rm -f /tmp/instance-deploy.$R.sh; exit \$rc"
       - name: Smoke test
         # THREE assertions, because the single `test "$code" = "200"` this step
         # used to be covers the dead-pool class and NOTHING else (charter D369,
@@ -1183,6 +1192,38 @@ jobs:
                       git show -s --format='%H %cd %ce' --date=format-local:%Y-%m-%dT%H:%M:%SZ "$served" > "$rangefile"
                       transition=unknown
                       measured=0
+                    else
+                      # THE LEFT ENDPOINT IS NOT AUTOMATICALLY RECORDED.
+                      # `prev..served` is HALF-OPEN: it EXCLUDES `prev`. `prev`
+                      # is the sha this box was serving before the swap, and it
+                      # owns a row only if the run that put it there recorded
+                      # one. When that run failed its gate (`needs:
+                      # control-plane.result == 'success' || instance.result ==
+                      # 'success'`) or was still non-terminal, `prev` is dropped
+                      # here AND by every later range too, permanently — every
+                      # later range starts at or after it. Measured on
+                      # 28f8e109c (run 34021843141, both legs failed, then
+                      # `cp: 28f8e109c...222cd2eca = 0 left / 3 right` on the
+                      # next run) and on 373df8e7a (run 34025636906, in_progress
+                      # 73+ min): both were a later deploy's `prev`, both still
+                      # had no cp row hours later.
+                      #
+                      # A row for `prev` is an OBSERVATION, not a fabrication:
+                      # the box demonstrably served it, which is what made it
+                      # `prev`. Asking the crown first is what keeps this at ZERO
+                      # extra rows on the ordinary path, where `prev` is the
+                      # previous run's `served` and already owns its own row —
+                      # unguarded, this would add a duplicate on every deploy.
+                      # `ahead > 0` guarantees prev != served here, so the row
+                      # carries `carried: true` and agrees_with_box still finds
+                      # exactly one non-carried row naming the served sha.
+                      if ! crown_has_row "$prev" "$target"; then
+                        echo "${target}: the previous sha ${prev} has NO row of its own — it reached this box through a run that never recorded, so it is enumerated here as carried rather than dropped by the half-open range"
+                        git show -s --format='%H %cd %ce' --date=format-local:%Y-%m-%dT%H:%M:%SZ "$prev" >> "$rangefile"
+                        if [ $? -ne 0 ]; then
+                          echo "::warning::${target}: git could not describe the previous sha ${prev} — it stays uncarried"
+                        fi
+                      fi
                     fi
                   fi
                 fi
@@ -1224,6 +1265,93 @@ jobs:
               return 1
             fi
             return 0
+          }
+
+          # THE SSH SEAM, ESTABLISHED BEFORE THE ROWS ARE BUILT. These three
+          # lines used to sit just above the POST; only their POSITION moved —
+          # same key, same options, same ServerAlive pair. rows_for now has a
+          # question for the crown (crown_has_row, below) that it must be able
+          # to ask WHILE the range is being assembled, not after.
+          install -m 600 /dev/null /tmp/deploy_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
+
+          # DOES THE CROWN ALREADY HOLD A ROW FOR THIS (sha, target)? Asked over
+          # the SAME seam the POST below uses — same ssh, same
+          # container-by-image-tag discovery, same WORKER_TOKEN — so it costs no
+          # new credential and no new host. `GET /v1/deliveries?sha=` is the
+          # reader crown-reconcile.sh itself uses; PR #14979 admitted the WORKER
+          # principal to that route.
+          #
+          # THE ASYMMETRY IS DELIBERATE AND IT IS THE WHOLE SAFETY ARGUMENT.
+          # This returns 1 — "the crown provably has NO row" — ONLY on a clean
+          # HTTP 200 whose body parsed. Every other answer returns 0, "assume
+          # recorded": no container, empty token, ssh failure, curl failure,
+          # non-200, unparseable body, a sha that is not 40 hex characters. The
+          # caller's only use of a 1 is to ADD a row, so an unreachable or
+          # unreadable crown must never be able to mint one. A duplicate row is a
+          # fabricated observation; a carry missed this run is re-offered by the
+          # next deploy that CAN read, because `prev` stays `prev`.
+          #
+          # The sha travels on STDIN, never in the remote command string, so no
+          # value from a job output can reach a remote shell word.
+          CROWN_READ_REMOTE='set -u
+          read -r SHA
+          case "$SHA" in "" | *[!0-9a-f]*) echo "CHR_ERROR=bad_sha"; exit 0 ;; esac
+          CID="$(docker ps -q --filter ancestor=cloud-control_plane:latest | head -1)"
+          if [ -z "$CID" ]; then echo "CHR_ERROR=no_control_plane_container"; exit 0; fi
+          WT="$(docker exec "$CID" printenv WORKER_TOKEN)"
+          if [ -z "$WT" ]; then echo "CHR_ERROR=empty_worker_token"; exit 0; fi
+          CODE="$(curl -s -o /tmp/chr-response.json -w "%{http_code}" --max-time 30 -H "authorization: Bearer $WT" "https://barkpark.cloud/v1/deliveries?sha=$SHA")"
+          CHR_CURL_RC=$?
+          echo "CHR_CURL_RC=$CHR_CURL_RC"
+          echo "CHR_HTTP=$CODE"
+          echo "CHR_BODY=$(tr -d "\n" < /tmp/chr-response.json)"
+          rm -f /tmp/chr-response.json
+          exit 0'
+
+          crown_has_row() { # <sha> <target> -> 0 has a row OR cannot tell, 1 provably none
+            chr_sha="$1"
+            chr_target="$2"
+            case "$chr_sha" in
+              ????????????????????????????????????????) : ;;
+              *)
+                echo "${chr_target}: '${chr_sha}' is not a 40-character sha — the crown is not asked and it is assumed recorded"
+                return 0
+                ;;
+            esac
+            case "$chr_sha" in
+              *[!0-9a-f]*)
+                echo "${chr_target}: '${chr_sha}' is not hex — the crown is not asked and it is assumed recorded"
+                return 0
+                ;;
+            esac
+            chr_out="$(printf '%s\n' "$chr_sha" | $SSH "root@${CP_HOST}" "$CROWN_READ_REMOTE")"
+            chr_rc=$?
+            if [ "$chr_rc" -ne 0 ]; then
+              echo "${chr_target}: the control plane could not be reached over SSH (rc=${chr_rc}) to ask whether ${chr_sha} already has a row — assumed recorded"
+              return 0
+            fi
+            chr_err="$(printf '%s\n' "$chr_out" | sed -n 's/^CHR_ERROR=//p')"
+            chr_curl="$(printf '%s\n' "$chr_out" | sed -n 's/^CHR_CURL_RC=//p')"
+            chr_http="$(printf '%s\n' "$chr_out" | sed -n 's/^CHR_HTTP=//p')"
+            chr_body="$(printf '%s\n' "$chr_out" | sed -n 's/^CHR_BODY=//p')"
+            case "${chr_curl}" in ''|*[!0-9]*) chr_curl=1 ;; esac
+            if [ -n "$chr_err" ] || [ "$chr_curl" -ne 0 ] || [ "$chr_http" != "200" ]; then
+              echo "${chr_target}: the crown did not answer cleanly about ${chr_sha} (error=${chr_err:-<none>}, curl_rc=${chr_curl}, http=${chr_http:-<none>}) — assumed recorded, because an unreadable crown must not be able to mint a duplicate row"
+              return 0
+            fi
+            chr_n="$(printf '%s' "$chr_body" | jq -r --arg s "$chr_sha" --arg t "$chr_target" '[.deliveries[]? | select(.sha == $s and .target == $t)] | length')"
+            if [ $? -ne 0 ]; then
+              echo "${chr_target}: the crown's 200 about ${chr_sha} could not be parsed — assumed recorded"
+              return 0
+            fi
+            case "${chr_n}" in ''|*[!0-9]*) echo "${chr_target}: the crown's 200 about ${chr_sha} carried no countable rows — assumed recorded"; return 0 ;; esac
+            if [ "$chr_n" -gt 0 ]; then
+              echo "${chr_target}: ${chr_sha} already has ${chr_n} row(s) in the crown — nothing to carry"
+              return 0
+            fi
+            return 1
           }
 
           # ONE ROW SET PER TARGET, EACH GATED ON THE JOB THAT ACTUALLY RAN. A
@@ -1313,10 +1441,6 @@ jobs:
             echo "delivered=${delivered}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
-          install -m 600 /dev/null /tmp/deploy_key
-          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
-          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
 
           # The POST is issued FROM the control plane, over the SSH this workflow
           # already holds, so the bearer never leaves the box and no new GitHub

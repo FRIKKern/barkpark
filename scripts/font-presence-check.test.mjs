@@ -22,6 +22,15 @@
 // is the entire subject of spd-palatino-linotype-unmeasured.
 //
 //   node scripts/font-presence-check.test.mjs
+//
+// MANUAL PROOF — not wired: it needs a real headless Chromium AND the host's
+// installed font set — CDP CSS.getPlatformFontsForNode is the ground truth, and
+// a CI runner's font set is not the measuring Mac's, so a green here on
+// ubuntu-latest would assert nothing about the artifacts in scripts/measurements/.
+// run by hand with: node scripts/font-presence-check.test.mjs
+// last run — NOT RUN by gates6-w13 on 2026-09-06 (env-dependent by the above;
+// adjudicated by inspection of its dependencies, not by a run).
+// That line is the machine-readable exemption scripts/selftest-wiring-census.sh reads.
 
 import fs from 'node:fs';
 import path from 'node:path';

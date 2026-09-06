@@ -59,6 +59,33 @@ defmodule Barkpark.Plugins.Github.LinkTest do
     doc
   end
 
+  # A published task carrying a stated acceptance criterion, so `claim_by_id/3`
+  # passes the criteria fence — the CLAIMED published row is what the mirror
+  # stamp used to fork a twin of.
+  defp mk_claimable_published_task!(doc_id, scope) do
+    {:ok, _draft} =
+      Content.create_document(
+        "task",
+        %{
+          "doc_id" => doc_id,
+          "title" => doc_id,
+          "content" =>
+            Barkpark.LabelFixtures.with_labels(%{
+              "kind" => "task",
+              "lifecycle_status" => "open",
+              "acceptance_criteria" => [
+                %{"criterion" => "it works", "met" => false, "evidence" => ""}
+              ]
+            })
+        },
+        @dataset,
+        scope
+      )
+
+    {:ok, published} = Content.publish_document(doc_id, "task", @dataset, scope)
+    published
+  end
+
   # A task that is CREATED then PUBLISHED — the collapse path's precondition.
   defp mk_published_task!(doc_id, scope) do
     _draft = mk_task!(doc_id, scope)
@@ -150,14 +177,14 @@ defmodule Barkpark.Plugins.Github.LinkTest do
       assert %{"repo" => "FRIKKern/barkpark", "issue" => 11} = Link.get(draft)
     end
 
-    test "collapses the draft twin back into an ALREADY-published task (D12)",
+    test "stamps an ALREADY-published task in place — no draft twin is ever forked (D12)",
          %{scope: scope} do
       id = uniq("gh")
       _published = mk_published_task!(id, scope)
 
       {:ok, _doc} = Link.put(id, @dataset, %{repo: "FRIKKern/barkpark", issue: 9}, scope)
 
-      # No permanent draft twin remains — the stamp was collapsed into published.
+      # No draft twin exists — the stamp was written onto the published row.
       assert {:error, :not_found} =
                Content.get_document(Content.draft_id(id), "task", @dataset, scope)
 
@@ -168,40 +195,166 @@ defmodule Barkpark.Plugins.Github.LinkTest do
     end
   end
 
-  describe "draft-twin collapse rejected by the publish wall (D23)" do
-    # An already-published task whose weighted tag is later UNregistered: the
-    # bookkeeping stamp's collapse-republish trips the E3 unknown_tag wall. The
-    # stamp still landed on the draft, so `put/4` keeps its {:ok, %Document{}}
-    # contract — but the discarded reason is LOGGED (was silently swallowed) and
-    # the un-collapsed draft twin survives.
-    test "a rejected collapse still returns {:ok, doc}, logs the reason, leaves the draft twin",
+  # ── task-aa8f25be2c04d391: the mirror stamp never forks a twin ─────────────
+  describe "the stamp never forks a drafts.<id> twin (C0)" do
+    # The producer this row was filed for: on a CLAIMED published task the old
+    # stamp forked a draft, tried to collapse it with `publish_document`, and
+    # was REFUSED whenever the claim map had moved under `Tasks.Renew` since
+    # the fork — leaving the twin behind. From then on `fetch_task/3` was
+    # DRAFT-FIRST, so every later pass merged into that frozen twin and was
+    # refused again: the published row never saw another stamp, and the
+    # bookkeeping accumulated on a row no task reader serves (measured on
+    # drafts.task-49b5c183f10ad0fc, 2026-09-06, eight revisions in 45 minutes).
+    test "a stale twin no longer captures the stamp — both passes land PUBLISHED",
+         %{scope: scope} do
+      id = uniq("gh")
+      _published = mk_claimable_published_task!(id, scope)
+      {:ok, claimed} = Tasks.claim_by_id(id, "gh-worker", scope)
+
+      # The fork the mirror's own earlier pass left behind: minted from the
+      # published content, claim verbatim.
+      {:ok, snapshot} = Content.get_document(id, "task", @dataset, scope)
+
+      {:ok, _twin} =
+        Content.create_document(
+          "task",
+          %{"doc_id" => id, "title" => snapshot.title, "content" => snapshot.content},
+          @dataset,
+          scope
+        )
+
+      # …and the claim moves on the PUBLISHED row (this is `Tasks.Renew` every
+      # ~90 s), so the twin's claim is now stale and its collapse is refused.
+      {:ok, _pulsed} = Tasks.pulse_by_id(claimed.id, "gh-worker", text: "still here")
+
+      {:ok, _} = Link.put(id, @dataset, %{repo: "FRIKKern/barkpark", issue: 3}, scope)
+      {:ok, mid} = Content.get_document(id, "task", @dataset, scope)
+      {:ok, _} = Link.put(id, @dataset, %{synced_rev: mid.rev, state: "synced"}, scope)
+
+      # The bookkeeping is on the row every task reader serves…
+      {:ok, published} = Content.get_document(id, "task", @dataset, scope)
+
+      assert %{"repo" => "FRIKKern/barkpark", "issue" => 3, "state" => "synced"} =
+               Link.get(published)
+
+      # …and NOT on the twin: the mirror never wrote through it.
+      {:ok, twin} = Content.get_document(Content.draft_id(id), "task", @dataset, scope)
+      assert Link.get(twin) == nil
+
+      # The live claim survived byte for byte — the fenced write patches only
+      # `content.github` (the old path republished a whole forked document).
+      {:ok, pulsed} = Content.get_document(id, "task", @dataset, scope)
+      assert pulsed.content["claim"]["worker"] == "gh-worker"
+      assert pulsed.content["claim"]["epoch"] == 2
+    end
+
+    test "two stamps on a CLAIMED published task fork no twin at all",
+         %{scope: scope} do
+      id = uniq("gh")
+      _published = mk_claimable_published_task!(id, scope)
+      {:ok, claimed} = Tasks.claim_by_id(id, "gh-worker", scope)
+      claim_before = claimed.content["claim"]
+
+      {:ok, _} = Link.put(id, @dataset, %{repo: "FRIKKern/barkpark", issue: 3}, scope)
+      {:ok, mid} = Content.get_document(id, "task", @dataset, scope)
+      {:ok, _} = Link.put(id, @dataset, %{synced_rev: mid.rev, state: "synced"}, scope)
+
+      assert {:error, :not_found} =
+               Content.get_document(Content.draft_id(id), "task", @dataset, scope)
+
+      {:ok, published} = Content.get_document(id, "task", @dataset, scope)
+      assert published.content["claim"] == claim_before
+    end
+  end
+
+  describe "refusals and forks are LOUD (C1)" do
+    test "a lost rev fence is RETURNED as {:error, {:stamp_refused, …}} and logged at error level",
+         %{scope: scope} do
+      id = uniq("gh")
+      _published = mk_published_task!(id, scope)
+      {:ok, stale_doc} = Content.get_document(id, "task", @dataset, scope)
+
+      # Move the row under the caller's struct.
+      {:ok, _} = Link.put(id, @dataset, %{repo: "FRIKKern/barkpark", issue: 1}, scope)
+
+      {result, log} =
+        with_log(fn ->
+          Link.put_on_published(stale_doc, @dataset, %{issue: 2}, scope)
+        end)
+
+      assert {:error, {:stamp_refused, %{doc_id: ^id, gate: "rev_fence"}}} = result
+      assert log =~ "[error]"
+      assert log =~ id
+      assert log =~ "rev_fence"
+
+      # And the refusal is a refusal: the stale write did NOT land.
+      {:ok, published} = Content.get_document(id, "task", @dataset, scope)
+      assert %{"issue" => 1} = Link.get(published)
+    end
+
+    test "a pre-existing draft twin is NAMED at error level and the stamp still lands published",
          %{scope: scope} do
       id = uniq("gh")
       _published = mk_published_task!(id, scope)
 
-      # `with_labels/1` tagged the task fixture-tag-1..2; drop one from the E3
-      # registry so the collapse-republish fails unknown_tag.
-      Repo.delete_all(
-        from d in Document,
-          where: d.doc_id == "fixture-tag-1" and d.type == "tag" and d.dataset == ^@dataset
-      )
+      # A twin minted by something else (this module can no longer make one).
+      {:ok, published} = Content.get_document(id, "task", @dataset, scope)
+
+      {:ok, _twin} =
+        Content.create_document(
+          "task",
+          %{"doc_id" => id, "title" => published.title, "content" => published.content},
+          @dataset,
+          scope
+        )
 
       {result, log} =
-        with_log(fn ->
-          Link.put(id, @dataset, %{repo: "FRIKKern/barkpark", issue: 42}, scope)
-        end)
+        with_log(fn -> Link.put(id, @dataset, %{repo: "FRIKKern/barkpark", issue: 5}, scope) end)
 
-      # Contract holds: the bookkeeping stamp landed on the draft.
-      assert {:ok, %Document{} = doc} = result
-      assert %{"repo" => "FRIKKern/barkpark", "issue" => 42} = Link.get(doc)
+      assert {:ok, %Document{}} = result
+      assert log =~ "[error]"
+      assert log =~ "draft_twin_present"
+      assert log =~ id
 
-      # No longer silent.
-      assert log =~ "collapse publish"
-      assert log =~ "rejected"
+      # The stamp landed on the PUBLISHED row — the row every task reader
+      # serves — and the twin was NOT published over.
+      {:ok, after_doc} = Content.get_document(id, "task", @dataset, scope)
+      assert %{"repo" => "FRIKKern/barkpark", "issue" => 5} = Link.get(after_doc)
+      assert {:ok, twin} = Content.get_document(Content.draft_id(id), "task", @dataset, scope)
+      assert Link.get(twin) == nil
+    end
+  end
 
-      # The rejected collapse means the draft twin was NOT folded back into the
-      # published row — it survives (the next reconcile converges it).
-      assert {:ok, _draft} = Content.get_document(Content.draft_id(id), "task", @dataset, scope)
+  describe "the stamp does not chase its own tail (C2)" do
+    test "N mirror passes over an unchanged task write exactly ONE revision",
+         %{scope: scope} do
+      id = uniq("gh")
+      _published = mk_claimable_published_task!(id, scope)
+      {:ok, _claimed} = Tasks.claim_by_id(id, "gh-worker", scope)
+
+      revs =
+        for _ <- 1..5 do
+          {:ok, before} = Content.get_document(id, "task", @dataset, scope)
+
+          {:ok, _} =
+            Link.put(
+              id,
+              @dataset,
+              %{repo: "FRIKKern/barkpark", issue: 4, synced_rev: before.rev, state: "synced"},
+              scope
+            )
+
+          {:ok, aft} = Content.get_document(id, "task", @dataset, scope)
+          aft.rev
+        end
+
+      # One write, then four no-ops: the rev stops moving.
+      assert length(Enum.uniq(revs)) == 1
+
+      # And the stamp is self-consistent, so `synced?/1` answers TRUE — the
+      # mirror stops re-mirroring instead of stamping the rev it just replaced.
+      {:ok, final} = Content.get_document(id, "task", @dataset, scope)
+      assert Link.synced?(final)
     end
   end
 

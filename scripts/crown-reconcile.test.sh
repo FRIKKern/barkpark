@@ -2024,6 +2024,68 @@ mutate_cr() { # <name> <literal-anchor> <literal-replacement> -> sets MUT_OUT
   MUT_OUT="$out"
 }
 
+section "(n4) THE DEFERRED RE-READ RE-ASKS THE IN-FLIGHT ALIBI THE SERVING ARM GRANTS"
+# THE LIVE DEFECT, in fixture form. The SERVING arm defers while
+# `serving_run_in_flight` names a non-terminal run for that exact sha; the
+# deferred re-read did NOT re-ask it, and skipped only $GRACED_THIS_RUN. So the
+# instant the box moved to a newer sha, a graced sha whose own deploy run was
+# STILL RUNNING lost its alibi and was accused: 373df8e7a, graced 09:58:01, its
+# run 34025636906 in_progress since 09:47:30, fired GRACED-UNRECORDED at
+# 11:00:18 — a red at a deploy nobody had finished.
+#
+# Run 3 is the in-flight deploy for the graced sha. ONE FIELD separates the two
+# run pages below (status/conclusion), so the verdict change is that field's and
+# nothing else's.
+RUNS_N4_FLIGHT="$(runs_add runs-n4-flight "$RUNS_BASE" 3 "$SHA_D" in_progress null "$IN2")"
+RUNS_N4_DONE="$(runs_add runs-n4-done "$RUNS_BASE" 3 "$SHA_D" completed failure "$IN2")"
+JOBS_N4="$(jobs_legs jobs-n4 "1:success:success" "2:success:success" "3:failure:failure")"
+CR_STATE="$TMP/state-reask-inflight.txt"; rm -f "$CR_STATE"
+run_cr 4 "run N: $SHA_D is served and unrecorded while its own run 3 is in flight — graced" \
+  --runs-fixture "$RUNS_N4_FLIGHT" --jobs-fixture "$JOBS_N4" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FRESH"
+if grep -q "^$SHA_D " "$CR_STATE" 2>/dev/null; then
+  ok "the graced sha reached the re-ask list, so the next run has something to re-ask"
+else
+  bad "the graced sha never reached the re-ask list at $CR_STATE — every arm below would be vacuous"
+  [ -f "$CR_STATE" ] && sed 's/^/       | /' "$CR_STATE" >&2
+fi
+
+# THE ARM ITSELF: the box has moved on to $SHA_A, so $SHA_D is no longer
+# $GRACED_THIS_RUN and reaches the deferred re-read — with its run STILL
+# in_progress. It must be HELD (rc 4), not accused.
+run_cr 4 "run N+1: the box now serves $SHA_A, and run 3 for the graced $SHA_D is STILL RUNNING" \
+  --runs-fixture "$RUNS_N4_FLIGHT" --jobs-fixture "$JOBS_N4" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+not_saw "GRACED-UNRECORDED:" "a deploy nobody has finished is not accused of failing to record"
+saw "GRACE HELD" "the deferral is NAMED, not silent"
+saw "deploy.yml run 3 for that exact sha is STILL RUNNING" "it names the run that is the alibi"
+saw "NOT YET DUE" "and the run exits 4 — not yet due, rather than a page"
+if grep -q "^$SHA_D " "$CR_STATE" 2>/dev/null; then
+  ok "the held sha STAYS on the re-ask list — a deferral is a debt, not a dismissal"
+else
+  bad "the held sha was dropped from the re-ask list — the accusation became unmakeable"
+fi
+
+# MUTATION: remove the re-ask. The identical fixture must then produce the live
+# red, which is what makes the arm above a DIFFERENCE and not a default.
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+mutate_cr drop-reask-inflight \
+  'if [ -n "$gflight" ] && [ "$gage" -lt "$SERVING_INFLIGHT_CAP_SECONDS" ]; then # MUT:G-REASK-INFLIGHT' \
+  'if [ -n "" ] && [ "$gage" -lt "$SERVING_INFLIGHT_CAP_SECONDS" ]; then # MUT:G-REASK-INFLIGHT'
+CR_ALT="$MUT_OUT"
+run_cr 1 "the SAME in-flight fixture, against a script whose deferred re-read never re-asks" \
+  --runs-fixture "$RUNS_N4_FLIGHT" --jobs-fixture "$JOBS_N4" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+CR_ALT=""
+saw "GRACED-UNRECORDED: 1 sha(s)" "without the re-ask the in-flight deploy is accused — the live 373df8e7a red, reproduced"
+not_saw "GRACE HELD" "…and nothing holds it"
+
+# THE OTHER DIRECTION: the alibi must EXPIRE. Same sha, same list, same crown —
+# run 3 is now completed and recorded nothing, so the accusation fires.
+run_cr 1 "run N+2: run 3 has finished and $SHA_D still has no cp row" \
+  --runs-fixture "$RUNS_N4_DONE" --jobs-fixture "$JOBS_N4" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+saw "GRACED-UNRECORDED: 1 sha(s)" "a finished run is no alibi — the deferred accusation fires"
+saw "$SHA_D" "it names the sha the earlier runs held"
+not_saw "GRACE HELD" "and nothing is held any more"
+CR_STATE=""
+
 section "(y) the POPULATION names CANCELLED runs in BOTH directions"
 # A cancelled run was never omitted from this population — run_delivers does not
 # consult the run's own conclusion — but it was counted ANONYMOUSLY, under a

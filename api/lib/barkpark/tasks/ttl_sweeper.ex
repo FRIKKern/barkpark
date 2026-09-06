@@ -276,8 +276,52 @@ defmodule Barkpark.Tasks.TtlSweeper do
   # NULL when either key is absent. Using `IS NULL OR < cutoff` covers
   # both the malformed-row case (no claim map / no ts_iso) and the
   # normal expired case.
+  # ── THE ONE RULE, RULE 4 (task-baf9b74a0ffc83f4) ─────────────────────────
+  #
+  # A `drafts.<id>` row whose PUBLISHED twin exists is not a task — it is a
+  # shadow of one, and `Barkpark.Tasks.TwinResolver` says no reader may answer
+  # from it. This sweeper was the one WRITER that still did: measured live on
+  # `task-49b5c183f10ad0fc`, whose published row was closed by its holder at
+  # 09:56:20Z while `drafts.task-49b5c183f10ad0fc` carried this worker's reap
+  # stamp (`claim.expired_at`) at 10:27:00Z, 31 minutes later. The reap bumped an
+  # epoch and flipped a lifecycle back to `open` on a row nobody could ever
+  # close — which is the "my claim silently vanished / the row reopened" symptom
+  # this campaign chased from four directions.
+  #
+  # The exclusion sits in the CANDIDATE SELECT (both of them) rather than in
+  # `still_expired?/3`: a shadow must not even be considered, so it can never
+  # cost a lock, an event, or a `skipped` count. Scoped by `workspace_id`,
+  # `project_id` AND `dataset` — the same tuple `(doc_id, type, dataset_id)` the
+  # unique index uses — so a published row in ANOTHER tenant's dataset can never
+  # exempt this one from its reap.
+  #
+  # An UNPAIRED `drafts.<id>` row is untouched: with no published twin the draft
+  # IS the row of record (the ready queue serves it, `Tasks.Claim` resolves it),
+  # so its lease must still expire. That carve-out is rule 1's premise, not an
+  # exception to it.
+  defp exclude_shadowed_drafts(query) do
+    from(d in query,
+      where:
+        not fragment("? LIKE 'drafts.%'", d.doc_id) or
+          not exists(
+            from(p in Document,
+              where:
+                p.doc_id == fragment("substring(? from 8)", parent_as(:sweep_candidate).doc_id) and
+                  p.type == "task" and
+                  p.dataset == parent_as(:sweep_candidate).dataset and
+                  ((is_nil(p.workspace_id) and is_nil(parent_as(:sweep_candidate).workspace_id)) or
+                     p.workspace_id == parent_as(:sweep_candidate).workspace_id) and
+                  ((is_nil(p.project_id) and is_nil(parent_as(:sweep_candidate).project_id)) or
+                     p.project_id == parent_as(:sweep_candidate).project_id),
+              select: 1
+            )
+          )
+    )
+  end
+
   defp expired_candidates(%DateTime{} = cutoff, %DateTime{} = now) do
     from(d in Document,
+      as: :sweep_candidate,
       where: d.type == "task",
       where: fragment("?->>'lifecycle_status'", d.content) == "in_progress",
       where:
@@ -300,6 +344,7 @@ defmodule Barkpark.Tasks.TtlSweeper do
         ),
       select: %Document{id: d.id}
     )
+    |> exclude_shadowed_drafts()
     |> Repo.all()
   end
 
@@ -314,6 +359,7 @@ defmodule Barkpark.Tasks.TtlSweeper do
   # resting state, and re-lapsing it every minute would spam events forever.
   defp engagement_candidates(%DateTime{} = cutoff) do
     from(d in Document,
+      as: :sweep_candidate,
       where: d.type == "task",
       where: fragment("?->>'lifecycle_status'", d.content) in ^@thought_states,
       where:
@@ -328,6 +374,7 @@ defmodule Barkpark.Tasks.TtlSweeper do
         ),
       select: %Document{id: d.id}
     )
+    |> exclude_shadowed_drafts()
     |> Repo.all()
   end
 

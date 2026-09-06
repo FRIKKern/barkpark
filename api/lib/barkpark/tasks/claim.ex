@@ -24,6 +24,7 @@ defmodule Barkpark.Tasks.Claim do
   alias Barkpark.Repo
   alias Barkpark.Tasks.Blockers
   alias Barkpark.Tasks.CriteriaExemption
+  alias Barkpark.Tasks.TwinResolver
   alias Barkpark.Tasks.{ExecutionPolicy, Queue, QueueGate, Validation, WorkDigest}
 
   @event_task_claimed "task.claimed"
@@ -138,11 +139,10 @@ defmodule Barkpark.Tasks.Claim do
   end
 
   # Everything is a task: the TARGETED claim_by_id path fetches by doc_id on
-  # `type == "task"`. Resolution: try the exact doc_id first; when no row is
-  # found AND the caller did NOT supply a `drafts.` prefix, retry with
-  # `"drafts." <> doc_id` (tasks created via mutate land as drafts.<id>). An
-  # explicit `drafts.` prefix is exact — the fallback is never applied in
-  # reverse. If both `t1` and `drafts.t1` exist, the exact `t1` match wins.
+  # `type == "task"`. Resolution is `Barkpark.Tasks.TwinResolver`'s ONE RULE —
+  # a bare id means either spelling, a published row always outranks its
+  # `drafts.` twin, an explicit `drafts.` prefix is exact (never resolved in
+  # reverse), and a cross-dataset tie the caller did not name is REFUSED.
   #
   # THREE STEPS, AND THE ORDER IS THE INVARIANT (task-eal-bl-lock-key-convergence):
   #
@@ -169,18 +169,13 @@ defmodule Barkpark.Tasks.Claim do
     end
   end
 
+  # THE ONE RULE (task-49eef068420df918 + task-baf9b74a0ffc83f4): the
+  # exact-then-`drafts.`-fallback dance is one query decided by
+  # `Barkpark.Tasks.TwinResolver`. Every claim-fenced verb — pulse, stamp, stage,
+  # close, release — resolves through here, so rule 4 ("no task verb writes to a
+  # `drafts.<id>` twin while a published row exists") is this one call site.
   defp resolve_task_by_doc_id(doc_id, workspace_id, project_id) do
-    case fetch_task_exact(doc_id, workspace_id, project_id) do
-      {:ok, _} = hit ->
-        hit
-
-      {:error, :not_found} ->
-        if String.starts_with?(doc_id, "drafts.") do
-          {:error, :not_found}
-        else
-          fetch_task_exact("drafts." <> doc_id, workspace_id, project_id)
-        end
-    end
+    fetch_task_exact(doc_id, workspace_id, project_id)
   end
 
   defp lock_task_row(task_uuid) do
@@ -220,28 +215,24 @@ defmodule Barkpark.Tasks.Claim do
   # `lock_task_row/1`, which runs AFTER the `task:<uuid>` advisory lock — see
   # the ordering note on `fetch_task_by_doc_id/3`. The row lock is still taken
   # on the targeted-claim path and is still what makes the claim a CAS.
+  #
+  # THE REPAIR (task-49eef068420df918 + task-baf9b74a0ffc83f4): `asc: d.dataset`
+  # under a `limit: 1` traded the 500 for a SILENT WRONG ROW — the claim landing
+  # on whichever dataset sorts first, which for the eleven live twins is the
+  # EMPTY copy. `Barkpark.Tasks.TwinResolver` owns the rule now: published wins,
+  # a `drafts.` twin never outranks a published row, and an unnamed cross-dataset
+  # tie is REFUSED (409, naming both datasets) rather than picked. A claim is a
+  # write; picking a row for the writer is the one thing this door must not do.
   defp fetch_task_exact(doc_id, workspace_id, project_id) do
-    base =
-      from(d in Document,
-        where: d.doc_id == ^doc_id and d.type == "task",
-        order_by: [
-          asc: fragment("CASE WHEN ? = 'published' THEN 0 ELSE 1 END", d.status),
-          asc: d.dataset,
-          asc: d.id
-        ],
-        limit: 1
-      )
-
     # Tenancy: route through the ONE shared helper (fail-CLOSED on nil) so the
     # targeted-claim fetch shares the exact workspace/project semantics as the
     # ready-queue path (Queue.ready_query → Scope.scope_to_workspace). A nil
     # workspace_id yields zero rows, never every tenant's rows.
-    query = Scope.scope_to_workspace(base, workspace_id, project_id)
-
-    case Repo.one(query) do
-      nil -> {:error, :not_found}
-      %Document{} = doc -> {:ok, doc}
-    end
+    TwinResolver.resolve(
+      doc_id,
+      &Scope.scope_to_workspace(&1, workspace_id, project_id),
+      &Repo.all/1
+    )
   end
 
   # ── THE CLAIM-TIME CRITERIA DOOR (task-9554c64bf51a0f81) ─────────────────

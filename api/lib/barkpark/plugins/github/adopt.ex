@@ -40,14 +40,40 @@ defmodule Barkpark.Plugins.Github.Adopt do
 
   ## Loop cut (D4 cut #2)
 
-  The content write persists via `Content.upsert_document(source: :github)`, so
-  its `mutation_events` row is stamped EXACTLY `"github"` (`to_string(:github)`),
-  which the wave-1 outbox reader (`source != "github"`) EXCLUDES — the adopt
-  write can never echo back out as an outbound mirror. If the task was already
-  PUBLISHED, the draft twin the upsert writes is collapsed back into the
-  published row via `Content.publish_document(source: :github)` — same stamp,
-  also outbox-excluded (the `Link.put` D12 pattern). A never-published task is
-  LEFT a draft (adoption never force-publishes under a human).
+  The adopt write's `mutation_events` row is stamped EXACTLY `"github"`, which
+  the wave-1 outbox reader (`source != "github"`) EXCLUDES — the adopt write can
+  never echo back out as an outbound mirror.
+
+  ## The flip never forks a twin (task-184760672ff3414b)
+
+  `Content.upsert_document/4` ALWAYS writes the draft row (it forces the id to
+  `drafts.<id>` and coerces `status -> draft`). The flip used to go through it
+  unconditionally and then collapse the fresh draft back into the published row
+  with `Content.publish_document/4`. That collapse is REFUSABLE — the publish
+  door's claim fence (`Content.Lifecycle.stale_claim?/2`) compares the whole
+  claim map and `Tasks.Renew` moves it every ~90 s — so on a claimed task the
+  collapse was refused and the adopt left a permanent `drafts.<id>` twin beside
+  the published row. That is the same fork `Link.put/4` (`MirrorJob.stamp`) was
+  measured making eight times in 45 minutes (task-aa8f25be2c04d391, repaired in
+  PR #16479).
+
+  `adopt/3` is now PUBLISHED-FIRST, the rule
+  `Content.Mutations.@published_first_patch_types` already applies to the `patch`
+  door for type `task`: when a published row exists, the label strip and the
+  `github.state` bump are applied to THAT row's content through
+  `Tasks.Internal.fenced_content_write/4` — the rev-fenced `UPDATE … RETURNING`
+  every task verb (claim/pulse/stamp/close) writes through. The published row is
+  the MERGE BASE as well as the target, so `content.claim`, the acceptance
+  criteria and everything else it carries survive byte for byte (a draft-based
+  merge onto the published row is exactly the erasure
+  `link_put_erasure_test.exs` forbids); it cannot draft-prefix; and there is no
+  publish to refuse. The write still carries `source: "github"`, so the Outbox
+  still excludes it (loop cut #2).
+
+  A never-published intake is LEFT a draft — adoption clears the gate and flips
+  ownership, it never force-publishes under a human (D6). A pre-existing twin
+  beside a published row is NAMED at error level and left alone: publishing a
+  twin whose provenance is unknown can destroy live published state.
 
   ## Injected seams (Intake precedent — no network in tests)
 
@@ -64,6 +90,7 @@ defmodule Barkpark.Plugins.Github.Adopt do
   alias Barkpark.Content
   alias Barkpark.Content.Document
   alias Barkpark.Plugins.Github.{Client, Link, Settings}
+  alias Barkpark.Tasks.Internal
 
   @task_type "task"
   @gate_label "needs-human"
@@ -74,21 +101,23 @@ defmodule Barkpark.Plugins.Github.Adopt do
 
     * `{:ok, %Document{}}`   — the task was adopted (a genuine `intake → adopted`
       flip, backlink attempted) OR was already `"adopted"` (idempotent no-op)
-    * `{:ok, %Document{}, collapse}` — adopted, but the draft-twin collapse
-      publish (D12) was REJECTED (e.g. the published task carries an
-      unregistered weighted tag the authoring wall now blocks). The adopt side
-      effects are already committed — a 422 here would lie — so this stays an
-      `:ok`, carrying `collapse = %{published: false, error: <wall detail>}` so
-      the caller can surface + retry (authoring-excellence D23). The label strip
-      + state flip landed on the DRAFT; the published perspective is unchanged.
+    * `{:error, {:adopt_refused, detail}}` — the published row moved under the
+      fenced write (`detail.gate == "rev_fence"`). NOTHING was committed — no
+      ledger write, no backlink — so an error here does not lie, and the caller
+      re-reads and retries. Reported LOUDLY (error log + telemetry), never
+      swallowed into a bare `{:ok, doc}`.
     * `{:error, :not_intake}` — the task exists but is not an adoptable intake
     * `{:error, :not_found}`  — no such task
     * `{:error, term()}`      — the ledger write failed
+
+  The old `{:ok, %Document{}, %{published: false, error: …}}` third element
+  (authoring-excellence D23: a refused draft-twin collapse AFTER the adopt had
+  committed, where a 422 would have lied) can no longer occur — there is no
+  collapse. Consumers keep their 3-tuple clause as a harmless total match.
   """
   @type result ::
           {:ok, Document.t()}
-          | {:ok, Document.t(), %{published: false, error: map()}}
-          | {:error, :not_intake | :not_found | term()}
+          | {:error, :not_intake | :not_found | {:adopt_refused, map()} | term()}
 
   @doc """
   Adopt an intake task into Barkpark. See the moduledoc for the gate, the
@@ -114,7 +143,76 @@ defmodule Barkpark.Plugins.Github.Adopt do
 
   # ── the genuine intake → adopted flip ──────────────────────────────────────
 
+  # PUBLISHED-FIRST. When a published row exists it is BOTH the write target and
+  # the merge base (see the moduledoc): the two adoption edits ride the
+  # rev-fenced task-write primitive, so no draft twin is minted and nothing else
+  # the row carries moves. Only a never-published intake takes the draft upsert.
   defp flip(task, dataset, opts) do
+    pid = Content.published_id(task.doc_id)
+
+    case Content.get_document(pid, @task_type, dataset, opts) do
+      {:ok, %Document{} = published} -> adopt_published(published, dataset, opts)
+      _ -> flip_on_draft(task, pid, dataset, opts)
+    end
+  end
+
+  @doc """
+  The PUBLISHED-FIRST arm of `adopt/3`, for a caller that already holds the
+  published row. The write target IS that row, so it goes through the rev-fenced
+  `Tasks.Internal.fenced_content_write/4` rather than `Content.upsert_document/4`
+  (which always draft-prefixes). Only `content.labels` and `content.github` move;
+  the claim, the acceptance criteria and the lifecycle the row carries are
+  preserved verbatim, and there is no publish door to refuse.
+
+  `published` is the row the write is FENCED on: a struct read before someone
+  else moved the row yields `{:error, {:adopt_refused, %{gate: "rev_fence"}}}`
+  with nothing committed.
+  """
+  @spec adopt_published(Document.t(), String.t(), keyword()) ::
+          {:ok, Document.t()} | {:error, term()}
+  def adopt_published(%Document{} = published, dataset, opts \\ []) do
+    pid = Content.published_id(published.doc_id)
+    report_draft_twin(pid, dataset, opts)
+
+    github = Link.get(published) || %{}
+    content = published.content || %{}
+
+    new_content =
+      content
+      |> Map.put("labels", strip_gate(Map.get(content, "labels")))
+      |> Map.put(@content_key, Map.put(github, "state", "adopted"))
+
+    observed_rev = published.rev
+    new_rev = Internal.generate_rev()
+
+    case Internal.fenced_content_write(published, observed_rev, new_content, new_rev) do
+      {:ok, %Document{} = stored} ->
+        # Same event contract as the old upsert path: stamped `source: "github"`,
+        # so `Outbox.fetch/3` excludes it and the adopt write can never echo back
+        # out as an outbound mirror (loop cut #2).
+        ev = Internal.insert_mutation_event!(stored, "update", observed_rev, "github")
+
+        Content.broadcast_document_mutation(stored, "update",
+          event_id: ev.id,
+          previous_rev: observed_rev
+        )
+
+        maybe_backlink(github, opts)
+        {:ok, stored}
+
+      :stale ->
+        detail = %{doc_id: pid, gate: "rev_fence", observed_rev: observed_rev}
+        report_anomaly(detail)
+        {:error, {:adopt_refused, detail}}
+    end
+  end
+
+  # NEVER-PUBLISHED arm — byte for byte the pre-existing behaviour minus the
+  # collapse: the flip lands on the draft row and the task is LEFT a draft.
+  # Adoption clears the `needs-human` gate and flips ownership; publishing is a
+  # human authoring act, so adoption never force-publishes under an operator
+  # (D6, and the same arm `Link.put/4` kept in #16479).
+  defp flip_on_draft(task, pid, dataset, opts) do
     github = Link.get(task) || %{}
     content = task.content || %{}
 
@@ -122,13 +220,6 @@ defmodule Barkpark.Plugins.Github.Adopt do
       content
       |> Map.put("labels", strip_gate(Map.get(content, "labels")))
       |> Map.put(@content_key, Map.put(github, "state", "adopted"))
-
-    pid = Content.published_id(task.doc_id)
-
-    # Capture the published perspective BEFORE the upsert writes its draft twin,
-    # so a never-published intake is never force-published under the operator.
-    was_published? =
-      match?({:ok, _}, Content.get_document(pid, @task_type, dataset, opts))
 
     attrs = %{
       "doc_id" => pid,
@@ -140,13 +231,8 @@ defmodule Barkpark.Plugins.Github.Adopt do
 
     with {:ok, upserted} <-
            Content.upsert_document(@task_type, attrs, dataset, source_opts) do
-      {doc, collapse} = collapse_draft_twin(was_published?, upserted, pid, dataset, source_opts)
       maybe_backlink(github, opts)
-
-      case collapse do
-        nil -> {:ok, doc}
-        %{} = collapse -> {:ok, doc, collapse}
-      end
+      {:ok, upserted}
     end
   end
 
@@ -156,57 +242,33 @@ defmodule Barkpark.Plugins.Github.Adopt do
   defp strip_gate(labels) when is_list(labels), do: Enum.reject(labels, &(&1 == @gate_label))
   defp strip_gate(_), do: []
 
-  # Collapse the draft twin the upsert wrote (D12 / the `Link.put` pattern).
-  # Returns `{doc, collapse}` where `collapse` is `nil` on success (or when no
-  # collapse was needed) and a `%{published: false, error: <wall detail>}` map
-  # when the collapse publish was REJECTED. Only when the task was ALREADY
-  # published do we publish the fresh draft back into the published row so no
-  # phantom unpublished draft is left in Studio; the publish carries the same
-  # `source: :github` stamp, so its `mutation_events` row is outbox-excluded
-  # (loop cut #2). A never-published task is left a draft.
-  #
-  # A REJECTED collapse publish (authoring-excellence D23) was silently
-  # swallowed before — the label edit never reached the published perspective
-  # and no signal reached anyone. It is no longer silent: the discarded reason
-  # is logged (the `maybe_backlink` best-effort precedent) AND returned as a
-  # machine-readable `collapse` detail so the operator/agent can retry. The
-  # adopt itself stays committed on the draft (a 422-after-commit would lie), so
-  # the return is still `{:ok, …}` upstream.
-  defp collapse_draft_twin(false, upserted, _pid, _dataset, _opts), do: {upserted, nil}
+  # A twin beside the published row is a FORK someone else minted (this module
+  # can no longer make one). The flip lands on the published row — the row every
+  # task reader serves — and the twin is NAMED, never silently published over:
+  # a twin whose provenance is unknown may hold state the published row does not.
+  defp report_draft_twin(pid, dataset, opts) do
+    case Content.get_document(Content.draft_id(pid), @task_type, dataset, opts) do
+      {:ok, %Document{doc_id: twin_id}} ->
+        report_anomaly(%{doc_id: pid, gate: "draft_twin_present", twin: twin_id})
 
-  defp collapse_draft_twin(true, upserted, pid, dataset, opts) do
-    case Content.publish_document(pid, @task_type, dataset, opts) do
-      {:ok, published} ->
-        {published, nil}
-
-      {:error, reason} ->
-        Logger.warning(
-          "github adopt: draft-twin collapse publish for #{pid} rejected: #{inspect(reason)}"
-        )
-
-        {upserted, %{published: false, error: collapse_error_detail(reason)}}
+      _ ->
+        :ok
     end
   end
 
-  # Machine-readable summary of a publish-wall rejection for the `collapse`
-  # response field — mirrors the wall's own error atoms (label_spine 422,
-  # unknown_tag 422, duplicate_of 409) so an agent keys on `code` to retry with
-  # a fixed label set. Anything unexpected degrades LOUDLY (inspected), never
-  # into a hint-less blob.
-  defp collapse_error_detail({:label_spine, details}),
-    do: %{code: "label_spine", details: details}
+  # LOUD, always: error level with the doc_id and the refusing/tripped gate, plus
+  # a telemetry count. The predecessor logged a warning on a refused collapse and
+  # still returned `{:ok, …}`, so a refusal raised nothing an operator saw.
+  defp report_anomaly(%{doc_id: doc_id, gate: gate} = detail) do
+    Logger.error("github adopt: flip for #{doc_id} hit #{gate}: #{inspect(detail)}")
 
-  defp collapse_error_detail({:unknown_tag, payload}),
-    do: %{code: "unknown_tag", details: payload}
+    :telemetry.execute([:barkpark, :github, :adopt, :write_anomaly], %{count: 1}, %{
+      doc_id: doc_id,
+      gate: gate
+    })
 
-  defp collapse_error_detail({:duplicate_of, payload}),
-    do: %{code: "duplicate_of", details: payload}
-
-  defp collapse_error_detail({:halted, reason}),
-    do: %{code: "halted", message: to_string(reason)}
-
-  defp collapse_error_detail(other),
-    do: %{code: "publish_failed", message: inspect(other)}
+    :ok
+  end
 
   # ── best-effort backlink ────────────────────────────────────────────────────
 

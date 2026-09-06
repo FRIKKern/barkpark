@@ -19,6 +19,17 @@
 //
 //   node --test scripts/studio-inspector-frame-sample.test.mjs
 //
+// MANUAL PROOF — not wired: it drives the REAL script as a subprocess in a real
+// chromium against three HTML fixtures, so it is browser-coupled and cannot join
+// the dep-free `scripts/studio-desk-*.test.mjs` glob in
+// .github/workflows/studio-instrument-selftests.yml (the same reason
+// __studio-wide-deletion-diff.test.mjs is excluded there by name).
+// run by hand with: node --test scripts/studio-inspector-frame-sample.test.mjs
+// last run — NOT RUN by gates6-w13 on 2026-09-06 (no chromium in that sweep's budget).
+// That line is the machine-readable exemption scripts/selftest-wiring-census.sh reads.
+// If studio later splits the pure analyse() arms into their own file, THAT file
+// belongs in the glob and this exemption shrinks to the browser arms.
+//
 // MUTATION PROOF (run by hand; see the PR body for the transcript). Break the
 // visibility predicate in studio-inspector-frame-sample.mjs by neutering the
 // obstruction term inside FRAME_SAMPLER:

@@ -4263,6 +4263,36 @@
     return "via " + c;
   }
 
+  // dr-w26 — THE WORD AND WHAT IT MEASURED, TOGETHER, WHERE THE CHIP IS.
+  //
+  // `status: "sent"` on a delivery row means the mail transport ACCEPTED the
+  // message at the submission hop. It is NOT a delivery confirmation — Barkpark
+  // has no receipt feed for email, and `http_status` is NULL on every email row
+  // by construction. Reading the bare chip as "arrived" is what made the
+  // 2026-08-08 outage alerts look audited when nothing had audited them.
+  //
+  // The control plane now ships the sentence beside the word
+  // (`Notifications.Delivery.status_meaning/1`, serialized by the cloud router's
+  // `delivery_json/1`). The console RENDERS it and does not OWN it: no copy map
+  // lives here, because a second author for one sentence is how the caveat and
+  // the word drift apart — the exact failure the field exists to end. Whatever
+  // the payload says is what an operator reads, escaped and verbatim.
+  //
+  // IT IS NOT A TOOLTIP AND NOT A DETAIL PANE. A caveat you have to hover or
+  // click for is a caveat the person who misread the chip never sees, so it
+  // renders in the SAME ROW, immediately after the status pill.
+  //
+  // ABSENT MEANS ABSENT. A payload with no `status_meaning` — an older control
+  // plane, or the instance-served webhook log, which has no such field —
+  // renders the row EXACTLY as before: empty string, no element, no "undefined",
+  // no empty qualifier span. A blank caveat and a confident claim look the same
+  // to a reader, so we emit neither.
+  function deliveryStatusMeaningHtml(d) {
+    var m = d && d.status_meaning != null ? String(d.status_meaning) : "";
+    if (m === "") return "";
+    return '<span class="wh-del-meaning">' + esc(m) + "</span>";
+  }
+
   // One delivery-log row in the webhook-deliveries visual grammar (`.wh-del-*`):
   // recipient leads (mono), a toned status pill, then channel · event · attempts,
   // the relative time, and — on a failure — the verbatim last_error on its own line.
@@ -4283,6 +4313,9 @@
     return '<div class="wh-del-row">' +
       '<span class="wh-del-event">' + recipient + "</span>" +
       '<span class="wh-del-status wh-del-status--' + tone + '">' + esc(notifDeliveryStatusLabel(d)) + "</span>" +
+      // dr-w26: the meaning rides IMMEDIATELY after the pill, same row, same
+      // cell run — this is the surface the control plane actually feeds.
+      deliveryStatusMeaningHtml(d) +
       '<span class="wh-del-meta">' + meta + "</span>" +
       '<span class="wh-del-spacer"></span>' +
       '<span class="wh-del-when">' + esc(fmtWhen(d.inserted_at)) + "</span>" +
@@ -12525,6 +12558,11 @@
     return '<div class="wh-del-row">' +
       '<span class="wh-del-event">' + (evId !== null ? "event #" + esc(evId) : "&mdash;") + "</span>" +
       '<span class="wh-del-status wh-del-status--' + tone + '">' + esc(label) + "</span>" +
+      // dr-w26: the SECOND surface painting this chip. Its rows come from the
+      // INSTANCE (`render_delivery`), which carries no `status_meaning` today,
+      // so this emits nothing — and will render the sentence the day that
+      // producer grows one, rather than needing to be found again.
+      deliveryStatusMeaningHtml(d) +
       (meta ? '<span class="wh-del-meta">' + meta + "</span>" : "") +
       '<span class="wh-del-spacer"></span>' +
       '<span class="wh-del-when">' + when + "</span>" +
@@ -27525,6 +27563,7 @@
       webhookEventsHtml: webhookEventsHtml, webhookBannerHtml: webhookBannerHtml,
       webhookCardHtml: webhookCardHtml, deliveryTone: deliveryTone,
       deliveryStatusLabel: deliveryStatusLabel, deliveryRowHtml: deliveryRowHtml,
+      deliveryStatusMeaningHtml: deliveryStatusMeaningHtml,
       replayToastBody: replayToastBody, hookToggleState: hookToggleState,
       // GR80 leg 3: the webhook test-send verdict helpers (pure).
       testSendToastBody: testSendToastBody, testSendAccepted: testSendAccepted,

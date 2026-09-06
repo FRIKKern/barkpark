@@ -623,7 +623,15 @@ defmodule Barkpark.Tasks.QueueTest do
           "lifecycle_status" => "done"
         })
 
-      _open_here = mk_task!(dep_id, scope, @dataset, %{"lifecycle_status" => "open"})
+      # `dataset_twin_intended` — the fixture deliberately puts ONE dep id in TWO
+      # datasets, which `Tasks.DatasetTwinFence` (THE ONE RULE's producer half,
+      # task-49eef068420df918) refuses without a stated intent. The shape under
+      # measurement here IS the twin, so the intent is stated.
+      _open_here =
+        mk_task!(dep_id, scope, @dataset, %{
+          "lifecycle_status" => "open",
+          "dataset_twin_intended" => true
+        })
 
       main =
         mk_task!("main-dep-dataset-#{System.unique_integer([:positive])}", scope, @dataset, %{
@@ -651,7 +659,15 @@ defmodule Barkpark.Tasks.QueueTest do
           "lifecycle_status" => "done"
         })
 
-      _open_here = mk_task!(dep_id, scope, @dataset, %{"lifecycle_status" => "open"})
+      # `dataset_twin_intended` — the fixture deliberately puts ONE dep id in TWO
+      # datasets, which `Tasks.DatasetTwinFence` (THE ONE RULE's producer half,
+      # task-49eef068420df918) refuses without a stated intent. The shape under
+      # measurement here IS the twin, so the intent is stated.
+      _open_here =
+        mk_task!(dep_id, scope, @dataset, %{
+          "lifecycle_status" => "open",
+          "dataset_twin_intended" => true
+        })
 
       main =
         mk_task!("main-dep-project-#{System.unique_integer([:positive])}", scope, @dataset, %{

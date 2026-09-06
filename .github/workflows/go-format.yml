@@ -45,9 +45,26 @@ on:
 permissions:
   contents: read
 concurrency:
-  # per-ref on PRs (a new push evicts the superseded run), per-sha on main.
-  group: go-format-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # main-collapse: harness-ok — publishes no context in
+  # .github/required-checks.json, performs no action (no deploy, no release, no
+  # mint or revoke), watches nothing. task-e376642d6d69fa3f.
+  #
+  # WHAT THIS TRADES, said plainly. Every main push shares ONE group and
+  # cancel-in-progress is the literal `true`, so a burst of merges leaves a
+  # single run, on the NEWEST sha, and the intermediate commits get no verdict
+  # from this workflow. That is a deliberate loss of bisectability, bought
+  # because main-push runs were 40%->52%->67%->57% of the whole Actions queue
+  # across four samples on 2026-09-06 (~17 un-collapsible runs per merge at 18
+  # merges/hour), sitting in front of every PR run. It is only sound because
+  # nothing merges on this workflow's names and nothing depends on its having
+  # run: for a REQUIRED context, or for anything that deploys/releases/renews/
+  # watches, the same marker is REFUSED by scripts/main-run-concurrency-check.sh
+  # and scripts/never-cancel-main-check.sh, which re-derive both facts from
+  # .github/required-checks.json and their denylist rather than trusting it.
+  #
+  # PRs are unchanged: they keep their own per-ref group and still supersede.
+  group: go-format-${{ github.ref == 'refs/heads/main' && 'main' || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   gofmt:
