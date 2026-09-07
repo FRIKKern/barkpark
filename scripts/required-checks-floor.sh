@@ -103,6 +103,17 @@
 #      committed `_readme` entry is gone, OR `enforced` regressed true → false.
 #      Hard, and never clearable with --acknowledge-growth.
 #   2  GROWTH — the candidate is a strict superset and nobody acknowledged it
+#  64  USAGE — the caller typed the command wrong. NOT a measurement at all, and
+#      that is the whole point of giving it a code of its own: until this was
+#      split out, `required-checks-floor.sh` with no candidate answered
+#      `FAIL: no candidate spec given` at exit 1 — the same word and the same
+#      code as a real LOSS. A did-not-run rendered as the most alarming verdict
+#      this repo can produce. 64 and not 2, because 2 is already a MEASURED
+#      verdict here (GROWTH) and `required-checks-apply.sh` maps rc 2 onto
+#      "acknowledgeable growth": reusing 2 would let a typo'd flag be waved
+#      through by `--acknowledge-growth`, rebuilding the same conflation one
+#      code over. 64 is sysexits' EX_USAGE, and apply's `*)` arm is fail-closed
+#      ("an unreadable reference is a refusal, never a pass").
 #
 # USAGE
 #   scripts/required-checks-floor.sh <candidate.json>
@@ -122,6 +133,12 @@ CANDIDATE=""
 QUIET=0
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
+
+# A usage error is not a verdict. `fail` is what this script says about something
+# it MEASURED; a caller who typed the command wrong measured nothing, so it must
+# not borrow `fail`'s word (FAIL) or its code (1). See EXIT CODES above for why
+# the code is 64 rather than 2.
+usage_error() { echo "usage error: $*" >&2; exit 64; }
 
 # Reading the reference is itself a thing that can fail, and an unreadable
 # reference must never degrade into "nothing to compare against, so pass".
@@ -173,19 +190,22 @@ enforced_of() {
 main() {
   while [ $# -gt 0 ]; do
     case "$1" in
-      --reference) REF_FILE="$2"; shift 2 ;;
-      --ref-rev) REF_REV="$2"; shift 2 ;;
-      --spec-path) SPEC_PATH="$2"; shift 2 ;;
+      --reference) [ $# -ge 2 ] || usage_error "--reference requires a value"
+         REF_FILE="$2"; shift 2 ;;
+      --ref-rev) [ $# -ge 2 ] || usage_error "--ref-rev requires a value"
+         REF_REV="$2"; shift 2 ;;
+      --spec-path) [ $# -ge 2 ] || usage_error "--spec-path requires a value"
+         SPEC_PATH="$2"; shift 2 ;;
       --acknowledge-growth) ACK_GROWTH=1; shift ;;
       --quiet) QUIET=1; shift ;;
       -h|--help) awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
-      -*) fail "unknown argument: $1" ;;
-      *) [ -z "$CANDIDATE" ] || fail "exactly one candidate spec, got a second: $1"
+      -*) usage_error "unknown argument: $1 ($0 [--reference REF] <candidate.json>)" ;;
+      *) [ -z "$CANDIDATE" ] || usage_error "exactly one candidate spec, got a second: $1"
          CANDIDATE="$1"; shift ;;
     esac
   done
 
-  [ -n "$CANDIDATE" ] || fail "no candidate spec given (usage: $0 [--reference REF] <candidate.json>)"
+  [ -n "$CANDIDATE" ] || usage_error "no candidate spec given ($0 [--reference REF] <candidate.json>)"
   [ -f "$CANDIDATE" ] || fail "cannot read candidate spec $CANDIDATE"
   jq -e . "$CANDIDATE" >/dev/null 2>&1 || fail "$CANDIDATE is not valid JSON"
 
