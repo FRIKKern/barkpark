@@ -12,7 +12,7 @@
     "test": "node --test 'src/**/*.test.ts'"
   },
   "dependencies": {
-    "@astrojs/react": "^4.4.0",
+    "@astrojs/react": "^6.0.5",
     "@barkpark/core": "file:./vendor/barkpark-core.tgz",
     "@barkpark/react": "file:./vendor/barkpark-react.tgz",
     "@tailwindcss/vite": "^4",
