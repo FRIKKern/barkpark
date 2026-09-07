@@ -1065,5 +1065,141 @@ grep -q "DRAFT, not counted: #15631" <<<"$out" \
   && bad "(q2) a non-draft row was printed on the draft line" \
   || ok "(q2) …and it is NOT on the draft line"
 
+# ═══ (r) the HTTP STATUS is the diagnostic, not the first line of the body ═══
+section "(r) a non-JSON error page is reported with its STATUS, not as \`<html>\`"
+
+# THE DEFECT THIS OWNS (task-e47f86df96d7d3ce). All three transport diagnostics
+# in stale-verdict-watch.sh read `head -1` of a capture that is `gh` output with
+# `2>&1`. `gh api` copies the RESPONSE BODY to stdout and writes its own summary
+# to stderr, so under a GitHub resolver timeout — an HTML error page — the first
+# line is the literal `<html>` and the status, the single fact that separates
+# the token from the rate limit from a server-side timeout, is thrown away.
+#
+# THESE PROBES DRIVE THE LIVE PAGE LOOP. No --fixture: `gh` is stubbed on PATH
+# and the script takes exactly the path a scheduled run takes, because a proof
+# on the --fixture path would say nothing about the code that actually failed.
+ERRSTUB="$TMP/errstub"; mkdir -p "$ERRSTUB"
+
+mk_err_stub() { # <http code> <gh summary message> <reason phrase>
+  cat > "$ERRSTUB/gh" <<STUBEOF
+#!/usr/bin/env bash
+# The commits read must still work: these probes are about the PR read.
+case "\$1 \${2:-}" in
+  "api repos/"*) cat "$COMMITS"; exit 0 ;;
+esac
+# gh api's real interleaving: BODY to stdout, its own one-line summary to stderr.
+cat <<'BODY'
+<html>
+<head><title>$1 $3</title></head>
+<body bgcolor="white">
+<center><h1>$1 $3</h1></center>
+<hr><center>GitHub.com</center>
+</body>
+</html>
+BODY
+echo "gh: HTTP $1: $2 (https://api.github.com/graphql)" >&2
+exit 1
+STUBEOF
+  chmod +x "$ERRSTUB/gh"
+}
+
+run_err() { # <code> <message> <reason phrase> [script]
+  local code="$1" msg="$2" phrase="$3" script="${4:-$WATCH}"
+  mk_err_stub "$code" "$msg" "$phrase"
+  env PATH="$ERRSTUB:/usr/bin:/bin:/usr/sbin:/sbin" \
+    SVW_RETRY_SLEEP="0 0 0" SVW_PAGE_SLEEP="0 0 0 0" \
+    bash "$script" --spec "$SPEC" --repo FRIKKern/barkpark --commits "$COMMITS" \
+      --baseline '' --page-size 1 --attempts 2 --page-attempts 2 2>&1
+}
+
+# (r1) A SERVER-SIDE TIMEOUT. The 2026-09-07 case: 30 dependabot PRs created in
+# 13 minutes forced that many uncached mergeability computations into one
+# resolver and it 504'd.
+out="$(run_err 504 "We couldn't respond to your request in time." "Gateway Time-out")"; rc=$?
+grep -q "HTTP 504" <<<"$out" \
+  && ok "(r1) a 504 HTML error page is reported WITH its status" \
+  || bad "(r1) no HTTP 504 anywhere in the output: $out"
+# The exact pre-fix line, anchored: the diagnostic IS the body's first line and
+# nothing else. `: <html>$` alone would also match the digest's own trailing
+# "first line of the body: <html>", which is the part that must SURVIVE.
+grep -qE 'retrying the PAGE in [0-9]+s: <html>$' <<<"$out" \
+  && bad "(r1) \`<html>\` is still the WHOLE diagnostic: $(grep -E 'retrying the PAGE in' <<<"$out" | head -1)" \
+  || ok "(r1) …and \`<html>\` is never the whole diagnostic on its own"
+grep -q "first line of the body: <html>" <<<"$out" \
+  && ok "(r1) …with the old first-line-of-body still printed, so this ADDED and removed nothing" \
+  || bad "(r1) the body's first line was dropped — the digest is quieter than head -1 was: $out"
+
+# (r2) CRITERION 2 — THE REFUSAL IS UNCHANGED. An unreadable population still
+# fails; nothing here bought a better diagnostic with a quieter watch.
+[ "$rc" = "6" ] \
+  && ok "(r2) …and the run STILL exits 6 UNREACHABLE (rc=$rc) — the refusal is unchanged" \
+  || bad "(r2) expected exit 6 on an unreadable population, got $rc: $out"
+grep -q "UNREACHABLE" <<<"$out" \
+  && ok "(r2) …and still says UNREACHABLE" || bad "(r2) no UNREACHABLE sentence: $out"
+grep -q "^ok — no CONFLICTING" <<<"$out" \
+  && bad "(r2) a run that could not read the population printed the clean sentence" \
+  || ok "(r2) …and never prints the clean sentence over a population it never read"
+grep -q "last transport error: HTTP 504" <<<"$out" \
+  && ok "(r2) …and the UNREACHABLE line itself carries the status the workflow's rc=6 text sends the operator to find" \
+  || bad "(r2) the UNREACHABLE sentence carries no status: $(grep UNREACHABLE <<<"$out" | head -1)"
+
+# (r3) THE SECOND EXPLANATION — a secondary rate limit. Same HTML shape, a
+# different status, and the log alone tells them apart.
+out2="$(run_err 403 "You have exceeded a secondary rate limit and have been temporarily blocked." "Forbidden")"; rc2=$?
+grep -q "HTTP 403" <<<"$out2" \
+  && ok "(r3) a 403 rate-limited page is reported as HTTP 403, not as \`<html>\`" \
+  || bad "(r3) no HTTP 403 in the output: $out2"
+[ "$rc2" = "6" ] \
+  && ok "(r3) …and a rate limit is a transport silence (exit 6), not a credential fault" \
+  || bad "(r3) expected exit 6 on a rate-limited read, got $rc2: $out2"
+grep -q "secondary rate limit" <<<"$out2" \
+  && ok "(r3) …and carries gh's own reason, so 'the budget' is readable off the log" \
+  || bad "(r3) gh's summary line was dropped: $out2"
+grep -q "HTTP 504" <<<"$out2" \
+  && bad "(r3) the 504 run's status leaked into the 403 run — the digest is not reading this run's output" \
+  || ok "(r3) …and 504 and 403 are DISTINGUISHABLE from the log alone, with no wall-clock reconstruction"
+
+# (r4) THE THIRD EXPLANATION — the token. Classified as a credential fault (rc
+# 3) rather than a transport silence, and it says which status made it one.
+out3="$(run_err 401 "Bad credentials" "Unauthorized")"; rc3=$?
+[ "$rc3" = "3" ] \
+  && ok "(r4) a 401 page is a CONFIGURATION FAULT (exit 3), not a transport silence" \
+  || bad "(r4) expected exit 3 on a 401, got $rc3: $out3"
+grep -q "HTTP 401" <<<"$out3" \
+  && ok "(r4) …and the status that made it one is printed" || bad "(r4) no HTTP 401 in the output: $out3"
+
+# (r5) THE HAPPY PATH IS UNCHANGED. The same live page loop, a page GitHub
+# answers normally: the verdict is reached and no digest text appears at all.
+gql_page "$TMP/gql-page1.json" 9101 true  "CURSOR_ONE"
+gql_page "$TMP/gql-page2.json" 9102 false null
+out4="$(run_stubbed pages)"; rc4=$?
+[ "$rc4" = "1" ] && grep -q "#9101" <<<"$out4" && grep -q "#9102" <<<"$out4" \
+  && ok "(r5) the unchanged happy path still reads both pages and reds at exit 1" \
+  || bad "(r5) the happy path moved: rc=$rc4: $out4"
+grep -qE "no HTTP status in the response|first line of the body" <<<"$out4" \
+  && bad "(r5) a successful read printed a transport digest: $out4" \
+  || ok "(r5) …and prints no transport diagnostic at all, because there was no error to digest"
+
+# (r6) DISARM, MUTATION-PROVEN. Every probe above would pass against a script
+# that printed the status somewhere by accident. This restores the ORIGINAL
+# defect at the two retry diagnostics — `head -1` of the combined capture — and
+# requires (r1)'s assertion to FAIL against it.
+MUTANT="$TMP/mutant-head1.sh"
+sed 's#gh_error_digest "$out"#printf "%s" "$out" | head -1#g' "$WATCH" > "$MUTANT"
+mut_before="$(command grep -c 'gh_error_digest "\$out"' "$WATCH")"
+mut_after="$(command grep -c 'gh_error_digest "\$out"' "$MUTANT")"
+if [ "$mut_before" -ge 2 ] && [ "$mut_after" = "0" ]; then
+  ok "(r6) the mutation APPLIED: $mut_before call site(s) became head -1, 0 remain"
+else
+  bad "(r6) the mutation did not apply ($mut_before → $mut_after) — every disarm below would be vacuous"
+fi
+out5="$(run_err 504 "We couldn't respond to your request in time." "Gateway Time-out" "$MUTANT")"
+grep -qE 'retrying the PAGE in [0-9]+s: <html>$' <<<"$out5" \
+  && ok "(r6) …and against the mutant the retry line reads \`: <html>\` again, so (r1) is a probe and not a decoration" \
+  || bad "(r6) the head -1 mutant did NOT reproduce the defect, so (r1) proves nothing: $out5"
+grep -qE 'retrying the PAGE in [0-9]+s: <html>$' <<<"$out" \
+  && bad "(r6) the real script also prints the bare \`<html>\` retry line" \
+  || ok "(r6) …while the real script never does — both directions"
+
 echo "── stale-verdict-watch: $PASS passed, $FAIL failed ──"
 [ "$FAIL" -eq 0 ] || exit 1
