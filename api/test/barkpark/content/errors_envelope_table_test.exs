@@ -128,6 +128,15 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # arm cannot move the other one silently.
       {"connection_unavailable", {:error, {:connection_unavailable, "tcp recv: closed"}},
        "storage_unavailable", 503, [:reason]},
+      # The READ twin (task-5a7f007878b56e6a). Same public code, same 503, same
+      # `reason` — a DIFFERENT hint, because the write arm above tells the
+      # caller to check whether the write LANDED and a read wrote nothing.
+      # Pinned here so a later edit cannot silently collapse the two arms back
+      # into one and hand an SSR build check-the-drafts advice for a dropped
+      # SELECT.
+      {"connection_unavailable_read",
+       {:error, {:connection_unavailable, :read, "tcp recv: closed"}}, "storage_unavailable", 503,
+       [:reason]},
       {"label_spine", {:error, {:label_spine, %{"tags" => ["required"]}}}, "label_spine", 422,
        [:details]},
       {"invalid_paper_structure", {:error, {:invalid_paper_structure, %{"blocks" => []}}},

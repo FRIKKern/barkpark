@@ -17,6 +17,8 @@ defmodule BarkparkWeb.QueryController do
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
+  require Logger
+
   action_fallback(BarkparkWeb.FallbackController)
 
   # The value sets THESE routes declare in `Barkpark.Plugins.Capabilities` (and
@@ -42,7 +44,95 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
+  # ─── THE READ-SIDE DBConnection CLASSIFICATION (task-5a7f007878b56e6a) ───
+  #
+  # THE READ TWIN OF PR #15489. That row wrapped `Content.Writer.create_document/4`
+  # so a checkout lost mid-write answers 503 `storage_unavailable` /
+  # `connection_unavailable` instead of 500 `internal_error / "unknown error
+  # (DBConnection.ConnectionError)"`. It deliberately did not widen into the read
+  # path, and the read path had the identical hole: zero `rescue` in all of
+  # `content/query.ex`, `content/graph.ex` and `content.ex`.
+  #
+  # WHY THE READ SIDE IS THE WORSE HALF. A 500 on create fails loudly and the
+  # caller resends. A 500 on read happens INSIDE an SSR build: the page renders
+  # with no content document, the deploy's HEALTH gate reads an empty
+  # `bp-doc-id` marker and refuses the switch after the whole build has been
+  # paid for — and the failure is then captioned by its SYMPTOM ("marker is
+  # empty") rather than its CAUSE (the pool). `internal_error` is not on
+  # `BarkparkCloud.Sites.Deploy.transient_refusal?/1`'s list, so the one
+  # condition that clears by itself was the one every caller was told to
+  # escalate.
+  #
+  # THE FIX IS A REGION, NOT A CALL SITE — the same argument #15489 made at the
+  # write door. Every Repo call inside `query_index!/4` can be refused a
+  # checkout (`fetch_schema`, `Content.list_documents_page/3`, `Expand.expand/4`,
+  # the optional `?count=true` total, `Content.schema_hash_for_dataset/2`,
+  # `maybe_resolve_tasks/3`) and the caller's remedy is identical at every one of
+  # them: resend. Naming a single call site would leave the other five raising.
+  #
+  # NO FAIL-OPEN — THE SHARP EDGE ON A READ PATH. `rescue e in
+  # DBConnection.ConnectionError` matches that ONE struct. The rescue returns an
+  # `{:error, …}` tuple and can never return `{:ok, _}`, `[]`, or a 200 with an
+  # empty `documents` list. That matters more here than at the write door: an
+  # empty 200 is precisely the shape that produced the deploy failures this row
+  # was filed from, so a rescue that "recovered" into an empty page would ship a
+  # WORSE defect than the 500 it replaced. Any other exception — a
+  # `Postgrex.Error`, an `Ecto.QueryError`, an `ArgumentError` from a bad filter
+  # — propagates exactly as it did before.
+  #
+  # BLAST RADIUS, STATED. This covers `GET /v1/data/query/:dataset/:type` and
+  # NOTHING ELSE in this controller. `backlinks/2`, `related/2`, `counts/2` and
+  # the document-show door are DELIBERATELY NOT WRAPPED and still raise as they
+  # did; the `:query_index` fault seam below is the only site, and a sibling
+  # seam in `TasksController` pins the untouched graph doors the same way
+  # #15489's `:upsert_prev_doc_lookup` seam pinned `upsert_document/4`.
   defp query_index(conn, dataset, type, params) do
+    query_index!(conn, dataset, type, params)
+  rescue
+    e in DBConnection.ConnectionError ->
+      Logger.error(
+        "BarkparkWeb.QueryController.index/2: the database connection was lost mid-read " <>
+          "(dataset=#{inspect(dataset)} type=#{inspect(type)}) — answering 503 " <>
+          "storage_unavailable/connection_unavailable. exception=#{Exception.message(e)}"
+      )
+
+      {:error, {:connection_unavailable, :read, read_fault_message(e)}}
+  end
+
+  # The caller-facing sentence. Where the write twin's message warns that the
+  # write is AMBIGUOUS, this one says the opposite and says it first: nothing
+  # was read, nothing changed, and an empty result is NOT the answer to this
+  # request. That sentence is the deliverable — the deploys this row came from
+  # failed because an unreadable corpus was rendered as an empty page.
+  defp read_fault_message(%DBConnection.ConnectionError{} = e) do
+    "the database connection was lost while reading documents " <>
+      "(#{Exception.message(e)}). No documents were read and nothing was " <>
+      "changed. This is transient: resend the identical request. Do NOT treat " <>
+      "this as an empty result — a build that renders what it managed to read " <>
+      "will ship a page with no content."
+  end
+
+  # Test-only fault seam, mirroring `Content.Writer.inject_write_fault!/1`
+  # (PR #15489) verbatim in intent: the SQL sandbox cannot produce a REAL
+  # rescuable transport failure — a pool timeout under
+  # `Ecto.Adapters.SQL.Sandbox` arrives as an ownership-shutdown EXIT and takes
+  # the test's own connection with it — so the test raises the exact exception
+  # the live 500 carried, at the exact read it was raised at. The config value
+  # is `{site, exception_module, message}` so the SAME seam proves both halves:
+  # a `DBConnection.ConnectionError` becomes the named 503, and ANY OTHER
+  # exception still propagates untouched. `nil` in every non-test env.
+  defp inject_read_fault!(site) do
+    case Application.get_env(:barkpark, :reader_fault) do
+      {^site, module, message} when is_atom(module) and is_binary(message) ->
+        raise module, message
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp query_index!(conn, dataset, type, params) do
+    inject_read_fault!(:query_index)
     t0 = System.monotonic_time(:microsecond)
     perspective = AnonPerspective.resolve(conn, params)
     # Clamp to the same bounds Content.list_documents enforces (limit [1,1000],
