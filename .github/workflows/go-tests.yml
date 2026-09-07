@@ -618,6 +618,32 @@ jobs:
         continue-on-error: true
         run: |
           set +e
+          # ── DROP THE GO PROBLEM MATCHER FIRST, BEFORE ANYTHING PRINTS ──────
+          #
+          # `actions/setup-go` registers a problem matcher owned by `go`. It
+          # promotes any `file.go:line:col: text` line to an ERROR ANNOTATION.
+          # govulncheck's report is made almost entirely of such lines — they are
+          # the example call traces that explain WHY a vulnerability is reachable.
+          #
+          # MEASURED on this step's first two runs (check-runs 101747752493 and
+          # 101749396903, both on a job whose conclusion was SUCCESS):
+          #   failure-level annotations: 10      <- GitHub's per-level cap
+          #   warning-level annotations: 2       <- the two this step means to emit
+          # 75 were emitted; 65 were silently truncated past the cap. So a GREEN
+          # advisory step decorated the PR's files view with ten red errors that
+          # mean nothing failed, and buried its own two real warnings among them.
+          #
+          # That is the repo's own mislabeling class, inverted: elsewhere a gate
+          # claims authority it lacks; here the EVIDENCE claims a severity the
+          # VERDICT does not. A reader who trusts the annotations sees a broken
+          # PR; a reader who trusts the conclusion sees green. Both are looking at
+          # the same step.
+          #
+          # Removing the matcher costs nothing: `go vet` and `go test -race` are
+          # EARLIER steps in this same job, so it has already done its real work
+          # by the time control reaches here, and it is re-registered per job.
+          # This is scoped to this step, not disabled for the workflow.
+          echo "::remove-matcher owner=go::"
           go install golang.org/x/vuln/cmd/govulncheck@latest
           if [ $? -ne 0 ]; then
             echo "::warning title=govulncheck: not run::Could not install govulncheck; this ADVISORY step reported nothing. Read it as 'not scanned', never as 'no vulnerabilities'."
