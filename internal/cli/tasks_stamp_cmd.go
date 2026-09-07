@@ -340,6 +340,15 @@ func stampReceipt(req stampRequest, stored taskboard.CriterionItem, readback api
 		"criterion_number": req.index + 1,
 		"problems":         problems,
 	}
+	// `notes` is the machine half of the advisory: never a problem (the write
+	// landed), always the same text the human receipt printed, so a scripted
+	// caller that branches on `confirmed` can still SEE that its --miss left
+	// met standing and read the verb that lowers it.
+	notes := []string{}
+	if n := missLeftMetTrueNote(req, stored); n != "" {
+		notes = append(notes, n)
+	}
+	r["notes"] = notes
 	r["stored"] = map[string]any{
 		"criterion":      stored.Criterion,
 		"met":            stored.Met,
@@ -397,6 +406,13 @@ func renderStampVerdict(out *writer, req stampRequest, stored taskboard.Criterio
 		}
 		out.progressf("✓ the store holds it — criterion index %d (#%d as boards number them): %s",
 			req.index, req.index+1, storedCriterionSummary(stored))
+		// The miss landed AND met is still true. That is not a failure, so the
+		// exit code does not move — but it is the exact moment the caller
+		// learns the flag did not do what they reached for it to do, so the
+		// reachable remedy is named right here.
+		if note := missLeftMetTrueNote(req, stored); note != "" {
+			out.progressf("  ! %s", note)
+		}
 		return exitOK
 	}
 	out.userErr("stamp NOT confirmed by the store — the write did not land as asked")
@@ -407,6 +423,9 @@ func renderStampVerdict(out *writer, req stampRequest, stored taskboard.Criterio
 	out.errf("  the store holds:    %s", storedCriterionSummary(stored))
 	for _, m := range mismatches {
 		out.errf("  ✗ %s", m)
+	}
+	if note := missLeftMetTrueNote(req, stored); note != "" {
+		out.errf("  ! %s", note)
 	}
 	out.errf("  ✗ NOT stored — stamp again (re-read with `bp task get %s` first if the criteria list may have moved). A stamp is only real once the store holds it.", req.docID)
 	return exitConflict
@@ -636,7 +655,10 @@ func stampEchoLine(sa stampArgs) string {
 	case sa.met:
 		outcome = "met"
 	case sa.miss:
-		outcome = "miss (attempt)"
+		// A miss is the outcome operators reach for when they mean "lower this"
+		// — and it lowers nothing. Say so BEFORE the write, and name the verb
+		// that does (missLeftMetTrueNote says it again after).
+		outcome = "miss (attempt) — met is UNCHANGED; " + stampWithdrawFlag + " is the verb that lowers a wrong met"
 	case sa.withdraw:
 		// Spelled out because a withdrawal is the one outcome that makes the
 		// board's number go DOWN, and an operator who typed the wrong index
