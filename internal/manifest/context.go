@@ -46,6 +46,31 @@ type Context struct {
 	// assuming one. Resolve sets them true when a layer above Defaults won.
 	WorkspaceExplicit bool
 	ProjectExplicit   bool
+
+	// WorkspaceFromServerEntry / ProjectFromServerEntry / DatasetFromServerEntry
+	// record that the value at FLAG precedence was not typed by the operator on
+	// this invocation — it was INJECTED by `bp -s <saved-name>` out of that saved
+	// server entry (internal/cli/cli.go's FindServer branch), which carries the
+	// entry's scope at flag precedence so it outranks env and the active config.
+	//
+	// WHY THIS EXISTS SEPARATELY FROM WorkspaceExplicit. The precedence is
+	// correct and stays: naming a server IS the operator's deliberate choice, and
+	// the scope saved with that server is the scope they want against it. What is
+	// NOT true is that they STATED that scope, and StatedScope is asked exactly
+	// that question. Without this flag, `bp -s gyldendal task ready` — no -w typed
+	// anywhere — resolves Workspace=gyldendal at LayerFlag, StatedScope reports
+	// [-w], and the scope-honesty refusal fires on a command line the operator
+	// cannot fix except by deleting their own saved entry. That is the same
+	// brick-the-CLI blast radius that got the WorkspaceExplicit-keyed design
+	// rejected, arriving through a different door.
+	//
+	// FALSE IS THE ZERO VALUE and it is the CONSERVATIVE one: a Context built as
+	// a literal, or resolved without any -s, reads as not-injected and every
+	// existing arm behaves byte-identically. Only cli.go's injection site sets
+	// these, through AttributeServerEntry.
+	WorkspaceFromServerEntry bool
+	ProjectFromServerEntry   bool
+	DatasetFromServerEntry   bool
 }
 
 // ActiveContext is the persisted-context layer — the saved named target a user
@@ -122,6 +147,48 @@ const (
 	LayerActive  = "active"
 	LayerDefault = "default"
 )
+
+// LayerServerEntry is a FIFTH provenance label that Resolve itself never
+// produces. It names a value that arrived at LayerFlag precedence because
+// `bp -s <saved-name>` copied it out of a saved server entry, rather than
+// because the operator typed the flag. AttributeServerEntry stamps it after the
+// fold, from the one place that knows which keys it injected.
+//
+// It is a LABEL correction, never a precedence change: the value still won at
+// flag precedence and still beats env and the active config. Only the answer to
+// "did the operator say this on this command line?" changes.
+const LayerServerEntry = "server-entry"
+
+// AttributeServerEntry relabels the workspace/project/dataset provenance for
+// the keys a `-s <saved-name>` resolution INJECTED into the flags map, and
+// records the same fact on the Context so StatedScope can read it.
+//
+// injected is the set of manifest Flag* keys the caller put into the flags map
+// itself. Only the three SCOPE keys are honoured — the token has its own
+// provenance path (cli.go's tokenProvenance), and the server key IS the thing
+// the operator named, so neither is a candidate for this correction.
+//
+// The relabel is guarded on the field having actually resolved at LayerFlag: if
+// some future caller injects a key that a higher layer then overrode, the label
+// keeps describing the value that really won.
+func AttributeServerEntry(ctx Context, src Sources, injected map[string]bool) (Context, Sources) {
+	if len(injected) == 0 {
+		return ctx, src
+	}
+	if injected[FlagWorkspace] && src.Workspace == LayerFlag {
+		src.Workspace = LayerServerEntry
+		ctx.WorkspaceFromServerEntry = true
+	}
+	if injected[FlagProject] && src.Project == LayerFlag {
+		src.Project = LayerServerEntry
+		ctx.ProjectFromServerEntry = true
+	}
+	if injected[FlagDataset] && src.Dataset == LayerFlag {
+		src.Dataset = LayerServerEntry
+		ctx.DatasetFromServerEntry = true
+	}
+	return ctx, src
+}
 
 // Sources reports, per field, WHICH layer supplied the value Resolve returned.
 // It exists so a caller that must EXPLAIN a resolved value ("which credential

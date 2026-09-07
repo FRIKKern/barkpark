@@ -757,7 +757,16 @@ func resolveContextProv(g globals) (manifest.Context, tokenProvenance) {
 	// the honest ANSWER to "where did this credential come from" is the saved
 	// server — not the flag, which only named which saved server to use. Only an
 	// explicit --token is labelled "flag".
+	// scopeFromSavedEntry: the same problem, one layer down, for the SCOPE. The
+	// three keys injected below sit at flag precedence but were never typed on
+	// this command line, and internal/manifest/scope.go's StatedScope asks
+	// precisely "did the operator state this scope?" to decide whether to REFUSE a
+	// command whose URL cannot carry it. Left unmarked, `bp -s gyldendal task
+	// ready` — no -w anywhere — refuses, and the only cure is deleting the saved
+	// entry. So this block records WHICH keys it injected and hands that set to
+	// manifest.AttributeServerEntry after the fold; the precedence is untouched.
 	tokenFromSavedEntry := false
+	scopeFromSavedEntry := map[string]bool{}
 	if g.server != "" {
 		if entry, ok := cfg.FindServer(g.server); ok {
 			flags[manifest.FlagServer] = entry.Server
@@ -767,12 +776,15 @@ func resolveContextProv(g globals) (manifest.Context, tokenProvenance) {
 			}
 			if _, set := flags[manifest.FlagWorkspace]; !set && entry.Workspace != "" {
 				flags[manifest.FlagWorkspace] = entry.Workspace
+				scopeFromSavedEntry[manifest.FlagWorkspace] = true
 			}
 			if _, set := flags[manifest.FlagProject]; !set && entry.Project != "" {
 				flags[manifest.FlagProject] = entry.Project
+				scopeFromSavedEntry[manifest.FlagProject] = true
 			}
 			if _, set := flags[manifest.FlagDataset]; !set && entry.Dataset != "" {
 				flags[manifest.FlagDataset] = entry.Dataset
+				scopeFromSavedEntry[manifest.FlagDataset] = true
 			}
 		} else {
 			// Unknown name → raw URL, as before.
@@ -782,6 +794,7 @@ func resolveContextProv(g globals) (manifest.Context, tokenProvenance) {
 
 	env := envContext()
 	ctx, srcs := manifest.ResolveWithSources(flags, env, active, bakedDefaults())
+	ctx, srcs = manifest.AttributeServerEntry(ctx, srcs, scopeFromSavedEntry)
 
 	prov := tokenProvenance{Tail: tokenTail(ctx.Token)}
 	switch srcs.Token {
