@@ -629,6 +629,15 @@
        very first block in the editor zeroes its leading margin so the document
        doesn't open with a gap. */
     .bp-paper-editor-body { outline: none; }
+    [data-bp-text-boundary] {
+      margin-block: 12px;
+      padding: 10px 12px;
+      border-inline-start: 2px solid var(--paper-accent, currentColor);
+      color: var(--paper-ink-soft);
+      font-family: var(--paper-font-ui, system-ui, sans-serif);
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
     /* Empty-block ghost text — @tiptap/extension-placeholder stamps `is-empty`
        (current empty node) / `is-editor-empty` (whole-empty editor) + a
        `data-placeholder` attr on the node. Render it as a muted, non-shifting
