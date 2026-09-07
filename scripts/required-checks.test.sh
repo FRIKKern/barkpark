@@ -4520,10 +4520,16 @@ fi
 # The bad references, minus the committed baseline. `comm` over sorted keys, so
 # a baselined entry whose ACTUAL row moves is NOT waved through by its cited
 # number matching.
-# `|| true`: the page is CLEAN now, so `grep -v '^OK'` matches nothing and exits
-# 1. Under `set -euo pipefail` that status is the assignment's status and the
-# whole suite dies here — an empty problem list is the SUCCESS case, not an error.
-RC20_XREF_BAD="$(grep -vE '^OK\t' <<<"$RC20_XREF_ALL" | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort || true)"
+# THE FILTER IS awk's `$1 != "OK"`, NEVER `grep -vE '^OK\t'`. `\t` inside an ERE
+# is not portable: this box resolves `grep` to ugrep, which honours it as a tab,
+# and the clause passed here while the SAME TREE reported three failures on the
+# runner, whose grep matched nothing and let every OK row through as a problem
+# (measured 2026-09-08 on 4d820bf83 vs CI job 101862015284, and on main's own
+# job 101860822447, which carried the identical leak). awk splits on a real tab
+# by -F and compares a whole field, so there is no escape to get wrong.
+# `|| true` is kept deliberately: awk exits 0 on an empty read, but an empty
+# problem list is the SUCCESS case here and the guard costs nothing.
+RC20_XREF_BAD="$(awk -F'\t' '$1 != "OK" { printf "%s|%s|%s\n", $2, $3, $4 }' <<<"$RC20_XREF_ALL" | sort || true)"
 RC20_XREF_BASE_SORTED="$(printf '%s\n' "$RC20_XREF_BASELINE" | sort)"
 RC20_XREF_NEW="$(comm -23 <(printf '%s\n' "$RC20_XREF_BAD") <(printf '%s\n' "$RC20_XREF_BASE_SORTED"))"
 RC20_XREF_FIXED="$(comm -13 <(printf '%s\n' "$RC20_XREF_BAD") <(printf '%s\n' "$RC20_XREF_BASE_SORTED"))"
@@ -4556,7 +4562,7 @@ if [ -n "$RC20_XREF_PATH" ] && [ -n "$RC20_XREF_TRUE" ] \
 else
   bad "the cross-reference mutation did not apply (path='$RC20_XREF_PATH' row='$RC20_XREF_TRUE') — the two arms below are vacuous"
 fi
-RC20_XREF_GOOD="$(rc20_xref_report "$RC20_XREF_SCRATCH" | grep -vE '^OK\t' | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort \
+RC20_XREF_GOOD="$(rc20_xref_report "$RC20_XREF_SCRATCH" | awk -F'\t' '$1 != "OK" { printf "%s|%s|%s\n", $2, $3, $4 }' | sort \
                   | comm -23 - <(printf '%s\n' "$RC20_XREF_BASE_SORTED") || true)"
 if [ -z "$RC20_XREF_GOOD" ]; then
   ok "…and a reference citing the RIGHT row number resolves clean — the clause is reading the table, not reddening on any \`**N · …**\` it has not seen before"
@@ -4565,7 +4571,7 @@ else
 fi
 printf '\n**%s · `%s`** — planted by required-checks.test.sh §20, WRONG arm.\n' \
   "$((RC20_XREF_TRUE + 1))" "$RC20_XREF_PATH" >> "$RC20_XREF_SCRATCH"
-RC20_XREF_RED="$(rc20_xref_report "$RC20_XREF_SCRATCH" | grep -vE '^OK\t' | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort \
+RC20_XREF_RED="$(rc20_xref_report "$RC20_XREF_SCRATCH" | awk -F'\t' '$1 != "OK" { printf "%s|%s|%s\n", $2, $3, $4 }' | sort \
                  | comm -23 - <(printf '%s\n' "$RC20_XREF_BASE_SORTED") || true)"
 if [ "$RC20_XREF_RED" = "$((RC20_XREF_TRUE + 1))|$RC20_XREF_PATH|$RC20_XREF_TRUE" ]; then
   ok "…and moving that ONE number by one makes the clause name it — cited $((RC20_XREF_TRUE + 1)), resolves to row $RC20_XREF_TRUE (mutation-proven able to fail)"
