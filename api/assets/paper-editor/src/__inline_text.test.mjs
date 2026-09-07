@@ -104,6 +104,46 @@ reply([{ status: "fulfilled", value: { reply: {
 } } }]);
 await new Promise(resolve => setTimeout(resolve, 0));
 assert.deepEqual(toggles, ["paper-toggle-edit"]);
+// LiveView preserves a focused native field's value during a remote repaint.
+// A later keystroke must still be authored against the revision the user saw.
+summary.focus();
+const coordinator = toggle._bpPaperExitCoordinator;
+assert.equal(coordinator.hasUnsaved(), false, "focus alone is not an unsaved edit");
+coordinator.observeRevision({ rev: 10, apply: () => {
+  window.document.querySelector("main").dataset.paperRev = "10";
+} });
+summary.blur();
+summary.focus();
+calls.length = 0;
+toggles.length = 0;
+summary.value = "Competing focused title";
+summary.dispatchEvent(new window.Event("input", { bubbles: true }));
+toggle.el.click();
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(calls[0].payload.if_rev, 9, "blur/refocus cannot silently adopt a revision skipped while focused");
+reply([{ status: "fulfilled", value: { reply: {
+  saved: false, conflict: true, request_id: calls[0].payload.request_id, current_rev: 10,
+} } }]);
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.deepEqual(toggles, [], "the native conflict retains the editor");
+const keep = window.document.querySelector('[data-bp-paper-conflict] [data-action="keep"]');
+assert.ok(keep && !keep.disabled, "explicit native text conflict can be reviewed and kept");
+keep.click();
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(calls[1].payload.if_rev, 10);
+assert.notEqual(calls[1].payload.request_id, calls[0].payload.request_id);
+reply([{ status: "fulfilled", value: { reply: {
+  saved: true, request_id: calls[1].payload.request_id, rev: 11,
+} } }]);
+await new Promise(resolve => setTimeout(resolve, 0));
+coordinator.observeRevision({ rev: 12, apply: () => {
+  window.document.querySelector("main").dataset.paperRev = "12";
+} });
+summary.value = "Continuing focused title";
+summary.dispatchEvent(new window.Event("input", { bubbles: true }));
+toggle.el.click();
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(calls[2].payload.if_rev, 11, "own acknowledgement refreshes the still-focused baseline only to its own revision");
 toggle.destroyed();
 dom.window.close();
 console.log("PASS inline text: native selection, grow/shrink, cleanup and acknowledged immediate View");
