@@ -62,6 +62,7 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS } from "../contract.js";
 import { isStatsType, wireStatsInline } from "./stats-inline.js";
+import { wireCardsInline } from "./cards-inline.js";
 
 // The TipTap node NAMES are `bpSheet` / `bpEmbed` (the canvas naming convention, like
 // bpCode/bpDiagram/bpField). The portable-doc `bpType` stays "sheet" / "embed"
@@ -768,7 +769,7 @@ export const Fleet = Node.create({
       // exactly like the code / task-list config islands.
       const isEditableKind = fleetKindEditable(bpType) && !isBlockLocked(block);
       let fleetEditor = null;
-      let statsConfig = null;
+      let nativeConfig = null;
       const currentBlock = () => {
         const pos = typeof getPos === "function" ? getPos() : null;
         return pos == null ? block : editor.state.doc.nodeAt(pos)?.attrs.bpBlock || block;
@@ -780,7 +781,8 @@ export const Fleet = Node.create({
         if (!cur || cur.type.name !== BP_FLEET_NODE_NAME) return;
         editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, bpBlock: nextBlock }));
       };
-      const statsInline = isStatsType(bpType) ? wireStatsInline(body, {
+      const wireNative = isStatsType(bpType) ? wireStatsInline : bpType === "cards" ? wireCardsInline : null;
+      const nativeInline = wireNative ? wireNative(body, {
         getBlock: currentBlock, isEditable: () => editor.isEditable,
         commit: commitBlock, undo: () => editor.commands.undo(), redo: () => editor.commands.redo(),
       }) : null;
@@ -788,8 +790,8 @@ export const Fleet = Node.create({
       let focused = false;
       const syncReveal = () => {
         if (!fleetEditor) return;
-        if (statsConfig) {
-          statsConfig.style.display = editor.isEditable && !isBlockLocked(currentBlock()) ? "" : "none";
+        if (nativeConfig) {
+          nativeConfig.style.display = editor.isEditable && !isBlockLocked(currentBlock()) ? "" : "none";
           return;
         }
         fleetEditor.el.style.display =
@@ -836,17 +838,18 @@ export const Fleet = Node.create({
               .run();
           },
         });
-        if (statsInline) {
-          dom.classList.add("bp-paper-contextual-editor", "bp-canvas-stats-inline");
-          statsConfig = document.createElement("details");
-          statsConfig.className = "bp-paper-contextual-controls bp-paper-stats-config";
+        if (nativeInline) {
+          dom.classList.add("bp-paper-contextual-editor");
+          if (isStatsType(bpType)) dom.classList.add("bp-canvas-stats-inline");
+          nativeConfig = document.createElement("details");
+          nativeConfig.className = `bp-paper-contextual-controls bp-paper-${bpType === "cards" ? "cards" : "stats"}-config`;
           const summary = document.createElement("summary");
           summary.className = "bp-paper-contextual-toggle";
-          summary.textContent = "Configure Stats";
-          statsConfig.appendChild(summary);
+          summary.textContent = bpType === "cards" ? "Configure Cards" : "Configure Stats";
+          nativeConfig.appendChild(summary);
           fleetEditor.el.classList.add("bp-paper-contextual-panel");
-          statsConfig.appendChild(fleetEditor.el);
-          dom.appendChild(statsConfig);
+          nativeConfig.appendChild(fleetEditor.el);
+          dom.appendChild(nativeConfig);
         } else dom.appendChild(fleetEditor.el);
         dom.addEventListener("mouseenter", onEnter);
         dom.addEventListener("mouseleave", onLeave);
@@ -855,7 +858,7 @@ export const Fleet = Node.create({
         syncReveal();
       }
       const flushFleetEditor = () => {
-        if (statsInline) statsInline.flush();
+        if (nativeInline) nativeInline.flush();
         if (fleetEditor) fleetEditor.flush();
       };
       dom.addEventListener("bp-flush-node", flushFleetEditor);
@@ -893,7 +896,7 @@ export const Fleet = Node.create({
           // Re-seed the editor from an echo / undo WITHOUT clobbering an in-progress
           // edit (refresh no-ops when the block is content-equal or focus is inside).
           if (fleetEditor) fleetEditor.refresh(b, focused);
-          if (statsInline) statsInline.refresh();
+          if (nativeInline) nativeInline.refresh();
           syncReveal();
           return true;
         },
@@ -904,7 +907,7 @@ export const Fleet = Node.create({
         // hook mutates the paint hole's innerHTML directly and PM must ignore it.
         ignoreMutation: () => true,
         destroy: () => {
-          if (statsInline) statsInline.destroy();
+          if (nativeInline) nativeInline.destroy();
           dom.removeEventListener("bp-flush-node", flushFleetEditor);
           if (fleetEditor) {
             fleetEditor.destroy();
