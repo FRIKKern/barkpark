@@ -18,12 +18,32 @@ defmodule Barkpark.Tenancy.Organization do
 
   # era-bl-allowed-auth-methods: the CLOSED vocabulary of authentication
   # methods an org policy may name. One string per door a user can walk
-  # through to mint a session: local password login, an emailed magic link,
-  # a WebAuthn passkey, and any enterprise SSO callback (OIDC / SAML /
-  # social). A value outside this list is rejected at write time, so the
-  # column can never hold a method no enforcement point knows about — a typo
+  # through to mint a session, and the vocabulary is DERIVED FROM THE DOORS —
+  # every term here has an enforcement point, and every local session-mint
+  # site answers to exactly one term. An allow-list that named a door nobody
+  # gated would be inert while reading as enforced.
+  #
+  #   password    POST /v1/auth/login, POST /login/account
+  #   magic_link  POST /v1/auth/magic-login, GET /auth/magic/:token
+  #   passkey     POST /v1/auth/webauthn/login
+  #   sso         the ENTERPRISE identity callbacks: OIDC + SAML, each bound
+  #               to a per-org connection (`c.organization_id`)
+  #   social      consumer OAuth (Google / GitHub / Microsoft)
+  #
+  # `social` is DELIBERATELY not folded into `sso`, and the distinction is
+  # load-bearing rather than cosmetic. `Sso.Social.handle_callback/3`
+  # find-or-LINKS by email against a consumer provider with no org binding at
+  # all — the social controller's own comment says "social login is
+  # app-level, no org of its own". If social counted as `sso`, a member of an
+  # `["sso"]` org could sign in with a personal Google account whose address
+  # matches theirs and be treated as having satisfied the enterprise identity
+  # policy. That is precisely the bypass this feature exists to close, so the
+  # doors get separate names and an org that wants both writes both.
+  #
+  # A value outside this list is rejected at write time, so the column can
+  # never hold a method no enforcement point knows about — a typo
   # ("passwrod") would otherwise silently disable a door nobody named.
-  @auth_methods ~w(password magic_link passkey sso)
+  @auth_methods ~w(password magic_link passkey sso social)
 
   @doc "The closed vocabulary of `allowed_auth_methods` values."
   @spec auth_methods() :: [String.t()]
@@ -54,7 +74,8 @@ defmodule Barkpark.Tenancy.Organization do
     # surface is byte-identical to before the column existed. A non-NULL list
     # is an allow-list: a method absent from it is refused at the session-mint
     # chokepoint with `auth_method_not_allowed`. SSO-only is expressed as
-    # `["sso"]`. Strictest-wins across a user's orgs = the INTERSECTION of the
+    # `["sso"]` — which also closes the consumer-OAuth door, since `social` is
+    # a separate term (see `@auth_methods`). Strictest-wins across a user's orgs = the INTERSECTION of the
     # non-NULL policies (`Tenancy.org_allowed_auth_methods_for_user/1`).
     field :allowed_auth_methods, {:array, :string}
 

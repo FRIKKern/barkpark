@@ -131,10 +131,19 @@ defmodule BarkparkWeb.SessionIssuer do
   the credential verified, so the refusal reveals nothing about an address
   that has no account.
 
+  `provider` is the PRECISE door for the audit trail when it is finer-grained
+  than the policy term — `"social:google"` gates on the coarse `"social"`
+  method but is recorded exactly, so a reader of the trail can tell which
+  provider was refused. Defaults to `method`.
+
   No session token exists on this path — the door fails closed.
   """
-  @spec deny_auth_method(Plug.Conn.t(), Accounts.User.t(), String.t()) :: Plug.Conn.t()
-  def deny_auth_method(conn, %Accounts.User{} = user, method) when is_binary(method) do
+  @spec deny_auth_method(Plug.Conn.t(), Accounts.User.t(), String.t(), String.t() | nil) ::
+          Plug.Conn.t()
+  def deny_auth_method(conn, %Accounts.User{} = user, method, provider \\ nil)
+      when is_binary(method) do
+    allowed = Barkpark.Tenancy.org_allowed_auth_methods_for_user(user.id)
+
     Barkpark.Audit.emit(%{
       category: "auth",
       action: "auth_method_not_allowed",
@@ -144,7 +153,8 @@ defmodule BarkparkWeb.SessionIssuer do
       metadata: %{
         "reason" => "org_allowed_auth_methods",
         "method" => method,
-        "allowed" => Barkpark.Tenancy.org_allowed_auth_methods_for_user(user.id),
+        "provider" => provider || method,
+        "allowed" => allowed,
         "path" => conn.request_path
       }
     })
@@ -161,7 +171,7 @@ defmodule BarkparkWeb.SessionIssuer do
         error: %{
           code: "auth_method_not_allowed",
           message: auth_method_message(method),
-          hint: "sign in through your organization's single sign-on provider"
+          hint: auth_method_hint(allowed)
         }
       })
     end
@@ -170,13 +180,28 @@ defmodule BarkparkWeb.SessionIssuer do
   @doc "The human-facing refusal shared by the API and browser doors."
   @spec auth_method_message(String.t()) :: String.t()
   def auth_method_message(method) do
-    "#{method_label(method)} is disabled for your organization — " <>
-      "sign in with your organization's single sign-on provider instead."
+    "#{method_label(method)} is disabled for your organization."
   end
+
+  # The hint names what IS open rather than assuming SSO is the answer — an
+  # org can equally have disabled SSO and left password on, and a hint that
+  # said "use single sign-on" there would send the member to a closed door.
+  # The user is past their credential check at this point, so naming their own
+  # org's allowed methods reveals nothing they could not already probe.
+  defp auth_method_hint([]),
+    do: "no sign-in method is currently permitted — contact your organization's administrator"
+
+  defp auth_method_hint(allowed) when is_list(allowed) do
+    "permitted sign-in method(s) for your organization: " <> Enum.join(allowed, ", ")
+  end
+
+  defp auth_method_hint(_), do: "contact your organization's administrator"
 
   defp method_label("password"), do: "Password sign-in"
   defp method_label("magic_link"), do: "Magic-link sign-in"
   defp method_label("passkey"), do: "Passkey sign-in"
+  defp method_label("sso"), do: "Single sign-on"
+  defp method_label("social"), do: "Social sign-in"
   defp method_label(other), do: "#{other} sign-in"
 
   @doc "The human-facing org-MFA enrolment guidance shared by the browser doors."

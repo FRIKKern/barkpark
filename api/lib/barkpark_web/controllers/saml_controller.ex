@@ -55,35 +55,43 @@ defmodule BarkparkWeb.SamlController do
       # in Studio. The password door already blocks this user; without this
       # check the IdP redirect was a clean bypass. Checked AFTER JIT so a
       # first-ever login into a require_mfa org is governed too.
-      if SessionIssuer.org_mfa_enrolment_blocked?(user) do
-        SessionIssuer.deny_org_mfa_enrolment(conn, user, "saml", c.organization_id)
-      else
-        Sso.record_login(user, "saml", c.organization_id)
+      # era-bl-allowed-auth-methods: the org allowed-methods policy binds at
+      # the SAME seam. SAML is ENTERPRISE sso (bound to this org's
+      # connection), so it answers to the "sso" term.
+      cond do
+        SessionIssuer.org_mfa_enrolment_blocked?(user) ->
+          SessionIssuer.deny_org_mfa_enrolment(conn, user, "saml", c.organization_id)
 
-        {:ok, token} =
-          Accounts.create_user_session_token(
-            user,
-            SessionIssuer.actor_opts(conn) ++
-              [
-                saml_name_id: subject.name_id,
-                saml_session_index: subject.session_index,
-                saml_org_slug: slug
-              ]
-          )
+        SessionIssuer.auth_method_blocked?(user, "sso") ->
+          SessionIssuer.deny_auth_method(conn, user, "sso", "saml")
 
-        conn = conn |> configure_session(renew: true) |> put_session("user_session", token)
+        true ->
+          Sso.record_login(user, "saml", c.organization_id)
 
-        # studio-user-login: a BROWSER posting the IdP's auto-submit form
-        # (Accept: text/html) lands IN Studio — the cookie above is its
-        # credential. Non-HTML callers (interop suite, SDKs) keep the JSON
-        # contract byte-identical.
-        if browser?(conn) do
-          conn |> Phoenix.Controller.redirect(to: "/studio")
-        else
-          conn
-          |> put_status(:created)
-          |> json(%{ok: true, token: token, user: %{id: user.id, email: user.email}})
-        end
+          {:ok, token} =
+            Accounts.create_user_session_token(
+              user,
+              SessionIssuer.actor_opts(conn) ++
+                [
+                  saml_name_id: subject.name_id,
+                  saml_session_index: subject.session_index,
+                  saml_org_slug: slug
+                ]
+            )
+
+          conn = conn |> configure_session(renew: true) |> put_session("user_session", token)
+
+          # studio-user-login: a BROWSER posting the IdP's auto-submit form
+          # (Accept: text/html) lands IN Studio — the cookie above is its
+          # credential. Non-HTML callers (interop suite, SDKs) keep the JSON
+          # contract byte-identical.
+          if browser?(conn) do
+            conn |> Phoenix.Controller.redirect(to: "/studio")
+          else
+            conn
+            |> put_status(:created)
+            |> json(%{ok: true, token: token, user: %{id: user.id, email: user.email}})
+          end
       end
     else
       # Every failed callback lands on the audit trail (era-w8) — a forged or
