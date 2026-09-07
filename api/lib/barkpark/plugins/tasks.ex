@@ -245,14 +245,23 @@ defmodule Barkpark.Plugins.Tasks do
   defp eval_criteria(:absent, prev), do: warn_if_create_zero(prev)
   defp eval_criteria([], prev), do: warn_if_create_zero(prev)
 
+  # ONE PREDICATE, BOTH DOORS (cdd-criteria-shape-gate). This clause used to
+  # carry its own `Enum.all?(list, &is_map/1)` under a message promising a
+  # `{criterion, met, evidence}` contract it did not check — and
+  # `Tasks.Validation` carried the identical blind spot on the document-write
+  # path. Two doors, one hole, which is how `%{"text" => "..."}` got into
+  # production six times. The rule now lives in ONE place
+  # (`Barkpark.Tasks.Validation.criteria_violation/1`) and both doors call it,
+  # so the two cannot drift: well-tested duplicate predicates still disagree
+  # eventually, and nothing goes red when they do.
   defp eval_criteria(list, _prev) when is_list(list) do
-    if Enum.all?(list, &is_map/1) do
-      warn_unflagged_merge_gates(list)
-      :ok
-    else
-      {:halt,
-       "acceptance_criteria entries must be {criterion, met, evidence} maps — " <>
-         "got a non-object entry"}
+    case Barkpark.Tasks.Validation.criteria_violation(list) do
+      nil ->
+        warn_unflagged_merge_gates(list)
+        :ok
+
+      message ->
+        {:halt, "acceptance_criteria: " <> message}
     end
   end
 
