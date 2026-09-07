@@ -949,6 +949,8 @@ jobs:
           which-gates scripts/which-gates.sh
           which-gates scripts/which-gates.test.sh
           which-gates scripts/cloud-path-escape-check.sh
+          which-gates cloud/test/barkpark_cloud/payload_key_set_census_test.exs
+          which-gates internal/cloudclient/**
           which-gates scripts/console-path-escape-check.sh
           which-gates scripts/go-path-escape-check.sh
           which-gates .github/workflows/cloud.yml
