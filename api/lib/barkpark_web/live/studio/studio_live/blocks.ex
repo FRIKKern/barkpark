@@ -330,9 +330,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   end
 
   def build_block_patch(%{"type" => "expandable"}, params) do
-    %{}
-    |> put_param(params, "summary", "")
-    |> Map.put("open", parse_bool(params["open"]))
+    patch = put_param(%{}, params, "summary", "")
+
+    if Map.has_key?(params, "open"),
+      do: Map.put(patch, "open", parse_bool(params["open"])),
+      else: patch
   end
 
   def build_block_patch(%{"type" => "bar-chart"} = block, params) do

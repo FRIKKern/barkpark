@@ -5,6 +5,20 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
 
   alias Barkpark.PortableDoc.Render
   alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
+  alias BarkparkWeb.Studio.StudioLive.Blocks
+
+  test "inline summaries patch only text while settings explicitly control default-open" do
+    for open <- [nil, false, true] do
+      block = %{"type" => "expandable", "open" => open}
+
+      assert Blocks.build_block_patch(block, %{"summary" => "Updated"}) == %{
+               "summary" => "Updated"
+             }
+
+      assert Blocks.build_block_patch(block, %{"open" => "false"}) == %{"open" => false}
+      assert Blocks.build_block_patch(block, %{"open" => "true"}) == %{"open" => true}
+    end
+  end
 
   test "paper-links keeps the live reader render visible and its existing form closed contextually" do
     block = %{
@@ -105,6 +119,24 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
     assert html =~ ~s(data-paper-rev="7")
 
     fragment = LazyHTML.from_fragment(html)
+
+    assert fragment
+           |> LazyHTML.query(
+             ~s(details.bp-expandable > summary textarea[name="summary"][form="expandable-summary-form-details"][aria-label="Expandable title"])
+           )
+           |> LazyHTML.text() == "Technical record"
+
+    assert fragment |> LazyHTML.query("summary form, form form") |> Enum.empty?()
+
+    assert fragment
+           |> LazyHTML.query(~s(#expandable-form-details input[name="summary"]))
+           |> Enum.count() == 1
+
+    assert fragment
+           |> LazyHTML.query(
+             ~s(#expandable-form-details input[name="open"][type="hidden"][value="false"])
+           )
+           |> Enum.count() == 1
 
     for disclosure <- LazyHTML.query(fragment, "details") do
       assert [_id] = LazyHTML.attribute(disclosure, "id")
