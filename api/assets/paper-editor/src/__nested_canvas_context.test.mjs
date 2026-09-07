@@ -57,6 +57,26 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 {
   const { dom, window, wrapper, canvas, bridge, pending } = mountCanvas(
+    'data-paper-container-kind="document"',
+  );
+  canvas.blocks = [{ id: "trigger" }, { id: "tail" }];
+  const ops = [{ op: "move-block", id: "new-callout", after: null }];
+  wrapper.dispatchEvent(new window.CustomEvent("bp-canvas-ops", {
+    bubbles: true, detail: { ops, seq: 1 },
+  }));
+  assert.equal(pending.length, 1, "root runs send a bounded document context");
+  assert.equal(pending[0].payload.container_kind, "document");
+  assert.equal(pending[0].payload.container_id, undefined);
+  assert.deepEqual(structuredClone(pending[0].payload.container_run_ids), ["trigger", "tail"]);
+  assert.deepEqual(structuredClone(pending[0].payload.ops), ops);
+  pending[0].resolve({ saved: true, request_id: pending[0].payload.request_id, rev: 8 });
+  await tick();
+  bridge.destroyed();
+  dom.window.close();
+}
+
+{
+  const { dom, window, wrapper, canvas, bridge, pending } = mountCanvas(
     'data-paper-container-id="details-1" data-paper-container-run="2"',
   );
   canvas.blocks = [{ id: "nested-a" }, { id: "nested-b" }];

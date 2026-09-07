@@ -2,7 +2,8 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
   @moduledoc false
 
   @type context ::
-          %{container_id: String.t(), container_run_ids: [String.t()]}
+          %{container_kind: String.t(), container_run_ids: [String.t()]}
+          | %{container_id: String.t(), container_run_ids: [String.t()]}
           | %{
               container_kind: String.t(),
               container_id: String.t(),
@@ -31,8 +32,13 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
          {:ok, row_id, row_present?} <- context_field(context, :container_row_id),
          {:ok, column_index, column_present?} <-
            context_field(context, :container_column_index),
-         true <- valid_base?(container_id, run_ids) do
+         true <- valid_run_ids?(run_ids),
+         true <- nonblank?(container_id) or (kind == "document" and is_nil(container_id)) do
       cond do
+        kind == "document" and is_nil(container_id) and not row_present? and
+            not column_present? ->
+          {:ok, %{container_kind: kind, container_run_ids: run_ids}}
+
         not kind_present? and not row_present? and not column_present? ->
           {:ok, %{container_id: container_id, container_run_ids: run_ids}}
 
@@ -146,6 +152,12 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
       false -> {:error, :invalid_canvas_run_result}
     end
   end
+
+  defp unique_container_run(
+         blocks,
+         %{container_kind: "document"}
+       ),
+       do: {:ok, %{path: [], alias: nil, children: blocks}}
 
   defp unique_container_run(
          blocks,
@@ -492,6 +504,8 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
 
   defp recursive_child_entries(_block), do: []
 
+  defp put_children(_blocks, [], nil, children), do: children
+
   defp put_children(blocks, path, alias_key, children) do
     put_path(blocks, path ++ [alias_key], children)
   end
@@ -635,8 +649,8 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
   defp block_id(block) when is_map(block), do: Map.get(block, "id")
   defp block_id(_block), do: nil
 
-  defp valid_base?(container_id, run_ids) do
-    nonblank?(container_id) and is_list(run_ids) and run_ids != [] and
+  defp valid_run_ids?(run_ids) do
+    is_list(run_ids) and run_ids != [] and
       Enum.all?(run_ids, &nonblank?/1) and Enum.uniq(run_ids) == run_ids
   end
 

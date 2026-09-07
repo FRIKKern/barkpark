@@ -2462,6 +2462,15 @@
           const validIds = runIds.length > 0 && runIds.every((id) =>
             typeof id === "string" && id.trim() !== ""
           ) && new Set(runIds).size === runIds.length;
+          // A top-level canvas is still only one run of the document. Fold
+          // head moves and appends inside that run, not across sibling widgets.
+          if (containerKind === "document" && !hasContainerId && !hasLegacyRunMarker &&
+              !hasContainerRowId && !hasContainerColumnIndex && validIds) {
+            return { wire: Object.freeze({
+              container_kind: "document",
+              container_run_ids: Object.freeze([...runIds]),
+            }), invalid: false };
+          }
           if (!containerId?.trim() || !validIds) {
             return { wire: {}, invalid: true };
           }

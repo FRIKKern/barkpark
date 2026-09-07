@@ -203,6 +203,9 @@ class BpPaperEditor extends HTMLElement {
         StarterKit.configure({
           // Single-block editing: heading levels 1–3, lists, history on.
           heading: { levels: [1, 2, 3] },
+          // PortableDoc quotes use their own inline carrier. The native nested
+          // quote cannot round-trip and consumes `> ` before callout shorthand.
+          blockquote: false,
           // Marks/nodes left enabled by StarterKit: paragraph, bold, italic,
           // strike, code, bulletList, orderedList, listItem, history.
         }),
