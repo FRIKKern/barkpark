@@ -45,6 +45,8 @@ defmodule Barkpark.Media.Delivery do
 
   # ── media-lifecycle webhooks (Events) ─────────────────────────────────────
 
-  def dispatch(dataset, event, file, doc \\ nil), do: Events.dispatch(dataset, event, file, doc)
-  defdelegate build_payload(event, dataset, file, doc), to: Events
+  def dispatch(dataset, event, file, doc \\ nil, override \\ nil),
+    do: Events.dispatch(dataset, event, file, doc, override)
+
+  defdelegate build_payload(event, dataset, file, doc, override \\ nil), to: Events
 end

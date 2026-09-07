@@ -29,11 +29,16 @@ defmodule Barkpark.Media.Delivery.Events do
   alias Barkpark.Webhooks
   alias Barkpark.Webhooks.{Dispatcher, Webhook}
 
-  @doc "Dispatch a media lifecycle event to configured webhook endpoints."
-  @spec dispatch(String.t(), String.t(), struct(), struct() | nil) :: :ok
-  def dispatch(dataset, event, file, doc \\ nil)
+  @doc """
+  Dispatch a media lifecycle event to configured webhook endpoints.
+
+  `override` is the where-used OVERRIDE WITNESS (task-303e3b171435d767) and is
+  `nil` for every event but a forced `media.deleted`. See `build_payload/5`.
+  """
+  @spec dispatch(String.t(), String.t(), struct(), struct() | nil, map() | nil) :: :ok
+  def dispatch(dataset, event, file, doc \\ nil, override \\ nil)
       when is_binary(dataset) and is_binary(event) do
-    body = Jason.encode!(build_payload(event, dataset, file, doc))
+    body = Jason.encode!(build_payload(event, dataset, file, doc, override))
 
     # Bounded fan-out: one outer supervised Task keeps the caller non-blocking;
     # inside it, async_stream_nolink on the dedicated WebhookDeliverySupervisor
@@ -64,9 +69,22 @@ defmodule Barkpark.Media.Delivery.Events do
     Application.get_env(:barkpark, :webhook_delivery_concurrency, 100)
   end
 
-  @doc "Build webhook payload map."
-  @spec build_payload(String.t(), String.t(), struct(), struct() | nil) :: map()
-  def build_payload(event, dataset, file, doc) do
+  @doc """
+  Build webhook payload map.
+
+  `override` carries the where-used census the DOOR computed before it called
+  `Media.delete_file/2` on a `?force=true` delete (`WhereUsed.witness_forced_delete/2`
+  returns `%{forced: true, referencedByCount: n}`). It is threaded down rather
+  than re-derived: the census is a PRE-delete fact, and a scan run from here —
+  after the row and its asset doc are gone — would answer a different question.
+
+  Absent it, the payload is byte-for-byte what it has always been. The webhook
+  serves a consumer that was not present for the request and cannot read the
+  box's logs (a link-graph rebuilder, a reindexer, a downstream cache), so a
+  contested delete used to be indistinguishable from an uncontested one.
+  """
+  @spec build_payload(String.t(), String.t(), struct(), struct() | nil, map() | nil) :: map()
+  def build_payload(event, dataset, file, doc, override \\ nil) do
     # Scope the sync-tags to the file's workspace/project so tenancy-correct
     # cache revalidation fires (mirrors dispatcher.ex build_payload). The legacy
     # `bp:ds:*` tags are retained for back-compat. resolve_scope_slugs handles
@@ -92,7 +110,27 @@ defmodule Barkpark.Media.Delivery.Events do
       ],
       timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
     }
+    |> put_override_witness(override)
   end
+
+  # ADDITIVE, and only on the forced path. An unforced delete's payload keeps
+  # exactly the keys it had, so a consumer that branches on the existing shape
+  # (or validates it strictly) is untouched, and `forced` is a positive signal
+  # rather than a field that is always there and usually false.
+  #
+  # The two keys are listed EXPLICITLY rather than merged wholesale: the witness
+  # map is an internal return value, and a third field added to it later must
+  # not join a PUBLISHED wire contract without somebody deciding to publish it.
+  #
+  # `referencedByCount` is camelCase against this payload's snake_case because
+  # it is the SAME field name the 200 receipt already ships for the same census
+  # (`WhereUsed.witness_forced_delete/2`); one census, one spelling, everywhere
+  # an operator might compare the two.
+  defp put_override_witness(payload, %{forced: true, referencedByCount: count}) do
+    Map.merge(payload, %{forced: true, referencedByCount: count})
+  end
+
+  defp put_override_witness(payload, _override), do: payload
 
   defp endpoints(dataset, event) do
     Application.get_env(:barkpark, :media_webhooks, [])
