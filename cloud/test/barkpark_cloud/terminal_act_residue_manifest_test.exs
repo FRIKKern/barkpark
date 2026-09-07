@@ -897,17 +897,23 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
   ## ── ROW 8: the OTHER destructive verb, for contrast ──────────────────────
 
   test "ROW 8 — an immediate billing cancel DESTROYS the entitlement and leaves EVERY box and child standing" do
-    {_user, team, token} = logged_in()
+    {_user, team, _token} = logged_in()
     {:ok, _sub} = Billing.subscribe(team, "supporter")
     bp = barkpark_fixture(team, %{name: "Kept", host: "10.0.0.2"})
     :ok = seed_children!(bp)
 
-    conn = call(:post, "/v1/billing/cancel", %{password: @password, at_period_end: false}, token)
-    assert conn.status == 200
+    # DRIVEN AT THE CONTEXT, NOT THE ROUTE. Until task-527f2a101b99ebf9 (ruled
+    # 2026-09-07) this row POSTed `at_period_end: false` to /v1/billing/cancel;
+    # that arm is REMOVED and the route now answers 422 to it. The residue this
+    # row registers is a property of the ACT — `request_cancel(team, false)` →
+    # `cancel_subscription/1` — and the act still exists, so the row moves down
+    # one layer rather than disappearing. The route's own refusal is pinned in
+    # web/router_billing_cancel_immediate_refused_test.exs.
+    assert {:ok, sub} = Billing.request_cancel(team, false)
 
     # DESTROYED: nothing that is a row. The subscription's status changed, which
     # is the whole act.
-    assert json_body(conn)["status"] == "canceled"
+    assert sub.status == "canceled"
 
     # SURVIVES: the box, its host, and all five children. A verb the console calls
     # a cancellation leaves every billable artefact exactly where it was; the
@@ -919,13 +925,14 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
            "an immediate cancel no longer suspends the team's boxes — this row's SURVIVES cell " <>
              "must be re-derived"
 
-    # TOLD: the audit trail, exactly once.
-    assert [ev] =
+    # TOLD: nothing. The audit row is written by the ROUTE's `Accounts.audit/3`
+    # wrapper, not by the context call this row now drives — so the honest cell
+    # here is EMPTY, and asserting it is empty is what stops this row quietly
+    # claiming a trail it no longer produces.
+    assert [] =
              team
              |> Accounts.list_audit_events()
              |> Enum.filter(&(&1.action == "subscription.canceled"))
-
-    assert ev.target_type == "subscription"
   end
 
   # RESIDUE-ROWS-END
