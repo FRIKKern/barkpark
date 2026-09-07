@@ -68,9 +68,11 @@ bp task claim t1 agent-1      # <doc_id> <worker_id>
 bp task release t1 agent-1 1  # <doc_id> <worker> <epoch>
 
 # Mid-claim: stamp a criterion — met, honestly missed, or WITHDRAWN (--criterion N is ZERO-based: 0 = the first)
-bp task stamp t1 agent-1 1 --criterion 0 --criterion-text "gate passes" --met --evidence "gate green"
-bp task stamp t1 agent-1 1 --criterion 1 --miss --note "flaky under sandbox"
-bp task stamp t1 agent-1 1 --criterion 0 --criterion-text "gate passes" --withdraw --note "review: the gate ran on the wrong branch"
+# Read the wording from a FILE (`-` = stdin) — a double-quoted `code span` is COMMAND SUBSTITUTION
+bp task get t1 -o json | jq -r '.doc.content.acceptance_criteria[0].criterion' > crit.txt
+bp task stamp t1 agent-1 1 --criterion 0 --criterion-text-file crit.txt --met --evidence "gate green"
+bp task stamp t1 agent-1 1 --criterion 1 --miss --note "flaky"
+bp task stamp t1 agent-1 1 --criterion 0 --criterion-text-file crit.txt --withdraw --note "wrong branch"
 
 # ... pulse the now-line as you work (renews the lease)
 bp task pulse t1 agent-1 --now "warm-up pinned, rerunning" --criterion 2
@@ -85,9 +87,7 @@ bp task close t1 agent-1 1 --set 'criteria:=[{"index":0,"met":true,"evidence":"P
 bp task landed t1 --commit a1b2c3d --pr 123 --note "merged to main" --criterion 6
 ```
 
-**Withdrawing a proof.** `--withdraw` is the only verb that LOWERS a met flag —
-review usually refutes a proof *after* the close. It sets `met: false`, leaves
-the original evidence where it was, and appends a signed withdrawal record; a bare `met:true → met:false` patch is refused everywhere.
+**Withdrawing a proof.** `--withdraw` is the only verb that LOWERS a met flag (review refutes a proof *after* the close): `met: false`, the evidence left in place, a signed record appended. A bare `met:true → met:false` patch is refused everywhere.
 
 **Lease + epoch.** A claim is a **45 min** lease (`:task_lease_ttl_seconds`, 2700 s) that `claim`/`next`/`pulse` print. Every pulse renews it **and** bumps `claim.epoch` — pass the pulse's epoch, not the claim's, to `stamp`/`close`.
 
