@@ -51,27 +51,30 @@ import "sort"
 // so the case that is currently CORRECT (floor scope, flat route) keeps its
 // byte-identical behaviour and only the case that is currently WRONG changes.
 
-// THE DATASET ARM, DECIDED. -d/--dataset is dropped by the same
-// fillTemplate/resolvePlaceholder mechanism on the majority of the command
-// surface, and StatedScope deliberately covers -w/-p ONLY. There is no
-// DatasetExplicit, no dataset entry in scopeDispositions, and no dataset arm in
-// refuseUnrepresentableScope — that is a decision, not an oversight:
+// THE DATASET ARM, BUILT — see dataset_scope.go. This file's rules cover -w/-p
+// ONLY, and that is still true: there is no DatasetTyped read here, no dataset
+// entry in scopeDispositions, and no dataset arm in refuseUnrepresentableScope's
+// -w/-p block. The dataset axis got its OWN file, its own four-way fate, and its
+// own per-noun disposition table, because two of the three rules differ:
 //
-//   1. The failure MODE is different. A dropped -w answers about ANOTHER
-//      TENANT: the cross-workspace read that this whole file exists to stop. A
-//      dropped -d answers about another dataset INSIDE the workspace you already
-//      named — wrong, but not a tenancy breach, and the fix (name the dataset in
-//      the route) is a server-side route question, not a client refusal.
-//   2. Refusing it needs a per-noun disposition table the -w/-p arm took a live
-//      manifest sweep to write, and shipping a refusal without one fails CLOSED
-//      across the whole surface — the exact brick this row was filed to prevent.
-//   3. It is not this row's defect. This row is about the PROVENANCE of an
-//      injected scope, and that half IS covered for the dataset:
-//      AttributeServerEntry marks DatasetFromServerEntry, so whoever does build
-//      the dataset arm inherits an honest signal instead of re-opening this door.
+//  1. There is no dataset MIRROR to route to. Every scoped_prefix the live
+//     manifest advertises is "/w/:workspace_slug/p/:project_slug" — no dataset
+//     segment anywhere — so ScopeMirrored has no dataset counterpart, and
+//     dataset_scope_test.go DERIVES that from the fixture rather than asserting
+//     it by hand.
+//  2. The arming provenance is NARROWER. StatedScope reads WorkspaceExplicit,
+//     which any layer above Defaults sets. StatedDataset reads DatasetTyped,
+//     which only a flag-precedence value sets, because an ambient
+//     BARKPARK_DATASET / .barkpark.json / saved-config dataset is a standing
+//     preference rather than a claim about this invocation — and refusing on it
+//     would brick every developer with a non-production default. See the
+//     DatasetTyped comment in context.go.
 //
-// So: the remedy in this file does NOT cover -d, on purpose, and the ground is
-// prepared for the follow-up that will.
+// What is UNCHANGED is the severity ordering this block originally recorded: a
+// dropped -w answers about another TENANT, a dropped -d about another dataset
+// INSIDE the workspace you already named. That is why -w/-p shipped first and
+// why refuseUnrepresentableScope still reports the -w/-p refusal ahead of the
+// dataset one when both apply.
 
 // ScopeFate is what happens to an operator-stated -w/-p on one command.
 type ScopeFate int
