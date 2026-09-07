@@ -139,7 +139,7 @@ func taskGetEnvelopeHelpLines() []string {
 		"machine-readable output: -o json (or -o yaml). The envelope is {\"ok\":…, \"doc\":{…}}.",
 		"",
 		"where things live in -o json:",
-		"  the claim              .doc.claim              (.epoch, .worker, .ts_iso) — NOT .doc.content.claim",
+		"  the claim               .doc.claim  (.epoch, .worker, .ts_iso) — NOT .doc.content.claim",
 		"  the acceptance criteria .doc.content.acceptance_criteria[]  entries keyed `criterion` (NOT `text`), plus `met` and `evidence`",
 		"  the description         .doc.content.description",
 		"  progress                .doc.criteria_progress  {met,total}",
