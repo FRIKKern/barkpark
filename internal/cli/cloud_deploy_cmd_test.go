@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+
+	"github.com/FRIKKern/barkpark/internal/cloudclient"
 	"os"
 	"strings"
 	"testing"
@@ -60,12 +62,21 @@ func stubDeployScript(t *testing.T, path, content string) {
 	t.Cleanup(func() { readDeployScript = prev })
 }
 
-// stubResolveStagingHost swaps resolveStagingHost for a fixed answer.
+// stubResolveStagingHost swaps resolveStagingHost for a fixed self-hosted answer
+// (mode "" — an unknown mode is self-hosted, so every pre-existing caller keeps
+// asserting the ssh path).
 func stubResolveStagingHost(t *testing.T, host, url string, found bool, err error) {
 	t.Helper()
+	stubResolveStagingRow(t, deployFleetRow{Host: host, URL: url}, found, err)
+}
+
+// stubResolveStagingRow swaps resolveStagingHost for a whole fixed fleet row, so
+// a test can name the ID and MODE the managed fork keys on.
+func stubResolveStagingRow(t *testing.T, row deployFleetRow, found bool, err error) {
+	t.Helper()
 	prev := resolveStagingHost
-	resolveStagingHost = func(cfg *Config, target string) (string, string, bool, error) {
-		return host, url, found, err
+	resolveStagingHost = func(cfg *Config, target string) (deployFleetRow, bool, error) {
+		return row, found, err
 	}
 	t.Cleanup(func() { resolveStagingHost = prev })
 }
@@ -793,5 +804,338 @@ func TestUseNonStagingUnaffected(t *testing.T) {
 	got, _ := LoadConfig()
 	if got.Server != "https://api.barkpark.cloud" {
 		t.Errorf("did not switch to prod: %q", got.Server)
+	}
+}
+
+// --- the managed path: deploy WITHOUT an operator SSH key -------------------
+//
+// The invariant under test is not "a different code path runs" — it is that a
+// managed deploy touches NO ssh seam at all. Every test here asserts BOTH
+// directions on the same run: the relay was called with the row's instance id,
+// AND the feeder / local-script reader were never reached (an operator with no
+// warm-pool key is exactly the person for whom "we also tried ssh" is fatal).
+
+// relayCall is one recorded managedDeployTrigger invocation.
+type relayCall struct {
+	calls int
+	id    string
+}
+
+// stubManagedTrigger swaps the control-plane relay for a canned verdict and
+// records what it was asked to update.
+func stubManagedTrigger(t *testing.T, status string, err error) *relayCall {
+	t.Helper()
+	rec := &relayCall{}
+	prev := managedDeployTrigger
+	managedDeployTrigger = func(cfg *Config, id string) (cloudclient.SelfUpdateResult, error) {
+		rec.calls++
+		rec.id = id
+		if err != nil {
+			return cloudclient.SelfUpdateResult{}, err
+		}
+		s := status
+		return cloudclient.SelfUpdateResult{Raw: []byte(`{"ok":true,"status":"` + s + `"}`), Status: &s}, nil
+	}
+	t.Cleanup(func() { managedDeployTrigger = prev })
+	return rec
+}
+
+// stubManagedBudget shrinks the managed poll budget so a pending run is reached
+// in milliseconds instead of ten minutes.
+func stubManagedBudget(t *testing.T, tries int) {
+	t.Helper()
+	pt, pw := managedDeployReadbackTries, managedDeployReadbackWait
+	managedDeployReadbackTries, managedDeployReadbackWait = tries, time.Millisecond
+	t.Cleanup(func() { managedDeployReadbackTries, managedDeployReadbackWait = pt, pw })
+}
+
+// stubReadDeployScriptCounter records whether the LOCAL deploy script was read
+// at all — the managed path must never open it.
+func stubReadDeployScriptCounter(t *testing.T) *int {
+	t.Helper()
+	calls := 0
+	prev := readDeployScript
+	readDeployScript = func() (string, string, error) {
+		calls++
+		return "deploy/instance-deploy.sh", "#!/usr/bin/env bash\n", nil
+	}
+	t.Cleanup(func() { readDeployScript = prev })
+	return &calls
+}
+
+// managedRow is the fleet row for a box Barkpark Cloud provisioned.
+func managedRow() deployFleetRow {
+	return deployFleetRow{Host: "5.6.7.8", URL: "https://gyl.barkpark.cloud", ID: "bp_123", Mode: "managed"}
+}
+
+// TestRunCloudDeployManagedGoesThroughTheControlPlane is criterion C0: a managed
+// box deploys via POST /v1/barkparks/:id/self-update and NO operator SSH key is
+// used — the feeder is never constructed and the local script is never read.
+func TestRunCloudDeployManagedGoesThroughTheControlPlane(t *testing.T) {
+	withTempConfigHome(t)
+	stubResolveStagingRow(t, managedRow(), true, nil)
+	rec := stubDeployFeeder(t)
+	scriptReads := stubReadDeployScriptCounter(t)
+	relay := stubManagedTrigger(t, "updating", nil)
+	stubDeploySleep(t)
+	stubManagedBudget(t, 3)
+	stubDeployLsRemote(t, readbackSha+"\trefs/heads/main\n", nil)
+	stubDeployStatus(t,
+		statusReply{code: 200, body: statusBody("1111111111")}, // before
+		statusReply{code: 200, body: statusBody(readbackSha[:9])},
+	)
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	code := runCloudDeploy(w, globals{}, []string{"gyl"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d\n%s\n%s", code, exitOK, stdout.String(), stderr.String())
+	}
+	if relay.calls != 1 || relay.id != "bp_123" {
+		t.Fatalf("relay calls=%d id=%q, want 1 call on bp_123", relay.calls, relay.id)
+	}
+	if rec.calls != 0 {
+		t.Errorf("the ssh feeder ran %d times on a MANAGED box — the whole point is that no operator key is needed", rec.calls)
+	}
+	if *scriptReads != 0 {
+		t.Errorf("the local deploy script was read %d times on a MANAGED box", *scriptReads)
+	}
+	out := stdout.String()
+	// C2: the read-back is the existing one — it names the sha the box now serves
+	// and what it advanced from.
+	for _, want := range []string{"control plane", "ADVANCED", readbackSha[:9], "1111111111"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("managed deploy output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestRunCloudDeploySelfHostedStillUsesTheKeyPath is criterion C1: every mode
+// that is not exactly "managed" keeps the ssh path — including the empty mode an
+// older control plane sends, which must fail SAFE (toward ssh), not toward a
+// relay the plane may hold no admin token for.
+func TestRunCloudDeploySelfHostedStillUsesTheKeyPath(t *testing.T) {
+	for _, mode := range []string{"", "self_hosted", "byo", "Managed"} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			withTempConfigHome(t)
+			row := managedRow()
+			row.Mode = mode
+			stubResolveStagingRow(t, row, true, nil)
+			rec := stubDeployFeeder(t)
+			relay := stubManagedTrigger(t, "updating", nil)
+			stubDeployScript(t, "deploy/instance-deploy.sh", "#!/usr/bin/env bash\n")
+			stubDeploySleep(t)
+			stubDeployLsRemote(t, readbackSha+"\trefs/heads/main\n", nil)
+			stubDeployStatus(t,
+				statusReply{code: 200, body: statusBody("1111111111")},
+				statusReply{code: 200, body: statusBody(readbackSha[:9])},
+			)
+
+			var stdout, stderr bytes.Buffer
+			w := newWriter(&stdout, &stderr)
+			w.output = "table"
+			if code := runCloudDeploy(w, globals{}, []string{"gyl"}); code != exitOK {
+				t.Fatalf("exit = %d, want %d\n%s", code, exitOK, stderr.String())
+			}
+			if rec.calls != 1 {
+				t.Errorf("mode %q: ssh feeder ran %d times, want 1 — the self-hosted path must be unchanged", mode, rec.calls)
+			}
+			if relay.calls != 0 {
+				t.Errorf("mode %q: the control-plane relay ran %d times on a box that is not managed", mode, relay.calls)
+			}
+			if !strings.Contains(rec.remoteScript, `bash "$tmp"`) {
+				t.Errorf("mode %q: the remote invocation is not the ssh one:\n%s", mode, rec.remoteScript)
+			}
+		})
+	}
+}
+
+// TestRunCloudDeployHostFlagKeepsSSHOnAManagedBox: --host is the deliberate
+// escape hatch, and it is decided BEFORE the fleet is consulted, so it must take
+// the ssh path even on a managed row.
+func TestRunCloudDeployHostFlagKeepsSSHOnAManagedBox(t *testing.T) {
+	withTempConfigHome(t)
+	stubResolveStagingRow(t, managedRow(), true, nil)
+	rec := stubDeployFeeder(t)
+	relay := stubManagedTrigger(t, "updating", nil)
+	stubDeployScript(t, "deploy/instance-deploy.sh", "#!/usr/bin/env bash\n")
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	if code := runCloudDeploy(w, globals{}, []string{"gyl", "--host", "1.2.3.4"}); code != exitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, exitOK, stderr.String())
+	}
+	if rec.calls != 1 || rec.host != "1.2.3.4" {
+		t.Errorf("--host on a managed box: feeder calls=%d host=%q, want 1 on 1.2.3.4", rec.calls, rec.host)
+	}
+	if relay.calls != 0 {
+		t.Errorf("--host on a managed box reached the relay %d times", relay.calls)
+	}
+}
+
+// TestRunCloudDeployManagedRefusesWhatTheRelayCannotCarry: the relay runs the
+// box's own self-update, which fast-forwards to origin/main — it carries no ref
+// and no argv. Asking for another ref (or --clean) is REFUSED with the --host
+// door named, never downgraded to "we deployed main instead", and NOTHING is
+// sent on either seam.
+func TestRunCloudDeployManagedRefusesWhatTheRelayCannotCarry(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"branch", []string{"gyl", "--branch", "feature-x"}, "feature-x"},
+		{"pr", []string{"gyl", "--pr", "42"}, "pull/42/head"},
+		{"clean", []string{"gyl", "--clean"}, "--clean"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			withTempConfigHome(t)
+			stubResolveStagingRow(t, managedRow(), true, nil)
+			rec := stubDeployFeeder(t)
+			relay := stubManagedTrigger(t, "updating", nil)
+			scriptReads := stubReadDeployScriptCounter(t)
+
+			var stdout, stderr bytes.Buffer
+			w := newWriter(&stdout, &stderr)
+			w.output = "table"
+			if code := runCloudDeploy(w, globals{}, c.args); code != exitUsage {
+				t.Fatalf("exit = %d, want %d (usage)\n%s", code, exitUsage, stderr.String())
+			}
+			msg := stderr.String()
+			for _, want := range []string{c.want, "--host"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("refusal missing %q:\n%s", want, msg)
+				}
+			}
+			if relay.calls != 0 || rec.calls != 0 || *scriptReads != 0 {
+				t.Errorf("a refused managed deploy still acted: relay=%d ssh=%d scriptReads=%d", relay.calls, rec.calls, *scriptReads)
+			}
+		})
+	}
+}
+
+// TestRunCloudDeployManagedRelayRefusalKeepsTheServerVocabulary: a refusal is
+// the CONTROL PLANE's, rendered by the same selfUpdateFail ladder `bp cloud
+// update` uses — one box must not be described two ways by two verbs.
+func TestRunCloudDeployManagedRelayRefusalKeepsTheServerVocabulary(t *testing.T) {
+	withTempConfigHome(t)
+	stubResolveStagingRow(t, managedRow(), true, nil)
+	rec := stubDeployFeeder(t)
+	// The expectation + BEFORE reads run before the trigger, so they are stubbed
+	// here too — a unit test must never reach a real box or a real remote.
+	stubDeployLsRemote(t, readbackSha+"\trefs/heads/main\n", nil)
+	stubDeployStatus(t, statusReply{code: 200, body: statusBody("1111111111")})
+	stubManagedTrigger(t, "", &cloudclient.SelfUpdateError{
+		HTTPStatus: 409, Code: "pinned", PinnedRelease: "v0.0.91",
+	})
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	code := runCloudDeploy(w, globals{}, []string{"gyl"})
+	if code == exitOK {
+		t.Fatalf("a refused relay exited 0:\n%s", stdout.String())
+	}
+	msg := stderr.String()
+	for _, want := range []string{"pinned", "v0.0.91", "Nothing was started"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("refusal sentence missing %q:\n%s", want, msg)
+		}
+	}
+	if rec.calls != 0 {
+		t.Error("a refused relay fell back to ssh — the operator-key path must never be a retry for a managed box")
+	}
+}
+
+// TestRunCloudDeployManagedDryRunSendsNothing: --dry-run on a managed box prints
+// the RELAY plan (not an ssh plan that will not happen) and touches neither seam.
+func TestRunCloudDeployManagedDryRunSendsNothing(t *testing.T) {
+	withTempConfigHome(t)
+	stubResolveStagingRow(t, managedRow(), true, nil)
+	rec := stubDeployFeeder(t)
+	relay := stubManagedTrigger(t, "updating", nil)
+	statusCalls := stubDeployStatus(t, statusReply{code: 200, body: statusBody(readbackSha)})
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	if code := runCloudDeploy(w, globals{dryRun: true}, []string{"gyl"}); code != exitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, exitOK, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"dry-run", "managed", "/v1/barkparks/bp_123/self-update", "gyl.barkpark.cloud"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("managed dry-run missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, `bash "$tmp"`) {
+		t.Errorf("managed dry-run printed the SSH remote invocation:\n%s", out)
+	}
+	if relay.calls != 0 || rec.calls != 0 || *statusCalls != 0 {
+		t.Errorf("dry-run acted: relay=%d ssh=%d status=%d", relay.calls, rec.calls, *statusCalls)
+	}
+}
+
+// TestPerformManagedDeployReadbackPendingIsNotAStall is the honesty axis the
+// async relay forces: an unmoved box at the end of the budget is PENDING, not
+// STALL. The ssh path earns "stall" because ssh blocks until the script exits;
+// nothing here observed a finished run.
+func TestPerformManagedDeployReadbackPendingIsNotAStall(t *testing.T) {
+	stubDeploySleep(t)
+	stubManagedBudget(t, 4)
+	calls := stubDeployStatus(t, statusReply{code: 200, body: statusBody("1111111111")})
+
+	rb := performManagedDeployReadback("gyl.barkpark.cloud", readbackSha, "", deployCommitRead{commit: "1111111111"})
+	if rb.outcome != deployPending {
+		t.Fatalf("outcome = %q, want %q", rb.outcome, deployPending)
+	}
+	if *calls != 4 {
+		t.Errorf("polled %d times, want the whole budget (4)", *calls)
+	}
+	line := rb.line("gyl", "gyl.barkpark.cloud")
+	for _, want := range []string{"NOT a proof it advanced", "NOT a proof it failed", "bp cloud status"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("pending line missing %q:\n%s", want, line)
+		}
+	}
+	if strings.Contains(line, "STALL") {
+		t.Errorf("a pending managed run was reported as a STALL:\n%s", line)
+	}
+}
+
+// TestPerformManagedDeployReadbackRidesOutTheRestartWindow: the blue/green flip
+// this very run performs makes the box briefly unreadable, so an unreachable
+// read must be RETRIED, not declared UNPERFORMABLE on the first miss.
+func TestPerformManagedDeployReadbackRidesOutTheRestartWindow(t *testing.T) {
+	stubDeploySleep(t)
+	stubManagedBudget(t, 5)
+	stubDeployStatus(t,
+		statusReply{code: 0, err: errors.New("connection refused")},
+		statusReply{code: 502, body: "bad gateway"},
+		statusReply{code: 200, body: statusBody(readbackSha[:9])},
+	)
+
+	rb := performManagedDeployReadback("gyl.barkpark.cloud", readbackSha, "", deployCommitRead{commit: "1111111111"})
+	if rb.outcome != deployAdvanced {
+		t.Fatalf("outcome = %q, want %q (a restart window is not an unperformable read-back)", rb.outcome, deployAdvanced)
+	}
+}
+
+// TestPerformManagedDeployReadbackTerminatesOnAnUnresolvableExpectation: with no
+// expected sha there is nothing to poll toward, so the budget is not burned.
+func TestPerformManagedDeployReadbackTerminatesOnAnUnresolvableExpectation(t *testing.T) {
+	stubDeploySleep(t)
+	stubManagedBudget(t, 40)
+	calls := stubDeployStatus(t, statusReply{code: 200, body: statusBody("1111111111")})
+
+	rb := performManagedDeployReadback("gyl.barkpark.cloud", "", "origin has no refs/heads/main", deployCommitRead{commit: "1111111111"})
+	if rb.outcome != deployUnperformable {
+		t.Fatalf("outcome = %q, want %q", rb.outcome, deployUnperformable)
+	}
+	if *calls != 1 {
+		t.Errorf("polled %d times against an unresolvable expectation, want 1", *calls)
 	}
 }

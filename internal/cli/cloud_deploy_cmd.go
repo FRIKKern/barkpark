@@ -6,6 +6,23 @@ package cli
 // thin driver over the SAME blue/green mechanics `deploy/instance-deploy.sh`
 // already carries — it does NOT invent a second deploy system:
 //
+// THE MANAGED FORK (mcd-w20). A box the control plane PROVISIONED (fleet
+// `mode == "managed"`) is no longer deployed from the operator's laptop at all:
+// there is a server-side relay that needs no operator SSH key
+// (POST /v1/barkparks/:id/self-update → Registry.trigger_self_update/2 →
+// the box's own /v1/admin/self-update, with the plane's STORED admin token), and
+// `bp cloud update` already drives it. `bp cloud deploy <managed-box>` now routes
+// through that relay instead of streaming a script over ~/.ssh — the change that
+// unblocks a team admin with full rights and no warm-pool key. The relay's ONE
+// limitation is honest and enforced up front: it runs the box's own self-update,
+// which fast-forwards to origin/<BARKPARK_UPSTREAM_BRANCH> (main by default) and
+// rebuilds (scripts/self-update.sh) — it cannot carry an arbitrary ref — so
+// --branch/--pr/--clean against a managed box are REFUSED with the --host escape
+// named, never silently downgraded to "we deployed main instead".
+//
+// Everything below is the SELF-HOSTED path, unchanged, and it is also what
+// --host takes on any box:
+//
 //   - it resolves the target's SSH host (— --host wins; else the control-plane
 //     fleet row's Barkpark.Host when logged in; else BARKPARK_STAGING_HOST; else a
 //     clear error),
@@ -41,6 +58,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
+	"github.com/FRIKKern/barkpark/internal/cloudclient"
 )
 
 // deployRemoteAppDir is the on-box checkout instance-deploy.sh operates on — the
@@ -63,32 +81,53 @@ type deployFeeder interface {
 // unit tests swap in a recorder — the freshen/EnsureFresh seam idiom.
 var newDeployFeeder = func(host string) deployFeeder { return cloud.NewSSHStepRunner(host) }
 
+// deployFleetRow is everything `bp cloud deploy` needs off the control-plane
+// fleet row: Host/URL drive host resolution exactly as before, and ID + Mode
+// decide WHICH deploy path runs at all. Mode is carried on the fleet lookup the
+// command already performs (cloudclient.Barkpark.Mode), so the managed fork costs
+// no extra round-trip.
+//
+// AN UNKNOWN MODE IS SELF-HOSTED. Only the literal "managed" takes the relay: an
+// older control plane that omits the key decodes to "", and the modes "byo" /
+// "self_hosted" are boxes the plane did not provision and holds no admin token
+// for. Every one of those keeps the ssh path byte-for-byte — the fail-safe
+// direction, because a wrong guess toward the relay is a deploy that cannot run.
+type deployFleetRow struct {
+	Host string
+	URL  string
+	ID   string
+	Mode string
+}
+
+// deployModeManaged is the ONE fleet mode that routes through the control plane.
+const deployModeManaged = "managed"
+
 // resolveStagingHost looks the target up in the user's fleet (needs `bp login`)
-// and returns its SSH host + public URL. A package var so tests inject a fake
-// fleet without an httptest server. A logged-OUT user (or a target not in the
-// fleet) returns found=false with no error, so host resolution falls through to
+// and returns its row. A package var so tests inject a fake fleet without an
+// httptest server. A logged-OUT user (or a target not in the fleet) returns
+// found=false with no error, so host resolution falls through to
 // BARKPARK_STAGING_HOST; only a real control-plane failure returns an error.
-var resolveStagingHost = func(cfg *Config, target string) (host, url string, found bool, err error) {
+var resolveStagingHost = func(cfg *Config, target string) (row deployFleetRow, found bool, err error) {
 	if cfg == nil || !cfg.HasCloudToken() {
-		return "", "", false, nil
+		return deployFleetRow{}, false, nil
 	}
 	list, lerr := cfg.CloudClient().ListBarkparks(cloudCtx())
 	if lerr != nil {
-		return "", "", false, lerr
+		return deployFleetRow{}, false, lerr
 	}
 	// Exact id/slug/name first (an exact hit must never lose to a case-folded one),
 	// then a case-insensitive name pass — the resolveOpenBarkparkID rule.
 	for _, b := range list {
 		if b.ID == target || b.Slug == target || b.Name == target {
-			return b.Host, b.URL, true, nil
+			return deployFleetRow{Host: b.Host, URL: b.URL, ID: b.ID, Mode: b.Mode}, true, nil
 		}
 	}
 	for _, b := range list {
 		if strings.EqualFold(b.Name, target) {
-			return b.Host, b.URL, true, nil
+			return deployFleetRow{Host: b.Host, URL: b.URL, ID: b.ID, Mode: b.Mode}, true, nil
 		}
 	}
-	return "", "", false, nil
+	return deployFleetRow{}, false, nil
 }
 
 // readDeployScript locates + reads the LOCAL deploy/instance-deploy.sh. A package
@@ -179,19 +218,28 @@ func runCloudDeploy(out *writer, g globals, args []string) int {
 	// fleet lookup runs (a no-op when logged out). A control-plane FAILURE is
 	// surfaced — but a plain miss falls through to the env knob below.
 	hostFlag := strings.TrimSpace(a.val("host"))
-	var cpHost, cpURL string
+	var cpRow deployFleetRow
 	var cpFound bool
 	if hostFlag == "" {
 		var lerr error
-		cpHost, cpURL, cpFound, lerr = resolveStagingHost(cfg, target)
+		cpRow, cpFound, lerr = resolveStagingHost(cfg, target)
 		if lerr != nil {
 			return cloudFail(out, "resolve deploy target", lerr)
 		}
 	}
 	envHost := strings.TrimSpace(os.Getenv("BARKPARK_STAGING_HOST"))
-	host, healthHost, via, herr := resolveDeployHost(target, hostFlag, envHost, cpHost, cpURL, cpFound)
+	host, healthHost, via, herr := resolveDeployHost(target, hostFlag, envHost, cpRow.Host, cpRow.URL, cpFound)
 	if herr != nil {
 		return useError(out, "usage", herr.Error(), exitUsage)
+	}
+
+	// THE MANAGED FORK. `via == "control-plane"` already means --host was absent
+	// AND the fleet row was found, so this is exactly "a box Barkpark Cloud
+	// provisioned, addressed by its fleet name" — the case that must not need an
+	// operator SSH key. An explicit --host is the deliberate escape hatch and
+	// never reaches here, so the ssh path stays reachable for every box.
+	if via == "control-plane" && strings.TrimSpace(cpRow.Mode) == deployModeManaged {
+		return runManagedDeploy(out, cfg, target, cpRow, ref, healthHost, clean, dryRun)
 	}
 
 	remoteScript := buildDeployRemoteScript(ref, "origin", healthHost, clean)
@@ -254,6 +302,157 @@ func runCloudDeploy(out *writer, g globals, args []string) int {
 	return exitOK
 }
 
+// ─── the managed path: deploy WITHOUT an operator SSH key ───────────────────
+//
+// A managed box is one Barkpark Cloud provisioned, and the plane holds an admin
+// token for it. `bp cloud update` already turns that into a deploy the operator
+// needs no key for; this is the same seam under the verb operators actually
+// type, plus the read-back `bp cloud update` deliberately does not do (it says
+// "watch it with bp cloud status" and returns).
+
+// runManagedDeploy deploys a managed box through the control plane: refuse what
+// the relay cannot honestly deliver, trigger the run, then hold the same
+// read-back contract the ssh path holds — the box's own /status.json against the
+// sha `git ls-remote` says origin/main points at.
+func runManagedDeploy(out *writer, cfg *Config, target string, row deployFleetRow, ref, healthHost string, clean, dryRun bool) int {
+	// REFUSAL 1 — the ref is the BOX's, not the request's. The relay runs
+	// scripts/self-update.sh, which fast-forwards to
+	// origin/${BARKPARK_UPSTREAM_BRANCH:-main}. Deploying "main" when the
+	// operator typed --branch x is not a smaller version of the ask, it is a
+	// different deploy — so this is a usage error that names the two real doors.
+	if ref != managedDeployRef {
+		return useError(out, "usage", fmt.Sprintf(
+			"%q is a MANAGED box, so `bp cloud deploy` routes through the control plane (no operator SSH key needed) — and that relay runs the box's OWN self-update, which fast-forwards to origin/%s (the box's BARKPARK_UPSTREAM_BRANCH) and rebuilds. It cannot carry %q. Either merge that ref to %s, or pass --host <ip> to take the operator-key ssh path, which can deploy any ref.",
+			target, managedDeployRef, ref, managedDeployRef), exitUsage)
+	}
+	// REFUSAL 2 — --clean is an ssh-path lever (it rm -f's the coalesce marker on
+	// the box before running the script). The relay carries no argv, so there is
+	// nothing to honour it with; accepting the flag and dropping it would make
+	// `--clean` a no-op that still prints a deploy.
+	if clean {
+		return useError(out, "usage", fmt.Sprintf(
+			"--clean removes %s/.instance-deploy-last on the box before the script runs, and the control-plane relay sends no arguments at all — %q is a MANAGED box, so there is nothing to apply it to. Re-run without --clean, or pass --host <ip> for the ssh path.",
+			deployRemoteAppDir, target), exitUsage)
+	}
+
+	if dryRun {
+		return managedDeployDryRun(out, target, row, healthHost)
+	}
+
+	// THE EXPECTATION AND THE BEFORE READ, resolved before the box is touched —
+	// the same two reads, in the same order, for the same reason as the ssh path.
+	expected, expectedProblem := resolveExpectedDeploySha(ref)
+	before := readDeployCommit(healthHost)
+
+	out.outf("→ deploying %s to %s via the control plane (managed box — no operator SSH key)", ref, target)
+	out.outf("  the plane relays POST /v1/admin/self-update with the box's STORED admin token; the box fast-forwards to origin/%s and rebuilds.", ref)
+
+	res, terr := managedDeployTrigger(cfg, row.ID)
+	if terr != nil {
+		// Every relay refusal already has one plain sentence and a stable exit in
+		// selfUpdateFail (pinned / already_running / not_enabled / not_live /
+		// suspended / identity_refused / …). Minting a second vocabulary for the
+		// same server codes under a different verb is how two commands start
+		// telling an operator different things about one box.
+		return selfUpdateFail(out, target, false, terr)
+	}
+	if state := rollbackCell(res.Status); state != "" {
+		out.outf("  accepted — the box reports %q. The run is async; polling its /status.json…", state)
+	} else {
+		// A 202 that names no state is a leaner control plane. Say the request was
+		// accepted and NOT what was not reported.
+		out.outf("  accepted — the control plane reported no run state. The run is async; polling its /status.json…")
+	}
+
+	rb := performManagedDeployReadback(healthHost, expected, expectedProblem, before)
+
+	out.outf("")
+	if rb.outcome == deployMismatch {
+		// The box moved, and not to what was asked for. That IS a named non-zero
+		// on this path too — unlike PENDING, it is not explained by "still running".
+		return useError(out, "deploy-"+rb.outcome, rb.line(target, healthHost), exitGeneric)
+	}
+	out.outf("%s", rb.line(target, healthHost))
+	out.outf("  smoke:")
+	for _, u := range deploySmokeURLs(healthHost) {
+		out.outf("    %s", u)
+	}
+	return exitOK
+}
+
+// performManagedDeployReadback polls the box's own /status.json until it serves
+// the expected sha or the budget runs out. It differs from the ssh path's
+// read-back in exactly two ways, both forced by the run being ASYNC:
+//
+//   - a transient read failure is RETRIED rather than declared UNPERFORMABLE:
+//     the blue/green flip this very run performs makes the box briefly
+//     unreachable, and the first read routinely lands inside that window;
+//   - an exhausted budget is deployPending, never deployStall — nothing here
+//     observed a finished run, so nothing here may claim one failed.
+//
+// An expectedProblem is still terminal: with no sha to compare against, more
+// polling buys nothing.
+func performManagedDeployReadback(healthHost, expected, expectedProblem string, before deployCommitRead) deployReadback {
+	var rb deployReadback
+	waited := time.Duration(0)
+	for i := 0; ; i++ {
+		rb = classifyDeployReadback(expected, expectedProblem, before, readDeployCommit(healthHost))
+		if expectedProblem != "" {
+			return rb
+		}
+		if rb.outcome == deployAdvanced || rb.outcome == deployAlreadyAt {
+			return rb
+		}
+		if i+1 >= managedDeployReadbackTries {
+			break
+		}
+		deploySleep(managedDeployReadbackWait)
+		waited += managedDeployReadbackWait
+	}
+	if rb.outcome == deployMismatch {
+		return rb
+	}
+	rb.outcome = deployPending
+	rb.problem = fmt.Sprintf("after %s of polling", waited)
+	return rb
+}
+
+// managedDeployDryRun prints the managed plan without touching the network: no
+// ssh host and no remote invocation exist on this path, so printing the ssh
+// plan's fields would describe a deploy that is not going to happen.
+func managedDeployDryRun(out *writer, target string, row deployFleetRow, healthHost string) int {
+	if out.output == "json" || out.output == "yaml" {
+		payload := map[string]any{
+			"ok":          true,
+			"dry_run":     true,
+			"target":      target,
+			"via":         "control-plane",
+			"mode":        row.Mode,
+			"instance_id": row.ID,
+			"health_host": healthHost,
+			"deploy_ref":  managedDeployRef,
+			"request":     "POST /v1/barkparks/" + row.ID + "/self-update",
+			"smoke_urls":  deploySmokeURLs(healthHost),
+		}
+		if out.output == "yaml" {
+			out.renderYAML(toGeneric(payload))
+		} else {
+			out.renderJSON(payload)
+		}
+		return exitOK
+	}
+	out.outf("dry-run — nothing was sent to the control plane or the box.")
+	out.outf("  target:        %s", target)
+	out.outf("  mode:          %s  (deploys via the control plane — no operator SSH key)", row.Mode)
+	out.outf("  instance id:   %s", row.ID)
+	out.outf("  health host:   %s", healthHost)
+	out.outf("  DEPLOY_REF:    %s  (the relay runs the box's own self-update; the ref is not ours to choose)", managedDeployRef)
+	out.outf("")
+	out.outf("request (the control plane relays it to the box with the STORED admin token):")
+	out.outf("  POST /v1/barkparks/%s/self-update", row.ID)
+	return exitOK
+}
+
 // ─── the read-back: proving the box advanced ────────────────────────────────
 //
 // `bp cloud deploy` used to gate its entire success message on `if derr != nil`
@@ -268,6 +467,14 @@ const (
 	deployStall         = "stall"
 	deployMismatch      = "mismatch"
 	deployUnperformable = "unperformable"
+	// deployPending is the MANAGED path's own outcome, and it exists because the
+	// relay's run is ASYNC: the control plane answers 202 the moment the box
+	// starts, so a box that has not advanced when the poll budget runs out has
+	// NOT been shown to stall — it may simply still be building. Calling that a
+	// STALL (the ssh path's named non-zero, earned there because ssh blocks until
+	// the script exits) would be a manufactured failure. It exits 0 like
+	// UNPERFORMABLE and, like it, says outright that it is not a proof.
+	deployPending = "pending"
 )
 
 // deployReadbackTries / deployReadbackWait: the AFTER read retries before it is
@@ -280,6 +487,33 @@ var (
 	deployReadbackWait  = 5 * time.Second
 	deploySleep         = time.Sleep
 )
+
+// The MANAGED path's own budget. The ssh path's 15 s is an insurance retry
+// AFTER a script that already ran to completion; the relay returns the instant
+// the run STARTS, so this budget must cover a whole fetch + build + health-gated
+// flip. 40 × 15 s = 10 min, the same order as an interactive ssh deploy, and
+// exhausting it is deployPending (not a failure), never a stall.
+var (
+	managedDeployReadbackTries = 40
+	managedDeployReadbackWait  = 15 * time.Second
+)
+
+// managedDeployRef is the ONLY ref the relay can deliver. scripts/self-update.sh
+// fast-forwards the box to origin/${BARKPARK_UPSTREAM_BRANCH:-main} — the ref is
+// the BOX's configuration, not a parameter of the request — so `bp cloud deploy`
+// may promise this one and must refuse the rest rather than deploy something
+// other than what was asked for.
+const managedDeployRef = "main"
+
+// managedDeployTrigger POSTs the control plane's self-update relay for one
+// instance. A package var so the tests drive every relay verdict without a
+// control plane; force is deliberately NOT plumbed — `bp cloud deploy` has no
+// --force, and a pinned box must be REFUSED here (a deploy that silently
+// overrode a pin is the lie this whole file exists to prevent). `bp cloud update
+// <box> --force` is the door for that, and the refusal sentence names it.
+var managedDeployTrigger = func(cfg *Config, id string) (cloudclient.SelfUpdateResult, error) {
+	return cfg.CloudClient().TriggerSelfUpdate(cloudCtx(), id, false)
+}
 
 // deployCommitRead is one /status.json read. Exactly one of commit / problem is
 // set: problem carries the reason the read-back could not be performed, phrased
@@ -497,6 +731,12 @@ func (rb deployReadback) line(target, healthHost string) string {
 		return fmt.Sprintf("STALL: the deploy exited 0 but %s still serves %s (expected %s) — nothing advanced", target, rb.served, shortSha(rb.expected))
 	case deployMismatch:
 		return fmt.Sprintf("MISMATCH: %s serves %s, not the requested %s", target, rb.served, shortSha(rb.expected))
+	case deployPending:
+		served := rb.served
+		if served == "" {
+			served = "no readable sha"
+		}
+		return fmt.Sprintf("→ %s: the control plane ACCEPTED the run and %s still reports %s (expected %s) %s — the relayed run is async, so this is NOT a proof it advanced and NOT a proof it failed; watch it land with `bp cloud status`", target, healthHost, served, shortSha(rb.expected), rb.problem)
 	default:
 		return fmt.Sprintf("→ %s deploy ran and exited 0, but the read-back is UNPERFORMABLE, so this is NOT a proof it advanced: %s", target, rb.problem)
 	}
@@ -671,17 +911,25 @@ USAGE
   bp cloud deploy <target> [--branch <x> | --pr <n>] [--host <ip>] [--clean] [--dry-run]
 
 WHAT IT DOES
-  Streams the LOCAL deploy/instance-deploy.sh to the target box over SSH and runs
-  it with DEPLOY_REF / DEPLOY_REMOTE / BARKPARK_HEALTH_HOST — the same blue/green
-  mechanics that deploy guerrilla, pointed at any ref. Try a build on staging
-  BEFORE the auto-deploy-on-merge train ships it everywhere.
+  A MANAGED box (one Barkpark Cloud provisioned) deploys through the CONTROL
+  PLANE — no operator SSH key. The plane relays the request to the box's own
+  admin endpoint with its stored admin token, and this command then proves the
+  result the same way it does everywhere else. That relay runs the box's own
+  self-update, which fast-forwards to origin/main and rebuilds, so --branch,
+  --pr and --clean are REFUSED there rather than quietly deploying something
+  else; --host <ip> takes the ssh path on any box.
+
+  Every OTHER box streams the LOCAL deploy/instance-deploy.sh to it over SSH and
+  runs it with DEPLOY_REF / DEPLOY_REMOTE / BARKPARK_HEALTH_HOST — the same
+  blue/green mechanics that deploy guerrilla, pointed at any ref. Try a build on
+  staging BEFORE the auto-deploy-on-merge train ships it everywhere.
 
   It NEVER changes your active server: deploying to staging cannot repoint the
   ambient bp target. (To keep bp off staging for good, note that ` + "`bp use`" + ` refuses
   to default to a staging server without --force — use ` + "`bp -s <name>`" + ` instead.)
 
-HOST RESOLUTION (first match wins)
-  --host <ip>            deploy straight to this box, no network lookup
+HOST RESOLUTION (first match wins; a managed fleet row needs no host at all)
+  --host <ip>            deploy straight to this box over ssh, no network lookup
   the fleet              the instance's host, resolved by name (needs ` + "`bp login`" + `)
   BARKPARK_STAGING_HOST  a pinned staging box IP
   otherwise              a clear error naming all three paths
@@ -698,6 +946,9 @@ PROOF (the ssh exit code is not the success claim)
     already at      the box already ran that sha — no rebuild happened (--clean forces one)
     STALL/MISMATCH  the run exited 0 but the box did not advance — a NAMED non-zero
     UNPERFORMABLE   the read-back could not be done (said outright, never a bare ✓)
+  On the managed path the relayed run is ASYNC, so the read-back POLLS for up to
+  ten minutes and an exhausted budget is PENDING — accepted, not yet proven —
+  never a STALL, because nothing observed a finished run.
   --host makes the health FQDN a guess, so that path is always UNPERFORMABLE —
   deploy by fleet name for a proven read-back.
 
