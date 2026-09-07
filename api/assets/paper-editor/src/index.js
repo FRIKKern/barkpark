@@ -175,7 +175,7 @@ class BpPaperEditor extends HTMLElement {
       // and suppresses onUpdate-driven typing, so no bp-op/slash ever fires.
       editable: this._editable,
       extensions: [
-        portableTextBoundary(this),
+        portableTextBoundary(this, () => this._editorMode === "block" ? this._blockType : null),
         ...(this._editorMode === "card-body" ? [
           Extension.create({
             name: "bpCardBodyVeto",

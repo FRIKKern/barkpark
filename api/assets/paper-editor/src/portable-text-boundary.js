@@ -4,13 +4,21 @@ import { Plugin } from "@tiptap/pm/state";
 // PortableDoc list items hold one inline array, not nested blocks. Its inline
 // serializer also has no hard-break carrier. Reject these edits before they can
 // look saved locally while disappearing in the persisted projection.
-export function portableTextBoundary(host) {
+export function portableTextBoundary(host, singleBlockType = () => null) {
   return Extension.create({
     name: "bpPortableTextBoundary",
     addProseMirrorPlugins: () => [new Plugin({
       filterTransaction(tr) {
         if (!tr.docChanged) return true;
         let message;
+        const type = singleBlockType();
+        if (type) {
+          const allowed = type === "list" ? ["bulletList", "orderedList"]
+            : type === "heading" ? ["heading"] : ["paragraph"];
+          if (tr.doc.childCount !== 1 || !allowed.includes(tr.doc.firstChild?.type.name)) {
+            message = "This field edits one block. Add separate blocks in the Paper canvas instead. This edit was not applied.";
+          }
+        }
         tr.doc.descendants(node => {
           if (node.type.name === "hardBreak") {
             message = "Inline line breaks are not supported yet. Use separate paragraphs or list items instead. This edit was not applied.";

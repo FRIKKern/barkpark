@@ -90,6 +90,12 @@ try {
     assert.deepEqual(singleOps, [{ op: "patch-block", id: "paragraph", patch: {
       content: [{ type: "text", value: "BeforeAfter" }],
     } }], "the per-block explicit flush retains the exact original text");
+    single._editor.commands.splitBlock();
+    assert.deepEqual(single._editor.getJSON(), initial,
+      "a single-block field must not show a second paragraph that its save would drop");
+    single._editor.commands.toggleBulletList();
+    assert.deepEqual(single._editor.getJSON(), initial,
+      "a paragraph field cannot silently become a list that its serializer discards");
   } finally {
     single.remove();
   }
