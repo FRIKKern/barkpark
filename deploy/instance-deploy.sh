@@ -1007,13 +1007,29 @@ systemctl daemon-reload
 # its own untouched root. A build failure = zero downtime. The golden rules
 # still hold: from-scratch build (fresh HEEx), deps.compile --force.
 cd "$APP/api" || { log "no $APP/api"; exit 10; }
-build() { MIX_ENV=prod MIX_BUILD_ROOT="_build_$TARGET" mix "$@"; }
-log "clean build into _build_$TARGET (deps.get; deps.compile --force; compile)"
-rm -rf "_build_$TARGET"
-if ! build deps.get;             then log "deps.get failed";     git -C "$APP" reset --hard "$OLD"; exit 12; fi
-if ! build deps.compile --force; then log "deps.compile failed"; git -C "$APP" reset --hard "$OLD"; exit 12; fi
-if ! build compile;              then log "compile failed";      git -C "$APP" reset --hard "$OLD"; exit 12; fi
-if [ ! -d "_build_$TARGET/prod" ]; then log "build produced no _build_$TARGET/prod — abort, live slot untouched"; git -C "$APP" reset --hard "$OLD"; exit 12; fi
+# BUILD ASIDE, SWAP ON SUCCESS (pds-bl-failed-build-wipes-rollback-root). This
+# used to `rm -rf _build_$TARGET` and compile straight into it, which destroyed
+# the idle slot's PREVIOUS good build root before knowing whether a replacement
+# would ever exist. `--rollback-preflight` reads exactly that directory (the
+# `no complete build root` refusal above), so any exit-12/13 failure took the
+# rollback option away at the one moment the owner needs it — a typed,
+# fail-closed refusal, but an availability loss all the same. The wipe is what
+# had to move: the previous root is now untouched until a COMPLETE build exists
+# to replace it. Costs one build root of disk transiently; a build root is the
+# cheap half of a box.
+NEW_ROOT="_build_$TARGET.new"
+PREV_ROOT="_build_$TARGET.prev"
+build() { MIX_ENV=prod MIX_BUILD_ROOT="$NEW_ROOT" mix "$@"; }
+log "clean build into $NEW_ROOT (deps.get; deps.compile --force; compile) — _build_$TARGET stays intact until the swap"
+# A run killed mid-build (or mid-swap) leaves these behind; a stale .new would
+# make the next build incremental against foreign artifacts, and a stale .prev
+# would pin disk forever. Both are scratch by construction — never a rollback
+# target, which only ever reads _build_$TARGET.
+rm -rf "$NEW_ROOT" "$PREV_ROOT"
+if ! build deps.get;             then log "deps.get failed (_build_$TARGET kept — rollback still possible)";     git -C "$APP" reset --hard "$OLD"; exit 12; fi
+if ! build deps.compile --force; then log "deps.compile failed (_build_$TARGET kept — rollback still possible)"; git -C "$APP" reset --hard "$OLD"; exit 12; fi
+if ! build compile;              then log "compile failed (_build_$TARGET kept — rollback still possible)";      git -C "$APP" reset --hard "$OLD"; exit 12; fi
+if [ ! -d "$NEW_ROOT/prod" ]; then log "build produced no $NEW_ROOT/prod — abort, live slot untouched, _build_$TARGET kept"; git -C "$APP" reset --hard "$OLD"; exit 12; fi
 log "migrate (new code, active slot still serving)"
 # BARKPARK_DB_STATEMENT_TIMEOUT=0 — `mix ecto.migrate` boots the repo with the
 # runtime config, so every migration connection would otherwise inherit the
@@ -1022,7 +1038,28 @@ log "migrate (new code, active slot still serving)"
 # is an operator-supervised, offline-shaped step and must be allowed to run to
 # completion; the per-migration guard in Barkpark.Release is the seatbelt, this
 # is the belt-and-braces (lead-cli-2's handoff, task-e2f5ecca0be9a6d1).
-if ! BARKPARK_DB_STATEMENT_TIMEOUT=0 build ecto.migrate; then log "migrate failed";      git -C "$APP" reset --hard "$OLD"; exit 13; fi
+if ! BARKPARK_DB_STATEMENT_TIMEOUT=0 build ecto.migrate; then log "migrate failed (_build_$TARGET kept — rollback still possible)"; rm -rf "$NEW_ROOT"; git -C "$APP" reset --hard "$OLD"; exit 13; fi
+
+# ---- Swap the completed build in. This is the LAST point at which the previous
+# root can be preserved: barkpark-slot@$TARGET boots with
+# MIX_BUILD_ROOT=$APP/api/_build_$TARGET baked into .slots/$TARGET.env (see
+# write_slot_env above), so the new build must live at that exact path before
+# the slot is started and health-gated — "swap on health" is not reachable
+# without repointing the unit's env, and the health gate has the slot-sha stamp
+# (D291) as its guard already. Two renames on one filesystem: the window in
+# which _build_$TARGET does not exist is a single mv.
+rm -rf "$PREV_ROOT"
+if [ -d "_build_$TARGET" ] && ! mv "_build_$TARGET" "$PREV_ROOT"; then
+  log "could not move the old _build_$TARGET aside — abort before touching it, live slot untouched"
+  rm -rf "$NEW_ROOT"; git -C "$APP" reset --hard "$OLD"; exit 12
+fi
+if ! mv "$NEW_ROOT" "_build_$TARGET"; then
+  log "could not swap $NEW_ROOT into place — restoring the previous root, live slot untouched"
+  [ -d "$PREV_ROOT" ] && mv "$PREV_ROOT" "_build_$TARGET"
+  git -C "$APP" reset --hard "$OLD"; exit 12
+fi
+rm -rf "$PREV_ROOT"
+log "swapped the fresh build into _build_$TARGET"
 
 # ---- Boot the idle slot and gate on it. The active slot is never touched;
 # every failure path from here on is zero-downtime.

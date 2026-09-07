@@ -1052,7 +1052,10 @@ check "compile failure: target slot NOT stamped"        "[ ! -e '$APP/.slots/blu
 check "compile failure: live slot stamp untouched"      "[ \"\$(cat '$APP/.slots/green.sha' 2>/dev/null)\" = 'goodsha' ]"
 check "compile failure: STATE not advanced"             "[ ! -f '$APP/.instance-deploy-last' ]"
 rc="$(run_preflight goodsha)"
-check "compile failure: rollback still refuses (21 no_previous_slot)" "[ '$rc' = '21' ]"
+# blue has never held a build on this box, so the refusal is the SHA arm — it
+# must stay 21, and it must name the missing stamp, not a missing build root.
+check "compile failure: rollback refuses a never-built slot (21 no_previous_slot)" "[ '$rc' = '21' ]"
+check "compile failure: the refusal is the missing-STAMP arm" "grep -q 'no recorded sha' '$TMP/preflight.log'"
 # ecto.migrate failure (exit 13) is the same law one step later.
 rm -f "$APP/.instance-deploy-last"
 rc="$(MIX_FAIL=ecto.migrate REMOTE_SHA=brokensha2 run_deploy 200 goodsha)"
@@ -1072,13 +1075,38 @@ rc="$(MIX_FAIL=compile REMOTE_SHA=v3sha run_deploy 200 v2sha)"   # targets green
 check "failed redeploy: exit 12"                         "[ '$rc' = '12' ]"
 check "failed redeploy: green keeps its PREVIOUS stamp (v1sha)" "[ \"\$(cat '$APP/.slots/green.sha' 2>/dev/null)\" = 'v1sha' ]"
 check "failed redeploy: live blue stamp untouched (v2sha)" "[ \"\$(cat '$APP/.slots/blue.sha' 2>/dev/null)\" = 'v2sha' ]"
-# The stamp is honest, but rollback is still refused — the clean build wiped
-# _build_green before compiling, so the old build root is gone. That refusal is
-# TYPED and fail-closed (21 no_previous_slot, naming the missing build root),
-# which is the point: the box never offers a rollback it cannot perform.
+# ...and the ROLLBACK IS STILL THERE (pds-bl-failed-build-wipes-rollback-root).
+# The clean build used to `rm -rf _build_green` before compiling, so a failed
+# build left the idle slot with an honest stamp and no build root, and
+# --rollback-preflight refused 21 no_previous_slot: fail-closed and truthful,
+# but the owner lost the rollback at the exact moment the deploy broke. The
+# build now runs in _build_green.new and only swaps once it is complete, so the
+# v1sha root the stamp names is still on disk and the preflight can offer it.
+# FAIL-BEFORE: with the bare `rm -rf` restored these three checks are RED
+# (preflight exits 21 and logs "no complete build root").
 rc="$(run_preflight v2sha)"
-check "failed redeploy: preflight refuses fail-closed (21)" "[ '$rc' = '21' ]"
-check "failed redeploy: refusal names the wiped build root, not a bogus sha" "grep -q 'no complete build root' '$TMP/preflight.log'"
+check "failed redeploy: preflight OFFERS the rollback (exit 0)" "[ '$rc' = '0' ]"
+check "failed redeploy: it names the previous slot sha (v1sha)" "grep -q 'TARGET_SHA=v1sha' '$TMP/preflight.log'"
+check "failed redeploy: green's previous build root survived the failed build" "[ -f '$APP/api/_build_green/prod/MARKER' ]"
+check "failed redeploy: no aside root left behind" "[ ! -e '$APP/api/_build_green.new' ] && [ ! -e '$APP/api/_build_green.prev' ]"
+# A migrate failure (exit 13) is the same law one step later: the build
+# completed into .new but nothing was swapped, so the old root stands.
+rm -f "$APP/.instance-deploy-last"
+rc="$(MIX_FAIL=ecto.migrate REMOTE_SHA=v4sha run_deploy 200 v2sha)"
+check "migrate failure: exit 13"                         "[ '$rc' = '13' ]"
+check "migrate failure: green's previous build root survived" "[ -f '$APP/api/_build_green/prod/MARKER' ]"
+check "migrate failure: the aside root was cleaned up"   "[ ! -e '$APP/api/_build_green.new' ]"
+rc="$(run_preflight v2sha)"
+check "migrate failure: rollback still OFFERED (exit 0)"  "[ '$rc' = '0' ]"
+rm -rf "$TMP"
+
+# A SUCCESSFUL deploy leaves no aside roots behind — the swap is a swap, not a
+# copy, so neither .new nor .prev may outlive it (they would pin a build root of
+# disk per slot forever, and .prev would look like a rollback target it is not).
+setup_case
+run_deploy 200 s1sha >/dev/null
+check "success: no .new/.prev left in the tree" \
+  "[ ! -e '$APP/api/_build_green.new' ] && [ ! -e '$APP/api/_build_green.prev' ] && [ -f '$APP/api/_build_green/prod/MARKER' ]"
 rm -rf "$TMP"
 
 echo "== Case 19: the four per-box site-deploy prerequisites are CHECKED, not prose (D593) =="
