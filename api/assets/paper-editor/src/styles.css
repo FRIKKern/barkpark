@@ -1269,6 +1269,20 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
   font-size: 13px;
 }
 
+/* Native collection controls belong outside the authored card/stat content.
+   Closed controls leave reader geometry intact; the fallback opens in flow. */
+.bp-paper-contextual-controls.bp-paper-cards-config,
+.bp-paper-contextual-controls.bp-paper-stats-config {
+  top: auto; bottom: 100%;
+}
+.bp-paper-contextual-controls.bp-paper-cards-config[open],
+.bp-paper-contextual-controls.bp-paper-stats-config[open] {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+.bp-paper-cards-config > .bp-paper-contextual-panel,
+.bp-paper-stats-config > .bp-paper-contextual-panel {
+  max-height: none; overflow: visible;
+}
 /* PM list items require a paragraph; reader items carry inline text. */
 .bp-paper-editor-body li > p { margin: 0; }
 /* No authored article palette: retain the browser's legacy paragraph rhythm. */
