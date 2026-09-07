@@ -755,6 +755,42 @@ defmodule Barkpark.Content.Errors do
   # rides through verbatim, because telling a caller to "resend the identical
   # request" without telling them to CHECK FIRST walks them into the dedup wall
   # and a duplicate-of-your-own-first-attempt refusal.
+  # THE READ TWIN (task-5a7f007878b56e6a). Same fault, same code, same status,
+  # same `reason` — and a DIFFERENT hint, because the two-element arm below
+  # tells the caller to CHECK WHETHER THE WRITE LANDED and a read wrote
+  # nothing. Handing an SSR build "`bp doc ls task --perspective drafts`" for a
+  # dropped SELECT is advice it cannot act on, and the whole point of naming
+  # this fault was to stop mis-captioning it.
+  #
+  # THE SENTENCE THIS ARM EXISTS TO SAY: an empty answer is not an answer. The
+  # deploy failures that produced this row were captioned "bp-doc-id marker is
+  # empty" — a build that read zero documents, rendered an empty page and got
+  # refused at the HEALTH gate after paying for the whole build. So the hint
+  # tells the renderer to RETRY THE RENDER, never to publish what it managed to
+  # read. A 503 here is a refusal the caller must not round down to "no rows".
+  #
+  # `code` stays "storage_unavailable" and `status` stays 503 for the reason the
+  # sibling arm argues at length: `internal/cli/errors.go` keys the CLI exit on
+  # `code`, and `errors_api_parity_test.go` refuses one code at two statuses.
+  # This arm adds NO code to the §9 vocabulary and needs no CLI change.
+  defp build({:error, {:connection_unavailable, :read, reason}}),
+    do: %{
+      code: "storage_unavailable",
+      message: halt_message(reason),
+      status: 503,
+      reason: "connection_unavailable",
+      hint:
+        "Transient: the database connection dropped mid-READ. This request " <>
+          "read nothing and CHANGED nothing — there is no partial write to " <>
+          "reconcile, so the correct move is simply to resend the identical " <>
+          "request. IF A BUILD OR SSR RENDER HIT THIS, RETRY THE RENDER — do " <>
+          "not publish the page it produced. This 503 is a REFUSAL, not an " <>
+          "empty result set: treating it as \"no documents\" is what turns a " <>
+          "transient pool fault into a deploy that ships an empty page. If it " <>
+          "keeps failing the database is degraded: an outage to report, not a " <>
+          "document to fix."
+    }
+
   defp build({:error, {:connection_unavailable, reason}}),
     do: %{
       code: "storage_unavailable",

@@ -93,11 +93,14 @@ defmodule BarkparkWeb.TasksController do
 
   import Ecto.Query, only: [from: 2]
 
+  require Logger
+
   alias Barkpark.{Content, Repo, Tasks}
   alias Barkpark.Tasks.Fleet
   alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Document
   alias Barkpark.Content.Graph
+  alias Barkpark.Content.Errors
   alias Barkpark.Tasks.Citations
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.QueueGate
@@ -297,7 +300,12 @@ defmodule BarkparkWeb.TasksController do
     case Params.parse_view(params["view"]) do
       :brief ->
         child_counts = Params.batch_child_counts(docs, scope_opts(conn))
-        Enum.map(docs, &Params.render_brief(&1, child_counts))
+        # task-52f4f3aff99c64d5: the LIVE half of the same edge — one extra
+        # indexed grouped query per page, and the only thing that separates an
+        # epic root still delegating to open children from a leaf a builder can
+        # be sent at. See Params.batch_live_child_counts/2.
+        live_child_counts = Params.batch_live_child_counts(docs, scope_opts(conn))
+        Enum.map(docs, &Params.render_brief(&1, child_counts, live_child_counts))
 
       :full ->
         counts = Params.batch_edge_counts(docs)
@@ -359,8 +367,12 @@ defmodule BarkparkWeb.TasksController do
           :brief ->
             child_counts = Params.batch_child_counts(sealed_in_progress ++ sealed_ready, scope)
 
-            {Enum.map(sealed_in_progress, &Params.render_brief(&1, child_counts)),
-             Enum.map(sealed_ready, &Params.render_brief(&1, child_counts))}
+            live_child_counts =
+              Params.batch_live_child_counts(sealed_in_progress ++ sealed_ready, scope)
+
+            render = &Params.render_brief(&1, child_counts, live_child_counts)
+
+            {Enum.map(sealed_in_progress, render), Enum.map(sealed_ready, render)}
 
           :full ->
             counts = Params.batch_edge_counts(sealed_in_progress ++ sealed_ready)
@@ -1765,7 +1777,83 @@ defmodule BarkparkWeb.TasksController do
   # `drafts`/`?drafts=true` token-gated — already inside the :require_token
   # tier — flips to a live extract over the drafts corpus, NOT the materialised
   # published-only table).
+  # ─── THE READ-SIDE DBConnection CLASSIFICATION, GRAPH DOOR ──────────────
+  # task-5a7f007878b56e6a. This is the door the deploy evidence NAMES: the
+  # failures read `HEALTH gate failed … bp-doc-id marker is empty — the SSR
+  # could not read a content document: graph 500: unknown error
+  # (DBConnection.ConnectionError)`. The SSR reaches it through the JS SDK's
+  # `GET /v1/graph/:id` (js/packages/core/src/graph.ts).
+  #
+  # A REGION, for the same reason the query door wraps one: TWO Repo calls sit
+  # on this path and either can be refused a checkout — `Repo.all/1` in
+  # `resolve_graph_root/2` (the root lookup) and the traversal inside
+  # `Content.Graph.traverse/2`. The caller's remedy is `resend` at both.
+  #
+  # RENDERED HERE, NOT VIA A FALLBACK. `TasksController` declares no
+  # `action_fallback`, so this action cannot return an `{:error, …}` tuple the
+  # way `QueryController` does. It renders the SAME envelope through
+  # `Barkpark.Content.Errors.to_envelope/2`, so the body, the `code`, the 503
+  # and the `request_id` stamp are byte-identical to the query door's — one
+  # fault, one shape, both doors.
+  #
+  # NO FAIL-OPEN, AND THE 404 IS THE TRAP HERE. `resolve_graph_root/2` answers
+  # `{:error, :not_found}` for a document that genuinely is not there, and a
+  # connection fault must NEVER be rounded into that arm: a 404 would tell an
+  # SSR build the document is gone, which is a permanent verdict on a transient
+  # fault and is exactly the mis-caption this row exists to remove. The rescue
+  # is on `DBConnection.ConnectionError` alone; it returns a 503 and never a
+  # 404, never `nodes: []`, never a success envelope.
+  #
+  # BLAST RADIUS, STATED. This covers `GET /v1/graph/:id` and NOTHING ELSE.
+  # `graph_corpus/2`, `graph_orphans/2`, `graph_dangling/2` and `graph_tasks/2`
+  # are DELIBERATELY NOT WRAPPED and still raise exactly as they did before —
+  # the `:graph_orphans` fault seam below exists so a test can PROVE one of
+  # those untouched doors is untouched rather than asserting it in prose, the
+  # way #15489's `:upsert_prev_doc_lookup` seam pinned `upsert_document/4`.
   def graph_show(conn, %{"id" => id} = params) do
+    graph_show!(conn, id, params)
+  rescue
+    e in DBConnection.ConnectionError ->
+      Logger.error(
+        "BarkparkWeb.TasksController.graph_show/2: the database connection was lost " <>
+          "mid-read (id=#{inspect(id)}) — answering 503 " <>
+          "storage_unavailable/connection_unavailable. exception=#{Exception.message(e)}"
+      )
+
+      render_connection_fault(conn, e)
+  end
+
+  # The graph door's caller-facing sentence. Same contract as the query door's:
+  # nothing was read, nothing changed, and an EMPTY GRAPH IS NOT THE ANSWER.
+  defp render_connection_fault(conn, %DBConnection.ConnectionError{} = e) do
+    message =
+      "the database connection was lost while reading the content graph " <>
+        "(#{Exception.message(e)}). No nodes or edges were read and nothing " <>
+        "was changed. This is transient: resend the identical request. Do NOT " <>
+        "treat this as an empty graph — a build that renders what it managed " <>
+        "to read will ship a page with no content."
+
+    env = Errors.to_envelope({:error, {:connection_unavailable, :read, message}}, conn)
+
+    conn
+    |> put_status(env.status)
+    |> json(%{error: Map.delete(env, :status)})
+  end
+
+  # Test-only fault seam — see `Content.Writer.inject_write_fault!/1` (#15489)
+  # for the full argument. `{site, exception_module, message}` so the same seam
+  # proves the named 503 AND that a non-connection exception still propagates.
+  defp inject_read_fault!(site) do
+    case Application.get_env(:barkpark, :reader_fault) do
+      {^site, module, message} when is_atom(module) and is_binary(message) ->
+        raise module, message
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp graph_show!(conn, id, params) do
     case resolve_graph_root(id, conn) do
       {:ok, %Document{} = root} ->
         # AFTER the existence-hiding 404 below, never before. This is the route
@@ -1786,6 +1874,7 @@ defmodule BarkparkWeb.TasksController do
 
   defp graph_traverse(conn, %Document{} = root, params) do
     opts = graph_traverse_opts(root, params, conn)
+    inject_read_fault!(:graph_traverse)
     result = Graph.traverse(root.id, opts)
 
     json(conn, %{
@@ -1856,6 +1945,12 @@ defmodule BarkparkWeb.TasksController do
   # stops at the ceiling is indistinguishable from a complete answer — the same
   # dishonesty `/v1/graph`'s `truncated` flag already fixed for the corpus.
   def graph_orphans(conn, _params) do
+    # THE UNTOUCHED-DOOR CONTROL (task-5a7f007878b56e6a). Deliberately NOT
+    # wrapped: this seam exists only so a test can prove a connection fault here
+    # still propagates as it always did, rather than the PR asserting that
+    # blast-radius claim in prose.
+    inject_read_fault!(:graph_orphans)
+
     %{orphans: orphans, count: count, limit: limit, truncated: truncated} =
       Graph.orphans_bounded(graph_derived_opts(conn))
 
@@ -2460,6 +2555,7 @@ defmodule BarkparkWeb.TasksController do
       |> Params.maybe_filter_project(project_id)
       |> Params.maybe_filter_dataset(dataset)
 
+    inject_read_fault!(:graph_root)
     rows = Repo.all(query)
 
     # THE ONE RULE at the graph root (`Barkpark.Tasks.TwinResolver` — read that
