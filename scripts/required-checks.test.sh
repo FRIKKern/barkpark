@@ -1978,6 +1978,56 @@ else
   bad "the floor implied it checked _readme/enforced against a reference that carries neither: $(head -2 <<<"$FOUT")"
 fi
 
+# (m) A USAGE ERROR IS NOT A VERDICT. Typed with no candidate, the floor used to
+#     answer `FAIL: no candidate spec given` at exit 1 — the same word and the
+#     same code as a LOST required context, i.e. a did-not-run rendered as the
+#     most alarming finding this repo can produce. Both halves are pinned: the
+#     code must not be 1 (or 2, which apply.sh reads as acknowledgeable growth),
+#     and the message must not open with the word this suite's gates use for a
+#     measured breach.
+UOUT="$(bash "$FLOOR" 2>&1)" && URC=0 || URC=$?
+if [ "$URC" -ne 0 ] && [ "$URC" -ne 1 ] && [ "$URC" -ne 2 ]; then
+  ok "the floor with NO candidate exits $URC — not 0, not 1 (LOSS), not 2 (GROWTH): a usage error is its own outcome"
+else
+  bad "the floor's usage error exits $URC, which collides with a measured verdict: $(head -1 <<<"$UOUT")"
+fi
+if ! grep -qE '^FAIL' <<<"$UOUT"; then
+  ok "…and it does not open with FAIL, the word this repo's gates use for a measured breach"
+else
+  bad "the floor still answers a usage error with the word FAIL: $(head -1 <<<"$UOUT")"
+fi
+# An unknown flag and a value-taking flag with no value are the same class. The
+# latter used to die on `set -u` unbound-variable at exit 1 with no usable message.
+for BADARGS in "--bogus-flag" "--reference"; do
+  # shellcheck disable=SC2086
+  UOUT="$(bash "$FLOOR" $BADARGS 2>&1)" && URC=0 || URC=$?
+  if [ "$URC" -eq 64 ]; then
+    ok "\`$BADARGS\` is a usage error too (exit 64), not an unbound-variable death at 1"
+  else
+    bad "\`$BADARGS\` exited $URC: $(head -1 <<<"$UOUT")"
+  fi
+done
+# NON-VACUITY, and it is the arm that matters: the split must not have silenced
+# a real breach. §12(b) already proved the swap reds — re-assert here that the
+# LOSS code is still 1 and distinguishable from the usage code above.
+FOUT="$(floor "$TMP/floor-swap.json")" && FRC=0 || FRC=$?
+if [ "$FRC" -eq 1 ] && [ "$FRC" -ne "$URC" ]; then
+  ok "…and a GENUINE breach still exits 1, distinct from the usage code (the fix did not silence the gate)"
+else
+  bad "the breach exit is now $FRC — the usage split moved a real verdict"
+fi
+# The same split, on the four siblings it was derived onto. Each must answer an
+# unknown flag with 64 rather than the code its own verdicts use.
+for SIB in required-checks-apply.sh required-checks-verify.sh \
+           required-checks-generate.sh registration-deadlock-sweep.sh; do
+  UOUT="$(bash "$REPO_ROOT/scripts/$SIB" --bogus-flag 2>&1)" && URC=0 || URC=$?
+  if [ "$URC" -eq 64 ] && ! grep -qE '^FAIL' <<<"$UOUT"; then
+    ok "$SIB answers an unknown flag with a usage error (exit 64), not its verdict code"
+  else
+    bad "$SIB exited $URC on an unknown flag: $(head -1 <<<"$UOUT")"
+  fi
+done
+
 # ═══ 13. the prose ratchet ═══════════════════════════════════════════════════
 
 section "13. no in-repo prose teaches \`gh pr merge --admin\` any more"

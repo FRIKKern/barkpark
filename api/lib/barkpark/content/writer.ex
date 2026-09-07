@@ -1230,8 +1230,10 @@ defmodule Barkpark.Content.Writer do
   # placements were measured and REFUTED (PDS-D393):
   #
   #   * `Barkpark.Tasks.Validation` is pure and receives CONTENT only — and
-  #     `/v1/data/mutate`'s patch clauses (`mutations.ex:288`/`:324`) build
-  #     `merged` and hand it to `upsert_document`, which validates at `:490`.
+  #     `/v1/data/mutate`'s patch clauses (the two `"patch"` clauses of
+  #     `mutations.ex:apply_one/3` — cited by SYMBOL because line anchors
+  #     are what rot) build `merged` and hand it to `upsert_document`,
+  #     which validates it.
   #     Merge happens BEFORE validation on EVERY update, so a content-only rule
   #     is RETROACTIVE: it would 422 every future patch to today's bare rows.
   #   * `validate_task_kind/2` is arity 2 — it never receives `opts`, so it can
