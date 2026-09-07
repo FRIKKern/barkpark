@@ -770,6 +770,17 @@ if grep -q 'no task reference found' "$fixtures/amb.err"; then
 else
   pass=$((pass+1)); printf 'ok   %-40s\n' "ambiguity: not reported as absence"
 fi
+# THE SECOND-CITATION FORM IS INVISIBLE HERE (task-29781d0921e5a885). A merged
+# PR names the OTHER rows it discharged with `Discharges:` lines, and the whole
+# point of a second keyword is that THIS grammar cannot see it: two column-0
+# `Task:` ids are a refusal (above), and that refusal is correct and stays.
+# So a body with one trailer and two citations must still extract exactly ONE
+# id, rc 0 — asserted both directions, because a gate that started reading
+# `Discharges:` would red every PR that used the documented form.
+check_extract "citations: one trailer + two Discharges" \
+  $'Fixes it.\n\nDischarges: sib-one c2\nDischarges: `sib-two`\n\nTask: cch-bl-x\n' 'cch-bl-x'
+check_extract "citations: Discharges alone is NOT a trailer" \
+  $'Discharges: sib-one c2\n' ''
 check_extract "trailer: label with no id" $'Task:\ncch-bl-x\n'                  ''
 check_extract "trailer: mid-sentence no"  $'Please see Task: cch-bl-x for why.\n' ''
 check_extract "trailer: bold wrapper no"  $'**Task:** cch-bl-x\n'               ''

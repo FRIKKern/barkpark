@@ -94,6 +94,25 @@
 #   Nothing else is written by either door. Not lifecycle_status, not the claim,
 #   not the assignee, not the criteria array wholesale, never a second criterion.
 #
+# AND A THIRD DOOR, FOR THE ROWS THIS MERGE DID NOT CREDIT
+# ----------------------------------------------------------------------------
+# Everything above marks the ONE row the `Task:` trailer names. A merge that
+# also discharged a criterion on a SIBLING row left that row nothing, and the
+# row went on advertising work origin/main already held (five measured
+# instances in one day — task-29781d0921e5a885). A body may now name those rows
+# at column 0:
+#
+#     Discharges: <doc_id> c<N>
+#
+# and this script POSTs the whole commit message to
+# POST /v1/tasks/<the trailer row>/discharges, where the SERVER parses the
+# citations (Barkpark.Tasks.Citations) and leaves each cited row a
+# `discharge_marks` note carrying the PR, the sha and the primary row. That
+# verb has NO criterion field and NO met field on the wire, so this door cannot
+# fabricate a done the way a /landed criterion flip could. The grammar is not
+# mirrored here: this file probes for the substring to decide whether to spend
+# a request, and parses nothing.
+#
 # THE REQUEST WAS GRANTED — AND BOTH DOORS ARE NOW CALLED, NOT ONE
 # ----------------------------------------------------------------------------
 # This section used to be a REQUEST: a label carries a fact, it cannot carry a
@@ -523,6 +542,28 @@ ledger_post_landed() { # $1 task id, $2 body file, $3 out file
     --data-binary "@${body}" 2>/dev/null || echo 000
 }
 
+# THE THIRD DOOR — POST /v1/tasks/:id/discharges. Same token, same no-claim,
+# no-epoch shape; a THIRD blast radius, narrower than either of the other two.
+# :id here is the PRIMARY row (the one the `Task:` trailer credits) and the body
+# carries the whole commit message: the SERVER parses its `Discharges:` lines
+# and marks the SIBLING rows the same merge may also have satisfied. Kept as its
+# own function so the fixture door records it under its own log.
+ledger_post_discharges() { # $1 primary task id, $2 body file, $3 out file
+  local id="$1" body="$2" out="$3"
+  if [ -n "$FIXTURE_DIR" ]; then
+    if [ -n "${LANDED_MARK_FIXTURE_DISCHARGES_CODE:-}" ]; then echo "$LANDED_MARK_FIXTURE_DISCHARGES_CODE"; return 0; fi
+    if [ -n "$HTTP_STUB_CODE" ]; then echo "$HTTP_STUB_CODE"; return 0; fi
+    cat "$body" >> "$FIXTURE_DIR/discharges.log"; printf '\n' >> "$FIXTURE_DIR/discharges.log"
+    echo '{"ok":true,"cited":0,"marked":0}' > "$out"; echo 200
+    return 0
+  fi
+  curl -sS -m 30 -o "$out" -w '%{http_code}' \
+    -X POST "${LEDGER_BASE%/}/v1/tasks/${id}/discharges" \
+    -H "Authorization: Bearer ${LEDGER_TOKEN:-}" \
+    -H "Content-Type: application/json" \
+    --data-binary "@${body}" 2>/dev/null || echo 000
+}
+
 # Bounded retry with backoff. 5xx/000 is transient; 401/403 is terminal and
 # never retried (retrying a refused credential just multiplies the log).
 with_retry() { # $1 fn, $2.. args -> sets RC_CODE
@@ -564,7 +605,7 @@ pr_number_from_subject() { # squash convention: "subject (#1234)"
 }
 
 # ── mark ─────────────────────────────────────────────────────────────────────
-MARKED=0; NOOP=0; SKIPPED=0; SCANNED=0; PLANNED=0; LANDINGS=0
+MARKED=0; NOOP=0; SKIPPED=0; SCANNED=0; PLANNED=0; LANDINGS=0; DISCHARGES=0
 
 # THE SENTENCE HALF — POST /v1/tasks/:id/landed, fired AFTER the labels write.
 #
@@ -636,6 +677,70 @@ json.dump(b, open(sys.argv[1],"w"))' "$lbody"
       warn "recording the landing for ${id} returned HTTP ${RC_CODE} — the LABEL is on the row, so the landing is still findable. Skipped, not failed."
       rm -f "$lbody" "$louf"; return 0 ;;
   esac
+}
+
+# THE SIBLING HALF — POST /v1/tasks/<primary>/discharges (task-29781d0921e5a885).
+#
+# WHAT IT IS FOR. The two doors above mark the ONE row the `Task:` trailer
+# credits. A merge that also discharged a criterion on a SIBLING row left that
+# row nothing at all: it kept advertising work origin/main already held, and a
+# lead paid a full re-derivation to refute it (five measured instances, one day).
+# A `Discharges: <doc_id> c<N>` line in the body names those rows.
+#
+# THIS SCRIPT OWNS NO SECOND GRAMMAR, HERE EITHER. The `case` below is a
+# PRESENCE probe, not a parser: it decides only whether to spend an HTTP call,
+# and it extracts nothing and resolves no row. The citation grammar lives in
+# Barkpark.Tasks.Citations and runs on the SERVER, which is handed the commit
+# message verbatim — the same rule the `Task:` extractor follows for the same
+# reason (#5290: a second copy of a grammar reddens correct work). A false
+# positive here costs one request that marks nothing; a false negative is
+# impossible, because a citation the server would parse contains the probed
+# substring by construction.
+#
+# NEVER FATAL, and it can never flip anything. The verb has no `criterion`
+# field and no `met` field to send — the server writes a `discharge_marks` note
+# and nothing else — so unlike /landed there is no permit to be careful about.
+# Only 401/403 is loud (every future run would be a silent no-op). A 404 is the
+# ledger not having this door yet, which is a ::warning and exit 0: an old
+# server must not red a merge that already happened.
+post_discharges() { # $1 primary id, $2 sha, $3 pr, $4 the commit message
+  local id="$1" sha="$2" pr="$3" msg="$4"
+  case "$msg" in
+    *[Dd]ischarges:*) : ;;
+    *) return 0 ;;
+  esac
+
+  local msgf dbody douf
+  msgf="$(mktemp -t landed-mark-msg.XXXXXX)"
+  dbody="$(mktemp -t landed-mark-dbody.XXXXXX)"
+  douf="$(mktemp -t landed-mark-dout.XXXXXX)"
+  printf '%s' "$msg" > "$msgf"
+  # Built by python3 from a FILE, never by string-pasting the message into
+  # JSON: a commit body carries quotes, backslashes and newlines, and a
+  # hand-built payload would be a 400 on the bodies that need this most.
+  python3 -c '
+import json,sys
+body = {"pr": str(sys.argv[2]), "commit": sys.argv[3], "body": open(sys.argv[1]).read()}
+if not body["pr"]:
+    body.pop("pr")
+json.dump(body, open(sys.argv[4], "w"))' "$msgf" "$pr" "$sha" "$dbody"
+
+  with_retry ledger_post_discharges "$id" "$dbody" "$douf"
+  case "$RC_CODE" in
+    401|403) rm -f "$msgf" "$dbody" "$douf"; die_auth "$RC_CODE" "POST /v1/tasks/${id}/discharges" ;;
+    2??)
+      local cited marked
+      cited="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("cited", 0))' "$douf" 2>/dev/null || echo 0)"
+      marked="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("marked", 0))' "$douf" 2>/dev/null || echo 0)"
+      note "${id}: ${sha:0:10} cites ${cited} sibling row(s); ${marked} back-link mark(s) written."
+      DISCHARGES=$((DISCHARGES + 1)) ;;
+    404)
+      warn "the ledger has no /v1/tasks/${id}/discharges door (HTTP 404) — the sibling rows named by this body go unmarked. Skipped, not failed." ;;
+    *)
+      warn "recording the sibling back-links for ${id} returned HTTP ${RC_CODE} — skipped, not failed." ;;
+  esac
+  rm -f "$msgf" "$dbody" "$douf"
+  return 0
 }
 
 mark_one() { # $1 task id, $2 sha, $3 pr
@@ -751,12 +856,17 @@ run_mark() {
     [ -n "$id" ] || continue
     pr="${ARG_PR:-$(pr_number_from_subject "$subject")}"
     mark_one "$id" "$sha" "$pr"
+    # AFTER the row's own marks, and never on a dry run. The sibling rows are
+    # the enrichment: if this fails the credited row is still marked and still
+    # findable, which is the same ordering argument /landed rides behind
+    # /labels.
+    [ "$DRY_RUN" = "1" ] || post_discharges "$id" "$sha" "$pr" "$msg"
   done <<<"$shas"
 
   if [ "$DRY_RUN" = "1" ]; then
     note "DRY RUN — scanned ${SCANNED} commit(s): ${PLANNED} would be marked, ${NOOP} already marked, ${SKIPPED} skipped. Nothing was written."
   else
-    note "scanned ${SCANNED} commit(s): ${MARKED} marked, ${LANDINGS} landing(s) recorded, ${NOOP} already marked, ${SKIPPED} skipped."
+    note "scanned ${SCANNED} commit(s): ${MARKED} marked, ${LANDINGS} landing(s) recorded, ${NOOP} already marked, ${SKIPPED} skipped, ${DISCHARGES} sibling citation(s) posted."
   fi
 }
 
@@ -847,7 +957,7 @@ mkcommit() { # $1 dir, $2 message
   git -C "$1" rev-parse HEAD
 }
 mkledger() { # $1 dir
-  mkdir -p "$1/rows"; : > "$1/writes.log"; : > "$1/landed.log"
+  mkdir -p "$1/rows"; : > "$1/writes.log"; : > "$1/landed.log"; : > "$1/discharges.log"
 }
 mkrow() { # $1 ledgerdir, $2 id, $3 lifecycle, $4 assignee, $5 criterion-text ("" = none)
   python3 - "$1/rows/$2.json" "$2" "$3" "$4" "$5" <<'PY'
@@ -1004,6 +1114,54 @@ check "a 409 from /landed still exits 0 — a merge is never undone by a refusal
 has "$OUT" "::notice" "a refused flip raises the holder handover"
 has "$OUT" "needs the claim holder" "the handover says who can finish it"
 has "$OUT" "marked task-ccc3" "the LABEL still landed, so the row is still findable by the reader"
+
+# 6f. THE SIBLING CITATIONS (task-29781d0921e5a885). A body carrying
+#     `Discharges:` lines POSTs the message to /discharges; a body without them
+#     spends no request at all. The script parses NOTHING here — these arms are
+#     about what is SENT, because what is parsed is the server's business.
+R4c="$TMPROOT/r4c"; L4c="$TMPROOT/l4c"; mkrepo "$R4c"; mkledger "$L4c"
+mkrow "$L4c" task-hhh1 in_progress builder-p ""
+S4d="$(mkcommit "$R4c" "$(printf 'fix(h): two siblings (#71)\n\nDischarges: task-sib-one c2\nDischarges: `task-sib-two`\n\nTask: task-hhh1\n')")"
+OUT="$(run "$R4c" "$L4c" --sha "$S4d")"; RC=$?
+check "a body with Discharges: lines still exits 0" "$RC" "0"
+has "$(cat "$L4c/discharges.log")" 'task-sib-one' "the /discharges body carries the FIRST cited row"
+has "$(cat "$L4c/discharges.log")" 'task-sib-two' "the /discharges body carries the SECOND cited row — a PR citing two rows sends BOTH"
+has "$(cat "$L4c/discharges.log")" '"pr": "71"' "the /discharges body sends pr as a STRING, like /landed"
+has "$(cat "$L4c/discharges.log")" "$S4d" "the /discharges body carries the merge sha"
+# THE ARM THAT MATTERS. This verb has no criterion field and no met field on the
+# wire, so a back-link cannot become a fabricated done the way a /landed
+# criterion flip could (task-48ff3f84e68aecbb). Asserted by BYTE.
+hasnt "$(cat "$L4c/discharges.log")" '"criterion"' "no /discharges body carries a criterion field"
+hasnt "$(cat "$L4c/discharges.log")" '"met"' "no /discharges body carries a met field"
+hasnt "$(cat "$L4c/discharges.log")" '"lifecycle_status"' "the /discharges body NEVER touches lifecycle_status"
+hasnt "$(cat "$L4c/discharges.log")" '"labels"' "the /discharges body NEVER touches labels"
+check "positive control: exactly ONE /discharges body was written" \
+  "$(grep -c '"commit"' "$L4c/discharges.log")" "1"
+has "$OUT" "1 sibling citation(s) posted" "the tally counts the sibling POST"
+
+# A body with NO citations spends no request — the common PR.
+S4e="$(mkcommit "$R4c" "$(printf 'fix(h): no siblings (#72)\n\nTask: task-hhh1\n')")"
+BEFORE_D="$(wc -c < "$L4c/discharges.log")"
+OUT="$(run "$R4c" "$L4c" --sha "$S4e")"
+check "a body with no Discharges: line writes NOTHING to /discharges" \
+  "$(wc -c < "$L4c/discharges.log")" "$BEFORE_D"
+has "$OUT" "0 sibling citation(s) posted" "…and the tally says so"
+
+# A DRY RUN never posts a citation either.
+R4d="$TMPROOT/r4d"; L4d="$TMPROOT/l4d"; mkrepo "$R4d"; mkledger "$L4d"
+mkrow "$L4d" task-hhh2 open builder-p ""
+S4f="$(mkcommit "$R4d" "$(printf 'fix(h): dry (#73)\n\nDischarges: task-sib-three c0\n\nTask: task-hhh2\n')")"
+OUT="$(run "$R4d" "$L4d" --sha "$S4f" --dry-run)"
+check "a --dry-run posts no sibling citation" "$(wc -c < "$L4d/discharges.log" | tr -d ' ')" "0"
+
+# AN OLD SERVER (404 on the door) IS NOT A RED. The merge already happened.
+R4e="$TMPROOT/r4e"; L4e="$TMPROOT/l4e"; mkrepo "$R4e"; mkledger "$L4e"
+mkrow "$L4e" task-hhh3 open builder-p ""
+S4g="$(mkcommit "$R4e" "$(printf 'fix(h): old server (#74)\n\nDischarges: task-sib-four\n\nTask: task-hhh3\n')")"
+OUT="$(LANDED_MARK_FIXTURE_DISCHARGES_CODE=404 run "$R4e" "$L4e" --sha "$S4g")"; RC=$?
+check "a 404 from /discharges exits 0" "$RC" "0"
+has "$OUT" "no /v1/tasks/task-hhh3/discharges door" "a ledger without the door says so, as a warning"
+has "$OUT" "marked task-hhh3" "the credited row is still marked when the sibling door is missing"
 
 # 7. THE 401 ARM. A broken secret must be loud and non-zero — a mechanism that
 #    fails quiet is the defect this script removes, reintroduced.
