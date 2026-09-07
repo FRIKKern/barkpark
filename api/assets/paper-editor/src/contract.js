@@ -13,6 +13,7 @@ export const PLACEHOLDER = {
   byline: "Add names, separated by · …",
   ingress: "Write the introduction…",
   pullquote: "Write the highlighted quote…",
+  blockquote: "Write the quote…",
 };
 
 // ── pdd-t18b: the atomic-contract resting-chrome rule (doctrine rule 6 / D13) ──
