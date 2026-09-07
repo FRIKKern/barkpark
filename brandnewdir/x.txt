@@ -1,0 +1,1 @@
+probe: a file in a genuinely new top-level directory.
