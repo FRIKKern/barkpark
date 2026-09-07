@@ -112,7 +112,14 @@ defmodule BarkparkCloud.Web.RouterBillingLifecycleTest do
       assert Billing.entitled?(team)
     end
 
-    test "correct password, immediate → 200 canceled, boxes suspended" do
+    # WAS "correct password, immediate → 200 canceled, boxes suspended". The
+    # immediate arm is REMOVED from the route (task-527f2a101b99ebf9, ruled
+    # 2026-09-07): it was owner-reachable behind nothing but this password
+    # re-confirm and no shipped client ever sent it. The pin is INVERTED rather
+    # than deleted, so the shape that used to be contract is now the shape that
+    # must be refused. The gateway-seam half of the guard lives in
+    # router_billing_cancel_immediate_refused_test.exs.
+    test "correct password, at_period_end:false → 422 invalid, nothing cancelled and no box suspended" do
       {_user, team, token} = user_with_team()
       {:ok, _sub} = Billing.subscribe(team, "supporter")
       {:ok, bp} = Registry.register_barkpark(team, %{name: "Prod", slug: "prod"})
@@ -120,10 +127,15 @@ defmodule BarkparkCloud.Web.RouterBillingLifecycleTest do
       conn =
         call(:post, "/v1/billing/cancel", %{password: @password, at_period_end: false}, token)
 
-      assert conn.status == 200
-      assert json_body(conn)["status"] == "canceled"
-      refute Billing.entitled?(team)
-      assert Registry.get_barkpark(bp.id).suspended
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "invalid"
+      assert [_sentence] = json_body(conn)["details"]["at_period_end"]
+
+      # The caller is told NO, and is not quietly handed the grace cancel
+      # instead: the subscription is exactly as it was.
+      assert %{status: "active", cancel_at_period_end: false} = Billing.live_subscription(team)
+      assert Billing.entitled?(team)
+      refute Registry.get_barkpark(bp.id).suspended
     end
 
     test "no subscription → 422 no_subscription (after password check passes)" do

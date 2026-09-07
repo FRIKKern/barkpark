@@ -92,7 +92,12 @@ defmodule BarkparkCloud.Web.RouterDetailsInternalColumnTest do
   # hand-built details map is a deliberate edit that re-reads this file, not a
   # number that drifts. Without them a typo'd regex and a clean tree look alike.
   @multi_field_constraints 7
-  @router_details_maps 10
+  # 10 -> 11 (task-527f2a101b99ebf9, 2026-09-07): POST /v1/billing/cancel gained
+  # a `details: %{at_period_end: [...]}` refusal when its immediate arm was
+  # removed from the contract. The key is the REQUEST BODY field the caller
+  # typed, not a column — `subscriptions` carries `cancel_at_period_end`, a
+  # different name — so ARM B below passes on its merits, not by exemption.
+  @router_details_maps 11
 
   ## ────────────────────────────────────────────────────────────────────
   ## PART 1 — the driven reachability table
