@@ -659,7 +659,7 @@ class BpPaperCanvas extends HTMLElement {
             if (node.type.name === "heading") {
               return PLACEHOLDER.heading(node.attrs && node.attrs.level);
             }
-            return PLACEHOLDER.paragraph;
+            return PLACEHOLDER[node.type.name] || PLACEHOLDER.paragraph;
           },
         }),
         // Smart typography — parity with ../index.js. A prose run holds no code

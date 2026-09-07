@@ -120,6 +120,23 @@ try {
     chronicle.remove();
   }
 
+  for (const [type, hint] of Object.entries({
+    eyebrow: "Add a kicker…", byline: "Add names, separated by · …",
+    ingress: "Write the introduction…", pullquote: "Write the highlighted quote…",
+  })) {
+    const empty = document.createElement("bp-paper-canvas");
+    empty.blocks = [{ id: `empty-${type}`, type, content: [], text: "", items: [] }];
+    document.body.appendChild(empty);
+    try {
+      assert.equal(empty.querySelector("[data-placeholder]")?.getAttribute("data-placeholder"), hint,
+        `${type}: an empty editable line explains its role`);
+      assert.equal(empty._editor.state.doc.textContent, "", "the hint is not authored content");
+      assert.equal(empty.flushPendingChanges(), false, "showing the hint emits no edit");
+    } finally {
+      empty.remove();
+    }
+  }
+
   console.log("mounted paste, undo, redo, and flush payload regression passed");
 } finally {
   canvas.remove();
