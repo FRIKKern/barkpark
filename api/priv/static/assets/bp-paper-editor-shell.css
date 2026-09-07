@@ -122,6 +122,25 @@
     .bp-paper-edit-toolbar .btn:hover { background: transparent; color: var(--paper-ink-soft); }
     .bp-paper-edit-toolbar .btn-destructive:hover { color: var(--paper-accent); background: var(--paper-accent-soft); }
     .bp-paper-edit-toolbar .btn:disabled { opacity: 0.35; }
+    /* Narrow pages have no outer gutter for the desktop control rail. Dock
+       only the focused block's controls; placing them above the block covers
+       the preceding prose, and nested blocks must not stack several docks. */
+    @media (max-width: 720px) {
+      .bp-paper-edit-toolbar {
+        position: fixed; top: auto; left: auto; right: 1rem;
+        bottom: calc(5rem + env(safe-area-inset-bottom, 0px)); transform: none;
+        flex-direction: row; z-index: 10;
+      }
+      .bp-paper-edit-toolbar .bp-paper-edit-actions { flex-direction: row; }
+      .bp-paper-edit-block:is(:hover, :focus-within) .bp-paper-edit-toolbar {
+        opacity: 0; pointer-events: none;
+      }
+      .bp-paper-edit-block:focus-within:not(:has(.bp-paper-edit-block:focus-within)) > .bp-paper-edit-toolbar {
+        opacity: 1; pointer-events: auto;
+      }
+      .bp-paper-edit-toolbar .btn,
+      .bp-paper-edit-toolbar .bp-paper-drag-grip { min-width: 32px; height: 32px; }
+    }
     /* The ⋮⋮ drag handle — grab affordance, warms on hover like the others. */
     .bp-paper-drag-grip {
       display: inline-flex; align-items: center; justify-content: center;
