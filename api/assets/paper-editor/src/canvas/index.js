@@ -634,6 +634,9 @@ class BpPaperCanvas extends HTMLElement {
         StarterKit.configure({
           // Same as ../index.js: heading levels 1–3, lists, history on.
           heading: { levels: [1, 2, 3] },
+          // Authored quotes have a dedicated PortableDoc editor. Native nested
+          // quotes lose their body on save and preempt `> [!note] ` shorthand.
+          blockquote: false,
           // Disable StarterKit's built-in horizontalRule so ONLY the canvas
           // `divider` node owns the <hr> parse rule + insert command. Otherwise
           // two nodes claim <hr> (ambiguous on paste/setContent) and
