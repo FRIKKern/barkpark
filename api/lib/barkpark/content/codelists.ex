@@ -19,10 +19,14 @@ defmodule Barkpark.Content.Codelists do
   ## Idempotent registration
 
   Calling `register/3` twice with the same `(plugin_name, list_id, issue)` is
-  idempotent: the codelist row's metadata is upserted, all of its existing
-  values + translations are deleted (cascading) and re-inserted from the
-  payload. Re-registration with a different `issue` creates a NEW codelist
-  row alongside the previous one (history is preserved).
+  idempotent: the codelist row's metadata is upserted, and the values +
+  translations are brought in line with the payload. When the persisted value
+  set already matches the payload exactly, the rebuild is SKIPPED entirely —
+  no `DELETE`, no `INSERT`, and every value keeps its `id` and `inserted_at`.
+  Otherwise all existing values + translations are deleted (cascading) and
+  re-inserted from the payload. Re-registration with a different `issue`
+  creates a NEW codelist row alongside the previous one (history is
+  preserved).
 
   ## Default-language fallback
 
@@ -127,8 +131,9 @@ defmodule Barkpark.Content.Codelists do
 
   Returns `{:ok, codelist}` with the persisted `Codelist` (without preloads).
   Re-registration of the same `(plugin_name, list_id, issue)` is idempotent:
-  the header row is upserted in place, and all existing values + translations
-  are deleted and replaced.
+  the header row is upserted in place. The values are rewritten only when the
+  persisted set differs from the payload; an unchanged snapshot at an
+  unchanged issue is a header touch and nothing more.
   """
   @spec register(String.t(), String.t(), map()) :: {:ok, %Codelist{}} | {:error, term()}
   def register(plugin_name, list_id, attrs)
@@ -154,9 +159,19 @@ defmodule Barkpark.Content.Codelists do
     Repo.transaction(fn ->
       Repo.set_local_statement_timeout!(:infinity)
       codelist = upsert_codelist!(plugin_name, list_id, issue, name, description)
-      written = replace_values!(codelist, values)
-      assert_payload_written!(list_id, values, written)
-      codelist
+
+      # The boot seeders re-register the SAME bundled snapshot at the SAME
+      # issue on every restart, and Barkpark auto-deploys on merge. Compare
+      # first: when the persisted set already IS the payload, the whole
+      # delete-and-rebuild is dead work. See `values_current?/2` for why the
+      # comparison cannot answer "current" for a list that needs seeding.
+      if values_current?(codelist, values) do
+        codelist
+      else
+        written = replace_values!(codelist, values)
+        assert_payload_written!(list_id, values, written)
+        codelist
+      end
     end)
   end
 
@@ -337,6 +352,152 @@ defmodule Barkpark.Content.Codelists do
         |> Ecto.Changeset.force_change(:updated_at, now)
         |> Repo.update!()
     end
+  end
+
+  # ── Unchanged-snapshot short circuit ─────────────────────────────────────
+  #
+  # THE PROPERTY: an unchanged snapshot at an unchanged issue performs no
+  # DELETE and no INSERT on `codelist_values`, so every value keeps its `id`
+  # and `inserted_at` across boots.
+  #
+  # THE DETECTION, and why it cannot skip a reseed that was actually needed:
+  # this compares the payload against the ROWS THAT ARE ACTUALLY ON DISK, not
+  # against a stored digest of what some earlier boot claimed to have written.
+  # A digest column is a promise about the past — it survives a truncate, a
+  # manual DELETE, a half-restored dump, or a schema change that dropped
+  # translations, and every one of those leaves the digest saying "current"
+  # over a codelist that is empty or wrong. Reading the rows back cannot lie
+  # about them. The fresh-install arm falls out of the same fact rather than
+  # needing its own branch: an empty table produces an empty fingerprint,
+  # which equals a non-empty payload's fingerprint for no payload, so an
+  # empty or absent codelist ALWAYS seeds.
+  #
+  # The comparison is TOTAL over the persisted set in both directions —
+  # `map_size` equality is implied by map equality, so a value present on
+  # disk and absent from the payload forces the rebuild just as a value the
+  # payload adds does. Every column the writer sets except the three it is
+  # asked to keep stable (`id`, `inserted_at`, `updated_at`) participates:
+  # `code`, `parent` (by parent CODE, since `(codelist_id, code)` is unique),
+  # `position`, `metadata`, and the full translation set per value
+  # (`language`, `label`, `description`).
+  #
+  # WHEN IT REFUSES TO ANSWER: any payload it cannot canonicalise without
+  # losing information — a duplicate `code`, a duplicate `language` within one
+  # value, or `metadata` that will not round-trip through JSON — returns
+  # `:indeterminate` and takes the rebuild path, which then fails exactly as
+  # it does today. The short circuit only ever ADDS a skip for payloads it
+  # fully understands; it never invents a success.
+  #
+  # COST: two SELECTs against one indexed `codelist_id`, against a DELETE
+  # plus ~28k rows of INSERT for the full local registry.
+  defp values_current?(%Codelist{id: codelist_id}, values) do
+    case expected_fingerprint(values) do
+      :indeterminate -> false
+      {:ok, expected} -> expected == persisted_fingerprint(codelist_id)
+    end
+  end
+
+  defp expected_fingerprint(values) do
+    {expected_value_count, _translations} = payload_totals(values)
+
+    case collect_expected(values, nil, %{}) do
+      :indeterminate ->
+        :indeterminate
+
+      fingerprint when map_size(fingerprint) == expected_value_count ->
+        {:ok, fingerprint}
+
+      # Fewer distinct codes than nodes: the payload repeats a code somewhere.
+      # `(codelist_id, code)` is unique, so this payload cannot be persisted
+      # as-is — hand it to the writer and let it raise.
+      _short ->
+        :indeterminate
+    end
+  end
+
+  defp collect_expected(inputs, parent_code, acc) do
+    Enum.reduce_while(inputs, acc, fn input, fingerprint ->
+      code = Map.fetch!(input, :code)
+      translations = Map.get(input, :translations, [])
+      canonical = canonical_translations(translations)
+
+      cond do
+        Map.has_key?(fingerprint, code) ->
+          {:halt, :indeterminate}
+
+        length(canonical) != length(translations) ->
+          {:halt, :indeterminate}
+
+        true ->
+          case canonical_metadata(Map.get(input, :metadata)) do
+            :indeterminate ->
+              {:halt, :indeterminate}
+
+            {:ok, metadata} ->
+              entry = {parent_code, Map.get(input, :position), metadata, canonical}
+
+              case collect_expected(
+                     Map.get(input, :children, []),
+                     code,
+                     Map.put(fingerprint, code, entry)
+                   ) do
+                :indeterminate -> {:halt, :indeterminate}
+                nested -> {:cont, nested}
+              end
+          end
+      end
+    end)
+  end
+
+  defp canonical_translations(translations) do
+    translations
+    |> Enum.map(fn translation ->
+      {Map.fetch!(translation, :language), Map.fetch!(translation, :label),
+       Map.get(translation, :description)}
+    end)
+    |> Enum.uniq_by(&elem(&1, 0))
+    |> Enum.sort()
+  end
+
+  # `metadata` is a jsonb column: it comes back from Postgres with string keys
+  # and JSON-native scalars regardless of what went in. Canonicalise the
+  # payload side through the same encoder so an atom-keyed map compares equal
+  # to the string-keyed map it was stored as, and refuse to answer for
+  # anything Jason cannot encode.
+  defp canonical_metadata(nil), do: {:ok, nil}
+
+  defp canonical_metadata(metadata) when is_map(metadata) do
+    {:ok, metadata |> Jason.encode!() |> Jason.decode!()}
+  rescue
+    _ -> :indeterminate
+  end
+
+  defp canonical_metadata(_other), do: :indeterminate
+
+  defp persisted_fingerprint(codelist_id) do
+    translations_by_value =
+      from(t in Translation,
+        join: v in Value,
+        on: v.id == t.codelist_value_id,
+        where: v.codelist_id == ^codelist_id,
+        select: {t.codelist_value_id, t.language, t.label, t.description}
+      )
+      |> Repo.all()
+      |> Enum.group_by(&elem(&1, 0), fn {_value_id, language, label, description} ->
+        {language, label, description}
+      end)
+
+    from(v in Value,
+      left_join: p in Value,
+      on: p.id == v.parent_id,
+      where: v.codelist_id == ^codelist_id,
+      select: {v.id, v.code, p.code, v.position, v.metadata}
+    )
+    |> Repo.all()
+    |> Map.new(fn {id, code, parent_code, position, metadata} ->
+      translations = translations_by_value |> Map.get(id, []) |> Enum.sort()
+      {code, {parent_code, position, metadata, translations}}
+    end)
   end
 
   # ── Bulk value writer ────────────────────────────────────────────────────
