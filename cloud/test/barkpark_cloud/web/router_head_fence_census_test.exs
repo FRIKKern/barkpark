@@ -261,8 +261,20 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # `session` each rise by exactly one; machine and public are untouched. (It also
   # adds the SECOND `Repo.preload(site, :barkpark)` to the router — a READ, the
   # same shape as the one the moduledoc above enumerates.)
-  @baseline_total 71
-  @baseline_session 51
+  # 2026-09-08: 72 / 52 / 8 / 12. ONE ROUTE WAS ADDED —
+  # `GET /v1/sites/:id/deployments/:dep_id/build-log`, the black box recorder's
+  # durable per-build record read by DEPLOYMENT ID (dr-bl-recorder-http-read-path).
+  # RULED NOT SIDE-EFFECTING: the handler is `Auth.require_platform_operator/2` +
+  # `Sites.BuildLog.for_deployment/2`, which performs only READS — `get_site/1`,
+  # `get_deployment/1`, `get_barkpark/1`, and one OUTBOUND box GET
+  # (`/v1/admin/site-deploy?…&record=1`, which reads a terminal.json off the box's
+  # disk). It mints nothing, burns nothing and spends no nonce, so no
+  # `side_effecting_get?/1` clause is owed. A bare HEAD costs one cross-host GET —
+  # a COST, not a mutation, and the fence rules on mutation. `require_platform_operator`
+  # delegates to `require_user`, so it lands in the SESSION bucket: `total` and
+  # `session` each rise by exactly one; machine and public are untouched.
+  @baseline_total 72
+  @baseline_session 52
   @baseline_machine 8
   @baseline_public 12
 
