@@ -40,7 +40,9 @@ defmodule Barkpark.Content.Papers.CanvasRunContextTest do
              Barkpark.PortableDoc.Patch.validate_result(
                [paragraph("a")],
                [paragraph("a"), paragraph("b")],
-               op, constraints: constraints)
+               op,
+               constraints: constraints
+             )
   end
 
   test "document run replacements stay between their untouched neighbors" do
