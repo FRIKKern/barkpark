@@ -1049,6 +1049,16 @@ defmodule BarkparkCloud.Billing do
   path). `false` cancels immediately at the gateway AND locally
   (`cancel_subscription/1` → suspend). Returns `{:ok, %Subscription{}}` or
   `{:error, :no_subscription | term}`.
+
+  NO ROUTE REACHES `false` (task-527f2a101b99ebf9, ruled 2026-09-07).
+  `POST /v1/billing/cancel` always passes `true` and refuses a body carrying
+  `at_period_end: false` with 422 `{invalid, details}`; the arity survives
+  because the immediate branch is still exercised directly by
+  `billing_lifecycle_test.exs` and by the two registers that pin what an
+  immediate cancel does (`promise_actor_manifest_test.exs`,
+  `terminal_act_residue_manifest_test.exs`). Re-routing a caller to `false` is
+  re-opening a capability that was deliberately closed — do it in a commit that
+  says so.
   """
   @spec request_cancel(Team.t() | binary(), boolean()) ::
           {:ok, Subscription.t()} | {:error, :no_subscription | term}

@@ -240,9 +240,14 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
       effect: {:flag_only, :suspend_update_all}
     },
 
-    # Immediate self-serve cancel. A REAL non-admin write path: POST
-    # /v1/billing/cancel with at_period_end: false → request_cancel/2 →
-    # cancel_subscription/1, gated by team ownership + password only.
+    # Immediate cancel. NO LONGER A SELF-SERVE PATH: until
+    # task-527f2a101b99ebf9 (ruled 2026-09-07) POST /v1/billing/cancel with
+    # at_period_end: false reached this, gated by team ownership + a password
+    # re-confirm only; the route now refuses that body 422 and the arm is
+    # request_cancel/2 → cancel_subscription/1 reached from Elixir alone. The
+    # row stays because the PROMISE ("your instances are paused") is still kept
+    # by this actor wherever it is called from — the resolvers below drive the
+    # context directly and never touched the route.
     {"billing_lapsed", :cancel_immediate} => %{
       clock: {:in_band, :cancel_immediate_suspends},
       actor: {:synchronous_call, :request_cancel_immediate},
