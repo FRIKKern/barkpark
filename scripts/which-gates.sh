@@ -4,7 +4,7 @@
 #
 # WHY IT EXISTS (task-cb42bf8ab0539891, measured on PR #16608). A builder was
 # briefed "node --test, the preview smoke, console-path-escape-check" for a
-# cloud/priv/static-only diff and went red on TWO REQUIRED contexts: the Console
+# console-static-only diff and went red on TWO REQUIRED contexts: the Console
 # gate also runs __refusal_copy_census.mjs, and the Cloud gate runs the whole
 # cloud Elixir suite because console_reader_census_test.exs reads app.js. The
 # gate list had been derived from the LANE (who owns the files) instead of from
