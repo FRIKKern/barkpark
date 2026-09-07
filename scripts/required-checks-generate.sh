@@ -198,6 +198,16 @@ EXCLUDED_BY_DECISION_REASONS=(
 )
 
 die() { echo "FAIL: $*" >&2; exit 1; }
+
+# A usage error is not a verdict: this script's nonzero codes describe something
+# it MEASURED, and a caller who typed the command wrong measured nothing. It
+# therefore gets a word and a code of its own (sysexits EX_USAGE) instead of
+# borrowing `die`'s FAIL/1, which made a did-not-run
+# indistinguishable from a real finding. 64 rather than 2 because 2 is a
+# MEASURED verdict elsewhere in this toolchain (GROWTH in
+# required-checks-floor.sh, "could not be evaluated" in the deadlock sweep), and
+# one usage code across the family beats a per-script guess.
+usage_error() { echo "usage error: $*" >&2; exit 64; }
 note() { [ "$EXPLAIN" -eq 1 ] && echo "$*" >&2 || true; }
 
 rule_enabled() {
@@ -706,7 +716,7 @@ main() {
       --status-source) SOURCE_FEED="status"; shift ;;
       --allow-single-sha) ALLOW_SINGLE_SHA=1; shift ;;
       -h|--help) usage 0 ;;
-      *) die "unknown argument: $1 (try --help)" ;;
+      *) usage_error "unknown argument: $1 (try --help)" ;;
     esac
   done
 

@@ -114,6 +114,16 @@ FLOOR_REF=""
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
+# A usage error is not a verdict: this script's nonzero codes describe something
+# it MEASURED, and a caller who typed the command wrong measured nothing. It
+# therefore gets a word and a code of its own (sysexits EX_USAGE) instead of
+# borrowing `fail`'s FAIL/1, which made a did-not-run
+# indistinguishable from a real finding. 64 rather than 2 because 2 is a
+# MEASURED verdict elsewhere in this toolchain (GROWTH in
+# required-checks-floor.sh, "could not be evaluated" in the deadlock sweep), and
+# one usage code across the family beats a per-script guess.
+usage_error() { echo "usage error: $*" >&2; exit 64; }
+
 build_payload() {
   # Note what is NOT here: `contexts`. See the header.
   jq '{
@@ -150,7 +160,7 @@ main() {
       # By SHAPE, not a line range: a range silently truncates the moment anyone
       # adds a line to the header above it.
       -h|--help) awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
-      *) fail "unknown argument: $1" ;;
+      *) usage_error "unknown argument: $1 (try --help)" ;;
     esac
   done
 
