@@ -84,20 +84,28 @@ func listEnvelopeHelpLines(cmd manifest.Command) []string {
 	if !ok {
 		return nil
 	}
+	// The example has to be RUNNABLE — the whole defect is a documented next
+	// step the caller cannot take — so it carries the command's required
+	// positional args (`bp doc ls <type>`), not just the noun and verb.
+	invocation := "bp " + cmd.Noun + " " + cmd.Verb
+	for _, a := range cmd.Args {
+		if a.Required {
+			invocation += " <" + a.Name + ">"
+		}
+	}
 	lines := []string{
 		"",
 		"machine-readable output: -o json (or -o yaml)",
-		fmt.Sprintf("  rows arrive under   .%s[]   — the rows are NOT at the top level and NOT under .%s",
-			env.Key, cmd.Noun),
+		fmt.Sprintf("  rows arrive under   .%s[]   — NOT at the top level, and NOT under a key named after the noun", env.Key),
 	}
 	if env.IDField != "" {
 		lines = append(lines,
 			fmt.Sprintf("  each row's id       .%s[].%s", env.Key, env.IDField),
-			fmt.Sprintf("  e.g. bp %s %s -o json | jq -r '.%s[].%s'", cmd.Noun, cmd.Verb, env.Key, env.IDField))
+			fmt.Sprintf("  e.g. %s -o json | jq -r '.%s[].%s'", invocation, env.Key, env.IDField))
 	} else {
 		lines = append(lines,
-			fmt.Sprintf("  e.g. bp %s %s -o json | jq '.%s[0]'   (the row's id field is not fixed by this CLI — read one row)",
-				cmd.Noun, cmd.Verb, env.Key))
+			fmt.Sprintf("  e.g. %s -o json | jq '.%s[0]'   (the row's id field is not fixed by this CLI — read one row)",
+				invocation, env.Key))
 	}
 	lines = append(lines,
 		"  A parser keyed on the wrong key reads ZERO rows and cannot tell that from an empty result.")
