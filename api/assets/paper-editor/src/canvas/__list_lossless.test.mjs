@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+
+for (const path of ["../styles.css", "../../../../priv/static/assets/bp-paper-editor-shell.css"]) {
+  const css = readFileSync(new URL(path, import.meta.url), "utf8");
+  assert.match(css, /\[data-bp-text-boundary\]\s*\{[^}]*border-inline-start:/,
+    "both the standalone editor and the public/Studio shell distinguish the notice from authored prose");
+}
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   pretendToBeVisual: true, url: "http://localhost/",
