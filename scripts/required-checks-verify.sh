@@ -46,6 +46,8 @@
 #
 # EXIT CODES   0 = agree · 1 = drift / prose contradicts the spec / cannot read
 #              3 = DEADLOCK · 4 = RE-RUN
+#              64 = USAGE (the caller typed it wrong — not a measurement,
+#              so it must not borrow drift's word or its code)
 #
 # 4 is returned by --deadlock, the mode a caller points at a SPECIFIC head (the
 # merge verb's pre-flight). --full and --ci SAMPLE an arbitrary settled head, so
@@ -117,6 +119,16 @@ QUIET=0
 WORKFLOWS_DIR="$REPO_ROOT/.github/workflows"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
+
+# A usage error is not a verdict: this script's nonzero codes describe something
+# it MEASURED, and a caller who typed the command wrong measured nothing. It
+# therefore gets a word and a code of its own (sysexits EX_USAGE) instead of
+# borrowing `fail`'s FAIL/1, which made a did-not-run
+# indistinguishable from a real finding. 64 rather than 2 because 2 is a
+# MEASURED verdict elsewhere in this toolchain (GROWTH in
+# required-checks-floor.sh, "could not be evaluated" in the deadlock sweep), and
+# one usage code across the family beats a per-script guess.
+usage_error() { echo "usage error: $*" >&2; exit 64; }
 say()  { [ "$QUIET" -eq 1 ] || echo "$*"; }
 
 read_spec() {
@@ -1999,7 +2011,7 @@ main() {
       --selftest) MODE="selftest"; shift ;;
       --quiet) QUIET=1; shift ;;
       -h|--help) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-      *) fail "unknown argument: $1" ;;
+      *) usage_error "unknown argument: $1 (try --help)" ;;
     esac
   done
 

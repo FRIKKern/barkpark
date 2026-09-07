@@ -166,13 +166,20 @@ defmodule Barkpark.Content.Lifecycle do
   # `title` COLUMN is written OUTSIDE that projection — `Content.Mutations`
   # builds `attrs["title"]` from the patch's `set` map while DROPPING `"title"`
   # from the merged content — so `doc patch <type> <id> --set title=X` on a
-  # blocks-bearing document lands the column while the bound title block
-  # overwrites `content["title"]` straight back to its create-time value. The
-  # patch answers 200 with a freshly bumped `_rev`; only a read of the stored row
-  # shows the value was discarded.
+  # blocks-bearing document USED TO land the column while the bound title block
+  # overwrote `content["title"]` straight back to its create-time value. The
+  # patch answered 200 with a freshly bumped `_rev`; only a read of the stored
+  # row showed the value was discarded. `Content.BoundFieldSync` closed that
+  # door (task-d8785cff163c8013) by writing the patched value THROUGH to the
+  # bound block projection re-derives the key from.
   #
-  # This gate does not repair that write. It stops the divergence being COPIED
-  # ONTO THE PUBLISHED ROW, which is where it stops being recoverable:
+  # THE GATE KEEPS ITS TEETH. The patch door is one of several writers that can
+  # move the column and the block list independently: `replace` /
+  # `createOrReplace` take a caller-supplied `title` alongside a caller-supplied
+  # `content["blocks"]` with nothing forcing them to agree, an import or a
+  # migration can write either side, and every row that diverged BEFORE the
+  # write-through is still on disk. This gate is what stops any of them being
+  # COPIED ONTO THE PUBLISHED ROW, which is where it stops being recoverable:
   # `publish_after_gate/5` builds `pub_attrs` with `"title" => draft.title` (the
   # column) and `"content" => pub_content` (carrying the stale block/preview
   # title), the generated `search_vector` then indexes BOTH, `doc get` answers
@@ -215,9 +222,9 @@ defmodule Barkpark.Content.Lifecycle do
           "#{inspect(column)} while the bound title block (and therefore the projected " <>
           "content[\"title\"] and content[\"preview\"]) is #{inspect(block_title)}. " <>
           "Publishing would put both on one row and index both for search, with nothing to say " <>
-          "which was meant. `doc patch --set title=` writes the COLUMN ONLY — the block is what " <>
-          "projection re-derives the content title from — so set the title through the title " <>
-          "block, then publish."}}
+          "which was meant. `doc patch --set title=` now writes the bound title block through " <>
+          "as well as the column (Content.BoundFieldSync), so re-patching this document's title " <>
+          "reconciles both sides — then publish."}}
     else
       _ -> :ok
     end
@@ -319,6 +326,8 @@ defmodule Barkpark.Content.Lifecycle do
                   {pub_result, prev_pub_rev} =
                     case Content.get_document(pid, type, dataset, opts) do
                       {:ok, existing} ->
+                        existing = lock_published_paper(existing, type)
+                        pub_attrs = advance_paper_publish_revision(pub_attrs, existing, type)
                         {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
 
                       _ ->
@@ -474,6 +483,29 @@ defmodule Barkpark.Content.Lifecycle do
         {:error, {:duplicate_of, annotate_claimed_survivor(payload, draft, worker)}}
     end
   end
+
+  # A whole-document publish replaces the same content that native Paper ops
+  # fence with content["rev"]. Never copy an old draft's counter onto that row.
+  # Lock before reading the counter so a concurrent op cannot make us reuse its
+  # revision between this read and the published update. Other types are unchanged.
+  defp lock_published_paper(%Document{id: id}, "paper") do
+    Repo.one(from(d in Document, where: d.id == ^id, lock: "FOR UPDATE")) ||
+      Repo.rollback(:not_found)
+  end
+
+  defp lock_published_paper(existing, _type), do: existing
+
+  defp advance_paper_publish_revision(attrs, %Document{content: current}, "paper") do
+    Map.update!(attrs, "content", fn content ->
+      rev = max(paper_stream_revision(content), paper_stream_revision(current)) + 1
+      Map.put(content, "rev", rev)
+    end)
+  end
+
+  defp advance_paper_publish_revision(attrs, _existing, _type), do: attrs
+
+  defp paper_stream_revision(%{"rev" => rev}) when is_integer(rev) and rev >= 0, do: rev
+  defp paper_stream_revision(_content), do: 0
 
   # The worker holding this draft's claim, or nil when the draft carries none.
   # Keyed on `claim.worker` (the field `Tasks.Close` CAS's against together with
