@@ -322,18 +322,40 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # Brief claim v2 = {worker, epoch, now} only — the identity + fencing +
   # now-line a board or resuming agent needs. work_digest / work_field_digests /
-  # ts_iso / execution_policy are full-view (and `task get`) detail. A claim
-  # with NEITHER a worker NOR a now-line carries no signal a list reader acts
-  # on (cut c) → nil, which prune_nils/1 then omits from the card.
+  # ts_iso / execution_policy are full-view (and `task get`) detail.
+  #
+  # cut (c), TIGHTENED (task-7385811ef5120f3a): the card carries a claim only
+  # when it names a WORKER. The old rule kept the block whenever a worker OR a
+  # now-line survived, which let LAPSED RESIDUE ride: when a lease is swept the
+  # server nulls `claim.worker` and leaves `epoch` + the last `now` line behind,
+  # so a row that is back on the ready queue — claimable by anyone — still
+  # rendered a claim object. Measured 2026-09-07 on a live `bp task ready
+  # --limit 50`: 16 of 50 cards carried a claim, 7 of them worker-less.
+  #
+  # WHY WORKER AND NOT `expired_at`: ownership on this card IS `claim.worker`.
+  # Every reader that asks "who holds this row" already reads that field and
+  # treats a blank as unheld — `taskScanRowMatcher` (internal/cli/tasks_scan.go)
+  # trims worker to decide `--claimed`, and `peek_claim/1`
+  # (plugins/tasks/web/board_live.ex) requires a non-empty binary worker. A
+  # `ready` row cannot hold a live claim by construction, so nothing that
+  # survives here is an ownership signal being withheld.
+  #
+  # NOTHING IS LOST, ONLY MOVED: this is the brief LIST card. `render_doc/2`
+  # :full — the shape `bp task get <doc_id>` and `?view=full` return — still
+  # emits `content.claim` verbatim, history and all. A live claim (worker
+  # present, as every `in_progress` row on `/v1/tasks/prime` has) is untouched.
   defp brief_claim(%{} = claim) do
-    worker = Map.get(claim, "worker")
-    now = Map.get(claim, "now")
+    case Map.get(claim, "worker") do
+      nil ->
+        nil
 
-    if is_nil(worker) and is_nil(now) do
-      nil
-    else
-      %{"worker" => worker, "epoch" => Map.get(claim, "epoch"), "now" => brief_now(now)}
-      |> prune_nils()
+      worker ->
+        %{
+          "worker" => worker,
+          "epoch" => Map.get(claim, "epoch"),
+          "now" => brief_now(Map.get(claim, "now"))
+        }
+        |> prune_nils()
     end
   end
 
@@ -534,9 +556,22 @@ defmodule BarkparkWeb.TasksController.Params do
       else: base
   end
 
+  # MIRRORS THE EMISSION RULE, not just the caps: a now-line only counts as
+  # truncated when it actually RIDES the card. Since brief_claim/1 drops a
+  # worker-less claim whole (task-7385811ef5120f3a), a lapsed residue with a
+  # long now-line no longer ships a … anywhere, and counting it here would put
+  # the honesty banner on a page that cut nothing visible — charter law 2's
+  # line pointing at a truncation the reader cannot find.
   defp brief_truncated?(%Document{} = doc) do
+    content = doc.content || %{}
+    claim = Map.get(content, "claim")
+
+    now_text =
+      if is_map(claim) and not is_nil(Map.get(claim, "worker")),
+        do: get_in(claim, ["now", "text"])
+
     over_limit?(doc.title, @brief_title_limit) or
-      over_limit?(get_in(doc.content || %{}, ["claim", "now", "text"]), @brief_now_text_limit)
+      over_limit?(now_text, @brief_now_text_limit)
   end
 
   defp over_limit?(s, limit) when is_binary(s), do: String.length(s) > limit

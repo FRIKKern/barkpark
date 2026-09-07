@@ -3564,12 +3564,18 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert String.ends_with?(card["title"], "…")
       assert String.valid?(card["title"])
 
-      # now.text: capped at 160 graphemes, same marker; ts trimmed to seconds.
-      assert String.length(card["claim"]["now"]["text"]) == 160
-      assert String.ends_with?(card["claim"]["now"]["text"], "…")
-      assert card["claim"]["now"]["ts"] == "2026-07-19T12:00:00Z"
+      # task-7385811ef5120f3a: the worker-less residue no longer rides a READY
+      # card at all, so this page's now-line cannot be the truncation witness.
+      # The now.text cap + seconds-trimmed ts are proven on the surface that
+      # HAS a live claim — "prime inherits the v2 cuts: in_progress now.text
+      # capped + top-level help line" below, whose row is claimed for real.
+      refute Map.has_key?(card, "claim")
 
-      # ONE top-level help line names the escape hatch.
+      # ONE top-level help line names the escape hatch — and here it is carried
+      # by the TITLE alone, which is the point: brief_truncated?/1 must track
+      # what actually got cut ON THE WIRE. A lapsed now-line that never shipped
+      # must not raise the banner (proven in brief_claim_lapsed_test.exs); a
+      # capped title still must.
       assert payload["help"] == [
                "truncated fields end with …; full record via bp task get <doc_id>"
              ]
@@ -4012,7 +4018,10 @@ defmodule BarkparkWeb.TasksControllerTest do
           # detail — the card names the term only" above.
           "reopen_trigger" => "never — this row is a byte-ceiling fixture",
           # Worker-less claim residue (a live worker would exclude the row
-          # from ready) — now-line + epoch survive as the hostile payload.
+          # from ready). Since task-7385811ef5120f3a this residue is DROPPED
+          # from the brief card whole — the assertion below pins that, and the
+          # fixture keeps carrying it so the drop stays measured instead of
+          # becoming an absent input nobody notices.
           "claim" => %{
             "epoch" => 7,
             "ts_iso" => ts,
@@ -4032,8 +4041,15 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert card["criteria_met"] == 2
       assert card["criteria_total"] == 5
       assert String.length(card["title"]) == 96
-      assert String.length(card["claim"]["now"]["text"]) == 160
 
+      # task-7385811ef5120f3a: the lapsed residue is gone from the card. Its
+      # now-line and epoch remain on the record and ride `bp task get`; a READY
+      # row is by construction not live-held, so nothing owned is withheld.
+      refute Map.has_key?(card, "claim")
+
+      # …and the honesty line still fires, from the TITLE cap — which is the
+      # point of keeping it asserted here: the banner must track what actually
+      # got cut on the wire, not what the raw record happened to contain.
       assert payload["help"] == [
                "truncated fields end with …; full record via bp task get <doc_id>"
              ]
