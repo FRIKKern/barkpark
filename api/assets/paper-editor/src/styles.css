@@ -1273,6 +1273,18 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-paper-editor-body li > p { margin: 0; }
 /* No authored article palette: retain the browser's legacy paragraph rhythm. */
 [data-paper-palette="legacy"] .bp-paper-editor-body .ProseMirror > p { margin: 1em 0; }
+[data-paper-palette="legacy"] .bp-paper-contextual-controls {
+  top: auto; bottom: 100%; color: CanvasText;
+}
+[data-paper-palette="legacy"] .bp-paper-contextual-toggle {
+  background: Canvas; font-size: 0.75rem; line-height: 1; padding: 1px 6px;
+}
+[data-paper-palette="legacy"] .bp-paper-contextual-controls[open] {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+[data-paper-palette="legacy"] .bp-paper-contextual-panel {
+  background: Canvas; color: CanvasText; max-height: none; overflow: visible;
+}
 /* Preserve typed spaces without giving trailing spaces their own wrap width. */
 .bp-paper-surface .ProseMirror { white-space: pre-wrap; }
 

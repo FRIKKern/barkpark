@@ -8,6 +8,10 @@ for (const file of ["../styles.css", "../../../../priv/static/assets/bp-paper-ed
   const css = readFileSync(new URL(file, import.meta.url), "utf8");
   assert.match(css, /\[data-paper-palette="legacy"\] \.bp-paper-editor-body \.ProseMirror > p\s*\{\s*margin: 1em 0;\s*\}/,
     "legacy paragraphs retain reader spacing without changing article typography");
+  assert.match(css, /\[data-paper-palette="legacy"\] \.bp-paper-contextual-controls\s*\{[^}]*bottom: 100%;/s,
+    "legacy fallback control sits above, not over, authored text");
+  assert.match(css, /\[data-paper-palette="legacy"\] \.bp-paper-contextual-controls\[open\]\s*\{[^}]*position: relative;/s,
+    "opened legacy configuration remains reachable in normal flow");
 }
 
 const { window } = new JSDOM("<!doctype html><body></body>", { pretendToBeVisual: true, url: "http://localhost/" });
