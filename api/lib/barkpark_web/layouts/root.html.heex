@@ -1221,6 +1221,11 @@
     html[data-width-bucket="phone"] .scope-title {
       min-width: 0; max-width: 100%;
     }
+    html[data-width-bucket="narrow"] .scope-menu,
+    html[data-width-bucket="phone"] .scope-menu {
+      /* The bounded popover, not the shell, owns its three Miller columns. */
+      overflow-x: auto;
+    }
 
     /* ── Self-update bar (isu-w1): slim admin strip pinned above the topbar.
        Server-rendered chrome (admin + :behind only); the `bp-update-bar`

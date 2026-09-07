@@ -34,6 +34,13 @@ defmodule BarkparkWeb.Studio.TopbarFocusContainmentTest do
     assert body =~ "gap: 24px;"
   end
 
+  test "the narrow workspace menu owns its overflowing Miller columns" do
+    for bucket <- ["narrow", "phone"] do
+      selector = ~s|html[data-width-bucket="#{bucket}"] .scope-menu|
+      assert rule!(File.read!(@root), selector) =~ "overflow-x: auto;"
+    end
+  end
+
   defp rule!(source, selector) do
     # Match each comma-list member independently, never a substring of a
     # bucket selector. Missing rules fail loudly rather than testing nil.
