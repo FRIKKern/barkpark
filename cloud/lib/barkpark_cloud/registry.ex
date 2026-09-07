@@ -7873,14 +7873,21 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
-  dwb-webhook fail-fast interim: mint a Deployment that is born TERMINAL-`failed`
-  in ONE transaction — a "this push happened but can't be built yet" tombstone.
+  dwb-webhook fail-fast: mint a Deployment that is born TERMINAL-`failed` in ONE
+  transaction — a "this push happened and there was nothing to build it from"
+  tombstone.
 
-  A GitHub push webhook currently has no artifact and no way to build from source
-  (that needs the human-gated GitHub App, gh-1). Enqueuing it as `queued` conjures
-  a zombie: the builder never claims a source-less row, so the console shows it as
-  "running" forever. Instead we record the push HONESTLY as a `failed` row carrying
-  `reason` — the console renders a calm blocked-tone with the `bp deploy` workaround.
+  NOT the github-push path. Source builds SHIPPED: the router gates on
+  `github_build_available?/1` (`is_binary(site.github_repo)`) and a push on a
+  repo-backed site takes `create_deployment/2`, minting a QUEUED artifact-less
+  row the builder claims and clones at `git_ref`. This function is the FALLBACK
+  arm for the one case that has no source at all — a site with NO linked repo.
+
+  It exists because enqueuing such a push as `queued` conjures a zombie: the
+  builder never claims a source-less row, so the console shows it as "running"
+  forever. Instead we record the push HONESTLY as a `failed` row carrying
+  `reason` — copy that names the missing repo and the link-a-repo remedy, which
+  `FailureCopy.humanize/1` renders in a calm blocked tone.
 
   Mechanics (charter D1):
 
