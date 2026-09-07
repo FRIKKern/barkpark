@@ -259,3 +259,51 @@ func TestDriftCheckWouldHaveCaughtTheMeasuredMisread(t *testing.T) {
 		t.Errorf("the drift note does not name the key the caller should read: %s", note)
 	}
 }
+
+// TestSearchSharesTheKeyAndNotTheIDField pins the one entry in
+// commandListEnvelopes that a tidy-minded editor would "correct" into being
+// wrong. doc.ls, doc.query and search.query all return their rows under
+// "documents", so the obvious generalisation is that they share an id field
+// too. They do not: doc.ls/doc.query return STORED DOCUMENTS keyed `_id`,
+// while search.query returns PROJECTIONS (id/type/title/slug/snippet/
+// highlights) keyed `id`, with no `_id` anywhere on the row.
+//
+// This is not hypothetical and it is not a hypothetical caught by review: this
+// file SHIPPED `_id` for search.query, and listEnvelopeDrift — the check in
+// this same PR — caught it against the live server with the message
+//
+//	envelope drift: `bp search query --help` documents each row's id at
+//	.documents[]._id, but the rows in this response carry no such field.
+//	A jq keyed on it resolves to null on every row.
+//
+// which is precisely the defect the whole row is about: a documented remedy
+// the caller cannot take. The guard caught its own author. Keeping that
+// asymmetry pinned is worth more than the tidier table.
+func TestSearchSharesTheKeyAndNotTheIDField(t *testing.T) {
+	docLs, ok := commandListEnvelopes["doc.ls"]
+	if !ok {
+		t.Fatal("doc.ls fell out of commandListEnvelopes — this test can no longer discriminate")
+	}
+	search, ok := commandListEnvelopes["search.query"]
+	if !ok {
+		t.Fatal("search.query fell out of commandListEnvelopes — this test can no longer discriminate")
+	}
+	if docLs.Key != search.Key {
+		t.Fatalf("doc.ls and search.query no longer share an envelope key (%q vs %q) — "+
+			"if the server really split them, update this test's premise; do not delete it",
+			docLs.Key, search.Key)
+	}
+	if search.IDField != "id" {
+		t.Errorf("search.query documents its row id as %q, want \"id\" — search hits are "+
+			"projections, not stored documents, and they carry no _id. A caller's jq "+
+			"keyed on the documented field resolves to null on every row.", search.IDField)
+	}
+	if docLs.IDField != "_id" {
+		t.Errorf("doc.ls documents its row id as %q, want \"_id\"", docLs.IDField)
+	}
+	if search.IDField == docLs.IDField {
+		t.Errorf("search.query and doc.ls now claim the SAME id field (%q) under the same "+
+			"envelope key. One of them is wrong: verify against a live response before "+
+			"making this table agree with itself.", search.IDField)
+	}
+}

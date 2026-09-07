@@ -55,19 +55,28 @@ type listEnvelopeShape struct {
 //
 //	task.ls / task.ready → tasks_controller.ex, the `docs:` key ·
 //	                       rows built by tasks_controller/params.ex, the `doc_id:` field
-//	doc.ls / doc.query / search.query → `documents:` · rows are stored documents,
-//	                       keyed `_id` (Envelope.render)
+//	doc.ls / doc.query   → `documents:` · rows are stored documents, keyed `_id`
+//	                       (Envelope.render)
+//	search.query         → `documents:` TOO, but keyed `id`, NOT `_id` — the hits
+//	                       are projections, not stored documents. Same key, different
+//	                       id field, which is exactly the guess this file exists to
+//	                       remove: a caller who generalises from doc.ls gets null.
 //	token.ls             → member_controller.ex, the `tokens:` key · rows matched on
 //	                       "id" by the destroy preview (destroy_confirm.go)
 //	workspace.member-ls  → member_controller.ex, the `members:` key — the seat rows
 //	                       carry several ref fields (identity/email/principal_id/
 //	                       id), so no single id field is claimed
 var commandListEnvelopes = map[string]listEnvelopeShape{
-	"task.ls":                 {Key: "docs", IDField: "doc_id"},
-	"task.ready":              {Key: "docs", IDField: "doc_id"},
-	"doc.ls":                  {Key: "documents", IDField: "_id"},
-	"doc.query":               {Key: "documents", IDField: "_id"},
-	"search.query":            {Key: "documents", IDField: "_id"},
+	"task.ls":    {Key: "docs", IDField: "doc_id"},
+	"task.ready": {Key: "docs", IDField: "doc_id"},
+	"doc.ls":     {Key: "documents", IDField: "_id"},
+	"doc.query":  {Key: "documents", IDField: "_id"},
+	// search.query shares doc.ls's ENVELOPE KEY and does NOT share its id field:
+	// search hits are projections (id/type/title/slug/snippet/highlights), not
+	// stored documents, so they carry `id` and no `_id`. Verified by running it
+	// against the live server 2026-09-07 — and caught by listEnvelopeDrift itself
+	// after this file first shipped `_id` here by inheriting the sibling rows.
+	"search.query":            {Key: "documents", IDField: "id"},
 	"media.ls":                {Key: "assets"},
 	"media.search":            {Key: "hits"},
 	"media.collections":       {Key: "collections"},
