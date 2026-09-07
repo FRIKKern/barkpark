@@ -1139,3 +1139,136 @@ func TestPerformManagedDeployReadbackTerminatesOnAnUnresolvableExpectation(t *te
 		t.Errorf("polled %d times against an unresolvable expectation, want 1", *calls)
 	}
 }
+
+// strandedManagedRow is a box Barkpark Cloud provisioned that NEVER WENT LIVE:
+// mode "managed" with an EMPTY Host — the control plane's own not_live state
+// (mode == "managed" and host in (nil, "")). The URL is still stamped, which is
+// precisely what made the hazard quiet: healthHost resolved to the stranded
+// box while the ssh target resolved to something else entirely.
+func strandedManagedRow() deployFleetRow {
+	row := managedRow()
+	row.Host = ""
+	return row
+}
+
+// TestRunCloudDeployStrandedManagedNeverTouchesTheStagingBox is THE DETECTOR.
+//
+// BARKPARK_STAGING_HOST IS SET IN THIS FIXTURE ON PURPOSE — without it the
+// pre-fix code errors "can't resolve a host", which is noisy but safe, and the
+// test would never reach the hazard. With it set, the pre-fix code resolved
+// via == "BARKPARK_STAGING_HOST", skipped the managed fork (which requires
+// via == "control-plane"), and ssh-deployed 9.9.9.9 — the STAGING box — under
+// the stranded box's name, with healthHost still pointing at gyl.barkpark.cloud.
+// The read-back would have reported the mismatch only AFTER 9.9.9.9 moved.
+//
+// The assertions that carry the property are the ZERO counters: the refusal must
+// happen before the ssh feeder is constructed, before the relay is called, and
+// before the local deploy script is even opened.
+func TestRunCloudDeployStrandedManagedNeverTouchesTheStagingBox(t *testing.T) {
+	withTempConfigHome(t)
+	t.Setenv("BARKPARK_STAGING_HOST", "9.9.9.9")
+	stubResolveStagingRow(t, strandedManagedRow(), true, nil)
+	rec := stubDeployFeeder(t)
+	relay := stubManagedTrigger(t, "updating", nil)
+	scriptReads := stubReadDeployScriptCounter(t)
+	lsRemotes := stubDeployLsRemote(t, readbackSha+"\trefs/heads/main\n", nil)
+	statusReads := stubDeployStatus(t,
+		statusReply{code: 200, body: statusBody("1111111111")},
+		statusReply{code: 200, body: statusBody(readbackSha[:9])},
+	)
+	stubDeploySleep(t)
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	code := runCloudDeploy(w, globals{}, []string{"gyl"})
+
+	if code == exitOK {
+		t.Fatalf("a host-less MANAGED row exited 0 — a deploy ran:\n%s", stdout.String())
+	}
+	if rec.calls != 0 {
+		t.Errorf("the ssh feeder ran %d times on a stranded managed row (host=%q) — with BARKPARK_STAGING_HOST set that is a deploy of the STAGING box under the stranded box's name", rec.calls, rec.host)
+	}
+	if rec.host == "9.9.9.9" {
+		t.Errorf("the deploy targeted the STAGING box %q while the operator named a stranded managed box", rec.host)
+	}
+	if relay.calls != 0 {
+		t.Errorf("the control-plane relay ran %d times for a box that never went live", relay.calls)
+	}
+	if *scriptReads != 0 {
+		t.Errorf("the local deploy script was read %d times — the refusal must precede every step of the deploy", *scriptReads)
+	}
+	if *lsRemotes != 0 || *statusReads != 0 {
+		t.Errorf("the refusal made network reads: ls-remote=%d status=%d — criterion 1 wants it BEFORE any network call", *lsRemotes, *statusReads)
+	}
+	msg := stdout.String() + stderr.String()
+	lower := strings.ToLower(msg)
+	for _, want := range []string{"never went live", "not_live", "gyl"} {
+		if !strings.Contains(lower, want) {
+			t.Errorf("the refusal does not name the box's actual state (%q missing):\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "9.9.9.9") {
+		t.Errorf("the refusal mentions the staging IP as if it were a target:\n%s", msg)
+	}
+}
+
+// TestRunCloudDeployStrandedManagedStillTakesHostFlag is the fix's own negative
+// arm: the refusal is gated on hostFlag == "", so an operator who KNOWS the
+// address keeps the ssh escape hatch even on a stranded managed row.
+func TestRunCloudDeployStrandedManagedStillTakesHostFlag(t *testing.T) {
+	withTempConfigHome(t)
+	t.Setenv("BARKPARK_STAGING_HOST", "9.9.9.9")
+	stubResolveStagingRow(t, strandedManagedRow(), true, nil)
+	rec := stubDeployFeeder(t)
+	relay := stubManagedTrigger(t, "updating", nil)
+	stubDeployScript(t, "deploy/instance-deploy.sh", "#!/usr/bin/env bash\n")
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	if code := runCloudDeploy(w, globals{}, []string{"gyl", "--host", "1.2.3.4"}); code != exitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, exitOK, stderr.String())
+	}
+	if rec.calls != 1 || rec.host != "1.2.3.4" {
+		t.Errorf("--host on a stranded managed box: feeder calls=%d host=%q, want 1 on 1.2.3.4", rec.calls, rec.host)
+	}
+	if relay.calls != 0 {
+		t.Errorf("--host reached the relay %d times", relay.calls)
+	}
+}
+
+// TestRunCloudDeployStrandedSelfHostedIsUnaffected: the guard keys on mode
+// "managed" exactly. A host-less row in any OTHER mode keeps the behaviour it
+// had — BARKPARK_STAGING_HOST resolution — because a self-hosted row's empty
+// Host means "the plane never knew the address", not "the box never went live",
+// and the env knob is the documented way to supply it.
+func TestRunCloudDeployStrandedSelfHostedIsUnaffected(t *testing.T) {
+	for _, mode := range []string{"", "self_hosted", "byo"} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			withTempConfigHome(t)
+			t.Setenv("BARKPARK_STAGING_HOST", "9.9.9.9")
+			row := strandedManagedRow()
+			row.Mode = mode
+			stubResolveStagingRow(t, row, true, nil)
+			rec := stubDeployFeeder(t)
+			stubDeployScript(t, "deploy/instance-deploy.sh", "#!/usr/bin/env bash\n")
+			stubDeploySleep(t)
+			stubDeployLsRemote(t, readbackSha+"\trefs/heads/main\n", nil)
+			stubDeployStatus(t,
+				statusReply{code: 200, body: statusBody("1111111111")},
+				statusReply{code: 200, body: statusBody(readbackSha[:9])},
+			)
+
+			var stdout, stderr bytes.Buffer
+			w := newWriter(&stdout, &stderr)
+			w.output = "table"
+			if code := runCloudDeploy(w, globals{}, []string{"gyl"}); code != exitOK {
+				t.Fatalf("mode %q: exit = %d, want %d\n%s", mode, code, exitOK, stderr.String())
+			}
+			if rec.calls != 1 || rec.host != "9.9.9.9" {
+				t.Errorf("mode %q: feeder calls=%d host=%q, want 1 on 9.9.9.9 — the env fallback must be unchanged for non-managed rows", mode, rec.calls, rec.host)
+			}
+		})
+	}
+}
