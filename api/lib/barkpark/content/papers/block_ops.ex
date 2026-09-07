@@ -1416,6 +1416,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
       nil ->
         fold_paper_ops(blocks, ops)
 
+      %{container_kind: "document"} = context ->
+        # The segment owns local ordering, but locks and declarations belong to
+        # the whole Paper. Check the spliced result before any write can occur.
+        with {:ok, folded, ids} <-
+               CanvasRunContext.map_run(blocks, context, &fold_paper_ops(&1, ops, [])),
+             {:ok, folded} <-
+               Patch.validate_result(blocks, folded, %{"op" => "canvas-run"},
+                 constraints: Papers.Template.paper_declarations()
+               ) do
+          {:ok, folded, ids}
+        end
+
       context ->
         CanvasRunContext.map_run(blocks, context, fn run_blocks ->
           fold_paper_ops(run_blocks, ops, [])

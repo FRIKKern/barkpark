@@ -829,7 +829,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-document-rev={@document_rev}
       data-paper-container-id={@container_id}
       data-paper-container-run={@container_id && @run_ordinal}
-      data-paper-container-kind={@container_kind}
+      data-paper-container-kind={if is_nil(@container_id), do: "document", else: @container_kind}
       data-paper-container-row-id={@container_row_id}
       data-paper-container-column-index={@container_column_index}
       data-test-id="paper-canvas-run"

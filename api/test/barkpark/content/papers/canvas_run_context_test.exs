@@ -3,6 +3,85 @@ defmodule Barkpark.Content.Papers.CanvasRunContextTest do
 
   alias Barkpark.Content.Papers.CanvasRunContext
 
+  test "spliced document results retain the whole-document lock and identity fences" do
+    locked = %{"id" => "locked", "type" => "heading", "locked" => true}
+    before = [paragraph("a"), locked]
+    op = %{"op" => "canvas-run"}
+
+    assert {:error, {:locked_block, "locked", "canvas-run"}} =
+             Barkpark.PortableDoc.Patch.validate_result(
+               before,
+               [paragraph("new") | before],
+               op,
+               []
+             )
+
+    assert {:error, _duplicate} =
+             Barkpark.PortableDoc.Patch.validate_result(
+               before,
+               before ++ [paragraph("a")],
+               op,
+               []
+             )
+
+    assert {:ok, ^before} = Barkpark.PortableDoc.Patch.validate_result(before, before, op, [])
+
+    constraints = [
+      %{
+        kind: "paragraph",
+        presence: :required,
+        count: {:max, 1},
+        position: [:free],
+        locked: false
+      }
+    ]
+
+    assert {:error, {:constraint, _message, "canvas-run"}} =
+             Barkpark.PortableDoc.Patch.validate_result(
+               [paragraph("a")],
+               [paragraph("a"), paragraph("b")],
+               op, constraints: constraints)
+  end
+
+  test "document run replacements stay between their untouched neighbors" do
+    before = %{"id" => "quote", "type" => "blockquote", "qa" => %{"keep" => true}}
+    blocks = [paragraph("title"), before, paragraph("trigger"), paragraph("tail")]
+    context = %{container_kind: "document", container_run_ids: ["trigger", "tail"]}
+    callout = %{"id" => "new", "type" => "callout", "content" => []}
+
+    assert {:ok, ^context} = CanvasRunContext.normalize(context)
+
+    assert {:ok, updated, :folded} =
+             CanvasRunContext.map_run(blocks, context, fn [_trigger, tail] ->
+               {:ok, [callout, tail], :folded}
+             end)
+
+    assert updated == [paragraph("title"), before, callout, paragraph("tail")]
+
+    assert {:error, :canvas_run_not_found} =
+             CanvasRunContext.map_run(
+               blocks,
+               %{context | container_run_ids: ["trigger", "title"]},
+               fn _ ->
+                 flunk("stale or non-contiguous document runs must not reach the fold")
+               end
+             )
+
+    assert {:error, :canvas_run_id_collision} =
+             CanvasRunContext.map_run(blocks, context, fn run ->
+               {:ok, [paragraph("title") | run], :folded}
+             end)
+
+    for extra <- [
+          %{container_id: "quote"},
+          %{container_row_id: "row"},
+          %{container_column_index: 0}
+        ] do
+      assert {:error, :invalid_canvas_run_context} =
+               CanvasRunContext.normalize(Map.merge(context, extra))
+    end
+  end
+
   test "normalizes the stable boundary context and rejects ambiguous shapes" do
     assert {:ok, %{container_id: "details", container_run_ids: ["a", "b"]}} =
              CanvasRunContext.normalize(%{
