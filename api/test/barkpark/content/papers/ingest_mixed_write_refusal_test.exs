@@ -36,8 +36,8 @@ defmodule Barkpark.Content.Papers.IngestMixedWriteRefusalTest do
 
   alias Barkpark.Content
   alias Barkpark.Content.Papers
-  alias Barkpark.LabelFixtures
   alias Barkpark.Content.Papers.MixedWriteGuard
+  alias Barkpark.LabelFixtures
 
   @token "barkpark-test-ingest-token"
   @path "/v1/plugins/bulldocs/papers"
