@@ -253,6 +253,15 @@ jobs:
       # swallows cannot fire, and the vanished-corpus mode is the one that used
       # to print "clean" at exit 0. Hence the explicit status split below instead
       # of `continue-on-error: true` on the step.
+      # BLOCKING, and deliberately ahead of the scan below. The scan's own
+      # advisory posture means a broken scan is nearly invisible: exit 1 only
+      # warns, and the corpus floor is the one thing that reds. --selftest is
+      # what proves that floor, and the four import shapes, still bite — it
+      # plants its specimens in a throwaway tree, never in the real corpus, so
+      # it cannot perturb the scan that follows.
+      - name: "Edge gate selftest (proves check-no-node-imports can still lose)"
+        run: bash scripts/check-no-node-imports.sh --selftest
+
       - name: "No node: imports in edge packages (ADVISORY on violations, BLOCKING on an unreadable corpus)"
         run: |
           set +e
