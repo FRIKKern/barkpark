@@ -244,12 +244,41 @@ defmodule Barkpark.Media.Delivery.Search do
 
   defp resolve_dataset_id(_dataset, _opts), do: nil
 
-  defp scope_media_to_dataset(query, _dataset, dataset_id) when is_binary(dataset_id) do
-    where(query, [m], m.dataset_id == ^dataset_id)
+  # ── The blob-side dataset predicate (task-362eccb409365b11) ────────────────
+  #
+  # RESOLVED arm — authoritative `dataset_id`, NULL-TOLERANT on the string.
+  # Byte-identical in shape to `join_scope_dataset/3` above (the asset-doc side
+  # of this same query) and to `Plugins.Media.Assets.scope_asset_dataset/3`; the
+  # dataset STRING ↔ `dataset_id` is 1:1 WITHIN a project, so the second disjunct
+  # is reachable only by rows carrying NO stamp and can never cross datasets.
+  #
+  # The tolerance is LOAD-BEARING, not decoration. `Media.put_scope_attrs/2`
+  # stamps `dataset_id` only when `Tenancy.scope_project_id/1` resolved a
+  # project — its first legit-nil arm is literally
+  # `resolve_dataset_id(_attrs, nil), do: {:ok, nil}`. Until
+  # task-362eccb409365b11 that arm was UNIVERSAL for every non-Default
+  # workspace, so EVERY media blob ever uploaded into one carries
+  # `dataset_id IS NULL`. A strict `m.dataset_id == ^dataset_id` here would make
+  # that entire corpus a zero-row 200 the moment the project began resolving —
+  # the same availability change the row pre-rejected for a fail-closed read,
+  # arriving through the front door instead.
+  #
+  # UNRESOLVED arm — the surviving string fallback, now PINNED to `dataset_id IS
+  # NULL`. Before, a bare `m.dataset == ^dataset` matched a SIBLING PROJECT's
+  # well-stamped rows: two projects in one workspace, each with a dataset slugged
+  # `production`, returned each other's media. The pin makes the two arms
+  # DISJOINT — a stamped row is reachable only through the project that owns its
+  # stamp — which is what restores the project rung on this read.
+  defp scope_media_to_dataset(query, dataset, dataset_id) when is_binary(dataset_id) do
+    where(
+      query,
+      [m],
+      m.dataset_id == ^dataset_id or (is_nil(m.dataset_id) and m.dataset == ^dataset)
+    )
   end
 
   defp scope_media_to_dataset(query, dataset, _dataset_id) do
-    where(query, [m], m.dataset == ^dataset)
+    where(query, [m], m.dataset == ^dataset and is_nil(m.dataset_id))
   end
 
   defp paginate_ids(query, opts) do
