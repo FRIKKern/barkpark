@@ -23,14 +23,27 @@ defmodule BarkparkWeb.Studio.ChatKeyJumpPaletteTest do
   @admin_token "chat-keys-admin-token"
 
   setup %{conn: conn} do
-    # Same leaked-session purge chat_live_test.exs runs: a Recorder that
-    # outlived a prior test's sandbox can COMMIT chat_sessions rows that escape
-    # rollback and ride list_sessions' recency-desc ordering ahead of the rows
-    # seeded here — which would silently shift what "the 2nd visible session"
-    # means and make the ordinal assertions below nondeterministic.
-    Barkpark.Repo.query!("DELETE FROM chat_runtime_usage_receipts")
-    Barkpark.Repo.query!("DELETE FROM epic_assignment_runtime_attempts")
-    Barkpark.Repo.delete_all(Barkpark.StudioChat.Session)
+    # ── Committed-session residue guard (`Barkpark.ChatSessionResidue`) ─────────
+    #
+    # The leak is NOT the Recorder, as this comment asserted for three waves — it
+    # is `Sandbox.unboxed_run/2`. The runtime-usage lock-ordering drive needs two
+    # real Postgres connections that block each other, so it COMMITS, and
+    # `CycleFleet.prepare_runtime_attempt/3` mints a `chat_sessions` row that
+    # `Tenancy.delete_workspace/1` never reaches (`owner_workspace_id` carries no
+    # FK). One committed session per run of that file, cleaned by nothing. Such a
+    # row escapes every later test's sandbox rollback and rides `list_sessions/*`'s
+    # recency-desc ordering ahead of the rows seeded here.
+    #
+    # THE SOURCE IS CLOSED: `runtime_usage_test.exs` now purges its own committed
+    # residue after the workspace teardown. This call is the belt for residue
+    # ALREADY committed on a long-lived box, which no fix can un-commit.
+    #
+    # It issues NO DELETE against either append-only ledger. The two unqualified
+    # table-wide DELETEs that used to stand here passed SILENTLY only while both
+    # tables were empty — a FOR EACH ROW trigger cannot fire on zero rows — and
+    # raised the moment either held one. Runs inside this test's sandbox
+    # transaction and rolls back with it.
+    Barkpark.ChatSessionResidue.purge!()
 
     {:ok, _} =
       Auth.create_token(@admin_token, "chat keys admin", "production", ["read", "write", "admin"])
