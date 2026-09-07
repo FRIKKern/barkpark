@@ -29,8 +29,10 @@ defmodule BarkparkWeb.MutateCriterionWhitespaceTest do
   where it was not acceptable for the birth-side disposition fence
   (`Content.Writer`, PDS-D393):
 
-    * the population is empty — 0 of 35,603 criteria strings across all 8,309
-      live task rows carry leading or trailing whitespace (2026-09-07); and
+    * the population is empty — 0 of 37,543 criteria strings across all 9,075
+      task rows carry leading or trailing whitespace (2026-09-07), counted on
+      the RAW perspective so the 761 DRAFT rows are included, because a draft is
+      exactly the kind of row this note could strand; and
     * the state is SELF-HEALING — the patch that fixes the wording carries the
       fixed wording, so it validates and lands.
 

@@ -220,7 +220,7 @@ defmodule Barkpark.Tasks.ValidationTest do
     end
 
     # THE NON-VACUITY ARM, and the reason the rule is spelled with
-    # `String.trim/1` rather than "no newlines". 4 of the 35,603 criteria
+    # `String.trim/1` rather than "no newlines". 4 of the 37,543 criteria
     # strings in the live corpus carry an INTERNAL newline and stamp fine; a
     # rule that banned newlines outright would refuse four honest rows to catch
     # a shape nobody has written. If this test ever goes red, the rule got

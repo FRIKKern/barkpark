@@ -307,19 +307,23 @@ defmodule Barkpark.Tasks.Validation do
   # untouched.
   #
   # TRIM, NOT "NO NEWLINES". `String.trim/1` strips leading and trailing
-  # whitespace and leaves the interior alone, which is exactly the rule: 4 of
-  # the 35,603 criteria strings in the live corpus contain an INTERNAL newline
-  # and are perfectly stampable, so a rule spelled "a criterion may not contain
-  # a newline" would refuse four honest rows to catch a shape nobody has
-  # written. Leading whitespace is refused alongside trailing for one reason —
-  # it is equally invisible in a diff and equally fatal to an `==` — not
-  # because it has been observed.
+  # whitespace and leaves the interior alone, which is exactly the rule: 4
+  # criteria strings in the live corpus contain an INTERNAL newline and are
+  # perfectly stampable, so a rule spelled "a criterion may not contain a
+  # newline" would refuse four honest rows to catch a shape nobody has written.
+  # Leading whitespace is refused alongside trailing for one reason — it is
+  # equally invisible in a diff and equally fatal to an `==` — not because it
+  # has been observed.
   #
-  # BLAST RADIUS, MEASURED RATHER THAN ASSUMED: 0 of 35,603 criteria strings
-  # across all 8,309 live task rows carry leading OR trailing whitespace
-  # (2026-09-07). This refuses a shape that exists nowhere today. Stated
-  # honestly, that is "no current harm", not "no future harm" — the rule earns
-  # its place by making the class unreachable, not by cleaning one up.
+  # BLAST RADIUS, MEASURED RATHER THAN ASSUMED: 0 of 37,543 criteria strings
+  # across all 9,075 task rows carry leading OR trailing whitespace
+  # (2026-09-07). That count is the RAW perspective and so includes the 761
+  # DRAFT rows, which matters here specifically: a draft is exactly the kind of
+  # row the retroactive note below could strand, so measuring only the published
+  # 8,309 would have excluded the population most at risk. This refuses a shape
+  # that exists nowhere today. Stated honestly, that is "no current harm", not
+  # "no future harm" — the rule earns its place by making the class
+  # unreachable, not by cleaning one up.
   #
   # THIS RULE IS RETROACTIVE, AND THAT IS DELIBERATE. `/v1/data/mutate`'s patch
   # clauses merge BEFORE they validate, so this sees the whole merged document
