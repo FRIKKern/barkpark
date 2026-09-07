@@ -101,7 +101,8 @@
 # seconds-old tip is the shape that made a `push:` trigger a regression for the
 # sibling watch. No age threshold ships here — that constant was measured and
 # rejected in scripts/main-gate-watch.sh's header, and the rejection holds
-# verbatim: `grep -c GRACE scripts/main-verdict-presence.sh` is 0.
+# verbatim here: no age-threshold constant ships in this file, and the harness
+# asserts that the executable body carries none.
 #
 # EXIT CODES  0 = every OWED workflow published a verdict on the tip
 #             1 = SCREAM — at least one owed workflow published none
@@ -395,7 +396,7 @@ EOF
     printf '%s' "$inflight" | while IFS= read -r line; do [ -n "$line" ] && say "    $line"; done
   fi
 
-  local screams="" declined="" not_owed=0 present=0 path tier found status conclusion
+  local screams="" declined="" waiting="" not_owed=0 present=0 path tier found status conclusion
   while IFS="$(printf '\t')" read -r path tier; do
     [ -n "$path" ] || continue
     found=""
@@ -420,6 +421,8 @@ EOF
       fi
       if [ -n "$inflight" ]; then
         say "  WAITING  $path — no run YET, and a run on this sha is still in flight"
+        waiting="$waiting$path (no run yet)
+"
         continue
       fi
       say "  MISSING  $path — NO_RUN: unfiltered push arm on main, and no run on this sha at all"
@@ -430,6 +433,8 @@ EOF
 
     if [ "$status" != "completed" ]; then
       say "  waiting  $path — status=$status"
+      waiting="$waiting$path (status=$status)
+"
       continue
     fi
 
@@ -465,6 +470,13 @@ EOF
     red "absent context is not a red one — so nothing else in this repository can see it. Re-run the"
     red "named workflows on this sha, or land the change that lets them run to a conclusion."
     return 1
+  fi
+
+  if [ -n "$waiting" ]; then
+    say "::notice::WAITING — an owed workflow on this tip has not answered YET. Neither a pass nor a scream;"
+    say "  the next scheduled run decides."
+    printf '%s' "$waiting" | while IFS= read -r line; do [ -n "$line" ] && say "  waiting: $line"; done
+    return 2
   fi
 
   say "ok — every owed main-push workflow published a verdict on $sha"
