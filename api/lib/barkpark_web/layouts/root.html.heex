@@ -1188,6 +1188,40 @@
       letter-spacing: 0.06em; color: var(--fg-dim);
     }
 
+    /* Keep native focus inside the visible narrow shell. The desktop grid's
+       intrinsic tab/action widths otherwise overflow the shell, so focusing
+       Theme scrolls the entire Paper sideways. Wrap in DOM order; do not
+       clip the bar, which would also clip the workspace switcher's popover. */
+    html[data-width-bucket="narrow"] .studio-bar,
+    html[data-width-bucket="phone"] .studio-bar {
+      display: flex; flex-wrap: wrap; height: auto; flex-shrink: 0;
+      gap: 8px; padding-block: 8px;
+    }
+    html[data-width-bucket="narrow"] .studio-bar-tabs,
+    html[data-width-bucket="phone"] .studio-bar-tabs,
+    html[data-width-bucket="narrow"] .studio-bar-right,
+    html[data-width-bucket="phone"] .studio-bar-right,
+    html[data-width-bucket="narrow"] .studio-bar-actions,
+    html[data-width-bucket="phone"] .studio-bar-actions {
+      flex-wrap: wrap; max-width: 100%;
+    }
+    html[data-width-bucket="narrow"] .studio-bar-brand,
+    html[data-width-bucket="phone"] .studio-bar-brand {
+      max-width: 100%;
+    }
+    html[data-width-bucket="narrow"] .studio-bar-right,
+    html[data-width-bucket="phone"] .studio-bar-right {
+      margin-left: auto;
+    }
+    html[data-width-bucket="narrow"] .scope-switcher,
+    html[data-width-bucket="phone"] .scope-switcher {
+      min-width: 0;
+    }
+    html[data-width-bucket="narrow"] .scope-title,
+    html[data-width-bucket="phone"] .scope-title {
+      min-width: 0; max-width: 100%;
+    }
+
     /* ── Self-update bar (isu-w1): slim admin strip pinned above the topbar.
        Server-rendered chrome (admin + :behind only); the `bp-update-bar`
        initialiser in the scripts below wires Update-now / changelog / dismiss.
