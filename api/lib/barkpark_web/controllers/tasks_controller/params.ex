@@ -689,8 +689,7 @@ defmodule BarkparkWeb.TasksController.Params do
           where: d.type == "task",
           where:
             fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) in ^keys,
-          where:
-            fragment("coalesce(?->>'lifecycle_status', 'open')", d.content) not in ^terminal,
+          where: fragment("coalesce(?->>'lifecycle_status', 'open')", d.content) not in ^terminal,
           group_by: fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content),
           select:
             {fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content),

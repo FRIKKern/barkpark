@@ -367,8 +367,9 @@ defmodule BarkparkWeb.TasksController do
             live_child_counts =
               Params.batch_live_child_counts(sealed_in_progress ++ sealed_ready, scope)
 
-            {Enum.map(sealed_in_progress, &Params.render_brief(&1, child_counts, live_child_counts)),
-             Enum.map(sealed_ready, &Params.render_brief(&1, child_counts, live_child_counts))}
+            render = &Params.render_brief(&1, child_counts, live_child_counts)
+
+            {Enum.map(sealed_in_progress, render), Enum.map(sealed_ready, render)}
 
           :full ->
             counts = Params.batch_edge_counts(sealed_in_progress ++ sealed_ready)

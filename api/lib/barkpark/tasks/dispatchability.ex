@@ -49,8 +49,35 @@ defmodule Barkpark.Tasks.Dispatchability do
                       row's criteria, and this rule does not read prose.
 
   Measured over that same live page (children rosters re-read per parent):
-  21 of 1,000 rows carry children at all; 13 classify `delegated`, 8
-  `undecided`, and 979 are untouched leaves.
+  21 of 1,000 rows carry children at all; 15 classify `delegated`, 6
+  `undecided`, and 979 are untouched leaves — strictly less than the page, and
+  20 of the 21 are rows other than the one that prompted this.
+
+  ## What it costs, hand-labelled — read this before trusting it
+
+  Of the 15 `delegated`, 11 are true (epic roots, GOAL rows, wave rows, the
+  campaign root, and a human-DECISION row). FOUR are FALSE POSITIVES, all the
+  same shape: an ordinary defect row that spun off ONE follow-up child while
+  keeping real own-work — `task-18f209f185f5b3f1`,
+  `bp-dataset-project-routing-gap`, `task-597ea451072da061`,
+  `spd-b45-deleted-task-orphans-github-mirror`. Precision 11/15; on the page,
+  4 in 1,000. The cost of a false positive is a skipped row, not a lost one:
+  the marker never removes anything from the queue.
+
+  FALSE NEGATIVES are the bigger hole and this rule CANNOT see them. A seal
+  row whose children hang off a DIFFERENT root carries child_count 0 and
+  renders as an ordinary leaf. Five confirmed on the same page:
+  `task-08b05ad1e792a850` ("GOAL: drive the mobile epic to the seal", PRIORITY
+  0 — the exact trap this module was filed for, and it walks straight past),
+  `task-b55fafd148bb2578`, `survey-once-build-forever-epic`,
+  `legendary-quality-takeover-final-review`, `ecd-bl-second-env-launch-proof`.
+  Recall against the hand-labelled set is 11/16.
+
+  Their signal is not the outbound parent edge but an INBOUND one: a criterion
+  that requires ANOTHER task id to be CLOSED. Measured on the same page, a
+  criterion naming a `task-<16 hex>` id alongside "closed" matches 8 of 988
+  rows and about three are genuine — better than vocabulary, not yet
+  shippable. That is a separate slice, filed, not smuggled in here.
 
   ## Why `live` and not just a positive count
 
