@@ -19,6 +19,7 @@ defmodule BarkparkCloud.DeployLedger.ClassContinuityTest do
   use BarkparkCloud.DataCase, async: false
 
   alias BarkparkCloud.{Accounts, DeployLedger, Registry, Repo}
+  alias BarkparkCloud.BoxCapacityRefusalFixture
   alias BarkparkCloud.DeployLedger.ClassContinuity
   alias BarkparkCloud.Registry.Deployment
 
@@ -37,15 +38,27 @@ defmodule BarkparkCloud.DeployLedger.ClassContinuityTest do
   @after_from ~U[2026-08-06 22:19:52Z]
   @after_to ~U[2026-08-07 00:40:00Z]
 
-  # VERBATIM refusal strings — the same corpus samples `deploy_ledger_test.exs`
-  # keys on. `classify_deferred/2` reads the anchored 409 prefix and the box's
-  # own code word out of these; an invented string would classify to
+  # Refusal strings from the same corpus `deploy_ledger_test.exs` keys on.
+  # `classify_deferred/2` reads the anchored 409 prefix and the box's own code
+  # word out of these; an invented string would classify to
   # DEFERRED_UNCLASSIFIED and the fixture would test nothing.
+  #
+  # The capacity body below used to be a HAND-TYPED copy of the box's message
+  # under a comment that called it VERBATIM, and nothing checked — it drifted
+  # and stayed drifted for a day (#16598) with this suite green throughout. It
+  # is now DERIVED; the word verbatim below is a fact the api/ gate enforces,
+  # not a promise this file makes.
   @requeued " — deferred: a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes"
   @d_busy "the instance refused the deploy (HTTP 409): already_running — a deploy is already in flight" <>
             @requeued
-  @d_capacity "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — site 'other-site' is building; retry when it finishes" <>
-                @requeued
+  # THE BOX'S OWN CAPACITY REFUSAL — NOT retyped here. `BoxCapacityRefusalFixture`
+  # reads the ONE shared copy (api/test/support/fixtures/box_capacity_refusal.json),
+  # and BarkparkWeb.SiteDeployCapacityBodyConformanceTest asserts the REAL emitter
+  # still produces it byte-for-byte. Re-word the refusal in the controller and the
+  # api/ gate reds naming the emitter and the stale fixture; this line follows the
+  # file with no edit here. Do not paste the string back in — the mirror guard
+  # (deploy_ledger/capacity_body_mirror_guard_test.exs) fails if you do.
+  @d_capacity BoxCapacityRefusalFixture.deferred_detail() <> @requeued
 
   describe "the rule, both directions" do
     test "FIRES: a class goes to zero while its cohort total holds" do
