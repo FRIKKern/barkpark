@@ -195,8 +195,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
   @a_capacity "the instance refused the deploy (HTTP 409): box_at_capacity" <> @abandon_cap
   @a_capacity_stamped "the instance refused the deploy (HTTP 409): box_at_capacity" <>
                         @rid <> @abandon_cap
-  @a_capacity_msg "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — site 'other-site' is building; retry when it finishes" <>
-                    @abandon_cap
+  @a_capacity_msg BoxCapacityRefusalFixture.deferred_detail() <> @abandon_cap
   # 2026-08-05 22:57:53Z — the one 6-cap abandonment, the busy slug.
   @a_busy "the instance refused the deploy (HTTP 409): already_running — a deploy is already in flight" <>
             @abandon_busy

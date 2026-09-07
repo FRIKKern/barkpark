@@ -146,19 +146,44 @@ defmodule BarkparkCloud.DeployLedger.CapacityBodyMirrorGuardTest do
       """
     end
 
-    test "the three known consumers really do read the fixture" do
-      # DERIVATION, checked: the three sites the grep found must each be using
-      # the reader. If one stops, the mirror is back even though no literal is.
-      for file <- [
-            "barkpark_cloud/deploy_ledger_test.exs",
-            "barkpark_cloud/deploy_ledger/class_continuity_test.exs",
-            "barkpark_cloud/deploy_ledger_partition_test.exs"
-          ] do
-        source = File.read!(Path.join(@cloud_test_root, file))
+    test "THE CENSUS: every file carrying a capacity clause reads the fixture" do
+      # DERIVED, not typed. `claim_regex/0` is built from the emitter's own
+      # literal and PROVEN against the emitter's own rendered output, so the
+      # census is the set of cloud tests that carry the box's slot clause —
+      # whatever files those turn out to be today. A guard that instead listed
+      # the three paths a human grepped would wave through the fourth copy
+      # pasted into a new file tomorrow, which is exactly how the first drift
+      # survived its own fix (#16581 fixed one site, #16598 the other two, a
+      # day later — and a FOURTH, sites_deploy_test.exs, was in neither).
+      claim = claim_regex()
 
-        assert source =~ "BoxCapacityRefusalFixture",
-               "#{file} no longer reads the shared capacity fixture — either it dropped its capacity corpus (then drop it from this list) or it went back to a hand-typed copy"
-      end
+      claimants =
+        for path <- exs_files(),
+            source = File.read!(path),
+            Regex.match?(claim, source) or String.contains?(source, "BoxCapacityRefusalFixture"),
+            do: {Path.relative_to(path, Path.expand("../../..", __DIR__)), File.read!(path)}
+
+      assert length(claimants) >= 4,
+             "the census found only #{length(claimants)} claimant file(s) — the derivation has gone blind, so its clean verdict means nothing: #{inspect(Enum.map(claimants, &elem(&1, 0)))}"
+
+      not_reading =
+        for {rel, source} <- claimants,
+            rel != @self,
+            not String.contains?(source, "BoxCapacityRefusalFixture"),
+            do: rel
+
+      assert not_reading == [], """
+      A CAPACITY-REFUSAL FIXTURE THAT DOES NOT READ THE SHARED COPY.
+
+        file(s)     : #{Enum.join(not_reading, ", ")}
+        emitter     : api/lib/barkpark_web/controllers/site_deploy_controller.ex
+                      (capacity_message/3 <> peer_tail/1)
+        the one copy: #{Fx.path()}
+
+      This file carries the box's build-slot clause but never reads
+      `BarkparkCloud.BoxCapacityRefusalFixture`, so its copy is free to drift
+      from the emitter with this suite green. Read the fixture instead.
+      """
     end
 
     test "the value the fixtures receive is the real thing, not a hole" do
@@ -172,5 +197,26 @@ defmodule BarkparkCloud.DeployLedger.CapacityBodyMirrorGuardTest do
       assert String.contains?(detail, Fx.holding_slug())
       assert String.length(Fx.message()) > 60
     end
+  end
+
+  # ── the claim detector, DERIVED from the emitter ─────────────────────────
+  #
+  # The emitter renders `"the box is at its build capacity (\#{in_use} of
+  # \#{slots} build slots in use) — "`. A fixture that CLAIMS to carry that
+  # body keeps the numeric slot clause even when the rest of the sentence has
+  # drifted — the invented `"4 of 4 build slots are in use"` that shipped for a
+  # day kept exactly this much and nothing else, which is why a detector keyed
+  # on the exact body could not see it.
+  #
+  # It is a derivation and not a typed guess because the assertion below proves
+  # it against the emitter's OWN rendered output: move the phrasing off this
+  # shape in the controller and this test reds instead of going quietly blind.
+  defp claim_regex do
+    regex = ~r/\d+ of \d+ build slots/
+
+    assert Regex.match?(regex, Fx.message()),
+           "the claim detector no longer matches the emitter's own body (#{inspect(Fx.message())}) — re-derive it from capacity_message/3 in #{Fx.emitter_path()}"
+
+    regex
   end
 end
