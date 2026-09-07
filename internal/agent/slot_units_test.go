@@ -43,7 +43,14 @@ InactiveEnterTimestamp=
 
 // The two failed site units, live on the same box: Result=exit-code with
 // ExecMainStatus=143 — 128+15, a clean SIGTERM retire that systemd files as an
-// exit code because the unit lacks SuccessExitStatus=143 (PR #14863).
+// exit code because that box's unit file predates SuccessExitStatus=143.
+//
+// THIS FIXTURE MODELS A LEGACY BOX, NOT TODAY'S FLEET. PR #14863 landed
+// SuccessExitStatus=143 in deploy/systemd/barkpark-site@.service (merged
+// 2026-09-02) and deploy/site-deploy-node.sh preflight-enforces it, so a slot
+// retired on a box deployed since stops CLEAN and emits no such row. Boxes
+// provisioned before that and not yet redeployed still emit it, which is why the
+// probe must keep carrying result and status as a pair.
 const liveFailedSitesShow = `MainPID=0
 Result=exit-code
 ExecMainCode=1
