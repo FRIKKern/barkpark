@@ -483,11 +483,18 @@ jobs:
       # skip-disclosure ratchet: a new job here reds the sibling path-escape
       # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
       # name, so required-checks-verify.sh's roster is unchanged.
-      - name: The top-level classifier must be able to fail (24-case harness)
-        run: bash scripts/toplevel-classifier-check.sh --selftest
-
+      # THE RATCHET RUNS FIRST, and that ordering is load-bearing. One red step
+      # skips every step after it in the same job, so a harness placed ahead of
+      # the ratchet would render its own terse assertion text on exactly the
+      # head the ratchet exists to explain. Measured on probe PR #16659: the
+      # harness reddened with `FAIL 11a unregistered: brandnewdir` and the
+      # classifier's own refusal, which names the path and prints how to
+      # classify it, never rendered at all.
       - name: Every changed top-level entry is one the repo knows
         run: bash scripts/toplevel-classifier-check.sh
+
+      - name: The top-level classifier must be able to fail (27-case harness)
+        run: bash scripts/toplevel-classifier-check.sh --selftest
 
       # ── the vips hedge, now a tripwire instead of a 39-second bill ────────
       # mix-prod-compile below used to `apt-get install libvips-dev` purely as

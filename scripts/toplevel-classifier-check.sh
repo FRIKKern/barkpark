@@ -240,6 +240,34 @@ check() {
 $(registry)
 EOF
 
+  # TREE COMPLETENESS, both directions, over the WHOLE tracked tree — not only
+  # the diff. The diff arm below is what names a NEW directory on the PR that
+  # adds it; this arm is what stops the registry drifting behind a tree it is
+  # supposed to enumerate, and it is why a rebase onto a head carrying an
+  # unregistered entry cannot inherit silence.
+  local tracked missing_rows untracked_rows
+  if ! tracked="$(git -C "$ROOT" ls-tree --name-only HEAD 2>/dev/null)" || [ -z "$tracked" ]; then
+    echo "toplevel-classifier: REFUSING — cannot read the tracked top-level tree of $ROOT. A registry checked against nothing is not a check." >&2
+    return 2
+  fi
+  missing_rows="$(comm -23 <(printf '%s\n' "$tracked" | LC_ALL=C sort) <(registry_names | LC_ALL=C sort))"
+  untracked_rows="$(comm -13 <(printf '%s\n' "$tracked" | LC_ALL=C sort) <(registry_names | LC_ALL=C sort))"
+  if [ -n "$missing_rows" ]; then
+    local m
+    for m in $missing_rows; do
+      echo "::error::toplevel-classifier: UNREGISTERED top-level entry '${m}' — git tracks it and the registry does not know it. A diff confined to it is in no path set any watched context dispatches on, so it would publish green names over code nothing read."
+    done
+    how_to_classify
+    rc=1
+  fi
+  if [ -n "$untracked_rows" ]; then
+    local u
+    for u in $untracked_rows; do
+      echo "::error::toplevel-classifier: UNTRACKED registry row '${u}' — git does not track it. Delete the row; a registry that names paths git cannot see stops describing the tree it enumerates."
+    done
+    rc=1
+  fi
+
   if [ "$n_rows" -eq 0 ]; then
     echo "::error::toplevel-classifier: REFUSING — the registry is EMPTY. A clean verdict over an empty known-set is the vacuous pass this check exists to remove." >&2
     return 2
@@ -337,8 +365,14 @@ selftest() {
     # Every registered entry must exist, or the STALE arm fires everywhere.
     local n
     for n in $(bash "$SELF" --list | awk 'NF {print $1}'); do
-      if [ -d "$ROOT/$n" ]; then mkdir -p "$d/$n"; else : > "$d/$n"; fi
+      if [ -d "$ROOT/$n" ]; then mkdir -p "$d/$n"; : > "$d/$n/.keep"; else : > "$d/$n"; fi
     done
+    # A REAL git fixture: check() refuses a non-git root, and the tree
+    # completeness arm reads `git ls-tree`. Empty directories are not tracked,
+    # hence the .keep above.
+    git -C "$d" init -q >/dev/null 2>&1
+    git -C "$d" add -A >/dev/null 2>&1
+    git -C "$d" -c user.email=t@e -c user.name=t commit -qm fixture >/dev/null 2>&1
   }
 
   # mutate <file> <anchor-ERE> <sed-expr> — asserts the anchor matched EXACTLY
@@ -455,14 +489,29 @@ selftest() {
   if [ "$rc10" -eq 2 ]; then ok "10a an unresolvable HEAD^1 REFUSES with exit 2"; else bad "10a exited $rc10, wanted 2: $out10"; fi
   case "$out10" in *"REFUSING"*) ok "10b and says so" ;; *) bad "10b: $out10" ;; esac
 
-  # ── 11. the LIVE tree: this repo's own registry covers this repo's own tree
-  local live_missing live_extra
-  live_missing="$(comm -23 <(git -C "$ROOT" ls-tree --name-only HEAD | LC_ALL=C sort) \
-                           <(registry_names | LC_ALL=C sort))"
-  live_extra="$(comm -13 <(git -C "$ROOT" ls-tree --name-only HEAD | LC_ALL=C sort) \
-                         <(registry_names | LC_ALL=C sort))"
-  if [ -z "$live_missing" ]; then ok "11a every tracked top-level entry is registered"; else bad "11a unregistered: $(printf '%s' "$live_missing" | tr '\n' ' ')"; fi
-  if [ -z "$live_extra" ]; then ok "11b no registry row names a path git does not track"; else bad "11b untracked rows: $(printf '%s' "$live_extra" | tr '\n' ' ')"; fi
+  # ── 11. TREE COMPLETENESS is a live arm of check(), not a harness case, so
+  #        it renders through the ratchet's own refusal text. Proved here on a
+  #        real git fixture whose tree carries an entry the registry lacks.
+  local d11="$tmp/d11"; mk_root "$d11"
+  mkdir -p "$d11/brandnewdir"; : > "$d11/brandnewdir/x.txt"
+  git -C "$d11" add -A >/dev/null 2>&1
+  git -C "$d11" -c user.email=t@e -c user.name=t commit -qm probe >/dev/null 2>&1
+  printf 'README.md\n' > "$tmp/p11"
+  local out11 rc11
+  out11="$(run_subject "$d11" "$tmp/p11")"; rc11=$?
+  if [ "$rc11" -ne 0 ]; then ok "11a a tracked top-level entry the registry lacks reds even when the diff misses it (rc=$rc11)"; else bad "11a tree completeness passed: $out11"; fi
+  case "$out11" in *"UNREGISTERED top-level entry 'brandnewdir'"*) ok "11b it is named" ;; *) bad "11b not named: $out11" ;; esac
+  case "$out11" in *"HOW TO CLASSIFY IT"*) ok "11c and the refusal says how to classify it" ;; *) bad "11c no guidance: $out11" ;; esac
+
+  # ── 12. a registry row naming a path git does not track reds ─────────────
+  local d12="$tmp/d12"; mk_root "$d12"
+  git -C "$d12" rm -r -q --cached docs-site >/dev/null 2>&1
+  git -C "$d12" -c user.email=t@e -c user.name=t commit -qm untrack >/dev/null 2>&1
+  printf 'README.md\n' > "$tmp/p12"
+  local out12 rc12
+  out12="$(run_subject "$d12" "$tmp/p12")"; rc12=$?
+  if [ "$rc12" -ne 0 ]; then ok "12a a row naming an untracked path reds (rc=$rc12)"; else bad "12a untracked row passed: $out12"; fi
+  case "$out12" in *"UNTRACKED registry row 'docs-site'"*) ok "12b it is named" ;; *) bad "12b: $out12" ;; esac
 
   echo
   echo "SELFTEST: ${pass} passed, ${fail} failed"
