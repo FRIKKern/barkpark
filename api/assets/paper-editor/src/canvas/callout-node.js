@@ -407,7 +407,7 @@ export const Callout = Node.create({
         // contentDOM is the editable body hole — PM manages the inline content
         // inside it. The title is an independent attr-backed editing island.
         contentDOM: body,
-        stopEvent: event => titleEl.contains(event.target),
+        stopEvent: event => titleEl.contains(event.target) || !!summary?.contains(event.target),
         // Re-render the chrome when the node's attrs change (tone/title/fold).
         // Return false — forcing PM to rebuild the view — for a different node
         // type OR a collapsible flip (which changes the root TAG div↔details).

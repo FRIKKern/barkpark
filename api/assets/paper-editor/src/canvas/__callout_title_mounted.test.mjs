@@ -72,6 +72,12 @@ try {
         "body, marks, tone, fold and custom metadata remain intact");
       assert.equal(key(title, "Enter").defaultPrevented, true);
       assert.equal(host._editor.state.doc.childCount, 1);
+      if (attrs.collapsible) {
+        const summary = host.querySelector("summary");
+        summary.focus();
+        assert.equal(key(summary, "Enter").defaultPrevented, false,
+          "ProseMirror must leave native summary keyboard activation alone");
+      }
     } finally { host.remove(); }
   }
 
