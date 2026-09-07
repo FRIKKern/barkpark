@@ -73,7 +73,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   def save(params, socket) when is_map(params) do
     socket = track_touched(socket, params)
 
-    case fold_dot_paths(params, touched_paths(socket), base_form(socket)) do
+    case fold_dot_paths(params, socket) do
       %{"doc" => doc} -> do_save(doc, socket)
       _ -> {:noreply, socket}
     end
@@ -135,7 +135,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   def autosave(params, socket) when is_map(params) do
     socket = track_touched(socket, params)
 
-    case fold_dot_paths(params, touched_paths(socket), base_form(socket)) do
+    case fold_dot_paths(params, socket) do
       %{"doc" => doc} -> {:noreply, mark_dirty(Shared.do_autosave(socket, doc))}
       _ -> {:noreply, socket}
     end
@@ -201,7 +201,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # as cleared. The set is emptied wherever the buffer becomes clean again —
   # explicit save, remote reload, navigation (`Lifecycle.finish_handle_params`)
   # — so a touched path can never leak onto the NEXT document opened.
-  defp fold_dot_paths(params, touched, base_form) do
+  defp fold_dot_paths(params, socket) do
+    touched = touched_paths(socket)
+    base_form = base_form(socket)
+
     {dotted, rest} =
       Enum.split_with(params, fn {k, v} ->
         is_binary(k) and String.starts_with?(k, "doc[") and foldable?(k, v, touched)
@@ -222,7 +225,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
             path ->
               acc
               |> seed_root(path, base_form)
-              |> StudioLive.put_value_at(path, value)
+              |> StudioLive.put_value_at(path, coerce_leaf(socket, path, value))
           end
         end)
 
@@ -266,6 +269,50 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   defp seed_root(doc, _path, _base_form), do: doc
 
   defp base_form(socket), do: socket.assigns[:editor_form] || %{}
+
+  # ── Coerce the leaf the way `build_content/2` coerces a TOP-LEVEL field ────
+  #
+  # A form posts every value as a string. `Forms.build_content/2` already turns
+  # a top-level `boolean` field's "true"/"false" into a real boolean and a
+  # `number` field's digits into an integer — the JSONB type flip found live on
+  # 2026-06-12. Nothing did that for a value arriving through a dotted name,
+  # because until this fold those values never reached storage at all: the
+  # moment a criterion row starts persisting, `met` would land as the STRING
+  # "false" under a `met == true` reader.
+  #
+  # `Shared.find_field_by_path/2` resolves the schema field at the path
+  # (descending composites and arrayOf, skipping row indices), so the leaf is
+  # coerced by its DECLARED type, not by guessing from the value. An
+  # unresolvable path or any other type keeps the string as-is, which is what
+  # the schema validator wants to see and reject.
+  defp coerce_leaf(socket, path, value) when is_binary(value) do
+    case Shared.find_field_by_path(socket, path) do
+      %{"type" => "boolean"} -> coerce_boolean(value)
+      %{"type" => "number"} -> coerce_number(value)
+      _ -> value
+    end
+  end
+
+  defp coerce_leaf(_socket, _path, value), do: value
+
+  defp coerce_boolean("true"), do: true
+  defp coerce_boolean("false"), do: false
+  defp coerce_boolean(other), do: other
+
+  defp coerce_number(value) do
+    trimmed = String.trim(value)
+
+    case Integer.parse(trimmed) do
+      {int, ""} ->
+        int
+
+      _ ->
+        case Float.parse(trimmed) do
+          {float, ""} -> float
+          _ -> value
+        end
+    end
+  end
 
   defp foldable?(_key, value, _touched) when is_nil(value), do: false
   defp foldable?(key, "", touched), do: MapSet.member?(touched, key)

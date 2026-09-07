@@ -151,12 +151,49 @@ defmodule BarkparkWeb.Studio.StudioCriteriaTextEditTest do
     assert Enum.at(stored, 0)["criterion"] == "EDITED ZERO",
            "the criterion text did NOT persist; stored row 0 = #{inspect(Enum.at(stored, 0))}"
 
-    # c1 — the untouched sibling row is unharmed.
-    assert Enum.at(stored, 1)["criterion"] == "ORIGINAL ONE",
-           "the untouched sibling criterion was damaged: #{inspect(Enum.at(stored, 1))}"
+    # c2 — the EDITED row is byte-identical to the stored one except for the
+    # one key the author typed in. Stated as an exact map so an unknown key
+    # (`merge_gate`) cannot be dropped and a declared one (`met`) cannot flip
+    # from the boolean `false` to the string "false" — the JSONB type flip a
+    # save that starts persisting nested rows would otherwise introduce.
+    assert Enum.at(stored, 0) ==
+             %{
+               "criterion" => "EDITED ZERO",
+               "met" => false,
+               "evidence" => "",
+               "merge_gate" => true
+             },
+           "the edited criterion row was not preserved: #{inspect(Enum.at(stored, 0))}"
 
-    # c2 — an unknown key on the EDITED row survives byte-identical.
-    assert Enum.at(stored, 0)["merge_gate"] == true,
-           "merge_gate was stripped from the edited criterion: #{inspect(Enum.at(stored, 0))}"
+    # c1 — the untouched sibling row is unharmed, byte-identical.
+    assert Enum.at(stored, 1) == Enum.at(criteria(), 1),
+           "the untouched sibling criterion was damaged: #{inspect(Enum.at(stored, 1))}"
+  end
+
+  test "the save that persists is the one the editor reports", %{slug: slug} do
+    conn = editor_conn!()
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task/#{slug}"))
+
+    wire =
+      Plug.Conn.Query.decode(
+        "doc[title]=criteria+probe&doc[acceptance_criteria][0].criterion=SAY+SO&" <>
+          "doc[acceptance_criteria][0].met=false&doc[acceptance_criteria][0].evidence=&" <>
+          "doc[acceptance_criteria][1].criterion=ORIGINAL+ONE&" <>
+          "doc[acceptance_criteria][1].met=false&doc[acceptance_criteria][1].evidence="
+      )
+
+    html = render_submit(view, "save", wire)
+
+    # The row's headline is "reports Saved and persists nothing". The honest
+    # pairing is the one asserted here: the editor's own report and the stored
+    # value agree.
+    refute html =~ "Save failed",
+           "the editor reported a failed save for a plain criterion text edit"
+
+    stored = reread!(slug) |> Map.get(:content) |> Map.get("acceptance_criteria")
+
+    assert Enum.at(stored, 0)["criterion"] == "SAY+SO" or
+             Enum.at(stored, 0)["criterion"] == "SAY SO",
+           "the editor did not fail the save, and did not store it either: #{inspect(stored)}"
   end
 end
