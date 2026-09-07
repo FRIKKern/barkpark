@@ -12101,7 +12101,7 @@
               }
             }
           },
-          "description": "Request body fields: url.",
+          "description": "Request body fields: url, name.",
           "required": true
         },
         "responses": {
