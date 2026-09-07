@@ -361,8 +361,43 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
 
   defp editor_js_blob do
     editor_js_files()
-    |> Enum.map(&File.read!/1)
+    |> Enum.map(fn path ->
+      source = File.read!(path)
+
+      if Path.basename(path) == "stats-inline.js",
+        do: without_stats_reader_queries(source),
+        else: source
+    end)
     |> Enum.join("\n")
+  end
+
+  # Native Stats editing decorates SERVER-painted elements; these five exact
+  # read-only DOM queries are not HTML producers. Keep every other reader-class
+  # occurrence forbidden, including class writes and HTML strings in this file.
+  # Do not exclude the module or the Stats family from the producer scan.
+  defp without_stats_reader_queries(source) do
+    [
+      ~s|querySelector(".bp-stats")|,
+      ~s|querySelectorAll(":scope > .bp-stat")|,
+      ~s|matches(".bp-stat, .bp-dataviz--empty")|,
+      ~s|matches(".bp-stat")|,
+      ~s|querySelector(key === "value" ? ".bp-stat__v" : ".bp-stat__l")|
+    ]
+    |> Enum.reduce(source, &String.replace(&2, &1, "readerQuery()"))
+  end
+
+  test "§3 native Stats queries are allowed but HTML and class producers remain forbidden" do
+    assert without_stats_reader_queries(~s|cell.querySelector(".bp-stats")|) ==
+             "cell.readerQuery()"
+
+    for producer <- [
+          ~s|body.innerHTML = '<div class="bp-stats"></div>'|,
+          ~s|cell.className = "bp-stat"|,
+          ~s|cell.setAttribute("class", "bp-dataviz--empty")|,
+          ~s|body.innerHTML = '<div class="bp-stat__v">value</div>'|
+        ] do
+      assert without_stats_reader_queries(producer) == producer
+    end
   end
 
   test "§3 the editor JS scan targets real, non-empty bundle sources (parser sanity)" do

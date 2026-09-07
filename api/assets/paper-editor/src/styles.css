@@ -1294,6 +1294,14 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-canvas-code:focus-within .bp-canvas-code-lang { opacity: 1; pointer-events: auto; }
 /* Server-painted bodies own their rhythm; wrappers must allow margin collapse. */
 .bp-canvas-fleet { margin: 0; overflow: visible; white-space: normal; }
+.bp-paper-surface .bp-canvas-stats-inline > .bp-paper-surface {
+  --bp-evidence-band: inherit;
+  --bp-evidence-band-max: inherit;
+  --bp-evidence-fill: inherit;
+  --bp-evidence-gutter: inherit;
+  --bp-evidence-width: inherit;
+  --bp-evidence-pull: inherit;
+}
 
 /* Diagram configuration stays outside the reader figure's layout. */
 .bp-canvas-diagram { position: relative; }

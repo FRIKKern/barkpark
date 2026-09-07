@@ -61,6 +61,7 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS } from "../contract.js";
+import { isStatsType, wireStatsInline } from "./stats-inline.js";
 
 // The TipTap node NAMES are `bpSheet` / `bpEmbed` (the canvas naming convention, like
 // bpCode/bpDiagram/bpField). The portable-doc `bpType` stays "sheet" / "embed"
@@ -599,6 +600,7 @@ export function fleetEditorParse(initialBlock, text) {
 // JSON object. The DOM is built lazily inside the node-view factory (references
 // `document`), so this is never called in the pure-Node harness.
 function buildFleetEditor(initialBlock, { onEdit, isEditable }) {
+  let currentBlock = initialBlock;
   const type = (initialBlock && initialBlock.type) || "";
   const itemEditor = FLEET_ITEM_EDITORS[type];
   const configEditor = FLEET_CONFIG_EDITORS[type];
@@ -639,7 +641,7 @@ function buildFleetEditor(initialBlock, { onEdit, isEditable }) {
   }
 
   function toBlock(text) {
-    return fleetEditorParse(initialBlock || { type }, text);
+    return fleetEditorParse(currentBlock || { type }, text);
   }
 
   let textTimer = null;
@@ -659,6 +661,7 @@ function buildFleetEditor(initialBlock, { onEdit, isEditable }) {
   area.addEventListener("input", onInput);
 
   const paint = (block) => {
+    currentBlock = block;
     area.readOnly = !isEditable();
     // Never clobber the field while the user is actively typing in it.
     if (document.activeElement !== area) {
@@ -765,10 +768,30 @@ export const Fleet = Node.create({
       // exactly like the code / task-list config islands.
       const isEditableKind = fleetKindEditable(bpType) && !isBlockLocked(block);
       let fleetEditor = null;
+      let statsConfig = null;
+      const currentBlock = () => {
+        const pos = typeof getPos === "function" ? getPos() : null;
+        return pos == null ? block : editor.state.doc.nodeAt(pos)?.attrs.bpBlock || block;
+      };
+      const commitBlock = nextBlock => {
+        if (!editor.isEditable || isBlockLocked(currentBlock()) || typeof getPos !== "function") return;
+        const pos = getPos();
+        const cur = pos == null ? null : editor.state.doc.nodeAt(pos);
+        if (!cur || cur.type.name !== BP_FLEET_NODE_NAME) return;
+        editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, bpBlock: nextBlock }));
+      };
+      const statsInline = isStatsType(bpType) ? wireStatsInline(body, {
+        getBlock: currentBlock, isEditable: () => editor.isEditable,
+        commit: commitBlock, undo: () => editor.commands.undo(), redo: () => editor.commands.redo(),
+      }) : null;
       let hovered = false;
       let focused = false;
       const syncReveal = () => {
         if (!fleetEditor) return;
+        if (statsConfig) {
+          statsConfig.style.display = editor.isEditable && !isBlockLocked(currentBlock()) ? "" : "none";
+          return;
+        }
         fleetEditor.el.style.display =
           editor.isEditable && (hovered || focused) ? "" : "none";
       };
@@ -793,7 +816,7 @@ export const Fleet = Node.create({
       };
       if (isEditableKind) {
         fleetEditor = buildFleetEditor(block, {
-          isEditable: () => editor.isEditable,
+          isEditable: () => editor.isEditable && !isBlockLocked(currentBlock()),
           onEdit: (nextBlock) => {
             if (!editor.isEditable) return;
             if (typeof getPos !== "function") return;
@@ -813,7 +836,18 @@ export const Fleet = Node.create({
               .run();
           },
         });
-        dom.appendChild(fleetEditor.el);
+        if (statsInline) {
+          dom.classList.add("bp-paper-contextual-editor", "bp-canvas-stats-inline");
+          statsConfig = document.createElement("details");
+          statsConfig.className = "bp-paper-contextual-controls bp-paper-stats-config";
+          const summary = document.createElement("summary");
+          summary.className = "bp-paper-contextual-toggle";
+          summary.textContent = "Configure Stats";
+          statsConfig.appendChild(summary);
+          fleetEditor.el.classList.add("bp-paper-contextual-panel");
+          statsConfig.appendChild(fleetEditor.el);
+          dom.appendChild(statsConfig);
+        } else dom.appendChild(fleetEditor.el);
         dom.addEventListener("mouseenter", onEnter);
         dom.addEventListener("mouseleave", onLeave);
         dom.addEventListener("focusin", onFocusIn);
@@ -821,6 +855,7 @@ export const Fleet = Node.create({
         syncReveal();
       }
       const flushFleetEditor = () => {
+        if (statsInline) statsInline.flush();
         if (fleetEditor) fleetEditor.flush();
       };
       dom.addEventListener("bp-flush-node", flushFleetEditor);
@@ -858,6 +893,7 @@ export const Fleet = Node.create({
           // Re-seed the editor from an echo / undo WITHOUT clobbering an in-progress
           // edit (refresh no-ops when the block is content-equal or focus is inside).
           if (fleetEditor) fleetEditor.refresh(b, focused);
+          if (statsInline) statsInline.refresh();
           syncReveal();
           return true;
         },
@@ -868,6 +904,7 @@ export const Fleet = Node.create({
         // hook mutates the paint hole's innerHTML directly and PM must ignore it.
         ignoreMutation: () => true,
         destroy: () => {
+          if (statsInline) statsInline.destroy();
           dom.removeEventListener("bp-flush-node", flushFleetEditor);
           if (fleetEditor) {
             fleetEditor.destroy();
