@@ -138,6 +138,12 @@ defmodule Barkpark.Plugins.Bulldocs.MixedWriteGuard do
   # 422 while the write kept the blocks — the exact hazard this module exists
   # to close, restored behind a 200 — and 672 tests still passed. A shared
   # predicate makes that divergence unrepresentable rather than merely untested.
+  #
+  # PUBLIC ON PURPOSE — do not privatise it. The delegate being callable by
+  # name is what lets `ClearBlocksPredicateParityTest` drive a table of values
+  # through BOTH module names and assert they agree; making it a `defp` wrapper
+  # would silently disarm that tripwire, which is the one check that catches a
+  # future re-inline of a second copy.
   defdelegate clear_blocks?(value), to: BlockOps
 
   defp existing_blocks(attrs) do
