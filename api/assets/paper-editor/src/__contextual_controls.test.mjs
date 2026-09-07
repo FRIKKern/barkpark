@@ -105,4 +105,14 @@ assert.match(shell, /\.bp-paper-quote-editor \.bp-blockquote__cite::before\s*\{[
 assert.match(surface, /\.bp-paper-surface \.bp-blockquote__cite::before\s*\{ content: "\\2014\\00a0";/,
   "canonical reader prefix and flow remain unchanged");
 
+const studioLayout = readFileSync(new URL("../../../lib/barkpark_web/layouts/root.html.heex", import.meta.url), "utf8");
+const narrowPaperHeader = studioLayout.match(/@container panel\s*\(max-width:\s*720px\)\s*\{\s*\.editor-panel\[data-test-id="studio-paper-editor"\] > \.editor-header\s*\{([^}]*)\}/);
+assert.ok(narrowPaperHeader, "Paper header actions must not spill over the title in a narrow content pane");
+assert.match(narrowPaperHeader[1], /display:\s*grid/, "title and actions get separate rows without changing the shared desktop header");
+assert.match(narrowPaperHeader[1], /grid-template-columns:\s*minmax\(0,\s*1fr\)/, "long titles cannot grow the narrow grid beyond its pane");
+assert.match(narrowPaperHeader[1], /height:\s*auto/, "two header rows are not squeezed into the legacy 42px height");
+assert.match(narrowPaperHeader[1], /flex-shrink:\s*0/, "the scrolling editor cannot shrink the header over its actions");
+assert.match(studioLayout, /\.editor-panel\[data-test-id="studio-paper-editor"\] > \.editor-header > div:last-child\s*\{[^}]*flex-wrap:\s*wrap/,
+  "Publish, View, standalone and Share actions wrap rather than disappearing off the pane");
+
 console.log("PASS contextual labels: scoped readable token and light/dark contrast");
