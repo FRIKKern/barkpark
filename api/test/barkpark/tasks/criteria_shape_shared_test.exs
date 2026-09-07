@@ -167,8 +167,13 @@ defmodule Barkpark.Tasks.CriteriaShapeSharedTest do
 
     test "every bad shape is refused at both doors" do
       for {label, criteria} <- @bad_shapes do
-        assert {{:refused, _}, {:refused, _}} = both_doors_agree(criteria),
-               "not refused: #{label}"
+        # Bound first, asserted on a boolean. `assert pattern = expr, msg` never
+        # reaches its message — the match raises MatchError before assert/2 runs
+        # — and the label is the whole point when ten fixtures share one arm.
+        {v, p} = both_doors_agree(criteria)
+
+        assert {elem_tag(v), elem_tag(p)} == {:refused, :refused},
+               "not refused at both doors: #{label} — got #{inspect(v)} / #{inspect(p)}"
       end
     end
 
@@ -206,7 +211,10 @@ defmodule Barkpark.Tasks.CriteriaShapeSharedTest do
   describe "POSITIVE CONTROL — a predicate that refuses everything is the worse bug" do
     test "every good shape still saves at both doors" do
       for {label, criteria} <- @good_shapes do
-        assert {:accepted, :accepted} = both_doors_agree(criteria), "wrongly refused: #{label}"
+        {v, p} = both_doors_agree(criteria)
+
+        assert {v, p} == {:accepted, :accepted},
+               "wrongly refused: #{label} — got #{inspect(v)} / #{inspect(p)}"
       end
     end
 

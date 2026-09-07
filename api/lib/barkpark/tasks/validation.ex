@@ -53,7 +53,6 @@ defmodule Barkpark.Tasks.Validation do
   @spec kinds() :: [String.t()]
   def kinds, do: @kinds
 
-  # @canonical capability:task-acceptance-criteria-shape aka:criterion,met,evidence,is_map,unstampable doc:docs/setup/TASK-SYSTEM.md
   @doc """
   The ONE shape rule for an `acceptance_criteria` list. Returns `nil` when
   every entry is well formed, or a human-readable message naming the FIRST
@@ -99,6 +98,7 @@ defmodule Barkpark.Tasks.Validation do
   typed `text` where the contract says `criterion` and got a clean 200 back;
   echoing the keys is what turns the refusal into a fix.
   """
+  # @canonical capability:task-acceptance-criteria-shape aka:criterion,met,evidence,is_map,unstampable doc:docs/setup/TASK-SYSTEM.md
   @spec criteria_violation(list()) :: nil | String.t()
   def criteria_violation(list) when is_list(list) do
     list
