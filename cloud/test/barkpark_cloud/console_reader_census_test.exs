@@ -1110,6 +1110,15 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "the not-a-member sentence owed."
     },
     %{
+      code: "resume_failed",
+      site: "router.ex POST /v1/operator/teams/:id/billing/resume",
+      reason:
+        "Operator-tier: the billing-suspension lift is gated on the platform-admin " <>
+          "allowlist (charter D30's permanent human gate); app.js never calls it, and " <>
+          "the 502 relays only the status-keyed billing_reason/1 summary, never the " <>
+          "raw Stripe body. Flip: a console operator billing view ships."
+    },
+    %{
       code: "send_failed",
       site: "router.ex test_email (POST /v1/notifications/test)",
       reason:
@@ -1123,6 +1132,15 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
       reason:
         "CLI-only: the poll pacing answer belongs to bp login's loop; the console " <>
           "never polls the device route. Flip: a console polling flow ships."
+    },
+    %{
+      code: "subscription_unpaid",
+      site: "router.ex POST /v1/operator/teams/:id/billing/resume",
+      reason:
+        "Operator-tier: the refusal half of the billing-suspension lift — the payment " <>
+          "gateway does not report the payer as current. Same platform-admin gate as " <>
+          "resume_failed above; the body carries gateway_status + a remedy for the " <>
+          "human reading it. Flip: a console operator billing view ships."
     },
     %{
       code: "ticket_mint_failed",

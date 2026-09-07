@@ -8182,6 +8182,75 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/tasks/{doc_id}/discharges": {
+      "post": {
+        "operationId": "task.discharges",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Post a merged PR's `Discharges:` citations so every SIBLING row the merge also satisfied learns about it. doc_id is the PRIMARY row — the one the PR's single `Task:` trailer credited; --body is the PR body, and the server parses every column-0 `Discharges: <doc_id> [c<N>]` line out of it (the grammar lives server-side in Barkpark.Tasks.Citations, so there is exactly ONE implementation and no client can drift from it). Each cited row gets a readable discharge_marks note beside the criterion it names, carrying --pr, --commit and the primary row id. NON-HOLDER, like `landed` and `renew`: a push-to-main workflow holds no claim, so there is no worker_id and no observed_epoch. It NEVER sets met=true and never touches lifecycle, the claim or evidence — a back-link may ROUTE a reader, never close a row; only the row's holder decides. A citation naming the primary row itself is skipped (status self), and an unknown id is reported (status not_found) rather than failing the call, because one bad line in a PR body must not swallow the good ones. CI calls this from scripts/landed-mark.sh after a merge; an operator calls it by hand to repair a merge whose citations were never posted.",
+        "tags": [
+          "task"
+        ],
+        "x-barkpark-scope": "write"
+      }
+    },
     "/v1/schemas/{dataset}/{name}": {
       "delete": {
         "operationId": "schema.delete",

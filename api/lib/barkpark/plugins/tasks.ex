@@ -542,6 +542,12 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/stamp", BarkparkWeb.TasksController, :stamp, auth: :token_root},
       {:post, "/tasks/:doc_id/pulse", BarkparkWeb.TasksController, :pulse, auth: :token_root},
       {:post, "/tasks/:doc_id/landed", BarkparkWeb.TasksController, :landed, auth: :token_root},
+      # THE BACK-LINK MARK (task-29781d0921e5a885): :doc_id is the PRIMARY row
+      # the PR's one `Task:` trailer credited; the body's `Discharges:` lines
+      # name the SIBLING rows the same merge may also have satisfied, and each
+      # gets a readable mark that CANNOT set met. See Tasks.Discharge.
+      {:post, "/tasks/:doc_id/discharges", BarkparkWeb.TasksController, :discharges,
+       auth: :token_root},
       # The NON-HOLDER lease extension: CI buys grace for a row its open PR
       # names, without holding (or disturbing) the claim. See Tasks.Renew.
       {:post, "/tasks/:doc_id/renew", BarkparkWeb.TasksController, :renew, auth: :token_root},
@@ -1456,6 +1462,59 @@ defmodule Barkpark.Plugins.Tasks do
             name: "reason",
             type: "string",
             summary: "Free-text label stored on the record; defaults to open_pr."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.discharges",
+        noun: "task",
+        verb: "discharges",
+        summary:
+          "Post a merged PR's `Discharges:` citations so every SIBLING row the merge also satisfied learns about it. " <>
+            "doc_id is the PRIMARY row — the one the PR's single `Task:` trailer credited; --body is the PR body, " <>
+            "and the server parses every column-0 `Discharges: <doc_id> [c<N>]` line out of it (the grammar lives " <>
+            "server-side in Barkpark.Tasks.Citations, so there is exactly ONE implementation and no client can " <>
+            "drift from it). Each cited row gets a readable discharge_marks note beside the criterion it names, " <>
+            "carrying --pr, --commit and the primary row id. NON-HOLDER, like `landed` and `renew`: a push-to-main " <>
+            "workflow holds no claim, so there is no worker_id and no observed_epoch. It NEVER sets met=true and " <>
+            "never touches lifecycle, the claim or evidence — a back-link may ROUTE a reader, never close a row; " <>
+            "only the row's holder decides. A citation naming the primary row itself is skipped (status self), and " <>
+            "an unknown id is reported (status not_found) rather than failing the call, because one bad line in a " <>
+            "PR body must not swallow the good ones. CI calls this from scripts/landed-mark.sh after a merge; " <>
+            "an operator calls it by hand to repair a merge whose citations were never posted.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/discharges"},
+        auth_tier: "write",
+        args: [
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary:
+              "The PRIMARY task document id — the row the PR's one `Task:` trailer credited. Cited rows come from --body, never from here."
+          }
+        ],
+        flags: [
+          %{
+            name: "body",
+            type: "string",
+            summary:
+              "The pull request body. Every column-0 `Discharges: <doc_id> [c<N>]` line in it is a citation; c<N> is the ZERO-BASED criterion index, and omitting it marks the row rather than one criterion. A body with no such line cites nothing and is not an error."
+          },
+          %{
+            name: "pr",
+            type: "string",
+            summary: "The pull request number recorded in every mark this call writes."
+          },
+          %{
+            name: "commit",
+            type: "string",
+            summary: "The merge sha recorded in every mark this call writes."
           }
         ],
         writes: true,

@@ -109,6 +109,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/operator/barkparks/without-agent-token operator  boxes holding NO live agent token (disarmed vs down), each row with its remedy
       GET     /v1/operator/deploy-ledger/census operator  fleet deploy ledger: class + site counts and the failure rate WITH its denominator, over a pinned window
       POST    /v1/operator/sites/content-secrets/mint operator  mint the content-publish secret for content-bound sites that have none, and register the webhook
+      POST    /v1/operator/teams/:id/billing/resume operator  lift a team's BILLING suspension after re-reading its subscription from the payment gateway (reason-scoped; 409 `subscription_unpaid` when the gateway does not say the payer is current)
       GET     /v1/deliveries       user(s)+worker  the platform's OWN per-sha delivery record — what was delivered, on whose run, and the clocks around it (?sha= narrows; a pinned window otherwise). PAT-reachable on purpose (D385/D412)
       GET     /v1/deploy-ledger/census user(s)  the SAME deploy ledger, scoped to the caller's own team sites (+ a scope line naming the team slug); the read a non-operator can actually reach
       PATCH   /v1/admin/barkparks/:id/channel worker set one box's release channel
@@ -4608,6 +4609,77 @@ defmodule BarkparkCloud.Web.Router do
         Registry.mint_missing_content_secrets(actor_user_id: conn.assigns.current_user.id)
 
       json(conn, 200, tally)
+    end
+  end
+
+  # POST /v1/operator/teams/:id/billing/resume -> 200 {resumed: true, ...} — THE
+  # ONLY ROUTE AT ANY TIER THAT CAN LIFT A BILLING SUSPENSION (task-75decf22069ee083).
+  #
+  # Until this existed, entry into billing suspension was automatic and fleet-wide
+  # while the exit was a webhook and nothing else — and one exit is missing: a
+  # Stripe-side reactivation of a `canceled` subscription arrives as
+  # `customer.subscription.updated`, an object with no `metadata.team_id`, so
+  # nothing activates and every managed box stays suspended. Grepping this file
+  # for `resume_billing_suspended` / `resume_team_barkparks` / `unsuspend`
+  # returned NOTHING: the only remedy was a hand-written DB write or an `iex`
+  # session on the box.
+  #
+  # THE REFUSAL IS THE POINT, AND IT IS NOT OUR OWN ROW'S OPINION. A resume that
+  # lifts any suspension on request is a billing bypass, so the decision is made
+  # against the PAYMENT GATEWAY's live answer — `Gateway.retrieve_subscription/1`
+  # via `Billing.resume_billing_suspension/1`. A team the gateway does not report
+  # as `active`/`trialing` gets 409 `subscription_unpaid` CARRYING that status, not
+  # a silent no-op 200. Deliberately NOT gated on `Billing.entitled?/1`: that
+  # predicate reads the stale local row this route exists to correct, so it would
+  # refuse precisely the case an operator is called for.
+  #
+  # Thin, like every other handler in this seam: the reason-scoping lives in
+  # `Registry.resume_billing_suspended/1` (managed rows, `"billing_lapsed"` /
+  # `"billing_past_due"` only — a `"quota_exceeded"` flag is untouchable from
+  # here), and the success arm is the SAME `Billing.recover_subscription/1` the
+  # `invoice.paid` webhook runs. This route adds no new writer of
+  # `barkparks.suspended`.
+  post "/v1/operator/teams/:id/billing/resume" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(Accounts.get_team(id)) ->
+        json(conn, 404, %{error: "not_found", scope: "team"})
+
+      true ->
+        case Billing.resume_billing_suspension(id) do
+          {:ok, %{gateway_status: status}} ->
+            json(conn, 200, %{
+              resumed: true,
+              team_id: id,
+              gateway_status: status,
+              reason_scope: ["billing_lapsed", "billing_past_due"]
+            })
+
+          {:error, {:unpaid, status}} ->
+            json(conn, 409, %{
+              error: "subscription_unpaid",
+              gateway_status: status,
+              remedy:
+                "the payment provider does not report this subscription as active — " <>
+                  "collect payment (or have the customer re-subscribe) first; this route " <>
+                  "restores boxes, it does not settle invoices"
+            })
+
+          {:error, :no_subscription} ->
+            json(conn, 409, %{
+              error: "no_subscription",
+              remedy:
+                "this team has no gateway-side subscription to verify, so there is no " <>
+                  "evidence on which to lift — have the team subscribe"
+            })
+
+          {:error, {:gateway, reason}} ->
+            json(conn, 502, %{error: "resume_failed", reason: billing_reason(reason)})
+        end
     end
   end
 
