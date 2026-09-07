@@ -494,7 +494,57 @@ defmodule Barkpark.Content.Mutations do
     end
   end
 
+  # [mutation-shape-422] #18, Gyldendal field report — a known {id,type} verb
+  # sent WITHOUT one of the two keys names the field instead of answering a
+  # bare 400 "request body is malformed".
+  #
+  # Every verb in @id_type_verbs has an `apply_one/3` head above that
+  # pattern-matches `%{"id" => id, "type" => type}`. Omit either key and the
+  # mutation matches no head at all and lands here — where, until this clause,
+  # the caller got `{"code":"malformed","message":"request body is malformed"}`
+  # with no verb and no field. That is a well-formed request the server cannot
+  # act on as sent, which is what 422 already means in this codebase (see the
+  # `workspace_scope_required` note in content/errors.ex), and the refusal now
+  # says WHICH key is missing so a caller never has to read this file to
+  # proceed. The list is derived from the heads above, not from the report —
+  # the report named `publish`/`unpublish`/`delete`; `discardDraft` and `patch`
+  # have the same shape and the same trap.
+  #
+  # DELIBERATELY NARROW — the generic 400 survives for anything genuinely
+  # malformed: an unknown verb, a known verb whose payload is not a map, and a
+  # `patch` that carries id+type but no recognized op (it has both keys, so
+  # nothing is "missing" — it fails for a different reason and must not be
+  # mislabelled).
+  @id_type_verbs ~w(publish unpublish discardDraft delete patch)
+
+  defp apply_one(mutation, _dataset, _opts) when is_map(mutation) do
+    case missing_id_type(mutation) do
+      {verb, missing} -> {:error, {:missing_mutation_fields, verb, missing}}
+      nil -> {:error, :malformed}
+    end
+  end
+
   defp apply_one(_, _, _), do: {:error, :malformed}
+
+  # The first @id_type_verbs key present with a MAP payload that omits `id` or
+  # `type`, as `{verb, missing_keys}`. `nil` means "not this defect" — either no
+  # known verb, a non-map payload, or both keys present.
+  defp missing_id_type(mutation) do
+    Enum.find_value(@id_type_verbs, fn verb ->
+      case Map.get(mutation, verb) do
+        payload when is_map(payload) ->
+          case Enum.reject(["id", "type"], &present_string?(Map.get(payload, &1))) do
+            [] -> nil
+            missing -> {verb, missing}
+          end
+
+        _ ->
+          nil
+      end
+    end)
+  end
+
+  defp present_string?(value), do: is_binary(value) and String.trim(value) != ""
 
   # The ledger's back door (cch-w1-ledger-close-guard, epic decision D22).
   #
