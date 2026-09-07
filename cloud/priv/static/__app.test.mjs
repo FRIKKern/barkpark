@@ -30135,6 +30135,9 @@ function csEl(tag, attrs) {
     removeEventListener() {},
     querySelector() { return null; },
     querySelectorAll() { return []; },
+    children: [],
+    appendChild(node) { this.children.push(node); return node; },
+    removeChild(node) { this.children = this.children.filter((c) => c !== node); return node; },
     // Browser-faithful: a disabled control dispatches no click at all.
     click(ev) {
       if (this.disabled) return false;
@@ -30188,7 +30191,17 @@ function csDocument(staticIds) {
       return null;
     },
     querySelectorAll() { return []; },
-    createElement: () => ({ ...inertEl, setAttribute() {}, appendChild() {} }),
+    // toast() builds its element here and then WIRES it — `el.querySelector(
+    // ".toast-close").addEventListener(...)` is unguarded in the shipped source.
+    // A createElement whose querySelector answers null therefore throws INSIDE
+    // the accepted-create branch, one line before loadInstanceSites() — which
+    // would have shown up here as "the console never refreshes the list", a
+    // defect report about app.js caused entirely by the rig.
+    createElement: () => {
+      const el = csEl("div", {});
+      el.querySelector = () => csEl("button", {});
+      return el;
+    },
     documentElement: { ...inertEl, getAttribute: () => null },
     body: { ...inertEl, appendChild() {} },
     _keydown: keydown,
@@ -30215,8 +30228,22 @@ function csDocument(staticIds) {
       for (const prev of doc._bodyEls) if (prev.id) reg.delete(prev.id);
       this._raw = String(html);
       const els = csParse(this._raw);
+      // A <select>'s value is its SELECTED OPTION's, never an attribute of its
+      // own — and the framework/starter defaults live there. A rig that skipped
+      // this would read "" for a control the person never touched and report an
+      // empty `framework` on the wire, which is a defect in the rig, not the
+      // console. Options are folded into the select that precedes them.
+      let currentSelect = null;
       for (const el of els) {
         el.focus = function () { doc.activeElement = this; this.focused = true; };
+        if (el.tagName === "SELECT") { currentSelect = el; el.value = ""; el._hasSelected = false; }
+        else if (el.tagName === "OPTION" && currentSelect) {
+          const v = el.attrs.value != null ? el.attrs.value : "";
+          if (!currentSelect._hasSelected && (el.attrs.selected != null || currentSelect.value === "")) {
+            currentSelect.value = v;
+            if (el.attrs.selected != null) currentSelect._hasSelected = true;
+          }
+        } else if (el.tagName !== "OPTION") currentSelect = null;
         if (el.id) reg.set(el.id, el);
       }
       doc._bodyEls = els;
@@ -30509,7 +30536,7 @@ test("stw2 c2: an OMITTED template sends NO `template` key — the framework-der
     "non-empty binary, so `template: \"\"` is silently dropped server-side — but the console must not rely on that, " +
     "and Site.changeset's closed slug set would refuse \"\" the moment the fold loosened. Sent: " + JSON.stringify(body));
   assert.ok(!("doc_type" in body), "a blank content type must be omitted too — the schema default is `post`");
-  assert.equal(body.framework, "plain" === "plain" ? "nextjs" : "", "framework still rides the body");
+  assert.equal(body.framework, "nextjs", "framework still rides the body — only the OPTIONAL keys are omitted");
 });
 
 test("stw2 c2: astro flips both the kind and the offered starters", async () => {
