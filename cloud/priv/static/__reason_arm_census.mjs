@@ -164,7 +164,7 @@ const BARE_CALL_RE = /(^|[^A-Za-z0-9_.])forbidden\(\s*conn\s*,([^\n]*)/gm;
 
 // ONE HOP BACK. Walks up from the call site to the nearest `<name> =` binding and
 // collects every string literal in an `if …, do: "A", else: "B"` (the shape at
-// router.ex:6377-6381, written across four lines). The window is bounded so a
+// router.ex:6378-6381, written across four lines). The window is bounded so a
 // same-named binding in a distant clause cannot be mistaken for this one.
 function resolveBinding(lines, name, callLine) {
   const WINDOW = 40;
