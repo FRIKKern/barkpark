@@ -1,0 +1,63 @@
+# Barkpark Caddy static-asset route — drop this INSIDE the site block that
+# reverse-proxies the app, BEFORE the `reverse_proxy …:400x` line (and therefore
+# before the maintenance `handle_errors` block in barkpark-maintenance.caddy).
+#
+# WHY. During a blue/green slot gap the app is briefly undialable and
+# `handle_errors 502 503 504` answers EVERY request with the branded
+# "Back in a moment" HTML — including `GET /assets/bp-paper-editor.css`. On
+# 2026-07-07 that shipped an HTML 503 where a 13,194-byte text/css was expected:
+# the already-cached JS mounted the PortableDoc canvas and it rendered
+# completely unstyled. Papers looked destroyed; no data was touched.
+# Serving the static tree off DISK ahead of the proxy means those requests never
+# reach the app, so they never reach handle_errors.
+#
+# NO DIGESTS ON THIS BOX. api/ runs no `mix phx.digest`, ships no
+# cache_manifest.json, and mounts Plug.Static without `cache_static_manifest`.
+# Every file under api/priv/static has a STABLE name, so there is exactly one
+# generation and old HTML and new HTML request the same URLs. Both slots already
+# share this one directory (per-slot roots are _build_blue / _build_green; priv
+# belongs to the checkout), so this changes WHO serves the bytes, not WHICH.
+#
+# `pass_thru` IS LOAD-BEARING. Not every /assets/* URL is a file — the reader
+# references /assets/paper-surface/paper-surface.css, which the app answers. A
+# plain file_server would 404 it; `pass_thru` lets a miss fall out of the handle
+# and continue to the reverse_proxy, so app-served asset routes behave exactly
+# as they did before (maintenance page included, during a gap).
+#
+# THE Cache-Control LINE IS NOT DECORATION. api/lib/barkpark_web/endpoint.ex
+# serves these unversioned assets `no-cache` on purpose (`headers:` for the 200,
+# `cache_control_for_etags:` for the 304) because a bare `public` let browsers
+# heuristically serve a STALE Studio shell after a deploy. Caddy's file_server
+# sends no Cache-Control at all; without this line that bug silently returns.
+# Caddy's own ETag/If-None-Match handling still answers 304 (measured on 2.11.4:
+# 200 + `Cache-Control: no-cache`, then 304 + `Cache-Control: no-cache`).
+#
+# The matcher mirrors `BarkparkWeb.static_paths()` — the exact set Plug.Static is
+# mounted `only:`. The block carries NO slot-port token, so the blue/green
+# ACTIVE_PORT grep and the port-flip sed pass over it untouched.
+#
+# SCOPE: the INSTANCE renderer only. deploy/site-deploy.sh's per-site
+# `handle_path /sites/<slug>/*` + file_server blocks are a different concern and
+# are NOT covered by this file.
+#
+# deploy/instance-deploy.sh injects this automatically (idempotent, validated,
+# auto-reverting). For a hand-managed Caddyfile, paste it in and `caddy reload`.
+# Replace <APP> with the checkout root (default /opt/barkpark).
+#
+# Example site block:
+#
+#   guerrilla.barkpark.cloud {
+#       @barkpark_static path /assets/* /fonts/* /images/* /favicon.ico /robots.txt
+#       handle @barkpark_static { … }
+#       reverse_proxy localhost:4000
+#       handle_errors 502 503 504 { … }
+#   }
+# BARKPARK_STATIC_ASSETS
+@barkpark_static path /assets/* /fonts/* /images/* /favicon.ico /robots.txt
+handle @barkpark_static {
+	header Cache-Control "no-cache"
+	root * <APP>/api/priv/static
+	file_server {
+		pass_thru
+	}
+}

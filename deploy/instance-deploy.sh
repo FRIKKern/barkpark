@@ -785,6 +785,113 @@ MAINT
 }
 with_caddy_lock arm_caddy_maintenance
 
+# ---- Arm the Caddy static-asset route (task-65493b2183c3bf91) so a backend gap
+# never turns a stylesheet into an HTML holding page. THE INCIDENT (2026-07-07
+# ~00:29): during a slot restart the app was briefly undialable, so
+# `handle_errors 502 503 504` above answered EVERY request with the branded
+# "Back in a moment" HTML — including `GET /assets/bp-paper-editor.css`. The JS
+# bundle was already browser-cached, so the PortableDoc canvas mounted and then
+# rendered completely UNSTYLED against a 503 text/html body where a 13,194-byte
+# text/css was expected. Papers looked destroyed; the data was never touched.
+#
+# THE FIX: Caddy serves the static tree straight off DISK, ahead of the proxy,
+# so those requests never reach the app and therefore never reach handle_errors.
+#
+# WHY THIS IS SAFE ON THIS BOX — the digest question, answered from the tree,
+# not assumed. Barkpark's api/ has NO asset digest step: no `mix phx.digest` in
+# any deploy path, no `cache_manifest.json`, no esbuild/tailwind in api/mix.exs,
+# and `Plug.Static` is mounted with `at: "/", from: :barkpark` and NO
+# `cache_static_manifest`. Every one of the 39 files under api/priv/static is
+# committed under a STABLE name (bp-paper-editor.css, phoenix.js, the fonts,
+# favicon.ico, robots.txt); the single generated one, assets/bp-pdrender.wasm.gz
+# (gitignored, `make wasm`), is stable-named too. So there is exactly ONE digest
+# generation, ever — the working tree's — and "an old slot serving old HTML that
+# references a hash the new tree no longer has" cannot occur here: old HTML and
+# new HTML request the same stable URLs. Both slots already share this one
+# api/priv/static (per-slot roots are _build_blue/_build_green; priv is the
+# checkout's), so Caddy reading it changes WHO serves the bytes, not WHICH.
+#
+# WHY `pass_thru` IS LOAD-BEARING: not every /assets/* URL is a file. The paper
+# reader references /assets/paper-surface/paper-surface.css, which no file on
+# disk answers. A plain `file_server` would 404 it; with `pass_thru` a miss
+# falls out of the handle and continues to the site's reverse_proxy, so
+# app-served asset routes behave EXACTLY as they do today (including landing on
+# the maintenance page during a gap). Verified against real Caddy 2.11.4.
+#
+# WHY THE Cache-Control HEADER: api/lib/barkpark_web/endpoint.ex deliberately
+# serves these unversioned assets `no-cache` (both on 200 via `headers:` and on
+# 304 via `cache_control_for_etags:`) because a bare `public` let browsers
+# heuristically serve a STALE Studio shell after a deploy. Caddy's file_server
+# sends no Cache-Control at all, which would silently re-open that bug — so the
+# route restates the contract. Caddy's own ETag/If-None-Match handling keeps
+# revalidation working (measured: 200 + `Cache-Control: no-cache`, then 304 +
+# `Cache-Control: no-cache`).
+#
+# SCOPE: the INSTANCE renderer only. deploy/site-deploy.sh's per-site
+# `handle_path /sites/<slug>/*` + file_server blocks are a DIFFERENT concern
+# (each spawned customer site roots its own directory) and are untouched here.
+#
+# Contract identical to the maintenance / /mcp / /connectors armings:
+# marker-idempotent, backed up, `caddy validate`d, auto-reverting, and it NEVER
+# fails the deploy. The block carries NO slot-port token, so the ACTIVE_PORT
+# grep and the port-flip sed pass over it exactly as they do the maintenance
+# block. Reference copy: deploy/caddy/barkpark-static-assets.caddy.
+STATIC_ROOT="${BARKPARK_STATIC_ROOT:-$APP/api/priv/static}"
+arm_caddy_static_assets() {
+  command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping static-asset route"; return 0; }
+  [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — skipping static-asset route"; return 0; }
+  if grep -q 'BARKPARK_STATIC_ASSETS' "$CADDYFILE"; then log "caddy static-asset route already armed"; return 0; fi
+  if [ ! -d "$STATIC_ROOT" ]; then
+    log "no static root $STATIC_ROOT — leaving Caddy untouched (static-asset route not armed)"
+    return 0
+  fi
+  if ! grep -qE "reverse_proxy[[:space:]]+localhost:(${BLUE_PORT}|${GREEN_PORT})([[:space:]]|\$)" "$CADDYFILE"; then
+    log "no slot 'reverse_proxy localhost:...' site in $CADDYFILE — leaving Caddy untouched (static-asset route not armed)"
+    return 0
+  fi
+  # The matcher mirrors BarkparkWeb.static_paths() (assets fonts images
+  # favicon.ico robots.txt) — the exact set Plug.Static is mounted `only:`.
+  # Anything outside it is dynamic and must keep going to the app.
+  local block; block="$(cat <<STATICROUTE
+	# BARKPARK_STATIC_ASSETS — serve api/priv/static off DISK, ahead of the slot
+	# proxy, so a blue/green gap can never answer a stylesheet with the
+	# maintenance HTML. Mirrors BarkparkWeb.static_paths(). \`pass_thru\` lets a
+	# non-file asset URL fall through to the app exactly as before.
+	@barkpark_static path /assets/* /fonts/* /images/* /favicon.ico /robots.txt
+	handle @barkpark_static {
+		header Cache-Control "no-cache"
+		root * ${STATIC_ROOT}
+		file_server {
+			pass_thru
+		}
+	}
+STATICROUTE
+)"
+  local bak; bak="${CADDYFILE}.bak.static.$(date -u +%Y%m%d%H%M%S)"
+  cp -a "$CADDYFILE" "$bak"
+  local tmp; tmp="$(mktemp)"
+  # Insert BEFORE the first slot reverse_proxy, so the handle sits inside that
+  # site block ahead of the bare fallback proxy. Slot ports only — never the
+  # /mcp (:4010) or /connectors (:4020) route lines.
+  BP_BLOCK="$block" BP_SLOT_RE="reverse_proxy[[:blank:]]+localhost:(${BLUE_PORT}|${GREEN_PORT})([[:blank:]]|\$)" awk '
+    BEGIN { blk=ENVIRON["BP_BLOCK"]; re=ENVIRON["BP_SLOT_RE"] }
+    !ins && $0 ~ re { print blk; ins=1 }
+    { print }
+  ' "$CADDYFILE" > "$tmp" && mv "$tmp" "$CADDYFILE"
+  # mktemp is 0600 and mv preserves it — the caddy user must still read its own
+  # config or `systemctl reload caddy` fails (same lesson as the other armings).
+  chmod --reference="$bak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
+  chown --reference="$bak" "$CADDYFILE" 2>/dev/null || true
+  if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
+    if systemctl reload caddy 2>/dev/null; then log "armed caddy static-asset route -> $STATIC_ROOT"; else log "caddy reload failed (config valid) — static-asset route live on next reload"; fi
+    rm -f "$bak"
+  else
+    log "caddy validate rejected the static-asset route — reverting, Caddy untouched"
+    mv "$bak" "$CADDYFILE"
+  fi
+}
+with_caddy_lock arm_caddy_static_assets
+
 # ---- Arm the /mcp Caddy route for the remote MCP endpoint (viable-everywhere
 # charter D19): path-based on the EXISTING public site — never a new subdomain —
 # proxying to 127.0.0.1:$MCP_PORT where barkpark-mcp.service listens
