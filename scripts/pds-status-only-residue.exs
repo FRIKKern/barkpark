@@ -88,6 +88,16 @@
 #   * send_resp sites are found by REGEX over lines while everything else is AST —
 #     a genuine lens mismatch, named here rather than hidden.
 #
+#   * THE A3 ARM CANNOT SEE A BODY-BOUND PAYLOAD AT ALL. It requires every
+#     payload variable to be bound in the def HEAD, so a variable bound by
+#     `with … <-`, a `case` clause pattern, or `x = conn.params[…]` is invisible
+#     to it BY CONSTRUCTION. The A3b section measures that population and
+#     classifies it by bind-site provenance; it is PRINTED and never sets the
+#     exit code, because a widened redding relation over a population whose
+#     false-positive rate has not been measured is the failure PDS-D554/D566
+#     name. See the `Provenance` module header for the three classes and the
+#     direction of every error the walk can make.
+#
 # PAYMENT IS OUT OF SCOPE — filed as pds-bl-status-only-residue-payment. Folding
 # the full json/2 population into the ok:true census is the error PDS-D448 caught.
 
@@ -256,6 +266,287 @@ defmodule PutStatus do
   end
 end
 
+# ------------------------------------------------- A3b: BIND-SITE PROVENANCE
+# THE BLIND SHAPE THIS ADDRESSES (pds-w40-bl-body-bound-provenance). The A3 arm
+# above requires every payload variable to be bound in the def HEAD. A variable
+# bound in the def BODY — `with {:ok, label} <- fetch_label(params)`, a `case`
+# clause pattern, a plain `=` off `conn.params` — can NEVER satisfy that
+# predicate, so an entire species of request echo is invisible to A3 by
+# construction. This module MEASURES that population and classifies each site's
+# payload variables by where their binding's right-hand side comes from.
+#
+# IT IS PRINTED, NOT ARMED, AND THAT IS A DELIBERATE CHOICE, NOT AN OVERSIGHT.
+# Widening a redding relation over a population whose false-positive rate has
+# not been measured is the failure PDS-D554/D566 name and PDS-D560 caught in the
+# act. The exit code below is untouched by this section: `Report.exit_code/2`
+# still reds only on unparsed corpus (3) and off-allowlist A3 head-bound echoes
+# (4). Arming A3b is a SEPARATE decision that must be paid for with a hand-read
+# of every site it names.
+#
+# THE THREE CLASSES, AND WHY THERE ARE THREE AND NOT TWO:
+#   REQUEST-ROOTED  every payload variable walks back to a binding whose RHS is
+#                   rooted in the request (`conn.params`, `conn.assigns`, a
+#                   head-bound argument of a `(conn, …)` def, or a chain of
+#                   those) and NO payload variable carries a post-write fact.
+#                   This is the accusation class.
+#   STORE-FACT      at least one payload variable walks back to a binding whose
+#                   RHS reaches a Repo write or a mutate-vocabulary context call
+#                   (`{:ok, token} <- Auth.create_token(…)` -> `token.id`). The
+#                   payload can differ if the write had gone the other way, so
+#                   the site is CLEARED — one store fact is enough.
+#   RESIDUAL        the walk could not decide at least one variable and found no
+#                   store fact. A residual site is NOT clean and NOT accused; it
+#                   is UNDECIDED, printed with the binding that defeated the
+#                   walk. No site is ever guessed into REQUEST-ROOTED.
+#
+# The walk is intra-def and depth-capped (@max_depth). It does not follow calls
+# into other functions, so `fetch_label(params)` is request-rooted because its
+# ARGUMENT is, not because the callee was read. A helper that launders a request
+# value through a module attribute or a process dictionary reads RESIDUAL here.
+defmodule Provenance do
+  @max_depth 4
+
+  # fields of %Plug.Conn{} that are request data
+  @conn_request_fields ~w(params body_params query_params path_params assigns
+                          req_headers host method request_path query_string
+                          remote_ip scheme port cookies req_cookies)a
+
+  @doc """
+  Variables referenced in an AST, with the string-interpolation artifact
+  removed. `Scan.vars/1` counts the `::binary` size-modifier atom of an
+  interpolation segment as if it were a program variable; that artifact is left
+  in place there on purpose (changing it would move the A3 arm's number) and is
+  corrected HERE, where the number is new.
+  """
+  def vars(ast) do
+    {_, acc} =
+      Macro.prewalk(ast, [], fn
+        {:"::", _, [l, {:binary, _, c}]}, a when is_atom(c) -> {l, a}
+        {v, _m, c} = n, a when is_atom(v) and is_atom(c) -> {n, [v | a]}
+        n, a -> {n, a}
+      end)
+
+    acc |> Enum.reject(&(&1 in [:__MODULE__, :conn])) |> Enum.uniq()
+  end
+
+  @doc """
+  Binding table for one def body: `%{var => [%{line:, kind:, rhs:}]}`.
+
+  Recognized bind sites: `lhs = rhs`, `lhs <- rhs` (with/for clauses), and
+  `case subj do pat -> … end` clause patterns (producer = the case subject).
+  An `fn`/`try`/`receive` pattern is deliberately NOT recognized: it would put a
+  variable in the table with a producer the walk cannot name, and a table entry
+  whose RHS is a lie is worse than no entry (an unlisted var reads UNDECIDED).
+  """
+  def bindings(nil), do: %{}
+
+  def bindings(body) do
+    {_, acc} =
+      Macro.prewalk(body, [], fn
+        {:=, m, [lhs, rhs]} = n, a -> {n, entries(lhs, rhs, :match, m) ++ a}
+        {:<-, m, [lhs, rhs]} = n, a -> {n, entries(lhs, rhs, :arrow, m) ++ a}
+        {:case, _m, [subj, [{:do, clauses} | _]]} = n, a when is_list(clauses) ->
+          {n,
+           Enum.flat_map(clauses, fn
+             {:->, cm, [pats, _]} -> Enum.flat_map(pats, &entries(&1, subj, :case_clause, cm))
+             _ -> []
+           end) ++ a}
+
+        n, a ->
+          {n, a}
+      end)
+
+    Enum.group_by(acc, & &1.var)
+  end
+
+  defp entries(lhs, rhs, kind, m) do
+    line = Keyword.get(m, :line)
+    for v <- pattern_vars(lhs), do: %{var: v, line: line, kind: kind, rhs: rhs}
+  end
+
+  # variables a PATTERN binds. `^pinned` and `_` bind nothing; a map pattern's
+  # KEYS are not bindings, its values are.
+  defp pattern_vars(pat) do
+    {_, acc} =
+      Macro.prewalk(pat, [], fn
+        {:^, _, _}, a -> {nil, a}
+        {v, _m, c} = n, a when is_atom(v) and is_atom(c) -> {n, [v | a]}
+        n, a -> {n, a}
+      end)
+
+    acc
+    |> Enum.reject(&(&1 == :_ or String.starts_with?(Atom.to_string(&1), "_")))
+    |> Enum.uniq()
+  end
+
+  @doc "classify a variable against the binding table, following RHS roots"
+  def classify(v, table, head_vars, request_head?, depth \\ 0) do
+    cond do
+      depth > @max_depth ->
+        {:undecided, "provenance walk exceeded depth #{@max_depth}"}
+
+      request_head? and v in head_vars ->
+        {:request, "bound in the def HEAD"}
+
+      binds = Map.get(table, v) ->
+        binds
+        |> Enum.map(&classify_binding(&1, table, head_vars, request_head?, depth))
+        |> combine()
+
+      true ->
+        {:undecided, "no binding for `#{v}` found in this def body"}
+    end
+  end
+
+  defp classify_binding(b, table, head_vars, request_head?, depth) do
+    rhs = b.rhs
+    where = "#{b.kind} at line #{b.line}: `#{snip(rhs)}`"
+
+    cond do
+      store_producing?(rhs) ->
+        {:store, "#{where} — RHS reaches a Repo write / mutate-vocab call"}
+
+      conn_request?(rhs) ->
+        {:request, "#{where} — RHS reads conn request data"}
+
+      true ->
+        rvs = vars(rhs) |> Enum.reject(&(&1 == b.var))
+
+        if rvs == [] do
+          {:undecided, "#{where} — RHS has no variable root this walk can follow"}
+        else
+          rvs
+          |> Enum.map(&classify(&1, table, head_vars, request_head?, depth + 1))
+          |> Enum.map(fn {c, why} -> {c, "#{where} <- #{why}"} end)
+          |> combine()
+        end
+    end
+  end
+
+  # ONE store fact clears; otherwise an undecided component poisons the whole.
+  defp combine([]), do: {:undecided, "no components"}
+
+  defp combine(cs) do
+    cond do
+      hit = Enum.find(cs, &(elem(&1, 0) == :store)) -> hit
+      hit = Enum.find(cs, &(elem(&1, 0) == :undecided)) -> hit
+      true -> hd(cs)
+    end
+  end
+
+  # `Scan.writes?/1` only matches MODULE-QUALIFIED calls, so a bare local
+  # `patch_callback(doc, …)` that itself persists reads as a non-write there —
+  # which is how the walk first labelled the return of a local write helper
+  # REQUEST-ROOTED (media_processing_controller.ex:61, caught by hand-reading
+  # the three sites this arm first named). `Scan.writes?/1` is NOT widened:
+  # doing so would move `write_reachable` across the whole corpus and silently
+  # restate the A3 arm's population. The widening is local to this walk.
+  #
+  # DIRECTION OF THE ERROR THIS BUYS: a bare local call whose NAME happens to
+  # start with a mutate word but which writes nothing will CLEAR a site into
+  # :store_fact. That shrinks the accusation class rather than growing it — an
+  # echo can hide behind it, but nothing innocent is accused because of it.
+  defp store_producing?(ast), do: Scan.writes?(ast) or local_mutate_call?(ast)
+
+  defp local_mutate_call?(ast) do
+    {_, hit} =
+      Macro.prewalk(ast, false, fn
+        {f, _m, a} = n, acc when is_atom(f) and is_list(a) and a != [] ->
+          {n, acc or (f not in [:%{}, :%, :{}, :<<>>, :__aliases__, :.., :|] and Scan.mutate_word?(f))}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    hit
+  end
+
+  defp conn_request?(rhs) do
+    {_, hit} =
+      Macro.prewalk(rhs, false, fn
+        {{:., _, [{:conn, _, c}, f]}, _, _} = n, acc when is_atom(c) and is_atom(f) ->
+          {n, acc or f in @conn_request_fields}
+
+        # conn.params["x"] / conn.assigns[:x] desugar through Access.get/2
+        {{:., _, [Access, :get]}, _, [inner | _]} = n, acc ->
+          {n, acc or conn_request?(inner)}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    hit
+  end
+
+  defp snip(ast) do
+    ast |> Macro.to_string() |> String.replace(~r/\s+/, " ") |> String.slice(0, 100)
+  end
+
+  @doc """
+  Site verdict for one census row. Returns
+  `%{verdict:, body_bound:, vars: [{var, class, why}]}`.
+
+  `body_bound` is the population predicate: at least one payload variable that
+  is NOT bound in the def head. A site with body_bound=false is exactly what the
+  A3 arm above already adjudicates and is excluded here.
+  """
+  def site(row) do
+    pv = vars(row.payload_ast)
+    hv = if row.head_ast, do: vars(Scan.head_of(row.head_ast)), else: []
+    request_head? = conn_first_arg?(row.head_ast)
+    table = bindings(row.body_ast)
+
+    classified =
+      Enum.map(pv, fn v ->
+        {c, why} = classify(v, table, hv, request_head?)
+        {v, c, why}
+      end)
+
+    classes = Enum.map(classified, fn {_, c, _} -> c end)
+
+    # THE PAYLOAD ITSELF CAN BE THE STORE FACT. `%{revoked_count:
+    # Auth.revoke_app_tokens_for_email(trimmed, …)}` has exactly one variable
+    # (`trimmed`, a trimmed request email) and every variable is request-rooted
+    # — yet the emitted NUMBER is the write's own return value. Classifying by
+    # variables alone accused it (app_token_controller.ex:392, found by
+    # hand-reading). A payload that reaches a write carries a post-write fact
+    # whether or not a variable holds it.
+    payload_writes? = store_producing?(row.payload_ast)
+
+    verdict =
+      cond do
+        pv == [] -> :no_vars
+        payload_writes? -> :store_fact
+        :store in classes -> :store_fact
+        :undecided in classes -> :residual
+        true -> :request_rooted
+      end
+
+    %{verdict: verdict, body_bound: pv != [] and Enum.any?(pv, &(&1 not in hv)), vars: classified}
+  end
+
+  defp conn_first_arg?(nil), do: false
+
+  defp conn_first_arg?(head) do
+    case Scan.head_of(head) do
+      {_n, _m, [{:conn, _, c} | _]} when is_atom(c) -> true
+      {_n, _m, [{:_conn, _, c} | _]} when is_atom(c) -> true
+      _ -> false
+    end
+  end
+
+  @doc "the body-bound population: write-reachable, 2xx-or-implicit, ≥1 body-bound payload var"
+  def population(rows) do
+    rows
+    |> Enum.filter(&(&1.write_reachable and &1.status != :explicit_non2xx))
+    |> Enum.map(fn r -> Map.put(r, :prov, site(r)) end)
+    |> Enum.filter(& &1.prov.body_bound)
+    |> Enum.sort_by(&{&1.file, &1.line})
+  end
+
+  def by_verdict(pop, v), do: Enum.filter(pop, &(&1.prov.verdict == v))
+end
+
 # ------------------------------------------------------------------- the census
 # Extracted into a function (wave 41) for one reason only: the SELFTEST must be
 # able to run the whole pipeline over a fixture the arms actually fire on. On
@@ -382,6 +673,11 @@ defmodule Census do
       textual_json_conn: String.contains?(src_line, "json(conn,"),
       payload_class: Scan.payload_class(payload),
       echo_only: echo_only?(payload, dhead),
+      # kept for the A3b bind-site provenance walk (Provenance.site/1); never
+      # inspect()ed into output — these are whole subtrees.
+      payload_ast: payload,
+      head_ast: dhead,
+      body_ast: dbody,
       payload_src: String.slice(String.trim(src_line), 0, 120)
     }
   end
@@ -530,8 +826,80 @@ defmodule Selftest do
   end
   '''
 
+  # THE A3b MUTANT, BOTH DIRECTIONS. Two fixtures that differ in exactly one
+  # payload: `create/2` emits only request-rooted, BODY-bound values in the
+  # first and adds `id: rec.id` — a post-write fact — in the second. Neither
+  # site can ever be seen by the A3 head-binding arm, which is the whole point:
+  # `label` and `kind` are bound by `with … <-` INSIDE the body.
+  #
+  # `touch/2` is identical in both and is the NON-VACUITY control in two
+  # directions at once: it holds the POPULATION at 2 across the repair (so a
+  # green "names none" cannot be bought by the population collapsing to zero),
+  # and its `tag` is bound from `System.unique_integer/1` — a root the walk
+  # cannot follow — so it must land in RESIDUAL and never in the accusation
+  # class. A run where `touch/2` reads request_rooted is the lens guessing.
+  @body_fixture ~S'''
+  defmodule FixtureWeb.BodyController do
+    use FixtureWeb, :controller
+
+    def create(conn, params) do
+      with {:ok, label} <- fetch_label(params),
+           {:ok, kind} <- fetch_kind(params) do
+        case Thing.create_thing(label, kind) do
+          {:ok, _rec} ->
+            conn |> put_status(:created) |> json(%{label: label, kind: kind})
+
+          {:error, _} ->
+            conn |> put_status(422) |> json(%{error: "nope"})
+        end
+      end
+    end
+
+    def touch(conn, _params) do
+      tag = System.unique_integer([:positive])
+      {:ok, _} = Thing.update_thing(tag)
+      json(conn, %{tag: tag})
+    end
+
+    def sweep(conn, %{"email" => email}) do
+      trimmed = String.trim(email)
+      json(conn, %{revoked_count: Thing.delete_things_for(trimmed)})
+    end
+  end
+  '''
+
+  @body_fixture_repaired ~S'''
+  defmodule FixtureWeb.BodyController do
+    use FixtureWeb, :controller
+
+    def create(conn, params) do
+      with {:ok, label} <- fetch_label(params),
+           {:ok, kind} <- fetch_kind(params) do
+        case Thing.create_thing(label, kind) do
+          {:ok, rec} ->
+            conn |> put_status(:created) |> json(%{id: rec.id, label: label, kind: kind})
+
+          {:error, _} ->
+            conn |> put_status(422) |> json(%{error: "nope"})
+        end
+      end
+    end
+
+    def touch(conn, _params) do
+      tag = System.unique_integer([:positive])
+      {:ok, _} = Thing.update_thing(tag)
+      json(conn, %{tag: tag})
+    end
+
+    def sweep(conn, %{"email" => email}) do
+      trimmed = String.trim(email)
+      json(conn, %{revoked_count: Thing.delete_things_for(trimmed)})
+    end
+  end
+  '''
+
   def run do
-    arms = classifier_arms() ++ fixture_arms()
+    arms = classifier_arms() ++ fixture_arms() ++ body_bound_arms()
 
     IO.puts("=== SELFTEST: #{length(arms)} arms (no corpus is read) ===")
 
@@ -592,6 +960,61 @@ defmodule Selftest do
 
     File.rm_rf!(root)
     arms
+  end
+
+  # A3b arms. `funs` is the SITE ROSTER, not a count: an arm asserting "1 site"
+  # would stay green if the arm swapped one site for another.
+  defp body_bound_arms do
+    funs = fn pop -> pop |> Enum.map(& &1.fun) |> Enum.sort() end
+    echo = scan_src(@body_fixture) |> Map.get(:rows) |> Provenance.population()
+    fixed = scan_src(@body_fixture_repaired) |> Map.get(:rows) |> Provenance.population()
+
+    [
+      {"A3b: the body-bound POPULATION on the echo fixture", funs.(echo),
+       ["create/2", "sweep/2", "touch/2"]},
+      {"A3b: the body-bound POPULATION is UNCHANGED by the repair (non-vacuity: a green\n        'names none' below cannot be bought by the population collapsing)", funs.(fixed),
+       ["create/2", "sweep/2", "touch/2"]},
+      {"A3b MUTANT +: the echo fixture's create/2 is NAMED request-rooted",
+       funs.(Provenance.by_verdict(echo, :request_rooted)), ["create/2"]},
+      {"A3b MUTANT -: the REPAIRED fixture names NO request-rooted site",
+       funs.(Provenance.by_verdict(fixed, :request_rooted)), []},
+      {"A3b: the repair moves create/2 into store_fact (it did not merely vanish)",
+       funs.(Provenance.by_verdict(fixed, :store_fact)), ["create/2", "sweep/2"]},
+      # REGRESSION, hand-read: app_token_controller.ex:392 was ACCUSED by the
+      # first cut of this walk. Its only variable is a trimmed request email —
+      # but the emitted number is the WRITE'S OWN RETURN. A payload that reaches
+      # a write carries a post-write fact even when no variable holds it.
+      {"A3b FP-1: a payload whose VALUE is the write's return is store_fact, not accused",
+       funs.(Provenance.by_verdict(echo, :store_fact)), ["sweep/2"]},
+      # REGRESSION, hand-read: media_processing_controller.ex:61 was ACCUSED
+      # because `Scan.writes?/1` only matches module-qualified calls, so the
+      # local write helper `patch_callback/5` read as a non-write.
+      {"A3b FP-2: a BARE LOCAL mutate-vocab call is a store producer",
+       Provenance.classify(:doc, Provenance.bindings(Code.string_to_quoted!("doc = patch_callback(doc, file)")), [:file], true)
+       |> elem(0), :store},
+      # `combine/1`'s undecided-poisons rule, probed in BOTH argument orders so
+      # the arm cannot be satisfied by whichever component happens to come
+      # first in the walk's accumulator.
+      {"A3b: UNDECIDED poisons a mixed binding (request first)",
+       Provenance.classify(:slug, Provenance.bindings(Code.string_to_quoted!("slug = build_slug(id, salt)")), [:id], true)
+       |> elem(0), :undecided},
+      {"A3b: UNDECIDED poisons a mixed binding (undecided first)",
+       Provenance.classify(:slug, Provenance.bindings(Code.string_to_quoted!("slug = build_slug(salt, id)")), [:id], true)
+       |> elem(0), :undecided},
+      {"A3b: an undecidable bind site lands in RESIDUAL, never in the accusation class",
+       funs.(Provenance.by_verdict(echo, :residual)), ["touch/2"]},
+      {"A3b: the A3 HEAD-bound arm sees NEITHER fixture site (this is the blind shape)",
+       length(Census.echoes(scan_src(@body_fixture).rows)), 0}
+    ]
+  end
+
+  defp scan_src(src) do
+    root = Path.join(System.tmp_dir!(), "pds-residue-fixture-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(root, "fixture_web/controllers"))
+    File.write!(Path.join(root, "fixture_web/controllers/body_controller.ex"), src)
+    scan = Census.scan(Census.files(root), root)
+    File.rm_rf!(root)
+    scan
   end
 
   defp scan_fixture do
@@ -793,6 +1216,9 @@ defmodule Report do
     )
 
     IO.puts("")
+    a3b(rows, total)
+
+    IO.puts("")
     IO.puts("--- RESIDUE SUMMARY (denominator #{den} response callsites = #{total} json/2 + #{length(scan.send_resp)} send_resp) ---")
     lit = Enum.count(rows, &(&1.payload_class == :literal_only))
     lit2xx = Enum.count(rows, &(&1.payload_class == :literal_only and &1.status != :explicit_non2xx))
@@ -812,6 +1238,56 @@ defmodule Report do
     end)
 
     exit_code(scan, unpinned)
+  end
+
+  # --- A3b: the BODY-BOUND population, PRINTED (never sets the exit code) ---
+  # The A3 arm above cannot see a payload whose variables are bound in the def
+  # BODY. This section measures how big that blind population is and classifies
+  # every one of its payload variables by BIND-SITE PROVENANCE, printing the
+  # binding that produced each classification. It is PRINTED and not ARMED on
+  # purpose — see the header comment on `Provenance`.
+  defp a3b(rows, total) do
+    IO.puts("--- A3b BODY-BOUND BIND-SITE PROVENANCE (PRINTED — DOES NOT SET THE EXIT CODE) ---")
+    pop = Provenance.population(rows)
+
+    IO.puts("population: write-reachable, 2xx-or-implicit-200 json/2 callsites with at least")
+    IO.puts("  one payload variable NOT bound in the def head: #{cs(length(pop), total)}")
+    IO.puts("  (every one of these is INVISIBLE to the A3 arm above, by construction)")
+    IO.puts("")
+    IO.puts("VERDICTS — one store fact CLEARS a site; an undecided variable makes it RESIDUAL,")
+    IO.puts("  never REQUEST-ROOTED. Nothing here is guessed into the accusation class.")
+
+    for v <- [:request_rooted, :residual, :store_fact] do
+      IO.puts("  #{v}: #{cs(length(Provenance.by_verdict(pop, v)), length(pop))}")
+    end
+
+    IO.puts("")
+    IO.puts("REQUEST-ROOTED SITES (the accusation class — every payload variable request-rooted,")
+    IO.puts("  no post-write fact anywhere in the payload):")
+    print_sites(Provenance.by_verdict(pop, :request_rooted))
+
+    IO.puts("")
+    IO.puts("RESIDUAL SITES (the walk could NOT decide — these are UNDECIDED, not clean):")
+    print_sites(Provenance.by_verdict(pop, :residual))
+
+    IO.puts("")
+    IO.puts("A3b UNIT + FLOOR: CALLSITES, same unit as the A3 arm, over the same corpus but a")
+    IO.puts("  WIDER population (body-bound as well as head-bound) and a walk that is intra-def")
+    IO.puts("  and depth-capped. It is a FLOOR in both directions: a laundered request value")
+    IO.puts("  reads RESIDUAL, and a mutate-vocab miss in `Scan.writes?/1` can mis-clear a site.")
+  end
+
+  defp print_sites([]), do: IO.puts("  (none)")
+
+  defp print_sites(sites) do
+    Enum.each(sites, fn r ->
+      IO.puts("  #{r.file}:#{r.line}  #{r.fun}  verdict=#{r.prov.verdict}")
+      IO.puts("      #{r.payload_src}")
+
+      Enum.each(r.prov.vars, fn {v, c, why} ->
+        IO.puts("      var `#{v}` => #{String.upcase(to_string(c))}  #{why}")
+      end)
+    end)
   end
 
   defp textual_count(rows), do: Enum.count(rows, & &1.textual_json_conn)
