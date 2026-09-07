@@ -45,8 +45,11 @@ const taskMatchFlag = "--match"
 // accepted by any other task verb, and the not_found enrichment must not fire
 // on a refusal from a verb whose id was not a task doc_id.
 const (
-	taskLsCommandID  = "task.ls"
-	taskGetCommandID = "task.get"
+	taskLsCommandID = "task.ls"
+	// taskStampCommandID keys the `--criterion-text-file` help block in
+	// usageCommand — the stamp verb's client-side, undeclarable twin of --match.
+	taskStampCommandID = "task.stamp"
+	taskGetCommandID   = "task.get"
 )
 
 // taskIDPrefixParam is the server-side lookup this file prefers over the walk:
