@@ -469,14 +469,16 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # axi-s1: the brief LIST card = brief render_doc + `child_count` from
   # one batched grouped query (`batch_child_counts/2`) — never per-row.
-  def render_brief(%Document{} = doc, child_counts, live_child_counts \\ nil) do
+  def render_brief(%Document{} = doc, child_counts, live_child_counts \\ nil, live_parents \\ nil) do
     key = strip_draft_prefix(doc.doc_id)
     total = Map.get(child_counts, key, 0)
+    content = doc.content || %{}
 
     doc
     |> render_doc(:brief)
     |> Map.put(:child_count, total)
     |> put_brief_dispatch(total, live_child_counts, key)
+    |> put_brief_upstream(content, live_parents)
   end
 
   # THE UMBRELLA MARKER (task-52f4f3aff99c64d5), additive and pruned, same law
@@ -506,6 +508,49 @@ defmodule BarkparkWeb.TasksController.Params do
 
   defp put_brief_dispatch(map, total, live_child_counts, key) do
     case Dispatchability.classify(total, Map.get(live_child_counts, key, 0)) do
+      nil -> map
+      class -> Map.put(map, :dispatch, class)
+    end
+  end
+
+  # ── THE CHILDLESS HALF OF THE SAME TRAP (task-e8d0fe00383f8499) ──────────
+  #
+  # `put_brief_dispatch/4` above reads the OUTBOUND edge and is structurally
+  # blind to a seal row whose children hang off a DIFFERENT root: it carries
+  # `child_count: 0` and renders as an ordinary leaf. THAT IS THE ROW THE
+  # WHOLE THING WAS FILED FOR — `task-08b05ad1e792a850`, "GOAL: drive the
+  # mobile epic to the seal", PRIORITY 0 — and #16762 walks straight past it.
+  #
+  # This reads the INBOUND edge: an UNMET criterion naming the row's own
+  # still-LIVE parent. `Dispatchability.classify_upstream/3` owns the rule and
+  # its moduledoc carries the hand-labelled precision (2/9 strict, 5/9 broad —
+  # the LEAST accurate of the three classes, which is why `upstream` is worded
+  # as a look-here and not a refusal) and the recall (1 of the 5 known misses,
+  # not 5).
+  #
+  # ONE KEY, AND `classify/2` OUTRANKS IT: a card already marked `delegated`
+  # or `undecided` keeps that. The parent edge is the stronger measurement
+  # (precision 11/15) and two dispatch values on one card would be two
+  # verdicts. Because the classes share the key, the hostile 50-card byte
+  # tripwire's WORST CASE is unchanged: 50 cards can still carry only one
+  # dispatch value each, and `,"dispatch":"upstream"` (22 B) is SHORTER than
+  # `,"dispatch":"delegated"` (23 B), which that tripwire already priced.
+  # MEASURED, not estimated, on the live 1,000-row page 2026-09-07: 8 cards
+  # gain the key (+176 B over 1,000); on its FIRST 50 CARDS — a real page,
+  # 17,908 B compact and thus already over the 15,360 B bound, a live defect
+  # this slice does not create and does not fix — exactly 2 cards gain it,
+  # +44 B (0.25%).
+  #
+  # `live_parents` DEFAULTS TO nil for the same reason `live_child_counts`
+  # does — an empty map would read as "no parent is live" and silently answer
+  # a question nobody measured.
+  defp put_brief_upstream(%{dispatch: _} = map, _content, _live_parents), do: map
+
+  defp put_brief_upstream(map, content, live_parents) do
+    parent_id = strip_draft_prefix(Map.get(content, "parent_id"))
+    criteria = Map.get(content, "acceptance_criteria")
+
+    case Dispatchability.classify_upstream(parent_id, live_parents, criteria) do
       nil -> map
       class -> Map.put(map, :dispatch, class)
     end
@@ -735,6 +780,53 @@ defmodule BarkparkWeb.TasksController.Params do
         |> maybe_filter_project(Keyword.get(scope, :project_id))
         |> Repo.all()
         |> Map.new()
+    end
+  end
+
+  # task-e8d0fe00383f8499: the LIVE set of the page's PARENTS — the inbound
+  # half of the same edge `batch_live_child_counts/2` reads outbound.
+  #
+  # One extra indexed query per LIST PAGE, keyed on the page's distinct
+  # drafts-stripped `parent_id`s (measured: 1,000 ready rows carried 815
+  # parent_ids, far fewer distinct), never per row. Same twin collapse and
+  # same tenancy filters as the two grouped queries above, so it can never
+  # disagree with them about WHICH row a parent is.
+  #
+  # `coalesce(…, 'open')` is load-bearing in the same direction as its
+  # sibling: a parent with no lifecycle_status reads LIVE, because an
+  # unresolved parent is one the tree above has not stopped at.
+  #
+  # Returns a set-like `%{parent doc_id => true}`; a parent that is terminal
+  # is simply ABSENT, and absence is what makes `classify_upstream/3` stay
+  # silent rather than guess.
+  def batch_live_parents(docs, scope \\ [])
+  def batch_live_parents([], _scope), do: %{}
+
+  def batch_live_parents(docs, scope) do
+    parent_keys =
+      docs
+      |> Enum.map(&strip_draft_prefix(Map.get(&1.content || %{}, "parent_id")))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    terminal = Dispatchability.terminal_statuses()
+
+    case parent_keys do
+      [] ->
+        %{}
+
+      keys ->
+        from(d in Document,
+          where: d.type == "task",
+          where: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id) in ^keys,
+          where: fragment("coalesce(?->>'lifecycle_status', 'open')", d.content) not in ^terminal,
+          select: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)
+        )
+        |> TaskQuery.collapse_twins()
+        |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
+        |> maybe_filter_project(Keyword.get(scope, :project_id))
+        |> Repo.all()
+        |> Map.new(&{&1, true})
     end
   end
 
