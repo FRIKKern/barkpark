@@ -62,6 +62,7 @@ defmodule Barkpark.Plugins.Bulldocs.MixedWriteGuard do
   """
 
   alias Barkpark.Content.Papers
+  alias Barkpark.Content.Papers.BlockOps
   alias Barkpark.PortableDoc.Projection
 
   # Reuse of the ALREADY-REGISTERED ingest 422 code (`Content.Errors`
@@ -130,9 +131,14 @@ defmodule Barkpark.Plugins.Bulldocs.MixedWriteGuard do
 
   def check(_attrs), do: :ok
 
-  defp clear_blocks?(true), do: true
-  defp clear_blocks?("true"), do: true
-  defp clear_blocks?(_), do: false
+  # ONE predicate, owned by the module that performs the destructive write.
+  # This used to be a second hand-written copy of `BlockOps.clear_blocks?/1`,
+  # and the two diverging was invisible: narrowing the BlockOps side alone to
+  # `[true]` left this guard waving a `"clear_blocks": "true"` POST past the
+  # 422 while the write kept the blocks — the exact hazard this module exists
+  # to close, restored behind a 200 — and 672 tests still passed. A shared
+  # predicate makes that divergence unrepresentable rather than merely untested.
+  defdelegate clear_blocks?(value), to: BlockOps
 
   defp existing_blocks(attrs) do
     with slug when is_binary(slug) and slug != "" <- attrs["slug"],

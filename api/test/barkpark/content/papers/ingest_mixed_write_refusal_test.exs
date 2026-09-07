@@ -171,6 +171,35 @@ defmodule Barkpark.Content.Papers.IngestMixedWriteRefusalTest do
       assert get_in(Content.get_paper(slug, @dataset).content, ["body_html"]) =~
                "SECOND-HTML-WRITE"
     end
+
+    test "REMEDY 2 works with the STRING \"true\" — the spelling loose clients send" do
+      # The flag is read at TWO points on one request: the ingest guard decides
+      # whether to refuse, and the write decides whether to drop the blocks.
+      # Both must agree on what counts as "yes", or a `"clear_blocks": "true"`
+      # POST passes the guard, keeps its blocks, and lands the verbatim
+      # body_html on a still-blocks-backed row — a 200 receipt over exactly the
+      # loss this file refuses. Only the BOOLEAN spelling was exercised above,
+      # so narrowing either reader to `[true]` alone ran green across 672
+      # tests. Both halves of the outcome are asserted here on purpose:
+      # asserting the status alone leaves the half that broke unpinned.
+      slug = "mixed-write-remedy-two-string"
+      publish_blocks!(slug)
+      assert json_response(post_paper(html_body(slug, @verbatim)), 422)
+
+      assert json_response(
+               post_paper(html_body(slug, @verbatim, %{"clear_blocks" => "true"})),
+               200
+             )["ok"] == true
+
+      paper = Content.get_paper(slug, @dataset)
+      refute Map.has_key?(paper.content, "blocks")
+      refute Map.has_key?(paper.content, "body")
+      assert Barkpark.PortableDoc.Projection.read_blocks(paper.content) == nil
+      assert get_in(paper.content, ["body_html"]) =~ "PRODUCER-BYTES-SENTINEL"
+
+      assert {:html, html} = Papers.reader_source(paper, @dataset)
+      assert html =~ "PRODUCER-BYTES-SENTINEL"
+    end
   end
 
   describe "no over-refusal — the guard is narrow" do

@@ -4210,10 +4210,38 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp put_or_clear_blocks(content, blocks, _clear) when is_list(blocks),
     do: Map.put(content, "blocks", blocks)
 
-  defp put_or_clear_blocks(content, _blocks, clear) when clear in [true, "true"],
-    do: content |> Map.delete("blocks") |> Map.delete("body")
+  defp put_or_clear_blocks(content, _blocks, clear) do
+    if clear_blocks?(clear),
+      do: content |> Map.delete("blocks") |> Map.delete("body"),
+      else: content
+  end
 
-  defp put_or_clear_blocks(content, _blocks, _clear), do: content
+  @doc """
+  Did the caller EXPLICITLY opt in to dropping a paper's canonical blocks?
+
+  `true` and the string `"true"` (the spelling any form-encoded or loosely
+  typed client sends) mean yes. Everything else — a missing key (`nil`), `""`,
+  `"false"`, `false`, `1`, `"1"`, `"TRUE"` — means no.
+
+  Public, and shared, ON PURPOSE. This one truthiness rule gates a DESTRUCTIVE
+  opt-in, and it is read in two places: here, where the blocks are actually
+  dropped, and in `Barkpark.Plugins.Bulldocs.MixedWriteGuard.check/1`, which
+  must let exactly the same write past the ingest 422. Those were two
+  hand-written copies until now, and the divergence is INVISIBLE to the suite:
+  narrowing this side alone to `[true]` — so that the guard waves a
+  `"clear_blocks": "true"` POST through while the write silently declines to
+  clear — compiled and ran 672 tests with 0 failures. The mixed-write hazard
+  this whole slice exists to close would have been restored in full, behind a
+  200. Two copies of one rule cannot be kept honest by review, so there is now
+  only one, and the plugin guard delegates to it.
+
+  The dependency direction is deliberate: core content (`BlockOps`) owns the
+  predicate and the plugin depends on core, never the reverse.
+  """
+  @spec clear_blocks?(term()) :: boolean()
+  def clear_blocks?(true), do: true
+  def clear_blocks?("true"), do: true
+  def clear_blocks?(_), do: false
 
   # Keys the surrounding `write_encrypted_blocks_doc/8` pipeline already reads
   # explicitly (as an upsert attr, a paper-only allowlisted content field, or a
