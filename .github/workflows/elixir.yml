@@ -461,6 +461,34 @@ jobs:
       - name: No workflow or card claims merge authority the spec denies
         run: bash scripts/merge-authority-claim-check.sh
 
+      # ── the unrecognised-top-level default (task-fb7857b984ff5ff8) ────────
+      # Every path set in this tree fails OPEN. Re-derived live on origin/main
+      # ad7f16319 with each ratchet's own `--match`, a head touching only
+      # `brandnewdir/x.txt` answers cloud=false console=false compile=false
+      # test=false go=false — nothing dispatches, every expensive leaf is
+      # skipped, and a skip publishes success. Four green names over a diff not
+      # one of them read.
+      #
+      # scripts/toplevel-classifier-check.sh is the DEFAULT for that case: it
+      # enumerates the top-level entries the repo knows and reds on one it does
+      # not, naming the path and how to classify it. It widens NO path set and
+      # adds no dispatch condition anywhere, so the check-run roster on a diff
+      # confined to known directories is unchanged.
+      #
+      # HERE for the reason every step above it is here: this job carries no
+      # `if:`, no continue-on-error and no `needs`, and it is judged NEVER by
+      # the aggregator below — so it can never be skipped into a green.
+      #
+      # A STEP and not a job, for the two reasons written above the
+      # skip-disclosure ratchet: a new job here reds the sibling path-escape
+      # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
+      # name, so required-checks-verify.sh's roster is unchanged.
+      - name: The top-level classifier must be able to fail (24-case harness)
+        run: bash scripts/toplevel-classifier-check.sh --selftest
+
+      - name: Every changed top-level entry is one the repo knows
+        run: bash scripts/toplevel-classifier-check.sh
+
       # ── the vips hedge, now a tripwire instead of a 39-second bill ────────
       # mix-prod-compile below used to `apt-get install libvips-dev` purely as
       # insurance against a future VIX_COMPILATION_MODE=PLATFORM_PROVIDED_LIBVIPS

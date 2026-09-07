@@ -85,6 +85,7 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Rows are sorted; duplicates red.
 # MUT-ANCHOR-REGISTRY
 registry() {
+  # MUT-EMPTY
   cat <<'REGISTRY'
 .air.toml none air live-reload config for the local Go loop
 .claude none agent harness config, workflows and worktree scaffolding
@@ -195,7 +196,7 @@ HOWTO
 
 # ── the check ────────────────────────────────────────────────────────────────
 check() {
-  local paths_file="$1" rc=0 name gates reason changed tl seen probe got want
+  local paths_file="$1" rc=0 name gates reason changed tl seen probe got
 
   # STALE + shape, over the whole registry, on every run.
   local dupes
@@ -310,7 +311,9 @@ derive_changed_paths() {
 # differ, and only then is the verdict read. A mutation that did not apply is a
 # green that proves nothing.
 selftest() {
-  local pass=0 fail=0 tmp
+  local pass=0 fail=0
+  # NOT local: the EXIT trap below runs after this function returns.
+  tmp=""
   ok()  { pass=$((pass + 1)); echo "  ok   $*"; }
   bad() { fail=$((fail + 1)); echo "  FAIL $*"; }
 
@@ -334,7 +337,7 @@ selftest() {
     # Every registered entry must exist, or the STALE arm fires everywhere.
     local n
     for n in $(bash "$SELF" --list | awk 'NF {print $1}'); do
-      mkdir -p "$d/$n" 2>/dev/null || true
+      if [ -d "$ROOT/$n" ]; then mkdir -p "$d/$n"; else : > "$d/$n"; fi
     done
   }
 
@@ -417,7 +420,7 @@ selftest() {
 
   # ── 7. an EMPTY registry REFUSES (exit 2), never passes vacuously ─────────
   local d7="$tmp/d7"; mk_root "$d7"
-  if mutate "$d7/scripts/toplevel-classifier-check.sh" '^# MUT-ANCHOR-REGISTRY$' '/^# MUT-ANCHOR-REGISTRY$/,/^# MUT-ANCHOR-REGISTRY-END$/{/^registry\(\) \{$/!{/^  cat <<.REGISTRY.$/!{/^REGISTRY$/!{/^\}$/!{/^# MUT-ANCHOR-REGISTRY/!d}}}}}'; then
+  if mutate "$d7/scripts/toplevel-classifier-check.sh" '^  # MUT-EMPTY$' 's/^  # MUT-EMPTY$/  return 0/'; then
     printf 'docs/x.md\n' > "$tmp/p7"
     local out7 rc7
     out7="$(run_subject "$d7" "$tmp/p7")"; rc7=$?
@@ -431,6 +434,7 @@ selftest() {
     printf 'README.md\n' > "$tmp/p8"
     local out8 rc8
     out8="$(run_subject "$d8" "$tmp/p8")"; rc8=$?
+    case "$out8" in *"duplicate registry row"*) ok "8b the duplicate is named" ;; *) bad "8b: $out8" ;; esac
     if [ "$rc8" -ne 0 ]; then ok "8a a duplicate registry row reds (rc=$rc8)"; else bad "8a a duplicate row passed"; fi
   fi
 
