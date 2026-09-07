@@ -389,6 +389,72 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       assert Registry.find_active_deployment(site.id, dep.git_ref).id == dep.id
     end
 
+    # THE MESSAGE IS PINNED TO THE CONDITION, BOTH DIRECTIONS.
+    #
+    # The test above is the WITH-a-repo half: the push takes the build path and
+    # produces NO reason at all. This is the WITHOUT-a-repo half: the same
+    # verified push, on a site whose only difference is a nil `github_repo`,
+    # produces the born-failed row AND copy that names THAT condition. A
+    # one-sided test would stay green if the branch were rewired to emit the
+    # message on the build path, or to emit the legacy "predates source builds"
+    # sentence here.
+    #
+    # Reaching the state: `clear_site_github/1` drops the SECRET too, and the
+    # route 404s without a secret — so the branch is only reachable when the repo
+    # is gone and the secret stayed, which is exactly the drift the router calls
+    # its "flip-safe defensive fallback". We construct that shape directly.
+    test "verified push on a site with NO linked repo → born-failed row whose copy names the MISSING REPO" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      {:ok, site} =
+        site
+        |> Ecto.Changeset.change(%{github_repo: nil})
+        |> BarkparkCloud.Repo.update()
+
+      refute BarkparkCloud.Registry.get_site(site.id).github_repo
+
+      push = %{
+        "ref" => "refs/heads/main",
+        "after" => "beef01beef01beef01beef01beef01beef01beef",
+        "head_commit" => %{"id" => "beef01beef01beef01beef01beef01beef01beef"}
+      }
+
+      conn = webhook_call(site.id, "push", push, secret)
+
+      assert conn.status == 201
+      body = json_body(conn)
+      assert body["status"] == "failed"
+
+      # THE OPERATOR-FACING SENTENCE. It names the real condition (no repo
+      # linked) and the real remedy (link one) — never the GitHub App, which
+      # shipped, and never "push again", which would not help here.
+      reason = body["reason"]
+      assert is_binary(reason), inspect(reason)
+      assert reason =~ "no GitHub repo linked", inspect(reason)
+      assert reason =~ "link a repo to this site", inspect(reason)
+      refute reason =~ "GitHub App"
+      refute reason =~ "not yet available"
+      refute reason =~ "predates"
+      refute reason =~ "push again"
+
+      # THE RAW ROW keeps the classifier prefix, so the ledger still counts this
+      # as GITHUB_PUSH_UNBUILDABLE — out of the failure denominator. Rewording
+      # past the prefix would silently move it into the rate.
+      [dep] = Registry.list_deployments(site)
+      assert dep.status == "failed"
+
+      assert String.starts_with?(dep.failure_reason, "github push builds require"),
+             inspect(dep.failure_reason)
+
+      assert BarkparkCloud.DeployLedger.classify(nil, dep.failure_reason) ==
+               "GITHUB_PUSH_UNBUILDABLE"
+
+      # …and the raw row names the condition too, for logs+ops.
+      assert dep.failure_reason =~ "a linked GitHub repo", inspect(dep.failure_reason)
+      refute dep.failure_reason =~ "GitHub App"
+    end
+
     test "BAD signature → 401, no Deployment" do
       {_user, team} = user_with_team()
       {site, _secret} = site_with_github(team)

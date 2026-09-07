@@ -114,7 +114,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
   @stale_lease "exceeded max deploy claim attempts (stale builder lease)"
   @died "deploy process died abnormally"
   @artifact_empty "artifact: artifact_url is empty (P6 bp deploy must populate it)"
-  @gh_push "github push builds require the GitHub App integration (not yet available) — deploy an artifact via bp deploy"
+  @gh_push "github push builds require a linked GitHub repo on this site — link a repo to this site, or deploy an artifact via bp deploy"
   # 2 rows: nixpacks. Genuinely unnamed — the honest tail.
   @nixpacks "nixpacks build: exit status 1"
 

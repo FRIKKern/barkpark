@@ -107,7 +107,7 @@ defmodule BarkparkCloud.DeployLedgerPartitionTest do
   # A deferral shape the ledger has never seen — lands in DEFERRED_UNCLASSIFIED.
   @d_novel "the boxcar shim deferred the handshake (code BLERG-7)" <> @requeued
   # Born-failed tombstone: NOT an attempt, so it must stay outside `volume`.
-  @gh_push "github push builds require the GitHub App integration (not yet available) — deploy an artifact via bp deploy"
+  @gh_push "github push builds require a linked GitHub repo on this site — link a repo to this site, or deploy an artifact via bp deploy"
 
   @from ~U[2026-07-26 00:00:00Z]
   @to ~U[2026-07-27 00:00:00Z]

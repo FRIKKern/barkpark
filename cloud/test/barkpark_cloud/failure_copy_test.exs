@@ -221,7 +221,11 @@ defmodule BarkparkCloud.FailureCopyTest do
     end
   end
 
-  test "dwb-webhook fail-fast: github-push born-failed reason → blocked-tone human copy naming the workaround" do
+  test "LEGACY github-push born-failed reason → blocked-tone copy naming the push-again workaround" do
+    # A row written BEFORE `github_build_available?/1` became a repo-present
+    # predicate. Nothing retro-builds it, so "push again" really is its cure.
+    # This literal is not minted by any producer today — it is DB state, which is
+    # exactly why the arm may not be deleted.
     raw =
       "github push builds require the GitHub App integration (not yet available) — deploy an artifact via bp deploy"
 
@@ -231,6 +235,34 @@ defmodule BarkparkCloud.FailureCopyTest do
     assert FailureCopy.humanize(raw) == human
     # Idempotent under the client failureCopy() second pass (its output does not
     # re-match the "github push builds" token or any other class).
+    assert FailureCopy.humanize(human) == human
+  end
+
+  test "NO-LINKED-REPO github-push reason → copy naming the missing repo, NOT the legacy 'predates' story" do
+    # The reason the router mints TODAY (`@github_push_build_reason`). It shares
+    # the classifier prefix with the legacy string above — same
+    # GITHUB_PUSH_UNBUILDABLE class, same denominator treatment — but needs the
+    # OPPOSITE remedy, so it must NOT collapse into the legacy arm.
+    raw =
+      "github push builds require a linked GitHub repo on this site — link a repo to this site, or deploy an artifact via bp deploy"
+
+    human =
+      "This site has no GitHub repo linked, so a push has nothing to build from — link a repo to this site, or deploy this commit with bp deploy."
+
+    assert FailureCopy.humanize(raw) == human
+
+    # BOTH DIRECTIONS. The refinement arm must win over the broad
+    # `"github push builds"` arm it sits above — a reordering (or a deletion of
+    # the narrower token) would silently serve the legacy sentence here.
+    legacy =
+      "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy."
+
+    refute FailureCopy.humanize(raw) == legacy
+    refute FailureCopy.humanize(raw) == raw
+
+    # Idempotent under the client failureCopy() second pass: the output carries
+    # none of the tokens any clause here, or the client's isGithubPushBlocked,
+    # matches.
     assert FailureCopy.humanize(human) == human
   end
 
