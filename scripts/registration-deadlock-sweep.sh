@@ -85,6 +85,8 @@
 #      was skipped, so the "no casualty" finding rests on no evidence at all, and
 #      the case where the candidate proposes no new context under
 #      --require-new-context
+#  64  USAGE — the caller typed the command wrong. Not a measurement, so it does
+#      not borrow 2, which here means the sweep RAN and could not evaluate.
 #
 # USAGE
 #   scripts/registration-deadlock-sweep.sh
@@ -130,6 +132,16 @@ REQUIRE_NEW_CONTEXT=0
 
 fail() { echo "FAIL: $*" >&2; exit 2; }
 
+# A usage error is not a verdict: this script's nonzero codes describe something
+# it MEASURED, and a caller who typed the command wrong measured nothing. It
+# therefore gets a word and a code of its own (sysexits EX_USAGE) instead of
+# borrowing `fail`'s FAIL/2, which made a did-not-run
+# indistinguishable from a real finding. 64 rather than 2 because 2 is a
+# MEASURED verdict elsewhere in this toolchain (GROWTH in
+# required-checks-floor.sh, "could not be evaluated" in the deadlock sweep), and
+# one usage code across the family beats a per-script guess.
+usage_error() { echo "usage error: $*" >&2; exit 64; }
+
 contexts_of() { # <json on stdin>
   jq -r '.protection.required_status_checks.checks[]?.context // empty' | LC_ALL=C sort -u
 }
@@ -149,7 +161,7 @@ main() {
       --fixture-dir) FIXTURE_DIR="$2"; shift 2 ;;
       --require-new-context) REQUIRE_NEW_CONTEXT=1; shift ;;
       -h|--help) awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
-      *) fail "unknown argument: $1" ;;
+      *) usage_error "unknown argument: $1 (try --help)" ;;
     esac
   done
 
