@@ -61,11 +61,25 @@ defmodule BarkparkCloud.DeployLedger do
 
   ## Why GITHUB_PUSH_UNBUILDABLE is out of the denominator (D19)
 
-  Exactly 7 rows, born `failed` on purpose by `Registry.record_unbuildable_push`
-  because `github_build_available?/1` is a hardcoded `false`. Only the
-  human-gated gh-1 can ever move them, so counting them permanently inflates a
-  rate this epic cannot touch. They are reported in their own `not_attempted`
-  bucket — visible, but never in a denominator.
+  Rows born `failed` on purpose by `Registry.create_failed_deployment/3`, from
+  the webhook's fallback arm. They were never a build ATTEMPT — no builder ever
+  claimed them, nothing ran — so counting them as failures measures a build that
+  did not happen. They are reported in their own `not_attempted` bucket —
+  visible, but never in a denominator.
+
+  THE RATIONALE, CORRECTED. This paragraph used to say the exclusion held
+  "because `github_build_available?/1` is a hardcoded `false`". It is not, and
+  on the evidence of the corrected siblings it never was by the time this was
+  read: the router's predicate is `is_binary(site.github_repo)`, a real
+  repo-present gate. So the 7 historical rows are LEGACY — born before that
+  flip — and the class stays live only for the flip-safe fallback arm (a push on
+  a site with no linked repo). The exclusion still holds on its OWN ground
+  (never attempted), not on an availability claim that is false.
+
+  That the population is now bounded rather than growing-under-a-permanent-block
+  is a reason to REVISIT whether this class deserves a standing exclusion; it is
+  not a licence to change the arithmetic from a docstring. `@not_attempted_classes`
+  below is unchanged by the correction of this prose.
 
   ## Why a rate below n≈200 is REFUSED (D3, the standing law)
 
@@ -286,7 +300,7 @@ defmodule BarkparkCloud.DeployLedger do
     "STALE_LEASE" => "the builder lease went stale",
     "PROCESS_DIED" => "the deploy process died abnormally",
     "UNCLASSIFIED" => "not yet named by the ledger",
-    "GITHUB_PUSH_UNBUILDABLE" => "GitHub push builds are not available yet",
+    "GITHUB_PUSH_UNBUILDABLE" => "a GitHub push with no source to build from",
     "BOX_BUSY_DEFERRED" => "the box was busy; the rebuild was re-queued, not lost",
     "BOX_AT_CAPACITY_DEFERRED" =>
       "the box was at its concurrent-build cap; the rebuild was re-queued, not lost",

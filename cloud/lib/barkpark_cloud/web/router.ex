@@ -10350,20 +10350,6 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # GET /v1/sites/:id/domain-status → 200 {ok, checked_at, instance, domains} —
-  # the Site sibling of the barkparks checklist above (charter D56, CF-in-front
-  # wave). Probes each of the site's custom `domains` dns_found → points_here →
-  # tls → serving against the box it runs on (`site.barkpark.host`).
-  #
-  # MODE-AWARE: a :cf_proxied site (behind Cloudflare's orange cloud) resolves to
-  # CF edge anycast IPs, not the origin, so `points_here` is classified :proxied
-  # (informational) instead of compared — the mode is read from the Site record,
-  # NEVER inferred from the resolved IP. A :direct site (the default, and every
-  # standalone box) is the exact addr == box intersection, unchanged.
-  #
-  # USER-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the sibling
-  # barkparks route (wrong-team / absent / malformed id are indistinguishable).
-  # Reads only public DNS + the box's own TLS/HTTP — no admin token, no zone read.
   # GET /v1/sites/:id/doctor → 200 {ok, checked_at, site, substrates, …}
   # (ssw8-site-doctor) — READ-ONLY. Every substrate this site occupies that the
   # control plane can genuinely reach, three-valued (present / absent / unknown /
@@ -10393,6 +10379,20 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # GET /v1/sites/:id/domain-status → 200 {ok, checked_at, instance, domains} —
+  # the Site sibling of the barkparks checklist above (charter D56, CF-in-front
+  # wave). Probes each of the site's custom `domains` dns_found → points_here →
+  # tls → serving against the box it runs on (`site.barkpark.host`).
+  #
+  # MODE-AWARE: a :cf_proxied site (behind Cloudflare's orange cloud) resolves to
+  # CF edge anycast IPs, not the origin, so `points_here` is classified :proxied
+  # (informational) instead of compared — the mode is read from the Site record,
+  # NEVER inferred from the resolved IP. A :direct site (the default, and every
+  # standalone box) is the exact addr == box intersection, unchanged.
+  #
+  # USER-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the sibling
+  # barkparks route (wrong-team / absent / malformed id are indistinguishable).
+  # Reads only public DNS + the box's own TLS/HTTP — no admin token, no zone read.
   get "/v1/sites/:id/domain-status" do
     conn = Auth.require_user(conn, [])
 
@@ -16151,12 +16151,27 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # git-ref clone lane: the RAW machine reason stamped on the born-failed
-  # fallback row when a push arrives for a site with NO linked repo. Human copy
-  # is applied at the serialization boundary (FailureCopy.humanize / app.js
-  # failureCopy) — this stays raw for logs+ops. The webhook route already 404s
-  # sites without github config, so this is a flip-safe defensive fallback, not
-  # a path a configured site ever takes.
-  @github_push_build_reason "github push builds require the GitHub App integration (not yet available) — deploy an artifact via bp deploy"
+  # fallback row when a push arrives for a site with NO linked repo. It names
+  # the condition the branch below ACTUALLY tests — no repo linked — and the
+  # remedy for it (link one). NOT the GitHub App: that integration shipped
+  # (`GitHub.install_url/0`, `record_installation/2`, `installation_token_for/1`),
+  # and `github_build_available?/1` below is a repo-present predicate, never an
+  # availability flag. Telling an operator to wait for a shipped feature is the
+  # bug this string used to be.
+  #
+  # THE `"github push builds require"` PREFIX IS LOAD-BEARING, not prose:
+  # `DeployLedger.classify/2` keys the GITHUB_PUSH_UNBUILDABLE class on
+  # `String.starts_with?(reason, "github push builds require")`, and that class
+  # sits in `@not_attempted_classes` — OUT of the failure denominator. Reword
+  # freely AFTER the prefix; drop the prefix and these rows silently fall into
+  # UNCLASSIFIED and inflate the very rate the ledger exists to measure.
+  #
+  # Human copy is applied at the serialization boundary (FailureCopy.humanize /
+  # app.js failureCopy) — this stays raw for logs+ops. The webhook route 404s a
+  # site with no webhook SECRET (not one with no repo), so this branch is the
+  # flip-safe defensive fallback for a site whose repo was unlinked while its
+  # secret stayed — not a path a fully-configured site ever takes.
+  @github_push_build_reason "github push builds require a linked GitHub repo on this site — link a repo to this site, or deploy an artifact via bp deploy"
 
   # git-ref clone lane: whether a source build for a GitHub push is available —
   # a REAL repo-present predicate. Repo visibility is not persisted, so
