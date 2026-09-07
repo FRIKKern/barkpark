@@ -2262,7 +2262,15 @@ defmodule Barkpark.Plugins.Capabilities do
         # admin — the /v1/webhooks route block is pipe_through [:api, :require_admin];
         # a "write" tier offered this to write tokens the server then 403s.
         "admin",
-        args: [arg("url", true, "string", "Delivery URL.")],
+        # `name` is REQUIRED by Webhook.changeset (validate_required([:name, :url])),
+        # so a url-only declaration made the verb IMPOSSIBLE — bp is manifest-driven,
+        # {url} was the only body it could build, and every call 422'd. An ARG, not a
+        # flag: buildBody folds flags into the body for batch writes and cycle.open
+        # only. Locked by internal/cli/webhook_create_required_args_lock_test.go.
+        args: [
+          arg("url", true, "string", "Delivery URL."),
+          arg("name", true, "string", "Subscription name (required by the server).")
+        ],
         writes: true,
         default_output: "minimal"
       ),
