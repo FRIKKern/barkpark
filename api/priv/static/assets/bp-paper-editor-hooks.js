@@ -1612,9 +1612,11 @@
         if (target.closest?.(
           'bp-paper-editor[data-editor-mode="card-body"], bp-paper-editor[data-editor-mode="table"]',
         )) return;
+        const associatedForm = target.form?.matches?.(".bp-paper-edit-form[phx-change]")
+          ? target.form : null;
         const source = target.closest?.("form[data-paper-field-flush]") ||
           target.closest?.(PAPER_FLUSH_TARGETS) ||
-          target.closest?.(".bp-paper-edit-form[phx-change]");
+          target.closest?.(".bp-paper-edit-form[phx-change]") || associatedForm;
         if (!source || !main.contains(source)) return;
         // Fallback forms can receive newer input while an older snapshot is
         // saving. Advance their dirty version so that acknowledgement cannot

@@ -77,6 +77,33 @@ measuredHeight = 100;
 resizeCallback([{ contentRect: { width: 200 } }]);
 assert.equal(textarea.style.height, "20px", "late observer callbacks do not touch disposed fields");
 assert.equal(disconnected, true);
+// A disclosure label is phrasing content inside <summary>; its form lives
+// outside the disclosure so nested child forms remain valid HTML.
+const summary = window.document.createElement("textarea");
+summary.name = "summary";
+summary.setAttribute("form", "disclosure-settings");
+const settings = window.document.createElement("form");
+settings.id = "disclosure-settings";
+settings.className = "bp-paper-edit-form";
+settings.setAttribute("phx-change", "paper-block-autosave");
+settings.setAttribute("phx-debounce", "500");
+settings.innerHTML = '<input name="block_id" value="disclosure">';
+window.document.querySelector("main").append(summary, settings);
+calls.length = 0;
+toggles.length = 0;
+summary.value = "Direct disclosure title";
+summary.dispatchEvent(new window.Event("input", { bubbles: true }));
+toggle.el.click();
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(calls.length, 1, "View must flush form-associated text outside the form");
+assert.equal(calls[0].payload.summary, "Direct disclosure title");
+assert.equal(calls[0].payload.open, undefined, "summary edits never send default-open settings");
+assert.deepEqual(toggles, [], "external text retains the same acknowledged exit barrier");
+reply([{ status: "fulfilled", value: { reply: {
+  saved: true, request_id: calls[0].payload.request_id, rev: 9,
+} } }]);
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.deepEqual(toggles, ["paper-toggle-edit"]);
 toggle.destroyed();
 dom.window.close();
 console.log("PASS inline text: native selection, grow/shrink, cleanup and acknowledged immediate View");
