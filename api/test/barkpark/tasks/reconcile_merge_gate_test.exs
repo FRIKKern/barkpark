@@ -37,6 +37,30 @@ defmodule Barkpark.Tasks.ReconcileMergeGateTest do
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
+  # A RAW store write that installs criteria the write door would now refuse.
+  #
+  # `Validation.criteria_violation/1` (cdd-criteria-shape-gate) halts an entry
+  # with no usable `criterion`, or a non-boolean `met`, at BOTH write doors — so
+  # a fixture carrying one can no longer be built through
+  # `Content.create_document/4`. The rows these tests model are real regardless:
+  # they were written before the gate existed, and 3 live task rows still carried
+  # a textless criterion when the gate was measured on 2026-09-07. The guard
+  # under test is precisely the one that has to MEET such a row without
+  # manufacturing a met-flip, so the row is installed BEHIND the door, the way
+  # history put it there, and the guard is measured unchanged. Building it
+  # through the front door instead would silently convert this into a test of
+  # the front door — which is `criteria_shape_shared_test.exs`'s job.
+  defp install_legacy_criteria!(task_id, criteria) do
+    stored = Repo.get!(Document, task_id)
+    content = Map.put(stored.content, "acceptance_criteria", criteria)
+
+    {1, _} =
+      from(d in Document, where: d.id == ^stored.id)
+      |> Repo.update_all(set: [content: content, rev: Barkpark.Tasks.Internal.generate_rev()])
+
+    Repo.get!(Document, task_id)
+  end
+
   defp mk_task!(doc_id, scope, content_extra) do
     content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
 
@@ -167,7 +191,11 @@ defmodule Barkpark.Tasks.ReconcileMergeGateTest do
       %{"criterion" => "", "met" => false, "merge_gate" => true}
     ]
 
-    task = mk_task!(uniq("rmg-textless"), scope, %{"acceptance_criteria" => textless})
+    task =
+      uniq("rmg-textless")
+      |> mk_task!(scope, %{"acceptance_criteria" => []})
+      |> Map.fetch!(:id)
+      |> install_legacy_criteria!(textless)
 
     assert {:ok, :no_guardable_marker} = Tasks.reconcile_merge_gate(task.id, @landed)
 
