@@ -324,6 +324,13 @@ on:
       - "scripts/landed-open-report.sh"
       - "scripts/landed-open-report.test.sh"
       - "scripts/lib/landed_open_report.py"
+      # ...and the CONSUMER that finally runs it on a schedule
+      # (task-f5be1a6dbf914096). The step body lives in a script so this
+      # harness can reach it — a predicate that exists only inside a YAML
+      # `run:` block is a predicate no harness can reach.
+      - "scripts/landed-open-report-schedule.sh"
+      - "scripts/landed-open-report-schedule.test.sh"
+      - ".github/workflows/landed-open-report.yml"
       # ── TASK LEASE RENEW (task-16e56d05b809dd39) ────────────────────────────
       # Per file, D26 — plus scripts/pr-task-gate.sh for the SAME reason the
       # landed-mark block above names it: that file OWNS the `Task:` trailer
@@ -572,6 +579,13 @@ on:
       - "scripts/landed-open-report.sh"
       - "scripts/landed-open-report.test.sh"
       - "scripts/lib/landed_open_report.py"
+      # ...and the CONSUMER that finally runs it on a schedule
+      # (task-f5be1a6dbf914096). The step body lives in a script so this
+      # harness can reach it — a predicate that exists only inside a YAML
+      # `run:` block is a predicate no harness can reach.
+      - "scripts/landed-open-report-schedule.sh"
+      - "scripts/landed-open-report-schedule.test.sh"
+      - ".github/workflows/landed-open-report.yml"
       # The renew lane's harness, on the push arm too: a lane wired on PRs only
       # goes dark the moment a merge lands.
       - "scripts/task-lease-renew.sh"
@@ -861,6 +875,9 @@ jobs:
           landed-mark scripts/landed-open-report.sh
           landed-mark scripts/landed-open-report.test.sh
           landed-mark scripts/lib/landed_open_report.py
+          landed-mark scripts/landed-open-report-schedule.sh
+          landed-mark scripts/landed-open-report-schedule.test.sh
+          landed-mark .github/workflows/landed-open-report.yml
           doc-gates-paths-parity scripts/doc-gates-paths-parity-check.sh
           doc-gates-paths-parity .github/workflows/doc-gates.yml
           merge-gate-bridge scripts/github-webhook-subscription-parity.sh
@@ -1882,6 +1899,8 @@ jobs:
         run: |
           bash -n scripts/landed-open-report.sh
           bash -n scripts/landed-open-report.test.sh
+          bash -n scripts/landed-open-report-schedule.sh
+          bash -n scripts/landed-open-report-schedule.test.sh
           python3 -c "import ast,sys; ast.parse(open('scripts/lib/landed_open_report.py').read())"
       - name: the READER's selftest is green, then nine arms are DISARMED and red
         # The consumer for the back-link this job's writer produces. Its own
@@ -1897,6 +1916,22 @@ jobs:
         run: |
           bash scripts/landed-open-report.sh --selftest
           bash scripts/landed-open-report.test.sh
+
+      - name: the CONSUMER refuses a failed read, and that refusal is load-bearing
+        # scripts/landed-open-report-schedule.sh is the step body of
+        # .github/workflows/landed-open-report.yml — the thing that finally
+        # RUNS the reader (task-f5be1a6dbf914096). It lives in scripts/ so this
+        # harness can execute the same bytes CI executes; the alternative, a
+        # predicate inside a YAML `run:` block, is how pr-task-gate silently
+        # dropped every backtick-wrapped trailer for weeks.
+        #
+        # Hermetic: a STUB `bp` on LANDED_REPORT_BP, no token, no network. It
+        # proves the 401 arm exits non-zero carrying the reader's own CANNOT
+        # READ line, that an unset token is a failure and not a skip, that the
+        # population floor refuses a thin read, and that [PARENT] / [GATE?]
+        # reach $GITHUB_STEP_SUMMARY — then deletes each of those refusals in a
+        # scratch tree and requires the run to stop refusing.
+        run: bash scripts/landed-open-report-schedule.test.sh
 
   doc-gates-paths-parity:
     needs: [changes]

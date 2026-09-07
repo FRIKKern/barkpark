@@ -1,0 +1,120 @@
+name: Landed-open report — rows whose work merged and never closed
+
+# THE HOLE THIS CLOSES. scripts/landed-open-report.sh shipped in #16616 and
+# NOTHING RAN IT against the ledger (task-f5be1a6dbf914096). Its hermetic
+# `--selftest` and its mutation harness do ride shell-harnesses.yml, so the code
+# was guarded — but a guarded reader that never reads is the same shape as the
+# gap it was built to close: a facility nobody consumes. On 2026-09-07 the walk
+# it does in ninety seconds found 33 rows carrying `landed-on-main` that are
+# still open or in_progress. Nobody was looking at them.
+#
+# THE VENUE, IN ONE SENTENCE (the criterion that asked for it): this is a report
+# about LEDGER state, not about a PR's diff, so it runs on a schedule and on
+# demand and NEVER on `pull_request` — a PR cannot make it truer or falser, and
+# a name that renders on a PR is a name that can be promoted into a merge gate
+# by accident.
+#
+# NO NEW REQUIRED CONTEXT, BY CONSTRUCTION AND NOT BY PROMISE. main's required
+# set is exactly `Elixir gate`, `PR references an active task`, `Cloud gate`,
+# `Console gate` (.github/required-checks.json). A workflow with no
+# `pull_request` and no `push` arm renders NO check run on any PR head and none
+# on main, so there is nothing here for branch protection to require and nothing
+# for the absent-context census to trip over — it needs no exclusions row for
+# the same reason. Wiring this makes the reader RUN, never BLOCK.
+#
+# A RED HERE MEANS THE READ FAILED, NOT THAT THE LEDGER IS DIRTY. The reader
+# exits 2 on a refused, short, or below-floor walk and this job turns that into
+# a failure with the reader's own CANNOT READ line in the log. Findings — live
+# rows — exit 0 and are published to the step summary with their [PARENT] and
+# [GATE?] flags intact, because a scheduled job that reds on every finding reds
+# every day and becomes a workflow everybody learns to ignore. The full argument
+# is in scripts/landed-open-report-schedule.sh's header, next to the code it
+# governs, and scripts/landed-open-report-schedule.test.sh mutation-proves every
+# arm of it with a stub `bp` — no token, no network.
+
+on:
+  # GitHub delivers this repo's cron every 2-5 h rather than on the minute
+  # (measured 2026-09-03 on task-lease-renew.yml). That is fine here: the
+  # subject is a slowly-moving population, not a per-push fact.
+  schedule:
+    - cron: "27 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One report at a time; a queued duplicate has nothing new to say. Never
+  # `cancel-in-progress: true` on a run that can be the day's only read.
+  group: landed-open-report
+  cancel-in-progress: false
+
+jobs:
+  landed-open-report:
+    name: Report task rows whose work landed on main and never closed
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      # FULL history. The reader resolves each landing sha to an AGE in days out
+      # of this checkout; a shallow clone carries none of them and every row
+      # would render `?` — legible, but it throws away the one column that says
+      # which rows have been stranded longest.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Syntax check the reader and its consumer
+        run: |
+          bash -n scripts/landed-open-report.sh
+          bash -n scripts/landed-open-report-schedule.sh
+
+      # THE GUARD MUST PROVE IT CAN FAIL BEFORE IT IS BELIEVED. Both of these
+      # are hermetic — fixtures and a stub `bp`, no token, no network — so they
+      # cannot rot into a skip, and they run BEFORE the live read so a broken
+      # reader is named as broken rather than as an empty ledger.
+      - name: The reader passes its own assertions (--selftest)
+        run: bash scripts/landed-open-report.sh --selftest
+
+      - name: The consumer's refusals are load-bearing (mutation harness)
+        run: bash scripts/landed-open-report-schedule.test.sh
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # `bp` is not on GitHub runners. Build it from THIS checkout rather than
+      # installing a release: the reader depends on `bp task ls --cursor ""`
+      # entering keyset mode, and a stale installed binary is exactly how a
+      # walker silently stops after one page.
+      - name: Build bp from this checkout
+        run: CGO_ENABLED=0 go build -o "$RUNNER_TEMP/bp" ./cmd/barkpark
+
+      - name: Read the ledger
+        env:
+          # bp takes its server and token from the environment — no config file
+          # and no wrapper script needed, so `LANDED_REPORT_BP` stays a single
+          # word as the reader requires. (internal/cli/cli.go: ServerEnvNames /
+          # TokenEnvNames.)
+          BARKPARK_SERVER: ${{ vars.BARKPARK_LEDGER_BASE || 'https://guerrilla.barkpark.cloud' }}
+          # The same secret pr-task-gate.yml, landed-mark.yml and
+          # task-lease-renew.yml read. This job only ever LISTS: it runs
+          # `bp task ls` and nothing else, and the reader has no --close and no
+          # write path of any kind.
+          BARKPARK_TOKEN: ${{ secrets.BARKPARK_TASK_TOKEN }}
+          LANDED_REPORT_BP: ${{ runner.temp }}/bp
+          # A POSITIVE CONTROL, NOT A THRESHOLD. Landed labels are only ever
+          # ADDED (landed-mark.sh never removes one), so the labelled population
+          # cannot shrink: 439 rows carried the label when the row was filed,
+          # 444 on 2026-09-07. A floor of 400 cannot be tripped by the ledger
+          # going clean — only by this job reading the wrong ledger, or reading
+          # nothing while printing a tidy empty list.
+          LANDED_SCHEDULE_MIN_POPULATION: "400"
+        run: |
+          # `set -uo pipefail` does NOT clear the -e in GitHub's `bash -e {0}`,
+          # so `|| rc=$?` is the -e-safe form — otherwise a refusal aborts the
+          # step with nothing but the runner's anonymous "exit code N".
+          set -uo pipefail
+          rc=0
+          bash scripts/landed-open-report-schedule.sh || rc=$?
+          exit "$rc"
