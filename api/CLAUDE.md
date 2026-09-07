@@ -68,6 +68,6 @@ Sanity's `drafts.` prefix convention (api-v1.md §6) — `Content.publish_docume
 After every mutation `Content` broadcasts (content/broadcast.ex — `tap_broadcast` / `broadcast_document_mutation`):
 
 - `"documents:#{dataset}"` — global per-dataset stream (legacy, untouched)
-- `"documents:ws:#{workspace_id}:#{dataset}"` — additive workspace-scoped stream (only when the doc carries a `workspace_id`)
+- `"documents:ws:#{workspace_id}:#{dataset}"` — additive workspace-scoped stream (only if the doc carries `workspace_id`)
 
-`/v1/data/listen/:dataset` streams these as SSE. Task mutations emit `mutation_events` rows — 16 kinds: `task.{claimed,closed,compacted,compaction_restored,criterion,engagement_lapsed,landed,lease_expired,lease_renewed,mutated,pulse,referenced,relabeled,released,reparented,staged}` (`tasks.ex`, `tasks/landed.ex`, `tasks/renew.ex`, `tasks/ttl_sweeper.ex`, `tasks/compactor.ex`). The `@event_task_*` attributes own this roster — EMITTED names only, never verbs like `task.get`; `scripts/roster-drift-check.sh` re-derives and diffs this line. A consumer switching on a stale subset drops kinds silently.
+`/v1/data/listen/:dataset` streams these as SSE. Task mutations emit `mutation_events` rows — 17 kinds: `task.{claimed,closed,compacted,compaction_restored,criterion,discharged,engagement_lapsed,landed,lease_expired,lease_renewed,mutated,pulse,referenced,relabeled,released,reparented,staged}` (`tasks.ex`, `tasks/landed.ex`, `tasks/renew.ex`, `tasks/ttl_sweeper.ex`, `tasks/compactor.ex`). The `@event_task_*` attributes own this roster — EMITTED names only, never verbs like `task.get`; `scripts/roster-drift-check.sh` re-derives and diffs this line. A consumer on a stale subset drops kinds silently.

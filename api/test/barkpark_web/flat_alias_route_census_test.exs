@@ -932,6 +932,16 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
          "from the token before AssignDefaultScope can stamp Default."},
+    # TasksController.discharges — the back-link mark (task-29781d0921e5a885).
+    # The doc_id in the path AND every `Discharges:` id parsed out of the PR body
+    # resolve through the SAME find_task_by_doc_id/2, so a cited row outside the
+    # caller's workspace is `not_found`, not marked: a PR body is untrusted input
+    # and cannot be used to reach across a tenancy boundary.
+    {"POST", "/v1/tasks/:doc_id/discharges"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
+         "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
+         "from the token before AssignDefaultScope can stamp Default."},
     # TasksController.landed — the NON-HOLDER landing mark (task-59fe7b40b719b379).
     # Dropping the holder/epoch gate does NOT widen tenancy: the doc_id still
     # resolves through find_task_by_doc_id/2, which is scope_opts/1-scoped, so a

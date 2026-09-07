@@ -232,6 +232,19 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   end
 
   @impl true
+  def retrieve_subscription(subscription_id) when is_binary(subscription_id) do
+    # GET /v1/subscriptions/:id — Stripe's own read of the subscription, the
+    # source of truth when our `subscriptions` row has gone stale. Unlike every
+    # other call in this module it returns the WHOLE decoded object rather than
+    # one field: the caller reads `"status"`, and a future caller reading
+    # `"cancel_at_period_end"` or `"current_period_end"` should not need a second
+    # round trip. Hence `request_object/1` beside `request/2`.
+    "/subscriptions/#{subscription_id}"
+    |> build_request(:get, %{})
+    |> request_object()
+  end
+
+  @impl true
   def verify_webhook(payload, signature_header)
       when is_binary(payload) and is_binary(signature_header) do
     # Stripe signs webhooks with the endpoint's signing secret (`whsec_…`), a
@@ -342,6 +355,34 @@ defmodule BarkparkCloud.Billing.StripeGateway do
             # reaches the client — see `billing_reason/1` at the router. The tuple
             # itself stays intact (http_client_test pins it); redaction is at the
             # router seam only.
+            Logger.error("Stripe HTTP #{status} error: #{inspect(body)}")
+            {:error, {:stripe_http_error, status, body}}
+
+          {:error, reason} ->
+            {:error, reason}
+
+          other ->
+            {:error, {:unexpected_stripe_response, other}}
+        end
+
+      _ ->
+        {:error, :http_client_not_configured}
+    end
+  end
+
+  # The whole-object sibling of `request/2` — same transport, same fail-closed
+  # ladder, same server-side-only logging of the raw Stripe body (it can carry
+  # `cus_…` ids and request echoes, so the router redacts it via
+  # `billing_reason/1` before anything reaches a client). It differs in exactly
+  # one way: it returns the decoded map instead of plucking one key out of it.
+  defp request_object(req) do
+    case http_client() do
+      fun when is_function(fun, 1) ->
+        with {:ok, %{status: status, body: body}} when status in 200..299 <- fun.(req),
+             {:ok, %{} = decoded} <- Jason.decode(body) do
+          {:ok, decoded}
+        else
+          {:ok, %{status: status, body: body}} ->
             Logger.error("Stripe HTTP #{status} error: #{inspect(body)}")
             {:error, {:stripe_http_error, status, body}}
 

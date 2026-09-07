@@ -33,6 +33,12 @@ defmodule BarkparkCloud.Billing.Gateway do
     * `cancel_subscription/2`  — cancel a subscription, either at period end
       (reversible grace) or immediately. Returns the gateway's updated sub map.
       Coolify-anchor: `app/Actions/Subscriptions/CancelSubscription.php`.
+    * `retrieve_subscription/1` — READ a subscription's CURRENT state back from
+      the gateway. The only READ callback here, and the only one that moves no
+      money: it exists because the control plane's own `subscriptions` row can go
+      STALE (a webhook that never arrived, or one that fell through), and a
+      recovery decision must then be made against the payer's real state rather
+      than against our copy of it.
     * `verify_webhook/2`      — verify an inbound webhook's signature and return
       the decoded event. Verify ONLY — event handling/dispatch is out of scope
       (YAGNI).
@@ -124,6 +130,26 @@ defmodule BarkparkCloud.Billing.Gateway do
   cancels immediately. Returns the gateway's updated subscription map.
   """
   @callback cancel_subscription(subscription_id :: subscription_id, opts :: keyword()) ::
+              {:ok, map()} | {:error, term}
+
+  @doc """
+  Read `subscription_id`'s CURRENT state back from the gateway. Returns the
+  gateway's subscription object — callers read `"status"` out of it (Stripe's
+  own vocabulary: `"active"`, `"trialing"`, `"past_due"`, `"canceled"`,
+  `"unpaid"`, …). READ-ONLY: nothing is charged, nothing is mutated.
+
+  WHY A READ CALLBACK EXISTS AT ALL. Every other callback here is a WRITE, and
+  the control plane deliberately learns state from signed webhooks rather than
+  polling. But a webhook can be missed or can fall through — a Stripe-side
+  reactivation of a `canceled` subscription arrives as
+  `customer.subscription.updated`, whose object carries no
+  `metadata.team_id`/`plan`, so it cannot activate anything. When that happens
+  our row and the payer's real state DISAGREE, and the operator lift
+  (`Billing.resume_billing_suspension/1`) must ask the gateway rather than
+  believe the stale row it is trying to correct. Without this callback that lift
+  could only ever be an unconditional grant — a billing bypass.
+  """
+  @callback retrieve_subscription(subscription_id :: subscription_id) ::
               {:ok, map()} | {:error, term}
 
   @doc """
