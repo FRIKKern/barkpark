@@ -319,6 +319,8 @@ defmodule Barkpark.Content.Lifecycle do
                   {pub_result, prev_pub_rev} =
                     case Content.get_document(pid, type, dataset, opts) do
                       {:ok, existing} ->
+                        existing = lock_published_paper(existing, type)
+                        pub_attrs = advance_paper_publish_revision(pub_attrs, existing, type)
                         {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
 
                       _ ->
@@ -474,6 +476,29 @@ defmodule Barkpark.Content.Lifecycle do
         {:error, {:duplicate_of, annotate_claimed_survivor(payload, draft, worker)}}
     end
   end
+
+  # A whole-document publish replaces the same content that native Paper ops
+  # fence with content["rev"]. Never copy an old draft's counter onto that row.
+  # Lock before reading the counter so a concurrent op cannot make us reuse its
+  # revision between this read and the published update. Other types are unchanged.
+  defp lock_published_paper(%Document{id: id}, "paper") do
+    Repo.one(from(d in Document, where: d.id == ^id, lock: "FOR UPDATE")) ||
+      Repo.rollback(:not_found)
+  end
+
+  defp lock_published_paper(existing, _type), do: existing
+
+  defp advance_paper_publish_revision(attrs, %Document{content: current}, "paper") do
+    Map.update!(attrs, "content", fn content ->
+      rev = max(paper_stream_revision(content), paper_stream_revision(current)) + 1
+      Map.put(content, "rev", rev)
+    end)
+  end
+
+  defp advance_paper_publish_revision(attrs, _existing, _type), do: attrs
+
+  defp paper_stream_revision(%{"rev" => rev}) when is_integer(rev) and rev >= 0, do: rev
+  defp paper_stream_revision(_content), do: 0
 
   # The worker holding this draft's claim, or nil when the draft carries none.
   # Keyed on `claim.worker` (the field `Tasks.Close` CAS's against together with
