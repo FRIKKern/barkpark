@@ -60,6 +60,28 @@ defmodule Barkpark.Tasks.LandedTest do
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
+  # A RAW store write that installs criteria the write door would now refuse.
+  #
+  # `Validation.criteria_violation/1` (cdd-criteria-shape-gate) halts an entry
+  # with no usable `criterion` at BOTH write doors, so a fixture like that can no
+  # longer be created through `Content.create_document/4`. The rows it models are
+  # real all the same — 3 live task rows carried a textless criterion when the
+  # gate was measured on 2026-09-07 — and the point of the guard under test is
+  # precisely that it meets them without faking a met-flip. So the row goes in
+  # behind the door, the way history put it there, and the guard is measured
+  # unchanged. Using the front door instead would have quietly turned this test
+  # into a test OF the front door.
+  defp install_legacy_criteria!(doc, criteria) do
+    stored = Repo.get!(Document, doc.id)
+    content = Map.put(stored.content, "acceptance_criteria", criteria)
+
+    {1, _} =
+      from(d in Document, where: d.id == ^stored.id)
+      |> Repo.update_all(set: [content: content, rev: Barkpark.Tasks.Internal.generate_rev()])
+
+    Repo.get!(Document, doc.id)
+  end
+
   defp task!(scope, content_extra \\ %{}) do
     doc_id = uniq("landed")
 
@@ -285,9 +307,9 @@ defmodule Barkpark.Tasks.LandedTest do
       # D56 rule refuses a met-flip with no text to CAS against — and this verb
       # rides that rule rather than routing around it.
       doc =
-        task!(scope, %{
-          "acceptance_criteria" => [%{"merge_gate" => true, "met" => false}]
-        })
+        scope
+        |> task!(%{"acceptance_criteria" => []})
+        |> install_legacy_criteria!([%{"merge_gate" => true, "met" => false}])
 
       assert {:error, :criterion_text_required} =
                Tasks.record_landing(doc.id, note: "merged to main", criterion: 0)
