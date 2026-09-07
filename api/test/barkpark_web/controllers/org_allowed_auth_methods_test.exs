@@ -18,6 +18,26 @@ defmodule BarkparkWeb.OrgAllowedAuthMethodsTest do
 
   @password "correct-horse-battery"
 
+  @issuer "https://idp.example.com"
+  @client_id "bp-client"
+
+  defmodule MockIdP do
+    @behaviour Barkpark.Sso.Oidc.HTTP
+    @impl true
+    def post_form(_url, _params), do: {:ok, %{"id_token" => fx(:id_token)}}
+    @impl true
+    def get_json(_url), do: {:ok, %{"keys" => [fx(:jwk)]}}
+    defp fx(k), do: Application.get_env(:barkpark, :oidc_test)[k]
+  end
+
+  defmodule MockSocialHTTP do
+    @behaviour Barkpark.Sso.Social.HTTP
+    @impl true
+    def post_form(_url, _params), do: {:ok, %{"access_token" => "at"}}
+    @impl true
+    def get_bearer(_url, _token), do: {:ok, Application.get_env(:barkpark, :social_test)}
+  end
+
   defp json_conn(conn), do: put_req_header(conn, "content-type", "application/json")
   defp post_json(conn, path, body), do: conn |> json_conn() |> post(path, Jason.encode!(body))
 
@@ -203,5 +223,214 @@ defmodule BarkparkWeb.OrgAllowedAuthMethodsTest do
     assert [event] = events
     assert event.metadata["method"] == "password"
     assert event.metadata["allowed"] == ["sso"]
+  end
+
+  # ── the ENTERPRISE sso door (OIDC) ─────────────────────────────────────────
+  #
+  # The enforcement set is derived from the VOCABULARY, not from the doors the
+  # filing happened to list: every term in `Organization.auth_methods/0` has a
+  # gated mint site, and every local mint site answers to exactly one term.
+  # OIDC and SAML are bound to a per-org connection, so both answer to "sso";
+  # SAML's arm lives in `saml_controller_test.exs` beside its signing fixture.
+
+  describe "OIDC callback — the enterprise sso door" do
+    setup do
+      prev = Application.get_env(:barkpark, :oidc_http)
+      Application.put_env(:barkpark, :oidc_http, MockIdP)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :oidc_http, prev),
+          else: Application.delete_env(:barkpark, :oidc_http)
+
+        Application.delete_env(:barkpark, :oidc_test)
+      end)
+
+      :ok
+    end
+
+    test "an org whose policy OMITS sso refuses the OIDC mint with 403", %{conn: conn} do
+      %{slug: slug, email: email} = oidc_org!(["password"])
+
+      body =
+        conn
+        |> oidc_callback(slug, email)
+        |> json_response(403)
+
+      assert body["error"]["code"] == "auth_method_not_allowed"
+      assert body["error"]["message"] =~ "Single sign-on is disabled"
+      refute body["token"]
+
+      user = Accounts.get_user_by_email(email)
+      assert user
+      assert Accounts.list_user_sessions(user) == []
+    end
+
+    test "an org whose policy INCLUDES sso mints unchanged", %{conn: conn} do
+      %{slug: slug, email: email} = oidc_org!(["sso"])
+
+      body = conn |> oidc_callback(slug, email) |> json_response(201)
+      assert body["token"]
+    end
+
+    test "an org with NO policy mints unchanged (zero tax)", %{conn: conn} do
+      %{slug: slug, email: email} = oidc_org!(nil)
+
+      body = conn |> oidc_callback(slug, email) |> json_response(201)
+      assert body["token"]
+    end
+  end
+
+  # ── the CONSUMER oauth door (social) ───────────────────────────────────────
+  #
+  # `social` is a SEPARATE term from `sso` and that is the point:
+  # `Sso.Social.handle_callback/3` find-or-links by email against a consumer
+  # provider with NO org binding. If social counted as sso, a personal Google
+  # account matching a member's address would satisfy an `["sso"]` policy —
+  # exactly the bypass this feature exists to close. The first test below is
+  # the one that would go quietly green under the collapsed vocabulary.
+
+  describe "social callback — the consumer oauth door" do
+    setup do
+      prev = Application.get_env(:barkpark, :social_http)
+      Application.put_env(:barkpark, :social_http, MockSocialHTTP)
+      {:ok, _} = Barkpark.Sso.Social.enable_provider("google", "cid", "secret")
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :social_http, prev),
+          else: Application.delete_env(:barkpark, :social_http)
+
+        Application.delete_env(:barkpark, :social_test)
+      end)
+
+      :ok
+    end
+
+    test "an SSO-ONLY org refuses consumer Google login — social is not sso", %{conn: conn} do
+      email = unique("gsso") <> "@example.com"
+      user = register!(email)
+      govern!(user, ["sso"])
+
+      body = conn |> social_callback(email) |> json_response(403)
+
+      assert body["error"]["code"] == "auth_method_not_allowed"
+      assert body["error"]["message"] =~ "Social sign-in is disabled"
+      assert Accounts.list_user_sessions(user) == []
+    end
+
+    test "the audit trail records the PRECISE provider, not just the policy term", %{conn: conn} do
+      email = unique("gaudit") <> "@example.com"
+      user = register!(email)
+      govern!(user, ["sso"])
+
+      conn |> social_callback(email) |> response(403)
+
+      events =
+        Barkpark.Repo.all(
+          from e in Barkpark.Audit.Event,
+            where: e.subject == ^user.id and e.action == "auth_method_not_allowed"
+        )
+
+      assert [event] = events
+      assert event.metadata["method"] == "social"
+      assert event.metadata["provider"] == "social:google"
+    end
+
+    test "an org whose policy INCLUDES social mints unchanged", %{conn: conn} do
+      email = unique("gok") <> "@example.com"
+      user = register!(email)
+      govern!(user, ["sso", "social"])
+
+      assert conn |> social_callback(email) |> json_response(201)
+    end
+
+    test "an org with NO policy mints unchanged (zero tax)", %{conn: conn} do
+      email = unique("gplain") <> "@example.com"
+      user = register!(email)
+      govern!(user, nil)
+
+      assert conn |> social_callback(email) |> json_response(201)
+    end
+  end
+
+  # ── fixtures for the SSO arms ──────────────────────────────────────────────
+
+  # An org with a real OIDC connection and `methods` as its policy (nil = none).
+  # Returns the org slug plus the email the mocked IdP will assert.
+  defp oidc_org!(methods) do
+    slug = unique("oidcaam")
+    {:ok, org} = Tenancy.create_organization(%{slug: slug, name: slug})
+
+    if methods do
+      {:ok, _} = Tenancy.set_organization_allowed_auth_methods(org.id, methods)
+    end
+
+    # jit_provision/3 creates one membership PER WORKSPACE in the org, and
+    # membership is what makes the user GOVERNED. An org with no workspace
+    # provisions nothing and the policy would be silently inert — the fixture
+    # must give the org a workspace or the test proves nothing.
+    {:ok, ws} = Tenancy.create_workspace(%{slug: slug <> "-ws", name: slug <> "-ws"})
+    {:ok, _ws} = Tenancy.assign_workspace_to_organization(ws, org.id)
+
+    {:ok, _c} =
+      Barkpark.Sso.Oidc.create_connection(%{
+        organization_id: org.id,
+        issuer: @issuer,
+        client_id: @client_id,
+        client_secret: "s",
+        authorization_endpoint: @issuer <> "/authorize",
+        token_endpoint: @issuer <> "/token",
+        jwks_uri: @issuer <> "/jwks"
+      })
+
+    %{org: org, slug: slug, email: slug <> "@example.com"}
+  end
+
+  # Sign a real RS256 id_token for `email` and drive the callback with a
+  # matching state + verifier, so the request reaches the mint seam for real.
+  defp oidc_callback(conn, slug, email) do
+    jwk = JOSE.JWK.generate_key({:rsa, 2048})
+    pub = jwk |> JOSE.JWK.to_public_map() |> elem(1) |> Map.put("kid", "k1")
+
+    claims = %{
+      "iss" => @issuer,
+      "aud" => @client_id,
+      "sub" => "oidc-" <> slug,
+      "email" => email,
+      "exp" => System.system_time(:second) + 300,
+      "iat" => System.system_time(:second),
+      "nonce" => "n1"
+    }
+
+    token =
+      jwk
+      |> JOSE.JWS.sign(Jason.encode!(claims), %{"alg" => "RS256", "kid" => "k1"})
+      |> JOSE.JWS.compact()
+      |> elem(1)
+
+    Application.put_env(:barkpark, :oidc_test, %{id_token: token, jwk: pub})
+
+    conn
+    |> init_test_session(%{oidc_state: "s1", oidc_verifier: "v1", oidc_nonce: "n1"})
+    |> get("/v1/auth/oidc/#{slug}/callback?code=abc&state=s1")
+  end
+
+  # Drive the Google callback for `email` with a matching state.
+  defp social_callback(conn, email) do
+    # `email_verified` is required on the ADOPTION path: these accounts are
+    # registered first, so Social.find_or_create_user/2 consults
+    # verified_email?/4 before linking. Without it the callback 401s
+    # `email_unverified` and never reaches the policy seam.
+    Application.put_env(:barkpark, :social_test, %{
+      "email" => email,
+      "email_verified" => true,
+      "sub" => "g-" <> email,
+      "id" => "g-" <> email
+    })
+
+    conn
+    |> init_test_session(%{social_state: "s1"})
+    |> get("/v1/auth/social/google/callback?code=abc&state=s1")
   end
 end
