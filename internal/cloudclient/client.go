@@ -2230,7 +2230,42 @@ type SiteDeployment struct {
 	Trigger       string      `json:"trigger,omitempty"`
 	RuntimeTarget string      `json:"runtime_target,omitempty"`
 	Port          int         `json:"port,omitempty"`
-	FailureReason string      `json:"failure_reason"`
+	// site-spawner (node slot truth): THE SERVED SLOT AND WHETHER THE HEALTH GATE
+	// ACTUALLY RAN. `deployment_json/1` has emitted `slot`, `port` and
+	// `health_exit_code` since #15095 (migration 20260902091000 added the three
+	// columns), and this struct declared only `Port` — so `json.Unmarshal` dropped
+	// the other two in silence and `bp cloud site status -o json` could not show
+	// them. Exactly the failure the FailureClass/FailureReasonRaw block below
+	// records one wave earlier: a decoder that never names them cannot report them.
+	//
+	//   * Slot is the blue/green position the BOX MEASURED Caddy to be proxying to
+	//     after SWITCH, read back out of its own Caddyfile — never the slot the
+	//     control plane intended. "" means the producer sent null: a static or
+	//     container row, a node build that died before SWITCH, a row written before
+	//     the migration, OR a served port matching neither of the site's two
+	//     allocated slots. That last case leaves Port standing while Slot is empty,
+	//     and that pair is a real signal ("we do not know which half"), not a bug —
+	//     so the two are rendered independently and neither is derived from the
+	//     other.
+	//
+	//   * HealthExitCode is 0 (HEALTH ran and PASSED), 14 (ran and failed — the
+	//     cross-engine convention), or nil (never measured).
+	//
+	// HealthExitCode IS A POINTER AND Port IS NOT, and the asymmetry is the whole
+	// point rather than an inconsistency. The house rule (DeferralDepth/Bound,
+	// FailureCode/Message above, and the `Deployment` block's six fields) is that a
+	// pointer buys the distinction between "the server did not send this key" and
+	// "the server measured this value" — and it is only worth buying when the zero
+	// value is a value the field can legitimately take. 0 is the SUCCESS code for a
+	// health check, so an `int` here would render a build that died in BUILD as
+	// health-certified; that is the single most dangerous coercion on this payload,
+	// and `omitempty` on it would erase every PASSING health check. A served TCP
+	// port of 0 is not a measurement the box can make (the node-slot window is
+	// [7002,7998], charter D68), so Port's zero is unambiguously "absent" and the
+	// plain int stays honest.
+	Slot           string `json:"slot,omitempty"`
+	HealthExitCode *int   `json:"health_exit_code"`
+	FailureReason  string `json:"failure_reason"`
 	// deploy-reliability W2: the ledger's own vocabulary for a failed row, which
 	// this struct did NOT declare — so `git grep failure_class -- internal/`
 	// returned zero while the control plane had been shipping both keys from its

@@ -2632,6 +2632,22 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 		if au := strings.TrimSpace(dep.ArtifactURL); au != "" {
 			m["artifact"] = hzCell(au)
 		}
+		// THE SERVED SLOT AND THE HEALTH VERDICT, in words rather than a bare
+		// number. `-o json` carries the raw `slot` / `port` / `health_exit_code`
+		// for scripts; a human reading this header needs to be told WHICH of the
+		// three states it got, because two of them look alike from a distance:
+		// exit 0 means the gate RAN and PASSED, and no key at all means nobody
+		// ever measured it. The rows are therefore never printed empty.
+		if line := siteServedSlotLine(dep.Slot, dep.Port); line != "" {
+			m["served slot"] = line
+		}
+		// Shown for NODE sites only. A static deploy has no health gate and never
+		// will, so a permanent "not measured" dash on every static status header
+		// would be noise that teaches the reader to ignore the row — while on a
+		// node deploy that same dash is the finding.
+		if siteIsNode(s.Kind, s.RuntimeTarget) {
+			m["health"] = siteHealthGateLine(dep.HealthExitCode)
+		}
 		// A deploy that did not go live owes the reader a reason — the deployment's
 		// failure_reason, else the failed stage's streamed detail.
 		if strings.EqualFold(dep.Status, "failed") || siteDeployCancelled(dep.Status) {
@@ -3273,6 +3289,53 @@ func siteStalenessMap(dep, newest *cloudclient.SiteDeployment, ledger []cloudcli
 	return m
 }
 
+// siteServedSlotLine renders the blue/green position the box MEASURED Caddy to be
+// proxying to after SWITCH, plus the loopback port it answers on.
+//
+// THREE OUTCOMES, THREE SENTENCES, and the third is the one worth writing code
+// for: the producer can send a port with a NULL slot when the served port matches
+// neither of the site's two allocated slots. That is a measurement — the box
+// looked, and what it found does not fit — so it must not render as the same
+// blank as "the box never looked". Returns "" only when the payload carries
+// neither, which is every static row and every row written before migration
+// 20260902091000.
+func siteServedSlotLine(slot string, port int) string {
+	sl := strings.TrimSpace(slot)
+	switch {
+	case sl != "" && port != 0:
+		return fmt.Sprintf("%s (Caddy upstream localhost:%d)", hzCell(sl), port)
+	case sl != "":
+		return hzCell(sl)
+	case port != 0:
+		return fmt.Sprintf("unknown — Caddy answers on localhost:%d, which matches neither of this site's two allocated slots", port)
+	default:
+		return ""
+	}
+}
+
+// siteHealthGateLine says whether the HEALTH stage RAN, and what it decided.
+//
+// nil is NOT a failure and NOT a pass: it is "never measured" — a build that died
+// before HEALTH, a row written before the health column existed. It gets an
+// explicit dash and a sentence, because the alternative every previous cut of this
+// surface chose was to print nothing, and a missing row reads as "fine".
+//
+// 0 IS THE SUCCESS CODE. It is spelled out rather than left as a number precisely
+// because a reader who skims "health: 0" reads a zero as an absence.
+func siteHealthGateLine(code *int) string {
+	if code == nil {
+		return "— (HEALTH never ran on this deployment, so nothing was measured — not a pass)"
+	}
+	switch *code {
+	case 0:
+		return "passed (HEALTH ran and exited 0)"
+	case 14:
+		return "FAILED (HEALTH ran and exited 14)"
+	default:
+		return fmt.Sprintf("FAILED (HEALTH ran and exited %d, outside the 0/14 convention)", *code)
+	}
+}
+
 // siteDeploymentMap is the structured shape of one deployment, stages included.
 func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	stages := make([]map[string]any, 0, len(d.Stages))
@@ -3333,6 +3396,30 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	}
 	if d.Port != 0 {
 		m["port"] = d.Port
+	}
+	// site-spawner (node slot truth): THE SERVED SLOT AND THE HEALTH GATE'S VERDICT.
+	// `deploy/site-spawner-node-live-proof.sh` reads `deployment.slot` and
+	// `deployment.health_exit_code` off exactly this envelope; before the decoder
+	// declared them (see the SiteDeployment block) `json.Unmarshal` dropped both and
+	// this map could not have emitted them at any price.
+	//
+	// SLOT AND PORT ARE WRITTEN INDEPENDENTLY. The producer can send a port with a
+	// null slot — a served port matching neither of the site's two allocated slots —
+	// and that pair means "we do not know which half", which is a different sentence
+	// from "we did not look". Deriving one from the other, or suppressing the port
+	// when the slot is missing, would delete the signal.
+	if sl := strings.TrimSpace(d.Slot); sl != "" {
+		m["slot"] = sl
+	}
+	// HEALTH IS WRITTEN WHENEVER THE SERVER SENT IT — INCLUDING 0. This is the one
+	// key on this envelope where the usual `!= 0` guard would be a lie in the
+	// dangerous direction: 0 is the code for HEALTH RAN AND PASSED, so gating on
+	// non-zero would erase every passing health check and make success
+	// indistinguishable from "nobody measured". nil (a static row, a build that died
+	// before HEALTH, a pre-migration row) gets NO KEY, which is the honest "not
+	// measured" the deferral pair and the stage timestamps above use.
+	if d.HealthExitCode != nil {
+		m["health_exit_code"] = *d.HealthExitCode
 	}
 	if d.FailureReason != "" {
 		m["failure_reason"] = d.FailureReason

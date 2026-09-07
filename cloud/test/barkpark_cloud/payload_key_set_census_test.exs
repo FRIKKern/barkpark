@@ -1030,10 +1030,18 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — gh-6 preview identity. SiteDeployment decodes Branch and Environment but neither preview key, so a CLI preview deploy cannot name the surface it just built."},
     {"site_deployment_json/3", :unread, "preview_url",
      "dr-w11-payload-divergence-close — the click-through target, same gap as preview_host."},
-    {"site_deployment_json/3", :unread, "slot",
-     "site-spawner node slot truth — the PRODUCER half only. The blue/green slot the box MEASURED Caddy to be serving; `deploy/site-spawner-node-live-proof.sh:731,:803` reads it off the wire today, and `internal/cloudclient.SiteDeployment` declares no Slot at all. The Go reader is the CLI half of this split row (which also turns HealthExitCode into a *int); the producer half is PR #15095, whose body names the split and this remainder, and it is fenced out of internal/."},
-    {"site_deployment_json/3", :unread, "health_exit_code",
-     "site-spawner node slot truth — the PRODUCER half only. 0 (HEALTH passed) | 14 (failed) | null (never measured); `deploy/site-spawner-node-live-proof.sh:872` reads it. It MUST land in Go as a `*int` — a plain int decodes the null to 0, which is the SUCCESS code, and that is exactly the zero-value success this pair exists to forbid (the same reason SiteDeployment's DeferralDepth/Bound are pointers). CLI half of the same split row; the producer half is PR #15095, whose body names this remainder."},
+    # DELETED (task-62ed247e1dd0b960's sibling, the CLI half of the node-slot row —
+    # site-spawner-backlog-node-deployment-slot-surfacing): the two `:unread` rows for
+    # `slot` / `health_exit_code`. Both said "the PRODUCER half only … declares no Slot
+    # at all", and both are now false: `internal/cloudclient.SiteDeployment` declares
+    # `Slot string json:"slot,omitempty"` and `HealthExitCode *int
+    # json:"health_exit_code"`, so the "no longer unread" arm reds on an allowlist row
+    # whose key IS decoded — the rows must go. The `*int` the deleted row DEMANDED is
+    # what landed: 0 is the SUCCESS code, so an `int` (or an `omitempty`) would erase
+    # every passing health check. Edited from the CLI lane under the same fence
+    # exception the failure_code/failure_message deletion above took: the REQUIRED
+    # Cloud gate couples this register to the Go json tags, so the edit cannot ride a
+    # follow-up PR.
     # DELETED (site-spawner node slot truth): `{"site_deployment_json/3", :phantom,
     # "port"}`. `SiteDeployment.Port` decoded to 0 forever because `deployments`
     # had no `port` column at all — the one router.ex emitted was the SITE
@@ -1408,20 +1416,33 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # MERGE HAZARD, restated because it has already fired on this branch twice:
   # these are `==` pins. Any PR that also moves them must RE-MEASURE after this
   # one lands, never sum with it.
-  # 162 -> 165 (site-spawner node slot truth): `deployment_json/1` — which
-  # `site_deployment_json/3` pipes, so the walker follows it — gains `slot`,
-  # `port` and `health_exit_code`. `@go_tag_pinned` does NOT move, and the reason
-  # is structural rather than lucky: this slice writes no Go at all (the reader is
-  # the CLI half of a split row, fenced out of `internal/`), and `Go.all_tags/1`
-  # counts names in that SOURCE. The three keys land on the wire in three
-  # different states, which is why one of them deletes an allowlist row and two
-  # of them add one: `port` was already declared by `SiteDeployment.Port` and
-  # decoded to 0 forever (a PHANTOM — row deleted below), while `slot` and
-  # `health_exit_code` are declared nowhere in the package (`grep -rn 'json:"slot'
-  # internal/cloudclient` is empty) and are therefore new :unread rows.
-  # MEASURED by the PIN CO-EDIT arm on this branch, which printed `162 -> 165` after the rebase onto the slot_units pin above;
+  # 162 -> 165 (site-spawner node slot truth, PRODUCER half, PR #15095):
+  # `deployment_json/1` — which `site_deployment_json/3` pipes, so the walker
+  # follows it — gains `slot`, `port` and `health_exit_code`. `@go_tag_pinned` did
+  # not move IN THAT SLICE, and the reason was structural rather than lucky: it
+  # wrote no Go at all (the reader was the CLI half of a split row, fenced out of
+  # `internal/`), and `Go.all_tags/1` counts names in that SOURCE. The three keys
+  # landed on the wire in three different states, which is why one of them deleted
+  # an allowlist row and two of them added one: `port` was already declared by
+  # `SiteDeployment.Port` and decoded to 0 forever (a PHANTOM — row deleted
+  # below), while `slot` and `health_exit_code` were declared nowhere in the
+  # package and were therefore new :unread rows.
+  # MEASURED by the PIN CO-EDIT arm on that branch, which printed `162 -> 165` after the rebase onto the slot_units pin above;
   # that the arithmetic happens to agree is the coincidence the comment above
   # warns about, not the method.
+  #
+  # THAT PARAGRAPH IS HISTORY NOW, AND THE SENTENCE IT USED TO END ON WAS FALSE
+  # WITHIN A DAY. It read "`slot` and `health_exit_code` are declared nowhere in
+  # the package (`grep -rn 'json:\"slot' internal/cloudclient` is empty)" in the
+  # PRESENT tense, and the CLI half
+  # (site-spawner-backlog-node-deployment-slot-surfacing) declared both:
+  # `SiteDeployment.Slot` (`json:"slot,omitempty"`) and
+  # `SiteDeployment.HealthExitCode` (`*int`, `json:"health_exit_code"`). The two
+  # `:unread` allowlist rows are DELETED above, and that grep now returns a hit.
+  # Corrected rather than left standing, because a census file's whole value is
+  # that its prose can be believed: a comment asserting a guarantee that no longer
+  # holds is the same defect #16647 landed to kill.
+  # `@emitted_pinned` does NOT move for the CLI half — it writes no serializer.
   # 165 -> 166 (dr-w10-s1, the deploy verdict): `barkpark_json/6` gains ONE key,
   # `deploy_rate` — the per-box deploy vital `DeployLedger.box_rates/3` puts on
   # the fleet row so `bp cloud status` can stop printing `ok` for a box failing
@@ -1584,7 +1605,25 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # all" verdict. It is a NEW name in the package (no other struct declares it),
   # so the floor moves and the multiplicity register does not. Measured by this
   # file's own arm's printed right-hand column, never summed.
-  @go_tag_pinned 338
+  # 338 -> 340 (site-spawner-backlog-node-deployment-slot-surfacing, the CLI half of
+  # the node-slot row): `internal/cloudclient.SiteDeployment` declares `Slot`
+  # (`json:"slot,omitempty"`) and `HealthExitCode` (`*int`,
+  # `json:"health_exit_code"`), closing the two `:unread` rows deleted from the
+  # allowlist above. MEASURED by the 999-technique on THIS tree — the pin set to 999
+  # and the refusal read back verbatim, "340 json tag(s) found in
+  # internal/cloudclient, the PIN is EXACTLY 999" — never as 338 + 2. That the
+  # arithmetic agrees here is a property of both names being new PACKAGE-WIDE
+  # (`Go.all_tags/1` is a file-GLOBAL union of NAMES, so a name already declared by
+  # any struct in the package rides free, as `team` and `scope` did in W19 S1 and
+  # `sha`/`count`/`limit` did in W26 S3), not evidence that summing is the method.
+  # `@go_tag_sites` does NOT move and that is MEASURED, not assumed: the SITE
+  # register arm (`actual == @go_tag_sites`) stayed GREEN across this change, which
+  # is the arm saying no name's multiplicity moved — both new names land at exactly
+  # one declaration site. The partition arm's own count on this tree is 626 sites,
+  # which 340 - 114 + 400 reproduces.
+  # MERGE HAZARD, unchanged: these are `==` pins. Any other PR that also moves them
+  # must RE-MEASURE after this one lands, never sum with it.
+  @go_tag_pinned 340
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
