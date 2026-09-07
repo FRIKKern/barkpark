@@ -489,12 +489,40 @@ defmodule PDS.Census do
   # Lens: build-free AST, substring counts, route depth 6, `transaction` NOT a write verb.
   # Engine printed live by that run:
   #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
+  # RE-DERIVED BY RUN, never re-typed (PDS-D448a): the four moved rows below are the
+  # output of `elixir scripts/pds-elixir-receipt-census.exs` from the repo root on the
+  # tree this commit ships, amended in the SAME commit as the change that moved them.
+  # Lens unchanged (build-free AST, :binary.matches/2 substring counts, route depth 6,
+  # @write_verbs without `transaction`, corpus api/lib/**/*.ex, CORPUS-INTACT this run);
+  # engine of this re-derivation: Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) ·
+  # aarch64-apple-darwin24.6.0, printed live by report_engine/0, 2026-09-07, rc=0
+  # `CENSUS OK`.
+  #
+  # WHAT MOVED IT: task-29781d0921e5a885 added ONE routed-write receipt —
+  # TasksController.discharges/2's `ok: true` success arm, the emission that makes the
+  # back-link mark auditable instead of an UNDISPOSED ARRIVAL. The same four rows the
+  # `landed` and `renew` arrivals each moved by one, moving by one a third time:
+  #
+  #   textual   110 -> 111  the new `ok: true` occurrence
+  #                         (111 == ast 102 + phantom 9).
+  #   ast       101 -> 102  the same one, as an AST-literal pair.
+  #   emitted    97 ->  98  the site emits on the wire.
+  #   write      59 ->  60  post /v1/tasks/:doc_id/discharges joins the routed-write set;
+  #                         the depth-6 relation reaches Tasks.record_discharge/2's Repo
+  #                         write through the Tasks facade. Disposed by the register row
+  #                         authored for it, not by an @routed_excluded entry.
+  #
+  # INHERITED UNCHANGED: phantom 9, consumer 4, read 26, unrouted 12 read `==` in the
+  # same run. `read` holding at 26 is the tell that this arrival is a POST only — the
+  # verb adds no sibling GET — and `phantom` holding at 9 is the tell that the receipt's
+  # own comments do not spell the needle, so an explanation cannot inflate the population
+  # it explains.
   @rederived %{
-    textual: 110,
-    ast: 101,
+    textual: 111,
+    ast: 102,
     phantom: 9,
     consumer: 4,
-    emitted: 97,
+    emitted: 98,
     # RE-DERIVED BY RUN AT PDS-D480/D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
     # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
     # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
@@ -542,7 +570,7 @@ defmodule PDS.Census do
     # reaches the fenced write. Conserved rows unmoved (textual 109 / ast 100 / phantom 9 /
     # consumer 4 / emitted 96 / unrouted 12); the route closes at 10 as before. Reverting the
     # three adopt files alone returns all eight rows to == (proven in the PR).
-    write: 59,
+    write: 60,
     read: 26,
     unrouted: 12
   }
@@ -2188,6 +2216,28 @@ defmodule PDS.Census do
       evidence:
         {"api/test/barkpark_web/controllers/tasks_renew_test.exs",
          ~S|test "200 ok:true, and the STORED row carries the window the receipt reports",|}},
+    # barkpark_web/controllers/tasks_controller.ex — the BACK-LINK MARK
+    # (task-29781d0921e5a885). discharges/2 emits `ok: true`, so it is JUDGED
+    # rather than excluded, and this one row clears BOTH arms it arrived red on:
+    # ROUTED-POPULATION-COMPLETE (the UNDISPOSED ARRIVAL of
+    # post /v1/tasks/:doc_id/discharges) and REGISTER-COMPLETE (the unjudged site).
+    #
+    # THE BASIS IS EARNED, NOT ASSERTED. Both halves of end_to_end's falsifier
+    # hold on the citation itself: the cited block drives the ROUTE (post/1
+    # through the authed conn) and then reads the STORED rows back
+    # (`marks_at/2` -> `content_of/1` -> `Repo.get!(Document, task.id)`),
+    # asserting that the pr / commit / primary the WIRE receipt claims are the
+    # ones the store actually holds on BOTH cited rows. Not `_unmutated`: the
+    # receipt's own counters are what the mutation moves. Appending
+    # `|> Enum.take(1)` to `Barkpark.Tasks.Citations.discharges/1` reds this exact
+    # block on the emission — `body["marked"] == 2` reads `left: 1 / right: 2` —
+    # so a receipt that over-reports what it marked cannot pass this citation.
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.discharges/2", "120540474", "111124755"},
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence:
+        {"api/test/barkpark_web/controllers/tasks_discharges_test.exs",
+         ~S|test "a PR citing TWO rows marks BOTH", %{conn: conn, scope: scope} do|}},
     # barkpark_web/controllers/tasks_controller.ex:961
     # RE-KEYED, NOT RE-JUDGED. edges/2 now parses `kind` and delegates the
     # unchanged success body to edges_for_kind/3, so the emitting def moved and

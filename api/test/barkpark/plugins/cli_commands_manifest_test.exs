@@ -61,6 +61,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                  "/v1/tasks/:doc_id/landed",
                  "/v1/tasks/:doc_id/pulse",
                  "/v1/tasks/:doc_id/renew",
+                 "/v1/tasks/:doc_id/discharges",
                  "/v1/tasks/:doc_id/move",
                  "/v1/tasks/:doc_id/stage",
                  # #5627 listener presence — the fleet pair rides the Tasks plugin.
@@ -216,7 +217,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Tasks.cli_commands/0" do
-    test "declares the fourteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
+    test "declares the sixteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -238,16 +239,27 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       # task-16e56d05b809dd39 — the NON-HOLDER lease extension a CI job calls so
       # a claim does not lapse underneath its own open PR (Tasks.Renew).
       assert "task.renew" in ids
+      # task-29781d0921e5a885 — the back-link mark. A merged PR's `Discharges:`
+      # citations, posted so every SIBLING row the merge also satisfied learns
+      # about it. Non-holder like landed/renew, and it never sets `met`.
+      assert "task.discharges" in ids
       # The content-graph read verbs are NOT on the Tasks plugin — they moved
       # to CORE (Goal ges/graph-edge-seam) so the kill switch can't drop them.
       refute "task.graph" in ids
       refute "task.graph-orphans" in ids
       refute "task.graph-dangling" in ids
       # #5627 (listener presence) added the two fleet verbs to this plugin —
-      # 15 task.* (13 + task.landed + task.renew) + fleet.roster/fleet.beat = 17.
+      # 16 task.* (13 + task.landed + task.renew + task.discharges)
+      # + fleet.roster/fleet.beat = 18.
+      #
+      # THIS INTEGER IS A REGISTRY. A route's declaration surface is not
+      # enumerable by reading the failures it produces: the manifest drift
+      # test, the flat-alias tenancy census, the pds receipt census,
+      # docs/openapi.json and THIS COUNT each announce themselves only once
+      # the previous one is satisfied. Adding a verb means paying all five.
       assert "fleet.roster" in ids
       assert "fleet.beat" in ids
-      assert length(cmds) == 17
+      assert length(cmds) == 18
 
       {fleet_cmds, task_cmds} = Enum.split_with(cmds, &(&1.noun == "fleet"))
 
