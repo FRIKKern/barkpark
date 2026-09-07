@@ -1,0 +1,51 @@
+# .silencer-counts — the committed count roster read by
+# scripts/silencer-growth-ratchet.sh (task cgsi-bl-baseline-laundering-estate).
+#
+# One line per SILENCER: "<name> <count>". The ratchet REDS when a silencer holds
+# MORE than the number here and stays green when it holds fewer — shrink-only, so
+# paying a baseline down is free and adding to one costs a visible bump in this
+# file, in the same commit, with a reason in the pull request.
+#
+# RAISING A NUMBER HERE IS THE POINT, not a workaround. The defect this closes is
+# that these files could be regenerated in one command with nothing comparing the
+# result to the previous revision. Making the increase land HERE, in a file whose
+# whole content is "how much are we currently silencing", is what turns a silent
+# regeneration into a reviewable diff.
+#
+# NOT ON THIS ROSTER, deliberately: .go-format-drift-ceiling. It is already
+# ratcheted by a BLOCKING job (.github/workflows/go-format.yml ->
+# scripts/go-format-drift-ceiling.sh). Two gates on one number would make a
+# legitimate prune red one of them.
+#
+# The names, and what each count measures, are defined in the table at the top of
+# scripts/silencer-growth-ratchet.sh. Every number below was measured off this
+# tree, not transcribed.
+#
+# DERIVE THESE UNDER bash, NOT zsh, AND NOT WITH `wc -l`. Both bite. This roster
+# was first written with a zsh-run `grep -vcE` and a `wc -l`, and BOTH reported
+# api/.sobelow-skips as one smaller than bash and awk agree it is: the file's
+# last line carries no trailing newline, which `wc -l` (a newline counter) does
+# not count at all. An off-by-one LOW here is not a harmless typo — it makes the
+# very next honest edit red the gate for no reason, and the obvious cure for
+# that red is to stop believing the gate. The gate measures with bash; derive
+# with bash, or cross-check with `awk 'END{print NR}'`.
+
+# fail-open tenant reads grandfathered by scripts/tenant-scope-check.sh --baseline
+# (non-comment lines). This is the strongest instance: the gate's own FAILED
+# message advertises the command that regenerates this file.
+tenant-scope-baseline 44
+
+# Sobelow findings skipped by the api security scan (non-comment lines).
+sobelow-skips 36
+
+# design/status-manifest.json — the hand-edited spec status-manifest-check.sh
+# compares against. Total lines: a JSON manifest has no comment syntax, so every
+# line is content.
+status-manifest 45
+
+# inline "lit-allow" literal-color waivers, counted as OCCURRENCES (a line may
+# carry more than one). Three populations because three different checkers read
+# them: scripts/go-literal-check.sh, web-literal-check.sh, studio-literal-check.sh.
+lit-allow-go 3
+lit-allow-web 0
+lit-allow-api 8

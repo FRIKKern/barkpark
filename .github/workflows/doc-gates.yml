@@ -217,6 +217,18 @@ on:
       - "**/package-lock.json"
       - "**/pnpm-lock.yaml"
       - "**/go.mod"
+      # SILENCER GROWTH RATCHET (cgsi-bl-baseline-laundering-estate). The two
+      # entries below are INPUTS the broader globs above genuinely miss:
+      # `scripts/**` does not match a dotfile, so scripts/.silencer-counts — the
+      # roster the whole gate compares against — matched NOTHING, and
+      # api/.sobelow-skips matched nothing either. A silencer whose edit does not
+      # trigger the gate that ratchets it is the exemptions.json defeat over
+      # again: raise the count in a PR the gate never runs on, spend it later.
+      # (The other four measured silencers already ride globs above:
+      # scripts/tenant-scope-baseline.txt and design/status-manifest.json are
+      # named; the lit-allow populations ride "**/*.go" and "**/*.ex".)
+      - "scripts/.silencer-counts"
+      - "api/.sobelow-skips"
       # ── the code-comment citation guard's .eex corpus (cgsiw-s5). The step
       # below runs tooling/doc-truth/retired-terms.mjs, whose TERM_EXTS includes
       # `.eex` and whose TERM_EXCLUDE covers node_modules/_build/deps/vendor/
@@ -488,6 +500,18 @@ on:
       - "**/package-lock.json"
       - "**/pnpm-lock.yaml"
       - "**/go.mod"
+      # SILENCER GROWTH RATCHET (cgsi-bl-baseline-laundering-estate). The two
+      # entries below are INPUTS the broader globs above genuinely miss:
+      # `scripts/**` does not match a dotfile, so scripts/.silencer-counts — the
+      # roster the whole gate compares against — matched NOTHING, and
+      # api/.sobelow-skips matched nothing either. A silencer whose edit does not
+      # trigger the gate that ratchets it is the exemptions.json defeat over
+      # again: raise the count in a PR the gate never runs on, spend it later.
+      # (The other four measured silencers already ride globs above:
+      # scripts/tenant-scope-baseline.txt and design/status-manifest.json are
+      # named; the lit-allow populations ride "**/*.go" and "**/*.ex".)
+      - "scripts/.silencer-counts"
+      - "api/.sobelow-skips"
       # ── the code-comment citation guard's .eex corpus (cgsiw-s5). The step
       # below runs tooling/doc-truth/retired-terms.mjs, whose TERM_EXTS includes
       # `.eex` and whose TERM_EXCLUDE covers node_modules/_build/deps/vendor/
@@ -1230,11 +1254,49 @@ jobs:
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/dependabot-roots-check.sh
 
+      # SILENCER GROWTH RATCHET (cgsi-bl-baseline-laundering-estate). Every gate
+      # in this repo that could not be landed over a dirty tree got a silencer:
+      # a baseline, a skips list, an inline waiver marker. Each one is
+      # regenerable in ONE command on any laptop, and until this step nothing
+      # anywhere compared the result to the previous revision —
+      # tenant-scope-check.sh even prints its own regeneration command inside its
+      # FAILED block, so the advertised cure for a red was a command that greens
+      # it with the finding still live. This step pins a COUNT per silencer in
+      # scripts/.silencer-counts and reds when one GROWS. A shrink never reds.
+      #
+      # --selftest FIRST, per this job's standing idiom: fourteen arms plant
+      # growth in all three measurement shapes, a shrink, and eight distinct
+      # ways the gate could go blind — each proving it exits 2 (REFUSE) rather
+      # than reporting clean. Arm N proves the passing arm is non-vacuous. It
+      # plants nothing in this tree.
+      #
+      # HONEST BLAST RADIUS: this job publishes "Doc budgets + anchors", which
+      # carries an S4 exclusion row in .github/required-checks.json. A red here
+      # is VISIBLE on the pull request and CANNOT block a merge. Wiring it here
+      # makes it RUN, not BLOCK — the blocking half of this fix is a CODEOWNERS
+      # entry on the silencer paths, which is a repo-governance change and not
+      # this step's to make.
+      - name: Silencer growth ratchet self-test (tripwire)
+        id: s32
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/silencer-growth-ratchet.sh --selftest
+
+      - name: Silencer growth ratchet (fails this job)
+        id: s33
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/silencer-growth-ratchet.sh
+
       - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
         if: always()
         env:
           STEP_OUTCOMES: ${{ toJSON(steps) }}
-          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\", \"s30\": \"Dependabot root drift gate self-test (tripwire)\", \"s31\": \"Dependabot root drift gate (fails this job)\"}"
+          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\", \"s30\": \"Dependabot root drift gate self-test (tripwire)\", \"s31\": \"Dependabot root drift gate (fails this job)\", \"s32\": \"Silencer growth ratchet self-test (tripwire)\", \"s33\": \"Silencer growth ratchet (fails this job)\"}"
           JOB_NAME: "Doc budgets + anchors"
           WORKFLOW_FILE: doc-gates.yml
           GITHUB_TOKEN: ${{ github.token }}
