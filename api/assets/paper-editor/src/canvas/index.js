@@ -2382,7 +2382,7 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._editor) return false;
     if (this._mode === "source") return true;
     const composing = !!(this._editor.view && this._editor.view.composing);
-    return this._editor.isFocused || composing || this._debounceTimer != null;
+    return this._editor.isFocused || this._bubble?.hasFocus() || composing || this._debounceTimer != null;
   }
 
   // Apply the confirmed external content to the editor WITHOUT entering the undo
@@ -2457,6 +2457,9 @@ class BpPaperCanvas extends HTMLElement {
 
     this._onBlurFlush = flush;
     this._onComposeEnd = flush;
+    // The contextual toolbar is mounted under body, outside the canvas. Its
+    // focus release must also wake the queued update after link editing ends.
+    this.ownerDocument.addEventListener("focusout", this._onBlurFlush);
     // The editor blur fires through TipTap's onBlur; but to catch a blur that
     // happens without a TipTap transaction we also bind the DOM listeners on the
     // editable mount. Both call the same idempotent flush.
@@ -2480,6 +2483,7 @@ class BpPaperCanvas extends HTMLElement {
     if (this._editor && this._editor.view && this._editor.view.composing) return;
     if (this._mode === "source") return;
     if (this._editor && this._editor.isFocused) return;
+    if (this._bubble?.hasFocus()) return;
     if (this._debounceTimer) return;
     if (this._inflightOps || this._dirtyWhileInflight || this._awaitingOwnEchoes.length > 0) return;
     const pending = this._pendingServerBlocks;
@@ -2493,6 +2497,7 @@ class BpPaperCanvas extends HTMLElement {
   // Tear down any queued external-edit echo + its release listeners.
   _clearPendingServerBlocks() {
     this._pendingServerBlocks = null;
+    if (this._onBlurFlush) this.ownerDocument.removeEventListener("focusout", this._onBlurFlush);
     if (this._mount) {
       if (this._onBlurFlush) {
         this._mount.removeEventListener("blur", this._onBlurFlush, true);

@@ -260,6 +260,36 @@ try {
     assert.equal(bubble.style.display, "none", "bubble hid — no stale float");
   });
   outside.remove();
+
+  // The URL input lives outside the canvas DOM. A remote update must treat its
+  // focus as an active edit, then release the queued update on toolbar blur.
+  editor.chain().focus().setTextSelection({ from: 5, to: 10 }).run();
+  await settle(400);
+  pointerActivate(linkBtn);
+  await frame();
+  await settle();
+  linkInput.value = "https://example.com/unfinished-link";
+  const heldText = editor.state.doc.textContent;
+  const remoteText = "Remote replacement must wait for link editing to finish";
+  canvas.applyServerBlocks([{ id: "b1", type: "paragraph",
+    content: [{ type: "text", value: remoteText }] }]);
+  await settle();
+  check("remote text waits while the contextual link field holds focus", () => {
+    assert.equal(editor.state.doc.textContent, heldText);
+    assert.equal(document.activeElement, linkInput);
+    assert.equal(linkInput.value, "https://example.com/unfinished-link");
+    assert.equal(bubble.style.display, "flex");
+    assert.ok(canvas._pendingServerBlocks);
+  });
+  document.body.appendChild(outside);
+  outside.focus();
+  await settle();
+  check("leaving the contextual toolbar releases the pending remote update", () => {
+    assert.equal(editor.state.doc.textContent, remoteText);
+    assert.equal(canvas._pendingServerBlocks, null);
+    assert.equal(bubble.style.display, "none");
+  });
+  outside.remove();
 } finally {
   canvas.remove();
   window.close();

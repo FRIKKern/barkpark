@@ -66,13 +66,13 @@ export class FormatBubble {
     // reports as document.activeElement), so never hide synchronously on blur —
     // re-check after focus settles and hide only if it landed outside both the
     // editor and the bubble.
-    if (!view.hasFocus() && !this._focusInBubble()) {
+    if (!view.hasFocus() && !this.hasFocus()) {
       setTimeout(() => {
         if (!this._editor || this._editor.isDestroyed) {
           this._hide();
           return;
         }
-        if (!this._editor.view.hasFocus() && !this._focusInBubble()) this._hide();
+        if (!this._editor.view.hasFocus() && !this.hasFocus()) this._hide();
       }, 0);
       return;
     }
@@ -97,7 +97,7 @@ export class FormatBubble {
   // True while document focus sits inside the bubble itself — the one state
   // where the editor is legitimately blurred yet the bubble must survive (the
   // link URL input, or a toolbar button that took focus).
-  _focusInBubble() {
+  hasFocus() {
     if (!this._el) return false;
     const active = document.activeElement;
     return !!active && this._el.contains(active);
