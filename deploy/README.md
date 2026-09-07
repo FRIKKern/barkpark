@@ -45,6 +45,21 @@ coalesce, rollback happy flip-back + typed refusals + unhealthy fail-closed,
 /mcp + /connectors route idempotence and their install guards):
 `deploy/instance-deploy_test.sh`.
 
+**Static assets survive a slot gap.** The maintenance handler above answers
+*every* failing request, so during a gap `GET /assets/bp-paper-editor.css`
+returned the holding-page HTML with a 503 and papers rendered unstyled (incident
+2026-07-07). `instance-deploy.sh` now also arms a `BARKPARK_STATIC_ASSETS` route
+— a `file_server` rooted at `api/priv/static`, matched on
+`BarkparkWeb.static_paths()` and placed BEFORE the slot `reverse_proxy`, so those
+bytes come off disk and never reach `handle_errors`. `pass_thru` keeps
+app-served asset URLs (e.g. `/assets/paper-surface/paper-surface.css`) on the
+proxy, and an explicit `Cache-Control: no-cache` restates the contract
+`endpoint.ex` sets on these unversioned files. api/ has no `phx.digest` step and
+no `cache_manifest.json`, so every static name is stable and there is only one
+generation to serve — old and new HTML request the same URLs. Instance path
+only: the per-site `file_server` blocks in `site-deploy.sh` are untouched.
+Reference block: `deploy/caddy/barkpark-static-assets.caddy`.
+
 **Remote MCP endpoint (`/mcp`).** `instance-deploy.sh` arms an idempotent
 path-based Caddy route (`handle /mcp /mcp/*` → `localhost:4010`, marker
 `BARKPARK_MCP_ROUTE`) on the existing public site and — GUARDED, non-fatal —

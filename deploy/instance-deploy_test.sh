@@ -299,6 +299,16 @@ EOF
   # scp's only instance-deploy.sh; everything else the deploy runs it reads from
   # $APP after the pull), so stage it exactly where the box would find it.
   cp "$HERE/mcp-reachability-smoke.sh" "$APP/deploy/"
+  # The shared static tree both slots serve (api/priv/static belongs to the
+  # CHECKOUT; the per-slot roots are _build_blue/_build_green). The static-asset
+  # route arming refuses to arm without it, so every case gets a real one.
+  mkdir -p "$APP/api/priv/static/assets/paper-surface" "$APP/api/priv/static/fonts"
+  printf '.bp-paper-surface{font-family:serif}\n' > "$APP/api/priv/static/assets/bp-paper-editor.css"
+  printf 'export const x=1\n' > "$APP/api/priv/static/assets/bp-paper-editor.bundle.js"
+  printf 'woff2-ish\n' > "$APP/api/priv/static/fonts/Inter-var.woff2"
+  # NOTE: assets/paper-surface/ stays EMPTY on purpose — /assets/paper-surface/
+  # paper-surface.css is referenced by the reader but answered by the APP, and is
+  # the case `pass_thru` exists for.
   CADDY="$TMP/Caddyfile"
   printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$CADDY"
   # The fake git's HEAD/FETCH_HEAD store — per case, so cases never bleed.
@@ -1287,6 +1297,143 @@ check "queued: the heartbeat names seconds waited AND the unchanged 1800s budget
   "grep -qE 'still queued for the deploy lock — [0-9]+s waited of 1800s max' '$TMP/out.log'"
 check "queued: the lock was actually taken, not bypassed (the deploy flipped Caddy)" \
   "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
+rm -rf "$TMP"
+
+echo "== Case 20: static assets survive a slot gap — LIVE outage + rollback (task-65493b2183c3bf91) =="
+# THE INCIDENT (2026-07-07 ~00:29): during a blue/green window the app was
+# briefly undialable, so `handle_errors 502 503 504` answered GET
+# /assets/bp-paper-editor.css with the branded "Back in a moment" HTML at 503.
+# The JS was browser-cached, so the PortableDoc canvas mounted and rendered
+# completely unstyled. This case proves the fix at BOTH altitudes:
+#   (A) config shape — the BARKPARK_STATIC_ASSETS block is armed once, sits
+#       BEFORE the slot proxy, carries no slot-port token, and the maintenance
+#       handler still exists exactly once;
+#   (B) REAL ROUTING — a real Caddy is booted on the deploy's OWN generated
+#       Caddyfile with the backend DEAD (the gap), and every referenced CSS/JS
+#       URL is curl'd for status, Content-Type and byte hash. Only the site
+#       address is rewritten to a loopback port; the armed block is verbatim.
+# (B) is what makes this a deployment/outage test rather than a grep.
+setup_case
+rc="$(run_deploy 200 staticsha)"
+check "static: deploy exit 0"                  "[ '$rc' = '0' ]"
+check "static: route armed exactly once"       "[ \"\$(grep -c 'BARKPARK_STATIC_ASSETS' '$CADDY')\" = '1' ]"
+check "static: matcher literal mirrors static_paths()" \
+  "[ \"\$(grep -cE '^[[:space:]]*@barkpark_static path /assets/\* /fonts/\* /images/\* /favicon\.ico /robots\.txt[[:space:]]*\$' '$CADDY')\" = '1' ]"
+check "static: root points at the CHECKOUT's shared priv/static" \
+  "grep -qE \"^[[:space:]]*root \* $APP/api/priv/static\$\" '$CADDY'"
+check "static: file_server is pass_thru (a non-file asset URL still reaches the app)" \
+  "grep -q 'pass_thru' '$CADDY'"
+check "static: Cache-Control no-cache restated (endpoint.ex's anti-stale-shell contract)" \
+  "grep -qE '^[[:space:]]*header Cache-Control \"no-cache\"\$' '$CADDY'"
+# THE ORDERING ASSERT. If this block lands AFTER the proxy, the proxy answers
+# first, the dial fails, handle_errors fires, and the incident is back.
+check "static: handle sits BEFORE the bare slot proxy" \
+  "[ \"\$(grep -n 'handle @barkpark_static' '$CADDY' | head -1 | cut -d: -f1)\" -lt \"\$(grep -nE 'reverse_proxy localhost:400[01]' '$CADDY' | head -1 | cut -d: -f1)\" ]"
+check "static: handle sits BEFORE the maintenance handler" \
+  "[ \"\$(grep -n 'handle @barkpark_static' '$CADDY' | head -1 | cut -d: -f1)\" -lt \"\$(grep -n 'handle_errors 502 503 504 {' '$CADDY' | head -1 | cut -d: -f1)\" ]"
+check "static: the maintenance handler still exists exactly once" \
+  "[ \"\$(grep -c 'handle_errors 502 503 504 {' '$CADDY')\" = '1' ]"
+check "static: the block carries NO slot-port token (flip sed + ACTIVE_PORT grep pass over it)" \
+  "[ \"\$(grep -c 'localhost:400[01]' '$CADDY')\" = '1' ]"
+check "static: armed Caddyfile is caddy-valid"  "caddy validate --adapter caddyfile --config '$CADDY' >/dev/null 2>&1"
+
+# ---- (B) LIVE OUTAGE PROOF -------------------------------------------------
+# Boot real Caddy on the generated config with NO backend listening — exactly
+# the blue/green gap. Only the site address becomes a loopback port (and TLS is
+# turned off); the armed block is copied byte-for-byte.
+LIVEPORT=19731
+LIVECADDY="$TMP/Caddyfile.live"
+{ printf '{\n\tadmin off\n\tauto_https off\n}\n'
+  sed -E "s|^guerrilla\.barkpark\.cloud \{|:${LIVEPORT} {|" "$CADDY"
+} > "$LIVECADDY"
+check "static: the live rewrite kept the armed block verbatim" \
+  "[ \"\$(grep -c 'BARKPARK_STATIC_ASSETS' '$LIVECADDY')\" = '1' ] && grep -q 'pass_thru' '$LIVECADDY'"
+check "static: the live config is caddy-valid" \
+  "caddy validate --adapter caddyfile --config '$LIVECADDY' >/dev/null 2>&1"
+CSS="$APP/api/priv/static/assets/bp-paper-editor.css"
+JS="$APP/api/priv/static/assets/bp-paper-editor.bundle.js"
+hash_of() { shasum -a 256 < "$1" 2>/dev/null | cut -d' ' -f1 || sha256sum < "$1" | cut -d' ' -f1; }
+CSS_SHA="$(hash_of "$CSS")"; JS_SHA="$(hash_of "$JS")"
+# The fakes are still on PATH inside run_deploy only — here we want the REAL
+# curl and the REAL caddy, so no PATH override.
+live_up=0
+caddy run --adapter caddyfile --config "$LIVECADDY" > "$TMP/caddy-live.log" 2>&1 &
+LIVEPID=$!
+for _ in $(seq 1 60); do
+  if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:${LIVEPORT}/robots.txt"; then live_up=1; break; fi
+  sleep 0.2 2>/dev/null || true
+done
+probe() { curl -s -o "$TMP/body.$$" -w '%{http_code} %{content_type}' --max-time 3 "http://127.0.0.1:${LIVEPORT}$1"; }
+if [ "$live_up" = 1 ]; then
+  check "static/LIVE: caddy came up on the generated config" "[ '$live_up' = '1' ]"
+  # THE REGRESSION ITSELF. Backend dead. This is the request that returned
+  # "text/html 503 Back in a moment" during the incident.
+  out="$(probe /assets/bp-paper-editor.css)"; body="$TMP/body.$$"
+  # $out and $body are read inside check()'s eval'd conditions, which shellcheck
+  # cannot see; log the first probe so the reference is also a real one.
+  echo "  (probe /assets/bp-paper-editor.css -> $out, body $body)"
+  check "static/LIVE: CSS during the gap is 200 text/css (NOT the holding page)" \
+    "[ \"\${out%% *}\" = '200' ] && case \"\$out\" in *text/css*) true ;; *) false ;; esac"
+  check "static/LIVE: CSS bytes are the real asset, hash-exact" \
+    "[ \"\$(hash_of '$body')\" = '$CSS_SHA' ]"
+  check "static/LIVE: the CSS body is NOT the maintenance HTML" \
+    "! grep -q 'Back in a moment' '$body'"
+  check "static/LIVE: CSS carries Cache-Control no-cache" \
+    "curl -sI --max-time 3 'http://127.0.0.1:${LIVEPORT}/assets/bp-paper-editor.css' | grep -qi '^cache-control: no-cache'"
+  out="$(probe /assets/bp-paper-editor.bundle.js)"
+  check "static/LIVE: JS during the gap is 200 javascript" \
+    "[ \"\${out%% *}\" = '200' ] && case \"\$out\" in *javascript*) true ;; *) false ;; esac"
+  check "static/LIVE: JS bytes are hash-exact"   "[ \"\$(hash_of '$body')\" = '$JS_SHA' ]"
+  out="$(probe /fonts/Inter-var.woff2)"
+  check "static/LIVE: a font during the gap is 200 off disk" "[ \"\${out%% *}\" = '200' ]"
+  # pass_thru: an asset URL with NO file behind it must still reach the app —
+  # which is dead, so it lands on the maintenance page exactly as before. If
+  # this 404s, file_server swallowed an app route.
+  out="$(probe /assets/paper-surface/paper-surface.css)"
+  check "static/LIVE: an APP-served asset URL still falls through to the proxy (503, not 404)" \
+    "[ \"\${out%% *}\" = '503' ]"
+  check "static/LIVE: and it lands on the maintenance page, unchanged behaviour" \
+    "grep -q 'Back in a moment' '$body'"
+  # A dynamic page during the gap must STILL get the branded holding page.
+  out="$(probe /papers/cmux-bridge)"
+  check "static/LIVE: a dynamic page during the gap still gets the maintenance 503" \
+    "[ \"\${out%% *}\" = '503' ] && grep -q 'Back in a moment' '$body'"
+  # ---- OLD HTML HELD OPEN ACROSS A CHECKOUT + SLOT CHANGE -----------------
+  # A reader loaded the page at 'staticsha' and is still holding it. The box now
+  # deploys a new sha (checkout advances, the other slot activates, Caddy flips)
+  # and then ROLLS BACK. Every asset URL that page references must keep
+  # answering with the correct MIME and bytes throughout — the names are stable
+  # (no phx.digest, no cache_manifest), so there is one generation and both the
+  # old and the new HTML ask for the same URLs.
+  : > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+  rc2="$(run_deploy 200 staticsha2)"
+  check "static: a second deploy still exits 0"  "[ '$rc2' = '0' ]"
+  check "static: no double arm (idempotent)"     "[ \"\$(grep -c 'BARKPARK_STATIC_ASSETS' '$CADDY')\" = '1' ]"
+  # The FIRST deploy above already flipped :4000 -> :4001, so this one goes back.
+  check "static: the second deploy moved the slot proxy again" "[ \"\$(first_upstream)\" = 'localhost:4000' ]"
+  check "static: the flip sed did NOT touch the static block's root path" \
+    "grep -qE \"^[[:space:]]*root \* $APP/api/priv/static\$\" '$CADDY'"
+  out="$(probe /assets/bp-paper-editor.css)"
+  check "static/LIVE: the old page's CSS is STILL 200 text/css after the flip" \
+    "[ \"\${out%% *}\" = '200' ] && case \"\$out\" in *text/css*) true ;; *) false ;; esac"
+  check "static/LIVE: STILL hash-exact after the flip" "[ \"\$(hash_of '$body')\" = '$CSS_SHA' ]"
+  rc3="$(run_rollback 200 staticsha2)"
+  check "static: rollback exits 0"               "[ '$rc3' = '0' ]"
+  check "static: rollback flipped back to the previous slot" "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
+  check "static: the static block survived the rollback flip intact" \
+    "[ \"\$(grep -c 'BARKPARK_STATIC_ASSETS' '$CADDY')\" = '1' ] && grep -q 'pass_thru' '$CADDY'"
+  out="$(probe /assets/bp-paper-editor.css)"
+  check "static/LIVE: the old page's CSS is STILL 200 text/css after the ROLLBACK" \
+    "[ \"\${out%% *}\" = '200' ] && case \"\$out\" in *text/css*) true ;; *) false ;; esac"
+  check "static/LIVE: STILL hash-exact after the rollback" "[ \"\$(hash_of '$body')\" = '$CSS_SHA' ]"
+else
+  # Never silently skip: a live proof that did not run is a FAILURE here, the
+  # same discipline as the missing-caddy guard at the top of this file.
+  fail "static/LIVE: caddy did not come up on :${LIVEPORT} on the generated config (nothing was proven)"
+  cat "$TMP/caddy-live.log" 2>/dev/null | tail -5
+fi
+kill "$LIVEPID" 2>/dev/null || true
+wait "$LIVEPID" 2>/dev/null || true
 rm -rf "$TMP"
 
 echo
