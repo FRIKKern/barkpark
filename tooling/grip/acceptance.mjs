@@ -161,7 +161,7 @@ const EXPECTED = Object.freeze({
 //   * specimens 1 and 4 are HOST-BOUND refusals — the command leaves this box
 //     (`ssh`, `barkpark.cloud`). The bound is about WHERE it would run.
 //   * specimen 6 is a HEAD-ALLOWLIST refusal — `node` is not an allowlisted
-//     head at all (screen.mjs:1096, "node executes arbitrary JavaScript
+//     head at all (screen.mjs REFUSED_HEADS, "node executes arbitrary JavaScript
 //     (including fs writes)"). The bound is about WHAT it would run, and it
 //     holds even for a command that never leaves the loopback.
 //
