@@ -364,9 +364,11 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     |> Enum.map(fn path ->
       source = File.read!(path)
 
-      if Path.basename(path) == "stats-inline.js",
-        do: without_stats_reader_queries(source),
-        else: source
+      case Path.basename(path) do
+        "stats-inline.js" -> without_stats_reader_queries(source)
+        "cards-inline.js" -> without_cards_reader_queries(source)
+        _ -> source
+      end
     end)
     |> Enum.join("\n")
   end
@@ -397,6 +399,28 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
           ~s|body.innerHTML = '<div class="bp-stat__v">value</div>'|
         ] do
       assert without_stats_reader_queries(producer) == producer
+    end
+  end
+
+  defp without_cards_reader_queries(source) do
+    [
+      ~s|querySelector(".bp-cards")|,
+      ~s|matches(".bp-card")|,
+      ~s|querySelector(key === "title" ? ".bp-card__t" : ".bp-card__d")|
+    ]
+    |> Enum.reduce(source, &String.replace(&2, &1, "readerQuery()"))
+  end
+
+  test "§3 native legacy Cards queries never exempt markup producers" do
+    assert without_cards_reader_queries(~s|body.querySelector(".bp-cards")|) ==
+             "body.readerQuery()"
+
+    for producer <- [
+          ~s|body.innerHTML = '<div class="bp-cards"></div>'|,
+          ~s|cell.className = "bp-card"|,
+          ~s|cell.setAttribute("class", "bp-card__t")|
+        ] do
+      assert without_cards_reader_queries(producer) == producer
     end
   end
 

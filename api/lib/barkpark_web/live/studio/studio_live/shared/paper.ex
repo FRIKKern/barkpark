@@ -1032,9 +1032,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   def fleet_render(block, previews) do
     render = %{"block_id" => Map.get(block, "id"), "html" => fleet_block_html(block, previews)}
 
-    # Bind native Stats fields to the authored source of this exact paint,
+    # Bind native Stats/Cards fields to the authored source of this exact paint,
     # not a later local value or a display-only query result.
-    if block["type"] in ~w(stat stats stat-grid),
+    if block["type"] in ~w(stat stats stat-grid cards),
       do: Map.put(render, "source_block", block),
       else: render
   end
