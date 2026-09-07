@@ -13,7 +13,7 @@ defmodule BarkparkWeb.TasksController.Params do
   alias Barkpark.Repo
   alias Barkpark.Content.{CallerContext, Document, DraftId, Envelope}
   alias Barkpark.Content.Scope
-  alias Barkpark.Tasks.{Close, Criteria, QueueGate}
+  alias Barkpark.Tasks.{Close, Criteria, Dispatchability, QueueGate}
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.Query, as: TaskQuery
 
@@ -447,10 +447,46 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # axi-s1: the brief LIST card = brief render_doc + `child_count` from
   # one batched grouped query (`batch_child_counts/2`) — never per-row.
-  def render_brief(%Document{} = doc, child_counts) do
+  def render_brief(%Document{} = doc, child_counts, live_child_counts \\ nil) do
+    key = strip_draft_prefix(doc.doc_id)
+    total = Map.get(child_counts, key, 0)
+
     doc
     |> render_doc(:brief)
-    |> Map.put(:child_count, Map.get(child_counts, strip_draft_prefix(doc.doc_id), 0))
+    |> Map.put(:child_count, total)
+    |> put_brief_dispatch(total, live_child_counts, key)
+  end
+
+  # THE UMBRELLA MARKER (task-52f4f3aff99c64d5), additive and pruned, same law
+  # as put_brief_labels/2 and put_brief_disposition/2 above.
+  #
+  # WHY A NEW KEY WHEN `child_count` IS ALREADY ON THE CARD: child_count is an
+  # INPUT the reader must interpret; this is the VERDICT. The row this fixes
+  # rendered `child_count: 359` on a P0 card and was still claimed as a slice,
+  # because a number among thirteen fields is not a refusal and the reader who
+  # misses it is the tired one the failure mode is about. `Dispatchability`
+  # owns the rule; this function only decides whether the key rides.
+  #
+  # ADDITIVE BY CONSTRUCTION, and that IS the negative arm: `classify/2`
+  # answers nil for every zero-child row, so all 979 of the 1,000 measured
+  # leaves emit a byte-identical card. A page of pure leaves is unchanged on
+  # the wire — including the hostile 50-card byte tripwire below, whose ~2,080
+  # B of headroom this cannot touch. Worst case is 50 delegated cards at
+  # `,"dispatch":"delegated"` = 24 B each = 1,200 B, inside that headroom; the
+  # measured page carries 13.
+  #
+  # `live_child_counts` DEFAULTS TO nil, NOT %{}: an empty map would read as
+  # "zero live children" and stamp `undecided` on every parent a caller could
+  # not measure. nil means UNMEASURED and omits the key entirely — a caller
+  # that has not paid for the live query says nothing rather than something
+  # false.
+  defp put_brief_dispatch(map, _total, nil, _key), do: map
+
+  defp put_brief_dispatch(map, total, live_child_counts, key) do
+    case Dispatchability.classify(total, Map.get(live_child_counts, key, 0)) do
+      nil -> map
+      class -> Map.put(map, :dispatch, class)
+    end
   end
 
   # ─── Brief truncation honesty (axi-w2-s2, charter law 2) ─────────────────
@@ -594,6 +630,66 @@ defmodule BarkparkWeb.TasksController.Params do
           where: d.type == "task",
           where:
             fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) in ^keys,
+          group_by: fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content),
+          select:
+            {fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content),
+             count(d.id)}
+        )
+        |> TaskQuery.collapse_twins()
+        |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
+        |> maybe_filter_project(Keyword.get(scope, :project_id))
+        |> Repo.all()
+        |> Map.new()
+    end
+  end
+
+  # axi-s1 sibling (task-52f4f3aff99c64d5): the LIVE half of the child count.
+  #
+  # Identical query to batch_child_counts/2 above — same drafts-stripped
+  # parent key, same twin collapse, same tenancy filters, so it rides the same
+  # `children_parent_index` and can never disagree with the total about WHICH
+  # rows are children. The only difference is the lifecycle predicate.
+  #
+  # A SEPARATE query rather than a `count(...) FILTER (WHERE …)` on the
+  # existing one: batch_child_counts/2 returns a bare `%{key => integer}` that
+  # render_doc_with_counts/3, the prime path and three test modules read
+  # positionally, and widening it to a tuple would rewrite every one of those
+  # for a second grouped scan over the same index. One extra indexed grouped
+  # query per LIST PAGE (never per row) is the cheaper trade.
+  #
+  # `coalesce(…, 'open')` is load-bearing: bare SQL `NOT IN` against a NULL
+  # yields NULL, so a child with no lifecycle_status would drop out of the
+  # LIVE count and its parent would classify `undecided` — the rule would call
+  # an epic seal-ready on the strength of a missing field. Coalescing to
+  # 'open' makes an unresolved child count as live, which is the conservative
+  # reading. (Measured 2026-09-07: 0 of the 460 children under the 21 parents
+  # on a live ready page carried a null status.)
+  #
+  # Returns %{drafts-stripped parent doc_id => live child count}; a parent
+  # whose children are ALL terminal is simply absent and defaults to 0, which
+  # is exactly the `undecided` case.
+  def batch_live_child_counts(docs, scope \\ [])
+  def batch_live_child_counts([], _scope), do: %{}
+
+  def batch_live_child_counts(docs, scope) do
+    parent_keys =
+      docs
+      |> Enum.map(&strip_draft_prefix(&1.doc_id))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    terminal = Dispatchability.terminal_statuses()
+
+    case parent_keys do
+      [] ->
+        %{}
+
+      keys ->
+        from(d in Document,
+          where: d.type == "task",
+          where:
+            fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) in ^keys,
+          where: fragment("coalesce(?->>'lifecycle_status', 'open')", d.content) not in ^terminal,
           group_by: fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content),
           select:
             {fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content),
