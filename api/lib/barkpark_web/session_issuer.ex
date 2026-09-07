@@ -103,6 +103,82 @@ defmodule BarkparkWeb.SessionIssuer do
     end
   end
 
+  @doc """
+  Is `user` refused THIS authentication method by org policy
+  (era-bl-allowed-auth-methods)? The twin of `org_mfa_enrolment_blocked?/1`
+  and, like it, the ONE predicate every session-mint chokepoint shares:
+  password + magic-link login (API and browser) and passkey login consult it
+  before a token is ever created.
+
+  `false` — the zero-tax answer — whenever no governing org set an
+  allow-list, so an ordinary org's login path is unchanged.
+  """
+  @spec auth_method_blocked?(Accounts.User.t(), String.t()) :: boolean()
+  def auth_method_blocked?(%Accounts.User{} = user, method) when is_binary(method) do
+    not Barkpark.Tenancy.auth_method_allowed_for_user?(user.id, method)
+  end
+
+  @doc """
+  Refuse a session-mint whose METHOD the user's org policy disallows
+  (era-bl-allowed-auth-methods). Audits the block, then forks on the caller
+  exactly like `deny_org_mfa_enrolment/4`: a browser (Accept: text/html) is
+  redirected to `/login` with guidance, an API caller gets a
+  `403 auth_method_not_allowed` envelope.
+
+  403, not 401, and NOT the generic `invalid_credentials` 401: the credentials
+  were CORRECT and the refusal is a policy decision the user must be told
+  about, or they retype a working password forever. The check runs only AFTER
+  the credential verified, so the refusal reveals nothing about an address
+  that has no account.
+
+  No session token exists on this path — the door fails closed.
+  """
+  @spec deny_auth_method(Plug.Conn.t(), Accounts.User.t(), String.t()) :: Plug.Conn.t()
+  def deny_auth_method(conn, %Accounts.User{} = user, method) when is_binary(method) do
+    Barkpark.Audit.emit(%{
+      category: "auth",
+      action: "auth_method_not_allowed",
+      subject: user.id,
+      actor_type: "user",
+      actor_id: user.id,
+      metadata: %{
+        "reason" => "org_allowed_auth_methods",
+        "method" => method,
+        "allowed" => Barkpark.Tenancy.org_allowed_auth_methods_for_user(user.id),
+        "path" => conn.request_path
+      }
+    })
+
+    if browser?(conn) do
+      conn
+      |> Phoenix.Controller.fetch_flash()
+      |> Phoenix.Controller.put_flash(:error, auth_method_message(method))
+      |> Phoenix.Controller.redirect(to: "/login")
+    else
+      conn
+      |> put_status(403)
+      |> json(%{
+        error: %{
+          code: "auth_method_not_allowed",
+          message: auth_method_message(method),
+          hint: "sign in through your organization's single sign-on provider"
+        }
+      })
+    end
+  end
+
+  @doc "The human-facing refusal shared by the API and browser doors."
+  @spec auth_method_message(String.t()) :: String.t()
+  def auth_method_message(method) do
+    "#{method_label(method)} is disabled for your organization — " <>
+      "sign in with your organization's single sign-on provider instead."
+  end
+
+  defp method_label("password"), do: "Password sign-in"
+  defp method_label("magic_link"), do: "Magic-link sign-in"
+  defp method_label("passkey"), do: "Passkey sign-in"
+  defp method_label(other), do: "#{other} sign-in"
+
   @doc "The human-facing org-MFA enrolment guidance shared by the browser doors."
   @spec org_mfa_enrolment_message() :: String.t()
   def org_mfa_enrolment_message do

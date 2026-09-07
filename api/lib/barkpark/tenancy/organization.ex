@@ -16,6 +16,19 @@ defmodule Barkpark.Tenancy.Organization do
 
   @slug_format ~r/^[a-z0-9][a-z0-9-]*$/
 
+  # era-bl-allowed-auth-methods: the CLOSED vocabulary of authentication
+  # methods an org policy may name. One string per door a user can walk
+  # through to mint a session: local password login, an emailed magic link,
+  # a WebAuthn passkey, and any enterprise SSO callback (OIDC / SAML /
+  # social). A value outside this list is rejected at write time, so the
+  # column can never hold a method no enforcement point knows about — a typo
+  # ("passwrod") would otherwise silently disable a door nobody named.
+  @auth_methods ~w(password magic_link passkey sso)
+
+  @doc "The closed vocabulary of `allowed_auth_methods` values."
+  @spec auth_methods() :: [String.t()]
+  def auth_methods, do: @auth_methods
+
   schema "organizations" do
     field :slug, :string
     field :name, :string
@@ -35,6 +48,16 @@ defmodule Barkpark.Tenancy.Organization do
     field :session_idle_timeout_seconds, :integer
     field :session_absolute_lifetime_seconds, :integer
 
+    # era-bl-allowed-auth-methods: org policy naming EXHAUSTIVELY which login
+    # doors this org's members may use (values from `auth_methods/0`). NULL —
+    # the default — means "no policy": every method stays open and the auth
+    # surface is byte-identical to before the column existed. A non-NULL list
+    # is an allow-list: a method absent from it is refused at the session-mint
+    # chokepoint with `auth_method_not_allowed`. SSO-only is expressed as
+    # `["sso"]`. Strictest-wins across a user's orgs = the INTERSECTION of the
+    # non-NULL policies (`Tenancy.org_allowed_auth_methods_for_user/1`).
+    field :allowed_auth_methods, {:array, :string}
+
     has_many :workspaces, Barkpark.Tenancy.Workspace
 
     timestamps(type: :utc_datetime_usec)
@@ -49,7 +72,8 @@ defmodule Barkpark.Tenancy.Organization do
       :name,
       :require_mfa,
       :session_idle_timeout_seconds,
-      :session_absolute_lifetime_seconds
+      :session_absolute_lifetime_seconds,
+      :allowed_auth_methods
     ])
     |> validate_required([:slug, :name])
     |> validate_length(:slug, min: 1, max: 63)
@@ -59,6 +83,37 @@ defmodule Barkpark.Tenancy.Organization do
     )
     |> validate_number(:session_idle_timeout_seconds, greater_than: 0)
     |> validate_number(:session_absolute_lifetime_seconds, greater_than: 0)
+    |> validate_allowed_auth_methods()
     |> unique_constraint(:slug)
+  end
+
+  # NULL is the no-policy default and always valid. A present list must be
+  # NON-EMPTY (an empty allow-list would lock every member out of every door
+  # while reading as "policy set") and every member must come from the closed
+  # vocabulary.
+  defp validate_allowed_auth_methods(changeset) do
+    case get_field(changeset, :allowed_auth_methods) do
+      nil ->
+        changeset
+
+      [] ->
+        add_error(changeset, :allowed_auth_methods, "must name at least one method")
+
+      methods when is_list(methods) ->
+        case Enum.reject(methods, &(&1 in @auth_methods)) do
+          [] ->
+            changeset
+
+          unknown ->
+            add_error(
+              changeset,
+              :allowed_auth_methods,
+              "contains unknown method(s): #{Enum.join(unknown, ", ")}"
+            )
+        end
+
+      _ ->
+        add_error(changeset, :allowed_auth_methods, "must be a list of method names")
+    end
   end
 end
