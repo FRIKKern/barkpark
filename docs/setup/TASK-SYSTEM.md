@@ -17,10 +17,7 @@ Lifecycle: `open · in_progress · blocked · done · cancelled`.
 
 ## Set up from zero
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
-bp  # no config + TTY → the setup wizard, then the TUI
-```
+Install and run the wizard per [QUICKSTART](QUICKSTART.md).
 
 The wizard's **clean profile pre-checks `bulldocs` + `tasks`** (server unions `media`); accept and schema, routes and crons go live on first boot. A dev server on `:4000` blocks the local DB reset — stop it or pick **connect**.
 
@@ -116,9 +113,9 @@ bp task ready --all                 # aggregate pages
 bp task ls --limit 20               # all tasks, goals included
 ```
 
-Filters: `kind`, `label`, `lifecycle_status`, `parent`, `parent_id`, `phase_id`, `type`, `limit`, plus `offset` on `ready` and `ls`. **Default pages:** `ls` 100, `ready` 50, cap 1000; `has_more` = `returned == limit`; a filled default page warns on stderr — `--all` or a bigger `--limit`; one page is not the board. Unknown key → 400 `invalid_filter`. Order: priority/creation/UUID; `ls` is total-ordered (updated_at DESC; `parent` → inserted_at ASC; id tiebreak), pages disjoint; `--all` fails `pagination_stalled` on a repeated full page.
+Filters: `kind`, `label`, `lifecycle_status`, `parent`, `parent_id`, `phase_id`, `type`, `limit`, plus `offset` on `ready` and `ls`. **Default pages:** `ls` 100, `ready` 50, cap 1000; `has_more` = `returned == limit`; a filled default page warns on stderr — use `--all` or a bigger `--limit`. One page is not the board. Unknown key → 400 `invalid_filter`. Order: priority/creation/UUID; `ls` is total-ordered (updated_at DESC; `parent` → inserted_at ASC; id tiebreak), pages disjoint; `--all` fails `pagination_stalled` on a repeated full page.
 
-**7. Watch the stream.** Both routes are in **What you get**. **Push:** SSE, `task.*`, no polling. **Pull:** `bp task events --since <id>` replays id-ASC, one page (≤500): `{ok, events:[{id,event,doc_id,rev,at}], cursor, has_more}`. `id` = the stable cursor (monotonic PK). Resume with the last `cursor` as `--since`; omit = from start, `has_more:true` → poll again. One `dataset` (default `production`), `type=task`.
+**7. Watch the stream.** Both routes are in **What you get**. **Push:** SSE, `task.*`, no polling. **Pull:** `bp task events --since <id>` replays id-ASC, one page (≤500): `{ok, events:[{id,event,doc_id,rev,at}], cursor, has_more}`. `id` = the stable cursor (monotonic PK). Resume with the last `cursor` as `--since`; omit = from start; `has_more:true` → poll again. One `dataset` (default `production`), `type=task`.
 
 ## Task ↔ code linkage
 
@@ -127,13 +124,13 @@ Two optional content fields answer "what code is this task?" as a field read, no
 - **`code_refs`** = `{"prs":[int],"commits":["sha"],"branch":"name","worktree":"path-or-null"}` — PRs, merge commits, branch, and (in flight) the worktree path.
 - **`last_worked_at`** = ISO timestamp of the newest attached code activity — unlike `updated_at`, which any edit bumps.
 
-Stamp at three moments ([ledger rule 6](../../.claude/workflows/bp-loop-ledger.md)): **claim** sets `branch`+`worktree`, **PR-open** appends `prs`, **merge** appends the sha to `commits` and clears `worktree`→null; each bumps `last_worked_at`. Patch flat via `/v1/data/mutate` — a `patch` with `set` merging both fields into `content`; on a `type:task` it lands on the PUBLISHED row, so pass `ifRevisionID` = the `rev` `bp task get` served. A pre-existing `drafts.<id>` twin 422s naming it. Leave a field absent when unknown; never fabricate a ref.
+Stamp at three moments ([ledger rule 6](../../.claude/workflows/bp-loop-ledger.md)): **claim** sets `branch`+`worktree`, **PR-open** appends `prs`, **merge** appends the sha to `commits` and clears `worktree`→null; each bumps `last_worked_at`. Patch flat via `/v1/data/mutate` — a `patch` with `set` merging both into `content`; on a `type:task` it hits the PUBLISHED row, so pass `ifRevisionID` = the `rev` `bp task get` served. A pre-existing `drafts.<id>` twin 422s naming it. Leave a field absent when unknown; never fabricate a ref.
 
 ## PR ↔ task contract — one trailer, one live claim
 
 `.github/workflows/pr-task-gate.yml` runs `scripts/pr-task-gate.sh` as the REQUIRED check "PR references an active task" on `opened`, `synchronize`, `reopened` and `edited`. Three rules a green PR obeys:
 
-- **Exactly one `Task: <doc_id>` at column 0** of the PR body. Two DISTINCT ids there make `extract_task_id` exit 4 — "ambiguous task reference … Exactly one is required" — and the check reds (measured 2026-09-02: three PRs closing 2–3 rows each, all red here, none on a claim). A PR landing several rows keeps ONE `Task:` and lists the others as `Also-closes: <doc_id>`, stamped and closed by hand. Restating the same id twice is fine; ids are deduplicated.
+- **Exactly one `Task: <doc_id>` at column 0** of the PR body. Two DISTINCT ids make `extract_task_id` exit 4 — "ambiguous task reference … Exactly one is required" — and the check reds. A PR landing several rows keeps ONE `Task:`, listing the rest as `Also-closes: <doc_id>`, stamped and closed by hand. Restating the same id twice is fine; ids are deduplicated.
 - **The claim is read when the gate RUNS, not when the PR opened.** Pass = the row is `in_progress` with a `claim.worker`, `done` with a `claim.closed_by`, or `open` with a claim still live at the PR's `created_at`. Never claimed, lapsed BEFORE the PR opened, cancelled, or wrong worker = definitive fail. Hold the claim until the PR MERGES — pulse every ~18 min (see **Lease + epoch**).
 - **A red caused by the body is fixed by editing the body**, not by pushing a commit — `edited` re-triggers the workflow. Exit 2 (ledger unreachable) and 3 (the gate's credential refused) are the workflow's, not yours: re-run once the ledger is up.
 
