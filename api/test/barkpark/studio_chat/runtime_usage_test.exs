@@ -284,6 +284,43 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
     assert Repo.aggregate(Receipt, :count) == receipts
   end
 
+  # The five studio-chat setups replaced their table-wide ledger DELETEs with
+  # `ChatSessionResidue.purge!/0`. This is that helper's own control, and it
+  # exercises BOTH pin types — an `epic_assignment_runtime_attempts` row and a
+  # `chat_runtime_usage_receipts` row — because a helper that handled only the
+  # ledger with an exemption hatch is the exact shape that opens the one without.
+  test "residue purge deletes unpinned sessions, archives ledger-pinned ones, deletes no ledger row",
+       ctx do
+    {:ok, loose} =
+      StudioChat.create_session(%{id: Ecto.UUID.generate(), cwd: "/tmp/loose", mode: "plan"})
+
+    assert {:ok, :recorded} =
+             RuntimeUsage.observe(
+               ctx.attribution,
+               :baseline,
+               event(ctx.session_id, "turn-residue-control", 100)
+             )
+
+    attempts = Repo.aggregate(RuntimeAttempt, :count)
+    receipts = Repo.aggregate(Receipt, :count)
+
+    assert attempts > 0, "VACUOUS: no attempt row pins ctx.session_id"
+    assert receipts > 0, "VACUOUS: no receipt row pins ctx.session_id"
+
+    assert :ok = Barkpark.ChatSessionResidue.purge!()
+
+    assert Repo.get(Session, loose.id) == nil
+
+    pinned = Repo.get(Session, ctx.session_id)
+    refute is_nil(pinned)
+    refute is_nil(pinned.archived_at)
+
+    # No DELETE ever reached either append-only ledger — the guards were not
+    # invoked, let alone weakened.
+    assert Repo.aggregate(RuntimeAttempt, :count) == attempts
+    assert Repo.aggregate(Receipt, :count) == receipts
+  end
+
   test "attempt authority rejects cross-Task claims and unsupported runtimes", ctx do
     assert {:error, :runtime_attempt_conflict} =
              CycleFleet.prepare_runtime_attempt(ctx.assignment, %{
