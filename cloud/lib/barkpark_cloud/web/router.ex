@@ -190,6 +190,7 @@ defmodule BarkparkCloud.Web.Router do
       PATCH   /v1/sites/:id        user(s)   update a site's settings (write ability)
       DELETE  /v1/sites/:id        user(s)   delete a site — tear it down on the box + deregister (write ability)
       GET     /v1/sites/:id/domain-status user  per-domain DNS/TLS/serving checklist, CF-mode-aware (team-scoped)
+      GET     /v1/sites/:id/doctor user  every substrate this site occupies, three-valued, each absence naming its repair (team-scoped)
       POST    /v1/sites/:id/deploy user(s)   enqueue a Deployment (the build job) (write ability)
       GET     /v1/sites/:id/deployments user list a site's PRODUCTION deployments, newest first
       GET     /v1/sites/:id/deployments/:dep_id user(s)  one deployment (read ability)
@@ -10363,6 +10364,35 @@ defmodule BarkparkCloud.Web.Router do
   # USER-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the sibling
   # barkparks route (wrong-team / absent / malformed id are indistinguishable).
   # Reads only public DNS + the box's own TLS/HTTP — no admin token, no zone read.
+  # GET /v1/sites/:id/doctor → 200 {ok, checked_at, site, substrates, …}
+  # (ssw8-site-doctor) — READ-ONLY. Every substrate this site occupies that the
+  # control plane can genuinely reach, three-valued (present / absent / unknown /
+  # not_applicable), each absence naming the EXACT repair verb or saying outright
+  # that none exists. The whole report is built by `Sites.Doctor.check/1`; this
+  # route is the thin team-scoped door, byte-for-byte the same auth walk as the
+  # domain-status sibling below (USER-authed, SAME no-existence-leak 404 for a
+  # wrong-team / absent / malformed id) — no new tier is invented for it.
+  get "/v1/sites/:id/doctor" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.get_team_site(conn.assigns.current_team, conn.path_params["id"]) do
+          %Registry.Site{} = site ->
+            json(conn, 200, Sites.Doctor.check(Repo.preload(site, :barkpark)))
+
+          nil ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
   get "/v1/sites/:id/domain-status" do
     conn = Auth.require_user(conn, [])
 

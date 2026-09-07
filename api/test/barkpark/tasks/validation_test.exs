@@ -250,17 +250,38 @@ defmodule Barkpark.Tasks.ValidationTest do
       refute msg =~ "criterion 0"
     end
 
-    test "an entry with no criterion text is not this rule's business" do
-      assert task_with_criteria([%{"met" => false}]) == :ok
-      assert task_with_criteria([%{"criterion" => 42}]) == :ok
+    # THIS TEST ASSERTED THE DEFECT (cdd-criteria-shape-gate). Until the shared
+    # shape predicate landed, both write doors accepted an entry with no usable
+    # `criterion`, and this arm pinned that acceptance in place under the
+    # trim rule's honest scope note ("not this rule's business"). The scope
+    # note was correct and the ACCEPTANCE was the hole: nothing else owned the
+    # key, so `%{"text" => "..."}` saved clean six times and produced rows no
+    # `bp task stamp --criterion-text` could ever address. The rule that owns
+    # it now is `Validation.criteria_violation/1`, called by BOTH doors, and it
+    # runs BEFORE the trim rule — so these shapes are refused here and the
+    # whitespace message is not what refuses them.
+    test "an entry with no usable criterion is refused by the SHAPE rule, not this one" do
+      assert {:error, %{"acceptance_criteria" => [msg]}} = task_with_criteria([%{"met" => false}])
+      assert msg =~ "criterion 0 has no usable `criterion` string"
+      assert msg =~ ~s(keys received: "met")
+      refute msg =~ "begins or ends with whitespace"
+
+      assert {:error, %{"acceptance_criteria" => [msg]}} =
+               task_with_criteria([%{"criterion" => 42}])
+
+      assert msg =~ "criterion 0 has no usable `criterion` string"
+      refute msg =~ "begins or ends with whitespace"
     end
 
     # Regression guard for the check this rule REPLACED: the list-of-maps and
     # is-a-list shapes must still refuse. A new rule that dropped an old one
     # would be a silent widening.
     test "the pre-existing shape rules still fire" do
+      # The non-map arm now reports the INDEX and the value rather than
+      # dumping the whole list — same refusal, a message an author can act on.
       assert {:error, %{"acceptance_criteria" => [msg]}} = task_with_criteria(["not a map"])
-      assert msg =~ "must be a list of maps"
+      assert msg =~ "criterion 0 is not an object"
+      assert msg =~ ~s("not a map")
 
       assert {:error, %{"acceptance_criteria" => [msg]}} = task_with_criteria("nope")
       assert msg =~ "must be a list when set"

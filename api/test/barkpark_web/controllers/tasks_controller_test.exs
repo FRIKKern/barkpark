@@ -2076,11 +2076,21 @@ defmodule BarkparkWeb.TasksControllerTest do
 
     test "garbage met values count as UNMET and never 500 the read",
          %{conn: conn, scope: scope} do
-      task =
-        mk_task!(
-          uniq("crit-garbage"),
-          scope,
-          criteria([crit_entry("yes"), crit_entry(1), crit_entry(true)])
+      # A non-boolean `met` is refused at both write doors now
+      # (cdd-criteria-shape-gate), so the garbage is installed with a raw store
+      # write. The rows this read has to survive were written before that gate
+      # and are still in the store — the READ-side tolerance is what is under
+      # test here, and it is unchanged.
+      task = mk_task!(uniq("crit-garbage"), scope, criteria([crit_entry(true)]))
+      garbage = criteria([crit_entry("yes"), crit_entry(1), crit_entry(true)])
+
+      {1, _} =
+        from(d in Document, where: d.id == ^task.id)
+        |> Repo.update_all(
+          set: [
+            content: Map.merge(task.content, garbage),
+            rev: Internal.generate_rev()
+          ]
         )
 
       resp = conn |> authed() |> get("/v1/tasks/#{task.doc_id}")

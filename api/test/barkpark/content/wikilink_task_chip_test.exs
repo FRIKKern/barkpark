@@ -115,16 +115,28 @@ defmodule Barkpark.Content.WikilinkTaskChipTest do
   end
 
   test "criteria are garbage-tolerant: non-boolean / missing met count as unmet" do
-    # (A non-map ENTRY can't even be persisted — validation.ex enforces
-    # "list of maps" at write time; the resolver additionally tolerates it.)
-    task!("t-garbage", "Garbage Criteria", %{
-      "acceptance_criteria" => [
-        %{"criterion" => "ok", "met" => true},
-        %{"criterion" => "stringy", "met" => "yes"},
-        %{"criterion" => "truthy-string", "met" => "true"},
-        %{"criterion" => "missing"}
-      ]
-    })
+    # NEITHER a non-map entry NOR a non-boolean `met` can be persisted through
+    # the write doors any more — `Validation.criteria_violation/1` refuses both
+    # (cdd-criteria-shape-gate). The READ side still has to survive them,
+    # because rows written before that gate are still in the store, so the
+    # garbage goes in with a raw store write and the resolver is measured on it
+    # exactly as before. Absent `met` is legal shape and needs no bypass; it
+    # stays in the list to keep the "missing counts as unmet" arm honest.
+    doc = task!("t-garbage", "Garbage Criteria", %{"acceptance_criteria" => []})
+
+    garbage = [
+      %{"criterion" => "ok", "met" => true},
+      %{"criterion" => "stringy", "met" => "yes"},
+      %{"criterion" => "truthy-string", "met" => "true"},
+      %{"criterion" => "missing"}
+    ]
+
+    {1, _} =
+      Barkpark.Content.Document
+      |> Ecto.Query.where([d], d.id == ^doc.id)
+      |> Barkpark.Repo.update_all(
+        set: [content: Map.put(doc.content, "acceptance_criteria", garbage)]
+      )
 
     assert %{criteria: %{met: 1, total: 4}} =
              Content.resolve_wikilink("Garbage Criteria", @dataset)
