@@ -103,7 +103,24 @@ while [ $# -gt 0 ]; do
 done
 file=""
 case "$path" in
-  */check-runs*)             file="check-runs.json" ;;
+  */check-runs*)
+    # PAGE-AWARE. The scan reads through scripts/lib/check-runs.sh, which walks
+    # `&page=N` until what it holds equals the feed's own total_count. Serving
+    # page one for every page would make a truncated feed grow past its total
+    # and refuse for the WRONG reason, and would hide a genuine short read.
+    #
+    # `per_page=100` CONTAINS `page=`, so the number must come off a `?`/`&`
+    # boundary — a `*page=` glob reads 100 as the page number.
+    page=1
+    case "$path" in *[?\&]page=*) page="${path##*[?&]page=}"; page="${page%%&*}" ;; esac
+    case "$page" in *[!0-9]*|'') page=1 ;; esac
+    if [ "$page" = "1" ]; then file="check-runs.json"; else file="check-runs-p$page.json"; fi
+    if [ ! -f "${GH_FIXTURE_DIR:-}/$file" ] && [ "$page" != "1" ]; then
+      # Past the end of the feed the API hands back an empty page, not a 404.
+      out='{"total_count":0,"check_runs":[]}'
+      if [ -n "${filter:-}" ]; then printf '%s' "$out" | jq "$filter"; else printf '%s' "$out"; fi
+      exit 0
+    fi ;;
   */check-suites*)           file="check-suites.json" ;;
   */actions/runs\?head_sha=*) file="runs-head-sha.json" ;;
   */actions/runs\?branch=*)  file="runs-branch.json" ;;
@@ -220,6 +237,87 @@ assert_eq "B3 the Format red in the GREEN suite is still advisory" \
   "advisory" "$(jq_of "$out_b" '.ci.failures[] | select(.name | startswith("Format")) | .advisory')"
 assert_eq "B4 certainty stays 'known' — every red here is decidable" \
   "known" "$(jq_of "$out_b" '.ci.advisory_certainty')"
+
+# ── T. A TRUNCATED CHECK-RUN READ CANNOT MASQUERADE AS A COMPLETE ONE ────────
+#
+# `?per_page=100` alone caps a page at 100 and says NOTHING about the remainder
+# — no error, no flag, just a short array (measured 2026-09-07 on head
+# 33799f6d8: total_count 122, 100 rows returned, 22 distinct names invisible).
+#
+# THE DIRECTION OF HARM HERE IS THE OPPOSITE OF THE CENSUS'S, and that is why
+# this file needs its own proof rather than the sibling's. `$refids` is the set
+# of suite ids REFERENCED by a check run, and ci.status is derived from those
+# suites ALONE. A suite whose runs all sit past the page boundary is never
+# referenced, so its conclusion never reaches the rollup: a RED suite goes
+# MISSING and the scan reports success on a head that is failing. This reader
+# fails PERMISSIVE — it hands the release curator a green light for a broken
+# candidate — where the census fails alarmist.
+#
+# ONE VARIABLE. Both fixtures below carry fixture B's suites unchanged,
+# including the genuinely red 81971901242. They differ only in whether the run
+# that references it made it into the page the reader was handed.
+FT="$TMP/fixture-truncated"; mkdir -p "$FT"
+cp "$FB/check-suites.json" "$FT/check-suites.json"
+# COMPLETE: all 12 rows, and the feed's own total_count agrees.
+cp "$FB/check-runs.json" "$FT/check-runs-complete.json"
+# TRUNCATED: the red suite's only run did not fit. The feed still says 12.
+jq -c '.check_runs |= map(select(.name != "Full production Paper reader audit"))' \
+  "$FB/check-runs.json" > "$FT/check-runs-short.json"
+
+serve_runs() { # <file> — install it as page one of $FT and scan
+  cp "$1" "$FT/check-runs.json"
+  run_scan "$FT" "$SHA_RED_SUITE"
+}
+
+echo "── T. a check-run read that cannot be vouched for refuses instead of reading green ──"
+
+# T0 THE FIXTURE ASSERTS ITSELF. If the short feed still carried the red run,
+# every clause below would pass for the wrong reason.
+assert_eq "T0a the short feed really is one row shorter (11 of a claimed 12)" \
+  "11" "$(jq -r '.check_runs | length' "$FT/check-runs-short.json")"
+assert_eq "T0b …and it still CLAIMS 12, which is the whole lie under test" \
+  "12" "$(jq -r '.total_count' "$FT/check-runs-short.json")"
+assert_eq "T0c …and the red suite it drops is still in the suites feed" \
+  "failure" "$(jq -r '.check_suites[] | select(.id == 81971901242) | .conclusion' "$FT/check-suites.json")"
+
+# T1 DIRECTION ONE — the complete feed. Nothing changes: this is fixture B's
+# verdict, reached through the paged reader.
+out_t1="$(serve_runs "$FT/check-runs-complete.json")"
+assert_eq "T1 a COMPLETE feed (total_count == rows) still derives the ordinary verdict" \
+  "failure" "$(jq_of "$out_t1" '.ci.status')"
+assert_eq "T1b …with the blocking red still named" \
+  "blocking" "$(jq_of "$out_t1" '.ci.failures[] | select(.name == "Full production Paper reader audit") | .advisory')"
+
+# T2 DIRECTION TWO — one row short of what the feed says exists. Before this
+# change the scan answered "success" here: the red suite was simply never
+# referenced. It must now refuse.
+out_t2="$(serve_runs "$FT/check-runs-short.json")"
+assert_eq "T2 a SHORT feed is refused, not rolled up — never 'success' off a set nobody can vouch for" \
+  "unknown" "$(jq_of "$out_t2" '.ci.status')"
+assert_eq "T2b …and it is emphatically not the old permissive answer" \
+  "false" "$([ "$(jq_of "$out_t2" '.ci.status')" = "success" ] && echo true || echo false)"
+
+# T3 THE REFUSAL SAYS WHICH FAILURE IT WAS. "gh unavailable or no check data"
+# sends a reader to look at credentials; the feed here answered fine and was
+# merely INCOMPLETE, and a truncated rollup would have looked green.
+assert_eq "T3 the status_reason names an INCOMPLETE read, not an unreachable one" \
+  "true" "$(jq_of "$out_t2" '.ci.status_reason | test("COMPLETELY|complete") and (test("gh unavailable") | not)')"
+assert_eq "T3b …and it carries the reader's own refusal line (the counts it could not reconcile)" \
+  "true" "$(jq_of "$out_t2" '.ci.status_reason | test("total_count|of 12")')"
+
+# T4 NO PARTIAL ROLLUP LEAKS OUT. The failure mode is a short list that reads
+# like a complete one, so the refusal must not also publish half a verdict.
+assert_eq "T4a checks_total is 0, not the 11 it happened to see" \
+  "0" "$(jq_of "$out_t2" '.ci.checks_total')"
+assert_eq "T4b no failures[] entries are published off the partial set" \
+  "0" "$(jq_of "$out_t2" '.ci.failures | length')"
+assert_eq "T4c certainty is the explicit cannot_tell" \
+  "cannot_tell" "$(jq_of "$out_t2" '.ci.advisory_certainty')"
+
+# T5 STILL BEST-EFFORT. A CI read it cannot vouch for must not fail the scan —
+# the curator still needs the commit range and the suggested bump.
+serve_runs "$FT/check-runs-short.json" >/dev/null; rc_t5=$?
+assert_eq "T5 exit 0 — an unvouchable CI read degrades the verdict, never the scan" "0" "$rc_t5"
 
 # ── C. the honest blind spot: two reds in one red suite ──────────────────────
 # GitHub does not say which of them was continue-on-error, and neither may we.
