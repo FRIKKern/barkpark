@@ -418,7 +418,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         true ->
           Map.put(base_content, "body_html", body_html)
       end
-      |> maybe_put_paper("blocks", if(is_list(blocks), do: blocks))
+      |> put_or_clear_blocks(blocks, attrs["clear_blocks"])
       |> maybe_put_paper("style", style)
       |> maybe_put_paper("source_doc", attrs["source_doc"])
       |> maybe_put_paper("goal_id", attrs["goal_id"])
@@ -4185,6 +4185,36 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp maybe_put_paper(map, _key, nil), do: map
   defp maybe_put_paper(map, key, value), do: Map.put(map, key, value)
 
+  # Blocks on the way into `content`, with ONE new arm.
+  #
+  # A block list always wins — that is the historical
+  # `maybe_put_paper("blocks", …)` behaviour, byte-for-byte.
+  #
+  # Absent blocks normally means "leave the row's blocks alone" (a
+  # metadata-only update, or the legacy HTML-only leg). `clear_blocks: true`
+  # is the EXPLICIT exception: the caller is demoting a blocks-backed paper to
+  # HTML-only on purpose, so the canonical block tree AND its projected body
+  # are dropped and the supplied `body_html` becomes the real source instead of
+  # a derived cache the reader rewrites on the next read.
+  #
+  # Opt-in only, and it exists because the mixed-write refusal at the ingest
+  # boundary (`Barkpark.Plugins.Bulldocs.MixedWriteGuard` —
+  # pe-w2-verbatim-html-overwrite-hazard) is required to name what to do
+  # instead. Before it there was NO way to make such a row HTML-only: this
+  # function's absent-blocks arm preserved them, and the ops route cannot reach
+  # an empty block list either because `ratchet_hollow/2` refuses every
+  # non-hollow → hollow edit. `content["body"]` goes with them — it is the
+  # projection OF those blocks (see `maybe_project/6`), so leaving it behind
+  # would keep `Projection.read_blocks/1` returning a block list for a row that
+  # just declared itself HTML-only.
+  defp put_or_clear_blocks(content, blocks, _clear) when is_list(blocks),
+    do: Map.put(content, "blocks", blocks)
+
+  defp put_or_clear_blocks(content, _blocks, clear) when clear in [true, "true"],
+    do: content |> Map.delete("blocks") |> Map.delete("body")
+
+  defp put_or_clear_blocks(content, _blocks, _clear), do: content
+
   # Keys the surrounding `write_encrypted_blocks_doc/8` pipeline already reads
   # explicitly (as an upsert attr, a paper-only allowlisted content field, or a
   # pipeline control opt) — excluded from the generic session-metadata
@@ -4213,7 +4243,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   @blocks_doc_reserved_attrs ~w(
     slug dataset blocks workspace_id project_id template style
     source_doc goal_id event_type tags description body_html payload_html
-    branch bypass_wall dedup_bypass events conversations
+    branch bypass_wall dedup_bypass events conversations clear_blocks
   )
 
   # Session-handoff Task 2 ("generalized upsert"): `write_encrypted_blocks_doc`'s

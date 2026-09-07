@@ -73,6 +73,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   alias Barkpark.Content
   alias Barkpark.Content.{Errors, Warnings}
   alias Barkpark.PortableDoc.Bpml.UnprintableError
+  alias Barkpark.Plugins.Bulldocs.MixedWriteGuard
   alias Barkpark.Tenancy
 
   # The SIX DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
@@ -861,10 +862,34 @@ defmodule BarkparkWeb.BulldocsIngestController do
         # the legacy HTML leg is walled identically.
         "tags" => params["tags"],
         "description" => params["description"],
-        "dedup_bypass" => params["dedup_bypass"]
+        "dedup_bypass" => params["dedup_bypass"],
+        # THE EXPLICIT DEMOTION (pe-w2-verbatim-html-overwrite-hazard, remedy
+        # 2 of the refusal below). Opt-in, never a default: it drops the row's
+        # canonical blocks so this verbatim HTML becomes the real source
+        # instead of a cache the reader overwrites. Absent → nil → the attr is
+        # normalized away and every existing producer is byte-unchanged.
+        "clear_blocks" => params["clear_blocks"]
       }
       |> put_scope(conn, params)
 
+    # THE MIXED-WRITE REFUSAL (pe-w2-verbatim-html-overwrite-hazard, RULED
+    # 2026-09-07: reject at the ingest boundary; blocks stay the source of
+    # truth). A verbatim body_html onto a paper that still carries canonical
+    # blocks used to answer 200 while the bytes were derived-cache-only —
+    # `Papers.reader_source/3` classifies that row `{:stale, rendered}`, serves
+    # the blocks and lets `refresh_html_cache/3` rewrite the cache, so the
+    # producer's hand-authored HTML vanished on the next read with no signal.
+    # It runs BEFORE `Warnings.reset()` so a refused ingest carries no advisory
+    # queue, and the message NAMES both honest paths (see MixedWriteGuard) —
+    # an error that only declines makes the caller guess, and the guess that
+    # appears to work is the destructive one.
+    case MixedWriteGuard.check(attrs) do
+      :ok -> ingest_html_write(conn, attrs)
+      {:refuse, error} -> conn |> put_status(:unprocessable_entity) |> json(%{error: error})
+    end
+  end
+
+  defp ingest_html_write(conn, attrs) do
     # Advisory channel — see the blocks head (authoring-excellence D36/D42).
     Warnings.reset()
 
