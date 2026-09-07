@@ -276,6 +276,17 @@ func usageCommand(out *writer, cmd manifest.Command) {
 	// mutations.ex — which is exactly what was reported (#18). The list and its
 	// derivation live in mutate_shapes.go, guarded against server drift by
 	// TestMutateHelpNamesEveryServerMutationClause.
+	// `bp task get` documented only its one positional argument — it never
+	// mentioned `-o json` and never described the envelope, so every reader
+	// hand-rolled a path walk against an undocumented shape that actively
+	// teaches the wrong guess. Lines and their guard live in
+	// tasks_get_misread.go, beside the sentinels they describe.
+	if cmd.ID == taskGetCommandID {
+		out.errf("")
+		for _, line := range taskGetEnvelopeHelpLines() {
+			out.errf("%s", line)
+		}
+	}
 	if cmd.ID == docMutateCommandID {
 		out.errf("")
 		for _, line := range mutateShapeLines() {
