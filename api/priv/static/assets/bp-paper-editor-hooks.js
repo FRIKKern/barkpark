@@ -2773,11 +2773,17 @@
         // back to the loading chip. An empty html paints an honest empty note, never
         // a blank strip (mirrors task_block_preview/1's honesty).
         this._fleetRenders = {};
-        this._paintFleet = (id, html) => {
+        this._fleetSources = {};
+        this._paintFleet = (id, html, sourceBlock) => {
           const hole = this.el.querySelector(
             `[data-bp-fleet-id="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"] [data-bp-fleet-body]`,
           );
           if (!hole) return; // this render's block is not in THIS run's WC
+          // Native Stats fields own paint timing while focused. Other fleet
+          // kinds retain the existing display-only injection unchanged.
+          if (!hole.dispatchEvent(new CustomEvent("bp-fleet-paint", {
+            detail: { html, sourceBlock }, cancelable: true,
+          }))) return;
           if (typeof html === "string" && html.trim() !== "") {
             hole.innerHTML = html;
           } else {
@@ -2790,7 +2796,8 @@
           payload.renders.forEach((r) => {
             if (!r || r.block_id == null) return;
             this._fleetRenders[r.block_id] = r.html;
-            this._paintFleet(r.block_id, r.html);
+            this._fleetSources[r.block_id] = r.source_block;
+            this._paintFleet(r.block_id, r.html, r.source_block);
           });
         };
         this.handleEvent("bp:block-html", this._onBlockHtml);
@@ -2799,7 +2806,7 @@
         // (a WC remount rebuilds the loading-chip holes from data-canvas-blocks).
         this._repaintFleet = () => {
           Object.keys(this._fleetRenders).forEach((id) =>
-            this._paintFleet(id, this._fleetRenders[id]),
+            this._paintFleet(id, this._fleetRenders[id], this._fleetSources[id]),
           );
         };
 

@@ -963,9 +963,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       fleet_renders =
         render_blocks
         |> Enum.filter(&fleet_block?/1)
-        |> Enum.map(fn block ->
-          %{"block_id" => Map.get(block, "id"), "html" => fleet_block_html(block, previews)}
-        end)
+        |> Enum.map(&fleet_render(&1, previews))
 
       # editable-figure: the CHILD-only render for every top-level figure, on the SAME
       # bp:block-html channel, keyed by the FIGURE id (so the bpFigure atom's paint
@@ -1030,6 +1028,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # every other fleet block renders directly from its carried snapshot/data. An
   # error preview falls back to the unresolved block so the emitter degrades
   # gracefully rather than crashing the push.
+  @doc false
+  def fleet_render(block, previews) do
+    render = %{"block_id" => Map.get(block, "id"), "html" => fleet_block_html(block, previews)}
+
+    # Bind native Stats fields to the authored source of this exact paint,
+    # not a later local value or a display-only query result.
+    if block["type"] in ~w(stat stats stat-grid),
+      do: Map.put(render, "source_block", block),
+      else: render
+  end
+
   defp fleet_block_html(block, previews) do
     resolved =
       case Map.get(previews, Map.get(block, "id")) do
