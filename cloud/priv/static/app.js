@@ -27564,6 +27564,14 @@
       siteCreateBody: siteCreateBody,
       // cch-w37-s1 — the create-site error line (was a RAW `r.data.error` render).
       siteCreateFailureCopy: siteCreateFailureCopy,
+      // stw2-c1/c2 — THE MODAL ITSELF, not just its pure helpers. The three
+      // helpers above are the payload's SHAPE; every property the row's c1 asks
+      // about (focus, the rendered refusal, the in-flight guard, where the
+      // refreshed list's bytes come from) lives in the DOM wiring around them
+      // and is unreachable from a pure call. `wireModal` rides along because
+      // Escape-to-dismiss is registered there, on the document — a create-site
+      // modal cannot be proven dismissible without it.
+      openCreateSiteModal: openCreateSiteModal, wireModal: wireModal,
       // search-template W8: site theme-edit pure helpers.
       siteThemeOptionsHtml: siteThemeOptionsHtml, siteThemePatchBody: siteThemePatchBody,
       // cch-w48-s2: the theme PATCH's refusal copy — pinned so the raw

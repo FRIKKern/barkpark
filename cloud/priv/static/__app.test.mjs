@@ -30083,3 +30083,480 @@ test("cch-w49-s7: the corpus assertion reads innerHTML STRINGS and is NOT built 
   assert.ok(!/plan-more/.test(arm), "and it must not depend on a #plan-more click (D551)");
   assert.ok(/hidden, false/.test(arm), "it must first prove the grid was OPEN, or the zero-offer claim is vacuous");
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// stw2-spa-create-site · c1 + c2 — THE CREATE-SITE MODAL, DRIVEN
+//
+// WHAT THE MERGED HALF ALREADY BOUGHT, AND WHAT IT DID NOT. PR #3534 landed the
+// modal and pinned its three PURE helpers (siteKindFor / siteTemplateOptions /
+// siteCreateBody). A pure helper can prove the payload's SHAPE and nothing else:
+// every property the row's c1 names — where focus goes, what the person READS
+// when the server refuses, how many requests a double-click issues, and whose
+// bytes the refreshed list is built from — lives in the DOM wiring AROUND those
+// helpers, in a click handler no pure call can reach. So these are DRIVEN.
+//
+// WHY A NEW DOM RIG AND NOT recordingDom(). recordingDom keeps innerHTML
+// verbatim but hands back nothing that was written INTO it: after openModal(),
+// `$("#site-nc-name")` resolves to null and the submit handler throws on
+// `.value` before it can issue a request. fakeDom() is worse — its innerHTML
+// setter regex-extracts class names and discards the markup. The modal is a
+// FORM, so the rig below parses the body's tags into addressable elements
+// (id, value, checked, disabled, focus order) while ALSO keeping the raw bytes,
+// which is what lets one test assert both "one request was sent" and "this
+// exact sentence was rendered".
+//
+// THE RIG IS DELIBERATELY BROWSER-FAITHFUL IN ONE PLACE: `click()` on a
+// disabled element dispatches NOTHING. That is not a convenience — it is the
+// mechanism the in-flight guard actually relies on, and a rig that fired the
+// handler anyway would report the guard broken while the browser holds it.
+
+// One tag out of the modal's markup: attributes parsed, identity addressable.
+function csEl(tag, attrs) {
+  const el = {
+    tagName: String(tag || "div").toUpperCase(),
+    attrs: attrs || {},
+    id: (attrs && attrs.id) || "",
+    type: (attrs && attrs.type) || "",
+    value: (attrs && attrs.value) || "",
+    checked: !!(attrs && "checked" in attrs),
+    disabled: !!(attrs && "disabled" in attrs),
+    hidden: !!(attrs && "hidden" in attrs),
+    textContent: "",
+    innerHTML: "",
+    _listeners: {},
+    onclick: null,
+    focused: false,
+    classList: { add() {}, remove() {}, contains: () => false, toggle() {} },
+    setAttribute(k, v) { this.attrs[k] = v; if (k === "id") this.id = v; },
+    removeAttribute(k) { delete this.attrs[k]; },
+    getAttribute(k) { return this.attrs[k] != null ? this.attrs[k] : null; },
+    hasAttribute(k) { return this.attrs[k] != null; },
+    addEventListener(kind, fn) { (this._listeners[kind] = this._listeners[kind] || []).push(fn); },
+    removeEventListener() {},
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    // Browser-faithful: a disabled control dispatches no click at all.
+    click(ev) {
+      if (this.disabled) return false;
+      if (typeof this.onclick === "function") this.onclick(ev || {});
+      (this._listeners.click || []).forEach((fn) => fn(ev || {}));
+      return true;
+    },
+    fire(kind, ev) { (this._listeners[kind] || []).forEach((fn) => fn(ev || {})); },
+  };
+  return el;
+}
+
+const CS_FOCUSABLE_TAGS = new Set(["BUTTON", "INPUT", "SELECT", "TEXTAREA"]);
+const csFocusable = (el) =>
+  CS_FOCUSABLE_TAGS.has(el.tagName) || el.attrs.href != null || el.attrs.tabindex != null;
+
+// Parse a markup string into a flat, source-ordered element list. Flat is
+// enough and honest: every control the create-site modal renders is a leaf, and
+// a rig that pretended to nest would be claiming structure it never parsed.
+function csParse(html) {
+  const out = [];
+  const tagRe = /<([a-zA-Z][a-zA-Z0-9]*)((?:\s+[^<>]*?)?)\/?>/g;
+  let m;
+  while ((m = tagRe.exec(html))) {
+    const attrs = {};
+    const attrRe = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*"([^"]*)")?/g;
+    let a;
+    while ((a = attrRe.exec(m[2]))) attrs[a[1]] = a[2] === undefined ? "" : a[2];
+    out.push(csEl(m[1], attrs));
+  }
+  return out;
+}
+
+// A document with a real #modal-root / #modal-body pair: assigning the body's
+// innerHTML publishes the parsed controls into the id registry, exactly as a
+// browser's parser publishes them to getElementById.
+function csDocument(staticIds) {
+  const reg = new Map();
+  const keydown = [];
+  const doc = {
+    readyState: "loading",
+    activeElement: null,
+    _bodyEls: [],
+    addEventListener(kind, fn) { if (kind === "keydown") keydown.push(fn); },
+    removeEventListener() {},
+    getElementById(id) { return reg.get(String(id)) || null; },
+    querySelector(sel) {
+      sel = String(sel);
+      if (sel.charAt(0) === "#") return reg.get(sel.slice(1)) || null;
+      if (sel === ".modal-x") return reg.get("__modal-x") || null;
+      return null;
+    },
+    querySelectorAll() { return []; },
+    createElement: () => ({ ...inertEl, setAttribute() {}, appendChild() {} }),
+    documentElement: { ...inertEl, getAttribute: () => null },
+    body: { ...inertEl, appendChild() {} },
+    _keydown: keydown,
+    _reg: reg,
+  };
+  const mk = (id) => {
+    const el = csEl("div", { id });
+    el.focus = function () { doc.activeElement = this; this.focused = true; };
+    reg.set(id, el);
+    return el;
+  };
+  for (const id of staticIds) mk(id);
+  // The × lives in index.html beside #modal-body, not in the body markup.
+  const x = csEl("button", {}); x.focus = function () { doc.activeElement = this; };
+  reg.set("__modal-x", x);
+
+  const bodyEl = reg.get("modal-body");
+  bodyEl._raw = "";
+  Object.defineProperty(bodyEl, "innerHTML", {
+    get() { return this._raw; },
+    set(html) {
+      // Drop the previous body's controls before publishing the new ones — a
+      // registry that kept them would let a CLOSED modal answer a query.
+      for (const prev of doc._bodyEls) if (prev.id) reg.delete(prev.id);
+      this._raw = String(html);
+      const els = csParse(this._raw);
+      for (const el of els) {
+        el.focus = function () { doc.activeElement = this; this.focused = true; };
+        if (el.id) reg.set(el.id, el);
+      }
+      doc._bodyEls = els;
+    },
+    configurable: true,
+  });
+  bodyEl.querySelector = (sel) => {
+    // openModal asks for the FIRST focusable with the shipped FOCUSABLE_SEL.
+    if (String(sel).indexOf("button") === 0) return doc._bodyEls.find(csFocusable) || null;
+    return null;
+  };
+  bodyEl.querySelectorAll = () => doc._bodyEls.filter(csFocusable);
+  return doc;
+}
+
+// A fresh realm per drive: `lastFocused`, `modalPinFlag` and `instanceSitesReq`
+// are IIFE module state, so two drives sharing one realm would share a race
+// ticket and a focus memory.
+function csRealm(staticIds) {
+  const h = {};
+  const doc = csDocument(staticIds);
+  const calls = [];
+  const box = {
+    __bpTestHook(x) { Object.assign(h, x); },
+    document: doc,
+    window: { addEventListener: noop, removeEventListener: noop, open: () => null, matchMedia: () => ({ matches: false, addEventListener: noop }) },
+    location: { hash: "", pathname: "/", search: "", origin: "http://localhost" },
+    localStorage: storage, sessionStorage: storage, navigator: {},
+    URL: URL, URLSearchParams: URLSearchParams,
+    fetch: () => Promise.reject(new Error("no fetch answer configured for this drive")),
+    EventSource: function () { return { addEventListener: noop, close: noop }; },
+    setTimeout: noop, clearTimeout: noop, setInterval: () => 1, clearInterval: noop,
+    console,
+  };
+  box.globalThis = box;
+  vm.createContext(box);
+  vm.runInContext(fs.readFileSync(new URL("./app.js", import.meta.url), "utf8"), box, { filename: "app.js (stw2 create-site realm)" });
+  // Route every request through one recorder; each drive installs its answers.
+  const answers = [];
+  box.fetch = (path, opts) => {
+    const body = opts && opts.body ? JSON.parse(opts.body) : null;
+    calls.push({ path: String(path), method: (opts && opts.method) || "GET", body });
+    const answer = answers.find((a) => a.match(String(path), (opts && opts.method) || "GET"));
+    if (!answer) return Promise.reject(new Error("unmatched request: " + opts.method + " " + path));
+    return answer.reply();
+  };
+  const reply = (status, payload) => () => Promise.resolve({
+    ok: status >= 200 && status < 300, status,
+    headers: { get: () => "application/json" },
+    json: () => Promise.resolve(payload),
+  });
+  return { h, box, doc, calls, answers, reply };
+}
+
+const csFlush = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
+const CS_IDS = ["modal-root", "modal-body", "app-shell", "site-new-btn", "instance-sites", "toast-stack"];
+const CS_BP = { id: "bp-1", name: "Acme prod", slug: "acme", host: "acme.example", url: "https://acme.barkpark.cloud" };
+
+// Open the modal with the form filled in. `deploy` defaults OFF so the drive
+// exercises the create-then-refresh path rather than W4's deploy detour.
+function csOpen(fields) {
+  const r = csRealm(CS_IDS);
+  r.h.wireModal();
+  r.doc._reg.get("modal-root").hidden = true;
+  // Focus starts where a person's does: on the button that opens the modal.
+  r.doc._reg.get("site-new-btn").focus = function () { r.doc.activeElement = this; };
+  r.doc.activeElement = r.doc._reg.get("site-new-btn");
+  r.h.openCreateSiteModal((fields && fields.bp) || CS_BP);
+  const set = (id, v) => { const el = r.doc._reg.get(id); if (el) el.value = v; return el; };
+  if (fields) {
+    if (fields.name !== undefined) set("site-nc-name", fields.name);
+    if (fields.triple !== undefined) set("site-nc-dataset", fields.triple);
+    if (fields.template !== undefined) set("site-nc-template", fields.template);
+    if (fields.docType !== undefined) set("site-nc-doctype", fields.docType);
+    if (fields.framework !== undefined) set("site-nc-framework", fields.framework);
+  }
+  const deployBox = r.doc._reg.get("site-nc-deploy");
+  if (deployBox) deployBox.checked = !!(fields && fields.deploy);
+  return r;
+}
+
+// ── c1(a) · keyboard and focus ─────────────────────────────────────────────
+
+test("stw2 c1a: opening the create-site modal moves focus INTO it", () => {
+  const r = csOpen({ name: "n", triple: "a/b/c" });
+  assert.equal(r.doc._reg.get("modal-root").hidden, false, "the modal must be shown");
+  assert.ok(r.doc.activeElement, "focus must land somewhere — a modal nobody is focused in is unreachable by keyboard");
+  assert.equal(r.doc.activeElement.id, "site-nc-name",
+    "focus must land on the modal's FIRST control, not stay on the opener; landed on: " +
+    JSON.stringify(r.doc.activeElement.id));
+});
+
+test("stw2 c1a: Escape closes the create-site modal and RETURNS focus to #site-new-btn", () => {
+  const r = csOpen({ name: "n", triple: "a/b/c" });
+  assert.equal(r.doc._keydown.length > 0, true, "wireModal must have registered a document keydown handler");
+  r.doc._keydown.forEach((fn) => fn({ key: "Escape" }));
+  assert.equal(r.doc._reg.get("modal-root").hidden, true, "Escape must dismiss the modal");
+  assert.equal(r.doc.activeElement.id, "site-new-btn",
+    "focus must go back to the control that opened the modal, or the keyboard user is dropped at the top of the " +
+    "document; it went to: " + JSON.stringify(r.doc.activeElement.id));
+});
+
+test("stw2 c1a: Tab is trapped inside the open create-site modal (both directions)", () => {
+  const r = csOpen({ name: "n", triple: "a/b/c" });
+  // trapModalTab reads `#modal-root .modal-card`; the rig's flat document has
+  // no card, so the trap's PURE core is driven with the modal's real controls.
+  const f = r.doc._bodyEls.filter(csFocusable);
+  assert.ok(f.length >= 5, "the modal must render its controls; got " + f.length);
+  assert.equal(r.h.trapTarget(f, f[f.length - 1], false), f[0], "Tab off the last control wraps to the first");
+  assert.equal(r.h.trapTarget(f, f[0], true), f[f.length - 1], "Shift+Tab off the first wraps to the last");
+  assert.equal(r.h.trapTarget(f, f[1], false), null, "mid-list Tab moves naturally");
+});
+
+test("stw2 c1a: the dialog is LABELLED — index.html's card and the modal's own title agree", () => {
+  const idx = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  assert.match(idx, /<div class="modal-card card" role="dialog" aria-modal="true" aria-labelledby="modal-title">/,
+    "the shared modal card must carry role=dialog + aria-modal + aria-labelledby");
+  // aria-labelledby is a promise the BODY has to keep: a dialog pointing at an
+  // id nothing renders is announced with no name at all.
+  const r = csOpen({ name: "n", triple: "a/b/c" });
+  const raw = r.doc._reg.get("modal-body").innerHTML;
+  assert.match(raw, /id="modal-title"/,
+    "the create-site body must render the element index.html's aria-labelledby names");
+  assert.match(raw, /New site on Acme prod/, "…and that element must carry the dialog's actual name");
+  // Every control the modal renders is reachable by its label.
+  for (const id of ["site-nc-name", "site-nc-framework", "site-nc-template", "site-nc-dataset", "site-nc-doctype"]) {
+    assert.ok(raw.includes('for="' + id + '"'), "control " + id + " must have a <label for>");
+  }
+});
+
+// ── c1(b) · the SERVER's words survive to the person ───────────────────────
+
+async function csRefusal(status, payload) {
+  const r = csOpen({ name: "search", triple: "acme/site/production" });
+  r.answers.push({ match: (p, m) => m === "POST" && p === "/v1/sites", reply: r.reply(status, payload) });
+  r.doc._reg.get("site-nc-submit").click();
+  await csFlush();
+  const err = r.doc._reg.get("site-nc-err");
+  return { r, text: err.textContent, hidden: err.hidden };
+}
+
+test("stw2 c1b: an unknown template's 422 renders the SERVER's catalog, not 'create failed (422)'", async () => {
+  // The exact envelope POST /v1/sites produces for a slug outside
+  // Registry.Site's @known_site_templates: validate_inclusion -> errors(cs).
+  const CATALOG = "must be one of: astro-search-starter, astro-starter, next-starter, search-starter";
+  const { text, hidden } = await csRefusal(422, { error: "invalid", details: { template: [CATALOG] } });
+  assert.equal(hidden, false, "the inline error box must be revealed");
+  assert.ok(text.includes(CATALOG),
+    "the server named every template it accepts and the console must relay that catalog verbatim; rendered: " +
+    JSON.stringify(text));
+  assert.ok(text.includes("template"), "…and name the field it is about");
+  assert.ok(!/create failed/.test(text),
+    "the generic status line must never beat an answer the server actually sent; rendered: " + JSON.stringify(text));
+});
+
+test("stw2 c1b: a 422 details map on ANY field reaches the person verbatim", async () => {
+  const { text } = await csRefusal(422, { error: "invalid", details: { slug: ["has already been taken"] } });
+  assert.ok(text.includes("has already been taken"),
+    "the per-field message is the most specific true thing anyone has; rendered: " + JSON.stringify(text));
+  assert.ok(!/check your input/i.test(text), "the curated generic must not win over a details map");
+});
+
+test("stw2 c1b: a 503 node_ports_exhausted detail is relayed, and the CLI re-run line never is", async () => {
+  const DETAIL = "this instance has no free node-slot port left — retire a node site or move to a larger box";
+  const ports = await csRefusal(503, { error: "node_ports_exhausted", detail: DETAIL });
+  assert.equal(ports.text, DETAIL, "a surface-neutral server sentence is relayed verbatim");
+
+  // content_binding_required's server detail embeds `--dataset <…>` — a FLAG,
+  // for a person looking straight at that field. Relaying it would be worse
+  // than authoring; the console's own sentence must win and the flag must die.
+  const bound = await csRefusal(422, {
+    error: "content_binding_required",
+    detail: "a static site builds FROM your content — bind it with `--dataset <workspace>/<project>/<dataset>` (missing: bootstrap_dataset)",
+  });
+  assert.ok(!/--dataset/.test(bound.text),
+    "a CLI flag must never reach a modal that already HAS that field; rendered: " + JSON.stringify(bound.text));
+  assert.ok(/workspace\/project\/dataset/.test(bound.text), "…and the console must point at the field instead");
+});
+
+test("stw2 c1b: a refusal leaves the modal OPEN and the form intact", async () => {
+  const { r } = await csRefusal(422, { error: "invalid", details: { name: ["can't be blank"] } });
+  assert.equal(r.doc._reg.get("modal-root").hidden, false,
+    "a refused create must not close the modal — the person would lose everything they typed");
+  assert.equal(r.doc._reg.get("site-nc-name").value, "search", "…and the typed values must survive");
+});
+
+// ── c1(c) · the in-flight guard ────────────────────────────────────────────
+
+test("stw2 c1c: a second click WHILE THE POST IS IN FLIGHT issues ZERO extra requests", async () => {
+  const r = csOpen({ name: "search", triple: "acme/site/production" });
+  // A create that never settles: the whole window this guard exists to cover.
+  let settle;
+  r.answers.push({
+    match: (p, m) => m === "POST" && p === "/v1/sites",
+    reply: () => new Promise((res) => { settle = res; }),
+  });
+  const submit = r.doc._reg.get("site-nc-submit");
+  submit.click();
+  await csFlush();
+  const posts = () => r.calls.filter((c) => c.method === "POST" && c.path === "/v1/sites").length;
+  assert.equal(posts(), 1, "the first click must issue exactly one create");
+  assert.equal(submit.disabled, true, "the button must be disabled for the duration of the flight");
+
+  submit.click(); submit.click(); submit.click();
+  await csFlush();
+  assert.equal(posts(), 1,
+    "three more clicks landed while the create was in flight and the console issued " + posts() +
+    " creates — every extra one is a duplicate site on the person's instance");
+
+  // And the guard RELEASES: a settled failure must leave the form usable, or
+  // the person is locked out of retrying by the very thing that protected them.
+  r.answers.length = 0;
+  r.answers.push({ match: (p, m) => m === "POST" && p === "/v1/sites", reply: r.reply(422, { error: "invalid", details: { name: ["is invalid"] } }) });
+  settle({ ok: false, status: 422, headers: { get: () => "application/json" }, json: () => Promise.resolve({ error: "invalid", details: { name: ["is invalid"] } }) });
+  await csFlush();
+  assert.equal(submit.disabled, false, "the guard must release once the request settles");
+  submit.click();
+  await csFlush();
+  assert.equal(posts(), 2, "…and a click AFTER the flight must be allowed through");
+});
+
+// ── c1(d) · the list is refreshed FROM THE SERVER, never from the form ──────
+
+test("stw2 c1d: the refreshed site list carries the SERVER's bytes, not the typed ones", async () => {
+  const r = csOpen({ name: "typed-name", triple: "acme/site/production" });
+  // The server accepted the create but named the site something else (a slug
+  // collision resolved server-side is the real-world shape). Optimistic paint
+  // and honest re-read are byte-distinguishable only when they DISAGREE.
+  r.answers.push({
+    match: (p, m) => m === "POST" && p === "/v1/sites",
+    reply: r.reply(201, { site: { id: "site-9", name: "server-name", slug: "server-slug", framework: "nextjs", barkpark_id: "bp-1" } }),
+  });
+  r.answers.push({
+    match: (p, m) => m === "GET" && p === "/v1/sites",
+    reply: r.reply(200, { sites: [{ id: "site-9", name: "server-name", slug: "server-slug", framework: "nextjs", barkpark_id: "bp-1" }] }),
+  });
+  r.doc._reg.get("site-nc-submit").click();
+  await csFlush();
+
+  assert.equal(r.calls.filter((c) => c.method === "GET" && c.path === "/v1/sites").length, 1,
+    "the accepted create must trigger exactly one re-read of the list; calls: " + JSON.stringify(r.calls.map((c) => c.method + " " + c.path)));
+  const painted = r.doc._reg.get("instance-sites").innerHTML;
+  assert.ok(painted.includes("server-slug"),
+    "the row must be built from the answer the server gave; painted: " + JSON.stringify(painted));
+  assert.ok(!painted.includes("typed-name"),
+    "the row carries a value the server never confirmed — that is optimistic fiction; painted: " + JSON.stringify(painted));
+  assert.equal(r.doc._reg.get("modal-root").hidden, true, "an accepted create closes the modal");
+});
+
+// ── c2 · the request body IS the CLI/server contract ───────────────────────
+
+async function csBodyOf(fields) {
+  const r = csOpen(fields);
+  r.answers.push({ match: (p, m) => m === "POST" && p === "/v1/sites", reply: r.reply(201, { site: { id: "s1", slug: "s1", barkpark_id: "bp-1" } }) });
+  r.answers.push({ match: (p, m) => m === "GET" && p === "/v1/sites", reply: r.reply(200, { sites: [] }) });
+  r.doc._reg.get("site-nc-submit").click();
+  await csFlush();
+  const post = r.calls.find((c) => c.method === "POST" && c.path === "/v1/sites");
+  assert.ok(post, "the create must have been sent; calls: " + JSON.stringify(r.calls.map((c) => c.method + " " + c.path)));
+  return { r, body: post.body };
+}
+
+test("stw2 c2: the create body carries the workspace/project/dataset triple, split from the one field", async () => {
+  const { body } = await csBodyOf({ name: "finder", triple: "acme/marketing/staging", template: "search-starter" });
+  assert.equal(body.workspace, "acme", "workspace is the FIRST segment");
+  assert.equal(body.project, "marketing", "project is the SECOND");
+  assert.equal(body.dataset, "staging", "dataset is the THIRD");
+  assert.equal(body.name, "finder");
+  assert.equal(body.barkpark_id, "bp-1", "the instance the site is spawned on rides the body (D29: omitting it 422s)");
+  assert.equal(body.framework, "nextjs");
+  assert.equal(body.kind, "node", "a nextjs site rides the node slot; the server default is `container`, so it must be explicit");
+  assert.equal(body.template, "search-starter");
+});
+
+test("stw2 c2: an incomplete triple is refused CLIENT-SIDE and sends nothing", async () => {
+  for (const bad of ["", "acme", "acme/site", "acme//production", "a/b/c/d"]) {
+    const r = csOpen({ name: "finder", triple: bad });
+    r.doc._reg.get("site-nc-submit").click();
+    await csFlush();
+    assert.equal(r.calls.length, 0,
+      "triple " + JSON.stringify(bad) + " is not a triple, yet a request went out: " + JSON.stringify(r.calls));
+    assert.equal(r.doc._reg.get("site-nc-err").hidden, false, "…and the person must be told why for " + JSON.stringify(bad));
+  }
+});
+
+test("stw2 c2: an OMITTED template sends NO `template` key — the framework-derived default is the SERVER's to pick", async () => {
+  const { body } = await csBodyOf({ name: "plain", triple: "acme/site/production", template: "", docType: "" });
+  assert.ok(!("template" in body),
+    "an empty starter must be OMITTED, not sent as \"\": put_site_content_binding folds a key in only when it is a " +
+    "non-empty binary, so `template: \"\"` is silently dropped server-side — but the console must not rely on that, " +
+    "and Site.changeset's closed slug set would refuse \"\" the moment the fold loosened. Sent: " + JSON.stringify(body));
+  assert.ok(!("doc_type" in body), "a blank content type must be omitted too — the schema default is `post`");
+  assert.equal(body.framework, "plain" === "plain" ? "nextjs" : "", "framework still rides the body");
+});
+
+test("stw2 c2: astro flips both the kind and the offered starters", async () => {
+  const { body } = await csBodyOf({ name: "static", triple: "acme/site/production", framework: "astro", template: "astro-starter" });
+  assert.equal(body.framework, "astro");
+  assert.equal(body.kind, "static", "astro is the static symlink-swap flagship, not the node slot");
+  assert.equal(body.template, "astro-starter");
+});
+
+test("stw2 c2: the console's key set is a SUBSET of the CLI's SpawnSiteCreate wire contract", () => {
+  // The mirror check the row asks for, taken from the two producers themselves
+  // rather than from prose: the Go struct's json tags, and the body the console
+  // actually builds. A key the console sends that the CLI has no tag for is a
+  // divergence between the two clients of ONE route.
+  const go = fs.readFileSync(new URL("../../../internal/cloudclient/client.go", import.meta.url), "utf8");
+  const start = go.indexOf("type SpawnSiteCreate struct {");
+  assert.ok(start !== -1, "SpawnSiteCreate must exist — the CLI half of this contract");
+  const struct = go.slice(start, go.indexOf("\n}", start));
+  const cliKeys = new Set([...struct.matchAll(/`json:"([a-z_]+)/g)].map((m) => m[1]));
+  for (const k of ["name", "framework", "kind", "workspace", "project", "dataset", "barkpark_id", "doc_type", "template"]) {
+    assert.ok(cliKeys.has(k), "the CLI struct lost the `" + k + "` tag — the console still sends it");
+  }
+  const full = hooks.siteCreateBody({
+    name: "n", framework: "nextjs", workspace: "w", project: "p", dataset: "d",
+    barkpark_id: "bp-1", template: "search-starter", doc_type: "paper",
+  });
+  for (const k of Object.keys(full)) {
+    assert.ok(cliKeys.has(k),
+      "the console sends `" + k + "` and the CLI's SpawnSiteCreate has no tag for it — the two clients of " +
+      "POST /v1/sites disagree on the wire shape");
+  }
+});
+
+test("stw2 c2: every key the console sends is one the SERVER actually reads", () => {
+  // router.ex's put_site_content_binding is the only place the optional keys are
+  // folded in; the required ones are read by name in the `post \"/v1/sites\"` body.
+  const router = fs.readFileSync(new URL("../../lib/barkpark_cloud/web/router.ex", import.meta.url), "utf8");
+  const fold = router.slice(router.indexOf("defp put_site_content_binding(attrs, body)"));
+  const foldBody = fold.slice(0, fold.indexOf("\n  end\n"));
+  for (const k of ["workspace", "project", "dataset", "doc_type", "template"]) {
+    assert.ok(foldBody.includes('"' + k + '"'),
+      "the server stopped reading `" + k + "` from the create body — the console still sends it");
+  }
+  const route = router.slice(router.indexOf('post "/v1/sites" do'));
+  const routeHead = route.slice(0, route.indexOf("\n  end\n"));
+  for (const k of ["barkpark_id", "name", "kind", "framework"]) {
+    assert.ok(routeHead.includes('conn.body_params["' + k + '"]'),
+      "the create route no longer reads `" + k + "` — the console still sends it");
+  }
+});
