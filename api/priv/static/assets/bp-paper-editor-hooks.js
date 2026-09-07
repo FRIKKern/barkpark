@@ -734,6 +734,7 @@
     let coordinator = paperExitCoordinators.get(main);
     if (!coordinator) {
       const sources = new Map();
+      let nativeFocusBaselines = new WeakMap();
       const members = new Set();
       const replayTargets = new WeakSet();
       let actionPending = false;
@@ -818,6 +819,14 @@
         return record;
       };
 
+      const nativeFormFor = (target) => target?.form?.matches?.(".bp-paper-edit-form[phx-change]")
+        ? target.form : null;
+      const authoredRevisionFor = (source, record) => {
+        const focused = nativeFocusBaselines.get(source);
+        if (focused?.key === record.documentKey) return focused.rev;
+        return record.documentKey === documentKey ? confirmedRevision : record.documentRevision;
+      };
+
       coordinator = {
         register(member) {
           members.add(member);
@@ -840,6 +849,8 @@
           if (members.size) return;
           document.removeEventListener("input", coordinator._onInput);
           document.removeEventListener("change", coordinator._onInput);
+          document.removeEventListener("focusin", coordinator._onNativeFocus);
+          document.removeEventListener("focusout", coordinator._onNativeBlur);
           document.removeEventListener("click", coordinator._onClick, true);
           document.removeEventListener("submit", coordinator._onSubmit, true);
           window.removeEventListener("beforeunload", coordinator._onBeforeUnload);
@@ -854,9 +865,7 @@
           captureHistoryPosition();
           const record = recordFor(source);
           if (record.authoredRev === undefined) {
-            record.authoredRev = record.documentKey === documentKey
-              ? confirmedRevision
-              : record.documentRevision;
+            record.authoredRev = authoredRevisionFor(source, record);
           }
           record.version += 1;
           record.dirtyToken = {};
@@ -869,9 +878,7 @@
           const record = recordFor(source);
           if (!record.dirty) {
             if (record.authoredRev === undefined) {
-              record.authoredRev = record.documentKey === documentKey
-                ? confirmedRevision
-                : record.documentRevision;
+              record.authoredRev = authoredRevisionFor(source, record);
             }
             record.version += 1;
             record.dirty = true;
@@ -985,9 +992,7 @@
             }
             const record = recordFor(source);
             if (record.authoredRev === undefined) {
-              record.authoredRev = record.documentKey === documentKey
-                ? confirmedRevision
-                : record.documentRevision;
+              record.authoredRev = authoredRevisionFor(source, record);
             }
             entry = {
               source, requestId, payload, send, onResult, reviewRequired,
@@ -1190,6 +1195,7 @@
       coordinator._resetIdentity = ({ key, rev }) => {
         documentKey = key || null;
         confirmedRevision = rev ?? null;
+        nativeFocusBaselines = new WeakMap();
         ownRevisions.clear();
         quarantinedEchoes.length = 0;
         conflict = null;
@@ -1516,6 +1522,8 @@
           coordinator.finishSave(token, saved);
           if (saved) {
             confirmedRevision = reply.rev ?? confirmedRevision;
+            const focused = nativeFocusBaselines.get(entry.source);
+            if (focused?.key === entry.documentKey) focused.rev = confirmedRevision;
             ownRevisions.set(entry.requestId, confirmedRevision);
             mutationQueue.shift();
             mutationById.delete(entry.requestId);
@@ -1607,14 +1615,36 @@
         });
       };
 
+      coordinator._onNativeFocus = (event) => {
+        const source = nativeFormFor(event.target);
+        if (!source || !main.contains(source) || !main.contains(event.target)) return;
+        const identity = identityFor(source);
+        if (nativeFocusBaselines.get(source)?.key !== identity.key) {
+          nativeFocusBaselines.set(source, {
+            key: identity.key,
+            rev: identity.key === documentKey ? confirmedRevision : identity.rev,
+          });
+        }
+      };
+      coordinator._onNativeBlur = (event) => {
+        const source = nativeFormFor(event.target);
+        const focused = source && nativeFocusBaselines.get(source);
+        const record = source && sources.get(source);
+        // A remote repaint may have skipped the focused value. Retain its
+        // original revision even after blur; that stale value remains in the
+        // form until an acknowledged save or authoritative remount replaces it.
+        if (focused?.key === documentKey && focused.rev === confirmedRevision &&
+            !record?.dirty && !record?.active) nativeFocusBaselines.delete(source);
+      };
       coordinator._onInput = (event) => {
         const target = event.target;
         if (target.closest?.(
           'bp-paper-editor[data-editor-mode="card-body"], bp-paper-editor[data-editor-mode="table"]',
         )) return;
+        const associatedForm = nativeFormFor(target);
         const source = target.closest?.("form[data-paper-field-flush]") ||
           target.closest?.(PAPER_FLUSH_TARGETS) ||
-          target.closest?.(".bp-paper-edit-form[phx-change]");
+          target.closest?.(".bp-paper-edit-form[phx-change]") || associatedForm;
         if (!source || !main.contains(source)) return;
         // Fallback forms can receive newer input while an older snapshot is
         // saving. Advance their dirty version so that acknowledgement cannot
@@ -1948,6 +1978,8 @@
       };
       document.addEventListener("input", coordinator._onInput);
       document.addEventListener("change", coordinator._onInput);
+      document.addEventListener("focusin", coordinator._onNativeFocus);
+      document.addEventListener("focusout", coordinator._onNativeBlur);
       document.addEventListener("click", coordinator._onClick, true);
       document.addEventListener("submit", coordinator._onSubmit, true);
       window.addEventListener("beforeunload", coordinator._onBeforeUnload);

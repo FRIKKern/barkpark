@@ -168,6 +168,25 @@ defmodule BarkparkWeb.BulldocsLiveContainerEditingTest do
     assert stored_blocks(ctx) == before
   end
 
+  test "summary-only saves preserve absent settings and every child exactly", ctx do
+    {:ok, view, _html} = live(ctx.conn, paper_path(ctx))
+    render_click(view, "paper-toggle-edit", %{})
+    before = stored_blocks(ctx)
+
+    render_hook(view, "paper-block-autosave", %{
+      "block_id" => "details",
+      "summary" => "An inline title",
+      "if_rev" => socket_of(view).assigns.paper_rev,
+      "request_id" => Ecto.UUID.generate()
+    })
+
+    assert stored_blocks(ctx) ==
+             Enum.map(before, fn
+               %{"id" => "details"} = block -> Map.put(block, "summary", "An inline title")
+               block -> block
+             end)
+  end
+
   test "expandable chrome and nested rich children persist without changing their container alias",
        ctx do
     path = paper_path(ctx)
@@ -219,6 +238,15 @@ defmodule BarkparkWeb.BulldocsLiveContainerEditingTest do
     assert details["open"] == true
     assert details["children"] == original_children
     refute Map.has_key?(details, "blocks")
+
+    render_hook(view, "paper-block-autosave", %{
+      "block_id" => "details",
+      "open" => "false",
+      "if_rev" => socket_of(view).assigns.paper_rev,
+      "request_id" => Ecto.UUID.generate()
+    })
+
+    assert stored_block(ctx, "details") == Map.put(details, "open", false)
 
     marked_content = [
       %{
@@ -409,7 +437,6 @@ defmodule BarkparkWeb.BulldocsLiveContainerEditingTest do
         "id" => "details",
         "type" => "expandable",
         "summary" => "Technical record",
-        "open" => false,
         "children" => [
           %{
             "id" => "child-rich",

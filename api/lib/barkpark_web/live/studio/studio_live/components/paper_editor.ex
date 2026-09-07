@@ -2961,14 +2961,35 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </div>
       <% "expandable" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-expandable-editor">
+          <form
+            id={"expandable-summary-form-" <> @id}
+            class="bp-paper-edit-form"
+            hidden
+            phx-submit="paper-edit-block"
+            phx-change="paper-block-autosave"
+            phx-debounce="500"
+          >
+            <input type="hidden" name="block_id" value={@id} />
+          </form>
           <details
             id={"paper-expandable-disclosure-" <> @id}
-            class="bp-expandable"
+            class="bp-expandable bp-paper-contextual-preview"
             open={Map.get(@block, "open") == true}
             phx-mounted={JS.ignore_attributes("open")}
             data-test-id="paper-expandable-preview"
           >
-            <summary><%= Map.get(@block, "summary", "") %></summary>
+            <summary>
+              <textarea
+                id={"expandable-summary-" <> @id}
+                name="summary"
+                form={"expandable-summary-form-" <> @id}
+                rows="1"
+                class="bp-paper-inline-text"
+                aria-label="Expandable title"
+                placeholder="Add a section title…"
+                phx-hook="BarkparkPaperAutoSize"
+              ><%= Map.get(@block, "summary", "") %></textarea>
+            </summary>
             <div class="bp-expandable__body" data-test-id="paper-expandable-children">
               <%= if @canvas_enabled do %>
                 <%= for segment <- @expandable_segments do %>
@@ -3057,6 +3078,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                          value={Map.get(@block, "summary", "")} />
                 </label>
                 <label class="bp-paper-edit-check">
+                  <input type="hidden" name="open" value="false" />
                   <input type="checkbox" name="open" value="true" checked={Map.get(@block, "open") == true} />
                   Open by default
                 </label>
