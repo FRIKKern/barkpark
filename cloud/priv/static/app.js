@@ -8534,7 +8534,7 @@
       // cch-w46-rv: remember WHAT was painted with WHICH authority, so a /v1/me
       // that answers after this line can repaint the header strip and the
       // Updates panel from the bp already held — no second read of anything.
-      instanceAuthorityMount = { bp: bp, tab: tab };
+      recordInstanceAuthorityMount(bp, tab);
       // D437: a still-checking control needs a way out — the shipped
       // [data-me-retry] exit, present only while the answer is unknown, repaints
       // this whole view once /v1/me lands (no-op when it is absent).
@@ -9241,6 +9241,19 @@
   // shipped [data-me-retry] exit re-enters, and that exit must not silently
   // change tab under the person.
   var instanceAuthorityMount = null;
+
+  // cch-w47-bl: THE ONE WRITER OF THAT RECORD, named. loadInstance used to
+  // assign the object inline, which made the repaint seam unreachable from the
+  // unit harness at any price: `repaintInstanceAuthority` hard-returns on a null
+  // mount, and nothing short of driving the whole loader (fleet fetch, tab
+  // mounts, breadcrumb, ticker) could set it. Extracting the assignment costs
+  // the browser nothing — same two fields, same single call site — and buys the
+  // harness the ONLY thing it was missing: the ability to say "this is what was
+  // painted, with the authority still out". The DOM assertions that follow are
+  // then about the repaint itself rather than about a loader stub.
+  function recordInstanceAuthorityMount(bp, tab) {
+    instanceAuthorityMount = bp ? { bp: bp, tab: tab } : null;
+  }
 
   // cch-w46-rv — THE SEAM EXTENDED PAST THE RAIL. THE SIBLING SET, DERIVED FROM
   // CODE, not from the filing: `grep -n "adminWriteControlHtml(" app.js` returns
@@ -27715,6 +27728,24 @@
       // handed, and the bug is that no second frame was ever painted.
       wireLifecycleActions: wireLifecycleActions,
       repaintLifecycleAuthority: repaintLifecycleAuthority,
+      // cch-w47-bl — THE EXPORT COMMENT ABOVE MADE A PROMISE THE FILE DID NOT
+      // KEEP. `git grep -c repaintLifecycleAuthority -- cloud/` answered ONE
+      // file (app.js) for four waves: the export was justified BY TESTABILITY
+      // and no test ever called it, so its coverage could shrink to nothing
+      // without a single assertion moving. __app.test.mjs now calls it directly
+      // (both its scoping guards and its repaint), which is what makes the
+      // sentence above true rather than aspirational.
+      //
+      // …and the seam that grew PAST the rail joins it, for the same reason and
+      // with the same blind spot: repaintInstanceAuthority is what heals the
+      // header strip's Attach domain (#inst-domain) and the Updates panel's Roll
+      // back ([data-rollback]) when /v1/me answers late. Every frame either one
+      // renders is individually correct for the authority it was handed — the
+      // defect is that no SECOND frame was ever painted, which no pure-helper
+      // assertion can see. recordInstanceAuthorityMount rides along because the
+      // repaint is a no-op without it (see the note at its definition).
+      repaintInstanceAuthority: repaintInstanceAuthority,
+      recordInstanceAuthorityMount: recordInstanceAuthorityMount,
       // cch-w38-s1: the ONE canonical three-valued authority read, exported
       // because the rail's mount and all seven elevated write functions have
       // zero hook reach — a positive control written against the other exports
