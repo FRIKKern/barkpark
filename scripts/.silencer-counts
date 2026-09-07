@@ -21,14 +21,31 @@
 # scripts/silencer-growth-ratchet.sh. Every number below was measured off this
 # tree, not transcribed.
 #
-# DERIVE THESE UNDER bash, NOT zsh, AND NOT WITH `wc -l`. Both bite. This roster
-# was first written with a zsh-run `grep -vcE` and a `wc -l`, and BOTH reported
-# api/.sobelow-skips as one smaller than bash and awk agree it is: the file's
-# last line carries no trailing newline, which `wc -l` (a newline counter) does
-# not count at all. An off-by-one LOW here is not a harmless typo — it makes the
-# very next honest edit red the gate for no reason, and the obvious cure for
-# that red is to stop believing the gate. The gate measures with bash; derive
-# with bash, or cross-check with `awk 'END{print NR}'`.
+# CROSS-CHECK EVERY NUMBER HERE WITH `awk 'END{print NR}'`. Two different tools
+# undercounted api/.sobelow-skips by one while this roster was being written,
+# and an off-by-one LOW is not a harmless typo: it reds the gate on the very
+# next honest edit, and the obvious cure for a red nobody believes is to stop
+# believing the gate. The file has 37 lines, 1 blank, 0 comments, 36 entries —
+# and its last line carries NO TRAILING NEWLINE, which is what both tools trip
+# over:
+#
+#   1. `wc -l` counts NEWLINES, not lines. It reports 36 for a 37-line file
+#      whose last line is unterminated, and any "lines minus blanks" derivation
+#      inherits the undercount (36 - 1 = 35, wrong).
+#   2. A `grep` that is not the system grep. On the machine this was derived on,
+#      `grep` was a shell function shimming ugrep; ugrep DROPS a final
+#      unterminated line from an INVERTED count. Minimal repro on a 3-line file
+#      whose last line is unterminated: `grep -c ''` returns 3 under both, and
+#      `grep -v <nomatch>` PRINTS all 3 under both, but `grep -vc <nomatch>`
+#      returns 2 under ugrep and 3 under /usr/bin/grep. Only the counting
+#      inverted form diverges, which is precisely the form a roster derivation
+#      reaches for. Use `command grep` if you must grep, or better, use awk.
+#
+# The gate itself measures under bash with whatever `grep` CI's runner provides,
+# so a number derived through a local shim can disagree with the gate that reads
+# it. awk has no such shim in this repo and agrees with /usr/bin/grep. Derive
+# with awk. (This is NOT a zsh-vs-bash difference: `zsh -f` and bash both
+# return 36. The shell was innocent; the `grep` on its PATH was not.)
 
 # fail-open tenant reads grandfathered by scripts/tenant-scope-check.sh --baseline
 # (non-comment lines). This is the strongest instance: the gate's own FAILED
