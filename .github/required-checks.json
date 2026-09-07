@@ -442,6 +442,90 @@
     {
       "context": "Crown reconcile harness",
       "reason": "S4 PATHS-FILTERED: crown-reconcile.yml carries a workflow-level `on: pull_request: paths:` filter (scripts/crown-reconcile.sh, its two harnesses, the workflow itself, .github/required-checks.json and shell-harnesses.yml), so on a PR touching none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). crown-reconcile.yml job `crown-reconcile-harness` — the self-test for scripts/crown-reconcile.sh and crown-waiver.test.sh. A can-lose arm: it grades the instrument, never the population."
+    },
+    {
+      "context": "Build + test + gates",
+      "reason": "S4 PATHS-FILTERED: js-tests.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). js-tests.yml job `test` — the js/ monorepo's real work: pnpm build, the vitest suites across every package, and the in-workflow gates (no-node-imports advisory, coverage upload). No continue-on-error, so a red genuinely fails the run; it gates nothing because the workflow's seven-path filter means most PRs never render it at all. ADDED 2026-09-07 (task-6c8a76a6f6196dfd) by the census clause."
+    },
+    {
+      "context": "Changeset present (PRs only)",
+      "reason": "S4 PATHS-FILTERED: js-tests.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). js-tests.yml job `changesets` — and its own `name:` states the second half of the reason: it is fenced `if: github.event_name == 'pull_request'`, so it renders on NO push-to-main head. Doubly absent: paths-filtered on the PR side, event-fenced on the push side. It checks that a js/ change ships a changeset entry for the release train. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Lighthouse CI — web/",
+      "reason": "S2 ADVISORY: ci.yml job `lighthouse` carries `continue-on-error: true`, so the job cannot fail its run and the name cannot express a verdict — requiring it would require a context that is green by construction. It runs Lighthouse against web/ and publishes the report as an artifact: an observability signal, not a merge gate. (It is ALSO paths-filtered to web/**, lighthouserc.json and ci.yml, so it is absent on most PRs — but continue-on-error is the disqualifying fact.) ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "web/ typecheck + unit tests + lint",
+      "reason": "S4 PATHS-FILTERED: ci.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). ci.yml job `web-checks` — the REAL gate of that workflow (explicitly not continue-on-error, unlike its `lighthouse` sibling): tsc typecheck, the `node --test` unit suite and lint for web/, on Node 22 for type-stripping. Load-bearing on the PRs it renders on; absent on every PR that touches no web/ path, which is why it is excluded rather than required. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "deploy receipts descend from a measurement (or refuse)",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `deploy-receipt-honesty` — and it is filtered TWICE: behind the workflow's 161-path filter and behind the in-workflow `changes` dispatcher (`if: needs.changes.outputs.deploy-receipt-honesty == 'true'`), so it is SKIPPED on most heads that do render the workflow. A harness: it proves a deploy receipt descends from a real measurement or refuses to emit. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "which-gates.sh gate-list deriver",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `which-gates` — same double filter as its `deploy-receipt-honesty` sibling: the 161-path workflow filter plus `if: needs.changes.outputs.which-gates == 'true'`. It grades scripts/which-gates.sh, the deriver that answers \"which CI gates does this change dispatch?\" by shelling the same `*-path-escape-check.sh --match` primitives the dispatchers shell. An instrument harness — it grades the deriver, never the product. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Cron overdue probe",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: cron-overdue-probe.yml job `cron-overdue-probe` is fenced `if: github.event_name != 'pull_request'` — the workflow's own comment gives the reason verbatim (\"a name that never renders on a PR head can never be sampled into the required-check spec\"). It renders on merged heads only through the push-to-main arm, which is why the census sees it at all. It reads whether every scheduled workflow has reported within its cadence. Requiring a context no PR can ever render would deadlock the branch outright. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Cron overdue harness",
+      "reason": "S4 PATHS-FILTERED: cron-overdue-probe.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). cron-overdue-probe.yml job `cron-overdue-harness`, the mirror of the probe above: fenced `if: github.event_name == 'pull_request'` and behind the workflow's three-path filter, so it renders only on PRs that touch the probe itself. It is the self-test for scripts/cron-overdue-probe.sh — it grades the instrument, not the population. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "offline-deploy-harnesses",
+      "reason": "S4 PATHS-FILTERED: deploy-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). deploy-harnesses.yml job `offline-deploy-harnesses` — the one name here that is a JOB ID rather than a `name:`, because the job declares none; GitHub renders the id. It runs the network-free deploy-script harnesses. The workflow's own header already says it \"is not a required status check … so it cannot block a merge no matter what it runs\", and names the blocking guard that does the job (api/test/barkpark/sites/deploy_runner_stage_names_test.exs, on the required Elixir lane). That prose is now matched by a row. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "cp-deploy.sh's pull form works on the box's git 2.34 (ubuntu:22.04 container)",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: deploy-harnesses.yml job `git-2-34-fetch` is fenced `if: github.event_name != 'pull_request'`, so it renders only through the push-to-main arm (and the workflow is paths-filtered besides). It runs cp-deploy.sh's pull form inside an ubuntu:22.04 container to prove it works against the git 2.34 the box actually ships — a container job, minutes long, that reaches nothing this PR changed. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Main gate watch",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: main-gate-watch.yml job `main-gate-watch` is fenced `if: github.event_name != 'pull_request'` for the reason its own comment states (\"a name that never renders on a PR head can never be sampled into the required-check spec\"); the census sees it only via push-to-main. It asks whether MAIN'S TIP is green on the four contexts branch protection names — a question about the branch after the fact, which a per-PR gate structurally cannot express. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Main verdict presence",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: main-gate-watch.yml job `main-verdict-presence`, fenced `if: github.event_name != 'pull_request'` exactly as its sibling is — its own comment says so and adds \"This job has NO authority over any pull request and nothing waits on it\". It asks whether every workflow whose push arm reaches main actually PUBLISHED a verdict on that sha (a run collapsed by cancel-in-progress publishes no context, and an absent context is not a red one). ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Main gate watch harness",
+      "reason": "S4 PATHS-FILTERED: main-gate-watch.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). main-gate-watch.yml job `main-gate-watch-harness`, fenced `if: github.event_name == 'pull_request'` and behind the workflow's six-path filter, so it renders only on PRs touching the watch itself. It is the both-ways proof set for scripts/main-gate-watch.sh and scripts/main-verdict-presence.sh — an instrument harness. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Vendored renderer block coverage",
+      "reason": "S4 PATHS-FILTERED: search-template-gates.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). search-template-gates.yml job `vendor-block-coverage` — it runs scripts/check-vendor-blocks.mjs --selftest, the negative half of the tripwire that asks whether the vendored renderer covers every PortableDoc block type. The workflow's own concurrency comment states the condition for its main-side collapsing being sound: \"no job name here appears in .github/required-checks.json\". Registering it would invalidate that. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Vendored SDK freshness",
+      "reason": "S4 PATHS-FILTERED: search-template-gates.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). search-template-gates.yml job `vendor-sdk-freshness` — selftest plus the real check (scripts/check-vendor-freshness.mjs), comparing the vendored tarballs against js/packages source. Same workflow-level constraint as its siblings: the file's concurrency marker is sound only while no job name here is a required context. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Starter-template contrast/focus literals",
+      "reason": "S4 PATHS-FILTERED: search-template-gates.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). search-template-gates.yml job `contrast-focus-literals` — scripts/templates-literal-check.sh, selftest then scan, over the starter templates' hard-coded contrast and focus-ring literals. Same workflow-level constraint as its siblings: registering any name in this file would void its main-side concurrency marker. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Flagship template bp-command parse",
+      "reason": "S4 PATHS-FILTERED: search-template-gates.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). search-template-gates.yml job `bp-command-truth` — it parses the `bp` commands quoted in the flagship template's docs and adjudicates them against the real CLI surface (repo-relative targets, --offline). Same workflow-level constraint as its siblings. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Stale verdict watch",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: stale-verdict-watch.yml job `stale-verdict-watch` is fenced `if: github.event_name != 'pull_request'`, with the same comment its cron and main-gate siblings carry; the census sees it only through push-to-main. It reads OPEN pull requests and their check rollup to find verdicts that have gone stale — a question about the population of open PRs, not about the head being merged, so no per-PR gate can express it. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Stale verdict harness",
+      "reason": "S4 PATHS-FILTERED: stale-verdict-watch.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). stale-verdict-watch.yml job `stale-verdict-harness`, fenced `if: github.event_name == 'pull_request'` and behind the workflow's five-path filter. It runs the mutation proofs for scripts/stale-verdict-watch.sh — it grades the watch, never the repo. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Break-glass harness",
+      "reason": "S4 PATHS-FILTERED: breakglass-watch.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). breakglass-watch.yml job `breakglass-harness`, fenced `if: github.event_name == 'pull_request'` and behind the workflow's six-path filter — the PR-side twin of `Break-glass watch`, which already carries a row above. It syntax-checks and proves scripts/breakglass.sh, breakglass-watch.sh and required-checks-apply.sh. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Generate reference",
+      "reason": "S4 PATHS-FILTERED: typedoc.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). typedoc.yml job `generate` — it builds the TypeDoc API reference for js/packages. A documentation artefact producer, filtered to js/packages/**, tooling/typedoc/**, package.json and the workflow itself; it is absent on every PR that touches none of them. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
     }
   ]
 }
