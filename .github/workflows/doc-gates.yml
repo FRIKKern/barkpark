@@ -206,6 +206,17 @@ on:
       - "scaffy/commands/**"
       - "cloud/priv/static/app.js"
       - "cloud/priv/static/__app.test.mjs"
+      # DEPENDABOT ROOT DRIFT (task-c33fee1e82700787). The last three entries
+      # are INPUTS, not the gate: scripts/dependabot-roots-check.sh re-derives
+      # the root set from the LOCKFILES in the tree, so ADDING or DELETING a
+      # lockfile anywhere is exactly the event that can invalidate
+      # .github/dependabot.yml — and .github/dependabot.yml is NOT covered by
+      # the ".github/workflows/**" entry above.
+      - ".github/dependabot.yml"
+      - "scripts/dependabot-roots-check.sh"
+      - "**/package-lock.json"
+      - "**/pnpm-lock.yaml"
+      - "**/go.mod"
       # ── the code-comment citation guard's .eex corpus (cgsiw-s5). The step
       # below runs tooling/doc-truth/retired-terms.mjs, whose TERM_EXTS includes
       # `.eex` and whose TERM_EXCLUDE covers node_modules/_build/deps/vendor/
@@ -466,6 +477,17 @@ on:
       - "scaffy/commands/**"
       - "cloud/priv/static/app.js"
       - "cloud/priv/static/__app.test.mjs"
+      # DEPENDABOT ROOT DRIFT (task-c33fee1e82700787). The last three entries
+      # are INPUTS, not the gate: scripts/dependabot-roots-check.sh re-derives
+      # the root set from the LOCKFILES in the tree, so ADDING or DELETING a
+      # lockfile anywhere is exactly the event that can invalidate
+      # .github/dependabot.yml — and .github/dependabot.yml is NOT covered by
+      # the ".github/workflows/**" entry above.
+      - ".github/dependabot.yml"
+      - "scripts/dependabot-roots-check.sh"
+      - "**/package-lock.json"
+      - "**/pnpm-lock.yaml"
+      - "**/go.mod"
       # ── the code-comment citation guard's .eex corpus (cgsiw-s5). The step
       # below runs tooling/doc-truth/retired-terms.mjs, whose TERM_EXTS includes
       # `.eex` and whose TERM_EXCLUDE covers node_modules/_build/deps/vendor/
@@ -1174,11 +1196,45 @@ jobs:
       # job's verdict. A red that main's newest completed run already carries
       # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
       # red stands (exit 1). Never on push to main; never a required context.
+      # ── DEPENDABOT ROOT DRIFT (task-c33fee1e82700787) ─────────────────────
+      # `.github/dependabot.yml` is a hand-written list of directories, and the
+      # failure mode of such a list is SILENCE: add a lockfile in a new tree and
+      # Dependabot simply never watches it — no error, no warning, the config
+      # stays green for the roots it does know. The gate re-derives every
+      # lockfile-bearing root from `git ls-tree -r HEAD` and asserts the config
+      # matches BOTH WAYS (a root with no entry is a hole; an entry with no root
+      # is a Dependabot config error nobody reads).
+      #
+      # --selftest FIRST, per this job's standing idiom: eight arms plant the
+      # green baseline, both drift directions, a package.json-only workspace
+      # member, two unparsable configs, a zero-derived-roots non-vacuity floor
+      # and the pre-fix "no config at all" state — each in a throwaway git repo,
+      # each re-invoking the shipping script. It plants nothing in this tree.
+      #
+      # HONEST BLAST RADIUS: this job publishes "Doc budgets + anchors", which
+      # carries an S4 exclusion in .github/required-checks.json. A red here is
+      # visible on the PR and CANNOT block a merge. Wiring makes it RUN.
+      - name: Dependabot root drift gate self-test (tripwire)
+        id: s30
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/dependabot-roots-check.sh --selftest
+
+      - name: Dependabot root drift gate (fails this job)
+        id: s31
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/dependabot-roots-check.sh
+
       - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
         if: always()
         env:
           STEP_OUTCOMES: ${{ toJSON(steps) }}
-          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\"}"
+          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\", \"s30\": \"Dependabot root drift gate self-test (tripwire)\", \"s31\": \"Dependabot root drift gate (fails this job)\"}"
           JOB_NAME: "Doc budgets + anchors"
           WORKFLOW_FILE: doc-gates.yml
           GITHUB_TOKEN: ${{ github.token }}
