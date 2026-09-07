@@ -1,0 +1,19 @@
+{
+  "slug": "paper-mixed-rhythm-lab-2026-09-07",
+  "description": "Synthetic View/Edit spacing matrix for quotes, disclosures, terminals, tables and nested Sections. Publish only to a scratch dataset.",
+  "tags": [{"tag": "container-lab", "strength": 90, "rationale": "Verify mixed component margin ownership."}],
+  "blocks": [
+    {"id":"title","type":"heading","level":1,"text":"One rhythm across mixed blocks"},
+    {"id":"intro","type":"paragraph","content":[{"type":"text","value":"The same words should keep the same position when editing starts."}]},
+    {"id":"quote-a","type":"blockquote","content":[{"type":"text","value":"The first quote keeps its space."}],"cite":"First author","qa":{"keep":"first"}},
+    {"id":"quote-b","type":"blockquote","content":[{"type":"text","value":"The next quote shares the boundary."}],"cite":"Second author","qa":{"keep":"second"}},
+    {"id":"details","type":"expandable","summary":"A section between quotes","open":true,"blocks":[{"id":"inside","type":"paragraph","content":[{"type":"text","value":"Nested prose retains its own rhythm."}]}],"qa":{"keep":"details"}},
+    {"id":"quote-c","type":"blockquote","content":[{"type":"text","value":"The quote after a disclosure must not jump."}],"cite":"Third author","qa":{"keep":"third"}},
+    {"id":"terminal-a","type":"terminal","title":"First terminal","children":[{"id":"term-a-copy","type":"paragraph","content":[{"type":"text","value":"First terminal body."}]}]},
+    {"id":"terminal-b","type":"terminal","title":"Second terminal","children":[{"id":"term-b-copy","type":"paragraph","content":[{"type":"text","value":"Second terminal body."}]}]},
+    {"id":"after-terminal","type":"paragraph","content":[{"type":"text","value":"The paragraph after the terminal shares the same collapsed margin."}]},
+    {"id":"table","type":"table","head":[[{"type":"text","value":"Boundary"}],[{"type":"text","value":"Expected"}]],"rows":[[[{"type":"text","value":"View to Edit"}],[{"type":"text","value":"Same geometry"}]]],"qa":{"keep":"table"}},
+    {"id":"section","type":"section","title":"Nested boundaries","blocks":[{"id":"section-intro","type":"paragraph","content":[{"type":"text","value":"The nested quote follows this paragraph."}]},{"id":"nested-quote","type":"blockquote","content":[{"type":"text","value":"Nested geometry is part of the contract."}],"cite":"Nested author","qa":{"keep":"nested"}}]},
+    {"id":"tail","type":"paragraph","content":[{"type":"text","value":"The final paragraph and footer remain reachable."}],"qa":{"keep":"tail"}}
+  ]
+}

@@ -4,9 +4,13 @@ import { readFileSync } from "node:fs";
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const shell = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
 const surface = readFileSync(new URL("../../paper-surface/paper-surface.css", import.meta.url), "utf8");
-const adjacentQuotes = shell.match(/\.bp-paper-edit-block\[data-block-type="blockquote"\]\s*\+\s*\.bp-paper-edit-block\[data-block-type="blockquote"\]\s*>\s*\.bp-paper-quote-editor\s*\{([^}]*)\}/);
-assert.match(adjacentQuotes?.[1] ?? "", /margin-top:\s*0/,
-  "adjacent quote wrappers cannot double the reader's collapsed inter-quote margin");
+const documentFlow = shell.match(/\.bp-paper-editor\s*\{([^}]*)\}/);
+assert.match(documentFlow?.[1] ?? "", /display:\s*flow-root/,
+  "mixed reader-shaped blocks must collapse sibling margins while containing the document's outer margins");
+assert.match(shell, /\.bp-paper-edit-form\[hidden\]\s*\{\s*display:\s*none/,
+  "a hidden native field-owner form cannot create a flex box that interrupts sibling margin collapse");
+assert.doesNotMatch(shell, /\[data-block-type="(?:blockquote|terminal)"\]\s*\+\s*\.bp-paper-edit-(?:block|canvas)/,
+  "normal block flow replaces pair-specific quote and terminal margin suppression");
 assert.match(surface, /\.bp-paper-surface \.bp-blockquote\s*\{[^}]*margin:\s*1\.4rem 0/,
   "the reader and lone quotes keep their existing vertical rhythm");
 const narrowToolbar = shell.match(/@media\s*\(max-width:\s*720px\)\s*\{\s*\.bp-paper-edit-toolbar\s*\{([^}]*)\}/);
