@@ -37,7 +37,14 @@ defmodule BarkparkWeb.Studio.TopbarFocusContainmentTest do
   test "the narrow workspace menu owns its overflowing Miller columns" do
     for bucket <- ["narrow", "phone"] do
       selector = ~s|html[data-width-bucket="#{bucket}"] .scope-menu|
-      assert rule!(File.read!(@root), selector) =~ "overflow-x: auto;"
+      menu = rule!(File.read!(@root), selector)
+      assert menu =~ "overflow-x: auto;"
+      assert menu =~ "flex-wrap: wrap;"
+      assert menu =~ "max-height: calc(100vh - 80px);"
+
+      column = rule!(File.read!(@root), selector <> "-col")
+      assert column =~ "flex: 1 1 160px;"
+      assert column =~ "max-width: 100%;"
     end
   end
 

@@ -1223,8 +1223,13 @@
     }
     html[data-width-bucket="narrow"] .scope-menu,
     html[data-width-bucket="phone"] .scope-menu {
-      /* The bounded popover, not the shell, owns its three Miller columns. */
-      overflow-x: auto;
+      /* Wrap columns so partially visible focused items are still usable.
+         The bounded popover, not the shell, owns any remaining overflow. */
+      flex-wrap: wrap; max-height: calc(100vh - 80px); overflow-x: auto;
+    }
+    html[data-width-bucket="narrow"] .scope-menu-col,
+    html[data-width-bucket="phone"] .scope-menu-col {
+      flex: 1 1 160px; max-width: 100%;
     }
 
     /* ── Self-update bar (isu-w1): slim admin strip pinned above the topbar.
