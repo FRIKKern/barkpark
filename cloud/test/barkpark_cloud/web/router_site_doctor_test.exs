@@ -288,6 +288,36 @@ defmodule BarkparkCloud.Web.RouterSiteDoctorTest do
              "so a write made on the strength of a failed read is the duplicate-webhook hazard this split prevents"
   end
 
+  # The arm above reaches the "instance has no URL, nothing was attempted" branch.
+  # This one reaches the OTHER unperformable shape — a LIVE box whose transport
+  # fails mid-probe — because they are different code paths and a proof of one is
+  # not a proof of the other. Measured: mutating only the transport-failure clause
+  # left the arm above fully GREEN.
+  test "a transport failure against a LIVE box is UNKNOWN too — not just an instance with no URL" do
+    {user, team} = user_with_team()
+    bp = live_barkpark(team)
+    site = static_site(bp)
+
+    program_box(site,
+      query: {:error, :timeout},
+      live: {:error, :timeout}
+    )
+
+    body = Jason.decode!(doctor(site, login_token(user)).resp_body)
+
+    read = substrate(body, "content_read")
+
+    assert read["state"] == "unknown",
+           "a probe that never reached a LIVE box was read as a verdict on the credential (#{read["detail"]})"
+
+    assert read["detail"] =~ "UNMEASURED"
+
+    live = substrate(body, "live_url")
+
+    assert live["state"] == "unknown",
+           "a fetch that never completed was read as a verdict on whether the site serves (#{live["detail"]})"
+  end
+
   ## ── ARM 3: honesty law 2 — branch on kind ───────────────────────────────────
 
   test "a node site is NOT reported missing its `current` symlink, while a static site with the same nil pointer IS" do
