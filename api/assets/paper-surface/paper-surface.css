@@ -739,6 +739,10 @@ html[data-theme="dark"] .bp-paper-body {
    and a wide table returns to scrolling inside it — the doc-overflow contract is
    unchanged at every width (measured: 360/768/1280/1920, all seven fixtures). */
 .bp-paper-surface .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; }
+/* A column is an authored boundary. Its table may scroll inside that slot,
+   but must not borrow the page-wide evidence band and cover the next column.
+   Set the tokens on the table itself so nested editor hosts cannot reset them. */
+.bp-paper-surface .bp-cols__c .bp-table { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
 /* A table with no rows paints NOTHING and still spent `--bp-air-table` doing it.
    Found by the divider dedup below: `portabledoc-showcase` renders a `sheet`
    whose cells resolve through a caller-supplied map, so without one it falls back
