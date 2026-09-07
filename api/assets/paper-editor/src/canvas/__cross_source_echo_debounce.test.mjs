@@ -272,6 +272,94 @@ try {
   assert.match(stalePendingCanvas._editor.state.doc.textContent, /Newer current authority/);
   assert.match(stalePendingCanvas._editor.state.doc.textContent, /Must survive stale receipt/);
   assert.equal(stalePendingCanvas._pendingServerBlocks, null);
+
+  // Chronicle browser regression: a focused but clean editor defers a remote
+  // title change. Its NEXT introduction edit must not revert that unseen title.
+  const focused = document.createElement("bp-paper-canvas");
+  focused.acknowledgedSaves = true;
+  focused.blocks = [paragraph("title", "Original title"), paragraph("lead", "Original lead")];
+  const focusedBatches = [];
+  focused.addEventListener("bp-canvas-ops", (event) => focusedBatches.push(event.detail));
+  document.body.appendChild(focused);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 50));
+    focused._editor.commands.focus("end");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(focused._editor.isFocused, true);
+    const remote = [paragraph("title", "Title from another tab"), paragraph("lead", "Original lead")];
+    focused.applyServerBlocks(remote, { mode: "external", requestId: null });
+    assert.equal(focused._editor.state.doc.firstChild.textContent, "Original title");
+    focused._editor.view.dispatch(focused._editor.state.tr.insertText(" local", focused._editor.state.doc.content.size - 1));
+    assert.equal(focused.flushPendingChanges(), true);
+    assert.deepEqual(focusedBatches[0].ops, [{
+      op: "patch-block", id: "lead", patch: { content: [{ type: "text", value: "Original lead local" }] },
+    }], "a deferred remote title is not a local edit to revert");
+    focused.identifyOpsRequest(focusedBatches[0].seq, "request-focused");
+    focused.acknowledgeOps(focusedBatches[0].seq, true);
+    const merged = [remote[0], paragraph("lead", "Original lead local")];
+    focused.applyServerBlocks(merged, { mode: "own", requestId: "request-focused" });
+    // Stay focused and edit again AFTER the own receipt, without a pre-existing
+    // debounce snapshot to protect the displayed baseline.
+    focused._editor.view.dispatch(focused._editor.state.tr.insertText(" again", focused._editor.state.doc.content.size - 1));
+    focused.flushPendingChanges();
+    assert.deepEqual(focusedBatches[1].ops.map((op) => op.id), ["lead"]);
+    focused.identifyOpsRequest(focusedBatches[1].seq, "request-focused-2");
+    const final = [remote[0], paragraph("lead", "Original lead local again")];
+    focused.applyServerBlocks(final, { mode: "own", requestId: "request-focused-2" });
+    focused.acknowledgeOps(focusedBatches[1].seq, true);
+    focused._editor.view.dispatch(focused._editor.state.tr.insertText(" third", focused._editor.state.doc.content.size - 1));
+    focused.flushPendingChanges();
+    assert.deepEqual(focusedBatches[2].ops.map((op) => op.id), ["lead"],
+      "an echo-before-ack reply also keeps unseen remote content out of the local diff");
+    focused.identifyOpsRequest(focusedBatches[2].seq, "request-focused-3");
+    focused.acknowledgeOps(focusedBatches[2].seq, true);
+    const finalThird = [remote[0], paragraph("lead", "Original lead local again third")];
+    focused.applyServerBlocks(finalThird, { mode: "own", requestId: "request-focused-3" });
+    focused._editor.commands.blur();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(focused._blocks, finalThird);
+    assert.equal(focused._editor.state.doc.firstChild.textContent, "Title from another tab");
+    assert.equal(focused.hasPendingChanges(), false);
+  } finally {
+    focused.remove();
+  }
+
+  const lead = paragraph("lead", "Lead");
+  const sibling = paragraph("sibling", "Sibling");
+  for (const [kind, remote] of Object.entries({
+    insertion: [lead, sibling, paragraph("new", "Remote addition")],
+    removal: [lead],
+    reorder: [sibling, lead],
+  })) {
+    const structure = document.createElement("bp-paper-canvas");
+    structure.acknowledgedSaves = true;
+    structure.blocks = [lead, sibling];
+    const emitted = [];
+    structure.addEventListener("bp-canvas-ops", (event) => emitted.push(event.detail));
+    document.body.appendChild(structure);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 50));
+      structure._editor.commands.focus("start");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      structure.applyServerBlocks(remote);
+      structure._editor.view.dispatch(structure._editor.state.tr.insertText("Local ", 1));
+      structure.flushPendingChanges();
+      assert.deepEqual(emitted[0].ops, [{ op: "patch-block", id: "lead",
+        patch: { content: [{ type: "text", value: "Local Lead" }] } }],
+      `${kind}: a local text edit cannot reverse a deferred remote structure change`);
+      structure.identifyOpsRequest(emitted[0].seq, `request-${kind}`);
+      const merged = remote.map((block) => block.id === "lead" ? paragraph("lead", "Local Lead") : block);
+      structure.applyServerBlocks(merged, { mode: "own", requestId: `request-${kind}` });
+      structure.acknowledgeOps(emitted[0].seq, true);
+      structure._editor.commands.blur();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.deepEqual(structure._blocks, merged);
+      assert.equal(structure.hasPendingChanges(), false);
+      assert.equal(structure._pendingServerBlocks, null);
+    } finally {
+      structure.remove();
+    }
+  }
 } finally {
   canvas.remove();
   idleCanvas.remove();

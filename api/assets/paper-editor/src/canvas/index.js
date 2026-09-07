@@ -1144,7 +1144,10 @@ class BpPaperCanvas extends HTMLElement {
     if (!current || current.seq !== seq) return false;
     if (saved !== true) return false;
 
-    this._blocks = deepCloneBlocks(current.confirmedBlocks || current.afterBlocks);
+    // Diff against the local snapshot the author still sees. A canonical reply
+    // can contain remote sibling changes queued for later display; advancing
+    // to those unseen values would turn the next local edit into a reversion.
+    this._blocks = deepCloneBlocks(current.afterBlocks);
     // A newer local edit may still be inside its debounce while this earlier
     // batch is acknowledged. Advance that draft's captured baseline with the
     // confirmed local snapshot so its next diff stays incremental.
@@ -1909,8 +1912,7 @@ class BpPaperCanvas extends HTMLElement {
   // (the keyboard shortcut in _onKeyDown and the palette command in
   // buildCommandRegistry → run()), so they are guaranteed identical.
   //
-  //   rich → source : serialize the run to markdown (blocksToMarkdown of the diff
-  //                   baseline this._blocks — the echo-advanced confirmed run), stash
+  //   rich → source : serialize the live run to markdown, including unsaved edits, stash
   //                   the original md + a deep clone of those baseline blocks, hide
   //                   the rich editor, close any open popup, show a focused textarea.
   //   source → rich : read the textarea. If the markdown is UNCHANGED (=== the stashed
@@ -1954,9 +1956,9 @@ class BpPaperCanvas extends HTMLElement {
 
     // THE BASELINE — derived from the LIVE doc (L0), NOT this._blocks (C).
     //
-    //   C  = this._blocks  — the ECHO-CONFIRMED baseline. It advances ASYNC, only when
-    //        the server echoes bp:canvas-update → applyServerBlocks. After the user
-    //        types, C LAGS the live doc by ~300ms + network until the echo lands.
+    //   C  = this._blocks — the displayed run's save baseline. It advances after
+    //        acknowledgement or an applied external update, not while that update
+    //        waits unseen for focus release. It can lag unconfirmed local typing.
     //   L0 = the LIVE doc projected back to blocks — docToBlocks(normalizeCanvasDoc(
     //        getJSON())), the SAME projection _emitOps diffs against. It includes the
     //        user's just-typed, not-yet-confirmed edits.
@@ -2179,7 +2181,7 @@ class BpPaperCanvas extends HTMLElement {
   //     stack. GUARD: if the editor is FOCUSED, composing (IME), or has an edit in
   //     its debounce window, we QUEUE the update and apply it after that local
   //     state settles so we never yank the caret or erase an un-emitted draft —
-  //     the baseline still advances immediately, only the visible re-render defers.
+  //     the diff baseline stays with the displayed snapshot until that render lands.
   applyServerBlocks(blocks, echoMeta = null) {
     if (!this._editor) return;
     const next = Array.isArray(blocks) ? blocks : [];
@@ -2204,7 +2206,6 @@ class BpPaperCanvas extends HTMLElement {
       if ((!foreignOwnRequest && exactInflightEcho) || correlatedOwnEcho) {
         this._inflightOps.echoSeen = true;
         if (!exactInflightEcho) {
-          this._inflightOps.confirmedBlocks = deepCloneBlocks(next);
           this._queueServerBlocks(next);
         } else if (echoMode !== "own-stale") {
           this._clearPendingServerBlocks();
@@ -2232,10 +2233,10 @@ class BpPaperCanvas extends HTMLElement {
       : -1;
     if (correlatedAwaitingIndex !== -1) {
       this._awaitingOwnEchoes.splice(0, correlatedAwaitingIndex + 1);
-      this._blocks = deepCloneBlocks(next);
       if (this._isEditingNow()) {
         this._queueServerBlocks(next);
       } else {
+        this._blocks = deepCloneBlocks(next);
         this._clearPendingServerBlocks();
         this._programmaticApply = true;
         try {
@@ -2264,11 +2265,8 @@ class BpPaperCanvas extends HTMLElement {
       return;
     }
 
-    // No local save state remains, so this server run is authoritative for the
-    // next diff whether it is an own echo or an external update.
-    this._blocks = next;
-
     if (ownEcho) {
+      this._blocks = next;
       // OWN ECHO: stamp the server-confirmed ids onto any just-minted live nodes
       // (bpId:null), an ATTR-ONLY transaction PM maps the selection through (the
       // caret does NOT move) and that does NOT enter undo. NO setContent. After
@@ -2286,6 +2284,7 @@ class BpPaperCanvas extends HTMLElement {
     if (this._isEditingNow()) {
       this._queueServerBlocks(next);
     } else {
+      this._blocks = next;
       this._programmaticApply = true;
       try {
         this._applyExternalContent(next);
