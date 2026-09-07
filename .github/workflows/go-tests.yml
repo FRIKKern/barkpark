@@ -573,7 +573,8 @@ jobs:
       # TOOLCHAIN, not by editing this repo, so a blocking step here would red
       # every open PR the day a stdlib advisory lands and NO PR could clear it.
       # That is precisely the shape `.github/required-checks.json` names as
-      # disqualifying when it holds `Security gate` out of branch protection:
+      # disqualifying when it holds the advisory `Security gate` out of branch
+      # protection — a ruling this step INHERITS and does not re-litigate:
       # its `mix-audit` upstream runs against a LIVE advisory database, so "a
       # CVE published tomorrow reds it on every open PR with no change to this
       # repo — a permanently correct red that no PR can clear, which is exactly
