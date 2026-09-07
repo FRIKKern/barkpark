@@ -1742,6 +1742,12 @@
 /* The citation is inline authoring, not a separate bound-field block. The
    quote already owns its reader margin; its form must not add another gap. */
 .bp-paper-edit-block[data-block-type="blockquote"]:has(.bp-paper-quote-editor) { margin-top: 0; }
+/* Reader siblings collapse their 1.4rem margins. Separate editor wrappers
+   cannot collapse across the flex layout, so keep only the first quote's
+   bottom margin at this specific boundary. Lone quotes are unchanged. */
+.bp-paper-edit-block[data-block-type="blockquote"] + .bp-paper-edit-block[data-block-type="blockquote"] > .bp-paper-quote-editor {
+  margin-top: 0;
+}
 .bp-paper-quote-editor .bp-paper-editor-body {
   background: transparent;
   color: inherit;

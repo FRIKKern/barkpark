@@ -4,6 +4,11 @@ import { readFileSync } from "node:fs";
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const shell = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
 const surface = readFileSync(new URL("../../paper-surface/paper-surface.css", import.meta.url), "utf8");
+const adjacentQuotes = shell.match(/\.bp-paper-edit-block\[data-block-type="blockquote"\]\s*\+\s*\.bp-paper-edit-block\[data-block-type="blockquote"\]\s*>\s*\.bp-paper-quote-editor\s*\{([^}]*)\}/);
+assert.match(adjacentQuotes?.[1] ?? "", /margin-top:\s*0/,
+  "adjacent quote wrappers cannot double the reader's collapsed inter-quote margin");
+assert.match(surface, /\.bp-paper-surface \.bp-blockquote\s*\{[^}]*margin:\s*1\.4rem 0/,
+  "the reader and lone quotes keep their existing vertical rhythm");
 const narrowToolbar = shell.match(/@media\s*\(max-width:\s*720px\)\s*\{\s*\.bp-paper-edit-toolbar\s*\{([^}]*)\}/);
 assert.ok(narrowToolbar, "narrow screens cannot rely on an off-screen left margin for block controls");
 assert.match(narrowToolbar[1], /left:\s*auto/, "narrow controls stop using the desktop left offset");
