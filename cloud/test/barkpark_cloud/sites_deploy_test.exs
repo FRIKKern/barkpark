@@ -33,6 +33,7 @@ defmodule BarkparkCloud.SitesDeployTest do
   use BarkparkCloud.DataCase, async: true
 
   alias BarkparkCloud.{Accounts, DeployLedger, Registry}
+  alias BarkparkCloud.BoxCapacityRefusalFixture
   alias BarkparkCloud.Registry.{Deployment, Site, Vault}
   alias BarkparkCloud.Sites.Deploy
   alias BarkparkCloud.Sites.FakeBoxRelay
@@ -1139,19 +1140,19 @@ defmodule BarkparkCloud.SitesDeployTest do
     test "the rendered bound is the CAUSE's own bound — 12 for capacity, 6 for a busy box" do
       {bp, site} = setup_site()
 
-      # THE BOX'S VERBATIM BODY (dr-w3-s3-followup-capacity-code-handshake), not
-      # an invented one: `BarkparkWeb.SiteDeployController.capacity_message/3`
-      # renders "the box is at its build capacity (N of N build slots in use) — "
-      # plus the holder tail, N = DeployRunner.build_slot_capacity() (1 today).
-      # The shape assertion below is what makes this fixture unable to drift
-      # back to the invented "4 of 4 build slots are in use" that sat here and
-      # in deploy_ledger_test.exs while the real emitter said something else.
-      capacity_body =
-        "the box is at its build capacity (1 of 1 build slots in use) — " <>
-          "site 'other-site' is building; retry when it finishes"
-
-      assert capacity_body =~
-               ~r/^the box is at its build capacity \(\d+ of \d+ build slots in use\) — /
+      # THE BOX'S VERBATIM BODY — READ, not retyped. The one copy lives in
+      # api/test/support/fixtures/box_capacity_refusal.json, and
+      # BarkparkWeb.SiteDeployCapacityBodyConformanceTest drives the REAL
+      # controller to a 409 and asserts `capacity_message/3 <> peer_tail/1`
+      # still emits exactly that. A reword there reds THERE, on the api diff.
+      #
+      # What stood here was a hand-typed copy under a "VERBATIM" comment, plus
+      # a shape assertion that checked a literal in this file against a regex
+      # in this file — it could not fail, and it did not stop the invented
+      # "4 of 4 build slots are in use" from sitting here and in
+      # deploy_ledger_test.exs for a day (#16598) while the emitter said
+      # something else.
+      capacity_body = BoxCapacityRefusalFixture.message()
 
       FakeBoxRelay.program(
         start:
