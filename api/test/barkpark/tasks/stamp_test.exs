@@ -1433,7 +1433,16 @@ defmodule Barkpark.Tasks.StampTest do
       criteria = [
         %{"criterion" => "gate passes", "met" => true, "evidence" => "42 green on abc123"},
         %{"criterion" => "docs updated", "met" => false, "evidence" => "half-written note"},
-        %{"criterion" => "  spacing  and  ünicode  ", "met" => false, "evidence" => "…ok"}
+        # This row used to read "  spacing  and  ünicode  ", with padding spaces.
+        # `Tasks.Validation` now refuses a criterion that begins or ends with
+        # whitespace (pds-bl-stamp-trailing-newline-deadend: that wording is the
+        # CAS key a met-flip is guarded by, and the shells that carry it strip
+        # trailing whitespace, so it could be refused but never stamped), which
+        # made this fixture uncreatable. The PADDING was never what this test is
+        # about — INTERIOR double spaces and a non-ASCII byte still carry the
+        # whole byte-preservation payload, and the evidence string keeps its own
+        # leading ellipsis. Only the outer padding is gone.
+        %{"criterion" => "spacing  and  ünicode", "met" => false, "evidence" => "…ok"}
       ]
 
       {task, closed} = closed_task!(scope, criteria)
