@@ -6813,13 +6813,24 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # POST /v1/billing/cancel {password, at_period_end?} → 200 {status,
-  # cancel_at_period_end}. DESTRUCTIVE → password re-confirmation (Coolify-anchor:
-  # the Subscription Livewire cancel re-checks Hash::check before acting).
-  # at_period_end defaults true (reversible grace — stays entitled until the
-  # period end); false cancels immediately (status canceled + the team's managed
-  # boxes suspended). 401 {password_invalid} on a wrong password; 403 {forbidden,
-  # reason: "no_team", scope: "team"} / 422 {no_subscription}.
+  # POST /v1/billing/cancel {password} → 200 {status, cancel_at_period_end}.
+  # DESTRUCTIVE → password re-confirmation (Coolify-anchor: the Subscription
+  # Livewire cancel re-checks Hash::check before acting). The cancel is ALWAYS
+  # the reversible grace cancel — the team stays entitled until the period end.
+  #
+  # THE IMMEDIATE ARM IS GONE (task-527f2a101b99ebf9, ruled 2026-09-07). It set
+  # `status: canceled` and suspended the team's boxes in-band, it was reachable
+  # by any plain team owner behind nothing but this password re-confirm, and NO
+  # shipped client ever sent it — the console posts {password} alone
+  # (app.js:19129), so no UI confirmation design was ever built behind it and an
+  # owner who tripped it gained nothing Stripe refunds. A body carrying
+  # `at_period_end: false` is now REFUSED 422 {invalid, details} rather than
+  # silently coerced to grace: a caller who asked for immediate is told no, not
+  # handed a different answer. `Billing.request_cancel/2` keeps its immediate
+  # branch (no route reaches it; see its @doc).
+  #
+  # 401 {password_invalid} on a wrong password; 403 {forbidden, reason:
+  # "no_team", scope: "team"} / 422 {no_subscription} / 422 {invalid, details}.
   post "/v1/billing/cancel" do
     # OWNER-gated, and the gate is placed BEFORE the password re-confirm: the
     # `confirm_password` check verifies the CALLER's own password (not authority),
@@ -6834,14 +6845,29 @@ defmodule BarkparkCloud.Web.Router do
       not confirm_password(conn) ->
         json(conn, 401, %{error: "password_invalid"})
 
+      conn.body_params["at_period_end"] == false ->
+        # The refusal sits AFTER the password step so the 401-first ordering the
+        # route already promises is untouched.
+        json(conn, 422, %{
+          error: "invalid",
+          details: %{
+            at_period_end: [
+              "immediate cancellation is not offered through the API; omit this field to end " <>
+                "the subscription at the end of the current billing period"
+            ]
+          }
+        })
+
       true ->
-        # Default to grace; only an explicit `false` cancels immediately.
-        at_end = conn.body_params["at_period_end"] != false
+        # ONE arm: grace. Kept as a named binding because the audit metadata and
+        # the context call must not be able to drift apart.
+        at_end = true
 
         # activity-audit-log: the cancel + a `subscription.canceled` audit row
         # commit in one transaction (target_id + metadata resolved from the
-        # updated subscription). A grace cancel (at_period_end) and an immediate
-        # cancel both record here; the metadata distinguishes them.
+        # updated subscription). `at_period_end` stays in the metadata even
+        # though it is now always true — the trail must keep reading the same
+        # for rows written before and after the immediate arm was removed.
         audit_cancel =
           Accounts.audit(
             %{
@@ -6857,8 +6883,9 @@ defmodule BarkparkCloud.Web.Router do
 
         case audit_cancel do
           {:ok, sub} ->
-            # The plan state changed and (on immediate cancel) the fleet was
-            # suspended — push both so an open dashboard reflects it live.
+            # The plan state changed — push so an open dashboard reflects it
+            # live. "fleet" is kept: a grace cancel moves no box today, and a
+            # redundant push is cheaper than a dashboard that misses one.
             push_event(conn.assigns.current_team.id, "subscription")
             push_event(conn.assigns.current_team.id, "fleet")
             push_event(conn.assigns.current_team.id, "audit")
