@@ -48,8 +48,9 @@
 // Union == closure TODAY. That is a MEASUREMENT, not an invariant — one tgw*-named
 // row filed outside the tree breaks it — so the union is computed, not assumed.
 // The direct lens drops 16 rows, all children of `tgw1-workflow-gate-wiring`
-// (itself done), one of which (`tgw2-verify-writes-back`) is OPEN and pooled: it
-// reports 32 claimable where the truth is 33. The prefix lens drops two hash-id
+// (itself done), one of which (`tgw2-verify-writes-back`) was OPEN and pooled when
+// this was measured: it reported 32 claimable where the truth was 33. That row has
+// since closed — the NUMBERS above are a dated measurement, the LENS argument is not. The prefix lens drops two hash-id
 // direct children, and unfenced it would sweep PAPERS (which carry no
 // lifecycle_status and would flatter clause (b)); the fence here is both the
 // `/production/task` path and a per-row `_type === "task"` assertion.
@@ -316,7 +317,7 @@ export const FROZEN_CRITERIA = [
     index: 1, polarity: null, covers: false,
     criterion: "Every rejection class is demonstrated FIRING by mutation against a frozen adversarial fixture, and a control that does not fire is its own third outcome class",
     rerun: "",
-    why: "UNMEASURED, FAIL-CLOSED: the fact is LOCAL EXECUTION and `node` is a REFUSED head (screen.mjs:1096), so it has no storable rerun at all until grip CI exists (tgw6-bl-grip-suite-has-no-ci, D114). D95's 2b is owned by tgw2-acceptance-suite. Never green.",
+    why: "UNMEASURED, FAIL-CLOSED: the fact is LOCAL EXECUTION and `node` is a REFUSED head (screen.mjs REFUSED_HEADS, \"node executes arbitrary JavaScript (including fs writes)\"), so no local rerun of the selftest is storable. THE GRIP-CI BLOCKER IS RETIRED — grip CI shipped, .github/workflows/grip-suite.yml is on main and its gating row is closed — and that changes the reason, not the verdict: `gh run list` over that workflow screens ADMITTED at L2, but its OUTPUT is a run status, not the per-rejection-class mutation demonstration (plus its non-firing control) this criterion names, so it would not cover the criterion either. Promoting this row to a polarity and a rerun is a ruling, not a citation fix, and this frozen table will not make it on its own. D95's 2b is owned by tgw2-acceptance-suite. Fails closed.",
   },
   {
     index: 2, polarity: "pass", covers: false,
@@ -337,9 +338,8 @@ export const FROZEN_CRITERIA = [
 // level test, is what refuses it (D96's closing clause: no criterion evidence
 // may be a local grep of the charter).
 //
-// `tgw5-bl-level-mention-promotion` ships in this same wave and closes the
-// promotion at its source — the same command re-derives L3 once that branch is
-// on main. This rule STAYS, and stays independent of it: the path rule is the
+// `tgw5-bl-level-mention-promotion` closed the promotion at its source and is on
+// main, so the same command now re-derives L3 (the run below prints it live). This rule STAYS, and stays independent of it: the path rule is the
 // second layer, and a defence that only works while the first layer is broken
 // is not defence in depth. Nothing here asserts the level; the run prints
 // whatever the grammar says today.
@@ -358,8 +358,8 @@ export function refusesAsCharterGrep(command) {
  * Polarity is read via the TOTAL helpers admitsPassClaim / admitsAbsenceClaim,
  * which are correct for null, undefined and the undecorated 6-key refusal
  * literal `screenedRerun` hand-builds at adjudicate.mjs:122-134 — the seam owned
- * by open task `tgw4-absence-veto-stops-at-the-rerun-seam`, cited here, not
- * re-solved. Reading `ruling.rerun.admits.absence` directly TypeErrors on every
+ * by `tgw4-absence-veto-stops-at-the-rerun-seam` (since closed), cited here, not
+ * re-solved in this file. Reading `ruling.rerun.admits.absence` directly TypeErrors on every
  * REFUSED command, including this file's own ceiling probe.
  */
 export function adjudicateCriterion(c, repo, run = screenedRerun) {
@@ -390,10 +390,10 @@ export const POLARITY_SPECIMENS = [
 
 // The honest L3 ceiling, stated mechanically. Every route out is closed.
 export const CEILING_PROBES = [
-  ["the seal's own execution", "node tooling/grip/seal.mjs", "screen.mjs:1096 — node executes arbitrary JavaScript"],
-  ["the seal's own data fetch", "curl -sG https://guerrilla.barkpark.cloud/v1/data/query/production/task", "screen.mjs:129 host bound (and :490 refuses --data-urlencode as a write even under -G)"],
+  ["the seal's own execution", "node tooling/grip/seal.mjs", "screen.mjs REFUSED_HEADS — node executes arbitrary JavaScript"],
+  ["the seal's own data fetch", "curl -sG https://guerrilla.barkpark.cloud/v1/data/query/production/task", "screen.mjs hostBoundReason — host bound (and CURL_BODY_FLAGS refuses --data-urlencode as a write even under -G)"],
   ["the shape grip ADMITS", "bp task list -o json", "an UNEARNED admission: bp reads the same server from ~/.config/barkpark/config.json while NAMING no host"],
-  ["the same read, host DECLARED", "bp -s https://guerrilla.barkpark.cloud task list", "screen.mjs:129 — declaring the host flips the identical read to refused"],
+  ["the same read, host DECLARED", "bp -s https://guerrilla.barkpark.cloud task list", "screen.mjs hostBoundReason — declaring the host flips the identical read to refused"],
 ];
 
 // ── MAIN ────────────────────────────────────────────────────────────────────
@@ -516,14 +516,14 @@ export function main(argv = process.argv.slice(2), out = console.log) {
     }
     say("  two of those read FAILED; only one may support an absence claim.");
     say("");
-    say("HONEST CEILING — grip CANNOT adjudicate its own execution (D96), stated by file:line:");
+    say("HONEST CEILING — grip CANNOT adjudicate its own execution (D96), stated by file:SYMBOL:");
     for (const [what, cmd, why] of CEILING_PROBES) {
       const s = screenCommand(cmd);
       say(`  ${s.ok ? "ADMITTED" : "REFUSED "} ${what}: ${deriveLevel(cmd)}  ${why}`);
     }
     say("  The screen REWARDS CONCEALING the host and PUNISHES DECLARING it. That asymmetry is");
     say("  more informative than any wrapper, and no L2 wrapper is manufactured here.");
-    say(`  D65's charter-grep shape, adjudicated by PATH regardless of level (tgw5 closes the promotion itself):`);
+    say(`  D65's charter-grep shape, adjudicated by PATH regardless of level (tgw5 closed the promotion itself):`);
     say(`  deriveLevel(${JSON.stringify(CHARTER_GREP_SPECIMEN)})`);
     say(`  = ${deriveLevel(CHARTER_GREP_SPECIMEN)} and screenCommand admits it (${screenCommand(CHARTER_GREP_SPECIMEN).ok}). refusesAsCharterGrep rejects it anyway: ${refusesAsCharterGrep(CHARTER_GREP_SPECIMEN)}.`);
     say("");
