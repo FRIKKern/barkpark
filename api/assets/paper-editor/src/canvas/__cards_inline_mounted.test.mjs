@@ -1,5 +1,18 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+
+// An unstyled reader uses browser paragraph margins, not article tokens. Keep
+// the public shell and standalone editor mirrors scoped to that explicit case.
+for (const file of ["../styles.css", "../../../../priv/static/assets/bp-paper-editor-shell.css"]) {
+  const css = readFileSync(new URL(file, import.meta.url), "utf8");
+  assert.match(css, /\[data-paper-palette="legacy"\] \.bp-paper-editor-body \.ProseMirror > p\s*\{\s*margin: 1em 0;\s*\}/,
+    "legacy paragraphs retain reader spacing without changing article typography");
+  assert.match(css, /\[data-paper-palette="legacy"\] \.bp-paper-contextual-controls\s*\{[^}]*bottom: 100%;/s,
+    "legacy fallback control sits above, not over, authored text");
+  assert.match(css, /\[data-paper-palette="legacy"\] \.bp-paper-contextual-controls\[open\]\s*\{[^}]*position: relative;/s,
+    "opened legacy configuration remains reachable in normal flow");
+}
 
 const { window } = new JSDOM("<!doctype html><body></body>", { pretendToBeVisual: true, url: "http://localhost/" });
 for (const name of ["customElements", "CustomEvent", "document", "DOMParser", "Element", "Event", "EventTarget", "HTMLElement", "KeyboardEvent", "MutationObserver", "Node", "NodeFilter", "Selection", "Text"]) globalThis[name] = window[name];
@@ -22,12 +35,13 @@ function paint(host, markup = html, sourceBlock = host.blocks[0]) {
   const event = new CustomEvent("bp-fleet-paint", { detail: { html: markup, sourceBlock }, cancelable: true });
   if (hole.dispatchEvent(event)) hole.innerHTML = markup;
 }
-function mount(attrs = {}, acknowledged = false) {
+function mount(attrs = {}, acknowledged = false, palette = null) {
   const block = { id: "legacy", type: "cards", items: [
     { id: "first", title: "Title", text: "Body", tone: "info", href: "/kept", audit: { keep: true } },
     { id: "second", title: "Sibling", text: "Untouched", extra: [1, 2] },
   ], audit: { collection: true }, ...attrs };
   const host = document.createElement("bp-paper-canvas");
+  if (palette) host.setAttribute("data-paper-palette", palette);
   host.acknowledgedSaves = acknowledged;
   host.blocks = [block];
   const batches = [];
@@ -40,6 +54,21 @@ function input(el, text) { el.textContent = text; el.dispatchEvent(new Event("in
 function key(el, name, extra = {}) { el.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true, ...extra })); }
 
 try {
+  for (const palette of ["legacy", "article"]) {
+    const row = mount({}, false, palette);
+    try {
+      assert.equal(row.host.querySelector("[data-bp-fleet-body]").classList.contains("bp-paper-surface"),
+        palette !== "legacy", "paint inherits the reader palette instead of restyling legacy content");
+      assert.ok(row.host.querySelector('[aria-label="Card title"]'), "legacy palette still supports native editing");
+    } finally { row.host.remove(); }
+  }
+  for (const type of ["figure", "task-list"]) {
+    const row = mount({ type }, false, "legacy");
+    try {
+      assert.equal(row.host.querySelector("[data-bp-fleet-body]").classList.contains("bp-paper-surface"), false,
+        `${type} paint also inherits the legacy reader palette`);
+    } finally { row.host.remove(); }
+  }
   const { host, block, batches } = mount();
   try {
     const title = host.querySelector('[aria-label="Card title"]');

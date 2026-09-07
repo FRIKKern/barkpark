@@ -49,7 +49,7 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
-import { wireAtomAccessibility } from "./embed-node.js";
+import { wireAtomAccessibility, readerPaintClass } from "./embed-node.js";
 
 // The TipTap node NAME is `bpTaskList`; the portable-doc `bpType` stays "task-list"
 // (run-convert.js maps a block.type "task-list" WITH a query to this node and back).
@@ -243,7 +243,7 @@ export const TaskList = Node.create({
       // keyed by data-bp-fleet-id, filled by the server hook. Until that HTML arrives
       // it shows an honest loading chip (never a blank strip).
       const body = document.createElement("div");
-      body.className = "bp-paper-surface";
+      body.className = readerPaintClass(editor);
       body.setAttribute("data-bp-fleet-body", "");
       const chip = document.createElement("div");
       chip.className = "bp-canvas-readonly-chip";

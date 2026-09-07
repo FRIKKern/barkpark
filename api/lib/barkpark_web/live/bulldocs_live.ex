@@ -1424,7 +1424,7 @@ defmodule BarkparkWeb.BulldocsLive do
           non-article papers (which keep the dark chrome above) — those emit
           bare `<h1>/<p>/…` the surface rules would restyle. The parchment
           reader skin re-skins the `--paper-*` tokens on this same element. --%>
-    <main class={[
+    <main data-paper-palette={if @article?, do: "article", else: "legacy"} class={[
       "bp-paper-shell",
       @article? && "bp-paper-surface",
       @article? && "bp-paper-article",
