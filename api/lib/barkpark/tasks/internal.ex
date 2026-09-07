@@ -69,8 +69,8 @@ defmodule Barkpark.Tasks.Internal do
   #
   # WHICH DOORS PR #16279 CLOSED, AND WHICH IT DID NOT. That PR ended brief
   # drift by calling `BriefMirror.maybe_resync_task_brief/2` from the attrs
-  # pipeline of `Content.Writer` — `create_document/4` (writer.ex:253) and
-  # `upsert_document/4` (writer.ex:827). Those are the DOCUMENT doors: `bp doc
+  # pipeline of `Content.Writer` — `create_document/4` and
+  # `upsert_document/4`. Those are the DOCUMENT doors: `bp doc
   # patch`, the MCP bridge, Studio, raw HTTP. They are covered and stay covered
   # (`Tasks.BriefMirrorWiringTest` pins both).
   #
