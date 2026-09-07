@@ -53,13 +53,13 @@ type listEnvelopeShape struct {
 // recorded below are the ones that were actually READ BACK off a live response
 // or off the row builder, not inferred from the key's name:
 //
-//	task.ls / task.ready → tasks_controller.ex:180 `docs:` ·
-//	                       rows built by tasks_controller/params.ex:202 `doc_id:`
+//	task.ls / task.ready → tasks_controller.ex, the `docs:` key ·
+//	                       rows built by tasks_controller/params.ex, the `doc_id:` field
 //	doc.ls / doc.query / search.query → `documents:` · rows are stored documents,
 //	                       keyed `_id` (Envelope.render)
-//	token.ls             → member_controller.ex:124 `tokens:` · rows matched on
+//	token.ls             → member_controller.ex, the `tokens:` key · rows matched on
 //	                       "id" by the destroy preview (destroy_confirm.go)
-//	workspace.member-ls  → member_controller.ex:36 `members:` — the seat rows
+//	workspace.member-ls  → member_controller.ex, the `members:` key — the seat rows
 //	                       carry several ref fields (identity/email/principal_id/
 //	                       id), so no single id field is claimed
 var commandListEnvelopes = map[string]listEnvelopeShape{
