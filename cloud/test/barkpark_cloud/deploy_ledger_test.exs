@@ -30,6 +30,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
   import Plug.Conn
 
   alias BarkparkCloud.{Accounts, DeployLedger, Registry, Repo}
+  alias BarkparkCloud.BoxCapacityRefusalFixture
   alias BarkparkCloud.Registry.Deployment
   alias BarkparkCloud.Sites.Deploy
   alias BarkparkCloud.Web.Router
@@ -125,8 +126,14 @@ defmodule BarkparkCloud.DeployLedgerTest do
   @d_busy_bare @r409_bare <> @requeued
   # The concurrent-build CAP's refusal: a box that is not busy with THIS site at
   # all, refusing a slot so it stops swapping itself to death.
-  @d_capacity "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — site 'other-site' is building; retry when it finishes" <>
-                @requeued
+  # THE BOX'S OWN CAPACITY REFUSAL — NOT retyped here. `BoxCapacityRefusalFixture`
+  # reads the ONE shared copy (api/test/support/fixtures/box_capacity_refusal.json),
+  # and BarkparkWeb.SiteDeployCapacityBodyConformanceTest asserts the REAL emitter
+  # still produces it byte-for-byte. Re-word the refusal in the controller and the
+  # api/ gate reds naming the emitter and the stale fixture; this line follows the
+  # file with no edit here. Do not paste the string back in — the mirror guard
+  # (deploy_ledger/capacity_body_mirror_guard_test.exs) fails if you do.
+  @d_capacity BoxCapacityRefusalFixture.deferred_detail() <> @requeued
   # A deferral shape the ledger has never seen — not a box refusal at all.
   @d_novel "the boxcar shim deferred the handshake (code BLERG-7)" <> @requeued
   # …and the nearer miss: a real anchored 409, refusing with a code the ledger has
@@ -153,7 +160,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
                     @rid <> @requeued
   # …and the stamped shape that already worked, because the message pushed the
   # stamp past the ` — ` boundary. Pinned so the strip does not regress it.
-  @d_capacity_msg_stamped "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — site 'other-site' is building; retry when it finishes" <>
+  @d_capacity_msg_stamped BoxCapacityRefusalFixture.deferred_detail() <>
                             @rid <> @requeued
 
   # A CODELESS envelope — `%{"error" => %{"message" => "…"}}` with no `code` key

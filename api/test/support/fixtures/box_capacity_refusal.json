@@ -1,0 +1,16 @@
+{
+  "_what": "The box's 409 box_at_capacity refusal BODY, for the peer-holder shape. THE ONE COPY.",
+  "_source_of_truth": "api/lib/barkpark_web/controllers/site_deploy_controller.ex — capacity_message/3 <> peer_tail/1",
+  "_conformance": "api/test/barkpark_web/controllers/site_deploy_capacity_body_conformance_test.exs drives the REAL controller to a 409 and asserts the emitted message equals `message` below. A hand-written fixture nobody asserts against is still a mirror.",
+  "_consumers": "cloud/ deploy-ledger fixtures read this file through BarkparkCloud.BoxCapacityRefusalFixture. Do not retype this string anywhere; cloud/test/barkpark_cloud/deploy_ledger/capacity_body_mirror_guard_test.exs fails if you do.",
+  "sample": {
+    "build_slots_in_use": 1,
+    "build_slot_capacity": 1,
+    "holding_slug": "other-site"
+  },
+  "parts": [
+    "the box is at its build capacity (1 of 1 build slots in use) — ",
+    "site 'other-site' is building; retry when it finishes"
+  ],
+  "message": "the box is at its build capacity (1 of 1 build slots in use) — site 'other-site' is building; retry when it finishes"
+}
