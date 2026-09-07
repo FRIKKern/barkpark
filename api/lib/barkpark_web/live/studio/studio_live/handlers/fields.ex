@@ -73,7 +73,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   def save(params, socket) when is_map(params) do
     socket = track_touched(socket, params)
 
-    case fold_dot_paths(params, touched_paths(socket)) do
+    case fold_dot_paths(params, touched_paths(socket), base_form(socket)) do
       %{"doc" => doc} -> do_save(doc, socket)
       _ -> {:noreply, socket}
     end
@@ -135,7 +135,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   def autosave(params, socket) when is_map(params) do
     socket = track_touched(socket, params)
 
-    case fold_dot_paths(params, touched_paths(socket)) do
+    case fold_dot_paths(params, touched_paths(socket), base_form(socket)) do
       %{"doc" => doc} -> {:noreply, mark_dirty(Shared.do_autosave(socket, doc))}
       _ -> {:noreply, socket}
     end
@@ -201,7 +201,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # as cleared. The set is emptied wherever the buffer becomes clean again —
   # explicit save, remote reload, navigation (`Lifecycle.finish_handle_params`)
   # — so a touched path can never leak onto the NEXT document opened.
-  defp fold_dot_paths(params, touched) do
+  defp fold_dot_paths(params, touched, base_form) do
     {dotted, rest} =
       Enum.split_with(params, fn {k, v} ->
         is_binary(k) and String.starts_with?(k, "doc[") and foldable?(k, v, touched)
@@ -216,14 +216,56 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       doc =
         Enum.reduce(dotted, doc, fn {key, value}, acc ->
           case StudioLive.parse_path(key) do
-            [] -> acc
-            path -> StudioLive.put_value_at(acc, path, value)
+            [] ->
+              acc
+
+            path ->
+              acc
+              |> seed_root(path, base_form)
+              |> StudioLive.put_value_at(path, value)
           end
         end)
 
       Map.put(rest, "doc", doc)
     end
   end
+
+  # ── Seed the CONTAINER before writing into it (this task) ──────────────────
+  #
+  # `Plug.Conn.Query.decode/1` gives back only what the dotted names carry, so
+  # the fold's `doc` starts with NO value at the path's root — for
+  # `doc[acceptance_criteria][0].criterion` there is no
+  # `doc["acceptance_criteria"]` at all. `put_value_at/3` refuses to invent an
+  # intermediate: descending an integer segment into a fresh `%{}` matches no
+  # clause and falls through to the no-op, so the folded value came out as
+  # `%{"acceptance_criteria" => %{}}` — the keystrokes gone AND the array
+  # replaced by an empty map. On `task` the kind validator refused the write
+  # ("Save failed"), which is the only reason the criteria survived at all; on
+  # any other type with an `arrayOf`-of-`composite` field the empty map SAVES
+  # and the whole list is destroyed.
+  #
+  # Seeding the root from the editor's own buffer is what makes the write a
+  # PATCH instead of a reconstruction: the existing rows are already there, so
+  # `put_value_at/3` replaces exactly the one leaf the name addresses. That is
+  # also what preserves keys no input renders — a criterion's `merge_gate` is
+  # not in the schema's composite (`criterion`/`met`/`evidence` only), so
+  # nothing posts it back and only the seeded row can carry it through.
+  #
+  # Only the ROOT is seeded, and only when the decoded `doc` has nothing there:
+  # every dotted sibling in the same payload still writes its own leaf on top,
+  # so a value the author changed always wins over the seeded one.
+  defp seed_root(doc, [root | _rest], base_form) when is_binary(root) and is_map(doc) do
+    cond do
+      Map.has_key?(doc, root) -> doc
+      not is_map(base_form) -> doc
+      not Map.has_key?(base_form, root) -> doc
+      true -> Map.put(doc, root, Map.get(base_form, root))
+    end
+  end
+
+  defp seed_root(doc, _path, _base_form), do: doc
+
+  defp base_form(socket), do: socket.assigns[:editor_form] || %{}
 
   defp foldable?(_key, value, _touched) when is_nil(value), do: false
   defp foldable?(key, "", touched), do: MapSet.member?(touched, key)
