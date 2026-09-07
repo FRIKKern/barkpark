@@ -437,7 +437,7 @@ defmodule Provenance do
   # `Scan.writes?/1` only matches MODULE-QUALIFIED calls, so a bare local
   # `patch_callback(doc, …)` that itself persists reads as a non-write there —
   # which is how the walk first labelled the return of a local write helper
-  # REQUEST-ROOTED (media_processing_controller.ex:61, caught by hand-reading
+  # REQUEST-ROOTED (media_processing_controller.ex's callback/2, caught by hand-reading
   # the three sites this arm first named). `Scan.writes?/1` is NOT widened:
   # doing so would move `write_reachable` across the whole corpus and silently
   # restate the A3 arm's population. The widening is local to this walk.
@@ -508,7 +508,7 @@ defmodule Provenance do
     # Auth.revoke_app_tokens_for_email(trimmed, …)}` has exactly one variable
     # (`trimmed`, a trimmed request email) and every variable is request-rooted
     # — yet the emitted NUMBER is the write's own return value. Classifying by
-    # variables alone accused it (app_token_controller.ex:392, found by
+    # variables alone accused it (app_token_controller.ex's revoke/2 email clause, found by
     # hand-reading). A payload that reaches a write carries a post-write fact
     # whether or not a variable holds it.
     payload_writes? = store_producing?(row.payload_ast)
@@ -980,13 +980,13 @@ defmodule Selftest do
        funs.(Provenance.by_verdict(fixed, :request_rooted)), []},
       {"A3b: the repair moves create/2 into store_fact (it did not merely vanish)",
        funs.(Provenance.by_verdict(fixed, :store_fact)), ["create/2", "sweep/2"]},
-      # REGRESSION, hand-read: app_token_controller.ex:392 was ACCUSED by the
+      # REGRESSION, hand-read: app_token_controller.ex's revoke/2 email clause was ACCUSED by the
       # first cut of this walk. Its only variable is a trimmed request email —
       # but the emitted number is the WRITE'S OWN RETURN. A payload that reaches
       # a write carries a post-write fact even when no variable holds it.
       {"A3b FP-1: a payload whose VALUE is the write's return is store_fact, not accused",
        funs.(Provenance.by_verdict(echo, :store_fact)), ["sweep/2"]},
-      # REGRESSION, hand-read: media_processing_controller.ex:61 was ACCUSED
+      # REGRESSION, hand-read: media_processing_controller.ex's callback/2 was ACCUSED
       # because `Scan.writes?/1` only matches module-qualified calls, so the
       # local write helper `patch_callback/5` read as a non-write.
       {"A3b FP-2: a BARE LOCAL mutate-vocab call is a store producer",
