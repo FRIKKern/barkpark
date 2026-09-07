@@ -104,8 +104,11 @@ defmodule BarkparkWeb.Studio.Caps do
   """
 
   import Phoenix.LiveView, only: [attach_hook: 4, put_flash: 3]
+  import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Access
+  alias Barkpark.Auth.ApiToken
+  alias Barkpark.Repo
   alias Barkpark.Tenancy
 
   # ── event classification (default-DENY: unclassified ⇒ :deny) ───────────────
@@ -234,7 +237,7 @@ defmodule BarkparkWeb.Studio.Caps do
 
   BUILT-IN ROLE ONLY (relabelled arpss-w10). The collapse figures are true for
   owner/admin/member and for nothing else: a USER-principal derive is 2 queries
-  (was 4), an API-TOKEN one is 1 (was 2), and the EVENT path 4. On a CUSTOM
+  (was 4), an API-TOKEN one is 2 (was 2), and the EVENT path 4. On a CUSTOM
   role the same USER derive costs 3 — 1 membership `Repo.one` + 1 `db_actions`
   `Repo.all` + 1 grant `Repo.all` — and the EVENT path 6, not 4. Those two
   custom-role figures were 5 and 10 until the collapse: pds-w43 collapsed the
@@ -247,6 +250,18 @@ defmodule BarkparkWeb.Studio.Caps do
   name (`granted_actions/2` answers from the compiled-in `@builtin_role_actions`
   map before `db_actions/2` runs) and ONE `Repo.all` for a custom one — so the
   built-in rows are unmoved and only the custom rows fall.
+
+  THE API-TOKEN ROW READS "2 (was 2)" ON PURPOSE, 2026-09-07
+  (task-02925b8af783e517). pds-w43 took it 2 -> 1 by collapsing the membership
+  loads; principal freshness has now taken it back 1 -> 2 by adding the
+  per-derive `%ApiToken{}` reload (`fresh_api_token/1`), so the figure has
+  returned to where it started by a DIFFERENT route. The "(was 2)" is the
+  pre-pds-w43 history and is left standing rather than rewritten, because the
+  cost test rebuilds this sentence from `@builtin_token_q` and the honest reading
+  is "one membership + one principal reload". The extra query buys the property
+  that a token revoked, expired or downgraded in the DB denies within ONE EVENT
+  instead of one MOUNT; it is the token-principal twin of the grant `Repo.all`
+  named below. No USER row and neither EVENT row moved — they carry no token.
 
   Every number above is ASSERTED row-by-row in
   `test/barkpark_web/live/studio/pds_w43_caps_derive_cost_test.exs`, and that
@@ -293,23 +308,47 @@ defmodule BarkparkWeb.Studio.Caps do
     * the component's own write seam, which re-asks this at the instant it
       authorizes (`grep -n 'refresh_write_capable' lib/barkpark_web/live/studio/sheet_grid.ex`).
 
-  WHAT IS FRESH HERE AND WHAT IS NOT. The MEMBERSHIP row and the GRANT set are
-  re-read from the DB on every call, so a revoked membership, a downgraded
-  ROLE and an expired grant all deny on the next call. The API-TOKEN
-  permissions array is NOT: it is read off the `%ApiToken{}` STRUCT captured at
-  mount by the session plug, so `Tenancy.Auth.permits?/2` still answers on
-  mount-time bytes and a token downgraded to `["read"]` (or revoked outright)
-  in the DB keeps `write == true` on an already-mounted socket until it
-  reconnects. That is a SECOND staleness this function does not close and must
-  not be read as closing — see the pds-w42 PR body.
+  WHAT IS FRESH HERE — ALL THREE INPUTS, SINCE 2026-09-07. The MEMBERSHIP row
+  and the GRANT set are re-read from the DB on every call, so a revoked
+  membership, a downgraded ROLE and an expired grant all deny on the next call.
+  The API-TOKEN PRINCIPAL is now re-read too (`fresh_api_token/1`,
+  task-02925b8af783e517): the `%ApiToken{}` the session plug captured at mount is
+  used only as an ID, and the row behind it is reloaded through
+  `Auth.verify_token/1`'s own liveness predicate (`kind == "api"`, not revoked,
+  not expired) before any seat is computed from it. So a token downgraded to
+  `["read"]`, revoked, disabled or expired in the DB denies on the NEXT EVENT,
+  not on the next mount.
+
+  This paragraph used to end "That is a SECOND staleness this function does not
+  close and must not be read as closing — see the pds-w42 PR body." It was true
+  when written and is not any more; the follow-up it named is the change that
+  closed it. The pds-w42 arm that asserted the gap OPEN was rewritten in place
+  to assert the denial (`pds_w42_caps_live_derive_test.exs`), and the
+  anonymous-escalation hazard the fix had to dodge — a revoked token must not
+  fall through to the principal-LESS public-demo posture — is written up at
+  `fresh_api_token/1` and asserted in `caps_principal_freshness_test.exs`.
   """
   @spec derive_from_assigns(map()) :: %{read: boolean, write: boolean, admin: boolean}
   def derive_from_assigns(assigns) when is_map(assigns) do
     ws = Map.get(assigns, :current_workspace)
     ws_id = ws && Map.get(ws, :id)
 
+    # GATED ON A RESOLVED WORKSPACE, and that is not an optimisation — it is
+    # the "an unresolved workspace costs NOTHING" guarantee both cost
+    # instruments assert (`caps_authorization_parity_test.exs`'s nil-workspace
+    # GUARD caught the ungated first draft at 1.0 q/op). The gate is the SAME
+    # `is_binary(ws_id)` shape guard `load_memberships/2` carries, and it loses
+    # no denial: with a non-binary ws_id that function returns `[]`, so every
+    # seat is empty and the caps map is all-false whatever this list holds.
     principals =
-      Enum.reject([Map.get(assigns, :api_token), Map.get(assigns, :current_user)], &is_nil/1)
+      if is_binary(ws_id) do
+        Enum.reject(
+          [fresh_api_token(Map.get(assigns, :api_token)), Map.get(assigns, :current_user)],
+          &is_nil/1
+        )
+      else
+        []
+      end
 
     desk = desk_scope(assigns)
     grants = if is_map(desk), do: active_grants(assigns), else: []
@@ -364,6 +403,83 @@ defmodule BarkparkWeb.Studio.Caps do
   def write_capable_now?(assigns) when is_map(assigns),
     do: write_capable?(assigns, derive_from_assigns(assigns))
 
+  # ── principal freshness (task-02925b8af783e517, 2026-09-07) ─────────────────
+  #
+  # THE STALENESS THIS CLOSES. `socket.assigns.api_token` is the `%ApiToken{}`
+  # the session plug captured AT MOUNT (`BarkparkWeb.LiveAuth.on_mount
+  # (:fetch_api_token)` — an `on_mount` hook and nothing else; there is NO
+  # `handle_event` hook re-verifying the bearer, VERIFIED 2026-09-07 by reading
+  # live_auth.ex, so `Auth.verify_token/1`'s revoked/expired WHERE clause runs
+  # exactly ONCE per socket lifetime). Every capability decision then read
+  # `permissions` off THAT struct, so a token downgraded to `["read"]`, revoked,
+  # disabled or EXPIRED in the database kept writing through an already-mounted
+  # Studio socket until it reconnected. Measured and asserted OPEN in
+  # `pds_w42_caps_live_derive_test.exs` before this change.
+  #
+  # THE MECHANISM: re-read the row, per derive, through the SAME predicate
+  # `Auth.verify_token/1` uses — `kind == "api"`, `revoked_at IS NULL`,
+  # `expires_at IS NULL OR expires_at > now`. `nil` means "no longer a valid
+  # bearer", by identity with the door that let it in. It is spelled here by id
+  # rather than by hash because the socket holds the loaded struct, not the raw
+  # bearer; the WHERE clause is otherwise the same one, and the `kind` filter is
+  # kept so a token flipped to a low-trust `"ticket"` mid-session stops
+  # authorizing here too.
+  #
+  # EXPIRY IS THEREFORE COVERED, and it was NOT before: the row said "may or may
+  # not be covered — verify, do not assume". It was not.
+  #
+  # ── THE ANONYMOUS-ESCALATION TRAP, AND WHY THIS SHAPE AVOIDS IT ─────────────
+  #
+  # `write_capable?/2` ends `… has_principal?(assigns) -> false; true -> true`.
+  # A principal-LESS socket is the intentionally-open anonymous public-demo
+  # posture and PASSES. So the naive revoke handling — nil the `:api_token`
+  # ASSIGN, or drop the principal where `has_principal?/1` can see it — would
+  # turn a REVOKED token into the OPEN posture: an ESCALATION, dressed as a
+  # denial, and criterion 2's wording ("denied the same way") would not catch it.
+  #
+  # This function is therefore deliberately NOT a socket/assigns rewrite. It is
+  # a read-only lens applied INSIDE `derive_from_assigns/1`'s local `principals`
+  # list. `assigns[:api_token]` is never touched, so `has_principal?/1` and
+  # `restricted?/1` — which both read the ASSIGNS map, not this list — still see
+  # a principal-BEARING socket. A revoked token thus contributes NO seat (caps
+  # `write: false`) and still trips the `has_principal?` arm, landing on `false`
+  # rather than on the fall-through `true`. Asserted directly, both halves, by
+  # `caps_principal_freshness_test.exs`.
+  #
+  # NIL-SAFE BY THE SAME CONSTRUCTION: `Enum.reject(…, &is_nil/1)` already
+  # removed a nil `:api_token` before this change; a revoked token now takes the
+  # identical path, so no clause anywhere downstream ever sees a nil principal
+  # and there is no new `FunctionClauseError` surface (criterion 2's crash arm).
+  #
+  # COST: +1 `Repo.one` per derive on a socket that carries an api_token AND a
+  # resolved workspace, and ZERO otherwise — no token principal (the `_other`
+  # clause never touches the Repo) and no workspace (the caller gates on
+  # `is_binary(ws_id)`). `@builtin_token_q` 1 -> 2 in the pds-w43 instrument. The USER rows,
+  # both EVENT rows and both `role_permits?/3` rows are UNMOVED — they carry no
+  # token principal. Deliberately no TTL memo: a bounded-staleness cache is the
+  # same defect with a shorter fuse, and the grant `Repo.all` two lines up
+  # already established that per-derive freshness is the price this module pays.
+  defp fresh_api_token(%ApiToken{id: id}) when is_binary(id) do
+    case Repo.uuid_or_nil(id) do
+      nil ->
+        nil
+
+      uuid ->
+        now = DateTime.utc_now()
+
+        Repo.one(
+          from(t in ApiToken,
+            where: t.id == ^uuid,
+            where: t.kind == "api",
+            where: is_nil(t.revoked_at),
+            where: is_nil(t.expires_at) or t.expires_at > ^now
+          )
+        )
+    end
+  end
+
+  defp fresh_api_token(_other), do: nil
+
   # ONE `Repo.one` per principal, handed to `Tenancy.Auth.seat_capabilities/3`
   # for the whole :read/:write/:admin decision. (The ROLE resolution behind it
   # used to run three times per user principal; it now runs once, inside that
@@ -415,13 +531,18 @@ defmodule BarkparkWeb.Studio.Caps do
   one. The `forked_pair` axis of the parity table still asserts they agree,
   cell by cell; it is now a shared-code agreement rather than a coincidence.
 
-  COST: the token arm holds no pre-loaded row, so it loads one — 0 → 1 query on
-  an `admin`-permissioned token socket with a BUILT-IN role, 0 → 2 with a CUSTOM
+  COST (restated 2026-09-07, task-02925b8af783e517): the token arm holds no
+  pre-loaded row, so it loads one — and since principal freshness it loads TWO,
+  the `%ApiToken{}` reload plus the membership. 0 → 2 queries on an
+  `admin`-permissioned token socket with a BUILT-IN role, 0 → 3 with a CUSTOM
   role (the resolver reads `role_permissions` for a non-built-in name). A
-  read-only token stays at 0.0: `Tenancy.Auth.permits?(token, :admin)` is the
-  FIRST conjunct and short-circuits before any load. `derive/1` is unaffected —
-  it reads the seat off rows it already holds and stays at 1.0 q/op (pds-w43
-  cost instrument).
+  read-only token stays at 0.0: `Tenancy.Auth.permits?(token, :admin)` on the
+  MOUNT-TIME struct is still the FIRST conjunct and short-circuits before any
+  load — kept deliberately, and sound because that conjunct can only deny more
+  than the fresh answer (see the clause comment below). `derive/1`'s token row
+  moved 1.0 → 2.0 q/op for the same reload; its USER and EVENT rows are unmoved
+  (pds-w43 cost instrument, plus the token rows in
+  `caps_authorization_parity_test.exs`).
   """
   @spec admin?(Phoenix.LiveView.Socket.t()) :: boolean
   def admin?(socket) do
@@ -439,10 +560,31 @@ defmodule BarkparkWeb.Studio.Caps do
   # `seat_capabilities/3` evaluates first, asked early so the load can be
   # skipped, and it can only ever DENY more. A token with a non-binary id, or an
   # unresolved workspace, denies WITHOUT touching the Repo.
-  defp token_admin_seat?(%Barkpark.Auth.ApiToken{id: id} = token, ws_id)
+  # PRINCIPAL FRESHNESS HERE TOO (task-02925b8af783e517, 2026-09-07). This
+  # module's own docs call `derive/1`'s `admin` key and this function a FORKED
+  # PAIR that "must move together", and the parity table asserts they agree cell
+  # by cell — so making `derive/1` fresh and leaving this one on mount-time bytes
+  # would fork them on exactly the axis the fix is about. Both arms of the
+  # conjunction below now read the RELOADED row.
+  #
+  # THE PRE-FILTER STAYS ON THE MOUNT-TIME STRUCT, AND THAT IS SOUND. The
+  # `permits?/2` conjunct runs first, against the stale struct, purely so a
+  # read-only token still costs ZERO queries (the parity table's 0.0 row). It can
+  # only ever DENY MORE than the fresh answer would: if the stale struct lacks
+  # `admin`, the token either never had it (deny is correct) or was UPGRADED
+  # mid-session, which this module has never honoured without a remount and which
+  # is the safe direction. If the stale struct HAS `admin`, nothing is concluded
+  # from it — the reload below is what decides, and a revoked or downgraded token
+  # dies there. So the cheap arm is a deny-only filter, never a grant.
+  defp token_admin_seat?(%ApiToken{id: id} = token, ws_id)
        when is_binary(id) and is_binary(ws_id) do
-    Tenancy.Auth.permits?(token, :admin) and
-      Tenancy.Auth.seat_capabilities(token, Tenancy.Auth.membership(token, ws_id), ws_id).admin
+    with true <- Tenancy.Auth.permits?(token, :admin),
+         %ApiToken{} = fresh <- fresh_api_token(token) do
+      Tenancy.Auth.permits?(fresh, :admin) and
+        Tenancy.Auth.seat_capabilities(fresh, Tenancy.Auth.membership(fresh, ws_id), ws_id).admin
+    else
+      _ -> false
+    end
   end
 
   defp token_admin_seat?(_token, _ws_id), do: false
