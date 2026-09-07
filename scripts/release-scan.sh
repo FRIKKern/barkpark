@@ -65,6 +65,21 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# ── the shared check-runs reader ─────────────────────────────────────────────
+# The check-run read goes through scripts/lib/check-runs.sh — the paged read
+# that ends in a comparison against the feed's own `total_count` and refuses
+# rather than emitting a set it cannot vouch for. `check_runs_feed` hands back
+# the RAW feed, not the lib's per-name TSV, because the advisory derivation
+# below counts reds PER SUITE and a dedup-by-name would collapse two reds of
+# one name into one — turning "cannot_tell" into a confident "blocking".
+CHECK_RUNS_LIB="${BARKPARK_CHECK_RUNS_LIB:-$REPO_ROOT/scripts/lib/check-runs.sh}"
+if [ ! -f "$CHECK_RUNS_LIB" ]; then
+  echo "release-scan: no check-runs reader at $CHECK_RUNS_LIB — refusing to derive a CI verdict without the shared primitive" >&2
+  exit 1
+fi
+# shellcheck source=scripts/lib/check-runs.sh
+. "$CHECK_RUNS_LIB"
+
 REF="${1:-origin/main}"
 SLUG="${RELEASE_SCAN_REPO:-FRIKKern/barkpark}"
 
@@ -159,8 +174,32 @@ CI_UNKNOWN='{"status":"unknown","status_reason":"gh unavailable or no check data
 
 # A check run carries .check_suite.id inline but NOT the suite's conclusion,
 # so the second call is genuinely needed to learn the rollup.
-runs_json="$(gh api "repos/${SLUG}/commits/${head_sha}/check-runs?per_page=100" \
-  --jq '[.check_runs[] | {name, status, conclusion, suite_id: .check_suite.id}]' 2>/dev/null || true)"
+#
+# THE READ IS PAGED AND PROVES ITS OWN COMPLETENESS, and for THIS script that is
+# a correctness fix, not tidiness. `?per_page=100` alone truncates at 100 with
+# no error and no flag (measured 2026-09-07 on head 33799f6d8: total_count 122,
+# 100 rows returned). Truncation here fails in the REASSURING direction, the
+# opposite of the census's: `$refids` below is the set of suite ids REFERENCED
+# by a check run, and ci.status is derived from those suites ALONE. A suite
+# whose runs all sit past row 100 is never referenced, so its conclusion never
+# reaches the rollup — a RED suite goes missing and the scan reports
+# ci.status "success" on a head that is failing, handing the release curator a
+# green light for a broken candidate. checks_total under-reports with it.
+#
+# So an incomplete read is NOT allowed to look like a small one: check_runs_feed
+# refuses, and the refusal lands on the honest degrade path this script already
+# owns (ci.status "unknown"), with a status_reason that NAMES the truncation
+# instead of blaming a missing feed. Best-effort is kept — a CI read that
+# cannot be vouched for must never fail the whole scan (git failure does that,
+# gh failure never has).
+ci_read_refused=""
+runs_json=""
+if ! ci_feed="$(check_runs_feed "$SLUG" "$head_sha" 2>&1)"; then
+  ci_read_refused="$(printf '%s' "$ci_feed" | head -1 | cut -c1-300)"
+else
+  runs_json="$(printf '%s' "$ci_feed" \
+    | jq -c '[.check_runs[] | {name, status, conclusion, suite_id: .check_suite.id}]' 2>/dev/null || true)"
+fi
 suites_json="$(gh api "repos/${SLUG}/commits/${head_sha}/check-suites?per_page=100" \
   --jq '[.check_suites[] | {id, status, conclusion}]' 2>/dev/null || true)"
 
@@ -211,7 +250,16 @@ classify_cancelled() {
         })'
 }
 
-if [ -z "$runs_json" ] || [ -z "$suites_json" ]; then
+if [ -n "$ci_read_refused" ]; then
+  # DISTINCT from "gh unavailable or no check data". The feed WAS reachable and
+  # answered; what could not be obtained is the WHOLE of it, and a partial
+  # rollup is indistinguishable from a green one. Say which it was.
+  ci_json="$(jq -n --arg why "$ci_read_refused" \
+    '{status:"unknown",
+      status_reason:("the check-run feed for this head could not be read COMPLETELY, so no rollup is derivable from it (a truncated read would look green): " + $why),
+      advisory_certainty:"cannot_tell", checks_total:0, suites_total:0,
+      failures:[], cancelled_runs:[]}')"
+elif [ -z "$runs_json" ] || [ -z "$suites_json" ]; then
   ci_json="$CI_UNKNOWN"
 else
   # Here-string, NOT `printf | grep -q`: grep -q closes its input on the first
