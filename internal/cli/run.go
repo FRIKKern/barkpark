@@ -588,6 +588,13 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// hinter is a CLOSURE, not a precomputed string, so the page walk behind the
 	// prefix suggestion runs only when the refusal actually IS an unannotated
 	// not_found — a 403, a 500, or a server that sent its own hint pays nothing.
+	// `bp task get -o json` only: materialise the two wrong field paths
+	// (.doc.content.claim / .doc.content.criteria) as `_misread` sentinels, so a
+	// parser walking them can no longer read a null as UNCLAIMED or as a row with
+	// NO CRITERIA. No-op for every other command and for the human table
+	// (tasks_get_misread.go).
+	respBody = annotateTaskGetMisreads(cmd, status, out.machineOut(), respBody)
+
 	var hinter func() string
 	if typed := taskGetTypedID(cmd, tail); typed != "" {
 		hinter = func() string { return taskGetNotFoundHint(out, m, ctx, typed) }
