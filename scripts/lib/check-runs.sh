@@ -38,8 +38,8 @@
 # one dedup, one sort — the callers pick their columns.
 #
 # THE READ IS PAGED AND PROVES ITS OWN COMPLETENESS. `?per_page=100` alone is a
-# silent truncation at 100 (measured: head 5df2cea8c, total_count 104, 100 rows
-# returned, 15 NAMES invisible). The live read now walks pages and asserts the
+# silent truncation at 100 (measured 2026-09-07: head 33799f6d8, total_count 122,
+# 100 rows returned, 22 NAMES invisible). The live read now walks pages and asserts the
 # accumulated count against the feed's own `total_count`; it REFUSES rather than
 # emitting a set it cannot vouch for. Cost is demand-driven — page one carries
 # total_count, so a head under 100 runs still costs exactly one request.
@@ -118,8 +118,16 @@ check_runs_rows_file() {
 
 # ── THE PAGED READ, AND WHY A COMPLETENESS PROOF AND NOT JUST `--paginate` ────
 #
-# MEASURED 2026-09-07: `repos/FRIKKern/barkpark/commits/5df2cea8c/check-runs?per_page=100`
-# answers `total_count: 104` and hands back exactly 100 elements. The REST API
+# MEASURED 2026-09-07: `repos/FRIKKern/barkpark/commits/33799f6d8/check-runs?per_page=100`
+# answers `total_count: 122` and hands back exactly 100 elements — hiding 22 distinct
+# names (73 unpaged vs 95 paged), among them `Doc budgets + anchors`, seven
+# `Dispatch (...)` jobs and three path-escape ratchets.
+#
+# PICK THE SPECIMEN BY NAMES, NOT BY RUN COUNT — a row-count over 100 does NOT imply a
+# hidden name. This comment first cited head 5df2cea8c (total_count 104), which hides
+# ZERO names: its 104 runs carry only 49 distinct names and page one already holds all
+# 49. Re-measured both directions with a control (a 95-run head also yields 0), so the
+# rule is that reruns inflate the COUNT without adding NAMES. The REST API
 # caps a page at 100 and says NOTHING about the remainder — no error, no flag on
 # the payload, just a short array. A reader that stops there is not wrong-looking,
 # it is silently blind, and it fails in the REASSURING direction: the required-
