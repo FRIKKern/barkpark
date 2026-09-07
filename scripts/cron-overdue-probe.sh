@@ -88,7 +88,20 @@
 #   bash scripts/cron-overdue-probe.sh --runs-file <ndjson> --now <iso>   # hermetic
 #   bash scripts/cron-overdue-probe.sh --table <file>        # override the table
 #   bash scripts/cron-overdue-probe.sh --no-dispatch         # report only, never fire
+#   bash scripts/cron-overdue-probe.sh --config-only         # table-vs-tree only
 #   bash scripts/cron-overdue-probe.sh --selftest            # no network
+#
+# THE CONFIG QUESTION AND THE LIVE QUESTION ARE ASKED SEPARATELY (2026-09-07,
+# task-16df558f0d748713). "Is every scheduled workflow classified?" is a fact
+# about the REPO. "Has a critical-cadence workflow gone silent?" is a fact about
+# GITHUB RIGHT NOW. They used to be welded together twice over — the selftest's
+# c1 asserted the repo's classification, and the report path did `check_table ||
+# exit 2` before it ever reached the overdue read — so ONE unclassified
+# `schedule:` disarmed the live safety net. Measured: 42 consecutive failing
+# runs and the overdue check dark for ~15h50m (2026-09-07T01:09:42Z..~16:59Z),
+# during which main-gate-watch.yml sat 238m past a 90m bound and nothing said
+# so. Now: the drift still REFUSES and still exits non-zero, but it no longer
+# answers a question it was not asked. --config-only is that question alone.
 #
 # THE HERMETIC INPUT IS RAW. --runs-file takes the newest run row per workflow
 # exactly as the API emits it — {"path": ".github/workflows/x.yml", "status":
@@ -98,7 +111,9 @@
 # EXIT CODES
 #   0 every critical-cadence workflow fired inside its bound
 #   1 OVERDUE — at least one critical workflow is silent past 3x its interval
-#   2 the table and the tree disagree, a fallback is missing, or usage
+#   2 the table and the tree disagree, a fallback is missing, or usage. In
+#     report mode this is now reached only when the CRON read itself came back
+#     clean: a drift never masks 1 or 3, and never suppresses the cron verdict.
 #   3 the run list could not be read — UNKNOWN, never reported as fired
 #
 # ENV
@@ -166,7 +181,7 @@ task-lease-renew.yml|critical|20|2026-09-03: the claim sweep. Ran ZERO times in 
 twoslash.yml|periodic|1440|2026-09-06: nightly twoslash type-check of the documentation snippets (cron 03:30Z); carries push: branches [main]. Same 2026-09-06 c1 red as deploy-harnesses.
 weekly-changelog.yml|report|10080|2026-09-03: weekly changelog digest.'
 
-usage() { sed -n '2,110p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,126p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -177,6 +192,11 @@ while [ $# -gt 0 ]; do
     --repo)       REPO="$2"; shift 2 ;;
     --factor)     OVERDUE_FACTOR="$2"; shift 2 ;;
     --no-dispatch) DISPATCH=0; shift ;;
+    # The CONFIGURATION question on its own: is every scheduled workflow in the
+    # tree classified, and does every critical cadence carry a fallback? It
+    # touches no network and reads no run list, which is exactly why it can be
+    # asked in a place that does not gate the live read.
+    --config-only) MODE=config; shift ;;
     --selftest)   MODE=selftest; shift ;;
     -h|--help)    usage ;;
     *) echo "cron-overdue-probe: unknown argument '$1'" >&2; usage ;;
@@ -528,14 +548,45 @@ STUB
     fail=$((fail+1)); echo "  FAIL c0 gh resolves to '$(gh_bin)', not the stub — every dispatch assertion below is live traffic"
   fi
 
-  # c1 — the table describes THIS tree. Non-vacuous: a table matching an empty
-  # tree would pass a set comparison trivially.
+  # c1 — THE COMPARISON CAN WIN, and that is ALL this arm asks now.
+  #
+  # It used to ask "does THIS repo's table match THIS repo's tree", which is a
+  # CONFIGURATION fact, not a fact about whether the probe still works — and the
+  # workflow runs this selftest as the tripwire BEFORE the live overdue read, so
+  # bundling the two meant one unclassified `schedule:` skipped the live check
+  # entirely. It did: 42 consecutive failing runs, the overdue check dark for
+  # ~15h50m on 2026-09-07, and main-gate-watch.yml 238m past a 90m bound behind
+  # it (task-16df558f0d748713). The configuration question is still asked and
+  # still REFUSES — `--config-only`, in its own workflow step and in the PR
+  # harness — it is simply not asked here, where a wrong answer disarms a probe.
+  #
+  # So c1 feeds check_table a table GENERATED FROM the tree and requires
+  # acceptance. Non-vacuous the same way it always was: a set comparison against
+  # an empty tree passes trivially, so the tree must hold at least 10 files.
+  # A WORKFLOWS DIR THE TABLE AGREES WITH BY CONSTRUCTION. The whole-program
+  # arms far below (c8d/c8d2) run the REPORT path, and the report path now
+  # reports a config drift instead of returning early — so one unclassified
+  # workflow in the real tree would turn c8d2's POSITIVE CONTROL red for a
+  # reason that has nothing to do with the dispatch arm it is controlling. That
+  # is this very defect one level down: measured on a planted unclassified
+  # workflow, 2026-09-07, c8d2 was the last arm still coupled to repo config.
+  # Point those arms at a directory holding exactly the table's own files.
+  local _tf
+  mkdir -p "$tmp/wf"
+  while IFS='|' read -r _tf _ _ _; do
+    [ -n "$_tf" ] || continue
+    [ -f "$WORKFLOWS_DIR/$_tf" ] && cp "$WORKFLOWS_DIR/$_tf" "$tmp/wf/$_tf"
+  done <<EOF
+$(table)
+EOF
+
   local n_tree
-  n_tree="$(scheduled_files | grep -c . || true)"
-  if check_table >/dev/null 2>&1 && [ "$n_tree" -ge 10 ]; then
-    pass=$((pass+1)); echo "  ok   c1 all $n_tree scheduled workflow(s) in .github/workflows carry a classification line, and none is classified that has no schedule"
+  n_tree="$(scheduled_files | awk 'END{print NR}')"
+  scheduled_files | awk '{print $0 "|periodic|1440|synthetic row, generated from the tree by selftest c1"}' > "$tmp/tree-table"
+  if TABLE_FILE="$tmp/tree-table" check_table >/dev/null 2>&1 && [ "$n_tree" -ge 10 ]; then
+    pass=$((pass+1)); echo "  ok   c1 a table generated from the $n_tree scheduled workflow(s) in the tree is ACCEPTED — the comparison can WIN, and this arm no longer depends on how the repo happens to be classified today"
   else
-    fail=$((fail+1)); echo "  FAIL c1 the table and the tree disagree ($n_tree scheduled files found)"; check_table
+    fail=$((fail+1)); echo "  FAIL c1 a table generated from the tree itself was refused ($n_tree scheduled files found)"; TABLE_FILE="$tmp/tree-table" check_table
   fi
 
   # c1b — and that comparison can LOSE: a table missing one row must refuse.
@@ -561,6 +612,65 @@ FIX
     fail=$((fail+1)); echo "  FAIL c2 a healthy fixture reddened (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
   fi
 
+  # ── A CONFIG DRIFT MUST NOT DISARM THE LIVE READ (task-16df558f0d748713) ──
+  # These four arms are the regression test for the whole point of this change.
+  # Run as WHOLE PROGRAMS, so what is asserted is the process exit code and the
+  # printed verdicts a human actually reads — not an internal return value.
+  #
+  # c1c — drift present, cron healthy: BOTH verdicts are printed, and the cron
+  # read genuinely ran. Before this change the script returned at `check_table
+  # || exit 2` and there was no cron verdict at all.
+  cat > "$tmp/drift-lag.ndjson" <<'FIX'
+{"path": "breakglass-watch.yml", "status": "completed", "created_at": "2026-09-03T11:41:00Z"}
+{"path": "stale-verdict-watch.yml", "status": "completed", "created_at": "2026-09-03T11:42:00Z"}
+{"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T09:00:00Z"}
+{"path": "cron-overdue-probe.yml", "status": "completed", "created_at": "2026-09-03T11:45:00Z"}
+FIX
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$WORKFLOWS_DIR" \
+           --table "$tmp/short-table" --runs-file "$tmp/fresh.ndjson" --now "$NOW" --no-dispatch 2>&1)"; rc=$?
+  if [ "$rc" = "2" ] \
+     && grep -q 'REFUSED: scheduled workflow(s) carry no classification line' <<<"$out" \
+     && grep -q 'VERDICT  config: DRIFT' <<<"$out" \
+     && grep -q 'VERDICT  cron: every critical-cadence workflow fired' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c1c an UNCLASSIFIED scheduled workflow REFUSES loudly (exit 2) and the cron verdict is still produced — the drift no longer takes the live read with it"
+  else
+    fail=$((fail+1)); echo "  FAIL c1c the drift suppressed the cron verdict or stopped refusing (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c1d — drift present AND a critical workflow overdue: the SCREAM owns the
+  # exit code (1, never laundered into a 2 that reads like a config chore) and
+  # the drift line is still printed. Neither verdict masks the other.
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$WORKFLOWS_DIR" \
+           --table "$tmp/short-table" --runs-file "$tmp/drift-lag.ndjson" --now "$NOW" --no-dispatch 2>&1)"; rc=$?
+  if [ "$rc" = "1" ] \
+     && grep -q 'OVERDUE  task-lease-renew.yml' <<<"$out" \
+     && grep -q 'VERDICT  cron: SCREAM' <<<"$out" \
+     && grep -q 'VERDICT  config: DRIFT' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c1d with a drift AND an overdue critical workflow, the exit code is the SCREAM (1) and both verdicts print — a drift cannot launder a silent safety net into a config chore"
+  else
+    fail=$((fail+1)); echo "  FAIL c1d the drift and the scream interfered (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c1e — --config-only asks the drift question ALONE, and refuses.
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$WORKFLOWS_DIR" \
+           --table "$tmp/short-table" --config-only 2>&1)"; rc=$?
+  if [ "$rc" = "2" ] && grep -q 'VERDICT  config: DRIFT' <<<"$out" \
+     && grep -q 'main-gate-watch.yml' <<<"$out" \
+     && ! grep -q 'VERDICT  cron:' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c1e --config-only REFUSES the same drift (exit 2), names the workflow, and reads no run list at all — the drift has a home that is not the tripwire"
+  else
+    fail=$((fail+1)); echo "  FAIL c1e --config-only did not refuse the drift cleanly (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c1e2 — and --config-only can PASS: the tree-generated table is accepted, so
+  # c1e is a question that can go either way rather than a mode that always reds.
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$WORKFLOWS_DIR" \
+           --table "$tmp/tree-table" --config-only 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] && grep -q 'VERDICT  config: every scheduled workflow' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c1e2 …and --config-only ACCEPTS a table that matches the tree — c1e is a question that can win"
+  else
+    fail=$((fail+1)); echo "  FAIL c1e2 --config-only refused a table generated from the tree (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
   # c3 — THE MUTATION THIS PROBE EXISTS FOR: fake a 6 h gap on main-gate-watch
   # (*/30, bound 90m) and nothing else. One field moves; the verdict must move
   # with it, and it must NAME the workflow.
@@ -831,7 +941,7 @@ STUB
   else
     fail=$((fail+1)); echo "  FAIL c8d-mut the mutation did not apply — c8d below would prove nothing"
   fi
-  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$tmp/nodispatch.sh" --workflows "$WORKFLOWS_DIR" \
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$tmp/nodispatch.sh" --workflows "$tmp/wf" \
            --runs-file "$tmp/lag92.ndjson" --now "$NOW" 2>&1)"; rc=$?
   if [ "$rc" = "1" ] && grep -q 'OVERDUE  main-gate-watch.yml' <<<"$out"; then
     pass=$((pass+1)); echo "  ok   c8d …and with the dispatch arm removed the SAME 92m fixture reds again — c8a is the arm doing the work, not the fixture"
@@ -839,7 +949,7 @@ STUB
     fail=$((fail+1)); echo "  FAIL c8d the mutant still passed (rc=$rc) — c8a proves nothing"; printf '%s\n' "$out" | sed 's/^/       /'
   fi
   # …and the positive control: the UNMUTATED script, same invocation, exits 0.
-  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$WORKFLOWS_DIR" \
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$tmp/wf" \
            --runs-file "$tmp/lag92.ndjson" --now "$NOW" 2>&1)"; rc=$?
   if [ "$rc" = "0" ]; then
     pass=$((pass+1)); echo "  ok   c8d2 …and the unmutated script on that identical invocation exits 0 — the pair differs only by the mutation"
@@ -864,10 +974,39 @@ STUB
 
 if [ "$MODE" = selftest ]; then selftest; exit $?; fi
 
+# ── --config-only: the CONFIGURATION question, alone ────────────────────────
+# No network, no run list, no verdict about cron. This exists so the drift can
+# be asked somewhere that does not gate the live read — and so it can be asked
+# at PR time, before the drift is ever on main to disarm anything.
+if [ "$MODE" = config ]; then
+  echo "cron-overdue-probe — CONFIGURATION only: is every scheduled workflow classified, and does every critical cadence carry a fallback?"
+  echo
+  CRC=0
+  check_table     || CRC=2
+  check_fallbacks || CRC=2
+  echo
+  if [ "$CRC" -eq 0 ]; then
+    echo "VERDICT  config: every scheduled workflow in .github/workflows carries a classification line, and every critical cadence carries a trigger fallback"
+  else
+    echo "VERDICT  config: DRIFT — the classification table and the tree disagree (named above). This is a REFUSAL, not a warning."
+  fi
+  exit "$CRC"
+fi
+
 echo "cron-overdue-probe — repo $REPO, bound ${OVERDUE_FACTOR}x the schedule interval"
 echo
-check_table || exit 2
-check_fallbacks || exit 2
+# THESE TWO NO LONGER `exit 2` ON THE SPOT (2026-09-07, task-16df558f0d748713).
+# They used to, which meant a CONFIGURATION drift — somebody adds a `schedule:`
+# and does not classify it — returned before the LIVE overdue read had run at
+# all. That is not the question the drift answers, and the cost of letting it
+# answer was measured: the overdue check dark ~15h50m while main-gate-watch.yml,
+# whose ONLY fallback is this probe (a push arm is forbidden there by
+# scripts/main-gate-watch.test.sh), sat 238m past its 90m bound. The drift is
+# still a refusal — it is carried in DRIFT, printed as its own VERDICT line
+# below, and exits non-zero — it just no longer takes the safety net with it.
+DRIFT=0
+check_table     || DRIFT=2
+check_fallbacks || DRIFT=2
 echo
 check_overdue
 RC=$?
@@ -877,4 +1016,15 @@ case "$RC" in
   1) echo "VERDICT  cron: SCREAM — a critical-cadence workflow is silent past ${OVERDUE_FACTOR}x its interval AND could not be fired (named above). GitHub cron is best-effort, so lag alone is no longer a scream: a cron-only critical workflow past bound is DISPATCHED by this probe, and only a failed dispatch, a dispatched run that never appeared, a push-armed workflow gone quiet, or a workflow with no run row at all reaches this verdict. A re-run of this probe is not the remedy." ;;
   3) echo "VERDICT  cron: UNKNOWN — the run list could not be read. Not a pass." ;;
 esac
-exit $RC
+
+# THE DRIFT IS A SECOND, INDEPENDENT VERDICT — printed whatever the cron read
+# said, so it can never be masked by a scream and can never mask one.
+if [ "$DRIFT" -ne 0 ]; then
+  echo "VERDICT  config: DRIFT — the classification table and the tree disagree (REFUSED, named above). This is a SEPARATE refusal from the cron verdict above, and it does not change it: classify the workflow in $(basename "$0")."
+fi
+
+# THE CODE IS THE WORST LIVE VERDICT, and the drift only owns it when the cron
+# read came back clean. A drift must never launder a 1 (a silent safety net) or
+# a 3 (an unreadable run list) into a 2 that reads like a config chore.
+[ "$RC" -ne 0 ] && exit "$RC"
+exit "$DRIFT"
