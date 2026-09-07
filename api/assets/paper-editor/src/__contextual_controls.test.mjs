@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const shell = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
+assert.match(shell, /\.bp-paper-surface \.bp-paper-add-block :is\(select, button\)\s*\{[^}]*background: var\(--paper-bg-deep\);[^}]*color: var\(--paper-ink\);/s,
+  "public article add-block controls use the Paper theme without Studio button CSS");
 const surface = readFileSync(new URL("../../paper-surface/paper-surface.css", import.meta.url), "utf8");
 const documentFlow = shell.match(/\.bp-paper-editor\s*\{([^}]*)\}/);
 assert.match(documentFlow?.[1] ?? "", /display:\s*flow-root/,

@@ -6,6 +6,10 @@ import { JSDOM } from "jsdom";
 // the public shell and standalone editor mirrors scoped to that explicit case.
 for (const file of ["../styles.css", "../../../../priv/static/assets/bp-paper-editor-shell.css"]) {
   const css = readFileSync(new URL(file, import.meta.url), "utf8");
+  assert.match(css, /\.bp-paper-contextual-controls\.bp-paper-cards-config,\s*\.bp-paper-contextual-controls\.bp-paper-stats-config\s*\{[^}]*bottom: 100%;/s,
+    "native collection configuration sits above authored content in every palette");
+  assert.match(css, /\.bp-paper-contextual-controls\.bp-paper-cards-config\[open\],\s*\.bp-paper-contextual-controls\.bp-paper-stats-config\[open\]\s*\{[^}]*position: relative;/s,
+    "native collection fallback opens in flow without covering fields");
   assert.match(css, /\[data-paper-palette="legacy"\] \.bp-paper-editor-body \.ProseMirror > p\s*\{\s*margin: 1em 0;\s*\}/,
     "legacy paragraphs retain reader spacing without changing article typography");
   assert.match(css, /\[data-paper-palette="legacy"\] \.bp-paper-contextual-controls\s*\{[^}]*bottom: 100%;/s,
