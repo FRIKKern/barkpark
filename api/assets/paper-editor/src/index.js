@@ -223,7 +223,8 @@ class BpPaperEditor extends HTMLElement {
             if (node.type.name === "heading") {
               return PLACEHOLDER.heading(node.attrs && node.attrs.level);
             }
-            return PLACEHOLDER.paragraph;
+            const hint = PLACEHOLDER[this._blockType];
+            return typeof hint === "string" ? hint : PLACEHOLDER.paragraph;
           },
         }),
         // Smart typography (— for --, “ ” for quotes, … for ...) — parity with
