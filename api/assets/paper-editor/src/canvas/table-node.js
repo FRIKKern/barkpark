@@ -192,8 +192,8 @@ function collectCellStarts(tableNode, tablePos) {
 }
 
 // Move the caret to the previous (dir=-1) / next (dir=1) cell. Returns false when the
-// caret is not in a table (default Tab/Enter proceeds) and true otherwise — including
-// at a grid edge, where it swallows the key so focus never escapes the editor.
+// caret is outside the table or at a grid edge, allowing native focus navigation
+// to reach the surrounding controls instead of trapping keyboard users.
 function moveCell(editor, dir) {
   const { state } = editor;
   const { $from } = state.selection;
@@ -206,9 +206,9 @@ function moveCell(editor, dir) {
   const curCellStart = $from.before(ci.depth) + 1;
   const starts = collectCellStarts(tableNode, tablePos);
   const idx = starts.indexOf(curCellStart);
-  if (idx === -1) return true;
+  if (idx === -1) return false;
   const target = idx + dir;
-  if (target < 0 || target >= starts.length) return true;
+  if (target < 0 || target >= starts.length) return false;
   editor.chain().focus().setTextSelection(starts[target]).run();
   return true;
 }

@@ -1272,6 +1272,16 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-paper-editor-body li > p { margin: 0; }
 /* Preserve typed spaces without giving trailing spaces their own wrap width. */
 .bp-paper-surface .ProseMirror { white-space: pre-wrap; }
+
+[data-bp-text-boundary] {
+  margin-block: 12px;
+  padding: 10px 12px;
+  border-inline-start: 2px solid var(--paper-accent, currentColor);
+  color: var(--paper-ink-soft);
+  font-family: var(--paper-font-ui, system-ui, sans-serif);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
 /* Opening paragraphs retain the reader's role-specific rhythm. Clamping them
    lifts the Chronicle navigation and title by one paragraph margin in Edit. */
 .bp-paper-editor > .bp-paper-edit-canvas:nth-child(1 of .bp-paper-edit-canvas, .bp-paper-edit-block) .bp-paper-editor-body .ProseMirror > :first-child:not(p) { margin-top: 0; }

@@ -31,6 +31,7 @@
 
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import { portableTextBoundary } from "../portable-text-boundary.js";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
@@ -582,6 +583,7 @@ class BpPaperCanvas extends HTMLElement {
       element: this._mount,
       editable: this._editable,
       extensions: [
+        portableTextBoundary(this),
         // pdd-t2/t14: the doctrine template-lock veto as a REAL ProseMirror
         // plugin. `filterTransaction` is a PLUGIN-spec option — as an
         // editorProps entry it is silently ignored by the view (found live in
