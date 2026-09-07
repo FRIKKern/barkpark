@@ -48,11 +48,20 @@ defmodule BarkparkWeb.Studio.TopbarFocusContainmentTest do
     end
   end
 
+  test "a missing rule fails with the selector in the diagnostic" do
+    assert_raise ExUnit.AssertionError, ~r/missing CSS rule: \.missing/, fn ->
+      rule!(".other { display: flex; }", ".missing")
+    end
+  end
+
   defp rule!(source, selector) do
     # Match each comma-list member independently, never a substring of a
     # bucket selector. Missing rules fail loudly rather than testing nil.
     pattern = ~r/(?:^|\n)\s*#{Regex.escape(selector)}\s*(?:,\s*[^{}]+)?\{([^{}]*)\}/
-    assert [_, body] = Regex.run(pattern, source), "missing CSS rule: #{selector}"
-    body
+
+    case Regex.run(pattern, source) do
+      [_, body] -> body
+      nil -> flunk("missing CSS rule: #{selector}")
+    end
   end
 end
