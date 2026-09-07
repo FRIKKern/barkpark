@@ -4028,18 +4028,37 @@ defmodule BarkparkWeb.TasksControllerTest do
     # claim 936 · criteria_total 865 · criteria_met 768 · child_count 753 ·
     # assignee 654 · priority 600 · lifecycle_status 252 · dispatch 132 ·
     # disposition 100 · status 32. Live titles average 84.6 graphemes and live
-    # doc_ids 28.7 against this fixture's ~57 and ~11. A variant of this fixture
-    # rebuilt at the live 2026-09-07 presence ratios and live string lengths
-    # measured 17,663 B — 115% of the bound. So the honest choices were: land a
-    # red, RAISE 15,360 (hides the breach), or shrink the assertion to whatever
-    # the fixture emits (weakens the gate). All three were refused. The number
-    # below is left exactly where the epic promised it, the shape is derived so
-    # no future key can hide, and the live figure is written down here so the
-    # next reader compares against production rather than against this fixture.
+    # doc_ids 28.7, against this fixture's ~57 and ~11.
     #
-    # ALSO NOT COVERED: `dispatch` (needs live child counts, absent here);
-    # page-level envelope keys beyond `docs`/`help`; and real board string
-    # lengths, per the paragraph above.
+    # That variant was BUILT AND MEASURED rather than estimated: this same
+    # fixture rebuilt at the live 2026-09-07 presence ratios (labels 19/50,
+    # assignee 20/50, parent_id 42/50, lifecycle_status 9/50, disposition 5/50)
+    # and live string lengths renders 50 cards in 17,725 B — 115% of the bound,
+    # and within 2.6% of the live 18,196 B reading above. So the honest choices
+    # were: land a red, RAISE 15,360 (hides the breach), or shrink the assertion
+    # to whatever the fixture emits (weakens the gate). All three were refused.
+    # The bound below is left exactly where the epic promised it, the shape is
+    # derived above so no future key can hide, and the live figure is written
+    # down here so the next reader compares against PRODUCTION rather than
+    # against this fixture.
+    #
+    # ALSO NOT COVERED, each measured while writing this:
+    #
+    #   * `claim` — 936 B on the live page, STRUCTURALLY UNREACHABLE from a
+    #     ready fixture. A claim naming a worker takes the row off the ready
+    #     queue outright: seeding nine worker-bearing claims dropped the page
+    #     from 50 cards to 41. The live board serves nine ready cards that DO
+    #     render a claim, so live carries a claim shape this fixture cannot
+    #     construct; the seeded residues here are worker-less and render
+    #     nothing, which the card-key census printed below makes visible
+    #     instead of leaving to be inferred from a byte count.
+    #   * `status` — 32 B live (2/50 rows are drafts) against 50/50 here, since
+    #     `mk_card_task!/4` creates drafts. This fixture OVERCOUNTS that key by
+    #     roughly 770 B; it is the one place the fixture is heavier than live.
+    #   * `dispatch` — needs live child counts, absent here (0/50 vs live 6/50).
+    #   * `child_count` — present on all 50 cards but always 0: the fixture
+    #     seeds no children, so the key is measured and its VALUE is not.
+    #   * page-level envelope keys beyond `docs` / `help`.
     test "realistic-mix tripwire: 50 brief ready cards ≤ 15,360 B",
          %{conn: conn, scope: scope} do
       ts = "2026-07-19T12:00:00.123456Z"
