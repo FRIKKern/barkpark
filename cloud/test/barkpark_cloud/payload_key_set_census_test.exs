@@ -3778,7 +3778,7 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
   # Verbatim corpus samples, same provenance as DeployLedgerTest's.
   @r409_coded "the instance refused the deploy (HTTP 409): already_running — a deploy is already in flight"
   @r500 "the instance refused the deploy (HTTP 500)"
-  @gh_push "github push builds require the GitHub App integration (not yet available) — deploy an artifact via bp deploy"
+  @gh_push "github push builds require a linked GitHub repo on this site — link a repo to this site, or deploy an artifact via bp deploy"
 
   # ── SIDE A: the register, one row per key PATH the wire carries ──────────
   #

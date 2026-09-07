@@ -750,18 +750,44 @@ defmodule BarkparkCloud.FailureCopy do
       typed_refusal?(reason) ->
         reason
 
+      # THE NO-LINKED-REPO ARM, checked BEFORE the legacy arm below because its
+      # token is a STRICT REFINEMENT of that arm's `"github push builds"` — the
+      # broad token would swallow it.
+      #
+      # Two conditions share the GITHUB_PUSH_UNBUILDABLE family and need OPPOSITE
+      # remedies, which is why one sentence cannot serve both: (a) LEGACY rows,
+      # born failed before `github_build_available?/1` became a repo-present
+      # predicate — nothing retro-builds them, so "push again" is their only way
+      # forward; (b) a push TODAY on a site with NO linked repo — pushing again
+      # changes nothing, the cure is to LINK A REPO. This arm speaks for (b),
+      # matching the raw reason the router mints today
+      # (`@github_push_build_reason`); the arm below keeps speaking for (a),
+      # whose rows are already written and unrewritable. Blocked-tone.
+      #
+      # The output carries none of the tokens any clause here (or the client's
+      # `isGithubPushBlocked`) matches, so a second `failureCopy()` pass is
+      # idempotent — it passes this string through verbatim.
+      String.contains?(down, "require a linked github repo") ->
+        "This site has no GitHub repo linked, so a push has nothing to build from — link a repo to this site, or deploy this commit with bp deploy."
+
       # dwb-webhook fail-fast: a GitHub push was recorded as a born-`failed`
       # deployment. Source builds have since ARRIVED — the router's
       # `github_build_available?/1` is a real repo-present predicate, so a push
       # on a repo-backed site now mints a queued row the builder claims. The
-      # rows this clause speaks for are LEGACY: they were born failed before
+      # rows this clause speaks for are LEGACY ONLY: they were born failed before
       # that flip, and no retro-build moves them. So the copy explains what
       # happened and names the two ways forward (push again, or `bp deploy`) —
       # it must never promise the capability as future, which it has not been
       # since the predicate flip. Blocked-tone.
-      # Checked FIRST — the raw reason is a known exact string; its output does
-      # not re-match any clause (no "github push builds" token), so a second
-      # client-side `failureCopy()` pass is idempotent.
+      #
+      # It no longer speaks for a push on a repo-less site: that condition mints
+      # a reason carrying the narrower `"require a linked github repo"` token and
+      # is caught by the arm ABOVE. "Predates GitHub source builds" would be a
+      # lie about a push made today, and "push again" would be a lie about its
+      # cure.
+      #
+      # Its output does not re-match any clause (no "github push builds" token),
+      # so a second client-side `failureCopy()` pass is idempotent.
       String.contains?(down, "github push builds") ->
         "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy."
 
