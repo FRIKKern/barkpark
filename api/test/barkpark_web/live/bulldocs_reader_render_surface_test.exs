@@ -38,6 +38,30 @@ defmodule BarkparkWeb.BulldocsReaderRenderSurfaceTest do
   defp para(id, text),
     do: %{"id" => id, "type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
 
+  test "reader declares its palette without changing authored style or rendered block bytes", %{
+    conn: conn
+  } do
+    for style <- [nil, "article", "article-wide"] do
+      slug = "reader-palette-#{System.unique_integer([:positive])}"
+
+      block = %{
+        "id" => "cards",
+        "type" => "cards",
+        "items" => [%{"title" => "Original", "text" => "Body"}]
+      }
+
+      attrs = %{"slug" => slug, "blocks" => [block]}
+      attrs = if style, do: Map.put(attrs, "style", style), else: attrs
+      {:ok, doc} = Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(attrs))
+      {:ok, _view, html} = live(conn, "/papers/#{slug}")
+      palette = if style, do: "article", else: "legacy"
+      assert html =~ ~s(data-paper-palette="#{palette}")
+      assert html =~ Render.render_block(block, %{style: :article})
+      assert doc.content["style"] == style
+      if is_nil(style), do: refute(Map.has_key?(doc.content, "style"))
+    end
+  end
+
   test "a NON-article paper streams the :article bytes and carries no email stamp", %{conn: conn} do
     slug = "reader-render-surface-#{System.unique_integer([:positive])}"
     block = para("p1", "reader body copy that must not carry mail type")

@@ -1580,6 +1580,8 @@
 
 /* PM list items require a paragraph; reader items carry inline text. */
 .bp-paper-editor-body li > p { margin: 0; }
+/* No authored article palette: retain the browser's legacy paragraph rhythm. */
+[data-paper-palette="legacy"] .bp-paper-editor-body .ProseMirror > p { margin: 1em 0; }
 /* Preserve typed spaces without giving trailing spaces their own wrap width. */
 .bp-paper-surface .ProseMirror { white-space: pre-wrap; }
 /* Opening paragraphs retain the reader's role-specific rhythm. Clamping them

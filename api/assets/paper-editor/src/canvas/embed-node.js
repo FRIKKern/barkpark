@@ -309,6 +309,14 @@ export const Embed = readOnlyAtomNode({
 // blank strip (mirrors the loading/empty/error honesty of task_block_preview/1).
 export const BP_FLEET_NODE_NAME = "bpFleet";
 
+// The public reader explicitly retains its legacy palette when no article
+// style is authored. Do not introduce an article styling island inside it.
+// Unmarked standalone embedders and Studio retain their existing default.
+export function readerPaintClass(editor) {
+  return editor.options.element.closest("[data-paper-palette]")?.getAttribute("data-paper-palette") === "legacy"
+    ? "" : "bp-paper-surface";
+}
+
 // The human label for the loading chip, derived from the fleet block's kind. A
 // terse, capitalized noun ("Task board", "Cards", …) so the pre-paint fallback
 // reads as an intentional placeholder, not a broken block. Unknown kinds fall back
@@ -750,7 +758,7 @@ export const Fleet = Node.create({
       // The `.bp-paper-surface` sink: the injected reader HTML is styled by the ONE
       // canonical stylesheet exactly as /papers renders it (D8 — no hand-mirrored
       // markup, no editor-only CSS).
-      body.className = "bp-paper-surface";
+      body.className = readerPaintClass(editor);
       body.setAttribute("data-bp-fleet-body", "");
 
       const chip = document.createElement("div");
