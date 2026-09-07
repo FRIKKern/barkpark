@@ -10358,6 +10358,15 @@ defmodule BarkparkCloud.Web.Router do
   # route is the thin team-scoped door, byte-for-byte the same auth walk as the
   # domain-status sibling below (USER-authed, SAME no-existence-leak 404 for a
   # wrong-team / absent / malformed id) — no new tier is invented for it.
+  #
+  # IT IS NOT THE domain-status SIBLING'S REACH. That route's own note below
+  # says it "reads only public DNS + the box's own TLS/HTTP — no admin token,
+  # no zone read"; THIS ONE DOES USE THE ADMIN RELAY. `Registry.content_webhook_state/1`
+  # → `find_content_webhook/3` → `relay_admin/4` lists the box's webhooks, and the
+  # read-token liveness probe goes out over `Registry.relay_as/4` as the SITE's
+  # own token. Stated here because the two blocks sit adjacent and an auth
+  # reviewer skimming for "which routes spend the admin credential" must not
+  # read the sibling's sentence as covering this route.
   get "/v1/sites/:id/doctor" do
     conn = Auth.require_user(conn, [])
 
