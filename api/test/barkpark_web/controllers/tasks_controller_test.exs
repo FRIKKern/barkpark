@@ -141,6 +141,95 @@ defmodule BarkparkWeb.TasksControllerTest do
     doc
   end
 
+  # ─── The brief card's CONTENT-SOURCE KEY SET, derived from the renderer ──
+  #
+  # task-69ba050120c2c021. A synthetic fixture is frozen at the shape its
+  # author knew; the live card is not. `labels` joined the brief card on
+  # 2026-09-05 and `child_count` before it, and neither rode this fixture —
+  # so the guard below sat at 78% of its budget while the page it exists to
+  # guard sat at 118% of the same budget, and no run could tell.
+  #
+  # The fix is not a longer hand-typed list — that is the same defect with a
+  # later date on it. It is to READ the renderer and ask it which content
+  # keys it consumes. `Params.render_doc/2 :brief` reaches content exactly
+  # twice: `Map.get(content, "<key>")` (eight call sites today) and
+  # `Criteria.progress(content)`. Both are matched here, off the module's own
+  # compile-time source path — not a repo-relative guess, and not a copy.
+  #
+  # WHAT THIS BUYS: a new `put_brief_*/2` that reads a new content key makes
+  # this set GROW, and `assert_brief_keys_covered!/1` below reds by NAME
+  # until the fixture populates it — at which point the measured bytes move.
+  # WHAT IT DOES NOT BUY: keys with no content source. `child_count` and
+  # `dispatch` are computed in `render_brief/3` from batched child counts,
+  # never read off `content`, so they are outside this derivation; the
+  # fixture carries child_count on all 50 cards anyway (it is unconditional,
+  # so it can never ride unmeasured) and `dispatch` on none.
+  defp brief_content_source_keys do
+    source =
+      BarkparkWeb.TasksController.Params.module_info(:compile)
+      |> Keyword.fetch!(:source)
+      |> to_string()
+
+    assert File.exists?(source),
+           "brief renderer source not readable at #{source} — the derivation below " <>
+             "would return an empty set and pass vacuously"
+
+    # From the :brief clause head down to the first shared helper after the
+    # brief block. Symbol-anchored on both ends: line numbers rot, and an
+    # anchor that stopped matching is caught by the non-vacuity floor below.
+    region =
+      source
+      |> File.read!()
+      |> String.split("\n")
+      |> Enum.drop_while(&(not String.contains?(&1, "def render_doc(%Document{} = doc, :brief)")))
+      |> Enum.take_while(
+        &(not String.contains?(&1, "defp put_unless(map, _key, steady, steady)"))
+      )
+      |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#"))
+      |> Enum.join("\n")
+
+    keys =
+      ~r/Map\.get\(content, "([a-z_]+)"\)/
+      |> Regex.scan(region, capture: :all_but_first)
+      |> List.flatten()
+      |> MapSet.new()
+
+    # The one non-`Map.get` content read in the region, pinned to the exact
+    # call: a rename shrinks the set silently otherwise.
+    keys =
+      if String.contains?(region, "Criteria.progress(content)"),
+        do: MapSet.put(keys, "acceptance_criteria"),
+        else: keys
+
+    # NON-VACUITY FLOOR, not a key list. An empty or near-empty set would
+    # make every coverage assertion below trivially true — which is the exact
+    # class of failure this whole derivation exists to end. The floor is the
+    # count measured 2026-09-07 (8 Map.get sites + acceptance_criteria); it
+    # may only ever be RAISED, and it deliberately does not name the keys, so
+    # a rename is caught by the count while an addition is caught by coverage.
+    count = MapSet.size(keys)
+
+    assert count >= 9,
+           "derived brief content-key set collapsed to #{count} key(s) " <>
+             "(#{inspect(Enum.sort(keys))}) — the region anchors in " <>
+             "brief_content_source_keys/0 no longer match the renderer"
+
+    keys
+  end
+
+  # `seeded` is the union of content keys the fixture ACTUALLY wrote, taken
+  # from the maps handed to mk_card_task! — never a second hand-typed list.
+  defp assert_brief_keys_covered!(seeded) do
+    derived = brief_content_source_keys()
+    missing = MapSet.difference(derived, seeded)
+
+    assert MapSet.equal?(missing, MapSet.new()),
+           "the brief card reads content key(s) #{inspect(Enum.sort(missing))} that no " <>
+             "fixture card populates — they ride production unmeasured by the byte " <>
+             "tripwire below. Populate them in the fixture (the bytes will move) or " <>
+             "state in this file why they cannot be reached."
+  end
+
   defp authed(conn) do
     conn
     |> put_req_header("authorization", "Bearer " <> @token)
@@ -3917,6 +4006,40 @@ defmodule BarkparkWeb.TasksControllerTest do
     # Any cut that regresses — a nil key creeping back, a cap widening, a
     # steady-state omission dropped — shows up here as raw bytes.
 
+    # ─── WHAT THIS TRIPWIRE DOES NOT COVER (task-69ba050120c2c021, c1) ──────
+    #
+    # THE GAP, WITH NUMBERS. This fixture is PRESENCE-complete against the
+    # renderer (every content key it reads is populated by at least one card,
+    # enforced above) but DENSITY-LIGHT against the live board. Measured the
+    # same day, three readings of a live `bp task ready --limit 50` envelope:
+    #
+    #     18,113 B  2026-09-07 ~17:29Z
+    #     18,196 B  2026-09-07  17:36Z
+    #     18,871 B  2026-09-07 ~15:5xZ
+    #
+    # — 118% to 123% of the 15,360 B bound asserted below. The spread is row
+    # churn on a live endpoint, not instrument drift. PRODUCTION IS OVER THIS
+    # BOUND AND HAS BEEN SINCE AT LEAST 2026-09-05; this test does not and
+    # cannot show that, and its green must never be read as "the ceiling holds".
+    #
+    # WHY THE FIXTURE IS NOT SIMPLY RAISED TO LIVE DENSITY. It cannot be and
+    # stay green: per-key bytes across those same 50 live cards were title
+    # 4,728 · labels 2,056 · doc_id 1,983 · updated_at 1,750 · parent_id 1,601 ·
+    # claim 936 · criteria_total 865 · criteria_met 768 · child_count 753 ·
+    # assignee 654 · priority 600 · lifecycle_status 252 · dispatch 132 ·
+    # disposition 100 · status 32. Live titles average 84.6 graphemes and live
+    # doc_ids 28.7 against this fixture's ~57 and ~11. A variant of this fixture
+    # rebuilt at the live 2026-09-07 presence ratios and live string lengths
+    # measured 17,663 B — 115% of the bound. So the honest choices were: land a
+    # red, RAISE 15,360 (hides the breach), or shrink the assertion to whatever
+    # the fixture emits (weakens the gate). All three were refused. The number
+    # below is left exactly where the epic promised it, the shape is derived so
+    # no future key can hide, and the live figure is written down here so the
+    # next reader compares against production rather than against this fixture.
+    #
+    # ALSO NOT COVERED: `dispatch` (needs live child counts, absent here);
+    # page-level envelope keys beyond `docs`/`help`; and real board string
+    # lengths, per the paragraph above.
     test "realistic-mix tripwire: 50 brief ready cards ≤ 15,360 B",
          %{conn: conn, scope: scope} do
       ts = "2026-07-19T12:00:00.123456Z"
@@ -3925,53 +4048,113 @@ defmodule BarkparkWeb.TasksControllerTest do
       # the duplicate-task wall exists to refuse.
       ids = for i <- 1..50, do: uniq("mix#{i}")
 
-      for {id, i} <- Enum.with_index(ids, 1) do
-        # 11/50 titles past the 96-grapheme cap; the rest typical length.
-        title =
-          if i <= 11 do
-            "Realistic long slice title number #{i} that spills well past the " <>
-              "ninety-six grapheme cap " <> String.duplicate("padding ", 6)
-          else
-            "Fix the ready queue pager step #{i}"
-          end
+      seeded =
+        for {id, i} <- Enum.with_index(ids, 1), reduce: MapSet.new() do
+          acc ->
+            # 11/50 titles past the 96-grapheme cap; the rest typical length.
+            title =
+              if i <= 11 do
+                "Realistic long slice title number #{i} that spills well past the " <>
+                  "ninety-six grapheme cap " <> String.duplicate("padding ", 6)
+              else
+                "Fix the ready queue pager step #{i}"
+              end
 
-        extra = %{"priority" => rem(i, 5), "distinct_from" => ids -- [id]}
-        # ~half carry an assignee, ~half a parent_id (independent halves).
-        extra = if i in 12..36, do: Map.put(extra, "assignee", "builder-#{i}"), else: extra
+            extra = %{"priority" => rem(i, 5), "distinct_from" => ids -- [id]}
+            # ~half carry an assignee, ~half a parent_id (independent halves).
+            extra = if i in 12..36, do: Map.put(extra, "assignee", "builder-#{i}"), else: extra
 
-        extra =
-          if rem(i, 2) == 0,
-            do: Map.put(extra, "parent_id", "phase-mix-#{rem(i, 3)}"),
-            else: extra
+            extra =
+              if rem(i, 2) == 0,
+                do: Map.put(extra, "parent_id", "phase-mix-#{rem(i, 3)}"),
+                else: extra
 
-        # 7/50 claim residues with a now-line (worker-less — a task with a
-        # LIVE claim worker is never ready); 3 of those now-lines past 160.
-        extra =
-          if i >= 44 do
-            now_text =
-              if i >= 48,
-                do: String.duplicate("now-line words that ramble on ", 10),
-                else: "wiring the serializer, tests next (#{i})"
+            # 7/50 claim residues with a now-line (worker-less — a task with a
+            # LIVE claim worker is never ready); 3 of those now-lines past 160.
+            extra =
+              if i >= 44 do
+                now_text =
+                  if i >= 48,
+                    do: String.duplicate("now-line words that ramble on ", 10),
+                    else: "wiring the serializer, tests next (#{i})"
 
-            Map.put(extra, "claim", %{
-              "epoch" => 3,
-              "ts_iso" => ts,
-              "work_digest" => "abcd1234deadbeef",
-              "now" => %{"text" => now_text, "ts" => ts}
-            })
-          else
-            extra
-          end
+                Map.put(extra, "claim", %{
+                  "epoch" => 3,
+                  "ts_iso" => ts,
+                  "work_digest" => "abcd1234deadbeef",
+                  "now" => %{"text" => now_text, "ts" => ts}
+                })
+              else
+                extra
+              end
 
-        mk_card_task!(id, title, scope, extra)
-      end
+            # ── Keys the renderer reads that the 2026-07 fixture never wrote.
+            # Each is held to a SMALL number of cards on purpose: this arm buys
+            # PRESENCE (no key rides the card unmeasured), and the density gap
+            # against live is declared in the block above rather than paid for
+            # in bytes here. Live 2026-09-07 ratios are named per key so the
+            # distance is legible instead of arbitrary.
+
+            # labels — live 19/50, the key that started this row (2,056 B live).
+            extra =
+              if i in [3, 17, 29],
+                do: Map.put(extra, "labels", ["proj:brief-diet", "phase:build", "area:tasks"]),
+                else: extra
+
+            # lifecycle_status — live 9/50 non-"open"; `blocked` is the one
+            # value queue.ex admits besides open, and put_unless/4 emits it.
+            extra =
+              if i in [7, 23], do: Map.put(extra, "lifecycle_status", "blocked"), else: extra
+
+            # disposition — live 5/50, all "open" (Stage.dispositions/0).
+            extra =
+              if i in [11, 31],
+                do:
+                  extra
+                  |> Map.put("disposition", "open")
+                  |> Map.put("reopen_trigger", "n/a — byte-tripwire fixture"),
+                else: extra
+
+            # engagement — 0/50 live on 2026-09-07, but the renderer reads it,
+            # so it rides one card: a key absent from today's board is exactly
+            # the key a future page grows into unmeasured.
+            extra =
+              if i == 19,
+                do:
+                  Map.put(extra, "engagement", %{"object" => "considering", "holder" => "lead"}),
+                else: extra
+
+            mk_card_task!(id, title, scope, extra)
+
+            # The fixture's own writes, mechanically — the coverage check must
+            # never compare the renderer against a SECOND hand-typed list.
+            MapSet.union(acc, MapSet.new(Map.keys(extra)))
+        end
+
+      # mk_card_task!/4 sets these on every card regardless of content_extra.
+      seeded =
+        MapSet.union(seeded, MapSet.new(["kind", "acceptance_criteria", "lifecycle_status"]))
+
+      # c0's teeth: the renderer, not this file, decides what must be covered.
+      assert_brief_keys_covered!(seeded)
 
       resp = conn |> authed() |> get("/v1/tasks/ready?view=brief&limit=50")
       payload = json_response(resp, 200)
       assert length(payload["docs"]) == 50
 
+      # Card-side census, printed with the bytes: a key the fixture SEEDS but
+      # the card never emits (worker-less `claim` is the standing example) is
+      # visible here instead of being inferred from a byte count.
+      census =
+        payload["docs"]
+        |> Enum.flat_map(&Map.keys/1)
+        |> Enum.frequencies()
+        |> Enum.sort_by(fn {k, n} -> {-n, k} end)
+        |> Enum.map_join(" ", fn {k, n} -> "#{k}:#{n}" end)
+
       bytes = byte_size(resp.resp_body)
       IO.puts("axi-w2-s2 realistic-mix probe: #{bytes}B for 50 brief ready cards")
+      IO.puts("axi-w2-s2 realistic-mix card keys: #{census}")
       assert bytes <= 15_360, "realistic 50-card brief page blew the 15,360 B bound: #{bytes}B"
     end
 
