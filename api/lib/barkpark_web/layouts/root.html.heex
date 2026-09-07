@@ -1973,6 +1973,18 @@
        Re-visit if Sheets ever grows a container-queried child. */
     .editor-panel.sheet-editor { container-type: normal; }
     .editor-header { justify-content: space-between; background: var(--bg); }
+    /* Paper actions are direct links/buttons, not the classic overflow menu.
+       Give them their own row when the pane is narrow: flex-end overflow would
+       otherwise paint Open standalone over the title. Desktop stays unchanged. */
+    @container panel (max-width: 720px) {
+      .editor-panel[data-test-id="studio-paper-editor"] > .editor-header {
+        display: grid; grid-template-columns: minmax(0, 1fr);
+        height: auto; flex-shrink: 0; gap: 8px; padding-block: 8px;
+      }
+      .editor-panel[data-test-id="studio-paper-editor"] > .editor-header > div:last-child {
+        flex-wrap: wrap;
+      }
+    }
     .editor-body { flex: 1; overflow-y: auto; padding: 20px 24px; max-width: 720px; }
     .editor-meta { font-size: var(--text-xs); color: var(--fg-dim); margin-bottom: 20px; }
     .editor-field { margin-bottom: 20px; }
