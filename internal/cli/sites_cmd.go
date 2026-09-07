@@ -11,7 +11,7 @@ package cli
 //   bp sites                                        — list sites (table)
 //   bp sites show <site-or-slug>                    — show one site
 //   bp sites create --barkpark <slug> --name <name> — create a site
-//                   [--framework nextjs] [--domain <d>] [--scale-mode always_on|zero]
+//                   [--framework nextjs] [--domain <d>] [--scale-mode always_on]
 //   bp deploy <site> [--artifact-url <url>] [--git-ref <ref>]  — enqueue a build
 //   bp sites deployments <site> [--limit N] [--before <cursor>] [--all] — list a window
 //                                                   of the site's deployments
@@ -702,10 +702,18 @@ func renderSiteDetail(out *writer, s cloudclient.Site, dep Deployment) {
 //	--barkpark   the Barkpark slug (resolved to a UUID via ListBarkparks) the
 //	             site lives on. Required.
 //	--name       human name for the site. Required.
-//	--framework  one of nextjs|nuxt|sveltekit|astro|static (server default
-//	             "nextjs" — omitted on the wire when empty).
+//	--framework  one of astro|nextjs|static — the SHIPPED set, i.e. exactly what
+//	             the create door accepts (Site.shipped_frameworks/0). Server
+//	             default "nextjs"; omitted on the wire when empty. The wider
+//	             stored vocabulary (Site.frameworks/0) carries framework keys
+//	             with no builder behind them; POST /v1/sites answers those with
+//	             a 422 naming the shipped list, so this help does not offer them.
 //	--domain     a hostname to attach at create time; may be repeated.
-//	--scale-mode always_on|zero. Optional.
+//	--scale-mode always_on. Optional. Same shape: the stored vocabulary
+//	             (Site.scale_modes/0) is wider than what the runtime implements
+//	             (Site.shipped_scale_modes/0), and only the shipped half is
+//	             advertised here. sites_help_shipped_lock_test.go reds if the
+//	             two sides ever disagree.
 func runSitesCreate(out *writer, args []string) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
@@ -1448,7 +1456,7 @@ func runSitesLogs(out *writer, args []string) int {
 //	--barkpark/--barkpark-id   the Barkpark slug or id (required)
 //	--name                     human name (required)
 //	--framework                framework key (optional)
-//	--scale-mode               always_on|zero (optional)
+//	--scale-mode               always_on (optional)
 //	--domain                   may be repeated to attach multiple at create time
 func parseSiteCreateArgs(args []string) (barkpark, name, framework, scaleMode string, domains []string, err error) {
 	for i := 0; i < len(args); i++ {
@@ -1484,7 +1492,7 @@ func parseSiteCreateArgs(args []string) (barkpark, name, framework, scaleMode st
 				domains = append(domains, d)
 			}
 		default:
-			return "", "", "", "", nil, fmt.Errorf("unexpected argument %q (usage: bp sites create --barkpark <slug> --name <name> [--framework nextjs] [--domain <d>] [--scale-mode always_on|zero])", a)
+			return "", "", "", "", nil, fmt.Errorf("unexpected argument %q (usage: bp sites create --barkpark <slug> --name <name> [--framework nextjs] [--domain <d>] [--scale-mode always_on])", a)
 		}
 		if err != nil {
 			return "", "", "", "", nil, err
@@ -1580,7 +1588,7 @@ USAGE
   bp sites                                          list every site under your team
   bp sites show <site-or-slug>                      show one site
   bp sites create --barkpark <slug> --name <name>   create a site under a Barkpark
-                  [--framework nextjs] [--domain <d>] [--scale-mode always_on|zero]
+                  [--framework nextjs] [--domain <d>] [--scale-mode always_on]
   bp sites deployments <site> [--limit N] [--before <c>] [--all]  list a window of a site's deployments (--all walks every page)
                                                     (newest first; STATUS/CAUSE/TRIGGER/STARTED
                                                      plus a summary carrying its denominator)
