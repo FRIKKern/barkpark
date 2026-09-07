@@ -166,7 +166,12 @@ defmodule Barkpark.Media.DatasetProjectScopeTest do
       # already use — because `Media.put_scope_attrs/2` legitimately writes
       # unstamped rows. What must NOT survive is a BARE `m0."dataset" = $n`:
       # that is the predicate that swallowed a sibling project's stamped rows.
-      for match <- Regex.scan(~r/.{0,60}m0\."dataset" = \$\d+/, sql) do
+      # Ecto parenthesises every operand, so the guard is compared against the
+      # SAME string with parentheses stripped — the assertion is about which
+      # predicates are ANDed together, not about Ecto's bracketing.
+      naked = String.replace(sql, ["(", ")"], "")
+
+      for match <- Regex.scan(~r/.{0,60}m0\."dataset" = \$\d+/, naked) do
         [context] = match
 
         assert context =~ ~r/m0\."dataset_id" IS NULL AND m0\."dataset" = \$\d+/,
@@ -275,6 +280,18 @@ defmodule Barkpark.Media.DatasetProjectScopeTest do
     end
 
     test "the :shared_only sentinel still resolves `workspace_id IS NULL`, not a tenant" do
+      # `:shared_only` takes `scope_project_id/1`'s Default arm, so the seeded
+      # Default project is what resolves the dataset. Seeding the "production"
+      # dataset there DELIBERATELY forces the RESOLVED arm — otherwise this test
+      # is order-dependent on whether some other test created that row, and on
+      # today's main it flips between passing (unresolved → bare string) and
+      # dropping the shared row entirely (resolved → strict `dataset_id = $n`).
+      # That flip is itself the evidence for the NULL tolerance: the shared
+      # layer's own rows carry NO dataset_id, and a strict arm loses them.
+      {_default_ws, seeded_project} = ensure_default_scope!()
+      {:ok, _} = Tenancy.create_dataset(seeded_project, %{slug: @dataset, name: @dataset})
+      assert %Tenancy.Dataset{} = Tenancy.get_dataset(seeded_project, @dataset)
+
       %{ws: ws, mine: mine} = two_project_workspace!()
 
       {:ok, shared} =

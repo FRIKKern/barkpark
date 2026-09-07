@@ -72,6 +72,16 @@ defmodule Barkpark.Repo.Migrations.AddMediaFilesCursorIndex do
 
   ## THE THIRD CONDITION, named after the fact (task-362eccb409365b11)
 
+  COMMENT-ONLY AMENDMENT, 2026-09-07. Everything below this heading is
+  moduledoc. `up/0`, `down/0`, `drop_invalid_index/0` and `@index_name` are
+  BYTE-IDENTICAL to the version that shipped, so no database — migrated before
+  or after — ends up with a different object. `MigrationManifestTest` is keyed
+  on the file's bytes and cannot tell a comment from an `ALTER`, so its
+  `MANIFEST.sha256` entry is regenerated with this commit; the PR carries the
+  `git diff` proving the executable half did not move. The tripwire's own
+  standing rule — ship a FORWARD migration instead — is about objects, and
+  there is no object here to move forward.
+
   The numbers above were measured with `dataset_id = $1` in the predicate, and
   the "before/after" framing above reads as though every cursor page now seeks.
   It does not, and the condition was not stated when this migration merged.
