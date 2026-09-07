@@ -4,6 +4,11 @@ import { readFileSync } from "node:fs";
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const shell = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
 const surface = readFileSync(new URL("../../paper-surface/paper-surface.css", import.meta.url), "utf8");
+const quoteWrapper = shell.match(/\.bp-paper-edit-block\[data-block-type="blockquote"\]:has\(\.bp-paper-quote-editor\)\s*\{([^}]*)\}/);
+assert.match(quoteWrapper?.[1] ?? "", /margin-top:\s*0/,
+  "an inline citation form cannot add a second wrapper gap above its reader-shaped quote");
+assert.match(shell, /\.bp-paper-edit-block:has\(\.bp-paper-edit-field\)\s*\{[^}]*margin-top:\s*6pt/,
+  "ordinary bound fields retain their own spacing");
 const luminance = hex => hex.match(/\w\w/g).map(value => parseInt(value, 16) / 255)
   .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
   .reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);

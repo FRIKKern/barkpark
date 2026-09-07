@@ -1720,6 +1720,9 @@
 .bp-paper-contextual-preview textarea.bp-paper-inline-text::placeholder {
   color: var(--paper-ink-soft);
 }
+/* The citation is inline authoring, not a separate bound-field block. The
+   quote already owns its reader margin; its form must not add another gap. */
+.bp-paper-edit-block[data-block-type="blockquote"]:has(.bp-paper-quote-editor) { margin-top: 0; }
 .bp-paper-quote-editor .bp-paper-editor-body {
   background: transparent;
   color: inherit;
