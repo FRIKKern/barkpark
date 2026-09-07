@@ -1730,9 +1730,20 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "DEMOTED ON THE ADVISORY LINE. side_effect_existence_only claims a Repo read that asserts EXISTENCE; the cited positive control (bulldocs_ingest_controller_test.exs `a valid block paper (locked title at index 0) still saves — positive control`) reads nothing back at all, so it cannot even assert that."},
-    # barkpark_web/controllers/bulldocs_ingest_controller.ex:244
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:892 — the html receipt.
+    # Mixed-write wave (pe-w2-verbatim-html-overwrite-hazard): ingest_html/4 grew
+    # a refusal in front of the write and the writing tail split out as
+    # ingest_html_write/2 — the SAME receipt at a new def, so this row re-keys
+    # exactly as apply_op_batch/4 did below; verdict, basis and evidence carry
+    # over unchanged. The receipt hash is IDENTICAL (124223564) because the
+    # emitted body did not change; only the site key did (19560303 -> 78800622).
+    # The cited upsert test still reaches it end-to-end: it POSTs body_html twice
+    # on one slug, an HTML-only row both times, so the new guard returns :ok and
+    # the write emits as before. One site in, one site out — this is a re-key,
+    # NOT a split into two emitting sites: ingest_html/4 now emits no receipt of
+    # its own, it either delegates or returns the 422 refusal envelope.
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
-            "BarkparkWeb.BulldocsIngestController.ingest_html/4", "19560303", "124223564"},
+            "BarkparkWeb.BulldocsIngestController.ingest_html_write/2", "78800622", "124223564"},
       verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
         {"api/test/barkpark_web/controllers/bulldocs_ingest_controller_test.exs",
          ~S|test "a second POST with the same slug updates in place (upsert)", %{conn: conn} do|}},
