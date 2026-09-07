@@ -22600,6 +22600,343 @@ test("cch-w46-s3: the repaint is SCOPED — a foreign instance's mount is never 
   }
 });
 
+// ── cch-w47-bl · THE SEAM PAST THE RAIL, IN THE UNIT SUITE ───────────────────
+// The three tests above pin the CLI rail. They pin nothing about the other two
+// authority-decided surfaces on the same screen — the header strip's Attach
+// domain (#inst-domain, inside #inst-header-actions) and the Updates panel's
+// Roll back ([data-rollback], inside #inst-update-actions). Those are covered by
+// __preview__/smoke.mjs's late-/v1/me instance-screen guard, and by NOTHING in
+// this file: `repaintInstanceAuthority` had no export, `instanceAuthorityMount`
+// had no writer but loadInstance, and so the unit suite could not reach the
+// repaint at any price. A harness with one instrument for a defect is a harness
+// that loses the defect the day that instrument is edited.
+//
+// WHAT THIS ADDS, and what it deliberately does not: the same PROPERTY the
+// smoke guard holds, driven through this file's own `driveMe` (the real
+// loadMe, both arms) and asserted on rendered bytes. It is not a second
+// mechanism in app.js — the repaint it drives is the one cch-w46-rv shipped.
+const W47BL_LIVE_BP = {
+  id: "bp-1", name: "web", provider: "hetzner", host: "h", url: "https://web.example",
+  update_state: "behind", update_latest_release: "v0.5.0",
+  autoupdate_paused: false, channel: "stable",
+};
+// The row's own state: a LIVE box that ALREADY HAS a custom host, so
+// instanceHeaderActionsHtml's `lc.live && !bp.custom_host` domain arm is "".
+const W47BL_CUSTOM_HOST_BP = Object.assign({}, W47BL_LIVE_BP, { custom_host: "console.acme.example" });
+
+// A DOM the repaint seam can actually write through. recordingDom answers null
+// for every selector, so `$("#inst-header-actions")` would be null and both
+// halves of repaintInstanceAuthority would return before painting anything —
+// a test that passes because nothing ran. Two addressable mounts, each parsing
+// the html written into it for the ONE control this seam's exit depends on.
+function instanceScreenDom() {
+  const clicks = { me: 0 };
+  const retryBtn = () => ({
+    disabled: false,
+    _h: [],
+    addEventListener(_t, fn) { this._h.push(fn); },
+    click() { clicks.me++; this._h.forEach((fn) => fn()); },
+  });
+  const mk = () => ({
+    _html: "",
+    controls: {},
+    isConnected: true,
+    get innerHTML() { return this._html; },
+    set innerHTML(v) {
+      this._html = String(v);
+      this.controls = {};
+      if (this._html.indexOf("data-me-retry") !== -1) this.controls["[data-me-retry]"] = retryBtn();
+      if (this._html.indexOf("data-rollback") !== -1) this.controls["[data-rollback]"] = retryBtn();
+    },
+    addEventListener() {},
+    querySelector(sel) { return this.controls[sel] || null; },
+    querySelectorAll() { return []; },
+    getAttribute() { return null; },
+  });
+  const strip = mk();
+  const updates = mk();
+  // wireUpdatePanel's compound selector ("#instance-tabpanel .update-panel") is
+  // unresolvable here, so it falls back to getElementById("instance-body") — in
+  // this stub the actions row IS the node that holds [data-rollback], which is
+  // the only hook that fallback binds.
+  const byId = { "inst-header-actions": strip, "inst-update-actions": updates, "instance-body": updates };
+  return {
+    strip, updates, clicks,
+    document: {
+      querySelector(sel) {
+        const s = String(sel);
+        return s.charAt(0) === "#" && byId[s.slice(1)] ? byId[s.slice(1)] : null;
+      },
+      getElementById(id) { return byId[id] || null; },
+      querySelectorAll() { return []; },
+      createElement: () => ({ ...inertEl }),
+    },
+  };
+}
+
+// Paint both surfaces with the authority still OUT, and tell the repaint seam
+// what was painted — the two lines loadInstance runs (instanceDetailHtml with
+// instanceAdminAuthority(), then recordInstanceAuthorityMount) reduced to the
+// two regions this seam owns.
+function mountInstanceScreenUnknown(dom, bp, tab) {
+  hooks.clearMe();
+  sandbox.document = dom.document;
+  sandbox.location.hash = "#instance/" + bp.id + "/" + tab;
+  const authority = hooks.instanceAdminAuthority();
+  assert.equal(authority, "unknown",
+    "the fixture must start with the authority genuinely UNKNOWN — otherwise every heal assertion below is vacuous");
+  dom.strip.innerHTML = hooks.instanceHeaderActionsHtml(bp, authority);
+  dom.updates.innerHTML = hooks.updatePanelActionsHtml(bp, authority);
+  hooks.recordInstanceAuthorityMount(bp, tab);
+}
+
+test("cch-w47-bl: a late /v1/me repaints #inst-header-actions AND #inst-update-actions — not only the rail", async () => {
+  const saved = { fetch: sandbox.fetch, document: sandbox.document, hash: sandbox.location.hash };
+  const dom = instanceScreenDom();
+  try {
+    // The USAGE tab, for the reason the rail guard picks it: reloadInstanceView()
+    // hard-returns there, so a seam routed through it looks fixed on Overview and
+    // reds here. The header renders on every tab; the Updates row is written by
+    // this seam regardless of which tab painted it.
+    mountInstanceScreenUnknown(dom, W47BL_LIVE_BP, "usage");
+    const stripBefore = dom.strip.innerHTML;
+    const upBefore = dom.updates.innerHTML;
+
+    // THE STRAND'S STARTING POINT, asserted so the heal below cannot be vacuous.
+    assert.ok(stripBefore.indexOf('id="inst-domain"') === -1,
+      "an unknown authority must not already carry the LIVE Attach domain hook — the after-assertion would prove nothing");
+    assert.ok(upBefore.indexOf('data-rollback="1"') === -1,
+      "…nor the LIVE Roll back hook");
+    assert.match(stripBefore, /Checking capabilities/,
+      "the header strip starts in the still-checking arm, which is the state this row is about");
+    assert.match(stripBefore, /data-me-retry/,
+      "…and it carries the page's ONE shipped exit while it is there");
+
+    // THE LATE SUCCESS. driveMe swaps fetch and drives the real loadMe; the two
+    // mounts stay exactly where they were painted.
+    await driveMe(200, ME_OWNER);
+
+    const stripAfter = dom.strip.innerHTML;
+    const upAfter = dom.updates.innerHTML;
+    assert.notEqual(stripAfter, stripBefore,
+      "the header strip must not be byte-identical after the answer landed (" + stripBefore.length + " bytes) — " +
+      "that is the whole defect, and it is the state the row was filed against");
+    assert.ok(stripAfter.indexOf('id="inst-domain"') !== -1,
+      "the owner's Attach domain comes alive without a reload. Got: " + stripAfter.slice(0, 300));
+    assert.ok(stripAfter.indexOf("Checking capabilities") === -1,
+      "…and the strip stops claiming to be checking a read that already answered");
+    assert.ok(stripAfter.indexOf("data-me-retry") === -1,
+      "…and the exit retires with the question it answered");
+    assert.ok(upAfter.indexOf('data-rollback="1"') !== -1,
+      "the Updates panel's Roll back heals from the SAME answer — it is the control with no exit of its own. Got: " +
+      upAfter.slice(0, 300));
+    assert.notEqual(upAfter, upBefore, "…and its row is genuinely repainted, not merely re-read");
+
+    // NOT reloadInstanceView(): that call refuses this tab, so a seam routed
+    // through it would leave both regions untouched right here.
+    assert.equal(sandbox.location.hash, "#instance/bp-1/usage", "…and this ran on the tab it refuses");
+  } finally {
+    Object.assign(sandbox, { fetch: saved.fetch, document: saved.document });
+    sandbox.location.hash = saved.hash;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w47-bl: the same repaint is SCOPED — a foreign instance and a foreign view are both no-ops", async () => {
+  const saved = { fetch: sandbox.fetch, document: sandbox.document, hash: sandbox.location.hash };
+  const dom = instanceScreenDom();
+  try {
+    mountInstanceScreenUnknown(dom, W47BL_LIVE_BP, "usage");
+    const before = dom.strip.innerHTML;
+
+    sandbox.location.hash = "#fleet";
+    await driveMe(200, ME_OWNER);
+    assert.equal(dom.strip.innerHTML, before, "off the instance view, the seam is a no-op");
+
+    sandbox.location.hash = "#instance/bp-OTHER/usage";
+    hooks.clearMe();
+    await driveMe(200, ME_OWNER);
+    assert.equal(dom.strip.innerHTML, before,
+      "a DIFFERENT instance's route never repaints this mount with this instance's authority");
+  } finally {
+    Object.assign(sandbox, { fetch: saved.fetch, document: saved.document });
+    sandbox.location.hash = saved.hash;
+    hooks.clearMe();
+  }
+});
+
+// ── cch-w47-bl · THE CUSTOM-HOST BOX, AND ITS ONE EXIT ───────────────────────
+// THE FILED CLAIM, and it is STALE on main: "on a live box that ALREADY HAS a
+// custom host, domainBtn is "", so the page has ZERO [data-me-retry] and the
+// stranded disabled Rollback has NO recovery at all". That WAS true while the
+// exit rode Attach domain. cch-w47-rv-bl moved it: the strip now emits ONE
+// group reason (adminWriteGroupReasonHtml at HEADER_ACTIONS_REASON_ID) carrying
+// meRetryHtml(), appended whenever the strip drew ANY grouped control — and
+// `connectBtn` ("Connect agent") is gated on `lc.live` ALONE, with no custom_host
+// predicate anywhere near it. So a live custom-host box has an exit today.
+//
+// NOTHING PINNED THAT. The count is a property of an arm no test counts, on a
+// fixture (custom_host set) that no authority test uses, and it is one
+// `!bp.custom_host` away from going back to zero. This is that pin, in both
+// directions: not zero (the row's defect) and not two (wireMeRetry binds the
+// FIRST match, so a second control is a dead button that looks like a way out).
+test("cch-w47-bl: a live CUSTOM-HOST box carries exactly ONE [data-me-retry] while /v1/me is out", () => {
+  hooks.clearMe();
+  assert.equal(hooks.instanceAdminAuthority(), "unknown", "sanity: the fixture's arm is the unknown one");
+
+  const strip = hooks.instanceHeaderActionsHtml(W47BL_CUSTOM_HOST_BP, "unknown");
+  // The predicate the filing named, still true: this box is offered no Attach
+  // domain at all, on ANY authority. If this reds the fixture stopped being the
+  // state the row is about.
+  assert.ok(strip.indexOf("Attach domain") === -1,
+    "a box that already answers on a custom host is offered no Attach domain — that is the state, not a bug");
+  assert.ok(hooks.instanceHeaderActionsHtml(W47BL_CUSTOM_HOST_BP, "grant").indexOf("Attach domain") === -1,
+    "…and not on the grant arm either, so the exit below cannot be riding that control");
+
+  assert.equal(strip.split("data-me-retry").length - 1, 1,
+    "the still-checking header strip of a CUSTOM-HOST box must carry exactly ONE exit. Zero is the filed defect " +
+    "(the page's only way out of a disabled Roll back would be a full reload); two is the founding class again — " +
+    "wireMeRetry binds the FIRST match, so the second is a dead button that reads as a way out. Got: " + strip);
+
+  // …and page-wide, because [data-rollback] lives in a different card and the
+  // row's whole complaint is about what the PAGE offers, not what one strip does.
+  const page = hooks.instanceDetailHtml(W47BL_CUSTOM_HOST_BP, "overview", { ready: false }, "unknown");
+  assert.equal(page.split("data-me-retry").length - 1, 1,
+    "the whole instance screen of a custom-host box carries exactly ONE exit while the answer is out. Got " +
+    (page.split("data-me-retry").length - 1));
+  // The control this exit exists FOR is on that page, DISABLED. Asserted on the
+  // label and the group pointer, not on `data-rollback`: adminWriteControlHtml
+  // drops the mount hook entirely on the non-grant arms (that is the point — the
+  // add-listener-if-present wiring must have nothing to re-arm), so a
+  // /data-rollback/ match here would be asserting the defect.
+  assert.match(page, /disabled aria-describedby="inst-update-actions-reason">Roll back&hellip;<\/button>/,
+    "sanity: the Roll back control this exit exists FOR is on that page, in its disabled-and-explained arm");
+  assert.ok(page.indexOf('data-rollback="1"') === -1,
+    "…and NOT live — an unknown authority offers no write");
+
+  // The answered arms offer none: retrying a read we HAVE is the transient lie.
+  for (const a of ["grant", "refuse"]) {
+    assert.equal(hooks.instanceHeaderActionsHtml(W47BL_CUSTOM_HOST_BP, a).split("data-me-retry").length - 1, 0,
+      "an ANSWERED authority (" + a + ") offers no Retry — there is nothing left to re-read");
+  }
+});
+
+test("cch-w47-bl: that ONE exit is REACHABLE — the repainted custom-host strip re-drives /v1/me on click", async () => {
+  const saved = { fetch: sandbox.fetch, document: sandbox.document, hash: sandbox.location.hash };
+  const dom = instanceScreenDom();
+  try {
+    mountInstanceScreenUnknown(dom, W47BL_CUSTOM_HOST_BP, "overview");
+
+    // A FAILED read is the terminal case: nothing re-reads /v1/me on its own, so
+    // whatever the repaint leaves on screen is the whole remaining recovery.
+    await driveMe(500, { error: "server_error" });
+    const failed = dom.strip.innerHTML;
+    assert.equal(failed.split("data-me-retry").length - 1, 1,
+      "after a FAILED read the custom-host strip still carries exactly one exit — a terminal read with no exit is " +
+      "the stranded state this row names. Got: " + failed);
+
+    // THE EXIT WORKS. innerHTML above destroyed the wired button; the seam's own
+    // wireMeRetry(strip, …, false) must have re-armed the replacement, or the
+    // control is decoration.
+    const owner = railFetch({ "/v1/me": { status: 200, body: ME_OWNER } });
+    sandbox.fetch = owner;
+    const btn = dom.strip.querySelector("[data-me-retry]");
+    assert.ok(btn, "the exit is a control the mount can find");
+    btn.click();
+    await settle();
+    assert.equal(owner.count("/v1/me"), 1, "one click, one fresh authority read — an unwired button issues none");
+  } finally {
+    Object.assign(sandbox, { fetch: saved.fetch, document: saved.document });
+    sandbox.location.hash = saved.hash;
+    hooks.clearMe();
+  }
+});
+
+// ── cch-w47-bl · THE EXPORT THAT PROMISED A TEST ─────────────────────────────
+// repaintLifecycleAuthority is exported to this harness with a comment
+// justifying the export BY TESTABILITY — and `git grep -c
+// repaintLifecycleAuthority -- cloud/` answered ONE file (app.js) for four
+// waves. The three cch-w46-s3 tests above drive it INDIRECTLY, through loadMe,
+// which means the export itself was load-bearing for nothing and its coverage
+// could shrink without a single assertion moving. This calls it directly.
+test("cch-w47-bl: repaintLifecycleAuthority, called DIRECTLY, repaints the rail and honours both its guards", async () => {
+  const saved = { fetch: sandbox.fetch, document: sandbox.document, hash: sandbox.location.hash };
+  const dom = railDom();
+  try {
+    const before = await mountRailUnknown(dom, railFetch({
+      "/v1/providers/capabilities": { status: 200, body: CAP_PAYLOAD },
+    }));
+    assert.ok(before.indexOf(LIVE_DECOMM) === -1, "an unknown authority offers no destroy verb");
+
+    // Land the answer OFF the instance view, so loadMe's own seam is a no-op and
+    // the rail is left holding the unknown paint with a KNOWN authority behind
+    // it. Everything after this point is the direct call's doing, and nothing
+    // else's.
+    sandbox.location.hash = "#fleet";
+    await driveMe(200, ME_OWNER);
+    assert.equal(dom.el.innerHTML, before, "sanity: off-view, loadMe's seam painted nothing");
+
+    // GUARD 1: the view. A direct call off the instance route is a no-op.
+    hooks.repaintLifecycleAuthority();
+    assert.equal(dom.el.innerHTML, before, "a direct call off #instance repaints nothing");
+
+    // GUARD 2: the instance. A stale mount from a previous drill-down is never
+    // painted with this instance's authority.
+    sandbox.location.hash = "#instance/bp-OTHER/usage";
+    hooks.repaintLifecycleAuthority();
+    assert.equal(dom.el.innerHTML, before, "a direct call on a DIFFERENT instance's route repaints nothing");
+
+    // …and on the route it owns, it paints.
+    sandbox.location.hash = "#instance/bp-1/usage";
+    hooks.repaintLifecycleAuthority();
+    const after = dom.el.innerHTML;
+    assert.notEqual(after, before, "the direct call repaints the rail it owns");
+    assert.ok(after.includes(LIVE_DECOMM), "…with the owner's live destroy verb");
+    assert.ok(after.indexOf("Checking capabilities") === -1,
+      "…and without the note about a read that already answered");
+  } finally {
+    Object.assign(sandbox, { fetch: saved.fetch, document: saved.document });
+    sandbox.location.hash = saved.hash;
+    hooks.clearMe();
+  }
+});
+
+// ── cch-w47-bl · THE SEAM WITH EXACTLY ONE GUARD ─────────────────────────────
+// MEASURED on origin/main: dropping the authority argument from loadInstance's
+// instanceDetailHtml call reds __preview__/smoke.mjs (rc 1) and leaves this
+// file GREEN — every test here hands the header helpers an EXPLICIT authority,
+// so none of them can see the CALL SITE stop reading one. One instrument for
+// the seam that decides who is offered every admin write on the screen.
+//
+// loadInstance is not hookable (it fetches the fleet, mounts five tabs, sets a
+// breadcrumb and arms a ticker), so this is a STRUCTURAL pin on the shipped
+// artifact — the shape __app.test.mjs already uses to hold FORBIDDEN_ROLE_COPY
+// verbatim. It reds on the exact mutation the smoke guard reds on, in the suite
+// that was blind to it. If the call is legitimately reshaped, this line moves
+// with it — deliberately, and in the same commit.
+test("cch-w47-bl: loadInstance THREADS instanceAdminAuthority() into instanceDetailHtml — the unit suite sees the drop now", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const CALL = "box.innerHTML = instanceDetailHtml(bp, tab, { ready: showReady }, instanceAdminAuthority());";
+  const hits = src.split(CALL).length - 1;
+  assert.equal(hits, 1,
+    "loadInstance must paint the instance screen through instanceDetailHtml WITH the three-valued authority read, " +
+    "exactly once. Expected this line verbatim:\n  " + CALL +
+    "\nFound " + hits + ". Dropping the 4th argument defaults every admin control on the screen to \"grant\" — a " +
+    "member is offered Attach domain and Roll back and collects the server's 403 after the click, which is the " +
+    "D428 disable-and-explain contract inverted.");
+
+  // NON-VACUITY: the two things the assertion above depends on must be real —
+  // the reader exists under that name, and the renderer takes an authority at
+  // all. A rename that broke both would otherwise red this test with a message
+  // about a defect nobody introduced.
+  assert.equal(typeof hooks.instanceAdminAuthority, "function",
+    "the three-valued reader the call site names must exist");
+  assert.notEqual(hooks.instanceDetailHtml(W47BL_LIVE_BP, "overview", { ready: false }, "refuse"),
+    hooks.instanceDetailHtml(W47BL_LIVE_BP, "overview", { ready: false }, "grant"),
+    "…and instanceDetailHtml must actually DECIDE on its 4th argument — if a refused screen is byte-identical to a " +
+    "granted one, threading the argument buys nothing and the pin above is theatre");
+});
+
 test("cch-w38-s1: THE POST-CLICK ARMS AGREE WITH THE RAIL — a permanent refusal is never sold as transient", () => {
   // (a) updateInstance: a flat gate 403/422 used to land in the default arm's
   // "Please try again in a moment." — copy for a TRANSIENT fault.
