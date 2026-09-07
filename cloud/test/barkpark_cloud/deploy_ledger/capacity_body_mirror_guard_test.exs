@@ -146,44 +146,63 @@ defmodule BarkparkCloud.DeployLedger.CapacityBodyMirrorGuardTest do
       """
     end
 
-    test "THE CENSUS: every file carrying a capacity clause reads the fixture" do
-      # DERIVED, not typed. `claim_regex/0` is built from the emitter's own
-      # literal and PROVEN against the emitter's own rendered output, so the
-      # census is the set of cloud tests that carry the box's slot clause —
-      # whatever files those turn out to be today. A guard that instead listed
-      # the three paths a human grepped would wave through the fourth copy
-      # pasted into a new file tomorrow, which is exactly how the first drift
-      # survived its own fix (#16581 fixed one site, #16598 the other two, a
-      # day later — and a FOURTH, sites_deploy_test.exs, was in neither).
+    test "THE CENSUS: no fixture claims to carry the box's body and then invents one" do
+      # Arm A above catches a hand-typed copy of the CORRECT body. It cannot
+      # see the failure that actually shipped: a fixture that claims the box's
+      # body and carries an INVENTED one. Reverting a corrected fixture to
+      # `"… box_at_capacity — 4 of 4 build slots are in use"` and running
+      # test/barkpark_cloud/deploy_ledger/ gave 10 tests, 0 failures — the
+      # needle Arm A hunts is precisely what a drifted copy no longer has.
+      #
+      # So this arm keys on the CLAIM, not the body: the persisted refusal
+      # shape `<409 caption>: <code> — <prose>`. Whatever prose follows must
+      # be the box's, and the only way to be the box's is to come from the
+      # shared fixture — after which no such literal exists in the file at all.
       claim = claim_regex()
 
-      claimants =
+      offenders =
         for path <- exs_files(),
-            source = File.read!(path),
-            Regex.match?(claim, source) or String.contains?(source, "BoxCapacityRefusalFixture"),
-            do: {Path.relative_to(path, Path.expand("../../..", __DIR__)), File.read!(path)}
-
-      assert length(claimants) >= 4,
-             "the census found only #{length(claimants)} claimant file(s) — the derivation has gone blind, so its clean verdict means nothing: #{inspect(Enum.map(claimants, &elem(&1, 0)))}"
-
-      not_reading =
-        for {rel, source} <- claimants,
+            rel = Path.relative_to(path, Path.expand("../../..", __DIR__)),
             rel != @self,
-            not String.contains?(source, "BoxCapacityRefusalFixture"),
-            do: rel
+            [_ | _] = hits <- [Regex.scan(claim, File.read!(path))],
+            bad = for([_, prose] <- hits, not String.starts_with?(prose, Fx.prefix()), do: prose),
+            bad != [],
+            do: {rel, bad}
 
-      assert not_reading == [], """
-      A CAPACITY-REFUSAL FIXTURE THAT DOES NOT READ THE SHARED COPY.
+      assert offenders == [], """
+      A FIXTURE CLAIMS TO CARRY THE BOX'S CAPACITY REFUSAL AND INVENTED ONE.
 
-        file(s)     : #{Enum.join(not_reading, ", ")}
-        emitter     : api/lib/barkpark_web/controllers/site_deploy_controller.ex
-                      (capacity_message/3 <> peer_tail/1)
-        the one copy: #{Fx.path()}
+      #{Enum.map_join(offenders, "\n", fn {rel, bad} -> "  #{rel}\n    carries: #{inspect(bad)}" end)}
 
-      This file carries the box's build-slot clause but never reads
-      `BarkparkCloud.BoxCapacityRefusalFixture`, so its copy is free to drift
-      from the emitter with this suite green. Read the fixture instead.
+        it should carry: #{inspect(Fx.prefix())}…
+        emitter        : api/lib/barkpark_web/controllers/site_deploy_controller.ex
+                         (capacity_message/3 <> peer_tail/1)
+        the one copy   : #{Fx.path()}
+
+      This is the exact drift that shipped for a day (#16581 corrected one
+      site, #16598 the other two) with every suite green: `classify_deferred/2`
+      reads only the `box_at_capacity` code word, so an invented tail still
+      classifies BOX_AT_CAPACITY_DEFERRED and no assertion notices. Build the
+      string from `BarkparkCloud.BoxCapacityRefusalFixture.deferred_detail/0`.
       """
+    end
+
+    test "the CLAIM detector fires on the body that actually shipped" do
+      # POSITIVE CONTROL for the arm above, on the REAL historical needle —
+      # not a needle invented for the test. If this stops firing, the census
+      # has gone blind in exactly the direction that cost a day.
+      claim = claim_regex()
+
+      drifted = Fx.refusal_caption() <> ": box_at_capacity — 4 of 4 build slots are in use"
+      honest = Fx.deferred_detail()
+
+      assert [[_, prose]] = Regex.scan(claim, ~s("#{drifted}"))
+      refute String.starts_with?(prose, Fx.prefix())
+
+      assert [[_, ok_prose]] = Regex.scan(claim, ~s("#{honest}"))
+
+      assert String.starts_with?(ok_prose, Fx.prefix()),
+             "the detector rejects the READER's own output — it would red on a correct tree"
     end
 
     test "the value the fixtures receive is the real thing, not a hole" do
@@ -199,24 +218,27 @@ defmodule BarkparkCloud.DeployLedger.CapacityBodyMirrorGuardTest do
     end
   end
 
-  # ── the claim detector, DERIVED from the emitter ─────────────────────────
+  # ── the claim detector, DERIVED from both producers ──────────────────────
   #
-  # The emitter renders `"the box is at its build capacity (\#{in_use} of
-  # \#{slots} build slots in use) — "`. A fixture that CLAIMS to carry that
-  # body keeps the numeric slot clause even when the rest of the sentence has
-  # drifted — the invented `"4 of 4 build slots are in use"` that shipped for a
-  # day kept exactly this much and nothing else, which is why a detector keyed
-  # on the exact body could not see it.
+  # A fixture CLAIMS to carry the box's capacity refusal when it holds the
+  # persisted shape `<409 caption>: box_at_capacity — <prose>`: the caption
+  # `Sites.Deploy` writes, the code word the controller sends, and a message
+  # segment. `[^"]*` stops at the end of the string literal, so the match is
+  # the claimed body and nothing after it.
   #
-  # It is a derivation and not a typed guess because the assertion below proves
-  # it against the emitter's OWN rendered output: move the phrasing off this
-  # shape in the controller and this test reds instead of going quietly blind.
+  # Both halves are checked against the sources that produce them, so a rename
+  # on either side reds here instead of leaving the detector hunting a string
+  # that no longer exists.
   defp claim_regex do
-    regex = ~r/\d+ of \d+ build slots/
+    assert File.read!(Fx.emitter_path()) =~ ~s(code: "box_at_capacity"),
+           "the controller no longer sends `box_at_capacity` — re-derive this detector from #{Fx.emitter_path()}"
 
-    assert Regex.match?(regex, Fx.message()),
-           "the claim detector no longer matches the emitter's own body (#{inspect(Fx.message())}) — re-derive it from capacity_message/3 in #{Fx.emitter_path()}"
+    assert File.read!(deploy_source()) =~ "the instance refused the deploy (HTTP ",
+           "Sites.Deploy no longer writes the anchored 409 caption — re-derive this detector from #{deploy_source()}"
 
-    regex
+    Regex.compile!(Regex.escape(Fx.refusal_caption() <> ": box_at_capacity — ") <> "([^\"]*)")
   end
+
+  defp deploy_source,
+    do: Path.expand("../../../lib/barkpark_cloud/sites/deploy.ex", __DIR__)
 end
