@@ -71,6 +71,37 @@ type Context struct {
 	WorkspaceFromServerEntry bool
 	ProjectFromServerEntry   bool
 	DatasetFromServerEntry   bool
+
+	// DatasetTyped records that the dataset was supplied AT FLAG PRECEDENCE on
+	// this invocation — i.e. `-d/--dataset` appeared in argv, or `-s <entry>`
+	// injected the saved entry's dataset (which DatasetFromServerEntry then
+	// subtracts back out). It is deliberately NOT the dataset twin of
+	// WorkspaceExplicit, and the name is different so the two are never reached
+	// for interchangeably.
+	//
+	// WHY NOT A `DatasetExplicit` MIRRORING WorkspaceExplicit. WorkspaceExplicit
+	// is true whenever ANY layer above Defaults spoke: a BARKPARK_DATASET, a repo
+	// .barkpark.json, the saved active config. For the WORKSPACE that is the right
+	// question, because a workspace is a tenant and an ambient one is still a
+	// statement about which tenant you are auditing. For the DATASET it is the
+	// wrong question and the known brick: the dataset floor is `production`, and a
+	// developer with BARKPARK_DATASET=dev exported, or `"dataset": "staging"` in
+	// their repo file, has an ambient non-floor dataset on EVERY command. Keying a
+	// refusal on that provenance refuses `bp task ready` for them forever, with no
+	// command line that fixes it — the same blast radius that got the
+	// WorkspaceExplicit-keyed design rejected, arriving through a third door.
+	//
+	// An ambient dataset is a STANDING PREFERENCE ("which content pool am I
+	// working in"); a typed -d is a statement about THIS invocation. Only the
+	// second is a claim the CLI can be caught silently discarding, so only the
+	// second arms dataset_scope.go's refusal — and only then when the value also
+	// DIVERGES from DefaultDefaults().Dataset.
+	//
+	// FALSE IS THE FAIL-OPEN ZERO VALUE here, unlike WorkspaceExplicit's
+	// fail-closed one, and that asymmetry is deliberate: a Context built as a
+	// literal (a test, a caller that skips Resolve) reads as not-typed and is
+	// left completely alone, so nothing that works today can start refusing.
+	DatasetTyped bool
 }
 
 // ActiveContext is the persisted-context layer — the saved named target a user
@@ -261,5 +292,11 @@ func ResolveWithSources(flags map[string]string, env apiclient.Config, active Ac
 
 		WorkspaceExplicit: stated(FlagWorkspace, env.Workspace, active.Workspace),
 		ProjectExplicit:   stated(FlagProject, env.Project, active.Project),
+
+		// Read off the layer that actually WON, not off a second walk of the
+		// precedence — srcDataset is the by-product of the same pick that chose
+		// the value, so the label can never describe a different layer than the
+		// one in ctx.Dataset. LayerFlag is the only layer a typed -d can win at.
+		DatasetTyped: srcDataset == LayerFlag,
 	}, src
 }
