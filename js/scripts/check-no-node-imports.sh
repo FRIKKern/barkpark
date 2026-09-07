@@ -29,7 +29,8 @@ set -euo pipefail
 
 # Absolute, captured BEFORE any cd: --selftest copies THIS file into each
 # throwaway corpus so the assertions drive the shipping scan.
-SELF="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")"
+unset CDPATH
+SELF="$(cd -P -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")"
 
 EXIT_VIOLATION=1
 EXIT_CORPUS=3
