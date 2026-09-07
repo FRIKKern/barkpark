@@ -78,6 +78,11 @@
 #                        (the pass then says so: nothing proved the comparator
 #                        can fail)
 #   PDS_STEP6_GUARD_DEMO=0  skip step 6's guard-off control (same honesty)
+#   PDS_STEP1_GRAIN_DEMO=0  skip step 1's manifest-grain negative control — the
+#                        locally built mis-grained bundles that prove the
+#                        PDS-D61/D62 guard can REFUSE. On by default (it costs no
+#                        network, no export and no credentials); the pass then
+#                        says so, because the green is weaker without it.
 #   PDS_PROOF_LIB=1      load the rungs as a library without running any
 #
 # bash 3.2 compatible (macOS system bash).
@@ -492,7 +497,7 @@ cmd_plan() {
 
   plan_row 1 "THE PULL — export --profile dev + import --yes --merge, both --with-blobs" \
     "a booted scratch target + a bp built FROM THIS WORKTREE (the installed one predates the dialect)" \
-    "RUNNABLE. Runs the PAIR (PDS-D58) with explicit -s/--token on both calls — BARKPARK_TOKEN is read NOWHERE. ASSERTS: (1) the built bp advertises --profile/--merge/--with-blobs in its own --help; (2) the export exits 0 and the tar carries a manifest; (3) the manifest's dataset EQUALS the dataset asked for — a workspace-grain bundle ABORTS naming pds-w4-pull-dataset-flag rather than being imported (PDS-D61/D62); (4) the import exits 0 and its receipt names tables+rows; (5) blob failures exit non-zero by the CLI's own contract. --merge is MANDATORY: mode=clean answers an opaque 500 (25P02 at workspace_bundle.ex:233) on a populated target. PDS-D9 adoption is reported by diffing the workspaces row across the import — the CLI never says it."
+    "RUNNABLE. Runs the PAIR (PDS-D58) with explicit -s/--token on both calls — BARKPARK_TOKEN is read NOWHERE. ASSERTS: (1) the built bp advertises --profile/--merge/--with-blobs in its own --help; (2) the export exits 0 and the tar carries a manifest; (3) the manifest's dataset EQUALS the dataset asked for — a workspace-grain bundle ABORTS naming pds-w4-pull-dataset-flag rather than being imported (PDS-D61/D62) — and that assertion carries a NEGATIVE CONTROL, on by default (PDS_STEP1_GRAIN_DEMO=0 to skip, and the pass then says so), which puts five locally built manifests through the same assertion and FAILs the step unless it refuses every mis-grained one; (4) the import exits 0 and its receipt names tables+rows; (5) blob failures exit non-zero by the CLI's own contract. --merge is MANDATORY: mode=clean answers an opaque 500 (25P02 at workspace_bundle.ex:233) on a populated target. PDS-D9 adoption is reported by diffing the workspaces row across the import — the CLI never says it."
 
   plan_row 2 "RAW-PERSPECTIVE CENSUS — per-type ?perspective=raw&count=true, BOTH ends" \
     "source HTTP; for the target half, step 1's import" \
@@ -925,6 +930,123 @@ print(v)' "$d/manifest.json" 2>/dev/null)"
   return "$rc"
 }
 
+# ── THE GRAIN VERDICT, AS ONE CALLABLE (PDS-D20) ─────────────────────────────
+#
+# The PDS-D61/D62 grain-hazard guard used to live INLINE in step_1, which is why
+# it was the one asserting rung nobody could point a control at. It is the same
+# comparison, moved behind a name so a locally built bundle can be put through
+# the EXACT assertion the live bundle goes through. stdout and the exit code of
+# every branch step_1 prints are unchanged — the abort/fail/info wording below is
+# byte-for-byte what it was.
+#
+# grain_verdict <tar> <want_dataset> -> one line on stdout:
+#     <verdict>|<profile>|<dataset>|<profile_rc>|<dataset_rc>
+#
+#   ok                the manifest is dev-profile and dataset-grain, as asked
+#   no-dataset        NO dataset field: a WORKSPACE-grain bundle (or nothing was
+#                     readable at all — manifest_field rc 2, PDS-D261)
+#   dataset-mismatch  a dataset field naming a DIFFERENT dataset
+#   profile-mismatch  right dataset, but not the scrubbed dev profile
+grain_verdict() {
+  local tar="$1" want="$2" p d prc=0 drc=0 v
+  p="$(manifest_field "$tar" profile)" || prc=$?
+  d="$(manifest_field "$tar" dataset)" || drc=$?
+  if [ -z "$d" ]; then
+    v="no-dataset"
+  elif [ "$d" != "$want" ]; then
+    v="dataset-mismatch"
+  elif [ "$p" != "dev" ]; then
+    v="profile-mismatch"
+  else
+    v="ok"
+  fi
+  printf '%s|%s|%s|%s|%s\n' "$v" "$p" "$d" "$prc" "$drc"
+}
+
+# THE ROUTING IS DATA, NOT A COMMENT. step_1 raises its ABORT with whatever this
+# returns, so the control can assert that a workspace-grain manifest really does
+# route to pds-w4-pull-dataset-flag — if someone re-points the branch, the
+# control reds instead of silently agreeing with itself.
+GRAIN_ABORT_TASK="pds-w4-pull-dataset-flag"
+grain_blocker() { # <verdict> -> the bp task an ABORT on that verdict waits on
+  case "$1" in
+    no-dataset) printf '%s\n' "$GRAIN_ABORT_TASK" ;;
+    *)          printf '\n' ;;
+  esac
+}
+
+# ── STEP 1'S NEGATIVE CONTROL (PDS-D20) ──────────────────────────────────────
+#
+# Step 1 was, until this control, the ONLY asserting rung with nothing that
+# FIRES. It had been run live and its assertion had MATCHED against a real
+# export — which proves the assertion was evaluated, and proves nothing at all
+# about whether it is capable of refusing. An assertion never observed failing is
+# not known to assert.
+#
+# So: build the mis-grained bundles here, on this machine, and put them through
+# grain_verdict — the same function the live bundle goes through, in the same
+# process, this run. It needs no network, no export, no credentials and no target,
+# which is why it runs BEFORE the environment preconditions: a default run on any
+# machine exercises it even when the rung goes on to ABORT for want of a target.
+#
+# Returns 0 when every fixture was classified as expected; on any miss it has
+# ALREADY called `fail 1` and returns 1 — a control that does not fire is a FAIL
+# of the step it controls, never a footnote.
+GRAIN_DEMO_NOTE=""
+grain_control() {
+  local dir want other name expect body json f v n=0 bad=0 blk
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/pds-grain.XXXXXX")"
+  TMP_DIRS="$TMP_DIRS $dir"
+  want="$SOURCE_DS"
+  other="$SOURCE_DS-not-the-one-asked-for"
+
+  say ""
+  info "GRAIN CONTROL (PDS-D20) — the SAME assertion, this run, against manifests"
+  info "  built HERE (no network, no export, no credentials). The manifest line"
+  info "  below is a measurement only if this assertion has been SEEN to refuse:"
+
+  while IFS='|' read -r name expect body; do
+    [ -z "${name:-}" ] && continue
+    f="$dir/$name.tar"
+    if [ "$body" = "@NOTATAR@" ]; then
+      # not a tar at all — the HTML error page of PDS-D261. manifest_field
+      # answers rc 2 (nothing readable), which must still be a refusal.
+      printf '<html><body>502 Bad Gateway</body></html>\n' >"$f"
+    else
+      json="$(printf '%s' "$body" | sed -e "s#@WANT@#$want#g" -e "s#@OTHER@#$other#g")"
+      mkdir -p "$dir/$name"
+      printf '%s\n' "$json" >"$dir/$name/manifest.json"
+      tar -cf "$f" -C "$dir/$name" manifest.json
+    fi
+    v="$(grain_verdict "$f" "$want" | cut -d'|' -f1)"
+    n=$((n + 1))
+    if [ "$v" = "$expect" ]; then
+      info "  $name -> $v (expected $expect)"
+    else
+      info "  $name -> $v (expected $expect)  *** DID NOT FIRE ***"
+      bad=$((bad + 1))
+    fi
+  done <<'GRAIN_FIXTURES'
+happy-dev-dataset|ok|{"profile":"dev","dataset":"@WANT@"}
+workspace-grain-no-dataset|no-dataset|{"profile":"dev"}
+wrong-dataset|dataset-mismatch|{"profile":"dev","dataset":"@OTHER@"}
+unscrubbed-profile|profile-mismatch|{"profile":"full","dataset":"@WANT@"}
+not-a-bundle-at-all|no-dataset|@NOTATAR@
+GRAIN_FIXTURES
+
+  if [ "$bad" -ne 0 ]; then
+    fail 1 "THE GRAIN CONTROL DID NOT FIRE: $bad of $n locally built manifests were classified WRONG by the same grain assertion the live bundle goes through. Until it has been shown capable of refusing a workspace-grain bundle, step 1's manifest line proves only that the comparison was evaluated (PDS-D20). Nothing was exported and nothing was imported."
+    return 1
+  fi
+  blk="$(grain_blocker no-dataset)"
+  if [ "$blk" != "pds-w4-pull-dataset-flag" ]; then
+    fail 1 "THE GRAIN CONTROL DID NOT FIRE: a dataset-less (workspace-grain) manifest routes to blocker '${blk:-<none>}', not the pds-w4-pull-dataset-flag ABORT this rung claims to raise for it (PDS-D61/D62). Nothing was exported and nothing was imported."
+    return 1
+  fi
+  info "  $n/$n classified as expected, and a workspace-grain manifest routes to ABORT $blk."
+  return 0
+}
+
 # WHAT pds-w1-pull-cli ACTUALLY SHIPPED (corrected at wave-3 review). This step
 # was authored expecting a single `bp dev pull` verb. That verb does NOT exist:
 # the pull front door landed as the EXISTING pair, extended —
@@ -947,6 +1069,21 @@ step_1() {
   say "  calls below carry an explicit -s <base> --token <tok>, and the two are"
   say "  never the same pair — the source token is a PRODUCTION admin token and a"
   say "  mirrored typo would aim it at production."
+  say ""
+
+  # ── the negative control, BEFORE the preconditions ────────────────────────
+  #
+  # Deliberately ahead of load_target/ensure_bp: it needs neither, and putting it
+  # after them would mean a machine with no scratch target ABORTs step 1 without
+  # ever exercising the assertion — which is the vacuous default this control
+  # exists to remove. On by default (PDS_STEP1_GRAIN_DEMO=0 to skip).
+  if [ "${PDS_STEP1_GRAIN_DEMO:-1}" = "1" ]; then
+    grain_control || return 0
+    GRAIN_DEMO_NOTE=" The grain assertion was CONTROLLED this run: five manifests built on this machine were put through it and it refused every mis-grained one — a dataset-less workspace-grain bundle routes to ABORT $GRAIN_ABORT_TASK — while accepting the correctly grained one."
+  else
+    GRAIN_DEMO_NOTE=" NOTE: the grain control was DISABLED (PDS_STEP1_GRAIN_DEMO=0), so nothing this run proved the manifest-grain assertion is capable of REFUSING a workspace-grain bundle; the green is weaker for it."
+    info "grain control   DISABLED (PDS_STEP1_GRAIN_DEMO=0) — the pass below is weaker for it: nothing proved the manifest-grain assertion can refuse"
+  fi
   say ""
 
   if ! load_target; then
@@ -1006,24 +1143,25 @@ step_1() {
   # A workspace-grain bundle wearing a dev command line is the silent-wrong-
   # answer hazard of this whole wave: it imports fine, and every census below
   # then measures a workspace, not the dataset the transcript claims.
-  local m_ds m_profile m_prc=0 m_drc=0 m_note
-  m_profile="$(manifest_field "$tar" profile)" || m_prc=$?
-  m_ds="$(manifest_field "$tar" dataset)" || m_drc=$?
+  local m_ds m_profile m_prc=0 m_drc=0 m_note m_verdict
+  IFS='|' read -r m_verdict m_profile m_ds m_prc m_drc <<GRAIN_VERDICT
+$(grain_verdict "$tar" "$SOURCE_DS")
+GRAIN_VERDICT
   # rc 2 is NOT "the field is absent" — it is "nothing was readable here". Saying
   # <absent> for both is the conflation PDS-D261 removed from full_meta_ok.
   m_note=""
   [ "$m_prc" -eq 2 ] && m_note=" — manifest UNREADABLE (no extractable manifest.json, or it is not a JSON object), so neither field below is an absence, it is a non-answer"
   info "manifest        profile='${m_profile:-$([ "$m_prc" -eq 2 ] && echo '<unreadable>' || echo '<absent>')}' dataset='${m_ds:-$([ "$m_drc" -eq 2 ] && echo '<unreadable>' || echo '<absent>')}' (asked for profile=dev dataset=$SOURCE_DS)$m_note"
-  if [ -z "$m_ds" ]; then
-    abort 1 "pds-w4-pull-dataset-flag" \
+  if [ "$m_verdict" = "no-dataset" ]; then
+    abort 1 "$(grain_blocker "$m_verdict")" \
       "the exported manifest carries NO dataset field — this is a WORKSPACE-GRAIN bundle wearing a dataset command line. Refusing to import it: every per-type census downstream would silently describe the whole workspace while the transcript claimed dataset=$SOURCE_DS (PDS-D61/D62). The bundle is on disk at $tar if you want to look."
     return 0
   fi
-  if [ "$m_ds" != "$SOURCE_DS" ]; then
+  if [ "$m_verdict" = "dataset-mismatch" ]; then
     fail 1 "the exported manifest says dataset='$m_ds' but the export asked for '$SOURCE_DS' — the scope flag is not reaching the engine. Nothing was imported."
     return 0
   fi
-  if [ "$m_profile" != "dev" ]; then
+  if [ "$m_verdict" = "profile-mismatch" ]; then
     fail 1 "the exported manifest says profile='${m_profile:-<absent>}' but the export asked for 'dev' — this bundle is NOT scrubbed and must not be treated as one. Nothing was imported."
     return 0
   fi
@@ -1071,7 +1209,7 @@ step_1() {
   pds_blind_spot_note \
     "date +%s, WALL CLOCK around an HTTP/CLI call issued from this shell — an OS clock outside every BEAM (PDS-D633 placement (a)); the BEAM doing the work is the remote SERVER, so no in-BEAM meter is reachable. A LATENCY, never a price (PDS-D605)" \
     "exit 0 in Ns"
-  pass 1 "the pull ran through the front-door PAIR: export --profile dev --dataset $SOURCE_DS --with-blobs ($bytes bytes, $n_blobs blobs) then import --yes --merge --with-blobs into $TARGET_BASE, exit 0 in $((t1 - t0))s. Manifest grain ASSERTED dataset=$m_ds profile=$m_profile. Receipt: ${receipt:-<none printed>}"
+  pass 1 "the pull ran through the front-door PAIR: export --profile dev --dataset $SOURCE_DS --with-blobs ($bytes bytes, $n_blobs blobs) then import --yes --merge --with-blobs into $TARGET_BASE, exit 0 in $((t1 - t0))s. Manifest grain ASSERTED dataset=$m_ds profile=$m_profile. Receipt: ${receipt:-<none printed>}.$GRAIN_DEMO_NOTE"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
