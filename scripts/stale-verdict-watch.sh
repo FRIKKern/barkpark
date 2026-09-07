@@ -250,8 +250,25 @@ SELFTEST_CHILD="${SVW_SELFTEST_CHILD:-0}"
 ATTEMPTS=3
 # THE TRANSPORT BUDGET, which is a different budget from ATTEMPTS above and was
 # the actual cause of the permanent rc=6 red. See the block above fetch_prs for
-# the measurement. PAGE_SIZE=25 is chosen with margin: 50 still answered at 72
-# open pull requests, 25 answered in ~4s, and the page count is cheap.
+# the measurement.
+#
+# WHAT THE MARGIN WAS MEASURED UNDER, because a figure without its condition is
+# the next stale comment (task-e47f86df96d7d3ce). MEASURED 2026-09-02 against
+# FRIKKern/barkpark at 72 open pull requests whose `mergeable` GitHub had
+# ALREADY COMPUTED — a warm, CACHED population: limit=50 + rollup answered 50
+# rows in ~10s, limit=25 + rollup answered 25 rows in ~4s, limit=100 + rollup
+# 504'd on 3 of 3. PAGE_SIZE=25 was chosen with that as the margin.
+#
+# THE MARGIN DOES NOT TRANSFER TO THE UNCACHED CASE, AND HAS NOT BEEN MEASURED
+# THERE. `mergeable` is computed lazily, so a page of freshly-created rows makes
+# the resolver compute mergeability for every row inside one request. On
+# 2026-09-07 thirty dependabot pull requests were created between 12:58Z and
+# 13:11Z and every page attempt timed out at ~10.4s (reconstructed from
+# consecutive attempt timestamps minus the scripted sleeps, across four runs) —
+# at a page size this margin calls comfortable. So: 25 is a measured page size
+# for a WARM population and an UNMEASURED one for a cold one. Re-measure against
+# an uncached population before quoting the margin again; do not lower the page
+# size on this note alone, because the cold-case number is not known.
 PAGE_SIZE="${SVW_PAGE_SIZE:-25}"
 PAGE_ATTEMPTS="${SVW_PAGE_ATTEMPTS:-4}"
 # Backoff BETWEEN page retries. The old budget spent all three of its attempts
@@ -300,6 +317,61 @@ required_contexts() {
 is_config_fault() { # body
   grep -qiE 'rate limit|abuse detection' <<<"$1" && return 1
   grep -qE 'HTTP 401|HTTP 403|Bad credentials|Resource not accessible by integration|Requires authentication|requires authentication' <<<"$1"
+}
+
+# ── THE DIAGNOSTIC: THE STATUS, NEVER JUST THE FIRST LINE OF THE BODY ────────
+#
+# THE DEFECT THIS OWNS (task-e47f86df96d7d3ce, measured 2026-09-07 against a
+# live 12-run red on main). Every `gh` call in this file is captured with
+# `2>&1`, and `gh api` copies the RESPONSE BODY to stdout and writes its own
+# one-line summary — `gh: HTTP 504`, `gh: Bad credentials` — to stderr. When
+# GitHub answers a resolver timeout it answers with an HTML error page, so the
+# FIRST LINE of that combined capture is the literal `<html>`, and all three
+# diagnostics below read `head -1`. The operator got, four times a run:
+#
+#     page 1 attempt 1/4 failed, retrying the PAGE in 3s: <html>
+#     poll 3/3 could not list pull requests: <html>
+#
+# The status was in $out the whole time, further down, and it is the SINGLE
+# fact that separates the three explanations the workflow's own rc=6 text sends
+# the operator away to choose between ("A 6 that PERSISTS is the token or the
+# poll budget, not the pull requests"): a 401 is the token, a 403/429 carrying
+# `rate limit` is the budget, a 502/504 is a server-side timeout. Settling the
+# 2026-09-07 red without it cost a reconstruction of the status from WALL-CLOCK
+# DELTAS — ~10.4s per failing attempt, derived from consecutive timestamps
+# minus the scripted 3/8/20s sleeps, across four runs. This reads the WHOLE
+# output and puts the status first.
+#
+# IT CAN ONLY ADD. The first line of the body is still printed, after the
+# status, and when no status can be found anywhere the digest degrades to
+# exactly the old `head -1` string preceded by a statement that there was no
+# status to report. Nothing here changes a return code, a retry budget, or a
+# refusal: this file still fails every read it cannot complete.
+gh_error_digest() { # <combined gh output> -> one line
+  # One awk, not a grep pipeline: the scan reads to EOF and never `exit`s, so
+  # the producing printf cannot take a SIGPIPE and hand `set -o pipefail` a 141.
+  printf '%s\n' "$1" | awk '
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      if (code == "") {
+        if (match(line, /HTTP\/[0-9.]+[ ]+[1-5][0-9][0-9]/)) {
+          s = substr(line, RSTART, RLENGTH); code = substr(s, length(s) - 2)
+        } else if (match(line, /HTTP[ ]+[1-5][0-9][0-9]/)) {
+          s = substr(line, RSTART, RLENGTH); code = substr(s, length(s) - 2)
+        } else if (match(line, /<title>[ ]*[1-5][0-9][0-9]/)) {
+          s = substr(line, RSTART, RLENGTH); code = substr(s, length(s) - 2)
+        }
+      }
+      if (summary == "" && substr(line, 1, 4) == "gh: ") summary = substr(line, 5)
+      if (first == "" && line ~ /[^ \t]/) first = line
+    }
+    END {
+      d = (code != "" ? "HTTP " code : "no HTTP status in the response")
+      if (summary != "") d = d " — " summary
+      if (first != "" && first != summary) d = d " — first line of the body: " first
+      print d
+    }'
 }
 
 # ── THE READ, AND WHY IT IS PAGED ────────────────────────────────────────────
@@ -404,7 +476,7 @@ fetch_pr_pages() { # <repo> -> JSON array | error body
         printf '%s' "$out"
         return 3
       fi
-      body="$(printf '%s' "$out" | head -1)"
+      body="$(gh_error_digest "$out")"
       if [ "$attempt" -ge "$PAGE_ATTEMPTS" ]; then
         red "  page $page failed $attempt/$PAGE_ATTEMPTS times, giving up on this pass: $body"
         printf '%s' "$out"
@@ -466,7 +538,7 @@ fetch_prs() { # -> prints JSON array, or the error body on failure
       printf '%s' "$out"
       return 3
     else
-      red "  poll $i/$ATTEMPTS could not list pull requests: $(printf '%s' "$out" | head -1)"
+      red "  poll $i/$ATTEMPTS could not list pull requests: $(gh_error_digest "$out")"
     fi
     sleep_for="$(printf '%s\n' $SLEEPS | sed -n "${i}p")"
     [ -n "${sleep_for:-}" ] || sleep_for=0
@@ -485,7 +557,7 @@ fetch_commits() { # <repo> -> ISO lines
       printf '%s\n' "$out"
       [ "$(printf '%s\n' "$out" | grep -c .)" -lt 100 ] && return 0
     else
-      red "  could not read main's commit dates (page $page): $(printf '%s' "$out" | head -1)"
+      red "  could not read main's commit dates (page $page): $(gh_error_digest "$out")"
       return 1
     fi
   done
@@ -1059,9 +1131,13 @@ main() {
     case "$rc" in
       0) ;;
       3) red "CONFIGURATION FAULT — this run's credential cannot list pull requests (401/403). A watch that cannot read what it watches must not report success."
-         red "$(printf '%s' "$prs" | head -3)"
+         red "$(gh_error_digest "$prs")"
          return 3 ;;
       *) red "UNREACHABLE — the pull-request list could not be read after $ATTEMPTS attempt(s), so this run classified nothing and does not know how many pull requests exist. This is a transport silence, not a green."
+         # The workflow's rc=6 text tells the operator to decide between the
+         # token and the budget. That decision is the STATUS, so it is stated
+         # here rather than left in the retry lines further up the log.
+         red "  last transport error: $(gh_error_digest "$prs")"
          return 6 ;;
     esac
   fi
