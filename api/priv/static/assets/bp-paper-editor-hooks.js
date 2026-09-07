@@ -22,7 +22,21 @@
       this._fit = () => {
         if (this._disposed || !this.el.isConnected) return;
         this.el.style.height = "0px";
-        this.el.style.height = `${this.el.scrollHeight}px`;
+        let height = this.el.scrollHeight;
+        if (this.el.classList.contains("bp-paper-inline-text")) {
+          const style = window.getComputedStyle(this.el);
+          const lineHeight = Number.parseFloat(style.lineHeight);
+          const plain = ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"]
+            .every((property) => Number.parseFloat(style[property]) === 0);
+          // scrollHeight is integer-rounded, unlike the reader's line boxes.
+          // Only correct that rounding for plain fields with a known line height;
+          // preserve the measured fallback for padding, normal line height or overflow.
+          const exact = Math.max(1, Math.round(height / lineHeight)) * lineHeight;
+          if (plain && Number.isFinite(exact) && lineHeight > 1 && Math.abs(exact - height) < 1) {
+            height = exact;
+          }
+        }
+        this.el.style.height = `${height}px`;
       };
       this._fit();
       this.el.addEventListener("input", this._fit);
