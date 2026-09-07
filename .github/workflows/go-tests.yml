@@ -562,6 +562,95 @@ jobs:
       - name: go test (race detector)
         run: go test -race ./...
 
+      # ── govulncheck — ADVISORY BY CONSTRUCTION, and this comment is the
+      # reason, not a disclaimer (task-c33fee1e82700787).
+      #
+      # WHY IT IS NOT BLOCKING. Measured on this tree before the step was
+      # written: `govulncheck ./...` reports ELEVEN vulnerabilities with CALLED
+      # symbols, and all eleven are Go STANDARD LIBRARY findings — e.g.
+      # GO-2026-4971, `net` fixed in go1.26.3. Zero of them are this repo's own
+      # module dependencies. A stdlib finding is cleared by bumping the
+      # TOOLCHAIN, not by editing this repo, so a blocking step here would red
+      # every open PR the day a stdlib advisory lands and NO PR could clear it.
+      # That is precisely the shape `.github/required-checks.json` names as
+      # disqualifying when it holds the advisory `Security gate` out of branch
+      # protection — a ruling this step INHERITS and does not re-litigate:
+      # its `mix-audit` upstream runs against a LIVE advisory database, so "a
+      # CVE published tomorrow reds it on every open PR with no change to this
+      # repo — a permanently correct red that no PR can clear, which is exactly
+      # what branch protection must never pin." The same argument applies here
+      # verbatim, so this step is wired the way that ruling implies: it RUNS on
+      # every Go change and REPORTS, and it never decides.
+      #
+      # HOW THE ADVISORY-NESS IS ENFORCED, twice, because once is a typo away
+      # from a permanent block:
+      #   1. the script ends in an explicit `exit 0` — the verdict is published
+      #      as `::warning::` annotations, which reach the PR files view and the
+      #      check-run API, unlike a $GITHUB_STEP_SUMMARY line;
+      #   2. `continue-on-error: true`, so even a failure this script did not
+      #      anticipate (a `go install` that cannot reach proxy.golang.org, a
+      #      toolchain mismatch) cannot fail the job.
+      # STEP-level `continue-on-error` does NOT make this job `continue-on-error`
+      # — the job's conclusion is unchanged, so the `Go gate` aggregator below
+      # still reads `needs.test.result == success` exactly as it did before this
+      # step existed, and its "no job here carries continue-on-error" invariant
+      # (which is about JOBS, and about laundering a FAILURE into a green
+      # `needs` result) is untouched. Nothing is added to any `needs:` list.
+      #
+      # NO NEW REQUIRED CONTEXT. This publishes no check-run name of its own; it
+      # is a step inside `go vet + test`. `.github/required-checks.json` is not
+      # edited by the change that added this.
+      #
+      # `-scan symbol` (the DEFAULT), not `-scan module`. Module mode reports
+      # every module with any known advisory whether or not the vulnerable code
+      # is reachable; on a 99-module go.sum that is a wall of findings nobody
+      # triages, and an advisory gate that is never read is worse than none.
+      # Symbol mode reports only vulnerabilities whose vulnerable symbols this
+      # binary can actually reach — a finding here is a claim somebody can act
+      # on. The mode is written out explicitly rather than left implicit so a
+      # future reader can see it was chosen.
+      #
+      # WHAT CI SEES IS NOT WHAT A LAPTOP SEES. The stdlib half of this report
+      # is a property of the TOOLCHAIN, and `actions/setup-go` above pins
+      # go.mod's version (1.25.0 at the time of writing) while a developer's box
+      # runs whatever it runs. Do not reconcile a local run against this one.
+      - name: govulncheck (advisory — reports, never blocks)
+        continue-on-error: true
+        run: |
+          set +e
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          if [ $? -ne 0 ]; then
+            echo "::warning title=govulncheck: not run::Could not install govulncheck; this ADVISORY step reported nothing. Read it as 'not scanned', never as 'no vulnerabilities'."
+            exit 0
+          fi
+
+          out="$("$(go env GOPATH)/bin/govulncheck" -scan symbol ./... 2>&1)"
+          rc=$?
+          printf '%s\n' "$out"
+
+          # rc is govulncheck's own verdict: 0 = nothing called, 3 = at least one
+          # vulnerability with a CALLED symbol, anything else = the tool itself
+          # failed. All three are reported and none of them fails this step.
+          if [ "$rc" -eq 0 ]; then
+            echo "govulncheck: no CALLED vulnerabilities on this tree (scan=symbol, toolchain $(go env GOVERSION))."
+            exit 0
+          fi
+
+          if [ "$rc" -ne 3 ]; then
+            echo "::warning title=govulncheck: tool error (exit $rc)::govulncheck did not complete, so NOTHING was scanned. This step is advisory and stays green; the log above has the error."
+            exit 0
+          fi
+
+          # Split stdlib from module findings — the distinction is the entire
+          # reason this step is advisory, so the annotation must carry it.
+          # `grep -c` prints a count AND exits non-zero on zero matches, so
+          # every count is captured with `|| true` and read from stdout, never
+          # from the exit status.
+          n_total="$(printf '%s\n' "$out" | grep -c '^Vulnerability #' || true)"
+          n_std="$(printf '%s\n' "$out" | grep -c '^  Standard library$' || true)"
+          echo "::warning title=govulncheck: ${n_total} called vulnerability finding(s)::ADVISORY, does not block. ${n_std} of them are Go STANDARD LIBRARY findings, cleared by bumping the toolchain in go.mod, not by editing this repo. Toolchain: $(go env GOVERSION), scan=symbol. Full report in this step's log."
+          exit 0
+
   go-gate:
     # ── THE AGGREGATOR — the one name step 3 should pin ─────────────────────
     #

@@ -1,0 +1,209 @@
+# Dependabot — the repo's ONLY automated dependency-freshness updater.
+#
+# WHY THIS FILE EXISTS (task-c33fee1e82700787). Before it, the repo had no
+# dependabot config and no renovate config. The single freshness signal was
+# `mix_audit` in security.yml — Elixir only, CVE-only, and it never proposes an
+# upgrade. One `go.mod` (205 go.sum lines / 99 unique modules) and ELEVEN
+# lockfile-bearing JS roots aged with nothing watching them.
+#
+# ── THE ROOT SET IS DERIVED, NOT CURATED ────────────────────────────────────
+#
+# `scripts/dependabot-roots-check.sh` re-derives the root set from
+# `git ls-tree -r HEAD` on every run and asserts this file's `updates:` entries
+# match it EXACTLY, in BOTH directions: a lockfile-bearing directory with no
+# entry is a hole, and an entry naming a directory that holds no lockfile is an
+# orphan that Dependabot will report as a config error. Do not hand-edit an
+# entry here without running that script; do not add a lockfile anywhere
+# without adding its entry here.
+#
+# A ROOT IS A DIRECTORY THAT HOLDS A LOCKFILE, not a directory that holds a
+# package.json. That distinction is the whole judgement call in this file and it
+# is deliberate:
+#
+#   * `js/packages/*` (12 members), `js/docs`, `apps/mobile` and
+#     `packages/client` carry a package.json but NO lockfile — they are
+#     workspace MEMBERS resolved by `js/pnpm-lock.yaml` and the root
+#     `pnpm-lock.yaml`. Dependabot updates a workspace from its LOCKFILE root
+#     and walks the members from there, so entries for the members would be
+#     duplicates at best and config errors at worst.
+#   * `api/assets/chat-palette`, `api/assets/chat-turn-clock`,
+#     `api/assets/sheet-grid`, `tooling/twoslash-mocks` and
+#     `tooling/webview-spike` carry a package.json, NO lockfile, and are not
+#     members of any pnpm workspace. They are genuinely uncovered by this file.
+#     That is stated, not hidden: Dependabot cannot pin an update it cannot
+#     resolve against a lockfile, and inventing one here would be a fake green.
+#     Committing lockfiles for them (or folding them into a workspace) is
+#     tracked separately; when a lockfile appears, the roots check REDS until an
+#     entry is added, which is exactly the alarm we want.
+#
+# THE REPO ROOT HOLDS TWO LOCKFILES — `package-lock.json` AND `pnpm-lock.yaml`.
+# Dependabot allows exactly one entry per (ecosystem, directory) pair, so `/`
+# gets ONE npm entry and the roots check dedupes by DIRECTORY for that reason.
+# The two-lockfile root is itself a smell (npm and pnpm disagreeing about the
+# same manifest); it is out of scope here and left as-is on purpose rather than
+# "cleaned up" inside a CI change.
+#
+# `groups:` is not cosmetic. Thirteen entries × unbounded PRs would bury the
+# board; every npm root batches its minor+patch bumps into ONE PR per week and
+# leaves majors as individual, reviewable PRs.
+
+version: 2
+
+updates:
+  # ── Go ─────────────────────────────────────────────────────────────────────
+  # The single go.mod, at the repo root. `go vet + test` in go-tests.yml runs
+  # `go vet ./...` + `go test -race ./...` on any **/*.go, go.mod or go.sum
+  # change, so a Dependabot bump here arrives already gated.
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      go-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # ── GitHub Actions ─────────────────────────────────────────────────────────
+  # Every `uses:` pin across .github/workflows/**. Actions are the one
+  # dependency class this repo pins by tag rather than by lockfile, so nothing
+  # else can see them age.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # ── npm / pnpm roots ───────────────────────────────────────────────────────
+  # Eleven directories, each holding at least one lockfile. Derived from
+  # `git ls-tree -r --name-only HEAD` and asserted by
+  # scripts/dependabot-roots-check.sh.
+
+  # Repo root: package-lock.json AND pnpm-lock.yaml (see the note above).
+  # pnpm-workspace.yaml here globs web, js/packages/core, js/packages/react,
+  # apps/mobile.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # api/assets/paper-editor — package-lock.json. The Papers editor bundle.
+  - package-ecosystem: "npm"
+    directory: "/api/assets/paper-editor"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # apps/hundesteder — pnpm-lock.yaml + its own pnpm-workspace.yaml (packages: [])
+  # anchoring it as a standalone Next.js app.
+  - package-ecosystem: "npm"
+    directory: "/apps/hundesteder"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # connectors — package-lock.json.
+  - package-ecosystem: "npm"
+    directory: "/connectors"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # js — pnpm-lock.yaml for the SDK workspace (js/pnpm-workspace.yaml globs
+  # packages/* and docs). ONE root, not twelve: the members have no lockfile.
+  - package-ecosystem: "npm"
+    directory: "/js"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # sdk — package-lock.json.
+  - package-ecosystem: "npm"
+    directory: "/sdk"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # templates/astro-search-starter — package-lock.json.
+  - package-ecosystem: "npm"
+    directory: "/templates/astro-search-starter"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # templates/astro-starter — package-lock.json.
+  - package-ecosystem: "npm"
+    directory: "/templates/astro-starter"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # templates/next-starter — package-lock.json.
+  - package-ecosystem: "npm"
+    directory: "/templates/next-starter"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # templates/search-starter — package-lock.json.
+  - package-ecosystem: "npm"
+    directory: "/templates/search-starter"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # web — pnpm-lock.yaml. The Next.js demo/finder app.
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
