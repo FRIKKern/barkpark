@@ -20,9 +20,10 @@ defmodule Barkpark.JsCoreErrorPredicateMirrorTest do
 
   This file is the shape the repo already uses for cross-surface literal locks
   (`api/test/barkpark/sheets_parity_test.exs` reads
-  `js/packages/react/src/blocks/sheet.ts` the same way): it runs in the REQUIRED
-  `Elixir gate` — job `Test (Elixir 1.18.1 / OTP 27.0)` in
-  `.github/workflows/elixir.yml` — and both source paths are declared in
+  `js/packages/react/src/blocks/sheet.ts` the same way). VENUE: workflow
+  `.github/workflows/elixir.yml`, job `Test (Elixir 1.18.4 / OTP 27.0)`,
+  aggregated into the REQUIRED context `Elixir gate` (one of the four in
+  `.github/required-checks.json`). Both source paths are declared in
   `ELIXIR_TEST_ONLY_PATHS` in `scripts/elixir-path-escape-check.sh`, whose
   `--match test` output IS that workflow's dispatch predicate. Declaring them
   does two things at once: it makes `scripts/elixir-path-escape-check.sh` honest
@@ -85,7 +86,9 @@ defmodule Barkpark.JsCoreErrorPredicateMirrorTest do
 
   describe "the extractor refuses rather than passing vacuously" do
     test "an empty read REFUSES with a distinct message" do
-      path = Path.join(System.tmp_dir!(), "bp-mirror-empty-#{System.unique_integer([:positive])}.ts")
+      path =
+        Path.join(System.tmp_dir!(), "bp-mirror-empty-#{System.unique_integer([:positive])}.ts")
+
       File.write!(path, "")
       on_exit(fn -> File.rm(path) end)
 
@@ -95,7 +98,9 @@ defmodule Barkpark.JsCoreErrorPredicateMirrorTest do
     end
 
     test "a source with no isBarkparkError signature REFUSES with a distinct message" do
-      path = Path.join(System.tmp_dir!(), "bp-mirror-nosig-#{System.unique_integer([:positive])}.ts")
+      path =
+        Path.join(System.tmp_dir!(), "bp-mirror-nosig-#{System.unique_integer([:positive])}.ts")
+
       File.write!(path, "export function somethingElse() {\n  return 1\n}\n")
       on_exit(fn -> File.rm(path) end)
 
@@ -105,7 +110,9 @@ defmodule Barkpark.JsCoreErrorPredicateMirrorTest do
     end
 
     test "an empty body REFUSES with a distinct message" do
-      path = Path.join(System.tmp_dir!(), "bp-mirror-nobody-#{System.unique_integer([:positive])}.ts")
+      path =
+        Path.join(System.tmp_dir!(), "bp-mirror-nobody-#{System.unique_integer([:positive])}.ts")
+
       File.write!(path, "export function isBarkparkError(e, code) {\n}\n")
       on_exit(fn -> File.rm(path) end)
 
