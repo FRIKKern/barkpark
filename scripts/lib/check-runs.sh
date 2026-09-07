@@ -49,6 +49,7 @@
 #   rows="$(check_runs_rows "$repo" "$full_sha" "$fixture_dir")" || handle
 #   wide="$(check_runs_rows_ext "$repo" "$full_sha" "$fixture_dir")" || handle
 #   wide="$(check_runs_rows_file "$explicit_json_path" "$sha")" || handle
+#   feed="$(check_runs_feed "$repo" "$full_sha")" || handle   # raw, complete, proven
 #   conclusion="$(check_runs_conclusion "$rows" 'Console gate')"   # "" if absent
 
 # Guard against double-sourcing (the lib carries no state, but a caller that
@@ -163,10 +164,18 @@ check_runs_rows_file() {
 # feed: a truncated read must not be byte-identical to a genuinely small one.
 _check_runs_fetch() {
   local repo="$1" sha="$2"
-  local page=1 body acc total got prev
+  local page=1 body acc total got prev err
 
-  body="$(gh api "repos/$repo/commits/$sha/check-runs?per_page=100&page=1" 2>/dev/null)" || {
-    echo "check-runs: cannot read check-runs for $sha (an unreadable feed is a failure, not an empty set)" >&2
+  # gh's OWN stderr is carried into the refusal rather than swallowed. It is the
+  # only place `Bad credentials` / `HTTP 401` ever appears, and a caller that
+  # grades a credential fault differently from a network blip (the census exits
+  # 3 on one and 2 on the other) cannot make that call off a message this
+  # function paraphrased. `2>/dev/null` here was a silent downgrade of every
+  # such caller to "could not read".
+  err="$(mktemp)"
+  body="$(gh api "repos/$repo/commits/$sha/check-runs?per_page=100&page=1" 2>"$err")" || {
+    echo "check-runs: cannot read check-runs for $sha (an unreadable feed is a failure, not an empty set) — $(head -3 "$err" | tr '\n' ' ' | cut -c1-400)" >&2
+    rm -f "$err"
     return 2
   }
 
@@ -175,6 +184,7 @@ _check_runs_fetch() {
   # its documented "malformed check-runs payload" refusal with its own wording.
   jq -e 'has("check_runs") and (.check_runs | type == "array")' >/dev/null 2>&1 <<<"$body" || {
     printf '%s\n' "$body"
+    rm -f "$err"
     return 0
   }
 
@@ -189,14 +199,17 @@ _check_runs_fetch() {
   if [ -z "$total" ]; then
     if [ "$got" -ge 100 ]; then
       echo "check-runs: check-runs feed for $sha returned a FULL page ($got) with no total_count — completeness cannot be proven, refusing to emit a possibly-truncated set" >&2
+      rm -f "$err"
       return 2
     fi
     printf '%s\n' "$body"
+    rm -f "$err"
     return 0
   fi
 
   if [ "$total" -gt $((BARKPARK_CHECK_RUNS_MAX_PAGES * 100)) ]; then
     echo "check-runs: $sha carries $total check runs, over the $BARKPARK_CHECK_RUNS_MAX_PAGES-page ceiling ($((BARKPARK_CHECK_RUNS_MAX_PAGES * 100))) — refusing rather than returning a bounded read that reads like a complete one (raise BARKPARK_CHECK_RUNS_MAX_PAGES deliberately)" >&2
+    rm -f "$err"
     return 2
   fi
 
@@ -204,26 +217,31 @@ _check_runs_fetch() {
     page=$((page + 1))
     if [ "$page" -gt "$BARKPARK_CHECK_RUNS_MAX_PAGES" ]; then
       echo "check-runs: hit the $BARKPARK_CHECK_RUNS_MAX_PAGES-page ceiling for $sha with $got of $total runs read — refusing (a partial read must never look like a small feed)" >&2
+      rm -f "$err"
       return 2
     fi
-    body="$(gh api "repos/$repo/commits/$sha/check-runs?per_page=100&page=$page" 2>/dev/null)" || {
-      echo "check-runs: cannot read check-runs page $page for $sha ($got of $total runs read) — refusing the partial set" >&2
+    body="$(gh api "repos/$repo/commits/$sha/check-runs?per_page=100&page=$page" 2>"$err")" || {
+      echo "check-runs: cannot read check-runs page $page for $sha ($got of $total runs read) — refusing the partial set — $(head -3 "$err" | tr '\n' ' ' | cut -c1-400)" >&2
+      rm -f "$err"
       return 2
     }
     jq -e 'has("check_runs") and (.check_runs | type == "array")' >/dev/null 2>&1 <<<"$body" || {
       echo "check-runs: malformed check-runs payload on page $page for $sha ($got of $total runs read) — refusing the partial set" >&2
+      rm -f "$err"
       return 2
     }
     # A page that adds nothing cannot terminate the walk quietly — that is the
     # infinite loop's exit AND the truncation's disguise, so it is a refusal.
     acc="$(jq -c --argjson p "$(jq -c '.check_runs' <<<"$body")" '. + $p' <<<"$acc")" || {
       echo "check-runs: cannot accumulate page $page for $sha — refusing the partial set" >&2
+      rm -f "$err"
       return 2
     }
     prev="$got"
     got="$(jq -r 'length' <<<"$acc")"
     if [ "$got" -le "$prev" ]; then
       echo "check-runs: page $page for $sha added no runs while $prev of $total were read — refusing the partial set" >&2
+      rm -f "$err"
       return 2
     fi
   done
@@ -234,10 +252,38 @@ _check_runs_fetch() {
   # stop being returned silently.
   if [ "$got" -ne "$total" ]; then
     echo "check-runs: read $got check runs for $sha but the feed reports total_count $total — refusing (the set cannot be vouched for; a re-run may have landed mid-read, retry)" >&2
+    rm -f "$err"
     return 2
   fi
 
+  rm -f "$err"
   jq -c -n --argjson runs "$acc" --argjson total "$total" '{total_count: $total, check_runs: $runs}'
+}
+
+# check_runs_feed <repo> <sha>
+#
+# THE COMPLETE FEED, RAW — `{total_count, check_runs}` as one JSON object, or a
+# refusal (return 2, ZERO bytes on stdout, a `check-runs: …` line on stderr).
+# Same paged read and same completeness proof as check_runs_rows_ext; only the
+# shape differs.
+#
+# WHY A SECOND PUBLIC SHAPE AND NOT "JUST USE THE TSV". Two callers outside this
+# lib read columns the TSV does not carry AND must not inherit its dedup:
+#
+#   * release-scan.sh needs `.check_suite.id` per run, and its advisory
+#     derivation counts REDS PER SUITE — `$reds_per_suite[...] == 1` is the
+#     whole "sole red in a red suite" proof. `check_runs_rows*` keeps the LATEST
+#     row per NAME, which is right for a required-context census and would
+#     silently collapse two reds of the same name into one here, turning
+#     "cannot_tell" into a confident "blocking".
+#   * absent-context-census.sh emits `{name, status, conclusion}` NDJSON and
+#     grades a credential fault (exit 3) apart from an unreadable feed (exit 2).
+#
+# Handing them the raw feed is the alternative to a third hand-rolled paging
+# loop — the defect class this lib exists to remove. The PROOF is shared; the
+# projection stays the caller's.
+check_runs_feed() {
+  _check_runs_fetch "$1" "$2"
 }
 
 # check_runs_rows_ext <repo> <sha> [fixture_dir]
