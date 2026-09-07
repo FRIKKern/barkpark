@@ -348,6 +348,81 @@ set -e
 if [ "$rc" -eq 0 ] && [ -z "$out" ]; then ok "an EMPTY feed still returns 0 rows and exit 0 — the caller rules (the deliberate divergence holds)"; else no "empty feed: rc=$rc out='$out' — the deliberate divergence broke"; fi
 echo
 
+# ── THE LIVE READ IS PAGED, AND A TRUNCATED READ IS NEVER A SMALL ANSWER ─────
+#
+# MEASURED 2026-09-07 on real heads, before the fix:
+#   33799f6d8  73 names visible, 95 real  (22 invisible, incl. `Doc budgets +
+#              anchors`, `PR meta gates`, `Crown reconcile`)
+#   5845640c9  93 of 99 · c8f3795a3 97 of 99 · 67a1f4636 98 of 100 · 9bb9ad3be 98 of 99
+# Five of the last forty heads on main carry more than 100 check runs, so this
+# is the ORDINARY case, not an exotic one. `?per_page=100` returns the short
+# array with no error, and the required-check census then reports CLEANER than
+# the truth — an absence it reports is not an absence.
+#
+# These cases drive the LIVE branch through a `gh` stub on PATH (the fixture
+# branch never paginates), in a FRESH bash with default options, and they assert
+# the pair that matters: a refusal is rc 2 with NOTHING on stdout, while a
+# genuinely short feed is rc 0 WITH rows. If those two ever become
+# indistinguishable the reader is lying again.
+echo "check-runs — the live read pages, and proves its own completeness"
+GHSTUB="$TMPROOT/ghstub"; mkdir -p "$GHSTUB"
+cat > "$GHSTUB/gh" <<'STUB'
+#!/usr/bin/env bash
+url="$2"; page=1
+case "$url" in *"page="*) page="${url##*page=}" ;; esac
+mkbody() { local n="$1" total="$2" pre="$3" i out=""
+  for ((i=0;i<n;i++)); do out="$out${out:+,}{\"name\":\"$pre-$i\",\"conclusion\":\"success\",\"status\":\"completed\",\"started_at\":\"2026-09-01T00:00:00Z\",\"app\":{\"id\":15368}}"; done
+  printf '{"total_count":%s,"check_runs":[%s]}\n' "$total" "$out"; }
+nototal() { local n="$1" pre="$2" i out=""
+  for ((i=0;i<n;i++)); do out="$out${out:+,}{\"name\":\"$pre-$i\",\"conclusion\":\"success\",\"status\":\"completed\",\"started_at\":\"2026-09-01T00:00:00Z\",\"app\":{\"id\":15368}}"; done
+  printf '{"check_runs":[%s]}\n' "$out"; }
+case "$SCENARIO" in
+  complete)       if [ "$page" = 1 ]; then mkbody 100 104 p1; else mkbody 4 104 p2; fi ;;
+  page1_fails)    echo "gh: HTTP 502" >&2; exit 1 ;;
+  page2_fails)    if [ "$page" = 1 ]; then mkbody 100 104 p1; else echo "gh: HTTP 403 rate limit exceeded" >&2; exit 1; fi ;;
+  page2_empty)    if [ "$page" = 1 ]; then mkbody 100 104 p1; else mkbody 0 104 p2; fi ;;
+  no_total_full)  nototal 100 p1 ;;
+  no_total_short) nototal 7 p1 ;;
+  over_cap)       mkbody 100 9999 p1 ;;
+  small)          mkbody 7 7 p1 ;;
+  *) echo "unknown scenario" >&2; exit 9 ;;
+esac
+STUB
+chmod +x "$GHSTUB/gh"
+live_rows() { # <scenario> — fresh bash, DEFAULT options, stdout only
+  SCENARIO="$1" PATH="$GHSTUB:$PATH" \
+    bash -c '. "$1" && check_runs_rows_ext repo deadbeef' _ "$lib"
+}
+# POSITIVE CONTROL FIRST. If the paged read cannot return 104 rows, every
+# refusal below would pass for the wrong reason.
+set +e
+out="$(live_rows complete 2>/dev/null)"; rc=$?
+set -e
+n="$(printf '%s\n' "$out" | grep -c . || true)"
+if [ "$rc" -eq 0 ] && [ "$n" -eq 104 ]; then ok "a 104-run head reads all 104 rows across two pages (the pre-fix read saw 100)"; else no "paged read: rc=$rc rows=$n, expected rc 0 and 104"; fi
+# The ordinary case must be UNCHANGED and must not pay for a second request.
+set +e
+out="$(live_rows small 2>/dev/null)"; rc=$?
+set -e
+n="$(printf '%s\n' "$out" | grep -c . || true)"
+if [ "$rc" -eq 0 ] && [ "$n" -eq 7 ]; then ok "a feed under one page is unchanged — 7 rows, exit 0, one request"; else no "small feed: rc=$rc rows=$n"; fi
+# A genuinely short feed with NO total_count is still an answer …
+set +e
+out="$(live_rows no_total_short 2>/dev/null)"; rc=$?
+set -e
+n="$(printf '%s\n' "$out" | grep -c . || true)"
+if [ "$rc" -eq 0 ] && [ "$n" -eq 7 ]; then ok "a short page with no total_count is a legitimate small answer (rc 0, 7 rows)"; else no "no_total_short: rc=$rc rows=$n"; fi
+# … while every read that CANNOT be vouched for refuses with an EMPTY stdout.
+for s in page1_fails page2_fails page2_empty no_total_full over_cap; do
+  set +e
+  out="$(live_rows "$s" 2>/dev/null)"; rc=$?
+  set -e
+  if [ "$rc" -eq 2 ] && [ -z "$out" ]; then ok "$s: refuses with rc 2 and NOTHING on stdout — never byte-identical to a small answer"; else no "$s: rc=$rc out='$out' — a truncated read is masquerading as a complete one"; fi
+done
+if has "$libbody" 'total_count'; then ok "the reader proves its count against the feed's own total_count"; else no "the reader no longer checks total_count — completeness is unproven"; fi
+if has "$libbody" 'BARKPARK_CHECK_RUNS_MAX_PAGES'; then ok "the page ceiling is an EXPLICIT bound, not an accident of per_page"; else no "the reader has no explicit page ceiling"; fi
+echo
+
 # ── usage guards ─────────────────────────────────────────────────────────────
 echo "usage — the instrument fails loudly rather than measuring nothing"
 set +e
