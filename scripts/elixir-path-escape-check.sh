@@ -117,9 +117,10 @@ scripts/prod-build-cache-guard.sh'
 # Each entry is a MEASURED read, not a guess; see --list-escapes for the census.
 #
 # Deliberately NOT here, both measured over-inclusions (charter D31):
-#   * repo-root templates/**  — no Elixir test reads it. That entry is a
-#     copy-paste from go-tests.yml, where it IS load-bearing. The only
-#     "templates" the suite reads is internal/provisioner/catalog/templates/**.
+#   * repo-root templates/**  — the bare TREE stays out. A copy-paste of
+#     go-tests.yml's entry, where it IS load-bearing, would run the full Elixir
+#     suite on every template edit. ONE exact file under it is now declared
+#     (the search-starter isBarkparkError stub, below); the tree is not.
 #   * scripts/claude-pinned-version.txt — reachable only from
 #     api/test/barkpark_web/studio/claude_chat_real_binary_test.exs, whose
 #     :real_binary tag is excluded in api/test/test_helper.exs. See EXEMPT below.
@@ -213,9 +214,19 @@ scripts/prod-build-cache-guard.sh'
 #   web/node_modules/**   TypeScript and renderToStaticMarkup's it (#15435). Declared as the
 #                         three EXACT subdirs the test names, never the bare `web` tree: a
 #                         change to web/app/** cannot break it, so it must not run the suite.
-#                         node_modules is gitignored and can never be a changed path — it is
-#                         declared because the test PROBES it (react-dom, typescript) and an
-#                         undeclared existing read reds this gate on any tree that installed it.
+#
+#   THE TWO isBarkparkError MIRROR ENTRIES, both read by
+#   api/test/barkpark/js_core_error_predicate_mirror_test.exs:
+#     js/packages/core/src/errors.ts
+#     templates/search-starter/lib/__test-stub-barkpark-core.mjs
+#   Declared for BOTH of this list's effects, and the second is the point. The
+#   stub is a hand-copied port of core's runtime predicate; the template's own
+#   node --test runs under search-starter-smoke (never fires on a js/ PR) and
+#   core's vitest runs under js-tests (never fires on a templates/ PR), so
+#   neither venue can see the mirror move. Declaring BOTH exact files puts them
+#   in the DISPATCH set, so a PR editing EITHER side runs this required suite —
+#   one door watched and the other open is not a lock. Two exact files, never
+#   `js/**` or `templates/**`: the trees would be far more CI than this buys.
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
@@ -232,6 +243,7 @@ internal/chat/testdata/**
 internal/pdrender/testdata/**
 internal/provisioner/catalog/templates/**
 internal/taskboard/**
+js/packages/core/src/errors.ts
 js/packages/react/src/blocks/sheet.ts
 js/packages/react/tests/fixtures/**
 scripts/async_env_seam_scan.exs
@@ -248,6 +260,7 @@ scripts/test-env-leak-allowlist.txt
 scripts/test-env-leak-gate.sh
 scripts/test-env-leak-gate.test.sh
 scripts/unreachable-assert-message-check.sh
+templates/search-starter/lib/__test-stub-barkpark-core.mjs
 web/__tests__/**
 web/components/**
 web/lib/**

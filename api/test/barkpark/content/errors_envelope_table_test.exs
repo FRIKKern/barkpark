@@ -80,6 +80,13 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"rev_mismatch/expected-actual", {:error, {:rev_mismatch, %{expected: "a", actual: "b"}}},
        "precondition_failed", 412, [:details]},
       {"malformed", {:error, :malformed}, "malformed", 400, []},
+      # [mutation-shape-422] The catch-all's NARROWER sibling: a known {id,type}
+      # mutate verb sent without one of the two keys. It leaves the 400 above
+      # for the already-registered `validation_failed` 422 and names the verb
+      # and the missing key(s) in `details`, so the caller never has to read
+      # content/mutations.ex to find the shape.
+      {"missing_mutation_fields", {:error, {:missing_mutation_fields, "publish", ["type"]}},
+       "validation_failed", 422, [:details]},
       # Same registered `malformed` code, one step narrower: a block list whose
       # element is not an object. It rides `malformed` on purpose (a request-body
       # SHAPE error, not a schema validation failure), so known_codes/0 and the

@@ -99,6 +99,9 @@ on:
     paths:
       - "scripts/main-gate-watch.sh"
       - "scripts/main-gate-watch.test.sh"
+      - "scripts/main-verdict-presence.sh"
+      - "scripts/main-verdict-presence.test.sh"
+      - ".github/main-push-workflows.txt"
       - ".github/workflows/main-gate-watch.yml"
 
 permissions:
@@ -208,6 +211,53 @@ jobs:
             *) echo "::warning::the convergence comparison refused — UNCHECKED, not green" ;;
           esac
 
+  main-verdict-presence:
+    name: Main verdict presence
+    # task-6cd940f66125a079. The sibling job above asks whether main's tip is
+    # GREEN on the four contexts branch protection names. This one asks a
+    # different question that nothing in this repository asked before: did every
+    # workflow whose push arm reaches main actually PUBLISH an answer on that
+    # sha? A run collapsed by the next merge's cancel-in-progress publishes no
+    # context at all, and an absent context is not a red one, so the sibling has
+    # nothing to look at. Measured on main shas 0097c711f and 3b5d07ca6, which
+    # each took five cancelled runs (go-tests among them) and raised nothing.
+    #
+    # This job has NO authority over any pull request and nothing waits on it:
+    # it is fenced off pull_request exactly as its sibling is, so its name is
+    # never sampled onto a PR head, and it is deliberately NOT in the protected
+    # set — promoting a cancellable workflow into that set is the wrong remedy
+    # and is refused here. spec-authority: advisory-ok — an observer of main's
+    # tip that renders no PR context and blocks no merge.
+    #
+    # It runs as its own job rather than as a step of the sibling so the two
+    # limbs are reported apart: fusing an absence report into a redness report
+    # is how a true positive stays invisible.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The tripwire first: if the read has stopped being able to lose, whatever
+      # it says about main below is decoration.
+      - name: Prove the read can lose both ways (main-verdict-presence.test.sh)
+        run: bash scripts/main-verdict-presence.test.sh
+
+      - name: Did every workflow that guards main publish a verdict on its tip?
+        env:
+          GH_TOKEN: ${{ secrets.BREAKGLASS_TOKEN || github.token }}
+        run: |
+          set -uo pipefail
+          rc=0
+          bash scripts/main-verdict-presence.sh --repo "${{ github.repository }}" --branch main || rc=$?
+          case "$rc" in
+            0) exit 0 ;;
+            1) echo "::error::MAIN'S TIP TOOK NO VERDICT from a workflow whose push arm reaches main — a cancelled, never-created or startup_failure run publishes no context, and an absent context is not a red one. Re-run the named workflows on that sha."; exit 1 ;;
+            2) echo "::notice::WAITING — the tip is still being judged (a run is not terminal, or no run exists yet). Absences on it are premature; the next scheduled run decides."; exit 0 ;;
+            3) echo "::error::CONFIGURATION FAULT — the main-push workflow set could not be derived, drifted from .github/main-push-workflows.txt, or the runs feed was unreadable. See scripts/main-verdict-presence.sh."; exit 1 ;;
+            *) echo "::error::main-verdict-presence.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
+          esac
+
   main-gate-watch-harness:
     name: Main gate watch harness
     if: github.event_name == 'pull_request'
@@ -219,3 +269,7 @@ jobs:
         run: bash -n scripts/main-gate-watch.sh
       - name: Both-ways proofs (main-gate-watch.test.sh)
         run: bash scripts/main-gate-watch.test.sh
+      - name: Shell syntax (main-verdict-presence.sh)
+        run: bash -n scripts/main-verdict-presence.sh
+      - name: Both-ways proofs (main-verdict-presence.test.sh)
+        run: bash scripts/main-verdict-presence.test.sh

@@ -70,6 +70,57 @@ defmodule Barkpark.Repo.Migrations.AddMediaFilesCursorIndex do
   — a true seek — instead of a bound in `Filter`. Any speedup figure quoted for
   this index presupposes that comparator.
 
+  ## THE THIRD CONDITION, named after the fact (task-362eccb409365b11)
+
+  COMMENT-ONLY AMENDMENT, 2026-09-07. Everything below this heading is
+  moduledoc. `up/0`, `down/0`, `drop_invalid_index/0` and `@index_name` are
+  BYTE-IDENTICAL to the version that shipped, so no database — migrated before
+  or after — ends up with a different object. `MigrationManifestTest` is keyed
+  on the file's bytes and cannot tell a comment from an `ALTER`, so its
+  `MANIFEST.sha256` entry is regenerated with this commit; the PR carries the
+  `git diff` proving the executable half did not move. The tripwire's own
+  standing rule — ship a FORWARD migration instead — is about objects, and
+  there is no object here to move forward.
+
+  The numbers above were measured with `dataset_id = $1` in the predicate, and
+  the "before/after" framing above reads as though every cursor page now seeks.
+  It does not, and the condition was not stated when this migration merged.
+  Stating it here rather than restating the claim:
+
+  **This index is used only when the read's dataset STRING RESOLVES to a
+  `dataset_id`.** `Search.resolve_dataset_id/2` resolves through
+  `Tenancy.scope_project_id/1` → `Tenancy.get_dataset/2`, a PER-PROJECT lookup.
+  When it returns nil the leading column of this index is absent from the WHERE
+  clause entirely, and the only alternative — the plain `dataset` btree — has no
+  `inserted_at`, so the plan reverts to exactly the 4975-buffer / 12.579 ms
+  Parallel Seq Scan measured in the "before" arm. The index is then pure write
+  cost for that request.
+
+  As MERGED, that non-seeking population was not incidental: `scope_project_id/1`
+  returned nil for EVERY token-bound non-Default workspace, so every flat
+  `/v1/media/*` request from one of them paid the 8th btree and kept the seq
+  scan. task-362eccb409365b11 collapses that population onto the resolving path
+  by answering with the workspace's OWN default project.
+
+  What remains conditional after that fix, stated exactly:
+
+    * a workspace with no `"default"`-slugged project still resolves nil and
+      still does not seek;
+    * a dataset slug with no `Dataset` row under the resolved project likewise;
+    * `scope_media_to_dataset/3`'s resolved arm is NULL-TOLERANT
+      (`dataset_id = $1 OR (dataset_id IS NULL AND dataset = $2)`) because
+      `Media.put_scope_attrs/2` legitimately writes unstamped rows. Postgres
+      plans that disjunction as a `BitmapOr`, which cannot carry the ordered
+      `(inserted_at, id)` seek — so a corpus that still holds unstamped rows in
+      the read's dataset sorts rather than seeks. Making the seek unconditional
+      needs the stamps, not another index; a second
+      `(dataset, inserted_at DESC, id DESC)` btree was argued and REJECTED —
+      it buys a seek on the path the fix makes unreachable and taxes every
+      insert forever. `media_files` ends with 8 indexes, not 9.
+
+  So: every cursor page whose dataset resolves AND whose corpus is fully stamped
+  seeks. That is the honest scope of the number above.
+
   ## Concurrency, and the 60 s statement_timeout hazard
 
   Same treatment as 20260902001000: prod's `barkpark` role carries

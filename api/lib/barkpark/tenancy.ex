@@ -320,19 +320,54 @@ defmodule Barkpark.Tenancy do
   answer ONLY when no workspace resolved — the legacy flat/Default path, whose
   behaviour is unchanged.
 
-  A resolved workspace with NO project returns `nil`, and that is the whole
-  point. A token carries no project binding (`Auth.create_token/5` has no
-  project argument), `Plugs.DeriveWorkspaceFromToken` assigns only
-  `:current_workspace`, and `Plugs.AssignDefaultScope` DELIBERATELY declines to
-  stamp the Default Project for a non-Default workspace — its moduledoc: pairing
-  workspace A with a Default-owned project means "every scoped read matches zero
-  rows, and every scoped write stamps a `project_id` belonging to another
-  tenant". `ScopeHelpers.put_scope/3` drops a nil scope entirely
+  A resolved workspace with NO project resolves THAT WORKSPACE'S OWN default
+  project — the `"default"`-slugged project `create_workspace_with_owner/2`
+  bootstraps into every workspace it mints — and `nil` when the workspace has
+  none (task-362eccb409365b11).
+
+  ## Why it is the workspace's OWN project, and never the seeded one
+
+  `Plugs.AssignDefaultScope` DELIBERATELY declines to stamp the SEEDED Default
+  Project for a non-Default workspace — its moduledoc: pairing workspace A with
+  a Default-OWNED project means "every scoped read matches zero rows, and every
+  scoped write stamps a `project_id` belonging to another tenant".
+  `ScopeHelpers.put_scope/3` drops a nil scope entirely
   (`put_scope(opts, _key, nil), do: opts`), so `:project_id` arrives ABSENT
   rather than nil — which is why a `Keyword.get(opts, :project_id) ||
   default_project_id()` fallback silently re-created exactly that cross-tenant
-  pairing. Callers treat `nil` as "no dataset_id" and keep their
-  workspace-scoped `dataset` STRING filter.
+  pairing. That hazard is a property of WHOSE project answers, not of answering
+  at all: the lookup below is `workspace_id: workspace, slug: "default"`, so the
+  project it returns is BY CONSTRUCTION inside the asking workspace and cannot
+  be another tenant's.
+
+  ## What returning `nil` here was costing
+
+  The three consumers (`Media.put_scope_attrs/2`,
+  `Media.Delivery.Search.resolve_dataset_id/2`,
+  `Plugins.Media.Assets.resolve_dataset_id/2`) all feed `get_dataset/2`, which
+  is a PER-PROJECT lookup. A `nil` project therefore made the dataset
+  UNRESOLVABLE — unconditionally, for every token-bound non-Default workspace on
+  every flat `/v1/media/*` route, since a token carries no project binding
+  (`Auth.create_token/5` has no project argument) and
+  `Plugs.DeriveWorkspaceFromToken` assigns only `:current_workspace`. Those
+  callers then fell back to a caller-supplied `dataset` STRING, which is
+  workspace-scoped but NOT project-scoped: two projects in one workspace each
+  holding a dataset slugged `production` returned each other's media. The
+  project rung of the scope ladder (`docs/contracts/tenancy.md`) collapsed.
+
+  This is a NARROWING for reads and a STAMPING for writes, both inside one
+  tenant. It is not a widening: nothing here can name a project outside the
+  workspace the caller already resolved.
+
+  ## The surviving `nil`
+
+  A workspace with no `"default"`-slugged project (renamed, deleted, or created
+  by `create_project/2` under some other slug) still answers `nil`, and the
+  media callers keep their string fallback — which
+  `Search.scope_media_to_dataset/3` now pins to `dataset_id IS NULL` so it can
+  no longer swallow a sibling project's stamped rows. `nil` remains a legitimate
+  answer, not an error; `Media.put_scope_attrs/2`'s first legit-nil arm
+  (felix-w27-bl-media-dataset-swallow-mirror) is preserved by it.
 
   `:workspace_id` may be the `:shared_only` sentinel `ScopeHelpers` assigns when
   an HTTP request resolved no workspace; that is an unresolved workspace, so it
@@ -343,7 +378,7 @@ defmodule Barkpark.Tenancy do
   def scope_project_id(opts) when is_list(opts) do
     case {Keyword.get(opts, :project_id), Keyword.get(opts, :workspace_id)} do
       {project_id, _workspace} when is_binary(project_id) -> project_id
-      {_absent, workspace} when is_binary(workspace) -> nil
+      {_absent, workspace} when is_binary(workspace) -> workspace_default_project_id(workspace)
       {_absent, _unresolved} -> scope_default_project_id()
     end
   end
@@ -361,6 +396,33 @@ defmodule Barkpark.Tenancy do
     case get_default_project() do
       %Project{id: id} -> id
       _ -> nil
+    end
+  end
+
+  # The `"default"`-slugged project INSIDE `workspace_id`, or nil.
+  #
+  # Guarded on the `:binary_id` cast the same way `get_workspace_by_id/1` is: an
+  # internal caller threading a non-UUID `:workspace_id` would otherwise raise
+  # `Ecto.CastError` → 500 on a read path. A malformed id matches no row → nil,
+  # which is the pre-existing answer for that input.
+  #
+  # Uncached, deliberately. `DefaultScopeCache` memoises the ONE instance
+  # singleton; a per-workspace cache would be a second invalidation surface
+  # (every `create_project/2`, every workspace delete) for a `Repo.get_by` on
+  # the `projects_workspace_id_slug_index` UNIQUE index — one index probe.
+  # `Search.search/2` already resolves the dataset id ONCE per request and
+  # threads it through `opts[:dataset_id]`, so a media search pays this once,
+  # not once per facet.
+  defp workspace_default_project_id(workspace_id) when is_binary(workspace_id) do
+    case Repo.uuid_or_nil(workspace_id) do
+      nil ->
+        nil
+
+      uuid ->
+        case Repo.get_by(Project, workspace_id: uuid, slug: @default_project_slug) do
+          %Project{id: id} -> id
+          _ -> nil
+        end
     end
   end
 

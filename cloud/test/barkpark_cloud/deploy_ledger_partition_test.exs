@@ -79,18 +79,31 @@ defmodule BarkparkCloud.DeployLedgerPartitionTest do
   use BarkparkCloud.DataCase, async: false
 
   alias BarkparkCloud.{Accounts, DeployLedger, Registry, Repo}
+  alias BarkparkCloud.BoxCapacityRefusalFixture
   alias BarkparkCloud.Registry.Deployment
 
   @password "correct-horse-battery"
 
-  # Verbatim corpus shapes (2026-08-05 re-derivation), same strings the ledger
-  # test uses — a fixture built on invented text proves nothing about the
-  # classifier that has to read the real column.
+  # Corpus shapes (2026-08-05 re-derivation), the same strings the ledger test
+  # uses — a fixture built on invented text proves nothing about the classifier
+  # that has to read the real column.
+  #
+  # The capacity body below used to be a HAND-TYPED copy of the box's message
+  # under a comment that called it verbatim, and nothing checked — it drifted
+  # and stayed drifted for a day (#16598) with this suite green throughout. It
+  # is now DERIVED from the one shared fixture; the api/ gate is what makes the
+  # claim true.
   @r409_bare "the instance refused the deploy (HTTP 409)"
   @requeued " — deferred: a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes"
   @d_busy_bare @r409_bare <> @requeued
-  @d_capacity "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — site 'other-site' is building; retry when it finishes" <>
-                @requeued
+  # THE BOX'S OWN CAPACITY REFUSAL — NOT retyped here. `BoxCapacityRefusalFixture`
+  # reads the ONE shared copy (api/test/support/fixtures/box_capacity_refusal.json),
+  # and BarkparkWeb.SiteDeployCapacityBodyConformanceTest asserts the REAL emitter
+  # still produces it byte-for-byte. Re-word the refusal in the controller and the
+  # api/ gate reds naming the emitter and the stale fixture; this line follows the
+  # file with no edit here. Do not paste the string back in — the mirror guard
+  # (deploy_ledger/capacity_body_mirror_guard_test.exs) fails if you do.
+  @d_capacity BoxCapacityRefusalFixture.deferred_detail() <> @requeued
   # A deferral shape the ledger has never seen — lands in DEFERRED_UNCLASSIFIED.
   @d_novel "the boxcar shim deferred the handshake (code BLERG-7)" <> @requeued
   # Born-failed tombstone: NOT an attempt, so it must stay outside `volume`.

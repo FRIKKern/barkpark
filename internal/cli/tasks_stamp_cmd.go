@@ -75,6 +75,19 @@ import (
 // least-surprise, fully-backward-compatible fix.
 func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
 	declared := commandDeclaresFlag(cmd, "merge-gated")
+
+	// THE NON-EVALUATING DOOR (tasks_stamp_criterion_file.go). `--criterion-text-file
+	// <path>` (or `-` for stdin) is resolved FIRST, into the inline
+	// `--criterion-text=<bytes>` spelling, so every stage after this line —
+	// parseStampArgs, the echo, splitArgs, the POST, the read-back — sees the
+	// ordinary flag and can never drift from it. The wording therefore reaches
+	// the server byte-for-byte off disk, with no shell anywhere in its path.
+	fromFile := stampTextCameFromFile(tail)
+	tail, err := resolveCriterionTextFile(tail)
+	if err != nil {
+		return useError(out, criterionTextSourceCode, err.Error(), exitValidation)
+	}
+
 	sa, forward := parseStampArgs(tail, declared)
 
 	// LEGACY-SERVER FALLBACK ONLY. When the server declares --merge-gated it
@@ -141,6 +154,16 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 			if req, ok := stampRequestOf(cmd, forward); ok {
 				explainMergeGateDetector(out, ctx, req.docID, req.index)
 			}
+		}
+		// A text mismatch is the THIRD refusal whose real cause the message can
+		// hide. The server's hint names one candidate — an off-by-one index or a
+		// changed list — and that is the WRONG place to look when the operator's
+		// own shell executed a backticked code span in the wording before bp ever
+		// saw it (the measured case on task-6576859f2c12a8e8). Name the second
+		// cause, say whether THIS run was even capable of it, and hand over the
+		// non-evaluating recipe.
+		if criteriaMismatchReason(out.lastErrorCode) {
+			explainCriteriaMismatch(out, sa.criterionText, fromFile)
 		}
 		return cap.flush(out, rc, nil)
 	}
