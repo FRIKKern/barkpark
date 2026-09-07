@@ -30,6 +30,19 @@ func taskEnvelope(title, disposition, reason string) string {
 		`"help":["bp task pulse task-a w1 --now \"...\""]}`
 }
 
+// taskEnvelopeWithContentClaimAndCriteria is taskEnvelope plus server-provided
+// content.claim and content.criteria. It exists for exactly one caller: the
+// byte compare in TestTaskGetJSONBytesUnchangedByRulingHeader, which needs a
+// body the misread annotation provably leaves alone (it never overwrites a
+// server field) so the compare isolates the ruling header.
+func taskEnvelopeWithContentClaimAndCriteria(title, disposition, reason string) string {
+	env := taskEnvelope(title, disposition, reason)
+	return strings.Replace(env,
+		`"content":{"lifecycle_status":"open"`,
+		`"content":{"claim":{"epoch":3},"criteria":[],"lifecycle_status":"open"`,
+		1)
+}
+
 func taskWriteCommand(id, verb string) manifest.Command {
 	return manifest.Command{
 		ID:            id,
@@ -209,10 +222,25 @@ func TestTaskGetJSONBytesUnchangedByRulingHeader(t *testing.T) {
 	// header. Any leak — one byte — reds this.
 	reference := taskGetCommand()
 	reference.ID = "widget.get"
+	// task.get grew a SECOND stdout annotation since this compare was written:
+	// the misread sentinels planted at .doc.content.claim / .doc.content.criteria
+	// (tasks_get_misread.go), which the widget.get reference is also keyed out
+	// of. Left alone, the two sides would differ for a reason that has nothing
+	// to do with the ruling header, and this test would be measuring the wrong
+	// thing. So the byte compare runs on a body whose content ALREADY answers at
+	// both keys — the one case where the annotation is contractually a no-op
+	// (it never overwrites a server field) — which restores "these two renders
+	// differ only by the ruling header" without weakening the assertion by a
+	// byte. `bytesBody` is checked below to really be annotation-proof, so this
+	// cannot go quietly vacuous.
+	bytesBody := taskEnvelopeWithContentClaimAndCriteria("do the thing", "parked", rulingReason)
+	if annotated := annotateTaskGetMisreads(taskGetCommand(), 200, true, []byte(bytesBody)); string(annotated) != bytesBody {
+		t.Fatalf("the byte-compare fixture is NOT annotation-proof, so this compare would measure the sentinels rather than the ruling header:\n%s", annotated)
+	}
 	for _, output := range []string{"json", "yaml", "minimal"} {
 		t.Run("bytes/"+output, func(t *testing.T) {
-			got, _, _ := runPageResponse(t, output, globals{}, taskGetCommand(), body)
-			want, _, _ := runPageResponse(t, output, globals{}, reference, body)
+			got, _, _ := runPageResponse(t, output, globals{}, taskGetCommand(), bytesBody)
+			want, _, _ := runPageResponse(t, output, globals{}, reference, bytesBody)
 			if got != want {
 				t.Fatalf("-o %s stdout is not byte-unchanged by the ruling header:\n got %q\nwant %q", output, got, want)
 			}
