@@ -63,6 +63,28 @@ assert.equal(textarea.style.height, "30px", "unexpected content overflow is not 
 textarea.style.lineHeight = "normal";
 sizing.updated();
 assert.equal(textarea.style.height, "30px", "normal line height retains the measured fallback");
+const cite = window.document.createElement("cite");
+cite.className = "bp-blockquote__cite";
+textarea.before(cite);
+cite.append(textarea);
+const computedStyle = window.getComputedStyle.bind(window);
+let prefixWidth = "20.888px";
+window.getComputedStyle = (element, pseudo) => element === cite && pseudo === "::before"
+  ? { width: prefixWidth }
+  : computedStyle(element);
+sizing.updated();
+assert.equal(textarea.style.textIndent, "20.888px", "only the first citation line reserves the rendered dash width");
+prefixWidth = "24.5px";
+sizing.updated();
+assert.equal(textarea.style.textIndent, "24.5px", "font and layout updates remeasure the actual prefix");
+prefixWidth = "auto";
+sizing.updated();
+assert.equal(textarea.style.textIndent, "24.5px", "an unavailable prefix measurement cannot poison native layout");
+assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [2, 5], "prefix fitting preserves native selection");
+assert.equal(textarea.value, "Original title", "the decorative prefix never enters authored text");
+cite.before(textarea);
+cite.remove();
+window.getComputedStyle = computedStyle;
 textarea.style.cssText = "";
 textarea.classList.remove("bp-paper-inline-text");
 measuredHeight = 20;
