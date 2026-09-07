@@ -2391,6 +2391,27 @@ class BpPaperCanvas extends HTMLElement {
   // out of the user's undo history. The baseline was already reset by the caller.
   _applyExternalContent(blocks) {
     if (!this._editor) return;
+    const { state } = this._editor;
+    const next = state.schema.nodeFromJSON(runToTiptap(blocks));
+    const sameOrder = state.doc.childCount === next.childCount &&
+      Array.from({ length: next.childCount }, (_, index) => index).every((index) => {
+        const id = state.doc.child(index).attrs.bpId;
+        return id != null && id === next.child(index).attrs.bpId;
+      });
+    if (sameOrder) {
+      // Preserve mappings/history for untouched siblings. Replacing the entire
+      // document maps their local undo steps through a deletion, even when the
+      // remote update changed only one other block.
+      const tr = state.tr.setMeta("addToHistory", false).setMeta("preventUpdate", true);
+      let position = 0;
+      state.doc.forEach((node, _offset, index) => {
+        const replacement = next.child(index);
+        if (!node.eq(replacement)) tr.replaceWith(position, position + node.nodeSize, replacement);
+        position += replacement.nodeSize;
+      });
+      if (tr.docChanged) this._editor.view.dispatch(tr);
+      return;
+    }
     this._editor
       .chain()
       .setContent(runToTiptap(blocks), false)

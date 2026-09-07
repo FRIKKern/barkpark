@@ -320,6 +320,14 @@ try {
     assert.deepEqual(focused._blocks, finalThird);
     assert.equal(focused._editor.state.doc.firstChild.textContent, "Title from another tab");
     assert.equal(focused.hasPendingChanges(), false);
+    const leadBeforeUndo = focused._editor.state.doc.child(1).textContent;
+    assert.equal(focused._editor.commands.undo(), true, "a remote sibling update retains local undo history");
+    assert.notEqual(focused._editor.state.doc.child(1).textContent, leadBeforeUndo,
+      "undo changes the local introduction after the remote title becomes visible");
+    assert.equal(focused._editor.state.doc.firstChild.textContent, "Title from another tab",
+      "undo never reverses another author's title edit");
+    focused.flushPendingChanges();
+    assert.deepEqual(focusedBatches.at(-1).ops.map((op) => op.id), ["lead"]);
   } finally {
     focused.remove();
   }
