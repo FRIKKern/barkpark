@@ -310,6 +310,8 @@ internal/cli/cloud/providers_capabilities.json
 internal/cloudclient/**
 internal/provisioner/**
 api/test/support/totp_test_helper.ex
+api/lib/barkpark_web/controllers/site_deploy_controller.ex
+api/test/support/fixtures/box_capacity_refusal.json
 js/packages/create-barkpark-app/templates/**
 scripts/async_env_seam_scan.exs
 scripts/cloud-path-escape-check.sh
