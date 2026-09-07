@@ -214,7 +214,18 @@ TMP="$(mktemp -d)"
 # so they are unaffected.
 RC_TALLY_REACHED=0
 cleanup() {
-  local rc=$?
+  # THE STATUS MUST BE PASSED IN WHENEVER THIS HANDLER IS CHAINED, and $1 is how.
+  # A bare `$?` here is the status of the PREVIOUS COMMAND. In a chained trap
+  # string — `trap 'other; cleanup' EXIT` — that previous command is `other`, not
+  # the script, so a successful `other` REPLACES the script's status with 0
+  # before this line ever runs. That is not hypothetical: §26 installed exactly
+  # that chain, its `rc26_cleanup` ends in an `rm -f` that always succeeds, and
+  # every `exit 1` this suite raised from its own tally line was rewritten to
+  # `exit 0` on the way out. `Required-check spec gate` rendered GREEN over a red
+  # assertion because of these six characters. §26 now captures $? as the FIRST
+  # command of the trap string and hands it here; §26(f) proves it, in both
+  # directions, against the trap string actually installed.
+  local rc="${1:-$?}"
   rm -rf "$TMP"
   if [ "$RC_TALLY_REACHED" -ne 1 ] && [ "$rc" -eq 0 ]; then
     echo "required-checks.test.sh: the run ended BEFORE its tally line while reporting success — it crashed, and a crash is not a pass. Scroll up for the last assertion that printed." >&2
@@ -5402,10 +5413,65 @@ rc26_cleanup() { rm -f "$REPO_ROOT"/scripts/.rc26-mutant-verify.*.sh; }
 # assumed: if the installed handler stops being `cleanup`, say so instead of
 # overwriting whatever replaced it.
 if [ "$(trap -p EXIT | sed -E "s/^trap -- '(.*)' EXIT$/\\1/")" = "cleanup" ]; then
-  trap 'rc26_cleanup; cleanup' EXIT
-  ok "§26 chains the EXIT trap onto \`cleanup\` instead of replacing it (the mutant copy is removed AND the 70-on-crash contract survives)"
+  # CAPTURE $? AS THE FIRST COMMAND OF THE TRAP STRING. `trap 'rc26_cleanup;
+  # cleanup' EXIT` — the shape that stood here — is chained correctly and is
+  # STILL wrong, because `cleanup` reads the status with `$?` and by then `$?`
+  # belongs to `rc26_cleanup`, whose `rm -f` always succeeds. Measured, not
+  # theorised: with that string installed, `exit "$(rc_exit_code 1 0)"` on the
+  # tally line left the process at 0, and `Required-check spec gate` was green
+  # over `289 passed, 1 failed`. Chaining preserved the HANDLER and destroyed the
+  # VERDICT. Same class as workflow-run-shell-check's arm-A clobber (a captured
+  # status destroyed by an intervening command), reached by a different vector.
+  # shellcheck disable=SC2154  # rc26_trap_rc IS assigned — by the first command
+  # of this same trap string, which shellcheck does not read as code. Deliberately
+  # NOT pre-initialised: if that assignment is ever deleted, `set -u` must kill the
+  # trap loudly rather than let a defaulted 0 reinstate the swallowed exit code.
+  trap 'rc26_trap_rc=$?; rc26_cleanup; cleanup "$rc26_trap_rc"' EXIT
+  ok "§26 chains the EXIT trap onto \`cleanup\` and hands it the captured status (the mutant copy is removed AND the script's own exit code survives the chain)"
 else
   bad "the EXIT trap is no longer plain \`cleanup\` ($(trap -p EXIT)) — §26 refuses to overwrite it; chain by hand"
+fi
+
+# ── (f) THE CHAIN PRESERVES A NON-ZERO EXIT — PROVED, NOT ASSERTED ───────────
+# The clause above used to say "the 70-on-crash contract survives" and was
+# believed for as long as it stood there, because nothing ran it. A pin on the
+# SHAPE of a trap string cannot see a status the string throws away. So this
+# clause EXECUTES the trap string that is actually installed, in a sub-bash
+# carrying THIS FILE'S OWN `cleanup` body (extracted, never re-typed — a hand
+# copy would drift and then prove nothing), and watches an `exit 1` come out the
+# other side. The disarmed arm is the pre-fix string: it must come out 0, or the
+# probe is not able to fail and this clause is decoration.
+RC26_CLEAN_BODY="$(awk '/^cleanup\(\) \{$/,/^\}$/' "${BASH_SOURCE[0]}")"
+RC26_TRAP_STR="$(trap -p EXIT | sed -E "s/^trap -- '(.*)' EXIT$/\1/")"
+RC26_PROBE="$TMP/rc26-exit-probe.sh"
+cat > "$RC26_PROBE" <<'RC26PROBE'
+#!/usr/bin/env bash
+set -uo pipefail
+RC_TALLY_REACHED=0
+TMP="$(mktemp -d)"
+rc26_cleanup() { rm -f "$TMP"/.rc26-probe.*.sh; }
+RC26PROBE
+printf '%s\n' "$RC26_CLEAN_BODY" >> "$RC26_PROBE"
+cat >> "$RC26_PROBE" <<'RC26PROBE'
+trap "$1" EXIT
+RC_TALLY_REACHED=1
+exit 1
+RC26PROBE
+if ! grep -q 'RC_TALLY_REACHED' "$RC26_PROBE" || ! grep -q 'local rc=' "$RC26_PROBE"; then
+  bad "§26(f) could not extract this file's \`cleanup\` body (the \`cleanup() {\`…\`}\` block moved) — the exit-code proof below would run against an empty function and pass vacuously"
+else
+  bash "$RC26_PROBE" "$RC26_TRAP_STR" >/dev/null 2>&1; RC26_ARMED_RC=$?
+  bash "$RC26_PROBE" 'rc26_cleanup; cleanup' >/dev/null 2>&1; RC26_DISARMED_RC=$?
+  if [ "$RC26_ARMED_RC" -eq 1 ]; then
+    ok "(f) the EXIT trap string §26 installs carries a non-zero exit THROUGH the chain (probe exited $RC26_ARMED_RC) — the tally line's \`exit \$(rc_exit_code …)\` reaches the caller"
+  else
+    bad "(f) the installed EXIT trap SWALLOWS the exit code: a probe carrying this file's own \`cleanup\` and the string \`$RC26_TRAP_STR\` turned \`exit 1\` into exit $RC26_ARMED_RC — every FAIL this suite prints is invisible to \`Required-check spec gate\`"
+  fi
+  if [ "$RC26_DISARMED_RC" -eq 0 ]; then
+    ok "…and the pre-fix string \`rc26_cleanup; cleanup\` turns the SAME \`exit 1\` into exit $RC26_DISARMED_RC — the probe is mutation-proven able to fail, and that 0 is the defect this section shipped with"
+  else
+    bad "the pre-fix chain did not swallow the code (exit $RC26_DISARMED_RC) — clause (f) is vacuous: it would pass whatever string were installed"
+  fi
 fi
 
 RC26_WF_DENY="$TMP/rc26-wf-deny"        # the violation
