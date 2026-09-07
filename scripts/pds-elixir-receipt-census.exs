@@ -1730,7 +1730,9 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "DEMOTED ON THE ADVISORY LINE. side_effect_existence_only claims a Repo read that asserts EXISTENCE; the cited positive control (bulldocs_ingest_controller_test.exs `a valid block paper (locked title at index 0) still saves — positive control`) reads nothing back at all, so it cannot even assert that."},
-    # barkpark_web/controllers/bulldocs_ingest_controller.ex:892 — the html receipt.
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex, ingest_html_write/2 — the
+    # html receipt. Cited by DEF, not by line: this row exists BECAUSE a def moved and
+    # a line-keyed reference went stale, so citing a line here would reproduce the bug.
     # Mixed-write wave (pe-w2-verbatim-html-overwrite-hazard): ingest_html/4 grew
     # a refusal in front of the write and the writing tail split out as
     # ingest_html_write/2 — the SAME receipt at a new def, so this row re-keys
