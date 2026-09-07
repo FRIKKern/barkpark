@@ -1760,7 +1760,14 @@
 }
 .bp-paper-quote-editor .bp-paper-editor-body p { margin: 0; }
 .bp-paper-edit-form.bp-paper-quote-cite-form { display: block; margin: 0; padding: 0; }
-.bp-paper-quote-editor .bp-blockquote__cite { display: flex; align-items: baseline; }
+.bp-paper-quote-editor .bp-blockquote__cite { display: block; position: relative; }
+.bp-paper-quote-editor .bp-blockquote__cite::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  pointer-events: none;
+}
 .bp-expandable.bp-paper-contextual-preview > summary > textarea.bp-paper-inline-text {
   display: inline-block;
   width: calc(100% - 1.5em);

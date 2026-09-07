@@ -16,11 +16,18 @@
   const Hooks = {};
 
   // Native on-page text fields keep browser selection/undo and the ordinary
-  // form save coordinator. Only their height is managed here.
+  // form save coordinator. Manage height and the citation's first-line prefix.
   Hooks.BarkparkPaperAutoSize = {
     mounted() {
       this._fit = () => {
         if (this._disposed || !this.el.isConnected) return;
+        if (this.el.parentElement?.matches(".bp-blockquote__cite")) {
+          // The reader's dash occupies only the first line. Measure its actual
+          // glyph width so wrapped native text keeps the same available space.
+          const prefix = window.getComputedStyle(this.el.parentElement, "::before");
+          const width = Number.parseFloat(prefix.width);
+          if (Number.isFinite(width)) this.el.style.textIndent = `${width}px`;
+        }
         this.el.style.height = "0px";
         let height = this.el.scrollHeight;
         if (this.el.classList.contains("bp-paper-inline-text")) {

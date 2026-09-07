@@ -94,4 +94,11 @@ for (const [name, css] of [["standalone", styles], ["host shell", shell]]) {
   assert.ok(checked >= 2, `${name} checks light and dark authored token pairs`);
 }
 
+assert.match(shell, /\.bp-paper-quote-editor \.bp-blockquote__cite\s*\{[^}]*display:\s*block/,
+  "wrapped attribution lines retain the reader's full width instead of a narrowed flex column");
+assert.match(shell, /\.bp-paper-quote-editor \.bp-blockquote__cite::before\s*\{[^}]*position:\s*absolute/,
+  "the decorative prefix is independent of the native text field's line width");
+assert.match(surface, /\.bp-paper-surface \.bp-blockquote__cite::before\s*\{ content: "\\2014\\00a0";/,
+  "canonical reader prefix and flow remain unchanged");
+
 console.log("PASS contextual labels: scoped readable token and light/dark contrast");
