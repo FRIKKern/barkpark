@@ -107,7 +107,9 @@ defmodule Barkpark.Tasks.InternalBriefMirrorCasTest do
                "so this test could not tell a fixed CAS door from a broken one"
 
       moved = Map.put(doc.content, "description", "THE REPLACEMENT RUNBOOK")
-      assert {:ok, _} = Internal.fenced_content_write(doc, doc.rev, moved, Internal.generate_rev())
+
+      assert {:ok, _} =
+               Internal.fenced_content_write(doc, doc.rev, moved, Internal.generate_rev())
 
       stored = reload(doc)
 
@@ -148,8 +150,11 @@ defmodule Barkpark.Tasks.InternalBriefMirrorCasTest do
       # an added criterion drifts the brief without editing a single word.
       doc = create_task("stable prose", [criterion("prove it")])
 
-      grown = Map.put(doc.content, "acceptance_criteria", [criterion("prove it"), criterion("c1")])
-      assert {:ok, _} = Internal.fenced_content_write(doc, doc.rev, grown, Internal.generate_rev())
+      grown =
+        Map.put(doc.content, "acceptance_criteria", [criterion("prove it"), criterion("c1")])
+
+      assert {:ok, _} =
+               Internal.fenced_content_write(doc, doc.rev, grown, Internal.generate_rev())
 
       assert criteria_items(reload(doc)) == ["prove it", "c1"],
              "an added criterion never reached the brief: the brief under-counts the work"
@@ -160,7 +165,9 @@ defmodule Barkpark.Tasks.InternalBriefMirrorCasTest do
       hand = Enum.find(doc.content["brief"]["blocks"], &(&1["id"] == "operator-notes"))
 
       moved = Map.put(doc.content, "description", "moved")
-      assert {:ok, _} = Internal.fenced_content_write(doc, doc.rev, moved, Internal.generate_rev())
+
+      assert {:ok, _} =
+               Internal.fenced_content_write(doc, doc.rev, moved, Internal.generate_rev())
 
       stored = reload(doc)
 
