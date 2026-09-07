@@ -243,8 +243,26 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # `side_effecting_get?/1` clause is owed. It is session-gated like every other
   # `/v1/operator/*` route, so `total` and `session` each rise by exactly one;
   # machine and public are untouched.
-  @baseline_total 70
-  @baseline_session 50
+  # 2026-09-07: 71 / 51 / 8 / 12. ONE ROUTE WAS ADDED — `GET /v1/sites/:id/doctor`,
+  # the per-substrate site census (ssw8-site-doctor): every substrate a site
+  # occupies that the control plane can genuinely reach, three-valued, each
+  # absence naming its repair. RULED NOT SIDE-EFFECTING: the handler is
+  # `Auth.require_user/2` + `Registry.get_team_site/2` + `Repo.preload(site,
+  # :barkpark)` + `Sites.Doctor.check/1`, and `check/1` performs only READS — the
+  # row, a `DeployLedger.list_page` query, `Registry.get_deployment/1`, and three
+  # OUTBOUND box GETs (the read-token liveness probe, the admin webhook LIST, and
+  # a plain fetch of the site's live URL). It mints nothing, burns nothing and
+  # spends no nonce, so no `side_effecting_get?/1` clause is owed; a behavioural
+  # arm pins the read-only-ness (`router_site_doctor_test.exs`, "it is read-only:
+  # the site row is byte-identical after the report"). The outbound GETs are the
+  # one thing worth naming: a bare HEAD of this route DOES cost three cross-host
+  # calls, which is a COST, not a mutation, and the fence rules on mutation. It is
+  # session-gated like every other `/v1/sites/:id/*` read, so `total` and
+  # `session` each rise by exactly one; machine and public are untouched. (It also
+  # adds the SECOND `Repo.preload(site, :barkpark)` to the router — a READ, the
+  # same shape as the one the moduledoc above enumerates.)
+  @baseline_total 71
+  @baseline_session 51
   @baseline_machine 8
   @baseline_public 12
 
