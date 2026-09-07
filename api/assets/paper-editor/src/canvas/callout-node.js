@@ -2,7 +2,7 @@
 //
 // Brings the `callout` block INTO the continuous canvas as a ProseMirror CONTENT
 // node (NOT an atom like S3.1's divider). A callout has an EDITABLE PROSE BODY
-// plus non-editable CHROME (a run-in bold title, or a native <summary> fold). In
+// plus an attr-backed title island (run-in bold text or a native summary). In
 // the canvas its body becomes a real editable PM region that JOINS the run +
 // cross-block selection, while the chrome renders AROUND it via a NodeView with a
 // `contentDOM` hole. This is the node-view pattern S3.1 proved, but as a content
@@ -51,7 +51,7 @@
 //     in the SAME ProseMirror document the canvas mounts (doc content is block+).
 //   * content:"inline*" + a contentDOM — the body is a real editable PM region
 //     that joins the run's selection. The chrome (frame/title/summary) lives
-//     OUTSIDE the contentDOM in the node-view, so it is NOT PM-editable.
+//     OUTSIDE the contentDOM; its title island writes an attribute instead.
 //   * NOT atom — unlike the divider, a callout HAS an interior to edit, so its
 //     content changes must produce a patch-block (see run-convert.js calloutNode
 //     handling). The chrome attrs (tone/title/collapsible/collapsed) ride node
@@ -133,8 +133,7 @@ export const Callout = Node.create({
   // compose_inline_children → one inline PdText). NOT block+ / paragraph+.
   content: "inline*",
 
-  // The body is editable; the chrome is rendered around it in the NodeView and is
-  // NOT part of the PM content, so it is never directly selectable/editable.
+  // The body is PM content; the directly editable title writes a node attribute.
   selectable: true,
 
   // A callout is a container, not a leaf — defining keeps PM from merging it into
@@ -222,7 +221,7 @@ export const Callout = Node.create({
   //
   // Non-collapsible builds (mirrors walk.ex callout/3 :article):
   //   <div class="bp-canvas-callout bp-callout bp-callout--<tone>" data-bp-type>
-  //     <strong>title</strong>" "            ← RUN-IN chrome (NOT editable)
+  //     <strong>title</strong>" "            ← editable attr-backed title
   //     <div class="bp-callout__body">…</div> ← contentDOM hole (editable inline)
   //
   // Collapsible builds (mirrors walk.ex collapsible_callout_article/3):
@@ -262,6 +261,8 @@ export const Callout = Node.create({
         summary = document.createElement("summary");
         summary.className = "bp-callout__summary";
         summary.contentEditable = "false";
+        titleEl = document.createElement("span");
+        summary.appendChild(titleEl);
 
         dom.appendChild(summary);
         dom.appendChild(body);
@@ -295,17 +296,80 @@ export const Callout = Node.create({
         dom.className = `bp-canvas-callout bp-callout bp-callout--${toneClass}`;
         dom.setAttribute("data-bp-type", "callout");
 
-        // Run-in title chrome: <strong> + a literal space, both inert to the
-        // caret. Hidden (display:none / empty space) when there is no title, so a
+        // Run-in title: <strong> + a literal space. Hidden when absent, so a
         // live title edit toggles without adding/removing nodes.
         titleEl = document.createElement("strong");
-        titleEl.contentEditable = "false";
+        // A false boundary makes the nested editable title a separate browser
+        // editing host; without it Chrome focuses the surrounding body canvas.
+        const titleHost = document.createElement("span");
+        titleHost.contentEditable = "false";
+        titleHost.appendChild(titleEl);
         spaceNode = document.createTextNode("");
 
-        dom.appendChild(titleEl);
+        dom.appendChild(titleHost);
         dom.appendChild(spaceNode);
         dom.appendChild(body);
       }
+
+      // Keep title input in its reader-shaped element, outside the body's PM
+      // contentDOM. Commit on input, not a timer: View, folding and body edits
+      // must never overtake an uncommitted title.
+      titleEl.setAttribute("role", "textbox");
+      titleEl.setAttribute("aria-label", "Callout title");
+      titleEl.setAttribute("aria-multiline", "false");
+      titleEl.tabIndex = 0;
+      titleEl.style.cursor = "text";
+      let focused = false;
+      let composing = false;
+      let dirty = false;
+      let current = node;
+      const commitTitle = () => {
+        if (!dirty || !editor.isEditable || composing || typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        const cur = editor.state.doc.nodeAt(pos);
+        if (!cur || cur.type.name !== "callout") return;
+        const title = titleEl.textContent || "";
+        dirty = false;
+        if ((cur.attrs.title || "") === title) return;
+        editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, {
+          ...cur.attrs, title: title || null,
+        }));
+      };
+      const onInput = () => { dirty = true; commitTitle(); };
+      const onFocus = () => { focused = true; };
+      const onBlur = () => {
+        composing = false;
+        commitTitle();
+        focused = false;
+        paint(current);
+      };
+      const onClick = event => {
+        // Summary's arrow/background still toggles natively. Its text edits.
+        if (editor.isEditable) event.preventDefault();
+      };
+      const onKeydown = event => {
+        if (event.isComposing) return;
+        if (event.key === "Enter") {
+          event.preventDefault();
+          titleEl.blur();
+        } else if ((event.metaKey || event.ctrlKey) && !event.altKey &&
+          (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
+          event.preventDefault();
+          const redo = event.shiftKey || event.key.toLowerCase() === "y";
+          editor.commands[redo ? "redo" : "undo"]();
+        }
+      };
+      const onCompositionStart = () => { composing = true; };
+      const onCompositionEnd = () => { composing = false; commitTitle(); };
+      titleEl.addEventListener("input", onInput);
+      titleEl.addEventListener("focus", onFocus);
+      titleEl.addEventListener("blur", onBlur);
+      titleEl.addEventListener("click", onClick);
+      titleEl.addEventListener("keydown", onKeydown);
+      titleEl.addEventListener("compositionstart", onCompositionStart);
+      titleEl.addEventListener("compositionend", onCompositionEnd);
+      dom.addEventListener("bp-flush-node", commitTitle);
 
       // Paint the chrome from the node's current attrs. Re-run on every update()
       // so a tone swap / title edit / fold toggle reflects immediately.
@@ -315,17 +379,18 @@ export const Callout = Node.create({
 
         const title = n.attrs && n.attrs.title;
         const hasTitle = title != null && title !== "";
+        current = n;
+        titleEl.contentEditable = editor.isEditable ? "plaintext-only" : "false";
+        const shown = hasTitle ? title : isCollapsible && !focused
+          ? toneLabel(n.attrs && n.attrs.tone) : "";
+        if (!composing && titleEl.textContent !== shown) titleEl.textContent = shown;
 
         if (isCollapsible) {
-          summary.textContent = hasTitle
-            ? title
-            : toneLabel(n.attrs && n.attrs.tone);
           // Reflect `open = !collapsed` without re-entering the toggle listener.
           syncingOpen = true;
           dom.open = !(n.attrs && n.attrs.collapsed);
           syncingOpen = false;
-        } else if (hasTitle) {
-          titleEl.textContent = title;
+        } else if (hasTitle || focused) {
           titleEl.style.display = "";
           spaceNode.textContent = " ";
         } else {
@@ -340,9 +405,9 @@ export const Callout = Node.create({
       return {
         dom,
         // contentDOM is the editable body hole — PM manages the inline content
-        // inside it. The chrome (title/summary) is OUTSIDE contentDOM so it is
-        // never edited.
+        // inside it. The title is an independent attr-backed editing island.
         contentDOM: body,
+        stopEvent: event => titleEl.contains(event.target) || !!summary?.contains(event.target),
         // Re-render the chrome when the node's attrs change (tone/title/fold).
         // Return false — forcing PM to rebuild the view — for a different node
         // type OR a collapsible flip (which changes the root TAG div↔details).
@@ -356,7 +421,7 @@ export const Callout = Node.create({
         // PM must NOT treat chrome mutations as content edits.
         ignoreMutation: (mutation) => {
           // Let PM manage selection.
-          if (mutation.type === "selection") return false;
+          if (mutation.type === "selection") return document.activeElement === titleEl;
           // The native <details> `open` toggle mutates an attribute on the root —
           // it is a disclosure, not a content edit, so ignore it.
           if (mutation.type === "attributes" && mutation.target === dom)
@@ -364,6 +429,16 @@ export const Callout = Node.create({
           // Let PM handle mutations inside the editable body (contentDOM); ignore
           // everything in the chrome (title/summary live outside body).
           return !body.contains(mutation.target);
+        },
+        destroy: () => {
+          titleEl.removeEventListener("input", onInput);
+          titleEl.removeEventListener("focus", onFocus);
+          titleEl.removeEventListener("blur", onBlur);
+          titleEl.removeEventListener("click", onClick);
+          titleEl.removeEventListener("keydown", onKeydown);
+          titleEl.removeEventListener("compositionstart", onCompositionStart);
+          titleEl.removeEventListener("compositionend", onCompositionEnd);
+          dom.removeEventListener("bp-flush-node", commitTitle);
         },
       };
     };
