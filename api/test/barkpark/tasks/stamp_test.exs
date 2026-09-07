@@ -51,6 +51,30 @@ defmodule Barkpark.Tasks.StampTest do
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
+  # A RAW store write that installs criteria the write door would now refuse.
+  #
+  # `Validation.criteria_violation/1` (cdd-criteria-shape-gate) halts an entry
+  # with no usable `criterion`, or a non-boolean `met`, at BOTH write doors — so
+  # a fixture carrying one can no longer be built through
+  # `Content.create_document/4`. The rows these tests model are real regardless:
+  # they were written before the gate existed, and 3 live task rows still carried
+  # a textless criterion when the gate was measured on 2026-09-07. The guard
+  # under test is precisely the one that has to MEET such a row without
+  # manufacturing a met-flip, so the row is installed BEHIND the door, the way
+  # history put it there, and the guard is measured unchanged. Building it
+  # through the front door instead would silently convert this into a test of
+  # the front door — which is `criteria_shape_shared_test.exs`'s job.
+  defp install_legacy_criteria!(task_id, criteria) do
+    stored = Repo.get!(Document, task_id)
+    content = Map.put(stored.content, "acceptance_criteria", criteria)
+
+    {1, _} =
+      from(d in Document, where: d.id == ^stored.id)
+      |> Repo.update_all(set: [content: content, rev: Barkpark.Tasks.Internal.generate_rev()])
+
+    Repo.get!(Document, task_id)
+  end
+
   defp default_criteria do
     [
       %{"criterion" => "gate passes", "met" => false, "evidence" => ""},
@@ -1395,12 +1419,22 @@ defmodule Barkpark.Tasks.StampTest do
       # The case that makes the pinning line load-bearing: with the line
       # removed, a stored met=true and a stored met=false both survive
       # untouched, and only THIS row can tell you the guard is gone.
+      # An absent `met` is legal shape and goes in through the front door; a
+      # STRING `met` is not, and is installed behind the write gate (see
+      # install_legacy_criteria!/2) — the malformed row this guard exists for
+      # was always a stored row, never an authored one.
       criteria = [
         %{"criterion" => "no met key at all", "evidence" => "prose only"},
-        %{"criterion" => "met is a string", "met" => "true", "evidence" => ""}
+        %{"criterion" => "met is a string", "met" => false, "evidence" => ""}
       ]
 
-      {task, closed} = closed_task!(scope, criteria)
+      {task, _closed} = closed_task!(scope, criteria)
+
+      closed =
+        install_legacy_criteria!(task.id, [
+          %{"criterion" => "no met key at all", "evidence" => "prose only"},
+          %{"criterion" => "met is a string", "met" => "true", "evidence" => ""}
+        ])
 
       assert {:ok, doc} =
                Stamp.stamp(task.id, "sweeper",

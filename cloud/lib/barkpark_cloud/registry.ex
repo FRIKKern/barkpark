@@ -6322,6 +6322,58 @@ defmodule BarkparkCloud.Registry do
   #                key). DELIBERATELY distinct from :absent: callers must not
   #                treat "I could not look" as "it is not there" when the
   #                consequence is a destructive or duplicating write.
+  @doc """
+  ssw8-site-doctor: does THIS site's content-publish webhook row exist on its box?
+
+  A NARROW public wrapper over `find_content_webhook/3`, not a promotion of it.
+  The private function takes an arbitrary `dataset` + `name`, and its whole
+  correctness rests on the caller passing the name `content_webhook_name/1`
+  builds — "registration, reconciliation and deregistration must agree
+  byte-for-byte or the find-by-name lookup silently misses and DUPLICATES
+  instead". Making that function public would put the byte-exact-name obligation
+  on every future caller. This wrapper derives BOTH arguments from the site row,
+  so there is nothing for a caller to get wrong, and it hands the doctor exactly
+  the read it needs and nothing else.
+
+  ALL THREE VALUES SURVIVE, plus a fourth for a site that owes no webhook:
+
+    * `{:ok, id}`      — the box listed this site's row
+    * `:absent`        — the box answered with a list and this row is NOT in it
+    * `:unknown`       — the list could not be read (box down / non-2xx / no
+                         `webhooks` key). Callers must NOT treat this as
+                         `:absent`: the repair for absent is a WRITE, and a write
+                         made on the strength of a failed read is the exact
+                         duplicate-webhook hazard the private function's contract
+                         warns about.
+    * `:not_applicable` — a `container` site, or a content-bound site with no
+                         bound dataset: there is no webhook it OUGHT to have.
+
+  A missing instance row is `:unknown`, never `:not_applicable` — an orphaned
+  `barkpark_id` means nobody could look, not that nothing is owed.
+  """
+  @spec content_webhook_state(Site.t()) ::
+          {:ok, String.t()} | :absent | :unknown | :not_applicable
+  def content_webhook_state(%Site{} = site) do
+    dataset = site.bootstrap_dataset
+
+    cond do
+      site.kind not in @content_bound_kinds ->
+        :not_applicable
+
+      not (is_binary(dataset) and dataset != "") ->
+        :not_applicable
+
+      true ->
+        case get_barkpark(site.barkpark_id) do
+          %Barkpark{} = barkpark ->
+            find_content_webhook(barkpark, dataset, content_webhook_name(site))
+
+          _ ->
+            :unknown
+        end
+    end
+  end
+
   defp find_content_webhook(%Barkpark{} = barkpark, dataset, name) do
     case relay_admin(barkpark, :get, "/v1/webhooks/#{URI.encode(dataset)}", nil) do
       {:ok, status, %{"webhooks" => hooks}} when status in 200..299 and is_list(hooks) ->

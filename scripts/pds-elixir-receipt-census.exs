@@ -1965,7 +1965,17 @@ defmodule PDS.Census do
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "22543410"},
       verdict: "PROVEN", basis: :end_to_end, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
-         ~S|test "a merged PR on an UNMARKED but WORDED gate → reconciled: unflagged_merge_gates, NAMED, and NOT ONE byte written", %{|},
+         # THE ONLY BASIS TOKEN IN THIS REGISTER THAT CANNOT CARRY THE `, %{`
+         # SUFFIX ITS FIVE SIBLINGS USE. This test's title is long enough that
+         # `test "<title>", %{` exceeds the formatter's 98-column line_length, so
+         # `mix format` splits the context param onto its own line and no line in
+         # the file can ever read the suffixed form. The five siblings keep the
+         # suffix only because their titles are short enough to stay joined.
+         # Trimmed to the part that survives formatting — still a real line, still
+         # unique in that file, still the SAME test. This is a re-cite, not a
+         # re-point: no line number is recorded here and the cited evidence is
+         # unchanged. Do not add `, %{` back; the formatter will delete it again.
+         ~S|test "a merged PR on an UNMARKED but WORDED gate → reconciled: unflagged_merge_gates, NAMED, and NOT ONE byte written",|},
       attestation:
         "mutation: route BOTH close.ex filters through Criteria.merge_gated?/1 — the remedy the filing asked for — and the receipt becomes `stamped` while the criterion flips met; `mix test api/test/barkpark/tasks/merge_gate_unflagged_test.exs` reds 3 of 6, including `a criterion that merely TALKS about merge gating is NOT flipped on merge`",
     },

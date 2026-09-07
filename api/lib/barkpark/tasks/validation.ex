@@ -54,6 +54,132 @@ defmodule Barkpark.Tasks.Validation do
   def kinds, do: @kinds
 
   @doc """
+  The ONE shape rule for an `acceptance_criteria` list. Returns `nil` when
+  every entry is well formed, or a human-readable message naming the FIRST
+  offending index when one is not.
+
+  TWO DOORS, ONE PREDICATE — THAT IS THE WHOLE POINT (cdd-criteria-shape-gate).
+  A task write is gated twice: the plugin write gate
+  (`Barkpark.Plugins.Tasks.eval_criteria/2`, which halts the mutate envelope
+  early) and the document-write path (`check_acceptance_criteria/2` below,
+  which `Content.create_document/4` and `Content.upsert_document/4` call).
+  Both doors previously carried their own `Enum.all?(list, &is_map/1)` and both
+  announced a `{criterion, met, evidence}` contract neither one checked, so
+  `%{"text" => "..."}` walked through both. Six rows reached production that
+  way. Two independently-maintained copies of a shape rule is the defect class,
+  not an implementation detail: each copy can be well tested and the pair can
+  still drift, because nothing fails when they disagree. So the rule lives here
+  once and both doors call it. If you add a third writer, call this — do not
+  copy it.
+
+  WHY `criterion` IS THE LOAD-BEARING KEY, and why its absence is fatal rather
+  than untidy. The criterion's stored text is the CAS key every met-flip is
+  matched on: `Tasks.Internal` compares it with `==`
+  (`resolve_criterion_index/2`), and it must, because an unguarded positional
+  index is the false-done vector D56 closed. An entry with no `criterion`
+  therefore cannot be addressed by `bp task stamp --criterion-text`, cannot be
+  flipped to met, and so cannot let its row close — while the row sits in the
+  ready queue advertising itself as available work. That is structurally
+  unfinishable, not merely malformed, which is why it is refused at the
+  authoring door instead of tolerated and reported later.
+
+  WHAT IS ENFORCED, AND WHAT DELIBERATELY IS NOT. `criterion` must be a
+  non-blank string. `met` must be a boolean WHEN PRESENT. `evidence` must be a
+  string WHEN PRESENT. `nil` is accepted for `met` and `evidence` and so is
+  their absence — the old message promised the full `{criterion, met,
+  evidence}` triple, and enforcing that literally would refuse every ordinary
+  row, because an unmet criterion has no evidence yet. Measured rather than
+  assumed: of 36,287 criteria entries across 8,736 live task rows (2026-09-07),
+  362 omit `evidence` outright and 40 omit `met`. A predicate that refused
+  those would be a far worse bug than the one it closes. Unknown extra keys are
+  left alone; this rule owns the three it names.
+
+  The message NAMES THE KEYS IT RECEIVED. The whole failure mode is a filer who
+  typed `text` where the contract says `criterion` and got a clean 200 back;
+  echoing the keys is what turns the refusal into a fix.
+  """
+  # @canonical capability:task-acceptance-criteria-shape aka:criterion,met,evidence,is_map,unstampable doc:docs/setup/TASK-SYSTEM.md
+  @spec criteria_violation(list()) :: nil | String.t()
+  def criteria_violation(list) when is_list(list) do
+    list
+    |> Enum.with_index()
+    |> Enum.find_value(fn {entry, index} -> entry_violation(entry, index) end)
+  end
+
+  defp entry_violation(entry, index) when is_map(entry) do
+    cond do
+      not valid_criterion?(entry) ->
+        "criterion #{index} has no usable `criterion` string " <>
+          "(keys received: #{received_keys(entry)}). The `criterion` text is the CAS " <>
+          "key every met-flip is matched on, so an entry without one can never be " <>
+          "stamped and its row can never close. Send a non-blank `criterion` string " <>
+          "— if you meant this text as the criterion, the key is `criterion`."
+
+      not valid_met?(entry) ->
+        "criterion #{index} has a non-boolean `met` " <>
+          "(#{inspect(Map.get(entry, "met", Map.get(entry, :met)))}). " <>
+          "`met` is true, false, null, or absent."
+
+      not valid_evidence?(entry) ->
+        "criterion #{index} has a non-string `evidence` " <>
+          "(#{inspect(Map.get(entry, "evidence", Map.get(entry, :evidence)))}). " <>
+          "`evidence` is a string, null, or absent."
+
+      true ->
+        nil
+    end
+  end
+
+  defp entry_violation(entry, index) do
+    "criterion #{index} is not an object, got #{inspect(entry)} — acceptance_criteria " <>
+      "entries are objects with a `criterion` string (plus optional boolean `met` and " <>
+      "string `evidence`)."
+  end
+
+  # `Map.fetch` twice rather than `Map.get(e, "k") || Map.get(e, :k)`: a
+  # legitimately-present `false` on `met` must NOT read as absent, which is the
+  # exact falsy-masking bug the `fetch/2` helper below already exists to avoid.
+  defp entry_fetch(entry, string_key, atom_key) do
+    case Map.fetch(entry, string_key) do
+      {:ok, v} -> {:ok, v}
+      :error -> Map.fetch(entry, atom_key)
+    end
+  end
+
+  # Blank-but-present is refused alongside absent, and for the same reason: a
+  # criterion of "" or "   " is a CAS key nobody can type back, so it is
+  # unstampable in exactly the way a missing key is.
+  defp valid_criterion?(entry) do
+    case entry_fetch(entry, "criterion", :criterion) do
+      {:ok, text} when is_binary(text) -> String.trim(text) != ""
+      _ -> false
+    end
+  end
+
+  defp valid_met?(entry) do
+    case entry_fetch(entry, "met", :met) do
+      :error -> true
+      {:ok, nil} -> true
+      {:ok, v} -> is_boolean(v)
+    end
+  end
+
+  defp valid_evidence?(entry) do
+    case entry_fetch(entry, "evidence", :evidence) do
+      :error -> true
+      {:ok, nil} -> true
+      {:ok, v} -> is_binary(v)
+    end
+  end
+
+  defp received_keys(entry) do
+    case entry |> Map.keys() |> Enum.map(&to_string/1) |> Enum.sort() do
+      [] -> "none — the entry is an empty object"
+      keys -> Enum.map_join(keys, ", ", &inspect/1)
+    end
+  end
+
+  @doc """
   Validates the `content` map of a `type:task` document against the §1
   field contract.
 
@@ -342,10 +468,13 @@ defmodule Barkpark.Tasks.Validation do
 
       list when is_list(list) ->
         cond do
-          not Enum.all?(list, &is_map/1) ->
-            Map.put(errors, "acceptance_criteria", [
-              "must be a list of maps, got #{inspect(list)}"
-            ])
+          # THE SHARED SHAPE RULE — the same call the plugin write gate makes.
+          # It subsumes the `Enum.all?(list, &is_map/1)` this branch used to
+          # carry (a non-map entry now reports its index and its value), and it
+          # adds the `criterion`/`met`/`evidence` contract both doors had only
+          # ever ANNOUNCED. Do not reintroduce a local shape check here.
+          shape = criteria_violation(list) ->
+            Map.put(errors, "acceptance_criteria", [shape])
 
           untrimmed = first_untrimmed_criterion(list) ->
             {index, text} = untrimmed
