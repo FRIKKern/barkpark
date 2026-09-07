@@ -3564,12 +3564,18 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert String.ends_with?(card["title"], "…")
       assert String.valid?(card["title"])
 
-      # now.text: capped at 160 graphemes, same marker; ts trimmed to seconds.
-      assert String.length(card["claim"]["now"]["text"]) == 160
-      assert String.ends_with?(card["claim"]["now"]["text"], "…")
-      assert card["claim"]["now"]["ts"] == "2026-07-19T12:00:00Z"
+      # task-7385811ef5120f3a: the worker-less residue no longer rides a READY
+      # card at all, so this page's now-line cannot be the truncation witness.
+      # The now.text cap + seconds-trimmed ts are proven on the surface that
+      # HAS a live claim — "prime inherits the v2 cuts: in_progress now.text
+      # capped + top-level help line" below, whose row is claimed for real.
+      refute Map.has_key?(card, "claim")
 
-      # ONE top-level help line names the escape hatch.
+      # ONE top-level help line names the escape hatch — and here it is carried
+      # by the TITLE alone, which is the point: brief_truncated?/1 must track
+      # what actually got cut ON THE WIRE. A lapsed now-line that never shipped
+      # must not raise the banner (proven in brief_claim_lapsed_test.exs); a
+      # capped title still must.
       assert payload["help"] == [
                "truncated fields end with …; full record via bp task get <doc_id>"
              ]
