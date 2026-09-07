@@ -176,6 +176,14 @@ on:
       # need naming (task-cb42bf8ab0539891).
       - "scripts/which-gates.sh"
       - "scripts/which-gates.test.sh"
+      # task-5ddbd0702c213aec: which-gates.test.sh cases 6-8 build their scratch
+      # trees out of the Elixir census that greps the Go package AND out of the
+      # package itself, then mutate both. Same rule as seal-run.test.sh above —
+      # an input that can break a harness must be able to trigger it — so a
+      # census rename, a pin rename, or a Go edit that leaves the harness with
+      # no derived anchor reds HERE instead of rotting between waves.
+      - "cloud/test/barkpark_cloud/payload_key_set_census_test.exs"
+      - "internal/cloudclient/**"
       - "scripts/main-red-breaker.sh"
       - "scripts/main-red-breaker.test.sh"
       - "scripts/main-red-breaker.runner-local.json"
@@ -466,6 +474,14 @@ on:
       # need naming (task-cb42bf8ab0539891).
       - "scripts/which-gates.sh"
       - "scripts/which-gates.test.sh"
+      # task-5ddbd0702c213aec: which-gates.test.sh cases 6-8 build their scratch
+      # trees out of the Elixir census that greps the Go package AND out of the
+      # package itself, then mutate both. Same rule as seal-run.test.sh above —
+      # an input that can break a harness must be able to trigger it — so a
+      # census rename, a pin rename, or a Go edit that leaves the harness with
+      # no derived anchor reds HERE instead of rotting between waves.
+      - "cloud/test/barkpark_cloud/payload_key_set_census_test.exs"
+      - "internal/cloudclient/**"
       - "scripts/main-red-breaker.sh"
       - "scripts/main-red-breaker.test.sh"
       - "scripts/main-red-breaker.runner-local.json"
