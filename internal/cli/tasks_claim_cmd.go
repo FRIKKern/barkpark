@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -18,9 +19,11 @@ import (
 // else holds it live, or a STALE-BUT-PRESENT claim.worker was left behind by
 // a third writer (`bp task stage` moves lifecycle_status without clearing
 // claim.worker) that refuses every id except the original holder. The
-// refusal body carries no `details` that would tell these apart (verified:
-// classifyError's {"ok":false,"reason":…} branch has no distinguishing
-// field for this shape), so a bare "not_ready" reads the same for all three.
+// refusal body's `details` still carries nothing that tells these apart, but it
+// is NOT causeless: the server sends a top-level `arm` beside `reason`
+// (not_ready_arm/2 — "held_by_other" | "queue_gated" | "not_claimable_status" |
+// "unknown") and a message to match. A named arm is a positive reason already
+// stated, and claimVerdict must not contradict one.
 //
 // This wrapper performs a SECOND read — GET the task doc right after the
 // refusal — and renders what the store currently holds. It never asserts a
@@ -56,7 +59,7 @@ func runTaskClaim(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	if !ok {
 		return rc
 	}
-	diagnoseClaimConflict(out, ctx, req)
+	diagnoseClaimConflict(out, ctx, req, out.lastErrorArm)
 	return rc
 }
 
@@ -92,7 +95,7 @@ func claimRequestOf(cmd manifest.Command, tail []string) (claimRequest, bool) {
 // from it. stdout is untouched (the failed POST's -o json/yaml envelope stays
 // the single parseable document); this rides stderr exactly like
 // emitHelpHints and the stamp wrapper's read-back confirmation.
-func diagnoseClaimConflict(out *writer, ctx manifest.Context, req claimRequest) {
+func diagnoseClaimConflict(out *writer, ctx manifest.Context, req claimRequest, serverArm string) {
 	client := apiclient.New(apiclient.Config{
 		BaseURL:   ctx.Server,
 		Token:     ctx.Token,
@@ -132,7 +135,47 @@ func diagnoseClaimConflict(out *writer, ctx manifest.Context, req claimRequest) 
 	claim := doc.ClaimInfo()
 	out.errf("diagnosis: read-back of %s — lifecycle_status=%s claim.worker=%s released_at=%s expired_at=%s",
 		req.docID, orNoneStr(lifecycle), orNoneStr(claim.Worker), orNoneStr(claim.ReleasedAt), orNoneStr(claim.ExpiredAt))
-	out.errf("  %s", claimVerdict(req.workerID, lifecycle, claim))
+	out.errf("  %s", claimVerdict(req.workerID, lifecycle, claim, queueGateOf(doc), serverArm))
+}
+
+// queueGate is content.queue_gate as the read-back holds it: the AUTHOR's own
+// hold on the row, evaluated by the server BEFORE lifecycle readiness
+// (Barkpark.Tasks.Claim → QueueGate, rendered by not_ready_arm's "queue_gated"
+// arm). It is a condition that makes a refusal legitimate, and the read-back
+// never looked at it — which is how a correctly-refused human_gated row was
+// told, in the same breath, that its refusal was "not a legitimate refusal".
+type queueGate struct {
+	State  string
+	Reason string
+}
+
+// gating reports whether this gate is, by itself, a sufficient reason for the
+// refusal. Absent gate and the explicitly-executable state are not; every other
+// persisted state ("human_gated", "parked", "evidence_stalled" — and any state
+// this build has not heard of) is. UNKNOWN STATES COUNT AS GATING on purpose:
+// the failure mode being closed here is a local guess overruling a server
+// answer, so a state we cannot classify must silence the guess, not license it.
+func (g queueGate) gating() bool {
+	return g.State != "" && g.State != "executable"
+}
+
+// queueGateOf reads content.queue_gate off the read-back document. A missing,
+// null or mis-shaped gate reads as the zero queueGate (not gating) — the same
+// tolerance ClaimInfo applies, so one odd field costs the gate line and never
+// the diagnosis.
+func queueGateOf(doc apiclient.Doc) queueGate {
+	raw, ok := doc.Extra["queue_gate"]
+	if !ok {
+		return queueGate{}
+	}
+	var g struct {
+		State  string `json:"state"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(raw, &g); err != nil {
+		return queueGate{}
+	}
+	return queueGate{State: strings.TrimSpace(g.State), Reason: strings.TrimSpace(g.Reason)}
 }
 
 func orNoneStr(s string) string {
@@ -154,14 +197,44 @@ var openLifecycleStates = map[string]bool{
 
 // claimVerdict is the PURE decision at the center of this wrapper: given what
 // the read-back showed and who asked, name which of the causes it supports.
-// It never claims more than the read-back can prove — a shape it cannot
-// confidently classify gets an honest "does not match a real conflict"
-// answer pointing at the known predicate defect, never a guess.
-func claimVerdict(requestedWorker, lifecycle string, claim apiclient.ClaimInfo) string {
+// It never claims more than the read-back can prove.
+//
+// THE INVARIANT: never print "not a legitimate refusal" before checking
+// legitimacy. The speculative arm below is the ONE sentence in this CLI that
+// asserts a refusal is illegitimate (derivation in the PR: grep for "not a
+// legitimate" / "does not match a real" across internal/cli), and it used to be
+// the DEFAULT for "no holder, lifecycle open". Two conditions that make such a
+// refusal entirely legitimate were never consulted:
+//
+//   - content.queue_gate — an AUTHOR's hold, which the server evaluates FIRST
+//     and which no retry and no holder-field ever reflects. Measured live on
+//     task-ed7ae8110c7c8b41: the server said "queue_gate state is human_gated —
+//     gated by its AUTHOR", and this function answered, one line later, that
+//     the refusal was not legitimate and named an unrelated server bug. What
+//     that recommends is an override of a gate the author set deliberately.
+//   - the refusal's own `arm` — the server's machine-readable name for which
+//     gate fired. A NAMED arm is a positive reason already stated; the local
+//     read-back has strictly less information than the predicate that refused,
+//     so it may report, never overrule.
+//
+// The speculation survives for the case it was written for: `arm` absent or
+// "unknown" AND no queue gate AND an open row — a refusal with no explanation
+// anywhere, which is what task-eb2b6170e19f1611 tracks.
+func claimVerdict(requestedWorker, lifecycle string, claim apiclient.ClaimInfo, gate queueGate, serverArm string) string {
 	hasWorker := claim.Present && claim.Worker != ""
 	if !hasWorker {
+		if gate.gating() {
+			v := fmt.Sprintf("queue_gate state is %q — this row is gated by its AUTHOR, not by readiness, and no retry will change that", gate.State)
+			if gate.Reason != "" {
+				v += fmt.Sprintf("; content.queue_gate.reason says: %s", gate.Reason)
+			}
+			return v
+		}
 		if lifecycle != "" && !openLifecycleStates[lifecycle] {
 			return fmt.Sprintf("genuinely not ready: lifecycle_status is %q, not an open/claimable state", lifecycle)
+		}
+		if serverArm != "" && serverArm != "unknown" {
+			return fmt.Sprintf("the refusal named its own cause (arm=%q) and the read-back finds no holder — the server's answer stands; this read-back adds no evidence against it", serverArm)
 		}
 		return "the store shows NO holder and an apparently-open row — this does not match a real conflict; likely the server-side predicate defect task-eb2b6170e19f1611 tracks, not a legitimate refusal"
 	}

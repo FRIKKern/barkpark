@@ -2494,6 +2494,7 @@ func handleResponseHinted(out *writer, m *manifest.Manifest, cmd manifest.Comman
 	// diagnoses are not interchangeable. Per-invocation state on the writer, not
 	// a package global: one writer per bp run.
 	out.lastErrorCode = ae.code
+	out.lastErrorArm = ae.arm
 	// A not_found the server did not annotate gets the remedy derived from the
 	// command that was actually dispatched, rather than the code table's
 	// one-size-fits-all document answer. serverHint still outranks it — the
