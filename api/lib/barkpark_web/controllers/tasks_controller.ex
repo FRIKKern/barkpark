@@ -305,7 +305,16 @@ defmodule BarkparkWeb.TasksController do
         # epic root still delegating to open children from a leaf a builder can
         # be sent at. See Params.batch_live_child_counts/2.
         live_child_counts = Params.batch_live_child_counts(docs, scope_opts(conn))
-        Enum.map(docs, &Params.render_brief(&1, child_counts, live_child_counts))
+        # task-e8d0fe00383f8499: the INBOUND half. The parent edge above is
+        # structurally blind to a seal row whose children hang off a DIFFERENT
+        # root — child_count 0, an ordinary-looking leaf. See
+        # Params.batch_live_parents/2 and Dispatchability.classify_upstream/3.
+        live_parents = Params.batch_live_parents(docs, scope_opts(conn))
+
+        Enum.map(
+          docs,
+          &Params.render_brief(&1, child_counts, live_child_counts, live_parents)
+        )
 
       :full ->
         counts = Params.batch_edge_counts(docs)
@@ -370,7 +379,10 @@ defmodule BarkparkWeb.TasksController do
             live_child_counts =
               Params.batch_live_child_counts(sealed_in_progress ++ sealed_ready, scope)
 
-            render = &Params.render_brief(&1, child_counts, live_child_counts)
+            # task-e8d0fe00383f8499, same INBOUND half as render_task_list/3.
+            live_parents = Params.batch_live_parents(sealed_in_progress ++ sealed_ready, scope)
+
+            render = &Params.render_brief(&1, child_counts, live_child_counts, live_parents)
 
             {Enum.map(sealed_in_progress, render), Enum.map(sealed_ready, render)}
 
