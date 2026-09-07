@@ -1,4 +1,4 @@
-defmodule Barkpark.Plugins.Bulldocs.MixedWriteGuard do
+defmodule Barkpark.Content.Papers.MixedWriteGuard do
   @moduledoc """
   THE PRODUCER CONTRACT for a verbatim `body_html` write onto a paper that
   still carries canonical blocks: it is REFUSED at the ingest boundary, 422.
@@ -59,6 +59,23 @@ defmodule Barkpark.Plugins.Bulldocs.MixedWriteGuard do
   Deliberately NOT covered: the generic document surface (`/v1/data/mutate`),
   which can write any `content` key on any document. That is not the Papers
   ingest boundary and has never pretended to enforce paper doctrine.
+
+  ## Why this lives in `Content.Papers` and not under `Plugins.Bulldocs`
+
+  It was first filed next to the controller that calls it,
+  `Barkpark.Plugins.Bulldocs.MixedWriteGuard`. That made HOST code —
+  `BarkparkWeb.BulldocsIngestController` — reach into a REMOVABLE plugin, and
+  `plugin_free_boot_test.exs` refuses exactly that: with all plugins off,
+  Barkpark still works. The right answer was the module's location, not a
+  waiver on the allowlist the guard's message offers.
+
+  And the location is honest on its own terms, independent of the invariant:
+  the subject here is PAPERS, not bulldocs. This module reads
+  `Projection.read_blocks/1`, calls `Papers.get_blocks_doc/4`, delegates to
+  `BlockOps.clear_blocks?/1`, and enforces a rule about the canonical block
+  tree. Nothing in it is bulldocs-specific except the route it happens to be
+  reached from. Core papers policy belongs in core papers; if a plugin needs
+  it, that is a plugin → core call, which is the allowed direction.
   """
 
   alias Barkpark.Content.Papers

@@ -72,8 +72,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   alias Barkpark.Content
   alias Barkpark.Content.{Errors, Warnings}
+  alias Barkpark.Content.Papers.MixedWriteGuard
   alias Barkpark.PortableDoc.Bpml.UnprintableError
-  alias Barkpark.Plugins.Bulldocs.MixedWriteGuard
   alias Barkpark.Tenancy
 
   # The SIX DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).

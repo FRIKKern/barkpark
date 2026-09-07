@@ -4198,7 +4198,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # a derived cache the reader rewrites on the next read.
   #
   # Opt-in only, and it exists because the mixed-write refusal at the ingest
-  # boundary (`Barkpark.Plugins.Bulldocs.MixedWriteGuard` —
+  # boundary (`Barkpark.Content.Papers.MixedWriteGuard` —
   # pe-w2-verbatim-html-overwrite-hazard) is required to name what to do
   # instead. Before it there was NO way to make such a row HTML-only: this
   # function's absent-blocks arm preserved them, and the ops route cannot reach
@@ -4225,7 +4225,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   Public, and shared, ON PURPOSE. This one truthiness rule gates a DESTRUCTIVE
   opt-in, and it is read in two places: here, where the blocks are actually
-  dropped, and in `Barkpark.Plugins.Bulldocs.MixedWriteGuard.check/1`, which
+  dropped, and in `Barkpark.Content.Papers.MixedWriteGuard.check/1`, which
   must let exactly the same write past the ingest 422. Those were two
   hand-written copies until now, and the divergence is INVISIBLE to the suite:
   narrowing this side alone to `[true]` — so that the guard waves a
@@ -4233,10 +4233,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
   clear — compiled and ran 672 tests with 0 failures. The mixed-write hazard
   this whole slice exists to close would have been restored in full, behind a
   200. Two copies of one rule cannot be kept honest by review, so there is now
-  only one, and the plugin guard delegates to it.
+  only one, and the ingest guard delegates to it.
 
-  The dependency direction is deliberate: core content (`BlockOps`) owns the
-  predicate and the plugin depends on core, never the reverse.
+  Both readers live in core `Content.Papers` ON PURPOSE. The guard was briefly
+  filed under `Barkpark.Plugins.Bulldocs` — next to the controller that calls
+  it — and that made HOST code (`BulldocsIngestController`) reach into a
+  REMOVABLE plugin, which `plugin_free_boot_test.exs` correctly refuses: with
+  all plugins off, Barkpark still works. The subject is papers, not bulldocs,
+  so the module moved rather than taking the allowlist waiver.
   """
   @spec clear_blocks?(term()) :: boolean()
   def clear_blocks?(true), do: true
