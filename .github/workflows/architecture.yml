@@ -98,7 +98,7 @@ jobs:
           node scripts/node-test-floor.mjs tooling/concept-map/ci-boundary.test.mjs
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
