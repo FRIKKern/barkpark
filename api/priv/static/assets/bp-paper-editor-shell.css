@@ -127,9 +127,10 @@
        the preceding prose, and nested blocks must not stack several docks. */
     @media (max-width: 720px) {
       .bp-paper-edit-toolbar {
-        position: fixed; top: auto; left: auto; right: 1rem;
-        bottom: calc(5rem + env(safe-area-inset-bottom, 0px)); transform: none;
-        flex-direction: row; z-index: 10;
+        position: fixed; top: auto; left: 0; right: 0; bottom: 0; transform: none;
+        flex-direction: row; justify-content: flex-end; z-index: 10;
+        padding: 0.5rem max(1rem, env(safe-area-inset-right, 0px)) calc(0.5rem + env(safe-area-inset-bottom, 0px));
+        border-radius: 0;
       }
       .bp-paper-edit-toolbar .bp-paper-edit-actions { flex-direction: row; }
       .bp-paper-edit-block:is(:hover, :focus-within) .bp-paper-edit-toolbar {
@@ -140,6 +141,10 @@
       }
       .bp-paper-edit-toolbar .btn,
       .bp-paper-edit-toolbar .bp-paper-drag-grip { min-width: 32px; height: 32px; }
+      .bp-paper-editor { padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px)); }
+      body:has(.bp-paper-editor) > .bp-view-controls {
+        padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+      }
     }
     /* The ⋮⋮ drag handle — grab affordance, warms on hover like the others. */
     .bp-paper-drag-grip {

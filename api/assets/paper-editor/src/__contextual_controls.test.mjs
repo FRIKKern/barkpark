@@ -6,12 +6,16 @@ const shell = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-
 const surface = readFileSync(new URL("../../paper-surface/paper-surface.css", import.meta.url), "utf8");
 const narrowToolbar = shell.match(/@media\s*\(max-width:\s*720px\)\s*\{\s*\.bp-paper-edit-toolbar\s*\{([^}]*)\}/);
 assert.ok(narrowToolbar, "narrow screens cannot rely on an off-screen left margin for block controls");
-assert.match(narrowToolbar[1], /left:\s*auto/, "narrow controls stop using the desktop left offset");
-assert.match(narrowToolbar[1], /right:\s*1rem/, "narrow controls stay inside the viewport edge");
+assert.match(narrowToolbar[1], /left:\s*0/, "narrow controls stop using the desktop left offset");
+assert.match(narrowToolbar[1], /right:\s*0/, "narrow controls occupy a dedicated viewport strip");
 assert.match(narrowToolbar[1], /position:\s*fixed/,
   "controls dock outside document flow instead of covering preceding prose");
 assert.match(narrowToolbar[1], /safe-area-inset-bottom/, "the dock respects the device safe area");
 assert.match(narrowToolbar[1], /transform:\s*none/, "the desktop off-screen translation is removed");
+assert.match(shell, /\.bp-paper-editor\s*\{\s*padding-bottom:\s*calc\(4rem \+ env\(safe-area-inset-bottom/,
+  "editor footer actions can scroll clear of the fixed strip without shifting authored blocks");
+assert.match(shell, /body:has\(\.bp-paper-editor\) > \.bp-view-controls\s*\{\s*padding-bottom:\s*calc\(4rem \+ env\(safe-area-inset-bottom/,
+  "public view-mode buttons can also scroll clear of the editing strip");
 assert.match(narrowToolbar[1], /flex-direction:\s*row/, "narrow controls use a compact horizontal group");
 assert.match(shell, /\.bp-paper-edit-toolbar \.bp-paper-edit-actions\s*\{[^}]*flex-direction:\s*row/,
   "the action buttons also switch from a vertical rail to a row");
