@@ -3073,6 +3073,26 @@ function canonicalJSON(value) {
   return JSON.stringify(value);
 }
 
+// A deferred remote edit is not part of the author's visible baseline. Allow
+// independent fields (and convergent values), but never silently patch over a
+// different remote value or remove a remotely changed block. The host owns review.
+export function hasOverlappingOps(ops, baseline, remote) {
+  if (!Array.isArray(remote)) return false;
+  const beforeById = new Map(baseline.map((block) => [block.id, block]));
+  const remoteById = new Map(remote.map((block) => [block.id, block]));
+  return ops.some((op) => {
+    if (op.op !== "patch-block" && op.op !== "remove-block") return false;
+    const before = beforeById.get(op.id);
+    const latest = remoteById.get(op.id);
+    if (!before || !latest) return false;
+    if (op.op === "remove-block") return canonicalJSON(before) !== canonicalJSON(latest);
+    if (before.type !== latest.type) return true;
+    return Object.entries(op.patch || {}).some(([key, value]) =>
+      canonicalJSON(before[key]) !== canonicalJSON(latest[key]) &&
+      canonicalJSON(value) !== canonicalJSON(latest[key]));
+  });
+}
+
 // The byte-significant projection of a prose node for change detection: its
 // type, heading level (if any), and content — i.e. exactly the inputs to
 // buildPatchBlockOp / tiptapToBlock. bpId/bpType are excluded so an identity

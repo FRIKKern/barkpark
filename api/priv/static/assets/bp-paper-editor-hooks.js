@@ -565,6 +565,7 @@
       payload,
       send,
       onResult: options.onResult,
+      reviewRequired: options.reviewRequired === true,
     });
   }
 
@@ -970,7 +971,7 @@
           }
         },
         requestId: bpPaperRequestId,
-        mutate(source, { requestId, payload, send, onResult }) {
+        mutate(source, { requestId, payload, send, onResult, reviewRequired = false }) {
           requestId ||= bpPaperRequestId();
           if (!requestId) return { requestId: null, promise: Promise.resolve(false) };
           let entry = mutationById.get(requestId);
@@ -989,7 +990,7 @@
                 : record.documentRevision;
             }
             entry = {
-              source, requestId, payload, send, onResult,
+              source, requestId, payload, send, onResult, reviewRequired,
               documentKey: record.documentKey,
               authoredRev: record.authoredRev,
               ifRev: mutationQueue.length || record.documentKey !== documentKey
@@ -1375,6 +1376,7 @@
         mutationById.delete(head.requestId);
         head.requestId = replacementId;
         head.ifRev = conflict.currentRev;
+        head.reviewRequired = false;
         mutationById.set(head.requestId, head);
         confirmedRevision = conflict.currentRev;
         conflict = null;
@@ -1482,6 +1484,13 @@
         if (Date.now() >= entry.expiresAt) {
           coordinator._expireMutation(entry);
           coordinator._resolveWaiters(entry, false);
+          return;
+        }
+        if (entry.reviewRequired) {
+          const review = { current_rev: confirmedRevision, local_overlap: true };
+          coordinator._setConflict(review, entry.source, entry.documentKey, entry);
+          coordinator._notifyResult(entry, false, review);
+          mutationQueue.forEach((queued) => coordinator._resolveWaiters(queued, false));
           return;
         }
         if (entry.ifRev === undefined) entry.ifRev = confirmedRevision;
@@ -2521,17 +2530,27 @@
               ...entry.containerContext,
             }, {
               requestId: entry.requestId,
+              reviewRequired: entry.conflictBlocks != null,
               onResult: (saved, result) => {
                 this._sendingOps = false;
                 if (result?.discarded) {
                   this._opsQueue = [];
                   this._opsFailed = false;
+                  if (entry.conflictBlocks) {
+                    this.el.querySelector("bp-paper-canvas")
+                      ?.resolveConflictWithServerBlocks?.(entry.conflictBlocks);
+                  }
                   return;
                 }
                 if (saved && this._opsQueue[0] === entry) {
                   this._opsQueue.shift();
                 }
                 const canvas = this.el.querySelector("bp-paper-canvas");
+                if (saved && result?.request_id && entry.seq != null) {
+                  if (canvas?.identifyOpsRequest?.(entry.seq, result.request_id, entry.requestId)) {
+                    entry.requestId = result.request_id;
+                  }
+                }
                 let acknowledgementError = null;
                 if (entry.seq != null &&
                     typeof canvas?.acknowledgeOps === "function") {
@@ -2565,6 +2584,7 @@
           const entry = {
             ops: e.detail.ops,
             seq: e.detail.seq,
+            conflictBlocks: e.detail.conflictBlocks || null,
             containerContext: containerContext.wire,
             invalidContainerContext: containerContext.invalid,
             requestId: this._exitCoordinator?.requestId() || bpPaperRequestId(),
@@ -2627,6 +2647,13 @@
             const wc = this.el.querySelector("bp-paper-canvas");
             if (!wc || typeof wc.applyServerBlocks !== "function") return;
             const apply = (mode) => {
+              const active = this._opsQueue.find((entry) =>
+                entry.mutationEntry?.requestId === payload.request_id);
+              if (active?.seq != null && payload.request_id) {
+                if (wc.identifyOpsRequest?.(active.seq, payload.request_id, active.requestId)) {
+                  active.requestId = payload.request_id;
+                }
+              }
               if (mode === "external-resync" &&
                   typeof wc.resolveConflictWithServerBlocks === "function") {
                 wc.resolveConflictWithServerBlocks(run.blocks);

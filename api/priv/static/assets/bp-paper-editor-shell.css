@@ -1711,6 +1711,14 @@
 .bp-paper-contextual-preview textarea.bp-paper-inline-text::placeholder {
   color: var(--paper-ink-soft);
 }
+.bp-paper-quote-editor .bp-paper-editor-body {
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.bp-paper-quote-editor .bp-paper-editor-body p { margin: 0; }
+.bp-paper-edit-form.bp-paper-quote-cite-form { display: block; margin: 0; padding: 0; }
+.bp-paper-quote-editor .bp-blockquote__cite { display: flex; align-items: baseline; }
 .bp-paper-contextual-panel .bp-paper-edit-fieldlabel {
   display: grid; gap: 0.3rem; min-width: 0; color: var(--paper-ink-soft);
 }

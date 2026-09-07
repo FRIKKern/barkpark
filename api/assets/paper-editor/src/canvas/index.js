@@ -56,6 +56,7 @@ import {
   runToOps,
   reconcileServerEcho,
   docToBlocks,
+  hasOverlappingOps,
 } from "./run-convert.js";
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
@@ -1098,26 +1099,31 @@ class BpPaperCanvas extends HTMLElement {
 
     this._debounceBaselineBlocks = null;
     const ops = runToOps(diffBaseline, stableDoc, { preserveNewIds: true });
-    return this._dispatchOps(ops, nextBlocks);
+    return this._dispatchOps(ops, nextBlocks, diffBaseline);
   }
 
   // Dispatch one op array for the LiveView hook to fold and retain its after-state
   // until the hook acknowledges the exact sequence. A zero-length array is a no-op.
-  _dispatchOps(ops, nextBlocks = null) {
+  _dispatchOps(ops, nextBlocks = null, diffBaseline = this._blocks) {
     if (!ops || !ops.length) return false;
+    const conflictBlocks = hasOverlappingOps(ops, diffBaseline, this._pendingServerBlocks)
+      ? deepCloneBlocks(this._pendingServerBlocks)
+      : null;
     const seq = this._acknowledgedSaves ? ++this._opsSeq : undefined;
     if (this._acknowledgedSaves) {
       this._inflightOps = {
         seq,
         ops,
         afterBlocks: deepCloneBlocks(nextBlocks || this._blocks),
+        pendingServerBlocks: this._pendingServerBlocks,
         echoSeen: false,
         requestId: null,
       };
     }
     this.dispatchEvent(
       new CustomEvent("bp-canvas-ops", {
-        detail: seq == null ? { ops } : { ops, seq },
+        detail: { ...(seq == null ? { ops } : { ops, seq }),
+          ...(conflictBlocks ? { conflictBlocks } : {}) },
         bubbles: true,
         composed: true,
       }),
@@ -1128,12 +1134,15 @@ class BpPaperCanvas extends HTMLElement {
   // Called by the LiveView bridge after the exact `paper-ops` request settles.
   // Failure retains the batch so the bridge can retry it byte-for-byte. Success
   // advances the local baseline and releases any edits made while it was pending.
-  identifyOpsRequest(seq, requestId) {
+  identifyOpsRequest(seq, requestId, previousRequestId = null) {
     const current = this._inflightOps;
     if (!current || current.seq !== seq || typeof requestId !== "string" || requestId === "") {
       return false;
     }
-    if (current.requestId && current.requestId !== requestId) return false;
+    // Explicit Keep mine changes the retry identity. Require the bridge to name
+    // the exact old request before rebinding an already identified snapshot.
+    if (current.requestId && current.requestId !== requestId &&
+        previousRequestId !== current.requestId) return false;
     current.requestId = requestId;
     return true;
   }
@@ -1148,6 +1157,20 @@ class BpPaperCanvas extends HTMLElement {
     // can contain remote sibling changes queued for later display; advancing
     // to those unseen values would turn the next local edit into a reversion.
     this._blocks = deepCloneBlocks(current.afterBlocks);
+    // A successful reviewed write supersedes the overlapping fields in the
+    // deferred snapshot it was authored against. Keep remote sibling data, but
+    // do not compare continued typing against those now-obsolete field values
+    // while the canonical echo is still travelling. A newer queued snapshot
+    // must retain its authority and still gets an independent overlap check.
+    if (current.pendingServerBlocks && this._pendingServerBlocks === current.pendingServerBlocks) {
+      const pending = deepCloneBlocks(this._pendingServerBlocks);
+      for (const op of current.ops) {
+        if (op.op !== "patch-block") continue;
+        const block = pending.find((item) => item.id === op.id);
+        if (block) Object.assign(block, JSON.parse(JSON.stringify(op.patch)));
+      }
+      this._pendingServerBlocks = pending;
+    }
     // A newer local edit may still be inside its debounce while this earlier
     // batch is acknowledged. Advance that draft's captured baseline with the
     // confirmed local snapshot so its next diff stays incremental.

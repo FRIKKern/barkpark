@@ -111,8 +111,12 @@ const hooks = window.BarkparkPaperEditorHooks;
 const paragraph = (id, value) => ({id, type: "paragraph", content: [{type: "text", value}]});
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
-async function mount() {
+async function mount({ revision, blocks = [paragraph("original", "Original")] } = {}) {
   const main = document.createElement("main");
+  if (revision != null) {
+    main.dataset.paperDocKey = "paper-overlap-probe";
+    main.dataset.paperRev = String(revision);
+  }
   main.innerHTML = `<button data-editing="true">View</button>
     <a href="/studio/papers/b" data-phx-link="patch">Paper B</a>
     <button type="button" phx-click="paper-delete-block">Delete</button>
@@ -123,7 +127,7 @@ async function mount() {
     <form phx-submit="paper-add-block"><select name="block-type"><option>paragraph</option></select></form>
     <div id="paper-canvas-probe-run-0" phx-hook="BarkparkPaperCanvas"><bp-paper-canvas></bp-paper-canvas></div>`;
   const wrapper = main.querySelector("[phx-hook]");
-  wrapper.dataset.canvasBlocks = JSON.stringify([paragraph("original", "Original")]);
+  wrapper.dataset.canvasBlocks = JSON.stringify(blocks);
   wrapper.dataset.canvasDataset = "production";
   document.body.appendChild(main);
   const canvas = wrapper.querySelector("bp-paper-canvas");
@@ -171,7 +175,7 @@ async function mount() {
     click: () => toggle.el.dispatchEvent(new window.MouseEvent("click", {bubbles:true, cancelable:true})),
     toggles: () => toggles,
     navigations: () => navigations,
-    echo: blocks => handlers.get("bp:canvas-update")({runs:[{run_id:"probe-run-0", blocks}]}),
+    echo: (blocks, meta = {}) => handlers.get("bp:canvas-update")({...meta, runs:[{run_id:"probe-run-0", blocks}]}),
     close: () => { toggle.destroyed(); hook.destroyed(); main.remove(); },
   };
 }
@@ -598,6 +602,108 @@ try {
   assert.equal(retry.toggles(), 1);
   assert.match(textOf(retry.canvas), /Second source change/);
   retry.close();
+  for (const choice of ["latest", "keep"]) {
+    const survivor = paragraph("survivor", "Retained paragraph");
+    const deleting = await mount({ revision: 1, blocks: [paragraph("original", "Original"), survivor] });
+    deleting.canvas._editor.commands.focus("start");
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const remote = [paragraph("original", "Other author changed this paragraph"), survivor];
+    deleting.echo(remote, { rev: 2 });
+    deleting.canvas._editor.view.dispatch(deleting.canvas._editor.state.tr.delete(
+      0, deleting.canvas._editor.state.doc.firstChild.nodeSize));
+    deleting.canvas.flushPendingChanges();
+    await tick();
+    assert.equal(deleting.requests.length, 0,
+      "deleting an unseen remotely changed paragraph requires review before sending");
+    assert.equal(textOf(deleting.canvas), "Retained paragraph", "the local deletion remains visible");
+    deleting.main.querySelector(`[data-action="${choice}"]`).click();
+    await tick();
+    if (choice === "keep") {
+      assert.equal(deleting.requests.length, 1);
+      const request = deleting.requests[0];
+      assert.deepEqual(request.payload.ops, [{ op: "remove-block", id: "original" }]);
+      assert.equal(request.payload.if_rev, 2);
+      deleting.echo([survivor], { rev: 3, request_id: request.payload.request_id });
+      request.resolve({ saved: true, rev: 3, request_id: request.payload.request_id });
+      await tick();
+    } else {
+      assert.equal(deleting.requests.length, 0, "Use latest never sends the discarded deletion");
+      assert.deepEqual(deleting.canvas._blocks, remote);
+    }
+    assert.equal(deleting.canvas.hasPendingChanges(), false);
+    assert.equal(beforeUnloadPrevented(), false);
+    deleting.close();
+  }
+  for (const choice of ["latest", "latest-newer", "keep", "keep-ack-first", "keep-typing", "keep-typing-echo-first"]) {
+    const continuedTyping = choice.startsWith("keep-typing");
+    const overlap = await mount({ revision: 1 });
+    overlap.canvas._editor.commands.focus("end");
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const remote = [{ ...paragraph("original", "Other author text"), audit: { author: "other" } },
+      paragraph("remote-sibling", "Remote sibling")];
+    overlap.echo(remote, { rev: 2 });
+    assert.equal(textOf(overlap.canvas), "Original", "remote text is deferred while focused");
+    append(overlap.canvas, " local draft");
+    overlap.canvas.flushPendingChanges();
+    await tick();
+    assert.equal(overlap.requests.length, 0,
+      "overlapping text must request review before sending a silent overwrite");
+    assert.ok(overlap.main.querySelector("[data-bp-paper-conflict]"));
+    assert.equal(beforeUnloadPrevented(), true);
+    overlap.click();
+    await tick();
+    assert.equal(overlap.toggles(), 0, "View retains an unresolved overlapping draft");
+    if (choice === "latest-newer") {
+      overlap.echo([{ ...remote[0], content: paragraph("original", "Newest remote text").content }, remote[1]], { rev: 4 });
+    }
+    if (continuedTyping) {
+      append(overlap.canvas, " continued");
+      overlap.canvas.flushPendingChanges();
+    }
+    overlap.main.querySelector(`[data-action="${choice.startsWith("latest") ? "latest" : "keep"}"]`).click();
+    await tick();
+    if (choice.startsWith("latest")) {
+      assert.equal(overlap.requests.length, 0, "Use latest never writes the discarded draft");
+      assert.equal(overlap.canvas._editor.state.doc.firstChild.textContent,
+        choice === "latest-newer" ? "Newest remote text" : "Other author text");
+    } else {
+      assert.equal(overlap.requests.length, 1, "Keep mine explicitly authorizes one write");
+      const request = overlap.requests[0];
+      assert.equal(request.payload.if_rev, 2);
+      assert.equal(request.payload.reviewRequired, undefined, "review state is never server payload");
+      const accepted = [{ ...remote[0], content: paragraph("original", "Original local draft").content }, remote[1]];
+      if (choice !== "keep-ack-first" && choice !== "keep-typing") {
+        overlap.echo(accepted, { rev: 3, request_id: request.payload.request_id });
+      }
+      request.resolve({ saved: true, rev: 3, request_id: request.payload.request_id });
+      await tick();
+      if (choice === "keep-ack-first" || choice === "keep-typing") {
+        overlap.echo(accepted, { rev: 3, request_id: request.payload.request_id });
+        await tick();
+      }
+      if (continuedTyping) {
+        assert.equal(overlap.main.querySelector("[data-bp-paper-conflict]"), null,
+          "continued typing must not reopen a resolved overlap against stale remote text");
+        assert.equal(overlap.requests.length, 2, "the continued draft saves after the chosen snapshot");
+        const continued = overlap.requests[1];
+        assert.equal(continued.payload.if_rev, 3);
+        overlap.echo([{ ...accepted[0], content: paragraph("original", "Original local draft continued").content }, remote[1]],
+          { rev: 4, request_id: continued.payload.request_id });
+        continued.resolve({ saved: true, rev: 4, request_id: continued.payload.request_id });
+        await tick();
+      }
+      overlap.canvas._editor.commands.blur();
+      await new Promise(resolve => setTimeout(resolve, 30));
+      assert.equal(overlap.canvas._editor.state.doc.firstChild.textContent,
+        continuedTyping ? "Original local draft continued" : "Original local draft");
+    }
+    assert.equal(overlap.canvas._editor.state.doc.childCount, 2, `${choice}: the remote sibling survives`);
+    assert.deepEqual(overlap.canvas._blocks[0].audit, { author: "other" });
+    assert.equal(overlap.canvas.hasPendingChanges(), false, `${choice}: the canvas settles`);
+    assert.equal(beforeUnloadPrevented(), false, `${choice}: unload protection releases only after resolution`);
+    overlap.close();
+  }
+
   const standalone = document.createElement("bp-paper-canvas");
   standalone.blocks = [paragraph("standalone", "Legacy host")];
   document.body.appendChild(standalone);

@@ -2271,27 +2271,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% "pullquote" -> %>
         <.rich_body_editor block={@block} />
       <% "blockquote" -> %>
-        <form
-          id={"blockquote-form-" <> @id}
-          class="bp-paper-edit-form"
-          phx-submit="paper-edit-block"
-          phx-change="paper-block-autosave"
-          phx-debounce="500"
-          data-test-id="paper-blockquote-editor"
-        >
-          <input type="hidden" name="block_id" value={@id} />
-          <label class="bp-paper-edit-fieldlabel" for={"blockquote-cite-" <> @id}>Attribution</label>
-          <input
-            id={"blockquote-cite-" <> @id}
-            type="text"
-            name="cite"
-            class="bp-paper-edit-text"
-            value={Blocks.form_value(Blocks.blockquote_cite_value(@block))}
-            placeholder="Author or source (optional)"
-            data-test-id="paper-field-blockquote-cite"
-          />
-        </form>
-        <.rich_body_editor block={@block} />
+        <blockquote class="bp-blockquote bp-paper-contextual-preview bp-paper-quote-editor">
+          <.rich_body_editor block={@block} />
+          <form
+            id={"blockquote-form-" <> @id}
+            class="bp-paper-edit-form bp-paper-quote-cite-form"
+            phx-submit="paper-edit-block"
+            phx-change="paper-block-autosave"
+            phx-debounce="500"
+            data-test-id="paper-blockquote-editor"
+          >
+            <input type="hidden" name="block_id" value={@id} />
+            <cite class="bp-blockquote__cite">
+              <textarea
+                id={"blockquote-cite-" <> @id}
+                name="cite"
+                rows="1"
+                class="bp-paper-inline-text"
+                aria-label="Quote attribution"
+                placeholder="Add author or source…"
+                phx-hook="BarkparkPaperAutoSize"
+                data-test-id="paper-field-blockquote-cite"
+              ><%= Blocks.form_value(Blocks.blockquote_cite_value(@block)) %></textarea>
+            </cite>
+          </form>
+        </blockquote>
       <% "section" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-section-editor">
           <%= if editable_section?(@block, @tree_identity_safe) do %>

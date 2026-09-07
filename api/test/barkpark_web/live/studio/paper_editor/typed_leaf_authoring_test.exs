@@ -197,6 +197,20 @@ defmodule BarkparkWeb.Studio.PaperEditor.TypedLeafAuthoringTest do
     assert html =~ ~s(step="any")
     assert html =~ ~s(id="blockquote-form-quote")
     assert html =~ ~s(id="paper-ed-quote")
+    tree = LazyHTML.from_fragment(html)
+
+    assert Enum.count(
+             LazyHTML.query(tree, "blockquote.bp-paper-quote-editor > .bp-paper-edit-wc + form")
+           ) == 1
+
+    assert Enum.count(
+             LazyHTML.query(
+               tree,
+               "blockquote.bp-paper-quote-editor cite.bp-blockquote__cite textarea[name=cite][aria-label='Quote attribution'][phx-hook=BarkparkPaperAutoSize]"
+             )
+           ) == 1
+
+    assert Enum.empty?(LazyHTML.query(tree, "#blockquote-form-quote label"))
 
     encoded_quote =
       blocks

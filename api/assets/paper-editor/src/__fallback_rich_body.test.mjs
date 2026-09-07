@@ -85,6 +85,7 @@ try {
   }
   for (const [type, hint] of Object.entries({
     ingress: "Write the introduction…", pullquote: "Write the highlighted quote…",
+    blockquote: "Write the quote…",
   })) {
     const empty = document.createElement("bp-paper-editor");
     empty.block = { id: `empty-${type}`, type, content: [] };
