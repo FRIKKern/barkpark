@@ -502,6 +502,23 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :malformed}),
     do: %{code: "malformed", message: "request body is malformed", status: 400}
 
+  # [mutation-shape-422] A mutate verb that requires `{id, type}` was sent
+  # without one of them (Content.Mutations `missing_id_type/1`). REUSES the
+  # already-registered `validation_failed` code on purpose: the meaning is the
+  # canonical one ("well-formed, but it does not validate — here is the field"),
+  # and a new token would have grown known_codes/0, the OpenAPI `Error.code`
+  # enum and docs/api-v1.md §9 for zero client-visible gain. The message names
+  # the verb and the field so the caller never has to read content/mutations.ex
+  # to find the shape; `details` carries the same facts machine-readably.
+  defp build({:error, {:missing_mutation_fields, verb, missing}})
+       when is_binary(verb) and is_list(missing),
+       do: %{
+         code: "validation_failed",
+         message: "#{verb} requires both id and type; missing: #{Enum.join(missing, ", ")}",
+         status: 422,
+         details: %{mutation: verb, missing: missing}
+       }
+
   # A block list carrying an element that is not an object. `render_blocks/2`
   # guards the LIST (`is_list`) but `render_block/2` guards the ELEMENT
   # (`is_map`), so `{"body":{"blocks":["notamap"]}}` used to clear the outer
