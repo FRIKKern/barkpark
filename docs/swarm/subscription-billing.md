@@ -33,13 +33,7 @@ signed-webhook verifier (no parallel system, no new dep).
   portal session, mirrored by `create_billing_portal_session/2`.
 - `app/Actions/Stripe/CancelSubscription.php` /
   `CancelSubscriptionAtPeriodEnd.php` — immediate vs grace cancel, mirrored by
-  `cancel_subscription/2`'s `:at_period_end` opt. **The parity stops at the
-  gateway.** `POST /v1/billing/cancel` offers the GRACE cancel only: it always
-  passes `at_period_end: true` and refuses a body carrying `false` with 422
-  `{invalid, details}` (task-527f2a101b99ebf9, ruled 2026-09-07 — the immediate
-  arm was reachable by any plain team owner behind nothing but the password
-  re-confirm below, and no shipped client ever sent it). `Billing.request_cancel/2`
-  keeps the `false` branch; nothing routes to it.
+  `cancel_subscription/2`'s `:at_period_end` opt.
 - `app/Livewire/Subscription/Actions.php` — re-confirms the password before a
   destructive cancel (the model for `POST /v1/billing/cancel`'s password gate).
 - `app/Jobs/SyncStripeSubscriptionsJob.php` — the nightly reconcile sweep.
@@ -65,7 +59,6 @@ signed-webhook verifier (no parallel system, no new dep).
 | `priv/repo/migrations/20260629120600_add_suspended_to_barkparks.exs` | new |
 | `test/barkpark_cloud/billing_lifecycle_test.exs` | new — lifecycle, entitlement, self-serve, registry suspension, gateway shapes |
 | `test/barkpark_cloud/web/router_billing_lifecycle_test.exs` | new — portal/cancel routes + grace-aware gate |
-| `test/barkpark_cloud/web/router_billing_cancel_immediate_refused_test.exs` | new (task-527f2a101b99ebf9) — the removed immediate arm, guarded at the gateway seam |
 | `test/barkpark_cloud/billing_test.exs` | updated one constraint-message assertion |
 
 ## Data model

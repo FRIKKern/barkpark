@@ -6821,9 +6821,10 @@ defmodule BarkparkCloud.Web.Router do
   # THE IMMEDIATE ARM IS GONE (task-527f2a101b99ebf9, ruled 2026-09-07). It set
   # `status: canceled` and suspended the team's boxes in-band, it was reachable
   # by any plain team owner behind nothing but this password re-confirm, and NO
-  # shipped client ever sent it — the console posts {password} alone
-  # (app.js:19129), so no UI confirmation design was ever built behind it and an
-  # owner who tripped it gained nothing Stripe refunds. A body carrying
+  # shipped client ever sent it — the console's cancel submit (submitCancelPlan
+  # in cloud/priv/static/app.js) posts {password} alone, so no UI confirmation
+  # design was ever built behind it and an owner who tripped it gained nothing
+  # Stripe refunds. A body carrying
   # `at_period_end: false` is now REFUSED 422 {invalid, details} rather than
   # silently coerced to grace: a caller who asked for immediate is told no, not
   # handed a different answer. `Billing.request_cancel/2` keeps its immediate
