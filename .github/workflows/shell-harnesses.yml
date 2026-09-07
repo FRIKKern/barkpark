@@ -168,6 +168,14 @@ on:
       - ".github/workflows/go-tests.yml"
       - "scripts/go-path-escape-check.sh"
       - "scripts/go-path-escape-check.test.sh"
+      # which-gates.sh DISCOVERS the `--match` dispatch call sites by scanning
+      # .github/workflows/*.yml and then SHELLS the primitives it found, so the
+      # primitives and the workflows that dispatch on them are its inputs — and
+      # those are already entries above (cloud.yml, console-harness.yml,
+      # go-tests.yml, the four *-path-escape-check.sh). Only the two new files
+      # need naming (task-cb42bf8ab0539891).
+      - "scripts/which-gates.sh"
+      - "scripts/which-gates.test.sh"
       - "scripts/main-red-breaker.sh"
       - "scripts/main-red-breaker.test.sh"
       - "scripts/main-red-breaker.runner-local.json"
@@ -443,6 +451,14 @@ on:
       - ".github/workflows/go-tests.yml"
       - "scripts/go-path-escape-check.sh"
       - "scripts/go-path-escape-check.test.sh"
+      # which-gates.sh DISCOVERS the `--match` dispatch call sites by scanning
+      # .github/workflows/*.yml and then SHELLS the primitives it found, so the
+      # primitives and the workflows that dispatch on them are its inputs — and
+      # those are already entries above (cloud.yml, console-harness.yml,
+      # go-tests.yml, the four *-path-escape-check.sh). Only the two new files
+      # need naming (task-cb42bf8ab0539891).
+      - "scripts/which-gates.sh"
+      - "scripts/which-gates.test.sh"
       - "scripts/main-red-breaker.sh"
       - "scripts/main-red-breaker.test.sh"
       - "scripts/main-red-breaker.runner-local.json"
@@ -706,6 +722,7 @@ jobs:
       selftest-wiring-census: ${{ steps.sets.outputs.selftest-wiring-census }}
       dispatch-selftest: ${{ steps.sets.outputs.dispatch-selftest }}
       deploy-receipt-honesty: ${{ steps.sets.outputs.deploy-receipt-honesty }}
+      which-gates: ${{ steps.sets.outputs.which-gates }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -896,6 +913,14 @@ jobs:
           selftest-wiring-census scripts/*.test.mjs
           selftest-wiring-census scripts/*_test.sh
           selftest-wiring-census .github/workflows/*.yml
+          which-gates scripts/which-gates.sh
+          which-gates scripts/which-gates.test.sh
+          which-gates scripts/cloud-path-escape-check.sh
+          which-gates scripts/console-path-escape-check.sh
+          which-gates scripts/go-path-escape-check.sh
+          which-gates .github/workflows/cloud.yml
+          which-gates .github/workflows/console-harness.yml
+          which-gates .github/workflows/go-tests.yml
           deploy-receipt-honesty scripts/deploy-receipt-failure.test.sh
           deploy-receipt-honesty Makefile
           deploy-receipt-honesty .githooks/post-merge
@@ -2184,6 +2209,36 @@ jobs:
 
       - name: "the GATE itself, over the real api/test tree"
         run: bash scripts/refute-on-absence-capture-log-check.sh
+
+  which-gates:
+    needs: [changes]
+    if: needs.changes.outputs.which-gates == 'true'
+    # THE GATE-LIST DERIVER (task-cb42bf8ab0539891). which-gates.sh answers
+    # "which CI gates does this change dispatch?" by SHELLING the very
+    # `*-path-escape-check.sh --match` primitives the dispatchers shell, and it
+    # discovers those call sites by scanning .github/workflows/*.yml. Both
+    # halves rot if nothing runs them: a renamed primitive, a rewritten
+    # dispatcher, or a new `--match` call site all change its answer, and the
+    # measured failure it exists to prevent (#16608: two REQUIRED contexts red
+    # because the gate list came from the LANE, not the workflows) returns the
+    # day it starts lying quietly.
+    #
+    # Harness FIRST, subject second — the harness's case 4 renames a primitive
+    # away in a scratch copy of the tree and requires a CANNOT READ line and a
+    # non-zero exit, so the subject step below cannot pass by swallowing a
+    # missing primitive as `false`.
+    name: which-gates.sh gate-list deriver
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: which-gates.sh syntax check
+        run: bash -n scripts/which-gates.sh
+
+      - name: "which-gates.test.sh (both file sets + the renamed-primitive mutation)"
+        run: bash scripts/which-gates.test.sh
+
 
   selftest-wiring-census:
     needs: [changes]
