@@ -10,6 +10,7 @@ defmodule Barkpark.Tasks.Internal do
   alias Barkpark.Content
   alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Repo
+  alias Barkpark.Tasks.BriefMirror
 
   # New rev token, same shape as `Content.generate_rev/0`. Kept here so the task
   # modules do not depend on a private function in another module.
@@ -48,6 +49,8 @@ defmodule Barkpark.Tasks.Internal do
   # existing error (`:stale_claim` for the lifecycle/claim arms, `:stale_rev` for
   # the merge reconcile), so no caller's return shape moves.
   def fenced_content_write(%Document{} = doc, observed_rev, new_content, new_rev) do
+    new_content = resync_brief_on_mirrored_change(doc, new_content)
+
     query =
       from(d in Document,
         where: d.id == ^doc.id and d.rev == ^observed_rev,
@@ -61,6 +64,116 @@ defmodule Barkpark.Tasks.Internal do
       {0, _} -> :stale
     end
   end
+
+  # ─── The brief mirror on the TASK door (task-59ced18605d8ef81) ────────────
+  #
+  # WHICH DOORS PR #16279 CLOSED, AND WHICH IT DID NOT. That PR ended brief
+  # drift by calling `BriefMirror.maybe_resync_task_brief/2` from the attrs
+  # pipeline of `Content.Writer` — `create_document/4` and
+  # `upsert_document/4`. Those are the DOCUMENT doors: `bp doc
+  # patch`, the MCP bridge, Studio, raw HTTP. They are covered and stay covered
+  # (`Tasks.BriefMirrorWiringTest` pins both).
+  #
+  # It did NOT close this one, and this one is the whole `bp task` verb family.
+  # `fenced_content_write/4` is a bare rev-fenced `Repo.update_all` that never
+  # passes through `Content.Writer`, so nothing in that pipeline — the brief
+  # mirror included — runs on it. Eighteen modules across `api/lib` call it:
+  # claim, close, compactor, discharge, fence, fleet, landed, move, mutations,
+  # pulse, release, renew, stage, stamp, ttl_sweeper, this module, plus the two
+  # GitHub plugin callers (`plugins/github/adopt.ex`, `link.ex`). Half a fix
+  # read as a whole one, which is why it is written down here rather than left
+  # for the next reader to re-derive.
+  #
+  # WHAT THIS IS AND IS NOT. It is not a repair for a live drift: a structural
+  # sweep of all 18 callers (write shapes only — `Map.put(` / `put_in(` /
+  # `Map.merge(`) enumerates 53 distinct literal keys they write and
+  # `"description"` is not among them, while the three `"criterion"` writes are
+  # two integer indices (discharge, pulse) and one CAS guard that
+  # `apply_criteria_update/2` refuses unless it EQUALS the stored text. So no
+  # verb shipping today drifts a brief here and no verb's behaviour changes.
+  # The defect is that the door is STRUCTURALLY INCAPABLE of re-deriving, and
+  # nothing tested that. The day a verb starts writing a mirrored block, the
+  # drift returns silently. This closes the capability gap; the detector for it
+  # is `test/barkpark/tasks/internal_brief_mirror_cas_test.exs`.
+  #
+  # MECHANISM, AND WHY NOT THE OBVIOUS ONE. The invariant is: A TASK CAS WRITE
+  # NEVER STORES A MIRRORED FIELD ITS OWN BRIEF CONTRADICTS. Three ways to hold
+  # it were on the table.
+  #
+  #   * Call the mirror UNCONDITIONALLY, as `Content.Writer` does. Rejected on
+  #     two counts. Cost: claim/pulse/stamp/renew are the hot path and would
+  #     each walk and rebuild the brief's blocks on every write, for a result
+  #     identical to the input in every case that ships today. Worse, it makes
+  #     every claim and pulse an UNRECORDED CONTENT EDIT — it would silently
+  #     repair the historically-drifted rows `gr-bl-brief-drift-backfill-714`
+  #     is measuring, moving that sweep's population under it. A CAS write must
+  #     change what its verb named and nothing else.
+  #   * REFUSE a write that carries a changed mirrored block. Rejected: it
+  #     converts a latent gap into a runtime wall in front of a verb nobody has
+  #     written yet, and `Content.Writer` already treats such an edit as
+  #     supported (its own moduledoc records a client-side refusal being built
+  #     first and rejected on evidence).
+  #   * RE-DERIVE ONLY WHEN A MIRRORED INPUT ACTUALLY MOVED. Chosen. The cost on
+  #     the hot path is one `==` on the description term plus, only when the
+  #     criteria list is not the same term, one pass extracting the criterion
+  #     texts on each side — and the verbs that rebuild the list (stamp, close,
+  #     landed, discharge) carry the criterion binaries through unchanged, so
+  #     that comparison is pointer-equal per element and single-digit in length.
+  #     No verb shipping today reaches the mirror at all.
+  #
+  # The detector is deliberately keyed on the STORED row, and it carries arms in
+  # BOTH directions: a description / criterion-text / criteria-membership change
+  # must reach the brief, and a claim-shaped write must leave an in-sync brief
+  # byte-identical AND leave a stale one stale.
+  defp resync_brief_on_mirrored_change(%Document{type: "task"} = doc, new_content)
+       when is_map(new_content) do
+    if mirrored_inputs_moved?(doc.content, new_content) do
+      case BriefMirror.maybe_resync_task_brief(
+             %{"content" => new_content, "title" => doc.title},
+             "task"
+           ) do
+        %{"content" => resynced} -> resynced
+        _ -> new_content
+      end
+    else
+      new_content
+    end
+  end
+
+  defp resync_brief_on_mirrored_change(_doc, new_content), do: new_content
+
+  # The two blocks `BriefMirror` derives, and only those: `purpose-copy` from
+  # `content["description"]` and `criteria-list` from the criterion TEXTS of
+  # `content["acceptance_criteria"]`. Everything else a verb writes — met,
+  # evidence, attempts, withdrawals, discharge_marks, claim, lifecycle — is
+  # invisible to the mirror and must not trigger a re-derive.
+  #
+  # Deliberately MORE sensitive than the mirror's own rule (no trimming, blanks
+  # kept), so the only possible error is a needless re-derive, which is a no-op.
+  # A `nil`/absent stored content cannot be compared, so it counts as moved.
+  defp mirrored_inputs_moved?(old, new) when is_map(old) do
+    Map.get(old, "description") != Map.get(new, "description") or
+      criterion_texts_moved?(
+        Map.get(old, "acceptance_criteria"),
+        Map.get(new, "acceptance_criteria")
+      )
+  end
+
+  defp mirrored_inputs_moved?(_old, _new), do: true
+
+  defp criterion_texts_moved?(same, same), do: false
+
+  defp criterion_texts_moved?(old, new),
+    do: stored_criterion_texts(old) != stored_criterion_texts(new)
+
+  defp stored_criterion_texts(list) when is_list(list) do
+    Enum.map(list, fn
+      entry when is_map(entry) -> Map.get(entry, "criterion")
+      _ -> nil
+    end)
+  end
+
+  defp stored_criterion_texts(_), do: []
 
   # Holder check shared by the holder-gated write paths (release, stamp, pulse):
   # the caller must BE the lease holder — `claim.worker` must equal `worker_id`
