@@ -22,7 +22,9 @@
        the page. The block container is transparent with generous rhythm;
        the move/delete controls + drag grip are de-emphasised, hover-revealed
        (a floating toolbar replaces them in B2). */
-    .bp-paper-editor { display: flex; flex-direction: column; gap: 0; padding: 0; }
+    /* Authored siblings use the reader's collapsing block margins. Contain the
+       document's outer margins without turning each block into a flex item. */
+    .bp-paper-editor { display: flow-root; padding: 0; }
     /* spd-w18 — the empty-body sentence is a real message, not chrome. It was
        `--paper-ink-faint` + italic, which is the same faint-grey family the
        owner read as a dead control; raised to `--paper-ink-soft` upright so it
@@ -220,6 +222,9 @@
     /* Edit forms — inputs read as quiet underlined text on the page, not
        boxed form controls (the page IS the form). */
     .bp-paper-edit-form { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+    /* Authoring fields can use an external hidden form owner. The display rule
+       above must not override its native hidden state or create a margin stop. */
+    .bp-paper-edit-form[hidden] { display: none; }
     .bp-paper-edit-text { flex: 1 1 200px; min-width: 120px; }
     .bp-paper-edit-textarea { flex: 1 1 100%; width: 100%; }
     .bp-paper-edit-form input[type="text"],
@@ -1638,22 +1643,6 @@
 :is(.bp-section__cell, .bp-cols__c) > .bp-paper-contextual-editor:first-child > [data-test-id="paper-terminal-readonly"] > .bp-term {
   margin-top: 0;
 }
-/* Reader Terminal margins collapse in normal block flow. The edit surface is a
-   flex column whose contextual wrappers prevent that collapse, so consecutive
-   Terminals otherwise receive two 1.6rem margins. Preserve the reader's single
-   beat without changing either frame's canonical margin token. */
-.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-block[data-block-type="terminal"] > .bp-paper-contextual-editor > [data-paper-terminal-editor-frame] {
-  margin-top: 0;
-}
-.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-block[data-block-type="terminal"] > .bp-paper-contextual-editor > [data-test-id="paper-terminal-readonly"] > .bp-term {
-  margin-top: 0;
-}
-/* A paragraph's 12pt leading margin also collapses into the preceding
-   Terminal's larger 1.6rem bottom margin in View. Its canvas wrapper prevents
-   that in Edit, so suppress only that first paragraph's redundant leading leg. */
-.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-canvas .bp-paper-editor-body .ProseMirror > p:first-child {
-  margin-top: 0;
-}
 .bp-paper-card-body-editor,
 .bp-paper-card-body-editor > bp-paper-editor {
   display: contents;
@@ -1747,12 +1736,6 @@
 /* The citation is inline authoring, not a separate bound-field block. The
    quote already owns its reader margin; its form must not add another gap. */
 .bp-paper-edit-block[data-block-type="blockquote"]:has(.bp-paper-quote-editor) { margin-top: 0; }
-/* Reader siblings collapse their 1.4rem margins. Separate editor wrappers
-   cannot collapse across the flex layout, so keep only the first quote's
-   bottom margin at this specific boundary. Lone quotes are unchanged. */
-.bp-paper-edit-block[data-block-type="blockquote"] + .bp-paper-edit-block[data-block-type="blockquote"] > .bp-paper-quote-editor {
-  margin-top: 0;
-}
 .bp-paper-quote-editor .bp-paper-editor-body {
   background: transparent;
   color: inherit;
