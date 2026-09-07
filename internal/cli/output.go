@@ -51,6 +51,13 @@ type writer struct {
 	// Per-invocation, never a package global: one writer per bp run.
 	lastErrorCode string
 
+	// lastErrorArm is the `arm` the same refusal carried — the server's own name
+	// for WHICH gate refused (see apiError.arm). Per-invocation, like
+	// lastErrorCode, and read by runTaskClaim for one purpose: a refusal that
+	// named its arm has already stated a positive cause, so the local read-back
+	// must not answer it with a speculation that the refusal is illegitimate.
+	lastErrorArm string
+
 	// credentialSent records whether the request just dispatched carried an
 	// Authorization header. Per-invocation, like lastErrorCode. It reaches
 	// apiError in handleResponseHinted so a 401 refusal can tell the two cases

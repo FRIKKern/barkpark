@@ -44,6 +44,15 @@ type apiError struct {
 	// the first thing lost. Raw bytes survive every shape and re-serialize
 	// byte-identically into the -o json / -o yaml envelope.
 	details json.RawMessage
+	// arm is the server's own machine-readable discriminator for WHICH refusal
+	// arm fired, carried as a TOP-LEVEL sibling of `reason` on the
+	// {"ok":false,…} task shape (tasks_controller.not_ready_arm/2 emits
+	// "held_by_other" | "queue_gated" | "not_claimable_status" | "unknown").
+	// It exists for ONE decision: a bare `not_ready` used to look causeless to
+	// the client, so the claim wrapper's read-back was free to guess. It is not
+	// causeless — a NAMED arm means the store already stated a positive reason,
+	// and no local guess may contradict it. "" means the body carried no arm.
+	arm string
 	// credentialSent records whether the request that earned this refusal
 	// actually carried a credential (an Authorization header). It exists for
 	// ONE decision: a 401 must never tell a caller to obtain a credential they
@@ -509,6 +518,9 @@ func classifyErrorBody(status int, body []byte) apiError {
 		Error  string `json:"error"`
 		Reason string `json:"reason"`
 		OK     *bool  `json:"ok"`
+		// Arm rides beside `reason` on the task refusal shape and names which
+		// gate fired. See apiError.arm.
+		Arm string `json:"arm"`
 	}
 	if err := json.Unmarshal(body, &strErr); err == nil && strErr.Error != "" {
 		switch strErr.Error {
@@ -587,7 +599,7 @@ func classifyErrorBody(status int, body []byte) apiError {
 		if details == nil {
 			details = topLevelDrift(body)
 		}
-		return apiError{exit: exit, code: strErr.Reason, message: msg, details: details}
+		return apiError{exit: exit, code: strErr.Reason, message: msg, details: details, arm: strErr.Arm}
 	}
 
 	// Message-only no-code envelope: default usage, downgrade to not-found when

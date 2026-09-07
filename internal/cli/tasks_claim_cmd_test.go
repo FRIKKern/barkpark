@@ -17,28 +17,28 @@ import (
 // --- claimVerdict: the pure decision table -------------------------------
 
 func TestClaimVerdict_GenuinelyNotReady(t *testing.T) {
-	got := claimVerdict("me", "blocked", apiclient.ClaimInfo{})
+	got := claimVerdict("me", "blocked", apiclient.ClaimInfo{}, queueGate{}, "")
 	if !strings.Contains(got, "genuinely not ready") || !strings.Contains(got, `"blocked"`) {
 		t.Errorf("verdict = %q, want a genuinely-not-ready verdict naming lifecycle_status", got)
 	}
 }
 
 func TestClaimVerdict_NoHolderButOpen_NamesThePredicateDefect(t *testing.T) {
-	got := claimVerdict("me", "open", apiclient.ClaimInfo{})
+	got := claimVerdict("me", "open", apiclient.ClaimInfo{}, queueGate{}, "")
 	if !strings.Contains(got, "task-eb2b6170e19f1611") {
 		t.Errorf("verdict = %q, want it to point at the known predicate defect", got)
 	}
 }
 
 func TestClaimVerdict_AlreadyYours(t *testing.T) {
-	got := claimVerdict("me", "open", apiclient.ClaimInfo{Present: true, Worker: "me"})
+	got := claimVerdict("me", "open", apiclient.ClaimInfo{Present: true, Worker: "me"}, queueGate{}, "")
 	if !strings.Contains(got, "YOU (me)") {
 		t.Errorf("verdict = %q, want it to say the store already lists the caller", got)
 	}
 }
 
 func TestClaimVerdict_HeldLiveBySomeoneElse(t *testing.T) {
-	got := claimVerdict("me", "open", apiclient.ClaimInfo{Present: true, Worker: "other"})
+	got := claimVerdict("me", "open", apiclient.ClaimInfo{Present: true, Worker: "other"}, queueGate{}, "")
 	if !strings.Contains(got, "held live by other") {
 		t.Errorf("verdict = %q, want a held-live-by verdict naming the holder", got)
 	}
@@ -47,7 +47,7 @@ func TestClaimVerdict_HeldLiveBySomeoneElse(t *testing.T) {
 func TestClaimVerdict_StaleReleasedWorkerField(t *testing.T) {
 	got := claimVerdict("me", "open", apiclient.ClaimInfo{
 		Present: true, Worker: "other", ReleasedAt: "2026-08-20T17:32:26Z",
-	})
+	}, queueGate{}, "")
 	if !strings.Contains(got, "RELEASED but claim.worker is still stale-set to other") ||
 		!strings.Contains(got, "WRONG WORKER") {
 		t.Errorf("verdict = %q, want the stale-released verdict naming the wrong-worker cause", got)
@@ -57,7 +57,7 @@ func TestClaimVerdict_StaleReleasedWorkerField(t *testing.T) {
 func TestClaimVerdict_ExpiredCountsAsNotLive(t *testing.T) {
 	got := claimVerdict("me", "open", apiclient.ClaimInfo{
 		Present: true, Worker: "other", ExpiredAt: "2026-08-20T17:32:26Z",
-	})
+	}, queueGate{}, "")
 	if !strings.Contains(got, "stale-set") {
 		t.Errorf("verdict = %q, want an expired-but-still-named claim treated as stale, not live", got)
 	}
@@ -278,6 +278,211 @@ func TestTaskClaimExecute_ReadBackFailureSaysSoAndNothingMore(t *testing.T) {
 			}
 			if strings.Contains(out, "read-back of task-x — lifecycle_status=") {
 				t.Errorf("a failed read-back printed the empty document as a read-back; got:\n%s", out)
+			}
+		})
+	}
+}
+
+// --- the queue gate: never "not legitimate" before checking legitimacy ---
+
+// speculativeSentence is the ONE assertion in this CLI that a refusal is
+// illegitimate. It is named once, here, so the absence assertions and the
+// positive control below cannot drift apart (an absence assertion that has
+// quietly stopped matching passes on every input).
+const speculativeSentence = "not a legitimate refusal"
+
+// liveHumanGatedClaimBody is the 409 guerrilla.barkpark.cloud sends for a
+// claim against a row its AUTHOR gated, captured from the shape
+// tasks_controller.not_ready_arm/2 emits: reason "not_ready", the arm named,
+// and the gate's own sentence as the message.
+const liveHumanGatedClaimBody = `{"ok":false,"reason":"not_ready","arm":"queue_gated",` +
+	`"execution_class":"human_gated","gate_reason":"needs an OPERATOR. Do not claim this row to build.",` +
+	`"message":"queue_gate state is \"human_gated\" — this row is gated by its AUTHOR, not by readiness, and no retry will change that. Read content.queue_gate.reason for what it is waiting on."}`
+
+// unexplainedClaimBody is the case the speculation was WRITTEN for: a bare
+// not_ready with no arm, over a row the read-back shows open and unheld.
+const unexplainedClaimBody = `{"ok":false,"reason":"not_ready"}`
+
+// gatedClaimServer refuses the POST with the given body and answers the
+// read-back with the given content fields, exactly as the live store holds them.
+func gatedClaimServer(t *testing.T, refusal string, readBack map[string]any) {
+	t.Helper()
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/claim"):
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(refusal))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/v1/data/doc/"):
+			body, _ := json.Marshal(map[string]any{"result": readBack})
+			_, _ = w.Write(body)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(backend.Close)
+
+	mf := filepath.Join(t.TempDir(), "manifest.json")
+	if err := os.WriteFile(mf, []byte(minimalClaimManifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	t.Setenv("BARKPARK_MANIFEST", mf)
+	t.Setenv("BARKPARK_API_URL", backend.URL)
+	t.Setenv("BARKPARK_API_TOKEN", "claim-stub")
+}
+
+// TestTaskClaimExecute_HumanGatedNamesTheGateAndDoesNotSpeculate is the
+// first-response pin (task-3011aa665010a615 c3).
+//
+// Measured live before the fix, one bp invocation, both halves on stderr:
+//
+//	bp: queue_gate state is "human_gated" — this row is gated by its AUTHOR …
+//	diagnosis: read-back of task-ed7ae8110c7c8b41 — lifecycle_status=open claim.worker=(none) …
+//	  the store shows NO holder and an apparently-open row — this does not match
+//	  a real conflict; likely the server-side predicate defect … not a legitimate refusal
+//
+// The refusal was legitimate. A diagnostic that calls an author's gate a known
+// server bug recommends an override of the gate — the cost here is a SAFETY
+// MECHANISM, not a confusing sentence.
+func TestTaskClaimExecute_HumanGatedNamesTheGateAndDoesNotSpeculate(t *testing.T) {
+	gatedClaimServer(t, liveHumanGatedClaimBody, map[string]any{
+		"_id": "task-x", "lifecycle_status": "open", "claim": nil,
+		"queue_gate": map[string]any{
+			"state": "human_gated", "version": 1,
+			"reason": "needs an OPERATOR. Do not claim this row to build.",
+		},
+	})
+	out, code := captureExecuteCode(t, []string{"task", "claim", "task-x", "me"})
+	if code != exitConflict {
+		t.Fatalf("exit = %d, want exitConflict (%d); out:\n%s", code, exitConflict, out)
+	}
+	// PRESENT: the gate is named in this, the FIRST response.
+	for _, want := range []string{"human_gated", "gated by its AUTHOR", "Do not claim this row to build."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("first response does not name the gate (%q missing):\n%s", want, out)
+		}
+	}
+	// ABSENT: no assertion that the refusal is illegitimate.
+	for _, banned := range []string{speculativeSentence, "does not match a real conflict", "task-eb2b6170e19f1611"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("first response still speculates (%q) over a legitimate gate:\n%s", banned, out)
+		}
+	}
+}
+
+// TestTaskClaimExecute_UnexplainedRefusalKeepsTheSpeculation is the POSITIVE
+// CONTROL for the absence half above. The absence assertion is only worth
+// something if it CAN see the sentence; this proves the same assertion, run
+// against the branch that still emits it, fails to find nothing.
+//
+// It is also c1's second branch: the speculation is not deleted, it is confined
+// to the case it was written for — a refusal with no explanation anywhere.
+func TestTaskClaimExecute_UnexplainedRefusalKeepsTheSpeculation(t *testing.T) {
+	gatedClaimServer(t, unexplainedClaimBody, map[string]any{
+		"_id": "task-x", "lifecycle_status": "open", "claim": nil,
+	})
+	out, code := captureExecuteCode(t, []string{"task", "claim", "task-x", "me"})
+	if code != exitConflict {
+		t.Fatalf("exit = %d, want exitConflict (%d); out:\n%s", code, exitConflict, out)
+	}
+	if !strings.Contains(out, speculativeSentence) {
+		t.Fatalf("the unexplained-refusal branch LOST the speculation — the absence assertion "+
+			"in the gated test can no longer see it and passes vacuously:\n%s", out)
+	}
+}
+
+// TestClaimVerdict_QueueGateOutranksTheSpeculation pins the pure decision: an
+// open, unheld row that carries an author gate must NEVER reach the
+// speculative arm, whatever the arm field says.
+func TestClaimVerdict_QueueGateOutranksTheSpeculation(t *testing.T) {
+	got := claimVerdict("me", "open", apiclient.ClaimInfo{},
+		queueGate{State: "human_gated", Reason: "waiting on an operator"}, "")
+	if strings.Contains(got, speculativeSentence) {
+		t.Errorf("verdict speculates over an author gate: %q", got)
+	}
+	for _, want := range []string{"human_gated", "gated by its AUTHOR", "waiting on an operator"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("verdict = %q, want it to name %q", got, want)
+		}
+	}
+}
+
+// An UNKNOWN gate state must silence the speculation too. The failure being
+// closed is a local guess overruling a server answer; a state this build cannot
+// classify is the last place to start guessing again.
+func TestClaimVerdict_UnknownGateStateStillSilencesTheSpeculation(t *testing.T) {
+	got := claimVerdict("me", "open", apiclient.ClaimInfo{}, queueGate{State: "some_future_state"}, "")
+	if strings.Contains(got, speculativeSentence) {
+		t.Errorf("verdict speculates over an unrecognised gate state: %q", got)
+	}
+}
+
+// "executable" is the one persisted state that is NOT a reason for a refusal,
+// so it must leave the speculation reachable — otherwise the gate check would
+// suppress the diagnosis on every gated row in the store.
+func TestClaimVerdict_ExecutableGateIsNotAReason(t *testing.T) {
+	got := claimVerdict("me", "open", apiclient.ClaimInfo{}, queueGate{State: "executable"}, "")
+	if !strings.Contains(got, speculativeSentence) {
+		t.Errorf("verdict = %q, want an executable gate to leave the unexplained-refusal arm reachable", got)
+	}
+}
+
+// A named arm, with no gate on the read-back, is still a positive reason the
+// server stated: report it, never contradict it.
+func TestClaimVerdict_NamedArmSuppressesTheSpeculation(t *testing.T) {
+	got := claimVerdict("me", "open", apiclient.ClaimInfo{}, queueGate{}, "held_by_other")
+	if strings.Contains(got, speculativeSentence) {
+		t.Errorf("verdict contradicts a server-named arm: %q", got)
+	}
+	if !strings.Contains(got, "held_by_other") {
+		t.Errorf("verdict = %q, want it to report the arm the server named", got)
+	}
+}
+
+// arm "unknown" is the server saying it could not name a cause either — the
+// exact input the speculation exists for.
+func TestClaimVerdict_UnknownArmKeepsTheSpeculation(t *testing.T) {
+	got := claimVerdict("me", "open", apiclient.ClaimInfo{}, queueGate{}, "unknown")
+	if !strings.Contains(got, speculativeSentence) {
+		t.Errorf("verdict = %q, want arm=unknown to reach the unexplained-refusal arm", got)
+	}
+}
+
+// classifyError must carry the arm off the wire, or every suppression above is
+// keyed on a field that is always "".
+func TestClassifyErrorCarriesTheNotReadyArm(t *testing.T) {
+	ae := classifyError(http.StatusConflict, []byte(liveHumanGatedClaimBody))
+	if ae.code != "not_ready" || ae.exit != exitConflict {
+		t.Fatalf("code/exit = %q/%d, want not_ready/%d", ae.code, ae.exit, exitConflict)
+	}
+	if ae.arm != "queue_gated" {
+		t.Errorf("arm = %q, want queue_gated — the server's own name for which gate fired", ae.arm)
+	}
+	if bare := classifyError(http.StatusConflict, []byte(unexplainedClaimBody)); bare.arm != "" {
+		t.Errorf("arm = %q on a body that carried none, want \"\"", bare.arm)
+	}
+}
+
+// queueGateOf must be as tolerant as ClaimInfo: one odd field costs the gate
+// line, never the diagnosis.
+func TestQueueGateOfIsShapeTolerant(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		raw  string
+		want queueGate
+	}{
+		{"absent", ``, queueGate{}},
+		{"null", `null`, queueGate{}},
+		{"string instead of object", `"human_gated"`, queueGate{}},
+		{"gated", `{"state":"human_gated","reason":"  hold  "}`, queueGate{State: "human_gated", Reason: "hold"}},
+		{"executable", `{"state":"executable"}`, queueGate{State: "executable"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := apiclient.Doc{}
+			if c.raw != "" {
+				d.Extra = map[string]json.RawMessage{"queue_gate": json.RawMessage(c.raw)}
+			}
+			if got := queueGateOf(d); got != c.want {
+				t.Errorf("queueGateOf(%s) = %+v, want %+v", c.raw, got, c.want)
 			}
 		})
 	}
