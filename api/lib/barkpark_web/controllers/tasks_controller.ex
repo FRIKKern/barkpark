@@ -297,7 +297,12 @@ defmodule BarkparkWeb.TasksController do
     case Params.parse_view(params["view"]) do
       :brief ->
         child_counts = Params.batch_child_counts(docs, scope_opts(conn))
-        Enum.map(docs, &Params.render_brief(&1, child_counts))
+        # task-52f4f3aff99c64d5: the LIVE half of the same edge — one extra
+        # indexed grouped query per page, and the only thing that separates an
+        # epic root still delegating to open children from a leaf a builder can
+        # be sent at. See Params.batch_live_child_counts/2.
+        live_child_counts = Params.batch_live_child_counts(docs, scope_opts(conn))
+        Enum.map(docs, &Params.render_brief(&1, child_counts, live_child_counts))
 
       :full ->
         counts = Params.batch_edge_counts(docs)
@@ -359,8 +364,11 @@ defmodule BarkparkWeb.TasksController do
           :brief ->
             child_counts = Params.batch_child_counts(sealed_in_progress ++ sealed_ready, scope)
 
-            {Enum.map(sealed_in_progress, &Params.render_brief(&1, child_counts)),
-             Enum.map(sealed_ready, &Params.render_brief(&1, child_counts))}
+            live_child_counts =
+              Params.batch_live_child_counts(sealed_in_progress ++ sealed_ready, scope)
+
+            {Enum.map(sealed_in_progress, &Params.render_brief(&1, child_counts, live_child_counts)),
+             Enum.map(sealed_ready, &Params.render_brief(&1, child_counts, live_child_counts))}
 
           :full ->
             counts = Params.batch_edge_counts(sealed_in_progress ++ sealed_ready)
