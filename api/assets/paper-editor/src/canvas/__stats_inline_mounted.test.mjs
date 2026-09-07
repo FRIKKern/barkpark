@@ -59,7 +59,7 @@ try {
       assert.ok(value, `${type}: visible value is an inline textbox`);
       assert.equal(label.contentEditable, "plaintext-only");
       assert.equal(value.parentElement.querySelector('.bp-stat__denom').textContent, "/20");
-      assert.equal(host.querySelector(".bp-stats-config").open, false, "JSON is a closed fallback");
+      assert.equal(host.querySelector(".bp-paper-stats-config").open, false, "JSON is a closed fallback");
       value.focus(); value.blur(); host.flushPendingChanges();
       assert.deepEqual(ops, [], "focus/blur retains numeric carriers without an authored change");
       label.focus(); input(label, "Edited directly");

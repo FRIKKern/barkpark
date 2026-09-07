@@ -839,7 +839,7 @@ export const Fleet = Node.create({
         if (statsInline) {
           dom.classList.add("bp-paper-contextual-editor", "bp-canvas-stats-inline");
           statsConfig = document.createElement("details");
-          statsConfig.className = "bp-paper-contextual-controls bp-stats-config";
+          statsConfig.className = "bp-paper-contextual-controls bp-paper-stats-config";
           const summary = document.createElement("summary");
           summary.className = "bp-paper-contextual-toggle";
           summary.textContent = "Configure Stats";
