@@ -51,6 +51,28 @@ import "sort"
 // so the case that is currently CORRECT (floor scope, flat route) keeps its
 // byte-identical behaviour and only the case that is currently WRONG changes.
 
+// THE DATASET ARM, DECIDED. -d/--dataset is dropped by the same
+// fillTemplate/resolvePlaceholder mechanism on the majority of the command
+// surface, and StatedScope deliberately covers -w/-p ONLY. There is no
+// DatasetExplicit, no dataset entry in scopeDispositions, and no dataset arm in
+// refuseUnrepresentableScope — that is a decision, not an oversight:
+//
+//   1. The failure MODE is different. A dropped -w answers about ANOTHER
+//      TENANT: the cross-workspace read that this whole file exists to stop. A
+//      dropped -d answers about another dataset INSIDE the workspace you already
+//      named — wrong, but not a tenancy breach, and the fix (name the dataset in
+//      the route) is a server-side route question, not a client refusal.
+//   2. Refusing it needs a per-noun disposition table the -w/-p arm took a live
+//      manifest sweep to write, and shipping a refusal without one fails CLOSED
+//      across the whole surface — the exact brick this row was filed to prevent.
+//   3. It is not this row's defect. This row is about the PROVENANCE of an
+//      injected scope, and that half IS covered for the dataset:
+//      AttributeServerEntry marks DatasetFromServerEntry, so whoever does build
+//      the dataset arm inherits an honest signal instead of re-opening this door.
+//
+// So: the remedy in this file does NOT cover -d, on purpose, and the ground is
+// prepared for the follow-up that will.
+
 // ScopeFate is what happens to an operator-stated -w/-p on one command.
 type ScopeFate int
 
@@ -96,13 +118,32 @@ var (
 // `-w default` on an instance whose real workspace is named `default` is not a
 // wrong answer waiting to happen, and a Context built as a literal (a test, a
 // caller that skips Resolve) reads as not-stated and is left alone.
+//
+// THE SECOND DOOR, AND WHY THE ...FromServerEntry SUBTRACTION IS HERE.
+// Provenance alone was never enough, and neither is provenance AND divergence,
+// because one thing that is not the operator's hand also writes at FLAG
+// precedence: `bp -s <saved-name>` copies that saved entry's workspace/project/
+// dataset into the flags map (internal/cli/cli.go's FindServer branch). Before
+// the subtraction below, `bp -s gyldendal task ready` — with no -w typed
+// anywhere on the command line — resolved Workspace=gyldendal at LayerFlag,
+// read as STATED and divergent, and was REFUSED. There is nothing the operator
+// can do about that except stop using their own saved server. The precedence is
+// right (naming a server IS a deliberate choice, and its saved scope should beat
+// env and the active config); it is the claim "they stated it" that is false, so
+// that is the only thing corrected. See AttributeServerEntry in context.go.
+//
+// The subtraction only ever turns a refusal OFF. A typed -w, a BARKPARK_*
+// workspace, a .barkpark.json and the saved active config all resolve with the
+// FromServerEntry flags false and are read exactly as they were before.
 func StatedScope(ctx Context) []string {
 	floor := DefaultDefaults()
 	var out []string
-	if ctx.WorkspaceExplicit && ctx.Workspace != "" && ctx.Workspace != floor.Workspace {
+	if ctx.WorkspaceExplicit && !ctx.WorkspaceFromServerEntry &&
+		ctx.Workspace != "" && ctx.Workspace != floor.Workspace {
 		out = append(out, "-w")
 	}
-	if ctx.ProjectExplicit && ctx.Project != "" && ctx.Project != floor.Project {
+	if ctx.ProjectExplicit && !ctx.ProjectFromServerEntry &&
+		ctx.Project != "" && ctx.Project != floor.Project {
 		out = append(out, "-p")
 	}
 	return out
