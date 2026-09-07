@@ -4,12 +4,6 @@ import { readFileSync } from "node:fs";
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const shell = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
 const surface = readFileSync(new URL("../../paper-surface/paper-surface.css", import.meta.url), "utf8");
-assert.match(shell, /\.bp-paper-quote-editor \.bp-blockquote__cite\s*\{[^}]*display:\s*block/,
-  "wrapped attribution lines retain the reader's full width instead of a narrowed flex column");
-assert.match(shell, /\.bp-paper-quote-editor \.bp-blockquote__cite::before\s*\{[^}]*position:\s*absolute/,
-  "the decorative prefix is independent of the native text field's line width");
-assert.match(surface, /\.bp-paper-surface \.bp-blockquote__cite::before\s*\{ content: "\\2014\\00a0";/,
-  "canonical reader prefix and flow remain unchanged");
 const adjacentQuotes = shell.match(/\.bp-paper-edit-block\[data-block-type="blockquote"\]\s*\+\s*\.bp-paper-edit-block\[data-block-type="blockquote"\]\s*>\s*\.bp-paper-quote-editor\s*\{([^}]*)\}/);
 assert.match(adjacentQuotes?.[1] ?? "", /margin-top:\s*0/,
   "adjacent quote wrappers cannot double the reader's collapsed inter-quote margin");
@@ -99,5 +93,12 @@ for (const [name, css] of [["standalone", styles], ["host shell", shell]]) {
   }
   assert.ok(checked >= 2, `${name} checks light and dark authored token pairs`);
 }
+
+assert.match(shell, /\.bp-paper-quote-editor \.bp-blockquote__cite\s*\{[^}]*display:\s*block/,
+  "wrapped attribution lines retain the reader's full width instead of a narrowed flex column");
+assert.match(shell, /\.bp-paper-quote-editor \.bp-blockquote__cite::before\s*\{[^}]*position:\s*absolute/,
+  "the decorative prefix is independent of the native text field's line width");
+assert.match(surface, /\.bp-paper-surface \.bp-blockquote__cite::before\s*\{ content: "\\2014\\00a0";/,
+  "canonical reader prefix and flow remain unchanged");
 
 console.log("PASS contextual labels: scoped readable token and light/dark contrast");
