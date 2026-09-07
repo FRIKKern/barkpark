@@ -373,6 +373,7 @@ defmodule Barkpark.Tasks.Close do
           "source" => "github_merge_event",
           "indices" => indices,
           "asserted_worker" => worker_id,
+          "prs" => asserted_prs(landed),
           "landed" => landed_summary(landed),
           "ts" => ts_iso
         })
@@ -1065,7 +1066,7 @@ defmodule Barkpark.Tasks.Close do
 
   defp unmet_after_autostamp(%Document{content: content}, landed, ack_override) do
     autostamped =
-      if is_map(landed) and map_size(landed) > 0 do
+      if is_map(landed) and map_size(landed) > 0 and witnessed_prs(content, landed) != [] do
         content
         |> merge_gate_synthetics("", MapSet.new())
         |> MapSet.new(&Map.get(&1, "index"))
@@ -1279,7 +1280,14 @@ defmodule Barkpark.Tasks.Close do
       merge_autostamp_record(
         new_content,
         "close",
-        close_autostamp_record(autostamps, worker_id, caller_token_id, landed, ts_iso)
+        close_autostamp_record(
+          autostamps,
+          worker_id,
+          caller_token_id,
+          landed,
+          witnessed_prs(doc.content, landed),
+          ts_iso
+        )
       )
 
     with {:ok, new_content} <- merge_criteria(new_content, criteria) do
@@ -1354,9 +1362,13 @@ defmodule Barkpark.Tasks.Close do
   # computation — a second traversal could disagree with the one that wrote.
   defp autostamp_merge_gate(%Document{} = doc, criteria, worker_id, "done", landed, ts_iso)
        when is_map(landed) and map_size(landed) > 0 and is_list(criteria) do
-    targeted = MapSet.new(criteria, &Map.get(&1, "index"))
-    evidence = compose_merge_gate_evidence(doc, worker_id, landed, ts_iso)
-    merge_gate_synthetics(doc.content, evidence, targeted)
+    if witnessed_prs(doc.content, landed) == [] do
+      []
+    else
+      targeted = MapSet.new(criteria, &Map.get(&1, "index"))
+      evidence = compose_merge_gate_evidence(doc, worker_id, landed, ts_iso)
+      merge_gate_synthetics(doc.content, evidence, targeted)
+    end
   end
 
   defp autostamp_merge_gate(_doc, _criteria, _worker, _status, _landed, _ts_iso), do: []
@@ -1383,9 +1395,10 @@ defmodule Barkpark.Tasks.Close do
   #     `verified: true`.
   @autostamp_key "merge_gate_autostamp"
 
-  defp close_autostamp_record([], _worker_id, _caller_token_id, _landed, _ts_iso), do: nil
+  defp close_autostamp_record([], _worker_id, _caller_token_id, _landed, _witnessed, _ts_iso),
+    do: nil
 
-  defp close_autostamp_record(autostamps, worker_id, caller_token_id, landed, ts_iso) do
+  defp close_autostamp_record(autostamps, worker_id, caller_token_id, landed, witnessed, ts_iso) do
     %{
       "verified" => false,
       "source" => "close_landed_digest",
@@ -1393,6 +1406,7 @@ defmodule Barkpark.Tasks.Close do
       "asserted_worker" => worker_id,
       "authenticated_token_id" => caller_token_id,
       "landed" => landed_summary(landed),
+      "witnessed_prs" => witnessed,
       "ts" => ts_iso
     }
   end
@@ -1497,6 +1511,96 @@ defmodule Barkpark.Tasks.Close do
     "auto: UNVERIFIED merge-gate autostamp — no merge observed; caller-asserted land digest " <>
       "from worker #{inspect(worker_id)} (epoch #{epoch}) naming #{landed_summary(landed)} at #{ts_iso}"
   end
+
+  # THE WITNESS (cch-w65). The close-time autostamp used to fire on the caller's
+  # bytes alone: any non-empty `landed` map on a terminal `done` close stamped
+  # every `merge_gate: true` criterion met, and `unmet_after_autostamp/3` deducted
+  # those same indices from the D289 criteria gate, so the close carried no
+  # `close_override` record either. Nothing checked WHO was closing or WHETHER
+  # the cited PR had anything to do with this task. A scratch worker paid a merge
+  # gate citing a foreign epic's merged PR that it had never touched, and the
+  # ledger stamped it.
+  #
+  # This closes the PR-REFERENCES-TASK axis, and it closes it against the server's
+  # OWN observation rather than the caller's assertion. The `pull_request` merge
+  # webhook resolves a merged PR to a task through THAT PR's `Task: <doc_id>`
+  # trailer (`Plugins.Github.MergeEvents`), and `write_reconcile/5` persists what
+  # it saw under `@autostamp_key`'s "merge_event" sub-key. So the ledger already
+  # holds a verified PR→task join; the close path simply never read it. Now it
+  # does: a close-time autostamp fires only for a PR the server watched arrive on
+  # THIS task, and an unwitnessed assertion stamps nothing.
+  #
+  # The refusal is deliberately NOT a new error. The gate is left unmet, so the
+  # existing criteria gate refuses the close and names the index, and a closer who
+  # means it passes `criteria_override` — which is RECORDED in
+  # `close_override.criteria`. That is the whole change in one sentence: a silent
+  # fabrication becomes a signed one.
+  #
+  # NO NETWORK CALL IS ADDED, and none may be: this runs under
+  # `pg_advisory_xact_lock`, where a GitHub round-trip would trade a fabrication
+  # bug for an availability bug.
+  #
+  # WHAT THIS DOES NOT CLOSE: the ACTOR-AUTHORITY axis. `worker_id` is a
+  # client-supplied body param (see the "NONE OF THIS IS AUTHORIZATION" note in
+  # this module's header) and proves nothing, and `caller_token_id` — the bearer
+  # the server really authenticated — carries no lead/reviewer role this ledger
+  # models, so there is no authority to check it against. A caller who holds a
+  # write token can still name any worker. What they can no longer do is have the
+  # server manufacture a proof for a PR it never saw land here.
+  defp witnessed_prs(content, landed) when is_map(content) and is_map(landed) do
+    asserted = asserted_prs(landed)
+
+    case asserted do
+      [] ->
+        []
+
+      _ ->
+        observed = MapSet.new(observed_prs(content))
+        Enum.filter(asserted, &MapSet.member?(observed, &1))
+    end
+  end
+
+  defp witnessed_prs(_content, _landed), do: []
+
+  # The PR numbers a caller's land digest names, as strings — the SAME key
+  # vocabulary `landed_summary/1` reads, so the evidence sentence and the witness
+  # join can never disagree about which PRs were asserted.
+  defp asserted_prs(landed) when is_map(landed) do
+    (Map.get(landed, "prs") || Map.get(landed, safe_atom("prs")))
+    |> normalize_landed_list()
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp asserted_prs(_landed), do: []
+
+  # The PR numbers the server itself observed merging into THIS task. Records
+  # written before this key existed carry only the prose summary, so those are
+  # read back through the `#<number>` shape `landed_summary/1` emits — a whole
+  # token, never a substring, so a witnessed #45 cannot vouch for an asserted
+  # #456.
+  defp observed_prs(content) do
+    case get_in(content, [@autostamp_key, "merge_event"]) do
+      %{} = record ->
+        case asserted_prs(record) do
+          [] -> summary_prs(Map.get(record, "landed"))
+          prs -> prs
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  defp summary_prs(summary) when is_binary(summary) do
+    ~r/#(\d+)/
+    |> Regex.scan(summary)
+    |> Enum.map(fn [_, number] -> number end)
+    |> Enum.uniq()
+  end
+
+  defp summary_prs(_summary), do: []
 
   defp landed_summary(landed) do
     prs = normalize_landed_list(Map.get(landed, "prs") || Map.get(landed, safe_atom("prs")))
