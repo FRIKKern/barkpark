@@ -139,6 +139,40 @@ printf '%s\n' "$out" | grep -q '^CANNOT READ: scripts/console-path-escape-check\
 says "Console gate" SKIPPED && no "the missing primitive printed as SKIPPED — the exact confusion this arm exists to forbid" || ok "no SKIPPED row for the missing primitive"
 says "Cloud gate" DISPATCHED && ok "the surviving primitives still answer" || no "the mutation took the whole run down — output: $out"
 
+# ── case 5: the git-range input, hermetically ───────────────────────────────
+# The default input is a RANGE, not --stdin, and a range flows through a
+# different arm of the script (git diff --no-renames, and the refusal when the
+# range does not resolve). Exercised over a throwaway repo built from the same
+# scratch tree, so it depends on no ref of the checkout it runs in.
+echo "case 5: a git range answers the same as the equivalent --stdin set"
+RANGE_TREE="$TMP/range"
+mkdir -p "$RANGE_TREE/scripts" "$RANGE_TREE/.github/workflows" || die "cannot build the range tree"
+cp "$ROOT"/scripts/*-path-escape-check.sh "$RANGE_TREE/scripts/" || die "no primitives to copy"
+cp "$SCRIPT" "$RANGE_TREE/scripts/" || die "cannot copy the wrapper"
+cp "$ROOT"/.github/workflows/*.yml "$RANGE_TREE/.github/workflows/" || die "no workflows to copy"
+cp "$ROOT/.github/required-checks.json" "$RANGE_TREE/.github/" || die "cannot copy the required-checks spec"
+(
+  cd "$RANGE_TREE" || exit 2
+  git init -q . && git add -A &&
+    git -c user.name=t -c user.email=t@t commit -qm base
+) >/dev/null 2>&1 || die "could not build the throwaway repo"
+mkdir -p "$RANGE_TREE/cloud/priv/static"
+echo "// a console static read" >"$RANGE_TREE/cloud/priv/static/app.js"
+(
+  cd "$RANGE_TREE" || exit 2
+  git add -A && git -c user.name=t -c user.email=t@t commit -qm change
+) >/dev/null 2>&1 || die "could not commit the change"
+
+out="$(WHICH_GATES_ROOT="$RANGE_TREE" bash "$RANGE_TREE/scripts/which-gates.sh" 'HEAD~1..HEAD' 2>&1)"
+status=$?
+[ $status -eq 0 ] && ok "a resolvable range exits 0" || no "exit $status over HEAD~1..HEAD — output: $out"
+says "Console gate" DISPATCHED && ok "the range input dispatches Console gate" || no "range input did not dispatch Console gate — output: $out"
+
+out="$(WHICH_GATES_ROOT="$RANGE_TREE" bash "$RANGE_TREE/scripts/which-gates.sh" 'refs/remotes/origin/nope...HEAD' 2>&1)"
+status=$?
+[ $status -ne 0 ] && ok "an unresolvable range exits non-zero" || no "an unresolvable range exited 0 — it would print every gate as SKIPPED: $out"
+printf '%s\n' "$out" | grep -q '^CANNOT READ: git range' && ok "an unresolvable range says CANNOT READ, not SKIPPED" || no "no CANNOT READ line for an unresolvable range — output: $out"
+
 # ── the tally ───────────────────────────────────────────────────────────────
 echo
 echo "# pass $pass / # fail $fail"

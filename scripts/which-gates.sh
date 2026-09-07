@@ -254,4 +254,4 @@ printf '%s\n' "$call_sites" | {
 }
 rc=$?
 
-exit $rc
+exit "$rc"

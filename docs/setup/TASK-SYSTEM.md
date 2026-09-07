@@ -36,6 +36,8 @@ The `task` schema auto-registers each boot (idempotent on `(name, dataset)`); tw
 
 **Register the movement.** Every unit of work runs under a claimed task: if no row names it, create one and claim it FIRST, then work. The doctrine, why unregistered work is unrecoverable, and the three ways registration silently does not land: [AGENT-ONRAMPS](AGENT-ONRAMPS.md#register-the-movement); here it also gates merge ([merge-gates](../ops/merge-gates.md)).
 
+**Gates come from the PATHS, not the lane**: `bash scripts/which-gates.sh` prints what your diff dispatches.
+
 **1. Token.** Any bearer token reaches the task endpoints (read tier); creating tasks uses the mutate endpoint (write tier). Dev default: `barkpark-dev-token`. A stale `BARKPARK_TOKEN` SHADOWS `~/.config/barkpark/config.json`: `bp whoami` reads `auth_tier: none` and every `bp task` verb says *hidden at your tier* — `unset BARKPARK_TOKEN` (or `env -u BARKPARK_TOKEN bp …`) before blaming the server.
 
 **2. Discover.** One call teaches the whole surface:
