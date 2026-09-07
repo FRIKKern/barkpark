@@ -5460,8 +5460,15 @@ RC26PROBE
 if ! grep -q 'RC_TALLY_REACHED' "$RC26_PROBE" || ! grep -q 'local rc=' "$RC26_PROBE"; then
   bad "§26(f) could not extract this file's \`cleanup\` body (the \`cleanup() {\`…\`}\` block moved) — the exit-code proof below would run against an empty function and pass vacuously"
 else
-  bash "$RC26_PROBE" "$RC26_TRAP_STR" >/dev/null 2>&1; RC26_ARMED_RC=$?
-  bash "$RC26_PROBE" 'rc26_cleanup; cleanup' >/dev/null 2>&1; RC26_DISARMED_RC=$?
+  # `cmd; RC=$?` is WRONG here and cost a full 25-minute run to learn: this file
+  # runs under `set -e`, the probe's whole job is to exit NON-ZERO, and a bare
+  # failing simple command kills the suite before the assignment on the next
+  # line — the run died right here with 263 of 290 assertions and no tally line.
+  # `|| RC=$?` is the only form that both survives `set -e` and keeps the code.
+  RC26_ARMED_RC=0
+  bash "$RC26_PROBE" "$RC26_TRAP_STR" >/dev/null 2>&1 || RC26_ARMED_RC=$?
+  RC26_DISARMED_RC=0
+  bash "$RC26_PROBE" 'rc26_cleanup; cleanup' >/dev/null 2>&1 || RC26_DISARMED_RC=$?
   if [ "$RC26_ARMED_RC" -eq 1 ]; then
     ok "(f) the EXIT trap string §26 installs carries a non-zero exit THROUGH the chain (probe exited $RC26_ARMED_RC) — the tally line's \`exit \$(rc_exit_code …)\` reaches the caller"
   else
