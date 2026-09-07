@@ -85,6 +85,7 @@ defmodule Barkpark.Tasks.AdvisoryLockKeyConvergenceTest do
     {"lib/barkpark/tasks/close.ex", "LockKey.task(task_id)"},
     {"lib/barkpark/tasks/compactor.ex", "LockKey.task(task_uuid)"},
     {"lib/barkpark/tasks/compactor.ex", "LockKey.task(task_uuid)"},
+    {"lib/barkpark/tasks/discharge.ex", "LockKey.task(task_id)"},
     {"lib/barkpark/tasks/fence.ex", "LockKey.task(child_uuid)"},
     {"lib/barkpark/tasks/fleet.ex", "LockKey.listener(logical_id)"},
     {"lib/barkpark/tasks/landed.ex", "LockKey.task(task_id)"},

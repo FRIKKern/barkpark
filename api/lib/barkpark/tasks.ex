@@ -87,6 +87,7 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Tasks.Expectations
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.Fence
+  alias Barkpark.Tasks.Discharge
   alias Barkpark.Tasks.Landed
   alias Barkpark.Tasks.{Claim, Close, Mutations, Queue, Release}
   alias Barkpark.Tasks.ClaimFence
@@ -581,6 +582,31 @@ defmodule Barkpark.Tasks do
   See `Barkpark.Tasks.Landed`.
   """
   defdelegate record_landing(task_id, opts \\ []), to: Landed, as: :record
+
+  @doc """
+  Leave a BACK-LINK on a row a merged PR cited but was not credited to — the
+  write behind `POST /v1/tasks/:doc_id/discharges` (task-29781d0921e5a885).
+
+      Tasks.record_discharge(task_uuid,
+        pr: "16640", commit: "b897f18", primary: "task-abc", criterion: 2)
+
+  A merged PR carries ONE `Task:` trailer, so it credits ONE row; a `Discharges:`
+  line in its body names the OTHER rows it may also have satisfied. This writes
+  the mark those rows never got: with `:criterion`, one entry of
+  `content.acceptance_criteria` gains a `discharge_marks` item; without one, the
+  sentence unions into `content.landed.notes`.
+
+  IT CANNOT SET `met`. A back-link is evidence offered by a caller who holds no
+  claim on the row it marks — the holder still verifies against origin/main and
+  still stamps. Nothing else is written either: not evidence, not
+  lifecycle_status, not the claim, not the disposition, not a label. Emits
+  `task.discharged`.
+
+  Returns `{:ok, :marked | :already, doc}`. Errors: `:not_found`,
+  `:empty_discharge`, `:invalid_criteria`, `:criteria_index_out_of_range`,
+  `:stale_claim`. See `Barkpark.Tasks.Discharge`.
+  """
+  defdelegate record_discharge(task_id, opts \\ []), to: Discharge, as: :record
 
   @doc """
   Pulse the task's now-line + renew its lease in ONE atomic write — the

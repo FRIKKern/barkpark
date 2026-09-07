@@ -542,6 +542,12 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/stamp", BarkparkWeb.TasksController, :stamp, auth: :token_root},
       {:post, "/tasks/:doc_id/pulse", BarkparkWeb.TasksController, :pulse, auth: :token_root},
       {:post, "/tasks/:doc_id/landed", BarkparkWeb.TasksController, :landed, auth: :token_root},
+      # THE BACK-LINK MARK (task-29781d0921e5a885): :doc_id is the PRIMARY row
+      # the PR's one `Task:` trailer credited; the body's `Discharges:` lines
+      # name the SIBLING rows the same merge may also have satisfied, and each
+      # gets a readable mark that CANNOT set met. See Tasks.Discharge.
+      {:post, "/tasks/:doc_id/discharges", BarkparkWeb.TasksController, :discharges,
+       auth: :token_root},
       # The NON-HOLDER lease extension: CI buys grace for a row its open PR
       # names, without holding (or disturbing) the claim. See Tasks.Renew.
       {:post, "/tasks/:doc_id/renew", BarkparkWeb.TasksController, :renew, auth: :token_root},

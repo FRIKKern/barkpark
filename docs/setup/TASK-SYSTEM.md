@@ -128,11 +128,12 @@ Stamp at three moments ([ledger rule 6](../../.claude/workflows/bp-loop-ledger.m
 
 ## PR ↔ task contract — one trailer, one live claim
 
-`.github/workflows/pr-task-gate.yml` runs `scripts/pr-task-gate.sh` as the REQUIRED check "PR references an active task" on `opened`, `synchronize`, `reopened` and `edited`. Three rules a green PR obeys:
+`.github/workflows/pr-task-gate.yml` runs `scripts/pr-task-gate.sh` as the REQUIRED check "PR references an active task" on `opened`, `synchronize`, `reopened`, `edited`. Four rules:
 
-- **Exactly one `Task: <doc_id>` at column 0** of the PR body. Two DISTINCT ids make `extract_task_id` exit 4 — "ambiguous task reference … Exactly one is required" — and the check reds. A PR landing several rows keeps ONE `Task:`, listing the rest as `Also-closes: <doc_id>`, stamped and closed by hand. Restating the same id twice is fine; ids are deduplicated.
-- **The claim is read when the gate RUNS, not when the PR opened.** Pass = the row is `in_progress` with a `claim.worker`, `done` with a `claim.closed_by`, or `open` with a claim still live at the PR's `created_at`. Never claimed, lapsed BEFORE the PR opened, cancelled, or wrong worker = definitive fail. Hold the claim until the PR MERGES — pulse every ~18 min (see **Lease + epoch**).
-- **A red caused by the body is fixed by editing the body**, not by pushing a commit — `edited` re-triggers the workflow. Exit 2 (ledger unreachable) and 3 (the gate's credential refused) are the workflow's, not yours: re-run once the ledger is up.
+- **Exactly one `Task: <doc_id>` at column 0** of the PR body. Two DISTINCT ids make `extract_task_id` exit 4 (ambiguous) and the check reds. A PR landing several rows keeps ONE `Task:` and cites the rest as `Discharges:` (below). Restating the same id twice is fine; ids are deduplicated.
+- **The claim is read when the gate RUNS, not when the PR opened.** Pass = the row is `in_progress` with a `claim.worker`, `done` with a `claim.closed_by`, or `open` with a claim live at the PR's `created_at`. Never claimed, lapsed BEFORE the PR opened, cancelled, or wrong worker = fail. Hold the claim until the PR MERGES — pulse every ~18 min (**Lease + epoch**).
+- **A second row the merge discharged: `Discharges: <doc_id> c<N>`** at column 0, repeatable; the gate matches `^Task:` only. Push-to-main POSTs it to `/v1/tasks/<primary>/discharges`, noting `discharge_marks` on criterion N (PR, sha, primary); never `met`.
+- **A red in the body is fixed by editing the body**, not by a commit — `edited` re-triggers the workflow. Exit 2 (ledger unreachable) and 3 (credential refused) are the workflow's, not yours: re-run once the ledger is up.
 
 ## The cmux bridge — a pane that owns its task
 

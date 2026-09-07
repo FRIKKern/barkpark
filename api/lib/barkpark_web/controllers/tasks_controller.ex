@@ -98,6 +98,7 @@ defmodule BarkparkWeb.TasksController do
   alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Document
   alias Barkpark.Content.Graph
+  alias Barkpark.Tasks.Citations
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.QueueGate
   alias Barkpark.Tasks.TwinResolver
@@ -1450,6 +1451,80 @@ defmodule BarkparkWeb.TasksController do
 
       {:error, :not_found} ->
         not_found(conn, "task not found")
+    end
+  end
+
+  # ─── POST /v1/tasks/:doc_id/discharges ──────────────────────────────────
+  # THE BACK-LINK MARK (task-29781d0921e5a885). `:doc_id` is the PRIMARY row —
+  # the one the PR's single `Task:` trailer credited. Body:
+  #   { "pr": "<number>", "commit": "<sha>", "body": "<the PR/squash body>" }
+  #
+  # The SERVER parses the `Discharges:` citations out of `body`
+  # (`Tasks.Citations`) and marks each row they name. The fan-out is here and
+  # not in the caller on purpose: the citation grammar then has exactly ONE
+  # implementation, in a language with a unit test, instead of a shell mirror
+  # that drifts (the #5290 failure mode — a second copy of the `Task:` regex
+  # reddened a correct trailer).
+  #
+  # NO worker_id and NO observed_epoch — the caller is a push-to-main workflow,
+  # the same posture as /landed. What it can write is narrower still:
+  # `Tasks.Discharge` puts ONE `discharge_marks` key on ONE criterion, or a note
+  # into content.landed. It has no path that sets `met`.
+  #
+  # PER-ROW OUTCOMES, ONE 200. A body may cite a row that was deleted, renamed,
+  # or lives outside this token's scope, and none of those should lose the marks
+  # that DID land. So each citation reports its own status in `marks[]` and the
+  # envelope is 200 unless the PRIMARY row itself does not resolve.
+  def discharges(conn, %{"doc_id" => doc_id} = params) do
+    citations = Citations.discharges(params["body"])
+
+    case find_task_by_doc_id(doc_id, conn) do
+      {:ok, %Document{} = primary} ->
+        marks =
+          Enum.map(citations, &mark_citation(conn, &1, primary, params))
+
+        json(conn, %{
+          ok: true,
+          primary: primary.doc_id,
+          cited: length(citations),
+          marked: Enum.count(marks, &(&1.status == "marked")),
+          marks: marks
+        })
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
+  defp mark_citation(conn, %{task_id: cited_id, criterion: index}, primary, params) do
+    base = %{task: cited_id, criterion: index}
+
+    cond do
+      # A PR citing its own trailer row is not a back-link — that row is already
+      # credited by the trailer and marked by /landed. Silently marking it again
+      # would put "possibly discharged ... under row <itself>" on it.
+      cited_id == primary.doc_id ->
+        Map.put(base, :status, "self")
+
+      true ->
+        case find_task_by_doc_id(cited_id, conn) do
+          {:ok, %Document{} = task} ->
+            opts = [
+              pr: params["pr"],
+              commit: params["commit"],
+              primary: primary.doc_id,
+              criterion: index,
+              caller_token_id: caller_token_id(conn)
+            ]
+
+            case Tasks.record_discharge(task.id, opts) do
+              {:ok, outcome, _doc} -> Map.put(base, :status, to_string(outcome))
+              {:error, reason} -> Map.put(base, :status, Params.reason_to_string(reason))
+            end
+
+          {:error, :not_found} ->
+            Map.put(base, :status, "not_found")
+        end
     end
   end
 
