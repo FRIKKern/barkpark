@@ -73,7 +73,11 @@ defmodule Barkpark.Tasks.Validation do
   (strings), `papers` / `attachments` (lists of strings), `labels` /
   `history` (lists), `estimate` / `history_summary` (maps), `outcome`
   (map; its `resolution`, when present, must be on the advertised enum),
-  `worklog` / `acceptance_criteria` (lists of maps). `execution_policy` and
+  `worklog` (lists of maps). `acceptance_criteria` is a list of maps PLUS one
+  content rule: a criterion's wording may not begin or end with whitespace,
+  because that wording is the CAS key every met-flip is guarded by and the
+  shells that carry it strip trailing newlines — see
+  `check_acceptance_criteria/2`. `execution_policy` and
   `queue_gate` are the two strict nested versioned contracts; other dossier
   composites retain top-level-only shape checks.
   """
@@ -169,7 +173,7 @@ defmodule Barkpark.Tasks.Validation do
     |> check_optional_map(content, "landed")
     |> check_optional_map(content, "history_summary")
     |> check_optional_map_list(content, "worklog")
-    |> check_optional_map_list(content, "acceptance_criteria")
+    |> check_acceptance_criteria(content)
     |> check_execution_policy(content)
     |> check_queue_gate(content)
   end
@@ -278,6 +282,109 @@ defmodule Barkpark.Tasks.Validation do
       other ->
         Map.put(errors, key, ["must be a list when set, got #{inspect(other)}"])
     end
+  end
+
+  # `acceptance_criteria` is `check_optional_map_list` PLUS one rule about the
+  # criterion WORDING, because that wording is not prose — it is a CAS key.
+  #
+  # THE DEAD END THIS CLOSES (pds-bl-stamp-trailing-newline-deadend). Every
+  # met-flip is guarded by the criterion's exact stored text: `Tasks.Internal`
+  # compares with `==` (`resolve_criterion_index/2` and the `:criteria_mismatch`
+  # clause), and it must, because an unguarded index is the false-done vector
+  # D56 closed. But the shells that carry that text strip trailing newlines:
+  # `$(cat file)` in POSIX command substitution drops ALL of them. So a
+  # criterion whose stored wording ends in a newline can be REFUSED forever and
+  # stamped never — `scripts/pds-crown-stamp.sh`'s `criterion_to_file()` already
+  # detects the shape and honestly refuses, but a refusal is not a way through.
+  #
+  # THE FIX IS AT THE AUTHORING DOOR, NOT THE MATCHING ONE. Relaxing the `==`
+  # to a trimmed compare would buy a way through at the price of a SILENT
+  # neighbour match, which is strictly worse than a loud dead end and is
+  # forbidden by the row in as many words. Normalising the text on write is the
+  # same defect wearing a helpful expression: it would rewrite an author's
+  # wording under a stamper's guard without telling either of them. So the
+  # unstampable shape is refused where it is born, and the matching code is
+  # untouched.
+  #
+  # TRIM, NOT "NO NEWLINES". `String.trim/1` strips leading and trailing
+  # whitespace and leaves the interior alone, which is exactly the rule: 4 of
+  # the 35,603 criteria strings in the live corpus contain an INTERNAL newline
+  # and are perfectly stampable, so a rule spelled "a criterion may not contain
+  # a newline" would refuse four honest rows to catch a shape nobody has
+  # written. Leading whitespace is refused alongside trailing for one reason —
+  # it is equally invisible in a diff and equally fatal to an `==` — not
+  # because it has been observed.
+  #
+  # BLAST RADIUS, MEASURED RATHER THAN ASSUMED: 0 of 35,603 criteria strings
+  # across all 8,309 live task rows carry leading OR trailing whitespace
+  # (2026-09-07). This refuses a shape that exists nowhere today. Stated
+  # honestly, that is "no current harm", not "no future harm" — the rule earns
+  # its place by making the class unreachable, not by cleaning one up.
+  #
+  # THIS RULE IS RETROACTIVE, AND THAT IS DELIBERATE. `/v1/data/mutate`'s patch
+  # clauses merge BEFORE they validate, so this sees the whole merged document
+  # and not just the fields a caller sent (the placement analysis in
+  # `Content.Writer`, PDS-D393, spells this out). A row that already carried a
+  # bad criterion would therefore 422 on a patch to an UNRELATED field. Two
+  # things make that acceptable where it was not acceptable for the birth-side
+  # disposition fence: the population is empty, and the state is SELF-HEALING —
+  # the patch that fixes the wording carries the fixed wording, so it validates
+  # and lands. A row can be stuck here only until someone corrects the text
+  # that was unstampable anyway. The regression test pins both halves.
+  defp check_acceptance_criteria(errors, content) do
+    case fetch(content, "acceptance_criteria") do
+      nil ->
+        errors
+
+      list when is_list(list) ->
+        cond do
+          not Enum.all?(list, &is_map/1) ->
+            Map.put(errors, "acceptance_criteria", [
+              "must be a list of maps, got #{inspect(list)}"
+            ])
+
+          untrimmed = first_untrimmed_criterion(list) ->
+            {index, text} = untrimmed
+
+            Map.put(errors, "acceptance_criteria", [
+              "criterion #{index} begins or ends with whitespace (#{inspect(text)}). " <>
+                "The criterion text is the CAS key every met-flip is guarded by, and " <>
+                "shell command substitution strips trailing newlines, so this wording " <>
+                "could be refused but never stamped. Send it trimmed; interior " <>
+                "newlines are fine."
+            ])
+
+          true ->
+            errors
+        end
+
+      other ->
+        Map.put(errors, "acceptance_criteria", [
+          "must be a list when set, got #{inspect(other)}"
+        ])
+    end
+  end
+
+  # The FIRST offender, with its index, so the message names a row the author
+  # can find rather than reporting that something somewhere is wrong. A
+  # non-binary or absent `criterion` is not this rule's business — the shape
+  # rules above own that — so it is skipped rather than refused.
+  defp first_untrimmed_criterion(list) do
+    list
+    |> Enum.with_index()
+    |> Enum.find_value(fn
+      {%{} = entry, index} ->
+        case Map.get(entry, "criterion") || Map.get(entry, :criterion) do
+          text when is_binary(text) ->
+            if String.trim(text) != text, do: {index, text}, else: nil
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
+    end)
   end
 
   # `outcome` map with a validated `resolution` enum (charter D23). Top-level
