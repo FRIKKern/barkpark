@@ -276,6 +276,18 @@ func usageCommand(out *writer, cmd manifest.Command) {
 	// mutations.ex — which is exactly what was reported (#18). The list and its
 	// derivation live in mutate_shapes.go, guarded against server drift by
 	// TestMutateHelpNamesEveryServerMutationClause.
+	// `--criterion-text-file` is resolved and consumed client-side
+	// (tasks_stamp_criterion_file.go), so the manifest cannot declare it and the
+	// flags block above cannot show it — the same undeclarable shape as `task ls
+	// --match`. Without this block the ONLY documented way to supply the guard
+	// text stays the double-quoted shell argument that executes the criterion's
+	// own backticks.
+	if cmd.ID == taskStampCommandID {
+		out.errf("")
+		for _, line := range stampCriterionTextHelpLines() {
+			out.errf("%s", line)
+		}
+	}
 	if cmd.ID == docMutateCommandID {
 		out.errf("")
 		for _, line := range mutateShapeLines() {
