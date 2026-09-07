@@ -30,7 +30,7 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     1. **Inventory tripwire.** The set of `position: fixed` surfaces that
        genuinely render *inside* an `.editor-panel` root is small and known.
        Everything else either portals to `document.body` or is a SIBLING of the
-       panel inside `.pane-layout`. If a future slice adds a fourth one, the
+       panel inside `.pane-layout`. If a future slice adds another one, the
        verdict "containment is harmless here" silently stops being audited —
        so a new one fails this test until it is classified.
 
@@ -137,7 +137,7 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   # with its placement relative to the panel roots above.
   #
   #   :under_panel     — renders as a DESCENDANT of an `.editor-panel` root.
-  #                      This is the set containment would affect. Keep it at 3.
+  #                      This is the set containment would affect. Audit additions.
   #   :body_portal     — JS moves the node to `document.body` before showing it.
   #   :layout_sibling  — server-rendered inside `.pane-layout` but AFTER
   #                      `</.studio_editor_shell>` (components.ex:913), so it is
@@ -150,6 +150,11 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     # sheet_grid.ex:3030, a sibling of the grid-wrap inside the sheet panel
     # (sheet_grid.ex:2478) — the one surface the carve-out insures.
     ".sheet-context-menu" => :under_panel,
+    # paper_editor.ex renders this inside each block, hence inside the Paper
+    # panel in Studio (and main on the public reader). At <=720px it becomes
+    # a viewport-bottom strip; the editor reserves footer space for it. It is
+    # deliberately NOT classified as a portal. Desktop stays an absolute rail.
+    ".bp-paper-edit-toolbar" => :under_panel,
     ".bp-slash-menu" => :body_portal,
     ".bp-paper-format" => :body_portal,
     ".bp-paper-context-menu" => :body_portal,
@@ -795,14 +800,20 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
       end
     end
 
-    test "exactly three fixed-position selectors render under a panel root" do
+    test "exactly four fixed-position selectors render under a panel root" do
       under_panel =
         @fixed_css_inventory
         |> Enum.filter(fn {_sel, placement} -> placement == :under_panel end)
         |> Enum.map(&elem(&1, 0))
         |> MapSet.new()
 
-      assert under_panel == MapSet.new([".bp-ae-toast", ".bp-ae-modal", ".sheet-context-menu"])
+      assert under_panel ==
+               MapSet.new([
+                 ".bp-ae-toast",
+                 ".bp-ae-modal",
+                 ".sheet-context-menu",
+                 ".bp-paper-edit-toolbar"
+               ])
     end
 
     test "root.html.heex declares position:fixed for exactly the inventoried selectors" do
@@ -988,7 +999,7 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
              That is a real finding, not a test bug — the paper editor mounts
              inside an `.editor-panel` root, so this surface is now subject to any
              containing block the panel grows. Add it to the hand-verified
-             under-panel set (the "exactly three" test above) with a rationale,
+             under-panel set (the "exactly four" test above) with a rationale,
              then update this expectation. Do not just delete the classification.
              """
     end
