@@ -51,6 +51,17 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCAN="$HERE/release-scan.sh"
+LIB="$HERE/lib/check-runs.sh"
+# The scan now READS through scripts/lib/check-runs.sh (the paged reader that
+# proves its own completeness), so every synthetic repo below must carry the lib
+# beside the script. `install_scan <root>` is the one place that knows this: a
+# copy of release-scan.sh alone is a broken installation and the script says so
+# and exits — which is the intended behaviour, not something to work around.
+install_scan() { # <repo root>
+  mkdir -p "$1/scripts/lib"
+  cp "$SCAN" "$1/scripts/release-scan.sh"
+  cp "$LIB" "$1/scripts/lib/check-runs.sh"
+}
 SHA_GREEN_SUITES="025c249717a40f1a9ca6741fb6eafaab83ef3a92"
 SHA_RED_SUITE="2c8fe0da467cd3772e250655352a25f7c5b68ee4"
 
@@ -349,11 +360,11 @@ git init -q -b main "$SEED" >>"$GITLOG" 2>&1
 
 DEEP="$TMP/deep"
 git clone -q "$ORIGIN" "$DEEP" >>"$GITLOG" 2>&1
-mkdir -p "$DEEP/scripts"; cp "$SCAN" "$DEEP/scripts/release-scan.sh"
+install_scan "$DEEP"
 
 SHALLOW="$TMP/shallow"
 git clone -q --depth 1 "file://$ORIGIN" "$SHALLOW" >>"$GITLOG" 2>&1
-mkdir -p "$SHALLOW/scripts"; cp "$SCAN" "$SHALLOW/scripts/release-scan.sh"
+install_scan "$SHALLOW"
 
 # ── G0. is the fixture even real? ────────────────────────────────────────────
 g0_fails_before=$fails
@@ -424,7 +435,7 @@ git init -q -b main "$BIG" >>"$GITLOG" 2>&1
     git commit -q --allow-empty -m "feat: commit $i $pad"
   done
 ) >>"$GITLOG" 2>&1
-mkdir -p "$BIG/scripts"; cp "$SCAN" "$BIG/scripts/release-scan.sh"
+install_scan "$BIG"
 
 # The exact bytes the pre-fix script handed to execve as ONE argv word.
 argv_bytes="$(git -C "$BIG" log --format='%H%x09%s' v0.1.0..main 2>/dev/null \
