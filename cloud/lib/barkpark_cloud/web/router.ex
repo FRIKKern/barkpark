@@ -3141,14 +3141,16 @@ defmodule BarkparkCloud.Web.Router do
               #    above means ANY team member can make the plane pay for that
               #    egress repeatedly while the team is suspended.
               # 4. AND THE PLANE THROWS THE ANSWER AWAY. Charter D684: the headline
-              #    verdict this route persists is `Enum.any?` over three probes, two
-              #    of them ANONYMOUS, and `verify.api` passes on a 200 from
+              #    verdict this route persists onto `verify_reachable` (with
+              #    `last_verified_at`) is `Enum.any?` over three probes, two of them
+              #    ANONYMOUS, and `verify.api` passes on a 200 from
               #    `/v1/capabilities` — run-proved to answer 200 to a bogus bearer.
               #    So the plane pays a credentialed egress for evidence it does not
-              #    actually rely on. (The persisted column is named here only in
-              #    prose: `verify_route_producer_exemption_test.exs` (D706) scans
-              #    this route's SOURCE — comments included — for that symbol, and
-              #    this refusal keys on `suspended`, which D706 names as fine.)
+              #    actually rely on. (Naming that column here is safe as of
+              #    task-bb7e9bcdeb5cea85: `verify_route_producer_exemption_test.exs`
+              #    (D706) still scans this route's SOURCE, but its matcher now reads
+              #    the CODE half of each line, so prose may name what the code does.
+              #    The refusal below keys on `suspended`, which D706 names as fine.)
               #
               # Placed as a sibling `cond` clause ABOVE `run_verify/3` — not a leg
               # inside `Verify.run/1` — so the ciphertext is never decrypted and
