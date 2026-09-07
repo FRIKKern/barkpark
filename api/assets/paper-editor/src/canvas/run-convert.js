@@ -3075,16 +3075,17 @@ function canonicalJSON(value) {
 
 // A deferred remote edit is not part of the author's visible baseline. Allow
 // independent fields (and convergent values), but never silently patch over a
-// different remote value in the same field. The host owns conflict resolution.
-export function hasOverlappingPatches(ops, baseline, remote) {
+// different remote value or remove a remotely changed block. The host owns review.
+export function hasOverlappingOps(ops, baseline, remote) {
   if (!Array.isArray(remote)) return false;
   const beforeById = new Map(baseline.map((block) => [block.id, block]));
   const remoteById = new Map(remote.map((block) => [block.id, block]));
   return ops.some((op) => {
-    if (op.op !== "patch-block") return false;
+    if (op.op !== "patch-block" && op.op !== "remove-block") return false;
     const before = beforeById.get(op.id);
     const latest = remoteById.get(op.id);
     if (!before || !latest) return false;
+    if (op.op === "remove-block") return canonicalJSON(before) !== canonicalJSON(latest);
     if (before.type !== latest.type) return true;
     return Object.entries(op.patch || {}).some(([key, value]) =>
       canonicalJSON(before[key]) !== canonicalJSON(latest[key]) &&

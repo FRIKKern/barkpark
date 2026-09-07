@@ -56,7 +56,7 @@ import {
   runToOps,
   reconcileServerEcho,
   docToBlocks,
-  hasOverlappingPatches,
+  hasOverlappingOps,
 } from "./run-convert.js";
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
@@ -1106,7 +1106,7 @@ class BpPaperCanvas extends HTMLElement {
   // until the hook acknowledges the exact sequence. A zero-length array is a no-op.
   _dispatchOps(ops, nextBlocks = null, diffBaseline = this._blocks) {
     if (!ops || !ops.length) return false;
-    const conflictBlocks = hasOverlappingPatches(ops, diffBaseline, this._pendingServerBlocks)
+    const conflictBlocks = hasOverlappingOps(ops, diffBaseline, this._pendingServerBlocks)
       ? deepCloneBlocks(this._pendingServerBlocks)
       : null;
     const seq = this._acknowledgedSaves ? ++this._opsSeq : undefined;

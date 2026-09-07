@@ -26,7 +26,7 @@ window.BP_PAPER_EDITOR_NO_INJECT = true;
 
 await import("./index.js");
 const { DEBOUNCE_MS } = await import("../contract.js");
-const { hasOverlappingPatches } = await import("./run-convert.js");
+const { hasOverlappingOps } = await import("./run-convert.js");
 
 const paragraph = (id, value) => ({
   id,
@@ -37,17 +37,26 @@ const paragraph = (id, value) => ({
 const original = paragraph("left-column", "Old left text");
 const localPatch = { op: "patch-block", id: original.id,
   patch: { content: paragraph(original.id, "Local text").content } };
-assert.equal(hasOverlappingPatches([localPatch], [original], null), false);
-assert.equal(hasOverlappingPatches([localPatch], [original], [paragraph(original.id, "Other text")]), true);
-assert.equal(hasOverlappingPatches([localPatch], [original], [paragraph(original.id, "Local text")]), false,
+assert.equal(hasOverlappingOps([localPatch], [original], null), false);
+assert.equal(hasOverlappingOps([localPatch], [original], [paragraph(original.id, "Other text")]), true);
+assert.equal(hasOverlappingOps([localPatch], [original], [paragraph(original.id, "Local text")]), false,
   "converging on the same value is not a conflict");
-assert.equal(hasOverlappingPatches([localPatch], [original], [{ ...original, audit: { author: "other" } }]), false,
+assert.equal(hasOverlappingOps([localPatch], [original], [{ ...original, audit: { author: "other" } }]), false,
   "independent metadata does not turn a text edit into a conflict");
-assert.equal(hasOverlappingPatches([localPatch], [original], [{ ...original,
+assert.equal(hasOverlappingOps([localPatch], [original], [{ ...original,
   content: [{ value: "Old left text", type: "text" }] }]), false,
   "object key order is immaterial");
-assert.equal(hasOverlappingPatches([{ ...localPatch, patch: { content: [] } }], [original],
+assert.equal(hasOverlappingOps([{ ...localPatch, patch: { content: [] } }], [original],
   [paragraph(original.id, "Other text")]), true, "clearing text also requires overlap review");
+const localRemoval = { op: "remove-block", id: original.id };
+assert.equal(hasOverlappingOps([localRemoval], [original], [original]), false,
+  "deleting unchanged content needs no review");
+assert.equal(hasOverlappingOps([localRemoval], [original], []), false,
+  "convergent deletions add no overlap");
+assert.equal(hasOverlappingOps([localRemoval], [original], [paragraph(original.id, "Other text")]), true,
+  "deletion must not discard an unseen remote text edit");
+assert.equal(hasOverlappingOps([localRemoval], [original], [{ ...original, audit: { author: "other" } }]), true,
+  "deletion must not discard unseen remote metadata either");
 const canvas = document.createElement("bp-paper-canvas");
 canvas.acknowledgedSaves = true;
 canvas.blocks = [original];

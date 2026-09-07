@@ -111,7 +111,7 @@ const hooks = window.BarkparkPaperEditorHooks;
 const paragraph = (id, value) => ({id, type: "paragraph", content: [{type: "text", value}]});
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
-async function mount({ revision } = {}) {
+async function mount({ revision, blocks = [paragraph("original", "Original")] } = {}) {
   const main = document.createElement("main");
   if (revision != null) {
     main.dataset.paperDocKey = "paper-overlap-probe";
@@ -127,7 +127,7 @@ async function mount({ revision } = {}) {
     <form phx-submit="paper-add-block"><select name="block-type"><option>paragraph</option></select></form>
     <div id="paper-canvas-probe-run-0" phx-hook="BarkparkPaperCanvas"><bp-paper-canvas></bp-paper-canvas></div>`;
   const wrapper = main.querySelector("[phx-hook]");
-  wrapper.dataset.canvasBlocks = JSON.stringify([paragraph("original", "Original")]);
+  wrapper.dataset.canvasBlocks = JSON.stringify(blocks);
   wrapper.dataset.canvasDataset = "production";
   document.body.appendChild(main);
   const canvas = wrapper.querySelector("bp-paper-canvas");
@@ -602,6 +602,38 @@ try {
   assert.equal(retry.toggles(), 1);
   assert.match(textOf(retry.canvas), /Second source change/);
   retry.close();
+  for (const choice of ["latest", "keep"]) {
+    const survivor = paragraph("survivor", "Retained paragraph");
+    const deleting = await mount({ revision: 1, blocks: [paragraph("original", "Original"), survivor] });
+    deleting.canvas._editor.commands.focus("start");
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const remote = [paragraph("original", "Other author changed this paragraph"), survivor];
+    deleting.echo(remote, { rev: 2 });
+    deleting.canvas._editor.view.dispatch(deleting.canvas._editor.state.tr.delete(
+      0, deleting.canvas._editor.state.doc.firstChild.nodeSize));
+    deleting.canvas.flushPendingChanges();
+    await tick();
+    assert.equal(deleting.requests.length, 0,
+      "deleting an unseen remotely changed paragraph requires review before sending");
+    assert.equal(textOf(deleting.canvas), "Retained paragraph", "the local deletion remains visible");
+    deleting.main.querySelector(`[data-action="${choice}"]`).click();
+    await tick();
+    if (choice === "keep") {
+      assert.equal(deleting.requests.length, 1);
+      const request = deleting.requests[0];
+      assert.deepEqual(request.payload.ops, [{ op: "remove-block", id: "original" }]);
+      assert.equal(request.payload.if_rev, 2);
+      deleting.echo([survivor], { rev: 3, request_id: request.payload.request_id });
+      request.resolve({ saved: true, rev: 3, request_id: request.payload.request_id });
+      await tick();
+    } else {
+      assert.equal(deleting.requests.length, 0, "Use latest never sends the discarded deletion");
+      assert.deepEqual(deleting.canvas._blocks, remote);
+    }
+    assert.equal(deleting.canvas.hasPendingChanges(), false);
+    assert.equal(beforeUnloadPrevented(), false);
+    deleting.close();
+  }
   for (const choice of ["latest", "latest-newer", "keep", "keep-ack-first", "keep-typing", "keep-typing-echo-first"]) {
     const continuedTyping = choice.startsWith("keep-typing");
     const overlap = await mount({ revision: 1 });
