@@ -2311,7 +2311,37 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # Landed between this PR's first sample and its rebase; the census clause
         # caught them, which is the whole point of the clause.
         --expect-unrendered "Crown reconcile"
-        --expect-unrendered "Crown reconcile harness")
+        --expect-unrendered "Crown reconcile harness"
+        # ── THE CENSUS PASS, 2026-09-07 (task-6c8a76a6f6196dfd) ─────────────
+        # 21 more exclusion rows: the FULL unaccounted set, derived over 199
+        # merged heads rather than the 4 that one stochastic sample surfaced.
+        # Same three causes as the block above — every one of these ten workflows
+        # is paths-filtered on pull_request, eight of the jobs are additionally
+        # event-fenced off pull_request, and several landed after the frozen pair.
+        # THE SIXTH PLACE, paid: a row added to .exclusions that this frozen
+        # window cannot reproduce must be acknowledged here, ONE NAME AT A TIME,
+        # or required-checks-generate.sh refuses every emit in this file.
+        --expect-unrendered "Build + test + gates"
+        --expect-unrendered "Changeset present (PRs only)"
+        --expect-unrendered "Lighthouse CI — web/"
+        --expect-unrendered "web/ typecheck + unit tests + lint"
+        --expect-unrendered "deploy receipts descend from a measurement (or refuse)"
+        --expect-unrendered "which-gates.sh gate-list deriver"
+        --expect-unrendered "Cron overdue probe"
+        --expect-unrendered "Cron overdue harness"
+        --expect-unrendered "offline-deploy-harnesses"
+        --expect-unrendered "cp-deploy.sh's pull form works on the box's git 2.34 (ubuntu:22.04 container)"
+        --expect-unrendered "Main gate watch"
+        --expect-unrendered "Main verdict presence"
+        --expect-unrendered "Main gate watch harness"
+        --expect-unrendered "Vendored renderer block coverage"
+        --expect-unrendered "Vendored SDK freshness"
+        --expect-unrendered "Starter-template contrast/focus literals"
+        --expect-unrendered "Flagship template bp-command parse"
+        --expect-unrendered "Stale verdict watch"
+        --expect-unrendered "Stale verdict harness"
+        --expect-unrendered "Break-glass harness"
+        --expect-unrendered "Generate reference")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
