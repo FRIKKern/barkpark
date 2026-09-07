@@ -77,7 +77,7 @@ try {
   document.body.appendChild(heading);
   try {
     assert.equal(heading.querySelector("[data-placeholder]")?.getAttribute("data-placeholder"), "Heading 1");
-    heading._editor.commands.setParagraph();
+    heading.block = { id: "empty-heading", type: "paragraph", content: [] };
     assert.equal(heading.querySelector("[data-placeholder]")?.getAttribute("data-placeholder"),
       "Start typing, or press / for blocks…", "a paragraph must not receive the heading formatter function");
   } finally {

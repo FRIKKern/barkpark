@@ -40,6 +40,28 @@ editor.block = structuredClone(projection);
 document.body.appendChild(editor);
 const control = (action) => editor.querySelector(`[data-table-action="${action}"]`);
 
+const cellPositions = [];
+editor._editor.state.doc.descendants((node, pos) => {
+  if (node.type.name === "bpTableCell") cellPositions.push(pos + 1);
+});
+const tab = (position, shiftKey = false) => {
+  editor._editor.commands.setTextSelection(position);
+  const event = new window.KeyboardEvent("keydown", {
+    key: "Tab", code: "Tab", shiftKey, bubbles: true, cancelable: true,
+  });
+  editor._editor.view.dom.dispatchEvent(event);
+  return event;
+};
+assert.equal(tab(cellPositions[0], true).defaultPrevented, false,
+  "Shift-Tab in the first cell allows native focus to leave the table");
+assert.equal(tab(cellPositions.at(-1)).defaultPrevented, false,
+  "Tab in the last cell allows native focus to reach table controls");
+assert.equal(tab(cellPositions[0]).defaultPrevented, true,
+  "Tab between cells remains an editor navigation command");
+assert.equal(editor._editor.state.selection.from, cellPositions[1]);
+assert.equal(tab(cellPositions[1], true).defaultPrevented, true);
+assert.equal(editor._editor.state.selection.from, cellPositions[0]);
+
 const table = editor.querySelector(".bp-table");
 const controls = editor.querySelector("details.bp-canvas-table__controls");
 assert.ok(controls, "Table structure uses an explicit native disclosure");
