@@ -105,7 +105,8 @@ defmodule BarkparkWeb.TasksController.BriefClaimLapsedTest do
     end
 
     test "a live claim with NO now-line still rides — the worker alone is the signal" do
-      card = Params.render_doc(doc("live-2", %{"worker" => "lead-ledger-c4", "epoch" => 4}), :brief)
+      card =
+        Params.render_doc(doc("live-2", %{"worker" => "lead-ledger-c4", "epoch" => 4}), :brief)
 
       assert card.claim["worker"] == "lead-ledger-c4"
       assert card.claim["epoch"] == 4
