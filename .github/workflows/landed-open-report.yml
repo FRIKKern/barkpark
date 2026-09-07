@@ -11,8 +11,8 @@ name: Landed-open report — rows whose work merged and never closed
 # THE VENUE, IN ONE SENTENCE (the criterion that asked for it): this is a report
 # about LEDGER state, not about a PR's diff, so it runs on a schedule and on
 # demand and NEVER on `pull_request` — a PR cannot make it truer or falser, and
-# a name that renders on a PR is a name that can be promoted into a merge gate
-# by accident.
+# a name that never renders on a PR can never be promoted into a merge gate by
+# accident, because branch protection has nothing to point at.
 #
 # NO NEW REQUIRED CONTEXT, BY CONSTRUCTION AND NOT BY PROMISE. main's required
 # set is exactly `Elixir gate`, `PR references an active task`, `Cloud gate`,
