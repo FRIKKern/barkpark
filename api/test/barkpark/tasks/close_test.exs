@@ -1062,7 +1062,19 @@ defmodule Barkpark.Tasks.CloseTest do
         %{"criterion" => "", "met" => false, "merge_gate" => true}
       ]
 
-      task = mk_task!(uniq("mg-textless"), scope, %{"acceptance_criteria" => textless})
+      # THE FRONT DOOR NOW REFUSES THIS SHAPE (cdd-criteria-shape-gate): a blank
+      # `criterion` is unstampable, so `Validation.criteria_violation/1` halts it
+      # at create. That refusal does NOT make this test moot — it makes it a
+      # LEGACY-DATA test, which is what it always really was. Rows carrying a
+      # textless criterion exist in the store today (measured 2026-09-07: 3 live
+      # task rows), written before the gate, and the auto-stamp still has to meet
+      # them. So the row is INSTALLED BEHIND the write gate, exactly as history
+      # installed it, and the downstream guard is measured on it unchanged.
+      # Building it through the front door instead would only prove the front
+      # door works, which is a different file's job.
+      task = mk_task!(uniq("mg-textless"), scope, %{"acceptance_criteria" => []})
+      :ok = foreign_patch_content!(task.id, %{"acceptance_criteria" => textless})
+      task = Repo.get!(Document, task.id)
 
       # A text-less gate is NOT auto-stampable, so the D289 gate still counts it
       # unmet — the lead's seal close names why it is closing over it.
