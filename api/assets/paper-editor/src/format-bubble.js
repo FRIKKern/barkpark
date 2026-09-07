@@ -157,7 +157,7 @@ export class FormatBubble {
         // added by tier3-keyboard-exit-and-focus-return before this fix
         // shipped. DECISION (this task's criterion 3): RETAIN that veto,
         // not simplify it away — every bubble button (bold/italic/code/
-        // link/remove) preventDefaults its own mousedown so a mouse click
+        // link/remove) has mousedown prevented by the toolbar so a mouse click
         // never focuses it, but Tab still can, and none of those buttons
         // stopPropagation their own Escape. This stopPropagation only
         // covers the link input; the veto is still load-bearing defense in
@@ -171,8 +171,7 @@ export class FormatBubble {
     remove.type = "button";
     remove.className = "bp-paper-format__link-remove";
     remove.textContent = "Remove";
-    remove.addEventListener("mousedown", (e) => {
-      e.preventDefault();
+    remove.addEventListener("click", () => {
       this._editor.chain().focus().extendMarkRange("link").unsetLink().run();
       this._closeLinkRow(false);
       this._syncPressed();
@@ -215,8 +214,10 @@ export class FormatBubble {
     btn.title = title;
     btn.setAttribute("aria-label", title);
     btn.setAttribute("aria-pressed", "false");
-    btn.addEventListener("mousedown", (e) => {
-      e.preventDefault();
+    // The toolbar's mousedown guard preserves the selection. Activate on click
+    // so Enter, Space, and assistive-technology activation work as well as a
+    // pointer, without toggling twice for the mouse's down + click sequence.
+    btn.addEventListener("click", () => {
       this._onBtn(name);
     });
     this._btns[name] = btn;
