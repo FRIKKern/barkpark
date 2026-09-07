@@ -85,8 +85,13 @@ defmodule BarkparkWeb.TasksDischargesTest do
     doc
   end
 
-  defp stored(task), do: Repo.get!(Document, task.id)
-  defp content_of(task), do: stored(task).content
+  # BOTH readers spell the store read themselves rather than chaining through a
+  # `stored/1` hop. The indirection cost nothing to a human and cost a real
+  # reader everything: `scripts/pds-elixir-receipt-census.exs` resolves a cited
+  # test's helpers exactly ONE hop deep, so a `Repo.` two hops down is invisible
+  # to it and an honest end_to_end citation reads as "never reads the stored row
+  # back". A postcondition read is worth spelling at the place that makes it.
+  defp content_of(task), do: Repo.get!(Document, task.id).content
 
   defp authed(conn) do
     conn
@@ -104,8 +109,7 @@ defmodule BarkparkWeb.TasksDischargesTest do
   end
 
   defp marks_at(task, index) do
-    task
-    |> content_of()
+    Repo.get!(Document, task.id).content
     |> Map.fetch!("acceptance_criteria")
     |> Enum.at(index)
     |> Map.get("discharge_marks", [])
@@ -351,6 +355,39 @@ defmodule BarkparkWeb.TasksDischargesTest do
 
       assert body["marked"] == 1
       assert length(marks_at(a, 1)) == 1
+    end
+
+    # THE TENANCY FENCE, MEASURED — not merely classified. A PR body is
+    # UNTRUSTED INPUT that names rows by id, so this is the one verb where a
+    # caller chooses which documents the server goes looking for. The path
+    # doc_id and every cited id resolve through the SAME scope_opts/1-scoped
+    # find_task_by_doc_id/2, so a row in another workspace must come back
+    # `not_found` and be left byte-identical. Without this test the
+    # :workspace_derived row in flat_alias_route_census_test is an assertion
+    # about the source, not a measurement of the wire.
+    test "a cited row in ANOTHER workspace is not_found, and is not touched",
+         %{conn: conn, scope: scope} do
+      primary = mk_task!(scope)
+
+      foreign_ws = TenancyFixtures.create_workspace!()
+      foreign_project = TenancyFixtures.create_project!(foreign_ws)
+      foreign = mk_task!(workspace_id: foreign_ws.id, project_id: foreign_project.id)
+
+      before_foreign = content_of(foreign)
+
+      assert {200, body} =
+               post_discharges(conn, primary, %{
+                 pr: "16658",
+                 commit: "deadbeefcafe",
+                 body: "Discharges: #{foreign.doc_id} c1\n"
+               })
+
+      assert statuses(body) == %{foreign.doc_id => "not_found"},
+             "a PR body must not reach across a workspace boundary: #{inspect(body["marks"])}"
+
+      assert body["marked"] == 0
+      assert content_of(foreign) == before_foreign
+      assert marks_at(foreign, 1) == []
     end
 
     test "a criterion index past the end of the row is reported, not written",
