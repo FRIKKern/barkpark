@@ -15339,10 +15339,40 @@
   // and human→human land on one output. Matched case-insensitively with the
   // apostrophe normalized (U+2019 → ') so a byte-level drift in the server copy
   // degrades only the re-mapping (their words show), never the classification.
+  // THE NO-LINKED-REPO REFINEMENT — the browser twin of the arm
+  // `FailureCopy.classify_atomic/1` checks ABOVE its own broad
+  // `"github push builds"` arm. The born-failed github-push family carries two
+  // conditions with OPPOSITE remedies: (a) LEGACY rows born failed before
+  // `github_build_available?/1` became a repo-present predicate — nothing
+  // retro-builds them, so "push again" is their cure; (b) a push TODAY on a
+  // site with NO linked repo — pushing again changes nothing, the cure is to
+  // LINK A REPO. Broad-token-only, the client could have the right words XOR
+  // the calm tone: the raw (b) reason carries `"github push builds"`, so
+  // failureCopy rewrote the server's correct sentence back to the LEGACY one,
+  // while the server-humanized (b) sentence carries NEITHER broad token, so
+  // failureTone fell through to `crashed` red.
+  //
+  // Two tokens, one per direction, so the pass is IDEMPOTENT the way the broad
+  // predicate is: `"require a linked github repo"` is present in the RAW reason
+  // the router mints (`@github_push_build_reason`) and `"no github repo linked"`
+  // in the HUMANIZED sentence the server sends — raw→human and human→human land
+  // on ONE output. Same normalization as below (lowercased, U+2019 → ') so a
+  // byte-level drift in the server copy degrades only the re-mapping, never the
+  // classification.
+  function isGithubPushNoRepo(reason) {
+    if (!reason || typeof reason !== "string") return false;
+    var lc = reason.toLowerCase().replace(/\u2019/g, "'");
+    return lc.indexOf("require a linked github repo") !== -1 ||
+      lc.indexOf("no github repo linked") !== -1;
+  }
+
   function isGithubPushBlocked(reason) {
     if (!reason || typeof reason !== "string") return false;
     var lc = reason.toLowerCase().replace(/\u2019/g, "'");
-    return lc.indexOf("github push builds") !== -1 ||
+    // The (b) family is blocked too — and its HUMANIZED sentence carries none
+    // of the three broad tokens, which is exactly how it used to tone crashed.
+    return isGithubPushNoRepo(reason) ||
+      lc.indexOf("github push builds") !== -1 ||
       lc.indexOf("can't be built yet") !== -1 ||
       lc.indexOf("cannot be built yet") !== -1;
   }
@@ -15384,6 +15414,11 @@
     // words, what it refused and why. Canned copy can only replace a true
     // statement with a false one.
     if (typedRefusal(reason)) return reason;
+    // CHECKED BEFORE THE BROAD ARM, or its token swallows this one: the raw
+    // no-linked-repo reason carries "github push builds" as well. Same ordering
+    // as the Elixir twin, and the sentence is the same sentence.
+    if (isGithubPushNoRepo(reason))
+      return "This site has no GitHub repo linked, so a push has nothing to build from — link a repo to this site, or deploy this commit with bp deploy.";
     if (isGithubPushBlocked(reason))
       return "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy.";
     if (reason.indexOf("no build source") !== -1)

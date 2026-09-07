@@ -5352,6 +5352,62 @@ test("failureTone: github-push family is 'blocked' (raw + humanized), everything
   assert.equal(hooks.failureTone(""), "crashed");
 });
 
+// ── task-8bdd2d50a204dab9: the NO-LINKED-REPO half of the same family ────────
+// PR #16766 split GITHUB_PUSH_UNBUILDABLE server-side into two conditions with
+// OPPOSITE remedies. BOTH DIRECTIONS are asserted here on one fixture pair,
+// because a one-sided test cannot see the collapse: on the broad token alone
+// the client had the right words XOR the calm tone, and either half read green
+// on its own.
+
+// The RAW reason the router mints today (`@github_push_build_reason`) and the
+// sentence `FailureCopy.humanize/1` maps it to. Their agreement with the Elixir
+// side is not asserted HERE — a second hand-written copy is a tautology. It is
+// locked by running both surfaces in
+// cloud/test/barkpark_cloud/failure_copy_client_mirror_test.exs.
+const NO_REPO_RAW =
+  "github push builds require a linked GitHub repo on this site — link a repo to this site, or deploy an artifact via bp deploy";
+const NO_REPO_HUMAN =
+  "This site has no GitHub repo linked, so a push has nothing to build from — link a repo to this site, or deploy this commit with bp deploy.";
+
+test("failureCopy: the no-linked-repo reason is NOT rewritten back to the legacy sentence", () => {
+  // The raw reason carries "github push builds" too, so the refinement arm must
+  // be checked ABOVE the broad one. Moving it below reds exactly here.
+  assert.equal(hooks.failureCopy(NO_REPO_RAW), NO_REPO_HUMAN);
+  assert.notEqual(hooks.failureCopy(NO_REPO_RAW), GH_HUMAN);
+});
+
+test("failureCopy: the humanized no-linked-repo copy maps to itself (idempotent)", () => {
+  // The server humanizes at the JSON boundary, so this is the string the client
+  // actually receives in production; the second pass must be the identity.
+  assert.equal(hooks.failureCopy(NO_REPO_HUMAN), NO_REPO_HUMAN);
+});
+
+test("failureTone: the no-linked-repo family is 'blocked' in BOTH directions", () => {
+  // The humanized sentence carries none of the three broad tokens — before the
+  // refinement it fell through to crashed red, which is the defect this row fixes.
+  assert.equal(hooks.failureTone(NO_REPO_RAW), "blocked");
+  assert.equal(hooks.failureTone(NO_REPO_HUMAN), "blocked");
+});
+
+test("failureCopy/failureTone: the LEGACY half is untouched by the refinement", () => {
+  // The other direction on the same family. Deleting the refinement arm must
+  // red the three tests above and leave this one green.
+  const legacyRaw =
+    "github push builds require the GitHub App integration (not yet available) — deploy an artifact via bp deploy";
+  assert.equal(hooks.failureCopy(legacyRaw), GH_HUMAN);
+  assert.equal(hooks.failureCopy(GH_HUMAN), GH_HUMAN);
+  assert.equal(hooks.failureTone(legacyRaw), "blocked");
+  assert.equal(hooks.failureTone(GH_HUMAN), "blocked");
+  // And the two families do not collapse into one sentence.
+  assert.notEqual(GH_HUMAN, NO_REPO_HUMAN);
+});
+
+test("failureTone: the refinement did not widen 'blocked' to unrelated reasons", () => {
+  assert.equal(hooks.failureTone("this site has no build source configured"), "crashed");
+  assert.equal(hooks.failureTone("a linked github repo would be nice"), "crashed");
+  assert.equal(hooks.failureTone("some brand new builder error"), "crashed");
+});
+
 // ── launchEntitled: the client mirror of the server's Billing.entitled?/1 ────
 // billing.ex entitled?/1 gates the launch form. The client must agree case-for-
 // case so a paying customer (incl. a past_due one in grace) is never shown
