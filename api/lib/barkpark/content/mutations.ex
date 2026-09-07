@@ -64,7 +64,15 @@ defmodule Barkpark.Content.Mutations do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{Broadcast, CallerContext, DraftId, Envelope, Warnings, Writer}
+  alias Barkpark.Content.{
+    BoundFieldSync,
+    Broadcast,
+    CallerContext,
+    DraftId,
+    Envelope,
+    Warnings,
+    Writer
+  }
 
   @doc """
   Apply a batch of mutations atomically. Returns `{:ok, {transaction_id, results}}`
@@ -442,6 +450,13 @@ defmodule Barkpark.Content.Mutations do
         |> apply_array_op(Map.get(patch, "append"), protected, :append)
         |> apply_array_op(Map.get(patch, "prepend"), protected, :prepend)
         |> Map.drop(unset_keys -- protected)
+        # Bound-block write-through (task-d8785cff163c8013). On a blocks-bearing
+        # document `Writer.maybe_project_document_content/2` re-derives every
+        # `content[fieldName]` from `content["blocks"]`, so a merge alone was
+        # overwritten back to the stale block value on the way to the row. Update
+        # the block projection reads FROM; projection stays its sole writer. A
+        # document with no block list is byte-identical. See BoundFieldSync.
+        |> BoundFieldSync.sync(existing.content || %{}, set_fields["title"])
 
       attrs = %{
         "doc_id" => id,
@@ -471,11 +486,14 @@ defmodule Barkpark.Content.Mutations do
          :ok <- ensure_rev(existing, if_rev(patch)) do
       warn_on_nested_content(fields)
 
+      prior = existing.content || %{}
+
       merged =
-        Map.merge(
-          existing.content || %{},
-          Map.drop(fields, ~w(title status _id _type _rev))
-        )
+        prior
+        |> Map.merge(Map.drop(fields, ~w(title status _id _type _rev)))
+        # Bound-block write-through — see the ops clause above and
+        # `Barkpark.Content.BoundFieldSync`.
+        |> BoundFieldSync.sync(prior, fields["title"])
 
       attrs = %{
         "doc_id" => id,
