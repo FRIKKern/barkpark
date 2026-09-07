@@ -19,9 +19,9 @@ Ingest is tier `ingest` — token read from `BARKPARK_INGEST_TOKEN` (bearer fall
 | Pending intents | `BARKPARK_INGEST_TOKEN=… bp bulldocs intents` | `GET /v1/plugins/bulldocs/intents` (ingest tier, not your admin token) |
 | Drain one intent | `bp bulldocs intent-processed <id>` | `POST /v1/plugins/bulldocs/intents/:id/processed` |
 
-Publish payload: `{"slug":…,"blocks":[…]}` (preferred) or `{"slug":…,"body_html":…}` (fallback cache path). Both forms require `slug`. Patch payload: `{"ops":[…]}`; `--if-rev` rejects unless the paper is still at that rev.
+Publish: `{"slug":…,"blocks":[…]}` (preferred) or `{"slug":…,"body_html":…}`. Patch: `{"ops":[…]}`; `--if-rev` rejects unless the paper is still at that rev.
 
-Published? If a session is open: `bp session log <session> --kind paper-published --ref <slug>` (never blocks).
+**`body_html` onto a paper that ALREADY has blocks: 422.** Blocks win; those bytes become a cache the next read rewrites. Send `blocks`, or `"clear_blocks":true` to make the row HTML-only.
 
 **Read-back:** no single-paper GET: `/v1/plugins/bulldocs/papers/:slug` 404s. Read via `bp doc get paper <slug>` or `bp paper view <slug>`.
 
