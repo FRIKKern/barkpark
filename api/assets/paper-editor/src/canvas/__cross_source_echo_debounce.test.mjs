@@ -336,12 +336,17 @@ try {
   const sibling = paragraph("sibling", "Sibling");
   for (const [kind, remote] of Object.entries({
     insertion: [lead, sibling, paragraph("new", "Remote addition")],
+    insertionBefore: [paragraph("new", "Remote addition"), lead, sibling],
+    insertionBetween: [lead, paragraph("new", "Remote addition"), sibling],
     removal: [lead],
+    removalBefore: [lead],
+    mixed: [paragraph("new", "Remote addition"), lead, paragraph("new-tail", "Another addition")],
     reorder: [sibling, lead],
   })) {
     const structure = document.createElement("bp-paper-canvas");
     structure.acknowledgedSaves = true;
-    structure.blocks = [lead, sibling];
+    const initial = kind === "removalBefore" || kind === "mixed" ? [sibling, lead] : [lead, sibling];
+    structure.blocks = initial;
     const emitted = [];
     structure.addEventListener("bp-canvas-ops", (event) => emitted.push(event.detail));
     document.body.appendChild(structure);
@@ -350,7 +355,8 @@ try {
       structure._editor.commands.focus("start");
       await new Promise((resolve) => setTimeout(resolve, 50));
       structure.applyServerBlocks(remote);
-      structure._editor.view.dispatch(structure._editor.state.tr.insertText("Local ", 1));
+      const leadPosition = initial[0].id === "lead" ? 1 : structure._editor.state.doc.firstChild.nodeSize + 1;
+      structure._editor.view.dispatch(structure._editor.state.tr.insertText("Local ", leadPosition));
       structure.flushPendingChanges();
       assert.deepEqual(emitted[0].ops, [{ op: "patch-block", id: "lead",
         patch: { content: [{ type: "text", value: "Local Lead" }] } }],
@@ -364,6 +370,24 @@ try {
       assert.deepEqual(structure._blocks, merged);
       assert.equal(structure.hasPendingChanges(), false);
       assert.equal(structure._pendingServerBlocks, null);
+      if (kind !== "reorder") {
+        assert.equal(structure._editor.commands.undo(), true, `${kind}: local undo remains available`);
+        const textById = {};
+        structure._editor.state.doc.forEach((node) => { textById[node.attrs.bpId] = node.textContent; });
+        assert.equal(textById.lead, "Lead", `${kind}: undo restores the locally edited text`);
+        assert.deepEqual(Object.keys(textById), remote.map((block) => block.id),
+          `${kind}: undo retains the remote block structure`);
+        structure.flushPendingChanges();
+        assert.deepEqual(emitted.at(-1).ops.map((op) => op.id), ["lead"]);
+        assert.equal(structure._editor.commands.redo(), true, `${kind}: local redo remains available`);
+        const afterRedo = {};
+        structure._editor.state.doc.forEach((node) => { afterRedo[node.attrs.bpId] = node.textContent; });
+        assert.equal(afterRedo.lead, "Local Lead");
+        assert.deepEqual(Object.keys(afterRedo), remote.map((block) => block.id));
+        for (const block of remote.filter((block) => block.id !== "lead")) {
+          assert.equal(afterRedo[block.id], block.content[0].value, `${kind}: remote sibling text survives redo`);
+        }
+      }
     } finally {
       structure.remove();
     }

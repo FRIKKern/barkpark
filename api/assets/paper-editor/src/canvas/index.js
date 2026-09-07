@@ -2393,22 +2393,43 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._editor) return;
     const { state } = this._editor;
     const next = state.schema.nodeFromJSON(runToTiptap(blocks));
-    const sameOrder = state.doc.childCount === next.childCount &&
-      Array.from({ length: next.childCount }, (_, index) => index).every((index) => {
-        const id = state.doc.child(index).attrs.bpId;
-        return id != null && id === next.child(index).attrs.bpId;
-      });
-    if (sameOrder) {
+    const previousIds = [];
+    const nextIds = [];
+    state.doc.forEach((node) => previousIds.push(node.attrs.bpId));
+    next.forEach((node) => nextIds.push(node.attrs.bpId));
+    const previousSet = new Set(previousIds);
+    const nextSet = new Set(nextIds);
+    const retainedIds = previousIds.filter((id) => nextSet.has(id));
+    const nextRetainedIds = nextIds.filter((id) => previousSet.has(id));
+    const stableOrder = previousIds.every((id) => id != null) && nextIds.every((id) => id != null) &&
+      previousSet.size === previousIds.length && nextSet.size === nextIds.length &&
+      retainedIds.every((id, index) => id === nextRetainedIds[index]);
+    if (stableOrder) {
       // Preserve mappings/history for untouched siblings. Replacing the entire
       // document maps their local undo steps through a deletion, even when the
-      // remote update changed only one other block.
+      // remote update changed, inserted, or removed only other blocks.
       const tr = state.tr.setMeta("addToHistory", false).setMeta("preventUpdate", true);
       let position = 0;
-      state.doc.forEach((node, _offset, index) => {
-        const replacement = next.child(index);
+      let previousIndex = 0;
+      next.forEach((replacement) => {
+        const id = replacement.attrs.bpId;
+        if (!previousSet.has(id)) {
+          tr.insert(position, replacement);
+          position += replacement.nodeSize;
+          return;
+        }
+        while (previousIds[previousIndex] !== id) {
+          const removed = state.doc.child(previousIndex++);
+          tr.delete(position, position + removed.nodeSize);
+        }
+        const node = state.doc.child(previousIndex++);
         if (!node.eq(replacement)) tr.replaceWith(position, position + node.nodeSize, replacement);
         position += replacement.nodeSize;
       });
+      while (previousIndex < state.doc.childCount) {
+        const removed = state.doc.child(previousIndex++);
+        tr.delete(position, position + removed.nodeSize);
+      }
       if (tr.docChanged) this._editor.view.dispatch(tr);
       return;
     }
