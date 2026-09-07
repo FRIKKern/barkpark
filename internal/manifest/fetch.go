@@ -140,9 +140,10 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 			// Downgrade guard: catches a genuinely OLDER 200 body than the one
 			// we already have cached — clock skew between replicas, or a
 			// replayed stale cached body reaching us through some intermediary.
-			// It does NOT catch a rolled-back deploy: api/lib/barkpark/plugins/
-			// capabilities.ex:230-231 stamps generated_at with DateTime.utc_now()
-			// at manifest-BUILD time, and capabilities_controller.ex:60 calls
+			// It does NOT catch a rolled-back deploy: the `generated_at =`
+			// binding in api/lib/barkpark/plugins/capabilities.ex stamps
+			// DateTime.utc_now() at manifest-BUILD time, and
+			// capabilities_controller.ex's manifest action calls
 			// Capabilities.manifest/2 per request with no memoization anywhere
 			// in that module — so a rolled-back server re-stamps a FRESH
 			// timestamp on every request and never looks "older" here. That
