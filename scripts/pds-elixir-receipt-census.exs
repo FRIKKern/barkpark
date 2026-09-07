@@ -2463,14 +2463,14 @@ defmodule PDS.Census do
     if show_sites?, do: report_each_site(classified)
     routed = report_routed_population(routed_derivation(parsed), classified, parsed, index)
     report_lens_can_miss(routed)
-    report_blind_spots(parsed)
+    blind = report_blind_spots(parsed)
     delegate = report_delegate_probe(index)
 
     {cpu1, _since_last} = :erlang.statistics(:runtime)
     ms = cpu1 - cpu0
 
     integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms,
-      parsed, falsifiers, routed, route_closure)
+      parsed, falsifiers, routed, route_closure, blind)
   end
 
   # THE GLOB IS RELATIVE TO CWD, DELIBERATELY. `--selftest` censuses a synthetic tree by
@@ -2590,8 +2590,131 @@ defmodule PDS.Census do
       parse_error?: ast == :parse_error,
       imports: imports,
       defs: attribute(defs, sites) |> elem(0),
-      sites: attribute(defs, sites) |> elem(1)
+      sites: attribute(defs, sites) |> elem(1),
+      # THE RECEIPT SHAPES, TAKEN OFF THE AST THIS FUNCTION ALREADY HAS (PDS wave 40
+      # blind-shape repair). Computed HERE and nowhere else so the blind-spot block and
+      # the arm that guards it read ONE parse: a second `Code.string_to_quoted` over 880
+      # files would be a second lens wearing one name, which is the defect this file
+      # exists to refuse. The substring lines are carried beside them so the FP/FN split
+      # is a set difference over the SAME corpus, never two runs compared by eye.
+      receipts: receipt_sites(ast, path, src)
     }
+  end
+
+  # ------------------------------------------------------- AST receipt shapes
+  #
+  # WHY THIS EXISTS AT ALL. The blind-spot block used to count `json(conn,` with
+  # `:binary.matches` over `f.src` — on a corpus it had ALREADY parsed to AST, under a
+  # banner declaring the lens "AST … no regex". CLOSED task pds-w34-status-only-lens
+  # (merged #8857) refuted that substring, and the block kept printing it for a month.
+  # Measured on this tree at the commit that added this function: 237 substring lines vs
+  # 503 AST json/2 sites — 28 of the 237 are FALSE POSITIVES (`error_json(conn, …` and
+  # friends: the substring matches the TAIL of a longer function name) and the substring
+  # MISSES 294 AST lines, almost all of them the dominant piped form `|> json(`.
+  #
+  # PIPES ARE NORMALISED FIRST, BOTTOM-UP. `conn |> put_status(:created) |> json(body)`
+  # is `json/1` in the raw AST and `json/2` after unpiping; counting the raw tree would
+  # reproduce the very blindness this replaces. `Macro.postwalk` rewrites the innermost
+  # pipe first, so a chain of any length collapses to nested calls exactly once — a
+  # `prewalk` that emitted a chain per `|>` node double-counts every chain longer than
+  # two (measured: 505 instead of 503 on this tree).
+  #
+  # THE 2xx SUBSET IS A CONTAINMENT, NOT A SECOND POPULATION. After unpiping, the conn
+  # a `json/2` answers on is its FIRST ARGUMENT, so "wears an explicit 2xx" is decidable
+  # as: does that subtree contain a `put_status/2` with a 2xx literal. That is why the
+  # block can print ONE population with a subset instead of three addends that were never
+  # additive (ZERO of the put_status sites are textually visible to `json(conn,`).
+  #
+  # BLIND SHAPE, PRINTED: a status bound to a VARIABLE (`|> put_status(status)`) is NOT
+  # 2xx here and cannot be — a build-free lens does not know the binding. The subset is
+  # therefore a FLOOR on the 2xx-wearing sites, never the count, and it says so where it
+  # is printed.
+  @receipt_2xx_atoms [
+    :ok,
+    :created,
+    :accepted,
+    :non_authoritative_information,
+    :no_content,
+    :reset_content,
+    :partial_content,
+    :multi_status,
+    :already_reported,
+    :im_used
+  ]
+
+  # THE VOCABULARY IS THE WHOLE 2xx RANGE, NOT FIVE HAND-WRITTEN SUBSTRINGS. The block
+  # this replaces asked for `put_status(:ok` / `:created` / `:accepted` / `:no_content` /
+  # `20`, so `:multi_status`, `:reset_content`, `:partial_content`,
+  # `:non_authoritative_information`, `:already_reported` and `:im_used` were silently
+  # uncounted. On this tree the two agree at 69 — which is exactly what made the omission
+  # invisible: agreement at a number is not coverage of a vocabulary.
+  defp status_2xx?({:__block__, _, [a]}) when is_atom(a), do: a in @receipt_2xx_atoms
+  defp status_2xx?({:__block__, _, [n]}) when is_integer(n), do: n >= 200 and n < 300
+  defp status_2xx?(_), do: false
+
+  # THE CONTAINMENT TEST. After unpiping, the conn a `json/2` answers on is its FIRST
+  # ARGUMENT, so the whole `conn |> put_status(:created) |> json(body)` chain is visible
+  # from the json node without leaving it. A `put_status` set on a DIFFERENT statement
+  # earlier in the same clause is NOT counted — this is a subset by construction, and a
+  # floor.
+  defp wears_2xx?(conn_expr) do
+    {_, wears?} =
+      Macro.prewalk(conn_expr, false, fn
+        {:put_status, _, [_conn, status]} = node, acc -> {node, acc or status_2xx?(status)}
+        node, acc -> {node, acc}
+      end)
+
+    wears?
+  end
+
+  defp unpipe(ast) do
+    Macro.postwalk(ast, fn
+      {:|>, _m, [left, {fun, fmeta, args}]} when is_atom(fun) and is_list(args) ->
+        {fun, fmeta, [left | args]}
+
+      other ->
+        other
+    end)
+  end
+
+  defp receipt_sites(:parse_error, _path, src),
+    do: Map.merge(%{json: [], put2xx: [], send2xx: []}, grep_receipts(src))
+
+  defp receipt_sites(ast, path, src) do
+    {_, acc} =
+      ast
+      |> unpipe()
+      |> Macro.prewalk(%{json: [], put2xx: [], send2xx: []}, fn
+        {:json, m, [conn, _payload]} = node, a ->
+          {node, %{a | json: [{path, m[:line], wears_2xx?(conn)} | a.json]}}
+
+        {:put_status, m, [_conn, status]} = node, a ->
+          {node, if(status_2xx?(status), do: %{a | put2xx: [{path, m[:line]} | a.put2xx]}, else: a)}
+
+        {:send_resp, m, [_conn, status, _body]} = node, a ->
+          {node, if(status_2xx?(status), do: %{a | send2xx: [{path, m[:line]} | a.send2xx]}, else: a)}
+
+        node, a ->
+          {node, a}
+      end)
+
+    Map.merge(acc, grep_receipts(src))
+  end
+
+  # THE REFUTED SUBSTRING, STILL TAKEN, ON PURPOSE. Retiring a number silently is the
+  # same overstatement this census hunts: 237 stays printed and RELABELLED with its own
+  # split. It is taken per LINE (not per occurrence) because the split against the AST is
+  # a set difference and a set needs a key; the raw occurrence total is carried beside it
+  # so the two can be seen to agree — or not.
+  defp grep_receipts(src) do
+    lines =
+      src
+      |> String.split("\n")
+      |> Enum.with_index(1)
+      |> Enum.filter(fn {l, _} -> String.contains?(l, "json(conn,") end)
+      |> Enum.map(fn {_, n} -> n end)
+
+    %{grep_lines: lines, grep_raw: count(src, "json(conn,")}
   end
 
   defp count(hay, needle), do: length(:binary.matches(hay, needle))
@@ -7848,33 +7971,159 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- blind spots
 
-  defp report_blind_spots(parsed) do
-    json = sum_occ(parsed, "json(conn,")
-    send_resp = sum_occ(parsed, "send_resp(conn, 2")
+  # THE AGGREGATE, DERIVED FROM parse_file/1's PER-FILE RECEIPTS AND FROM NOTHING ELSE.
+  # It is called TWICE on every run — once by the block that prints and once by the arm
+  # that guards the printed numbers — which is only sound because it re-reads the SAME
+  # parse rather than re-parsing. Its blind shape is stated where the arm prints: a
+  # mutation to receipt_sites/3 itself moves both sides together and this arm cannot see
+  # it; what it CAN see is a number invented, dropped or transcribed at the print site,
+  # which is the failure this block actually had.
+  defp blind_shape(parsed) do
+    json = Enum.flat_map(parsed, & &1.receipts.json)
+    put2xx = Enum.flat_map(parsed, & &1.receipts.put2xx)
+    send2xx = Enum.flat_map(parsed, & &1.receipts.send2xx)
+    grep = Enum.flat_map(parsed, fn f -> Enum.map(f.receipts.grep_lines, &{f.path, &1}) end)
 
-    put2xx =
-      Enum.sum(
-        for f <- parsed do
-          Enum.sum(
-            for pat <- ["put_status(:ok", "put_status(:created", "put_status(:accepted",
-                        "put_status(:no_content", "put_status(20"],
-                do: count(f.src, pat)
-          )
-        end
-      )
+    ast_lines = MapSet.new(json, fn {path, line, _} -> {path, line} end)
+    grep_lines = MapSet.new(grep)
+
+    %{
+      ast_json: length(json),
+      ast_json_2xx: Enum.count(json, fn {_, _, wears?} -> wears? end),
+      ast_put2xx: length(put2xx),
+      ast_send2xx: length(send2xx),
+      grep_raw: Enum.sum(Enum.map(parsed, & &1.receipts.grep_raw)),
+      grep_lines: MapSet.size(grep_lines),
+      ast_lines: MapSet.size(ast_lines),
+      # THE SPLIT, AS TWO SETS AND NOT AS A DIFFERENCE OF TWO TOTALS. `ast_json >=
+      # grep_raw` would have passed on this tree for a year while the substring was
+      # matching the tail of `error_json(conn,`; a set difference names WHICH lines.
+      false_positive: MapSet.difference(grep_lines, ast_lines),
+      false_negative: MapSet.difference(ast_lines, grep_lines)
+    }
+  end
+
+  # ------------------------------------------------- BLIND-SHAPE-SPLIT
+  #
+  # THE ARM THE BLOCK NEVER HAD. Until this commit the three blind-spot numbers were the
+  # only figures in the report with NO arm over them: forcing `json = 9999`, `put2xx =
+  # 8888`, `send_resp = 7777` on this file left rc=0, 20 arms PASS and `CENSUS OK`, with
+  # the whole diff those three lines plus the wall clock (measured, tree fd6e9ddff).
+  #
+  # IT ASSERTS A RELATION AND A SPLIT, NEVER A THRESHOLD. Both sides move together on any
+  # honest corpus change — a controller repaired, a route added — so it cannot red on
+  # churn. It reds on exactly two things: a printed number that is not the derived one,
+  # and a FP/FN split that does not reconcile the two lenses. `ast_json >= grep_raw`
+  # would have been the cheap version and it is WORTHLESS: it passed on this tree for a
+  # month while 28 of the substring's lines were matching the tail of `error_json(conn,`.
+  #
+  # BLIND SHAPE, PRINTED: both sides read parse_file/1's `receipts` field, so a mutation
+  # INSIDE receipt_sites/3 moves them together and this arm prints PASS through it. What
+  # it catches is the failure the block actually had — a number invented, transcribed or
+  # dropped between the derivation and the page.
+  defp blind_shape_checks(blind, parsed) do
+    d = blind_shape(parsed)
+    fp = MapSet.size(d.false_positive)
+    fn_ = MapSet.size(d.false_negative)
+
+    printed = [
+      {"json/2 sites", blind.json, d.ast_json},
+      {"2xx subset", blind.json_2xx, d.ast_json_2xx},
+      {"send_resp/3 2xx", blind.send_resp, d.ast_send2xx},
+      {"put_status/2 2xx", blind.put2xx, d.ast_put2xx},
+      {"legacy substring lines", blind.legacy, d.grep_lines},
+      {"legacy substring occurrences", blind.legacy_raw, d.grep_raw},
+      {"false positives", blind.fp, fp},
+      {"false negatives", blind.fn_, fn_}
+    ]
+
+    drifted = Enum.reject(printed, fn {_, got, want} -> got == want end)
+    subset? = d.ast_json_2xx <= d.ast_json
+    reconciles? = d.grep_lines - fp == d.ast_lines - fn_
+
+    why =
+      cond do
+        drifted != [] ->
+          "the blind-spot block PRINTED a number this run did not derive: " <>
+            Enum.map_join(drifted, " · ", fn {label, got, want} ->
+              "#{label} printed #{got}, derived #{want}"
+            end)
+
+        not subset? ->
+          "the 2xx figure #{d.ast_json_2xx} EXCEEDS the json/2 population #{d.ast_json} — it is being printed as an addend, not a subset"
+
+        not reconciles? ->
+          "the two lenses do not reconcile: legacy #{d.grep_lines} - FP #{fp} = #{d.grep_lines - fp}, but AST #{d.ast_lines} - FN #{fn_} = #{d.ast_lines - fn_}; the FP/FN split does not describe the gap it claims to"
+
+        true ->
+          "all 8 printed blind-spot figures re-derived from the same parse · #{d.ast_json} json/2 site(s), #{d.ast_json_2xx} wearing a 2xx literal (a SUBSET, #{d.ast_json_2xx} <= #{d.ast_json}), #{d.ast_send2xx} send_resp/3, #{d.ast_put2xx} put_status/2 · the refuted substring reconciles: #{d.grep_lines} - #{fp} FP == #{d.ast_lines} - #{fn_} FN == #{d.ast_lines - fn_} · BLIND SHAPE: both sides read ONE parse, so a mutation inside receipt_sites/3 moves them together and prints PASS through it"
+      end
+
+    [{"BLIND-SHAPE-SPLIT", drifted == [] and subset? and reconciles?, why}]
+  end
+
+  defp report_blind_spots(parsed) do
+    b = blind_shape(parsed)
+
+    # THE PRINTED BINDINGS, TAKEN OFF `b` ONE LINE EACH AND ON PURPOSE. Every number in
+    # this block passes through a named binding here and is returned to integrity/15 in
+    # the map below, so BLIND-SHAPE-SPLIT compares WHAT WAS PRINTED against a fresh
+    # derivation. Before this, forcing `json = 9999` printed 9999, left rc=0, 20 arms
+    # PASS and `CENSUS OK`: no arm read these numbers at all.
+    json = b.ast_json
+    json_2xx = b.ast_json_2xx
+    send_resp = b.ast_send2xx
+    put2xx = b.ast_put2xx
+    legacy = b.grep_lines
+    legacy_raw = b.grep_raw
+    fp = MapSet.size(b.false_positive)
+    fn_ = MapSet.size(b.false_negative)
 
     p("WHAT THIS LENS CANNOT SEE (a census that hides its blind spots is propaganda)")
     p(String.duplicate("-", 78))
-    p("  #{json}  json(conn, ...) responses — a 200 with no `ok` key claims success by STATUS alone")
-    p("  #{put2xx}  put_status(2xx) sites — same claim, wearing a status code")
-    p("  #{send_resp}  send_resp(conn, 2xx) sites — same again, with no body to inspect")
+    p("  #{json}  json/2 receipt sites (AST, pipes normalised) — a 200 with no `ok` key claims")
+    p("        success by STATUS alone. ONE population with SUBSETS, never three addends:")
+    p("        #{json_2xx} of these #{json} wear an explicit put_status(2xx) on the conn they answer on,")
+    p("        and #{send_resp} send_resp/3 site(s) carry a 2xx literal with no body to inspect.")
+    p("        #{put2xx} put_status/2 call(s) carry a 2xx literal anywhere in this corpus.")
+    p("  #{legacy}  json(conn, — THE REFUTED LEGACY SUBSTRING, KEPT AND RELABELLED, NOT DELETED.")
+    p("        (#{legacy_raw} raw occurrence(s) on #{legacy} line(s)#{if legacy_raw == legacy, do: " — one per line", else: " — some line carries more than one"}.)")
+    p("        pds-w34-status-only-lens (merged #8857) refuted it and this block printed it")
+    p("        anyway. Measured this run: #{fp} of its #{legacy} line(s) are FALSE POSITIVES (the")
+    p("        substring matches the TAIL of a longer name, e.g. `error_json(conn,`) and it")
+    p("        MISSES #{fn_} AST line(s) — almost all the piped form `|> json(`, which it cannot")
+    p("        see at all. #{legacy} - #{fp} = #{legacy - fp} = #{b.ast_lines} - #{fn_}. The two numbers are")
+    p("        INCOMPATIBLE LENSES over one population, never two populations to add.")
     p("  ALSO INVISIBLE: `mix ecto.migrations` reporting `up` (PDS-D311) — it reads a")
     p("  bookkeeping row, never the object the migration claims to have produced.")
-    p("  Re-derive these three without this script (plain substrings, no \\b needed):")
-    p("    git grep -c 'json(conn,' -- 'api/lib/**/*.ex' | awk -F: '{s+=$2} END{print s}'")
-    p("    git grep -c 'send_resp(conn, 2' -- 'api/lib/**/*.ex' | awk -F: '{s+=$2} END{print s}'")
+    p("  BLIND SHAPE, PRINTED: a status bound to a VARIABLE (`|> put_status(status)`) is")
+    p("  counted in NEITHER 2xx figure — a build-free lens does not know the binding — so")
+    p("  #{json_2xx} and #{put2xx} are FLOORS, not counts. The block this replaced asked for FIVE")
+    p("  hand-written substrings (:ok :created :accepted :no_content 20) and silently lost")
+    p("  :multi_status, :reset_content, :partial_content, :non_authoritative_information,")
+    p("  :already_reported and :im_used; the vocabulary is now the whole 2xx range, taken")
+    p("  off the AST. Agreement at a number is not coverage of a vocabulary.")
+    p("  Re-derive EVERY number above without this script:")
+    p("    #{legacy} legacy line(s) / #{legacy_raw} raw occurrence(s) · git grep -c 'json(conn,' -- 'api/lib/**/*.ex' | awk -F: '{s+=$2} END{print s}'")
+    p("    #{json} / #{json_2xx} / #{send_resp} / #{put2xx} / #{fp} / #{fn_} are AST call-node counts: NO substring")
+    p("    re-derives them. `git grep -c '|> json(' -- 'api/lib/**/*.ex'` and `git grep -c")
+    p("    'json(' -- 'api/lib/**/*.ex'` BRACKET #{json} (piped-only floor and all-arities ceiling);")
+    p("    `git grep -c 'send_resp(' -- 'api/lib/**/*.ex'` brackets #{send_resp} from above. To re-derive")
+    p("    EXACTLY, re-run this script — and BLIND-SHAPE-SPLIT below is what makes that")
+    p("    honest: it re-derives all eight from the same parse and reds on any drift.")
     p("")
     report_roster(parsed)
+
+    %{
+      json: json,
+      json_2xx: json_2xx,
+      send_resp: send_resp,
+      put2xx: put2xx,
+      legacy: legacy,
+      legacy_raw: legacy_raw,
+      fp: fp,
+      fn_: fn_
+    }
   end
 
   # THE ROSTER, PRINTED WITH ITS ANCHORS RESOLVED LIVE. The line beside each row is
@@ -8059,8 +8308,6 @@ defmodule PDS.Census do
 
     {"ROSTER-VERDICT-FRESH", not vacuous? and stale == [] and unresolved == [], why}
   end
-
-  defp sum_occ(parsed, needle), do: Enum.sum(Enum.map(parsed, &count(&1.src, needle)))
 
   # ---------------------------------------------------------------- delegate probe
 
@@ -8756,6 +9003,27 @@ defmodule PDS.Census do
       ],
       refute: ["PASS  ROUTED-POPULATION-COMPLETE"],
       proves: "a route module bound to a LOCAL VARIABLE is resolved to its fully-qualified alias before route_specs/1 reads the tuple: retire the substitution and the same route arrives as `?.index` while the committed row naming Barkpark.Filler.PluginOpsLive.index is orphaned — the two halves name the resolved module and the unresolved one in the SAME run"
+    },
+    # THE MUTANT THE BLIND-SPOT BLOCK NEVER HAD (PDS wave 40). Measured at tree fd6e9ddff,
+    # BEFORE this repair: the identical perturbation — force the printed json figure to a
+    # nonsense value — left rc=0, 20 arms PASS and `CENSUS OK`, and the entire diff of the
+    # report was that one number plus the wall clock. The mutation is at the PRINT SITE,
+    # not inside receipt_sites/3, because that is the failure the block actually had: a
+    # figure that reaches the page without passing an arm.
+    #
+    # IT REDS OVER THE SYNTHETIC CORPUS, WHERE THE DERIVED FIGURE IS 0. That is not a
+    # vacuous floor dressed up: the arm compares PRINTED against DERIVED, so 9999 vs 0
+    # names both halves in its FAIL line — and the case asserts the printed number by
+    # value, so a mutant whose anchor silently stopped applying could not pass.
+    %{
+      name: "BLIND-SHAPE-PRINTED-IS-DERIVED",
+      corpus: :full,
+      argv: [],
+      mut: {"    json = b." <> "ast_json\n", "    json = 9999\n"},
+      exit: 1,
+      expect: ["FAIL  BLIND-SHAPE-SPLIT", "json/2 sites printed 9999", "did not derive"],
+      refute: ["PASS  BLIND-SHAPE-SPLIT"],
+      proves: "a blind-spot figure invented at the print site reds BY NAME — before this arm the same mutation printed 9999 and exited 0 with CENSUS OK"
     },
     # ROUTED-DISPOSITION-UNSHADOWED, ONE CASE PER BRANCH OF ITS PREDICATE (PDS-D556).
     #
@@ -9766,7 +10034,7 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- integrity
 
-  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers, routed, route_closure) do
+  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers, routed, route_closure, blind) do
     classified_n = Enum.count(classified, fn s -> elem(s.shape, 0) != "UNCLASSIFIED" end)
     unclassified_n = Enum.count(classified, fn s -> elem(s.shape, 0) == "UNCLASSIFIED" end)
 
@@ -9838,6 +10106,7 @@ defmodule PDS.Census do
        end}
     ] ++
         routed_checks(routed) ++
+        blind_shape_checks(blind, parsed) ++
         register_checks(classified, parsed) ++
         roster_freshness_checks(classified, parsed) ++
         falsifier_check(falsifiers) ++ baseline_checks(drift_rows, classified) ++
