@@ -64,6 +64,7 @@ defmodule Barkpark.Content.Mutations do
 
   alias Barkpark.Repo
   alias Barkpark.Content
+
   alias Barkpark.Content.{
     BoundFieldSync,
     Broadcast,
