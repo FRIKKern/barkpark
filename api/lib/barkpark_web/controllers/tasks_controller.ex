@@ -1793,7 +1793,7 @@ defmodule BarkparkWeb.TasksController do
   # SSR build the document is gone, which is a permanent verdict on a transient
   # fault and is exactly the mis-caption this row exists to remove. The rescue
   # is on `DBConnection.ConnectionError` alone; it returns a 503 and never a
-  # 404, never `nodes: []`, never `ok: true`.
+  # 404, never `nodes: []`, never a success envelope.
   #
   # BLAST RADIUS, STATED. This covers `GET /v1/graph/:id` and NOTHING ELSE.
   # `graph_corpus/2`, `graph_orphans/2`, `graph_dangling/2` and `graph_tasks/2`
