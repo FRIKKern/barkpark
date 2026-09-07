@@ -1611,6 +1611,16 @@
    summary pair preserves keyboard and disclosure semantics without JS. */
 .bp-paper-edit-block:has(.bp-paper-contextual-editor) { margin-top: 0; }
 .bp-paper-contextual-editor { position: relative; }
+/* The reader paint is nested inside the existing Paper surface. Do not reset
+   its authored evidence band to the default tokens at that extra boundary. */
+.bp-paper-surface .bp-canvas-stats-inline > .bp-paper-surface {
+  --bp-evidence-band: inherit;
+  --bp-evidence-band-max: inherit;
+  --bp-evidence-fill: inherit;
+  --bp-evidence-gutter: inherit;
+  --bp-evidence-width: inherit;
+  --bp-evidence-pull: inherit;
+}
 /* Figure is a reader-wide evidence surface. Expand the editor block itself to
    that same band so its hover outline and floating toolbar surround the child
    and caption instead of staying behind in the narrow prose column. The inner

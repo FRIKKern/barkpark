@@ -97,7 +97,18 @@ export function wireStatsInline(body, { getBlock, isEditable, commit, undo, redo
   }
   function onKey(event) {
     if (!fields.has(event.target) || event.isComposing) return;
-    if (event.key === "Enter") { event.preventDefault(); event.target.blur(); }
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "a") {
+      // Chromium otherwise selects the outer contenteditable canvas, crossing
+      // this native island and potentially replacing unrelated Paper blocks.
+      event.preventDefault();
+      event.stopPropagation();
+      const range = document.createRange();
+      range.selectNodeContents(event.target);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    else if (event.key === "Enter") { event.preventDefault(); event.target.blur(); }
     else if ((event.metaKey || event.ctrlKey) && !event.altKey && ["z", "y"].includes(event.key.toLowerCase())) {
       event.preventDefault();
       (event.shiftKey || event.key.toLowerCase() === "y" ? redo : undo)();

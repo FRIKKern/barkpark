@@ -1,5 +1,15 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+
+for (const path of ["../styles.css", "../../../../priv/static/assets/bp-paper-editor-shell.css"]) {
+  const css = readFileSync(new URL(path, import.meta.url), "utf8");
+  const rule = css.match(/\.bp-paper-surface \.bp-canvas-stats-inline > \.bp-paper-surface\s*\{([^}]+)\}/)?.[1];
+  assert.ok(rule, "nested Stats paint retains the enclosing reader evidence band");
+  for (const token of ["band", "band-max", "fill", "gutter", "width", "pull"]) {
+    assert.ok(rule.includes(`--bp-evidence-${token}: inherit;`), `${path}: inherit ${token}`);
+  }
+}
 
 const { window } = new JSDOM("<!doctype html><body></body>", { pretendToBeVisual: true, url: "http://localhost/" });
 for (const name of ["customElements", "CustomEvent", "document", "DOMParser", "Element", "Event", "EventTarget", "HTMLElement", "KeyboardEvent", "MutationObserver", "Node", "NodeFilter", "Selection", "Text"]) globalThis[name] = window[name];
@@ -45,6 +55,7 @@ try {
       const label = host.querySelector('[aria-label="Stat label"]');
       const value = host.querySelector('[aria-label="Stat value"]');
       assert.ok(label, `${type}: visible label is an inline textbox`);
+      assert.ok(label.closest(".bp-canvas-stats-inline"), "Stats has its scoped reader-token boundary");
       assert.ok(value, `${type}: visible value is an inline textbox`);
       assert.equal(label.contentEditable, "plaintext-only");
       assert.equal(value.parentElement.querySelector('.bp-stat__denom').textContent, "/20");
@@ -52,6 +63,9 @@ try {
       value.focus(); value.blur(); host.flushPendingChanges();
       assert.deepEqual(ops, [], "focus/blur retains numeric carriers without an authored change");
       label.focus(); input(label, "Edited directly");
+      key(label, "a", { metaKey: true });
+      assert.equal(window.getSelection().toString(), "Edited directly", "select-all stays inside the field");
+      assert.equal(document.activeElement, label, "select-all does not focus the outer canvas");
       paint(host, html);
       assert.equal(document.activeElement, label, "server repaint preserves the native editing host");
       assert.equal(label.textContent, "Edited directly", "stale paint cannot erase pending text");
