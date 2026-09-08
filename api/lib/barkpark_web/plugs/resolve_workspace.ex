@@ -7,10 +7,14 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
 
     1. read `:workspace_slug` from `conn.path_params`,
     2. `Barkpark.Tenancy.get_workspace_by_slug/1` — 404 (envelope) if unknown,
-    3. `Barkpark.Tenancy.Auth.authorize(api_token, workspace.id, :read)` —
-       403 (envelope) on refusal — `{:error, :forbidden_membership}`, whose
-       message/hint name MEMBERSHIP rather than a permission tier (the
-       `forbidden` code and the 403 status are unchanged).
+    3. `Barkpark.Tenancy.Auth.authorize_with_reason(api_token, workspace.id,
+       :read)` — 403 (envelope) on refusal, with the REFUSING ARM named:
+       `{:error, :forbidden_membership}` (reason "not_a_member") when the
+       principal holds no seat here, `{:error, :forbidden_capability}` (reason
+       "missing_capability") when it IS a member whose permissions/role do not
+       satisfy `:read`. The `forbidden` code and the 403 status are unchanged
+       on both, and so is WHO is admitted — `authorize/3` is this same function
+       collapsed, so the admitted set is identical by construction.
 
   Step 3 is the cross-dataset read-leak fix: even an authenticated token only
   reaches a workspace's content when it is a member with at least `:read`.
@@ -86,9 +90,16 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
     # MEMBERSHIP first, unchanged — a member's decision (token OR user role) is
     # byte-identical to before, and NEVER carries the grant flag. Only a
     # non-member user is offered the grant path below (grants only ADD access).
-    member? =
-      TenancyAuth.authorize(token, workspace.id, :read) == :ok or
-        (not is_nil(user) and TenancyAuth.authorize(user, workspace.id, :read) == :ok)
+    #
+    # `authorize_with_reason/3`, NOT `authorize/3`. This is an ACCURACY change
+    # and nothing else: `authorize/3` IS `authorize_with_reason/3` collapsed
+    # (`case authorize_with_reason(...) do :ok -> :ok; {:error, _} ->
+    # {:error, :forbidden} end`), so `decision == :ok` here is true for EXACTLY
+    # the callers `authorize(...) == :ok` admitted before — the admitted set is
+    # byte-identical by construction, not by inspection. What changes is only
+    # what a REFUSAL is allowed to say about itself.
+    decision = read_decision(token, user, workspace.id)
+    member? = decision == :ok
 
     # Grant path (airdrop-grants ag-enforcement, Layer 1). ONLY a non-member USER
     # with an ACTIVE grant that authorizes :read here is admitted — as a
@@ -132,14 +143,57 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
         )
         |> halt()
 
-      # Not a member (and no share / demo / grant admitted it). The reason is
-      # MEMBERSHIP, never a permission tier — `:forbidden_membership` says so in
-      # the envelope. Same 403 status and same "forbidden" code as before; only
-      # the message/hint/reason changed (gyldendal #15).
+      # Refused (and no share / demo / grant admitted it). WHICH ARM refused is
+      # now carried through: a caller that IS a member but whose permissions /
+      # role do not satisfy `:read` gets `:forbidden_capability`
+      # (reason "missing_capability"), and everything else keeps the
+      # `:forbidden_membership` envelope it had (reason "not_a_member"). The two
+      # arms have OPPOSITE remedies — grant a seat vs. re-mint the credential —
+      # so rendering the second as the first pointed an operator at widening
+      # workspace membership, the more dangerous of the two fixes. Same 403 and
+      # same "forbidden" code on both arms; only `reason`/message/hint differ.
       true ->
-        halt_envelope(conn, {:error, :forbidden_membership})
+        halt_envelope(conn, {:error, refusal_envelope(decision)})
     end
   end
+
+  # The read decision for this conn, reason-carrying. Preserves the ORDER and
+  # the SHORT-CIRCUIT of the boolean it replaced: the token arm is asked first,
+  # the user arm only when the token arm refused and a user is present, so no
+  # request issues a DB read it did not issue before.
+  #
+  # When BOTH arms refuse, `:missing_capability` wins: it is the strictly more
+  # specific fact ("this principal is inside the workspace"), and a caller
+  # holding a seat on either principal is not a stranger to the workspace.
+  defp read_decision(token, user, workspace_id) do
+    case TenancyAuth.authorize_with_reason(token, workspace_id, :read) do
+      :ok ->
+        :ok
+
+      {:error, token_reason} when not is_nil(user) ->
+        case TenancyAuth.authorize_with_reason(user, workspace_id, :read) do
+          :ok -> :ok
+          {:error, user_reason} -> {:error, more_specific(token_reason, user_reason)}
+        end
+
+      {:error, token_reason} ->
+        {:error, token_reason}
+    end
+  end
+
+  defp more_specific(:missing_capability, _), do: :missing_capability
+  defp more_specific(_, :missing_capability), do: :missing_capability
+  defp more_specific(:not_a_member, _), do: :not_a_member
+  defp more_specific(_, :not_a_member), do: :not_a_member
+  defp more_specific(reason, _), do: reason
+
+  # ONLY the insider arm gets the new envelope. `:not_a_member` keeps the
+  # envelope it always had, and so does the bare `:forbidden` that an ANONYMOUS
+  # conn produces (no token and no user reach `authorize_with_reason/3`'s
+  # catch-all, which is `{:error, :forbidden}` — NOT `:not_a_member`), so the
+  # anonymous 403 body is unchanged.
+  defp refusal_envelope({:error, :missing_capability}), do: :forbidden_capability
+  defp refusal_envelope(_), do: :forbidden_membership
 
   # Build a grant-bearing CallerContext for `user` and admit it ONLY if some
   # ACTIVE grant admits the MOUNTED DESK scope for :read. Returns the ctx (to
