@@ -179,32 +179,40 @@ defmodule BarkparkWeb.ChatTokenControllerTest do
       # `RequireToken` + `RequireWorkspaceRole`. BOTH refusals are 403 with code
       # "forbidden", so status alone cannot say which fired, and `reason` is the
       # only discriminator: `ResolveWorkspace` halts with
-      # `:forbidden_membership` (reason "not_a_member"), `RequireWorkspaceRole`
-      # halts with plain `:forbidden` (NO reason at all).
+      # `:forbidden_membership` (reason "not_a_member") for an outsider and
+      # `:forbidden_capability` (reason "missing_capability") for an
+      # under-scoped insider, while `RequireWorkspaceRole` halts with plain
+      # `:forbidden` (NO reason at all).
       #
-      # OBSERVED: `ResolveWorkspace` answers, reason "not_a_member" — even
-      # though the minted token IS a member. `Auth.create_token/5` inserts a
+      # OBSERVED: `ResolveWorkspace` answers, reason "missing_capability" — and
+      # that reason is the accurate one, which is the whole point of this
+      # assertion. The minted token IS a member: `Auth.create_token/5` inserts a
       # `workspace_memberships` row for it (role `member`, because
       # `role_for_permissions/1` grants `admin` only on an `admin` permission),
-      # and the assertion below proves that row exists. What actually fails is
-      # the CAPABILITY half: the permission set is `["chat"]`, which does not
-      # satisfy `:read`, and `ResolveWorkspace` calls `TenancyAuth.authorize/3`
-      # — the arm-collapsing variant — so `{:error, :missing_capability}`
-      # becomes `{:error, :forbidden}` and is rendered as a MEMBERSHIP refusal.
-      # `TenancyAuth.authorize_with_reason/3` exists to name the arm and is not
-      # consulted here. Pinning the reason is therefore a change-detector on a
-      # KNOWN-INACCURATE envelope: if that call site is corrected to
-      # `authorize_with_reason/3`, this line reds and the right edit is to
-      # expect the capability reason, not to loosen the assertion again.
+      # and the assertion below proves that row exists. What fails is the
+      # CAPABILITY half — the permission set is `["chat"]`, which does not
+      # satisfy `:read`.
+      #
+      # This line used to read "not_a_member" and was a change-detector on a
+      # KNOWN-INACCURATE envelope: `ResolveWorkspace` called
+      # `TenancyAuth.authorize/3` (which is `authorize_with_reason/3` collapsed
+      # to `{:error, :forbidden}`), so the insider arm was rendered as a
+      # membership refusal. task-d63f91a7f817b4a3 routed the plug through
+      # `authorize_with_reason/3` and this line was corrected, NOT loosened:
+      # re-widening it to a status-or-code disjunction is refused (that is the
+      # defect task-140f050736f4aa08 exists to remove), because the exact
+      # `reason` string is the ONLY thing that discriminates this gate from
+      # `RequireWorkspaceRole`.
       assert resp.status == 403
       body = Jason.decode!(resp.resp_body)
       assert body["error"]["code"] == "forbidden"
-      assert body["error"]["reason"] == "not_a_member"
+      assert body["error"]["reason"] == "missing_capability"
 
-      # The membership row really is there — without this the line above reads
-      # as "the caller is a stranger", which is the opposite of the truth and is
-      # what makes the escalation refusal interesting: the minted token is
-      # INSIDE the workspace and still cannot mint.
+      # The membership row really is there — it is what makes the reason above
+      # CORRECT rather than merely different, and what makes the escalation
+      # refusal interesting: the minted token is INSIDE the workspace and still
+      # cannot mint. Without this pair of assertions in one test, nothing here
+      # would notice the envelope going back to calling an insider a stranger.
       {:ok, minted_tok} = Auth.verify_token(minted)
       assert TenancyAuth.membership_role(minted_tok, ws_a.id) == "member"
       assert minted_tok.permissions == ["chat"]

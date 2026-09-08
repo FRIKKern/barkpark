@@ -59,6 +59,13 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"replay", {:error, :replay}, "unauthorized", 401, [:reason]},
       {"forbidden", {:error, :forbidden}, "forbidden", 403, []},
       {"forbidden_membership", {:error, :forbidden_membership}, "forbidden", 403, [:reason]},
+      # The membership arm SIBLING (task-d63f91a7f817b4a3): same `forbidden`
+      # code and same 403 - deliberately, so no client keying on either moves -
+      # with `reason` the only discriminator between "you hold no seat here" and
+      # "you hold a seat but not this capability". The two have OPPOSITE
+      # remedies, so if this row ever collapses into the one above, the envelope
+      # has gone back to telling an insider it is a stranger.
+      {"forbidden_capability", {:error, :forbidden_capability}, "forbidden", 403, [:reason]},
       {"workspace_suspended", {:error, :workspace_suspended}, "workspace_suspended", 403, []},
       {"workspace_suspended/reason", {:error, {:workspace_suspended, "abuse"}},
        "workspace_suspended", 403, [:details]},

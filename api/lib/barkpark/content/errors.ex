@@ -394,6 +394,28 @@ defmodule Barkpark.Content.Errors do
         "This is a MEMBERSHIP check, not a permission tier: sign in as — or send a token belonging to — a member of this workspace. A browser session authenticates on any route that reads the session cookie, including the scoped media writes — no data-token is required for those."
     }
 
+  # The OTHER arm of the same two-arm predicate, split out by
+  # task-d63f91a7f817b4a3. `ResolveWorkspace` used to render EVERY refusal as
+  # `:forbidden_membership`, so a caller that holds a seat in the workspace but
+  # whose token permissions / membership role do not satisfy `:read` was told
+  # it was not a member. That is false in the direction that misleads hardest —
+  # the two arms have OPPOSITE remedies (invite the principal vs. re-mint the
+  # credential with the right permissions), and "not a member" points the
+  # operator at WIDENING workspace membership, the more dangerous fix.
+  #
+  # `code` stays "forbidden" and the status stays 403 — byte-identical to the
+  # membership arm for any client keying on those. `reason` is the only
+  # discriminator, exactly as `:forbidden_membership` intends it to be.
+  defp build({:error, :forbidden_capability}),
+    do: %{
+      code: "forbidden",
+      message: "caller is a member of this workspace but lacks the required capability",
+      status: 403,
+      reason: "missing_capability",
+      hint:
+        "The principal DOES hold a seat in this workspace — do NOT add a membership it already has. What is missing is the capability: an API token needs `read` (or `admin`) in its permissions, and a user account needs a membership role that grants read. Re-mint the token with the right permissions, or raise the role."
+    }
+
   # Per-workspace quota gate (perfect-plan-build W1, D11). Suspended = a hard
   # 403 write-block; over-quota = 402 Payment Required (the honest "you hit your
   # plan's write cap" semantic, distinct from a 429 rate limit that clears on
