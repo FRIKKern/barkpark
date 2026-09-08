@@ -1980,7 +1980,6 @@ defmodule BarkparkWeb.TasksController.Params do
   # sync by the conn test that asserts the claim receipt's `seconds` equals the
   # configured value — a drift between the number the sweeper enforces and the
   # number the receipt promises is the whole defect this closes.
-  @default_lease_ttl_seconds 2700
 
   # ─── The lease a claim/pulse just granted (claim-lease, wave 27) ─────────
   #
@@ -2005,7 +2004,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # RENEWAL: claim (renewal path), re-claim and pulse all refresh `ts_iso`, so
   # the same function describes the lease after a heartbeat with no special case.
   def claim_lease(%Document{} = doc) do
-    ttl = Application.get_env(:barkpark, :task_lease_ttl_seconds, @default_lease_ttl_seconds)
+    ttl = QueueGate.lease_ttl_seconds()
 
     with ts when is_binary(ts) <- get_in(doc.content || %{}, ["claim", "ts_iso"]),
          {:ok, granted, _} <- DateTime.from_iso8601(ts) do
