@@ -748,8 +748,8 @@
     .bp-paper-editor-body li { margin: var(--bp-li-gap) 0 0; }
     .bp-paper-editor-body ul,
     .bp-paper-editor-body ol { padding-left: var(--bp-list-indent); }
-    .bp-paper-editor-body ul li { list-style: disc; }
-    .bp-paper-editor-body ol li { list-style: decimal; }
+    .bp-paper-editor-body ul > li { list-style: disc; }
+    .bp-paper-editor-body ol > li { list-style: decimal; }
     /* Article-chrome ROLE prose (eyebrow/byline/ingress/pullquote) — the canvas
        node-view emits `<p class="bp-role-*">` matching the reader, so these MIRROR
        the single-source `.bp-paper-surface .bp-role-*` rules in paper-surface.css

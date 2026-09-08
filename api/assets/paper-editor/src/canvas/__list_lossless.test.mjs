@@ -42,10 +42,12 @@ try {
   editor.commands.setTextSelection(betaPosition);
   const original = editor.getJSON();
   editor.commands.sinkListItem("listItem");
-  assert.deepEqual(editor.getJSON(), original, "unsupported indentation leaves both items intact");
-  assert.match(canvas.querySelector('[role="status"]').textContent, /Nested lists/);
+  assert.equal(editor.state.doc.firstChild.childCount, 1, "indentation nests the second item");
+  assert.equal(editor.state.doc.textContent, "AlphaBeta", "indentation preserves all words");
+  editor.commands.undo();
+  assert.deepEqual(editor.getJSON(), original, "indentation undo restores exact source state");
   assert.equal(canvas.flushPendingChanges(), false);
-  assert.deepEqual(batches, [], "rejected indentation cannot emit a destructive save");
+  assert.deepEqual(batches, [], "an undone indentation cannot emit a save");
 
   editor.commands.setHardBreak();
   assert.deepEqual(editor.getJSON(), original, "Shift-Enter's command cannot create a disappearing break");
@@ -59,7 +61,9 @@ try {
       ? "<ul><li>Parent<ul><li>Child</li></ul></li></ul>" : "Parent\nChild",
   } });
   editor.view.dom.dispatchEvent(paste);
-  assert.deepEqual(editor.getJSON(), original, "nested HTML paste is rejected as a whole, never partially saved");
+  assert.ok(editor.state.doc.textContent.includes("ParentChild"), "nested HTML paste retains parent and child");
+  editor.commands.undo();
+  assert.deepEqual(editor.getJSON(), original, "nested paste undo restores exact source");
   assert.equal(canvas.flushPendingChanges(), false);
 
   editor.commands.setTextSelection(betaPosition + 2);

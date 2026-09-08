@@ -362,27 +362,7 @@ export function blockToTiptap(block) {
       return { type: "doc", content: [node] };
     }
     case "list": {
-      const ordered = block.ordered === true;
-      // Coerce each item to a canonical inline ARRAY first (legacy flat-string
-      // items → a single text inline node) so neither editor throws on a string
-      // item. A canonical inline-array item is passed through UNCHANGED.
-      const items = (block.items || []).map((itemInline) => ({
-        type: "listItem",
-        attrs: { bpListSource: { item: deepCloneJson(itemInline) } },
-        content: [
-          {
-            type: "paragraph",
-            content: inlineArrayToTiptap(listItemToInlineArray(itemInline)),
-          },
-        ],
-      }));
-      const listNode = {
-        type: ordered ? "orderedList" : "bulletList",
-        content: items.length
-          ? items
-          : [{ type: "listItem", content: [{ type: "paragraph" }] }],
-      };
-      return { type: "doc", content: [listNode] };
+      return { type: "doc", content: [listToTiptap(block, String(block.id || "list"))] };
     }
     case "paragraph":
     default: {
@@ -813,10 +793,65 @@ function comparableListInline(content) {
   return out;
 }
 
-function listItemFromTiptap(li, content) {
+function supportedListChild(child) {
+  return child && typeof child === "object" && !Array.isArray(child) &&
+    Array.isArray(child.items) && ["list", "bulletList", "bullet_list", "bulleted-list",
+      "bulleted_list", "ordered-list", "numbered_list"].includes(child.type);
+}
+
+function orderedListSource(block) {
+  return block.ordered === true || block.type === "ordered-list" || block.type === "numbered_list";
+}
+
+function listToTiptap(block, path, nested = false) {
+  const items = (Array.isArray(block.items) ? block.items : []).map((item, index) => ({
+    type: "listItem",
+    attrs: { bpListSource: { item: deepCloneJson(item) } },
+    content: [{ type: "paragraph", content: inlineArrayToTiptap(listItemToInlineArray(item)) },
+      ...(Array.isArray(item?.children) ? item.children.flatMap((child, at) =>
+        supportedListChild(child) ? [listToTiptap(child, `${path}/${index}/${at}`, true)] : []) : [])],
+  }));
+  return {
+    type: orderedListSource(block) ? "orderedList" : "bulletList",
+    ...(nested ? { attrs: { bpListFrameSource: { block: deepCloneJson(block), path } } } : {}),
+    content: items.length ? items : [{ type: "listItem", content: [{ type: "paragraph" }] }],
+  };
+}
+
+function nestedListFromTiptap(node, seen) {
+  const source = node.attrs?.bpListFrameSource;
+  const ownsSource = source?.block && !seen.has(source.path);
+  if (ownsSource) seen.add(source.path);
+  const ordered = node.type === "orderedList";
+  const items = (node.content || []).map(li => listItemFromTiptap(li, seen));
+  if (!ownsSource) return { type: "list", ordered, items };
+  const fields = deepCloneJson(source.block);
+  // An empty source list needs a schema placeholder, not a new persisted item.
+  const emptyPlaceholder = fields.items.length === 0 && node.content?.length === 1 &&
+    node.content[0].content?.length === 1 && !(node.content[0].content[0].content || []).length;
+  fields.items = emptyPlaceholder ? [] : items;
+  if (ordered !== orderedListSource(fields)) {
+    fields.type = "list";
+    fields.ordered = ordered;
+  }
+  return fields;
+}
+
+function listItemFromTiptap(li, seen = new Set()) {
+  const content = li.content?.[0]?.content;
   const source = li.attrs?.bpListSource;
-  return source && Object.hasOwn(source, "item")
+  const item = source && Object.hasOwn(source, "item")
     ? inlineCarrierFromTiptap(source.item, content) : tiptapInlineToPd(content);
+  const nested = (li.content || []).slice(1).filter(node =>
+    node.type === "bulletList" || node.type === "orderedList").map(node => nestedListFromTiptap(node, seen));
+  const original = Array.isArray(source?.item?.children) ? source.item.children : [];
+  if (!nested.length && !original.some(supportedListChild)) return item;
+  let index = 0;
+  const children = original.flatMap(child => supportedListChild(child)
+    ? index < nested.length ? [nested[index++]] : [] : [deepCloneJson(child)]);
+  children.push(...nested.slice(index));
+  return item && typeof item === "object" && !Array.isArray(item)
+    ? { ...item, children } : { content: tiptapInlineToPd(content), children };
 }
 
 function inlineCarrierFromTiptap(item, content) {
@@ -877,10 +912,8 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
     }
     case "list": {
       const ordered = top.type === "orderedList";
-      const items = (top.content || []).map((li) => {
-        const para = (li.content || []).find((c) => c.type === "paragraph") || {};
-        return listItemFromTiptap(li, para.content);
-      });
+      const seen = new Set();
+      const items = (top.content || []).map(li => listItemFromTiptap(li, seen));
       return { ordered, items };
     }
     case "paragraph":
