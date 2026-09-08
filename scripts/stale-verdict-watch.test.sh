@@ -833,6 +833,12 @@ if [ "\$mode" = "flaky-page-2" ] && grep -q 'after=' <<<"\$*" && [ ! -f "$TMP/pa
   echo "HTTP 504: We couldn't respond to your request in time. (https://api.github.com/graphql)" >&2
   exit 1
 fi
+# THE SPLIT READ (2026-09-08): the population query no longer carries the status
+# rollup — it is fetched per CONFLICTING row by a SECOND graphql query selecting
+# `pullRequest(number:)`. The stub must tell the two apart, or it answers a
+# rollup request with a population page and the script correctly refuses it
+# ("did not come back as a pull request payload").
+if grep -q 'pullRequest(number:' <<<"\$*"; then cat "$TMP/gql-rollup.json"; exit 0; fi
 if grep -q 'after=' <<<"\$*"; then cat "$TMP/gql-page2.json"; else cat "$TMP/gql-page1.json"; fi
 STUBEOF
   chmod +x "$STUB/gh"
@@ -840,6 +846,19 @@ STUBEOF
 
 # A raw GraphQL page in GitHub's own shape — NOT the normalised shape — so the
 # normaliser is exercised rather than bypassed.
+# The per-PR rollup, in GitHub's own shape so the rollup normaliser is exercised
+# rather than bypassed — the same discipline gql_page follows for the population.
+gql_rollup() { # <path>
+  local roll="[]" c
+  for c in "${CTX[@]}"; do
+    roll="$(jq -c --arg n "$c" --arg t "$OLD" \
+      '. + [{__typename:"CheckRun", name:$n, conclusion:"SUCCESS", completedAt:$t, status:"COMPLETED"}]' <<<"$roll")"
+  done
+  jq -n --argjson roll "$roll" \
+    '{data:{repository:{pullRequest:{number:9101,
+        commits:{nodes:[{commit:{statusCheckRollup:{contexts:{nodes:$roll}}}}]}}}}}' > "$1"
+}
+
 gql_page() { # <path> <number> <hasNext> <cursor>
   local roll="[]" c
   for c in "${CTX[@]}"; do
@@ -856,6 +875,7 @@ gql_page() { # <path> <number> <hasNext> <cursor>
 }
 gql_page "$TMP/gql-page1.json" 9101 true  "CURSOR_ONE"
 gql_page "$TMP/gql-page2.json" 9102 false null
+gql_rollup "$TMP/gql-rollup.json"
 
 STUB_PATH="$STUB:/usr/bin:/bin:/usr/sbin:/sbin"
 run_stubbed() { # <mode> [extra args…]
@@ -877,9 +897,14 @@ grep -q "#9101" <<<"$out" && grep -q "#9102" <<<"$out" \
 grep -q "after=CURSOR_ONE" "$STUB_LOG" \
   && ok "(p-1) …and page 2 was asked for with the cursor page 1 named" \
   || bad "(p-1) no request carried the endCursor from page 1: $(cat "$STUB_LOG")"
-[ "$(grep -c graphql "$STUB_LOG")" = "2" ] \
-  && ok "(p-1) …in exactly 2 page requests, so paging is not re-reading the whole population per row" \
-  || bad "(p-1) expected 2 graphql page requests, saw $(grep -c graphql "$STUB_LOG")"
+# COUNT THE POPULATION PAGES, NOT EVERY GRAPHQL CALL. Since the split read a run
+# also issues one `pullRequest(number:)` rollup request per CONFLICTING row, so a
+# bare `grep -c graphql` conflates two different reads and would grow with the
+# conflicted set. What this arm is about is that PAGING does not re-read the
+# population per row, so it counts population queries specifically.
+[ "$(grep -c 'pullRequests(states:' "$STUB_LOG")" = "2" ] \
+  && ok "(p-1) …in exactly 2 population page requests, so paging is not re-reading the whole population per row" \
+  || bad "(p-1) expected 2 population page requests, saw $(grep -c 'pullRequests(states:' "$STUB_LOG")"
 
 # (p-2) A page that 504s ONCE is retried AS A PAGE — page 1 is not re-fetched.
 out="$(run_stubbed flaky-page-2)"; rc=$?
@@ -977,7 +1002,9 @@ nodes=[{"number":30000+i,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","hea
 page={"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":False,"endCursor":None},"nodes":nodes}}}}
 open(sys.argv[1],"w").write(json.dumps(page))
 PY
-printf '#!/usr/bin/env bash\ncase "$*" in *graphql*) cat "%s" ;; *) echo "{}" ;; esac\n' "$LPAGE" > "$LSTUB/bin/gh"; chmod +x "$LSTUB/bin/gh"
+q_rollup "$LSTUB/rollup.json" 15631
+printf '#!/usr/bin/env bash\ncase "$*" in *"pullRequest(number:"*) cat "%s" ;; *graphql*) cat "%s" ;; *) echo "{}" ;; esac\n' \
+  "$LSTUB/rollup.json" "$LPAGE" > "$LSTUB/bin/gh"; chmod +x "$LSTUB/bin/gh"
 lpage_bytes="$(wc -c < "$LPAGE" | tr -d ' ')"
 [ "${lpage_bytes:-0}" -ge "$SCALE_MIN" ] \
   && ok "the generated live page is ${lpage_bytes}B ≥ ${SCALE_MIN}B" \
@@ -1027,9 +1054,24 @@ q_page() { # <path> <isDraft: true|false>  — one CONFLICTING PR with a full st
     > "$path"
 }
 
+q_rollup() { # <path> <number> — the per-PR rollup the split read fetches separately
+  local path="$1" num="$2" ctxjson="[]" c
+  for c in "${CTX[@]}"; do
+    ctxjson="$(jq -c --arg n "$c" --arg t "$OLD" \
+      '. + [{__typename:"CheckRun", name:$n, status:"COMPLETED", conclusion:"SUCCESS", completedAt:$t}]' <<<"$ctxjson")"
+  done
+  jq -n --argjson num "$num" --argjson ctx "$ctxjson" '
+    { data: { repository: { pullRequest: { number: $num,
+        commits: { nodes: [ { commit: { statusCheckRollup: { contexts: { nodes: $ctx } } } } ] } } } } }' > "$path"
+}
+
 q_run() { # <page json path> — the live read, with only `gh` stubbed
   local page="$1"
-  printf '#!/usr/bin/env bash\ncase "$*" in *graphql*) cat "%s" ;; *) echo "[]" ;; esac\n' "$page" > "$QSTUB/bin/gh"
+  # SPLIT READ: a rollup request selects `pullRequest(number:` and must NOT be
+  # answered with a population page — the script refuses that, correctly.
+  q_rollup "$QSTUB/rollup.json" 15631
+  printf '#!/usr/bin/env bash\ncase "$*" in *"pullRequest(number:"*) cat "%s" ;; *graphql*) cat "%s" ;; *) echo "[]" ;; esac\n' \
+    "$QSTUB/rollup.json" "$page" > "$QSTUB/bin/gh"
   chmod +x "$QSTUB/bin/gh"
   env PATH="$QSTUB/bin:/usr/bin:/bin:/usr/sbin:/sbin" GH_TOKEN=stub \
     bash "$WATCH" --commits "$COMMITS" --spec "$SPEC" --repo FRIKKern/barkpark 2>&1
@@ -1172,6 +1214,7 @@ grep -q "HTTP 401" <<<"$out3" \
 # answers normally: the verdict is reached and no digest text appears at all.
 gql_page "$TMP/gql-page1.json" 9101 true  "CURSOR_ONE"
 gql_page "$TMP/gql-page2.json" 9102 false null
+gql_rollup "$TMP/gql-rollup.json"
 out4="$(run_stubbed pages)"; rc4=$?
 [ "$rc4" = "1" ] && grep -q "#9101" <<<"$out4" && grep -q "#9102" <<<"$out4" \
   && ok "(r5) the unchanged happy path still reads both pages and reds at exit 1" \
