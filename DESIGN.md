@@ -91,6 +91,10 @@
 
 The first track-control slice appends an empty rightmost track and removes only an empty rightmost track while at least one track remains. Existing track indexes, nested editor ownership, history and signed leases must stay unchanged; pending nested/scalar saves settle before structural mutation. Nonempty, protected, stale and middle-track removal is visibly refused without changing source. Adding an empty track consumes no child ID. Middle-track removal remains open until its ownership and history contract is separately implemented and verified; edge controls are not whole-Columns sign-off.
 
+## Card title editing contract
+
+Clicking the visible Card title must place the native caret in that title, never in its body. Reuse the proven isolated title editing-host boundary and composition-aware settlement; typing followed immediately by blur or View must not disappear. Preserve the authored title's semantic heading level, source shape, IDs and unknown metadata, and every untouched slot. Keep reader typography and layout, native keyboard access and shared history; do not add a pointer-focus workaround or a separate title panel as the primary path.
+
 ## Content voice
 - Tone: Clear, warm, specific, and lightly playful; closer to a beautifully edited product journal than an engineering report. Confident about shipped facts, restrained about interpretation, and comfortable saying that a period was mostly maintenance.
 - Terminology: Prefer ordinary phrases such as “clearer errors,” “more complete results,” “safer access,” and “easier day-to-day use.” Reserve counts, internal component names, code paths, protocols, fields, flags, commit language, “first-parent,” “digest,” and “renderer” for the technical record.
