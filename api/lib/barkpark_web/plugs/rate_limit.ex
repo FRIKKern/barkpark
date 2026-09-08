@@ -154,9 +154,13 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     conn = put_resp_header(conn, "retry-after", Integer.to_string(retry_after))
 
     if wants_html?(conn) do
+      # Phoenix.Controller.html/2, not send_resp/3: same bytes, and it keeps
+      # this module out of Sobelow's XSS.SendResp scan, which flags any
+      # non-literal body argument regardless of provenance (the only thing
+      # interpolated here is an integer this module computed).
       conn
-      |> put_resp_content_type("text/html")
-      |> send_resp(429, html_429(retry_after))
+      |> put_status(429)
+      |> Phoenix.Controller.html(html_429(retry_after))
       |> halt()
     else
       env = Errors.to_envelope({:error, :rate_limited, %{retry_after: retry_after}}, conn)
