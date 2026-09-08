@@ -1158,6 +1158,25 @@ if config_env() == :prod do
           Integer.to_string(Keyword.get(base_rate_limits, :write_per_minute, 60))
       )
     )
+    # Browser class (charter D2/D4 Gate A) — SHADOW-FIRST. `_BROWSER` is the
+    # budget, `_BROWSER_ENABLED=false` is the kill switch, and
+    # `_BROWSER_ENFORCE=true` is the explicit human promotion to refusing. With
+    # ENFORCE unset the plug serves 200 and only counts, which is the point.
+    |> Keyword.put(
+      :browser_per_minute,
+      String.to_integer(
+        System.get_env("BARKPARK_RATE_LIMIT_BROWSER") ||
+          Integer.to_string(Keyword.get(base_rate_limits, :browser_per_minute, 600))
+      )
+    )
+    |> Keyword.put(
+      :browser_enabled,
+      System.get_env("BARKPARK_RATE_LIMIT_BROWSER_ENABLED") not in ["false", "0"]
+    )
+    |> Keyword.put(
+      :browser_enforce,
+      System.get_env("BARKPARK_RATE_LIMIT_BROWSER_ENFORCE") in ["true", "1"]
+    )
 
   config :barkpark, :rate_limits, rate_limits
 
