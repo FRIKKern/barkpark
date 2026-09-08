@@ -111,6 +111,9 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
 
     assert image_src(slug) == "/before.png"
 
+    replay_halt = %{reason: "A newer lifecycle gate halted this editor"}
+    halted_socket = Phoenix.Component.assign(undo_socket, paper_halt: replay_halt)
+
     assert {:reply,
             %{
               saved: true,
@@ -119,9 +122,10 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
               rev: ^undo_rev,
               history_step: %{version: 1, ref: ^undo_id, action: "redo"}
             }, replay_socket} =
-             StudioLive.handle_event("paper-history-step", undo_params, undo_socket)
+             StudioLive.handle_event("paper-history-step", undo_params, halted_socket)
 
     assert image_src(slug) == "/before.png"
+    assert replay_socket.assigns.paper_halt == replay_halt
     redo_id = Ecto.UUID.generate()
 
     assert {:reply,

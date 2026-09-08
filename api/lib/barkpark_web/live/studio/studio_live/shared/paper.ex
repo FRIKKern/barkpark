@@ -658,7 +658,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
               |> reconcile_history_step(request_id, outcome)
               |> assign(save_status: "Auto-saved")
               |> assign(last_paper_save_ok?: true)
-              |> assign(paper_halt: nil)
+              |> clear_history_halt(outcome)
 
             {:ok, socket, receipt, outcome}
 
@@ -701,6 +701,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # The original applied request already performed every source and host
   # effect. An exact replay returns only its stored acknowledgement.
   defp reconcile_history_step(socket, _request_id, :replayed), do: socket
+
+  defp clear_history_halt(socket, :applied), do: assign(socket, paper_halt: nil)
+  defp clear_history_halt(socket, :replayed), do: socket
 
   defp history_step_failed(socket, request_id, reason) do
     rejected = history_step_rejection(reason)
