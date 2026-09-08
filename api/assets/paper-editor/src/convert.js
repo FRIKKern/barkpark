@@ -134,20 +134,22 @@ function inlineToTiptapNodes(node, marks, out) {
   }
 }
 
-// Coerce ONE list item into a canonical inline ARRAY. The canonical `list` block
-// stores each item as an inline array (`items:[ [inline...], ... ]`, see :10), but
-// 7 legacy papers (webhook-*/qstash-*/ga4-* specs) store a flat STRING per item
-// (`items:["text one", ...]`). A flat string reaching `inlineArrayToTiptap` would
-// run `.forEach` on a string and THROW ("forEach is not a function") — crashing
-// BOTH editors (per-block + canvas) the moment such a paper opens. This coerces a
-// string (or any non-array) item to a single text inline node, matching how the
-// VIEW render already tolerates it (compose.ex `compose_inline_children(str) → [str]`
-// renders byte-identically to the inline-text-array form). ADDITIVE: a canonical
-// inline-ARRAY item is returned UNCHANGED (the byte-identical fast path); only a
-// non-array item is coerced.
+// Match the list readers: arrays, encoded arrays, content-first maps, then text.
+// This is list-specific; JSON-looking paragraph strings remain literal prose.
 function listItemToInlineArray(item) {
   if (Array.isArray(item)) return item;
-  if (typeof item === "string") return [{ type: "text", value: item }];
+  if (typeof item === "string") {
+    try {
+      const parsed = JSON.parse(item);
+      if (Array.isArray(parsed) && parsed.length && parsed[0] && typeof parsed[0] === "object" && !Array.isArray(parsed[0])) return parsed;
+    } catch { /* Plain strings remain literal text. */ }
+    return [{ type: "text", value: item }];
+  }
+  if (item && typeof item === "object") {
+    if (Array.isArray(item.content) && item.content.length) return item.content;
+    return typeof item.text === "string" && item.text !== ""
+      ? [{ type: "text", value: item.text }] : [];
+  }
   // Any other non-array scalar (number, etc.) → its string form as one text node;
   // null/undefined → an empty item (an empty `<li>`), never a throw.
   if (item == null) return [];
@@ -166,7 +168,8 @@ function listItemToInlineArray(item) {
 // coerced to a single text inline node instead of throwing on `.forEach`. The
 // canonical inline-ARRAY path is byte-unchanged; only a non-array input is coerced.
 export function inlineArrayToTiptap(inline) {
-  const arr = Array.isArray(inline) ? inline : listItemToInlineArray(inline);
+  const arr = Array.isArray(inline) ? inline
+    : inline == null ? [] : [{ type: "text", value: String(inline) }];
   const out = [];
   arr.forEach((node) => inlineToTiptapNodes(node, [], out));
   return out;
@@ -361,6 +364,7 @@ export function blockToTiptap(block) {
       // item. A canonical inline-array item is passed through UNCHANGED.
       const items = (block.items || []).map((itemInline) => ({
         type: "listItem",
+        attrs: { bpListSource: { item: deepCloneJson(itemInline) } },
         content: [
           {
             type: "paragraph",
@@ -788,6 +792,46 @@ export function tableProjectionMatchesAction(before, after, action) {
 //   heading   → { text, level }
 //   paragraph → { content: [inline...] }
 //   list      → { ordered, items: [[inline...], ...] }
+function comparableListInline(content) {
+  const out = [];
+  for (const node of content || []) {
+    const next = deepCloneJson(node);
+    if (!next.marks?.length) delete next.marks;
+    const previous = out[out.length - 1];
+    if (previous?.type === "text" && next.type === "text" && jsonEqual(previous.marks, next.marks)) {
+      previous.text += next.text;
+    } else out.push(next);
+  }
+  return out;
+}
+
+function listItemFromTiptap(li, content) {
+  const inline = tiptapInlineToPd(content);
+  const source = li.attrs?.bpListSource;
+  if (!source || !Object.hasOwn(source, "item")) return inline;
+  const item = source.item;
+  if (jsonEqual(comparableListInline(inlineArrayToTiptap(listItemToInlineArray(item))),
+    comparableListInline(content))) return deepCloneJson(item);
+  if (item && typeof item === "object" && !Array.isArray(item)) {
+    const next = deepCloneJson(item);
+    if (!(Array.isArray(item.content) && item.content.length) && typeof item.text === "string" &&
+      inline.every(node => node.type === "text")) next.text = inline.map(node => node.value).join("");
+    else {
+      next.content = inline;
+      // Reader maps fall back to text when content is empty. Clearing the
+      // authored body must not resurrect an old shadow text value.
+      if (!inline.length && typeof next.text === "string") next.text = "";
+    }
+    return next;
+  }
+  if (typeof item === "string") {
+    const decoded = listItemToInlineArray(item);
+    if (!jsonEqual(decoded, [{ type: "text", value: item }])) return JSON.stringify(inline);
+    if (inline.every(node => node.type === "text")) return inline.map(node => node.value).join("");
+  }
+  return inline;
+}
+
 export function tiptapToBlock(editorJSON, blockId, blockType) {
   const doc = editorJSON || {};
   const top = (doc.content && doc.content[0]) || {};
@@ -802,7 +846,7 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
       const ordered = top.type === "orderedList";
       const items = (top.content || []).map((li) => {
         const para = (li.content || []).find((c) => c.type === "paragraph") || {};
-        return tiptapInlineToPd(para.content);
+        return listItemFromTiptap(li, para.content);
       });
       return { ordered, items };
     }

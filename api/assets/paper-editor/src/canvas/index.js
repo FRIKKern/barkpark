@@ -31,6 +31,7 @@
 
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import { ListItemSource } from "../list-item-source.js";
 import { portableTextBoundary } from "../portable-text-boundary.js";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -583,6 +584,7 @@ class BpPaperCanvas extends HTMLElement {
       element: this._mount,
       editable: this._editable,
       extensions: [
+        ListItemSource,
         portableTextBoundary(this),
         // pdd-t2/t14: the doctrine template-lock veto as a REAL ProseMirror
         // plugin. `filterTransaction` is a PLUGIN-spec option — as an

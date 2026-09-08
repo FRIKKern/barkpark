@@ -20,6 +20,7 @@
 import { Editor, Extension, Mark } from "@tiptap/core";
 import { Plugin } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
+import { ListItemSource } from "./list-item-source.js";
 import { portableTextBoundary } from "./portable-text-boundary.js";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -175,6 +176,7 @@ class BpPaperEditor extends HTMLElement {
       // and suppresses onUpdate-driven typing, so no bp-op/slash ever fires.
       editable: this._editable,
       extensions: [
+        ListItemSource,
         portableTextBoundary(this, () => this._editorMode === "block" ? this._blockType : null),
         ...(this._editorMode === "card-body" ? [
           Extension.create({
