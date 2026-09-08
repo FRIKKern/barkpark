@@ -298,6 +298,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert html =~ ~s(data-paper-canvas-resume-state="blocked")
       assert has_element?(view, ~s([id="paper-editor-#{draft.doc_id}"][inert]))
       assert has_element?(view, ~s(button[data-paper-canvas-export-draft]))
+      assert has_element?(view, ~s(button[data-test-id="paper-canvas-reload-server"]))
       refute html =~ ~s(data-test-id="paper-canvas-run")
       refute html =~ ~s(data-test-id="paper-table-editor")
     end

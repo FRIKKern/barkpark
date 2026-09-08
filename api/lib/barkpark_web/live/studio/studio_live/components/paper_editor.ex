@@ -192,7 +192,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <details data-test-id="paper-canvas-recovery-controls">
         <summary>Recovery options</summary>
         <p>Reload only after reviewing the frozen draft; this permanently discards unsaved local edits.</p>
-        <a href="" data-test-id="paper-canvas-reload-server">Discard local edits and reload the server version</a>
+        <button type="button" data-test-id="paper-canvas-reload-server">
+          Discard local edits and reload the server version
+        </button>
       </details>
     </div>
     <div

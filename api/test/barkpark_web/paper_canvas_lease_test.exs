@@ -436,7 +436,7 @@ defmodule BarkparkWeb.PaperCanvasLeaseTest do
     assert html =~ ~s(data-paper-canvas-export-draft)
     assert html =~ ~s(data-paper-editor-target="paper-editor-drafts.lease-paper")
     assert html =~ ~s(data-test-id="paper-canvas-recovery-controls")
-    assert html =~ ~s(data-test-id="paper-canvas-reload-server")
+    assert html =~ ~s(<button type="button" data-test-id="paper-canvas-reload-server")
     assert html =~ ~s(id="paper-editor-drafts.lease-paper")
     assert html =~ ~s(data-paper-doc-key="production:paper:drafts.lease-paper")
     assert html =~ ~s(data-paper-canvas-resume-halt="true")
