@@ -49,10 +49,12 @@ within your control.
 
 ## Built from everyday work
 
-I build Barkpark around problems I encounter at work. I got tired of copying AI
-status updates into messages for coworkers, so I made Papers to share documents
-quickly over the local network. Repeated XLSX exports led to Sheets: keep the data
-in Barkpark, update it there, and share a document that reflects those changes.
+I build Barkpark around problems I encounter at work. Papers began because I
+wanted a better way to read what an AI proposed, with Cursor's plan mode as a
+reference point. I wanted the proposal itself to be a document I could share with
+coworkers and develop further together. Repeated XLSX exports led to Sheets:
+keep the data in Barkpark, update it there, and share a document that reflects
+those changes.
 
 Those are starting points. The core should support applications I have never
 thought of, built by people who know their own work better than I do.
