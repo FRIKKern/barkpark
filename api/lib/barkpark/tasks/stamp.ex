@@ -46,6 +46,15 @@ defmodule Barkpark.Tasks.Stamp do
   # additionally carries `"withdrawn" => true` on that payload, so a feed
   # consumer can select corrections without string-matching the result.
   #
+  # A stamp that WRITES EVIDENCE also carries `evidence_sha256` (over the raw
+  # bytes, before any normalisation) and `evidence_bytes`. THE LIMIT BELONGS
+  # WITH THE FIELD: these prove the evidence at index N CHANGED between two
+  # stamps. They do NOT prove misalignment, and they CANNOT recover what was
+  # written. Anyone reading this as "the feed carries evidence provenance" will
+  # conclude the ledger can reconstruct a misfiled stamp — it cannot. Before
+  # they existed a misaligned stamp that was later re-stamped left no trace
+  # anywhere: overwritten in the row, never captured here.
+  #
   # THE WITHDRAWAL (D745, wave 62). Before this verb existed, a reviewer who
   # refuted a stamped proof had no write that could lower the lock — `--met`
   # only raises and `--miss` pins — so the correction went into the criterion's
@@ -365,6 +374,51 @@ defmodule Barkpark.Tasks.Stamp do
                           if result_tag == "withdrawn",
                             do: Map.put(p, "withdrawn", true),
                             else: p
+                        end)
+                        |> then(fn p ->
+                          # EVIDENCE PROVENANCE — a DIGEST, never the prose.
+                          #
+                          # WHAT IT PROVES, AND THE LIMIT IN THE SAME BREATH:
+                          # it proves the evidence at index N CHANGED between
+                          # two stamps. It does NOT prove misalignment, and it
+                          # CANNOT recover what was written. Read it as "index
+                          # N's evidence at T1 differs from index N's at T2" and
+                          # nothing more — a reader who takes it as "the feed
+                          # carries evidence provenance" will conclude the
+                          # ledger can reconstruct a misfiled stamp. It cannot.
+                          #
+                          # WHY IT EXISTS: this event carried {index, result,
+                          # worker} and never the evidence, so a stamp written
+                          # misaligned and later re-stamped left NO trace — not
+                          # in the row (overwritten) and not here (never
+                          # captured). Only `--withdraw` preserved anything.
+                          # Measuring the realised harm of the inert
+                          # --criterion-text guard hit exactly that wall: the one
+                          # row where misalignment is KNOWN to have happened sat
+                          # inside the sample and read correctly aligned,
+                          # because it was repaired before close.
+                          #
+                          # BOTH FIELDS, not the digest alone: the byte length is
+                          # what separates a TRUNCATION from a REWRITE when
+                          # someone is comparing two differing digests weeks
+                          # later, and it costs nothing to carry.
+                          #
+                          # RAW BYTES, BEFORE ANY NORMALISATION. Normalising
+                          # first would make two writers differing only in
+                          # trailing whitespace produce the SAME digest — a
+                          # detector blind to the case where a tool mangled the
+                          # text, which is the case most worth catching.
+                          case update["evidence"] do
+                            ev when is_binary(ev) and ev != "" ->
+                              Map.merge(p, %{
+                                "evidence_sha256" =>
+                                  :sha256 |> :crypto.hash(ev) |> Base.encode16(case: :lower),
+                                "evidence_bytes" => byte_size(ev)
+                              })
+
+                            _ ->
+                              p
+                          end
                         end)
                         |> then(fn p ->
                           # The override is LOUD on the event feed too, on a
