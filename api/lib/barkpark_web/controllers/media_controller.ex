@@ -811,14 +811,20 @@ defmodule BarkparkWeb.MediaController do
     # RAW `/media/files/...` URL STRINGS, invisible to every reference graph, so
     # this door used to answer 200 while blanking a live page. Consult usage
     # BEFORE the irreversible `Media.delete_file/2`. See `Media.WhereUsed`.
-    with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
+    scope = scope_opts(conn)
+
+    with {:ok, file} <- Media.get_file(id, scope),
          {:ok, override} <- refuse_if_referenced(conn, file, params),
          # RECEIPT LAW (pds w39): `Media.delete_file/2` returns the row
          # `Repo.delete/2` removed (see `delete_file/2` in media.ex). This used to discard it
          # and echo the `:id` path param; `filename` is stored state the request
          # never carries, so reverting to the echo reds the differential.
+         # The forced-delete WITNESS rides down to the `media.deleted` webhook
+         # too (task-303e3b171435d767): the receipt below only reaches the
+         # CALLER, while a link-graph rebuilder or reindexer sees a delete it
+         # must apply and could not learn it was contested.
          {:ok, deleted} <-
-           Media.delete_file(id, Keyword.put(scope_opts(conn), :where_used, :guard)) do
+           Media.delete_file(id, Keyword.merge(scope, where_used: :guard, override: override)) do
       # `override` is nil unless the caller disarmed the where-used guard, so an
       # ordinary delete's receipt is byte-for-byte what it always was and only a
       # FORCED one grows `forced` + `referencedByCount`.

@@ -692,7 +692,19 @@ defmodule Barkpark.Media do
     # does not exist, and must NOT get a delete out of the raise.
     _policy = where_used_policy!(opts)
 
-    case get_file(id, Keyword.delete(opts, :where_used)) do
+    # THE OVERRIDE WITNESS (task-303e3b171435d767). `:override` is the where-used
+    # census the DOOR already computed — `WhereUsed.witness_forced_delete/2`
+    # returns `%{forced: true, referencedByCount: n}` on a `?force=true` delete
+    # and the door passes it down; it is nil on every other path.
+    #
+    # It is THREADED, not re-derived. The census is a PRE-delete fact and it is
+    # NOT in scope at the dispatch below — the guard lives at the call site by
+    # design (`where_used_policy!/1`), so a scan run from here would both
+    # duplicate the door's work and answer a different question, the row and its
+    # asset doc being gone by then. This function only carries the value.
+    override = Keyword.get(opts, :override)
+
+    case get_file(id, Keyword.drop(opts, [:where_used, :override])) do
       {:ok, file} ->
         # Resolve the webhook payload BEFORE deleting so the DB delete is the
         # FIRST side effect: on failure the row survives intact (still
@@ -711,7 +723,7 @@ defmodule Barkpark.Media do
             # controllers). See `defer_media_effect/1`.
             defer_media_effect(fn ->
               Cdn.invalidate(file)
-              Events.dispatch(file.dataset, "media.deleted", file, doc)
+              Events.dispatch(file.dataset, "media.deleted", file, doc, override)
               # ROW-ADDRESSED (task-8eb6542ece62aff1): remove THIS row's object.
               # Path-addressed, a second claimant's delete would erase the first
               # claimant's bytes — a cross-tenant DESTROY through the same hole
