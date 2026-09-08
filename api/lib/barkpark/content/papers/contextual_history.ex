@@ -9,10 +9,11 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   authoritative tree and changes only the recorded field when its exact state
   still matches the continuation guard.
 
-  Phase one supports `figure.caption` and the singular Figure image child's
-  `image.src`. Unsupported or ambiguous edits remain valid edits without a
-  continuation. Values are exact JSON values; absent and present-with-null are
-  distinct. Continuations are capped at 16 KiB encoded and never truncated.
+  Phase one supports `figure.caption` and `image.src`, including singular
+  Figure image children. Unsupported or ambiguous edits remain valid edits
+  without a continuation. Values are exact JSON values; absent and
+  present-with-null are distinct. Continuations are capped at 16 KiB encoded
+  and never truncated.
   """
 
   alias Barkpark.PortableDoc.BlockIds
