@@ -8,7 +8,7 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
   A response body alone is never evidence.
 
   Sites covered in this file:
-    * search_controller.ex:316         delete_search_synonym (surface "documents")
+    * SearchController.delete_search_synonym/2  (surface "documents")
     * v1/media_controller.ex:188       delete_search_synonym (surface "media")
     * SecretController.update/2         update (ciphertext + "set" audit row)
     * secret_controller.ex:80          delete (audit row is INSIDE the delete txn)
