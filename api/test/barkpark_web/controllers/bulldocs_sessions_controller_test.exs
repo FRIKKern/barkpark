@@ -147,7 +147,16 @@ defmodule BarkparkWeb.BulldocsSessionsControllerTest do
 
       # `PublicRead`/QueryController fail CLOSED on a private type: 404, and in
       # no case a body carrying the session.
-      assert anon.status in [401, 403, 404]
+      # WHICH GATE: the PRIVATE-VISIBILITY oracle — 404 `not_found`, not a 403.
+      # The caller must not learn the type exists, so the refusal is
+      # indistinguishable from a route miss BY DESIGN. Pinning it is what stops
+      # the assertion from also passing on a genuine 403 (which would leak
+      # existence) or on an authentication failure — mutation-proved: sending an
+      # invalid bearer makes this same request 401, a status the old
+      # `in [401, 403, 404]` accepted.
+      assert anon.status == 404
+      err = Jason.decode!(anon.resp_body)["error"]
+      assert err["code"] == "not_found"
       refute anon.resp_body =~ slug
 
       # Control: the SAME anonymous request against the PUBLIC sibling type
