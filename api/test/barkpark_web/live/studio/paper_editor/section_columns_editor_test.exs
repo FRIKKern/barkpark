@@ -29,7 +29,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
     assert SectionLayout.stack_rules?(%{"blocks" => [%{"type" => "heading"}]}, :email)
   end
 
-  test "Section title patches distinguish omission, clearing, trimming, and invalid values" do
+  test "Section title patches distinguish omission, clearing, preserved whitespace, and invalid values" do
     section = %{
       "id" => "section",
       "type" => "section",
@@ -43,7 +43,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
     assert Blocks.build_block_patch(section, %{"title" => "   "}) == %{"title" => nil}
 
     assert Blocks.build_block_patch(section, %{"title" => "  Revised  "}) == %{
-             "title" => "Revised"
+             "title" => "  Revised  "
            }
 
     assert Blocks.resolve_block_form([section], %{
@@ -54,7 +54,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
               %{
                 "op" => "patch-block",
                 "id" => "section",
-                "patch" => %{"title" => "Revised"}
+                "patch" => %{"title" => "  Revised  "}
               }}
 
     assert Blocks.resolve_block_form([section], %{"block_id" => "section"}) ==
@@ -65,7 +65,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
 
     html = render_fields(section)
     tree = LazyHTML.from_fragment(html)
-    title = LazyHTML.query(tree, "form[name='section-config'] input[name='title']")
+    title = LazyHTML.query(tree, "form[name='section-config'] textarea[name='title']")
 
     assert Enum.count(LazyHTML.query(tree, "#section-controls-section")) == 1
 
@@ -76,8 +76,137 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
              )
            ) == 1
 
-    assert LazyHTML.attribute(title, "value") == ["Existing"]
+    assert LazyHTML.text(title) == "Existing"
     assert Enum.count(title) == 1
+  end
+
+  test "Section title paint and Configure fallback focus one canonical scalar field" do
+    for section <- [
+          %{
+            "id" => "section",
+            "type" => "section",
+            "title" =>
+              "Existing title that is deliberately long enough to wrap without collapsing the reader geometry",
+            "blocks" => [paragraph("inside", "Nested draft")]
+          },
+          %{
+            "id" => "section",
+            "type" => "section",
+            "title" =>
+              "Existing title that is deliberately long enough to wrap without collapsing the reader geometry",
+            "layout" => %{"mode" => "grid", "tracks" => 2},
+            "blocks" => [paragraph("inside", "Nested draft")]
+          }
+        ] do
+      tree = section |> render_fields(canvas_enabled: true) |> LazyHTML.from_fragment()
+      frame = LazyHTML.query(tree, "[data-paper-section-editor-frame]")
+      title_editor = LazyHTML.query(frame, "[data-paper-section-title-editor]")
+      title_form = LazyHTML.query(title_editor, "form[name='section-config']")
+      title_input = LazyHTML.query(title_form, "textarea[name='title']")
+      paint = LazyHTML.query(title_editor, "[data-paper-section-title-paint]")
+      fallback = LazyHTML.query(tree, "[data-paper-section-title-panel-trigger]")
+      title_dom_id = section_title_dom_id("section")
+
+      assert Enum.count(title_editor) == 1
+      assert LazyHTML.attribute(title_form, "id") == ["section-form-section"]
+      assert LazyHTML.attribute(title_form, "phx-change") == ["paper-block-autosave"]
+      assert LazyHTML.attribute(title_input, "id") == [title_dom_id]
+
+      assert LazyHTML.text(title_input) ==
+               "Existing title that is deliberately long enough to wrap without collapsing the reader geometry"
+
+      assert LazyHTML.attribute(title_input, "rows") == ["1"]
+      assert LazyHTML.attribute(title_input, "phx-hook") == ["BarkparkPaperAutoSize"]
+      assert LazyHTML.attribute(paint, "type") == ["button"]
+      assert LazyHTML.attribute(paint, "aria-controls") == [title_dom_id]
+
+      assert LazyHTML.text(paint) ==
+               "Existing title that is deliberately long enough to wrap without collapsing the reader geometry"
+
+      assert LazyHTML.attribute(paint, "phx-click") == [
+               ~s([["focus",{"to":"##{title_dom_id}"}]])
+             ]
+
+      assert LazyHTML.attribute(fallback, "aria-controls") == [title_dom_id]
+
+      assert LazyHTML.attribute(fallback, "phx-click") == [
+               ~s([["focus",{"to":"##{title_dom_id}"}]])
+             ]
+
+      assert LazyHTML.text(fallback) == "Edit title"
+
+      assert Enum.count(LazyHTML.query(tree, "form[name='section-config']")) == 1
+
+      assert Enum.empty?(
+               LazyHTML.query(
+                 tree,
+                 "#section-controls-section [name='title']"
+               )
+             )
+
+      nested_editor_count =
+        Enum.count(LazyHTML.query(frame, "[data-test-id='paper-canvas-run']")) +
+          Enum.count(LazyHTML.query(frame, "[data-test-id='paper-block-editor-wc']"))
+
+      assert nested_editor_count == 1
+      assert Enum.empty?(LazyHTML.query(title_form, "[data-test-id='paper-canvas-run']"))
+      assert Enum.empty?(LazyHTML.query(title_form, "[data-test-id='paper-block-editor-wc']"))
+    end
+  end
+
+  test "absent and empty Section titles stay zero-flow until Configure focuses the same field" do
+    for title <- [:absent, nil, ""] do
+      section = %{"id" => "section", "type" => "section", "blocks" => []}
+      section = if title == :absent, do: section, else: Map.put(section, "title", title)
+      tree = section |> render_fields() |> LazyHTML.from_fragment()
+      title_editor = LazyHTML.query(tree, "[data-paper-section-title-editor]")
+      title_dom_id = section_title_dom_id("section")
+      title_input = LazyHTML.query(title_editor, "##{title_dom_id}")
+      fallback = LazyHTML.query(tree, "[data-paper-section-title-panel-trigger]")
+
+      assert LazyHTML.attribute(title_editor, "data-paper-section-title-empty") == ["true"]
+      assert Enum.empty?(LazyHTML.query(title_editor, "[data-paper-section-title-paint]"))
+      assert LazyHTML.text(title_input) == ""
+      assert LazyHTML.text(fallback) == "Add title"
+
+      assert LazyHTML.attribute(fallback, "phx-click") == [
+               ~s([["focus",{"to":"##{title_dom_id}"}]])
+             ]
+    end
+  end
+
+  test "Section title focus selectors encode authored block IDs without changing submissions" do
+    block_id = "section: foo/[title]#?"
+    title_dom_id = section_title_dom_id(block_id)
+
+    tree =
+      %{"id" => block_id, "type" => "section", "title" => "Authored", "blocks" => []}
+      |> render_fields()
+      |> LazyHTML.from_fragment()
+
+    form = LazyHTML.query(tree, "form[name='section-config']")
+    textarea = LazyHTML.query(form, "textarea[name='title']")
+    paint = LazyHTML.query(tree, "[data-paper-section-title-paint]")
+    fallback = LazyHTML.query(tree, "[data-paper-section-title-panel-trigger]")
+
+    assert LazyHTML.attribute(textarea, "id") == [title_dom_id]
+    assert LazyHTML.attribute(LazyHTML.query(form, "label"), "for") == [title_dom_id]
+    assert LazyHTML.attribute(paint, "aria-controls") == [title_dom_id]
+    assert LazyHTML.attribute(fallback, "aria-controls") == [title_dom_id]
+
+    assert LazyHTML.attribute(paint, "phx-click") == [
+             ~s([["focus",{"to":"##{title_dom_id}"}]])
+           ]
+
+    assert LazyHTML.attribute(fallback, "phx-click") == [
+             ~s([["focus",{"to":"##{title_dom_id}"}]])
+           ]
+
+    assert LazyHTML.attribute(LazyHTML.query(form, "input[name='block_id']"), "value") == [
+             block_id
+           ]
+
+    refute title_dom_id =~ block_id
   end
 
   test "Columns is addable and editor-only wide geometry follows reader evidence bands" do
@@ -138,7 +267,10 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
     assert html =~ "bp-paper-contextual-controls--section"
     assert html =~ ~s(data-paper-section-editor-frame)
     assert html =~ ~s(<hr class="bp-hr" style="border-top-width:1px")
-    assert html =~ ~s(<span style="font-weight:bold">Overview</span>)
+
+    assert LazyHTML.text(LazyHTML.query(tree, "[data-paper-section-title-paint]")) ==
+             "Overview"
+
     assert Enum.count(LazyHTML.query(tree, "[data-test-id='paper-canvas-run']")) == 1
 
     assert LazyHTML.attribute(
@@ -544,6 +676,10 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
   end
 
   defp render_fields(block), do: render_fields(block, [])
+
+  defp section_title_dom_id(block_id) do
+    "section-title-" <> Base.url_encode64(block_id, padding: false)
+  end
 
   defp paragraph(id, text),
     do: %{"id" => id, "type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
