@@ -975,15 +975,24 @@ defmodule BarkparkWeb.TasksController do
     residue = if stale_map, do: stale_claim_note(c, holder), else: ""
 
     cond do
-      # ORDERED BY PERMANENCE, NOT BY SPECIFICITY. A caller blocked by two things
-      # needs the one that WILL NOT CHANGE. The lifecycle is permanent; a live
-      # holder is transient but real; the queue gate is the author's to lift AND
-      # its own input is derived from the claim, so it must not outrank the
-      # lifecycle. Found by test rather than by reading: with the stale-map fix
-      # in place but the old ordering kept, `QueueGate.execution_class/2` read
-      # the same dead claim, returned `foreign_claimed`, and the QUEUE arm
-      # masked the terminal lifecycle exactly as `held_by_other` had.
-      status not in Validation.claimable_statuses() ->
+      # ORDERED BY PERMANENCE, AND "PERMANENT" IS NARROWER THAN "NOT CLAIMABLE".
+      # A caller blocked by two things needs the one that WILL NOT CHANGE.
+      #
+      # Only a TERMINAL status is permanent: nothing but an explicit
+      # `bp task stage <id> open` moves `done` or `cancelled`. `in_progress` is
+      # NOT permanent — it is the SHADOW OF A LIVE CLAIM, and its real
+      # explanation is the holder, so it must stay BELOW `held_by_other` or a
+      # genuinely held row reports its own lifecycle back at the caller and
+      # hides the one actionable fact: who to ask.
+      #
+      # Both halves of this ordering were found by TEST, not by reading. The
+      # first: with the stale-map fix in place but the original ordering kept,
+      # `QueueGate.execution_class/2` read the same dead claim, returned
+      # `foreign_claimed`, and the QUEUE arm masked a terminal lifecycle exactly
+      # as `held_by_other` had. The second: hoisting the WHOLE
+      # `not_claimable_status` arm then broke `claim_refusal_arm_test.exs` —
+      # a live-claimed row is `in_progress`, so it stopped naming its holder.
+      status in permanently_unclaimable_statuses() ->
         %{
           ok: false,
           reason: "not_ready",
@@ -1023,9 +1032,30 @@ defmodule BarkparkWeb.TasksController do
               "Read content.queue_gate.reason for what it is waiting on." <> residue
         }
 
+      status not in Validation.claimable_statuses() ->
+        %{
+          ok: false,
+          reason: "not_ready",
+          arm: "not_claimable_status",
+          lifecycle_status: status,
+          stale_claim_map: stale_map,
+          message:
+            "lifecycle_status is #{inspect(status)}; only " <>
+              "#{inspect(Validation.claimable_statuses())} is claimable. " <>
+              "Reopen it with `bp task stage <id> open` first." <> residue
+        }
+
       true ->
         %{ok: false, reason: "not_ready", arm: "unknown", stale_claim_map: stale_map}
     end
+  end
+
+  # PERMANENT means terminal-AND-unclaimable, DERIVED from the two canonical
+  # lists rather than hardcoded: `blocked` is a closed lifecycle AND claimable,
+  # and this subtraction drops it automatically. A literal ~w(done cancelled)
+  # would be correct today and silently disagree the day either list moves.
+  defp permanently_unclaimable_statuses do
+    Barkpark.Tasks.Close.closed_lifecycle_statuses() -- Validation.claimable_statuses()
   end
 
   # IS THIS CLAIM A LEASE OR RESIDUE? Compares `claim.ts_iso` against the SAME
