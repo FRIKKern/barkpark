@@ -950,8 +950,62 @@ defmodule BarkparkWeb.TasksController do
     gate = Map.get(c, "queue_gate")
     status = Map.get(c, "lifecycle_status")
 
+    # A CLAIM MAP OUTLIVES ITS LEASE, SO "is there a holder" IS THE WRONG FIRST
+    # QUESTION (task-4753f80a2ec47d03). `bp task stage <id> open` moves a row and
+    # leaves the claim map behind, and a lapsed lease is never swept from the
+    # map either — so a `claim.worker` proves only that somebody once claimed
+    # this row, not that anybody holds it now.
+    #
+    # MEASURED 2026-09-08, and the pair is the whole argument: two `cancelled`
+    # rows, same verb, same session, differing only in WHOSE name sat in a stale
+    # map. The one whose map named the caller got the correct, permanent reason
+    # ("lifecycle_status is \"cancelled\"; only [open, blocked] is claimable").
+    # The one whose map named another lane got "held by lead-instruments —
+    # nobody else can claim it", whose claim had expired SIX DAYS earlier. That
+    # message was wrong three ways: the row was not held; the real blocker (a
+    # terminal lifecycle) was hidden behind a transient-sounding one; and its
+    # remedy — "re-claim with it VERBATIM" — is itself refused on a terminal
+    # row. It also teaches a wrong SOCIAL move, which the other arms do not:
+    # it sends a lane to ask another lane for a row nobody holds.
+    #
+    # So `held_by_other` now requires a LIVE lease, and every other arm appends
+    # the stale map as CONTEXT rather than letting it mask the real reason. The
+    # caller gets both facts: the residue, and the blocker that will not change.
+    stale_map = not is_nil(holder) and holder != worker_id and not claim_lease_live?(c)
+    residue = if stale_map, do: stale_claim_note(c, holder), else: ""
+
     cond do
-      not is_nil(holder) and holder != worker_id ->
+      # ORDERED BY PERMANENCE, AND "PERMANENT" IS NARROWER THAN "NOT CLAIMABLE".
+      # A caller blocked by two things needs the one that WILL NOT CHANGE.
+      #
+      # Only a TERMINAL status is permanent: nothing but an explicit
+      # `bp task stage <id> open` moves `done` or `cancelled`. `in_progress` is
+      # NOT permanent — it is the SHADOW OF A LIVE CLAIM, and its real
+      # explanation is the holder, so it must stay BELOW `held_by_other` or a
+      # genuinely held row reports its own lifecycle back at the caller and
+      # hides the one actionable fact: who to ask.
+      #
+      # Both halves of this ordering were found by TEST, not by reading. The
+      # first: with the stale-map fix in place but the original ordering kept,
+      # `QueueGate.execution_class/2` read the same dead claim, returned
+      # `foreign_claimed`, and the QUEUE arm masked a terminal lifecycle exactly
+      # as `held_by_other` had. The second: hoisting the WHOLE
+      # `not_claimable_status` arm then broke `claim_refusal_arm_test.exs` —
+      # a live-claimed row is `in_progress`, so it stopped naming its holder.
+      status in permanently_unclaimable_statuses() ->
+        %{
+          ok: false,
+          reason: "not_ready",
+          arm: "not_claimable_status",
+          lifecycle_status: status,
+          stale_claim_map: stale_map,
+          message:
+            "lifecycle_status is #{inspect(status)}; only " <>
+              "#{inspect(Validation.claimable_statuses())} is claimable. " <>
+              "Reopen it with `bp task stage <id> open` first." <> residue
+        }
+
+      not is_nil(holder) and holder != worker_id and claim_lease_live?(c) ->
         %{
           ok: false,
           reason: "not_ready",
@@ -970,11 +1024,25 @@ defmodule BarkparkWeb.TasksController do
           reason: "not_ready",
           arm: "queue_gated",
           execution_class: QueueGate.execution_class(c, worker_id),
+          # THE CLASSIFICATION IS QueueGate'S AND IS LEFT EXACTLY AS COMPUTED —
+          # this field only says what it was DERIVED FROM. `QueueGate`'s notion
+          # of a live claim is `live_claim_worker/1`: a worker name AND no close
+          # stamp, with no timestamp comparison anywhere in it. So a claim whose
+          # lease expired days ago still reads LIVE there and still yields
+          # `foreign_claimed`. Without this note the envelope contradicted
+          # itself — the message saying "nobody holds this row and there is no
+          # one to ask" beside a field saying `foreign_claimed` — and A MACHINE
+          # READER KEYS ON THE FIELD, NOT THE PROSE (internal/cli's claim path
+          # renders `execution_class` directly). Fixing QueueGate is a separate
+          # row: its blast radius is every consumer of `execution_class`.
+          execution_class_note:
+            if(stale_map, do: "derived from a STALE claim map — the lease has expired"),
           gate_reason: if(is_map(gate), do: Map.get(gate, "reason")),
+          stale_claim_map: stale_map,
           message:
             "queue_gate state is #{inspect(QueueGate.execution_class(c, worker_id))} — this row " <>
               "is gated by its AUTHOR, not by readiness, and no retry will change that. " <>
-              "Read content.queue_gate.reason for what it is waiting on."
+              "Read content.queue_gate.reason for what it is waiting on." <> residue
         }
 
       status not in Validation.claimable_statuses() ->
@@ -983,15 +1051,76 @@ defmodule BarkparkWeb.TasksController do
           reason: "not_ready",
           arm: "not_claimable_status",
           lifecycle_status: status,
+          stale_claim_map: stale_map,
           message:
             "lifecycle_status is #{inspect(status)}; only " <>
               "#{inspect(Validation.claimable_statuses())} is claimable. " <>
-              "Reopen it with `bp task stage <id> open` first."
+              "Reopen it with `bp task stage <id> open` first." <> residue
         }
 
       true ->
-        %{ok: false, reason: "not_ready", arm: "unknown"}
+        %{ok: false, reason: "not_ready", arm: "unknown", stale_claim_map: stale_map}
     end
+  end
+
+  # PERMANENT means terminal-AND-unclaimable, DERIVED from the two canonical
+  # lists rather than hardcoded: `blocked` is a closed lifecycle AND claimable,
+  # and this subtraction drops it automatically. A literal ~w(done cancelled)
+  # would be correct today and silently disagree the day either list moves.
+  defp permanently_unclaimable_statuses do
+    Barkpark.Tasks.Close.closed_lifecycle_statuses() -- Validation.claimable_statuses()
+  end
+
+  # IS THIS CLAIM A LEASE OR RESIDUE? Compares `claim.ts_iso` against the SAME
+  # ttl the sweeper uses, read from config rather than hardcoded, so the two
+  # cannot drift apart.
+  #
+  # FAILS CLOSED ON PURPOSE: no timestamp, or one that will not parse, is
+  # treated as LIVE. This function can only ever DOWNGRADE somebody from holder
+  # to residue, so an unprovable case must keep the old protective behaviour —
+  # a parse bug here must not hand one lane another lane's row.
+  defp claim_lease_live?(content) do
+    case get_in(content, ["claim", "ts_iso"]) do
+      ts when is_binary(ts) ->
+        case DateTime.from_iso8601(ts) do
+          {:ok, claimed_at, _} ->
+            DateTime.diff(DateTime.utc_now(), claimed_at) < lease_ttl_seconds()
+
+          _ ->
+            true
+        end
+
+      _ ->
+        true
+    end
+  end
+
+  @default_lease_ttl_seconds 2700
+  defp lease_ttl_seconds,
+    do: Application.get_env(:barkpark, :task_lease_ttl_seconds, @default_lease_ttl_seconds)
+
+  # Names the residue AND says what it is not, because "held by X" was read as
+  # ownership by its own author tonight even with the finding written down.
+  defp stale_claim_note(content, holder) do
+    age =
+      case get_in(content, ["claim", "ts_iso"]) do
+        ts when is_binary(ts) ->
+          case DateTime.from_iso8601(ts) do
+            {:ok, at, _} ->
+              " (last renewed #{div(DateTime.diff(DateTime.utc_now(), at), 60)} minutes ago, " <>
+                "against a #{div(lease_ttl_seconds(), 60)}-minute lease)"
+
+            _ ->
+              ""
+          end
+
+        _ ->
+          ""
+      end
+
+    " NOTE: this row also carries a STALE claim map naming #{holder}#{age} — that lease has " <>
+      "expired, so nobody holds this row and there is no one to ask. The blocker above is the " <>
+      "real one."
   end
 
   defp claim_holder(content) do
