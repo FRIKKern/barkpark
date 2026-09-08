@@ -87,6 +87,10 @@
 - Disabled: Not applicable to the read-only Chronicle.
 - Offline/slow network: Core text and links are server-rendered. Media is optional evidence, and related cards preserve their authored links when live resolution is unavailable.
 
+## Card title editing contract
+
+Clicking the visible Card title must place the native caret in that title, never in its body. Reuse the proven isolated title editing-host boundary and composition-aware settlement; typing followed immediately by blur or View must not disappear. Preserve the authored title's semantic heading level, source shape, IDs and unknown metadata, and every untouched slot. Keep reader typography and layout, native keyboard access and shared history; do not add a pointer-focus workaround or a separate title panel as the primary path.
+
 ## Content voice
 - Tone: Clear, warm, specific, and lightly playful; closer to a beautifully edited product journal than an engineering report. Confident about shipped facts, restrained about interpretation, and comfortable saying that a period was mostly maintenance.
 - Terminology: Prefer ordinary phrases such as “clearer errors,” “more complete results,” “safer access,” and “easier day-to-day use.” Reserve counts, internal component names, code paths, protocols, fields, flags, commit language, “first-parent,” “digest,” and “renderer” for the technical record.
