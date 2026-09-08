@@ -316,6 +316,53 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
       assert is_binary(record["ts"]) and record["ts"] != ""
     end
 
+    # `blocked` IS THE SECOND EXEMPT LIFECYCLE, AND IT IS THE WHOLE POINT OF THE
+    # PAIR. Every honesty gate on this path exempts `cancelled` AND `blocked` by
+    # name, so a receipt proved on only one of them leaves the next reader no
+    # arm saying the other matters. Measured on the live server before this
+    # fix: a blocked close raised a declared gate at exit 0 with no trace,
+    # identical to the cancelled door — one code path, one predicate.
+    test "a BLOCKED close that flips a declared gate records it too", %{scope: scope} do
+      {task, epoch} = claimed_task!("mg-receipt-blocked", scope, "builder")
+
+      assert {:ok, _} =
+               Close.close(task.id, "builder",
+                 observed_epoch: epoch,
+                 lifecycle_status: "blocked",
+                 reason: "waiting on an upstream decision",
+                 criteria: [
+                   %{
+                     "index" => 1,
+                     "met" => true,
+                     "evidence" => @evidence,
+                     "criterion" => @gate_text
+                   }
+                 ],
+                 caller_token_id: "tok-xyz"
+               )
+
+      content = stored(task.id)
+      assert content["lifecycle_status"] == "blocked"
+      assert Enum.at(content["acceptance_criteria"], 1)["met"] == true
+
+      record = receipt(content, "close_body_flips")
+
+      assert is_map(record),
+             "a BLOCKED close that flipped a declared merge gate must leave a record, " <>
+               "got: #{inspect(record)}"
+
+      assert record["verified"] == false
+      assert record["source"] == "close_body_criteria"
+      assert record["indices"] == [1]
+      assert record["asserted_worker"] == "builder"
+      assert record["authenticated_token_id"] == "tok-xyz"
+
+      # The lifecycle is ON the record precisely so a reader can tell WHICH
+      # exemption was in play — the two doors are otherwise indistinguishable.
+      assert record["lifecycle_status"] == "blocked"
+      assert is_binary(record["ts"]) and record["ts"] != ""
+    end
+
     test "a close body that flips only NON-gated criteria mints nothing", %{scope: scope} do
       {task, epoch} = claimed_task!("mg-receipt-close-honest", scope, "builder")
 
