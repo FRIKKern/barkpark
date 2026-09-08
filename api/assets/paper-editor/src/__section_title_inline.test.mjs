@@ -15,6 +15,8 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 assert.match(shell, /\.bp-paper-section-title-form:not\(:focus-within\)\s*\{[^}]*position:\s*absolute[^}]*clip-path:\s*inset\(50%\)/s,
   "the mounted scalar form adds no resting title geometry");
+assert.match(shell, /\.bp-paper-section-title-form > label\.sr-only\s*\{[^}]*position:\s*absolute[^}]*width:\s*1px[^}]*height:\s*1px[^}]*clip-path:\s*inset\(50%\)/s,
+  "the accessible label stays visually hidden when the canonical form is focused");
 assert.match(shell, /\[data-paper-section-title-empty="true"\]:not\(:focus-within\)\s*\{[^}]*height:\s*0[^}]*margin-block:\s*0/s,
   "an absent or empty title stays zero-flow until focused");
 assert.match(shell, /\.bp-paper-section-title-editor:has\(\.bp-paper-section-title-form:focus-within\)[^{]*> \.bp-paper-section-title-paint\s*\{[^}]*display:\s*none/s,
