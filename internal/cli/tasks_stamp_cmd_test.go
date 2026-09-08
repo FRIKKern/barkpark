@@ -3,8 +3,10 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -265,6 +267,57 @@ func stampTestServerQuery(t *testing.T, sink *string) *int32 {
 	return stampTestServerWith(t, stampStoreHonest, minimalStampManifest, sink)
 }
 
+// stampMergedParams reads a stamp request the way the REAL server does.
+//
+// THIS FAKE USED TO READ `r.URL.Query()` ONLY, and that made it a WEAKER server
+// than the one it stands in for. Phoenix merges query params and body params
+// into `conn.params` (body wins on a collision), and
+// `TasksController.stamp/2` pattern-matches on that merge — it does
+// `Map.get(params, "evidence")`, never `conn.query_params`. So a query-only fake
+// cannot see a request the production server accepts, and it reds a change that
+// production would have taken.
+//
+// That is why the prose moved to the body at all: in the query it rides the
+// REQUEST LINE, where a measured wall sits at ~9.9 KB (task-b71ece4e1a8d1f6d).
+// Correcting the fake to merge is not loosening it — it is closing a gap
+// between the fake and the system, and it makes the fake able to prove the
+// compatibility property the change depends on: BOTH shapes are accepted, so an
+// old bp keeps working against a new server and vice versa.
+func stampMergedParams(r *http.Request) url.Values {
+	merged := url.Values{}
+	for k, vs := range r.URL.Query() {
+		for _, v := range vs {
+			merged.Add(k, v)
+		}
+	}
+	if r.Body == nil {
+		return merged
+	}
+	raw, err := io.ReadAll(r.Body)
+	if err != nil || len(raw) == 0 {
+		return merged
+	}
+	var body map[string]any
+	if json.Unmarshal(raw, &body) != nil {
+		return merged
+	}
+	for k, v := range body {
+		switch tv := v.(type) {
+		case string:
+			merged.Set(k, tv) // body WINS, as Plug's merge does
+		case bool:
+			if tv {
+				merged.Set(k, "true")
+			} else {
+				merged.Set(k, "false")
+			}
+		case float64:
+			merged.Set(k, strconv.FormatFloat(tv, 'f', -1, 64))
+		}
+	}
+	return merged
+}
+
 func stampTestServerWith(t *testing.T, mode stampStoreMode, manifestJSON string, querySink *string) *int32 {
 	t.Helper()
 	var hits int32
@@ -283,7 +336,7 @@ func stampTestServerWith(t *testing.T, mode stampStoreMode, manifestJSON string,
 				mu.Unlock()
 			}
 			if mode == stampStoreHonest || mode == stampStore500Landed {
-				q := r.URL.Query()
+				q := stampMergedParams(r)
 				idx, err := strconv.Atoi(q.Get("criterion"))
 				if err == nil {
 					mu.Lock()

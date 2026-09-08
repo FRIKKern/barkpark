@@ -2035,6 +2035,41 @@ func commandFlagBelongsInBody(cmd manifest.Command, name string) bool {
 			return true
 		}
 	}
+	// task.stamp's PROSE rides the body, because in the query string it rides the
+	// REQUEST LINE — and that is where the wall is.
+	//
+	// MEASURED, not assumed (task-b71ece4e1a8d1f6d): a stamp whose encoded URI
+	// reaches 9,933 bytes is refused, deterministically, 3/3, as
+	// `stream error: … INTERNAL_ERROR; received from peer`. 9,913 bytes lands.
+	// The refusal names no field, no bound and no unit, is indistinguishable
+	// from a network blip, and is DETERMINISTIC WHILE LOOKING TRANSIENT — so the
+	// response it invites is retry, and the conclusion after two retries is "the
+	// ledger is unreliable tonight".
+	//
+	// WHY THIS IS THE FIX RATHER THAN A LIMIT CHECK: a server cannot describe a
+	// request it never finished parsing. No validation message is reachable from
+	// a request line the peer rejected, so the only repair that can produce a
+	// good error is to stop putting prose there. `close` already posts its
+	// reason in the body and has no such wall (URI 69 bytes against a 9,812-byte
+	// reason); this puts stamp on the same footing.
+	//
+	// THE SERVER ALREADY ACCEPTS BOTH, so this needs no coordinated deploy:
+	// Phoenix merges query and body into conn.params, and TasksController.stamp/2
+	// reads Map.get(params, "evidence") / "note" off that merge. An OLD bp keeps
+	// working against a NEW server and vice versa. The query path is retained for
+	// compatibility, NOT because it is correct.
+	//
+	// `criterion-text` deliberately STAYS in the query: the server accepts
+	// "criterion_text" and "criterion-text" but not the camelCase "criterionText"
+	// that bodyFlagKey would produce for a hyphenated name. It is bounded by the
+	// criterion's own length (~1.5 KB worst case observed), so the remaining URI
+	// is nowhere near the wall. Moving it needs a key-preserving body path first.
+	if cmd.ID == "task.stamp" {
+		switch name {
+		case "evidence", "note":
+			return true
+		}
+	}
 	return false
 }
 
