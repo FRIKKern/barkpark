@@ -38,8 +38,6 @@ Drift = the ONE comparison, pinned `fallback` vs resolved value, made where the 
 
 ## Authoring (v1)
 
-List-specific source-carrier preservation is defined in [list authoring](portable-doc-list-authoring.md); inline live-ref semantics below are unchanged.
-
 Bulldocs ingest block-ops API only (`POST /v1/plugins/bulldocs/papers/<slug>/ops`, `append-block`). The editor round-trips existing nodes (convert.js, both directions, per-block + canvas) but has no insert affordance yet. patch-block shallow-merges per block — patching `content` replaces the whole array.
 
 ## Tests / fixtures
