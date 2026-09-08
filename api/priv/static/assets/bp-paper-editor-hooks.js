@@ -2680,6 +2680,13 @@
                     this.el[PAPER_CANVAS_LEASE_OVERFLOW] = true;
                   }
                 }
+                if (saved && !result?.discarded && entry.boundaryLeasePending) {
+                  // A saved boundary mutation without an authoritative lease
+                  // result cannot be allowed to fall out of the queue and lose
+                  // the only reconnect ownership signal. Fail closed until its
+                  // matching echo supplies a valid lease set.
+                  this.el[PAPER_CANVAS_LEASE_OVERFLOW] = true;
+                }
                 this._sendingOps = false;
                 if (result?.discarded) {
                   this._opsQueue = [];

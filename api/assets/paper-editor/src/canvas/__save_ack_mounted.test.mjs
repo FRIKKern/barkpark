@@ -1078,6 +1078,80 @@ try {
   );
   overflowReply.close();
 
+  const replyBeforeLeaseEcho = await mount({ revision: 15 });
+  replyBeforeLeaseEcho.main.querySelector("[phx-hook]").dataset.paperContainerKind = "document";
+  document.body.prepend(replyBeforeLeaseEcho.main);
+  replyBeforeLeaseEcho.canvas._editor.commands.insertContentAt(
+    replyBeforeLeaseEcho.canvas._editor.state.doc.content.size,
+    slashTypeToNode("table"),
+  );
+  replyBeforeLeaseEcho.canvas.flushPendingChanges();
+  const replyBeforeLeaseSave = replyBeforeLeaseEcho.requests[0];
+  const replyBeforeLeaseTable = inserted(replyBeforeLeaseSave);
+  replyBeforeLeaseSave.resolve({
+    saved: true,
+    rev: 16,
+    request_id: replyBeforeLeaseSave.payload.request_id,
+  });
+  await tick();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    {
+      paper_editing_key: "paper-overlap-probe",
+      paper_canvas_lease_key: "paper-overlap-probe",
+      paper_canvas_lease_overflow: true,
+    },
+    "a saved boundary reply missing lease authority fails closed after leaving the queue",
+  );
+  replyBeforeLeaseEcho.echo([paragraph("original", "Original"), replyBeforeLeaseTable], {
+    rev: 16,
+    request_id: replyBeforeLeaseSave.payload.request_id,
+    retained_leases: ["reply-before-echo-lease"],
+  });
+  await tick();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    {
+      paper_editing_key: "paper-overlap-probe",
+      paper_canvas_lease_key: "paper-overlap-probe",
+      paper_canvas_leases: ["reply-before-echo-lease"],
+    },
+    "a later authoritative lease echo recovers a reply-first fail-closed owner",
+  );
+  replyBeforeLeaseEcho.close();
+
+  const leaseEchoBeforeReply = await mount({ revision: 17 });
+  leaseEchoBeforeReply.main.querySelector("[phx-hook]").dataset.paperContainerKind = "document";
+  document.body.prepend(leaseEchoBeforeReply.main);
+  leaseEchoBeforeReply.canvas._editor.commands.insertContentAt(
+    leaseEchoBeforeReply.canvas._editor.state.doc.content.size,
+    slashTypeToNode("section"),
+  );
+  leaseEchoBeforeReply.canvas.flushPendingChanges();
+  const leaseEchoBeforeSave = leaseEchoBeforeReply.requests[0];
+  const leaseEchoBeforeSection = inserted(leaseEchoBeforeSave);
+  leaseEchoBeforeReply.echo([paragraph("original", "Original"), leaseEchoBeforeSection], {
+    rev: 18,
+    request_id: leaseEchoBeforeSave.payload.request_id,
+    retained_leases: ["echo-before-reply-lease"],
+  });
+  leaseEchoBeforeSave.resolve({
+    saved: true,
+    rev: 18,
+    request_id: leaseEchoBeforeSave.payload.request_id,
+  });
+  await tick();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    {
+      paper_editing_key: "paper-overlap-probe",
+      paper_canvas_lease_key: "paper-overlap-probe",
+      paper_canvas_leases: ["echo-before-reply-lease"],
+    },
+    "an authoritative echo arriving first prevents a later legacy reply from re-blocking reconnect",
+  );
+  leaseEchoBeforeReply.close();
+
   const queuedBoundaries = await mount({ revision: 20 });
   queuedBoundaries.main.querySelector("[phx-hook]").dataset.paperContainerKind = "document";
   document.body.prepend(queuedBoundaries.main);
