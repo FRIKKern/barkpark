@@ -3974,7 +3974,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     end
   end
 
-  defp figure_caption_value(block), do: Blocks.form_value(Map.get(block, "caption"))
+  defp figure_caption_value(block) do
+    case Map.get(block, "caption") do
+      caption when is_binary(caption) -> caption
+      nil -> ""
+      caption when is_number(caption) or is_atom(caption) -> to_string(caption)
+      _ -> ""
+    end
+  end
 
   defp figure_child_segment(%{"child" => child}, true) do
     [child]
@@ -3991,7 +3998,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # would raise Phoenix.HTML.Safe in the render and take the whole pane down.
   defp image_block_src(block) do
     case Map.get(block, "src") do
-      src when is_binary(src) -> src
+      src when is_binary(src) -> if(String.trim(src) == "", do: "", else: src)
       _ -> ""
     end
   end

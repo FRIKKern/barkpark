@@ -199,6 +199,30 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
     refute html =~ ~s(data-test-id="paper-block-image-picker")
   end
 
+  test "a whitespace-only image source uses the visible empty-image recovery state" do
+    child = %{
+      "id" => "image-child",
+      "type" => "image",
+      "src" => " \n\t ",
+      "alt" => "Missing trail map"
+    }
+
+    html =
+      render_component(&PaperEditor.paper_block_fields/1,
+        block: figure(child),
+        picker_browse: true
+      )
+
+    tree = LazyHTML.from_fragment(html)
+    preview = LazyHTML.query(tree, "[data-test-id='paper-figure-image-preview']")
+    picker = LazyHTML.query(tree, "[data-test-id='paper-block-image-picker']")
+
+    assert LazyHTML.attribute(preview, "data-image-src") == [""]
+    assert LazyHTML.attribute(picker, "value") == [""]
+    assert Enum.empty?(LazyHTML.query(preview, "img"))
+    assert html =~ ~s(data-test-id="paper-figure-image-picker")
+  end
+
   test "an empty caption keeps one stable textarea and exposes a zero-flow focus control" do
     block = figure(paragraph("child", "Inside")) |> Map.put("caption", "")
     html = render_component(&PaperEditor.paper_block_fields/1, block: block)
@@ -263,6 +287,32 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
 
     assert LazyHTML.text(LazyHTML.query(acknowledged, "[data-paper-figure-caption-paint]")) ==
              "Figure 2. Acknowledged"
+  end
+
+  test "caption paint follows reader stringification for scalar and malformed source values" do
+    numeric = figure(paragraph("child", "Inside")) |> Map.put("caption", 42.5)
+    numeric_html = render_component(&PaperEditor.paper_block_fields/1, block: numeric)
+    numeric_tree = LazyHTML.from_fragment(numeric_html)
+
+    assert LazyHTML.text(LazyHTML.query(numeric_tree, "[data-paper-figure-caption-paint]")) ==
+             "42.5"
+
+    assert LazyHTML.text(LazyHTML.query(numeric_tree, "#figure-caption-figure")) == "42.5"
+
+    for value <- [nil, %{"opaque" => true}, ["opaque"]] do
+      block = figure(paragraph("child", "Inside")) |> Map.put("caption", value)
+      html = render_component(&PaperEditor.paper_block_fields/1, block: block)
+
+      tree = LazyHTML.from_fragment(html)
+
+      assert LazyHTML.attribute(
+               LazyHTML.query(tree, "figcaption"),
+               "data-paper-figure-caption-empty"
+             ) == ["true"]
+
+      assert Enum.empty?(LazyHTML.query(tree, "[data-paper-figure-caption-paint]"))
+      assert LazyHTML.text(LazyHTML.query(tree, "textarea")) == ""
+    end
   end
 
   test "missing, nil, scalar, and unstable children remain honest read-only previews" do
