@@ -966,6 +966,72 @@ try {
     pendingReconnect.close();
   }
 
+  const studioFocus = await mount({ revision: 7 });
+  const originalStudioMain = studioFocus.main;
+  originalStudioMain.id = "paper-editor-studio-focus";
+  const originalStudioShell = document.createElement("section");
+  originalStudioShell.id = "studio-responsive-pane";
+  originalStudioMain.parentElement.insertBefore(originalStudioShell, originalStudioMain);
+  originalStudioShell.appendChild(originalStudioMain);
+  const studioWrapper = originalStudioMain.querySelector("[phx-hook]");
+  studioFocus.hook.disconnected();
+  studioFocus.canvas._editor.view.dispatch(
+    studioFocus.canvas._editor.state.tr.insertText(" focused draft", 9),
+  );
+  const studioEditor = studioFocus.canvas._editor;
+  studioEditor.commands.setTextSelection("end");
+  studioEditor.view.focus();
+  assert.equal(studioEditor.view.hasFocus(), true,
+    "offline Studio editing has rich focus before the reconnect join morph");
+  const studioSelection = studioEditor.state.selection.from;
+  const studioHistory = undoDepth(studioEditor.state);
+
+  const replacementStudioMain = document.createElement("main");
+  const replacementStudioRoot = document.createElement("div");
+  replacementStudioRoot.id = originalStudioMain.id;
+  replacementStudioRoot.className = "bp-paper-editor";
+  replacementStudioRoot.dataset.paperDocKey = originalStudioMain.dataset.paperDocKey;
+  replacementStudioRoot.dataset.paperCanvasResumeHalt = "true";
+  replacementStudioRoot.dataset.paperCanvasResumeState = "pending";
+  replacementStudioRoot.setAttribute("inert", "");
+  const incomingStudioShell = document.createElement("section");
+  incomingStudioShell.id = originalStudioShell.id;
+  incomingStudioShell.appendChild(replacementStudioRoot.cloneNode(false));
+  window.BarkparkPaperEditorBeforeElUpdated(originalStudioShell, incomingStudioShell);
+  assert.equal(studioFocus.canvas._resumeFocusState, "armed",
+    "the Studio ancestor join morph captures the canvas focused after disconnect");
+  studioEditor.view.dom.blur();
+  replacementStudioRoot.appendChild(studioWrapper);
+  replacementStudioMain.appendChild(replacementStudioRoot);
+  document.body.appendChild(replacementStudioMain);
+  studioFocus.hook.reconnected();
+  await tick();
+  assert.equal(studioFocus.canvas._editor, studioEditor,
+    "Studio reconnect keeps the ignored editor while replacing its outer root and main");
+  assert.equal(studioEditor.view.hasFocus(), false,
+    "the pending inert render cannot restore focus before retry acknowledgement");
+
+  const resumedStudioMain = document.createElement("main");
+  const resumedStudioRoot = replacementStudioRoot.cloneNode(false);
+  delete resumedStudioRoot.dataset.paperCanvasResumeHalt;
+  delete resumedStudioRoot.dataset.paperCanvasResumeState;
+  resumedStudioRoot.removeAttribute("inert");
+  resumedStudioMain.appendChild(resumedStudioRoot);
+  window.BarkparkPaperEditorBeforeElUpdated(replacementStudioMain, resumedStudioMain);
+  delete replacementStudioRoot.dataset.paperCanvasResumeHalt;
+  delete replacementStudioRoot.dataset.paperCanvasResumeState;
+  replacementStudioRoot.removeAttribute("inert");
+  await tick();
+  assert.equal(studioEditor.view.hasFocus(), true,
+    "Studio restores focus after the acknowledged retry removes the halt");
+  assert.equal(studioEditor.state.selection.from, studioSelection,
+    "Studio reconnect restores the exact rich-editor selection");
+  assert.equal(undoDepth(studioEditor.state), studioHistory,
+    "Studio reconnect focus restoration does not alter native history");
+  studioFocus.close();
+  replacementStudioMain.remove();
+  originalStudioShell.remove();
+
   const leaseControls = await mount({ revision: 8, blocks: [paragraph("private-draft", "Private draft")] });
   document.body.prepend(leaseControls.main);
   const boundedLeases = ["lease-0", "lease-0", ...Array.from(
@@ -1399,6 +1465,14 @@ try {
     "downloading does not replace or reconcile the live editor");
   assert.equal(recovery.requests.length, 0,
     "downloading performs no persistence or network mutation");
+  const replacementMain = document.createElement("main");
+  replacementMain.dataset.testId = "studio-paper-shell-reconnected";
+  replacementMain.append(warning, recoveryRoot);
+  document.body.appendChild(replacementMain);
+  recovery.hook.reconnected();
+  await tick();
+  assert.equal(recoveryWrapper.closest("main"), replacementMain,
+    "the ignored canvas can survive a Studio shell replacement");
   const reloadButton = warning.querySelector('[data-test-id="paper-canvas-reload-server"]');
   const reloadEvent = () => ({
     button: 0,
@@ -1447,6 +1521,7 @@ try {
   warning.remove();
   nestedHook.destroyed();
   recovery.close();
+  replacementMain.remove();
 
   const queuedBoundaries = await mount({ revision: 20 });
   queuedBoundaries.main.querySelector("[phx-hook]").dataset.paperContainerKind = "document";

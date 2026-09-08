@@ -784,7 +784,7 @@
 
   function bpPaperExitCoordinator(hook) {
     if (hook._bpPaperExitCoordinator) return hook._bpPaperExitCoordinator;
-    const main = hook.el.closest?.("main");
+    let main = hook.el.closest?.("main");
     if (!main) return null;
     let coordinator = paperExitCoordinators.get(main);
     if (!coordinator) {
@@ -884,6 +884,18 @@
       };
 
       coordinator = {
+        rebindMain(nextMain, observedDocumentKey) {
+          if (!nextMain || nextMain === main) return nextMain === main;
+          if (!observedDocumentKey || observedDocumentKey !== documentKey) return false;
+          const occupied = paperExitCoordinators.get(nextMain);
+          if (occupied && occupied !== coordinator) return false;
+          if (paperExitCoordinators.get(main) === coordinator) {
+            paperExitCoordinators.delete(main);
+          }
+          main = nextMain;
+          paperExitCoordinators.set(main, coordinator);
+          return true;
+        },
         register(member) {
           members.add(member);
           member._bpPaperExitCoordinator = coordinator;
@@ -2222,6 +2234,37 @@
   document.addEventListener("click", bpPaperReloadCanvasRecovery);
 
   function bpPaperBeforeElUpdated(fromEl, toEl) {
+    const paperEditorRootsWithin = (element) => {
+      if (!element?.querySelectorAll) return [];
+      const roots = [...element.querySelectorAll(".bp-paper-editor[data-paper-doc-key]")];
+      if (element.matches?.(".bp-paper-editor[data-paper-doc-key]")) roots.unshift(element);
+      return roots;
+    };
+    const fromPaperRoots = paperEditorRootsWithin(fromEl);
+    const toPaperRoots = paperEditorRootsWithin(toEl);
+    toPaperRoots.forEach((toRoot) => {
+      if (!toRoot.id) return;
+      const fromRoot = fromPaperRoots.find((candidate) =>
+        candidate.id === toRoot.id &&
+        candidate.dataset.paperDocKey === toRoot.dataset.paperDocKey
+      );
+      if (!fromRoot) return;
+      const wasRootHalted = fromRoot.dataset.paperCanvasResumeHalt === "true";
+      const nextRootState = toRoot.dataset.paperCanvasResumeState;
+      const willRootHalt = toRoot.dataset.paperCanvasResumeHalt === "true" &&
+        (nextRootState === "pending" || nextRootState === "blocked");
+      const liveCanvases = [...fromRoot.querySelectorAll("bp-paper-canvas")].filter(
+        (canvas) => canvas.closest(".bp-paper-editor[data-paper-doc-key]") === fromRoot,
+      );
+      if (!wasRootHalted && willRootHalt) {
+        liveCanvases.forEach((canvas) => canvas.captureResumeFocus?.());
+      } else if (wasRootHalted && !willRootHalt) {
+        Promise.resolve().then(() => {
+          liveCanvases.forEach((canvas) => canvas.restoreResumeFocus?.());
+        });
+      }
+    });
+
     const resumeState = toEl?.dataset?.paperCanvasResumeState;
     const samePaperEditor = fromEl?.id && fromEl.id === toEl?.id &&
       fromEl.dataset?.paperDocKey &&
@@ -2229,20 +2272,6 @@
     const wasHalted = fromEl?.dataset?.paperCanvasResumeHalt === "true";
     const willHalt = toEl?.dataset?.paperCanvasResumeHalt === "true" &&
       (resumeState === "pending" || resumeState === "blocked");
-    const canvasesForRoot = () => [...fromEl.querySelectorAll("bp-paper-canvas")].filter(
-      (canvas) => canvas.closest(".bp-paper-editor[data-paper-doc-key]") === fromEl,
-    );
-    if (samePaperEditor && !wasHalted && willHalt) {
-      canvasesForRoot().forEach((canvas) => {
-        canvas.captureResumeFocus?.();
-      });
-    }
-    if (samePaperEditor && wasHalted && !willHalt) {
-      const canvases = canvasesForRoot();
-      Promise.resolve().then(() => {
-        canvases.forEach((canvas) => canvas.restoreResumeFocus?.());
-      });
-    }
     if (willHalt && samePaperEditor) {
       // LiveView snapshots phx-update="ignore" from the OLD element before
       // calling this callback, so the server's new ignore marker cannot cancel
@@ -3161,10 +3190,32 @@
         }
       },
       updated() {
+        const editorRoot = this.el.closest(".bp-paper-editor[data-paper-doc-key]");
+        this._exitCoordinator?.rebindMain?.(
+          this.el.closest("main"),
+          editorRoot?.dataset.paperDocKey,
+        );
         if (typeof this._repaintFleet === "function") this._repaintFleet();
       },
+      disconnected() {
+        // Capture before LiveView's reconnect patch can make the Studio shell
+        // inert or move its responsive column. The WC owns all cancellation
+        // and identity guards; this hook only supplies the earlier lifecycle
+        // edge that is not observable from the eventual halt morph.
+        this.el.querySelector("bp-paper-canvas")?.captureResumeFocus?.();
+      },
       reconnected() {
+        const editorRoot = this.el.closest(".bp-paper-editor[data-paper-doc-key]");
+        this._exitCoordinator?.rebindMain?.(
+          this.el.closest("main"),
+          editorRoot?.dataset.paperDocKey,
+        );
         this._retryQueuedOpsAfterReconnect?.();
+        const canvas = this.el.querySelector("bp-paper-canvas");
+        if (editorRoot && !editorRoot.hasAttribute("inert") &&
+            editorRoot.dataset.paperCanvasResumeHalt !== "true") {
+          Promise.resolve().then(() => canvas?.restoreResumeFocus?.());
+        }
       },
       destroyed() {
         this._saveBridgeDestroyed = true;
