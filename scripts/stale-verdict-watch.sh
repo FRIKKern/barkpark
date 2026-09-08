@@ -1178,7 +1178,7 @@ selftest() {
     || st_ok "(11) a nonsense assertion fails, so the greps above are load-bearing"
 
   echo
-  # ── (q) THE SPLIT READ (task-589fb46ee65456e7) ────────────────────────────
+  # ── (s) THE SPLIT READ (task-589fb46ee65456e7) ────────────────────────────
   # The population is read WITHOUT the status rollup and the rollup is fetched
   # only for CONFLICTING rows. These arms hold the three ways that can go wrong.
   run_child_roll() { # <fixture> <baseline> <rollup-fixture> [extra…] -> rc; output in $d/out.txt
@@ -1195,40 +1195,40 @@ selftest() {
   jq -c -n --argjson r "$rollup" '{"9001": $r}' > "$d/rollup.json"
   : > "$d/empty-pin"
 
-  # (q1) POSITIVE: the rollup is attached, and the verdict that needs it is
+  # (s1) POSITIVE: the rollup is attached, and the verdict that needs it is
   #      reached — the same NOVEL red arm (1) proves, but arriving via the split.
   run_child_roll "$d/light.json" "$d/empty-pin" "$d/rollup.json"; rc=$?
   out="$(cat "$d/out.txt")"
-  [ "$rc" = "1" ] && st_ok "(q1) a light population + a separately-fetched rollup still reds on a stale verdict" \
-    || st_bad "(q1) expected rc 1 through the split read, got $rc: $out"
+  [ "$rc" = "1" ] && st_ok "(s1) a light population + a separately-fetched rollup still reds on a stale verdict" \
+    || st_bad "(s1) expected rc 1 through the split read, got $rc: $out"
   grep -q "NOVEL  1 — #9001" <<<"$out" \
-    && st_ok "(q1) …and #9001 is named, so the rollup really was attached to the conflicting row" \
-    || st_bad "(q1) #9001 was not named through the split read: $out"
+    && st_ok "(s1) …and #9001 is named, so the rollup really was attached to the conflicting row" \
+    || st_bad "(s1) #9001 was not named through the split read: $out"
 
-  # (q2) THE BUDGET REFUSES BEFORE SPENDING. --rollup-max 0 with one conflicting
+  # (s2) THE BUDGET REFUSES BEFORE SPENDING. --rollup-max 0 with one conflicting
   #      row must exit 9 and say so, rather than issuing the call.
   run_child_roll "$d/light.json" "$d/empty-pin" "$d/rollup.json" --rollup-max 0; rc=$?
   out="$(cat "$d/out.txt")"
-  [ "$rc" = "9" ] && st_ok "(q2) more conflicting rows than --rollup-max exits 9, the budget refusal" \
-    || st_bad "(q2) expected rc 9 over the rollup budget, got $rc: $out"
+  [ "$rc" = "9" ] && st_ok "(s2) more conflicting rows than --rollup-max exits 9, the budget refusal" \
+    || st_bad "(s2) expected rc 9 over the rollup budget, got $rc: $out"
   grep -q "ROLLUP BUDGET EXCEEDED" <<<"$out" \
-    && st_ok "(q2) …and it names the budget rather than failing silently" \
-    || st_bad "(q2) the budget refusal did not name itself: $out"
+    && st_ok "(s2) …and it names the budget rather than failing silently" \
+    || st_bad "(s2) the budget refusal did not name itself: $out"
 
-  # (q3) A MISSING ROLLUP IS A FAILED READ, NOT AN EMPTY ONE. This is the
+  # (s3) A MISSING ROLLUP IS A FAILED READ, NOT AN EMPTY ONE. This is the
   #      silent-zero family: an empty rollup would flow into the verdict as
   #      "no required context rendered", a claim ABOUT the pull request.
   echo '{}' > "$d/rollup-missing.json"
   run_child_roll "$d/light.json" "$d/empty-pin" "$d/rollup-missing.json"; rc=$?
   out="$(cat "$d/out.txt")"
-  [ "$rc" = "2" ] && st_ok "(q3) a CONFLICTING row whose rollup could not be read exits 2, never 0" \
-    || st_bad "(q3) expected rc 2 for an unreadable rollup, got $rc: $out"
+  [ "$rc" = "2" ] && st_ok "(s3) a CONFLICTING row whose rollup could not be read exits 2, never 0" \
+    || st_bad "(s3) expected rc 2 for an unreadable rollup, got $rc: $out"
   case "$out" in
-    *"NOVEL"*) st_bad "(q3) an unreadable rollup produced a VERDICT about the pull request: $out" ;;
-    *) st_ok "(q3) …and it issues no verdict about #9001 on evidence it does not have" ;;
+    *"NOVEL"*) st_bad "(s3) an unreadable rollup produced a VERDICT about the pull request: $out" ;;
+    *) st_ok "(s3) …and it issues no verdict about #9001 on evidence it does not have" ;;
   esac
 
-  # (q4) BLIND STILL FAILS, and it is proved by MUTATION rather than asserted.
+  # (s4) BLIND STILL FAILS, and it is proved by MUTATION rather than asserted.
   #      Strip the `blind` clause on a copy; the all-UNKNOWN population must
   #      then stop exiting 5. If it does not, arm (6) was never measuring it and
   #      the split read could have quietly turned a blind run green.
@@ -1237,8 +1237,8 @@ selftest() {
        updatedAt:"2026-08-01T00:00:00Z", statusCheckRollup:[]}]' > "$d/blind.json"
   bash "$0" --fixture "$d/blind.json" --commits "$d/commits.txt" --spec "$SPEC" \
     --repo FRIKKern/barkpark --baseline "$d/empty-pin" > "$d/out.txt" 2>&1; rc=$?
-  [ "$rc" = "5" ] && st_ok "(q4) an all-UNKNOWN population still exits 5 BLIND under the split read" \
-    || st_bad "(q4) expected rc 5 BLIND after the split, got $rc: $(cat "$d/out.txt")"
+  [ "$rc" = "5" ] && st_ok "(s4) an all-UNKNOWN population still exits 5 BLIND under the split read" \
+    || st_bad "(s4) expected rc 5 BLIND after the split, got $rc: $(cat "$d/out.txt")"
 
   # AIM AT THE ARM THAT DECIDES, NOT THE ONE THAT REPORTS. The first version of
   # this mutation stripped the verdict's `.blind` FIELD and the run STILL exited
@@ -1247,13 +1247,13 @@ selftest() {
   # the predicate lives in TWO places; this one targets the live half.
   sed 's/then return 5; fi/then :; fi/' "$0" > "$d/mut-blind.sh"
   if diff -q "$0" "$d/mut-blind.sh" >/dev/null 2>&1; then
-    st_bad "(q4) MUTATION did not apply — the blind clause moved, so this arm proves nothing"
+    st_bad "(s4) MUTATION did not apply — the blind clause moved, so this arm proves nothing"
   else
     bash "$d/mut-blind.sh" --fixture "$d/blind.json" --commits "$d/commits.txt" --spec "$SPEC" \
       --repo FRIKKern/barkpark --baseline "$d/empty-pin" > "$d/out.txt" 2>&1; rc=$?
     [ "$rc" = "5" ] \
-      && st_bad "(q4) MUTATION SURVIVED: still exited 5 with the blind clause removed" \
-      || st_ok "(q4) with the blind clause removed the same population stops failing — the refusal is live, not decorative"
+      && st_bad "(s4) MUTATION SURVIVED: still exited 5 with the blind clause removed" \
+      || st_ok "(s4) with the blind clause removed the same population stops failing — the refusal is live, not decorative"
   fi
 
 
