@@ -1057,6 +1057,7 @@ class BpPaperCanvas extends HTMLElement {
     const ownerDocument = this.ownerDocument;
     const activeElement = ownerDocument?.activeElement;
     const paperRoot = this.closest(".bp-paper-editor[data-paper-doc-key]");
+    const paperRootId = paperRoot?.id;
     const paperDocKey = paperRoot?.getAttribute("data-paper-doc-key");
     const hasRichFocus =
       editor?.view?.hasFocus?.() === true &&
@@ -1070,6 +1071,7 @@ class BpPaperCanvas extends HTMLElement {
       editor?.isEditable !== true ||
       !hasRichFocus ||
       !paperRoot ||
+      !paperRootId ||
       !paperDocKey
     ) {
       return false;
@@ -1078,7 +1080,7 @@ class BpPaperCanvas extends HTMLElement {
     this._resumeFocusIntent = {
       editor,
       ownerDocument,
-      paperRoot,
+      paperRootId,
       paperDocKey,
     };
     this._resumeFocusState = "armed";
@@ -1098,8 +1100,9 @@ class BpPaperCanvas extends HTMLElement {
     this._clearResumeFocusIntent();
     if (!armed || !intent) return false;
 
-    const { editor, ownerDocument, paperRoot, paperDocKey } = intent;
+    const { editor, ownerDocument, paperRootId, paperDocKey } = intent;
     const activeElement = ownerDocument?.activeElement;
+    const paperRoot = this.closest(".bp-paper-editor[data-paper-doc-key]");
     const focusIsEmpty =
       activeElement == null ||
       activeElement === ownerDocument.body ||
@@ -1112,8 +1115,8 @@ class BpPaperCanvas extends HTMLElement {
       this._mode !== "rich" ||
       !this._editable ||
       editor.isEditable !== true ||
-      this.closest(".bp-paper-editor[data-paper-doc-key]") !== paperRoot ||
-      paperRoot.getAttribute("data-paper-doc-key") !== paperDocKey ||
+      paperRoot?.id !== paperRootId ||
+      paperRoot?.getAttribute("data-paper-doc-key") !== paperDocKey ||
       this.closest("[inert]") != null ||
       !focusIsEmpty
     ) {

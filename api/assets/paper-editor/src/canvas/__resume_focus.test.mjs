@@ -36,6 +36,7 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 function mount(id, { editable = true } = {}) {
   const root = document.createElement("section");
+  root.id = `paper-editor-${id}`;
   root.className = "bp-paper-editor";
   root.setAttribute("data-paper-doc-key", `production:paper:${id}`);
   const canvas = document.createElement("bp-paper-canvas");
@@ -80,6 +81,34 @@ try {
   assert.equal(resumed.canvas.restoreResumeFocus(), false,
     "the reconnect focus intent is consumed once");
   close(resumed);
+
+  const replaced = mount("resume-replaced-root");
+  focusRich(replaced);
+  const replacedSelection = replaced.editor.state.selection.from;
+  const replacedHistory = undoDepth(replaced.editor.state);
+  assert.equal(replaced.canvas.captureResumeFocus(), true);
+  replaced.root.setAttribute("inert", "");
+  replaced.editor.view.dom.blur();
+  const replacementRoot = document.createElement("section");
+  replacementRoot.id = replaced.root.id;
+  replacementRoot.className = replaced.root.className;
+  replacementRoot.setAttribute(
+    "data-paper-doc-key",
+    replaced.root.getAttribute("data-paper-doc-key"),
+  );
+  replacementRoot.setAttribute("inert", "");
+  document.body.appendChild(replacementRoot);
+  replacementRoot.appendChild(replaced.canvas);
+  replaced.root.remove();
+  await tick();
+  assert.equal(replaced.canvas._editor, replaced.editor,
+    "a same-id/document ancestor replacement retains the editor instance");
+  replacementRoot.removeAttribute("inert");
+  assert.equal(replaced.canvas.restoreResumeFocus(), true,
+    "logical root identity survives LiveView replacing the outer editor element");
+  assert.equal(replaced.editor.state.selection.from, replacedSelection);
+  assert.equal(undoDepth(replaced.editor.state), replacedHistory);
+  replacementRoot.remove();
 
   const recoveryButton = document.createElement("button");
   recoveryButton.textContent = "Download recovery";
@@ -137,6 +166,17 @@ try {
   assert.equal(switched.canvas.restoreResumeFocus(), false,
     "a document identity change invalidates the captured intent");
   close(switched);
+
+  const changedRootId = mount("resume-root-id-one");
+  focusRich(changedRootId);
+  assert.equal(changedRootId.canvas.captureResumeFocus(), true);
+  changedRootId.root.setAttribute("inert", "");
+  changedRootId.editor.view.dom.blur();
+  changedRootId.root.id = "paper-editor-resume-root-id-two";
+  changedRootId.root.removeAttribute("inert");
+  assert.equal(changedRootId.canvas.restoreResumeFocus(), false,
+    "a different outer editor id cannot inherit focus intent");
+  close(changedRootId);
 
   const removed = mount("resume-removed");
   focusRich(removed);
