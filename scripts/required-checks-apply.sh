@@ -243,8 +243,26 @@ main() {
   # `--branch` too, not just `--sha`: verify otherwise reads the live protection
   # of the branch the SPEC names (main), so an apply to a throwaway branch would
   # verify a branch it never touched — an apply/verify pair that cannot agree.
+  #
+  # THE MAPPING FOR THIS SITE IS FAIL, NOT HOLD, AND IT IS THE ONE CALLER WHERE
+  # THAT IS OBVIOUS. This runs AFTER the protection PUT has already landed. A
+  # verifier that exits 5 here is saying "the write happened and I could not
+  # confirm what it wrote" — on the object that decides what may merge into main.
+  # There is nothing to hold FOR: the side effect is already on the branch, so
+  # this must end loud and nonzero and name the state the operator is now in.
+  # The code is preserved (5 leaves as 5) so a wrapper can still tell it from
+  # drift, and the sentence below is what a human needs either way.
+  local vrc=0
   bash "$REPO_ROOT/scripts/required-checks-verify.sh" --spec "$SPEC" \
-    ${BRANCH_OVERRIDE:+--branch "$branch" --sha "$(gh api "repos/$repo/commits/$branch" --jq .sha)"}
+    ${BRANCH_OVERRIDE:+--branch "$branch" --sha "$(gh api "repos/$repo/commits/$branch" --jq .sha)"} || vrc=$?
+  if [ "$vrc" -eq 5 ]; then
+    echo "APPLY UNCONFIRMED: the PUT to $repo/$branch SUCCEEDED, and the read-back verifier was BLOCKED —" >&2
+    echo "                   it could not read an input (named above) and made NO measurement of what is now live." >&2
+    echo "                   Protection on $branch is in whatever state the PUT left it. Re-run:" >&2
+    echo "                     bash scripts/required-checks-verify.sh --spec $SPEC${BRANCH_OVERRIDE:+ --branch $branch}" >&2
+    echo "                   once the input is readable. Do NOT treat this as a confirmed apply." >&2
+  fi
+  return "$vrc"
 }
 
 main "$@"
