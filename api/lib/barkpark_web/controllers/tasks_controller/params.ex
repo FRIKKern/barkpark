@@ -580,16 +580,43 @@ defmodule BarkparkWeb.TasksController.Params do
   `limit` is the EFFECTIVE limit after clamping, so `?limit=5000` reports 1000:
   the number the caller asked for is not the number they got, and this field is
   about what they got.
+
+  ## `next_offset` — the continuation, minted WHERE `has_more` IS
+
+  `has_more: true` with nothing to pass back is a dead end dressed as a
+  promise. `offset` states where THIS page started; it is not a continuation,
+  because a caller that echoes it re-reads the page it already holds. So the
+  same expression that decides `has_more` also mints the token that acts on
+  it: `next_offset` is `offset + returned` exactly when `has_more` is true, and
+  `nil` otherwise.
+
+  OFFSET, NOT KEYSET, ON PURPOSE. `GET /v1/tasks/ready` is served by
+  `Tasks.ready/1`, whose ordering has no keyset axis to seek on, so an
+  offset-shaped continuation is the only one that route can honestly mint. The
+  index has BOTH: it keeps the keyset `next_cursor` for the caller who opted
+  in, and `page_block/2` in `TasksController` nils `next_offset` in that branch
+  — offset and cursor are two paging models the index already refuses to mix
+  (a `?cursor=` with a non-zero `?offset=` is a 400), and emitting both would
+  hand the caller two tokens that disagree about where page two begins.
+
+  DERIVED FROM `has_more`, NOT FROM A SECOND PREDICATE. Because it rides the
+  same cheap `returned == limit`, it inherits that predicate's one over-report:
+  an exactly-full last page mints a `next_offset` that returns zero rows. That
+  costs one empty round-trip and is the safe direction — the failure this
+  block exists to prevent is a continuation WITHHELD, never one too many.
   """
   def page_meta(docs, page_opts) when is_list(docs) do
     limit = Keyword.fetch!(page_opts, :limit)
+    offset = Keyword.fetch!(page_opts, :offset)
     returned = length(docs)
+    has_more = returned == limit
 
     %{
       limit: limit,
-      offset: Keyword.fetch!(page_opts, :offset),
+      offset: offset,
       returned: returned,
-      has_more: returned == limit
+      has_more: has_more,
+      next_offset: if(has_more, do: offset + returned, else: nil)
     }
   end
 

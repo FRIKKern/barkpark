@@ -25,20 +25,47 @@ defmodule Barkpark.Search.HitEnvelope do
 
   The envelope's key set is identical in both views (`documents`, `count`,
   `query`, `parsedQuery`, `highlights`, `recovery`, `correctedTo`, `facets`,
-  `truncation`, `engineUsed`, `hasMore`) so shape-destructuring clients
-  (`find-shape.ts`) never branch.
+  `truncation`, `engineUsed`, `hasMore`, `offset`, `nextOffset`) so
+  shape-destructuring clients (`find-shape.ts`) never branch.
   Surface-specific extras (`ms`, `seq`, `searchEventId`) are `Map.put` by the
   call sites.
 
-  ## `count` vs `hasMore`/`offset` (NOT repaired here, just named)
+  ## `count` vs `hasMore`/`offset`
 
   On this builder's callers (REST/loopback/WS), `count` is the CORPUS TOTAL
   for the query — `result.total`, not the number of rows in `documents`. That
   collides in NAME (not in meaning — each endpoint is internally consistent)
   with `QueryController`'s `count`, which is the number of PAGE ROWS returned.
-  A client reading both endpoints must already know which `count` it holds;
-  `hasMore` below is additive sugar derived from the corpus-total `count`
-  here, and does not resolve that naming collision.
+  A client reading both endpoints must already know which `count` it holds,
+  and this section does not resolve that naming collision.
+
+  WHAT IT DOES RESOLVE, and this heading used to say "NOT repaired here, just
+  named": `hasMore: true` was emitted with no `offset`, no `limit`, no
+  `nextOffset` and no cursor anywhere in the map. The envelope told a paging
+  client that another page exists and gave it nothing to ask for it with — a
+  dead end dressed as a promise, and one that read as an accepted DECISION
+  precisely because a docstring here had already named it. A promise with no
+  continuation is a defect whether or not it is documented.
+
+  So `offset` and `nextOffset` are now emitted beside `hasMore`, and by
+  construction they cannot disagree with it: `nextOffset` is
+  `offset + length(documents)` exactly when `hasMore` is true and `nil`
+  otherwise, computed from the same two numbers. `offset` states where THIS
+  page began (it is not a continuation — echoing it re-reads the page in hand);
+  `nextOffset` is the token to pass back as the next request's `offset`.
+
+  KEYSET IS NOT AVAILABLE HERE. A search page is a relevance ranking over a
+  corpus, not a scan of an ordered column, so there is no stable
+  `(sort_key, id)` tuple to seek past; offset is the only continuation this
+  surface can honestly mint.
+
+  ONE CALLER-SIDE GAP REMAINS, named rather than hidden: `SearchChannel`
+  clamps a `"offset"` param on its `"query"` message but never threads it into
+  `build/5`, so a WS page two computes both `hasMore` and `nextOffset` against
+  an assumed offset of `0`. That is a one-line fix in `search_channel.ex`,
+  which this builder does not own. The two fields stay CONSISTENT under it —
+  they are derived from the same `offset` — so the channel under-reports its
+  position rather than contradicting itself.
   """
 
   alias Barkpark.Content.{CallerContext, Envelope}
@@ -83,6 +110,9 @@ defmodule Barkpark.Search.HitEnvelope do
     # visibility filter that produced this map — never against raw content.
     highlights = top_highlights(meta[:highlights] || %{}, view)
 
+    next_offset = offset + length(docs)
+    has_more = count > next_offset
+
     %{
       documents: documents(docs, meta, view, caller_context, schema_resolver, fields, highlights),
       count: count,
@@ -102,7 +132,14 @@ defmodule Barkpark.Search.HitEnvelope do
       # (see moduledoc), so whether another page exists is derivable in-hand
       # — the server had the fact and simply wasn't saying it. A paging
       # client no longer has to guess from `length(documents) == limit`.
-      hasMore: count > offset + length(docs)
+      #
+      # THE THREE FIELDS ARE ONE FACT, SPELLED ONCE. `next_offset` is bound
+      # from the same `offset + length(docs)` that decides `hasMore`, so there
+      # is no second predicate that can drift out of step with the first and
+      # leave `hasMore: true` holding a `nil` continuation.
+      hasMore: has_more,
+      offset: offset,
+      nextOffset: if(has_more, do: next_offset, else: nil)
     }
   end
 
@@ -126,6 +163,14 @@ defmodule Barkpark.Search.HitEnvelope do
   always computed against an assumed `offset` of `0`. Forwarding it would
   read as "this is page-aware" on a surface that is not yet, which is worse
   than silence. Revisit together with whoever wires federated pagination.
+
+  `offset`/`nextOffset` are dropped for the SAME reason and MUST stay dropped
+  TOGETHER WITH `hasMore`: the continuation invariant is that a surface saying
+  `hasMore: true` also hands back something to page with. Dropping all three
+  keeps this payload silent about paging, which satisfies the invariant
+  vacuously. Forwarding `hasMore` alone would break it, and forwarding
+  `nextOffset` alone would offer a token derived from an offset the caller
+  never set.
   """
   @spec rekey_federated(map()) :: map()
   def rekey_federated(envelope) do
