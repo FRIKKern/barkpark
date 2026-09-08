@@ -196,6 +196,14 @@ defmodule BarkparkWeb.Plugs.RateLimitBrowserShadowTest do
       assert get_resp_header(out, "retry-after") == ["60"]
       assert hd(get_resp_header(out, "content-type")) =~ "text/html"
       assert out.resp_body =~ "Too many requests"
+
+      # D4 asks for a content-negotiated HTML 429 "+ Retry-After", and
+      # Retry-After is the HEADER asserted above. The body carries no
+      # interpolated integer at all — that is what keeps it a compile-time
+      # literal and keeps this module off the Sobelow regression gate — so it
+      # points the reader at the header instead.
+      assert out.resp_body =~ "Retry-After header"
+      refute out.resp_body =~ "60 second"
     end
 
     test "with :browser_enforce true a non-HTML caller keeps the JSON envelope" do

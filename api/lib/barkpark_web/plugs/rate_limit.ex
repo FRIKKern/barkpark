@@ -36,6 +36,19 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
   @shadow_event [:barkpark, :rate_limit, :shadow]
 
+  # No interpolation, by design — see `browser_refuse/2`. The retry interval
+  # travels in the `retry-after` header, which is where a client reads it.
+  @html_429 """
+  <!DOCTYPE html>
+  <html lang="en"><head><meta charset="utf-8">
+  <title>Too many requests</title></head>
+  <body>
+  <h1>Too many requests</h1>
+  <p>You are reading faster than this server serves. Please retry after the
+  interval given in this response's Retry-After header.</p>
+  </body></html>
+  """
+
   def init(opts), do: opts
 
   # THE MOUNT DECIDES THE CLASS, AND SILENCE MEANS "AS BEFORE".
@@ -164,14 +177,24 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # (class, accept) pair and no third one hiding in here.
   defp browser_refuse(conn, retry_after) do
     if wants_html?(conn) do
-      # Phoenix.Controller.html/2, not send_resp/3: same bytes, and it keeps
-      # this module out of Sobelow's XSS.SendResp scan, which flags any
-      # non-literal body argument regardless of provenance (the only thing
-      # interpolated here is an integer this module computed).
+      # THE BODY IS A COMPILE-TIME LITERAL, AND THAT IS THE POINT.
+      #
+      # It used to interpolate `retry_after`, which made the argument to
+      # `html/2` a runtime-computed binary — and Sobelow's XSS.HTML flags any
+      # non-literal body regardless of provenance, so this module reddened the
+      # Sobelow regression gate. An advisory red still TRANSFERS to main on
+      # merge and becomes the next lane's inherited red, so "it blocks nothing"
+      # was never a reason to ship it.
+      #
+      # Nothing is lost. Charter D4 asks for a content-negotiated HTML 429
+      # "+ Retry-After", and Retry-After IS the header set on the line below —
+      # the integer never needed to appear in the body. The page points the
+      # reader at that header instead, which is the value a client should
+      # actually obey.
       conn
       |> put_resp_header("retry-after", Integer.to_string(retry_after))
       |> put_status(429)
-      |> Phoenix.Controller.html(html_429(retry_after))
+      |> Phoenix.Controller.html(@html_429)
       |> halt()
     else
       json_refuse(conn, retry_after)
@@ -196,19 +219,6 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     conn
     |> get_req_header("accept")
     |> Enum.any?(&String.contains?(&1, "text/html"))
-  end
-
-  defp html_429(retry_after) do
-    """
-    <!DOCTYPE html>
-    <html lang="en"><head><meta charset="utf-8">
-    <title>Too many requests</title></head>
-    <body>
-    <h1>Too many requests</h1>
-    <p>You are reading faster than this server serves. Please retry in
-    #{retry_after} second(s).</p>
-    </body></html>
-    """
   end
 
   defp method_class(method) when method in @read_methods, do: :read
