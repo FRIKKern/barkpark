@@ -138,6 +138,10 @@
 #                 and the size fault wore the credential fault's name.
 #             5 = BLIND: the population is non-empty and NOT ONE row could be
 #                 classified (every row answered UNKNOWN after re-polling).
+#             9 = ROLLUP BUDGET EXCEEDED: more CONFLICTING rows than
+#                 --rollup-max need a status rollup, so this run refuses BEFORE
+#                 issuing them rather than re-creating the timeout the single
+#                 combined query used to hit. Loud, and never a green.
 #                 2 says "some rows went unread"; 5 says "this run classified
 #                 NOTHING", which is a different claim and used to be
 #                 indistinguishable from perfect coverage — run 31311358759
@@ -271,6 +275,13 @@ ATTEMPTS=3
 # size on this note alone, because the cold-case number is not known.
 PAGE_SIZE="${SVW_PAGE_SIZE:-25}"
 PAGE_ATTEMPTS="${SVW_PAGE_ATTEMPTS:-4}"
+# THE ROLLUP BUDGET. The status rollup is fetched ONLY for CONFLICTING rows, and
+# never for more than this many of them. A bad week with 41 conflicted PRs must
+# degrade to a LOUD refusal (rc 9), not to 41 heavy queries and a 504 — which is
+# the failure the single heavy query already had, and carrying it across would
+# be shipping the same defect in a new shape.
+ROLLUP_MAX="${SVW_ROLLUP_MAX:-25}"
+ROLLUP_FIXTURE=""
 # Backoff BETWEEN page retries. The old budget spent all three of its attempts
 # inside ~60 seconds against a deterministic 504 — three shots at the same wall.
 PAGE_SLEEPS="${SVW_PAGE_SLEEP:-3 8 20 0}"
@@ -405,6 +416,67 @@ gh_error_digest() { # <combined gh output> -> one line
 # fails the run. Nothing below falls back to an empty population, and no arm
 # added here can turn a failed read into a green: the ONLY success return is
 # the one that printed a payload GitHub actually answered with.
+# ── THE SPLIT READ (task-589fb46ee65456e7) ──────────────────────────────────
+# THE POPULATION READ NO LONGER CARRIES THE ROLLUP. Asking for `mergeable` AND
+# `statusCheckRollup{contexts(first:100)}` for every open row is what broke the
+# read: MEASURED 2026-09-08 with 41 open PRs, `--json …statusCheckRollup` at
+# limit 100 returned HTTP 504 after 11.2s, at limit 50 the same, and at limit 25
+# it answered in 6.9s with ZERO UNKNOWN — while the SAME query WITHOUT the
+# rollup answered all 100 in 3.1s, also with zero UNKNOWN. Reproduced
+# independently by another session on a different token: 11.3s to an empty body
+# at limit 100, 7.5s at limit 25, 0.6s for the light query. So query weight
+# ALONE is sufficient to break the read; that is the premise this split rests on.
+#
+# The verdict only ever consumes a rollup for CONFLICTING rows — `full_green_all`,
+# `laundered` and `partial` all derive from `.conflicting[]` — so the cost is
+# inverted: every row used to pay for a rollup, now only candidates do.
+#
+# WHAT THIS DOES NOT DO IS TURN AN UNREADABLE POPULATION GREEN. The light read
+# refuses exactly as the heavy one did, `blind` is still `open > 0 AND
+# classified == 0`, and a rollup that cannot be fetched returns non-zero rather
+# than an empty rollup — an empty rollup would read as "no required context
+# rendered", which is a VERDICT about the pull request rather than a failure to
+# look.
+PR_QUERY_LIGHT='
+query($owner:String!,$name:String!,$first:Int!,$after:String){
+  repository(owner:$owner,name:$name){
+    pullRequests(states:OPEN, first:$first, after:$after,
+                 orderBy:{field:CREATED_AT,direction:DESC}){
+      pageInfo{ hasNextPage endCursor }
+      nodes{ number mergeable mergeStateStatus updatedAt headRefOid isDraft }
+    }
+  }
+}'
+
+PR_NORMALISE_LIGHT_JQ='
+[ .data.repository.pullRequests.nodes[]
+  | { number, mergeable, mergeStateStatus, headRefOid, updatedAt,
+      isDraft: (.isDraft // false),
+      statusCheckRollup: [] } ]'
+
+# One PR's rollup. Asked only for CONFLICTING numbers, at most ROLLUP_MAX of them.
+ROLLUP_QUERY='
+query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      number
+      commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:100){ nodes{
+        __typename
+        ... on CheckRun { name conclusion completedAt status }
+        ... on StatusContext { context state createdAt }
+      }}}}}}
+    }
+  }
+}'
+
+ROLLUP_NORMALISE_JQ='
+[ (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[]
+  | { __typename,
+      name:        (.name // .context),
+      status:      (.status // ""),
+      conclusion:  (.conclusion // .state // ""),
+      completedAt: (.completedAt // "0001-01-01T00:00:00Z") } ]'
+
 PR_QUERY='
 query($owner:String!,$name:String!,$first:Int!,$after:String){
   repository(owner:$owner,name:$name){
@@ -466,10 +538,10 @@ fetch_pr_pages() { # <repo> -> JSON array | error body
     while :; do
       attempt=$((attempt + 1))
       if [ -n "$after" ]; then
-        out="$(gh api graphql -f query="$PR_QUERY" -F owner="$owner" -F name="$name" \
+        out="$(gh api graphql -f query="$PR_QUERY_LIGHT" -F owner="$owner" -F name="$name" \
                  -F first="$PAGE_SIZE" -F after="$after" 2>&1)" && break
       else
-        out="$(gh api graphql -f query="$PR_QUERY" -F owner="$owner" -F name="$name" \
+        out="$(gh api graphql -f query="$PR_QUERY_LIGHT" -F owner="$owner" -F name="$name" \
                  -F first="$PAGE_SIZE" 2>&1)" && break
       fi
       if is_config_fault "$out"; then
@@ -487,7 +559,7 @@ fetch_pr_pages() { # <repo> -> JSON array | error body
       red "  page $page attempt $attempt/$PAGE_ATTEMPTS failed, retrying the PAGE in ${sleep_for}s: $body"
       [ "$sleep_for" = "0" ] || sleep "$sleep_for"
     done
-    got="$(jq -c "$PR_NORMALISE_JQ" <<<"$out" 2>/dev/null)" || {
+    got="$(jq -c "$PR_NORMALISE_LIGHT_JQ" <<<"$out" 2>/dev/null)" || {
       # A page GitHub answered 200 to and jq could not read is NOT a transport
       # silence — but it is also not a population, so it must not be reported
       # as one. It leaves as an unreadable page, which upstream calls
@@ -522,6 +594,69 @@ fetch_pr_pages() { # <repo> -> JSON array | error body
 # PAGE_ATTEMPTS budget above is about transport. They are separate on purpose:
 # the 2026-08-23 measurement of 368 scheduled runs found ZERO rc=5 BLIND runs,
 # so the UNKNOWN budget was never the problem — the transport was.
+# THE SECOND HALF OF THE SPLIT READ: attach a status rollup to the CONFLICTING
+# rows and to nothing else.
+#
+# THREE WAYS OUT, AND ONLY ONE OF THEM IS A PASS:
+#   0  every conflicting row carries a rollup GitHub actually answered with
+#      (including the common case of ZERO conflicting rows, which needs no call)
+#   9  ROLLUP BUDGET EXCEEDED — more conflicting rows than the cap. Refuses
+#      BEFORE issuing a single heavy call, so the failure the old single query
+#      had under load is not re-created one request at a time.
+#   2  a rollup could not be read. NOT an empty rollup: an empty rollup would
+#      flow into the verdict as "no required context rendered", which is a
+#      claim ABOUT the pull request rather than an admission that we could not
+#      look. An unreadable population must be distinguishable from an empty one
+#      AT THE POINT OF THE READ, not three functions later.
+enrich_conflicting() { # <repo> <rows-json> -> prints rows; rc 0 | 2 | 9
+  local repo="$1" rows="$2" nums cnt n out roll map owner name
+  nums="$(jq -r '[ .[] | select(.mergeable == "CONFLICTING") | .number ] | .[]' <<<"$rows" 2>/dev/null)" || {
+    red "  the population could not be scanned for CONFLICTING rows"; return 2; }
+  cnt="$(printf '%s\n' "$nums" | grep -c . || true)"
+  [ "${cnt:-0}" -eq 0 ] && { printf '%s' "$rows"; return 0; }
+
+  if [ "$cnt" -gt "$ROLLUP_MAX" ]; then
+    red "ROLLUP BUDGET EXCEEDED — $cnt CONFLICTING row(s) need a status rollup and the cap is $ROLLUP_MAX."
+    red "  The rollup is the expensive half of this read: asking for it across a large set is exactly what"
+    red "  made the single combined query time out (measured 2026-09-08: 504 at 50 rows, fine at 25)."
+    red "  This run REFUSES rather than issuing $cnt heavy requests and reporting whatever survives."
+    red "  REMEDY: drain the conflicted population, or raise --rollup-max deliberately with a measurement."
+    return 9
+  fi
+
+  owner="${repo%%/*}"; name="${repo##*/}"
+  map='{}'
+  for n in $nums; do
+    if [ -n "$ROLLUP_FIXTURE" ]; then
+      out="$(jq -c --argjson n "$n" '.[$n | tostring] // empty' < "$ROLLUP_FIXTURE" 2>/dev/null)"
+      [ -n "$out" ] || { red "  no rollup for #$n in the rollup fixture — a missing rollup is a failed read, not an empty one"; return 2; }
+      roll="$out"
+    else
+      out="$(gh api graphql -f query="$ROLLUP_QUERY" -F owner="$owner" -F name="$name" -F number="$n" 2>&1)" || {
+        red "  could not read the status rollup for #$n: $(gh_error_digest "$out")"; return 2; }
+      printf '%s' "$out" | jq -e '.data.repository.pullRequest' >/dev/null 2>&1 || {
+        red "  the status rollup for #$n did not come back as a pull request payload"; return 2; }
+      roll="$(printf '%s' "$out" | jq -c "$ROLLUP_NORMALISE_JQ" 2>/dev/null)" || {
+        red "  the status rollup for #$n did not normalise"; return 2; }
+    fi
+    map="$(jq -c --argjson n "$n" --argjson r "$roll" '. + {($n | tostring): $r}' <<<"$map" 2>/dev/null)" || {
+      red "  the rollup for #$n could not be added to the map"; return 2; }
+  done
+
+  # EVERY conflicting row must come back carrying its rollup. A row that asked
+  # for one and did not get one is a failed read, and it fails here rather than
+  # being handed to the verdict as an empty list.
+  out="$(jq -c --argjson m "$map" '
+      [ .[] | if .mergeable == "CONFLICTING"
+              then . + { statusCheckRollup: ($m[(.number|tostring)] // null) }
+              else . end ]' <<<"$rows" 2>/dev/null)" || {
+    red "  the rollups could not be merged into the population"; return 2; }
+  printf '%s' "$out" | jq -e 'all(.[]; .statusCheckRollup != null)' >/dev/null 2>&1 || {
+    red "  a CONFLICTING row came back without a rollup — refusing rather than treating it as empty"; return 2; }
+  printf '%s' "$out"
+  return 0
+}
+
 fetch_prs() { # -> prints JSON array, or the error body on failure
   local repo="$1" out i=0 rc sleep_for unknown
   while [ "$i" -lt "$ATTEMPTS" ]; do
@@ -1043,6 +1178,85 @@ selftest() {
     || st_ok "(11) a nonsense assertion fails, so the greps above are load-bearing"
 
   echo
+  # ── (q) THE SPLIT READ (task-589fb46ee65456e7) ────────────────────────────
+  # The population is read WITHOUT the status rollup and the rollup is fetched
+  # only for CONFLICTING rows. These arms hold the three ways that can go wrong.
+  run_child_roll() { # <fixture> <baseline> <rollup-fixture> [extra…] -> rc; output in $d/out.txt
+    bash "$0" --fixture "$1" --commits "$d/commits.txt" --spec "$SPEC" \
+      --repo FRIKKern/barkpark --baseline "$2" --rollup-fixture "$3" \
+      "${@:4}" > "$d/out.txt" 2>&1
+  }
+
+  # a population whose CONFLICTING row carries NO rollup — exactly what the
+  # light query returns — plus a rollup fixture that supplies it separately.
+  jq -c -n --argjson n 9001 --arg h "$HEAD_A" \
+    '[{number:$n, mergeable:"CONFLICTING", mergeStateStatus:"DIRTY",
+       headRefOid:$h, updatedAt:"2026-08-01T00:00:00Z", statusCheckRollup:[]}]' > "$d/light.json"
+  jq -c -n --argjson r "$rollup" '{"9001": $r}' > "$d/rollup.json"
+  : > "$d/empty-pin"
+
+  # (q1) POSITIVE: the rollup is attached, and the verdict that needs it is
+  #      reached — the same NOVEL red arm (1) proves, but arriving via the split.
+  run_child_roll "$d/light.json" "$d/empty-pin" "$d/rollup.json"; rc=$?
+  out="$(cat "$d/out.txt")"
+  [ "$rc" = "1" ] && st_ok "(q1) a light population + a separately-fetched rollup still reds on a stale verdict" \
+    || st_bad "(q1) expected rc 1 through the split read, got $rc: $out"
+  grep -q "NOVEL  1 — #9001" <<<"$out" \
+    && st_ok "(q1) …and #9001 is named, so the rollup really was attached to the conflicting row" \
+    || st_bad "(q1) #9001 was not named through the split read: $out"
+
+  # (q2) THE BUDGET REFUSES BEFORE SPENDING. --rollup-max 0 with one conflicting
+  #      row must exit 9 and say so, rather than issuing the call.
+  run_child_roll "$d/light.json" "$d/empty-pin" "$d/rollup.json" --rollup-max 0; rc=$?
+  out="$(cat "$d/out.txt")"
+  [ "$rc" = "9" ] && st_ok "(q2) more conflicting rows than --rollup-max exits 9, the budget refusal" \
+    || st_bad "(q2) expected rc 9 over the rollup budget, got $rc: $out"
+  grep -q "ROLLUP BUDGET EXCEEDED" <<<"$out" \
+    && st_ok "(q2) …and it names the budget rather than failing silently" \
+    || st_bad "(q2) the budget refusal did not name itself: $out"
+
+  # (q3) A MISSING ROLLUP IS A FAILED READ, NOT AN EMPTY ONE. This is the
+  #      silent-zero family: an empty rollup would flow into the verdict as
+  #      "no required context rendered", a claim ABOUT the pull request.
+  echo '{}' > "$d/rollup-missing.json"
+  run_child_roll "$d/light.json" "$d/empty-pin" "$d/rollup-missing.json"; rc=$?
+  out="$(cat "$d/out.txt")"
+  [ "$rc" = "2" ] && st_ok "(q3) a CONFLICTING row whose rollup could not be read exits 2, never 0" \
+    || st_bad "(q3) expected rc 2 for an unreadable rollup, got $rc: $out"
+  case "$out" in
+    *"NOVEL"*) st_bad "(q3) an unreadable rollup produced a VERDICT about the pull request: $out" ;;
+    *) st_ok "(q3) …and it issues no verdict about #9001 on evidence it does not have" ;;
+  esac
+
+  # (q4) BLIND STILL FAILS, and it is proved by MUTATION rather than asserted.
+  #      Strip the `blind` clause on a copy; the all-UNKNOWN population must
+  #      then stop exiting 5. If it does not, arm (6) was never measuring it and
+  #      the split read could have quietly turned a blind run green.
+  jq -c -n --arg h "$HEAD_A" \
+    '[{number:9001, mergeable:"UNKNOWN", mergeStateStatus:null, headRefOid:$h,
+       updatedAt:"2026-08-01T00:00:00Z", statusCheckRollup:[]}]' > "$d/blind.json"
+  bash "$0" --fixture "$d/blind.json" --commits "$d/commits.txt" --spec "$SPEC" \
+    --repo FRIKKern/barkpark --baseline "$d/empty-pin" > "$d/out.txt" 2>&1; rc=$?
+  [ "$rc" = "5" ] && st_ok "(q4) an all-UNKNOWN population still exits 5 BLIND under the split read" \
+    || st_bad "(q4) expected rc 5 BLIND after the split, got $rc: $(cat "$d/out.txt")"
+
+  # AIM AT THE ARM THAT DECIDES, NOT THE ONE THAT REPORTS. The first version of
+  # this mutation stripped the verdict's `.blind` FIELD and the run STILL exited
+  # 5 — because rc 5 is computed from the shell's `open`/`classified`, and
+  # `.blind` is only carried for the report. The mutation survived and told me
+  # the predicate lives in TWO places; this one targets the live half.
+  sed 's/then return 5; fi/then :; fi/' "$0" > "$d/mut-blind.sh"
+  if diff -q "$0" "$d/mut-blind.sh" >/dev/null 2>&1; then
+    st_bad "(q4) MUTATION did not apply — the blind clause moved, so this arm proves nothing"
+  else
+    bash "$d/mut-blind.sh" --fixture "$d/blind.json" --commits "$d/commits.txt" --spec "$SPEC" \
+      --repo FRIKKern/barkpark --baseline "$d/empty-pin" > "$d/out.txt" 2>&1; rc=$?
+    [ "$rc" = "5" ] \
+      && st_bad "(q4) MUTATION SURVIVED: still exited 5 with the blind clause removed" \
+      || st_ok "(q4) with the blind clause removed the same population stops failing — the refusal is live, not decorative"
+  fi
+
+
   echo "── stale-verdict-watch --selftest: $SELFTEST_PASS passed, $SELFTEST_FAIL failed ──"
   [ "$SELFTEST_FAIL" -eq 0 ] || return 1
   return 0
@@ -1055,6 +1269,13 @@ main() {
       --branch) BRANCH="${2:-}"; shift 2 ;;
       --spec) SPEC="${2:-}"; shift 2 ;;
       --fixture) FIXTURE="${2:-}"; shift 2 ;;
+      --rollup-fixture) ROLLUP_FIXTURE="${2:-}"; shift 2 ;;
+      --rollup-max)
+        ROLLUP_MAX="${2:-}"
+        case "$ROLLUP_MAX" in
+          ''|*[!0-9]*) red "--rollup-max must be a non-negative integer, got: '${ROLLUP_MAX}'"; exit 3 ;;
+        esac
+        shift 2 ;;
       --commits) COMMITS_FILE="${2:-}"; shift 2 ;;
       # An ARGUMENT fault must not wear transport silence's name. `--attempts 0`
       # (or a non-numeric value) makes the poll loop never execute and `out`
@@ -1125,9 +1346,17 @@ main() {
   if [ -n "$FIXTURE" ]; then
     [ -f "$FIXTURE" ] || { red "no such fixture: $FIXTURE"; exit 3; }
     prs="$(cat "$FIXTURE")"
+    if [ -n "$ROLLUP_FIXTURE" ]; then
+      prs_enriched="$(enrich_conflicting "${repo:-o/r}" "$prs")"; erc=$?
+      [ "$erc" = "0" ] && prs="$prs_enriched" || { red "rollup enrichment refused (rc $erc)"; exit "$erc"; }
+    fi
   else
     [ -n "$repo" ] || { red "no repo: pass --repo or commit one in $SPEC"; exit 3; }
     prs="$(fetch_prs "$repo")"; rc=$?
+    if [ "$rc" = "0" ]; then
+      prs_enriched="$(enrich_conflicting "$repo" "$prs")"; erc=$?
+      if [ "$erc" = "0" ]; then prs="$prs_enriched"; else rc="$erc"; fi
+    fi
     case "$rc" in
       0) ;;
       3) red "CONFIGURATION FAULT — this run's credential cannot list pull requests (401/403). A watch that cannot read what it watches must not report success."
