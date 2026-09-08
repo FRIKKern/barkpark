@@ -1347,6 +1347,7 @@
           const head = conflict.entry;
           const positional = conflict.positional;
           detail.hidden = false;
+          banner.querySelector('[data-action="review"]').setAttribute("aria-expanded", "true");
           detail.querySelector("[data-conflict-message]").textContent = positional
             ? `Server revision ${String(conflict.currentRev ?? "unknown")}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft.`
             : conflict.keepUnavailable
@@ -1371,7 +1372,7 @@
           banner = document.createElement("div");
           banner.dataset.bpPaperConflict = "true";
           banner.setAttribute("role", "alert");
-          banner.innerHTML = '<span>Save paused — this document changed elsewhere. Your edits are still here.</span> <button type="button" data-action="review">Review</button> <button type="button" data-action="keep">Keep mine</button> <button type="button" data-action="latest">Use latest</button> <div data-conflict-detail hidden><span data-conflict-message></span><pre data-conflict-draft aria-label="Unsaved draft payload"></pre></div>';
+          banner.innerHTML = '<strong class="bp-conflict-title">Save paused</strong><span class="bp-conflict-description">This document changed elsewhere. Your edits are still here.</span><div class="bp-conflict-actions"><button type="button" data-action="review" aria-expanded="false">Review</button><button type="button" data-action="keep">Keep mine</button><button type="button" data-action="latest">Use latest</button></div><div data-conflict-detail hidden><p data-conflict-message></p><details><summary>Technical details</summary><pre data-conflict-draft aria-label="Unsaved draft payload" tabindex="0"></pre></details></div>';
           const root = main.querySelector(".bp-paper-editor") || main;
           root.prepend(banner);
           banner.addEventListener("click", (event) => {
@@ -1476,9 +1477,14 @@
           );
           return false;
         }
+        let replacedChosenSource = false;
         if (latestRevision != null) {
           confirmedRevision = latestRevision;
-          if (!reloadBoundary) latest.forEach((echo) => echo.apply?.("external-resync"));
+          if (!reloadBoundary) latest.forEach((echo) => {
+            if (typeof echo.apply !== "function") return;
+            echo.apply("external-resync");
+            if (echo.source === chosenSource) replacedChosenSource = true;
+          });
         }
         for (let index = quarantinedEchoes.length - 1; index >= 0; index--) {
           const echo = quarantinedEchoes[index];
@@ -1496,6 +1502,14 @@
         if (conflict) {
           coordinator._reloadIfClean();
           return;
+        }
+        // Only an applied replacement with no other retained work resolves the
+        // authoritative failure. A revision number alone is not remote content;
+        // another source may own a terminal warning without a queued mutation.
+        if (replacedChosenSource && !coordinator.hasUnsaved() &&
+            !mutationActive && !mutationQueue.length) {
+          setSaveStatus("", true);
+          renderSaveStatus();
         }
         coordinator._pumpMutations();
         coordinator._reloadIfClean();

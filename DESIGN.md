@@ -78,6 +78,7 @@
 - Empty authoring blocks: Keep the exact block and undo history. Resting scaffolds occupy no document height; selecting their gutter control reveals the native editing surface. Newly inserted, selected empty blocks remain immediately writable. Never remove stored blanks or dividers as a styling fix.
 - Error: Publish failures name the exact slug and HTTP response; no partially successful batch is reported as complete.
 - Interrupted editing: Reconnecting must retain the same document's unsaved canvas. Resume presentation only after the server rechecks write authority; never send draft text in connection hints or report an unacknowledged edit as saved.
+- Conflict recovery: Lead with a short explanation and explicit choices in the existing Paper control style. Review explains what each choice does; raw payloads remain available in a collapsed technical disclosure. Never imply a remote comparison was loaded when it was not. Keep positional retry restrictions, preserve unrelated drafts, and clear failure status only after the chosen source has accepted the latest content.
 - Success: The index publishes last, after all editions, and becomes the stable confirmation surface.
 - Disabled: Not applicable to the read-only Chronicle.
 - Offline/slow network: Core text and links are server-rendered. Media is optional evidence, and related cards preserve their authored links when live resolution is unavailable.
