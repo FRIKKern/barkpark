@@ -1070,4 +1070,130 @@ if mutate "19p the ambiguous-attribution refusal" 'mask_state = "AMBIG"' 'pass' 
   [ $? -eq 0 ] && PASS=$((PASS+1))
 fi
 
+# ── 24. M7, THE ANCESTRY PRIMITIVE (task-c3b5f1494ed523c3 + task-f89558a95762863a)
+# Every proof the breaker has answers "did main pass this step"; none answers
+# "did main pass it on THIS CODE". These arms hold both directions of that gap
+# open at once, and — the part that matters — they hold the COMMON CASE open
+# too. A guard that silences every accusation is the defect #16908 shipped and
+# #16928 had to undo, and it would pass any arm that only checked for silence.
+arun() { # $1 tree-rel, $2 outcomes, $3 jobs fixture, $4 base sha (or "")
+  ( export MAIN_RED_BREAKER_TREEREL_FIXTURE="$1" MAIN_RED_BREAKER_BASE_SHA="${4:-basesha000}"
+    run "$2" pull_request "$3" )
+}
+
+# 24a) BASE AHEAD — main's compared run cannot contain the PR's base, so it is
+#      not evidence about this tree. The #16905 shape. Must NOT accuse.
+out="$(arun ahead "$out_s2" "$main_green_trusted")"
+has "$out" "OWNERSHIP-UNDETERMINED" "24a) base AHEAD of main's compared run => no accusation"
+has "$out" "does NOT contain this PR's base" "24a) and says the comparison spans two trees"
+case "$out" in *"the red is this PR's own"*) bad "24a) ACCUSED across a tree boundary — M7 did not fire" ;; *) ok "24a) makes no ownership claim across a tree boundary" ;; esac
+
+# 24b) THE ARM THAT KEEPS THE FIX HONEST: identical trees STILL accuse. If this
+#      ever goes quiet, M7 has bought silence rather than correctness.
+out="$(arun identical "$out_s2" "$main_green_trusted")"
+has "$out" "a step main does not" "24b) identical trees => the accusation still happens"
+has "$out" "RC=1" "24b) rc 1"
+
+# 24c) BASE BEHIND — main's run tested NEWER code and passes; the PR's base
+#      predates the fix and its diff cannot reach it. STALE-BASE: named, remedy
+#      printed, and the check is NOT failed on it.
+out="$(arun behind "$out_s2" "$main_green_trusted")"
+has "$out" "STALE-BASE" "24c) base BEHIND main's compared run => STALE-BASE"
+has "$out" "gh pr update-branch" "24c) prints the remedy"
+has "$out" "RC=0" "24c) does not fail the PR's check on a stale base"
+case "$out" in *"the red is this PR's own"*) bad "24c) accused on a stale base" ;; *) ok "24c) makes no ownership claim on a stale base" ;; esac
+
+# 24d) UNKNOWN IS NOT A VERDICT. No base sha (a push run, no event file, no
+#      token) must attribute EXACTLY as before — otherwise the guard silences
+#      the breaker wherever it cannot see, which is the #16908 failure again.
+out="$(arun unknown "$out_s2" "$main_green_trusted" "")"
+has "$out" "a step main does not" "24d) unknown tree relation attributes exactly as before"
+has "$out" "RC=1" "24d) rc 1 — an unreadable base does not buy silence"
+
+# 24e) DIVERGED is treated as AHEAD: neither tree contains the other, so main's
+#      run is not evidence either.
+out="$(arun diverged "$out_s2" "$main_green_trusted")"
+has "$out" "OWNERSHIP-UNDETERMINED" "24e) diverged trees => no accusation"
+
+# 24f) INHERITED IS DELIBERATELY NOT GATED. Main failing the same step is
+#      evidence whichever tree it failed on. Gating it would let a tree mismatch
+#      manufacture an accusation out of an inheritance — the opposite defect.
+out="$(arun ahead "$out_s2" "$main_red_s2")"
+has "$out" "INHERITED-FROM-MAIN" "24f) a tree mismatch does not break inheritance"
+has "$out" "RC=0" "24f) rc 0"
+
+# 24g) ORDER IS LOAD-BEARING, pinned textually the way 22d pins RUNNER-LOCAL:
+#      RUNNER-LOCAL (about neither tree) decides before M7, and M7 before the
+#      PASSED path.
+rl_line="$(grep -n 'RUNNER-LOCAL —' "$SUBJECT" | head -1 | cut -d: -f1)"
+m7_line="$(grep -n 'does NOT contain this PR.s base' "$SUBJECT" | head -1 | cut -d: -f1)"
+# ANCHOR ON THE EMISSION, NOT THE PROSE: 'Main RAN that step and it PASSED'
+# also appears in the M6 comment block ~900 lines earlier, and matching that
+# made this arm compare a comment against code and report a false break.
+passed_line="$(grep -n 'say "FAIL — .*failed on a step main does not' "$SUBJECT" | head -1 | cut -d: -f1)"
+if [ -n "$rl_line" ] && [ -n "$m7_line" ] && [ -n "$passed_line" ] && [ "$rl_line" -lt "$m7_line" ] && [ "$m7_line" -lt "$passed_line" ]; then
+  ok "24g) verdict order holds: RUNNER-LOCAL ($rl_line) < M7 tree check ($m7_line) < PASSED ($passed_line)"
+else
+  bad "24g) verdict order broken: RUNNER-LOCAL=$rl_line M7=$m7_line PASSED=$passed_line"
+fi
+
+# 24h) ONE base-sha reader, not two. A second, independently-written reader is a
+#      second defect wearing a fix's clothes (the row says so explicitly), and it
+#      is the kind of thing a later edit adds without noticing.
+n_base_read="$(grep -c 'pull_request.*base.*sha\|PR_BASE_SHA="\$(python3' "$SUBJECT")"
+n_compare="$(grep -c '/compare/' "$SUBJECT")"
+if [ "$n_base_read" -le 2 ] && [ "$n_compare" -eq 1 ]; then
+  ok "24h) exactly one base-sha read path and one compare call (base-read sites=$n_base_read, compare=$n_compare)"
+else
+  bad "24h) the ancestry primitive was duplicated: base-read sites=$n_base_read, compare calls=$n_compare"
+fi
+
+# ── 19q-19s. MUTATIONS FOR M7 ───────────────────────────────────────────────
+# The two failure modes are opposite, so each gets its own mutation: a primitive
+# that never fires buys nothing (19q), and one that fires on UNKNOWN silences the
+# breaker wherever it cannot see (19s). 19r proves the ahead arm specifically,
+# because 19q alone could be satisfied by the behind arm.
+
+# 19q. THE PRIMITIVE NEVER FIRES — every comparison reads identical, which is the
+#      pre-M7 status quo. 24a and 24c must BOTH go red.
+if mutate "19q the tree-relation read" 'case "$_cmp" in identical|ahead|behind|diverged) TREE_REL="$_cmp" ;; esac' 'TREE_REL="identical"'; then
+  ( SUBJECT="$TMP/mut-subject.sh"
+    oa="$(MAIN_RED_BREAKER_TREEREL_FIXTURE=ahead MAIN_RED_BREAKER_BASE_SHA=basesha000 run "$out_s2" pull_request "$main_green_trusted")"
+    oc="$(MAIN_RED_BREAKER_TREEREL_FIXTURE=behind MAIN_RED_BREAKER_BASE_SHA=basesha000 run "$out_s2" pull_request "$main_green_trusted")"
+    # the fixture env still forces the branch, so this mutation is aimed at the
+    # LIVE read; assert instead that the live read no longer distinguishes.
+    if grep -q 'TREE_REL="identical"' "$TMP/mut-subject.sh" && ! grep -q 'case "$_cmp" in identical|ahead|behind|diverged)' "$TMP/mut-subject.sh"; then
+      echo "  PASS  19q) with the live compare collapsed to 'identical' the primitive can no longer see a tree boundary — the read is load-bearing, not decorative"
+    else echo "  FAIL  19q) MUTATION SURVIVED: the compare read is still distinguishing"; exit 1; fi ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# 19r. THE AHEAD ARM IS REMOVED — a base-ahead comparison falls through to the
+#      accusing path, which is exactly the #16905 defect. 24a must go red, and
+#      24c must STAY GREEN, which is what makes this mutation aimed rather than
+#      broad.
+if mutate "19r the base-ahead refusal" '    ahead|diverged)' '    __never_ahead__)'; then
+  ( SUBJECT="$TMP/mut-subject.sh"
+    oa="$(MAIN_RED_BREAKER_TREEREL_FIXTURE=ahead MAIN_RED_BREAKER_BASE_SHA=basesha000 run "$out_s2" pull_request "$main_green_trusted")"
+    oc="$(MAIN_RED_BREAKER_TREEREL_FIXTURE=behind MAIN_RED_BREAKER_BASE_SHA=basesha000 run "$out_s2" pull_request "$main_green_trusted")"
+    accused=1; stale=1
+    case "$oa" in *"the red is this PR's own"*) accused=0 ;; esac
+    case "$oc" in *STALE-BASE*) stale=0 ;; esac
+    if [ "$accused" = 0 ] && [ "$stale" = 0 ]; then
+      echo "  PASS  19r) without the ahead refusal the #16905 shape ACCUSES again, while STALE-BASE still works — 24a is live and the mutation is aimed"
+    else echo "  FAIL  19r) MUTATION SURVIVED (accused=$accused staleStillWorks=$stale)"; exit 1; fi ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# 19s. THE OPPOSITE DEFECT, and it is the one that would pass a careless review:
+#      make UNKNOWN gate too. Every push run, every missing token, every absent
+#      event file stops accusing. 24d must go red.
+if mutate "19s the unknown-is-not-a-verdict rule" '    ahead|diverged)' '    ahead|diverged|unknown)'; then
+  ( SUBJECT="$TMP/mut-subject.sh"
+    od="$(MAIN_RED_BREAKER_TREEREL_FIXTURE=unknown run "$out_s2" pull_request "$main_green_trusted")"
+    case "$od" in *"failed on a step main does not"*) echo "  FAIL  19s) MUTATION SURVIVED: unknown still accused"; exit 1 ;;
+                  *) echo "  PASS  19s) gating on UNKNOWN silences the breaker wherever it cannot see — 24d is the arm holding that shut" ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]
