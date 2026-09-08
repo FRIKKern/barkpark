@@ -1244,5 +1244,96 @@ grep -qE 'retrying the PAGE in [0-9]+s: <html>$' <<<"$out" \
   && bad "(r6) the real script also prints the bare \`<html>\` retry line" \
   || ok "(r6) …while the real script never does — both directions"
 
+# ── (r7) A JSON ERROR BODY'S MESSAGE, NOT ITS OPENING BRACE ──────────────────
+# MEASURED ON MAIN 2026-09-08: five consecutive UNREACHABLE runs, and the
+# digest printed `first line of the body: {` for every 403. A JSON body has `{`
+# on line 1 and the message on line 2, so a SECONDARY RATE LIMIT and a
+# PERMISSIONS failure were indistinguishable in the log — which is exactly the
+# discrimination needed to tell whether the retry ladder EARNS the 403 (run
+# 34199179651: one 502 then three 403s in a single ladder) or whether it is
+# upstream and unrelated (run 34199900331: 502 throughout, no 403 at all).
+# Same family as task-e47f86df96d7d3ce: a digest that truncates before the
+# discriminating field cannot settle the question it exists to record.
+#
+# The function is lifted out and probed directly — no stub gh, no network — so
+# these arms test the digest itself rather than a path that happens to reach it.
+( eval "$(awk '/^gh_error_digest\(\) \{/,/^\}$/' "$WATCH")"
+
+  d_rate="$(gh_error_digest 'gh: HTTP 403
+{
+  "message": "You have exceeded a secondary rate limit. Please wait a few minutes before you try again.",
+  "documentation_url": "https://docs.github.com/rest/overview/rate-limits"
+}')"
+  d_perm="$(gh_error_digest 'gh: HTTP 403
+{
+  "message": "Resource not accessible by integration",
+  "documentation_url": "https://docs.github.com/rest"
+}')"
+  d_html="$(gh_error_digest 'HTTP 502
+<html>
+<head><title>502 Bad Gateway</title></head>
+</html>')"
+  d_oneline="$(gh_error_digest 'gh: HTTP 403
+{"message":"You have exceeded a secondary rate limit.","documentation_url":"x"}')"
+  d_nomsg="$(gh_error_digest 'HTTP 500
+{
+  "error": "boom"
+}')"
+
+  case "$d_rate" in
+    *"secondary rate limit"*) echo "  ok   (r7) a JSON 403 names the secondary rate limit instead of printing \`{\`" ;;
+    *) echo "  FAIL (r7) the rate-limit message was not surfaced: $d_rate"; exit 1 ;;
+  esac
+  case "$d_rate" in
+    *"first line of the body: {"*) echo "  FAIL (r7) still printing the opening brace: $d_rate"; exit 1 ;;
+    *) echo "  ok   (r7) …and no longer prints the opening brace as the whole diagnostic" ;;
+  esac
+  # THE DISCRIMINATION ITSELF: the two 403s must not read alike, or the fix
+  # bought a longer sentence and no information.
+  if [ "$d_rate" = "$d_perm" ]; then
+    echo "  FAIL (r7) a rate-limit 403 and a permissions 403 still read identically: $d_rate"; exit 1
+  else
+    echo "  ok   (r7) …and a permissions 403 reads DIFFERENTLY, which is the whole point"
+  fi
+  case "$d_perm" in
+    *"Resource not accessible by integration"*) echo "  ok   (r7) …the permissions 403 names its own cause" ;;
+    *) echo "  FAIL (r7) the permissions message was not surfaced: $d_perm"; exit 1 ;;
+  esac
+  case "$d_oneline" in
+    *"secondary rate limit"*) echo "  ok   (r7) a one-line JSON body works too — gh prints both shapes" ;;
+    *) echo "  FAIL (r7) a one-line JSON body lost its message: $d_oneline"; exit 1 ;;
+  esac
+  # NON-REGRESSION, BOTH DIRECTIONS: HTML still reports its status and first
+  # line, and a JSON body with no message field still falls back.
+  case "$d_html" in
+    *"HTTP 502"*) echo "  ok   (r7) an HTML 502 still reports its status — the fallback is intact" ;;
+    *) echo "  FAIL (r7) the HTML path regressed: $d_html"; exit 1 ;;
+  esac
+  case "$d_nomsg" in
+    *"first line of the body"*) echo "  ok   (r7) a JSON body with NO message field still falls back to the first line" ;;
+    *) echo "  FAIL (r7) the no-message fallback was lost: $d_nomsg"; exit 1 ;;
+  esac ) && PASS=$((PASS+7)) || FAIL=$((FAIL+1))
+
+# (r7b) DISARM. Remove the message extraction and the rate-limit arm must fail —
+# otherwise (r7) is passing on something other than the new code.
+MUT_MSG="$TMP/mutant-nomsg.sh"
+sed 's/if (msg == "" &&/if (0 \&\&/' "$WATCH" > "$MUT_MSG"
+if command grep -q 'if (0 &&' "$MUT_MSG" && ! diff -q "$WATCH" "$MUT_MSG" >/dev/null 2>&1; then
+  ok "(r7b) the mutation APPLIED — the message extraction is disabled in the mutant"
+  ( eval "$(awk '/^gh_error_digest\(\) \{/,/^\}$/' "$MUT_MSG")"
+    d="$(gh_error_digest 'gh: HTTP 403
+{
+  "message": "You have exceeded a secondary rate limit.",
+  "documentation_url": "x"
+}')"
+    case "$d" in
+      *"secondary rate limit"*) echo "  FAIL (r7b) MUTATION SURVIVED: the message appeared without the extraction: $d"; exit 1 ;;
+      *) echo "  ok   (r7b) without the extraction the 403 is back to \`{\` — (r7) measures the new code" ;;
+    esac ) && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+else
+  bad "(r7b) the mutation did not apply — (r7) would prove nothing"
+fi
+
+
 echo "── stale-verdict-watch: $PASS passed, $FAIL failed ──"
 [ "$FAIL" -eq 0 ] || exit 1
