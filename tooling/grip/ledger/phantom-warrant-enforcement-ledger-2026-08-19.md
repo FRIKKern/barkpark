@@ -14,7 +14,7 @@
 **What a guarantee sentence in this repo is actually worth.** Four bounded strata, a stated
 denominator for each, and a four-cell verdict per claim.
 
-Re-derived and published **2026-09-08** against `287dd278d653ab02e8c9b6b895c8b0f85ae2baf4`.
+Re-derived and published **2026-09-08** against `e5ef630bc` (this branch's base).
 Every counted figure below is re-derived by
 `tooling/grip/ledger/phantom-warrant-enforcement-ledger-2026-08-19.rerun.sh`, which **exits 1 when
 one drifts**.
@@ -26,7 +26,7 @@ one drifts**.
 required_contexts             = 4
 exclusion_rows                = 119
 workflow_files                = 64
-canonical_grep_occurrences    = 202
+canonical_grep_occurrences    = 204
 canonical_declarations        = 97
 claude_md_numbered_claims     = 19
 docs_anchors_real_invocations = 1
@@ -45,7 +45,7 @@ first act of writing it, and three had drifted badly:**
 | **exclusion rows** | 25 | **119** | **drifted 4.8×** |
 | **workflow files** | 50 | **64** | **drifted** |
 | **`@canonical` declarations** | 51 | **97** | **drifted 1.9×** |
-| **`@canonical` grep occurrences** | 128 | **202** | **drifted** |
+| **`@canonical` grep occurrences** | 128 | **204** | **drifted** |
 
 **The drift is not an error to correct back.** These are denominators over a live repo: workflows get
 added, markers get stamped, exclusion rows accumulate. What the drift proves is the premise —
@@ -118,8 +118,8 @@ producer is already filed as `cchi-w57-blocking-shaped-name-census-guard`.
 ## Stratum B — the canonical index
 
 **Denominator, re-derived:** **97** real `@canonical` declarations across section 8's five extensions
-(`.ex`, `.exs`, `.go`, `.ts`, `.tsx`), against **202** raw grep occurrences. **The gap is prose
-citations** in charters, cards and scaffy corpora; counting those would pad this stratum by 105 rows.
+(`.ex`, `.exs`, `.go`, `.ts`, `.tsx`), against **204** raw grep occurrences. **The gap is prose
+citations** in charters, cards and scaffy corpora; counting those would pad this stratum by 107 rows.
 Two numbers, on purpose.
 
 | claim | cell | evidence |
