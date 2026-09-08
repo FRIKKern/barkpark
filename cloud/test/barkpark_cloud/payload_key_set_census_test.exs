@@ -1623,7 +1623,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # which 340 - 114 + 400 reproduces.
   # MERGE HAZARD, unchanged: these are `==` pins. Any other PR that also moves them
   # must RE-MEASURE after this one lands, never sum with it.
-  @go_tag_pinned 340
+  # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 340 -> 352. Twelve NEW tag names arrive with
+  # `SiteBuildLogRecord` — available, box_error, box_log_state, box_status,
+  # evicted_at, exit_code, journal_command, log_bytes, log_path, log_state,
+  # record, unit_name. The struct's other 14 tags already existed as names
+  # package-wide and land entirely in the SITE register below.
+  @go_tag_pinned 352
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1687,6 +1692,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "barkpark_id" => 4,
     "basis" => 6,
     "became_live_at" => 2,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.BuildID` joins
+    # the single existing declaration — the recorder's key, echoed on EVERY
+    # answer including the refusals. It rides free on the NAME union.
+    "build_id" => 2,
     "build_log_url" => 2,
     # MetricsSpaceSites.Bytes joined the two existing `bytes` declarations
     # with the deployed-sites directory total (host-space report, W6 S4).
@@ -1732,11 +1741,17 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "deferred" => 3,
     "delivered" => 2,
     "deployment" => 3,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.DeploymentID`
+    # joins the single existing declaration — the build-log route is
+    # DEPLOYMENT-KEYED, so it echoes the id on every answer.
+    "deployment_id" => 2,
     "deployments" => 2,
     # ssw8 (PR #14610): ContentBinding.Detail is the ninth — WHY an `unverified`
     # create-time binding read could not be confirmed. The name already existed
     # package-wide, so `@go_tag_pinned` structurally cannot see this site.
-    "detail" => 9,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 9 -> 10. `SiteBuildLogRecord.Detail` — the plane's human
+    # sentence on a 409/410/502 build-log refusal.
+    "detail" => 10,
     # ssw8 (PR #14610): ContentBinding.DocType is the third — the type the
     # control plane actually READ at create, as against the type the site ROW
     # stores. Same name, different measurement: exactly the collision this
@@ -1746,14 +1761,21 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "email" => 3,
     "environment" => 4,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — the refusal envelope `decodeSelfUpdatePin/1` reads.
-    "error" => 9,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 9 -> 10. `SiteBuildLogRecord.Error` — the build-log
+    # refusal slug (not_found / box_unbound / build_log_evicted / box_unreachable).
+    "error" => 10,
     "evidence" => 2,
     "failed" => 2,
     # deploy/sites-embed-failure-cause: `SiteDeploymentEmbed` (internal/cloudclient) is a THIRD declaration — the fleet list embed learned to name the cause.
     "failure_class" => 3,
     "failure_rate" => 2,
     # deploy/sites-embed-failure-cause: same third declaration on `SiteDeploymentEmbed` — the humanized reason rides beside the class.
-    "failure_reason" => 3,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 3 -> 4. `SiteBuildLogRecord.FailureReason` — the recorder's
+    # own honest reason, capped at 4000 bytes by the serializer.
+    "failure_reason" => 4,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.FinishedAt`
+    # joins the single existing declaration.
+    "finished_at" => 2,
     "framework" => 4,
     "from" => 2,
     "git_ref" => 2,
@@ -1776,7 +1798,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # labels sharing one name, kept visible here.
     "method" => 2,
     "min_sample" => 6,
-    "name" => 11,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.Mode` —
+    # deploy/rollback/teardown, as the record captured it.
+    "mode" => 2,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 11 -> 12. `SiteBuildLogStage.Name` — one stage of the
+    # recorded build ladder.
+    "name" => 12,
     "never_covered" => 3,
     "next_cursor" => 2,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.OK` — the 202 relay envelope's own flag.
@@ -1797,7 +1824,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # dr-bl-w7: 9 -> 10. MetricsSpaceResidual.Reason — the machine-readable slug
     # a surface branches on to word a refusal ("roots-overlap-or-cross-a-mount"),
     # never prose parsed back into a decision.
-    "reason" => 10,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 10 -> 11. `SiteBuildLogRecord.Reason` — the CLOSED relay
+    # vocabulary `BuildLog.relay_reason/1` emits instead of an inspected term.
+    "reason" => 11,
     "refused" => 4,
     # W6 S4: MetricsSpace.ReportedAt — the space report stamps its own cadence,
     # which is why it is not the health beat's `as_of`.
@@ -1811,7 +1840,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # the only guard that can notice it being deleted.
     "residual" => 2,
     "role" => 4,
-    "runtime_target" => 3,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 3 -> 4. `SiteBuildLogRecord.RuntimeTarget` — static/node,
+    # as the record captured it.
+    "runtime_target" => 4,
     "sample" => 6,
     "scale_mode" => 2,
     "scope" => 4,
@@ -1826,10 +1857,17 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # the package already had — it rides free on the NAME union, so
     # `@go_tag_pinned` does not move for it and this row does.
     "sites" => 5,
-    "slug" => 7,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 7 -> 8. `SiteBuildLogRecord.Slug` — the site slug the box
+    # recorded the build under, echoed from the record.
+    "slug" => 8,
     "source" => 3,
     "stage" => 3,
-    "stages" => 2,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 2 -> 3. `SiteBuildLogRecord.Stages` — the recorded stage
+    # ladder, capped at 32 entries by the serializer.
+    "stages" => 3,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.StartedAt`
+    # joins the single existing declaration. `@go_tag_pinned` cannot see it.
+    "started_at" => 2,
     # ssw8 (PR #14610): ContentBinding.Status is the fourteenth — "bound" or
     # "unverified", the create-time verdict itself. Rides free on the NAME
     # union, so only this row can notice the site being deleted.
@@ -1839,7 +1877,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # field a reader BRANCHES on, so only this row can notice a site dying.
     "state" => 2,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.Status` — the run state the CLI verdict QUOTES rather than inventing.
-    "status" => 17,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 17 -> 18. `SiteBuildLogStage.Status` — one stage's verdict.
+    "status" => 18,
     "team" => 4,
     "team_id" => 6,
     "template" => 2,
@@ -1896,7 +1935,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # declarations ride free on the name union and land entirely in the SITE arm —
   # which is the exact class of change `@go_tag_pinned` structurally cannot see,
   # and the reason this register exists.
-  @cloudclient_sources ~w(client.go deliveries.go selfupdate.go)
+  # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go is the FOURTH non-test source — the client half of the
+  # operator build-log read path (GET /v1/sites/:id/deployments/:dep_id/build-log,
+  # dr-bl-recorder-http-read-path). It declares 26 json tags across two structs,
+  # 12 of them NEW NAMES (so `@go_tag_pinned` moves 340 -> 352) and 14 of them
+  # names the package already had — 9 that bump an existing register row and 5
+  # that were declared exactly once and are now duplicated. That split is the
+  # register's whole reason to exist: the 14 ride free on the NAME union and
+  # `@go_tag_pinned` structurally cannot see any of them.
+  @cloudclient_sources ~w(client.go deliveries.go selfupdate.go site_build_log.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
