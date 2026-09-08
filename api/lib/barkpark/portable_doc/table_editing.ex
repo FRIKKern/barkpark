@@ -462,6 +462,27 @@ defmodule Barkpark.PortableDoc.TableEditing do
     protected_wrapper(node, child, rank, "link", ~w(type href children), %{"href" => href})
   end
 
+  defp protected_inline_node(
+         %{"type" => "wikilink", "target" => target, "children" => [child]} = node,
+         rank
+       )
+       when is_binary(target) do
+    with true <- optional_non_nil?(node, "alias") and optional_non_nil?(node, "docId") do
+      semantics = Map.take(node, ~w(target alias docId))
+
+      protected_wrapper(
+        node,
+        child,
+        rank,
+        "wikilink",
+        ~w(type target children alias docId),
+        semantics
+      )
+    else
+      _ -> :error
+    end
+  end
+
   defp protected_inline_node(%{"type" => type, "children" => [child]} = node, rank)
        when type in ~w(strong em underline strikethrough) do
     protected_wrapper(node, child, rank, type, ~w(type children), %{})
@@ -584,6 +605,7 @@ defmodule Barkpark.PortableDoc.TableEditing do
     actual =
       case type do
         "link" -> Map.take(node, ["href"])
+        "wikilink" -> Map.take(node, ~w(target alias docId))
         _mark -> %{}
       end
 

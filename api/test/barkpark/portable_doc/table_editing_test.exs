@@ -471,6 +471,122 @@ defmodule Barkpark.PortableDoc.TableEditingTest do
              ]) == %{"keep" => true}
     end
 
+    test "keeps protected text editable through a metadata-free wikilink" do
+      source = [
+        %{
+          "type" => "wikilink",
+          "target" => "paper-one",
+          "alias" => "Paper one",
+          "docId" => "paper-one-id",
+          "children" => [
+            %{"type" => "text", "value" => "Before", "tracking" => %{"keep" => true}}
+          ]
+        }
+      ]
+
+      table = %{"id" => "wikilink-text", "type" => "table", "rows" => [[source]]}
+      projection = project!(table)
+
+      assert get_in(projection.shape, [
+               "rows",
+               Access.at(0),
+               "cells",
+               Access.at(0),
+               "inline"
+             ]) == %{"v" => 1, "anchors" => ["text"], "opaque" => ["text"]}
+
+      change = [
+        %{
+          "area" => "body",
+          "row" => 0,
+          "column" => 0,
+          "content" => [
+            %{
+              "type" => "wikilink",
+              "target" => "paper-two",
+              "children" => text("After")
+            }
+          ]
+        }
+      ]
+
+      assert {:ok, updated} = TableEditing.merge_cells(table, projection.shape, change)
+
+      assert get_in(updated, [
+               "rows",
+               Access.at(0),
+               Access.at(0),
+               Access.at(0),
+               "children",
+               Access.at(0),
+               "tracking"
+             ]) == %{"keep" => true}
+
+      assert get_in(updated, ["rows", Access.at(0), Access.at(0), Access.at(0), "target"]) ==
+               "paper-two"
+    end
+
+    test "preserves opaque wikilink metadata and refuses semantic retargeting" do
+      source = [
+        %{
+          "type" => "wikilink",
+          "target" => "paper-one",
+          "alias" => "Paper one",
+          "docId" => "paper-one-id",
+          "children" => text("Before"),
+          "vendor" => %{"keep" => true}
+        }
+      ]
+
+      table = %{"id" => "opaque-wikilink", "type" => "table", "rows" => [[source]]}
+      projection = project!(table)
+
+      assert get_in(projection.shape, [
+               "rows",
+               Access.at(0),
+               "cells",
+               Access.at(0),
+               "inline"
+             ]) == %{
+               "v" => 1,
+               "anchors" => ["wikilink", "text"],
+               "opaque" => ["wikilink"]
+             }
+
+      edit_text = [
+        %{
+          "area" => "body",
+          "row" => 0,
+          "column" => 0,
+          "content" => [
+            %{
+              "type" => "wikilink",
+              "target" => "paper-one",
+              "alias" => "Paper one",
+              "docId" => "paper-one-id",
+              "children" => text("After")
+            }
+          ]
+        }
+      ]
+
+      assert {:ok, updated} = TableEditing.merge_cells(table, projection.shape, edit_text)
+
+      assert get_in(updated, ["rows", Access.at(0), Access.at(0), Access.at(0), "vendor"]) ==
+               %{"keep" => true}
+
+      for {key, value} <- [
+            {"target", "paper-two"},
+            {"alias", "Changed alias"},
+            {"docId", "paper-two-id"}
+          ] do
+        retargeted = put_in(hd(edit_text), ["content", Access.at(0), key], value)
+
+        assert TableEditing.merge_cells(table, projection.shape, [retargeted]) ==
+                 {:error, :invalid_cells}
+      end
+    end
+
     test "rejects ambiguous metadata chains and removal of a metadata-bearing wrapper" do
       table = metadata_table()
 
