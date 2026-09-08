@@ -360,6 +360,58 @@ defmodule Barkpark.Tasks.ClaimTest do
       assert handed_out.content["claim"]["worker"] == "worker-second"
     end
 
+    test "an EXPIRED LEASE is handed out by the READY QUEUE too (the SQL twin)",
+         %{scope: scope} do
+      # The SAME move one layer down (task-f48b0d7c943fc3a5). `live_claim_worker/1`
+      # learned that a lease can lapse; `executable_query/0` is its SQL twin and
+      # had to learn it in the same commit, or the row becomes claimable BY NAME
+      # while staying invisible on the board — the same bug wearing the other
+      # half of its face, which is exactly what the twin comment warns about.
+      #
+      # This population is NOT hypothetical and NOT swept: `TtlSweeper` selects
+      # only `in_progress` rows, and `bp task stage <id> open` moves a row out of
+      # `in_progress` without touching `content.claim`. So this map sits there
+      # forever.
+      stale_ts =
+        DateTime.utc_now()
+        |> DateTime.add(-(Barkpark.Tasks.QueueGate.lease_ttl_seconds() + 86_400), :second)
+        |> DateTime.to_iso8601()
+
+      phase_id = uniq("phase-stale")
+
+      task =
+        mk_task!(uniq("stale-queue"), scope, %{
+          "parent_id" => phase_id,
+          "claim" => %{"worker" => "worker-long-gone", "epoch" => 4, "ts_iso" => stale_ts}
+        })
+
+      queue_opts = scope ++ [phase_id: phase_id, dataset: @dataset]
+
+      # RED BEFORE THE FIX: {:ok, nil} — a row nobody held, hidden from the board.
+      assert {:ok, %Document{} = handed_out} = Tasks.claim("worker-newcomer", queue_opts)
+      assert handed_out.id == task.id
+      assert handed_out.content["claim"]["worker"] == "worker-newcomer"
+    end
+
+    test "the SQL twin FAILS CLOSED on a malformed ts_iso — it must not even raise",
+         %{scope: scope} do
+      # `(text)::timestamptz` RAISES on garbage rather than returning NULL, and
+      # this predicate runs over the WHOLE ready population, not just the
+      # in_progress slice the sweeper casts on. One malformed row must not take
+      # the board down, and must not release a claim we cannot prove is dead.
+      phase_id = uniq("phase-garbage")
+
+      _task =
+        mk_task!(uniq("garbage-queue"), scope, %{
+          "parent_id" => phase_id,
+          "claim" => %{"worker" => "worker-holder", "epoch" => 4, "ts_iso" => "yesterday-ish"}
+        })
+
+      queue_opts = scope ++ [phase_id: phase_id, dataset: @dataset]
+
+      assert {:ok, nil} = Tasks.claim("worker-newcomer", queue_opts)
+    end
+
     test "a LIVE claim is still foreign: a contender gets :not_ready and the queue skips it",
          %{scope: scope} do
       # The over-widening guard. Same fixture as above, stopped one step short:
