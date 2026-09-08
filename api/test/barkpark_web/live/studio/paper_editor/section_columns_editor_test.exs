@@ -326,7 +326,10 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
            ) == ["first", "second:part"]
 
     assert LazyHTML.attribute(LazyHTML.query(form, "button[name='column-action']"), "value") == [
+             "add-column",
+             "remove-column:0",
              "add:0",
+             "remove-column:1",
              "up:1:first",
              "down:1:first",
              "remove:1:first",
@@ -335,6 +338,30 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
              "remove:1:second:part",
              "add:1"
            ]
+
+    assert LazyHTML.attribute(
+             LazyHTML.query(form, "button[value='remove-column:0']"),
+             "disabled"
+           ) == [""]
+
+    assert LazyHTML.attribute(
+             LazyHTML.query(form, "button[value='remove-column:0']"),
+             "aria-describedby"
+           ) == ["column-columns-0-remove-reason"]
+
+    assert LazyHTML.text(
+             LazyHTML.query(
+               form,
+               "[data-column-index='0'] [data-test-id='paper-column-remove-reason']"
+             )
+           ) =~ "Only the last column can be removed"
+
+    assert LazyHTML.text(
+             LazyHTML.query(
+               form,
+               "[data-column-index='1'] [data-test-id='paper-column-remove-reason']"
+             )
+           ) =~ "Locked content"
 
     assert Enum.count(LazyHTML.query(tree, ".bp-paper-contextual-controls--columns")) == 1
     assert Enum.empty?(LazyHTML.query(tree, ".bp-paper-contextual-controls--columns-empty"))
@@ -349,6 +376,31 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
 
     assert Enum.count(LazyHTML.query(empty_tree, ".bp-paper-contextual-controls--columns-empty")) ==
              1
+
+    empty_form = LazyHTML.query(empty_tree, "#columns-structure-form-empty-columns")
+
+    assert LazyHTML.attribute(
+             LazyHTML.query(empty_form, "button[value='remove-column:1']"),
+             "disabled"
+           ) == []
+
+    single =
+      %{"id" => "single-column", "type" => "columns", "columns" => [[]]}
+      |> render_fields()
+      |> LazyHTML.from_fragment()
+
+    assert LazyHTML.text(LazyHTML.query(single, "[data-test-id='paper-column-remove-reason']")) =~
+             "At least one column is required"
+
+    zero =
+      %{"id" => "zero-columns", "type" => "columns", "columns" => []}
+      |> render_fields()
+      |> LazyHTML.from_fragment()
+
+    assert LazyHTML.attribute(
+             LazyHTML.query(zero, "button[name='column-action']"),
+             "value"
+           ) == ["add-column"]
   end
 
   test "generic Beta recursively edits every canonical Columns child" do
