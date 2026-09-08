@@ -154,8 +154,13 @@ func TestRunCommandWarnsWhenDefaultPageMayBeTruncated(t *testing.T) {
 }
 
 func TestRunCommandTruncationNoticeBoundaries(t *testing.T) {
-	full := `{"docs":[{"id":"1"},{"id":"2"},{"id":"3"}]}`
-	short := `{"docs":[{"id":"1"},{"id":"2"}]}`
+	// `doc_id`, not `id`: this fixture stands in for task.ready, whose rows
+	// really are keyed doc_id (tasks_controller/params.ex). A fixture that
+	// disagrees with the envelope the CLI documents is a fixture that cannot
+	// catch a drift in it — and it now trips the drift advisory
+	// (list_envelope_help.go), which is the check doing its job.
+	full := `{"docs":[{"doc_id":"1"},{"doc_id":"2"},{"doc_id":"3"}]}`
+	short := `{"docs":[{"doc_id":"1"},{"doc_id":"2"}]}`
 
 	tests := []struct {
 		name string

@@ -251,6 +251,17 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		out.errf("pagination: --limit <n> · --offset <n> · --all")
 	}
 
+	// The envelope key. Three verbs of this same CLI return their rows under
+	// three DIFFERENT keys (task ready → docs, doc ls → documents, task get →
+	// doc) and no help named any of them, so every parser guessed — and one
+	// keyed on `tasks`/`id` read ZERO rows out of a 310 KB response and printed
+	// a confident EMPTY QUEUE. An empty read and an empty result are
+	// indistinguishable downstream. Registry and drift check:
+	// list_envelope_help.go.
+	for _, line := range listEnvelopeHelpLines(cmd) {
+		out.errf("%s", line)
+	}
+
 	// `--match` is honoured entirely client-side (see tasks_match.go), so the
 	// manifest cannot declare it and the flags block above cannot show it. A
 	// flag nobody can discover is a flag nobody uses — and this one exists
@@ -283,6 +294,14 @@ func usageCommand(out *writer, cmd manifest.Command) {
 	// text stays the double-quoted shell argument that executes the criterion's
 	// own backticks.
 	if cmd.ID == taskStampCommandID {
+		// The three outcomes and what each does to `met` come FIRST: the
+		// manifest's own --miss summary is server-owned and says met never
+		// flips without naming the verb that does, which is the whole defect
+		// (tasks_stamp_withdraw_remedy.go).
+		out.errf("")
+		for _, line := range stampOutcomeHelpLines() {
+			out.errf("%s", line)
+		}
 		out.errf("")
 		for _, line := range stampCriterionTextHelpLines() {
 			out.errf("%s", line)

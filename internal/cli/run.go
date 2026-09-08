@@ -595,6 +595,15 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// (tasks_get_misread.go).
 	respBody = annotateTaskGetMisreads(cmd, status, out.machineOut(), respBody)
 
+	// The envelope key the --help promised, CHECKED against what the server
+	// actually sent. A documented key nobody verifies is the same unfalsifiable
+	// promise as the refusals this closes: true when written, silently wrong
+	// afterwards. Advisory on stderr only — it never fails the command and
+	// never edits the body (list_envelope_help.go).
+	if note := listEnvelopeDrift(cmd, status, respBody); note != "" {
+		out.errf("bp: %s", note)
+	}
+
 	var hinter func() string
 	if typed := taskGetTypedID(cmd, tail); typed != "" {
 		hinter = func() string { return taskGetNotFoundHint(out, m, ctx, typed) }
