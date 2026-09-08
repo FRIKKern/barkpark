@@ -3,6 +3,16 @@ import { readFileSync } from "node:fs";
 
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const shell = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
+assert.match(shell, /\.bp-paper-figure-image-controls\s*\{[^}]*position:\s*absolute/s,
+  "resting Figure image options cannot move the reader image or caption");
+assert.match(shell, /\[data-paper-figure-image-trigger\]:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--paper-accent\)/s,
+  "the rendered Figure image has a visible keyboard target without changing its box");
+assert.match(shell, /\.bp-paper-figure-image-picker\s*\{[^}]*max-height:\s*min\(70vh, 42rem\)[^}]*overflow:\s*auto/s,
+  "Figure image options remain reachable in a bounded mobile overlay");
+assert.match(shell, /\.bp-paper-edit-form\.bp-paper-figure-caption-form\s*\{[^}]*display:\s*block[^}]*margin:\s*0[^}]*padding:\s*0/s,
+  "Figure caption form cannot add a second layout around reader typography");
+assert.match(shell, /textarea\.bp-paper-figure-caption-input\s*\{[^}]*font:\s*inherit[^}]*resize:\s*none/s,
+  "the growing Figure caption inherits the reader's font and avoids native resize chrome");
 for (const [name, css] of [["standalone", styles], ["host shell", shell]]) {
   assert.match(css, /\[data-test-id="paper-canvas-resume-warning"\]\s*\{[^}]*font-family:\s*var\(--paper-font-ui/s,
     `${name} reconnect recovery uses editor chrome rather than document prose`);

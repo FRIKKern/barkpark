@@ -1696,6 +1696,53 @@
   width: var(--bp-evidence-width, 100%);
   box-sizing: border-box;
 }
+.bp-paper-figure-image { position: relative; }
+[data-paper-figure-image-trigger] { cursor: pointer; outline-offset: 3px; }
+[data-paper-figure-image-trigger]:focus-visible {
+  outline: 2px solid var(--paper-accent);
+}
+.bp-paper-figure-image-controls {
+  position: absolute; top: 0; right: 0; z-index: 4;
+  width: min(32rem, calc(100vw - 2rem)); max-width: 100%;
+  color: var(--paper-ink-soft);
+  font-family: var(--paper-font-ui, system-ui, sans-serif);
+  font-size: 0.8125rem; line-height: 1.4;
+  opacity: 0; pointer-events: none;
+}
+.bp-paper-figure-image:hover > .bp-paper-figure-image-controls,
+.bp-paper-figure-image:focus-within > .bp-paper-figure-image-controls,
+.bp-paper-figure-image-controls[open] { opacity: 1; pointer-events: auto; }
+.bp-paper-figure-image-controls > summary {
+  cursor: pointer; width: max-content; max-width: 100%; margin-left: auto;
+  padding: 0.35rem 0.65rem; border: 1px solid var(--paper-rule); border-radius: 4px;
+  background: var(--paper-bg);
+}
+.bp-paper-figure-image-controls > summary:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
+.bp-paper-figure-image-picker {
+  max-height: min(70vh, 42rem); overflow: auto;
+  box-sizing: border-box; margin-top: 0.55rem; padding: 0.75rem;
+  background: var(--paper-bg); border: 1px solid var(--paper-rule); border-radius: 4px;
+}
+@media (hover: none) {
+  .bp-paper-figure-image-controls { opacity: 1; pointer-events: auto; }
+  .bp-paper-figure-image-controls > summary { min-height: 44px; box-sizing: border-box; }
+}
+.bp-paper-edit-form.bp-paper-figure-caption-form { display: block; margin: 0; padding: 0; }
+.bp-paper-figure-caption-form > label.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+textarea.bp-paper-figure-caption-input {
+  display: block; width: 100%; min-width: 0; box-sizing: border-box;
+  margin: 0; padding: 0; border: 0; border-radius: 0;
+  background: transparent; color: inherit; font: inherit;
+  resize: none; overflow: hidden; outline-offset: 3px;
+}
+textarea.bp-paper-figure-caption-input:focus-visible {
+  outline: 2px solid var(--paper-accent);
+}
 .bp-paper-edit-block[data-block-type="columns"]:has([data-paper-columns-editor-frame]),
 .bp-paper-edit-block[data-block-type="section"]:has([data-paper-section-editor-frame].bp-section--wide) {
   margin-inline: var(--bp-evidence-pull, 0px);

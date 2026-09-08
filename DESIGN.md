@@ -72,6 +72,7 @@
 
 ## Interaction states
 - Editing: Public Papers and Studio use the same shared editor controls. Controls are keyboard reachable, retain visible focus, and close without discarding a draft. No-op View/Edit/View must not rewrite content or advance its revision.
+- Figure image editing: Keep the canonical reader image and caption in their resting positions. Pointer or keyboard activation of the rendered image opens the existing scoped media picker; configuration is a contextual fallback, not a replacement layout. Dismissing the picker or selecting the current source writes nothing. Replacement changes only the explicitly selected image source, preserving child identity, descriptions, other metadata and the enclosing Figure. Keep non-image children on their existing editing path; this contract does not expand canvas admission.
 - Save validation: Invalid input remains visible and editable; leaving edit mode waits for valid, acknowledged persistence. Failure never silently replaces the draft with the last saved value.
 - Loading: Server-rendered Paper body and authored related-Paper fallbacks remain meaningful before live detail resolution.
 - Empty: Quiet editions state that no mainline changes landed and still link to adjacent periods.
