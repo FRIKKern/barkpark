@@ -568,6 +568,35 @@ Being merely **behind** main is not in this class and is never reported: main is
 permits. Only a conflicted one is stuck. All four behaviours are mutation-proved
 over self-written fixtures in `scripts/stale-verdict-watch.test.sh`.
 
+### SELF-CAMOUFLAGING — the fix that narrates itself in the vocabulary it removed
+
+The four classes above are about a CHECK that reads green. There is a fifth, and
+its victim is the **search** an author uses to re-derive what is left to do: **a
+change that documents itself in the vocabulary of the thing it removes makes its
+own prose indistinguishable from the remaining work.** The codebase's own search
+key stops discriminating, and it stops discriminating in the comforting
+direction — the fix looks like the biggest remaining cluster.
+
+Measured, not inferred: #16888 tightened 32 multi-status refusal assertions and
+gave each site a comment quoting the bracket literal it had just deleted. A
+sweep for that literal over `api/test` then returned 80 hits, of which 20 were
+that PR's own explanations — and all 20 sat in the ten files that were already
+fixed. A sweeper re-deriving the remaining population reads the highest apparent
+density of work precisely where there is none. It produced one false reading
+before it was caught.
+
+When a fix narrates the pattern it deleted, describe that pattern in prose —
+name the statuses, not the numerals — rather than reproducing a greppable
+literal. The durable second layer is to anchor the sweep grep on `status` before
+the bracket, so an assertion and a sentence about an assertion stop matching the
+same expression; that strict form is invariant across the reword, which is how
+you prove the reword removed only phantoms.
+
+The non-vacuity arm is the acceptance criterion that matters. Re-run the loose
+sweep after the reword and confirm it still returns the same number of LIVE-CODE
+sites. A fix that silences false positives by also blinding the search has made
+the artifact worse than the noise it removed.
+
 ## Security gates (Sobelow + mix_audit)
 
 `.github/workflows/security.yml` (filed by `task-a41fc4590b2c2eb1`) adds two
