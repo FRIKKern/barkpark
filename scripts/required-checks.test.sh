@@ -71,6 +71,26 @@
 # and only when the producer's own refusal is on record in GEN_EMIT_ERR.
 # Section 25 pins both directions.
 #
+# THE VERIFIER SPEAKS THE SAME DISTINCTION NOW, IN A DIFFERENT NUMBER, AND THE
+# TRANSLATION HAPPENS HERE. scripts/required-checks-verify.sh exits 5 for
+# BLOCKED — an input it could not read, a producer that refused. It is 5 and not
+# 4 on purpose: 4 in THAT file is RE-RUN (every required context rendered, but
+# one concluded `cancelled`), so a shared integer would carry two meanings across
+# one call and a mapping written without noticing would silently convert one into
+# the other. Both directions look plausible, which is what makes it dangerous.
+#
+#   verify 5 (BLOCKED)  -> this suite's `blocked()`  -> this suite exits 4 (HOLD)
+#   verify 4 (RE-RUN)   -> NOT blocked; a verdict about a head, routed on its own
+#   verify 1 (DRIFT)    -> this suite's `bad()`      -> this suite exits 1
+#
+# §11b exercises both of the first two against the real verifier. Before the
+# verifier had a fifth code, §11's live half was `if bash "$VERIFY"` and called
+# `bad` — a MEASURED BREACH — on any nonzero. On 2026-09-07 an E2BIG inside
+# scripts/lib/check-runs.sh made the check-run feed unreadable, verify exited 1,
+# and this line reported "full mode reds on the committed spec — hgw2-s7's slice
+# gate cannot pass" for hours. A cannot-read was filed, triaged and prioritised
+# as a live branch-protection defect.
+#
 # THE INTERPRETER GUARD, AND THE VACUOUS GREEN IT DELETES (wave 53)
 #
 # The shebang above only decides who runs this file when it is EXECUTED. An
@@ -1426,21 +1446,29 @@ fi
 
 section "8. the guard FAILS — never skips — when it cannot see one of the three sides"
 
-if bash "$VERIFY" --spec "$TMP/no-such-spec.json" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe >/dev/null 2>&1; then
-  bad "a missing spec passed"
-else
-  ok "a missing committed spec FAILS"
-fi
-if bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/nope.json" --runs "$TMP/runs.json" --sha probe >/dev/null 2>&1; then
-  bad "an unreadable live config passed"
-else
-  ok "an unreadable live config FAILS"
-fi
-if bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$TMP/nope.json" --sha probe >/dev/null 2>&1; then
-  bad "an unreadable check-run feed passed"
-else
-  ok "an unreadable check-run feed FAILS (no PR to render names against = red, not green)"
-fi
+# NONZERO IS NO LONGER ENOUGH TO ASSERT HERE. These three clauses used to read
+# `if bash "$VERIFY" …; then bad; else ok; fi` — satisfied by ANY refusal,
+# including drift's 1. The whole point of verify's exit 5 is that a no-read has
+# its own word, so the assertion has to name the code or it certifies nothing
+# about the distinction it exists to protect.
+rc8_noread() { # label <verify args…>
+  local label="$1"; shift
+  local rc=0
+  bash "$VERIFY" "$@" >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -eq 5 ]; then
+    ok "$label is BLOCKED (exit 5) — a hold, not drift"
+  elif [ "$rc" -eq 1 ]; then
+    bad "$label exited 1 — drift's code for a no-read, the collapse this section exists to refuse"
+  else
+    bad "$label exited $rc, neither the hold (5) nor a recognised verdict"
+  fi
+}
+rc8_noread "a missing committed spec" \
+  --spec "$TMP/no-such-spec.json" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe
+rc8_noread "an unreadable live config" \
+  --spec "$TMP/enforced.json" --readback "$TMP/nope.json" --runs "$TMP/runs.json" --sha probe
+rc8_noread "an unreadable check-run feed (no PR to render names against)" \
+  --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$TMP/nope.json" --sha probe
 
 # ── AN EMPTY FEED IS NOT A DEADLOCK, AND THE REFUSAL THAT SAYS SO IS THIS
 #    CALLER'S ────────────────────────────────────────────────────────────────
@@ -1455,10 +1483,10 @@ fi
 RC8_EMPTY_RUNS="$TMP/runs-empty.json"
 echo '{ "check_runs": [] }' > "$RC8_EMPTY_RUNS"
 RC8_E_OUT="$(bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$RC8_EMPTY_RUNS" --sha probe 2>&1)" && RC8_E_RC=0 || RC8_E_RC=$?
-if [ "$RC8_E_RC" -eq 1 ] && grep -q "refusing to declare agreement against an empty feed" <<<"$RC8_E_OUT"; then
-  ok "an EMPTY check-run feed FAILS BY NAME (exit 1) — never a green, and never a deadlock verdict against the spec"
+if [ "$RC8_E_RC" -eq 5 ] && grep -q "refusing to declare agreement against an empty feed" <<<"$RC8_E_OUT"; then
+  ok "an EMPTY check-run feed is BLOCKED BY NAME (exit 5) — never a green, never a deadlock verdict against the spec, and never drift's 1"
 else
-  bad "an empty check-run feed did not red with the guard's own refusal (exit $RC8_E_RC): $(grep -m2 -e FAIL -e DEADLOCK <<<"$RC8_E_OUT")"
+  bad "an empty check-run feed did not hold with the guard's own refusal (exit $RC8_E_RC, wanted 5): $(grep -m2 -e BLOCKED -e FAIL -e DEADLOCK <<<"$RC8_E_OUT")"
 fi
 RC8_NOEMPTY="$TMP/verify-no-empty-refusal.sh"
 sed 's%^.*refusing to declare agreement against an empty feed.*$%    || : # EMPTY REFUSAL REMOVED%' "$VERIFY" > "$RC8_NOEMPTY"
@@ -1627,6 +1655,78 @@ else
 fi
 
 
+section "11b. the 4/4 COLLISION across the verify boundary, exercised in both directions"
+
+# THE HAZARD, STATED BEFORE IT IS TESTED. Two files, one call, one integer:
+#
+#   scripts/required-checks-verify.sh   4 = RE-RUN   (every required context
+#                                                     rendered; one concluded
+#                                                     `cancelled`)
+#   scripts/required-checks.test.sh     4 = HOLD     (an input could not be read)
+#
+# Those are not the same claim and they are not even the same KIND of claim: one
+# is a verdict about a specific head that a re-run fixes, the other is this suite
+# saying it has no verdict at all. A mapping written without noticing converts one
+# into the other, and BOTH directions read plausibly in the output — "held" over
+# a cancelled run, or "re-run it" over an outage. That is why the verifier's
+# no-read code is 5 and never 4: the two vocabularies must not be able to touch.
+#
+# This section proves the separation from the actual binary rather than from the
+# header, and it proves it in both directions with the ARM named for each exit.
+
+# (a) THE RE-RUN ARM. A required context whose latest run concluded `cancelled`,
+#     asked through --deadlock (the mode bp-merge.sh's pre-flight uses). Must be
+#     4, and must NOT be a hold: nothing here failed to be read.
+RC11B_CANCEL="$TMP/rc11b-cancelled.json"
+jq -c --arg keep "$KEPT_CTX" '(.check_runs[] | select(.name == $keep)) |= (.conclusion = "cancelled" | .status = "completed")' \
+  "$TMP/runs.json" > "$RC11B_CANCEL"
+RC11B_A_OUT="$(bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$RC11B_CANCEL" --sha probe --deadlock 2>&1)" && RC11B_A=0 || RC11B_A=$?
+if [ "$RC11B_A" -eq 4 ] && ! grep -q '^BLOCKED:' <<<"$RC11B_A_OUT"; then
+  ok "(a) the RE-RUN arm: a cancelled required context exits 4 from verify and prints NO \`BLOCKED:\` line — it is a verdict about a head, and this suite must never route it to blocked()"
+else
+  bad "(a) the cancelled-required-context arm did not produce a clean RE-RUN (exit $RC11B_A, wanted 4; blocked line present: $(grep -c '^BLOCKED:' <<<"$RC11B_A_OUT" || true))"
+fi
+
+# (b) THE BLOCKED ARM. The identical invocation with a feed that cannot be read
+#     at all. Must be 5. Same mode, same spec, same read-back — the ONLY thing
+#     that changed is whether the input could be read, so a matching number here
+#     cannot be borrowed from anything else in the command line.
+RC11B_B_OUT="$(bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$TMP/rc11b-does-not-exist.json" --sha probe --deadlock 2>&1)" && RC11B_B=0 || RC11B_B=$?
+if [ "$RC11B_B" -eq 5 ] && grep -q '^BLOCKED:' <<<"$RC11B_B_OUT"; then
+  ok "(b) the BLOCKED arm: the SAME --deadlock call with an unreadable feed exits 5 and says so in its own word"
+else
+  bad "(b) an unreadable feed through --deadlock did not hold (exit $RC11B_B, wanted 5): $(tail -1 <<<"$RC11B_B_OUT")"
+fi
+
+# (c) THE SEPARATION, asserted from (a) and (b)'s own numbers rather than from
+#     the headers. If a future edit ever unifies them, this reds before any
+#     caller silently starts converting one into the other.
+if [ "$RC11B_A" -ne "$RC11B_B" ] && [ "$RC11B_B" -ne 4 ]; then
+  ok "(c) RE-RUN ($RC11B_A) and BLOCKED ($RC11B_B) are DIFFERENT integers out of verify, and BLOCKED is not 4 — this suite's own HOLD code cannot be produced by a cancelled run"
+else
+  bad "(c) verify's RE-RUN and BLOCKED collided (re-run=$RC11B_A, blocked=$RC11B_B) — a caller mapping 4 to this suite's HOLD would now convert a cancelled run into an outage report"
+fi
+
+# (d) AND THE TRANSLATION THIS FILE PERFORMS, exercised on the tallies rather
+#     than described. The §11 live half routes verify's 5 to blocked() and
+#     everything else nonzero to bad(). Replay both arms through that exact
+#     shape against a scratch pair of counters and check which tally moved.
+RC11B_P0=$PASS; RC11B_F0=$FAIL; RC11B_B0=$BLOCKED
+# The two emitted lines below are §11b(d)'s own instrument, not findings: the
+# counters are restored immediately after and the verdict is (d)'s ok/bad.
+rc11b_route() { local m="§11b(d) ROUTING PROBE — not a finding, the tallies are restored two lines down"
+  case "$1" in 0) ok "$m" ;; 5) blocked "$m" ;; *) bad "$m" ;; esac; }
+rc11b_route "$RC11B_A"
+RC11B_A_F=$((FAIL - RC11B_F0)); RC11B_A_B=$((BLOCKED - RC11B_B0))
+rc11b_route "$RC11B_B"
+RC11B_B_F=$((FAIL - RC11B_F0 - RC11B_A_F)); RC11B_B_B=$((BLOCKED - RC11B_B0 - RC11B_A_B))
+PASS=$RC11B_P0; FAIL=$RC11B_F0; BLOCKED=$RC11B_B0
+if [ "$RC11B_A_F" -eq 1 ] && [ "$RC11B_A_B" -eq 0 ] && [ "$RC11B_B_F" -eq 0 ] && [ "$RC11B_B_B" -eq 1 ]; then
+  ok "(d) the translation holds on the TALLIES: verify's RE-RUN(4) increments failed and not blocked, verify's BLOCKED(5) increments blocked and not failed — so \`0 failed\` can never hide an outage and a hold can never absorb a real verdict"
+else
+  bad "(d) the §11 routing shape mis-tallies (re-run -> failed+$RC11B_A_F blocked+$RC11B_A_B; blocked -> failed+$RC11B_B_F blocked+$RC11B_B_B)"
+fi
+
 # ═══ the API stage — §10 and §11's three live clauses ════════════════════════
 #
 # EVERYTHING ABOVE THIS LINE IS HERMETIC. Everything below reads the live GitHub
@@ -1658,11 +1758,20 @@ api_stage() {
 
   section "11 (live half). full mode tracks the COMMITTED spec against reality"
 
-  if bash "$VERIFY" >/dev/null 2>&1; then
-    ok "full mode is green on the COMMITTED spec (enforced=$(jq -r .enforced "$SPEC")) — hgw2-s7's slice gate passes"
-  else
-    bad "full mode reds on the committed spec — hgw2-s7's slice gate cannot pass"
-  fi
+  # THE SITE THE WHOLE EXIT-5 CONTRACT WAS BUILT FOR. This was
+  # `if bash "$VERIFY" >/dev/null 2>&1` — any nonzero fell into `bad`, a MEASURED
+  # BREACH of branch protection. On 2026-09-07 an E2BIG inside
+  # scripts/lib/check-runs.sh made the feed unreadable, verify exited 1, and this
+  # line reported "hgw2-s7's slice gate cannot pass" for hours over an input
+  # nobody could read. The verdict and the hold now arrive as different integers,
+  # so this routes them to different tallies. stderr is KEPT (it carries verify's
+  # own BLOCKED: line, which is the only text that names what could not be read).
+  RC11_OUT="$(bash "$VERIFY" 2>&1)" && RC11_RC=0 || RC11_RC=$?
+  case "$RC11_RC" in
+    0) ok "full mode is green on the COMMITTED spec (enforced=$(jq -r .enforced "$SPEC")) — hgw2-s7's slice gate passes" ;;
+    5) blocked "full mode could not READ one of its inputs, so this run has NO verdict about hgw2-s7's slice gate: $(grep -m1 '^BLOCKED:' <<<"$RC11_OUT")" ;;
+    *) bad "full mode reds on the committed spec (exit $RC11_RC) — hgw2-s7's slice gate cannot pass: $(grep -m1 -e '^FAIL:' -e DRIFT <<<"$RC11_OUT")" ;;
+  esac
 
   if jq -e '.enforced == false' "$SPEC" >/dev/null; then
     if bash "$VERIFY" --spec "$FULLMUT" >/dev/null 2>&1; then

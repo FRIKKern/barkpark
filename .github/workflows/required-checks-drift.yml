@@ -598,4 +598,20 @@ jobs:
             echo "::error::DEADLOCK — the committed spec requires a context this head never rendered. Merging with protection on would brick the branch."
             exit 1
           fi
+          # 5 = BLOCKED: the verifier could not READ one of its three sides (the
+          # committed spec, live protection, the rendered check-run feed) — or a
+          # producer refused. It reached NO verdict about the required set, so the
+          # red this step raises must not be read as a claim about the spec. Same
+          # shape as the step above maps the mutation suite's own HOLD code, and
+          # the same shape as the DEADLOCK line: a NAMED ::error:: and a nonzero,
+          # never a silent pass. This step still reds, deliberately — the alternative
+          # is the vacuous green this whole family exists to refuse — but it reds
+          # saying WHICH kind of thing happened. The measured cost of not having
+          # this: on 2026-09-07 an E2BIG inside scripts/lib/check-runs.sh made the
+          # feed unreadable, the verifier exited 1, and hours went into triaging a
+          # branch-protection breach that did not exist.
+          if [ "$rc" -eq 5 ]; then
+            echo "::error::HOLD (not drift) — the three-way guard could not READ an input, or a producer refused. The BLOCKED: line above names what could not be read. This run made NO measurement of the required set; fix the input, do NOT read this as a claim about the committed spec."
+            exit 1
+          fi
           exit "$rc"

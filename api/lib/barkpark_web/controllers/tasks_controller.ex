@@ -1560,7 +1560,8 @@ defmodule BarkparkWeb.TasksController do
 
     message =
       Params.criteria_hint(reason, surface) ||
-        Params.fence_hint(reason, surface, Map.get(extra, :current_epoch))
+        Params.fence_hint(reason, surface, Map.get(extra, :current_epoch)) ||
+        Params.stale_rev_hint(reason, surface, Map.get(extra, :current_rev))
 
     body =
       case message do
@@ -1589,6 +1590,20 @@ defmodule BarkparkWeb.TasksController do
 
       _ ->
         %{}
+    end
+  end
+
+  # `stale_claim` on the close/stamp path is a REV-CAS loss, NOT a lease problem
+  # (`Tasks.Close.apply_close_update/8`: `fenced_content_write/4` matched 0 rows
+  # on `d.rev == observed_rev`). The name is historical and consumers string-match
+  # it, so the token stays and the MESSAGE carries the truth — which means it
+  # needs the same thing `doc_changed_since_claim` supplies and this one never
+  # did: the rev that is current NOW, read back on the refusal path so the caller
+  # recovers without a second round trip. A miss degrades to naming the re-read.
+  defp fence_extras(conn, doc_id, :stale_claim) do
+    case find_task_by_doc_id(doc_id, conn) do
+      {:ok, %Document{rev: rev}} when is_binary(rev) -> %{current_rev: rev}
+      _ -> %{}
     end
   end
 

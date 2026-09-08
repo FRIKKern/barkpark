@@ -45,8 +45,13 @@ const inertEl = {
 };
 const storage = { getItem: () => null, setItem: noop, removeItem: noop };
 
-const hooks = {};
-const sandbox = {
+// dr-w5-followup: the sandbox is built by a FACTORY, not inline, because the
+// bucket-invariant proof has to EVALUATE A MUTATED app.js and read the hooks it
+// exports. Re-implementing the derivation in the test would prove nothing about
+// the shipped file; re-running the shipped file with one rung inserted proves
+// exactly the invariant the criterion asks for.
+function makeSandbox(hooks) {
+  const sandbox = {
   __bpTestHook(h) { Object.assign(hooks, h); },
   document: {
     readyState: "loading", // keeps init() unbound — DOMContentLoaded never fires
@@ -73,13 +78,30 @@ const sandbox = {
   setInterval: () => 1, // truthy handle so stopInstanceTicker() clears cleanly
   clearInterval: noop,
   console,
-};
-sandbox.globalThis = sandbox;
+  };
+  sandbox.globalThis = sandbox;
+  return sandbox;
+}
+
+// Evaluate a (possibly mutated) app.js source in its own fresh context and hand
+// back the hooks it exported. The shipped file is the default argument, so the
+// main harness below and every mutant run take the SAME path.
+const APP_PATH = new URL("./app.js", import.meta.url);
+function evalApp(src) {
+  const h = {};
+  const sb = makeSandbox(h);
+  vm.createContext(sb);
+  vm.runInContext(src === undefined ? fs.readFileSync(APP_PATH, "utf8") : src, sb);
+  return { hooks: h, sandbox: sb };
+}
+
+// THE harness context. Kept as a module-level `sandbox` binding because dozens
+// of tests below drive it directly (sandbox.location.hash, sandbox.fetch, …);
+// evalApp exists for the MUTANT runs, which must not touch this one.
+const hooks = {};
+const sandbox = makeSandbox(hooks);
 vm.createContext(sandbox);
-vm.runInContext(
-  fs.readFileSync(new URL("./app.js", import.meta.url), "utf8"),
-  sandbox,
-);
+vm.runInContext(fs.readFileSync(APP_PATH, "utf8"), sandbox);
 
 // ── cch-w36-s1 · THE LAUNCH PAYWALL'S AUTHORITY SEAM ───────────────────────
 // The server refuses two DIFFERENT things on this one screen: launching needs
@@ -4502,7 +4524,7 @@ test("D32: the SPA ladder is attention_order.json's ORDER, derived on both sides
   assert.equal(hooks.bucketOfRank(0), undefined);
 
   // ── THE NAMED CLASSIFIER GAP: rungs the SPA ORDERS but cannot PRODUCE.
-  // Closing one without deleting its entry reds here, and so does a fifth.
+  // Adding one without an arm reds here.
   assert.deepEqual(
     ladderOrder.filter((st) => !hooks.attentionKinds.includes(st)),
     [...hooks.ATTENTION_ORDER_ONLY],
@@ -4510,17 +4532,22 @@ test("D32: the SPA ladder is attention_order.json's ORDER, derived on both sides
   // THE LITERAL IS THE POINT. The deepEqual above compares the implementation
   // against ITSELF (ladder minus kinds, versus the list the implementation
   // publishes) and therefore cannot fail on its own; this line is the half that
-  // can. Each entry earns its place with a reason the implementation does not
-  // control — and the full ladder is attention_order.json's, not this list's:
-  //   strained — needs the host's load vitals; no fleet row carries them.
-  //   filling  — needs the host's disk vitals; likewise absent from the row.
-  // A rung whose inputs ARE on the payload does not belong here: it belongs in
-  // classifyBp. dr-w10-s1's `deploys_failing` and dr-w24-followup's `diverged`
-  // left this list the moment their arms landed, which is the only way out of it.
-  assert.deepEqual([...hooks.ATTENTION_ORDER_ONLY], ["strained", "filling"],
-    "the ORDER-ONLY list must be exactly the rungs whose INPUTS are missing from " +
-    "the fleet payload — a rung added here to make a test pass is a widened gap, " +
-    "not a fix");
+  // can. dr-w5-followup: THE GAP IS NOW EMPTY — `strained` and `filling` were
+  // its last two entries and they left it the only way out, through a
+  // classifyBp arm, once it was MEASURED that their inputs (cpu_cores, load15/
+  // load1, disk_used_percent, via router.ex merge_pressure/2) had been on the
+  // fleet row all along. A rung whose inputs are on the payload does not belong
+  // here: it belongs in classifyBp. A name reappearing in this list is a
+  // WIDENED GAP, not a fix, and it reds this line.
+  assert.deepEqual([...hooks.ATTENTION_ORDER_ONLY], [],
+    "the ORDER-ONLY list is empty: every rung this console orders, it also " +
+    "classifies. A rung added here to make a test pass is a widened gap, not a fix");
+  // …and the empty gap is only meaningful alongside a NON-EMPTY ladder that the
+  // kinds cover exactly. Without this, `[] === []` above would green a file
+  // whose ladder had been deleted.
+  assert.deepEqual([...hooks.attentionKinds], ladderOrder,
+    "with an empty gap, the classifiable kinds ARE the ladder, in order");
+  assert.ok(ladderOrder.length >= 14, "the ladder collapsed to " + ladderOrder.length + " rungs");
 
   // ── RULING A's SHAPE, as ordering claims over the ladder (fixture-independent,
   // so they hold on a main that has not taken the fixture change yet).
@@ -4544,6 +4571,373 @@ test("D32: the SPA ladder is attention_order.json's ORDER, derived on both sides
   }
 });
 
+// ═══ dr-w5-followup: THE SPA LADDER STOPS BEING TWO RUNGS BEHIND GO ═══════════
+//
+// Until this slice classifyBp could return twelve of the ladder's fourteen
+// states: `strained` and `filling` were ORDERED and never PRODUCED, so the
+// console rendered a box HEALTHY while `bp cloud status` called it strained in
+// the same minute. The recorded reason — "no fleet row carries the load and
+// disk vitals" — was FALSE when measured: router.ex merge_pressure/2 has been
+// putting cpu_cores, load15/load1 and disk_used_percent on every fleet row, and
+// app.js has read bp.pressure for the slot pair since #14886.
+
+// The `pressure` node the control plane really serializes (router.ex
+// merge_pressure/2): the key is ALWAYS present, every vital is a number or
+// null, and an absent key / the agent's -1 sentinel both arrive as null. Every
+// witness below is built from this shape rather than hand-tuned to the
+// predicate, and `over` names only what the case is about.
+function PRESSURE(over) {
+  return Object.assign({
+    cpu_percent: null, cpu_cores: null, mem_used_percent: null,
+    load1: null, load15: null, req_per_s: null, p95_ms: null, err_5xx_per_s: null,
+    disk_used_percent: null, swap_used_percent: null, swap_total_bytes: null,
+    reported_at: "2026-09-08T00:00:00Z",
+  }, over || {});
+}
+const LIVE_BOX = { id: "b1", name: "guerrilla", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" };
+const VITAL_BOX = (over) => ({ ...LIVE_BOX, pressure: PRESSURE(over) });
+
+test("dr-w5-followup (c0): the SPA's vitals fences are the GO twin's constants, read out of the Go source", () => {
+  // Not a restated number: the expected side is grepped from
+  // internal/cli/cloud_status_cmd.go, so a fence changed on one surface reds
+  // here instead of drifting silently for a wave.
+  const GO = fs.readFileSync(new URL("../../../internal/cli/cloud_status_cmd.go", import.meta.url), "utf8");
+  const constOf = (name) => {
+    const m = new RegExp("\\b" + name + "\\s*=\\s*([0-9.]+)").exec(GO);
+    assert.ok(m, "internal/cli/cloud_status_cmd.go no longer declares " + name +
+      " — the cross-surface pin has lost its anchor, not its meaning");
+    return Number(m[1]);
+  };
+  assert.equal(hooks.STRAINED_LOAD15_PER_CORE, constOf("strainedLoad15PerCore"));
+  assert.equal(hooks.STRAINED_LOAD1_PER_CORE, constOf("strainedLoad1PerCore"));
+  assert.equal(hooks.FILLING_DISK_PCT, constOf("fillingDiskPercent"));
+  // Non-vacuity: the greps must have found real numbers, not undefined == undefined.
+  assert.equal(hooks.STRAINED_LOAD15_PER_CORE, 1.75);
+  assert.equal(hooks.STRAINED_LOAD1_PER_CORE, 2.0);
+  assert.equal(hooks.FILLING_DISK_PCT, 90);
+  // and the fallback fence is HIGHER than the primary, which is the whole
+  // argument for having it: a noisier window may only UNDER-report strain.
+  assert.ok(hooks.STRAINED_LOAD1_PER_CORE > hooks.STRAINED_LOAD15_PER_CORE);
+});
+
+test("dr-w5-followup (c0): the fence TABLE — every shape of the pressure block, both directions", () => {
+  // BOTH ARMS IN ONE RUN. Each row names a shape and the verdict it must get;
+  // the `fires` column is the catch arm, the `ok` rows are the ignore arm. A
+  // predicate that fired on nil would red the silences; one that never fired
+  // would red the positives.
+  const CASES = [
+    // ── SILENCES. A box that did not report is not a rung (charter D42).
+    ["no pressure key at all (a pre-contract control plane)", { ...LIVE_BOX }, "ok"],
+    ["an all-null pressure block (the box has never beaten)", VITAL_BOX({}), "ok"],
+    ["load15 present but cpu_cores null — no denominator, no verdict", VITAL_BOX({ load15: 9.9 }), "ok"],
+    ["cpu_cores 0 — a denominator that cannot divide", VITAL_BOX({ cpu_cores: 0, load15: 9.9 }), "ok"],
+    ["cpu_cores negative (a sentinel that survived) — still no verdict", VITAL_BOX({ cpu_cores: -1, load15: 9.9 }), "ok"],
+    ["a non-numeric vital is a silence, never a coercion", VITAL_BOX({ cpu_cores: "4", load15: "9.9" }), "ok"],
+    // ── THE LOAD15 FENCE, on both sides of 1.75x.
+    ["load15 1.74x — busy, not in trouble", VITAL_BOX({ cpu_cores: 4, load15: 6.96 }), "ok"],
+    ["load15 exactly 1.75x — the fence is >=, so it FIRES", VITAL_BOX({ cpu_cores: 4, load15: 7.0 }), "strained"],
+    ["load15 1.8x", VITAL_BOX({ cpu_cores: 2, load15: 3.6 }), "strained"],
+    // ── THE LOAD1 FALLBACK, only when load15 is absent, and against 2.0x.
+    ["load1 1.99x with no load15 — under the HIGHER fallback fence", VITAL_BOX({ cpu_cores: 4, load1: 7.96 }), "ok"],
+    ["load1 exactly 2.0x with no load15 — fires through the fallback", VITAL_BOX({ cpu_cores: 4, load1: 8.0 }), "strained"],
+    ["load1 1.8x with no load15 — would fire on the PRIMARY fence and must not", VITAL_BOX({ cpu_cores: 4, load1: 7.2 }), "ok"],
+    // ── PREFERENCE: load15 wins whenever it is present, in BOTH directions.
+    ["a load1 spike over a calm load15 is NOT strain", VITAL_BOX({ cpu_cores: 4, load1: 40, load15: 1.0 }), "ok"],
+    ["a calm load1 does not rescue a hot load15", VITAL_BOX({ cpu_cores: 4, load1: 0.1, load15: 7.2 }), "strained"],
+    // ── THE DISK FENCE, on both sides of 90%.
+    ["disk 89.9% — not yet filling", VITAL_BOX({ disk_used_percent: 89.9 }), "ok"],
+    ["disk exactly 90% — the meter's own over_limit ceiling", VITAL_BOX({ disk_used_percent: 90 }), "filling"],
+    ["disk 94.2%", VITAL_BOX({ disk_used_percent: 94.2 }), "filling"],
+    ["disk null with a live block — silence", VITAL_BOX({ cpu_cores: 4, load15: 0.2 }), "ok"],
+    // ── PRECEDENCE: strained outranks filling, exactly as the ladder orders.
+    ["strained AND filling together reads as the higher rung", VITAL_BOX({ cpu_cores: 2, load15: 3.6, disk_used_percent: 99 }), "strained"],
+  ];
+  assert.ok(CASES.length >= 7, "the criterion asks for the fence shapes; this table runs " + CASES.length);
+  for (const [why, bp, want] of CASES) {
+    assert.equal(hooks.classifyBp(bp), want, why);
+  }
+  // …and the table is NOT one-sided: it must contain both verdicts, or a
+  // predicate stuck on one answer would pass a table of only the other.
+  const got = CASES.map(([, bp]) => hooks.classifyBp(bp));
+  assert.ok(got.includes("strained") && got.includes("filling") && got.includes("ok"),
+    "the fence table must exercise both firing rungs AND the silence");
+
+  // The predicate seams answer the same way when probed directly, and
+  // loadPerCore names WHICH window it judged — the fallback must be legible.
+  assert.equal(hooks.loadPerCore(VITAL_BOX({ cpu_cores: 4, load15: 7.2, load1: 1 })).window, "15m avg");
+  assert.equal(hooks.loadPerCore(VITAL_BOX({ cpu_cores: 4, load1: 8 })).window, "1m avg");
+  assert.equal(hooks.loadPerCore(VITAL_BOX({})).ok, false);
+  assert.equal(hooks.strainedBox(VITAL_BOX({ cpu_cores: 2, load15: 3.6 })), true);
+  assert.equal(hooks.fillingBox(VITAL_BOX({ disk_used_percent: 94.2 })), true);
+  assert.equal(hooks.fillingBox(VITAL_BOX({})), false);
+});
+
+test("dr-w5-followup (c0): the vitals REASONS name the measurement and the fence, and never say CPU", () => {
+  const strained = VITAL_BOX({ cpu_cores: 2, load15: 3.6, load1: 0.4 });
+  const why = hooks.strainedReason(strained);
+  assert.equal(why, "load 3.6 on 2 cores (1.8x, 15m avg)");
+  // load1/load15 count uninterruptible sleep: a box stalled on I/O is honestly
+  // under load with an idle CPU, so naming CPU sends the operator to the wrong
+  // instrument. Go's strainedReason carries the same prohibition.
+  assert.doesNotMatch(why, /cpu/i, "the strained reason must say LOAD, never CPU");
+  // the fallback reading is LEGIBLE AS SUCH — an operator can see it is coarser.
+  assert.match(hooks.strainedReason(VITAL_BOX({ cpu_cores: 4, load1: 8 })), /1m avg/);
+  assert.equal(hooks.strainedReason(VITAL_BOX({})), "", "an unmeasured box has no reason to give");
+
+  assert.equal(hooks.fillingReason(VITAL_BOX({ disk_used_percent: 94.2 })),
+    "disk 94.2% used (fills at 90%)");
+  assert.equal(hooks.fillingReason(VITAL_BOX({})), "");
+  // Evidence only, no advice (D332(d)) — the same bar the never-reported copy meets.
+  for (const copy of [why, hooks.fillingReason(VITAL_BOX({ disk_used_percent: 94.2 }))]) {
+    assert.doesNotMatch(copy, /retry|try again|check the|contact|restart|reinstall|should|make sure|verify/i);
+  }
+});
+
+test("dr-w5-followup (c11): D42's FACTUAL ARM survives the change — a SILENCE is never a rung", () => {
+  // THE REFUTATION ARM. These three must ALL still read ok / healthy after two
+  // new rungs landed, because a box that did not report is a silence and only a
+  // POSITIVE measured reading over a fence may fire a state.
+  const SILENCES = [
+    ["an all-null pressure block", VITAL_BOX({})],
+    ["an ABSENT pressure key", { ...LIVE_BOX }],
+    ["a quiet METERED box — every vital present, every one calm", VITAL_BOX({
+      cpu_cores: 8, cpu_percent: 4.1, mem_used_percent: 31.0,
+      load1: 0.21, load15: 0.34, disk_used_percent: 41.7,
+      swap_used_percent: 0, swap_total_bytes: 0, req_per_s: 0.0, p95_ms: 12, err_5xx_per_s: 0.0,
+    })],
+    ["a box beating with a pre-vitals agent (reported_at set, every vital null)", VITAL_BOX({})],
+  ];
+  for (const [why, bp] of SILENCES) {
+    assert.equal(hooks.classifyBp(bp), "ok", why + " must classify ok");
+    assert.equal(hooks.bucketOf(bp), "healthy", why + " must bucket healthy");
+    assert.equal(hooks.statusOf(bp).label, "Healthy", why + " must render Healthy");
+    assert.equal(hooks.strainedBox(bp), false, why + " is not strained");
+    assert.equal(hooks.fillingBox(bp), false, why + " is not filling");
+  }
+  // THE POSITIVE CONTROL, in the SAME run: the identical quiet box with ONE
+  // measured vital moved over its fence does fire. Without this the four
+  // assertions above would also pass against a classifier that can never say
+  // `strained` at all — which is precisely the state this row is closing.
+  const quiet = SILENCES[2][1];
+  const hot = { ...quiet, pressure: { ...quiet.pressure, load15: 15.2 } };
+  assert.equal(hooks.classifyBp(hot), "strained", "a MEASURED reading over the fence must fire");
+  assert.equal(hooks.bucketOf(hot), "attention");
+  const full = { ...quiet, pressure: { ...quiet.pressure, disk_used_percent: 96.0 } };
+  assert.equal(hooks.classifyBp(full), "filling");
+  assert.equal(hooks.bucketOf(full), "attention");
+});
+
+test("dr-w5-followup (c2): EVERY statusPill render site is enumerated FROM THE CODE, and every one paints the new states", () => {
+  // ── HOW THE SITE SET IS DERIVED. Not from a list in the task row (which said
+  // six): every `statusPill(` CALL in app.js, minus its own definition, mapped
+  // to the nearest preceding top-level `function NAME(`.
+  const sites = [];
+  const callRe = /\bstatusPill\(/g;
+  let m;
+  while ((m = callRe.exec(APP_SRC)) !== null) {
+    const before = APP_SRC.slice(0, m.index);
+    if (/function\s+$/.test(before)) continue;             // the definition itself
+    const fns = before.match(/\n  function ([a-zA-Z0-9_]+)\(/g) || [];
+    const last = fns[fns.length - 1];
+    sites.push(/function ([a-zA-Z0-9_]+)\(/.exec(last)[1]);
+  }
+  assert.deepEqual(sites.slice().sort(),
+    ["attentionRowHtml", "fleetRow", "instanceCardHtml", "instanceHeaderHtml"],
+    "the statusPill render sites derived from app.js are: " + sites.join(", "));
+
+  // ── AND THE SET IS CLOSED. `statusPill()` is the ONLY producer of a FLEET-
+  // STATE pill: every other `status-pill--` literal in the file takes its role
+  // from something that is not a classifyBp state (the update badge, the meter
+  // pill, a token's Active/Disabled). So covering statusOf covers all four
+  // sites by construction, and this is the assertion that keeps that true.
+  const producers = (APP_SRC.match(/status-pill status-pill--' \+ esc\(([a-zA-Z0-9_.]+)\)/g) || []);
+  assert.ok(producers.some((p) => p.includes("esc(s.role)")),
+    "statusPill no longer paints its role from statusOf's answer");
+
+  // ── THE RENDERS. All four sites, driven, for both new states.
+  const STRAINED = { ...VITAL_BOX({ cpu_cores: 2, load15: 3.6 }), id: "b1", name: "guerrilla" };
+  const FILLING = { ...VITAL_BOX({ disk_used_percent: 94.2 }), id: "b2", name: "jarl" };
+  const RENDER = {
+    fleetRow: (bp) => hooks.fleetRow(bp, {}),
+    attentionRowHtml: (bp) => hooks.attentionRowHtml(bp),
+    instanceCardHtml: (bp) => hooks.instanceCardHtml(bp, {}),
+    instanceHeaderHtml: (bp) => hooks.instanceHeaderHtml(bp, { authority: "owner" }),
+  };
+  assert.deepEqual(Object.keys(RENDER).slice().sort(), sites.slice().sort(),
+    "a render site was added or renamed in app.js and this test did not follow it");
+
+  for (const [site, render] of Object.entries(RENDER)) {
+    for (const [state, bp, label, detail] of [
+      ["strained", STRAINED, "Under load", "load 3.6 on 2 cores"],
+      ["filling", FILLING, "Disk filling", "disk 94.2% used"],
+    ]) {
+      const html = render(bp);
+      assert.match(html, /status-pill--warn/, site + " renders " + state + " UNCOLOURED");
+      assert.ok(html.includes(label), site + " renders " + state + " UNLABELLED");
+      assert.ok(html.includes(detail), site + " renders " + state + " without its measured reason");
+      assert.equal(html.includes("Unclassified"), false, site + " renders " + state + " as unhandled");
+    }
+    // The NEGATIVE arm, same run: a healthy box at the same site is still green
+    // and carries neither new label — so the assertions above are not matching
+    // markup every render happens to contain.
+    const okHtml = render({ ...LIVE_BOX, id: "b3", name: "calm" });
+    assert.match(okHtml, /status-pill--ok/, site + " lost the healthy render");
+    assert.equal(okHtml.includes("Under load") || okHtml.includes("Disk filling"), false,
+      site + " paints a vitals label over a healthy box");
+  }
+
+  // ── unreported, named by the criterion alongside the two new states.
+  const never = { ...LIVE_BOX, id: "b4", name: "silent", last_seen_at: null };
+  assert.equal(hooks.classifyBp(never), "unreported");
+  for (const [site, render] of Object.entries(RENDER)) {
+    const html = render(never);
+    assert.match(html, /status-pill--neutral/, site + " renders unreported uncoloured");
+    assert.ok(html.includes("Never reported"), site + " renders unreported unlabelled");
+  }
+});
+
+// ── THE BUCKET INVARIANT (c1), PROVED BY RE-RUNNING A MUTATED app.js ─────────
+//
+// The criterion is an INVARIANT, not a set of integers: bucketOf must derive a
+// state's bucket FROM ITS RUNG, so inserting a rung cannot silently re-bucket
+// any existing state. The original wording prescribed `attention<=8 /
+// in-flight 9-10 / healthy 11` — the very magic integers this file was
+// refactored to remove, and which would file `deploy_stalled` under "in-flight"
+// while every word-based test stayed green.
+//
+// So the proof is a MUTATION of the shipped source, re-evaluated: insert a
+// rung, read the buckets back out of the mutant, and assert nothing moved. The
+// second half runs the SAME mutation against a THRESHOLD-shaped bucketOfRank
+// and asserts that it DOES move something — the arm that proves this test can
+// fail at all.
+const APP_SRC_FOR_MUTATION = fs.readFileSync(APP_PATH, "utf8");
+const RUNG_ANCHOR = '    { state: "degraded",        bucket: "attention" },';
+const MUTANT_RUNG = '    { state: "zz_inserted_rung", bucket: "attention" },';
+
+test("dr-w5-followup (c1): inserting a rung re-buckets NOTHING — the bucket rides on the rung", () => {
+  // The mutation must APPLY, exactly once, or the run below proves nothing.
+  assert.equal(APP_SRC_FOR_MUTATION.split(RUNG_ANCHOR).length - 1, 1,
+    "the ladder anchor this mutation edits is not unique in app.js — the mutation cannot be trusted");
+  const mutated = APP_SRC_FOR_MUTATION.replace(RUNG_ANCHOR, RUNG_ANCHOR + "\n" + MUTANT_RUNG);
+  const mutant = evalApp(mutated).hooks;
+
+  // …and it must have LANDED: one more rung, in the position we put it.
+  const base = [...hooks.ATTENTION_LADDER].map((r) => r.state);
+  const after = [...mutant.ATTENTION_LADDER].map((r) => r.state);
+  assert.equal(after.length, base.length + 1, "the inserted rung did not reach the mutant's ladder");
+  assert.equal(after[base.indexOf("degraded") + 1], "zz_inserted_rung");
+  assert.ok(base.length >= 14, "the baseline ladder is " + base.length + " rungs");
+
+  // ── THE INVARIANT. Every pre-existing state's BUCKET is unchanged, even
+  // though most of their RANKS shifted by one.
+  const moved = [];
+  const shifted = [];
+  for (const st of base) {
+    const wasRank = hooks.ATTENTION_RANK[st];
+    const nowRank = mutant.ATTENTION_RANK[st];
+    if (nowRank !== wasRank) shifted.push(st);
+    const was = hooks.bucketOfRank(wasRank);
+    const now = mutant.bucketOfRank(nowRank);
+    if (was !== now) moved.push(st + ": " + was + " -> " + now);
+  }
+  assert.deepEqual(moved, [], "inserting one rung silently re-bucketed: " + moved.join("; "));
+  // NON-VACUITY: the insertion really did shift ranks. A mutation that moved
+  // nothing would satisfy the loop above without testing anything.
+  assert.ok(shifted.length >= 9,
+    "only " + shifted.length + " ranks shifted — the insertion was not disruptive enough to prove the invariant");
+});
+
+test("dr-w5-followup (c1): the SAME insertion over a THRESHOLD bucketOfRank DOES re-bucket — the catch arm", () => {
+  // The mirror of the test above: this is the implementation shape the original
+  // criterion asked for, and it is the defect. Both mutations must apply.
+  const THRESH_ANCHOR = "    return ATTENTION_BUCKET_BY_RANK[r];";
+  assert.equal(APP_SRC_FOR_MUTATION.split(THRESH_ANCHOR).length - 1, 1,
+    "the bucketOfRank body anchor is not unique — this mutation cannot be trusted");
+  const mutated = APP_SRC_FOR_MUTATION
+    .replace(RUNG_ANCHOR, RUNG_ANCHOR + "\n" + MUTANT_RUNG)
+    .replace(THRESH_ANCHOR, '    return r <= 11 ? "attention" : r <= 13 ? "in-flight" : "healthy";');
+  assert.notEqual(mutated, APP_SRC_FOR_MUTATION);
+  const mutant = evalApp(mutated).hooks;
+
+  const moved = [];
+  for (const st of [...hooks.ATTENTION_LADDER].map((r) => r.state)) {
+    const was = hooks.bucketOfRank(hooks.ATTENTION_RANK[st]);
+    const now = mutant.bucketOfRank(mutant.ATTENTION_RANK[st]);
+    if (was !== now) moved.push(st + ": " + was + " -> " + now);
+  }
+  assert.ok(moved.length > 0,
+    "a rank-THRESHOLD bucketOfRank survived a rung insertion unchanged — then the test above proves nothing");
+  // and it is the exact silent misfiling the ladder note warns about: an
+  // attention state filed as in-flight, with no word-based test disturbed.
+  assert.ok(moved.some((line) => line.includes("attention -> in-flight")),
+    "the threshold shape moved buckets, but not the way the ladder note predicts: " + moved.join("; "));
+});
+
+test("dr-w5-followup (c6): bucketOf has an EXPLICIT unknown -> attention arm — an unranked state can never hide in healthy", () => {
+  // MUTATION C: delete a rung from the ladder WITHOUT touching classifyBp, so
+  // the classifier returns a state nothing ranks — the shape a future rung
+  // added to classifyBp alone would have.
+  const BEHIND_RUNG = '    { state: "behind",          bucket: "attention" },\n';
+  assert.equal(APP_SRC_FOR_MUTATION.split(BEHIND_RUNG).length - 1, 1,
+    "the `behind` rung anchor is not unique — this mutation cannot be trusted");
+  const mutant = evalApp(APP_SRC_FOR_MUTATION.replace(BEHIND_RUNG, "")).hooks;
+
+  const behind = { ...LIVE_BOX, update_state: "behind" };
+  assert.equal(mutant.classifyBp(behind), "behind", "the mutation must leave the CLASSIFIER intact");
+  assert.equal(mutant.attentionRank(behind), undefined, "…and must really unrank it");
+  // ── THE ARM. Go's attentionBucket default, verbatim in behaviour.
+  assert.equal(mutant.bucketOf(behind), "attention",
+    "an unranked state bucketed somewhere other than attention — the inversion this row exists to kill");
+  // and it surfaces in the ROLLUP rather than vanishing: before the arm,
+  // fleetSummary incremented out[undefined] and the box left all three counts.
+  const sum = mutant.fleetSummary([behind, { ...LIVE_BOX }]);
+  assert.equal(sum.attention, 1, "the unranked box must be COUNTED, in attention");
+  assert.equal(sum.healthy, 1);
+  assert.equal(sum.total, 2);
+
+  // ── THE ARM IS LOAD-BEARING: remove it and the same mutant loses the box.
+  // This is what makes the assertions above a test rather than a description.
+  const FALLBACK = "    return bucket === undefined ? \"attention\" : bucket;";
+  assert.equal(APP_SRC_FOR_MUTATION.split(FALLBACK).length - 1, 1,
+    "bucketOf's unknown arm is not where this test thinks it is");
+  const noArm = evalApp(APP_SRC_FOR_MUTATION.replace(BEHIND_RUNG, "").replace(FALLBACK, "    return bucket;")).hooks;
+  assert.equal(noArm.bucketOf(behind), undefined, "with the arm removed the state must go unbucketed");
+  assert.notEqual(noArm.fleetSummary([behind, { ...LIVE_BOX }]).attention, 1,
+    "with the arm removed the rollup must LOSE the box — otherwise the arm buys nothing");
+
+  // ── AND IT DOES NOT SWALLOW THE HEALTHY ANSWER (the ignore arm): the real
+  // implementation still buckets every mapped state by its rung, `ok` included.
+  for (const rung of [...hooks.ATTENTION_LADDER]) {
+    assert.equal(hooks.bucketOfRank(hooks.ATTENTION_RANK[rung.state]), rung.bucket, rung.state);
+  }
+  assert.equal(hooks.bucketOf({ ...LIVE_BOX }), "healthy", "the fallback must not drag `ok` into attention");
+  // the RAW lookup still refuses to guess — that is what lets the two be told apart.
+  assert.equal(hooks.bucketOfRank(999), undefined);
+});
+
+test("dr-w5-followup (c7): the never-reported state carries an ATTENTION_RANK entry — it cannot sort into healthy", () => {
+  // NAMING, checked rather than assumed: cch-w34-s6 shipped this state under the
+  // identifier `unreported`; the shared fixture labels the SAME rung "never
+  // reported". The cross-task dependency is that the rung EXISTS and is ranked.
+  assert.equal(typeof hooks.ATTENTION_RANK.unreported, "number",
+    "the never-reported rung has no ATTENTION_RANK entry — never-reported boxes sort into healthy");
+  assert.equal(hooks.bucketOfRank(hooks.ATTENTION_RANK.unreported), "attention");
+  const fixtureRung = ATTENTION_FIXTURE.states.find((st) => st.state === "unreported");
+  assert.ok(fixtureRung, "attention_order.json no longer carries the never-reported rung");
+  assert.equal(fixtureRung.label, "never reported",
+    "the fixture's label for `unreported` moved — the two names are no longer the same rung");
+  assert.equal(fixtureRung.bucket, "attention");
+  // driven, not just tabled: a real never-reported box lands in attention.
+  const never = { ...LIVE_BOX, last_seen_at: null };
+  assert.equal(hooks.classifyBp(never), "unreported");
+  assert.equal(hooks.bucketOf(never), "attention");
+  assert.equal(hooks.fleetSummary([never]).attention, 1);
+  // and the OTHER spelling, should anyone ever mint it, still cannot hide:
+  // bucketOf's unknown arm files it in attention rather than healthy.
+  assert.equal(hooks.bucketOfRank(hooks.ATTENTION_RANK.never_reported), undefined,
+    "a rung named never_reported appeared — this test's naming note is stale, not its claim");
+});
+
 // ── the PREDICATE gets a cross-surface asserter too (dr-w25) ────────────────
 //
 // The D32 test above holds the SPA's RANK TABLE to attention_order.json. It says
@@ -4565,10 +4959,11 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
   // above pins that list against the ladder; this one only consumes it.
   // Pinned, not derived: reading the gap off the code under test would make the
   // witness set below shrink in lockstep with any widening of the gap, and this
-  // test could never fail. Same two entries, same reasons, as the D32 test:
-  //   strained — the host's load vitals are not on the fleet payload.
-  //   filling  — the host's disk vitals are not on the fleet payload.
-  const SPA_GAP = ["strained", "filling"];
+  // test could never fail. dr-w5-followup emptied it — every fixture state now
+  // needs a witness below, which is precisely the strength a pinned (rather than
+  // derived) gap buys: widen the gap in app.js and this line reds instead of
+  // quietly excusing the rung from needing a witness.
+  const SPA_GAP = [];
   assert.deepEqual([...hooks.ATTENTION_ORDER_ONLY], SPA_GAP,
     "the implementation's ORDER-ONLY list drifted from the gap this test pins");
   const expected = fixture.states.map((st) => st.state).filter((k) => !SPA_GAP.includes(k));
@@ -4591,6 +4986,12 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
     unreported: { host: "h", last_seen_at: null },
     deploy_stalled: { ...LIVE, queued_deploy_age_seconds: 420 },
     behind: { ...LIVE, update_state: "behind" },
+    // dr-w5-followup: the two vitals rungs, reachable at last. Both witnesses
+    // are SERVER SHAPES — the `pressure` node router.ex merge_pressure/2 puts on
+    // every fleet row — not hand-tuned objects the predicate happens to like.
+    // 3.6/2 cores = 1.8x, over the 1.75 fence; 94.2% disk, over the 90 fence.
+    strained: { ...LIVE, pressure: { cpu_cores: 2, load15: 3.6, load1: 0.4, disk_used_percent: 20 } },
+    filling: { ...LIVE, pressure: { cpu_cores: 2, load15: 0.1, load1: 0.1, disk_used_percent: 94.2 } },
     removing: { deprovision_status: "pending" },
     provisioning: {},
     ok: { ...LIVE },
@@ -4868,7 +5269,7 @@ test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls
   // charter D33: a MAP[state] || "…" tail announces the CALMEST word over the
   // most severe state. The enum is pinned, and every member has an explicit arm.
   const KINDS = ["removal_failed", "failed", "suspended", "degraded",
-    "deploys_failing", "diverged", "unreported",
+    "deploys_failing", "diverged", "strained", "filling", "unreported",
     "deploy_stalled", "behind", "removing", "provisioning", "ok"];
   assert.deepEqual([...hooks.attentionKinds].sort(), KINDS.slice().sort(),
     "a new fleet state was added without a statusOf arm (or one was removed)");
@@ -4882,6 +5283,8 @@ test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls
     unreported: { host: "h", last_seen_at: null },
     deploy_stalled: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", queued_deploy_age_seconds: 420 },
     behind: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind" },
+    strained: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", pressure: { cpu_cores: 2, load15: 3.6 } },
+    filling: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", pressure: { cpu_cores: 2, load15: 0.1, disk_used_percent: 94.2 } },
     removing: { deprovision_status: "pending" },
     provisioning: {},
     ok: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },

@@ -4864,4 +4864,112 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert content["reopen_trigger"] == "when the census ratifies a second case"
     end
   end
+
+  # ─── THE TWO CLOSE-PATH REFUSALS THAT HAD TO LEARN TO SPEAK ────────────────
+  #
+  # Both halves of task-8ca0bd7a8ed50f14, ON THE WIRE. The server-side gate and
+  # the server-side hint are the whole fix a caller experiences: the bp CLI
+  # prints a 409's top-level `message` in place of the bare reason token, so a
+  # refusal with no message is a refusal that teaches nothing.
+  describe "POST /v1/tasks/:doc_id/close — refusals that name what actually happened" do
+    defp claimed_for_close!(conn, scope, criteria) do
+      doc_id = uniq("close-refusal")
+      task = mk_task!(doc_id, scope, %{"acceptance_criteria" => criteria})
+
+      payload =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{doc_id}/claim", Jason.encode!(%{worker_id: "worker-1"}))
+        |> json_response(200)
+
+      {task, payload["doc"]["claim"]["epoch"]}
+    end
+
+    # THE RAISE GATE. Measured on the live server before this change: this exact
+    # request returned 200 and left met=true on a cancelled row, with no override
+    # and no trace. It is now a 409 whose message says the ONE thing the caller
+    # is getting wrong — the cancel is fine, the assertion is not.
+    test "a cancelled close that raises a criterion is 409 criteria_raised_on_abandon, and writes nothing",
+         %{conn: conn, scope: scope} do
+      {task, epoch} =
+        claimed_for_close!(conn, scope, [
+          %{"criterion" => "the gate is green", "met" => false, "merge_gate" => true}
+        ])
+
+      body =
+        Jason.encode!(%{
+          worker_id: "worker-1",
+          observed_epoch: epoch,
+          lifecycle_status: "cancelled",
+          reason: "abandoning this row",
+          criteria: [
+            %{index: 0, met: true, evidence: "merged", criterion: "the gate is green"}
+          ]
+        })
+
+      payload =
+        conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", body) |> json_response(409)
+
+      assert payload["ok"] == false
+      assert payload["reason"] == "criteria_raised_on_abandon:0"
+
+      # The message has to teach the HONEST move first. A refusal that leads
+      # with the stamp would just relocate the assertion one command later.
+      assert payload["message"] =~ "may never assert"
+      assert payload["message"] =~ "WITHOUT the met flips"
+      assert payload["message"] =~ "only raising is refused"
+
+      content = Repo.get_by!(Document, doc_id: task.doc_id).content
+      assert content["lifecycle_status"] == "in_progress", "a refused close writes nothing"
+      assert Enum.at(content["acceptance_criteria"], 0)["met"] == false
+    end
+
+    # THE SECOND 409, THE MIS-WORDED ONE. `stale_claim` is minted when the
+    # rev-CAS matches zero rows: the REV moved and the epoch never did. The
+    # token says "claim", so a caller reads a lapsed lease and RE-CLAIMS, which
+    # bumps the epoch and does nothing about the rev — the one wrong move. The
+    # token stays (errors.go and the pr-task gate string-match it); the MESSAGE
+    # now names the rev, supplies its current value, and says not to re-claim.
+    test "a stale observed_rev is 409 stale_claim whose message names the REV, not the epoch",
+         %{conn: conn, scope: scope} do
+      {task, epoch} =
+        claimed_for_close!(conn, scope, [
+          %{"criterion" => "the gate is green", "met" => true, "evidence" => "81 tests green"}
+        ])
+
+      body =
+        Jason.encode!(%{
+          worker_id: "worker-1",
+          observed_epoch: epoch,
+          lifecycle_status: "done",
+          reason: "shipped in PR #16853, sha 81c1ef118b",
+          # An explicit pin bypasses the work-digest fence by design, so this
+          # lands on the rev-CAS itself — the emitter under test.
+          observed_rev: "deadbeefdeadbeefdeadbeefdeadbeef"
+        })
+
+      payload =
+        conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", body) |> json_response(409)
+
+      assert payload["ok"] == false
+      assert payload["reason"] == "stale_claim"
+
+      # THE DISCRIMINATOR, and it is the sentence that makes the fix reviewable:
+      # the two close-path 409s are told apart by whether the message names the
+      # BRIEF (doc_changed_since_claim) or the REV (this one). Neither may name
+      # the EPOCH, because in neither case did the epoch move.
+      assert payload["message"] =~ "your CLAIM is fine"
+      assert payload["message"] =~ "Do NOT re-claim"
+      assert payload["message"] =~ "observed_rev="
+
+      # The current rev rides the refusal so recovery needs no second round
+      # trip — the property `doc_changed_since_claim` already had and this one
+      # did not.
+      current = Repo.get_by!(Document, doc_id: task.doc_id).rev
+      assert payload["message"] =~ current
+
+      assert Repo.get_by!(Document, doc_id: task.doc_id).content["lifecycle_status"] ==
+               "in_progress"
+    end
+  end
 end

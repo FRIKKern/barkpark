@@ -1535,6 +1535,9 @@ defmodule BarkparkWeb.TasksController.Params do
   def reason_to_string({:criteria_unmet, indices}) when is_list(indices),
     do: "criteria_unmet:#{Enum.join(indices, ",")}"
 
+  def reason_to_string({:criteria_raised_on_abandon, indices}) when is_list(indices),
+    do: "criteria_raised_on_abandon:#{Enum.join(indices, ",")}"
+
   def reason_to_string({:acknowledgement_unposted, issue}),
     do: "acknowledgement_unposted:#{issue || "?"}"
 
@@ -1732,6 +1735,23 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|Stamp them as you prove them (`bp task stamp <id> <worker> <epoch> --criterion N --criterion-text "…" | <>
         ~s|--met --evidence "…"`), or close over them on the record: --set criteria_override="<why it is done anyway>".|
 
+  # THE RAISE GATE (task-8ca0bd7a8ed50f14). The refusal has to say the thing the
+  # caller is about to get wrong: it is NOT "you may not cancel this row" — the
+  # cancel is fine and every other gate still waves it through — it is "this
+  # cancel is also asserting something". So the hint names the honest cancel
+  # FIRST (drop the met flips, keep the reason), and offers the stamp only as
+  # the other honest route, because reaching for a stamp you cannot prove is the
+  # same lie one command later. There is deliberately NO override to name.
+  def criteria_hint({:criteria_raised_on_abandon, indices}, :close) when is_list(indices),
+    do:
+      ~s|acceptance criteria #{Enum.join(indices, ", ")} (0-BASED) would be RAISED to met=true by this close, | <>
+        ~s|and its lifecycle abandons the work — a cancel may abandon acceptance criteria, it may never assert | <>
+        ~s|them. Nothing was written. The cancel itself is fine and no other gate is in your way: re-run it | <>
+        ~s|WITHOUT the met flips and put what you learned in the reason. Lowering met, clearing evidence and | <>
+        ~s|editing criterion text all still land on this close — only raising is refused. If a criterion really | <>
+        ~s|IS proven, prove it before you abandon the row: bp task stamp <id> <worker> <epoch> --criterion N | <>
+        ~s|--criterion-text "<verbatim>" --met --evidence "…", then close. There is no override, on purpose.|
+
   # The reporter loop (`Github.Acknowledgement`). This refusal must carry three
   # things the caller cannot get anywhere else: WHO is waiting (someone outside
   # this ledger, who can only see the issue), WHAT discharges it (a comment plus
@@ -1846,6 +1866,48 @@ defmodule BarkparkWeb.TasksController.Params do
   end
 
   def fence_hint(_reason, _surface, _current_epoch), do: nil
+
+  @doc """
+  The rev-CAS 409's remedy sentence (task-8ca0bd7a8ed50f14).
+
+  There are TWO 409s on the close path and only one of them was worded for what
+  actually happened.
+
+    1. `doc_changed_since_claim` — the work-digest fence. Correct today: it names
+       the BRIEF fields that drifted, supplies `current_rev` in the refusal body,
+       and prescribes a re-read or an explicit `observed_rev` pin.
+    2. `stale_claim` — minted when `fenced_content_write/4` matches 0 rows on
+       `d.rev == observed_rev`. The REV moved; the epoch never did. The token
+       says "claim", so a caller reads it as a lapsed lease and RE-CLAIMS — which
+       is the one wrong move: it bumps the epoch, invalidates the epoch they were
+       holding, and does nothing about the rev that actually moved.
+
+  The two are distinguishable by whether the message names the BRIEF or the
+  EPOCH, and this hint exists so the second one names NEITHER — it names the REV.
+  The reason token itself is unchanged: `internal/cli/errors.go` and the pr-task
+  gate both string-match it, and renaming a wire token to fix a sentence is the
+  wrong trade.
+  """
+  @spec stale_rev_hint(atom() | tuple(), atom(), String.t() | nil) :: String.t() | nil
+  def stale_rev_hint(:stale_claim, surface, current_rev)
+      when is_binary(current_rev) and surface in [:close, :stamp] do
+    ~s|despite the name, your CLAIM is fine — nothing happened to the lease and the epoch you passed is | <>
+      ~s|still the one this row carries. What moved is the row's `rev`: this write is fenced on the rev you | <>
+      ~s|read, another writer committed first, and the row is at #{current_rev} now. Nothing was written. | <>
+      ~s|Do NOT re-claim — that advances the epoch and throws away the one you are holding without touching | <>
+      ~s|the rev. Re-read the row, confirm your close still describes it, and re-run the SAME command on the | <>
+      ~s|SAME epoch: bp task #{surface} <id> <worker> <your epoch> --set observed_rev=#{current_rev}|
+  end
+
+  def stale_rev_hint(:stale_claim, surface, _current_rev) when surface in [:close, :stamp] do
+    ~s|despite the name, your CLAIM is fine — the epoch you passed is still the one this row carries. What | <>
+      ~s|moved is the row's `rev`: this write is fenced on the rev you read and another writer committed | <>
+      ~s|first. Nothing was written. Do NOT re-claim — that advances the epoch and leaves the rev exactly | <>
+      ~s|as stale. Re-read the row and re-run the SAME command on the SAME epoch: | <>
+      ~s|bp task get <id> -o json -> .doc.rev, then bp task #{surface} <id> <worker> <your epoch>|
+  end
+
+  def stale_rev_hint(_reason, _surface, _current_rev), do: nil
 
   @doc """
   The edited-under-you 409's remedy sentence

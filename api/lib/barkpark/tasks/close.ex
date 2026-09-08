@@ -54,6 +54,17 @@ defmodule Barkpark.Tasks.Close do
   #     real rows cancelled with `""` in one minute, rc=0, `close_reason` absent.
   #     `done` and `blocked` are exempt BY NAME. There is NO override and NO
   #     default — the escape hatch is to pass the reason.
+  #   * CRITERIA RAISE (task-8ca0bd7a8ed50f14) — a `cancelled` or `blocked` close
+  #     whose `criteria` payload flips any criterion's `met` from false to TRUE
+  #     is REFUSED (`{:criteria_raised_on_abandon, indices}`). This is the exact
+  #     complement of the CRITERIA gate above: D289 exempts those two lifecycles
+  #     from being REQUIRED to prove criteria, and that exemption was silently
+  #     also letting them WRITE proof. Main's ruling: A CANCEL MAY ABANDON
+  #     ACCEPTANCE CRITERIA. IT MAY NEVER ASSERT THEM. Lowering met, clearing
+  #     evidence and editing criterion text stay allowed on both lifecycles, and
+  #     every exemption above is untouched — a cancel over UNMET criteria still
+  #     closes. There is NO override, for the same reason CANCEL REASON has
+  #     none: the honest move is to not assert it.
   #
   # NONE OF THIS IS AUTHORIZATION. `worker_id` arrives as a client-supplied body
   # param (`tasks_controller.ex` close/2), never from the api_token, so a caller
@@ -521,6 +532,13 @@ defmodule Barkpark.Tasks.Close do
                      # are unmet" is the wrong thing to say — re-read first.
                      :ok <- check_work_digest(doc, observed_rev_opt),
                      :ok <- check_criteria_payload(doc, criteria),
+                     # THE RAISE GATE (task-8ca0bd7a8ed50f14). Runs AFTER the payload
+                     # dry-run so a malformed entry keeps its own error, and
+                     # BEFORE D289 because D289 is exempt on exactly the two
+                     # lifecycles this gate exists for. Main's ruling, verbatim:
+                     # A CANCEL MAY ABANDON ACCEPTANCE CRITERIA. IT MAY NEVER
+                     # ASSERT THEM.
+                     :ok <- check_criteria_raise(doc, new_status, criteria),
                      # AHEAD of the criteria gate, and a test caught why. The
                      # acknowledgement criterion IS an acceptance criterion, so
                      # with the order reversed D289 fires first and the caller
@@ -723,6 +741,81 @@ defmodule Barkpark.Tasks.Close do
     case merge_criteria(content, criteria) do
       {:ok, _dry_run} -> :ok
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # THE RAISE GATE (task-8ca0bd7a8ed50f14) — the WRITING half of the honesty
+  # exemptions, which nothing guarded.
+  #
+  # Every honesty gate on this path exempts `cancelled` and `blocked` BY NAME,
+  # and that is right for the REQUIRING half: abandoning acceptance criteria is
+  # what cancelling MEANS. It is wrong for the WRITING half, because the same
+  # command that abandons the row can flip a criterion to met on its way out and
+  # the exemption removes the only thing that was stopping it. MEASURED
+  # 2026-09-08 on the live server: `close … cancelled --set criteria:=[{met:
+  # true}]` and the identical `blocked` close both returned EXIT 0 over a
+  # `"merge_gate" => true` criterion, leaving met=true on a terminal row with no
+  # override and no autostamp trace — while `bp task stamp --met` on the SAME
+  # criterion refuses at exit 5 and names its own detector. One door guarded and
+  # loud, another unguarded and silent, both writing the same field.
+  #
+  # SCOPED TO RAISING, and to raising only. Lowering `met`, clearing evidence
+  # and editing criterion text all still land on a cancel — a closer correcting
+  # the record downward is the honest direction, and refusing it would make
+  # cancelling harder, which the row's own criterion 2 rules out. The predicate
+  # is a met-bit DIFF against the doc as read inside this txn, not a scan of the
+  # payload's shape: a text-keyed entry, an index-keyed entry and a re-assert of
+  # an already-met criterion all resolve through `merge_criteria/2` first, so
+  # none of them can route around it and an idempotent no-op is not punished.
+  #
+  # NOT limited to `merge_gate` criteria. The gate that made this measurable was
+  # a merge gate, but the principle is about the LIFECYCLE, not the marker: a
+  # cancelled row asserting ANY criterion it never proved is the same lie in a
+  # smaller font.
+  defp check_criteria_raise(_doc, status, _criteria)
+       when status not in ~w(cancelled blocked),
+       do: :ok
+
+  defp check_criteria_raise(_doc, _status, []), do: :ok
+
+  defp check_criteria_raise(%Document{content: content}, _status, criteria)
+       when is_list(criteria) do
+    case raised_criteria_indices(content, criteria) do
+      [] -> :ok
+      indices -> {:error, {:criteria_raised_on_abandon, indices}}
+    end
+  end
+
+  # A non-list payload is `:invalid_criteria`, which `check_criteria_payload/2`
+  # already refused one line earlier. Falling through as :ok here keeps THAT the
+  # error the caller hears rather than shadowing it with this one.
+  defp check_criteria_raise(_doc, _status, _criteria), do: :ok
+
+  # The met-bit diff. `merge_criteria/2` is pure over the content map, so this
+  # is the same dry-run the payload check just made, read for a different fact.
+  # An error is impossible here in practice (the payload check ran first) and is
+  # answered `[]` rather than crashing, so this gate can never be the one that
+  # reports a malformed payload.
+  defp raised_criteria_indices(content, criteria) do
+    case merge_criteria(content, criteria) do
+      {:ok, merged} ->
+        stored = met_bits(content)
+
+        merged
+        |> met_bits()
+        |> Enum.with_index()
+        |> Enum.filter(fn {met, index} -> met and not Enum.at(stored, index, false) end)
+        |> Enum.map(fn {_met, index} -> index end)
+
+      {:error, _reason} ->
+        []
+    end
+  end
+
+  defp met_bits(content) do
+    case Map.get(content, "acceptance_criteria") do
+      list when is_list(list) -> Enum.map(list, &(Map.get(&1, "met") == true))
+      _ -> []
     end
   end
 

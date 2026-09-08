@@ -27,6 +27,14 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
   zero with no flag, no marker check and no trace. Both doors write the same
   field, so both mint the same receipt.
 
+  SUPERSEDED IN PART (task-8ca0bd7a8ed50f14). The `cancelled`/`blocked` half of
+  that second door is now REFUSED outright rather than recorded — a cancel may
+  abandon acceptance criteria, it may never assert them — so those two arms
+  below assert the refusal and prove nothing was written. The receipt itself is
+  untouched and still fires wherever a raise remains legal: a `done` close that
+  raises on the record, which is the arm that keeps `close_autostamp_record/6`
+  from going dead.
+
   NOT A REFUSAL. A close that legitimately flips a merge gate on a genuinely
   merged carrier still succeeds — the arrears sweep is not stranded. What
   changes is that the ledger can now name it.
@@ -270,14 +278,20 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
   # ─── THE CLOSE DOOR ────────────────────────────────────────────────────────
 
   describe "close --set criteria:= mints a receipt for a gate it flips" do
-    # THE SHARPER NEGATIVE ARM. A `cancelled` close is exempt from every honesty
-    # gate on this path BY NAME — correct on its own, since abandoning
-    # acceptance criteria is what cancelling means, and wrong in combination,
-    # because the same command can flip a declared gate to met on its way out.
-    test "a CANCELLED close that flips a declared gate records it", %{scope: scope} do
+    # SUPERSEDED BY THE RAISE GATE (task-8ca0bd7a8ed50f14), AND LEFT HERE ON
+    # PURPOSE. When this file was written, a `cancelled` close raising a declared
+    # gate SUCCEEDED and the receipt was the whole remedy: the flip landed, and
+    # the ledger could at least NAME it. Main then ruled the stronger thing — A
+    # CANCEL MAY ABANDON ACCEPTANCE CRITERIA, IT MAY NEVER ASSERT THEM — so the
+    # raise is now REFUSED upstream of the receipt and this door mints nothing
+    # because it never opens. The arm keeps its subject and changes its verdict
+    # rather than being deleted, so the next reader can see that the receipt was
+    # not wrong, it was superseded.
+    test "a CANCELLED close that would flip a declared gate is REFUSED, and writes nothing",
+         %{scope: scope} do
       {task, epoch} = claimed_task!("mg-receipt-cancel", scope, "builder")
 
-      assert {:ok, _} =
+      assert {:error, {:criteria_raised_on_abandon, [1]}} =
                Close.close(task.id, "builder",
                  observed_epoch: epoch,
                  lifecycle_status: "cancelled",
@@ -294,26 +308,13 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
                )
 
       content = stored(task.id)
-      assert content["lifecycle_status"] == "cancelled"
-      assert Enum.at(content["acceptance_criteria"], 1)["met"] == true
 
-      # ONE ACT, ONE RECORD — the close-body flip follows
-      # `Close.close_autostamp_record/6`: a single map naming every index this
-      # close raised, not a list of records like the stamp door (each stamp is
-      # its own call).
-      record = receipt(content, "close_body_flips")
-
-      assert is_map(record),
-             "a close body that flipped a declared merge gate must leave a record, " <>
-               "got: #{inspect(record)}"
-
-      assert record["verified"] == false
-      assert record["source"] == "close_body_criteria"
-      assert record["indices"] == [1]
-      assert record["asserted_worker"] == "builder"
-      assert record["authenticated_token_id"] == "tok-xyz"
-      assert record["lifecycle_status"] == "cancelled"
-      assert is_binary(record["ts"]) and record["ts"] != ""
+      # NOTHING WAS WRITTEN — the refusal sits ahead of the single rev-CAS write,
+      # so the close did not half-land: the row is still claimed, the criterion
+      # is still unmet, and there is no receipt to explain away.
+      assert content["lifecycle_status"] == "in_progress"
+      assert Enum.at(content["acceptance_criteria"], 1)["met"] == false
+      refute Map.has_key?(content, @receipt_key)
     end
 
     # `blocked` IS THE SECOND EXEMPT LIFECYCLE, AND IT IS THE WHOLE POINT OF THE
@@ -322,10 +323,10 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
     # arm saying the other matters. Measured on the live server before this
     # fix: a blocked close raised a declared gate at exit 0 with no trace,
     # identical to the cancelled door — one code path, one predicate.
-    test "a BLOCKED close that flips a declared gate records it too", %{scope: scope} do
+    test "a BLOCKED close that would flip a declared gate is REFUSED too", %{scope: scope} do
       {task, epoch} = claimed_task!("mg-receipt-blocked", scope, "builder")
 
-      assert {:ok, _} =
+      assert {:error, {:criteria_raised_on_abandon, [1]}} =
                Close.close(task.id, "builder",
                  observed_epoch: epoch,
                  lifecycle_status: "blocked",
@@ -342,13 +343,47 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
                )
 
       content = stored(task.id)
-      assert content["lifecycle_status"] == "blocked"
+      assert content["lifecycle_status"] == "in_progress"
+      assert Enum.at(content["acceptance_criteria"], 1)["met"] == false
+      refute Map.has_key?(content, @receipt_key)
+    end
+
+    # THE RECEIPT IS STILL REACHABLE, and this arm is what keeps the code above
+    # from going dead. The raise gate closes the ABANDON lifecycles only; a `done`
+    # close that raises a declared gate on the record — D289 answered with
+    # `criteria_override` — still flips the bit and must still mint the receipt.
+    # Without this arm the two rewritten arms above would leave
+    # `close_autostamp_record/6` untested and nothing would notice if it stopped
+    # firing.
+    test "a DONE close that raises a declared gate on the record still records it",
+         %{scope: scope} do
+      {task, epoch} = claimed_task!("mg-receipt-done-override", scope, "builder")
+
+      assert {:ok, _} =
+               Close.close(task.id, "builder",
+                 observed_epoch: epoch,
+                 lifecycle_status: "done",
+                 reason: "shipped in PR #16853, sha 81c1ef118b",
+                 criteria: [
+                   %{
+                     "index" => 1,
+                     "met" => true,
+                     "evidence" => @evidence,
+                     "criterion" => @gate_text
+                   }
+                 ],
+                 criteria_override: "closing over the rest on the record",
+                 caller_token_id: "tok-xyz"
+               )
+
+      content = stored(task.id)
+      assert content["lifecycle_status"] == "done"
       assert Enum.at(content["acceptance_criteria"], 1)["met"] == true
 
       record = receipt(content, "close_body_flips")
 
       assert is_map(record),
-             "a BLOCKED close that flipped a declared merge gate must leave a record, " <>
+             "a close body that flipped a declared merge gate must leave a record, " <>
                "got: #{inspect(record)}"
 
       assert record["verified"] == false
@@ -356,15 +391,24 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
       assert record["indices"] == [1]
       assert record["asserted_worker"] == "builder"
       assert record["authenticated_token_id"] == "tok-xyz"
-
-      # The lifecycle is ON the record precisely so a reader can tell WHICH
-      # exemption was in play — the two doors are otherwise indistinguishable.
-      assert record["lifecycle_status"] == "blocked"
+      assert record["lifecycle_status"] == "done"
       assert is_binary(record["ts"]) and record["ts"] != ""
     end
 
-    test "a close body that flips only NON-gated criteria mints nothing", %{scope: scope} do
-      {task, epoch} = claimed_task!("mg-receipt-close-honest", scope, "builder")
+    # LOWERING IS NOT ASSERTING, and a cancel that only lowers must still land —
+    # the raise gate is scoped to the DIRECTION, not to the payload's presence.
+    test "a CANCELLED close that only LOWERS a met criterion still lands, and mints nothing",
+         %{scope: scope} do
+      doc_id = uniq("mg-receipt-close-honest")
+
+      already =
+        List.update_at(criteria(), 0, fn c ->
+          Map.merge(c, %{"met" => true, "evidence" => "42 tests green"})
+        end)
+
+      task = mk_task!(doc_id, scope, %{"acceptance_criteria" => already})
+      {:ok, claimed} = Tasks.claim_by_id(doc_id, "builder", scope)
+      epoch = claimed.content["claim"]["epoch"]
 
       assert {:ok, _} =
                Close.close(task.id, "builder",
@@ -374,14 +418,18 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
                  criteria: [
                    %{
                      "index" => 0,
-                     "met" => true,
-                     "evidence" => "42 tests green",
+                     "met" => false,
+                     "evidence" => "",
                      "criterion" => @plain_text
                    }
                  ]
                )
 
-      refute Map.has_key?(stored(task.id), @receipt_key),
+      content = stored(task.id)
+      assert content["lifecycle_status"] == "cancelled"
+      assert Enum.at(content["acceptance_criteria"], 0)["met"] == false
+
+      refute Map.has_key?(content, @receipt_key),
              "an honest close leaves no receipt to explain away"
     end
 
