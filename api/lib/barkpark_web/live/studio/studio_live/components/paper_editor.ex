@@ -1530,16 +1530,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       >
         <input type="hidden" name="block_id" value={@block["id"]} />
         <label class="sr-only" for={"section-title-" <> @block["id"]}>Section title</label>
-        <input
+        <textarea
           id={"section-title-" <> @block["id"]}
-          type="text"
           name="title"
-          class="bp-paper-edit-text bp-paper-section-title-input"
+          rows="1"
+          class="bp-paper-inline-text bp-paper-section-title-input"
           aria-label="Section title"
           placeholder="Section title"
-          value={@title}
+          phx-hook="BarkparkPaperAutoSize"
           data-test-id="paper-field-title"
-        />
+        ><%= @title %></textarea>
       </form>
     </div>
     """

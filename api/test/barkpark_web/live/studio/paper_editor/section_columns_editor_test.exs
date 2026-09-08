@@ -65,7 +65,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
 
     html = render_fields(section)
     tree = LazyHTML.from_fragment(html)
-    title = LazyHTML.query(tree, "form[name='section-config'] input[name='title']")
+    title = LazyHTML.query(tree, "form[name='section-config'] textarea[name='title']")
 
     assert Enum.count(LazyHTML.query(tree, "#section-controls-section")) == 1
 
@@ -76,7 +76,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
              )
            ) == 1
 
-    assert LazyHTML.attribute(title, "value") == ["Existing"]
+    assert LazyHTML.text(title) == "Existing"
     assert Enum.count(title) == 1
   end
 
@@ -85,13 +85,15 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
           %{
             "id" => "section",
             "type" => "section",
-            "title" => "Existing title",
+            "title" =>
+              "Existing title that is deliberately long enough to wrap without collapsing the reader geometry",
             "blocks" => [paragraph("inside", "Nested draft")]
           },
           %{
             "id" => "section",
             "type" => "section",
-            "title" => "Existing title",
+            "title" =>
+              "Existing title that is deliberately long enough to wrap without collapsing the reader geometry",
             "layout" => %{"mode" => "grid", "tracks" => 2},
             "blocks" => [paragraph("inside", "Nested draft")]
           }
@@ -100,7 +102,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
       frame = LazyHTML.query(tree, "[data-paper-section-editor-frame]")
       title_editor = LazyHTML.query(frame, "[data-paper-section-title-editor]")
       title_form = LazyHTML.query(title_editor, "form[name='section-config']")
-      title_input = LazyHTML.query(title_form, "input[name='title']")
+      title_input = LazyHTML.query(title_form, "textarea[name='title']")
       paint = LazyHTML.query(title_editor, "[data-paper-section-title-paint]")
       fallback = LazyHTML.query(tree, "[data-paper-section-title-panel-trigger]")
 
@@ -108,11 +110,17 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
       assert LazyHTML.attribute(title_form, "id") == ["section-form-section"]
       assert LazyHTML.attribute(title_form, "phx-change") == ["paper-block-autosave"]
       assert LazyHTML.attribute(title_input, "id") == ["section-title-section"]
-      assert LazyHTML.attribute(title_input, "value") == ["Existing title"]
-      assert LazyHTML.attribute(title_input, "type") == ["text"]
+
+      assert LazyHTML.text(title_input) ==
+               "Existing title that is deliberately long enough to wrap without collapsing the reader geometry"
+
+      assert LazyHTML.attribute(title_input, "rows") == ["1"]
+      assert LazyHTML.attribute(title_input, "phx-hook") == ["BarkparkPaperAutoSize"]
       assert LazyHTML.attribute(paint, "type") == ["button"]
       assert LazyHTML.attribute(paint, "aria-controls") == ["section-title-section"]
-      assert LazyHTML.text(paint) == "Existing title"
+
+      assert LazyHTML.text(paint) ==
+               "Existing title that is deliberately long enough to wrap without collapsing the reader geometry"
 
       assert LazyHTML.attribute(paint, "phx-click") == [
                ~s([["focus",{"to":"#section-title-section"}]])
@@ -131,7 +139,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
       assert Enum.empty?(
                LazyHTML.query(
                  tree,
-                 "#section-controls-section input[name='title']"
+                 "#section-controls-section [name='title']"
                )
              )
 
@@ -156,7 +164,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
 
       assert LazyHTML.attribute(title_editor, "data-paper-section-title-empty") == ["true"]
       assert Enum.empty?(LazyHTML.query(title_editor, "[data-paper-section-title-paint]"))
-      assert LazyHTML.attribute(title_input, "value") == [""]
+      assert LazyHTML.text(title_input) == ""
       assert LazyHTML.text(fallback) == "Add title"
 
       assert LazyHTML.attribute(fallback, "phx-click") == [
