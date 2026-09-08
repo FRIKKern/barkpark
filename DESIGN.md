@@ -87,6 +87,10 @@
 - Disabled: Not applicable to the read-only Chronicle.
 - Offline/slow network: Core text and links are server-rendered. Media is optional evidence, and related cards preserve their authored links when live resolution is unavailable.
 
+## Columns track editing contract
+
+The first track-control slice appends an empty rightmost track and removes only an empty rightmost track while at least one track remains. Existing track indexes, nested editor ownership, history and signed leases must stay unchanged; pending nested/scalar saves settle before structural mutation. Nonempty, protected, stale and middle-track removal is visibly refused without changing source. Adding an empty track consumes no child ID. Middle-track removal remains open until its ownership and history contract is separately implemented and verified; edge controls are not whole-Columns sign-off.
+
 ## Content voice
 - Tone: Clear, warm, specific, and lightly playful; closer to a beautifully edited product journal than an engineering report. Confident about shipped facts, restrained about interpretation, and comfortable saying that a period was mostly maintenance.
 - Terminology: Prefer ordinary phrases such as “clearer errors,” “more complete results,” “safer access,” and “easier day-to-day use.” Reserve counts, internal component names, code paths, protocols, fields, flags, commit language, “first-parent,” “digest,” and “renderer” for the technical record.
