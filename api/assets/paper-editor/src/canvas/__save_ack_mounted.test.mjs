@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import { closeHistory, undoDepth } from "@tiptap/pm/history";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -50,7 +51,9 @@ Object.defineProperty(window, "navigation", {
   },
 });
 
-const { BpPaperCanvas, DEBOUNCE_MS } = await import("./index.js");
+const { BpPaperCanvas } = await import("./index.js");
+const { DEBOUNCE_MS } = await import("../contract.js");
+const { slashTypeToNode } = await import("./slash-insert.js");
 assert.equal(customElements.get("bp-paper-canvas"), BpPaperCanvas);
 
 const hooksSource = readFileSync(
@@ -175,7 +178,11 @@ async function mount({ revision, blocks = [paragraph("original", "Original")] } 
     click: () => toggle.el.dispatchEvent(new window.MouseEvent("click", {bubbles:true, cancelable:true})),
     toggles: () => toggles,
     navigations: () => navigations,
-    echo: (blocks, meta = {}) => handlers.get("bp:canvas-update")({...meta, runs:[{run_id:"probe-run-0", blocks}]}),
+    echo: (blocks, meta = {}) => handlers.get("bp:canvas-update")({
+      ...meta,
+      runs: [{ run_id: "probe-run-0", blocks }],
+    }),
+    update: () => hook.updated(),
     close: () => { toggle.destroyed(); hook.destroyed(); main.remove(); },
   };
 }
@@ -703,6 +710,230 @@ try {
     assert.equal(beforeUnloadPrevented(), false, `${choice}: unload protection releases only after resolution`);
     overlap.close();
   }
+
+  // The server pins a slash-inserted boundary to its originating run for the
+  // current editing session. A full-run acknowledgement must therefore be a
+  // history-neutral echo: the ignored canvas remains the sole mounted owner and
+  // native undo still removes only the insertion.
+  for (const type of ["table", "section"]) {
+    const handoff = await mount({ revision: 1 });
+    handoff.canvas._editor.view.dispatch(
+      handoff.canvas._editor.state.tr.insertText(" kept", 9),
+    );
+    handoff.canvas._editor.view.dispatch(closeHistory(handoff.canvas._editor.state.tr));
+    handoff.canvas._editor.commands.insertContentAt(
+      handoff.canvas._editor.state.doc.content.size,
+      slashTypeToNode(type),
+    );
+    handoff.canvas.flushPendingChanges();
+    assert.equal(handoff.requests.length, 1, `${type}: slash boundary saves once`);
+    const request = handoff.requests[0];
+    const boundary = inserted(request);
+    handoff.canvas._editor.commands.setTextSelection(2);
+    handoff.canvas._editor.commands.focus();
+    const selectionBefore = handoff.canvas._editor.state.selection.from;
+    const historyBefore = undoDepth(handoff.canvas._editor.state);
+
+    const acknowledgedRun = [paragraph("original", "Original kept"), boundary];
+    handoff.echo(acknowledgedRun, {
+      rev: 2,
+      request_id: request.payload.request_id,
+    });
+    request.resolve({ saved: true, rev: 2, request_id: request.payload.request_id });
+    await tick();
+
+    const pinnedNodes = handoff.canvas._editor.getJSON().content.filter(
+      node => node.attrs?.bpId === boundary.id,
+    );
+    assert.equal(pinnedNodes.length, 1,
+      `${type}: acknowledged boundary has exactly one node in its pinned canvas`);
+    let pinnedDom = null;
+    handoff.canvas._editor.state.doc.forEach((node, offset) => {
+      if (node.attrs?.bpId === boundary.id) pinnedDom = handoff.canvas._editor.view.nodeDOM(offset);
+    });
+    assert.ok(pinnedDom && !pinnedDom.hidden,
+      `${type}: the pinned originating owner remains visibly mounted`);
+    assert.equal(handoff.canvas._editor.state.selection.from, selectionBefore,
+      `${type}: a prose selection survives the ownership handoff`);
+    assert.equal(undoDepth(handoff.canvas._editor.state), historyBefore,
+      `${type}: a full-run acknowledgement neither consumes nor adds canvas history`);
+    assert.equal(handoff.canvas._editor.commands.undo(), true,
+      `${type}: native undo remains available after acknowledgement`);
+    assert.equal(
+      handoff.canvas._editor.getJSON().content.some(node => node.attrs?.bpId === boundary.id),
+      false,
+      `${type}: native undo removes the acknowledged insertion`,
+    );
+    assert.equal(handoff.canvas._editor.state.doc.firstChild.textContent, "Original kept",
+      `${type}: undo preserves the unrelated earlier prose history step`);
+    handoff.canvas.flushPendingChanges();
+    assert.equal(handoff.requests.length, 2,
+      `${type}: undo emits one follow-up persistence request`);
+    assert.deepEqual(handoff.requests[1].payload.ops, [
+      { op: "remove-block", id: boundary.id },
+    ], `${type}: native undo persists as removal of the retained boundary only`);
+    handoff.close();
+  }
+
+  const slashSection = await mount({ revision: 5 });
+  slashSection.canvas._editor.commands.insertContentAt(
+    slashSection.canvas._editor.state.doc.content.size,
+    {
+      type: "paragraph",
+      attrs: { bpId: null, bpType: "paragraph" },
+      content: [{ type: "text", text: "draft" }],
+    },
+  );
+  slashSection.canvas._editor.commands.setTextSelection(
+    slashSection.canvas._editor.state.doc.content.size - 1,
+  );
+  const { insertSlashTypeAtSelection } = await import("./command-palette.js");
+  assert.equal(insertSlashTypeAtSelection(slashSection.canvas._editor, "section"), true);
+  slashSection.canvas.flushPendingChanges();
+  const slashSectionSave = slashSection.requests[0];
+  const slashSectionBlock = inserted(slashSectionSave);
+  assert.deepEqual(slashSectionBlock.blocks[0].content, [
+    { type: "text", value: "" },
+  ], "the faithful slash-section request carries the server-stored empty text leaf");
+  slashSection.echo([paragraph("original", "Original"), slashSectionBlock], {
+    rev: 6,
+    request_id: slashSectionSave.payload.request_id,
+  });
+  slashSectionSave.resolve({
+    saved: true,
+    rev: 6,
+    request_id: slashSectionSave.payload.request_id,
+  });
+  await tick();
+  assert.equal(slashSection.canvas._editor.commands.undo(), true,
+    "a real slash-section replacement remains undoable after its full-run acknowledgement");
+  assert.equal(
+    slashSection.canvas._editor.getJSON().content.some(
+      node => node.attrs?.bpId === slashSectionBlock.id,
+    ),
+    false,
+    "slash-section undo removes the acknowledged inserted section",
+  );
+  assert.equal(slashSection.canvas._editor.state.doc.lastChild.textContent, "draft",
+    "slash-section undo restores the trigger paragraph as a separate history event");
+  slashSection.canvas.flushPendingChanges();
+  assert.deepEqual(slashSection.requests[1].payload.ops.map(op => op.op), [
+    "remove-block",
+    "insert-after",
+  ], "slash-section undo persists the replacement reversal");
+  assert.equal(slashSection.requests[1].payload.ops[0].id, slashSectionBlock.id);
+  assert.deepEqual(slashSection.requests[1].payload.ops[1].block.content, [
+    { type: "text", value: "draft" },
+  ]);
+  slashSection.close();
+
+  const tableRedo = await mount({
+    revision: 10,
+    blocks: [paragraph("original", "Original"), paragraph("target", "draft")],
+  });
+  tableRedo.canvas._editor.commands.setTextSelection(
+    tableRedo.canvas._editor.state.doc.content.size - 1,
+  );
+  assert.equal(insertSlashTypeAtSelection(tableRedo.canvas._editor, "table"), true);
+  tableRedo.canvas.flushPendingChanges();
+  const tableInsertSave = tableRedo.requests[0];
+  const insertedTable = inserted(tableInsertSave);
+  tableRedo.echo([paragraph("original", "Original"), insertedTable], {
+    rev: 11,
+    request_id: tableInsertSave.payload.request_id,
+  });
+  tableInsertSave.resolve({
+    saved: true,
+    rev: 11,
+    request_id: tableInsertSave.payload.request_id,
+  });
+  await tick();
+
+  assert.equal(tableRedo.canvas._editor.commands.undo(), true,
+    "the acknowledged slash-table insertion can be undone");
+  tableRedo.canvas.flushPendingChanges();
+  const tableUndoSave = tableRedo.requests[1];
+  const restoredParagraph = inserted(tableUndoSave);
+  tableRedo.echo([paragraph("original", "Original"), restoredParagraph], {
+    rev: 12,
+    request_id: tableUndoSave.payload.request_id,
+  });
+  tableUndoSave.resolve({
+    saved: true,
+    rev: 12,
+    request_id: tableUndoSave.payload.request_id,
+  });
+  await tick();
+  assert.equal(tableRedo.canvas._inflightOps, null,
+    "the undo acknowledgement releases the canvas before redo");
+
+  assert.equal(tableRedo.canvas._editor.commands.redo(), true,
+    "the table insertion remains redoable after its undo acknowledgement");
+  let bodyCellPosition = null;
+  tableRedo.canvas._editor.state.doc.descendants((node, pos) => {
+    if (bodyCellPosition == null && node.type.name === "bpTableCell") {
+      bodyCellPosition = pos + 1;
+    }
+  });
+  assert.ok(bodyCellPosition != null, "redo restores an editable body cell");
+  tableRedo.canvas._editor.commands.setTextSelection(bodyCellPosition);
+  tableRedo.canvas._editor.commands.insertContent("Studio mobile");
+  assert.match(tableRedo.canvas._editor.state.doc.textContent, /Studio mobile/,
+    "the immediate cell edit lands in the redone PM table before host update");
+  assert.equal(tableRedo.canvas.hasPendingChanges(), true,
+    "redo plus immediate cell typing arms the canvas debounce");
+  tableRedo.update();
+  assert.equal(tableRedo.canvas.hasPendingChanges(), true,
+    "the host update preserves the redone table debounce");
+  await new Promise(resolve => setTimeout(resolve, DEBOUNCE_MS * 4));
+  assert.equal(tableRedo.requests.length, 3,
+    "redo plus immediate cell typing survives a host update and debounces one save");
+  const redoneTable = inserted(tableRedo.requests[2]);
+  assert.equal(redoneTable.id, insertedTable.id,
+    "redo preserves the acknowledged table identity");
+  assert.equal(redoneTable.rows[0][0][0].value, "Studio mobile",
+    "the immediate cell draft rides the redone table persistence batch");
+  tableRedo.close();
+
+  const newerBoundaryDraft = await mount({ revision: 20 });
+  newerBoundaryDraft.canvas._editor.commands.insertContentAt(
+    newerBoundaryDraft.canvas._editor.state.doc.content.size,
+    slashTypeToNode("table"),
+  );
+  newerBoundaryDraft.canvas.flushPendingChanges();
+  const firstTableSave = newerBoundaryDraft.requests[0];
+  const draftedTable = inserted(firstTableSave);
+  const addRow = newerBoundaryDraft.canvas.querySelector('button[title="Add row"]');
+  assert.ok(addRow, "the newly inserted table exposes its native structure control");
+  addRow.click();
+  newerBoundaryDraft.canvas.flushPendingChanges();
+  newerBoundaryDraft.echo([paragraph("original", "Original"), draftedTable], {
+    rev: 21,
+    request_id: firstTableSave.payload.request_id,
+  });
+  firstTableSave.resolve({ saved: true, rev: 21, request_id: firstTableSave.payload.request_id });
+  await tick();
+  assert.equal(newerBoundaryDraft.requests.length, 2,
+    "a newer table draft remains in its originating canvas long enough to save");
+  const currentTableNode = () => newerBoundaryDraft.canvas._editor.getJSON().content.find(
+    node => node.attrs?.bpId === draftedTable.id,
+  );
+  assert.equal(currentTableNode()?.content?.length, 3,
+    "an older full-run acknowledgement cannot discard the newer table row");
+  const secondTableSave = newerBoundaryDraft.requests[1];
+  assert.deepEqual(secondTableSave.payload.ops.map(op => op.id), [draftedTable.id]);
+  const latestTable = { ...draftedTable, ...secondTableSave.payload.ops[0].patch };
+  newerBoundaryDraft.echo([paragraph("original", "Original"), latestTable], {
+    rev: 22,
+    request_id: secondTableSave.payload.request_id,
+  });
+  secondTableSave.resolve({ saved: true, rev: 22, request_id: secondTableSave.payload.request_id });
+  await tick();
+  assert.equal(currentTableNode()?.content?.length, 3,
+    "the newest table acknowledgement preserves the edited pinned boundary");
+  assert.equal(newerBoundaryDraft.canvas.hasPendingChanges(), false,
+    "the newer boundary draft settles after its exact full-run acknowledgement");
+  newerBoundaryDraft.close();
 
   const standalone = document.createElement("bp-paper-canvas");
   standalone.blocks = [paragraph("standalone", "Legacy host")];
