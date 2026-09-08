@@ -264,7 +264,7 @@ deployments, 17,171 failed, **65.0% lifetime / 87.3% over 7d**. Four sites — `
 
 - **D29 — `FailureCopy.scrub/1` CANNOT SEE BARKPARK'S OWN TOKEN. D13's evidence sentence is RETIRED;
   D13's conclusion stands.** *Why:* measured against the REAL module on origin/main, 2,000 tokens
-  minted with the production expression (`auth.ex:502`): `BARKPARK_TOKEN=<tok>` leaks **1902/2000 =
+  minted with the production expression (`Barkpark.Auth.create_personal_access_token/3`): `BARKPARK_TOKEN=<tok>` leaks **1902/2000 =
   95.1%**, and so do two shapes nobody asked about — a bare token in prose and a colourised
   `token=`. Three independent holes: the key clause's `\b` cannot fire after the `_` in
   `BARKPARK_TOKEN`; the provider-prefix clause lists sk/pk/ghp/xox/hcloud and **not** `bppat_` or
