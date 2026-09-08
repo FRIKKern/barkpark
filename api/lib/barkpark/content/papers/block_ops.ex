@@ -914,6 +914,142 @@ defmodule Barkpark.Content.Papers.BlockOps do
     do: {:error, :invalid_paper_ops_request}
 
   @doc """
+  Apply one server-authorized contextual history continuation exactly once.
+
+  `history_ref` names a completed Paper mutation receipt in the same physical
+  document and principal scope. The stored private continuation is revalidated
+  and applied to the current authoritative block tree; no inverse patch is
+  accepted from the caller. Each continuation may be consumed only once, while
+  an exact retry of the consuming request replays its immutable receipt.
+  """
+  def apply_paper_contextual_history_once(
+        slug,
+        history_ref,
+        action,
+        dataset,
+        request_id,
+        principal_key,
+        opts \\ []
+      )
+
+  def apply_paper_contextual_history_once(
+        slug,
+        history_ref,
+        action,
+        dataset,
+        request_id,
+        principal_key,
+        opts
+      )
+      when is_binary(slug) and is_binary(history_ref) and is_binary(action) and
+             is_binary(dataset) and is_binary(request_id) and is_list(opts) do
+    with false <- Repo.in_transaction?(),
+         {:ok, history_ref} <- normalize_paper_ops_request_id(history_ref),
+         {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
+         true <- history_ref != request_id,
+         {:ok, action} <- normalize_contextual_history_action(action),
+         {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
+         :ok <- require_contextual_history_revision(opts),
+         {:ok, opts} <- normalize_canvas_run_opts(opts),
+         :ok <- reject_contextual_history_canvas_context(opts),
+         %Document{} = doc <- get_block_op_paper(slug, dataset, opts) do
+      action_hash = paper_ops_key_hash(doc, request_id, principal_key)
+      history_hash = paper_ops_key_hash(doc, history_ref, principal_key)
+
+      action_scope =
+        "paper_contextual_history:v1:" <>
+          contextual_history_payload_fingerprint(history_ref, action, opts)
+
+      consumption_hash = contextual_history_consumption_hash(doc, history_ref, principal_key)
+      consumption_scope = "paper_contextual_history_consumption:v1"
+
+      Repo.transaction(fn ->
+        case IdempotencyStore.claim_exact(action_hash, action_scope) do
+          :claimed ->
+            maybe_after_idempotency_claim(opts)
+
+            with {:ok, stored_receipt} <-
+                   IdempotencyStore.lookup_completed_exact(
+                     history_hash,
+                     ["paper_ops:v1:", "paper_block_form:v1:", "paper_contextual_history:v1:"],
+                     3_600
+                   ),
+                 {:ok, predecessor_receipt} <-
+                   normalize_stored_paper_ops_receipt(stored_receipt),
+                 {:ok, history} <- contextual_history_from_receipt(predecessor_receipt),
+                 :ok <- require_contextual_history_action(history, action),
+                 :ok <- claim_contextual_history_consumption(consumption_hash, consumption_scope),
+                 %Document{} = current_doc <- lock_paper_physical_row(doc.id),
+                 true <- same_paper_physical_scope?(current_doc, doc),
+                 {:ok, receipt, effects} <-
+                   persist_paper_contextual_history(
+                     current_doc,
+                     slug,
+                     history,
+                     dataset,
+                     opts
+                   ) do
+              maybe_before_idempotency_complete(opts)
+
+              with :ok <-
+                     IdempotencyStore.complete_exact(consumption_hash, consumption_scope, %{
+                       history_ref: history_ref
+                     }),
+                   :ok <- IdempotencyStore.complete_exact(action_hash, action_scope, receipt) do
+                {:applied, receipt, effects}
+              else
+                {:error, reason} -> Repo.rollback(reason)
+              end
+            else
+              false -> Repo.rollback(:not_found)
+              nil -> Repo.rollback(:not_found)
+              {:error, reason} -> Repo.rollback(reason)
+            end
+
+          {:replay, stored_receipt} ->
+            case normalize_stored_paper_ops_receipt(stored_receipt) do
+              {:ok, receipt} -> {:replayed, receipt}
+              {:error, reason} -> Repo.rollback(reason)
+            end
+
+          :in_progress ->
+            Repo.rollback(:idempotency_in_progress)
+
+          {:error, reason} ->
+            Repo.rollback(reason)
+        end
+      end)
+      |> case do
+        {:ok, {:applied, receipt, effects}} ->
+          run_paper_batch_effects(effects, dataset, opts)
+          {:ok, receipt, :applied}
+
+        {:ok, {:replayed, receipt}} ->
+          {:ok, receipt, :replayed}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      true -> {:error, :paper_contextual_history_nested_transaction_unsupported}
+      false -> {:error, :invalid_paper_contextual_history_request}
+      nil -> {:error, :not_found}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  def apply_paper_contextual_history_once(
+        _slug,
+        _history_ref,
+        _action,
+        _dataset,
+        _request_id,
+        _principal_key,
+        _opts
+      ),
+      do: {:error, :invalid_paper_contextual_history_request}
+
+  @doc """
   Resolve trusted server-owned block-form source against the revision-accepted
   paper blocks and apply the resulting non-empty op batch exactly once.
 
@@ -1074,10 +1210,81 @@ defmodule Barkpark.Content.Papers.BlockOps do
          :ok <- preflight_table_editor_ops(blocks, ops),
          {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev),
          {:ok, folded, block_ids} <- fold_paper_ops_in_context(blocks, ops, opts),
-         # Same quality-gate RATCHET as the single-op path, applied to the
-         # atomic batch RESULT: the whole batch is refused (paper unchanged)
-         # when it would hollow out a non-hollow paper.
-         :ok <- ratchet_hollow(blocks, folded),
+         no_op? =
+           ops == [] or
+             (folded == blocks and
+                (trusted_form_noop? or Enum.all?(ops, &table_editor_op?/1))),
+         {:ok, new_blocks, rev, effects} <-
+           persist_paper_block_result(
+             doc,
+             slug,
+             blocks,
+             folded,
+             block_ids,
+             dataset,
+             opts,
+             no_op?
+           ) do
+      receipt = %{
+        slug: slug,
+        op_count: if(no_op?, do: 0, else: length(ops)),
+        rev: rev,
+        block_ids: if(no_op?, do: [], else: block_ids)
+      }
+
+      {:ok, maybe_capture_contextual_history(receipt, blocks, new_blocks, ops, opts), effects}
+    else
+      {:error, _reason} = err -> err
+    end
+  end
+
+  defp persist_paper_contextual_history(doc, slug, history, dataset, opts) do
+    with if_rev = Keyword.fetch!(opts, :if_rev),
+         :ok <- check_paper_if_rev(doc, if_rev),
+         {:ok, blocks} <- resolve_contextual_history_blocks(doc),
+         {:ok, folded, next_history} <- ContextualHistory.apply(blocks, history),
+         block_id = get_in(history, ["target", "id"]),
+         {:ok, _new_blocks, rev, effects} <-
+           persist_paper_block_result(
+             doc,
+             slug,
+             blocks,
+             folded,
+             [block_id],
+             dataset,
+             opts,
+             false,
+             true
+           ) do
+      {:ok,
+       %{
+         slug: slug,
+         op_count: 1,
+         rev: rev,
+         block_ids: [block_id],
+         contextual_history: next_history
+       }, effects}
+    end
+  end
+
+  # Shared post-fold persistence spine for ordinary batches and contextual
+  # history. In particular, history restoration still crosses every Paper
+  # ratchet, normalization/encryption chokepoint, projection, and write fence.
+  defp persist_paper_block_result(
+         %Document{} = doc,
+         slug,
+         blocks,
+         folded,
+         block_ids,
+         dataset,
+         opts,
+         no_op?,
+         strict_result? \\ false
+       ) do
+    # Same quality-gate RATCHET as the single-op path, applied to the atomic
+    # batch RESULT: the whole batch is refused (paper unchanged) when it would
+    # hollow out a non-hollow paper.
+    with :ok <- ratchet_hollow(blocks, folded),
          # Same field-loss RATCHET as the single-op path, on the atomic batch
          # RESULT: the whole batch is refused (paper unchanged) when it would
          # newly strand a note/card block's prose under an unread key.
@@ -1091,85 +1298,75 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # encrypt marked bound block values before render/project/persist so the
          # batch write stores ciphertext-at-rest. No-op for an unmarked schema;
          # fail closed (HIGH-3) when a marked block cannot be sealed.
-         {:ok, new_blocks} <- encrypt_paper_blocks(normalized, dataset, doc.workspace_id) do
-      cond do
-        ops == [] or
-            (folded == blocks and
-               (trusted_form_noop? or Enum.all?(ops, &table_editor_op?/1))) ->
-          # Trusted block forms and private Table intents still pass through
-          # revision/context/Patch fences before sharing the empty-batch receipt:
-          # current rev, no write or broadcast. Canonical ops keep their semantics.
-          {:ok,
-           %{
-             slug: slug,
-             op_count: 0,
-             rev: paper_current_rev(doc),
-             block_ids: []
-           }, nil}
+         {:ok, new_blocks} <- encrypt_paper_blocks(normalized, dataset, doc.workspace_id),
+         :ok <- require_exact_contextual_history_result(folded, new_blocks, strict_result?) do
+      if no_op? do
+        # Trusted block forms and private Table intents still pass through
+        # revision/context/Patch fences before sharing the empty-batch receipt:
+        # current rev, no write or broadcast. Canonical ops keep their semantics.
+        {:ok, blocks, paper_current_rev(doc), nil}
+      else
+        rev = paper_next_rev(doc)
+        style = get_in(doc.content || %{}, ["style"])
+        scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
+        render_opts = Labels.paper_render_opts(dataset, style, scope)
+        body_html = Render.render_blocks(new_blocks, render_opts)
 
-        true ->
-          rev = paper_next_rev(doc)
-          style = get_in(doc.content || %{}, ["style"])
-          scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
-          render_opts = Labels.paper_render_opts(dataset, style, scope)
-          body_html = Render.render_blocks(new_blocks, render_opts)
+        content =
+          (doc.content || %{})
+          |> Map.put("blocks", new_blocks)
+          |> put_body_html(body_html)
+          |> Map.put("rev", rev)
+          # Pre-patch `blocks` as old_blocks: a batch that unbinds a field
+          # clears the orphan content[fieldName]; non-unbind ops ⇒ dropped == [].
+          |> Projection.project(blocks, new_blocks, project_opts(render_opts, slug, doc))
 
-          content =
-            (doc.content || %{})
-            |> Map.put("blocks", new_blocks)
-            |> put_body_html(body_html)
-            |> Map.put("rev", rev)
-            # Pre-patch `blocks` as old_blocks: a batch that unbinds a field
-            # clears the orphan content[fieldName]; non-unbind ops ⇒ dropped == [].
-            |> Projection.project(blocks, new_blocks, project_opts(render_opts, slug, doc))
+        title = paper_title(content, slug)
 
-          title = paper_title(content, slug)
+        changeset =
+          Document.changeset(doc, %{
+            "content" => content,
+            "title" => title,
+            "rev" => generate_rev()
+          })
 
-          changeset =
-            Document.changeset(doc, %{
-              "content" => content,
-              "title" => title,
-              "rev" => generate_rev()
-            })
+        case fenced_or_plain_paper_update(changeset, doc, opts) do
+          {:ok, saved} ->
+            # Same actor stamp as the single-op frame (slice 4), same posture:
+            # server-side, additive, ignorable.
+            frame =
+              Map.merge(
+                %{
+                  op_kind: :batch,
+                  block_id: List.last(block_ids),
+                  block_ids: block_ids,
+                  fragment_html: nil,
+                  position: nil,
+                  rev: rev
+                },
+                CallerContext.actor_stamp_from_opts(opts)
+              )
 
-          case fenced_or_plain_paper_update(changeset, doc, opts) do
-            {:ok, saved} ->
-              # Same actor stamp as the single-op frame (slice 4), same posture:
-              # server-side, additive, ignorable.
-              frame =
-                Map.merge(
-                  %{
-                    op_kind: :batch,
-                    block_id: List.last(block_ids),
-                    block_ids: block_ids,
-                    fragment_html: nil,
-                    position: nil,
-                    rev: rev
-                  },
-                  CallerContext.actor_stamp_from_opts(opts)
-                )
+            {:ok, new_blocks, rev, {saved, slug, frame}}
 
-              receipt = %{
-                slug: slug,
-                op_count: length(ops),
-                rev: rev,
-                block_ids: block_ids
-              }
+          {:error, :precondition_failed} = err ->
+            err
 
-              {:ok, maybe_capture_contextual_history(receipt, blocks, new_blocks, ops, opts),
-               {saved, slug, frame}}
-
-            {:error, :precondition_failed} = err ->
-              err
-
-            {:error, changeset} ->
-              {:error, changeset}
-          end
+          {:error, changeset} ->
+            {:error, changeset}
+        end
       end
     else
       {:error, _reason} = err -> err
     end
   end
+
+  defp require_exact_contextual_history_result(blocks, blocks, true), do: :ok
+
+  defp require_exact_contextual_history_result(_folded, _persisted, true),
+    do: {:error, :history_conflict}
+
+  defp require_exact_contextual_history_result(_folded, _persisted, false), do: :ok
 
   # Server-only opt-in. Hosts do not enable this until their reply adapter can
   # expose an opaque reference instead of the private before/after values.
@@ -1212,6 +1409,62 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp normalize_paper_ops_principal(_), do: {:error, :missing_principal}
+
+  defp normalize_contextual_history_action(action) when action in ["undo", "redo"],
+    do: {:ok, action}
+
+  defp normalize_contextual_history_action(_action), do: {:error, :invalid_history_action}
+
+  defp require_contextual_history_revision(opts) do
+    case Keyword.get(opts, :if_rev) do
+      revision when is_integer(revision) and revision >= 0 -> :ok
+      _invalid -> {:error, :invalid_paper_contextual_history_request}
+    end
+  end
+
+  # Contextual history v1 resolves its target from server-owned receipt
+  # authority across the full Paper. It must not borrow a caller-provided
+  # canvas run to influence echo partitioning or retained ownership without a
+  # proof that the receipt target belongs to that run.
+  defp reject_contextual_history_canvas_context(opts) do
+    case Keyword.get(opts, :canvas_run_context) do
+      nil -> :ok
+      _context -> {:error, :invalid_canvas_run_context}
+    end
+  end
+
+  defp contextual_history_from_receipt(%{contextual_history: history}) do
+    case ContextualHistory.validate(history) do
+      :ok -> {:ok, history}
+      {:error, :invalid_history} -> {:error, :invalid_history}
+    end
+  end
+
+  defp contextual_history_from_receipt(_receipt), do: {:error, :invalid_history}
+
+  # Unlike an ordinary revision-fenced batch, history is not a conversion
+  # door. It may change only the guarded field in an already-canonical Paper;
+  # promoting legacy content.body.blocks would be an unrelated structural
+  # mutation hidden inside undo/redo.
+  defp resolve_contextual_history_blocks(%Document{content: %{"blocks" => blocks}})
+       when is_list(blocks),
+       do: {:ok, blocks}
+
+  defp resolve_contextual_history_blocks(_doc), do: {:error, :history_conflict}
+
+  defp require_contextual_history_action(%{"action" => action}, action), do: :ok
+
+  defp require_contextual_history_action(_history, _action),
+    do: {:error, :history_action_mismatch}
+
+  defp claim_contextual_history_consumption(hash, scope) do
+    case IdempotencyStore.claim_exact(hash, scope) do
+      :claimed -> :ok
+      {:replay, _receipt} -> {:error, :history_ref_consumed}
+      :in_progress -> {:error, :history_ref_consumed}
+      {:error, _reason} -> {:error, :history_ref_consumed}
+    end
+  end
 
   defp normalize_canvas_run_opts(opts) when is_list(opts) do
     context = Keyword.get(opts, :canvas_run_context)
@@ -1264,11 +1517,54 @@ defmodule Barkpark.Content.Papers.BlockOps do
     |> deterministic_hash()
   end
 
+  defp same_paper_physical_scope?(%Document{} = current, %Document{} = original) do
+    {
+      current.id,
+      current.workspace_id,
+      current.project_id,
+      current.dataset_id,
+      current.dataset
+    } ===
+      {
+        original.id,
+        original.workspace_id,
+        original.project_id,
+        original.dataset_id,
+        original.dataset
+      }
+  end
+
+  defp lock_paper_physical_row(id) do
+    Repo.one(from(d in Document, where: d.id == ^id, lock: "FOR UPDATE"))
+  end
+
   defp paper_ops_payload_fingerprint(ops, opts) do
     case Keyword.get(opts, :canvas_run_context) do
       nil -> {ops, Keyword.get(opts, :if_rev)}
       context -> {ops, Keyword.get(opts, :if_rev), context}
     end
+    |> deterministic_hash()
+  end
+
+  defp contextual_history_payload_fingerprint(history_ref, action, opts) do
+    case Keyword.get(opts, :canvas_run_context) do
+      nil -> {history_ref, action, Keyword.fetch!(opts, :if_rev)}
+      context -> {history_ref, action, Keyword.fetch!(opts, :if_rev), context}
+    end
+    |> deterministic_hash()
+  end
+
+  defp contextual_history_consumption_hash(%Document{} = doc, history_ref, principal_key) do
+    {
+      "paper_contextual_history_consumption:v1",
+      doc.id,
+      doc.workspace_id,
+      doc.project_id,
+      doc.dataset_id,
+      doc.dataset,
+      principal_key,
+      history_ref
+    }
     |> deterministic_hash()
   end
 

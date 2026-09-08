@@ -88,6 +88,26 @@ defmodule Barkpark.Repo.IdempotencyStore do
     end
   end
 
+  @doc """
+  Reads one completed exact-operation receipt inside the caller's transaction.
+
+  `allowed_scope_prefixes` is an explicit namespace allowlist, not a generic
+  scope selector. Rows must be completed with status 200, no older than the
+  inclusive `max_age_seconds` boundary, and not dated in the future. This
+  lookup never mutates, reclaims, or sweeps an idempotency row.
+  """
+  def lookup_completed_exact(
+        hash,
+        allowed_scope_prefixes,
+        max_age_seconds,
+        now \\ DateTime.utc_now()
+      ) do
+    with :ok <- validate_lookup_args(hash, allowed_scope_prefixes, max_age_seconds, now),
+         true <- Repo.in_transaction?() || {:error, :idempotency_transaction_required} do
+      do_lookup_completed_exact(hash, allowed_scope_prefixes, max_age_seconds, now)
+    end
+  end
+
   defp do_complete_exact(hash, scope, receipt) do
     with {:ok, body} <- Jason.encode(receipt) do
       query =
@@ -109,6 +129,77 @@ defmodule Barkpark.Repo.IdempotencyStore do
       end
     end
   end
+
+  defp do_lookup_completed_exact(hash, allowed_scope_prefixes, max_age_seconds, now) do
+    case Repo.get(Key, hash) do
+      nil ->
+        {:error, :idempotency_receipt_missing}
+
+      %Key{state: "pending"} ->
+        {:error, :idempotency_receipt_pending}
+
+      %Key{scope: scope} when not is_binary(scope) ->
+        {:error, :idempotency_receipt_malformed}
+
+      %Key{scope: scope} = row ->
+        if Enum.any?(allowed_scope_prefixes, &String.starts_with?(scope, &1)) do
+          decode_completed_lookup(row, max_age_seconds, now)
+        else
+          {:error, :idempotency_receipt_wrong_scope}
+        end
+    end
+  end
+
+  defp decode_completed_lookup(
+         %Key{
+           state: "completed",
+           status_code: 200,
+           response_body: body,
+           inserted_at: %DateTime{} = inserted_at
+         },
+         max_age_seconds,
+         now
+       ) do
+    cutoff = DateTime.add(now, -max_age_seconds, :second)
+
+    cond do
+      DateTime.compare(inserted_at, now) == :gt ->
+        {:error, :idempotency_receipt_malformed}
+
+      DateTime.compare(inserted_at, cutoff) == :lt ->
+        {:error, :idempotency_receipt_expired}
+
+      true ->
+        decode_lookup_receipt(body)
+    end
+  end
+
+  defp decode_completed_lookup(%Key{}, _max_age_seconds, _now),
+    do: {:error, :idempotency_receipt_malformed}
+
+  defp decode_lookup_receipt(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, receipt} when is_map(receipt) -> {:ok, receipt}
+      _invalid -> {:error, :idempotency_receipt_malformed}
+    end
+  end
+
+  defp decode_lookup_receipt(_body), do: {:error, :idempotency_receipt_malformed}
+
+  defp validate_lookup_args(hash, prefixes, max_age_seconds, %DateTime{})
+       when is_binary(hash) and is_list(prefixes) and is_integer(max_age_seconds) and
+              max_age_seconds >= 0 do
+    if nonblank?(hash) and prefixes != [] and Enum.all?(prefixes, &nonblank?/1) do
+      :ok
+    else
+      {:error, :idempotency_lookup_invalid_args}
+    end
+  end
+
+  defp validate_lookup_args(_hash, _prefixes, _max_age_seconds, _now),
+    do: {:error, :idempotency_lookup_invalid_args}
+
+  defp nonblank?(value), do: is_binary(value) and String.trim(value) != ""
 
   defp decode_exact_receipt(body) when is_binary(body) do
     case Jason.decode(body) do
