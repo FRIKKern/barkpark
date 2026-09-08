@@ -66,8 +66,9 @@ bp task claim t1 agent-1      # <doc_id> <worker_id>
 # Voluntary walk-away (fenced)
 bp task release t1 agent-1 1  # <doc_id> <worker> <epoch>
 
-# Mid-claim: stamp a criterion — met, honestly missed, or WITHDRAWN (--criterion N is ZERO-based: 0 = the first)
-# Read the wording from a FILE (`-` = stdin) — a double-quoted `code span` is COMMAND SUBSTITUTION
+# Mid-claim: stamp a criterion (--criterion N is ZERO-based: 0 = the first)
+# Wording from a FILE (`-` = stdin); a double-quoted `code span` is COMMAND SUBSTITUTION
+# FROM THE ROW: matches any index - guard INERT
 bp task get t1 -o json | jq -r '.doc.content.acceptance_criteria[0].criterion' > crit.txt
 bp task stamp t1 agent-1 1 --criterion 0 --criterion-text-file crit.txt --met --evidence "gate green"
 bp task stamp t1 agent-1 1 --criterion 1 --miss --note "flaky"
