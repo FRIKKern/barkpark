@@ -1779,7 +1779,7 @@ textarea.bp-paper-figure-caption-input:focus-visible {
   position: relative; min-width: 0;
 }
 .bp-paper-section-title-editor--stack {
-  width: max-content; max-width: 100%;
+  width: 100%; max-width: 100%;
 }
 .bp-paper-edit-form.bp-paper-section-title-form {
   display: block; margin: 0; padding: 0;

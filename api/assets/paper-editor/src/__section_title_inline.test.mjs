@@ -13,6 +13,9 @@ const shell = readFileSync(new URL(
 ), "utf8");
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+assert.match(shell, /\.bp-paper-section-title-editor--stack\s*\{\s*width:\s*100%/s,
+  "the title owner retains reader width when its paint is hidden, rather than shrinking to textarea columns");
+
 assert.match(shell, /\.bp-paper-section-title-form:not\(:focus-within\)\s*\{[^}]*position:\s*absolute[^}]*clip-path:\s*inset\(50%\)/s,
   "the mounted scalar form adds no resting title geometry");
 assert.match(shell, /\.bp-paper-section-title-form > label\.sr-only\s*\{[^}]*position:\s*absolute[^}]*width:\s*1px[^}]*height:\s*1px[^}]*clip-path:\s*inset\(50%\)/s,
