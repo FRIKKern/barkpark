@@ -34,7 +34,7 @@ main_green_trusted="$TMP/main-green-trusted.json"; echo '{"jobs":[{"name":"Doc b
 main_other_job="$TMP/main-other.json"; echo '{"jobs":[{"name":"Some other job","conclusion":"failure","steps":[{"name":"Code-comment citation guard (fails this job)","conclusion":"failure"}]}]}' > "$main_other_job"
 
 run() { # $1 outcomes, $2 event, $3 jobs fixture (or ""), $4 OUR raw capture file (or ""), $5 MAIN raw job log (or "")
-  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$1" STEP_NAMES="$NAMES" JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE="doc-gates.yml" GITHUB_EVENT_NAME="$2" GITHUB_REPOSITORY="o/r" GITHUB_TOKEN="t" GITHUB_STEP_SUMMARY="$TMP/summary.md"
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$1" STEP_NAMES="${STEP_NAMES_OVERRIDE:-$NAMES}" JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE="doc-gates.yml" GITHUB_EVENT_NAME="$2" GITHUB_REPOSITORY="o/r" GITHUB_TOKEN="t" GITHUB_STEP_SUMMARY="$TMP/summary.md"
     [ -n "$3" ] && export MAIN_RED_BREAKER_FIXTURE="$3"
     [ -n "${4:-}" ] && export BREAKER_ERROR_LOG="$4"
     [ -n "${5:-}" ] && export MAIN_RED_BREAKER_LOG_FIXTURE="$5"
@@ -1195,5 +1195,57 @@ if mutate "19s the unknown-is-not-a-verdict rule" '    ahead|diverged)' '    ahe
                   *) echo "  PASS  19s) gating on UNKNOWN silences the breaker wherever it cannot see — 24d is the arm holding that shut" ;; esac ) || FAIL=$((FAIL+1))
   [ $? -eq 0 ] && PASS=$((PASS+1))
 fi
+
+# ── 25. api_trusted: an unreachable proof, and the guard that makes it so
+#       (task-658971cd9db61621)
+# THIS SECTION EXISTS BECAUSE THE ROW'S FIRST CLAIM WAS WRONG. It said the
+# empty-`gate_names` fallback was REACHABLE AND WRONG. The arm written to reach
+# it could not: with an empty STEP_NAMES the run exits at "nothing to decide"
+# long before, so the first version of 25a was a GREEN WITH NO SUBJECT — a sound
+# assertion on a path that never arrives. The fixture had to change, not the
+# assertion. What is pinned here is the structural chain that makes both the
+# fallback and the proof unreachable.
+
+# 25a) THE GUARD THAT MAKES THE FALLBACK UNREACHABLE. `ours.txt` is built with
+#      `if sid in names`, so an empty STEP_NAMES yields no failed gate steps and
+#      the run exits 0 at "nothing to decide" — hundreds of lines before
+#      api_trusted. Contrapositive: a non-empty `ours` requires a non-empty
+#      `names`, so `gate_names` is never empty at that line.
+out="$(STEP_NAMES_OVERRIDE='{}' run "$out_s2" pull_request "$main_green_trusted")"
+has "$out" "nothing to decide" "25a) an empty STEP_NAMES exits at 'nothing to decide' — the fallback is unreachable, not merely unused"
+has "$out" "RC=0" "25a) rc 0"
+case "$out" in
+  *"the red is this PR's own"*) bad "25a) it accused with no gate names at all" ;;
+  *) ok "25a) …and it makes no ownership claim on a run it could not map to gate steps" ;;
+esac
+
+# 25a2) MUTATION — remove the early exit and 25a's sentence must disappear, which
+#       is what proves 25a measures the guard rather than the fixture.
+#       AIMED AT A SINGLE LINE ON PURPOSE: `mutate` counts matching LINES with
+#       grep but occurrences with python's str.count, so a MULTI-LINE anchor
+#       reports 2 to the first check and 1 to the second and can never apply. My
+#       first attempt aimed at the two-line `sid in names` block and died that
+#       way. One line, one count, both agree.
+if mutate "25a2 the nothing-to-decide early exit" 'if [ ! -s "$TMPD/ours.txt" ]; then' 'if false; then'; then
+  ( SUBJECT="$TMP/mut-subject.sh"
+    o="$(STEP_NAMES_OVERRIDE='{}' MAIN_RED_BREAKER_SUBJECT="$TMP/mut-subject.sh" run "$out_s2" pull_request "$main_green_trusted")"
+    case "$o" in
+      *"nothing to decide"*)
+        echo "  FAIL  25a2) MUTATION SURVIVED: still exited early, so 25a is not measuring the guard"; exit 1 ;;
+      *) echo "  PASS  25a2) without the early exit an empty STEP_NAMES runs on past it — 25a pins the real reason the fallback is dead" ;;
+    esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# 25b) THE CONTROL FOR THE ABSENCE CLAIM. "api_trusted is unreachable" is an
+#      ABSENCE, and an absence with no positive case is not a measurement — this
+#      fleet has paid for several of those tonight. Feed a job whose API DOES
+#      report a GATE step as `failure` — the shape that exists only if a gate step
+#      ever drops continue-on-error — and the proof must FIRE. If this arm ever
+#      fails, the branch is dead for some reason other than the documented one and
+#      the comment above it is wrong.
+out="$(run "$out_s2" pull_request "$main_green_trusted")"
+has "$out" "a step main does not" "25b) CONTROL: when the API reports a GATE step failed, api_trusted fires and the breaker accuses"
+has "$out" "RC=1" "25b) …rc 1 — the proof is alive, and only its precondition is absent in production"
 
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]
