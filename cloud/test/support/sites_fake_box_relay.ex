@@ -54,6 +54,8 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
       already took is in flight).
     * `:polls` — a list of `poll_deploy/3` replies, consumed in order; the last repeats
     * `:rollback` — the reply to `rollback/2` (default: a successful flip)
+    * `:build_record` — the reply to `build_record/3` (default: a definite
+      `never_recorded`, the answer a real box gives for a build it never saw)
   """
   def program(opts) when is_list(opts) do
     ensure_store()
@@ -68,6 +70,7 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
         polls: Keyword.get(opts, :polls, []),
         rollback: Keyword.get(opts, :rollback, {:ok, 200, %{"status" => "rolled_back"}}),
         teardown: Keyword.get(opts, :teardown, {:ok, 200, %{"status" => "torn_down"}}),
+        build_record: Keyword.get(opts, :build_record),
         calls: []
       })
     end)
@@ -128,6 +131,36 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
     {:ok, 200, %{"state" => "failed", "stages" => stages, "failure_reason" => reason}}
   end
 
+  @doc """
+  A durable terminal record as the box's `record=1` door renders it
+  (`BarkparkWeb.SiteDeployController.render_build_record/1`). `log_state` is the
+  field the control plane keys its three answers on, so it is the required
+  argument and every other key has a plausible default.
+  """
+  def terminal_record(slug, build_id, log_state, opts \\ []) do
+    {:ok, 200,
+     %{
+       "slug" => slug,
+       "build_id" => build_id,
+       "record" => Keyword.get(opts, :record, "present"),
+       "log_state" => log_state,
+       "log_path" =>
+         Keyword.get(opts, :log_path, "/var/lib/barkpark/site-runs/#{slug}-#{build_id}.log"),
+       "log_bytes" => Keyword.get(opts, :log_bytes, 31_402),
+       "exit_code" => Keyword.get(opts, :exit_code, 12),
+       "failure_reason" => Keyword.get(opts, :failure_reason, "BUILD failed (exit 12)"),
+       "stages" => Keyword.get(opts, :stages, [%{"name" => "BUILD", "status" => "failed"}]),
+       "unit_name" => Keyword.get(opts, :unit_name, "barkpark-site@#{slug}.service"),
+       "journal_command" =>
+         Keyword.get(opts, :journal_command, "journalctl -u barkpark-site@#{slug}"),
+       "mode" => Keyword.get(opts, :mode, "deploy"),
+       "runtime_target" => Keyword.get(opts, :runtime_target, "static"),
+       "started_at" => Keyword.get(opts, :started_at, "2026-08-06T01:00:00Z"),
+       "finished_at" => Keyword.get(opts, :finished_at, "2026-08-06T01:04:00Z"),
+       "evicted_at" => Keyword.get(opts, :evicted_at)
+     }}
+  end
+
   ## ---------------------------------------------------------------------------
   ## BoxRelay behaviour
   ## ---------------------------------------------------------------------------
@@ -146,6 +179,26 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
   def poll_deploy(_bp, slug, build_id) do
     record({:poll_deploy, %{slug: slug, build_id: build_id}})
     next_poll()
+  end
+
+  # The DURABLE record read (`dr-bl-recorder-http-read-path`). Default is
+  # `never_recorded`, not `available`: an unprogrammed fake must answer the state
+  # a box gives for a build it has never heard of, so a test that forgets to
+  # program cannot accidentally assert against an invented log.
+  @impl true
+  def build_record(_bp, slug, build_id) do
+    record({:build_record, %{slug: slug, build_id: build_id}})
+
+    fetch(
+      :build_record,
+      {:ok, 200,
+       %{
+         "slug" => slug,
+         "build_id" => build_id,
+         "record" => "absent",
+         "log_state" => "never_recorded"
+       }}
+    )
   end
 
   @impl true

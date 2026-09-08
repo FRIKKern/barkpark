@@ -532,8 +532,10 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def delete(conn, %{"dataset" => dataset, "id" => id} = params) do
+    scope = scope_opts(conn)
+
     with :ok <- require_write(conn),
-         {:ok, file} <- Media.get_file(id, scope_opts(conn)),
+         {:ok, file} <- Media.get_file(id, scope),
          :ok <- ensure_dataset(file, dataset),
          # WHERE-USED GUARD (pe-w2-bl-media-delete-where-used): papers embed
          # media as RAW `/media/files/...` URL STRINGS, invisible to every
@@ -541,8 +543,12 @@ defmodule BarkparkWeb.V1.MediaController do
          # edges only), so this door used to answer 200 while blanking a live
          # page. Consult usage BEFORE the irreversible delete.
          {:ok, override} <- refuse_if_referenced(conn, file, params),
+         # The forced-delete WITNESS rides down to the `media.deleted` webhook
+         # too (task-303e3b171435d767): the receipt below only reaches the
+         # CALLER, while a link-graph rebuilder or reindexer sees a delete it
+         # must apply and could not learn it was contested.
          {:ok, deleted} <-
-           Media.delete_file(id, Keyword.put(scope_opts(conn), :where_used, :guard)) do
+           Media.delete_file(id, Keyword.merge(scope, where_used: :guard, override: override)) do
       # RECEIPT LAW (pds w40): `Media.delete_file/2` returns the row
       # `Repo.delete(file, stale_error_field: :id)` removed (media.ex:413-455).
       # This used to discard it and echo the `:id` path param. NOTE the trap the

@@ -1273,6 +1273,38 @@ defmodule Barkpark.Tasks.Close do
     # names them as caller-asserted rather than verified. Both ride this single
     # rev-CAS write, so an autostamp and its confession land together or not at
     # all — the same discipline `close_override` already follows.
+
+    # THE CLOSE-BODY DOOR (cch-w56-bl). `--set criteria:=[…]` flips the identical
+    # `met` bit `Tasks.Stamp` guards, and nothing on this path ever asked whether
+    # the criterion was a merge gate. A `done` close is stopped only
+    # INCIDENTALLY, by the D289 criteria gate counting unmet criteria; a
+    # `cancelled` close is exempt from every honesty gate on this path BY NAME —
+    # correct on its own, since abandoning acceptance criteria is what cancelling
+    # means, and wrong in combination, because the same command can flip a
+    # declared gate to met on its way out. Measured on the live server: exit
+    # zero, no flag, no marker check, no trace, and the met bit is what survives.
+    #
+    # A RECEIPT, NOT A REFUSAL. Refusing here would strand the legitimate arrears
+    # sweep — a lead closing a genuinely merged, fully-green carrier by hand is
+    # how 215 of these have been stamped — so the close still succeeds and the
+    # ledger now names what was asserted. It is computed from the CALLER's own
+    # criteria, deliberately BEFORE the synthetics are appended below: the
+    # autostamp has its own `"close"` record, and counting its indices here
+    # would confess the same act twice under two different names.
+    new_content =
+      merge_autostamp_record(
+        new_content,
+        "close_body_flips",
+        close_body_flip_record(
+          doc,
+          criteria,
+          worker_id,
+          caller_token_id,
+          new_status,
+          ts_iso
+        )
+      )
+
     autostamps = autostamp_merge_gate(doc, criteria, worker_id, new_status, landed, ts_iso)
     criteria = if is_list(criteria), do: criteria ++ autostamps, else: criteria
 
@@ -1410,6 +1442,59 @@ defmodule Barkpark.Tasks.Close do
       "ts" => ts_iso
     }
   end
+
+  # THE CLOSE-BODY FLIP RECORD (cch-w56-bl), in `close_autostamp_record/6`'s
+  # shape and under its key: one act, one record, naming every declared merge
+  # gate this close body raised from unmet to met.
+  #
+  # IT KEYS ON THE TRANSITION, not on being named. A criterion already met is
+  # not raised by a close that mentions it, so mentioning it asserts nothing —
+  # the same reason `merge_gate_synthetics/3` skips an already-met gate. And it
+  # keys on the STORED criterion via `Criteria.merge_gated?/1`, never on the
+  # caller's own text: the verdict has to come from what the ledger holds.
+  #
+  # `lifecycle_status` is recorded because it is the whole point. Every honesty
+  # gate on this path exempts `cancelled` by name — which is why that arm flipped
+  # declared gates at exit zero — so a reader must be able to see, on the record
+  # itself, which close carried the flip.
+  #
+  # A close that raised no gate writes nothing (the nil clause below), so an
+  # honest close stays byte-identical.
+  defp close_body_flip_record(%Document{} = doc, criteria, worker_id, token_id, status, ts_iso)
+       when is_list(criteria) do
+    stored = Map.get(doc.content || %{}, "acceptance_criteria")
+
+    indices =
+      criteria
+      |> Enum.filter(fn update ->
+        is_map(update) and Map.get(update, "met") == true and
+          raises_a_gate?(Criteria.at(stored, Map.get(update, "index")))
+      end)
+      |> Enum.map(&Map.get(&1, "index"))
+
+    case indices do
+      [] ->
+        nil
+
+      _ ->
+        %{
+          "verified" => false,
+          "source" => "close_body_criteria",
+          "indices" => indices,
+          "lifecycle_status" => status,
+          "asserted_worker" => worker_id,
+          "authenticated_token_id" => token_id,
+          "ts" => ts_iso
+        }
+    end
+  end
+
+  defp close_body_flip_record(_doc, _criteria, _worker, _token, _status, _ts), do: nil
+
+  defp raises_a_gate?(nil), do: false
+
+  defp raises_a_gate?(entry),
+    do: Map.get(entry, "met") != true and Criteria.merge_gated?(entry)
 
   # A close that autostamped nothing writes nothing (mirrors
   # `merge_override_record/2`: an honest close leaves no receipt to explain

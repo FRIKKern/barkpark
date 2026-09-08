@@ -7,6 +7,11 @@
 Description=Barkpark warm-image nightly bake (snapshot-management)
 Wants=network-online.target
 After=network-online.target
+# A failed nightly bake is otherwise invisible: the timer keeps firing, the warm
+# pool keeps serving the last good snapshot, and it ages silently. `%n` hands the
+# handler this unit's own name. NOT on the .timer — a timer's OnFailure= fires
+# only if the TIMER fails to activate, never when the job it triggered errored.
+OnFailure=barkpark-unit-failure-alert@%n.service
 
 [Service]
 Type=oneshot

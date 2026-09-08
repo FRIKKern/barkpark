@@ -207,6 +207,68 @@ defmodule BarkparkWeb.SamlControllerTest do
     end
   end
 
+  describe "org allowed-auth-methods at the ACS mint (era-bl-allowed-auth-methods)" do
+    # SAML is ENTERPRISE sso — bound to this org's own connection — so it
+    # answers to the "sso" term. These tests reuse the module's real signed
+    # assertion fixture, so the request genuinely reaches the mint seam and
+    # the refusal is not a fixture artefact.
+    test "an org whose policy OMITS sso refuses the ACS mint with 403", %{conn: conn} do
+      i = idp()
+      {org, _ws} = setup_conn(i.cert_pem)
+      {:ok, _} = Tenancy.set_organization_allowed_auth_methods(org.id, ["password"])
+
+      resp =
+        post(conn, "/v1/auth/saml/#{@slug}/acs", %{
+          "SAMLResponse" => signed_response("ssoblocked@samlctrl.com", i.key, i.cert_der)
+        })
+
+      body = json_response(resp, 403)
+      assert body["error"]["code"] == "auth_method_not_allowed"
+      assert body["error"]["message"] =~ "Single sign-on is disabled"
+      refute body["token"]
+
+      # Fail closed: JIT provisioned the account but NO session exists.
+      user = Accounts.get_user_by_email("ssoblocked@samlctrl.com")
+      assert user
+      refute Repo.exists?(from s in Barkpark.Accounts.UserSession, where: s.user_id == ^user.id)
+
+      assert Repo.exists?(
+               from e in Barkpark.Audit.Event,
+                 where: e.action == "auth_method_not_allowed" and e.subject == ^user.id
+             )
+    end
+
+    test "an org whose policy INCLUDES sso mints unchanged", %{conn: conn} do
+      i = idp()
+      {org, _ws} = setup_conn(i.cert_pem)
+      {:ok, _} = Tenancy.set_organization_allowed_auth_methods(org.id, ["sso"])
+
+      body =
+        conn
+        |> post("/v1/auth/saml/#{@slug}/acs", %{
+          "SAMLResponse" => signed_response("ssook@samlctrl.com", i.key, i.cert_der)
+        })
+        |> json_response(201)
+
+      assert body["token"]
+      assert Accounts.verify_user_session_token(body["token"])
+    end
+
+    test "an org with NO policy mints unchanged (zero tax)", %{conn: conn} do
+      i = idp()
+      {_org, _ws} = setup_conn(i.cert_pem)
+
+      body =
+        conn
+        |> post("/v1/auth/saml/#{@slug}/acs", %{
+          "SAMLResponse" => signed_response("nopolicy@samlctrl.com", i.key, i.cert_der)
+        })
+        |> json_response(201)
+
+      assert body["token"]
+    end
+  end
+
   test "failed ACS callbacks land on the audit trail (era-w8)", %{conn: conn} do
     # No connection for the org → 404, audited.
     assert conn

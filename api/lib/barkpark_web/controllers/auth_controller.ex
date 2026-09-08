@@ -98,10 +98,20 @@ defmodule BarkparkWeb.AuthController do
         )
 
       user ->
-        if user.totp_enabled do
-          login_with_mfa(conn, user, params["totp_code"], params["recovery_code"])
-        else
-          issue_session(conn, user)
+        # era-bl-allowed-auth-methods: the org policy door, checked HERE —
+        # after the password verified, before any session work. Before the
+        # credential is known good the refusal would be an enumeration
+        # oracle; after the session mint it would be a leak. A governed
+        # SSO-only member gets a specific 403, never the generic 401 above.
+        cond do
+          BarkparkWeb.SessionIssuer.auth_method_blocked?(user, "password") ->
+            BarkparkWeb.SessionIssuer.deny_auth_method(conn, user, "password")
+
+          user.totp_enabled ->
+            login_with_mfa(conn, user, params["totp_code"], params["recovery_code"])
+
+          true ->
+            issue_session(conn, user)
         end
     end
   end
@@ -562,7 +572,15 @@ defmodule BarkparkWeb.AuthController do
   def magic_login(conn, %{"token" => token}) do
     case Accounts.consume_login_token(token) do
       {:ok, user} ->
-        issue_session(conn, user)
+        # era-bl-allowed-auth-methods: a magic link must not be the side door
+        # around an SSO-only policy. The token is already consumed (single-use
+        # is the anti-replay contract and holds regardless), so a refusal here
+        # costs the link, not the policy.
+        if BarkparkWeb.SessionIssuer.auth_method_blocked?(user, "magic_link") do
+          BarkparkWeb.SessionIssuer.deny_auth_method(conn, user, "magic_link")
+        else
+          issue_session(conn, user)
+        end
 
       :error ->
         error(

@@ -154,7 +154,8 @@ defmodule BarkparkWeb.TokenControllerTest do
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
     end
 
-    test "anonymous → 403/404 (no token)", %{conn: conn} do
+    test "anonymous → 403 not_a_member (the MEMBERSHIP gate, before the role gate)",
+         %{conn: conn} do
       resp =
         conn
         |> put_req_header("content-type", "application/json")
@@ -163,7 +164,24 @@ defmodule BarkparkWeb.TokenControllerTest do
           Jason.encode!(%{"label" => "x", "permissions" => ["public-read"]})
         )
 
-      assert resp.status in [401, 403, 404]
+      # ANONYMOUS is refused one pipeline EARLIER than the two siblings above.
+      # `:scoped_api` runs `ResolveWorkspace` BEFORE `:scoped_admin`'s
+      # `RequireToken`/`RequireWorkspaceRole`, so with no `:api_token` assign the
+      # membership `cond` falls straight to `{:error, :forbidden_membership}`
+      # (`api/lib/barkpark_web/plugs/resolve_workspace.ex`, the final `true ->`
+      # arm), which the envelope builds as 403 / code "forbidden" /
+      # reason "not_a_member" (`api/lib/barkpark/content/errors.ex`,
+      # `build({:error, :forbidden_membership})`). This caller never reaches the
+      # authorisation check at all.
+      #
+      # The STATUS ALONE does not discriminate, which is why the reason is
+      # asserted too: 403 with no `reason` is `RequireWorkspaceRole`'s plain
+      # `{:error, :forbidden}` envelope — a DIFFERENT gate answering. A 401
+      # would mean authentication ran first; a 404 would mean the route is gone.
+      assert resp.status == 403
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "forbidden"
+      assert body["error"]["reason"] == "not_a_member"
     end
   end
 

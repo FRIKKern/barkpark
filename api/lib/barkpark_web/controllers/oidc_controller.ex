@@ -75,27 +75,38 @@ defmodule BarkparkWeb.OidcController do
             # time — a governed factor-less user is refused HERE (audited),
             # never landed in Studio. Checked AFTER handle_callback's JIT so
             # a first-ever login into a require_mfa org is governed too.
-            if SessionIssuer.org_mfa_enrolment_blocked?(user) do
-              SessionIssuer.deny_org_mfa_enrolment(conn, user, "oidc", c.organization_id)
-            else
-              Sso.record_login(user, "oidc", c.organization_id)
+            # era-bl-allowed-auth-methods: the org allowed-methods policy
+            # binds at the SAME seam. OIDC is ENTERPRISE sso (bound to this
+            # org's connection), so it answers to the "sso" term. An org that
+            # narrowed its list without naming "sso" gets this door closed —
+            # without the check the allow-list was inert on exactly the door
+            # its own vocabulary invited an admin to disable.
+            cond do
+              SessionIssuer.org_mfa_enrolment_blocked?(user) ->
+                SessionIssuer.deny_org_mfa_enrolment(conn, user, "oidc", c.organization_id)
 
-              {:ok, token} =
-                Accounts.create_user_session_token(user, SessionIssuer.actor_opts(conn))
+              SessionIssuer.auth_method_blocked?(user, "sso") ->
+                SessionIssuer.deny_auth_method(conn, user, "sso", "oidc")
 
-              conn =
-                conn |> configure_session(renew: true) |> put_session("user_session", token)
+              true ->
+                Sso.record_login(user, "oidc", c.organization_id)
 
-              # studio-user-login: a browser completing the code flow
-              # (Accept: text/html) lands IN Studio on its new session cookie;
-              # non-HTML callers keep the JSON contract byte-identical.
-              if browser?(conn) do
-                redirect(conn, to: "/studio")
-              else
-                conn
-                |> put_status(:created)
-                |> json(%{ok: true, token: token, user: %{id: user.id, email: user.email}})
-              end
+                {:ok, token} =
+                  Accounts.create_user_session_token(user, SessionIssuer.actor_opts(conn))
+
+                conn =
+                  conn |> configure_session(renew: true) |> put_session("user_session", token)
+
+                # studio-user-login: a browser completing the code flow
+                # (Accept: text/html) lands IN Studio on its new session cookie;
+                # non-HTML callers keep the JSON contract byte-identical.
+                if browser?(conn) do
+                  redirect(conn, to: "/studio")
+                else
+                  conn
+                  |> put_status(:created)
+                  |> json(%{ok: true, token: token, user: %{id: user.id, email: user.email}})
+                end
             end
 
           {:error, reason} ->
