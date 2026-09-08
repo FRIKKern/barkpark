@@ -881,7 +881,14 @@
           const blocked = historyTop("undo")?.disabledReason
             ? historyTop("undo")
             : historyTop("redo")?.disabledReason ? historyTop("redo") : null;
-          status.textContent = blocked ? historyReason(blocked) : "";
+          const activeDirection = pending?.historyDirection || historyRequestPending;
+          status.textContent = blocked
+            ? historyReason(blocked)
+            : pending && mutationPaused && !mutationActive
+              ? `${pending.historyDirection === "undo" ? "Undo" : "Redo"} was not confirmed. Try again.`
+              : activeDirection
+                ? `${activeDirection === "undo" ? "Undoing" : "Redoing"}…`
+                : "";
         }
       };
 
@@ -1331,10 +1338,12 @@
         if (pending) {
           if (pending.historyDirection !== direction || mutationActive || conflict) return false;
           coordinator.retryMutation(pending);
+          renderSaveStatus();
           renderHistoryControls();
           return true;
         }
         historyRequestPending = direction;
+        renderSaveStatus();
         renderHistoryControls();
         Promise.resolve(coordinator.run(async () => {
           const step = historyTop(direction);
@@ -1363,6 +1372,7 @@
           return mutation.promise;
         })).finally(() => {
           historyRequestPending = null;
+          renderSaveStatus(false);
           renderHistoryControls();
         });
         return true;

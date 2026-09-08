@@ -55,6 +55,7 @@ const picker = el.querySelector("bp-media-picker");
 const undo = window.document.querySelector('[data-paper-history-action="undo"]');
 const redo = window.document.querySelector('[data-paper-history-action="redo"]');
 const status = window.document.querySelector("[data-paper-history-status]");
+const saveStatus = window.document.querySelector('[data-test-id="bp-paper-footer-save"]');
 const calls = [];
 const replies = [];
 const deferReply = (toTarget, name, payload) => {
@@ -124,6 +125,9 @@ try {
   await tick();
   const firstUndo = calls.at(-1);
   assert.equal(firstUndo.name, "paper-history-step");
+  assert.equal(status.textContent, "Undoing…");
+  assert.doesNotMatch(saveStatus.textContent, /auto-saved/i,
+    "pending history cannot leave the document claiming it is saved");
   assert.deepEqual(JSON.parse(JSON.stringify(firstUndo.payload)), {
     history_ref: captionSave.payload.request_id,
     action: "undo",
@@ -140,6 +144,8 @@ try {
   await tick();
   assert.equal(undo.dataset.paperHistoryState, "retry",
     "an ambiguous applied response keeps the same history action retryable");
+  assert.match(status.textContent, /not confirmed.*try again/i,
+    "an ambiguous history response announces its retry state");
   const guardedUnload = new window.Event("beforeunload", { cancelable: true });
   window.dispatchEvent(guardedUnload);
   assert.equal(guardedUnload.defaultPrevented, true,
