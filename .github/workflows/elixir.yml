@@ -993,6 +993,43 @@ jobs:
         working-directory: .
         run: bash scripts/unreachable-assert-message-check.sh
 
+      # ── comment-status-literal ratchet, riding this job ──────────────────
+      # A STEP, not a job, for exactly the reason the ratchet above records:
+      # security-gate-shape.test.sh and the *-path-escape-check.test.sh suite
+      # derive `blocking_not_in_needs` FROM this YAML and demand a new blocking
+      # job be added to the aggregator's `needs` — which then leaves their
+      # `env -i` exercises without the new R_* var and dies on `set -u`.
+      #
+      # THE DEFECT: PR #16888 tightened 32 multi-status refusal assertions and,
+      # in 20 of its explanatory comments, QUOTED the bracket literal it had
+      # just removed (`# old \`in [401, 403, 404]\` was green on…`). Those
+      # comments then answered every grep for the REMAINING work, in exactly
+      # the ten files already fixed. PR #16918 rewords them — but a cleanup
+      # only removes INSTANCES, and PR #16912 authored a FRESH one a single
+      # commit after the defect was named. This step removes the RATE.
+      #
+      # SEVERITY: searchability, not correctness. No test asserts anything
+      # different because of a comment; what is lost is the reliability of the
+      # instrument used to find the rest of a class defect.
+      #
+      # It rides mix-test because that is the blocking job that already has
+      # Elixir on PATH — the scanner reads the tokenizer's own comment list via
+      # Code.string_to_quoted_with_comments/2, so a `#` inside a heredoc or a
+      # sigil is not mistaken for a comment. It runs BEFORE deps/compile: the
+      # scanner needs neither.
+      #
+      # --selftest FIRST (distrust vacuous green). Ten arms, including one that
+      # proves a CLEAN tree passes and four that drive the REAL api/test on a
+      # scratch copy — without those, a scanner that always reports "clean"
+      # would satisfy a can-it-red test while measuring nothing.
+      - name: The comment-status-literal guard must be able to fail
+        working-directory: .
+        run: bash scripts/comment-status-literal-check.sh --selftest
+
+      - name: No NEW status literals in comments (never-worse ratchet)
+        working-directory: .
+        run: bash scripts/comment-status-literal-check.sh
+
       # ── client-ip trust-boundary ratchet, riding this job ────────────────
       # Same STEP-not-a-job reasoning as the ratchet above: adding a blocking
       # job would trip the aggregator `needs` checks in the path-escape suite.
