@@ -640,19 +640,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           {:ok, receipt, outcome} ->
             socket =
               socket
-              |> sync_paper_edit_doc()
-              |> push_canvas_echo(request_id)
-              |> push_task_previews()
-              |> push_block_renders()
+              |> reconcile_history_step(request_id, outcome)
               |> assign(save_status: "Auto-saved")
               |> assign(last_paper_save_ok?: true)
               |> assign(paper_halt: nil)
 
             {:ok, socket, receipt, outcome}
 
-          {:error, :precondition_failed} ->
-            socket = socket |> sync_paper_edit_doc() |> push_canvas_echo(request_id)
-
+          {:error, reason} when reason in [:precondition_failed, :history_conflict] ->
             {:error,
              socket
              |> assign(save_status: "Save failed", last_paper_save_ok?: false)
@@ -660,19 +655,68 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
                last_paper_save_result: %{
                  saved: false,
                  request_id: request_id,
+                 rejected: "history_conflict",
                  conflict: true,
                  current_rev: socket.assigns[:paper_rev]
                }
              )}
 
-          {:error, _reason} ->
-            {:error,
-             socket
-             |> put_flash(:error, "History step failed")
-             |> assign(save_status: "Save failed", last_paper_save_ok?: false)}
+          {:error, reason} ->
+            {:error, history_step_failed(socket, request_id, reason)}
         end
     end
   end
+
+  defp reconcile_history_step(socket, request_id, :applied) do
+    socket
+    |> sync_paper_edit_doc()
+    |> push_canvas_echo(request_id)
+    |> push_task_previews()
+    |> push_block_renders()
+  end
+
+  # The original applied request already performed every source and host
+  # effect. An exact replay returns only its stored acknowledgement.
+  defp reconcile_history_step(socket, _request_id, :replayed), do: socket
+
+  defp history_step_failed(socket, request_id, reason) do
+    rejected = history_step_rejection(reason)
+
+    socket
+    |> put_flash(:error, "History step failed")
+    |> assign(save_status: "Save failed", last_paper_save_ok?: false)
+    |> assign(
+      last_paper_save_result: %{
+        saved: false,
+        request_id: request_id,
+        rejected: rejected
+      }
+    )
+  end
+
+  defp history_step_rejection(:history_ref_consumed), do: "history_ref_consumed"
+  defp history_step_rejection(:idempotency_receipt_expired), do: "history_expired"
+
+  defp history_step_rejection(reason)
+       when reason in [
+              :idempotency_receipt_missing,
+              :idempotency_receipt_wrong_scope,
+              :idempotency_receipt_malformed,
+              :invalid_history,
+              :block_not_found
+            ],
+       do: "history_unavailable"
+
+  defp history_step_rejection(reason)
+       when reason in [
+              :invalid_history_action,
+              :invalid_paper_contextual_history_request,
+              :invalid_request_id,
+              :idempotency_payload_mismatch
+            ],
+       do: "invalid_history_request"
+
+  defp history_step_rejection(_reason), do: "history_step_failed"
 
   @doc false
   def receipt_changed?(receipt), do: Map.get(receipt, :op_count, 0) > 0

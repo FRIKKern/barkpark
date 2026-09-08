@@ -70,7 +70,7 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
               replayed: false,
               rev: forward_rev,
               history_step: %{version: 1, ref: ^forward_id, action: "undo"}
-            }, forward_socket} =
+            } = forward_reply, forward_socket} =
              StudioLive.handle_event(
                "paper-op",
                %{
@@ -82,6 +82,9 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
                },
                socket
              )
+
+    assert Enum.sort(Map.keys(forward_reply)) ==
+             [:changed, :history_step, :replayed, :request_id, :rev, :saved]
 
     assert image_src(slug) == "/after.png"
     undo_id = Ecto.UUID.generate()
@@ -100,8 +103,11 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
               replayed: false,
               rev: undo_rev,
               history_step: %{version: 1, ref: ^undo_id, action: "redo"}
-            }, undo_socket} =
+            } = undo_reply, undo_socket} =
              StudioLive.handle_event("paper-history-step", undo_params, forward_socket)
+
+    assert Enum.sort(Map.keys(undo_reply)) ==
+             [:history_step, :replayed, :request_id, :rev, :saved]
 
     assert image_src(slug) == "/before.png"
 
@@ -186,6 +192,197 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
                  "if_rev" => caption_socket.assigns.paper_rev
                },
                caption_socket
+             )
+  end
+
+  test "a source no-op follows op_count but exposes no history step", %{socket: socket} do
+    request_id = Ecto.UUID.generate()
+
+    assert {:reply,
+            %{
+              saved: true,
+              changed: true,
+              request_id: ^request_id,
+              replayed: false,
+              history_step: nil
+            }, _socket} =
+             StudioLive.handle_event(
+               "paper-op",
+               %{
+                 "op" => "patch-block",
+                 "id" => "image",
+                 "patch" => %{"src" => "/before.png"},
+                 "request_id" => request_id,
+                 "if_rev" => socket.assigns.paper_rev
+               },
+               socket
+             )
+  end
+
+  test "credential, revoked-token, and read-only refusals happen before history lookup", %{
+    socket: socket,
+    slug: slug
+  } do
+    forward_id = Ecto.UUID.generate()
+
+    assert {:reply, %{saved: true, rev: forward_rev}, forward_socket} =
+             StudioLive.handle_event(
+               "paper-op",
+               %{
+                 "op" => "patch-block",
+                 "id" => "image",
+                 "patch" => %{"src" => "/after.png"},
+                 "request_id" => forward_id,
+                 "if_rev" => socket.assigns.paper_rev
+               },
+               socket
+             )
+
+    params = %{
+      "history_ref" => forward_id,
+      "action" => "undo",
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => forward_rev
+    }
+
+    refused_sockets = [
+      Phoenix.Component.assign(forward_socket,
+        current_user: nil,
+        api_token: nil,
+        api_token_credential_present?: true
+      ),
+      Phoenix.Component.assign(forward_socket,
+        current_user: nil,
+        api_token: %{id: "revoked-token"},
+        api_token_raw: "not-a-valid-token",
+        api_token_credential_present?: true
+      ),
+      Phoenix.Component.assign(forward_socket, editor_type: "session")
+    ]
+
+    for refused <- refused_sockets do
+      assert {:reply, %{saved: false}, _socket} =
+               StudioLive.handle_event("paper-history-step", params, refused)
+
+      assert image_src(slug) == "/after.png"
+    end
+
+    assert {:reply, %{saved: true}, _socket} =
+             StudioLive.handle_event("paper-history-step", params, forward_socket)
+
+    assert image_src(slug) == "/before.png"
+  end
+
+  test "terminal failures expose only the safe rejected vocabulary", %{socket: socket} do
+    missing = %{
+      "history_ref" => Ecto.UUID.generate(),
+      "action" => "undo",
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => socket.assigns.paper_rev
+    }
+
+    assert {:reply, %{saved: false, rejected: "history_unavailable"}, _socket} =
+             StudioLive.handle_event("paper-history-step", missing, socket)
+
+    assert {:reply, %{saved: false, rejected: "invalid_history_request"}, _socket} =
+             StudioLive.handle_event(
+               "paper-history-step",
+               %{missing | "action" => "erase", "request_id" => Ecto.UUID.generate()},
+               socket
+             )
+
+    forward_id = Ecto.UUID.generate()
+
+    assert {:reply, %{saved: true, rev: forward_rev}, forward_socket} =
+             StudioLive.handle_event(
+               "paper-op",
+               %{
+                 "op" => "patch-block",
+                 "id" => "image",
+                 "patch" => %{"src" => "/after.png"},
+                 "request_id" => forward_id,
+                 "if_rev" => socket.assigns.paper_rev
+               },
+               socket
+             )
+
+    undo_id = Ecto.UUID.generate()
+
+    assert {:reply, %{saved: true, rev: undo_rev}, undo_socket} =
+             StudioLive.handle_event(
+               "paper-history-step",
+               %{
+                 "history_ref" => forward_id,
+                 "action" => "undo",
+                 "request_id" => undo_id,
+                 "if_rev" => forward_rev
+               },
+               forward_socket
+             )
+
+    assert {:reply, %{saved: false, rejected: "history_ref_consumed"}, _socket} =
+             StudioLive.handle_event(
+               "paper-history-step",
+               %{
+                 "history_ref" => forward_id,
+                 "action" => "undo",
+                 "request_id" => Ecto.UUID.generate(),
+                 "if_rev" => undo_rev
+               },
+               undo_socket
+             )
+  end
+
+  test "same-field divergence returns a correlated history conflict", %{socket: socket} do
+    forward_id = Ecto.UUID.generate()
+
+    assert {:reply, %{saved: true}, forward_socket} =
+             StudioLive.handle_event(
+               "paper-op",
+               %{
+                 "op" => "patch-block",
+                 "id" => "image",
+                 "patch" => %{"src" => "/after.png"},
+                 "request_id" => forward_id,
+                 "if_rev" => socket.assigns.paper_rev
+               },
+               socket
+             )
+
+    newer_id = Ecto.UUID.generate()
+
+    assert {:reply, %{saved: true, rev: newer_rev}, newer_socket} =
+             StudioLive.handle_event(
+               "paper-op",
+               %{
+                 "op" => "patch-block",
+                 "id" => "image",
+                 "patch" => %{"src" => "/newer.png"},
+                 "request_id" => newer_id,
+                 "if_rev" => forward_socket.assigns.paper_rev
+               },
+               forward_socket
+             )
+
+    request_id = Ecto.UUID.generate()
+
+    assert {:reply,
+            %{
+              saved: false,
+              request_id: ^request_id,
+              rejected: "history_conflict",
+              conflict: true,
+              current_rev: ^newer_rev
+            }, _socket} =
+             StudioLive.handle_event(
+               "paper-history-step",
+               %{
+                 "history_ref" => forward_id,
+                 "action" => "undo",
+                 "request_id" => request_id,
+                 "if_rev" => newer_rev
+               },
+               newer_socket
              )
   end
 
