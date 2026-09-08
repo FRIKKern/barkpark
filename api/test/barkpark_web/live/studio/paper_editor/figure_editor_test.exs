@@ -4,6 +4,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.PortableDoc.Render
+  alias Barkpark.PortableDoc.Render.Figures
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
@@ -144,10 +145,20 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
     assert LazyHTML.attribute(preview, "phx-hook") == ["BarkparkFigureImageBridge"]
     assert LazyHTML.attribute(preview, "data-block-id") == ["image-child"]
     assert LazyHTML.attribute(preview, "data-image-src") == ["/media/files/figure.jpg"]
-    assert LazyHTML.attribute(trigger, "role") == ["button"]
-    assert LazyHTML.attribute(trigger, "tabindex") == ["0"]
-    assert LazyHTML.attribute(trigger, "aria-label") == ["Replace figure image"]
+    assert LazyHTML.attribute(trigger, "type") == ["button"]
+    assert LazyHTML.attribute(trigger, "role") == []
+    assert LazyHTML.attribute(trigger, "tabindex") == []
+    assert LazyHTML.attribute(trigger, "aria-label") == ["Replace figure image: A trail map"]
     assert LazyHTML.attribute(trigger, "aria-haspopup") == ["dialog"]
+    assert LazyHTML.to_html(trigger) =~ ~s(class="bp-paper-figure-image-trigger")
+    assert LazyHTML.to_html(trigger) =~ ~s(></button>)
+    assert Enum.empty?(LazyHTML.query(trigger, "img"))
+
+    assert LazyHTML.attribute(
+             LazyHTML.query(preview, ".bp-paper-figure-image-paint"),
+             "class"
+           ) == ["bp-paper-figure-image-paint"]
+
     assert LazyHTML.attribute(picker, "open") == []
     assert html =~ ~s(data-test-id="paper-block-image-picker")
     assert html =~ ~s(data-paper-figure-image-picker)
@@ -183,9 +194,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
     assert reader_image =~ ~s(data-bp-lightboxable="true")
     assert html =~ reader_image
     assert LazyHTML.attribute(preview, "phx-hook") == []
-    assert LazyHTML.attribute(trigger, "role") == []
-    assert LazyHTML.attribute(trigger, "tabindex") == []
-    assert LazyHTML.attribute(trigger, "aria-label") == []
+    assert Enum.empty?(trigger)
     refute html =~ ~s(data-test-id="paper-figure-image-picker")
     refute html =~ ~s(data-test-id="paper-block-image-picker")
   end
@@ -210,20 +219,50 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
            ]
   end
 
-  test "a multiline caption stays escaped and authored verbatim in the growable textarea" do
+  test "a caption keeps canonical reader paint and a stable focus-revealed textarea across an ACK" do
     authored = "Figure 2. First & <line>\nSecond line"
     block = figure(paragraph("child", "Inside")) |> Map.put("caption", authored)
     html = render_component(&PaperEditor.paper_block_fields/1, block: block)
     tree = LazyHTML.from_fragment(html)
     caption = LazyHTML.query(tree, "figcaption.bp-figcaption")
+    paint = LazyHTML.query(tree, "[data-paper-figure-caption-paint]")
     textarea = LazyHTML.query(tree, "#figure-caption-figure")
 
     assert LazyHTML.attribute(caption, "data-paper-figure-caption-empty") == []
+    assert LazyHTML.attribute(paint, "type") == ["button"]
+    assert LazyHTML.attribute(paint, "aria-label") == ["Edit figure caption: " <> authored]
+    assert LazyHTML.attribute(paint, "aria-controls") == ["figure-caption-figure"]
+
+    assert LazyHTML.attribute(paint, "phx-click") == [
+             ~s([["focus",{"to":"#figure-caption-figure"}]])
+           ]
+
+    assert html =~ Figures.figcaption_inner(authored)
     assert LazyHTML.text(textarea) == authored
     refute html =~ "<line>"
     assert html =~ "&amp;"
     assert html =~ "&lt;line&gt;"
     refute html =~ ~s(data-paper-figure-caption-add)
+
+    acknowledged =
+      render_component(&PaperEditor.paper_block_fields/1,
+        block: Map.put(block, "caption", "Figure 2. Acknowledged")
+      )
+      |> LazyHTML.from_fragment()
+
+    assert LazyHTML.attribute(LazyHTML.query(acknowledged, "form"), "id") ==
+             ["figure-form-figure"]
+
+    assert LazyHTML.attribute(LazyHTML.query(acknowledged, "textarea"), "id") ==
+             ["figure-caption-figure"]
+
+    assert LazyHTML.attribute(
+             LazyHTML.query(acknowledged, "[data-paper-figure-caption-paint]"),
+             "id"
+           ) == ["figure-caption-paint-figure"]
+
+    assert LazyHTML.text(LazyHTML.query(acknowledged, "[data-paper-figure-caption-paint]")) ==
+             "Figure 2. Acknowledged"
   end
 
   test "missing, nil, scalar, and unstable children remain honest read-only previews" do

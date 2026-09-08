@@ -28,7 +28,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   alias Barkpark.Content
   alias Barkpark.Content.Papers.Template
   alias Barkpark.PortableDoc.{Projection, Render, Slots, TaskResolver}
-  alias Barkpark.PortableDoc.Render.{Compose, SectionLayout}
+  alias Barkpark.PortableDoc.Render.{Compose, Figures, SectionLayout}
   alias Barkpark.PortableDoc.Render.Components, as: RenderComponents
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
@@ -1935,16 +1935,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     data-figure-id={@id}
                     data-child-id={child["id"]}
                   >
-                    <div
-                      data-paper-figure-image-trigger={@picker_browse && "true"}
-                      role={@picker_browse && "button"}
-                      tabindex={@picker_browse && "0"}
-                      aria-label={@picker_browse && "Replace figure image"}
-                      aria-haspopup={@picker_browse && "dialog"}
-                      data-test-id="paper-figure-image-edit-trigger"
-                    >
+                    <div class="bp-paper-figure-image-paint">
                       <%= raw(figure_image_editor_html(child, @paper_links, @picker_browse)) %>
                     </div>
+                    <button
+                      :if={@picker_browse}
+                      type="button"
+                      class="bp-paper-figure-image-trigger"
+                      data-paper-figure-image-trigger
+                      aria-label={figure_image_trigger_label(child)}
+                      aria-haspopup="dialog"
+                      data-test-id="paper-figure-image-edit-trigger"
+                    ></button>
                     <details
                       :if={@picker_browse}
                       class="bp-paper-figure-image-controls"
@@ -2005,17 +2007,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <% end %>
                 <% end %>
               </div>
+              <% caption = figure_caption_value(@block) %>
               <figcaption
                 class="bp-figcaption"
-                data-paper-figure-caption-empty={figure_caption_empty?(@block) && "true"}
+                data-paper-figure-caption-empty={caption == "" && "true"}
               >
                 <button
-                  :if={figure_caption_empty?(@block)}
+                  :if={caption == ""}
                   type="button"
                   class="bp-paper-figure-caption-add"
                   phx-click={JS.focus(to: "#figure-caption-" <> @id)}
                   data-paper-figure-caption-add
                 >Add caption</button>
+                <button
+                  :if={caption != ""}
+                  id={"figure-caption-paint-" <> @id}
+                  type="button"
+                  class="bp-paper-figure-caption-paint"
+                  phx-click={JS.focus(to: "#figure-caption-" <> @id)}
+                  aria-label={"Edit figure caption: " <> caption}
+                  aria-controls={"figure-caption-" <> @id}
+                  data-paper-figure-caption-paint
+                ><%= raw(Figures.figcaption_inner(caption)) %></button>
                 <form
                   id={"figure-form-" <> @id}
                   class="bp-paper-edit-form bp-paper-figure-caption-form"
@@ -2036,7 +2049,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     aria-label="Figure caption"
                     placeholder="Add caption…"
                     phx-hook="BarkparkPaperAutoSize"
-                  ><%= Blocks.form_value(Map.get(@block, "caption")) %></textarea>
+                  ><%= caption %></textarea>
                 </form>
               </figcaption>
             </figure>
@@ -3953,8 +3966,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     end
   end
 
-  defp figure_caption_empty?(block),
-    do: Blocks.form_value(Map.get(block, "caption")) == ""
+  defp figure_image_trigger_label(child) do
+    case Map.get(child, "alt") do
+      "" -> "Replace figure image"
+      alt when is_binary(alt) -> "Replace figure image: " <> alt
+      _ -> "Replace figure image"
+    end
+  end
+
+  defp figure_caption_value(block), do: Blocks.form_value(Map.get(block, "caption"))
 
   defp figure_child_segment(%{"child" => child}, true) do
     [child]
