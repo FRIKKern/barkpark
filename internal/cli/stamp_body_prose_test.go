@@ -54,16 +54,23 @@ func TestStampProseRidesTheBodyNotTheQuery(t *testing.T) {
 		}
 	}
 
-	// criterion-text STAYS in the query, deliberately: the server reads
-	// "criterion_text"/"criterion-text" but not the camelCase "criterionText"
-	// that bodyFlagKey produces for a hyphenated name. Pinning it keeps a future
-	// "move everything" change from silently breaking the off-by-one guard —
-	// which would fail OPEN, since a missing criterion-text is a 409 the caller
-	// sees rather than a silent flip.
-	if commandFlagBelongsInBody(cmd, "criterion-text") {
-		t.Errorf("criterion-text must stay in the query until a key-preserving body "+
-			"path exists: bodyFlagKey(%q) = %q, which the server does not read",
-			"criterion-text", bodyFlagKey("criterion-text"))
+	// criterion-text rides the body TOO, but only through the key-preserving
+	// seam: the generic rule would camelCase it to "criterionText", which the
+	// server reads as no key at all.
+	if !commandFlagBelongsInBody(cmd, "criterion-text") {
+		t.Error("criterion-text must ride the BODY — it is the largest remaining " +
+			"prose on the request line after evidence and note moved")
+	}
+	if got := stampBodyKey2(cmd, "criterion-text"); got != "criterion_text" {
+		t.Errorf("stampBodyKey2(task.stamp, %q) = %q, want %q — "+
+			"stamp_criterion_text/1 reads \"criterion_text\" or \"criterion-text\", "+
+			"never the camelCase form", "criterion-text", got, "criterion_text")
+	}
+	// AND THE EXCEPTION MUST NOT LEAK. Any other command keeps the generic rule.
+	generic := manifest.Command{ID: "bulldocs.patch", Writes: true}
+	if got := stampBodyKey2(generic, "criterion-text"); got != bodyFlagKey("criterion-text") {
+		t.Errorf("the snake_case exception leaked to %s: got %q, want the generic %q",
+			generic.ID, got, bodyFlagKey("criterion-text"))
 	}
 
 	// NON-VACUITY: the helper must not simply say "body" for everything on this
@@ -141,8 +148,9 @@ func TestStampRequestShape(t *testing.T) {
 		t.Fatalf("the scalars must stay in the query: criterion=%q met=%q",
 			q.Get("criterion"), q.Get("met"))
 	}
-	if q.Get("criterion-text") == "" {
-		t.Fatal("criterion-text must stay in the query — it is the off-by-one guard")
+	if q.Get("criterion-text") != "" {
+		t.Fatal("criterion-text is still in the query — after evidence and note " +
+			"moved it is the largest prose left on the request line")
 	}
 
 	body, _, _, err := buildBody(cmd, flags, args)
@@ -152,6 +160,11 @@ func TestStampRequestShape(t *testing.T) {
 	var got map[string]any
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("body is not JSON: %v — %s", err, string(body))
+	}
+	if got["criterion_text"] != "the criterion wording" {
+		t.Fatalf("criterion-text must arrive in the body as %q, not %v — a renamed "+
+			"key is NO key to the server, and a --met without it is refused 409 "+
+			"criterion_text_required", "criterion_text", stampBodyKeys(got))
 	}
 	if got["evidence"] != longProse {
 		t.Fatalf("evidence did not arrive in the body by value; body keys = %v. "+

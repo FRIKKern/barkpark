@@ -340,8 +340,15 @@ func stampTestServerWith(t *testing.T, mode stampStoreMode, manifestJSON string,
 				idx, err := strconv.Atoi(q.Get("criterion"))
 				if err == nil {
 					mu.Lock()
+					// BOTH SPELLINGS, as stamp_criterion_text/1 does:
+					// `Map.get(params, "criterion_text") || Map.get(params, "criterion-text")`.
+					// A fake that reads only one is again weaker than production.
+					ctext := q.Get("criterion_text")
+					if ctext == "" {
+						ctext = q.Get("criterion-text")
+					}
 					row := map[string]any{
-						"criterion": q.Get("criterion-text"),
+						"criterion": ctext,
 						"met":       q.Get("met") == "true",
 						"evidence":  q.Get("evidence"),
 					}

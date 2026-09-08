@@ -1777,7 +1777,11 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 			continue
 		}
 		if values := flags[f.Name]; len(values) > 0 {
-			obj[bodyFlagKey(f.Name)] = values[len(values)-1]
+			// stampBodyKey is bodyFlagKey for every command but task.stamp,
+			// whose `criterion-text` needs the snake_case spelling the server
+			// reads. Routed through one helper so the exception cannot be
+			// applied in one call site and forgotten in another.
+			obj[stampBodyKey2(cmd, f.Name)] = values[len(values)-1]
 		}
 	}
 	// --set fields target: nested under SetKey (e.g. patch's `set`) or, by
@@ -2059,14 +2063,20 @@ func commandFlagBelongsInBody(cmd manifest.Command, name string) bool {
 	// working against a NEW server and vice versa. The query path is retained for
 	// compatibility, NOT because it is correct.
 	//
-	// `criterion-text` deliberately STAYS in the query: the server accepts
-	// "criterion_text" and "criterion-text" but not the camelCase "criterionText"
-	// that bodyFlagKey would produce for a hyphenated name. It is bounded by the
-	// criterion's own length (~1.5 KB worst case observed), so the remaining URI
-	// is nowhere near the wall. Moving it needs a key-preserving body path first.
+	// `criterion-text` RIDES THE BODY TOO, under the snake_case key the server
+	// reads. The generic bodyFlagKey would camelCase it to "criterionText", which
+	// TasksController reads as NO key at all - so stampBodyKey maps it to
+	// "criterion_text", one of the two spellings stamp_criterion_text/1 accepts
+	// (`Map.get(params, "criterion_text") || Map.get(params, "criterion-text")`).
+	//
+	// It matters because it is the OFF-BY-ONE GUARD: a --met carrying no
+	// criterion-text is refused 409 criterion_text_required. So a silent key
+	// rename here fails CLOSED rather than flipping a neighbouring criterion -
+	// but it would still be a refusal nobody could diagnose, which is why the
+	// key is pinned by a test rather than trusted.
 	if cmd.ID == "task.stamp" {
 		switch name {
-		case "evidence", "note":
+		case "evidence", "note", "criterion-text":
 			return true
 		}
 	}
@@ -2090,6 +2100,28 @@ func commandHasSetBodyFlags(cmd manifest.Command, flags map[string][]string) boo
 // reads for it (`if-rev` → `ifRev`). Names without a hyphen — cycle.open's
 // snake_case *_json contract flags, single-word flags — pass through unchanged,
 // so the server-side spelling is preserved exactly.
+// stampBodyKey is bodyFlagKey for task.stamp, where one flag needs a spelling
+// the generic camelCase rule would destroy. `criterion-text` must arrive as
+// "criterion_text": the server reads that or the hyphenated form, never
+// "criterionText". Kept as a named seam rather than an if buried inside
+// bodyFlagKey so the exception is visible from either function.
+func stampBodyKey(name string) string {
+	if name == "criterion-text" {
+		return "criterion_text"
+	}
+	return bodyFlagKey(name)
+}
+
+// stampBodyKey2 applies that exception ONLY to task.stamp. Every other command
+// keeps the generic camelCase rule, so this cannot silently change a body key
+// on some unrelated verb that happens to declare a hyphenated flag.
+func stampBodyKey2(cmd manifest.Command, name string) string {
+	if cmd.ID == "task.stamp" {
+		return stampBodyKey(name)
+	}
+	return bodyFlagKey(name)
+}
+
 func bodyFlagKey(name string) string {
 	if !strings.Contains(name, "-") {
 		return name
