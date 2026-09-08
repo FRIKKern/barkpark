@@ -184,6 +184,10 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
       rendered = editor_html(open_editor(view))
 
+      # Shared Paper history is available on the per-block opt-out path too;
+      # its controls belong in this baseline, without enabling the canvas.
+      assert rendered =~ ~s(aria-label="Image and caption history")
+
       if File.exists?(@snapshot_path) do
         # The snapshot is a text file; its final newline is not part of the DOM.
         baseline = @snapshot_path |> File.read!() |> String.trim_trailing("\n")

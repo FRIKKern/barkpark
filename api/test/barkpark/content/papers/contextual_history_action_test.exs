@@ -4,6 +4,7 @@ defmodule Barkpark.Content.Papers.ContextualHistoryActionTest do
   alias Barkpark.Content
   alias Barkpark.Repo
   alias Barkpark.Repo.IdempotencyStore
+  alias Barkpark.Tenancy
   alias Barkpark.TenancyFixtures
 
   @dataset "production"
@@ -41,6 +42,56 @@ defmodule Barkpark.Content.Papers.ContextualHistoryActionTest do
     refute Map.has_key?(figure(current(slug)), "caption")
     assert {:ok, _, :applied} = action(slug, undo_id, "redo")
     assert Map.fetch!(figure(current(slug)), "caption") === ""
+  end
+
+  test "a block form receipt authorizes an undo and redo chain without replacing source metadata" do
+    {slug, original} = seed!()
+    history_ref = Ecto.UUID.generate()
+    undo_id = Ecto.UUID.generate()
+
+    resolver = fn _blocks ->
+      {:ok,
+       [
+         %{
+           "op" => "patch-block",
+           "id" => "figure",
+           "patch" => %{"caption" => "Form caption"}
+         }
+       ]}
+    end
+
+    assert {:ok, forward, :applied} =
+             Content.apply_paper_block_form_once(
+               slug,
+               "figure_caption_form:v1",
+               %{"block_id" => "figure", "caption" => "Form caption"},
+               @dataset,
+               history_ref,
+               @principal,
+               resolver,
+               if_rev: original.content["rev"] || 0,
+               contextual_history: true
+             )
+
+    predecessor = row!(original, history_ref)
+    assert String.starts_with?(predecessor.scope, "paper_block_form:v1:")
+
+    assert Jason.decode!(predecessor.response_body)["contextual_history"] ==
+             forward.contextual_history
+
+    assert figure(current(slug))["caption"] == "Form caption"
+    assert image(current(slug)) === image(original)
+
+    assert {:ok, undo, :applied} = action(slug, history_ref, "undo", undo_id)
+    refute Map.has_key?(figure(current(slug)), "caption")
+    assert image(current(slug)) === image(original)
+    assert row!(original, history_ref).response_body === predecessor.response_body
+
+    assert {:ok, redo, :applied} = action(slug, undo_id, "redo")
+    assert figure(current(slug))["caption"] == "Form caption"
+    assert image(current(slug)) === image(original)
+    assert redo.contextual_history["action"] == "undo"
+    assert undo.contextual_history["action"] == "redo"
   end
 
   test "an unrelated edit survives a history step at the fresh revision" do
@@ -221,6 +272,74 @@ defmodule Barkpark.Content.Papers.ContextualHistoryActionTest do
     assert Repo.aggregate(IdempotencyStore.Key, :count) == before_rows
   end
 
+  test "a committed doc id and type rename after prefetch rejects history on the same row" do
+    Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+      workspace = TenancyFixtures.create_workspace!()
+      project = TenancyFixtures.create_project!(workspace)
+      {slug, paper} = seed!(nil, workspace_id: workspace.id, project_id: project.id)
+      history_ref = Ecto.UUID.generate()
+      request_id = Ecto.UUID.generate()
+      renamed_doc_id = "renamed-#{slug}"
+      renamed_type = "session"
+      scope_opts = [workspace_id: workspace.id, project_id: project.id]
+
+      owned_hashes = [
+        paper_key_hash(paper, history_ref),
+        paper_key_hash(paper, request_id),
+        history_consumption_hash(paper, history_ref)
+      ]
+
+      try do
+        assert {:ok, forward, :applied} =
+                 Content.apply_paper_block_ops_once(
+                   slug,
+                   [
+                     %{
+                       "op" => "patch-block",
+                       "id" => "image",
+                       "patch" => %{"src" => "/after.png"}
+                     }
+                   ],
+                   @dataset,
+                   history_ref,
+                   @principal,
+                   scope_opts ++
+                     [if_rev: paper.content["rev"] || 0, contextual_history: true]
+                 )
+
+        changed_content = Repo.get!(Barkpark.Content.Document, paper.id).content
+
+        opts =
+          scope_opts ++
+            [
+              if_rev: forward.rev,
+              after_idempotency_claim: fn ->
+                Task.async(fn ->
+                  Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+                    Repo.get!(Barkpark.Content.Document, paper.id)
+                    |> Ecto.Changeset.change(doc_id: renamed_doc_id, type: renamed_type)
+                    |> Repo.update!()
+                  end)
+                end)
+                |> Task.await(5_000)
+              end
+            ]
+
+        assert {:error, :not_found} = action(slug, history_ref, "undo", request_id, opts)
+
+        stored = Repo.get!(Barkpark.Content.Document, paper.id)
+        assert stored.doc_id == renamed_doc_id
+        assert stored.type == renamed_type
+        assert stored.content === changed_content
+        refute Repo.get(IdempotencyStore.Key, paper_key_hash(paper, request_id))
+        refute Repo.get(IdempotencyStore.Key, history_consumption_hash(paper, history_ref))
+      after
+        Repo.delete_all(from(k in IdempotencyStore.Key, where: k.key_hash in ^owned_hashes))
+        assert {:ok, _workspace} = Tenancy.delete_workspace(workspace)
+      end
+    end)
+  end
+
   test "history cannot mint a positional identity to target an id-less replacement" do
     {slug, paper} = seed!()
 
@@ -338,14 +457,40 @@ defmodule Barkpark.Content.Papers.ContextualHistoryActionTest do
   defp image(paper), do: figure(paper)["child"]
 
   defp row!(paper, ref) do
-    hash =
-      {"paper_ops:v1", paper.id, paper.workspace_id, paper.project_id, paper.dataset_id,
-       paper.dataset, @principal, ref}
-      |> :erlang.term_to_binary([:deterministic])
-      |> then(&:crypto.hash(:sha256, &1))
-      |> Base.encode16(case: :lower)
+    Repo.get!(IdempotencyStore.Key, paper_key_hash(paper, ref))
+  end
 
-    Repo.get!(IdempotencyStore.Key, hash)
+  defp paper_key_hash(paper, request_id) do
+    deterministic_hash({
+      "paper_ops:v1",
+      paper.id,
+      paper.workspace_id,
+      paper.project_id,
+      paper.dataset_id,
+      paper.dataset,
+      @principal,
+      request_id
+    })
+  end
+
+  defp history_consumption_hash(paper, history_ref) do
+    deterministic_hash({
+      "paper_contextual_history_consumption:v1",
+      paper.id,
+      paper.workspace_id,
+      paper.project_id,
+      paper.dataset_id,
+      paper.dataset,
+      @principal,
+      history_ref
+    })
+  end
+
+  defp deterministic_hash(term) do
+    term
+    |> :erlang.term_to_binary([:deterministic])
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
   end
 
   defp seed!(slug \\ nil, scope_attrs \\ []) do

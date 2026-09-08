@@ -777,11 +777,8 @@ defmodule BarkparkWeb.BulldocsLive do
       case Edit.apply_ops(socket, ops, request_id, is_map(params) && params["if_rev"], context) do
         {:ok, socket, receipt, outcome} ->
           {:reply,
-           %{
-             saved: true,
-             request_id: request_id,
-             replayed: outcome == :replayed,
-             rev: receipt.rev,
+           Edit.receipt_result(receipt, request_id, outcome)
+           |> Map.merge(%{
              retained_leases:
                BarkparkWeb.Studio.StudioLive.Shared.Paper.canvas_reply_leases(
                  socket,
@@ -789,13 +786,18 @@ defmodule BarkparkWeb.BulldocsLive do
                  ops
                ),
              retained_lease_overflow: BarkparkWeb.PaperCanvasLease.blocked?(socket)
-           }, socket}
+           }), socket}
 
         {:error, socket} ->
           reply = socket.assigns[:last_save_result] || %{saved: false, request_id: request_id}
           {:reply, Map.put_new(reply, :request_id, request_id), socket}
       end
     end
+  end
+
+  def handle_event("paper-history-step", params, socket) do
+    socket = Edit.apply_history_step(socket, params)
+    {:reply, socket.assigns[:last_save_result] || %{saved: false}, socket}
   end
 
   def handle_event("paper-edit-block", params, socket),

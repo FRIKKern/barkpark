@@ -885,11 +885,14 @@
       letter-spacing: 0.02em;
       color: var(--paper-ink-faint);
       display: flex;
+      flex-wrap: wrap;
       gap: 8px;
       align-items: baseline;
     }
     .bp-paper-footer-sep { opacity: 0.5; }
     .bp-paper-footer-save { margin-left: auto; color: var(--paper-ink-soft); }
+    .bp-paper-history-controls { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    [data-paper-history-status] { color: var(--paper-ink-soft); }
     /* Restore the surface's old-style hanging figures in the editable text.
        The bundled ProseMirror base CSS kills ligatures + onum with
        `font-variant-ligatures: none` / `font-feature-settings: "liga" 0`;
@@ -1941,18 +1944,25 @@ textarea.bp-paper-figure-caption-input:focus-visible {
 .bp-paper-contextual-panel .bp-paper-edit-actions {
   flex-direction: row; flex-wrap: wrap; gap: 0.4rem;
 }
-.bp-paper-contextual-panel button {
+.bp-paper-contextual-panel button,
+.bp-paper-history-controls button {
   min-height: 2rem; padding: 0.35rem 0.65rem;
   font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.8125rem;
   line-height: 1.3; color: var(--paper-ink-soft); background: transparent;
   border: 1px solid var(--paper-rule); border-radius: 4px; cursor: pointer;
 }
-.bp-paper-contextual-panel button:hover:not(:disabled) {
+.bp-paper-contextual-panel button:hover:not(:disabled),
+.bp-paper-history-controls button:hover:not(:disabled) {
   color: var(--paper-ink); background: var(--paper-accent-soft);
 }
-.bp-paper-contextual-panel button:disabled { opacity: 0.45; cursor: default; }
-.bp-paper-contextual-panel :is(summary, button, input, textarea, select):focus-visible {
+.bp-paper-contextual-panel button:disabled,
+.bp-paper-history-controls button:disabled { opacity: 0.45; cursor: default; }
+.bp-paper-contextual-panel :is(summary, button, input, textarea, select):focus-visible,
+.bp-paper-history-controls button:focus-visible {
   outline: 2px solid var(--paper-accent); outline-offset: 2px;
+}
+@media (max-width: 600px), (pointer: coarse) {
+  .bp-paper-history-controls button { min-width: 44px; min-height: 44px; }
 }
 @media (hover: none) {
   .bp-paper-contextual-editor > .bp-paper-contextual-controls {
