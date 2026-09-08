@@ -46,15 +46,17 @@ const source = {
   },
 };
 
-function mount() {
+function mount(level = 3) {
   const host = document.createElement("bp-paper-canvas");
-  host.blocks = [structuredClone(source)];
+  const original = structuredClone(source);
+  original.slots.title[0].level = level;
+  host.blocks = [original];
   const batches = [];
   host.addEventListener("bp-canvas-ops", event => batches.push(event.detail.ops));
   document.body.appendChild(host);
   const title = host.querySelector('[data-test-id="paper-card-title"]');
   assert.ok(title);
-  return { host, title, batches };
+  return { host, title, batches, original };
 }
 
 function input(title, value) {
@@ -149,6 +151,33 @@ try {
     assert.equal(composing.batches[0][0].patch.slots.title[0].text, "日本語");
   } finally {
     composing.host.remove();
+  }
+
+  for (const [level, expectedTag] of [
+    [1, "H1"],
+    ["2", "H2"],
+    ["3", "H3"],
+    [4, "H2"],
+    [null, "H2"],
+    ["junk", "H2"],
+  ]) {
+    const clamped = mount(level);
+    try {
+      assert.equal(
+        clamped.title.parentElement.tagName,
+        expectedTag,
+        `authored level ${String(level)} follows the reader's 1..3 clamp`,
+      );
+      input(clamped.title, "Clamped title edit");
+      clamped.host.flushPendingChanges();
+      assert.equal(
+        clamped.batches[0][0].patch.slots.title[0].level,
+        level,
+        "render-time level normalization never rewrites authoritative source",
+      );
+    } finally {
+      clamped.host.remove();
+    }
   }
 
   const keyboard = mount();

@@ -134,7 +134,10 @@ function jsonAttr(attrKey, dataName) {
 function cardTitleLevel(node) {
   const title = node?.attrs?.bpBlock?.slots?.title;
   const level = Array.isArray(title) && title.length === 1 ? title[0]?.level : null;
-  return Number.isInteger(level) && level >= 1 && level <= 6 ? level : 2;
+  if (level === 1 || level === "1") return 1;
+  if (level === 2 || level === "2") return 2;
+  if (level === 3 || level === "3") return 3;
+  return 2;
 }
 
 export const Card = Node.create({
