@@ -19,7 +19,7 @@ it on your laptop or server, or pay someone to operate it for you.
 | Studio | Browse, edit, and publish content in your browser. |
 | Terminal UI | Work with content from your keyboard; open it by running `bp`. |
 | `bp` CLI | Read and change content from scripts or an agent's tools. |
-| REST API | Connect your own applications and integrations. |
+| AI agents | Operate Barkpark through the CLI, API, or MCP. |
 
 ## What this makes possible
 
@@ -117,9 +117,9 @@ The [CLI handbook](docs/cli/HANDBOOK.md) covers updates, queries, and publishing
 
 ## Working with agents
 
-The goal is full control through CLI, TUI, GUI, or AI, including setup and access
-management. An agent should be able to do the work end to end. People should be
-able to read the data, inspect changes, and take over at any point.
+Full control through CLI, TUI, GUI, or AI is the goal, including setup and access
+management. Today, you can revoke workspace tokens, inspect document revisions,
+and read task evidence to follow an agent's work.
 
 `bp capabilities -o json` lists commands available to the caller. Generate Codex
 setup instructions with:
@@ -169,8 +169,8 @@ and transfer content explicitly.
 
 ## How it works
 
-Schemas describe content types. The server exposes commands through
-`GET /v1/capabilities`; clients discover what the caller is allowed to use.
+The REST API connects your applications. `GET /v1/capabilities` describes the
+commands available to the caller.
 Plugins add schemas, routes, jobs, and commands, and the core runs with all
 plugins disabled.
 
