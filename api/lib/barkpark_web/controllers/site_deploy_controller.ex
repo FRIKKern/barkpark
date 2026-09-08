@@ -452,15 +452,33 @@ defmodule BarkparkWeb.SiteDeployController do
   # build printed is on the box in the clear. `DeployRunner.build_record/2`
   # refuses the bytes for exactly that reason.
   #
-  # CORRECTED 2026-09-08 (task-04e89e88f056aa38). This used to rest the refusal
-  # on "the measured leak rate of the shared scrubber against this box's own
-  # `bppat_` token shape is 95.1%". Both defects that claim described have
-  # LANDED, and the figure matched neither of them. DERIVATION, re-read on main
-  # on 2026-09-08 in `cloud/lib/barkpark_cloud/failure_copy.ex`: shape-blindness
-  # measures 94.3% there and is closed (`@secret_patterns` now carries
-  # `bppat_`/`bpcs_`/`bp_<kind>_`); ordering measures 2000/2000 = 100% there and
-  # is closed (`raw/1` = `strip_ansi |> scrub`, test-pinned). Neither is 95.1%.
-  # WHAT IS NOT REFUTED IS THE REFUSAL: both landed scrubbers are
+  # CORRECTED 2026-09-08 (task-04e89e88f056aa38), then CORRECTED AGAIN the same
+  # day. The whole sequence is kept deliberately, so the next reader sees it:
+  # (1) this comment ORIGINALLY rested the refusal on "the measured leak rate of
+  # the shared scrubber against this box's own `bppat_` token shape is 95.1%";
+  # (2) THE FIRST CORRECTION replaced that with "the figure matched neither of
+  # them … Neither is 95.1%" — which is FALSE, and it shipped; (3) this is the
+  # repair.
+  #
+  # 95.1% IS REAL. `.claude/workflows/bp-deploy-reliability-charter.md`,
+  # decision D29, quoting its own derivation: 2,000 tokens minted with the
+  # production expression (the charter cites the mint site as `auth.ex:502`),
+  # `BARKPARK_TOKEN=<tok>` leaks 1902/2000 = 95.1% through
+  # `FailureCopy.scrub/1`. That is PER-SHAPE. The 94.3% in
+  # `cloud/lib/barkpark_cloud/failure_copy.ex` is the AGGREGATE — "a real token
+  # measured 94.3% LEAKED through `scrub/1` in four of six shapes". Different
+  # scopes, both real; neither refutes the other, and treating them as rivals is
+  # what produced the false correction.
+  #
+  # WHAT HAS CHANGED is that 95.1% is HISTORICAL, not live: the defect it
+  # measured is CLOSED. Re-read on main on 2026-09-08 in that same file —
+  # shape-blindness is closed (`@secret_patterns` now carries
+  # `bppat_`/`bpcs_`/`bp_<kind>_`) and ordering is closed (`raw/1` =
+  # `strip_ansi |> scrub`, test-pinned). A closed defect cannot carry a refusal,
+  # which is the only reason the figure is no longer the ground here.
+  #
+  # WHAT IS NOT REFUTED IS THE REFUSAL, and its ground is stated above: nothing
+  # scrubs the RECORDED LOG BYTES AT WRITE. Both landed scrubbers are
   # DISPLAY-BOUNDARY, so a clean render says nothing about the bytes this
   # endpoint would hand out. So this ships the STRUCTURED record — which is
   # strictly more diagnostic than the one-line failure_reason and carries no
