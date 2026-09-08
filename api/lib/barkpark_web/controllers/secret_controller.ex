@@ -57,7 +57,9 @@ defmodule BarkparkWeb.SecretController do
   #     prefix of the page it asked for, and the walk still terminates.
   #   * Clamping `offset` is NOT safe, and not merely because "a security read
   #     should not silently serve a different page". It breaks TERMINATION. The
-  #     documented way to walk this log is to page forward until a page comes
+  #     way to walk this log — documented in `audit/2`'s own @doc, in this same
+  #     change, precisely so this sentence cites something real rather than a
+  #     convention nobody wrote down — is to page forward until a page comes
   #     back empty. Under a silent ceiling, every offset at or above the cap
   #     returns the SAME non-empty page, so that loop never ends and the caller
   #     re-reads rows it has already seen — an auditor walking a secret's trail
@@ -134,6 +136,21 @@ defmodule BarkparkWeb.SecretController do
   1..#{@max_audit_limit}; `offset` is floored at 0 but an offset above
   `@max_audit_offset` is a 400, not a silent clamp — see the attribute's own
   comment for why the two ends are treated differently.
+
+  HOW TO WALK THE WHOLE TRAIL, stated here because the refusal above depends on
+  it and a justification that cites an undocumented convention is not a
+  justification: this response carries no total and no continuation token, so a
+  caller reads the trail by paging forward — `?offset=` advanced by `?limit=`
+  each time — UNTIL A PAGE COMES BACK EMPTY. That empty page is the only
+  termination signal there is. It is why an over-large `offset` refuses instead
+  of clamping: a clamp would answer every offset at or above the ceiling with
+  the SAME non-empty page, the empty page would never arrive, and a caller
+  walking to exhaustion would loop on one window while believing it had read
+  everything. (The failure needs a trail longer than #{@max_audit_offset} rows
+  for one name in one tier; a shorter trail returns an empty page at the
+  ceiling and terminates correctly either way. Rare is not the same as
+  acceptable on a security read, and an auditor is exactly the caller who
+  eventually has a trail that long.)
 
   Tenant-walled through the same `resolve_scope/1` D199 guard as every other
   verb: the flat route reads the GLOBAL tier (`workspace_id IS NULL`), the
