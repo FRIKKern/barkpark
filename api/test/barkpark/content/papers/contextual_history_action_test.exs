@@ -93,7 +93,6 @@ defmodule Barkpark.Content.Papers.ContextualHistoryActionTest do
     assert redo.contextual_history["action"] == "undo"
     assert undo.contextual_history["action"] == "redo"
   end
-
   test "an unrelated edit survives a history step at the fresh revision" do
     {slug, _} = seed!()
     {ref, _} = change!(slug, "image", "src", "/after.png")
@@ -339,7 +338,6 @@ defmodule Barkpark.Content.Papers.ContextualHistoryActionTest do
       end
     end)
   end
-
   test "history cannot mint a positional identity to target an id-less replacement" do
     {slug, paper} = seed!()
 
