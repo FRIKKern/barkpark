@@ -21,10 +21,8 @@ assert.match(shell, /\[data-paper-section-title-empty="true"\]:not\(:focus-withi
   "an absent or empty title stays zero-flow until focused");
 assert.match(shell, /\.bp-paper-section-title-editor:has\(\.bp-paper-section-title-form:focus-within\)[^{]*> \.bp-paper-section-title-paint\s*\{[^}]*display:\s*none/s,
   "the reader paint gives way to the same canonical input on focus");
-assert.match(shell, /input\.bp-paper-edit-text\.bp-paper-section-title-input\s*\{[^}]*field-sizing:\s*content[^}]*font:\s*inherit/s,
-  "the focused input inherits reader typography without a fixed control width");
-assert.match(shell, /\.bp-paper-edit-block\[data-block-type="section"\][^{]*input\.bp-paper-edit-text\.bp-paper-section-title-input\s*\{[^}]*font-weight:\s*inherit[^}]*text-align:\s*inherit/s,
-  "the canonical input overrides the legacy centered configuration-field styling");
+assert.match(shell, /textarea\.bp-paper-inline-text\.bp-paper-section-title-input\s*\{[^}]*width:\s*100%[^}]*font:\s*inherit[^}]*resize:\s*none[^}]*overflow:\s*hidden[^}]*overflow-wrap:\s*anywhere/s,
+  "the autosized title wraps at the reader width without native textarea chrome");
 
 const dom = new JSDOM(`<!doctype html><body>
   <main data-paper-doc-key="production:paper:section-title" data-paper-rev="7">
@@ -35,17 +33,18 @@ const dom = new JSDOM(`<!doctype html><body>
              data-paper-section-title-editor style="font-weight:bold">
           <button type="button" class="bp-paper-section-title-paint"
                   data-paper-section-title-paint aria-controls="section-title-section"
-                  aria-label="Edit section title:   Existing title  ">  Existing title  </button>
+                  aria-label="Edit section title: A long Section title keeps every line in the same place while I edit the words directly beside the nested content">A long Section title keeps every line in the same place while I edit the words directly beside the nested content</button>
           <form id="section-form-section" name="section-config"
                 class="bp-paper-edit-form bp-paper-section-title-form"
                 phx-submit="paper-edit-block" phx-change="paper-block-autosave"
                 phx-debounce="500" data-test-id="paper-section-config-editor">
             <input type="hidden" name="block_id" value="section">
             <label class="sr-only" for="section-title-section">Section title</label>
-            <input id="section-title-section" type="text" name="title"
-                   class="bp-paper-edit-text bp-paper-section-title-input"
-                   aria-label="Section title" placeholder="Section title"
-                   value="  Existing title  " data-test-id="paper-field-title">
+            <textarea id="section-title-section" name="title" rows="1"
+                      class="bp-paper-inline-text bp-paper-section-title-input"
+                      aria-label="Section title" placeholder="Section title"
+                      phx-hook="BarkparkPaperAutoSize"
+                      data-test-id="paper-field-title">A long Section title keeps every line in the same place while I edit the words directly beside the nested content</textarea>
           </form>
         </div>
         <div id="nested-child" phx-hook="BarkparkPaperCanvas" tabindex="-1">Nested draft</div>
@@ -80,6 +79,19 @@ const form = window.document.getElementById("section-form-section");
 const paint = window.document.querySelector("[data-paper-section-title-paint]");
 const fallback = window.document.querySelector("[data-paper-section-title-panel-trigger]");
 const nested = window.document.getElementById("nested-child");
+assert.equal(input.tagName, "TEXTAREA");
+assert.equal(input.rows, 1);
+assert.equal(input.getAttribute("phx-hook"), "BarkparkPaperAutoSize");
+let measuredTitleHeight = 86;
+Object.defineProperty(input, "scrollHeight", { get: () => measuredTitleHeight });
+input.style.cssText = "line-height:28.789px;padding:0;border:0";
+const sizing = {
+  ...window.BarkparkPaperEditorHooks.BarkparkPaperAutoSize,
+  el: input,
+};
+sizing.mounted();
+assert.equal(input.style.height, "86.367px",
+  "the canonical field opens at the wrapped reader title's three-line height");
 for (const trigger of [paint, fallback]) {
   assert.equal(trigger.tagName, "BUTTON");
   assert.equal(trigger.type, "button");
@@ -121,7 +133,7 @@ input.blur();
 hook.el.click();
 await tick();
 assert.equal(calls.length, 0,
-  "focus-only entry preserves an authored whitespace title without a save");
+  "focus-only entry preserves the wrapped authored title without a save");
 assert.deepEqual(toggles, ["paper-toggle-edit"]);
 toggles.length = 0;
 
@@ -141,6 +153,7 @@ const firstChildSave = hook._bpPaperExitCoordinator.mutate(nested, {
 activeChildSave = firstChildSave;
 input.focus();
 input.value = "  Revised title  ";
+measuredTitleHeight = 29;
 input.setSelectionRange(4, 11);
 input.dispatchEvent(new window.InputEvent("input", {
   bubbles: true, inputType: "insertText", data: "Revised",
@@ -183,7 +196,8 @@ assert.deepEqual([input.selectionStart, input.selectionEnd], [4, 11],
 assert.equal(secondChildPayload.if_rev, 9,
   "the next nested mutation uses the acknowledged title revision");
 
-input.value = "  Existing title  ";
+input.value = "A long Section title keeps every line in the same place while I edit the words directly beside the nested content";
+measuredTitleHeight = 58;
 input.dispatchEvent(new window.InputEvent("input", {
   bubbles: true, inputType: "historyUndo", data: null,
 }));
@@ -195,7 +209,8 @@ activeChildSave = null;
 await new Promise((resolve) => setTimeout(resolve, 510));
 assert.equal(calls.length, 2);
 assert.equal(calls[1].payload.if_rev, 10);
-assert.equal(calls[1].payload.title, "  Existing title  ",
+assert.equal(calls[1].payload.title,
+  "A long Section title keeps every line in the same place while I edit the words directly beside the nested content",
   "a native historyUndo input remains a normal exact scalar save after acknowledgement");
 assert.deepEqual(toggles, [], "View remains fenced through the queued native undo");
 settleForm({ saved: true, request_id: calls[1].payload.request_id, rev: 11 });
@@ -208,5 +223,6 @@ assert.equal(cleanExit.defaultPrevented, false);
 assert.equal(hook._bpPaperExitCoordinator.hasUnsaved(), false);
 
 hook.destroyed();
+sizing.destroyed();
 dom.window.close();
 console.log("PASS Section title: one scalar field, exact FIFO, native undo, and clean View drain");

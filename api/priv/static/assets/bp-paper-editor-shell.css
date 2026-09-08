@@ -1803,15 +1803,13 @@ textarea.bp-paper-figure-caption-input:focus-visible {
   > .bp-paper-section-title-paint {
   display: none;
 }
-input.bp-paper-edit-text.bp-paper-section-title-input {
-  display: block; field-sizing: content; min-width: 1ch; max-width: 100%;
+textarea.bp-paper-inline-text.bp-paper-section-title-input {
+  display: block; width: 100%; min-width: 0; max-width: 100%;
   box-sizing: border-box; margin: 0; padding: 0;
   border: 0; border-radius: 0; background: transparent;
   color: inherit; font: inherit; font-weight: inherit; text-align: inherit;
-}
-.bp-paper-edit-block[data-block-type="section"]
-  input.bp-paper-edit-text.bp-paper-section-title-input {
-  font-weight: inherit; text-align: inherit;
+  letter-spacing: inherit; resize: none; overflow: hidden;
+  overflow-wrap: anywhere;
 }
 [data-paper-section-title-empty="true"]:not(:focus-within) {
   height: 0; margin-block: 0;
