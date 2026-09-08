@@ -126,6 +126,36 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
            |> Enum.count() == 1
   end
 
+  test "paper-links numeric header fields use edit fallback labels without changing source" do
+    block = %{
+      "id" => "numeric-related",
+      "type" => "paper-links",
+      "title" => 42,
+      "description" => 7,
+      "refs" => ["next"]
+    }
+
+    original = block
+    html = render_component(&PaperEditor.paper_block_fields/1, %{block: block, paper_links: %{}})
+    fragment = LazyHTML.from_fragment(html)
+
+    assert fragment
+           |> LazyHTML.query(~s([data-paper-links-title-panel-trigger]))
+           |> LazyHTML.text() == "Edit heading"
+
+    assert fragment
+           |> LazyHTML.query(~s([data-paper-links-description-panel-trigger]))
+           |> LazyHTML.text() == "Edit description"
+
+    assert fragment |> LazyHTML.query(~s(textarea[name="title"])) |> LazyHTML.text() == "42"
+
+    assert fragment
+           |> LazyHTML.query(~s(textarea[name="description"]))
+           |> LazyHTML.text() == "7"
+
+    assert block === original
+  end
+
   test "bar-chart keeps the canonical chart visible while row controls start closed" do
     block = %{
       "id" => "velocity",

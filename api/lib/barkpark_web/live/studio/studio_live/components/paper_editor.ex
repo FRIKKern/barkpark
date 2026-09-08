@@ -554,20 +554,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           :if={@canvas_eligible and @doc_type == "paper"}
           class="bp-paper-history-controls"
           role="group"
-          aria-label="Image and caption history"
+          aria-label="Content change history"
         >
           <button
             type="button"
             class="btn btn-ghost btn-sm"
             data-paper-history-action="undo"
-            aria-label="Undo image or caption change"
+            aria-label="Undo content change"
             disabled
           >Undo</button>
           <button
             type="button"
             class="btn btn-ghost btn-sm"
             data-paper-history-action="redo"
-            aria-label="Redo image or caption change"
+            aria-label="Redo content change"
             disabled
           >Redo</button>
           <span data-paper-history-status role="status" aria-live="polite"></span>
@@ -1688,6 +1688,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp paper_links_field_absent?(block, field) do
     case Map.get(block, field) do
       value when is_binary(value) -> String.trim(value) == ""
+      value when is_integer(value) -> false
       _value -> true
     end
   end
