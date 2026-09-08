@@ -47,6 +47,27 @@ Installed by `deploy/site-runtime-install.sh`, which is streamed to the box as *
 
 `barkpark-rotate-public-token.timer` — weekly Monday 03:00 (server local time; assumes UTC host), 600 s random jitter, `Persistent=true`.
 
+## Failure handling — `barkpark-unit-failure-alert@`
+
+Both scheduled units carry `OnFailure=barkpark-unit-failure-alert@%n.service`. **On the `.service`, never the `.timer`**: a timer's `OnFailure=` fires only if the *timer* fails to activate — the job's failure lands on the service it triggered, so a timer-side handler is installed, looks right, and is silent for exactly these failures. One `@`-template serves both (same convention as `barkpark-slot@` / `barkpark-site@`); `%n` passes the failing unit's name in as `%i`. Neither guarded unit sets `Restart=`, so its first non-zero exit is final and the handler fires at once — with `Restart=`, systemd only enters `failed` after the restart budget is exhausted.
+
+The handler runs `/usr/local/bin/barkpark-unit-failure-alert` (`barkpark-unit-failure-alert.sh`). It **always** records: journald at `err` under tag `barkpark-alert`, plus a stamp under `/var/lib/barkpark/failed-units/` (a weekly job's failure must outlive journal rotation). It **delivers** by POSTing to `$BARKPARK_ALERT_WEBHOOK` from `/etc/barkpark/alert.env` — and when that is unset or the POST fails it logs `ALERT NOT DELIVERED` at `err` rather than no-opping quietly. **No channel existed on either box before this**: the control host's `/etc/barkpark-provisioner.env` and the prod box's `/opt/barkpark/.env` carry no GitHub credential and no usable MTA, and the two units run on *different hosts*.
+
+Install the handler alongside whichever unit it guards:
+
+```bash
+sudo install -m 0644 deploy/systemd/barkpark-unit-failure-alert@.service /etc/systemd/system/
+sudo install -m 0755 deploy/systemd/barkpark-unit-failure-alert.sh /usr/local/bin/barkpark-unit-failure-alert
+sudo systemctl daemon-reload
+# optional, and the only thing that reaches a human:
+printf 'BARKPARK_ALERT_WEBHOOK=%s\n' "$URL" | sudo tee /etc/barkpark/alert.env >/dev/null
+sudo chmod 600 /etc/barkpark/alert.env
+```
+
+Verify a firing without waiting for a real failure: `sudo systemctl start barkpark-unit-failure-alert@barkpark-image-bake.service`, then `journalctl -t barkpark-alert -p err -n 20`.
+
+`deploy/systemd/systemd-onfailure_test.sh` is the offline guard — every `.timer`'s target `.service` carries an `OnFailure=`, the handler it names exists here, and no scheduled service sets `Restart=` other than `no`. It proves it can fail on every run. **`deploy/cp-deploy.sh` does not yet install the handler** (it installs only the image-bake pair); until it does, the `OnFailure=` on the control host names a unit that is not there.
+
 ## Install
 
 ```bash
