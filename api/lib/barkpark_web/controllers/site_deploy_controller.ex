@@ -462,8 +462,9 @@ defmodule BarkparkWeb.SiteDeployController do
   #
   # 95.1% IS REAL. `.claude/workflows/bp-deploy-reliability-charter.md`,
   # decision D29, quoting its own derivation: 2,000 tokens minted with the
-  # production expression (the charter cites the mint site as `auth.ex:502`),
-  # `BARKPARK_TOKEN=<tok>` leaks 1902/2000 = 95.1% through
+  # production expression — `Barkpark.Auth.create_personal_access_token/3` in
+  # `api/lib/barkpark/auth.ex` — of which the `BARKPARK_TOKEN=<tok>` shape leaks
+  # 1902/2000 = 95.1% through
   # `FailureCopy.scrub/1`. That is PER-SHAPE. The 94.3% in
   # `cloud/lib/barkpark_cloud/failure_copy.ex` is the AGGREGATE — "a real token
   # measured 94.3% LEAKED through `scrub/1` in four of six shapes". Different

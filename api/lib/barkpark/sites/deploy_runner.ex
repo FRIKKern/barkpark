@@ -1363,9 +1363,10 @@ defmodule Barkpark.Sites.DeployRunner do
   # FALSE, and it shipped.
   # (3) THIS REPAIR: 95.1% is a real, well-derived measurement. It is written
   # down in `.claude/workflows/bp-deploy-reliability-charter.md`, decision D29,
-  # which derives it as: 2,000 tokens minted with the production expression
-  # (the charter cites the mint site as `auth.ex:502`), of which the
-  # `BARKPARK_TOKEN=<tok>` shape leaks 1902/2000 = 95.1% through
+  # which derives it as: 2,000 tokens minted with the production expression —
+  # `Barkpark.Auth.create_personal_access_token/3` in `api/lib/barkpark/auth.ex`,
+  # whose raw value is `@pat_token_prefix <> Base.url_encode64(32 bytes)` — of
+  # which the `BARKPARK_TOKEN=<tok>` shape leaks 1902/2000 = 95.1% through
   # `FailureCopy.scrub/1`; D29 separately measures the shipped
   # `scrub |> strip_ansi` order leaking a COLOURISED token at the same 95.1%,
   # against 0% for `strip_ansi |> scrub`.
