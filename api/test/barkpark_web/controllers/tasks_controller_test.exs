@@ -467,7 +467,13 @@ defmodule BarkparkWeb.TasksControllerTest do
                "limit" => 100,
                "offset" => 0,
                "returned" => 100,
-               "has_more" => true
+               "has_more" => true,
+               # THE CONTINUATION, not an echo. `offset` says where this page
+               # BEGAN; `next_offset` is the value to send back as the next
+               # request's `?offset=`, and it is present exactly when
+               # `has_more` is true. A `has_more: true` with nothing to page
+               # with is the defect this key exists to close.
+               "next_offset" => 100
              }
     end
 
@@ -516,7 +522,9 @@ defmodule BarkparkWeb.TasksControllerTest do
                "limit" => 2,
                "offset" => 2,
                "returned" => 2,
-               "has_more" => true
+               "has_more" => true,
+               # offset + returned, so the walk advances past what it just read.
+               "next_offset" => 4
              }
     end
 
@@ -536,6 +544,9 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert body["page"]["limit"] == 50
       assert body["page"]["offset"] == 0
       assert body["page"]["has_more"] == true
+      # `Tasks.ready/1` has no keyset axis to seek on, so ready's continuation
+      # is necessarily OFFSET-shaped: 0 + the 50 rows served.
+      assert body["page"]["next_offset"] == 50
     end
   end
 
