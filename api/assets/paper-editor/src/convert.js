@@ -386,8 +386,12 @@ export function blockToTiptap(block) {
     }
     case "paragraph":
     default: {
-      const node = { type: "paragraph" };
-      const inline = inlineArrayToTiptap(block.content);
+      const source = {};
+      for (const key of ["content", "text"]) {
+        if (Object.hasOwn(block, key)) source[key] = deepCloneJson(block[key]);
+      }
+      const node = { type: "paragraph", attrs: { bpParagraphSource: source } };
+      const inline = inlineArrayToTiptap(listItemToInlineArray(source));
       if (inline.length) node.content = inline;
       return { type: "doc", content: [node] };
     }
@@ -810,10 +814,13 @@ function comparableListInline(content) {
 }
 
 function listItemFromTiptap(li, content) {
-  const inline = tiptapInlineToPd(content);
   const source = li.attrs?.bpListSource;
-  if (!source || !Object.hasOwn(source, "item")) return inline;
-  const item = source.item;
+  return source && Object.hasOwn(source, "item")
+    ? inlineCarrierFromTiptap(source.item, content) : tiptapInlineToPd(content);
+}
+
+function inlineCarrierFromTiptap(item, content) {
+  const inline = tiptapInlineToPd(content);
   if (jsonEqual(comparableListInline(inlineArrayToTiptap(listItemToInlineArray(item))),
     comparableListInline(content))) return deepCloneJson(item);
   if (item && typeof item === "object" && !Array.isArray(item)) {
@@ -878,6 +885,8 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
     }
     case "paragraph":
     default: {
+      const source = top.attrs?.bpParagraphSource;
+      if (source && typeof source === "object") return inlineCarrierFromTiptap(source, top.content);
       return { content: tiptapInlineToPd(top.content) };
     }
   }

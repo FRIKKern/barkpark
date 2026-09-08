@@ -22,6 +22,7 @@ import { Plugin } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
 import { ListItemSource } from "./list-item-source.js";
 import { HeadingSource } from "./heading-source.js";
+import { ParagraphSource } from "./paragraph-source.js";
 import { portableTextBoundary } from "./portable-text-boundary.js";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -179,6 +180,7 @@ class BpPaperEditor extends HTMLElement {
       extensions: [
       ListItemSource,
       HeadingSource,
+        ...(this._editorMode === "block" && this._blockType === "paragraph" ? [ParagraphSource] : []),
         portableTextBoundary(this, () => this._editorMode === "block" ? this._blockType : null),
         ...(this._editorMode === "card-body" ? [
           Extension.create({

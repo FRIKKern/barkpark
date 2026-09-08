@@ -363,6 +363,7 @@ try {
   for (const [kind, makeBlock] of Object.entries({
     heading: (text) => ({ id: "local", type: "heading", level: 2, text }),
     paragraph: (text) => paragraph("local", text),
+    paragraphText: (text) => ({ id: "local", type: "paragraph", content: [], text }),
     list: (text) => ({ id: "local", type: "list", items: [{ id: "item", text, audit: "keep" }] }),
   })) {
     const carrierCanvas = document.createElement("bp-paper-canvas");
