@@ -1314,7 +1314,6 @@ try {
   delete recoveryMain.dataset.paperDocKey;
   delete recoveryMain.dataset.paperRev;
   recoveryMain.appendChild(recoveryRoot);
-  append(recovery.canvas, " newest pending prose");
 
   const nestedWrapper = document.createElement("div");
   nestedWrapper.id = "paper-canvas-probe-nested-run";
@@ -1377,9 +1376,14 @@ try {
     downloadClicks += 1;
     downloadedName = this.download;
   };
+  assert.equal(recovery.requests.length, 0,
+    "recovery export starts without an existing persistence request");
+  append(recovery.canvas, " newest pending prose");
   const recoveryEditor = recovery.canvas._editor;
   const recoveryInnerHTML = recoveryRoot.innerHTML;
   warning.querySelector("button").click();
+  assert.equal(recovery.requests.length, 0,
+    "downloading performs no persistence or network mutation");
   await tick();
   const wrongWarning = document.createElement("div");
   wrongWarning.dataset.testId = "paper-canvas-resume-warning";
@@ -1463,8 +1467,6 @@ try {
     "downloading does not mutate the frozen editor DOM");
   assert.equal(recovery.canvas._editor, recoveryEditor,
     "downloading does not replace or reconcile the live editor");
-  assert.equal(recovery.requests.length, 0,
-    "downloading performs no persistence or network mutation");
   const replacementMain = document.createElement("main");
   replacementMain.dataset.testId = "studio-paper-shell-reconnected";
   replacementMain.append(warning, recoveryRoot);

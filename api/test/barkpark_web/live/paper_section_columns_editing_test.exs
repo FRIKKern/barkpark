@@ -299,6 +299,23 @@ defmodule BarkparkWeb.PaperSectionColumnsEditingTest do
       {slug, original} = create_legacy_nested_paper()
       {view, path} = mount_editor(conn, host, slug)
       [projected] = Content.ensure_block_ids(original["blocks"])
+      preserve_request = Ecto.UUID.generate()
+
+      render_hook(view, "paper-edit-block", %{
+        "block_id" => projected["id"],
+        "title" => "  Preserved title  ",
+        "request_id" => preserve_request,
+        "if_rev" => socket_of(view).assigns.paper_rev
+      })
+
+      assert_reply(view, %{saved: true, request_id: ^preserve_request})
+      preserved = stored(slug).content
+
+      assert preserved["blocks"] == [Map.put(projected, "title", "  Preserved title  ")]
+
+      derived_keys = ~w(blocks body body_html body_html_sv preview rev)
+      assert Map.drop(preserved, derived_keys) == Map.drop(original, derived_keys)
+
       request = Ecto.UUID.generate()
 
       render_hook(view, "paper-edit-block", %{
@@ -311,7 +328,6 @@ defmodule BarkparkWeb.PaperSectionColumnsEditingTest do
       assert_reply(view, %{saved: true, request_id: ^request})
       cleared = stored(slug).content
       assert cleared["blocks"] == [Map.put(projected, "title", nil)]
-      derived_keys = ~w(blocks body body_html body_html_sv preview rev)
       assert Map.drop(cleared, derived_keys) == Map.drop(original, derived_keys)
 
       invalid_request = Ecto.UUID.generate()
