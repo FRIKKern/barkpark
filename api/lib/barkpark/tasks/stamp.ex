@@ -144,6 +144,17 @@ defmodule Barkpark.Tasks.Stamp do
 
   @event_task_criterion "task.criterion"
 
+  # THE ONE RECEIPT KEY. Deliberately the SAME content key `Tasks.Close` writes
+  # its autostamp provenance under (`Close`'s `@autostamp_key`): a reader asking
+  # "was this criterion PROVEN, or merely asserted?" must have ONE place to look,
+  # whichever door did the asserting. `merge_gate_override_receipt_test.exs`
+  # reads both doors through a single constant, so a drift between the two
+  # literals reds there rather than splitting the answer across two keys.
+  @autostamp_key "merge_gate_autostamp"
+
+  # A LIST, unlike close's sub-keys — see `append_override_record/2`.
+  @stamp_override_key "stamp_overrides"
+
   # The TERMINAL lifecycles — sealed by close, and the only statuses on which
   # a post-close `--miss` attempt is admitted. `open` / `blocked` stay refused:
   # they can still be claimed, so the per-criterion instrument is not missing
@@ -180,6 +191,10 @@ defmodule Barkpark.Tasks.Stamp do
       * `:merge_gated` (optional boolean, default `false`) — the LEAD-ONLY
         override that releases the MERGE-GATE refusal below. Without it a
         `{:met, _}` on a merge-gated row fails with `:merge_gated_criterion`.
+        USING IT MINTS A RECEIPT: an override that actually lifts the refusal
+        appends a record to `content.merge_gate_autostamp.stamp_overrides` on
+        the same rev-CAS write as the flip (see `check_merge_gate/6`). The flag
+        on a row that is NOT a gate lifts nothing and records nothing.
       * `:caller_token_id` (optional) — audit stamp on the event row.
 
   THE MERGE-GATE REFUSAL. A criterion the LEAD closes on merge is not the
@@ -323,8 +338,11 @@ defmodule Barkpark.Tasks.Stamp do
 
           %Document{} = doc ->
             with :ok <- authorize(doc, worker_id, observed_epoch, observed_rev, result_tag),
-                 :ok <- check_merge_gate(doc, update, result_tag, merge_gated),
-                 {:ok, updated} <- apply_stamp_update(doc, update) do
+                 {:ok, override} <-
+                   check_merge_gate(doc, update, result_tag, merge_gated, worker_id,
+                     caller_token_id: caller_token_id
+                   ),
+                 {:ok, updated} <- apply_stamp_update(doc, update, override) do
               ev =
                 insert_mutation_event!(
                   updated,
@@ -343,6 +361,12 @@ defmodule Barkpark.Tasks.Stamp do
                           if result_tag == "withdrawn",
                             do: Map.put(p, "withdrawn", true),
                             else: p
+                        end)
+                        |> then(fn p ->
+                          # The override is LOUD on the event feed too, on a
+                          # boolean — a board can select asserted merge gates
+                          # without re-reading the document or parsing prose.
+                          if override, do: Map.put(p, "merge_gated_override", true), else: p
                         end)
                         |> then(fn p ->
                           # (d) of task-d68754135a6a9f66: a board must be able
@@ -498,32 +522,76 @@ defmodule Barkpark.Tasks.Stamp do
   # A miss flips no lock and is never refused. An index that does not resolve
   # to a stored map falls through to `merge_criteria`, which owns the
   # out-of-range / mismatch taxonomy — this guard never invents those errors.
-  defp check_merge_gate(_doc, _update, "miss", _merge_gated), do: :ok
+  # THE RECEIPT (cch-w56-bl). The override used to be neither loud nor recorded:
+  # an overridden criterion and a hand-proven one were byte-identical in the
+  # store — same key set, same `met`, and the only differing field
+  # (`merge_gate`) describes the criterion's TYPE, not that an override was
+  # used. The refusal above is deliberately WIDE because a false refusal is loud
+  # and recoverable while a false permit is silent; an override that is itself
+  # silent makes that reasoning self-defeating. So this returns `{:ok, record}`
+  # rather than a bare `:ok`, and the record rides the SAME rev-CAS write as the
+  # flip it explains — an override and its confession land together or not at
+  # all, exactly as `Close.merge_override_record/2` already does for a close.
+  #
+  # ONLY AN OVERRIDE THAT LIFTED SOMETHING MINTS. The record keys on the STORED
+  # criterion being a gate, not on the caller having typed the flag: a flag that
+  # released no refusal asserted nothing, and minting there would smear override
+  # records across honest rows until the receipt stopped discriminating. An
+  # ordinary stamp therefore stays byte-identical, mirroring
+  # `Close.merge_autostamp_record/3`'s nil clause — an honest act leaves no
+  # receipt to explain away.
+  #
+  # THIS IS NOT AUTHORIZATION, and the record says so twice on purpose (the
+  # `Close.close_autostamp_record/6` precedent): `asserted_worker` is the
+  # client-supplied worker id, which a caller can claim to be anyone, and
+  # `authenticated_token_id` is the api_token the server actually
+  # authenticated. A record naming only the first would carry the overrider's
+  # chosen name and nothing else.
+  defp check_merge_gate(_doc, _update, "miss", _merge_gated, _worker_id, _opts), do: {:ok, nil}
 
   # A withdrawal LOWERS a lock, so it cannot fabricate a done before the PR
   # exists — the exact harm the merge gate exists to prevent. A reviewer who
   # refutes a merge gate's proof must be able to say so without a lead-only
-  # override, so this is never refused.
-  defp check_merge_gate(_doc, _update, "withdrawn", _merge_gated), do: :ok
-  defp check_merge_gate(_doc, _update, _tag, true), do: :ok
+  # override, so this is never refused — and there is nothing to confess.
+  defp check_merge_gate(_doc, _update, "withdrawn", _merge_gated, _worker_id, _opts),
+    do: {:ok, nil}
 
-  defp check_merge_gate(%Document{content: content}, update, _tag, false) do
+  defp check_merge_gate(%Document{content: content}, update, _tag, merge_gated, worker_id, opts) do
     entry =
       (content || %{})
       |> Map.get("acceptance_criteria")
       |> Criteria.at(Map.get(update, "index"))
 
-    if Criteria.merge_gated?(entry) do
-      {:error, :merge_gated_criterion}
-    else
-      :ok
+    case {Criteria.merge_gated?(entry), merge_gated} do
+      {true, false} -> {:error, :merge_gated_criterion}
+      {true, true} -> {:ok, override_record(update, entry, worker_id, opts)}
+      {false, _} -> {:ok, nil}
     end
+  end
+
+  # `close_autostamp_record/6`'s shape, one door over: what was asserted, by
+  # whom, when, about which criterion, and that NOTHING was verified. The
+  # criterion text and the asserted evidence are snapshotted here because a
+  # later stamp can overwrite both on the criterion itself, and then the
+  # override's own claim would be unreadable.
+  defp override_record(update, entry, worker_id, opts) do
+    %{
+      "verified" => false,
+      "source" => "stamp_merge_gated_override",
+      "indices" => [Map.get(update, "index")],
+      "criterion" => Map.get(entry || %{}, "criterion"),
+      "asserted_evidence" => Map.get(update, "evidence"),
+      "asserted_worker" => worker_id,
+      "authenticated_token_id" => Keyword.get(opts, :caller_token_id),
+      "ts" => DateTime.utc_now() |> DateTime.to_iso8601()
+    }
   end
 
   # In-lock re-read is `doc`; the final write is rev-CAS'd against that read
   # (defense in depth under the advisory lock, same as apply_close_update).
-  defp apply_stamp_update(%Document{} = doc, update) do
+  defp apply_stamp_update(%Document{} = doc, update, override) do
     with {:ok, new_content} <- merge_criteria(doc.content, [update]) do
+      new_content = append_override_record(new_content, override)
       new_rev = generate_rev()
 
       case fenced_content_write(doc, doc.rev, new_content, new_rev) do
@@ -531,5 +599,29 @@ defmodule Barkpark.Tasks.Stamp do
         :stale -> {:error, :stale_claim}
       end
     end
+  end
+
+  # APPEND, never overwrite. `Close.merge_autostamp_record/3` replaces per
+  # sub-key because its two sub-keys are two different claims about ONE
+  # criterion set; here each override is a separate act on a separate criterion,
+  # so replacing would erase the very record the previous override left. A
+  # non-list value found under the key is treated as absent rather than crashed
+  # on, the same tolerance `Criteria` applies to stored garbage.
+  defp append_override_record(content, nil), do: content
+
+  defp append_override_record(content, record) when is_map(record) do
+    parent =
+      case Map.get(content, @autostamp_key) do
+        m when is_map(m) -> m
+        _ -> %{}
+      end
+
+    existing =
+      case Map.get(parent, @stamp_override_key) do
+        l when is_list(l) -> l
+        _ -> []
+      end
+
+    Map.put(content, @autostamp_key, Map.put(parent, @stamp_override_key, existing ++ [record]))
   end
 end
