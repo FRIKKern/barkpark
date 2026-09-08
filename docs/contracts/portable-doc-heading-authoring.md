@@ -12,8 +12,8 @@ array rather than flattening marks into a plain string. Clearing primary content
 also clears a visible scalar fallback so old text cannot reappear.
 
 The editor's `bpHeadingSource` attribute carries source fields through history.
-It is not rendered into HTML, accepted from pasted HTML, or copied onto newly
-split blocks. Block IDs and unrelated metadata remain outside the field patch.
+It is not rendered into HTML or accepted from pasted HTML. Native splits may
+retain the text carrier; block IDs and unrelated metadata remain outside it.
 The existing heading-level policy and hard-break guard are unchanged.
 
 Tests: `src/__heading_carriers.test.mjs` and
