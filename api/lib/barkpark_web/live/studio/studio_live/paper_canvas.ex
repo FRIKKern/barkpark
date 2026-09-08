@@ -305,30 +305,64 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   defp not_opted_out?("false"), do: false
   defp not_opted_out?(_), do: true
 
-  @doc false
-  def retained_ids(%{slug: slug, ids: %MapSet{} = ids}, slug), do: ids
-  def retained_ids(_, _), do: MapSet.new()
+  @document_owner :document
 
   @doc false
-  def refresh_retained(%{slug: slug, ids: %MapSet{} = ids} = ownership, slug, blocks),
-    do: %{ownership | ids: prune_retained(ids, blocks)}
+  def retained_ids(ownership, slug), do: retained_ids(ownership, slug, @document_owner)
+
+  def retained_ids(%{slug: slug, owners: owners}, slug, owner) when is_map(owners) do
+    case Map.get(owners, owner) do
+      %MapSet{} = ids -> ids
+      _ -> MapSet.new()
+    end
+  end
+
+  # Accept the old socket shape across a hot-code refresh. It represented only
+  # the document owner and is upgraded on the next accepted write/refresh.
+  def retained_ids(%{slug: slug, ids: %MapSet{} = ids}, slug, @document_owner), do: ids
+  def retained_ids(_, _, _), do: MapSet.new()
+
+  @doc false
+  def retained_owners(%{slug: slug, owners: owners}, slug) when is_map(owners), do: owners
+
+  def retained_owners(%{slug: slug, ids: %MapSet{} = ids}, slug),
+    do: %{@document_owner => ids}
+
+  def retained_owners(_, _), do: %{}
+
+  @doc false
+  def refresh_retained(%{slug: slug} = ownership, slug, blocks) do
+    %{slug: slug, owners: prune_retained(retained_owners(ownership, slug), blocks)}
+  end
 
   def refresh_retained(_, _, _), do: nil
 
   @doc false
-  def prune_retained(ids, blocks) when is_list(blocks) do
-    current =
-      blocks
-      |> Enum.filter(&(is_map(&1) and &1["type"] in ["table", "section"]))
-      |> MapSet.new(& &1["id"])
-
-    MapSet.intersection(ids, current)
+  def prune_retained(%MapSet{} = ids, blocks) do
+    prune_retained(%{@document_owner => ids}, blocks)
+    |> Map.get(@document_owner, MapSet.new())
   end
 
-  def prune_retained(_ids, _blocks), do: MapSet.new()
+  def prune_retained(owners, blocks) when is_map(owners) and is_list(blocks) do
+    with {:ok, blocks} <- Barkpark.Content.project_block_ids_safely(blocks) do
+      Enum.reduce(owners, %{}, fn
+        {owner, %MapSet{} = ids}, kept ->
+          retained = MapSet.filter(ids, &retained_boundary?(blocks, owner, &1))
+          if MapSet.size(retained) == 0, do: kept, else: Map.put(kept, owner, retained)
+
+        {_owner, _invalid}, kept ->
+          kept
+      end)
+    else
+      _ -> %{}
+    end
+  end
+
+  def prune_retained(%MapSet{}, _blocks), do: MapSet.new()
+  def prune_retained(_owners, _blocks), do: %{}
 
   @doc false
-  # Keep a newly inserted top-level boundary in the PM editor which owns its
+  # Keep a newly inserted boundary in the exact PM editor which owns its
   # insertion history. This socket-only exception ends when that editor unmounts.
   def retain_insertions(prior, before_content, after_content, context, ops) do
     blocks_of = fn
@@ -338,36 +372,110 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
 
     before_blocks = blocks_of.(before_content)
     after_blocks = blocks_of.(after_content)
+    legacy? = match?(%MapSet{}, prior)
+    prior = if legacy?, do: %{@document_owner => prior}, else: prior
     prior = prune_retained(prior, after_blocks)
 
     alias Barkpark.Content.Papers.CanvasRunContext
 
-    with {:ok, %{container_kind: "document"} = normalized} <- CanvasRunContext.normalize(context),
-         {:ok, _, _} <- CanvasRunContext.map_run(before_blocks, normalized, &{:ok, &1, nil}) do
-      before_ids = MapSet.new(before_blocks, & &1["id"])
+    next =
+      with {:ok, normalized} <- CanvasRunContext.normalize(context),
+           {:ok, owner} <- retention_owner(normalized),
+           {:ok, _before, _} <-
+             CanvasRunContext.map_run(before_blocks, normalized, &{:ok, &1, nil}),
+           {:ok, _} <- Barkpark.Content.project_block_ids_safely(before_blocks),
+           {:ok, after_blocks} <- Barkpark.Content.project_block_ids_safely(after_blocks) do
+        candidate_ids =
+          Enum.flat_map(ops, fn
+            %{"op" => kind, "block" => %{"id" => id, "type" => type}}
+            when kind in ["insert-after", "append-block", "replace-block"] and
+                   type in ["table", "section"] and is_binary(id) and id != "" ->
+              [id]
 
-      candidate_ids =
-        Enum.flat_map(ops, fn
-          %{"op" => kind, "block" => %{"id" => id, "type" => type}}
-          when kind in ["insert-after", "append-block", "replace-block"] and
-                 type in ["table", "section"] and is_binary(id) and id != "" ->
-            [id]
+            _ ->
+              []
+          end)
+          |> MapSet.new()
+          |> Enum.filter(fn id ->
+            not retained_boundary?(before_blocks, owner, id) and
+              retained_boundary?(after_blocks, owner, id)
+          end)
 
-          _ ->
-            []
+        Enum.reduce(candidate_ids, prior, fn id, owners ->
+          Map.update(owners, owner, MapSet.new([id]), &MapSet.put(&1, id))
         end)
-        |> MapSet.new()
-        |> MapSet.difference(before_ids)
+      else
+        _ -> prior
+      end
 
-      Enum.reduce(after_blocks, prior, fn block, ids ->
-        if block["type"] in ["table", "section"] and MapSet.member?(candidate_ids, block["id"]),
-          do: MapSet.put(ids, block["id"]),
-          else: ids
-      end)
+    if legacy?, do: Map.get(next, @document_owner, MapSet.new()), else: next
+  end
+
+  defp retention_owner(%{container_kind: "document"}), do: {:ok, @document_owner}
+
+  defp retention_owner(%{container_kind: "section", container_id: id}),
+    do: {:ok, {:section, id}}
+
+  defp retention_owner(%{
+         container_kind: "columns",
+         container_id: id,
+         container_column_index: index
+       }),
+       do: {:ok, {:columns, id, index}}
+
+  defp retention_owner(_context), do: {:error, :unsupported_retention_owner}
+
+  defp retained_boundary?(blocks, owner, id) when is_binary(id) and id != "" do
+    alias Barkpark.Content.Papers.CanvasRunContext
+
+    with true <- retention_owner_active?(blocks, owner),
+         {:ok, context} <- retention_context(owner, id),
+         {:ok, _blocks, type} <-
+           CanvasRunContext.map_run(blocks, context, fn
+             [%{"id" => ^id, "type" => type} = block] when type in ["table", "section"] ->
+               {:ok, [block], type}
+
+             _ ->
+               {:error, :retained_boundary_changed}
+           end) do
+      type in ["table", "section"]
     else
-      _ -> prior
+      _ -> false
     end
   end
+
+  defp retained_boundary?(_blocks, _owner, _id), do: false
+
+  defp retention_owner_active?(blocks, {:section, container_id}) do
+    Barkpark.Content.Papers.CanvasRunContext.stack_section_canvas?(blocks, container_id)
+  end
+
+  defp retention_owner_active?(_blocks, _owner), do: true
+
+  defp retention_context(@document_owner, id),
+    do: {:ok, %{container_kind: "document", container_run_ids: [id]}}
+
+  defp retention_context({:section, container_id}, id) when is_binary(container_id),
+    do:
+      {:ok,
+       %{
+         container_kind: "section",
+         container_id: container_id,
+         container_run_ids: [id]
+       }}
+
+  defp retention_context({:columns, container_id, index}, id)
+       when is_binary(container_id) and is_integer(index) and index >= 0,
+       do:
+         {:ok,
+          %{
+            container_kind: "columns",
+            container_id: container_id,
+            container_column_index: index,
+            container_run_ids: [id]
+          }}
+
+  defp retention_context(_owner, _id), do: {:error, :invalid_retention_owner}
 
   @doc """
   Partition an ordered block list into maximal contiguous canvas runs.

@@ -551,13 +551,70 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
       assert Enum.count(blocks, &(&1["id"] == "new-table")) == 1
       refute has_element?(view, ~s(bp-paper-editor[data-editor-mode="table"]))
-      assert assigns_of(view).paper_canvas_retained.ids == MapSet.new(["new-table"])
+
+      assert assigns_of(view).paper_canvas_retained.owners == %{
+               document: MapSet.new(["new-table"])
+             }
+
       saved = stored_blocks(slug)
       render_click(view, "paper-toggle-edit", %{})
       assert assigns_of(view).paper_canvas_retained == nil
       render_click(view, "paper-toggle-edit", %{})
       assert has_element?(view, ~s(bp-paper-editor[data-editor-mode="table"]))
       assert stored_blocks(slug) == saved
+    end
+
+    test "a new Table stays in its nested Section reader run after acknowledgement", %{
+      conn: conn,
+      slug: slug
+    } do
+      intro = %{"id" => "nested-intro", "type" => "paragraph", "text" => "Keep"}
+      target = %{"id" => "nested-target", "type" => "paragraph", "text" => "/table"}
+
+      assert {:ok, _} =
+               Content.apply_paper_block_ops(
+                 slug,
+                 [
+                   %{
+                     "op" => "append-block",
+                     "block" => %{
+                       "id" => "nested-section",
+                       "type" => "section",
+                       "blocks" => [intro, target]
+                     }
+                   }
+                 ],
+                 @dataset
+               )
+
+      {:ok, view, _} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+      request_id = Ecto.UUID.generate()
+      table = %{"id" => "nested-table", "type" => "table", "rows" => [["Native"]]}
+
+      render_hook(view, "paper-ops", %{
+        "request_id" => request_id,
+        "if_rev" => assigns_of(view).paper_rev,
+        "container_kind" => "section",
+        "container_id" => "nested-section",
+        "container_run_ids" => ["nested-intro", "nested-target"],
+        "ops" => [%{"op" => "replace-block", "id" => "nested-target", "block" => table}]
+      })
+
+      assert_push_event(view, "bp:canvas-update", %{request_id: ^request_id, runs: runs})
+
+      run_id =
+        BarkparkWeb.Studio.StudioLive.PaperCanvas.section_run_slug(slug, "nested-section")
+        |> BarkparkWeb.Studio.StudioLive.PaperCanvas.run_id(0)
+
+      assert %{blocks: [^intro, %{"id" => "nested-table"}]} =
+               Enum.find(runs, &(&1.run_id == run_id))
+
+      refute has_element?(view, ~s(bp-paper-editor[data-editor-mode="table"]))
+
+      assert assigns_of(view).paper_canvas_retained.owners == %{
+               {:section, "nested-section"} => MapSet.new(["nested-table"])
+             }
     end
 
     test "a paper-ops batch folds atomically through apply_paper_block_ops", %{

@@ -96,5 +96,255 @@ defmodule BarkparkWeb.Studio.SharedPaperBoundaryHandoffTest do
     assert PaperCanvas.retain_insertions(ids, %{}, %{"blocks" => []}, nil, []) == MapSet.new()
   end
 
+  test "a Section run owns its newly inserted Table and echo does not duplicate it" do
+    intro = paragraph("intro")
+    target = paragraph("target")
+    before = %{"blocks" => [section("outer", [intro, target])]}
+    table = %{"id" => "nested-table", "type" => "table", "rows" => [["Draft"]]}
+    after_content = %{"blocks" => [section("outer", [intro, table])]}
+    context = section_context("outer", ["intro", "target"])
+
+    owners =
+      PaperCanvas.retain_insertions(%{}, before, after_content, context, [
+        %{"op" => "replace-block", "id" => "target", "block" => table}
+      ])
+
+    assert owners == %{{:section, "outer"} => MapSet.new(["nested-table"])}
+
+    retained = %{slug: "paper", owners: owners}
+
+    expected_run = PaperCanvas.run_id(PaperCanvas.section_run_slug("paper", "outer"), 0)
+
+    assert [%{run_id: ^expected_run, blocks: [^intro, ^table]}] =
+             Paper.canvas_echo_runs("paper", after_content["blocks"], retained)
+  end
+
+  test "each Columns position owns only its inserted boundary and preserves peer echoes" do
+    left = paragraph("left")
+    target = paragraph("target")
+    peer = paragraph("peer")
+    before = %{"blocks" => [columns("cols", [[left, target], [peer]])]}
+    table = %{"id" => "column-table", "type" => "table", "rows" => [["Draft"]]}
+    after_content = %{"blocks" => [columns("cols", [[left, table], [peer]])]}
+
+    owners =
+      PaperCanvas.retain_insertions(
+        %{},
+        before,
+        after_content,
+        columns_context("cols", 0, ["left", "target"]),
+        [%{"op" => "replace-block", "id" => "target", "block" => table}]
+      )
+
+    assert owners == %{{:columns, "cols", 0} => MapSet.new(["column-table"])}
+
+    runs =
+      Paper.canvas_echo_runs("paper", after_content["blocks"], %{slug: "paper", owners: owners})
+
+    left_run = PaperCanvas.run_id(PaperCanvas.columns_run_slug("paper", "cols", 0), 0)
+    peer_run = PaperCanvas.run_id(PaperCanvas.columns_run_slug("paper", "cols", 1), 0)
+
+    assert %{blocks: [^left, ^table]} = Enum.find(runs, &(&1.run_id == left_run))
+
+    assert %{blocks: [^peer]} = Enum.find(runs, &(&1.run_id == peer_run))
+  end
+
+  test "a retained nested Section stays wholly inside its parent's run" do
+    intro = paragraph("intro")
+    target = paragraph("target")
+    before = %{"blocks" => [section("outer", [intro, target])]}
+    nested = section("nested", [paragraph("nested-body")])
+    after_content = %{"blocks" => [section("outer", [intro, nested])]}
+
+    owners =
+      PaperCanvas.retain_insertions(
+        %{},
+        before,
+        after_content,
+        section_context("outer", ["intro", "target"]),
+        [%{"op" => "replace-block", "id" => "target", "block" => nested}]
+      )
+
+    runs =
+      Paper.canvas_echo_runs("paper", after_content["blocks"], %{slug: "paper", owners: owners})
+
+    expected_run = PaperCanvas.run_id(PaperCanvas.section_run_slug("paper", "outer"), 0)
+    assert [%{run_id: ^expected_run, blocks: [^intro, ^nested]}] = runs
+  end
+
+  test "unrelated acknowledgements retain existing owner buckets" do
+    first_table = %{"id" => "first-table", "type" => "table", "rows" => [["One"]]}
+    second_table = %{"id" => "second-table", "type" => "table", "rows" => [["Two"]]}
+    left = paragraph("left")
+    right = paragraph("right")
+    before = %{"blocks" => [section("one", [left, first_table]), section("two", [right])]}
+
+    after_content = %{
+      "blocks" => [section("one", [left, first_table]), section("two", [right, second_table])]
+    }
+
+    prior = %{{:section, "one"} => MapSet.new(["first-table"])}
+
+    owners =
+      PaperCanvas.retain_insertions(
+        prior,
+        before,
+        after_content,
+        section_context("two", ["right"]),
+        [%{"op" => "append-block", "block" => second_table}]
+      )
+
+    assert owners == %{
+             {:section, "one"} => MapSet.new(["first-table"]),
+             {:section, "two"} => MapSet.new(["second-table"])
+           }
+  end
+
+  test "nested undo prunes ownership and redo reacquires the exact owner" do
+    intro = paragraph("intro")
+    before = %{"blocks" => [section("outer", [intro])]}
+    table = %{"id" => "nested-table", "type" => "table", "rows" => [["Draft"]]}
+    inserted = %{"blocks" => [section("outer", [intro, table])]}
+    context = section_context("outer", ["intro"])
+    insert = %{"op" => "append-block", "block" => table}
+
+    retained = PaperCanvas.retain_insertions(%{}, before, inserted, context, [insert])
+
+    released =
+      PaperCanvas.retain_insertions(
+        retained,
+        inserted,
+        before,
+        section_context("outer", ["intro", "nested-table"]),
+        [%{"op" => "remove-block", "id" => "nested-table"}]
+      )
+
+    assert released == %{}
+
+    assert PaperCanvas.retain_insertions(released, before, inserted, context, [insert]) ==
+             retained
+  end
+
+  test "refresh prunes cross-container moves, column moves and changed boundary types" do
+    table = %{"id" => "owned", "type" => "table", "rows" => [["Draft"]]}
+
+    ownership = %{
+      slug: "paper",
+      owners: %{
+        {:section, "left"} => MapSet.new(["owned"]),
+        {:columns, "cols", 0} => MapSet.new(["column-owned"]),
+        document: MapSet.new(["changed"])
+      }
+    }
+
+    blocks = [
+      section("left", []),
+      section("right", [table]),
+      columns("cols", [[], [%{"id" => "column-owned", "type" => "section", "blocks" => []}]]),
+      paragraph("changed")
+    ]
+
+    assert PaperCanvas.refresh_retained(ownership, "paper", blocks) == %{
+             slug: "paper",
+             owners: %{}
+           }
+
+    assert PaperCanvas.refresh_retained(ownership, "other", blocks) == nil
+  end
+
+  test "refresh releases ownership when a Section stack canvas becomes a grid" do
+    table = %{"id" => "owned", "type" => "table", "rows" => [["Draft"]]}
+
+    ownership = %{
+      slug: "paper",
+      owners: %{{:section, "outer"} => MapSet.new(["owned"])}
+    }
+
+    stack = [section("outer", [table])]
+    assert PaperCanvas.refresh_retained(ownership, "paper", stack) == ownership
+
+    grid = [put_in(section("outer", [table]), ["layout"], %{"mode" => "grid", "tracks" => 2})]
+
+    released = PaperCanvas.refresh_retained(ownership, "paper", grid)
+    assert released == %{slug: "paper", owners: %{}}
+
+    assert PaperCanvas.refresh_retained(released, "paper", stack) == released
+  end
+
+  test "refresh releases ownership when a Columns position is no longer editable" do
+    ownership = %{
+      slug: "paper",
+      owners: %{{:columns, "cols", 0} => MapSet.new(["owned"])}
+    }
+
+    for malformed <- [
+          [columns("cols", [])],
+          [%{"id" => "cols", "type" => "columns", "columns" => ["opaque"]}]
+        ] do
+      assert PaperCanvas.refresh_retained(ownership, "paper", malformed) == %{
+               slug: "paper",
+               owners: %{}
+             }
+    end
+  end
+
+  test "preexisting boundaries, malformed trees and unsupported nested origins fail closed" do
+    table = %{"id" => "existing", "type" => "table", "rows" => [["Keep"]]}
+    before = %{"blocks" => [section("outer", [table])]}
+
+    assert PaperCanvas.retain_insertions(
+             %{},
+             before,
+             before,
+             section_context("outer", ["existing"]),
+             [%{"op" => "replace-block", "id" => "existing", "block" => table}]
+           ) == %{}
+
+    duplicate = %{"blocks" => [section("outer", [paragraph("same")]), paragraph("same")]}
+
+    assert PaperCanvas.retain_insertions(
+             %{},
+             duplicate,
+             duplicate,
+             section_context("outer", ["same"]),
+             [%{"op" => "append-block", "block" => table}]
+           ) == %{}
+
+    for unsupported <- [
+          %{container_id: "expandable", container_run_ids: ["target"]},
+          %{container_kind: "terminal", container_id: "terminal", container_run_ids: ["target"]},
+          %{
+            container_kind: "tabs",
+            container_id: "tabs",
+            container_row_id: "row",
+            container_run_ids: ["target"]
+          },
+          %{
+            container_kind: "steps",
+            container_id: "steps",
+            container_row_id: "row",
+            container_run_ids: ["target"]
+          },
+          %{container_kind: "figure", container_id: "figure", container_run_ids: ["target"]}
+        ] do
+      assert PaperCanvas.retain_insertions(%{}, before, before, unsupported, []) == %{}
+    end
+  end
+
   defp paragraph(id), do: %{"id" => id, "type" => "paragraph", "content" => []}
+
+  defp section(id, blocks), do: %{"id" => id, "type" => "section", "blocks" => blocks}
+
+  defp columns(id, columns), do: %{"id" => id, "type" => "columns", "columns" => columns}
+
+  defp section_context(id, run_ids),
+    do: %{container_kind: "section", container_id: id, container_run_ids: run_ids}
+
+  defp columns_context(id, index, run_ids),
+    do: %{
+      container_kind: "columns",
+      container_id: id,
+      container_column_index: index,
+      container_run_ids: run_ids
+    }
 end

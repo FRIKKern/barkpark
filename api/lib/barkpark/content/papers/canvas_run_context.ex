@@ -108,6 +108,20 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
 
   def map_run(_blocks, _context, _fun), do: {:error, :invalid_canvas_run_context}
 
+  @doc false
+  def stack_section_canvas?(blocks, container_id)
+      when is_list(blocks) and is_binary(container_id) and container_id != "" do
+    case find_containers(blocks, "section", container_id, []) do
+      [%{alias: "blocks", layout: layout}] ->
+        not match?(%{"mode" => "grid"}, layout)
+
+      _ ->
+        false
+    end
+  end
+
+  def stack_section_canvas?(_blocks, _container_id), do: false
+
   defp map_normalized_run(blocks, %{container_kind: "figure"} = context, fun) do
     before_counts = id_occurrences(blocks)
 
@@ -402,8 +416,16 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
 
   defp container_match(%{"type" => "section"} = block, path) do
     case Map.get(block, "blocks") do
-      blocks when is_list(blocks) -> %{path: path, alias: "blocks", children: blocks}
-      _invalid -> %{path: path, alias: nil, children: []}
+      blocks when is_list(blocks) ->
+        %{
+          path: path,
+          alias: "blocks",
+          children: blocks,
+          layout: Map.get(block, "layout")
+        }
+
+      _invalid ->
+        %{path: path, alias: nil, children: [], layout: Map.get(block, "layout")}
     end
   end
 

@@ -1122,8 +1122,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
       rev = doc_field(socket.assigns[:paper_doc], :content) |> then(&get_in(&1 || %{}, ["rev"]))
 
-      retained = PaperCanvas.retained_ids(socket.assigns[:paper_canvas_retained], slug)
-      runs = canvas_echo_runs(slug, blocks, retained)
+      runs = canvas_echo_runs(slug, blocks, socket.assigns[:paper_canvas_retained])
 
       push_event(
         socket,
@@ -1139,9 +1138,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # Retention belongs to this mounted editor, never the stored document.
   def retain_canvas_insertions(socket, slug, before_content, context, ops) do
     after_content = doc_field(socket.assigns[:paper_doc], :content) || %{}
-    prior = PaperCanvas.retained_ids(socket.assigns[:paper_canvas_retained], slug)
-    ids = PaperCanvas.retain_insertions(prior, before_content, after_content, context, ops)
-    assign(socket, :paper_canvas_retained, %{slug: slug, ids: ids})
+    prior = PaperCanvas.retained_owners(socket.assigns[:paper_canvas_retained], slug)
+    owners = PaperCanvas.retain_insertions(prior, before_content, after_content, context, ops)
+    assign(socket, :paper_canvas_retained, %{slug: slug, owners: owners})
   end
 
   @doc false
@@ -1172,38 +1171,51 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   def table_confirmation(result, _op, _blocks, _rev), do: result
 
   @doc false
-  def canvas_echo_runs(slug, blocks, retained_ids \\ MapSet.new())
+  def canvas_echo_runs(slug, blocks, retained \\ nil)
 
-  def canvas_echo_runs(slug, blocks, retained_ids) when is_binary(slug) and is_list(blocks) do
+  def canvas_echo_runs(slug, blocks, retained) when is_binary(slug) and is_list(blocks) do
     blocks = Content.ensure_block_ids(blocks)
-    run_entries(slug, blocks, retained_ids) ++ nested_canvas_echo_runs(slug, blocks)
+    retained = normalize_echo_retained(retained, slug)
+    owner_run_entries(slug, slug, blocks, retained, :document)
   end
 
-  def canvas_echo_runs(_slug, _blocks, _retained_ids), do: []
+  def canvas_echo_runs(_slug, _blocks, _retained), do: []
 
-  defp run_entries(slug, blocks, retained_ids \\ MapSet.new()) do
+  defp normalize_echo_retained(%MapSet{} = ids, slug),
+    do: %{slug: slug, owners: %{document: ids}}
+
+  defp normalize_echo_retained(retained, _slug), do: retained
+
+  defp owner_run_entries(root_slug, run_slug, blocks, retained, owner) do
+    retained_ids = PaperCanvas.retained_ids(retained, root_slug, owner)
+
     blocks
     |> PaperCanvas.partition_runs(retained_ids)
     |> PaperCanvas.with_run_ordinals()
     |> Enum.flat_map(fn
       {:run, run_blocks, ordinal} ->
-        [%{run_id: PaperCanvas.run_id(slug, ordinal), blocks: run_blocks}]
+        [%{run_id: PaperCanvas.run_id(run_slug, ordinal), blocks: run_blocks}]
 
-      {:block, _block} ->
-        []
+      {:block, block} ->
+        boundary_echo_runs(root_slug, block, retained)
     end)
   end
 
-  defp nested_canvas_echo_runs(root_slug, blocks) do
-    Enum.flat_map(blocks, fn
+  defp boundary_echo_runs(root_slug, block, retained) do
+    case block do
       %{"type" => "tabs", "id" => id, "tabs" => rows}
       when is_binary(id) and is_list(rows) ->
         Enum.flat_map(rows, fn
           %{"id" => row_id} = row when is_binary(row_id) and row_id != "" ->
             children = tab_children(row)
 
-            run_entries(PaperCanvas.tabs_run_slug(root_slug, id, row_id), children) ++
-              nested_canvas_echo_runs(root_slug, children)
+            owner_run_entries(
+              root_slug,
+              PaperCanvas.tabs_run_slug(root_slug, id, row_id),
+              children,
+              retained,
+              nil
+            )
 
           _ ->
             []
@@ -1212,8 +1224,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       %{"type" => "expandable", "id" => id} = block when is_binary(id) ->
         children = expandable_children(block)
 
-        run_entries(PaperCanvas.expandable_run_slug(root_slug, id), children) ++
-          nested_canvas_echo_runs(root_slug, children)
+        owner_run_entries(
+          root_slug,
+          PaperCanvas.expandable_run_slug(root_slug, id),
+          children,
+          retained,
+          nil
+        )
 
       %{"type" => "steps", "id" => id, "steps" => rows}
       when is_binary(id) and is_list(rows) ->
@@ -1221,8 +1238,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           %{"id" => row_id} = row when is_binary(row_id) and row_id != "" ->
             children = expandable_children(row)
 
-            run_entries(PaperCanvas.steps_run_slug(root_slug, id, row_id), children) ++
-              nested_canvas_echo_runs(root_slug, children)
+            owner_run_entries(
+              root_slug,
+              PaperCanvas.steps_run_slug(root_slug, id, row_id),
+              children,
+              retained,
+              nil
+            )
 
           _ ->
             []
@@ -1232,14 +1254,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       when is_binary(id) and id != "" and is_map(child) ->
         children = [child]
 
-        run_entries(PaperCanvas.figure_run_slug(root_slug, id), children) ++
-          nested_canvas_echo_runs(root_slug, children)
+        owner_run_entries(
+          root_slug,
+          PaperCanvas.figure_run_slug(root_slug, id),
+          children,
+          retained,
+          nil
+        )
 
       %{"type" => "terminal", "id" => id} = block when is_binary(id) and id != "" ->
         case terminal_children(block) do
           {:ok, children} ->
-            run_entries(PaperCanvas.terminal_run_slug(root_slug, id), children) ++
-              nested_canvas_echo_runs(root_slug, children)
+            owner_run_entries(
+              root_slug,
+              PaperCanvas.terminal_run_slug(root_slug, id),
+              children,
+              retained,
+              nil
+            )
 
           :error ->
             []
@@ -1249,12 +1281,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       when is_binary(id) and id != "" and is_list(children) ->
         own_runs =
           if SectionLayout.grid(block) do
-            []
+            Enum.flat_map(children, &boundary_echo_runs(root_slug, &1, retained))
           else
-            run_entries(PaperCanvas.section_run_slug(root_slug, id), children)
+            owner_run_entries(
+              root_slug,
+              PaperCanvas.section_run_slug(root_slug, id),
+              children,
+              retained,
+              {:section, id}
+            )
           end
 
-        own_runs ++ nested_canvas_echo_runs(root_slug, children)
+        own_runs
 
       %{"type" => "columns", "id" => id, "columns" => columns}
       when is_binary(id) and id != "" and is_list(columns) ->
@@ -1262,8 +1300,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         |> Enum.with_index()
         |> Enum.flat_map(fn
           {children, index} when is_list(children) ->
-            run_entries(PaperCanvas.columns_run_slug(root_slug, id, index), children) ++
-              nested_canvas_echo_runs(root_slug, children)
+            owner_run_entries(
+              root_slug,
+              PaperCanvas.columns_run_slug(root_slug, id, index),
+              children,
+              retained,
+              {:columns, id, index}
+            )
 
           {_opaque, _index} ->
             []
@@ -1271,7 +1314,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
       _ ->
         []
-    end)
+    end
   end
 
   @doc false

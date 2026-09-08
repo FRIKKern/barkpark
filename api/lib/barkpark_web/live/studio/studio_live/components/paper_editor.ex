@@ -367,6 +367,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 canvas_enabled={@canvas_on?}
                 tree_identity_safe={@tree_identity_safe}
                 table_editor_target_ids={@table_editor_target_ids}
+                canvas_retained={@canvas_retained}
               />
             <% {:ghosts, ghosts, anchor_id} -> %>
               <.ghost_slots_group ghosts={ghosts} anchor_id={anchor_id} />
@@ -468,6 +469,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             paper_links={@paper_links}
             tree_identity_safe={@tree_identity_safe}
             table_editor_target_ids={@table_editor_target_ids}
+            canvas_retained={@canvas_retained}
           />
         </div>
       <% end %>
@@ -924,6 +926,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:paper_links, :map, default: %{})
   attr(:tree_identity_safe, :boolean, default: true)
   attr(:table_editor_target_ids, :any, default: nil)
+  attr(:canvas_retained, :any, default: nil)
 
   def edit_block(assigns) do
     ~H"""
@@ -1019,6 +1022,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         paper_links={@paper_links}
         tree_identity_safe={@tree_identity_safe}
         table_editor_target_ids={@table_editor_target_ids}
+        canvas_retained={@canvas_retained}
       />
     </div>
     """
@@ -1430,6 +1434,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:paper_links, :map, default: %{})
   attr(:tree_identity_safe, :boolean, default: nil)
   attr(:table_editor_target_ids, :any, default: nil)
+  attr(:canvas_retained, :any, default: nil)
 
   def paper_block_fields(assigns) do
     tree_identity_safe =
@@ -1727,6 +1732,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           paper_links={@paper_links}
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
+                          canvas_retained={@canvas_retained}
                         />
                     <% end %>
                   <% end %>
@@ -1900,6 +1906,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       paper_links={@paper_links}
                       tree_identity_safe={@tree_identity_safe}
                       table_editor_target_ids={@table_editor_target_ids}
+                      canvas_retained={@canvas_retained}
                     />
                 <% end %>
               </div>
@@ -2325,6 +2332,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       paper_links={@paper_links}
                       tree_identity_safe={@tree_identity_safe}
                       table_editor_target_ids={@table_editor_target_ids}
+                      canvas_retained={@canvas_retained}
                     />
                   </div>
                 </div>
@@ -2332,7 +2340,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               <% else %>
                 <%= if SectionLayout.stack_rules?(@block, :article) do %><hr class="bp-hr" style="border-top-width:1px" /><% end %>
                 <span :if={not is_nil(@block["title"])} style="font-weight:bold"><%= @block["title"] %></span>
-                <%= for segment <- section_segments(@block, @canvas_enabled) do %>
+                <%= for segment <- section_segments(@block, @canvas_enabled, @canvas_retained, @root_slug) do %>
                   <%= case segment do %>
                     <% {:run, run_blocks, ordinal} -> %>
                       <.canvas_run
@@ -2353,6 +2361,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         paper_links={@paper_links}
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
+                        canvas_retained={@canvas_retained}
                       />
                   <% end %>
                 <% end %>
@@ -2394,7 +2403,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <%= if editable_columns?(@block, @tree_identity_safe) do %>
             <div class="bp-cols" data-paper-columns-editor-frame style={"--bp-cols:#{max(length(@block["columns"]), 1)}"}>
               <div :for={{column, column_index} <- Enum.with_index(@block["columns"])} class="bp-cols__c" data-column-index={column_index} data-paper-container-column-index={column_index}>
-                <%= for segment <- column_segments(column, @canvas_enabled) do %>
+                <%= for segment <- column_segments(column, column_index, @block, @canvas_enabled, @canvas_retained, @root_slug) do %>
                   <%= case segment do %>
                     <% {:run, run_blocks, ordinal} -> %>
                       <.canvas_run
@@ -2417,6 +2426,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         paper_links={@paper_links}
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
+                        canvas_retained={@canvas_retained}
                       />
                   <% end %>
                 <% end %>
@@ -2811,6 +2821,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           paper_links={@paper_links}
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
+                          canvas_retained={@canvas_retained}
                         />
                     <% end %>
                   <% end %>
@@ -2923,6 +2934,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         canvas_enabled={@canvas_enabled} paper_links={@paper_links}
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
+                        canvas_retained={@canvas_retained}
                       />
                   <% end %>
                 <% end %>
@@ -3033,6 +3045,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           paper_links={@paper_links}
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
+                          canvas_retained={@canvas_retained}
                         />
                       </div>
                   <% end %>
@@ -3059,6 +3072,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     paper_links={@paper_links}
                     tree_identity_safe={@tree_identity_safe}
                     table_editor_target_ids={@table_editor_target_ids}
+                    canvas_retained={@canvas_retained}
                   />
                 </div>
               <% end %>
@@ -3593,15 +3607,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       length(ids) == length(Enum.uniq(ids))
   end
 
-  defp section_segments(%{"blocks" => blocks}, true),
-    do: blocks |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals()
+  defp section_segments(%{"id" => id, "blocks" => blocks}, true, retained, root_slug),
+    do:
+      blocks
+      |> PaperCanvas.partition_runs(PaperCanvas.retained_ids(retained, root_slug, {:section, id}))
+      |> PaperCanvas.with_run_ordinals()
 
-  defp section_segments(%{"blocks" => blocks}, false), do: Enum.map(blocks, &{:block, &1})
+  defp section_segments(%{"blocks" => blocks}, false, _retained, _root_slug),
+    do: Enum.map(blocks, &{:block, &1})
 
-  defp column_segments(blocks, true),
-    do: blocks |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals()
+  defp column_segments(blocks, index, %{"id" => id}, true, retained, root_slug),
+    do:
+      blocks
+      |> PaperCanvas.partition_runs(
+        PaperCanvas.retained_ids(retained, root_slug, {:columns, id, index})
+      )
+      |> PaperCanvas.with_run_ordinals()
 
-  defp column_segments(blocks, false), do: Enum.map(blocks, &{:block, &1})
+  defp column_segments(blocks, _index, _block, false, _retained, _root_slug),
+    do: Enum.map(blocks, &{:block, &1})
 
   defp empty_step_body?(%{"children" => children}) when is_list(children), do: children == []
   defp empty_step_body?(%{"children" => children}) when children not in [nil, false], do: false
