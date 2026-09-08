@@ -2101,6 +2101,21 @@
       ]) {
         if (value != null && value !== "") context[key] = value;
       }
+      if (wrapper.dataset.canvasBlocks != null) {
+        try {
+          const confirmedBlocks = JSON.parse(wrapper.dataset.canvasBlocks);
+          const confirmedRunIds = Array.isArray(confirmedBlocks)
+            ? confirmedBlocks.map((block) => block?.id)
+            : [];
+          if (confirmedRunIds.length > 0 && confirmedRunIds.every((id) =>
+            typeof id === "string" && id.trim() !== ""
+          ) && new Set(confirmedRunIds).size === confirmedRunIds.length) {
+            context.container_run_ids = confirmedRunIds;
+          }
+        } catch (_error) {
+          // The exact raw confirmed source remains in the fragment below.
+        }
+      }
       fragments.push({
         wrapper_id: wrapper.id || null,
         run_id: wrapper.id?.startsWith("paper-canvas-")

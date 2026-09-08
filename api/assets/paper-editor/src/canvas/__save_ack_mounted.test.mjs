@@ -1276,7 +1276,7 @@ try {
   assert.deepEqual(recoveryBundle.fragments[0], {
     wrapper_id: "paper-canvas-probe-run-0",
     run_id: "probe-run-0",
-    context: { container_kind: "document" },
+    context: { container_kind: "document", container_run_ids: ["original"] },
     source: {
       dataset: "production",
       confirmed_blocks_json: JSON.stringify([paragraph("original", "Original")]),
@@ -1291,6 +1291,7 @@ try {
     container_id: "section-7",
     container_kind: "section",
     container_run: "1",
+    container_run_ids: ["nested"],
   }, "a nested run keeps its exact server container context");
   assert.equal(recoveryBundle.fragments[1].draft.mode, "markdown");
   assert.equal(recoveryBundle.fragments[1].draft.raw_source, malformedRawSource,
