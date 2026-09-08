@@ -32,6 +32,7 @@ defmodule BarkparkWeb.PaperCanvasLease do
     |> assign(:paper_canvas_resume_status, :none)
     |> assign(:paper_canvas_lease_tokens, %{})
     |> assign(:paper_canvas_lease_key, nil)
+    |> assign(:paper_canvas_lease_scope, nil)
     |> Phoenix.LiveView.attach_hook(:paper_canvas_resume_halt, :handle_event, &halt_mutation/3)
   end
 
@@ -53,6 +54,7 @@ defmodule BarkparkWeb.PaperCanvasLease do
         |> assign(:paper_canvas_resume_halt, false)
         |> assign(:paper_canvas_resume_status, :resumed)
         |> assign(:paper_canvas_lease_key, key)
+        |> assign(:paper_canvas_lease_scope, scope)
         |> assign(:paper_canvas_resume_attempt, @empty_attempt)
 
       :halt ->
@@ -62,6 +64,7 @@ defmodule BarkparkWeb.PaperCanvasLease do
         |> assign(:paper_canvas_resume_halt, true)
         |> assign(:paper_canvas_resume_status, :blocked)
         |> assign(:paper_canvas_lease_key, key)
+        |> assign(:paper_canvas_lease_scope, scope)
         |> assign(:paper_canvas_resume_attempt, @empty_attempt)
 
       :pending ->
@@ -71,6 +74,7 @@ defmodule BarkparkWeb.PaperCanvasLease do
         |> assign(:paper_canvas_resume_halt, true)
         |> assign(:paper_canvas_resume_status, :pending)
         |> assign(:paper_canvas_lease_key, key)
+        |> assign(:paper_canvas_lease_scope, scope)
         |> assign(:paper_canvas_resume_attempt, @empty_attempt)
 
       {:pending, ownership, tokens} ->
@@ -80,22 +84,29 @@ defmodule BarkparkWeb.PaperCanvasLease do
         |> assign(:paper_canvas_resume_halt, true)
         |> assign(:paper_canvas_resume_status, :pending)
         |> assign(:paper_canvas_lease_key, key)
+        |> assign(:paper_canvas_lease_scope, scope)
         |> assign(:paper_canvas_resume_attempt, @empty_attempt)
 
       :none ->
-        case socket.assigns[:paper_canvas_lease_key] do
-          nil ->
-            socket
-            |> assign(:paper_canvas_resume_attempt, @empty_attempt)
-            |> assign(:paper_canvas_lease_key, key)
+        if authorized? != true do
+          reset_socket(socket)
+        else
+          case socket.assigns[:paper_canvas_lease_scope] do
+            nil ->
+              socket
+              |> assign(:paper_canvas_resume_attempt, @empty_attempt)
+              |> assign(:paper_canvas_lease_key, key)
+              |> assign(:paper_canvas_lease_scope, scope)
 
-          ^key ->
-            assign(socket, :paper_canvas_resume_attempt, @empty_attempt)
+            ^scope ->
+              assign(socket, :paper_canvas_resume_attempt, @empty_attempt)
 
-          _different_key ->
-            socket
-            |> reset_socket()
-            |> assign(:paper_canvas_lease_key, key)
+            _different_scope ->
+              socket
+              |> reset_socket()
+              |> assign(:paper_canvas_lease_key, key)
+              |> assign(:paper_canvas_lease_scope, scope)
+          end
         end
     end
   end
@@ -112,11 +123,13 @@ defmodule BarkparkWeb.PaperCanvasLease do
         |> assign(:paper_canvas_resume_halt, false)
         |> assign(:paper_canvas_resume_status, :resumed)
         |> assign(:paper_canvas_lease_key, key)
+        |> assign(:paper_canvas_lease_scope, scope)
 
       :unsupported ->
         socket
         |> assign(:paper_canvas_lease_tokens, %{})
         |> assign(:paper_canvas_lease_key, key)
+        |> assign(:paper_canvas_lease_scope, scope)
 
       :overflow ->
         socket
@@ -124,6 +137,7 @@ defmodule BarkparkWeb.PaperCanvasLease do
         |> assign(:paper_canvas_resume_halt, true)
         |> assign(:paper_canvas_resume_status, :blocked)
         |> assign(:paper_canvas_lease_key, key)
+        |> assign(:paper_canvas_lease_scope, scope)
     end
   end
 
@@ -136,6 +150,7 @@ defmodule BarkparkWeb.PaperCanvasLease do
     |> assign(:paper_canvas_resume_status, :none)
     |> assign(:paper_canvas_resume_attempt, @empty_attempt)
     |> assign(:paper_canvas_lease_key, nil)
+    |> assign(:paper_canvas_lease_scope, nil)
   end
 
   @doc false

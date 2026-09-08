@@ -343,6 +343,43 @@ defmodule BarkparkWeb.PaperCanvasLeaseTest do
     assert switched.assigns.paper_canvas_resume_status == :none
     assert switched.assigns.paper_canvas_lease_tokens == %{}
     assert switched.assigns.paper_canvas_retained == nil
+
+    tenant_switched =
+      PaperCanvasLease.resume_socket(
+        issued,
+        %{paper | workspace_id: "other-workspace"},
+        blocks,
+        true
+      )
+
+    assert tenant_switched.assigns.paper_canvas_resume_status == :none
+    assert tenant_switched.assigns.paper_canvas_lease_tokens == %{}
+    assert tenant_switched.assigns.paper_canvas_retained == nil
+
+    authority_switched = %{
+      issued
+      | assigns: Map.put(issued.assigns, :current_user, %{id: "other-author"})
+    }
+
+    authority_switched = PaperCanvasLease.resume_socket(authority_switched, paper, blocks, true)
+    assert authority_switched.assigns.paper_canvas_lease_tokens == %{}
+    assert authority_switched.assigns.paper_canvas_retained == nil
+
+    project_switched =
+      PaperCanvasLease.resume_socket(
+        issued,
+        %{paper | project_id: "other-project"},
+        blocks,
+        true
+      )
+
+    assert project_switched.assigns.paper_canvas_lease_tokens == %{}
+    assert project_switched.assigns.paper_canvas_retained == nil
+
+    unauthorized = PaperCanvasLease.resume_socket(issued, paper, blocks, false)
+    assert unauthorized.assigns.paper_canvas_lease_tokens == %{}
+    assert unauthorized.assigns.paper_canvas_retained == nil
+    assert unauthorized.assigns.paper_canvas_resume_halt == false
   end
 
   test "scope preserves the exact draft document id used by the rendered editor key" do
