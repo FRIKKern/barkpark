@@ -19,6 +19,7 @@ defmodule Barkpark.Tasks.ClaimTest do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
+  alias Barkpark.Tasks.QueueGate
   alias Barkpark.Content.Document
 
   @dataset "production"
@@ -410,6 +411,85 @@ defmodule Barkpark.Tasks.ClaimTest do
       queue_opts = scope ++ [phase_id: phase_id, dataset: @dataset]
 
       assert {:ok, nil} = Tasks.claim("worker-newcomer", queue_opts)
+    end
+
+    test "a FRESH lease on a ready-eligible row survives a non-UTC DB session", %{scope: scope} do
+      # THE POPULATION: `open` (so the queue's lifecycle filter does NOT already
+      # exclude it) carrying a claim map whose `ts_iso` is seconds old. `bp task
+      # stage <id> open` on a live claim produces exactly this, and it is the
+      # only shape where `executable_query/0`'s lease arm is the DECIDING factor
+      # rather than a second opinion — every `in_progress` fixture in this
+      # describe is dropped by lifecycle BEFORE the lease arm is consulted, so
+      # those tests pass whatever the lease arm answers.
+      #
+      # WHY THE TIMEZONE: every writer stamps UTC with a trailing `Z`
+      # (`DateTime.utc_now() |> DateTime.to_iso8601()` at claim.ex:446, :527 and
+      # pulse.ex:177), but the cutoff is built with `to_char(now() - ...)` and
+      # `now()` renders in the SESSION's TimeZone. Comparing a UTC string
+      # against a local-time string shifts the boundary by the session's UTC
+      # offset, making the EFFECTIVE lease `ttl - offset`. At +02:00 against a
+      # 2700s TTL that is -4500 seconds: NEGATIVE, so every claim however fresh
+      # reads as expired and the ready queue hands out a row somebody is
+      # actively holding. West of UTC the same defect runs the other way and the
+      # lease never expires at all.
+      #
+      # A UTC test runner has no offset, so this is invisible to the rest of the
+      # suite by construction — it needs its own test, not a trusted green.
+      fresh_ts = DateTime.utc_now() |> DateTime.to_iso8601()
+
+      stale_ts =
+        DateTime.utc_now()
+        |> DateTime.add(-(QueueGate.lease_ttl_seconds() + 86_400), :second)
+        |> DateTime.to_iso8601()
+
+      live_phase = uniq("phase-tz-live")
+      dead_phase = uniq("phase-tz-dead")
+
+      live =
+        mk_task!(uniq("tz-live"), scope, %{
+          "parent_id" => live_phase,
+          "lifecycle_status" => "open",
+          "claim" => %{"worker" => "worker-holder", "epoch" => 2, "ts_iso" => fresh_ts}
+        })
+
+      _dead =
+        mk_task!(uniq("tz-dead"), scope, %{
+          "parent_id" => dead_phase,
+          "lifecycle_status" => "open",
+          "claim" => %{"worker" => "worker-long-gone", "epoch" => 2, "ts_iso" => stale_ts}
+        })
+
+      live_opts = scope ++ [phase_id: live_phase, dataset: @dataset]
+      dead_opts = scope ++ [phase_id: dead_phase, dataset: @dataset]
+
+      # PRECONDITION, asserted rather than assumed: the fixture really is
+      # ready-eligible, so an {:ok, nil} below is the LEASE arm refusing and not
+      # the lifecycle filter having quietly excluded the row.
+      reloaded = Repo.get!(Document, live.id)
+      assert reloaded.content["lifecycle_status"] == "open"
+      assert reloaded.content["claim"]["worker"] == "worker-holder"
+
+      # CONTROL — this queue, this scope, this fixture SHAPE can hand a row out.
+      # Without it, every assertion below would pass on a queue that returns nil
+      # for everything, and the test would prove nothing at all.
+      assert {:ok, %Document{}} = Tasks.claim("worker-control", dead_opts)
+
+      # CONTROL — on a UTC session the fresh lease is correctly held.
+      Repo.query!("SET LOCAL TIME ZONE 'UTC'")
+      assert {:ok, nil} = Tasks.claim("worker-newcomer", live_opts)
+
+      # THE ASSERTION. Only the session timezone changes between here and the
+      # line above.
+      # RED BEFORE THE FIX: {:ok, %Document{}} — worker-newcomer walks off with a
+      # row worker-holder claimed seconds ago.
+      Repo.query!("SET LOCAL TIME ZONE 'Europe/Oslo'")
+      assert {:ok, nil} = Tasks.claim("worker-newcomer", live_opts)
+
+      # And west of UTC, where the same defect instead makes a lease never
+      # expire — the inert direction, still wrong, and it must not pass by
+      # accident either.
+      Repo.query!("SET LOCAL TIME ZONE 'America/New_York'")
+      assert {:ok, nil} = Tasks.claim("worker-newcomer", live_opts)
     end
 
     test "a LIVE claim is still foreign: a contender gets :not_ready and the queue skips it",
