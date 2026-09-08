@@ -125,7 +125,15 @@ defmodule BarkparkWeb.TicketsAttachmentsSessionPipelineTest do
       |> put_req_header("authorization", "Bearer #{public_raw}")
       |> get(path)
 
-    assert conn.status in [401, 403]
+    # WHICH GATE: a PERMISSION-TIER refusal — `{:error, :forbidden}`, which
+    # carries NO `reason`. Deliberately distinct from `ResolveWorkspace`'s
+    # membership arm (`:forbidden_membership`, reason "not_a_member"): both are
+    # 403 "forbidden", so the absence of `reason` is what says the caller got
+    # past the membership check and was refused on its authority.
+    assert conn.status == 403
+    err = Jason.decode!(conn.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    refute Map.has_key?(err, "reason")
     refute conn.resp_body == @pdf
   end
 
@@ -138,7 +146,15 @@ defmodule BarkparkWeb.TicketsAttachmentsSessionPipelineTest do
       |> put_req_header("authorization", "Bearer #{public_raw}")
       |> get(path)
 
-    assert conn.status in [401, 403]
+    # WHICH GATE: a PERMISSION-TIER refusal — `{:error, :forbidden}`, which
+    # carries NO `reason`. Deliberately distinct from `ResolveWorkspace`'s
+    # membership arm (`:forbidden_membership`, reason "not_a_member"): both are
+    # 403 "forbidden", so the absence of `reason` is what says the caller got
+    # past the membership check and was refused on its authority.
+    assert conn.status == 403
+    err = Jason.decode!(conn.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    refute Map.has_key?(err, "reason")
     refute conn.resp_body == @pdf
   end
 
@@ -151,7 +167,15 @@ defmodule BarkparkWeb.TicketsAttachmentsSessionPipelineTest do
       |> Plug.Test.init_test_session(%{"api_token" => public_raw})
       |> get(path)
 
-    assert conn.status in [401, 403]
+    # WHICH GATE: a PERMISSION-TIER refusal — `{:error, :forbidden}`, which
+    # carries NO `reason`. Deliberately distinct from `ResolveWorkspace`'s
+    # membership arm (`:forbidden_membership`, reason "not_a_member"): both are
+    # 403 "forbidden", so the absence of `reason` is what says the caller got
+    # past the membership check and was refused on its authority.
+    assert conn.status == 403
+    err = Jason.decode!(conn.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    refute Map.has_key?(err, "reason")
     refute conn.resp_body == @pdf
   end
 
@@ -165,7 +189,15 @@ defmodule BarkparkWeb.TicketsAttachmentsSessionPipelineTest do
       |> put_req_header("authorization", "Bearer #{share_raw}")
       |> get(path)
 
-    assert conn.status in [401, 403]
+    # WHICH GATE: a PERMISSION-TIER refusal — `{:error, :forbidden}`, which
+    # carries NO `reason`. Deliberately distinct from `ResolveWorkspace`'s
+    # membership arm (`:forbidden_membership`, reason "not_a_member"): both are
+    # 403 "forbidden", so the absence of `reason` is what says the caller got
+    # past the membership check and was refused on its authority.
+    assert conn.status == 403
+    err = Jason.decode!(conn.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    refute Map.has_key?(err, "reason")
     refute conn.resp_body == @pdf
   end
 
