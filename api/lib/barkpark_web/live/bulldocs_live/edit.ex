@@ -81,6 +81,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     paper-toggle-edit
     paper-op
     paper-ops
+    paper-history-step
     paper-edit-block
     paper-block-autosave
     paper-add-block
@@ -213,12 +214,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
            form_source
          ) do
       {:ok, socket, receipt, outcome} ->
-        result = %{
-          saved: true,
-          request_id: request_id,
-          replayed: outcome == :replayed,
-          rev: receipt.rev
-        }
+        result = receipt_result(receipt, request_id, outcome)
 
         assign(
           socket,
@@ -324,7 +320,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
         opts =
           write_opts(socket) ++
-            [if_rev: if_rev] ++
+            [if_rev: if_rev, contextual_history: true] ++
             if(context, do: [canvas_run_context: context], else: [])
 
         # Slice 4: the exactly-once seam is the one the SHIPPED editor drives —
@@ -409,6 +405,53 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
         replay_principal_key(assigns),
         opts
       )
+    end
+  end
+
+  @doc "Apply one opaque, request-identified contextual history step."
+  def apply_history_step(socket, params) do
+    request_id = is_map(params) && Map.get(params, "request_id")
+
+    with :ok <- validate_history_step_params(params),
+         assigns <- fresh_authorization_assigns(socket.assigns),
+         paper <- socket.assigns[:paper_doc],
+         workspace_id <- doc_field(paper, :workspace_id),
+         slug when is_binary(slug) <- socket.assigns[:slug],
+         :ok <- authorize_history_step(assigns, workspace_id, slug),
+         {:ok, if_rev} <- revision(params["if_rev"]),
+         principal when is_binary(principal) <- replay_principal_key(assigns),
+         {:ok, receipt, outcome} <-
+           Content.apply_paper_contextual_history_once(
+             slug,
+             params["history_ref"],
+             params["action"],
+             socket.assigns[:dataset],
+             request_id,
+             principal,
+             write_opts_from_assigns(assigns) ++ [if_rev: if_rev]
+           ) do
+      if outcome != :replayed, do: record_edit(socket)
+
+      socket =
+        if outcome == :replayed do
+          socket
+        else
+          socket
+          |> sync()
+          |> reconcile_canvas(request_id)
+        end
+
+      socket
+      |> assign(:save_status, "Auto-saved")
+      |> assign(:last_save_ok?, true)
+      |> assign(:paper_halt, nil)
+      |> assign(:last_save_result, history_receipt_result(receipt, request_id, outcome))
+    else
+      {:error, :denied} -> failed_history_step(socket, request_id, :history_unavailable, true)
+      nil -> failed_history_step(socket, request_id, :invalid_history_request)
+      :error -> failed_history_step(socket, request_id, :invalid_history_request)
+      {:error, reason} -> failed_history_step(socket, request_id, history_error_code(reason))
+      _invalid -> failed_history_step(socket, request_id, :invalid_history_request)
     end
   end
 
@@ -679,8 +722,12 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   Public so a test can assert the shape without driving a whole LiveView.
   """
   def write_opts(socket) do
-    scope = ScopeHelpers.scope_opts(socket)
-    ctx = PaperActor.caller_context(scope, socket.assigns)
+    write_opts_from_assigns(socket.assigns)
+  end
+
+  defp write_opts_from_assigns(assigns) do
+    scope = ScopeHelpers.scope_opts_from_assigns(assigns)
+    ctx = PaperActor.caller_context(scope, assigns)
 
     scope
     |> Keyword.put(:caller_context, ctx)
@@ -696,7 +743,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   defp refuse_save(socket, request_id), do: socket |> refuse() |> failed_save(request_id)
 
   defp failed_save(socket, request_id, rejection \\ nil) do
-    result = %{saved: false, request_id: request_id}
+    result = %{saved: false, request_id: request_id, changed: false, history_step: nil}
 
     result =
       if rejection == :validation,
@@ -708,6 +755,105 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> assign(:last_save_ok?, false)
     |> assign(:last_save_result, result)
   end
+
+  defp validate_history_step_params(params) when is_map(params) do
+    if Enum.sort(Map.keys(params)) == Enum.sort(~w(history_ref action request_id if_rev)),
+      do: :ok,
+      else: {:error, :invalid_history_step}
+  end
+
+  defp validate_history_step_params(_params), do: {:error, :invalid_history_step}
+
+  defp authorize_history_step(assigns, workspace_id, slug) do
+    if PaperViewer.can_edit?(assigns, workspace_id, slug),
+      do: :ok,
+      else: {:error, :denied}
+  end
+
+  defp failed_history_step(socket, request_id, code, denied? \\ false) do
+    socket = if denied?, do: put_flash(socket, :error, @denial), else: socket
+
+    result = %{
+      saved: false,
+      request_id: request_id,
+      changed: false,
+      history_step: nil,
+      rejected: Atom.to_string(code)
+    }
+
+    result =
+      if code == :history_conflict do
+        Map.merge(result, %{conflict: true, current_rev: socket.assigns[:paper_rev]})
+      else
+        result
+      end
+
+    socket
+    |> assign(:save_status, "Save failed")
+    |> assign(:last_save_ok?, false)
+    |> assign(:last_save_result, result)
+  end
+
+  defp history_error_code(:history_ref_consumed), do: :history_ref_consumed
+
+  defp history_error_code(reason)
+       when reason in [:history_conflict, :precondition_failed, :block_not_found, :duplicate_id],
+       do: :history_conflict
+
+  defp history_error_code(:idempotency_receipt_expired), do: :history_expired
+
+  defp history_error_code(reason)
+       when reason in [
+              :idempotency_receipt_missing,
+              :idempotency_receipt_pending,
+              :idempotency_receipt_wrong_scope,
+              :idempotency_receipt_malformed,
+              :idempotency_receipt_invalid,
+              :invalid_history
+            ],
+       do: :history_unavailable
+
+  defp history_error_code(reason)
+       when reason in [
+              :invalid_request_id,
+              :invalid_history_step,
+              :invalid_history_action,
+              :history_action_mismatch,
+              :invalid_paper_contextual_history_request,
+              :invalid_canvas_run_context
+            ],
+       do: :invalid_history_request
+
+  defp history_error_code(_reason), do: :history_unavailable
+
+  @doc "Build a public exact-write receipt without exposing private history values."
+  def receipt_result(receipt, request_id, outcome) do
+    %{
+      saved: true,
+      request_id: request_id,
+      replayed: outcome == :replayed,
+      rev: receipt.rev,
+      changed: receipt.op_count > 0,
+      history_step: opaque_history_step(receipt, request_id)
+    }
+  end
+
+  defp history_receipt_result(receipt, request_id, outcome) do
+    %{
+      saved: true,
+      request_id: request_id,
+      replayed: outcome == :replayed,
+      rev: receipt.rev,
+      history_step: opaque_history_step(receipt, request_id)
+    }
+  end
+
+  defp opaque_history_step(%{contextual_history: %{"action" => action}}, request_id)
+       when action in ["undo", "redo"] and is_binary(request_id) do
+    %{version: 1, ref: request_id, action: action}
+  end
+
+  defp opaque_history_step(_receipt, _request_id), do: nil
 
   # Connected item-share readers retain the signed mount session in the
   # PluginScopeSession liveness assign. Resolve its raw link again for EVERY
@@ -770,7 +916,14 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> reconcile_canvas(request_id)
     |> assign(:save_status, "Auto-saved")
     |> assign(:last_save_ok?, true)
-    |> assign(:last_save_result, %{saved: true, request_id: request_id, rev: result.rev})
+    |> assign(:last_save_result, %{
+      saved: true,
+      request_id: request_id,
+      replayed: false,
+      rev: result.rev,
+      changed: true,
+      history_step: nil
+    })
     # A prior halt cleared: the next accepted edit dismisses the banner.
     |> assign(:paper_halt, nil)
   end
@@ -786,6 +939,8 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> assign(:last_save_result, %{
       saved: false,
       request_id: request_id,
+      changed: false,
+      history_step: nil,
       conflict: true,
       current_rev: socket.assigns[:paper_rev]
     })
@@ -796,7 +951,12 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> put_flash(:error, constraint_flash(message))
     |> assign(:save_status, "Save failed")
     |> assign(:last_save_ok?, false)
-    |> assign(:last_save_result, %{saved: false, request_id: request_id})
+    |> assign(:last_save_result, %{
+      saved: false,
+      request_id: request_id,
+      changed: false,
+      history_step: nil
+    })
   end
 
   # A lifecycle-hook HALT. MIRROR the server truth verbatim; the reader authors
@@ -809,7 +969,12 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> put_flash(:error, message)
     |> assign(:save_status, "Save failed")
     |> assign(:last_save_ok?, false)
-    |> assign(:last_save_result, %{saved: false, request_id: request_id})
+    |> assign(:last_save_result, %{
+      saved: false,
+      request_id: request_id,
+      changed: false,
+      history_step: nil
+    })
   end
 
   defp handle_result({:error, _reason}, socket, request_id) do
@@ -817,7 +982,12 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> put_flash(:error, "Edit failed")
     |> assign(:save_status, "Save failed")
     |> assign(:last_save_ok?, false)
-    |> assign(:last_save_result, %{saved: false, request_id: request_id})
+    |> assign(:last_save_result, %{
+      saved: false,
+      request_id: request_id,
+      changed: false,
+      history_step: nil
+    })
   end
 
   defp revision(n) when is_integer(n) and n >= 0, do: {:ok, n}
