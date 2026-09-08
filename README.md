@@ -1,36 +1,37 @@
 <!-- doc-tier: human | canonical-for: project-overview | budget: 1750tok -->
 # Barkpark
 
-Barkpark is an open-source platform for building tools that work together. You
-control the server, the data, and the code. Run it on your laptop or a remote
-server, and work through a browser, terminal, command line, or AI agent.
+Barkpark is an open-source platform you can shape around your work. Use one
+instance for a single job, or combine applications into a larger system. They
+share a core for data, authentication, permissions, and APIs.
 
-It comes with tools for documents, spreadsheets, structured data, and shared
-tasks. They use a common core for storage, schemas, permissions, and APIs. You can
-build your own applications on that foundation, with fewer separate services to
-choose and connect.
+You control the server, the data, and the code. Run it on your laptop or a remote
+server, and work through a browser, terminal, command line, or AI agent.
 
 [Try the browser app](https://api.barkpark.cloud/studio) · [Set up Barkpark](docs/setup/QUICKSTART.md) · [Documentation](docs/INDEX.md)
 
-## Start with familiar tools
+## One purpose or a larger system
 
-Write a project update with text, tables, and images, then share it for coworkers
-to read in a browser or terminal. Barkpark calls these documents **Papers**. You
-can host them on a local network or a remote server.
+You can use Barkpark as:
 
-Work on a budget in a spreadsheet with cells, formulas, and tabs. These are
-**Sheets**. A Sheet lives in Barkpark and can be embedded in a Paper. Save changes
-to the budget, and the figures embedded in your project update refresh. You can
-share the report without exporting another XLSX file.
+- A media library for organizing images and files.
+- A task manager for planning work and keeping track of who is doing it.
+- A CMS for defining and editing the content behind a website or catalog.
+- A place to write and share documents, called **Papers**.
+- A place to work with spreadsheets, called **Sheets**, with cells and formulas.
 
-An agent can update that spreadsheet through the API while you review it in the
-browser. The document and its data stay connected. This is the reason for the
-shared core: each tool can become part of another workflow.
+You can also build email workflows with an agent and a mail service you configure.
+These are uses of the platform; you can add your own applications through plugins
+and the API.
 
-You can also define your own data types, such as products in a catalog or recipes
-for a website, and edit their records visually or through an agent. This is
-Barkpark's content management side. The [recipe example below](#create-your-first-record)
-shows how a new data type becomes usable.
+One installation might only manage photos. Another might hold a publication's
+catalog, media, assignments, documents, and budgets. You choose what belongs
+together and what deserves its own instance.
+
+The core supplies the common parts. Each application can reuse the data model,
+storage, authentication, and access controls. Sharing controls let you choose
+who can read or change content and what you make public. The aim is to keep the
+system understandable as the work gets more complicated.
 
 ## Choose how you work
 
@@ -45,9 +46,8 @@ The goal is full control from whichever interface you prefer. An agent should be
 able to operate the whole system, including setup and access management. People
 should be able to read the data, understand changes, and take over.
 
-Today, you can inspect document revisions and revoke workspace tokens. A shared
-task board records claims and evidence so you can follow work across agent
-sessions. These controls help you see what happened behind a finished page.
+Inspect document revisions and task evidence to follow an agent's work across
+sessions. Revoke its workspace token when it should no longer have access.
 See [agent setup](docs/setup/AGENT-ONRAMPS.md), the [task workflow](docs/setup/TASK-SYSTEM.md),
 and [access control](docs/auth.md).
 
