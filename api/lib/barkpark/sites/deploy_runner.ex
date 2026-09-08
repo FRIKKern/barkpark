@@ -1351,17 +1351,42 @@ defmodule Barkpark.Sites.DeployRunner do
   # BUILDS the string, so there is no window in which the untouched string
   # exists on a path someone can widen.
   #
-  # CORRECTED 2026-09-08 (task-04e89e88f056aa38). This paragraph used to justify
-  # the local redactor by asserting that "the measured leak rate of the shared
-  # scrubber against this box's own `bppat_` token shape is 95.1%". That figure
-  # is STALE and matched neither defect it stood in for. DERIVATION, re-read on
-  # main on 2026-09-08 in `cloud/lib/barkpark_cloud/failure_copy.ex`: the
-  # SHAPE-BLINDNESS leak that file measures is 94.3%, and it is CLOSED —
-  # `@secret_patterns` now carries `bppat_`/`bpcs_`/`bp_<kind>_` explicitly. The
-  # ORDERING leak it measures is 2000/2000 = 100%, and it is CLOSED too —
-  # `raw/1` = `strip_ansi |> scrub`, test-pinned. Nothing in the tree measures
-  # 95.1%. Do not re-derive the local redactor's justification from a leak rate;
-  # it is `@token_re` below, at the build site, on purpose.
+  # CORRECTED 2026-09-08 (task-04e89e88f056aa38), then CORRECTED AGAIN the same
+  # day, because the first correction was WRONG. Both moves are kept: the record
+  # of the error is part of the fix.
+  #
+  # (1) ORIGINALLY this paragraph justified the local redactor by asserting "the
+  # measured leak rate of the shared scrubber against this box's own `bppat_`
+  # token shape is 95.1%".
+  # (2) THE FIRST CORRECTION replaced that with "that figure is STALE and matched
+  # neither defect it stood in for. Nothing in the tree measures 95.1%." THAT WAS
+  # FALSE, and it shipped.
+  # (3) THIS REPAIR: 95.1% is a real, well-derived measurement. It is written
+  # down in `.claude/workflows/bp-deploy-reliability-charter.md`, decision D29,
+  # which derives it as: 2,000 tokens minted with the production expression —
+  # `Barkpark.Auth.create_personal_access_token/3` in `api/lib/barkpark/auth.ex`,
+  # whose raw value is `@pat_token_prefix <> Base.url_encode64(32 bytes)` — of
+  # which the `BARKPARK_TOKEN=<tok>` shape leaks 1902/2000 = 95.1% through
+  # `FailureCopy.scrub/1`; D29 separately measures the shipped
+  # `scrub |> strip_ansi` order leaking a COLOURISED token at the same 95.1%,
+  # against 0% for `strip_ansi |> scrub`.
+  #
+  # 95.1% AND 94.3% ARE NOT RIVALS — they measure different SCOPES, and reading
+  # them as competing for one slot is what produced the false correction above.
+  # 95.1% is PER-SHAPE (D29: the `BARKPARK_TOKEN=<tok>` shape over 2,000 trials,
+  # and separately the colourised shape). 94.3% is the AGGREGATE, stated in
+  # `cloud/lib/barkpark_cloud/failure_copy.ex`: "a real token measured 94.3%
+  # LEAKED through `scrub/1` in four of six shapes". Both are real measurements
+  # of different things.
+  #
+  # WHAT IS TRUE OF 95.1% TODAY is that it is HISTORICAL, not live: it measured a
+  # defect that is now CLOSED — which is why it is no longer the justification,
+  # NOT because it was fabricated. Re-read on main on 2026-09-08 in
+  # `cloud/lib/barkpark_cloud/failure_copy.ex`: shape-blindness is closed
+  # (`@secret_patterns` now carries `bppat_`/`bpcs_`/`bp_<kind>_` explicitly),
+  # and ordering is closed (`raw/1` = `strip_ansi |> scrub`, test-pinned). Do not
+  # re-derive the local redactor's justification from a leak rate, live or
+  # historical; it is `@token_re` below, at the build site, on purpose.
   #
   # What must SURVIVE is the diagnosis — a File.Error's action and path, an
   # errno's meaning — because "enoent" alone is what made 25 failures
