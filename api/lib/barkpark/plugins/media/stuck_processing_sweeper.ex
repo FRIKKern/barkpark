@@ -118,6 +118,21 @@ defmodule Barkpark.Plugins.Media.StuckProcessingSweeper do
   @attempts_key "bp_processing_attempts"
   @media_file_key "mediaFileId"
 
+  # SINGLE-SOURCE GUARD for `stuck_candidates/1`. That query spells the document
+  # type and the JSONB status key as SQL LITERALS so the planner can match the
+  # partial index `documents_media_processing_idx` (see the comment on the
+  # function). Ecto's `fragment/1` refuses interpolation into its format string,
+  # so those literals cannot be built from the attributes below — this assertion
+  # is the link instead. Editing either attribute without editing the matching
+  # fragment is a COMPILE ERROR, not a silent seq-scan.
+  unless @asset_type == "mediaAsset" and @status_key == "bp_processing_status" do
+    raise CompileError,
+      description:
+        "stuck_candidates/1 hard-codes 'mediaAsset' / 'bp_processing_status' as SQL " <>
+          "literals to reach documents_media_processing_idx; @asset_type/@status_key " <>
+          "changed without updating those fragments"
+  end
+
   @default_after_seconds 900
   @default_batch_limit 500
   @default_max_attempts 5
@@ -163,11 +178,36 @@ defmodule Barkpark.Plugins.Media.StuckProcessingSweeper do
   # Candidate set: type mediaAsset, still `"processing"`, untouched since before
   # the cutoff. Oldest first (so nothing starves), bounded per pass. `ready` and
   # `failed` rows fail the status filter — terminal states are never revisited.
+  #
+  # THE TYPE AND THE STATUS KEY/VALUE ARE SQL LITERALS ON PURPOSE. They are the
+  # predicate of the partial index `documents_media_processing_idx` (migration
+  # 20260908094217), and a partial index is only usable when the planner can
+  # PROVE the query's WHERE implies the index predicate. Passed as BIND
+  # PARAMETERS — `d.type == ^@asset_type` and `fragment("?->>? = ?", d.content,
+  # ^@status_key, "processing")`, which is what this query used to emit — that
+  # proof holds only under a CUSTOM plan, where the planner substitutes the
+  # actual values first. Under a GENERIC plan (which is exactly what a
+  # long-lived per-minute cron worker's cached prepared statement invites) the
+  # planner sees `type = $1 AND content->>$2 = 'processing'`, cannot match the
+  # predicate, and falls back to `Parallel Seq Scan on documents` + `Sort`.
+  # Measured both ways on a 200k-row sandbox under `force_generic_plan`; see the
+  # migration's moduledoc for the two plans.
+  #
+  # Ecto's `fragment/1` forbids ANY interpolation into its format string (its
+  # SQL-injection guard, and it does not exempt compile-time module attributes),
+  # so the two literals are spelled out below rather than built from
+  # `@asset_type`/`@status_key`. They stay single-sourced by the compile-time
+  # assertion above: change either attribute without changing these fragments
+  # and the module STOPS COMPILING.
+  #
+  # If either literal turns back into a bind parameter, Postgres SILENTLY stops
+  # using the index — no error, just the seq-scan back. Guarded by
+  # `test/barkpark/plugins/media/stuck_processing_index_test.exs`.
   defp stuck_candidates(%DateTime{} = cutoff) do
     from(d in Document,
       where:
-        d.type == ^@asset_type and
-          fragment("?->>? = ?", d.content, ^@status_key, "processing") and
+        fragment("? = 'mediaAsset'", d.type) and
+          fragment("?->>'bp_processing_status' = 'processing'", d.content) and
           d.updated_at < ^cutoff,
       order_by: [asc: d.updated_at],
       limit: ^batch_limit()
