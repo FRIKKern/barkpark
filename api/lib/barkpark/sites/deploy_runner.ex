@@ -134,8 +134,17 @@ defmodule Barkpark.Sites.DeployRunner do
 
   This slice keeps the record on the BOX. No raw log bytes are exposed over
   HTTP here: the build env file carries `BARKPARK_TOKEN=` in plaintext and the
-  display scrubber does not yet know that shape, so the read path ships after
-  the scrubber does.
+  recorded log is written to disk VERBATIM — nothing scrubs it at write.
+
+  CORRECTED 2026-09-08 (task-04e89e88f056aa38). This used to read "the display
+  scrubber does not yet know that shape, so the read path ships after the
+  scrubber does". It knows the shape now. DERIVATION, re-read on main on
+  2026-09-08 in `cloud/lib/barkpark_cloud/failure_copy.ex`: `@secret_patterns`
+  carries a dedicated `bppat_`/`bpcs_`/`bp_<kind>_` arm, closing a leak that
+  file measures at 94.3%; and `raw/1` = `strip_ansi |> scrub` closed a separate
+  ordering leak it measures at 2000/2000 = 100%. Both landed fixes are
+  DISPLAY-BOUNDARY scrubbers, so neither one touches the bytes on disk — which
+  is why the read path is STILL withheld, now for the reason that is true.
 
   ## Fail-closed
 
@@ -450,8 +459,17 @@ defmodule Barkpark.Sites.DeployRunner do
   same map.
 
   `:log_path` is a path ON THE BOX. The bytes are deliberately NOT returned —
-  they carry the build env's plaintext `BARKPARK_TOKEN` and no scrubber on this
-  box is trusted with that shape yet.
+  they carry the build env's plaintext `BARKPARK_TOKEN` and NOTHING SCRUBS THEM
+  AT WRITE, so whatever the build printed sits on disk in the clear.
+
+  CORRECTED 2026-09-08 (task-04e89e88f056aa38). The old wording — "no scrubber
+  on this box is trusted with that shape yet" — is no longer true, and was never
+  the operative fact. DERIVATION, re-read on main on 2026-09-08 in
+  `cloud/lib/barkpark_cloud/failure_copy.ex`: `@secret_patterns` gained a
+  `bppat_`/`bpcs_`/`bp_<kind>_` arm (closing a 94.3% shape-blindness leak) and
+  `raw/1` = `strip_ansi |> scrub` closed a 2000/2000 = 100% ordering leak. Both
+  are DISPLAY-BOUNDARY scrubbers; the WRITE path still has none, and that — not
+  a scrubber's competence — is what this refusal rests on.
   """
   @spec build_record(String.t(), String.t() | nil) :: map()
   def build_record(slug, build_id \\ nil) when is_binary(slug) do
@@ -1328,11 +1346,26 @@ defmodule Barkpark.Sites.DeployRunner do
 
   # The provision reason, rendered for an operator and SCRUBBED. Deliberately a
   # local, explicit redactor rather than the display-boundary `scrub/1`: this
-  # string crosses an HTTP boundary as a 500 body, and the measured leak rate
-  # of the shared scrubber against this box's own `bppat_` token shape is
-  # 95.1%. What
-  # must SURVIVE is the diagnosis — a File.Error's action and path, an errno's
-  # meaning — because "enoent" alone is what made 25 failures unreadable.
+  # string crosses an HTTP boundary as a 500 body, and the shared scrubber is a
+  # DISPLAY-boundary tool in the cloud app — this module redacts at the point it
+  # BUILDS the string, so there is no window in which the untouched string
+  # exists on a path someone can widen.
+  #
+  # CORRECTED 2026-09-08 (task-04e89e88f056aa38). This paragraph used to justify
+  # the local redactor by asserting that "the measured leak rate of the shared
+  # scrubber against this box's own `bppat_` token shape is 95.1%". That figure
+  # is STALE and matched neither defect it stood in for. DERIVATION, re-read on
+  # main on 2026-09-08 in `cloud/lib/barkpark_cloud/failure_copy.ex`: the
+  # SHAPE-BLINDNESS leak that file measures is 94.3%, and it is CLOSED —
+  # `@secret_patterns` now carries `bppat_`/`bpcs_`/`bp_<kind>_` explicitly. The
+  # ORDERING leak it measures is 2000/2000 = 100%, and it is CLOSED too —
+  # `raw/1` = `strip_ansi |> scrub`, test-pinned. Nothing in the tree measures
+  # 95.1%. Do not re-derive the local redactor's justification from a leak rate;
+  # it is `@token_re` below, at the build site, on purpose.
+  #
+  # What must SURVIVE is the diagnosis — a File.Error's action and path, an
+  # errno's meaning — because "enoent" alone is what made 25 failures
+  # unreadable.
   #
   # PUBLIC (`@doc false`) purely so the operator sentences can be asserted
   # directly. Neither of the two shapes below can be induced end-to-end from a
