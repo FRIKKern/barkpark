@@ -4,6 +4,10 @@ Documentation=file:///opt/barkpark/deploy/systemd/README.md
 After=network-online.target barkpark.service
 Wants=network-online.target
 Requires=barkpark.service
+# A failed WEEKLY rotation is the worst silence in this tree: the public-read
+# token simply never rotates and nothing says so. `%n` hands the handler this
+# unit's own name. NOT on the .timer — see barkpark-unit-failure-alert@.service.
+OnFailure=barkpark-unit-failure-alert@%n.service
 
 [Service]
 Type=oneshot

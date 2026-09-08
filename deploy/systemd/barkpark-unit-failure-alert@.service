@@ -1,0 +1,40 @@
+# barkpark-unit-failure-alert@.service — the OnFailure= handler for every
+# SCHEDULED (timer-driven) Barkpark unit. ONE handler serves all of them.
+#
+# WHY A TEMPLATE (`@`), NOT ONE HANDLER PER JOB. `%i` carries the failing unit's
+# own name, so a single file covers every timer-driven service present and
+# future; per-job handlers would have to be added by hand to each new timer and
+# the one nobody added is exactly the one that fails silently. This repo already
+# uses instance templates for the same reason (barkpark-slot@.service,
+# barkpark-site@.service) — this is the house convention, not an import.
+#
+# WHY IT HANGS OFF THE .service AND NOT THE .timer. A systemd OnFailure= on a
+# .timer fires only when the TIMER UNIT ITSELF fails to activate. The job's
+# failure lands on the .service the timer triggers. A handler wired to the timer
+# would be installed, would look right in `systemctl cat`, and would stay silent
+# for exactly the failures it exists to surface: a bake that errored, a rotation
+# that never rotated.
+#
+# WHY IT IS NOT SWALLOWED BY Restart=. When a service sets Restart=, systemd
+# enters `failed` — and therefore fires OnFailure= — only after the restart
+# budget is exhausted; while it is retrying the handler does NOT run. Both
+# guarded units are Type=oneshot with NO Restart= (systemd rejects
+# Restart=always on oneshot anyway), so the very first non-zero exit is the
+# final one and the handler fires immediately. deploy/systemd/systemd-onfailure_test.sh
+# enforces that: a scheduled service may not carry a Restart= other than `no`.
+#
+# CALLED FOR: `OnFailure=barkpark-unit-failure-alert@%n.service` on the guarded
+# unit. `%n` is the FAILING unit's full name (e.g. barkpark-image-bake.service),
+# which arrives here as `%i`.
+[Unit]
+Description=Alert a human that %i failed
+# The handler must run even when the box is shutting the failing job down.
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+# `-` = optional. The file carries BARKPARK_ALERT_WEBHOOK (see the script). Its
+# ABSENCE does not disable the handler: the durable local record is written
+# either way and the script says out loud that delivery was not configured.
+EnvironmentFile=-/etc/barkpark/alert.env
+ExecStart=/usr/local/bin/barkpark-unit-failure-alert %i
