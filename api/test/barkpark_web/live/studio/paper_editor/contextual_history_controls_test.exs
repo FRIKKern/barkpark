@@ -27,6 +27,16 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualHistoryControlsTest do
     end
   end
 
+  test "both hosts share themed history buttons and narrow touch targets" do
+    css =
+      File.read!(Path.expand("../../../../../priv/static/assets/bp-paper-editor-shell.css", __DIR__))
+
+    assert css =~ ".bp-paper-contextual-panel button,\n.bp-paper-history-controls button {"
+    assert css =~ ".bp-paper-history-controls button:focus-visible"
+    assert css =~ "@media (max-width: 600px), (pointer: coarse)"
+    assert css =~ ".bp-paper-history-controls button { min-width: 44px; min-height: 44px; }"
+  end
+
   defp editor(opts) do
     render_component(
       &PaperEditor.paper_block_editor/1,
