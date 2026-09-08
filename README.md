@@ -3,44 +3,39 @@
 
 [![Deploy with Barkpark](https://barkpark.cloud/button.svg)](https://barkpark.cloud/new?template=blog-starter)
 
-Barkpark brings your tools and data into one open-source system you can run
-yourself. The server, database, and files can live on your computer. You can keep reading
-and editing local content when your internet connection or remote server fails.
+Barkpark is an open-source CMS you can run on your computer or a server.
+Define your own fields, edit content visually, and publish it through an API.
+Build a website or just keep a recipe collection. Use only what you need.
 
-Start with a media library, a task board, or a CMS. Add documents, spreadsheets,
-or your own applications as you need them. They share data definitions, storage,
-authentication, and APIs, so each addition can use the same foundation.
+## What you can do
 
-A publisher can attach cover images to catalog entries and let its website read
-those entries. The team can manage production tasks and working documents beside
-them, under separate access rules. One Barkpark could support that whole workflow;
-another could be just your personal media library.
+| Use | What you get |
+|---|---|
+| Manage content | Custom fields, linked records, drafts, revisions, and a visual editor. |
+| Write documents | Papers: shareable proposals, reports, and notes that update live. |
+| Work with spreadsheets | Sheets: collaborative tables, formulas, and Excel import/export. |
+| Organize media | Upload images and files; manage tags, collections, and rights. |
+| Track work | Task boards, dependencies, agent work queues, and support tickets. |
+| Search content | Full-text search, filters, facets, and click analytics. |
+| Work with AI | Chat with agents, give them tasks, and inspect their changes. |
+| Publish websites | Templates, deployments, and custom domains on your instance. |
+| Manage servers | Provision, update, archive, and restore your Barkpark instances. |
+| Control access | Workspace membership, scoped tokens, sharing rules, and single sign-on. |
+| Run specialist tools | Live quizzes and ONIX book-metadata editing and export. |
 
-Work through the browser app, interactive terminal, command line, or an AI agent.
-People and agents use the same records. You can inspect document revisions and
-task evidence, manage access, and revoke workspace tokens. An agent's work should
-remain understandable to the people using the system.
+Use each tool independently or combine them through shared data and access rules.
+Work through the browser, terminal UI, CLI, or AI. Review changes and revoke tokens yourself.
 
-You can also run a remote instance for shared access. Local and remote instances
-hold their own data, with explicit transfers between them today.
+## Local or remote
 
-## Why I build it
+Keep the server, database, and files on your computer. Local work continues when
+the internet or a remote server fails. Run remotely for shared access.
+Local and remote instances hold separate data; transfers are explicit today.
 
-I wanted a better way to read what an AI proposed, share it with coworkers, and
-develop it together. That became Papers, Barkpark's shareable documents. Barkpark
-grows from needs like this: make something useful, then make its foundations
-useful for the next idea too.
+## Get started
 
-Vendors can save you time and effort. They should remain a choice. You should be
-able to change your tools, connect them differently, or run them yourself when
-that serves you better. [Read the principles](docs/PHILOSOPHY.md).
+[Run locally](docs/setup/QUICKSTART.md) · [Open Studio](https://api.barkpark.cloud/studio) · [Deploy a server](docs/setup/GO-LIVE.md) · [Connect an agent](docs/setup/AGENT-ONRAMPS.md)
 
-## Try Barkpark
+[Documentation](docs/INDEX.md) · [Build a plugin](docs/cards/plugins.md) · [Principles](docs/PHILOSOPHY.md)
 
-[Open Studio](https://api.barkpark.cloud/studio) to explore the browser app, or
-[run Barkpark locally](docs/setup/QUICKSTART.md) to start with your own instance.
-
-[Deploy a server](docs/setup/GO-LIVE.md) · [Connect an agent](docs/setup/AGENT-ONRAMPS.md) · [Build a plugin](docs/cards/plugins.md) · [Documentation](docs/INDEX.md)
-
-Barkpark is [MIT licensed](LICENSE). Optional hosting through
-[Barkpark Cloud](https://barkpark.cloud) helps fund development.
+[MIT licensed](LICENSE). Optional [Barkpark Cloud](https://barkpark.cloud) hosting funds development.
