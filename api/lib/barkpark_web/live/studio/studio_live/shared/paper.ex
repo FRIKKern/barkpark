@@ -303,9 +303,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       {:ok, socket, receipt, outcome} ->
         result = %{
           saved: true,
+          changed: receipt_changed?(receipt),
           request_id: request_id,
           replayed: outcome == :replayed,
-          rev: receipt.rev
+          rev: receipt.rev,
+          history_step: receipt_history_step(receipt, request_id)
         }
 
         assign(socket,
@@ -485,7 +487,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         opts =
           BarkparkWeb.ScopeHelpers.scope_opts(socket) ++
             [if_rev: if_rev] ++
-            if(context, do: [canvas_run_context: context], else: [])
+            if(context, do: [canvas_run_context: context], else: []) ++
+            if(is_binary(request_id), do: [contextual_history: true], else: [])
 
         result =
           if is_map(form_source) and PaperCanvasLease.pending?(socket) do
@@ -586,6 +589,106 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       )
     end
   end
+
+  @doc false
+  def paper_history_step(socket, params) do
+    request_id = params["request_id"]
+    socket = failed_result(socket, %{"request_id" => request_id})
+    {socket, revoked_token?} = refresh_replay_token(socket)
+    paper = socket.assigns[:paper_doc]
+    slug = paper && doc_field(paper, :doc_id)
+    dataset = socket.assigns.dataset
+
+    invalid_credential? =
+      socket.assigns[:api_token_credential_present?] == true and
+        is_nil(socket.assigns[:api_token]) and is_nil(socket.assigns[:current_user])
+
+    cond do
+      invalid_credential? ->
+        {:error, refuse_write_denied(socket)}
+
+      revoked_token? and is_nil(socket.assigns[:current_user]) ->
+        {:error, refuse_write_denied(socket)}
+
+      write_denied?(socket) ->
+        {:error, refuse_write_denied(socket)}
+
+      grant_target_denied?(socket, doc_field(paper, :type), slug) ->
+        {:error, refuse_outside_grant(socket)}
+
+      read_only_pane?(socket) ->
+        {:error, refuse_read_only_pane(socket)}
+
+      socket.assigns[:editor_view] != :paper ->
+        {:error, socket}
+
+      not is_binary(slug) or paper_revision(params["if_rev"]) == :error ->
+        {:error, socket}
+
+      true ->
+        {:ok, if_rev} = paper_revision(params["if_rev"])
+
+        case Content.apply_paper_contextual_history_once(
+               slug,
+               params["history_ref"],
+               params["action"],
+               dataset,
+               request_id,
+               replay_principal_key(socket),
+               ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
+             ) do
+          {:ok, receipt, outcome} ->
+            socket =
+              socket
+              |> sync_paper_edit_doc()
+              |> push_canvas_echo(request_id)
+              |> push_task_previews()
+              |> push_block_renders()
+              |> assign(save_status: "Auto-saved")
+              |> assign(last_paper_save_ok?: true)
+              |> assign(paper_halt: nil)
+
+            {:ok, socket, receipt, outcome}
+
+          {:error, :precondition_failed} ->
+            socket = socket |> sync_paper_edit_doc() |> push_canvas_echo(request_id)
+
+            {:error,
+             socket
+             |> assign(save_status: "Save failed", last_paper_save_ok?: false)
+             |> assign(
+               last_paper_save_result: %{
+                 saved: false,
+                 request_id: request_id,
+                 conflict: true,
+                 current_rev: socket.assigns[:paper_rev]
+               }
+             )}
+
+          {:error, _reason} ->
+            {:error,
+             socket
+             |> put_flash(:error, "History step failed")
+             |> assign(save_status: "Save failed", last_paper_save_ok?: false)}
+        end
+    end
+  end
+
+  @doc false
+  def receipt_changed?(receipt), do: Map.get(receipt, :op_count, 0) > 0
+
+  @doc false
+  def receipt_history_step(receipt, request_id) when is_binary(request_id) do
+    case Map.get(receipt, :contextual_history) do
+      %{"action" => action} when action in ["undo", "redo"] ->
+        %{version: 1, ref: request_id, action: action}
+
+      _unsupported ->
+        nil
+    end
+  end
+
+  def receipt_history_step(_receipt, _request_id), do: nil
 
   defp refresh_replay_token(socket) do
     current_user = socket.assigns[:current_user]
