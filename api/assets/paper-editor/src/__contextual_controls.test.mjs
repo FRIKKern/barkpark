@@ -91,8 +91,10 @@ assert.match(rows[1], /display:\s*grid/, "each authored row field has its own li
 assert.match(rows[1], /min-inline-size:\s*0/, "fieldset intrinsic width cannot force panel overflow");
 const actions = shell.match(/\.bp-paper-contextual-panel \.bp-paper-edit-actions\s*\{([^}]*)\}/);
 assert.match(actions?.[1] ?? "", /flex-direction:\s*row/, "row actions remain a compact wrapping group");
-const buttons = shell.match(/\.bp-paper-contextual-panel button\s*\{([^}]*)\}/);
+const buttons = shell.match(/\.bp-paper-contextual-panel button\s*,\s*\.bp-paper-history-controls button\s*\{([^}]*)\}/);
 assert.match(buttons?.[1] ?? "", /min-height:\s*2rem/, "public controls have explicit usable button sizing");
+assert.match(buttons?.[1] ?? "", /color:\s*var\(--paper-ink-soft\)/,
+  "history and fallback controls share readable Paper tokens in both hosts");
 
 const gaugeOpen = shell.match(/\.bp-paper-contextual-controls--gauge-list\[open\](?:\s*,[^{}]+)?\s*\{([^}]*)\}/);
 assert.ok(gaugeOpen, "an open gauge disclosure has a bounded gauge-only layout override");

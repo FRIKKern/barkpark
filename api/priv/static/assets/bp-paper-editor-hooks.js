@@ -69,6 +69,7 @@
     },
   };
   const PAPER_OP_RETRY_TTL_MS = 60 * 60 * 1000;
+  const PAPER_CONTEXTUAL_HISTORY_LIMIT = 100;
   const PAPER_CANVAS_LEASES = Symbol("bpPaperCanvasLeases");
   const PAPER_CANVAS_LEASE_PENDING = Symbol("bpPaperCanvasLeasePending");
   const PAPER_CANVAS_LEASE_OVERFLOW = Symbol("bpPaperCanvasLeaseOverflow");
@@ -622,7 +623,20 @@
       send,
       onResult: options.onResult,
       reviewRequired: options.reviewRequired === true,
+      kind: options.kind,
+      trackDraft: options.trackDraft,
+      historyDirection: options.historyDirection,
+      historyStep: options.historyStep,
     });
+  }
+
+  function bpPaperContextualHistoryStep(value, requestId, expectedAction) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    if (Object.keys(value).sort().join("\n") !== "action\nref\nversion") return null;
+    if (value.version !== 1 || value.ref !== requestId || value.action !== expectedAction) {
+      return null;
+    }
+    return { version: 1, ref: value.ref, action: value.action };
   }
 
   function bpPaperHistoryPosition(state) {
@@ -804,16 +818,100 @@
       const mutationById = new Map();
       const ownRevisions = new Map();
       const quarantinedEchoes = [];
+      const contextualHistory = { undo: [], redo: [] };
       let mutationActive = false;
       let mutationPaused = false;
       let conflict = null;
       let pendingIdentity = null;
       let reloadWhenClean = false;
       let discardReloadBypass = false;
+      let historyRequestPending = null;
       const initialCarrier = hook.el.closest?.("[data-paper-doc-key]") ||
         main.querySelector("[data-paper-doc-key]");
       let documentKey = initialCarrier?.dataset.paperDocKey || null;
       let confirmedRevision = bpPaperRevisionFrom(initialCarrier);
+
+      const historyStack = (direction) => contextualHistory[direction];
+      const historyPendingEntry = () => mutationQueue.find((entry) => entry.kind === "history");
+      const historyTop = (direction) => historyStack(direction)?.at(-1) || null;
+      const historyReason = (entry) => {
+        const code = entry?.disabledReason;
+        if (code === "history_expired" || code === "history_ref_expired" ||
+            code === "idempotency_receipt_expired") {
+          return "This change is more than one hour old and can no longer be restored.";
+        }
+        if (code === "history_ref_consumed") {
+          return "This history step was already used. Make a new edit to continue.";
+        }
+        if (code === "history_conflict") {
+          return "This change no longer matches the current document.";
+        }
+        if (code === "history_unavailable") {
+          return "This history step is no longer available for this document.";
+        }
+        if (code === "invalid_history_request") {
+          return "This history step could not be validated.";
+        }
+        return code ? "This history step is unavailable." : "";
+      };
+
+      const renderHistoryControls = () => {
+        const pending = historyPendingEntry();
+        for (const direction of ["undo", "redo"]) {
+          const top = historyTop(direction);
+          main.querySelectorAll(`[data-paper-history-action="${direction}"]`).forEach((control) => {
+            const retryable = pending?.historyDirection === direction &&
+              !mutationActive && !conflict && mutationPaused && !top?.disabledReason;
+            const disabled = !top || Boolean(top.disabledReason) ||
+              (Boolean(pending) && !retryable) || Boolean(historyRequestPending) ||
+              Boolean(conflict);
+            control.disabled = disabled;
+            control.setAttribute("aria-disabled", String(disabled));
+            control.dataset.paperHistoryState = top?.disabledReason
+              ? "blocked"
+              : pending?.historyDirection === direction
+                ? (retryable ? "retry" : "pending")
+                : historyRequestPending === direction ? "waiting"
+                : top ? "ready" : "empty";
+            control.title = historyReason(top);
+          });
+        }
+        const status = main.querySelector('[data-paper-history-status][role="status"]');
+        if (status) {
+          const blocked = historyTop("undo")?.disabledReason
+            ? historyTop("undo")
+            : historyTop("redo")?.disabledReason ? historyTop("redo") : null;
+          const activeDirection = pending?.historyDirection || historyRequestPending;
+          status.textContent = blocked
+            ? historyReason(blocked)
+            : pending && mutationPaused && !mutationActive
+              ? `${pending.historyDirection === "undo" ? "Undo" : "Redo"} was not confirmed. Try again.`
+              : activeDirection
+                ? `${activeDirection === "undo" ? "Undoing" : "Redoing"}…`
+                : "";
+        }
+      };
+
+      const makeHistoryEntry = (step) => {
+        const requestId = bpPaperRequestId();
+        return requestId ? {
+          ...step,
+          requestId,
+          expiresAt: Date.now() + PAPER_OP_RETRY_TTL_MS,
+          disabledReason: null,
+        } : null;
+      };
+
+      const pushHistory = (direction, step) => {
+        const entry = makeHistoryEntry(step);
+        if (!entry) return false;
+        const stack = historyStack(direction);
+        stack.push(entry);
+        if (stack.length > PAPER_CONTEXTUAL_HISTORY_LIMIT) {
+          stack.splice(0, stack.length - PAPER_CONTEXTUAL_HISTORY_LIMIT);
+        }
+        return true;
+      };
 
       const setSaveStatus = (text, force = false) => {
         const status = main.querySelector(
@@ -886,7 +984,10 @@
 
       coordinator = {
         rebindMain(nextMain, observedDocumentKey) {
-          if (!nextMain || nextMain === main) return nextMain === main;
+          if (!nextMain || nextMain === main) {
+            if (nextMain === main) renderHistoryControls();
+            return nextMain === main;
+          }
           if (!observedDocumentKey || observedDocumentKey !== documentKey) return false;
           const occupied = paperExitCoordinators.get(nextMain);
           if (occupied && occupied !== coordinator) return false;
@@ -895,7 +996,11 @@
           }
           main = nextMain;
           paperExitCoordinators.set(main, coordinator);
+          renderHistoryControls();
           return true;
+        },
+        refreshHistoryControls() {
+          renderHistoryControls();
         },
         register(member) {
           members.add(member);
@@ -927,6 +1032,9 @@
           window.removeEventListener("phx:navigate", coordinator._onNavigate);
           window.navigation?.removeEventListener?.("navigate", coordinator._onNavigationApiNavigate);
           sources.forEach((record) => clearTimeout(record.timer));
+          contextualHistory.undo.length = 0;
+          contextualHistory.redo.length = 0;
+          historyRequestPending = null;
           paperExitCoordinators.delete(main);
         },
         markDirty(source) {
@@ -981,12 +1089,14 @@
           coordinator._reloadIfClean();
           return true;
         },
-        hasUnsaved() {
+        hasUnsaved(includePendingHistoryAction = true) {
           for (const record of sources.values()) {
             if (record.dirty || record.active > 0) return true;
           }
           return [...main.querySelectorAll("bp-paper-canvas, bp-paper-editor")]
-            .some((editor) => editor.hasPendingChanges?.() === true);
+            .some((editor) => editor.hasPendingChanges?.() === true) ||
+            mutationQueue.some((entry) => entry.kind === "history") ||
+            (includePendingHistoryAction && Boolean(historyRequestPending));
         },
         firstUnsavedWithin(root) {
           if (!root) return null;
@@ -1043,7 +1153,7 @@
                 : coordinator._sendFallback(source, driver));
             }
 
-            if (!pending.length) return !coordinator.hasUnsaved();
+            if (!pending.length) return !coordinator.hasUnsaved(false);
             if (!(await Promise.all(pending)).every(Boolean)) return false;
           }
           return false;
@@ -1061,7 +1171,10 @@
           }
         },
         requestId: bpPaperRequestId,
-        mutate(source, { requestId, payload, send, onResult, reviewRequired = false }) {
+        mutate(source, {
+          requestId, payload, send, onResult, reviewRequired = false,
+          kind = "forward", trackDraft = true, historyDirection = null, historyStep = null,
+        }) {
           requestId ||= bpPaperRequestId();
           if (!requestId) return { requestId: null, promise: Promise.resolve(false) };
           let entry = mutationById.get(requestId);
@@ -1073,17 +1186,18 @@
               fallbackRecord.timer = null;
               fallbackRecord.fallbackDeferred = true;
             }
-            const record = recordFor(source);
-            if (record.authoredRev === undefined) {
+            const record = trackDraft ? recordFor(source) : null;
+            if (record && record.authoredRev === undefined) {
               record.authoredRev = authoredRevisionFor(source, record);
             }
             entry = {
-              source, requestId, payload, send, onResult, reviewRequired,
-              documentKey: record.documentKey,
-              authoredRev: record.authoredRev,
-              ifRev: mutationQueue.length || record.documentKey !== documentKey
+              source, requestId, payload, send, onResult, reviewRequired, kind,
+              trackDraft, historyDirection, historyStep,
+              documentKey: record?.documentKey ?? documentKey,
+              authoredRev: record?.authoredRev ?? confirmedRevision,
+              ifRev: mutationQueue.length || (record?.documentKey ?? documentKey) !== documentKey
                 ? undefined
-                : record.authoredRev,
+                : record?.authoredRev ?? confirmedRevision,
               expiresAt: Date.now() + PAPER_OP_RETRY_TTL_MS,
               waiters: [],
             };
@@ -1093,6 +1207,7 @@
           const promise = new Promise((resolve) => entry.waiters.push(resolve));
           mutationPaused = false;
           coordinator._pumpMutations();
+          renderHistoryControls();
           return { requestId: entry.requestId, promise, entry };
         },
         retryMutation(entry) {
@@ -1171,6 +1286,96 @@
       coordinator._resolveWaiters = (entry, saved) => {
         const waiters = entry.waiters.splice(0);
         waiters.forEach((resolve) => resolve(saved));
+      };
+      coordinator._recordForwardHistory = (entry, reply) => {
+        if (entry.kind === "history") return;
+        if (reply?.changed !== false) contextualHistory.redo.length = 0;
+        if (reply?.changed !== true) {
+          renderHistoryControls();
+          return;
+        }
+        const step = bpPaperContextualHistoryStep(reply.history_step, entry.requestId, "undo");
+        if (step) pushHistory("undo", step);
+        renderHistoryControls();
+      };
+      coordinator._settleHistory = (entry, replyStep) => {
+        const source = historyStack(entry.historyDirection);
+        const current = source.at(-1);
+        if (!current || current !== entry.historyStep) return false;
+        source.pop();
+        const retainedFocusBaselines = new WeakMap();
+        for (const [draftSource, record] of sources) {
+          if (!record.dirty && record.active === 0) continue;
+          const baseline = nativeFocusBaselines.get(draftSource);
+          if (baseline) retainedFocusBaselines.set(draftSource, baseline);
+        }
+        nativeFocusBaselines = retainedFocusBaselines;
+        pushHistory(replyStep.action, replyStep);
+        renderHistoryControls();
+        return true;
+      };
+      coordinator._terminalHistoryFailure = (entry, reply) => {
+        if (entry.kind !== "history" || reply?.request_id !== entry.requestId) return false;
+        const reason = reply?.rejected || reply?.error || reply?.code ||
+          (reply?.conflict === true ? "history_conflict" : null);
+        if (!["history_expired", "history_ref_expired", "idempotency_receipt_expired",
+              "history_ref_consumed", "history_conflict", "history_unavailable",
+              "invalid_history_request"].includes(reason)) return false;
+        mutationQueue.shift();
+        mutationById.delete(entry.requestId);
+        if (historyTop(entry.historyDirection) === entry.historyStep) {
+          entry.historyStep.disabledReason = reason;
+        }
+        mutationPaused = false;
+        coordinator._notifyResult(entry, false, reply);
+        coordinator._resolveWaiters(entry, false);
+        renderHistoryControls();
+        coordinator._pumpMutations();
+        return true;
+      };
+      coordinator._requestHistory = (direction, source) => {
+        const pending = historyPendingEntry();
+        if (pending) {
+          if (pending.historyDirection !== direction || mutationActive || conflict) return false;
+          coordinator.retryMutation(pending);
+          renderSaveStatus();
+          renderHistoryControls();
+          return true;
+        }
+        historyRequestPending = direction;
+        renderSaveStatus();
+        renderHistoryControls();
+        Promise.resolve(coordinator.run(async () => {
+          const step = historyTop(direction);
+          if (!step || step.disabledReason) return false;
+          if (Date.now() >= step.expiresAt) {
+            step.disabledReason = "history_ref_expired";
+            renderHistoryControls();
+            return false;
+          }
+          const driver = [...members].find((member) => typeof member.pushEvent === "function");
+          if (!driver) return false;
+          const mutation = bpPaperMutation(
+            driver,
+            source,
+            "paper-history-step",
+            { history_ref: step.ref, action: step.action },
+            {
+              requestId: step.requestId,
+              kind: "history",
+              trackDraft: false,
+              historyDirection: direction,
+              historyStep: step,
+            },
+          );
+          renderHistoryControls();
+          return mutation.promise;
+        })).finally(() => {
+          historyRequestPending = null;
+          renderSaveStatus(false);
+          renderHistoryControls();
+        });
+        return true;
       };
       coordinator._notifyResult = (entry, saved, result) => {
         try {
@@ -1281,9 +1486,13 @@
         nativeFocusBaselines = new WeakMap();
         ownRevisions.clear();
         quarantinedEchoes.length = 0;
+        contextualHistory.undo.length = 0;
+        contextualHistory.redo.length = 0;
+        historyRequestPending = null;
         conflict = null;
         mutationPaused = false;
         coordinator._renderConflict?.();
+        renderHistoryControls();
       };
       coordinator._maybeAdoptPendingIdentity = () => {
         if (!pendingIdentity || coordinator._hasUnsavedForDocument(documentKey) ||
@@ -1353,6 +1562,23 @@
         return true;
       };
       coordinator._expireMutation = (entry) => {
+        if (entry.kind === "history") {
+          mutationQueue.shift();
+          mutationById.delete(entry.requestId);
+          if (historyTop(entry.historyDirection) === entry.historyStep) {
+            entry.historyStep.disabledReason = "history_ref_expired";
+          }
+          mutationPaused = false;
+          coordinator._notifyResult(entry, false, {
+            saved: false,
+            request_id: entry.requestId,
+            rejected: "history_ref_expired",
+          });
+          coordinator._resolveWaiters(entry, false);
+          renderHistoryControls();
+          coordinator._pumpMutations();
+          return;
+        }
         mutationPaused = true;
         const message = "Save paused after one hour of retries. Unsaved work remains here; copy it before reloading.";
         const status = main.querySelector('[data-test-id="bp-paper-footer-save"][role="status"]');
@@ -1599,7 +1825,7 @@
         if (entry.ifRev === undefined) entry.ifRev = confirmedRevision;
         const wire = { ...entry.payload, request_id: entry.requestId };
         if (entry.ifRev != null) wire.if_rev = entry.ifRev;
-        const token = coordinator.beginSave(entry.source);
+        const token = entry.trackDraft === false ? null : coordinator.beginSave(entry.source);
         if (token && entry.source.matches?.(".bp-paper-edit-form[phx-change]")) {
           entry.formVersion ??= token.version;
           token.version = entry.formVersion;
@@ -1614,9 +1840,22 @@
         Promise.resolve(sent).catch(() => null).then((reply) => {
           const identityOK = reply?.request_id === entry.requestId;
           const revOK = entry.ifRev == null || reply?.rev != null;
-          const saved = reply?.saved === true && identityOK && revOK;
+          const expectedHistoryAction = entry.historyDirection === "undo" ? "redo" : "undo";
+          const replyHistoryStep = entry.kind === "history"
+            ? bpPaperContextualHistoryStep(
+                reply?.history_step,
+                entry.requestId,
+                expectedHistoryAction,
+              )
+            : null;
+          const saved = reply?.saved === true && identityOK && revOK &&
+            (entry.kind !== "history" || Boolean(replyHistoryStep));
           mutationActive = false;
           coordinator.finishSave(token, saved);
+          if (!saved && coordinator._terminalHistoryFailure(entry, reply)) {
+            renderSaveStatus(false);
+            return;
+          }
           if (saved) {
             confirmedRevision = reply.rev ?? confirmedRevision;
             const focused = nativeFocusBaselines.get(entry.source);
@@ -1624,6 +1863,11 @@
             ownRevisions.set(entry.requestId, confirmedRevision);
             mutationQueue.shift();
             mutationById.delete(entry.requestId);
+            if (entry.kind === "history") {
+              coordinator._settleHistory(entry, replyHistoryStep);
+            } else {
+              coordinator._recordForwardHistory(entry, reply);
+            }
             const continuingSource = sources.get(entry.source);
             if (continuingSource?.dirty &&
                 continuingSource.documentKey === entry.documentKey &&
@@ -1709,6 +1953,7 @@
             coordinator._reviewQuarantinedReloadConflict();
           }
           renderSaveStatus(saved);
+          renderHistoryControls();
         });
       };
 
@@ -1977,6 +2222,15 @@
       coordinator._onClick = (event) => {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey ||
             event.ctrlKey || event.shiftKey || event.altKey) return;
+        const historyControl = event.target.closest?.("[data-paper-history-action]");
+        const historyDirection = historyControl?.dataset.paperHistoryAction;
+        if (historyControl && ["undo", "redo"].includes(historyDirection) &&
+            main.contains(historyControl)) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          coordinator._requestHistory(historyDirection, historyControl);
+          return;
+        }
         const target = event.target.closest?.("a[href], [phx-click]");
         if (!target || replayTargets.has(target)) {
           if (target) replayTargets.delete(target);
@@ -2088,6 +2342,7 @@
       window.addEventListener("phx:navigate", coordinator._onNavigate);
       window.navigation?.addEventListener?.("navigate", coordinator._onNavigationApiNavigate);
       paperExitCoordinators.set(main, coordinator);
+      renderHistoryControls();
     }
     return coordinator.register(hook);
   }
@@ -3507,6 +3762,7 @@
         this.el.addEventListener("bp-flush-pending", this._onFlushPending);
       },
       updated() {
+        this._exitCoordinator?.refreshHistoryControls?.();
         // The picker shell is intentionally ignored so LiveView never replaces
         // an open native picker. Refresh its public value from the authoritative
         // server-rendered source when the surrounding Figure hook updates.

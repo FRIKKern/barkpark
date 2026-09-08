@@ -335,9 +335,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
           {:reply,
            %{
              saved: true,
+             changed: SharedPaper.receipt_changed?(receipt),
              request_id: request_id,
              replayed: outcome == :replayed,
              rev: receipt.rev,
+             history_step: SharedPaper.receipt_history_step(receipt, request_id),
              retained_leases: SharedPaper.canvas_reply_leases(socket, context, ops),
              retained_lease_overflow: BarkparkWeb.PaperCanvasLease.blocked?(socket)
            }, socket}
@@ -349,6 +351,54 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
           {:reply, Map.put_new(reply, :request_id, request_id), socket}
       end
     end
+  end
+
+  @history_step_keys ~w(action history_ref if_rev request_id)
+
+  def paper_history_step(params, socket) when is_map(params) do
+    if Enum.sort(Map.keys(params)) == @history_step_keys do
+      case SharedPaper.paper_history_step(socket, params) do
+        {:ok, socket, receipt, outcome} ->
+          request_id = params["request_id"]
+
+          {:reply,
+           %{
+             saved: true,
+             request_id: request_id,
+             replayed: outcome == :replayed,
+             rev: receipt.rev,
+             history_step: SharedPaper.receipt_history_step(receipt, request_id)
+           }, socket}
+
+        {:error, socket} ->
+          reply =
+            socket.assigns[:last_paper_save_result] ||
+              %{
+                saved: false,
+                request_id: params["request_id"]
+              }
+
+          {:reply, Map.put_new(reply, :request_id, params["request_id"]), socket}
+      end
+    else
+      history_step_invalid_reply(socket, params)
+    end
+  end
+
+  def paper_history_step(params, socket), do: history_step_invalid_reply(socket, params)
+
+  defp history_step_invalid_reply(socket, params) do
+    request_id = if is_map(params), do: params["request_id"]
+    result = %{saved: false, request_id: request_id, rejected: "invalid_history_request"}
+
+    socket =
+      assign(socket,
+        save_status: "Save failed",
+        last_paper_save_ok?: false,
+        last_paper_save_result: result
+      )
+
+    {:reply, result, socket}
   end
 
   @doc """

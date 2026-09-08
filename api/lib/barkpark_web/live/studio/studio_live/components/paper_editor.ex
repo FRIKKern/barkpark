@@ -550,6 +550,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <span><%= @doc_stats.words %> words</span>
         <span class="bp-paper-footer-sep">·</span>
         <span><%= @doc_stats.blocks %> blocks</span>
+        <span
+          :if={@canvas_eligible and @doc_type == "paper"}
+          class="bp-paper-history-controls"
+          role="group"
+          aria-label="Image and caption history"
+        >
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            data-paper-history-action="undo"
+            aria-label="Undo image or caption change"
+            disabled
+          >Undo</button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            data-paper-history-action="redo"
+            aria-label="Redo image or caption change"
+            disabled
+          >Redo</button>
+          <span data-paper-history-status role="status" aria-live="polite"></span>
+        </span>
         <%!-- sup-w5 — the save affordance now ECHOES the socket-owned
               @save_status instead of a hardcoded "✓ Auto-saved" that lied
               through "Save failed"/plugin halts. role=status + aria-live=polite
