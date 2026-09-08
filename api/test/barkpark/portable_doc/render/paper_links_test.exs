@@ -161,6 +161,17 @@ defmodule Barkpark.PortableDoc.Render.PaperLinksTest do
     assert default.section_style ==
              "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)"
 
+    whitespace =
+      Compose.paper_links_presentation(
+        %{"title" => "   ", "description" => "\n ", "refs" => ["next"]},
+        :article
+      )
+
+    assert whitespace.title == "Explore the work"
+    assert whitespace.title_source == "   "
+    assert whitespace.description == nil
+    assert whitespace.description_source == "\n "
+
     chapters =
       Compose.paper_links_presentation(%{"layout" => "chapters", "refs" => ["next"]}, :article)
 

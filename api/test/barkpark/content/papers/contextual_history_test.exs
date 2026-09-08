@@ -95,6 +95,45 @@ defmodule Barkpark.Content.Papers.ContextualHistoryTest do
     assert {:ok, ^before, _redo} = ContextualHistory.apply(after_blocks, continuation)
   end
 
+  test "paper-links heading fields round-trip while reference and layout edits stay unsupported" do
+    before = [
+      %{
+        "id" => "links",
+        "type" => "paper-links",
+        "title" => "Before",
+        "description" => "Before description",
+        "layout" => "chapters",
+        "refs" => [%{"slug" => "next", "unknown" => %{"keep" => true}}],
+        "unknown" => [1, 2]
+      }
+    ]
+
+    for {field, value} <- [
+          {"title", "  After heading  "},
+          {"description", "  After description  "}
+        ] do
+      after_blocks = [Map.put(hd(before), field, value)]
+
+      assert {:ok, continuation} =
+               ContextualHistory.capture(before, after_blocks, [patch("links", field, value)])
+
+      assert continuation["target"] == %{"id" => "links", "type" => "paper-links"}
+      assert continuation["field"] == field
+      assert {:ok, ^before, redo} = ContextualHistory.apply(after_blocks, continuation)
+      assert {:ok, ^after_blocks, _undo} = ContextualHistory.apply(before, redo)
+    end
+
+    for {field, value} <- [
+          {"layout", "timeline"},
+          {"refs", [%{"slug" => "other"}]}
+        ] do
+      after_blocks = [Map.put(hd(before), field, value)]
+
+      assert {:ok, nil} =
+               ContextualHistory.capture(before, after_blocks, [patch("links", field, value)])
+    end
+  end
+
   test "distinguishes integer and float JSON values exactly" do
     before = [figure("figure", image("image", "/old.jpg")) |> Map.put("caption", 1)]
     after_blocks = [Map.put(hd(before), "caption", 1.0)]

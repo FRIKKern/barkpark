@@ -29,6 +29,14 @@ defmodule BarkparkWeb.BulldocsContextualHistoryHostTest do
                        "src" => "/before.png",
                        "alt" => "Authored description"
                      }
+                   },
+                   %{
+                     "id" => "links",
+                     "type" => "paper-links",
+                     "title" => "Original links heading",
+                     "description" => "Original links description",
+                     "refs" => [%{"slug" => "next", "unknown" => %{"keep" => true}}],
+                     "unknown" => [1, 2]
                    }
                  ]
                })
@@ -186,6 +194,72 @@ defmodule BarkparkWeb.BulldocsContextualHistoryHostTest do
     assert legacy.changed == true
   end
 
+  test "Public paper-links heading ACK undoes and redoes without touching references", %{
+    slug: slug,
+    view: view
+  } do
+    forward_id = Ecto.UUID.generate()
+
+    assert {:reply,
+            %{
+              saved: true,
+              history_step: %{version: 1, ref: ^forward_id, action: "undo"},
+              rev: forward_rev
+            }, forward_socket} =
+             BulldocsLive.handle_event(
+               "paper-block-autosave",
+               %{
+                 "block_id" => "links",
+                 "title" => "  Public heading  ",
+                 "request_id" => forward_id,
+                 "if_rev" => socket_of(view).assigns.paper_rev
+               },
+               socket_of(view)
+             )
+
+    assert paper_links(slug)["title"] == "  Public heading  "
+    assert paper_links(slug)["refs"] == [%{"slug" => "next", "unknown" => %{"keep" => true}}]
+
+    undo_id = Ecto.UUID.generate()
+
+    assert {:reply,
+            %{
+              saved: true,
+              history_step: %{version: 1, ref: ^undo_id, action: "redo"},
+              rev: undo_rev
+            }, undone_socket} =
+             BulldocsLive.handle_event(
+               "paper-history-step",
+               %{
+                 "history_ref" => forward_id,
+                 "action" => "undo",
+                 "request_id" => undo_id,
+                 "if_rev" => forward_rev
+               },
+               forward_socket
+             )
+
+    assert paper_links(slug)["title"] == "Original links heading"
+    redo_id = Ecto.UUID.generate()
+
+    assert {:reply, %{saved: true}, _redone_socket} =
+             BulldocsLive.handle_event(
+               "paper-history-step",
+               %{
+                 "history_ref" => undo_id,
+                 "action" => "redo",
+                 "request_id" => redo_id,
+                 "if_rev" => undo_rev
+               },
+               undone_socket
+             )
+
+    links = paper_links(slug)
+    assert links["title"] == "  Public heading  "
+    assert links["description"] == "Original links description"
+    assert links["unknown"] == [1, 2]
+  end
+
   defp socket_of(view), do: :sys.get_state(view.pid).socket
 
   defp image_src(slug) do
@@ -195,5 +269,13 @@ defmodule BarkparkWeb.BulldocsContextualHistoryHostTest do
     |> Map.fetch!("blocks")
     |> Enum.find(&(&1["id"] == "figure"))
     |> get_in(["child", "src"])
+  end
+
+  defp paper_links(slug) do
+    slug
+    |> Content.get_paper()
+    |> Map.fetch!(:content)
+    |> Map.fetch!("blocks")
+    |> Enum.find(&(&1["id"] == "links"))
   end
 end

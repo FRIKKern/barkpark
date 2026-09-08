@@ -409,6 +409,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end
   end
 
+  def validate_block_patch(%{"type" => "paper-links"} = block, params) do
+    with :ok <- validate_text_form_fields(params, ~w(title description), "paper-links header") do
+      {:ok, build_block_patch(block, params)}
+    end
+  end
+
   def validate_block_patch(%{"type" => "card"} = block, params),
     do: card_chrome_patch(block, params)
 
@@ -3105,7 +3111,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
         Map.put(map, key, if(String.trim(value) == "", do: nil, else: value))
 
       {:ok, _value} ->
-        Map.put(map, key, nil)
+        map
 
       :error ->
         map

@@ -89,6 +89,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
     block = %{
       "id" => "related: with punctuation!?",
       "type" => "paper-links",
+      "title" => "   ",
       "refs" => []
     }
 
@@ -98,10 +99,21 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
 
     assert html =~ "Explore the work"
     refute html =~ ~s(<section data-paper-links)
+    refute html =~ ~s(data-paper-links-title-paint)
+    refute html =~ ~s(class="bp-paper-links-title-heading")
+    refute html =~ ~s(class="bp-paper-links-description-paragraph")
 
     assert fragment
            |> LazyHTML.query(~s(textarea#paper-links-title-#{encoded}[name="title"]))
-           |> LazyHTML.text() == ""
+           |> LazyHTML.text() == "   "
+
+    assert fragment
+           |> LazyHTML.query(~s(textarea#paper-links-title-#{encoded}[tabindex="-1"]))
+           |> Enum.count() == 1
+
+    assert fragment
+           |> LazyHTML.query(~s(textarea#paper-links-description-#{encoded}[tabindex="-1"]))
+           |> Enum.count() == 1
 
     assert fragment
            |> LazyHTML.query(~s(input[name="block_id"][value="related: with punctuation!?"]))

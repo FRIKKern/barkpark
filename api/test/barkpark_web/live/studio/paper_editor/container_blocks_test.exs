@@ -60,6 +60,14 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContainerBlocksTest do
     assert %{"title" => nil} = Blocks.build_block_patch(block, %{"title" => "   "})
     assert %{"description" => nil} = Blocks.build_block_patch(block, %{"description" => "\n "})
     refute Map.has_key?(Blocks.build_block_patch(block, %{"title" => "new"}), "refs")
+
+    assert {:error, {:invalid_text, "paper-links header"}} =
+             Blocks.validate_block_patch(block, %{"title" => %{"forged" => true}})
+
+    assert {:error, {:invalid_text, "paper-links header"}} =
+             Blocks.validate_block_patch(block, %{"description" => ["forged"]})
+
+    assert Blocks.build_block_patch(block, %{"title" => %{"forged" => true}}) == %{}
   end
 
   test "bar-chart patch merges typed values into each original bar" do

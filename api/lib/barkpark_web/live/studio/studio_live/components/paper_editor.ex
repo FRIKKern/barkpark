@@ -1601,7 +1601,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         style={@presentation.title_style <> ";font-weight:bold"}
         data-paper-links-title-default={@presentation.title_default? && "true"}
       >
-        <h2 class="bp-paper-links-title-heading" style="margin:0;font:inherit;color:inherit">
+        <h2
+          :if={!@empty}
+          class="bp-paper-links-title-heading"
+          style="margin:0;font:inherit;color:inherit"
+        >
           <button
             type="button"
             phx-click={JS.focus(to: "#" <> @title_dom_id)}
@@ -1628,6 +1632,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             aria-label="Related papers heading"
             placeholder={@presentation.title}
             phx-hook="BarkparkPaperAutoSize"
+            tabindex={@empty && "-1"}
           ><%= @presentation.title_source %></textarea>
         </form>
       </div>
@@ -1638,7 +1643,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         data-paper-links-description-empty={is_nil(@presentation.description) && "true"}
       >
         <p
-          :if={@presentation.description}
+          :if={!@empty && @presentation.description}
           class="bp-paper-links-description-paragraph"
           style="margin:0;font:inherit;color:inherit"
         >
@@ -1668,6 +1673,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             aria-label="Related papers description"
             placeholder="Add a description"
             phx-hook="BarkparkPaperAutoSize"
+            tabindex={@empty && "-1"}
           ><%= @presentation.description_source %></textarea>
         </form>
       </div>

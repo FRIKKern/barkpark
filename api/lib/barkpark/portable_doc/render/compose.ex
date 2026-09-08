@@ -2683,17 +2683,19 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> Enum.reject(&is_nil/1)
       |> Enum.map_join(fn ref -> paper_link_card(ref, style, layout) end)
 
-    title_source = paper_links_source_text(Map.get(block, "title"))
-    description_source = paper_links_source_text(Map.get(block, "description"))
+    title_source = paper_links_form_text(Map.get(block, "title"))
+    description_source = paper_links_form_text(Map.get(block, "description"))
+    title = paper_links_display_text(Map.get(block, "title"))
+    description = paper_links_display_text(Map.get(block, "description"))
 
     %{
       cards_html: cards,
       empty?: cards == "",
       layout: layout,
-      title: title_source || "Explore the work",
-      title_source: title_source || "",
-      title_default?: is_nil(title_source),
-      description: description_source,
+      title: title || "Explore the work",
+      title_source: title_source,
+      title_default?: is_nil(title),
+      description: description,
       description_source: description_source || "",
       section_style: paper_links_section_style(layout),
       header_style: "margin:0 0 #{if layout == "chapters", do: "2.15rem", else: "1.15rem"}",
@@ -2727,12 +2729,16 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  defp paper_links_source_text(value) when is_binary(value) do
+  defp paper_links_display_text(value) when is_binary(value) do
     if String.trim(value) == "", do: nil, else: value
   end
 
-  defp paper_links_source_text(value) when is_integer(value), do: Integer.to_string(value)
-  defp paper_links_source_text(_value), do: nil
+  defp paper_links_display_text(value) when is_integer(value), do: Integer.to_string(value)
+  defp paper_links_display_text(_value), do: nil
+
+  defp paper_links_form_text(value) when is_binary(value), do: value
+  defp paper_links_form_text(value) when is_integer(value), do: Integer.to_string(value)
+  defp paper_links_form_text(_value), do: ""
 
   defp paper_links_section_style("chapters"),
     do:
