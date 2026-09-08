@@ -42,6 +42,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.CanvasRunContext
+  alias Barkpark.Content.Papers.ContextualHistory
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
   alias Barkpark.PortableDoc.TableEditing
@@ -1148,13 +1149,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
                   CallerContext.actor_stamp_from_opts(opts)
                 )
 
-              {:ok,
-               %{
-                 slug: slug,
-                 op_count: length(ops),
-                 rev: rev,
-                 block_ids: block_ids
-               }, {saved, slug, frame}}
+              receipt = %{
+                slug: slug,
+                op_count: length(ops),
+                rev: rev,
+                block_ids: block_ids
+              }
+
+              {:ok, maybe_capture_contextual_history(receipt, blocks, new_blocks, ops, opts),
+               {saved, slug, frame}}
 
             {:error, :precondition_failed} = err ->
               err
@@ -1165,6 +1168,21 @@ defmodule Barkpark.Content.Papers.BlockOps do
       end
     else
       {:error, _reason} = err -> err
+    end
+  end
+
+  # Server-only opt-in. Hosts do not enable this until their reply adapter can
+  # expose an opaque reference instead of the private before/after values.
+  # Capture uses the actual persisted shapes after normalization/encryption;
+  # unsupported history must never turn an accepted ordinary save into failure.
+  defp maybe_capture_contextual_history(receipt, before_blocks, after_blocks, ops, opts) do
+    if Keyword.get(opts, :contextual_history) == true do
+      case ContextualHistory.capture(before_blocks, after_blocks, ops) do
+        {:ok, history} when is_map(history) -> Map.put(receipt, :contextual_history, history)
+        _ -> receipt
+      end
+    else
+      receipt
     end
   end
 
@@ -1295,15 +1313,28 @@ defmodule Barkpark.Content.Papers.BlockOps do
     |> Base.encode16(case: :lower)
   end
 
-  defp normalize_stored_paper_ops_receipt(%{
-         "slug" => slug,
-         "op_count" => op_count,
-         "rev" => rev,
-         "block_ids" => block_ids
-       })
+  defp normalize_stored_paper_ops_receipt(
+         %{
+           "slug" => slug,
+           "op_count" => op_count,
+           "rev" => rev,
+           "block_ids" => block_ids
+         } = stored
+       )
        when is_binary(slug) and is_integer(op_count) and is_integer(rev) and
               is_list(block_ids) do
-    {:ok, %{slug: slug, op_count: op_count, rev: rev, block_ids: block_ids}}
+    receipt = %{slug: slug, op_count: op_count, rev: rev, block_ids: block_ids}
+
+    case Map.fetch(stored, "contextual_history") do
+      :error ->
+        {:ok, receipt}
+
+      {:ok, history} ->
+        case ContextualHistory.validate(history) do
+          :ok -> {:ok, Map.put(receipt, :contextual_history, history)}
+          _ -> {:error, :idempotency_receipt_invalid}
+        end
+    end
   end
 
   defp normalize_stored_paper_ops_receipt(_),
