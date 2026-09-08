@@ -6,6 +6,13 @@ defmodule Barkpark.Content.Envelope do
   All other keys come from the document's stored content plus `title`.
   User content cannot override reserved keys.
 
+  `title` is the ONE emitted key sourced from a COLUMN rather than from content,
+  so it is the one key a caller's own content field can collide with. The column
+  wins whenever it holds a value; a content field named `title` is emitted only
+  when the column is blank — where the key would otherwise carry nothing while
+  the stored value was destroyed on the way out. The derivation, the rejected
+  alternatives and the residual case live at `emitted_title/2` below.
+
   ## Field visibility (Phase 3, core-auth)
 
   `render/3` is the SINGLE output chokepoint where per-field visibility is
@@ -83,10 +90,12 @@ defmodule Barkpark.Content.Envelope do
 
   # @canonical capability:visibility-redaction aka:redact,render,private-field,field-visibility,owner_only doc:docs/auth-user-sessions.md
   def render(doc, schema \\ nil, caller_context \\ nil) do
+    content = doc.content || %{}
+
     user_fields =
-      (doc.content || %{})
+      content
       |> Map.drop(@reserved)
-      |> Map.put("title", doc.title)
+      |> Map.put("title", emitted_title(doc.title, content))
 
     {user_fields, derived_from_body?} = promote_paper_blocks(user_fields, doc.type)
 
@@ -120,6 +129,74 @@ defmodule Barkpark.Content.Envelope do
   end
 
   defp maybe_drop_orphaned_promotion(fields, false), do: fields
+
+  # [title-collision] gh-13711 — the READ-path sibling of gh-6291 (`content`)
+  # and gh-6292 (`status`), both fixed on the WRITE path in PR #13706.
+  #
+  # This used to be an unconditional `Map.put("title", doc.title)`. A document
+  # written through the CONTENT-PRESENT branch of `Writer.from_envelope/1` —
+  # `{"content": {"title": "…", …}}` with no top-level `title` — stores that
+  # field intact in the row and then had it overwritten here by a NULL column on
+  # the way out. The value was then unreadable by any means: `render/3` is the
+  # single field-visibility chokepoint, so REST query, search, share-link,
+  # history and reference expansion lost it identically. It is a REACHABLE
+  # shape, not a hypothetical — the mixed-shape refusal's own message
+  # (`Writer.refuse_orphan_top_level_keys/1`) tells callers to "Move them INSIDE
+  # `content`", which walks a type with its own `title` field straight into it.
+  #
+  # DECISION — THE COLUMN WINS WHENEVER IT HOLDS A VALUE; a content field named
+  # `title` is emitted only when the column would otherwise emit nothing.
+  # Rejected alternatives, and why:
+  #
+  #   * `Map.put_new` ("content wins whenever the key is present") is WRONG, and
+  #     wrong on live data. `PortableDoc.Projection.project_bound_fields/3` is
+  #     the SOLE writer of `content[fieldName]` and does a verbatim
+  #     `Map.put(acc, fieldName, projected_value(block))`; `projected_value/1`
+  #     documents that a bound block with no `"value"` projects `nil`. So a
+  #     bound title block on a blocks-bearing document leaves `"title"` PRESENT
+  #     with a `nil` value. `put_new` keys on presence, so every such document
+  #     would start rendering `title: nil` while its column holds the real
+  #     title.
+  #   * "Content always wins" also manufactures divergence against everything
+  #     that addresses the COLUMN: `Content.Query` filters (`apply_field_op/4`)
+  #     and orders (`apply_order/2`) on `d.title`, `field_readable?/3` lists
+  #     `title` in `@system_filterable` so it is filterable for every caller,
+  #     `Search.Highlighter.document_field_text/2` highlights `doc.title`, and
+  #     `Lifecycle.ensure_bound_title_agrees/1` exists precisely BECAUSE the
+  #     column and a bound title block can move independently — it refuses only
+  #     at publish, and only for bound blocks, so diverged drafts, papers and
+  #     imports are already on disk.
+  #   * "Both, under distinct keys" would mint a new reserved `_title` that every
+  #     SDK, CLI, Studio and scaffold reader must learn, to serve a field-name
+  #     collision. Not worth a vocabulary change.
+  #
+  # When the column is blank the emitted key carries NO information today — it
+  # is `nil`. Emitting the stored value there disagrees with nothing (a filter
+  # on `title` matches nothing against a NULL column either) and is strictly
+  # more than the destroyed value. Only a non-blank BINARY is taken, so the
+  # `title`-is-a-string assumption consumers rely on (`internal/apiclient`'s
+  # `scalarString`, `@barkpark/core`'s non-nullable `title`) survives a bound
+  # block whose value is a map or a list.
+  #
+  # RESIDUAL, on purpose: with the column set, a colliding `content["title"]` is
+  # still not readable. Making THAT case loud belongs on the WRITE door beside
+  # `Writer.refuse_colliding_status/1` — a different blast radius, to be filed
+  # rather than smuggled in here.
+  defp emitted_title(column, content) when is_map(content) do
+    if blank_title?(column) do
+      case Map.get(content, "title") do
+        value when is_binary(value) -> if blank_title?(value), do: column, else: value
+        _ -> column
+      end
+    else
+      column
+    end
+  end
+
+  defp emitted_title(column, _content), do: column
+
+  defp blank_title?(value) when is_binary(value), do: String.trim(value) == ""
+  defp blank_title?(_value), do: true
 
   def render_many(docs, schema \\ nil, caller_context \\ nil),
     do: Enum.map(docs, &render(&1, schema, caller_context))
