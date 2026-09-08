@@ -47,6 +47,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | `fields` | — | CSV content-field projection (`title,slug`); system fields kept |
 | `order` | `_updatedAt:desc` | `<field>:asc\|desc`, comma-join secondaries |
 | `count` | `false` | `true` adds `result.total` |
+| `id_prefix` | — | Stable-document-id prefix: exactly `filter[_id][startsWith]` (literal — `%`/`_` are not wildcards). Blank, non-string, or colliding with an `_id`/`doc_id` filter clause → 400 `invalid_filter` naming `id_prefix`; **never a silent unfiltered 200**. Also honoured by `GET /api/documents/:type`. |
 | `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
 | `filter[<field>][<op>]` | — | Ops: `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, weighted `strength >= min`; flat never matches), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
 | `filter[]` (repeated) | — | `filter[]=status=published&filter[]=price>10` — each element parses like a lone `filter=`, clauses are **ANDed** (no OR form); different ops on one field compose, the **same field+op twice → 400 `invalid_filter`** (use `in`), and **one unparseable element fails the whole request** (400, never a silent unfiltered 200) |
