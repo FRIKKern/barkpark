@@ -414,6 +414,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
+        id: setup
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -434,6 +435,7 @@ jobs:
 
       # PyYAML ships on ubuntu-latest; no install step, no network.
       - name: Every job in .github/workflows has a legal shape
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/workflow-job-shape-check.sh --dir .github/workflows
 
   # ── stale-tree regression check (task-e75a5acd30825d77, C1) ─────────────────
@@ -552,6 +554,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
+        id: setup
         uses: actions/checkout@v4
 
       # The API stage, §10 and §11: the committed spec's `enforced` flag against
@@ -581,6 +584,7 @@ jobs:
           exit "$rc"
 
       - name: Three-way drift check (spec ↔ live protection ↔ rendered names)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ secrets.BREAKGLASS_TOKEN || github.token }}
         run: |

@@ -324,6 +324,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        id: setup
         with:
           # depth 2, not 0. On a pull_request the checked-out ref is the merge
           # commit, so HEAD^1 IS the base sha and `git diff HEAD^1 HEAD` is
@@ -412,6 +413,7 @@ jobs:
         run: bash scripts/elixir-path-escape-check.sh --selftest
 
       - name: Every repo-root read is dispatched on
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/elixir-path-escape-check.sh
 
       # ── the wave-33 skip-disclosure ratchet, riding this job ─────────────
@@ -433,6 +435,7 @@ jobs:
       # ratchet blocks the merge — strictly stronger placement than its sibling,
       # which hangs off a context branch protection does not require.
       - name: The four gates announce their skips (the ratchet must be able to fail)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/gate-announces-skips.test.sh
 
       # ── the merge-authority claim guard, riding this job for one reason ───
@@ -456,9 +459,11 @@ jobs:
       # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
       # name, so required-checks-verify.sh's roster is unchanged.
       - name: The merge-authority claim guard must be able to fail
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/merge-authority-claim-check.test.sh
 
       - name: No workflow or card claims merge authority the spec denies
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/merge-authority-claim-check.sh
 
       # ── the unrecognised-top-level default (task-fb7857b984ff5ff8) ────────
@@ -491,9 +496,11 @@ jobs:
       # classifier's own refusal, which names the path and prints how to
       # classify it, never rendered at all.
       - name: Every changed top-level entry is one the repo knows
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/toplevel-classifier-check.sh
 
       - name: The top-level classifier must be able to fail (27-case harness)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/toplevel-classifier-check.sh --selftest
 
       # ── the vips hedge, now a tripwire instead of a 39-second bill ────────
@@ -508,6 +515,7 @@ jobs:
       # path-escape harnesses via `blocking_not_in_needs`, and a step adds no
       # rendered check name, so required-checks-verify.sh's roster is unchanged.
       - name: The vips hedge tripwire must be able to fail
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/vips-hedge-tripwire.sh --selftest
 
       # NAME THIS STEP WITHOUT THE MODE TOKEN. A `name:` is not a comment, so
@@ -515,6 +523,7 @@ jobs:
       # on the first real run — the guard catching its own wiring, which is the
       # correct behaviour and the reason the name reads around the token.
       - name: A platform-provided vips mode is never selected bare
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/vips-hedge-tripwire.sh
 
       # ── the diff-scoped format verdict, end to end ───────────────────────
@@ -530,6 +539,7 @@ jobs:
       # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
       # name, so required-checks-verify.sh's roster is unchanged.
       - name: A touched unformatted file reds the gate, an untouched one does not
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/format-diff-scope.test.sh
 
       # ── the Elixir pin-agreement gate (task-0c3081a2e534bdfc) ────────────
@@ -579,6 +589,7 @@ jobs:
       # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
       # name, so required-checks-verify.sh's roster is unchanged.
       - name: The PR test selector must fail safe (47-case harness)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/elixir-impacted-tests.sh --selftest
 
       # The pinned half of the selector's ALWAYS set is the net under the tests
@@ -587,6 +598,7 @@ jobs:
       # dropped one would shrink that net with no symptom at all, so the
       # existence of every pin is asserted separately from the harness.
       - name: Every pinned ALWAYS test still exists
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/elixir-impacted-tests.sh --check-pins
 
       # The main-red attribution reporter (elixir-main-red-attribution.yml) runs
@@ -596,12 +608,15 @@ jobs:
       # a proof that only runs when the thing it proves is already firing has
       # never been observed to fail.
       - name: The main-red attribution reporter must be able to report a miss
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/elixir-main-red-attribution.test.sh
 
       - name: The pin-agreement gate must be able to fail
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/toolchain-skew-check.sh --selftest
 
       - name: The production Elixir pin is covered by the jobs that test it
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/toolchain-skew-check.sh
 
   format:
