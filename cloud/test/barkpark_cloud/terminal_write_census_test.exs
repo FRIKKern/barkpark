@@ -54,6 +54,14 @@ defmodule BarkparkCloud.TerminalWriteCensus.EpochThiefRelay do
     :ok
   end
 
+  # The recorder read (`dr-bl-recorder-http-read-path`). This census drives
+  # `Sites.Deploy.run/1` and never reads a terminal record, so the honest stub is
+  # the answer a box gives for a build it has no record of — not an invented one.
+  @impl true
+  def build_record(_bp, slug, build_id) do
+    {:ok, 200, %{"slug" => slug, "build_id" => build_id, "log_state" => "never_recorded"}}
+  end
+
   @impl true
   def start_deploy(_bp, _payload) do
     state = state()

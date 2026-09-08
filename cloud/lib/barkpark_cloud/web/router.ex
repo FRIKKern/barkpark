@@ -195,6 +195,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites/:id/deployments user list a site's PRODUCTION deployments, newest first
       GET     /v1/sites/:id/deployments/:dep_id user(s)  one deployment (read ability)
       POST    /v1/sites/:id/rollback user(s) roll a site back to a prior deployment (write ability)
+      GET     /v1/sites/:id/deployments/:dep_id/build-log operator  the black box recorder's durable per-build record for THAT deployment (404 no such deployment / 410 evicted / 200 with an honest log_state)
       POST    /v1/sites/:id/deployments/:dep_id/promote user(s) rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact (write ability)
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/deployments/:dep_id/artifact user(s)  upload a PREBUILT dist for a minted deployment, then start it (write ability)
@@ -8777,6 +8778,33 @@ defmodule BarkparkCloud.Web.Router do
           json(conn, 404, %{error: "not_found"})
       end
     end)
+  end
+
+  # GET /v1/sites/:id/deployments/:dep_id/build-log → the black box recorder's
+  # durable per-build record, read BY DEPLOYMENT ID (dr-bl-recorder-http-read-path).
+  #
+  # OPERATOR-GATED, and the gate is 403-dark in production today
+  # (`gr-ops-platform-admin-emails` leaves `PLATFORM_ADMIN_EMAILS` unset), so this
+  # route answers 403 to every real account until a human sets it. That is a human
+  # gate this route INHERITS, not a defect it introduces — and no test here asserts
+  # a live 200 from it.
+  #
+  # Every decision lives in `Sites.BuildLog`: the site scoping, the three
+  # distinguishable answers (404 no-such-deployment / 410 evicted / 200 with an
+  # honest `log_state`), and the explicit field allowlist over the box's reply.
+  # This file is touched by every lane, so it carries the door and none of the
+  # policy.
+  get "/v1/sites/:id/deployments/:dep_id/build-log" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      {status, body} =
+        Sites.BuildLog.for_deployment(conn.path_params["id"], conn.path_params["dep_id"])
+
+      json(conn, status, body)
+    end
   end
 
   # POST /v1/sites/:id/rollback → 200 {ok, status, deployment_id,
