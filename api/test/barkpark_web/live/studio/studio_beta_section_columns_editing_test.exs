@@ -254,14 +254,14 @@ defmodule BarkparkWeb.Studio.StudioBetaSectionColumnsEditingTest do
 
     render_hook(view, "paper-block-autosave", %{
       "block_id" => ids.outer_section,
-      "title" => "Edited outer section",
+      "title" => "  Edited outer section  ",
       "if_rev" => socket_of(view).assigns.editor_doc.rev,
       "request_id" => title_request
     })
 
     assert_reply(view, %{saved: true, replayed: false, request_id: ^title_request})
     after_title = stored_blocks(doc.doc_id)
-    assert nested_block(after_title, ids.outer_section)["title"] == "Edited outer section"
+    assert nested_block(after_title, ids.outer_section)["title"] == "  Edited outer section  "
     assert_metadata_preserved(after_title)
 
     child_request = Ecto.UUID.generate()
@@ -288,6 +288,7 @@ defmodule BarkparkWeb.Studio.StudioBetaSectionColumnsEditingTest do
 
     assert nested_block(after_child, ids.column_paragraph)["content"] == text("Column prose")
     assert nested_block(after_child, ids.left_paragraph)["content"] == text("Left column")
+    assert nested_block(after_child, ids.outer_section)["title"] == "  Edited outer section  "
     assert_metadata_preserved(after_child)
 
     clear_title_request = Ecto.UUID.generate()

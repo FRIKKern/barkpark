@@ -29,7 +29,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
     assert SectionLayout.stack_rules?(%{"blocks" => [%{"type" => "heading"}]}, :email)
   end
 
-  test "Section title patches distinguish omission, clearing, trimming, and invalid values" do
+  test "Section title patches distinguish omission, clearing, preserved whitespace, and invalid values" do
     section = %{
       "id" => "section",
       "type" => "section",
@@ -43,7 +43,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
     assert Blocks.build_block_patch(section, %{"title" => "   "}) == %{"title" => nil}
 
     assert Blocks.build_block_patch(section, %{"title" => "  Revised  "}) == %{
-             "title" => "Revised"
+             "title" => "  Revised  "
            }
 
     assert Blocks.resolve_block_form([section], %{
@@ -54,7 +54,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
               %{
                 "op" => "patch-block",
                 "id" => "section",
-                "patch" => %{"title" => "Revised"}
+                "patch" => %{"title" => "  Revised  "}
               }}
 
     assert Blocks.resolve_block_form([section], %{"block_id" => "section"}) ==
