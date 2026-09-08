@@ -1697,6 +1697,7 @@
   box-sizing: border-box;
 }
 .bp-paper-figure-image { position: relative; }
+.bp-paper-figure-editor-frame { display: flow-root; }
 [data-paper-figure-image-trigger] { cursor: pointer; outline-offset: 3px; }
 .bp-paper-figure-image-trigger {
   position: absolute; inset: 0; width: 100%; height: 100%;
