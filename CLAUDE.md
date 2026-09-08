@@ -28,6 +28,7 @@ Load exactly ONE card, read it fully, follow its Code anchors. Do not load a sec
 | Ops | domain / TLS / DNS | `docs/ops/adding-a-domain.md` |
 | Ops | CI / merge gates | `docs/ops/merge-gates.md` |
 | API/SDK | HTTP API contract | `docs/api-v1.md` |
+| API/SDK | backlinks / tags / counts / history | `docs/contracts/document-graph-and-history.md` |
 | API/SDK | auth / tokens | `docs/auth.md` |
 | API/SDK | tenancy / workspace / project / dataset scoping | `docs/contracts/tenancy.md` |
 | API/SDK | query filter / sort / projection / expand limits | `docs/contracts/query-surface-limits.md` |
