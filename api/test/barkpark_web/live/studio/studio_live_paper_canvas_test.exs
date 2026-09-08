@@ -26,7 +26,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
   import Phoenix.LiveViewTest
 
-  alias Barkpark.Content
+  alias Barkpark.{Auth, Content}
   alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
 
   @dataset "production"
@@ -252,6 +252,54 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # The "Open standalone" reader link + the Share affordance survive the
       # toggle's removal — the header action row stays coherent.
       assert html =~ ~s(data-test-id="paper-open-standalone")
+    end
+
+    test "a same-draft invalid reconnect lease freezes the actual Studio pane before partitioning",
+         %{conn: conn} do
+      slug = "canvas-resume-blocked-#{System.unique_integer([:positive])}"
+      path = scoped_studio("/d/#{@dataset}/studio/paper/#{slug}")
+
+      {:ok, draft} =
+        Content.create_document(
+          "paper",
+          %{
+            "doc_id" => slug,
+            "title" => "Blocked reconnect",
+            "content" => %{
+              "blocks" => [
+                %{"id" => "before", "type" => "paragraph", "text" => "Before"},
+                %{"id" => "owned-table", "type" => "table", "rows" => [["Draft"]]}
+              ]
+            }
+          },
+          @dataset
+        )
+
+      assert draft.doc_id == "drafts.#{slug}"
+
+      raw = "studio-resume-writer-#{System.unique_integer([:positive])}"
+
+      {:ok, _token} =
+        Auth.create_token(raw, "Studio reconnect writer", @dataset, ["read", "write"])
+
+      conn =
+        conn
+        |> Plug.Test.init_test_session(%{"api_token" => raw})
+        |> put_connect_params(%{
+          "paper_canvas_lease_key" => "#{@dataset}:paper:#{draft.doc_id}",
+          "paper_canvas_leases" => ["invalid-same-document-lease"]
+        })
+
+      {:ok, view, html} = live(conn, path)
+
+      assert html =~ ~s(data-test-id="paper-canvas-resume-warning")
+      assert html =~ ~s(id="paper-editor-#{draft.doc_id}")
+      assert html =~ ~s(data-paper-canvas-resume-halt="true")
+      assert html =~ ~s(data-paper-canvas-resume-state="blocked")
+      assert has_element?(view, ~s([id="paper-editor-#{draft.doc_id}"][inert]))
+      assert has_element?(view, ~s(button[data-paper-canvas-export-draft]))
+      refute html =~ ~s(data-test-id="paper-canvas-run")
+      refute html =~ ~s(data-test-id="paper-table-editor")
     end
 
     test "an external {:paper_block} delta re-syncs the edit doc and pushes the block to the WCs (no Edit mode needed)",
