@@ -3,6 +3,11 @@ import { readFileSync } from "node:fs";
 
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const shell = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
+const mediaStyles = readFileSync(new URL("../../../priv/static/assets/bp-media-picker.css", import.meta.url), "utf8");
+assert.match(mediaStyles, /\.bp-ab-grid\s*\{[^}]*display:\s*grid/s,
+  "the shared media library defines its grid without depending on Studio utilities");
+assert.match(mediaStyles, /var\(--bg-elevated, var\(--paper-bg\)\)/,
+  "media dialogs use the current Paper palette when Studio tokens are absent");
 assert.match(shell, /\.bp-paper-figure-image-controls\s*\{[^}]*position:\s*absolute/s,
   "resting Figure image options cannot move the reader image or caption");
 assert.match(shell, /\[data-paper-figure-image-trigger\]:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--paper-accent\)/s,
@@ -128,6 +133,10 @@ assert.match(surface, /\.bp-paper-surface \.bp-blockquote__cite::before\s*\{ con
   "canonical reader prefix and flow remain unchanged");
 
 const studioLayout = readFileSync(new URL("../../../lib/barkpark_web/layouts/root.html.heex", import.meta.url), "utf8");
+assert.match(studioLayout, /href="\/assets\/bp-media-picker\.css"/,
+  "Studio loads the same media styles as the Public editor");
+assert.doesNotMatch(studioLayout, /\.bp-ab-overlay\s*\{/,
+  "media styling has one shared owner rather than a duplicate Studio inline copy");
 const narrowPaperHeader = studioLayout.match(/@container panel\s*\(max-width:\s*720px\)\s*\{\s*\.editor-panel\[data-test-id="studio-paper-editor"\] > \.editor-header\s*\{([^}]*)\}/);
 assert.ok(narrowPaperHeader, "Paper header actions must not spill over the title in a narrow content pane");
 assert.match(narrowPaperHeader[1], /display:\s*grid/, "title and actions get separate rows without changing the shared desktop header");
