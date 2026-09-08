@@ -1584,7 +1584,9 @@ defmodule BarkparkWeb.TasksController.Params do
     do:
       ~s|this criterion is a MERGE GATE — the LEAD closes it when the PR merges, and a builder flipping it | <>
         ~s|fabricates a done before the PR exists. Nothing was written. If you ARE the lead closing the gate, | <>
-        ~s|re-run with --merge-gated. | <>
+        ~s|re-run with --merge-gated — which nothing verifies: it records your assertion | <>
+        ~s|(verified:false, with the api_token that was authenticated) rather than checking your | <>
+        ~s|role. | <>
         ~s|IF THIS ROW IS NOT A GATE, THE MATCH WAS ON ITS PROSE AND IS A FALSE POSITIVE: with no explicit | <>
         ~s|"merge_gate" key on the criterion the guard falls back to matching the MERGE-GATED / MERGE GATE | <>
         ~s|wording anywhere in the text, which over the live corpus (2026-08-22) is a mention rather than a | <>
