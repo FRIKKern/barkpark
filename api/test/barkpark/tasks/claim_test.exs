@@ -423,8 +423,8 @@ defmodule Barkpark.Tasks.ClaimTest do
       # those tests pass whatever the lease arm answers.
       #
       # WHY THE TIMEZONE: every writer stamps UTC with a trailing `Z`
-      # (`DateTime.utc_now() |> DateTime.to_iso8601()` at claim.ex:446, :527 and
-      # pulse.ex:177), but the cutoff is built with `to_char(now() - ...)` and
+      # (`DateTime.utc_now() |> DateTime.to_iso8601()` in Tasks.Claim and Pulse),
+      # but the cutoff is built with `to_char(now() - ...)` and
       # `now()` renders in the SESSION's TimeZone. Comparing a UTC string
       # against a local-time string shifts the boundary by the session's UTC
       # offset, making the EFFECTIVE lease `ttl - offset`. At +02:00 against a

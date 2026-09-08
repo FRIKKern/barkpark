@@ -1623,7 +1623,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # which 340 - 114 + 400 reproduces.
   # MERGE HAZARD, unchanged: these are `==` pins. Any other PR that also moves them
   # must RE-MEASURE after this one lands, never sum with it.
-  # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 340 -> 352. Twelve NEW tag names arrive with
+  # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds 12 tag names (340 -> 352) with
   # `SiteBuildLogRecord` — available, box_error, box_log_state, box_status,
   # evicted_at, exit_code, journal_command, log_bytes, log_path, log_state,
   # record, unit_name. The struct's other 14 tags already existed as names
@@ -1801,7 +1801,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.Mode` —
     # deploy/rollback/teardown, as the record captured it.
     "mode" => 2,
-    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 11 -> 12. `SiteBuildLogStage.Name` — one stage of the
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one name site (11 -> 12). `SiteBuildLogStage.Name` — one stage of the
     # recorded build ladder.
     "name" => 12,
     "never_covered" => 3,
@@ -1824,7 +1824,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # dr-bl-w7: 9 -> 10. MetricsSpaceResidual.Reason — the machine-readable slug
     # a surface branches on to word a refusal ("roots-overlap-or-cross-a-mount"),
     # never prose parsed back into a decision.
-    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 10 -> 11. `SiteBuildLogRecord.Reason` — the CLOSED relay
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one reason site (10 -> 11). `SiteBuildLogRecord.Reason` — the CLOSED relay
     # vocabulary `BuildLog.relay_reason/1` emits instead of an inspected term.
     "reason" => 11,
     "refused" => 4,
@@ -1877,7 +1877,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # field a reader BRANCHES on, so only this row can notice a site dying.
     "state" => 2,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.Status` — the run state the CLI verdict QUOTES rather than inventing.
-    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 17 -> 18. `SiteBuildLogStage.Status` — one stage's verdict.
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one status site (17 -> 18). `SiteBuildLogStage.Status` — one stage's verdict.
     "status" => 18,
     "team" => 4,
     "team_id" => 6,
