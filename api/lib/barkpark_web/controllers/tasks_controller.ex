@@ -1024,19 +1024,25 @@ defmodule BarkparkWeb.TasksController do
           reason: "not_ready",
           arm: "queue_gated",
           execution_class: QueueGate.execution_class(c, worker_id),
-          # THE CLASSIFICATION IS QueueGate'S AND IS LEFT EXACTLY AS COMPUTED —
-          # this field only says what it was DERIVED FROM. `QueueGate`'s notion
-          # of a live claim is `live_claim_worker/1`: a worker name AND no close
-          # stamp, with no timestamp comparison anywhere in it. So a claim whose
-          # lease expired days ago still reads LIVE there and still yields
-          # `foreign_claimed`. Without this note the envelope contradicted
-          # itself — the message saying "nobody holds this row and there is no
-          # one to ask" beside a field saying `foreign_claimed` — and A MACHINE
+          # THE CLASSIFICATION IS QueueGate'S AND IS LEFT EXACTLY AS COMPUTED.
+          # It used to contradict the sentence beside it: `QueueGate`'s notion
+          # of a live claim was "a worker name AND no close stamp", with no
+          # timestamp comparison anywhere in it, so a lease that expired days
+          # ago still yielded `foreign_claimed` while this arm's message said
+          # "nobody holds this row and there is no one to ask" — and A MACHINE
           # READER KEYS ON THE FIELD, NOT THE PROSE (internal/cli's claim path
-          # renders `execution_class` directly). Fixing QueueGate is a separate
-          # row: its blast radius is every consumer of `execution_class`.
+          # renders `execution_class` directly).
+          #
+          # `QueueGate.live_claim_worker/1` now checks the lease too
+          # (task-f48b0d7c943fc3a5), so the field and the message tell ONE
+          # story: a stale map no longer classifies the row, and this note says
+          # so rather than warning about it.
           execution_class_note:
-            if(stale_map, do: "derived from a STALE claim map — the lease has expired"),
+            if(stale_map,
+              do:
+                "a STALE claim map naming #{holder} is present and was EXCLUDED from " <>
+                  "this classification — the lease has expired"
+            ),
           gate_reason: if(is_map(gate), do: Map.get(gate, "reason")),
           stale_claim_map: stale_map,
           message:
@@ -1071,33 +1077,15 @@ defmodule BarkparkWeb.TasksController do
     Barkpark.Tasks.Close.closed_lifecycle_statuses() -- Validation.claimable_statuses()
   end
 
-  # IS THIS CLAIM A LEASE OR RESIDUE? Compares `claim.ts_iso` against the SAME
-  # ttl the sweeper uses, read from config rather than hardcoded, so the two
-  # cannot drift apart.
-  #
-  # FAILS CLOSED ON PURPOSE: no timestamp, or one that will not parse, is
-  # treated as LIVE. This function can only ever DOWNGRADE somebody from holder
-  # to residue, so an unprovable case must keep the old protective behaviour —
-  # a parse bug here must not hand one lane another lane's row.
-  defp claim_lease_live?(content) do
-    case get_in(content, ["claim", "ts_iso"]) do
-      ts when is_binary(ts) ->
-        case DateTime.from_iso8601(ts) do
-          {:ok, claimed_at, _} ->
-            DateTime.diff(DateTime.utc_now(), claimed_at) < lease_ttl_seconds()
+  # IS THIS CLAIM A LEASE OR RESIDUE? ONE HOME, and it is `QueueGate` — the
+  # module that owns claim-derived execution state and now asks the same
+  # question in `live_claim_worker/1` and in the SQL twin `executable_query/0`.
+  # This arm used to carry its own copy; two copies of one rule with no shared
+  # fixture is how the two halves drift, and the drift IS the bug both sides
+  # were fixing (task-f48b0d7c943fc3a5).
+  defp claim_lease_live?(content), do: QueueGate.claim_lease_live?(content)
 
-          _ ->
-            true
-        end
-
-      _ ->
-        true
-    end
-  end
-
-  @default_lease_ttl_seconds 2700
-  defp lease_ttl_seconds,
-    do: Application.get_env(:barkpark, :task_lease_ttl_seconds, @default_lease_ttl_seconds)
+  defp lease_ttl_seconds, do: QueueGate.lease_ttl_seconds()
 
   # Names the residue AND says what it is not, because "held by X" was read as
   # ownership by its own author tonight even with the finding written down.
