@@ -1244,7 +1244,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
-      basis_spans: [{512, 512}],
+      basis_spans: [{522, 522}],
       basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1257,7 +1257,10 @@ defmodule PDS.Census do
           "this def grew by 18 lines — +18, the comment still sits on the def's first body line. " <>
           "RE-ANCHORED again off :501 on pds-w37-api-logout-unread-revoke: logout/2, above this " <>
           "def, grew by 11 lines when it started carrying its revoke count — +11, the comment " <>
-          "still sits on the def's first body line.",
+          "still sits on the def's first body line. RE-ANCHORED again off :512 on " <>
+          "era-bl-allowed-auth-methods: login/2, above this def, grew by 10 lines when it took " <>
+          "the org allowed-auth-methods guard — +10, the comment still sits on the def's first " <>
+          "body line.",
       why:
         "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
           "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
@@ -1266,7 +1269,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{527, 532}],
+      basis_spans: [{537, 542}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1280,7 +1283,10 @@ defmodule PDS.Census do
           "RE-ANCHORED again off :498-503 on the PAT admin-mint cap lane (PR #14933): +18 lines " <>
           "inserted above (the token `anti-enumeration` now on :519). RE-ANCHORED again off " <>
           ":516-521 on pds-w37-api-logout-unread-revoke: +11 lines inserted above by logout/2 " <>
-          "carrying its revoke count (the token `anti-enumeration` now on :530).",
+          "carrying its revoke count (the token `anti-enumeration` now on :530). RE-ANCHORED " <>
+          "again off :527-532 on era-bl-allowed-auth-methods: +10 lines inserted above by " <>
+          "login/2 taking the org allowed-auth-methods guard (the token `anti-enumeration` now " <>
+          "on :540).",
       why:
         "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
           ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>
