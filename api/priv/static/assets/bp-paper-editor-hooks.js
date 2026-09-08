@@ -137,6 +137,59 @@
   // Restore the operated row only after acknowledgement, without stealing focus
   // from a user who has moved elsewhere while the request was in flight.
   function bpPaperCollectionFocus(form, submitter) {
+    if (submitter?.name === "column-action") {
+      const value = submitter.value || "";
+      const addTrack = value === "add-column";
+      const removeTrack = /^remove-column:(0|[1-9]\d*)$/.exec(value);
+      if (addTrack || removeTrack) {
+        if (document.activeElement !== submitter) return () => {};
+        const columnCount = Number(form.elements.namedItem("column-count")?.value);
+        if (!Number.isSafeInteger(columnCount) || columnCount < 0) return () => {};
+        const beforeColumns = [];
+        for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+          const childCount = Number(
+            form.elements.namedItem(`column-${columnIndex}-child-count`)?.value,
+          );
+          if (!Number.isSafeInteger(childCount) || childCount < 0) return () => {};
+          const ids = Array.from({ length: childCount }, (_unused, childIndex) =>
+            form.elements.namedItem(`column-${columnIndex}-child-${childIndex}-id`)?.value);
+          if (ids.some((id) => typeof id !== "string" || id === "") ||
+              new Set(ids).size !== ids.length) return () => {};
+          beforeColumns.push(ids);
+        }
+        const removedIndex = removeTrack ? Number(removeTrack[1]) : null;
+        if (removeTrack &&
+            (columnCount < 2 || removedIndex !== columnCount - 1 ||
+              beforeColumns[removedIndex].length !== 0)) return () => {};
+        const nextColumnCount = columnCount + (addTrack ? 1 : -1);
+        return () => {
+          if (!form.isConnected ||
+              (document.activeElement !== submitter &&
+                !(document.activeElement === document.body && !submitter.isConnected)) ||
+              Number(form.elements.namedItem("column-count")?.value) !== nextColumnCount) return;
+          for (let columnIndex = 0; columnIndex < nextColumnCount; columnIndex += 1) {
+            const childCount = Number(
+              form.elements.namedItem(`column-${columnIndex}-child-count`)?.value,
+            );
+            if (!Number.isSafeInteger(childCount) || childCount < 0) return;
+            const ids = Array.from({ length: childCount }, (_unused, childIndex) =>
+              form.elements.namedItem(`column-${columnIndex}-child-${childIndex}-id`)?.value);
+            const expected = addTrack && columnIndex === columnCount
+              ? []
+              : beforeColumns[columnIndex];
+            if (ids.some((id) => typeof id !== "string" || id === "") ||
+                new Set(ids).size !== ids.length ||
+                JSON.stringify(ids) !== JSON.stringify(expected)) return;
+          }
+          const buttons = [...form.elements].filter((control) =>
+            control.name === "column-action" && !control.disabled);
+          const lastTrack = buttons.find((control) =>
+            control.value === `add:${nextColumnCount - 1}`);
+          const globalAdd = buttons.find((control) => control.value === "add-column");
+          (lastTrack || globalAdd)?.focus();
+        };
+      }
+    }
     const nestedMatch = /^(section|column|terminal)-action$/.exec(submitter?.name || "");
     if (nestedMatch) {
       if (document.activeElement !== submitter) return () => {};
@@ -1132,6 +1185,11 @@
         async drain() {
           while (main.isConnected) {
             const pending = [];
+            const retainedStructural = mutationQueue[0];
+            if (!mutationActive && mutationPaused && !conflict &&
+                retainedStructural?.source?.matches?.("form[phx-submit]")) {
+              pending.push(coordinator.retryMutation(retainedStructural));
+            }
             main.querySelectorAll(PAPER_FLUSH_TARGETS).forEach((wrapper) => {
               wrapper.dispatchEvent(new CustomEvent("bp-flush-pending", {
                 detail: { waitUntil: (promise) => pending.push(Promise.resolve(promise)) },
