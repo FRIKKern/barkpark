@@ -188,9 +188,13 @@ defmodule Barkpark.Tasks.Stamp do
         caller read. It is CAS'd against the stored rev inside the lock. Unused
         on any row stamped under a live claim, where the epoch fence applies
         instead.
-      * `:merge_gated` (optional boolean, default `false`) — the LEAD-ONLY
-        override that releases the MERGE-GATE refusal below. Without it a
-        `{:met, _}` on a merge-gated row fails with `:merge_gated_criterion`.
+      * `:merge_gated` (optional boolean, default `false`) — the LEAD-OWNED
+        override that releases the MERGE-GATE refusal below. LEAD-OWNED is a
+        CONVENTION, not an authorization: nothing checks that the caller is a
+        lead, and nothing can, because the server authenticates an api_token and
+        not the `worker_id` the caller typed (`check_merge_gate/6` says so at the
+        point of permit). Without it a `{:met, _}` on a merge-gated row fails
+        with `:merge_gated_criterion`.
         USING IT MINTS A RECEIPT: an override that actually lifts the refusal
         appends a record to `content.merge_gate_autostamp.stamp_overrides` on
         the same rev-CAS write as the flip (see `check_merge_gate/6`). The flag

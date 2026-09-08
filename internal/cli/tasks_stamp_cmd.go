@@ -122,9 +122,13 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	// document's `ok`.
 	cap := beginStampCapture(out, g, cmd)
 
-	// Hand the real POST to the shared dispatch, with the CLI-only
-	// --merge-gated stripped (the server does not declare that flag, so an
-	// un-stripped token would fail splitArgs with "unknown flag").
+	// Hand the real POST to the shared dispatch. Whether `forward` still carries
+	// --merge-gated is CONDITIONAL and parseStampArgs owns the decision: when the
+	// server DECLARES the flag it is forwarded like any other, because the server
+	// enforces the gate and needs to see the override; only against a legacy
+	// manifest that does not declare it is it stripped, since an undeclared token
+	// fails splitArgs with "unknown flag". See the doc comment on parseStampArgs
+	// and the fallback branch above.
 	rc := runCommand(out, g, ctx, m, cmd, forward)
 
 	// THE READ-BACK (PDS-D359/D361). A 2xx is not a landed write: the epic has
