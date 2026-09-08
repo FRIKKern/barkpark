@@ -2,7 +2,7 @@
 
 ## Source of truth
 - Status: Active
-- Last refreshed: 2026-09-06
+- Last refreshed: 2026-09-08
 - Primary product surfaces: Public Paper reader, Barkpark Chronicle index, Chronicle day/week/month/year editions, Studio Paper editor, email and TUI Paper views.
 - Evidence reviewed: `api/assets/paper-surface/paper-surface.css`, the PortableDoc image/figure/asciicast renderers, the live Paper relation resolver, `docs/evidence/**`, `tooling/paper-excellence/evidence/**`, the committed Paper Excellence screenshot panel, and fresh multi-viewport Chronicle renders.
 
@@ -28,6 +28,7 @@
 
 ## Design principles
 - Edit the same document: Switching to edit mode preserves the rendered content, typography, and reading geometry. Configuration lives in contextual controls, not an always-visible replacement form. Collapsed expandable content remains a disclosure, with its nested content editable when opened.
+- Preserve scaffolds without expanding the resting page: Empty prose and authored dividers suppressed by the reader keep their source identity. In Edit, a compact, labelled, keyboard-reachable gutter control selects the scaffold; only the selected scaffold expands for typing or deletion. Entering Edit alone must not add paragraph-height gaps or duplicate section boundaries. Selection is an intentional composing state, not a saved layout mutation.
 - Lead with reader value: Describe the shipped outcome before its repository mechanics.
 - Review, do not transcribe: Synthesize the period into a defensible point of view; counts and commit subjects are evidence, not the story.
 - Headline the change, not the mood: Every edition earns a short news headline that names the product, surface, or capability that moved and says what happened. A title must carry enough factual meaning to distinguish this edition from another one before the body is read.
@@ -74,7 +75,9 @@
 - Save validation: Invalid input remains visible and editable; leaving edit mode waits for valid, acknowledged persistence. Failure never silently replaces the draft with the last saved value.
 - Loading: Server-rendered Paper body and authored related-Paper fallbacks remain meaningful before live detail resolution.
 - Empty: Quiet editions state that no mainline changes landed and still link to adjacent periods.
+- Empty authoring blocks: Keep the exact block and undo history. Resting scaffolds occupy no document height; selecting their gutter control reveals the native editing surface. Newly inserted, selected empty blocks remain immediately writable. Never remove stored blanks or dividers as a styling fix.
 - Error: Publish failures name the exact slug and HTTP response; no partially successful batch is reported as complete.
+- Interrupted editing: Reconnecting must retain the same document's unsaved canvas. Resume presentation only after the server rechecks write authority; never send draft text in connection hints or report an unacknowledged edit as saved.
 - Success: The index publishes last, after all editions, and becomes the stable confirmation surface.
 - Disabled: Not applicable to the read-only Chronicle.
 - Offline/slow network: Core text and links are server-rendered. Media is optional evidence, and related cards preserve their authored links when live resolution is unavailable.
@@ -104,5 +107,6 @@
 - Test/screenshot expectations: Generator tests, structure/quality audit, design checks, and hermetic light/dark screenshots at 360/768/1280/1920. The primary 1440 × 1200 capture must pass a five-second comprehension test (edition, factual lead, consequence, authentic proof, and the start of the brief are visible), the monthly rail must expose every active day plus source-linked milestone travel, and at least one labelled relationship thread must connect three or more source-grounded changes. A structured visual verdict must score at least 90/100; truth, width leakage, overflow, accessibility, or five-second comprehension failures remain blocking regardless of aggregate score.
 
 ## Open questions
+- [ ] Full-inventory scaffold census / Paper editing epic / this repair starts with native prose and reader-suppressed section dividers; other empty component shapes require their own evidence.
 - [ ] Decide whether a human editor should be able to lock or amend an AI-written review without losing automatic source updates / product owner / affects protected editorial overlays.
 - [ ] Decide which product moments deserve a deliberately recorded cast when no committed recording exists / product owner / affects future media coverage, never archive completeness.
