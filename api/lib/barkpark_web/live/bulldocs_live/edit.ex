@@ -118,6 +118,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   def defaults(socket, paper) do
     socket
     |> assign(:editing?, false)
+    |> assign(:paper_canvas_retained, nil)
     |> assign(:edit_blocks, blocks_of(paper))
     |> assign(:paper_doc, paper)
     |> assign(:paper_rev, rev_of(paper))
@@ -167,6 +168,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
         socket =
           socket
           |> assign(:editing?, editing?)
+          |> assign(:paper_canvas_retained, nil)
           # Slice 4: tell the room. The presence meta's `editing?` is what puts
           # the dot next to a name in `#paper-presence`, so it must flip on the
           # SAME event that flips the mode — not on the first op, which may never
@@ -370,6 +372,12 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
             socket =
               socket
               |> sync()
+              |> SharedPaper.retain_canvas_insertions(
+                slug,
+                doc_field(paper, :content),
+                context,
+                ops
+              )
               |> reconcile_canvas(request_id)
               |> assign(:save_status, "Auto-saved")
               |> assign(:last_save_ok?, true)
@@ -584,6 +592,14 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   @doc "Re-derive the editor buffer from an already-loaded paper document."
   def sync(socket, paper) do
     socket
+    |> assign(
+      :paper_canvas_retained,
+      BarkparkWeb.Studio.StudioLive.PaperCanvas.refresh_retained(
+        socket.assigns[:paper_canvas_retained],
+        doc_field(paper, :doc_id),
+        blocks_of(paper)
+      )
+    )
     |> assign(:edit_blocks, blocks_of(paper))
     |> assign(:paper_doc, paper)
     |> assign(:paper_rev, rev_of(paper))

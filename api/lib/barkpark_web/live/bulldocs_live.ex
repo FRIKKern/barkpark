@@ -1588,6 +1588,7 @@ defmodule BarkparkWeb.BulldocsLive do
             scope_prefix={@scope_prefix}
             picker_browse={@picker_browse?}
             canvas_eligible={true}
+            canvas_retained={Map.get(assigns, :paper_canvas_retained)}
             task_previews={@task_previews}
             paper_links={@paper_link_details}
             save_status={@save_status}

@@ -305,6 +305,70 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   defp not_opted_out?("false"), do: false
   defp not_opted_out?(_), do: true
 
+  @doc false
+  def retained_ids(%{slug: slug, ids: %MapSet{} = ids}, slug), do: ids
+  def retained_ids(_, _), do: MapSet.new()
+
+  @doc false
+  def refresh_retained(%{slug: slug, ids: %MapSet{} = ids} = ownership, slug, blocks),
+    do: %{ownership | ids: prune_retained(ids, blocks)}
+
+  def refresh_retained(_, _, _), do: nil
+
+  @doc false
+  def prune_retained(ids, blocks) when is_list(blocks) do
+    current =
+      blocks
+      |> Enum.filter(&(is_map(&1) and &1["type"] in ["table", "section"]))
+      |> MapSet.new(& &1["id"])
+
+    MapSet.intersection(ids, current)
+  end
+
+  def prune_retained(_ids, _blocks), do: MapSet.new()
+
+  @doc false
+  # Keep a newly inserted top-level boundary in the PM editor which owns its
+  # insertion history. This socket-only exception ends when that editor unmounts.
+  def retain_insertions(prior, before_content, after_content, context, ops) do
+    blocks_of = fn
+      %{"blocks" => blocks} when is_list(blocks) -> blocks
+      _ -> []
+    end
+
+    before_blocks = blocks_of.(before_content)
+    after_blocks = blocks_of.(after_content)
+    prior = prune_retained(prior, after_blocks)
+
+    alias Barkpark.Content.Papers.CanvasRunContext
+
+    with {:ok, %{container_kind: "document"} = normalized} <- CanvasRunContext.normalize(context),
+         {:ok, _, _} <- CanvasRunContext.map_run(before_blocks, normalized, &{:ok, &1, nil}) do
+      before_ids = MapSet.new(before_blocks, & &1["id"])
+
+      candidate_ids =
+        Enum.flat_map(ops, fn
+          %{"op" => kind, "block" => %{"id" => id, "type" => type}}
+          when kind in ["insert-after", "append-block", "replace-block"] and
+                 type in ["table", "section"] and is_binary(id) and id != "" ->
+            [id]
+
+          _ ->
+            []
+        end)
+        |> MapSet.new()
+        |> MapSet.difference(before_ids)
+
+      Enum.reduce(after_blocks, prior, fn block, ids ->
+        if block["type"] in ["table", "section"] and MapSet.member?(candidate_ids, block["id"]),
+          do: MapSet.put(ids, block["id"]),
+          else: ids
+      end)
+    else
+      _ -> prior
+    end
+  end
+
   @doc """
   Partition an ordered block list into maximal contiguous canvas runs.
 
@@ -325,15 +389,21 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   A list that is all canvas-eligible ⇒ a single `{:run, _}` (even a lone divider).
   """
   @spec partition_runs([map()]) :: [{:run, [map()]} | {:block, map()}]
-  def partition_runs(blocks) when is_list(blocks) do
+  def partition_runs(blocks, retained_ids \\ MapSet.new()) when is_list(blocks) do
+    eligible? = fn block ->
+      canvas?(block) or
+        (is_map(block) and block["type"] in ["table", "section"] and
+           MapSet.member?(retained_ids, block["id"]))
+    end
+
     blocks
     # Group adjacent blocks by their canvas-eligibility, preserving order.
     # `chunk_by` cuts a new chunk every time the boolean flips, so each chunk is
     # a maximal contiguous stretch of either all-canvas or all-non-canvas blocks.
-    |> Enum.chunk_by(&canvas?/1)
+    |> Enum.chunk_by(eligible?)
     |> Enum.flat_map(fn
       [first | _] = chunk ->
-        if canvas?(first) do
+        if eligible?.(first) do
           # A maximal canvas stretch (prose ∪ dividers ∪ callouts ∪ attr-atoms ∪
           # native fields ∪ read-only sheet/embed atoms) → ONE run keyed
           # (downstream) by its first id.

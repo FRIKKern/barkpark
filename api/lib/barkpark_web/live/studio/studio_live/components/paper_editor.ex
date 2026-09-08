@@ -132,6 +132,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # at its FALSE default, so the canvas never mounts where its ops can't land —
   # the canvas flag stays gated to the one surface whose persist path is wired.
   attr(:canvas_eligible, :boolean, default: false)
+  attr(:canvas_retained, :any, default: nil)
 
   # t9 — live task-block previews (block_id ⇒ preview entry from
   # TaskResolver.preview/2), display-only rows the flag-ON boundary widgets
@@ -209,7 +210,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     # editor, where `paper-ops` (→ paper_doc) is the wrong persist path.
     canvas_on? = PaperCanvas.paper_canvas_enabled?() and assigns.canvas_eligible
 
-    segments = if canvas_on?, do: index_segments(PaperCanvas.partition_runs(free)), else: []
+    retained = PaperCanvas.retained_ids(assigns.canvas_retained, assigns.slug)
+
+    segments =
+      if canvas_on?, do: index_segments(PaperCanvas.partition_runs(free, retained)), else: []
 
     assigns =
       assigns
