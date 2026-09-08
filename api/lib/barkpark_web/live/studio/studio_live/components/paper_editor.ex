@@ -1488,6 +1488,63 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     """
   end
 
+  attr(:block, :map, required: true)
+  attr(:grid, :boolean, default: false)
+
+  defp section_title_editor(assigns) do
+    title = Map.get(assigns.block, "title")
+
+    assigns =
+      assigns
+      |> assign(:title, title || "")
+      |> assign(:title_empty, title in [nil, ""])
+
+    ~H"""
+    <div
+      class={[
+        "bp-paper-section-title-editor",
+        @grid && "bp-section__title",
+        !@grid && "bp-paper-section-title-editor--stack"
+      ]}
+      style="font-weight:bold"
+      data-paper-section-title-editor
+      data-paper-section-title-empty={@title_empty && "true"}
+    >
+      <button
+        :if={!@title_empty}
+        type="button"
+        class="bp-paper-section-title-paint"
+        phx-click={JS.focus(to: "#section-title-" <> @block["id"])}
+        aria-label={"Edit section title: " <> @title}
+        aria-controls={"section-title-" <> @block["id"]}
+        data-paper-section-title-paint
+      ><%= @title %></button>
+      <form
+        id={"section-form-" <> @block["id"]}
+        name="section-config"
+        class="bp-paper-edit-form bp-paper-section-title-form"
+        phx-submit="paper-edit-block"
+        phx-change="paper-block-autosave"
+        phx-debounce="500"
+        data-test-id="paper-section-config-editor"
+      >
+        <input type="hidden" name="block_id" value={@block["id"]} />
+        <label class="sr-only" for={"section-title-" <> @block["id"]}>Section title</label>
+        <input
+          id={"section-title-" <> @block["id"]}
+          type="text"
+          name="title"
+          class="bp-paper-edit-text bp-paper-section-title-input"
+          aria-label="Section title"
+          placeholder="Section title"
+          value={@title}
+          data-test-id="paper-field-title"
+        />
+      </form>
+    </div>
+    """
+  end
+
   # Per-block-type edit fields. Rich bodies use the canonical WC so its
   # PortableDoc conversion preserves marks and links while text changes.
   # Ordinary forms remain for scalar chrome such as callout tone/title/fold.
@@ -2459,7 +2516,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             >
               <%= if grid = SectionLayout.grid(@block) do %>
                 <hr class="bp-hr" />
-                <div :if={not is_nil(@block["title"])} class="bp-section__title" style="font-weight:bold"><%= @block["title"] %></div>
+                <.section_title_editor block={@block} grid />
                 <div class="bp-section__grid" style={grid.style}>
                   <div
                     :for={child <- @block["blocks"]}
@@ -2481,7 +2538,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 <hr class="bp-hr" />
               <% else %>
                 <%= if SectionLayout.stack_rules?(@block, :article) do %><hr class="bp-hr" style="border-top-width:1px" /><% end %>
-                <span :if={not is_nil(@block["title"])} style="font-weight:bold"><%= @block["title"] %></span>
+                <.section_title_editor block={@block} />
                 <%= for segment <- section_segments(@block, @canvas_enabled, @canvas_retained, @root_slug) do %>
                   <%= case segment do %>
                     <% {:run, run_blocks, ordinal} -> %>
@@ -2513,11 +2570,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             <details id={"section-controls-" <> @id} class="bp-paper-contextual-controls bp-paper-contextual-controls--section" phx-mounted={JS.ignore_attributes("open")}>
               <summary class="bp-paper-contextual-toggle">Configure section</summary>
               <div class="bp-paper-contextual-panel">
-                <form id={"section-form-" <> @id} name="section-config" class="bp-paper-edit-form" phx-submit="paper-edit-block" phx-change="paper-block-autosave" phx-debounce="500" data-test-id="paper-section-config-editor">
-                  <input type="hidden" name="block_id" value={@id} />
-                  <label class="bp-paper-edit-fieldlabel" for={"section-title-" <> @id}>Title</label>
-                  <input id={"section-title-" <> @id} type="text" name="title" class="bp-paper-edit-text" placeholder="Section title" value={Map.get(@block, "title", "")} data-test-id="paper-field-title" />
-                </form>
+                <div class="bp-paper-edit-form">
+                  <span class="bp-paper-edit-fieldlabel">Title</span>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm bp-paper-section-title-panel-trigger"
+                    phx-click={JS.focus(to: "#section-title-" <> @id)}
+                    aria-controls={"section-title-" <> @id}
+                    data-paper-section-title-panel-trigger
+                  ><%= if Map.get(@block, "title") in [nil, ""], do: "Add title", else: "Edit title" %></button>
+                </div>
                 <form id={"section-structure-form-" <> @id} class="bp-paper-edit-form" phx-submit="paper-edit-block" data-test-id="paper-section-structure-editor">
                   <input type="hidden" name="block_id" value={@id} />
                   <input type="hidden" name="section-child-count" value={length(@block["blocks"])} />

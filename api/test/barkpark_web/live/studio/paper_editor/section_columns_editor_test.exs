@@ -80,6 +80,91 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
     assert Enum.count(title) == 1
   end
 
+  test "Section title paint and Configure fallback focus one canonical scalar field" do
+    for section <- [
+          %{
+            "id" => "section",
+            "type" => "section",
+            "title" => "Existing title",
+            "blocks" => [paragraph("inside", "Nested draft")]
+          },
+          %{
+            "id" => "section",
+            "type" => "section",
+            "title" => "Existing title",
+            "layout" => %{"mode" => "grid", "tracks" => 2},
+            "blocks" => [paragraph("inside", "Nested draft")]
+          }
+        ] do
+      tree = section |> render_fields(canvas_enabled: true) |> LazyHTML.from_fragment()
+      frame = LazyHTML.query(tree, "[data-paper-section-editor-frame]")
+      title_editor = LazyHTML.query(frame, "[data-paper-section-title-editor]")
+      title_form = LazyHTML.query(title_editor, "form[name='section-config']")
+      title_input = LazyHTML.query(title_form, "input[name='title']")
+      paint = LazyHTML.query(title_editor, "[data-paper-section-title-paint]")
+      fallback = LazyHTML.query(tree, "[data-paper-section-title-panel-trigger]")
+
+      assert Enum.count(title_editor) == 1
+      assert LazyHTML.attribute(title_form, "id") == ["section-form-section"]
+      assert LazyHTML.attribute(title_form, "phx-change") == ["paper-block-autosave"]
+      assert LazyHTML.attribute(title_input, "id") == ["section-title-section"]
+      assert LazyHTML.attribute(title_input, "value") == ["Existing title"]
+      assert LazyHTML.attribute(title_input, "type") == ["text"]
+      assert LazyHTML.attribute(paint, "type") == ["button"]
+      assert LazyHTML.attribute(paint, "aria-controls") == ["section-title-section"]
+      assert LazyHTML.text(paint) == "Existing title"
+
+      assert LazyHTML.attribute(paint, "phx-click") == [
+               ~s([["focus",{"to":"#section-title-section"}]])
+             ]
+
+      assert LazyHTML.attribute(fallback, "aria-controls") == ["section-title-section"]
+
+      assert LazyHTML.attribute(fallback, "phx-click") == [
+               ~s([["focus",{"to":"#section-title-section"}]])
+             ]
+
+      assert LazyHTML.text(fallback) == "Edit title"
+
+      assert Enum.count(LazyHTML.query(tree, "form[name='section-config']")) == 1
+
+      assert Enum.empty?(
+               LazyHTML.query(
+                 tree,
+                 "#section-controls-section input[name='title']"
+               )
+             )
+
+      nested_editor_count =
+        Enum.count(LazyHTML.query(frame, "[data-test-id='paper-canvas-run']")) +
+          Enum.count(LazyHTML.query(frame, "[data-test-id='paper-block-editor-wc']"))
+
+      assert nested_editor_count == 1
+      assert Enum.empty?(LazyHTML.query(title_form, "[data-test-id='paper-canvas-run']"))
+      assert Enum.empty?(LazyHTML.query(title_form, "[data-test-id='paper-block-editor-wc']"))
+    end
+  end
+
+  test "absent and empty Section titles stay zero-flow until Configure focuses the same field" do
+    for title <- [:absent, nil, ""] do
+      section = %{"id" => "section", "type" => "section", "blocks" => []}
+      section = if title == :absent, do: section, else: Map.put(section, "title", title)
+      tree = section |> render_fields() |> LazyHTML.from_fragment()
+      title_editor = LazyHTML.query(tree, "[data-paper-section-title-editor]")
+      title_input = LazyHTML.query(title_editor, "#section-title-section")
+      fallback = LazyHTML.query(tree, "[data-paper-section-title-panel-trigger]")
+
+      assert LazyHTML.attribute(title_editor, "data-paper-section-title-empty") == ["true"]
+      assert Enum.empty?(LazyHTML.query(title_editor, "[data-paper-section-title-paint]"))
+      assert LazyHTML.attribute(title_input, "value") == [""]
+      assert LazyHTML.text(fallback) == "Add title"
+
+      assert LazyHTML.attribute(fallback, "phx-click") == [
+               ~s([["focus",{"to":"#section-title-section"}]])
+             ]
+    end
+  end
+
   test "Columns is addable and editor-only wide geometry follows reader evidence bands" do
     html = render_component(&PaperEditor.paper_block_editor/1, slug: "paper", blocks: [])
     css = File.read!(@editor_shell_css)
@@ -138,7 +223,10 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
     assert html =~ "bp-paper-contextual-controls--section"
     assert html =~ ~s(data-paper-section-editor-frame)
     assert html =~ ~s(<hr class="bp-hr" style="border-top-width:1px")
-    assert html =~ ~s(<span style="font-weight:bold">Overview</span>)
+
+    assert LazyHTML.text(LazyHTML.query(tree, "[data-paper-section-title-paint]")) ==
+             "Overview"
+
     assert Enum.count(LazyHTML.query(tree, "[data-test-id='paper-canvas-run']")) == 1
 
     assert LazyHTML.attribute(
