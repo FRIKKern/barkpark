@@ -258,13 +258,24 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
                403
     end
 
-    test "anonymous → 401/403/404", %{} do
+    test "anonymous → 403 not_a_member (the MEMBERSHIP gate, before the role gate)", %{} do
       resp =
         scoped_conn()
         |> put_req_header("content-type", "application/json")
         |> get(scoped("sec-scope-a", ""))
 
-      assert resp.status in [401, 403, 404]
+      # Same mechanism as `token_controller_test.exs`: `:scoped_api` runs
+      # `ResolveWorkspace` before any authentication/authorisation plug, so an
+      # anonymous caller on an existing non-Default workspace is refused by the
+      # MEMBERSHIP gate — 403 / "forbidden" / reason "not_a_member"
+      # (`resolve_workspace.ex` final `true ->` arm; `errors.ex`
+      # `build({:error, :forbidden_membership})`). Asserting the reason is what
+      # discriminates: a plain 403 with no `reason` is a different gate, 401 is
+      # authentication running first, 404 is a route that no longer exists.
+      assert resp.status == 403
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "forbidden"
+      assert body["error"]["reason"] == "not_a_member"
     end
   end
 
