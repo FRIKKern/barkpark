@@ -78,7 +78,7 @@ Save this complete schema as `recipe.json`:
   "title": "Recipe",
   "visibility": "public",
   "fields": [
-    { "name": "title", "type": "string", "required": true },
+    { "name": "title", "type": "string", "validation": { "required": true } },
     { "name": "minutes", "type": "number" }
   ]
 }
