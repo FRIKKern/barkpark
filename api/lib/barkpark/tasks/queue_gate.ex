@@ -149,17 +149,42 @@ defmodule Barkpark.Tasks.QueueGate do
       # one gates the ready queue that `bp task ready` / `bp task next` read.
       # Fixing only one leaves a reopened row claimable-by-name but invisible
       # on the board — the SAME bug wearing the other half of its face.
-      # The SQL half of `lease_live?/1`. CASE, not `AND`, because Postgres
-      # is free to reorder the arms of an AND and a `::timestamptz` cast of
-      # a malformed string RAISES rather than returning NULL — a CASE pins
-      # the order so the guard always runs first. Absent / unparseable
-      # `ts_iso` falls to `false` here, i.e. NOT expired, i.e. still
-      # claim-held: the same FAIL-CLOSED direction the Elixir arm takes.
+      # The SQL half of `lease_live?/1`. CASE, not `AND`, because Postgres is
+      # free to reorder the arms of an AND — the CASE pins the order so the
+      # shape guard always runs first.
+      #
+      # THERE IS NO CAST, AND THAT IS THE POINT. A `::timestamptz` cast RAISES
+      # on a malformed string rather than returning NULL, and this query gates
+      # the READY QUEUE: one bad `ts_iso` anywhere in the ready population would
+      # break `bp task ready` and `bp task next` for everyone — strictly worse
+      # than the defect this predicate exists to fix. Found by lead-ledger-c5's
+      # fence review, which measured it: the earlier prefix regex admitted
+      # anything with a well-formed first 19 characters straight into the cast.
+      #
+      # ANCHORING ALONE WOULD NOT HAVE FIXED IT — a regex cannot validate
+      # CALENDAR semantics. '2026-13-45T99:99:99Z' and '2026-02-30T12:00:00Z'
+      # both match a fully anchored pattern and both still raise. So the shape
+      # guard and the comparison each do the job the other cannot: the anchored
+      # pattern (T and Z REQUIRED, which is what every writer emits — claim.ex
+      # :446 and :527 and pulse.ex:177 are all `DateTime.utc_now() |>
+      # DateTime.to_iso8601()`) makes LEXICOGRAPHIC ordering well-defined, and
+      # the text comparison cannot raise whatever the tail says.
+      #
+      # Requiring `T` and `Z` is load-bearing, not tidiness: a space separator
+      # sorts BELOW 'T', and a '-05:00' offset compares by its literal local
+      # digits — either would let a live claim read as expired, which is the one
+      # direction that must never fail. Anything not matching falls to `false`,
+      # i.e. NOT expired, i.e. still claim-held: the same FAIL-CLOSED direction
+      # the Elixir arm takes.
+      #
+      # The cutoff carries no trailing `Z` so a fractional stamp at the exact
+      # boundary second sorts GREATER than it — erring toward LIVE by under a
+      # second against a 2700-second lease.
       (fragment("COALESCE(btrim(?->'claim'->>'worker'), '') = ''", d.content) or
          fragment("COALESCE(btrim(?->'claim'->>'closed_at'), '') <> ''", d.content) or
          fragment("COALESCE(btrim(?->'claim'->>'closed_by'), '') <> ''", d.content) or
          fragment(
-           "CASE WHEN ?->'claim'->>'ts_iso' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}' THEN (?->'claim'->>'ts_iso')::timestamptz < now() - (? * interval '1 second') ELSE false END",
+           "CASE WHEN ?->'claim'->>'ts_iso' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?Z$' THEN ?->'claim'->>'ts_iso' < to_char(now() - (? * interval '1 second'), 'YYYY-MM-DD\"T\"HH24:MI:SS') ELSE false END",
            d.content,
            d.content,
            ^lease_ttl_seconds()
