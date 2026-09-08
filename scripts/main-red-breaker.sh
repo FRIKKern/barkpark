@@ -816,7 +816,55 @@ for j in legs:
 
 # (c) of the three PASS proofs: if the API marks a GATE step failed, this job's
 # step conclusions are NOT continue-on-error-masked, so `success` means passed.
-api_trusted = bool(api_failed & gate_names) if gate_names else bool(api_failed)
+#
+# WHY THIS BRANCH NEVER FIRES IN PRODUCTION, MEASURED RATHER THAN ASSUMED
+# (task-658971cd9db61621). Across the SIX workflows that invoke this script,
+# every step carrying an `id: sN` — which is exactly what STEP_NAMES maps, so
+# exactly what `gate_names` holds — also carries `continue-on-error: true`.
+# 57 of 57, read from the workflow files on 2026-09-08:
+#     compose-smoke.yml 4/4 · doc-gates.yml 30/30 · go-format.yml 3/3 ·
+#     required-checks-drift.yml 6/6 · security.yml 14/14
+# Repo-wide the ratio is about 73 `continue-on-error` keys over ~886 step-starts
+# across 64 workflow files (~8%), so the concentration is a property of the
+# BREAKER JOBS specifically — and it is the shape this file's own header
+# prescribes, not a smell. A continue-on-error step is reported by the jobs API
+# with conclusion "success" EVEN WHEN IT FAILED, so `api_failed` can never
+# contain a gate step and this intersection is empty BY CONSTRUCTION. That is
+# why it fired 0 times in 34 sampled main jobs: an unreachable branch, not a
+# quiet week.
+#
+# THE FAILURES ARE NOT SWALLOWED, WHICH IS WHY THAT SHAPE IS CORRECT: the Decide
+# step running this script is not continue-on-error, and it fails the job on what
+# the gate steps recorded (main run 34187182735: job `failure`, step 35 Decide
+# `failure`, every gate step `success`). continue-on-error is how one adjudicator
+# gets to see every failed gate before judging, not how failures disappear.
+#
+# IT IS KEPT, NOT DELETED. The unreachability is a property of the current job
+# SHAPE, not of this logic: the moment any gate step drops `continue-on-error`,
+# or a new breaker job adopts a different shape, this becomes live and is the
+# strongest of the three proofs. Arm 25b is the CONTROL that keeps the claim
+# honest — it feeds a job whose API DOES report a gate step `failure` and asserts
+# this fires, so "unreachable" rests on a positive case rather than on an absence
+# nobody probed.
+#
+# THE EMPTY-`gate_names` FALLBACK IS REMOVED, AND IT WAS DEAD CODE RATHER THAN A
+# LIVE BUG — a correction to this row's own first claim. It read
+# `... if gate_names else bool(api_failed)`, widening to EVERY step main ran. That
+# would be wrong if reached: Decide is the only non-continue-on-error step, so on
+# any red main it is in `api_failed`, and the fallback would have read TRUE —
+# asserting "this job's conclusions are not masked" ON THE STRENGTH OF MAIN'S OWN
+# DECIDE STEP HAVING FAILED. But it cannot be reached, and the chain is
+# structural: `ours.txt` is built with `if sid in names`, so an empty STEP_NAMES
+# yields no failed gate steps and the run exits at "no gate step failed — nothing
+# to decide" hundreds of lines earlier. Contrapositive: a non-empty `ours`
+# REQUIRES a non-empty `names`, and `set(names.values())` of a non-empty mapping
+# is non-empty. An unparseable STEP_NAMES exits 2 earlier still. Arm 25a pins that
+# early exit with a mutation on the guard that produces it.
+#
+# It is deleted anyway, because it was unreachable only by virtue of a guard three
+# hundred lines away: a reader who changes that guard would silently re-arm a
+# predicate that reads main's own failure as proof of someone else's health.
+api_trusted = bool(api_failed & gate_names)
 job_all_success = bool(legs) and all(c == "success" for c in job_concls)
 job_cancelled = any(c in ("cancelled", None, "") for c in job_concls)
 
