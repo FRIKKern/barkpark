@@ -826,7 +826,7 @@ defmodule Barkpark.Content.Lifecycle do
   #                            (already fenced by `Transitions.legal?/2` above)
   #   * `acceptance_criteria` — stamp (already fenced by `criteria_fence/2`)
   #   * `close_reason`       — close.ex:1232
-  #   * `close_override`     — close.ex:1310
+  #   * `close_override`     — close.ex (`merge_override_record/2`)
   #   * `disposition`        — close.ex (`advance_disposition_on_close/2`),
   #                            stage.ex (@disposition_key)
   #   * `reopen_trigger`     — stage.ex (@reopen_trigger_key)
