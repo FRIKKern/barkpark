@@ -37,6 +37,20 @@
 # this, through an ordinary PR. Each run appends what is visible NOW; the file
 # remembers what has since scrolled out of the capped window.
 #
+# THESE ROWS ARE RUN-LEVEL, AND THAT INFLATES IN THE DIRECTION THAT MATTERS.
+# `latest_conclusion` and `attempt1_conclusion` are read from the workflow-RUN
+# rollup, and continue-on-error laundering means a run whose attempt-2 rollup
+# reads `success` MAY still hold a masked failed job. So a row recorded here as
+# failure->success may be a rollup artefact rather than a real pass — which
+# OVERSTATES the apparent flake count, which is exactly the number a future
+# FLAKE-SUSPECTED verdict would rest on. Adjudicated RUN-LEVEL in
+# .github/run-level-readers.allow rather than argued down to a softer class.
+# THE HONEST UPGRADE, when somebody computes a verdict from this: descend to
+# actions/runs/<id>/jobs per recorded row and re-derive both conclusions from the
+# JOB conclusions. Until then, treat every count off this ledger as a CEILING on
+# flakes as well as a floor on re-runs. (Found by this repo's own run-level
+# reader census reddening on the first push of this file — the gate was right.)
+#
 # USAGE
 #   scripts/rerun-transition-collect.sh                  # collect into the ledger
 #   scripts/rerun-transition-collect.sh --dry-run        # print rows, write nothing
