@@ -3,7 +3,7 @@
 
 Cards: cards/{studio,plugins,cli,js-sdk,onix-bokbasen,search-media,tui}.md
 
-Contracts: contracts/{webhook-realtime,bokbasen,onix-field-map,schema-v2,tenancy}.md
+Contracts: contracts/{writing,webhook-realtime,bokbasen,onix-field-map,schema-v2,tenancy}.md
 
 Decisions: decisions/{0001-sdk-envelope,0002-npm-dist-tag,0003-sync-tags,0004-cloud-boundary,deferred}.md
 

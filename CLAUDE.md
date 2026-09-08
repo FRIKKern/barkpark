@@ -1,6 +1,8 @@
 <!-- doc-tier: agent | canonical-for: repo-router | budget: 2500tok -->
 # Barkpark — Router
 
+Read [Writing standard](docs/contracts/writing.md) for every task, alongside its routing card.
+
 ## Identity
 
 Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (repo root + `internal/cli/` — one binary, manifest-driven from `GET /v1/capabilities`), **Phoenix API + LiveView Studio** (`api/`), **JS SDK monorepo** (`js/`), **Next.js web demo** (`web/`). Plugins ride the `Barkpark.Plugin` behaviour — 12 today (Bulldocs, Frt, Github, Grip, Media, OnixEdit, Pulse, Quiz, Scaffy, Sheets, Tasks, Tickets); with all plugins off, Barkpark still works. That roster is DERIVED, not curated — one `use Barkpark.Plugin` per file in `api/lib/barkpark/plugins/*.ex`, diffed against this line by `scripts/roster-drift-check.sh`. Prod runs on Hetzner ARM64.
