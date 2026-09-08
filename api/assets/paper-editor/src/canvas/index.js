@@ -376,6 +376,7 @@ function normalizeCanvasDoc(doc) {
     if (node && node.attrs) {
       const a = node.attrs;
       if (a.bpParagraphSource == null) delete a.bpParagraphSource;
+      if (a.bpListFrameSource == null) delete a.bpListFrameSource;
       if (
         a.bpId == null &&
         a.bpType == null &&

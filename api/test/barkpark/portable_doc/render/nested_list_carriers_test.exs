@@ -10,11 +10,16 @@ defmodule Barkpark.PortableDoc.Render.NestedListCarriersTest do
     refute css =~ ".bp-paper-surface ol li {"
     refute css =~ ".bp-paper-surface ul li {"
 
-    editor_css =
-      File.read!(Path.expand("../../../../assets/paper-editor/src/styles.css", __DIR__))
-
-    assert editor_css =~ ".bp-paper-editor-body ul > li { list-style: disc; }"
-    assert editor_css =~ ".bp-paper-editor-body ol > li { list-style: decimal; }"
+    for path <- [
+          "../../../../assets/paper-editor/src/styles.css",
+          "../../../../priv/static/assets/bp-paper-editor-shell.css"
+        ] do
+      editor_css = File.read!(Path.expand(path, __DIR__))
+      assert editor_css =~ ".bp-paper-editor-body ul > li { list-style: disc; }"
+      assert editor_css =~ ".bp-paper-editor-body ol > li { list-style: decimal; }"
+      refute editor_css =~ ".bp-paper-editor-body ol li {"
+      refute editor_css =~ ".bp-paper-editor-body ul li {"
+    end
   end
 
   @fixture Path.expand("../../../support/fixtures/nested-list-carriers.json", __DIR__)

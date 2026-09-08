@@ -365,6 +365,9 @@ try {
     paragraph: (text) => paragraph("local", text),
     paragraphText: (text) => ({ id: "local", type: "paragraph", content: [], text }),
     list: (text) => ({ id: "local", type: "list", items: [{ id: "item", text, audit: "keep" }] }),
+    nestedList: (text) => ({ id: "local", type: "list", items: [{ id: "parent", text: "", children: [
+      { id: "frame", type: "list", ordered: true, audit: "keep frame", items: [{ id: "child", text }] },
+    ] }] }),
   })) {
     const carrierCanvas = document.createElement("bp-paper-canvas");
     carrierCanvas.blocks = [paragraph("remote", "Original remote"), makeBlock("Original local")];
