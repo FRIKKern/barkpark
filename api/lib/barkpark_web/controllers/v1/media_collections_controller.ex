@@ -21,7 +21,11 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
 
   def index(conn, %{"dataset" => dataset} = params) do
     limit = parse_int(params["limit"], 200) |> min(1000)
-    offset = parse_int(params["offset"], 0)
+    # `Collections.list/2` floors the offset but has no ceiling of its own, so
+    # `?offset=999999999` is a real Postgres OFFSET under a <=1000 LIMIT. The
+    # sibling actions in this file (assets, share_view) already go through
+    # `MediaSearchParams.parse/1`; `index` is the one that skipped the clamp.
+    offset = MediaSearchParams.clamp_offset(parse_int(params["offset"], 0))
 
     list_opts = [limit: limit, offset: offset] ++ scope_opts(conn)
 
