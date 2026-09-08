@@ -159,6 +159,164 @@ defmodule Barkpark.Content.Papers.TableEditingOpTest do
     assert Content.get_paper(slug) == before_replay
   end
 
+  test "v2 cell edits preserve nested inline source metadata without exposing it in projections or receipts" do
+    source = inline_metadata_table()
+    sibling = %{"id" => "sibling", "type" => "paragraph", "content" => inline("Keep sibling")}
+    section = %{"id" => "section", "type" => "section", "blocks" => [source, sibling]}
+    {slug, paper} = seed_table!([section])
+    request_id = Ecto.UUID.generate()
+
+    assert {:ok, projection} = TableEditing.project(source)
+
+    assert projection.shape == %{
+             "v" => 2,
+             "head" => %{"state" => "absent"},
+             "rows" => [
+               %{
+                 "kind" => "cells-map",
+                 "cells" => [
+                   %{
+                     "kind" => "content-map",
+                     "inline" => %{
+                       "v" => 1,
+                       "anchors" => ["link", "text"],
+                       "opaque" => ["link", "text"]
+                     }
+                   },
+                   "inline-array"
+                 ]
+               }
+             ]
+           }
+
+    projection_json = Jason.encode!(projection)
+    refute projection_json =~ "link-source-secret"
+    refute projection_json =~ "text-source-secret"
+    refute projection_json =~ "producer"
+
+    op = %{
+      "op" => "patch-table-cells",
+      "id" => source["id"],
+      "shape" => projection.shape,
+      "cells" => [
+        %{
+          "area" => "body",
+          "row" => 0,
+          "column" => 0,
+          "content" => [
+            %{
+              "type" => "link",
+              "href" => "/source",
+              "children" => inline("Edited metadata cell")
+            }
+          ]
+        }
+      ]
+    }
+
+    refute Jason.encode!(op) =~ "source-secret"
+
+    assert {:ok, receipt, :applied} =
+             Content.apply_paper_block_ops_once(
+               slug,
+               [op],
+               @dataset,
+               request_id,
+               "user:table-editing-v2",
+               if_rev: paper.content["rev"]
+             )
+
+    refute inspect(receipt) =~ "source-secret"
+
+    expected_source =
+      put_in(
+        source,
+        [
+          "rows",
+          Access.at(0),
+          "cells",
+          Access.at(0),
+          "content",
+          Access.at(0),
+          "children",
+          Access.at(0),
+          "value"
+        ],
+        "Edited metadata cell"
+      )
+
+    expected_section = put_in(section, ["blocks", Access.at(0)], expected_source)
+    saved = Content.get_paper(slug)
+    assert saved.content["blocks"] == [expected_section]
+
+    assert {:ok, ^receipt, :replayed} =
+             Content.apply_paper_block_ops_once(
+               slug,
+               [op],
+               @dataset,
+               request_id,
+               "user:table-editing-v2",
+               if_rev: paper.content["rev"]
+             )
+
+    assert Content.get_paper(slug) == saved
+  end
+
+  test "v2 shapes fail closed when forged or stale and an external conflict leaves source untouched" do
+    source = inline_metadata_table()
+    sibling = %{"id" => "sibling", "type" => "paragraph", "content" => inline("Before")}
+    {slug, paper} = seed_table!([source, sibling])
+    {:ok, projection} = TableEditing.project(source)
+
+    op = %{
+      "op" => "patch-table-cells",
+      "id" => source["id"],
+      "shape" => projection.shape,
+      "cells" => [
+        %{
+          "area" => "body",
+          "row" => 0,
+          "column" => 0,
+          "content" => [
+            %{"type" => "link", "href" => "/source", "children" => inline("Rejected")}
+          ]
+        }
+      ]
+    }
+
+    descriptor_path = ["shape", "rows", Access.at(0), "cells", Access.at(0), "inline"]
+
+    for forged <- [
+          put_in(op, descriptor_path ++ ["anchors"], ["text", "link"]),
+          put_in(op, descriptor_path ++ ["opaque"], ["link"]),
+          put_in(op, descriptor_path ++ ["extra"], "forged"),
+          put_in(op, ["shape", "v"], 1)
+        ] do
+      assert {:error, _} =
+               Content.apply_paper_block_ops(slug, [forged], @dataset,
+                 if_rev: paper.content["rev"]
+               )
+
+      assert Content.get_paper(slug).content == paper.content
+    end
+
+    external = %{
+      "op" => "patch-block",
+      "id" => "sibling",
+      "patch" => %{"content" => inline("External")}
+    }
+
+    assert {:ok, _} =
+             Content.apply_paper_block_op(slug, external, @dataset, if_rev: paper.content["rev"])
+
+    after_external = Content.get_paper(slug)
+
+    assert {:error, _} =
+             Content.apply_paper_block_ops(slug, [op], @dataset, if_rev: paper.content["rev"])
+
+    assert Content.get_paper(slug) == after_external
+  end
+
   test "single paper and direct document cells use the same authoritative merge" do
     {slug, paper} = seed_table!()
     op = cells_op(table(), "Single paper cell")
@@ -766,6 +924,41 @@ defmodule Barkpark.Content.Papers.TableEditingOpTest do
             "row-meta" => %{"keep" => true}
           }
         ]
+    }
+  end
+
+  defp inline_metadata_table do
+    %{
+      "id" => "metadata-table",
+      "type" => "table",
+      "table-note" => %{"keep" => true},
+      "rows" => [
+        %{
+          "row-note" => "keep",
+          "cells" => [
+            %{
+              "cell-note" => %{"keep" => true},
+              "content" => [
+                %{
+                  "type" => "link",
+                  "href" => "/source",
+                  "_key" => "link-source-secret",
+                  "producer" => %{"role" => "primary"},
+                  "children" => [
+                    %{
+                      "type" => "text",
+                      "value" => "Original metadata cell",
+                      "_key" => "text-source-secret",
+                      "producer" => %{"offset" => 9}
+                    }
+                  ]
+                }
+              ]
+            },
+            inline("Canonical neighbor")
+          ]
+        }
+      ]
     }
   end
 

@@ -217,6 +217,143 @@ defmodule BarkparkWeb.PaperTableEditingTest do
       assert stored(host, id).content["blocks"] == final_blocks
     end
 
+    test "#{host}: v2 Table cells save and reload without exposing inline source metadata",
+         %{conn: conn} do
+      host = unquote(host)
+      source = metadata_table()
+      {id, before} = seed(host, [source])
+      {view, path} = mount(conn, host, id)
+      selector = "#paper-ed-metadata-table bp-paper-editor[data-editor-mode='table']"
+      assert has_element?(view, selector)
+
+      projection =
+        view
+        |> element(selector)
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("bp-paper-editor[data-editor-mode='table']")
+        |> LazyHTML.attribute("data-block")
+        |> List.first()
+        |> Jason.decode!()
+
+      assert projection["shape"] == %{
+               "v" => 2,
+               "head" => %{"state" => "absent"},
+               "rows" => [
+                 %{
+                   "kind" => "cells-map",
+                   "cells" => [
+                     %{
+                       "kind" => "content-map",
+                       "inline" => %{
+                         "v" => 1,
+                         "anchors" => ["link", "text"],
+                         "opaque" => ["link", "text"]
+                       }
+                     },
+                     "inline-array"
+                   ]
+                 }
+               ]
+             }
+
+      projection_json = Jason.encode!(projection)
+      refute projection_json =~ "link-source-secret"
+      refute projection_json =~ "text-source-secret"
+      refute projection_json =~ "producer"
+      refute render(view) =~ "text-source-secret"
+
+      request_id = Ecto.UUID.generate()
+
+      op = %{
+        "op" => "patch-table-cells",
+        "id" => "metadata-table",
+        "shape" => projection["shape"],
+        "cells" => [
+          %{
+            "area" => "body",
+            "row" => 0,
+            "column" => 0,
+            "content" => [
+              %{
+                "type" => "link",
+                "href" => "/source",
+                "children" => text("Edited metadata cell")
+              }
+            ]
+          }
+        ],
+        "request_id" => request_id,
+        "if_rev" => revision(view, host)
+      }
+
+      refute Jason.encode!(op) =~ "source-secret"
+      render_hook(view, "paper-op", op)
+
+      assert_reply(view, %{
+        saved: true,
+        request_id: ^request_id,
+        table_projection: reply_projection,
+        table_projection_rev: reply_rev
+      })
+
+      reply_json = Jason.encode!(reply_projection)
+      refute reply_json =~ "source-secret"
+      refute reply_json =~ "producer"
+      assert reply_projection.shape == projection["shape"]
+
+      expected =
+        put_in(
+          source,
+          [
+            "rows",
+            Access.at(0),
+            "cells",
+            Access.at(0),
+            "content",
+            Access.at(0),
+            "children",
+            Access.at(0),
+            "value"
+          ],
+          "Edited metadata cell"
+        )
+
+      saved = stored(host, id)
+      assert saved.content["blocks"] == [expected]
+
+      render_hook(view, "paper-op", op)
+
+      assert_reply(view, %{
+        saved: true,
+        request_id: ^request_id,
+        replayed: true,
+        table_projection: ^reply_projection,
+        table_projection_rev: ^reply_rev
+      })
+
+      assert stored(host, id) == saved
+
+      stale_id = Ecto.UUID.generate()
+
+      stale =
+        put_in(op, ["shape", "rows", Access.at(0), "cells", Access.at(0), "inline", "opaque"], [
+          "text"
+        ])
+
+      stale = %{stale | "request_id" => stale_id, "if_rev" => reply_rev}
+      render_hook(view, "paper-op", stale)
+      assert_reply(view, %{saved: false, request_id: ^stale_id})
+      assert stored(host, id) == saved
+
+      {:ok, reloaded, _} = live(conn, path)
+      enter(reloaded, host)
+      assert has_element?(reloaded, selector)
+      refute render(reloaded) =~ "text-source-secret"
+      assert stored(host, id).content["blocks"] == [expected]
+      assert stored(host, id).content != before
+    end
+
     test "#{host}: idless legacy Table is visible but cannot acquire an editing identity", %{
       conn: conn
     } do
@@ -332,6 +469,41 @@ defmodule BarkparkWeb.PaperTableEditingTest do
         %{
           "row-note" => "preserve",
           "cells" => [%{"cell-note" => "preserve", "content" => text("Original cell")}]
+        }
+      ]
+    }
+  end
+
+  defp metadata_table do
+    %{
+      "id" => "metadata-table",
+      "type" => "table",
+      "table-note" => %{"keep" => true},
+      "rows" => [
+        %{
+          "row-note" => "keep",
+          "cells" => [
+            %{
+              "cell-note" => %{"keep" => true},
+              "content" => [
+                %{
+                  "type" => "link",
+                  "href" => "/source",
+                  "_key" => "link-source-secret",
+                  "producer" => %{"role" => "primary"},
+                  "children" => [
+                    %{
+                      "type" => "text",
+                      "value" => "Original metadata cell",
+                      "_key" => "text-source-secret",
+                      "producer" => %{"offset" => 9}
+                    }
+                  ]
+                }
+              ]
+            },
+            text("Canonical neighbor")
+          ]
         }
       ]
     }

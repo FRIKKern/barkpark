@@ -481,9 +481,13 @@ function tableInlineToTiptap(inline) {
   }
 }
 
-function tableRowToTiptap(cells, header) {
+function tableRowToTiptap(cells, header, rowShape) {
   if (!Array.isArray(cells) || cells.length === 0) return null;
-  const projected = cells.map(tableInlineToTiptap);
+  const projected = cells.map((inline, index) => {
+    const descriptor = tableCellDescriptor(rowShape?.cells?.[index]);
+    if (descriptor && !tableProtectedSourceMatches(inline, descriptor)) return null;
+    return tableInlineToTiptap(inline);
+  });
   if (projected.some((inline) => inline == null)) return null;
   return {
     type: "bpTableRow",
@@ -501,25 +505,114 @@ function exactObjectKeys(value, expected) {
   return keys.length === wanted.length && keys.every((key, index) => key === wanted[index]);
 }
 
-function validTableRowShape(shape, width, header = false) {
+const TABLE_CELL_KINDS = new Set(["inline-array", "content-map"]);
+const TABLE_PROTECTED_CHAIN_TYPES = new Set([
+  "link", "wikilink", "strong", "em", "underline", "strikethrough", "text",
+]);
+
+function tableCellDescriptor(cellShape) {
+  return cellShape && typeof cellShape === "object" && !Array.isArray(cellShape)
+    ? cellShape : null;
+}
+
+function validTableCellShape(cellShape, version) {
+  if (typeof cellShape === "string") return TABLE_CELL_KINDS.has(cellShape);
+  if (version !== 2 || !exactObjectKeys(cellShape, ["kind", "inline"]) ||
+      !TABLE_CELL_KINDS.has(cellShape.kind) ||
+      !exactObjectKeys(cellShape.inline, ["v", "anchors", "opaque"]) ||
+      cellShape.inline.v !== 1) return false;
+  const { anchors, opaque } = cellShape.inline;
+  if (!Array.isArray(anchors) || !Array.isArray(opaque) || anchors.length === 0 ||
+      opaque.length === 0 || anchors.at(-1) !== "text" ||
+      anchors.some((type) => !TABLE_PROTECTED_CHAIN_TYPES.has(type)) ||
+      new Set(anchors).size !== anchors.length || new Set(opaque).size !== opaque.length) return false;
+  return jsonEqual(anchors, [...opaque.filter((type) => type !== "text"), "text"]);
+}
+
+function validTableRowShape(shape, width, version, header = false) {
   return exactObjectKeys(shape, ["kind", "cells"]) &&
     (header ? shape.kind === "array" : ["array", "cells-map"].includes(shape.kind)) &&
     Array.isArray(shape.cells) && shape.cells.length === width &&
-    shape.cells.every((kind) => ["inline-array", "content-map"].includes(kind));
+    shape.cells.every((cellShape) => validTableCellShape(cellShape, version));
 }
 
 function validTableShape(shape, head, rows, width) {
-  if (!exactObjectKeys(shape, ["v", "head", "rows"]) || shape.v !== 1 ||
+  if (!exactObjectKeys(shape, ["v", "head", "rows"]) || ![1, 2].includes(shape.v) ||
       !Array.isArray(shape.rows) || shape.rows.length !== rows.length ||
-      !shape.rows.every((row) => validTableRowShape(row, width))) return false;
+      !shape.rows.every((row) => validTableRowShape(row, width, shape.v))) return false;
   const headShape = shape.head;
   if (!headShape || typeof headShape !== "object" || Array.isArray(headShape)) return false;
+  const descriptors = shape.rows.flatMap((row) => row.cells).filter(tableCellDescriptor);
   if (head === null) {
     return exactObjectKeys(headShape, ["state"]) &&
-      ["absent", "null", "empty"].includes(headShape.state);
+      ["absent", "null", "empty"].includes(headShape.state) &&
+      (shape.v === 2 ? descriptors.length > 0 : descriptors.length === 0);
   }
-  return exactObjectKeys(headShape, ["state", "row"]) && headShape.state === "row" &&
-    validTableRowShape(headShape.row, width, true);
+  if (!exactObjectKeys(headShape, ["state", "row"]) || headShape.state !== "row" ||
+      !validTableRowShape(headShape.row, width, shape.v, true)) return false;
+  descriptors.push(...headShape.row.cells.filter(tableCellDescriptor));
+  return shape.v === 2 ? descriptors.length > 0 : descriptors.length === 0;
+}
+
+function tablePdInlineChain(inline) {
+  if (!Array.isArray(inline) || inline.length !== 1) return null;
+  const chain = [];
+  let node = inline[0];
+  while (node && typeof node === "object" && !Array.isArray(node)) {
+    if (!TABLE_PROTECTED_CHAIN_TYPES.has(node.type) ||
+        chain.some((entry) => entry.type === node.type)) return null;
+    if (node.type === "text") {
+      if (!exactObjectKeys(node, ["type", "value"]) ||
+          typeof node.value !== "string" || node.value === "") return null;
+      chain.push({ type: "text", node });
+      return chain;
+    }
+    const allowed = node.type === "link"
+      ? ["type", "href", "children"]
+      : node.type === "wikilink"
+        ? ["type", "target", "children", ...(
+          Object.hasOwn(node, "alias") ? ["alias"] : []),
+        ...(
+          Object.hasOwn(node, "docId") ? ["docId"] : [])]
+        : ["type", "children"];
+    if (!exactObjectKeys(node, allowed) || !Array.isArray(node.children) ||
+        node.children.length !== 1 ||
+        (node.type === "link" && typeof node.href !== "string") ||
+        (node.type === "wikilink" && typeof node.target !== "string")) return null;
+    chain.push({ type: node.type, node });
+    node = node.children[0];
+  }
+  return null;
+}
+
+function tableOpaqueRoleSemanticsMatch(source, current) {
+  if (source.type === "text") return true;
+  if (source.type === "link") return source.node.href === current.node.href;
+  if (source.type === "wikilink") {
+    return source.node.target === current.node.target &&
+      source.node.alias === current.node.alias && source.node.docId === current.node.docId;
+  }
+  return true;
+}
+
+function tableProtectedSourceMatches(inline, descriptor) {
+  const chain = tablePdInlineChain(inline);
+  return chain != null && jsonEqual(
+    chain.map(({ type }) => type).filter((type) =>
+      type === "text" || descriptor.inline.opaque.includes(type)),
+    descriptor.inline.anchors,
+  );
+}
+
+function tableProtectedInlineSupported(inline, sourceInline, descriptor) {
+  const source = tablePdInlineChain(sourceInline);
+  const current = tablePdInlineChain(tiptapInlineToPd(inline));
+  if (!source || !current || !tableProtectedSourceMatches(sourceInline, descriptor)) return false;
+  return descriptor.inline.opaque.every((type) => {
+    const sourceRole = source.find((entry) => entry.type === type);
+    const currentRole = current.find((entry) => entry.type === type);
+    return sourceRole && currentRole && tableOpaqueRoleSemanticsMatch(sourceRole, currentRole);
+  });
 }
 
 const TABLE_MARKS = new Set([
@@ -600,13 +693,17 @@ export function tableProjection(projection) {
       projection.rows.length === 0 || !Object.prototype.hasOwnProperty.call(projection, "head")) {
     return { editable: false, shape: null, head: null, rows: [], doc: emptyDoc };
   }
-  const body = projection.rows.map((row) => tableRowToTiptap(row, false));
   const width = projection.rows[0]?.length;
-  const head = projection.head == null ? null : tableRowToTiptap(projection.head, true);
-  if (!Number.isSafeInteger(width) || width < 1 || body.some((row, index) =>
-    row == null || projection.rows[index].length !== width) ||
-    (projection.head != null && (head == null || projection.head.length !== width)) ||
-    !validTableShape(projection.shape, projection.head, projection.rows, width)) {
+  if (!Number.isSafeInteger(width) || width < 1 ||
+      !validTableShape(projection.shape, projection.head, projection.rows, width)) {
+    return { editable: false, shape: null, head: null, rows: [], doc: emptyDoc };
+  }
+  const body = projection.rows.map((row, index) =>
+    tableRowToTiptap(row, false, projection.shape.rows[index]));
+  const head = projection.head == null ? null
+    : tableRowToTiptap(projection.head, true, projection.shape.head.row);
+  if (body.some((row, index) => row == null || projection.rows[index].length !== width) ||
+      (projection.head != null && (head == null || projection.head.length !== width))) {
     return { editable: false, shape: null, head: null, rows: [], doc: emptyDoc };
   }
   const rows = head ? [head, ...body] : body;
@@ -631,22 +728,32 @@ function tableCellRows(editorJSON, projection) {
   const nodes = editorJSON?.content;
   if (!source.editable || !Array.isArray(nodes) || nodes.length !== 1 ||
       nodes[0]?.type !== "bpTable" || nodes[0]?.attrs?.bpId !== projection.id ||
+      !tableAttrsHaveOnly(nodes[0]?.attrs, ["bpId", "bpType", "bpTableSource"]) ||
+      nodes[0]?.attrs?.bpTableSource != null ||
       !Array.isArray(nodes[0].content)) return null;
   const liveRows = nodes[0].content;
   const hasHead = source.head != null;
   if (liveRows.length !== source.rows.length + (hasHead ? 1 : 0)) return null;
-  const readRow = (row, header) => {
+  const readRow = (row, header, sourceCells, rowShape) => {
     if (row?.type !== "bpTableRow" || !Array.isArray(row.content) ||
         row.content.length !== source.rows[0].length) return null;
     const expectedType = header ? "bpTableHeaderCell" : "bpTableCell";
-    const cells = row.content.map((cell) => {
-      if (cell?.type !== expectedType) return null;
+    const cells = row.content.map((cell, column) => {
+      if (cell?.type !== expectedType ||
+          (cell.attrs != null && (!exactObjectKeys(cell.attrs, ["bpTableCellSource"]) ||
+            cell.attrs.bpTableCellSource != null))) return null;
       const inline = cell.content || [];
       if (!Array.isArray(inline)) return null;
       try {
         if (!tableTiptapInlineEqual(inlineArrayToTiptap(tiptapInlineToPd(inline)), inline)) {
           return null;
         }
+        const descriptor = tableCellDescriptor(rowShape.cells[column]);
+        if (descriptor && !tableProtectedInlineSupported(
+          inline,
+          sourceCells[column],
+          descriptor,
+        )) return null;
       } catch (_error) {
         return null;
       }
@@ -655,8 +762,10 @@ function tableCellRows(editorJSON, projection) {
     return cells.some((cell) => cell == null) ? null : cells;
   };
   let offset = 0;
-  const head = hasHead ? readRow(liveRows[offset++], true) : null;
-  const rows = liveRows.slice(offset).map((row) => readRow(row, false));
+  const head = hasHead
+    ? readRow(liveRows[offset++], true, source.head, projection.shape.head.row) : null;
+  const rows = liveRows.slice(offset).map((row, index) =>
+    readRow(row, false, source.rows[index], projection.shape.rows[index]));
   return (hasHead && head == null) || rows.some((row) => row == null)
     ? null
     : { source, head, rows };
@@ -709,6 +818,7 @@ export function tableProjectionMatchesCells(projection, cells) {
 }
 
 export function tableProjectionMatchesAction(before, after, action) {
+  if (before?.id !== after?.id) return false;
   const source = tableProjection(before);
   const target = tableProjection(after);
   if (!source.editable || !target.editable || typeof action !== "string") return false;
@@ -769,6 +879,11 @@ export function tableProjectionMatchesAction(before, after, action) {
   } else {
     return false;
   }
+  const protectedCells = [
+    ...shapeRows.flatMap((row) => row.cells),
+    ...(expected.head ? shapeHead.row.cells : []),
+  ].filter(tableCellDescriptor);
+  expected.shape.v = protectedCells.length > 0 ? 2 : 1;
   return jsonEqual(expected.shape, target.shape) && jsonEqual(expected.head, target.head) &&
     jsonEqual(expected.rows, target.rows);
 }

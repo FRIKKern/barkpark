@@ -44,6 +44,51 @@ defmodule BarkparkWeb.Studio.PaperEditor.TableContextualEditorTest do
     end
   end
 
+  test "metadata-bearing Table cells expose only the sanitized v2 projection to the DOM" do
+    table = metadata_table()
+    tree = render_editor([table], true) |> LazyHTML.from_fragment()
+    editor = LazyHTML.query(tree, "bp-paper-editor[data-editor-mode='table']")
+    assert Enum.count(editor) == 1
+    [projection] = LazyHTML.attribute(editor, "data-block") |> Enum.map(&Jason.decode!/1)
+
+    assert projection["shape"] == %{
+             "v" => 2,
+             "head" => %{"state" => "absent"},
+             "rows" => [
+               %{
+                 "kind" => "array",
+                 "cells" => [
+                   %{
+                     "kind" => "inline-array",
+                     "inline" => %{
+                       "v" => 1,
+                       "anchors" => ["link", "text"],
+                       "opaque" => ["link", "text"]
+                     }
+                   }
+                 ]
+               }
+             ]
+           }
+
+    assert projection["rows"] == [
+             [
+               [
+                 %{
+                   "type" => "link",
+                   "href" => "/source",
+                   "children" => [%{"type" => "text", "value" => "Metadata cell"}]
+                 }
+               ]
+             ]
+           ]
+
+    encoded = Jason.encode!(projection)
+    refute encoded =~ "link-source-secret"
+    refute encoded =~ "text-source-secret"
+    refute encoded =~ "producer"
+  end
+
   test "raw authored eligibility survives nested grid and Columns rendering" do
     for parent <- [
           %{
@@ -112,6 +157,33 @@ defmodule BarkparkWeb.Studio.PaperEditor.TableContextualEditorTest do
       "type" => "table",
       "rows" => [[[%{"type" => "text", "value" => "Cell"}]]],
       "private-metadata" => true
+    }
+  end
+
+  defp metadata_table do
+    %{
+      "id" => "metadata-table",
+      "type" => "table",
+      "rows" => [
+        [
+          [
+            %{
+              "type" => "link",
+              "href" => "/source",
+              "_key" => "link-source-secret",
+              "producer" => %{"role" => "primary"},
+              "children" => [
+                %{
+                  "type" => "text",
+                  "value" => "Metadata cell",
+                  "_key" => "text-source-secret",
+                  "producer" => %{"offset" => 3}
+                }
+              ]
+            }
+          ]
+        ]
+      ]
     }
   end
 end
