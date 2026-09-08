@@ -69,6 +69,12 @@
     },
   };
   const PAPER_OP_RETRY_TTL_MS = 60 * 60 * 1000;
+  const PAPER_CANVAS_LEASES = Symbol("bpPaperCanvasLeases");
+  const PAPER_CANVAS_LEASE_PENDING = Symbol("bpPaperCanvasLeasePending");
+  const PAPER_CANVAS_LEASE_OVERFLOW = Symbol("bpPaperCanvasLeaseOverflow");
+  const PAPER_CANVAS_LEASE_MAX_COUNT = 64;
+  const PAPER_CANVAS_LEASE_MAX_LENGTH = 2048;
+  const PAPER_CANVAS_LEASE_MAX_TOTAL_LENGTH = 32768;
   const PAPER_FLUSH_TARGETS =
     '[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"], ' +
     '[phx-hook="BarkparkFieldBlockBridge"], [phx-hook="BarkparkFieldBridge"]';
@@ -95,6 +101,34 @@
     "Save paused — retry required.",
   ]);
   const paperExitCoordinators = new WeakMap();
+
+  function bpPaperCanvasLeaseSet(value) {
+    if (!Array.isArray(value)) return { leases: [], valid: false };
+    const leases = [];
+    const seen = new Set();
+    let totalLength = 0;
+    for (const lease of value) {
+      if (typeof lease !== "string" || lease.length === 0 ||
+          lease.length > PAPER_CANVAS_LEASE_MAX_LENGTH) {
+        return { leases: [], valid: false };
+      }
+      if (seen.has(lease)) continue;
+      if (leases.length >= PAPER_CANVAS_LEASE_MAX_COUNT ||
+          totalLength + lease.length > PAPER_CANVAS_LEASE_MAX_TOTAL_LENGTH) {
+        return { leases: [], valid: false };
+      }
+      leases.push(lease);
+      seen.add(lease);
+      totalLength += lease.length;
+    }
+    return { leases, valid: true };
+  }
+
+  function bpPaperOpsInsertRetainedBoundary(ops) {
+    return Array.isArray(ops) && ops.some((op) =>
+      (op?.op === "insert-after" || op?.op === "append-block" || op?.op === "replace-block") &&
+      (op?.block?.type === "table" || op?.block?.type === "section"));
+  }
 
   // Collection forms use positional field names. After a reorder LiveView can
   // retain the focused button at its old index, now belonging to another row.
@@ -2031,6 +2065,26 @@
   }
 
   function bpPaperBeforeElUpdated(fromEl, toEl) {
+    const resumeState = toEl?.dataset?.paperCanvasResumeState;
+    if (toEl?.dataset?.paperCanvasResumeHalt === "true" &&
+        (resumeState === "pending" || resumeState === "blocked") &&
+        fromEl?.id && fromEl.id === toEl.id &&
+        fromEl.dataset?.paperDocKey &&
+        fromEl.dataset.paperDocKey === toEl.dataset?.paperDocKey) {
+      // LiveView snapshots phx-update="ignore" from the OLD element before
+      // calling this callback, so the server's new ignore marker cannot cancel
+      // this first reconnect morph. Give morphdom an exact clone of the live
+      // children instead: keyed ignored editors reconcile to themselves and
+      // retain their DOM-owned drafts, history, selection, and form state. The
+      // server warning is a sibling outside this frozen root.
+      if (resumeState === "blocked") {
+        fromEl.querySelectorAll('[phx-hook="BarkparkPaperCanvas"]').forEach((wrapper) => {
+          wrapper[PAPER_CANVAS_LEASE_OVERFLOW] = true;
+        });
+      }
+      toEl.replaceChildren(...Array.from(fromEl.childNodes, (child) => child.cloneNode(true)));
+      return;
+    }
     if (!fromEl?.matches?.("[data-paper-terminal-boundary]") ||
         !toEl?.matches?.("[data-paper-terminal-boundary]") ||
         fromEl.id !== toEl.id) return;
@@ -2476,6 +2530,11 @@
         this._sendingOps = false;
         this._opsFailed = false;
         this._saveBridgeDestroyed = false;
+        const refreshLeasePending = () => {
+          this.el[PAPER_CANVAS_LEASE_PENDING] = this._opsQueue.some(
+            (entry) => entry.boundaryLeasePending,
+          );
+        };
         const captureContainerContext = () => {
           const containerId = this.el.dataset.paperContainerId;
           const containerKind = this.el.dataset.paperContainerKind;
@@ -2608,10 +2667,24 @@
               requestId: entry.requestId,
               reviewRequired: entry.conflictBlocks != null,
               onResult: (saved, result) => {
+                if (saved && result?.retained_lease_overflow === true) {
+                  this.el[PAPER_CANVAS_LEASE_OVERFLOW] = true;
+                } else if (saved && result &&
+                    Object.prototype.hasOwnProperty.call(result, "retained_leases")) {
+                  const replyLeaseSet = bpPaperCanvasLeaseSet(result.retained_leases);
+                  if (replyLeaseSet.valid) {
+                    this.el[PAPER_CANVAS_LEASES] = replyLeaseSet.leases;
+                    entry.boundaryLeasePending = false;
+                    this.el[PAPER_CANVAS_LEASE_OVERFLOW] = false;
+                  } else {
+                    this.el[PAPER_CANVAS_LEASE_OVERFLOW] = true;
+                  }
+                }
                 this._sendingOps = false;
                 if (result?.discarded) {
                   this._opsQueue = [];
                   this._opsFailed = false;
+                  refreshLeasePending();
                   if (entry.conflictBlocks) {
                     this.el.querySelector("bp-paper-canvas")
                       ?.resolveConflictWithServerBlocks?.(entry.conflictBlocks);
@@ -2621,6 +2694,7 @@
                 if (saved && this._opsQueue[0] === entry) {
                   this._opsQueue.shift();
                 }
+                refreshLeasePending();
                 const canvas = this.el.querySelector("bp-paper-canvas");
                 if (saved && result?.request_id && entry.seq != null) {
                   if (canvas?.identifyOpsRequest?.(entry.seq, result.request_id, entry.requestId)) {
@@ -2657,9 +2731,13 @@
         this._onCanvasOps = (e) => {
           this._exitCoordinator?.markDirty(this.el);
           const containerContext = captureContainerContext();
+          const boundaryLeasePending = !containerContext.invalid &&
+            containerContext.wire.container_kind === "document" &&
+            bpPaperOpsInsertRetainedBoundary(e.detail.ops);
           const entry = {
             ops: e.detail.ops,
             seq: e.detail.seq,
+            boundaryLeasePending,
             conflictBlocks: e.detail.conflictBlocks || null,
             containerContext: containerContext.wire,
             invalidContainerContext: containerContext.invalid,
@@ -2671,6 +2749,7 @@
             canvas.identifyOpsRequest(entry.seq, entry.requestId);
           }
           this._opsQueue.push(entry);
+          refreshLeasePending();
           sendNextOps();
         };
         this.el.addEventListener("bp-canvas-ops", this._onCanvasOps);
@@ -2738,6 +2817,24 @@
                   mode,
                   requestId: payload.request_id,
                 });
+              }
+              // A validated server echo authoritatively replaces reconnect
+              // ownership leases (a successful mutation reply can install them
+              // earlier). Keep the opaque tokens on this exact ignored
+              // run wrapper so a later LiveSocket join can resume ownership
+              // before its first render without persisting document or draft data.
+              if (run.retained_lease_overflow === true) {
+                this.el[PAPER_CANVAS_LEASE_OVERFLOW] = true;
+              } else if (Object.prototype.hasOwnProperty.call(run, "retained_leases")) {
+                const echoLeaseSet = bpPaperCanvasLeaseSet(run.retained_leases);
+                if (echoLeaseSet.valid) {
+                  this.el[PAPER_CANVAS_LEASES] = echoLeaseSet.leases;
+                  if (active) active.boundaryLeasePending = false;
+                  refreshLeasePending();
+                  this.el[PAPER_CANVAS_LEASE_OVERFLOW] = false;
+                } else {
+                  this.el[PAPER_CANVAS_LEASE_OVERFLOW] = true;
+                }
               }
             };
             this._exitCoordinator?.observeRevision({
@@ -2849,6 +2946,9 @@
       destroyed() {
         this._saveBridgeDestroyed = true;
         this._opsQueue = [];
+        delete this.el[PAPER_CANVAS_LEASES];
+        delete this.el[PAPER_CANVAS_LEASE_PENDING];
+        delete this.el[PAPER_CANVAS_LEASE_OVERFLOW];
         this.el.removeEventListener("bp-canvas-ops", this._onCanvasOps);
         this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
         this.el.removeEventListener("bp-ready", this._onCanvasReady);
@@ -3602,8 +3702,52 @@
   // authority; no draft text, credentials, or mutation payload rides the hint.
   window.BarkparkPaperEditorConnectParams = () => {
     const toggle = document.querySelector('#paper-edit-toggle[data-editing="true"]');
-    const key = toggle?.closest("main")?.querySelector("[data-paper-doc-key]")?.dataset.paperDocKey;
-    return key ? { paper_editing_key: key } : {};
+    if (!toggle && document.querySelector("#paper-edit-toggle")) return {};
+    const toggleMain = toggle?.closest("main");
+    const documentRoot = toggle
+      ? (toggleMain?.matches("[data-paper-doc-key]")
+          ? toggleMain
+          : toggleMain?.querySelector("[data-paper-doc-key]"))
+      : [...document.querySelectorAll("[data-paper-doc-key]")].find((candidate) =>
+          candidate.querySelector('[phx-hook="BarkparkPaperCanvas"]'));
+    const key = documentRoot?.dataset.paperDocKey;
+    if (!key) return {};
+
+    const leases = [];
+    const seen = new Set();
+    let totalLength = 0;
+    let leasePending = false;
+    let leaseOverflow = false;
+    documentRoot.querySelectorAll('[phx-hook="BarkparkPaperCanvas"]').forEach((wrapper) => {
+      if (!wrapper.isConnected ||
+          wrapper.closest("[data-paper-doc-key]") !== documentRoot) return;
+      if (wrapper[PAPER_CANVAS_LEASE_PENDING] === true) leasePending = true;
+      if (wrapper[PAPER_CANVAS_LEASE_OVERFLOW] === true) leaseOverflow = true;
+      const wrapperLeaseSet = bpPaperCanvasLeaseSet(wrapper[PAPER_CANVAS_LEASES] || []);
+      if (!wrapperLeaseSet.valid) {
+        leaseOverflow = true;
+        return;
+      }
+      for (const lease of wrapperLeaseSet.leases) {
+        if (seen.has(lease)) continue;
+        if (leases.length >= PAPER_CANVAS_LEASE_MAX_COUNT ||
+            totalLength + lease.length > PAPER_CANVAS_LEASE_MAX_TOTAL_LENGTH) {
+          leaseOverflow = true;
+          return;
+        }
+        leases.push(lease);
+        seen.add(lease);
+        totalLength += lease.length;
+      }
+    });
+
+    return {
+      ...(toggle ? { paper_editing_key: key } : {}),
+      ...(leases.length || leasePending || leaseOverflow ? { paper_canvas_lease_key: key } : {}),
+      ...(!leaseOverflow && leases.length ? { paper_canvas_leases: leases } : {}),
+      ...(leasePending ? { paper_canvas_lease_pending: true } : {}),
+      ...(leaseOverflow ? { paper_canvas_lease_overflow: true } : {}),
+    };
   };
   window.BarkparkPaperEditorBeforeElUpdated = bpPaperBeforeElUpdated;
   window.BarkparkPaperEditorHooks = Hooks;

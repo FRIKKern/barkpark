@@ -211,10 +211,13 @@ for (const { kind, attributes, expected } of [
 ]) {
   const { dom, window, wrapper, canvas, bridge, pending } = mountCanvas(attributes);
   canvas.blocks = [{ id: "nested-a" }, { id: "nested-b" }];
+  const ops = kind === "section"
+    ? [{ op: "replace-block", id: "nested-a", block: { id: "nested-table", type: "table", rows: [] } }]
+    : [{ op: "patch-block", id: "nested-a" }];
   wrapper.dispatchEvent(
     new window.CustomEvent("bp-canvas-ops", {
       bubbles: true,
-      detail: { ops: [{ op: "patch-block", id: "nested-a" }], seq: 12 },
+      detail: { ops, seq: 12 },
     }),
   );
 
@@ -224,6 +227,10 @@ for (const { kind, attributes, expected } of [
   assert.equal("container_row_id" in original, false);
   if (["section", "terminal"].includes(kind)) {
     assert.equal("container_column_index" in original, false);
+  }
+  if (kind === "section") {
+    assert.equal(window.BarkparkPaperEditorConnectParams().paper_canvas_lease_pending, undefined,
+      "a nested boundary replacement cannot claim top-level reconnect retention");
   }
 
   wrapper.dataset.paperContainerKind = "expandable";
