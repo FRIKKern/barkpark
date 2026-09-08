@@ -7193,9 +7193,11 @@
   // WHY systemd calls a unit failed: Result and ExecMainStatus read TOGETHER or
   // not at all. Measured on guerrilla 2026-09-01: barkpark-site@search__b reads
   // result "exit-code" with exec_main_status 143 — 128+15, i.e. Next.js exiting
-  // on the SIGTERM of its own retire, filed as an exit code only because the
-  // unit lacks SuccessExitStatus=143 (PR #14863). `result` alone reports that
-  // deliberate stop as a crash.
+  // on the SIGTERM of its own retire, filed as an exit code only because that
+  // box's unit file predates SuccessExitStatus=143. PR #14863 landed that line
+  // (merged 2026-09-02) and deploy/site-deploy-node.sh preflight-enforces it, so
+  // this is the LEGACY-BOX path — boxes not yet redeployed. On those, `result`
+  // alone reports a deliberate stop as a crash.
   function slotUnitReason(u) {
     var result = u.result === null ? "" : String(u.result);
     if (u.execMainStatus === null) return result;
