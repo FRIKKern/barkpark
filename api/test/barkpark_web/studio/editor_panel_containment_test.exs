@@ -82,6 +82,10 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
                     "../../../priv/static/assets/bp-paper-editor-shell.css",
                     __DIR__
                   )
+  @root_media_picker_css Path.expand(
+                           "../../../priv/static/assets/bp-media-picker.css",
+                           __DIR__
+                         )
   @lib Path.expand("../../../lib/barkpark_web", __DIR__)
   @static_js Path.expand("../../../priv/static/assets", __DIR__)
 
@@ -262,11 +266,14 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   # ExUnit has no layout engine to recognise one any other way (see @moduledoc).
   @backdrop_name_shapes ~w(backdrop overlay scrim)
 
-  # The Studio root layout's CSS is two files since edit-on-the-link: the
-  # remaining inline <style> plus the editor shell stylesheet it links
-  # (/assets/bp-paper-editor-shell.css, which the public paper reader links
-  # too). The census is over what the Studio page LOADS, so it reads both.
-  defp root_css, do: File.read!(@root) <> "\n" <> File.read!(@root_shell_css)
+  # The Studio root layout's CSS is three files since edit-on-the-link: the
+  # remaining inline <style>, the editor shell stylesheet and the shared media
+  # picker stylesheet it links. The census is over what the Studio page LOADS,
+  # so it reads all three rather than losing fixed overlays when CSS is moved.
+  defp root_css do
+    [@root, @root_shell_css, @root_media_picker_css]
+    |> Enum.map_join("\n", &File.read!/1)
+  end
 
   # Strip CSS comments so prose about `position: fixed` is never censused.
   defp decommented(css), do: Regex.replace(~r|/\*.*?\*/|s, css, "")
