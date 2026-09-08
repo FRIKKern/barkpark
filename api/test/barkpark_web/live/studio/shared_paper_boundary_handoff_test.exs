@@ -252,6 +252,42 @@ defmodule BarkparkWeb.Studio.SharedPaperBoundaryHandoffTest do
     assert PaperCanvas.refresh_retained(ownership, "other", blocks) == nil
   end
 
+  test "refresh releases ownership when a Section stack canvas becomes a grid" do
+    table = %{"id" => "owned", "type" => "table", "rows" => [["Draft"]]}
+
+    ownership = %{
+      slug: "paper",
+      owners: %{{:section, "outer"} => MapSet.new(["owned"])}
+    }
+
+    stack = [section("outer", [table])]
+    assert PaperCanvas.refresh_retained(ownership, "paper", stack) == ownership
+
+    grid = [put_in(section("outer", [table]), ["layout"], %{"mode" => "grid", "tracks" => 2})]
+
+    released = PaperCanvas.refresh_retained(ownership, "paper", grid)
+    assert released == %{slug: "paper", owners: %{}}
+
+    assert PaperCanvas.refresh_retained(released, "paper", stack) == released
+  end
+
+  test "refresh releases ownership when a Columns position is no longer editable" do
+    ownership = %{
+      slug: "paper",
+      owners: %{{:columns, "cols", 0} => MapSet.new(["owned"])}
+    }
+
+    for malformed <- [
+          [columns("cols", [])],
+          [%{"id" => "cols", "type" => "columns", "columns" => ["opaque"]}]
+        ] do
+      assert PaperCanvas.refresh_retained(ownership, "paper", malformed) == %{
+               slug: "paper",
+               owners: %{}
+             }
+    end
+  end
+
   test "preexisting boundaries, malformed trees and unsupported nested origins fail closed" do
     table = %{"id" => "existing", "type" => "table", "rows" => [["Keep"]]}
     before = %{"blocks" => [section("outer", [table])]}

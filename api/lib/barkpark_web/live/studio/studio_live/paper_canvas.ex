@@ -428,7 +428,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   defp retained_boundary?(blocks, owner, id) when is_binary(id) and id != "" do
     alias Barkpark.Content.Papers.CanvasRunContext
 
-    with {:ok, context} <- retention_context(owner, id),
+    with true <- retention_owner_active?(blocks, owner),
+         {:ok, context} <- retention_context(owner, id),
          {:ok, _blocks, type} <-
            CanvasRunContext.map_run(blocks, context, fn
              [%{"id" => ^id, "type" => type} = block] when type in ["table", "section"] ->
@@ -444,6 +445,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   end
 
   defp retained_boundary?(_blocks, _owner, _id), do: false
+
+  defp retention_owner_active?(blocks, {:section, container_id}) do
+    Barkpark.Content.Papers.CanvasRunContext.stack_section_canvas?(blocks, container_id)
+  end
+
+  defp retention_owner_active?(_blocks, _owner), do: true
 
   defp retention_context(@document_owner, id),
     do: {:ok, %{container_kind: "document", container_run_ids: [id]}}
