@@ -573,6 +573,13 @@ class BpPaperCanvas extends HTMLElement {
     // through the current DOM mutation only; onBlur clears it in a microtask.
     this._richFocusIntent = false;
     this._richFocusIntentVersion = 0;
+    // Reconnect recovery temporarily freezes the stable editor root with `inert`.
+    // Keep a separate, one-shot focus intent so that freeze-induced blur can return
+    // to the exact same rich editor after a successful retry without touching its
+    // ProseMirror selection or history. Deliberate focus elsewhere cancels it.
+    this._resumeFocusIntent = null;
+    this._resumeFocusState = "idle"; // "idle" | "armed" | "cancelled"
+    this._onResumeFocusIn = null;
   }
 
   connectedCallback() {
@@ -1041,7 +1048,105 @@ class BpPaperCanvas extends HTMLElement {
     });
   }
 
+  captureResumeFocus() {
+    if (this._resumeFocusState !== "idle") {
+      return this._resumeFocusState === "armed";
+    }
+
+    const editor = this._editor;
+    const ownerDocument = this.ownerDocument;
+    const activeElement = ownerDocument?.activeElement;
+    const paperRoot = this.closest(".bp-paper-editor[data-paper-doc-key]");
+    const paperDocKey = paperRoot?.getAttribute("data-paper-doc-key");
+    const hasRichFocus =
+      editor?.view?.hasFocus?.() === true &&
+      activeElement != null &&
+      this.contains(activeElement);
+
+    if (
+      !this.isConnected ||
+      this._mode !== "rich" ||
+      !this._editable ||
+      editor?.isEditable !== true ||
+      !hasRichFocus ||
+      !paperRoot ||
+      !paperDocKey
+    ) {
+      return false;
+    }
+
+    this._resumeFocusIntent = {
+      editor,
+      ownerDocument,
+      paperRoot,
+      paperDocKey,
+    };
+    this._resumeFocusState = "armed";
+    this._onResumeFocusIn = (event) => {
+      const target = event.target;
+      const emptyFocusTarget =
+        target == null || target === ownerDocument.body || target === ownerDocument.documentElement;
+      if (!emptyFocusTarget && !this.contains(target)) this._cancelResumeFocus();
+    };
+    ownerDocument.addEventListener("focusin", this._onResumeFocusIn, true);
+    return true;
+  }
+
+  restoreResumeFocus() {
+    const intent = this._resumeFocusIntent;
+    const armed = this._resumeFocusState === "armed";
+    this._clearResumeFocusIntent();
+    if (!armed || !intent) return false;
+
+    const { editor, ownerDocument, paperRoot, paperDocKey } = intent;
+    const activeElement = ownerDocument?.activeElement;
+    const focusIsEmpty =
+      activeElement == null ||
+      activeElement === ownerDocument.body ||
+      activeElement === ownerDocument.documentElement;
+
+    if (
+      !this.isConnected ||
+      this._editor !== editor ||
+      this.ownerDocument !== ownerDocument ||
+      this._mode !== "rich" ||
+      !this._editable ||
+      editor.isEditable !== true ||
+      this.closest(".bp-paper-editor[data-paper-doc-key]") !== paperRoot ||
+      paperRoot.getAttribute("data-paper-doc-key") !== paperDocKey ||
+      this.closest("[inert]") != null ||
+      !focusIsEmpty
+    ) {
+      return false;
+    }
+
+    editor.view.focus();
+    return true;
+  }
+
+  _cancelResumeFocus() {
+    if (this._resumeFocusState !== "armed") return;
+    const ownerDocument = this._resumeFocusIntent?.ownerDocument;
+    if (ownerDocument && this._onResumeFocusIn) {
+      ownerDocument.removeEventListener("focusin", this._onResumeFocusIn, true);
+    }
+    this._resumeFocusIntent = null;
+    this._resumeFocusState = "cancelled";
+    this._onResumeFocusIn = null;
+  }
+
+  _clearResumeFocusIntent() {
+    const ownerDocument = this._resumeFocusIntent?.ownerDocument;
+    if (ownerDocument && this._onResumeFocusIn) {
+      ownerDocument.removeEventListener("focusin", this._onResumeFocusIn, true);
+    }
+    this._resumeFocusIntent = null;
+    this._resumeFocusState = "idle";
+    this._onResumeFocusIn = null;
+  }
+
   _teardownDisconnected() {
+    this._clearResumeFocusIntent();
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
