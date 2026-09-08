@@ -1,6 +1,12 @@
 DATA-VIZ LIVE-DATA (RESOLVED)           
 ─────────────────────────────           
                                         
+The three blocks below carry the        
+resolved Attrs that TaskResolver.shape/2
+stamps onto a query-bearing             
+chart/heatmap/stat block after the count
+rollup — series/cells/value, no query.  
+                                        
 Tasks per status over the last 4 days   
   5┤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⠤⠒⠉
 3.7┤⠀⢀⣀⣀⡠⠤⠤⠔⠒⠒⠊⠉⠉⠒⠢⠤⢄⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡠⠔⠒⠉⠀⠀⠀⠀
