@@ -3140,9 +3140,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   defp put_section_title(map, params) do
     case Map.fetch(params, "title") do
-      {:ok, title} when is_binary(title) -> Map.put(map, "title", optional_string(title))
+      {:ok, title} when is_binary(title) -> Map.put(map, "title", section_title_value(title))
       _ -> map
     end
+  end
+
+  defp section_title_value(title) do
+    if String.trim(title) == "", do: nil, else: title
   end
 
   defp put_optional_patch(map, params, key) do
