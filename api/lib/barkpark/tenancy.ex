@@ -244,6 +244,145 @@ defmodule Barkpark.Tenancy do
   end
 
   @doc """
+  Set (or clear) an organization's ALLOWED AUTHENTICATION METHODS
+  (era-bl-allowed-auth-methods). Mirrors `set_organization_require_mfa/3` and
+  `set_organization_session_policy/3`: UUID-guarded, `:not_found` on an
+  unknown/malformed id, and the change is audited on the tamper-evident trail
+  (`auth` / `allowed_auth_methods_changed`).
+
+  `methods` is either `nil` (CLEAR the policy — every door open again, the
+  zero-tax default) or a non-empty list of method names drawn from
+  `Organization.auth_methods/0` (`"password"`, `"magic_link"`, `"passkey"`,
+  `"sso"`; atoms are accepted and normalised). SSO-only is `["sso"]`. Anything
+  else returns `{:error, :invalid_policy}` WITHOUT touching the DB — a typo
+  must never silently disable a login door.
+
+  `opts` may carry `:actor_id` / `:actor_type` (defaults `"admin"`).
+  """
+  @spec set_organization_allowed_auth_methods(binary(), [String.t() | atom()] | nil, keyword()) ::
+          {:ok, Organization.t()} | {:error, Ecto.Changeset.t() | :not_found | :invalid_policy}
+  def set_organization_allowed_auth_methods(organization_id, methods, opts \\ [])
+      when is_binary(organization_id) do
+    with {:ok, _} <- Ecto.UUID.cast(organization_id),
+         {:ok, normalised} <- normalise_auth_methods(methods),
+         %Organization{} = org <- Repo.get(Organization, organization_id) do
+      result =
+        org
+        |> Organization.changeset(%{
+          slug: org.slug,
+          name: org.name,
+          allowed_auth_methods: normalised
+        })
+        |> Repo.update()
+
+      with {:ok, _updated} <- result do
+        audit_org_auth_change(
+          org,
+          "allowed_auth_methods_changed",
+          %{"allowed_auth_methods" => normalised},
+          opts
+        )
+      end
+
+      result
+    else
+      :error -> {:error, :not_found}
+      nil -> {:error, :not_found}
+      {:error, :invalid_policy} = err -> err
+    end
+  end
+
+  # nil clears. A list is deduped + sorted so the stored policy has ONE
+  # canonical byte shape (["sso","password"] and ["password","sso"] are the
+  # same policy and must not read as a change). Membership in the closed
+  # vocabulary is re-checked by the changeset; rejecting here keeps the DB
+  # untouched on a bad call, matching `session_policy_changes/1`.
+  defp normalise_auth_methods(nil), do: {:ok, nil}
+
+  defp normalise_auth_methods(methods) when is_list(methods) and methods != [] do
+    normalised =
+      methods
+      |> Enum.map(fn
+        m when is_atom(m) -> Atom.to_string(m)
+        m when is_binary(m) -> m
+        _ -> :invalid
+      end)
+
+    vocabulary = Organization.auth_methods()
+
+    if Enum.all?(normalised, &(is_binary(&1) and &1 in vocabulary)) do
+      {:ok, normalised |> Enum.uniq() |> Enum.sort()}
+    else
+      {:error, :invalid_policy}
+    end
+  end
+
+  defp normalise_auth_methods(_), do: {:error, :invalid_policy}
+
+  @doc """
+  Resolve the STRICTEST allowed-auth-methods policy GOVERNING this user across
+  every organization reachable through their `principal_type: "user"` workspace
+  memberships (era-bl-allowed-auth-methods).
+
+  Mirrors `org_requires_mfa_for_user?/1`'s governing model: any governing org
+  can tighten, and a laxer org grants no escape. Returns `nil` when NO
+  governing org sets a policy — the zero-tax default meaning "every method
+  allowed". Otherwise returns the INTERSECTION of the non-NULL policies: a
+  method must be permitted by EVERY governing org that expressed an opinion.
+  Orgs with a NULL policy express none and are ignored.
+
+  The intersection CAN be empty — two governing orgs allowing disjoint sets
+  leave the user no door. That is the honest strictest-wins reading, not a
+  bug: the alternative (union) would let a second org re-open a door the
+  first one closed, which is exactly the bypass this policy exists to stop.
+  """
+  @spec org_allowed_auth_methods_for_user(binary()) :: [String.t()] | nil
+  def org_allowed_auth_methods_for_user(user_id) when is_binary(user_id) do
+    Repo.all(
+      from m in Membership,
+        join: w in Workspace,
+        on: w.id == m.workspace_id,
+        join: o in Organization,
+        on: o.id == w.organization_id,
+        where:
+          m.principal_type == "user" and m.principal_id == ^user_id and
+            not is_nil(o.allowed_auth_methods),
+        select: o.allowed_auth_methods
+    )
+    |> case do
+      [] ->
+        nil
+
+      lists ->
+        lists
+        |> Enum.map(&MapSet.new/1)
+        |> Enum.reduce(&MapSet.intersection/2)
+        |> Enum.sort()
+    end
+  end
+
+  def org_allowed_auth_methods_for_user(_), do: nil
+
+  @doc """
+  May this user authenticate with `method` (era-bl-allowed-auth-methods)?
+
+  `true` whenever no governing org expressed a policy — the zero-tax path an
+  ordinary org never leaves. `false` only when at least one governing org set
+  an allow-list and the strictest resolution
+  (`org_allowed_auth_methods_for_user/1`) does not contain `method`.
+  """
+  @spec auth_method_allowed_for_user?(binary(), String.t()) :: boolean()
+  def auth_method_allowed_for_user?(user_id, method)
+      when is_binary(user_id) and is_binary(method) do
+    case org_allowed_auth_methods_for_user(user_id) do
+      nil -> true
+      allowed -> method in allowed
+    end
+  end
+
+  def auth_method_allowed_for_user?(_, _), do: true
+
+  @doc """
   Does any organization GOVERNING this user require MFA enrolment?
 
   The governing rule (owner-ratified 2026-07-05): **ANY-org-requires →
