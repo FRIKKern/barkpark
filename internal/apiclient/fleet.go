@@ -87,7 +87,7 @@ func (c *Client) FleetEventsWithCursor(ctx context.Context, lastEventID string, 
 		}
 
 		// No client timeout — the stream is long-lived; ctx cancellation ends it.
-		resp, err := (&http.Client{Timeout: 0}).Do(req)
+		resp, err := streamClient().Do(req)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
