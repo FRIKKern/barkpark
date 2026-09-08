@@ -1498,6 +1498,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       assigns
       |> assign(:title, title || "")
       |> assign(:title_empty, title in [nil, ""])
+      |> assign(:title_dom_id, section_title_dom_id(assigns.block["id"]))
 
     ~H"""
     <div
@@ -1514,9 +1515,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         :if={!@title_empty}
         type="button"
         class="bp-paper-section-title-paint"
-        phx-click={JS.focus(to: "#section-title-" <> @block["id"])}
+        phx-click={JS.focus(to: "#" <> @title_dom_id)}
         aria-label={"Edit section title: " <> @title}
-        aria-controls={"section-title-" <> @block["id"]}
+        aria-controls={@title_dom_id}
         data-paper-section-title-paint
       ><%= @title %></button>
       <form
@@ -1529,9 +1530,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         data-test-id="paper-section-config-editor"
       >
         <input type="hidden" name="block_id" value={@block["id"]} />
-        <label class="sr-only" for={"section-title-" <> @block["id"]}>Section title</label>
+        <label class="sr-only" for={@title_dom_id}>Section title</label>
         <textarea
-          id={"section-title-" <> @block["id"]}
+          id={@title_dom_id}
           name="title"
           rows="1"
           class="bp-paper-inline-text bp-paper-section-title-input"
@@ -1543,6 +1544,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       </form>
     </div>
     """
+  end
+
+  defp section_title_dom_id(block_id) do
+    "section-title-" <> Base.url_encode64(block_id, padding: false)
   end
 
   # Per-block-type edit fields. Rich bodies use the canonical WC so its
@@ -2575,8 +2580,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <button
                     type="button"
                     class="btn btn-ghost btn-sm bp-paper-section-title-panel-trigger"
-                    phx-click={JS.focus(to: "#section-title-" <> @id)}
-                    aria-controls={"section-title-" <> @id}
+                    phx-click={JS.focus(to: "#" <> section_title_dom_id(@id))}
+                    aria-controls={section_title_dom_id(@id)}
                     data-paper-section-title-panel-trigger
                   ><%= if Map.get(@block, "title") in [nil, ""], do: "Add title", else: "Edit title" %></button>
                 </div>

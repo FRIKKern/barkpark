@@ -379,9 +379,10 @@ defmodule BarkparkWeb.Studio.StudioBetaSectionColumnsEditingTest do
   end
 
   defp section_title(view, id) do
-    html = view |> element("#section-title-#{id}") |> render()
+    dom_id = "section-title-" <> Base.url_encode64(id, padding: false)
+    html = view |> element("##{dom_id}") |> render()
     tree = LazyHTML.from_fragment(html)
-    LazyHTML.text(LazyHTML.query(tree, "#section-title-#{id}"))
+    LazyHTML.text(LazyHTML.query(tree, "##{dom_id}"))
   end
 
   defp nested_blocks do

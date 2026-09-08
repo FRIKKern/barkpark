@@ -105,11 +105,12 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
       title_input = LazyHTML.query(title_form, "textarea[name='title']")
       paint = LazyHTML.query(title_editor, "[data-paper-section-title-paint]")
       fallback = LazyHTML.query(tree, "[data-paper-section-title-panel-trigger]")
+      title_dom_id = section_title_dom_id("section")
 
       assert Enum.count(title_editor) == 1
       assert LazyHTML.attribute(title_form, "id") == ["section-form-section"]
       assert LazyHTML.attribute(title_form, "phx-change") == ["paper-block-autosave"]
-      assert LazyHTML.attribute(title_input, "id") == ["section-title-section"]
+      assert LazyHTML.attribute(title_input, "id") == [title_dom_id]
 
       assert LazyHTML.text(title_input) ==
                "Existing title that is deliberately long enough to wrap without collapsing the reader geometry"
@@ -117,19 +118,19 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
       assert LazyHTML.attribute(title_input, "rows") == ["1"]
       assert LazyHTML.attribute(title_input, "phx-hook") == ["BarkparkPaperAutoSize"]
       assert LazyHTML.attribute(paint, "type") == ["button"]
-      assert LazyHTML.attribute(paint, "aria-controls") == ["section-title-section"]
+      assert LazyHTML.attribute(paint, "aria-controls") == [title_dom_id]
 
       assert LazyHTML.text(paint) ==
                "Existing title that is deliberately long enough to wrap without collapsing the reader geometry"
 
       assert LazyHTML.attribute(paint, "phx-click") == [
-               ~s([["focus",{"to":"#section-title-section"}]])
+               ~s([["focus",{"to":"##{title_dom_id}"}]])
              ]
 
-      assert LazyHTML.attribute(fallback, "aria-controls") == ["section-title-section"]
+      assert LazyHTML.attribute(fallback, "aria-controls") == [title_dom_id]
 
       assert LazyHTML.attribute(fallback, "phx-click") == [
-               ~s([["focus",{"to":"#section-title-section"}]])
+               ~s([["focus",{"to":"##{title_dom_id}"}]])
              ]
 
       assert LazyHTML.text(fallback) == "Edit title"
@@ -159,7 +160,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
       section = if title == :absent, do: section, else: Map.put(section, "title", title)
       tree = section |> render_fields() |> LazyHTML.from_fragment()
       title_editor = LazyHTML.query(tree, "[data-paper-section-title-editor]")
-      title_input = LazyHTML.query(title_editor, "#section-title-section")
+      title_dom_id = section_title_dom_id("section")
+      title_input = LazyHTML.query(title_editor, "##{title_dom_id}")
       fallback = LazyHTML.query(tree, "[data-paper-section-title-panel-trigger]")
 
       assert LazyHTML.attribute(title_editor, "data-paper-section-title-empty") == ["true"]
@@ -168,9 +170,43 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
       assert LazyHTML.text(fallback) == "Add title"
 
       assert LazyHTML.attribute(fallback, "phx-click") == [
-               ~s([["focus",{"to":"#section-title-section"}]])
+               ~s([["focus",{"to":"##{title_dom_id}"}]])
              ]
     end
+  end
+
+  test "Section title focus selectors encode authored block IDs without changing submissions" do
+    block_id = "section: foo/[title]#?"
+    title_dom_id = section_title_dom_id(block_id)
+
+    tree =
+      %{"id" => block_id, "type" => "section", "title" => "Authored", "blocks" => []}
+      |> render_fields()
+      |> LazyHTML.from_fragment()
+
+    form = LazyHTML.query(tree, "form[name='section-config']")
+    textarea = LazyHTML.query(form, "textarea[name='title']")
+    paint = LazyHTML.query(tree, "[data-paper-section-title-paint]")
+    fallback = LazyHTML.query(tree, "[data-paper-section-title-panel-trigger]")
+
+    assert LazyHTML.attribute(textarea, "id") == [title_dom_id]
+    assert LazyHTML.attribute(LazyHTML.query(form, "label"), "for") == [title_dom_id]
+    assert LazyHTML.attribute(paint, "aria-controls") == [title_dom_id]
+    assert LazyHTML.attribute(fallback, "aria-controls") == [title_dom_id]
+
+    assert LazyHTML.attribute(paint, "phx-click") == [
+             ~s([["focus",{"to":"##{title_dom_id}"}]])
+           ]
+
+    assert LazyHTML.attribute(fallback, "phx-click") == [
+             ~s([["focus",{"to":"##{title_dom_id}"}]])
+           ]
+
+    assert LazyHTML.attribute(LazyHTML.query(form, "input[name='block_id']"), "value") == [
+             block_id
+           ]
+
+    refute title_dom_id =~ block_id
   end
 
   test "Columns is addable and editor-only wide geometry follows reader evidence bands" do
@@ -640,6 +676,10 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
   end
 
   defp render_fields(block), do: render_fields(block, [])
+
+  defp section_title_dom_id(block_id) do
+    "section-title-" <> Base.url_encode64(block_id, padding: false)
+  end
 
   defp paragraph(id, text),
     do: %{"id" => id, "type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
