@@ -346,18 +346,13 @@ defmodule BarkparkWeb.Studio.StudioBetaSectionColumnsEditingTest do
     assert has_element?(view, "[data-test-id='paper-columns-editor']")
 
     if is_binary(outer_title) do
-      assert has_element?(view, "#section-title-#{ids.outer_section}[value='#{outer_title}']")
+      assert section_title(view, ids.outer_section) == outer_title
     else
-      assert has_element?(view, "#section-title-#{ids.outer_section}")
-
-      refute has_element?(
-               view,
-               "#section-title-#{ids.outer_section}[value='Edited outer section']"
-             )
+      assert section_title(view, ids.outer_section) == ""
     end
 
-    assert has_element?(view, "#section-title-#{ids.inner_section}[value='Inner section']")
-    assert has_element?(view, "#section-title-#{ids.grid_section}[value='Grid section']")
+    assert section_title(view, ids.inner_section) == "Inner section"
+    assert section_title(view, ids.grid_section) == "Grid section"
 
     for id <- [
           ids.outer_paragraph,
@@ -380,6 +375,12 @@ defmodule BarkparkWeb.Studio.StudioBetaSectionColumnsEditingTest do
              view,
              ".bp-section__cell[style='grid-column:span 2;order:1'] #paper-ed-#{ids.grid_paragraph}"
            )
+  end
+
+  defp section_title(view, id) do
+    html = view |> element("#section-title-#{id}") |> render()
+    tree = LazyHTML.from_fragment(html)
+    LazyHTML.text(LazyHTML.query(tree, "#section-title-#{id}"))
   end
 
   defp nested_blocks do
