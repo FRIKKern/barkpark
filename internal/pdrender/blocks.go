@@ -29,9 +29,9 @@ type headingRenderer struct{ ir InlineRenderer }
 
 func (h headingRenderer) Render(b Block, ctx RenderCtx) []string {
 	level := headingLevel(b.Attrs)
-	text := sanitizeDisplayText(attrStr(b.Attrs, "text"))
-	if text == "" {
-		text = h.ir.Inline(attrSlice(b.Attrs, "content"), ctx)
+	text := sanitizeDisplayText(stringishAttr(b.Attrs, "text"))
+	if content := attrSlice(b.Attrs, "content"); len(content) > 0 {
+		text = h.ir.Inline(content, ctx)
 	}
 	style := ctx.Theme.Heading[level-1]
 
@@ -73,7 +73,13 @@ func headingLevel(m map[string]any) int {
 type paragraphRenderer struct{ ir InlineRenderer }
 
 func (p paragraphRenderer) Render(b Block, ctx RenderCtx) []string {
-	inline := p.ir.Inline(attrSlice(b.Attrs, "content"), ctx)
+	content := attrSlice(b.Attrs, "content")
+	if len(content) == 0 {
+		if text, ok := b.Attrs["text"].(string); ok {
+			content = []any{text}
+		}
+	}
+	inline := p.ir.Inline(content, ctx)
 	if inline == "" {
 		return nil
 	}
