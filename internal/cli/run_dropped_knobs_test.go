@@ -22,7 +22,11 @@ import (
 //
 // An explicit limit now SETS the threshold instead of suppressing the check.
 func TestTruncationGuardSurvivesAnExplicitLimit(t *testing.T) {
-	rows := `{"documents":[{"id":"1"},{"id":"2"},{"id":"3"}]}`
+	// The command under test is the task.ready stand-in, so its rows arrive
+	// under `docs` keyed `doc_id` — the shape its own --help documents. A
+	// fixture answering under `documents` is exactly the misread the drift
+	// advisory names, and it warned here until this line matched reality.
+	rows := `{"docs":[{"doc_id":"1"},{"doc_id":"2"},{"doc_id":"3"}]}`
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

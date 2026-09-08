@@ -240,9 +240,16 @@ func TestRunPaginatedAll_RefusesUnreadablePageMidPagination(t *testing.T) {
 	}
 }
 
-// paginatedEnvelopeKeys records, for every `paginated: true` command in the API
-// manifest source, the envelope key its controller actually emits — read from
-// the controller, not guessed:
+// paginatedEnvelopeKeys is DERIVED from commandListEnvelopes
+// (list_envelope_help.go), the registry `--help` renders the envelope key from.
+// The two used to be separate lists — this guard held the truth and the help
+// held nothing — so the help could not go stale because it did not exist. Now
+// that the help makes a claim, the claim and the guard must be the SAME datum:
+// a paginated command whose key drifts reds here AND stops being documented
+// wrongly, in one edit.
+//
+// For every `paginated: true` command in the API manifest source, the envelope
+// key its controller actually emits — read from the controller, not guessed:
 //
 //	task.ls / task.ready → tasks_controller.ex:83        %{ok: true, docs: …}
 //	doc.ls / doc.query   → query_controller.ex:90        documents: rendered
@@ -252,20 +259,15 @@ func TestRunPaginatedAll_RefusesUnreadablePageMidPagination(t *testing.T) {
 //	media.collection-assets → v1/media_collections_controller.ex:69 hits: hits
 //	search.query         → search/hit_envelope.ex:71     documents: …
 //	ticket.inbox         → tickets_controller.ex:93,169  tickets: rows
-var paginatedEnvelopeKeys = map[string]string{
-	"task.ls":                 "docs",
-	"task.ready":              "docs",
-	"doc.ls":                  "documents",
-	"doc.query":               "documents",
-	"media.ls":                "assets",
-	"media.search":            "hits",
-	"media.collections":       "collections",
-	"media.collection-assets": "hits",
-	"search.query":            "documents",
-	"ticket.inbox":            "tickets",
-	"token.ls":                "tokens",  // member_controller.ex
-	"workspace.member-ls":     "members", // member_controller.ex
+func paginatedEnvelopeKeysOf() map[string]string {
+	out := map[string]string{}
+	for id, env := range commandListEnvelopes {
+		out[id] = env.Key
+	}
+	return out
 }
+
+var paginatedEnvelopeKeys = paginatedEnvelopeKeysOf()
 
 // TestPaginatedCommandsUseKnownEnvelopeKeys is the companion guard to the
 // unreadable_list_page refusal. That refusal can only red a caller that reaches
