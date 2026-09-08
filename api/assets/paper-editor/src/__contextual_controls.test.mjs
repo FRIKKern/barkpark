@@ -10,6 +10,10 @@ assert.match(mediaStyles, /var\(--bg-elevated, var\(--paper-bg\)\)/,
   "media dialogs use the current Paper palette when Studio tokens are absent");
 assert.match(shell, /\.bp-paper-figure-image-controls\s*\{[^}]*position:\s*absolute/s,
   "resting Figure image options cannot move the reader image or caption");
+assert.match(shell, /\.bp-paper-figure-image\[data-image-src=""\] > \.bp-paper-figure-image-controls\s*\{[^}]*opacity:\s*1[^}]*pointer-events:\s*auto/s,
+  "an empty image keeps its source recovery controls visibly pointer reachable");
+assert.match(shell, /\.bp-paper-figure-caption-form:not\(:focus-within\)\s*\{[^}]*position:\s*absolute[^}]*clip-path:\s*inset\(50%\)/s,
+  "resting captions use canonical reader paint rather than textarea whitespace layout");
 assert.match(shell, /\[data-paper-figure-image-trigger\]:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--paper-accent\)/s,
   "the rendered Figure image has a visible keyboard target without changing its box");
 assert.match(shell, /\.bp-paper-figure-image-picker\s*\{[^}]*max-height:\s*min\(70vh, 42rem\)[^}]*overflow:\s*auto/s,
