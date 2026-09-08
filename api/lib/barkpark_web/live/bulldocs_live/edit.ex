@@ -783,7 +783,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
     result =
       if code == :history_conflict do
-        Map.merge(result, %{conflict: true, current_rev: socket.assigns[:paper_rev]})
+        Map.merge(result, %{conflict: true, current_rev: current_history_rev(socket)})
       else
         result
       end
@@ -824,7 +824,30 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
             ],
        do: :invalid_history_request
 
-  defp history_error_code(_reason), do: :history_unavailable
+  # Unknown authority/storage failures are deliberately not classified as a
+  # terminal refusal. The coordinator may retry the same immutable request ID;
+  # only the explicit cases above are safe to discard from its history queue.
+  defp history_error_code(_reason), do: :history_step_failed
+
+  defp current_history_rev(socket) do
+    assigns = fresh_authorization_assigns(socket.assigns)
+    paper = socket.assigns[:paper_doc]
+    workspace_id = doc_field(paper, :workspace_id)
+    slug = socket.assigns[:slug]
+
+    if is_binary(slug) and PaperViewer.can_edit?(assigns, workspace_id, slug) do
+      case Content.get_paper(
+             slug,
+             socket.assigns[:dataset],
+             ScopeHelpers.scope_opts_from_assigns(assigns)
+           ) do
+        %{content: content} when is_map(content) -> Map.get(content, "rev") || 0
+        _missing -> socket.assigns[:paper_rev]
+      end
+    else
+      socket.assigns[:paper_rev]
+    end
+  end
 
   @doc "Build a public exact-write receipt without exposing private history values."
   def receipt_result(receipt, request_id, outcome) do

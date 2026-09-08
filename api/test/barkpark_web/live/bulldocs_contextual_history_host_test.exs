@@ -146,7 +146,6 @@ defmodule BarkparkWeb.BulldocsContextualHistoryHostTest do
   end
 
   test "unsupported exact and legacy writes return an explicit nil history step", %{
-    slug: slug,
     view: view
   } do
     request_id = Ecto.UUID.generate()
