@@ -679,7 +679,7 @@ def deterministic_editorial(period: Period, selected: list[Event]) -> dict[str, 
             "theme": f"A quiet {period.kind}",
             "plain_summary": "Nothing new shipped in this period. We keep quiet editions visible so an empty page is never mistaken for a missing one.",
             "work_themes": [],
-            "progress_assessment": "This was a pause, not a progress claim. The surrounding editions carry the latest substantive work.",
+            "progress_assessment": "This was a quiet period. The surrounding editions show the latest work.",
             "mode": "deterministic",
         }
 
@@ -966,7 +966,7 @@ def editorial_prompt(packets: list[dict[str, Any]]) -> str:
             source_catalog[source["ref"]] = source
     evidence = {"periods": compact_packets, "source_catalog": source_catalog}
     return """
-You are the editor of Barkpark Chronicle, a premium, friendly product journal.
+You edit Barkpark Chronicle.
 Turn the supplied verified evidence into the simplest truthful answer to one
 question: “What did Barkpark work on?” Write for an intelligent friend who does
 not work in software.
@@ -1003,6 +1003,9 @@ The first sentence of `plain_summary` must name the most important actual change
 Do not begin with “This period was about,” “Today’s work focused on,” or another
 sentence that describes the act of working instead of its result. The second
 sentence explains what a reader can now see, do, or trust that they could not before.
+
+Before returning JSON, silently check for vague claims and repetition. Revise them
+using only the supplied evidence. Do not add facts.
 
 Return only JSON with this exact outer shape, with one edition object for every
 `edition_id` supplied in the source packets:

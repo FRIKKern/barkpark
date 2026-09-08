@@ -5,14 +5,14 @@
 
 **[Live Studio →](https://api.barkpark.cloud/studio)** · **[Install](#install--connect)** · **[Deploy](#be-your-own-cloud)** · **[Barkpark Cloud](https://barkpark.cloud)** · **[Docs](docs/INDEX.md)**
 
-**A lightweight operating system for everything you and your AI make.** One content model —
-tasks, papers, sheets, media, anything you can schema — with an AI agent driving the API while
-you edit the same documents live in Studio or a terminal.
+Barkpark manages tasks, Papers, spreadsheets, and media through one content model.
+An AI agent can work through the API while you edit the same documents in Studio
+or a terminal.
 
-**Barkpark is yours** — open source you run anywhere: a laptop, a VPS, a box at home. You own
-your content, schema, server and source code; you should never have to rely on us. Or use
-**[Barkpark Cloud](https://barkpark.cloud)** — the official home: one login across your whole
-fleet, and a way to cheer the work on. [The full stance →](docs/PHILOSOPHY.md)
+Barkpark is open source software you can run on a laptop, a VPS, or a server at home.
+You own your content, schema, server, and source code, and you should never have to
+rely on us. [Barkpark Cloud](https://barkpark.cloud) provides one login across your
+instances and helps fund continued work on Barkpark. [Read our principles](docs/PHILOSOPHY.md).
 
 **2.81M lines · 9,366 files · 16,900+ tests · 561 routes · 11 plugins · four runtimes.**
 

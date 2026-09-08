@@ -1076,7 +1076,7 @@ func failedDocListInterior() []string {
 	return []string{
 		"",
 		dimStyle.Render("   ✕ Couldn't load documents"),
-		dimStyle.Render("   the server refused or is unreachable"),
+		dimStyle.Render("   the request failed"),
 	}
 }
 
@@ -1099,7 +1099,7 @@ func (m model) renderReadFailedState(width, height int) string {
 		lines = append(lines, "")
 	}
 	lines = append(lines, dimStyle.Render("   ✕ Couldn't load this document"))
-	lines = append(lines, dimStyle.Render("   the server refused or is unreachable"))
+	lines = append(lines, dimStyle.Render("   the request failed"))
 
 	for len(lines) < height {
 		lines = append(lines, "")
