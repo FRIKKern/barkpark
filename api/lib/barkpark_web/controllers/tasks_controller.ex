@@ -272,6 +272,14 @@ defmodule BarkparkWeb.TasksController do
   # (sealing rewrites `content` only — `id` and the timestamps survive), and it
   # is `nil` on a short page: `returned < limit` PROVES the walk is finished, so
   # a token there would invite one more round-trip to learn nothing.
+  #
+  # WHY `next_offset` IS NILLED IN THE CURSOR BRANCH. `page_meta/2` mints an
+  # offset continuation for EVERY list (that is the ready route's only possible
+  # one — see its docstring). On a cursor walk that token would be a second,
+  # contradicting answer to "where does page two start": the cursor seeks past
+  # the last ROW, the offset counts from the head of a window that rotates
+  # under writes, and `index/2` above already 400s a request that names both.
+  # One page, one continuation — here the cursor.
   defp page_block(docs, page_opts) do
     meta = Params.page_meta(docs, page_opts)
 
@@ -281,7 +289,7 @@ defmodule BarkparkWeb.TasksController do
           do: Params.next_cursor(docs, Keyword.fetch!(page_opts, :cursor_axis)),
           else: nil
 
-      Map.put(meta, :next_cursor, next)
+      meta |> Map.put(:next_cursor, next) |> Map.put(:next_offset, nil)
     else
       meta
     end
