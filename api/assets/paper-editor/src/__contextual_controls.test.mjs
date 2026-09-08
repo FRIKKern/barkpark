@@ -13,6 +13,10 @@ assert.match(shell, /\.bp-paper-edit-form\.bp-paper-figure-caption-form\s*\{[^}]
   "Figure caption form cannot add a second layout around reader typography");
 assert.match(shell, /textarea\.bp-paper-figure-caption-input\s*\{[^}]*font:\s*inherit[^}]*resize:\s*none/s,
   "the growing Figure caption inherits the reader's font and avoids native resize chrome");
+assert.match(shell, /\[data-paper-figure-caption-empty="true"\]:not\(:focus-within\)\s*\{[^}]*height:\s*0[^}]*margin:\s*0/s,
+  "captionless Figures retain zero resting caption height until intentional focus");
+assert.match(shell, /\[data-paper-figure-caption-empty="true"\]:not\(:focus-within\) > \.bp-paper-figure-caption-form\s*\{[^}]*position:\s*absolute[^}]*clip-path:\s*inset\(50%\)/s,
+  "empty caption authoring stays mounted and focusable without entering resting flow");
 for (const [name, css] of [["standalone", styles], ["host shell", shell]]) {
   assert.match(css, /\[data-test-id="paper-canvas-resume-warning"\]\s*\{[^}]*font-family:\s*var\(--paper-font-ui/s,
     `${name} reconnect recovery uses editor chrome rather than document prose`);

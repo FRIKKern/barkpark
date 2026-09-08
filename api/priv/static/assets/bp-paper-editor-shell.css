@@ -1743,6 +1743,28 @@ textarea.bp-paper-figure-caption-input {
 textarea.bp-paper-figure-caption-input:focus-visible {
   outline: 2px solid var(--paper-accent);
 }
+.bp-paper-figure-editor-frame > .bp-figcaption { position: relative; }
+[data-paper-figure-caption-empty="true"]:not(:focus-within) {
+  height: 0; margin: 0;
+}
+[data-paper-figure-caption-empty="true"]:not(:focus-within) > .bp-paper-figure-caption-form {
+  position: absolute; inset: 0 0 auto; clip-path: inset(50%);
+  opacity: 0; pointer-events: none;
+}
+.bp-paper-figure-caption-add {
+  position: absolute; right: 0; bottom: 0; z-index: 2;
+  min-height: 44px; padding: 0.35rem 0.65rem;
+  color: var(--paper-ink-soft); background: var(--paper-bg);
+  border: 1px solid var(--paper-rule); border-radius: 4px;
+  font-family: var(--paper-font-ui, system-ui, sans-serif);
+  font-size: 0.8125rem; line-height: 1.4; cursor: pointer;
+}
+.bp-paper-figure-caption-add:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
+.bp-figcaption:has(.bp-paper-figure-caption-form:focus-within) > .bp-paper-figure-caption-add {
+  visibility: hidden; pointer-events: none;
+}
 .bp-paper-edit-block[data-block-type="columns"]:has([data-paper-columns-editor-frame]),
 .bp-paper-edit-block[data-block-type="section"]:has([data-paper-section-editor-frame].bp-section--wide) {
   margin-inline: var(--bp-evidence-pull, 0px);
