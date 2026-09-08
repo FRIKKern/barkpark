@@ -3,7 +3,7 @@
 
 [![Deploy with Barkpark](https://barkpark.cloud/button.svg)](https://barkpark.cloud/new?template=blog-starter)
 
-**[Live Studio →](https://api.barkpark.cloud/studio)** · **[Install](#install--connect)** · **[Deploy](#be-your-own-cloud)** · **[Barkpark Cloud](https://barkpark.cloud)** · **[Docs](docs/INDEX.md)**
+[Live Studio](https://api.barkpark.cloud/studio) · [Install](#install--connect) · [Deploy](#be-your-own-cloud) · [Barkpark Cloud](https://barkpark.cloud) · [Docs](docs/INDEX.md)
 
 Barkpark manages tasks, Papers, spreadsheets, and media through one content model.
 An AI agent can work through the API while you edit the same documents in Studio
@@ -14,128 +14,132 @@ You own your content, schema, server, and source code, and you should never have
 rely on us. [Barkpark Cloud](https://barkpark.cloud) provides one login across your
 instances and helps fund continued work on Barkpark. [Read our principles](docs/PHILOSOPHY.md).
 
-**2.81M lines · 9,366 files · 16,900+ tests · 561 routes · 11 plugins · four runtimes.**
-
 ## What this makes possible
 
-- **The internet goes out; your work doesn't.** A full Barkpark runs on your laptop — same
-  Studio, same API. Move content between servers with `bp migrate`; Cloud's auth tunnel
-  reaches your local box too.
-- **An AI builds a spreadsheet; you're both inside it a minute later.** Real formulas, a live
-  grid — sharing is a link, on your LAN or across the world.
-- **A paper written once reads everywhere.** The same blocks render on the web, in the
-  terminal, in the editor, even in email.
-- **A whole CMS for a side project, in minutes.** Schema one type and every surface exists —
-  a D&D campaign got its own Barkpark while the idea was still warm.
-- **Hand someone the whole thing.** `bp export` streams a dataset to a file; instances archive
-  and resurrect on a different cloud. Leaving is a feature — which is why staying is safe.
+- Run Barkpark locally with the same Studio and API, including when you are offline.
+  Move content between servers with `bp migrate`, or connect your local instance
+  through Cloud's auth tunnel.
+- Create and edit spreadsheets with formulas in a live grid. Share them by link
+  on your local network or over the internet.
+- Read the same Paper blocks on the web, in the terminal, in the editor, and in email.
+- Define a content type for a project and work with it through Studio, the terminal,
+  the CLI, or the API.
+- Export a dataset to a file with `bp export`. Archive an instance and restore it
+  on another cloud provider.
 
 ## Install & connect
 
-Two commands on macOS / Linux (the live [Studio](https://api.barkpark.cloud/studio) needs none):
+On macOS or Linux, install the CLI and choose whether to run locally, deploy a
+server, or connect to an existing instance. You can also use the live
+[Studio](https://api.barkpark.cloud/studio) without installing the CLI:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
-bp setup          # local · deploy · connect — pick one, it does the rest
+bp setup          # choose local, deploy, or connect
 ```
 
-Own a server? `bp setup --target deploy` installs over SSH.
+To install on a server over SSH, use `bp setup --target deploy`.
 
 Windows: `irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex`, then `.\scripts\setup-windows.ps1`.
 
-[Quickstart](docs/setup/QUICKSTART.md) · [Cursor](docs/setup/CURSOR.md) · [Learn & own](docs/learn/README.md) · [From source](docs/setup/SETUP.md)
+[Quickstart](docs/setup/QUICKSTART.md) · [Cursor](docs/setup/CURSOR.md) · [Learn Barkpark](docs/learn/README.md) · [From source](docs/setup/SETUP.md)
 
 ## Your first schema
 
-Describe the shape of your content once, and every surface — Studio pane, TUI desk, REST
-routes, CLI verbs — appears around it:
+A schema defines the fields in a content type. Studio, the terminal UI, the REST
+API, and the CLI use that definition:
 
 ```bash
-bp make schema recipe --out recipe.json   # skeleton — fill the blanks
-bp schema apply --file recipe.json        # the type now exists everywhere
-bp seed recipe --count 5 --publish        # schema-valid sample data, live
-bp tinker                                 # REPL: query it, poke it
+bp make schema recipe --out recipe.json   # create a schema to edit
+bp schema apply --file recipe.json        # apply the schema
+bp seed recipe --count 5 --publish        # publish sample data
+bp tinker                                 # open the interactive shell
 ```
 
-When you're ready to go further: `bp doctor` checks your setup, and the
-[handbook](docs/cli/HANDBOOK.md) walks the rest.
+Use `bp doctor` to check your setup. See the [handbook](docs/cli/HANDBOOK.md)
+for more commands and examples.
 
 ## Working with agents
 
-Barkpark treats an agent as a collaborator with a desk of its own. `bp capabilities -o json`
-describes every noun, verb and route in one call, so any harness can learn the system without
-docs pasted into context. Work lives on a shared task board with an atomic claim/close
-contract, so several agents (and you) can move at once without collisions:
+Agents discover the available commands and routes through `bp capabilities -o json`.
+Tasks, claims, and evidence are stored in Barkpark, so work can be shared across
+agents and sessions. Claim operations are atomic, and closing a task requires its
+claim epoch.
+
+These are separate command examples. Use the task ID, worker, and epoch from your
+own claim:
 
 ```bash
-bp task next agent-1                      # atomically claim the next ready task
-bp task claim t1 a1 --resources lib/x.ex  # fence files against parallel workers
-bp task close t1 agent-1 1                # CAS on the claim epoch
+bp task next agent-1                      # claim the next ready task
+bp task claim t1 a1 --resources lib/x.ex  # declare the files you plan to edit
+bp task close t1 agent-1 1                # close using the claim's worker and epoch
 ```
 
-Because the board lives in Barkpark rather than in a session, an agent that disconnects or
-crashes picks its work back up, context intact — and everything it does lands visibly in
-Studio, in real time. `bp onramp` emits ready-to-paste setup for nine harnesses (Claude Code,
-Cursor, Codex, Windsurf, Zed and more), and a built-in MCP server exposes the task board to
-any MCP client.
+An agent can read the task record after reconnecting. If its claim has lapsed, it
+must claim the task again before continuing. Studio shows task updates as they happen.
+`bp onramp` generates setup instructions for agent tools including Claude Code,
+Cursor, Codex, Windsurf, and Zed. The built-in MCP server also exposes the task
+board to MCP clients.
 
-This repository is built this way: agents claim work from `bp task ready`, publish design
-papers, and score the codebase into a browsable graph ([Cody](tooling/README.md)).
+We use this workflow to build Barkpark: agents find work with `bp task ready`,
+publish design Papers, and inspect the codebase through [Cody](tooling/README.md).
 
 ## Four ways in
 
-| Surface | What it is |
+| Surface | What it provides |
 |---|---|
-| **`bp` CLI** | One static binary speaking the whole API, assembled live from `GET /v1/capabilities`. |
-| **Web Studio** | Multi-pane LiveView desk at `/studio` — drill, filter, autosave, publish, real-time. |
-| **Terminal TUI** | The same desk, keyboard-driven (`bp` with no args). |
-| **REST API** | Public reads, token-authed writes, Sanity-compatible mutations, SSE stream. |
+| `bp` CLI | Commands derived from the server's `GET /v1/capabilities` response. |
+| Web Studio | A LiveView interface at `/studio` for browsing, filtering, editing, and publishing content. |
+| Terminal TUI | A keyboard-driven interface, opened by running `bp` with no arguments. |
+| REST API | Public reads, token-authenticated writes, Sanity-compatible mutations, and server-sent events. |
 
 ## How it works
 
-- **One schema, many surfaces.** A single SchemaDefinition drives Studio, TUI, REST, and CLI.
-- **Manifest-driven contract.** The server projects nouns, verbs, and routes into
-  `GET /v1/capabilities`; every client reads the same projection — default-deny,
-  existence-hiding, keyed on auth tier.
-- **Proven parity, not promised.** One document renders in Elixir, TypeScript and Go; 62 frozen
-  fixtures fail the build if they disagree.
-- **The plugin highway.** Plugins ride the `Barkpark.Plugin` behaviour — schemas, routes,
-  workers, cron, CLI verbs travel module → manifest → `bp` shell.
-  **With all plugins off, Barkpark still works** — an AST gate proves it.
+A `SchemaDefinition` describes each content type. Studio, TUI, REST, and CLI use
+that definition. The server lists available commands and routes through
+`GET /v1/capabilities`, filtered by the caller's authentication tier.
 
-Stack: Elixir / Phoenix LiveView · PostgreSQL · Oban · Go (CLI + TUI, one binary) · Caddy.
-Plugins: **Tasks · Bulldocs · Media · OnixEdit · Sheets · Frt · GitHub · Pulse · Quiz · Scaffy ·
-Tickets**. It grades itself — [`tooling/`](tooling/README.md) recomputes 14 critics live.
+PortableDoc renderers in Elixir, TypeScript, and Go use shared fixtures to check
+that the same content renders consistently across surfaces.
+
+Plugins implement the `Barkpark.Plugin` behaviour and can provide schemas, routes,
+workers, scheduled jobs, and CLI commands. Barkpark's core also runs with all
+plugins disabled.
+
+Barkpark uses Elixir, Phoenix LiveView, PostgreSQL, Oban, Go, and Caddy. Plugins
+include Tasks, Bulldocs, Media, OnixEdit, Sheets, Frt, GitHub, Grip, Pulse, Quiz, Scaffy,
+and Tickets. The [code analysis tools](tooling/README.md) check the repository and
+produce reports for contributors.
 
 ## Why we build it this way
 
-We know the temptation from the inside: the moment greed enters a design, dark patterns
-follow — so we took the choice away from ourselves. Open source dismantles the machinery that
-makes a "no" profitable. We are locked behind a purpose — greatness, and making software
-yours — and we will not hold back on user experience or freedom.
-[Conditioned for greatness →](docs/PHILOSOPHY.md)
+You should be able to run Barkpark, keep your content, and change the software
+without depending on us. We commit to open source, user control, and a usable
+product. [Read our principles](docs/PHILOSOPHY.md).
 
 ## Be your own cloud
 
-Any Ubuntu 22.04+ box → HTTPS + CLI login. Point a DNS A record at the box, run `deploy.sh`
-(installs Barkpark + Caddy/TLS, prints your admin token):
+To deploy on an Ubuntu 22.04+ server, point a DNS A record at it and run `deploy.sh`.
+The script installs Barkpark and Caddy, configures HTTPS, and prints your admin token:
 
 ```bash
 scp deploy.sh root@SERVER_IP:/root/
 ssh root@SERVER_IP "DOMAIN=app.example.com BARKPARK_SEED_PROFILE=clean bash /root/deploy.sh"
 ```
 
-`DOMAIN` = public hostname, never an IP. Walkthrough: [`GO-LIVE.md`](docs/setup/GO-LIVE.md).
-Prefer it handled? **[Barkpark Cloud](https://barkpark.cloud)** provisions on two clouds, deploys
-blue/green, and can archive an instance and resurrect it on the *other* cloud. Or run the
-control plane ([`cloud/`](cloud/README.md)) yourself.
+Set `DOMAIN` to a public hostname, not an IP address. See
+[`GO-LIVE.md`](docs/setup/GO-LIVE.md) for the full walkthrough.
+
+[Barkpark Cloud](https://barkpark.cloud) can provision servers, deploy with a
+blue/green setup, and archive and restore instances across cloud providers. You
+can also run the [control plane](cloud/README.md) yourself.
 
 ## Documentation
 
-| Doc | What |
+| Documentation | Covers |
 |---|---|
 | [`GO-LIVE.md`](docs/setup/GO-LIVE.md) · [`TASK-SYSTEM.md`](docs/setup/TASK-SYSTEM.md) | Deploy a public instance · the task system |
-| [`HANDBOOK.md`](docs/cli/HANDBOOK.md) · [`cheatsheets/`](docs/cheatsheets/) | Full `bp` manual · one-pagers |
+| [`HANDBOOK.md`](docs/cli/HANDBOOK.md) · [`cheatsheets/`](docs/cheatsheets/) | Full `bp` manual · quick references |
 | [`api-v1.md`](docs/api-v1.md) · [`auth.md`](docs/auth.md) | HTTP contract · tokens and tiers |
 | [`plugins.md`](docs/cards/plugins.md) | Build a plugin |
 
