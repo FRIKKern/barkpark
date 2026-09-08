@@ -381,11 +381,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
           {:reply, Map.put_new(reply, :request_id, params["request_id"]), socket}
       end
     else
-      failed_reply(socket, params)
+      history_step_invalid_reply(socket, params)
     end
   end
 
-  def paper_history_step(params, socket), do: failed_reply(socket, params)
+  def paper_history_step(params, socket), do: history_step_invalid_reply(socket, params)
+
+  defp history_step_invalid_reply(socket, params) do
+    request_id = if is_map(params), do: params["request_id"]
+    result = %{saved: false, request_id: request_id, rejected: "invalid_history_request"}
+
+    socket =
+      assign(socket,
+        save_status: "Save failed",
+        last_paper_save_ok?: false,
+        last_paper_save_result: result
+      )
+
+    {:reply, result, socket}
+  end
 
   @doc """
   t9 — LIVE TASK-BLOCK PREVIEW refresh. The canvas hook fires this on mount (seed

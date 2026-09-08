@@ -261,7 +261,7 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
     ]
 
     for refused <- refused_sockets do
-      assert {:reply, %{saved: false}, _socket} =
+      assert {:reply, %{saved: false, rejected: "history_unavailable"}, _socket} =
                StudioLive.handle_event("paper-history-step", params, refused)
 
       assert image_src(slug) == "/after.png"
@@ -333,7 +333,10 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
              )
   end
 
-  test "same-field divergence returns a correlated history conflict", %{socket: socket} do
+  test "same-field divergence returns the fresh current revision without host effects", %{
+    socket: socket,
+    slug: slug
+  } do
     forward_id = Ecto.UUID.generate()
 
     assert {:reply, %{saved: true}, forward_socket} =
@@ -349,19 +352,16 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
                socket
              )
 
-    newer_id = Ecto.UUID.generate()
-
-    assert {:reply, %{saved: true, rev: newer_rev}, newer_socket} =
-             StudioLive.handle_event(
-               "paper-op",
+    assert {:ok, %{rev: newer_rev}} =
+             Content.apply_paper_block_op(
+               slug,
                %{
                  "op" => "patch-block",
                  "id" => "image",
-                 "patch" => %{"src" => "/newer.png"},
-                 "request_id" => newer_id,
-                 "if_rev" => forward_socket.assigns.paper_rev
+                 "patch" => %{"src" => "/newer.png"}
                },
-               forward_socket
+               @dataset,
+               if_rev: forward_socket.assigns.paper_rev
              )
 
     request_id = Ecto.UUID.generate()
@@ -382,7 +382,7 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
                  "request_id" => request_id,
                  "if_rev" => newer_rev
                },
-               newer_socket
+               forward_socket
              )
   end
 
@@ -399,7 +399,7 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
       "if_rev" => socket.assigns.paper_rev
     }
 
-    assert {:reply, %{saved: false}, _socket} =
+    assert {:reply, %{saved: false, rejected: "invalid_history_request"}, _socket} =
              StudioLive.handle_event(
                "paper-history-step",
                Map.put(valid_shape, "private_receipt", %{}),
@@ -408,7 +408,7 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
 
     beta_socket = Phoenix.Component.assign(socket, editor_view: :form, editor_mode: :beta)
 
-    assert {:reply, %{saved: false}, _socket} =
+    assert {:reply, %{saved: false, rejected: "invalid_history_request"}, _socket} =
              StudioLive.handle_event("paper-history-step", valid_shape, beta_socket)
 
     assert Content.get_paper(slug, @dataset).content === before.content

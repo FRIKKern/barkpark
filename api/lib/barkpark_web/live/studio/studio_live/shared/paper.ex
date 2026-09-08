@@ -605,25 +605,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
     cond do
       invalid_credential? ->
-        {:error, refuse_write_denied(socket)}
+        {:error,
+         socket
+         |> refuse_write_denied()
+         |> history_step_refused(request_id, "history_unavailable")}
 
       revoked_token? and is_nil(socket.assigns[:current_user]) ->
-        {:error, refuse_write_denied(socket)}
+        {:error,
+         socket
+         |> refuse_write_denied()
+         |> history_step_refused(request_id, "history_unavailable")}
 
       write_denied?(socket) ->
-        {:error, refuse_write_denied(socket)}
+        {:error,
+         socket
+         |> refuse_write_denied()
+         |> history_step_refused(request_id, "history_unavailable")}
 
       grant_target_denied?(socket, doc_field(paper, :type), slug) ->
-        {:error, refuse_outside_grant(socket)}
+        {:error,
+         socket
+         |> refuse_outside_grant()
+         |> history_step_refused(request_id, "history_unavailable")}
 
       read_only_pane?(socket) ->
-        {:error, refuse_read_only_pane(socket)}
+        {:error,
+         socket
+         |> refuse_read_only_pane()
+         |> history_step_refused(request_id, "history_unavailable")}
 
       socket.assigns[:editor_view] != :paper ->
-        {:error, socket}
+        {:error, history_step_refused(socket, request_id, "invalid_history_request")}
 
       not is_binary(slug) or paper_revision(params["if_rev"]) == :error ->
-        {:error, socket}
+        {:error, history_step_refused(socket, request_id, "invalid_history_request")}
 
       true ->
         {:ok, if_rev} = paper_revision(params["if_rev"])
@@ -647,7 +662,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
             {:ok, socket, receipt, outcome}
 
-          {:error, reason} when reason in [:precondition_failed, :history_conflict] ->
+          {:error, reason}
+          when reason in [
+                 :precondition_failed,
+                 :history_conflict,
+                 :block_not_found,
+                 :duplicate_id
+               ] ->
+            current_rev = current_history_rev(socket, slug, dataset)
+
             {:error,
              socket
              |> assign(save_status: "Save failed", last_paper_save_ok?: false)
@@ -657,7 +680,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
                  request_id: request_id,
                  rejected: "history_conflict",
                  conflict: true,
-                 current_rev: socket.assigns[:paper_rev]
+                 current_rev: current_rev
                }
              )}
 
@@ -694,29 +717,53 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     )
   end
 
+  defp history_step_refused(socket, request_id, rejected) do
+    assign(socket,
+      last_paper_save_result: %{
+        saved: false,
+        request_id: request_id,
+        rejected: rejected
+      }
+    )
+  end
+
   defp history_step_rejection(:history_ref_consumed), do: "history_ref_consumed"
   defp history_step_rejection(:idempotency_receipt_expired), do: "history_expired"
 
   defp history_step_rejection(reason)
        when reason in [
               :idempotency_receipt_missing,
+              :idempotency_receipt_pending,
               :idempotency_receipt_wrong_scope,
               :idempotency_receipt_malformed,
-              :invalid_history,
-              :block_not_found
+              :idempotency_receipt_invalid,
+              :invalid_history
             ],
        do: "history_unavailable"
 
   defp history_step_rejection(reason)
+       when reason in [:block_not_found, :duplicate_id],
+       do: "history_conflict"
+
+  defp history_step_rejection(reason)
        when reason in [
               :invalid_history_action,
+              :history_action_mismatch,
               :invalid_paper_contextual_history_request,
               :invalid_request_id,
+              :invalid_canvas_run_context,
               :idempotency_payload_mismatch
             ],
        do: "invalid_history_request"
 
   defp history_step_rejection(_reason), do: "history_step_failed"
+
+  defp current_history_rev(socket, slug, dataset) do
+    case Content.get_paper(slug, dataset, ScopeHelpers.scope_opts(socket)) do
+      %{content: content} when is_map(content) -> Map.get(content, "rev") || 0
+      _missing -> socket.assigns[:paper_rev]
+    end
+  end
 
   @doc false
   def receipt_changed?(receipt), do: Map.get(receipt, :op_count, 0) > 0
