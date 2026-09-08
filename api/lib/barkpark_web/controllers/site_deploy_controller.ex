@@ -447,10 +447,22 @@ defmodule BarkparkWeb.SiteDeployController do
   # fail" was an SSH session. This is that answer over the existing admin door.
   #
   # RAW LOG BYTES ARE DELIBERATELY NOT SERVED, AND THIS IS NOT A SIZE DECISION.
-  # The build env file carries `BARKPARK_TOKEN=` in plaintext, and the measured
-  # leak rate of the shared scrubber against this box's own `bppat_` token shape
-  # is 95.1% (DeployRunner :1153-1155). DeployRunner :404-406 refuses the bytes
-  # for exactly that reason. So this ships the STRUCTURED record — which is
+  # The build env file carries `BARKPARK_TOKEN=` in plaintext and THE RECORDED
+  # BYTES ARE NEVER SCRUBBED AT WRITE — the log is captured verbatim, so what the
+  # build printed is on the box in the clear. `DeployRunner.build_record/2`
+  # refuses the bytes for exactly that reason.
+  #
+  # CORRECTED 2026-09-08 (task-04e89e88f056aa38). This used to rest the refusal
+  # on "the measured leak rate of the shared scrubber against this box's own
+  # `bppat_` token shape is 95.1%". Both defects that claim described have
+  # LANDED, and the figure matched neither of them. DERIVATION, re-read on main
+  # on 2026-09-08 in `cloud/lib/barkpark_cloud/failure_copy.ex`: shape-blindness
+  # measures 94.3% there and is closed (`@secret_patterns` now carries
+  # `bppat_`/`bpcs_`/`bp_<kind>_`); ordering measures 2000/2000 = 100% there and
+  # is closed (`raw/1` = `strip_ansi |> scrub`, test-pinned). Neither is 95.1%.
+  # WHAT IS NOT REFUTED IS THE REFUSAL: both landed scrubbers are
+  # DISPLAY-BOUNDARY, so a clean render says nothing about the bytes this
+  # endpoint would hand out. So this ships the STRUCTURED record — which is
   # strictly more diagnostic than the one-line failure_reason and carries no
   # credential surface — and `log_path` + `log_bytes` + `journal_command` tell an
   # operator where the bytes are without moving them.
