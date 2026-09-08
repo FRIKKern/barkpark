@@ -7,8 +7,8 @@
 //                  that JOINS the run + FormatBubble (the callout body precedent). A
 //                  PM NodeView has EXACTLY ONE contentDOM, so the body slot claims it.
 //   * title slot → an attr-backed contentEditable ISLAND writing node.attrs.title
-//                  (the section.title precedent: debounced, re-entrancy-guarded
-//                  setNodeMarkup; Enter suppressed; cleared → null round-trips ABSENT).
+//                  immediately outside composition (the callout title precedent;
+//                  Enter suppressed; cleared → null round-trips ABSENT).
 //   * media/action slots → PRESENT-ONLY attrs carrying the WHOLE image/action element
 //                  (deep-cloned; the bpColumnAtom/section.cells precedent), painted
 //                  read-only with the reader class AND edited by REAL controls: the
@@ -26,8 +26,8 @@
 // the ONE shared compose→walk bridge:
 //   media  → <img src alt style="max-width:100%;height:auto"[ width height]>
 //            (walk.ex image/1 — a bare img, NO wrapper div)
-//   title  → <h2>text</h2> (PdHeading, default level 2 — here a contentEditable
-//            island writing node.attrs.title)
+//   title  → <hN>text</hN> (PdHeading's authored level, default 2 — here a
+//            contentEditable island writing node.attrs.title)
 //   body   → <p>…</p> (PdParagraph, classless — here the contentDOM IS the <p>)
 //   action → <a href class="bp-button[ bp-button--primary]">label</a>
 //            (walk.ex button/2's binary priority collapse)
@@ -131,6 +131,12 @@ function jsonAttr(attrKey, dataName) {
   };
 }
 
+function cardTitleLevel(node) {
+  const title = node?.attrs?.bpBlock?.slots?.title;
+  const level = Array.isArray(title) && title.length === 1 ? title[0]?.level : null;
+  return Number.isInteger(level) && level >= 1 && level <= 6 ? level : 2;
+}
+
 export const Card = Node.create({
   name: BP_CARD_NODE_NAME,
 
@@ -218,7 +224,8 @@ export const Card = Node.create({
   //     </div>
   //     <img style="max-width:100%;height:auto">            ← media slot (present-only,
   //                                                            the reader's bare <img>)
-  //     <h2 contenteditable>TITLE</h2>                       ← EDITABLE title island
+  //     <hN contenteditable=false><span contenteditable>TITLE</span></hN>
+  //                                                          ← EDITABLE title island
   //     <p>…</p>                                             ← contentDOM (editable body)
   //     <a class="bp-button[ bp-button--primary]">…</a>      ← action slot (present-only,
   //                                                            the reader's PdButton)
@@ -227,7 +234,7 @@ export const Card = Node.create({
   // Colour rides ENTIRELY on `bp-card--<tone>` (reader cascade + embedder mirror);
   // the slots are the reader's OWN bare-semantic shapes, so the surface h2/p/img/
   // .bp-button rules paint them identically in View and Edit. The title island
-  // writes node.attrs.title via a debounced, re-entrancy-guarded setNodeMarkup;
+  // writes node.attrs.title via a composition-aware immediate setNodeMarkup;
   // its events/mutations are hidden from PM (stopEvent/ignoreMutation).
   addNodeView() {
     return ({ node, editor, getPos }) => {
@@ -308,10 +315,20 @@ export const Card = Node.create({
       mediaImg.style.maxWidth = "100%";
       mediaImg.style.height = "auto";
 
-      // title slot — the reader's semantic <h2> (PdHeading, default level 2), here
-      // an editable contentEditable island writing node.attrs.title.
-      const titleEl = document.createElement("h2");
+      // Title slot — the reader's semantic heading level. A contentEditable=false
+      // parent makes its plaintext-only child a separate browser editing host, so
+      // Chrome cannot redirect a pointer selection into the surrounding PM body.
+      const titleLevel = cardTitleLevel(node);
+      const titleHost = document.createElement(`h${titleLevel}`);
+      titleHost.contentEditable = "false";
+      const titleEl = document.createElement("span");
       titleEl.setAttribute("data-test-id", "paper-card-title");
+      titleEl.setAttribute("role", "textbox");
+      titleEl.setAttribute("aria-label", "Card title");
+      titleEl.setAttribute("aria-multiline", "false");
+      titleEl.tabIndex = 0;
+      titleEl.style.cursor = "text";
+      titleHost.appendChild(titleEl);
 
       // body slot — the reader's <p>: the contentDOM IS the paragraph, so PM fills
       // the card's inline* content straight into the same classless <p> shape
@@ -324,10 +341,12 @@ export const Card = Node.create({
       actionLink.setAttribute("contenteditable", "false");
 
       // Reader order: media, title, body, action. Controls ride at the top (edit-only).
-      dom.append(controls, mediaImg, titleEl, body, actionLink);
+      dom.append(controls, mediaImg, titleHost, body, actionLink);
 
       let syncingTitle = false;
       let titleFocused = false;
+      let titleComposing = false;
+      let titleDirty = false;
 
       const currentNode = () => {
         if (typeof getPos !== "function") return node;
@@ -344,14 +363,14 @@ export const Card = Node.create({
         const title = a.title;
         const hasTitle = title != null && title !== "";
         const shown = hasTitle ? title : "";
-        if (titleEl.textContent !== shown) {
+        if (!titleComposing && !titleDirty && titleEl.textContent !== shown) {
           syncingTitle = true;
           titleEl.textContent = shown;
           syncingTitle = false;
         }
         const editable = editor.isEditable;
-        titleEl.contentEditable = editable ? "true" : "false";
-        titleEl.style.display = hasTitle || (editable && titleFocused) ? "" : "none";
+        titleEl.contentEditable = editable ? "plaintext-only" : "false";
+        titleHost.style.display = hasTitle || (editable && titleFocused) ? "" : "none";
 
         // media slot (present-only): show the bare <img> iff a media element with
         // a src. width/height mirror PdImage's optional dims (the media element is
@@ -433,52 +452,63 @@ export const Card = Node.create({
           .run();
       };
 
-      // ── title island: debounced write-back (cleared → null → round-trips ABSENT).
-      let writeTimer = null;
+      // ── title island: immediate, composition-aware write-back. The canvas owns
+      // network batching, while the node attr must settle before blur, flush, or body
+      // editing can repaint the title from stale authority.
       const commitTitleWrite = () => {
+        if (!titleDirty || titleComposing || syncingTitle || !editor.isEditable) return;
+        if (typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        const cur = editor.state.doc.nodeAt(pos);
+        if (!cur || cur.type.name !== BP_CARD_NODE_NAME) return;
         const raw = titleEl.textContent || "";
         const nextTitle = raw === "" ? null : raw;
-        writeAttr((attrs) => {
-          if ((attrs.title || null) === nextTitle) return attrs;
-          attrs.title = nextTitle;
-          return attrs;
-        });
+        titleDirty = false;
+        if ((cur.attrs.title || null) === nextTitle) return;
+        editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, {
+          ...cur.attrs,
+          title: nextTitle,
+        }));
       };
-      const scheduleTitleWrite = () => {
-        if (syncingTitle) return;
-        if (!editor.isEditable) return;
-        if (writeTimer) clearTimeout(writeTimer);
-        writeTimer = setTimeout(() => {
-          writeTimer = null;
-          commitTitleWrite();
-        }, 250);
-      };
-      const flushTitleWrite = () => {
-        if (!writeTimer) return;
-        clearTimeout(writeTimer);
-        writeTimer = null;
+      const onTitleInput = () => {
+        titleDirty = true;
         commitTitleWrite();
       };
-      const onTitleInput = () => scheduleTitleWrite();
       const onTitleFocus = () => {
         titleFocused = true;
-        if (editor.isEditable) titleEl.style.display = "";
+        if (editor.isEditable) titleHost.style.display = "";
       };
       const onTitleBlur = () => {
+        titleComposing = false;
+        commitTitleWrite();
         titleFocused = false;
         paint(currentNode());
       };
       const onTitleKeydown = (e) => {
+        if (e.isComposing) return;
         if (e.key === "Enter") {
           e.preventDefault();
           titleEl.blur();
+        } else if ((e.metaKey || e.ctrlKey) && !e.altKey &&
+          (e.key.toLowerCase() === "z" || e.key.toLowerCase() === "y")) {
+          e.preventDefault();
+          const redo = e.shiftKey || e.key.toLowerCase() === "y";
+          editor.commands[redo ? "redo" : "undo"]();
         }
+      };
+      const onTitleCompositionStart = () => { titleComposing = true; };
+      const onTitleCompositionEnd = () => {
+        titleComposing = false;
+        commitTitleWrite();
       };
       titleEl.addEventListener("input", onTitleInput);
       titleEl.addEventListener("focus", onTitleFocus);
       titleEl.addEventListener("blur", onTitleBlur);
       titleEl.addEventListener("keydown", onTitleKeydown);
-      dom.addEventListener("bp-flush-node", flushTitleWrite);
+      titleEl.addEventListener("compositionstart", onTitleCompositionStart);
+      titleEl.addEventListener("compositionend", onTitleCompositionEnd);
+      dom.addEventListener("bp-flush-node", commitTitleWrite);
 
       // ── media control: read the picker's PARSED accessor (e.target.meta.url), with a
       // JSON-tolerant fallback (mediaUrlFromValue) over the bp-change STRING detail — the
@@ -538,6 +568,7 @@ export const Card = Node.create({
         contentDOM: body,
         update: (updated) => {
           if (updated.type.name !== BP_CARD_NODE_NAME) return false;
+          if (cardTitleLevel(updated) !== titleLevel) return false;
           paint(updated);
           return true;
         },
@@ -546,7 +577,7 @@ export const Card = Node.create({
           return !!(t && (titleEl.contains(t) || controls.contains(t)));
         },
         ignoreMutation: (m) => {
-          if (m.type === "selection") return false; // let PM own selection
+          if (m.type === "selection") return document.activeElement === titleEl;
           if (m.type === "attributes" && m.target === dom) return true;
           if (titleEl.contains(m.target)) return true; // title edits are attr writes
           if (controls.contains(m.target)) return true; // controls (inc. the picker WC's own preview DOM) are attr writes
@@ -556,12 +587,13 @@ export const Card = Node.create({
           return !body.contains(m.target);
         },
         destroy: () => {
-          if (writeTimer) clearTimeout(writeTimer);
-          dom.removeEventListener("bp-flush-node", flushTitleWrite);
+          dom.removeEventListener("bp-flush-node", commitTitleWrite);
           titleEl.removeEventListener("input", onTitleInput);
           titleEl.removeEventListener("focus", onTitleFocus);
           titleEl.removeEventListener("blur", onTitleBlur);
           titleEl.removeEventListener("keydown", onTitleKeydown);
+          titleEl.removeEventListener("compositionstart", onTitleCompositionStart);
+          titleEl.removeEventListener("compositionend", onTitleCompositionEnd);
           mediaPicker.removeEventListener("bp-change", onMediaChange);
           actionLabelInput.removeEventListener("change", writeAction);
           actionHrefInput.removeEventListener("change", writeAction);
