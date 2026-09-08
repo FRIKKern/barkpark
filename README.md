@@ -1,14 +1,35 @@
 <!-- doc-tier: human | canonical-for: project-overview | budget: 1750tok -->
 # Barkpark
 
-Barkpark is an open-source platform you can shape around your work. Use one
-instance for a single job, or combine applications into a larger system. They
-share a core for data, authentication, permissions, and APIs.
+[![Deploy with Barkpark](https://barkpark.cloud/button.svg)](https://barkpark.cloud/new?template=blog-starter)
 
-You control the server, the data, and the code. Run it on your laptop or a remote
-server, and work through a browser, terminal, command line, or AI agent.
+Barkpark is an open-source application platform you can run on your own computer,
+including its server and database. Run it locally, remotely, or both, with control
+over your data and who can access it.
+
+Use one instance for one job, or combine applications around a shared core for
+data, authentication, permissions, and APIs.
 
 [Try the browser app](https://api.barkpark.cloud/studio) · [Set up Barkpark](docs/setup/QUICKSTART.md) · [Documentation](docs/INDEX.md)
+
+## Local work, remote access
+
+With Barkpark and the data and files you need on your machine, you can keep
+reading and editing local content when the internet goes out or a remote
+instance is unavailable. Your work does not have to wait for that server.
+
+The database matters here. For example, [Sanity Studio can run locally](https://www.sanity.io/docs/studio/development)
+while its content stays in Sanity's hosted Content Lake. Barkpark lets you run
+the application and its data store locally.
+
+Use a remote instance for access from other places or a shared server for
+coworkers. Local and remote instances hold their own data; you can explicitly
+transfer content between them. Bring the data and files you need locally before
+going offline. Automatic synchronization and failover remain goals.
+
+Features that call online services, such as a hosted AI model, still need an
+internet connection. See the [local setup guide](docs/setup/personal-local.md)
+for running the stack and bringing Cloud workspace data onto your machine.
 
 ## One purpose or a larger system
 
@@ -123,20 +144,16 @@ queries, updates, and publishing.
 
 ## Why I build it
 
-I build Barkpark from problems I run into at work. Papers started because I was
-tired of copying AI progress into messages for coworkers. Sheets came from
-repeatedly exporting spreadsheets when we could work with live data instead.
-Each tool should make the next idea easier to build.
+I build Barkpark from problems I run into at work. Papers started because I wanted
+a better way to read what an AI proposed, share the proposal with coworkers, and
+develop it together. Sheets came from repeatedly exporting spreadsheets when we
+could work with live data instead. Each tool should make the next idea easier to
+build.
 
 Vendors can save you time and effort. They also bring limits on what you can
 change and how products connect. Barkpark aims to make more of those choices
 yours: use a service where it helps, run things yourself where that fits, and
 keep the ability to inspect and change the software.
-
-You can work with data on a local instance without internet access and explicitly
-move content between servers. Keeping local and remote instances automatically
-synchronized through outages is a goal; current transfer tools do not provide
-that guarantee.
 
 Barkpark is [MIT licensed](LICENSE). [Barkpark Cloud](https://barkpark.cloud) can
 operate instances for you and helps fund development. Its
