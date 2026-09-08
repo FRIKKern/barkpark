@@ -21,6 +21,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias Barkpark.Access
   alias Barkpark.Content
   alias Barkpark.Content.Labels
+  alias Barkpark.Content.Papers.CanvasRunContext
   alias Barkpark.PortableDoc.Render.SectionLayout
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, TaskResolver}
   alias BarkparkWeb.ScopeHelpers
@@ -28,6 +29,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
   alias BarkparkWeb.Studio.StudioLive.Shared
+  alias BarkparkWeb.PaperCanvasLease
 
   @server_minted_block :__server_minted_block__
   @server_form_source :__server_block_form_source__
@@ -482,31 +484,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
         opts =
           BarkparkWeb.ScopeHelpers.scope_opts(socket) ++
-            [if_rev: if_rev] ++ if(context, do: [canvas_run_context: context], else: [])
+            [if_rev: if_rev] ++
+            if(context, do: [canvas_run_context: context], else: [])
 
         result =
-          if is_map(form_source) do
-            resolver = fn blocks ->
-              with {:ok, op} <- Blocks.resolve_block_form(blocks, form_source), do: {:ok, [op]}
-            end
-
-            Content.apply_paper_block_form_once(
+          if is_map(form_source) and PaperCanvasLease.pending?(socket) do
+            {:error, :idempotency_replay_required}
+          else
+            apply_paper_ops_once(
+              socket,
               slug,
-              "block_form:v1",
+              ops,
               form_source,
               dataset,
               request_id,
-              replay_principal_key(socket),
-              resolver,
-              opts
-            )
-          else
-            Content.apply_paper_block_ops_once(
-              slug,
-              ops,
-              dataset,
-              request_id,
-              replay_principal_key(socket),
               opts
             )
           end
@@ -516,7 +507,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket =
               socket
               |> sync_paper_edit_doc()
-              |> retain_canvas_insertions(slug, doc_field(paper, :content), context, ops)
+              |> retain_canvas_insertions(
+                slug,
+                doc_field(paper, :content),
+                context,
+                ops,
+                outcome
+              )
               |> push_canvas_echo(request_id)
               |> push_task_previews()
               |> push_block_renders()
@@ -559,6 +556,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
              |> put_flash(:error, "Edit failed")
              |> assign(save_status: "Save failed", last_paper_save_ok?: false)}
         end
+    end
+  end
+
+  defp apply_paper_ops_once(socket, slug, ops, form_source, dataset, request_id, opts) do
+    if is_map(form_source) do
+      resolver = fn blocks ->
+        with {:ok, op} <- Blocks.resolve_block_form(blocks, form_source), do: {:ok, [op]}
+      end
+
+      Content.apply_paper_block_form_once(
+        slug,
+        "block_form:v1",
+        form_source,
+        dataset,
+        request_id,
+        replay_principal_key(socket),
+        resolver,
+        opts
+      )
+    else
+      Content.apply_paper_block_ops_once(
+        slug,
+        ops,
+        dataset,
+        request_id,
+        replay_principal_key(socket),
+        opts
+      )
     end
   end
 
@@ -1122,7 +1147,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
       rev = doc_field(socket.assigns[:paper_doc], :content) |> then(&get_in(&1 || %{}, ["rev"]))
 
-      runs = canvas_echo_runs(slug, blocks, socket.assigns[:paper_canvas_retained])
+      lease_tokens = socket.assigns[:paper_canvas_lease_tokens] || %{}
+
+      runs =
+        slug
+        |> canvas_echo_runs(blocks, socket.assigns[:paper_canvas_retained])
+        |> Enum.map(fn run ->
+          run
+          |> Map.put(:retained_leases, PaperCanvasLease.for_run(lease_tokens, run.blocks))
+          |> Map.put(:retained_lease_overflow, PaperCanvasLease.blocked?(socket))
+        end)
 
       push_event(
         socket,
@@ -1136,11 +1170,70 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc false
   # Retention belongs to this mounted editor, never the stored document.
-  def retain_canvas_insertions(socket, slug, before_content, context, ops) do
+  def retain_canvas_insertions(socket, slug, before_content, context, ops, outcome \\ :applied) do
     after_content = doc_field(socket.assigns[:paper_doc], :content) || %{}
     prior = PaperCanvas.retained_owners(socket.assigns[:paper_canvas_retained], slug)
-    owners = PaperCanvas.retain_insertions(prior, before_content, after_content, context, ops)
-    assign(socket, :paper_canvas_retained, %{slug: slug, owners: owners})
+
+    owners =
+      PaperCanvas.retain_insertions(prior, before_content, after_content, context, ops, outcome)
+
+    socket
+    |> assign(:paper_canvas_retained, %{slug: slug, owners: owners})
+    |> PaperCanvasLease.issue_socket(
+      socket.assigns[:paper_doc],
+      owners,
+      after_content["blocks"] || [],
+      after_content["rev"]
+    )
+  end
+
+  @doc false
+  def canvas_reply_leases(socket, {:ok, %{} = context}, ops) when is_list(ops) do
+    blocks = paper_top_level_blocks(socket)
+
+    with {:ok, normalized} <- CanvasRunContext.normalize(context),
+         post_ids <- postwrite_context_ids(normalized.container_run_ids, ops),
+         post_context <- Map.put(normalized, :container_run_ids, post_ids),
+         {:ok, _blocks, leases} <-
+           CanvasRunContext.map_run(blocks, post_context, fn run ->
+             {:ok, run,
+              PaperCanvasLease.for_run(socket.assigns[:paper_canvas_lease_tokens] || %{}, run)}
+           end) do
+      leases
+    else
+      _ -> []
+    end
+  end
+
+  def canvas_reply_leases(_socket, _context, _ops), do: []
+
+  defp postwrite_context_ids(ids, ops) do
+    Enum.reduce(ops, ids, fn
+      %{"op" => "append-block", "block" => %{"id" => id}}, current when is_binary(id) ->
+        current ++ [id]
+
+      %{"op" => "insert-after", "afterId" => after_id, "block" => %{"id" => id}}, current
+      when is_binary(id) ->
+        insert_context_id(current, after_id, id, :after)
+
+      %{"op" => "insert-before", "beforeId" => before_id, "block" => %{"id" => id}}, current
+      when is_binary(id) ->
+        insert_context_id(current, before_id, id, :before)
+
+      %{"op" => "replace-block", "id" => old_id, "block" => %{"id" => id}}, current
+      when is_binary(id) ->
+        Enum.map(current, &if(&1 == old_id, do: id, else: &1))
+
+      _op, current ->
+        current
+    end)
+  end
+
+  defp insert_context_id(ids, anchor, id, side) do
+    case Enum.find_index(ids, &(&1 == anchor)) do
+      nil -> ids
+      index -> List.insert_at(ids, index + if(side == :after, do: 1, else: 0), id)
+    end
   end
 
   @doc false
@@ -2029,6 +2122,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         backlinks_linked: linked,
         backlinks_unlinked: unlinked
       )
+      |> PaperCanvasLease.resume_socket(
+        paper,
+        content["blocks"] || [],
+        canvas_resume_authorized?(socket, paper)
+      )
       |> assign(sidebar_assigns(paper))
       # pdd-t12b: with the canvas ON (the mainline default) a block paper opens
       # straight into the always-editable editor — the read-only streamed View
@@ -2075,6 +2173,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   def setup_paper_view(socket, _paper), do: clear_paper_view(socket)
+
+  @doc false
+  def canvas_resume_authorized?(socket, paper) do
+    doc_field(paper, :type) == Content.paper_type() and
+      not write_denied?(socket) and
+      not grant_target_denied?(socket, doc_field(paper, :type), doc_field(paper, :doc_id)) and
+      not read_only_pane?(socket)
+  end
 
   # Default t6 sidebar assigns when a paper opens: panel + every section open,
   # slug draft seeded from the paper's own id with its live format verdict.
@@ -2181,9 +2287,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         backlinks_linked: [],
         backlinks_unlinked: []
       )
+      |> PaperCanvasLease.reset_socket()
       |> assign(sidebar_assigns(nil))
     else
-      assign(socket,
+      socket
+      |> assign(
         editor_view: :form,
         paper_canvas_retained: nil,
         paper_link_details: %{},
@@ -2191,6 +2299,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         backlinks_linked: [],
         backlinks_unlinked: []
       )
+      |> PaperCanvasLease.reset_socket()
     end
   end
 

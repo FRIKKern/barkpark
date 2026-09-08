@@ -318,6 +318,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   scope_prefix={@scope_prefix}
                   canvas_eligible={true}
                   canvas_retained={@paper_canvas_retained}
+                  canvas_resume_halt={Map.get(assigns, :paper_canvas_resume_halt, false)}
+                  canvas_resume_state={Map.get(assigns, :paper_canvas_resume_status, :none)}
                   task_previews={@task_previews}
                   paper_links={@paper_links}
                   save_status={@save_status}

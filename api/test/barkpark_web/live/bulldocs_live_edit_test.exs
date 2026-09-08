@@ -185,6 +185,106 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
     end
   end
 
+  test "authenticated leases resume ownership and pending exact-once replay unfreezes it", %{
+    conn: conn,
+    slug: slug
+  } do
+    writer = writer_conn(conn)
+    {:ok, first, _html} = live(writer, "/papers/#{slug}")
+    render_click(first, "paper-toggle-edit", %{})
+
+    original_rev = assigns_of(first).paper_rev
+
+    first_payload = %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => original_rev,
+      "container_kind" => "document",
+      "container_run_ids" => ["b-head", "b-body", "b-extra"],
+      "ops" => [
+        %{
+          "op" => "append-block",
+          "block" => %{
+            "id" => "first-reconnect-table",
+            "type" => "table",
+            "head" => [[], []],
+            "rows" => [[[], []]]
+          }
+        }
+      ]
+    }
+
+    render_hook(first, "paper-ops", first_payload)
+    leases = assigns_of(first).paper_canvas_lease_tokens |> Map.values()
+    assert length(leases) == 1
+    persisted_rev = assigns_of(first).paper_rev
+    assert persisted_rev == original_rev + 1
+
+    reconnect = %{
+      "paper_editing_key" => "#{@dataset}:paper:#{slug}",
+      "paper_canvas_lease_key" => "#{@dataset}:paper:#{slug}",
+      "paper_canvas_leases" => leases,
+      "paper_canvas_lease_pending" => true
+    }
+
+    {:ok, resumed, html} = live(put_connect_params(writer, reconnect), "/papers/#{slug}")
+
+    assert assigns_of(resumed).editing?,
+           inspect(
+             Map.take(assigns_of(resumed), [
+               :editing?,
+               :can_edit?,
+               :paper_canvas_resume_status,
+               :paper_canvas_resume_attempt,
+               :paper_canvas_resume_halt,
+               :paper_canvas_retained
+             ]),
+             pretty: true
+           )
+
+    assert assigns_of(resumed).paper_canvas_resume_status == :pending
+
+    assert MapSet.member?(
+             assigns_of(resumed).paper_canvas_retained.owners.document,
+             "first-reconnect-table"
+           )
+
+    assert html =~ ~s(data-paper-canvas-resume-state="pending")
+    assert html =~ ~s(inert)
+
+    pending_payload = %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => persisted_rev,
+      "container_kind" => "document",
+      "container_run_ids" => [
+        "b-head",
+        "b-body",
+        "b-extra",
+        "first-reconnect-table"
+      ],
+      "ops" => [
+        %{
+          "op" => "append-block",
+          "block" => %{
+            "id" => "pending-reconnect-table",
+            "type" => "table",
+            "head" => [[], []],
+            "rows" => [[[], []]]
+          }
+        }
+      ]
+    }
+
+    render_hook(resumed, "paper-ops", pending_payload)
+
+    assert assigns_of(resumed).paper_canvas_resume_status == :resumed
+    refute render(resumed) =~ ~s(data-paper-canvas-resume-halt="true")
+    assert assigns_of(resumed).paper_rev == persisted_rev + 1
+    assert length(Map.values(assigns_of(resumed).paper_canvas_lease_tokens)) == 2
+
+    render_hook(resumed, "paper-ops", pending_payload)
+    assert assigns_of(resumed).paper_rev == persisted_rev + 1
+  end
+
   describe "criterion 2 — anonymous: no editor markup, every edit event refused" do
     test "the anonymous render carries neither the toggle nor the editor", %{
       conn: conn,

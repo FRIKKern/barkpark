@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   alias Barkpark.Content.Papers.ValueWriteback
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.StudioLive.{Blocks, PaperCanvas, Shared}
+  alias BarkparkWeb.Studio.StudioLive.Shared.Paper, as: SharedPaper
 
   @server_minted_block :__server_minted_block__
 
@@ -19,7 +20,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     if socket.assigns[:editor_view] == :paper do
       next_edit_mode = !socket.assigns[:paper_edit_mode]
 
-      socket = assign(socket, paper_edit_mode: next_edit_mode, paper_canvas_retained: nil)
+      socket =
+        socket
+        |> assign(paper_edit_mode: next_edit_mode)
+        |> BarkparkWeb.PaperCanvasLease.reset_socket()
 
       socket =
         if next_edit_mode or not socket.assigns[:paper_block_mode] do
@@ -333,7 +337,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
              saved: true,
              request_id: request_id,
              replayed: outcome == :replayed,
-             rev: receipt.rev
+             rev: receipt.rev,
+             retained_leases: SharedPaper.canvas_reply_leases(socket, context, ops),
+             retained_lease_overflow: BarkparkWeb.PaperCanvasLease.blocked?(socket)
            }, socket}
 
         {:error, socket} ->

@@ -133,6 +133,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # the canvas flag stays gated to the one surface whose persist path is wired.
   attr(:canvas_eligible, :boolean, default: false)
   attr(:canvas_retained, :any, default: nil)
+  attr(:canvas_resume_halt, :boolean, default: false)
+  attr(:canvas_resume_state, :any, default: :none)
 
   # t9 — live task-block previews (block_id ⇒ preview entry from
   # TaskResolver.preview/2), display-only rows the flag-ON boundary widgets
@@ -148,17 +150,62 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:paper_halt, :string, default: nil)
 
   def paper_block_editor(assigns) do
-    assigns =
-      assign(
-        assigns,
-        :table_editor_target_ids,
-        assigns.table_editor_target_ids || table_editor_ids(assigns.blocks)
-      )
+    if assigns.canvas_resume_halt do
+      paper_block_editor_resume_halt(assigns)
+    else
+      assigns =
+        assign(
+          assigns,
+          :table_editor_target_ids,
+          assigns.table_editor_target_ids || table_editor_ids(assigns.blocks)
+        )
 
-    case Content.project_block_ids_safely(assigns.blocks) do
-      {:ok, _projected} -> paper_block_editor_identity_safe(assigns)
-      {:error, {:duplicate_id, _id}} -> paper_block_editor_identity_readonly(assigns)
+      case Content.project_block_ids_safely(assigns.blocks) do
+        {:ok, _projected} -> paper_block_editor_identity_safe(assigns)
+        {:error, {:duplicate_id, _id}} -> paper_block_editor_identity_readonly(assigns)
+      end
     end
+  end
+
+  defp paper_block_editor_resume_halt(assigns) do
+    assigns = assign(assigns, :notice, BarkparkWeb.PaperCanvasLease.halt_notice())
+
+    ~H"""
+    <div
+      id={"paper-canvas-resume-warning-#{@slug}"}
+      class="bp-paper-halt"
+      data-test-id="paper-canvas-resume-warning"
+      role="alert"
+    >
+      <p>{@notice}</p>
+      <p>
+        Download the preserved canvas draft fragments before reloading. This recovery file preserves
+        the affected canvas data; it is not a complete document export.
+      </p>
+      <button
+        type="button"
+        data-paper-canvas-export-draft
+        data-paper-editor-target={"paper-editor-#{@slug}"}
+      >
+        Download preserved canvas draft
+      </button>
+      <details data-test-id="paper-canvas-recovery-controls">
+        <summary>Recovery options</summary>
+        <p>Reload only after reviewing the frozen draft; this permanently discards unsaved local edits.</p>
+        <a href="" data-test-id="paper-canvas-reload-server">Discard local edits and reload the server version</a>
+      </details>
+    </div>
+    <div
+      id={"paper-editor-#{@slug}"}
+      class="bp-paper-editor"
+      data-test-id="studio-paper-block-editor"
+      data-paper-doc-key={"#{@dataset}:#{@doc_type}:#{@slug}"}
+      data-paper-canvas-resume-halt="true"
+      data-paper-canvas-resume-state={to_string(@canvas_resume_state)}
+      inert
+    >
+    </div>
+    """
   end
 
   defp paper_block_editor_identity_readonly(assigns) do

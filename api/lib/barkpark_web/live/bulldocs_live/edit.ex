@@ -168,7 +168,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
         socket =
           socket
           |> assign(:editing?, editing?)
-          |> assign(:paper_canvas_retained, nil)
+          |> BarkparkWeb.PaperCanvasLease.reset_socket()
           # Slice 4: tell the room. The presence meta's `editing?` is what puts
           # the dot next to a name in `#paper-presence`, so it must flip on the
           # SAME event that flips the mode — not on the first op, which may never
@@ -324,7 +324,8 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
         opts =
           write_opts(socket) ++
-            [if_rev: if_rev] ++ if(context, do: [canvas_run_context: context], else: [])
+            [if_rev: if_rev] ++
+            if(context, do: [canvas_run_context: context], else: [])
 
         # Slice 4: the exactly-once seam is the one the SHIPPED editor drives —
         # `bp-paper-editor-hooks.js` stamps a `request_id` on every mutation — so
@@ -335,28 +336,16 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
         # would leave every real reader edit unattributed while the tests that
         # drive the legacy seam stayed green.
         result =
-          if is_map(form_source) do
-            resolver = fn blocks ->
-              with {:ok, op} <- Blocks.resolve_block_form(blocks, form_source), do: {:ok, [op]}
-            end
-
-            Content.apply_paper_block_form_once(
+          if is_map(form_source) and BarkparkWeb.PaperCanvasLease.pending?(socket) do
+            {:error, :idempotency_replay_required}
+          else
+            apply_paper_ops_once(
+              assigns,
               slug,
-              "block_form:v1",
+              ops,
               form_source,
               socket.assigns[:dataset],
               request_id,
-              replay_principal_key(assigns),
-              resolver,
-              opts
-            )
-          else
-            Content.apply_paper_block_ops_once(
-              slug,
-              ops,
-              socket.assigns[:dataset],
-              request_id,
-              replay_principal_key(assigns),
               opts
             )
           end
@@ -376,7 +365,8 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
                 slug,
                 doc_field(paper, :content),
                 context,
-                ops
+                ops,
+                outcome
               )
               |> reconcile_canvas(request_id)
               |> assign(:save_status, "Auto-saved")
@@ -391,6 +381,34 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
           {:error, reason} ->
             {:error, handle_result({:error, reason}, socket, request_id)}
         end
+    end
+  end
+
+  defp apply_paper_ops_once(assigns, slug, ops, form_source, dataset, request_id, opts) do
+    if is_map(form_source) do
+      resolver = fn blocks ->
+        with {:ok, op} <- Blocks.resolve_block_form(blocks, form_source), do: {:ok, [op]}
+      end
+
+      Content.apply_paper_block_form_once(
+        slug,
+        "block_form:v1",
+        form_source,
+        dataset,
+        request_id,
+        replay_principal_key(assigns),
+        resolver,
+        opts
+      )
+    else
+      Content.apply_paper_block_ops_once(
+        slug,
+        ops,
+        dataset,
+        request_id,
+        replay_principal_key(assigns),
+        opts
+      )
     end
   end
 
