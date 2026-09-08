@@ -246,6 +246,21 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
     {titles, result["count"]}
   end
 
+  # A REFUSAL IS A STATUS *AND* A BODY. Both show doors used to hand back the
+  # bare status, which is exactly what let their assertions accept `in [403,
+  # 404]` — with no envelope to look at there is nothing to tell one refusal
+  # from another, so the disjunction was the only honest thing left to say.
+  # `Content.Errors` renders every controller error tuple into a single
+  # `%{"error" => %{"code", "message", "hint", "requestId", ...}}` envelope, and
+  # TWO DIFFERENT GATES ON THESE ROUTES EMIT `code: "forbidden"` — the
+  # permission-tier refusal (`{:error, :forbidden}`) and `ResolveWorkspace`'s
+  # membership halt (`{:error, :forbidden_membership}`, which carries
+  # `reason: "not_a_member"`). Pinning the number alone would pass for the wrong
+  # gate, so the envelope rides back with the status.
+  defp refusal(conn) do
+    {:refused, conn.status, json_response(conn, conn.status)["error"] || %{}}
+  end
+
   defp collection_show(ctx, token, id) do
     conn =
       ctx.conn
@@ -254,7 +269,7 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
 
     case conn.status do
       200 -> {:ok, json_response(conn, 200)["result"]}
-      status -> {:refused, status}
+      _ -> refusal(conn)
     end
   end
 
@@ -266,7 +281,7 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
 
     case conn.status do
       200 -> {:ok, json_response(conn, 200)["result"]}
-      status -> {:refused, status}
+      _ -> refusal(conn)
     end
   end
 
@@ -414,10 +429,38 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
       assert {:ok, _result} = collection_show(ctx, ctx.read, ctx.coll_id)
     end
 
+    # 404, AND IT COULD NOT HONESTLY BE ANYTHING ELSE. `MediaCollectionsController.show/2`
+    # is `with {:ok, collection} <- Collections.get(id, dataset, scope_opts(conn))` —
+    # no `Access.allowed?`, no `ensure_viewable`. `Collections.get/3` refuses this
+    # tier BEFORE `fetch/3` runs (`restrict_public_read_tier?/1` and the type is
+    # not in `Schema.public_type_names/2` -> `{:error, :not_found}`), so the door
+    # never resolves the row. A 403 here would assert knowledge the door does not
+    # have and would newly reveal that the collection exists. This is
+    # existence-hiding on purpose, and it is the DIFFERENT answer from its asset
+    # sibling below — which is why these two assertions must not be unified.
+    #
+    # WHAT ELSE 404s THIS ROUTE: a genuinely absent id, a wrong `:dataset`, or an
+    # id in another workspace — all render the SAME `not_found` envelope, by
+    # design; the clamp is deliberately indistinguishable from absence, so no
+    # field in the body can separate them. The discrimination is carried by the
+    # two CONTROLS above instead: admin and `{read}` resolve THIS id on THIS
+    # route, so a 404 here is the tier and not a broken fixture. What the code
+    # pin DOES buy is separation from the other 404s this surface can emit —
+    # `capability_unavailable` (media plugin off) and a route miss, neither of
+    # which would be a refusal at all.
     test "a public-read token is refused the private-typed collection by id", ctx do
       case collection_show(ctx, ctx.public_read, ctx.coll_id) do
-        {:refused, status} ->
-          assert status in [403, 404], "expected a refusal, got #{status}"
+        {:refused, status, error} ->
+          assert status == 404,
+                 "the collection show door has no identity gate — it can only hide " <>
+                   "existence, so 404 is the one honest refusal. got #{status} " <>
+                   "error=#{inspect(error)}"
+
+          assert error["code"] == "not_found",
+                 "404 with code=#{inspect(error["code"])}: this is NOT the scoping " <>
+                   "refusal. `capability_unavailable` means the media plugin is off " <>
+                   "and a route miss means the URL changed — neither is the clamp. " <>
+                   "error=#{inspect(error)}"
 
         {:ok, result} ->
           flunk(
@@ -481,11 +524,52 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
       assert {:ok, _result} = show(ctx, ctx.read)
     end
 
+    # 403, NOT 404 — THE OPPOSITE OF THE COLLECTION DOOR, AND FOR A REASON THE CODE STATES.
+    # `V1.MediaController.show/2` resolves the blob (`Media.get_file/2`), checks
+    # the dataset, loads the asset document and only THEN gates
+    # (`ensure_viewable/3` -> `{:error, :forbidden}`). It has already identified
+    # the asset — it must, in order to gate it — so "forbidden" is the honest
+    # answer, and its own `@doc` records the parity decision with the legacy
+    # sibling: "both doors answer the same question, and disagreeing about the
+    # status code would make a caller's probe of one door mean something
+    # different at the other."
+    #
+    # WHAT ELSE 403s THIS ROUTE — and why the number alone is not enough.
+    # `ResolveWorkspace` halts a NON-MEMBER of `/w/:ws` with
+    # `{:error, :forbidden_membership}`, which renders the SAME
+    # `code: "forbidden"` and never reaches this controller at all. A bare
+    # `assert status == 403` would therefore green if the token stopped being a
+    # workspace member — the fixture's own mint (`mint!(…, ws.id)`) breaking
+    # would LOOK like the clamp working. The two arms are separated only by
+    # `message` and by `reason`, which the membership arm carries
+    # (`"not_a_member"`) and the permission arm does not, so both are pinned.
+    # The remaining 403s on this surface are neither: an unauthenticated caller
+    # gets 401, a wrong dataset or a missing id gets 404, and the limiter
+    # answers 429 — if this ever reads 429, the body names the limiter and the
+    # fault is LOAD, not this gate.
     test "a public-read token is refused the private asset's metadata", ctx do
       case show(ctx, ctx.public_read) do
-        {:refused, status} ->
-          assert status in [403, 404],
-                 "expected a refusal on the private asset, got #{status}"
+        {:refused, status, error} ->
+          assert status == 403,
+                 "the asset show door RESOLVES the asset before gating it " <>
+                   "(`ensure_viewable/3`), so it must say forbidden, not hide " <>
+                   "existence. got #{status} error=#{inspect(error)}"
+
+          assert error["code"] == "forbidden",
+                 "403 with code=#{inspect(error["code"])} — not the viewability " <>
+                   "gate. error=#{inspect(error)}"
+
+          assert error["message"] == "token lacks required permission",
+                 "403 forbidden, but NOT from `ensure_viewable/3`. This is the " <>
+                   "whole reason the number is not enough: `ResolveWorkspace`'s " <>
+                   "membership halt renders code=forbidden too. message=" <>
+                   "#{inspect(error["message"])} error=#{inspect(error)}"
+
+          refute Map.has_key?(error, "reason"),
+                 "the permission-tier refusal carries no `reason`; a `reason` here " <>
+                   "means a DIFFERENT 403 answered — `reason=not_a_member` means " <>
+                   "`ResolveWorkspace` refused the token's membership and the " <>
+                   "media gate was never consulted. error=#{inspect(error)}"
 
         {:ok, result} ->
           flunk(
