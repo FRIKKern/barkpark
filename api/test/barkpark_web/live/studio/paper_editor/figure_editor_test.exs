@@ -135,7 +135,10 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
     picker = LazyHTML.query(tree, "[data-test-id='paper-figure-image-picker']")
     frame = LazyHTML.query(tree, "figure.bp-paper-figure-editor-frame")
 
-    assert html =~ Render.render_block(child, %{style: :article})
+    reader_image = Render.render_block(child, %{style: :article})
+    assert reader_image =~ ~s(data-bp-lightboxable="true")
+    assert html =~ String.replace(reader_image, ~s( data-bp-lightboxable="true"), "")
+    refute html =~ ~s(data-bp-lightboxable="true")
     assert LazyHTML.attribute(preview, "data-figure-id") == ["figure"]
     assert LazyHTML.attribute(preview, "data-child-id") == ["image-child"]
     assert LazyHTML.attribute(preview, "phx-hook") == ["BarkparkFigureImageBridge"]
@@ -176,13 +179,51 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
     preview = LazyHTML.query(tree, "[data-test-id='paper-figure-image-preview']")
     trigger = LazyHTML.query(tree, "[data-test-id='paper-figure-image-edit-trigger']")
 
-    assert html =~ Render.render_block(child, %{style: :article})
+    reader_image = Render.render_block(child, %{style: :article})
+    assert reader_image =~ ~s(data-bp-lightboxable="true")
+    assert html =~ reader_image
     assert LazyHTML.attribute(preview, "phx-hook") == []
     assert LazyHTML.attribute(trigger, "role") == []
     assert LazyHTML.attribute(trigger, "tabindex") == []
     assert LazyHTML.attribute(trigger, "aria-label") == []
     refute html =~ ~s(data-test-id="paper-figure-image-picker")
     refute html =~ ~s(data-test-id="paper-block-image-picker")
+  end
+
+  test "an empty caption keeps one stable textarea and exposes a zero-flow focus control" do
+    block = figure(paragraph("child", "Inside")) |> Map.put("caption", "")
+    html = render_component(&PaperEditor.paper_block_fields/1, block: block)
+    tree = LazyHTML.from_fragment(html)
+    caption = LazyHTML.query(tree, "figcaption.bp-figcaption")
+    add = LazyHTML.query(tree, "[data-paper-figure-caption-add]")
+    textarea = LazyHTML.query(tree, "#figure-caption-figure")
+
+    assert LazyHTML.attribute(caption, "data-paper-figure-caption-empty") == ["true"]
+    assert LazyHTML.attribute(add, "type") == ["button"]
+    assert LazyHTML.text(add) == "Add caption"
+    assert LazyHTML.attribute(textarea, "name") == ["caption"]
+    assert LazyHTML.attribute(textarea, "phx-hook") == ["BarkparkPaperAutoSize"]
+    assert LazyHTML.text(textarea) == ""
+
+    assert LazyHTML.attribute(add, "phx-click") == [
+             ~s([["focus",{"to":"#figure-caption-figure"}]])
+           ]
+  end
+
+  test "a multiline caption stays escaped and authored verbatim in the growable textarea" do
+    authored = "Figure 2. First & <line>\nSecond line"
+    block = figure(paragraph("child", "Inside")) |> Map.put("caption", authored)
+    html = render_component(&PaperEditor.paper_block_fields/1, block: block)
+    tree = LazyHTML.from_fragment(html)
+    caption = LazyHTML.query(tree, "figcaption.bp-figcaption")
+    textarea = LazyHTML.query(tree, "#figure-caption-figure")
+
+    assert LazyHTML.attribute(caption, "data-paper-figure-caption-empty") == []
+    assert LazyHTML.text(textarea) == authored
+    refute html =~ "<line>"
+    assert html =~ "&amp;"
+    assert html =~ "&lt;line&gt;"
+    refute html =~ ~s(data-paper-figure-caption-add)
   end
 
   test "missing, nil, scalar, and unstable children remain honest read-only previews" do

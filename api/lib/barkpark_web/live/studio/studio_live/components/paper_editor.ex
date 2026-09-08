@@ -1943,7 +1943,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       aria-haspopup={@picker_browse && "dialog"}
                       data-test-id="paper-figure-image-edit-trigger"
                     >
-                      <%= raw(Render.render_block(child, %{style: :article, paper_links: @paper_links})) %>
+                      <%= raw(figure_image_editor_html(child, @paper_links, @picker_browse)) %>
                     </div>
                     <details
                       :if={@picker_browse}
@@ -2005,7 +2005,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <% end %>
                 <% end %>
               </div>
-              <figcaption class="bp-figcaption">
+              <figcaption
+                class="bp-figcaption"
+                data-paper-figure-caption-empty={figure_caption_empty?(@block) && "true"}
+              >
+                <button
+                  :if={figure_caption_empty?(@block)}
+                  type="button"
+                  class="bp-paper-figure-caption-add"
+                  phx-click={JS.focus(to: "#figure-caption-" <> @id)}
+                  data-paper-figure-caption-add
+                >Add caption</button>
                 <form
                   id={"figure-form-" <> @id}
                   class="bp-paper-edit-form bp-paper-figure-caption-form"
@@ -3927,6 +3937,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       "width:var(--bp-evidence-width, 100%);" <>
       "box-sizing:border-box;overflow-x:#{overflow}"
   end
+
+  # Article images opt into the reader lightbox through this exact marker. In
+  # Edit the image itself is already one keyboard/pointer picker trigger, so
+  # retaining the marker would let the global lightbox enhancer introduce a
+  # second interactive control inside it. Keep the canonical reader-produced
+  # image bytes and geometry; suppress only the competing behavior marker.
+  defp figure_image_editor_html(child, paper_links, picker_browse) do
+    html = Render.render_block(child, %{style: :article, paper_links: paper_links})
+
+    if picker_browse do
+      String.replace(html, ~s( data-bp-lightboxable="true"), "")
+    else
+      html
+    end
+  end
+
+  defp figure_caption_empty?(block),
+    do: Blocks.form_value(Map.get(block, "caption")) == ""
 
   defp figure_child_segment(%{"child" => child}, true) do
     [child]
