@@ -974,12 +974,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
                      ["paper_ops:v1:", "paper_block_form:v1:", "paper_contextual_history:v1:"],
                      3_600
                    ),
-                 {:ok, history} <- contextual_history_from_receipt(stored_receipt),
+                 {:ok, predecessor_receipt} <-
+                   normalize_stored_paper_ops_receipt(stored_receipt),
+                 {:ok, history} <- contextual_history_from_receipt(predecessor_receipt),
                  :ok <- require_contextual_history_action(history, action),
                  :ok <- claim_contextual_history_consumption(consumption_hash, consumption_scope),
-                 %Document{id: current_id} = current_doc <-
-                   get_block_op_paper(slug, dataset, opts),
-                 true <- current_id == doc.id,
+                 %Document{} = current_doc <- lock_paper_physical_row(doc.id),
+                 true <- same_paper_physical_scope?(current_doc, doc),
                  {:ok, receipt, effects} <-
                    persist_paper_contextual_history(
                      current_doc,
@@ -1240,8 +1241,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp persist_paper_contextual_history(doc, slug, history, dataset, opts) do
     with if_rev = Keyword.fetch!(opts, :if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
-         {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
-         {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev),
+         {:ok, blocks} <- resolve_contextual_history_blocks(doc),
          {:ok, folded, next_history} <- ContextualHistory.apply(blocks, history),
          block_id = get_in(history, ["target", "id"]),
          {:ok, _new_blocks, rev, effects} <-
@@ -1433,7 +1433,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  defp contextual_history_from_receipt(%{"contextual_history" => history}) do
+  defp contextual_history_from_receipt(%{contextual_history: history}) do
     case ContextualHistory.validate(history) do
       :ok -> {:ok, history}
       {:error, :invalid_history} -> {:error, :invalid_history}
@@ -1441,6 +1441,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp contextual_history_from_receipt(_receipt), do: {:error, :invalid_history}
+
+  # Unlike an ordinary revision-fenced batch, history is not a conversion
+  # door. It may change only the guarded field in an already-canonical Paper;
+  # promoting legacy content.body.blocks would be an unrelated structural
+  # mutation hidden inside undo/redo.
+  defp resolve_contextual_history_blocks(%Document{content: %{"blocks" => blocks}})
+       when is_list(blocks),
+       do: {:ok, blocks}
+
+  defp resolve_contextual_history_blocks(_doc), do: {:error, :history_conflict}
 
   defp require_contextual_history_action(%{"action" => action}, action), do: :ok
 
@@ -1505,6 +1515,27 @@ defmodule Barkpark.Content.Papers.BlockOps do
       request_id
     }
     |> deterministic_hash()
+  end
+
+  defp same_paper_physical_scope?(%Document{} = current, %Document{} = original) do
+    {
+      current.id,
+      current.workspace_id,
+      current.project_id,
+      current.dataset_id,
+      current.dataset
+    } ===
+      {
+        original.id,
+        original.workspace_id,
+        original.project_id,
+        original.dataset_id,
+        original.dataset
+      }
+  end
+
+  defp lock_paper_physical_row(id) do
+    Repo.one(from(d in Document, where: d.id == ^id, lock: "FOR UPDATE"))
   end
 
   defp paper_ops_payload_fingerprint(ops, opts) do
