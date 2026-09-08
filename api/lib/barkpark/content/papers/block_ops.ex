@@ -1520,6 +1520,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp same_paper_physical_scope?(%Document{} = current, %Document{} = original) do
     {
       current.id,
+      current.doc_id,
+      current.type,
       current.workspace_id,
       current.project_id,
       current.dataset_id,
@@ -1527,6 +1529,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
     } ===
       {
         original.id,
+        original.doc_id,
+        original.type,
         original.workspace_id,
         original.project_id,
         original.dataset_id,

@@ -885,11 +885,14 @@
       letter-spacing: 0.02em;
       color: var(--paper-ink-faint);
       display: flex;
+      flex-wrap: wrap;
       gap: 8px;
       align-items: baseline;
     }
     .bp-paper-footer-sep { opacity: 0.5; }
     .bp-paper-footer-save { margin-left: auto; color: var(--paper-ink-soft); }
+    .bp-paper-history-controls { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    [data-paper-history-status] { color: var(--paper-ink-soft); }
     /* Restore the surface's old-style hanging figures in the editable text.
        The bundled ProseMirror base CSS kills ligatures + onum with
        `font-variant-ligatures: none` / `font-feature-settings: "liga" 0`;
