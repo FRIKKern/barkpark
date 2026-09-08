@@ -56,10 +56,44 @@ defmodule Barkpark.Tasks.Events do
   never selected `document` at all.
 
   With `payload: true` each row gains a `:payload` key carrying ONLY the typed
-  stamps (`staged`, `reparented`, `fenced`, `lease_expired`) — never the Envelope half, so
-  the row's whole `content` blob and the `caller_token_id` audit stamp stay out
-  of the feed. A row whose event stamped none of them carries no `:payload` key
-  at all.
+  stamps — never the Envelope half, so the row's whole `content` blob and the
+  `caller_token_id` audit stamp stay out of the feed. A row whose event stamped
+  none carries no `:payload` key at all.
+
+  ### The projection is DERIVED, not a hand-kept list of verbs
+
+  It used to be a literal whitelist — `~w(staged reparented fenced
+  lease_expired)` — and that list was the defect: `Tasks.Landed` had been
+  stamping a `landed_mark` (`{landed, criterion, flipped}`) since it shipped,
+  and because nobody added the word to this module every single `task.landed`
+  event in the backlog reached the wire with an EMPTY payload. All 20 of them,
+  measured 2026-09-06 across 81,564 events. `bp task landed` is the one verb
+  that writes with no claim, no worker id and no epoch, so its event is the
+  ONLY durable account of which criterion a landing notice flipped — and the
+  recovery channel was blind for exactly that verb.
+
+  A whitelist makes silence the default for every future verb, so the whitelist
+  is gone. The payload is now `document` MINUS two lists that live NEXT TO THE
+  WRITER that produces them:
+
+    * `Tasks.Internal.envelope_keys/0` — the Envelope-shaped view
+      `Internal.envelope_document/1` writes into EVERY task mutation event
+      (`doc_id`/`type`/`title`/`status`/`content`/`rev`). It is the one place
+      that shape is defined, and `TtlSweeper`'s two hand-rolled inserts build
+      from it too, so there is no second envelope to drift.
+    * `Tasks.Internal.audit_keys/0` — `caller_stamp/1`'s `caller_token_id`.
+
+  Everything else in `document` got there because a task write path merged its
+  own typed stamp through `insert_mutation_event!/5`'s `extra_document`. That
+  is the definition of a typed payload, so that is what is projected. A NEW
+  verb's stamp is on the feed the moment it is written; nothing has to be
+  remembered here.
+
+  The size property the opt-in exists to protect is unchanged, because it was
+  never the LIST that bounded the bytes — it is the Envelope subtraction. The
+  row's whole `content` blob is an envelope key and stays out either way, and a
+  typed stamp is a handful of scalars plus (for `staged`) the notes the
+  recovery sweep is there to read.
 
   ## Why OPT-IN and not always-on
 
@@ -75,15 +109,15 @@ defmodule Barkpark.Tasks.Events do
 
   alias Barkpark.Content.MutationEvent
   alias Barkpark.Repo
+  alias Barkpark.Tasks.Internal
 
   @task_type "task"
 
-  # The typed `extra_document` stamps a task write path may merge into an
-  # event's `document` (`Tasks.Internal.insert_mutation_event!/5`). A WHITELIST,
-  # not "document minus the envelope": the envelope half carries the row's full
-  # `content` and `caller_token_id`, and neither belongs on a poll feed. A new
-  # typed stamp is invisible here until it is added to this list ON PURPOSE.
-  @payload_keys ~w(staged reparented fenced lease_expired)
+  # The keys a payload row must NEVER carry, taken from the WRITER that puts
+  # them there (see the moduledoc). Everything else in `document` is a typed
+  # `extra_document` stamp and IS the payload — so a new verb's stamp needs no
+  # edit here to become visible.
+  @non_payload_keys Internal.envelope_keys() ++ Internal.audit_keys()
 
   # Keyset page size, matching EventLog's replay batch. A single feed call
   # returns at most this many events; the caller pages by advancing `since` to
@@ -160,21 +194,31 @@ defmodule Barkpark.Tasks.Events do
     )
   end
 
-  # `document` never reaches the wire — it is replaced by the whitelisted typed
-  # stamps under `:payload`, and dropped entirely when the event stamped none
-  # (a plain `task.claimed` row is then IDENTICAL to its default-shape self).
+  # `document` never reaches the wire — it is replaced by the typed stamps
+  # under `:payload` (everything the writer merged that is not envelope and not
+  # audit), and dropped entirely when the event stamped none (a plain
+  # `task.claimed` row is then IDENTICAL to its default-shape self).
   defp project_payload(row) do
     document = Map.get(row, :document)
     row = Map.delete(row, :document)
 
     typed =
       case document do
-        map when is_map(map) -> Map.take(map, @payload_keys)
+        map when is_map(map) -> Map.drop(map, @non_payload_keys)
         _ -> %{}
       end
 
     if map_size(typed) == 0, do: row, else: Map.put(row, :payload, typed)
   end
+
+  @doc """
+  The keys the `:payload` projection subtracts from an event's `document`.
+
+  Exposed so a test can ask this module what it excludes and check that against
+  what the WRITERS actually merge, instead of re-listing verbs by hand.
+  """
+  @spec non_payload_keys() :: [String.t()]
+  def non_payload_keys, do: @non_payload_keys
 
   @doc """
   The clamped page size a `replay_since/3` call would use for `raw` — so the
