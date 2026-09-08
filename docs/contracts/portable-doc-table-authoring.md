@@ -1,46 +1,48 @@
 <!-- doc-tier: agent | canonical-for: portable-doc-table-authoring | budget: 700tok -->
 # Table source preservation
 
-New Public/Studio mounts retain the lossless contextual Table editor and its
-server-owned positional operations. The continuous canvas remains a compatibility
-receiver for already-mounted runs and newly slash-inserted tables; this repair
-does not change server partitioning or expand contextual admission.
+Public/Studio use positional Table operations. Canonical tables keep
+their v1 projection. A table containing supported opaque inline metadata
+uses v2; ordinary cells retain their carrier strings. Protected cells describe
+`{kind, inline: {v: 1, anchors, opaque}}`: ordered unique opaque roles plus terminal
+`text`, and the nonempty subset carrying extras. Free wrappers are not anchors,
+so formatting cannot invalidate a queued text edit. Metadata values stay on
+the server, never in ProseMirror, HTML source attributes, or operation receipts.
 
-In that compatibility canvas, cell text lives
-in ProseMirror; private `bpTableSource` and `bpTableCellSource` attributes retain
-the original block and cell carriers. They are not rendered to HTML or imported
-from pasted HTML.
+## Contextual metadata lens
 
-An unchanged cell serializes its original source, including inline metadata.
-Editing a content-map cell replaces its `content` while retaining sibling fields.
-Other edited cells use canonical inline arrays. Structural controls carry source
-with surviving cells; new cells have no inherited source identity. Undo restores
-the previous grid and carriers. Source echoes establish a new confirmed baseline.
+Each protected cell admits one recognized wrapper chain ending in one nonempty
+text leaf. Extras may use arbitrary keys outside the renderer's semantic namespace;
+semantic collisions and unknown types remain read-only. Sanitized projection must
+render identically, and whole-table normalization must remain exact.
 
-Table-level metadata and absent/null/empty `head` distinctions remain intact.
-Deliberately removing an existing header emits `head: []`; omitting `head` from a
-patch is not header removal.
+Saving re-projects authoritative source and exact-matches shape before merging.
+Only the text value changes on an opaque text role. Opaque wrapper roles and their
+semantic attributes must remain unchanged; metadata-free wrappers may change.
+Splits, multiple leaves, empty deletion, or removal of a protected role are refused
+with accessible feedback, without changing the draft or marking it dirty.
+Moves retain source carriers; explicit row/column deletion removes those carriers.
+New cells inherit no metadata. Ordinary cells retain their existing editing grammar.
 
-## Boundaries
+## Compatibility canvas and boundaries
 
-This is not a new storage dialect. Existing server normalization converts string
-cells and simple wrappers into canonical inline arrays. Tests compare native
-save/reload against the freshly stored source, not pre-publication input.
+Already-mounted runs and slash-inserted tables retain the compatibility canvas.
+Private `bpTableSource`/`bpTableCellSource` attributes preserve untouched source;
+they are neither rendered nor imported from pasted HTML. Edited content maps keep
+sibling fields; other edited cells use canonical inline arrays. Undo restores
+carriers and source echoes establish a confirmed baseline.
 
-Numeric/null cells, malformed or ragged grids, and legacy header/column aliases
-remain guarded rather than exposing an editor that cannot safely save them.
-Contextual table admission is unchanged. A fail-closed block is preserved, not
-silently normalized or discarded. Unknown inline content is not a promise of
-lossless editing inside that cell; untouched source preservation is distinct
-from support for editing every possible inline dialect.
+Numeric/null cells, ragged grids and legacy aliases remain guarded. Existing server
+normalization canonicalizes strings/simple wrappers; native comparisons use stored
+source, not pre-publication input. Table metadata and absent/null/empty `head` stay
+distinct. Explicit header removal emits `head: []`; omission is not removal.
 
 ## Verification
 
-`npm test` in `api/assets/paper-editor` includes `src/__table.test.mjs` and mounted
-`src/canvas/__control_matrix.test.mjs`. Server persistence and existing numeric/null
-refusals are pinned in `api/test/barkpark/content/paper_table_source_test.exs`.
-Native Public and Studio checks additionally verify the unchanged contextual
-path's stored blocks after editing, structural operations and reload. Those checks
-are not evidence that every legacy carrier is newly editable.
+Server: `api/lib/barkpark/portable_doc/table_editing.ex` and its matching test.
+Client: `api/assets/paper-editor/src/convert.js`, `index.js`,
+`__table_contextual.test.mjs`; compatibility tests: `__table.test.mjs` and
+`canvas/__control_matrix.test.mjs`. Native checks compare exact stored source after
+typing, formatting/refusal, structure, undo, echoes and reload in both hosts.
 
-Code: `api/assets/paper-editor/src/canvas/run-convert.js` and `table-node.js`.
+Compatibility code: `canvas/run-convert.js` and `canvas/table-node.js`.
