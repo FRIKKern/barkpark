@@ -62,19 +62,9 @@ Fetch one document. 404 if missing or the schema is `"private"`. Takes `?fields=
 
 `?expand=true` (or `?expand=author,category`) inlines reference fields with the referenced document — single refs and `arrayOf`-of-reference lists, values plain ids or `{_ref: id}`. **Depth 1** only; nested refs and missing targets stay raw (expanded = map, raw = string).
 
-### 5b. Backlinks — `GET /v1/data/backlinks/:dataset/:id` [token]
+### 5b/5c. Graph reads + history [token]
 
-Inbound refs (reverse of §5a) — docs referencing `:id`: `{result:{backlinks:[<docs>], count:N}}`. Scope/visibility-filtered; out-of-tenant/hidden omitted.
-
-Related — `GET /v1/data/related/:dataset/:id` (`?limit=`, ≤50): weighted-tag overlap (Σ `LEAST(src,cand)/100` + main_tag bonus) + backlinks → `{result:{related:[{doc_id,type,title,score,sources,shared_tags}],count:N}}`. Anon 404.
-
-Tags — `GET /v1/data/tags/:dataset` (`?type=`, default `paper,task`): per-tag per-type published counts → `{result:{tags:[{tag,counts,total}],count}}`; `/tags/:dataset/:tag`: docs by tag strength (legacy flat last) → `result.documents:[{doc_id,type,title,strength,rationale,main_tag_match}]`. Anon 404.
-
-Counts — `GET /v1/data/counts/:dataset` [token]: per-type **published** counts, one aggregate → `{ok,dataset,perspective:"published",counts:{<type>:N}}` (frozen, not `result`-wrapped). Anon 404. Published-only; other `?perspective` → 400 (§4).
-
-### 5c. History [token]
-
-Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,action,rev,timestamp}], count}`; `GET revision/:dataset/:id` → `{revision:{rev,…content}}`, where `:id` is EITHER the revision UUID or the document `_rev` hash (disjoint shapes; a null `rev` resolves by UUID only); `POST revision/:dataset/:id/restore` restores as a draft.
+`/v1/data/{backlinks,related,tags,counts,history,revision}`: [contracts/document-graph-and-history.md](contracts/document-graph-and-history.md).
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
@@ -136,23 +126,9 @@ Contract: [contracts/plugin-http-api.md](contracts/plugin-http-api.md) (`bptk_` 
 
 Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless legacy aliases. Contract: [`cycle-fleet.md`](contracts/cycle-fleet.md).
 
-## 8d. Media asset record — `absoluteUrl`
+## 8d. Media — asset record (`absoluteUrl`) + `/v1/media/*` list envelope
 
-Asset urls (`url`/`originalUrl`/`previewUrl`/`thumbnailUrl`/`renditions.*`/`cdnUrls.*`) are RELATIVE paths and stay so. The upload `201` and `GET /v1/media/:dataset/:id` also carry **`absoluteUrl`** — same binary, host from `:media_cdn, :base_url` else the API's origin (`PHX_SCHEME`/`PHX_HOST`), `/w/:ws/p/:proj` prefix applied.
-
-## 8e. `/v1/media/*` list envelope
-
-Every list `result` carries `total` (grand total, stable across pages), `hasMore` (exact, always present — **never infer truncation from `rows == limit`**: an exactly-full last page has it too), `limit`, `offset`, and `nextOffset` = `offset + rows`, present **only** when `hasMore`. `search` uses `nextCursor` instead (always present, `null` unless `hasMore`), no `nextOffset`.
-
-**`count` means opposite things on the two routes that carry it — it is legacy, prefer `total`.** Neither was re-pointed: that would silently break whichever consumer reads it correctly today.
-
-| Route | Rows key | `count` | Also |
-|---|---|---|---|
-| `GET /v1/media/:ds` | `assets` | **grand total** (≡ `total`) | — |
-| `GET /v1/media/:ds/collections` | `collections` | **page rows** | — |
-| `GET /v1/media/:ds/collections/:id/assets` | `hits` | *absent* | `collectionId`, `facets` |
-| `GET /v1/media/:ds/search` | `hits` | *absent* | `facets`, `nextCursor` |
-| `GET /v1/media/:ds/share/:token` | `hits` | *absent* | `collection` |
+Contract: [contracts/media-http-envelope.md](contracts/media-http-envelope.md).
 
 ## 9. Error Codes
 
