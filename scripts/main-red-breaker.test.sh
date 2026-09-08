@@ -922,4 +922,152 @@ if mutate "19l runner-local data tripwire" '    if why:' '    if False:' 1; then
   [ $? -eq 0 ] && PASS=$((PASS+1))
 fi
 
+# ── 23. THE CONTINUE-ON-ERROR MASKING DETECTOR (task-d0ce9aaf8040d687) ───────
+# PR #16908 removed `job_all_success` as a PASS proof because an all-green main
+# job cannot RULE OUT masking. Correct, and blunt: it also silenced the common
+# case, where nothing is masked. These arms prove the detector buys that case
+# back WITHOUT reopening the defect. Both directions are required — an arm that
+# only shows the accusation returning would pass on a detector that had simply
+# reverted #16908.
+#
+# The fixtures carry per-step started_at/completed_at because attribution is by
+# TIMESTAMP WINDOW, not by counting `##[group]Run` blocks and indexing into the
+# step list. Positional attribution is a guess: one unlogged step and every
+# later name is silently wrong.
+
+# main all-green at BOTH levels, with per-step windows. Nothing disconfirms
+# masking here — which is exactly the shape #16908 made unaccusable.
+main_allgreen_win="$TMP/main-allgreen-win.json"; cat > "$main_allgreen_win" <<'J'
+{"jobs":[{"name":"Doc budgets + anchors","conclusion":"success","steps":[
+ {"name":"Doc byte budgets (fails this job)","conclusion":"success","started_at":"2026-09-08T04:31:13Z","completed_at":"2026-09-08T04:31:23Z"},
+ {"name":"Code-comment citation guard (fails this job)","conclusion":"success","started_at":"2026-09-08T04:32:00Z","completed_at":"2026-09-08T04:32:10Z"},
+ {"name":"Tenant fail-open read baseline gate (fails this job)","conclusion":"success","started_at":"2026-09-08T04:32:20Z","completed_at":"2026-09-08T04:32:30Z"}]}]}
+J
+# a CLEAN log: main ran, printed no ##[error] anywhere.
+log_clean="$TMP/log-clean.log"; cat > "$log_clean" <<'L'
+2026-09-08T04:31:13.1000000Z ##[group]Run scripts/check-doc-budgets.sh
+2026-09-08T04:31:22.9000000Z docs: 0 over budget
+2026-09-08T04:32:00.1000000Z ##[group]Run scripts/comment-citation-guard.sh
+2026-09-08T04:32:09.9000000Z citations: all resolve
+2026-09-08T04:32:20.1000000Z ##[group]Run scripts/tenant-failopen-gate.sh
+2026-09-08T04:32:29.9000000Z baseline: unchanged
+L
+# the 2026-09-07 SHAPE: job success, every step success, a MASKED failure whose
+# ##[error] lands squarely inside ONE step's window.
+log_masked="$TMP/log-masked.log"; cat > "$log_masked" <<'L'
+2026-09-08T04:31:13.1000000Z ##[group]Run scripts/check-doc-budgets.sh
+2026-09-08T04:31:22.9000000Z docs: 0 over budget
+2026-09-08T04:32:00.1000000Z ##[group]Run scripts/comment-citation-guard.sh
+2026-09-08T04:32:05.5000000Z 286 passed, 4 FAILED
+2026-09-08T04:32:05.6000000Z ##[error]Process completed with exit code 1.
+2026-09-08T04:32:20.1000000Z ##[group]Run scripts/tenant-failopen-gate.sh
+2026-09-08T04:32:29.9000000Z baseline: unchanged
+L
+# an ##[error] on a BOUNDARY SECOND shared by two steps — attributable to
+# neither. The API stamps seconds; the log stamps 100ns.
+main_boundary="$TMP/main-boundary.json"; cat > "$main_boundary" <<'J'
+{"jobs":[{"name":"Doc budgets + anchors","conclusion":"success","steps":[
+ {"name":"Doc byte budgets (fails this job)","conclusion":"success","started_at":"2026-09-08T04:32:00Z","completed_at":"2026-09-08T04:32:14Z"},
+ {"name":"Code-comment citation guard (fails this job)","conclusion":"success","started_at":"2026-09-08T04:32:14Z","completed_at":"2026-09-08T04:32:14Z"},
+ {"name":"Tenant fail-open read baseline gate (fails this job)","conclusion":"success","started_at":"2026-09-08T04:32:14Z","completed_at":"2026-09-08T04:32:15Z"}]}]}
+J
+log_boundary="$TMP/log-boundary.log"; cat > "$log_boundary" <<'L'
+2026-09-08T04:32:00.1000000Z ##[group]Run scripts/check-doc-budgets.sh
+2026-09-08T04:32:14.2456896Z ##[error]Process completed with exit code 1.
+L
+# a log with an ##[error] that carries NO parseable timestamp at all.
+log_untimed="$TMP/log-untimed.log"; printf '##[error]Process completed with exit code 1.\n' > "$log_untimed"
+
+# 23a) THE ARM THAT MATTERS FIRST: the common case comes back. All-green main,
+#      log affirmatively clean -> the accusation is restored.
+out="$(run "$out_s2" pull_request "$main_allgreen_win" "" "$log_clean")"
+has "$out" "a step main does not" "23a) all-green main + a clean log RESTORES the accusation (#16908's silence is bought back)"
+has "$out" "Code-comment citation guard" "23a) names our failed step"
+has "$out" "RC=1" "23a) rc 1"
+
+# 23b) THE ARM THAT MATTERS MORE: the same all-green main, but the log shows a
+#      masked failure -> still UNDETERMINED. If this ever accuses, the detector
+#      has reopened the defect #16908 closed.
+out="$(run "$out_s2" pull_request "$main_allgreen_win" "" "$log_masked")"
+has "$out" "OWNERSHIP-UNDETERMINED" "23b) the 2026-09-07 shape (job success, steps success, masked failure in log) still refuses to accuse"
+has "$out" "MASKING DETECTED" "23b) and says masking is why"
+has "$out" "Code-comment citation guard" "23b) names the masked step"
+case "$out" in *"the red is this PR's own"*) bad "23b) ACCUSED under masking — the detector reopened #16908" ;; *) ok "23b) makes no ownership claim under masking" ;; esac
+
+# 23c) AMBIGUOUS ATTRIBUTION IS NOT A PASS. An ##[error] on a boundary second
+#      belongs to no single step, so masking can be neither confirmed nor ruled
+#      out -> UNDETERMINED, never PASSED. (M1-M4: this file's own failure mode
+#      is manufacturing a confident answer from an ambiguous parse.)
+out="$(run "$out_s2" pull_request "$main_boundary" "" "$log_boundary")"
+has "$out" "OWNERSHIP-UNDETERMINED" "23c) an unattributable ##[error] never becomes a pass"
+has "$out" "could not be attributed to a single step" "23c) and says the attribution was ambiguous"
+case "$out" in *"the red is this PR's own"*) bad "23c) a boundary-second error was read as a clean bill" ;; *) ok "23c) ambiguity does not accuse" ;; esac
+
+# 23d) AN UNTIMESTAMPED ##[error] IS ALSO AMBIGUOUS, not ignored. Dropping a
+#      line the parser cannot read would silently turn a masked job into a clean
+#      one — the exact shape of a detector that goes blind while reporting PASS.
+out="$(run "$out_s2" pull_request "$main_allgreen_win" "" "$log_untimed")"
+has "$out" "OWNERSHIP-UNDETERMINED" "23d) an ##[error] with no parseable timestamp does not become a clean bill"
+case "$out" in *"the red is this PR's own"*) bad "23d) an unparseable error line was dropped and the job read clean" ;; *) ok "23d) an unreadable error line is ambiguity, not absence" ;; esac
+
+# 23e) "COULD NOT LOOK" IS DISTINGUISHED FROM "NOTHING THERE". With no log
+#      fixture at all the detector has no evidence, so the all-green job stays
+#      unaccusable — collapsing NOLOG into NOERR would restore #16908's defect
+#      wholesale, and it would do it silently.
+out="$(run "$out_s2" pull_request "$main_allgreen_win")"
+has "$out" "OWNERSHIP-UNDETERMINED" "23e) no log => no clean bill (NOLOG is not NOERR)"
+has "$out" "could not be checked at all" "23e) and says the log was unreadable rather than clean"
+
+# 23f) THE DETECTOR COSTS NO NEW API CALL: it reads the log the signature clause
+#      already fetches. With a log fixture present, curl is still never invoked.
+[ ! -s "$TMP/curl.log" ] && ok "23f) no API call added by the detector" || bad "23f) the detector made a network call"
+
+# ── 19m-19p. MUTATIONS FOR THE MASKING DETECTOR ─────────────────────────────
+# Section 23's arms are green. Green proves nothing until each one is shown to
+# go RED when the behaviour it names is removed. The two dangerous failures are
+# OPPOSITE, so they get separate mutations: a detector that never trusts buys
+# nothing (19m), and a detector that always trusts reopens #16908 (19n).
+
+# 19m. THE DETECTOR BUYS NOTHING. Make `job_trusted` permanently false — the
+#      post-#16908 status quo. 23a must go red: the common case stays silenced.
+if mutate "19m the restored pass proof" 'job_trusted = job_all_success and mask_state == "NOERR"' 'job_trusted = False'; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(run "$out_s2" pull_request "$main_allgreen_win" "" "$log_clean")"
+    case "$out" in *"failed on a step main does not"*) echo "  FAIL  19m) MUTATION SURVIVED: still accused with job_trusted forced false — 23a is vacuous"; exit 1 ;; *) echo "  PASS  19m) with job_trusted removed the common case goes silent again — 23a measures the detector, not the weather" ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# 19n. THE DETECTOR TRUSTS BLINDLY — this is #16908's defect, re-armed. Drop the
+#      NOERR requirement so an all-green job is a pass proof again. 23b must go
+#      red: the masked shape would start accusing.
+if mutate "19n the NOERR requirement" 'job_trusted = job_all_success and mask_state == "NOERR"' 'job_trusted = job_all_success'; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(run "$out_s2" pull_request "$main_allgreen_win" "" "$log_masked")"
+    case "$out" in *"the red is this PR's own"*) echo "  PASS  19n) without the NOERR requirement the masked shape ACCUSES again — 23b is the arm holding #16908 shut" ;; *) echo "  FAIL  19n) MUTATION SURVIVED: still refused to accuse, so 23b would pass on a broken detector"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# 19o. "COULD NOT LOOK" COLLAPSED INTO "NOTHING THERE". An unfetched log becomes
+#      a clean bill. 23e must go red — and note this mutation is INVISIBLE to
+#      23a, 23b, 23c and 23d, which is exactly why 23e has to exist separately.
+if mutate "19o the NOLOG/NOERR distinction" 'mask_state = "NOLOG"' 'mask_state = "NOERR"'; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(run "$out_s2" pull_request "$main_allgreen_win")"
+    case "$out" in *"failed on a step main does not"*) echo "  PASS  19o) collapsing NOLOG into NOERR turns an unread log into a pass proof — 23e is not vacuous" ;; *) echo "  FAIL  19o) MUTATION SURVIVED: still undetermined with the distinction removed"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# 19p. AMBIGUITY TREATED AS ABSENCE. An ##[error] the parser cannot attribute is
+#      silently dropped instead of forcing AMBIG — the classic shape of a
+#      detector that goes blind while still reporting a confident verdict.
+#      23c and 23d must BOTH go red; either alone would leave the other's
+#      failure mode uncovered.
+if mutate "19p the ambiguous-attribution refusal" 'mask_state = "AMBIG"' 'pass' 3; then
+  ( SUBJECT="$TMP/mut-subject.sh"
+    oc="$(run "$out_s2" pull_request "$main_boundary" "" "$log_boundary")"
+    od="$(run "$out_s2" pull_request "$main_allgreen_win" "" "$log_untimed")"
+    badc=1; badd=1
+    case "$oc" in *"failed on a step main does not"*) badc=0 ;; esac
+    case "$od" in *"failed on a step main does not"*) badd=0 ;; esac
+    if [ "$badc" = 0 ] && [ "$badd" = 0 ]; then echo "  PASS  19p) with the ambiguity refusal removed BOTH an unattributable and an untimestamped error become clean bills — 23c and 23d are live"; else echo "  FAIL  19p) MUTATION SURVIVED: ambiguity still refused (23c=$badc 23d=$badd)"; exit 1; fi ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]

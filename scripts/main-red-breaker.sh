@@ -589,7 +589,7 @@ fi
 # UNKNOWN     main's success is masked by continue-on-error, or the job/JSON is
 #             missing                      -> UNDETERMINED
 python3 - "$MAIN_JOBS" "$JOB_NAME" "$TMPD/ours.txt" "$TMPD/names.json" "$MAIN_LOG" > "$TMPD/report.txt" 2>/dev/null <<'PY'
-import json, re, sys
+import calendar, json, re, sys, time
 
 jobs_path, want, ours_path, names_path, log_path = sys.argv[1:6]
 ours = [l.rstrip("\n") for l in open(ours_path) if l.strip()]
@@ -691,12 +691,148 @@ api_trusted = bool(api_failed & gate_names) if gate_names else bool(api_failed)
 job_all_success = bool(legs) and all(c == "success" for c in job_concls)
 job_cancelled = any(c in ("cancelled", None, "") for c in job_concls)
 
+# ── (d) the CONTINUE-ON-ERROR MASKING DETECTOR ──────────────────────────────
+# `job_all_success` was removed as a PASS proof (task-11e4855cc32c281c, PR
+# #16908) because an all-green job cannot RULE OUT masking: a step whose
+# `outcome` was `failure` still reports `conclusion: success`, and `outcome` is
+# absent from the jobs API entirely. That removal was correct and it was blunt —
+# it silenced the accusation in the common case too, where nothing is masked at
+# all. This detector buys the common case back by answering the question
+# `job_all_success` could not: IS anything masked in this job?
+#
+# The evidence is main's OWN job log, which this script has already fetched for
+# the signature clause — no new API call. A step that printed `##[error]` under
+# an API conclusion of `success` is masked BY DEFINITION.
+#
+# ATTRIBUTION IS DELIBERATELY NOT POSITIONAL. The raw job log carries no step
+# names, so the tempting move is to count `##[group]Run` blocks and index into
+# the API's ordered step list. That is a guess wearing a structure's clothes: one
+# unlogged step and every later name is wrong, silently. Instead each log line's
+# own timestamp is matched against the API's per-step [started_at, completed_at]
+# window. The API stamps at SECOND precision while the log stamps at 100ns, so
+# adjacent steps routinely share a boundary second and a line can land inside
+# more than one window — that case is AMBIGUOUS and is reported as such. A
+# masked job with an unattributable step is still a masked job; the verdict that
+# matters is the job-level one, and the step name is a courtesy.
+#
+# MEASURED ON REAL DATA, 2026-09-08, main run 34187182735 job 101937772871
+# ('Doc budgets + anchors', 39 steps, job conclusion `failure` while EVERY gate
+# step reads `success` — the masking shape, live on main):
+#   - its 2 `##[error]` lines attributed to 3 and 9 candidate steps, never to 1.
+#     A job of many sub-second gates shares boundary seconds constantly, so on
+#     real logs this detector resolves to AMBIG far more often than to a named
+#     step. That is the honest answer and it costs nothing: AMBIG and MASKED
+#     both refuse to trust the job, which is the verdict `job_trusted` needs.
+#     THE STEP NAME IS A BONUS THAT USUALLY WILL NOT ARRIVE. Do not "fix" this
+#     by narrowing to one owner — picking among equals is guessing.
+#   - the positional alternative is REFUTED, not merely disliked: that job's log
+#     holds 34 `##[group]Run` blocks against 37 executed steps. Indexing the
+#     step list by log block would have mis-named every step after the third
+#     divergence, silently and confidently.
+#
+# FOUR STATES, because "no masking found" and "could not look" are different
+# claims and collapsing them is how a detector manufactures a confident wrong
+# answer (this file's own M1-M4 failure mode):
+#   NOLOG   the log was absent or empty — we could not look. NOT a clean bill.
+#   NOERR   the log was read and contains no `##[error]` at all — positive
+#           evidence of no masking, and the ONLY state that restores a pass.
+#   MASKED  at least one `##[error]` under a step the API calls `success`.
+#   AMBIG   errors present but not attributable to a step, or the log parsed
+#           strangely. Treated exactly like MASKED: never a clean bill.
+TS = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.\d+)?Z?\s")
+
+def _secs(t):
+    try:
+        return calendar.timegm(time.strptime(t[:19], "%Y-%m-%dT%H:%M:%S"))
+    except Exception:
+        return None
+
+mask_state, masked_steps = "NOLOG", set()
+err_times, log_lines_seen = [], 0
+try:
+    with open(log_path, errors="replace") as fh:
+        for raw in fh:
+            log_lines_seen += 1
+            line = raw.rstrip("\r\n")
+            if "##[error]" not in line:
+                continue
+            m = TS.match(line)
+            err_times.append(_secs(m.group(1)) if m else None)
+except Exception:
+    err_times, log_lines_seen = [], 0
+
+if log_lines_seen == 0:
+    mask_state = "NOLOG"
+elif not err_times:
+    mask_state = "NOERR"
+else:
+    # windows: step name -> list of (start, end) across matrix legs
+    windows = []
+    for j in legs:
+        for s in j.get("steps") or []:
+            a, b = _secs(s.get("started_at") or ""), _secs(s.get("completed_at") or "")
+            if a is None or b is None:
+                continue
+            windows.append((a, b, s.get("name"), s.get("conclusion")))
+    if not windows:
+        mask_state = "AMBIG"        # errors, but no windows to attribute them to
+    else:
+        mask_state = "NOERR"
+        for t in err_times:
+            if t is None:
+                mask_state = "AMBIG"      # an ##[error] we could not even timestamp
+                continue
+            owners = [(n, c) for (a, b, n, c) in windows if a <= t <= b]
+            if len(owners) == 1:
+                n, c = owners[0]
+                if c == "success":
+                    masked_steps.add(n)
+                    if mask_state != "AMBIG":
+                        mask_state = "MASKED"
+                # an ##[error] under a step the API ALREADY calls failure is not
+                # masking — it is the API telling the truth. Not a clean bill
+                # either, but it disconfirms nothing, so leave the state alone.
+            else:
+                # zero owners (an error outside every step window, e.g. a job
+                # level annotation) or several (a shared boundary second).
+                mask_state = "AMBIG"
+
+# The proof `job_all_success` was NOT: an all-green job whose log affirmatively
+# shows no masking. NOERR is doing the load-bearing work here — without it this
+# is the same weak evidence #16908 removed, and re-adding it would reopen that
+# defect rather than fix this one.
+#
+# WHAT THIS ACTUALLY BUYS, MEASURED 2026-09-08 over 34 breaker-bearing main jobs
+# across 120 main runs (task-d0ce9aaf8040d687 asked for a number, not an
+# impression):
+#     carried an old pass proof already : 24 / 34   (log_parsed 24, api_trusted 0)
+#     job_trusted true                  : 29 / 34
+#     NEWLY accusable because of this   : 10 / 34
+#     no proof at all, before or after  :  0 / 34
+# `api_trusted` fired ZERO times in the sample: after #16908 the accusing path
+# was resting almost entirely on main's own Decide line being readable.
+#
+# THE FIRST PASS OF THIS MEASUREMENT SAID 31 AND WAS WRONG BY 3x. It counted
+# every all-green, clean-log job as newly accusable without checking whether the
+# job ALREADY had a proof — and an all-green main job makes the breaker print
+# "no gate step failed in '<job>'" into its own log, which sets `log_green` ->
+# `log_parsed` -> already a pass. The 10 that remain are real: they are the
+# security.yml matrix jobs (Sobelow, Dependency CVE audit), whose Decide line
+# does not round-trip under their matrix-suffixed job names. A denominator
+# derived from the property being measured cannot detect that property's
+# absence; log_parsed had to be READ out of the log, exactly as this script
+# reads it.
+job_trusted = job_all_success and mask_state == "NOERR"
+
 print("STATUS=%s" % status)
 print("LEGS=%d" % len(legs))
 print("JOBCONCL=%s" % ",".join(str(c) for c in job_concls))
 print("LOGPARSED=%d" % int(log_parsed))
 print("LOGGREEN=%d" % int(log_green))
 print("LOGAMBIGUOUS=%d" % int(log_ambiguous))
+print("MASKSTATE=%s" % mask_state)
+print("MASKEDSTEPS=%s" % ";".join(sorted(masked_steps)))
+print("JOBTRUSTED=%d" % int(job_trusted))
 print("MAINFAILED=%s" % ";".join(sorted(api_failed | log_failed)))
 # LOG_DERIVED: at least one of OUR steps matched only through main's log line.
 print("LOGDERIVED=%d" % int(bool([s for s in ours if s in log_failed and s not in api_failed])))
@@ -714,13 +850,19 @@ for s in ours:
             cls = "NOTREACHED"
         elif job_cancelled:
             cls = "NOTREACHED"
-        elif st == "success" and log_ambiguous and not api_trusted and not job_all_success:
+        elif st == "success" and log_ambiguous and not api_trusted and not job_trusted:
             # M4: main's failed-step list came back ';'-joined and a name may
             # have been shredded by the split, so "absent from main's set" is
             # not trustworthy. Undetermined — never blame.
             cls = "UNKNOWN"
-        elif st == "success" and (log_parsed or api_trusted):
+        elif st == "success" and (log_parsed or api_trusted or job_trusted):
             # `job_all_success` USED TO BE A THIRD PROOF HERE AND IT IS NOT ONE.
+            # It is back as `job_trusted`, WHICH IS NOT THE SAME PREDICATE: it is
+            # `job_all_success` AND the masking detector affirmatively finding no
+            # `##[error]` anywhere in main's log (MASKSTATE=NOERR). The bare form
+            # asserted a pass from the ABSENCE of disconfirming evidence; this one
+            # asserts it from PRESENT evidence that nothing was masked. NOLOG and
+            # AMBIG both refuse it — "I could not look" is not "nothing there".
             # (task-11e4855cc32c281c, measured 2026-09-07 on PR #16791.) The
             # sibling proof `api_trusted` two blocks up carries the correct
             # reasoning in its own comment: "if the API marks a GATE step failed,
@@ -750,6 +892,12 @@ PY
 if [ ! -s "$TMPD/report.txt" ]; then
   undetermined "Main's jobs listing could not be classified at all (the classifier produced no output)."
 fi
+# Read-only diagnostic seam. The verdict lines below are ordered — a step main's
+# own Decide line already names as failed is settled BEFORE the masking clause
+# is ever consulted — so on a real run the detector's verdict is usually not
+# visible in the output at all. This makes it inspectable without a second copy
+# of the classifier, which would be an instrument that agrees with itself.
+[ -n "${MAIN_RED_BREAKER_REPORT_OUT:-}" ] && cp -- "$TMPD/report.txt" "$MAIN_RED_BREAKER_REPORT_OUT" 2>/dev/null
 
 get() { sed -n "s/^$1=//p" "$TMPD/report.txt" | head -1; }
 STATUS="$(get STATUS)"; LEGS="$(get LEGS)"; LOG_DERIVED="$(get LOGDERIVED)"
@@ -758,6 +906,19 @@ STATUS="$(get STATUS)"; LEGS="$(get LEGS)"; LOG_DERIVED="$(get LOGDERIVED)"
 # one job failing, and a reader should not have to guess which they were told.
 [ "${LEGS:-0}" -gt 1 ] 2>/dev/null && MAIN_RUN_DESC="${MAIN_RUN_DESC} (${LEGS} matrix legs of this job were unioned.)"
 MAINS_1L="$(get MAINFAILED)"
+# The masking detector's verdict, stated in words rather than left implicit. A
+# reader who is told "UNDETERMINED" deserves to know WHICH of the two very
+# different reasons applies: main's log showed a masked failure, or the log
+# could not be read at all. Silence that does not say why is the thing this
+# script exists to stop.
+MASKSTATE="$(get MASKSTATE)"; MASKEDSTEPS="$(get MASKEDSTEPS)"
+case "$MASKSTATE" in
+  MASKED) MASK_1L=" MASKING DETECTED in main's job: main's log prints '##[error]' under step(s) the jobs API calls 'success'${MASKEDSTEPS:+ — ${MASKEDSTEPS}}, so main's step conclusions are not trustworthy here and an all-green job proves nothing." ;;
+  AMBIG)  MASK_1L=" Main's log holds '##[error]' that could not be attributed to a single step (adjacent steps share a boundary second, or the error sits outside every step window), so masking can be neither confirmed nor ruled out." ;;
+  NOLOG)  MASK_1L=" Main's job log was empty or could not be fetched, so masking could not be checked at all — that is not a clean bill of health." ;;
+  NOERR)  MASK_1L=" Main's log contains no '##[error]' anywhere, so nothing in that job is continue-on-error masked." ;;
+  *)      MASK_1L="" ;;
+esac
 cls_of() { awk -F'\t' -v c="$1" '$1=="STEP" && $2==c {print $3}' "$TMPD/report.txt"; }
 NOTREACHED="$(cls_of NOTREACHED)"; PASSED="$(cls_of PASSED)"; UNKNOWN="$(cls_of UNKNOWN)"; FAILEDONMAIN="$(cls_of FAILED)"
 
@@ -785,7 +946,7 @@ if [ -n "$NOTREACHED" ]; then
   undetermined "Main's job did NOT REACH these step(s): $(printf '%s' "$NOTREACHED" | tr '\n' ';') — they are skipped/cancelled or absent from main's step list, because one red step skips every later step in the same job. Main not failing a step it never ran is not evidence that it passes."
 fi
 if [ -n "$UNKNOWN" ]; then
-  undetermined "Main's state for these step(s) is UNKNOWN: $(printf '%s' "$UNKNOWN" | tr '\n' ';'). Main's jobs API reports them 'success', but every gate step runs with continue-on-error — which reports 'success' for a FAILED step — and main's own Decide line could not be read to settle it."
+  undetermined "Main's state for these step(s) is UNKNOWN: $(printf '%s' "$UNKNOWN" | tr '\n' ';'). Main's jobs API reports them 'success', but every gate step runs with continue-on-error — which reports 'success' for a FAILED step — and main's own Decide line could not be read to settle it.${MASK_1L}"
 fi
 if [ -z "$FAILEDONMAIN" ]; then
   undetermined "No step could be classified against main at all."
