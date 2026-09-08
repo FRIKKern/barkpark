@@ -52,10 +52,16 @@ vm.runInContext(
 const Hooks = window.BarkparkPaperEditorHooks;
 const el = window.document.getElementById("figure-image");
 const picker = el.querySelector("bp-media-picker");
-const undo = window.document.querySelector('[data-paper-history-action="undo"]');
-const redo = window.document.querySelector('[data-paper-history-action="redo"]');
-const status = window.document.querySelector("[data-paper-history-status]");
-const saveStatus = window.document.querySelector('[data-test-id="bp-paper-footer-save"]');
+let undo = window.document.querySelector('[data-paper-history-action="undo"]');
+let redo = window.document.querySelector('[data-paper-history-action="redo"]');
+let status = window.document.querySelector("[data-paper-history-status]");
+let saveStatus = window.document.querySelector('[data-test-id="bp-paper-footer-save"]');
+const refreshControlRefs = () => {
+  undo = window.document.querySelector('[data-paper-history-action="undo"]');
+  redo = window.document.querySelector('[data-paper-history-action="redo"]');
+  status = window.document.querySelector("[data-paper-history-status]");
+  saveStatus = window.document.querySelector('[data-test-id="bp-paper-footer-save"]');
+};
 const calls = [];
 const replies = [];
 const deferReply = (toTarget, name, payload) => {
@@ -168,20 +174,117 @@ try {
   assert.equal(redo.disabled, false, "Undo acknowledgement creates only an opaque Redo token");
   assert.equal(undo.disabled, false, "the older Undo entry remains below the consumed top");
 
+  redo.click();
+  await tick();
+  const firstRedo = calls.at(-1);
+  assert.equal(firstRedo.name, "paper-history-step");
+  assert.deepEqual(JSON.parse(JSON.stringify(firstRedo.payload)), {
+    history_ref: retriedUndo.payload.request_id,
+    action: "redo",
+    request_id: firstRedo.payload.request_id,
+    if_rev: 10,
+  }, "Redo consumes the opaque token returned by Undo on the acknowledged revision");
+  settleReply({
+    saved: true,
+    request_id: firstRedo.payload.request_id,
+    rev: 11,
+    history_step: { version: 1, ref: firstRedo.payload.request_id, action: "undo" },
+  });
+  await tick();
+  assert.equal(redo.disabled, true);
+  assert.equal(undo.disabled, false, "Redo acknowledgement returns the next opaque Undo token");
+
+  undo.click();
+  await tick();
+  const secondUndo = calls.at(-1);
+  assert.equal(secondUndo.payload.history_ref, firstRedo.payload.request_id);
+  assert.equal(secondUndo.payload.if_rev, 11);
+  settleReply({
+    saved: true,
+    request_id: secondUndo.payload.request_id,
+    rev: 12,
+    history_step: { version: 1, ref: secondUndo.payload.request_id, action: "redo" },
+  });
+  await tick();
+  assert.equal(redo.disabled, false, "the repeated Undo restores Redo before a new edit");
+
+  const footer = window.document.querySelector("footer");
+  footer.innerHTML = `
+    <div class="bp-paper-history-controls" role="group" aria-label="Image and caption history">
+      <button type="button" data-paper-history-action="undo" disabled>Undo</button>
+      <button type="button" data-paper-history-action="redo" disabled>Redo</button>
+      <span data-paper-history-status role="status" aria-live="polite"></span>
+    </div>
+    <span data-test-id="bp-paper-footer-save" role="status"></span>`;
+  refreshControlRefs();
+  hook.updated();
+  assert.equal(undo.disabled, false, "a LiveView footer replacement restores Undo state");
+  assert.equal(redo.disabled, false, "a LiveView footer replacement restores Redo state");
+
+  const canvasEl = window.document.createElement("div");
+  canvasEl.id = "paper-canvas-history-run-0";
+  canvasEl.setAttribute("phx-hook", "BarkparkPaperCanvas");
+  canvasEl.dataset.canvasBlocks = "[]";
+  canvasEl.innerHTML = "<bp-paper-canvas></bp-paper-canvas>";
+  window.document.querySelector(".bp-paper-editor").prepend(canvasEl);
+  const canvas = canvasEl.querySelector("bp-paper-canvas");
+  canvas.acknowledgedSaves = true;
+  canvas.acknowledgeOps = () => {};
+  canvas.applyServerBlocks = (blocks) => { canvas.applied = blocks; };
+  canvas.resolveConflictWithServerBlocks = (blocks) => { canvas.resolved = blocks; };
+  const canvasHandlers = new Map();
+  const canvasHook = {
+    ...Hooks.BarkparkPaperCanvas,
+    el: canvasEl,
+    handleEvent: (name, handler) => canvasHandlers.set(name, handler),
+    pushEvent: (name, payload) => name === "task-preview-refresh"
+      ? Promise.resolve({})
+      : deferReply(false, name, payload),
+  };
+  canvasHook.mounted();
+  canvasHandlers.get("bp:canvas-update")({
+    rev: 13,
+    runs: [{ run_id: "history-run-0", blocks: [{ id: "external-proof" }] }],
+  });
+  assert.deepEqual(canvas.applied, [{ id: "external-proof" }]);
+  assert.equal(undo.disabled, false, "a clean external echo does not push or consume Undo");
+  assert.equal(redo.disabled, false, "a clean external echo does not clear Redo");
+
   caption.value = "Caption";
   caption.dispatchEvent(new window.Event("input", { bubbles: true }));
   await new Promise((resolve) => setTimeout(resolve, 325));
   const postHistoryCaption = calls.at(-1);
   assert.equal(postHistoryCaption.name, "paper-edit-block");
-  assert.equal(postHistoryCaption.payload.if_rev, 10,
+  assert.equal(postHistoryCaption.payload.if_rev, 13,
     "a clean focused caption rebases to the acknowledged history revision");
-  settleSaved(postHistoryCaption, 10, { changed: false, history_step: null });
+  settleSaved(postHistoryCaption, 13, { changed: false, history_step: null });
   await tick();
   assert.equal(redo.disabled, false, "an acknowledged no-op preserves Redo");
 
+  replaceImage("https://example.test/new-forward.jpg");
+  const newForward = calls.at(-1);
+  settleSaved(newForward, 14, {
+    changed: true,
+    history_step: { version: 1, ref: newForward.payload.request_id, action: "undo" },
+  });
+  await tick();
+  assert.equal(redo.disabled, true, "an acknowledged new edit clears Redo");
+
+  undo.click();
+  await tick();
+  const undoNewForward = calls.at(-1);
+  settleReply({
+    saved: true,
+    request_id: undoNewForward.payload.request_id,
+    rev: 15,
+    history_step: { version: 1, ref: undoNewForward.payload.request_id, action: "redo" },
+  });
+  await tick();
+  assert.equal(redo.disabled, false);
+
   replaceImage("https://example.test/unsupported.jpg");
   const unsupported = calls.at(-1);
-  settleSaved(unsupported, 11, {
+  settleSaved(unsupported, 16, {
     history_step: {
       version: 1,
       ref: unsupported.payload.request_id,
@@ -198,7 +301,7 @@ try {
   const consumed = calls.at(-1);
   assert.equal(consumed.name, "paper-history-step");
   assert.equal(consumed.payload.history_ref, first.payload.request_id,
-    "after undoing the caption, the next Undo reaches the older image change");
+    "an unsupported forward receipt does not displace the older Undo entry");
   settleReply({
     saved: false,
     request_id: consumed.payload.request_id,
@@ -209,6 +312,10 @@ try {
   assert.equal(undo.dataset.paperHistoryState, "blocked");
   assert.match(status.textContent, /already used/i,
     "the history status explains the terminal failure without exposing receipt contents");
+  const cleanAfterTerminal = new window.Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(cleanAfterTerminal);
+  assert.equal(cleanAfterTerminal.defaultPrevented, false,
+    "a terminal history failure removes its transport entry from the exit guard");
 
   const callCountBeforeKeys = calls.length;
   caption.focus();
@@ -219,6 +326,7 @@ try {
   assert.equal(nativeUndo.defaultPrevented, false,
     "Cmd/Ctrl-Z remains native inside editable text");
   assert.equal(calls.length, callCountBeforeKeys, "native text history does not call Paper history");
+  canvasHook.destroyed();
 
   const next = window.document.createElement("div");
   next.id = "next-figure";
