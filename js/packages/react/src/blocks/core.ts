@@ -24,6 +24,7 @@ import {
   textLeafValue,
 } from '../inline'
 import { renderBlock, renderBlocks } from './registry'
+import { listChildren } from '../list-children'
 import { CHAT_DIFF_BUDGET, diffRowsHtml, splitLines, type DiffLine } from './chat'
 
 type Emit = (block: Block) => string
@@ -521,9 +522,12 @@ const pullquote: Emit = (b) =>
 
 const list: Emit = (b) => {
   const tag = b.ordered === true ? 'ol' : 'ul'
-  const items = asList(b.items)
-  const inner = items.map((item) => `<li><span>${renderInlines(itemInlines(item))}</span></li>`).join('')
-  return `<${tag}>${inner}</${tag}>`
+  return `<${tag}>${asList(b.items)
+    .map(
+      (item) =>
+        `<li><span>${renderInlines(itemInlines(item))}</span>${renderBlocks(listChildren(item))}</li>`,
+    )
+    .join('')}</${tag}>`
 }
 
 // The inline content of ONE list item, whatever authored shape it took. The RN

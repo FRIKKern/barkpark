@@ -23,6 +23,7 @@ on:
     paths:
       - "cmd/pdrender-wasm/**"
       - "internal/pdrender/**"
+      - "api/test/support/fixtures/nested-list-carriers.json"
       - ".github/workflows/pdrender-wasm.yml"
       - "go.mod"
       - "go.sum"
@@ -30,6 +31,7 @@ on:
     paths:
       - "cmd/pdrender-wasm/**"
       - "internal/pdrender/**"
+      - "api/test/support/fixtures/nested-list-carriers.json"
       - ".github/workflows/pdrender-wasm.yml"
       - "go.mod"
       - "go.sum"
