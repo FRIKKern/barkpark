@@ -654,18 +654,7 @@ defmodule Barkpark.Tasks.Internal do
       rev: doc.rev,
       previous_rev: previous_rev,
       source: to_string(source),
-      document:
-        Map.merge(
-          %{
-            "doc_id" => doc.doc_id,
-            "type" => doc.type,
-            "title" => doc.title,
-            "status" => doc.status,
-            "content" => doc.content,
-            "rev" => doc.rev
-          },
-          extra_document
-        ),
+      document: Map.merge(envelope_document(doc), extra_document),
       workspace_id: doc.workspace_id,
       project_id: doc.project_id,
       dataset_id: doc.dataset_id,
@@ -673,6 +662,44 @@ defmodule Barkpark.Tasks.Internal do
     })
     |> Repo.insert!()
   end
+
+  # ─── THE ENVELOPE HALF OF `mutation_events.document` ──────────────────────
+  #
+  # ONE definition of the Envelope-shaped view a task mutation event carries,
+  # so a READER can say what is envelope and what is a writer's typed stamp
+  # WITHOUT re-listing the stamps by hand. `Tasks.Events.replay_since/3`'s
+  # `:payload` projection is exactly `document` MINUS `envelope_keys/0` MINUS
+  # `audit_keys/0` — which is why these two lists live next to the writer that
+  # produces them rather than in the reader that subtracts them. Move a key
+  # into the envelope here and the feed stops projecting it in the same commit.
+  @envelope_keys ~w(doc_id type title status content rev)
+
+  # The audit stamps a writer merges alongside the envelope that are NOT for
+  # the poll feed. `caller_stamp/1`'s `caller_token_id` attributes the event to
+  # the authenticated bearer; that is an audit fact for the store, not a field
+  # a statusline / TUI / deck poller should receive.
+  @audit_keys ~w(caller_token_id)
+
+  @doc "The Envelope-shaped view of `doc` that every task mutation event carries."
+  @spec envelope_document(Document.t()) :: map()
+  def envelope_document(%Document{} = doc) do
+    %{
+      "doc_id" => doc.doc_id,
+      "type" => doc.type,
+      "title" => doc.title,
+      "status" => doc.status,
+      "content" => doc.content,
+      "rev" => doc.rev
+    }
+  end
+
+  @doc "The keys `envelope_document/1` writes — the half a payload reader subtracts."
+  @spec envelope_keys() :: [String.t()]
+  def envelope_keys, do: @envelope_keys
+
+  @doc "Writer-merged keys that are audit stamps, never feed payload."
+  @spec audit_keys() :: [String.t()]
+  def audit_keys, do: @audit_keys
 
   # Audit stamp: the id of the api_token that drove this workflow mutation.
   # Returns an `extra_document`-shaped fragment so it merges into the event's
