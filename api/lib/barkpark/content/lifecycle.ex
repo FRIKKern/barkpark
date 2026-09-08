@@ -825,7 +825,7 @@ defmodule Barkpark.Content.Lifecycle do
   #   * `lifecycle_status`   — claim/close/fence/move/stamp/ttl_sweeper
   #                            (already fenced by `Transitions.legal?/2` above)
   #   * `acceptance_criteria` — stamp (already fenced by `criteria_fence/2`)
-  #   * `close_reason`       — close.ex:1232
+  #   * `close_reason`       — close.ex (`apply_close_update/8`)
   #   * `close_override`     — close.ex (`merge_override_record/2`)
   #   * `disposition`        — close.ex (`advance_disposition_on_close/2`),
   #                            stage.ex (@disposition_key)
