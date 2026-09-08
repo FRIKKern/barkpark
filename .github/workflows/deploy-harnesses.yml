@@ -168,7 +168,17 @@ jobs:
             echo "::error title=shellcheck control DID NOT FIRE::A deliberate SC2034 was planted in a copy of $victim and shellcheck -S warning still returned 0. The clean green printed above therefore proves NOTHING about deploy/*.sh - this instrument is not discriminating. Do not re-run hoping for a different answer: find out why shellcheck stopped reporting SC2034 (a wrapper on PATH, a disable directive inherited from the copied file, a severity default change)."
             exit 1
           fi
-          if ! printf '%s' "$ctl_out" | grep -q "SC2034"; then
+          # HERE-STRING, never `printf … | grep -q` (D37, and scripts/pipefail-sigpipe-scan.sh
+          # documents this exact shape). `grep -q` exits on the FIRST match without
+          # draining, the producer takes SIGPIPE and dies 141, `pipefail` propagates 141
+          # as the pipeline's status, and the `!` inverts it — so this control would
+          # report "fired for the WRONG REASON" at precisely the moment it fired
+          # correctly. MEASURED on this shape: correct at 384 bytes (0 inversions in 200
+          # trials, which is today's real $ctl_out), 58 of 60 inverted at ~1 KB, 60 of 60
+          # at ~2 KB. So it is LATENT, not currently firing — and one extra shellcheck
+          # finding, a longer temp path or a chattier shellcheck release carries it over.
+          # A here-string has no producer process to kill.
+          if ! grep -q "SC2034" <<<"$ctl_out"; then
             echo "::error title=shellcheck control fired for the WRONG REASON::The planted copy was rejected (exit $ctl_rc) but the output names no SC2034, so the control is not measuring what it claims to measure. Output follows."
             printf '%s\n' "$ctl_out"
             exit 1
