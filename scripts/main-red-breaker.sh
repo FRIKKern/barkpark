@@ -20,6 +20,17 @@
 #                                               cancelled, or never reached the step
 #   RUNNER-LOCAL             exit 0, ::warning  the HOST caused it — a known signature
 #                                               in this red's OWN body (see M6)
+#   STALE-BASE               exit 0, ::warning  main's compared run tested NEWER code
+#                                               and passes; your base predates the fix
+#                                               your diff cannot reach (see M7)
+#
+# VERDICT ORDER, and it is load-bearing (pinned by a textual arm, as #16384's
+# 22d pins RUNNER-LOCAL): RUNNER-LOCAL is decided FIRST, because a host-caused
+# crash is about neither tree. Then M7's tree check, because a comparison across
+# different code cannot support ANY ownership claim. Only then PASSED. INHERITED
+# is deliberately NOT gated by M7 — main failing the same step is evidence
+# whichever tree it failed on, and gating it would let a tree mismatch
+# manufacture an accusation out of an inheritance.
 #
 # UNDETERMINED still exits 1 — these are non-required jobs, so the red blocks
 # nothing, and failing closed can never wave a real PR defect through. What
@@ -138,6 +149,61 @@
 #     REFUSES an entry missing either field, says so in the log, and attributes
 #     the red exactly as if the entry were absent. A future entry therefore
 #     costs its author a measurement, which is the price of the exemption.
+#
+# M7. IT COMPARED AGAINST A DIFFERENT TREE AND CALLED THE DIFFERENCE "YOURS"
+#     (task-c3b5f1494ed523c3 base-behind, task-f89558a95762863a base-ahead).
+#     EVERY PROOF THIS SCRIPT HAD ANSWERS "DID MAIN PASS THIS STEP". NONE OF
+#     THEM ANSWERS "DID MAIN PASS IT ON THIS CODE." api_trusted, log_parsed and
+#     job_trusted are all statements about main's RUN; the verdict is a
+#     statement about the PR's TREE.
+#
+#     MEASURED 2026-09-08, 60 failed pull_request runs, 19 carrying the accusing
+#     sentence, each classified by comparing the PR's baseRefOid against the
+#     head_sha of the main run THE BREAKER ITSELF NAMES:
+#       base AHEAD of main's compared run   7 / 19
+#       identical (a sound comparison)      9 / 19
+#       base BEHIND main's compared run     3 / 19
+#       diverged / unclassifiable           0 / 19
+#     FEWER THAN HALF OF ITS ACCUSATIONS RESTED ON A LIKE-FOR-LIKE COMPARISON.
+#
+#     PROVEN WRONG END TO END on PR #16905, doc-gates run 34184567216: the
+#     breaker printed "Main RAN that step and it PASSED, so the red is this PR's
+#     own. (Main run 34184554269, head 5ebf6e29 …)". What failed was a NOVEL
+#     stale-lineref finding against the events-landed payload test, whose comment
+#     cited a line in tasks/landed.ex that had since moved. (Named without the
+#     file:line form on purpose — quoting a line number here would itself be the
+#     defect the sweep exists to stop, and the escape hatch is not the answer.)
+#     #16905 changed only plugins/tasks.ex and docs/openapi.json — neither file.
+#     The citing test ARRIVED ON MAIN in eb582a3f0 at 03:44:33Z; the compared
+#     main run was created 03:44:32Z, ONE SECOND EARLIER, and
+#     compare(5ebf6e293...eb582a3f0) = ahead 1 / behind 0. #16905's base IS
+#     eb582a3f0. Lineref counts: main 03:44Z 145 known / 0 novel; #16905 145 / 1
+#     novel; main 04:30Z 145 / 5 novel INCLUDING the identical finding — main
+#     caught up and failed on the same thing 43 minutes later. A ONE-SECOND
+#     WINDOW IN A FLEET THAT MERGES CONSTANTLY IS NOT A CORNER CASE.
+#
+#     THE LIMIT ON THAT NUMBER, stated because it is easy to inflate: base-ahead
+#     proves the COMPARISON IS UNSOUND, not that each of those 7 verdicts was
+#     factually wrong. Only #16905 is proven wrong end to end. Do not restate
+#     7/19 as "7 false accusations".
+#
+#     FIX: ONE base-sha read and ONE compare call, consumed by BOTH directions.
+#     ahead/diverged -> UNDETERMINED (main's run is not evidence about this
+#     tree); behind -> STALE-BASE, exit 0, naming `gh pr update-branch`;
+#     identical -> attributed exactly as before; unknown -> attributed exactly
+#     as before, because a guard that fires when it cannot see would silence the
+#     breaker wholesale (which is what #16908 did and #16928 had to undo).
+#     A SECOND, INDEPENDENTLY-WRITTEN BASE-SHA READER WOULD BE A SECOND DEFECT
+#     WEARING A FIX'S CLOTHES: there is exactly one, and both verdicts use it.
+#
+#     NOT COVERED HERE, AND NOT PRETENDED TO BE: a genuinely FLAKY job. On the
+#     same sha as #16905's doc-gates red, compose-smoke run 34184567197 failed
+#     on attempt 1 — the breaker accusing via its Smoke arms Decide step — and
+#     SUCCEEDED on attempt 2 of the SAME run id, i.e. an unchanged tree by
+#     construction. There the comparison was SOUND and the job is simply
+#     non-deterministic. M7 leaves that case untouched by design; it is sized
+#     first and built second under task-f89558a95762863a, because one instance
+#     is not a rate.
 #
 #     WHY ONLY ON A PULL REQUEST. The not-a-pull_request clause below still
 #     exits first, so a push to main never prints RUNNER-LOCAL. That is
@@ -575,6 +641,69 @@ for j in d.get("jobs") or []:
 print(best)
 PY
 MAIN_JOB_ID="$(head -1 "$TMPD/mainjob.id" 2>/dev/null | tr -d "[:space:]")"
+
+# ── M7: THE ANCESTRY PRIMITIVE — WHICH TREE DID MAIN RUN? ────────────────────
+# Every proof this script had answers "did main pass this step". NONE of them
+# answers "did main pass it on THIS CODE". `api_trusted`, `log_parsed` and
+# `job_trusted` are all statements about main's RUN; the verdict is a statement
+# about the PR's TREE. That gap is M7, and it produces false accusations in BOTH
+# directions off the same missing fact:
+#
+#   BASE AHEAD  — the PR's base contains commits no completed main run has yet
+#                 exercised. Main's job could not have executed the defect, so
+#                 "Main RAN that step and it PASSED" is true of a tree that does
+#                 not contain the bug, asserted about a tree that does.
+#   BASE BEHIND — main's compared run tested NEWER code than the PR. A step main
+#                 passes may pass BECAUSE OF A FIX THE PR'S BASE PREDATES, which
+#                 the PR's diff cannot reach. That is the STALE-BASE class.
+#
+# ONE READ AND ONE COMPARE SETTLE BOTH. A second, independently-written base-sha
+# reader would be a second defect wearing a fix's clothes, so there is exactly
+# one here and both verdicts consume it.
+#
+# MEASURED 2026-09-08 over 60 failed pull_request runs: 19 carried the accusing
+# sentence — 7 base-ahead, 3 base-behind, 9 identical, 0 unclassifiable. FEWER
+# THAN HALF OF THE BREAKER'S ACCUSATIONS RESTED ON A LIKE-FOR-LIKE COMPARISON.
+# That line alone justifies the primitive without any single verdict having to
+# be proven wrong — and the limit is stated on purpose: base-ahead proves the
+# COMPARISON UNSOUND, not that each of those 7 verdicts was factually wrong.
+# Only PR #16905 is proven wrong end to end (main run 34184554269 created
+# 03:44:32Z on head 5ebf6e293; the citing test arrived in eb582a3f0 at
+# 03:44:33Z; compare = ahead 1 / behind 0; #16905's base IS eb582a3f0; main
+# failed the identical finding 43 minutes later).
+#
+# UNKNOWN IS NOT A VERDICT AND MUST NOT SILENCE ANYTHING. On a push run there is
+# no base; with no token or no event file the read fails. In every such case
+# TREE_REL is `unknown` and attribution proceeds exactly as before — a guard
+# that fires when it cannot see would silence the breaker wholesale, which is
+# the failure #16908 caused and #16928 had to undo.
+PR_BASE_SHA="${MAIN_RED_BREAKER_BASE_SHA:-}"
+if [ -z "$PR_BASE_SHA" ] && [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ] && [ -s "${GITHUB_EVENT_PATH:-/nonexistent}" ]; then
+  PR_BASE_SHA="$(python3 -c 'import json,sys
+try:
+    print((json.load(open(sys.argv[1])).get("pull_request") or {}).get("base",{}).get("sha") or "")
+except Exception:
+    print("")' "$GITHUB_EVENT_PATH" 2>/dev/null | tr -d "[:space:]")"
+fi
+
+# identical | ahead | behind | diverged | unknown.
+# `ahead` means the SECOND ref is ahead of the first: base is a DESCENDANT of
+# main's compared head, i.e. main's run never contained the base. The direction
+# is easy to invert, so it is asserted by a harness arm rather than by comment.
+TREE_REL="${MAIN_RED_BREAKER_TREEREL_FIXTURE:-}"
+if [ -z "$TREE_REL" ]; then
+  TREE_REL="unknown"
+  if [ -n "$PR_BASE_SHA" ] && [ -n "${MAIN_RUN_SHA:-}" ] && [ -z "${MAIN_RED_BREAKER_FIXTURE:-}" ]; then
+    _cmp="$(curl -sS --max-time 20 "${auth[@]}" "${API}/compare/${MAIN_RUN_SHA}...${PR_BASE_SHA}" 2>/dev/null \
+            | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("status") or "")
+except Exception:
+    print("")' 2>/dev/null | tr -d "[:space:]")"
+    case "$_cmp" in identical|ahead|behind|diverged) TREE_REL="$_cmp" ;; esac
+  fi
+fi
+
 MAIN_LOG="$TMPD/main-job.log"; : > "$MAIN_LOG"
 if [ -n "${MAIN_RED_BREAKER_LOG_FIXTURE:-}" ]; then
   cp -- "$MAIN_RED_BREAKER_LOG_FIXTURE" "$MAIN_LOG" 2>/dev/null || : > "$MAIN_LOG"
@@ -935,7 +1064,28 @@ fi
 # same defect wearing the opposite mask — a breaker that never accuses is as
 # useless as one that always does. So a PASSED step is reported, and the steps
 # that could not be settled are named in the SAME line rather than dropped.
+# ── M7 GATES THE ACCUSING PATH, AND ONLY THE ACCUSING PATH ──────────────────
+# These sit AFTER the RUNNER-LOCAL verdict (which is about the host, not either
+# tree) and BEFORE the PASSED path, because PASSED is the only verdict that
+# claims "this red is yours" and therefore the only one a tree mismatch can
+# falsify. INHERITED is untouched: main failing the same step is evidence
+# regardless of which tree it failed on, and gating it would let a tree mismatch
+# manufacture an accusation out of an inheritance — the opposite defect.
 if [ -n "$PASSED" ]; then
+  case "$TREE_REL" in
+    ahead|diverged)
+      undetermined "Main's compared run does NOT contain this PR's base, so it is not evidence about this tree: main run ${MAIN_RUN_ID} tested head ${MAIN_RUN_SHA:-?}, this PR's base is ${PR_BASE_SHA:-?}, and comparing them reports '${TREE_REL}' — the base carries commit(s) that run never executed. 'Main runs and passes this step' is therefore a statement about DIFFERENT CODE. Step(s) held back from attribution: $(printf '%s' "$PASSED" | tr '\n' ';'). Measured 2026-09-08: 7 of 19 accusations were made across this boundary."
+      ;;
+    behind)
+      # STALE-BASE. Main's run tested NEWER code and passed; the PR's base
+      # predates that. The red is neither main's (main is green there now) nor
+      # reachable by the PR's diff. This is NOT a failure of the PR, so the
+      # check is not failed on it — exit 0, with the remedy named.
+      say "STALE-BASE — '${JOB_NAME}' failed on step(s) main's newer tree passes: $(printf '%s' "$PASSED" | tr '\n' ';'). Main's compared run ${MAIN_RUN_ID} tested head ${MAIN_RUN_SHA:-?}, which is AHEAD of this PR's base ${PR_BASE_SHA:-?} — so main may pass that step because of a fix your base predates, and your diff cannot reach it. REMEDY: gh pr update-branch, then re-run. This is not attributed to you and this job does not fail on it. ${MAIN_RUN_DESC}"
+      echo "::warning title=Main-red breaker: stale base::'${JOB_NAME}' failed on step(s) main's NEWER tree passes. Your base (${PR_BASE_SHA:-?}) predates main's compared head (${MAIN_RUN_SHA:-?}). Remedy: gh pr update-branch."
+      exit 0
+      ;;
+  esac
   UNSETTLED="$(printf '%s\n%s' "$NOTREACHED" "$UNKNOWN" | sed '/^$/d' | tr '\n' ';')"
   say "FAIL — '${JOB_NAME}' failed on a step main does not: $(printf '%s' "$PASSED" | tr '\n' ';'). Main RAN that step and it PASSED, so the red is this PR's own.${MAINS_1L:+ (Main is red on: ${MAINS_1L}; those are inherited, the rest is yours.)}${UNSETTLED:+ Ownership of these other failed step(s) is UNDETERMINED, not attributed to you: ${UNSETTLED}} ${MAIN_RUN_DESC}"
   echo "::error title=Main-red breaker: this PR's own red::'${JOB_NAME}' failed on a step main runs and passes: $(printf '%s' "$PASSED" | tr '\n' ';')."
