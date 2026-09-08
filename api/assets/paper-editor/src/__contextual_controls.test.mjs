@@ -8,7 +8,7 @@ assert.match(shell, /\.bp-paper-figure-editor-frame\s*\{[^}]*display:\s*flow-roo
   "Figure contains the reader image's trailing margin even when caption is empty");
 assert.match(mediaStyles, /\.bp-ab-grid\s*\{[^}]*display:\s*grid/s,
   "the shared media library defines its grid without depending on Studio utilities");
-assert.match(mediaStyles, /var\(--bg-elevated, var\(--paper-bg\)\)/,
+assert.match(mediaStyles, /var\(--surface-raised, var\(--paper-bg\)\)/,
   "media dialogs use the current Paper palette when Studio tokens are absent");
 assert.match(shell, /\.bp-paper-figure-image-controls\s*\{[^}]*position:\s*absolute/s,
   "resting Figure image options cannot move the reader image or caption");
