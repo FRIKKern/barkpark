@@ -178,7 +178,7 @@ async function mount({ revision, blocks = [paragraph("original", "Original")] } 
   toggle.mounted();
   await new Promise(resolve => setTimeout(resolve, 350));
   assert.equal(requests.length, 0);
-  return {canvas, requests, main, navigation, deleteButton, moveButton,
+  return {canvas, requests, main, hook, navigation, deleteButton, moveButton,
     materializeButton, unbindButton, arrayButton, addForm, actions,
     click: () => toggle.el.dispatchEvent(new window.MouseEvent("click", {bubbles:true, cancelable:true})),
     toggles: () => toggles,
@@ -251,6 +251,10 @@ try {
   assert.equal(refusedNavigation.requests.length, 1);
   resolveSaved(refusedNavigation.requests[0], false);
   await tick();
+  refusedNavigation.hook.reconnected();
+  await tick();
+  assert.equal(refusedNavigation.requests.length, 1,
+    "reconnect never replays an application-level save refusal");
   assert.equal(refusedNavigation.navigations(), 0, "a failed save never replays navigation");
   assert.match(textOf(refusedNavigation.canvas), /must remain local/,
     "failed navigation preserves the exact mounted editor text");
@@ -890,6 +894,77 @@ try {
     node => node.attrs?.bpId === reconnectTable.id,
   ), false, "the second native undo removes the retained Table insertion");
   reconnectOwnership.close();
+
+  // A transport loss can settle the original push before or after LiveView's
+  // reconnect callback. The preserved ignored canvas must replay the exact
+  // queued boundary batch after the pending recovery render, without creating
+  // a new request identity or unfreezing its live draft locally.
+  for (const reconnectBeforeFailure of [false, true]) {
+    const pendingReconnect = await mount({ revision: 3 });
+    const pendingWrapper = pendingReconnect.main.querySelector("[phx-hook]");
+    pendingWrapper.dataset.paperContainerKind = "document";
+    document.body.prepend(pendingReconnect.main);
+    pendingReconnect.canvas._editor.commands.insertContentAt(
+      pendingReconnect.canvas._editor.state.doc.content.size,
+      slashTypeToNode("section"),
+    );
+    pendingReconnect.canvas._editor.view.dispatch(
+      pendingReconnect.canvas._editor.state.tr.insertText(" offline newer text", 9),
+    );
+    pendingReconnect.canvas.flushPendingChanges();
+    const firstAttempt = pendingReconnect.requests[0];
+    const exactPayload = JSON.stringify(firstAttempt.payload);
+    const pendingSection = inserted(firstAttempt);
+    pendingReconnect.main.inert = true;
+    pendingReconnect.main.dataset.paperCanvasResumeHalt = "true";
+    pendingReconnect.main.dataset.paperCanvasResumeState = "pending";
+    const editorBeforeReconnect = pendingReconnect.canvas._editor;
+    const historyBeforeReconnect = undoDepth(editorBeforeReconnect.state);
+
+    if (reconnectBeforeFailure) pendingReconnect.hook.reconnected();
+    firstAttempt.reject(new Error("transport disconnected"));
+    await tick();
+    if (!reconnectBeforeFailure) pendingReconnect.hook.reconnected();
+    await waitFor(() => pendingReconnect.requests.length === 2,
+      "a reconnect should replay the transport-paused canvas mutation");
+
+    const retried = pendingReconnect.requests[1];
+    assert.equal(JSON.stringify(retried.payload), exactPayload,
+      "reconnect retries the exact request id, revision, context, and ops");
+    assert.equal(pendingReconnect.main.inert, true,
+      "the client retry never unfreezes the pending recovery root");
+    assert.equal(pendingReconnect.canvas._editor, editorBeforeReconnect,
+      "the pending reconnect keeps the live editor instance");
+    assert.equal(undoDepth(editorBeforeReconnect.state), historyBeforeReconnect,
+      "the pending reconnect keeps native insertion history");
+
+    retried.resolve({
+      saved: true,
+      rev: 4,
+      request_id: retried.payload.request_id,
+      retained_leases: ["signed-reconnect-retry-lease"],
+    });
+    pendingReconnect.echo([paragraph("original", "Original offline newer text"), pendingSection], {
+      rev: 4,
+      request_id: retried.payload.request_id,
+      retained_leases: ["signed-reconnect-retry-lease"],
+    });
+    await tick();
+    assert.match(textOf(pendingReconnect.canvas), /offline newer text/,
+      "newer text in the boundary batch remains mounted through retry acknowledgement");
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+      {
+        paper_editing_key: "paper-overlap-probe",
+        paper_canvas_lease_key: "paper-overlap-probe",
+        paper_canvas_leases: ["signed-reconnect-retry-lease"],
+      },
+      "retry acknowledgement replaces pending recovery with its signed owner lease",
+    );
+    assert.equal(pendingReconnect.main.inert, true,
+      "only a subsequent authoritative LiveView render may unhalt recovery");
+    pendingReconnect.close();
+  }
 
   const leaseControls = await mount({ revision: 8, blocks: [paragraph("private-draft", "Private draft")] });
   document.body.prepend(leaseControls.main);

@@ -2648,6 +2648,7 @@
         this._opsQueue = [];
         this._sendingOps = false;
         this._opsFailed = false;
+        this._opsReconnectRetryRequested = false;
         this._saveBridgeDestroyed = false;
         const refreshLeasePending = () => {
           this.el[PAPER_CANVAS_LEASE_PENDING] = this._opsQueue.some(
@@ -2810,6 +2811,7 @@
                 if (result?.discarded) {
                   this._opsQueue = [];
                   this._opsFailed = false;
+                  this._opsReconnectRetryRequested = false;
                   refreshLeasePending();
                   if (entry.conflictBlocks) {
                     this.el.querySelector("bp-paper-canvas")
@@ -2837,10 +2839,18 @@
                   }
                 }
                 if (saved) {
+                  entry.transportRetryable = false;
+                  this._opsReconnectRetryRequested = false;
                   this._opsFailed = false;
                   sendNextOps();
                 } else {
                   this._opsFailed = true;
+                  entry.transportRetryable = result == null;
+                  if (entry.transportRetryable && this._opsReconnectRetryRequested) {
+                    this._retryQueuedOpsAfterReconnect?.();
+                  } else if (!entry.transportRetryable) {
+                    this._opsReconnectRetryRequested = false;
+                  }
                 }
                 if (acknowledgementError) throw acknowledgementError;
               },
@@ -2849,10 +2859,40 @@
           }
           const pending = mutation.promise
             .then((saved) => {
+              // retryMutation can refuse locally (expired/conflicted/no longer
+              // queued) without invoking the adapter callback. Do not leave
+              // the hook permanently marked in flight in that case.
+              if (!saved && this._sendingOps && this._opsQueue[0] === entry) {
+                this._sendingOps = false;
+                this._opsFailed = true;
+                this._opsReconnectRetryRequested = false;
+              }
               return saved;
             })
             .finally(() => this._pendingSaves.delete(pending));
           this._pendingSaves.add(pending);
+        };
+        this._retryQueuedOpsAfterReconnect = () => {
+          if (this._saveBridgeDestroyed) return false;
+          const entry = this._opsQueue[0];
+          if (!entry || entry.unretryable) return false;
+          this._opsReconnectRetryRequested = true;
+          if (this._sendingOps) return true;
+          if (Date.now() >= entry.expiresAt) {
+            this._opsReconnectRetryRequested = false;
+            this._opsFailed = false;
+            sendNextOps();
+            return false;
+          }
+          if (!entry.transportRetryable) {
+            this._opsReconnectRetryRequested = false;
+            return false;
+          }
+          this._opsReconnectRetryRequested = false;
+          entry.transportRetryable = false;
+          this._opsFailed = false;
+          sendNextOps();
+          return true;
         };
         this._onCanvasOps = (e) => {
           this._exitCoordinator?.markDirty(this.el);
@@ -3069,8 +3109,13 @@
       updated() {
         if (typeof this._repaintFleet === "function") this._repaintFleet();
       },
+      reconnected() {
+        this._retryQueuedOpsAfterReconnect?.();
+      },
       destroyed() {
         this._saveBridgeDestroyed = true;
+        this._opsReconnectRetryRequested = false;
+        this._retryQueuedOpsAfterReconnect = null;
         this._opsQueue = [];
         delete this.el[PAPER_CANVAS_LEASES];
         delete this.el[PAPER_CANVAS_LEASE_PENDING];
