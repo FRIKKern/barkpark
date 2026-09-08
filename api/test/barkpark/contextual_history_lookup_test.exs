@@ -93,7 +93,7 @@ defmodule Barkpark.ContextualHistoryLookupTest do
     end)
   end
 
-  defp insert_row!(overrides \\ []) do
+  defp insert_row!(overrides) do
     hash = unique_hash()
 
     attrs =

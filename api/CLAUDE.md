@@ -25,7 +25,7 @@ Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.serv
 
 - **Core utilities:** `Barkpark.PortableDoc.{Render,Patch,Projection,Synthesis,Bpml}`; `Content.upsert_paper/1`, `apply_paper_block_op/3`, `apply_document_block_op/5`, `get_public_paper/1`, `doc_topic/4`; `BarkparkWeb.Plugs.RequireIngestToken`.
 - **Bulldocs-owned:** `BarkparkWeb.BulldocsLive` (reader), `BulldocsIngestController` / `BulldocsIntentsController`, `Barkpark.Plugins.Bulldocs.Events`, `layouts/bulldocs.html.heex`.
-- **Reader editing:** Public/Studio share canvas + `PaperViewer`; View flushes; focus pins revisions; overlaps need review; cites/labels stay inline. Figure picker writes child `src` only; empty captions are zero-flow. `Papers.ContextualHistory` guards source/caption reversals in private opt-in receipts; undo/redo UI remains off.
+- **Reader editing:** Public/Studio share canvas + `PaperViewer`; View flushes; focus pins revisions; overlaps need review; cites/labels stay inline. Figure picker writes child `src`; empty captions are zero-flow. `Papers.ContextualHistory` restores source/caption via scoped, single-use 1h receipts; UI remains off.
 - **Plugin module:** `register_schemas/1` + `register_routes/1` expose the `:public_root` reader and `:ingest` API (`/v1/plugins/bulldocs/*`) for reuse.
 - **Sessions:** 2nd blocks type (whitelist `{paper, session}`); routes `/v1/plugins/bulldocs/sessions*`; private+unwalled schema; Studio pane read-only v1 (`bp session publish` writes).
 
