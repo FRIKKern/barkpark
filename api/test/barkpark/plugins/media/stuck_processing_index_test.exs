@@ -43,8 +43,16 @@ defmodule Barkpark.Plugins.Media.StuckProcessingIndexTest do
         [@index]
       )
 
-    assert [[indexdef]] = rows,
-           """
+    # NOT `assert [[indexdef]] = rows, "..."` — a pattern match inside assert/2
+    # raises MatchError BEFORE assert/2 can render its message, so the guard's
+    # explanation would be dead code in the exact run that needs it.
+    indexdef =
+      case rows do
+        [[def_]] ->
+          def_
+
+        [] ->
+          flunk("""
            Missing index #{@index} on `documents`.
 
            `StuckProcessingSweeper.stuck_candidates/1` filters
@@ -52,7 +60,8 @@ defmodule Barkpark.Plugins.Media.StuckProcessingIndexTest do
            and orders by `updated_at`; without this index that is a seq-scan
            plus a sort on every cron tick. Migration:
            priv/repo/migrations/20260908094217_add_documents_media_processing_index.exs
-           """
+          """)
+      end
 
     # Key column — the ONLY one, which is what lets the LIMIT be a forward index
     # seek instead of a sort.
@@ -113,8 +122,13 @@ defmodule Barkpark.Plugins.Media.StuckProcessingIndexTest do
     parent = self()
 
     handler = fn _event, _measure, %{query: query, params: params}, _cfg ->
+      # Keyed on the SHAPE of the candidate SELECT (a `documents` read carrying a
+      # JSONB `->>` extraction), NOT on the literals under test — otherwise the
+      # mutation this test exists to catch would make the capture silently miss
+      # and the red would name a missing statement instead of the missing
+      # literal. With an empty corpus `sweep/1` issues exactly this one query.
       if is_binary(query) and String.contains?(query, "FROM \"documents\"") and
-           String.contains?(query, "mediaAsset") do
+           String.contains?(query, "->>") do
         send(parent, {:candidate_sql, query, params})
       end
 
@@ -139,10 +153,11 @@ defmodule Barkpark.Plugins.Media.StuckProcessingIndexTest do
         flunk("""
         Never observed the sweeper's candidate SELECT on `documents`.
 
-        The capture keys on the statement containing both `FROM "documents"` and
-        the literal `mediaAsset`. If the type is no longer a literal in the SQL,
-        THAT IS THE DEFECT this test exists to catch — the query can no longer
-        match the partial index #{@index} under a generic plan.
+        The capture keys on a `documents` read carrying a JSONB `->>`
+        extraction, which is the candidate SELECT's shape regardless of how its
+        constants are spelled. Reaching here means `stuck_candidates/1` no
+        longer issues that query at all (renamed, restructured, or the JSONB
+        status filter dropped) — re-point the capture at its replacement.
         """)
     end
   end
