@@ -376,11 +376,29 @@ gh_error_digest() { # <combined gh output> -> one line
       }
       if (summary == "" && substr(line, 1, 4) == "gh: ") summary = substr(line, 5)
       if (first == "" && line ~ /[^ \t]/) first = line
+      # A JSON ERROR BODY HAS `{` ON LINE 1 AND THE MESSAGE ON LINE 2. GitHub
+      # answers a 403 with {"message": "...", "documentation_url": ...}, so
+      # `first line of the body` printed a single brace and a secondary rate
+      # limit could not be told apart from a permissions failure in the log.
+      # Same family as task-e47f86df96d7d3ce (`head -1` discarding the HTTP
+      # status): A DIGEST THAT TRUNCATES BEFORE THE DISCRIMINATING FIELD CANNOT
+      # SETTLE THE QUESTION IT EXISTS TO RECORD. Scanned over every line, since
+      # gh may print the body on one line or pretty-printed.
+      if (msg == "" && match(line, /"message"[ ]*:[ ]*"[^"]*"/)) {
+        m = substr(line, RSTART, RLENGTH)
+        sub(/^"message"[ ]*:[ ]*"/, "", m)
+        sub(/"$/, "", m)
+        if (m != "") msg = m
+      }
     }
     END {
       d = (code != "" ? "HTTP " code : "no HTTP status in the response")
       if (summary != "") d = d " — " summary
-      if (first != "" && first != summary) d = d " — first line of the body: " first
+      # PREFER THE MESSAGE OVER THE FIRST LINE. `first` remains the fallback for
+      # HTML bodies and for JSON with no message field, so this ADDS a
+      # discrimination and removes none.
+      if (msg != "") d = d " — " msg
+      else if (first != "" && first != summary) d = d " — first line of the body: " first
       print d
     }'
 }
