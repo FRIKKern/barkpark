@@ -3001,6 +3001,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
   Coverage (the item shapes a list can carry):
 
     * STRING — `"text"` → `[%{"type" => "text", "value" => "text"}]`.
+      A JSON-encoded nonempty inline-object array is decoded instead, matching
+      the readers; wrapping it as text would expose JSON syntax after saving.
     * INLINE ARRAY — `[%{"type" => "text", …}]` → unchanged (canonical).
     * other scalar (number) → its string form as one text node.
     * `nil` item → `[]` (an empty list item), never a crash.
@@ -4081,12 +4083,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   # Coerce ONE list item to a canonical inline ARRAY. A list (already an inline
   # array) is returned BYTE-IDENTICAL — the idempotent fast path. A binary becomes
-  # a single text inline node (render-identical, see the moduledoc). Any other
+  # a single text inline node, unless readers recognize an encoded inline array.
+  # Decoding that array preserves rendered content and its opaque fields. Any other
   # scalar coerces to its string form; nil → an empty item.
   defp normalize_list_item(item) when is_list(item), do: item
 
-  defp normalize_list_item(item) when is_binary(item),
-    do: [%{"type" => "text", "value" => item}]
+  defp normalize_list_item(item) when is_binary(item) do
+    case Jason.decode(item) do
+      {:ok, [%{} | _] = inline} -> inline
+      _ -> [%{"type" => "text", "value" => item}]
+    end
+  end
 
   defp normalize_list_item(nil), do: []
 

@@ -31,10 +31,11 @@ JSON decoding is list-specific. JSON-looking strings in paragraph content remain
 literal prose.
 
 This table describes the editor boundary, not every server write path. Existing
-`BlockOps.normalize_list_items/1` still canonicalizes string/scalar carriers on
-writes; JSON-encoded strings can become literal JSON text there. That separate
-server compatibility gap remains open. Browser save/reload proof for this repair
-covers map-backed items; scalar/encoded carriers have editor round-trip proof.
+`BlockOps.normalize_list_items/1` canonicalizes string/scalar carriers on writes.
+JSON-encoded nonempty inline-object arrays are decoded, matching the readers;
+ordinary strings become text nodes. Item maps and inline arrays retain their
+opaque fields. This changes the carrier, not the visible content. Existing
+literal JSON already wrapped in text nodes is not heuristically decoded.
 
 ## Current boundary
 
