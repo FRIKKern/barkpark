@@ -164,7 +164,7 @@ class BpPaperEditor extends HTMLElement {
     } else if (this._editorMode === "table") {
       this._sourceBlock = JSON.parse(JSON.stringify(block));
       this._tableEditable = tableProjection(block).editable;
-      this._editable = this._editable && this._tableEditable;
+      this._editable = this._editable && this._tableEditable && !this._tableStructureAwaiting;
     }
     this._blockId = block && block.id != null ? block.id : null;
     this._blockType = (block && block.type) || "paragraph";
@@ -405,6 +405,14 @@ class BpPaperEditor extends HTMLElement {
       this._editor.destroy();
       this._editor = null;
     }
+    if (this._mount) {
+      this._mount.remove();
+      this._mount = null;
+    }
+    if (this._tableEditStatus) {
+      this._tableEditStatus.remove();
+      this._tableEditStatus = null;
+    }
     this._settleTableLifecycle(false);
   }
 
@@ -451,6 +459,39 @@ class BpPaperEditor extends HTMLElement {
     this._tableEditStatus.dataset.state = "";
     this._tableEditStatus.hidden = true;
     this._tableEditStatus.textContent = "";
+  }
+
+  _installTableProjectionDoc(doc) {
+    if (!this._editor) return false;
+    if (JSON.stringify(this._editor.getJSON()) === JSON.stringify(doc)) return true;
+    const target = this._editor.schema.nodeFromJSON(doc);
+    const sameContent = (left, right) => {
+      if (left.type !== right.type || left.text !== right.text ||
+          JSON.stringify(left.marks) !== JSON.stringify(right.marks) ||
+          left.childCount !== right.childCount) return false;
+      for (let index = 0; index < left.childCount; index++) {
+        if (!sameContent(left.child(index), right.child(index))) return false;
+      }
+      return true;
+    };
+    if (sameContent(this._editor.state.doc, target)) {
+      const transaction = this._editor.state.tr;
+      this._editor.state.doc.descendants((node, position) => {
+        if (node.isText) return;
+        const targetNode = target.nodeAt(position);
+        if (targetNode && JSON.stringify(node.attrs) !== JSON.stringify(targetNode.attrs)) {
+          transaction.setNodeMarkup(position, undefined, targetNode.attrs, node.marks);
+        }
+      });
+      if (transaction.docChanged) {
+        transaction.setMeta("addToHistory", false);
+        transaction.setMeta("preventUpdate", true);
+        this._editor.view.dispatch(transaction);
+      }
+      return true;
+    }
+    this._editor.commands.setContent(doc, false);
+    return true;
   }
 
   // Explicit conflict resolution seam. The host calls this only after the user
@@ -641,17 +682,18 @@ class BpPaperEditor extends HTMLElement {
   applyTableProjection(value, metadata = {}) {
     if (this._sourceBlock?.id != null && value?.id != null &&
         value.id !== this._sourceBlock.id) return false;
-    this._blockProp = value;
     const awaiting = this._tableStructureAwaiting;
     if (awaiting) {
       if (metadata.requestId !== awaiting.requestId ||
           !tableProjectionMatchesAction(this._sourceBlock, value, awaiting.action)) {
         return false;
       }
+      this._blockProp = value;
       awaiting.echo = { value, metadata };
       if (awaiting.saved) this._acceptTableStructureEcho();
       return true;
     }
+    this._blockProp = value;
     return this._acceptTableProjection(value);
   }
 
@@ -1241,7 +1283,9 @@ class BpPaperEditor extends HTMLElement {
     const projection = tableProjection(value);
     this._tableEditable = projection.editable;
     this._editable = this.getAttribute("editable") !== "false" && projection.editable;
-    this._editor.setEditable(this._editable, false);
+    if (this._editor.isEditable !== this._editable) {
+      this._editor.setEditable(this._editable, false);
+    }
     if (!projection.editable) {
       if (!this._tableSourceError) {
         this._tableSourceError = true;
@@ -1257,7 +1301,7 @@ class BpPaperEditor extends HTMLElement {
       if (this._discardTableDraft) {
         this._sourceBlock = value && typeof value === "object"
           ? JSON.parse(JSON.stringify(value)) : value;
-        this._editor.commands.setContent(projection.doc, false);
+        this._installTableProjectionDoc(projection.doc);
       }
       return false;
     }
@@ -1297,7 +1341,7 @@ class BpPaperEditor extends HTMLElement {
     if (!preservesDraft) {
       this._tableDraftJSON = null;
       this._tableDirtyToken = null;
-      this._editor.commands.setContent(projection.doc, false);
+      this._installTableProjectionDoc(projection.doc);
     }
     if (this._tablePendingAction && this._tableAwaitingCells.length === 0) {
       this._emitTableStructure();

@@ -8,7 +8,7 @@ const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", 
 const { window } = dom;
 for (const name of [
   "customElements", "CustomEvent", "document", "DOMParser", "Element", "Event",
-  "EventTarget", "HTMLElement", "KeyboardEvent", "MutationObserver", "Node",
+  "EventTarget", "FormData", "HTMLElement", "KeyboardEvent", "MutationObserver", "Node",
   "NodeFilter", "Selection", "Text",
 ]) globalThis[name] = window[name];
 globalThis.window = window;
@@ -424,9 +424,27 @@ try {
   });
   structureAck.rows.push([[], []]);
   live.editor.trackTableMutation(live.ops[1], "structure-1");
+  const storedBeforeRejectedStructure = clone(live.editor.block);
+  const sourceBeforeRejectedStructure = clone(live.editor._sourceBlock);
+  const renderedBeforeRejectedStructure = clone(live.editor._editor.getJSON());
   assert.equal(live.editor.applyTableProjection(structureAck, { requestId: "wrong" }), false);
+  assert.deepEqual(live.editor.block, storedBeforeRejectedStructure,
+    "a rejected same-id structure echo cannot replace the stored block getter");
+  assert.deepEqual(live.editor._sourceBlock, sourceBeforeRejectedStructure);
+  assert.equal(JSON.stringify(live.editor._editor.getJSON()),
+    JSON.stringify(renderedBeforeRejectedStructure));
   assert.equal(live.editor._editor.isEditable, false,
     "an unrelated valid projection cannot unlock positional coordinates");
+  live.editor.remove();
+  document.body.appendChild(live.editor);
+  assert.deepEqual(live.editor.block, storedBeforeRejectedStructure,
+    "disconnect/reconnect mounts the last acknowledged projection, never a rejected echo");
+  assert.deepEqual(live.editor._sourceBlock, sourceBeforeRejectedStructure);
+  assert.equal(JSON.stringify(live.editor._editor.getJSON()),
+    JSON.stringify(renderedBeforeRejectedStructure));
+  assert.equal(live.editor.querySelectorAll(".bp-paper-editor-body").length, 1);
+  assert.equal(live.editor._editor.isEditable, false,
+    "a reconnect stays locked while the acknowledged positional action is unresolved");
   live.editor.tableMutationResult(live.ops[1], true, { request_id: "structure-1" });
   assert.equal(live.editor._editor.isEditable, false,
     "a receipt without its exact resulting projection stays locked");
@@ -555,6 +573,22 @@ try {
   assert.equal(protectedMounted.editor._tableAwaitingCells.length, 0);
   assert.equal(protectedMounted.editor._editor.isEditable, true,
     "the exact source echo retires the queued topology-preserving edit");
+  assert.equal(protectedMounted.editor._editor.commands.undo(), true,
+    "an exact saved echo preserves the local undo branch");
+  assert.equal(protectedMounted.editor._editor.getJSON().content[0].content[0]
+    .content[0].content[0].text, "Beta");
+  assert.equal(protectedMounted.editor.flushPendingChanges(), true);
+  const protectedUndoAck = clone(metadataProjection);
+  protectedUndoAck.rows[0][0] = clone(protectedMounted.ops[1].cells[0].content);
+  protectedMounted.editor.block = protectedUndoAck;
+  assert.equal(protectedMounted.editor._editor.commands.redo(), true,
+    "an exact undo echo preserves the local redo branch");
+  assert.match(protectedMounted.editor._editor.getText(), /Beta queued/);
+  assert.equal(protectedMounted.editor.flushPendingChanges(), true);
+  const protectedRedoAck = clone(protectedAck);
+  protectedRedoAck.rows[0][0] = clone(protectedMounted.ops[2].cells[0].content);
+  protectedMounted.editor.block = protectedRedoAck;
+  assert.equal(protectedMounted.editor._tableAwaitingCells.length, 0);
   protectedMounted.editor.remove();
 
   const freeLinkMounted = mounted(freeLinkProjection);
@@ -562,19 +596,38 @@ try {
   retargeted.content[0].content[0].content[0].content[0].marks[0].attrs.href =
     "/papers/new";
   freeLinkMounted.editor._editor.commands.setContent(retargeted, true);
+  assert.equal(freeLinkMounted.editor.flushPendingChanges(), true);
+  assert.equal(freeLinkMounted.ops.length, 1);
   const retargetedAndTyped = clone(freeLinkMounted.editor._editor.getJSON());
   retargetedAndTyped.content[0].content[0].content[0].content[0].text =
     "Retargeted and typed";
   freeLinkMounted.editor._editor.commands.setContent(retargetedAndTyped, true);
   assert.equal(freeLinkMounted.editor.flushPendingChanges(), true);
-  assert.equal(freeLinkMounted.ops.length, 1,
-    "metadata-free href then typing also coalesces without changing anchored shape");
+  assert.equal(freeLinkMounted.ops.length, 2,
+    "metadata-free href then typing queue as two immutable shape-stable operations");
   assert.deepEqual(freeLinkMounted.ops[0].shape, freeLinkProjection.shape);
   assert.deepEqual(freeLinkMounted.ops[0].cells[0].content, [{
     type: "link",
     href: "/papers/new",
+    children: [{ type: "text", value: "Linked protected text" }],
+  }]);
+  assert.deepEqual(freeLinkMounted.ops[1].shape, freeLinkProjection.shape);
+  assert.deepEqual(freeLinkMounted.ops[1].cells[0].content, [{
+    type: "link",
+    href: "/papers/new",
     children: [{ type: "text", value: "Retargeted and typed" }],
   }]);
+  const freeLinkFirstAck = clone(freeLinkProjection);
+  freeLinkFirstAck.rows[0][0] = clone(freeLinkMounted.ops[0].cells[0].content);
+  freeLinkMounted.editor.block = freeLinkFirstAck;
+  assert.equal(freeLinkMounted.editor._tableAwaitingCells.length, 1,
+    "the first exact echo retires only the href operation");
+  assert.match(freeLinkMounted.editor._editor.getText(), /Retargeted and typed/,
+    "the later typed draft remains rendered while its own echo is pending");
+  const freeLinkSecondAck = clone(freeLinkFirstAck);
+  freeLinkSecondAck.rows[0][0] = clone(freeLinkMounted.ops[1].cells[0].content);
+  freeLinkMounted.editor.block = freeLinkSecondAck;
+  assert.equal(freeLinkMounted.editor._tableAwaitingCells.length, 0);
   freeLinkMounted.editor.remove();
 
   const incompatibleProtectedEcho = mounted(metadataProjection);
@@ -841,15 +894,6 @@ try {
   assert.equal(queueReplies.length, 1,
     "the second old-base operation waits behind the active mutation");
   assert.equal(queueEditor._tableAwaitingCells.length, 2);
-  queueHandlers.get("bp:block-update")({
-    block_id: "table-protected-queue",
-    block: { id: "table-protected-queue", type: "table", rows: "raw metadata echo" },
-    table_projection: clone(queueProjection),
-    rev: 11,
-  });
-  assert.equal(queueEditor._tableAwaitingCells.length, 2);
-  assert.equal(queueHook._exitCoordinator.hasUnsaved(), true,
-    "a metadata-only external echo with identical visible text cannot retire pending local work");
 
   const firstQueuePayload = clone(queueReplies[0].payload);
   queueReplies[0].resolve(null);
@@ -897,6 +941,155 @@ try {
   assert.equal(queueHook._exitCoordinator.hasUnsaved(), false);
   queueHook.destroyed();
   queueMain.remove();
+
+  const conflictWrapper = document.createElement("div");
+  conflictWrapper.id = "paper-ed-table-external-conflict";
+  conflictWrapper.setAttribute("phx-hook", "BarkparkPaperEditor");
+  conflictWrapper.innerHTML = `<bp-paper-editor data-editor-mode="table"></bp-paper-editor>`;
+  const conflictMain = document.createElement("main");
+  conflictMain.dataset.paperDocKey = "drafts:table-external-conflict";
+  conflictMain.dataset.paperRev = "10";
+  conflictMain.appendChild(conflictWrapper);
+  document.body.appendChild(conflictMain);
+  const conflictEditor = conflictWrapper.querySelector("bp-paper-editor");
+  const conflictProjection = { ...clone(metadataProjection), id: "table-external-conflict" };
+  conflictEditor.block = conflictProjection;
+  const conflictReplies = [];
+  const conflictHandlers = new Map();
+  const conflictHook = {
+    ...window.BarkparkPaperEditorHooks.BarkparkPaperEditor,
+    el: conflictWrapper,
+    handleEvent: (name, handler) => conflictHandlers.set(name, handler),
+    pushEvent: (_name, payload) => new Promise((resolve) =>
+      conflictReplies.push({ payload: clone(payload), resolve })),
+  };
+  conflictHook.mounted();
+  const conflictDraft = clone(conflictEditor._editor.getJSON());
+  conflictDraft.content[0].content[0].content[0].content[0].text = "Local pending source";
+  conflictEditor._editor.commands.setContent(conflictDraft, true);
+  assert.equal(conflictEditor.flushPendingChanges(), true);
+  assert.equal(conflictReplies[0].payload.if_rev, 10);
+  const retainedConflictDraft = JSON.stringify(conflictEditor._editor.getJSON());
+  conflictHandlers.get("bp:block-update")({
+    block_id: "table-external-conflict",
+    block: { id: "table-external-conflict", type: "table", rows: "raw metadata echo" },
+    table_projection: clone(conflictProjection),
+    rev: 11,
+  });
+  assert.equal(conflictEditor._tableAwaitingCells.length, 1);
+  assert.equal(JSON.stringify(conflictEditor._editor.getJSON()), retainedConflictDraft);
+  assert.equal(conflictHook._exitCoordinator.hasUnsaved(), true,
+    "an external rev 11 echo cannot retire a local if_rev 10 mutation");
+  conflictReplies[0].resolve({
+    saved: false,
+    request_id: conflictReplies[0].payload.request_id,
+    conflict: true,
+    current_rev: 11,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(conflictMain.querySelector("[data-bp-paper-conflict]"));
+  assert.equal(conflictHook._exitCoordinator.hasUnsaved(), true,
+    "the distinct conflict sequence retains its local Table draft and exit fence");
+  conflictHook.destroyed();
+  conflictMain.remove();
+
+  const interleaveWrapper = document.createElement("div");
+  interleaveWrapper.id = "paper-ed-table-sibling-interleave";
+  interleaveWrapper.setAttribute("phx-hook", "BarkparkPaperEditor");
+  interleaveWrapper.innerHTML = `<bp-paper-editor data-editor-mode="table"></bp-paper-editor>`;
+  const siblingForm = document.createElement("form");
+  siblingForm.id = "paper-caption-sibling";
+  siblingForm.className = "bp-paper-edit-form";
+  siblingForm.setAttribute("phx-change", "paper-block-autosave");
+  siblingForm.setAttribute("phx-debounce", "0");
+  siblingForm.innerHTML = `
+    <input type="hidden" name="block_id" value="caption-sibling">
+    <textarea name="text">Caption before</textarea>
+  `;
+  const interleaveMain = document.createElement("main");
+  interleaveMain.dataset.paperDocKey = "drafts:table-sibling-interleave";
+  interleaveMain.dataset.paperRev = "30";
+  interleaveMain.append(interleaveWrapper, siblingForm);
+  document.body.appendChild(interleaveMain);
+  const interleaveEditor = interleaveWrapper.querySelector("bp-paper-editor");
+  const interleaveProjection = { ...clone(metadataProjection), id: "table-sibling-interleave" };
+  interleaveEditor.block = interleaveProjection;
+  const interleaveCalls = [];
+  const recordInterleave = (kind, event, payload) => new Promise((resolve) =>
+    interleaveCalls.push({ kind, event, payload: clone(payload), resolve }));
+  const interleaveHook = {
+    ...window.BarkparkPaperEditorHooks.BarkparkPaperEditor,
+    el: interleaveWrapper,
+    handleEvent() {},
+    pushEvent: (event, payload) => recordInterleave("table", event, payload),
+    pushEventTo: (_target, event, payload) => recordInterleave("form", event, payload),
+  };
+  interleaveHook.mounted();
+  const firstInterleaveDraft = clone(interleaveEditor._editor.getJSON());
+  firstInterleaveDraft.content[0].content[0].content[0].content[0].text = "Table first";
+  interleaveEditor._editor.commands.setContent(firstInterleaveDraft, true);
+  assert.equal(interleaveEditor.flushPendingChanges(), true);
+  assert.equal(interleaveCalls.length, 1);
+  assert.equal(interleaveCalls[0].kind, "table");
+  assert.equal(interleaveCalls[0].payload.if_rev, 30);
+  const siblingText = siblingForm.querySelector("textarea");
+  siblingText.value = "Caption queued";
+  siblingText.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(interleaveCalls.length, 1,
+    "a sibling fallback form serializes behind the active Table mutation");
+  const firstInterleaveAck = clone(interleaveProjection);
+  firstInterleaveAck.rows[0][0] = clone(interleaveCalls[0].payload.cells[0].content);
+  interleaveCalls[0].resolve({
+    saved: true,
+    request_id: interleaveCalls[0].payload.request_id,
+    rev: 31,
+    table_projection: firstInterleaveAck,
+    table_projection_rev: 31,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(interleaveCalls.length, 2);
+  assert.equal(interleaveCalls[1].kind, "form");
+  assert.equal(interleaveCalls[1].event, "paper-block-autosave");
+  assert.equal(interleaveCalls[1].payload.if_rev, 31,
+    "the sibling form inherits the Table acknowledgement revision");
+  const secondInterleaveDraft = clone(interleaveEditor._editor.getJSON());
+  secondInterleaveDraft.content[0].content[0].content[0].content[0].text = "Table second";
+  interleaveEditor._editor.commands.setContent(secondInterleaveDraft, true);
+  assert.equal(interleaveEditor.flushPendingChanges(), true);
+  assert.equal(interleaveCalls.length, 2,
+    "later Table work waits behind the active sibling form save");
+  interleaveCalls[1].resolve([{
+    status: "fulfilled",
+    value: { reply: {
+      saved: true,
+      request_id: interleaveCalls[1].payload.request_id,
+      rev: 32,
+    } },
+  }]);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(interleaveCalls.length, 3);
+  assert.equal(interleaveCalls[2].kind, "table");
+  assert.equal(interleaveCalls[2].payload.if_rev, 32,
+    "the second Table mutation inherits the sibling form acknowledgement revision");
+  const secondInterleaveAck = clone(firstInterleaveAck);
+  secondInterleaveAck.rows[0][0] = clone(interleaveCalls[2].payload.cells[0].content);
+  interleaveCalls[2].resolve({
+    saved: true,
+    request_id: interleaveCalls[2].payload.request_id,
+    rev: 33,
+    table_projection: secondInterleaveAck,
+    table_projection_rev: 33,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const cleanExit = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(cleanExit);
+  assert.equal(cleanExit.defaultPrevented, false);
+  assert.equal(interleaveHook._exitCoordinator.hasUnsaved(), false,
+    "Table and sibling form settlement release the shared document exit fence");
+  interleaveHook.destroyed();
+  interleaveMain.remove();
 
   for (const badReceipt of ["missing", "malformed", "wrong-id"]) {
     const badWrapper = document.createElement("div");
