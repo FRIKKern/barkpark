@@ -98,7 +98,7 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	// edges but strictly better than shipping the met-flip unguarded.
 	if !declared && stampMergeGateFallback(sa) {
 		return useError(out, "merge_gated_criterion",
-			"refusing to stamp a MERGE-GATED criterion met: --criterion-text carries the MERGE-GATED marker, and that row is the lead's to close (a builder flipping it fabricates a done before the PR exists). Pass --merge-gated to override only if you are the lead closing the gate. (This server is too old to declare --merge-gated, so the match is on the TEXT you passed and may be a false positive on a criterion that merely MENTIONS merge-gating.)",
+			"refusing to stamp a MERGE-GATED criterion met: --criterion-text carries the MERGE-GATED marker, and that row is the lead's to close (a builder flipping it fabricates a done before the PR exists). Pass --merge-gated to override — it is an ASSERTION, not a permission: nothing checks that you are a lead, and the server cannot, because it authenticates your api_token and not the worker_id you typed. The override is RECORDED as an assertion (content.merge_gate_autostamp.stamp_overrides, carrying \"verified\": false, your asserted worker, and the token actually authenticated). (This server is too old to declare --merge-gated, so the match is on the TEXT you passed and may be a false positive on a criterion that merely MENTIONS merge-gating.)",
 			exitValidation)
 	}
 
