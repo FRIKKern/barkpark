@@ -352,9 +352,13 @@ export function blockToTiptap(block) {
   switch (block.type) {
     case "heading": {
       const level = clampLevel(block.level);
-      const text = block.text || "";
-      const node = { type: "heading", attrs: { level } };
-      if (text.length) node.content = [{ type: "text", text }];
+      const source = {};
+      for (const key of ["content", "text"]) {
+        if (Object.hasOwn(block, key)) source[key] = deepCloneJson(block[key]);
+      }
+      const node = { type: "heading", attrs: { level, bpHeadingSource: source } };
+      const inline = headingInline(source);
+      if (inline.length) node.content = inline;
       return { type: "doc", content: [node] };
     }
     case "list": {
@@ -832,6 +836,12 @@ function listItemFromTiptap(li, content) {
   return inline;
 }
 
+function headingInline(source) {
+  if (Array.isArray(source.content) && source.content.length) return inlineArrayToTiptap(source.content);
+  const text = source.text;
+  return inlineArrayToTiptap(text != null && ["string", "number", "boolean"].includes(typeof text) ? String(text) : "");
+}
+
 export function tiptapToBlock(editorJSON, blockId, blockType) {
   const doc = editorJSON || {};
   const top = (doc.content && doc.content[0]) || {};
@@ -839,6 +849,22 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
   switch (blockType) {
     case "heading": {
       const level = clampLevel(top.attrs && top.attrs.level);
+      const source = top.attrs?.bpHeadingSource;
+      if (source && typeof source === "object") {
+        const fields = deepCloneJson(source);
+        if (jsonEqual(comparableListInline(headingInline(source)), comparableListInline(top.content))) return { ...fields, level };
+        const content = tiptapInlineToPd(top.content);
+        const rich = content.some(node => node.type !== "text");
+        if ((Array.isArray(source.content) && source.content.length) || rich) {
+          fields.content = content;
+          if (!content.length && fields.text != null && ["string", "number", "boolean"].includes(typeof fields.text)) fields.text = "";
+        } else {
+          fields.text = plainText(top.content);
+        }
+        return { ...fields, level };
+      }
+      const content = tiptapInlineToPd(top.content);
+      if (content.some(node => node.type !== "text")) return { content, level };
       const text = plainText(top.content);
       return { text, level };
     }
