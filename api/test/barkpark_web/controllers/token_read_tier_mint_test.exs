@@ -206,7 +206,8 @@ defmodule BarkparkWeb.TokenReadTierMintTest do
     # Both it and the permission-tier gates answer 403 with code "forbidden", so
     # `reason` is the ONLY discriminator: the membership arm carries
     # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
-    # old `in [401, 403, 404]` was green on a deleted route and on a lost
+    # old assertion accepted any of three statuses — unauthorized, forbidden or
+    # not-found — so it was green on a deleted route and on a lost
     # authentication too.
     assert resp.status == 403,
            "a workspace-A [\"read\"] token answered #{resp.status} on workspace B's PRIVATE " <>

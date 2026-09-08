@@ -101,10 +101,10 @@ defmodule BarkparkWeb.Integration.AccountSessionMediaWriteTest do
 
       # WHICH GATE — AND IT IS NOT THE ONE THE TEST NAME IMPLIES. The refusal
       # observed here is the CSRF gate: 403 with code "csrf_required", not the
-      # membership or permission gate. The old `in [401, 403]` hid that: it was
-      # green on a CSRF rejection that never reached the authorisation check the
-      # test is about. Pinning the code is what makes the gap visible; widening it
-      # again would re-hide it.
+      # membership or permission gate. The old assertion accepted unauthorized or
+      # forbidden alike, and hid that: it was green on a CSRF rejection that never
+      # reached the authorisation check the test is about. Pinning the code is
+      # what makes the gap visible; widening it again would re-hide it.
       assert conn.status == 403
       err = Jason.decode!(conn.resp_body)["error"]
       assert err["code"] == "csrf_required"

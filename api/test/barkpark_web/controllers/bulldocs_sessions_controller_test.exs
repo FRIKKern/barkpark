@@ -152,8 +152,8 @@ defmodule BarkparkWeb.BulldocsSessionsControllerTest do
       # indistinguishable from a route miss BY DESIGN. Pinning it is what stops
       # the assertion from also passing on a genuine 403 (which would leak
       # existence) or on an authentication failure — mutation-proved: sending an
-      # invalid bearer makes this same request 401, a status the old
-      # `in [401, 403, 404]` accepted.
+      # invalid bearer makes this same request 401, a status the old three-way
+      # disjunction over unauthorized, forbidden and not-found accepted.
       assert anon.status == 404
       err = Jason.decode!(anon.resp_body)["error"]
       assert err["code"] == "not_found"

@@ -1,0 +1,12 @@
+# Per-file counts of COMMENTS in api/test/**/*_test.exs that reproduce a
+# bracketed list of two or more HTTP status literals (e.g. `[401, 403, 404]`).
+# Such a comment is byte-identical to the assertion form it describes, so it
+# answers every grep for the REMAINING work. Narrate it in prose instead.
+# RATCHET: counts may only FALL. Regenerate with --baseline after fixing.
+# Counts, NOT file:line — a line pin slides on any insertion above it.
+# KEEP THIS FILE SHORT. A tripwire that grows stops discriminating; the
+# eighth row is waved through by the seven above it. Fix the site instead.
+# Paths are RELATIVE TO THE SCAN ROOT (api/test), not the repo root, so this
+# same file is valid over a scratch copy — which is what lets --selftest arm
+# (e) judge THIS baseline rather than a rewritten one.
+1 barkpark/media/scoped_media_public_read_tier_audit_test.exs
