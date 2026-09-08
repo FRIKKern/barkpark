@@ -980,6 +980,18 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   disconnectedCallback() {
+    // LiveView may move this keyed canvas between responsive Studio columns.
+    // Custom-element reactions report that connected-to-connected reparent as a
+    // disconnect followed synchronously by a reconnect. Defer destructive
+    // teardown one microtask so the same editor, history, and pending debounce
+    // survive that move; a genuine removal is still torn down immediately after
+    // the current DOM mutation finishes.
+    queueMicrotask(() => {
+      if (!this.isConnected) this._teardownDisconnected();
+    });
+  }
+
+  _teardownDisconnected() {
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;

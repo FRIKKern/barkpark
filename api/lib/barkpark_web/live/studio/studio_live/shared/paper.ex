@@ -516,6 +516,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket =
               socket
               |> sync_paper_edit_doc()
+              |> retain_canvas_insertions(slug, doc_field(paper, :content), context, ops)
               |> push_canvas_echo(request_id)
               |> push_task_previews()
               |> push_block_renders()
@@ -1119,13 +1120,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             {nil, []}
         end
 
-      runs = canvas_echo_runs(slug, blocks)
-
       rev = doc_field(socket.assigns[:paper_doc], :content) |> then(&get_in(&1 || %{}, ["rev"]))
-      push_event(socket, "bp:canvas-update", %{runs: runs, rev: rev, request_id: request_id})
+
+      retained = PaperCanvas.retained_ids(socket.assigns[:paper_canvas_retained], slug)
+      runs = canvas_echo_runs(slug, blocks, retained)
+
+      push_event(
+        socket,
+        "bp:canvas-update",
+        %{runs: runs, rev: rev, request_id: request_id}
+      )
     else
       socket
     end
+  end
+
+  @doc false
+  # Retention belongs to this mounted editor, never the stored document.
+  def retain_canvas_insertions(socket, slug, before_content, context, ops) do
+    after_content = doc_field(socket.assigns[:paper_doc], :content) || %{}
+    prior = PaperCanvas.retained_ids(socket.assigns[:paper_canvas_retained], slug)
+    ids = PaperCanvas.retain_insertions(prior, before_content, after_content, context, ops)
+    assign(socket, :paper_canvas_retained, %{slug: slug, ids: ids})
   end
 
   @doc false
@@ -1156,16 +1172,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   def table_confirmation(result, _op, _blocks, _rev), do: result
 
   @doc false
-  def canvas_echo_runs(slug, blocks) when is_binary(slug) and is_list(blocks) do
+  def canvas_echo_runs(slug, blocks, retained_ids \\ MapSet.new())
+
+  def canvas_echo_runs(slug, blocks, retained_ids) when is_binary(slug) and is_list(blocks) do
     blocks = Content.ensure_block_ids(blocks)
-    run_entries(slug, blocks) ++ nested_canvas_echo_runs(slug, blocks)
+    run_entries(slug, blocks, retained_ids) ++ nested_canvas_echo_runs(slug, blocks)
   end
 
-  def canvas_echo_runs(_slug, _blocks), do: []
+  def canvas_echo_runs(_slug, _blocks, _retained_ids), do: []
 
-  defp run_entries(slug, blocks) do
+  defp run_entries(slug, blocks, retained_ids \\ MapSet.new()) do
     blocks
-    |> PaperCanvas.partition_runs()
+    |> PaperCanvas.partition_runs(retained_ids)
     |> PaperCanvas.with_run_ordinals()
     |> Enum.flat_map(fn
       {:run, run_blocks, ordinal} ->
@@ -1706,6 +1724,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
         assign(socket,
           paper_doc: fresh,
+          paper_canvas_retained:
+            PaperCanvas.refresh_retained(socket.assigns[:paper_canvas_retained], slug, blocks),
           paper_rev: Map.get(content, "rev") || 0,
           paper_link_details: paper_link_details(socket, fresh, blocks)
         )
@@ -1939,6 +1959,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc false
   def setup_paper_view(socket, %{content: content} = paper) when is_map(content) do
+    retained =
+      PaperCanvas.refresh_retained(
+        socket.assigns[:paper_canvas_retained],
+        paper.doc_id,
+        content["blocks"] || []
+      )
+
     blocks = reader_paper_blocks(socket, paper)
     rev = Map.get(content, "rev") || 0
     html = reader_paper_html(socket, paper)
@@ -1953,6 +1980,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_html: html,
         paper_block_mode: true,
         paper_edit_mode: false,
+        paper_canvas_retained: retained,
         paper_link_details: paper_link_details(socket, paper, blocks),
         backlinks_used_by: used_by,
         backlinks_linked: linked,
@@ -1992,6 +2020,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_html: html,
         paper_block_mode: false,
         paper_edit_mode: false,
+        paper_canvas_retained: nil,
         paper_link_details: %{},
         backlinks_used_by: used_by,
         backlinks_linked: linked,
@@ -2097,6 +2126,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       socket
       |> assign(
         editor_view: :form,
+        paper_canvas_retained: nil,
         paper_doc: nil,
         paper_rev: 0,
         paper_html: "",
@@ -2112,6 +2142,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     else
       assign(socket,
         editor_view: :form,
+        paper_canvas_retained: nil,
         paper_link_details: %{},
         backlinks_used_by: [],
         backlinks_linked: [],

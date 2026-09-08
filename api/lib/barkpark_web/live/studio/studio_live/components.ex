@@ -43,6 +43,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:paper_html, :string, default: "")
   attr(:paper_block_mode, :boolean, default: false)
   attr(:paper_edit_mode, :boolean, default: false)
+  attr(:paper_canvas_retained, :any, default: nil)
   # t9 — live task-block previews (block_id ⇒ preview entry), display-only rows
   # the Edit-mode boundary widgets paint (Shared.push_task_previews fills it).
   attr(:task_previews, :map, default: %{})
@@ -316,6 +317,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   api_token_raw={@api_token_raw}
                   scope_prefix={@scope_prefix}
                   canvas_eligible={true}
+                  canvas_retained={@paper_canvas_retained}
                   task_previews={@task_previews}
                   paper_links={@paper_links}
                   save_status={@save_status}
@@ -1551,6 +1553,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       <%= cond do %>
         <% @editor_view == :paper -> %>
         <.studio_paper_view
+          paper_canvas_retained={Map.get(assigns, :paper_canvas_retained)}
           focus_on_mount={@focus_doc_on_open}
           paper_doc={@paper_doc}
           paper_rev={@paper_rev}

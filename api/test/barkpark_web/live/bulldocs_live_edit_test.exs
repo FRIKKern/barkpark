@@ -523,6 +523,43 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert block_text(slug, "b-extra") == "Stale tab"
     end
 
+    test "new table keeps one reader editor until leaving Edit releases session ownership", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+      request_id = Ecto.UUID.generate()
+
+      render_hook(view, "paper-ops", %{
+        "request_id" => request_id,
+        "if_rev" => assigns_of(view).paper_rev,
+        "container_kind" => "document",
+        "container_run_ids" => ["b-head", "b-body", "b-extra"],
+        "ops" => [
+          %{
+            "op" => "append-block",
+            "block" => %{"id" => "new-table", "type" => "table", "rows" => [["Native"]]}
+          }
+        ]
+      })
+
+      assert_push_event(view, "bp:canvas-update", %{
+        request_id: ^request_id,
+        runs: [%{blocks: blocks}]
+      })
+
+      assert Enum.count(blocks, &(&1["id"] == "new-table")) == 1
+      refute has_element?(view, ~s(bp-paper-editor[data-editor-mode="table"]))
+      assert assigns_of(view).paper_canvas_retained.ids == MapSet.new(["new-table"])
+      saved = stored_blocks(slug)
+      render_click(view, "paper-toggle-edit", %{})
+      assert assigns_of(view).paper_canvas_retained == nil
+      render_click(view, "paper-toggle-edit", %{})
+      assert has_element?(view, ~s(bp-paper-editor[data-editor-mode="table"]))
+      assert stored_blocks(slug) == saved
+    end
+
     test "a paper-ops batch folds atomically through apply_paper_block_ops", %{
       conn: conn,
       slug: slug

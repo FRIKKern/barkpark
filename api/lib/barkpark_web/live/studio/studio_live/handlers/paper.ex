@@ -19,7 +19,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     if socket.assigns[:editor_view] == :paper do
       next_edit_mode = !socket.assigns[:paper_edit_mode]
 
-      socket = assign(socket, paper_edit_mode: next_edit_mode)
+      socket = assign(socket, paper_edit_mode: next_edit_mode, paper_canvas_retained: nil)
 
       socket =
         if next_edit_mode or not socket.assigns[:paper_block_mode] do

@@ -794,6 +794,112 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
     # The canvas hook routes each run to its <bp-paper-canvas> and calls
     # applyServerBlocks — an own-echo resets the baseline (no caret move), an external
     # edit re-renders.
+    test "inserting a section in the final run retains its original wrapper",
+         %{conn: conn} do
+      assert {:ok, _} =
+               Content.apply_paper_block_ops(
+                 @slug,
+                 [
+                   %{
+                     "op" => "append-block",
+                     "block" => %{"id" => "first-table", "type" => "table", "rows" => [["First"]]}
+                   },
+                   %{
+                     "op" => "append-block",
+                     "block" => %{
+                       "id" => "target",
+                       "type" => "paragraph",
+                       "content" => [%{"type" => "text", "value" => "Replace me"}]
+                     }
+                   }
+                 ],
+                 @dataset
+               )
+
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      open_editor(view)
+      request_id = Ecto.UUID.generate()
+
+      render_hook(view, "paper-ops", %{
+        "request_id" => request_id,
+        "if_rev" => paper_rev(view),
+        "container_kind" => "document",
+        "container_run_ids" => ["target"],
+        "ops" => [
+          %{
+            "op" => "replace-block",
+            "id" => "target",
+            "block" => %{
+              "id" => "new-section",
+              "type" => "section",
+              "title" => "New section",
+              "blocks" => [
+                %{"id" => "nested", "type" => "paragraph", "content" => []}
+              ]
+            }
+          }
+        ]
+      })
+
+      assert_push_event(view, "bp:canvas-update", %{
+        request_id: ^request_id,
+        runs: runs
+      })
+
+      assert %{blocks: [%{"id" => "new-section"}]} =
+               Enum.find(runs, &(&1.run_id == "#{@slug}-run-1"))
+
+      refute has_element?(view, ~s([data-test-id="paper-section-editor"]))
+    end
+
+    test "an acknowledged table insertion stays in its originating run",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      open_editor(view)
+      request_id = Ecto.UUID.generate()
+
+      render_hook(view, "paper-ops", %{
+        "request_id" => request_id,
+        "if_rev" => paper_rev(view),
+        "container_kind" => "document",
+        "container_run_ids" => ["h-1", "p-intro", "c-note", "p-after", "d-end"],
+        "ops" => [
+          %{
+            "op" => "insert-after",
+            "afterId" => "p-intro",
+            "block" => %{
+              "id" => "inserted-table",
+              "type" => "table",
+              "rows" => [["Saved once"]]
+            }
+          }
+        ]
+      })
+
+      assert_push_event(view, "bp:canvas-update", %{
+        request_id: ^request_id,
+        runs: runs
+      })
+
+      assert [%{run_id: @run0_id, blocks: blocks}] = runs
+      assert Enum.count(blocks, &(&1["id"] == "inserted-table")) == 1
+      assert has_element?(view, ~s(#paper-canvas-#{@run0_id}))
+      refute has_element?(view, ~s(bp-paper-editor[data-editor-mode="table"]))
+
+      socket = :sys.get_state(view.pid).socket
+      paper = socket.assigns.paper_doc
+      rebuilt = BarkparkWeb.Studio.StudioLive.Shared.Paper.setup_paper_view(socket, paper)
+      assert rebuilt.assigns.paper_canvas_retained.ids == MapSet.new(["inserted-table"])
+
+      without_table =
+        put_in(paper.content["blocks"], Enum.reject(blocks, &(&1["id"] == "inserted-table")))
+
+      pruned = BarkparkWeb.Studio.StudioLive.Shared.Paper.setup_paper_view(rebuilt, without_table)
+      assert pruned.assigns.paper_canvas_retained.ids == MapSet.new()
+      cleared = BarkparkWeb.Studio.StudioLive.Shared.Paper.clear_paper_view(rebuilt)
+      assert cleared.assigns.paper_canvas_retained == nil
+    end
+
     test "S4a: a paper-ops batch pushes bp:canvas-update with the confirmed run blocks (flag ON)",
          %{conn: conn} do
       {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
