@@ -3,6 +3,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
 
   import Phoenix.LiveViewTest
 
+  alias Barkpark.PortableDoc.Render
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
@@ -90,6 +91,10 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
     assert html =~ ~s(data-test-id="paper-figure-editor")
     assert html =~ ~s(id="paper-ed-child")
     assert html =~ ~s(id="figure-form-figure")
+    assert html =~ ~s(class="bp-paper-edit-form bp-paper-figure-caption-form")
+    assert html =~ ~s(class="bp-paper-inline-text bp-paper-figure-caption-input")
+    assert html =~ ~s(phx-hook="BarkparkPaperAutoSize")
+    assert html =~ ~s(aria-label="Figure caption")
     assert Enum.empty?(LazyHTML.query(tree, "form form"))
     refute html =~ ~s(data-test-id="paper-canvas-run")
   end
@@ -102,6 +107,82 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
     assert html =~ ~s(data-test-id="paper-form-editor")
     assert html =~ ~s(data-test-id="paper-figure-caption-editor")
     assert Enum.empty?(LazyHTML.query(tree, "form form"))
+  end
+
+  test "an image child rests as the exact reader image with an accessible picker fallback" do
+    child = %{
+      "id" => "image-child",
+      "type" => "image",
+      "src" => "/media/files/figure.jpg",
+      "alt" => "A trail map",
+      "width" => 960,
+      "height" => 540,
+      "opaque" => %{"assetId" => "asset-1"}
+    }
+
+    html =
+      render_component(&PaperEditor.paper_block_fields/1,
+        block: figure(child),
+        dataset: "production",
+        scope_prefix: "/w/default/p/default",
+        api_token_raw: "writer-token",
+        picker_browse: true
+      )
+
+    tree = LazyHTML.from_fragment(html)
+    preview = LazyHTML.query(tree, "[data-test-id='paper-figure-image-preview']")
+    trigger = LazyHTML.query(tree, "[data-test-id='paper-figure-image-edit-trigger']")
+    picker = LazyHTML.query(tree, "[data-test-id='paper-figure-image-picker']")
+    frame = LazyHTML.query(tree, "figure.bp-paper-figure-editor-frame")
+
+    assert html =~ Render.render_block(child, %{style: :article})
+    assert LazyHTML.attribute(preview, "data-figure-id") == ["figure"]
+    assert LazyHTML.attribute(preview, "data-child-id") == ["image-child"]
+    assert LazyHTML.attribute(preview, "phx-hook") == ["BarkparkFigureImageBridge"]
+    assert LazyHTML.attribute(preview, "data-block-id") == ["image-child"]
+    assert LazyHTML.attribute(preview, "data-image-src") == ["/media/files/figure.jpg"]
+    assert LazyHTML.attribute(trigger, "role") == ["button"]
+    assert LazyHTML.attribute(trigger, "tabindex") == ["0"]
+    assert LazyHTML.attribute(trigger, "aria-label") == ["Replace figure image"]
+    assert LazyHTML.attribute(trigger, "aria-expanded") == ["false"]
+    assert LazyHTML.attribute(picker, "open") == []
+    assert html =~ ~s(data-test-id="paper-block-image-picker")
+    assert html =~ ~s(data-paper-figure-image-picker)
+    assert html =~ ~s(value="/media/files/figure.jpg")
+    assert html =~ ~s(dataset="production")
+    assert html =~ ~s(scope-prefix="/w/default/p/default")
+    assert html =~ ~s(data-token="writer-token")
+
+    assert LazyHTML.attribute(frame, "style") == [
+             "margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:visible"
+           ]
+  end
+
+  test "an image child stays a passive exact reader image when media browsing is unavailable" do
+    child = %{
+      "id" => "image-child",
+      "type" => "image",
+      "src" => "/media/files/figure.jpg",
+      "alt" => "A trail map"
+    }
+
+    html =
+      render_component(&PaperEditor.paper_block_fields/1,
+        block: figure(child),
+        picker_browse: false
+      )
+
+    tree = LazyHTML.from_fragment(html)
+    preview = LazyHTML.query(tree, "[data-test-id='paper-figure-image-preview']")
+    trigger = LazyHTML.query(tree, "[data-test-id='paper-figure-image-edit-trigger']")
+
+    assert html =~ Render.render_block(child, %{style: :article})
+    assert LazyHTML.attribute(preview, "phx-hook") == []
+    assert LazyHTML.attribute(trigger, "role") == []
+    assert LazyHTML.attribute(trigger, "tabindex") == []
+    assert LazyHTML.attribute(trigger, "aria-label") == []
+    refute html =~ ~s(data-test-id="paper-figure-image-picker")
+    refute html =~ ~s(data-test-id="paper-block-image-picker")
   end
 
   test "missing, nil, scalar, and unstable children remain honest read-only previews" do

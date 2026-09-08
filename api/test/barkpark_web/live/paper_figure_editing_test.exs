@@ -33,6 +33,66 @@ defmodule BarkparkWeb.PaperFigureEditingTest do
   end
 
   for host <- [:public, :studio] do
+    test "#{host}: Figure image picker patches only the singular child source and repaints", %{
+      conn: conn
+    } do
+      host = unquote(host)
+      {slug, original} = create_image_figure()
+      {view, _path} = mount_editor(conn, host, slug)
+
+      assert has_element?(
+               view,
+               "[data-test-id='paper-figure-image-preview'] img[src='/media/original.jpg']"
+             )
+
+      assert has_element?(
+               view,
+               "[data-test-id='paper-block-image-picker'][value='/media/original.jpg']"
+             )
+
+      refute has_element?(view, "[data-test-id='paper-canvas-run']")
+
+      request = Ecto.UUID.generate()
+
+      params = %{
+        "ops" => [
+          %{
+            "op" => "patch-block",
+            "id" => "figure-image",
+            "patch" => %{"src" => "/media/replacement.jpg"}
+          }
+        ],
+        "container_kind" => "figure",
+        "container_id" => "figure",
+        "container_run_ids" => ["figure-image"],
+        "request_id" => request,
+        "if_rev" => socket_of(view).assigns.paper_rev
+      }
+
+      render_hook(view, "paper-ops", params)
+      assert_reply(view, %{saved: true, request_id: ^request, replayed: false, rev: revision})
+
+      [saved] = stored(slug).content["blocks"]
+      original_child = original["blocks"] |> hd() |> Map.fetch!("child")
+      assert saved["child"] == Map.put(original_child, "src", "/media/replacement.jpg")
+      assert saved["caption"] == "Figure 1. Original caption"
+      assert saved["opaque"] == %{"outer" => true}
+
+      assert has_element?(
+               view,
+               "[data-test-id='paper-figure-image-preview'] img[src='/media/replacement.jpg']"
+             )
+
+      assert has_element?(
+               view,
+               "[data-test-id='paper-figure-image-preview'][data-image-src='/media/replacement.jpg']"
+             )
+
+      render_hook(view, "paper-ops", params)
+      assert_reply(view, %{saved: true, request_id: ^request, replayed: true, rev: ^revision})
+      assert hd(stored(slug).content["blocks"]) == saved
+    end
+
     test "#{host}: Figure child and caption persist independently with exact retry and reload", %{
       conn: conn
     } do
@@ -149,7 +209,7 @@ defmodule BarkparkWeb.PaperFigureEditingTest do
       {:ok, reloaded, _} = live(conn, path)
       toggle_public_editor(reloaded, host)
       assert has_element?(reloaded, "[data-test-id='paper-figure-editor']")
-      assert has_element?(reloaded, "input[name='caption'][value='Edited caption']")
+      assert has_element?(reloaded, "textarea[name='caption']", "Edited caption")
       render_hook(reloaded, "paper-block-autosave", caption_params)
       assert_reply(reloaded, %{saved: true, request_id: ^caption_request, replayed: true})
       assert hd(stored(slug).content["blocks"]) == caption_saved
@@ -190,6 +250,42 @@ defmodule BarkparkWeb.PaperFigureEditingTest do
           slug: slug,
           dataset: @dataset,
           title: "Figure editing",
+          blocks: blocks
+        })
+      )
+
+    original = Map.put(paper.content, "blocks", blocks)
+    paper |> Ecto.Changeset.change(content: original) |> Repo.update!()
+    {slug, original}
+  end
+
+  defp create_image_figure do
+    slug = "figure-image-editing-#{System.unique_integer([:positive])}"
+
+    blocks = [
+      %{
+        "id" => "figure",
+        "type" => "figure",
+        "caption" => "Figure 1. Original caption",
+        "opaque" => %{"outer" => true},
+        "child" => %{
+          "id" => "figure-image",
+          "type" => "image",
+          "src" => "/media/original.jpg",
+          "alt" => "Original description",
+          "width" => 960,
+          "height" => 540,
+          "opaque" => %{"assetId" => "asset-original", "future" => [1, 2]}
+        }
+      }
+    ]
+
+    {:ok, paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          dataset: @dataset,
+          title: "Figure image editing",
           blocks: blocks
         })
       )
