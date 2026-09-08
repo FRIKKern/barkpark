@@ -347,7 +347,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
     assert LazyHTML.attribute(
              LazyHTML.query(form, "button[value='remove-column:0']"),
              "aria-describedby"
-           ) == ["column-columns-0-remove-reason"]
+           ) == ["column-Y29sdW1ucw-0-remove-reason"]
 
     assert LazyHTML.text(
              LazyHTML.query(
@@ -401,6 +401,31 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
              LazyHTML.query(zero, "button[name='column-action']"),
              "value"
            ) == ["add-column"]
+  end
+
+  test "Columns removal reason uses a unique DOM-safe ID without changing authored identity" do
+    authored_id = "columns: foo/[tracks]#?"
+
+    tree =
+      %{"id" => authored_id, "type" => "columns", "columns" => [[]]}
+      |> render_fields()
+      |> LazyHTML.from_fragment()
+
+    form = LazyHTML.query(tree, "[data-test-id='paper-columns-structure-editor']")
+    button = LazyHTML.query(form, "button[value='remove-column:0']")
+    [reason_id] = LazyHTML.attribute(button, "aria-describedby")
+    reason = LazyHTML.query(form, "##{reason_id}")
+
+    assert reason_id ==
+             "column-#{Base.url_encode64(authored_id, padding: false)}-0-remove-reason"
+
+    refute reason_id =~ ~r/\s/
+    assert LazyHTML.attribute(reason, "id") == [reason_id]
+    assert Enum.count(reason) == 1
+
+    assert LazyHTML.attribute(LazyHTML.query(form, "input[name='block_id']"), "value") == [
+             authored_id
+           ]
   end
 
   test "generic Beta recursively edits every canonical Columns child" do

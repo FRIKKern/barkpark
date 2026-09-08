@@ -2593,7 +2593,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     <legend>Column <%= column_index + 1 %></legend>
                     <input type="hidden" name={"column-#{column_index}-child-count"} value={length(column)} />
                     <% remove_reason = column_track_remove_reason(@block["columns"], column_index) %>
-                    <% remove_reason_id = "column-#{@id}-#{column_index}-remove-reason" %>
+                    <% remove_reason_id = column_track_remove_reason_id(@id, column_index) %>
                     <button type="submit" name="column-action" value={"remove-column:#{column_index}"} disabled={not is_nil(remove_reason)} aria-describedby={remove_reason && remove_reason_id} class="btn btn-destructive btn-sm">Remove column</button>
                     <span :if={remove_reason} id={remove_reason_id} class="bp-paper-lock-note" data-test-id="paper-column-remove-reason"><%= remove_reason %></span>
                     <div :for={{child, child_index} <- Enum.with_index(column)} class="bp-paper-edit-actions">
@@ -3762,6 +3762,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       {:error, _reason} ->
         "This column cannot be removed."
     end
+  end
+
+  defp column_track_remove_reason_id(block_id, column_index) do
+    encoded_id = Base.url_encode64(block_id, padding: false)
+    "column-#{encoded_id}-#{column_index}-remove-reason"
   end
 
   defp section_renderable?(%{"blocks" => blocks} = block) when is_list(blocks),
