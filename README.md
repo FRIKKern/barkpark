@@ -84,19 +84,22 @@ Save this complete schema as `recipe.json`:
 }
 ```
 
-Apply it, then create a published recipe. This example is public content; use the
-sample values below.
+Apply it, create a draft, then publish it. This example is public content; use
+the sample values below.
 
 ```bash
 bp schema apply --file recipe.json --yes
-bp doc create recipe --set _id=recipe-pancakes --set title=Pancakes --set minutes:=15 --publish --yes
+bp doc create recipe --set _id=recipe-pancakes --set title=Pancakes --set minutes:=15 --yes
+bp doc publish recipe recipe-pancakes --yes
 bp doc get recipe recipe-pancakes -o json
 ```
 
-In the returned document's content, look for:
+The JSON response includes these fields:
 
 ```json
 {
+  "_id": "recipe-pancakes",
+  "_type": "recipe",
   "title": "Pancakes",
   "minutes": 15
 }
