@@ -1024,6 +1024,19 @@ defmodule BarkparkWeb.TasksController do
           reason: "not_ready",
           arm: "queue_gated",
           execution_class: QueueGate.execution_class(c, worker_id),
+          # THE CLASSIFICATION IS QueueGate'S AND IS LEFT EXACTLY AS COMPUTED —
+          # this field only says what it was DERIVED FROM. `QueueGate`'s notion
+          # of a live claim is `live_claim_worker/1`: a worker name AND no close
+          # stamp, with no timestamp comparison anywhere in it. So a claim whose
+          # lease expired days ago still reads LIVE there and still yields
+          # `foreign_claimed`. Without this note the envelope contradicted
+          # itself — the message saying "nobody holds this row and there is no
+          # one to ask" beside a field saying `foreign_claimed` — and A MACHINE
+          # READER KEYS ON THE FIELD, NOT THE PROSE (internal/cli's claim path
+          # renders `execution_class` directly). Fixing QueueGate is a separate
+          # row: its blast radius is every consumer of `execution_class`.
+          execution_class_note:
+            if(stale_map, do: "derived from a STALE claim map — the lease has expired"),
           gate_reason: if(is_map(gate), do: Map.get(gate, "reason")),
           stale_claim_map: stale_map,
           message:
