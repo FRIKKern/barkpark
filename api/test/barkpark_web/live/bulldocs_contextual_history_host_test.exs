@@ -94,10 +94,14 @@ defmodule BarkparkWeb.BulldocsContextualHistoryHostTest do
 
     assert image_src(slug) == "/before.png"
 
-    assert {:reply, replay, _socket} =
-             BulldocsLive.handle_event("paper-history-step", params, undone_socket)
+    newer_halt = %{reason: :newer_lifecycle_halt}
+    halted_socket = Phoenix.Component.assign(undone_socket, :paper_halt, newer_halt)
+
+    assert {:reply, replay, replayed_socket} =
+             BulldocsLive.handle_event("paper-history-step", params, halted_socket)
 
     assert replay == %{undo | replayed: true}
+    assert replayed_socket.assigns.paper_halt == newer_halt
     assert image_src(slug) == "/before.png"
   end
 

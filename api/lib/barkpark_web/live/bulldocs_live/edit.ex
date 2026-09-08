@@ -439,12 +439,12 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
           socket
           |> sync()
           |> reconcile_canvas(request_id)
+          |> assign(:paper_halt, nil)
         end
 
       socket
       |> assign(:save_status, "Auto-saved")
       |> assign(:last_save_ok?, true)
-      |> assign(:paper_halt, nil)
       |> assign(:last_save_result, history_receipt_result(receipt, request_id, outcome))
     else
       {:error, :denied} -> failed_history_step(socket, request_id, :history_unavailable, true)
