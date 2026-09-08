@@ -1,9 +1,12 @@
 <!-- doc-tier: human | canonical-for: agents-md-onramp | budget: 900tok -->
 # AGENTS.md — the one teach block
 
-`AGENTS.md` is the tool-agnostic convergence standard (~two dozen agents read it: Codex, Aider, and a growing list). One file at your repo root, and any of them knows the Barkpark claim-first contract before it touches the board. `bp onramp agents-md` emits that block — the ONE canonical teach text — so you never hand-copy it.
-
-**Register the movement** — every unit of work runs under a claimed `bp` task: claim before you work, stamp evidence as you prove it, close on the claim epoch. The full doctrine, and the three ways a registration silently does not happen, is in [Agent Onramps](AGENT-ONRAMPS.md).
+`AGENTS.md` gives coding agents shared instructions for working in a repository.
+`bp onramp agents-md` generates a managed Barkpark block for the repository root.
+The block tells agents to claim a `bp` task before starting, record evidence as
+they verify work, and close the task using the claim epoch. The same task body
+also appears in the Cursor, Claude, and Codex wrappers. See
+[Register the movement](AGENT-ONRAMPS.md) for the full task-tracking instructions.
 
 ## Emit it
 
