@@ -785,6 +785,27 @@ defmodule Barkpark.Content do
           opts
         )
 
+  @doc "Apply one server-authorized contextual Paper history continuation exactly once."
+  def apply_paper_contextual_history_once(
+        slug,
+        history_ref,
+        action,
+        dataset,
+        request_id,
+        principal_key,
+        opts \\ []
+      ),
+      do:
+        Papers.BlockOps.apply_paper_contextual_history_once(
+          slug,
+          history_ref,
+          action,
+          dataset,
+          request_id,
+          principal_key,
+          opts
+        )
+
   @doc "Apply a single portable-doc op to any Expectation-bearing document. See `Content.Papers`."
   def apply_document_block_op(doc_id, type, op, dataset, opts \\ []),
     do: Papers.apply_document_block_op(doc_id, type, op, dataset, opts)
