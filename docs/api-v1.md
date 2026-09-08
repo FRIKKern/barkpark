@@ -146,7 +146,7 @@ Every list `result` carries `total` (grand total, stable across pages), `hasMore
 
 **`count` means opposite things on the two routes that carry it — it is legacy, prefer `total`.** Neither was re-pointed: that would silently break whichever consumer reads it correctly today.
 
-| Route [token] | Rows key | `count` | Also |
+| Route | Rows key | `count` | Also |
 |---|---|---|---|
 | `GET /v1/media/:ds` | `assets` | **grand total** (≡ `total`) | — |
 | `GET /v1/media/:ds/collections` | `collections` | **page rows** | — |
