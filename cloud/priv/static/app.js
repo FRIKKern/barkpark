@@ -6628,10 +6628,10 @@
   // classifyBp collapses the fleet fields GET /v1/barkparks already returns
   // (provision/deprovision status, suspended, health_status, agent_status,
   // update_state, last_seen_at, queued_deploy_age_seconds, commit_ancestry,
-  // deploy_rate) into exactly ONE of the TWELVE ranked states this console
-  // classifies (of the decision-32 fixture's fourteen — see the ladder's
-  // ORDER-ONLY note) of charter
-  // decision 15 — the single attention-order spec. Both statusOf (the pill) and
+  // deploy_rate, pressure) into exactly ONE of the FOURTEEN ranked states of
+  // charter decision 15 — the single attention-order spec. Fourteen is the
+  // decision-32 fixture's whole vocabulary: since dr-w5-followup the console
+  // can PRODUCE every rung it orders, and the named classifier gap is empty. Both statusOf (the pill) and
   // attentionRank/bucketOf (the queue + rollup) derive from it, so the pill's
   // colour and the queue's order can never disagree. This is the JS twin of
   // slice 9's Go statusRole/attention order; they MUST agree on ordering.
@@ -6658,7 +6658,7 @@
     // last_seen_at null they were never measured, so they cannot rank this box.
     // This arm is checked BEFORE degraded because unknown is a different state,
     // not a lesser one; the ladder below is where its urgency is expressed.
-    if (live && bp.last_seen_at == null) return "unreported";      // 7
+    if (live && bp.last_seen_at == null) return "unreported";      // 9
     if (live && !healthy) return "degraded";                       // 4
     // dr-w10-s1: THE DEPLOY VERDICT, the Go twin's arm verbatim
     // (cloud_status_cmd.go attentionStatus `case live && deploysFailing(b)`).
@@ -6674,6 +6674,22 @@
     // slice it was rendered by commitBehindCell and ranked by nothing, so a
     // diverged box classified `ok` and sat in HEALTHY.
     if (live && divergedByCommits(bp)) return "diverged";          // 6
+    // dr-w5-followup: THE VITALS RUNGS, and they mirror the Go twin's arms in
+    // the same place in the same order (cloud_status_cmd.go attentionStatus,
+    // `case live && strained(b)` then `case live && filling(b)`) — after the
+    // deploy verdict, before the queue. A confirmed failure outranks a capacity
+    // signal; a box's own capacity outranks its stuck queue.
+    //
+    // THE INPUTS WERE ALREADY ON THIS ROW. router.ex merge_pressure/2 puts
+    // cpu_cores, load15/load1 and disk_used_percent on EVERY fleet row, and
+    // this file has read bp.pressure since the slot-pair work — so these arms
+    // widened no payload and touched no second surface.
+    //
+    // D42's factual arm lives inside the predicates, never here: an absent
+    // pressure block, an all-null one, and a quiet metered box are SILENCES and
+    // stay `ok`. Only a POSITIVE measured reading at or over the fence fires.
+    if (live && strainedBox(bp)) return "strained";                // 7
+    if (live && fillingBox(bp)) return "filling";                  // 8
     // jpf-w1 D7: a queued deployment no builder has claimed for 5 minutes.
     // AFTER degraded/unreported — a sick box's stuck queue is a SYMPTOM, so
     // the box's own condition outranks it — and BEFORE behind. The threshold
@@ -6681,7 +6697,7 @@
     // raw age, nil when nothing is queued, and nil NEVER alarms (an absent
     // field on an older CP must not read as stalled).
     if (live && typeof bp.queued_deploy_age_seconds === "number" &&
-        bp.queued_deploy_age_seconds >= 300) return "deploy_stalled"; // 8
+        bp.queued_deploy_age_seconds >= 300) return "deploy_stalled"; // 10
     // dr-w25: TWO independent sources can say `behind`, and until this slice the
     // console read only the weaker one. `update_state` is the box's RELEASE-TAG
     // self-grade; `commit_ancestry` is the control plane's own compare of the
@@ -6693,10 +6709,10 @@
     // attentionStatus: `live && (b.UpdateState == "behind" || behindByCommits(b))`)
     // — same rung, same label, same bucket; it simply stops missing the boxes
     // whose release-tag grade cannot express the gap.
-    if (live && (bp.update_state === "behind" || behindByCommits(bp))) return "behind"; // 9
-    if (removing) return "removing";                              // 10
-    if (!host) return "provisioning";                            // 11 (rank-2 already excluded)
-    return "ok";                                                // 12
+    if (live && (bp.update_state === "behind" || behindByCommits(bp))) return "behind"; // 11
+    if (removing) return "removing";                              // 12
+    if (!host) return "provisioning";                            // 13 (rank-2 already excluded)
+    return "ok";                                                // 14
   }
 
   // ── THE LADDER IS AN ORDER, NOT A HAND-TYPED NUMBERING (dr-w10 ruling A) ──
@@ -6739,23 +6755,26 @@
     { state: "ok",              bucket: "healthy" },
   ];
 
-  // THE NAMED GAP, and it is a gap in the CLASSIFIER, not in the ladder.
-  // These rungs are ORDERED here (so every other state sits on its true rung)
-  // and are not yet PRODUCED by classifyBp, because their inputs are not on the
-  // fleet payload this console reads: `strained` and `filling` need the load and
-  // disk vitals, and no fleet row carries them. Naming them HERE is what keeps
-  // the closed-enum guard honest: a rung added to the ladder that is NOT named
-  // here must have a classifyBp arm and a statusOf arm, or the enum test reds.
-  // (The name says what these rungs ARE — ORDERED ONLY. It deliberately
-  // avoids the word the dr-w1-s2 guard forbids in this file: that token is a
+  // THE NAMED GAP — rungs this file ORDERS but cannot PRODUCE. IT IS EMPTY, and
+  // that is the point of keeping it: a rung added to the ladder with no
+  // classifyBp arm and no statusOf arm must be listed here or the enum test
+  // reds, so "ordered" and "classified" can never be silently conflated.
+  // (The name says what such rungs ARE — ORDERED ONLY. It deliberately avoids
+  // the word the dr-w1-s2 guard forbids in this file: that token is a
   // deploy-LEDGER failure class, and app.js must never name one.)
   //
-  // `deploys_failing` and `diverged` were ORDER-ONLY for exactly one commit —
-  // the mirror carried the ladder before the classifier could produce either —
-  // and are now CLASSIFIED (see the two arms in classifyBp). A gap list is a
-  // confession, not a lever: the way out of it is a classifyBp arm, never a
-  // longer list.
-  var ATTENTION_ORDER_ONLY = ["strained", "filling"];
+  // EVERY ENTRY THIS LIST EVER HELD LEFT IT THE SAME WAY — through an arm.
+  // `deploys_failing` and `diverged` were ORDER-ONLY for exactly one commit
+  // (the mirror carried the ladder before the classifier could produce either).
+  // `strained` and `filling` were listed here far longer, on a REASON THAT WAS
+  // WRONG: the note said they "need the load and disk vitals, and no fleet row
+  // carries them". Measured on origin/main, every fleet row already carried
+  // them — router.ex merge_pressure/2 emits cpu_cores, load15/load1 and
+  // disk_used_percent on the row this console fetches, and this file already
+  // read bp.pressure for the slot pair. The inputs were never missing; only the
+  // arms were. A gap list is a confession, not a lever: the way out of it is a
+  // classifyBp arm, never a longer list.
+  var ATTENTION_ORDER_ONLY = [];
 
   // Derived, never hand-maintained: rank = 1-based position; bucket = the rung's.
   var ATTENTION_RANK = {};
@@ -6790,15 +6809,24 @@
   // #fleet/inflight deep-link segment keeps its old spelling — that is a URL,
   // not vocabulary — and parseFleetFilter maps it to the canonical bucket).
   //
-  // NO FALLBACK ARM ON PURPOSE: a rank outside the ladder is not a bucket this
-  // function may guess at, and `|| "attention"` would file an unknown state
-  // under a real bucket and scan green. classifyBp is total over ATTENTION_KINDS,
-  // so every rank reaching here is a ladder position by construction.
+  // bucketOfRank IS THE RAW LOOKUP AND STAYS UNGUESSED: a rank outside the
+  // ladder is `undefined`, never a real bucket name that would scan green. That
+  // is what lets a test tell "off the ladder" from "in attention".
   function bucketOfRank(r) {
     return ATTENTION_BUCKET_BY_RANK[r];
   }
+  // bucketOf is the CONSUMER-FACING answer and it is TOTAL, with an EXPLICIT
+  // unknown arm that surfaces in ATTENTION — the Go twin's attentionBucket
+  // default, verbatim (cloud_status_cmd.go: "any unknown label defensively
+  // surfaces in the attention bucket rather than hiding"). classifyBp is total
+  // over the ladder today, so this arm is unreachable by construction; it exists
+  // for the day it is not. THE INVERSION IT KILLS: without it an unranked state
+  // makes attentionRank undefined, bucketOfRank undefined, and fleetSummary
+  // increments `out[undefined]` — the box vanishes from all three counts and the
+  // screen reads calm. Failing INTO attention is the only safe direction here.
   function bucketOf(bp) {
-    return bucketOfRank(attentionRank(bp));
+    var bucket = bucketOfRank(attentionRank(bp));
+    return bucket === undefined ? "attention" : bucket;
   }
 
   // Pure rollup of a fleet list into the three bucket counts + total.
@@ -6904,6 +6932,14 @@
     // dr-w24-followup: warn, and the detail says the thing the BEHIND column
     // cannot — WHY a diverged box is worth looking at. Never a distance.
     if (kind === "diverged") return { role: "warn", label: "Diverged", detail: divergedDetail(bp) };
+    // dr-w5-followup: the vitals rungs. WARN, not danger — a box over the fence
+    // is news, not a failure — matching attention_order.json's tone for both.
+    // The labels are the fixture's own words ("under load" / "disk filling"),
+    // Title-cased like every other label here. Each detail names the MEASURED
+    // number AND the fence it crossed, so the verdict is arguable rather than
+    // asserted; neither says CPU (see strainedReason) and neither advises.
+    if (kind === "strained") return { role: "warn", label: "Under load", detail: strainedReason(bp) };
+    if (kind === "filling") return { role: "warn", label: "Disk filling", detail: fillingReason(bp) };
     // jpf-w1 D7: warn, never the info/blue tone "queued" would get — waiting
     // is news, waiting five minutes with no builder is an alarm. The detail
     // NAMES THE AGE off the payload's own number (the criterion's "queued 7m"),
@@ -7146,6 +7182,102 @@
       s += " · " + deployPct1(d.box_caused.pct) + "% box-caused";
     }
     return s;
+  }
+
+  // ── THE VITALS FENCES (charter D67) — `strained` and `filling` ─────────────
+  //
+  // Byte-equal to the Go twin's constants (internal/cli/cloud_status_cmd.go
+  // strainedLoad15PerCore / strainedLoad1PerCore / fillingDiskPercent), owned on
+  // the client like DEPLOYS_FAILING_PCT above and for the same reason: the
+  // payload carries the raw vitals, the surface owns the verdict.
+  //
+  // 1.75 is deliberately above 1.0 — one runnable task per core is busy, not in
+  // trouble — and the 15-minute window means a burst cannot trip it. The load1
+  // FALLBACK sits HIGHER at 2.0 because the same box reads noisier over a
+  // 1-minute window, so the coarser predicate can only UNDER-report strain,
+  // never over-report it. Both arms divide by the box's OWN reported cpu_cores
+  // or do not fire at all: charter D52 refused a hardcoded core count, which is
+  // a fabricated denominator, not a fence.
+  //
+  // 90 is the SAME ceiling the usage meter already ships as its disk over_limit
+  // (cloud/lib/barkpark_cloud/usage.ex, meter(value, @src_disk, at, 100, 70, 90)),
+  // and that duplication IS the rung's purpose: the verdict surface must stop
+  // saying HEALTHY about a box the usage surface already calls over_limit.
+  var STRAINED_LOAD15_PER_CORE = 1.75;
+  var STRAINED_LOAD1_PER_CORE = 2.0;
+  var FILLING_DISK_PCT = 90.0;
+
+  // A vital is a NUMBER or it is a SILENCE. merge_pressure/2 renders an absent
+  // key and the agent's -1 sentinel alike as null, and the key is ALWAYS present
+  // (an all-null block when the box has never beaten), so a consumer must branch
+  // on the values and never on the key. A null vital never fires a rung.
+  function vitalNum(n) {
+    return (typeof n === "number" && isFinite(n)) ? n : null;
+  }
+  function pressureOf(bp) {
+    return (bp && bp.pressure && typeof bp.pressure === "object") ? bp.pressure : null;
+  }
+
+  // The sustained load-per-core reading the strained fence judges, WITH the
+  // fence it must clear and a human name for the window it came from. `ok` is
+  // false whenever the box did not give us enough to judge — D42's factual arm,
+  // verbatim. Mirrors the Go twin's loadPerCore, preference and all: load15
+  // first (the honest sustained signal); load1 only for an agent that predates
+  // it, and then against the higher fence.
+  function loadPerCore(bp) {
+    var none = { perCore: 0, fence: 0, window: "", ok: false };
+    var p = pressureOf(bp);
+    var cores = p ? vitalNum(p.cpu_cores) : null;
+    if (cores == null || cores <= 0) return none;
+    var l15 = p ? vitalNum(p.load15) : null;
+    if (l15 != null) return { perCore: l15 / cores, fence: STRAINED_LOAD15_PER_CORE, window: "15m avg", ok: true };
+    var l1 = p ? vitalNum(p.load1) : null;
+    if (l1 != null) return { perCore: l1 / cores, fence: STRAINED_LOAD1_PER_CORE, window: "1m avg", ok: true };
+    return none;
+  }
+
+  // The rung predicates. Named *Box so neither shadows the state string it
+  // produces. Swap NEVER triggers strain — it only enriches the reason — and an
+  // unmeasured box is NEVER strained or filling.
+  function strainedBox(bp) {
+    var r = loadPerCore(bp);
+    return r.ok && r.perCore >= r.fence;
+  }
+  function fillingBox(bp) {
+    var p = pressureOf(bp);
+    var disk = p ? vitalNum(p.disk_used_percent) : null;
+    return disk != null && disk >= FILLING_DISK_PCT;
+  }
+
+  // Go's trimFloat(round1(x)): one decimal, trailing zero trimmed.
+  function vital1(n) {
+    return String(Math.round(n * 10) / 10);
+  }
+
+  // The WHY for a strained row. It says LOAD and never CPU: load1/load15 count
+  // uninterruptible sleep, so a box stalled on I/O is honestly under load while
+  // its CPU sits idle, and naming it "CPU" would send an operator to the wrong
+  // instrument. It also names WHICH average it used, so a reading taken through
+  // the less-sensitive fallback is legible as such. Verbatim the Go twin's
+  // strainedReason, minus the swap clause: this file has no byte formatter and
+  // inventing one for a detail string is not worth a second rounding rule.
+  function strainedReason(bp) {
+    var r = loadPerCore(bp);
+    if (!r.ok) return "";
+    var p = pressureOf(bp);
+    var l15 = vitalNum(p.load15);
+    var load = l15 != null ? l15 : vitalNum(p.load1);
+    return "load " + vital1(load) + " on " + vital1(vitalNum(p.cpu_cores)) +
+      " cores (" + r.perCore.toFixed(1) + "x, " + r.window + ")";
+  }
+
+  // The WHY for a filling row, naming the fence it crossed so the number is not
+  // just an assertion. Verbatim the Go twin's fillingReason.
+  function fillingReason(bp) {
+    var p = pressureOf(bp);
+    var disk = p ? vitalNum(p.disk_used_percent) : null;
+    if (disk == null) return "";
+    return "disk " + vital1(disk) + "% used (fills at " + vital1(FILLING_DISK_PCT) + "%)";
   }
 
   // ── slot_units (#14886): IS THE BLUE/GREEN DEPLOY PAIR INTACT ───────────────
@@ -27848,7 +27980,8 @@
       rollbackInstance: rollbackInstance, updateInstance: updateInstance,
       // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).
       legacyRoute: legacyRoute, parseFleetFilter: parseFleetFilter,
-      classifyBp: classifyBp, statusOf: statusOf, suspendedReasonText: suspendedReasonText,
+      classifyBp: classifyBp, statusOf: statusOf, statusPill: statusPill,
+      suspendedReasonText: suspendedReasonText,
       // cch-w34-s6: the never-reported renderers + the closed state enum the
       // harness asserts statusOf is total over.
       lastSeenText: lastSeenText, missedChecksText: missedChecksText,
@@ -27865,6 +27998,14 @@
       deploysFailingReason: deploysFailingReason,
       divergedByCommits: divergedByCommits, divergedDetail: divergedDetail,
       DEPLOYS_FAILING_PCT: DEPLOYS_FAILING_PCT,
+      // dr-w5-followup: the VITALS seams, exported so the harness can probe the
+      // fences directly — through loadPerCore's window/fence choice, not only
+      // through classifyBp's one-word answer.
+      loadPerCore: loadPerCore, strainedBox: strainedBox, fillingBox: fillingBox,
+      strainedReason: strainedReason, fillingReason: fillingReason,
+      STRAINED_LOAD15_PER_CORE: STRAINED_LOAD15_PER_CORE,
+      STRAINED_LOAD1_PER_CORE: STRAINED_LOAD1_PER_CORE,
+      FILLING_DISK_PCT: FILLING_DISK_PCT,
       attentionRank: attentionRank, attentionCompare: attentionCompare,
       bucketOf: bucketOf, bucketOfRank: bucketOfRank, ATTENTION_RANK: ATTENTION_RANK,
       fleetSummary: fleetSummary, filterFleet: filterFleet,
