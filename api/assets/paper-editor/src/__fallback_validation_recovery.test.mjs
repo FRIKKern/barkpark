@@ -437,10 +437,19 @@ const tocMarkup = `
   env.close();
 }
 
-// Use latest replaces one conflicted canvas source with authoritative server
-// state. Later local batches for that same canvas have not entered the global
-// queue yet, so discarding the chosen source must clear its whole local queue.
-{
+// Use latest clears a stale failure only after the chosen canvas receives and
+// applies its authoritative echo. A reply revision alone is not content, and
+// another dirty source may still own a more specific terminal warning.
+for (const scenario of [
+  { name: "matching echo", echo: true, expectedStatus: "" },
+  { name: "reply only", echo: false, expectedStatus: "Save failed" },
+  {
+    name: "dirty sibling",
+    echo: true,
+    siblingUnretryable: true,
+    expectedStatus: "Save paused: this nested editor lost its document position. Your edits are still here; copy them before reloading.",
+  },
+]) {
   const env = mountedForm(`
     <div id="discard-carrier" data-paper-doc-key="production:paper:validation" data-paper-rev="7">
       <div id="paper-canvas-discard-run" phx-hook="BarkparkPaperCanvas"
@@ -454,18 +463,28 @@ const tocMarkup = `
         <input name="caption" value="Server caption">
       </form>
     </div>
+    ${scenario.siblingUnretryable ? `
+      <div id="paper-canvas-unretryable-sibling" phx-hook="BarkparkPaperCanvas"
+           data-paper-doc-key="production:paper:validation" data-paper-rev="7"
+           data-paper-container-kind="figure" data-paper-container-run="0"
+           data-canvas-blocks="[]">
+        <bp-paper-canvas></bp-paper-canvas>
+      </div>
+    ` : ""}
   `);
   const wrapper = env.window.document.querySelector("#paper-canvas-discard-run");
   const canvas = wrapper.querySelector("bp-paper-canvas");
   canvas.acknowledgeOps = () => {};
-  canvas.applyServerBlocks = () => {};
+  const appliedServerBlocks = [];
+  canvas.applyServerBlocks = (blocks, receipt) => appliedServerBlocks.push({ blocks, receipt });
   canvas.hasPendingChanges = () => false;
   const calls = [];
   const replies = [];
+  const handlers = new Map();
   const bridge = {
     ...env.window.BarkparkPaperEditorHooks.BarkparkPaperCanvas,
     el: wrapper,
-    handleEvent: () => {},
+    handleEvent: (name, handler) => handlers.set(name, handler),
     pushEvent: (_event, payload) => {
       calls.push(payload);
       return new Promise((resolve) => replies.push(resolve));
@@ -492,16 +511,71 @@ const tocMarkup = `
   });
   await tick();
 
-  const banner = env.window.document.querySelector("[data-bp-paper-conflict]");
+  let banner = env.window.document.querySelector("[data-bp-paper-conflict]");
   assert.ok(banner);
+  const recoveryStatus = env.window.document.querySelector('[data-test-id="bp-paper-footer-save"]');
+  const remoteBlocks = [{ id: "child-discard", text: "Authoritative remote" }];
+  if (scenario.echo) {
+    handlers.get("bp:canvas-update")({
+      rev: 8,
+      runs: [{ run_id: "discard-run", blocks: remoteBlocks }],
+    });
+    await tick();
+    banner = env.window.document.querySelector("[data-bp-paper-conflict]");
+    assert.ok(banner, `${scenario.name} retains review until Use latest`);
+  }
+
+  let siblingBridge = null;
+  if (scenario.siblingUnretryable) {
+    const siblingWrapper = env.window.document.querySelector("#paper-canvas-unretryable-sibling");
+    const siblingCanvas = siblingWrapper.querySelector("bp-paper-canvas");
+    siblingCanvas.acknowledgeOps = () => {};
+    siblingCanvas.hasPendingChanges = () => false;
+    siblingBridge = {
+      ...env.window.BarkparkPaperEditorHooks.BarkparkPaperCanvas,
+      el: siblingWrapper,
+      handleEvent: () => {},
+      pushEvent: () => {
+        throw new Error("an invalid sibling context must never be sent");
+      },
+    };
+    siblingBridge.mounted();
+    siblingCanvas.blocks = [{ id: "sibling-child" }];
+    siblingWrapper.dispatchEvent(new env.window.CustomEvent("bp-canvas-ops", {
+      bubbles: true,
+      detail: {
+        ops: [{ op: "patch-block", id: "sibling-child", patch: { text: "Retained sibling" } }],
+        seq: 1,
+      },
+    }));
+    assert.equal(siblingBridge._opsFailed, true, "the sibling warning comes from an unretryable batch");
+  } else {
+    recoveryStatus.textContent = "Save failed";
+  }
+
   banner.querySelector('[data-action="latest"]').click();
   await tick();
 
-  assert.equal(calls.length, 1, "Use latest never sends the superseded second local batch");
-  assert.equal(bridge._opsQueue.length, 0, "Use latest clears all local work for its chosen canvas");
-  env.clickView();
-  await tick();
-  assert.equal(env.toggleCalls.length, 1, "discarded local canvas work cannot strand View");
+  assert.equal(recoveryStatus.textContent, scenario.expectedStatus,
+    `${scenario.name} preserves the authoritative footer state`);
+  assert.equal(calls.length, 1, `${scenario.name} never sends the superseded second local batch`);
+  assert.equal(bridge._opsQueue.length, 0, `${scenario.name} clears all local work for its chosen canvas`);
+  assert.equal(appliedServerBlocks.length, scenario.echo ? 1 : 0,
+    `${scenario.name} applies server blocks only from an observed echo`);
+  if (scenario.echo) {
+    assert.deepEqual(appliedServerBlocks[0].blocks, remoteBlocks,
+      `${scenario.name} applies the exact authoritative blocks`);
+    assert.equal(appliedServerBlocks[0].receipt.mode, "external-resync",
+      `${scenario.name} applies the echo as conflict recovery`);
+  }
+  if (scenario.siblingUnretryable) {
+    assert.equal(siblingBridge._opsQueue.length, 1, "Use latest retains the sibling's unretryable work");
+  } else {
+    env.clickView();
+    await tick();
+    assert.equal(env.toggleCalls.length, 1, `${scenario.name} cannot strand View after chosen work is discarded`);
+  }
+  siblingBridge?.destroyed();
   bridge.destroyed();
   env.close();
 }
