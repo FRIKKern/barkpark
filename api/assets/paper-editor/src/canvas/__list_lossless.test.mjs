@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { tiptapToBlock } from "../convert.js";
+import "../__list_carriers.test.mjs";
 
 for (const path of ["../styles.css", "../../../../priv/static/assets/bp-paper-editor-shell.css"]) {
   const css = readFileSync(new URL(path, import.meta.url), "utf8");
@@ -100,6 +102,43 @@ try {
     single.remove();
   }
   console.log("mounted list losslessness regression passed");
+  for (const tag of ["bp-paper-canvas", "bp-paper-editor"]) {
+    const host = document.createElement(tag);
+    const source = { id: "carrier-list", type: "list", ordered: false, items: [
+      { id: "alpha", content: [{ type: "text", value: "Alpha" }], audit: { keep: 1 } },
+      { id: "beta", text: "Beta", audit: { keep: 2 } },
+    ] };
+    const ops = [];
+    if (tag === "bp-paper-canvas") {
+      host.blocks = [source];
+      host.addEventListener("bp-canvas-ops", e => ops.push(...e.detail.ops));
+    } else {
+      host.block = source;
+      host.addEventListener("bp-op", e => ops.push(e.detail));
+    }
+    document.body.appendChild(host);
+    try {
+      const ed = host._editor;
+      assert.equal(ed.state.doc.textContent, "AlphaBeta", `${tag}: reader-shaped maps show their text`);
+      assert.equal(host.querySelector('[data-bp-list-source]'), null, "source metadata never enters HTML");
+      let pos;
+      ed.state.doc.descendants((node, at) => { if (node.isText && node.text === "Alpha") pos = at; });
+      ed.commands.setTextSelection(pos + 2);
+      ed.commands.splitListItem("listItem");
+      host.flushPendingChanges();
+      const saved = ops.at(-1).patch.items;
+      assert.deepEqual(saved, [
+        { ...source.items[0], content: [{ type: "text", value: "Al" }] },
+        [{ type: "text", value: "pha" }],
+        source.items[1],
+      ], `${tag}: split retains the original ID once and leaves sibling carriers untouched`);
+      assert.equal(ed.commands.undo(), true);
+      host.flushPendingChanges();
+      assert.deepEqual(tiptapToBlock(ed.getJSON(), source.id, "list").items, source.items,
+        `${tag}: undo restores exact source carriers`);
+    } finally { host.remove(); }
+  }
+  console.log("mounted list carrier identity and split preservation passed");
 } finally {
   canvas.remove();
   window.close();
