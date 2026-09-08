@@ -28,7 +28,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   alias Barkpark.Content
   alias Barkpark.Content.Papers.Template
   alias Barkpark.PortableDoc.{Projection, Render, Slots, TaskResolver}
-  alias Barkpark.PortableDoc.Render.{Compose, SectionLayout}
+  alias Barkpark.PortableDoc.Render.{Compose, Figures, SectionLayout}
   alias Barkpark.PortableDoc.Render.Components, as: RenderComponents
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
@@ -1920,65 +1920,136 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <%= if editable_figure_child?(@block) do %>
             <figure
               class="bp-paper-figure-editor-frame"
-              style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"
+              style={figure_editor_frame_style(@block)}
             >
               <div class="bp-paper-figure-editor-child" data-test-id="paper-figure-child">
-                <%= case figure_child_segment(@block, @canvas_enabled) do %>
-                  <% {:run, [child], run_ordinal} -> %>
-                    <.canvas_run
-                      slug={PaperCanvas.figure_run_slug(@root_slug, @id)}
-                      run_blocks={[child]}
-                      run_ordinal={run_ordinal}
-                      dataset={@dataset}
-                      api_token_raw={@api_token_raw}
-                      scope_prefix={@scope_prefix}
-                      picker_browse={@picker_browse}
-                      doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
-                      paper_rev={@doc_type == "paper" && @paper_rev}
-                      document_rev={@doc_type != "paper" && @document_rev}
-                      container_id={@id}
-                      container_kind="figure"
-                    />
-                  <% {:block, child} -> %>
-                    <.paper_block_fields
-                      block={child}
-                      dataset={@dataset}
-                      api_token_raw={@api_token_raw}
-                      scope_prefix={@scope_prefix}
-                      picker_browse={@picker_browse}
-                      doc_type={@doc_type}
-                      paper_rev={@paper_rev}
-                      document_rev={@document_rev}
-                      root_slug={@root_slug}
-                      doc_key={@doc_key}
-                      canvas_enabled={@canvas_enabled}
-                      paper_links={@paper_links}
-                      tree_identity_safe={@tree_identity_safe}
-                      table_editor_target_ids={@table_editor_target_ids}
-                      canvas_retained={@canvas_retained}
-                    />
+                <%= if image_figure_child?(@block) do %>
+                  <% child = Map.fetch!(@block, "child") %>
+                  <div
+                    id={"paper-figure-image-" <> child["id"]}
+                    class="bp-paper-figure-image"
+                    phx-hook={@picker_browse && "BarkparkFigureImageBridge"}
+                    data-block-id={child["id"]}
+                    data-image-src={image_block_src(child)}
+                    data-test-id="paper-figure-image-preview"
+                    data-figure-id={@id}
+                    data-child-id={child["id"]}
+                  >
+                    <div class="bp-paper-figure-image-paint">
+                      <%= raw(figure_image_editor_html(child, @paper_links, @picker_browse)) %>
+                    </div>
+                    <button
+                      :if={@picker_browse}
+                      type="button"
+                      class="bp-paper-figure-image-trigger"
+                      data-paper-figure-image-trigger
+                      aria-label={figure_image_trigger_label(child)}
+                      aria-haspopup="dialog"
+                      data-test-id="paper-figure-image-edit-trigger"
+                    ></button>
+                    <details
+                      :if={@picker_browse}
+                      class="bp-paper-figure-image-controls"
+                      data-test-id="paper-figure-image-picker"
+                    >
+                      <summary>Image options</summary>
+                      <div
+                        id={"paper-figure-image-picker-" <> child["id"]}
+                        class="bp-paper-figure-image-picker"
+                        phx-update="ignore"
+                      >
+                        <bp-media-picker
+                          value={image_block_src(child)}
+                          dataset={@dataset}
+                          scope-prefix={@scope_prefix}
+                          data-token={@api_token_raw}
+                          data-paper-figure-image-picker
+                          data-test-id="paper-block-image-picker"
+                        ></bp-media-picker>
+                      </div>
+                    </details>
+                  </div>
+                <% else %>
+                  <%= case figure_child_segment(@block, @canvas_enabled) do %>
+                    <% {:run, [child], run_ordinal} -> %>
+                      <.canvas_run
+                        slug={PaperCanvas.figure_run_slug(@root_slug, @id)}
+                        run_blocks={[child]}
+                        run_ordinal={run_ordinal}
+                        dataset={@dataset}
+                        api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix}
+                        picker_browse={@picker_browse}
+                        doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                        paper_rev={@doc_type == "paper" && @paper_rev}
+                        document_rev={@doc_type != "paper" && @document_rev}
+                        container_id={@id}
+                        container_kind="figure"
+                      />
+                    <% {:block, child} -> %>
+                      <.paper_block_fields
+                        block={child}
+                        dataset={@dataset}
+                        api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix}
+                        picker_browse={@picker_browse}
+                        doc_type={@doc_type}
+                        paper_rev={@paper_rev}
+                        document_rev={@document_rev}
+                        root_slug={@root_slug}
+                        doc_key={@doc_key}
+                        canvas_enabled={@canvas_enabled}
+                        paper_links={@paper_links}
+                        tree_identity_safe={@tree_identity_safe}
+                        table_editor_target_ids={@table_editor_target_ids}
+                        canvas_retained={@canvas_retained}
+                      />
+                  <% end %>
                 <% end %>
               </div>
-              <figcaption class="bp-figcaption">
+              <% caption = figure_caption_value(@block) %>
+              <figcaption
+                class="bp-figcaption"
+                data-paper-figure-caption-empty={caption == "" && "true"}
+              >
+                <button
+                  :if={caption == ""}
+                  type="button"
+                  class="bp-paper-figure-caption-add"
+                  phx-click={JS.focus(to: "#figure-caption-" <> @id)}
+                  data-paper-figure-caption-add
+                >Add caption</button>
+                <button
+                  :if={caption != ""}
+                  id={"figure-caption-paint-" <> @id}
+                  type="button"
+                  class="bp-paper-figure-caption-paint"
+                  phx-click={JS.focus(to: "#figure-caption-" <> @id)}
+                  aria-label={"Edit figure caption: " <> caption}
+                  aria-controls={"figure-caption-" <> @id}
+                  data-paper-figure-caption-paint
+                ><%= raw(Figures.figcaption_inner(caption)) %></button>
                 <form
                   id={"figure-form-" <> @id}
-                  class="bp-paper-edit-form"
+                  class="bp-paper-edit-form bp-paper-figure-caption-form"
                   phx-submit="paper-edit-block"
                   phx-change="paper-block-autosave"
                   phx-debounce="500"
                   data-test-id="paper-figure-caption-editor"
                 >
                   <input type="hidden" name="block_id" value={@id} />
-                  <label class="bp-paper-edit-fieldlabel" for={"figure-caption-" <> @id}>
+                  <label class="sr-only" for={"figure-caption-" <> @id}>
                     Caption
                   </label>
-                  <input
+                  <textarea
                     id={"figure-caption-" <> @id}
-                    type="text"
                     name="caption"
-                    class="bp-paper-edit-text"
-                    value={Blocks.form_value(Map.get(@block, "caption"))}
-                  />
+                    rows="1"
+                    class="bp-paper-inline-text bp-paper-figure-caption-input"
+                    aria-label="Figure caption"
+                    placeholder="Add caption…"
+                    phx-hook="BarkparkPaperAutoSize"
+                  ><%= caption %></textarea>
                 </form>
               </figcaption>
             </figure>
@@ -3865,6 +3936,53 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   defp editable_figure_child?(_block), do: false
 
+  defp image_figure_child?(%{"child" => %{"id" => id, "type" => "image"}})
+       when is_binary(id),
+       do: String.trim(id) != ""
+
+  defp image_figure_child?(_block), do: false
+
+  defp figure_editor_frame_style(block) do
+    overflow = if image_figure_child?(block), do: "visible", else: "auto"
+
+    "margin:var(--bp-air-figure, 1.6rem) 0 0;" <>
+      "margin-inline:var(--bp-evidence-pull, 0px);" <>
+      "width:var(--bp-evidence-width, 100%);" <>
+      "box-sizing:border-box;overflow-x:#{overflow}"
+  end
+
+  # Article images opt into the reader lightbox through this exact marker. In
+  # Edit the image itself is already one keyboard/pointer picker trigger, so
+  # retaining the marker would let the global lightbox enhancer introduce a
+  # second interactive control inside it. Keep the canonical reader-produced
+  # image bytes and geometry; suppress only the competing behavior marker.
+  defp figure_image_editor_html(child, paper_links, picker_browse) do
+    html = Render.render_block(child, %{style: :article, paper_links: paper_links})
+
+    if picker_browse do
+      String.replace(html, ~s( data-bp-lightboxable="true"), "")
+    else
+      html
+    end
+  end
+
+  defp figure_image_trigger_label(child) do
+    case Map.get(child, "alt") do
+      "" -> "Replace figure image"
+      alt when is_binary(alt) -> "Replace figure image: " <> alt
+      _ -> "Replace figure image"
+    end
+  end
+
+  defp figure_caption_value(block) do
+    case Map.get(block, "caption") do
+      caption when is_binary(caption) -> caption
+      nil -> ""
+      caption when is_number(caption) or is_atom(caption) -> to_string(caption)
+      _ -> ""
+    end
+  end
+
   defp figure_child_segment(%{"child" => child}, true) do
     [child]
     |> PaperCanvas.partition_runs()
@@ -3880,7 +3998,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # would raise Phoenix.HTML.Safe in the render and take the whole pane down.
   defp image_block_src(block) do
     case Map.get(block, "src") do
-      src when is_binary(src) -> src
+      src when is_binary(src) -> if(String.trim(src) == "", do: "", else: src)
       _ -> ""
     end
   end

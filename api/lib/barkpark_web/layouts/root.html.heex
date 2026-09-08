@@ -2625,86 +2625,6 @@
     .access-chip { flex-shrink: 0; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: var(--bg-subtle, hsl(var(--bp-neutral-hsl) / 0.12)); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
     .access-chip-expiry[data-expired="true"] { color: var(--destructive); }
 
-    /* bp-asset-browser — native mediaAsset modal */
-    .bp-ab-overlay {
-      position: fixed; inset: 0; z-index: 60;
-      background: hsl(var(--bp-scrim-hsl) / 0.55);
-      display: flex; align-items: center; justify-content: center;
-      padding: 24px;
-    }
-    .bp-ab-overlay[hidden] { display: none !important; }
-    .bp-ab-dialog {
-      width: min(960px, 100%); max-height: min(85vh, 900px);
-      background: var(--bg-elevated); border: 1px solid var(--border-muted);
-      border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
-      display: flex; flex-direction: column; overflow: hidden;
-    }
-    .bp-ab-header {
-      display: flex; align-items: center; gap: 12px;
-      padding: 14px 16px; border-bottom: 1px solid var(--border-muted);
-    }
-    .bp-ab-title { font-size: 15px; font-weight: 600; margin: 0; flex: 0 0 auto; }
-    .bp-ab-search { flex: 1; min-width: 0; }
-    .bp-ab-body { position: relative; flex: 1; overflow-y: auto; padding: 16px; }
-    .bp-ab-loading { position: absolute; inset: 16px; display: flex; align-items: center; justify-content: center; }
-    .bp-ab-grid { min-height: 120px; }
-    .bp-ab-card {
-      display: flex; flex-direction: column; align-items: stretch;
-      padding: 0; border: 2px solid transparent; background: var(--bg-subtle);
-      cursor: pointer; text-align: left;
-      transition: border-color var(--dur-1) ease, transform var(--dur-1) ease;
-    }
-    .bp-ab-card:hover { border-color: var(--primary); transform: translateY(-2px); }
-    .bp-ab-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
-    .bp-ab-file-icon {
-      aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
-      font-size: 11px; text-transform: uppercase; color: var(--fg-muted);
-      background: var(--bg-muted);
-    }
-    .bp-ab-card-title {
-      font-size: 11px; color: var(--fg-muted); padding: 6px 8px;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    /* bp-media-picker — the image-field input. Two states only: a framed
-       preview of the SELECTED image, or ONE dashed drop-target card when
-       empty (click = upload, drag = drop). The library never renders inline
-       under the field — Browse library opens the bp-asset-browser modal. */
-    bp-media-picker { display: block; }
-    .bp-mp-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-    /* Gyldendal parity E1 — image focal point (hotspot) + alt text on the field picker. */
-    .bp-mp-hotspot { position: relative; display: inline-block; cursor: crosshair; }
-    .bp-mp-focal {
-      position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%;
-      border: 2px solid var(--bg); background: var(--primary); box-shadow: 0 0 0 2px var(--primary);
-      pointer-events: none;
-    }
-    .bp-mp-alt-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
-    .bp-mp-alt-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-dim); }
-    .bp-mp-alt { width: 100%; }
-    .bp-mp-preview-img {
-      display: block; max-width: 100%; max-height: 240px;
-      border-radius: var(--radius-sm); border: 1px solid var(--border);
-      background: var(--bg-subtle);
-    }
-    .bp-mp-empty {
-      display: flex; align-items: center; justify-content: center;
-      min-height: 88px; padding: 20px;
-      border: 1px dashed var(--border); border-radius: var(--radius-sm);
-      color: var(--fg-muted); font-size: var(--text-sm); text-align: center;
-      cursor: pointer; user-select: none;
-      transition: border-color var(--dur-1), color var(--dur-1), background var(--dur-1);
-    }
-    .bp-mp-empty:hover, .bp-mp-empty:focus-visible {
-      border-color: var(--primary); color: var(--fg);
-      background: var(--bg-subtle); outline: none;
-    }
-    bp-media-picker.bp-mp-drag-over .bp-mp-empty,
-    bp-media-picker.bp-mp-drag-over .bp-mp-preview-img {
-      border-color: var(--primary); border-style: dashed;
-    }
-    .bp-mp-broken { color: var(--destructive); border-color: var(--destructive); opacity: 0.8; }
-    bp-media-picker.bp-mp-busy { opacity: 0.7; pointer-events: none; }
-    .bp-mp-error { display: none; margin-top: 6px; font-size: var(--text-xs); color: var(--destructive); }
 
     /* bp-asset-explorer — full-page Media tab workspace */
     .media-explorer-panel {
@@ -4213,6 +4133,7 @@
         than the link being hoisted, so every rule keeps its exact cascade
         position relative to the halves above and below. --%>
   <link rel="stylesheet" href="/assets/bp-paper-editor-shell.css" />
+  <link rel="stylesheet" href="/assets/bp-media-picker.css" />
   <style>
 
     /* ── Studio sheet grid editor (Sheets M2) ─────────────────────────────

@@ -77,7 +77,8 @@
   const PAPER_CANVAS_LEASE_MAX_TOTAL_LENGTH = 32768;
   const PAPER_FLUSH_TARGETS =
     '[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"], ' +
-    '[phx-hook="BarkparkFieldBlockBridge"], [phx-hook="BarkparkFieldBridge"]';
+    '[phx-hook="BarkparkFieldBlockBridge"], [phx-hook="BarkparkFieldBridge"], ' +
+    '[phx-hook="BarkparkFigureImageBridge"]';
   const PAPER_STRUCTURAL_EVENTS = new Set([
     "paper-delete-block",
     "paper-materialize-slot",
@@ -3397,6 +3398,129 @@
         if (this._control && this._onInput) this._control.removeEventListener("input", this._onInput);
         if (this._control && this._onChange) this._control.removeEventListener("change", this._onChange);
       }
+    };
+
+    // BarkparkFigureImageBridge keeps an editable Figure looking like the
+    // reader. The server renders the canonical image child; this hook only
+    // turns that rendered image into the contextual picker trigger and sends a
+    // source-only patch for the child. The following LiveView render remains
+    // authoritative for the visible image and every other child field.
+    Hooks.BarkparkFigureImageBridge = {
+      mounted() {
+        this._exitCoordinator = bpPaperExitCoordinator(this);
+        this._pendingSaves = new Set();
+        this._mutationEntries = [];
+        this._pendingImageSources = new Set();
+
+        const picker = this.el.querySelector("bp-media-picker[data-paper-figure-image-picker]");
+        this._picker = picker;
+        const triggerSelector = "[data-paper-figure-image-trigger]";
+        const inactive = () => !picker || !!this.el.closest("[inert]");
+        const openPicker = () => {
+          if (inactive()) return false;
+          let opened = false;
+          try { opened = picker.openBrowser?.() === true; } catch (_err) { opened = false; }
+          if (!opened) picker.openFileDialog?.();
+          return true;
+        };
+        const mediaUrl = (event) => {
+          const metaUrl = event.target?.meta?.url;
+          if (typeof metaUrl === "string" && metaUrl) return { valid: true, src: metaUrl };
+          const value = event.detail?.value;
+          if (typeof value !== "string") return { valid: false };
+          if (!value.trim().startsWith("{")) return { valid: true, src: value };
+          try {
+            const parsed = JSON.parse(value);
+            return typeof parsed?.url === "string"
+              ? { valid: true, src: parsed.url }
+              : { valid: false };
+          } catch (_err) {
+            return { valid: false };
+          }
+        };
+        const pushSource = (src) => {
+          this._pendingImageSources.add(src);
+          let mutation;
+          mutation = bpPaperMutation(this, this.el, "paper-op", {
+            op: "patch-block",
+            id: this.el.dataset.blockId,
+            patch: { src },
+          }, {
+            onResult: (saved, result) => {
+              if (saved || result?.discarded) {
+                this._pendingImageSources.delete(src);
+                this._mutationEntries = this._mutationEntries.filter(
+                  (entry) => entry !== mutation.entry,
+                );
+              }
+            },
+          });
+          if (mutation.entry) this._mutationEntries.push(mutation.entry);
+          const pending = mutation.promise.finally(() => this._pendingSaves.delete(pending));
+          this._pendingSaves.add(pending);
+          return pending;
+        };
+
+        this._onClick = (event) => {
+          const trigger = event.target?.closest?.(triggerSelector);
+          if (!trigger || !this.el.contains(trigger)) return;
+          event.preventDefault();
+          if (inactive()) return;
+          trigger.focus?.();
+          openPicker();
+        };
+        this._onKeydown = (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          const trigger = event.target?.closest?.(triggerSelector);
+          if (!trigger || !this.el.contains(trigger)) return;
+          event.preventDefault();
+          if (inactive()) return;
+          openPicker();
+        };
+        this._onChange = (event) => {
+          if (event.target !== picker || inactive()) return;
+          const parsed = mediaUrl(event);
+          if (!parsed.valid) return;
+          const { src } = parsed;
+          if (src === (this.el.dataset.imageSrc || "") || this._pendingImageSources.has(src)) return;
+          this._exitCoordinator?.markDirty(this.el);
+          pushSource(src);
+        };
+        this._onFlushPending = (event) => {
+          if (!this._pendingSaves.size && this._mutationEntries.length) {
+            const retry = this._exitCoordinator?.retryMutation(this._mutationEntries[0]);
+            if (retry) {
+              const pending = retry.finally(() => this._pendingSaves.delete(pending));
+              this._pendingSaves.add(pending);
+            }
+          }
+          if (this._pendingSaves.size) {
+            event.detail.waitUntil(
+              Promise.all([...this._pendingSaves]).then((results) => results.every(Boolean)),
+            );
+          }
+        };
+
+        this.el.addEventListener("click", this._onClick);
+        this.el.addEventListener("keydown", this._onKeydown);
+        this.el.addEventListener("bp-change", this._onChange);
+        this.el.addEventListener("bp-flush-pending", this._onFlushPending);
+      },
+      updated() {
+        // The picker shell is intentionally ignored so LiveView never replaces
+        // an open native picker. Refresh its public value from the authoritative
+        // server-rendered source when the surrounding Figure hook updates.
+        if (this._picker && this._picker.value !== this.el.dataset.imageSrc) {
+          this._picker.value = this.el.dataset.imageSrc || "";
+        }
+      },
+      destroyed() {
+        bpReleasePaperExitCoordinator(this);
+        this.el.removeEventListener("click", this._onClick);
+        this.el.removeEventListener("keydown", this._onKeydown);
+        this.el.removeEventListener("bp-change", this._onChange);
+        this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
+      },
     };
 
     // BarkparkPaperSortable — drag-handle reorder for the paper block editor

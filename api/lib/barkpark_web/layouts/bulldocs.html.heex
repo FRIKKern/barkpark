@@ -2830,11 +2830,11 @@
     const publicBootNonce = document.currentScript && document.currentScript.nonce;
     const paperEditorHookNames = [
       "BarkparkPaperEditToggle", "BarkparkPaperEditor", "BarkparkPaperCanvas",
-      "BarkparkFieldBlockBridge", "BarkparkFieldBridge",
+      "BarkparkFieldBlockBridge", "BarkparkFieldBridge", "BarkparkFigureImageBridge",
       "BarkparkPaperSortable", "BarkparkPaperContextMenu", "BarkparkPaperAutoSize"
     ];
     const paperEditorElementNames = [
-      "bp-paper-editor", "bp-paper-canvas", "bp-media-picker",
+      "bp-paper-editor", "bp-paper-canvas", "bp-asset-browser", "bp-media-picker",
       "bp-reference-picker", "bp-rich-text-editor"
     ];
     let paperEditorAssetsReady;
@@ -2864,10 +2864,14 @@
 
     async function loadPaperEditorAssets() {
       window.BP_PAPER_EDITOR_NO_INJECT = true;
-      const styleReady = loadPaperEditorStyle("/assets/bp-paper-editor-shell.css");
+      const styleReady = Promise.all([
+        loadPaperEditorStyle("/assets/bp-paper-editor-shell.css"),
+        loadPaperEditorStyle("/assets/bp-media-picker.css")
+      ]);
       const scriptsReady = (async () => {
         for (const src of [
           "/assets/bp-paper-editor.bundle.js",
+          "/assets/bp-asset-browser.js",
           "/assets/bp-media-picker.js",
           "/assets/bp-reference-picker.js",
           "/assets/bp-rich-text-editor.js",
@@ -2892,6 +2896,9 @@
         if (!window.customElements?.get(name)) {
           throw new Error(`Editor component unavailable: ${name}`);
         }
+      }
+      if (typeof window.BpAssetBrowser?.ensure !== "function") {
+        throw new Error("Editor asset browser API unavailable");
       }
       Object.assign(PaperHooks, window.BarkparkPaperEditorHooks);
     }
