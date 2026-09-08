@@ -9,10 +9,12 @@ defmodule Barkpark.PortableDoc.TableEditing do
   """
 
   alias Barkpark.Content.Papers.BlockOps
+  alias Barkpark.PortableDoc.Render.Inline
 
   @max_safe_integer 9_007_199_254_740_991
   @aliases ~w(content header headers columns)
   @indexed_actions ~w(remove-row up-row down-row remove-column left-column right-column)
+  @inline_semantic_keys ~w(type value text marks attrs content children href target alias docId doc_id anchor name tone strong note field as fallback label rel class title)
 
   @type projection :: %{shape: map(), head: nil | [list()], rows: [[list()]]}
 
@@ -23,10 +25,12 @@ defmodule Barkpark.PortableDoc.TableEditing do
          true <- Enum.all?(@aliases, &(not Map.has_key?(table, &1))),
          {:ok, row_shapes, projected_rows, width} <- project_body_rows(rows),
          {:ok, head_shape, projected_head} <- project_head(table, width),
-         true <- BlockOps.normalize_render_shapes([table]) == [table] do
+         true <- BlockOps.normalize_render_shapes([table]) === [table] do
+      version = if protected_shape?(head_shape, row_shapes), do: 2, else: 1
+
       {:ok,
        %{
-         shape: %{"v" => 1, "head" => head_shape, "rows" => row_shapes},
+         shape: %{"v" => version, "head" => head_shape, "rows" => row_shapes},
          head: projected_head,
          rows: projected_rows
        }}
@@ -41,7 +45,7 @@ defmodule Barkpark.PortableDoc.TableEditing do
           {:ok, map()} | {:error, :read_only_shape | :stale_shape | :invalid_cells}
   def merge_cells(table, expected_shape, changes) do
     with {:ok, projection} <- project(table),
-         true <- projection.shape == expected_shape,
+         true <- projection.shape === expected_shape,
          {:ok, changes} <- validate_changes(changes, projection),
          {:ok, updated} <- apply_cell_changes(table, changes) do
       case project(updated) do
@@ -59,7 +63,7 @@ defmodule Barkpark.PortableDoc.TableEditing do
           {:ok, map()} | {:error, :read_only_shape | :stale_shape | :invalid_action}
   def apply_action(table, expected_shape, action) do
     with {:ok, projection} <- project(table),
-         true <- projection.shape == expected_shape,
+         true <- projection.shape === expected_shape,
          {:ok, parsed_action} <- parse_action(action),
          {:ok, updated} <- apply_parsed_action(table, projection, parsed_action),
          {:ok, _projection} <- project(updated) do
@@ -124,13 +128,13 @@ defmodule Barkpark.PortableDoc.TableEditing do
   end
 
   defp project_cell(inline) when is_list(inline) do
-    if valid_inline?(inline), do: {:ok, "inline-array", inline}, else: :error
+    project_cell_inline(inline, "inline-array")
   end
 
   defp project_cell(%{"content" => inline} = cell) when is_list(inline) do
-    if valid_inline?(inline) and not Map.has_key?(cell, "header") and
+    if not Map.has_key?(cell, "header") and
          cell["type"] not in ["tableHeader", "table_header"] do
-      {:ok, "content-map", inline}
+      project_cell_inline(inline, "content-map")
     else
       :error
     end
@@ -257,10 +261,14 @@ defmodule Barkpark.PortableDoc.TableEditing do
     end
   end
 
-  defp put_cell_content(cell, inline) when is_list(cell), do: {:ok, inline}
+  defp put_cell_content(cell, inline) when is_list(cell) do
+    with {:ok, merged} <- merge_cell_inline(cell, inline), do: {:ok, merged}
+  end
 
-  defp put_cell_content(%{"content" => _old} = cell, inline),
-    do: {:ok, Map.put(cell, "content", inline)}
+  defp put_cell_content(%{"content" => old} = cell, inline) do
+    with {:ok, merged} <- merge_cell_inline(old, inline),
+         do: {:ok, Map.put(cell, "content", merged)}
+  end
 
   defp put_cell_content(_cell, _inline), do: :error
 
@@ -373,6 +381,214 @@ defmodule Barkpark.PortableDoc.TableEditing do
   end
 
   defp safe_index?(index), do: is_integer(index) and index >= 0 and index <= @max_safe_integer
+
+  defp project_cell_inline(inline, kind) do
+    cond do
+      valid_inline?(inline) ->
+        {:ok, kind, inline}
+
+      true ->
+        case protected_inline(inline) do
+          {:ok, protected} ->
+            shape = %{
+              "kind" => kind,
+              "inline" => %{
+                "v" => 1,
+                "anchors" => protected_anchors(protected),
+                "opaque" => protected.opaque
+              }
+            }
+
+            {:ok, shape, [protected.sanitized]}
+
+          :error ->
+            :error
+        end
+    end
+  end
+
+  defp protected_shape?(head_shape, row_shapes) do
+    row_protected? = Enum.any?(row_shapes, &row_shape_protected?/1)
+
+    head_protected? =
+      case head_shape do
+        %{"state" => "row", "row" => row_shape} -> row_shape_protected?(row_shape)
+        _ -> false
+      end
+
+    row_protected? or head_protected?
+  end
+
+  defp row_shape_protected?(%{"cells" => cells}) when is_list(cells),
+    do: Enum.any?(cells, &is_map/1)
+
+  defp row_shape_protected?(_shape), do: false
+
+  defp protected_inline([node]) do
+    with {:ok, parsed} <- protected_inline_node(node, -1),
+         true <- parsed.opaque != [],
+         true <-
+           Inline.compose_inline_children([node]) ===
+             Inline.compose_inline_children([parsed.sanitized]) do
+      {:ok, parsed}
+    else
+      _ -> :error
+    end
+  end
+
+  defp protected_inline(_inline), do: :error
+
+  defp protected_inline_node(%{"type" => "text", "value" => value} = node, _rank)
+       when is_binary(value) and value != "" do
+    with {:ok, extras} <- inline_extras(node, ~w(type value)) do
+      {:ok,
+       %{
+         sanitized: %{"type" => "text", "value" => value},
+         types: ["text"],
+         opaque: opaque_types("text", extras, []),
+         extras: put_opaque_extras(%{}, "text", extras),
+         semantics: put_opaque_semantics(%{}, "text", extras, %{})
+       }}
+    else
+      _ -> :error
+    end
+  end
+
+  defp protected_inline_node(
+         %{"type" => "link", "href" => href, "children" => [child]} = node,
+         rank
+       )
+       when is_binary(href) do
+    protected_wrapper(node, child, rank, "link", ~w(type href children), %{"href" => href})
+  end
+
+  defp protected_inline_node(%{"type" => type, "children" => [child]} = node, rank)
+       when type in ~w(strong em underline strikethrough) do
+    protected_wrapper(node, child, rank, type, ~w(type children), %{})
+  end
+
+  defp protected_inline_node(_node, _rank), do: :error
+
+  defp protected_wrapper(node, child, rank, type, semantic_keys, semantics) do
+    node_rank = inline_rank(type)
+
+    with true <- node_rank > rank,
+         {:ok, extras} <- inline_extras(node, semantic_keys),
+         {:ok, parsed_child} <- protected_inline_node(child, node_rank) do
+      sanitized =
+        node
+        |> Map.take(semantic_keys)
+        |> Map.put("children", [parsed_child.sanitized])
+
+      {:ok,
+       %{
+         sanitized: sanitized,
+         types: [type | parsed_child.types],
+         opaque: opaque_types(type, extras, parsed_child.opaque),
+         extras: put_opaque_extras(parsed_child.extras, type, extras),
+         semantics: put_opaque_semantics(parsed_child.semantics, type, extras, semantics)
+       }}
+    else
+      _ -> :error
+    end
+  end
+
+  defp inline_extras(node, semantic_keys) do
+    extra_keys = Map.keys(node) -- semantic_keys
+
+    if Enum.any?(extra_keys, &(&1 in @inline_semantic_keys)) do
+      :error
+    else
+      {:ok, Map.take(node, extra_keys)}
+    end
+  end
+
+  defp opaque_types(_type, extras, opaque) when map_size(extras) == 0, do: opaque
+  defp opaque_types(type, _extras, opaque), do: [type | opaque]
+
+  defp protected_anchors(protected) do
+    Enum.filter(protected.types, &(&1 == "text" or &1 in protected.opaque))
+  end
+
+  defp put_opaque_extras(extras_by_type, _type, extras) when map_size(extras) == 0,
+    do: extras_by_type
+
+  defp put_opaque_extras(extras_by_type, type, extras),
+    do: Map.put(extras_by_type, type, extras)
+
+  defp put_opaque_semantics(semantics_by_type, _type, extras, _semantics)
+       when map_size(extras) == 0,
+       do: semantics_by_type
+
+  defp put_opaque_semantics(semantics_by_type, type, _extras, semantics),
+    do: Map.put(semantics_by_type, type, semantics)
+
+  defp merge_cell_inline(source, incoming) do
+    case protected_inline(source) do
+      {:ok, protected} -> merge_protected_inline(protected, incoming)
+      :error -> {:ok, incoming}
+    end
+  end
+
+  defp merge_protected_inline(protected, incoming) do
+    with {:ok, incoming_chain} <- editable_inline_chain(incoming),
+         {:ok, merged, seen} <- reattach_opaque(incoming_chain, protected, MapSet.new()),
+         true <- MapSet.new(protected.opaque) == seen do
+      {:ok, [merged]}
+    else
+      _ -> :error
+    end
+  end
+
+  defp editable_inline_chain([node]) do
+    case protected_inline_node(node, -1) do
+      {:ok, %{opaque: [], sanitized: sanitized}} -> {:ok, sanitized}
+      _ -> :error
+    end
+  end
+
+  defp editable_inline_chain(_inline), do: :error
+
+  defp reattach_opaque(%{"type" => "text"} = node, protected, seen) do
+    reattach_node_extras(node, protected, seen)
+  end
+
+  defp reattach_opaque(%{"children" => [child]} = node, protected, seen) do
+    with {:ok, child, seen} <- reattach_opaque(child, protected, seen),
+         {:ok, node, seen} <-
+           reattach_node_extras(Map.put(node, "children", [child]), protected, seen) do
+      {:ok, node, seen}
+    end
+  end
+
+  defp reattach_opaque(_node, _protected, _seen), do: :error
+
+  defp reattach_node_extras(%{"type" => type} = node, protected, seen) do
+    case Map.fetch(protected.extras, type) do
+      :error ->
+        {:ok, node, seen}
+
+      {:ok, extras} ->
+        with true <- opaque_semantics_match?(type, node, protected.semantics[type]),
+             false <- MapSet.member?(seen, type) do
+          {:ok, Map.merge(node, extras), MapSet.put(seen, type)}
+        else
+          _ -> :error
+        end
+    end
+  end
+
+  defp opaque_semantics_match?("text", _node, %{}), do: true
+
+  defp opaque_semantics_match?(type, node, expected) do
+    actual =
+      case type do
+        "link" -> Map.take(node, ["href"])
+        _mark -> %{}
+      end
+
+    actual === expected
+  end
 
   defp valid_inline?(nodes) when is_list(nodes) do
     Enum.reduce_while(nodes, {:ok, nil}, fn node, {:ok, previous_signature} ->
