@@ -2732,7 +2732,7 @@
           this._exitCoordinator?.markDirty(this.el);
           const containerContext = captureContainerContext();
           const boundaryLeasePending = !containerContext.invalid &&
-            containerContext.wire.container_kind === "document" &&
+            ["document", "section", "columns"].includes(containerContext.wire.container_kind) &&
             bpPaperOpsInsertRetainedBoundary(e.detail.ops);
           const entry = {
             ops: e.detail.ops,
