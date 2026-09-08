@@ -184,7 +184,7 @@ defmodule Barkpark.Tasks.QueueGate do
          fragment("COALESCE(btrim(?->'claim'->>'closed_at'), '') <> ''", d.content) or
          fragment("COALESCE(btrim(?->'claim'->>'closed_by'), '') <> ''", d.content) or
          fragment(
-           "CASE WHEN ?->'claim'->>'ts_iso' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.0-9]*Z$' THEN ?->'claim'->>'ts_iso' < to_char(now() - (? * interval '1 second'), 'YYYY-MM-DD\"T\"HH24:MI:SS') ELSE false END",
+           "CASE WHEN ?->'claim'->>'ts_iso' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.0-9]*Z$' THEN ?->'claim'->>'ts_iso' < to_char((now() at time zone 'UTC') - (? * interval '1 second'), 'YYYY-MM-DD\"T\"HH24:MI:SS') ELSE false END",
            d.content,
            d.content,
            ^lease_ttl_seconds()
