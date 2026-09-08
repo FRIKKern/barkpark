@@ -225,6 +225,51 @@ window.dispatchEvent(cleanExit);
 assert.equal(cleanExit.defaultPrevented, false);
 assert.equal(hook._bpPaperExitCoordinator.hasUnsaved(), false);
 
+// A remote revision must not silently replace this focused native title's
+// authored baseline or permit View to discard its exact rejected draft.
+toggles.length = 0;
+input.focus();
+hook._bpPaperExitCoordinator.observeRevision({ rev: 12, apply: () => {
+  window.document.querySelector("main").dataset.paperRev = "12";
+} });
+input.value = "  Local Section draft  ";
+input.setSelectionRange(2, 15);
+input.dispatchEvent(new window.InputEvent("input", {
+  bubbles: true, inputType: "insertText", data: "Local",
+}));
+hook.el.click();
+await tick();
+const rejectedTitle = calls.at(-1).payload;
+assert.equal(rejectedTitle.if_rev, 11);
+assert.equal(rejectedTitle.title, "  Local Section draft  ");
+settleForm({ saved: false, conflict: true,
+  request_id: rejectedTitle.request_id, current_rev: 12 });
+await tick();
+assert.equal(input.value, "  Local Section draft  ");
+assert.equal(window.document.activeElement, input);
+assert.deepEqual([input.selectionStart, input.selectionEnd], [2, 15]);
+assert.deepEqual(toggles, [], "a rejected Section title keeps View fenced");
+const guardedExit = new window.Event("beforeunload", { cancelable: true });
+window.dispatchEvent(guardedExit);
+assert.equal(guardedExit.defaultPrevented, true);
+const keepTitle = window.document.querySelector(
+  '[data-bp-paper-conflict] [data-action="keep"]');
+assert.ok(keepTitle && !keepTitle.disabled);
+keepTitle.click();
+await tick();
+const retriedTitle = calls.at(-1).payload;
+assert.equal(retriedTitle.if_rev, 12);
+assert.notEqual(retriedTitle.request_id, rejectedTitle.request_id);
+assert.equal(retriedTitle.title, "  Local Section draft  ");
+settleForm({ saved: true, request_id: retriedTitle.request_id, rev: 13 });
+await tick();
+assert.equal(input.value, "  Local Section draft  ");
+assert.equal(hook._bpPaperExitCoordinator.hasUnsaved(), false);
+hook.el.click();
+await tick();
+assert.deepEqual(toggles, ["paper-toggle-edit"],
+  "View resumes only after explicit conflict recovery saves the title");
+
 hook.destroyed();
 sizing.destroyed();
 dom.window.close();
