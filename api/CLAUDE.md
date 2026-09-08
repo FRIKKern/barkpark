@@ -21,12 +21,12 @@ Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.serv
 
 ## Bulldocs (the Papers surface)
 
-**Papers** is the **Bulldocs plugin** — plugin/producer brand; a **paper** is the artifact (persisted `type` stays `"paper"`, reader URL `/papers/:slug`). **Core keeps the reusable machinery, the plugin is thin wiring.**
+**Papers** is the Bulldocs plugin/producer; a **paper** is the `type:"paper"` artifact at `/papers/:slug`. Core owns the machinery; plugin wiring stays thin.
 
-- **Core utilities:** `Barkpark.PortableDoc.{Render,Patch,Projection,Synthesis,Bpml}` (block engine); `Content.upsert_paper/1`, `apply_paper_block_op/3`, `apply_document_block_op/5`, `get_public_paper/1`, `doc_topic/4`; `BarkparkWeb.Plugs.RequireIngestToken`.
+- **Core utilities:** `Barkpark.PortableDoc.{Render,Patch,Projection,Synthesis,Bpml}`; `Content.upsert_paper/1`, `apply_paper_block_op/3`, `apply_document_block_op/5`, `get_public_paper/1`, `doc_topic/4`; `BarkparkWeb.Plugs.RequireIngestToken`.
 - **Bulldocs-owned:** `BarkparkWeb.BulldocsLive` (reader), `BulldocsIngestController` / `BulldocsIntentsController`, `Barkpark.Plugins.Bulldocs.Events`, `layouts/bulldocs.html.heex`.
-- **Reader editing:** `BulldocsLive.Edit` shares Studio canvas + `PaperViewer`. View flushes fields; saves stay run-local. Focus pins revisions; overlaps require review. Cites/labels stay inline.
-- **Plugin module:** `register_schemas/1` + `register_routes/1` — reader on `:public_root`, ingest API on `:ingest` (`/v1/plugins/bulldocs/*`). Reused by any plugin wanting a reader or token-gated ingest.
+- **Reader editing:** Public/Studio share canvas + `PaperViewer`; View flushes run-local saves; focus pins revisions; overlaps need review; cites/labels stay inline. Figure images stay reader-painted; picker writes only child `src`, retaining metadata. Empty captions use a focus-revealed zero-flow textarea. No contextual undo/redo.
+- **Plugin module:** `register_schemas/1` + `register_routes/1` expose the `:public_root` reader and `:ingest` API (`/v1/plugins/bulldocs/*`) for reuse.
 - **Sessions:** 2nd blocks type (whitelist `{paper, session}`); routes `/v1/plugins/bulldocs/sessions*`; private+unwalled schema; Studio pane read-only v1 (`bp session publish` writes).
 
 **Alias-drop gate:** `/v1/paperflow/*` aliases `/v1/plugins/bulldocs/*` for legacy producers — externally gated, do NOT drop. Ingest auth: `:ingest_token` from `BARKPARK_INGEST_TOKEN` (legacy `PAPERFLOW_INGEST_TOKEN`). See `docs/decisions/deferred.md`.
