@@ -142,7 +142,13 @@ defmodule BarkparkWeb.QueryController do
     limit = parse_int(params["limit"], 100) |> min(1000) |> max(1)
     offset = parse_int(params["offset"], 0) |> max(0) |> min(100_000)
     order = parse_order_param(params["order"])
-    filter_map = params |> Map.get("filter", %{}) |> normalize_filter_map()
+
+    filter_map =
+      params
+      |> Map.get("filter", %{})
+      |> normalize_filter_map()
+      |> with_id_prefix(params["id_prefix"])
+
     expand_spec = parse_expand(params["expand"])
 
     schema = fetch_schema(conn, type, dataset)
@@ -1311,6 +1317,22 @@ defmodule BarkparkWeb.QueryController do
     Enum.map(rendered, fn doc ->
       Map.filter(doc, fn {k, _v} -> String.starts_with?(k, "_") or MapSet.member?(keep, k) end)
     end)
+  end
+
+  # `?id_prefix=` -> an `_id startsWith` clause on the SAME filter map, or an
+  # `{:error, _}` sentinel that the `match?({:error, _}, filter_map)` guard in
+  # `query_index!/4` already turns into a 400 `invalid_filter`. The rule itself
+  # lives in `Content.Query.merge_id_prefix/2` — ONE derivation shared with
+  # `LegacyController.index/2`, because the two list doors are the duplicated
+  # emitter this fix exists for. An already-failed filter map short-circuits:
+  # the first refusal is the one the caller gets.
+  defp with_id_prefix({:error, _} = err, _id_prefix), do: err
+
+  defp with_id_prefix(filter_map, id_prefix) when is_map(filter_map) do
+    case Content.Query.merge_id_prefix(filter_map, id_prefix) do
+      {:ok, merged} -> merged
+      {:error, _} = err -> err
+    end
   end
 
   defp normalize_filter_map(map) when is_map(map) do

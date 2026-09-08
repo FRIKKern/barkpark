@@ -408,6 +408,91 @@ defmodule Barkpark.Content.Query do
   @spec valid_filter_ops() :: [String.t()]
   def valid_filter_ops, do: @valid_filter_ops
 
+  # ── `?id_prefix=` — THE ONE DERIVATION OF A STABLE-ID PREFIX FILTER ───────
+  #
+  # `GET /v1/data/query/:dataset/:type?id_prefix=<p>` used to return the
+  # UNFILTERED default page at 200: no door read the parameter, so a sweep that
+  # asked for one id family was answered with ~100 unrelated documents in
+  # default order and had no way to tell. That is the silent-passthrough class
+  # this module already fails closed on for a typo'd operator
+  # (`invalid_filter_op/1`), an unparseable flat filter (`{:invalid_flat_filter,
+  # _}`) and an unrecognised `?order=` — `id_prefix` was the one input still
+  # discarded as noise.
+  #
+  # THE CONTRACT IS THE FILTER, NOT A REFUSAL. `_id startsWith` is already a
+  # documented, per-field-allowlisted operator with an `apply_field_op/4` clause
+  # on the `doc_id` COLUMN (escaped LIKE, so `%`/`_` in the prefix are literal),
+  # so honouring `id_prefix` adds no query semantics — it is exactly
+  # `?filter[_id][startsWith]=<p>`, reachable by a caller that cannot spell
+  # Plug's bracket syntax. A 400 was the alternative, but it would have refused
+  # ONE name while every other unrecognised query key stays ignored, and it
+  # would have left the caller's actual question unanswerable at this door.
+  #
+  # IT STILL FAILS CLOSED, on the two shapes that would rebuild the bug:
+  #   * blank/whitespace — a "prefix" that matches every row is the full-page
+  #     fallback this closes, so it is a 400 rather than a silent no-op;
+  #   * non-binary (`?id_prefix[]=a`, `?id_prefix[k]=v`) — a list/map can never
+  #     be a prefix, and it would reach `escape_like/1`'s `to_string/1` as
+  #     garbage.
+  # A CONFLICT with a caller-supplied `_id`/`doc_id` filter clause is refused
+  # too: silently clobbering one of the two constraints is the same lie in a
+  # smaller box. Both refusals reuse the registered `invalid_filter` envelope
+  # (`{:invalid_filter_clause, message, details}` -> 400), so no new error code
+  # enters `Errors.known_codes/0`, the served OpenAPI `Error.code` enum, or
+  # docs/api-v1.md §9.
+  #
+  # Callers: `BarkparkWeb.QueryController.query_index!/4` and
+  # `BarkparkWeb.LegacyController.index/2` — the two document-LIST doors. It
+  # lives here, not in either controller, because the filing's own note is that
+  # this surface's emitters are duplicated and a fix in one leaves the other
+  # lying.
+  @doc """
+  Merge a caller's `?id_prefix=` into `filter_map` as an `_id startsWith` clause.
+
+  `{:ok, filter_map}` unchanged when `id_prefix` is absent (`nil`), otherwise
+  `{:ok, map}` with the clause added — or `{:error, {:invalid_filter_clause,
+  message, details}}` (a 400 `invalid_filter`) for a blank prefix, a non-string
+  prefix, or a prefix that would collide with an `_id`/`doc_id` filter the
+  caller already sent.
+  """
+  @spec merge_id_prefix(map(), term()) ::
+          {:ok, map()} | {:error, {:invalid_filter_clause, String.t(), map()}}
+  def merge_id_prefix(filter_map, id_prefix)
+
+  def merge_id_prefix(filter_map, nil) when is_map(filter_map), do: {:ok, filter_map}
+
+  def merge_id_prefix(filter_map, prefix) when is_map(filter_map) and is_binary(prefix) do
+    conflict = Enum.find(@id_fields, &Map.has_key?(filter_map, &1))
+
+    cond do
+      String.trim(prefix) == "" ->
+        {:error,
+         {:invalid_filter_clause,
+          "id_prefix must be a non-empty document-id prefix; an empty value would " <>
+            "match every document, which is what an ignored id_prefix already did",
+          %{param: "id_prefix", field: "_id", op: "startsWith"}}}
+
+      is_binary(conflict) ->
+        {:error,
+         {:invalid_filter_clause,
+          "id_prefix conflicts with the #{inspect(conflict)} filter clause in the same " <>
+            "request; send one or the other (id_prefix is filter[_id][startsWith])",
+          %{param: "id_prefix", field: conflict, op: "startsWith"}}}
+
+      true ->
+        {:ok, Map.put(filter_map, "_id", %{"startsWith" => prefix})}
+    end
+  end
+
+  def merge_id_prefix(filter_map, prefix) when is_map(filter_map) do
+    {:error,
+     {:invalid_filter_clause,
+      "id_prefix must be a string document-id prefix; a list or map value " <>
+        "(e.g. ?id_prefix[]=a or ?id_prefix[k]=v) is not a prefix — got " <>
+        inspect(prefix, limit: 5, printable_limit: 100),
+      %{param: "id_prefix", field: "_id", op: "startsWith"}}}
+  end
+
   @doc """
   Check a filter map WITHOUT building a query — `:ok`, or `{:error, {field, op}}`
   naming the FIRST clause that has no SQL arm.
