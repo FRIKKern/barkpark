@@ -16,10 +16,11 @@ const dom = new JSDOM(`<!doctype html><body>
       <div id="figure-image" class="bp-paper-figure-image-editor"
            phx-hook="BarkparkFigureImageBridge" data-block-id="image-child-1"
            data-image-src="https://example.test/before.jpg">
-        <div class="bp-paper-figure-image-preview" data-paper-figure-image-trigger
-             role="button" tabindex="0" aria-label="Replace figure image">
-          <a href="/reader-link"><img src="https://example.test/before.jpg" alt="Kept description"></a>
+        <div class="bp-paper-figure-image-paint">
+          <img src="https://example.test/before.jpg" alt="Kept description">
         </div>
+        <button type="button" class="bp-paper-figure-image-trigger"
+                data-paper-figure-image-trigger aria-label="Replace figure image"></button>
         <details class="bp-paper-figure-image-controls">
           <summary>Image options</summary>
           <bp-media-picker data-paper-figure-image-picker></bp-media-picker>
@@ -50,8 +51,7 @@ assert.equal(typeof Hooks.BarkparkFigureImageBridge?.mounted, "function",
 
 const el = window.document.getElementById("figure-image");
 const trigger = el.querySelector("[data-paper-figure-image-trigger]");
-const link = trigger.querySelector("a");
-const image = trigger.querySelector("img");
+const image = el.querySelector(".bp-paper-figure-image-paint img");
 const picker = el.querySelector("[data-paper-figure-image-picker]");
 const opens = [];
 picker.openBrowser = () => { opens.push("browser"); return true; };
@@ -73,8 +73,8 @@ hook.mounted();
 
 try {
   const click = new window.MouseEvent("click", { bubbles: true, cancelable: true });
-  link.dispatchEvent(click);
-  assert.equal(click.defaultPrevented, true, "edit mode intercepts a reader link inside the image");
+  trigger.dispatchEvent(click);
+  assert.equal(click.defaultPrevented, true, "the rendered image overlay owns its edit action");
   assert.deepEqual(opens, ["browser"], "clicking the rendered image opens the library");
   assert.equal(window.document.activeElement, trigger,
     "pointer activation gives the picker an Escape focus-return target");
@@ -168,13 +168,13 @@ try {
   assert.deepEqual(await Promise.all(retryWait), [true]);
 
   picker.openBrowser = () => false;
-  image.click();
+  trigger.click();
   assert.equal(opens.at(-1), "upload", "upload remains the trusted fallback without browsing");
 
   el.setAttribute("inert", "");
   const beforeInert = calls.length;
   const opensBeforeInert = opens.length;
-  image.click();
+  trigger.click();
   picker.dispatchEvent(new window.CustomEvent("bp-change", { bubbles: true, detail: { value: "x" } }));
   assert.equal(calls.length, beforeInert, "an inert editor neither opens nor writes");
   assert.equal(opens.length, opensBeforeInert, "an inert editor does not activate the picker");
@@ -182,7 +182,7 @@ try {
   hook.destroyed();
   el.removeAttribute("inert");
   const beforeDestroy = calls.length;
-  image.click();
+  trigger.click();
   picker.dispatchEvent(new window.CustomEvent("bp-change", { bubbles: true, detail: { value: "x" } }));
   assert.equal(calls.length, beforeDestroy, "destroy removes activation and persistence listeners");
 
