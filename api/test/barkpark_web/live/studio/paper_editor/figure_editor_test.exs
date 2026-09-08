@@ -144,7 +144,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
     assert LazyHTML.attribute(trigger, "role") == ["button"]
     assert LazyHTML.attribute(trigger, "tabindex") == ["0"]
     assert LazyHTML.attribute(trigger, "aria-label") == ["Replace figure image"]
-    assert LazyHTML.attribute(trigger, "aria-expanded") == ["false"]
+    assert LazyHTML.attribute(trigger, "aria-haspopup") == ["dialog"]
     assert LazyHTML.attribute(picker, "open") == []
     assert html =~ ~s(data-test-id="paper-block-image-picker")
     assert html =~ ~s(data-paper-figure-image-picker)

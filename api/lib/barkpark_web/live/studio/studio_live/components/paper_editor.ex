@@ -1940,7 +1940,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       role={@picker_browse && "button"}
                       tabindex={@picker_browse && "0"}
                       aria-label={@picker_browse && "Replace figure image"}
-                      aria-expanded={@picker_browse && "false"}
+                      aria-haspopup={@picker_browse && "dialog"}
                       data-test-id="paper-figure-image-edit-trigger"
                     >
                       <%= raw(Render.render_block(child, %{style: :article, paper_links: @paper_links})) %>
