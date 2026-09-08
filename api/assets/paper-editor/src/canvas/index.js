@@ -42,7 +42,7 @@ import Typography from "@tiptap/extension-typography";
 // NodeSelection ONTO a divider/code/diagram/field atom). @tiptap/pm re-exports the
 // PM core modules, so this is the canonical TipTap-vanilla import (no extra dep).
 import { TextSelection, NodeSelection, Plugin } from "@tiptap/pm/state";
-import { Fragment, Slice } from "@tiptap/pm/model";
+import { Fragment, Slice, Mark } from "@tiptap/pm/model";
 import { Extension } from "@tiptap/core";
 
 // PURE S0 projector + op-mapper — used verbatim (do NOT reinvent the diff).
@@ -272,6 +272,25 @@ import {
 // a patch-block for that block (the existing prose patch path).
 import { Wikilink, Blockref, Tag, Valueref } from "../marks.js";
 import { DEBOUNCE_MS, PLACEHOLDER } from "../contract.js";
+
+// Collect attribute-only refreshes without replacing text or changing its undo
+// mappings. List carriers live on descendants, not just the top-level block.
+function attributeRefreshes(node, replacement, position) {
+  if (node.eq(replacement)) return [];
+  if (node.type !== replacement.type || node.isText ||
+      !Mark.sameSet(node.marks, replacement.marks) ||
+      node.childCount !== replacement.childCount) return null;
+  const changes = node.sameMarkup(replacement) ? [] : [{ position, replacement }];
+  let offset = position + 1;
+  for (let index = 0; index < node.childCount; index++) {
+    const child = node.child(index);
+    const nested = attributeRefreshes(child, replacement.child(index), offset);
+    if (nested === null) return null;
+    changes.push(...nested);
+    offset += child.nodeSize;
+  }
+  return changes;
+}
 
 // One-shot, id-guarded self-inject of the standalone stylesheet — IDENTICAL
 // contract to ../index.js:ensureStyles (same <link>, same id-guard, same
@@ -2455,7 +2474,19 @@ class BpPaperCanvas extends HTMLElement {
           tr.delete(position, position + removed.nodeSize);
         }
         const node = state.doc.child(previousIndex++);
-        if (!node.eq(replacement)) tr.replaceWith(position, position + node.nodeSize, replacement);
+        if (!node.eq(replacement)) {
+          // Saved carrier metadata can change without changing the text. Refresh
+          // attributes in place: replacing that text maps local undo steps away.
+          const refreshes = attributeRefreshes(node, replacement, position);
+          if (refreshes !== null) {
+            for (const refresh of refreshes) {
+              const target = refresh.replacement;
+              tr.setNodeMarkup(refresh.position, target.type, target.attrs, target.marks);
+            }
+          } else {
+            tr.replaceWith(position, position + node.nodeSize, replacement);
+          }
+        }
         position += replacement.nodeSize;
       });
       while (previousIndex < state.doc.childCount) {
