@@ -12460,7 +12460,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Re-parent a task (rail-l3): move it under another task's rail, or omit new_parent_id to move it to the root. Emits a task.reparented event; the response carries the destination rail_rev + the source from_rail_rev.",
+        "summary": "Re-parent a task (rail-l3): move it under another task's rail, or omit new_parent_id to move it to the root. The response carries the destination rail_rev + the source from_rail_rev. EVENT SEMANTICS: a task.reparented event is emitted ONLY when the parent actually CHANGES. A same-parent call is an idempotent no-op — the server returns the row unchanged, writes nothing, and emits NO event and NO broadcast (Barkpark.Tasks.Move: the `same_parent?` arm returns `{:noop, doc}` and never reaches the mutation-event/broadcast path that do_move/4 owns). Do NOT build de-duplication or audit logic around phantom no-op events; they have never existed. The no-op is NOT free, though: BarkparkWeb.Plugs.RateLimit runs as pipeline middleware BEFORE the controller and bills purely by HTTP method class, so a same-parent move still CONSUMES one write-bucket slot.",
         "tags": [
           "task"
         ],
