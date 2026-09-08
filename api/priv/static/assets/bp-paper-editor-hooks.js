@@ -808,6 +808,7 @@
       let conflict = null;
       let pendingIdentity = null;
       let reloadWhenClean = false;
+      let discardReloadBypass = false;
       const initialCarrier = hook.el.closest?.("[data-paper-doc-key]") ||
         main.querySelector("[data-paper-doc-key]");
       let documentKey = initialCarrier?.dataset.paperDocKey || null;
@@ -990,6 +991,20 @@
         requestReloadWhenClean() {
           reloadWhenClean = true;
           return coordinator._reloadIfClean();
+        },
+        discardLocalDraftAndReload(reload = () => window.location.reload()) {
+          // The recovery warning is an explicit destructive choice made after
+          // the author has had an opportunity to export the frozen draft. Only
+          // this document coordinator's unload prompt may be bypassed; do not
+          // clear its DOM or queues before the browser starts the hard reload.
+          discardReloadBypass = true;
+          try {
+            reload();
+            return true;
+          } catch (error) {
+            discardReloadBypass = false;
+            throw error;
+          }
         },
         async drain() {
           while (main.isConnected) {
@@ -1819,6 +1834,10 @@
         }, delay);
       };
       coordinator._onBeforeUnload = (event) => {
+        if (discardReloadBypass) {
+          discardReloadBypass = false;
+          return;
+        }
         if (!coordinator.hasUnsaved()) return;
         event.preventDefault();
         event.returnValue = "";
@@ -2183,13 +2202,48 @@
 
   document.addEventListener("click", bpPaperDownloadCanvasRecovery);
 
+  function bpPaperReloadCanvasRecovery(event, reload) {
+    if (event.defaultPrevented || event.button !== 0) return false;
+    const button = event.target.closest?.('[data-test-id="paper-canvas-reload-server"]');
+    if (!button) return false;
+    const warning = button.closest?.('[data-test-id="paper-canvas-resume-warning"]');
+    const editorRoot = warning?.nextElementSibling;
+    if (!warning || !editorRoot ||
+        !editorRoot.matches?.(".bp-paper-editor[data-paper-doc-key]") ||
+        editorRoot.dataset.paperCanvasResumeHalt !== "true" ||
+        !editorRoot.hasAttribute("inert")) return false;
+    const coordinator = paperExitCoordinators.get(editorRoot.closest("main"));
+    if (!coordinator) return false;
+    event.preventDefault();
+    return coordinator.discardLocalDraftAndReload(reload);
+  }
+
+  window.BarkparkPaperEditorReloadCanvasRecovery = bpPaperReloadCanvasRecovery;
+  document.addEventListener("click", bpPaperReloadCanvasRecovery);
+
   function bpPaperBeforeElUpdated(fromEl, toEl) {
     const resumeState = toEl?.dataset?.paperCanvasResumeState;
-    if (toEl?.dataset?.paperCanvasResumeHalt === "true" &&
-        (resumeState === "pending" || resumeState === "blocked") &&
-        fromEl?.id && fromEl.id === toEl.id &&
-        fromEl.dataset?.paperDocKey &&
-        fromEl.dataset.paperDocKey === toEl.dataset?.paperDocKey) {
+    const samePaperEditor = fromEl?.id && fromEl.id === toEl?.id &&
+      fromEl.dataset?.paperDocKey &&
+      fromEl.dataset.paperDocKey === toEl?.dataset?.paperDocKey;
+    const wasHalted = fromEl?.dataset?.paperCanvasResumeHalt === "true";
+    const willHalt = toEl?.dataset?.paperCanvasResumeHalt === "true" &&
+      (resumeState === "pending" || resumeState === "blocked");
+    const canvasesForRoot = () => [...fromEl.querySelectorAll("bp-paper-canvas")].filter(
+      (canvas) => canvas.closest(".bp-paper-editor[data-paper-doc-key]") === fromEl,
+    );
+    if (samePaperEditor && !wasHalted && willHalt) {
+      canvasesForRoot().forEach((canvas) => {
+        canvas.captureResumeFocus?.();
+      });
+    }
+    if (samePaperEditor && wasHalted && !willHalt) {
+      const canvases = canvasesForRoot();
+      Promise.resolve().then(() => {
+        canvases.forEach((canvas) => canvas.restoreResumeFocus?.());
+      });
+    }
+    if (willHalt && samePaperEditor) {
       // LiveView snapshots phx-update="ignore" from the OLD element before
       // calling this callback, so the server's new ignore marker cannot cancel
       // this first reconnect morph. Give morphdom an exact clone of the live

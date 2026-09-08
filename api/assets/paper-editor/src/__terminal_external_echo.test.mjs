@@ -427,6 +427,30 @@ for (const type of ["terminal", "stage"]) {
   const field = window.document.querySelector("#live-field");
   editor.historySentinel = { undoDepth: 3 };
   editor.pendingSentinel = { requestId: "local-only-request" };
+  let resumeFocusRange = null;
+  let resumeFocusCaptures = 0;
+  let resumeFocusRestores = 0;
+  editor.captureResumeFocus = () => {
+    if (resumeFocusRange || !editor.contains(window.document.activeElement)) return false;
+    resumeFocusRange = window.getSelection().rangeCount
+      ? window.getSelection().getRangeAt(0).cloneRange()
+      : null;
+    resumeFocusCaptures += 1;
+    return resumeFocusRange != null;
+  };
+  editor.restoreResumeFocus = () => {
+    const savedRange = resumeFocusRange;
+    resumeFocusRange = null;
+    if (!savedRange || root.hasAttribute("inert") ||
+        ![window.document.body, window.document.documentElement].includes(
+          window.document.activeElement,
+        )) return false;
+    editable.focus();
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(savedRange);
+    resumeFocusRestores += 1;
+    return true;
+  };
   field.value = "Unsaved native form value";
   editable.focus();
   const range = window.document.createRange();
@@ -442,6 +466,7 @@ for (const type of ["terminal", "stage"]) {
   halted.dataset.paperDocKey = root.dataset.paperDocKey;
   halted.dataset.paperCanvasResumeHalt = "true";
   halted.dataset.paperCanvasResumeState = "pending";
+  halted.setAttribute("inert", "");
   halted.innerHTML = '<div data-test-id="paper-table-contextual-editor">Server owner</div>';
 
   liveViewMorph(window, root, halted);
@@ -466,6 +491,9 @@ for (const type of ["terminal", "stage"]) {
   assert.equal(window.document.querySelector('[data-test-id="paper-table-contextual-editor"]'), null,
     "the halt patch cannot introduce a second contextual owner");
   assert.equal(root.dataset.paperCanvasResumeHalt, "true");
+  assert.equal(resumeFocusCaptures, 1,
+    "normal to halted reconnect captures the live canvas focus before inert morphing");
+  editable.blur();
 
   const repeatedHalt = halted.cloneNode(false);
   repeatedHalt.innerHTML = '<div data-test-id="paper-section-editor">Newer server owner</div>';
@@ -476,6 +504,8 @@ for (const type of ["terminal", "stage"]) {
   assert.equal(window.document.querySelector('[data-test-id="paper-section-editor"]'), null,
     "a repeated halt cannot introduce another contextual owner");
   assert.equal(field.value, "Unsaved native form value");
+  assert.equal(resumeFocusCaptures, 1,
+    "a repeated halt never overwrites or recreates the one-shot focus intent");
 
   const resumed = window.document.createElement("div");
   resumed.id = root.id;
@@ -488,11 +518,19 @@ for (const type of ["terminal", "stage"]) {
     <form id="live-form"><input id="live-field" value="Server baseline"></form>
   `;
   liveViewMorph(window, root, resumed);
+  await tick();
   assert.equal(window.document.querySelector("#paper-canvas-reconnect-run-0"), wrapper,
     "a successful retry unhalts onto the matching retained server run without remounting it");
   assert.equal(wrapper.querySelector("bp-paper-canvas"), editor);
   assert.deepEqual(editor.historySentinel, { undoDepth: 3 });
   assert.deepEqual(editor.pendingSentinel, { requestId: "local-only-request" });
+  assert.equal(resumeFocusRestores, 1,
+    "halt to normal queues one focus restoration after the morph removes inert");
+  assert.equal(window.document.activeElement, editable,
+    "the acknowledged retry restores the previously focused rich canvas");
+  assert.equal(window.getSelection().anchorNode, editable.firstChild);
+  assert.equal(window.getSelection().anchorOffset, 6,
+    "the acknowledged retry restores the exact pre-halt caret");
 
   const discarded = window.document.createElement("div");
   discarded.id = root.id;

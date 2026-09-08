@@ -1285,7 +1285,10 @@ try {
   const warning = document.createElement("div");
   warning.dataset.testId = "paper-canvas-resume-warning";
   warning.innerHTML = `<button type="button" data-paper-canvas-export-draft
-    data-paper-editor-target="${recoveryRoot.id}">Download preserved canvas draft</button>`;
+    data-paper-editor-target="${recoveryRoot.id}">Download preserved canvas draft</button>
+    <button type="button" data-test-id="paper-canvas-reload-server">
+      Discard local edits and reload the server version
+    </button>`;
   recoveryRoot.parentElement.insertBefore(warning, recoveryRoot);
 
   let downloadedText = null;
@@ -1315,10 +1318,23 @@ try {
   const wrongWarning = document.createElement("div");
   wrongWarning.dataset.testId = "paper-canvas-resume-warning";
   wrongWarning.innerHTML = `<button type="button" data-paper-canvas-export-draft
-    data-paper-editor-target="${recoveryRoot.id}">Wrong recovery scope</button>`;
+    data-paper-editor-target="${recoveryRoot.id}">Wrong recovery scope</button>
+    <button type="button" data-test-id="paper-canvas-reload-server">Wrong reload scope</button>`;
   document.body.appendChild(wrongWarning);
   wrongWarning.querySelector("button").click();
   await tick();
+  let wrongScopeReloads = 0;
+  const wrongReloadButton = wrongWarning.querySelector(
+    '[data-test-id="paper-canvas-reload-server"]',
+  );
+  assert.equal(window.BarkparkPaperEditorReloadCanvasRecovery({
+    button: 0,
+    defaultPrevented: false,
+    target: wrongReloadButton,
+    preventDefault() {},
+  }, () => { wrongScopeReloads += 1; }), false,
+  "a recovery warning outside the exact editor sibling scope cannot hard reload");
+  assert.equal(wrongScopeReloads, 0);
   wrongWarning.remove();
   window.Blob = OriginalBlob;
   window.URL.createObjectURL = originalCreateObjectURL;
@@ -1383,6 +1399,51 @@ try {
     "downloading does not replace or reconcile the live editor");
   assert.equal(recovery.requests.length, 0,
     "downloading performs no persistence or network mutation");
+  const reloadButton = warning.querySelector('[data-test-id="paper-canvas-reload-server"]');
+  const reloadEvent = () => ({
+    button: 0,
+    defaultPrevented: false,
+    target: reloadButton,
+    preventDefault() { this.defaultPrevented = true; },
+  });
+  assert.equal(beforeUnloadPrevented(), true,
+    "the frozen unsaved draft is protected before explicit discard");
+  assert.throws(
+    () => window.BarkparkPaperEditorReloadCanvasRecovery(
+      reloadEvent(),
+      () => { throw new Error("reload refused"); },
+    ),
+    /reload refused/,
+    "a failed hard reload reports its failure",
+  );
+  assert.equal(beforeUnloadPrevented(), true,
+    "a failed hard reload restores this document's unload guard");
+  let hardReloads = 0;
+  let hardReloadWasBlocked = null;
+  const acceptedReload = reloadEvent();
+  assert.equal(
+    window.BarkparkPaperEditorReloadCanvasRecovery(
+      acceptedReload,
+      () => {
+        hardReloads += 1;
+        hardReloadWasBlocked = beforeUnloadPrevented();
+      },
+    ),
+    true,
+    "the exact adjacent recovery warning can explicitly request a hard reload",
+  );
+  assert.equal(acceptedReload.defaultPrevented, true);
+  assert.equal(hardReloads, 1);
+  assert.equal(hardReloadWasBlocked, false,
+    "explicit discard bypasses only this document's unload guard during hard reload");
+  assert.equal(beforeUnloadPrevented(), true,
+    "the explicit bypass is consumed once and the next ordinary unload remains guarded");
+  assert.equal(recoveryRoot.innerHTML, recoveryInnerHTML,
+    "explicit reload performs no eager frozen-DOM mutation");
+  assert.equal(recovery.canvas._editor, recoveryEditor,
+    "explicit reload leaves the live editor intact until navigation starts");
+  assert.equal(recovery.requests.length, 0,
+    "explicit reload never clears or submits the local queue");
   warning.remove();
   nestedHook.destroyed();
   recovery.close();
