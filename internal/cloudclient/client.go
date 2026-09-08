@@ -361,9 +361,12 @@ type RunawayProc struct {
 // Result and ExecMainStatus are read TOGETHER or not at all. Measured on
 // guerrilla 2026-09-01: barkpark-site@search__b reads Result "exit-code" with
 // ExecMainStatus 143 — 128+15, i.e. Next.js exiting on the SIGTERM of its own
-// retire, filed by systemd as an exit code because the unit lacks
-// SuccessExitStatus=143 (PR #14863). `result` alone reads a deliberate stop as
-// a crash.
+// retire, filed by systemd as an exit code because that box's unit file predates
+// SuccessExitStatus=143. PR #14863 landed that line (merged 2026-09-02) into
+// deploy/systemd/barkpark-site@.service and deploy/site-deploy-node.sh
+// preflight-enforces it, so this is the LEGACY-BOX path — boxes provisioned
+// before it and not yet redeployed. On those, `result` alone reads a deliberate
+// stop as a crash.
 //
 // The pointers carry the same law as every pointer in Pressure: nil is "the
 // control plane could not read this property", never a fabricated 0 — and a pid

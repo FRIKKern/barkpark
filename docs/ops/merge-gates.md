@@ -777,10 +777,10 @@ because `@canonical capability:` markers in source files must be re-checked
 when a code rename rots a marker. The workflow also fires on changes to the
 gate scripts themselves and to the workflow file.
 
-### The doc-gates roster (it is not two scripts — it is twenty-two)
+### The doc-gates roster (it is not two scripts — it is twenty-four)
 
 `doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
-undersells it: it runs **22 steps labelled `(fails this job)`** plus 6
+undersells it: it runs **24 steps labelled `(fails this job)`** plus 6
 `(tripwire)` self-tests that prove a scanner still reds on a planted defect. A
 PR touching one `.ex` file runs all of them.
 
@@ -840,6 +840,8 @@ so its verdict is unaffected.) In workflow order:
 | 20 | Preview-env isolation | `scripts/preview-env-isolation-check.sh` (+ `--selftest`) |
 | 21 | PortableDoc render parity | `scripts/pd-parity-completeness.sh` |
 | 22 | Scaffy anchor drift | `bp scaffy validate` over `scaffy/commands/` (+ `--selftest`) |
+| 23 | Dependabot root drift | `scripts/dependabot-roots-check.sh` |
+| 24 | Silencer growth ratchet | `scripts/silencer-growth-ratchet.sh` |
 
 Run any of them locally with the same command CI uses — they are ordinary
 scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s

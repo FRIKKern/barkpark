@@ -1016,9 +1016,13 @@ func slotUnitShortName(u cloudclient.SlotUnit) string {
 //
 // The reason is Result + ExecMainStatus TOGETHER, never Result alone. Measured
 // 2026-09-01: a deliberate retire reads Result "exit-code" with status 143 —
-// 128+15, a clean SIGTERM — because the unit file lacks SuccessExitStatus=143
-// (PR #14863). Printing "(exit-code)" and dropping the 143 would report that
-// retire as a crash.
+// 128+15, a clean SIGTERM — because that box's unit file predates
+// SuccessExitStatus=143. PR #14863 landed that line (merged 2026-09-02) into
+// deploy/systemd/barkpark-site@.service and deploy/site-deploy-node.sh
+// preflight-enforces it, so a slot retired on a box deployed since stops clean;
+// this is now the LEGACY-BOX path, and boxes not yet redeployed still report the
+// 143. Printing "(exit-code)" and dropping it would report that legacy retire as
+// a crash.
 func slotUnitFailureClause(failed []cloudclient.SlotUnit) string {
 	out := make([]string, 0, len(failed))
 	for _, u := range failed {

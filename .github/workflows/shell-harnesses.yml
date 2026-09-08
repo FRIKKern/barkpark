@@ -134,6 +134,7 @@ on:
       - "scripts/registration-sample.sh"
       - "scripts/registration-sample.test.sh"
       - "scripts/lib/check-runs.sh"
+      - "scripts/lib/check-runs.test.sh"
       - "scripts/cloud-path-escape-check.sh"
       - "scripts/console-path-escape-check.sh"
       - "scripts/console-path-escape-check.test.sh"
@@ -432,6 +433,7 @@ on:
       - "scripts/registration-sample.sh"
       - "scripts/registration-sample.test.sh"
       - "scripts/lib/check-runs.sh"
+      - "scripts/lib/check-runs.test.sh"
       - "scripts/cloud-path-escape-check.sh"
       - "scripts/console-path-escape-check.sh"
       - "scripts/console-path-escape-check.test.sh"
@@ -799,6 +801,7 @@ jobs:
           merge-verb-table scripts/bp-merge.test.sh
           merge-verb-table scripts/required-checks-verify.sh
           merge-verb-table scripts/lib/check-runs.sh
+          merge-verb-table scripts/lib/check-runs.test.sh
           release-scan-verdict scripts/release-scan.sh
           release-scan-verdict scripts/release-scan.test.sh
           zero-criteria-census scripts/epic-zero-criteria-census.sh
@@ -1120,6 +1123,14 @@ jobs:
         run: bash -n scripts/bp-merge.sh
       - name: bp-merge refusal-string table (captured fixtures, no live GitHub)
         run: bash scripts/bp-merge.test.sh
+      - name: the shared check-run reader survives a feed larger than an argument
+        # scripts/lib/check-runs.sh is read by this job's own verifier, by
+        # release-scan.sh and by absent-context-census.sh, and had no harness of
+        # its own until it broke in production by putting the whole feed on ARGV.
+        # The fixture is SIZED from getconf, not typed, and the harness refuses
+        # to measure if it does not exceed the platform's argument limit.
+        run: bash scripts/lib/check-runs.test.sh
+
       - name: required-checks-verify selftest (every clause mutation-proven)
         # The merge verb's pre-flight IS this script, so its own selftest rides
         # the same lane. It needs no token: --selftest drives temp fixtures only.

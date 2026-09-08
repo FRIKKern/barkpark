@@ -11600,8 +11600,12 @@ defmodule BarkparkCloud.Web.Router do
   # `result` and `exec_main_status` are kept as a PAIR on purpose: measured
   # 2026-09-01, barkpark-site@search__b reads Result=exit-code with
   # ExecMainStatus=143 — 128+15, a clean SIGTERM retire that systemd files as an
-  # exit code (PR #14863 adds SuccessExitStatus=143). A consumer handed `result`
-  # alone would read a deliberate stop as a crash.
+  # exit code because that box's unit file predates SuccessExitStatus=143.
+  # PR #14863 landed that line (merged 2026-09-02) into
+  # deploy/systemd/barkpark-site@.service and deploy/site-deploy-node.sh
+  # preflight-enforces it, so this is the LEGACY-BOX path — boxes not yet
+  # redeployed. A consumer handed `result` alone would read their deliberate stop
+  # as a crash.
   defp slot_unit(row) when is_map(row) do
     with unit when is_binary(unit) <- named_or_nil(Map.get(row, "unit")),
          active when is_binary(active) <- named_or_nil(Map.get(row, "active_state")),

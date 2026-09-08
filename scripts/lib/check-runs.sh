@@ -164,7 +164,7 @@ check_runs_rows_file() {
 # feed: a truncated read must not be byte-identical to a genuinely small one.
 _check_runs_fetch() {
   local repo="$1" sha="$2"
-  local page=1 body acc total got prev err
+  local page=1 body acc total got prev err page_runs
 
   # gh's OWN stderr is carried into the refusal rather than swallowed. It is the
   # only place `Bad credentials` / `HTTP 401` ever appears, and a caller that
@@ -232,7 +232,14 @@ _check_runs_fetch() {
     }
     # A page that adds nothing cannot terminate the walk quietly — that is the
     # infinite loop's exit AND the truncation's disguise, so it is a refusal.
-    acc="$(jq -c --argjson p "$(jq -c '.check_runs' <<<"$body")" '. + $p' <<<"$acc")" || {
+    # Same rule as the assembly below: nothing that scales with the feed goes on
+    # argv. This one put ONE PAGE there (the accumulator was already on stdin), so
+    # it is bounded at 100 runs - but at the ~3,076 bytes/run measured on this
+    # repo a full page is ~307KB, still 2.3x the 131072-byte per-argument cap. It
+    # is dormant only because a >100-run sha is needed to reach the loop at all.
+    # Two JSON values on stdin, slurped: no argument grows with the data.
+    page_runs="$(jq -c '.check_runs' <<<"$body")"
+    acc="$(jq -c -s '.[0] + .[1]' <<<"$acc"$'\n'"$page_runs")" || {
       echo "check-runs: cannot accumulate page $page for $sha — refusing the partial set" >&2
       rm -f "$err"
       return 2
@@ -257,7 +264,16 @@ _check_runs_fetch() {
   fi
 
   rm -f "$err"
-  jq -c -n --argjson runs "$acc" --argjson total "$total" '{total_count: $total, check_runs: $runs}'
+  # THE FEED GOES ON STDIN, NEVER ARGV. This line used to pass the whole
+  # accumulated payload as ONE argument, and Linux caps a SINGLE argument at
+  # MAX_ARG_STRLEN = 32 * PAGE_SIZE = 131072 bytes regardless of ARG_MAX. Real
+  # feeds passed that long ago: the sha this was measured on (d580983459) carries
+  # 83 runs / 255,330 bytes compact - 1.9x the cap, ~3,076 bytes per run, so only
+  # ~42 runs fit. Past that, exec fails with "Argument list too long", the
+  # function cannot return, and the guard goes BLIND EXACTLY WHEN THE FEED IS
+  # BIGGEST. It failed closed, which is the only reason it was survivable and the
+  # reason nobody saw it. "$total" stays on argv: it is a bounded integer.
+  printf '%s' "$acc" | jq -c --argjson total "$total" '{total_count: $total, check_runs: .}'
 }
 
 # check_runs_feed <repo> <sha>
