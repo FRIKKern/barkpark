@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: repo-router | budget: 2500tok -->
 # Barkpark — Router
 
-Read [Writing standard](docs/contracts/writing.md) before every task. Apply it to replies, plans, code explanations, reviews, docs, and product copy. It is the shared default; load the task's routing card as well.
+Read [Writing standard](docs/contracts/writing.md) for every task, alongside its routing card.
 
 ## Identity
 
