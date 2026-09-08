@@ -6017,12 +6017,13 @@
     // BP-INFLIGHT-GUARD-END
 
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
-      params: {
+      params: () => ({
         _csrf_token: csrfToken,
         user_id: userId,
         user_name: userName,
-        user_color: userColor
-      },
+        user_color: userColor,
+        ...(window.BarkparkPaperEditorConnectParams?.() || {})
+      }),
       hooks: Hooks,
       dom: {
         onBeforeElUpdated: (fromEl, toEl) =>

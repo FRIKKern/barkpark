@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { JSDOM } from "jsdom";
 
-const dom = new JSDOM('<main><button id="paper-edit-toggle" data-editing="false">Edit</button><div data-paper-doc-key="production:paper:example"></div></main>');
+const dom = new JSDOM('<main><button id="paper-edit-toggle" data-editing="false">Edit</button><div class="bp-paper-editor" data-paper-doc-key="production:paper:example"></div></main>');
 const { window } = dom;
 vm.runInContext(readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"), vm.createContext({ window, document: window.document, console, setTimeout, clearTimeout }));
 try {

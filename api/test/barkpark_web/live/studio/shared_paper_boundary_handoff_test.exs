@@ -6,7 +6,7 @@ defmodule BarkparkWeb.Studio.SharedPaperBoundaryHandoffTest do
   test "accepted new top-level boundary retains one complete run without changing its source" do
     for type <- ["table", "section"] do
       before = %{"blocks" => [paragraph("intro")]}
-      block = %{"id" => "new", "type" => type}
+      block = boundary(type, "new")
       after_content = %{"blocks" => before["blocks"] ++ [block]}
       context = %{container_kind: "document", container_run_ids: ["intro"]}
       ops = [%{"op" => "insert-after", "afterId" => "intro", "block" => block}]
@@ -25,7 +25,7 @@ defmodule BarkparkWeb.Studio.SharedPaperBoundaryHandoffTest do
   test "undo releases retained ownership and redo reacquires it with newer source intact" do
     for type <- ["table", "section"] do
       before = %{"blocks" => [paragraph("intro")]}
-      block = %{"id" => "new", "type" => type, "title" => "Newer local input"}
+      block = Map.put(boundary(type, "new"), "title", "Newer local input")
       inserted = %{"blocks" => before["blocks"] ++ [block]}
       context = %{container_kind: "document", container_run_ids: ["intro"]}
       insert = %{"op" => "insert-after", "afterId" => "intro", "block" => block}
@@ -48,7 +48,7 @@ defmodule BarkparkWeb.Studio.SharedPaperBoundaryHandoffTest do
   end
 
   test "existing boundaries, malformed contexts and nested insertions gain no exception" do
-    table = %{"id" => "table", "type" => "table", "rows" => [["Keep"]]}
+    table = table("table")
     before = %{"blocks" => [paragraph("intro"), table]}
     context = %{container_kind: "document", container_run_ids: ["intro"]}
     op = %{"op" => "replace-block", "id" => "table", "block" => table}
@@ -100,7 +100,7 @@ defmodule BarkparkWeb.Studio.SharedPaperBoundaryHandoffTest do
     intro = paragraph("intro")
     target = paragraph("target")
     before = %{"blocks" => [section("outer", [intro, target])]}
-    table = %{"id" => "nested-table", "type" => "table", "rows" => [["Draft"]]}
+    table = table("nested-table")
     after_content = %{"blocks" => [section("outer", [intro, table])]}
     context = section_context("outer", ["intro", "target"])
 
@@ -124,7 +124,7 @@ defmodule BarkparkWeb.Studio.SharedPaperBoundaryHandoffTest do
     target = paragraph("target")
     peer = paragraph("peer")
     before = %{"blocks" => [columns("cols", [[left, target], [peer]])]}
-    table = %{"id" => "column-table", "type" => "table", "rows" => [["Draft"]]}
+    table = table("column-table")
     after_content = %{"blocks" => [columns("cols", [[left, table], [peer]])]}
 
     owners =
@@ -173,8 +173,8 @@ defmodule BarkparkWeb.Studio.SharedPaperBoundaryHandoffTest do
   end
 
   test "unrelated acknowledgements retain existing owner buckets" do
-    first_table = %{"id" => "first-table", "type" => "table", "rows" => [["One"]]}
-    second_table = %{"id" => "second-table", "type" => "table", "rows" => [["Two"]]}
+    first_table = table("first-table")
+    second_table = table("second-table")
     left = paragraph("left")
     right = paragraph("right")
     before = %{"blocks" => [section("one", [left, first_table]), section("two", [right])]}
@@ -203,7 +203,7 @@ defmodule BarkparkWeb.Studio.SharedPaperBoundaryHandoffTest do
   test "nested undo prunes ownership and redo reacquires the exact owner" do
     intro = paragraph("intro")
     before = %{"blocks" => [section("outer", [intro])]}
-    table = %{"id" => "nested-table", "type" => "table", "rows" => [["Draft"]]}
+    table = table("nested-table")
     inserted = %{"blocks" => [section("outer", [intro, table])]}
     context = section_context("outer", ["intro"])
     insert = %{"op" => "append-block", "block" => table}
@@ -225,8 +225,32 @@ defmodule BarkparkWeb.Studio.SharedPaperBoundaryHandoffTest do
              retained
   end
 
+  test "an exactly-once replay reacquires an already persisted boundary" do
+    intro = paragraph("intro")
+    table = table("replayed-table")
+    current = %{"blocks" => [section("outer", [intro, table])]}
+
+    assert PaperCanvas.retain_insertions(
+             %{},
+             current,
+             current,
+             section_context("outer", ["intro", "target"]),
+             [%{"op" => "replace-block", "id" => "target", "block" => table}],
+             :replayed
+           ) == %{{:section, "outer"} => MapSet.new(["replayed-table"])}
+
+    assert PaperCanvas.retain_insertions(
+             %{},
+             current,
+             current,
+             section_context("outer", ["intro", "target"]),
+             [%{"op" => "replace-block", "id" => "target", "block" => table}],
+             :applied
+           ) == %{}
+  end
+
   test "refresh prunes cross-container moves, column moves and changed boundary types" do
-    table = %{"id" => "owned", "type" => "table", "rows" => [["Draft"]]}
+    table = table("owned")
 
     ownership = %{
       slug: "paper",
@@ -253,7 +277,7 @@ defmodule BarkparkWeb.Studio.SharedPaperBoundaryHandoffTest do
   end
 
   test "refresh releases ownership when a Section stack canvas becomes a grid" do
-    table = %{"id" => "owned", "type" => "table", "rows" => [["Draft"]]}
+    table = table("owned")
 
     ownership = %{
       slug: "paper",
@@ -289,7 +313,7 @@ defmodule BarkparkWeb.Studio.SharedPaperBoundaryHandoffTest do
   end
 
   test "preexisting boundaries, malformed trees and unsupported nested origins fail closed" do
-    table = %{"id" => "existing", "type" => "table", "rows" => [["Keep"]]}
+    table = table("existing")
     before = %{"blocks" => [section("outer", [table])]}
 
     assert PaperCanvas.retain_insertions(
@@ -332,6 +356,12 @@ defmodule BarkparkWeb.Studio.SharedPaperBoundaryHandoffTest do
   end
 
   defp paragraph(id), do: %{"id" => id, "type" => "paragraph", "content" => []}
+
+  defp boundary("table", id), do: table(id)
+  defp boundary("section", id), do: section(id, [paragraph("#{id}-body")])
+
+  defp table(id),
+    do: %{"id" => id, "type" => "table", "head" => [[], []], "rows" => [[[], []]]}
 
   defp section(id, blocks), do: %{"id" => id, "type" => "section", "blocks" => blocks}
 

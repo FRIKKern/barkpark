@@ -125,6 +125,7 @@ defmodule BarkparkWeb.BulldocsLive do
       # grades writable only for the ONE paper it binds, so the workspace alone
       # is not enough to decide. The credential arm is unchanged.
       |> assign(:can_edit?, PaperViewer.can_edit?(socket.assigns, paper.workspace_id, slug))
+      |> BarkparkWeb.PaperCanvasLease.prepare_socket()
       # Slice 2 (task-633d25cac4262afc): edit-mode state + the event gate. The
       # gate is attached for EVERY viewer — it is what makes a `paper-*` edit
       # event unreachable without `:can_edit?`, so it must not be conditional
@@ -154,6 +155,19 @@ defmodule BarkparkWeb.BulldocsLive do
         source ->
           source
       end
+
+    socket =
+      socket
+      |> BarkparkWeb.PaperCanvasLease.resume_socket(
+        paper,
+        source_blocks(reader_source),
+        socket.assigns[:can_edit?] == true
+      )
+      |> then(fn resumed ->
+        if resumed.assigns.paper_canvas_resume_status in [:resumed, :pending, :blocked],
+          do: assign(resumed, :editing?, true),
+          else: resumed
+      end)
 
     paper_link_refs = reader_source |> source_blocks() |> paper_link_refs()
 
@@ -307,6 +321,7 @@ defmodule BarkparkWeb.BulldocsLive do
     # Edit.toggle rechecks the freshly resolved viewer's write authority.
     socket =
       if connected?(socket) and
+           socket.assigns.paper_canvas_resume_status == :none and
            (get_connect_params(socket) || %{})["paper_editing_key"] == "#{dataset}:paper:#{slug}" do
         Edit.toggle(socket)
       else
@@ -766,7 +781,14 @@ defmodule BarkparkWeb.BulldocsLive do
              saved: true,
              request_id: request_id,
              replayed: outcome == :replayed,
-             rev: receipt.rev
+             rev: receipt.rev,
+             retained_leases:
+               BarkparkWeb.Studio.StudioLive.Shared.Paper.canvas_reply_leases(
+                 socket,
+                 context,
+                 ops
+               ),
+             retained_lease_overflow: BarkparkWeb.PaperCanvasLease.blocked?(socket)
            }, socket}
 
         {:error, socket} ->
@@ -1589,6 +1611,8 @@ defmodule BarkparkWeb.BulldocsLive do
             picker_browse={@picker_browse?}
             canvas_eligible={true}
             canvas_retained={Map.get(assigns, :paper_canvas_retained)}
+            canvas_resume_halt={Map.get(assigns, :paper_canvas_resume_halt, false)}
+            canvas_resume_state={Map.get(assigns, :paper_canvas_resume_status, :none)}
             task_previews={@task_previews}
             paper_links={@paper_link_details}
             save_status={@save_status}

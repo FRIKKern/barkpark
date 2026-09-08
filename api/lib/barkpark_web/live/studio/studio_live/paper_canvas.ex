@@ -364,7 +364,11 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   @doc false
   # Keep a newly inserted boundary in the exact PM editor which owns its
   # insertion history. This socket-only exception ends when that editor unmounts.
-  def retain_insertions(prior, before_content, after_content, context, ops) do
+  def retain_insertions(prior, before_content, after_content, context, ops),
+    do: retain_insertions(prior, before_content, after_content, context, ops, :applied)
+
+  @doc false
+  def retain_insertions(prior, before_content, after_content, context, ops, outcome) do
     blocks_of = fn
       %{"blocks" => blocks} when is_list(blocks) -> blocks
       _ -> []
@@ -381,8 +385,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
     next =
       with {:ok, normalized} <- CanvasRunContext.normalize(context),
            {:ok, owner} <- retention_owner(normalized),
-           {:ok, _before, _} <-
-             CanvasRunContext.map_run(before_blocks, normalized, &{:ok, &1, nil}),
+           true <-
+             outcome == :replayed or
+               match?(
+                 {:ok, _before, _},
+                 CanvasRunContext.map_run(before_blocks, normalized, &{:ok, &1, nil})
+               ),
            {:ok, _} <- Barkpark.Content.project_block_ids_safely(before_blocks),
            {:ok, after_blocks} <- Barkpark.Content.project_block_ids_safely(after_blocks) do
         candidate_ids =
@@ -397,7 +405,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
           end)
           |> MapSet.new()
           |> Enum.filter(fn id ->
-            not retained_boundary?(before_blocks, owner, id) and
+            (outcome == :replayed or not retained_boundary?(before_blocks, owner, id)) and
               retained_boundary?(after_blocks, owner, id)
           end)
 
@@ -425,7 +433,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
 
   defp retention_owner(_context), do: {:error, :unsupported_retention_owner}
 
-  defp retained_boundary?(blocks, owner, id) when is_binary(id) and id != "" do
+  @doc false
+  def retained_boundary_type(blocks, owner, id) when is_binary(id) and id != "" do
     alias Barkpark.Content.Papers.CanvasRunContext
 
     with true <- retention_owner_active?(blocks, owner),
@@ -433,18 +442,35 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
          {:ok, _blocks, type} <-
            CanvasRunContext.map_run(blocks, context, fn
              [%{"id" => ^id, "type" => type} = block] when type in ["table", "section"] ->
-               {:ok, [block], type}
+               if retained_boundary_admitted?(blocks, block),
+                 do: {:ok, [block], type},
+                 else: {:error, :retained_boundary_not_admitted}
 
              _ ->
                {:error, :retained_boundary_changed}
            end) do
-      type in ["table", "section"]
+      {:ok, type}
     else
+      _ -> :error
+    end
+  end
+
+  def retained_boundary_type(_blocks, _owner, _id), do: :error
+
+  defp retained_boundary?(blocks, owner, id),
+    do: match?({:ok, _type}, retained_boundary_type(blocks, owner, id))
+
+  defp retained_boundary_admitted?(_blocks, %{"id" => id, "type" => "table"} = block) do
+    case Barkpark.Content.Papers.BlockOps.table_editor_target_ids([block]) do
+      {:ok, ids} -> MapSet.member?(ids, id)
       _ -> false
     end
   end
 
-  defp retained_boundary?(_blocks, _owner, _id), do: false
+  defp retained_boundary_admitted?(_blocks, %{"type" => "section", "blocks" => children}),
+    do: is_list(children) and children != []
+
+  defp retained_boundary_admitted?(_blocks, _block), do: false
 
   defp retention_owner_active?(blocks, {:section, container_id}) do
     Barkpark.Content.Papers.CanvasRunContext.stack_section_canvas?(blocks, container_id)

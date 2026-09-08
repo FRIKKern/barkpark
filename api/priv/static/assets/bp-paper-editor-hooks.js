@@ -69,6 +69,12 @@
     },
   };
   const PAPER_OP_RETRY_TTL_MS = 60 * 60 * 1000;
+  const PAPER_CANVAS_LEASES = Symbol("bpPaperCanvasLeases");
+  const PAPER_CANVAS_LEASE_PENDING = Symbol("bpPaperCanvasLeasePending");
+  const PAPER_CANVAS_LEASE_OVERFLOW = Symbol("bpPaperCanvasLeaseOverflow");
+  const PAPER_CANVAS_LEASE_MAX_COUNT = 64;
+  const PAPER_CANVAS_LEASE_MAX_LENGTH = 2048;
+  const PAPER_CANVAS_LEASE_MAX_TOTAL_LENGTH = 32768;
   const PAPER_FLUSH_TARGETS =
     '[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"], ' +
     '[phx-hook="BarkparkFieldBlockBridge"], [phx-hook="BarkparkFieldBridge"]';
@@ -95,6 +101,34 @@
     "Save paused — retry required.",
   ]);
   const paperExitCoordinators = new WeakMap();
+
+  function bpPaperCanvasLeaseSet(value) {
+    if (!Array.isArray(value)) return { leases: [], valid: false };
+    const leases = [];
+    const seen = new Set();
+    let totalLength = 0;
+    for (const lease of value) {
+      if (typeof lease !== "string" || lease.length === 0 ||
+          lease.length > PAPER_CANVAS_LEASE_MAX_LENGTH) {
+        return { leases: [], valid: false };
+      }
+      if (seen.has(lease)) continue;
+      if (leases.length >= PAPER_CANVAS_LEASE_MAX_COUNT ||
+          totalLength + lease.length > PAPER_CANVAS_LEASE_MAX_TOTAL_LENGTH) {
+        return { leases: [], valid: false };
+      }
+      leases.push(lease);
+      seen.add(lease);
+      totalLength += lease.length;
+    }
+    return { leases, valid: true };
+  }
+
+  function bpPaperOpsInsertRetainedBoundary(ops) {
+    return Array.isArray(ops) && ops.some((op) =>
+      (op?.op === "insert-after" || op?.op === "append-block" || op?.op === "replace-block") &&
+      (op?.block?.type === "table" || op?.block?.type === "section"));
+  }
 
   // Collection forms use positional field names. After a reorder LiveView can
   // retain the focused button at its old index, now belonging to another row.
@@ -750,7 +784,7 @@
 
   function bpPaperExitCoordinator(hook) {
     if (hook._bpPaperExitCoordinator) return hook._bpPaperExitCoordinator;
-    const main = hook.el.closest?.("main");
+    let main = hook.el.closest?.("main");
     if (!main) return null;
     let coordinator = paperExitCoordinators.get(main);
     if (!coordinator) {
@@ -774,6 +808,7 @@
       let conflict = null;
       let pendingIdentity = null;
       let reloadWhenClean = false;
+      let discardReloadBypass = false;
       const initialCarrier = hook.el.closest?.("[data-paper-doc-key]") ||
         main.querySelector("[data-paper-doc-key]");
       let documentKey = initialCarrier?.dataset.paperDocKey || null;
@@ -849,6 +884,18 @@
       };
 
       coordinator = {
+        rebindMain(nextMain, observedDocumentKey) {
+          if (!nextMain || nextMain === main) return nextMain === main;
+          if (!observedDocumentKey || observedDocumentKey !== documentKey) return false;
+          const occupied = paperExitCoordinators.get(nextMain);
+          if (occupied && occupied !== coordinator) return false;
+          if (paperExitCoordinators.get(main) === coordinator) {
+            paperExitCoordinators.delete(main);
+          }
+          main = nextMain;
+          paperExitCoordinators.set(main, coordinator);
+          return true;
+        },
         register(member) {
           members.add(member);
           member._bpPaperExitCoordinator = coordinator;
@@ -956,6 +1003,20 @@
         requestReloadWhenClean() {
           reloadWhenClean = true;
           return coordinator._reloadIfClean();
+        },
+        discardLocalDraftAndReload(reload = () => window.location.reload()) {
+          // The recovery warning is an explicit destructive choice made after
+          // the author has had an opportunity to export the frozen draft. Only
+          // this document coordinator's unload prompt may be bypassed; do not
+          // clear its DOM or queues before the browser starts the hard reload.
+          discardReloadBypass = true;
+          try {
+            reload();
+            return true;
+          } catch (error) {
+            discardReloadBypass = false;
+            throw error;
+          }
         },
         async drain() {
           while (main.isConnected) {
@@ -1785,6 +1846,10 @@
         }, delay);
       };
       coordinator._onBeforeUnload = (event) => {
+        if (discardReloadBypass) {
+          discardReloadBypass = false;
+          return;
+        }
         if (!coordinator.hasUnsaved()) return;
         event.preventDefault();
         event.returnValue = "";
@@ -2030,7 +2095,198 @@
     hook._bpPaperExitCoordinator?.release(hook);
   }
 
+  function bpPaperCanvasRecoveryBundle(editorRoot) {
+    const documentKey = editorRoot?.dataset?.paperDocKey;
+    if (!documentKey) return null;
+    const paperMain = editorRoot.closest?.("main");
+    let revision = editorRoot.dataset.paperRev ?? paperMain?.dataset?.paperRev;
+    const fragments = [];
+
+    editorRoot.querySelectorAll('[phx-hook="BarkparkPaperCanvas"]').forEach((wrapper) => {
+      if (!wrapper.isConnected ||
+          wrapper.closest(".bp-paper-editor[data-paper-doc-key]") !== editorRoot) return;
+      const canvas = wrapper.querySelector("bp-paper-canvas");
+      let draft;
+      if (typeof canvas?.recoverySnapshot === "function") {
+        try {
+          draft = canvas.recoverySnapshot();
+        } catch (_error) {
+          draft = {
+            mode: "unknown",
+            serialization_error: "The live canvas draft could not be serialized.",
+          };
+        }
+      } else {
+        draft = {
+          mode: "unknown",
+          serialization_error: "The live canvas recovery serializer was unavailable.",
+        };
+      }
+      const context = {};
+      for (const [key, value] of [
+        ["container_id", wrapper.dataset.paperContainerId],
+        ["container_kind", wrapper.dataset.paperContainerKind],
+        ["container_run", wrapper.dataset.paperContainerRun],
+        ["container_row_id", wrapper.dataset.paperContainerRowId],
+        ["container_column_index", wrapper.dataset.paperContainerColumnIndex],
+      ]) {
+        if (value != null && value !== "") context[key] = value;
+      }
+      if (wrapper.dataset.canvasBlocks != null) {
+        try {
+          const confirmedBlocks = JSON.parse(wrapper.dataset.canvasBlocks);
+          const confirmedRunIds = Array.isArray(confirmedBlocks)
+            ? confirmedBlocks.map((block) => block?.id)
+            : [];
+          if (confirmedRunIds.length > 0 && confirmedRunIds.every((id) =>
+            typeof id === "string" && id.trim() !== ""
+          ) && new Set(confirmedRunIds).size === confirmedRunIds.length) {
+            context.container_run_ids = confirmedRunIds;
+          }
+        } catch (_error) {
+          // The exact raw confirmed source remains in the fragment below.
+        }
+      }
+      fragments.push({
+        wrapper_id: wrapper.id || null,
+        run_id: wrapper.id?.startsWith("paper-canvas-")
+          ? wrapper.id.slice("paper-canvas-".length)
+          : null,
+        context,
+        source: {
+          ...(wrapper.dataset.canvasDataset != null
+            ? { dataset: wrapper.dataset.canvasDataset }
+            : {}),
+          ...(wrapper.dataset.canvasBlocks != null
+            ? { confirmed_blocks_json: wrapper.dataset.canvasBlocks }
+            : {}),
+          ...(wrapper.dataset.paperRev != null
+            ? { paper_revision: wrapper.dataset.paperRev }
+            : {}),
+          ...(wrapper.dataset.documentRev != null
+            ? { document_revision: wrapper.dataset.documentRev }
+            : {}),
+        },
+        draft,
+      });
+    });
+
+    return {
+      format: "barkpark-paper-canvas-recovery",
+      version: 1,
+      scope: "canvas-fragments",
+      notice: "Recovery bundle for preserved canvas fragments; not a complete Paper document export.",
+      document: {
+        key: documentKey,
+        ...(revision != null
+          ? { revision }
+          : {}),
+      },
+      fragments,
+    };
+  }
+
+  function bpPaperDownloadCanvasRecovery(event) {
+    if (event.defaultPrevented || event.button !== 0) return;
+    const button = event.target.closest?.("[data-paper-canvas-export-draft]");
+    if (!button) return;
+    const warning = button.closest?.('[data-test-id="paper-canvas-resume-warning"]');
+    const targetId = button.dataset.paperEditorTarget;
+    const editorRoot = targetId ? document.getElementById(targetId) : null;
+    if (!warning || !editorRoot || warning.nextElementSibling !== editorRoot ||
+        editorRoot.dataset.paperCanvasResumeHalt !== "true" ||
+        !editorRoot.hasAttribute("inert")) return;
+    const bundle = bpPaperCanvasRecoveryBundle(editorRoot);
+    if (!bundle) return;
+
+    event.preventDefault();
+    const blob = new window.Blob([`${JSON.stringify(bundle, null, 2)}\n`], {
+      type: "application/json",
+    });
+    const href = window.URL.createObjectURL(blob);
+    const download = document.createElement("a");
+    const safeKey = bundle.document.key.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 120) || "paper";
+    download.href = href;
+    download.download = `${safeKey}-canvas-recovery.json`;
+    download.click();
+    Promise.resolve().then(() => window.URL.revokeObjectURL(href));
+  }
+
+  document.addEventListener("click", bpPaperDownloadCanvasRecovery);
+
+  function bpPaperReloadCanvasRecovery(event, reload) {
+    if (event.defaultPrevented || event.button !== 0) return false;
+    const button = event.target.closest?.('[data-test-id="paper-canvas-reload-server"]');
+    if (!button) return false;
+    const warning = button.closest?.('[data-test-id="paper-canvas-resume-warning"]');
+    const editorRoot = warning?.nextElementSibling;
+    if (!warning || !editorRoot ||
+        !editorRoot.matches?.(".bp-paper-editor[data-paper-doc-key]") ||
+        editorRoot.dataset.paperCanvasResumeHalt !== "true" ||
+        !editorRoot.hasAttribute("inert")) return false;
+    const coordinator = paperExitCoordinators.get(editorRoot.closest("main"));
+    if (!coordinator) return false;
+    event.preventDefault();
+    return coordinator.discardLocalDraftAndReload(reload);
+  }
+
+  window.BarkparkPaperEditorReloadCanvasRecovery = bpPaperReloadCanvasRecovery;
+  document.addEventListener("click", bpPaperReloadCanvasRecovery);
+
   function bpPaperBeforeElUpdated(fromEl, toEl) {
+    const paperEditorRootsWithin = (element) => {
+      if (!element?.querySelectorAll) return [];
+      const roots = [...element.querySelectorAll(".bp-paper-editor[data-paper-doc-key]")];
+      if (element.matches?.(".bp-paper-editor[data-paper-doc-key]")) roots.unshift(element);
+      return roots;
+    };
+    const fromPaperRoots = paperEditorRootsWithin(fromEl);
+    const toPaperRoots = paperEditorRootsWithin(toEl);
+    toPaperRoots.forEach((toRoot) => {
+      if (!toRoot.id) return;
+      const fromRoot = fromPaperRoots.find((candidate) =>
+        candidate.id === toRoot.id &&
+        candidate.dataset.paperDocKey === toRoot.dataset.paperDocKey
+      );
+      if (!fromRoot) return;
+      const wasRootHalted = fromRoot.dataset.paperCanvasResumeHalt === "true";
+      const nextRootState = toRoot.dataset.paperCanvasResumeState;
+      const willRootHalt = toRoot.dataset.paperCanvasResumeHalt === "true" &&
+        (nextRootState === "pending" || nextRootState === "blocked");
+      const liveCanvases = [...fromRoot.querySelectorAll("bp-paper-canvas")].filter(
+        (canvas) => canvas.closest(".bp-paper-editor[data-paper-doc-key]") === fromRoot,
+      );
+      if (!wasRootHalted && willRootHalt) {
+        liveCanvases.forEach((canvas) => canvas.captureResumeFocus?.());
+      } else if (wasRootHalted && !willRootHalt) {
+        Promise.resolve().then(() => {
+          liveCanvases.forEach((canvas) => canvas.restoreResumeFocus?.());
+        });
+      }
+    });
+
+    const resumeState = toEl?.dataset?.paperCanvasResumeState;
+    const samePaperEditor = fromEl?.id && fromEl.id === toEl?.id &&
+      fromEl.dataset?.paperDocKey &&
+      fromEl.dataset.paperDocKey === toEl?.dataset?.paperDocKey;
+    const wasHalted = fromEl?.dataset?.paperCanvasResumeHalt === "true";
+    const willHalt = toEl?.dataset?.paperCanvasResumeHalt === "true" &&
+      (resumeState === "pending" || resumeState === "blocked");
+    if (willHalt && samePaperEditor) {
+      // LiveView snapshots phx-update="ignore" from the OLD element before
+      // calling this callback, so the server's new ignore marker cannot cancel
+      // this first reconnect morph. Give morphdom an exact clone of the live
+      // children instead: keyed ignored editors reconcile to themselves and
+      // retain their DOM-owned drafts, history, selection, and form state. The
+      // server warning is a sibling outside this frozen root.
+      if (resumeState === "blocked") {
+        fromEl.querySelectorAll('[phx-hook="BarkparkPaperCanvas"]').forEach((wrapper) => {
+          wrapper[PAPER_CANVAS_LEASE_OVERFLOW] = true;
+        });
+      }
+      toEl.replaceChildren(...Array.from(fromEl.childNodes, (child) => child.cloneNode(true)));
+      return;
+    }
     if (!fromEl?.matches?.("[data-paper-terminal-boundary]") ||
         !toEl?.matches?.("[data-paper-terminal-boundary]") ||
         fromEl.id !== toEl.id) return;
@@ -2475,7 +2731,13 @@
         this._opsQueue = [];
         this._sendingOps = false;
         this._opsFailed = false;
+        this._opsReconnectRetryRequested = false;
         this._saveBridgeDestroyed = false;
+        const refreshLeasePending = () => {
+          this.el[PAPER_CANVAS_LEASE_PENDING] = this._opsQueue.some(
+            (entry) => entry.boundaryLeasePending,
+          );
+        };
         const captureContainerContext = () => {
           const containerId = this.el.dataset.paperContainerId;
           const containerKind = this.el.dataset.paperContainerKind;
@@ -2608,10 +2870,32 @@
               requestId: entry.requestId,
               reviewRequired: entry.conflictBlocks != null,
               onResult: (saved, result) => {
+                if (saved && result?.retained_lease_overflow === true) {
+                  this.el[PAPER_CANVAS_LEASE_OVERFLOW] = true;
+                } else if (saved && result &&
+                    Object.prototype.hasOwnProperty.call(result, "retained_leases")) {
+                  const replyLeaseSet = bpPaperCanvasLeaseSet(result.retained_leases);
+                  if (replyLeaseSet.valid) {
+                    this.el[PAPER_CANVAS_LEASES] = replyLeaseSet.leases;
+                    entry.boundaryLeasePending = false;
+                    this.el[PAPER_CANVAS_LEASE_OVERFLOW] = false;
+                  } else {
+                    this.el[PAPER_CANVAS_LEASE_OVERFLOW] = true;
+                  }
+                }
+                if (saved && !result?.discarded && entry.boundaryLeasePending) {
+                  // A saved boundary mutation without an authoritative lease
+                  // result cannot be allowed to fall out of the queue and lose
+                  // the only reconnect ownership signal. Fail closed until its
+                  // matching echo supplies a valid lease set.
+                  this.el[PAPER_CANVAS_LEASE_OVERFLOW] = true;
+                }
                 this._sendingOps = false;
                 if (result?.discarded) {
                   this._opsQueue = [];
                   this._opsFailed = false;
+                  this._opsReconnectRetryRequested = false;
+                  refreshLeasePending();
                   if (entry.conflictBlocks) {
                     this.el.querySelector("bp-paper-canvas")
                       ?.resolveConflictWithServerBlocks?.(entry.conflictBlocks);
@@ -2621,6 +2905,7 @@
                 if (saved && this._opsQueue[0] === entry) {
                   this._opsQueue.shift();
                 }
+                refreshLeasePending();
                 const canvas = this.el.querySelector("bp-paper-canvas");
                 if (saved && result?.request_id && entry.seq != null) {
                   if (canvas?.identifyOpsRequest?.(entry.seq, result.request_id, entry.requestId)) {
@@ -2637,10 +2922,18 @@
                   }
                 }
                 if (saved) {
+                  entry.transportRetryable = false;
+                  this._opsReconnectRetryRequested = false;
                   this._opsFailed = false;
                   sendNextOps();
                 } else {
                   this._opsFailed = true;
+                  entry.transportRetryable = result == null;
+                  if (entry.transportRetryable && this._opsReconnectRetryRequested) {
+                    this._retryQueuedOpsAfterReconnect?.();
+                  } else if (!entry.transportRetryable) {
+                    this._opsReconnectRetryRequested = false;
+                  }
                 }
                 if (acknowledgementError) throw acknowledgementError;
               },
@@ -2649,17 +2942,51 @@
           }
           const pending = mutation.promise
             .then((saved) => {
+              // retryMutation can refuse locally (expired/conflicted/no longer
+              // queued) without invoking the adapter callback. Do not leave
+              // the hook permanently marked in flight in that case.
+              if (!saved && this._sendingOps && this._opsQueue[0] === entry) {
+                this._sendingOps = false;
+                this._opsFailed = true;
+                this._opsReconnectRetryRequested = false;
+              }
               return saved;
             })
             .finally(() => this._pendingSaves.delete(pending));
           this._pendingSaves.add(pending);
         };
+        this._retryQueuedOpsAfterReconnect = () => {
+          if (this._saveBridgeDestroyed) return false;
+          const entry = this._opsQueue[0];
+          if (!entry || entry.unretryable) return false;
+          this._opsReconnectRetryRequested = true;
+          if (this._sendingOps) return true;
+          if (Date.now() >= entry.expiresAt) {
+            this._opsReconnectRetryRequested = false;
+            this._opsFailed = false;
+            sendNextOps();
+            return false;
+          }
+          if (!entry.transportRetryable) {
+            this._opsReconnectRetryRequested = false;
+            return false;
+          }
+          this._opsReconnectRetryRequested = false;
+          entry.transportRetryable = false;
+          this._opsFailed = false;
+          sendNextOps();
+          return true;
+        };
         this._onCanvasOps = (e) => {
           this._exitCoordinator?.markDirty(this.el);
           const containerContext = captureContainerContext();
+          const boundaryLeasePending = !containerContext.invalid &&
+            ["document", "section", "columns"].includes(containerContext.wire.container_kind) &&
+            bpPaperOpsInsertRetainedBoundary(e.detail.ops);
           const entry = {
             ops: e.detail.ops,
             seq: e.detail.seq,
+            boundaryLeasePending,
             conflictBlocks: e.detail.conflictBlocks || null,
             containerContext: containerContext.wire,
             invalidContainerContext: containerContext.invalid,
@@ -2671,6 +2998,7 @@
             canvas.identifyOpsRequest(entry.seq, entry.requestId);
           }
           this._opsQueue.push(entry);
+          refreshLeasePending();
           sendNextOps();
         };
         this.el.addEventListener("bp-canvas-ops", this._onCanvasOps);
@@ -2738,6 +3066,24 @@
                   mode,
                   requestId: payload.request_id,
                 });
+              }
+              // A validated server echo authoritatively replaces reconnect
+              // ownership leases (a successful mutation reply can install them
+              // earlier). Keep the opaque tokens on this exact ignored
+              // run wrapper so a later LiveSocket join can resume ownership
+              // before its first render without persisting document or draft data.
+              if (run.retained_lease_overflow === true) {
+                this.el[PAPER_CANVAS_LEASE_OVERFLOW] = true;
+              } else if (Object.prototype.hasOwnProperty.call(run, "retained_leases")) {
+                const echoLeaseSet = bpPaperCanvasLeaseSet(run.retained_leases);
+                if (echoLeaseSet.valid) {
+                  this.el[PAPER_CANVAS_LEASES] = echoLeaseSet.leases;
+                  if (active) active.boundaryLeasePending = false;
+                  refreshLeasePending();
+                  this.el[PAPER_CANVAS_LEASE_OVERFLOW] = false;
+                } else {
+                  this.el[PAPER_CANVAS_LEASE_OVERFLOW] = true;
+                }
               }
             };
             this._exitCoordinator?.observeRevision({
@@ -2844,11 +3190,41 @@
         }
       },
       updated() {
+        const editorRoot = this.el.closest(".bp-paper-editor[data-paper-doc-key]");
+        this._exitCoordinator?.rebindMain?.(
+          this.el.closest("main"),
+          editorRoot?.dataset.paperDocKey,
+        );
         if (typeof this._repaintFleet === "function") this._repaintFleet();
+      },
+      disconnected() {
+        // Capture before LiveView's reconnect patch can make the Studio shell
+        // inert or move its responsive column. The WC owns all cancellation
+        // and identity guards; this hook only supplies the earlier lifecycle
+        // edge that is not observable from the eventual halt morph.
+        this.el.querySelector("bp-paper-canvas")?.captureResumeFocus?.();
+      },
+      reconnected() {
+        const editorRoot = this.el.closest(".bp-paper-editor[data-paper-doc-key]");
+        this._exitCoordinator?.rebindMain?.(
+          this.el.closest("main"),
+          editorRoot?.dataset.paperDocKey,
+        );
+        this._retryQueuedOpsAfterReconnect?.();
+        const canvas = this.el.querySelector("bp-paper-canvas");
+        if (editorRoot && !editorRoot.hasAttribute("inert") &&
+            editorRoot.dataset.paperCanvasResumeHalt !== "true") {
+          Promise.resolve().then(() => canvas?.restoreResumeFocus?.());
+        }
       },
       destroyed() {
         this._saveBridgeDestroyed = true;
+        this._opsReconnectRetryRequested = false;
+        this._retryQueuedOpsAfterReconnect = null;
         this._opsQueue = [];
+        delete this.el[PAPER_CANVAS_LEASES];
+        delete this.el[PAPER_CANVAS_LEASE_PENDING];
+        delete this.el[PAPER_CANVAS_LEASE_OVERFLOW];
         this.el.removeEventListener("bp-canvas-ops", this._onCanvasOps);
         this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
         this.el.removeEventListener("bp-ready", this._onCanvasReady);
@@ -3602,8 +3978,52 @@
   // authority; no draft text, credentials, or mutation payload rides the hint.
   window.BarkparkPaperEditorConnectParams = () => {
     const toggle = document.querySelector('#paper-edit-toggle[data-editing="true"]');
-    const key = toggle?.closest("main")?.querySelector("[data-paper-doc-key]")?.dataset.paperDocKey;
-    return key ? { paper_editing_key: key } : {};
+    if (!toggle && document.querySelector("#paper-edit-toggle")) return {};
+    const toggleMain = toggle?.closest("main");
+    const documentRoot = toggle
+      ? (toggleMain?.matches(".bp-paper-editor[data-paper-doc-key]")
+          ? toggleMain
+          : toggleMain?.querySelector(".bp-paper-editor[data-paper-doc-key]"))
+      : [...document.querySelectorAll(".bp-paper-editor[data-paper-doc-key]")].find((candidate) =>
+          candidate.querySelector('[phx-hook="BarkparkPaperCanvas"]'));
+    const key = documentRoot?.dataset.paperDocKey;
+    if (!key) return {};
+
+    const leases = [];
+    const seen = new Set();
+    let totalLength = 0;
+    let leasePending = false;
+    let leaseOverflow = false;
+    documentRoot.querySelectorAll('[phx-hook="BarkparkPaperCanvas"]').forEach((wrapper) => {
+      if (!wrapper.isConnected ||
+          wrapper.closest(".bp-paper-editor[data-paper-doc-key]") !== documentRoot) return;
+      if (wrapper[PAPER_CANVAS_LEASE_PENDING] === true) leasePending = true;
+      if (wrapper[PAPER_CANVAS_LEASE_OVERFLOW] === true) leaseOverflow = true;
+      const wrapperLeaseSet = bpPaperCanvasLeaseSet(wrapper[PAPER_CANVAS_LEASES] || []);
+      if (!wrapperLeaseSet.valid) {
+        leaseOverflow = true;
+        return;
+      }
+      for (const lease of wrapperLeaseSet.leases) {
+        if (seen.has(lease)) continue;
+        if (leases.length >= PAPER_CANVAS_LEASE_MAX_COUNT ||
+            totalLength + lease.length > PAPER_CANVAS_LEASE_MAX_TOTAL_LENGTH) {
+          leaseOverflow = true;
+          return;
+        }
+        leases.push(lease);
+        seen.add(lease);
+        totalLength += lease.length;
+      }
+    });
+
+    return {
+      ...(toggle ? { paper_editing_key: key } : {}),
+      ...(leases.length || leasePending || leaseOverflow ? { paper_canvas_lease_key: key } : {}),
+      ...(!leaseOverflow && leases.length ? { paper_canvas_leases: leases } : {}),
+      ...(leasePending ? { paper_canvas_lease_pending: true } : {}),
+      ...(leaseOverflow ? { paper_canvas_lease_overflow: true } : {}),
+    };
   };
   window.BarkparkPaperEditorBeforeElUpdated = bpPaperBeforeElUpdated;
   window.BarkparkPaperEditorHooks = Hooks;

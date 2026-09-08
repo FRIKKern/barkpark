@@ -10,8 +10,9 @@ const hookSource = readFileSync(
 
 function mountCanvas(attributes = "") {
   const dom = new JSDOM(`
-    <main data-paper-doc-key="production:paper:nested" data-paper-rev="7">
+    <main class="bp-paper-editor" data-paper-doc-key="production:paper:nested" data-paper-rev="7">
       <div id="paper-canvas-nested-run" phx-hook="BarkparkPaperCanvas"
+           data-paper-doc-key="production:paper:nested" data-paper-rev="7"
            data-canvas-blocks="[]" ${attributes}>
         <bp-paper-canvas></bp-paper-canvas>
       </div>
@@ -211,10 +212,13 @@ for (const { kind, attributes, expected } of [
 ]) {
   const { dom, window, wrapper, canvas, bridge, pending } = mountCanvas(attributes);
   canvas.blocks = [{ id: "nested-a" }, { id: "nested-b" }];
+  const ops = kind === "section" || kind === "columns"
+    ? [{ op: "replace-block", id: "nested-a", block: { id: "nested-table", type: "table", rows: [] } }]
+    : [{ op: "patch-block", id: "nested-a" }];
   wrapper.dispatchEvent(
     new window.CustomEvent("bp-canvas-ops", {
       bubbles: true,
-      detail: { ops: [{ op: "patch-block", id: "nested-a" }], seq: 12 },
+      detail: { ops, seq: 12 },
     }),
   );
 
@@ -224,6 +228,16 @@ for (const { kind, attributes, expected } of [
   assert.equal("container_row_id" in original, false);
   if (["section", "terminal"].includes(kind)) {
     assert.equal("container_column_index" in original, false);
+  }
+  if (kind === "section" || kind === "columns") {
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+      {
+        paper_canvas_lease_key: "production:paper:nested",
+        paper_canvas_lease_pending: true,
+      },
+      `${kind}: a retention-capable nested boundary replacement is reconnect-pending before ACK`,
+    );
   }
 
   wrapper.dataset.paperContainerKind = "expandable";

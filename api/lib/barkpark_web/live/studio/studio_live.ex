@@ -86,6 +86,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     socket =
       socket
       |> Mount.init()
+      |> BarkparkWeb.PaperCanvasLease.prepare_socket()
       |> Caps.attach()
       |> load_access_grants()
       |> schedule_access_expiry()

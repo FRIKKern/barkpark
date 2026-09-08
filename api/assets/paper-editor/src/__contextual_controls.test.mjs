@@ -3,6 +3,12 @@ import { readFileSync } from "node:fs";
 
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const shell = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
+for (const [name, css] of [["standalone", styles], ["host shell", shell]]) {
+  assert.match(css, /\[data-test-id="paper-canvas-resume-warning"\]\s*\{[^}]*font-family:\s*var\(--paper-font-ui/s,
+    `${name} reconnect recovery uses editor chrome rather than document prose`);
+  assert.match(css, /\[data-test-id="paper-canvas-resume-warning"\] button\s*\{[^}]*min-height:\s*44px/s,
+    `${name} recovery actions have themed touch-sized controls`);
+}
 assert.match(shell, /\.bp-paper-surface \.bp-paper-add-block :is\(select, button\)\s*\{[^}]*background: var\(--paper-bg-deep\);[^}]*color: var\(--paper-ink\);/s,
   "public article add-block controls use the Paper theme without Studio button CSS");
 const surface = readFileSync(new URL("../../paper-surface/paper-surface.css", import.meta.url), "utf8");
