@@ -247,9 +247,12 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
   end
 
   # A REFUSAL IS A STATUS *AND* A BODY. Both show doors used to hand back the
-  # bare status, which is exactly what let their assertions accept `in [403,
-  # 404]` — with no envelope to look at there is nothing to tell one refusal
-  # from another, so the disjunction was the only honest thing left to say.
+  # bare status, which is exactly what let their assertions accept EITHER of the
+  # two refusal codes at once — with no envelope to look at there is nothing to
+  # tell one refusal from another, so the disjunction was the only honest thing
+  # left to say. (Deliberately described rather than quoted: a comment that
+  # pastes the literal it removed becomes a false hit in the sweep that hunts
+  # the remaining sites, and false hits land in the files already fixed.)
   # `Content.Errors` renders every controller error tuple into a single
   # `%{"error" => %{"code", "message", "hint", "requestId", ...}}` envelope, and
   # TWO DIFFERENT GATES ON THESE ROUTES EMIT `code: "forbidden"` — the
