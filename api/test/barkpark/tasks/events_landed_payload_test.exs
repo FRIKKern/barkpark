@@ -7,7 +7,7 @@ defmodule Barkpark.Tasks.EventsLandedPayloadTest do
 
   `Tasks.Landed` has stamped a `landed_mark` — `%{landed, criterion, flipped}` —
   onto its `task.landed` mutation_event since the verb shipped
-  (`landed.ex:197`). `Tasks.Events.replay_since/3` projected the typed payload
+  (in `Tasks.Landed`). `Tasks.Events.replay_since/3` projected the typed payload
   through a HAND-KEPT whitelist, `~w(staged reparented fenced lease_expired)`,
   and `landed_mark` was never added to it. So every `task.landed` event on the
   feed carried an EMPTY payload — 20 of them across 16 docs, measured

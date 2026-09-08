@@ -33,6 +33,7 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { ListItemSource } from "../list-item-source.js";
 import { HeadingSource } from "../heading-source.js";
+import { ParagraphSource } from "../paragraph-source.js";
 import { portableTextBoundary } from "../portable-text-boundary.js";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -374,6 +375,7 @@ function normalizeCanvasDoc(doc) {
   const stripNested = (node) => {
     if (node && node.attrs) {
       const a = node.attrs;
+      if (a.bpParagraphSource == null) delete a.bpParagraphSource;
       if (
         a.bpId == null &&
         a.bpType == null &&
@@ -606,6 +608,7 @@ class BpPaperCanvas extends HTMLElement {
       extensions: [
       ListItemSource,
       HeadingSource,
+      ParagraphSource,
         portableTextBoundary(this),
         // pdd-t2/t14: the doctrine template-lock veto as a REAL ProseMirror
         // plugin. `filterTransaction` is a PLUGIN-spec option — as an
