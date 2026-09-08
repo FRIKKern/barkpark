@@ -339,6 +339,16 @@ func sendLedgerWrite(req *manifestRequest) (int, []byte, string, error) {
 			// A 2xx, or a 4xx refusal — an ANSWER either way. Hand it back
 			// untouched; this policy never inspects a response it did not
 			// retry (the read path's rule, for the same reason).
+			//
+			// EXCEPT for the one thing the caller cannot otherwise learn: that
+			// this 2xx is attempt N, not attempt 1. See ledgerMarkReplay.
+			if attempt > 1 && err == nil && status >= 200 && status < 300 {
+				lw.emit(fmt.Sprintf("ledger REPLAY: this %s SUCCEEDED on attempt %d of %d — "+
+					"an earlier attempt may ALSO have been applied by the store (the last read-back said %s), "+
+					"so re-read the row before trusting a count, an epoch or an append-only list",
+					lw.verb, attempt, retries+1, last.state))
+				body = ledgerMarkReplay(body, lw.verb, attempt)
+			}
 			return status, body, ct, err
 		}
 		if attempt > retries {
@@ -368,6 +378,65 @@ func sendLedgerWrite(req *manifestRequest) (int, []byte, string, error) {
 			lw.verb, attempts, last.state, err)
 	}
 	return status, body, ct, nil
+}
+
+// ── the replay signal ───────────────────────────────────────────────────────
+
+// ledgerReplayField is the key sendLedgerWrite adds to a successful ledger-write
+// envelope that it RE-SENT.
+//
+// WHY A MARKER AND NOT AN IDEMPOTENCY KEY. The duplicate itself is not always
+// preventable from this side: the loop re-sends on ledgerLandedUnknown, and it
+// must — calling an unreadable ledger "not landed" would swallow writes that
+// genuinely failed. So the second-best guarantee is the one
+// task-8456f26a831d5cdc actually asks for: "a second apply the caller can SEE is
+// acceptable". A key would need a server half to honour it (an api/ change,
+// outside this fence) and — measured in tasks_write_replay_test.go — sending an
+// `Idempotency-Key` header would ALSO make the request replayable to net/http's
+// own transport, arming a blind repeat underneath this loop's re-read.
+//
+// The marker rides in the ENVELOPE and not only on stderr because the callers
+// that get burned are scripts: the python loop that measured this duplicate read
+// rc and stdout, never a stderr line, which is exactly how it went unnoticed
+// until somebody read the row back by hand.
+const ledgerReplayField = "barkpark_replay"
+
+// ledgerMarkReplay annotates a JSON envelope. It is deliberately total and
+// non-fatal: a body that is not a JSON object (a minimal text receipt, a proxy's
+// HTML) comes back BYTE-FOR-BYTE, because a write's receipt must never be
+// damaged by the act of labelling it.
+func ledgerMarkReplay(body []byte, verb string, attempt int) []byte {
+	if len(body) == 0 {
+		return body
+	}
+	// Keyed on the BODY PARSING, not on a Content-Type: a store answering a
+	// write with JSON and no content-type header (or `text/plain` from a
+	// sniffing proxy) must still get the marker, and a body that is not a JSON
+	// object falls out of json.Unmarshal on its own.
+	var env map[string]json.RawMessage
+	if json.Unmarshal(body, &env) != nil || env == nil {
+		return body
+	}
+	if _, taken := env[ledgerReplayField]; taken {
+		return body
+	}
+	mark, err := json.Marshal(map[string]any{
+		"verb":    verb,
+		"attempt": attempt,
+		"resent":  true,
+		"warning": "this write was re-sent after a transient failure; an earlier attempt may also have been applied",
+		"re_read": "bp task get <doc_id>",
+		"row":     "task-8456f26a831d5cdc",
+	})
+	if err != nil {
+		return body
+	}
+	env[ledgerReplayField] = mark
+	out, err := json.Marshal(env)
+	if err != nil {
+		return body
+	}
+	return out
 }
 
 // ledgerAdviceFor is the one line that tells the caller what to DO, and it
