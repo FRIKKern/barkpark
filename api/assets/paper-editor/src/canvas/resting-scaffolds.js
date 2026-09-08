@@ -9,6 +9,7 @@ export function restingScaffolds(host) {
   return Extension.create({
     name: "restingScaffolds",
     addProseMirrorPlugins() {
+      const editor = this.editor;
       return [new Plugin({
         props: {
           decorations(state) {
@@ -46,7 +47,9 @@ export function restingScaffolds(host) {
               const divider = root && node.type.name === "divider" && next?.type.name === "heading" && next.attrs.level === 2;
               // Late host hydration maps the initial empty document selection to
               // AllSelection. It is not an intent to edit every empty scaffold.
-              const selected = !(state.selection instanceof AllSelection) &&
+              // Studio can mount a run with a default NodeSelection on its
+              // leading divider. Only the focused editor represents intent.
+              const selected = editor.isFocused && !(state.selection instanceof AllSelection) &&
                 state.selection.from < pos + node.nodeSize && state.selection.to > pos;
               if ((!empty && !divider) || selected) return flush();
               decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: "bp-resting-scaffold" }));

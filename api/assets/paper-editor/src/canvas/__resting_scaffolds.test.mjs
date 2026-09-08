@@ -75,5 +75,13 @@ try {
   try {
     assert.equal(late.host.querySelectorAll(".bp-resting-scaffold").length, 2, "post-mount data assignment also collapses resting scaffolds");
   } finally { late.parent.remove(); }
+  const initialAtom = mount("document");
+  try {
+    initialAtom.host.blocks = structuredClone(blocks.slice(2, 4));
+    initialAtom.ed.commands.setNodeSelection(0);
+    assert.equal(initialAtom.host.querySelectorAll(".bp-resting-scaffold").length, 1, "an unfocused canvas's default atom selection is not author intent");
+    initialAtom.host.querySelector('button[aria-label="Select hidden divider"]').click();
+    assert.equal(initialAtom.host.querySelectorAll(".bp-resting-scaffold").length, 0, "focused node selection still reveals the native divider");
+  } finally { initialAtom.parent.remove(); }
   console.log("resting scaffolds preserve geometry, access, and source history");
 } finally { window.close(); }
