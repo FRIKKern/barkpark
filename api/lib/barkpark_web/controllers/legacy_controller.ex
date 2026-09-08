@@ -31,7 +31,17 @@ defmodule BarkparkWeb.LegacyController do
     # `bin/1` collapses a non-binary `?filter[]=x` / `?filter[k]=v` to nil
     # BEFORE parse_legacy_filter's `String.split/2` — which would otherwise
     # 500 with a FunctionClauseError on a list/map. nil → the empty-filter path.
-    with {:ok, filter_map} <- parse_legacy_filter(bin(Map.get(params, "filter"))) do
+    # `?id_prefix=` — THE SECOND LIST DOOR. `/v1/data/query` ignored this
+    # parameter and answered the unfiltered page at 200; this route did the
+    # same, and it is worse here because `collect_all_documents/3` WALKS up to
+    # 10,000 rows, so an ignored prefix hands a sweep ten pages of unrelated
+    # documents instead of one. Same rule, same refusals, one derivation:
+    # `Content.Query.merge_id_prefix/2`. The `with` threads it exactly like the
+    # filter parse above, so an error reaches `action_fallback` as a 400
+    # `invalid_filter` and never as a 200.
+    with {:ok, filter_map} <- parse_legacy_filter(bin(Map.get(params, "filter"))),
+         {:ok, filter_map} <-
+           Content.Query.merge_id_prefix(filter_map, Map.get(params, "id_prefix")) do
       schema = fetch_schema(conn, type)
       caller_context = CallerContext.from_conn(conn)
 
