@@ -116,6 +116,7 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
 async function mount({ revision, blocks = [paragraph("original", "Original")] } = {}) {
   const main = document.createElement("main");
+  main.className = "bp-paper-editor";
   if (revision != null) {
     main.dataset.paperDocKey = "paper-overlap-probe";
     main.dataset.paperRev = String(revision);
@@ -130,6 +131,10 @@ async function mount({ revision, blocks = [paragraph("original", "Original")] } 
     <form phx-submit="paper-add-block"><select name="block-type"><option>paragraph</option></select></form>
     <div id="paper-canvas-probe-run-0" phx-hook="BarkparkPaperCanvas"><bp-paper-canvas></bp-paper-canvas></div>`;
   const wrapper = main.querySelector("[phx-hook]");
+  if (revision != null) {
+    wrapper.dataset.paperDocKey = main.dataset.paperDocKey;
+    wrapper.dataset.paperRev = String(revision);
+  }
   wrapper.dataset.canvasBlocks = JSON.stringify(blocks);
   wrapper.dataset.canvasDataset = "production";
   document.body.appendChild(main);
@@ -1151,6 +1156,151 @@ try {
     "an authoritative echo arriving first prevents a later legacy reply from re-blocking reconnect",
   );
   leaseEchoBeforeReply.close();
+
+  const recovery = await mount({ revision: 19 });
+  const recoveryRoot = recovery.main;
+  recoveryRoot.id = "paper-editor-recovery-probe";
+  recoveryRoot.dataset.paperCanvasResumeHalt = "true";
+  recoveryRoot.dataset.paperCanvasResumeState = "blocked";
+  recoveryRoot.setAttribute("inert", "");
+  recoveryRoot.querySelector("[phx-hook]").dataset.paperContainerKind = "document";
+  append(recovery.canvas, " newest pending prose");
+
+  const nestedWrapper = document.createElement("div");
+  nestedWrapper.id = "paper-canvas-probe-nested-run";
+  nestedWrapper.setAttribute("phx-hook", "BarkparkPaperCanvas");
+  nestedWrapper.dataset.paperDocKey = recoveryRoot.dataset.paperDocKey;
+  nestedWrapper.dataset.paperRev = recoveryRoot.dataset.paperRev;
+  nestedWrapper.dataset.canvasBlocks = JSON.stringify([paragraph("nested", "Nested baseline")]);
+  nestedWrapper.dataset.canvasDataset = "production";
+  nestedWrapper.dataset.paperContainerId = "section-7";
+  nestedWrapper.dataset.paperContainerKind = "section";
+  nestedWrapper.dataset.paperContainerRun = "1";
+  nestedWrapper.innerHTML = "<bp-paper-canvas></bp-paper-canvas>";
+  recoveryRoot.appendChild(nestedWrapper);
+  const nestedHandlers = new Map();
+  const nestedHook = {
+    ...hooks.BarkparkPaperCanvas,
+    el: nestedWrapper,
+    handleEvent: (name, handler) => nestedHandlers.set(name, handler),
+    pushEvent: () => Promise.resolve({ saved: true }),
+  };
+  nestedHook.mounted();
+  const nestedCanvas = nestedWrapper.querySelector("bp-paper-canvas");
+  nestedCanvas.toggleSourceMode();
+  const malformedRawSource = "# Newest source draft\n\n[[[ malformed **";
+  nestedCanvas.querySelector("textarea").value = malformedRawSource;
+
+  const wrongDocumentRoot = document.createElement("div");
+  wrongDocumentRoot.className = "bp-paper-editor";
+  wrongDocumentRoot.dataset.paperDocKey = "production:paper:wrong-document";
+  wrongDocumentRoot.innerHTML = `<div id="paper-canvas-wrong-run" phx-hook="BarkparkPaperCanvas"
+    data-canvas-blocks='[{"id":"wrong","type":"paragraph","content":[{"type":"text","value":"Wrong document secret"}]}]'>
+    <bp-paper-canvas></bp-paper-canvas></div>`;
+  recoveryRoot.appendChild(wrongDocumentRoot);
+  const warning = document.createElement("div");
+  warning.dataset.testId = "paper-canvas-resume-warning";
+  warning.innerHTML = `<button type="button" data-paper-canvas-export-draft
+    data-paper-editor-target="${recoveryRoot.id}">Download preserved canvas draft</button>`;
+  recoveryRoot.parentElement.insertBefore(warning, recoveryRoot);
+
+  let downloadedText = null;
+  let downloadedName = null;
+  let downloadClicks = 0;
+  let revokedHref = null;
+  const OriginalBlob = window.Blob;
+  const originalCreateObjectURL = window.URL.createObjectURL;
+  const originalRevokeObjectURL = window.URL.revokeObjectURL;
+  const originalAnchorClick = window.HTMLAnchorElement.prototype.click;
+  window.Blob = class RecoveryBlob {
+    constructor(parts, options) {
+      downloadedText = parts.join("");
+      this.type = options?.type;
+    }
+  };
+  window.URL.createObjectURL = () => "blob:paper-canvas-recovery";
+  window.URL.revokeObjectURL = (href) => { revokedHref = href; };
+  window.HTMLAnchorElement.prototype.click = function clickRecoveryDownload() {
+    downloadClicks += 1;
+    downloadedName = this.download;
+  };
+  const recoveryEditor = recovery.canvas._editor;
+  const recoveryInnerHTML = recoveryRoot.innerHTML;
+  warning.querySelector("button").click();
+  await tick();
+  const wrongWarning = document.createElement("div");
+  wrongWarning.dataset.testId = "paper-canvas-resume-warning";
+  wrongWarning.innerHTML = `<button type="button" data-paper-canvas-export-draft
+    data-paper-editor-target="${recoveryRoot.id}">Wrong recovery scope</button>`;
+  document.body.appendChild(wrongWarning);
+  wrongWarning.querySelector("button").click();
+  await tick();
+  wrongWarning.remove();
+  window.Blob = OriginalBlob;
+  window.URL.createObjectURL = originalCreateObjectURL;
+  window.URL.revokeObjectURL = originalRevokeObjectURL;
+  window.HTMLAnchorElement.prototype.click = originalAnchorClick;
+
+  const recoveryBundle = JSON.parse(downloadedText);
+  assert.deepEqual(
+    {
+      format: recoveryBundle.format,
+      version: recoveryBundle.version,
+      scope: recoveryBundle.scope,
+      document: recoveryBundle.document,
+      fragmentCount: recoveryBundle.fragments.length,
+    },
+    {
+      format: "barkpark-paper-canvas-recovery",
+      version: 1,
+      scope: "canvas-fragments",
+      document: { key: "paper-overlap-probe", revision: "19" },
+      fragmentCount: 2,
+    },
+    "the recovery download is explicitly a current-document canvas-fragment bundle",
+  );
+  assert.match(recoveryBundle.notice, /not a complete Paper document export/);
+  assert.equal(downloadedName, "paper-overlap-probe-canvas-recovery.json");
+  assert.equal(downloadClicks, 1,
+    "a recovery button outside the exact warning/editor sibling scope cannot export another root");
+  assert.equal(revokedHref, "blob:paper-canvas-recovery");
+  assert.deepEqual(recoveryBundle.fragments[0], {
+    wrapper_id: "paper-canvas-probe-run-0",
+    run_id: "probe-run-0",
+    context: { container_kind: "document" },
+    source: {
+      dataset: "production",
+      confirmed_blocks_json: JSON.stringify([paragraph("original", "Original")]),
+      paper_revision: "19",
+    },
+    draft: {
+      mode: "rich",
+      blocks: [paragraph("original", "Original newest pending prose")],
+    },
+  }, "the export projects newest debounced rich text without flushing or saving it");
+  assert.deepEqual(recoveryBundle.fragments[1].context, {
+    container_id: "section-7",
+    container_kind: "section",
+    container_run: "1",
+  }, "a nested run keeps its exact server container context");
+  assert.equal(recoveryBundle.fragments[1].draft.mode, "markdown");
+  assert.equal(recoveryBundle.fragments[1].draft.raw_source, malformedRawSource,
+    "raw source text is preserved even when its intermediate syntax is malformed");
+  assert.equal(downloadedText.includes("Wrong document secret"), false,
+    "a nested wrapper belonging to another document is excluded");
+  assert.equal(downloadedText.includes("signed-opaque"), false,
+    "recovery files contain no reconnect leases or credentials");
+  assert.equal(recoveryRoot.hasAttribute("inert"), true,
+    "downloading leaves the blocked editor inert");
+  assert.equal(recoveryRoot.innerHTML, recoveryInnerHTML,
+    "downloading does not mutate the frozen editor DOM");
+  assert.equal(recovery.canvas._editor, recoveryEditor,
+    "downloading does not replace or reconcile the live editor");
+  assert.equal(recovery.requests.length, 0,
+    "downloading performs no persistence or network mutation");
+  warning.remove();
+  nestedHook.destroyed();
+  recovery.close();
 
   const queuedBoundaries = await mount({ revision: 20 });
   queuedBoundaries.main.querySelector("[phx-hook]").dataset.paperContainerKind = "document";

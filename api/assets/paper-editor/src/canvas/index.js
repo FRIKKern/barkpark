@@ -1130,6 +1130,55 @@ class BpPaperCanvas extends HTMLElement {
     );
   }
 
+  // Read-only recovery seam for a reconnect halt. This projects the live editor
+  // instead of the acknowledged `blocks` baseline, so debounced prose is not
+  // omitted. Source mode always includes the textarea verbatim; if its markdown
+  // cannot be projected, the raw text and an explicit error remain exportable.
+  recoverySnapshot() {
+    if (this._mode === "source" && this._sourceEl) {
+      const rawSource = this._sourceEl.value;
+      try {
+        const baseline = this._sourceBaselineBlocks || [];
+        const blocks = clampLockedPrefix(
+          baseline,
+          realignBlockIds(baseline, markdownToBlocks(rawSource)),
+        );
+        return {
+          mode: "markdown",
+          raw_source: rawSource,
+          blocks: deepCloneBlocks(blocks),
+        };
+      } catch (_error) {
+        return {
+          mode: "markdown",
+          raw_source: rawSource,
+          serialization_error: "The Markdown draft could not be projected to PortableDoc blocks.",
+        };
+      }
+    }
+
+    let rawEditorDocument = null;
+    try {
+      rawEditorDocument = this._editor?.getJSON?.() || null;
+      if (!rawEditorDocument) {
+        return {
+          mode: "rich",
+          serialization_error: "The live rich-text document was unavailable.",
+        };
+      }
+      return {
+        mode: "rich",
+        blocks: deepCloneBlocks(docToBlocks(normalizeCanvasDoc(rawEditorDocument))),
+      };
+    } catch (_error) {
+      return {
+        mode: "rich",
+        ...(rawEditorDocument ? { raw_editor_document: rawEditorDocument } : {}),
+        serialization_error: "The rich-text draft could not be projected to PortableDoc blocks.",
+      };
+    }
+  }
+
   // Explicit conflict resolution seam. Normal echoes never erase newer local
   // edits; this path is reserved for the user's deliberate "Use latest" action.
   resolveConflictWithServerBlocks(blocks) {

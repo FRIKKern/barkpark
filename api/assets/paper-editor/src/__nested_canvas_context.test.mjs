@@ -10,8 +10,9 @@ const hookSource = readFileSync(
 
 function mountCanvas(attributes = "") {
   const dom = new JSDOM(`
-    <main data-paper-doc-key="production:paper:nested" data-paper-rev="7">
+    <main class="bp-paper-editor" data-paper-doc-key="production:paper:nested" data-paper-rev="7">
       <div id="paper-canvas-nested-run" phx-hook="BarkparkPaperCanvas"
+           data-paper-doc-key="production:paper:nested" data-paper-rev="7"
            data-canvas-blocks="[]" ${attributes}>
         <bp-paper-canvas></bp-paper-canvas>
       </div>

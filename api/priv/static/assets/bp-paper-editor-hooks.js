@@ -2064,6 +2064,113 @@
     hook._bpPaperExitCoordinator?.release(hook);
   }
 
+  function bpPaperCanvasRecoveryBundle(editorRoot) {
+    const documentKey = editorRoot?.dataset?.paperDocKey;
+    if (!documentKey) return null;
+    const paperMain = editorRoot.closest?.("main");
+    let revision = editorRoot.dataset.paperRev ?? paperMain?.dataset?.paperRev;
+    const fragments = [];
+
+    editorRoot.querySelectorAll('[phx-hook="BarkparkPaperCanvas"]').forEach((wrapper) => {
+      if (!wrapper.isConnected ||
+          wrapper.closest(".bp-paper-editor[data-paper-doc-key]") !== editorRoot) return;
+      const canvas = wrapper.querySelector("bp-paper-canvas");
+      let draft;
+      if (typeof canvas?.recoverySnapshot === "function") {
+        try {
+          draft = canvas.recoverySnapshot();
+        } catch (_error) {
+          draft = {
+            mode: "unknown",
+            serialization_error: "The live canvas draft could not be serialized.",
+          };
+        }
+      } else {
+        draft = {
+          mode: "unknown",
+          serialization_error: "The live canvas recovery serializer was unavailable.",
+        };
+      }
+      const context = {};
+      for (const [key, value] of [
+        ["container_id", wrapper.dataset.paperContainerId],
+        ["container_kind", wrapper.dataset.paperContainerKind],
+        ["container_run", wrapper.dataset.paperContainerRun],
+        ["container_row_id", wrapper.dataset.paperContainerRowId],
+        ["container_column_index", wrapper.dataset.paperContainerColumnIndex],
+      ]) {
+        if (value != null && value !== "") context[key] = value;
+      }
+      if (revision == null) {
+        revision = wrapper.dataset.paperRev ?? wrapper.dataset.documentRev;
+      }
+      fragments.push({
+        wrapper_id: wrapper.id || null,
+        run_id: wrapper.id?.startsWith("paper-canvas-")
+          ? wrapper.id.slice("paper-canvas-".length)
+          : null,
+        context,
+        source: {
+          ...(wrapper.dataset.canvasDataset != null
+            ? { dataset: wrapper.dataset.canvasDataset }
+            : {}),
+          ...(wrapper.dataset.canvasBlocks != null
+            ? { confirmed_blocks_json: wrapper.dataset.canvasBlocks }
+            : {}),
+          ...(wrapper.dataset.paperRev != null
+            ? { paper_revision: wrapper.dataset.paperRev }
+            : {}),
+          ...(wrapper.dataset.documentRev != null
+            ? { document_revision: wrapper.dataset.documentRev }
+            : {}),
+        },
+        draft,
+      });
+    });
+
+    return {
+      format: "barkpark-paper-canvas-recovery",
+      version: 1,
+      scope: "canvas-fragments",
+      notice: "Recovery bundle for preserved canvas fragments; not a complete Paper document export.",
+      document: {
+        key: documentKey,
+        ...(revision != null
+          ? { revision }
+          : {}),
+      },
+      fragments,
+    };
+  }
+
+  function bpPaperDownloadCanvasRecovery(event) {
+    if (event.defaultPrevented || event.button !== 0) return;
+    const button = event.target.closest?.("[data-paper-canvas-export-draft]");
+    if (!button) return;
+    const warning = button.closest?.('[data-test-id="paper-canvas-resume-warning"]');
+    const targetId = button.dataset.paperEditorTarget;
+    const editorRoot = targetId ? document.getElementById(targetId) : null;
+    if (!warning || !editorRoot || warning.nextElementSibling !== editorRoot ||
+        editorRoot.dataset.paperCanvasResumeHalt !== "true" ||
+        !editorRoot.hasAttribute("inert")) return;
+    const bundle = bpPaperCanvasRecoveryBundle(editorRoot);
+    if (!bundle) return;
+
+    event.preventDefault();
+    const blob = new window.Blob([`${JSON.stringify(bundle, null, 2)}\n`], {
+      type: "application/json",
+    });
+    const href = window.URL.createObjectURL(blob);
+    const download = document.createElement("a");
+    const safeKey = bundle.document.key.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 120) || "paper";
+    download.href = href;
+    download.download = `${safeKey}-canvas-recovery.json`;
+    download.click();
+    Promise.resolve().then(() => window.URL.revokeObjectURL(href));
+  }
+
+  document.addEventListener("click", bpPaperDownloadCanvasRecovery);
+
   function bpPaperBeforeElUpdated(fromEl, toEl) {
     const resumeState = toEl?.dataset?.paperCanvasResumeState;
     if (toEl?.dataset?.paperCanvasResumeHalt === "true" &&
@@ -3712,10 +3819,10 @@
     if (!toggle && document.querySelector("#paper-edit-toggle")) return {};
     const toggleMain = toggle?.closest("main");
     const documentRoot = toggle
-      ? (toggleMain?.matches("[data-paper-doc-key]")
+      ? (toggleMain?.matches(".bp-paper-editor[data-paper-doc-key]")
           ? toggleMain
-          : toggleMain?.querySelector("[data-paper-doc-key]"))
-      : [...document.querySelectorAll("[data-paper-doc-key]")].find((candidate) =>
+          : toggleMain?.querySelector(".bp-paper-editor[data-paper-doc-key]"))
+      : [...document.querySelectorAll(".bp-paper-editor[data-paper-doc-key]")].find((candidate) =>
           candidate.querySelector('[phx-hook="BarkparkPaperCanvas"]'));
     const key = documentRoot?.dataset.paperDocKey;
     if (!key) return {};
@@ -3727,7 +3834,7 @@
     let leaseOverflow = false;
     documentRoot.querySelectorAll('[phx-hook="BarkparkPaperCanvas"]').forEach((wrapper) => {
       if (!wrapper.isConnected ||
-          wrapper.closest("[data-paper-doc-key]") !== documentRoot) return;
+          wrapper.closest(".bp-paper-editor[data-paper-doc-key]") !== documentRoot) return;
       if (wrapper[PAPER_CANVAS_LEASE_PENDING] === true) leasePending = true;
       if (wrapper[PAPER_CANVAS_LEASE_OVERFLOW] === true) leaseOverflow = true;
       const wrapperLeaseSet = bpPaperCanvasLeaseSet(wrapper[PAPER_CANVAS_LEASES] || []);

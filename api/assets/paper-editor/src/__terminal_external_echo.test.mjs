@@ -410,8 +410,9 @@ for (const type of ["terminal", "stage"]) {
 {
   const { window } = environment(`
     <main>
-      <div id="paper-editor-reconnect" data-paper-doc-key="production:paper:reconnect">
-        <div id="paper-canvas-reconnect-run-0" phx-update="ignore" phx-hook="BarkparkPaperCanvas">
+      <div id="paper-editor-reconnect" class="bp-paper-editor" data-paper-doc-key="production:paper:reconnect">
+        <div id="paper-canvas-reconnect-run-0" phx-update="ignore" phx-hook="BarkparkPaperCanvas"
+             data-paper-doc-key="production:paper:reconnect">
           <bp-paper-canvas><div id="live-caret" contenteditable="true">Local canvas draft</div></bp-paper-canvas>
         </div>
         <form id="live-form"><input id="live-field" value="Server baseline"></form>
@@ -437,6 +438,7 @@ for (const type of ["terminal", "stage"]) {
 
   const halted = window.document.createElement("div");
   halted.id = root.id;
+  halted.className = root.className;
   halted.dataset.paperDocKey = root.dataset.paperDocKey;
   halted.dataset.paperCanvasResumeHalt = "true";
   halted.dataset.paperCanvasResumeState = "pending";
@@ -477,6 +479,7 @@ for (const type of ["terminal", "stage"]) {
 
   const resumed = window.document.createElement("div");
   resumed.id = root.id;
+  resumed.className = root.className;
   resumed.dataset.paperDocKey = root.dataset.paperDocKey;
   resumed.innerHTML = `
     <div id="paper-canvas-reconnect-run-0" phx-update="ignore" phx-hook="BarkparkPaperCanvas">
@@ -493,6 +496,7 @@ for (const type of ["terminal", "stage"]) {
 
   const discarded = window.document.createElement("div");
   discarded.id = root.id;
+  discarded.className = root.className;
   discarded.dataset.paperDocKey = root.dataset.paperDocKey;
   discarded.innerHTML = '<div id="authoritative-unhalted-child">Authoritative server editor</div>';
   liveViewMorph(window, root, discarded);
@@ -503,7 +507,7 @@ for (const type of ["terminal", "stage"]) {
 
 {
   const { window } = environment(`
-    <main><div id="paper-editor-reconnect" data-paper-doc-key="production:paper:first">
+    <main><div id="paper-editor-reconnect" class="bp-paper-editor" data-paper-doc-key="production:paper:first">
       <div id="old-paper-child">First paper</div>
     </div></main>
   `);
@@ -511,6 +515,7 @@ for (const type of ["terminal", "stage"]) {
   const oldChild = window.document.querySelector("#old-paper-child");
   const wrongDocument = window.document.createElement("div");
   wrongDocument.id = root.id;
+  wrongDocument.className = root.className;
   wrongDocument.dataset.paperDocKey = "production:paper:second";
   wrongDocument.dataset.paperCanvasResumeHalt = "true";
   wrongDocument.dataset.paperCanvasResumeState = "pending";
@@ -523,8 +528,9 @@ for (const type of ["terminal", "stage"]) {
 
 {
   const { window } = environment(`
-    <main><div id="paper-editor-blocked" data-paper-doc-key="production:paper:blocked">
-      <div id="paper-canvas-blocked-run-0" phx-update="ignore" phx-hook="BarkparkPaperCanvas">
+    <main><div id="paper-editor-blocked" class="bp-paper-editor" data-paper-doc-key="production:paper:blocked">
+      <div id="paper-canvas-blocked-run-0" phx-update="ignore" phx-hook="BarkparkPaperCanvas"
+           data-paper-doc-key="production:paper:blocked">
         <bp-paper-canvas><div contenteditable="true">Recoverable local text</div></bp-paper-canvas>
       </div>
     </div></main>
@@ -533,6 +539,7 @@ for (const type of ["terminal", "stage"]) {
   const wrapper = window.document.querySelector("#paper-canvas-blocked-run-0");
   const blocked = window.document.createElement("div");
   blocked.id = root.id;
+  blocked.className = root.className;
   blocked.dataset.paperDocKey = root.dataset.paperDocKey;
   blocked.dataset.paperCanvasResumeHalt = "true";
   blocked.dataset.paperCanvasResumeState = "blocked";
