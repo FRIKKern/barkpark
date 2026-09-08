@@ -98,7 +98,7 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	// edges but strictly better than shipping the met-flip unguarded.
 	if !declared && stampMergeGateFallback(sa) {
 		return useError(out, "merge_gated_criterion",
-			"refusing to stamp a MERGE-GATED criterion met: --criterion-text carries the MERGE-GATED marker, and that row is the lead's to close (a builder flipping it fabricates a done before the PR exists). Pass --merge-gated to override only if you are the lead closing the gate. (This server is too old to declare --merge-gated, so the match is on the TEXT you passed and may be a false positive on a criterion that merely MENTIONS merge-gating.)",
+			"refusing to stamp a MERGE-GATED criterion met: --criterion-text carries the MERGE-GATED marker, and that row is the lead's to close (a builder flipping it fabricates a done before the PR exists). Pass --merge-gated to override — it is an ASSERTION, not a permission: nothing checks that you are a lead, and the server cannot, because it authenticates your api_token and not the worker_id you typed. The override is RECORDED as an assertion (content.merge_gate_autostamp.stamp_overrides, carrying \"verified\": false, your asserted worker, and the token actually authenticated). (This server is too old to declare --merge-gated, so the match is on the TEXT you passed and may be a false positive on a criterion that merely MENTIONS merge-gating.)",
 			exitValidation)
 	}
 
@@ -122,9 +122,13 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	// document's `ok`.
 	cap := beginStampCapture(out, g, cmd)
 
-	// Hand the real POST to the shared dispatch, with the CLI-only
-	// --merge-gated stripped (the server does not declare that flag, so an
-	// un-stripped token would fail splitArgs with "unknown flag").
+	// Hand the real POST to the shared dispatch. Whether `forward` still carries
+	// --merge-gated is CONDITIONAL and parseStampArgs owns the decision: when the
+	// server DECLARES the flag it is forwarded like any other, because the server
+	// enforces the gate and needs to see the override; only against a legacy
+	// manifest that does not declare it is it stripped, since an undeclared token
+	// fails splitArgs with "unknown flag". See the doc comment on parseStampArgs
+	// and the fallback branch above.
 	rc := runCommand(out, g, ctx, m, cmd, forward)
 
 	// THE READ-BACK (PDS-D359/D361). A 2xx is not a landed write: the epic has
