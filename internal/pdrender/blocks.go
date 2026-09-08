@@ -93,7 +93,7 @@ func (p paragraphRenderer) Render(b Block, ctx RenderCtx) []string {
 type listRenderer struct{ ir InlineRenderer }
 
 func (lr listRenderer) Render(b Block, ctx RenderCtx) []string {
-	ordered := attrBool(b.Attrs, "ordered")
+	ordered := attrBool(b.Attrs, "ordered") || b.Type == "ordered-list" || b.Type == "numbered_list"
 	items := attrSlice(b.Attrs, "items")
 	var out []string
 	for i, item := range items {
@@ -113,6 +113,29 @@ func (lr listRenderer) Render(b Block, ctx RenderCtx) []string {
 				out = append(out, ctx.Theme.Dim.Render(prefix)+line)
 			} else {
 				out = append(out, strings.Repeat(" ", indent)+line)
+			}
+		}
+		if record, ok := item.(map[string]any); ok {
+			for _, value := range attrSlice(record, "children") {
+				child, ok := value.(map[string]any)
+				if !ok {
+					continue
+				}
+				kind := attrStr(child, "type")
+				switch kind {
+				case "list", "bulletList", "bullet_list", "bulleted-list", "bulleted_list", "ordered-list", "numbered_list":
+				default:
+					continue
+				}
+				if _, ok := child["items"].([]any); !ok {
+					continue
+				}
+				childCtx := ctx
+				childCtx.Width = bodyWidth
+				childCtx.Depth++
+				for _, line := range lr.Render(Block{Type: kind, Attrs: child}, childCtx) {
+					out = append(out, strings.Repeat(" ", indent)+line)
+				}
 			}
 		}
 	}

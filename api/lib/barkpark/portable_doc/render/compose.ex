@@ -348,7 +348,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # Lists stay semantic in every style. Article mode leaves the resulting
   # PdList/PdListItem frame bare for the paper stylesheet; email/default mode
   # applies its Outlook-safe spacing inline in Walk.
-  def compose_block(%{"type" => "list"} = b, _style) do
+  def compose_block(%{"type" => "list"} = b, style) do
     ordered = Map.get(b, "ordered") == true
 
     items =
@@ -357,12 +357,13 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> Enum.map(fn item ->
         %{
           "kind" => "PdListItem",
-          "children" => [
-            %{
-              "kind" => "PdText",
-              "children" => compose_inline_children(normalize_list_item(item))
-            }
-          ]
+          "children" =>
+            [
+              %{
+                "kind" => "PdText",
+                "children" => compose_inline_children(normalize_list_item(item))
+              }
+            ] ++ compose_list_children(item, style)
         }
       end)
 
@@ -2188,6 +2189,19 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # verbatim (a plain-text item stays plain text). Backward-compatible: non-binary
   # items and non-JSON strings are returned unchanged, so canonical lists (and
   # the golden fixture) are byte-identical.
+  defp compose_list_children(%{"children" => children}, style) when is_list(children) do
+    Enum.flat_map(children, fn
+      %{"type" => type, "items" => items} = child
+      when type in ["list", "ordered-list", "numbered_list"] or type in @unordered_list_aliases ->
+        if is_list(items), do: [compose_block(child, style)], else: []
+
+      _ ->
+        []
+    end)
+  end
+
+  defp compose_list_children(_, _), do: []
+
   defp normalize_list_item(item) when is_binary(item) do
     case Jason.decode(item) do
       {:ok, [%{} | _] = nodes} -> nodes

@@ -91,6 +91,7 @@ on:
       # these JSON mirrors with NO .go source change, so the Go realization leg must
       # run on THIS PR to catch a TUI divergence from the new projection.
       - "internal/pdrender/testdata/**"
+      - "api/test/support/fixtures/nested-list-carriers.json"
       # Taskboard TUI golden frames (internal/taskboard/testdata/*.txt). The
       # compose/render/glyph-budget suites assert the committed frames byte-for-byte
       # and inventory every glyph in them; a golden REGEN (or a hand-added fixture)

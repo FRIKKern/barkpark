@@ -34,6 +34,7 @@ on:
       # JS block. The mirrors agreeing is not the renderer agreeing.
       - "api/lib/barkpark/portable_doc/**"
       - "api/test/support/fixtures/pd-parity/**"
+      - "api/test/support/fixtures/nested-list-carriers.json"
   pull_request:
     paths:
       - "js/**"
@@ -54,6 +55,7 @@ on:
       # JS block. The mirrors agreeing is not the renderer agreeing.
       - "api/lib/barkpark/portable_doc/**"
       - "api/test/support/fixtures/pd-parity/**"
+      - "api/test/support/fixtures/nested-list-carriers.json"
 
 concurrency:
   group: js-tests-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}

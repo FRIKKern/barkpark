@@ -174,5 +174,19 @@ for (const [label, file] of slateFixtures) {
   console.log("SMOKE OK: " + label + " → " + out.length + " bytes, wrapper + non-fallback + dim-as-color (" + CHROME_DIM_COLOR + ") green");
 }
 
+const nestedJSON = readFileSync(join(repoRoot, "api/test/support/fixtures/nested-list-carriers.json"), "utf8");
+for (const width of [20, 80]) {
+  for (const theme of ["dark", "light"]) {
+    const out = render(nestedJSON, width, theme);
+    if (!out.startsWith('<pre class="bp-tui-pre">') || !out.endsWith("</pre>")) fail("nested lists: invalid wrapper");
+    const text = out.replace(/<[^>]*>/g, "");
+    for (const line of ["• Plan", "  1. Build", "     • Verify", "  2. Ship", "• Flat sibling", "• Fallback parent", "  1. Alias child"]) {
+      if (!text.includes(line)) fail(`nested lists ${width}/${theme}: missing ${line}`);
+    }
+    if (text.includes("Inactive parent fallback")) fail("nested lists revived inactive fallback");
+  }
+}
+console.log("SMOKE OK: shared nested-list fixture, mixed markers, 20/80 columns and light/dark");
+
 console.log("SMOKE OK: all " + slateFixtures.length + " slate fixtures (m17→m26) rendered through the wasm reader with three refutations each");
 process.exit(0);
