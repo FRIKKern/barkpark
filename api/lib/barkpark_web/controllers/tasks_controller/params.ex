@@ -1584,9 +1584,9 @@ defmodule BarkparkWeb.TasksController.Params do
     do:
       ~s|this criterion is a MERGE GATE — the LEAD closes it when the PR merges, and a builder flipping it | <>
         ~s|fabricates a done before the PR exists. Nothing was written. If you ARE the lead closing the gate, | <>
-        ~s|re-run with --merge-gated — which nothing verifies: it records your assertion | <>
-        ~s|(verified:false, with the api_token that was authenticated) rather than checking your | <>
-        ~s|role. | <>
+        ~s|re-run with --merge-gated — which RECORDS your assertion, marked verified:false and | <>
+        ~s|stamped with the api_token you authenticated with, rather than checking your role: the | <>
+        ~s|server does not verify that you are a lead and cannot. | <>
         ~s|IF THIS ROW IS NOT A GATE, THE MATCH WAS ON ITS PROSE AND IS A FALSE POSITIVE: with no explicit | <>
         ~s|"merge_gate" key on the criterion the guard falls back to matching the MERGE-GATED / MERGE GATE | <>
         ~s|wording anywhere in the text, which over the live corpus (2026-08-22) is a mention rather than a | <>
@@ -2323,7 +2323,8 @@ defmodule BarkparkWeb.TasksController.Params do
   defp landed_present(_), do: nil
 
   @doc """
-  Reads the LEAD-ONLY `--merge-gated` override off a stamp request, from the
+  Reads the LEAD-OWNED, UNENFORCED `--merge-gated` override off a stamp
+  request, from the
   kebab manifest flag (query key `merge-gated`) or the snake JSON body key.
   Absent / anything but a truthy scalar → `false`: the override must be ASKED
   FOR, never inferred, because it is the one flag that lets a caller flip a
