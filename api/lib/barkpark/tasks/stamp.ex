@@ -553,7 +553,8 @@ defmodule Barkpark.Tasks.Stamp do
   # exists — the exact harm the merge gate exists to prevent. A reviewer who
   # refutes a merge gate's proof must be able to say so without a lead-only
   # override, so this is never refused — and there is nothing to confess.
-  defp check_merge_gate(_doc, _update, "withdrawn", _merge_gated, _worker_id, _opts), do: {:ok, nil}
+  defp check_merge_gate(_doc, _update, "withdrawn", _merge_gated, _worker_id, _opts),
+    do: {:ok, nil}
 
   defp check_merge_gate(%Document{content: content}, update, _tag, merge_gated, worker_id, opts) do
     entry =
