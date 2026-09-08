@@ -66,7 +66,7 @@ sudo chmod 600 /etc/barkpark/alert.env
 
 Verify a firing without waiting for a real failure: `sudo systemctl start barkpark-unit-failure-alert@barkpark-image-bake.service`, then `journalctl -t barkpark-alert -p err -n 20`.
 
-`deploy/systemd/systemd-onfailure_test.sh` is the offline guard — every `.timer`'s target `.service` carries an `OnFailure=`, the handler it names exists here, and no scheduled service sets `Restart=` other than `no`. It proves it can fail on every run. **`deploy/cp-deploy.sh` does not yet install the handler** (it installs only the image-bake pair); until it does, the `OnFailure=` on the control host names a unit that is not there.
+`deploy/systemd-onfailure_test.sh` is the offline guard — every `.timer`'s target `.service` carries an `OnFailure=`, the handler it names exists here, and no scheduled service sets `Restart=` other than `no`. It proves it can fail on every run. **`deploy/cp-deploy.sh` does not yet install the handler** (it installs only the image-bake pair); until it does, the `OnFailure=` on the control host names a unit that is not there.
 
 ## Install
 

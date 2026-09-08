@@ -39,11 +39,45 @@
 # verify` (not available on macOS, where much of this repo is authored) and it
 # proves nothing about a live box: only that what we would install is coherent.
 #
-# Usage: bash deploy/systemd/systemd-onfailure_test.sh
+# ── THIS HARNESS IS ADVISORY. IT CANNOT BLOCK A MERGE. READ WHY. ─────────────
+# It runs as one step of `offline-deploy-harnesses` in
+# .github/workflows/deploy-harnesses.yml. That workflow publishes the check name
+# `Deploy harnesses`, which is NOT one of the four contexts this repo requires:
+# `Cloud gate`, `Console gate`, `Elixir gate`, `PR references an active task`
+# (.github/required-checks.json). A red here reds that advisory name and stops
+# nothing.
+#
+# AND IT CAN NEVER BECOME ONE, for a reason worth stating rather than making the
+# next reader rediscover it. deploy-harnesses.yml carries a WORKFLOW-LEVEL
+# `paths:` filter (deploy/**, that workflow, deploy_runner.ex). A workflow-level
+# paths filter emits NO check run at all on a non-matching PR — so a required
+# context pointing there would report "expected" forever and DEADLOCK every
+# docs-only, api-only and js-only PR (honest-gates D18; docs/ops/merge-gates.md,
+# the S4 PATHS-FILTERED exclusion). That workflow's own header says exactly
+# this. Absence-on-non-matching-PRs is fine for an advisory check and is
+# precisely what disqualifies it from the required set.
+#
+# THE FAILURE MODE THIS PARAGRAPH PREVENTS IS NOT "ADVISORY" — IT IS "ADVISORY
+# WHILE READ AS BLOCKING." A guard that runs, lints and is mutation-proven is
+# worth having on those terms as long as it states them. Do not call this file a
+# gate, and do not let a green here stand in for merge protection over
+# deploy/systemd/. If these units ever need real merge authority, that is a
+# change to the required set, not a change to this comment.
+#
+# Usage: bash deploy/systemd-onfailure_test.sh
 #        SYSTEMD_DIR=<dir> bash ...   (used by the arm-E control; not for CI)
 set -uo pipefail
 
-DIR="${SYSTEMD_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+# THE CORPUS IS deploy/systemd/, THE SCRIPT IS deploy/. This file deliberately
+# sits one level ABOVE the units it reads: `deploy/*.sh` — the glob that runs
+# bash -n and shellcheck over this tree in deploy-harnesses.yml — is NOT
+# recursive, so a guard parked in deploy/systemd/ is never linted, and a guard
+# nobody lints is a guard nobody maintains. It also puts this file beside its
+# siblings (instance-deploy_test.sh, cp-deploy_test.sh), which is where the next
+# person looks. The consequence is that DIR must be derived, not assumed: drop
+# the /systemd suffix below and this reads an EMPTY corpus, which is exactly how
+# a relocated harness goes quietly green. Arm D is what refuses that.
+DIR="${SYSTEMD_DIR:-$(cd "$(dirname "$0")/systemd" && pwd)}"
 MIN_TIMERS="${MIN_TIMERS:-2}"
 FAILED=0
 CHECKS=0
@@ -57,17 +91,28 @@ directives() { sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$1"; }
 # value <file> <key> — the value of Key=... , comments stripped, or empty.
 value() { directives "$1" | grep -m1 -E "^[[:space:]]*$2=" | sed -E "s/^[[:space:]]*$2=[[:space:]]*//"; }
 
+# N_TIMERS IS COUNTED, NOT DERIVED FROM THE ARRAY. Under `set -u` on bash 3.2 —
+# /bin/bash on macOS, where much of this repo is authored — taking the LENGTH of
+# an EMPTY array is an unbound-variable ERROR, not zero. That crash lands on
+# exactly the path arm D exists to report (a corpus of zero), so the clearest
+# failure this script has would have been replaced by a bash error naming a line
+# number. Measured here on the first run after this file moved, not theorised.
 timers=()
-while IFS= read -r t; do [ -n "$t" ] && timers+=("$t"); done < <(ls "$DIR"/*.timer 2>/dev/null)
+N_TIMERS=0
+while IFS= read -r t; do
+  [ -n "$t" ] || continue
+  timers[$N_TIMERS]="$t"
+  N_TIMERS=$((N_TIMERS + 1))
+done < <(ls "$DIR"/*.timer 2>/dev/null)
 
 # ── arm D: the corpus floor ──────────────────────────────────────────────────
-if [ "${#timers[@]}" -lt "$MIN_TIMERS" ]; then
-  fail "discovered only ${#timers[@]} .timer file(s) in $DIR; the floor is $MIN_TIMERS. A pass over a corpus that shrank is a check that stopped looking, not a green. Lower MIN_TIMERS deliberately if deploy/systemd really lost a timer."
+if [ "$N_TIMERS" -lt "$MIN_TIMERS" ]; then
+  fail "discovered only $N_TIMERS .timer file(s) in $DIR; the floor is $MIN_TIMERS. A pass over a corpus that shrank is a check that stopped looking, not a green. Lower MIN_TIMERS deliberately if deploy/systemd really lost a timer."
 else
-  ok "corpus floor: ${#timers[@]} .timer file(s) discovered (floor $MIN_TIMERS)"
+  ok "corpus floor: $N_TIMERS .timer file(s) discovered (floor $MIN_TIMERS)"
 fi
 
-for t in "${timers[@]}"; do
+for t in ${timers[@]+"${timers[@]}"}; do
   tname="$(basename "$t")"
   # A [Timer] may name its target explicitly with Unit=; otherwise systemd
   # triggers the same-basename .service.
@@ -153,4 +198,4 @@ if [ "$FAILED" -ne 0 ]; then
   printf '\nsystemd-onfailure_test.sh: FAILED (%d checks passed before the failure(s) above)\n' "$CHECKS" >&2
   exit 1
 fi
-printf '\nsystemd-onfailure_test.sh: PASS — %d checks over %d scheduled unit(s)\n' "$CHECKS" "${#timers[@]}"
+printf '\nsystemd-onfailure_test.sh: PASS — %d checks over %d scheduled unit(s)\n' "$CHECKS" "$N_TIMERS"

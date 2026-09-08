@@ -218,6 +218,25 @@ jobs:
         env:
           BARKPARK_SELFTEST_REQUIRE_E2E: "1"
         run: bash deploy/site-deploy-node.sh --self-test
+      # Every timer-driven unit in deploy/systemd/ carries an OnFailure= handler,
+      # that handler exists in-tree, and no scheduled service sets a Restart=
+      # that would defer the failed state past it. Before task-0633ab45951a5780
+      # there were ZERO systemd OnFailure= directives in the whole repository and
+      # both scheduled jobs — the nightly warm-image bake and the WEEKLY
+      # public-read token rotation — failed into silence on boxes that are
+      # off-CI by construction. Text-only and offline: it never invokes systemd
+      # (systemd-analyze verify is not available where much of this repo is
+      # authored), and it proves it can fail on every run by stripping an
+      # OnFailure= from a copy in a tmpdir. Sub-second.
+      #
+      # spec-authority: advisory-ok — this step reds `Deploy harnesses`, which is
+      # not in the required set and cannot be (the workflow-level paths: filter
+      # above emits no check run on a non-matching PR, so requiring it would
+      # deadlock every unrelated PR — D18, and this file's own header). The
+      # script's header states that in full so a reader of the guard alone
+      # cannot mistake it for merge protection.
+      - name: systemd OnFailure handler harness
+        run: bash deploy/systemd-onfailure_test.sh
 
   git-2-34-fetch:
     # task-6f18e71a351f8081 B. The control-plane box is Ubuntu 22.04 with the

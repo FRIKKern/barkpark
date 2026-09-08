@@ -20,7 +20,7 @@
 # budget is exhausted; while it is retrying the handler does NOT run. Both
 # guarded units are Type=oneshot with NO Restart= (systemd rejects
 # Restart=always on oneshot anyway), so the very first non-zero exit is the
-# final one and the handler fires immediately. deploy/systemd/systemd-onfailure_test.sh
+# final one and the handler fires immediately. deploy/systemd-onfailure_test.sh
 # enforces that: a scheduled service may not carry a Restart= other than `no`.
 #
 # CALLED FOR: `OnFailure=barkpark-unit-failure-alert@%n.service` on the guarded
