@@ -323,8 +323,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def build_block_patch(%{"type" => "paper-links"} = block, params) do
     %{}
-    |> put_optional_patch(params, "title")
-    |> put_optional_patch(params, "description")
+    |> put_paper_links_text(params, "title")
+    |> put_paper_links_text(params, "description")
     |> put_optional_patch(params, "layout")
     |> put_paper_link_refs(block, params)
   end
@@ -3097,6 +3097,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   defp section_title_value(title) do
     if String.trim(title) == "", do: nil, else: title
+  end
+
+  defp put_paper_links_text(map, params, key) do
+    case Map.fetch(params, key) do
+      {:ok, value} when is_binary(value) ->
+        Map.put(map, key, if(String.trim(value) == "", do: nil, else: value))
+
+      {:ok, _value} ->
+        Map.put(map, key, nil)
+
+      :error ->
+        map
+    end
   end
 
   defp put_optional_patch(map, params, key) do

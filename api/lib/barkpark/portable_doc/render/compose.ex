@@ -2669,7 +2669,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp block_to_html(_, _), do: ""
 
-  defp paper_links_html(block, style) do
+  @doc false
+  def paper_links_presentation(block, style) do
     resolved = Map.get(block, "_paper_links", %{})
     reasons = Map.get(block, "reasons", %{})
     layout = nonblank(Map.get(block, "layout"))
@@ -2682,55 +2683,84 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> Enum.reject(&is_nil/1)
       |> Enum.map_join(fn ref -> paper_link_card(ref, style, layout) end)
 
-    if cards == "" do
+    title_source = paper_links_source_text(Map.get(block, "title"))
+    description_source = paper_links_source_text(Map.get(block, "description"))
+
+    %{
+      cards_html: cards,
+      empty?: cards == "",
+      layout: layout,
+      title: title_source || "Explore the work",
+      title_source: title_source || "",
+      title_default?: is_nil(title_source),
+      description: description_source,
+      description_source: description_source || "",
+      section_style: paper_links_section_style(layout),
+      header_style: "margin:0 0 #{if layout == "chapters", do: "2.15rem", else: "1.15rem"}",
+      title_style: paper_links_title_style(layout),
+      description_style:
+        "margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6",
+      grid_style: paper_links_grid_style(layout)
+    }
+  end
+
+  defp paper_links_html(block, style) do
+    presentation = paper_links_presentation(block, style)
+
+    if presentation.empty? do
       ""
     else
-      title = nonblank(Map.get(block, "title")) || "Explore the work"
-      description = nonblank(Map.get(block, "description"))
-
       intro =
-        if description,
+        if presentation.description,
           do:
-            ~s|<p style="margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6">#{Util.escape_html(description)}</p>|,
+            ~s|<p style="#{presentation.description_style}">#{Util.escape_html(presentation.description)}</p>|,
           else: ""
 
-      section_style =
-        case layout do
-          "chapters" ->
-            "margin:4.8rem var(--bp-evidence-pull, 0) 0;width:var(--bp-evidence-width, auto);padding-top:1.65rem;border-top:1px solid var(--paper-ink, #17332d)"
+      layout_attr =
+        if presentation.layout,
+          do: ~s| data-layout="#{Util.escape_attr(presentation.layout)}"|,
+          else: ""
 
-          "timeline" ->
-            "margin:4.8rem var(--bp-evidence-pull, 0) 0;width:var(--bp-evidence-width, auto);padding-top:1.65rem;border-top:3px double var(--paper-ink, #17332d)"
-
-          _ ->
-            "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)"
-        end
-
-      title_style =
-        if layout in ["chapters", "timeline"],
-          do:
-            "margin:0;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.8rem,4vw,2.65rem);line-height:1.08;letter-spacing:-0.025em;color:var(--paper-ink, #17332d)",
-          else: "margin:0;font-size:1.15rem;line-height:1.25;color:var(--paper-ink, #17332d)"
-
-      grid_style =
-        case layout do
-          "chapters" ->
-            "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,25rem),1fr));gap:0;border-bottom:1px solid var(--paper-rule, #dde7e2)"
-
-          "timeline" ->
-            "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:0;border-top:1px solid var(--paper-rule, #dde7e2);border-bottom:1px solid var(--paper-rule, #dde7e2)"
-
-          _ ->
-            "display:grid;gap:0.85rem"
-        end
-
-      layout_attr = if layout, do: ~s| data-layout="#{Util.escape_attr(layout)}"|, else: ""
-
-      ~s|<section data-paper-links#{layout_attr} aria-label="#{Util.escape_attr(title)}" style="#{section_style}">| <>
-        ~s|<header style="margin:0 0 #{if layout == "chapters", do: "2.15rem", else: "1.15rem"}"><h2 style="#{title_style}">#{Util.escape_html(title)}</h2>#{intro}</header>| <>
-        ~s(<div style="#{grid_style}">#{cards}</div></section>)
+      ~s|<section data-paper-links#{layout_attr} aria-label="#{Util.escape_attr(presentation.title)}" style="#{presentation.section_style}">| <>
+        ~s|<header style="#{presentation.header_style}"><h2 style="#{presentation.title_style}">#{Util.escape_html(presentation.title)}</h2>#{intro}</header>| <>
+        ~s(<div style="#{presentation.grid_style}">#{presentation.cards_html}</div></section>)
     end
   end
+
+  defp paper_links_source_text(value) when is_binary(value) do
+    if String.trim(value) == "", do: nil, else: value
+  end
+
+  defp paper_links_source_text(value) when is_integer(value), do: Integer.to_string(value)
+  defp paper_links_source_text(_value), do: nil
+
+  defp paper_links_section_style("chapters"),
+    do:
+      "margin:4.8rem var(--bp-evidence-pull, 0) 0;width:var(--bp-evidence-width, auto);padding-top:1.65rem;border-top:1px solid var(--paper-ink, #17332d)"
+
+  defp paper_links_section_style("timeline"),
+    do:
+      "margin:4.8rem var(--bp-evidence-pull, 0) 0;width:var(--bp-evidence-width, auto);padding-top:1.65rem;border-top:3px double var(--paper-ink, #17332d)"
+
+  defp paper_links_section_style(_layout),
+    do: "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)"
+
+  defp paper_links_title_style(layout) when layout in ["chapters", "timeline"],
+    do:
+      "margin:0;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.8rem,4vw,2.65rem);line-height:1.08;letter-spacing:-0.025em;color:var(--paper-ink, #17332d)"
+
+  defp paper_links_title_style(_layout),
+    do: "margin:0;font-size:1.15rem;line-height:1.25;color:var(--paper-ink, #17332d)"
+
+  defp paper_links_grid_style("chapters"),
+    do:
+      "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,25rem),1fr));gap:0;border-bottom:1px solid var(--paper-rule, #dde7e2)"
+
+  defp paper_links_grid_style("timeline"),
+    do:
+      "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:0;border-top:1px solid var(--paper-rule, #dde7e2);border-bottom:1px solid var(--paper-rule, #dde7e2)"
+
+  defp paper_links_grid_style(_layout), do: "display:grid;gap:0.85rem"
 
   defp paper_link_ref(slug, resolved, reasons) when is_binary(slug) do
     paper_link_ref(%{"slug" => slug}, resolved, reasons)

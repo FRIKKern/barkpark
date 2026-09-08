@@ -47,6 +47,21 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContainerBlocksTest do
     assert [%{"slug" => "day", "title" => "Updated", "unknown" => "keep"}] = patch["refs"]
   end
 
+  test "paper-links scalar header edits preserve meaningful whitespace without rebuilding refs" do
+    refs = [%{"slug" => "day", "unknown" => %{"keep" => true}}, "legacy"]
+    block = %{"type" => "paper-links", "refs" => refs}
+
+    assert %{"title" => "  Authored heading  "} =
+             Blocks.build_block_patch(block, %{"title" => "  Authored heading  "})
+
+    assert %{"description" => "  Authored description  "} =
+             Blocks.build_block_patch(block, %{"description" => "  Authored description  "})
+
+    assert %{"title" => nil} = Blocks.build_block_patch(block, %{"title" => "   "})
+    assert %{"description" => nil} = Blocks.build_block_patch(block, %{"description" => "\n "})
+    refute Map.has_key?(Blocks.build_block_patch(block, %{"title" => "new"}), "refs")
+  end
+
   test "bar-chart patch merges typed values into each original bar" do
     block = %{
       "type" => "bar-chart",

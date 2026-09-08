@@ -2,6 +2,7 @@ defmodule Barkpark.PortableDoc.Render.PaperLinksTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.Render
+  alias Barkpark.PortableDoc.Render.Compose
 
   @block %{
     "id" => "related",
@@ -125,5 +126,55 @@ defmodule Barkpark.PortableDoc.Render.PaperLinksTest do
     refute html =~ "Generic live title"
     refute html =~ "Generic live description"
     refute html =~ "rev 12"
+  end
+
+  test "heading presentation preserves authored whitespace and keeps absent copy reader-only" do
+    block = %{
+      "type" => "paper-links",
+      "title" => "  Authored heading  ",
+      "description" => "  Authored description  ",
+      "refs" => ["next-paper"]
+    }
+
+    html = Render.render_block(block, %{style: :article})
+
+    assert html =~ ">  Authored heading  </h2>"
+    assert html =~ ">  Authored description  </p>"
+
+    default_html =
+      Render.render_block(%{"type" => "paper-links", "refs" => ["next-paper"]}, %{
+        style: :article
+      })
+
+    assert default_html =~ ">Explore the work</h2>"
+    refute default_html =~ "<p style="
+    assert Render.render_block(%{"type" => "paper-links", "refs" => []}, %{style: :article}) == ""
+  end
+
+  test "shared presentation keeps the reader's default, chapters, and timeline geometry" do
+    default = Compose.paper_links_presentation(%{"refs" => ["next"]}, :article)
+
+    assert default.title == "Explore the work"
+    assert default.title_source == ""
+    assert default.title_default?
+
+    assert default.section_style ==
+             "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)"
+
+    chapters =
+      Compose.paper_links_presentation(%{"layout" => "chapters", "refs" => ["next"]}, :article)
+
+    assert chapters.header_style == "margin:0 0 2.15rem"
+    assert chapters.title_style =~ "font-size:clamp(1.8rem,4vw,2.65rem)"
+    assert chapters.grid_style =~ "minmax(min(100%,25rem),1fr)"
+
+    timeline =
+      Compose.paper_links_presentation(%{"layout" => "timeline", "refs" => ["next"]}, :article)
+
+    assert timeline.section_style =~ "border-top:3px double"
+    assert timeline.grid_style =~ "minmax(min(100%,13rem),1fr)"
+
+    assert timeline.description_style ==
+             "margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6"
   end
 end

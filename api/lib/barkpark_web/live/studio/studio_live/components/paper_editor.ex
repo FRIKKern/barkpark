@@ -1550,6 +1550,142 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     "section-title-" <> Base.url_encode64(block_id, padding: false)
   end
 
+  attr(:block, :map, required: true)
+  attr(:paper_links, :map, default: %{})
+
+  defp paper_links_preview(assigns) do
+    presentation =
+      assigns.block
+      |> Map.put("_paper_links", assigns.paper_links)
+      |> Compose.paper_links_presentation(:article)
+
+    assigns = assign(assigns, :presentation, presentation)
+
+    ~H"""
+    <div class="bp-paper-contextual-preview" data-test-id="paper-links-preview">
+      <%= if @presentation.empty? do %>
+        <.paper_links_header_editor block={@block} presentation={@presentation} empty />
+      <% else %>
+        <section
+          data-paper-links
+          data-layout={@presentation.layout}
+          aria-label={@presentation.title}
+          style={@presentation.section_style}
+        >
+          <.paper_links_header_editor block={@block} presentation={@presentation} />
+          <div style={@presentation.grid_style}><%= raw(@presentation.cards_html) %></div>
+        </section>
+      <% end %>
+    </div>
+    """
+  end
+
+  attr(:block, :map, required: true)
+  attr(:presentation, :map, required: true)
+  attr(:empty, :boolean, default: false)
+
+  defp paper_links_header_editor(assigns) do
+    assigns =
+      assigns
+      |> assign(:title_dom_id, paper_links_dom_id("title", assigns.block["id"]))
+      |> assign(:description_dom_id, paper_links_dom_id("description", assigns.block["id"]))
+
+    ~H"""
+    <header
+      class="bp-paper-links-header-editor"
+      style={@presentation.header_style}
+      data-paper-links-header-empty={@empty && "true"}
+    >
+      <div
+        class="bp-paper-links-title-owner"
+        style={@presentation.title_style <> ";font-weight:bold"}
+        data-paper-links-title-default={@presentation.title_default? && "true"}
+      >
+        <h2 class="bp-paper-links-title-heading" style="margin:0;font:inherit;color:inherit">
+          <button
+            type="button"
+            phx-click={JS.focus(to: "#" <> @title_dom_id)}
+            aria-label={"Edit related papers heading: " <> @presentation.title}
+            aria-controls={@title_dom_id}
+            data-paper-links-title-paint
+          ><%= @presentation.title %></button>
+        </h2>
+        <form
+          id={"paper-links-title-form-" <> @block["id"]}
+          class="bp-paper-edit-form bp-paper-links-title-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+          data-test-id="paper-links-title-editor"
+        >
+          <input type="hidden" name="block_id" value={@block["id"]} />
+          <label class="sr-only" for={@title_dom_id}>Related papers heading</label>
+          <textarea
+            id={@title_dom_id}
+            name="title"
+            rows="1"
+            class="bp-paper-inline-text bp-paper-links-title-input"
+            aria-label="Related papers heading"
+            placeholder={@presentation.title}
+            phx-hook="BarkparkPaperAutoSize"
+          ><%= @presentation.title_source %></textarea>
+        </form>
+      </div>
+
+      <div
+        class="bp-paper-links-description-owner"
+        style={@presentation.description_style}
+        data-paper-links-description-empty={is_nil(@presentation.description) && "true"}
+      >
+        <p
+          :if={@presentation.description}
+          class="bp-paper-links-description-paragraph"
+          style="margin:0;font:inherit;color:inherit"
+        >
+          <button
+            type="button"
+            phx-click={JS.focus(to: "#" <> @description_dom_id)}
+            aria-label="Edit related papers description"
+            aria-controls={@description_dom_id}
+            data-paper-links-description-paint
+          ><%= @presentation.description %></button>
+        </p>
+        <form
+          id={"paper-links-description-form-" <> @block["id"]}
+          class="bp-paper-edit-form bp-paper-links-description-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+          data-test-id="paper-links-description-editor"
+        >
+          <input type="hidden" name="block_id" value={@block["id"]} />
+          <label class="sr-only" for={@description_dom_id}>Related papers description</label>
+          <textarea
+            id={@description_dom_id}
+            name="description"
+            rows="1"
+            class="bp-paper-inline-text bp-paper-links-description-input"
+            aria-label="Related papers description"
+            placeholder="Add a description"
+            phx-hook="BarkparkPaperAutoSize"
+          ><%= @presentation.description_source %></textarea>
+        </form>
+      </div>
+    </header>
+    """
+  end
+
+  defp paper_links_dom_id(field, block_id) do
+    "paper-links-#{field}-" <> Base.url_encode64(block_id, padding: false)
+  end
+
+  defp paper_links_field_absent?(block, field) do
+    case Map.get(block, field) do
+      value when is_binary(value) -> String.trim(value) == ""
+      _value -> true
+    end
+  end
+
   # Per-block-type edit fields. Rich bodies use the canonical WC so its
   # PortableDoc conversion preserves marks and links while text changes.
   # Ordinary forms remain for scalar chrome such as callout tone/title/fold.
@@ -2678,9 +2814,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </div>
       <% "paper-links" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-links-contextual-editor">
-          <div class="bp-paper-contextual-preview" data-test-id="paper-links-preview">
-            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
-          </div>
+          <.paper_links_preview block={@block} paper_links={@paper_links} />
           <details id={"paper-links-controls-" <> @id} class="bp-paper-contextual-controls"
                    phx-mounted={JS.ignore_attributes("open")}>
             <summary class="bp-paper-contextual-toggle">Configure related papers</summary>
@@ -2695,15 +2829,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               >
                 <input type="hidden" name="block_id" value={@id} />
                 <input type="hidden" name="ref-count" value={length(Map.get(@block, "refs", []))} />
-                <label class="bp-paper-edit-fieldlabel">
-                  Title
-                  <input type="text" name="title" class="bp-paper-edit-text"
-                         value={Map.get(@block, "title", "")} />
-                </label>
-                <label class="bp-paper-edit-fieldlabel">
-                  Description
-                  <textarea name="description" class="bp-paper-edit-textarea" rows="2"><%= Map.get(@block, "description", "") %></textarea>
-                </label>
+                <div class="bp-paper-edit-form">
+                  <span class="bp-paper-edit-fieldlabel">Heading</span>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm"
+                    phx-click={JS.focus(to: "#" <> paper_links_dom_id("title", @id))}
+                    aria-controls={paper_links_dom_id("title", @id)}
+                    data-paper-links-title-panel-trigger
+                  ><%= if paper_links_field_absent?(@block, "title"), do: "Add heading", else: "Edit heading" %></button>
+                </div>
+                <div class="bp-paper-edit-form">
+                  <span class="bp-paper-edit-fieldlabel">Description</span>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm"
+                    phx-click={JS.focus(to: "#" <> paper_links_dom_id("description", @id))}
+                    aria-controls={paper_links_dom_id("description", @id)}
+                    data-paper-links-description-panel-trigger
+                  ><%= if paper_links_field_absent?(@block, "description"), do: "Add description", else: "Edit description" %></button>
+                </div>
                 <label class="bp-paper-edit-fieldlabel">
                   Layout
                   <input type="text" name="layout" class="bp-paper-edit-text"
