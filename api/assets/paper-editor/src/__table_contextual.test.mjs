@@ -22,6 +22,7 @@ const {
   tableProjection,
   tableTiptapDocSupported,
   buildTableCellsOp,
+  tableProjectionMatchesAction,
 } = await import("./convert.js");
 const { BpPaperEditor } = await import("./index.js");
 
@@ -45,6 +46,61 @@ const projection = {
     [[{ type: "text", value: "Ada" }], [{ type: "text", value: "Writer" }]],
     [[{ type: "text", value: "Bob" }], [{ type: "text", value: "Editor" }]],
   ],
+};
+
+const metadataProjection = {
+  id: "table-metadata",
+  type: "table",
+  shape: {
+    v: 2,
+    head: { state: "absent" },
+    rows: [{
+      kind: "array",
+      cells: [
+        {
+          kind: "inline-array",
+          inline: { v: 1, anchors: ["text"], opaque: ["text"] },
+        },
+        {
+          kind: "content-map",
+          inline: { v: 1, anchors: ["link", "text"], opaque: ["link", "text"] },
+        },
+        "inline-array",
+      ],
+    }],
+  },
+  head: null,
+  rows: [[
+    [{ type: "text", value: "Beta" }],
+    [{
+      type: "link",
+      href: "/papers/source",
+      children: [{ type: "text", value: "Source" }],
+    }],
+    [{ type: "strong", children: [{ type: "text", value: "Canonical" }] }],
+  ]],
+};
+
+const freeLinkProjection = {
+  id: "table-free-link",
+  type: "table",
+  shape: {
+    v: 2,
+    head: { state: "absent" },
+    rows: [{
+      kind: "array",
+      cells: [{
+        kind: "inline-array",
+        inline: { v: 1, anchors: ["text"], opaque: ["text"] },
+      }],
+    }],
+  },
+  head: null,
+  rows: [[[{
+    type: "link",
+    href: "/papers/old",
+    children: [{ type: "text", value: "Linked protected text" }],
+  }]]],
 };
 
 function mounted(value = projection) {
@@ -82,6 +138,145 @@ try {
   ]);
   assert.equal(tableTiptapDocSupported(projected.doc, projection), true);
   assert.equal(buildTableCellsOp(projected.doc, projection), null, "mount emits no operation");
+
+  const protectedProjection = tableProjection(metadataProjection);
+  assert.equal(protectedProjection.editable, true,
+    "shape v2 admits exact descriptors for cells whose hidden source metadata stays server-owned");
+  assert.doesNotMatch(JSON.stringify(protectedProjection.doc), /qa|opaque|bpTableCellSource|bpTableSource/,
+    "the client projection contains canonical visible inline only, never source metadata or PM tokens");
+  assert.equal(tableTiptapDocSupported(protectedProjection.doc, metadataProjection), true);
+  assert.equal(buildTableCellsOp(protectedProjection.doc, metadataProjection), null);
+
+  const protectedTextEdit = clone(protectedProjection.doc);
+  protectedTextEdit.content[0].content[0].content[0].content[0].text = "Beta edited";
+  assert.deepEqual(buildTableCellsOp(protectedTextEdit, metadataProjection), {
+    op: "patch-table-cells",
+    id: "table-metadata",
+    shape: metadataProjection.shape,
+    cells: [{
+      area: "body",
+      row: 0,
+      column: 0,
+      content: [{ type: "text", value: "Beta edited" }],
+    }],
+  }, "typing may change the protected text value without importing its hidden metadata");
+
+  const protectedWholeRunMark = clone(protectedProjection.doc);
+  protectedWholeRunMark.content[0].content[0].content[0].content[0].marks = [{ type: "bold" }];
+  assert.equal(tableTiptapDocSupported(protectedWholeRunMark, metadataProjection), true,
+    "a metadata-free whole-run wrapper may be added around the one protected text role");
+  assert.deepEqual(buildTableCellsOp(protectedWholeRunMark, metadataProjection).cells[0].content, [{
+    type: "strong",
+    children: [{ type: "text", value: "Beta" }],
+  }]);
+
+  const protectedLinkEdit = clone(protectedProjection.doc);
+  protectedLinkEdit.content[0].content[0].content[1].content[0].text = "Source edited";
+  assert.equal(tableTiptapDocSupported(protectedLinkEdit, metadataProjection), true);
+  assert.deepEqual(buildTableCellsOp(protectedLinkEdit, metadataProjection).cells[0].content, [{
+    type: "link",
+    href: "/papers/source",
+    children: [{ type: "text", value: "Source edited" }],
+  }], "typing retains the unique protected link and text roles");
+
+  for (const mutate of [
+    (doc) => { doc.content[0].content[0].content[0].content = [
+      { type: "text", text: "Be" }, { type: "text", text: "ta", marks: [{ type: "bold" }] },
+    ]; },
+    (doc) => { doc.content[0].content[0].content[0].content = []; },
+    (doc) => { doc.content[0].content[0].content[0].content[0].marks = [{ type: "mystery" }]; },
+    (doc) => { delete doc.content[0].content[0].content[1].content[0].marks; },
+    (doc) => { doc.content[0].content[0].content[1].content[0].marks[0].attrs.href = "/changed"; },
+    (doc) => { doc.content[0].content[0].content[0].attrs = {
+      bpTableCellSource: { cell: [{ type: "text", value: "private" }] },
+    }; },
+  ]) {
+    const unsafe = clone(protectedProjection.doc);
+    mutate(unsafe);
+    assert.equal(tableTiptapDocSupported(unsafe, metadataProjection), false,
+      "splits, deletion, unknown roles, protected-wrapper changes, and PM source imports fail closed");
+    assert.equal(buildTableCellsOp(unsafe, metadataProjection), null);
+  }
+
+  const unprotectedEdit = clone(protectedProjection.doc);
+  delete unprotectedEdit.content[0].content[0].content[2].content[0].marks;
+  assert.equal(tableTiptapDocSupported(unprotectedEdit, metadataProjection), true,
+    "canonical v2 cells without descriptors retain the existing free inline editor");
+
+  for (const shape of [
+    { ...clone(metadataProjection.shape), v: 1 },
+    { ...clone(metadataProjection.shape), rows: [{ kind: "array", cells: [
+      { kind: "inline-array", inline: { v: 1, anchors: ["text"], opaque: [] } },
+      "content-map", "inline-array",
+    ] }] },
+    { ...clone(metadataProjection.shape), rows: [{ kind: "array", cells: [
+      { kind: "inline-array", inline: { v: 1, anchors: ["text", "text"], opaque: ["text"] } },
+      "content-map", "inline-array",
+    ] }] },
+    { ...clone(metadataProjection.shape), rows: [{ kind: "array", cells: [
+      { kind: "inline-array", inline: { v: 1, anchors: ["link"], opaque: ["link"] } },
+      "content-map", "inline-array",
+    ] }] },
+    { ...clone(metadataProjection.shape), rows: [{ kind: "array", cells: [
+      { kind: "inline-array", inline: {
+        v: 1, anchors: ["mystery", "text"], opaque: ["mystery"], extra: true,
+      } },
+      "content-map", "inline-array",
+    ] }] },
+  ]) {
+    assert.equal(tableProjection({ ...clone(metadataProjection), shape }).editable, false,
+      "v2 descriptors are exact, ordered, unique, recognized, nonempty, and end in text");
+  }
+
+  const v2WithoutProtectedCell = clone(projection);
+  v2WithoutProtectedCell.shape.v = 2;
+  assert.equal(tableProjection(v2WithoutProtectedCell).editable, false,
+    "shape v2 is reserved for Tables with at least one protected cell descriptor");
+
+  const movedProtectedColumn = clone(metadataProjection);
+  [movedProtectedColumn.rows[0][0], movedProtectedColumn.rows[0][1]] =
+    [movedProtectedColumn.rows[0][1], movedProtectedColumn.rows[0][0]];
+  [movedProtectedColumn.shape.rows[0].cells[0], movedProtectedColumn.shape.rows[0].cells[1]] =
+    [movedProtectedColumn.shape.rows[0].cells[1], movedProtectedColumn.shape.rows[0].cells[0]];
+  assert.equal(tableProjectionMatchesAction(
+    metadataProjection,
+    movedProtectedColumn,
+    "right-column:0",
+  ), true, "structural moves carry protected descriptors with their cells");
+
+  const downgradeBefore = {
+    id: "table-downgrade",
+    type: "table",
+    shape: {
+      v: 2,
+      head: { state: "absent" },
+      rows: [{ kind: "array", cells: [
+        { kind: "inline-array", inline: { v: 1, anchors: ["text"], opaque: ["text"] } },
+        "inline-array",
+      ] }],
+    },
+    head: null,
+    rows: [[
+      [{ type: "text", value: "Protected" }],
+      [{ type: "text", value: "Keep" }],
+    ]],
+  };
+  const downgradeAfter = {
+    id: "table-downgrade",
+    type: "table",
+    shape: {
+      v: 1,
+      head: { state: "absent" },
+      rows: [{ kind: "array", cells: ["inline-array"] }],
+    },
+    head: null,
+    rows: [[[{ type: "text", value: "Keep" }]]],
+  };
+  assert.equal(tableProjectionMatchesAction(
+    downgradeBefore,
+    downgradeAfter,
+    "remove-column:0",
+  ), true, "deleting the last protected carrier deliberately downgrades shape v2 to v1");
 
   const underlinedProjection = {
     id: "table-underlined",
@@ -306,6 +501,117 @@ try {
   assert.equal(veto.ops.length, 0);
   veto.editor.remove();
 
+  const protectedMounted = mounted(metadataProjection);
+  const protectedStatus = protectedMounted.editor.querySelector("[data-table-edit-status]");
+  assert.ok(protectedStatus);
+  assert.equal(protectedStatus.getAttribute("role"), "status");
+  assert.equal(protectedStatus.getAttribute("aria-live"), "polite");
+  assert.equal(protectedStatus.hidden, true);
+  const beforeProtectedRefusal = clone(protectedMounted.editor._editor.getJSON());
+  const splitProtected = clone(beforeProtectedRefusal);
+  splitProtected.content[0].content[0].content[0].content = [
+    { type: "text", text: "Be" },
+    { type: "text", text: "ta", marks: [{ type: "bold" }] },
+  ];
+  protectedMounted.editor._editor.commands.setContent(splitProtected, true);
+  assert.equal(JSON.stringify(protectedMounted.editor._editor.getJSON()),
+    JSON.stringify(beforeProtectedRefusal),
+    "a protected split is refused before ProseMirror mutates the document");
+  assert.equal(protectedStatus.hidden, false);
+  assert.match(protectedStatus.textContent, /one non-empty text run/i);
+  assert.equal(protectedMounted.editor.hasPendingChanges(), false);
+  assert.equal(protectedMounted.editor._tableDirtyToken, null);
+  assert.equal(protectedMounted.ops.length, 0,
+    "refusal feedback never creates a dirty latch, debounce, or operation");
+  const sameStatus = protectedStatus;
+  protectedMounted.editor._editor.commands.setContent(splitProtected, true);
+  assert.equal(protectedMounted.editor.querySelector("[data-table-edit-status]"), sameStatus,
+    "repeated rejected transactions reuse one editor-local live region");
+
+  const markedProtected = clone(beforeProtectedRefusal);
+  markedProtected.content[0].content[0].content[0].content[0].marks = [{ type: "bold" }];
+  protectedMounted.editor._editor.commands.setContent(markedProtected, true);
+  const markedAndTyped = clone(protectedMounted.editor._editor.getJSON());
+  markedAndTyped.content[0].content[0].content[0].content[0].text = "Beta queued";
+  protectedMounted.editor._editor.commands.setContent(markedAndTyped, true);
+  assert.equal(protectedStatus.hidden, true, "the next accepted edit clears stale refusal feedback");
+  assert.equal(protectedMounted.editor._editor.commands.undo(), true);
+  assert.equal(protectedMounted.editor._editor.getJSON().content[0].content[0]
+    .content[0].content[0].text, "Beta");
+  assert.equal(protectedMounted.editor._editor.commands.redo(), true);
+  assert.equal(protectedMounted.editor._editor.getJSON().content[0].content[0]
+    .content[0].content[0].text, "Beta queued");
+  assert.equal(protectedMounted.editor.flushPendingChanges(), true);
+  assert.equal(protectedMounted.ops.length, 1,
+    "whole-run format then typing coalesces into one shape-stable operation before acknowledgement");
+  assert.deepEqual(protectedMounted.ops[0].shape, metadataProjection.shape);
+  assert.deepEqual(protectedMounted.ops[0].cells[0].content, [{
+    type: "strong",
+    children: [{ type: "text", value: "Beta queued" }],
+  }]);
+  const protectedAck = clone(metadataProjection);
+  protectedAck.rows[0][0] = clone(protectedMounted.ops[0].cells[0].content);
+  protectedMounted.editor.block = protectedAck;
+  assert.equal(protectedMounted.editor._tableAwaitingCells.length, 0);
+  assert.equal(protectedMounted.editor._editor.isEditable, true,
+    "the exact source echo retires the queued topology-preserving edit");
+  protectedMounted.editor.remove();
+
+  const freeLinkMounted = mounted(freeLinkProjection);
+  const retargeted = clone(freeLinkMounted.editor._editor.getJSON());
+  retargeted.content[0].content[0].content[0].content[0].marks[0].attrs.href =
+    "/papers/new";
+  freeLinkMounted.editor._editor.commands.setContent(retargeted, true);
+  const retargetedAndTyped = clone(freeLinkMounted.editor._editor.getJSON());
+  retargetedAndTyped.content[0].content[0].content[0].content[0].text =
+    "Retargeted and typed";
+  freeLinkMounted.editor._editor.commands.setContent(retargetedAndTyped, true);
+  assert.equal(freeLinkMounted.editor.flushPendingChanges(), true);
+  assert.equal(freeLinkMounted.ops.length, 1,
+    "metadata-free href then typing also coalesces without changing anchored shape");
+  assert.deepEqual(freeLinkMounted.ops[0].shape, freeLinkProjection.shape);
+  assert.deepEqual(freeLinkMounted.ops[0].cells[0].content, [{
+    type: "link",
+    href: "/papers/new",
+    children: [{ type: "text", value: "Retargeted and typed" }],
+  }]);
+  freeLinkMounted.editor.remove();
+
+  const incompatibleProtectedEcho = mounted(metadataProjection);
+  const localProtectedDraft = clone(incompatibleProtectedEcho.editor._editor.getJSON());
+  localProtectedDraft.content[0].content[0].content[1].content[0].text = "Local source";
+  incompatibleProtectedEcho.editor._editor.commands.setContent(localProtectedDraft, true);
+  const retainedProtectedDraft = JSON.stringify(incompatibleProtectedEcho.editor._editor.getJSON());
+  const wrongProtectedAuthority = { ...clone(metadataProjection), id: "other-table" };
+  assert.equal(incompatibleProtectedEcho.editor.applyTableProjection(wrongProtectedAuthority), false);
+  assert.equal(JSON.stringify(incompatibleProtectedEcho.editor._editor.getJSON()),
+    retainedProtectedDraft);
+  assert.equal(incompatibleProtectedEcho.editor._editor.isEditable, true);
+  assert.equal(incompatibleProtectedEcho.editor.hasPendingChanges(), true);
+  assert.equal(incompatibleProtectedEcho.editor._sourceBlock.id, "table-metadata");
+  assert.equal(incompatibleProtectedEcho.editor._blockId, "table-metadata",
+    "a mismatched external projection preserves the draft, exit fence, and editor identity");
+  assert.equal(incompatibleProtectedEcho.editor.resolveConflictWithServerBlock(
+    wrongProtectedAuthority,
+  ), false);
+  assert.equal(JSON.stringify(incompatibleProtectedEcho.editor._editor.getJSON()),
+    retainedProtectedDraft, "even an external-resync path cannot discard a draft for another id");
+  const changedProtectedAuthority = clone(metadataProjection);
+  changedProtectedAuthority.rows[0][1][0].href = "/papers/server-change";
+  incompatibleProtectedEcho.editor.block = changedProtectedAuthority;
+  assert.equal(JSON.stringify(incompatibleProtectedEcho.editor._editor.getJSON()),
+    retainedProtectedDraft, "an incompatible protected source echo retains the local draft");
+  assert.equal(incompatibleProtectedEcho.editor._editor.isEditable, false,
+    "the incompatible draft freezes until explicit conflict resolution");
+  assert.equal(incompatibleProtectedEcho.errors.at(-1).code, "table_draft_incompatible");
+  assert.equal(incompatibleProtectedEcho.editor.flushPendingChanges(), false);
+  incompatibleProtectedEcho.editor.resolveConflictWithServerBlock(changedProtectedAuthority);
+  assert.doesNotMatch(incompatibleProtectedEcho.editor._editor.getText(), /Local source/);
+  assert.match(incompatibleProtectedEcho.editor._editor.getText(), /Source/);
+  assert.equal(incompatibleProtectedEcho.editor._editor.isEditable, true,
+    "Use latest installs the compatible authoritative projection and reopens editing");
+  incompatibleProtectedEcho.editor.remove();
+
   for (const invalid of [
     null,
     { ...projection, id: " table-1" },
@@ -358,6 +664,16 @@ try {
     pushEvent: (_name, payload) => new Promise((resolve) => replies.push({ payload, resolve })),
   };
   hook.mounted();
+  const wrongNestedInbound = { ...clone(projection), id: "other-table" };
+  handlers.get("bp:block-update")({
+    block_id: "table-hook",
+    block: { id: "table-hook", type: "table", rows: "raw" },
+    table_projection: wrongNestedInbound,
+  });
+  assert.equal(hookedEditor.block.id, "table-hook");
+  assert.equal(hookedEditor._sourceBlock.id, "table-hook");
+  assert.equal(hookedEditor._blockId, "table-hook",
+    "an external envelope cannot redirect the editor through a mismatched nested projection id");
   const inbound = { ...clone(projection), id: "table-hook" };
   inbound.rows[0][1] = [{ type: "text", value: "Projection echo" }];
   handlers.get("bp:block-update")({
@@ -400,6 +716,7 @@ try {
   }));
   drainPromise.then(() => { drainSettled = true; });
   const cellPayload = clone(replies[0].payload);
+  assert.equal(cellPayload.id, "table-hook");
   const hookedCellAck = clone(inbound);
   hookedCellAck.rows[0][0] = clone(cellPayload.cells[0].content);
   replies[0].resolve({
@@ -486,7 +803,102 @@ try {
   hook.destroyed();
   main.remove();
 
-  for (const badReceipt of ["missing", "malformed"]) {
+  const queueWrapper = document.createElement("div");
+  queueWrapper.id = "paper-ed-table-protected-queue";
+  queueWrapper.setAttribute("phx-hook", "BarkparkPaperEditor");
+  queueWrapper.innerHTML = `<bp-paper-editor data-editor-mode="table"></bp-paper-editor>`;
+  const queueMain = document.createElement("main");
+  queueMain.dataset.paperDocKey = "drafts:table-protected-queue";
+  queueMain.dataset.paperRev = "10";
+  queueMain.appendChild(queueWrapper);
+  document.body.appendChild(queueMain);
+  const queueEditor = queueWrapper.querySelector("bp-paper-editor");
+  const queueProjection = { ...clone(metadataProjection), id: "table-protected-queue" };
+  queueEditor.block = queueProjection;
+  const queueReplies = [];
+  const queueHandlers = new Map();
+  const queueHook = {
+    ...window.BarkparkPaperEditorHooks.BarkparkPaperEditor,
+    el: queueWrapper,
+    handleEvent: (name, handler) => queueHandlers.set(name, handler),
+    pushEvent: (_name, payload) => new Promise((resolve) =>
+      queueReplies.push({ payload: clone(payload), resolve })),
+  };
+  queueHook.mounted();
+
+  const queuedFormat = clone(queueEditor._editor.getJSON());
+  queuedFormat.content[0].content[0].content[0].content[0].marks = [{ type: "bold" }];
+  queueEditor._editor.commands.setContent(queuedFormat, true);
+  assert.equal(queueEditor.flushPendingChanges(), true);
+  assert.equal(queueReplies.length, 1);
+  assert.equal(queueReplies[0].payload.if_rev, 10);
+  assert.deepEqual(queueReplies[0].payload.shape, queueProjection.shape);
+
+  const queuedType = clone(queueEditor._editor.getJSON());
+  queuedType.content[0].content[0].content[0].content[0].text = "Beta after format";
+  queueEditor._editor.commands.setContent(queuedType, true);
+  assert.equal(queueEditor.flushPendingChanges(), true);
+  assert.equal(queueReplies.length, 1,
+    "the second old-base operation waits behind the active mutation");
+  assert.equal(queueEditor._tableAwaitingCells.length, 2);
+  queueHandlers.get("bp:block-update")({
+    block_id: "table-protected-queue",
+    block: { id: "table-protected-queue", type: "table", rows: "raw metadata echo" },
+    table_projection: clone(queueProjection),
+    rev: 11,
+  });
+  assert.equal(queueEditor._tableAwaitingCells.length, 2);
+  assert.equal(queueHook._exitCoordinator.hasUnsaved(), true,
+    "a metadata-only external echo with identical visible text cannot retire pending local work");
+
+  const firstQueuePayload = clone(queueReplies[0].payload);
+  queueReplies[0].resolve(null);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  queueWrapper.dispatchEvent(new CustomEvent("bp-flush-pending", {
+    detail: { waitUntil() {} },
+  }));
+  assert.equal(queueReplies.length, 2);
+  assert.deepEqual(queueReplies[1].payload, firstQueuePayload,
+    "transport retry preserves the first protected operation, revision, shape, and request id");
+
+  const firstQueueAck = clone(queueProjection);
+  firstQueueAck.rows[0][0] = clone(firstQueuePayload.cells[0].content);
+  queueReplies[1].resolve({
+    saved: true,
+    request_id: firstQueuePayload.request_id,
+    rev: 11,
+    table_projection: firstQueueAck,
+    table_projection_rev: 11,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(queueEditor._tableAwaitingCells.length, 1,
+    "the exact first receipt retires only the FIFO head");
+  assert.equal(queueReplies.length, 3);
+  assert.equal(queueReplies[2].payload.if_rev, 11,
+    "the second protected operation sends on the acknowledged revision");
+  assert.deepEqual(queueReplies[2].payload.shape, queueProjection.shape,
+    "metadata-free formatting does not churn the anchored v2 shape");
+  assert.deepEqual(queueReplies[2].payload.cells[0].content, [{
+    type: "strong",
+    children: [{ type: "text", value: "Beta after format" }],
+  }]);
+
+  const secondQueueAck = clone(firstQueueAck);
+  secondQueueAck.rows[0][0] = clone(queueReplies[2].payload.cells[0].content);
+  queueReplies[2].resolve({
+    saved: true,
+    request_id: queueReplies[2].payload.request_id,
+    rev: 12,
+    table_projection: secondQueueAck,
+    table_projection_rev: 12,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(queueEditor._tableAwaitingCells.length, 0);
+  assert.equal(queueHook._exitCoordinator.hasUnsaved(), false);
+  queueHook.destroyed();
+  queueMain.remove();
+
+  for (const badReceipt of ["missing", "malformed", "wrong-id"]) {
     const badWrapper = document.createElement("div");
     badWrapper.id = `paper-ed-table-${badReceipt}`;
     badWrapper.setAttribute("phx-hook", "BarkparkPaperEditor");
@@ -516,8 +928,10 @@ try {
       saved: true,
       request_id: badReplies[0].payload.request_id,
       rev: 2,
-      ...(badReceipt === "malformed" ? {
-        table_projection: { ...clone(projection), id: `table-${badReceipt}`, shape: null },
+      ...(badReceipt !== "missing" ? {
+        table_projection: badReceipt === "malformed"
+          ? { ...clone(projection), id: `table-${badReceipt}`, shape: null }
+          : { ...clone(projection), id: "other-table" },
         table_projection_rev: 2,
       } : {}),
     };
@@ -528,6 +942,10 @@ try {
     assert.equal(badHook._exitCoordinator.hasUnsaved(), true,
       "an unverifiable saved receipt remains truthfully dirty and blocks navigation");
     assert.equal(badErrors.at(-1).code, "table_projection_receipt_invalid");
+    assert.equal(badEditor.block.id, `table-${badReceipt}`);
+    assert.equal(badEditor._sourceBlock.id, `table-${badReceipt}`);
+    assert.equal(badEditor._blockId, `table-${badReceipt}`,
+      "an invalid own receipt cannot redirect the next Table operation");
     badHook.destroyed();
     badMain.remove();
   }

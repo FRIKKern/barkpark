@@ -133,6 +133,8 @@ class BpPaperEditor extends HTMLElement {
     this._tableStructureAwaiting = null;
     this._tableSettlement = null;
     this._tableSourceError = false;
+    this._tableEditStatus = null;
+    this._tableAcceptedUpdate = false;
   }
 
   connectedCallback() {
@@ -171,6 +173,16 @@ class BpPaperEditor extends HTMLElement {
     this._mount = document.createElement("div");
     this._mount.className = "bp-paper-editor-body";
     this.appendChild(this._mount);
+    if (this._editorMode === "table") {
+      this._tableEditStatus = document.createElement("p");
+      this._tableEditStatus.className = "bp-paper-table-edit-status";
+      this._tableEditStatus.dataset.tableEditStatus = "";
+      this._tableEditStatus.setAttribute("role", "status");
+      this._tableEditStatus.setAttribute("aria-live", "polite");
+      this._tableEditStatus.setAttribute("aria-atomic", "true");
+      this._tableEditStatus.hidden = true;
+      this.appendChild(this._tableEditStatus);
+    }
 
     this._editor = new Editor({
       element: this._mount,
@@ -196,8 +208,7 @@ class BpPaperEditor extends HTMLElement {
             name: "bpContextualTableVeto",
             addProseMirrorPlugins: () => [
               new Plugin({
-                filterTransaction: (tr) => this._discardTableDraft === true ||
-                  tableTiptapDocSupported(tr.doc.toJSON(), this._sourceBlock),
+                filterTransaction: (tr) => this._filterTableTransaction(tr),
               }),
             ],
           }),
@@ -270,6 +281,11 @@ class BpPaperEditor extends HTMLElement {
           this._cardBodyDirtyToken = dirty.token;
           this._cardBodyDraftJSON = JSON.parse(JSON.stringify(this._editor.getJSON()));
         } else if (this._editorMode === "table") {
+          if (!this._tableAcceptedUpdate) {
+            if (this._bubble) this._bubble.update();
+            return;
+          }
+          this._tableAcceptedUpdate = false;
           const dirty = { token: null };
           this.dispatchEvent(new CustomEvent("bp-local-change", {
             detail: dirty,
@@ -408,10 +424,41 @@ class BpPaperEditor extends HTMLElement {
     return Boolean(this._debounceTimer || this._tableSettlement);
   }
 
+  _filterTableTransaction(transaction) {
+    if (this._discardTableDraft === true) {
+      this._tableAcceptedUpdate = false;
+      return true;
+    }
+    const supported = tableTiptapDocSupported(transaction.doc.toJSON(), this._sourceBlock);
+    if (transaction.docChanged) {
+      this._tableAcceptedUpdate = supported;
+      if (supported) this._clearTableEditRefusal();
+      else this._reportTableEditRefusal();
+    }
+    return supported;
+  }
+
+  _reportTableEditRefusal() {
+    if (!this._tableEditStatus || this._tableEditStatus.dataset.state === "refused") return;
+    this._tableEditStatus.dataset.state = "refused";
+    this._tableEditStatus.hidden = false;
+    this._tableEditStatus.textContent =
+      "That change would remove protected Table content. Keep this cell as one non-empty text run.";
+  }
+
+  _clearTableEditRefusal() {
+    if (!this._tableEditStatus || this._tableEditStatus.dataset.state !== "refused") return;
+    this._tableEditStatus.dataset.state = "";
+    this._tableEditStatus.hidden = true;
+    this._tableEditStatus.textContent = "";
+  }
+
   // Explicit conflict resolution seam. The host calls this only after the user
   // chooses "Use latest"; unlike a normal server echo it intentionally discards
   // the pending local debounce before installing the authoritative block.
   resolveConflictWithServerBlock(block) {
+    if (this._editorMode === "table" && this._sourceBlock?.id != null &&
+        block?.id != null && block.id !== this._sourceBlock.id) return false;
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     this._debounceTimer = null;
     this._cardBodyDraftJSON = null;
@@ -431,6 +478,7 @@ class BpPaperEditor extends HTMLElement {
       this._discardCardBodyDraft = false;
       this._discardTableDraft = false;
     }
+    return true;
   }
 
   // Read the initial block from the `block` JS property (object) first, then
@@ -591,6 +639,8 @@ class BpPaperEditor extends HTMLElement {
   }
 
   applyTableProjection(value, metadata = {}) {
+    if (this._sourceBlock?.id != null && value?.id != null &&
+        value.id !== this._sourceBlock.id) return false;
     this._blockProp = value;
     const awaiting = this._tableStructureAwaiting;
     if (awaiting) {
@@ -1124,11 +1174,11 @@ class BpPaperEditor extends HTMLElement {
   // Property setter so LiveView / a parent can assign `el.block = {...}` before
   // or after mount. Re-loads content into a live editor.
   set block(value) {
-    this._blockProp = value;
     if (this._editor && this._editorMode === "table") {
       this.applyTableProjection(value);
       return;
     }
+    this._blockProp = value;
     if (this._editor && value && typeof value === "object") {
       this._blockId = value.id != null ? value.id : this._blockId;
       this._blockType = value.type || this._blockType;
@@ -1208,6 +1258,27 @@ class BpPaperEditor extends HTMLElement {
         this._sourceBlock = value && typeof value === "object"
           ? JSON.parse(JSON.stringify(value)) : value;
         this._editor.commands.setContent(projection.doc, false);
+      }
+      return false;
+    }
+    if (this._tableDraftJSON &&
+        !tableTiptapDocSupported(this._tableDraftJSON, value)) {
+      this._tableEditable = false;
+      this._editable = false;
+      this._editor.setEditable(false, false);
+      this._blockId = value.id;
+      this._blockType = "table";
+      this._sourceBlock = JSON.parse(JSON.stringify(value));
+      if (!this._tableSourceError) {
+        this._tableSourceError = true;
+        this.dispatchEvent(new CustomEvent("bp-error", {
+          detail: {
+            code: "table_draft_incompatible",
+            error: "Table metadata changed while you were editing. Your draft is retained; review the server version before continuing.",
+          },
+          bubbles: true,
+          composed: true,
+        }));
       }
       return false;
     }
