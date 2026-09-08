@@ -568,6 +568,11 @@ class BpPaperCanvas extends HTMLElement {
     // Bound listener for the textarea's own Mod-Shift-m (toggle BACK to rich) +
     // Escape — kept as a field so the exact identity is removed on cleanup.
     this._onSourceKeyDown = null;
+    // Responsive Studio morphs can blur the rich editor immediately BEFORE the
+    // custom element's disconnectedCallback. Keep the last focused intent alive
+    // through the current DOM mutation only; onBlur clears it in a microtask.
+    this._richFocusIntent = false;
+    this._richFocusIntentVersion = 0;
   }
 
   connectedCallback() {
@@ -949,8 +954,20 @@ class BpPaperCanvas extends HTMLElement {
       onSelectionUpdate: () => {
         if (this._bubble) this._bubble.update();
       },
-      onBlur: () => { if (this._bubble) this._bubble.update(); },
-      onFocus: () => { if (this._bubble) this._bubble.update(); },
+      onBlur: () => {
+        const version = ++this._richFocusIntentVersion;
+        queueMicrotask(() => {
+          if (this._richFocusIntentVersion === version && !this._editor?.isFocused) {
+            this._richFocusIntent = false;
+          }
+        });
+        if (this._bubble) this._bubble.update();
+      },
+      onFocus: () => {
+        this._richFocusIntentVersion += 1;
+        this._richFocusIntent = true;
+        if (this._bubble) this._bubble.update();
+      },
     });
 
     // Selection format toolbar — REUSED verbatim from ../format-bubble.js. It is
@@ -986,8 +1003,41 @@ class BpPaperCanvas extends HTMLElement {
     // teardown one microtask so the same editor, history, and pending debounce
     // survive that move; a genuine removal is still torn down immediately after
     // the current DOM mutation finishes.
+    const editor = this._editor;
+    const ownerDocument = this.ownerDocument;
+    const restoreRichFocus =
+      this._mode === "rich" &&
+      this._editable &&
+      editor?.isEditable === true &&
+      this._richFocusIntent === true;
     queueMicrotask(() => {
-      if (!this.isConnected) this._teardownDisconnected();
+      if (!this.isConnected) {
+        this._teardownDisconnected();
+        return;
+      }
+
+      // A DOM move drops native focus to <body>; Blink also delivers a blur that
+      // clears TipTap's live isFocused flag before this microtask. The value
+      // captured above is the pre-move intent. Restore only that narrow case. A
+      // prior blur, any meaningful intervening focus, an editor replacement,
+      // source mode, read mode, cross-document move, or inert destination wins.
+      const activeElement = ownerDocument?.activeElement;
+      const focusIsEmpty =
+        activeElement == null ||
+        activeElement === ownerDocument.body ||
+        activeElement === ownerDocument.documentElement;
+      if (
+        restoreRichFocus &&
+        this._editor === editor &&
+        this.ownerDocument === ownerDocument &&
+        this._mode === "rich" &&
+        this._editable &&
+        editor.isEditable === true &&
+        this.closest("[inert]") == null &&
+        focusIsEmpty
+      ) {
+        editor.view.focus();
+      }
     });
   }
 
@@ -1032,6 +1082,8 @@ class BpPaperCanvas extends HTMLElement {
     this._sourceBaselineBlocks = null;
     this._sourceOriginalMd = "";
     this._mode = "rich";
+    this._richFocusIntentVersion += 1;
+    this._richFocusIntent = false;
     if (this._editor) {
       this._editor.destroy();
       this._editor = null;
