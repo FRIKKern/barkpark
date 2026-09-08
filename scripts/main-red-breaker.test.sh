@@ -20,6 +20,17 @@ main_red_s2="$TMP/main-red-s2.json"; cat > "$main_red_s2" <<'J'
 {"jobs":[{"name":"Doc budgets + anchors","conclusion":"failure","steps":[{"name":"Doc byte budgets (fails this job)","conclusion":"success"},{"name":"Code-comment citation guard (fails this job)","conclusion":"failure"},{"name":"Tenant fail-open read baseline gate (fails this job)","conclusion":"success"}]}]}
 J
 main_green="$TMP/main-green.json"; echo '{"jobs":[{"name":"Doc budgets + anchors","conclusion":"success","steps":[{"name":"Code-comment citation guard (fails this job)","conclusion":"success"}]}]}' > "$main_green"
+# MAIN GREEN *ON OUR STEP*, BUT RED ON ANOTHER GATE STEP -> `api_trusted`.
+# Since PR #16908 an all-green main job is no longer proof that main PASSED a
+# step: a job concludes `success` while holding a step whose `outcome` was
+# `failure`, because every gate step is continue-on-error and `outcome` is not
+# in the jobs API. The breaker therefore accuses only when something
+# DISCONFIRMS masking — here, the API itself marking a gate step failed.
+# Every arm below whose subject is "an accusation happens" uses THIS fixture, so
+# the accusation stays reachable and the arm keeps discriminating. Using
+# `main_green` for those would make them pass because the breaker can no longer
+# accuse AT ALL, which is a vacuous green, not a proof.
+main_green_trusted="$TMP/main-green-trusted.json"; echo '{"jobs":[{"name":"Doc budgets + anchors","conclusion":"failure","steps":[{"name":"Doc byte budgets (fails this job)","conclusion":"failure"},{"name":"Code-comment citation guard (fails this job)","conclusion":"success"}]}]}' > "$main_green_trusted"
 main_other_job="$TMP/main-other.json"; echo '{"jobs":[{"name":"Some other job","conclusion":"failure","steps":[{"name":"Code-comment citation guard (fails this job)","conclusion":"failure"}]}]}' > "$main_other_job"
 
 run() { # $1 outcomes, $2 event, $3 jobs fixture (or ""), $4 OUR raw capture file (or ""), $5 MAIN raw job log (or "")
@@ -34,8 +45,17 @@ run() { # $1 outcomes, $2 event, $3 jobs fixture (or ""), $4 OUR raw capture fil
 out="$(run "$out_all_green" pull_request "")"; has "$out" "nothing to decide" "1) all green: nothing to decide"; has "$out" "RC=0" "1) rc 0"; [ ! -s "$TMP/curl.log" ] && ok "1) no API call when nothing failed" || bad "1) API was called"
 # 2. THE INHERITED PATH (mutation: fake a main red on the same step) -> exit 0 + notice
 out="$(run "$out_s2" pull_request "$main_red_s2")"; has "$out" "INHERITED-FROM-MAIN" "2) same step red on main => inherited"; has "$out" "RC=0" "2) rc 0"; has "$out" "::notice" "2) a notice annotation is emitted"; grep -q 'Inherited from main' "$TMP/summary.md" && ok "2) step summary written" || bad "2) no step summary"
-# 3. THE OWN-FAILURE PATH (mutation: fake main green) -> exit 1 naming our step
-out="$(run "$out_s2" pull_request "$main_green")"; has "$out" "FAIL" "3) main green => the red is ours"; has "$out" "Code-comment citation guard" "3) names our failed step"; has "$out" "RC=1" "3) rc 1"
+# 3. THE OWN-FAILURE PATH -> exit 1 naming our step. Uses the api_trusted
+#    fixture: main is green ON OUR STEP while the API marks another gate step
+#    failed, which is what makes main's `success` trustworthy (#16908).
+out="$(run "$out_s2" pull_request "$main_green_trusted")"; has "$out" "a step main does not" "3) main green on our step (api_trusted) => the red is ours"; has "$out" "Code-comment citation guard" "3) names our failed step"; has "$out" "RC=1" "3) rc 1"
+# 3b. THE NEW CONTRACT, and the sibling that stops 3) from silently inverting.
+#     An ALL-GREEN main job disconfirms nothing, so ownership is UNDETERMINED
+#     rather than ours. Before #16908 this case was ACCUSED. Note that 3)'s old
+#     assertion was `has "$out" "FAIL"` — loose enough to keep passing through
+#     that inversion, which is why it now asserts the accusing sentence itself.
+out="$(run "$out_s2" pull_request "$main_green")"; has "$out" "OWNERSHIP-UNDETERMINED" "3b) an all-green main job alone is NOT proof main passed the step"
+case "$out" in *"a step main does not"*) bad "3b) accused on an all-green job — #16908 regressed" ;; *) ok "3b) makes no ownership claim from an all-green job" ;; esac
 # 4. main red on the same step AND we fail an extra step -> exit 1 naming only the extra
 out="$(run "$out_s2_s3" pull_request "$main_red_s2")"; has "$out" "failed on a step main does not: Tenant fail-open" "4) the extra step is ours"; has "$out" "RC=1" "4) rc 1"
 # 5. main red on a different JOB -> not inherited, and NOT blamed on the author:
@@ -439,7 +459,8 @@ has "$out" "RC=1" "18f) rc 1"
 # 18g. THE THREE VERDICTS ARE THREE DIFFERENT ANNOTATIONS. A reader (and any
 #      log scraper) must be able to tell them apart without parsing prose.
 out="$(run "$out_s2" pull_request "$main_red_s2")";        has "$out" "::notice"  "18g) inherited emits ::notice"
-out="$(run "$out_s2" pull_request "$main_green")";         has "$out" "::error"   "18g) the PR's own red emits ::error"
+out="$(run "$out_s2" pull_request "$main_green_trusted")"; has "$out" "::error"   "18g) the PR's own red emits ::error"
+out="$(run "$out_s2" pull_request "$main_green")";         has "$out" "::warning" "18g) an all-green main job emits ::warning, not ::error (#16908)"
 out="$(run "$out_s2" pull_request "$main_notreached")";    has "$out" "::warning" "18g) undetermined emits ::warning"
 
 # 18h. M4 — A STEP NAME THAT CONTAINS THE DELIMITER. Found on 2026-09-06 by
@@ -603,7 +624,7 @@ fi
 #      failure wearing the other mask. Arms 3 and 4 must both go red.
 if mutate "19c the accusing path" 'cls = "PASSED"                 # the ONLY accusing evidence' 'cls = "UNKNOWN"'; then
   ( SUBJECT="$TMP/mut-subject.sh"
-    o3="$(run "$out_s2" pull_request "$main_green")"; o4="$(run "$out_s2_s3" pull_request "$main_red_s2")"
+    o3="$(run "$out_s2" pull_request "$main_green_trusted")"; o4="$(run "$out_s2_s3" pull_request "$main_red_s2")"
     bad3=1; bad4=1
     case "$o3" in *"the red is this PR's own"*) bad3=0 ;; esac
     case "$o4" in *"failed on a step main does not"*) bad4=0 ;; esac
@@ -825,7 +846,7 @@ rl_run() { # $1 outcomes, $2 main jobs fixture, $3 OUR capture, $4 MAIN job log 
 # 22a. THE PASSED PATH — main RAN this step and PASSED it. This is the branch
 #      that accused runs 34018218144 and 34018443211, and it reaches its verdict
 #      without ever reading an error message.
-out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$RL_DATA")"
+out="$(rl_run "$out_s2" "$main_green_trusted" "$sigalt_cap" "" "$RL_DATA")"
 has "$out" "RUNNER-LOCAL" "22a) real sigaltstack capture + main GREEN on the step => RUNNER-LOCAL"
 has "$out" "beam-sigaltstack-boot-abort" "22a) names the data-file entry that matched"
 has "$out" "PLATINUM 8573C" "22a) and the host measurement that justified the entry"
@@ -844,14 +865,14 @@ case "$out" in *"NOT with the same failure signature"*) bad "22a2) fell through 
 # 22b. THE CONTROL — the same step, the same wording, WITHOUT the signature.
 #      Attributed exactly as before this change. If this ever stops failing, M6
 #      has become an 'ignore compose-smoke' switch.
-out="$(rl_run "$out_s2" "$main_green" "$plain_cap" "" "$RL_DATA")"
+out="$(rl_run "$out_s2" "$main_green_trusted" "$plain_cap" "" "$RL_DATA")"
 has "$out" "failed on a step main does not" "22b) no signature => attributed exactly as today"
 has "$out" "RC=1" "22b) rc 1"
 case "$out" in *RUNNER-LOCAL*) bad "22b) excused a red that carries no runner-local signature" ;; *) ok "22b) does not excuse an unsigned red" ;; esac
 # 22c. THE TRIPWIRE — an entry with the right pattern but no date and no
 #      measurement is REFUSED, and it buys nothing: the red is attributed
 #      exactly as it would have been with no data file at all.
-out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$bad_data")"
+out="$(rl_run "$out_s2" "$main_green_trusted" "$sigalt_cap" "" "$bad_data")"
 has "$out" "REFUSED entry 'undated-sigaltstack'" "22c) an entry with no date/measurement is refused by name"
 has "$out" "no ISO date" "22c) and says the date is missing"
 has "$out" "no measurement" "22c) and says the measurement is missing"
@@ -882,21 +903,21 @@ PY
 # 19j. MUTATION — delete the check IN THE WRONG DIRECTION: make the signature
 #      match everything. 22b must go red, i.e. an ordinary red gets excused.
 if mutate "19j runner-local signature match" '        if rx.search(body):' '        if True:' 1; then
-  ( out="$(rl_run "$out_s2" "$main_green" "$plain_cap" "" "$RL_DATA" "$TMP/mut-subject.sh")"
+  ( out="$(rl_run "$out_s2" "$main_green_trusted" "$plain_cap" "" "$RL_DATA" "$TMP/mut-subject.sh")"
     case "$out" in *RUNNER-LOCAL*) echo "  PASS  19j) matching everything excuses a red with no signature — 22b is not vacuous" ;; *) echo "  FAIL  19j) MUTATION SURVIVED: still attributed the unsigned red"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
   [ $? -eq 0 ] && PASS=$((PASS+1))
 fi
 # 19k. MUTATION — remove the RUNNER-LOCAL verdict entirely. 22a must go back to
 #      the sentence that accused four PRs.
 if mutate "19k runner-local verdict" 'if [ -n "$RL_ID" ]; then' 'if false; then' 1; then
-  ( out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$RL_DATA" "$TMP/mut-subject.sh")"
+  ( out="$(rl_run "$out_s2" "$main_green_trusted" "$sigalt_cap" "" "$RL_DATA" "$TMP/mut-subject.sh")"
     case "$out" in *"a step main does not"*) echo "  PASS  19k) without the verdict the sigaltstack crash is blamed on the PR — 22a is not vacuous" ;; *) echo "  FAIL  19k) MUTATION SURVIVED: still refused to blame"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
   [ $? -eq 0 ] && PASS=$((PASS+1))
 fi
 # 19l. MUTATION — drop the date/measurement tripwire. 22c must go red: the
 #      undated entry would then silence a real accusation.
 if mutate "19l runner-local data tripwire" '    if why:' '    if False:' 1; then
-  ( out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$bad_data" "$TMP/mut-subject.sh")"
+  ( out="$(rl_run "$out_s2" "$main_green_trusted" "$sigalt_cap" "" "$bad_data" "$TMP/mut-subject.sh")"
     case "$out" in *RUNNER-LOCAL*) echo "  PASS  19l) without the tripwire an undated entry DOES suppress the accusation — 22c is not vacuous" ;; *) echo "  FAIL  19l) MUTATION SURVIVED: the undated entry still bought nothing"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
   [ $? -eq 0 ] && PASS=$((PASS+1))
 fi

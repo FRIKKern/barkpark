@@ -719,7 +719,29 @@ for s in ours:
             # have been shredded by the split, so "absent from main's set" is
             # not trustworthy. Undetermined — never blame.
             cls = "UNKNOWN"
-        elif st == "success" and (job_all_success or log_parsed or api_trusted):
+        elif st == "success" and (log_parsed or api_trusted):
+            # `job_all_success` USED TO BE A THIRD PROOF HERE AND IT IS NOT ONE.
+            # (task-11e4855cc32c281c, measured 2026-09-07 on PR #16791.) The
+            # sibling proof `api_trusted` two blocks up carries the correct
+            # reasoning in its own comment: "if the API marks a GATE step failed,
+            # this job's step conclusions are NOT continue-on-error-masked, so
+            # `success` means passed." `job_all_success` is the case where
+            # NOTHING disconfirms masking — an all-green job is the weakest
+            # possible evidence, not a third proof, because a job concludes
+            # `success` while containing a step whose `outcome` was `failure`.
+            #
+            # WHAT IT COST: main's `Required-check spec gate` concluded success
+            # with every step reading `conclusion: success`, while its own log
+            # said `286 passed, 4 FAILED` — s1's `outcome: failure` is invisible
+            # to the jobs API. This clause therefore emitted "Main RAN that step
+            # and it PASSED, so the red is this PR's own" against the one PR that
+            # was FIXING the swallow. A breaker that accuses the repair is worse
+            # than one that stays quiet.
+            #
+            # An all-green-job-only case now falls through to UNKNOWN, whose
+            # message already names this exact hazard. THE TWO ERRORS ARE NOT
+            # SYMMETRIC: a false accusation sends a lane hunting a red it did not
+            # cause; a missed accusation leaves it undetermined, where it looks.
             cls = "PASSED"                 # the ONLY accusing evidence
         else:
             cls = "UNKNOWN"
