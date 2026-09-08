@@ -157,6 +157,15 @@ jobs:
             # sentence described neither, and it still concluded green.
             6) echo "::error::UNREACHABLE — the pull-request list could not be read after every attempt, so this run classified ZERO rows and does not know how many pull requests exist. This is not a green: no population was ever read. It is usually TRANSIENT (rate limit, or Actions transport) and the next scheduled run clears it by itself. A 6 that PERSISTS is the token or the poll budget, not the pull requests."; exit 1 ;;
             7) echo "::error::DISTANCE UNREADABLE — the pull requests WERE read and main's commit history was NOT, so no staleness distance exists this run and no row can be called stale or clean. This is not a credential fault on the pull-request read: that read worked. Look at the commits API for ${{ github.repository }}, not at the PR list."; exit 1 ;;
+            # 9 is the ROLLUP BUDGET. The status rollup is the expensive half
+            # of this read, and asking for it across a large conflicted set is
+            # exactly what made the old single combined query time out
+            # (measured 2026-09-08: HTTP 504 at 50 rows, fine at 25). The split
+            # read fetches rollups only for CONFLICTING rows, so this arm is the
+            # promise that the cost cannot silently come back: past the cap the
+            # run REFUSES before issuing them rather than firing N heavy
+            # requests and reporting whatever survives.
+            9) echo "::error::ROLLUP BUDGET EXCEEDED — more CONFLICTING pull requests need a status rollup than --rollup-max allows, so this run refused BEFORE issuing them rather than re-creating the timeout that made this watch blind. This is not a green and not a pass: the population was read, the conflicted set is too large to adjudicate within budget, and the log above names the count and the cap. REMEDY: drain the conflicted population, or raise --rollup-max deliberately with a measurement behind it."; exit 1 ;;
             *) echo "::error::stale-verdict-watch.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
           esac
 
