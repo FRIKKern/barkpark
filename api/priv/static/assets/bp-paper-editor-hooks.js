@@ -2101,9 +2101,6 @@
       ]) {
         if (value != null && value !== "") context[key] = value;
       }
-      if (revision == null) {
-        revision = wrapper.dataset.paperRev ?? wrapper.dataset.documentRev;
-      }
       fragments.push({
         wrapper_id: wrapper.id || null,
         run_id: wrapper.id?.startsWith("paper-canvas-")

@@ -1158,12 +1158,21 @@ try {
   leaseEchoBeforeReply.close();
 
   const recovery = await mount({ revision: 19 });
-  const recoveryRoot = recovery.main;
+  const recoveryMain = recovery.main;
+  const recoveryRoot = document.createElement("div");
   recoveryRoot.id = "paper-editor-recovery-probe";
+  recoveryRoot.className = "bp-paper-editor";
+  recoveryRoot.dataset.paperDocKey = recoveryMain.dataset.paperDocKey;
   recoveryRoot.dataset.paperCanvasResumeHalt = "true";
   recoveryRoot.dataset.paperCanvasResumeState = "blocked";
   recoveryRoot.setAttribute("inert", "");
-  recoveryRoot.querySelector("[phx-hook]").dataset.paperContainerKind = "document";
+  const recoveryWrapper = recoveryMain.querySelector("[phx-hook]");
+  recoveryWrapper.dataset.paperContainerKind = "document";
+  recoveryRoot.appendChild(recoveryWrapper);
+  recoveryMain.className = "";
+  delete recoveryMain.dataset.paperDocKey;
+  delete recoveryMain.dataset.paperRev;
+  recoveryMain.appendChild(recoveryRoot);
   append(recovery.canvas, " newest pending prose");
 
   const nestedWrapper = document.createElement("div");
@@ -1254,7 +1263,7 @@ try {
       format: "barkpark-paper-canvas-recovery",
       version: 1,
       scope: "canvas-fragments",
-      document: { key: "paper-overlap-probe", revision: "19" },
+      document: { key: "paper-overlap-probe" },
       fragmentCount: 2,
     },
     "the recovery download is explicitly a current-document canvas-fragment bundle",
