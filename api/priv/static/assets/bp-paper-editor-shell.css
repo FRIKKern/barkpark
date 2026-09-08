@@ -1749,6 +1749,7 @@
 .bp-paper-figure-caption-paint {
   display: block; width: 100%; padding: 0; margin: 0; border: 0;
   background: transparent; color: inherit; font: inherit; text-align: inherit;
+  letter-spacing: inherit; word-spacing: inherit;
   white-space: normal; cursor: text;
 }
 .bp-paper-figure-caption-paint:focus-visible {

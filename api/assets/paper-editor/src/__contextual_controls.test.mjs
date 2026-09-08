@@ -18,6 +18,8 @@ assert.match(shell, /\.bp-paper-figure-image\[data-image-src=""\] > \.bp-paper-f
   "missing image recovery reserves a touch row rather than covering caption or following prose");
 assert.match(shell, /\.bp-paper-figure-caption-form:not\(:focus-within\)\s*\{[^}]*position:\s*absolute[^}]*clip-path:\s*inset\(50%\)/s,
   "resting captions use canonical reader paint rather than textarea whitespace layout");
+assert.match(shell, /\.bp-paper-figure-caption-paint\s*\{[^}]*letter-spacing:\s*inherit[^}]*word-spacing:\s*inherit/s,
+  "native caption buttons retain reader character spacing at wrapping thresholds");
 assert.match(shell, /\[data-paper-figure-image-trigger\]:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--paper-accent\)/s,
   "the rendered Figure image has a visible keyboard target without changing its box");
 assert.match(shell, /\.bp-paper-figure-image-picker\s*\{[^}]*max-height:\s*min\(70vh, 42rem\)[^}]*overflow:\s*auto/s,
