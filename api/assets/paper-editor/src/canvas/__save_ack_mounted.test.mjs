@@ -879,21 +879,55 @@ try {
   tableRedo.canvas._editor.commands.setTextSelection(bodyCellPosition);
   tableRedo.canvas._editor.commands.insertContent("Studio mobile");
   assert.match(tableRedo.canvas._editor.state.doc.textContent, /Studio mobile/,
-    "the immediate cell edit lands in the redone PM table before host update");
+    "the immediate cell edit lands in the redone PM table before Studio reparenting");
   assert.equal(tableRedo.canvas.hasPendingChanges(), true,
     "redo plus immediate cell typing arms the canvas debounce");
-  tableRedo.update();
+  const movedStudioColumn = document.createElement("section");
+  tableRedo.main.parentNode.appendChild(movedStudioColumn);
+  movedStudioColumn.appendChild(tableRedo.main.querySelector("[phx-hook]"));
   assert.equal(tableRedo.canvas.hasPendingChanges(), true,
-    "the host update preserves the redone table debounce");
+    "a connected-to-connected Studio column move preserves the redone table debounce");
   await new Promise(resolve => setTimeout(resolve, DEBOUNCE_MS * 4));
   assert.equal(tableRedo.requests.length, 3,
-    "redo plus immediate cell typing survives a host update and debounces one save");
+    "redo plus immediate cell typing survives Studio reparenting and debounces one save");
   const redoneTable = inserted(tableRedo.requests[2]);
   assert.equal(redoneTable.id, insertedTable.id,
     "redo preserves the acknowledged table identity");
   assert.equal(redoneTable.rows[0][0][0].value, "Studio mobile",
     "the immediate cell draft rides the redone table persistence batch");
+  movedStudioColumn.remove();
   tableRedo.close();
+
+  const responsiveProse = await mount({ revision: 13 });
+  append(responsiveProse.canvas, " responsive draft");
+  const responsiveEditor = responsiveProse.canvas._editor;
+  assert.equal(responsiveProse.canvas.hasPendingChanges(), true,
+    "ordinary prose arms the debounce before a responsive Studio move");
+  const responsiveColumn = document.createElement("section");
+  responsiveProse.main.parentNode.appendChild(responsiveColumn);
+  responsiveColumn.appendChild(responsiveProse.main.querySelector("[phx-hook]"));
+  assert.equal(responsiveProse.canvas._editor, responsiveEditor,
+    "responsive reparenting preserves the mounted editor and its history");
+  assert.equal(responsiveProse.canvas.hasPendingChanges(), true,
+    "responsive reparenting preserves an ordinary prose debounce");
+  await new Promise(resolve => setTimeout(resolve, DEBOUNCE_MS * 4));
+  assert.equal(responsiveProse.requests.length, 1,
+    "ordinary prose survives Studio reparenting and reaches persistence");
+  assert.equal(
+    responsiveProse.requests[0].payload.ops[0].patch.content[0].value,
+    "Original responsive draft",
+  );
+  responsiveColumn.remove();
+  responsiveProse.close();
+
+  const removedCanvas = document.createElement("bp-paper-canvas");
+  removedCanvas.blocks = [paragraph("removed", "Removed")];
+  document.body.appendChild(removedCanvas);
+  assert.ok(removedCanvas._editor, "a genuinely connected canvas mounts its editor");
+  removedCanvas.remove();
+  await tick();
+  assert.equal(removedCanvas._editor, null,
+    "a genuine removal still destroys the editor after the reparent grace microtask");
 
   const newerBoundaryDraft = await mount({ revision: 20 });
   newerBoundaryDraft.canvas._editor.commands.insertContentAt(
