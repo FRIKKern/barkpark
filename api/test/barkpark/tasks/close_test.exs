@@ -2104,10 +2104,20 @@ defmodule Barkpark.Tasks.CloseTest do
 
       task = mk_task!(uniq("crit-text-whole"), scope, %{"acceptance_criteria" => @rubric})
 
+      # The lifecycle is `done` and not `blocked` because of the raise gate
+      # (task-8ca0bd7a8ed50f14): an ABANDON close may no longer raise `met`, and
+      # this arm's whole subject is a rubric paste that raises one row while
+      # lowering another. `done` + `criteria_override` keeps the subject — one
+      # write, mixed met values, resolution by TEXT — on a lifecycle where the
+      # raise is legal. Rewriting the arm rather than dropping the raise matters:
+      # a paste with no raise would still pass if text-keyed resolution broke on
+      # the met=true branch, which is precisely the branch this arm guards.
       assert {:ok, closed} =
                Close.close(task.id, "w",
                  observed_epoch: 0,
-                 lifecycle_status: "blocked",
+                 lifecycle_status: "done",
+                 reason: "shipped in PR #14349, sha 66b329c959",
+                 criteria_override: "the second rubric row is closed over, on the record",
                  criteria: [
                    %{
                      "criterion" => "the reader survives a nil workspace",
@@ -2123,7 +2133,7 @@ defmodule Barkpark.Tasks.CloseTest do
                %{"met" => false}
              ] = closed.content["acceptance_criteria"]
 
-      assert closed.content["lifecycle_status"] == "blocked"
+      assert closed.content["lifecycle_status"] == "done"
     end
 
     test "a text that matches NO stored row is refused and writes nothing", %{scope: scope} do
