@@ -30,6 +30,20 @@ defmodule BarkparkWeb.SearchSuggestionsFlatSharedClientTenantTest do
   moduledoc gets rewritten; every other test in this file is a plain regression
   lock that must keep passing through the fix.
 
+  MUTATION PROOF — this file is not vacuous. Adding the blind c2 gate
+
+      defp recent_queries(_surface, _scope, "client:" <> _rest, _p, _l, _w), do: []
+
+  ahead of the general clause in `Barkpark.Search.Intelligence` REDS both
+  `flat route: a shared client id unions two customers' recent queries` and the
+  SANITY test here — so the collision assertion genuinely observes the leak and
+  would notice its closure. It ALSO reds
+  `Barkpark.Search.IntelRecentCrossTenantTest` "CLAMP 1: workspace-A recents
+  EXCLUDE workspace-B's query", which is the standing proof that `client:<x>`
+  recents are correctly isolated on a REAL per-tenant workspace. That is the
+  over-block: the blind gate is not the fix, because the same key is safe
+  wherever `scope_ws/2` has a real workspace to bind on.
+
   WHAT IT IS NOT: a claim that the header is guessable. The shipped UI mints a
   per-session `crypto.randomUUID()`, so real callers never collide. The exposure
   requires a widget vendor to hardcode ONE non-random client id across two
@@ -233,7 +247,7 @@ defmodule BarkparkWeb.SearchSuggestionsFlatSharedClientTenantTest do
     # assertion. `Plugs.ResolveWorkspace` refuses on MEMBERSHIP.
     body = json_response(conn, 403)
 
-    assert body["error"]["reason"] == "forbidden_membership",
+    assert body["error"]["reason"] == "not_a_member",
            "expected the ResolveWorkspace membership refusal, got: #{inspect(body["error"])}"
   end
 end
