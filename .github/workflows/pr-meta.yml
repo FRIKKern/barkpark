@@ -127,6 +127,7 @@ jobs:
       # two workflows that needed full history were each paying for it separately
       # before this fold.
       - name: Checkout (merge ref; full history for the pinned worktrees)
+        id: setup
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -153,6 +154,7 @@ jobs:
       # path or a file that registers no tests is a red, and `--floor 1` pins the
       # file count; the tally assert pins the 12 tests the pin was filed with.
       - name: tooling/status tests (node-test-floor, 12-test tally)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           set -euo pipefail
           node scripts/node-test-floor.mjs --floor 1 'tooling/status/test/*.test.mjs' 2>&1 | tee /tmp/status-tests.txt
@@ -171,6 +173,7 @@ jobs:
       # node-test-floor.mjs, never bare `node --test`: a zero-match glob or a
       # file registering no tests exits 0 three separate ways.
       - name: tooling/lib tests (node-test-floor, 9-test tally)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           set -euo pipefail
           node scripts/node-test-floor.mjs --floor 1 'tooling/lib/*.test.mjs' 2>&1 | tee /tmp/lib-tests.txt
@@ -218,6 +221,7 @@ jobs:
       # in .github/required-checks.json, so a red here informs the author and
       # stops nothing. The word `gate-map` above is a FILE NAME, not a claim.
       - name: "gate-map: the derivation is live and non-vacuous (no committed snapshot)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           set -euo pipefail
           # The venue assertion: read this workflow's `on:` block (top-level key
@@ -232,6 +236,7 @@ jobs:
           node --check tooling/gate-map/gate-map.mjs
           node tooling/gate-map/gate-map.mjs --verify
       - name: No symlink is committed to this repo
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/committed-symlink-check.sh
 
       # ── run-level-reader-census ───────────────────────────────────────────────
@@ -242,9 +247,11 @@ jobs:
       # the gate above: the census's steady state is "everything adjudicated",
       # which is also what a broken scan produces.
       - name: Prove the census can fail (--selftest)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-level-reader-census.sh --selftest
 
       - name: Every run-level reader is adjudicated
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-level-reader-census.sh
 
       # ── shim-trigger-filter-check ─────────────────────────────────────────────
@@ -263,9 +270,11 @@ jobs:
       # reason: a clean tree and a broken scanner print the same green, so the
       # mutation matrix runs before the scan and cannot rot unexecuted.
       - name: Prove the shim-trigger ratchet can fail (--selftest)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/shim-trigger-filter-check.sh --selftest
 
       - name: No shimmed workflow filters its own pull_request trigger
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/shim-trigger-filter-check.sh
 
       # The PR-path CI inventory's own derivations — required/feeds-required,
@@ -277,6 +286,7 @@ jobs:
       # harness nobody executes reads as coverage and is silence. It guards
       # scripts/ci-pr-inventory.py, which produces .github/ci-pr-inventory.md.
       - name: Prove the CI inventory's derivations can fail (--selftest)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python3 scripts/ci-pr-inventory.py --selftest
 
       # ── aesthetics-guard (ADVISORY) ───────────────────────────────────────────

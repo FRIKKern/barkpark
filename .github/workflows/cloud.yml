@@ -201,11 +201,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        id: setup
 
       - name: Harness (the ratchet must be able to fail)
         run: bash scripts/cloud-path-escape-check.sh --selftest
 
       - name: Every repo-root read is dispatched on
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/cloud-path-escape-check.sh
 
       # ── the FailureCopy scrub/strip_ansi ORDER tripwire ──────────────────
@@ -230,11 +232,13 @@ jobs:
       # Harness FIRST, subject second — the house selftest-first idiom. A gate
       # that cannot be shown to fail is not evidence that nothing failed.
       - name: Harness (the scrub-order tripwire must be able to fail)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/failure-copy-scrub-order-check.sh --selftest
 
       - name: No display boundary scrubs before it strips ANSI
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/failure-copy-scrub-order-check.sh
@@ -261,11 +265,13 @@ jobs:
       #
       # Harness FIRST, subject second — the house selftest-first idiom.
       - name: Harness (the DNS vocabulary pin must be able to fail)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/cli-dns-step-vocabulary-check.sh --selftest
 
       - name: Every DNS step verb the Go readers emit is classified
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/cli-dns-step-vocabulary-check.sh
