@@ -103,6 +103,107 @@ defmodule BarkparkWeb.SessionIssuer do
     end
   end
 
+  @doc """
+  Is `user` refused THIS authentication method by org policy
+  (era-bl-allowed-auth-methods)? The twin of `org_mfa_enrolment_blocked?/1`
+  and, like it, the ONE predicate every session-mint chokepoint shares:
+  password + magic-link login (API and browser) and passkey login consult it
+  before a token is ever created.
+
+  `false` — the zero-tax answer — whenever no governing org set an
+  allow-list, so an ordinary org's login path is unchanged.
+  """
+  @spec auth_method_blocked?(Accounts.User.t(), String.t()) :: boolean()
+  def auth_method_blocked?(%Accounts.User{} = user, method) when is_binary(method) do
+    not Barkpark.Tenancy.auth_method_allowed_for_user?(user.id, method)
+  end
+
+  @doc """
+  Refuse a session-mint whose METHOD the user's org policy disallows
+  (era-bl-allowed-auth-methods). Audits the block, then forks on the caller
+  exactly like `deny_org_mfa_enrolment/4`: a browser (Accept: text/html) is
+  redirected to `/login` with guidance, an API caller gets a
+  `403 auth_method_not_allowed` envelope.
+
+  403, not 401, and NOT the generic `invalid_credentials` 401: the credentials
+  were CORRECT and the refusal is a policy decision the user must be told
+  about, or they retype a working password forever. The check runs only AFTER
+  the credential verified, so the refusal reveals nothing about an address
+  that has no account.
+
+  `provider` is the PRECISE door for the audit trail when it is finer-grained
+  than the policy term — `"social:google"` gates on the coarse `"social"`
+  method but is recorded exactly, so a reader of the trail can tell which
+  provider was refused. Defaults to `method`.
+
+  No session token exists on this path — the door fails closed.
+  """
+  @spec deny_auth_method(Plug.Conn.t(), Accounts.User.t(), String.t(), String.t() | nil) ::
+          Plug.Conn.t()
+  def deny_auth_method(conn, %Accounts.User{} = user, method, provider \\ nil)
+      when is_binary(method) do
+    allowed = Barkpark.Tenancy.org_allowed_auth_methods_for_user(user.id)
+
+    Barkpark.Audit.emit(%{
+      category: "auth",
+      action: "auth_method_not_allowed",
+      subject: user.id,
+      actor_type: "user",
+      actor_id: user.id,
+      metadata: %{
+        "reason" => "org_allowed_auth_methods",
+        "method" => method,
+        "provider" => provider || method,
+        "allowed" => allowed,
+        "path" => conn.request_path
+      }
+    })
+
+    if browser?(conn) do
+      conn
+      |> Phoenix.Controller.fetch_flash()
+      |> Phoenix.Controller.put_flash(:error, auth_method_message(method))
+      |> Phoenix.Controller.redirect(to: "/login")
+    else
+      conn
+      |> put_status(403)
+      |> json(%{
+        error: %{
+          code: "auth_method_not_allowed",
+          message: auth_method_message(method),
+          hint: auth_method_hint(allowed)
+        }
+      })
+    end
+  end
+
+  @doc "The human-facing refusal shared by the API and browser doors."
+  @spec auth_method_message(String.t()) :: String.t()
+  def auth_method_message(method) do
+    "#{method_label(method)} is disabled for your organization."
+  end
+
+  # The hint names what IS open rather than assuming SSO is the answer — an
+  # org can equally have disabled SSO and left password on, and a hint that
+  # said "use single sign-on" there would send the member to a closed door.
+  # The user is past their credential check at this point, so naming their own
+  # org's allowed methods reveals nothing they could not already probe.
+  defp auth_method_hint([]),
+    do: "no sign-in method is currently permitted — contact your organization's administrator"
+
+  defp auth_method_hint(allowed) when is_list(allowed) do
+    "permitted sign-in method(s) for your organization: " <> Enum.join(allowed, ", ")
+  end
+
+  defp auth_method_hint(_), do: "contact your organization's administrator"
+
+  defp method_label("password"), do: "Password sign-in"
+  defp method_label("magic_link"), do: "Magic-link sign-in"
+  defp method_label("passkey"), do: "Passkey sign-in"
+  defp method_label("sso"), do: "Single sign-on"
+  defp method_label("social"), do: "Social sign-in"
+  defp method_label(other), do: "#{other} sign-in"
+
   @doc "The human-facing org-MFA enrolment guidance shared by the browser doors."
   @spec org_mfa_enrolment_message() :: String.t()
   def org_mfa_enrolment_message do
