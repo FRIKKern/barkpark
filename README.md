@@ -1,13 +1,14 @@
 <!-- doc-tier: human | canonical-for: project-overview | budget: 1750tok -->
 # Barkpark
 
-Barkpark is an open-source content management system for developers working with
-AI agents. You define your content types, and people and agents work on the same
-data through a browser, terminal, or API. Run it on your own laptop or server.
+Barkpark is an open-source platform for building connected applications on
+infrastructure you own. Run and modify the server and control your data. Build on
+shared schemas, storage, permissions, and APIs. Work with the same data through a
+browser, terminal, CLI, or AI agent.
 
-For example, an agent can add recipes through the API while you edit them in
-Studio, Barkpark's web interface. The same records are available in the terminal;
-you do not maintain a separate copy for each interface.
+Vendors save work, but their limits shape what you can build. Barkpark's goal is
+fewer separate services and more freedom to change and combine your tools. Run
+it on your laptop or server, or pay someone to operate it for you.
 
 [Try Studio](https://api.barkpark.cloud/studio) · [Install](#install--connect) · [Create a recipe](#your-first-schema) · [Host a server](#be-your-own-cloud) · [Docs](docs/INDEX.md)
 
@@ -18,18 +19,21 @@ you do not maintain a separate copy for each interface.
 | Studio | Browse, edit, and publish content in your browser. |
 | Terminal UI | Work with content from your keyboard; open it by running `bp`. |
 | `bp` CLI | Read and change content from scripts or an agent's tools. |
-| REST API | Connect your own applications and integrations. |
+| AI agents | Operate Barkpark through the CLI, API, or MCP. |
 
 ## What this makes possible
 
-- Define content types for a website, catalog, or project. Their fields become
-  available in Studio, the terminal UI, and the API.
-- Keep tasks and their evidence on a shared board so agents can hand work between
-  sessions. Claims record who is working on each task.
-- Write documents called Papers using blocks that render in the browser, terminal,
-  editor, and email. Spreadsheets provide formulas and an editable grid.
-- Work against a local server when offline. Export datasets with `bp export` or
-  move content between servers with `bp migrate`.
+- Use Barkpark as a CMS: define content types, then edit records visually in
+  Studio or through an agent using the API.
+- Share Papers, Barkpark's documents, through a browser or terminal on a local
+  network or a remote server. Papers also render for email.
+- Keep a spreadsheet in Sheets and embed it in a Paper. Updates to the sheet
+  refresh the embedded data, so you can share the document without another XLSX
+  export.
+- Share tasks and their evidence across agent sessions. Claims record who is
+  working on each task.
+- Work with the data on your local server when offline. Export datasets with
+  `bp export` or move content between servers with `bp migrate`.
 
 ## Install & connect
 
@@ -106,26 +110,28 @@ The JSON response includes these fields:
 ```
 
 Open the Recipe type in Studio, in the same project and dataset, to edit the
-record. Run `bp` to browse it in the terminal. Both interfaces work with the
-recipe you just created. The example uses a fixed ID; choose another ID to create
+record, or run `bp` to browse it in the terminal. Choose another ID to create
 another recipe.
 
 The [CLI handbook](docs/cli/HANDBOOK.md) covers updates, queries, and publishing.
 
 ## Working with agents
 
-Give your agent access to the same instance. `bp capabilities -o json` describes
-the commands available to its credentials. To generate Codex setup instructions:
+Full control through CLI, TUI, GUI, or AI is the goal, including setup and access
+management. Today, you can revoke workspace tokens, inspect document revisions,
+and read task evidence to follow an agent's work.
+
+`bp capabilities -o json` lists commands available to the caller. Generate Codex
+setup instructions with:
 
 ```bash
 bp onramp codex
 ```
 
-[Agent onramps](docs/setup/AGENT-ONRAMPS.md) also cover Claude Code, Cursor, and
-other tools, including MCP clients. The [task guide](docs/setup/TASK-SYSTEM.md)
-shows a complete workflow for claiming work, recording evidence, and closing a
-task with the current claim epoch. Task records remain available after a session
-ends; the agent must renew or reclaim its lease as the guide describes.
+[Agent onramps](docs/setup/AGENT-ONRAMPS.md) cover other tools and MCP clients.
+The [task guide](docs/setup/TASK-SYSTEM.md) covers claims, evidence, and closing
+work with the current claim epoch. These records make an agent's work inspectable
+across sessions. Agents must renew or reclaim their leases.
 
 ## Be your own cloud
 
@@ -147,15 +153,24 @@ cloud providers. You can also run the [control plane](cloud/README.md) yourself.
 
 ## Why we build it this way
 
-You should be able to keep your content, run your own server, and change the
-software without depending on us. Barkpark is MIT licensed. Using Barkpark Cloud
-helps fund continued development; self-hosting remains an option.
+I build Barkpark from everyday problems. Papers began because I was tired of
+copying AI progress into messages for coworkers; I wanted to share it over the
+local network. Sheets grew from repeatedly exporting XLSX files when we could
+work with live data instead.
+
+Each tool should make the next one easier to build. The aim is to spend more time
+on an idea and less on choosing vendors and connecting them. You can run,
+inspect, and change the software yourself. Barkpark is MIT licensed; using
+Barkpark Cloud helps fund it.
+
+Automatic local/remote synchronization remains a goal. Today you can work locally
+and transfer content explicitly.
 [Read our principles](docs/PHILOSOPHY.md).
 
 ## How it works
 
-Schemas describe content types. The server exposes commands through
-`GET /v1/capabilities`; clients discover what the caller is allowed to use.
+The REST API connects your applications. `GET /v1/capabilities` describes the
+commands available to the caller.
 Plugins add schemas, routes, jobs, and commands, and the core runs with all
 plugins disabled.
 
