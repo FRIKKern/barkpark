@@ -47,9 +47,39 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # `plug(BarkparkWeb.Plugs.RateLimit, class: :browser)`; that router edit is
   # charter D7/slice 8 work and is deliberately NOT part of this change.
   def call(conn, opts) do
+    # ONE `RateLimiter.check/2` CALL SITE, DELIBERATELY.
+    # `rate_limiter_scoped_key_coverage_test.exs` walks the AST of every module
+    # that meters and pins the census of check/2 call sites (8 across the tree,
+    # exactly ONE of them here). A second `check` call for the browser class
+    # reds that census — so the browser class differs from the method classes in
+    # what it PLANS (budget, key) and what it does when the bucket is empty, and
+    # not in how it debits.
+    case plan(conn, opts) do
+      # The kill switch, and it short-circuits BEFORE any key is built: no
+      # bucket is created and check/2 is never reached.
+      :skip ->
+        conn
+
+      {class, per_minute, key} ->
+        case RateLimiter.check(RateLimiter.scoped_key(conn, key), bucket_opts(per_minute)) do
+          :ok -> conn
+          :rate_limited -> limited(conn, class, key, per_minute)
+        end
+    end
+  end
+
+  # THE MOUNT DECIDES THE CLASS, AND SILENCE MEANS "AS BEFORE".
+  #
+  # Every one of the 14 `plug(BarkparkWeb.Plugs.RateLimit)` lines in router.ex
+  # passes NO options, so `opts` is `[]` here and this falls to the method
+  # clause — byte-identical keys, budgets and refusals to what those pipelines
+  # got before `:browser` existed. A browser pipeline opts IN with
+  # `plug(BarkparkWeb.Plugs.RateLimit, class: :browser)`; that router edit is
+  # charter D7 / slice 8 work and is deliberately NOT part of this change.
+  defp plan(conn, opts) do
     case class_opt(opts) do
-      :browser -> browser_call(conn)
-      _ -> method_call(conn)
+      :browser -> browser_plan(conn)
+      _ -> method_plan(conn)
     end
   end
 
@@ -57,76 +87,63 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   defp class_opt(%{} = opts), do: Map.get(opts, :class)
   defp class_opt(_), do: nil
 
-  defp method_call(conn) do
+  defp method_plan(conn) do
     class = method_class(conn.method)
     dataset = conn.path_params["dataset"]
     per_minute = limit_per_minute(class, dataset)
-    bucket_opts = bucket_opts(per_minute)
-    key = bucket_key(conn, class, dataset)
+    {class, per_minute, bucket_key(conn, class, dataset)}
+  end
 
-    case RateLimiter.check(RateLimiter.scoped_key(conn, key), bucket_opts) do
-      :ok ->
-        conn
+  defp browser_plan(conn) do
+    cfg = Application.get_env(:barkpark, :rate_limits, [])
 
-      :rate_limited ->
-        refuse(conn, retry_after_seconds(per_minute))
+    if browser_enabled?(cfg) do
+      per_minute = browser_per_minute(cfg)
+      {:browser, per_minute, bucket_key(conn, :browser, conn.path_params["dataset"])}
+    else
+      :skip
     end
   end
 
   # THE SHADOW PATH — CHARTER D2, AND IT MAY NEVER REFUSE ANYBODY.
   #
-  # `:rate_limited` here does NOT halt the conn. It logs one line, emits a
-  # `would_429` measurement on `#{inspect(@shadow_event)}`, and returns the conn
-  # untouched so the request is served exactly as if no limiter ran. Promotion
-  # to enforcing is a separate, explicit human decision against observed shadow
-  # data (`:browser_enforce`, default false) — never a side effect of this
-  # slice merging. A false-positive 429 on a real reader is the epic's one-way
-  # door, and this is the door being held shut.
+  # An empty bucket on the browser class does NOT halt the conn. It logs one
+  # line, emits a `would_429` measurement, and returns the conn untouched so the
+  # request is served exactly as if no limiter ran. Promotion to enforcing is a
+  # separate, explicit human decision against observed shadow data
+  # (`:browser_enforce`, default false) — never a side effect of this slice
+  # merging. A false-positive 429 on a real reader is the epic's one-way door,
+  # and this clause is the door being held shut.
   #
   # `would_429` is a DIMENSION, never a sixth route class (charter D9): the
   # telemetry metadata carries `class: :browser` and the measurement is the
   # counter. Carrying it into RequestStats' per-class objects edits
   # `request_stats.ex`, which is outside this slice's fence; this event is the
   # seam that slice consumes.
-  defp browser_call(conn) do
-    cfg = Application.get_env(:barkpark, :rate_limits, [])
+  defp limited(conn, :browser, key, per_minute) do
+    retry_after = retry_after_seconds(per_minute)
 
-    # THE KILL SWITCH, and it is the FIRST thing read on purpose: off means no
-    # key is built, no bucket is created and `RateLimiter.check/2` is never
-    # called — the plug costs one `Application.get_env` and a keyword lookup.
-    if browser_enabled?(cfg) do
-      per_minute = browser_per_minute(cfg)
-      key = bucket_key(conn, :browser, conn.path_params["dataset"])
+    Logger.warning(
+      "rate_limit shadow would_429 class=browser key=#{key} " <>
+        "per_minute=#{per_minute} retry_after=#{retry_after} " <>
+        "method=#{conn.method} path=#{conn.request_path}"
+    )
 
-      case RateLimiter.check(RateLimiter.scoped_key(conn, key), bucket_opts(per_minute)) do
-        :ok ->
-          conn
+    :telemetry.execute(
+      @shadow_event,
+      %{would_429: 1},
+      %{class: :browser, key: key, per_minute: per_minute, retry_after: retry_after}
+    )
 
-        :rate_limited ->
-          retry_after = retry_after_seconds(per_minute)
-
-          Logger.warning(
-            "rate_limit shadow would_429 class=browser key=#{key} " <>
-              "per_minute=#{per_minute} retry_after=#{retry_after} " <>
-              "method=#{conn.method} path=#{conn.request_path}"
-          )
-
-          :telemetry.execute(
-            @shadow_event,
-            %{would_429: 1},
-            %{class: :browser, key: key, per_minute: per_minute, retry_after: retry_after}
-          )
-
-          if browser_enforce?(cfg) do
-            refuse(conn, retry_after)
-          else
-            conn
-          end
-      end
+    if browser_enforce?(Application.get_env(:barkpark, :rate_limits, [])) do
+      refuse(conn, retry_after)
     else
       conn
     end
   end
+
+  # The 14 API pipelines: unchanged, still a hard refusal.
+  defp limited(conn, _class, _key, per_minute), do: refuse(conn, retry_after_seconds(per_minute))
 
   # Content-negotiated refusal. A browser asking for HTML gets HTML; everything
   # else keeps the JSON envelope the 14 API pipelines have always returned, so
