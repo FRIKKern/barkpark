@@ -21,6 +21,13 @@ await import("./index.js");
 const text = value => [{ type: "text", value }];
 const table = { id: "table", type: "table", head: [text("Name"), text("Age")],
   rows: [[text("Ada"), text("36")], [text("Bob"), text("40")]] };
+const mixedTable = { id: "table-mixed", type: "table", caption: "Keep me",
+  head: ["Name", "Age"], rows: [["Ada", "36"], [
+    { content: [{ type: "link", href: "/bob", tracking: { keep: true },
+      children: text("Bob") }], sourceId: "opaque-cell" }, "40",
+  ]] };
+const linkedBob = { content: [{ type: "link", href: "/bob", tracking: { keep: true },
+  children: text("Bob") }], sourceId: "opaque-cell" };
 const section = { id: "section", type: "section", title: "Group",
   layout: { mode: "grid", tracks: 2, cells: { child: { span: 2 } } },
   blocks: [{ id: "child", type: "paragraph", content: text("Keep this") }] };
@@ -86,6 +93,127 @@ try {
       assert.deepEqual(patch.rows, expected.rows, title);
       assert.deepEqual(patch.head ?? null, expected.head, title);
     });
+  }
+  await exercise(mixedTable, click('button[title="Add column"]'), (patch, canvas) => {
+    assert.deepEqual(patch.head, ["Name", "Age", []]);
+    assert.deepEqual(patch.rows, [
+      ["Ada", "36", []],
+      [linkedBob, "40", []],
+    ]);
+    assert.doesNotMatch(canvas.innerHTML, /sourceId|bpTableSource|bpTableCellSource|Keep me/,
+      "private source carriers never render into DOM");
+  });
+  for (const [title, expected] of [
+    ["Add row", {
+      head: mixedTable.head,
+      rows: [...mixedTable.rows, [[], []]],
+    }],
+    ["Remove row", {
+      head: mixedTable.head,
+      rows: mixedTable.rows.slice(0, 1),
+    }],
+    ["Remove column", {
+      head: ["Name"],
+      rows: [["Ada"], [linkedBob]],
+    }],
+    ["Toggle header row", {
+      head: [],
+      rows: [mixedTable.head, ...mixedTable.rows],
+    }],
+  ]) {
+    await exercise(mixedTable, click(`button[title="${title}"]`), patch => {
+      assert.deepEqual(patch.head, expected.head, `${title} preserves header carriers`);
+      assert.deepEqual(patch.rows, expected.rows, `${title} preserves body carriers`);
+    });
+  }
+  {
+    const canvas = document.createElement("bp-paper-canvas");
+    canvas.blocks = structuredClone([mixedTable]);
+    const batches = [];
+    canvas.addEventListener("bp-canvas-ops", event => batches.push(event.detail.ops));
+    document.body.appendChild(canvas);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      canvas.querySelector('button[title="Add row"]').click();
+      assert.equal(canvas._editor.commands.undo(), true, "native table structure is undoable");
+      assert.equal(canvas.flushPendingChanges(), false, "undo restores exact source-backed table");
+      assert.deepEqual(batches, []);
+    } finally { canvas.remove(); }
+  }
+  {
+    const sourceTable = {
+      id: "table-normalized-echo",
+      type: "table",
+      caption: "old table metadata",
+      head: ["Name", "Owner"],
+      rows: [["Ada", { content: text("Bob"), sourceId: "old-cell-metadata" }]],
+    };
+    const normalizedEcho = {
+      ...sourceTable,
+      caption: "fresh table metadata",
+      head: [text("Name"), text("Owner")],
+      rows: [[text("Ada"), {
+        content: text("Bob"),
+        sourceId: "fresh-cell-metadata",
+        serverMetadata: { revision: 2 },
+      }]],
+    };
+    const canvas = document.createElement("bp-paper-canvas");
+    canvas.blocks = structuredClone([sourceTable]);
+    const batches = [];
+    canvas.addEventListener("bp-canvas-ops", event => batches.push(event.detail.ops));
+    document.body.appendChild(canvas);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      canvas.applyServerBlocks(structuredClone([normalizedEcho]));
+
+      const liveTable = canvas._editor.getJSON().content[0];
+      assert.deepEqual(liveTable.attrs.bpTableSource.block, normalizedEcho,
+        "a normalized echo refreshes the private table source");
+      assert.deepEqual(
+        liveTable.content[1].content[1].attrs.bpTableCellSource.cell,
+        normalizedEcho.rows[0][1],
+        "a normalized echo refreshes the private cell source",
+      );
+      assert.equal(canvas._editor.commands.undo(), false,
+        "the attribute-only authoritative refresh does not enter history");
+      assert.deepEqual(batches, [], "the authoritative refresh does not author an edit");
+
+      let bobEnd = null;
+      canvas._editor.state.doc.descendants((node, pos) => {
+        if (node.isText && node.text === "Bob") bobEnd = pos + node.nodeSize;
+      });
+      assert.notEqual(bobEnd, null, "the refreshed content-map cell remains editable");
+      canvas._editor.view.dispatch(canvas._editor.state.tr.insertText("!", bobEnd));
+      canvas.flushPendingChanges();
+
+      assert.equal(batches.length, 1, "the next cell edit emits one batch");
+      assert.deepEqual(batches[0][0].patch, {
+        head: normalizedEcho.head,
+        rows: [[normalizedEcho.rows[0][0], {
+          ...normalizedEcho.rows[0][1],
+          content: text("Bob!"),
+        }]],
+      }, "the next edit preserves freshly echoed carriers and cell metadata");
+      cases++;
+    } finally { canvas.remove(); }
+  }
+  {
+    const canvas = document.createElement("bp-paper-canvas");
+    canvas.blocks = [table];
+    document.body.appendChild(canvas);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      canvas._editor.commands.setContent(
+        '<table data-bp-type="table" data-bp-table-source="forged"><tbody>' +
+        '<tr><td data-bp-table-cell-source="forged">pasted</td></tr></tbody></table>',
+      );
+      const pasted = canvas._editor.getJSON().content[0];
+      assert.equal(pasted.attrs.bpTableSource, null,
+        "pasted HTML cannot import a table source carrier");
+      assert.equal(pasted.content[0].content[0].attrs.bpTableCellSource, null,
+        "pasted HTML cannot import a cell source carrier");
+    } finally { canvas.remove(); }
   }
   for (const [id, mode, tracks] of [
     ["paper-section-mode", "stack", 2],
