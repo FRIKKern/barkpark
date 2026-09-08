@@ -726,7 +726,28 @@
       border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
       padding-top: var(--bp-section-gap);
     }
-    .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
+.bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
+/* A nested disclosure heading is not a document section boundary. */
+.bp-expandable__body .bp-paper-editor-body > .ProseMirror > h2 {
+  margin-top: 1.9em; border-top: 0; padding-top: 0;
+}
+/* Reader-suppressed scaffolds remain keyboard-reachable without reserving
+ * document space until selected. These are transient editor decorations. */
+.bp-paper-editor-body .ProseMirror > .bp-resting-scaffold {
+  display: none;
+}
+.bp-paper-editor-body .bp-scaffold-control {
+  position: absolute; inset-inline-start: -24px; width: 24px; height: 24px;
+  padding: 0; border: 0; border-radius: 4px; background: var(--paper-bg);
+  color: var(--paper-ink-soft); font: 14px/24px var(--paper-font-mono);
+  cursor: pointer;
+}
+.bp-paper-editor-body .bp-scaffold-control:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 2px;
+}
+@media (max-width: 720px) {
+  .bp-paper-editor-body .bp-scaffold-control { inset-inline-start: -16px; background: transparent; }
+}
     /* THE LINK AFFORDANCE — byte-mirrored from the reader's `.bp-paper-surface a`
        (paper-surface.css carries the measurement: `--paper-accent-soft` as a
        border-bottom computed to 1.14–1.35:1 over the reading ground, so the old
@@ -940,6 +961,7 @@
          never px (D2). Keep BYTE-ALIGNED with styles.css. */
     .bp-canvas-section > .bp-section__grid { display: grid; grid-template-columns: repeat(var(--bp-tracks, 2), minmax(0, 1fr)); gap: var(--bp-grid-gap, 1.6rem); }
     @media (max-width: 720px) { .bp-canvas-section > .bp-section__grid { grid-template-columns: 1fr; } }
+    @media (max-width: 720px) { .bp-canvas-section .bp-section__cell { grid-column: 1 / -1 !important; } }
     .bp-canvas-section .bp-section__cell { min-width: 0; }
     .bp-canvas-section .bp-section__cell > :first-child { margin-top: 0; }
     .bp-canvas-section.bp-section--wide { margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }

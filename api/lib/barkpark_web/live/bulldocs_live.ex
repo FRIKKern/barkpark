@@ -302,6 +302,17 @@ defmodule BarkparkWeb.BulldocsLive do
       # it would track a process that is about to exit.
       |> join_paper_presence()
 
+    # A socket reconnect must not replace a still-dirty, ignored client canvas
+    # with the reader. The hint only restores presentation for this exact Paper;
+    # Edit.toggle rechecks the freshly resolved viewer's write authority.
+    socket =
+      if connected?(socket) and
+           (get_connect_params(socket) || %{})["paper_editing_key"] == "#{dataset}:paper:#{slug}" do
+        Edit.toggle(socket)
+      else
+        socket
+      end
+
     {:ok, socket, layout: false}
   end
 

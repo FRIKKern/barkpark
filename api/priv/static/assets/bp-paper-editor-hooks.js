@@ -3583,6 +3583,14 @@
         this._pendingRequests.forEach((request) => request.finish(false));
       }
     };
+  // Re-evaluated by LiveSocket on every join, not captured at initial load.
+  // This is only a document-bound presentation hint. The server rechecks write
+  // authority; no draft text, credentials, or mutation payload rides the hint.
+  window.BarkparkPaperEditorConnectParams = () => {
+    const toggle = document.querySelector('#paper-edit-toggle[data-editing="true"]');
+    const key = toggle?.closest("main")?.querySelector("[data-paper-doc-key]")?.dataset.paperDocKey;
+    return key ? { paper_editing_key: key } : {};
+  };
   window.BarkparkPaperEditorBeforeElUpdated = bpPaperBeforeElUpdated;
   window.BarkparkPaperEditorHooks = Hooks;
 })();

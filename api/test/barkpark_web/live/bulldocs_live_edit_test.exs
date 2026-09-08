@@ -153,6 +153,38 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
     end
   end
 
+  test "a reconnect resumes only this writable Paper's existing editing mode", %{
+    conn: conn,
+    slug: slug
+  } do
+    before = stored_blocks(slug)
+
+    conn =
+      conn
+      |> writer_conn()
+      |> put_connect_params(%{"paper_editing_key" => "#{@dataset}:paper:#{slug}"})
+
+    {:ok, view, _html} = live(conn, "/papers/#{slug}")
+    assert assigns_of(view).editing?
+    assert has_element?(view, "#paper-edit-toggle[data-editing=true]")
+    assert stored_blocks(slug) == before
+  end
+
+  test "reconnect mode hints cannot grant edit authority or target another Paper", %{
+    conn: conn,
+    slug: slug
+  } do
+    for {session, key} <- [
+          {conn, "#{@dataset}:paper:#{slug}"},
+          {writer_conn(conn), "#{@dataset}:paper:other"}
+        ] do
+      {:ok, view, _html} =
+        live(put_connect_params(session, %{"paper_editing_key" => key}), "/papers/#{slug}")
+
+      refute assigns_of(view).editing?
+    end
+  end
+
   describe "criterion 2 — anonymous: no editor markup, every edit event refused" do
     test "the anonymous render carries neither the toggle nor the editor", %{
       conn: conn,

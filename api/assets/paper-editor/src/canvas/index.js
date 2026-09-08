@@ -64,6 +64,7 @@ import {
 } from "./run-convert.js";
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
+import { restingScaffolds } from "./resting-scaffolds.js";
 // S3: the divider as a canvas ATOM node — the first non-prose block to live
 // INSIDE the canvas document (so a prose run can CONTAIN dividers). A leaf with
 // no edit UI; PM's atom selection + Backspace-delete come free. See ./divider-node.js.
@@ -708,6 +709,7 @@ class BpPaperCanvas extends HTMLElement {
         // THE make-or-break: declares bpId/bpType on the block nodes so the run's
         // ids survive the setContent->getJSON round-trip runToOps depends on.
         BpAttrs,
+        restingScaffolds(this),
         // S3: the divider atom node — a non-prose leaf living INSIDE the canvas
         // document. Registers the `divider` node type (toDOM <hr>, bpId/bpType
         // attrs) so runToTiptap's { type:"divider" } node mounts as an atom and

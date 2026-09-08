@@ -869,9 +869,10 @@ html[data-theme="dark"] .bp-paper-body {
    claim about a position belongs. The block stays in the document, keeps
    round-tripping through every engine, and stops painting a second boundary.
 
-   VIEW ONLY, on the precedent of `p:empty` above (Reader-Owned Spacing
-   Doctrine): in the editor an invisible block is one the author cannot select or
-   delete, so `.bp-paper-editor-body` deliberately keeps drawing it.
+   Reader-only selectors, on the precedent of `p:empty` above. The editor's
+   resting-scaffolds extension mirrors suppression with a labelled gutter
+   control: selection restores the native divider for editing/deletion. The
+   document and its undo history retain the original block throughout.
 
    TWO LEGS, the same two the section head has: the flat body (legacy reader and
    the render rig) and the block-backed reader, where every top-level block is
@@ -1508,6 +1509,8 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    mirrors (the .bp-cols trio precedent). */
 .bp-paper-surface .bp-section__grid { display: grid; grid-template-columns: repeat(var(--bp-tracks, 2), minmax(0, 1fr)); gap: var(--bp-grid-gap, 1.6rem); }
 @media (max-width: 720px) { .bp-paper-surface .bp-section__grid { grid-template-columns: 1fr; } }
+/* Authored desktop spans must not create implicit tracks in the one-column reader. */
+@media (max-width: 720px) { .bp-paper-surface .bp-section__cell { grid-column: 1 / -1 !important; } }
 .bp-paper-surface .bp-section__cell { min-width: 0; }
 .bp-paper-surface .bp-section__cell > :first-child { margin-top: 0; }
 .bp-paper-surface .bp-section--wide { margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
