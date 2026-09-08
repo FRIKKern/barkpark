@@ -223,6 +223,7 @@ CONSOLE_PATHS='cloud/priv/static/**
 internal/taskboard/testdata/styleguide_lifecycle.txt
 internal/pdrender/testdata/styleguide_tokens.txt
 internal/agent/report.go
+internal/cli/cloud_status_cmd.go
 .github/workflows/cloud.yml
 design/emit-fence.test.mjs
 cloud/priv/audit-actions.json
