@@ -279,6 +279,103 @@ defmodule BarkparkWeb.Plugs.RateLimitBrowserShadowTest do
       refute Enum.any?(keys, &String.contains?(&1, ":browser:"))
     end
 
+    # THE ARM THAT WAS MISSING, AND THE DEFECT IT CAUGHT.
+    #
+    # The first draft routed BOTH classes through one negotiating `refuse/2`,
+    # so a `:read`/`:write` caller sending `Accept: text/html` — every browser,
+    # and curl with browser headers — got `<!DOCTYPE html>` where main returns a
+    # documented JSON envelope. Criterion 2 asks whether the pipeline KEYS are
+    # untouched, and they were; response SHAPE is a different axis the row does
+    # not name, and no accept-header assertion in this file drove a DEFAULT-init
+    # call. This is that assertion.
+    test "Accept has NO influence on a read/write refusal — five accept values, one identical response" do
+      with_limits(read_per_minute: 1, write_per_minute: 1)
+
+      accepts = [
+        {"none", []},
+        {"html", [{"accept", "text/html"}]},
+        {"browser",
+         [{"accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}]},
+        {"json", [{"accept", "application/json"}]},
+        {"star", [{"accept", "*/*"}]}
+      ]
+
+      responses =
+        for {label, headers} <- accepts do
+          # A distinct DATASET per case, so each gets its own full bucket and the
+          # SECOND call is the refusal in every case. Not a distinct bearer: an
+          # unresolvable bearer falls back to the IP bucket by design, so five
+          # made-up tokens would all share ONE bucket and case two onward would
+          # be refused on its first call.
+          conn =
+            %{
+              build_conn(:get, "/v1/data/query/production/post", "")
+              | path_params: %{"dataset" => "accept-sweep-#{label}"}
+            }
+
+          conn = Enum.reduce(headers, conn, fn {k, v}, c -> put_req_header(c, k, v) end)
+
+          refute RateLimit.call(conn, RateLimit.init([])).halted
+          out = RateLimit.call(conn, RateLimit.init([]))
+
+          {label,
+           %{
+             status: out.status,
+             halted: out.halted,
+             retry_after: get_resp_header(out, "retry-after"),
+             content_type: get_resp_header(out, "content-type"),
+             body: out.resp_body
+           }}
+        end
+
+      # Non-vacuity: five cases actually ran and each really refused.
+      assert length(responses) == 5
+      assert Enum.all?(responses, fn {_, r} -> r.halted and r.status == 429 end)
+
+      # THE INVARIANT: every field is identical across all five. `Accept` cannot
+      # reach this code path at all, so it cannot change the bytes.
+      shapes = responses |> Enum.map(fn {_, r} -> r end) |> Enum.uniq()
+
+      assert length(shapes) == 1,
+             "Accept changed a read/write refusal — the content negotiation leaked out of the " <>
+               "browser class:\n#{inspect(responses, pretty: true)}"
+
+      # And it is the pre-browser JSON envelope, not HTML wearing a JSON name.
+      [shape] = shapes
+      assert shape.retry_after == ["60"]
+      assert hd(shape.content_type) =~ "application/json"
+      refute shape.body =~ "<!DOCTYPE"
+      assert Jason.decode!(shape.body)["error"]["code"] == "rate_limited"
+      assert Jason.decode!(shape.body)["error"]["details"]["retry_after"] == 60
+    end
+
+    # SECOND AXIS FOUND BY THE SWEEP for browser-scoped behaviour reaching the
+    # method classes through a shared callee. `limited/4` dispatches on the
+    # class and only its `:browser` clause logs and emits — this pins that,
+    # because a `would_429` counted for an API 429 would corrupt the very
+    # shadow data the promotion decision is made against.
+    test "a read/write refusal emits NO shadow telemetry and logs no would_429 line" do
+      with_limits(read_per_minute: 1, write_per_minute: 1)
+
+      conn =
+        %{
+          build_conn(:get, "/v1/data/query/production/post", "")
+          | path_params: %{"dataset" => "production"}
+        }
+        |> put_req_header("authorization", "Bearer no-shadow-for-api")
+
+      {log, events} =
+        count_would_429(fn ->
+          ExUnit.CaptureLog.capture_log(fn ->
+            refute RateLimit.call(conn, RateLimit.init([])).halted
+            assert RateLimit.call(conn, RateLimit.init([])).halted
+          end)
+        end)
+
+      assert events == []
+      refute log =~ "would_429"
+    end
+
     test "the browser bucket is disjoint from the read bucket for the same caller" do
       with_limits(read_per_minute: 1, write_per_minute: 1, browser_per_minute: 1)
 

@@ -136,40 +136,60 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     )
 
     if browser_enforce?(Application.get_env(:barkpark, :rate_limits, [])) do
-      refuse(conn, retry_after)
+      browser_refuse(conn, retry_after)
     else
       conn
     end
   end
 
-  # The 14 API pipelines: unchanged, still a hard refusal.
-  defp limited(conn, _class, _key, per_minute), do: refuse(conn, retry_after_seconds(per_minute))
+  # THE 14 API PIPELINES: UNCHANGED, AND THAT MEANS THE BYTES TOO.
+  #
+  # This clause reaches `json_refuse/2` DIRECTLY, never the negotiating
+  # `browser_refuse/2`. The first draft of this slice routed both classes
+  # through one negotiating helper, and the comment here said "unchanged, still
+  # a hard refusal" — true about WHETHER these pipelines refuse, false about
+  # WHAT they return: an API caller sending `Accept: text/html` (every browser,
+  # and curl with browser headers) started getting `<!DOCTYPE html>` where a
+  # documented JSON envelope had always been. Charter D4 scopes the content
+  # negotiation to the NEW `:browser` class — it is a property of that class,
+  # not of refusal in general. `rate_limit_browser_shadow_test.exs` pins that
+  # `Accept` has NO influence on a `:read`/`:write` refusal.
+  defp limited(conn, _class, _key, per_minute),
+    do: json_refuse(conn, retry_after_seconds(per_minute))
 
-  # Content-negotiated refusal. A browser asking for HTML gets HTML; everything
-  # else keeps the JSON envelope the 14 API pipelines have always returned, so
-  # this is additive to their behaviour and not a rewrite of it. Both carry
-  # `retry-after`. UNREACHABLE on a browser pipeline while `:browser_enforce`
-  # is false, which is its default.
-  defp refuse(conn, retry_after) do
-    conn = put_resp_header(conn, "retry-after", Integer.to_string(retry_after))
-
+  # Content-negotiated refusal — REACHABLE ONLY FROM THE `:browser` CLASS, and
+  # only once a human has set `:browser_enforce`. A browser asking for HTML gets
+  # HTML; anything else on that class falls through to the same JSON envelope
+  # the API classes use, so there is exactly one refusal body shape per
+  # (class, accept) pair and no third one hiding in here.
+  defp browser_refuse(conn, retry_after) do
     if wants_html?(conn) do
       # Phoenix.Controller.html/2, not send_resp/3: same bytes, and it keeps
       # this module out of Sobelow's XSS.SendResp scan, which flags any
       # non-literal body argument regardless of provenance (the only thing
       # interpolated here is an integer this module computed).
       conn
+      |> put_resp_header("retry-after", Integer.to_string(retry_after))
       |> put_status(429)
       |> Phoenix.Controller.html(html_429(retry_after))
       |> halt()
     else
-      env = Errors.to_envelope({:error, :rate_limited, %{retry_after: retry_after}}, conn)
-
-      conn
-      |> put_status(env.status)
-      |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
-      |> halt()
+      json_refuse(conn, retry_after)
     end
+  end
+
+  # THE PRE-BROWSER REFUSAL, MOVED AND NOT REWRITTEN. Byte-for-byte what
+  # `call/2` did on main for a `:read`/`:write` 429: the `retry-after` header,
+  # the `Errors.to_envelope` status, and the `%{error: …}` JSON body. It reads
+  # nothing off the request, so no `Accept` value can change its output.
+  defp json_refuse(conn, retry_after) do
+    env = Errors.to_envelope({:error, :rate_limited, %{retry_after: retry_after}}, conn)
+
+    conn
+    |> put_resp_header("retry-after", Integer.to_string(retry_after))
+    |> put_status(env.status)
+    |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
+    |> halt()
   end
 
   defp wants_html?(conn) do
