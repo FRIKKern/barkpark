@@ -67,10 +67,15 @@ func missLeftMetTrueNote(req stampRequest, stored taskboard.CriterionItem) strin
 func stampOutcomeHelpLines() []string {
 	return []string{
 		"outcomes (what each one does to `met`):",
-		"  --met        met → TRUE. Requires --evidence; the read-back refuses a met with no evidence stored.",
+		"  --met        met → TRUE. This CLI's read-back refuses to confirm a met the store holds with no",
+		"               evidence — that is a client-side check, not a promise about what the server enforces.",
 		"  --miss       met is UNCHANGED. Records an honest attempt with --note. A miss NEVER lowers a met —",
 		"               if the criterion is already met and you want it lowered, --miss will not do it.",
 		"  " + stampWithdrawFlag + "  met → FALSE. THIS is the verb that lowers a wrong met: the evidence is kept as the",
 		"               superseded proof and a signed withdrawal record (--note) says who lowered it and why.",
+		"",
+		"These are the outcomes of `bp task stamp`. They are NOT an inventory of every way `met` can",
+		"move — a close is a different door with its own rules. Do not read this block as a guarantee",
+		"that no other path can raise or lower a criterion.",
 	}
 }
