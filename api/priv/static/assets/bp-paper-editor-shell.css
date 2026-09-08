@@ -1718,6 +1718,10 @@
 .bp-paper-figure-image-controls[open] { opacity: 1; pointer-events: auto; }
 .bp-paper-figure-image[data-image-src=""] > .bp-paper-figure-image-controls {
   opacity: 1; pointer-events: auto;
+  position: relative; min-height: 44px; margin-left: auto;
+}
+.bp-paper-figure-image[data-image-src=""] > .bp-paper-figure-image-controls > summary {
+  min-height: 44px; box-sizing: border-box;
 }
 .bp-paper-figure-image-controls > summary {
   cursor: pointer; width: max-content; max-width: 100%; margin-left: auto;
