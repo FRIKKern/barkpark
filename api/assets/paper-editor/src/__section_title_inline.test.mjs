@@ -27,6 +27,8 @@ assert.match(shell, /\.bp-paper-section-title-editor:has\(\.bp-paper-section-tit
 assert.match(shell, /textarea\.bp-paper-inline-text\.bp-paper-section-title-input\s*\{[^}]*width:\s*100%[^}]*font:\s*inherit[^}]*resize:\s*none[^}]*overflow:\s*hidden[^}]*overflow-wrap:\s*anywhere/s,
   "the autosized title wraps at the reader width without native textarea chrome");
 
+const sectionId = "section: foo/[title]#?";
+const titleDomId = `section-title-${Buffer.from(sectionId).toString("base64url")}`;
 const dom = new JSDOM(`<!doctype html><body>
   <main data-paper-doc-key="production:paper:section-title" data-paper-rev="7">
     <button id="view" data-editing="true">View</button>
@@ -35,15 +37,15 @@ const dom = new JSDOM(`<!doctype html><body>
         <div class="bp-paper-section-title-editor bp-paper-section-title-editor--stack"
              data-paper-section-title-editor style="font-weight:bold">
           <button type="button" class="bp-paper-section-title-paint"
-                  data-paper-section-title-paint aria-controls="section-title-section"
+                  data-paper-section-title-paint aria-controls="${titleDomId}"
                   aria-label="Edit section title: A long Section title keeps every line in the same place while I edit the words directly beside the nested content">A long Section title keeps every line in the same place while I edit the words directly beside the nested content</button>
           <form id="section-form-section" name="section-config"
                 class="bp-paper-edit-form bp-paper-section-title-form"
                 phx-submit="paper-edit-block" phx-change="paper-block-autosave"
                 phx-debounce="500" data-test-id="paper-section-config-editor">
-            <input type="hidden" name="block_id" value="section">
-            <label class="sr-only" for="section-title-section">Section title</label>
-            <textarea id="section-title-section" name="title" rows="1"
+            <input type="hidden" name="block_id" value="${sectionId}">
+            <label class="sr-only" for="${titleDomId}">Section title</label>
+            <textarea id="${titleDomId}" name="title" rows="1"
                       class="bp-paper-inline-text bp-paper-section-title-input"
                       aria-label="Section title" placeholder="Section title"
                       phx-hook="BarkparkPaperAutoSize"
@@ -55,7 +57,7 @@ const dom = new JSDOM(`<!doctype html><body>
       <details id="section-controls-section">
         <summary>Configure section</summary>
         <button type="button" data-paper-section-title-panel-trigger
-                aria-controls="section-title-section">Edit title</button>
+                aria-controls="${titleDomId}">Edit title</button>
       </details>
     </div>
     <footer><span role="status" data-test-id="bp-paper-footer-save"></span></footer>
@@ -77,7 +79,9 @@ vm.runInContext(hooksSource, vm.createContext({
   customElements: { whenDefined: () => Promise.resolve() },
 }));
 
-const input = window.document.getElementById("section-title-section");
+const input = window.document.getElementById(titleDomId);
+assert.equal(window.document.querySelector(`#${titleDomId}`), input,
+  "the actual JS.focus CSS selector resolves even when the authored ID has punctuation and spaces");
 const form = window.document.getElementById("section-form-section");
 const paint = window.document.querySelector("[data-paper-section-title-paint]");
 const fallback = window.document.querySelector("[data-paper-section-title-panel-trigger]");
@@ -173,7 +177,8 @@ await tick();
 assert.equal(calls.length, 1);
 assert.equal(calls[0].event, "paper-block-autosave");
 assert.equal(calls[0].payload.if_rev, 8);
-assert.equal(calls[0].payload.block_id, "section");
+assert.equal(calls[0].payload.block_id, sectionId,
+  "focus-safe DOM identity never rewrites the authored mutation target");
 assert.equal(calls[0].payload.title, "  Revised title  ",
   "the scalar bridge preserves authored leading and trailing whitespace exactly");
 assert.equal(calls[0].payload.text, undefined,
