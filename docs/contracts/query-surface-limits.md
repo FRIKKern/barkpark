@@ -151,6 +151,39 @@ scoping mechanism, and roughly fifteen sibling route families carry it. Mounting
 the graph routes alone would leave the siblings broken and split the fix.
 Repairing it is owned by the flat-route census, not by this document.
 
+## 8. One response envelope: `result`
+
+Every **GET under `/v1/data`** returns its payload under a top-level `result`.
+The envelope metadata — `syncTags`, `ms`, `etag`, `schemaHash` — rides *beside*
+`result`, never inside it. Non-GET routes are writes and answer with the
+`{ok: true, ...}` receipt instead, so the verb decides the shape. Per-key
+meaning: `docs/api-v1.md` §3. Decision record: `docs/decisions/0001-sdk-envelope.md`.
+
+That ADR says Phoenix wraps *every* response. It does not, and the exceptions
+are load-bearing for a client:
+
+| Route | Emits | Why not `result` |
+|---|---|---|
+| `GET /v1/data/counts/:dataset` | `{ok, dataset, perspective, counts}` | a read shaped as a write receipt |
+| `GET /v1/data/history/:ds/:type/:id` | `{revisions, count}` | predates the envelope |
+| `GET /v1/data/revision/:ds/:id` | `{revision}` | predates the envelope |
+| `GET /v1/data/analytics/:dataset` | `{dataset, total_documents, types, recent_activity}` | flat stats shape |
+| `GET /v1/data/listen/:dataset` | SSE stream | not a JSON body |
+| `GET /v1/data/export/:dataset` | NDJSON stream | not a JSON body |
+
+**`?filterresponse=false` — or `Accept: ...+filterresponse=false` — strips the
+envelope** and returns the inner payload flat: `{documents, count, ...}` for a
+list, the bare document for a single read. This, not endpoint drift, is why one
+route can answer in two shapes; it is a per-request opt-out. Producer:
+`BarkparkWeb.Plugs.AcceptBarkparkVendor`.
+
+Enforced by `api/test/barkpark_web/response_envelope_convention_test.exs`. It
+derives the route set from `Router.__routes__/0`, so a new GET under `/v1/data`
+is judged the moment it compiles, and reds *naming the endpoint* when one
+invents a shape or builds its body through a helper the checker cannot read. The
+table above IS that test's grandfather list: adding a row is the review moment,
+and a row naming a route that no longer exists reds.
+
 ## Related
 
 - Envelope keys and the draft/published model: `docs/api-v1.md` §3.
