@@ -794,6 +794,51 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
     # The canvas hook routes each run to its <bp-paper-canvas> and calls
     # applyServerBlocks — an own-echo resets the baseline (no caret move), an external
     # edit re-renders.
+    test "nested table insertion retains the Section child run without a second editor",
+         %{conn: conn} do
+      intro = %{"id" => "nested-intro", "type" => "paragraph", "text" => "Keep this prose"}
+      target = %{"id" => "nested-target", "type" => "paragraph", "text" => "/table"}
+
+      section = %{
+        "id" => "nested-section",
+        "type" => "section",
+        "title" => "Nested ownership",
+        "blocks" => [intro, target]
+      }
+
+      assert {:ok, _} =
+               Content.apply_paper_block_ops(
+                 @slug,
+                 [%{"op" => "append-block", "block" => section}],
+                 @dataset
+               )
+
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      open_editor(view)
+      request_id = Ecto.UUID.generate()
+      table = %{"id" => "nested-table", "type" => "table", "rows" => [["Draft"]]}
+
+      render_hook(view, "paper-ops", %{
+        "request_id" => request_id,
+        "if_rev" => paper_rev(view),
+        "container_kind" => "section",
+        "container_id" => "nested-section",
+        "container_run_ids" => ["nested-intro", "nested-target"],
+        "ops" => [%{"op" => "replace-block", "id" => "nested-target", "block" => table}]
+      })
+
+      assert_push_event(view, "bp:canvas-update", %{request_id: ^request_id, runs: runs})
+
+      run_id =
+        BarkparkWeb.Studio.StudioLive.PaperCanvas.section_run_slug(@slug, "nested-section") <>
+          "-run-0"
+
+      assert %{blocks: [^intro, %{"id" => "nested-table"}]} =
+               Enum.find(runs, &(&1.run_id == run_id))
+
+      refute has_element?(view, ~s(bp-paper-editor[data-editor-mode="table"]))
+    end
+
     test "inserting a section in the final run retains its original wrapper",
          %{conn: conn} do
       assert {:ok, _} =
@@ -889,13 +934,16 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       socket = :sys.get_state(view.pid).socket
       paper = socket.assigns.paper_doc
       rebuilt = BarkparkWeb.Studio.StudioLive.Shared.Paper.setup_paper_view(socket, paper)
-      assert rebuilt.assigns.paper_canvas_retained.ids == MapSet.new(["inserted-table"])
+
+      assert rebuilt.assigns.paper_canvas_retained.owners == %{
+               document: MapSet.new(["inserted-table"])
+             }
 
       without_table =
         put_in(paper.content["blocks"], Enum.reject(blocks, &(&1["id"] == "inserted-table")))
 
       pruned = BarkparkWeb.Studio.StudioLive.Shared.Paper.setup_paper_view(rebuilt, without_table)
-      assert pruned.assigns.paper_canvas_retained.ids == MapSet.new()
+      assert pruned.assigns.paper_canvas_retained.owners == %{}
       cleared = BarkparkWeb.Studio.StudioLive.Shared.Paper.clear_paper_view(rebuilt)
       assert cleared.assigns.paper_canvas_retained == nil
     end
