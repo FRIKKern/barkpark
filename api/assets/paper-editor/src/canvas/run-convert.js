@@ -1527,7 +1527,7 @@ function cardBlockEditable(block) {
       return cardBodyContentSupported(block, content);
     }) &&
     cardSlotSupported(slots, "media", (element) =>
-      (element.type == null || element.type === "image") &&
+      (!Object.hasOwn(element, "type") || element.type === "image") &&
       optionalCardText(element, "src") && optionalCardText(element, "alt")) &&
     cardSlotSupported(slots, "action", (element) =>
       element.type === "action" && optionalCardText(element, "label") &&

@@ -281,7 +281,7 @@ try {
   for (const [name, media] of [
     ["absent-type", { src: "/before.png", alt: "Keep alt", width: 320,
       height: 180, metadata: { keep: true } }],
-    ["null-type", { type: null, src: "/before.png", alt: "Keep alt",
+    ["image-type", { type: "image", src: "/before.png", alt: "Keep alt",
       width: 320, height: 180, metadata: { keep: true } }],
   ]) {
     await exercise({ id: `card-media-${name}`, type: "card", slots: {
@@ -452,12 +452,12 @@ try {
     } finally { readerCanvas.remove(); }
   }
 
-  for (const [name, media, admitted] of [
-    ["type-absent", { src: "/image.png" }, true],
-    ["image-type", { type: "image", src: "/image.png" }, true],
-    ["null-type", { type: null, src: "/image.png" }, false],
-    ["empty-src", { type: "image", src: "" }, false],
-    ["missing", null, false],
+  for (const [name, media, cardAdmitted, direct] of [
+    ["type-absent", { src: "/image.png" }, true, true],
+    ["image-type", { type: "image", src: "/image.png" }, true, true],
+    ["null-type", { type: null, src: "/image.png" }, false, false],
+    ["empty-src", { type: "image", src: "" }, true, false],
+    ["missing", null, true, false],
   ]) {
     const slots = { body: [{ type: "paragraph", content: [] }] };
     if (media) slots.media = [media];
@@ -469,11 +469,11 @@ try {
       const picker = canvas.querySelector("bp-media-picker");
       const paint = canvas.querySelector('[data-test-id="paper-card-media-control"]');
       const controls = canvas.querySelector(".bp-canvas-card__controls");
-      assert.equal(canvas.querySelectorAll("bp-media-picker").length, 1,
-        `${name} keeps exactly one picker`);
-      assert.equal(!paint.hidden, admitted, `${name} direct admission`);
-      assert.equal(controls.contains(picker), !admitted,
-        `${name} uses exactly ${admitted ? "the image" : "Configure"} picker location`);
+      assert.equal(canvas.querySelectorAll("bp-media-picker").length, cardAdmitted ? 1 : 0,
+        `${name} exposes a picker only for an admitted Card`);
+      assert.equal(paint ? !paint.hidden : false, direct, `${name} direct admission`);
+      assert.equal(controls?.contains(picker) || false, cardAdmitted && !direct,
+        `${name} uses ${direct ? "the image" : "Configure or opaque fallback"}`);
       cases++;
     } finally { canvas.remove(); }
   }

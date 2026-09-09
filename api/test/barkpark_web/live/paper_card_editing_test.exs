@@ -303,6 +303,93 @@ defmodule BarkparkWeb.PaperCardEditingTest do
       {:ok, _, _} = live(conn, path)
       assert stored(slug).content == original
     end
+
+    test "#{host}: explicit-null Card media stays contextual at root and in Section and Columns",
+         %{conn: conn} do
+      host = unquote(host)
+      {slug, original} = create_null_media_cards()
+      {view, path} = mount_editor(conn, host, slug)
+      ids = ["null-root", "null-section", "null-column"]
+      html = render(view)
+      tree = LazyHTML.from_fragment(html)
+
+      assert Enum.sort(
+               LazyHTML.attribute(
+                 LazyHTML.query(
+                   tree,
+                   "[data-test-id='paper-card-editor'] input[name='block_id']"
+                 ),
+                 "value"
+               )
+             ) == Enum.sort(ids)
+
+      assert Enum.count(LazyHTML.query(tree, "[data-test-id='paper-card-contextual-editor']")) ==
+               3
+
+      assert Enum.count(LazyHTML.query(tree, "[data-test-id='paper-card-body-editor']")) == 3
+      assert Enum.count(LazyHTML.query(tree, "input[name='card-title']")) == 3
+      assert Enum.count(LazyHTML.query(tree, "input[name='card-media-src']")) == 3
+
+      assert LazyHTML.attribute(
+               LazyHTML.query(tree, "input[name='card-media-src']"),
+               "value"
+             ) == List.duplicate("/media/null-type.png", 3)
+
+      refute has_element?(view, "img[src='/media/null-type.png']")
+      refute html =~ "data-bp-opaque"
+
+      canvas_payloads =
+        tree
+        |> LazyHTML.query("[data-test-id='paper-canvas-run'][data-canvas-blocks]")
+        |> LazyHTML.attribute("data-canvas-blocks")
+
+      assert canvas_payloads != []
+      assert Enum.any?(canvas_payloads, &(&1 =~ "canvas-neighbor"))
+
+      for id <- ids, payload <- canvas_payloads do
+        refute payload =~ id
+      end
+
+      for {id, index} <- Enum.with_index(ids, 1) do
+        before_card = find_block!(stored(slug).content["blocks"], id)
+        before_media = get_in(before_card, ["slots", "media", Access.at(0)])
+        assert Map.fetch!(before_media, "type") === nil
+        request = Ecto.UUID.generate()
+
+        render_hook(view, "paper-block-autosave", %{
+          "block_id" => id,
+          "card-title" => "Edited null Card #{index}",
+          "request_id" => request,
+          "if_rev" => socket_of(view).assigns.paper_rev
+        })
+
+        assert_reply(view, %{saved: true, request_id: ^request})
+        edited = find_block!(stored(slug).content["blocks"], id)
+        assert Map.drop(edited, ["slots"]) === Map.drop(before_card, ["slots"])
+        assert Map.drop(edited["slots"], ["title"]) === Map.drop(before_card["slots"], ["title"])
+        assert get_in(edited, ["slots", "media", Access.at(0)]) === before_media
+
+        assert edited["slots"]["title"] === [
+                 Map.put(hd(before_card["slots"]["title"]), "text", "Edited null Card #{index}")
+               ]
+      end
+
+      saved = stored(slug).content
+      {:ok, reloaded, _} = live(conn, path)
+      toggle_public_editor(reloaded, host)
+
+      for {id, index} <- Enum.with_index(ids, 1) do
+        assert has_element?(
+                 reloaded,
+                 "#card-form-#{id} input[name='card-title'][value='Edited null Card #{index}']"
+               )
+
+        assert get_in(find_block!(saved["blocks"], id), ["slots", "media", Access.at(0)]) ===
+                 get_in(find_block!(original["blocks"], id), ["slots", "media", Access.at(0)])
+      end
+
+      assert stored(slug).content === saved
+    end
   end
 
   defp create_card_grid do
@@ -380,6 +467,115 @@ defmodule BarkparkWeb.PaperCardEditingTest do
     original = Map.put(paper.content, "blocks", blocks)
     paper |> Ecto.Changeset.change(content: original) |> Repo.update!()
     {slug, original}
+  end
+
+  defp create_null_media_cards do
+    slug = "card-null-media-#{System.unique_integer([:positive])}"
+
+    card = fn id ->
+      %{
+        "id" => id,
+        "type" => "card",
+        "tone" => "ok",
+        "unknown" => %{"card" => id},
+        "slots" => %{
+          "title" => [
+            %{
+              "type" => "heading",
+              "level" => 3,
+              "text" => "Original #{id}",
+              "unknown" => ["title"]
+            }
+          ],
+          "body" => [
+            %{
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Editable body #{id}"}],
+              "unknown" => ["body"]
+            }
+          ],
+          "media" => [
+            %{
+              "type" => nil,
+              "src" => "/media/null-type.png",
+              "alt" => "Explicit null media",
+              "width" => 320,
+              "height" => 180,
+              "unknown" => %{"media" => [id, nil, 1, 1.0]}
+            }
+          ],
+          "action" => [
+            %{
+              "type" => "action",
+              "label" => "Read",
+              "href" => "/papers/original",
+              "unknown" => ["action"]
+            }
+          ],
+          "custom" => [%{"opaque" => [1, 2, 3]}]
+        }
+      }
+    end
+
+    blocks = [
+      card.("null-root"),
+      %{
+        "id" => "canvas-neighbor",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Canvas ownership control"}]
+      },
+      %{
+        "id" => "null-section-owner",
+        "type" => "section",
+        "variant" => "stack",
+        "blocks" => [card.("null-section")]
+      },
+      %{
+        "id" => "null-columns-owner",
+        "type" => "columns",
+        "columns" => [[card.("null-column")], []],
+        "unknown" => %{"columns" => true}
+      }
+    ]
+
+    {:ok, paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          dataset: @dataset,
+          title: "Explicit null Card media",
+          blocks: blocks
+        })
+      )
+
+    original = Map.put(paper.content, "blocks", blocks)
+    paper |> Ecto.Changeset.change(content: original) |> Repo.update!()
+    {slug, original}
+  end
+
+  defp find_block!(blocks, id) do
+    Enum.find_value(blocks, fn
+      %{"id" => ^id} = block ->
+        block
+
+      %{"type" => "section", "blocks" => children} when is_list(children) ->
+        find_block(children, id)
+
+      %{"type" => "columns", "columns" => columns} when is_list(columns) ->
+        columns
+        |> List.flatten()
+        |> find_block(id)
+
+      _block ->
+        nil
+    end) || flunk("missing block #{inspect(id)}")
+  end
+
+  defp find_block(blocks, id) do
+    Enum.find_value(blocks, fn
+      %{"id" => ^id} = block -> block
+      _block -> nil
+    end)
   end
 
   defp mount_editor(conn, host, slug) do
