@@ -14055,8 +14055,40 @@ defmodule BarkparkCloud.Web.Router do
       slug: site && site.slug,
       domains: (site && site.domains) || [],
       preview_slug: d.preview_slug,
-      preview_host: d.preview_host
+      preview_host: d.preview_host,
+      # cf-agent-sites-tls-channel: the CP→box TLS channel. The box derives its
+      # Caddy TLS mode from serving_mode (internal/runtime/runtime.go
+      # tlsModeForServing: cf_proxied → `tls internal`, everything else →
+      # on_demand), and until this key rode the claim the field was zero-valued
+      # on every real box — so a Cloudflare-proxied origin fell back to
+      # on-demand ACME, whose challenge cannot complete through the proxy, and
+      # served a 526.
+      #
+      # ONLY serving_mode travels. The Site row also carries `tls_mode`
+      # ("on_demand" | "cf_internal" | "cf_origin_ca"), but that is a SECOND
+      # vocabulary the box does not speak (caddyfile.TLSMode* is "on_demand" |
+      # "internal" | "origin_ca"), and cf-box-render-internal-tls already made
+      # the box derive its TLS mode from serving_mode. Shipping tls_mode too
+      # would put two sources of the same truth on one wire.
+      serving_mode: agent_serving_mode(site)
     })
+  end
+
+  # The serving mode the agent claim carries, read STRAIGHT FROM THE RECORD —
+  # the same rule `BarkparkCloud.DomainStatus` applies. `Map.get/2` (not struct
+  # access) so a row whose schema predates the `serving_mode` column degrades to
+  # "direct" (fail-closed to the pure-standalone on-demand path) instead of
+  # putting a JSON null on the wire; a nil site degrades the same way.
+  # Public (`@doc false`) for ONE reason: the absent-column degrade cannot be
+  # reached through the HTTP wire — a row read out of Postgres always HAS the
+  # column — so the fail-closed rule is asserted against the function itself.
+  @doc false
+  def agent_serving_mode(site) do
+    case Map.get(site || %{}, :serving_mode) do
+      "cf_proxied" -> "cf_proxied"
+      :cf_proxied -> "cf_proxied"
+      _ -> "direct"
+    end
   end
 
   # Scope check: does deployment_id's site belong to barkpark? Used by the

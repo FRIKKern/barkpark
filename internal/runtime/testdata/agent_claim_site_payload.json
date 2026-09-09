@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "THE MIRROR LOCK for cf-agent-sites-tls-channel. One file, two readers:",
+    "  * cloud/test/barkpark_cloud/web/router_agent_serving_mode_test.exs asserts that",
+    "    the control plane's agent claim/pending serializer (Router.deployment_with_site_json/1)",
+    "    emits EXACTLY the `cf_proxied` and `direct` objects below.",
+    "  * internal/runtime/runtime_serving_mode_wire_test.go serves these objects as the",
+    "    raw body of POST /v1/agent/deployments/claim and asserts the rendered Caddyfile.",
+    "Change the wire on one side and the OTHER side's suite reds, because both read this file.",
+    "`legacy_control_plane` is the pre-change shape: a control plane that sends NO",
+    "serving_mode key at all. It is here so the Go decoder's zero-value behaviour",
+    "(on_demand, byte-identical to pre-Cloudflare) stays pinned and can never be",
+    "'fixed' into a default of cf_proxied."
+  ],
+  "cf_proxied": {
+    "slug": "shop",
+    "domains": ["shop.example.com"],
+    "preview_slug": null,
+    "preview_host": null,
+    "serving_mode": "cf_proxied"
+  },
+  "direct": {
+    "slug": "shop",
+    "domains": ["shop.example.com"],
+    "preview_slug": null,
+    "preview_host": null,
+    "serving_mode": "direct"
+  },
+  "legacy_control_plane": {
+    "slug": "shop",
+    "domains": ["shop.example.com"],
+    "preview_slug": null,
+    "preview_host": null
+  }
+}
