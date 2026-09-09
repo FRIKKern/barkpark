@@ -259,12 +259,35 @@ try {
     "the coordinator's dirty source is disconnected when its admitted identity changes");
   assert.equal(authoritativeTitle.value, "Replacement authoritative title");
   assert.notEqual(authoritativeTitle, oldIdentityTitle);
-  const recovery = win.document.querySelector("[data-bp-paper-conflict][role=alert]");
+  let recovery = win.document.querySelector("[data-bp-paper-conflict][role=alert]");
   assert.ok(recovery,
     "a never-sent draft disconnected by an identity replacement enters visible recovery");
   const retainedText = recovery.querySelector("textarea[data-reference-draft-text][readonly]");
   assert.equal(retainedText?.value, "Unsaved draft for the old identity",
     "recovery exposes the exact old field text without assigning it to the replacement");
+  const responsiveReplacement = editorRoot.cloneNode(false);
+  responsiveReplacement.innerHTML = `${fieldForm(
+    "title", "Replacement authoritative title", changedIdentity,
+  )}${fieldForm(
+    "description", "Replacement authoritative description", changedIdentity,
+  )}${editorRoot.querySelector("footer").outerHTML}`;
+  morph(editorRoot, responsiveReplacement, {
+    getNodeKey: (node) => node?.id,
+    onBeforeElUpdated: (fromEl, toEl) => {
+      win.BarkparkPaperEditorBeforeElUpdated(fromEl, toEl);
+      return true;
+    },
+  });
+  win.BarkparkPaperEditorHooks.BarkparkPaperSortable.updated.call({
+    _exitCoordinator: hook._bpPaperExitCoordinator,
+  });
+  await tick();
+  recovery = win.document.querySelector("[data-bp-paper-reference-draft]");
+  assert.ok(recovery,
+    "a matching root-only responsive morph restores the retained recovery banner");
+  assert.equal(recovery.querySelector("[data-reference-draft-text]").value,
+    "Unsaved draft for the old identity",
+    "responsive repaint keeps the first retained draft exact without recapturing it");
   const keep = recovery.querySelector('[data-action="keep"]');
   assert.equal(keep?.disabled, true,
     "an old identity draft cannot be kept onto the replacement reference");
@@ -313,6 +336,7 @@ try {
   assert.equal(secondRecovery.querySelector("[data-reference-draft-text]").value,
     "Second retained description draft");
   assert.equal(oldIdentityDescription.isConnected, false);
+  editorRoot.dataset.paperRev = "12";
 
   const replacementDraft = win.document.getElementById(
     referenceFieldId("title", changedIdentity),
@@ -328,12 +352,26 @@ try {
     "another live draft retains its own replacement identity");
   assert.equal(replacementCall.payload["paper-link-ref-value"], replacementDraft.value);
   await acknowledge(replacementCall, 13);
-  assert.equal(secondRecovery.querySelector("[data-reference-draft-text]").value,
+  const retainedAfterAck = win.document.querySelector("[data-bp-paper-reference-draft]");
+  assert.equal(retainedAfterAck.querySelector("[data-reference-draft-text]").value,
     "Second retained description draft",
-  "acknowledging another source does not discard the retained old draft");
-  secondRecovery.querySelector("button[data-reference-draft-discard]").click();
+    "acknowledging another source does not discard the retained old draft");
+  hook._bpPaperExitCoordinator._setConflict(
+    { current_rev: 14 }, oldIdentityDescription.form,
+    "production:paper:reference-copy",
+  );
+  const cleanConflict = win.document.querySelector(
+    "[data-bp-paper-conflict]:not([data-bp-paper-reference-draft])",
+  );
+  const cleanDiscard = cleanConflict.querySelector("[data-reference-draft-discard]");
+  assert.ok(cleanDiscard,
+    "an exact never-sent generic conflict exposes source-scoped discard");
+  cleanDiscard.click();
   await tick();
-  assert.equal(win.document.querySelector("[data-bp-paper-reference-draft]"), null);
+  assert.equal(win.document.querySelector("[data-bp-paper-conflict]"), null,
+    "clean source discard reconciles and clears the source-less conflict");
+  assert.equal(calls.length, callsBeforeIdentityChange + 1,
+    "clean generic discard sends no old-identity payload");
   assert.equal(replacementDraft.value, "Replacement identity remains independently editable");
   hook.el.click();
   await tick(); await tick();
@@ -346,7 +384,10 @@ try {
 }
 console.log("related-card copy serializes same-field and sibling-field saves without broad source payloads");
 
-async function attemptedDetachedRecovery(reply, { newerDraft = false } = {}) {
+async function attemptedDetachedRecovery(
+  reply,
+  { newerDraft = false, earlyConflict = false } = {},
+) {
   const attemptedDom = new JSDOM(`<!doctype html><body>
     <main data-paper-doc-key="production:paper:attempted-recovery" data-paper-rev="30">
       <button id="attempted-view" data-editing="true">View</button>
@@ -385,6 +426,7 @@ async function attemptedDetachedRecovery(reply, { newerDraft = false } = {}) {
   }));
   const attemptedCalls = [];
   const attemptedReplies = [];
+  const attemptedToggles = [];
   const attemptedHook = {
     ...attemptedWindow.BarkparkPaperEditorHooks.BarkparkPaperEditToggle,
     el: attemptedWindow.document.getElementById("attempted-view"),
@@ -394,7 +436,10 @@ async function attemptedDetachedRecovery(reply, { newerDraft = false } = {}) {
         { status: "fulfilled", value: { reply: value } },
       ])));
     },
-    pushEvent() { return Promise.resolve({}); },
+    pushEvent(event, payload) {
+      attemptedToggles.push({ event, payload });
+      return Promise.resolve({});
+    },
   };
   attemptedHook.mounted();
   try {
@@ -425,14 +470,28 @@ async function attemptedDetachedRecovery(reply, { newerDraft = false } = {}) {
         return true;
       },
     });
+    if (earlyConflict) {
+      attemptedHook._bpPaperExitCoordinator._setConflict(
+        { current_rev: 31 }, oldField.form, "production:paper:attempted-recovery",
+      );
+    }
     await tick();
-    let recovery = attemptedWindow.document.querySelector("[data-bp-paper-reference-draft]");
+    let recovery = earlyConflict
+      ? attemptedWindow.document.querySelector(
+        "[data-bp-paper-conflict]:not([data-bp-paper-reference-draft])",
+      )
+      : attemptedWindow.document.querySelector("[data-bp-paper-reference-draft]");
     assert.ok(recovery, "an attempted detached draft remains visible while its result is unknown");
     assert.equal(recovery.querySelector("[data-reference-draft-text]").value,
       newerDraft ? `${unsafeText}newer` : unsafeText,
       "HTML-like retained text is exposed literally through textarea.value");
-    assert.equal(recovery.querySelector("[data-reference-draft-discard]").disabled, true,
-      "an in-flight request cannot be discarded as local-only");
+    if (earlyConflict) {
+      assert.equal(recovery.querySelector('[data-action="latest"]').disabled, true,
+        "a conflict rendered before capture settles is refreshed into detached recovery");
+    } else {
+      assert.equal(recovery.querySelector("[data-reference-draft-discard]").disabled, true,
+        "an in-flight request cannot be discarded as local-only");
+    }
     recovery.querySelector("[data-reference-draft-download]").click();
     await tick();
     const exported = await downloaded.text();
@@ -451,7 +510,11 @@ async function attemptedDetachedRecovery(reply, { newerDraft = false } = {}) {
       } : {}),
     });
     await tick(); await tick();
-    recovery = attemptedWindow.document.querySelector("[data-bp-paper-reference-draft]");
+    recovery = earlyConflict
+      ? attemptedWindow.document.querySelector(
+        "[data-bp-paper-conflict]:not([data-bp-paper-reference-draft])",
+      )
+      : attemptedWindow.document.querySelector("[data-bp-paper-reference-draft]");
     if (reply?.saved === true) {
       if (newerDraft) {
         assert.ok(recovery,
@@ -474,11 +537,18 @@ async function attemptedDetachedRecovery(reply, { newerDraft = false } = {}) {
       ).disabled, false, "late success records ordinary contextual history");
     } else {
       assert.ok(recovery, "a transport-uncertain result remains readable and export-only");
-      assert.equal(recovery.querySelector("[data-reference-draft-discard]").disabled, true);
-      attemptedHook._bpPaperExitCoordinator.observeRevision({
-        rev: 31, source: oldField,
-      });
-      await tick();
+      attemptedHook.el.click();
+      await tick(); await tick();
+      assert.equal(attemptedCalls.length, 1,
+        "View drain never retries a transport-uncertain detached request");
+      assert.equal(attemptedToggles.length, 0,
+        "View remains blocked while the detached receipt is unresolved");
+      if (!earlyConflict) {
+        attemptedHook._bpPaperExitCoordinator.observeRevision({
+          rev: 31, source: oldField,
+        });
+        await tick();
+      }
       const conflictBanner = attemptedWindow.document.querySelector(
         "[data-bp-paper-conflict]:not([data-bp-paper-reference-draft])",
       );
@@ -539,6 +609,7 @@ await attemptedDetachedRecovery({
   history_step: { version: 1, ref: "filled-from-request", action: "undo" },
 }, { newerDraft: true });
 await attemptedDetachedRecovery(null);
+await attemptedDetachedRecovery(null, { earlyConflict: true });
 console.log("related-card attempted detached drafts remain receipt-owned and export-only");
 
 async function detachedRecoveryNegative({
@@ -641,6 +712,7 @@ console.log("related-card recovery ignores connected, malformed, and cross-scope
       <div id="paper-editor-recovery-fence" class="bp-paper-editor"
         data-paper-doc-key="production:paper:recovery-fence" data-paper-rev="50">
         ${fieldForm("title", "Fence original")}
+        ${fieldForm("description", "Fence original description")}
         <span data-test-id="bp-paper-footer-save" role="status"></span>
       </div>
     </main></body>`, { runScripts: "outside-only", url: "http://localhost/" });
@@ -673,9 +745,13 @@ console.log("related-card recovery ignores connected, malformed, and cross-scope
     const oldField = fenceWindow.document.getElementById(referenceFieldId("title"));
     oldField.value = "Never-sent fenced draft";
     oldField.dispatchEvent(new fenceWindow.InputEvent("input", { bubbles: true }));
+    const oldDescription = fenceWindow.document.getElementById(referenceFieldId("description"));
+    oldDescription.value = "Second never-sent fenced draft";
+    oldDescription.dispatchEvent(new fenceWindow.InputEvent("input", { bubbles: true }));
     const root = fenceWindow.document.querySelector(".bp-paper-editor");
     const replacement = root.cloneNode(false);
     replacement.innerHTML = `${fieldForm("title", "Replacement", changedIdentity)}
+      ${fieldForm("description", "Replacement description", changedIdentity)}
       <span data-test-id="bp-paper-footer-save" role="status"></span>`;
     fenceMorph(root, replacement, {
       getNodeKey: (node) => node?.id,
@@ -708,6 +784,36 @@ console.log("related-card recovery ignores connected, malformed, and cross-scope
       "Use latest cannot discard a chosen local-only detached draft");
     assert.equal(fenceCalls[0].payload.request_id, queuedRequestId,
       "the unrelated queued receipt identity remains unchanged");
+    const genericRecovery = fenceWindow.document.querySelector(
+      "[data-bp-paper-conflict]:not([data-bp-paper-reference-draft])",
+    );
+    const discard = genericRecovery.querySelector("[data-reference-draft-discard]");
+    assert.ok(discard, "the exact local-only source remains explicitly discardable");
+    discard.click();
+    await tick();
+    assert.equal(fenceCalls.length, 1,
+      "discard does not resend or replace unrelated in-flight authority");
+    assert.equal(fenceCalls[0].payload.request_id, queuedRequestId);
+    let reanchored = fenceWindow.document.querySelector(
+      "[data-bp-paper-conflict]:not([data-bp-paper-reference-draft])",
+    );
+    assert.equal(reanchored.querySelector("[data-reference-draft-label]").textContent,
+      "Retained description draft",
+      "reanchoring a shared banner updates the retained field label");
+    assert.equal(reanchored.querySelector("[data-reference-draft-text]").value,
+      "Second never-sent fenced draft");
+    reanchored.querySelector("[data-reference-draft-discard]").click();
+    await tick();
+    assert.equal(fenceCalls.length, 1);
+    assert.equal(fenceCalls[0].payload.request_id, queuedRequestId);
+    assert.equal(fenceWindow.document.querySelector("[data-bp-paper-reference-draft]"), null);
+    reanchored = fenceWindow.document.querySelector(
+      "[data-bp-paper-conflict]:not([data-bp-paper-reference-draft])",
+    );
+    assert.ok(reanchored, "the conflict remains anchored to the unrelated in-flight source");
+    assert.equal(reanchored.querySelector("[data-reference-draft-text]"), null,
+      "old local recovery text is removed after exact source discard");
+    assert.equal(replacementField.value, "Independent queued draft");
   } finally {
     fenceHook.destroyed?.();
     fenceDom.window.close();

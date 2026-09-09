@@ -1108,6 +1108,11 @@
         refreshHistoryControls() {
           renderHistoryControls();
         },
+        refreshPresentation() {
+          renderHistoryControls();
+          coordinator._renderConflict?.();
+          renderSaveStatus();
+        },
         register(member) {
           members.add(member);
           member._bpPaperExitCoordinator = coordinator;
@@ -1257,7 +1262,10 @@
               snapshot,
             });
           }
-          if (!candidates.length) return false;
+          const hasRetainedDraft = detachedReferenceDrafts.some(
+            (draft) => draft.documentKey === rootDocumentKey,
+          );
+          if (!candidates.length && !hasRetainedDraft) return false;
           Promise.resolve().then(() => {
             const currentRoot = document.getElementById(rootId);
             if (!currentRoot?.isConnected ||
@@ -1274,8 +1282,7 @@
               }
               detachedReferenceDrafts.push(candidate);
             }
-            coordinator._renderDetachedReferenceDraft();
-            renderSaveStatus();
+            coordinator.refreshPresentation();
           });
           return true;
         },
@@ -1302,7 +1309,10 @@
             const pending = [];
             const retainedStructural = mutationQueue[0];
             if (!mutationActive && mutationPaused && !conflict &&
-                retainedStructural?.source?.matches?.("form[phx-submit]")) {
+                retainedStructural?.source?.matches?.("form[phx-submit]") &&
+                !detachedReferenceDrafts.some(
+                  (draft) => draft.source === retainedStructural.source,
+                )) {
               pending.push(coordinator.retryMutation(retainedStructural));
             }
             main.querySelectorAll(PAPER_FLUSH_TARGETS).forEach((wrapper) => {
@@ -1824,8 +1834,11 @@
         Promise.resolve().then(() => window.URL.revokeObjectURL(href));
         return true;
       };
-      coordinator._discardDetachedReferenceDraft = (draft) => {
-        if (!draft || detachedReferenceDrafts[0] !== draft ||
+      coordinator._discardDetachedReferenceDraft = (draft, conflictOwned = false) => {
+        const draftIndex = detachedReferenceDrafts.indexOf(draft);
+        if (!draft || draftIndex < 0 ||
+            (!conflictOwned && draftIndex !== 0) ||
+            (conflictOwned && conflict?.source !== draft.source) ||
             !coordinator._detachedReferenceDraftIsLocalOnly(draft)) return false;
         const record = sources.get(draft.source);
         clearTimeout(record.timer);
@@ -1835,9 +1848,10 @@
         if (!coordinator._detachedReferenceDraftIsLocalOnly(draft)) return false;
         sources.delete(draft.source);
         nativeFocusBaselines.delete(draft.source);
-        detachedReferenceDrafts.shift();
+        detachedReferenceDrafts.splice(draftIndex, 1);
         coordinator._renderDetachedReferenceDraft();
         renderSaveStatus();
+        if (conflictOwned) return true;
         if (!coordinator._maybeAdoptPendingIdentity()) {
           coordinator._flushQuarantinedIfClean();
         }
@@ -1846,6 +1860,41 @@
         // Do not request a reload here, but honor one already requested by an
         // independent recovery boundary once this last local draft is gone.
         coordinator._reloadIfClean();
+        return true;
+      };
+      coordinator._discardConflictDetachedReferenceDraft = (draft) => {
+        if (!draft || conflict?.source !== draft.source ||
+            !coordinator._detachedReferenceDraftIsLocalOnly(draft)) return false;
+        const retainedReply = conflict.reply;
+        const retainedDocumentKey = conflict.documentKey;
+        if (!coordinator._discardDetachedReferenceDraft(draft, true)) return false;
+        const nextDraft = detachedReferenceDrafts.find(
+          (candidate) => candidate.documentKey === retainedDocumentKey,
+        );
+        const nextEntry = nextDraft
+          ? mutationQueue.find((entry) =>
+            entry.documentKey === retainedDocumentKey && entry.source === nextDraft.source,
+          )
+          : mutationQueue.find((entry) => entry.documentKey === retainedDocumentKey);
+        const nextDirty = [...sources].find(([source, record]) =>
+          record.documentKey === retainedDocumentKey &&
+          (record.dirty || record.active > 0) &&
+          (!nextDraft || source === nextDraft.source),
+        ) || [...sources].find(([_source, record]) =>
+          record.documentKey === retainedDocumentKey &&
+          (record.dirty || record.active > 0),
+        );
+        const nextSource = nextDraft?.source || nextEntry?.source || nextDirty?.[0];
+        if (nextSource || nextEntry || mutationActive) {
+          coordinator._setConflict(
+            retainedReply,
+            nextSource || nextEntry?.source,
+            retainedDocumentKey,
+            nextEntry || null,
+          );
+          return true;
+        }
+        coordinator._useLatest();
         return true;
       };
       coordinator._renderDetachedReferenceDraft = () => {
@@ -1980,6 +2029,12 @@
               coordinator._downloadDetachedReferenceDraft(detached);
               return;
             }
+            if (event.target.closest?.("[data-reference-draft-discard]") &&
+                detached?.source === conflict?.source &&
+                coordinator._detachedReferenceDraftIsLocalOnly(detached)) {
+              coordinator._discardConflictDetachedReferenceDraft(detached);
+              return;
+            }
             const action = event.target.closest?.("[data-action]")?.dataset.action;
             if (action === "review") {
               renderDetail(true);
@@ -2018,14 +2073,29 @@
             const label = document.createElement("label");
             label.dataset.detachedReferenceRecovery = "true";
             const labelText = document.createElement("span");
-            labelText.textContent = `Retained ${detached.field} draft`;
+            labelText.dataset.referenceDraftLabel = "true";
             field = document.createElement("textarea");
             field.dataset.referenceDraftText = "true";
             field.readOnly = true;
             label.append(labelText, field);
             detail.querySelector("details")?.before(label);
           }
+          detail.querySelector("[data-reference-draft-label]").textContent =
+            `Retained ${detached.field} draft`;
           field.value = detached.value;
+          const canDiscard = detached.source === conflict.source &&
+            coordinator._detachedReferenceDraftIsLocalOnly(detached);
+          let discard = banner.querySelector("[data-reference-draft-discard]");
+          if (canDiscard && !discard) {
+            discard = document.createElement("button");
+            discard.type = "button";
+            discard.dataset.referenceDraftDiscard = "true";
+            discard.dataset.detachedReferenceRecovery = "true";
+            discard.textContent = "Discard old draft";
+            banner.querySelector(".bp-conflict-actions")?.append(discard);
+          } else if (!canDiscard) {
+            discard?.remove();
+          }
         } else {
           banner.querySelectorAll("[data-detached-reference-recovery]").forEach(
             (element) => element.remove(),
@@ -4252,8 +4322,9 @@
       },
       updated() {
         // LiveView can replace the footer controls while preserving this hook.
-        // Re-apply the coordinator's session history state to the new buttons.
-        this._exitCoordinator?.refreshHistoryControls?.();
+        // Re-apply coordinator-owned controls and recovery UI after the server
+        // morph removes client-only presentation nodes.
+        this._exitCoordinator?.refreshPresentation?.();
       },
       destroyed() {
         this.el.removeEventListener("dragstart", this._onDragStart);
