@@ -3090,14 +3090,113 @@ const ROUND_TRIP_FIELDS = [
  * each width's baseline is the desk as the previous round trip left it. Drift
  * that ACCUMULATES across trips shows up as a widening delta instead of being
  * reset away by a fresh load at every step.
+ *
+ * ...AND THAT SAME NO-RELOAD DESIGN IS EXACTLY WHY THE OPEN LEG NEEDS A GUARD.
+ * See `seededOpenCarryOver` below: a post-dismiss baseline is a CLOSED panel,
+ * and at a wide width a closed panel is not the state this leg claims to be
+ * measuring.
  */
-async function runRoundTrip(page, measureFace, run) {
+
+/**
+ * THE SEEDED-OPEN CARRY-OVER REFUSAL (D97) — one wide-bucket width where the
+ * before-leg measured a panel that was ALREADY CLOSED when the width started.
+ *
+ * THE OBSERVATION THAT FORCED IT. In the committed round-2 artefacts
+ * (`scripts/measurements/spd-bracketed-deployed-run{1,2}-2026-07-22.json`) the
+ * round trip records `open_clicks: 2` at 1440 and `open_clicks: 1` at 1280 —
+ * both wide-bucket widths, in the same descending pass, in BOTH runs. At the
+ * wide bucket the panel is genuinely open in the seeded default, so the first
+ * real click CLOSES it and only the second reaches `[data-user-opened]`; that
+ * is what `open_clicks: 2` means and it is what `openInspectorByRealClick`'s
+ * own note says. Reaching the marker in ONE click at a wide width is therefore
+ * only possible from an ALREADY-CLOSED panel — here, the panel the 1440 leg's
+ * own dismiss left behind, inherited by 1280 because this sweep never reloads.
+ *
+ * WHY IT IS AN INSTRUMENT FAILURE AND NOT A NUMBER. The 1280 `before` in those
+ * artefacts reads `content_px: 640` — the CLOSED-panel column — while the
+ * matrix rows for the same width describe the panel OPEN at 599px. Both figures
+ * are real; they are readings of DIFFERENT STATES, and the round-trip cell
+ * labels the closed one as the width's baseline. A +44px "drift" filed off that
+ * cell (spd-w13-1280-prior-observations-stale, PR #16309) was this carry-over,
+ * not the desk. That is precisely the confound `bucket_precondition` already
+ * refuses on the tier axis, one axis over: a cell whose two legs describe
+ * different states is no evidence about round-trip fidelity.
+ *
+ * WHY REFUSE RATHER THAN RE-SEED. The row that filed this allowed either. A
+ * re-seed (reload per width, or a corrective re-open) changes the PROTOCOL this
+ * pass exists to run — `no reload at any point`, so accumulating drift widens
+ * instead of resetting (D110) — and a corrective click would have to be
+ * distinguished, in the artifact, from the desk's own clicks. Refusing the one
+ * affected width costs one cell, changes no protocol, and states the finding by
+ * name. It is the cheaper and the honest catch.
+ *
+ * WHY IT DOES NOT `die()`. D138: a mid-sweep abort writes ZERO bytes, which is
+ * an instrument failure rather than a desk fact. This reports — a named warning,
+ * a machine-readable record on the run, the width withdrawn from `cells`, and
+ * `returns_bit_identical` forced false because coverage is part of the claim.
+ *
+ * WHY THE LOOP SELF-HEALS. The refusal is taken AFTER the open leg and instead
+ * of the dismiss, so the width leaves the panel OPEN — the seeded default. The
+ * next wide width therefore needs its two clicks again and is measured normally:
+ * one carry-over refuses one width, never a cascade.
+ *
+ * The band is read RAW (`bandNameFor(window.innerWidth)`, via
+ * `preBefore.expected_raw_band`) and not from the requested viewport or the
+ * page's own stamp, for the reason `bucketPrecondition` gives: a stamp mirror
+ * agrees by construction in exactly the dead-band case.
+ */
+export function seededOpenCarryOver({ viewport_px, raw_band, open_clicks }) {
+  if (raw_band !== 'wide') return null;
+  if (open_clicks !== 1) return null;
+  return {
+    id: 'seeded-open-carry-over',
+    instrument_failure: true,
+    viewport_px,
+    raw_band,
+    open_clicks,
+    expected_open_clicks: 2,
+    message:
+      `INSTRUMENT FAILURE (seeded-open carry-over) at viewport ${viewport_px}px — this says NOTHING ` +
+      `about the desk's layout. The open leg reached [data-user-opened] in ONE real click at a ` +
+      `"${raw_band}"-bucket width. At the wide bucket the seeded default is OPEN, so the first ` +
+      `click CLOSES the panel and two clicks are required; one click is only reachable from a panel ` +
+      `that was ALREADY CLOSED when this width started — the state the previous width's dismiss ` +
+      `left behind, inherited because this pass never reloads. The "before" this width captured is ` +
+      `therefore a CLOSED-panel reading labelled as the seeded default, so no round_trip cell is ` +
+      `written for ${viewport_px}px and returns_bit_identical cannot be claimed for this run. ` +
+      `Witnessed in BOTH committed round-2 deployed artefacts under scripts/measurements/ — ` +
+      `open_clicks 2 at 1440 and 1 at 1280, with a 1280 before-leg of content_px 640 (the closed ` +
+      `column) where the matrix for that width reads 599. The block comment on ` +
+      `seededOpenCarryOver names the two files; they are not named here because a dated literal in ` +
+      `live code is a target with an expiry date (studio-desk-default-doc.test.mjs).`,
+  };
+}
+
+/**
+ * Impure edges by injection (same reason `openInspectorByRealClick` is exported
+ * and for the same test): the seeded-open refusal above is a property of THIS
+ * loop's control flow — which width is skipped, which cells are not counted,
+ * what the rollup then refuses to claim — and none of that is provable by
+ * calling a predicate. `scripts/studio-desk-roundtrip-carry-over.test.mjs`
+ * drives this function with the four page-touching edges replaced by replays of
+ * the 2026-07-22 artefacts. A full authenticated sweep against a deployed desk
+ * cannot be the only way to see the guard hold.
+ */
+export async function runRoundTrip(page, measureFace, run, {
+  widths: sweepWidths = WIDTHS,
+  faces: sweepFaces = FACES,
+  settle = waitForDeskSettled,
+  readStamp = readBucketStamp,
+  open = openInspectorByRealClick,
+  dismiss = dismissInspectorByRealClick,
+} = {}) {
   const widths = [];
+  const refusedWidths = [];
   let cells = 0, identicalCells = 0, cellsWithdrawn = 0;
 
-  for (const width of WIDTHS) {
+  for (const width of sweepWidths) {
     await page.setViewportSize({ width, height: 900 });
-    await waitForDeskSettled(page);
+    await settle(page);
 
     // D171/D185 INSIDE THIS LOOP, not only in the two-state sweep — and this is
     // the leg that needs it most. Every observed row until now came from the
@@ -3106,18 +3205,18 @@ async function runRoundTrip(page, measureFace, run) {
     // the shape the widen dead-band ambushes. The baseline is checked before the
     // trip, and again after the dismiss, because a bucket that moved DURING the
     // trip would make the before/after comparison a comparison of two tiers.
-    const stampBefore = await readBucketStamp(page);
+    const stampBefore = await readStamp(page);
     const preBefore = recordBucketPrecondition(
       run, `round-trip baseline at viewport ${width}px`,
       bucketPrecondition(width, stampBefore.real_inner_width, stampBefore.width_bucket_stamped));
 
     const before = {};
-    for (const face of FACES) before[face.id] = await measureFace(face);
+    for (const face of sweepFaces) before[face.id] = await measureFace(face);
 
     // Non-fatal here BY DESIGN — see the note on openInspectorByRealClick. A
     // width whose toggle cannot be reached costs this pass and nothing else;
     // the matrix rows already collected survive and still reach disk.
-    const opened = await openInspectorByRealClick(page, { fatal: false });
+    const opened = await open(page, { fatal: false });
     if (!opened.reached) {
       return {
         ran: false,
@@ -3132,7 +3231,35 @@ async function runRoundTrip(page, measureFace, run) {
       };
     }
 
-    const dismissed = await dismissInspectorByRealClick(page);
+    // THE SEEDED-OPEN CARRY-OVER REFUSAL. Taken here — after the open leg has
+    // told us how many clicks the marker cost, and INSTEAD of the dismiss, so
+    // the width leaves the panel open and the next one self-heals.
+    const carryOver = seededOpenCarryOver({
+      viewport_px: width,
+      raw_band: preBefore.expected_raw_band,
+      open_clicks: opened.clicks_needed,
+    });
+    if (carryOver) {
+      run.warnings.push(carryOver.message);
+      (run.seeded_open_carry_over ??= []).push(carryOver);
+      refusedWidths.push(width);
+      widths.push({
+        viewport_px: width,
+        open_clicks: opened.clicks_needed,
+        refused_for_seeded_open_carry_over: carryOver,
+        bucket_precondition_ok: preBefore.bucket_precondition_ok,
+        expected_raw_band: preBefore.expected_raw_band,
+        real_inner_width: preBefore.real_inner_width,
+        bucket_precondition_before: preBefore,
+        faces: [],
+        before_raw: Object.fromEntries(sweepFaces.map((f) => [
+          f.id, Object.fromEntries(ROUND_TRIP_FIELDS.map(([n, g]) => [n, g(before[f.id])])),
+        ])),
+      });
+      continue;
+    }
+
+    const dismissed = await dismiss(page);
     if (!dismissed.dismissed) {
       return {
         ran: false,
@@ -3143,9 +3270,9 @@ async function runRoundTrip(page, measureFace, run) {
               'matrix and every other pass in this run are unaffected.',
       };
     }
-    await waitForDeskSettled(page);
+    await settle(page);
 
-    const stampAfter = await readBucketStamp(page);
+    const stampAfter = await readStamp(page);
     const preAfter = recordBucketPrecondition(
       run, `round-trip post-dismiss at viewport ${width}px`,
       bucketPrecondition(width, stampAfter.real_inner_width, stampAfter.width_bucket_stamped));
@@ -3165,7 +3292,7 @@ async function runRoundTrip(page, measureFace, run) {
       preBefore.bucket_precondition_ok && preAfter.bucket_precondition_ok;
 
     const faces = [];
-    for (const face of FACES) {
+    for (const face of sweepFaces) {
       const after = await measureFace(face);
       const diffs = [];
       for (const [name, get] of ROUND_TRIP_FIELDS) {
@@ -3214,6 +3341,11 @@ async function runRoundTrip(page, measureFace, run) {
     });
   }
 
+  // The grammar rollups speak only for widths that actually completed a trip: a
+  // refused width has no dismiss leg, and listing it with a null control would
+  // publish a coverage this pass does not have (D183, same rule).
+  const measuredWidths = widths.filter((w) => !w.refused_for_seeded_open_carry_over);
+
   return {
     ran: true,
     protocol: 'default -> open -> dismiss, on the SAME page instance, no reload at any point',
@@ -3224,15 +3356,15 @@ async function runRoundTrip(page, measureFace, run) {
     // toggle, while every destination width (900 and below) dismisses via the
     // purpose-built [data-test-id="sidebar-dismiss"] that #5086 shipped. The
     // per-width data was always here; the defect was a summary that hid it.
-    dismiss_grammar_by_width: widths.map((w) => ({
+    dismiss_grammar_by_width: measuredWidths.map((w) => ({
       viewport_px: w.viewport_px,
       control: w.dismiss_control,
       grammar: w.dismiss_grammar,
     })),
-    dismiss_controls_used: [...new Set(widths.map((w) => w.dismiss_control))].map((control) => ({
+    dismiss_controls_used: [...new Set(measuredWidths.map((w) => w.dismiss_control))].map((control) => ({
       control,
-      grammar: widths.find((w) => w.dismiss_control === control)?.dismiss_grammar ?? null,
-      widths_px: widths.filter((w) => w.dismiss_control === control).map((w) => w.viewport_px),
+      grammar: measuredWidths.find((w) => w.dismiss_control === control)?.dismiss_grammar ?? null,
+      widths_px: measuredWidths.filter((w) => w.dismiss_control === control).map((w) => w.viewport_px),
     })),
     dismiss_grammar_note:
       'BY WIDTH, never one scalar. "Returned bit-identical after a toggle re-click" and "returned ' +
@@ -3252,7 +3384,16 @@ async function runRoundTrip(page, measureFace, run) {
     cells_withdrawn_for_bucket_precondition: cellsWithdrawn,
     widths_withdrawn_for_bucket_precondition:
       widths.filter((w) => !w.bucket_precondition_ok).map((w) => w.viewport_px),
-    returns_bit_identical: cells > 0 && identicalCells === cells && cellsWithdrawn === 0,
+    // COVERAGE IS PART OF THE CLAIM, on this axis too. A width refused for the
+    // seeded-open carry-over wrote no cell at all, so the survivors could agree
+    // perfectly and the headline would read true over a sweep that skipped the
+    // width the finding is about.
+    widths_refused_for_seeded_open_carry_over: refusedWidths,
+    seeded_open_carry_over: widths
+      .filter((w) => w.refused_for_seeded_open_carry_over)
+      .map((w) => w.refused_for_seeded_open_carry_over),
+    returns_bit_identical:
+      cells > 0 && identicalCells === cells && cellsWithdrawn === 0 && refusedWidths.length === 0,
     widths,
     note:
       'Bit-identical means EVERY compared field matched exactly — not "within tolerance". These are ' +
