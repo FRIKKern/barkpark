@@ -21,7 +21,9 @@
 #
 # DERIVATION. `bash scripts/hex-audit-oracle.sh`, run 2026-09-09 against
 # origin/main 851021379 on Elixir 1.19.5 / OTP 27 (local). 30 records: api 17
-# (4 HIGH), cloud 13 (4 HIGH). Regenerate the same way; never hand-add an id
+# (4 HIGH), cloud 13 (5 HIGH). Both figures reproduced at CI's pinned Elixir
+# 1.18.1 / OTP 27.0 in security.yml run 34410161152, which matched all 30 ids.
+# Regenerate the same way; never hand-add an id
 # without saying which run produced it.
 api:EEF-CVE-2026-66838  postgrex 0.22.3  MEDIUM
 api:EEF-CVE-2026-47079  xml_builder 2.4.0  LOW

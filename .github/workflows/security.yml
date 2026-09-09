@@ -724,9 +724,11 @@ jobs:
       # the same commit, opposite answers: `mix deps.audit` (mix_audit, mirego's
       # DB — the step directly above) says "No vulnerabilities found." while
       # `mix hex.audit` (Hex's own OSV-backed feed) reports 17 advisories on
-      # api/mix.lock and 13 on cloud/mix.lock, 4 HIGH each (measured 2026-09-09,
-      # local, at origin/main 8510213). The mix_audit step is not wrong about
-      # its own database; it simply cannot see this feed.
+      # api/mix.lock (4 HIGH) and 13 on cloud/mix.lock (5 HIGH) — measured
+      # 2026-09-09 at origin/main 8510213, and reproduced at this job's pinned
+      # 1.18.1/OTP 27.0 in run 34410161152, where the step directly above still
+      # printed "No vulnerabilities found." in the SAME job. The mix_audit step
+      # is not wrong about its own database; it simply cannot see this feed.
       #
       # THE RECORDED DECISION (2026-09-09, lead-gates, on the orchestrator's
       # ruling). `mix hex.audit` runs as a SECOND, ADVISORY oracle beside

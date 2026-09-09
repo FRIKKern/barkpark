@@ -13,7 +13,8 @@
 #
 #   Worse for the second lock: the CVE job is declared `working-directory: api`,
 #   so cloud/mix.lock was never audited by ANY oracle. `mix hex.audit` over it
-#   reports 14 advisories, 5 HIGH (measured 2026-09-09, local). mix_audit gives
+#   reports 13 advisories, 5 HIGH (measured 2026-09-09; re-measured at CI's
+#   pinned 1.18.1/OTP 27.0 in run 34410161152, same figures). mix_audit gives
 #   no answer there at all — mix_audit is an api-only dep, so in cloud/ the task
 #   does not exist. This script reports that as ORACLE-UNAVAILABLE, which is a
 #   DIFFERENT WORD from clean, on purpose (charter: a failed read must never be
