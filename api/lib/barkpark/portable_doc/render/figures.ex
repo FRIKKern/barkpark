@@ -177,12 +177,12 @@ defmodule Barkpark.PortableDoc.Render.Figures do
     rows_attr =
       if is_integer(rows) and rows in 6..40, do: ~s( data-cast-rows="#{rows}"), else: ""
 
+    # `~s|…|`, not `~s(…)`: a paren-delimited sigil whose body contains
+    # `var(--paper-rule, #dde7e2)` makes the tokenizer read `border-radius:6px`
+    # as a keyword argument ("keyword argument must be followed by space after:
+    # radius:") and the file will not compile. The pipe delimiter has no such
+    # ambiguity, and the sibling figure/divider strings above already use it.
     ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">| <>
-      # `~s|…|`, not `~s(…)`: a paren-delimited sigil whose body contains
-      # `var(--paper-rule, #dde7e2)` makes the tokenizer read `border-radius:6px`
-      # as a keyword argument ("keyword argument must be followed by space after:
-      # radius:") and the file will not compile. The pipe delimiter has no such
-      # ambiguity, and the sibling figure/divider strings above already use it.
       ~s|<div class="bp-asciicast" data-cast-src="#{safe_url(src)}"#{poster_attr}#{rows_attr} style="border:1px solid var(--paper-rule, #dde7e2);border-radius:6px;overflow:hidden"></div>| <>
       cap <>
       "</figure>"
