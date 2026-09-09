@@ -179,7 +179,14 @@ cannot=0
 files=()
 for t in "${targets[@]}"; do
   if [ -d "$t" ]; then
-    while IFS= read -r f; do files+=("$f"); done < <(find "$t" -type f \( -name '*.sh' -o -name '*.bash' \) -print | sort)
+    # *.yml/*.yaml are collected too — a GitHub Actions `run:` body IS shell, and
+    # the class's most recent live instance lived in one (deploy-harnesses.yml:171,
+    # fixed by #16872).  Before 2026-09-09 this find(1) took only *.sh/*.bash, so
+    # `.github` — the scanner's own second default target, and almost entirely
+    # YAML — contributed 0 of its 138 findings.  A YAML file that declares no
+    # `run:` body flattens to nothing and can report nothing, so widening the net
+    # to every .yml costs a stat and cannot over-report.
+    while IFS= read -r f; do files+=("$f"); done < <(find "$t" -type f \( -name '*.sh' -o -name '*.bash' -o -name '*.yml' -o -name '*.yaml' \) -print | sort)
   elif [ -f "$t" ]; then
     files+=("$t")
   else
@@ -234,6 +241,212 @@ strip_quoted() {
   STRIPPED="$out"
 }
 
+# ── yaml_flatten — render a GitHub Actions workflow as the shell it really is ──
+#
+# WHY THIS IS NOT `find … -o -name '*.yml'` PLUS THE EXISTING LOOP.  The loop
+# below keeps a per-line pipefail state machine down the whole file.  A workflow
+# is not one shell: EVERY `run:` body is a SEPARATE process.  `set -euo pipefail`
+# in step 1 says NOTHING about step 5, and letting it leak would flag every
+# later step in the 149 workflow files that arm pipefail once — a scanner that
+# reports its own parser instead of the defect.
+#
+# So the file is FLATTENED first, ONE OUTPUT LINE PER INPUT LINE so every
+# reported `file:line` still points at the real workflow line:
+#   · a line outside a shell `run:` body  → a blank line (invisible to the loop);
+#   · the `run:` KEY line                 → a `###PFSCAN-RESET` sentinel that the
+#                                           loop below turns into a hard state
+#                                           reset — that IS the block boundary;
+#   · a line inside the body              → itself, verbatim.
+#
+# THE SENTINEL CARRIES THE BLOCK'S STARTING STATE, because a workflow step does
+# not start from bash's defaults (this is the part a naive extension gets wrong
+# in BOTH directions):
+#   · no `shell:` key      → Actions runs `bash -e {0}`      → errexit ON, pipefail OFF
+#   · `shell: bash`        → `bash --noprofile --norc -eo pipefail {0}` → BOTH ON
+#   · `shell: sh`          → `sh -e {0}`                     → errexit ON, pipefail OFF
+#   · anything else (python3/pwsh/node/a custom `<cmd> {0}`) → NOT shell; the
+#     body is emitted as blanks and reports nothing, by name rather than silently.
+# errexit therefore comes from HERE and not from the loop's column-0 `set -e`
+# rule — a `run:` body is indented, so that rule can never fire inside one.
+#
+# `${{ … }}` is substituted by Actions BEFORE any shell sees the body, so it is
+# not shell input; it is replaced with the inert word EXPR so a `|` inside an
+# expression is not read as a pipeline.  Same treatment as
+# scripts/workflow-run-shell-check.sh, deliberately.
+#
+# LIMIT, stated rather than discovered later: `defaults.run.shell` is honoured at
+# workflow and job level by the scan below only when it appears as the
+# `defaults:` → `run:` → `shell:` triple; a step-level `shell:` always wins.
+# Anything this parser cannot resolve is treated as the Actions DEFAULT (pipefail
+# OFF), which under-reports.  That is the same direction strip_quoted() errs in:
+# it can make us report LESS, never more.
+yaml_flatten() {
+  local file="$1"
+  local -a L=()
+  local raw
+  while IFS= read -r raw || [ -n "$raw" ]; do L+=("$raw"); done <"$file"
+  local n=${#L[@]}
+
+  # workflow/job-level `defaults: → run: → shell:` (see LIMIT above).
+  local def_shell="" d_state=0 d_indent=0 s t ind
+  local i
+  for ((i = 0; i < n; i++)); do
+    s="${L[i]}"
+    t="${s#"${s%%[![:space:]]*}"}"
+    [ -n "$t" ] || continue
+    case "$t" in '#'*) continue ;; esac
+    ind=$((${#s} - ${#t}))
+    case "$d_state:$t" in
+    0:defaults:*) d_state=1 d_indent=$ind ;;
+    1:run:*) [ "$ind" -gt "$d_indent" ] && d_state=2 || d_state=0 ;;
+    2:shell:*)
+      def_shell="${t#shell:}"
+      def_shell="${def_shell#"${def_shell%%[![:space:]]*}"}"
+      d_state=0
+      ;;
+    *) [ "$ind" -le "$d_indent" ] && d_state=0 ;;
+    esac
+  done
+
+  local in_body=0 run_indent=-1 body_ok=0
+  local j k dash_ind step_end sh rest pf ee
+  for ((i = 0; i < n; i++)); do
+    s="${L[i]}"
+    t="${s#"${s%%[![:space:]]*}"}"
+
+    if [ "$in_body" -eq 1 ]; then
+      if [ -z "$t" ]; then
+        printf '\n'
+        continue
+      fi
+      ind=$((${#s} - ${#t}))
+      if [ "$ind" -gt "$run_indent" ]; then
+        if [ "$body_ok" -eq 1 ]; then
+          scrub_expr "$s"
+          printf '%s\n' "$SCRUBBED"
+        else
+          printf '\n'
+        fi
+        continue
+      fi
+      in_body=0
+    fi
+
+    # a `run:` key: `run: …`, `- run: …`, `        run: |`
+    case "$t" in
+    'run:' | 'run:'[[:space:]]*) ;;
+    '- run:' | '- run:'[[:space:]]*)
+      t="${t#- }"
+      ;;
+    *)
+      printf '\n'
+      continue
+      ;;
+    esac
+    run_indent=$((${#s} - ${#t}))
+
+    # the enclosing step's own `shell:` — same indent as this `run:` key, inside
+    # the same `- ` list item.  Nearest preceding dash at run_indent-2 opens it;
+    # the next line at indent <= that dash closes it.
+    sh="$def_shell"
+    if [ "$run_indent" -ge 2 ]; then
+      dash_ind=$((run_indent - 2))
+      step_end=$n
+      for ((j = i; j >= 0; j--)); do
+        [ "${L[j]:dash_ind:2}" = "- " ] || continue
+        [ -z "${L[j]:0:dash_ind}" ] || continue
+        case "${L[j]:0:dash_ind}" in *[![:space:]]*) continue ;; esac
+        for ((k = j + 1; k < n; k++)); do
+          local s2="${L[k]}" t2
+          t2="${s2#"${s2%%[![:space:]]*}"}"
+          [ -n "$t2" ] || continue
+          if [ $((${#s2} - ${#t2})) -le "$dash_ind" ]; then
+            step_end=$k
+            break
+          fi
+        done
+        for ((k = j; k < step_end; k++)); do
+          case "${L[k]:run_indent}" in
+          'shell:'*)
+            case "${L[k]:0:run_indent}" in *[![:space:]]*) continue ;; esac
+            sh="${L[k]:run_indent+6}"
+            sh="${sh#"${sh%%[![:space:]]*}"}"
+            ;;
+          esac
+        done
+        break
+      done
+    fi
+    sh="${sh%%[[:space:]]*}"
+    sh="${sh//\"/}"
+    sh="${sh//\'/}"
+
+    case "$sh" in
+    "" | bash) pf=1 ee=1 ;; # `shell: bash` == bash -eo pipefail; "" only when a
+      # `defaults` triple named it, so it is the same thing
+    sh) pf=0 ee=1 ;;
+    *) pf=-1 ee=0 ;; # not a shell Actions runs as bash/sh — skip the body
+    esac
+    # NO `shell:` key at all is the Actions DEFAULT `bash -e {0}`: errexit on,
+    # pipefail OFF.  Distinguish it from an explicit `shell: bash`.
+    if [ -z "$sh" ] && [ -z "$def_shell" ]; then pf=0 ee=1; fi
+
+    if [ "$pf" -lt 0 ]; then
+      body_ok=0
+      pf=0
+      ee=0
+    else
+      body_ok=1
+    fi
+
+    rest="${t#run:}"
+    rest="${rest#"${rest%%[![:space:]]*}"}"
+    case "$rest" in
+    '' | '|' | '|-' | '|+' | '>' | '>-' | '>+' | '|'[0-9]* | '>'[0-9]*)
+      in_body=1
+      printf '###PFSCAN-RESET\t%d\t%d\n' "$pf" "$ee"
+      ;;
+    *)
+      # single-line `run: cmd` — one whole block on one line.  Emit the reset AND
+      # the command, or a `run: printf … | grep -q …` under `shell: bash` would
+      # be silently invisible.
+      in_body=0
+      if [ "$body_ok" -eq 1 ]; then
+        scrub_expr "$rest"
+        printf '###PFSCAN-RESET\t%d\t%d\t%s\n' "$pf" "$ee" "$SCRUBBED"
+      else
+        printf '###PFSCAN-RESET\t%d\t%d\n' "$pf" "$ee"
+      fi
+      ;;
+    esac
+  done
+}
+
+# scrub_expr — blank out `${{ … }}`; answers in SCRUBBED (no fork, same reason
+# as strip_quoted).
+SCRUBBED=""
+scrub_expr() {
+  local s="$1" pre post
+  while :; do
+    case "$s" in
+    *'${{'*'}}'*) ;;
+    *) break ;;
+    esac
+    pre="${s%%'${{'*}"
+    post="${s#*'${{'}"
+    case "$post" in
+    *'}}'*) post="${post#*'}}'}" ;;
+    *) post="" ;;
+    esac
+    s="${pre}EXPR${post}"
+  done
+  SCRUBBED="$s"
+}
+
+flat_tmp=""
+cleanup_flat() { [ -n "$flat_tmp" ] && rm -f "$flat_tmp"; }
+trap cleanup_flat EXIT
+
 for f in "${files[@]}"; do
   [ -r "$f" ] || {
     cannot_read "$f"
@@ -244,6 +457,20 @@ for f in "${files[@]}"; do
   # pipefail` and `set -o pipefail` must all pass it.  The per-line state machine
   # below is the real gate; this only skips files that cannot possibly host it.
   grep -q 'pipefail' "$f" || continue
+
+  src="$f"
+  yaml_mode=0
+  case "$f" in
+  *.yml | *.yaml)
+    yaml_mode=1
+    [ -n "$flat_tmp" ] || flat_tmp="$(mktemp "${TMPDIR:-/tmp}/pfscan-flat.XXXXXX")" || die "mktemp failed"
+    if ! yaml_flatten "$f" >"$flat_tmp"; then
+      cannot_read "$f (workflow flatten failed)"
+      continue
+    fi
+    src="$flat_tmp"
+    ;;
+  esac
 
   pipefail_on=0
   errexit=0
@@ -256,6 +483,25 @@ for f in "${files[@]}"; do
   while IFS= read -r raw || [ -n "$raw" ]; do
     lineno=$((lineno + 1))
     line="${raw%%$'\r'}"
+
+    # ── a `run:` BLOCK BOUNDARY (flattened workflows only) ─────────────────
+    # THE reset.  Every `run:` body is its own process, so pipefail, errexit,
+    # any open heredoc and any pending `rc=$?` from the previous block all end
+    # here.  Without this, one `set -euo pipefail` in step 1 would arm the
+    # scanner for every later step in the file.
+    if [ "$yaml_mode" -eq 1 ]; then
+      case "$line" in
+      '###PFSCAN-RESET'*)
+        IFS=$'\t' read -r _sent pipefail_on errexit line <<<"$line"
+        heredoc=""
+        prev_pipe_line=0
+        prev_pipe_text=""
+        prev_pipe_conf=""
+        [ -n "$line" ] || continue
+        raw="$line"
+        ;;
+      esac
+    fi
 
     # ── heredoc bodies are DATA, not code ──────────────────────────────────
     # scripts/deploy-convergence-check.sh writes whole fixture workflows into
@@ -466,7 +712,7 @@ for f in "${files[@]}"; do
     report="$report$f:$lineno: [$conf] reader=$reader; status $consumed; $why
     $trimmed
 "
-  done <"$f" || cannot_read "$f (read failed mid-file)"
+  done <"$src" || cannot_read "$f (read failed mid-file)"
 done
 
 if [ "$count_only" -eq 0 ] && [ -n "$report" ]; then
