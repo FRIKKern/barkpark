@@ -2489,7 +2489,18 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Stale verdict watch"
         --expect-unrendered "Stale verdict harness"
         --expect-unrendered "Break-glass harness"
-        --expect-unrendered "Generate reference")
+        --expect-unrendered "Generate reference"
+        # ── 2026-09-09: four rows #17111 (c19d7c7ab) added to .exclusions by hand for
+        # names #17079/#17081 created and landed-mark.yml — all three workflows are
+        # main-push + schedule or event-fenced off pull_request, and every one landed
+        # after the frozen pair (2026-07-31), so this window can never render them.
+        # #17111 paid five of the six places and not this one: its own gate went red
+        # on the PR head (run 34392441135) and on main from c19d7c7ab, and the
+        # required four let it merge anyway.
+        --expect-unrendered "Filebase aesthetics critic (advisory, main + nightly)"
+        --expect-unrendered "pipefail SIGPIPE scan"
+        --expect-unrendered "pipefail scan — did the scanner's inputs move?"
+        --expect-unrendered "Mark the task rows this push landed")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
