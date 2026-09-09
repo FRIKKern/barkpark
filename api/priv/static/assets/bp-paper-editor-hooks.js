@@ -4162,19 +4162,25 @@
     // BarkparkFigureImageBridge keeps an editable Figure looking like the
     // reader. The server renders the canonical image child; this hook only
     // turns that rendered image into the contextual picker trigger and sends a
-    // source-only patch for the child. The following LiveView render remains
+    // source-only patch for the child. A fixed server-authored Card mode uses
+    // the existing Card form resolver instead; neither event nor field names
+    // are configurable by the picker. The following LiveView render remains
     // authoritative for the visible image and every other child field.
     Hooks.BarkparkFigureImageBridge = {
       mounted() {
         this._exitCoordinator = bpPaperExitCoordinator(this);
         this._pendingSaves = new Set();
         this._mutationEntries = [];
-        this._pendingImageSources = new Set();
+        this._lastImageIntent = null;
+
+        const owner = this.el.dataset.imageOwner;
+        const cardImage = owner === "card";
+        const supportedOwner = owner === undefined || cardImage;
 
         const picker = this.el.querySelector("bp-media-picker[data-paper-figure-image-picker]");
         this._picker = picker;
         const triggerSelector = "[data-paper-figure-image-trigger]";
-        const inactive = () => !picker || !!this.el.closest("[inert]");
+        const inactive = () => !supportedOwner || !picker || !!this.el.closest("[inert]");
         const openPicker = () => {
           if (inactive()) return false;
           let opened = false;
@@ -4198,16 +4204,19 @@
           }
         };
         const pushSource = (src) => {
-          this._pendingImageSources.add(src);
           let mutation;
-          mutation = bpPaperMutation(this, this.el, "paper-op", {
+          const event = cardImage ? "paper-edit-block" : "paper-op";
+          const payload = cardImage ? {
+            block_id: this.el.dataset.blockId,
+            "card-media-src": src,
+          } : {
             op: "patch-block",
             id: this.el.dataset.blockId,
             patch: { src },
-          }, {
+          };
+          mutation = bpPaperMutation(this, this.el, event, payload, {
             onResult: (saved, result) => {
               if (saved || result?.discarded) {
-                this._pendingImageSources.delete(src);
                 this._mutationEntries = this._mutationEntries.filter(
                   (entry) => entry !== mutation.entry,
                 );
@@ -4241,7 +4250,13 @@
           const parsed = mediaUrl(event);
           if (!parsed.valid) return;
           const { src } = parsed;
-          if (src === (this.el.dataset.imageSrc || "") || this._pendingImageSources.has(src)) return;
+          // Compare with the latest intent, not every queued source: selecting
+          // A again while B is pending must enqueue A after B, not lose it.
+          const intended = this._mutationEntries.length
+            ? this._lastImageIntent
+            : (this.el.dataset.imageSrc || "");
+          if (src === intended) return;
+          this._lastImageIntent = src;
           this._exitCoordinator?.markDirty(this.el);
           pushSource(src);
         };

@@ -80,18 +80,27 @@ function normalizeActionPriority(p) {
 // has NO server-side JSON normalizer (unlike the field path's media_field_url/1), so a
 // JSON blob written into attrs.media.src renders a broken <img src="{…}"> on the reader
 // (walk.ex image/1). This is the exact JSON-tolerant fallback root.html.heex uses for
-// the field-image path. Non-string, empty/whitespace, or an unparseable envelope → ""
-// (a CLEAR, or a safe degrade — NEVER the raw blob). A bare URL passes through verbatim.
-export function mediaUrlFromValue(raw) {
-  if (typeof raw !== "string") return "";
+// the field-image path. A bare URL (including the intentional empty-string CLEAR)
+// passes through verbatim. The validity bit is important at the event boundary:
+// malformed picker events must be ignored, not mistaken for a clear.
+function parsedMediaUrl(raw) {
+  if (typeof raw !== "string") return { valid: false };
   if (raw.trim().startsWith("{")) {
     try {
-      return JSON.parse(raw).url || "";
+      const parsed = JSON.parse(raw);
+      return typeof parsed?.url === "string"
+        ? { valid: true, src: parsed.url }
+        : { valid: false };
     } catch {
-      return "";
+      return { valid: false };
     }
   }
-  return raw;
+  return { valid: true, src: raw };
+}
+
+export function mediaUrlFromValue(raw) {
+  const parsed = parsedMediaUrl(raw);
+  return parsed.valid ? parsed.src : "";
 }
 
 // The TipTap node NAME is `bpCard` (its portable-doc bpType stays "card"); run-convert
@@ -325,6 +334,26 @@ export const Card = Node.create({
       mediaImg.setAttribute("contenteditable", "false");
       mediaImg.style.maxWidth = "100%";
       mediaImg.style.height = "auto";
+      const mediaPaint = document.createElement("button");
+      mediaPaint.type = "button";
+      mediaPaint.className = "bp-canvas-card__media-paint";
+      mediaPaint.setAttribute("contenteditable", "false");
+      mediaPaint.setAttribute("aria-haspopup", "dialog");
+      mediaPaint.setAttribute("data-test-id", "paper-card-media-control");
+      mediaPaint.textContent = "Change image";
+      const syncMediaPaintBounds = () => {
+        if (mediaPaint.hidden) return;
+        mediaPaint.style.left = `${mediaImg.offsetLeft}px`;
+        mediaPaint.style.top = `${mediaImg.offsetTop}px`;
+        mediaPaint.style.width = `${mediaImg.offsetWidth}px`;
+        mediaPaint.style.height = `${mediaImg.offsetHeight}px`;
+      };
+      const mediaPaintObserver = typeof ResizeObserver === "function"
+        ? new ResizeObserver(syncMediaPaintBounds)
+        : null;
+      mediaPaintObserver?.observe(mediaImg);
+      const onMediaLoad = () => syncMediaPaintBounds();
+      mediaImg.addEventListener("load", onMediaLoad);
 
       // Title slot — the reader's semantic heading level. A contentEditable=false
       // parent makes its plaintext-only child a separate browser editing host, so
@@ -363,7 +392,15 @@ export const Card = Node.create({
       actionLabelBoundary.appendChild(actionLabelHost);
 
       // Reader order: media, title, body, action. Controls ride at the top (edit-only).
-      dom.append(controls, mediaImg, titleHost, body, actionLink, actionLabelBoundary);
+      dom.append(
+        controls,
+        mediaImg,
+        mediaPaint,
+        titleHost,
+        body,
+        actionLink,
+        actionLabelBoundary,
+      );
 
       let syncingTitle = false;
       let titleFocused = false;
@@ -402,6 +439,13 @@ export const Card = Node.create({
         // carried VERBATIM, so an API-authored width/height paints here too).
         const media = a.media;
         const src = (media && media.src) || "";
+        const directMedia = Boolean(
+          media &&
+          typeof media === "object" &&
+          typeof media.src === "string" &&
+          media.src !== "" &&
+          (!Object.prototype.hasOwnProperty.call(media, "type") || media.type === "image")
+        );
         if (src) {
           mediaImg.setAttribute("src", src);
           mediaImg.setAttribute("alt", (media && media.alt) || "");
@@ -418,6 +462,21 @@ export const Card = Node.create({
           mediaImg.style.display = "";
         } else {
           mediaImg.style.display = "none";
+        }
+        mediaPaint.hidden = !editable || !directMedia;
+        mediaPaint.setAttribute(
+          "aria-label",
+          media && typeof media.alt === "string" && media.alt !== ""
+            ? `Replace Card image: ${media.alt}`
+            : "Replace Card image",
+        );
+        if (directMedia) {
+          if (mediaPicker.previousElementSibling !== mediaPaint) mediaPaint.after(mediaPicker);
+          mediaPicker.hidden = true;
+          syncMediaPaintBounds();
+        } else {
+          if (mediaPicker.parentElement !== controls) controls.prepend(mediaPicker);
+          mediaPicker.hidden = false;
         }
         // Keep the media picker in sync with an EXTERNAL attr change (an echo, an undo)
         // via its `value` PROPERTY setter (re-renders the preview; does NOT re-fire
@@ -633,19 +692,44 @@ export const Card = Node.create({
       // {type:"image",src} — NEVER write the raw value. An empty string is a CLEAR →
       // attrs.media=null → round-trips ABSENT (removal lands).
       const onMediaChange = (e) => {
-        const meta = (e.target && e.target.meta) || {};
-        const src = meta.url || mediaUrlFromValue((e.detail && e.detail.value) || "");
+        const metaUrl = e.target?.meta?.url;
+        const parsed = typeof metaUrl === "string" && metaUrl
+          ? { valid: true, src: metaUrl }
+          : parsedMediaUrl(e.detail?.value);
+        if (!parsed.valid) return;
+        const { src } = parsed;
         writeAttr((attrs) => {
           if (src === "") {
             attrs.media = null; // clear → round-trips ABSENT (removal lands)
           } else {
-            const prev = attrs.media && typeof attrs.media === "object" ? attrs.media : {};
-            attrs.media = { ...prev, type: "image", src };
+            const prev = attrs.media && typeof attrs.media === "object" ? attrs.media : null;
+            attrs.media = prev ? { ...prev, src } : { type: "image", src };
           }
           return attrs;
         });
       };
       mediaPicker.addEventListener("bp-change", onMediaChange);
+      const openMediaPicker = () => {
+        if (!editor.isEditable || mediaPaint.hidden) return;
+        const opened = typeof mediaPicker.openBrowser === "function" && mediaPicker.openBrowser();
+        if (!opened && typeof mediaPicker.openFileDialog === "function") {
+          mediaPicker.openFileDialog();
+        }
+      };
+      const onMediaPaintClick = () => openMediaPicker();
+      const onMediaPaintKeydown = (event) => {
+        if ((event.metaKey || event.ctrlKey) && !event.altKey &&
+            (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
+          event.preventDefault();
+          const redo = event.shiftKey || event.key.toLowerCase() === "y";
+          editor.commands[redo ? "redo" : "undo"]();
+        } else if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openMediaPicker();
+        }
+      };
+      mediaPaint.addEventListener("click", onMediaPaintClick);
+      mediaPaint.addEventListener("keydown", onMediaPaintKeydown);
 
       // ── action controls: set/clear the action element's label/href/priority.
       // type:"action" is ALWAYS present (no server normalize net — dropping it renders
@@ -711,7 +795,8 @@ export const Card = Node.create({
         stopEvent: (e) => {
           const t = e && e.target;
           return !!(t && (
-            titleEl.contains(t) || actionLabelHost.contains(t) || controls.contains(t)
+            titleEl.contains(t) || actionLabelHost.contains(t) || mediaPaint.contains(t) ||
+            mediaPicker.contains(t) || controls.contains(t)
           ));
         },
         ignoreMutation: (m) => {
@@ -722,7 +807,8 @@ export const Card = Node.create({
           if (m.type === "attributes" && m.target === dom) return true;
           if (titleEl.contains(m.target)) return true; // title edits are attr writes
           if (controls.contains(m.target)) return true; // controls (inc. the picker WC's own preview DOM) are attr writes
-          if (mediaImg.contains(m.target)) return true; // media slot is attr-painted
+          if (mediaImg.contains(m.target) || mediaPaint.contains(m.target) ||
+              mediaPicker.contains(m.target)) return true; // media slot and picker are attr-painted
           if (actionLink.contains(m.target) || actionLabelBoundary.contains(m.target)) return true;
           // Let PM handle mutations inside the editable body (contentDOM); ignore chrome.
           return !body.contains(m.target);
@@ -743,6 +829,10 @@ export const Card = Node.create({
           actionLabelHost.removeEventListener("compositionend", onActionCompositionEnd);
           actionLabelControl.removeEventListener("click", focusActionLabel);
           mediaPicker.removeEventListener("bp-change", onMediaChange);
+          mediaPaint.removeEventListener("click", onMediaPaintClick);
+          mediaPaint.removeEventListener("keydown", onMediaPaintKeydown);
+          mediaImg.removeEventListener("load", onMediaLoad);
+          mediaPaintObserver?.disconnect();
           actionLabelInput.removeEventListener("change", writeNewAction);
           actionHrefInput.removeEventListener("change", writeActionHref);
           actionPrioritySelect.removeEventListener("change", writeActionPriority);

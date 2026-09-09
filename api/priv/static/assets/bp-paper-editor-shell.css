@@ -1701,6 +1701,17 @@
   box-sizing: border-box;
 }
 .bp-paper-figure-image { position: relative; }
+.bp-canvas-card__media-paint {
+  position: absolute; padding: 0; margin: 0; border: 0;
+  border-radius: 0; background: transparent; color: transparent;
+  font-size: 0; cursor: pointer;
+}
+.bp-canvas-card__media-paint:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
+.bp-canvas-card > bp-media-picker.bp-canvas-card__media-picker[hidden] {
+  display: none !important;
+}
 .bp-paper-figure-editor-frame { display: flow-root; }
 [data-paper-figure-image-trigger] { cursor: pointer; outline-offset: 3px; }
 .bp-paper-figure-image-trigger {

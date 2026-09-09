@@ -1493,6 +1493,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   defp card_action_present?(_block), do: false
 
+  defp card_image_direct?(%{"slots" => %{"media" => [media]}}) when is_map(media) do
+    is_binary(media["src"]) and media["src"] != "" and
+      (not Map.has_key?(media, "type") or media["type"] == "image")
+  end
+
+  defp card_image_direct?(_block), do: false
+
+  defp card_image_dom_id(block_id),
+    do: "card-image-" <> Base.url_encode64(block_id, padding: false)
+
+  defp card_image_trigger_label(block) do
+    case get_in(block, ["slots", "media"]) do
+      [%{"alt" => alt}] when is_binary(alt) and alt != "" -> "Replace card image: " <> alt
+      _ -> "Replace card image"
+    end
+  end
+
   defp card_action_label_dom_id(block_id),
     do: "card-action-label-" <> Base.url_encode64(block_id, padding: false)
 
@@ -2372,9 +2389,50 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <%= case Blocks.card_form_state(@block) do %>
             <% {:ok, state} -> %>
               <% parts = RenderComponents.card_article_parts(@block) %>
+              <% direct_image = @picker_browse && card_image_direct?(@block) %>
               <div class="bp-paper-contextual-preview" data-test-id="paper-card-preview">
                 <div class={parts.class}>
-                  <%= raw(parts.media_html) %>
+                  <%= if direct_image do %>
+                    <div
+                      id={card_image_dom_id(@id)}
+                      class="bp-paper-card-image bp-paper-figure-image"
+                      phx-hook="BarkparkFigureImageBridge"
+                      data-image-owner="card"
+                      data-block-id={@id}
+                      data-image-src={state.media_src}
+                      data-test-id="paper-card-image-preview"
+                    >
+                      <%= raw(String.replace(parts.media_html, ~s( data-bp-lightboxable="true"), "")) %>
+                      <button
+                        id={card_image_dom_id(@id) <> "-trigger"}
+                        type="button"
+                        class="bp-paper-figure-image-trigger"
+                        data-paper-figure-image-trigger
+                        aria-label={card_image_trigger_label(@block)}
+                        aria-haspopup="dialog"
+                        data-test-id="paper-card-image-edit-trigger"
+                      ></button>
+                      <details class="bp-paper-figure-image-controls" data-test-id="paper-card-image-picker">
+                        <summary>Image options</summary>
+                        <div
+                          id={card_image_dom_id(@id) <> "-picker"}
+                          class="bp-paper-figure-image-picker"
+                          phx-update="ignore"
+                        >
+                          <bp-media-picker
+                            value={state.media_src}
+                            dataset={@dataset}
+                            scope-prefix={@scope_prefix}
+                            data-token={@api_token_raw}
+                            data-paper-figure-image-picker
+                            data-test-id="paper-block-image-picker"
+                          ></bp-media-picker>
+                        </div>
+                      </details>
+                    </div>
+                  <% else %>
+                    <%= raw(parts.media_html) %>
+                  <% end %>
                   <%= raw(parts.title_html) %>
                   <.card_body_editor block={@block} />
                   <%= if card_action_present?(@block) do %>
@@ -2410,8 +2468,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     </select>
                     <label class="bp-paper-edit-fieldlabel" for={"card-title-" <> @id}>Title</label>
                     <input id={"card-title-" <> @id} type="text" name="card-title" class="bp-paper-edit-text" value={state.title} />
-                    <label class="bp-paper-edit-fieldlabel" for={"card-media-src-" <> @id}>Media source</label>
-                    <input id={"card-media-src-" <> @id} type="text" name="card-media-src" class="bp-paper-edit-text" value={state.media_src} />
+                    <%= if direct_image do %>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-sm"
+                        data-test-id="paper-card-image-focus"
+                        aria-controls={card_image_dom_id(@id) <> "-trigger"}
+                        phx-click={contextual_panel_focus(card_image_dom_id(@id) <> "-trigger")}
+                      >Replace image</button>
+                    <% else %>
+                      <label class="bp-paper-edit-fieldlabel" for={"card-media-src-" <> @id}>Media source</label>
+                      <input id={"card-media-src-" <> @id} type="text" name="card-media-src" class="bp-paper-edit-text" value={state.media_src} />
+                    <% end %>
                     <label class="bp-paper-edit-fieldlabel" for={"card-media-alt-" <> @id}>Media description</label>
                     <input id={"card-media-alt-" <> @id} type="text" name="card-media-alt" class="bp-paper-edit-text" value={state.media_alt} />
                     <%= if card_action_present?(@block) do %>

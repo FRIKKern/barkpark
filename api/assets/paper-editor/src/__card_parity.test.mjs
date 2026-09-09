@@ -166,8 +166,17 @@ check("action slot is the reader's PdButton anchor with the binary priority coll
 //        the top, OUTSIDE the reader-shape subtree) ────────────────────────────
 check("mounted order keeps reader slots before the edit-only action-label twin", () => {
   assert.ok(
-    /dom\.append\(controls, mediaImg, titleHost, body, actionLink, actionLabelBoundary\);/.test(SRC),
+    /dom\.append\(\s*controls,\s*mediaImg,\s*mediaPaint,\s*titleHost,\s*body,\s*actionLink,\s*actionLabelBoundary,?\s*\);/.test(SRC),
     "the mounted slot order no longer matches the reader's media, title, body, action",
+  );
+});
+
+check("direct media editing keeps the bare image and adds a sibling native control", () => {
+  assert.ok(
+    /const mediaImg = document\.createElement\("img"\);/.test(SRC) &&
+      /const mediaPaint = document\.createElement\("button"\);/.test(SRC) &&
+      /mediaPaint\.setAttribute\("aria-haspopup", "dialog"\);/.test(SRC),
+    "the Card image lost its bare reader element or sibling picker control",
   );
 });
 

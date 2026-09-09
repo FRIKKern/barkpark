@@ -87,6 +87,30 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
               "description" => "Original links description",
               "refs" => refs,
               "unknown" => [1, 2]
+            },
+            %{
+              "id" => "card",
+              "type" => "card",
+              "tone" => "calm",
+              "slots" => %{
+                "title" => [%{"type" => "heading", "text" => "Card title"}],
+                "body" => [%{"type" => "paragraph", "content" => []}],
+                "media" => [
+                  %{
+                    "type" => "image",
+                    "src" => "/card-before.png",
+                    "alt" => "Card alt",
+                    "width" => 640,
+                    "height" => 320,
+                    "opaque" => %{"keep" => [true, nil, 1, 1.0]}
+                  }
+                ],
+                "action" => [
+                  %{"type" => "action", "label" => "Read", "href" => "/read"}
+                ],
+                "unknown" => %{"slot" => true}
+              },
+              "unknown" => %{"card" => true}
             }
           ]
         })
@@ -286,7 +310,7 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
               rev: forward_rev
             }, forward_socket} =
              StudioLive.handle_event(
-               "paper-block-autosave",
+               "paper-edit-block",
                %{
                  "block_id" => "links",
                  "description" => "  Studio description  ",
@@ -478,6 +502,127 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
 
     assert [^newer_target, ^sibling] = paper_links(slug)["refs"]
     assert Content.get_paper(target_slug, @dataset).content === linked_before
+  end
+
+  test "Studio Card media source history preserves the current carrier through undo and redo", %{
+    socket: socket,
+    slug: slug
+  } do
+    original_card = card(slug)
+    original_media = card_media(slug)
+    forward_id = Ecto.UUID.generate()
+
+    assert {:reply,
+            %{
+              saved: true,
+              changed: true,
+              replayed: false,
+              request_id: ^forward_id,
+              history_step: %{version: 1, ref: ^forward_id, action: "undo"},
+              rev: forward_rev
+            } = forward_reply, forward_socket} =
+             StudioLive.handle_event(
+               "paper-block-autosave",
+               %{
+                 "block_id" => "card",
+                 "card-media-src" => "/card-after.png",
+                 "request_id" => forward_id,
+                 "if_rev" => socket.assigns.paper_rev
+               },
+               socket
+             )
+
+    refute inspect(forward_reply) =~ "/card-before.png"
+    saved_media = card_media(slug)
+    assert saved_media === Map.put(original_media, "src", "/card-after.png")
+
+    concurrent_media =
+      saved_media
+      |> Map.put("alt", "Concurrent Studio alt")
+      |> Map.put("height", 720)
+      |> Map.put("opaque", %{"later" => [false, nil]})
+
+    concurrent_slots = Map.put(card(slug)["slots"], "media", [concurrent_media])
+
+    assert {:ok, %{rev: concurrent_rev}} =
+             Content.apply_paper_block_op(
+               slug,
+               %{
+                 "op" => "patch-block",
+                 "id" => "card",
+                 "patch" => %{"slots" => concurrent_slots}
+               },
+               @dataset,
+               if_rev: forward_rev
+             )
+
+    undo_id = Ecto.UUID.generate()
+
+    assert {:reply,
+            %{
+              saved: true,
+              history_step: %{version: 1, ref: ^undo_id, action: "redo"},
+              rev: undo_rev
+            }, undone_socket} =
+             StudioLive.handle_event(
+               "paper-history-step",
+               %{
+                 "history_ref" => forward_id,
+                 "action" => "undo",
+                 "request_id" => undo_id,
+                 "if_rev" => concurrent_rev
+               },
+               forward_socket
+             )
+
+    assert card_media(slug) === Map.put(concurrent_media, "src", original_media["src"])
+    assert Map.delete(card(slug), "slots") === Map.delete(original_card, "slots")
+    redo_id = Ecto.UUID.generate()
+
+    assert {:reply, %{saved: true}, _redone_socket} =
+             StudioLive.handle_event(
+               "paper-history-step",
+               %{
+                 "history_ref" => undo_id,
+                 "action" => "redo",
+                 "request_id" => redo_id,
+                 "if_rev" => undo_rev
+               },
+               undone_socket
+             )
+
+    assert card_media(slug) === concurrent_media
+  end
+
+  test "Studio Card media history rejects newer sources and carrier type drift", %{
+    socket: socket,
+    slug: slug
+  } do
+    forward_id = Ecto.UUID.generate()
+
+    assert {:reply, %{saved: true, rev: forward_rev}, forward_socket} =
+             StudioLive.handle_event(
+               "paper-edit-block",
+               %{
+                 "block_id" => "card",
+                 "card-media-src" => "/card-after.png",
+                 "request_id" => forward_id,
+                 "if_rev" => socket.assigns.paper_rev
+               },
+               socket
+             )
+
+    newer_media = Map.put(card_media(slug), "src", "/card-newer.png")
+    newer_slots = Map.put(card(slug)["slots"], "media", [newer_media])
+
+    assert {:ok, %{rev: newer_rev}} = patch_card_slots(slug, newer_slots, forward_rev)
+    assert_history_conflict(forward_socket, forward_id, newer_rev)
+    typeless_media = newer_media |> Map.put("src", "/card-after.png") |> Map.delete("type")
+    typeless_slots = Map.put(card(slug)["slots"], "media", [typeless_media])
+
+    assert {:ok, %{rev: typeless_rev}} = patch_card_slots(slug, typeless_slots, newer_rev)
+    assert_history_conflict(forward_socket, forward_id, typeless_rev)
+    assert card_media(slug) === typeless_media
   end
 
   test "credential, revoked-token, and read-only refusals happen before history lookup", %{
@@ -687,6 +832,48 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
     |> Map.fetch!(:content)
     |> Map.fetch!("blocks")
     |> Enum.find(&(&1["id"] == "links"))
+  end
+
+  defp card(slug) do
+    slug
+    |> Content.get_paper(@dataset)
+    |> Map.fetch!(:content)
+    |> Map.fetch!("blocks")
+    |> Enum.find(&(&1["id"] == "card"))
+  end
+
+  defp card_media(slug), do: get_in(card(slug), ["slots", "media", Access.at(0)])
+
+  defp patch_card_slots(slug, slots, if_rev) do
+    Content.apply_paper_block_op(
+      slug,
+      %{"op" => "patch-block", "id" => "card", "patch" => %{"slots" => slots}},
+      @dataset,
+      if_rev: if_rev
+    )
+  end
+
+  defp assert_history_conflict(socket, history_ref, if_rev) do
+    request_id = Ecto.UUID.generate()
+
+    assert {:reply,
+            %{
+              saved: false,
+              request_id: ^request_id,
+              rejected: "history_conflict",
+              conflict: true,
+              current_rev: ^if_rev
+            }, _socket} =
+             StudioLive.handle_event(
+               "paper-history-step",
+               %{
+                 "history_ref" => history_ref,
+                 "action" => "undo",
+                 "request_id" => request_id,
+                 "if_rev" => if_rev
+               },
+               socket
+             )
   end
 
   defp reference_copy_params(ref, field, value, request_id, if_rev) do
