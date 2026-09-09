@@ -145,7 +145,10 @@ defmodule BarkparkWeb.GraphCorpusHeapBoundTest do
 
   defp bearer(conn, token), do: put_req_header(conn, "authorization", "Bearer " <> token)
 
-  test "the corpus derivation's peak heap is bounded by ONE type, not the corpus", %{conn: conn} do
+  test "the corpus derivation's peak heap is bounded by ONE type, not the corpus", %{
+    conn: conn,
+    scope: scope
+  } do
     # The control: one type's documents, decoded, as the fold sees them. This is
     # measured, not guessed, so the ceiling below is derived from the machine
     # this test runs on rather than from a constant someone tuned once.
@@ -153,7 +156,11 @@ defmodule BarkparkWeb.GraphCorpusHeapBoundTest do
     {:memory, before_mem} = :erlang.process_info(self(), :memory)
 
     one_type_docs =
-      Content.list_documents("heapt1", @dataset, limit: 1000, perspective: :published)
+      Content.list_documents(
+        "heapt1",
+        @dataset,
+        [limit: 1000, perspective: :published] ++ scope
+      )
 
     assert length(one_type_docs) == @docs_per_type,
            "fixture did not publish #{@docs_per_type} documents — the ceiling would be nonsense"
