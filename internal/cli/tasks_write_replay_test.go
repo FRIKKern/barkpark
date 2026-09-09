@@ -123,7 +123,8 @@ func (f *replayFake) serve(t *testing.T) {
 		// area exists to correct.
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/stamp"):
-			if note := r.URL.Query().Get("note"); note != "" {
+			// note rides the BODY since #17000; read the merge, as the server does.
+			if note := stampMergedParams(r).Get("note"); note != "" {
 				f.attempts = append(f.attempts, note)
 			}
 		case strings.HasSuffix(r.URL.Path, "/pulse"):
