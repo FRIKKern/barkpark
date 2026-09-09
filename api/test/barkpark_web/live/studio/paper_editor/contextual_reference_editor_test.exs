@@ -229,6 +229,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
     first_title_id = "paper-link-ref-title-#{encoded}-0-#{first_digest}"
     first_description_id = "paper-link-ref-description-#{encoded}-0-#{first_digest}"
     missing_title_id = "paper-link-ref-title-#{encoded}-1-#{missing_digest}"
+    missing_description_id = "paper-link-ref-description-#{encoded}-1-#{missing_digest}"
 
     first_title_form =
       fragment
@@ -286,17 +287,33 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
            |> LazyHTML.attribute("href")
            |> Enum.at(0) == "/papers/authored"
 
-    assert fragment
-           |> LazyHTML.query(
-             ~s([data-paper-link-ref-title-panel-trigger][aria-controls="#{missing_title_id}"])
-           )
-           |> Enum.count() == 1
+    for {field, dom_id} <- [
+          {"title", first_title_id},
+          {"description", first_description_id},
+          {"title", missing_title_id},
+          {"description", missing_description_id}
+        ] do
+      trigger =
+        fragment
+        |> LazyHTML.query(
+          ~s([data-paper-link-ref-#{field}-panel-trigger][aria-controls="#{dom_id}"])
+        )
+        |> Enum.at(0)
 
-    assert fragment
-           |> LazyHTML.query(
-             ~s([data-paper-link-ref-description-panel-trigger][aria-controls="#{first_description_id}"])
-           )
-           |> Enum.count() == 1
+      assert trigger
+             |> LazyHTML.attribute("phx-click")
+             |> List.first()
+             |> Jason.decode!() == [
+               [
+                 "remove_attr",
+                 %{
+                   "attr" => "open",
+                   "to" => %{"closest" => ".bp-paper-contextual-controls"}
+                 }
+               ],
+               ["focus", %{"to" => "##{dom_id}"}]
+             ]
+    end
 
     assert fragment
            |> LazyHTML.query(
