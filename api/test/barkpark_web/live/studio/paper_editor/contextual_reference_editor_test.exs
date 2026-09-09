@@ -156,6 +156,155 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
     assert block === original
   end
 
+  test "admitted reference copy edits in place while duplicate and live copy stay reader links" do
+    hostile_id = "related: copy/[inline]!?"
+
+    block = %{
+      "id" => hostile_id,
+      "type" => "paper-links",
+      "layout" => "timeline",
+      "refs" => [
+        %{
+          "slug" => " authored ",
+          "title" => "Authored title",
+          "description" => "Authored description",
+          "prefer_authored_copy" => true,
+          "unknown" => %{"keep" => true}
+        },
+        %{"slug" => "missing", "prefer_authored_copy" => true},
+        %{"slug" => "duplicate", "title" => "First", "prefer_authored_copy" => true},
+        %{"slug" => " duplicate ", "title" => "Second", "prefer_authored_copy" => true},
+        %{"slug" => "live", "title" => "Local ignored", "prefer_authored_copy" => false}
+      ]
+    }
+
+    live_details = %{
+      "authored" => %{title: "Live ignored", description: "Live ignored"},
+      "missing" => %{title: "Live fallback title", description: "Live fallback description"},
+      "duplicate" => %{title: "Duplicate live"},
+      "live" => %{title: "Live owned elsewhere", description: "Read only live copy"}
+    }
+
+    html =
+      render_component(&PaperEditor.paper_block_fields/1, %{
+        block: block,
+        paper_links: live_details
+      })
+
+    fragment = LazyHTML.from_fragment(html)
+    encoded = Base.url_encode64(hostile_id, padding: false)
+
+    assert fragment
+           |> LazyHTML.query(~s(div[data-paper-link-card-editable]))
+           |> Enum.count() == 2
+
+    assert fragment
+           |> LazyHTML.query(~S|a[data-paper-link-card]:not([data-paper-link-open])|)
+           |> Enum.count() == 3
+
+    assert fragment
+           |> LazyHTML.query(~s([data-paper-link-ref-title-paint]))
+           |> Enum.count() == 1
+
+    assert fragment
+           |> LazyHTML.query(~s([data-paper-link-ref-description-paint]))
+           |> Enum.count() == 1
+
+    assert html =~ "Live fallback title"
+    assert html =~ "Live fallback description"
+    refute html =~ "Live ignored"
+
+    {:ok, first_admission} = Blocks.paper_link_reference_copy_admission(block, 0)
+
+    first_title_form =
+      fragment
+      |> LazyHTML.query(~s(form[data-test-id="paper-link-ref-title-editor"]))
+      |> Enum.at(0)
+
+    assert first_title_form
+           |> LazyHTML.query(~s([name="paper-link-ref-index"]))
+           |> LazyHTML.attribute("value") == ["0"]
+
+    assert first_title_form
+           |> LazyHTML.query(~s([name="paper-link-ref-slug"]))
+           |> LazyHTML.attribute("value") == [" authored "]
+
+    assert first_title_form
+           |> LazyHTML.query(~s([name="paper-link-ref-field"]))
+           |> LazyHTML.attribute("value") == ["title"]
+
+    assert first_title_form
+           |> LazyHTML.query(~s([name="paper-link-ref-guard"]))
+           |> LazyHTML.attribute("value") == [first_admission.guard]
+
+    assert first_title_form
+           |> LazyHTML.query(~s(textarea[name="paper-link-ref-value"]))
+           |> LazyHTML.text() == "Authored title"
+
+    assert fragment
+           |> LazyHTML.query(
+             ~s(textarea#paper-link-ref-title-#{encoded}-1[name="paper-link-ref-value"][tabindex="-1"])
+           )
+           |> Enum.count() == 1
+
+    assert fragment
+           |> LazyHTML.query(~s(textarea#paper-link-ref-title-#{encoded}-1))
+           |> LazyHTML.text() == ""
+
+    assert fragment
+           |> LazyHTML.query(~s(textarea#paper-link-ref-title-#{encoded}-1))
+           |> LazyHTML.attribute("placeholder") == ["Live fallback title"]
+
+    assert fragment
+           |> LazyHTML.query(~s(a[data-paper-link-open]))
+           |> LazyHTML.attribute("href")
+           |> Enum.at(0) == "/papers/authored"
+
+    assert fragment
+           |> LazyHTML.query(
+             ~s([data-paper-link-ref-title-panel-trigger][aria-controls="paper-link-ref-title-#{encoded}-1"])
+           )
+           |> Enum.count() == 1
+
+    assert fragment
+           |> LazyHTML.query(
+             ~s(a[data-paper-link-open][aria-label="Open paper: Authored title"] form)
+           )
+           |> Enum.empty?()
+
+    assert fragment
+           |> LazyHTML.query("a button, a textarea, form form")
+           |> Enum.empty?()
+
+    approved_names = [
+      "block_id",
+      "paper-link-ref-index",
+      "paper-link-ref-slug",
+      "paper-link-ref-field",
+      "paper-link-ref-value",
+      "paper-link-ref-guard"
+    ]
+
+    for form <- LazyHTML.query(fragment, ~s(form[data-test-id^="paper-link-ref-"])) do
+      names =
+        form
+        |> LazyHTML.query("[name]")
+        |> Enum.map(&(LazyHTML.attribute(&1, "name") |> List.first()))
+        |> Enum.sort()
+
+      assert names == Enum.sort(approved_names)
+    end
+
+    configure = LazyHTML.query(fragment, ~s([data-test-id="paper-links-editor"]))
+    refute configure |> LazyHTML.query(~s([name="ref-0-title"])) |> Enum.any?()
+    refute configure |> LazyHTML.query(~s([name="ref-0-description"])) |> Enum.any?()
+    refute configure |> LazyHTML.query(~s([name="ref-1-title"])) |> Enum.any?()
+    refute configure |> LazyHTML.query(~s([name="ref-1-description"])) |> Enum.any?()
+    assert configure |> LazyHTML.query(~s([name="ref-2-title"])) |> Enum.count() == 1
+    assert configure |> LazyHTML.query(~s([name="ref-3-title"])) |> Enum.count() == 1
+    assert configure |> LazyHTML.query(~s([name="ref-4-title"])) |> Enum.count() == 1
+  end
+
   test "bar-chart keeps the canonical chart visible while row controls start closed" do
     block = %{
       "id" => "velocity",
