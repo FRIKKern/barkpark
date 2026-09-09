@@ -87,7 +87,7 @@ import { spawnSync } from "node:child_process";
 import { openSync, closeSync, readSync, readFileSync, rmSync, mkdtempSync, statSync } from "node:fs";
 import { constants as bufferConstants } from "node:buffer";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const LEDGER_CLI = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
@@ -373,7 +373,10 @@ export function runGrepCount(term, dir, { excludeDirs = [] } = {}) {
   return { count: status === 0 ? lines : 0, status };
 }
 
-function grepFlags(excludeDirs) {
+// Exported so a test can assert the CONSTRUCTED ARGV carries the exclusions,
+// rather than timing a run — a timing assertion passes vacuously on a machine
+// that has no nested worktrees, which is exactly the reader this guard is for.
+export function grepFlags(excludeDirs) {
   return ["-rIn", ...excludeDirs.map((d) => `--exclude-dir=${d}`)];
 }
 
@@ -440,8 +443,33 @@ function grepLinesToAnswer(grepLines) {
 // The heavy directories a repo-wide grep must NOT count: vendored trees and
 // build output are not "the codebase an agent searches", and scanning them is
 // both noise and the run's slowest step. Named once.
+//
+// `.claude` IS ON THIS LIST BECAUSE OF A MEASUREMENT, not for tidiness. Agents
+// nest their git worktrees under `.claude/worktrees/`, and each one is a FULL
+// checkout of this repo. With the list below missing that entry, the single
+// repo-wide `grep -rIn … .` in `scoreQuery` walked the tree once per nested
+// worktree: caught LIVE as PID 17091, `grep -rIn --exclude-dir=.git … -- <term>
+// .`, cwd /Volumes/SATECHI/github/barkpark, ELAPSED 38:30 AND STILL RUNNING, a
+// descendant of another agent's `node --test tooling/grip/test/*.test.mjs`. The
+// same file completes in 9 SECONDS from a clean worktree. That 38:30 is the
+// whole of the epic's ">25 minutes / does not terminate" folklore, and the
+// defect is HERE, in the exclude list — not in how many worktrees a machine
+// happens to carry. A later reader who prunes their worktrees and sees a fast
+// pass has measured their own filesystem, not this list.
+//
+// IT IS SPELLED `.claude`, NOT `.claude/worktrees`, AND THE SPELLING IS THE
+// FIX. Measured on this host 2026-09-10: BSD grep (/usr/bin/grep) matches
+// `--exclude-dir` against the directory BASENAME only, so
+// `--exclude-dir=.claude/worktrees` skipped NOTHING — the planted file under
+// .claude/worktrees/x still matched — while `--exclude-dir=.claude` and
+// `--exclude-dir=worktrees` each skipped it. (ugrep, which shadows `grep` on
+// this PATH, honours the path form; GNU grep does not.) So the path spelling
+// would have shipped a comment-shaped no-op on the very grep most likely to
+// run. `worktrees` rides alongside as the portable catch for a worktree root
+// parked outside `.claude`.
 export const REPO_WIDE_EXCLUDES = Object.freeze([
   ".git", "node_modules", "_build", "deps", ".turbo", "dist", "build",
+  ".claude", "worktrees",
 ]);
 
 // Score one query at one granularity against one store. The scoped grep targets
@@ -721,7 +749,24 @@ function main(argv) {
 
 // Only run when invoked directly, so the test can import the pure functions
 // without spawning the CLI.
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// `resolve()` ON BOTH SIDES — the spelling the other seven grip CLIs (cli,
+// census, screen, ledger, backfill, acceptance, seal) all carry, and this was
+// the last file without it.
+//
+// HONEST ABOUT WHAT IT FIXES, because the surfacing row overstated it.
+// `node ./trial-leads-vs-grep.mjs --selftest` from tooling/grip was MEASURED on
+// origin/main's own copy of this file, 2026-09-10, and printed
+// `selftest OK: W1-W7 frozen…` — node ABSOLUTISES process.argv[1] before the
+// module sees it, so the relative-argv failure the row predicted does not
+// reproduce. Nor does `resolve()` rescue the case that DOES reproduce: invoked
+// through a symlink, both forms read false (import.meta.url is realpath'd,
+// argv[1] is not, and resolve() does not follow links) — measured the same day
+// on both the patched and unpatched copies.
+//
+// So this is a UNIFORMITY fix, not a bug fix, and it is worth making for that
+// alone: eight identical guards are one thing a reader has to check, and the
+// odd one out is where the next half-fixed guard hides.
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   // NO process.exit HERE (charter D92). main() writes the whole report — the
   // `--json` document included — to stdout on the line before it returns, and
   // Node writes a PIPE asynchronously: process.exit() discards whatever the
