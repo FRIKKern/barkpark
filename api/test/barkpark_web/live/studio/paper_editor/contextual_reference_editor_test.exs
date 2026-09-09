@@ -500,7 +500,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
           "title" => 9,
           "description" => 1.5,
           "prefer_authored_copy" => false
-        }
+        },
+        "legacy-string"
       ]
     }
 
@@ -524,6 +525,10 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
              |> LazyHTML.query(~s([data-paper-link-ref-#{opaque_field}-readonly]))
              |> Enum.count() == 1
     end
+
+    legacy_row = configure |> LazyHTML.query(~s([data-ref-index="4"])) |> Enum.at(0)
+    assert legacy_row |> LazyHTML.query(~s([name="ref-4-title"])) |> Enum.count() == 1
+    assert legacy_row |> LazyHTML.query(~s([name="ref-4-description"])) |> Enum.count() == 1
   end
 
   test "bar-chart keeps the canonical chart visible while row controls start closed" do

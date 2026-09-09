@@ -1913,13 +1913,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     end
   end
 
-  defp paper_link_ref_field_representable?(ref, field) when is_map(ref) do
+  defp paper_link_ref_field_representable?(ref, field)
+       when is_map(ref) and not is_struct(ref) do
     case Map.fetch(ref, field) do
       :error -> true
       {:ok, value} -> is_nil(value) or is_binary(value) or is_integer(value)
     end
   end
 
+  defp paper_link_ref_field_representable?(ref, _field) when is_binary(ref), do: true
   defp paper_link_ref_field_representable?(_ref, _field), do: false
 
   # Per-block-type edit fields. Rich bodies use the canonical WC so its
