@@ -265,7 +265,7 @@
     },
     {
       "context": "Report main-push failure to a human",
-      "reason": "S7 EXCLUDED BY DECISION: an AFTER-THE-FACT reporter, and the one name in this ledger published by FIVE different jobs — cloud.yml, console-harness.yml, deploy-harnesses.yml, search-template-gates.yml and twoslash.yml each define a `report-main-failure` job under this identical `name:`. Branch protection keys on the STRING, so requiring it would pin whichever of the five happened to render, and the two paths-filtered ones would make it absent on most PRs anyway. It exists to open an issue when a push-to-main run reds; it certifies nothing about a PR. Its collision is itself worth knowing: a green under this name does not tell you WHICH workflow reported."
+      "reason": "S7 EXCLUDED BY DECISION: an AFTER-THE-FACT reporter, and the one name in this ledger published by EVERY workflow that wires the push-to-main reporter — a set that GROWS with each gate that gains the arm, so this row carries the PREDICATE and not a count: any workflow with a job whose `name:` is this string. CORRECTED 2026-09-09 (task-2e28697e29983544) — the sentence here said \"FIVE different jobs\" and listed five files; it was five when written and is NINE today (cloud.yml, console-harness.yml, deploy-harnesses.yml, elixir.yml, go-tests.yml, pr-meta.yml, search-template-gates.yml, security.yml, twoslash.yml) after #17076 gave the Elixir, Go and Security gates the arm the other two already had. The job KEYS are not uniform either — pr-meta.yml calls its job `main-failure-issue` where the rest call it `report-main-failure` — so counting job keys misses it too. Re-derive, never trust this list: awk '/^  [A-Za-z0-9_-]+:/{k=$1} /^    name: Report main-push failure to a human/{print FILENAME, k}' .github/workflows/*.yml. Branch protection keys on the STRING, so requiring it would pin whichever one happened to render, and the paths-filtered ones would make it absent on most PRs anyway. It exists to open an issue when a push-to-main run reds; it certifies nothing about a PR. Its collision is itself worth knowing: a green under this name does not tell you WHICH workflow reported."
     },
     {
       "context": "gofmt -l (advisory)",
@@ -526,6 +526,22 @@
     {
       "context": "Generate reference",
       "reason": "S4 PATHS-FILTERED: typedoc.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). typedoc.yml job `generate` — it builds the TypeDoc API reference for js/packages. A documentation artefact producer, filtered to js/packages/**, tooling/typedoc/**, package.json and the workflow itself; it is absent on every PR that touches none of them. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Filebase aesthetics critic (advisory, main + nightly)",
+      "reason": "S2 ADVISORY BY INTENT: ADDED 2026-09-09 (#17079, 6e3e353ee) — pr-meta.yml job 'aesthetics' carries a job-level 'if: github.event_name != pull_request', so on every PR head it is SKIPPED and publishes no verdict a PR could clear; its two critic steps carry step-level continue-on-error, so the job reds only when the harness itself breaks. Retire this row if the job ever gains a pull_request arm that concludes on its own findings."
+    },
+    {
+      "context": "pipefail SIGPIPE scan",
+      "reason": "S2 ADVISORY BY INTENT: ADDED 2026-09-09 (#17081, e4acd4339) — pipefail-sigpipe-scan.yml job 'scan' is advisory by its own header ('THIS WORKFLOW IS ADVISORY … nothing here can stop a merge'): it SKIPS on a PR touching none of scripts/, .github/workflows/ or deploy/, and its high-confidence ratchet reds on a repo-wide count that no single PR can clear. Retire this row when the ratchet's baseline is zero and a deadlock sweep reports no casualties."
+    },
+    {
+      "context": "pipefail scan — did the scanner's inputs move?",
+      "reason": "S2 ADVISORY BY INTENT: ADDED 2026-09-09 (#17081, e4acd4339) — pipefail-sigpipe-scan.yml job 'changes' is a DISPATCHER: it only computes the 'hit' output the scan job reads, and asserts nothing about the tree. Requiring it would pin the scan's own venue predicate to the merge button. Retire this row if the job ever carries the verdict itself."
+    },
+    {
+      "context": "Mark the task rows this push landed",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: landed-mark.yml job 'landed-mark' — the workflow carries no pull_request trigger, so on a PR this name is not SKIPPED, it is ABSENT, and a required absent context reports 'expected' forever (D18). Derived from the workflow's own `on:` block, not from a list."
     }
   ]
 }
