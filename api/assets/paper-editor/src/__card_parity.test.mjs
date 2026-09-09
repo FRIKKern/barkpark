@@ -164,10 +164,23 @@ check("action slot is the reader's PdButton anchor with the binary priority coll
 
 // ── 5. SOURCE: reader slot ORDER media, title, body, action (controls ride at
 //        the top, OUTSIDE the reader-shape subtree) ────────────────────────────
-check("mounted order is controls, media, title, body, action (reader slot order)", () => {
+check("mounted order keeps reader slots before the edit-only action-label twin", () => {
   assert.ok(
-    /dom\.append\(controls, mediaImg, titleHost, body, actionLink\);/.test(SRC),
+    /dom\.append\(controls, mediaImg, titleHost, body, actionLink, actionLabelHost\);/.test(SRC),
     "the mounted slot order no longer matches the reader's media, title, body, action",
+  );
+});
+
+check("direct action-label editing uses a non-link plaintext sibling", () => {
+  assert.ok(
+    /const actionLabelHost = document\.createElement\("span"\);/.test(SRC) &&
+      /actionLabelHost\.contentEditable = editable && hasAction \? "plaintext-only" : "false";/.test(SRC),
+    "the action label lost its independent plaintext editing host",
+  );
+  assert.ok(
+    /actionLink\.style\.display = "none";/.test(SRC) &&
+      /actionLabelHost\.style\.display = editable && hasAction \? "" : "none";/.test(SRC),
+    "View/Edit no longer expose mutually exclusive link and editing hosts",
   );
 });
 
