@@ -586,7 +586,21 @@ defmodule Barkpark.Tasks.Internal do
   # persisted key. Widening a union can only persist MORE of what a caller
   # actually sent — no existing close passes them, so close's stored shape is
   # unchanged.
-  @landed_keys ~w(prs files capability_slugs commits notes)
+  # `landings` is the PAIRED key and the reason the union has to hold maps as
+  # well as scalars (cch-w63). `prs` and `commits` are PARALLEL LISTS: a row
+  # that accumulated four landings carries four numbers and four shas, and
+  # NOTHING in the stored shape says which sha paid which PR — the pairing
+  # existed only inside the `notes` SENTENCE ("landed on main as <sha> by PR
+  # #<n>"), i.e. exactly the prose reconstruction a structured field is meant to
+  # end. `landings` carries `%{"pr" => "<n>", "commit" => "<sha>"}` so the two
+  # facts are joined at the point they were known, by the writer that knew both.
+  #
+  # It is ADDITIVE, never a replacement: `prs` and `commits` keep being written
+  # and every existing reader (close's artifact gate, reland-check.yml,
+  # landed-open-report.sh) is untouched. A landing that knows only one half
+  # still writes that half into its scalar list and no pair — a half-pair would
+  # assert an association nobody observed.
+  @landed_keys ~w(prs files capability_slugs commits notes landings)
 
   def merge_landed(content, landed) when is_map(landed) and map_size(landed) > 0 do
     existing =

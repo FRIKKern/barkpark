@@ -11,23 +11,27 @@ import (
 	"testing"
 )
 
-// `bp task landed` is a PURELY MANIFEST-DRIVEN verb — there is no
-// tasks_landed_cmd.go, and that is the claim these tests defend. Its two
-// siblings on this ledger earned hand-written wrappers for reasons `landed`
-// does not have: `stamp` translates a 0-vs-1 base and re-reads the row it
-// flipped; `close` and `pulse` re-read because an exit code alone had already
-// been watched lying about a write. `landed` adds no client-side ergonomics and
-// adjudicates nothing client-side — every guard it has is a server guard on the
-// STORED row (merge-shaped, already-met, index-in-range), and a CLI that
-// second-guessed any of them from the flags it was typed would be exactly the
+// `bp task landed`'s ADDITIVE-MANIFEST CLAIM: declaring `task.landed` on the
+// server is what makes the verb work, and the generic dispatch must reach the
+// right method and path carrying every flag. A manifest whose path_template
+// drifted from the route, or a wrapper that SWALLOWED a flag, reds here.
+//
+// THIS FILE USED TO OPEN "there is no tasks_landed_cmd.go, and that is the
+// claim these tests defend." THERE IS ONE NOW (cch-w63), and the reasoning that
+// sentence rested on is worth keeping because it is still right about what a
+// wrapper may not do: `landed` adjudicates NOTHING client-side — merge-shaped,
+// already-met, index-in-range are all server guards on the STORED row, and a
+// CLI that second-guessed any of them from the flags it was typed would be the
 // mistake `stamp`'s own comment records as measured-refuted.
 //
-// So what a Go test can actually prove here is that DECLARING the verb is the
-// whole CLI change: given a manifest that carries `task.landed`, the generic
-// dispatch reaches the right method and path and carries every flag on the
-// wire. A regression that added a `noun == "task" && verb == "landed"` branch
-// which swallowed a flag, or a manifest whose path_template drifted from the
-// route, reds here.
+// The wrapper does not do that. It adjudicates nothing; it RESOLVES one value
+// no server can see and no caller can be trusted to type — the merge sha. This
+// repo squash-merges, so a branch tip is `diverged` from main forever
+// (compare/022dc4c44...main on PR #17098) while `mergeCommit.oid` is `ahead`
+// (compare/29b6c3e66...main), and the sha an operator has on screen is the tip.
+// tasks_landed_merge_commit_test.go covers that arm; the two tests BELOW are
+// the original claim, unchanged, and they pass through the wrapper untouched
+// because each either supplies `--commit` explicitly or names no `--pr` at all.
 const minimalLandedManifest = `{
   "manifest_version": "test",
   "server": {"name": "test", "version": "0", "base_url": "http://example.invalid"},

@@ -666,6 +666,17 @@ func Execute(args []string) int {
 		return runTaskPulse(out, g, ctx, m, *cmd, tail)
 	}
 
+	// `bp task landed` — client-side ergonomic wrapper: `--pr N` with no
+	// `--commit` resolves N to `mergeCommit.oid`, never the branch tip. This
+	// repo squash-merges, so a branch tip is `diverged` from main forever and a
+	// landing recorded against it is a merge record no reader can
+	// ancestor-check. The POST is unchanged; the wrapper only fills in the sha
+	// it resolved, or REFUSES (it never falls back to headRefOid). See
+	// tasks_landed_cmd.go.
+	if noun == "task" && verb == "landed" {
+		return runTaskLanded(out, g, ctx, m, *cmd, tail)
+	}
+
 	return runCommand(out, g, ctx, m, *cmd, tail)
 }
 
