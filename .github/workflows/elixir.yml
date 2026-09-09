@@ -1157,7 +1157,7 @@ jobs:
           done
           installed=0
           for i in 1 2 3; do
-            if sudo apt-get install -y libxml2-utilz; then installed=1; break; fi
+            if sudo apt-get install -y libxml2-utils; then installed=1; break; fi
             echo "apt-get install libxml2-utils attempt ${i}/3 failed"
             sleep 10
           done
