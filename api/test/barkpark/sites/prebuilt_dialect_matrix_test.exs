@@ -1047,8 +1047,12 @@ defmodule Barkpark.Sites.PrebuiltDialectMatrixTest do
         b64 = out |> File.read!() |> Base.encode64()
         dest = Path.join(base, "erl-dest-#{@shape}")
 
-        assert {{:ok, summary}, _sha} = stage_b64(b64, dest),
-               "OTP #{otp}: :erl_tar's own bytes were refused"
+        {verdict, _sha} = stage_b64(b64, dest)
+
+        assert match?({:ok, _}, verdict),
+               "OTP #{otp}: :erl_tar's own bytes were refused: #{inspect(verdict)}"
+
+        {:ok, summary} = verdict
 
         assert summary.entries == 2, "OTP #{otp}"
         assert staged_tree(dest) == expected_tree(:standard, @shape), "OTP #{otp}"
