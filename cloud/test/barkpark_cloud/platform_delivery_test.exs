@@ -1024,6 +1024,85 @@ defmodule BarkparkCloud.PlatformDeliveryTest do
     end
   end
 
+  ## 9. THE NULL SHA — dr-w24-bl-sha-validator-admits-all-zeros
+
+  describe "the all-zeros sentinel" do
+    @null_sha String.duplicate("0", 40)
+
+    test "the recorder REFUSES a 40-zero sha through the real route" do
+      # `~r/^[0-9a-f]{7,64}$/` admits it: 40 lowercase hex chars. It is also the
+      # one sha that CANNOT name a commit — it is git's "no object" sentinel and
+      # the shape a shell script writes when `git rev-parse` produced nothing.
+      # A verifier posted exactly this row and it stood as the platform's
+      # second-ever durable memory of its own deploys. Delete `reject_null_sha`
+      # from `changeset/2` and this goes green-at-200 with a row on disk.
+      conn =
+        call(
+          :post,
+          "/v1/internal/platform-deliveries",
+          %{deliveries: [row(%{"sha" => @null_sha})]},
+          @worker_token
+        )
+
+      assert conn.status == 422
+      assert %{"error" => "invalid_row", "index" => 0, "errors" => errors} = body(conn)
+      assert Enum.any?(errors["sha"], &(&1 =~ "all-zeros"))
+
+      # The REFUSAL is what matters, not the message: nothing reached the table.
+      assert {:ok, []} = PlatformDelivery.list([])
+    end
+
+    test "an all-zeros PREVIOUS_sha is refused too" do
+      # `previous_sha` is the half a transition is GRADED against. A null
+      # previous_sha would make `commit_ancestry` grade a move against nothing
+      # and land a count it cannot justify. Same validator, second field.
+      conn =
+        call(
+          :post,
+          "/v1/internal/platform-deliveries",
+          %{deliveries: [row(%{"previous_sha" => @null_sha, "transition" => "forward"})]},
+          @worker_token
+        )
+
+      assert conn.status == 422
+      assert %{"error" => "invalid_row", "errors" => errors} = body(conn)
+      assert Enum.any?(errors["previous_sha"], &(&1 =~ "all-zeros"))
+      assert {:ok, []} = PlatformDelivery.list([])
+    end
+
+    test "a SHORT all-zeros sha — inside the 7-64 window — is refused as well" do
+      # The rule is a PREDICATE (not-all-zeros), not a 40-char special case: an
+      # abbreviated `0000000` is the same sentinel and the same lie. Write the
+      # check as `value == String.duplicate("0", 40)` and this one goes red.
+      conn =
+        call(
+          :post,
+          "/v1/internal/platform-deliveries",
+          %{deliveries: [row(%{"sha" => "0000000"})]},
+          @worker_token
+        )
+
+      assert conn.status == 422
+      assert {:ok, []} = PlatformDelivery.list([])
+    end
+
+    test "CONTROL — a real sha, and a sha of repeated NON-zero hex, both record" do
+      # The narrowness is the point. `bbbb…` is improbable, not impossible, and
+      # a resolvability check would need egress and would refuse a fork's real
+      # commit. Widen the predicate to "any repeated character" and this fails.
+      batch = [
+        row(),
+        row(%{"sha" => String.duplicate("b", 40), "delivering_run_id" => "run-B"})
+      ]
+
+      conn =
+        call(:post, "/v1/internal/platform-deliveries", %{deliveries: batch}, @worker_token)
+
+      assert conn.status == 200
+      assert body(conn) == %{"ok" => true, "received" => 2, "recorded" => 2}
+    end
+  end
+
   # Fetch the ONE row a test wrote, by its own unique run id. Deliberately not
   # `List.first/1` and never a count: the identity is
   # (sha, delivering_run_id, first_seen_at), so the run id is what makes a row
