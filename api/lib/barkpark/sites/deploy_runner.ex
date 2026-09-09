@@ -812,6 +812,34 @@ defmodule Barkpark.Sites.DeployRunner do
   @spec build_slot_capacity() :: pos_integer()
   def build_slot_capacity, do: @build_slot_capacity
 
+  @doc """
+  The worst-case bytes the STAGED PREBUILT TREES can hold in the run-state dir.
+
+  DERIVATION, named end to end so raising it is a decision and not a patch:
+
+    * one staged tree exists per IN-FLIGHT prebuilt deploy — `ingest_prebuilt/1`
+      extracts into `<run_state_dir>/<slug>.prebuilt` and `drop_staged_prebuilt/1`
+      removes it at run FINALIZE (`cache_and_cleanup/4`), so a tree's life is
+      exactly one run and the `:unit_deadline` watchdog finalizes even a run
+      nobody polls;
+    * the box admits `build_slot_capacity()` concurrent `mode: :deploy` runs
+      (`box_at_capacity?/2`), and a prebuilt deploy IS a deploy
+      (`takes_build_slot?/1`), so that is the count of live trees;
+    * each tree is capped by the extractor's own total cap,
+      `PrebuiltArtifact.caps().max_total_bytes` — read from THERE, never
+      re-declared here, so a cap edit cannot drift out of this bound.
+
+  This replaces the old worst case, which was `@max_tracked_runs` (32) x that
+  64 MiB cap = 2 GiB of dead trees on a 3.8 GB box: before the finalize drop the
+  ONLY thing that removed a tree was `prune_run_state_dir/1`'s LRU eviction, and
+  that sweep is gated on `length(manifests) > @max_tracked_runs` — manifests are
+  one-per-SLUG, so on a 12-site box it never fired at all. The LRU sweep is kept
+  as a BACKSTOP for a tree whose run died without ever finalizing.
+  """
+  @spec staged_prebuilt_bound_bytes() :: pos_integer()
+  def staged_prebuilt_bound_bytes,
+    do: build_slot_capacity() * PrebuiltArtifact.caps().max_total_bytes
+
   @typedoc """
   What the door knows about itself. `capacity` is the CONSTANT
   `@build_slot_capacity`; everything else is a MEASUREMENT, and every
@@ -1522,6 +1550,7 @@ defmodule Barkpark.Sites.DeployRunner do
 
     with :ok <- write_env_file(env_file, req, status_file, log_file),
          :ok <- fresh_run_files([status_file, log_file]),
+         :ok <- seed_prebuilt_log(req, log_file),
          :ok <- write_manifest(dir, manifest),
          :ok <- systemd_run(req, unit, env_file) do
       state =
@@ -1664,6 +1693,7 @@ defmodule Barkpark.Sites.DeployRunner do
     # failed — the manifest carries none of that.
     _ = write_terminal_record(manifest, render)
     _ = unlink_env(manifest)
+    _ = drop_staged_prebuilt(manifest)
 
     state
     |> cancel_timer(slug)
@@ -2131,6 +2161,36 @@ defmodule Barkpark.Sites.DeployRunner do
   # sobelow_skip ["Traversal.FileModule"]
   defp unlink_env(%{build_env_file: path}) when is_binary(path), do: File.rm(path)
   defp unlink_env(_), do: :ok
+
+  # THE STAGED PREBUILT TREE DIES WITH ITS RUN (ssw9 / ssw10-bl).
+  #
+  # `<slug>.prebuilt/` is the caller's uploaded bytes, extracted so the engine's
+  # STAGE arm can copy them into `releases/<build_id>/`. Once the run is
+  # TERMINAL that copy has either happened or will never happen, so the tree has
+  # no reader left — and it is the biggest thing a run leaves behind (up to
+  # `PrebuiltArtifact.caps().max_total_bytes`). Dropping it HERE, where the run
+  # finalizes, is what makes `staged_prebuilt_bound_bytes/0` true; the LRU sweep
+  # in `prune_run_state_dir/1` never fired on a real box (it counts SLUGS).
+  #
+  # BOTH OUTCOMES, decided deliberately: a FAILED prebuilt deploy drops its tree
+  # too. There is nothing to diagnose in it that the run did not already record
+  # — the digest is in the manifest and the terminal record, the release keeps
+  # `.bp-prebuilt-sha256`, and the engine's own words are in the log — while the
+  # caller still holds the artifact, and RE-UPLOAD is the only recovery a
+  # prebuilt release has (`deploy/site-deploy.sh`, and deploy/README.md). Keeping
+  # a 64 MiB tree per failure to re-read bytes the uploader already owns is the
+  # trade this refuses.
+  #
+  # Only ever the path THIS manifest names, and through `sweep_path/3` — the SAME
+  # containment the retention sweep uses. `prebuilt_dir` is a JSON string read
+  # back off disk (a manifest survives a BEAM restart), so a corrupt or planted
+  # manifest naming a path outside the run-state dir is REFUSED and logged, never
+  # followed. That is the one property that keeps this from being an arbitrary
+  # `rm -rf` driven by a file.
+  defp drop_staged_prebuilt(%{prebuilt_dir: dir}) when is_binary(dir),
+    do: sweep_path(run_state_dir(), dir, &File.rm_rf/1)
+
+  defp drop_staged_prebuilt(_), do: :ok
 
   # Each {mode, runtime_target} cell resolves its own injectable command (tests
   # stub these). The engine takes slug/build_id/content_rev from the ENVIRONMENT,
@@ -2650,6 +2710,47 @@ defmodule Barkpark.Sites.DeployRunner do
     end)
   end
 
+  # A PREBUILT DEPLOY MUST NOT LEAVE THE MANIFEST POINTING AT AN EMPTY LOG.
+  #
+  # `log_file` is only ever WRITTEN by the engine, and on the box-build path that
+  # writer is BUILD's `tee "$BUILD_LOG"` (deploy/site-deploy.sh). `log()` prints
+  # to stdout ONLY (deploy/lib/site-deploy-common.sh) and `emit()` appends to the
+  # STATUS file, not this one — so on the prebuilt path, where BUILD is
+  # `skipped` and no npm runs, NOTHING ever writes here. `fresh_run_files/1`
+  # still truncates the path to zero, so an operator opening the file the
+  # manifest names sees an empty file where the last build's diagnostics were.
+  #
+  # The Runner is the party that KNOWS what happened: it is the only place the
+  # artifact digest, the staged path and the reason there is no build output all
+  # exist at once. So the prebuilt path writes its own lines, and the file is
+  # never empty. Deliberately plain prose: it must not collide with a marker a
+  # finalizer reads out of the log (`TORN_DOWN=`, `TEARDOWN_FAILED=`,
+  # `ROLLED BACK`, `TARGET_BUILD=`, `(no_previous)`, `(not_supported)`), and it
+  # is not BPSTAGE, which lives in the status fold.
+  #
+  # Reachability: `path` is `launch_unit/2`'s freshly built `log_file`
+  # (run_state_dir + a validated slug + the run tag); the digest is the
+  # already-verified `artifact_sha256`.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp seed_prebuilt_log(%DeployRequest{artifact_b64: nil}, _path), do: :ok
+
+  defp seed_prebuilt_log(%DeployRequest{} = req, path) do
+    lines = [
+      "[site-deploy] PREBUILT DEPLOY — no build ran on this box.",
+      "[site-deploy] uploaded artifact sha256 #{req.artifact_sha256}, staged at #{prebuilt_dir(req.slug)}",
+      "[site-deploy] BUILD is reported skipped; the stage fold is the status file, not this log.",
+      "[site-deploy] this release is UNREPRODUCIBLE from this box — it carries no source to " <>
+        "rebuild from, and the engine refuses to rebuild a prebuilt release. The only recovery " <>
+        "is to RE-UPLOAD the artifact for build #{req.build_id}."
+    ]
+
+    # Best-effort by design: a log the Runner could not seed must never fail the
+    # deploy — but the same {:error, _} shape as its with-chain siblings would,
+    # so it is swallowed HERE rather than mapped to :start_failed.
+    _ = File.write(path, Enum.join(lines, "\n") <> "\n")
+    :ok
+  end
+
   defp file_mtime(path) do
     case File.stat(path, time: :posix) do
       {:ok, %{mtime: secs}} -> DateTime.from_unix!(secs)
@@ -2684,9 +2785,12 @@ defmodule Barkpark.Sites.DeployRunner do
         # leave a tombstone, or the deployment reads back as never-recorded.
         _ = sweep_path(dir, m.log_file, &evict_build_log(&1, :count))
         # The staged prebuilt tree is the BIGGEST thing a run leaves behind (up
-        # to the 64 MiB extraction cap, against a 3.8 GB box), so it is swept
-        # with the rest of the quartet rather than living forever after a
-        # one-shot slug.
+        # to the 64 MiB extraction cap, against a 3.8 GB box). This is now only a
+        # BACKSTOP: `drop_staged_prebuilt/1` removes it at run finalize, which is
+        # what actually bounds it (`staged_prebuilt_bound_bytes/0`). This sweep
+        # is gated on `length(manifests) > @max_tracked_runs`, and manifests are
+        # one-per-SLUG, so on a 12-site box it never fires — it can only ever
+        # catch a tree whose run died before finalizing.
         _ = sweep_path(dir, m.prebuilt_dir, &File.rm_rf/1)
         _ = sweep_path(dir, m.build_env_file, &File.rm/1)
       end
@@ -2764,10 +2868,16 @@ defmodule Barkpark.Sites.DeployRunner do
   #                                                       (they carry
   #                                                       BARKPARK_TOKEN= in
   #                                                       plaintext at 0600)
-  #   <slug>.prebuilt/          1 per SLUG (replaced)     quartet sweep on
+  #   <slug>.prebuilt/          1 per SLUG (replaced)     DROPPED AT FINALIZE
+  #                                                       (drop_staged_prebuilt/1,
+  #                                                       from cache_and_cleanup/4)
+  #                                                       — see
+  #                                                       staged_prebuilt_bound_bytes/0.
+  #                                                       Quartet sweep on
   #                                                       eviction + THIS SWEEP
-  #                                                       once no manifest names
-  #                                                       it
+  #                                                       remain as BACKSTOPS for
+  #                                                       a run that never
+  #                                                       finalized
   #   <slug>.prebuilt.staging-N transient                 removed by
   #                                                       PrebuiltArtifact on
   #                                                       both exits; THIS SWEEP
