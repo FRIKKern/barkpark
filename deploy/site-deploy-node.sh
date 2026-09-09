@@ -779,8 +779,13 @@ if [ "$MODE" = selftest ]; then
   # 2026-09-09: +33 (342->375, 359->392) for the bare-path upgrade (D79) and the
   # staging-time RETIRE key (D80). All 33 sit outside both optional blocks, so
   # BOTH floors move by the same 33.
-  SELFTEST_FLOOR_MIN=375
-  SELFTEST_FLOOR_FULL=392
+  # 2026-09-09: +21 (375->396, 392->413) for the teardown STOP ORDER — a refused
+  # or unlockable disarm now leaves both slots RUNNING (no armed route over dead
+  # processes), and a successful disarm followed by a stop that does not take
+  # RESTORES the route byte-identically (no dead route over live processes). All
+  # 21 sit outside both optional blocks, so BOTH floors move by the same 21.
+  SELFTEST_FLOOR_MIN=396
+  SELFTEST_FLOOR_FULL=413
   TESTS=0; FAILS=0
   check() { local label="$1"; shift; TESTS=$((TESTS + 1)); if "$@"; then echo "  ok   - $label"; else echo "  FAIL - $label"; FAILS=$((FAILS + 1)); fi; }
 
@@ -1834,6 +1839,19 @@ FAKENPM
   # keeps serving. The engine must not print TORN_DOWN= (the only marker the CP
   # reads — its presence alone is exit 0), must exit 25, and must keep the release
   # tree AND the slot env files. On origin/main every one of these fails.
+  # WHICH SLOTS ARE UP, read through the fake systemctl. The teardown's stop
+  # order is only observable against this: a refused disarm must leave the set
+  # UNCHANGED (the route it could not remove still has processes behind it).
+  td_slots_up() { # <slug> -> the running slots, e.g. "a", "ab", "" for none
+    local s out=""
+    for s in a b; do
+      env PATH="$FAKEBIN:$PATH" systemctl is-active --quiet "barkpark-site@$1__$s" && out="$out$s"
+    done
+    printf '%s' "$out"
+  }
+  WARM_UP_PRE="$(td_slots_up warm)"
+  check "reject-case PRECONDITION: warm HAD a running slot before the teardown" \
+    [ -n "$WARM_UP_PRE" ]
   REJBIN="$TD/bin-reject"; mkdir -p "$REJBIN"
   printf '#!/usr/bin/env bash\ncase "$1" in validate) exit 1;; *) exit 0;; esac\n' > "$REJBIN/caddy"
   chmod +x "$REJBIN/caddy"   # everything else still resolves from $FAKEBIN
@@ -1862,6 +1880,16 @@ FAKENPM
     grep -q 'STILL LIVE' "$TD/td-reject.out"
   check "node rejected teardown does NOT hedge — it made the measurement" \
     sh -c "! grep -q 'NEVER CHECKED' '$TD/td-reject.out'"
+  # THE STOP ORDER (D77 residue). On the pre-fix engine both slots were stopped
+  # BEFORE the disarm, so this reverted-still-live route answered 502 over two
+  # dead processes — strictly worse than the static engine's twin, which keeps
+  # serving real bytes. Nothing is stopped until the route is demonstrably down.
+  check "node rejected teardown LEFT the slots RUNNING (the un-removable route still SERVES, it does not 502)" \
+    [ "$(td_slots_up warm)" = "$WARM_UP_PRE" ]
+  check "node rejected teardown says the slots are still running, not stopped" \
+    grep -q 'BOTH SLOTS ARE STILL RUNNING' "$TD/td-reject.out"
+  check "node rejected teardown no longer promises a 502 window" \
+    sh -c "! grep -q 'now answers 502' '$TD/td-reject.out'"
 
   echo "[selftest] --teardown says UNKNOWN, not 'still live', when the Caddyfile lock was never taken (D77)"
   # The OTHER non-zero from with_caddy_lock, and a DIFFERENT claim: nothing read
@@ -1891,6 +1919,63 @@ FAKENPM
   check "node lock-starved teardown KEPT the release tree" [ -d "$TD/sites/warm/releases/w3" ]
   check "node lock-starved teardown left the Caddyfile byte-identical" \
     cmp -s "$TD/cf-before-lockstarve" "$CF"
+  check "node lock-starved teardown LEFT the slots RUNNING (the route's state is UNKNOWN — do not strand it over dead processes)" \
+    [ "$(td_slots_up warm)" = "$WARM_UP_PRE" ]
+  check "node lock-starved teardown says the slots are still running" \
+    grep -q 'BOTH SLOTS ARE STILL RUNNING' "$TD/td-lock.out"
+
+  echo "[selftest] --teardown RESTORES the route when the disarm succeeds and a slot will not stop (no dead route over live slots)"
+  # THE INVERSE HAZARD, and the reason the fix is not a two-line swap. Disarm
+  # first and a stop that does not take strands a DEAD route over a LIVE process
+  # — the mirror of the 502 window above, and invisible to every check that only
+  # asserts the route is gone. $STOPBIN's systemctl reports success for
+  # stop/disable and leaves the unit UP (a stuck ExecStop, a unit that restarts
+  # itself); every other verb delegates to the real fake, so the disarm SUCCEEDS
+  # here. The engine must notice, put the route back byte-identically, and fail.
+  STOPBIN="$TD/bin-nostop"; mkdir -p "$STOPBIN"
+  cat > "$STOPBIN/systemctl" <<NOSTOP
+#!/usr/bin/env bash
+case "\${1:-}" in stop|disable) exit 0;; esac
+exec "$FAKEBIN/systemctl" "\$@"
+NOSTOP
+  chmod +x "$STOPBIN/systemctl"
+  cp "$CF" "$TD/cf-before-nostop"
+  WARM_UP_PRE3="$(td_slots_up warm)"
+  check "no-stop-case PRECONDITION: warm HAD a running slot before the teardown" \
+    [ -n "$WARM_UP_PRE3" ]
+  check "no-stop-case PRECONDITION: warm's route was ARMED before the teardown" \
+    grep -q 'BARKPARK_SITE_ROUTE:warm' "$CF"
+  env PATH="$STOPBIN:$FAKEBIN:$PATH" \
+    SITE_SLUG=warm SITE_PORT_A="$T_PORT_C" SITE_PORT_B="$T_PORT_D" \
+    BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$CF" BARKPARK_SITE_DEPLOY_LOCK="$TD/warm.lock" \
+    BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" BARKPARK_SITE_LOG_FILE="$TD/td-nostop.log" \
+    BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    bash "$SELF" --teardown > "$TD/td-nostop.out" 2>&1; tdrc5=$?
+  check "node no-stop teardown exits 25 (not 0)" [ "$tdrc5" = 25 ]
+  check "node no-stop teardown printed NO TORN_DOWN=" \
+    sh -c "! grep -q 'TORN_DOWN=' '$TD/td-nostop.out'"
+  check "node no-stop teardown logged NO TORN_DOWN= durably" \
+    sh -c "! grep -q 'TORN_DOWN=' '$TD/td-nostop.log'"
+  check "node no-stop teardown printed the typed failure" \
+    grep -q '^TEARDOWN_FAILED=warm detail="' "$TD/td-nostop.out"
+  check "node no-stop teardown names the slot that would not stop" \
+    grep -q 'would NOT stop' "$TD/td-nostop.out"
+  check "node no-stop teardown RESTORED the route (no dead route over a live slot)" \
+    grep -q 'BARKPARK_SITE_ROUTE:warm' "$CF"
+  check "node no-stop teardown left the Caddyfile BYTE-IDENTICAL to the pre-teardown snapshot" \
+    cmp -s "$TD/cf-before-nostop" "$CF"
+  check "node no-stop teardown says it RESTORED the pre-teardown Caddyfile" \
+    grep -q 'RESTORED the pre-teardown Caddyfile' "$TD/td-nostop.out"
+  check "node no-stop teardown left the same slots RUNNING, matching the restored route" \
+    [ "$(td_slots_up warm)" = "$WARM_UP_PRE3" ]
+  check "node no-stop teardown KEPT the release tree" [ -d "$TD/sites/warm/releases/w3" ]
+  check "node no-stop teardown KEPT both slot env files" \
+    sh -c "[ -f '$SENV/warm__a.env' ] && [ -f '$SENV/warm__b.env' ]"
+  check "node no-stop teardown does NOT claim the route is still live (the disarm SUCCEEDED here)" \
+    sh -c "! grep -q 'STILL LIVE' '$TD/td-nostop.out'"
+  check "node no-stop teardown left NO Caddyfile backup litter behind" \
+    sh -c "! ls '$CF'.bak.* >/dev/null 2>&1"
 
   # -------------------------------------------------------------------------
   # THE FLEET BUILD ADMISSION GATE — one box, one build (D95/D104), node side.
@@ -2782,6 +2867,7 @@ disarm_caddy_node_route() {
 # and `systemctl start barkpark-site@<slug>__<slot>` can put it back in service.
 teardown_failed_node() { # <detail>
   local detail="$1" line
+  [ -n "${CF_SNAPSHOT:-}" ] && rm -f "$CF_SNAPSHOT"
   log "TEARDOWN FAILED — $detail"
   printf -v line 'TEARDOWN_FAILED=%s detail="%s"' "$SITE_SLUG" "$detail"
   [ -n "${BARKPARK_SITE_LOG_FILE:-}" ] && printf '%s\n' "$line" >> "$BARKPARK_SITE_LOG_FILE"
@@ -2789,20 +2875,69 @@ teardown_failed_node() { # <detail>
   exit 25
 }
 
+# Put the Caddyfile back EXACTLY as this teardown found it. Used on one path
+# only: the disarm succeeded and a slot then refused to stop. Re-committing the
+# byte-identical pre-teardown snapshot re-arms this site's route over the slots
+# that are still running, so the box lands in the state the teardown started
+# from and never in "dead route over live slots" (the inverse of the hazard
+# disarm-first exists to close). Runs under with_caddy_lock, like every other
+# Caddyfile read-modify-write here. RETURNS: 0 restored (or already identical,
+# i.e. nothing to undo), 1 the restore itself was rejected.
+restore_caddyfile_snapshot() { # <snapshot>
+  local snap="$1" tmp
+  [ -n "$snap" ] && [ -f "$snap" ] && [ -f "$CADDYFILE" ] || return 1
+  cmp -s "$snap" "$CADDYFILE" && return 0
+  tmp="$(mktemp)"
+  cp -a "$snap" "$tmp" || { rm -f "$tmp"; return 1; }
+  commit_caddyfile "$tmp" || { rm -f "$tmp"; return 1; }
+  log "restored the pre-teardown Caddyfile — /sites/$SITE_SLUG is routed again"
+}
+
 if [ "$MODE" = teardown ]; then
-  stop_slot a; stop_slot b
+  # THE STOP ORDER (D77 residue). The route comes down FIRST, under the Caddyfile
+  # lock, and the slots stop only once it is demonstrably gone. Stopping first was
+  # strictly WORSE than the static engine's equivalent failure: a refused disarm
+  # left an ARMED route over two STOPPED slots, i.e. a public 502 on a live route,
+  # where the static engine keeps serving real bytes through its reverted config.
+  #
+  # This is NOT a two-line swap, because disarm-first carries the INVERSE hazard:
+  # a route already removed and a slot that then refuses to stop is a DEAD route
+  # over a LIVE process. So the pre-disarm Caddyfile is snapshotted before the
+  # first write and RESTORED if a stop does not take. The invariant both arms
+  # hold: no post-teardown state has an armed route over stopped slots, and none
+  # has a dead route over running slots.
+  CF_SNAPSHOT=""
+  if [ -f "$CADDYFILE" ]; then
+    CF_SNAPSHOT="$(mktemp)"
+    cp -a "$CADDYFILE" "$CF_SNAPSHOT" 2>/dev/null || CF_SNAPSHOT=""
+  fi
   # TWO different failures, and they are NOT the same claim (see the static engine's
   # twin). 2 = the disarm ran and the route demonstrably survived it. 1 =
   # with_caddy_lock's own guard fired, so nothing ever read the Caddyfile and the
   # route's state is UNKNOWN to this run. Both keep the tree and both slot env
-  # files; only one of them is a measurement.
+  # files AND both slots RUNNING; only one of them is a measurement.
   disarm_rc=0
   with_caddy_lock disarm_caddy_node_route || disarm_rc=$?
   if [ "$disarm_rc" = 1 ]; then
-    teardown_failed_node "the caddy /sites/$SITE_SLUG route was NEVER CHECKED — the shared Caddyfile lock could not be taken, so whether this site is still routed is UNKNOWN to this run. Both slots are stopped; the release tree at $ROOT and both slot env files are kept, so a re-run of --teardown (or \`systemctl start barkpark-site@${SITE_SLUG}__a\`) can finish or undo the job"
+    teardown_failed_node "the caddy /sites/$SITE_SLUG route was NEVER CHECKED — the shared Caddyfile lock could not be taken, so whether this site is still routed is UNKNOWN to this run. Nothing was stopped: BOTH SLOTS ARE STILL RUNNING (this engine stops a slot only after the route is demonstrably down), so if that route is still armed it keeps serving real bytes rather than a 502. The release tree at $ROOT and both slot env files are kept; re-run --teardown once the lock is free"
   elif [ "$disarm_rc" != 0 ]; then
-    teardown_failed_node "the caddy /sites/$SITE_SLUG route is STILL LIVE — this run tried to remove it, the change was rejected, and the Caddyfile was reverted to the serving config. Both slots are stopped, so that route now answers 502 until you either re-run --teardown (after fixing the Caddyfile) or \`systemctl start barkpark-site@${SITE_SLUG}__a\`; the release tree at $ROOT and both slot env files are kept for exactly that"
+    teardown_failed_node "the caddy /sites/$SITE_SLUG route is STILL LIVE — this run tried to remove it, the change was rejected, and the Caddyfile was reverted to the serving config. BOTH SLOTS ARE STILL RUNNING, so that route keeps serving this site's real bytes instead of answering 502; fix the Caddyfile and re-run --teardown (the release tree at $ROOT and both slot env files are kept for exactly that)"
   fi
+  # The route is down and this run measured it. NOW the slots.
+  stop_slot a; stop_slot b
+  # THE INVERSE HAZARD, measured rather than assumed: systemctl can report success
+  # and leave a unit up (a stuck ExecStop, a unit that restarts itself). Ask.
+  still_up=""
+  slot_running a && still_up="a"
+  slot_running b && still_up="${still_up:+$still_up and }b"
+  if [ -n "$still_up" ]; then
+    # teardown_failed_node removes $CF_SNAPSHOT on its way out, on every arm.
+    if with_caddy_lock restore_caddyfile_snapshot "$CF_SNAPSHOT"; then
+      teardown_failed_node "slot(s) $still_up would NOT stop — the caddy /sites/$SITE_SLUG route came down first, so this run RESTORED the pre-teardown Caddyfile: the route is armed again over the slot(s) that are still running, which serves real bytes instead of stranding a dead route over a live process. Nothing was deleted (the release tree at $ROOT and both slot env files are kept); fix the slot unit and re-run --teardown"
+    fi
+    teardown_failed_node "slot(s) $still_up would NOT stop AND the caddy /sites/$SITE_SLUG route could not be put back — the disarm succeeded, the restore was rejected, so this site is now UNROUTED with slot(s) $still_up still running. Nothing was deleted (the release tree at $ROOT and both slot env files are kept); stop the slot unit(s) by hand (\`systemctl stop barkpark-site@${SITE_SLUG}__<slot>\`) and re-run --teardown"
+  fi
+  [ -n "$CF_SNAPSHOT" ] && rm -f "$CF_SNAPSHOT"
   rm -f "$(slot_env a)" "$(slot_env b)" 2>/dev/null || true
   if [ -d "$ROOT" ]; then
     rm -rf "$ROOT" && log "TORE DOWN — stopped slots + removed release tree $ROOT"
