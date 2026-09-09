@@ -690,8 +690,25 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
 
   # THE ANTI-VACUITY FLOOR. A deleted register row would otherwise be a silent
   # green — zero instruments examined is zero reader-less instruments found.
-  # Lowered only in the same commit as the instrument that went away.
-  @register_floor 9
+  # Moved only in the same commit as the instrument that arrived or went away.
+  #
+  # RE-DERIVED 2026-09-10 (dr-w27-bl-register-floor-lags-the-register). It stood
+  # at 9 while `@register` carried 10 rows, so the floor had a row of SLACK:
+  # deleting any single row — including `queued_seconds`, the row the wave
+  # before it had just added — still satisfied `>=` and the register shrank
+  # silently. That is precisely the deletion the floor exists to refuse.
+  #
+  # HAND-TYPED, and compared with `==`, for two reasons:
+  #
+  #   * `@register_floor length(@register)` would read the expected value off
+  #     the very thing it guards. That assertion can never fail, in either
+  #     direction, and a guard that cannot lose measures nothing.
+  #   * `>=` is how the slack got here in the first place: it is silent when the
+  #     register GROWS, so the floor lags every addition until somebody notices.
+  #     Under `==` an addition reds too, and the co-edit is forced at the moment
+  #     the row lands rather than a wave later. (Same lesson as the payload
+  #     census's `@go_tag_pinned`, which shipped one tag of slack under `>=`.)
+  @register_floor 10
 
   # The corpus floor, per root. A `find` that silently returns nothing (a moved
   # tree, a refused-dirs change that eats a whole root) reports every instrument
@@ -749,9 +766,12 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
   # ---------------------------------------------------------------------------
 
   test "every row carries a REQUIRED reason and names both its SURFACE and its AUDIENCE" do
-    assert length(@register) >= @register_floor,
-           "the register shrank to #{length(@register)} rows (floor #{@register_floor}). " <>
-             "Lower the floor in the same commit as the instrument that went away, or restore the row."
+    assert length(@register) == @register_floor,
+           "the register carries #{length(@register)} rows, the PIN is EXACTLY " <>
+             "#{@register_floor}. FEWER: an instrument left the register — restore the row, or " <>
+             "lower the pin in the same commit as the instrument that went away. MORE: an " <>
+             "instrument arrived — raise the pin in the same commit, so the floor can never " <>
+             "again lag the register it guards."
 
     for row <- @register do
       for field <- [:key, :what, :surface, :audience, :reason] do
