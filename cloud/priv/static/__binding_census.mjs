@@ -247,10 +247,31 @@ const FIXTURE_FLAGS = ["--add-check", "--remove-check", "--ratchet-check"];
 const fixtureFlagAt = process.argv.findIndex((a) => FIXTURE_FLAGS.includes(a));
 const FIXTURE_MODE = fixtureFlagAt === -1 ? null : process.argv[fixtureFlagAt];
 const FIXTURE_FILE = FIXTURE_MODE ? process.argv[fixtureFlagAt + 1] : null;
-if (FIXTURE_MODE && !FIXTURE_FILE) {
-  console.error(`FAIL(2): ${FIXTURE_MODE} needs a fixture file argument.`);
-  console.error("  e.g. node cloud/priv/static/__binding_census.mjs --add-check cloud/priv/static/__binding_census.add.fixture.js");
+
+// ── THE ONE REFUSAL VOCABULARY (cch-w63-bl) ─────────────────────────────────
+// EVERY exit-2 path in this file ends with exactly ONE line, on STDERR:
+//
+//     !! BINDING CENSUS (exit 2): REFUSED TO MEASURE — <reason>
+//
+// It is the same shape __preview__/exit-vocabulary.mjs already emits for the
+// browser instruments, so ONE reader covers the whole console fence. Before
+// this, six of console-unit's nine exit-2 sites spoke a private vocabulary
+// (BARE `console.error` lines with no prefix at all) that no `!!`-anchored capture could see — a gate that CAPTURES the
+// refusing instrument's own summary line would have replaced a wrong sentence
+// with NO sentence, in the wave about silence.
+//
+// THE READER IS scripts/console-refusal-capture.mjs, and its unit test
+// ENUMERATES this file from source: a new exit-2 path that does not go through
+// `refuse2` reds that test. Do not add one.
+const REFUSAL_NAME = "BINDING CENSUS";
+const refuse2 = (reason) => {
+  process.stderr.write(`!! ${REFUSAL_NAME} (exit 2): REFUSED TO MEASURE — ${reason}\n`);
   process.exit(2);
+};
+
+if (FIXTURE_MODE && !FIXTURE_FILE) {
+  console.error("  e.g. node cloud/priv/static/__binding_census.mjs --add-check cloud/priv/static/__binding_census.add.fixture.js");
+  refuse2(`${FIXTURE_MODE} needs a fixture file argument.`);
 }
 
 const APP = FIXTURE_FILE || process.argv[2] || path.join(here, "app.js");
@@ -822,7 +843,7 @@ if (FIXTURE_MODE) {
     console.error("  This is NOT the census failing on the console. It is the control that proves the");
     console.error("  census can fail failing to behave as its own fixture declares. Fix the fixture or");
     console.error("  the arm, never the declaration alone.");
-    process.exit(2);
+    refuse2("the fixture control lost its footing — " + LABEL);
   };
 
   // ── the declarations, read from the fixture's own bytes ───────────────────
@@ -1057,7 +1078,7 @@ for (const r of withContext) {
 const die2 = (lines) => {
   console.error("");
   for (const l of lines) console.error(l);
-  process.exit(2);
+  refuse2(String(lines[0] || "the census lost its footing").replace(/^FAIL\(2\):\s*/, ""));
 };
 
 // (2a) THE VACUITY FLOOR. Not "79 seen" — 79 RESOLVED TO A ROUTE.

@@ -127,14 +127,35 @@ const ROUTER_LABEL = process.argv[2] || "cloud/lib/barkpark_cloud/web/router.ex"
 const APP_LABEL = process.argv[3] || "cloud/priv/static/app.js";
 const AUTH_LABEL = process.argv[4] || "cloud/lib/barkpark_cloud/web/auth.ex";
 
+
+// ── THE ONE REFUSAL VOCABULARY (cch-w63-bl) ─────────────────────────────────
+// EVERY exit-2 path in this file ends with exactly ONE line, on STDERR:
+//
+//     !! REASON ARM CENSUS (exit 2): REFUSED TO MEASURE — <reason>
+//
+// It is the same shape __preview__/exit-vocabulary.mjs already emits for the
+// browser instruments, so ONE reader covers the whole console fence. Before
+// this, six of console-unit's nine exit-2 sites spoke a private vocabulary
+// (`  EXIT 2 — THE CENSUS REFUSED TO MEASURE…`, leading spaces and no `!!`) that no `!!`-anchored capture could see — a gate that CAPTURES the
+// refusing instrument's own summary line would have replaced a wrong sentence
+// with NO sentence, in the wave about silence.
+//
+// THE READER IS scripts/console-refusal-capture.mjs, and its unit test
+// ENUMERATES this file from source: a new exit-2 path that does not go through
+// `refuse2` reds that test. Do not add one.
+const REFUSAL_NAME = "REASON ARM CENSUS";
+const refuse2 = (reason) => {
+  process.stderr.write(`!! ${REFUSAL_NAME} (exit 2): REFUSED TO MEASURE — ${reason}\n`);
+  process.exit(2);
+};
+
 function die2(lines) {
   console.error("");
   for (const l of lines) console.error(l);
   console.error("");
-  console.error("  EXIT 2 — THE CENSUS REFUSED TO MEASURE. It is making NO claim about this tree:");
   console.error("  nothing here says the console's reason arms are complete and nothing says they");
   console.error("  are not. A gate that cannot read its input must not go green (charter D449).");
-  process.exit(2);
+  refuse2(String(lines[0] || "the census could not read its input").replace(/^FAIL\(2\):\s*/, ""));
 }
 
 function read(file, label) {
