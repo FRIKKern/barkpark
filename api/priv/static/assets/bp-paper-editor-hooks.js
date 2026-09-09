@@ -4171,12 +4171,16 @@
         this._exitCoordinator = bpPaperExitCoordinator(this);
         this._pendingSaves = new Set();
         this._mutationEntries = [];
-        this._pendingImageSources = new Set();
+        this._lastImageIntent = null;
+
+        const owner = this.el.dataset.imageOwner;
+        const cardImage = owner === "card";
+        const supportedOwner = owner === undefined || cardImage;
 
         const picker = this.el.querySelector("bp-media-picker[data-paper-figure-image-picker]");
         this._picker = picker;
         const triggerSelector = "[data-paper-figure-image-trigger]";
-        const inactive = () => !picker || !!this.el.closest("[inert]");
+        const inactive = () => !supportedOwner || !picker || !!this.el.closest("[inert]");
         const openPicker = () => {
           if (inactive()) return false;
           let opened = false;
@@ -4200,9 +4204,7 @@
           }
         };
         const pushSource = (src) => {
-          this._pendingImageSources.add(src);
           let mutation;
-          const cardImage = this.el.dataset.imageOwner === "card";
           const event = cardImage ? "paper-edit-block" : "paper-op";
           const payload = cardImage ? {
             block_id: this.el.dataset.blockId,
@@ -4215,7 +4217,6 @@
           mutation = bpPaperMutation(this, this.el, event, payload, {
             onResult: (saved, result) => {
               if (saved || result?.discarded) {
-                this._pendingImageSources.delete(src);
                 this._mutationEntries = this._mutationEntries.filter(
                   (entry) => entry !== mutation.entry,
                 );
@@ -4249,7 +4250,13 @@
           const parsed = mediaUrl(event);
           if (!parsed.valid) return;
           const { src } = parsed;
-          if (src === (this.el.dataset.imageSrc || "") || this._pendingImageSources.has(src)) return;
+          // Compare with the latest intent, not every queued source: selecting
+          // A again while B is pending must enqueue A after B, not lose it.
+          const intended = this._mutationEntries.length
+            ? this._lastImageIntent
+            : (this.el.dataset.imageSrc || "");
+          if (src === intended) return;
+          this._lastImageIntent = src;
           this._exitCoordinator?.markDirty(this.el);
           pushSource(src);
         };
