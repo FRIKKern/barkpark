@@ -731,7 +731,21 @@ step_0b() {
     return 0
   fi
 
-  if ! git -C "$REPO_ROOT" merge-base --is-ancestor "$DEPLOYED_SHA" "$worktree_sha"; then
+  # ANCESTRY IS GUARDED, never bare. `merge-base --is-ancestor` folds "the worktree
+  # genuinely does not contain it" and "my walk was truncated before it got there"
+  # into the SAME rc=1, and THIS script runs on the CP box, whose checkout the
+  # deploy-reliability charter records as SHALLOW. A bare rc=1 there would print
+  # FAIL 0b — "the box is serving code this worktree does not contain" — off a
+  # question the checkout could not answer. scripts/ancestry-guard.sh probes ref,
+  # object and walk-truncation separately and exits 2 when no claim is sound; that
+  # is an ABORT (a blocker to clear), never a FAIL (a verdict about the deploy).
+  "$REPO_ROOT/scripts/ancestry-guard.sh" --repo "$REPO_ROOT" "$DEPLOYED_SHA" "$worktree_sha" >/dev/null 2>&1
+  _anc_rc=$?
+  if [ "$_anc_rc" = 2 ]; then
+    abort 0b "readable git history" "$("$REPO_ROOT/scripts/ancestry-guard.sh" --repo "$REPO_ROOT" "$DEPLOYED_SHA" "$worktree_sha" 2>&1) — the containment of $DEPLOYED_SHA in $worktree_sha is UNDECIDABLE in this checkout, so neither a pass nor a fail may be recorded. Deepen the checkout (git fetch --unshallow) or re-derive with: gh api repos/FRIKKern/barkpark/compare/$DEPLOYED_SHA...$worktree_sha --jq .status"
+    return 0
+  fi
+  if [ "$_anc_rc" != 0 ]; then
     fail 0b "the deployed sha $DEPLOYED_SHA is NOT an ancestor of the worktree $worktree_sha — the source is serving code this worktree does not contain, so a schema differential against it is unsound"
     return 0
   fi
