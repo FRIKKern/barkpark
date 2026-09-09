@@ -616,6 +616,102 @@ export function isSilentByDesign(command) {
   return false;
 }
 
+// ── A TOOLCHAIN FAULT IS NOT A REFUTATION ────────────────────────────────────
+//
+// THE DEFECT, measured on this host 2026-09-10 against origin/main bb175f130:
+//
+//   go test ./internal/cli -run TestSiteClaimsAreProbedWithResponseTypes
+//     exit 1
+//     stdout: FAIL\tgithub.com/FRIKKern/barkpark/internal/cli [build failed]
+//     stderr: # runtime/cgo
+//             error: unknown option '-E'
+//
+// `go test` is not in GO_LISTERS (`vet`, `build`, `list`), so it fell to
+// FAMILY.UNKNOWN, whose DEFAULT branch rules ANY nonzero exit FAILED with
+// absenceEligible:true. FAILED travels adjudicate.mjs's EXECUTION_MAP to
+// VERDICTS.FAILED, which tooling/pds/adjudicate.mjs turns into
+// PDS_VERDICT.REFUTED / "PASS-CONTRADICTED": *the command ran and REFUTES the
+// claim*. The test binary was never produced. Nothing was asserted. A host
+// whose `cc` is a shim was silently converted into evidence that a guard is
+// broken — the mirror image of the laundered-absence class this file exists to
+// abolish, and it fires on the BEHAVIOUR-class recipe, the one an epic files
+// most.
+//
+// THE EXIT CODE CANNOT BE THE DISCRIMINATOR. Both of these exit 1, measured
+// side by side on this host:
+//
+//   a genuine assertion failure  --- FAIL: TestGenuineFailure (0.00s)
+//                                FAIL\tprobe\t0.152s
+//   a package that never built   FAIL\tprobe [setup failed]
+//                                # probe
+//                                p_test.go:5:3: no required module provides package …
+//
+// So the discriminator is the OUTPUT MARKER, and the marker table is keyed BY
+// HEAD rather than being one flat regex list: `node --test` printing the string
+// "[build failed]" out of a FIXTURE must not be read as Go's build-failure
+// banner. A toolchain's own dialect only speaks for that toolchain.
+//
+// Fails CLOSED in one direction only: a matched marker demotes a decisive
+// verdict to UNAVAILABLE (inadmissible for a pass AND for an absence). It can
+// never promote anything, and it is inert at exit 0.
+const TOOLCHAIN_FAULTS = new Map([
+  ["go", [
+    [/\[build failed\]/, "the Go package failed to BUILD — the test binary was never produced"],
+    [/\[setup failed\]/, "the Go package failed to SET UP — the test binary was never produced"],
+    [/^# \S*cgo\b/m, "cgo could not be compiled by this host's C driver"],
+    [/no required module provides package/, "a module dependency is not present on this host"],
+    [/cannot find package|package \S+ is not in (?:GOROOT|std)/, "a package could not be resolved on this host"],
+    [/build constraints exclude all Go files/, "no Go file in the package builds on this host"],
+    [/go: (?:updates to go\.mod needed|cannot find main module|download|module .* found .* but does not contain)/, "the Go module graph could not be resolved on this host"],
+    [/go: -.*flag provided but not defined|flag provided but not defined: -/, "the toolchain rejected the recipe's own flags — nothing was run"],
+  ]],
+  ["mix", [
+    [/== Compilation error/, "Elixir compilation failed — no test was run"],
+    [/\*\* \(Mix\)/, "mix could not set the run up"],
+    [/Could not compile dependency|could not compile dependency/, "a dependency failed to compile on this host"],
+  ]],
+  ["npm", JS_FAULTS()],
+  ["pnpm", JS_FAULTS()],
+  ["yarn", JS_FAULTS()],
+  ["node", JS_FAULTS()],
+  ["cargo", [
+    [/^error\[E\d+\]|could not compile/m, "the Rust crate failed to compile — no test binary was produced"],
+  ]],
+]);
+
+/**
+ * `Cannot find module` and friends are the JS toolchain's build faults: the
+ * module graph never resolved, so no test ever ran. Anchored to a stderr-shaped
+ * line so a test that PRINTS the phrase in an assertion message is not caught.
+ */
+function JS_FAULTS() {
+  return [
+    [/^\s*(?:Error: )?Cannot find module /m, "a JS module could not be resolved on this host"],
+    [/ERR_MODULE_NOT_FOUND|code: 'MODULE_NOT_FOUND'/, "a JS module could not be resolved on this host"],
+    [/npm ERR! (?:code )?E(?:NOENT|RESOLVE|ACCES)/, "npm could not set the run up on this host"],
+  ];
+}
+
+/**
+ * Did this command fail to BUILD/SET UP rather than to ASSERT? Pure.
+ *
+ * @returns {string|null} the reason, or null when this is not a toolchain fault
+ */
+export function classifyToolchainFault(command, run = {}) {
+  const stage = lastStageParts(command);
+  if (!stage) return null;
+  const markers = TOOLCHAIN_FAULTS.get(stage.head);
+  if (!markers) return null;
+  // Inert at success and when nothing was measured. A fault is only ever read
+  // out of a run that ALREADY failed — this never manufactures a failure.
+  if (run.exit === 0 || run.exit === null || run.exit === undefined) return null;
+  const text = `${String(run.stdout ?? "")}\n${String(run.stderr ?? "")}`;
+  for (const [pattern, why] of markers) {
+    if (pattern.test(text)) return why;
+  }
+  return null;
+}
+
 /** Is git the tool that produced this exit code? (rc128 is git's dialect.) */
 function isGitLed(command) {
   const stage = lastStageParts(command);
@@ -677,6 +773,21 @@ export function classifySilence(command, run = {}) {
   const empty = stdout.trim() === "";
   const bytes = Buffer.byteLength(stdout, "utf8");
   const ok = (verdict, reason, absenceEligible = true) => ({ family, verdict, reason, absenceEligible });
+
+  // A BUILD THAT NEVER RAN IS NOT A REFUTATION. This runs BEFORE the family
+  // switch on purpose: the fault is a property of the RUN, not of the family,
+  // and every family's nonzero branch (UNKNOWN's default FAILED, QUERY-LISTER's
+  // `exited N`) would otherwise convert it into a decisive answer. UNAVAILABLE
+  // is INADMISSIBLE for a pass AND for an absence, so downstream it reads as
+  // "says nothing either way" rather than "REFUTES the claim".
+  const toolchainFault = classifyToolchainFault(command, run);
+  if (toolchainFault) {
+    return ok(
+      VERDICT.UNAVAILABLE,
+      `${toolchainFault} — the command never reached an assertion, so this is an environment fault, never a refutation`,
+      false,
+    );
+  }
 
   switch (family) {
     // grep rc0 must PRINT: "matched" with nothing to show is a broken read.
