@@ -4,6 +4,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardMediaContextualEditorTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.PortableDoc.Render
+  alias Barkpark.PortableDoc.Render.Components, as: RenderComponents
+  alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
 
   test "a singleton authored image rests as the canonical reader paint with one direct picker" do
@@ -59,6 +61,30 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardMediaContextualEditorTest do
       assert Enum.count(LazyHTML.query(tree, "[data-paper-figure-image-picker]")) == 1
       assert Enum.count(LazyHTML.query(tree, "[data-test-id='paper-card-image-preview']")) == 1
     end
+  end
+
+  test "explicit null media type preserves reader paint and contextual fields without inventing an image" do
+    media = image(%{"type" => nil})
+    block = card("null-type", media)
+    assert {:ok, state} = Blocks.card_form_state(block)
+    assert state.media_src == media["src"]
+
+    html = render_fields(block, picker_browse: true)
+    tree = LazyHTML.from_fragment(html)
+    parts = RenderComponents.card_article_parts(block)
+
+    assert html =~ parts.media_html
+    assert Enum.empty?(LazyHTML.query(tree, "img"))
+    assert Enum.empty?(LazyHTML.query(tree, "[data-test-id='paper-card-image-preview']"))
+    assert Enum.empty?(LazyHTML.query(tree, "[data-paper-figure-image-picker]"))
+    assert Enum.count(LazyHTML.query(tree, "[data-test-id='paper-card-body-editor']")) == 1
+    assert LazyHTML.attribute(LazyHTML.query(tree, "input[name='card-media-src']"), "value") ==
+             [media["src"]]
+    assert {:ok, patch} = Blocks.validate_block_patch(block, %{"card-title" => "Edited title"})
+    assert patch["slots"]["media"] == [media]
+    assert patch["slots"]["title"] == [
+             %{"type" => "heading", "level" => 3, "text" => "Edited title"}
+           ]
   end
 
   test "null empty and missing image sources retain the explicit source fallback" do
