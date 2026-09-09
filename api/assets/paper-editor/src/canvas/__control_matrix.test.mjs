@@ -310,6 +310,8 @@ try {
       assert.equal(label.getAttribute("aria-label"), "Card action label");
       assert.equal(label.contentEditable, "plaintext-only");
       assert.equal(label.closest("a"), null, "the editing host is not nested in a link");
+      assert.equal(label.parentElement.contentEditable, "false",
+        "the editing host has the same ProseMirror ownership boundary as the Card title");
       assert.equal(readerLink.style.display, "none", "Edit exposes no navigation target");
       assert.equal(canvas.querySelector('[data-test-id="paper-card-action-label-create"]').hidden,
         true, "a present action has no duplicate label input");
@@ -333,6 +335,8 @@ try {
             priority: "future-priority", metadata: { keep: [1, 2] } }],
         },
       } }], "label-only editing preserves href representation, unknown priority and metadata");
+      assert.equal(canvas.querySelector("p").textContent, "Keep body",
+        "typing the action label cannot enter the Card body");
       const undo = new window.KeyboardEvent("keydown", {
         key: "z", metaKey: true, bubbles: true, cancelable: true,
       });

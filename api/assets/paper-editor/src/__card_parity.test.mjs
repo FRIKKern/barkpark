@@ -166,16 +166,18 @@ check("action slot is the reader's PdButton anchor with the binary priority coll
 //        the top, OUTSIDE the reader-shape subtree) ────────────────────────────
 check("mounted order keeps reader slots before the edit-only action-label twin", () => {
   assert.ok(
-    /dom\.append\(controls, mediaImg, titleHost, body, actionLink, actionLabelHost\);/.test(SRC),
+    /dom\.append\(controls, mediaImg, titleHost, body, actionLink, actionLabelBoundary\);/.test(SRC),
     "the mounted slot order no longer matches the reader's media, title, body, action",
   );
 });
 
 check("direct action-label editing uses a non-link plaintext sibling", () => {
   assert.ok(
-    /const actionLabelHost = document\.createElement\("span"\);/.test(SRC) &&
+    /actionLabelBoundary\.contentEditable = "false";/.test(SRC) &&
+      /actionLabelBoundary\.appendChild\(actionLabelHost\);/.test(SRC) &&
+      /const actionLabelHost = document\.createElement\("span"\);/.test(SRC) &&
       /actionLabelHost\.contentEditable = editable && hasAction \? "plaintext-only" : "false";/.test(SRC),
-    "the action label lost its independent plaintext editing host",
+    "the action label lost its independent ProseMirror-fenced plaintext editing host",
   );
   assert.ok(
     /actionLink\.style\.display = "none";/.test(SRC) &&

@@ -351,6 +351,8 @@ export const Card = Node.create({
       // label island, avoiding both navigation and nested interactive content.
       const actionLink = document.createElement("a");
       actionLink.setAttribute("contenteditable", "false");
+      const actionLabelBoundary = document.createElement("span");
+      actionLabelBoundary.contentEditable = "false";
       const actionLabelHost = document.createElement("span");
       actionLabelHost.setAttribute("data-test-id", "paper-card-action-label");
       actionLabelHost.setAttribute("role", "textbox");
@@ -358,9 +360,10 @@ export const Card = Node.create({
       actionLabelHost.setAttribute("aria-multiline", "false");
       actionLabelHost.tabIndex = 0;
       actionLabelHost.style.cursor = "text";
+      actionLabelBoundary.appendChild(actionLabelHost);
 
       // Reader order: media, title, body, action. Controls ride at the top (edit-only).
-      dom.append(controls, mediaImg, titleHost, body, actionLink, actionLabelHost);
+      dom.append(controls, mediaImg, titleHost, body, actionLink, actionLabelBoundary);
 
       let syncingTitle = false;
       let titleFocused = false;
@@ -720,7 +723,7 @@ export const Card = Node.create({
           if (titleEl.contains(m.target)) return true; // title edits are attr writes
           if (controls.contains(m.target)) return true; // controls (inc. the picker WC's own preview DOM) are attr writes
           if (mediaImg.contains(m.target)) return true; // media slot is attr-painted
-          if (actionLink.contains(m.target) || actionLabelHost.contains(m.target)) return true;
+          if (actionLink.contains(m.target) || actionLabelBoundary.contains(m.target)) return true;
           // Let PM handle mutations inside the editable body (contentDOM); ignore chrome.
           return !body.contains(m.target);
         },
