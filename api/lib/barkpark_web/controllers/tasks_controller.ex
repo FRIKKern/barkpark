@@ -2175,6 +2175,15 @@ defmodule BarkparkWeb.TasksController do
   @graph_corpus_node_budget 2000
   @graph_corpus_per_type_limit 1000
 
+  # HOW MUCH OF ONE TYPE IS RESIDENT AT ONCE. `list_documents/3` returns a
+  # type's whole page in one shot, so "one type at a time" still means up to
+  # @graph_corpus_per_type_limit fully-decoded documents live together — and on
+  # a corpus dominated by one large type that IS the peak. The fold walks each
+  # type in pages of this size instead, so the bound is one PAGE of decoded
+  # documents, not one type of them, and it no longer moves when a single type
+  # grows.
+  @graph_corpus_page_size 200
+
   # THIRD ceiling, and the only one that protects the BOX rather than the
   # payload: a CONCURRENT-DERIVATION CAP.
   #
@@ -2290,7 +2299,7 @@ defmodule BarkparkWeb.TasksController do
         bad_request(conn, message)
 
       {:ok, types} ->
-        # ONE TYPE AT A TIME — this fold IS the peak-heap bound.
+        # ONE PAGE OF ONE TYPE AT A TIME — this fold IS the peak-heap bound.
         #
         # It used to read every type's documents into a `doc_lists` list and
         # hold that list live across the WHOLE derivation, because the edge
@@ -2313,18 +2322,18 @@ defmodule BarkparkWeb.TasksController do
         # per-edge boolean whose query results were already discarded; it does
         # not change what stays resident. This changes what stays resident.
         #
-        # A type's documents are now live only for that type's iteration: nodes
-        # and edges are projected to small maps as they are read, `docs` is dead
-        # by the next iteration, and the explicit collect turns "eventually
-        # reclaimable" into "reclaimed" rather than waiting for an allocation to
-        # trigger a GC on a heap already the size of the corpus. Peak is
-        # max(one type's documents) + the projected result, not the sum over
-        # every type.
+        # Documents are now live only for the page they arrived in — see
+        # `fold_corpus_type/8`, which owns the paging, the projection and the
+        # collect. Peak is one PAGE of decoded documents plus the projected
+        # result, not the sum over every type; a single type growing no longer
+        # moves it either.
         #
         # SEMANTICS ARE UNCHANGED, deliberately: same `types` order, same
         # FIRST-wins de-duplication (node by id, edge by {from_id, to_id,
-        # field}), same per-type cap probe, and the budget + edge-honesty passes
-        # below are untouched.
+        # field}), the same per-type ceiling, and the budget + edge-honesty
+        # passes below are untouched. The truncation SIGNAL changed instrument
+        # (a `has_more` probe row instead of a `count_documents/3` query) and
+        # not meaning: it is still "this type has more rows than the cap".
         #
         # `dangling: :skip` — the OPT-IN escape from `extract_edges/2`'s
         # per-target existence query. This path NEVER reads that boolean: the
@@ -2340,62 +2349,11 @@ defmodule BarkparkWeb.TasksController do
         # dominant cost behind a measured 34s first paint.
         edge_opts = opts |> Keyword.put(:schemas, schemas) |> Keyword.put(:dangling, :skip)
 
-        # The per-type-cap signal is carried out of the fold instead of being
-        # discarded: a type whose page comes back at the cap gets ONE count
-        # query to confirm the ceiling actually fired (vs exactly-at-cap).
+        page_size = graph_corpus_page_size()
+
         {rev_nodes, rev_edges, node_ids, _edge_keys, per_type_capped} =
           Enum.reduce(types, {[], [], MapSet.new(), MapSet.new(), false}, fn type, acc ->
-            {nodes_acc, edges_acc, seen_nodes, seen_edges, capped} = acc
-
-            docs = Content.list_documents(type, dataset, list_opts)
-
-            capped =
-              capped or
-                (length(docs) >= per_type_limit and
-                   Content.count_documents(type, dataset, list_opts) > per_type_limit)
-
-            {nodes_acc, seen_nodes} =
-              Enum.reduce(docs, {nodes_acc, seen_nodes}, fn d, {acc_n, seen} ->
-                pid = Content.published_id(d.doc_id)
-
-                if MapSet.member?(seen, pid) do
-                  {acc_n, seen}
-                else
-                  node = %{
-                    id: pid,
-                    doc_id: pid,
-                    type: d.type,
-                    title: d.title || pid,
-                    phantom: false
-                  }
-
-                  {[node | acc_n], MapSet.put(seen, pid)}
-                end
-              end)
-
-            {edges_acc, seen_edges} =
-              docs
-              |> Content.corpus_edges_for_docs(dataset, edge_opts)
-              |> Enum.reduce({edges_acc, seen_edges}, fn e, {acc_e, seen} ->
-                key = {e.from_id, e.to_id, e.field}
-
-                if MapSet.member?(seen, key) do
-                  {acc_e, seen}
-                else
-                  edge = %{from_id: e.from_id, to_id: e.to_id, kind: e.kind}
-                  {[edge | acc_e], MapSet.put(seen, key)}
-                end
-              end)
-
-            # `docs` is dead here — nothing below this line reads it, so the
-            # collect reclaims this type's documents BEFORE the next type's are
-            # read. Without it the heap only shrinks when an allocation happens
-            # to trigger a GC, which on this path is after the corpus is
-            # already resident. The collect is O(live heap), and the live heap
-            # at this point is the projected nodes/edges, not the documents.
-            :erlang.garbage_collect()
-
-            {nodes_acc, edges_acc, seen_nodes, seen_edges, capped}
+            fold_corpus_type(type, dataset, list_opts, edge_opts, per_type_limit, page_size, 0, acc)
           end)
 
         real_nodes = Enum.reverse(rev_nodes)
@@ -2442,6 +2400,77 @@ defmodule BarkparkWeb.TasksController do
           truncated: per_type_capped or over_budget,
           truncation_reason: graph_truncation_reason(per_type_capped, over_budget)
         })
+    end
+  end
+
+  # ONE PAGE OF ONE TYPE AT A TIME — the peak-heap bound, tail-recursive.
+  #
+  # Each page is projected to node maps ({id, doc_id, type, title, phantom}) and
+  # edge maps ({from_id, to_id, kind}) as it is read, de-duplicated against the
+  # carried MapSets, and then dropped. `docs` is dead by the time the collect
+  # runs, so the page's decoded documents are reclaimed BEFORE the next page is
+  # read rather than whenever an allocation happens to trigger a GC — which on
+  # this path used to be after the corpus was already resident.
+  #
+  # The per-type ceiling is enforced by `take` (never read past
+  # `per_type_limit`), and the TRUNCATION SIGNAL is now exact and free:
+  # `list_documents_page/3` costs one extra row to say whether anything exists
+  # past the page, so `capped` is set when a page ends AT the ceiling with more
+  # rows behind it. That replaces the separate `count_documents/3` probe the
+  # single-shot read needed.
+  #
+  # HONEST LIMIT: offset paging over `updated_at_desc` can skip or repeat a row
+  # if the corpus is written to mid-derivation. Repeats are absorbed by the
+  # de-duplication sets; a skip is the same class of imprecision the 1000-row
+  # per-type cap already shipped, and the response says `truncated` either way.
+  defp fold_corpus_type(type, dataset, list_opts, edge_opts, per_type_limit, page_size, offset, acc) do
+    {nodes_acc, edges_acc, seen_nodes, seen_edges, capped} = acc
+    take = min(page_size, per_type_limit - offset)
+
+    if take <= 0 do
+      acc
+    else
+      page_opts = list_opts |> Keyword.put(:limit, take) |> Keyword.put(:offset, offset)
+      {docs, has_more} = Content.list_documents_page(type, dataset, page_opts)
+      read = length(docs)
+
+      {nodes_acc, seen_nodes} =
+        Enum.reduce(docs, {nodes_acc, seen_nodes}, fn d, {acc_n, seen} ->
+          pid = Content.published_id(d.doc_id)
+
+          if MapSet.member?(seen, pid) do
+            {acc_n, seen}
+          else
+            node = %{id: pid, doc_id: pid, type: d.type, title: d.title || pid, phantom: false}
+            {[node | acc_n], MapSet.put(seen, pid)}
+          end
+        end)
+
+      {edges_acc, seen_edges} =
+        docs
+        |> Content.corpus_edges_for_docs(dataset, edge_opts)
+        |> Enum.reduce({edges_acc, seen_edges}, fn e, {acc_e, seen} ->
+          key = {e.from_id, e.to_id, e.field}
+
+          if MapSet.member?(seen, key) do
+            {acc_e, seen}
+          else
+            {[%{from_id: e.from_id, to_id: e.to_id, kind: e.kind} | acc_e], MapSet.put(seen, key)}
+          end
+        end)
+
+      # `docs` is dead from here down.
+      :erlang.garbage_collect()
+
+      next_offset = offset + read
+      capped = capped or (has_more and next_offset >= per_type_limit)
+      acc = {nodes_acc, edges_acc, seen_nodes, seen_edges, capped}
+
+      if has_more and read > 0 do
+        fold_corpus_type(type, dataset, list_opts, edge_opts, per_type_limit, page_size, next_offset, acc)
+      else
+        acc
+      end
     end
   end
 
@@ -2712,6 +2741,9 @@ defmodule BarkparkWeb.TasksController do
 
   defp graph_corpus_per_type_limit,
     do: Application.get_env(:barkpark, :graph_corpus_per_type_limit, @graph_corpus_per_type_limit)
+
+  defp graph_corpus_page_size,
+    do: Application.get_env(:barkpark, :graph_corpus_page_size, @graph_corpus_page_size)
 
   # GRAPH ROOT RESOLUTION (gap #4 BOUND DECISION). Roots on ANY content doc, so
   # we DELIBERATELY do NOT call find_task_by_doc_id/2 (which hard-filters
