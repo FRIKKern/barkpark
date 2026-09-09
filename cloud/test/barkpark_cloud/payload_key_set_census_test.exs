@@ -409,25 +409,56 @@ defmodule BarkparkCloud.PayloadKeySetCensus.Go do
   """
   @spec struct_fields(binary, binary) :: MapSet.t() | nil
   def struct_fields(src, name) do
-    case Regex.run(~r/^type #{name} struct \{\n(.*?)\n\}$/ms, src, capture: :all_but_first) do
-      [body] ->
+    case struct_body(src, name) do
+      nil ->
+        nil
+
+      body ->
         ~r/^\s*([A-Z][A-Za-z0-9_]*)\s+[^\s]+\s+`json:"([^",]*)/m
         |> Regex.scan(body, capture: :all_but_first)
         |> Enum.reject(fn [_f, tag] -> tag in ["", "-"] end)
         |> Enum.map(fn [f, _tag] -> f end)
         |> MapSet.new()
-
-      _ ->
-        nil
     end
   end
 
   @doc "The json tag names of one struct, or nil when the struct does not exist."
   @spec struct_tags(binary, binary) :: MapSet.t() | nil
   def struct_tags(src, name) do
-    case Regex.run(~r/^type #{name} struct \{\n(.*?)\n\}$/ms, src, capture: :all_but_first) do
-      [body] -> tags(body)
-      _ -> nil
+    case struct_body(src, name) do
+      nil -> nil
+      body -> tags(body)
+    end
+  end
+
+  # The BODY of one struct — the text between its own braces and NOTHING past
+  # them — or nil when the struct does not exist.
+  #
+  # MEASURED FALLTHROUGH (dr-w34-followup-struct-tags-fallthrough). The previous
+  # regex was `^type NAME struct \{\n(.*?)\n\}$/ms`. A FIELDLESS struct writes
+  # its closing brace on the line straight after the opening one, so the `\n`
+  # that `(.*?)` needs before `\}` had already been consumed by `\{\n` — the
+  # lazy body therefore ran on to the closing brace of the NEXT struct in the
+  # file and swallowed its fields whole. Emptying `type DeployCoverageSite
+  # struct` made the PHANTOM arm report nine tags of `DeployCoverageCohorts` as
+  # phantoms OF DeployCoverageSite: red for the right reason by accident, and
+  # naming the wrong struct. The same fallthrough attributes a NEIGHBOUR's tags
+  # to a struct that has some of its own, which is a red nobody can act on.
+  #
+  # The replacement refuses to cross a column-0 `}`: a body is the run of lines
+  # that are NOT a bare closing brace. Nested anonymous structs are unaffected —
+  # gofmt indents their braces, so only the struct's own terminator sits at
+  # column 0. The second clause is the one-line form gofmt writes for a struct
+  # with no fields at all (`type X struct{}`), whose body is empty by definition.
+  @spec struct_body(binary, binary) :: binary | nil
+  defp struct_body(src, name) do
+    multiline = ~r/^type #{name} struct \{\n((?:(?!^\}$).)*)^\}$/ms
+    oneline = ~r/^type #{name} struct\s*\{\s*\}$/m
+
+    cond do
+      match = Regex.run(multiline, src, capture: :all_but_first) -> hd(match)
+      Regex.match?(oneline, src) -> ""
+      true -> nil
     end
   end
 
@@ -2466,6 +2497,59 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
            "no emitted key is declared by more than one struct anywhere in internal/cloudclient. " <>
              "The file-global union is no longer blind, so the OFF-STRUCT arm cannot bite — " <>
              "re-derive its premise before believing its green."
+  end
+
+  # A FIELDLESS struct is the shape that made the scanner read past its own
+  # closing brace and report the NEXT struct's tags under the empty struct's
+  # name (dr-w34-followup-struct-tags-fallthrough, MEASURED not predicted). The
+  # fixture puts the fieldless struct BETWEEN two tagged ones on purpose: the
+  # `before` struct proves the scanner is not simply returning empty for
+  # everything, and the `after` struct is the one whose tags used to be stolen.
+  test "SCANNER: a fieldless struct is EMPTY, and its neighbours' tags are not attributed to it" do
+    fixture = """
+    type FixtureBefore struct {
+    \tAlpha string `json:"alpha"`
+    }
+
+    type FixtureEmptyBraces struct {
+    }
+
+    type FixtureEmptyOneLine struct{}
+
+    type FixtureAfter struct {
+    \tOmega string `json:"omega"`
+    }
+
+    type FixtureNested struct {
+    \tInner struct {
+    \t\tDeep string `json:"deep"`
+    \t} `json:"inner"`
+    }
+    """
+
+    # The neighbours are read correctly — without this the empties below would
+    # be a green with no subject.
+    assert Go.struct_tags(fixture, "FixtureBefore") == MapSet.new(["alpha"])
+    assert Go.struct_tags(fixture, "FixtureAfter") == MapSet.new(["omega"])
+
+    # THE FINDING. Both spellings gofmt can produce for a fieldless struct.
+    assert Go.struct_tags(fixture, "FixtureEmptyBraces") == MapSet.new(),
+           "a fieldless struct reported tags — the scanner ran past its own closing brace and " <>
+             "attributed a NEIGHBOUR's tags to it, which is how a PHANTOM red names the wrong struct."
+
+    assert Go.struct_tags(fixture, "FixtureEmptyOneLine") == MapSet.new()
+
+    # The stolen set was specifically the NEXT struct's, so name it.
+    refute "omega" in Go.struct_tags(fixture, "FixtureEmptyBraces")
+    assert Go.struct_fields(fixture, "FixtureEmptyBraces") == MapSet.new()
+
+    # A struct's own body still reaches its NESTED braces: only a column-0 `}`
+    # terminates it, so the guard above did not buy emptiness with blindness.
+    assert Go.struct_tags(fixture, "FixtureNested") == MapSet.new(["inner", "deep"])
+
+    # An absent struct is still nil, not empty — the pair arms above tell those
+    # two apart and refuse the first.
+    assert Go.struct_tags(fixture, "FixtureNotThere") == nil
   end
 
   # ---------------------------------------------------------------------------
