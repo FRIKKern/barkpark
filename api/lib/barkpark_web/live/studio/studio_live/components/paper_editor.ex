@@ -1913,6 +1913,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     end
   end
 
+  defp paper_link_ref_field_representable?(ref, field) when is_map(ref) do
+    case Map.fetch(ref, field) do
+      :error -> true
+      {:ok, value} -> is_nil(value) or is_binary(value) or is_integer(value)
+    end
+  end
+
+  defp paper_link_ref_field_representable?(_ref, _field), do: false
+
   # Per-block-type edit fields. Rich bodies use the canonical WC so its
   # PortableDoc conversion preserves marks and links while text changes.
   # Ordinary forms remain for scalar chrome such as callout tone/title/fold.
@@ -3138,15 +3147,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           </p>
                       <% end %>
                     <% {:error, _reason} -> %>
-                      <label class="bp-paper-edit-fieldlabel">
-                        Authored title
-                        <input type="text" name={"ref-#{index}-title"} class="bp-paper-edit-text"
-                               value={Blocks.paper_link_ref_value(ref, "title") || ""} />
-                      </label>
-                      <label class="bp-paper-edit-fieldlabel">
-                        Authored description
-                        <textarea name={"ref-#{index}-description"} class="bp-paper-edit-textarea" rows="2"><%= Blocks.paper_link_ref_value(ref, "description") || "" %></textarea>
-                      </label>
+                      <%= if paper_link_ref_field_representable?(ref, "title") do %>
+                        <label class="bp-paper-edit-fieldlabel">
+                          Authored title
+                          <input type="text" name={"ref-#{index}-title"} class="bp-paper-edit-text"
+                                 value={Blocks.paper_link_ref_value(ref, "title") || ""} />
+                        </label>
+                      <% else %>
+                        <p class="bp-paper-edit-readonly" data-paper-link-ref-title-readonly>
+                          Authored title has an unsupported shape and is preserved read-only.
+                        </p>
+                      <% end %>
+                      <%= if paper_link_ref_field_representable?(ref, "description") do %>
+                        <label class="bp-paper-edit-fieldlabel">
+                          Authored description
+                          <textarea name={"ref-#{index}-description"} class="bp-paper-edit-textarea" rows="2"><%= Blocks.paper_link_ref_value(ref, "description") || "" %></textarea>
+                        </label>
+                      <% else %>
+                        <p class="bp-paper-edit-readonly" data-paper-link-ref-description-readonly>
+                          Authored description has an unsupported shape and is preserved read-only.
+                        </p>
+                      <% end %>
                   <% end %>
                   <label class="bp-paper-edit-fieldlabel">
                     Eyebrow

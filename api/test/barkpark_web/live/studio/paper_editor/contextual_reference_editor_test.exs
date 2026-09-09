@@ -472,6 +472,60 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
     refute configure |> LazyHTML.query(~s([name="ref-1-description"])) |> Enum.any?()
   end
 
+  test "unadmitted reference rows keep safe legacy fields without serializing opaque siblings" do
+    block = %{
+      "id" => "legacy-partial-copy",
+      "type" => "paper-links",
+      "refs" => [
+        %{
+          "slug" => "duplicate",
+          "title" => %{"text" => "preserve"},
+          "description" => "Editable duplicate description",
+          "prefer_authored_copy" => true
+        },
+        %{
+          "slug" => " duplicate ",
+          "title" => "Editable duplicate title",
+          "description" => ["preserve"],
+          "prefer_authored_copy" => true
+        },
+        %{
+          "slug" => "live-owned-title",
+          "title" => false,
+          "description" => 7,
+          "prefer_authored_copy" => false
+        },
+        %{
+          "slug" => "live-owned-description",
+          "title" => 9,
+          "description" => 1.5,
+          "prefer_authored_copy" => false
+        }
+      ]
+    }
+
+    html = render_component(&PaperEditor.paper_block_fields/1, %{block: block, paper_links: %{}})
+
+    configure =
+      html |> LazyHTML.from_fragment() |> LazyHTML.query(~s([data-test-id="paper-links-editor"]))
+
+    for {index, safe_field, opaque_field} <- [
+          {0, "description", "title"},
+          {1, "title", "description"},
+          {2, "description", "title"},
+          {3, "title", "description"}
+        ] do
+      row = configure |> LazyHTML.query(~s([data-ref-index="#{index}"])) |> Enum.at(0)
+
+      assert row |> LazyHTML.query(~s([name="ref-#{index}-#{safe_field}"])) |> Enum.count() == 1
+      refute row |> LazyHTML.query(~s([name="ref-#{index}-#{opaque_field}"])) |> Enum.any?()
+
+      assert row
+             |> LazyHTML.query(~s([data-paper-link-ref-#{opaque_field}-readonly]))
+             |> Enum.count() == 1
+    end
+  end
+
   test "bar-chart keeps the canonical chart visible while row controls start closed" do
     block = %{
       "id" => "velocity",
