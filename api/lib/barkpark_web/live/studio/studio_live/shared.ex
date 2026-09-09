@@ -93,6 +93,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   def list_topic(dataset, _ws_id), do: "documents:#{dataset}"
 
+  @doc """
+  THE CONSUMER-SIDE TENANT FENCE for the GLOBAL document stream
+  (task-be3b3aa6da5df3a2, instance 6).
+
+  `list_topic/2` above already prefers the workspace-keyed topic
+  `documents:ws:<id>:<dataset>` whenever a workspace is in context — but the
+  fallback clause, and every consumer that joins `documents:<dataset>` directly
+  (`ChatLive.subscribe_hand_tasks/1`), ride the GLOBAL topic, which
+  `Content.Broadcast` fires UNCONDITIONALLY for every tenant while the
+  workspace-keyed twin is conditional on `doc.workspace_id`.
+
+  THE TOPIC STRING IS THE BROADCASTER'S TO CHANGE; THE FILTER IS OURS. The
+  payload already carries `:workspace_id` (`content/broadcast.ex` stamps it on
+  both mutation messages), so a consumer can fence itself without any change to
+  the producer — which is why this is a predicate here rather than a new topic
+  there.
+
+  Fail-closed in the direction that matters, permissive only for the SHARED
+  layer, mirroring `Content.Scope.scope_to_workspace_or_global/3`:
+
+    * a message stamped with ANOTHER workspace  -> refused
+    * a message stamped with OUR workspace      -> admitted
+    * a message with NO workspace (shared layer)-> admitted to any tenant
+    * an UNRESOLVED consumer (`ws_id` nil)      -> shared layer ONLY
+  """
+  @spec own_tenant?(map(), binary() | nil) :: boolean()
+  def own_tenant?(msg, ws_id) when is_map(msg) do
+    case Map.get(msg, :workspace_id) do
+      nil -> true
+      ^ws_id when is_binary(ws_id) -> true
+      _ -> false
+    end
+  end
+
   @doc false
   def ensure_presence_subscription(socket) do
     if connected?(socket) do

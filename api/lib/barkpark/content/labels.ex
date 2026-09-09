@@ -52,6 +52,16 @@ defmodule Barkpark.Content.Labels do
   guard were ever dropped.
   """
   @spec reference_title(String.t() | nil, String.t() | nil, String.t(), keyword()) :: String.t()
+  # THE ARITY IS THE TENANT FENCE (task-be3b3aa6da5df3a2, instance 3). `opts`
+  # defaults to `[]`, so a 3-arity call COMPILES, reads, and silently drops
+  # `workspace_id`, `project_id`, `caller_context` AND `grant_scoped` — the
+  # `nil` workspace arm of `Content.Scope.scope_to_workspace_or_global/3`
+  # returns the query UNTOUCHED, i.e. every tenant's rows, and the caller sees
+  # a plausible title rather than an error. That is exactly how the Studio
+  # sidebar came to resolve references un-narrowed while the body of the SAME
+  # paper resolved them 4-arity. A new call site MUST pass the scope; the
+  # 3-arity form is for a caller that has genuinely resolved no tenant.
+  # @canonical capability:reference-title-resolution aka:reference_title,resolve reference label,relations pane title doc:docs/contracts/tenancy.md
   def reference_title(value, ref_type, dataset, opts \\ [])
 
   def reference_title(value, _ref_type, _dataset, _opts) when value in [nil, ""],
