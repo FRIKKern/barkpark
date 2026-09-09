@@ -9970,10 +9970,50 @@ defmodule BarkparkCloud.Registry do
 
   defp dispatch_reaped_deployment_alerts(alerts) do
     alerts
-    |> Enum.filter(fn {site_id, _reason, _identity} ->
-      DeploymentFailedPolicy.destroyed_content?(%{site_id: site_id})
-    end)
+    |> destroyed_content_alerts()
     |> enqueue_reaped_deployment_alerts()
+  rescue
+    # An alert must never break the sweep that triggered it — the four bulk
+    # passes have already COMMITTED by the time this runs, and a raise here would
+    # fail the reaper job so Oban re-drove a sweep that can no longer find those
+    # rows (they are terminal now), losing the alerts AND re-running the passes.
+    # Loud, named, and counted: an operator can see exactly how many alerts the
+    # enqueue lost. This is not routed through `Withhold` because a withhold row
+    # is itself a `Repo.insert`, and the branch we are in is the one where
+    # writing to this database just failed.
+    #
+    # dr-w11-bl-deployment-failed-alarm-fatigue MOVED THIS RESCUE UP ONE
+    # FUNCTION, and that is the whole reason the narrowing lives in its own
+    # helper. `destroyed_content_alerts/1` READS THE DATABASE (one
+    # `Repo.exists?` per distinct site). A filter that raised OUTSIDE this
+    # rescue would fail the sweep for the same already-committed rows the
+    # rescue exists to protect — the narrowing must not be able to do what the
+    # enqueue is forbidden to do. The count is the PRE-filter list: the sweep
+    # cannot say how many survived a pass that raised.
+    error ->
+      Logger.error(
+        "reap_stale_deployments: failed to enqueue up to #{length(alerts)} deployment_failed " <>
+          "alerts: #{Exception.message(error)}"
+      )
+
+      :ok
+  end
+
+  # dr-w11-bl-deployment-failed-alarm-fatigue: the narrowing, at ONE READ PER
+  # DISTINCT SITE. A mass reap is many rows of few sites (27 rows across 2 teams
+  # in the covering test), and asking the ledger once per ROW would put an
+  # N-query fan-out on the reaper tick for an answer that cannot differ between
+  # two rows of the same site. The verdict map is built first, then applied — the
+  # single predicate is still `DeploymentFailedPolicy.destroyed_content?/1`, so
+  # the reaper and the two synchronous producers cannot drift apart.
+  defp destroyed_content_alerts(alerts) do
+    verdicts =
+      alerts
+      |> Enum.map(fn {site_id, _reason, _identity} -> site_id end)
+      |> Enum.uniq()
+      |> Map.new(&{&1, DeploymentFailedPolicy.destroyed_content?(%{site_id: &1})})
+
+    Enum.filter(alerts, fn {site_id, _reason, _identity} -> Map.fetch!(verdicts, site_id) end)
   end
 
   # The narrowing can empty a non-empty sweep, and an empty sweep must not reach
@@ -9991,22 +10031,6 @@ defmodule BarkparkCloud.Registry do
     |> Oban.insert_all()
 
     :ok
-  rescue
-    # An alert must never break the sweep that triggered it — the four bulk
-    # passes have already COMMITTED by the time this runs, and a raise here would
-    # fail the reaper job so Oban re-drove a sweep that can no longer find those
-    # rows (they are terminal now), losing the alerts AND re-running the passes.
-    # Loud, named, and counted: an operator can see exactly how many alerts the
-    # enqueue lost. This is not routed through `Withhold` because a withhold row
-    # is itself a `Repo.insert`, and the branch we are in is the one where
-    # writing to this database just failed.
-    error ->
-      Logger.error(
-        "reap_stale_deployments: failed to enqueue #{length(alerts)} deployment_failed " <>
-          "alerts: #{Exception.message(error)}"
-      )
-
-      :ok
   end
 
   # Guard a :binary_id PK lookup: a non-UUID id (a malformed path param) makes

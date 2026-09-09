@@ -2324,13 +2324,26 @@ defmodule BarkparkCloud.DeployLedger do
   """
   @spec content_on_web?(Ecto.UUID.t()) :: boolean()
   def content_on_web?(site_id) when is_binary(site_id) do
-    Repo.exists?(
-      from(d in Deployment,
-        where: d.site_id == ^site_id,
-        where: d.environment == "production",
-        where: d.status == "live"
-      )
-    )
+    case Ecto.UUID.cast(site_id) do
+      {:ok, id} ->
+        Repo.exists?(
+          from(d in Deployment,
+            where: d.site_id == ^id,
+            where: d.environment == "production",
+            where: d.status == "live"
+          )
+        )
+
+      # A NON-CASTABLE ID IS `false`, NOT A RAISE. `d.site_id == ^"nope"` makes
+      # `Repo.exists?` raise `Ecto.Query.CastError`, and this predicate is read
+      # on the reaper's post-commit alert path, where a raise fails a sweep whose
+      # four bulk passes have ALREADY COMMITTED — Oban then re-drives a sweep
+      # that can no longer find those rows. `false` is also the SAFE verdict for
+      # the sole caller: `DeploymentFailedPolicy` reads it as "nothing is up", so
+      # the doubt falls toward SENDING the alarm, never toward suppressing it.
+      :error ->
+        false
+    end
   end
 
   def content_on_web?(_site_id), do: false
