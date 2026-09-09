@@ -11354,6 +11354,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Narrow the page to the DIRECT children of this parent task id (`parent_id` is an accepted alias server-side). This is the parent-scoped read that carries updated_at per row — the close-time field a \"which children closed between T1 and T2\" audit needs. `bp task get <parent>` renders the same rail but its child summaries are a lighter card; use this verb when you are querying by time rather than reading one task.",
+            "in": "query",
+            "name": "parent",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
