@@ -832,3 +832,112 @@ jobs:
             echo "::notice title=Go gate: green — nothing ran::NO GO JOB RAN on this head.%0AGo gate is green because this diff touched none of the path globs declared in go-tests.yml on.push.paths, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0ARead it as 'no Go job executed', never as 'the Go suite passed'."
           fi
           echo "Go gate: every upstream job either succeeded or was legitimately not dispatched."
+
+  report-main-failure:
+    # ── THE RED THAT REACHES A HUMAN ─────────────────────────────────────────
+    #
+    # WHY THIS EXISTS, MEASURED. On origin/main a327775de the per-workflow
+    # caller count of scripts/file-ci-failure-issue.sh read: console-harness 2,
+    # cloud 2, elixir 0, go-tests 0, security 0 (an impossible-script-name
+    # control grep returned 0 against 36 real hits, so the count discriminates).
+    # The reporting path was built for two of the five gate workflows and never
+    # for the other three. The live instance: commit cdb49a3228548a69c is an
+    # ancestor of origin/main and carries `Elixir gate` FAILURE at
+    # 2026-09-07T03:23:00Z with Cloud and Console green — A REQUIRED CONTEXT
+    # CONCLUDED FAILURE ON A COMMIT THAT IS ON MAIN, and no path existed that
+    # would tell anyone. Had it been Console gate, issue #13332 is what would
+    # have been filed. This job is that path for the Go lane.
+    #
+    # WHY NOT A HISTORY WALK. scripts/main-gate-watch.sh is deliberately
+    # TIP-SCOPED and its lines 26-32 say why: walked per-commit over main's last
+    # 25 commits it reds on 23 of 25, 15 purely as MISSING — 92% noise. That
+    # reasoning is correct and is NOT touched here. The remedy is the PUSH RUN'S
+    # OWN failure arm: it fires on the run that actually failed and needs no
+    # history walk at all. cdb49a322 stopped being the tip within minutes, so
+    # tip-scoping and this arm are complementary, not alternatives.
+    #
+    # WHAT THIS BUYS, ON THE RECORD (issue #6377). This buys "REACHES AN ISSUE",
+    # not "reaches a human". #11714 is still open with 949 comments, every
+    # author github-actions[bot] and zero human replies. A durable, keyed,
+    # timestamped record of a post-merge red beats no record — that is the trade
+    # being made, deliberately, and it is not a claim that anyone reads it.
+    #
+    # Shape, every part load-bearing (ported byte-for-byte from
+    # console-harness.yml's arm — the four gate workflows must not drift):
+    #
+    #   * `needs: [go-gate]` — it reports on the AGGREGATOR'S verdict, the
+    #     name branch protection reads, not on any single leaf.
+    #
+    #   * `if: failure() && …` — `failure()` is true when an ancestor FAILED and
+    #     is FALSE for `cancelled`. A cancelled main-push run (queue-depth-1
+    #     displacement) executes zero substantive jobs and has nothing to
+    #     report; filing for it would be noise that trains people to ignore the
+    #     real ones.
+    #
+    #   * `github.ref == 'refs/heads/main'` — a failing PR already has a human
+    #     attached to it. Only main's post-merge red is ownerless.
+    #
+    #   * THE DRILL BRANCH. `github.head_ref == 'ci-drill/main-push-failure-arm'`
+    #     is a NAMED, EXACT-MATCH self-test hatch, and it exists because an arm
+    #     gated on `github.ref == 'refs/heads/main'` CANNOT BE OBSERVED FIRING
+    #     BEFORE IT REACHES THE DEFAULT BRANCH — none of the five gate workflows carries
+    #     `workflow_dispatch`, and a `workflow_dispatch` added on a branch is
+    #     not dispatchable until it is on the default branch. Without this hatch
+    #     the arm would ship as the vacuous-green shape this repo keeps
+    #     rediscovering: wired, never once seen to fire. On the drill branch the
+    #     failure key is a DISTINCT drill key, so a drill can never comment on
+    #     the real main issue. Re-prove this arm at any time by branching
+    #     `ci-drill/main-push-failure-arm`, breaking one upstream job, and
+    #     opening a PR.
+    #
+    #   * `permissions:` is JOB-LEVEL and must stay that way. The repository's
+    #     `default_workflow_permissions` is "read", so the issue POST 403s
+    #     without an explicit `issues: write` — but a WORKFLOW-level block would
+    #     silently re-scope the token of every other job in this file.
+    #
+    # It cannot warn-and-pass: scripts/file-ci-failure-issue.sh exits 1 whenever
+    # the alert was not delivered. A red here means "main is broken AND nobody
+    # was told" — worse than the failure it was reporting, so it is worth its
+    # own red. It never affects `Go gate`, which has already published its
+    # verdict by then. This job publishes the check name `Report main-push
+    # failure to a human`, which is NOT in .github/required-checks.json and must
+    # never be added to it.
+    name: Report main-push failure to a human
+    needs: [go-gate]
+    if: >-
+      failure()
+      && (github.ref == 'refs/heads/main'
+          || github.head_ref == 'ci-drill/main-push-failure-arm')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: ${{ github.ref == 'refs/heads/main' && 'go-tests-main' || 'ci-drill-main-push-failure-arm' }}
+          CI_FAILURE_DETAIL: |
+            The `Go gate` context is RED on a push to `main`.
+            This is POST-MERGE: the breakage is already on the default branch.
+
+            `Go gate` is ADVISORY: it is not among the contexts listed in
+            .github/required-checks.json, so it never stopped this change and
+            could not have. That is exactly why it needs a report — an advisory
+            red on main is the one with no human already attached to it. (The
+            required roster is deliberately NOT enumerated here: that spec is
+            the single owner of it, and a copy in prose goes stale.)
+
+            Read the aggregator's "Decide (fail-closed over every upstream
+            result)" step: it names whether `go vet + test` or the `changes`
+            dispatcher is out of the allow-set.
+            This issue is idempotent per key: an ongoing failure appends a
+            comment rather than opening a new issue. CLOSE IT once main is green
+            again — the next main-push failure opens a fresh one.
+
+            If `ci-drill-main-push-failure-arm` is the key in the title, this is
+            a DRILL from the `ci-drill/main-push-failure-arm` branch proving the
+            arm can fire. It accuses nothing. Close it.
+        run: bash scripts/file-ci-failure-issue.sh
