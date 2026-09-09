@@ -115,6 +115,12 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
     trigger = LazyHTML.query(tree, "[data-test-id='paper-card-action-label-focus']")
     assert LazyHTML.attribute(trigger, "aria-controls") == [field_id]
     assert hd(LazyHTML.attribute(trigger, "phx-click")) =~ "##{field_id}"
+    [focus_commands] = LazyHTML.attribute(trigger, "phx-click")
+
+    assert [["remove_attr", %{"attr" => "open"}], ["focus", _]] =
+             Enum.map(Jason.decode!(focus_commands), fn [command, args] ->
+               [command, Map.take(args, ["attr"])]
+             end)
 
     assert LazyHTML.text(LazyHTML.query(tree, "textarea[name='card-action-label']")) ==
              " <literal> "

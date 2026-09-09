@@ -1956,7 +1956,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   defp paper_link_ref_field_dom_id(_field, _block_id, _index, nil), do: nil
 
-  defp paper_link_ref_panel_focus(dom_id) do
+  defp contextual_panel_focus(dom_id) do
     JS.remove_attribute("open", to: {:closest, ".bp-paper-contextual-controls"})
     |> JS.focus(to: "#" <> dom_id)
   end
@@ -2420,7 +2420,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         class="btn btn-ghost btn-sm"
                         data-test-id="paper-card-action-label-focus"
                         aria-controls={card_action_label_dom_id(@id)}
-                        phx-click={JS.focus(to: "#" <> card_action_label_dom_id(@id))}
+                        phx-click={contextual_panel_focus(card_action_label_dom_id(@id))}
                       >Edit action label</button>
                     <% else %>
                       <label class="bp-paper-edit-fieldlabel" for={"card-action-label-" <> @id}>Action label</label>
@@ -3196,7 +3196,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                             <button
                               type="button"
                               class="btn btn-ghost btn-sm"
-                              phx-click={paper_link_ref_panel_focus(paper_link_ref_dom_id("title", @id, index, admission.guard))}
+                              phx-click={contextual_panel_focus(paper_link_ref_dom_id("title", @id, index, admission.guard))}
                               aria-controls={paper_link_ref_dom_id("title", @id, index, admission.guard)}
                               data-paper-link-ref-title-panel-trigger
                             ><%= if paper_links_field_absent?(ref, "title"), do: "Add title", else: "Edit title" %></button>
@@ -3213,7 +3213,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                             <button
                               type="button"
                               class="btn btn-ghost btn-sm"
-                              phx-click={paper_link_ref_panel_focus(paper_link_ref_dom_id("description", @id, index, admission.guard))}
+                              phx-click={contextual_panel_focus(paper_link_ref_dom_id("description", @id, index, admission.guard))}
                               aria-controls={paper_link_ref_dom_id("description", @id, index, admission.guard)}
                               data-paper-link-ref-description-panel-trigger
                             ><%= if paper_links_field_absent?(ref, "description"), do: "Add description", else: "Edit description" %></button>
