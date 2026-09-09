@@ -71,6 +71,38 @@
 #
 # bash 3.2 compatible (macOS system bash): no associative arrays, no mapfile.
 
+# INTERPRETER GUARD — MEASURED 2026-09-09 by RUNNING it, not by grepping
+# (task-b896488e115d1eed). `sh scripts/toplevel-classifier-check.sh` on this Mac's bash 3.2.57 in
+# POSIX mode (which is what /bin/sh is here) exited 0.
+#
+# WHY THAT 0 IS A LIE HERE: the process substitution(s) at line(s) 240, 285, 286 sit
+# inside a command substitution, so bash parses them only when the $( ) is
+# expanded. Under POSIX mode that expansion printed
+#   scripts/toplevel-classifier-check.sh: command substitution: syntax error near unexpected token `('
+# to stderr, the captured variable came back EMPTY, and an empty diff/comm reads
+# as "no drift" — after which this script printed its own OK/PASS/VERDICT line.
+# The verdict was rendered; the comparison behind it never ran. That was observed
+# in the 2026-09-09 census, on a clean tree, in this script's own output.
+#
+# CI IS NOT EXPOSED: every workflow invokes this with `bash`. This is an agent-
+# and operator-facing trap — someone typing `sh scripts/toplevel-classifier-check.sh` out of habit —
+# and it is recorded here as one, not overstated as a CI hole.
+#
+# The guard below is copied verbatim (modulo the script name) from
+# scripts/required-checks.test.sh:119-129. It must stay POSIX-parseable and must
+# stay ABOVE the first process substitution: bash reads incrementally, so
+# anything the guard sits after is code a POSIX-mode shell has already run.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "toplevel-classifier-check.sh: needs bash (this script uses process substitution); run: bash scripts/toplevel-classifier-check.sh${1:+ $1}" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "toplevel-classifier-check.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/toplevel-classifier-check.sh${1:+ $1}" >&2
+    exit 2
+    ;;
+esac
+
 set -uo pipefail
 
 ROOT="${TOPLEVEL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"

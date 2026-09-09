@@ -124,6 +124,38 @@
 #   CRON_PROBE_POLL_TRIES  how many times to look for the dispatched run (12)
 #   CRON_PROBE_POLL_SLEEP  seconds between those looks (5)
 
+# INTERPRETER GUARD — MEASURED 2026-09-09 by RUNNING it, not by grepping
+# (task-b896488e115d1eed). `sh scripts/cron-overdue-probe.sh` on this Mac's bash 3.2.57 in
+# POSIX mode (which is what /bin/sh is here) exited 0.
+#
+# WHY THAT 0 IS A LIE HERE: the process substitution(s) at line(s) 307, 308 sit
+# inside a command substitution, so bash parses them only when the $( ) is
+# expanded. Under POSIX mode that expansion printed
+#   scripts/cron-overdue-probe.sh: command substitution: syntax error near unexpected token `('
+# to stderr, the captured variable came back EMPTY, and an empty diff/comm reads
+# as "no drift" — after which this script printed its own OK/PASS/VERDICT line.
+# The verdict was rendered; the comparison behind it never ran. That was observed
+# in the 2026-09-09 census, on a clean tree, in this script's own output.
+#
+# CI IS NOT EXPOSED: every workflow invokes this with `bash`. This is an agent-
+# and operator-facing trap — someone typing `sh scripts/cron-overdue-probe.sh` out of habit —
+# and it is recorded here as one, not overstated as a CI hole.
+#
+# The guard below is copied verbatim (modulo the script name) from
+# scripts/required-checks.test.sh:119-129. It must stay POSIX-parseable and must
+# stay ABOVE the first process substitution: bash reads incrementally, so
+# anything the guard sits after is code a POSIX-mode shell has already run.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "cron-overdue-probe.sh: needs bash (this script uses process substitution); run: bash scripts/cron-overdue-probe.sh${1:+ $1}" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "cron-overdue-probe.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/cron-overdue-probe.sh${1:+ $1}" >&2
+    exit 2
+    ;;
+esac
+
 set -uo pipefail
 
 REPO_ROOT="${CRON_PROBE_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
