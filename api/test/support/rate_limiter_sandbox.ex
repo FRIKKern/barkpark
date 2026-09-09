@@ -3,7 +3,8 @@ defmodule Barkpark.RateLimiterSandbox do
   Per-test isolation for `Barkpark.RateLimiter`'s WHOLE-NODE token buckets.
 
   `RateLimiter` keeps its buckets in a `:named_table` ETS table
-  (`:barkpark_rate_limiter`, rate_limiter.ex:26/50-56). A named table is node
+  (`@table :barkpark_rate_limiter`, created by `:ets.new(@table, [:named_table, ...])`
+  in rate_limiter.ex). A named table is node
   state, not process state: it outlives every test, it is not owned by the SQL
   sandbox, and nothing in `api/test/support` ever reset it. So a bucket a test
   spends stays spent for the rest of the run.
