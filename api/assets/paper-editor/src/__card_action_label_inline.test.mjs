@@ -12,6 +12,15 @@ const shell = readFileSync(new URL(
   import.meta.url,
 ), "utf8");
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+assert.match(shell, /font: inherit; font-weight: bold; text-align: inherit; letter-spacing: inherit;/,
+  "reader paint and textarea share letter spacing so the same label fits the same width");
+assert.match(shell, /clip-path: inset\(50%\); contain: size;/,
+  "an inactive exact-whitespace textarea cannot enlarge the reader button");
+for (const css of [shell, readFileSync(new URL("./styles.css", import.meta.url), "utf8")]) {
+  assert.match(css,
+    /\.bp-canvas-card:has\(\[data-test-id="paper-card-action-label"\]:focus\) \.bp-canvas-card__controls \{ opacity: 0; pointer-events: none; \}/,
+    "direct label typing does not overlay the previous prose with Card configuration controls");
+}
 const waitFor = async (predicate) => {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (predicate()) return;
