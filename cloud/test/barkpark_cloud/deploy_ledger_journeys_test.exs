@@ -264,7 +264,8 @@ defmodule BarkparkCloud.DeployLedgerJourneysTest do
         %{inserted_at: ~U[2026-08-06 23:30:00Z], status: "live", content_rev: "666666666666"}
       ])
 
-      node = DeployLedger.journeys(@from, @to, site_ids: [before_door.id, after_door.id, across.id])
+      node =
+        DeployLedger.journeys(@from, @to, site_ids: [before_door.id, after_door.id, across.id])
 
       assert node.boundary.instant == @door
       assert Enum.map(node.sides, & &1.side) == [:pre, :post, :straddling]
