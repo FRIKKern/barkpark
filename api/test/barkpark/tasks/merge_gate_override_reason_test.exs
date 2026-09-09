@@ -175,9 +175,12 @@ defmodule Barkpark.Tasks.MergeGateOverrideReasonTest do
                  caller_token_id: "tok-abc"
                )
 
-      # Read back from the PUBLISHED perspective — what a reader of the row
-      # sees, not what the caller was told.
-      content = published_content!(task.id)
+      # Read back FROM THE STORE, never from the envelope the writer was handed
+      # — the same discipline the stamp verb's own read-back enforces. The
+      # PUBLISHED-perspective read (GET /v1/tasks/:id after the stamp) is
+      # asserted end-to-end in tasks_controller_test.exs, "merge-gated=<reason>
+      # releases the gate on the wire, and the reason is persisted".
+      content = stored(task.id)
 
       assert Enum.at(content["acceptance_criteria"], 1)["met"] == true
 
@@ -302,12 +305,4 @@ defmodule Barkpark.Tasks.MergeGateOverrideReasonTest do
   end
 
   defp stored(task_id), do: Repo.get!(Document, task_id).content
-
-  # The PUBLISHED read: the row as a reader of the ledger sees it, not the
-  # envelope the writer was handed.
-  defp published_content!(task_id) do
-    doc = Repo.get!(Document, task_id)
-    assert doc.status == "published", "the fixture row must be published to read it back"
-    doc.content
-  end
 end

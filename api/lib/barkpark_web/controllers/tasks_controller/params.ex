@@ -2402,13 +2402,18 @@ defmodule BarkparkWeb.TasksController.Params do
 
   @merge_gated_bare_truthy [true, 1, "true", "1", "yes", "on", "TRUE", "True", "Yes", "On"]
 
+  # The falsy spellings a boolean flag used to accept. They are NOT a reason —
+  # a caller spelling the override off asked for no override, and reading
+  # "false" as a signed sentence would let the word `false` release a gate.
+  @merge_gated_bare_falsy ["false", "0", "no", "off", "FALSE", "False", "No", "Off"]
+
   defp merge_gated_reason(v) when v in @merge_gated_bare_truthy,
     do: {:error, :invalid_stamp, merge_gated_reason_message()}
 
   defp merge_gated_reason(v) when is_binary(v) do
     case String.trim(v) do
       "" -> {:ok, nil}
-      reason -> {:ok, reason}
+      reason -> if reason in @merge_gated_bare_falsy, do: {:ok, nil}, else: {:ok, reason}
     end
   end
 
