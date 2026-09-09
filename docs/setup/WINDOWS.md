@@ -36,9 +36,14 @@ When it finishes you get:
 | Studio | `http://localhost:4000/studio` |
 | API | `http://localhost:4000/api/schemas` (liveness probe — there is no `/health`) |
 | Reader | `http://localhost:4000/papers/<slug>` |
-| Token | `barkpark-dev-token` (read+write+admin; `demo` profile) |
+| API token | `barkpark-dev-token` (read+write+admin; `demo` profile only) |
+| Ingest token | `barkpark-dev-ingest-token` (the dev default of `BARKPARK_INGEST_TOKEN`) |
 
 ### Create a paper
+
+Paper ingest is guarded by its own shared secret, **not** by the API token above
+— `barkpark-dev-token` returns `401 invalid ingest token` on this route. Send
+`barkpark-dev-ingest-token` (or any admin-tier API token):
 
 ```powershell
 irm http://localhost:4000/v1/plugins/bulldocs/papers -Method Post `

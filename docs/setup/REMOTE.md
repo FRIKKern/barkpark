@@ -140,11 +140,11 @@ curl -s $BP/v1/data/mutate/production -H "Authorization: Bearer $TOK" \
 
 **Create a paper** — papers are `type:"paper"` documents; ingest one through
 the Bulldocs route. The body carries `slug` + `blocks` at the **top level**
-(no `content` wrapper), and this one route wants an **admin-tier** bearer (or
-the instance's `BARKPARK_INGEST_TOKEN`) — a read/write scoped token 401s here:
+(no `content` wrapper). It needs its own credential: `$TOK` above 401s here.
+Set `$ING` to an **admin-tier** bearer, or `BARKPARK_INGEST_TOKEN`:
 
 ```bash
-curl -s $BP/v1/plugins/bulldocs/papers -H "Authorization: Bearer $TOK" \
+curl -s $BP/v1/plugins/bulldocs/papers -H "Authorization: Bearer $ING" \
   -H 'Content-Type: application/json' \
   -d '{"slug":"welcome","blocks":[
         {"id":"t1","type":"heading","level":1,"text":"Welcome"},
