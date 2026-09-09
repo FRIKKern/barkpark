@@ -365,6 +365,51 @@ defmodule Barkpark.Content.Papers.ContextualHistoryTest do
     assert {:ok, ^after_blocks, _undo} = ContextualHistory.apply(before, redo)
   end
 
+  test "reference history scopes slug uniqueness to the selected target" do
+    unrelated = [
+      %{"slug" => "duplicate", "unknown" => 1},
+      " duplicate ",
+      %{"malformed" => true}
+    ]
+
+    target = authored_ref("target", %{"title" => "Before"})
+    before_refs = unrelated ++ [target]
+    saved_target = Map.put(target, "title", "After")
+    after_refs = unrelated ++ [saved_target]
+    before = [paper_links(before_refs)]
+    after_blocks = [paper_links(after_refs)]
+
+    assert {:ok, continuation} =
+             ContextualHistory.capture(before, after_blocks, [refs_patch("links", after_refs)])
+
+    assert continuation["target"]["ref_index"] == 3
+    assert continuation["target"]["ref_slug"] == "target"
+
+    current_refs = after_refs ++ [" duplicate ", %{"still" => "malformed"}]
+    current = [paper_links(current_refs)]
+
+    assert {:ok, [undone], redo} = ContextualHistory.apply(current, continuation)
+    assert Enum.at(undone["refs"], 3) === target
+    assert Enum.take(undone["refs"], 3) === unrelated
+    assert Enum.drop(undone["refs"], 4) === Enum.drop(current_refs, 4)
+
+    assert {:ok, [redone], _undo} = ContextualHistory.apply([undone], redo)
+    assert Enum.at(redone["refs"], 3) === saved_target
+
+    ambiguous_before_refs = before_refs ++ [%{"slug" => " target "}]
+    ambiguous_after_refs = after_refs ++ [%{"slug" => " target "}]
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(
+               [paper_links(ambiguous_before_refs)],
+               [paper_links(ambiguous_after_refs)],
+               [refs_patch("links", ambiguous_after_refs)]
+             )
+
+    duplicate_target = [paper_links(current_refs ++ [%{"slug" => " target "}])]
+    assert {:error, :history_conflict} = ContextualHistory.apply(duplicate_target, continuation)
+  end
+
   test "reference capture rejects ambiguous ownership and any change beyond one copy field" do
     target = authored_ref("target", %{"title" => "Before", "description" => "Description"})
     sibling = %{"slug" => "sibling"}

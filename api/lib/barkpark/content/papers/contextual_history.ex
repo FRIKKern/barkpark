@@ -193,9 +193,11 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
          {:ok, current} <- unique_target_for_apply(blocks, id),
          true <- Map.get(current, "type") === "paper-links" || {:error, :history_conflict},
          refs when is_list(refs) <- Map.get(current, "refs"),
-         true <- unique_canonical_ref_slugs?(refs) || {:error, :history_conflict},
          current_ref when is_map(current_ref) <- Enum.at(refs, ref_index),
          true <- Map.get(current_ref, "slug") === ref_slug || {:error, :history_conflict},
+         true <-
+           unique_selected_ref_slug?(refs, ref_index, ref_slug) ||
+             {:error, :history_conflict},
          true <- reference_identity(current_ref) === identity || {:error, :history_conflict},
          true <- field_state(current_ref, field) === expect || {:error, :history_conflict},
          next_ref <- put_field_state(current_ref, field, replace),
@@ -247,10 +249,10 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
          before_refs when is_list(before_refs) <- Map.get(before_target, "refs"),
          after_refs when is_list(after_refs) <- Map.get(after_target, "refs"),
          true <- length(before_refs) === length(after_refs),
-         true <- unique_canonical_ref_slugs?(before_refs),
-         true <- unique_canonical_ref_slugs?(after_refs),
          {:ok, ref_index, ref_slug, field, identity, before_state, after_state} <-
            reference_copy_change(before_refs, after_refs),
+         true <- unique_selected_ref_slug?(before_refs, ref_index, ref_slug),
+         true <- unique_selected_ref_slug?(after_refs, ref_index, ref_slug),
          {:ok, projected_after} <-
            replace_target_field(
              before_blocks,
@@ -420,10 +422,17 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
 
   defp reference_identity(ref), do: Map.drop(ref, @reference_fields)
 
-  defp unique_canonical_ref_slugs?(refs) when is_list(refs) do
-    slugs = Enum.map(refs, &canonical_ref_slug/1)
-    Enum.all?(slugs, &is_binary/1) and length(slugs) == MapSet.size(MapSet.new(slugs))
+  defp unique_selected_ref_slug?(refs, ref_index, raw_slug)
+       when is_list(refs) and is_integer(ref_index) and ref_index >= 0 and is_binary(raw_slug) do
+    canonical_slug = canonical_ref_slug(raw_slug)
+    selected = Enum.at(refs, ref_index)
+
+    is_binary(canonical_slug) and is_map(selected) and not is_struct(selected) and
+      Map.get(selected, "slug") === raw_slug and
+      Enum.count(refs, &(canonical_ref_slug(&1) === canonical_slug)) == 1
   end
+
+  defp unique_selected_ref_slug?(_refs, _ref_index, _raw_slug), do: false
 
   defp canonical_ref_slug(slug) when is_binary(slug) do
     case String.trim(slug) do
