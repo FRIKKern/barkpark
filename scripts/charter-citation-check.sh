@@ -116,8 +116,10 @@ SCOPE_DEFAULT=(
   "api/lib/barkpark_web/layouts/root.html.heex"
   "api/test/barkpark_web/studio"
   "api/test/barkpark_web/live/studio"
-  "api/assets"
   "scripts/studio-desk-measure.mjs"
+  # NOT api/assets: measured on origin/main it holds paper-editor, paper-surface,
+  # sheet-grid and chat bundles ONLY — every `charter D<n>` there belongs to
+  # another epic. The desk's own CSS lives in root.html.heex, already in scope.
 )
 
 # Paths inside the scope above that another charter owns outright. Each entry
@@ -330,8 +332,11 @@ run_check() {
   while IFS=$'\t' read -r path line d _kind text; do
     owner=""
     if [ -d ".claude/workflows" ]; then
-      owner="$(grep -lE "(^|[^A-Za-z0-9])${d}([^0-9A-Za-z]|$)" .claude/workflows/*.md 2>/dev/null \
-               | grep -v "$(basename "$charter")" | sed 's|.*/||' | tr '\n' ' ')"
+      # The owner probe uses the DEFINITION forms, not a loose mention: a charter
+      # that merely writes "D34" in prose does not own D34.
+      owner="$(grep -lE "^[[:space:]]*([-*][[:space:]]+)?\*\*${d}([.,:*]|[[:space:]]|-)|^#+[[:space:]]+${d}([[:space:]]|$)" \
+                 .claude/workflows/*.md 2>/dev/null \
+               | grep -v "$(basename "$charter")" | sed 's|.*/||' | head -4 | tr '\n' ' ')"
     fi
     printf '  %s  %s:%s\n' "$d" "$path" "$line"
     printf '      %s\n' "$(echo "$text" | sed 's/^[[:space:]]*//' | cut -c1-140)"
