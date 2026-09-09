@@ -329,13 +329,22 @@ defmodule BarkparkWeb.PaperCardEditingTest do
       assert Enum.count(LazyHTML.query(tree, "[data-test-id='paper-card-body-editor']")) == 3
       assert Enum.count(LazyHTML.query(tree, "input[name='card-title']")) == 3
       assert Enum.count(LazyHTML.query(tree, "input[name='card-media-src']")) == 3
+
+      assert LazyHTML.attribute(
+               LazyHTML.query(tree, "input[name='card-media-src']"),
+               "value"
+             ) == List.duplicate("/media/null-type.png", 3)
+
       refute has_element?(view, "img[src='/media/null-type.png']")
       refute html =~ "data-bp-opaque"
 
       canvas_payloads =
         tree
-        |> LazyHTML.query("bp-paper-canvas[data-canvas-blocks]")
+        |> LazyHTML.query("[data-test-id='paper-canvas-run'][data-canvas-blocks]")
         |> LazyHTML.attribute("data-canvas-blocks")
+
+      assert canvas_payloads != []
+      assert Enum.any?(canvas_payloads, &(&1 =~ "canvas-neighbor"))
 
       for id <- ids, payload <- canvas_payloads do
         refute payload =~ id
@@ -510,6 +519,11 @@ defmodule BarkparkWeb.PaperCardEditingTest do
 
     blocks = [
       card.("null-root"),
+      %{
+        "id" => "canvas-neighbor",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Canvas ownership control"}]
+      },
       %{
         "id" => "null-section-owner",
         "type" => "section",
