@@ -112,11 +112,57 @@ defmodule BarkparkCloud.RouterTierLens do
     "require_user_or_pat+ability:root+forbidden:admin" => "admin"
   }
 
+  # Routes whose post-guard `Auth.forbidden(required: …)` is NOT a tier and must
+  # not be read as one — a NAMED consent list, exactly like @unresolved_consent,
+  # asserted below in both directions so it cannot rot.
+  @elevation_consent %{
+    {"POST", "/v1/tokens"} =>
+      "the 403 is PAYLOAD-conditional, not principal-conditional: any member may " <>
+        "mint a `read` PAT, and `create_personal_access_token/3` refuses only when " <>
+        "the requested abilities include deploy/root/write (anti-escalation). The " <>
+        "row's `user` is correct — an `admin` cell here would tell every member " <>
+        "they cannot mint the token they can in fact mint. `user` and not `user(s)`: " <>
+        "the outer guard IS `Auth.require_user`, so PAT management is session-only, " <>
+        "exactly as the comment above the route says."
+  }
+
+  # Rows whose guard this resolver CANNOT reach, each with the reason it cannot.
+  # This is a NAMED consent list, not a silent skip: an unresolved row that is not
+  # listed here fails the census, and a listed row that becomes resolvable fails it
+  # too, so the list cannot rot in either direction.
+  @unresolved_consent %{
+    {"GET", "/v1/events"} =>
+      "authenticates inline in `require_user_sse/1` — Bearer OR a single-use `?ticket=` — " <>
+        "invoking neither `Auth.require_*` nor `with_team_role/3`. That bespoke dual path is " <>
+        "exactly what the row's starred `user*` tier documents."
+  }
+
+  @doc "Rows whose post-guard `Auth.forbidden(required: …)` is NOT a tier."
+  @spec elevation_consent() :: %{{binary(), binary()} => binary()}
+  def elevation_consent, do: @elevation_consent
+
+  @doc "Rows this resolver cannot reach, each with the reason it cannot."
+  @spec unresolved_consent() :: %{{binary(), binary()} => binary()}
+  def unresolved_consent, do: @unresolved_consent
+
   @decl_re ~r/^\s*(get|post|put|patch|delete)[\s(]+"([^"]+)"/
   @def_re ~r/^\s*defp?\s+(\w+)\(/
   @block_end_re ~r/^  end\s*$/
   # `post("/v1/launch", do: go_live(conn))` — a one-line body, no `end` of its own.
   @inline_body_re ~r/\bdo:/
+
+  # A `defp` HEADER whose `do:` body sits on the NEXT line:
+  #
+  #     defp crash_slug(%Plug.Parsers.UnsupportedMediaTypeError{}, _status),
+  #       do: "unsupported_media_type"
+  #
+  # It has no `end` of its own, so read naively it stays OPEN and swallows every
+  # block below it until some unrelated `  end` arrives. In router.ex that ate
+  # `no_team/1` — the single emitter of the `reason: "no_team"` refusal — and
+  # handed its line to `crash_slug/2`, which is how a refusal-attribution census
+  # got the wrong host. The tell is a header that CLOSES its argument list and
+  # then ends in a comma: the body is a `do:` on a following line.
+  @def_continuation_re ~r/,\s*$/
 
   @doc "The router source path this lens defaults to."
   @spec default_source_path() :: binary()
@@ -163,7 +209,15 @@ defmodule BarkparkCloud.RouterTierLens do
           |> source()
           |> String.split("\n")
           |> Enum.reduce({nil, [], %{}, %{}}, &scan_line/2)
-          |> then(fn {_open, _acc, routes, defs} -> {routes, defs} end)
+          |> then(fn
+            # A block still open at EOF is CLOSED, never dropped: the last
+            # helper in the file must be in `defs` like every other one.
+            {nil, _acc, routes, defs} ->
+              {routes, defs}
+
+            {open, acc, routes, defs} ->
+              close_block(strip_state(open), Enum.reverse(acc), routes, defs)
+          end)
 
         Process.put({:router_tier_lens_blocks, path}, result)
         result
@@ -182,8 +236,15 @@ defmodule BarkparkCloud.RouterTierLens do
 
   defp scan_line(line, {open, acc, routes, defs}) do
     cond do
+      # A `do:` continuation closes ON the line that carries the body.
+      match?({:cont, _}, open) and Regex.match?(@inline_body_re, line) ->
+        {routes, defs} =
+          close_block(strip_state(open), Enum.reverse([line | acc]), routes, defs)
+
+        {nil, [], routes, defs}
+
       open != nil and Regex.match?(@block_end_re, line) ->
-        {routes, defs} = close_block(open, Enum.reverse([line | acc]), routes, defs)
+        {routes, defs} = close_block(strip_state(open), Enum.reverse([line | acc]), routes, defs)
         {nil, [], routes, defs}
 
       open != nil ->
@@ -205,13 +266,36 @@ defmodule BarkparkCloud.RouterTierLens do
   # A one-line `..., do: expr` block closes immediately; anything else stays open
   # until the module-level `  end` that closes it.
   defp open_block(key, line, routes, defs) do
-    if Regex.match?(@inline_body_re, line) do
-      {routes, defs} = close_block(key, [line], routes, defs)
-      {nil, [], routes, defs}
-    else
-      {key, [line], routes, defs}
+    cond do
+      Regex.match?(@inline_body_re, line) ->
+        {routes, defs} = close_block(key, [line], routes, defs)
+        {nil, [], routes, defs}
+
+      def_continuation?(key, line) ->
+        {{:cont, key}, [line], routes, defs}
+
+      true ->
+        {key, [line], routes, defs}
     end
   end
+
+  # A `defp`/`def` header that has already closed its argument list and ends in a
+  # comma: its body is a `do:` on the next line, so it must NOT wait for an `end`
+  # that never comes. Route declarations are excluded — `get "/x" do` never takes
+  # this shape.
+  defp def_continuation?({:def, _name}, line),
+    do: Regex.match?(@def_continuation_re, line) and balanced_parens?(line)
+
+  defp def_continuation?(_key, _line), do: false
+
+  defp balanced_parens?(line) do
+    opens = line |> String.graphemes() |> Enum.count(&(&1 == "("))
+    closes = line |> String.graphemes() |> Enum.count(&(&1 == ")"))
+    opens > 0 and opens == closes
+  end
+
+  defp strip_state({:cont, key}), do: key
+  defp strip_state(key), do: key
 
   defp close_block({:route, key}, lines, routes, defs),
     do: {Map.put_new(routes, key, Enum.join(lines, "\n")), defs}
@@ -444,6 +528,197 @@ defmodule BarkparkCloud.RouterTierLens do
     end
   end
 
+  # ── Block spans, refusal sites and the declared tier column ────────────────
+  #
+  # Three primitives the CAUSE-ONLY tripwire
+  # (`router_cause_only_refusal_test.exs`) needs and that nothing here should
+  # re-parse a second time: WHERE a block starts and ends (so a refusal on line
+  # N can be attributed to the route or helper that hosts it), WHAT every
+  # `Auth.forbidden/2` call site says (authority-bearing vs cause-only), and
+  # WHICH tier the moduledoc route table declares for a row.
+
+  @doc """
+  Every block `blocks/1` recognises, as `{key, first_line, last_line}` with
+  1-based line numbers, in source order. Same four regexes, same open/close rule
+  — this is `blocks/1` keeping its line numbers instead of throwing them away,
+  not a second scanner.
+
+  Spans are disjoint, so `Enum.find/2` over them attributes a line to at most one
+  block. A line inside NO span (module attributes, the moduledoc, top-level
+  prose) attributes to nothing, and a caller must treat that as a refusal.
+  """
+  @spec block_spans(binary()) :: [{{:route, {binary(), binary()}} | {:def, binary()}, pos_integer(), pos_integer()}]
+  def block_spans(path \\ @default_source) do
+    path
+    |> source()
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.reduce({nil, []}, &span_line/2)
+    |> then(fn
+      {nil, acc} -> Enum.reverse(acc)
+      {{key, first}, acc} -> Enum.reverse([{strip_state(key), first, first} | acc])
+    end)
+  end
+
+  defp span_line({line, n}, {open, acc}) do
+    cond do
+      match?({{:cont, _}, _}, open) and Regex.match?(@inline_body_re, line) ->
+        {key, first} = open
+        {nil, [{strip_state(key), first, n} | acc]}
+
+      open != nil and Regex.match?(@block_end_re, line) ->
+        {key, first} = open
+        {nil, [{strip_state(key), first, n} | acc]}
+
+      open != nil ->
+        {open, acc}
+
+      match = Regex.run(@decl_re, line) ->
+        [_, verb, path] = match
+        open_span({:route, {String.upcase(verb), path}}, line, n, acc)
+
+      match = Regex.run(@def_re, line) ->
+        [_, name] = match
+        open_span({:def, name}, line, n, acc)
+
+      true ->
+        {nil, acc}
+    end
+  end
+
+  defp open_span(key, line, n, acc) do
+    cond do
+      Regex.match?(@inline_body_re, line) -> {nil, [{key, n, n} | acc]}
+      def_continuation?(key, line) -> {{{:cont, key}, n}, acc}
+      true -> {{key, n}, acc}
+    end
+  end
+
+  @doc """
+  The block whose span contains `line`, or `nil` when the line sits inside none.
+  """
+  @spec block_at(pos_integer(), binary()) :: {:route, {binary(), binary()}} | {:def, binary()} | nil
+  def block_at(line, path \\ @default_source) do
+    Enum.find_value(block_spans(path), fn {key, first, last} ->
+      if line >= first and line <= last, do: key
+    end)
+  end
+
+  # An `Auth.forbidden(` CALL, never the `Auth.forbidden/2` prose that names the
+  # seam in a comment (three such mentions live in router.ex today) — the same
+  # call-not-mention doctrine `guard_in/3` and the refusal lens already hold.
+  @forbidden_call_re ~r/Auth\.forbidden\(/
+
+  @doc """
+  Every `Auth.forbidden/2` CALL SITE in the router source, as
+  `%{line:, text:, kind:}` in source order.
+
+  `kind` is one of:
+
+    * `:authority` — the call names the authority that would have admitted the
+      caller (`required: "admin"`). This is the shape the refusal lens reads as a
+      post-guard elevation.
+    * `:cause_only` — the call names a CAUSE and no authority (`reason:
+      "no_team"`, `reason: "outranked"`). Invisible to the elevation lens by
+      construction: there is no tier in the bytes to read.
+    * `:unparsable` — the call does not close on its own line, so no classifier
+      can read its keywords. NEVER a pass; a caller must refuse.
+    * `:unclassified` — it closes, and carries neither `required:` nor
+      `reason:`. A third refusal shape nobody has ruled on. Also never a pass.
+
+  Full-line comments are stripped first, so prose about the seam is not counted
+  as a refusal.
+  """
+  @spec refusal_sites(binary()) :: [%{line: pos_integer(), text: binary(), kind: atom()}]
+  def refusal_sites(path \\ @default_source) do
+    path
+    |> source()
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.reject(fn {line, _n} -> String.starts_with?(String.trim_leading(line), "#") end)
+    |> Enum.filter(fn {line, _n} -> Regex.match?(@forbidden_call_re, line) end)
+    |> Enum.map(fn {line, n} ->
+      %{line: n, text: String.trim(line), kind: classify_refusal(line)}
+    end)
+  end
+
+  defp classify_refusal(line) do
+    case forbidden_call_text(line) do
+      nil ->
+        :unparsable
+
+      call ->
+        cond do
+          Regex.match?(~r/\brequired:/, call) -> :authority
+          Regex.match?(~r/\breason:/, call) -> :cause_only
+          true -> :unclassified
+        end
+    end
+  end
+
+  # The `Auth.forbidden(...)` call text, balanced on ONE line, or nil. A call
+  # that spans lines is reported as `:unparsable` rather than half-read: reading
+  # only the first line of a multi-line refusal is exactly how a `required:` on
+  # the second line would be misfiled as cause-only.
+  defp forbidden_call_text(line) do
+    case :binary.match(line, "Auth.forbidden(") do
+      :nomatch ->
+        nil
+
+      {at, len} ->
+        line
+        |> String.slice((at + len)..-1//1)
+        |> String.graphemes()
+        |> Enum.reduce_while({0, []}, fn ch, {depth, acc} ->
+          case ch do
+            ")" when depth == 0 -> {:halt, {:done, Enum.reverse(acc)}}
+            ")" -> {:cont, {depth - 1, [ch | acc]}}
+            "(" -> {:cont, {depth + 1, [ch | acc]}}
+            _ -> {:cont, {depth, [ch | acc]}}
+          end
+        end)
+        |> case do
+          {:done, chars} -> Enum.join(chars)
+          _ -> nil
+        end
+    end
+  end
+
+  # A moduledoc route-table row WITH its tier column: `POST /path admin ...`.
+  @tier_row_re ~r/^\s{4,}(GET|POST|PUT|PATCH|DELETE)\s+(\S+)\s+(\S+)/
+
+  @doc "The Router `@moduledoc` block text, or `nil` when it cannot be located."
+  @spec moduledoc_block(binary()) :: binary() | nil
+  def moduledoc_block(path \\ @default_source) do
+    case Regex.run(~r/@moduledoc\s+"""(.*?)"""/s, source(path)) do
+      [_, block] -> block
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The tier the moduledoc route table DECLARES for a row, exactly as written, or
+  `nil` when the table has no tier-bearing row for that method+path. A token
+  outside `tier_tokens/0` is not a tier and reads as `nil`.
+  """
+  @spec declared_tier(binary(), binary(), binary()) :: binary() | nil
+  def declared_tier(method, path, source_path \\ @default_source) do
+    case moduledoc_block(source_path) do
+      nil ->
+        nil
+
+      block ->
+        block
+        |> String.split("\n")
+        |> Enum.find_value(fn line ->
+          case Regex.run(@tier_row_re, line) do
+            [_, ^method, ^path, tier] -> if tier in @tier_tokens, do: tier, else: nil
+            _ -> nil
+          end
+        end)
+    end
+  end
+
   @doc "`user*` is a footnoted `user`; `user(s)` and `admin(d)` are their own tiers."
   @spec normalize_tier(binary()) :: binary()
   def normalize_tier("user(s)"), do: "user(s)"
@@ -468,6 +743,40 @@ defmodule BarkparkCloud.RouterTierLens do
         {:error, :route_not_found}
 
       guard = raw_route_guard(method, path, source_path) ->
+        case Map.fetch(@guard_tier, guard) do
+          {:ok, tier} -> {:ok, tier}
+          :error -> {:error, {:unmapped_guard, guard}}
+        end
+
+      true ->
+        {:error, :no_guard_found}
+    end
+  end
+  @doc """
+  The guard a row is CENSUSED against: the raw guard, minus any elevation
+  `elevation_consent/0` has ruled is not a tier.
+  """
+  @spec route_guard(binary(), binary(), binary()) :: binary() | nil
+  def route_guard(method, path, source_path \\ @default_source) do
+    guard = raw_route_guard(method, path, source_path)
+
+    if Map.has_key?(@elevation_consent, {method, path}), do: base_guard(guard), else: guard
+  end
+
+  @doc """
+  `tier_of/3`, but through `route_guard/3` — the consent-aware guard the route
+  table census actually compares its rows against. Same error vocabulary.
+  """
+  @spec censused_tier_of(binary(), binary(), binary()) ::
+          {:ok, binary()} | {:error, atom() | {atom(), binary()}}
+  def censused_tier_of(method, path, source_path \\ @default_source) do
+    {routes, _defs} = blocks(source_path)
+
+    cond do
+      not Map.has_key?(routes, {method, path}) ->
+        {:error, :route_not_found}
+
+      guard = route_guard(method, path, source_path) ->
         case Map.fetch(@guard_tier, guard) do
           {:ok, tier} -> {:ok, tier}
           :error -> {:error, {:unmapped_guard, guard}}
