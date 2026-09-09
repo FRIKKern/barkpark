@@ -1976,6 +1976,196 @@ defmodule BarkparkCloud.SitesDeployTest do
     end
   end
 
+  # dr-bl-w8-graced-deploys-are-uncounted. THE SAVES WERE THE UNCOUNTED HALF.
+  #
+  # Grace has always been able to say what it could not save: `with_graced_note/2`
+  # puts "after tolerating 3 transient box 5xx" into the `failure_reason` of a row
+  # that failed anyway, and four tests above assert exactly that. Nothing said
+  # what grace DID save, in any outcome — because `forget_graced_refusals/1`
+  # `Map.drop`s the ctx tally on every poll that reached the box, and a poll that
+  # reached the box is what a working grace LOOKS LIKE. The start-retry arm
+  # recorded nothing at all, win or lose.
+  #
+  # Charter D114 is the bill for that: one wire literal falling out of
+  # `transient_refusal?/1` deletes 3 start retries and 45 poll-grace beats per
+  # deploy, and with no counter the loss reads only as a higher failure rate with
+  # nothing naming the cause.
+  #
+  # THE MUTATION THESE TESTS ANSWER TO: reinstate the silent drop — delete the
+  # `record_grace(...)` call from `record_graced_refusal/2` and from the start
+  # `>= 500` arm of `start_on_box/6` — and every test in this block goes red.
+  describe "the grace that WORKED is counted (dr-bl-w8)" do
+    setup do
+      ref = make_ref()
+      test = self()
+
+      :telemetry.attach(
+        "grace-#{inspect(ref)}",
+        [:barkpark_cloud, :sites, :deploy, :grace],
+        fn event, measurements, metadata, _ ->
+          send(test, {:grace_telemetry, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach("grace-#{inspect(ref)}") end)
+      :ok
+    end
+
+    test "graced poll refusals are counted on the row and SURVIVE the reaching poll that clears the caption tally" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      # Two blips, then the box comes back and the build finishes. This is the
+      # save: the deploy goes LIVE, so `with_graced_note/2` never runs and the
+      # ctx tally is dropped by the very poll that made the run a success.
+      FakeBoxRelay.program(
+        polls: [
+          crash_500(),
+          crash_500(),
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "live"
+      # The pre-W8 record of those two saves, in full:
+      assert is_nil(row.failure_reason)
+
+      # The post-W8 record: a NUMBER on the row the grace saved.
+      assert row.graced_poll_refusals == 2
+      assert row.graced_start_retries == 0
+      assert %DateTime{} = row.last_graced_at
+
+      # …and the in-process signal, carrying the box's own caption so a reader
+      # can tell WHICH refusal was swallowed, not merely how many.
+      assert_received {:grace_telemetry, [:barkpark_cloud, :sites, :deploy, :grace], %{count: 1},
+                       %{
+                         kind: :poll_refusal,
+                         deployment_id: id,
+                         site_slug: slug,
+                         caption: caption
+                       }}
+
+      assert id == d.id
+      assert slug == site.slug
+      assert caption =~ "internal_error"
+      assert_received {:grace_telemetry, _, %{count: 1}, %{kind: :poll_refusal}}
+    end
+
+    test "a start retry that then succeeds is counted — the arm that recorded nothing in any outcome" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      # The blip ate the response and the box did NOT take the job; the retry
+      # lands and the build runs to live. Nothing about this row used to say a
+      # retry had happened.
+      FakeBoxRelay.program(
+        start: [crash_500(), {:ok, 202, %{"status" => "started"}}],
+        polls: [FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "live"
+      assert row.graced_start_retries == 1
+      assert row.graced_poll_refusals == 0
+      assert %DateTime{} = row.last_graced_at
+
+      assert_received {:grace_telemetry, _, %{count: 1},
+                       %{kind: :start_retry, deployment_id: id, caption: caption}}
+
+      assert id == d.id
+      assert caption =~ "refused the deploy"
+
+      # Two triggers, one build — the retry is a retry (the D9 guarantee the
+      # count now has a number behind it).
+      assert Enum.count(FakeBoxRelay.calls(), &match?({:start_deploy, _}, &1)) == 2
+    end
+
+    test "a wedged-Runner save is counted too — the exact literal charter D114 shows a rename deletes" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          runner_unavailable_503(),
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "live"
+      # Drop `"deploy_runner_unavailable"` from `transient_refusal?/1` and this
+      # deploy stops going live at all — but BEFORE this column, the only visible
+      # difference between the two worlds was a failure rate.
+      assert row.graced_poll_refusals == 1
+    end
+
+    test "the counter also survives the FAILING path, alongside the caption it does not replace" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(polls: [crash_500()])
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      # The prose is the operator's and is untouched; the column is the
+      # aggregate's. Both, never one instead of the other.
+      assert row.failure_reason =~ "3 transient box 5xx"
+      assert row.graced_poll_refusals == 3
+    end
+
+    test "the count is reachable from a NAMED QUERY over a pinned window, not only from one row" do
+      {bp, site} = setup_site()
+
+      {:ok, saved} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          crash_500(),
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(saved.id)
+
+      from_at = DateTime.add(DateTime.utc_now(), -3600, :second)
+      to_at = DateTime.add(DateTime.utc_now(), 3600, :second)
+
+      census = Registry.deploy_grace_census(from_at, to_at, site_ids: [site.id])
+
+      assert census.deployments == 1
+      assert census.graced_poll_refusals == 1
+      assert census.graced_start_retries == 0
+      assert census.deployments_graced == 1
+      # THE NUMBER THE TASK EXISTS FOR: deploys that reached `live` only because
+      # grace held. Kill grace and this goes to zero while failures climb.
+      assert census.saved == 1
+      # A zero that means "nobody was counting" is kept apart from a zero that
+      # means "no saves" — a census that summed them could not be read.
+      assert census.unmeasured == 0
+
+      # The window is PINNED, so a census that excludes the row reports zero
+      # rather than silently reusing the fleet's answer.
+      past =
+        Registry.deploy_grace_census(
+          DateTime.add(from_at, -7200, :second),
+          from_at,
+          site_ids: [site.id]
+        )
+
+      assert past.deployments == 0
+      assert past.saved == 0
+    end
+  end
+
   # dr-w8-s2 (D). `stage_caption/2`'s non-failed arm was a bare `scrub/1`, and a
   # scrub alone is not a boundary on build-log bytes: a build tool colourises its
   # own output, so the ESC runs land INSIDE the shape the scrubber matches and the

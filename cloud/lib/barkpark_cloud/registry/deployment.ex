@@ -245,6 +245,28 @@ defmodule BarkparkCloud.Registry.Deployment do
     field :coalesced_attempts, :integer, default: 0
     field :coalesced_last_at, :utc_datetime_usec
 
+    # deploy-reliability W8 (dr-bl-w8-graced-deploys-are-uncounted): THE SAVES,
+    # AS DATA. `Sites.Deploy` already counts graced poll refusals — on `ctx`, an
+    # in-memory map that `forget_graced_refusals/1` CLEARS on any poll that
+    # reached the box. That reset is correct for the caption it feeds, and it
+    # means the count survives exactly one way: into the `failure_reason` of a
+    # deploy that failed anyway. Every grace that WORKED left no trace, and the
+    # start-retry arm recorded nothing in any outcome.
+    #
+    # These are the durable counterpart: monotonic per run, independent of
+    # `ctx`, so a reaching poll cannot erase them and a build that went `live`
+    # can still say what it survived. Charter D114 is why it matters — a
+    # one-literal wire rename kills 3 start retries and 45 poll-grace beats with
+    # no line saying so, and "zero saves" is the only shape that regression has.
+    #
+    # NULLABLE (pre-W8 rows are honestly unknown, never a backfilled 0 — on this
+    # column that lie is load-bearing) and NOT castable on any changeset, for the
+    # same reason `coalesced_attempts` is not: they are bumped by an atomic
+    # `UPDATE` mid-run, and a read-modify-write would lose the count.
+    field :graced_poll_refusals, :integer, default: 0
+    field :graced_start_retries, :integer, default: 0
+    field :last_graced_at, :utc_datetime_usec
+
     belongs_to :site, BarkparkCloud.Registry.Site
 
     timestamps(type: :utc_datetime_usec)
@@ -496,6 +518,12 @@ defmodule BarkparkCloud.Registry.Deployment do
       # a DIFFERENT process than the one holding that row's claim, and a
       # changeset write would be a read-modify-write that loses concurrent
       # attempts — which is the entire count.
+      #
+      # `graced_poll_refusals` / `graced_start_retries` / `last_graced_at` are
+      # NOT here for the same reason (deploy-reliability W8): they are bumped by
+      # an atomic `UPDATE` from inside the poll loop, mid-transition, and a
+      # changeset write would both lose bumps and be refused by the from-status
+      # guard on a run that has not moved status yet.
       :deferral_depth,
       :deferral_bound,
       :deferral_cause,
