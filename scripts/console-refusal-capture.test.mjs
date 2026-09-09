@@ -204,7 +204,13 @@ test("cch-w63-bl (DERIVED): each normalised emitter declares its name and has ON
     assert.equal(exits, 1,
       `${e.file} has ${exits} exit-2 paths; exactly one is allowed and it lives inside refuse2. ` +
       `A second one publishes no capturable line.`);
-    // The line the helper actually builds, matched against the shipped regex.
+    // The helper's WRITE, read from source: a line the test typed itself would
+    // stay green with the `!!` deleted from the emitter (measured by the lead,
+    // 2026-09-09 — that mutation survived the manifest-only form).
+    const write = "process.stderr.write(`!! ${REFUSAL_NAME} (exit 2): REFUSED TO MEASURE — ${reason}\\n`)";
+    assert.ok(src.includes(write),
+      `${e.file}'s refuse2 no longer writes the captured shape to stderr verbatim: ${write}`);
+    // The line the helper builds from that template, matched against the shipped regex.
     const line = `!! ${e.name} (exit 2): REFUSED TO MEASURE — could not read its input`;
     assert.equal(captureRefusal(line + "\n"), line, `the capture cannot read ${e.file}'s own shape`);
     assert.equal(refusalInstrument(line), e.name);
