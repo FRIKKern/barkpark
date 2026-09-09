@@ -5,6 +5,7 @@
 #
 #   ALWAYS       unfiltered push arm — every push to main owes it a run
 #   CONDITIONAL  paths-filtered push arm — owed-ness depends on the commit
+.github/workflows/architecture.yml	CONDITIONAL
 .github/workflows/astro-finder-drift.yml	CONDITIONAL
 .github/workflows/astro-search-finder-test.yml	CONDITIONAL
 .github/workflows/bp-graph-drift.yml	CONDITIONAL
