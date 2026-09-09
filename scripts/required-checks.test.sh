@@ -6148,6 +6148,132 @@ else
   fi
 fi
 
+section "29. S4's ABSOLUTE arm: a workflow with NO pull_request trigger is ABSENT on every PR, and the stage derives that from the \`on:\` block"
+
+# The committed spec has carried five "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD"
+# rows with NO stage able to derive them, so each arrived by hand — and the
+# sixth was missed: landed-mark.yml is `on: push: branches: [main]` only, its
+# name `Mark the task rows this push landed` rendered on every main head, and
+# the census clause called it unaccounted (task-2e28697e29983544). Both arms,
+# because a stage that excludes on the wrong evidence is worse than the hole:
+# the SAME job, the SAME name, differing only in the trigger block.
+RC29="$TMP/rc29"; RC29_PUSH="$RC29/push"; RC29_PR="$RC29/pr"
+RC29_PUSHF="$RC29/push-fix"; RC29_PRF="$RC29/pr-fix"
+mkdir -p "$RC29_PUSH" "$RC29_PR" "$RC29_PUSHF" "$RC29_PRF"
+cat > "$RC29_PUSH/w.yml" <<'YML'
+name: Push only
+on:
+  push:
+    branches: [main]
+jobs:
+  mark:
+    name: Push-only gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+sed 's/^on:$/on:/; s/^  push:$/  pull_request:/; s/^    branches: \[main\]$//' "$RC29_PUSH/w.yml" > "$RC29_PR/w.yml"
+RC29_NAMES_SAVE=("${RC27_NAMES[@]}")
+RC27_NAMES=("Push-only gate")
+rc27_feed "$RC29_PUSHF" p1 p2 mainA; printf 'mainA\n' > "$RC29_PUSHF/main-shas.txt"
+rc27_feed "$RC29_PRF"   r1 r2 mainA; printf 'mainA\n' > "$RC29_PRF/main-shas.txt"
+
+rc27_gen "$GEN" "$RC29_PUSH" "$RC29_PUSHF" p1 p2
+if [ "$RC27_RC" -eq 0 ] && excluded_by "$RC27_OUT" "Push-only gate" "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD"; then
+  ok "a name published by a workflow with no pull_request trigger is EXCLUDED as structurally absent — an absent required context reports 'expected' forever (D18), and it is derived from the workflow's own \`on:\` block, not from a list"
+else
+  bad "29a the push-only workflow's name was not excluded as structurally absent (exit $RC27_RC): $(grep -E '^  (keep|exclude) ' <<<"$RC27_OUT" | head -2 | tr '\n' '⏎')"
+fi
+
+# THE MIRROR — the identical job under `pull_request:` must be KEPT. Without
+# this arm the stage above could be excluding on the job's name, on its file,
+# or on nothing at all.
+rc27_gen "$GEN" "$RC29_PR" "$RC29_PRF" r1 r2
+if [ "$RC27_RC" -eq 0 ] && kept_in "$RC27_OUT" "Push-only gate"; then
+  ok "…and the IDENTICAL job under \`pull_request:\` is KEPT — the stage keys on the trigger block, not on the job, the file or the name"
+else
+  bad "29b the same job under pull_request was not kept (exit $RC27_RC) — the stage above excludes on the wrong evidence: $(grep -E '^  (keep|exclude) ' <<<"$RC27_OUT" | head -2 | tr '\n' '⏎')"
+fi
+
+# THE MUTATION — disarm the stage in a COPY and watch the push-only name walk
+# into the required set, which is the state this repo was in until today.
+RC29_MUT="$TMP/gen-nopushonly.sh"
+sed 's%^    if \[ -z "\$reason" \] && \[ -n "\$file" \] && ! workflow_has_pr_trigger "\$file"; then$%    if false; then # ABSOLUTE S4 ARM REMOVED%' "$GEN" > "$RC29_MUT"
+RC29_N="$(grep -c 'ABSOLUTE S4 ARM REMOVED' "$RC29_MUT" || true)"
+if [ "$RC29_N" -ne 1 ]; then
+  bad "29c the absolute-S4 mutation applied $RC29_N times, not exactly 1 — its condition moved, so the arms above are vacuous"
+else
+  ok "the absolute-S4 mutation applies exactly once: a copy of the generator no longer asks the trigger question"
+  rc27_gen "$RC29_MUT" "$RC29_PUSH" "$RC29_PUSHF" p1 p2
+  if [ "$RC27_RC" -eq 0 ] && kept_in "$RC27_OUT" "Push-only gate"; then
+    ok "…and WITHOUT it the SAME push-only name is emitted REQUIRED — a context that can never render on a PR, pinned to the merge button (mutation-proven able to fail)"
+  else
+    bad "29d the unguarded run did not keep the push-only name (exit $RC27_RC) — the arms above are vacuous"
+  fi
+fi
+RC27_NAMES=("${RC29_NAMES_SAVE[@]}")
+
+section "28. the spec gate's DISPATCHER lists the workflow tree — the input the census clause actually reads"
+
+# WHY THIS CLAUSE EXISTS (task-2e28697e29983544). The required `Required-check
+# spec gate` sits behind `Dispatch (required-checks inputs)` in
+# .github/workflows/required-checks-drift.yml, and that dispatcher's path
+# predicate used to name exactly three things: the spec file, scripts/
+# required-checks[.-]*, and the drift workflow ITSELF. But the census clause in
+# required-checks-verify.sh reads .github/workflows/ ENTIRE — a rendered
+# check-run name is a job's `name:`, wherever that job lives. So a PR adding a
+# job to any OTHER workflow never fired the gate, and the name landed on main
+# unaccounted: #17079 and #17081 put three in on 2026-09-09 (`Filebase
+# aesthetics critic (advisory, main + nightly)`, `pipefail scan — did the
+# scanner's inputs move?`, `pipefail SIGPIPE scan`) and neither PR was ever
+# asked the question. A gate whose dispatcher omits one of its own inputs
+# cannot see that input change, and nothing in this suite said so.
+#
+# The predicate is LIFTED from the YAML here, never restated: a clause that
+# carries its own copy of the regex passes forever after the workflow's copy
+# moves.
+RC28_WF="$REPO_ROOT/.github/workflows/required-checks-drift.yml"
+RC28_LINE="$(grep -nE "grep -qE '\^\(.*\)\\\$' <<<\"\\\$files\"" "$RC28_WF" | head -1 || true)"
+if [ -z "$RC28_LINE" ]; then
+  bad "28a no dispatcher predicate of the form \`grep -qE '^(…)$' <<<\"\$files\"\` in $RC28_WF — it moved, was renamed, or went back to a pipeline; every clause below would be vacuous"
+else
+  ok "28a the dispatcher predicate is a HERE-STRING (line ${RC28_LINE%%:*}), not \`printf … | grep -q\`: under set -o pipefail that pipeline returns 141 when grep -q closes the pipe on a match, and a TRUE match reported false here means touched=false — the gate skips and publishes a quiet green"
+  RC28_PRED="$(sed "s/^[^:]*://" <<<"$RC28_LINE" | grep -oE "'\^\([^']*\)\\\$'" | sed "s/^'//; s/'\$//")"
+
+  # ARM ONE — a job added to ANY workflow, in either spelling GitHub reads.
+  RC28_HITS=0
+  for probe in ".github/workflows/zz-new-gate.yml" ".github/workflows/zz-new-gate.yaml" ".github/required-checks.json" "scripts/required-checks-verify.sh"; do
+    grep -qE "$RC28_PRED" <<<"$probe" && RC28_HITS=$((RC28_HITS + 1))
+  done
+  if [ "$RC28_HITS" -eq 4 ]; then
+    ok "28b all four inputs dispatch TRUE — a new job in a .yml OR a .yaml workflow, the spec file, and the verifier (both workflow spellings: GitHub reads either out of that directory, and §3c indexes both)"
+  else
+    bad "28b only $RC28_HITS of 4 inputs match the dispatcher predicate — an input of this gate cannot fire it"
+  fi
+
+  # ARM TWO — and it still DISCRIMINATES. A predicate that matched everything
+  # would pass arm one and be worthless: the dispatcher exists to skip.
+  RC28_MISS=0
+  for probe in "docs/ops/merge-gates.md" "api/lib/barkpark/plugin.ex" "web/app/page.tsx"; do
+    grep -qE "$RC28_PRED" <<<"$probe" || RC28_MISS=$((RC28_MISS + 1))
+  done
+  if [ "$RC28_MISS" -eq 3 ]; then
+    ok "…and a docs-only, an Elixir-only and a web-only path all dispatch FALSE — the widening did not turn the dispatcher into a match-everything"
+  else
+    bad "28c $((3 - RC28_MISS)) of 3 unrelated paths dispatch TRUE — this predicate no longer skips anything, which costs a job on every PR"
+  fi
+
+  # THE MUTATION — narrow the alternation back to the drift workflow alone and
+  # watch the same new-gate path go FALSE. This is the hole as it stood on
+  # 2026-09-09, reproduced on demand rather than described.
+  RC28_OLD='^(\.github/required-checks\.json|scripts/required-checks[.-].*|\.github/workflows/required-checks-drift\.yml)$'
+  if grep -qE "$RC28_OLD" <<<".github/workflows/zz-new-gate.yml"; then
+    bad "28d the pre-widening predicate ALSO matches a new workflow — the mutation control is vacuous, so arm one proves nothing"
+  else
+    ok "…and WITHOUT the widening the IDENTICAL path dispatches FALSE — the gate never runs, the name lands on main unaccounted, and main's advisory job reds after the fact (mutation-proven able to fail)"
+  fi
+fi
+
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
   echo "  Run without --hermetic, with a token carrying admin on this repo, to exercise them."

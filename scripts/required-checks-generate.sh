@@ -174,9 +174,15 @@ EXPECT_DEMOTED=()
 # subsumed — but must still never gate a merge. Each needs one line of why.
 ADVISORY_BY_INTENT_NAMES=(
   "PR task gate self-test"
+  "Filebase aesthetics critic (advisory, main + nightly)"
+  "pipefail scan — did the scanner's inputs move?"
+  "pipefail SIGPIPE scan"
 )
 ADVISORY_BY_INTENT_REASONS=(
   "the task gate's own harness — it proves the gate CAN fail; requiring it makes the tripwire's tripwire load-bearing"
+  "ADDED 2026-09-09 (#17079, 6e3e353ee) — pr-meta.yml job 'aesthetics' carries a job-level 'if: github.event_name != pull_request', so on every PR head it is SKIPPED and publishes no verdict a PR could clear; its two critic steps carry step-level continue-on-error, so the job reds only when the harness itself breaks. Retire this row if the job ever gains a pull_request arm that concludes on its own findings."
+  "ADDED 2026-09-09 (#17081, e4acd4339) — pipefail-sigpipe-scan.yml job 'changes' is a DISPATCHER: it only computes the 'hit' output the scan job reads, and asserts nothing about the tree. Requiring it would pin the scan's own venue predicate to the merge button. Retire this row if the job ever carries the verdict itself."
+  "ADDED 2026-09-09 (#17081, e4acd4339) — pipefail-sigpipe-scan.yml job 'scan' is advisory by its own header ('THIS WORKFLOW IS ADVISORY … nothing here can stop a merge'): it SKIPS on a PR touching none of scripts/, .github/workflows/ or deploy/, and its high-confidence ratchet reds on a repo-wide count that no single PR can clear. Retire this row when the ratchet's baseline is zero and a deadlock sweep reports no casualties."
 )
 
 # S7 EXCLUDED BY DECISION: names that pass every mechanical stage — green on
@@ -198,6 +204,40 @@ EXCLUDED_BY_DECISION_REASONS=(
 )
 
 die() { echo "FAIL: $*" >&2; exit 1; }
+
+# ── S4's ABSOLUTE arm: a workflow with NO pull_request trigger at all ────────
+# `pf` above catches a workflow-level `on: pull_request: paths:` — the filter
+# that makes a name ABSENT on a PR that misses the paths. A workflow that never
+# triggers on pull_request AT ALL is the same failure mode without the escape
+# hatch: the name is not `skipped` on a PR, it is absent, and a required absent
+# context reports "expected" forever (D18). The committed spec has carried five
+# such rows ("S4 STRUCTURALLY ABSENT ON EVERY PR HEAD" — main-gate-watch,
+# stale-verdict-watch, cron-overdue-probe …) with NO stage able to derive them,
+# so each arrived by hand and the sixth was missed: `landed-mark.yml` landed
+# push-only and its name sat unaccounted on every main head until
+# task-2e28697e29983544. This is that stage.
+#
+# FAIL-SAFE DIRECTION: an unreadable or unknown file claims a trigger. The cost
+# of a false "has a PR trigger" is that a name stays UNACCOUNTED and the census
+# clause says so out loud; the cost of a false "absent" is a silent exclusion
+# row nobody typed.
+workflow_has_pr_trigger() { # <basename of a workflow file>
+  local f="$WORKFLOW_DIR/$1"
+  [ -n "$1" ] && [ -f "$f" ] || return 0
+  awk '
+    # the same three spellings the index matches: bare, "on", '"'"'on'"'"'
+    /^("on"|\047on\047|on)[ \t]*:/ {
+      # the inline forms — `on: [push, pull_request]` and `on: pull_request`
+      if ($0 ~ /pull_request/) { found = 1 }
+      inon = 1; next
+    }
+    inon && /^[A-Za-z"\047]/ { inon = 0 }
+    inon && /^  pull_request(_target)?[ \t]*:/ { found = 1 }
+    inon && /^  - pull_request(_target)?[ \t]*$/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$f"
+}
+
 
 # A usage error is not a verdict: this script's nonzero codes describe something
 # it MEASURED, and a caller who typed the command wrong measured nothing. It
@@ -884,6 +924,11 @@ EOF
     # S4 paths-filtered — an absent check is a permanent "expected"
     if [ -z "$reason" ] && [ "$pf" = "1" ]; then
       reason="S4 PATHS-FILTERED: $file only runs on matching paths, so on other PRs this name is ABSENT — a required absent context never reports"
+    fi
+
+    # S4, the absolute arm — no pull_request trigger anywhere in the workflow
+    if [ -z "$reason" ] && [ -n "$file" ] && ! workflow_has_pr_trigger "$file"; then
+      reason="S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: $file job '$job' — the workflow carries no pull_request trigger, so on a PR this name is not SKIPPED, it is ABSENT, and a required absent context reports 'expected' forever (D18). Derived from the workflow's own \`on:\` block, not from a list."
     fi
 
     # S5 red on main

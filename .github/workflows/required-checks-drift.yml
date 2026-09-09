@@ -237,14 +237,37 @@ jobs:
             echo "empty diff — dispatching TRUE rather than skipping a gate"
             exit 0
           fi
-          if printf '%s\n' "$files" | grep -qE '^(\.github/required-checks\.json|scripts/required-checks[.-].*|\.github/workflows/required-checks-drift\.yml)$'; then
+          # THE WORKFLOW TREE IS ONE OF THIS GATE'S OWN INPUTS (task-2e28697e29983544).
+          # This alternation used to be exactly the spec file, its scripts, and
+          # THIS workflow — and the census clause in required-checks-verify.sh
+          # reads .github/workflows/ ENTIRE, because a rendered check-run name
+          # comes from a job's `name:`, wherever that job lives. So a PR adding a
+          # job to any OTHER workflow never fired this gate, the name landed on
+          # main unaccounted, and main's own advisory run went red for it after
+          # the fact: #17079 and #17081 put three names in on 2026-09-09 that way
+          # (Filebase aesthetics critic …, pipefail scan …, pipefail SIGPIPE scan)
+          # and neither PR was ever asked the question. A gate whose dispatcher
+          # omits one of its own inputs cannot see that input change.
+          #
+          # BOTH SPELLINGS. GitHub reads .yml AND .yaml out of this directory,
+          # and §3c of scripts/required-checks.test.sh indexes both; a predicate
+          # that matched only .yml would re-open this hole for a .yaml file.
+          #
+          # A HERE-STRING, NEVER `printf … | grep -q`. Under `set -o pipefail`
+          # grep -q closes the pipe on its first match, printf takes SIGPIPE, and
+          # the pipeline returns 141 — a TRUE match reported as a false one, which
+          # here means `touched=false`: the gate skips and publishes a quiet green.
+          # That is the exact defect scripts/pipefail-sigpipe-scan.sh hunts, and
+          # widening the pattern above makes the match — hence the race — common
+          # rather than rare.
+          if grep -qE '^(\.github/required-checks\.json|scripts/required-checks[.-].*|\.github/workflows/.*\.ya?ml)$' <<<"$files"; then
             echo "touched=true" >> "$GITHUB_OUTPUT"
-            echo "this PR edits the required-checks spec or its scripts — running the gate"
+            echo "this PR edits the required-checks spec, its scripts, or a workflow that can change the rendered name set — running the gate"
           else
             echo "touched=false" >> "$GITHUB_OUTPUT"
             echo "no required-checks input touched — the gate is skipped on this PR"
           fi
-          printf '%s\n' "$files" | head -50
+          head -50 <<<"$files"
 
   # ── the hermetic half (see the header: not a required context today) ────────
   # Unmatrixed (one job, one rendered name — no `(27.0, 1.18.1)` tuple to pin),
