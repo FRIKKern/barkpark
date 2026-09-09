@@ -16,6 +16,9 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   index, raw slug, and non-copy metadata without storing the surrounding refs.
   A private version-3 continuation supports only the label of an existing
   singleton canonical Card action without storing the surrounding slots.
+  A private version-4 continuation supports only the source of an existing
+  singleton canonical Card media element. It binds the media element's exact
+  absent, null, or image type without storing its other fields.
   Unsupported or ambiguous edits remain valid edits without a continuation.
   Values are exact JSON values; absent and present-with-null are distinct.
   Continuations are capped at 16 KiB encoded and never truncated.
@@ -26,10 +29,12 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   @version 1
   @reference_version 2
   @card_action_version 3
+  @card_media_version 4
   @max_encoded_bytes 16 * 1024
   @continuation_keys ~w(action expect field replace target version)
   @target_keys ~w(id type)
   @reference_continuation_keys ~w(action expect field identity replace target version)
+  @card_media_identity_keys ~w(type)
   @reference_target_keys ~w(id ref_index ref_slug type)
   @reference_fields ~w(title description)
   @allowed_fields MapSet.new([
@@ -59,8 +64,14 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
 
       {:ok, nil} ->
         case capture_card_action_label(before_blocks, after_blocks, ops) do
-          {:ok, %{} = continuation} -> {:ok, continuation}
-          {:ok, nil} -> capture_block_field(before_blocks, after_blocks, ops)
+          {:ok, %{} = continuation} ->
+            {:ok, continuation}
+
+          {:ok, nil} ->
+            case capture_card_media_src(before_blocks, after_blocks, ops) do
+              {:ok, %{} = continuation} -> {:ok, continuation}
+              {:ok, nil} -> capture_block_field(before_blocks, after_blocks, ops)
+            end
         end
     end
   end
@@ -156,6 +167,30 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
          true <- valid_card_action_target?(target),
          true <- valid_card_action_state?(expect),
          true <- valid_card_action_state?(replace),
+         false <- expect === replace,
+         true <- encoded_within_cap?(continuation) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_history}
+    end
+  end
+
+  def validate(%{"version" => @card_media_version} = continuation)
+      when is_map(continuation) and not is_struct(continuation) do
+    with true <- exact_keys?(continuation, @reference_continuation_keys),
+         %{
+           "action" => action,
+           "target" => target,
+           "field" => "media.src",
+           "identity" => identity,
+           "expect" => expect,
+           "replace" => replace
+         } <- continuation,
+         true <- action in ["undo", "redo"],
+         true <- valid_card_action_target?(target),
+         true <- valid_card_media_identity?(identity),
+         true <- valid_card_media_src_state?(expect),
+         true <- valid_card_media_src_state?(replace),
          false <- expect === replace,
          true <- encoded_within_cap?(continuation) do
       :ok
@@ -284,6 +319,34 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
     end
   end
 
+  defp apply_validated(blocks, %{"version" => @card_media_version} = continuation) do
+    with %{
+           "action" => action,
+           "target" => %{"id" => id, "type" => "card"},
+           "field" => "media.src",
+           "identity" => %{"type" => type_state},
+           "expect" => expect,
+           "replace" => replace
+         } <- continuation,
+         {:ok, current} <- unique_target_for_apply(blocks, id),
+         true <- Map.get(current, "type") === "card" || {:error, :history_conflict},
+         {:ok, _current_media, current_type_state, current_src_state} <- card_media_src(current),
+         true <- current_type_state === type_state || {:error, :history_conflict},
+         true <- current_src_state === expect || {:error, :history_conflict},
+         {:ok, next_blocks} <- replace_card_media_src(blocks, id, replace),
+         next <- card_media_continuation(toggle(action), id, type_state, replace, expect),
+         :ok <- validate(next) do
+      {:ok, next_blocks, next}
+    else
+      {:error, reason}
+      when reason in [:invalid_history, :history_conflict, :block_not_found, :duplicate_id] ->
+        {:error, reason}
+
+      _changed_or_malformed ->
+        {:error, :history_conflict}
+    end
+  end
+
   defp eligible_op([
          %{"op" => "patch-block", "id" => id, "patch" => patch}
        ])
@@ -371,6 +434,42 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
 
   defp eligible_card_action_op(_ops), do: {:error, :unsupported}
 
+  defp capture_card_media_src(before_blocks, after_blocks, ops) do
+    with {:ok, id} <- eligible_card_media_op(ops),
+         {:ok, before_target} <- unique_target(before_blocks, id),
+         {:ok, after_target} <- unique_target(after_blocks, id),
+         true <- Map.get(before_target, "type") === "card",
+         true <- Map.get(after_target, "type") === "card",
+         {:ok, _before_media, before_type_state, before_src_state} <-
+           card_media_src(before_target),
+         {:ok, _after_media, after_type_state, after_src_state} <- card_media_src(after_target),
+         true <- before_type_state === after_type_state,
+         false <- before_src_state === after_src_state,
+         {:ok, projected_after} <- replace_card_media_src(before_blocks, id, after_src_state),
+         true <- projected_after === after_blocks,
+         continuation <-
+           card_media_continuation(
+             "undo",
+             id,
+             after_type_state,
+             after_src_state,
+             before_src_state
+           ),
+         :ok <- validate(continuation) do
+      {:ok, continuation}
+    else
+      _unsupported_or_ambiguous -> {:ok, nil}
+    end
+  end
+
+  defp eligible_card_media_op([
+         %{"op" => "patch-block", "id" => id, "patch" => %{"slots" => _slots} = patch}
+       ])
+       when is_binary(id) and id != "" and map_size(patch) == 1,
+       do: {:ok, id}
+
+  defp eligible_card_media_op(_ops), do: {:error, :unsupported}
+
   defp reference_copy_change(before_refs, after_refs) do
     changed =
       before_refs
@@ -456,6 +555,18 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
     }
   end
 
+  defp card_media_continuation(action, id, type_state, expect, replace) do
+    %{
+      "version" => @card_media_version,
+      "action" => action,
+      "target" => %{"id" => id, "type" => "card"},
+      "field" => "media.src",
+      "identity" => %{"type" => type_state},
+      "expect" => expect,
+      "replace" => replace
+    }
+  end
+
   defp toggle("undo"), do: "redo"
   defp toggle("redo"), do: "undo"
 
@@ -480,6 +591,14 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   end
 
   defp valid_card_action_target?(_target), do: false
+
+  defp valid_card_media_identity?(identity)
+       when is_map(identity) and not is_struct(identity) do
+    exact_keys?(identity, @card_media_identity_keys) and
+      valid_card_media_type_state?(identity["type"])
+  end
+
+  defp valid_card_media_identity?(_identity), do: false
 
   defp valid_reference_identity?(identity, ref_slug)
        when is_map(identity) and not is_struct(identity) do
@@ -516,6 +635,22 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
     do: exact_keys?(state, ["present", "value"]) and (is_nil(value) or is_binary(value))
 
   defp valid_card_action_state?(_state), do: false
+
+  defp valid_card_media_type_state?(%{"present" => false} = state),
+    do: exact_keys?(state, ["present"])
+
+  defp valid_card_media_type_state?(%{"present" => true, "value" => value} = state),
+    do: exact_keys?(state, ["present", "value"]) and value in [nil, "image"]
+
+  defp valid_card_media_type_state?(_state), do: false
+
+  defp valid_card_media_src_state?(%{"present" => false} = state),
+    do: exact_keys?(state, ["present"])
+
+  defp valid_card_media_src_state?(%{"present" => true, "value" => value} = state),
+    do: exact_keys?(state, ["present", "value"]) and (is_nil(value) or is_binary(value))
+
+  defp valid_card_media_src_state?(_state), do: false
 
   defp field_state(block, field) do
     if Map.has_key?(block, field) do
@@ -662,6 +797,24 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
     _malformed -> {:error, :history_conflict}
   end
 
+  defp replace_card_media_src(blocks, id, state) do
+    case transform_blocks(blocks, id, fn block ->
+           {:ok, media, _type_state, _src_state} = card_media_src(block)
+           slots = Map.fetch!(block, "slots")
+
+           Map.put(
+             block,
+             "slots",
+             Map.put(slots, "media", [put_field_state(media, "src", state)])
+           )
+         end) do
+      {next_blocks, 1} -> {:ok, next_blocks}
+      _missing_or_duplicate -> {:error, :invalid_history}
+    end
+  rescue
+    _malformed -> {:error, :history_conflict}
+  end
+
   defp card_action_label(%{"slots" => slots})
        when is_map(slots) and not is_struct(slots) do
     case Map.get(slots, "action") do
@@ -681,6 +834,27 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   end
 
   defp card_action_label(_block), do: {:error, :history_conflict}
+
+  defp card_media_src(%{"slots" => slots})
+       when is_map(slots) and not is_struct(slots) do
+    case Map.get(slots, "media") do
+      [media] when is_map(media) and not is_struct(media) ->
+        type_state = field_state(media, "type")
+        src_state = field_state(media, "src")
+
+        if valid_card_media_type_state?(type_state) and valid_card_media_src_state?(src_state) and
+             optional_binary?(media, "alt") do
+          {:ok, media, type_state, src_state}
+        else
+          {:error, :history_conflict}
+        end
+
+      _missing_or_malformed ->
+        {:error, :history_conflict}
+    end
+  end
+
+  defp card_media_src(_block), do: {:error, :history_conflict}
 
   defp optional_binary?(map, key) do
     not Map.has_key?(map, key) or is_nil(map[key]) or is_binary(map[key])

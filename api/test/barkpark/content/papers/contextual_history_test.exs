@@ -727,6 +727,207 @@ defmodule Barkpark.Content.Papers.ContextualHistoryTest do
              ContextualHistory.capture(before, over_limit, [slots_patch(over_limit)])
   end
 
+  test "card media source history preserves exact carrier type and source states" do
+    type_states = [
+      %{"present" => false},
+      %{"present" => true, "value" => nil},
+      %{"present" => true, "value" => "image"}
+    ]
+
+    source_changes = [
+      {%{"present" => false}, %{"present" => true, "value" => nil}},
+      {%{"present" => true, "value" => nil}, %{"present" => true, "value" => ""}},
+      {%{"present" => true, "value" => ""}, %{"present" => true, "value" => "   "}},
+      {%{"present" => true, "value" => "   "}, %{"present" => true, "value" => "/after.png"}}
+    ]
+
+    for type_state <- type_states, {before_state, after_state} <- source_changes do
+      before_media =
+        card_media()
+        |> put_state("type", type_state)
+        |> put_state("src", before_state)
+
+      after_media = put_state(before_media, "src", after_state)
+      before = [card_with_media(before_media)]
+      after_blocks = [card_with_media(after_media)]
+
+      assert {:ok, continuation} =
+               ContextualHistory.capture(before, after_blocks, [slots_patch(after_blocks)])
+
+      assert continuation == %{
+               "version" => 4,
+               "action" => "undo",
+               "target" => %{"id" => "card", "type" => "card"},
+               "field" => "media.src",
+               "identity" => %{"type" => type_state},
+               "expect" => after_state,
+               "replace" => before_state
+             }
+
+      assert :ok = ContextualHistory.validate(continuation)
+      assert {:ok, ^before, redo} = ContextualHistory.apply(after_blocks, continuation)
+      assert redo["action"] == "redo"
+      assert {:ok, ^after_blocks, ^continuation} = ContextualHistory.apply(before, redo)
+    end
+  end
+
+  test "card media source history preserves concurrent carrier metadata and Card fields" do
+    before_media =
+      card_media()
+      |> Map.put("src", "/before.png")
+      |> Map.put("alt", "Before alt")
+      |> Map.put("width", 640)
+      |> Map.put("height", 320)
+      |> Map.put("opaque", %{"keep" => [true, nil, 1, 1.0]})
+
+    saved_media = Map.put(before_media, "src", "/after.png")
+    before = [card_with_media(before_media)]
+    after_blocks = [card_with_media(saved_media)]
+
+    assert {:ok, continuation} =
+             ContextualHistory.capture(before, after_blocks, [slots_patch(after_blocks)])
+
+    concurrent_media =
+      saved_media
+      |> Map.put("alt", "Concurrent alt")
+      |> Map.put("width", 1280)
+      |> Map.put("height", nil)
+      |> Map.put("id", "concurrent-owner")
+      |> Map.put("opaque", %{"later" => [false, %{}]})
+
+    current =
+      card_with_media(concurrent_media)
+      |> put_in(["slots", "title"], [%{"type" => "heading", "text" => "Concurrent title"}])
+      |> put_in(["slots", "action", Access.at(0), "href"], "/concurrent")
+      |> Map.put("tone", "strong")
+      |> Map.put("outside", %{"keep" => true})
+      |> then(&[&1])
+
+    assert {:ok, [undone], redo} = ContextualHistory.apply(current, continuation)
+    assert get_in(undone, ["slots", "media"]) == [Map.put(concurrent_media, "src", "/before.png")]
+
+    assert get_in(undone, ["slots", "title"]) == [
+             %{"type" => "heading", "text" => "Concurrent title"}
+           ]
+
+    assert get_in(undone, ["slots", "action", Access.at(0), "href"]) == "/concurrent"
+    assert undone["tone"] == "strong"
+    assert undone["outside"] == %{"keep" => true}
+
+    assert {:ok, [redone], _undo} = ContextualHistory.apply([undone], redo)
+    assert get_in(redone, ["slots", "media"]) == [concurrent_media]
+  end
+
+  test "card media source capture rejects structural, broad, and malformed changes" do
+    before_media = Map.put(card_media(), "src", "/before.png")
+    after_media = Map.put(before_media, "src", "/after.png")
+    before = [card_with_media(before_media)]
+    valid_after = [card_with_media(after_media)]
+
+    unsupported = [
+      [card_with_media(Map.put(after_media, "alt", "Changed too"))],
+      [card_with_media(Map.put(after_media, "type", nil))],
+      [card_with_media([after_media, after_media])],
+      [card_with_media(Map.put(after_media, "src", 42))],
+      [card_with_media(Map.put(after_media, "alt", %{}))],
+      [card_with_media(Map.put(after_media, "type", "video"))],
+      [card_with_media(nil)],
+      [card_with_media([])]
+    ]
+
+    for after_blocks <- unsupported do
+      assert {:ok, nil} =
+               ContextualHistory.capture(before, after_blocks, [slots_patch(valid_after)])
+    end
+
+    without_media = [card_with_media(:absent)]
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(without_media, valid_after, [slots_patch(valid_after)])
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(before, without_media, [slots_patch(without_media)])
+
+    duplicate_before = before ++ [card_with_media(before_media)]
+    duplicate_after = valid_after ++ [card_with_media(before_media)]
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(duplicate_before, duplicate_after, [
+               slots_patch(valid_after)
+             ])
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(before, valid_after, [
+               put_in(slots_patch(valid_after), ["patch", "extra"], true)
+             ])
+  end
+
+  test "card media source apply and validation fail closed" do
+    before_media = Map.put(card_media(), "src", "/before.png")
+    after_media = Map.put(before_media, "src", "/after.png")
+    before = [card_with_media(before_media)]
+    after_blocks = [card_with_media(after_media)]
+
+    assert {:ok, continuation} =
+             ContextualHistory.capture(before, after_blocks, [slots_patch(after_blocks)])
+
+    for current <- [
+          [card_with_media(Map.put(after_media, "src", "/newer.png"))],
+          [card_with_media(Map.delete(after_media, "type"))],
+          [card_with_media(Map.put(after_media, "type", nil))],
+          [card_with_media(Map.put(after_media, "type", "video"))],
+          [card_with_media(Map.put(after_media, "src", 42))],
+          [card_with_media(Map.put(after_media, "alt", []))],
+          [card_with_media([after_media, after_media])],
+          [card_with_media(nil)],
+          [card_with_media([])]
+        ] do
+      assert {:error, :history_conflict} = ContextualHistory.apply(current, continuation)
+    end
+
+    duplicate = after_blocks ++ after_blocks
+    assert {:error, :duplicate_id} = ContextualHistory.apply(duplicate, continuation)
+
+    for invalid <- [
+          Map.put(continuation, "version", 4.0),
+          Map.put(continuation, "extra", true),
+          Map.put(continuation, "field", "media.alt"),
+          Map.delete(continuation, "identity"),
+          put_in(continuation, ["identity", "extra"], true),
+          put_in(continuation, ["identity", "type"], %{"present" => true, "value" => "video"}),
+          put_in(continuation, ["target", "type"], "image"),
+          Map.put(continuation, "expect", %{"present" => true, "value" => 42}),
+          Map.put(continuation, "replace", continuation["expect"])
+        ] do
+      assert {:error, :invalid_history} = ContextualHistory.validate(invalid)
+      assert {:error, :invalid_history} = ContextualHistory.apply(after_blocks, invalid)
+    end
+  end
+
+  test "card media source continuation uses the inclusive encoded-size cap" do
+    before_media = Map.put(card_media(), "src", "/before.png")
+    before = [card_with_media(before_media)]
+    seed_after = [card_with_media(Map.put(before_media, "src", "x"))]
+
+    assert {:ok, seed} =
+             ContextualHistory.capture(before, seed_after, [slots_patch(seed_after)])
+
+    fixed_bytes = byte_size(Jason.encode!(seed)) - 1
+    at_limit = String.duplicate("x", @max_bytes - fixed_bytes)
+    limited_after = [card_with_media(Map.put(before_media, "src", at_limit))]
+
+    assert {:ok, continuation} =
+             ContextualHistory.capture(before, limited_after, [slots_patch(limited_after)])
+
+    assert byte_size(Jason.encode!(continuation)) == @max_bytes
+    assert :ok = ContextualHistory.validate(continuation)
+
+    over_limit = [card_with_media(Map.put(before_media, "src", at_limit <> "x"))]
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(before, over_limit, [slots_patch(over_limit)])
+  end
+
   defp capture_caption(before, caption) do
     after_blocks = [Map.put(hd(before), "caption", caption)]
     ContextualHistory.capture(before, after_blocks, [patch("figure", "caption", caption)])
@@ -782,6 +983,29 @@ defmodule Barkpark.Content.Papers.ContextualHistoryTest do
       "priority" => "primary",
       "unknown" => %{"keep" => true}
     }
+  end
+
+  defp card_media do
+    %{
+      "type" => "image",
+      "alt" => "Kept",
+      "width" => 640,
+      "unknown" => %{"keep" => true}
+    }
+  end
+
+  defp card_with_media(media, id \\ "card") do
+    action = card_action() |> Map.put("label", "Read")
+    block = card(action, id)
+
+    slots =
+      case media do
+        :absent -> Map.delete(block["slots"], "media")
+        value when is_list(value) -> Map.put(block["slots"], "media", value)
+        value -> Map.put(block["slots"], "media", [value])
+      end
+
+    Map.put(block, "slots", slots)
   end
 
   defp slots_patch([block]), do: patch(block["id"], "slots", block["slots"])
