@@ -40,6 +40,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def structure_child_locked?(child), do: not is_nil(locked_visible_block_id(child))
 
   @doc false
+  def column_track_removal(columns, column_index)
+      when is_list(columns) and is_integer(column_index) do
+    column_count = length(columns)
+
+    cond do
+      column_index < 0 or column_index >= column_count ->
+        malformed_structure("columns")
+
+      column_count < 2 ->
+        {:error, {:minimum_column_count, 1}}
+
+      column_index != column_count - 1 ->
+        {:error, {:column_not_rightmost, column_index}}
+
+      locked_id = locked_visible_block_id(Enum.at(columns, column_index)) ->
+        {:error, {:locked_block, locked_id, "remove-column"}}
+
+      Enum.at(columns, column_index) != [] ->
+        {:error, {:column_not_empty, column_index}}
+
+      true ->
+        :ok
+    end
+  end
+
+  def column_track_removal(_columns, _column_index), do: malformed_structure("columns")
+
+  @doc false
   def card_form_state(%{"type" => "card"} = block) do
     with {:ok, tone} <- optional_card_text(block, "tone"),
          {:ok, slots} <- card_slots(block),
@@ -1522,6 +1550,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
        when action in [nil, ""],
        do: {:ok, nil}
 
+  defp validate_column_child_action("add-column", _columns, _params),
+    do: {:ok, :add_column}
+
+  defp validate_column_child_action("remove-column:" <> _index = action, columns, _params) do
+    columns
+    |> Enum.with_index()
+    |> Enum.find_value(fn {_children, column_index} ->
+      if action == "remove-column:#{column_index}",
+        do: column_track_removal(columns, column_index)
+    end)
+    |> case do
+      :ok -> {:ok, {:remove_column, length(columns) - 1}}
+      nil -> malformed_structure("columns")
+      {:error, _reason} = error -> error
+    end
+  end
+
   defp validate_column_child_action(action, columns, params) when is_binary(action) do
     Enum.with_index(columns)
     |> Enum.find_value(fn {children, column_index} ->
@@ -1560,6 +1605,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     do: malformed_structure("columns")
 
   defp apply_column_child_action(columns, nil, _params), do: columns
+
+  defp apply_column_child_action(columns, :add_column, _params), do: columns ++ [[]]
+
+  defp apply_column_child_action(columns, {:remove_column, column_index}, _params),
+    do: List.delete_at(columns, column_index)
 
   defp apply_column_child_action(columns, {:add, column_index}, params) do
     children = Enum.at(columns, column_index)

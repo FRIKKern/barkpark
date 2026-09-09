@@ -88,6 +88,10 @@
 - Disabled: Not applicable to the read-only Chronicle.
 - Offline/slow network: Core text and links are server-rendered. Media is optional evidence, and related cards preserve their authored links when live resolution is unavailable.
 
+## Columns track editing contract
+
+The first track-control slice appends an empty rightmost track and removes only an empty rightmost track while at least one track remains. Existing track indexes, nested editor ownership, history and signed leases must stay unchanged; pending nested/scalar saves settle before structural mutation. Nonempty, protected, stale and middle-track removal is visibly refused without changing source. Adding an empty track consumes no child ID. Middle-track removal remains open until its ownership and history contract is separately implemented and verified; edge controls are not whole-Columns sign-off.
+
 ## Card title editing contract
 
 Clicking the visible Card title must place the native caret in that title, never in its body. Reuse the proven isolated title editing-host boundary and composition-aware settlement; typing followed immediately by blur or View must not disappear. Preserve the authored title's semantic heading level, source shape, IDs and unknown metadata, and every untouched slot. Keep reader typography and layout, native keyboard access and shared history; do not add a pointer-focus workaround or a separate title panel as the primary path.

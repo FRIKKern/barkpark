@@ -2798,9 +2798,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <input type="hidden" name="block_id" value={@id} />
                   <input type="hidden" name="column-count" value={length(@block["columns"])} />
                   <input type="hidden" name="column-new-child-id" value={Blocks.new_block_id()} />
-                  <fieldset :for={{column, column_index} <- Enum.with_index(@block["columns"])} class="bp-paper-edit-form">
+                  <button type="submit" name="column-action" value="add-column" class="btn btn-ghost btn-sm">Add column</button>
+                  <fieldset :for={{column, column_index} <- Enum.with_index(@block["columns"])} class="bp-paper-edit-form" data-column-index={column_index}>
                     <legend>Column <%= column_index + 1 %></legend>
                     <input type="hidden" name={"column-#{column_index}-child-count"} value={length(column)} />
+                    <% remove_reason = column_track_remove_reason(@block["columns"], column_index) %>
+                    <% remove_reason_id = column_track_remove_reason_id(@id, column_index) %>
+                    <button type="submit" name="column-action" value={"remove-column:#{column_index}"} disabled={not is_nil(remove_reason)} aria-describedby={remove_reason && remove_reason_id} class="btn btn-destructive btn-sm">Remove column</button>
+                    <span :if={remove_reason} id={remove_reason_id} class="bp-paper-lock-note" data-test-id="paper-column-remove-reason"><%= remove_reason %></span>
                     <div :for={{child, child_index} <- Enum.with_index(column)} class="bp-paper-edit-actions">
                       <span>Child <%= child_index + 1 %> · <%= child["type"] %></span>
                       <input type="hidden" name={"column-#{column_index}-child-#{child_index}-id"} value={child["id"]} />
@@ -3955,6 +3960,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   end
 
   defp editable_columns?(_block, _tree_identity_safe), do: false
+
+  defp column_track_remove_reason(columns, column_index) do
+    case Blocks.column_track_removal(columns, column_index) do
+      :ok ->
+        nil
+
+      {:error, {:minimum_column_count, 1}} ->
+        "At least one column is required."
+
+      {:error, {:column_not_rightmost, ^column_index}} ->
+        "Only the last column can be removed, so open drafts keep their column index."
+
+      {:error, {:locked_block, _id, "remove-column"}} ->
+        "Locked content must be removed before this column."
+
+      {:error, {:column_not_empty, ^column_index}} ->
+        "Remove this column's children first."
+
+      {:error, _reason} ->
+        "This column cannot be removed."
+    end
+  end
+
+  defp column_track_remove_reason_id(block_id, column_index) do
+    encoded_id = Base.url_encode64(block_id, padding: false)
+    "column-#{encoded_id}-#{column_index}-remove-reason"
+  end
 
   defp section_renderable?(%{"blocks" => blocks} = block) when is_list(blocks),
     do: is_nil(block["title"]) or is_binary(block["title"])
