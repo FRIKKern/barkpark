@@ -35,6 +35,12 @@ on:
 
 permissions:
   contents: read
+  # The PR-BODY FALLBACK needs this. Under this repo's COMMIT_MESSAGES squash
+  # setting the commit on main carries the branch's messages, not the PR body
+  # where the `Task:` trailer lives, so landed-mark.sh resolves the PR from the
+  # sha (REST repos/<o>/<r>/commits/<sha>/pulls) and reads its body. Read-only,
+  # and it widens nothing that can write.
+  pull-requests: read
 
 concurrency:
   # PER-SHA, and that is the whole point. `landed-mark-${{ github.ref }}` would
@@ -82,6 +88,11 @@ jobs:
           # `remove`. Nothing here can close, claim or re-stage a row.
           LEDGER_TOKEN: ${{ secrets.BARKPARK_TASK_TOKEN }}
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+          # `gh` is preinstalled on ubuntu-latest but refuses to run without a
+          # token; without this the PR-body fallback prints its CANNOT READ line
+          # on every trailer-less commit and marks nothing. GITHUB_REPOSITORY is
+          # set by the runner, so the script needs no repo knob.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
           if [ -z "${LEDGER_TOKEN:-}" ]; then
