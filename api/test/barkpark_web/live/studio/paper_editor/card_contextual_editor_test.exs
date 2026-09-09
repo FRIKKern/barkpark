@@ -49,7 +49,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
     assert html =~ ~s(src="/image.png")
 
     assert form_value(form, "card-title") == ["Card title"]
-    assert form_value(form, "card-media-src") == ["/image.png"]
+    assert form_value(form, "card-media-src") == []
     assert form_value(form, "card-media-alt") == ["Cover"]
     assert Enum.empty?(LazyHTML.query(form, "[name='card-action-label']"))
     action_form = LazyHTML.query(preview, "[data-test-id='paper-card-action-label-form']")
@@ -72,9 +72,14 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
 
     assert length(:binary.matches(html, "Card body")) == 1
 
-    assert child_kinds(card_frame) == ["img", "h3", "div", "div"]
+    assert child_kinds(card_frame) == ["div", "h3", "div", "div"]
     assert LazyHTML.attribute(LazyHTML.query(card_frame, "h3"), "class") == []
     assert LazyHTML.attribute(LazyHTML.query(card_frame, "img"), "src") == ["/image.png"]
+
+    media_owner = LazyHTML.query(card_frame, "[data-test-id='paper-card-image-preview']")
+    assert LazyHTML.attribute(media_owner, "data-image-owner") == ["card"]
+    assert Enum.count(LazyHTML.query(media_owner, "[data-paper-figure-image-picker]")) == 1
+    assert Enum.empty?(LazyHTML.query(form, "[name='card-media-src']"))
 
     assert LazyHTML.attribute(
              LazyHTML.query(card_frame, "[data-paper-card-action-paint]"),
