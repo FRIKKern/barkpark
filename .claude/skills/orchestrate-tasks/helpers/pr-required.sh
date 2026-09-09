@@ -8,10 +8,11 @@
 # (measured 2026-09-02: an EARLY RED section appended here made a lane's watcher report a job
 # name where the verdict should be, and would have stopped the merge sweep merging anything).
 #
-# SELFTEST: `pr-required.sh --selftest` drives five arms (healthy PR / unreadable repo /
-# unreadable head sha / unfetchable check-runs / repo-arg omitted) against a stub `gh` on PATH,
+# SELFTEST: `pr-required.sh --selftest` drives six arms (healthy PR / unreadable repo /
+# unreadable head sha / unfetchable check-runs / repo-arg omitted / genuine 0/4) against a stub `gh` on PATH,
 # from a cwd that is NOT a git repo, and asserts for each that `| tail -1` reads the verdict or
-# the refusal — never an intermediate line — and that no refusal contains the string "0/4".
+# the refusal — never an intermediate line — that no refusal contains the string "0/4", and
+# that an HONEST 0/4 (four required contexts present, all failed) still verdicts at exit 0.
 # It makes NO network calls. Run it after ANY edit to this file.
 set -u
 SELF="${BASH_SOURCE[0]}"; case "$SELF" in */*) SELFDIR="${SELF%/*}";; *) SELFDIR=".";; esac
@@ -32,11 +33,14 @@ if [ "$1" = api ]; then
   for a in "$@"; do
     case "$a" in
       */check-runs*)   [ "${GH_STUB_BREAK:-}" = runs ] && exit 1
+                       # GH_STUB_ALLRED: the four required contexts EXIST on this head and every
+                       # one concluded failure — a real, measured 0/4, not a failed read.
+                       c=success; [ "${GH_STUB_ALLRED:-}" = 1 ] && c=failure
                        printf '%s\n' \
-                         "Cloud gate	completed	success	2026-01-01T00:00:00Z" \
-                         "Console gate	completed	success	2026-01-01T00:00:00Z" \
-                         "Elixir gate	completed	success	2026-01-01T00:00:00Z" \
-                         "PR references an active task	completed	success	2026-01-01T00:00:00Z"
+                         "Cloud gate	completed	$c	2026-01-01T00:00:00Z" \
+                         "Console gate	completed	$c	2026-01-01T00:00:00Z" \
+                         "Elixir gate	completed	$c	2026-01-01T00:00:00Z" \
+                         "PR references an active task	completed	$c	2026-01-01T00:00:00Z"
                        exit 0;;
       */actions/runs*) echo 0; exit 0;;
       */pulls/*)       [ "${GH_STUB_BREAK:-}" = sha ] && exit 1
@@ -50,7 +54,7 @@ STUB
   chmod +x "$d/bin/gh"
   _arm() { # label  expected-LAST-line-prefix  expected-exit  GH_STUB_BREAK  args...
     label="$1"; want="$2"; wantrc="$3"; brk="$4"; shift 4
-    out=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_STUB_BREAK="$brk" GH_REPO="" bash "$SELF" "$@" 2>/dev/null ); rc=$?
+    out=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_STUB_BREAK="$brk" GH_STUB_ALLRED="${ALLRED:-}" GH_REPO="" bash "$SELF" "$@" 2>/dev/null ); rc=$?
     last=$(printf '%s\n' "$out" | tail -1)
     if [ "$rc" = "$wantrc" ] && case "$last" in "$want"*) true;; *) false;; esac; then
       printf 'PASS %-20s exit=%s | tail -1: %s\n' "$label" "$rc" "$last"
@@ -83,8 +87,15 @@ STUB
     0:MERGEABLE:*) printf 'PASS %-20s exit=0 | tail -1: %s\n' "git-remote default" "$last";;
     *) printf 'FAIL %-20s exit=%s | tail -1: %s\n' "git-remote default" "$rc" "$last"; fails=$((fails+1));;
   esac
+  # Arm 6 — ANTI-OVER-REACH. A head whose four required contexts all EXIST and all concluded
+  # failure is a genuine, measured zero. The refusal must NOT swallow it: the verdict stays
+  # "NOT YET: 0/4 …" at exit 0. This arm FAILS if anyone widens the CANNOT READ guard to cover
+  # "no required context is green", which would make an honest red indistinguishable from a
+  # broken read in the opposite direction.
+  ALLRED=1 _arm "genuine 0/4"    "NOT YET: 0/4"    0 ""     42 acme/widget
+  unset ALLRED
   rm -rf "$d"
-  if [ "$fails" = 0 ]; then echo "SELFTEST: 5/5 arms pass"; return 0; fi
+  if [ "$fails" = 0 ]; then echo "SELFTEST: 6/6 arms pass"; return 0; fi
   echo "SELFTEST: $fails assertion(s) FAILED"; return 1
 }
 [ "${1:-}" = "--selftest" ] && { selftest; exit $?; }
