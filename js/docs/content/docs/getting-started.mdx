@@ -33,17 +33,18 @@ exits 1 with `required variable … is missing a value` and starts no container.
 each one using the generator command printed above it in `.env.example` (`openssl rand
 -base64 64` / `openssl rand -base64 32`), and set `PHX_HOST=localhost`.
 
-Add one more line to `.env`, because this page uses the demo dataset:
+One more line matters, because this page uses the demo dataset. `.env.example` ships
+`BARKPARK_SEED_PROFILE=clean` (compose's own default is `clean` too), and the clean
+profile seeds **one welcome paper and an admin token printed once** — no `post` schema
+and no `barkpark-dev-token`, so every example below would 404 or 401. Change it:
 
 ```bash
 BARKPARK_SEED_PROFILE=demo
 ```
 
-Compose defaults to `BARKPARK_SEED_PROFILE=clean`, which seeds **one welcome paper and
-an admin token printed once** — no `post` schema and no `barkpark-dev-token`, so every
-example below would 404 or 401. The `demo` profile is what seeds the eight example
-schemas, 27 documents, and the dev token `barkpark-dev-token`. The container re-runs the
-(idempotent) seed on every start, so setting this later and restarting also works.
+`demo` is what seeds the eight example schemas, 27 documents, and the dev token
+`barkpark-dev-token`. The container re-runs the (idempotent) seed on every start, so
+changing this later and restarting also works.
 
 Then start Postgres and the API container:
 
