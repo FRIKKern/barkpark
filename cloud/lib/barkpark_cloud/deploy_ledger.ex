@@ -2853,6 +2853,14 @@ defmodule BarkparkCloud.DeployLedger do
     # Elixir. `rows between unbounded preceding and 1 preceding` counts terminals
     # STRICTLY BEFORE the row, so every row of a run shares a number and the
     # terminal is the group's last row by construction.
+    #
+    # THE `coalesce` IS LOAD-BEARING AND WAS FOUND BY A RED, NOT BY READING. A
+    # SUM over an EMPTY frame is NULL, not 0 — so the FIRST row of every site
+    # partition came back `run_no: nil` while its successors came back `0`, and
+    # `Enum.group_by/2` put the head of every journey in a group of its own. The
+    # figure that produced was not an error: it was a confidently wrong
+    # attempts-per-release, one attempt light on every site, which is exactly the
+    # failure shape this whole metric exists to refuse.
     rows =
       Repo.all(
         from(d in scoped,
@@ -2864,7 +2872,7 @@ defmodule BarkparkCloud.DeployLedger do
             content_rev: d.content_rev,
             run_no:
               fragment(
-                "sum(case when ? in ('live','failed') then 1 else 0 end) over (partition by ? order by ? asc, ? asc rows between unbounded preceding and 1 preceding)",
+                "coalesce(sum(case when ? in ('live','failed') then 1 else 0 end) over (partition by ? order by ? asc, ? asc rows between unbounded preceding and 1 preceding), 0)",
                 d.status,
                 d.site_id,
                 d.inserted_at,
