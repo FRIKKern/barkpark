@@ -2353,7 +2353,16 @@ defmodule BarkparkWeb.TasksController do
 
         {rev_nodes, rev_edges, node_ids, _edge_keys, per_type_capped} =
           Enum.reduce(types, {[], [], MapSet.new(), MapSet.new(), false}, fn type, acc ->
-            fold_corpus_type(type, dataset, list_opts, edge_opts, per_type_limit, page_size, 0, acc)
+            fold_corpus_type(
+              type,
+              dataset,
+              list_opts,
+              edge_opts,
+              per_type_limit,
+              page_size,
+              0,
+              acc
+            )
           end)
 
         real_nodes = Enum.reverse(rev_nodes)
@@ -2423,7 +2432,16 @@ defmodule BarkparkWeb.TasksController do
   # if the corpus is written to mid-derivation. Repeats are absorbed by the
   # de-duplication sets; a skip is the same class of imprecision the 1000-row
   # per-type cap already shipped, and the response says `truncated` either way.
-  defp fold_corpus_type(type, dataset, list_opts, edge_opts, per_type_limit, page_size, offset, acc) do
+  defp fold_corpus_type(
+         type,
+         dataset,
+         list_opts,
+         edge_opts,
+         per_type_limit,
+         page_size,
+         offset,
+         acc
+       ) do
     {nodes_acc, edges_acc, seen_nodes, seen_edges, capped} = acc
     take = min(page_size, per_type_limit - offset)
 
@@ -2467,7 +2485,16 @@ defmodule BarkparkWeb.TasksController do
       acc = {nodes_acc, edges_acc, seen_nodes, seen_edges, capped}
 
       if has_more and read > 0 do
-        fold_corpus_type(type, dataset, list_opts, edge_opts, per_type_limit, page_size, next_offset, acc)
+        fold_corpus_type(
+          type,
+          dataset,
+          list_opts,
+          edge_opts,
+          per_type_limit,
+          page_size,
+          next_offset,
+          acc
+        )
       else
         acc
       end
