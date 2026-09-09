@@ -534,7 +534,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
         # ── the four NON-WALL rejection shapes (ae-nonwall-rejection-render) ──
         #
-        # Wave-11's census (charter D83a) proved these are the only real
+        # Wave-11's census (authoring-excellence charter D83a) proved these are the only real
         # `{:error, reason}` shapes beyond the wall tuples that reach here. Each
         # one degraded to the content-free "Action failed", which tells an author
         # nothing about a situation every one of them can be recovered from.
