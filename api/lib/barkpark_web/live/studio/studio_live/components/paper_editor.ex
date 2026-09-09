@@ -1582,7 +1582,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           aria-controls={@dom_id}
           data-paper-card-title-paint
         ><%= @title.text %></button>
-        <label class="sr-only" for={@dom_id}>Card title</label>
         <textarea
           id={@dom_id}
           name="card-title"

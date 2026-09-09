@@ -31,7 +31,6 @@ const dom = new JSDOM(`<!doctype html><body>
           <input type="hidden" name="block_id" value="${blockId}">
           <h2 class="bp-paper-card-title-heading bp-paper-card-title-owner"
               data-paper-card-title-owner>
-            <label class="sr-only" for="${titleId}">Card title</label>
             <button type="button" data-paper-card-title-paint
                     aria-controls="${titleId}"
                     aria-label="Edit Card title: ${originalTitle}">${originalTitle}</button>

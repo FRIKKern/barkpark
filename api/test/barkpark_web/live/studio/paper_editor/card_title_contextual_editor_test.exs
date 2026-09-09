@@ -56,6 +56,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardTitleContextualEditorTest do
              ]
 
       assert Enum.count(LazyHTML.query(tree, "[name='card-title']")) == 1
+      assert LazyHTML.attribute(textarea, "aria-label") == ["Card title"]
+      assert Enum.empty?(LazyHTML.query(owner, "label"))
       assert Enum.count(heading) == 1
     end
   end
