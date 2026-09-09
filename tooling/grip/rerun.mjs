@@ -492,6 +492,15 @@ const GIT_LISTERS = new Set([
   "status", "show-ref", "for-each-ref", "blame", "describe", "shortlog",
 ]);
 const GO_LISTERS = new Set(["vet", "build", "list"]);
+// `git grep` is a MATCHER, not an UNKNOWN. Its exit-code grammar is grep's —
+// rc1 is a genuine no-match — and census.mjs's own classifier has always said
+// so (GIT_MATCHER there). rerun.mjs did not, so every `git grep` fell to
+// FAMILY.UNKNOWN, where the DEFAULT branch rules ANY nonzero exit FAILED with
+// absenceEligible:true. That put rc128 — an unresolvable ref, a missing repo —
+// on the same footing as a real no-match: an environment fault laundered into
+// a proven absence, inside the instrument built to abolish exactly that. The
+// rc128 UNAVAILABLE rules lived only in CONTENT_FETCH and were unreachable.
+const GIT_MATCHERS = new Set(["grep"]);
 
 /** Tokens of a command segment, with env assignments stripped. */
 function tokens(segment) {
@@ -521,13 +530,13 @@ function gitSubcommand(rest) {
 const AMBIGUOUS_LIST = /\|\||&&|;/;
 
 /** Which tool family's exit-code grammar governs this command? Pure. */
-export function classifyFamily(command) {
+function lastStageParts(command) {
   const cmd = String(command || "").trim();
-  if (!cmd) return FAMILY.UNKNOWN;
+  if (!cmd) return null;
   // Scan SYNTAX, not text — a `|` or the word `diff` inside a quoted pattern is
   // data, exactly as in classifySafety. An unterminated quote falls back to raw.
   const blanked = blankQuotedSpans(cmd) ?? cmd;
-  if (AMBIGUOUS_LIST.test(blanked)) return FAMILY.UNKNOWN;
+  if (AMBIGUOUS_LIST.test(blanked)) return null;
 
   // Find the pipe on the BLANKED text (a quoted `|` is data, not a pipeline),
   // then slice the ORIGINAL at that offset — blanking is 1:1, so the offsets
@@ -536,10 +545,14 @@ export function classifyFamily(command) {
   // argument to -C: the whole command falls to UNKNOWN.
   const pipe = blanked.lastIndexOf("|");
   const parts = tokens(pipe === -1 ? cmd : cmd.slice(pipe + 1));
-  if (parts.length === 0) return FAMILY.UNKNOWN;
+  if (parts.length === 0) return null;
+  return { head: parts[0].split("/").pop(), rest: parts.slice(1) };
+}
 
-  const head = parts[0].split("/").pop();
-  const rest = parts.slice(1);
+export function classifyFamily(command) {
+  const stage = lastStageParts(command);
+  if (!stage) return FAMILY.UNKNOWN;
+  const { head, rest } = stage;
   const has = (...flags) => rest.some((t) => flags.some((f) => t === f || t.startsWith(`${f}=`)));
 
   if (MATCHER_HEADS.has(head)) return FAMILY.MATCHER;
@@ -554,6 +567,7 @@ export function classifyFamily(command) {
     const { verb, args } = gitSubcommand(rest);
     const hasArg = (...flags) => args.some((t) => flags.some((f) => t === f || t.startsWith(`${f}=`)));
     if (verb === "merge-base") return hasArg("--is-ancestor") ? FAMILY.PREDICATE : FAMILY.QUERY_LISTER;
+    if (GIT_MATCHERS.has(verb)) return FAMILY.MATCHER;
     if (GIT_CONTENT_FETCH.has(verb)) return FAMILY.CONTENT_FETCH;
     if (verb === "diff" && hasArg("--quiet", "--exit-code")) return FAMILY.DIFFER;
     if (GIT_LISTERS.has(verb)) return FAMILY.QUERY_LISTER;
@@ -564,6 +578,48 @@ export function classifyFamily(command) {
     return GO_LISTERS.has(verb) ? FAMILY.QUERY_LISTER : FAMILY.UNKNOWN;
   }
   return FAMILY.UNKNOWN;
+}
+
+// ── SILENT BY DESIGN — a predicate that answers with its exit code alone ─────
+//
+// D6 says a silent success is a broken read, and that rule has no exception for
+// a command that was ASKED to be silent. Two of the best-polarised spellings in
+// the grammar are exactly that shape, and both were measured on this host:
+//
+//   git cat-file -e origin/main:<path>   rc0 present / rc128 absent, 0 bytes
+//   grep -q <pat> <file>                 rc0 match  / rc1 no-match,  0 bytes
+//
+// Before this rule the first hit CONTENT-FETCH's "exited 0 but returned no
+// bytes" and the second hit MATCHER's "grep exited 0 (match) yet produced no
+// output": each arrived at the verdict layer saying NOTHING, and an honest
+// author reads "null read" and concludes the tool is broken. The suppression is
+// NARROW ON PURPOSE — it fires only when the flag that demands silence is on
+// the command line, so a plain `grep` that exits 0 with no output keeps its
+// NULL-READ ruling, which is the defect D6 was written for.
+const QUIET_CLUSTER = /^-[A-Za-z]*q[A-Za-z]*$/;
+const QUIET_LONG = new Set(["--quiet", "--silent"]);
+const isQuietFlag = (t) => QUIET_LONG.has(t) || QUIET_CLUSTER.test(t);
+
+/** Is this command's silence at exit 0 the ANSWER rather than a failed read? */
+export function isSilentByDesign(command) {
+  const stage = lastStageParts(command);
+  if (!stage) return false;
+  const { head, rest } = stage;
+  if (head === "git") {
+    const { verb, args } = gitSubcommand(rest);
+    // `cat-file -e` prints nothing by contract; `cat-file -t` prints the type.
+    if (verb === "cat-file") return args.includes("-e");
+    if (GIT_MATCHERS.has(verb)) return args.some(isQuietFlag);
+    return false;
+  }
+  if (MATCHER_HEADS.has(head)) return rest.some(isQuietFlag);
+  return false;
+}
+
+/** Is git the tool that produced this exit code? (rc128 is git's dialect.) */
+function isGitLed(command) {
+  const stage = lastStageParts(command);
+  return !!stage && stage.head === "git";
 }
 
 // FOUR SEMANTICS SHARE EXIT 128, and only one of them is decay. Keying decay on
@@ -578,6 +634,26 @@ export function classifyFamily(command) {
 const GIT_PATH_GONE = /does not exist in|exists on disk, but not in/i;
 const GIT_REF_GONE = /invalid object name|unknown revision or path not in the working tree|bad revision|ambiguous argument/i;
 const GIT_WRONG_CWD = /not a git repository/i;
+
+/**
+ * The rc128 discriminator, shared by every git-led family.
+ *
+ * It used to live INSIDE `case FAMILY.CONTENT_FETCH`, which made it unreachable
+ * for any other git command — the whole point of the git grep fault. Hoisting
+ * it here is what lets a MATCHER whose head is `git` reach the same rules.
+ */
+function gitExit128(stderr, ok) {
+  if (GIT_WRONG_CWD.test(stderr)) {
+    return ok(VERDICT.UNAVAILABLE, "not a git repository here — an environment fault, never decay", false);
+  }
+  if (GIT_REF_GONE.test(stderr)) {
+    return ok(VERDICT.UNAVAILABLE, `the ref could not be resolved here (unfetched or renamed): ${firstLine(stderr)} — an environment fault, never decay`, false);
+  }
+  if (GIT_PATH_GONE.test(stderr)) {
+    return ok(VERDICT.FAILED, `the ref resolved and the path is NOT in it: ${firstLine(stderr)}`);
+  }
+  return ok(VERDICT.UNAVAILABLE, `git exited 128 with an unrecognised reason: ${firstLine(stderr) || "(no stderr)"}`, false);
+}
 
 /**
  * Rule on a completed run's (family, exit, output) triple. Pure — separable from
@@ -605,9 +681,18 @@ export function classifySilence(command, run = {}) {
   switch (family) {
     // grep rc0 must PRINT: "matched" with nothing to show is a broken read.
     case FAMILY.MATCHER:
-      if (exit === 0 && empty) return ok(VERDICT.NULL_READ, "grep exited 0 (match) yet produced no output");
+      if (exit === 0 && empty) {
+        // `-q` was asked for: the exit code IS the output.
+        if (isSilentByDesign(command)) return ok(VERDICT.OK, "the matcher matched and was told to answer with its exit code alone (-q) — silence is the designed answer");
+        return ok(VERDICT.NULL_READ, "grep exited 0 (match) yet produced no output");
+      }
       if (exit === 0) return ok(VERDICT.OK, `matched, ${bytes} bytes of output`);
       if (exit === 1) return ok(VERDICT.FAILED, "ran fine and matched nothing — a genuine no-match");
+      // `git grep` is a MATCHER whose ERRORS are spoken in git's dialect: an
+      // unresolvable ref and a missing repo both exit 128, and reading either
+      // as a matcher tool-error (let alone as the UNKNOWN default's "FAILED,
+      // absence-eligible") is an environment fault dressed as proof.
+      if (exit === 128 && isGitLed(command)) return gitExit128(stderr, ok);
       // ugrep (this host's `grep`) words its rc2 warning differently from GNU
       // grep, so this keys on the EXIT CODE, never on the message.
       return ok(VERDICT.NULL_READ, `the matcher errored (exit ${exit}) — a tool error is not an absence`, false);
@@ -632,20 +717,14 @@ export function classifySilence(command, run = {}) {
       return ok(VERDICT.FAILED, `exited ${exit}: ${firstLine(stderr) || "(no stderr)"}`);
 
     case FAMILY.CONTENT_FETCH:
-      if (exit === 0 && empty) return ok(VERDICT.NULL_READ, "the fetch exited 0 but returned no bytes");
-      if (exit === 0) return ok(VERDICT.OK, `fetched ${bytes} bytes`);
-      if (exit === 128) {
-        if (GIT_WRONG_CWD.test(stderr)) {
-          return ok(VERDICT.UNAVAILABLE, "not a git repository here — an environment fault, never decay", false);
-        }
-        if (GIT_REF_GONE.test(stderr)) {
-          return ok(VERDICT.UNAVAILABLE, `the ref could not be resolved here (unfetched or renamed): ${firstLine(stderr)} — an environment fault, never decay`, false);
-        }
-        if (GIT_PATH_GONE.test(stderr)) {
-          return ok(VERDICT.FAILED, `the ref resolved and the path is NOT in it: ${firstLine(stderr)}`);
-        }
-        return ok(VERDICT.UNAVAILABLE, `git exited 128 with an unrecognised reason: ${firstLine(stderr) || "(no stderr)"}`, false);
+      if (exit === 0 && empty) {
+        // `git cat-file -e <ref>:<path>` is an EXISTENCE CHECK: rc0 means the
+        // blob is there and printing nothing is the contract, not a null read.
+        if (isSilentByDesign(command)) return ok(VERDICT.OK, "the existence check passed — `cat-file -e` answers with its exit code alone, so silence is the designed answer");
+        return ok(VERDICT.NULL_READ, "the fetch exited 0 but returned no bytes");
       }
+      if (exit === 0) return ok(VERDICT.OK, `fetched ${bytes} bytes`);
+      if (exit === 128) return gitExit128(stderr, ok);
       return ok(VERDICT.FAILED, `exited ${exit}: ${firstLine(stderr) || "(no stderr)"}`);
 
     // Unrecognised: keep the pre-existing conservative default exactly. An
