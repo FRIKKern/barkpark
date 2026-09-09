@@ -302,6 +302,7 @@ if [ "${#DIRS[@]}" -eq 0 ]; then DIRS=(api cloud); fi
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/hex-audit-oracle.XXXXXX")"
 unreadable=0; any_high=0; grand_total=0
+SEEN="$WORK/seen.txt"; : >"$SEEN"
 
 for d in "${DIRS[@]}"; do
   dir="$ROOT/$d"
@@ -346,10 +347,12 @@ for d in "${DIRS[@]}"; do
   fi
   grand_total=$((grand_total + R_TOTAL))
   [ "$R_HIGH" -gt 0 ] && any_high=1
+  # Seen ids are keyed BY LOCK (`api:EEF-...`), not bare. bandit's two HIGHs sit
+  # in BOTH locks; a bare-id baseline would let an advisory recorded against api/
+  # arrive in cloud/ and never read as NEW.
+  echo "$R_IDS" | awk -v d="$d" 'NF {print d ":" $1}' >>"$SEEN"
   echo
 done
-
-rm -rf "$WORK"
 
 echo "══════════════════════════════════════════════════════════════════════"
 echo "VERDICT: locks=${#DIRS[@]} advisories(hex.audit)=$grand_total high_or_worse=$( [ $any_high = 1 ] && echo yes || echo no ) unreadable=$( [ $unreadable = 1 ] && echo yes || echo no )"
@@ -359,6 +362,34 @@ echo "oracle should BLOCK is owner-queue item 47 / criterion 1 of"
 echo "cch-w12-bl-cve-gate-is-oracle-blind, deliberately not decided here."
 echo "══════════════════════════════════════════════════════════════════════"
 
-[ "$unreadable" = "1" ] && exit 3
+# UNREADABLE OUTRANKS EVERYTHING. A feed that refused to answer is not a clean
+# feed and is not a baseline match either, so it exits 3 before any verdict
+# below — a CANNOT READ must never be byte-identical to a zero.
+if [ "$unreadable" = "1" ]; then
+  rm -rf "$WORK"
+  echo "CANNOT READ: at least one lock produced no advisory report. Exit 3."
+  exit 3
+fi
+
+if [ -n "$BASELINE" ]; then
+  if [ ! -f "$BASELINE" ]; then
+    rm -rf "$WORK"
+    echo "CANNOT READ: --baseline '$BASELINE' does not exist. A baseline read as"
+    echo "empty would flip this ratchet's verdict wholesale; refusing to guess."
+    exit 3
+  fi
+  echo
+  echo "RATCHET against $BASELINE"
+  baseline_verdict "$BASELINE" "$SEEN"
+  rm -rf "$WORK"
+  if [ "$B_NEW" -gt 0 ]; then
+    echo "RATCHET VERDICT: $B_NEW advisory id(s) not in the recorded baseline. Exit 1."
+    exit 1
+  fi
+  echo "RATCHET VERDICT: no unrecorded advisory. Exit 0."
+  exit 0
+fi
+
+rm -rf "$WORK"
 [ "$any_high" = "1" ] && exit 1
 exit 0
