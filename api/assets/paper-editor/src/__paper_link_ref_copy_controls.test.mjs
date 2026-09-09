@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import vm from "node:vm";
 import { JSDOM } from "jsdom";
 
 const shell = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
@@ -39,3 +40,110 @@ assert.equal(dom.window.getComputedStyle(document.querySelector("[data-paper-lin
 assert.equal(document.querySelectorAll("textarea").length, 1);
 dom.window.close();
 console.log("related-card copy controls preserve separate editing and navigation ownership");
+
+// These opaque replies are client-protocol fixtures, not proof of server
+// authority. ExUnit and native host checks separately exercise real receipts.
+const identity = Buffer.from(JSON.stringify({
+  slug: "unique-destination", prefer_authored_copy: true, qa: { keep: "identity" },
+})).toString("base64url");
+const fieldForm = (field, value) => `<form id="ref-${field}-form"
+  class="bp-paper-edit-form bp-paper-link-ref-${field}-form"
+  phx-submit="paper-edit-block" phx-change="paper-block-autosave" phx-debounce="500">
+  <input type="hidden" name="block_id" value="related: copy/[owner]#?">
+  <input type="hidden" name="paper-link-ref-index" value="3">
+  <input type="hidden" name="paper-link-ref-slug" value="unique-destination">
+  <input type="hidden" name="paper-link-ref-field" value="${field}">
+  <input type="hidden" name="paper-link-ref-guard" value="${identity}">
+  <textarea id="ref-${field}" name="paper-link-ref-value">${value}</textarea>
+</form>`;
+const queueDom = new JSDOM(`<!doctype html><body>
+  <main data-paper-doc-key="production:paper:reference-copy" data-paper-rev="7">
+    <button id="view" data-editing="true">View</button>
+    <div class="bp-paper-editor" data-paper-doc-key="production:paper:reference-copy" data-paper-rev="7">
+      ${fieldForm("title", "Original title")}
+      ${fieldForm("description", "Original description")}
+      <footer><button data-paper-history-action="undo" disabled>Undo</button>
+        <button data-paper-history-action="redo" disabled>Redo</button>
+        <span data-paper-history-status role="status"></span>
+        <span data-test-id="bp-paper-footer-save" role="status"></span></footer>
+    </div>
+  </main></body>`, { url: "http://localhost/" });
+const win = queueDom.window;
+let serial = 0;
+Object.defineProperty(win, "crypto", { configurable: true, value: {
+  randomUUID: () => `00000000-0000-4000-8000-${String(++serial).padStart(12, "0")}`,
+} });
+vm.runInContext(readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"), vm.createContext({
+  window: win, document: win.document, CustomEvent: win.CustomEvent,
+  FormData: win.FormData, Date, setTimeout, clearTimeout,
+  customElements: { whenDefined: () => Promise.resolve() },
+}));
+const calls = [];
+const replies = [];
+const toggles = [];
+const hook = {
+  ...win.BarkparkPaperEditorHooks.BarkparkPaperEditToggle,
+  el: win.document.getElementById("view"),
+  pushEvent(event, payload) {
+    if (event === "paper-toggle-edit") { toggles.push(event); return Promise.resolve({}); }
+    calls.push({ event, payload: structuredClone(payload) });
+    return new Promise(resolve => replies.push(reply => resolve(reply)));
+  },
+  pushEventTo(_target, event, payload) {
+    calls.push({ event, payload: structuredClone(payload) });
+    return new Promise(resolve => replies.push(reply => resolve([{ status: "fulfilled", value: { reply } }])));
+  },
+};
+const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+const input = (field, value) => {
+  const element = win.document.getElementById(`ref-${field}`);
+  element.focus(); element.value = value;
+  element.dispatchEvent(new win.InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+};
+const acknowledge = async (call, rev) => {
+  assert.ok(replies.length, "a real pending client request must exist before a fixture reply");
+  replies.shift()({ saved: true, changed: true, request_id: call.payload.request_id, rev,
+    history_step: { version: 1, ref: call.payload.request_id, action: "undo" } });
+  await tick(); await tick();
+};
+hook.mounted();
+try {
+  win.document.getElementById("ref-title").focus();
+  win.document.getElementById("ref-title").blur();
+  hook.el.click(); await tick();
+  assert.equal(calls.length, 0, "untouched canonical fields send no mutation");
+  assert.equal(toggles.length, 1);
+  toggles.length = 0;
+
+  input("title", "  First title  ");
+  await new Promise(resolve => setTimeout(resolve, 510));
+  assert.equal(calls.length, 1);
+  input("title", "  Newer title  ");
+  input("description", "  New description  ");
+  hook.el.click(); await tick();
+  assert.equal(calls.length, 1, "newer same-field and sibling-field edits await the first ACK");
+  assert.equal(toggles.length, 0, "View waits for all pending local copy");
+  await acknowledge(calls[0], 8);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].payload.if_rev, 8);
+  await acknowledge(calls[1], 9);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].payload.if_rev, 9);
+  assert.deepEqual(calls.slice(1).map(call => [call.payload["paper-link-ref-field"],
+    call.payload["paper-link-ref-value"]]).sort(([a], [b]) => a.localeCompare(b)),
+  [["description", "  New description  "], ["title", "  Newer title  "]],
+  "both independent fields persist their exact latest values; cross-field queue order is not a source contract");
+  for (const call of calls) {
+    assert.equal(call.payload["paper-link-ref-guard"], identity,
+      "copy edits do not change the identity guard across own ACK rebasing");
+    assert.deepEqual(Object.keys(call.payload).sort(), ["block_id", "paper-link-ref-index",
+      "paper-link-ref-slug", "paper-link-ref-field", "paper-link-ref-value", "paper-link-ref-guard",
+      "request_id", "if_rev"].sort(), "no sibling reference or inverse source is submitted");
+  }
+  await acknowledge(calls[2], 10);
+  assert.equal(toggles.length, 1, "View occurs only after every exact field value is acknowledged");
+} finally {
+  hook.destroyed?.();
+  queueDom.window.close();
+}
+console.log("related-card copy serializes same-field and sibling-field saves without broad source payloads");

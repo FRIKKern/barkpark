@@ -2133,7 +2133,18 @@
             if (record.pending === pending) record.pending = null;
             if (
               snapshotSaved && source.isConnected && record.dirty && record.active === 0
-            ) coordinator._scheduleFallback(source);
+            ) {
+              // A later document mutation may already be queued or in flight.
+              // Keep this newer form snapshot in the deferred set so each ACK
+              // can advance its reviewed revision before it is serialized.
+              // Scheduling it now drops that marker and can send the snapshot
+              // from behind a sibling form against the sibling's old base.
+              if (mutationActive || mutationQueue.length) {
+                record.fallbackDeferred = true;
+              } else {
+                coordinator._scheduleFallback(source);
+              }
+            }
           });
         record.pending = pending;
         return pending;
