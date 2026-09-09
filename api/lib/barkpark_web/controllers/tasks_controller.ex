@@ -3348,8 +3348,15 @@ defmodule BarkparkWeb.TasksController do
   # Personal Dev Fleet presence heartbeat (Barkpark.Tasks.Fleet). Registration
   # rides the plain Content path; every later beat is the zero-row atomic
   # write (PDF-D17). `dataset` query param defaults "production", the same
-  # request_dataset/1 the graph reads use; scope opts feed ONLY the
-  # registration create.
+  # request_dataset/1 the graph reads use. `scope_opts(conn)` feeds BOTH halves
+  # of the beat (task-8d083ef87c7d0022): `Fleet.beat/3` resolves the listener
+  # row that decides register-vs-touch under the caller's workspace, and stamps
+  # the same scope on the registration create. It used to feed the create ONLY,
+  # so a bearer in workspace A that beat as a worker NAME workspace B had
+  # registered landed on B's row and CAS-overwrote B's listener state. When the
+  # scoped resolve finds nothing and the create then loses to the
+  # `(doc_id, type, dataset_id)` unique index — another tenant owns the name —
+  # the answer is a 409 `worker_name_taken`, an honest refusal.
 
   def fleet_beat(conn, params) do
     dataset = request_dataset(conn)
@@ -3385,6 +3392,17 @@ defmodule BarkparkWeb.TasksController do
       {:error, :stale_beat} ->
         conflict(conn, :stale_beat, nil)
 
+      # Another workspace owns this worker name's row. 409, NAMED: the caller
+      # can only fix this by choosing a different worker name, and a bare
+      # `beat_failed` would not tell it that.
+      {:error, :worker_name_taken} ->
+        conflict(conn, :worker_name_taken, nil, %{
+          message:
+            "another workspace already registered this worker name in this dataset; " <>
+              "worker names share one identity leaf (doc_id, type, dataset_id) — " <>
+              "beat under a name your workspace owns."
+        })
+
       {:error, other} ->
         unprocessable(conn, "beat_failed", "beat failed: #{inspect(other)}")
     end
@@ -3404,8 +3422,10 @@ defmodule BarkparkWeb.TasksController do
   #
   # This route READ globally while `fleet_beat/2` two functions up WROTE
   # scoped — the asymmetry that leaked every workspace's listeners, and each
-  # worker's in-progress task id, to any bearer holding `read`. Both halves now
-  # thread the same `scope_opts(conn)`.
+  # worker's in-progress task id, to any bearer holding `read`. Both routes now
+  # thread the same `scope_opts(conn)`, and so do both halves of the beat: since
+  # task-8d083ef87c7d0022, `Fleet.beat/3`'s register-vs-touch RESOLVE carries
+  # the caller's workspace too, not just the registration create.
   #
   # `scope_opts/1` ALWAYS carries `:workspace_id` for a conn — a real id, or
   # the `:shared_only` sentinel when the request resolved no workspace — so a

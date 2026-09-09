@@ -128,23 +128,58 @@ defmodule Barkpark.Tasks.Fleet do
     * `status` / `agent` / `scope` / `capacity` / `ttl_s` — only when the
       beat provides them (`ttl` is accepted as an alias for `ttl_s`).
 
-  `opts` are `Content` write opts (workspace/project scope) used ONLY on the
-  registration create. Returns `{:ok, receipt}` with
+  `opts` carry the caller's tenant scope (`ScopeHelpers.scope_opts(conn)`), and
+  BOTH halves of the beat run under it: the RESOLVE that decides
+  register-vs-touch is workspace-scoped through the same `scope_to/2` the
+  roster uses (binary → equality, `:shared_only` → `workspace_id IS NULL`,
+  `nil`/absent → NO rows, fail closed), and the registration create stamps it.
+  Before task-8d083ef87c7d0022 only the create was scoped: the resolve keyed on
+  `(type, dataset, doc_id)` alone, so a beat from workspace A for a worker NAME
+  workspace B had registered landed on B's row and CAS-merged A's state into
+  it. Project is deliberately NOT narrowed — same reasoning as `roster_scope/1`.
+
+  Returns `{:ok, receipt}` with
   `%{registered: boolean, doc: %{...}}`, or `{:error, :missing_worker |
-  :invalid_status | :invalid_ttl | :invalid_capacity | :stale_beat}`
+  :invalid_status | :invalid_ttl | :invalid_capacity | :stale_beat |
+  :worker_name_taken | :unscoped_beat}`
   (`:invalid_capacity` = a structured capacity that violates the contract, see
   `put_capacity/2`; `:stale_beat` = a non-beat writer raced the CAS; safe to
-  retry — the next beat lands).
+  retry — the next beat lands; `:worker_name_taken` = the scoped resolve found
+  nothing but ANOTHER tenant already owns that row's identity leaf
+  `(doc_id, type, dataset_id)` — an honest refusal, never a silent touch;
+  `:unscoped_beat` = `opts` carried no resolvable workspace, see
+  `beat_workspace/1`, unreachable from any HTTP request).
   """
   def beat(params, dataset, opts \\ []) when is_map(params) and is_binary(dataset) do
-    with {:ok, worker} <- fetch_worker(params),
+    with {:ok, workspace_id} <- beat_workspace(opts),
+         {:ok, worker} <- fetch_worker(params),
          {:ok, fields} <- beat_fields(params) do
       logical_id = @type_name <> "-" <> slug(worker)
 
-      case canonical_row(logical_id, dataset) do
+      case canonical_row(logical_id, dataset, workspace_id) do
         nil -> register(logical_id, worker, fields, dataset, opts)
         %Document{} = doc -> touch(doc, logical_id, fields)
       end
+    end
+  end
+
+  # FAIL CLOSED on an unresolved tenant, the same posture `roster/2` documents —
+  # and here it is a WRITE, so it matters more. Scoping only the RESOLVE would
+  # leave one door open: with `workspace_id: nil` the resolve correctly finds
+  # nothing, but `register/5` then hands those same nil-scope opts to
+  # `Content.create_document/4`, whose prev-doc lookup runs through
+  # `Scope.scope_to_workspace_or_global/3` — and THAT helper reads a nil
+  # workspace as "every tenant" (the sign-flip documented in `Content.Scope`).
+  # The create would find another workspace's row as `prev_doc` and UPDATE it,
+  # re-stamping its scope to NULL — the very cross-tenant write this function
+  # just closed, one call deeper. No HTTP request can reach this arm
+  # (`ScopeHelpers.scope_opts/1` always emits a real id or `:shared_only`); it
+  # guards the internal caller.
+  defp beat_workspace(opts) do
+    case Keyword.get(opts, :workspace_id) do
+      workspace_id when is_binary(workspace_id) -> {:ok, workspace_id}
+      :shared_only -> {:ok, :shared_only}
+      _ -> {:error, :unscoped_beat}
     end
   end
 
@@ -443,15 +478,25 @@ defmodule Barkpark.Tasks.Fleet do
     |> String.trim("-")
   end
 
-  # The canonical row for a logical id: draft/published twins collapse,
-  # published wins (Board idiom). `Content.create_document` prefixes new rows
-  # with `drafts.`, so the beat must look at BOTH shapes.
-  defp canonical_row(logical_id, dataset) do
+  # The canonical row for a logical id, UNDER THE CALLER'S WORKSPACE:
+  # draft/published twins collapse, published wins (Board idiom).
+  # `Content.create_document` prefixes new rows with `drafts.`, so the beat must
+  # look at BOTH shapes.
+  #
+  # The workspace clause is load-bearing (task-8d083ef87c7d0022). `logical_id`
+  # is `"listener-" <> slug(params["worker"])` — a RAW request string on a
+  # `:token_root` route — and this resolve decides register-vs-touch. Unscoped,
+  # it handed `touch/3` whatever tenant's row shared the name, and `touch/3`
+  # CAS-merged the caller's state into it. It runs through the SAME `scope_to/2`
+  # arms `roster/2` does, so read and write can never disagree about who is
+  # asking; project stays un-narrowed for the reason `roster_scope/1` states.
+  defp canonical_row(logical_id, dataset, workspace_id) do
     ids = [logical_id, "drafts." <> logical_id]
 
     from(d in Document,
       where: d.type == @type_name and d.dataset == ^dataset and d.doc_id in ^ids
     )
+    |> scope_to({:workspace, workspace_id})
     |> Repo.all()
     |> case do
       [] -> nil
@@ -476,7 +521,29 @@ defmodule Barkpark.Tasks.Fleet do
 
     case Content.create_document(@type_name, attrs, dataset, opts) do
       {:ok, %Document{} = doc} -> {:ok, receipt(doc, true)}
+      {:error, %Ecto.Changeset{} = cs} -> {:error, register_changeset_reason(cs)}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # The scoped resolve found nothing, so this beat is a REGISTRATION — and the
+  # insert lost to the `(doc_id, type, dataset_id)` unique index, which means
+  # some OTHER tenant already owns this worker name's row. `Document.changeset`
+  # maps that index to a `constraint: :unique` error, so the changeset is the
+  # only honest signal available here. Answer with a NAMED refusal
+  # (`:worker_name_taken` → HTTP 409) instead of leaking a changeset: before the
+  # scope clause this collision could not happen, because the resolve simply
+  # returned the other tenant's row and the beat quietly wrote to it.
+  defp register_changeset_reason(%Ecto.Changeset{errors: errors} = cs) do
+    if Enum.any?(errors, fn {_field, {_msg, meta}} ->
+         Keyword.get(meta, :constraint) == :unique
+       end) do
+      :worker_name_taken
+    else
+      # Every other changeset failure keeps its historical shape — the caller
+      # still gets the changeset, and the controller still renders it as
+      # `beat_failed`. Only the unique collision is reclassified.
+      cs
     end
   end
 
@@ -495,7 +562,7 @@ defmodule Barkpark.Tasks.Fleet do
         # In-lock re-read: beats serialize on the advisory lock, so the CAS
         # below only loses to a NON-beat writer (e.g. a Studio edit) racing
         # between this read and the write — that surfaces as :stale_beat.
-        # global-read: by-PK re-read inside the listener-beat advisory lock — same posture as pulse.ex/stamp.ex/ttl_sweeper; the caller already resolved the row under its own scope.
+        # global-read: by-PK re-read inside the listener-beat advisory lock — same posture as pulse.ex/stamp.ex/ttl_sweeper; `canonical_row/3` resolved this PK under the caller's own workspace scope, so re-reading it by id adds no reach.
         case Repo.get(Document, doc.id) do
           nil -> {:error, :stale_beat}
           %Document{} = fresh -> apply_beat(fresh, fields)
