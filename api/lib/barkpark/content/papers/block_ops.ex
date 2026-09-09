@@ -429,6 +429,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
       # ingest POST can pass the wall below and search/readers see the labels.
       # Absent keys leave any existing content labels untouched (an update
       # without tags never strips a labeled paper).
+      # The caller's explicit title (task-4b8770c64ccac487). `paper_title/2`
+      # already prefers `content["title"]` over the first heading, but until
+      # this line NOTHING wrote it on a paper write from HTTP — the ingest
+      # controller's title was dropped and the heading silently won. Placed
+      # BEFORE `maybe_project/6` on purpose: a bound title field-block still
+      # projects over it (Exp-P2's editor-authored title keeps precedence).
+      # nil (absent) leaves any existing content title untouched.
+      |> maybe_put_paper("title", attrs["title"])
       |> maybe_put_paper("tags", attrs["tags"])
       |> maybe_put_paper("description", attrs["description"])
       |> maybe_put_paper("dedup_bypass", attrs["dedup_bypass"])
@@ -4602,9 +4610,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # pipeline control opt) — excluded from the generic session-metadata
   # passthrough below so it can never double-write or clobber a derived key.
   # NOTE: "title" is deliberately NOT reserved here. For a paper, `title`
-  # never reaches `content` through this path at all (a paper clause below is
-  # a full no-op) — its row title instead comes from a PROJECTED bound title
-  # field-block or the first heading (see `paper_title/2`). For a non-paper
+  # never reaches `content` through THIS path (the paper clause below is a
+  # full no-op) — it is written by the explicit `maybe_put_paper("title", …)`
+  # in `write_encrypted_blocks_doc/8` (a caller-supplied title, honoured since
+  # task-4b8770c64ccac487) and by a PROJECTED bound title field-block, which
+  # still wins; absent both, the first heading (see `paper_title/2`). For a non-paper
   # type there is no such projection, so `content["title"]` — and therefore
   # the Document row's `title` (`paper_title/2` reads `content["title"]`
   # first) — has NO OTHER writer; reserving "title" here would silently drop
