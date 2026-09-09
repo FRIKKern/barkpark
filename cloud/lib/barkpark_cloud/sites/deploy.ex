@@ -117,7 +117,9 @@ defmodule BarkparkCloud.Sites.Deploy do
       `merge_provision_steps` / `merge_provision_console`, where it would replace
       the only copy of the narration that exists.
 
-    * **anything else → `FailureCopy.strip_ansi/1` THEN `FailureCopy.scrub/1`.**
+    * **anything else → `FailureCopy.raw/1` = `FailureCopy.strip_ansi/1` THEN `FailureCopy.scrub/1`.**
+      (The two verbs are named on ONE line deliberately: `failure-copy-scrub-order-check.sh`
+      reads a wrapped mention as a bare, unproven `scrub` and reds.)
       A stage detail is a REMOTE capture (an ssh stderr fold, a provider body, a
       build log line), so it is redacted at every display boundary. `broadcast_stage/2` shipped it RAW:
       driven on a detail carrying `Authorization: Bearer <token>`, the HTTP
@@ -137,8 +139,9 @@ defmodule BarkparkCloud.Sites.Deploy do
   # INSIDE the shape the scrubber matches on and the secret walks out in
   # cleartext (with raw 0x1B bytes attached, which a console then interprets).
   # Strip first, then redact — the order is the fix (dr-w8-s2).
-  def stage_caption(_status, detail),
-    do: detail |> FailureCopy.strip_ansi() |> FailureCopy.scrub()
+  # dr-w23-bl: that composition IS `FailureCopy.raw/1` (`failure_copy.ex:548`),
+  # so the boundary names the entry point rather than re-deriving the order.
+  def stage_caption(_status, detail), do: FailureCopy.raw(detail)
 
   ## ---------------------------------------------------------------------------
   ## Mint
