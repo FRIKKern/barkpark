@@ -108,6 +108,8 @@ Reuse the canonical default, chapters and timeline card presentation. Editable c
 
 Reference field DOM identity includes its position and a bounded digest of the guarded reference identity, not position alone. Copy-only acknowledgements retain the same native field; replacing or changing its guarded identity creates a different field so retained drafts and native undo cannot migrate to another reference. Unrelated duplicate or malformed references must not suppress history for a uniquely identified target.
 
+Admission is field-specific: absent, nil, text and integer copy have lossless native form representations; opaque maps, lists, booleans and floats remain read-only with an explanation in Configure. A safe sibling field stays editable. Submitting the unchanged form representation preserves the original value and type, including nil and whitespace-only text.
+
 ## Content voice
 - Tone: Clear, warm, specific, and lightly playful; closer to a beautifully edited product journal than an engineering report. Confident about shipped facts, restrained about interpretation, and comfortable saying that a period was mostly maintenance.
 - Terminology: Prefer ordinary phrases such as “clearer errors,” “more complete results,” “safer access,” and “easier day-to-day use.” Reserve counts, internal component names, code paths, protocols, fields, flags, commit language, “first-parent,” “digest,” and “renderer” for the technical record.
