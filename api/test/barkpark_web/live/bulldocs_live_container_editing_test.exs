@@ -70,8 +70,20 @@ defmodule BarkparkWeb.BulldocsLiveContainerEditingTest do
 
     render_hook(view, "paper-block-autosave", %{
       "block_id" => "links",
-      "title" => "Updated journey",
-      "description" => "Updated authored description",
+      "title" => "  Updated journey  ",
+      "if_rev" => socket_of(view).assigns.paper_rev,
+      "request_id" => Ecto.UUID.generate()
+    })
+
+    render_hook(view, "paper-block-autosave", %{
+      "block_id" => "links",
+      "description" => "  Updated authored description  ",
+      "if_rev" => socket_of(view).assigns.paper_rev,
+      "request_id" => Ecto.UUID.generate()
+    })
+
+    render_hook(view, "paper-block-autosave", %{
+      "block_id" => "links",
       "layout" => "chapters",
       "ref-count" => "2",
       "ref-0-slug" => "day-one",
@@ -88,8 +100,8 @@ defmodule BarkparkWeb.BulldocsLiveContainerEditingTest do
     })
 
     links = stored_block(ctx, "links")
-    assert links["title"] == "Updated journey"
-    assert links["description"] == "Updated authored description"
+    assert links["title"] == "  Updated journey  "
+    assert links["description"] == "  Updated authored description  "
     assert links["layout"] == "chapters"
 
     assert [first, "legacy-updated"] = links["refs"]
@@ -105,8 +117,6 @@ defmodule BarkparkWeb.BulldocsLiveContainerEditingTest do
 
     render_hook(view, "paper-edit-block", %{
       "block_id" => "links",
-      "title" => "Updated journey",
-      "description" => "Updated authored description",
       "layout" => "chapters",
       "ref-count" => "2",
       "ref-0-slug" => "day-one",

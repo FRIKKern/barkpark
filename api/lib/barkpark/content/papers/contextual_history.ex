@@ -9,11 +9,11 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   authoritative tree and changes only the recorded field when its exact state
   still matches the continuation guard.
 
-  Phase one supports `figure.caption` and `image.src`, including singular
-  Figure image children. Unsupported or ambiguous edits remain valid edits
-  without a continuation. Values are exact JSON values; absent and
-  present-with-null are distinct. Continuations are capped at 16 KiB encoded
-  and never truncated.
+  Supported fields are `figure.caption`, `image.src`, `paper-links.title`, and
+  `paper-links.description`, including singular Figure image children.
+  Unsupported or ambiguous edits remain valid edits without a continuation.
+  Values are exact JSON values; absent and present-with-null are distinct.
+  Continuations are capped at 16 KiB encoded and never truncated.
   """
 
   alias Barkpark.PortableDoc.BlockIds
@@ -22,7 +22,12 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   @max_encoded_bytes 16 * 1024
   @continuation_keys ~w(action expect field replace target version)
   @target_keys ~w(id type)
-  @allowed_fields MapSet.new([{"figure", "caption"}, {"image", "src"}])
+  @allowed_fields MapSet.new([
+                    {"figure", "caption"},
+                    {"image", "src"},
+                    {"paper-links", "title"},
+                    {"paper-links", "description"}
+                  ])
 
   @type continuation :: %{required(String.t()) => term()}
   @type apply_error ::

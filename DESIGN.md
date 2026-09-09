@@ -96,6 +96,10 @@ The first track-control slice appends an empty rightmost track and removes only 
 
 Clicking the visible Card title must place the native caret in that title, never in its body. Reuse the proven isolated title editing-host boundary and composition-aware settlement; typing followed immediately by blur or View must not disappear. Preserve the authored title's semantic heading level, source shape, IDs and unknown metadata, and every untouched slot. Keep reader typography and layout, native keyboard access and shared history; do not add a pointer-focus workaround or a separate title panel as the primary path.
 
+## Related-paper heading editing contract
+
+The authored `paper-links` heading and description should be editable in their reader position, with Configure related papers focusing the same canonical fields as fallback. Reuse the reader's presentation rules for default, chapters and timeline layouts; do not duplicate a second visible heading or shift linked cards when a field gains focus. Keep meaningful leading/trailing whitespace and untouched reference carriers/unknown metadata exactly. A displayed default heading must not become authored source on a no-op, and an absent description must not reserve reader space. When no references render, preserve the reader's empty output and keep authoring reachable through fallback controls. Linked labels may resolve from other Papers: this slice must not rewrite those Papers or silently materialize their live copy. Reuse native autosizing, save coordination and history, with explicit conflict recovery and selector-safe field IDs.
+
 ## Content voice
 - Tone: Clear, warm, specific, and lightly playful; closer to a beautifully edited product journal than an engineering report. Confident about shipped facts, restrained about interpretation, and comfortable saying that a period was mostly maintenance.
 - Terminology: Prefer ordinary phrases such as “clearer errors,” “more complete results,” “safer access,” and “easier day-to-day use.” Reserve counts, internal component names, code paths, protocols, fields, flags, commit language, “first-parent,” “digest,” and “renderer” for the technical record.

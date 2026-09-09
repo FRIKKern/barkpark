@@ -43,6 +43,14 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
               "id" => "paragraph",
               "type" => "paragraph",
               "content" => [%{"type" => "text", "value" => "Before"}]
+            },
+            %{
+              "id" => "links",
+              "type" => "paper-links",
+              "title" => "Original links heading",
+              "description" => "Original links description",
+              "refs" => [%{"slug" => "next", "unknown" => %{"keep" => true}}],
+              "unknown" => [1, 2]
             }
           ]
         })
@@ -221,6 +229,65 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
                },
                socket
              )
+  end
+
+  test "Studio paper-links description ACK undoes and redoes without touching neighbours", %{
+    socket: socket,
+    slug: slug
+  } do
+    forward_id = Ecto.UUID.generate()
+
+    assert {:reply,
+            %{
+              saved: true,
+              history_step: %{version: 1, ref: ^forward_id, action: "undo"},
+              rev: forward_rev
+            }, forward_socket} =
+             StudioLive.handle_event(
+               "paper-block-autosave",
+               %{
+                 "block_id" => "links",
+                 "description" => "  Studio description  ",
+                 "request_id" => forward_id,
+                 "if_rev" => socket.assigns.paper_rev
+               },
+               socket
+             )
+
+    assert paper_links(slug)["description"] == "  Studio description  "
+    undo_id = Ecto.UUID.generate()
+
+    assert {:reply, %{saved: true, rev: undo_rev}, undone_socket} =
+             StudioLive.handle_event(
+               "paper-history-step",
+               %{
+                 "history_ref" => forward_id,
+                 "action" => "undo",
+                 "request_id" => undo_id,
+                 "if_rev" => forward_rev
+               },
+               forward_socket
+             )
+
+    assert paper_links(slug)["description"] == "Original links description"
+
+    assert {:reply, %{saved: true}, _redone_socket} =
+             StudioLive.handle_event(
+               "paper-history-step",
+               %{
+                 "history_ref" => undo_id,
+                 "action" => "redo",
+                 "request_id" => Ecto.UUID.generate(),
+                 "if_rev" => undo_rev
+               },
+               undone_socket
+             )
+
+    links = paper_links(slug)
+    assert links["description"] == "  Studio description  "
+    assert links["title"] == "Original links heading"
+    assert links["refs"] == [%{"slug" => "next", "unknown" => %{"keep" => true}}]
+    assert links["unknown"] == [1, 2]
   end
 
   test "credential, revoked-token, and read-only refusals happen before history lookup", %{
@@ -422,5 +489,13 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
     slug
     |> Content.get_paper(@dataset)
     |> then(&get_in(&1.content, ["blocks", Access.at(0), "child", "src"]))
+  end
+
+  defp paper_links(slug) do
+    slug
+    |> Content.get_paper(@dataset)
+    |> Map.fetch!(:content)
+    |> Map.fetch!("blocks")
+    |> Enum.find(&(&1["id"] == "links"))
   end
 end

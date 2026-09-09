@@ -20,7 +20,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
     end
   end
 
-  test "paper-links keeps the live reader render visible and its existing form closed contextually" do
+  test "paper-links keeps canonical cards and exposes one direct scalar editor per header field" do
     block = %{
       "id" => "related",
       "type" => "paper-links",
@@ -49,10 +49,19 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
         paper_links: live_details
       })
 
-    assert html =~ Render.render_block(block, %{style: :article, paper_links: live_details})
     assert html =~ "Release week, live"
     refute html =~ ">Release week</a>"
     assert html =~ ~s(data-test-id="paper-links-preview")
+    assert html =~ ~s(class="bp-paper-links-header-editor")
+    assert html =~ ~s(class="bp-paper-links-title-heading")
+    assert html =~ ~s(data-paper-links-title-paint)
+    assert html =~ ~s(class="bp-paper-links-description-paragraph")
+    assert html =~ ~s(data-paper-links-description-paint)
+    assert html =~ ~s(id="paper-links-title-cmVsYXRlZA")
+    assert html =~ ~s(id="paper-links-description-cmVsYXRlZA")
+    assert html =~ ~s(data-test-id="paper-links-title-editor")
+    assert html =~ ~s(data-test-id="paper-links-description-editor")
+    assert html =~ ~s(phx-hook="BarkparkPaperAutoSize")
     assert html =~ ~s(class="bp-paper-contextual-controls")
     assert html =~ "ignore_attrs"
     assert html =~ ~s(id="paper-links-form-related")
@@ -60,6 +69,91 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
     assert html =~ ~s(phx-change="paper-block-autosave")
     assert html =~ ~s(type="hidden" name="ref-0-featured" value="false")
     assert html =~ ~s(type="checkbox" name="ref-0-featured" value="true")
+
+    fragment = LazyHTML.from_fragment(html)
+
+    assert fragment |> LazyHTML.query(~s(textarea[name="title"])) |> Enum.count() == 1
+    assert fragment |> LazyHTML.query(~s(textarea[name="description"])) |> Enum.count() == 1
+    assert fragment |> LazyHTML.query("h2 form, p form, form form") |> Enum.empty?()
+
+    assert fragment
+           |> LazyHTML.query(~s(#paper-links-form-related [name="title"]))
+           |> Enum.empty?()
+
+    assert fragment
+           |> LazyHTML.query(~s(#paper-links-form-related [name="description"]))
+           |> Enum.empty?()
+  end
+
+  test "paper-links default heading stays paint-only and hostile ids get safe focus targets" do
+    block = %{
+      "id" => "related: with punctuation!?",
+      "type" => "paper-links",
+      "title" => "   ",
+      "refs" => []
+    }
+
+    html = render_component(&PaperEditor.paper_block_fields/1, %{block: block, paper_links: %{}})
+    encoded = Base.url_encode64(block["id"], padding: false)
+    fragment = LazyHTML.from_fragment(html)
+
+    assert html =~ "Explore the work"
+    refute html =~ ~s(<section data-paper-links)
+    refute html =~ ~s(data-paper-links-title-paint)
+    refute html =~ ~s(class="bp-paper-links-title-heading")
+    refute html =~ ~s(class="bp-paper-links-description-paragraph")
+
+    assert fragment
+           |> LazyHTML.query(~s(textarea#paper-links-title-#{encoded}[name="title"]))
+           |> LazyHTML.text() == "   "
+
+    assert fragment
+           |> LazyHTML.query(~s(textarea#paper-links-title-#{encoded}[tabindex="-1"]))
+           |> Enum.count() == 1
+
+    assert fragment
+           |> LazyHTML.query(~s(textarea#paper-links-description-#{encoded}[tabindex="-1"]))
+           |> Enum.count() == 1
+
+    assert fragment
+           |> LazyHTML.query(~s(input[name="block_id"][value="related: with punctuation!?"]))
+           |> Enum.count() == 3
+
+    assert fragment
+           |> LazyHTML.query(
+             ~s([data-paper-links-title-panel-trigger][aria-controls="paper-links-title-#{encoded}"])
+           )
+           |> Enum.count() == 1
+  end
+
+  test "paper-links numeric header fields use edit fallback labels without changing source" do
+    block = %{
+      "id" => "numeric-related",
+      "type" => "paper-links",
+      "title" => 42,
+      "description" => 7,
+      "refs" => ["next"]
+    }
+
+    original = block
+    html = render_component(&PaperEditor.paper_block_fields/1, %{block: block, paper_links: %{}})
+    fragment = LazyHTML.from_fragment(html)
+
+    assert fragment
+           |> LazyHTML.query(~s([data-paper-links-title-panel-trigger]))
+           |> LazyHTML.text() == "Edit heading"
+
+    assert fragment
+           |> LazyHTML.query(~s([data-paper-links-description-panel-trigger]))
+           |> LazyHTML.text() == "Edit description"
+
+    assert fragment |> LazyHTML.query(~s(textarea[name="title"])) |> LazyHTML.text() == "42"
+
+    assert fragment
+           |> LazyHTML.query(~s(textarea[name="description"]))
+           |> LazyHTML.text() == "7"
+
+    assert block === original
   end
 
   test "bar-chart keeps the canonical chart visible while row controls start closed" do

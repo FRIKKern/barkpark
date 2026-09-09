@@ -3919,6 +3919,11 @@
         this.el.addEventListener("drop", this._onDrop);
         this.el.addEventListener("dragend", this._onDragEnd);
       },
+      updated() {
+        // LiveView can replace the footer controls while preserving this hook.
+        // Re-apply the coordinator's session history state to the new buttons.
+        this._exitCoordinator?.refreshHistoryControls?.();
+      },
       destroyed() {
         this.el.removeEventListener("dragstart", this._onDragStart);
         this.el.removeEventListener("dragover", this._onDragOver);
