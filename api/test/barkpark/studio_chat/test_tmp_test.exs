@@ -61,7 +61,8 @@ defmodule Barkpark.StudioChat.TestTmpTest do
     assert Path.type(root) == :absolute
     assert root == TestTmp.root()
 
-    # The whole point: the root is NOT the shared, reaper-visible TMPDIR.
-    refute String.starts_with?(root, System.get_env("TMPDIR") || "/tmp")
+    # The whole point: the root is inside the build tree mix owns, not the
+    # shared scratch root TMPDIR names (which some boxes reap on a timer).
+    assert String.starts_with?(root, Mix.Project.build_path())
   end
 end
