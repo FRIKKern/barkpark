@@ -5,6 +5,8 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
   `Tasks.Stamp` refuses a builder's met-flip on a merge-gated criterion and says
   so loudly — the refusal names its detector and cannot be talked out of. The
   escape hatch beside it, `merge_gated: true`, was neither loud nor recorded:
+  (that opt is now a REASON STRING — see @reason below and
+  pds-bl-merge-gated-override-carries-no-reason; `true` releases nothing)
   the stored criterion produced by an OVERRIDDEN stamp was byte-identical to the
   one produced by an ordinary stamp. Same key set, same `met`, and the only
   differing field (`merge_gate`) describes the criterion's TYPE, not that an
@@ -122,6 +124,14 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
   # names only a branch, and this file is not testing that gate.
   @evidence "PR #14383 merged, sha 63b89bef30 an ancestor of origin/main"
 
+  # THE OVERRIDE IS A REASON, NOT A BOOLEAN
+  # (pds-bl-merge-gated-override-carries-no-reason). `merge_gated: true` no
+  # longer releases anything: an escape that costs one word and records nothing
+  # is indistinguishable on the record from the reflex it exists to make
+  # expensive. The reason rides the SAME record this file already pins, in the
+  # field name `close_override.*` uses.
+  @reason "PR #14383 merged to main; I am the lead closing the gate"
+
   # ─── THE STAMP DOOR ────────────────────────────────────────────────────────
 
   describe "stamp --merge-gated mints a receipt" do
@@ -138,7 +148,7 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
                  criterion: 1,
                  criterion_text: @gate_text,
                  outcome: {:met, @evidence},
-                 merge_gated: true,
+                 merge_gated: @reason,
                  caller_token_id: "tok-abc"
                )
 
@@ -166,6 +176,12 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
       assert record["authenticated_token_id"] == "tok-abc"
       assert record["criterion"] == @gate_text
       assert record["asserted_evidence"] == @evidence
+
+      # THE FIELD THIS ROW EXISTS FOR. Delete `"reason" => reason` from
+      # `Stamp.override_record/5` and this line is the one that reds — every
+      # other field survives a reason-less override untouched, which is
+      # precisely why the receipt could not tell a reflex from a decision.
+      assert record["reason"] == @reason
       assert is_binary(record["ts"]) and record["ts"] != ""
     end
 
@@ -179,7 +195,7 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
                    criterion: index,
                    criterion_text: text,
                    outcome: {:met, @evidence},
-                   merge_gated: true
+                   merge_gated: @reason
                  )
       end
 
@@ -197,7 +213,7 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
                  criterion: 1,
                  criterion_text: @gate_text,
                  outcome: {:met, @evidence},
-                 merge_gated: true
+                 merge_gated: @reason
                )
 
       event =
@@ -241,7 +257,7 @@ defmodule Barkpark.Tasks.MergeGateOverrideReceiptTest do
                  criterion: 0,
                  criterion_text: @plain_text,
                  outcome: {:met, "42 tests green"},
-                 merge_gated: true
+                 merge_gated: @reason
                )
 
       refute Map.has_key?(stored(task.id), @receipt_key)

@@ -1510,11 +1510,16 @@ defmodule BarkparkWeb.TasksController do
     with {:ok, worker_id} <- Params.fetch_string(params, "worker_id"),
          {:ok, observed_epoch} <- Params.fetch_int(params, "observed_epoch"),
          {:ok, index, outcome, criterion_text} <- Params.parse_stamp(params),
+         # The override's REASON, or a 400 for the legacy reason-less boolean.
+         # Refused HERE and not only in bp: a CLI-only guard is bypassed by a
+         # direct POST, the same argument that put the merge-gate verdict itself
+         # on this side of the wire.
+         {:ok, merge_gated} <- Params.stamp_merge_gated(params),
          {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
       opts =
         [observed_epoch: observed_epoch, criterion: index, outcome: outcome]
         |> Params.put_opt(:criterion_text, criterion_text)
-        |> Params.put_opt(:merge_gated, Params.stamp_merge_gated(params))
+        |> Params.put_opt(:merge_gated, merge_gated)
         |> Params.put_opt(:observed_rev, Params.stamp_observed_rev(params))
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
 

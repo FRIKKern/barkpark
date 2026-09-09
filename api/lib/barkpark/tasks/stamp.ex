@@ -197,8 +197,13 @@ defmodule Barkpark.Tasks.Stamp do
         caller read. It is CAS'd against the stored rev inside the lock. Unused
         on any row stamped under a live claim, where the epoch fence applies
         instead.
-      * `:merge_gated` (optional boolean, default `false`) — the LEAD-OWNED
-        override that releases the MERGE-GATE refusal below. LEAD-OWNED is a
+      * `:merge_gated` (optional NON-EMPTY REASON STRING, default absent) — the
+        LEAD-OWNED override that releases the MERGE-GATE refusal below. It is a
+        REASON, not a boolean: `true` (or any other non-string) releases
+        NOTHING, because an override that costs one word and records nothing is
+        indistinguishable on the record from the reflex it is supposed to make
+        expensive. The controller refuses the legacy bare-boolean spelling with
+        a 400 rather than reading it as a reason-less override. LEAD-OWNED is a
         CONVENTION, not an authorization: nothing checks that the caller is a
         lead, and nothing can, because the server authenticates an api_token and
         not the `worker_id` the caller typed (`check_merge_gate/6` says so at the
@@ -206,8 +211,10 @@ defmodule Barkpark.Tasks.Stamp do
         with `:merge_gated_criterion`.
         USING IT MINTS A RECEIPT: an override that actually lifts the refusal
         appends a record to `content.merge_gate_autostamp.stamp_overrides` on
-        the same rev-CAS write as the flip (see `check_merge_gate/6`). The flag
-        on a row that is NOT a gate lifts nothing and records nothing.
+        the same rev-CAS write as the flip (see `check_merge_gate/6`), and the
+        REASON is a field on that record — `close_override.*`'s shape, where
+        `reason` sits beside the actor and the ts. The flag on a row that is NOT
+        a gate lifts nothing and records nothing.
       * `:caller_token_id` (optional) — audit stamp on the event row.
 
   THE MERGE-GATE REFUSAL. A criterion the LEAD closes on merge is not the
@@ -234,7 +241,8 @@ defmodule Barkpark.Tasks.Stamp do
     outcome = Keyword.fetch!(opts, :outcome)
     criterion_text = Keyword.get(opts, :criterion_text)
     caller_token_id = Keyword.get(opts, :caller_token_id)
-    merge_gated = Keyword.get(opts, :merge_gated, false) == true
+    # A REASON or nothing. A non-string (the legacy `true`) is not an override.
+    merge_gated = normalize_merge_gated(Keyword.get(opts, :merge_gated))
     observed_rev = Keyword.get(opts, :observed_rev)
 
     with {:ok, update, result_tag} <- build_update(index, outcome, worker_id, criterion_text) do
@@ -324,6 +332,22 @@ defmodule Barkpark.Tasks.Stamp do
     do: Map.put(update, "criterion", text)
 
   defp put_guard(update, _text), do: update
+
+  # THE OVERRIDE IS A REASON (pds-bl-merge-gated-override-carries-no-reason).
+  # Only a non-blank string releases the merge-gate refusal; `true`, `false`,
+  # `nil` and every other shape read as "not asked for". Deliberately NOT
+  # tolerant of `true`: the whole point is that the escape stops being free, and
+  # a compatibility clause here would keep the free spelling alive forever on the
+  # one path that matters. Nothing new is permitted — a caller who passed `true`
+  # before now gets the same refusal an unflagged caller gets.
+  defp normalize_merge_gated(reason) when is_binary(reason) do
+    case String.trim(reason) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_merge_gated(_), do: nil
 
   defp do_stamp_txn(
          task_id,
@@ -620,9 +644,13 @@ defmodule Barkpark.Tasks.Stamp do
       |> Map.get("acceptance_criteria")
       |> Criteria.at(Map.get(update, "index"))
 
-    case {Criteria.merge_gated?(entry), merge_gated} do
+    # The LEFT side of this pair is the REFUSAL SET and it is untouched by the
+    # reason requirement: `Criteria.merge_gated?/1` decides which criteria are
+    # gates, exactly as before. Only the RIGHT side changed — the escape now
+    # requires a reason, so this can refuse MORE and never less.
+    case {Criteria.merge_gated?(entry), is_binary(merge_gated)} do
       {true, false} -> {:error, :merge_gated_criterion}
-      {true, true} -> {:ok, override_record(update, entry, worker_id, opts)}
+      {true, true} -> {:ok, override_record(update, entry, worker_id, merge_gated, opts)}
       {false, _} -> {:ok, nil}
     end
   end
@@ -632,10 +660,16 @@ defmodule Barkpark.Tasks.Stamp do
   # criterion text and the asserted evidence are snapshotted here because a
   # later stamp can overwrite both on the criterion itself, and then the
   # override's own claim would be unreadable.
-  defp override_record(update, entry, worker_id, opts) do
+  # `reason` is the override's whole point: without it the record said WHO
+  # asserted and WHEN, and never WHY — so a reflex override and a deliberate one
+  # produced identical receipts. The field name and its place beside the actor
+  # and the ts are `close_override.*`'s (Close.maybe_put_override/5), not a new
+  # shape.
+  defp override_record(update, entry, worker_id, reason, opts) do
     %{
       "verified" => false,
       "source" => "stamp_merge_gated_override",
+      "reason" => reason,
       "indices" => [Map.get(update, "index")],
       "criterion" => Map.get(entry || %{}, "criterion"),
       "asserted_evidence" => Map.get(update, "evidence"),

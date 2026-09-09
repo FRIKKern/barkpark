@@ -190,6 +190,12 @@ var codeExit = map[string]int{
 	"invalid_lifecycle":     exitValidation,
 	"sentinel_worker_id":    exitValidation,
 	"merge_gated_criterion": exitValidation,
+	// The override's own reason gate. A `--merge-gated` passed bare — no reason
+	// — is refused, by the CLI before it sends and by the server for anyone who
+	// POSTs directly. It buckets with the family above for the same reason they
+	// all do: nothing moved under the caller and re-sending the identical
+	// command can never succeed; the fix is to type the reason.
+	"merge_gated_reason_required": exitValidation,
 	// The close-artifact gate (PDS-D291). A `done` close of a kind:task row with
 	// ZERO acceptance criteria whose reason names no PR+sha and pastes no run
 	// output. It buckets with `criteria_unmet` and NOT with the conflict family

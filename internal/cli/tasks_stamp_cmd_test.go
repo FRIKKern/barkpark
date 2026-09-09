@@ -33,7 +33,7 @@ func TestParseStampArgs_MergeGatedRoutedByDeclaration(t *testing.T) {
 	tail := []string{
 		"bp-task-x", "worker-1", "2",
 		"--criterion", "3", "--met", "--evidence", "gate green",
-		"--criterion-text", "some row", "--merge-gated",
+		"--criterion-text", "some row", "--merge-gated", "PR #123 merged as abc1234",
 	}
 	base := []string{
 		"bp-task-x", "worker-1", "2",
@@ -43,11 +43,14 @@ func TestParseStampArgs_MergeGatedRoutedByDeclaration(t *testing.T) {
 
 	for _, c := range []struct {
 		name     string
-		declared bool
+		declared string
 		want     []string
 	}{
-		{"server declares it → forwarded", true, append(append([]string{}, base...), "--merge-gated")},
-		{"legacy server → stripped", false, base},
+		{"server declares it string → flag AND reason forwarded", "string",
+			append(append([]string{}, base...), "--merge-gated", "PR #123 merged as abc1234")},
+		{"reason-less server → bare flag, reason dropped", "bool",
+			append(append([]string{}, base...), "--merge-gated")},
+		{"legacy server → both stripped", "", base},
 	} {
 		sa, forward := parseStampArgs(tail, c.declared)
 
@@ -62,6 +65,12 @@ func TestParseStampArgs_MergeGatedRoutedByDeclaration(t *testing.T) {
 		}
 		if !sa.mergeGated {
 			t.Errorf("%s: mergeGated not parsed", c.name)
+		}
+		// The REASON is read the same way against all three servers: the
+		// CLI-side refusal of a bare override must not depend on how old the
+		// server is.
+		if sa.mergeGatedReason != "PR #123 merged as abc1234" {
+			t.Errorf("%s: mergeGatedReason = %q, want the typed reason", c.name, sa.mergeGatedReason)
 		}
 		if !reflect.DeepEqual(forward, c.want) {
 			t.Errorf("%s: forward = %v\n want %v", c.name, forward, c.want)
@@ -85,7 +94,7 @@ func TestCommandDeclaresFlag(t *testing.T) {
 
 // The `--flag=value` inline spelling must parse identically to the space form.
 func TestParseStampArgs_InlineForms(t *testing.T) {
-	sa, forward := parseStampArgs([]string{"--criterion=5", "--criterion-text=inline row", "--met=true"}, true)
+	sa, forward := parseStampArgs([]string{"--criterion=5", "--criterion-text=inline row", "--met=true"}, "string")
 	if sa.criterion == nil || *sa.criterion != 5 {
 		t.Fatalf("criterion = %v, want 5", sa.criterion)
 	}
@@ -188,7 +197,7 @@ const minimalStampManifest = `{
         {"name": "evidence", "type": "string", "summary": "ev"},
         {"name": "miss", "type": "bool", "summary": "x"},
         {"name": "note", "type": "string", "summary": "n"},
-        {"name": "merge-gated", "type": "bool", "summary": "lead only"}
+        {"name": "merge-gated", "type": "string", "summary": "lead only, carries the reason"}
       ],
       "writes": true, "batch": false, "paginated": false, "dry_run": false,
       "default_output": "minimal"
@@ -203,8 +212,19 @@ const minimalStampManifest = `{
 var legacyStampManifest = strings.Replace(
 	minimalStampManifest,
 	`,
-        {"name": "merge-gated", "type": "bool", "summary": "lead only"}`,
+        {"name": "merge-gated", "type": "string", "summary": "lead only, carries the reason"}`,
 	"",
+	1,
+)
+
+// reasonlessStampManifest declares --merge-gated as the OLD bare BOOL — a server
+// between the two changes. The CLI must still refuse a bare override (the
+// refusal is client-side) and must forward only the flag, never the reason
+// token, which such a server would bind as a positional and reject.
+var reasonlessStampManifest = strings.Replace(
+	minimalStampManifest,
+	`{"name": "merge-gated", "type": "string", "summary": "lead only, carries the reason"}`,
+	`{"name": "merge-gated", "type": "bool", "summary": "lead only"}`,
 	1,
 )
 
@@ -442,13 +462,13 @@ func TestTaskStampExecute_LegacyServerOverrideReleasesAndStrips(t *testing.T) {
 		"task", "stamp", "bp-task-x", "w", "1",
 		"--criterion", "6", "--met", "--evidence", "e",
 		"--criterion-text", "final row [MERGE-GATED — the lead closes this]",
-		"--merge-gated",
+		"--merge-gated", "PR #4242 merged to main as deadbee",
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want exitOK; out:\n%s", code, out)
 	}
 	if n := atomic.LoadInt32(hits); n != 1 {
-		t.Fatalf("stamp POST fired %d times, want 1 (override sends; --merge-gated stripped)", n)
+		t.Fatalf("stamp POST fired %d times, want 1 (override sends; --merge-gated + reason stripped)", n)
 	}
 	if !strings.Contains(out, "criterion #7") {
 		t.Errorf("echo should still translate index 6 → criterion #7; got:\n%s", out)
@@ -484,7 +504,7 @@ func TestTaskStampExecute_ModernServerForwardsOverride(t *testing.T) {
 		"task", "stamp", "bp-task-x", "w", "1",
 		"--criterion", "6", "--met", "--evidence", "e",
 		"--criterion-text", "final row [MERGE-GATED — the lead closes this]",
-		"--merge-gated",
+		"--merge-gated", "PR #4242 merged to main as deadbee",
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want exitOK", code)
@@ -492,8 +512,13 @@ func TestTaskStampExecute_ModernServerForwardsOverride(t *testing.T) {
 	if n := atomic.LoadInt32(hits); n != 1 {
 		t.Fatalf("stamp POST fired %d times, want 1", n)
 	}
-	if !strings.Contains(gotQuery, "merge-gated=true") {
-		t.Errorf("--merge-gated did not reach the server; query was %q", gotQuery)
+	// The REASON, not a boolean: the server persists it beside the stamp, so a
+	// mutation that forwarded a bare `merge-gated=true` reds here.
+	if !strings.Contains(gotQuery, "merge-gated=PR+%234242+merged+to+main+as+deadbee") {
+		t.Errorf("--merge-gated reason did not reach the server; query was %q", gotQuery)
+	}
+	if strings.Contains(gotQuery, "merge-gated=true") {
+		t.Errorf("the override still rode as a bare boolean; query was %q", gotQuery)
 	}
 }
 
@@ -934,7 +959,7 @@ func TestParseStampArgsReadsWithdraw(t *testing.T) {
 	sa, forward := parseStampArgs([]string{
 		"t1", "w", "3", "--criterion", "0",
 		"--criterion-text", "gate passes", "--withdraw", "--note", "review refuted it",
-	}, true)
+	}, "string")
 	if !sa.withdraw {
 		t.Fatalf("--withdraw not parsed: %+v", sa)
 	}
