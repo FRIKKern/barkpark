@@ -35,15 +35,23 @@ defmodule BarkparkWeb.GraphCorpusHeapBoundTest do
 
   use BarkparkWeb.ConnCase, async: false
 
+  # The fixture publishes @types x @docs_per_type documents and the derivation
+  # then walks all of them; on a loaded shared test database that is well past
+  # ExUnit's 60s default AND past the sandbox's ownership ceiling — the second
+  # one surfaces as a DBConnection.OwnershipError mid-derivation, not as a
+  # timeout. Both are fixture cost, not a slow assertion.
+  @moduletag timeout: 300_000
+  @moduletag ownership_timeout: 300_000
+
   alias Barkpark.{Auth, Content, TenancyFixtures}
 
   @admin_token "barkpark-test-graph-heap-admin"
   @dataset "production"
 
-  # 8 types x 40 documents. The per-type cap is 1000 and the node budget 2000,
+  # 12 types x 40 documents. The per-type cap is 1000 and the node budget 2000,
   # so 320 nodes trips neither — this test measures the derivation, not the
   # truncation passes.
-  @types 8
+  @types 12
   @docs_per_type 40
 
   # Each document's content is a map of many SMALL values. Small binaries live
@@ -162,17 +170,22 @@ defmodule BarkparkWeb.GraphCorpusHeapBoundTest do
         [limit: 1000, perspective: :published] ++ scope
       )
 
-    assert length(one_type_docs) == @docs_per_type,
-           "fixture did not publish #{@docs_per_type} documents — the ceiling would be nonsense"
-
+    # Collect while `one_type_docs` is still LIVE — the assert BELOW is what
+    # keeps it live across the collect, so this is the RETAINED cost of one
+    # type's documents and not decode garbage a GC would drop. Reorder those two
+    # lines and the compiler drops the binding at the collect and the cost reads
+    # ZERO; the > 100_000 guard is what caught exactly that.
+    :erlang.garbage_collect()
     {:memory, with_one_type} = :erlang.process_info(self(), :memory)
     one_type_cost = with_one_type - before_mem
+
+    assert length(one_type_docs) == @docs_per_type,
+           "fixture did not publish #{@docs_per_type} documents — the ceiling would be nonsense"
 
     assert one_type_cost > 100_000,
            "one type's documents cost only #{one_type_cost} bytes of heap — the fixture is too " <>
              "small for this test to discriminate anything"
 
-    _ = one_type_docs
     :erlang.garbage_collect()
     {:memory, baseline} = :erlang.process_info(self(), :memory)
 
@@ -190,11 +203,18 @@ defmodule BarkparkWeb.GraphCorpusHeapBoundTest do
 
     growth = peak - baseline
 
-    # The ceiling: four times one type's documents. Holding every type at once
-    # costs at least @types x one_type_cost (8x); holding one at a time costs
-    # one_type_cost plus the projected nodes. 4x sits between them with room on
-    # both sides for scheduler and encoder churn.
-    ceiling = one_type_cost * 4
+    IO.puts(
+      "graph-heap-bound: one_type_cost=#{one_type_cost} baseline=#{baseline} peak=#{peak} " <>
+        "growth=#{growth} nodes=#{length(nodes)} ratio=#{Float.round(growth / one_type_cost, 2)}"
+    )
+
+    # The ceiling: FIVE times one type's retained documents. CALIBRATED, not
+    # picked — on this fixture, with `one_type_cost` reading an identical
+    # 969,280 B on both sides, origin/main grows 11,188,584 B (11.54x) and this
+    # branch grows 2,547,816 B (2.63x). 5x sits between them with ~2x margin in
+    # each direction for scheduler and allocator churn. If you widen the
+    # fixture, RE-CALIBRATE: a ceiling that both sides satisfy is not a test.
+    ceiling = one_type_cost * 5
 
     assert growth < ceiling,
            """
