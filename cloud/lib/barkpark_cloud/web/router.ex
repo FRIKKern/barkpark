@@ -243,6 +243,17 @@ defmodule BarkparkCloud.Web.Router do
   routes with the shared WORKER token (`require_worker` — Bearer WORKER_TOKEN, never a
   user/agent token) — all via `BarkparkCloud.Web.Auth`.
 
+  The `worker` tier carries a SECOND FACTOR on the `/v1/internal/*` family: the
+  `:fence_internal_surface` plug below refuses, with a 404, any caller whose
+  resolved client IP is outside `:internal_allowed_cidrs`
+  (`INTERNAL_ALLOWED_CIDRS`). The fence is a PATH PREDICATE — `path_info`
+  starting `["v1", "internal" | _]` — so every current and future member of the
+  family inherits it without an enumeration to keep in step. It fails CLOSED: a
+  prod release that never declared the ranges refuses to boot, and the only way
+  to run with no network factor is the named opt-out `INTERNAL_ALLOWED_CIDRS=any`.
+  See `BarkparkCloud.Web.InternalPerimeter` and
+  `router_internal_perimeter_test.exs`.
+
   This table is a hand-maintained mirror of the `Plug.Router` match clauses below.
   It does not drift silently: `router_moduledoc_table_test.exs` parses both the match
   macros and this table from the source and fails CI on any mismatch — add the row
@@ -309,6 +320,7 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.Registry.InstanceApiCatalog
   alias BarkparkCloud.Sites
   alias BarkparkCloud.Web.Auth
+  alias BarkparkCloud.Web.InternalPerimeter
 
   # Recover the REAL client IP from X-Forwarded-For BEFORE anything reads
   # conn.remote_ip (peer_ip/1 → the device-auth `start:<ip>` rate bucket and the
@@ -320,6 +332,23 @@ defmodule BarkparkCloud.Web.Router do
   # forge its bucket. Placed first: it must run before RewriteOn's builders and
   # before any matcher reads remote_ip.
   plug(:trust_forwarded_ip)
+
+  # dr-w24-bl-internal-write-route-is-publicly-reachable — the NETWORK factor in
+  # front of the `/v1/internal/*` fleet-ops surface. MEASURED on prod: an
+  # unauthenticated POST from a laptop to
+  # `https://barkpark.cloud/v1/internal/platform-deliveries` answered 401, not
+  # 404 — the whole family is reachable from the open internet and a single
+  # shared bearer (WORKER_TOKEN) is the only thing between it and the delivery
+  # record. One leaked secret is then a total compromise of the fleet-ops
+  # surface, with no second factor anywhere.
+  #
+  # Runs IMMEDIATELY after :trust_forwarded_ip (which is what makes
+  # conn.remote_ip the real client behind Caddy) and BEFORE :match, Plug.Static
+  # and Plug.Parsers — so a refused caller never reaches a handler, never has a
+  # body parsed, and gets NO oracle on whether its bearer was the worker token:
+  # the refusal is decided before any token is compared. The membership rule and
+  # the boot-time contract live in `BarkparkCloud.Web.InternalPerimeter`.
+  plug(:fence_internal_surface)
 
   # Normalize scheme/host/port from the Caddy TLS front's forwarding headers
   # BEFORE any plug (or builder) reads conn.scheme/host/port. The app never
@@ -588,6 +617,44 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp trusted_peer?(_), do: false
+
+  # dr-w24-bl-internal-write-route-is-publicly-reachable — the in-app half of the
+  # `/v1/internal/*` perimeter. The other half is the edge (a Caddy matcher that
+  # answers the family 404 for any source outside the operator's ranges); this
+  # one exists because the app must not depend on a front door it does not own,
+  # and because a direct hit on :4100 (a container on the bridge, a mis-scoped
+  # port publish) bypasses Caddy entirely.
+  #
+  # A PREDICATE, not a list: the fence is `path_info` starting ["v1","internal"],
+  # so all 31 routes in the family today — and every one added tomorrow —
+  # inherit it with nothing to keep in step. An enumeration would be a snapshot
+  # and would silently omit the next route.
+  #
+  # FAIL CLOSED, including when unconfigured: `allowed?/2`'s last clause is
+  # `false`, so a deleted or unexpected `:internal_allowed_cidrs` refuses rather
+  # than opens. A prod release that never declared `INTERNAL_ALLOWED_CIDRS`
+  # refuses to BOOT (`InternalPerimeter.load!/2`), which aborts the deploy and
+  # leaves the live slot serving; the only way to have no network factor is the
+  # named opt-out `INTERNAL_ALLOWED_CIDRS=any`. Dev and test ship `:any`
+  # (config.exs) so local behaviour is unchanged.
+  #
+  # 404, not 401/403: the point of the row is that the family ANNOUNCES ITSELF to
+  # the internet. A 403 would still say "this route exists and you have the wrong
+  # credential". 404 is the same answer the router gives any unknown path, so an
+  # off-net scanner cannot tell the surface apart from empty space. See
+  # `router_internal_perimeter_test.exs`.
+  defp fence_internal_surface(%Plug.Conn{path_info: ["v1", "internal" | _]} = conn, _opts) do
+    if InternalPerimeter.allowed?(
+         Application.get_env(:barkpark_cloud, :internal_allowed_cidrs),
+         conn.remote_ip
+       ) do
+      conn
+    else
+      conn |> json(404, %{error: "not_found"}) |> halt()
+    end
+  end
+
+  defp fence_internal_surface(conn, _opts), do: conn
 
   # Front-door canonicalization: 308 www.<dashboard-host> -> the apex dashboard
   # origin, carrying the path AND query string through (the device-link `?code=`

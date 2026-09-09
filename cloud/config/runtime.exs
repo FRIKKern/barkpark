@@ -432,6 +432,34 @@ if peers = System.get_env("TRUSTED_PROXY_PEERS") do
          end)
 end
 
+# dr-w24-bl-internal-write-route-is-publicly-reachable — INTERNAL_ALLOWED_CIDRS:
+# a comma-separated list of source ranges permitted to reach `/v1/internal/*`
+# (e.g. "203.0.113.7/32,10.20.0.0/16"; a bare address is its own /32, or /128 for
+# v6), or the literal `any` for the named opt-out.
+#
+# UNSET IS FATAL IN PROD. That is the row: the family is on the open internet
+# with one shared bearer in front of it, and a perimeter that defaults open when
+# nobody configured it is not a perimeter. `cp-deploy.sh` builds the new slot
+# aside and health-gates it before flipping Caddy, so this refusal aborts a
+# deploy (exit 14) and leaves the LIVE slot serving — it costs a deploy, never an
+# outage. Outside prod the value is `:any`, matching config.exs.
+#
+# Unlike TRUSTED_PROXY_PEERS above, CIDR ranges ARE the point here: this list
+# NARROWS who may reach a surface, it does not widen who may be believed, so a
+# too-wide entry costs reach and can never grant forgery. A malformed entry
+# raises at boot rather than degrading the fence into a silent no-op.
+#
+# Deliberately OUTSIDE any env block: where the callers dial from is a property
+# of the DEPLOYMENT, not of the environment name. The rule itself lives in
+# `BarkparkCloud.Web.InternalPerimeter.load!/2` so it is unit-tested rather than
+# merely written down here.
+config :barkpark_cloud,
+       :internal_allowed_cidrs,
+       BarkparkCloud.Web.InternalPerimeter.load!(
+         System.get_env("INTERNAL_ALLOWED_CIDRS"),
+         config_env()
+       )
+
 # gh-9531 residual (task-eeabfd9bf3ed8371) — the two DEPLOYMENT values this
 # control plane used to freeze at BUILD time in module attributes:
 #
