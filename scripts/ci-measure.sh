@@ -2111,7 +2111,6 @@ probe_dead_runs = []
 for j in sel:
     concl[j.get("conclusion") or "?"] += 1
     st, ct = parse(j.get("started_at")), parse(j.get("completed_at"))
-    if st and ct: wall.append((ct - st).total_seconds())
     pairs = [(parse(s.get("started_at")), parse(s.get("completed_at"))) for s in (j.get("steps") or [])]
     pairs = [(a, b) for a, b in pairs if a and b]
     if pairs:
@@ -2119,6 +2118,15 @@ for j in sel:
         compute.append(c)
         d = (st or ct).date().isoformat()
         per_day[d] += c
+        # WALL IS TAKEN ONLY FROM JOBS THAT EXECUTED, and this is not a taste
+        # call. GitHub gives a `skipped` job a completed_at one second BEFORE its
+        # started_at, so it reports a wall of -1s. Measured 2026-09-09 on this
+        # very row: 175 of 573 prefix-matching jobs in 2026-09-03..09-06 and 248
+        # of 697 in 2026-09-06..09-09 were `skipped`, and pooling their -1s with
+        # real jobs dragged the "median wall time" to 867s and 446s — a 48% drop
+        # that was mostly a change in the SKIPPED SHARE, not in how long the job
+        # takes. A median over a pool a third of which is -1 is not a latency.
+        if st and ct: wall.append((ct - st).total_seconds())
     else:
         zero_step += 1
     hit = [s for s in (j.get("steps") or []) if (s.get("name") or "") == probe]
@@ -2171,7 +2179,8 @@ print()
 print(f"  jobs seen {report['jobs_seen']}, matching the prefix {report['jobs_selected']}, "
       f"of which zero-step (executed nothing) {zero_step}")
 w, c = report["wall_seconds"], report["compute_seconds"]
-print(f"  WALL    n={w['n']}  median {w['median']}s  p90 {w['p90']}s  min {w['min']}s  max {w['max']}s")
+print(f"  WALL    n={w['n']}  median {w['median']}s  p90 {w['p90']}s  min {w['min']}s  max {w['max']}s"
+      "   (EXECUTED jobs only — a `skipped` job reports -1s and is not a latency)")
 print(f"  COMPUTE n={c['n']}  median {c['median']}s  p90 {c['p90']}s   (from STEPS; wall and compute are never summed)")
 print(f"  JOB-MINUTES for THIS job: {report['job_minutes_total']} total, "
       f"{report['job_minutes_per_day']} per day")
