@@ -432,6 +432,22 @@ defmodule Barkpark.Content.Writer do
          # rule; called from here exactly like the fence above.
          :ok <-
            Barkpark.Tasks.DatasetTwinFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
+         # THE CRITERIA-REQUIRED BIRTH FENCE, OPT-IN PER PARENT
+         # (dr-w33-bl-task-create-refuses-criteria-less-rows). A criteria-less
+         # row is UNFALSIFIABLE, and three censuses + three backfills in 24h
+         # lost to the fact that nothing REFUSED the write. Head-matches on
+         # `prev_doc == nil` like every birth guard above, and short-circuits
+         # before any read unless the create is BOTH parented and criteria-less
+         # — so it adds no query to any other write.
+         :ok <-
+           Barkpark.Tasks.CriteriaRequiredFence.check(
+             type,
+             attrs,
+             dataset,
+             doc_id,
+             prev_doc,
+             opts
+           ),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
@@ -950,6 +966,22 @@ defmodule Barkpark.Content.Writer do
          # rule; called from here exactly like the fence above.
          :ok <-
            Barkpark.Tasks.DatasetTwinFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
+         # THE CRITERIA-REQUIRED BIRTH FENCE, OPT-IN PER PARENT
+         # (dr-w33-bl-task-create-refuses-criteria-less-rows). A criteria-less
+         # row is UNFALSIFIABLE, and three censuses + three backfills in 24h
+         # lost to the fact that nothing REFUSED the write. Head-matches on
+         # `prev_doc == nil` like every birth guard above, and short-circuits
+         # before any read unless the create is BOTH parented and criteria-less
+         # — so it adds no query to any other write.
+         :ok <-
+           Barkpark.Tasks.CriteriaRequiredFence.check(
+             type,
+             attrs,
+             dataset,
+             doc_id,
+             prev_doc,
+             opts
+           ),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do

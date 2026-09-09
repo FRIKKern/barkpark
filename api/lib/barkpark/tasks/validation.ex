@@ -291,6 +291,14 @@ defmodule Barkpark.Tasks.Validation do
     # don't over-constrain either.
     |> check_optional_list(content, "labels")
     |> check_optional_list(content, "history")
+    # The criteria-required opt-in (`Barkpark.Tasks.CriteriaRequiredFence`): a
+    # PARENT row declares that its children must be born with acceptance
+    # criteria. Shape-checked so a typo'd `"true"` or `1` is refused LOUDLY
+    # rather than read as absent and silently disarming the fence — a governance
+    # switch that fails open on a typo is worse than no switch. The
+    # `content.dedup_bypass` precedent for the flag's shape and placement;
+    # unlike that one it is checked here, because its default is OFF.
+    |> check_optional_boolean(content, "require_criteria")
     |> check_optional_map(content, "estimate")
     |> check_outcome(content)
     # Land digest (task-obsession layer 3): what the task changed —
@@ -374,6 +382,14 @@ defmodule Barkpark.Tasks.Validation do
 
       other ->
         Map.put(errors, "priority", ["must be an integer 0..4 when set, got #{inspect(other)}"])
+    end
+  end
+
+  defp check_optional_boolean(errors, content, key) do
+    case fetch(content, key) do
+      nil -> errors
+      v when is_boolean(v) -> errors
+      other -> Map.put(errors, key, ["must be a boolean when set, got #{inspect(other)}"])
     end
   end
 
