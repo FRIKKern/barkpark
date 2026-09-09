@@ -1817,7 +1817,49 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert Enum.all?(criteria, &(&1["met"] == false)), "a refused stamp writes nothing"
     end
 
-    test "--merge-gated=true releases the gate on the wire and the stamp lands",
+    # THE OVERRIDE CARRIES ITS REASON on the wire too
+    # (pds-bl-merge-gated-override-carries-no-reason): `merge-gated=<why>`
+    # releases the gate AND lands the reason on the row, while the legacy bare
+    # `merge-gated=true` is a 400 — a CLI-only reason requirement would be
+    # bypassed by exactly this POST.
+    test "merge-gated=<reason> releases the gate on the wire, and the reason is persisted",
+         %{conn: conn, scope: scope} do
+      {doc_id, epoch} =
+        claim_with_criteria!(conn, scope, [
+          %{
+            "criterion" => "[MERGE-GATED — the lead closes this] PR merged to main",
+            "met" => false
+          }
+        ])
+
+      body = Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&criterion-text=%5BMERGE-GATED+%E2%80%94+the+lead+closes+this%5D+PR+merged+to+main&met=true&evidence=PR+%23123+merged&merge-gated=PR+%23123+merged+as+abc1234%3B+lead+closing",
+          body
+        )
+
+      assert resp.status == 200
+      show = conn |> authed() |> get("/v1/tasks/#{doc_id}")
+      doc = Jason.decode!(show.resp_body)["doc"]
+      [row] = doc["content"]["acceptance_criteria"]
+      assert row["met"] == true
+
+      # THE READ-BACK FROM THE PUBLISHED PERSPECTIVE (criterion 1): the reason
+      # is on the ROW, not in a log line. Delete the persistence and this reds.
+      [record] = doc["content"]["merge_gate_autostamp"]["stamp_overrides"]
+      assert record["reason"] == "PR #123 merged as abc1234; lead closing"
+      assert record["verified"] == false
+      assert record["asserted_worker"] == "worker-1"
+    end
+
+    # THE LEGACY BARE BOOLEAN IS REFUSED ON THE WIRE. This is the arm a CLI-only
+    # guard cannot cover: an old bp, a curl, or an agent posting straight at the
+    # endpoint. It REFUSES MORE than before and permits nothing new.
+    test "a bare merge-gated=true is 400 and writes nothing",
          %{conn: conn, scope: scope} do
       {doc_id, epoch} =
         claim_with_criteria!(conn, scope, [
@@ -1837,10 +1879,14 @@ defmodule BarkparkWeb.TasksControllerTest do
           body
         )
 
-      assert resp.status == 200
+      assert resp.status == 400
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["message"] =~ "REASON"
+      assert payload["message"] =~ "stamp_overrides"
+
       show = conn |> authed() |> get("/v1/tasks/#{doc_id}")
       [row] = Jason.decode!(show.resp_body)["doc"]["content"]["acceptance_criteria"]
-      assert row["met"] == true
+      assert row["met"] == false, "a refused override writes nothing"
     end
 
     # cch-w49 c0 on the wire: a criterion that merely MENTIONS merge-gating,
