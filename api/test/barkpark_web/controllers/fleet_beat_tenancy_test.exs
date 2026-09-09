@@ -148,8 +148,10 @@ defmodule BarkparkWeb.FleetBeatTenancyTest do
                  "the refusal must NAME why: got #{inspect(body["reason"])}"
 
         other ->
-          flunk("A's beat answered #{other}, neither its own row nor an honest refusal: " <>
-                  a_conn.resp_body)
+          flunk(
+            "A's beat answered #{other}, neither its own row nor an honest refusal: " <>
+              a_conn.resp_body
+          )
       end
 
       # 5. NON-VACUITY: B can still beat its OWN row. Without this, every
@@ -169,7 +171,8 @@ defmodule BarkparkWeb.FleetBeatTenancyTest do
     end
 
     test "each workspace's roster reports its OWN listener's declared state", ctx do
-      _ = beat!(ctx.token_b, %{"worker" => ctx.worker, "agent" => "b-agent", "capacity" => "b-cap"})
+      _ =
+        beat!(ctx.token_b, %{"worker" => ctx.worker, "agent" => "b-agent", "capacity" => "b-cap"})
 
       _ =
         post_beat(ctx.token_a, %{
@@ -266,7 +269,9 @@ defmodule BarkparkWeb.FleetBeatTenancyTest do
         row
 
       other ->
-        flunk("expected exactly ONE listener row for #{worker} in #{workspace.id}, got #{length(other)}")
+        flunk(
+          "expected exactly ONE listener row for #{worker} in #{workspace.id}, got #{length(other)}"
+        )
     end
   end
 
