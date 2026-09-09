@@ -298,6 +298,119 @@ async function stableGeneratedIdScenario({
   }
 }
 
+async function columnTrackScenario({
+  action = "add-column",
+  saved = true,
+  moveFocus = false,
+  corruptSurvivor = false,
+  removeSurvivingAdd = false,
+}) {
+  const dom = new JSDOM(`<main data-paper-doc-key="production:paper:focus" data-paper-rev="1">
+    <button id="toggle" data-editing="true">View</button>
+    <div id="paper-editor" class="bp-paper-contextual-editor">
+      <form id="column-tracks" phx-submit="paper-edit-block">
+        <input type="hidden" name="block_id" value="columns">
+        <input type="hidden" name="column-count" value="3">
+        <input type="hidden" name="column-new-child-id" value="child:unused">
+        <input type="hidden" name="column-0-child-count" value="1">
+        <input type="hidden" name="column-0-child-0-id" value="left:one">
+        <button type="submit" name="column-action" value="add:0">Add child to column 1</button>
+        <input type="hidden" name="column-1-child-count" value="1">
+        <input type="hidden" name="column-1-child-0-id" value="middle:one">
+        <button type="submit" name="column-action" value="add:1">Add child to column 2</button>
+        <input type="hidden" name="column-2-child-count" value="0">
+        <button type="submit" name="column-action" value="add:2">Add child to column 3</button>
+        <button id="track-submitter" type="submit" name="column-action" value="${action}">Track action</button>
+        <button type="submit" name="column-action" value="add-column">Add column</button>
+      </form>
+    </div>
+    <button id="track-elsewhere">Another control</button>
+  </main>`, { url: "http://localhost/" });
+  const { window } = dom;
+  vm.runInContext(source, vm.createContext({
+    window, document: window.document, CustomEvent: window.CustomEvent,
+    FormData: window.FormData, setTimeout, clearTimeout,
+  }));
+  let send;
+  let resolve;
+  const hook = {
+    ...window.BarkparkPaperEditorHooks.BarkparkPaperEditToggle,
+    el: window.document.getElementById("toggle"),
+    pushEvent: (event, payload) => {
+      send = { event, payload };
+      return new Promise(done => { resolve = done; });
+    },
+  };
+  hook.mounted();
+  try {
+    const form = window.document.getElementById("column-tracks");
+    const submitter = window.document.getElementById("track-submitter");
+    const generatedId = form.elements.namedItem("column-new-child-id").value;
+    submitter.focus();
+    form.dispatchEvent(new window.SubmitEvent("submit", {
+      bubbles: true, cancelable: true, submitter,
+    }));
+    await tick();
+    assert.equal(send.event, "paper-edit-block");
+    assert.equal(send.payload["column-action"], action);
+    assert.equal(window.document.activeElement, submitter,
+      "track focus waits for an exact acknowledgement");
+
+    if (moveFocus) window.document.getElementById("track-elsewhere").focus();
+    if (saved && action === "add-column") {
+      const count = window.document.createElement("input");
+      count.type = "hidden";
+      count.name = "column-3-child-count";
+      count.value = "0";
+      const addChild = window.document.createElement("button");
+      addChild.type = "submit";
+      addChild.name = "column-action";
+      addChild.value = "add:3";
+      addChild.textContent = "Add child to column 4";
+      form.append(count, addChild);
+      form.elements.namedItem("column-count").value = "4";
+    }
+    if (saved && action === "remove-column:2") {
+      form.elements.namedItem("column-2-child-count").remove();
+      [...form.querySelectorAll('[name="column-action"]')]
+        .filter(control => control.value === "add:2").forEach(control => control.remove());
+      if (removeSurvivingAdd) {
+        [...form.querySelectorAll('[name="column-action"]')]
+          .filter(control => control.value === "add:1").forEach(control => control.remove());
+      }
+      submitter.remove();
+      form.elements.namedItem("column-count").value = "2";
+    }
+    if (corruptSurvivor) {
+      form.elements.namedItem("column-0-child-0-id").value = "wrong:left";
+    }
+    resolve({
+      saved,
+      request_id: send.payload.request_id,
+      ...(saved ? { rev: 2 } : {}),
+    });
+    await tick();
+
+    assert.equal(form.elements.namedItem("column-new-child-id").value, generatedId,
+      "whole-track actions never consume or rotate the child insertion token");
+    if (moveFocus) {
+      assert.equal(window.document.activeElement.id, "track-elsewhere",
+        "track acknowledgement never steals focus after the user moves");
+    } else if (!saved || corruptSurvivor) {
+      assert.notEqual(window.document.activeElement?.value,
+        action === "add-column" ? "add:3" : "add:1",
+        "failed or structurally inconsistent acknowledgement cannot claim focus success");
+    } else {
+      assert.equal(window.document.activeElement?.value,
+        action === "add-column" ? "add:3" : removeSurvivingAdd ? "add-column" : "add:1",
+        "track acknowledgement focuses the new or surviving last track");
+    }
+  } finally {
+    hook.destroyed();
+    window.close();
+  }
+}
+
 await scenario({});
 await scenario({ action: "add" });
 await scenario({ action: "remove:1" });
@@ -321,4 +434,10 @@ for (const prefix of ["panel", "step"]) {
   await stableGeneratedIdScenario({ prefix, action: "add-body:row:one" });
   await stableGeneratedIdScenario({ prefix, saved: false });
 }
+await columnTrackScenario({});
+await columnTrackScenario({ action: "remove-column:2" });
+await columnTrackScenario({ action: "remove-column:2", removeSurvivingAdd: true });
+await columnTrackScenario({ saved: false });
+await columnTrackScenario({ moveFocus: true });
+await columnTrackScenario({ corruptSurvivor: true });
 console.log("PASS collection focus: reorder, add, remove, failure, and no focus stealing");
