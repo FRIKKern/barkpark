@@ -30,6 +30,7 @@ defmodule BarkparkCloud.Registry do
   alias BarkparkCloud.GitHub.CommitDistance
   alias BarkparkCloud.FailureCopy
   alias BarkparkCloud.Notifications
+  alias BarkparkCloud.Notifications.DeploymentFailedPolicy
   alias BarkparkCloud.Workers.DeploymentAlertWorker
 
   alias BarkparkCloud.Registry.{
@@ -9853,12 +9854,26 @@ defmodule BarkparkCloud.Registry do
   # the payload was exactly `%{detail: failure_reason}` plus the site name added
   # by `dispatch_site_event/3` — a cause with no subject, so three alerts in an
   # hour could not be told apart from three attempts at one push.
+  #
+  # dr-w11-bl-deployment-failed-alarm-fatigue: AND THE ALERT SAYS ONLY THE
+  # FAILURES THAT COST SOMETHING. The edge guard above already collapses one
+  # broken deploy's stage reports to one email; it does not ask whether that one
+  # email is about anything. `DeploymentFailedPolicy.destroyed_content?/1` is
+  # that question and it is asked HERE, at the one funnel both synchronous
+  # producers reach — `dispatch_deployment_terminal/2`'s edge and
+  # `create_failed_deployment/3`'s born-failed row — so neither can be narrowed
+  # without the other. The struct is what carries `environment`, which is why the
+  # gate sits on the /1 arity and not on /3.
   defp dispatch_deployment_failed(%Deployment{} = deployment) do
-    dispatch_deployment_failed(
-      deployment.site_id,
-      deployment.failure_reason,
-      deployment_identity(deployment)
-    )
+    if DeploymentFailedPolicy.destroyed_content?(deployment) do
+      dispatch_deployment_failed(
+        deployment.site_id,
+        deployment.failure_reason,
+        deployment_identity(deployment)
+      )
+    else
+      :ok
+    end
   end
 
   # Site-keyed, because a Deployment only `belongs_to :site` and the alert's team
@@ -9938,9 +9953,34 @@ defmodule BarkparkCloud.Registry do
   #
   # `Withhold` keeps its `:reap_alert_cap` reason and label: rows written under
   # the old policy are still on live delivery logs and must keep rendering.
+  #
+  # dr-w11-bl-deployment-failed-alarm-fatigue: THE THIRD PRODUCER, NARROWED BY
+  # THE SAME PREDICATE. The reaper's rows never pass through
+  # `dispatch_deployment_failed/1` — the four bulk passes are bare
+  # `Repo.update_all` writes — so the gate has to be repeated here or the reaped
+  # half of the covering set keeps sending. The filter is on the ENQUEUE and not
+  # inside `DeploymentAlertWorker`, so a suppressed alert costs no Oban row at
+  # all; the worker's own `dispatch_site_event(_, :deployment_failed, _)` is fed
+  # by nothing but this list.
+  #
+  # The reaper holds only the `{id, site_id}` its `select:` named, so the policy
+  # gets no `:environment` and asks the site question unqualified. That is not a
+  # gap: `DeployLedger.content_on_web?/1` is production-scoped either way.
   defp dispatch_reaped_deployment_alerts([]), do: :ok
 
   defp dispatch_reaped_deployment_alerts(alerts) do
+    alerts
+    |> Enum.filter(fn {site_id, _reason, _identity} ->
+      DeploymentFailedPolicy.destroyed_content?(%{site_id: site_id})
+    end)
+    |> enqueue_reaped_deployment_alerts()
+  end
+
+  # The narrowing can empty a non-empty sweep, and an empty sweep must not reach
+  # `Oban.insert_all/1` — the same reason the head clause above exists.
+  defp enqueue_reaped_deployment_alerts([]), do: :ok
+
+  defp enqueue_reaped_deployment_alerts(alerts) do
     alerts
     |> Enum.map(fn {site_id, reason, identity} ->
       DeploymentAlertWorker.new(%{

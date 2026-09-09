@@ -2287,6 +2287,54 @@ defmodule BarkparkCloud.DeployLedger do
     }
   end
 
+  @doc """
+  Whether `site_id` has content ANSWERING ON THE WEB — at least one live mark.
+
+  THIS IS `delivery/3`'s OWN `live_marks` PREDICATE, ASKED AS AN EXISTENCE
+  QUESTION. `site_delivery/3` (below, `deploy_ledger.ex:2289`) builds a site's
+  ordered list of "content answered on the web at" instants as
+
+      rows
+      |> Enum.filter(&(&1.status == "live" and &1.became_live_at != nil))
+
+  over a source query already narrowed to `environment == "production"`. Those
+  are exactly the three clauses below. Writing them a second time somewhere else
+  is how the fleet ends up with two definitions of "this site is on the web" and
+  the one a human is shown becomes a coin toss — the same argument
+  `SitePublishWaitingAlert` and `DeployRateAlert` both make for reading their
+  cohort out of this module instead of hand-rolling a query.
+
+  ONE DELIBERATE DIFFERENCE FROM `delivery/3`: NO WINDOW. `delivery/3` is a
+  measurement over a pinned door, so its `live_marks` are the marks INSIDE that
+  door. This is not a measurement, it is a fact about the site right now — a
+  site that went live eight months ago and has not deployed since is still
+  serving its content to every reader, and a 24h door would call it dark. The
+  door belongs to the percentile, not to the question "is anything up".
+
+  THE SECOND DELIBERATE DIFFERENCE: UNMETERED ROWS COUNT HERE. `delivery/3`
+  requires `became_live_at` because it needs an INSTANT to subtract; a `live`
+  row without one is counted as `unmetered` and is never a mark (jarl-website
+  alone has 55 such rows). This function needs no instant — it asks whether
+  anything is up, and a `live` production row says content answered on the web
+  whether or not the ledger can name the second it did. Requiring the stamp here
+  would read 55 rows' worth of serving site as DARK, and its only caller
+  (`Notifications.DeploymentFailedPolicy`) turns a dark verdict into a customer
+  email. The doubt falls toward "up", which is the direction that does not
+  manufacture the alarm this predicate exists to suppress.
+  """
+  @spec content_on_web?(Ecto.UUID.t()) :: boolean()
+  def content_on_web?(site_id) when is_binary(site_id) do
+    Repo.exists?(
+      from(d in Deployment,
+        where: d.site_id == ^site_id,
+        where: d.environment == "production",
+        where: d.status == "live"
+      )
+    )
+  end
+
+  def content_on_web?(_site_id), do: false
+
   # One site's rows folded into observations. `live_marks` is that site's ordered
   # list of "content answered on the web at" instants; a row that did not itself
   # reach live is DELIVERED by the first mark at or after it (that is when the
