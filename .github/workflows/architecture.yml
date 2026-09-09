@@ -83,7 +83,24 @@ permissions:
   contents: read
 
 concurrency:
-  group: architecture-${{ github.ref }}
+  # One group per PUSH SHA on main, per REF everywhere else — the shape
+  # elixir.yml:79 carries and the one scripts/main-run-concurrency-check.sh
+  # names in its own FAIL text. GitHub keeps exactly ONE not-yet-started run per
+  # group, so the `architecture-${{ github.ref }}` group this line replaced made
+  # every merge a rival for one slot: measured 2026-09-02 on elixir.yml, 37 of
+  # 40 main runs cancelled before a runner picked them up. That shape was
+  # harmless while this file was pull_request-only; the push-to-main arm added
+  # above on 2026-09-09 (#17101) is what turned it into a defect, and it reddened
+  # 'a queued deploy or main gate run cannot be evicted' on main c19d7c7ab.
+  #
+  # NOT the main-collapse marker, which this workflow would formally qualify for
+  # (it publishes no context in .github/required-checks.json and matches no
+  # DENY_PATTERNS entry). Collapsing means an intermediate sha gets NO verdict
+  # from this workflow, and since 2026-09-05 (task-6891e8f620c1bdea) the Boundary
+  # gate is a real red rather than continue-on-error: its main verdict is what a
+  # bisect for "which merge added the sideways edge" reads. A per-sha group is
+  # what keeps that verdict per-merge. PR refs keep superseding.
+  group: architecture-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # NEVER a bare `true` now that this workflow has a push-to-main arm above.
   # scripts/never-cancel-main-check.sh (honest-gates D12) reds on exactly that
   # pair — `push:` with `main` among its branches AND a literal `true` — because
