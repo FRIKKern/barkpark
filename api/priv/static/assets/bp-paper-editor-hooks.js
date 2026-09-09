@@ -895,6 +895,7 @@
       const mutationById = new Map();
       const ownRevisions = new Map();
       const quarantinedEchoes = [];
+      const detachedReferenceDrafts = [];
       const contextualHistory = { undo: [], redo: [] };
       let mutationActive = false;
       let mutationPaused = false;
@@ -1004,7 +1005,9 @@
           record.dirty && source.isConnected &&
           source.matches?.(".bp-paper-edit-form[phx-change]") &&
           source.checkValidity?.() === false);
-        if (conflict) return setSaveStatus("Save paused — review required.");
+        if (conflict || detachedReferenceDrafts.length) {
+          return setSaveStatus("Save paused — review required.");
+        }
         if (invalidFallback) {
           return setSaveStatus("Unsaved changes — fix invalid fields.");
         }
@@ -1105,6 +1108,11 @@
         refreshHistoryControls() {
           renderHistoryControls();
         },
+        refreshPresentation() {
+          renderHistoryControls();
+          coordinator._renderConflict?.();
+          renderSaveStatus();
+        },
         register(member) {
           members.add(member);
           member._bpPaperExitCoordinator = coordinator;
@@ -1193,6 +1201,7 @@
           return true;
         },
         hasUnsaved(includePendingHistoryAction = true) {
+          if (detachedReferenceDrafts.length) return true;
           for (const record of sources.values()) {
             if (record.dirty || record.active > 0) return true;
           }
@@ -1213,6 +1222,69 @@
           const editor = [...(root.querySelectorAll?.("bp-paper-canvas, bp-paper-editor") || [])]
             .find((candidate) => candidate.hasPendingChanges?.() === true);
           return editor?.closest?.(PAPER_FLUSH_TARGETS) || null;
+        },
+        captureReferenceDraftReplacement(fromRoot, rootId, rootDocumentKey) {
+          if (!fromRoot || !rootId || !rootDocumentKey ||
+              fromRoot.dataset.paperDocKey !== rootDocumentKey) return false;
+          const candidates = [];
+          for (const [source, record] of sources) {
+            if (record.documentKey !== rootDocumentKey ||
+                (!record.dirty && record.active === 0) ||
+                !(source === fromRoot || fromRoot.contains(source))) continue;
+            const values = bpPaperLinkReferenceCopyForm(source);
+            if (!values) continue;
+            const capturedValues = { ...values };
+            const capturedField = record.formSnapshot?.fields?.find(
+              ({ control }) => control.name === "paper-link-ref-value",
+            );
+            if (typeof capturedField?.value === "string") {
+              capturedValues["paper-link-ref-value"] = capturedField.value;
+            }
+            const snapshot = {
+              identity: {
+                documentKey: record.documentKey,
+                documentRevision: record.authoredRev ?? record.documentRevision,
+                formId: source.id || null,
+                blockId: capturedValues.block_id,
+              },
+              structure: null,
+              values: PAPER_LINK_REFERENCE_COPY_KEYS.map((name) => ({
+                name,
+                type: name === "paper-link-ref-value" ? "textarea" : "hidden",
+                value: capturedValues[name],
+              })),
+            };
+            candidates.push({
+              source,
+              documentKey: record.documentKey,
+              field: capturedValues["paper-link-ref-field"],
+              value: capturedValues["paper-link-ref-value"],
+              snapshot,
+            });
+          }
+          const hasRetainedDraft = detachedReferenceDrafts.some(
+            (draft) => draft.documentKey === rootDocumentKey,
+          );
+          if (!candidates.length && !hasRetainedDraft) return false;
+          Promise.resolve().then(() => {
+            const currentRoot = document.getElementById(rootId);
+            if (!currentRoot?.isConnected ||
+                !currentRoot.matches?.(".bp-paper-editor[data-paper-doc-key]") ||
+                currentRoot.dataset.paperDocKey !== rootDocumentKey) return;
+            const nextMain = currentRoot.closest("main");
+            if (!coordinator.rebindMain(nextMain, rootDocumentKey)) return;
+            for (const candidate of candidates) {
+              const record = sources.get(candidate.source);
+              if (!record || (!record.dirty && record.active === 0) ||
+                  candidate.source.isConnected ||
+                  detachedReferenceDrafts.some((draft) => draft.source === candidate.source)) {
+                continue;
+              }
+              detachedReferenceDrafts.push(candidate);
+            }
+            coordinator.refreshPresentation();
+          });
+          return true;
         },
         requestReloadWhenClean() {
           reloadWhenClean = true;
@@ -1237,7 +1309,10 @@
             const pending = [];
             const retainedStructural = mutationQueue[0];
             if (!mutationActive && mutationPaused && !conflict &&
-                retainedStructural?.source?.matches?.("form[phx-submit]")) {
+                retainedStructural?.source?.matches?.("form[phx-submit]") &&
+                !detachedReferenceDrafts.some(
+                  (draft) => draft.source === retainedStructural.source,
+                )) {
               pending.push(coordinator.retryMutation(retainedStructural));
             }
             main.querySelectorAll(PAPER_FLUSH_TARGETS).forEach((wrapper) => {
@@ -1542,6 +1617,14 @@
               record.mutationEntry ||
               !source.matches?.(".bp-paper-edit-form[phx-change]") ||
               record.documentKey !== entry.documentKey) continue;
+          if (!source.isConnected &&
+              detachedReferenceDrafts.some((draft) => draft.source === source)) {
+            // The old identity has no live form to restore or save. Its exact
+            // captured value remains recovery-owned until explicit discard.
+            record.fallbackDeferred = false;
+            record.fallbackUnsafe = false;
+            continue;
+          }
           if (source === entry.source && bpPaperPositionalCollectionActionEntry(entry)) {
             coordinator._pauseFallbackForReview(source, record, entry);
             unsafe ||= [source, record, entry];
@@ -1583,6 +1666,7 @@
         if (!unsafe) coordinator._resumeFallbackDrafts();
       };
       coordinator._hasUnsavedForDocument = (key) => {
+        if (detachedReferenceDrafts.some((draft) => draft.documentKey === key)) return true;
         for (const record of sources.values()) {
           if (record.documentKey === key && (record.dirty || record.active > 0)) return true;
         }
@@ -1617,14 +1701,24 @@
           !echo.documentKey || echo.documentKey === documentKey,
         );
         if (!candidates.length) return false;
-        const newest = candidates[candidates.length - 1];
-        const latest = candidates.filter((echo) => echo.rev === newest.rev);
         for (let i = quarantinedEchoes.length - 1; i >= 0; i--) {
           if (!quarantinedEchoes[i].documentKey ||
               quarantinedEchoes[i].documentKey === documentKey) {
             quarantinedEchoes.splice(i, 1);
           }
         }
+        const applicable = candidates.filter((echo) =>
+          typeof confirmedRevision === "number" && typeof echo.rev === "number"
+            ? echo.rev > confirmedRevision
+            : echo.rev !== confirmedRevision,
+        );
+        if (!applicable.length) return false;
+        const newest = applicable.reduce((current, candidate) =>
+          typeof current.rev === "number" && typeof candidate.rev === "number"
+            ? (candidate.rev > current.rev ? candidate : current)
+            : candidate,
+        );
+        const latest = applicable.filter((echo) => echo.rev === newest.rev);
         confirmedRevision = newest.rev;
         latest.forEach((echo) => echo.apply?.("external"));
         return true;
@@ -1699,6 +1793,187 @@
           composed: true,
         }));
       };
+      coordinator._detachedReferenceDraftIsLocalOnly = (draft) => {
+        const record = draft && sources.get(draft.source);
+        return Boolean(record && record.dirty && record.active === 0 &&
+          record.documentKey === draft.documentKey && draft.documentKey === documentKey &&
+          !draft.source.isConnected &&
+          record.pending == null && record.mutationEntry == null &&
+          !mutationQueue.some((entry) => entry.source === draft.source));
+      };
+      coordinator._blockingDetachedReferenceDraft = (key = conflict?.documentKey) =>
+        detachedReferenceDrafts.find((draft) =>
+          draft.documentKey === key &&
+          !coordinator._detachedReferenceDraftIsLocalOnly(draft),
+        ) || null;
+      coordinator._conflictDetachedReferenceDraft = () =>
+        detachedReferenceDrafts.find((draft) => draft.source === conflict?.source) ||
+        coordinator._blockingDetachedReferenceDraft();
+      coordinator._removeDetachedReferenceDraft = (source) => {
+        const index = detachedReferenceDrafts.findIndex((draft) => draft.source === source);
+        if (index < 0) return false;
+        detachedReferenceDrafts.splice(index, 1);
+        coordinator._renderDetachedReferenceDraft();
+        return true;
+      };
+      coordinator._downloadDetachedReferenceDraft = (draft) => {
+        if (!draft || !detachedReferenceDrafts.includes(draft)) return false;
+        const bundle = {
+          format: "barkpark-paper-field-recovery",
+          version: 1,
+          scope: "detached-reference-field",
+          notice: "Recovery bundle for one replaced related-Paper field; not a complete Paper document export.",
+          document: {
+            key: draft.documentKey,
+            ...(draft.snapshot.identity.documentRevision != null
+              ? { revision: draft.snapshot.identity.documentRevision }
+              : {}),
+          },
+          draft: draft.snapshot,
+        };
+        const blob = new window.Blob([`${JSON.stringify(bundle, null, 2)}\n`], {
+          type: "application/json",
+        });
+        const href = window.URL.createObjectURL(blob);
+        const download = document.createElement("a");
+        const safeKey = draft.documentKey.replace(/[^a-zA-Z0-9._-]+/g, "-")
+          .slice(0, 120) || "paper";
+        download.href = href;
+        download.download = `${safeKey}-reference-draft-recovery.json`;
+        download.click();
+        Promise.resolve().then(() => window.URL.revokeObjectURL(href));
+        return true;
+      };
+      coordinator._discardDetachedReferenceDraft = (draft, conflictOwned = false) => {
+        const draftIndex = detachedReferenceDrafts.indexOf(draft);
+        if (!draft || draftIndex < 0 ||
+            (!conflictOwned && draftIndex !== 0) ||
+            (conflictOwned && conflict?.source !== draft.source) ||
+            !coordinator._detachedReferenceDraftIsLocalOnly(draft)) return false;
+        const record = sources.get(draft.source);
+        clearTimeout(record.timer);
+        record.timer = null;
+        // Recheck after cancelling the never-fired debounce. Any request entry,
+        // active send or retained promise keeps this recovery export-only.
+        if (!coordinator._detachedReferenceDraftIsLocalOnly(draft)) return false;
+        sources.delete(draft.source);
+        nativeFocusBaselines.delete(draft.source);
+        detachedReferenceDrafts.splice(draftIndex, 1);
+        coordinator._renderDetachedReferenceDraft();
+        renderSaveStatus();
+        if (conflictOwned) return true;
+        if (!coordinator._maybeAdoptPendingIdentity()) {
+          coordinator._flushQuarantinedIfClean();
+        }
+        coordinator._resumeFallbackDrafts();
+        coordinator._pumpMutations();
+        // Do not request a reload here, but honor one already requested by an
+        // independent recovery boundary once this last local draft is gone.
+        coordinator._reloadIfClean();
+        return true;
+      };
+      coordinator._discardConflictDetachedReferenceDraft = (draft) => {
+        if (!draft || conflict?.source !== draft.source ||
+            !coordinator._detachedReferenceDraftIsLocalOnly(draft)) return false;
+        const retainedReply = conflict.reply;
+        const retainedDocumentKey = conflict.documentKey;
+        if (!coordinator._discardDetachedReferenceDraft(draft, true)) return false;
+        const nextDraft = detachedReferenceDrafts.find(
+          (candidate) => candidate.documentKey === retainedDocumentKey,
+        );
+        const nextEntry = nextDraft
+          ? mutationQueue.find((entry) =>
+            entry.documentKey === retainedDocumentKey && entry.source === nextDraft.source,
+          )
+          : mutationQueue.find((entry) => entry.documentKey === retainedDocumentKey);
+        const nextDirty = [...sources].find(([source, record]) =>
+          record.documentKey === retainedDocumentKey &&
+          (record.dirty || record.active > 0) &&
+          (!nextDraft || source === nextDraft.source),
+        ) || [...sources].find(([_source, record]) =>
+          record.documentKey === retainedDocumentKey &&
+          (record.dirty || record.active > 0),
+        );
+        const nextSource = nextDraft?.source || nextEntry?.source || nextDirty?.[0];
+        if (nextSource || nextEntry || mutationActive) {
+          coordinator._setConflict(
+            retainedReply,
+            nextSource || nextEntry?.source,
+            retainedDocumentKey,
+            nextEntry || null,
+          );
+          return true;
+        }
+        const hasSameDocumentEcho = quarantinedEchoes.some((echo) =>
+          !echo.documentKey || echo.documentKey === retainedDocumentKey,
+        );
+        if (!hasSameDocumentEcho) {
+          coordinator._renderConflict();
+          return true;
+        }
+        conflict = null;
+        mutationPaused = false;
+        coordinator._flushQuarantinedIfClean();
+        coordinator._renderConflict();
+        renderHistoryControls();
+        renderSaveStatus();
+        coordinator._resumeFallbackDrafts();
+        coordinator._pumpMutations();
+        // Source-scoped discard never creates a reload request. It may only
+        // honor an explicit reload already owned by another recovery boundary.
+        coordinator._reloadIfClean();
+        return true;
+      };
+      coordinator._renderDetachedReferenceDraft = () => {
+        let banner = main.querySelector("[data-bp-paper-reference-draft]");
+        const draft = detachedReferenceDrafts[0];
+        if (!draft || conflict) {
+          banner?.remove();
+          return;
+        }
+        if (!banner) {
+          banner = document.createElement("div");
+          banner.dataset.bpPaperConflict = "true";
+          banner.dataset.bpPaperReferenceDraft = "true";
+          banner.setAttribute("role", "alert");
+          banner.innerHTML = '<strong class="bp-conflict-title">Related Paper changed</strong><span class="bp-conflict-description"></span><div class="bp-conflict-actions"><button type="button" data-action="review" aria-expanded="false">Review retained draft</button><button type="button" data-action="keep" disabled aria-disabled="true">Keep mine</button><button type="button" data-reference-draft-download>Download old field draft</button><button type="button" data-reference-draft-discard>Discard old draft</button></div><div data-conflict-detail hidden><p data-conflict-message></p><label><span data-reference-draft-label></span><textarea data-reference-draft-text readonly></textarea></label><details><summary>Technical details</summary><pre data-conflict-draft aria-label="Unsaved draft payload" tabindex="0"></pre></details></div>';
+          const root = main.querySelector(".bp-paper-editor") || main;
+          root.prepend(banner);
+          banner.addEventListener("click", (event) => {
+            const current = detachedReferenceDrafts[0];
+            if (!current) return;
+            if (event.target.closest?.('[data-action="review"]')) {
+              const detail = banner.querySelector("[data-conflict-detail]");
+              detail.hidden = false;
+              banner.querySelector('[data-action="review"]')
+                .setAttribute("aria-expanded", "true");
+            } else if (event.target.closest?.("[data-reference-draft-download]")) {
+              coordinator._downloadDetachedReferenceDraft(current);
+            } else if (event.target.closest?.("[data-reference-draft-discard]")) {
+              coordinator._discardDetachedReferenceDraft(current);
+            }
+          });
+        }
+        const localOnly = coordinator._detachedReferenceDraftIsLocalOnly(draft);
+        const fieldLabel = draft.field === "title" ? "title" : "description";
+        banner.querySelector(".bp-conflict-description").textContent = localOnly
+          ? `This related Paper was replaced before your ${fieldLabel} draft was sent. The draft was not applied to the replacement.`
+          : `This related Paper was replaced while your ${fieldLabel} save was unresolved. Download the retained draft while its result is confirmed.`;
+        banner.querySelector("[data-conflict-message]").textContent = localOnly
+          ? "Download or copy this exact draft before explicitly discarding it."
+          : "This save may already have reached the server. It cannot be discarded safely here.";
+        banner.querySelector("[data-reference-draft-label]").textContent =
+          `Retained ${fieldLabel} draft`;
+        banner.querySelector("[data-reference-draft-text]").value = draft.value;
+        banner.querySelector("[data-conflict-draft]").textContent =
+          JSON.stringify(draft.snapshot, null, 2);
+        const discard = banner.querySelector("[data-reference-draft-discard]");
+        discard.disabled = !localOnly;
+        discard.setAttribute("aria-disabled", String(!localOnly));
+        discard.title = localOnly
+          ? ""
+          : "This save has an unresolved server outcome and cannot be discarded here.";
+      };
       coordinator._setConflict = (reply, source, sourceDocumentKey, conflictEntry = null) => {
         const dirtyFallbackSource = [...sources].find(([fallbackSource, record]) =>
           record.dirty && fallbackSource.matches?.(".bp-paper-edit-form[phx-change]") &&
@@ -1733,22 +2008,33 @@
         renderSaveStatus();
       };
       coordinator._renderConflict = () => {
-        let banner = main.querySelector("[data-bp-paper-conflict]");
+        let banner = main.querySelector(
+          "[data-bp-paper-conflict]:not([data-bp-paper-reference-draft])",
+        );
         if (!conflict) {
           banner?.remove();
+          coordinator._renderDetachedReferenceDraft();
           return;
         }
+        main.querySelector("[data-bp-paper-reference-draft]")?.remove();
         const renderDetail = (notify = false) => {
           const detail = banner.querySelector("[data-conflict-detail]");
           const head = conflict.entry;
           const positional = conflict.positional;
+          const detached = coordinator._conflictDetachedReferenceDraft();
+          const detachedLocalOnly = detached?.source === conflict.source &&
+            coordinator._detachedReferenceDraftIsLocalOnly(detached);
           detail.hidden = false;
           banner.querySelector('[data-action="review"]').setAttribute("aria-expanded", "true");
-          detail.querySelector("[data-conflict-message]").textContent = positional
-            ? `Server revision ${String(conflict.currentRev ?? "unknown")}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft.`
-            : conflict.keepUnavailable
-              ? `Server revision ${String(conflict.currentRev ?? "unknown")}. No exact retry payload is available. Use latest explicitly discards this retained draft.`
-              : `Server revision ${String(conflict.currentRev ?? "unknown")}. Keep mine retries your edits on that revision; Use latest discards them.`;
+          detail.querySelector("[data-conflict-message]").textContent = detached
+            ? detachedLocalOnly
+              ? "Copy or download this exact old-reference draft, then use Discard old draft. It will not be applied to the replacement."
+              : "This draft has a pending or attempted save for the old reference. Copy or download it; retry and discard are unavailable here."
+            : positional
+              ? `Server revision ${String(conflict.currentRev ?? "unknown")}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft.`
+              : conflict.keepUnavailable
+                ? `Server revision ${String(conflict.currentRev ?? "unknown")}. No exact retry payload is available. Use latest explicitly discards this retained draft.`
+                : `Server revision ${String(conflict.currentRev ?? "unknown")}. Keep mine retries your edits on that revision; Use latest discards them.`;
           const retainedDraft = bpPaperConflictDraft(head, conflict.snapshot);
           const reviewDraft = conflict.latestSnapshot
             ? {
@@ -1772,6 +2058,17 @@
           const root = main.querySelector(".bp-paper-editor") || main;
           root.prepend(banner);
           banner.addEventListener("click", (event) => {
+            const detached = coordinator._conflictDetachedReferenceDraft();
+            if (event.target.closest?.("[data-reference-draft-download]") && detached) {
+              coordinator._downloadDetachedReferenceDraft(detached);
+              return;
+            }
+            if (event.target.closest?.("[data-reference-draft-discard]") &&
+                detached?.source === conflict?.source &&
+                coordinator._detachedReferenceDraftIsLocalOnly(detached)) {
+              coordinator._discardConflictDetachedReferenceDraft(detached);
+              return;
+            }
             const action = event.target.closest?.("[data-action]")?.dataset.action;
             if (action === "review") {
               renderDetail(true);
@@ -1787,11 +2084,76 @@
         keep.disabled = keepUnavailable;
         keep.setAttribute("aria-disabled", String(keepUnavailable));
         keep.title = keepUnavailable ? "This retained draft has no safe exact rebase path." : "";
+        const detached = coordinator._conflictDetachedReferenceDraft();
+        if (detached) {
+          keep.disabled = true;
+          keep.setAttribute("aria-disabled", "true");
+          const detachedLocalOnly = detached.source === conflict.source &&
+            coordinator._detachedReferenceDraftIsLocalOnly(detached);
+          banner.querySelector(".bp-conflict-description").textContent = detachedLocalOnly
+            ? `This related Paper was replaced before your ${detached.field} draft was sent.`
+            : `This related Paper was replaced while your ${detached.field} save was unresolved.`;
+          let download = banner.querySelector("[data-reference-draft-download]");
+          if (!download) {
+            download = document.createElement("button");
+            download.type = "button";
+            download.dataset.referenceDraftDownload = "true";
+            download.dataset.detachedReferenceRecovery = "true";
+            download.textContent = "Download old field draft";
+            banner.querySelector(".bp-conflict-actions")?.append(download);
+          }
+          const latest = banner.querySelector('[data-action="latest"]');
+          latest.disabled = true;
+          latest.setAttribute("aria-disabled", "true");
+          latest.title = "This save has an unresolved server outcome and cannot be discarded here.";
+          const detail = banner.querySelector("[data-conflict-detail]");
+          let field = detail.querySelector("[data-reference-draft-text]");
+          if (!field) {
+            const label = document.createElement("label");
+            label.dataset.detachedReferenceRecovery = "true";
+            const labelText = document.createElement("span");
+            labelText.dataset.referenceDraftLabel = "true";
+            field = document.createElement("textarea");
+            field.dataset.referenceDraftText = "true";
+            field.readOnly = true;
+            label.append(labelText, field);
+            detail.querySelector("details")?.before(label);
+          }
+          detail.querySelector("[data-reference-draft-label]").textContent =
+            `Retained ${detached.field} draft`;
+          field.value = detached.value;
+          const canDiscard = detached.source === conflict.source &&
+            coordinator._detachedReferenceDraftIsLocalOnly(detached);
+          let discard = banner.querySelector("[data-reference-draft-discard]");
+          if (canDiscard && !discard) {
+            discard = document.createElement("button");
+            discard.type = "button";
+            discard.dataset.referenceDraftDiscard = "true";
+            discard.dataset.detachedReferenceRecovery = "true";
+            discard.textContent = "Discard old draft";
+            banner.querySelector(".bp-conflict-actions")?.append(discard);
+          } else if (!canDiscard) {
+            discard?.remove();
+          }
+        } else {
+          banner.querySelectorAll("[data-detached-reference-recovery]").forEach(
+            (element) => element.remove(),
+          );
+          banner.querySelector(".bp-conflict-description").textContent =
+            "This document changed elsewhere. Your edits are still here.";
+          const latest = banner.querySelector('[data-action="latest"]');
+          latest.disabled = false;
+          latest.setAttribute("aria-disabled", "false");
+          latest.title = "";
+        }
         const openDetail = banner.querySelector("[data-conflict-detail]:not([hidden])");
         if (openDetail) renderDetail();
       };
       coordinator._keepMine = () => {
         const head = mutationQueue[0];
+        if (coordinator._conflictDetachedReferenceDraft()) {
+          return false;
+        }
         if (!head || conflict?.currentRev == null || conflict.keepUnavailable) {
           return false;
         }
@@ -1811,6 +2173,9 @@
       };
       coordinator._useLatest = () => {
         const chosenSource = conflict?.source;
+        if (coordinator._conflictDetachedReferenceDraft()) {
+          return false;
+        }
         const chosenRecord = sources.get(chosenSource);
         const reloadBoundary = conflict?.reloadOnLatest
           ? chosenSource?.closest?.("[data-paper-terminal-boundary]")
@@ -1821,6 +2186,10 @@
             !chosenSource.matches?.('[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"]')),
         );
         const latestRevision = conflict?.currentRev ?? quarantinedEchoes.at(-1)?.rev;
+        const latestRevisionIsCurrentOrNewer = !(
+          typeof confirmedRevision === "number" && typeof latestRevision === "number" &&
+          latestRevision < confirmedRevision
+        );
         const latest = quarantinedEchoes.filter((echo) =>
           echo.rev === latestRevision &&
           (!echo.documentKey || echo.documentKey === conflict?.documentKey),
@@ -1874,7 +2243,7 @@
           return false;
         }
         let replacedChosenSource = false;
-        if (latestRevision != null) {
+        if (latestRevision != null && latestRevisionIsCurrentOrNewer) {
           confirmedRevision = latestRevision;
           if (!reloadBoundary) latest.forEach((echo) => {
             if (typeof echo.apply !== "function") return;
@@ -1975,6 +2344,9 @@
               coordinator._settleHistory(entry, replyHistoryStep);
             } else {
               coordinator._recordForwardHistory(entry, reply);
+            }
+            if (!sources.has(entry.source)) {
+              coordinator._removeDetachedReferenceDraft(entry.source);
             }
             const continuingSource = sources.get(entry.source);
             if (continuingSource?.dirty &&
@@ -2171,7 +2543,10 @@
           : bpPaperMutation(driver, source, event, params, {
             target,
             onResult: (saved, result) => {
-              if (saved || result?.discarded) record.mutationEntry = null;
+              if (saved || result?.discarded) {
+                record.mutationEntry = null;
+                coordinator._renderDetachedReferenceDraft();
+              }
             },
           });
         record.mutationEntry = mutation.entry || record.mutationEntry;
@@ -2184,6 +2559,7 @@
           })
           .finally(() => {
             if (record.pending === pending) record.pending = null;
+            coordinator._renderDetachedReferenceDraft();
             if (
               snapshotSaved && source.isConnected && record.dirty && record.active === 0
             ) {
@@ -2627,6 +3003,12 @@
         candidate.dataset.paperDocKey === toRoot.dataset.paperDocKey
       );
       if (!fromRoot) return;
+      const recoveryCoordinator = paperExitCoordinators.get(fromRoot.closest("main"));
+      recoveryCoordinator?.captureReferenceDraftReplacement?.(
+        fromRoot,
+        toRoot.id,
+        toRoot.dataset.paperDocKey,
+      );
       const wasRootHalted = fromRoot.dataset.paperCanvasResumeHalt === "true";
       const nextRootState = toRoot.dataset.paperCanvasResumeState;
       const willRootHalt = toRoot.dataset.paperCanvasResumeHalt === "true" &&
@@ -3985,8 +4367,9 @@
       },
       updated() {
         // LiveView can replace the footer controls while preserving this hook.
-        // Re-apply the coordinator's session history state to the new buttons.
-        this._exitCoordinator?.refreshHistoryControls?.();
+        // Re-apply coordinator-owned controls and recovery UI after the server
+        // morph removes client-only presentation nodes.
+        this._exitCoordinator?.refreshPresentation?.();
       },
       destroyed() {
         this.el.removeEventListener("dragstart", this._onDragStart);

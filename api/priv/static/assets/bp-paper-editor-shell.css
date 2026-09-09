@@ -2189,10 +2189,16 @@ textarea.bp-paper-inline-text.bp-paper-link-ref-description-input {
 }
 [data-bp-paper-conflict] button[data-action="keep"] { border-color: var(--paper-accent); color: var(--paper-accent); }
 [data-bp-paper-conflict] button:disabled { opacity: .55; cursor: not-allowed; }
-[data-bp-paper-conflict] :is(button, summary, pre):focus-visible,
+[data-bp-paper-conflict] :is(button, summary, pre, textarea):focus-visible,
 [data-test-id="paper-canvas-resume-warning"] :is(button, summary, a):focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 3px; }
 [data-bp-paper-conflict] [data-conflict-detail] { margin-top: 12px; border-top: 1px solid var(--paper-rule); padding-top: 12px; }
 [data-bp-paper-conflict] [data-conflict-message] { margin: 0 0 12px; font: inherit; }
+[data-bp-paper-conflict] [data-reference-draft-text] {
+  box-sizing: border-box; width: 100%; max-width: 100%; min-height: 6rem;
+  margin: 8px 0 12px; padding: 12px; border: 1px solid var(--paper-rule); border-radius: 4px;
+  color: var(--paper-ink); background: var(--paper-bg-deep); font: inherit;
+  line-height: 1.5; resize: vertical;
+}
 [data-bp-paper-conflict] summary,
 [data-test-id="paper-canvas-resume-warning"] summary { cursor: pointer; color: var(--paper-ink-soft); }
 [data-test-id="paper-canvas-resume-warning"] p { margin: 0 0 12px; font: inherit; }
