@@ -634,6 +634,87 @@ await detachedRecoveryNegative({
 });
 console.log("related-card recovery ignores connected, malformed, and cross-scope sources");
 
+{
+  const fenceDom = new JSDOM(`<!doctype html><body>
+    <main data-paper-doc-key="production:paper:recovery-fence" data-paper-rev="50">
+      <button id="fence-view" data-editing="true">View</button>
+      <div id="paper-editor-recovery-fence" class="bp-paper-editor"
+        data-paper-doc-key="production:paper:recovery-fence" data-paper-rev="50">
+        ${fieldForm("title", "Fence original")}
+        <span data-test-id="bp-paper-footer-save" role="status"></span>
+      </div>
+    </main></body>`, { runScripts: "outside-only", url: "http://localhost/" });
+  const fenceWindow = fenceDom.window;
+  const fenceMorph = shippedMorphdom(fenceWindow);
+  let fenceSerial = 0;
+  Object.defineProperty(fenceWindow, "crypto", { configurable: true, value: {
+    randomUUID: () => `00000000-0000-4000-8004-${String(++fenceSerial).padStart(12, "0")}`,
+  } });
+  vm.runInContext(readFileSync(new URL(
+    "../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url,
+  ), "utf8"), vm.createContext({
+    window: fenceWindow, document: fenceWindow.document,
+    CustomEvent: fenceWindow.CustomEvent, FormData: fenceWindow.FormData,
+    Date, setTimeout, clearTimeout,
+    customElements: { whenDefined: () => Promise.resolve() },
+  }));
+  const fenceCalls = [];
+  const fenceHook = {
+    ...fenceWindow.BarkparkPaperEditorHooks.BarkparkPaperEditToggle,
+    el: fenceWindow.document.getElementById("fence-view"),
+    pushEvent() { return Promise.resolve({}); },
+    pushEventTo(_target, event, payload) {
+      fenceCalls.push({ event, payload: structuredClone(payload) });
+      return new Promise(() => {});
+    },
+  };
+  fenceHook.mounted();
+  try {
+    const oldField = fenceWindow.document.getElementById(referenceFieldId("title"));
+    oldField.value = "Never-sent fenced draft";
+    oldField.dispatchEvent(new fenceWindow.InputEvent("input", { bubbles: true }));
+    const root = fenceWindow.document.querySelector(".bp-paper-editor");
+    const replacement = root.cloneNode(false);
+    replacement.innerHTML = `${fieldForm("title", "Replacement", changedIdentity)}
+      <span data-test-id="bp-paper-footer-save" role="status"></span>`;
+    fenceMorph(root, replacement, {
+      getNodeKey: (node) => node?.id,
+      onBeforeElUpdated: (fromEl, toEl) => {
+        fenceWindow.BarkparkPaperEditorBeforeElUpdated(fromEl, toEl);
+        return true;
+      },
+    });
+    await tick();
+    assert.ok(fenceWindow.document.querySelector("[data-bp-paper-reference-draft]"));
+    const replacementField = fenceWindow.document.getElementById(
+      referenceFieldId("title", changedIdentity),
+    );
+    replacementField.value = "Independent queued draft";
+    replacementField.dispatchEvent(new fenceWindow.InputEvent("input", { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 510));
+    assert.equal(fenceCalls.length, 1);
+    assert.ok(fenceWindow.document.querySelector("[data-bp-paper-reference-draft]"),
+      "the local-only recovery remains registered while another field sends");
+    const queuedRequestId = fenceCalls[0].payload.request_id;
+    fenceHook._bpPaperExitCoordinator._setConflict(
+      { current_rev: 51 }, oldField.form, "production:paper:recovery-fence",
+      { source: oldField.form, documentKey: "production:paper:recovery-fence", ifRev: 50 },
+    );
+    assert.ok(fenceHook._bpPaperExitCoordinator._conflictDetachedReferenceDraft(),
+      "the chosen local-only detached source is recognized as a conflict fence");
+    assert.equal(fenceHook._bpPaperExitCoordinator._keepMine(), false,
+      "Keep mine cannot rewrite another queue entry for a chosen local-only detached draft");
+    assert.equal(fenceHook._bpPaperExitCoordinator._useLatest(), false,
+      "Use latest cannot discard a chosen local-only detached draft");
+    assert.equal(fenceCalls[0].payload.request_id, queuedRequestId,
+      "the unrelated queued receipt identity remains unchanged");
+  } finally {
+    fenceHook.destroyed?.();
+    fenceDom.window.close();
+  }
+}
+console.log("related-card local-only recovery fences direct conflict actions");
+
 async function focusedSiblingRevision({
   sourceField = "title", candidateField = "description", candidateIdentity = identity,
   candidateIndex = "3", candidateSlug = "unique-destination", candidateExtra = "",

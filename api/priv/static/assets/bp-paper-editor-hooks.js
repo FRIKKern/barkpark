@@ -1786,6 +1786,9 @@
           draft.documentKey === key &&
           !coordinator._detachedReferenceDraftIsLocalOnly(draft),
         ) || null;
+      coordinator._conflictDetachedReferenceDraft = () =>
+        detachedReferenceDrafts.find((draft) => draft.source === conflict?.source) ||
+        coordinator._blockingDetachedReferenceDraft();
       coordinator._removeDetachedReferenceDraft = (source) => {
         const index = detachedReferenceDrafts.findIndex((draft) => draft.source === source);
         if (index < 0) return false;
@@ -1972,9 +1975,7 @@
           const root = main.querySelector(".bp-paper-editor") || main;
           root.prepend(banner);
           banner.addEventListener("click", (event) => {
-            const detached = detachedReferenceDrafts.find(
-              (draft) => draft.source === conflict?.source,
-            ) || coordinator._blockingDetachedReferenceDraft();
+            const detached = coordinator._conflictDetachedReferenceDraft();
             if (event.target.closest?.("[data-reference-draft-download]") && detached) {
               coordinator._downloadDetachedReferenceDraft(detached);
               return;
@@ -1994,9 +1995,7 @@
         keep.disabled = keepUnavailable;
         keep.setAttribute("aria-disabled", String(keepUnavailable));
         keep.title = keepUnavailable ? "This retained draft has no safe exact rebase path." : "";
-        const detached = detachedReferenceDrafts.find(
-          (draft) => draft.source === conflict.source,
-        ) || coordinator._blockingDetachedReferenceDraft();
+        const detached = coordinator._conflictDetachedReferenceDraft();
         if (detached) {
           keep.disabled = true;
           keep.setAttribute("aria-disabled", "true");
@@ -2041,7 +2040,7 @@
       };
       coordinator._keepMine = () => {
         const head = mutationQueue[0];
-        if (coordinator._blockingDetachedReferenceDraft()) {
+        if (coordinator._conflictDetachedReferenceDraft()) {
           return false;
         }
         if (!head || conflict?.currentRev == null || conflict.keepUnavailable) {
@@ -2063,7 +2062,7 @@
       };
       coordinator._useLatest = () => {
         const chosenSource = conflict?.source;
-        if (coordinator._blockingDetachedReferenceDraft()) {
+        if (coordinator._conflictDetachedReferenceDraft()) {
           return false;
         }
         const chosenRecord = sources.get(chosenSource);
