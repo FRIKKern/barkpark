@@ -30363,18 +30363,44 @@ test("cch-w49-s7: billingCheckoutCapability is a NEW pure sibling over the PAYLO
   }
 });
 
-test("cch-w49-s7: D439 — billingIsOwner / billingCanManage are NOT widened by this slice", () => {
+test("cch-w49-s7: D439 — billingIsOwner / billingCanManage are NOT widened by this slice", async () => {
   // A NEW sibling, never a widening. If someone folded the capability into
   // either of these, `if (billingIsOwner())` would be true for the STRING
-  // "unconfigured" — the exact fail-open D439 forbids. Both are pinned by BYTES
-  // (a diff that touches either body reds here) and by TYPE.
-  const src = APP_SRC;
-  assert.ok(src.includes('function billingIsOwner() { return billingOwnerAuthority() === "grant"; }'),
-    "billingIsOwner must still be exactly the two-valued delegation cch-w49-s6 landed");
-  assert.ok(src.includes("function billingCanManage(role) { return actorRoleIn(role, CONSOLE_OWNER_ROLES); }"),
-    "billingCanManage must still be exactly the role predicate");
-  assert.equal(typeof hooks.billingCanManage("owner"), "boolean");
-  assert.equal(typeof hooks.billingCanManage("member"), "boolean");
+  // "unconfigured" — the exact fail-open D439 forbids.
+  //
+  // cch-w49-bl REPLACED THE INSTRUMENT. These two claims used to be pinned by
+  // BYTES — `APP_SRC.includes('function billingIsOwner() { … }')` — and the
+  // double dissociation the row demanded was run against exactly that pin on
+  // the shipped file:
+  //   * behaviour-IDENTICAL rewrite (`var b = billingOwnerAuthority(); return
+  //     b === "grant";`) → 1393 pass / 1 fail, and THIS test was the one fail.
+  //     A guard that reds on a rename is a guard that punishes refactoring for
+  //     nothing.
+  //   * full behavioural BYPASS above the intact text (`if (true) return true;`)
+  //     → this test stayed GREEN. It cannot see the fence run at all; only the
+  //     cch-w49-s6 behavioural pins above caught that mutation.
+  // Wrong in both directions, so both claims are DRIVEN now. The bypass arm is
+  // held by cch-w49-s6's five-band pin (billingIsOwner === (band === "grant")
+  // on every band, boolean throughout) — this test holds the D439 half.
+  const { h } = await w49s6Case(null, W49S6_ME_MEMBER, {});
+  assert.equal(h.billingIsOwner(), false, "a determinate non-owner is refused");
+  assert.equal(typeof h.billingIsOwner(), "boolean",
+    "billingIsOwner must stay two-valued — folding the capability STRING into it is the fail-open D439 forbids");
+  const owner = await w49s6Case(null, W49S6_ME_OWNER, {});
+  assert.equal(owner.h.billingIsOwner(), true, "…and the owner limb still says true, so this is not an always-false green");
+  assert.equal(typeof owner.h.billingIsOwner(), "boolean");
+  // billingCanManage is a ROLE predicate, arity 1, and stays boolean across the
+  // whole role domain — including the shapes a widened reader would hand back
+  // as a string.
+  for (const role of ["owner", "admin", "member", "nonsense", null, undefined, ""]) {
+    assert.equal(typeof hooks.billingCanManage(role), "boolean",
+      "billingCanManage(" + JSON.stringify(role) + ") must stay two-valued");
+  }
+  assert.equal(hooks.billingCanManage("owner"), true, "owner is the ONLY console owner role (CONSOLE_OWNER_ROLES)");
+  for (const role of ["admin", "member", "nonsense", null, undefined, ""]) {
+    assert.equal(hooks.billingCanManage(role), false,
+      "billingCanManage(" + JSON.stringify(role) + ") must refuse — an admin is not an owner on the money surface");
+  }
   // …and the new sibling is a STRING, so the two can never be confused.
   assert.equal(typeof hooks.billingCheckoutCapability({}), "string");
 });
@@ -31045,4 +31071,120 @@ test("stw2 c2: every key the console sends is one the SERVER actually reads", ()
     assert.ok(routeHead.includes('conn.body_params["' + k + '"]'),
       "the create route no longer reads `" + k + "` — the console still sends it");
   }
+});
+
+// ── cch-w49-bl · THE FIVE PLAIN-MEMBER FENCES, SWEPT WITH THE MONEY FENCE'S
+//    DOUBLE DISSOCIATION ─────────────────────────────────────────────────────
+//
+// Wave 49 proved the DECOY shape at exactly one seam: the billing owner fence
+// was protected only by a source-text `indexOf`, which greened on a full
+// behavioural bypass and reddened on a behaviour-identical rewrite. The row
+// asked whether the five sibling plain-member fences share it. Both mutations
+// were run on the SHIPPED file, one fence at a time, restoring between runs
+// (baseline: 1394 pass / 0 fail):
+//
+//   fence                bypass (`if (true) return <grant>;` above the intact
+//                        text)                     rewrite (behaviour-identical)
+//   ────────────────────────────────────────────────────────────────────────────
+//   providerCanWrite     RED  1391/3                 GREEN 1394/0   not a decoy
+//   notifCanManage       RED  1393/1                 GREEN 1394/0   not a decoy
+//   canMintAnyAbility    RED  1390/4                 GREEN 1394/0   not a decoy
+//   assignableRoles      RED  1385/9                 GREEN 1394/0   not a decoy
+//   (the members fence)
+//   billingIsOwner       RED  1391/3                 RED   1393/1   DECOY HALF
+//
+// So the answer is NO for four and HALF-YES for one: the epic's confidence was
+// NOT overstated by five. Every plain-member fence already reds on a full
+// bypass, because cch-w41-s3 / cch-w41-bl / C10 / cch-w42-s3 drive them. The
+// one surviving decoy was the FALSE-POSITIVE half — cch-w49-s7's byte pin on
+// billingIsOwner's body, which reddened on a rename that changed nothing. It is
+// replaced above with a driven pin.
+//
+// (The row's OMIT set also named "env-vars write". There is no env-var write
+// fence in the console client: `grep -n 'envCanWrite\\|env_vars\\|envVar'
+// cloud/priv/static/app.js` returns exactly one hit, a COMMENT at :260 about
+// router.ex's cross-tenant env-var arm. Nothing to sweep.)
+//
+// WHAT THIS BLOCK ADDS. The four non-decoy fences red on the bypass through
+// PREDICATE assertions only — nothing pinned the RENDERED bytes each fence
+// gates, so a future slice could keep the predicate honest and hand the member
+// the affordance anyway. These pins close that: one driven /v1/me per role, the
+// predicate's own answer fed to the shipped renderer, and the affordance
+// asserted absent for the member and PRESENT for the owner (so an always-false
+// mutation cannot green them either).
+
+async function w49blRoleRender(me) {
+  hooks.clearMe();
+  await driveMe(200, me);
+  const ctx = hooks.membersContext();
+  const roster = [
+    { user_id: me.user.id, email: me.user.email, role: me.team_authority.role, joined_at: "2030-01-01T00:00:00Z" },
+    { user_id: "u-other", email: "other@acme.com", role: "member", joined_at: "2030-01-01T00:00:00Z" },
+  ];
+  const out = {
+    provider: hooks.providerCanWrite(),
+    notif: hooks.notifCanManage(),
+    mint: hooks.canMintAnyAbility(),
+    owner: hooks.billingIsOwner(),
+    githubHtml: hooks.githubCardHtml({ connected: true, account_login: "acme" }, hooks.providerCanWrite()),
+    notifHtml: hooks.notifPageHtml({ alerts_enabled: true, transport: "instance", from_address: "a@acme.com" },
+      { canManage: hooks.notifCanManage(), state: hooks.meState() }),
+    tokensHtml: hooks.tokenAbilitiesFieldHtml(),
+    ctx,
+    membersHtml: ctx ? hooks.membersPanelHtml(roster, [], ctx) : null,
+  };
+  hooks.clearMe();
+  return out;
+}
+
+test("cch-w49-bl: the five plain-member fences REFUSE a driven member — in the predicate AND in the rendered bytes", async () => {
+  const m = await w49blRoleRender(ME_MEMBER);
+
+  // 1 · providerCanWrite — the GitHub card's Disconnect is an admin act.
+  assert.equal(m.provider, false, "providerCanWrite(): a member does not write providers");
+  assert.equal(m.githubHtml.indexOf('id="github-disconnect"'), -1,
+    "…and the connected GitHub card offers a member NO Disconnect button");
+
+  // 2 · notifCanManage — channels + routing matrix are admin-only.
+  assert.equal(m.notif, false, "notifCanManage(): a member does not manage notification settings");
+  assert.ok(m.notifHtml.includes("managed by team admins"),
+    "…and the member page states the cap instead of drawing the channels editor");
+  assert.equal(m.notifHtml.indexOf("notif-smtp"), -1, "…no SMTP write fields anywhere on a member's page");
+
+  // 3 · canMintAnyAbility — the token picker is capped at read-only.
+  assert.equal(m.mint, false, "canMintAnyAbility(): a member mints read-only tokens only");
+  assert.ok(m.tokensHtml.includes(MEMBER_NOTE), "…and the picker says so, in the curated sentence");
+
+  // 4 · billingIsOwner — the money fence, driven here too so all five sit in one place.
+  assert.equal(m.owner, false, "billingIsOwner(): a member is not the team owner");
+  assert.equal(typeof m.owner, "boolean", "…and stays two-valued (D439)");
+
+  // 5 · the MEMBERS fence — assignableRoles(ctx.role).length is what gates the
+  // whole surface: invite card, Revoke, Change role and Remove.
+  assert.deepEqual({ role: m.ctx && m.ctx.role, assignable: [...hooks.assignableRoles(m.ctx.role)] },
+    { role: "member", assignable: [] },
+    "membersContext() resolves the SERVER's role and a member is assigned nothing");
+  for (const marker of ["data-member-role", "data-member-remove", "data-invite-revoke", "Pending invitations"]) {
+    assert.equal(m.membersHtml.indexOf(marker), -1,
+      "the member roster must carry no `" + marker + "` affordance (GR33 plain-member law)");
+  }
+  // NON-VACUITY: the panel really painted the roster it was given.
+  assert.ok(m.membersHtml.includes("other@acme.com"), "…and it is a real roster, not an empty-string green");
+});
+
+test("cch-w49-bl: the OWNER gets every one of the five — so no pin above can be satisfied by an always-false fence", async () => {
+  const o = await w49blRoleRender(ME_OWNER);
+
+  assert.deepEqual({ provider: o.provider, notif: o.notif, mint: o.mint, owner: o.owner },
+    { provider: true, notif: true, mint: true, owner: true },
+    "an owner clears all four boolean fences");
+  assert.ok(o.githubHtml.includes('id="github-disconnect"'), "the owner IS offered Disconnect");
+  assert.ok(!o.notifHtml.includes("managed by team admins"), "the owner gets the editor, not the notice");
+  assert.ok(!o.tokensHtml.includes(MEMBER_NOTE), "the owner is not told to ask an admin");
+  assert.deepEqual({ role: o.ctx && o.ctx.role, assignable: [...hooks.assignableRoles(o.ctx.role)] },
+    { role: "owner", assignable: ["owner", "admin", "member"] },
+    "and the owner may assign every role");
+  assert.ok(o.membersHtml.includes("Pending invitations"), "…and reads the invitations section");
+  assert.ok(o.membersHtml.includes("data-member-role") || o.membersHtml.includes("data-member-remove"),
+    "…and is offered at least one row verb over the other member");
 });
