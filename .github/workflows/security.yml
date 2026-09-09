@@ -717,6 +717,64 @@ jobs:
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           mix deps.audit --ignore-advisory-ids GHSA-4g2h-vm7x-747c
+
+      # ══ THE SECOND CVE ORACLE — ADVISORY, AND ADVISORY BY CONSTRUCTION ═══
+      #
+      # cch-w12-bl-cve-gate-is-oracle-blind. Two oracles, the same two locks,
+      # the same commit, opposite answers: `mix deps.audit` (mix_audit, mirego's
+      # DB — the step directly above) says "No vulnerabilities found." while
+      # `mix hex.audit` (Hex's own OSV-backed feed) reports 17 advisories on
+      # api/mix.lock (4 HIGH) and 13 on cloud/mix.lock (5 HIGH) — measured
+      # 2026-09-09 at origin/main 8510213, and reproduced at this job's pinned
+      # 1.18.1/OTP 27.0 in run 34410161152, where the step directly above still
+      # printed "No vulnerabilities found." in the SAME job. The mix_audit step
+      # is not wrong about its own database; it simply cannot see this feed.
+      #
+      # THE RECORDED DECISION (2026-09-09, lead-gates, on the orchestrator's
+      # ruling). `mix hex.audit` runs as a SECOND, ADVISORY oracle beside
+      # mix_audit, over BOTH locks. The choice of which oracle should BLOCK is
+      # HELD FOR THE OWNER (owner-queue item 47 / criterion 1 of that row) and
+      # is deliberately NOT settled here. No PR reds when a new advisory is
+      # published, because these steps are non-blocking by construction:
+      #
+      #   1. `continue-on-error: true` — the step's own failure never fails the
+      #      job.
+      #   2. NO `id:` — and that is the load-bearing half. This job's verdict is
+      #      owned by the "Decide (main-red breaker…)" step below, which reads
+      #      `toJSON(steps)`; a step WITHOUT an id never appears in `steps` at
+      #      all, so it cannot enter the breaker's arithmetic even by accident.
+      #      Giving these steps an id would silently promote them to the job's
+      #      verdict. Do not add one without re-deciding the policy above.
+      #   3. No new JOB name. The check-run census (.github/required-checks.json,
+      #      scripts/required-checks-verify.sh) keys on job names; steps inside
+      #      an existing job add no row, so the required set cannot drift.
+      #
+      # AND IT IS STILL ABLE TO FAIL (criterion 2). scripts/hex-audit-oracle.sh
+      # exits 0 clean / 1 on an advisory not in .github/hex-audit-baseline.txt /
+      # 3 CANNOT READ when hex.audit itself refuses to answer. Proven locally
+      # 2026-09-09: api/mix.lock's plug hand-reverted 1.20.3 → 1.20.1 yielded
+      # "+ api:EEF-CVE-2026-56813, + api:EEF-CVE-2026-56814" and exit 1; the
+      # restored lock exit 0; cloud/deps parked away exit 3 with "CANNOT READ".
+      # A tool that dies must never read as clean.
+      - name: Fetch cloud deps (hex.audit cannot load a lock whose deps are absent)
+        continue-on-error: true   # ADVISORY — and NO id:, see the block above
+        working-directory: cloud
+        run: mix deps.get
+
+      - name: Second CVE oracle selftest (the parser + ratchet must be able to fail)
+        continue-on-error: true   # ADVISORY — and NO id:, see the block above
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/hex-audit-oracle.sh --selftest
+
+      - name: Second CVE oracle — mix hex.audit over BOTH locks (ADVISORY, blocks nothing)
+        continue-on-error: true   # ADVISORY — and NO id:, see the block above
+        working-directory: ${{ github.workspace }}
+        # NOTE, stated rather than buried: this job is `if: needs.changes.outputs.api
+        # == 'true'`, and the dispatcher emits no `cloud` output at all. A
+        # cloud-ONLY pull request therefore still never reaches either oracle.
+        # That topological half of the row is UNCHANGED here on purpose —
+        # widening the venue is a dispatcher change, not an oracle change.
+        run: bash scripts/hex-audit-oracle.sh --baseline .github/hex-audit-baseline.txt
       # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
       # Every gate step above ran with continue-on-error; this step owns the
       # job's verdict. A red that main's newest completed run already carries
