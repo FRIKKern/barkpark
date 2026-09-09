@@ -14,6 +14,20 @@ Object.defineProperty(globalThis, "navigator", { configurable: true, value: wind
 globalThis.getComputedStyle = window.getComputedStyle.bind(window);
 globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
 globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+const resizeObservers = [];
+globalThis.ResizeObserver = class ResizeObserver {
+  constructor(callback) {
+    this.callback = callback;
+    this.targets = new Set();
+    this.disconnected = false;
+    resizeObservers.push(this);
+  }
+  observe(target) { this.targets.add(target); }
+  disconnect() {
+    this.disconnected = true;
+    this.targets.clear();
+  }
+};
 window.Range.prototype.getClientRects = () => [];
 window.Range.prototype.getBoundingClientRect = () => ({
   top: 0, left: 0, right: 0, bottom: 0,
@@ -281,6 +295,132 @@ try {
       assert.deepEqual(patch.slots.body, [{ type: "paragraph", content: text("Keep body") }]);
       assert.deepEqual(patch.slots.opaque, [{ type: "future", value: { keep: true } }]);
     });
+  }
+  {
+    const source = { id: "card-media-direct", type: "card", slots: {
+      body: [{ type: "paragraph", content: text("Keep body") }],
+      media: [{ src: "/before.png", alt: "Authored alt", width: 640,
+        metadata: { keep: [1, 2] } }],
+      opaque: [{ type: "future", value: { keep: true } }],
+    } };
+    const canvas = document.createElement("bp-paper-canvas");
+    canvas.blocks = structuredClone([source]);
+    const batches = [];
+    canvas.addEventListener("bp-canvas-ops", event => batches.push(event.detail.ops));
+    document.body.appendChild(canvas);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      const picker = canvas.querySelector("bp-media-picker");
+      const paint = canvas.querySelector('[data-test-id="paper-card-media-control"]');
+      const image = canvas.querySelector("img");
+      const controls = canvas.querySelector(".bp-canvas-card__controls");
+      assert.equal(canvas.querySelectorAll("bp-media-picker").length, 1,
+        "an admitted image has one picker instance");
+      assert.equal(picker.previousElementSibling, paint,
+        "the existing picker is anchored beside the visible image control");
+      assert.equal(controls.contains(picker), false,
+        "the admitted image does not retain a duplicate Configure picker");
+      assert.equal(picker.hidden, true, "the picker implementation adds no duplicate image paint");
+      assert.equal(paint.hidden, false);
+      assert.equal(paint.getAttribute("aria-haspopup"), "dialog");
+      assert.equal(paint.getAttribute("aria-label"), "Replace Card image: Authored alt");
+      for (const [property, value] of [
+        ["offsetLeft", 14], ["offsetTop", 23], ["offsetWidth", 280], ["offsetHeight", 160],
+      ]) Object.defineProperty(image, property, { configurable: true, value });
+      const imageObserver = resizeObservers.find(observer => observer.targets.has(image));
+      assert.ok(imageObserver, "the direct control observes the bare image geometry");
+      imageObserver.callback();
+      assert.deepEqual({
+        left: paint.style.left,
+        top: paint.style.top,
+        width: paint.style.width,
+        height: paint.style.height,
+      }, { left: "14px", top: "23px", width: "280px", height: "160px" },
+      "the pointer target covers the image and no Card body content");
+      Object.defineProperty(image, "offsetHeight", { configurable: true, value: 190 });
+      image.dispatchEvent(new window.Event("load"));
+      assert.equal(paint.style.height, "190px", "image load refreshes the overlay geometry");
+
+      let browserOpens = 0;
+      let fileOpens = 0;
+      picker.openBrowser = () => { browserOpens += 1; return true; };
+      picker.openFileDialog = () => { fileOpens += 1; };
+      paint.click();
+      for (const key of ["Enter", " "]) {
+        const event = new window.KeyboardEvent("keydown", {
+          key, bubbles: true, cancelable: true,
+        });
+        paint.dispatchEvent(event);
+        assert.equal(event.defaultPrevented, true, `${JSON.stringify(key)} activates the picker`);
+      }
+      assert.equal(browserOpens, 3, "pointer, Enter and Space open the same picker");
+      assert.equal(fileOpens, 0);
+      picker.openBrowser = () => { browserOpens += 1; return false; };
+      paint.click();
+      assert.equal(fileOpens, 1, "a missing asset browser falls back to the same picker's file dialog");
+
+      picker.dispatchEvent(new window.CustomEvent("bp-change", {
+        bubbles: true, detail: { value: "/after.png" },
+      }));
+      assert.deepEqual(canvas._editor.getJSON().content[0].attrs.media, {
+        src: "/after.png", alt: "Authored alt", width: 640,
+        metadata: { keep: [1, 2] },
+      }, "direct replacement preserves the exact type-absent media carrier");
+      assert.equal(canvas._editor.commands.undo(), true);
+      assert.deepEqual(canvas._editor.getJSON().content[0].attrs.media, source.slots.media[0],
+        "native Undo restores the exact source carrier");
+      assert.equal(canvas._editor.commands.redo(), true);
+      assert.equal(canvas.flushPendingChanges(), true);
+      assert.deepEqual(batches, [[{ op: "patch-block", id: source.id, patch: { slots: {
+        ...source.slots,
+        media: [{ ...source.slots.media[0], src: "/after.png" }],
+      } } }]], "native Redo flushes only the direct media replacement");
+      const opensBeforeDestroy = browserOpens;
+      canvas._editor.commands.setContent("<p>Replacement</p>");
+      paint.click();
+      assert.equal(browserOpens, opensBeforeDestroy,
+        "destroyed Card media controls cannot reopen their detached picker");
+      assert.equal(imageObserver.disconnected, true,
+        "destroying the Card releases its image resize observer");
+      cases++;
+    } finally { canvas.remove(); }
+
+    const readerCanvas = document.createElement("bp-paper-canvas");
+    readerCanvas.setAttribute("editable", "false");
+    readerCanvas.blocks = structuredClone([source]);
+    document.body.appendChild(readerCanvas);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      assert.equal(readerCanvas.querySelector('[data-test-id="paper-card-media-control"]').hidden,
+        true, "View exposes the bare reader image without an editing overlay");
+      assert.equal(readerCanvas.querySelector("img").style.display, "");
+    } finally { readerCanvas.remove(); }
+  }
+
+  for (const [name, media, admitted] of [
+    ["type-absent", { src: "/image.png" }, true],
+    ["image-type", { type: "image", src: "/image.png" }, true],
+    ["null-type", { type: null, src: "/image.png" }, false],
+    ["empty-src", { type: "image", src: "" }, false],
+    ["missing", null, false],
+  ]) {
+    const slots = { body: [{ type: "paragraph", content: [] }] };
+    if (media) slots.media = [media];
+    const canvas = document.createElement("bp-paper-canvas");
+    canvas.blocks = [{ id: `card-media-admission-${name}`, type: "card", slots }];
+    document.body.appendChild(canvas);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      const picker = canvas.querySelector("bp-media-picker");
+      const paint = canvas.querySelector('[data-test-id="paper-card-media-control"]');
+      const controls = canvas.querySelector(".bp-canvas-card__controls");
+      assert.equal(canvas.querySelectorAll("bp-media-picker").length, 1,
+        `${name} keeps exactly one picker`);
+      assert.equal(!paint.hidden, admitted, `${name} direct admission`);
+      assert.equal(controls.contains(picker), !admitted,
+        `${name} uses exactly ${admitted ? "the image" : "Configure"} picker location`);
+      cases++;
+    } finally { canvas.remove(); }
   }
   await exercise({ id: "card-clear-action-label", type: "card", slots: {
     body: [{ type: "paragraph", content: text("Keep body") }],
