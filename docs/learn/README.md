@@ -8,13 +8,32 @@ reference, the routing table in the repo `CLAUDE.md` points you at the right car
 
 ## Start here
 
-Four lines from nothing to a running Barkpark — full walkthrough in
+Install the CLI first — full walkthrough in
 [../setup/QUICKSTART.md](../setup/QUICKSTART.md):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
 bp version
-bp setup --target local --yes   # brings up a dev server on this machine
+```
+
+Then pick the route that matches what you already have. **`--target local` is
+destructive: it runs `mix ecto.reset`, which drops and recreates the dev
+database.** Use it only on a machine whose dev DB you are willing to lose, and
+stop any running dev server first — a live server holds DB connections and
+blocks the reset with `object_in_use`.
+
+```bash
+bp setup --target local --yes   # DESTRUCTIVE (wipes the dev DB), then serves on :4000
+bp                              # launches the TUI
+```
+
+**Already have a Barkpark** — your own server, a teammate's, or a hosted one?
+`connect` is the non-destructive path: it writes `bp` config only and touches no
+database.
+
+```bash
+bp setup --target connect --server https://api.example.com --token $TOKEN
+bp whoami                       # active server + auth tier
 bp                              # launches the TUI
 ```
 

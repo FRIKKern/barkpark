@@ -11,35 +11,68 @@ This page takes you from zero to a queried document. You will run the API locall
 
 Pick one:
 
-- **Docker** — Docker Engine 24+ with `docker compose`. Fastest path.
-- **Local toolchain** — Elixir 1.15+, Erlang/OTP 27+ (tested on Elixir 1.19.5 / OTP 28), PostgreSQL 14+, and Node 20+ if you plan to use the JavaScript SDK.
+- **Docker** — Docker Engine 24+ with `docker compose`, plus `openssl` to generate the secrets compose requires. Fastest path.
+- **Local toolchain** — Elixir 1.15+, Erlang/OTP 27+ (tested on Elixir 1.19.5 / OTP 28), PostgreSQL 14+ with a `postgres` role whose password is `postgres` (`config/dev.exs` hardcodes it — see [SETUP.md](https://github.com/FRIKKern/barkpark/blob/main/docs/setup/SETUP.md)), libvips (`brew install vips`), and Node 20+ if you plan to use the JavaScript SDK.
 
 The Barkpark source tree provides both a `docker-compose.yml` at the repo root and a Mix project under `api/`.
 
 ## Spin up in 60 seconds
 
-Clone the repo, then start Postgres and the API container:
+Clone the repo and write the `.env` compose requires — this step is not optional:
 
 ```bash
 git clone https://github.com/FRIKKern/barkpark.git
 cd barkpark
+cp .env.example .env
+```
+
+`docker-compose.yml` hard-requires six variables (`SECRET_KEY_BASE`, `PHX_HOST`,
+`BARKPARK_CLOAK_KEY`, `BARKPARK_KEK`, `PREVIEW_JWT_SECRET`,
+`BARKPARK_RELEASE_CAPTURE_HMAC_SECRET`). With any of them unset, `docker compose up`
+exits 1 with `required variable … is missing a value` and starts no container. Fill
+each one using the generator command printed above it in `.env.example` (`openssl rand
+-base64 64` / `openssl rand -base64 32`), and set `PHX_HOST=localhost`.
+
+Add one more line to `.env`, because this page uses the demo dataset:
+
+```bash
+BARKPARK_SEED_PROFILE=demo
+```
+
+Compose defaults to `BARKPARK_SEED_PROFILE=clean`, which seeds **one welcome paper and
+an admin token printed once** — no `post` schema and no `barkpark-dev-token`, so every
+example below would 404 or 401. The `demo` profile is what seeds the eight example
+schemas, 27 documents, and the dev token `barkpark-dev-token`. The container re-runs the
+(idempotent) seed on every start, so setting this later and restarting also works.
+
+Then start Postgres and the API container:
+
+```bash
 docker compose up -d
 ```
 
-The API binds to `http://localhost:4000`. On first boot the container runs migrations and seeds eight example schemas, 27 documents, and the dev token `barkpark-dev-token`. Verify the API is up:
+The API binds to `http://localhost:4000`. First boot runs migrations and seeds, which can
+take minutes. Verify the API is up:
 
 ```bash
 curl -s http://localhost:4000/v1/data/query/production/post | head
 ```
 
-If you prefer running Elixir directly without Docker:
+If you prefer running Elixir directly without Docker, `mix ecto.setup` creates, migrates
+and seeds without dropping anything, and raw `mix` defaults to the `demo` profile this
+page needs:
 
 ```bash
 cd api
 mix deps.get
-mix ecto.reset
+mix ecto.setup
 mix phx.server
 ```
+
+`mix ecto.reset` is the same thing preceded by a **drop** — it destroys the dev database
+and everything in it. Reach for it only when you want a fresh database, and only after
+stopping any running server (a live server holds connections and the drop fails with
+`object_in_use`).
 
 ## Create your first document
 
