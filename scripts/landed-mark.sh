@@ -195,6 +195,17 @@
 #   bash scripts/landed-mark.sh --list-open         # the instrument (below)
 #   bash scripts/landed-mark.sh --selftest          # hermetic, no network
 #
+# THE PR-BODY FALLBACK
+#   This repo squash-merges with COMMIT_MESSAGES, so the commit GitHub writes on
+#   main carries the BRANCH's messages and NOT the PR body — and the `Task:`
+#   trailer lives in the PR body. When a walked commit yields no trailer, this
+#   script resolves the PR from the sha (REST `repos/<o>/<r>/commits/<sha>/pulls`,
+#   never GraphQL) and runs the SAME extractor over that PR's body. Needs `gh`
+#   with a token and GITHUB_REPOSITORY (or LANDED_MARK_REPO); a failed lookup is
+#   a distinct `CANNOT READ` warning and a SKIPPED count, never a silent zero.
+#   In fixture mode the lookup reads $FIXTURE_DIR/pulls/<sha>.json — the
+#   selftest stays hermetic.
+#
 # THE INSTRUMENT (--list-open)
 #   Lists task rows that are STILL OPEN although their id appears in a `Task:`
 #   trailer of a commit on origin/main -- the population the measurement above
@@ -235,6 +246,11 @@ LEDGER_BASE="${LEDGER_BASE:-https://guerrilla.barkpark.cloud}"
 RETRIES="${LANDED_MARK_RETRIES:-3}"
 RETRY_DELAY="${LANDED_MARK_RETRY_DELAY:-2}"
 MAX_COMMITS="${LANDED_MARK_MAX_COMMITS:-100}"
+# owner/repo for the PR-body fallback below. GITHUB_REPOSITORY is set on every
+# Actions runner; LANDED_MARK_REPO exists so a hand run outside CI can name it.
+# Empty is not fatal — it is a distinct CANNOT READ on the fallback, never a
+# silent "this commit named no task".
+REPO_SLUG="${LANDED_MARK_REPO:-${GITHUB_REPOSITORY:-}}"
 
 MODE="mark"
 DRY_RUN=0
@@ -476,8 +492,43 @@ def cmd_apply_landed_fixture(argv):
     return 0
 
 
+# THE PR-BODY FALLBACK, JSON HALF. `GET repos/<o>/<r>/commits/<sha>/pulls`
+# answers with a LIST — a sha can be associated with more than one PR (a branch
+# merged twice, a revert, a PR opened from a fork of the same commit). Picking
+# by position would be the same guess pr-task-gate.sh refuses, so the pick is by
+# EVIDENCE and in one order: the PR whose own merge_commit_sha IS this sha
+# first, then any PR that merged at all, then whatever REST listed first. The
+# sort is stable, so REST's order breaks every tie it is allowed to break.
+#
+# Prints the number on line 1 and the body from line 2 on. rc 1 when the file
+# is not a non-empty list of objects — a CANNOT READ, never a silent "no PR".
+def cmd_pulls_first(argv):
+    try:
+        data = json.load(open(argv[0]))
+    except Exception:
+        return 1
+    if not isinstance(data, list):
+        return 1
+    prs = [p for p in data if isinstance(p, dict)]
+    if not prs:
+        return 1
+    sha = argv[1] if len(argv) > 1 else ""
+
+    def rank(p):
+        if sha and p.get("merge_commit_sha") == sha:
+            return 0
+        if p.get("merged_at"):
+            return 1
+        return 2
+
+    pr = sorted(prs, key=rank)[0]
+    sys.stdout.write("%s\n%s\n" % (pr.get("number") or "", pr.get("body") or ""))
+    return 0
+
+
 CMDS = {"plan": cmd_plan, "field": cmd_field, "apply-fixture": cmd_apply_fixture,
-        "apply-landed-fixture": cmd_apply_landed_fixture}
+        "apply-landed-fixture": cmd_apply_landed_fixture,
+        "pulls-first": cmd_pulls_first}
 sys.exit(CMDS[sys.argv[1]](sys.argv[2:]))
 PYEOF
 
@@ -602,6 +653,82 @@ pr_number_from_subject() { # squash convention: "subject (#1234)"
   local subject="$1" n
   n="$(sed -nE 's/.*\(#([0-9]+)\)[[:space:]]*$/\1/p' <<<"$subject")"
   printf '%s' "$n"
+}
+
+# ── The PR-BODY FALLBACK (measured 2026-09-09T22:47Z) ────────────────────────
+# THE DEFECT. This repo's squash setting is COMMIT_MESSAGES, so the squash
+# commit GitHub writes on main carries the BRANCH's commit messages — not the
+# PR body. The `Task:` trailer lives in the PR BODY (that is where pr-task-gate
+# reads it, and the brief tells builders to put it there), so for every PR whose
+# branch commits did not happen to repeat the trailer, the walk above reads a
+# message with no trailer, marks nothing, and exits 0 — silence that is
+# byte-identical to the common "this commit really names no task" case.
+# Measured over origin/main 2026-09-09 16:00Z..23:00Z: 30 squash commits with a
+# `(#N)` subject carried NO column-0 `Task:` line, and every one of them
+# resolved to a task row through its PR body. None of those 30 rows carried the
+# mark for its sha.
+#
+# THE FIX, AND WHY IT IS A FALLBACK AND NOT A REPLACEMENT. The commit message
+# is still read FIRST: it is free, it needs no token, and when a body-carried
+# trailer is there it is the author's own statement about this exact commit.
+# Only when it yields nothing does this ask GitHub which PR the sha landed
+# under and run the SAME extractor over that PR's body. There is no second
+# grammar here either — `pr-task-gate.sh --extract-task-id` decides, exactly as
+# it does for the commit message, so an ambiguous PR body is refused (rc 4) and
+# not resolved by position.
+#
+# REST, NEVER GraphQL. `gh api repos/<o>/<r>/commits/<sha>/pulls` is one cheap
+# REST call against the standard rate pool; the GraphQL pool is small, shared
+# and burned first, and a lookup that fails on a budget makes this fallback a
+# silent no-op again.
+#
+# A FAILED LOOKUP IS NEVER A ZERO. No gh, no owner/repo, a non-2xx, or a body
+# that is not a list: each prints a distinct `CANNOT READ` warning naming the
+# sha, and the commit is counted as SKIPPED. It is not fatal — the code is
+# already on main, and this whole file exits 0 on everything but a refused
+# credential.
+FALLBACK_PR=""
+FALLBACK_BODY=""
+
+pulls_json_for_sha() { # $1 sha, $2 out file -> rc 0 wrote JSON, 1 CANNOT READ
+  local sha="$1" out="$2"
+  if [ -n "$FIXTURE_DIR" ]; then
+    # The hermetic door. A fixture directory with no pulls/<sha>.json is the
+    # "GitHub knows no PR for this sha" case, and it is spelled as an empty
+    # list rather than a read failure — an absent association is an ANSWER.
+    if [ -f "$FIXTURE_DIR/pulls/$sha.json" ]; then
+      cat "$FIXTURE_DIR/pulls/$sha.json" > "$out"
+    else
+      printf '[]\n' > "$out"
+    fi
+    return 0
+  fi
+  command -v gh >/dev/null 2>&1 || { warn "CANNOT READ the PR for ${sha:0:10} — gh is not on PATH, so the PR-body fallback could not run. This commit is UNMEASURED, not trailer-less."; return 1; }
+  [ -n "$REPO_SLUG" ] || { warn "CANNOT READ the PR for ${sha:0:10} — no owner/repo (GITHUB_REPOSITORY / LANDED_MARK_REPO is empty), so the PR-body fallback could not run. This commit is UNMEASURED, not trailer-less."; return 1; }
+  # REST. `-H Accept` pinned so a future default cannot change the shape.
+  gh api -H "Accept: application/vnd.github+json" \
+     "repos/${REPO_SLUG}/commits/${sha}/pulls" > "$out" 2>/dev/null && return 0
+  warn "CANNOT READ the PR for ${sha:0:10} — GET repos/${REPO_SLUG}/commits/${sha}/pulls failed (token scope, rate limit, or network). This commit is UNMEASURED, not trailer-less."
+  return 1
+}
+
+trailer_from_pr_body() { # $1 sha -> id on stdout; rc 4 ambiguous, rc 1 no PR / CANNOT READ
+  local sha="$1" f raw prn body out rcx
+  FALLBACK_PR=""; FALLBACK_BODY=""
+  f="$(mktemp -t landed-mark-pulls.XXXXXX)"
+  if ! pulls_json_for_sha "$sha" "$f"; then rm -f "$f"; return 1; fi
+  raw="$(python3 "$PYHELPER" pulls-first "$f" "$sha" 2>/dev/null)"; rcx=$?
+  rm -f "$f"
+  [ "$rcx" = "0" ] || return 1
+  prn="$(sed -n '1p' <<<"$raw")"
+  body="$(sed -n '2,$p' <<<"$raw")"
+  FALLBACK_PR="$prn"; FALLBACK_BODY="$body"
+  # A PR with an EMPTY body is a real answer: no trailer. rc 0, empty stdout —
+  # the same shape the extractor returns for a body without one.
+  [ -n "$body" ] || return 0
+  out="$(trailer_ids_for "$body")"; rcx=$?
+  printf '%s' "$out"
+  return "$rcx"
 }
 
 # ── mark ─────────────────────────────────────────────────────────────────────
@@ -837,7 +964,7 @@ commit_list() {
 }
 
 run_mark() {
-  local shas msg subject id rc pr
+  local shas msg subject id rc pr cite
   shas="$(commit_list)"
   if [ -z "$shas" ]; then
     note "no commits in this push — nothing to mark."
@@ -853,14 +980,39 @@ run_mark() {
       warn "${sha:0:10} names two or more DISTINCT tasks at column 0 — pr-task-gate's grammar refuses to choose, and so does this. Nothing marked for that commit."
       SKIPPED=$((SKIPPED + 1)); continue
     fi
+    # THE FALLBACK. The commit message said nothing, which under a
+    # COMMIT_MESSAGES squash is the NORMAL shape for a PR that carried its
+    # trailer in the body. Ask GitHub which PR this sha landed under and run
+    # the SAME extractor over that PR's body. `cite` is the text the sibling
+    # citations are read from, and it follows the trailer: a `Discharges:` line
+    # written in the PR body would otherwise be lost for exactly the PRs this
+    # fallback exists to rescue.
+    cite="$msg"
+    # Reset per commit: FALLBACK_PR is a GLOBAL, and a stale value from the
+    # PREVIOUS commit would be spliced into THIS commit's mark below when this
+    # subject carries no `(#N)` — a wrong PR number on a right row.
+    FALLBACK_PR=""; FALLBACK_BODY=""
+    if [ -z "$id" ]; then
+      id="$(trailer_from_pr_body "$sha")"; rc=$?
+      case "$rc" in
+        4) warn "${sha:0:10}: the PR body names two or more DISTINCT tasks at column 0 — refused, not picked. Nothing marked for that commit."
+           SKIPPED=$((SKIPPED + 1)); continue ;;
+        1) SKIPPED=$((SKIPPED + 1)); continue ;;
+      esac
+      if [ -n "$id" ]; then
+        cite="$FALLBACK_BODY"
+        note "${sha:0:10}: no trailer in the commit message; PR #${FALLBACK_PR:-?} body names ${id}."
+      fi
+    fi
     [ -n "$id" ] || continue
     pr="${ARG_PR:-$(pr_number_from_subject "$subject")}"
+    [ -n "$pr" ] || pr="$FALLBACK_PR"
     mark_one "$id" "$sha" "$pr"
     # AFTER the row's own marks, and never on a dry run. The sibling rows are
     # the enrichment: if this fails the credited row is still marked and still
     # findable, which is the same ordering argument /landed rides behind
     # /labels.
-    [ "$DRY_RUN" = "1" ] || post_discharges "$id" "$sha" "$pr" "$msg"
+    [ "$DRY_RUN" = "1" ] || post_discharges "$id" "$sha" "$pr" "$cite"
   done <<<"$shas"
 
   if [ "$DRY_RUN" = "1" ]; then
