@@ -939,6 +939,14 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-paper-editor-body .bp-card--ok { border-left-color: var(--st-ok); }
 .bp-paper-editor-body .bp-card--warn { border-left-color: var(--st-warn); }
 .bp-paper-editor-body .bp-card--danger { border-left-color: var(--st-danger); }
+.bp-canvas-card__media-paint {
+  position: absolute; padding: 0; margin: 0; border: 0;
+  border-radius: 0; background: transparent; color: transparent;
+  font-size: 0; cursor: pointer;
+}
+.bp-canvas-card__media-paint:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
 /* The card's action slot is the reader's PdButton anchor; mirror the
  * `.bp-paper-surface .bp-button` rules byte-for-byte (the .bp-canvas-action
  * precedent above) so the embedder paints it identically to /papers. */

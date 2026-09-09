@@ -4162,7 +4162,9 @@
     // BarkparkFigureImageBridge keeps an editable Figure looking like the
     // reader. The server renders the canonical image child; this hook only
     // turns that rendered image into the contextual picker trigger and sends a
-    // source-only patch for the child. The following LiveView render remains
+    // source-only patch for the child. A fixed server-authored Card mode uses
+    // the existing Card form resolver instead; neither event nor field names
+    // are configurable by the picker. The following LiveView render remains
     // authoritative for the visible image and every other child field.
     Hooks.BarkparkFigureImageBridge = {
       mounted() {
@@ -4200,11 +4202,17 @@
         const pushSource = (src) => {
           this._pendingImageSources.add(src);
           let mutation;
-          mutation = bpPaperMutation(this, this.el, "paper-op", {
+          const cardImage = this.el.dataset.imageOwner === "card";
+          const event = cardImage ? "paper-edit-block" : "paper-op";
+          const payload = cardImage ? {
+            block_id: this.el.dataset.blockId,
+            "card-media-src": src,
+          } : {
             op: "patch-block",
             id: this.el.dataset.blockId,
             patch: { src },
-          }, {
+          };
+          mutation = bpPaperMutation(this, this.el, event, payload, {
             onResult: (saved, result) => {
               if (saved || result?.discarded) {
                 this._pendingImageSources.delete(src);
