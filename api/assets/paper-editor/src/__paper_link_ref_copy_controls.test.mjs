@@ -366,6 +366,10 @@ try {
   const cleanDiscard = cleanConflict.querySelector("[data-reference-draft-discard]");
   assert.ok(cleanDiscard,
     "an exact never-sent generic conflict exposes source-scoped discard");
+  cleanConflict.querySelector('[data-action="review"]').click();
+  assert.equal(cleanConflict.querySelector("[data-conflict-message]").textContent,
+    "Copy or download this exact old-reference draft, then use Discard old draft. It will not be applied to the replacement.",
+    "never-sent recovery copy names the available source-scoped discard");
   cleanDiscard.click();
   await tick();
   assert.equal(win.document.querySelector("[data-bp-paper-conflict]"), null,
@@ -553,6 +557,10 @@ async function attemptedDetachedRecovery(
         "[data-bp-paper-conflict]:not([data-bp-paper-reference-draft])",
       );
       assert.ok(conflictBanner, "external authority can still enter ordinary conflict review");
+      conflictBanner.querySelector('[data-action="review"]').click();
+      assert.equal(conflictBanner.querySelector("[data-conflict-message]").textContent,
+        "The server outcome is unresolved. Copy or download the retained draft; retry and discard are unavailable here.",
+        "transport-uncertain recovery copy does not promise retry or discard");
       const latest = conflictBanner.querySelector('[data-action="latest"]');
       assert.equal(latest.disabled, true,
         "generic Use latest cannot delete a registered attempted detached source");

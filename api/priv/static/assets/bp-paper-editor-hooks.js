@@ -1994,13 +1994,20 @@
           const detail = banner.querySelector("[data-conflict-detail]");
           const head = conflict.entry;
           const positional = conflict.positional;
+          const detached = coordinator._conflictDetachedReferenceDraft();
+          const detachedLocalOnly = detached?.source === conflict.source &&
+            coordinator._detachedReferenceDraftIsLocalOnly(detached);
           detail.hidden = false;
           banner.querySelector('[data-action="review"]').setAttribute("aria-expanded", "true");
-          detail.querySelector("[data-conflict-message]").textContent = positional
-            ? `Server revision ${String(conflict.currentRev ?? "unknown")}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft.`
-            : conflict.keepUnavailable
-              ? `Server revision ${String(conflict.currentRev ?? "unknown")}. No exact retry payload is available. Use latest explicitly discards this retained draft.`
-              : `Server revision ${String(conflict.currentRev ?? "unknown")}. Keep mine retries your edits on that revision; Use latest discards them.`;
+          detail.querySelector("[data-conflict-message]").textContent = detached
+            ? detachedLocalOnly
+              ? "Copy or download this exact old-reference draft, then use Discard old draft. It will not be applied to the replacement."
+              : "The server outcome is unresolved. Copy or download the retained draft; retry and discard are unavailable here."
+            : positional
+              ? `Server revision ${String(conflict.currentRev ?? "unknown")}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft.`
+              : conflict.keepUnavailable
+                ? `Server revision ${String(conflict.currentRev ?? "unknown")}. No exact retry payload is available. Use latest explicitly discards this retained draft.`
+                : `Server revision ${String(conflict.currentRev ?? "unknown")}. Keep mine retries your edits on that revision; Use latest discards them.`;
           const retainedDraft = bpPaperConflictDraft(head, conflict.snapshot);
           const reviewDraft = conflict.latestSnapshot
             ? {
@@ -2054,6 +2061,11 @@
         if (detached) {
           keep.disabled = true;
           keep.setAttribute("aria-disabled", "true");
+          const detachedLocalOnly = detached.source === conflict.source &&
+            coordinator._detachedReferenceDraftIsLocalOnly(detached);
+          banner.querySelector(".bp-conflict-description").textContent = detachedLocalOnly
+            ? `This related Paper was replaced before your ${detached.field} draft was sent.`
+            : `This related Paper was replaced while your ${detached.field} save was unresolved.`;
           let download = banner.querySelector("[data-reference-draft-download]");
           if (!download) {
             download = document.createElement("button");
@@ -2100,6 +2112,8 @@
           banner.querySelectorAll("[data-detached-reference-recovery]").forEach(
             (element) => element.remove(),
           );
+          banner.querySelector(".bp-conflict-description").textContent =
+            "This document changed elsewhere. Your edits are still here.";
           const latest = banner.querySelector('[data-action="latest"]');
           latest.disabled = false;
           latest.setAttribute("aria-disabled", "false");
