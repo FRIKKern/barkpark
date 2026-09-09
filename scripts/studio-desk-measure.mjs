@@ -3164,8 +3164,11 @@ export function seededOpenCarryOver({ viewport_px, raw_band, open_clicks }) {
       `left behind, inherited because this pass never reloads. The "before" this width captured is ` +
       `therefore a CLOSED-panel reading labelled as the seeded default, so no round_trip cell is ` +
       `written for ${viewport_px}px and returns_bit_identical cannot be claimed for this run. ` +
-      `Witnessed in scripts/measurements/spd-bracketed-deployed-run{1,2}-2026-07-22.json ` +
-      `(open_clicks 2 at 1440, 1 at 1280).`,
+      `Witnessed in BOTH committed round-2 deployed artefacts under scripts/measurements/ — ` +
+      `open_clicks 2 at 1440 and 1 at 1280, with a 1280 before-leg of content_px 640 (the closed ` +
+      `column) where the matrix for that width reads 599. The block comment on ` +
+      `seededOpenCarryOver names the two files; they are not named here because a dated literal in ` +
+      `live code is a target with an expiry date (studio-desk-default-doc.test.mjs).`,
   };
 }
 
