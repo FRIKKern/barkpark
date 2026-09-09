@@ -7,6 +7,10 @@ const hooksSource = readFileSync(new URL(
   "../../../priv/static/assets/bp-paper-editor-hooks.js",
   import.meta.url,
 ), "utf8");
+const shell = readFileSync(new URL(
+  "../../../priv/static/assets/bp-paper-editor-shell.css",
+  import.meta.url,
+), "utf8");
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 const waitFor = async (predicate) => {
   for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -15,6 +19,19 @@ const waitFor = async (predicate) => {
   }
   assert.fail("condition did not settle");
 };
+
+assert.match(shell,
+  /\.bp-paper-edit-form\.bp-paper-card-title-form\s*\{[^}]*margin:\s*0[^}]*padding:\s*0/s,
+  "the canonical title form adds no geometry around the reader heading");
+assert.match(shell,
+  /\.bp-paper-card-title-input:not\(:focus\)\s*\{[^}]*position:\s*absolute[^}]*opacity:\s*0[^}]*pointer-events:\s*none[^}]*clip-path:\s*inset\(50%\)[^}]*contain:\s*size/s,
+  "the inactive native textarea is non-painting and cannot enlarge the Card");
+assert.match(shell,
+  /\.bp-paper-card-title-owner:has\(\.bp-paper-card-title-input:focus\)[^{]*> \[data-paper-card-title-paint\]\s*\{\s*display:\s*none/s,
+  "the reader paint yields to the one canonical textarea while it is focused");
+assert.match(shell,
+  /\[data-paper-card-title-paint\]:focus-visible,\s*\.bp-paper-card-title-input:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--paper-accent\)[^}]*outline-offset:\s*3px/s,
+  "both pointer surfaces retain the shared visible keyboard focus treatment");
 
 const blockId = "card: foo/[title]#?";
 const titleId = `card-title-${Buffer.from(blockId).toString("base64url")}`;
@@ -211,9 +228,7 @@ toggles.length = 0;
 // Empty is an intentional clear owned by that same canonical textarea.
 input.value = "";
 input.setSelectionRange(0, 0);
-input.dispatchEvent(new window.InputEvent("input", {
-  bubbles: true, inputType: "deleteContentBackward", data: null,
-}));
+input.dispatchEvent(new window.Event("input", { bubbles: true }));
 assert.equal(hook._bpPaperExitCoordinator.hasUnsaved(), true,
   "the empty title remains a real pending scalar draft");
 hook.el.click();
