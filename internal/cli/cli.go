@@ -437,7 +437,7 @@ func Execute(args []string) int {
 			printRouteLatencyHelp(out)
 			return exitOK
 		}
-		return runRouteLatency(out, rest[1:])
+		return runRouteLatency(out, g, rest[1:])
 	case "server":
 		// `bp server ls` is an alias for `bp servers`; it dispatches from the
 		// nounBuiltins registry above. `server` is NOT a manifest noun, so no

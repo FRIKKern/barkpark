@@ -56,7 +56,7 @@ type routeLatencyWindow struct {
 
 // runRouteLatency is `bp latency [--name <handle>] [--url <url>] [--token <tok>]
 // [--min-uptime <seconds>]`.
-func runRouteLatency(out *writer, args []string) int {
+func runRouteLatency(out *writer, g globals, args []string) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			printRouteLatencyHelp(out)
@@ -67,6 +67,17 @@ func runRouteLatency(out *writer, args []string) int {
 	name, urlOverride, tokenOverride, minUptime, perr := parseRouteLatencyArgs(args)
 	if perr != nil {
 		return useError(out, "usage", perr.Error(), exitUsage)
+	}
+
+	// `--token` is a GLOBAL flag (globals.go valueFlags), so parseGlobals consumes
+	// it before this command's own parser ever sees it — a command-local --token
+	// is unreachable in a real `bp latency --token X` invocation and the value
+	// arrives on g instead. Prefer a locally-set one, fall back to the global, so
+	// both spellings reach the same bearer. Without this the flag is silently
+	// dropped and the saved token is used in its place, which is a live 401
+	// against a platform-operator-gated route.
+	if strings.TrimSpace(tokenOverride) == "" {
+		tokenOverride = g.token
 	}
 
 	base, token, target, ok := resolveDoctorTarget(out, name, urlOverride, tokenOverride)
@@ -433,7 +444,7 @@ THE WINDOW
 TARGET
   --url <url>      probe this base URL directly (overrides config)
   --name <handle>  probe a known Barkpark by name (else the active server)
-  --token <token>  bearer for /v1/instance/metrics (else the saved one)
+  --token <token>  bearer for /v1/instance/metrics (a GLOBAL flag; else the saved one)
 
 FLAGS
   --min-uptime <s> minimum slot age before any figure is printed (default 600)

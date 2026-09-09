@@ -112,13 +112,51 @@ func routeLatencyFixture(t *testing.T, uptimeSeconds any, exposition string) (ba
 	return srv.URL, &hits
 }
 
+// runLatency drives the command the way Execute does: `--token` is a GLOBAL
+// flag, so parseGlobals lifts it onto globals before the command's own parser
+// runs. Feeding it through the local arg slice instead would test a path a real
+// `bp latency --token X` never takes — and DID hide a live 401 (the bearer was
+// dropped and the saved token used in its place).
 func runLatency(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
+	g, rest, err := parseGlobals(args)
+	if err != nil {
+		t.Fatalf("parseGlobals(%v): %v", args, err)
+	}
 	var so, se bytes.Buffer
 	w := newWriter(&so, &se)
 	w.output = "table"
-	code = runRouteLatency(w, args)
+	code = runRouteLatency(w, g, rest)
 	return code, so.String(), se.String()
+}
+
+// TestRouteLatencyTokenArrivesOnGlobals pins the seam the live 401 exposed:
+// `--token` is consumed by parseGlobals, so the command MUST read it off
+// globals or the Bearer never reaches /v1/instance/metrics.
+func TestRouteLatencyTokenArrivesOnGlobals(t *testing.T) {
+	g, rest, err := parseGlobals([]string{"--url", "http://x", "--token", "tok-abc"})
+	if err != nil {
+		t.Fatalf("parseGlobals: %v", err)
+	}
+	if g.token != "tok-abc" {
+		t.Fatalf("precondition: --token did not land on globals (g.token=%q) — this guard is measuring nothing", g.token)
+	}
+	for _, a := range rest {
+		if a == "--token" || a == "tok-abc" {
+			t.Fatalf("precondition: --token still in rest %v — the global parser changed", rest)
+		}
+	}
+	base, hits := routeLatencyFixture(t, 14400, realShapeExposition)
+	g.token = "tok-abc"
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.output = "table"
+	if code := runRouteLatency(w, g, []string{"--url", base}); code != exitOK {
+		t.Fatalf("exit=%d — the Bearer from globals never reached the scrape:\n%s%s", code, so.String(), se.String())
+	}
+	if atomic.LoadInt32(hits) != 1 {
+		t.Fatalf("metrics not scraped")
+	}
 }
 
 // TestRouteLatencyNamesTheSlowRoute is criterion 0: the consumer must say WHICH
@@ -324,11 +362,13 @@ func TestRouteLatencyQuantileMath(t *testing.T) {
 	if !dq.Bounded {
 		t.Fatalf("/v1/admin/site-deploy p95 must be bounded, got %+v", dq)
 	}
-	// rank = 0.95*448 = 425.6, which falls in the (25, 50] bucket (141 → 402).
-	if dq.Lower != 25 || dq.Upper != 50 {
-		t.Errorf("/v1/admin/site-deploy p95 bracket = %v–%v, want 25–50", dq.Lower, dq.Upper)
+	// rank = 0.95*448 = 425.6. The le=50 bucket holds only 402, so the 95th
+	// percentile lands in the NEXT one, (50, 100] — which is still two orders of
+	// magnitude below /v1/graph, the point of the fixture.
+	if dq.Lower != 50 || dq.Upper != 100 {
+		t.Errorf("/v1/admin/site-deploy p95 bracket = %v–%v, want 50–100", dq.Lower, dq.Upper)
 	}
-	if dq.MS < 25 || dq.MS > 50 {
+	if dq.MS < 50 || dq.MS > 100 {
 		t.Errorf("interpolated p95 %v is outside its own bracket", dq.MS)
 	}
 
