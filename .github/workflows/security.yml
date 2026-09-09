@@ -952,7 +952,7 @@ jobs:
     #   * THE DRILL BRANCH. `github.head_ref == 'ci-drill/main-push-failure-arm'`
     #     is a NAMED, EXACT-MATCH self-test hatch, and it exists because an arm
     #     gated on `github.ref == 'refs/heads/main'` CANNOT BE OBSERVED FIRING
-    #     BEFORE IT MERGES — none of the five gate workflows carries
+    #     BEFORE IT REACHES THE DEFAULT BRANCH — none of the five gate workflows carries
     #     `workflow_dispatch`, and a `workflow_dispatch` added on a branch is
     #     not dispatchable until it is on the default branch. Without this hatch
     #     the arm would ship as the vacuous-green shape this repo keeps
