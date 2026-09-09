@@ -59,6 +59,22 @@ defmodule BarkparkCloud.Workers.DeployRateAlertWorker do
         "sent=#{result.sent} latched=#{result.latched}"
     )
 
-    {:ok, result}
+    # dr-w11-s5-waiting-alert — THE SECOND EDGE-GUARDED DEPLOY NOTICE, on the
+    # same tick and for the same reason this worker exists: it is a per-team
+    # read of an already-computed cohort with a latched, one-per-episode output,
+    # and giving it its own crontab row would put a second hourly ledger scan on
+    # the fleet to answer a question the same tick can answer.
+    #
+    # It is called SECOND and its accounting is logged separately: the two
+    # notices share a state ROW but never a verdict, and one log line carrying
+    # both counts would make an episode of either indistinguishable in journald.
+    waiting = Notifications.deliver_site_publish_waiting_notices()
+
+    Logger.info(
+      "site_publish_waiting teams=#{waiting.teams} waiting=#{waiting.waiting} " <>
+        "sent=#{waiting.sent} latched=#{waiting.latched} recovered=#{waiting.recovered}"
+    )
+
+    {:ok, Map.put(result, :waiting, waiting)}
   end
 end
