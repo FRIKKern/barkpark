@@ -687,6 +687,12 @@ pr_number_from_subject() { # squash convention: "subject (#1234)"
 # sha, and the commit is counted as SKIPPED. It is not fatal — the code is
 # already on main, and this whole file exits 0 on everything but a refused
 # credential.
+# THESE ARE GLOBALS AND THE CALL BELOW IS NOT A COMMAND SUBSTITUTION, on
+# purpose: `id="$(trailer_from_pr_body "$sha")"` would run the whole function in
+# a SUBSHELL, and every assignment it made would die with that subshell — the
+# id would arrive and the PR number would silently be empty. (Measured: the
+# 2026-09-09 first cut did exactly this; the mark landed with no PR on it.)
+FALLBACK_ID=""
 FALLBACK_PR=""
 FALLBACK_BODY=""
 
@@ -712,9 +718,9 @@ pulls_json_for_sha() { # $1 sha, $2 out file -> rc 0 wrote JSON, 1 CANNOT READ
   return 1
 }
 
-trailer_from_pr_body() { # $1 sha -> id on stdout; rc 4 ambiguous, rc 1 no PR / CANNOT READ
+trailer_from_pr_body() { # $1 sha -> sets FALLBACK_ID/_PR/_BODY; rc 4 ambiguous, rc 1 no PR / CANNOT READ
   local sha="$1" f raw prn body out rcx
-  FALLBACK_PR=""; FALLBACK_BODY=""
+  FALLBACK_ID=""; FALLBACK_PR=""; FALLBACK_BODY=""
   f="$(mktemp -t landed-mark-pulls.XXXXXX)"
   if ! pulls_json_for_sha "$sha" "$f"; then rm -f "$f"; return 1; fi
   raw="$(python3 "$PYHELPER" pulls-first "$f" "$sha" 2>/dev/null)"; rcx=$?
@@ -727,7 +733,7 @@ trailer_from_pr_body() { # $1 sha -> id on stdout; rc 4 ambiguous, rc 1 no PR / 
   # the same shape the extractor returns for a body without one.
   [ -n "$body" ] || return 0
   out="$(trailer_ids_for "$body")"; rcx=$?
-  printf '%s' "$out"
+  FALLBACK_ID="$out"
   return "$rcx"
 }
 
@@ -991,9 +997,13 @@ run_mark() {
     # Reset per commit: FALLBACK_PR is a GLOBAL, and a stale value from the
     # PREVIOUS commit would be spliced into THIS commit's mark below when this
     # subject carries no `(#N)` — a wrong PR number on a right row.
-    FALLBACK_PR=""; FALLBACK_BODY=""
+    FALLBACK_ID=""; FALLBACK_PR=""; FALLBACK_BODY=""
     if [ -z "$id" ]; then
-      id="$(trailer_from_pr_body "$sha")"; rc=$?
+      # MUT-PR-FALLBACK: scripts/landed-mark.test.sh replaces this call with
+      # `FALLBACK_ID=""; rc=0` in a scratch copy and requires the §14 arms to
+      # go RED while §14b/§14c (nothing written) stay green.
+      trailer_from_pr_body "$sha"; rc=$?
+      id="$FALLBACK_ID"
       case "$rc" in
         4) warn "${sha:0:10}: the PR body names two or more DISTINCT tasks at column 0 — refused, not picked. Nothing marked for that commit."
            SKIPPED=$((SKIPPED + 1)); continue ;;
@@ -1385,6 +1395,107 @@ has "$OUT" "CANNOT MEASURE" "a zero-commit scan says so instead of reporting OK"
 OUT="$(bash "$SELF" --lst-open 2>&1)"; RC=$?
 check "an unknown option refuses at exit 2" "$RC" "2"
 has "$OUT" "unknown option" "the unknown-option refusal names the flag"
+
+# 14. THE PR-BODY FALLBACK (measured 2026-09-09T22:47Z). Under a
+#     COMMIT_MESSAGES squash the commit on main carries the BRANCH's messages,
+#     so a PR whose `Task:` trailer lives in its BODY lands with a bare subject
+#     and no trailer at all. Before this, that was silence — indistinguishable
+#     from a commit that really names no task. Every arm here is hermetic: the
+#     lookup reads $FIXTURE/pulls/<sha>.json and never touches the network.
+mkpull() { # $1 ledgerdir, $2 sha, $3 pr number, $4 PR body
+  mkdir -p "$1/pulls"
+  python3 - "$1/pulls/$2.json" "$3" "$4" <<'PYP'
+import json, sys
+path, num, body = sys.argv[1:4]
+json.dump([{"number": int(num), "body": body, "merged_at": "2026-09-09T22:00:00Z",
+            "merge_commit_sha": None}], open(path, "w"))
+PYP
+}
+
+# 14a. THE RESCUE. Bare subject, no trailer in the message, trailer in the PR
+#      body — the exact shape of all 30 trailer-less squashes measured on
+#      origin/main 2026-09-09 16:00Z..23:00Z.
+RA="$TMPROOT/ra"; LA="$TMPROOT/la"; mkrepo "$RA"; mkledger "$LA"
+mkrow "$LA" task-iii1 in_progress builder-s ""
+SA="$(mkcommit "$RA" "fix(z): a squash with no trailer (#88)")"
+mkpull "$LA" "$SA" 88 "$(printf 'prose about the change\n\nTask: task-iii1\n')"
+OUT="$(run "$RA" "$LA" --sha "$SA")"; RC=$?
+check "MUT-PR-FALLBACK: a bare-subject squash exits 0" "$RC" "0"
+has "$OUT" "no trailer in the commit message; PR #88 body names task-iii1" "MUT-PR-FALLBACK: the fallback says WHERE the id came from"
+has "$OUT" "marked task-iii1" "MUT-PR-FALLBACK: a trailer that lives only in the PR body still marks the row"
+check "MUT-PR-FALLBACK: the fallback really wrote (1 label POST)" "$(writes_in "$LA")" "1"
+has "$(cat "$LA/writes.log")" "landed:pr-88@${SA:0:10}" "MUT-PR-FALLBACK: the fact label carries the PR and the sha"
+has "$(cat "$LA/landed.log")" '"pr": "88"' "MUT-PR-FALLBACK: the landing sentence carries the PR too"
+# Positive control: the row really moved. A "marked" line over a row nothing
+# reached would be a vacuous green.
+check "MUT-PR-FALLBACK positive control: the row carries the class label" \
+  "$(python3 -c 'import json,sys; print("landed-on-main" in (json.load(open(sys.argv[1]))["doc"]["content"].get("labels") or []))' "$LA/rows/task-iii1.json")" "True"
+
+# 14b. THE LOOKUP FINDS NO PR. An empty association list is an ANSWER, and the
+#      answer is silence + exit 0 — the same shape as a commit with no trailer.
+RB="$TMPROOT/rb"; LB="$TMPROOT/lb"; mkrepo "$RB"; mkledger "$LB"; mkdir -p "$LB/pulls"
+mkrow "$LB" task-iii2 in_progress builder-s ""
+SB="$(mkcommit "$RB" "fix(z): no PR for this sha (#89)")"
+OUT="$(run "$RB" "$LB" --sha "$SB")"; RC=$?
+check "the fallback finding NO PR exits 0" "$RC" "0"
+check "the fallback finding NO PR writes NOTHING" "$(writes_in "$LB")" "0"
+hasnt "$OUT" "marked task-" "the fallback finding NO PR marks nothing"
+
+# 14c. THE PR EXISTS AND ITS BODY HAS NO TRAILER. Also silence + exit 0: most
+#      PRs on this repo predate the trailer rule or are dependabot noise.
+RC2="$TMPROOT/rc2"; LC="$TMPROOT/lc"; mkrepo "$RC2"; mkledger "$LC"
+mkrow "$LC" task-iii3 in_progress builder-s ""
+SC="$(mkcommit "$RC2" "fix(z): PR body has no trailer (#90)")"
+mkpull "$LC" "$SC" 90 "$(printf 'just prose, and a quoted example:\n\n    Task: task-iii3\n')"
+OUT="$(run "$RC2" "$LC" --sha "$SC")"; RC=$?
+check "a PR body with no COLUMN-0 trailer exits 0" "$RC" "0"
+check "a PR body with no COLUMN-0 trailer writes NOTHING" "$(writes_in "$LC")" "0"
+hasnt "$OUT" "marked task-iii3" "an INDENTED example in the PR body is not a trailer — pr-task-gate's grammar, not a second one"
+
+# 14d. THE PR NUMBER COMES OFF THE LOOKUP when the subject carries none. A
+#      hand-merged commit has no `(#N)` at all, and a mark with no PR is a mark
+#      nobody can trace back.
+RD="$TMPROOT/rd"; LD="$TMPROOT/ld"; mkrepo "$RD"; mkledger "$LD"
+mkrow "$LD" task-iii4 in_progress builder-s ""
+SD="$(mkcommit "$RD" "fix(z): no pr suffix in the subject at all")"
+mkpull "$LD" "$SD" 91 "$(printf 'Task: task-iii4\n')"
+OUT="$(run "$RD" "$LD" --sha "$SD")"
+has "$OUT" "marked task-iii4" "a subject with no (#N) is still marked through the lookup"
+has "$(cat "$LD/writes.log")" "landed:pr-91@" "the PR number comes off the LOOKUP when the subject has none"
+
+# 14e. AN AMBIGUOUS PR BODY IS REFUSED, not picked — the same rule the commit
+#      message obeys. Two distinct ids, and the fallback writes nothing.
+RE="$TMPROOT/re"; LE="$TMPROOT/le"; mkrepo "$RE"; mkledger "$LE"
+mkrow "$LE" task-iii5 in_progress builder-s ""
+SE="$(mkcommit "$RE" "fix(z): ambiguous PR body (#92)")"
+mkpull "$LE" "$SE" 92 "$(printf 'Task: task-iii5\nTask: task-iii6\n')"
+OUT="$(run "$RE" "$LE" --sha "$SE")"; RC=$?
+check "an ambiguous PR body exits 0" "$RC" "0"
+has "$OUT" "DISTINCT" "an ambiguous PR body is refused, not picked"
+check "an ambiguous PR body writes nothing" "$(writes_in "$LE")" "0"
+
+# 14f. THE COMMIT MESSAGE STILL WINS. This is a FALLBACK: a body-carried
+#      trailer is the author's statement about THIS commit, and a PR body that
+#      names a different row may not override it.
+RF="$TMPROOT/rf"; LF="$TMPROOT/lf"; mkrepo "$RF"; mkledger "$LF"
+mkrow "$LF" task-iii7 in_progress builder-s ""
+mkrow "$LF" task-iii8 in_progress builder-s ""
+SF="$(mkcommit "$RF" "$(printf 'fix(z): message wins (#93)\n\nTask: task-iii7\n')")"
+mkpull "$LF" "$SF" 93 "$(printf 'Task: task-iii8\n')"
+OUT="$(run "$RF" "$LF" --sha "$SF")"
+has "$OUT" "marked task-iii7" "a commit-message trailer is used and the PR body is never consulted"
+hasnt "$OUT" "task-iii8" "the PR body does NOT override a trailer the commit message already carried"
+
+# 14g. THE SIBLING CITATIONS FOLLOW THE TRAILER. A `Discharges:` line written
+#      in the PR body would otherwise be lost for exactly the PRs this fallback
+#      rescues — the citation text has to come from wherever the id came from.
+RG="$TMPROOT/rg"; LG="$TMPROOT/lg"; mkrepo "$RG"; mkledger "$LG"
+mkrow "$LG" task-iii9 in_progress builder-s ""
+SG="$(mkcommit "$RG" "fix(z): siblings in the PR body (#94)")"
+mkpull "$LG" "$SG" 94 "$(printf 'Discharges: task-sib-five c1\n\nTask: task-iii9\n')"
+OUT="$(run "$RG" "$LG" --sha "$SG")"
+has "$(cat "$LG/discharges.log")" 'task-sib-five' "a Discharges: line in the PR body reaches /discharges through the fallback"
+has "$OUT" "1 sibling citation(s) posted" "…and the tally counts it"
 
 echo "landed-mark --selftest: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ] || exit 1
