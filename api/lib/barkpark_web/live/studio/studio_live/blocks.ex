@@ -62,6 +62,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     do: {:error, :paper_link_reference_copy_unavailable}
 
   @doc false
+  def paper_link_reference_copy_admission(
+        %{"refs" => refs} = block,
+        index,
+        field
+      )
+      when is_list(refs) and is_integer(index) and index >= 0 and
+             field in ["title", "description"] do
+    with {:ok, admission} <- paper_link_reference_copy_admission(block, index),
+         ref when is_map(ref) and not is_struct(ref) <- Enum.at(refs, index),
+         true <- paper_link_ref_copy_field_representable?(ref, field) do
+      {:ok, admission}
+    else
+      _ -> {:error, :paper_link_reference_copy_unavailable}
+    end
+  end
+
+  def paper_link_reference_copy_admission(_block, _index, _field),
+    do: {:error, :paper_link_reference_copy_unavailable}
+
+  @doc false
   def paper_link_ref_guard(ref) when is_map(ref) and not is_struct(ref) do
     identity = Map.drop(ref, ["title", "description"])
 
@@ -87,16 +107,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   defp resolve_paper_link_ref_form(%{"type" => "paper-links"} = block, source) do
     with true <- Enum.sort(Map.keys(source)) == @paper_link_ref_form_keys,
          {:ok, index} <- canonical_paper_link_ref_index(source["paper-link-ref-index"]),
-         {:ok, %{slug: slug, guard: expected_guard}} <-
-           paper_link_reference_copy_admission(block, index),
-         true <- source["paper-link-ref-slug"] === slug,
          field when field in ["title", "description"] <- source["paper-link-ref-field"],
+         {:ok, %{slug: slug, guard: expected_guard}} <-
+           paper_link_reference_copy_admission(block, index, field),
+         true <- source["paper-link-ref-slug"] === slug,
          value when is_binary(value) <- source["paper-link-ref-value"],
          true <- valid_paper_link_ref_guard?(source["paper-link-ref-guard"], expected_guard),
          refs when is_list(refs) <- block["refs"],
          ref when is_map(ref) and not is_struct(ref) <- Enum.at(refs, index) do
       updated =
-        if String.trim(value) == "", do: Map.delete(ref, field), else: Map.put(ref, field, value)
+        cond do
+          paper_link_ref_copy_form_value(ref, field) === value -> ref
+          String.trim(value) == "" -> Map.delete(ref, field)
+          true -> Map.put(ref, field, value)
+        end
 
       patch =
         if updated === ref, do: %{}, else: %{"refs" => List.replace_at(refs, index, updated)}
@@ -140,6 +164,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   end
 
   defp paper_link_ref_trimmed_slug(_ref), do: nil
+
+  defp paper_link_ref_copy_field_representable?(ref, field) do
+    case Map.fetch(ref, field) do
+      :error -> true
+      {:ok, value} -> is_nil(value) or is_binary(value) or is_integer(value)
+    end
+  end
+
+  defp paper_link_ref_copy_form_value(ref, field) do
+    case Map.fetch(ref, field) do
+      :error -> ""
+      {:ok, nil} -> ""
+      {:ok, value} when is_binary(value) -> value
+      {:ok, value} when is_integer(value) -> Integer.to_string(value)
+    end
+  end
 
   @doc false
   def structure_child_locked?(child), do: not is_nil(locked_visible_block_id(child))

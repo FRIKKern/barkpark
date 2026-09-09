@@ -45,6 +45,75 @@ defmodule BarkparkWeb.Studio.PaperEditor.PaperLinksReferenceCopyPatchTest do
     assert block === paper_links([first, sibling])
   end
 
+  test "field admission rejects opaque selected values but permits opaque sibling copy" do
+    for opaque <- [%{"keep" => true}, ["keep"], true, 1.5] do
+      ref = authored_ref(%{"title" => opaque, "description" => "Safe"})
+      block = paper_links([ref])
+
+      assert {:ok, _row} = Blocks.paper_link_reference_copy_admission(block, 0)
+
+      assert {:error, :paper_link_reference_copy_unavailable} =
+               Blocks.paper_link_reference_copy_admission(block, 0, "title")
+
+      assert {:ok, _field} =
+               Blocks.paper_link_reference_copy_admission(block, 0, "description")
+
+      assert {:error, {:source_validation, :invalid_paper_link_reference_copy}} =
+               Blocks.resolve_block_form(
+                 [block],
+                 source(ref, %{
+                   "paper-link-ref-field" => "title",
+                   "paper-link-ref-value" => "Overwrite"
+                 })
+               )
+    end
+
+    opaque_description = %{"keep" => [true, nil]}
+    ref = authored_ref(%{"title" => "Before", "description" => opaque_description})
+
+    assert {:ok, %{"patch" => %{"refs" => [updated]}}} =
+             Blocks.resolve_block_form(
+               [paper_links([ref])],
+               source(ref, %{"paper-link-ref-value" => "After"})
+             )
+
+    assert updated["title"] == "After"
+    assert updated["description"] === opaque_description
+  end
+
+  test "representable absent nil integer and exact string values submit as source-preserving no-ops" do
+    cases = [
+      {%{}, ""},
+      {%{"title" => nil}, ""},
+      {%{"title" => 42}, "42"},
+      {%{"title" => "Before"}, "Before"},
+      {%{"title" => "   "}, "   "}
+    ]
+
+    for {copy, submitted} <- cases do
+      ref = authored_ref(copy)
+      block = paper_links([ref])
+
+      assert {:ok, _admission} =
+               Blocks.paper_link_reference_copy_admission(block, 0, "title")
+
+      assert {:ok, %{"patch" => %{}}} =
+               Blocks.resolve_block_form(
+                 [block],
+                 source(ref, %{"paper-link-ref-value" => submitted})
+               )
+
+      assert block === paper_links([ref])
+    end
+
+    assert {:error, :paper_link_reference_copy_unavailable} =
+             Blocks.paper_link_reference_copy_admission(
+               paper_links([authored_ref(%{"title" => "Before"})]),
+               0,
+               "eyebrow"
+             )
+  end
+
   test "blank deletes only the selected field and exact no-op returns an empty patch" do
     first = authored_ref(%{"title" => "Before", "description" => "Keep"})
     block = paper_links([first])
