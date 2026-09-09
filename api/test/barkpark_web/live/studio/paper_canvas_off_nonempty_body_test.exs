@@ -76,7 +76,7 @@ defmodule BarkparkWeb.Studio.PaperCanvasOffNonEmptyBodyTest do
       |> Ecto.Changeset.change(content: %{"rev" => 0, "blocks" => []})
       |> Barkpark.Repo.update!()
 
-    assert %{"blocks" => []} = doc.content,
+    assert doc.content["blocks"] == [],
            "FIXTURE LAW: the guard measures a blocks-LIST document that is EMPTY, " <>
              "got #{inspect(doc.content)}"
 
