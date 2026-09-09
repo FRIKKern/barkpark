@@ -923,12 +923,12 @@ jobs:
             The `Go gate` context is RED on a push to `main`.
             This is POST-MERGE: the breakage is already on the default branch.
 
-            `Go gate` is ADVISORY — branch protection on main requires exactly
-            four contexts (`Elixir gate`, `Cloud gate`, `Console gate`, `PR
-            references an active task`, enforce_admins=true) and this is not
-            one of them. It did not block the merge and it cannot. That is
-            exactly why it needs a report: an advisory red on main is the one
-            with no human already attached to it.
+            `Go gate` is ADVISORY: it is not among the contexts listed in
+            .github/required-checks.json, so it never stopped this change and
+            could not have. That is exactly why it needs a report — an advisory
+            red on main is the one with no human already attached to it. (The
+            required roster is deliberately NOT enumerated here: that spec is
+            the single owner of it, and a copy in prose goes stale.)
 
             Read the aggregator's "Decide (fail-closed over every upstream
             result)" step: it names whether `go vet + test` or the `changes`

@@ -995,10 +995,11 @@ jobs:
             The `Security gate` context is RED on a push to `main`.
             This is POST-MERGE: the breakage is already on the default branch.
 
-            `Security gate` is ADVISORY — the four required contexts on main are
-            `Elixir gate`, `Cloud gate`, `Console gate` and `PR references an
-            active task`, and this is not among them. It did not block the merge
-            and it cannot.
+            `Security gate` is ADVISORY: it is not among the contexts listed in
+            .github/required-checks.json, so it never stopped this change and
+            could not have. (The required roster is deliberately NOT enumerated
+            here: that spec is the single owner of it, and a copy in prose goes
+            stale.)
 
             Read the aggregator's "Decide (fail-closed over every upstream
             result)" step: it names which of `gate-shape`,
