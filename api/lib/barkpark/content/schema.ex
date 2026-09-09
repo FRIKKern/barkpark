@@ -108,6 +108,17 @@ defmodule Barkpark.Content.Schema do
     |> Enum.uniq_by(& &1.name)
   end
 
+  # THE ARITY IS THE TENANT FENCE (task-be3b3aa6da5df3a2, instance 1). `opts`
+  # defaults to `[]`, so a 2-arity call compiles and returns a schema — with
+  # `workspace_id` nil the query below runs `scope_to_workspace_or_global(nil,
+  # nil)` (the query untouched) and then `order_by(asc_nulls_last: dataset_id)
+  # |> limit(1)`, so on a SAME-NAMED type it can hand back ANOTHER workspace's
+  # `%SchemaDefinition{}` — field set, visibility flags, list_preview,
+  # desk_groups — and this tenant's document is then rendered through it. Every
+  # `barkpark_web` caller passes scope (`schema_controller` via
+  # `scope_opts(conn)`); a new one must too. The redaction path has its OWN
+  # chokepoint with a nil-workspace-only fallback: `get_schema_for_redaction/3`.
+  # @canonical capability:schema-resolution-tenant-scoped aka:get_schema,schema definition lookup,type schema doc:docs/contracts/tenancy.md
   def get_schema(name, dataset, opts \\ []) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)

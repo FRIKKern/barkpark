@@ -19,6 +19,7 @@ defmodule BarkparkWeb.Studio.StudioTenantScopeReadsTest do
 
   alias BarkparkWeb.Studio.StudioLive.Components
   alias BarkparkWeb.Studio.StudioLive.Handlers.Airdrop
+  alias BarkparkWeb.Studio.StudioLive.Handlers.Secondary
 
   # ── instance 3 — the sidebar Relations pane resolves a reference title ──────
   #
@@ -93,6 +94,123 @@ defmodule BarkparkWeb.Studio.StudioTenantScopeReadsTest do
 
       assert html =~ "WORKSPACE A INTRO"
       refute html =~ "WORKSPACE B INTRO"
+    end
+  end
+
+  # ── criterion 3 — THE SCHEMA CASE, two workspaces, one type name ────────────
+  #
+  # The row's instance 1 (`Content.get_schema(type, dataset)` beside a scoped
+  # `fetch_doc_with_draft` in `handlers/secondary.ex`) is GONE from origin/main:
+  # that read is now `Content.resolve_schema(type, dataset,
+  # ScopeHelpers.scope_opts(socket))`. A fixed call site is invisible to a test
+  # once it is fixed, so this test does not assert the SHAPE of the call — it
+  # asserts the BEHAVIOUR the shape buys, over the exact fixture the row
+  # describes, at the exact Studio read instance 1 named. Drop the scope
+  # argument back off `select_secondary/2` and it goes red (proof in the PR).
+  #
+  # THE MECHANISM (`content/schema.ex get_schema/3`): with `workspace_id` nil
+  # the query runs `scope_to_workspace_or_global(nil, nil)` — the nil arm
+  # returns the query UNTOUCHED, every tenant's rows — then
+  # `order_by(asc_nulls_last: dataset_id) |> limit(1)`. Two same-named rows
+  # therefore collapse to whichever the database hands back first, and this
+  # tenant's document renders through the OTHER tenant's field set, visibility
+  # flags, list_preview and desk_groups.
+  #
+  # THE DATASET LEG (the row's METHOD NOTE, checked first): both schema rows are
+  # written with a nil `dataset_id` and the dataset STRING "test", so
+  # `scope_schema_to_dataset/3`'s `is_nil(s.dataset_id) and s.dataset == ^dataset`
+  # arm admits BOTH regardless of what `Content.resolve_read_dataset_id/2`
+  # resolves for the seeded Default project. The dataset leaf cannot silently
+  # fence this one — the workspace filter is the only thing standing between the
+  # two rows, which is what makes the red proof meaningful.
+  describe "the Studio secondary pane binds the caller's OWN SchemaDefinition" do
+    alias Barkpark.Content.SchemaDefinition
+
+    setup do
+      ws_a = create_workspace!()
+      proj_a = create_project!(ws_a)
+      ws_b = create_workspace!()
+      proj_b = create_project!(ws_b)
+
+      type = "post#{System.unique_integer([:positive])}"
+
+      # A REAL `datasets` row per project, both slugged "test". The nil-dataset_id
+      # shape is NOT available here: `schema_definitions_name_dataset_null_dataset_id_index`
+      # is a UNIQUE index on (name, dataset) WHERE dataset_id IS NULL, so the
+      # database itself refuses two same-named legacy rows — a fence worth
+      # recording, and the reason each row below carries a dataset_id.
+      {:ok, ds_a} = Barkpark.Tenancy.get_or_create_dataset(proj_a, "test")
+      {:ok, ds_b} = Barkpark.Tenancy.get_or_create_dataset(proj_b, "test")
+
+      {:ok, _schema_a} = seed_schema!(type, ws_a, proj_a, ds_a, "WORKSPACE A SCHEMA")
+      {:ok, _schema_b} = seed_schema!(type, ws_b, proj_b, ds_b, "WORKSPACE B SCHEMA")
+
+      {:ok, doc_b} =
+        create_document_in!(ws_b, proj_b, type, %{
+          "doc_id" => "shared-id",
+          "title" => "B doc"
+        })
+
+      %{ws_b: ws_b, proj_b: proj_b, type: type, doc_b: doc_b}
+    end
+
+    defp seed_schema!(name, ws, proj, ds, title) do
+      %SchemaDefinition{}
+      |> SchemaDefinition.changeset(%{
+        name: name,
+        title: title,
+        dataset: "test",
+        dataset_id: ds.id,
+        workspace_id: ws.id,
+        project_id: proj.id,
+        fields: [%{"name" => title_field(title), "type" => "string"}]
+      })
+      |> Barkpark.Repo.insert()
+    end
+
+    defp title_field("WORKSPACE A SCHEMA"), do: "a_only_field"
+    defp title_field(_), do: "b_only_field"
+
+    defp secondary_socket(ws, proj, type) do
+      %Phoenix.LiveView.Socket{
+        assigns: %{
+          __changed__: %{},
+          current_workspace: ws,
+          current_project: proj,
+          dataset: "test",
+          editor_type: type,
+          secondary_doc: nil,
+          secondary_schema: nil,
+          secondary_type: nil,
+          show_secondary_picker: true,
+          secondary_search: "",
+          flash: %{}
+        }
+      }
+    end
+
+    test "workspace B's secondary pane resolves B's schema, never A's", %{
+      ws_b: ws_b,
+      proj_b: proj_b,
+      type: type
+    } do
+      socket = secondary_socket(ws_b, proj_b, type)
+
+      {:noreply, socket} = Secondary.select_secondary(%{"id" => "shared-id"}, socket)
+
+      schema = socket.assigns.secondary_schema
+
+      assert schema,
+             "the secondary pane resolved NO schema — the fixture, not the fence, is wrong"
+
+      assert schema.title == "WORKSPACE B SCHEMA",
+             "the Studio bound workspace A's SchemaDefinition to workspace B's document " <>
+               "(got #{inspect(schema.title)}) — the schema read dropped the caller's workspace_id"
+
+      assert schema.workspace_id == ws_b.id
+
+      assert Enum.map(schema.fields, & &1["name"]) == ["b_only_field"],
+             "the field set came from the other tenant's schema: #{inspect(schema.fields)}"
     end
   end
 
@@ -176,10 +294,11 @@ defmodule BarkparkWeb.Studio.StudioTenantScopeReadsTest do
     # paren — the 4-arity/3-arity scoped forms carry one more argument and do
     # not match.
     @short_arity_shapes [
-      {"Content.get_schema/2", ~r/get_schema\(\s*[^()\n]+,\s*[^,()\n]+\)/},
-      {"Content.get_paper/2", ~r/get_paper\(\s*[^()\n]+,\s*[^,()\n]+\)/},
-      {"Content.reference_title/3", ~r/reference_title\(\s*[^()\n]+,\s*[^,()\n]+,\s*[^,()\n]+\)/},
-      {"Content.get_document/3", ~r/get_document\(\s*[^()\n]+,\s*[^,()\n]+,\s*[^,()\n]+\)/}
+      {"Content.get_schema/2", ~r/get_schema\(\s*[^,()\n]+,\s*[^,()\n]+\)/},
+      {"Content.get_paper/2", ~r/get_paper\(\s*[^,()\n]+,\s*[^,()\n]+\)/},
+      {"Content.reference_title/3",
+       ~r/reference_title\(\s*[^,()\n]+,\s*[^,()\n]+,\s*[^,()\n]+\)/},
+      {"Content.get_document/3", ~r/get_document\(\s*[^,()\n]+,\s*[^,()\n]+,\s*[^,()\n]+\)/}
     ]
 
     defp short_arity_hits(lines_by_file) do
