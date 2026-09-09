@@ -953,6 +953,22 @@ defmodule Barkpark.Plugins.Tasks do
             type: "string",
             summary:
               "The rail_rev (rail ETag) you last observed for this task's parent rail. When it differs from the current rail_rev the response carries a rail_changed notice — advisory, never a gate."
+          },
+          %{
+            name: "set",
+            type: "string",
+            repeatable: true,
+            summary:
+              "Extra claim-body fields as key=value (key:=json for typed). THE CRITERIA GATE " <>
+                "(task-9554c64bf51a0f81): a claim of a kind:task row stating ZERO acceptance " <>
+                "criteria is REFUSED — criteria_unstated — because a row with none can only ever " <>
+                "be attested by artifact, and criteria written after the work describe it instead " <>
+                "of shaping it. Containers (a decision/goal label, a non-task kind, a row WITH " <>
+                "children) are EXEMPT by name, so label a container rather than overriding it. The " <>
+                "way through is --set criteria_unstated_override=\"<why this row needs none>\", " <>
+                "which lands on the record; a blank or whitespace-only reason is NOT an override. " <>
+                "This is the flag the refusal's own remedy line names, so that remedy is runnable " <>
+                "as printed."
           }
         ],
         writes: true,
