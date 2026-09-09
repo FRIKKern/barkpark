@@ -1047,8 +1047,14 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
 
         tar = junk_tar(parents ++ [{:file, name}])
 
-        assert {:error, "E_JUNK_ENTRY", message} = stage(tar, dest),
-               "#{name} was not refused"
+        # Bind first, then assert on a boolean: a message on the `assert pattern =`
+        # macro form is unreachable (scripts/unreachable-assert-message-check.sh).
+        result = stage(tar, dest)
+
+        assert match?({:error, "E_JUNK_ENTRY", _}, result),
+               "#{name} was not refused, got: #{inspect(result)}"
+
+        {:error, "E_JUNK_ENTRY", message} = result
 
         assert message =~ "Repack" or message =~ "rename",
                "#{name}: the message must say what to DO, got: #{message}"
