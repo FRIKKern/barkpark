@@ -18,14 +18,28 @@ if [ -z "$REPO" ]; then
   echo "CANNOT READ: merge-sweep could not resolve owner/repo — pass it as arg 1 or set GH_REPO. Nothing was swept; this is NOT 'zero PRs mergeable'."
   exit 3
 fi
-merged=0; skipped=0
+merged=0; skipped=0; refused=0
 for pr in $(gh pr list --repo "$REPO" --state open --limit 300 --json number,headRefName,baseRefName,isDraft,title --jq '.[]|select(.isDraft|not)|select(.baseRefName=="main")|select(.headRefName|test("^(security|sec2|gates|deploy|console|cli|cli2|studio|docs|pds|grip|instr|chat|orch)/"))|select(.title|test("DO NOT MERGE|WIP|HOLD";"i")|not)|.number'); do
   v=$(bash "$ORCH/pr-required.sh" "$pr" "$REPO" 2>/dev/null | tail -1)
-  case "$v" in MERGEABLE*) ;; *) skipped=$((skipped+1)); continue;; esac
+  # A REFUSAL is not a NOT-YET. pr-required.sh prints a "CANNOT READ" last line and exits 3 when a
+  # read failed; folding that into $skipped reproduces, one level up, the very lie this instrument
+  # was hardened against — "not-yet 6" would read identically whether six PRs were red or the
+  # instrument could not see any of them. Count and name them separately.
+  case "$v" in
+    MERGEABLE*)   ;;
+    "CANNOT READ"*) refused=$((refused+1))
+                  echo "$(date -u +%H:%MZ) CANNOT READ #$pr: $(printf '%s' "$v" | cut -c1-140)" >> "$ORCH/merge-sweep.log"
+                  continue;;
+    *)            skipped=$((skipped+1)); continue;;
+  esac
   if out=$(gh pr merge "$pr" --repo "$REPO" --squash --delete-branch 2>&1); then
     merged=$((merged+1)); echo "$(date -u +%H:%MZ) MERGED #$pr $(gh pr view $pr --repo $REPO --json title --jq .title | cut -c1-80)" >> "$ORCH/merge-sweep.log"
   else
     echo "$(date -u +%H:%MZ) REFUSED #$pr: $(echo "$out" | tail -1 | cut -c1-140)" >> "$ORCH/merge-sweep.log"
   fi
 done
-echo "$(date -u +%H:%MZ) merge-sweep: merged $merged, not-yet $skipped"
+if [ "$refused" -gt 0 ]; then
+  echo "$(date -u +%H:%MZ) merge-sweep: merged $merged, not-yet $skipped, CANNOT READ $refused (those $refused were NOT measured — they are not 'not yet')"
+  exit 3
+fi
+echo "$(date -u +%H:%MZ) merge-sweep: merged $merged, not-yet $skipped, CANNOT READ 0"
