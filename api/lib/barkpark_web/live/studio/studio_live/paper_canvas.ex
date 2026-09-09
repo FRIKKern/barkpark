@@ -581,6 +581,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   boundary. This is the predicate `partition_runs/1` chunks on.
   """
   @spec canvas?(map()) :: boolean()
+  # Explicit null is not an absent image type in the reader. Keep this Card in
+  # its contextual editor, which preserves reader paint and editable body/title,
+  # instead of admitting a false image or the client's read-only opaque carrier.
+  def canvas?(%{"type" => "card", "slots" => %{"media" => [%{"type" => nil}]}}),
+    do: false
+
   def canvas?(block) when is_map(block), do: Map.get(block, "type") in @canvas_types
   def canvas?(_), do: false
 
