@@ -10,6 +10,7 @@ defmodule BarkparkWeb.BulldocsLiveContainerEditingTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.{Auth, Content}
+  alias BarkparkWeb.Studio.StudioLive.Blocks
 
   @dataset "production"
 
@@ -65,8 +66,50 @@ defmodule BarkparkWeb.BulldocsLiveContainerEditingTest do
     assert stored_blocks(ctx) == before_toggle
     refute editing =~ "paper-links blocks are not editable yet"
     assert has_element?(view, "#paper-links-form-links")
-    assert has_element?(view, ~s(#paper-links-form-links input[name="ref-0-title"]))
+    refute has_element?(view, ~s(#paper-links-form-links input[name="ref-0-title"]))
+    assert has_element?(view, "#paper-links-form-links [data-paper-link-ref-title-panel-trigger]")
+    assert has_element?(view, ~s(textarea[aria-label="Related paper title"]))
+    assert has_element?(view, ~s(textarea[aria-label="Related paper description"]))
     assert has_element?(view, ~s(#paper-links-form-links button[value="remove:1"]))
+
+    before_copy = stored_blocks(ctx)
+    ref = hd(stored_block(ctx, "links")["refs"])
+
+    for {field, value} <- [
+          {"title", "  Direct Day One  "},
+          {"description", "  Direct reference copy  "}
+        ] do
+      request_id = Ecto.UUID.generate()
+
+      render_hook(view, "paper-block-autosave", %{
+        "block_id" => "links",
+        "paper-link-ref-index" => "0",
+        "paper-link-ref-slug" => ref["slug"],
+        "paper-link-ref-field" => field,
+        "paper-link-ref-value" => value,
+        "paper-link-ref-guard" => Blocks.paper_link_ref_guard(ref),
+        "if_rev" => socket_of(view).assigns.paper_rev,
+        "request_id" => request_id
+      })
+
+      assert_reply(view, %{saved: true, request_id: ^request_id})
+    end
+
+    expected_copy =
+      Enum.map(before_copy, fn
+        %{"id" => "links", "refs" => [first | rest]} = block ->
+          updated =
+            first
+            |> Map.put("title", "  Direct Day One  ")
+            |> Map.put("description", "  Direct reference copy  ")
+
+          Map.put(block, "refs", [updated | rest])
+
+        block ->
+          block
+      end)
+
+    assert stored_blocks(ctx) == expected_copy
 
     render_hook(view, "paper-block-autosave", %{
       "block_id" => "links",
@@ -82,6 +125,8 @@ defmodule BarkparkWeb.BulldocsLiveContainerEditingTest do
       "request_id" => Ecto.UUID.generate()
     })
 
+    # Older clients still submit the legacy collection payload. Keep this
+    # compatibility check alongside the canonical inline-owner checks above.
     render_hook(view, "paper-block-autosave", %{
       "block_id" => "links",
       "layout" => "chapters",
