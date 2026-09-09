@@ -82,8 +82,15 @@ defmodule BarkparkWeb.Studio.RowPressStateCoverageTest do
   end
 
   describe "the state is ABSENT at rest" do
-    test "no element on a quiet desk claims to be busy", %{html: html} do
-      refute html =~ "aria-busy",
+    # `has_element?`, never `html =~ "aria-busy"`. The mounted HTML carries the
+    # ROOT LAYOUT, and the layout carries the rule
+    # `#studio-panes [aria-busy="true"]::after` that paints this very state —
+    # so the substring form matches the STYLESHEET on a desk where no element
+    # is busy at all, and reds a correct build. (It did, on the first run of
+    # this file.) The selector asks the question the criterion asks: does any
+    # ELEMENT claim to be busy?
+    test "no element on a quiet desk claims to be busy", %{view: view} do
+      refute has_element?(view, "[aria-busy]"),
              "a desk nobody has pressed reports work in flight; a state that is always on distinguishes nothing"
     end
   end
