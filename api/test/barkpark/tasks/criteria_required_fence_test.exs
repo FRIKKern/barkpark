@@ -11,11 +11,12 @@ defmodule Barkpark.Tasks.CriteriaRequiredFenceTest do
   `Plugins.Tasks.warn_if_create_zero/1` logs and SAVES, and
   `Validation.check_acceptance_criteria/2` returns `errors` untouched on `nil`.
 
-  THE REFUSAL TEST BELOW IS MUTATION-PROVEN: collapsing
-  `CriteriaRequiredFence.check/6` to `:ok` reds "a criteria-less BIRTH under a
-  flagged parent is REFUSED" and ONLY that test — the six control tests, which
-  pin what the fence must NOT break, stay green either way. That is the point:
-  a guard that cannot lose was never measuring anything.
+  THE REFUSAL TESTS BELOW ARE MUTATION-PROVEN, MEASURED not asserted: collapsing
+  `CriteriaRequiredFence.check/6` to its `:ok` catch-all runs `7 tests, 2
+  failures` — the two refusal tests red (`drafts.crf-child-refuse` is BORN, the
+  exact 2026-08-09 shape) and the five control tests, which pin what the fence
+  must NOT break, stay green. Restored: `7 tests, 0 failures`. That is the
+  point: a guard that cannot lose was never measuring anything.
   """
   use Barkpark.DataCase, async: false
 
