@@ -30,6 +30,17 @@ name: pr-meta
 # which existed only to refresh the critic against its own tooling — is preserved
 # below as an in-job early exit, not deleted.
 #
+# AMENDED 2026-09-09 (task-33742276cf0a35b1). Two of the three folded groups are
+# still step groups in the `pr-meta` job. THE THIRD IS NOT: the filebase critic
+# now lives in its own `aesthetics` job further down, carrying
+# `if: github.event_name != 'pull_request'`, and this workflow gained a
+# `schedule:` arm to hold it. The argument above — that no paths predicate covers
+# the critic's subject — is UNCHANGED, and is exactly why the move is a VENUE
+# change and not a `paths:` filter. What changed is the measurement: the critic
+# is 573 s of a 615 s run, the other fifteen gates total ~35 s, and an advisory
+# that cannot block a merge has no claim on ten minutes of every PR. Read the
+# `aesthetics` job's own header for the numbers, the owner and the watcher.
+#
 # WHAT DID **NOT** MOVE, AND WHY (do not "finish the job" without reading this)
 # ----------------------------------------------------------------------------
 #   reland-check.yml           Out-of-fence harnesses parse it BY PATH AND BY JOB
@@ -84,6 +95,7 @@ name: pr-meta
 # BLOCKING vs ADVISORY IS PRESERVED PER STEP, NOT PER JOB
 # ------------------------------------------------------
 # The two gates that could red before still red this job; the advisory critic
+# (since 2026-09-09 in the separate `aesthetics` job below)
 # carries `continue-on-error: true` at the STEP level, so it reports without
 # blocking exactly as its job-level flag used to. Every step keeps the name it had
 # in its own workflow, so a red still names its own reason, and the advisory steps
