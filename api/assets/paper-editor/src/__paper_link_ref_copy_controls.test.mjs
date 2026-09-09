@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { JSDOM } from "jsdom";
+import { JSDOM, VirtualConsole } from "jsdom";
 
 function shippedMorphdom(window) {
   window.eval(readFileSync(new URL(
@@ -118,6 +118,15 @@ assert.equal(replacementTitle.__nativeHistoryProbe, undefined,
   "native history state does not cross the identity boundary");
 console.log("related-card copy morph ownership follows the admitted identity guard");
 
+let queueNavigationErrors = 0;
+const queueVirtualConsole = new VirtualConsole();
+queueVirtualConsole.on("jsdomError", (error) => {
+  if (error.message.includes("Not implemented: navigation")) {
+    queueNavigationErrors += 1;
+    return;
+  }
+  throw error;
+});
 const queueDom = new JSDOM(`<!doctype html><body>
   <main data-paper-doc-key="production:paper:reference-copy" data-paper-rev="7">
     <button id="view" data-editing="true">View</button>
@@ -129,7 +138,7 @@ const queueDom = new JSDOM(`<!doctype html><body>
         <span data-paper-history-status role="status"></span>
         <span data-test-id="bp-paper-footer-save" role="status"></span></footer>
     </div>
-  </main></body>`, { url: "http://localhost/" });
+  </main></body>`, { url: "http://localhost/", virtualConsole: queueVirtualConsole });
 const win = queueDom.window;
 let serial = 0;
 Object.defineProperty(win, "crypto", { configurable: true, value: {
@@ -356,27 +365,89 @@ try {
   assert.equal(retainedAfterAck.querySelector("[data-reference-draft-text]").value,
     "Second retained description draft",
     "acknowledging another source does not discard the retained old draft");
-  hook._bpPaperExitCoordinator._setConflict(
-    { current_rev: 14 }, oldIdentityDescription.form,
-    "production:paper:reference-copy",
+  const replacementDescription = win.document.getElementById(
+    referenceFieldId("description", changedIdentity),
   );
+  replacementDescription.focus();
+  replacementDescription.value = "Replacement description survives recovery";
+  replacementDescription.dispatchEvent(new win.InputEvent("input", {
+    bubbles: true, inputType: "insertText", data: replacementDescription.value,
+  }));
+  await new Promise(resolve => setTimeout(resolve, 510));
+  const staleDescriptionCall = calls.at(-1);
+  assert.equal(staleDescriptionCall.payload.if_rev, 13,
+    "the replacement field begins on the last acknowledged revision");
+  hook._bpPaperExitCoordinator.observeRevision({
+    rev: 14,
+    observedDocumentKey: "production:paper:reference-copy",
+    source: oldIdentityDescription.form,
+    reloadOnLatest: true,
+  });
+  replies.shift()({
+    saved: false,
+    conflict: true,
+    current_rev: 14,
+    request_id: staleDescriptionCall.payload.request_id,
+  });
+  await tick(); await tick();
   const cleanConflict = win.document.querySelector(
     "[data-bp-paper-conflict]:not([data-bp-paper-reference-draft])",
   );
-  const cleanDiscard = cleanConflict.querySelector("[data-reference-draft-discard]");
+  const keepReplacement = cleanConflict.querySelector('[data-action="keep"]');
+  assert.equal(keepReplacement.disabled, false,
+    "the retained never-sent old field does not block retrying the replacement field");
+  keepReplacement.click();
+  await tick(); await tick();
+  const retriedDescriptionCall = calls.at(-1);
+  assert.equal(retriedDescriptionCall.payload.if_rev, 14,
+    "Keep mine retries the replacement field against the external revision");
+  await acknowledge(retriedDescriptionCall, 15);
+  replacementDescription.blur();
+  await tick();
+  const retainedAfterKeep = win.document.querySelector(
+    "[data-bp-paper-conflict]:not([data-bp-paper-reference-draft])",
+  );
+  assert.equal(win.document.querySelector('[data-paper-history-action="undo"]').dataset.paperHistoryState,
+    "ready", "the accepted replacement retry records contextual history before recovery discard");
+  assert.equal(retainedAfterKeep.querySelector("[data-reference-draft-text]").value,
+    "Second retained description draft",
+    "the old-reference recovery remains exact after the replacement save is accepted");
+  const discardConflict = retainedAfterKeep;
+  const cleanDiscard = discardConflict.querySelector("[data-reference-draft-discard]");
   assert.ok(cleanDiscard,
     "an exact never-sent generic conflict exposes source-scoped discard");
-  cleanConflict.querySelector('[data-action="review"]').click();
-  assert.equal(cleanConflict.querySelector("[data-conflict-message]").textContent,
+  discardConflict.querySelector('[data-action="review"]').click();
+  assert.equal(discardConflict.querySelector("[data-conflict-message]").textContent,
     "Copy or download this exact old-reference draft, then use Discard old draft. It will not be applied to the replacement.",
     "never-sent recovery copy names the available source-scoped discard");
   cleanDiscard.click();
   await tick();
+  assert.equal(queueNavigationErrors, 0,
+    "source-scoped discard reconciles a stale echo without requesting a hard reload");
   assert.equal(win.document.querySelector("[data-bp-paper-conflict]"), null,
     "clean source discard reconciles and clears the source-less conflict");
-  assert.equal(calls.length, callsBeforeIdentityChange + 1,
+  assert.equal(win.document.querySelector('[data-test-id="bp-paper-footer-save"]').textContent, "",
+    "reconciled stale authority clears the obsolete paused-save presentation");
+  assert.equal(calls.length, callsBeforeIdentityChange + 3,
     "clean generic discard sends no old-identity payload");
   assert.equal(replacementDraft.value, "Replacement identity remains independently editable");
+  hook._bpPaperExitCoordinator.refreshPresentation();
+  const undo = win.document.querySelector('[data-paper-history-action="undo"]');
+  assert.equal(undo.disabled, false,
+    "the accepted replacement edit remains available to contextual history");
+  undo.click();
+  await tick(); await tick();
+  const undoCall = calls.at(-1);
+  assert.equal(undoCall.event, "paper-history-step");
+  assert.equal(undoCall.payload.if_rev, 15,
+    "discarding the old draft cannot roll history authority back to a stale external echo");
+  replies.shift()({
+    saved: true,
+    request_id: undoCall.payload.request_id,
+    rev: 16,
+    history_step: { version: 1, ref: undoCall.payload.request_id, action: "redo" },
+  });
+  await tick(); await tick();
   hook.el.click();
   await tick(); await tick();
   assert.equal(toggles.length, togglesBeforeIdentityChange + 1,
@@ -559,8 +630,8 @@ async function attemptedDetachedRecovery(
       assert.ok(conflictBanner, "external authority can still enter ordinary conflict review");
       conflictBanner.querySelector('[data-action="review"]').click();
       assert.equal(conflictBanner.querySelector("[data-conflict-message]").textContent,
-        "The server outcome is unresolved. Copy or download the retained draft; retry and discard are unavailable here.",
-        "transport-uncertain recovery copy does not promise retry or discard");
+        "This draft has a pending or attempted save for the old reference. Copy or download it; retry and discard are unavailable here.",
+        "attempted recovery copy stays outcome-neutral and does not promise retry or discard");
       const latest = conflictBanner.querySelector('[data-action="latest"]');
       assert.equal(latest.disabled, true,
         "generic Use latest cannot delete a registered attempted detached source");

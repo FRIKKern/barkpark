@@ -1701,14 +1701,24 @@
           !echo.documentKey || echo.documentKey === documentKey,
         );
         if (!candidates.length) return false;
-        const newest = candidates[candidates.length - 1];
-        const latest = candidates.filter((echo) => echo.rev === newest.rev);
         for (let i = quarantinedEchoes.length - 1; i >= 0; i--) {
           if (!quarantinedEchoes[i].documentKey ||
               quarantinedEchoes[i].documentKey === documentKey) {
             quarantinedEchoes.splice(i, 1);
           }
         }
+        const applicable = candidates.filter((echo) =>
+          typeof confirmedRevision === "number" && typeof echo.rev === "number"
+            ? echo.rev > confirmedRevision
+            : echo.rev !== confirmedRevision,
+        );
+        if (!applicable.length) return false;
+        const newest = applicable.reduce((current, candidate) =>
+          typeof current.rev === "number" && typeof candidate.rev === "number"
+            ? (candidate.rev > current.rev ? candidate : current)
+            : candidate,
+        );
+        const latest = applicable.filter((echo) => echo.rev === newest.rev);
         confirmedRevision = newest.rev;
         latest.forEach((echo) => echo.apply?.("external"));
         return true;
@@ -1894,7 +1904,24 @@
           );
           return true;
         }
-        coordinator._useLatest();
+        const hasSameDocumentEcho = quarantinedEchoes.some((echo) =>
+          !echo.documentKey || echo.documentKey === retainedDocumentKey,
+        );
+        if (!hasSameDocumentEcho) {
+          coordinator._renderConflict();
+          return true;
+        }
+        conflict = null;
+        mutationPaused = false;
+        coordinator._flushQuarantinedIfClean();
+        coordinator._renderConflict();
+        renderHistoryControls();
+        renderSaveStatus();
+        coordinator._resumeFallbackDrafts();
+        coordinator._pumpMutations();
+        // Source-scoped discard never creates a reload request. It may only
+        // honor an explicit reload already owned by another recovery boundary.
+        coordinator._reloadIfClean();
         return true;
       };
       coordinator._renderDetachedReferenceDraft = () => {
@@ -2002,7 +2029,7 @@
           detail.querySelector("[data-conflict-message]").textContent = detached
             ? detachedLocalOnly
               ? "Copy or download this exact old-reference draft, then use Discard old draft. It will not be applied to the replacement."
-              : "The server outcome is unresolved. Copy or download the retained draft; retry and discard are unavailable here."
+              : "This draft has a pending or attempted save for the old reference. Copy or download it; retry and discard are unavailable here."
             : positional
               ? `Server revision ${String(conflict.currentRev ?? "unknown")}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft.`
               : conflict.keepUnavailable
@@ -2159,6 +2186,10 @@
             !chosenSource.matches?.('[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"]')),
         );
         const latestRevision = conflict?.currentRev ?? quarantinedEchoes.at(-1)?.rev;
+        const latestRevisionIsCurrentOrNewer = !(
+          typeof confirmedRevision === "number" && typeof latestRevision === "number" &&
+          latestRevision < confirmedRevision
+        );
         const latest = quarantinedEchoes.filter((echo) =>
           echo.rev === latestRevision &&
           (!echo.documentKey || echo.documentKey === conflict?.documentKey),
@@ -2212,7 +2243,7 @@
           return false;
         }
         let replacedChosenSource = false;
-        if (latestRevision != null) {
+        if (latestRevision != null && latestRevisionIsCurrentOrNewer) {
           confirmedRevision = latestRevision;
           if (!reloadBoundary) latest.forEach((echo) => {
             if (typeof echo.apply !== "function") return;
