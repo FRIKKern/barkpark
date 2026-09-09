@@ -978,6 +978,165 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
     end
   end
 
+  @index_html "<!doctype html><title>bp</title>"
+
+  defp junk_tar(junk_entries) do
+    side = String.duplicate("A", 163)
+
+    tarball(
+      [dir_entry("."), file_entry("index.html", @index_html)] ++
+        Enum.map(junk_entries, fn
+          {:dir, name} -> dir_entry(name)
+          {:file, name} -> file_entry(name, side)
+        end)
+    )
+  end
+
+  describe "packaging junk is refused, not skipped (charter D121)" do
+    # THE FAIL-BEFORE, executable. This is the exact all-ustar archive wave 11
+    # measured — no pax `x` block anywhere, every entry a plain typeflag-0/5
+    # ustar header — and on origin/main 22c60a6a8 it ACCEPTED with
+    # `entries: 10`, staging:
+    #
+    #   .DS_Store             regular  6148
+    #   ._.                   regular   163
+    #   ._index.html          regular   163
+    #   PaxHeader             directory
+    #   PaxHeader/index.html  regular    22
+    #   assets/._app.css      regular   163
+    #   assets/app.css        regular     6
+    #   index.html            regular    32
+    #
+    # every one of them FETCHABLE. The archive is built here rather than pinned
+    # as base64 so the fixture cannot rot away from what it claims to be.
+    test "the wave-11 all-ustar junk archive is REFUSED, and leaves no tree", %{dest: dest} do
+      tar =
+        junk_tar([
+          {:file, ".DS_Store"},
+          {:file, "._."},
+          {:file, "._index.html"},
+          {:dir, "PaxHeader"},
+          {:file, "PaxHeader/index.html"},
+          {:dir, "assets"},
+          {:file, "assets/._app.css"}
+        ])
+
+      assert {:error, "E_JUNK_ENTRY", message} = stage(tar, dest)
+      # First junk entry wins, and it is named.
+      assert message =~ ".DS_Store"
+      refute File.exists?(dest), "a refusal must leave no partial tree"
+      assert Path.wildcard(dest <> ".staging-*") == []
+    end
+
+    test "each junk class is refused ON ITS OWN, at the root and nested", %{dest: dest} do
+      for name <- [
+            ".DS_Store",
+            "._.",
+            "._index.html",
+            "assets/.DS_Store",
+            "assets/._app.css",
+            "PaxHeader/index.html",
+            "deep/PaxHeaders.0/index.html"
+          ] do
+        parents =
+          name
+          |> Path.split()
+          |> Enum.drop(-1)
+          |> Enum.scan(&Path.join(&2, &1))
+          |> Enum.map(&{:dir, &1})
+
+        tar = junk_tar(parents ++ [{:file, name}])
+
+        assert {:error, "E_JUNK_ENTRY", message} = stage(tar, dest),
+               "#{name} was not refused"
+
+        assert message =~ "Repack" or message =~ "rename",
+               "#{name}: the message must say what to DO, got: #{message}"
+
+        refute File.exists?(dest)
+      end
+    end
+
+    test "the message names the repack incantation, verified on real tars", %{dest: dest} do
+      # Both flags were run on this machine's bsdtar 3.5.3 (libarchive 3.7.4)
+      # and GNU tar 1.35 before being written into the message: an incantation
+      # that does not parse is worse than no advice at all.
+      assert {:error, "E_JUNK_ENTRY", message} = stage(junk_tar([{:file, "._index.html"}]), dest)
+
+      assert message =~ "COPYFILE_DISABLE=1"
+      assert message =~ "--no-xattrs"
+      assert message =~ "--exclude='._*'"
+      assert message =~ "--exclude=.DS_Store"
+      assert message =~ "AppleDouble"
+    end
+
+    test "a REFUSAL cannot lie about a skipped entry: `entries` is only ever reported on :ok",
+         %{dest: dest} do
+      # This is criterion 2's other half. The alternative design — skip the junk
+      # and stage the rest — has to answer "what does `entries` count?" and both
+      # answers are lies: count it and the caller is told a file was staged that
+      # was not; drop it and the count no longer matches the archive. Refusing
+      # dissolves the question, and this row is what pins that: the refusal
+      # tuple has NO entries field, and the same dist WITHOUT the junk reports
+      # the honest 2.
+      assert {:error, "E_JUNK_ENTRY", _} = stage(junk_tar([{:file, ".DS_Store"}]), dest)
+
+      assert {:ok, summary} = stage(junk_tar([]), dest)
+      assert summary.entries == 2
+      assert Path.wildcard(Path.join(dest, "**")) |> Enum.map(&Path.basename/1) == ["index.html"]
+    end
+
+    test "the rule does NOT catch ordinary dotfiles or an ordinary name containing '._'",
+         %{dest: dest} do
+      # The refusal must be narrow. `.well-known/` is a real path a static site
+      # serves, and `app._hash.css` is a perfectly ordinary asset name — a
+      # substring rule would eat both. Only a SEGMENT that starts with `._`, or
+      # is exactly `.DS_Store`/`PaxHeader`, is junk.
+      tar =
+        tarball([
+          dir_entry("."),
+          file_entry("index.html", @index_html),
+          dir_entry(".well-known"),
+          file_entry(".well-known/security.txt", "Contact: mailto:x@example.com\n"),
+          file_entry("app._hash.css", "body{}"),
+          dir_entry("PaxHeaderish"),
+          file_entry("PaxHeaderish/a.txt", "a")
+        ])
+
+      assert {:ok, summary} = stage(tar, dest)
+      assert summary.entries == 7
+      assert File.exists?(Path.join(dest, ".well-known/security.txt"))
+      assert File.exists?(Path.join(dest, "app._hash.css"))
+      assert File.exists?(Path.join(dest, "PaxHeaderish/a.txt"))
+    end
+
+    test "a junk name arriving through a pax `path` override is refused too", %{dest: dest} do
+      # The `x` block applies `path` and then RE-VALIDATES it through the whole
+      # rule set. `junk_free/1` runs on the EFFECTIVE name, so an override that
+      # smuggles `._x` past an innocent ustar shadow header is caught.
+      tar =
+        tarball([
+          dir_entry("."),
+          file_entry("index.html", @index_html),
+          pax_entry([{"path", "assets/._smuggled.css"}]),
+          file_entry("assets/innocent.css", "body{}")
+        ])
+
+      assert {:error, "E_JUNK_ENTRY", message} = stage(tar, dest)
+      assert message =~ "._smuggled.css"
+      refute File.exists?(dest)
+    end
+
+    test "traversal still wins over junk: the more severe code is the one reported",
+         %{dest: dest} do
+      # Ordering matters for what an operator is told. `../._x` is an ESCAPE
+      # first and junk second; reporting E_JUNK_ENTRY would file a break-in as a
+      # packaging nit.
+      tar = tarball([dir_entry("."), file_entry("../._escape", "x")])
+      assert {:error, "E_PATH_TRAVERSAL", _} = stage(tar, dest)
+    end
+  end
+
   describe "caps/0" do
     test "the named caps are the ones the charter states" do
       assert PrebuiltArtifact.caps() == %{
