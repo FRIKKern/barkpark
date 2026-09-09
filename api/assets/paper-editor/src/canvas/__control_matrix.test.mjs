@@ -8,12 +8,16 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", {
 const { window } = dom;
 for (const name of ["customElements", "CustomEvent", "document", "DOMParser", "Element",
   "Event", "EventTarget", "HTMLElement", "KeyboardEvent", "MutationObserver", "Node",
-  "NodeFilter", "Selection", "Text"]) globalThis[name] = window[name];
+  "NodeFilter", "Range", "Selection", "Text"]) globalThis[name] = window[name];
 globalThis.window = window;
 Object.defineProperty(globalThis, "navigator", { configurable: true, value: window.navigator });
 globalThis.getComputedStyle = window.getComputedStyle.bind(window);
 globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
 globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+window.Range.prototype.getClientRects = () => [];
+window.Range.prototype.getBoundingClientRect = () => ({
+  top: 0, left: 0, right: 0, bottom: 0,
+});
 globalThis.CSS ||= { escape: value => String(value) };
 window.BP_PAPER_EDITOR_NO_INJECT = true;
 await import("./index.js");
@@ -239,7 +243,7 @@ try {
     title: [{ type: "heading", text: "Keep title" }],
     body: [{ type: "paragraph", content: text("Keep body") }],
   } }, canvas => {
-    change(canvas, "paper-card-action-label", "Visit");
+    change(canvas, "paper-card-action-label-create", "Visit");
     change(canvas, "paper-card-action-href", "/visit");
     change(canvas, "paper-card-action-priority", "primary");
     canvas.querySelector('[data-test-id="paper-card-media-src"]').dispatchEvent(
@@ -252,5 +256,164 @@ try {
       type: "action", label: "Visit", href: "/visit", priority: "primary",
     });
   });
+  await exercise({ id: "card-clear-action-label", type: "card", slots: {
+    body: [{ type: "paragraph", content: text("Keep body") }],
+    action: [{ id: "keep-id", type: "action", label: "Clear me", href: "/keep",
+      priority: "secondary", metadata: { keep: true } }],
+  } }, canvas => {
+    const label = canvas.querySelector('[data-test-id="paper-card-action-label"]');
+    label.textContent = "";
+    label.dispatchEvent(new window.InputEvent("input", { bubbles: true }));
+  }, patch => {
+    assert.deepEqual(patch.slots.action[0], {
+      id: "keep-id", type: "action", label: "", href: "/keep",
+      priority: "secondary", metadata: { keep: true },
+    }, "clearing only the label retains the action, href, priority and metadata");
+  });
+  await exercise({ id: "card-action-latest-attrs", type: "card", slots: {
+    body: [{ type: "paragraph", content: text("Keep body") }],
+    action: [{ id: "keep-id", type: "action", label: "Before", href: null,
+      priority: "future-priority", metadata: { keep: true } }],
+  } }, canvas => {
+    const label = canvas.querySelector('[data-test-id="paper-card-action-label"]');
+    label.textContent = "After";
+    label.dispatchEvent(new window.InputEvent("input", { bubbles: true }));
+    change(canvas, "paper-card-action-href", "/after");
+    change(canvas, "paper-card-action-priority", "primary");
+  }, patch => {
+    assert.deepEqual(patch.slots.action[0], {
+      id: "keep-id", type: "action", label: "After", href: "/after",
+      priority: "primary", metadata: { keep: true },
+    }, "sequential label, href and priority writes each start from the latest action attrs");
+  });
+
+  {
+    const source = { id: "card-action-direct", type: "card", extra: { keep: true }, slots: {
+      body: [{ type: "paragraph", content: text("Keep body") }],
+      action: [{ id: "cta", type: "action", label: "Go", href: null,
+        priority: "future-priority", metadata: { keep: [1, 2] } }],
+    } };
+    const canvas = document.createElement("bp-paper-canvas");
+    canvas.blocks = structuredClone([source]);
+    const batches = [];
+    canvas.addEventListener("bp-canvas-ops", event => batches.push(event.detail.ops));
+    document.body.appendChild(canvas);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      const label = canvas.querySelector('[data-test-id="paper-card-action-label"]');
+      const labelControl = canvas.querySelector(
+        '[data-test-id="paper-card-action-label-control"]',
+      );
+      const readerLink = canvas.querySelector("a.bp-button");
+      assert.equal(label.tagName, "SPAN");
+      assert.equal(label.getAttribute("role"), "textbox");
+      assert.equal(label.getAttribute("aria-label"), "Card action label");
+      assert.equal(label.contentEditable, "plaintext-only");
+      assert.equal(label.closest("a"), null, "the editing host is not nested in a link");
+      assert.equal(label.parentElement.contentEditable, "false",
+        "the editing host has the same ProseMirror ownership boundary as the Card title");
+      assert.equal(readerLink.style.display, "none", "Edit exposes no navigation target");
+      assert.equal(canvas.querySelector('[data-test-id="paper-card-action-label-create"]').hidden,
+        true, "a present action has no duplicate label input");
+      labelControl.click();
+      assert.equal(document.activeElement, label,
+        "the panel control focuses the same canonical visible label host");
+
+      label.dispatchEvent(new window.CompositionEvent("compositionstart", { bubbles: true }));
+      label.textContent = "Open directly";
+      label.dispatchEvent(new window.InputEvent("input", { bubbles: true }));
+      assert.equal(canvas.flushPendingChanges(), false,
+        "an active composition is not serialized by an early canvas flush");
+      label.dispatchEvent(new window.CompositionEvent("compositionend", { bubbles: true }));
+      assert.equal(canvas.flushPendingChanges(), true,
+        "composition completion reaches the ordinary canvas flush boundary");
+      assert.equal(batches.length, 1);
+      assert.deepEqual(batches[0], [{ op: "patch-block", id: source.id, patch: {
+        slots: {
+          ...source.slots,
+          action: [{ id: "cta", type: "action", label: "Open directly", href: null,
+            priority: "future-priority", metadata: { keep: [1, 2] } }],
+        },
+      } }], "label-only editing preserves href representation, unknown priority and metadata");
+      assert.equal(canvas.querySelector("p").textContent, "Keep body",
+        "typing the action label cannot enter the Card body");
+      const undo = new window.KeyboardEvent("keydown", {
+        key: "z", metaKey: true, bubbles: true, cancelable: true,
+      });
+      label.dispatchEvent(undo);
+      assert.equal(undo.defaultPrevented, true, "the label routes native Undo to the canvas");
+      assert.equal(canvas._editor.getJSON().content[0].attrs.action.label, "Go");
+      const redo = new window.KeyboardEvent("keydown", {
+        key: "z", metaKey: true, shiftKey: true, bubbles: true, cancelable: true,
+      });
+      label.dispatchEvent(redo);
+      assert.equal(redo.defaultPrevented, true, "the label routes native Redo to the canvas");
+      assert.equal(canvas._editor.getJSON().content[0].attrs.action.label, "Open directly");
+
+      cases++;
+    } finally { canvas.remove(); }
+
+    const readerCanvas = document.createElement("bp-paper-canvas");
+    readerCanvas.setAttribute("editable", "false");
+    readerCanvas.blocks = structuredClone([source]);
+    document.body.appendChild(readerCanvas);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      const readerLink = readerCanvas.querySelector("a.bp-button");
+      assert.equal(readerLink.style.display, "", "View keeps the ordinary reader anchor");
+      assert.equal(readerLink.getAttribute("href"), "");
+      assert.equal(readerCanvas.querySelector('[data-test-id="paper-card-action-label"]').style.display,
+        "none", "View hides the non-navigational editing host");
+    } finally { readerCanvas.remove(); }
+  }
+
+  for (const [name, action] of [["absent", undefined], ["nil", null], ["empty", []]]) {
+    const slots = { body: [{ type: "paragraph", content: [] }] };
+    if (action !== undefined) slots.action = action;
+    const canvas = document.createElement("bp-paper-canvas");
+    canvas.blocks = [{ id: `card-action-${name}`, type: "card", slots }];
+    const batches = [];
+    canvas.addEventListener("bp-canvas-ops", event => batches.push(event.detail.ops));
+    document.body.appendChild(canvas);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      const label = canvas.querySelector('[data-test-id="paper-card-action-label"]');
+      const labelControl = canvas.querySelector(
+        '[data-test-id="paper-card-action-label-control"]',
+      );
+      assert.equal(label.style.display, "none", `${name} action has no direct label island`);
+      assert.equal(labelControl.hidden, true, `${name} action has no misleading focus control`);
+      assert.equal(canvas.querySelector('[data-test-id="paper-card-action-label-create"]').hidden,
+        false, `${name} action retains explicit Configure creation`);
+      assert.equal(canvas.flushPendingChanges(), false,
+        `${name} action mount/focus state does not materialize a slot`);
+      assert.deepEqual(batches, []);
+      cases++;
+    } finally { canvas.remove(); }
+  }
+  for (const [name, action] of [
+    ["absent-label", { id: "keep", type: "action", href: "/keep", meta: { exact: true } }],
+    ["null-label", { id: "keep", type: "action", label: null, href: null,
+      meta: { exact: true } }],
+  ]) {
+    const canvas = document.createElement("bp-paper-canvas");
+    canvas.blocks = [{ id: `card-action-${name}`, type: "card", slots: {
+      body: [{ type: "paragraph", content: [] }], action: [action],
+    } }];
+    const batches = [];
+    canvas.addEventListener("bp-canvas-ops", event => batches.push(event.detail.ops));
+    document.body.appendChild(canvas);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      const label = canvas.querySelector('[data-test-id="paper-card-action-label"]');
+      assert.equal(label.textContent, "");
+      label.focus();
+      label.dispatchEvent(new window.InputEvent("input", { bubbles: true }));
+      assert.equal(canvas.flushPendingChanges(), false,
+        `${name} remains an exact no-op when its empty label is untouched`);
+      assert.deepEqual(batches, []);
+      cases++;
+    } finally { canvas.remove(); }
+  }
   console.log(`mounted control matrix: ${cases} interaction/payload cases passed`);
 } finally { window.close(); }

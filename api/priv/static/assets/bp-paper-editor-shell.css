@@ -994,6 +994,7 @@
     .bp-canvas-card { position: relative; }
     .bp-canvas-card__controls { position: absolute; bottom: 100%; left: 0; right: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px; margin: 0; opacity: 0; pointer-events: none; transition: opacity 0.12s ease; }
     .bp-canvas-card:hover .bp-canvas-card__controls, .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; pointer-events: auto; }
+    .bp-canvas-card:has([data-test-id="paper-card-action-label"]:focus) .bp-canvas-card__controls { opacity: 0; pointer-events: none; }
     .bp-canvas-card__input { flex: 1 1 120px; min-width: 0; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
     /* notes-grid split: the `note` WIDGET edit chrome. UNLIKE card, note does NOT
          class-share with the reader (parity §3 forbids bp-notes / bp-note__ in the
@@ -1762,6 +1763,7 @@
   display: none;
 }
 .bp-paper-figure-caption-form > label.sr-only,
+.bp-paper-card-action-label-form > label.sr-only,
 .bp-paper-section-title-form > label.sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
@@ -1777,6 +1779,39 @@ textarea.bp-paper-figure-caption-input:focus-visible {
 }
 .bp-paper-section-title-editor {
   position: relative; min-width: 0;
+}
+.bp-paper-card-action-label-owner {
+  display: inline-grid; position: relative; max-width: 100%; vertical-align: baseline;
+}
+.bp-paper-card-action-label-owner > [data-paper-card-action-paint],
+.bp-paper-edit-form.bp-paper-card-action-label-form {
+  grid-area: 1 / 1; box-sizing: border-box; margin: 0; max-width: 100%;
+  font: inherit; font-weight: bold; text-align: inherit; letter-spacing: inherit;
+}
+.bp-paper-card-action-label-owner > [data-paper-card-action-paint] {
+  cursor: text; white-space: normal; overflow-wrap: anywhere;
+}
+.bp-paper-card-action-label-owner > [data-paper-card-action-paint]:not(.bp-button--primary),
+.bp-paper-edit-form.bp-paper-card-action-label-form:not(.bp-button--primary) {
+  background: transparent;
+}
+.bp-paper-edit-form.bp-paper-card-action-label-form {
+  display: block; width: 0; min-width: 100%;
+}
+.bp-paper-card-action-label-form:not(:focus-within) {
+  opacity: 0; pointer-events: none; clip-path: inset(50%); contain: size;
+}
+.bp-paper-card-action-label-owner:has(.bp-paper-card-action-label-form:focus-within)
+  > [data-paper-card-action-paint] { visibility: hidden; }
+textarea.bp-paper-inline-text.bp-paper-card-action-label-input {
+  display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box;
+  margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent;
+  color: inherit; font: inherit; font-weight: inherit; letter-spacing: inherit;
+  text-align: inherit; resize: none; overflow: hidden; overflow-wrap: anywhere;
+}
+.bp-paper-card-action-label-owner > [data-paper-card-action-paint]:focus-visible,
+.bp-paper-card-action-label-input:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
 }
 .bp-paper-section-title-editor--stack {
   width: 100%; max-width: 100%;

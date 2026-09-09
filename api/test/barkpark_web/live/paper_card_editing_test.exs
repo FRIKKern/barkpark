@@ -33,6 +33,70 @@ defmodule BarkparkWeb.PaperCardEditingTest do
   end
 
   for host <- [:public, :studio] do
+    test "#{host}: direct action label preserves every other source through replay, conflict and reload",
+         %{conn: conn} do
+      host = unquote(host)
+      {slug, original} = create_card_grid()
+      {view, path} = mount_editor(conn, host, slug)
+
+      assert has_element?(
+               view,
+               "[data-test-id='paper-card-action-label-form'] textarea[name='card-action-label']"
+             )
+
+      request = Ecto.UUID.generate()
+      revision = socket_of(view).assigns.paper_rev
+
+      params = %{
+        "block_id" => "story:2",
+        "card-action-label" => "  Direct <label>  ",
+        "request_id" => request,
+        "if_rev" => revision
+      }
+
+      render_hook(view, "paper-block-autosave", params)
+      assert_reply(view, %{saved: true, request_id: ^request})
+
+      expected =
+        update_in(
+          original,
+          ["blocks", Access.at(0), "blocks", Access.at(1), "slots", "action", Access.at(0)],
+          &Map.put(&1, "label", "  Direct <label>  ")
+        )
+
+      actual = stored(slug).content
+      assert actual["blocks"] == expected["blocks"]
+      assert actual["body"]["blocks"] == expected["blocks"]
+
+      assert Map.drop(actual["body"], ["blocks", "html"]) ==
+               Map.drop(original["body"], ["blocks", "html"])
+
+      # The normal write projection refreshes rendered HTML and revision metadata.
+      assert Map.drop(actual, ["blocks", "body", "body_html", "rev"]) ==
+               Map.drop(original, ["blocks", "body", "body_html", "rev"])
+
+      assert actual["body_html"] =~ "Direct &lt;label&gt;"
+      expected = actual
+      render_hook(view, "paper-block-autosave", params)
+      assert_reply(view, %{saved: true, replayed: true, request_id: ^request})
+      assert stored(slug).content == expected
+
+      stale_request = Ecto.UUID.generate()
+
+      render_hook(view, "paper-block-autosave", %{
+        params
+        | "request_id" => stale_request,
+          "card-action-label" => "Stale overwrite"
+      })
+
+      assert_reply(view, %{saved: false, request_id: ^stale_request})
+      assert stored(slug).content == expected
+      {:ok, reloaded, _} = live(conn, path)
+      toggle_public_editor(reloaded, host)
+      assert render(reloaded) =~ "Direct &lt;label&gt;"
+      assert stored(slug).content == expected
+    end
+
     test "#{host}: grid Card chrome edits preserve slots, siblings, and placement through reload",
          %{conn: conn} do
       host = unquote(host)

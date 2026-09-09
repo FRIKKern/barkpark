@@ -1488,6 +1488,62 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     """
   end
 
+  defp card_action_present?(%{"slots" => %{"action" => [%{"type" => "action"}]}}),
+    do: true
+
+  defp card_action_present?(_block), do: false
+
+  defp card_action_label_dom_id(block_id),
+    do: "card-action-label-" <> Base.url_encode64(block_id, padding: false)
+
+  attr(:block, :map, required: true)
+  attr(:state, :map, required: true)
+
+  defp card_action_label_editor(assigns) do
+    assigns =
+      assigns
+      |> assign(:dom_id, card_action_label_dom_id(assigns.block["id"]))
+      |> assign(
+        :button_class,
+        if(assigns.state.action_priority == "primary",
+          do: "bp-button bp-button--primary",
+          else: "bp-button"
+        )
+      )
+
+    ~H"""
+    <div class="bp-paper-card-action-label-owner" data-paper-card-action-label-owner>
+      <button
+        type="button"
+        class={@button_class}
+        data-paper-card-action-paint
+        aria-label={"Edit card action label: " <> @state.action_label}
+        aria-controls={@dom_id}
+        phx-click={JS.focus(to: "#" <> @dom_id)}
+      ><%= @state.action_label %></button>
+      <form
+        id={@dom_id <> "-form"}
+        class={"bp-paper-edit-form bp-paper-card-action-label-form " <> @button_class}
+        phx-submit="paper-edit-block"
+        phx-change="paper-block-autosave"
+        phx-debounce="500"
+        data-test-id="paper-card-action-label-form"
+      >
+        <input type="hidden" name="block_id" value={@block["id"]} />
+        <label class="sr-only" for={@dom_id}>Card action label</label>
+        <textarea
+          id={@dom_id}
+          name="card-action-label"
+          rows="1"
+          class="bp-paper-inline-text bp-paper-card-action-label-input"
+          aria-label="Card action label"
+          phx-hook="BarkparkPaperAutoSize"
+        ><%= @state.action_label %></textarea>
+      </form>
+    </div>
+    """
+  end
+
   attr(:block, :map, required: true)
   attr(:grid, :boolean, default: false)
 
@@ -1900,7 +1956,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   defp paper_link_ref_field_dom_id(_field, _block_id, _index, nil), do: nil
 
-  defp paper_link_ref_panel_focus(dom_id) do
+  defp contextual_panel_focus(dom_id) do
     JS.remove_attribute("open", to: {:closest, ".bp-paper-contextual-controls"})
     |> JS.focus(to: "#" <> dom_id)
   end
@@ -2321,7 +2377,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <%= raw(parts.media_html) %>
                   <%= raw(parts.title_html) %>
                   <.card_body_editor block={@block} />
-                  <%= raw(parts.action_html) %>
+                  <%= if card_action_present?(@block) do %>
+                    <.card_action_label_editor block={@block} state={state} />
+                  <% else %>
+                    <%= raw(parts.action_html) %>
+                  <% end %>
                 </div>
               </div>
               <details
@@ -2354,8 +2414,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     <input id={"card-media-src-" <> @id} type="text" name="card-media-src" class="bp-paper-edit-text" value={state.media_src} />
                     <label class="bp-paper-edit-fieldlabel" for={"card-media-alt-" <> @id}>Media description</label>
                     <input id={"card-media-alt-" <> @id} type="text" name="card-media-alt" class="bp-paper-edit-text" value={state.media_alt} />
-                    <label class="bp-paper-edit-fieldlabel" for={"card-action-label-" <> @id}>Action label</label>
-                    <input id={"card-action-label-" <> @id} type="text" name="card-action-label" class="bp-paper-edit-text" value={state.action_label} />
+                    <%= if card_action_present?(@block) do %>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-sm"
+                        data-test-id="paper-card-action-label-focus"
+                        aria-controls={card_action_label_dom_id(@id)}
+                        phx-click={contextual_panel_focus(card_action_label_dom_id(@id))}
+                      >Edit action label</button>
+                    <% else %>
+                      <label class="bp-paper-edit-fieldlabel" for={"card-action-label-" <> @id}>Action label</label>
+                      <input id={"card-action-label-" <> @id} type="text" name="card-action-label" class="bp-paper-edit-text" value={state.action_label} />
+                    <% end %>
                     <label class="bp-paper-edit-fieldlabel" for={"card-action-href-" <> @id}>Action destination</label>
                     <input id={"card-action-href-" <> @id} type="text" name="card-action-href" class="bp-paper-edit-text" value={state.action_href} />
                     <label class="bp-paper-edit-fieldlabel" for={"card-action-priority-" <> @id}>Action priority</label>
@@ -3126,7 +3196,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                             <button
                               type="button"
                               class="btn btn-ghost btn-sm"
-                              phx-click={paper_link_ref_panel_focus(paper_link_ref_dom_id("title", @id, index, admission.guard))}
+                              phx-click={contextual_panel_focus(paper_link_ref_dom_id("title", @id, index, admission.guard))}
                               aria-controls={paper_link_ref_dom_id("title", @id, index, admission.guard)}
                               data-paper-link-ref-title-panel-trigger
                             ><%= if paper_links_field_absent?(ref, "title"), do: "Add title", else: "Edit title" %></button>
@@ -3143,7 +3213,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                             <button
                               type="button"
                               class="btn btn-ghost btn-sm"
-                              phx-click={paper_link_ref_panel_focus(paper_link_ref_dom_id("description", @id, index, admission.guard))}
+                              phx-click={contextual_panel_focus(paper_link_ref_dom_id("description", @id, index, admission.guard))}
                               aria-controls={paper_link_ref_dom_id("description", @id, index, admission.guard)}
                               data-paper-link-ref-description-panel-trigger
                             ><%= if paper_links_field_absent?(ref, "description"), do: "Add description", else: "Edit description" %></button>

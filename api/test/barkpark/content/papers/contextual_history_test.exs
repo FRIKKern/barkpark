@@ -546,6 +546,187 @@ defmodule Barkpark.Content.Papers.ContextualHistoryTest do
              )
   end
 
+  test "card action label history preserves exact scalar states" do
+    states = [
+      {%{"present" => false}, %{"present" => true, "value" => nil}},
+      {%{"present" => true, "value" => nil}, %{"present" => true, "value" => ""}},
+      {%{"present" => true, "value" => ""}, %{"present" => true, "value" => "   "}},
+      {%{"present" => true, "value" => "   "}, %{"present" => true, "value" => "Read next"}}
+    ]
+
+    for {before_state, after_state} <- states do
+      before_action = put_state(card_action(), "label", before_state)
+      after_action = put_state(card_action(), "label", after_state)
+      before = [card(before_action)]
+      after_blocks = [card(after_action)]
+
+      assert {:ok, continuation} =
+               ContextualHistory.capture(before, after_blocks, [slots_patch(after_blocks)])
+
+      assert continuation == %{
+               "version" => 3,
+               "action" => "undo",
+               "target" => %{"id" => "card", "type" => "card"},
+               "field" => "action.label",
+               "expect" => after_state,
+               "replace" => before_state
+             }
+
+      assert :ok = ContextualHistory.validate(continuation)
+      assert {:ok, ^before, redo} = ContextualHistory.apply(after_blocks, continuation)
+      assert redo["action"] == "redo"
+      assert {:ok, ^after_blocks, ^continuation} = ContextualHistory.apply(before, redo)
+    end
+  end
+
+  test "card action label history preserves concurrent Card and action fields" do
+    before_action =
+      card_action()
+      |> Map.put("label", "Before")
+      |> Map.put("opaque", %{"keep" => [true, nil, 1, 1.0]})
+
+    before = [card(before_action)]
+    saved_action = Map.put(before_action, "label", "After")
+    after_blocks = [card(saved_action)]
+
+    assert {:ok, continuation} =
+             ContextualHistory.capture(before, after_blocks, [slots_patch(after_blocks)])
+
+    concurrent_action =
+      saved_action
+      |> Map.put("href", "/concurrent")
+      |> Map.put("priority", "secondary")
+      |> Map.put("later", %{"keep" => true})
+
+    current =
+      card(concurrent_action)
+      |> put_in(["slots", "title"], [%{"type" => "heading", "text" => "Concurrent"}])
+      |> put_in(["slots", "media"], [%{"type" => "image", "src" => "/new.png"}])
+      |> Map.put("outside", [1, 2])
+      |> then(&[&1])
+
+    assert {:ok, [undone], redo} = ContextualHistory.apply(current, continuation)
+    [undone_action] = get_in(undone, ["slots", "action"])
+    assert undone_action == Map.put(concurrent_action, "label", "Before")
+    assert get_in(undone, ["slots", "title"]) == [%{"type" => "heading", "text" => "Concurrent"}]
+    assert get_in(undone, ["slots", "media"]) == [%{"type" => "image", "src" => "/new.png"}]
+    assert undone["outside"] == [1, 2]
+
+    assert {:ok, [redone], _undo} = ContextualHistory.apply([undone], redo)
+    assert get_in(redone, ["slots", "action", Access.at(0), "label"]) == "After"
+    assert get_in(redone, ["slots", "action", Access.at(0), "href"]) == "/concurrent"
+  end
+
+  test "card action capture rejects broad, structural, and malformed changes" do
+    before_action = Map.put(card_action(), "label", "Before")
+    before = [card(before_action)]
+    after_action = Map.put(before_action, "label", "After")
+    valid_after = [card(after_action)]
+
+    unsupported = [
+      {[card(Map.put(after_action, "href", "/changed"))], slots_patch(valid_after)},
+      {[card(after_action), card(Map.put(after_action, "label", "Other"), "other")],
+       slots_patch(valid_after)},
+      {[%{"id" => "card", "type" => "card", "slots" => %{"action" => [after_action]}}],
+       slots_patch(valid_after)},
+      {[card(nil)], slots_patch([card(nil)])},
+      {[card([after_action, after_action])], slots_patch([card([after_action, after_action])])},
+      {[card(Map.put(after_action, "type", "button"))], slots_patch(valid_after)},
+      {[card(Map.put(after_action, "label", 42))], slots_patch(valid_after)},
+      {[card(Map.put(after_action, "label", [%{"type" => "text", "value" => "After"}]))],
+       slots_patch(valid_after)},
+      {[card(Map.put(after_action, "href", %{"rich" => true}))], slots_patch(valid_after)},
+      {[card(Map.put(after_action, "priority", []))], slots_patch(valid_after)}
+    ]
+
+    for {after_blocks, op} <- unsupported do
+      assert {:ok, nil} = ContextualHistory.capture(before, after_blocks, [op])
+    end
+
+    without_action = [put_in(hd(before), ["slots", "action"], [])]
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(without_action, valid_after, [slots_patch(valid_after)])
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(before, without_action, [slots_patch(without_action)])
+
+    duplicate_before = before ++ [card(before_action)]
+    duplicate_after = valid_after ++ [card(before_action)]
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(duplicate_before, duplicate_after, [
+               slots_patch(valid_after)
+             ])
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(before, valid_after, [
+               put_in(slots_patch(valid_after), ["patch", "extra"], true)
+             ])
+  end
+
+  test "card action apply and validation fail closed" do
+    before_action = Map.put(card_action(), "label", "Before")
+    before = [card(before_action)]
+    after_action = Map.put(before_action, "label", "After")
+    after_blocks = [card(after_action)]
+
+    assert {:ok, continuation} =
+             ContextualHistory.capture(before, after_blocks, [slots_patch(after_blocks)])
+
+    for current <- [
+          [card(nil)],
+          [card([after_action, after_action])],
+          [card(Map.put(after_action, "type", "button"))],
+          [card(Map.put(after_action, "label", "Newer"))],
+          [card(Map.put(after_action, "label", 42))],
+          [card(Map.put(after_action, "label", [%{"type" => "text", "value" => "Newer"}]))],
+          [card(Map.put(after_action, "href", %{"rich" => true}))],
+          [card(Map.put(after_action, "priority", []))]
+        ] do
+      assert {:error, :history_conflict} = ContextualHistory.apply(current, continuation)
+    end
+
+    for invalid <- [
+          Map.put(continuation, "version", 3.0),
+          Map.put(continuation, "extra", true),
+          Map.put(continuation, "field", "action.href"),
+          put_in(continuation, ["target", "type"], "paper-links"),
+          Map.put(continuation, "expect", %{"present" => true, "value" => 42}),
+          Map.put(continuation, "replace", continuation["expect"])
+        ] do
+      assert {:error, :invalid_history} = ContextualHistory.validate(invalid)
+      assert {:error, :invalid_history} = ContextualHistory.apply(after_blocks, invalid)
+    end
+
+    oversized = put_in(continuation, ["replace", "value"], String.duplicate("x", @max_bytes))
+    assert {:error, :invalid_history} = ContextualHistory.validate(oversized)
+  end
+
+  test "card action continuation uses the inclusive encoded-size cap" do
+    before_action = Map.put(card_action(), "label", "Before")
+    before = [card(before_action)]
+    seed_after = [card(Map.put(before_action, "label", "x"))]
+
+    assert {:ok, seed} =
+             ContextualHistory.capture(before, seed_after, [slots_patch(seed_after)])
+
+    fixed_bytes = byte_size(Jason.encode!(seed)) - 1
+    at_limit = String.duplicate("x", @max_bytes - fixed_bytes)
+    limited_after = [card(Map.put(before_action, "label", at_limit))]
+
+    assert {:ok, continuation} =
+             ContextualHistory.capture(before, limited_after, [slots_patch(limited_after)])
+
+    assert byte_size(Jason.encode!(continuation)) == @max_bytes
+    assert :ok = ContextualHistory.validate(continuation)
+
+    over_limit = [card(Map.put(before_action, "label", at_limit <> "x"))]
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(before, over_limit, [slots_patch(over_limit)])
+  end
+
   defp capture_caption(before, caption) do
     after_blocks = [Map.put(hd(before), "caption", caption)]
     ContextualHistory.capture(before, after_blocks, [patch("figure", "caption", caption)])
@@ -575,6 +756,40 @@ defmodule Barkpark.Content.Papers.ContextualHistoryTest do
       extra
     )
   end
+
+  defp card(action, id \\ "card") do
+    action_slot = if is_list(action), do: action, else: [action]
+
+    %{
+      "id" => id,
+      "type" => "card",
+      "tone" => "calm",
+      "slots" => %{
+        "title" => [%{"type" => "heading", "text" => "Title"}],
+        "body" => [%{"type" => "paragraph", "content" => []}],
+        "media" => [%{"type" => "image", "src" => "/image.png", "unknown" => true}],
+        "action" => action_slot,
+        "future" => %{"keep" => true}
+      },
+      "unknown" => [1, 2]
+    }
+  end
+
+  defp card_action do
+    %{
+      "type" => "action",
+      "href" => "/read",
+      "priority" => "primary",
+      "unknown" => %{"keep" => true}
+    }
+  end
+
+  defp slots_patch([block]), do: patch(block["id"], "slots", block["slots"])
+
+  defp put_state(map, field, %{"present" => false}), do: Map.delete(map, field)
+
+  defp put_state(map, field, %{"present" => true, "value" => value}),
+    do: Map.put(map, field, value)
 
   defp figure(id, child),
     do: %{"id" => id, "type" => "figure", "caption" => "Before", "child" => child}
