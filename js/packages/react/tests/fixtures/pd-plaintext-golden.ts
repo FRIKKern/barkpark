@@ -46,7 +46,10 @@ export const PROSE_GOLDEN: Record<string, string> = {
   figure: 'The figure body.\n\nFigure with a captioned child',
   card: 'Card title\n\nCard body text.',
   cards: 'Rule one\n\nThe first rule body.\n\nRule two\n\nThe second rule body.',
-  columns: 'Left column body.\n\nRight column body.',
+  // The left column's EMPTY paragraph (Reader-Owned Spacing invariant 2) is a
+  // scaffold, not reading content: it contributes NO text and NO extra blank
+  // line — the two prose runs join with the same single `\n\n` as any pair.
+  columns: 'Left column body.\n\nLeft column, after the scaffold.\n\nRight column body.',
   section: 'Alpha cell\n\nBeta cell',
   terminal: 'Inside the frame.',
   // grown (pbw-stier-steps): each step's title + its nested blocks' prose

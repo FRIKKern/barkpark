@@ -1444,7 +1444,14 @@ jobs:
     # See the verdict-channel note on `cssom-parity` — same contract, same
     # fail-closed guarantee: this output NAMES the fault, it never grades it.
     outputs:
-      verdict: ${{ steps.tier.outputs.verdict }}
+      # TWO verdict-publishing steps now, ONE channel: `roster` is the later
+      # step, so it can only have published a verdict if `tier` already
+      # exited 0 — and if `tier` failed, `roster` never ran and its output is
+      # the empty string, which `||` skips. So this reads the verdict of the
+      # step that actually decided the job, in both directions. It NAMES a
+      # failure; it never grades one — `console-gate` computes `bad` from
+      # `result` alone.
+      verdict: ${{ steps.roster.outputs.verdict || steps.tier.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
 
@@ -1481,6 +1488,83 @@ jobs:
             *)
               verdict UNINTERPRETABLE
               echo "::error title=Tier floor render UNINTERPRETABLE::breakpoint-sweep.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
+      # ── ROSTER PHONE BAND — THE FIRST ON-AXIS RENDERED WIDTH IN THIS
+      # WORKFLOW (cchi-w21-s6). A STEP, not a job, deliberately: a new job
+      # needs THREE aggregator edits and the missing `decide` line is the one
+      # that is SILENTLY ignored (D209). This step adds zero aggregator
+      # surface — `console-gate` still has 7 `needs:` entries and 7 `decide`
+      # calls, counted before and after.
+      #
+      # WHY IT EXISTS: until it, CI rendered exactly ONE cell at exactly ONE
+      # width — 901 — and `WIDTHS.includes(901)` is FALSE. The boundary walk
+      # breakpoint-sweep.mjs DERIVES from app.css's own @media preludes is
+      # [619,620,621,719,720,721,739,740,741,767,768,769,829,830,831,898,899,
+      # 900,903,904,905] — 21 widths, printed by the sweep's own `>> axis`
+      # banner (read there 2026-09-09 on 468286c17; this comment quotes the
+      # banner, it never re-derives it). So zero of the widths this epic
+      # derived from the stylesheet were ever rendered anywhere in CI, and a
+      # breakpoint regression AT a breakpoint had no rendered witness.
+      #
+      # WHAT IT RENDERS, AND WHY EXACTLY THOSE: `--cell members,members-member
+      # --widths 320,390,620`.
+      #   * 320 and 390 are the two phone widths cch-w21-s1 fixed (PR #9057,
+      #     squash 3cf1285e30c97493c16677b208435499e08ba0c7): a
+      #     `@media (max-width: 620px)` band that wraps `.set-row-side` onto
+      #     its own line, plus `overflow-wrap: anywhere` on `.set-row-name`.
+      #     They are OFF the derived axis — legal, because `--widths` is a
+      #     bare comma list validated against nothing (an off-axis width
+      #     renders fine); they buy the s1 regression witness, not coverage.
+      #   * 620 is the ON-AXIS width, and it is on the axis BECAUSE s1's own
+      #     band declares it: a derived boundary width and the remedy's band
+      #     edge at once, so a re-cut of that band reds here.
+      #   * `--cell` is NOT `--widths`: it refuses per name (selectNames/
+      #     selectCells), so a renamed or deleted cell exits 2 rather than
+      #     quietly sweeping fewer cells than asked for.
+      #
+      # COST — MEASURED, NEVER ESTIMATED, AND IT CARRIES ITS DATE. 2 cells x 2
+      # themes x 1 height (800, the default) x 3 widths = 12 CELLS RENDERED.
+      # This step's own wall time, read off THIS PR's own GitHub Actions run
+      # 34375959436 / job 102548831562 (ubuntu-latest, 2026-09-09): the step
+      # ran 16:19:49 -> 16:19:53, 3.9s end to end, of which the sweep's own
+      # `>> cost` line accounts for `12 cells in 3.2s (0.27s/cell)` — the
+      # remaining ~0.7s is Chrome bring-up and the static serve. The break run
+      # of the same step (34377005308, remedy reverted) measured 12 cells in
+      # 2.5s. NOT a projection from the local box: locally the same command is
+      # 6.1s of render, so a number lifted from a laptop would have been 2x.
+      # The FULL render leg stays a developer instrument for the reason argued
+      # on the job header above: 25 x 2 x 1 x 21 = 1050 renders, MINUTES.
+      - name: Roster phone band — render the members roster at 320/390/620px
+        id: roster
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          # Guarded exactly as in `tier` above, for the same reason.
+          verdict() { if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$1" >> "$GITHUB_OUTPUT"; fi; return 0; }
+          rc=0
+          node cloud/priv/static/__preview__/breakpoint-sweep.mjs --render --widths 320,390,620 --cell members,members-member || rc=$?
+          case "$rc" in
+            0)
+              verdict OK
+              echo "Roster phone band: the members roster renders clean at 320, 390 and 620px (620 is on the sweep's own derived axis) in both themes."
+              ;;
+            2)
+              verdict REFUSED
+              echo "::error title=Roster phone band render REFUSED::The sweep refused to measure (exit 2) — an ENVIRONMENT or COVERAGE fault, not a layout defect. NO claim is being made about the members roster. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a squatting server on the sweep's port, or a cell name this step asks for that CELLS no longer carries (`members`, `members-member`) — a renamed cell refuses here rather than sweeping fewer cells than it was asked for. A bring-up refusal is retried a bounded number of times in a fresh profile before this fires — every attempt's Chrome stderr is in the log."
+              exit 1
+              ;;
+            1)
+              verdict MEASURED_DEFECT
+              echo "::error title=Roster phone band render DEFECT::A measured defect on the members roster at 320/390/620px (exit 1) — most likely the cch-w21-s1 remedy in cloud/priv/static/app.css was re-cut: the `@media (max-width: 620px)` band that gives `.set-row-side` its own line, or `overflow-wrap: anywhere` on `.set-row-name`. With that remedy reverted this exact command prints `Q1 SIDEWAYS members/dark@320: scrollWidth 332 > viewport 320` and a Q2 CUT_BY_VIEWPORT line for the Remove button — the person you are about to remove goes unnamed and the control leaves the screen. See the Q1/Q2/Q3 lines above for the element, its scrollWidth/clientWidth and its text."
+              exit 1
+              ;;
+            *)
+              verdict UNINTERPRETABLE
+              echo "::error title=Roster phone band render UNINTERPRETABLE::breakpoint-sweep.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
               exit 1
               ;;
           esac
