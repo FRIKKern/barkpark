@@ -72,6 +72,7 @@ const hook = {
 hook.mounted();
 
 try {
+  el.dataset.imageOwner = "card";
   const click = new window.MouseEvent("click", { bubbles: true, cancelable: true });
   trigger.dispatchEvent(click);
   assert.equal(click.defaultPrevented, true, "the rendered image overlay owns its edit action");
@@ -111,7 +112,7 @@ try {
     id: "image-child-1",
     patch: { src: "https://example.test/after.jpg" },
     if_rev: 7,
-  }, "replacement changes only the canonical child source");
+  }, "an absent Figure owner is frozen at mount and changes only the canonical child source");
   assert.equal(image.src, "https://example.test/before.jpg",
     "the bridge leaves the painted reader image to the server echo");
   picker.dispatchEvent(new window.CustomEvent("bp-change", {

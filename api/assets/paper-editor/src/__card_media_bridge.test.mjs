@@ -81,6 +81,7 @@ const hook = {
 hook.mounted();
 
 try {
+  el.dataset.imageOwner = "future-card-owner";
   const pointer = new window.MouseEvent("click", { bubbles: true, cancelable: true });
   trigger.dispatchEvent(pointer);
   assert.equal(pointer.defaultPrevented, true);
@@ -119,7 +120,7 @@ try {
   assert.equal(calls[0].name, "paper-edit-block");
   assert.deepEqual(Object.keys(calls[0].payload).sort(),
     ["block_id", "card-media-src", "if_rev", "request_id"].sort(),
-    "Card mode exposes only the source field and immutable mutation envelope");
+    "the exact Card owner is frozen at mount and exposes only its source envelope");
   assert.equal(calls[0].payload.block_id, "card:media/[one]");
   assert.equal(calls[0].payload["card-media-src"], "https://example.test/after.jpg");
   assert.equal(calls[0].payload.if_rev, 7);
@@ -198,3 +199,163 @@ try {
   hook.destroyed();
   dom.window.close();
 }
+
+function mountedCardBridge({ owner = "card", id = "ordered-card", src = "A" } = {}) {
+  const ownerAttribute = owner == null ? "" : ` data-image-owner="${owner}"`;
+  const fixture = new JSDOM(`<!doctype html><body>
+    <main data-paper-doc-key="production:paper:card-order" data-paper-rev="7">
+      <div class="bp-paper-editor" data-paper-doc-key="production:paper:card-order" data-paper-rev="7">
+        <div id="bridge" phx-hook="BarkparkFigureImageBridge"${ownerAttribute}
+             data-block-id="${id}" data-image-src="${src}">
+          <button type="button" data-paper-figure-image-trigger>Replace</button>
+          <bp-media-picker data-paper-figure-image-picker></bp-media-picker>
+        </div>
+      </div>
+    </main>
+  </body>`, { url: "http://localhost/" });
+  const fixtureWindow = fixture.window;
+  let fixtureUuid = 0;
+  Object.defineProperty(fixtureWindow, "crypto", { configurable: true, value: {
+    randomUUID: () =>
+      `10000000-0000-4000-8000-${String(++fixtureUuid).padStart(12, "0")}`,
+  } });
+  vm.runInContext(hooksSource, vm.createContext({
+    window: fixtureWindow,
+    document: fixtureWindow.document,
+    CustomEvent: fixtureWindow.CustomEvent,
+    FormData: fixtureWindow.FormData,
+    Date,
+    setTimeout,
+    clearTimeout,
+    customElements: { whenDefined: () => Promise.resolve() },
+  }));
+
+  const bridge = fixtureWindow.document.getElementById("bridge");
+  const mediaPicker = bridge.querySelector("[data-paper-figure-image-picker]");
+  const mediaTrigger = bridge.querySelector("[data-paper-figure-image-trigger]");
+  const fixtureCalls = [];
+  const fixtureReplies = [];
+  const fixtureOpens = [];
+  mediaPicker.openBrowser = () => { fixtureOpens.push("browser"); return true; };
+  mediaPicker.openFileDialog = () => { fixtureOpens.push("upload"); };
+  const fixtureHook = {
+    ...fixtureWindow.BarkparkPaperEditorHooks.BarkparkFigureImageBridge,
+    el: bridge,
+    pushEvent(name, payload) {
+      fixtureCalls.push({ name, payload: structuredClone(payload) });
+      return new Promise((resolve, reject) => fixtureReplies.push({
+        resolve: (reply) => resolve({ ...reply, request_id: payload.request_id }),
+        reject,
+      }));
+    },
+  };
+  fixtureHook.mounted();
+
+  return {
+    fixture,
+    window: fixtureWindow,
+    bridge,
+    picker: mediaPicker,
+    trigger: mediaTrigger,
+    hook: fixtureHook,
+    calls: fixtureCalls,
+    replies: fixtureReplies,
+    opens: fixtureOpens,
+    choose(nextSrc) {
+      mediaPicker.meta = { url: nextSrc };
+      mediaPicker.dispatchEvent(new fixtureWindow.CustomEvent("bp-change", {
+        bubbles: true,
+        detail: { value: JSON.stringify({ url: nextSrc }) },
+      }));
+    },
+    acknowledge(nextSrc, rev, extra = {}) {
+      bridge.dataset.imageSrc = nextSrc;
+      bridge.closest("[data-paper-rev]").dataset.paperRev = String(rev);
+      fixtureReplies.shift().resolve({ saved: true, rev, ...extra });
+    },
+    close() {
+      fixtureHook.destroyed();
+      fixtureWindow.close();
+    },
+  };
+}
+
+// The author's newest intent can be the original source. It is not a no-op
+// while a different source is in flight: queue the restoration behind B, then
+// retain that exact rebased request through a lost acknowledgement.
+{
+  const env = mountedCardBridge();
+  try {
+    env.choose("B");
+    env.choose("A");
+    assert.equal(env.calls.length, 1, "A waits behind the in-flight B selection");
+    env.acknowledge("B", 8);
+    await waitFor(() => env.calls.length === 2);
+    assert.deepEqual(Object.keys(env.calls[1].payload).sort(),
+      ["block_id", "card-media-src", "if_rev", "request_id"].sort());
+    assert.equal(env.calls[1].payload["card-media-src"], "A");
+    assert.equal(env.calls[1].payload.if_rev, 8,
+      "the queued restoration rebases onto B's acknowledged revision");
+
+    const restoreWire = structuredClone(env.calls[1]);
+    env.replies.shift().reject(new Error("restoration acknowledgement lost"));
+    await tick();
+    await tick();
+    const pending = [];
+    env.bridge.dispatchEvent(new env.window.CustomEvent("bp-flush-pending", {
+      detail: { waitUntil: (promise) => pending.push(promise) },
+    }));
+    await waitFor(() => env.calls.length === 3);
+    assert.deepEqual(env.calls[2], restoreWire,
+      "the A restoration retries with the exact request identity and source-only wire");
+    env.acknowledge("A", 9, { replayed: true });
+    assert.deepEqual(await Promise.all(pending), [true]);
+  } finally {
+    env.close();
+  }
+}
+
+// Dedupe against the last intended source, not every source anywhere in the
+// queue. Returning to B after C is a distinct final intent and must survive.
+{
+  const env = mountedCardBridge();
+  try {
+    env.choose("B");
+    env.choose("C");
+    env.choose("B");
+    assert.equal(env.calls.length, 1, "C and final B serialize behind the first B");
+
+    env.acknowledge("B", 8);
+    await waitFor(() => env.calls.length === 2);
+    assert.equal(env.calls[1].payload["card-media-src"], "C");
+    assert.equal(env.calls[1].payload.if_rev, 8);
+
+    env.acknowledge("C", 9);
+    await waitFor(() => env.calls.length === 3);
+    assert.equal(env.calls[2].payload["card-media-src"], "B");
+    assert.equal(env.calls[2].payload.if_rev, 9,
+      "the final B intent rebases after C instead of being globally deduplicated");
+    env.acknowledge("B", 10);
+    await tick();
+    assert.equal(env.hook._exitCoordinator.hasUnsaved(), false);
+  } finally {
+    env.close();
+  }
+}
+
+// An explicitly present unknown owner is neither Figure nor Card. It cannot
+// activate a picker or infer a write shape from arbitrary data attributes.
+for (const owner of ["", "video"]) {
+  const env = mountedCardBridge({ owner });
+  try {
+    env.trigger.click();
+    env.choose("B");
+    await tick();
+    assert.deepEqual(env.opens, [], `unknown owner ${JSON.stringify(owner)} stays inactive`);
+    assert.deepEqual(env.calls, [], `unknown owner ${JSON.stringify(owner)} cannot write`);
+  } finally {
+    env.close();
+  }
+}
+
+console.log("PASS Card media ordering: latest intent, exact retry, frozen owner, unknown fail-closed");
