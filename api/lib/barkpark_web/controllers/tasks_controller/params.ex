@@ -909,6 +909,31 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # C2: a lightweight child summary — just enough to render the rail without
   # the full render_doc payload or a recursive child fetch (one level only).
+  #
+  # `updated_at` IS THE CLOSE-TIME FIELD (gr-bl-close-time-audit-vacuous-green).
+  # The rail used to carry `inserted_at` and nothing else, which made the
+  # obvious close-window audit — "which children of this epic closed between T1
+  # and T2?" — return ZERO ROWS over a payload that simply had no such field.
+  # Not an error: a silent wrong answer that reads exactly like "nothing closed
+  # in that window", on the one audit that catches false-done closes. The
+  # alternative route was fetching every done child INDIVIDUALLY (80 requests
+  # for one question), and that cost is what makes an agent reach for the
+  # broken shortcut in the first place.
+  #
+  # WHY updated_at AND NOT closed_at. A task RELEASES `content.claim` when it
+  # closes, so there is no per-row close stamp to surface — `closed_at` would be
+  # null on every closed row, which is the same silent zero wearing a better
+  # name. `documents.updated_at` is re-stamped by every write including the
+  # close, so for a row now in a terminal lifecycle_status it IS the close time,
+  # and it is a column already on the row this query loaded: no join, no second
+  # source of truth, no extra query. A caller that needs the transition itself
+  # (not its timestamp) reads `GET /v1/tasks/events`, which is the only surface
+  # that owns "what changed when".
+  #
+  # It is the SAME field `render_doc/2` puts on the full doc and on the brief
+  # card, so the rail and the list now answer the close-time question with one
+  # vocabulary. Pinned by `tasks_controller_test.exs`, "C2: the rail carries
+  # updated_at — the close-time field a window audit needs".
   def child_summary(%Document{} = doc) do
     content = doc.content || %{}
 
@@ -917,7 +942,8 @@ defmodule BarkparkWeb.TasksController.Params do
       title: doc.title,
       lifecycle_status: Map.get(content, "lifecycle_status"),
       execution_class: QueueGate.execution_class(content),
-      inserted_at: doc.inserted_at
+      inserted_at: doc.inserted_at,
+      updated_at: doc.updated_at
     }
     # Same omit-when-absent contract as render_doc — a parent's rail shows
     # each child's criteria progress without a per-child fetch.

@@ -715,6 +715,35 @@ defmodule Barkpark.Plugins.Tasks do
               "Keyset page cursor over (updated_at, id) — pass empty for page 1, " <>
                 "then echo page.next_cursor. Walks past the 1000-row limit cap, " <>
                 "so a missing task means closed/absent, not rotated out. Not with offset."
+          },
+          # gr-bl-close-time-audit-vacuous-green. THE PARENT-SCOPED LISTING,
+          # DECLARED. The route has honoured a flat `?parent=` (and its
+          # `parent_id` alias) since task-233cb8a1d033c738 — but the CLI
+          # declared only limit/offset/cursor, so `bp task ls --parent <epic>`
+          # answered `unknown flag --parent for task ls` and the ONLY
+          # discoverable parent-scoped read was `bp task get <epic>`, whose
+          # `children[]` rail carried no close-time field at all. An operator
+          # asking "which children closed in this window?" therefore ran the
+          # discoverable command and got a silent zero.
+          #
+          # Nothing in Go changes: `applyQuery` forwards one query key per
+          # DECLARED string flag, so declaring it here IS the wiring, and the
+          # rows come back through the index renderer that already carries
+          # `updated_at` on both the full and the brief card. That is the whole
+          # point of naming it — the answerable route is now the one the help
+          # text shows, and `--view=brief` makes it {doc_id, title, priority,
+          # assignee, parent_id, updated_at} per row.
+          %{
+            name: "parent",
+            type: "string",
+            summary:
+              "Narrow the page to the DIRECT children of this parent task id " <>
+                "(`parent_id` is an accepted alias server-side). This is the " <>
+                "parent-scoped read that carries updated_at per row — the " <>
+                "close-time field a \"which children closed between T1 and T2\" " <>
+                "audit needs. `bp task get <parent>` renders the same rail but " <>
+                "its child summaries are a lighter card; use this verb when you " <>
+                "are querying by time rather than reading one task."
           }
         ],
         writes: false,

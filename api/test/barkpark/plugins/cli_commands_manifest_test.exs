@@ -548,6 +548,56 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert limit.default == 100
     end
 
+    # gr-bl-close-time-audit-vacuous-green. `GET /v1/tasks` has honoured a flat
+    # `?parent=` since task-233cb8a1d033c738, but the manifest declared only
+    # limit/offset/cursor — so `bp task ls --parent <epic>` answered
+    # `unknown flag --parent for task ls` and the parent-scoped listing was
+    # UNDISCOVERABLE from the CLI. The discoverable alternative,
+    # `bp task get <epic>`, rendered a rail with no close-time field, so an
+    # operator auditing "which children closed in this window?" ran the
+    # reachable command and read a silent zero as a clean pass.
+    #
+    # The manifest IS the wiring: run.go's applyQuery forwards one query key
+    # per DECLARED flag, so this declaration is what puts `?parent=` on the
+    # wire. The route's flat allowlist is pinned separately by
+    # tasks_controller_test.exs ("every param the shipped consumers send is
+    # still accepted", which now lists `parent=`).
+    test "task.ls declares the parent filter, so the parent-scoped listing is discoverable" do
+      ls = Enum.find(Tasks.cli_commands(), &(&1.id == "task.ls"))
+      parent = Enum.find(ls.flags, &(&1.name == "parent"))
+
+      assert parent,
+             "task.ls declares no parent flag — `bp task ls --parent <epic>` is a usage error " <>
+               "and the only discoverable parent-scoped read is the rail, which is not a listing"
+
+      assert parent.type == "string"
+
+      # The help text has to say WHY this route rather than the rail: it is the
+      # one that answers a close-time question. A summary that merely said
+      # "filter by parent" would leave the audit ergonomics exactly where the
+      # trap found them.
+      assert parent.summary =~ "updated_at"
+      assert parent.summary =~ "close-time"
+    end
+
+    # The other half of the same fix: the parent rail on `GET /v1/tasks/:id`
+    # carries a close-time field. Pinned here too because the CLI's `task get`
+    # help points readers at that rail — the two surfaces have to agree that a
+    # close-window question is answerable.
+    test "the child rail carries updated_at, the close-time field" do
+      doc = %Barkpark.Content.Document{
+        doc_id: "kid-1",
+        title: "kid",
+        content: %{"kind" => "task", "lifecycle_status" => "done"},
+        inserted_at: ~U[2026-01-01 00:00:00Z],
+        updated_at: ~U[2026-02-02 03:04:05Z]
+      }
+
+      summary = BarkparkWeb.TasksController.Params.child_summary(doc)
+
+      assert summary.updated_at == ~U[2026-02-02 03:04:05Z]
+    end
+
     # Third and fourth instances from the same sweep: doc.ls and doc.query both
     # declared `default: 50` against QueryController.index's real default of
     # 100 (parse_int(params["limit"], 100), unchanged since 8b81b12279 — the

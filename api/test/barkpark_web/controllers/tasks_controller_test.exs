@@ -702,7 +702,13 @@ defmodule BarkparkWeb.TasksControllerTest do
             "lifecycle_status=open",
             "phase_id=none",
             "label=none",
-            "filter[parent_id]=none"
+            "filter[parent_id]=none",
+            # gr-bl-close-time-audit-vacuous-green: task.ls now DECLARES
+            # `parent`, so run.go ships `?parent=` on every
+            # `bp task ls --parent <epic>`. This line is what the comment above
+            # promises — a new manifest flag whose flat spelling the route did
+            # not accept would red here rather than in prod.
+            "parent=none"
           ] do
         {status, _} = list_ids(conn, qs)
         assert status == 200, "a shipped consumer's param was refused: #{qs}"
@@ -2460,6 +2466,85 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert summary["title"] == first.title
       assert summary["lifecycle_status"] == "open"
       assert Map.has_key?(summary, "inserted_at")
+    end
+
+    # gr-bl-close-time-audit-vacuous-green — THE REGRESSION PIN.
+    #
+    # The rail used to carry `inserted_at` and no close-time field, so the
+    # obvious audit ("which children of this epic closed between T1 and T2?")
+    # filtered on a key that did not exist and returned ZERO rows at HTTP 200 —
+    # indistinguishable from "nothing closed in that window", on the exact
+    # audit that catches false-done closes. This test does the window query
+    # itself, so the silent-zero form cannot come back: with `updated_at`
+    # dropped from `child_summary/1` the window below matches nothing and the
+    # assertion reds.
+    test "C2: the rail carries updated_at — the close-time field a window audit needs",
+         %{conn: conn, scope: scope} do
+      root = mk_task!(uniq("c2-closetime-root"), scope)
+      child = mk_task!(uniq("c2-closetime-child"), scope, %{"parent_id" => root.doc_id})
+
+      before_close = DateTime.utc_now() |> DateTime.add(-1, :second)
+
+      # A real close: claim, then close. This is the transition whose TIME the
+      # audit is asking about, and it is also what proves the point about
+      # `closed_at` — the close RELEASES content.claim, so the row itself
+      # carries no close stamp other than `updated_at`.
+      claim_body = Jason.encode!(%{worker_id: "closetime-worker"})
+      claim_resp = conn |> authed() |> post("/v1/tasks/#{child.doc_id}/claim", claim_body)
+      assert claim_resp.status == 200
+      epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
+
+      close_body = Jason.encode!(%{worker_id: "closetime-worker", observed_epoch: epoch})
+      close_resp = conn |> authed() |> post("/v1/tasks/#{child.doc_id}/close", close_body)
+      assert close_resp.status == 200
+
+      after_close = DateTime.utc_now() |> DateTime.add(1, :second)
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/#{root.doc_id}")
+        |> Map.fetch!(:resp_body)
+        |> Jason.decode!()
+
+      assert [summary] = payload["children"]
+      assert summary["doc_id"] == child.doc_id
+      assert summary["lifecycle_status"] == "done"
+
+      # The close-time signal is present and parseable...
+      assert is_binary(summary["updated_at"]),
+             "the rail carries no close-time field, so a window audit over it " <>
+               "returns zero rows and reads as green"
+
+      {:ok, updated_at, _} = DateTime.from_iso8601(summary["updated_at"])
+
+      # ...and it is a CLOSE time, not the insert time: the row was created
+      # before `before_close` too, so a summary that answered with inserted_at
+      # would still pass a naive "is it in the window" check. This asserts the
+      # field MOVED past the insert.
+      assert DateTime.compare(updated_at, before_close) in [:gt, :eq]
+      assert DateTime.compare(updated_at, after_close) == :lt
+
+      {:ok, inserted_at, _} = DateTime.from_iso8601(summary["inserted_at"])
+      assert DateTime.compare(updated_at, inserted_at) == :gt
+
+      # THE AUDIT ITSELF, run over the payload exactly as an operator would:
+      # "which children of this parent closed in this window?" It answered 0
+      # before this change.
+      closed_in_window =
+        payload["children"]
+        |> Enum.filter(fn c ->
+          with ts when is_binary(ts) <- c["updated_at"],
+               {:ok, at, _} <- DateTime.from_iso8601(ts) do
+            c["lifecycle_status"] == "done" and
+              DateTime.compare(at, before_close) in [:gt, :eq] and
+              DateTime.compare(at, after_close) == :lt
+          else
+            _ -> false
+          end
+        end)
+
+      assert Enum.map(closed_in_window, & &1["doc_id"]) == [child.doc_id]
     end
 
     test "C2: a childless task returns children == [] and child_count == 0",
