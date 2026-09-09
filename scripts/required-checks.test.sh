@@ -839,6 +839,7 @@ cp "$REPO_ROOT"/.github/workflows/*.yml "$RC3C_CA/"
 cat > "$RC3C_CA/aaa-rc3c-catchall.yml" <<'YAML'
 name: rc3c catch-all specimen
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       operation:
@@ -874,6 +875,7 @@ section "3d. a job named after an INPUT is a catch-all — the generator refuses
 cat > "$WF/poison.yml" <<'YAML'
 name: poison
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       operation:
@@ -961,6 +963,7 @@ cp "$REPO_ROOT"/.github/workflows/*.yml "$REALCOPY/"
 cat > "$REALCOPY/aaa-planted-poison.yml" <<'YAML'
 name: planted
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       operation:
