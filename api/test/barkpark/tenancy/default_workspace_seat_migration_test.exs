@@ -24,7 +24,6 @@ defmodule Barkpark.Tenancy.DefaultWorkspaceSeatMigrationTest do
 
   use Barkpark.DataCase, async: false
 
-
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.{Repo, Tenancy}
@@ -105,7 +104,12 @@ defmodule Barkpark.Tenancy.DefaultWorkspaceSeatMigrationTest do
       )
 
     {:ok, _} = Tenancy.create_workspace(%{slug: "default", name: "Default Workspace"})
-    {:ok, _other} = Tenancy.create_workspace(%{slug: "other-#{System.unique_integer([:positive])}", name: "Other"})
+
+    {:ok, _other} =
+      Tenancy.create_workspace(%{
+        slug: "other-#{System.unique_integer([:positive])}",
+        name: "Other"
+      })
 
     assert %{num_rows: 1} = Repo.query!(@backfill, [])
 

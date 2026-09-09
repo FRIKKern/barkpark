@@ -55,9 +55,12 @@ defmodule Barkpark.TenancySingletonSlugTest do
 
     # THE RENAME PATH IS CLOSED. Asserted in the setup, where a regression would
     # otherwise make every arm below vacuous rather than red.
-    assert %Workspace{slug: "vacated-for-test"} = Tenancy.get_default_workspace(),
+    vacated = Tenancy.get_default_workspace()
+
+    assert match?(%Workspace{slug: "vacated-for-test"}, vacated),
            "RENAME MOVED THE SEAT: the instance-default singleton is once again " <>
-             "identified by a mutable, user-claimable string (task-566dc5be4871353b)"
+             "identified by a mutable, user-claimable string (task-566dc5be4871353b); " <>
+             "got #{inspect(vacated)}"
 
     {_n, _} =
       Repo.update_all(from(w in Workspace, where: w.is_default == true), set: [is_default: false])

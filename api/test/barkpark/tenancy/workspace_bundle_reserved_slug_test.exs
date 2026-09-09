@@ -78,11 +78,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundleReservedSlugTest do
     # THE RENAME PATH IS CLOSED — asserted here rather than in prose, and in the
     # one place a regression would silently make every arm below vacuous: if the
     # seat ever becomes slug-derived again, this refute reds and names why.
-    assert %Workspace{slug: "parked-for-reserved-slug-test"} =
-             Tenancy.get_default_workspace(),
+    parked = Tenancy.get_default_workspace()
+
+    assert match?(%Workspace{slug: "parked-for-reserved-slug-test"}, parked),
            "RENAME MOVED THE SEAT: get_default_workspace/0 stopped resolving the renamed " <>
              "workspace, so the singleton is once again identified by a mutable, " <>
-             "user-claimable string (task-566dc5be4871353b)"
+             "user-claimable string (task-566dc5be4871353b); got #{inspect(parked)}"
 
     {_n, _} =
       Repo.update_all(
@@ -317,7 +318,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundleReservedSlugTest do
       {:ok, _doc} = create_document_in!(src, proj, "post", %{"doc_id" => unique("d")}, "test")
 
       # Put THIS workspace in the seat, then export it.
-      {1, _} = Repo.update_all(from(w in Workspace, where: w.id == ^src.id), set: [is_default: true])
+      {1, _} =
+        Repo.update_all(from(w in Workspace, where: w.id == ^src.id), set: [is_default: true])
+
       Barkpark.Tenancy.DefaultScopeCache.invalidate()
       assert Tenancy.get_default_workspace().id == src.id
 
