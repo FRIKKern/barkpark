@@ -63,9 +63,9 @@ console.log("related-card copy controls preserve separate editing and navigation
 
 // These opaque replies are client-protocol fixtures, not proof of server
 // authority. ExUnit and native host checks separately exercise real receipts.
-const identity = Buffer.from(JSON.stringify({
+const identity = createHash("sha256").update(JSON.stringify({
   slug: "unique-destination", prefer_authored_copy: true, qa: { keep: "identity" },
-})).toString("base64url");
+})).digest("base64url");
 const blockId = "related: copy/[owner]#?";
 const referenceFieldId = (field, guard = identity) =>
   `paper-link-ref-${field}-${Buffer.from(blockId).toString("base64url")}-3-${
@@ -99,9 +99,9 @@ assert.equal(morphDom.window.document.getElementById(referenceFieldId("title")),
   "copy-only ACKs retain the exact keyed textarea and its native history owner");
 assert.deepEqual(retainedTitle.__nativeHistoryProbe, { undoDepth: 2 });
 
-const changedIdentity = Buffer.from(JSON.stringify({
+const changedIdentity = createHash("sha256").update(JSON.stringify({
   slug: "unique-destination", prefer_authored_copy: true, qa: { keep: "replacement" },
-})).toString("base64url");
+})).digest("base64url");
 const identityChanged = morphCard.cloneNode(false);
 identityChanged.innerHTML = `${fieldForm("title", "Replacement title", changedIdentity)}
   ${fieldForm("description", "Replacement description", changedIdentity)}`;
