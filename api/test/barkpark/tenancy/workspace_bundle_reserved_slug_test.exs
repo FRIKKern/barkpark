@@ -7,8 +7,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundleReservedSlugTest do
   `Workspace.changeset/2`'s `validate_exclusion(:slug, @reserved_slugs)` (the
   routing prefixes). task-545166efceb1bc91.
 
-  WHY THE SEAT IS WORTH TAKING. `Tenancy.get_default_workspace/0` is
-  `Repo.get_by(Workspace, slug: "default")`. Whoever holds that slug IS the
+  WHY THE SEAT IS WORTH TAKING. `Tenancy.get_default_workspace/0` reads the
+  uncast `workspaces.is_default` column (task-566dc5be4871353b); it used to be
+  `Repo.get_by(Workspace, slug: "default")`, and whoever held that slug WAS the
   instance default — `AssignDefaultScope` binds every flat route to it and
   `Content.WriteScope.resolve_write_scope/1` stamps an UNSCOPED WRITE with it.
   The `unique_index(:workspaces, [:slug])` the import route leans on refuses a
@@ -54,16 +55,42 @@ defmodule Barkpark.Tenancy.WorkspaceBundleReservedSlugTest do
   @singleton_slug "default"
 
   setup do
-    # Vacate the seat by RENAME, not by the real teardown: the multi-table
-    # cascade deadlocked against the test's own transaction under the shared
-    # sandbox (Postgrex 40P01, documented in tenancy_singleton_slug_test.exs).
-    # Every arm here needs only that `get_default_workspace/0` resolves to
-    # nothing before the fixture builds its own "default"-slugged source.
+    # Vacate the seat WITHOUT the real teardown: the multi-table cascade
+    # deadlocked against the test's own transaction under the shared sandbox
+    # (Postgrex 40P01, documented in tenancy_singleton_slug_test.exs). Every arm
+    # here needs only that `get_default_workspace/0` resolves to nothing before
+    # the fixture builds its own "default"-slugged source.
+    #
+    # THIS SETUP USED TO BE A RENAME ALONE, and that it no longer suffices is
+    # the whole of task-566dc5be4871353b in one statement. While the seat WAS
+    # the `default` slug, moving the slug moved the seat — which is precisely
+    # the residue PR #12879 could not close, because `Workspace.changeset/2`
+    # casts `:slug` and any future `update_workspace/2` would have handed a
+    # principal the instance default for free. The seat is now
+    # `workspaces.is_default`, which no changeset casts, so the rename below is
+    # inert and the flag has to be cleared explicitly.
     {_n, _} =
       Repo.update_all(
         from(w in Workspace, where: w.slug == ^@singleton_slug),
         set: [slug: "parked-for-reserved-slug-test"]
       )
+
+    # THE RENAME PATH IS CLOSED — asserted here rather than in prose, and in the
+    # one place a regression would silently make every arm below vacuous: if the
+    # seat ever becomes slug-derived again, this refute reds and names why.
+    assert %Workspace{slug: "parked-for-reserved-slug-test"} =
+             Tenancy.get_default_workspace(),
+           "RENAME MOVED THE SEAT: get_default_workspace/0 stopped resolving the renamed " <>
+             "workspace, so the singleton is once again identified by a mutable, " <>
+             "user-claimable string (task-566dc5be4871353b)"
+
+    {_n, _} =
+      Repo.update_all(
+        from(w in Workspace, where: w.is_default == true),
+        set: [is_default: false]
+      )
+
+    Barkpark.Tenancy.DefaultScopeCache.invalidate()
 
     refute Tenancy.get_default_workspace()
     :ok

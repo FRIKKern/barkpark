@@ -37,18 +37,38 @@ defmodule Barkpark.TenancySingletonSlugTest do
     # effects, which under the shared sandbox deadlocked against the test's own
     # transaction (Postgrex 40P01) — a harness artefact, not a product finding.
     # What every arm here needs is only that `get_default_workspace/0` resolves
-    # to nothing, and a rename produces exactly that state. It is also the
-    # faithful shape: renaming out of the slug is itself one of the ways the
-    # seat goes vacant (Workspace.changeset/2 casts :slug).
+    # to nothing.
+    #
+    # RETRACTED, and left standing as the record: this comment used to add "it
+    # is also the faithful shape — renaming out of the slug is itself one of the
+    # ways the seat goes vacant (Workspace.changeset/2 casts :slug)". That was
+    # TRUE when it was written and is FALSE now. task-566dc5be4871353b moved the
+    # seat to `workspaces.is_default`, a column NO changeset casts, so a rename
+    # moves nothing and the flag has to be cleared on its own line. The rename is
+    # kept only so the arms below can mint their own `default`-slugged rows
+    # without colliding on `workspaces_slug_index`.
     {_n, _} =
       Repo.update_all(
         from(w in Workspace, where: w.slug == ^"default"),
         set: [slug: "vacated-for-test"]
       )
 
+    # THE RENAME PATH IS CLOSED. Asserted in the setup, where a regression would
+    # otherwise make every arm below vacuous rather than red.
+    assert %Workspace{slug: "vacated-for-test"} = Tenancy.get_default_workspace(),
+           "RENAME MOVED THE SEAT: the instance-default singleton is once again " <>
+             "identified by a mutable, user-claimable string (task-566dc5be4871353b)"
+
+    {_n, _} =
+      Repo.update_all(from(w in Workspace, where: w.is_default == true), set: [is_default: false])
+
+    Barkpark.Tenancy.DefaultScopeCache.invalidate()
+
     refute Tenancy.get_default_workspace()
     :ok
   end
+
+  defp unique_name, do: "ws-#{System.unique_integer([:positive])}"
 
   defp claimant_token do
     # A principal id is all create_workspace_with_owner/2 needs; any binary
@@ -117,23 +137,75 @@ defmodule Barkpark.TenancySingletonSlugTest do
   end
 
   describe "NEGATIVE ARMS — the legitimate creators keep working" do
-    test "Tenancy.create_workspace/1 still mints the singleton (seeds / support re-mint)" do
+    test "Tenancy.create_workspace/1 still mints a default-slugged row — and the SEAT stays VACANT" do
       minted = Tenancy.create_workspace(%{slug: "default", name: "Default Workspace"})
 
       assert match?({:ok, %Workspace{slug: "default"}}, minted),
              "the INTERNAL creator was guarded — this breaks seeding and the " <>
                "support bracket's own recovery; got: #{inspect(minted)}"
 
-      assert Tenancy.get_default_workspace()
+      # THE ASSERTION THAT FLIPPED, and the flip IS the fix
+      # (task-566dc5be4871353b). This line used to read
+      # `assert Tenancy.get_default_workspace()`: minting the slug WAS taking the
+      # seat, which is exactly why the singleton was claimable. Now the slug and
+      # the seat are different things — the row exists, the seat does not move,
+      # and only `establish_default_workspace!/0` (below) can fill it.
+      refute Tenancy.get_default_workspace(),
+             "minting a `default`-slugged workspace TOOK the instance-default seat — the " <>
+               "singleton is identifiable by a user-supplied string again"
     end
 
-    test "Seeds.Shared.ensure_default_scope/0 still establishes the default" do
+    test "Seeds.Shared.ensure_default_scope/0 still establishes the default (WRITER 1 of 3)" do
       _ = Barkpark.Seeds.Shared.ensure_default_scope()
 
       default_ws = Tenancy.get_default_workspace()
 
-      assert match?(%Workspace{slug: "default"}, default_ws),
+      assert match?(%Workspace{slug: "default", is_default: true}, default_ws),
              "ensure_default_scope/0 could not re-establish the singleton; got: #{inspect(default_ws)}"
+    end
+
+    test "establish_default_workspace!/0 ADOPTS an orphaned default-slugged row rather than " <>
+           "inserting a second one" do
+      # The state a migration leaves if the backfill ran while the flag was
+      # clear, and the state an operator leaves by clearing the flag by hand:
+      # the row is there, the seat is not. A blind insert would collide on
+      # `workspaces_slug_index` and crash the support bracket's re-mint.
+      {:ok, orphan} = Tenancy.create_workspace(%{slug: "default", name: "Default Workspace"})
+      refute Tenancy.get_default_workspace()
+
+      established = Tenancy.establish_default_workspace!()
+
+      assert established.id == orphan.id,
+             "establish_default_workspace!/0 minted a SECOND default-slugged workspace " <>
+               "instead of adopting the orphaned row"
+
+      assert Tenancy.get_default_workspace().id == orphan.id
+    end
+
+    test "establish_default_workspace!/0 is idempotent — a held seat is returned untouched" do
+      first = Tenancy.establish_default_workspace!()
+      second = Tenancy.establish_default_workspace!()
+
+      assert first.id == second.id
+      assert Tenancy.get_default_workspace().id == first.id
+    end
+
+    test "at most ONE workspace can hold the seat (workspaces_single_default_index)" do
+      held = Tenancy.establish_default_workspace!()
+      {:ok, other} = Tenancy.create_workspace_with_owner(%{name: unique_name()}, claimant_token())
+
+      # Postgrex.Error, not Ecto.ConstraintError: `update_all` carries no
+      # changeset for Ecto to translate the 23505 against — which is the point.
+      # The index is the wall, and it stands under a RAW write, not only under
+      # the changeset path that never had access to the field anyway.
+      err =
+        assert_raise Postgrex.Error, fn ->
+          Repo.update_all(from(w in Workspace, where: w.id == ^other.id), set: [is_default: true])
+        end
+
+      assert err.postgres.constraint == "workspaces_single_default_index"
+
+      assert Tenancy.get_default_workspace().id == held.id
     end
 
     test "an ordinary owner-create is untouched" do
