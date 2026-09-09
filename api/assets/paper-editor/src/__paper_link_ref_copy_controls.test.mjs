@@ -116,7 +116,6 @@ assert.equal(replacementTitle.value, "Replacement title",
   "a retained draft cannot retarget the newly admitted reference");
 assert.equal(replacementTitle.__nativeHistoryProbe, undefined,
   "native history state does not cross the identity boundary");
-morphDom.window.close();
 console.log("related-card copy morph ownership follows the admitted identity guard");
 
 const queueDom = new JSDOM(`<!doctype html><body>
@@ -205,8 +204,36 @@ try {
   }
   await acknowledge(calls[2], 10);
   assert.equal(toggles.length, 1, "View occurs only after every exact field value is acknowledged");
+
+  const oldIdentityTitle = win.document.getElementById(referenceFieldId("title"));
+  input("title", "Unsaved draft for the old identity");
+  const callsBeforeIdentityChange = calls.length;
+  const togglesBeforeIdentityChange = toggles.length;
+  const editorRoot = win.document.querySelector(".bp-paper-editor");
+  const authoritativeReplacement = editorRoot.cloneNode(false);
+  authoritativeReplacement.innerHTML = `${fieldForm(
+    "title", "Replacement authoritative title", changedIdentity,
+  )}${fieldForm(
+    "description", "Replacement authoritative description", changedIdentity,
+  )}${editorRoot.querySelector("footer").outerHTML}`;
+  morph(editorRoot, authoritativeReplacement, { getNodeKey: (node) => node?.id });
+
+  const authoritativeTitle = win.document.getElementById(
+    referenceFieldId("title", changedIdentity),
+  );
+  assert.equal(oldIdentityTitle.isConnected, false,
+    "the coordinator's dirty source is disconnected when its admitted identity changes");
+  assert.equal(authoritativeTitle.value, "Replacement authoritative title");
+  assert.notEqual(authoritativeTitle, oldIdentityTitle);
+  hook.el.click();
+  await tick(); await tick();
+  assert.equal(calls.length, callsBeforeIdentityChange,
+    "the retained old-identity draft is never submitted through the new reference form");
+  assert.equal(toggles.length, togglesBeforeIdentityChange,
+    "View stays blocked while the disconnected old-identity draft remains unresolved");
 } finally {
   hook.destroyed?.();
   queueDom.window.close();
+  morphDom.window.close();
 }
 console.log("related-card copy serializes same-field and sibling-field saves without broad source payloads");
