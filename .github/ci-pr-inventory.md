@@ -21,6 +21,12 @@ no trigger, workflow or branch-protection setting was changed by the commit
 that added this file. The required set stays at four contexts until the owner
 rules otherwise.**
 
+**AMENDED 2026-09-09 — that banner is no longer true of every row. See
+"§Moves taken" at the bottom of this file: one verdict has been implemented.
+The paragraph above is preserved verbatim because it is what the 2026-09-06
+measurement was taken under, and a table whose banner is silently edited stops
+being a baseline.**
+
 ## The rule these verdicts apply
 
 > A PR runs only what **can block it**, **or** finishes **under 60 s**, **or**
@@ -257,3 +263,38 @@ Filing and fixing them is out of this document's scope; recording them is not.
   the breaker's own verdict, not a doc-budget overflow. No other red in this
   table was read to the step level, so no claim is made about what any of them
   means.
+
+## Moves taken
+
+One dated line per workflow (or job) whose VENUE actually changed. A row here is
+not a verdict — it is a landed trigger edit, with the owner who reads its red and
+the watcher that reaches them.
+
+### MOVED 2026-09-09 (task-33742276cf0a35b1, PR gates/ci-diet-3)
+
+| what moved | from | to | owner | watcher | measured cost it removed |
+|---|---|---|---|---|---|
+| `pr-meta.yml` — the **filebase aesthetics critic**, now its own `aesthetics` job (`if: ${{ github.event_name != 'pull_request' }}`) | every `pull_request` | `push: main` (unchanged tooling-paths predicate) **+ nightly `schedule: 17 5 * * *`** + `workflow_dispatch` | lead-gates | the `Report main-push failure to a human` job added to `pr-meta.yml` in the same PR → `scripts/file-ci-failure-issue.sh`, issue key `pr-meta-aesthetics` | **~573 s of a 615 s run**, on **61 of 61** sampled PR runs. The `PR meta gates` job's median real compute was **608 s**; the fifteen gates that STAY total ~35 s and clear the under-60 s clause on their own. ≈ **582 estimated job-minutes per 29 h window** (2026-09-08T11:36Z .. 2026-09-09T16:03Z; the 1000-item Actions listing cap is what makes the window 29 h and not 7 days). |
+
+**Why a nightly and not push-only.** On `push: main` the critic was already scoped
+OUT unless `tooling/aesthetics/**` or `pr-meta.yml` itself changed — that predicate is
+preserved character-for-character, so push alone would have been a move to a venue
+that almost never fires, i.e. a delete wearing a trigger's clothes. The nightly arm
+scores main's tip against main as of 24 h earlier, which is a comparison **no PR run
+has ever made** and is the one that reports the day's structural drift.
+
+**What did NOT change, and can be checked rather than believed.**
+`.github/required-checks.json` is untouched (`bash scripts/required-checks-floor.sh` →
+`FLOOR OK … 4 context(s)`). `pr-meta.yml` has no aggregator, so no `needs:` list moved.
+The move is a **job-level `if:`**, never a workflow-level `paths:` key — a
+paths-filtered workflow emits no check run, and an ABSENT context reports `expected`
+forever (`scripts/shim-trigger-filter-check.sh` → OK, floor 6;
+`scripts/absent-context-census.test.sh` → 66 passed, 0 failed).
+
+**What this move does NOT do, said plainly.** It does not reduce the CHECK-RUN COUNT
+on a PR. A job skipped by a job-level `if:` still publishes a check run; the count is
+driven by job NAMES, not by venue. Measured 2026-09-09 across the five newest
+non-dependabot open PR heads: 53 / 53 / 47 / 52 / 82 check runs. This row's criterion
+"under 20" is **not reachable by venue moves at all** — it needs the check-run NAMES
+folded, which changes context names and is an owner ruling. The lever this move pulls
+is COMPUTE and PR wall-clock, and those it pulls hard.

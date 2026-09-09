@@ -674,6 +674,15 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
     },
 
     # ── containers ─────────────────────────────────────────────────────────────
+    # The `columns` fixture is ALSO the Reader-Owned Spacing carrier (doctrine
+    # invariant 2, /papers/mechanical-spacing-doctrine): its left column holds an
+    # EXACT empty paragraph BETWEEN two prose paragraphs. The generator renders one
+    # block per fixture, so a container is the only place a multi-block run can
+    # live — and `columns` is the container whose children are plain prose. Both
+    # engines must drop that scaffold: the frozen `expectedHtml` carries no
+    # `<p></p>` and the shape projection holds exactly two `p` nodes in that column,
+    # so a renderer that stops suppressing (walk.ex `paragraph/3` or core.ts
+    # `isBlankParagraphRun`) reds the freshness lock AND the JS shape parity.
     "columns" => %{
       "type" => "columns",
       "columns" => [
@@ -681,6 +690,12 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
           %{
             "type" => "paragraph",
             "content" => [%{"type" => "text", "value" => "Left column body."}]
+          },
+          # Reader-Owned Spacing invariant 2: an authoring scaffold, never published.
+          %{"type" => "paragraph", "content" => []},
+          %{
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Left column, after the scaffold."}]
           }
         ],
         [

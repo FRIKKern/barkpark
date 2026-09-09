@@ -30,6 +30,7 @@
 .github/workflows/mobile.yml	CONDITIONAL
 .github/workflows/paper-editor.yml	CONDITIONAL
 .github/workflows/pdrender-wasm.yml	CONDITIONAL
+.github/workflows/pipefail-sigpipe-scan.yml	ALWAYS
 .github/workflows/plugin-node.yml	CONDITIONAL
 .github/workflows/pr-meta.yml	ALWAYS
 .github/workflows/release-artifact.yml	CONDITIONAL

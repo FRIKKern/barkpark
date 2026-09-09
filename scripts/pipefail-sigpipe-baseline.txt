@@ -1,0 +1,52 @@
+# pipefail-sigpipe-scan.sh — the HIGH-confidence ratchet.
+#
+# THE NUMBER AND ITS DERIVATION (a bare number carries its date and its command).
+# MEASURED 2026-09-09 on origin/main 468286c17, with the workflow-reading scanner
+# in this same change, by exactly:
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only
+#     → pipefail-sigpipe-scan: 16 finding(s) — high 16 · medium 0 · low 0 — over 336 file(s)
+#
+# COMPOSITION, so the number is checkable and not merely quoted:
+#     8  in .github/workflows/**  — 0 of these were visible to ANY scan before
+#                                   2026-09-09; the collector took only *.sh/*.bash.
+#                                   7 are `… | head -N` under `set -euo pipefail`
+#                                   in cp-ops.yml; 1 is `git --version | grep -qE …`
+#                                   in deploy-harnesses.yml.
+#     8  in scripts/** and deploy/** — the pre-existing set the scanner has
+#                                   reported since it was written.
+# At all confidences the same tree reads 155 (high 16 · medium 136 · low 3) over
+# 336 files. That full inventory is PRINTED by the CI job on every run; only this
+# number is enforced.
+#
+# ── THE DECISION: BASELINE AT HIGH, NOT FIX-FIRST ──────────────────────────────
+# Recorded here rather than left implicit, because a wiring without a stated
+# policy is the next stale baseline.
+#
+# WHY NOT FIX-FIRST. 155 sites is a campaign, not a prerequisite. Every one of
+# them is a behaviour change inside a LIVE gate or deploy script; landing 155 of
+# those behind one PR to unblock a scanner would put more risk into the tree than
+# the scanner removes. Fixing the whole set is deliberately OUT of this change.
+#
+# WHY HIGH IS THE ENFORCED TIER. `high` is the scanner's own label for a producer
+# that is unbounded or file-sized — `find`/`git`/`docker`/`ls`/a full `grep` into
+# `grep -q`/`head`. There the 141 is not a maybe: the producer will outrun a
+# 64KB pipe as soon as the tree it reads grows. `medium` (136) is the shape of
+# the live bug — `printf "$var" | grep -q` — but its variables are usually short
+# today, so a gate at medium reds on 136 pre-existing sites on its first PR, and
+# a gate that reds on every PR from day one gets switched off rather than
+# obeyed. medium and low are therefore INVENTORY, printed and not enforced.
+#
+# WHY A RATCHET AND NOT A CEILING. The count may FALL freely; it may never RISE.
+# A rise is a NEW site, and the whole point is that this class is latent — it
+# ships green and reds months later on an unrelated PR. Note that the scanner
+# does NOT red when the number falls (it prints RATCHET LOOSE): a check that
+# fails when the world gets better teaches its readers to regenerate the number,
+# and regeneration is where a real regression gets laundered in.
+#
+# TO LOWER IT: fix a site, re-run the command above, put its printed count here,
+# and update the date and composition in this header in the same commit.
+# TO RAISE IT: don't. A rise means a new site was added; fix the site.
+#
+# Filed under task-b090e1c603d686ba.
+16

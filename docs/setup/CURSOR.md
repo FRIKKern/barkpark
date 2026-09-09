@@ -4,9 +4,7 @@
 Give your Cursor agent a real task board: lifecycle, priorities, and an atomic
 claim/close contract built for concurrent workers. Two minutes, three steps.
 
-**Register the movement** — every unit of work runs under a claimed `bp` task: claim before you work, stamp evidence as you prove it, close on the claim epoch. The full doctrine, and the three ways a registration silently does not happen, is in [Agent Onramps](AGENT-ONRAMPS.md).
-
-See also: [Agent Onramps](AGENT-ONRAMPS.md) — the shared AUTH + CREATE journeys and the same onramp for every other agent surface (Cursor Cloud, Claude Code, Codex, ChatGPT, Claude.ai).
+**Register the movement** — every unit of work runs under a claimed `bp` task: claim before you work, stamp evidence as you prove it, close on the claim epoch. [Agent Onramps](AGENT-ONRAMPS.md) carries the full doctrine, the shared AUTH + CREATE journeys, and the same onramp for every other agent surface (Cursor Cloud, Claude Code, Codex, ChatGPT, Claude.ai).
 
 ## 1. Install the `bp` CLI
 
@@ -25,12 +23,15 @@ irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli
 ## 2. Connect to a Barkpark
 
 ```bash
-bp setup          # local · deploy · connect — pick one, it does the rest
+bp setup --target connect --server https://api.example.com --token $TOKEN
 ```
 
-`connect` points `bp` at an existing server (yours or a hosted one) and stores
-the config in `~/.config/barkpark/`. No Barkpark yet? `local` runs one on your
-machine; `deploy` installs on your own server over SSH. Verify:
+Pass `--target`: bare `bp setup` is the TTY-only wizard and exits **code 2**
+in an agent's terminal. `connect` points `bp` at an existing server (yours or a
+hosted one), stores config in `~/.config/barkpark/`, and touches no database.
+No Barkpark yet? `--target local --yes` runs one here — **destructive: it runs
+`mix ecto.reset`, wiping the dev DB**; `--target deploy` installs on a server
+you own, over SSH. Routes: [QUICKSTART.md](QUICKSTART.md). Verify:
 
 ```bash
 bp task ready     # empty list = connected, no open work
@@ -52,22 +53,21 @@ the claim epoch, and recover from `doc_changed_since_claim`. From then on,
 "what should I work on?" in Cursor means `bp task ready`, and finished work is
 closed on the board — no markdown TODO lists.
 
-That's it. The agent discovers everything else itself: `bp capabilities -o json`
-returns the entire API — every noun, verb, and route — in one call.
+The agent discovers the rest itself: `bp capabilities -o json` returns the
+entire API — every noun, verb, and route — in one call.
 
 ## Filing work for the agent
 
 ```bash
 # `tags` are weighted labels [{tag, strength 1–100, rationale}], mandatory on
-# publish; each `tag` must be a registered tag doc (`bp doc ls tag`) or the
-# publish 422s `unknown_tag`. Strengths are distinct; the max is the main tag.
+# publish; each must be a registered tag doc (`bp doc ls tag`) or the publish
+# 422s `unknown_tag`. Strengths are distinct; the max is the main tag.
 bp task create "Fix the flaky search test" --publish \
   --set 'priority:=1' \
   --set 'tags:=[{"tag":"search","strength":80,"rationale":"the flaky test exercises the search path"},{"tag":"testing","strength":50,"rationale":"stabilising a flaky test is test-reliability work"}]' \
   --set 'acceptance_criteria:=[{"criterion":"test green 10x in a row","met":false,"evidence":""}]'
 ```
 
-Open Cursor, ask the agent to pick up the next ready task, and watch the board.
 
 ## MCP (Model Context Protocol)
 
@@ -153,10 +153,8 @@ disabled, `--tools all` still starts (bridge-only, after a one-line stderr
 warning) whereas the default `--tools tasks` refuses — there are no task verbs to
 back the curated tools.
 
-### Validation
-
-`bp mcp serve` is proven against a live server (real JSON-RPC transcript, not a
-fixture) in [`../ops/mcp-serve-validation.md`](../ops/mcp-serve-validation.md).
+`bp mcp serve` is proven against a live server (real JSON-RPC transcript) in
+[`../ops/mcp-serve-validation.md`](../ops/mcp-serve-validation.md).
 
 ## Troubleshooting
 
