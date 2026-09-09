@@ -51,6 +51,7 @@ defmodule BarkparkCloud.Notifications do
     EmailSettings,
     EventEmail,
     SafeUrl,
+    SitePublishWaitingAlert,
     Transactional,
     Withhold
   }
@@ -845,6 +846,239 @@ defmodule BarkparkCloud.Notifications do
       |> Repo.update()
 
     latched
+  end
+
+  @doc """
+  dr-w11-s5-waiting-alert — ONE SWEEP of the publish-WAITING notice over every
+  team, plus its RECOVERY counterpart.
+
+  Returns `%{teams, waiting, sent, latched, recovered}`.
+
+  ## The cohort is read, never re-derived
+
+  Each team's reading is `SitePublishWaitingAlert.read/2`, which is a thin call
+  onto `DeployLedger.delivery/3` — the ONE definition of "which of this team's
+  sites is still waiting". No query is written here. `delivery/3` already
+  excludes rows a human cancelled and rows whose live mark the ledger cannot
+  time, and a second hand-written "newest attempt post-dates newest live row"
+  query would have emailed teams about both.
+
+  ## The edge guard is the LATCH, and it is the whole of it
+
+      sweep 1  waiting, alerted_at nil        -> SEND, latch
+      sweep 2  waiting, alerted_at set        -> latched, send nothing
+      sweep 3  waiting, alerted_at set        -> latched, send nothing
+      sweep 4  clear,   alerted_at set        -> SEND RECOVERY, clear the latch
+      sweep 5  clear,   alerted_at nil        -> nothing
+
+  Three sweeps with the same site still waiting are exactly one email. Remove
+  the `not is_nil(state.waiting_alerted_at)` clause below and sweeps 2 and 3
+  send too, which is the per-sweep producer charter D14 forbids.
+
+  ## RECOVERY, and why it is not just the absence of an alert
+
+  An instrument that can only accuse is an alarm. When the verdict leaves
+  `:waiting` while the latch is set, one message goes out naming BOTH durations
+  the episode had: the longest wait the ledger measured
+  (`waiting_longest_seconds`, carried on the state row precisely because the
+  cohort it was measured from is empty by the time this fires) and the wall time
+  the alert itself stood.
+
+  An `:unmeasured` reading sends NO recovery and does NOT clear the latch. A
+  team whose reading became unreadable has not been told good news — it has been
+  told nothing — and clearing the latch there would let the next readable
+  waiting sweep re-send the same accusation.
+  """
+  @spec deliver_site_publish_waiting_notices(keyword()) :: %{
+          teams: non_neg_integer(),
+          waiting: non_neg_integer(),
+          sent: non_neg_integer(),
+          latched: non_neg_integer(),
+          recovered: non_neg_integer()
+        }
+  def deliver_site_publish_waiting_notices(opts \\ []) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+
+    team_ids =
+      Registry.all_barkparks()
+      |> Enum.map(& &1.team_id)
+      |> Enum.filter(&is_binary/1)
+      |> Enum.uniq()
+
+    zero = %{teams: 0, waiting: 0, sent: 0, latched: 0, recovered: 0}
+
+    Enum.reduce(team_ids, zero, fn team_id, acc ->
+      envelope = read_waiting_envelope(team_id, now)
+      verdict = SitePublishWaitingAlert.verdict(envelope)
+      longest = SitePublishWaitingAlert.longest_wait_seconds(envelope)
+
+      before = get_or_build_deploy_rate_state(team_id)
+      state = advance_waiting_state(before, team_id, verdict, longest, now)
+
+      acc = %{acc | teams: acc.teams + 1}
+      acc = if verdict == :waiting, do: %{acc | waiting: acc.waiting + 1}, else: acc
+
+      cond do
+        # RECOVERY. The wait cleared while an alert stood. `before` is read for
+        # the durations because `advance_waiting_state/5` has already cleared
+        # them off the row — the episode's numbers must be taken from the state
+        # as it was when the episode ended, not after.
+        verdict == :clear and not is_nil(before.waiting_alerted_at) ->
+          episode = DateTime.diff(now, before.waiting_alerted_at)
+          n = send_waiting_recovery(team_id, before.waiting_longest_seconds, episode)
+          %{acc | recovered: acc.recovered + n}
+
+        verdict != :waiting ->
+          acc
+
+        # THE EDGE GUARD. Delete this clause and sweeps 2 and 3 of one episode
+        # each send an email.
+        not is_nil(before.waiting_alerted_at) ->
+          %{acc | latched: acc.latched + 1}
+
+        true ->
+          sent = send_waiting_notice(team_id, envelope)
+
+          # STAMPED WHATEVER THE TRANSPORT SAID, for the reason
+          # `deliver_deploy_rate_notices/1` records: retrying a failed send on
+          # the next sweep turns one bad relay hour into a sweep-rate retry
+          # storm against the same inbox, which is the volume shape this slice
+          # exists to refuse. The failure is visible as a `failed` Delivery row.
+          latch_waiting_state(state, now)
+
+          %{acc | sent: acc.sent + sent}
+      end
+    end)
+  end
+
+  # A team whose site list could not be read is UNMEASURED, never CLEAR.
+  # `team_site_ids/1` returns `{:error, …}` rather than `nil` on failure
+  # precisely so this cannot silently become a fleet-wide read; `%{}` here is an
+  # envelope `SitePublishWaitingAlert.verdict/1` reads as `:unmeasured`.
+  defp read_waiting_envelope(team_id, now) do
+    case team_site_ids(team_id) do
+      ids when is_list(ids) -> SitePublishWaitingAlert.read(now, ids)
+      {:error, _reason} -> %{}
+    end
+  rescue
+    _e -> %{}
+  catch
+    :exit, _reason -> %{}
+  end
+
+  defp get_or_build_deploy_rate_state(team_id) do
+    Repo.get_by(DeployRateAlertState, team_id: team_id) ||
+      %DeployRateAlertState{team_id: team_id, consecutive_red: 0}
+  end
+
+  # THE WAITING HALF of the state machine, and it is two rules.
+  #
+  # `waiting` CARRIES the latch forward and keeps the LONGEST duration the
+  # episode has shown — a wait that deepens must not reset the number the
+  # recovery message will quote. `clear` drops both. `unmeasured` touches
+  # NEITHER: an unreadable sweep is not evidence the wait ended, and clearing
+  # the latch on one would re-arm the same accusation for the next readable
+  # sweep.
+  defp advance_waiting_state(existing, team_id, verdict, longest, now) do
+    attrs =
+      case verdict do
+        :waiting ->
+          %{
+            waiting_verdict: "waiting",
+            waiting_alerted_at: existing.waiting_alerted_at,
+            waiting_longest_seconds: deepest_wait(longest, existing.waiting_longest_seconds)
+          }
+
+        :clear ->
+          %{waiting_verdict: "clear", waiting_alerted_at: nil, waiting_longest_seconds: nil}
+
+        :unmeasured ->
+          %{
+            waiting_verdict: "unmeasured",
+            waiting_alerted_at: existing.waiting_alerted_at,
+            waiting_longest_seconds: existing.waiting_longest_seconds
+          }
+      end
+
+    attrs =
+      Map.merge(attrs, %{
+        team_id: team_id,
+        waiting_observed_at: now,
+        # THE RATE HALF IS NOT INVENTED HERE. `verdict` is NOT NULL on this
+        # table and the row may not exist yet — a team this sweep sees first has
+        # had no rate reading, and the honest word for that is `unmeasured`,
+        # never `clear`. An EXISTING row's rate verdict is carried through
+        # untouched: this sweep must not overwrite the other alert's standing.
+        verdict: existing.verdict || "unmeasured"
+      })
+
+    {:ok, state} =
+      existing
+      |> DeployRateAlertState.changeset(attrs)
+      |> Repo.insert_or_update()
+
+    state
+  end
+
+  # A WAIT THAT DEEPENS KEEPS THE DEEPER NUMBER. The recovery message quotes
+  # this, and quoting the LAST reading instead would understate an episode whose
+  # cohort partly drained before it fully cleared. `nil` on both sides stays
+  # `nil` — an unnamed duration, never a zero.
+  defp deepest_wait(a, b) do
+    case Enum.filter([a, b], &is_number/1) do
+      [] -> nil
+      numbers -> Enum.max(numbers)
+    end
+  end
+
+  defp latch_waiting_state(%DeployRateAlertState{} = state, now) do
+    {:ok, latched} =
+      state
+      |> DeployRateAlertState.changeset(%{
+        team_id: state.team_id,
+        verdict: state.verdict || "unmeasured",
+        waiting_verdict: "waiting",
+        waiting_alerted_at: now
+      })
+      |> Repo.update()
+
+    latched
+  end
+
+  # ONE SEND FOR ONE TEAM, gated on the team's EXISTING answer about deploy
+  # alert mail. No new column and no new checkbox: `DeployRateAlert` set that
+  # precedent in the same epic, and the `@events` list in `EmailSettings` is
+  # policed by a bidirectional console census that requires every toggle to have
+  # a producer AND a rendered row. Riding `deployment_failed` keeps this notice
+  # under a switch the team already knows about.
+  defp send_waiting_notice(team_id, envelope) do
+    dispatch_waiting_email(team_id, "site_publish_waiting", fn recipient ->
+      SitePublishWaitingAlert.build(envelope, recipient)
+    end)
+  end
+
+  defp send_waiting_recovery(team_id, longest_seconds, episode_seconds) do
+    dispatch_waiting_email(team_id, "site_publish_waiting_recovered", fn recipient ->
+      SitePublishWaitingAlert.build_recovery(longest_seconds, episode_seconds, recipient)
+    end)
+  end
+
+  defp dispatch_waiting_email(team_id, event_name, build_fun) do
+    settings = get_or_create_settings(team_id)
+
+    if EmailSettings.event_enabled?(settings, :deployment_failed) do
+      recipients = team_id |> team_member_emails() |> Enum.uniq()
+
+      Enum.count(recipients, fn recipient ->
+        result = recipient |> build_fun.() |> Mailer.deliver()
+
+        record_delivery(team_id, recipient, event_name, "alert", result, @platform_carrier)
+
+        match?({:ok, _}, result)
+      end)
+    else
+      0
+    end
   end
 
   # THE SITE IDS ONE TEAM OWNS — the narrowing the digest's deploy reading is
