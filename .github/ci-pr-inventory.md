@@ -298,3 +298,32 @@ non-dependabot open PR heads: 53 / 53 / 47 / 52 / 82 check runs. This row's crit
 "under 20" is **not reachable by venue moves at all** — it needs the check-run NAMES
 folded, which changes context names and is an owner ruling. The lever this move pulls
 is COMPUTE and PR wall-clock, and those it pulls hard.
+
+### AMENDED 2026-09-09 (task-33742276cf0a35b1, PR gates/ci-diet-4)
+
+| what changed | from | to | owner | watcher | measured effect |
+|---|---|---|---|---|---|
+| `architecture.yml` — job `boundary-gate` KEEPS its PR arm; the workflow GAINS a main arm | `pull_request` only (no push arm at all) | **+ `push: main`** (same paths) + `workflow_dispatch`; `concurrency.cancel-in-progress` `true` → `${{ github.ref != 'refs/heads/main' }}` | lead-gates | `Report main-push failure to a human` (name reused, not new) → `scripts/file-ci-failure-issue.sh`, key `architecture-main` | The `Restore the api dev build tree` cache (`actions/cache/restore`, key `hashFiles('api/mix.lock')`) had **no main-scoped entry to restore, ever** — a PR-saved cache is scoped to that PR's ref. Every PR compiled the api tree cold on its first run. One main run per `mix.lock` change now writes the entry every PR restores. Inventory row: 171 s median, fires 12/20 heads. |
+
+**This is an ADD, not the `move-to-nightly` the table verdicts.** The row above is
+answered here rather than executed, for a reason that outranks the cost rule:
+**task-6891e8f620c1bdea flipped this gate off `continue-on-error` on 2026-09-05** —
+four days before the verdict — specifically so a NEW boundary regression reds its own
+check-run BEFORE the merge. Moving it to nightly would silently reverse that dated,
+deliberate decision. A verdict computed by a mechanical rule (advisory + >60 s + a
+`paths:` filter that fires on 12/20) measures COST correctly and says nothing about
+what the gate is FOR. The trigger decision was explicitly deferred to this task by the
+workflow's own header; taken here, the honest exercise of it is to warm the cache the
+missing arm was starving, not to delete the pre-merge red.
+
+## Verdicts NOT executed, and the mechanism that blocks each
+
+Recorded so the next taker does not re-derive them. All four were named as movers or
+candidates; none is a safe venue move today.
+
+| workflow | committed verdict | why it did NOT move |
+|---|---|---|
+| `compose-smoke.yml` | **move-to-push** | Its expensive job `green-arm` (214 s median) is a `needs:` of the `compose-gate` aggregator, whose `Decide (fail-closed over every upstream result)` step accepts a `skipped` upstream **only when that job's gate value is the literal string `false`**. A job-level `if:` makes `green-arm` skip with gate `'true'`, which the aggregator reds by design: *"A skip here does NOT mean 'not needed'. It means the job never ran."* Moving it therefore requires teaching `decide()` a third accepted skip reason — surgery on a fail-closed aggregator that is under an open human gate (`shb-bl-register-compose-smoke`) and whose shape is ported verbatim from `cloud.yml`. Not a trigger edit. |
+| `doc-gates.yml` | **move-to-push** | Measured step-level on PR run 34386237923: **118 s total, no dominant step** — 29 s / 19 s (checkout) / 13 s / 10 s (Go) / 8 s, then a long tail. There is no 573 s critic to lift out; it is 34 independent pre-merge gates plus ~33 s of setup. Worse, the **NEW-lineref gate loses its SUBJECT, not just its venue**: `scripts/new-lineref-check.sh` diffs against the PR merge base and `resolve_base` falls back to `origin/main`, so on a main push the diff is empty and it scans nothing. Moving the job wholesale deletes that gate's only reachable input. Preserving it needs a job SPLIT, which introduces a new job name and so a new `.exclusions` row. |
+| `security.yml` | **keep-on-PR** | Committed verdict is keep-on-PR — *"advisory, but real compute 42.5 s is under the 60 s floor"*. It appeared at 324 s in the 29-hour cost table because that sample caught its heavy tail: the inventory's own p90 for this workflow is **304 s against a 42.5 s median**. The median is the floor's subject; both numbers are right and they measure different things. Not movable, and the p90 is the thing to look at if it is ever revisited. |
+| `paper-editor.yml` | **keep-on-PR** | Committed verdict is keep-on-PR — genuinely path-filtered, fires on **0 of 20** sampled PR heads. The 53 runs it shows in the 29-hour table are real but concentrated in that window; on a PR that misses its paths it costs nothing, which is exactly the third clause of the venue rule. |

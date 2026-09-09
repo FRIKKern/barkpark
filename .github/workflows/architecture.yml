@@ -30,12 +30,45 @@ name: architecture
 # an allowlist, and the durable fix is a SHORTER list — never a longer one.
 
 on:
-  # NO push: ARM HERE, and that is a KNOWN GAP, not an oversight. This workflow
-  # produces no main-scoped result and writes no main-scoped Actions cache (the
-  # devbuild cache block below records exactly that consequence: "no main-scoped
-  # entry is ever written and a branch can only ever restore its own"). Adding
-  # the arm is DEFERRED to task-33742276cf0a35b1, which owns CI trigger policy;
-  # this PR deliberately touches no trigger block.
+  # THE PUSH ARM, ADDED 2026-09-09 by task-33742276cf0a35b1 — the row the
+  # comment that stood here deferred this decision to. That comment read: "NO
+  # push: ARM HERE, and that is a KNOWN GAP, not an oversight … Adding the arm
+  # is DEFERRED to task-33742276cf0a35b1, which owns CI trigger policy." This
+  # is that task, and this is the arm.
+  #
+  # WHAT THE GAP ACTUALLY COST, and why the fix is an ADD and not a MOVE.
+  # `Restore the api dev build tree` below is an `actions/cache/restore` keyed
+  # on `hashFiles('api/mix.lock')`. A PR run may READ a cache scoped to its base
+  # branch, but a cache SAVED by a PR run is scoped to that PR's own ref and is
+  # invisible to every other branch. With no push-to-main arm, no main-scoped
+  # entry was ever written, so the restore could only ever hit on a branch's
+  # SECOND run — every PR compiled the api tree cold the first time. One main
+  # run per mix.lock change now writes the entry every PR restores. This arm
+  # therefore makes the PR path CHEAPER by adding a run OFF it.
+  #
+  # THE PR ARM STAYS, deliberately. `.github/ci-pr-inventory.md` verdicts this
+  # workflow `move-to-nightly` on cost alone (advisory, 171 s, its `paths:`
+  # filter fires on 12 of 20 sampled heads). Taking that verdict literally would
+  # REVERSE task-6891e8f620c1bdea, which four days earlier — 2026-09-05 — flipped
+  # this gate off `continue-on-error` precisely so a NEW boundary regression reds
+  # its own check-run BEFORE the merge. A cost verdict computed by a mechanical
+  # rule does not outrank a deliberate, dated decision about what the gate is
+  # FOR. The inventory row is answered in `.github/ci-pr-inventory.md` §Moves
+  # taken rather than silently executed.
+  push:
+    branches: [main]
+    # The SAME path set as the PR arm, deliberately: this arm exists to warm the
+    # main-scoped cache, and a main push that touches none of these paths cannot
+    # invalidate a key derived from api/mix.lock.
+    paths:
+      - "api/**"
+      - "internal/**"
+      - "js/**"
+      - "apps/**"
+      - "tooling/concept-map/**"
+      - "tooling/symbol-graph/**"
+      - ".github/workflows/architecture.yml"
+  workflow_dispatch:
   pull_request:
     paths:
       - "api/**"
@@ -51,7 +84,16 @@ permissions:
 
 concurrency:
   group: architecture-${{ github.ref }}
-  cancel-in-progress: true
+  # NEVER a bare `true` now that this workflow has a push-to-main arm above.
+  # scripts/never-cancel-main-check.sh (honest-gates D12) reds on exactly that
+  # pair — `push:` with `main` among its branches AND a literal `true` — because
+  # a main run cancelled by the next push is a NON-PASS that reads as noise: on
+  # 2026-06-10 that starved the Elixir suite for 19 consecutive main runs with
+  # zero completions all day. The bare `true` was HONEST while this file was
+  # pull_request-only (github.ref is never refs/heads/main there, so the
+  # expression below evaluates identically); adding the arm is what makes it a
+  # defect, so the guard and the arm change in the same commit.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   boundary-gate:
@@ -407,3 +449,56 @@ jobs:
             fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── THE WATCHER ──────────────────────────────────────────────────────────
+  # Added with the push arm above, and inseparable from it: a main-scoped run
+  # that nobody reads is worse than no run at all, because it manufactures a
+  # red nobody is accountable for. Owner: lead-gates.
+  #
+  # THE JOB NAME IS DELIBERATELY NOT NEW. "Report main-push failure to a human"
+  # is already published by five jobs (cloud.yml, console-harness.yml and
+  # others) and already carries its own row in `.github/required-checks.json`
+  # `.exclusions` — "S7 EXCLUDED BY DECISION: an AFTER-THE-FACT reporter, and
+  # the one name in this ledger published by FIVE different jobs". Reusing the
+  # name verbatim is what lets this workflow gain a job WITHOUT touching
+  # required-checks.json, which this PR does not modify.
+  main-failure-issue:
+    name: Report main-push failure to a human
+    needs: [boundary-gate]
+    # `github.ref == 'refs/heads/main'` and NOT `event_name != 'pull_request'`:
+    # a workflow_dispatch on a branch must not file a main-breakage issue.
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: architecture-main
+          CI_FAILURE_DETAIL: |
+            The `Boundary gate` check is RED on a push to `main`.
+            This is POST-MERGE: a NEW feature→feature edge, a NEW kernel→feature
+            edge, or a NEW feature cycle is already on the default branch, and
+            every PR branched from this tip inherits the regression.
+
+            "Boundary gate" is NOT a required context — it cannot block a merge —
+            so this red arrived without stopping anything. Read the `Run boundary
+            gate` step first: tooling/concept-map/ci-boundary.mjs names the
+            offending identity and whether it is unlisted, or listed in
+            tooling/concept-map/accepted-until-fixed.json against a bp task row
+            that is already closed.
+
+            Do NOT discharge this by adding the identity to
+            accepted-until-fixed.json: that file is a TRIPWIRE whose durable fix
+            is a SHORTER list. It names each tolerated identity WITH the task
+            row that owes the fix, and ci-boundary.mjs reds when a listed row is
+            closed while its debt is still present.
+
+            This issue is idempotent per key: an ongoing failure appends a
+            comment rather than opening a new issue. CLOSE IT once main is green
+            again — the next main-push failure opens a fresh one.
+        run: bash scripts/file-ci-failure-issue.sh
