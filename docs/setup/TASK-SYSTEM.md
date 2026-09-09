@@ -62,7 +62,6 @@ bp task next agent-1          # prints doc_id + epoch; no_ready (HTTP 200, not a
 
 # Targeted claim: name the row
 bp task claim t1 agent-1      # <doc_id> <worker_id>
-bp task claim t1 agent-1 --set criteria_unstated_override="why this row needs none"  # a row with ZERO acceptance criteria is refused; this is its on-the-record way through
 
 # Voluntary walk-away (fenced)
 bp task release t1 agent-1 1  # <doc_id> <worker> <epoch>
