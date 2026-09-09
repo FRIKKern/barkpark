@@ -11,6 +11,9 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
 
   Supported fields are `figure.caption`, `image.src`, `paper-links.title`, and
   `paper-links.description`, including singular Figure image children.
+  A private version-2 continuation additionally supports one authored
+  `paper-links` reference title or description. It binds the reference's exact
+  index, raw slug, and non-copy metadata without storing the surrounding refs.
   Unsupported or ambiguous edits remain valid edits without a continuation.
   Values are exact JSON values; absent and present-with-null are distinct.
   Continuations are capped at 16 KiB encoded and never truncated.
@@ -19,9 +22,13 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   alias Barkpark.PortableDoc.BlockIds
 
   @version 1
+  @reference_version 2
   @max_encoded_bytes 16 * 1024
   @continuation_keys ~w(action expect field replace target version)
   @target_keys ~w(id type)
+  @reference_continuation_keys ~w(action expect field identity replace target version)
+  @reference_target_keys ~w(id ref_index ref_slug type)
+  @reference_fields ~w(title description)
   @allowed_fields MapSet.new([
                     {"figure", "caption"},
                     {"image", "src"},
@@ -43,6 +50,13 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   """
   @spec capture(term(), term(), term()) :: {:ok, nil | continuation()}
   def capture(before_blocks, after_blocks, ops) do
+    case capture_reference_copy(before_blocks, after_blocks, ops) do
+      {:ok, %{} = continuation} -> {:ok, continuation}
+      {:ok, nil} -> capture_block_field(before_blocks, after_blocks, ops)
+    end
+  end
+
+  defp capture_block_field(before_blocks, after_blocks, ops) do
     with {:ok, id, field} <- eligible_op(ops),
          {:ok, before_target} <- unique_target(before_blocks, id),
          {:ok, after_target} <- unique_target(after_blocks, id),
@@ -70,7 +84,8 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   continuations, and values above the encoded-size cap.
   """
   @spec validate(term()) :: :ok | {:error, :invalid_history}
-  def validate(continuation) when is_map(continuation) and not is_struct(continuation) do
+  def validate(%{"version" => @version} = continuation)
+      when is_map(continuation) and not is_struct(continuation) do
     with true <- exact_keys?(continuation, @continuation_keys),
          %{
            "version" => @version,
@@ -93,6 +108,31 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
     end
   end
 
+  def validate(%{"version" => @reference_version} = continuation)
+      when is_map(continuation) and not is_struct(continuation) do
+    with true <- exact_keys?(continuation, @reference_continuation_keys),
+         %{
+           "action" => action,
+           "target" => target,
+           "field" => field,
+           "identity" => identity,
+           "expect" => expect,
+           "replace" => replace
+         } <- continuation,
+         true <- action in ["undo", "redo"],
+         true <- field in @reference_fields,
+         true <- valid_reference_target?(target),
+         true <- valid_reference_identity?(identity, target["ref_slug"]),
+         true <- valid_scalar_state?(expect),
+         true <- valid_scalar_state?(replace),
+         false <- expect === replace,
+         true <- encoded_within_cap?(continuation) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_history}
+    end
+  end
+
   def validate(_continuation), do: {:error, :invalid_history}
 
   @doc """
@@ -105,8 +145,14 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   @spec apply(term(), term()) ::
           {:ok, [map()], continuation()} | {:error, apply_error()}
   def apply(blocks, continuation) do
-    with :ok <- validate(continuation),
-         %{
+    case validate(continuation) do
+      :ok -> apply_validated(blocks, continuation)
+      {:error, :invalid_history} = error -> error
+    end
+  end
+
+  defp apply_validated(blocks, %{"version" => @version} = continuation) do
+    with %{
            "action" => action,
            "target" => %{"id" => id, "type" => type},
            "field" => field,
@@ -130,6 +176,55 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
     end
   end
 
+  defp apply_validated(blocks, %{"version" => @reference_version} = continuation) do
+    with %{
+           "action" => action,
+           "target" => %{
+             "id" => id,
+             "type" => "paper-links",
+             "ref_index" => ref_index,
+             "ref_slug" => ref_slug
+           },
+           "field" => field,
+           "identity" => identity,
+           "expect" => expect,
+           "replace" => replace
+         } <- continuation,
+         {:ok, current} <- unique_target_for_apply(blocks, id),
+         true <- Map.get(current, "type") === "paper-links" || {:error, :history_conflict},
+         refs when is_list(refs) <- Map.get(current, "refs"),
+         true <- unique_canonical_ref_slugs?(refs) || {:error, :history_conflict},
+         current_ref when is_map(current_ref) <- Enum.at(refs, ref_index),
+         true <- Map.get(current_ref, "slug") === ref_slug || {:error, :history_conflict},
+         true <- reference_identity(current_ref) === identity || {:error, :history_conflict},
+         true <- field_state(current_ref, field) === expect || {:error, :history_conflict},
+         next_ref <- put_field_state(current_ref, field, replace),
+         next_refs <- List.replace_at(refs, ref_index, next_ref),
+         {:ok, next_blocks} <-
+           replace_target_field(blocks, id, "refs", %{"present" => true, "value" => next_refs}),
+         next <-
+           reference_continuation(
+             toggle(action),
+             id,
+             ref_index,
+             ref_slug,
+             field,
+             identity,
+             replace,
+             expect
+           ),
+         :ok <- validate(next) do
+      {:ok, next_blocks, next}
+    else
+      {:error, reason}
+      when reason in [:invalid_history, :history_conflict, :block_not_found, :duplicate_id] ->
+        {:error, reason}
+
+      _changed_or_malformed ->
+        {:error, :history_conflict}
+    end
+  end
+
   defp eligible_op([
          %{"op" => "patch-block", "id" => id, "patch" => patch}
        ])
@@ -142,12 +237,123 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
 
   defp eligible_op(_ops), do: {:error, :unsupported}
 
+  defp capture_reference_copy(before_blocks, after_blocks, ops) do
+    with {:ok, id} <- eligible_reference_op(ops),
+         {:ok, before_target} <- unique_target(before_blocks, id),
+         {:ok, after_target} <- unique_target(after_blocks, id),
+         true <- Map.get(before_target, "type") === "paper-links",
+         true <- Map.get(after_target, "type") === "paper-links",
+         true <- Map.delete(before_target, "refs") === Map.delete(after_target, "refs"),
+         before_refs when is_list(before_refs) <- Map.get(before_target, "refs"),
+         after_refs when is_list(after_refs) <- Map.get(after_target, "refs"),
+         true <- length(before_refs) === length(after_refs),
+         true <- unique_canonical_ref_slugs?(before_refs),
+         true <- unique_canonical_ref_slugs?(after_refs),
+         {:ok, ref_index, ref_slug, field, identity, before_state, after_state} <-
+           reference_copy_change(before_refs, after_refs),
+         {:ok, projected_after} <-
+           replace_target_field(
+             before_blocks,
+             id,
+             "refs",
+             %{"present" => true, "value" => after_refs}
+           ),
+         true <- projected_after === after_blocks,
+         continuation <-
+           reference_continuation(
+             "undo",
+             id,
+             ref_index,
+             ref_slug,
+             field,
+             identity,
+             after_state,
+             before_state
+           ),
+         :ok <- validate(continuation) do
+      {:ok, continuation}
+    else
+      _unsupported_or_ambiguous -> {:ok, nil}
+    end
+  end
+
+  defp eligible_reference_op([
+         %{"op" => "patch-block", "id" => id, "patch" => %{"refs" => _refs} = patch}
+       ])
+       when is_binary(id) and id != "" and map_size(patch) == 1,
+       do: {:ok, id}
+
+  defp eligible_reference_op(_ops), do: {:error, :unsupported}
+
+  defp reference_copy_change(before_refs, after_refs) do
+    changed =
+      before_refs
+      |> Enum.zip(after_refs)
+      |> Enum.with_index()
+      |> Enum.filter(fn {{before_ref, after_ref}, _index} -> before_ref !== after_ref end)
+
+    case changed do
+      [{{before_ref, after_ref}, ref_index}]
+      when is_map(before_ref) and is_map(after_ref) and not is_struct(before_ref) and
+             not is_struct(after_ref) ->
+        before_identity = reference_identity(before_ref)
+        after_identity = reference_identity(after_ref)
+        ref_slug = Map.get(before_ref, "slug")
+
+        changed_fields =
+          Enum.filter(@reference_fields, fn field ->
+            field_state(before_ref, field) !== field_state(after_ref, field)
+          end)
+
+        with true <- before_identity === after_identity,
+             true <- valid_reference_identity?(before_identity, ref_slug),
+             [field] <- changed_fields,
+             before_state <- field_state(before_ref, field),
+             after_state <- field_state(after_ref, field),
+             true <- valid_scalar_state?(before_state),
+             true <- valid_scalar_state?(after_state) do
+          {:ok, ref_index, ref_slug, field, before_identity, before_state, after_state}
+        else
+          _unsupported -> {:error, :unsupported}
+        end
+
+      _none_or_many ->
+        {:error, :unsupported}
+    end
+  end
+
   defp continuation(action, id, type, field, expect, replace) do
     %{
       "version" => @version,
       "action" => action,
       "target" => %{"id" => id, "type" => type},
       "field" => field,
+      "expect" => expect,
+      "replace" => replace
+    }
+  end
+
+  defp reference_continuation(
+         action,
+         id,
+         ref_index,
+         ref_slug,
+         field,
+         identity,
+         expect,
+         replace
+       ) do
+    %{
+      "version" => @reference_version,
+      "action" => action,
+      "target" => %{
+        "id" => id,
+        "type" => "paper-links",
+        "ref_index" => ref_index,
+        "ref_slug" => ref_slug
+      },
+      "field" => field,
+      "identity" => identity,
       "expect" => expect,
       "replace" => replace
     }
@@ -163,6 +369,24 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
 
   defp valid_target?(_target), do: false
 
+  defp valid_reference_target?(target) when is_map(target) and not is_struct(target) do
+    exact_keys?(target, @reference_target_keys) and nonblank_binary?(target["id"]) and
+      target["type"] === "paper-links" and is_integer(target["ref_index"]) and
+      target["ref_index"] >= 0 and nonblank_binary?(target["ref_slug"])
+  end
+
+  defp valid_reference_target?(_target), do: false
+
+  defp valid_reference_identity?(identity, ref_slug)
+       when is_map(identity) and not is_struct(identity) do
+    json_value?(identity) and not Map.has_key?(identity, "title") and
+      not Map.has_key?(identity, "description") and Map.get(identity, "slug") === ref_slug and
+      Map.get(identity, "prefer_authored_copy") === true and
+      not is_nil(canonical_ref_slug(ref_slug))
+  end
+
+  defp valid_reference_identity?(_identity, _ref_slug), do: false
+
   defp allowed_field?(type, field), do: MapSet.member?(@allowed_fields, {type, field})
 
   defp valid_state?(%{"present" => false} = state), do: exact_keys?(state, ["present"])
@@ -171,6 +395,15 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
     do: exact_keys?(state, ["present", "value"]) and json_value?(value)
 
   defp valid_state?(_state), do: false
+
+  defp valid_scalar_state?(%{"present" => false} = state), do: exact_keys?(state, ["present"])
+
+  defp valid_scalar_state?(%{"present" => true, "value" => value} = state),
+    do:
+      exact_keys?(state, ["present", "value"]) and
+        (is_nil(value) or is_boolean(value) or is_binary(value) or is_number(value))
+
+  defp valid_scalar_state?(_state), do: false
 
   defp field_state(block, field) do
     if Map.has_key?(block, field) do
@@ -184,6 +417,23 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
 
   defp put_field_state(block, field, %{"present" => true, "value" => value}),
     do: Map.put(block, field, value)
+
+  defp reference_identity(ref), do: Map.drop(ref, @reference_fields)
+
+  defp unique_canonical_ref_slugs?(refs) when is_list(refs) do
+    slugs = Enum.map(refs, &canonical_ref_slug/1)
+    Enum.all?(slugs, &is_binary/1) and length(slugs) == MapSet.size(MapSet.new(slugs))
+  end
+
+  defp canonical_ref_slug(slug) when is_binary(slug) do
+    case String.trim(slug) do
+      "" -> nil
+      canonical -> canonical
+    end
+  end
+
+  defp canonical_ref_slug(%{"slug" => slug}), do: canonical_ref_slug(slug)
+  defp canonical_ref_slug(_ref), do: nil
 
   defp exact_keys?(map, expected) when is_map(map),
     do: Enum.sort(Map.keys(map)) == Enum.sort(expected)
