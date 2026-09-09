@@ -873,14 +873,20 @@ for m in re.finditer(
 
 exit2 = sorted(n for n, j in jobs.items() if n != "console-gate" and job_can_exit_2(j))
 emit("exit2_jobs", ",".join(exit2))
-# THE NAMED EXEMPTION, and there is exactly one. `changes` reaches an exit 2
-# through the ratchet's `--match` mode, but it is the DISPATCHER: it publishes
-# path outputs, not a verdict, and its own fail-closed contract already forbids
-# it to emit a path answer it could not measure. Giving it a channel is real
-# work in its own right and is filed, not smuggled in here
-# (cch-w64-bl-dispatcher-has-no-verdict-channel). It is written out as a fact so
-# extending the exemption costs a human an edit in this file.
-EXEMPT = {"changes"}
+# THE EXEMPTION SET, NOW EMPTY — and that emptiness is the proof, not a
+# formality. `changes` was the one name in it: the DISPATCHER reaches an exit 2
+# through the ratchet's `--match` mode, published path outputs and no verdict,
+# and was carried here while a channel for it was filed as its own work
+# (cch-w64-bl-dispatcher-has-no-verdict-channel). That channel has landed, so
+# the name is deleted. Nothing else changed in this emitter: it already reds on
+# any exit-2-capable job with no `outputs.verdict` or no 4th `decide` argument,
+# so DELETING THE NAME IS THE WHOLE PROOF — put the dispatcher back without a
+# channel and `exit2_without_verdict_output` names it (driven below by the
+# `drop-dispatcher-channel` mutant).
+#
+# It stays a written-out fact, and stays a SET rather than a deleted concept, so
+# that re-granting an exemption to a future job costs a human an edit here.
+EXEMPT = set()
 emit("exit2_exempt", ",".join(sorted(EXEMPT)))
 emit("exit2_without_verdict_output",
      ",".join(n for n in exit2
@@ -934,7 +940,7 @@ PY
   assert_fact exit2_without_verdict_output ""
   assert_fact exit2_without_decide_verdict ""
   # The exemption is pinned, not open-ended: extending it must cost an edit here.
-  assert_fact exit2_exempt "changes"
+  assert_fact exit2_exempt ""
   # …and the population it was computed from is real. "" over an empty set is
   # the shape a neutered parser returns.
   assert_fact_min exit2_jobs_count 5
@@ -981,7 +987,10 @@ PY
   assert_fact_min decide_consumes_count 4
   assert_fact dispatcher_if ""
   assert_fact dispatcher_matrix False
-  assert_fact dispatcher_outputs "console"
+  # `console` AND `verdict`, sorted. The dispatcher got its verdict channel in
+  # wave 64 (cch-w64-bl-dispatcher-has-no-verdict-channel); `console` alone here
+  # means the channel was taken back out.
+  assert_fact dispatcher_outputs "console,verdict"
   assert_fact escape_if ""
   assert_fact escape_needs ""
   assert_fact "if::console-unit" "needs.changes.outputs.console == 'true'"
@@ -1175,7 +1184,8 @@ import sys, yaml
 src, dst, mode = sys.argv[1], sys.argv[2], sys.argv[3]
 wf = yaml.safe_load(open(src))
 jobs = wf["jobs"]
-assert mode in ("clean", "drop-outputs", "drop-decide-arg", "fake-exit2"), mode
+assert mode in ("clean", "drop-outputs", "drop-decide-arg",
+                "drop-dispatcher-channel", "fake-exit2"), mode
 if mode == "drop-outputs":
     # The `outputs:` block this slice added, taken back out — the state
     # path-escape shipped in until D776.
@@ -1187,6 +1197,17 @@ elif mode == "drop-decide-arg":
     step["run"] = step["run"].replace(
         'decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"          "${V_ESCAPE:-}"',
         'decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"', 1)
+elif mode == "drop-dispatcher-channel":
+    # THE DISPATCHER'S CHANNEL, TAKEN BACK OUT — the state `changes` shipped in
+    # until wave 64, when it was the emitter's single NAMED exemption. With
+    # EXEMPT now empty this mutant must be named by BOTH facts; if it is not,
+    # the exemption was deleted into an emitter that cannot see the dispatcher
+    # at all, and `exit2_exempt = ""` proves nothing.
+    jobs["changes"].pop("outputs", None)
+    step = next(s for s in jobs["console-gate"]["steps"] if "run" in s)
+    step["run"] = step["run"].replace(
+        'decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"          "${V_CHANGES:-}"',
+        'decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"', 1)
 elif mode == "fake-exit2":
     # A NEW blocking job that can refuse to measure, wired in the ordinary way
     # and carrying no channel at all — the exact arrival this fact exists to
@@ -1226,6 +1247,12 @@ PY
   vc drop-outputs    "path-escape"  ""
   vc drop-decide-arg ""             "path-escape"
   vc fake-exit2      "a11y-ceiling" "a11y-ceiling"
+  # The exemption's replacement. `exit2_exempt = ""` above is an ABSENCE, and an
+  # absence is never caught by inspection: this is the control that proves the
+  # emitter still SEES `changes` and still reds when its channel is gone. Both
+  # facts, because the mutant removes both halves — the `outputs:` block and the
+  # 4th `decide` argument — exactly as main carried them before wave 64.
+  vc drop-dispatcher-channel "changes" "changes"
   # …and the fake job must be invisible to the OTHER structural facts, so the
   # red above is this fact's and not a neighbour's borrowed alarm.
   if [ "$(sed -n 's|^blocking_not_in_needs=||p' "$TMPROOT/vc-fake-exit2.facts")" = "" ] \
@@ -1470,6 +1497,26 @@ gate "path-escape REFUSED (the last unwired refusal)" 1 \
 gate_says "path-escape ratchet: failure" "…and names the ratchet"
 gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal, not a measured coverage defect"
 gate_says "(exit 2): path-escape ratchet" "…and carries it into the refusals tally by name"
+
+# (m3) THE DISPATCHER'S OWN REFUSAL (cch-w64-bl-dispatcher-has-no-verdict-channel).
+#      `changes` runs the same ratchet in `--match` mode, whose `exit 2` sites
+#      are an unknown path-set name and a set name that resolved to an EMPTY
+#      pattern. Until this slice the dispatcher had `outputs: {console}` only and
+#      its `decide` line took three arguments, so that refusal reached the merge
+#      button as a bare `FAIL changes (dispatcher): failure` — indistinguishable
+#      from a dispatcher that MEASURED an unresolvable base. It was the emitter's
+#      single named exemption in case 8; `exit2_exempt = ""` above is the
+#      structural half, this is the behavioural one.
+#
+#      NOTE THE GATE VALUE: the dispatcher is a NEVER-gated job, so this run also
+#      exercises the refusal arm on a job that can never legitimately skip.
+gate "changes (dispatcher) REFUSED (the exemption this slice deleted)" 1 \
+  R_CHANGES=failure R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
+  O_CONSOLE= V_CHANGES=REFUSED
+gate_says "changes (dispatcher): failure" "…and names the dispatcher"
+gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal, not a bare dispatcher death"
+gate_says "(exit 2): changes (dispatcher)" "…and carries it into the refusals tally by name"
+gate_names "changes (dispatcher)" "path-escape ratchet"
 
 # (n) …and BOTH refusals in one run are both named, in decide order.
 gate "console-unit and cssom-parity both REFUSED" 1 \
