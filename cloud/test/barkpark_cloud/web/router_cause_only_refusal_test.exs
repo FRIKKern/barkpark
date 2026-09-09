@@ -136,7 +136,7 @@ defmodule BarkparkCloud.Web.RouterCauseOnlyRefusalTest do
   test "every cause-only refusal sits under a guard whose tier matches its row" do
     results = Enum.map(cause_only(), &verdict/1)
 
-    failures = Enum.reject(results, &(&1.ok?))
+    failures = Enum.reject(results, & &1.ok?)
 
     assert failures == [], """
     #{length(failures)} cause-only refusal(s) in router.ex are NOT vouched for by

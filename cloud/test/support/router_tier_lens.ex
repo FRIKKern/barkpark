@@ -547,7 +547,9 @@ defmodule BarkparkCloud.RouterTierLens do
   block. A line inside NO span (module attributes, the moduledoc, top-level
   prose) attributes to nothing, and a caller must treat that as a refusal.
   """
-  @spec block_spans(binary()) :: [{{:route, {binary(), binary()}} | {:def, binary()}, pos_integer(), pos_integer()}]
+  @spec block_spans(binary()) :: [
+          {{:route, {binary(), binary()}} | {:def, binary()}, pos_integer(), pos_integer()}
+        ]
   def block_spans(path \\ @default_source) do
     path
     |> source()
@@ -597,7 +599,8 @@ defmodule BarkparkCloud.RouterTierLens do
   @doc """
   The block whose span contains `line`, or `nil` when the line sits inside none.
   """
-  @spec block_at(pos_integer(), binary()) :: {:route, {binary(), binary()}} | {:def, binary()} | nil
+  @spec block_at(pos_integer(), binary()) ::
+          {:route, {binary(), binary()}} | {:def, binary()} | nil
   def block_at(line, path \\ @default_source) do
     Enum.find_value(block_spans(path), fn {key, first, last} ->
       if line >= first and line <= last, do: key
@@ -752,6 +755,7 @@ defmodule BarkparkCloud.RouterTierLens do
         {:error, :no_guard_found}
     end
   end
+
   @doc """
   The guard a row is CENSUSED against: the raw guard, minus any elevation
   `elevation_consent/0` has ruled is not a tier.

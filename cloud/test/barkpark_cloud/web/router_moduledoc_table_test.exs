@@ -138,7 +138,6 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
   defp elevation_consent, do: Lens.elevation_consent()
   defp unresolved_consent, do: Lens.unresolved_consent()
 
-
   # The census must not shrink silently. If a refactor makes currently-resolvable
   # rows unresolvable, the split moves and this reds — lower it deliberately, in
   # the same commit as the routes you removed, or not at all.
