@@ -38,9 +38,10 @@ name: dependabot-task-trailer
 # ── WHY THE GATE RE-EVALUATES AFTER THE EDIT ────────────────────────────────
 # Editing a PR body emits a `pull_request` event of type `edited`, and
 # pr-task-gate.yml ALREADY lists `edited` in its `types:` (it is documented
-# there as load-bearing, for the sticky-red case). So this workflow needs no
-# change to the gate at all: the merge-base cutoff and the `hotfix!`
-# labeled/unlabeled hatch are untouched by this PR.
+# there as load-bearing, for the sticky-red case). So this file does not edit
+# pr-task-gate.yml at all, and neither of that file's two escape hatches is
+# touched by this PR: not its cutoff step, and not its `hotfix!`
+# labeled/unlabeled pair.
 
 on:
   # TWO TRIGGERS, one per job, and the split is deliberate.
