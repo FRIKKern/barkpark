@@ -215,6 +215,20 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
     refute html =~ "Live ignored"
 
     {:ok, first_admission} = Blocks.paper_link_reference_copy_admission(block, 0)
+    {:ok, missing_admission} = Blocks.paper_link_reference_copy_admission(block, 1)
+
+    first_digest =
+      :crypto.hash(:sha256, first_admission.guard)
+      |> Base.url_encode64(padding: false)
+
+    missing_digest =
+      :crypto.hash(:sha256, missing_admission.guard)
+      |> Base.url_encode64(padding: false)
+
+    assert byte_size(first_digest) == 43
+    first_title_id = "paper-link-ref-title-#{encoded}-0-#{first_digest}"
+    first_description_id = "paper-link-ref-description-#{encoded}-0-#{first_digest}"
+    missing_title_id = "paper-link-ref-title-#{encoded}-1-#{missing_digest}"
 
     first_title_form =
       fragment
@@ -241,18 +255,30 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
            |> LazyHTML.query(~s(textarea[name="paper-link-ref-value"]))
            |> LazyHTML.text() == "Authored title"
 
+    assert first_title_form
+           |> LazyHTML.query(~s(textarea##{first_title_id}))
+           |> Enum.count() == 1
+
+    assert first_title_form |> LazyHTML.attribute("id") == [first_title_id <> "-form"]
+
     assert fragment
            |> LazyHTML.query(
-             ~s(textarea#paper-link-ref-title-#{encoded}-1[name="paper-link-ref-value"][tabindex="-1"])
+             ~s(form##{first_description_id}-form textarea##{first_description_id})
            )
            |> Enum.count() == 1
 
     assert fragment
-           |> LazyHTML.query(~s(textarea#paper-link-ref-title-#{encoded}-1))
+           |> LazyHTML.query(
+             ~s(textarea##{missing_title_id}[name="paper-link-ref-value"][tabindex="-1"])
+           )
+           |> Enum.count() == 1
+
+    assert fragment
+           |> LazyHTML.query(~s(textarea##{missing_title_id}))
            |> LazyHTML.text() == ""
 
     assert fragment
-           |> LazyHTML.query(~s(textarea#paper-link-ref-title-#{encoded}-1))
+           |> LazyHTML.query(~s(textarea##{missing_title_id}))
            |> LazyHTML.attribute("placeholder") == ["Live fallback title"]
 
     assert fragment
@@ -262,7 +288,13 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
 
     assert fragment
            |> LazyHTML.query(
-             ~s([data-paper-link-ref-title-panel-trigger][aria-controls="paper-link-ref-title-#{encoded}-1"])
+             ~s([data-paper-link-ref-title-panel-trigger][aria-controls="#{missing_title_id}"])
+           )
+           |> Enum.count() == 1
+
+    assert fragment
+           |> LazyHTML.query(
+             ~s([data-paper-link-ref-description-panel-trigger][aria-controls="#{first_description_id}"])
            )
            |> Enum.count() == 1
 
@@ -303,6 +335,141 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
     assert configure |> LazyHTML.query(~s([name="ref-2-title"])) |> Enum.count() == 1
     assert configure |> LazyHTML.query(~s([name="ref-3-title"])) |> Enum.count() == 1
     assert configure |> LazyHTML.query(~s([name="ref-4-title"])) |> Enum.count() == 1
+
+    copy_only_block =
+      update_in(block, ["refs", Access.at(0)], fn ref ->
+        ref
+        |> Map.put("title", "Copy-only title change")
+        |> Map.put("description", "Copy-only description change")
+      end)
+
+    {:ok, copy_only_admission} =
+      Blocks.paper_link_reference_copy_admission(copy_only_block, 0)
+
+    assert copy_only_admission.guard == first_admission.guard
+
+    copy_only_html =
+      render_component(&PaperEditor.paper_block_fields/1, %{
+        block: copy_only_block,
+        paper_links: live_details
+      })
+
+    assert copy_only_html =~ ~s(id="#{first_title_id}")
+
+    identity_changed_block =
+      update_in(block, ["refs", Access.at(0), "unknown"], fn _ -> %{"keep" => "changed"} end)
+
+    {:ok, identity_changed_admission} =
+      Blocks.paper_link_reference_copy_admission(identity_changed_block, 0)
+
+    refute identity_changed_admission.guard == first_admission.guard
+
+    changed_digest =
+      :crypto.hash(:sha256, identity_changed_admission.guard)
+      |> Base.url_encode64(padding: false)
+
+    identity_changed_html =
+      render_component(&PaperEditor.paper_block_fields/1, %{
+        block: identity_changed_block,
+        paper_links: live_details
+      })
+
+    refute identity_changed_html =~ ~s(id="#{first_title_id}")
+
+    assert identity_changed_html =~
+             ~s(id="paper-link-ref-title-#{encoded}-0-#{changed_digest}")
+  end
+
+  test "reference copy gates opaque title and description fields independently" do
+    block = %{
+      "id" => "partial-copy",
+      "type" => "paper-links",
+      "refs" => [
+        %{
+          "slug" => "opaque-title",
+          "title" => %{"text" => "preserve"},
+          "description" => "Editable description",
+          "prefer_authored_copy" => true
+        },
+        %{
+          "slug" => "opaque-description",
+          "title" => "Editable title",
+          "description" => ["preserve"],
+          "prefer_authored_copy" => true
+        }
+      ]
+    }
+
+    html =
+      render_component(&PaperEditor.paper_block_fields/1, %{
+        block: block,
+        paper_links: %{
+          "opaque-title" => %{
+            title: "Live title fallback",
+            description: "Live description ignored"
+          },
+          "opaque-description" => %{
+            title: "Live title ignored",
+            description: "Live description fallback"
+          }
+        }
+      })
+
+    fragment = LazyHTML.from_fragment(html)
+
+    assert html =~ "Live title fallback"
+    assert html =~ "Live description fallback"
+    assert html =~ "Editable description"
+    assert html =~ "Editable title"
+
+    title_form =
+      fragment
+      |> LazyHTML.query(~s(form[data-test-id="paper-link-ref-title-editor"]))
+      |> Enum.at(0)
+
+    description_form =
+      fragment
+      |> LazyHTML.query(~s(form[data-test-id="paper-link-ref-description-editor"]))
+      |> Enum.at(0)
+
+    assert title_form
+           |> LazyHTML.query(~s([name="paper-link-ref-index"]))
+           |> LazyHTML.attribute("value") == ["1"]
+
+    assert description_form
+           |> LazyHTML.query(~s([name="paper-link-ref-index"]))
+           |> LazyHTML.attribute("value") == ["0"]
+
+    assert fragment
+           |> LazyHTML.query(~s([data-paper-link-ref-title-paint]))
+           |> Enum.count() == 1
+
+    assert fragment
+           |> LazyHTML.query(~s([data-paper-link-ref-description-paint]))
+           |> Enum.count() == 1
+
+    configure = LazyHTML.query(fragment, ~s([data-test-id="paper-links-editor"]))
+
+    first_row = configure |> LazyHTML.query(~s([data-ref-index="0"])) |> Enum.at(0)
+    second_row = configure |> LazyHTML.query(~s([data-ref-index="1"])) |> Enum.at(0)
+
+    assert first_row |> LazyHTML.query(~s([data-paper-link-ref-title-readonly])) |> Enum.count() ==
+             1
+
+    assert first_row
+           |> LazyHTML.query(~s([data-paper-link-ref-description-panel-trigger]))
+           |> Enum.count() == 1
+
+    assert second_row
+           |> LazyHTML.query(~s([data-paper-link-ref-title-panel-trigger]))
+           |> Enum.count() == 1
+
+    assert second_row
+           |> LazyHTML.query(~s([data-paper-link-ref-description-readonly]))
+           |> Enum.count() == 1
+
+    refute configure |> LazyHTML.query(~s([name="ref-0-title"])) |> Enum.any?()
+    refute configure |> LazyHTML.query(~s([name="ref-1-description"])) |> Enum.any?()
   end
 
   test "bar-chart keeps the canonical chart visible while row controls start closed" do
