@@ -427,6 +427,17 @@ func Execute(args []string) int {
 			return exitOK
 		}
 		return runDoctor(out, rest[1:])
+	case "latency":
+		// `bp latency [--name <handle>] [--url <url>] [--token <tok>]` — name
+		// WHICH route is slow, from the per-route dispatch histogram the box
+		// already serves at GET /v1/instance/metrics and nothing read. Its own
+		// flags are not globals, so they arrive in rest. Refuses (non-zero, no
+		// figure) when the slot is too young for a since-boot cumulative read.
+		if g.help {
+			printRouteLatencyHelp(out)
+			return exitOK
+		}
+		return runRouteLatency(out, rest[1:])
 	case "server":
 		// `bp server ls` is an alias for `bp servers`; it dispatches from the
 		// nounBuiltins registry above. `server` is NOT a manifest noun, so no
