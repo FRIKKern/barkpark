@@ -22,8 +22,13 @@ defmodule BarkparkWeb.Studio.PaperCanvasOffNonEmptyBodyTest do
 
   Both flag values are measured in the SAME file and the count is asserted at
   both, so "non-zero" can never be satisfied by chrome leaking into the region:
-  the region is the `<article>` inside `main[data-test-id="studio-paper-shell"]`,
-  never the whole shell.
+  the region is `main[data-test-id="studio-paper-shell"]` — the body arm and
+  nothing else; the header, the badge, the action bar and the metadata sidebar
+  are all its siblings, outside it.
+
+  AS MEASURED ON THIS FIXTURE: before the fix, flag=1 rendered 496 visible
+  characters and flag=0 rendered 0. After it, flag=1 is unchanged at 496 and
+  flag=0 renders 100.
 
   The flag is pinned per charter D233 through
   `BarkparkWeb.PaperEditorTestHelpers.pin_paper_canvas!/1` — the repo's single
@@ -157,6 +162,13 @@ defmodule BarkparkWeb.Studio.PaperCanvasOffNonEmptyBodyTest do
              "the flag-OFF body region rendered ZERO visible characters for a blocks-list " <>
                "document — an author who opens this paper is shown nothing at all and is " <>
                "given no way forward. Region text was: #{inspect(text)}"
+
+      # And the characters are the RIGHT ones: the sentence names WHICH document
+      # is empty and WHERE the way forward is. Without this a stray glyph of
+      # chrome leaking into the region would satisfy the count above.
+      assert text =~ "has no body blocks yet"
+      assert text =~ @doc_id
+      assert text =~ "Choose Edit above to add one."
     end
 
     # Criterion 3: the shell's accessible name. A wordless region that is also
