@@ -96,6 +96,10 @@
     /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question)-(?:count|action|\d+-)/;
   const PAPER_POSITIONAL_COLLECTION_ACTION_PARAM =
     /^(?:(?:note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question|section|column|terminal)-action|option-action)$/;
+  const PAPER_LINK_REFERENCE_COPY_KEYS = [
+    "block_id", "paper-link-ref-field", "paper-link-ref-guard",
+    "paper-link-ref-index", "paper-link-ref-slug", "paper-link-ref-value",
+  ];
   const PAPER_TRANSIENT_SAVE_STATUSES = new Set([
     "", "Auto-saved", "✓ Auto-saved", "Saving…",
     "Unsaved changes — fix invalid fields.",
@@ -103,6 +107,26 @@
     "Save paused — retry required.",
   ]);
   const paperExitCoordinators = new WeakMap();
+
+  function bpPaperLinkReferenceCopySource(value) {
+    if (!value || typeof value !== "object") return null;
+    const keys = Object.keys(value).sort();
+    if (keys.length !== PAPER_LINK_REFERENCE_COPY_KEYS.length ||
+        keys.some((key, index) => key !== PAPER_LINK_REFERENCE_COPY_KEYS[index]) ||
+        PAPER_LINK_REFERENCE_COPY_KEYS.some((key) => typeof value[key] !== "string") ||
+        !["title", "description"].includes(value["paper-link-ref-field"])) return null;
+    return value;
+  }
+
+  function bpPaperLinkReferenceCopyForm(form) {
+    if (!form?.matches?.(".bp-paper-edit-form[phx-change]")) return null;
+    const entries = [...new FormData(form)];
+    if (entries.length !== PAPER_LINK_REFERENCE_COPY_KEYS.length ||
+        entries.some(([_key, value]) => typeof value !== "string")) return null;
+    const value = Object.fromEntries(entries);
+    if (Object.keys(value).length !== entries.length) return null;
+    return bpPaperLinkReferenceCopySource(value);
+  }
 
   function bpPaperCanvasLeaseSet(value) {
     if (!Array.isArray(value)) return { leases: [], valid: false };
@@ -1027,6 +1051,32 @@
         return record;
       };
 
+      const advanceFocusedReferenceCopySibling = (entry) => {
+        const acknowledged = bpPaperLinkReferenceCopySource(entry?.payload);
+        if (!acknowledged || entry.ifRev == null || entry.documentKey !== documentKey ||
+            quarantinedEchoes.some((echo) =>
+              (!echo.documentKey || echo.documentKey === entry.documentKey) &&
+              echo.requestId !== entry.requestId)) return false;
+        const identityKeys = [
+          "block_id", "paper-link-ref-index", "paper-link-ref-slug", "paper-link-ref-guard",
+        ];
+        const sibling = [...main.querySelectorAll(".bp-paper-edit-form[phx-change]")]
+          .find((form) => {
+            if (form === entry.source || !form.isConnected || !main.contains(form) ||
+                !form.contains(document.activeElement) || sources.has(form) ||
+                identityFor(form).key !== entry.documentKey) return false;
+            const focused = nativeFocusBaselines.get(form);
+            if (focused?.key !== entry.documentKey || focused.rev !== entry.ifRev) return false;
+            const candidate = bpPaperLinkReferenceCopyForm(form);
+            return candidate &&
+              candidate["paper-link-ref-field"] !== acknowledged["paper-link-ref-field"] &&
+              identityKeys.every((key) => candidate[key] === acknowledged[key]);
+          });
+        if (!sibling) return false;
+        nativeFocusBaselines.get(sibling).rev = confirmedRevision;
+        return true;
+      };
+
       const nativeFormFor = (target) => target?.form?.matches?.(".bp-paper-edit-form[phx-change]")
         ? target.form : null;
       const authoredRevisionFor = (source, record) => {
@@ -1947,7 +1997,10 @@
               }
             }
             coordinator._reviewQuarantinedReloadConflict();
-            if (!conflict) coordinator._advanceFallbackDrafts(entry);
+            if (!conflict) {
+              advanceFocusedReferenceCopySibling(entry);
+              coordinator._advanceFallbackDrafts(entry);
+            }
             if (!coordinator._maybeAdoptPendingIdentity()) {
               coordinator._flushQuarantinedIfClean();
             }

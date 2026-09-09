@@ -202,8 +202,22 @@ try {
       "paper-link-ref-slug", "paper-link-ref-field", "paper-link-ref-value", "paper-link-ref-guard",
       "request_id", "if_rev"].sort(), "no sibling reference or inverse source is submitted");
   }
+  win.document.getElementById(referenceFieldId("title")).focus();
   await acknowledge(calls[2], 10);
   assert.equal(toggles.length, 1, "View occurs only after every exact field value is acknowledged");
+
+  input("title", "Title save before clean sibling focus");
+  await new Promise(resolve => setTimeout(resolve, 510));
+  const titleBeforeSiblingFocus = calls.at(-1);
+  assert.equal(titleBeforeSiblingFocus.payload.if_rev, 10);
+  win.document.getElementById(referenceFieldId("description")).focus();
+  await acknowledge(titleBeforeSiblingFocus, 11);
+  input("description", "First description input after title ACK");
+  await new Promise(resolve => setTimeout(resolve, 510));
+  const descriptionAfterOwnAck = calls.at(-1);
+  assert.equal(descriptionAfterOwnAck.payload.if_rev, 11,
+    "a clean focused sibling adopts the disjoint reference field's own ACK revision");
+  await acknowledge(descriptionAfterOwnAck, 12);
 
   const oldIdentityTitle = win.document.getElementById(referenceFieldId("title"));
   input("title", "Unsaved draft for the old identity");
@@ -237,3 +251,114 @@ try {
   morphDom.window.close();
 }
 console.log("related-card copy serializes same-field and sibling-field saves without broad source payloads");
+
+async function focusedSiblingRevision({
+  sourceField = "title", candidateField = "description", candidateIdentity = identity,
+  candidateIndex = "3", candidateSlug = "unique-destination", candidateExtra = "",
+  candidateDirty = false, candidatePreviouslySaved = false, externalRevision = false,
+} = {}) {
+  const scenarioForm = ({ id, field, guard = identity, index = "3", slug = "unique-destination", extra = "" }) => `
+    <form id="${id}" class="bp-paper-edit-form" phx-change="paper-block-autosave" phx-debounce="0">
+      <input type="hidden" name="block_id" value="${blockId}">
+      <input type="hidden" name="paper-link-ref-index" value="${index}">
+      <input type="hidden" name="paper-link-ref-slug" value="${slug}">
+      <input type="hidden" name="paper-link-ref-field" value="${field}">
+      <input type="hidden" name="paper-link-ref-guard" value="${guard}">
+      ${extra}<textarea id="${id}-field" name="paper-link-ref-value">Initial ${field}</textarea>
+    </form>`;
+  const scenarioDom = new JSDOM(`<!doctype html><body>
+    <main data-paper-doc-key="production:paper:focused-sibling" data-paper-rev="20">
+      <button id="scenario-view" data-editing="true">View</button>
+      ${scenarioForm({ id: "scenario-source", field: sourceField })}
+      ${scenarioForm({ id: "scenario-candidate", field: candidateField,
+        guard: candidateIdentity, index: candidateIndex, slug: candidateSlug,
+        extra: candidateExtra })}
+      <span data-test-id="bp-paper-footer-save" role="status"></span>
+    </main></body>`, { url: "http://localhost/" });
+  const scenarioWindow = scenarioDom.window;
+  let scenarioSerial = 0;
+  Object.defineProperty(scenarioWindow, "crypto", { configurable: true, value: {
+    randomUUID: () => `00000000-0000-4000-8001-${String(++scenarioSerial).padStart(12, "0")}`,
+  } });
+  vm.runInContext(readFileSync(new URL(
+    "../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url,
+  ), "utf8"), vm.createContext({
+    window: scenarioWindow, document: scenarioWindow.document,
+    CustomEvent: scenarioWindow.CustomEvent, FormData: scenarioWindow.FormData,
+    Date, setTimeout, clearTimeout, customElements: { whenDefined: () => Promise.resolve() },
+  }));
+  const scenarioCalls = [];
+  const scenarioReplies = [];
+  const scenarioHook = {
+    ...scenarioWindow.BarkparkPaperEditorHooks.BarkparkPaperEditToggle,
+    el: scenarioWindow.document.getElementById("scenario-view"),
+    pushEventTo(_target, event, payload) {
+      scenarioCalls.push({ event, payload: structuredClone(payload) });
+      return new Promise(resolve => scenarioReplies.push(reply =>
+        resolve([{ status: "fulfilled", value: { reply } }])));
+    },
+    pushEvent() { return Promise.resolve({}); },
+  };
+  const scenarioInput = (element, value) => {
+    element.value = value;
+    element.dispatchEvent(new scenarioWindow.InputEvent("input", {
+      bubbles: true, inputType: "insertText", data: value,
+    }));
+  };
+  scenarioHook.mounted();
+  try {
+    const source = scenarioWindow.document.getElementById("scenario-source-field");
+    const candidate = scenarioWindow.document.getElementById("scenario-candidate-field");
+    let expectedSourceRev = 20;
+    if (candidatePreviouslySaved) {
+      candidate.focus();
+      scenarioInput(candidate, "Previously acknowledged candidate mutation");
+      await tick(); await tick();
+      assert.equal(scenarioCalls.at(-1).payload.if_rev, 20);
+      scenarioReplies.shift()({
+        saved: true, changed: true, request_id: scenarioCalls.at(-1).payload.request_id, rev: 21,
+        history_step: { version: 1, ref: scenarioCalls.at(-1).payload.request_id, action: "undo" },
+      });
+      await tick(); await tick();
+      expectedSourceRev = 21;
+    }
+    source.focus();
+    scenarioInput(source, "Source mutation");
+    await tick(); await tick();
+    const sourceCall = scenarioCalls.at(-1);
+    assert.equal(sourceCall.payload.if_rev, expectedSourceRev);
+    candidate.focus();
+    if (candidateDirty) scenarioInput(candidate, "Candidate already dirty");
+    if (externalRevision) {
+      scenarioHook._bpPaperExitCoordinator.observeRevision({ rev: 22, source: scenarioHook.el });
+    }
+    scenarioReplies.shift()({
+      saved: true, changed: true, request_id: sourceCall.payload.request_id,
+      rev: expectedSourceRev + 1,
+      history_step: { version: 1, ref: sourceCall.payload.request_id, action: "undo" },
+    });
+    await tick(); await tick();
+    if (!candidateDirty) scenarioInput(candidate, "Candidate mutation");
+    await tick(); await tick();
+    return scenarioCalls.at(-1)?.payload.if_rev;
+  } finally {
+    scenarioHook.destroyed?.();
+    scenarioDom.window.close();
+  }
+}
+
+assert.equal(await focusedSiblingRevision({ sourceField: "description", candidateField: "title" }), 21,
+  "the clean focused sibling exception works in the reverse field direction");
+assert.equal(await focusedSiblingRevision({
+  candidateIdentity: changedIdentity, candidateIndex: "4", candidateSlug: "other-destination",
+}), 20, "another reference identity retains its viewed revision");
+assert.equal(await focusedSiblingRevision({
+  candidateExtra: '<input type="hidden" name="extra" value="forged">',
+}), 20, "a form with noncanonical extra source fields retains its viewed revision");
+assert.equal(await focusedSiblingRevision({ externalRevision: true }), 20,
+  "a quarantined external revision retains the focused field's viewed revision");
+assert.equal(await focusedSiblingRevision({ candidateDirty: true }), 21,
+  "an already-dirty sibling follows the ordinary reviewed queue path");
+assert.equal(await focusedSiblingRevision({ candidatePreviouslySaved: true }), 22,
+  "an acknowledged clean sibling can safely adopt a later disjoint ACK revision");
+console.log("related-card focused sibling rebasing stays narrow and fail-closed");
