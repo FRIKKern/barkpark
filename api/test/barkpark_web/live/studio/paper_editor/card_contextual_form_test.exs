@@ -3,6 +3,45 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualFormTest do
 
   alias BarkparkWeb.Studio.StudioLive.Blocks
 
+  test "media source-only replacement preserves exact existing carrier metadata" do
+    for type <- [:absent, nil, "image"], src <- [:absent, nil, "", "/before.png"] do
+      media = %{
+        "id" => "media-owner",
+        "alt" => nil,
+        "width" => 640,
+        "height" => 320,
+        "future" => %{"keep" => [true, nil, 3]}
+      }
+
+      media = if type == :absent, do: media, else: Map.put(media, "type", type)
+      media = if src == :absent, do: media, else: Map.put(media, "src", src)
+
+      block =
+        card(%{
+          "qa" => "unchanged",
+          "slots" => %{
+            "media" => [media],
+            "future" => %{"opaque" => true},
+            "action" => [%{"type" => "action", "label" => "Read", "href" => "/keep"}]
+          }
+        })
+
+      assert {:ok, op} =
+               Blocks.resolve_block_form([block], %{
+                 "block_id" => block["id"],
+                 "card-media-src" => "/after.png"
+               })
+
+      assert Map.merge(block, op["patch"]) ==
+               put_in(block, ["slots", "media"], [Map.put(media, "src", "/after.png")])
+
+      assert {:ok, %{}} =
+               Blocks.validate_block_patch(block, %{
+                 "card-media-src" => if(src in [:absent, nil], do: "", else: src)
+               })
+    end
+  end
+
   test "label-only source changes exactly one field in an existing action" do
     for priority <- [nil, "secondary", "primary", "quiet"],
         label <- [nil, "", "  Read  "] do
