@@ -639,8 +639,8 @@ export const Card = Node.create({
           if (src === "") {
             attrs.media = null; // clear → round-trips ABSENT (removal lands)
           } else {
-            const prev = attrs.media && typeof attrs.media === "object" ? attrs.media : {};
-            attrs.media = { ...prev, type: "image", src };
+            const prev = attrs.media && typeof attrs.media === "object" ? attrs.media : null;
+            attrs.media = prev ? { ...prev, src } : { type: "image", src };
           }
           return attrs;
         });

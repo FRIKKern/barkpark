@@ -256,6 +256,32 @@ try {
       type: "action", label: "Visit", href: "/visit", priority: "primary",
     });
   });
+  for (const [name, media] of [
+    ["absent-type", { src: "/before.png", alt: "Keep alt", width: 320,
+      height: 180, metadata: { keep: true } }],
+    ["null-type", { type: null, src: "/before.png", alt: "Keep alt",
+      width: 320, height: 180, metadata: { keep: true } }],
+  ]) {
+    await exercise({ id: `card-media-${name}`, type: "card", slots: {
+      title: [{ type: "heading", text: "Keep title" }],
+      body: [{ type: "paragraph", content: text("Keep body") }],
+      media: [media],
+      opaque: [{ type: "future", value: { keep: true } }],
+    } }, canvas => {
+      canvas.querySelector('[data-test-id="paper-card-media-src"]').dispatchEvent(
+        new window.CustomEvent("bp-change", {
+          bubbles: true,
+          detail: { value: JSON.stringify({ url: "/after.png", assetId: "asset-2" }) },
+        }),
+      );
+    }, patch => {
+      assert.deepEqual(patch.slots.media, [{ ...media, src: "/after.png" }],
+        `${name} replacement changes only src without normalizing the carrier`);
+      assert.deepEqual(patch.slots.title, [{ type: "heading", text: "Keep title" }]);
+      assert.deepEqual(patch.slots.body, [{ type: "paragraph", content: text("Keep body") }]);
+      assert.deepEqual(patch.slots.opaque, [{ type: "future", value: { keep: true } }]);
+    });
+  }
   await exercise({ id: "card-clear-action-label", type: "card", slots: {
     body: [{ type: "paragraph", content: text("Keep body") }],
     action: [{ id: "keep-id", type: "action", label: "Clear me", href: "/keep",
