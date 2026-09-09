@@ -2290,11 +2290,63 @@ defmodule BarkparkWeb.TasksController do
         bad_request(conn, message)
 
       {:ok, types} ->
-        # Node-listing phase, carrying the per-type-cap signal out instead of
-        # discarding it: a type whose page comes back at the cap gets ONE count
+        # ONE TYPE AT A TIME — this fold IS the peak-heap bound.
+        #
+        # It used to read every type's documents into a `doc_lists` list and
+        # hold that list live across the WHOLE derivation, because the edge
+        # phase zipped over it afterwards and the budget/encode phases ran after
+        # that. `doc_lists` is every published document of every type (cap
+        # @graph_corpus_per_type_limit = 1000/type) with each document's full
+        # decoded `content` map attached — the response keeps only
+        # {id, doc_id, type, title} per node and {from_id, to_id, kind} per
+        # edge, but the whole corpus stayed REACHABLE until the function
+        # returned, including while Jason encoded the response.
+        #
+        # MEASURED from outside the BEAM on guerrilla (dr-bl-w9): three natural
+        # /v1/graph calls moved beam.smp RSS +684 MB / +568 MB / +646 MB, each
+        # within 2-4 s off a 403-446 MB idle floor, on a 3,819 MB two-core box;
+        # both OOM kills in that 24 h window shot beam.smp itself.
+        #
+        # #10016 IS NOT THIS FIX. Its `dangling: :skip` (still set below) killed
+        # ~1,300-2,300 serial per-reference existence round trips and the pool
+        # connection they held — that is the POOL-TIMEOUT story. It nils a
+        # per-edge boolean whose query results were already discarded; it does
+        # not change what stays resident. This changes what stays resident.
+        #
+        # A type's documents are now live only for that type's iteration: nodes
+        # and edges are projected to small maps as they are read, `docs` is dead
+        # by the next iteration, and the explicit collect turns "eventually
+        # reclaimable" into "reclaimed" rather than waiting for an allocation to
+        # trigger a GC on a heap already the size of the corpus. Peak is
+        # max(one type's documents) + the projected result, not the sum over
+        # every type.
+        #
+        # SEMANTICS ARE UNCHANGED, deliberately: same `types` order, same
+        # FIRST-wins de-duplication (node by id, edge by {from_id, to_id,
+        # field}), same per-type cap probe, and the budget + edge-honesty passes
+        # below are untouched.
+        #
+        # `dangling: :skip` — the OPT-IN escape from `extract_edges/2`'s
+        # per-target existence query. This path NEVER reads that boolean: the
+        # edge projection keeps only from_id/to_id/kind, and the phantom-node
+        # pass answers "does the target exist?" in memory off `node_ids`. The
+        # flag is local to THIS call site — /v1/graph/dangling (Graph.dangling/1),
+        # EdgeProjector and corpus_edges/3 read through the unchanged `:resolve`
+        # default and keep resolving.
+        #
+        # The schema STRUCTS (not just their names) are threaded in as a
+        # prefetch: `extract_edges/2` used to re-read this same invariant list
+        # once PER DOCUMENT — 4096 identical queries on the live corpus, the
+        # dominant cost behind a measured 34s first paint.
+        edge_opts = opts |> Keyword.put(:schemas, schemas) |> Keyword.put(:dangling, :skip)
+
+        # The per-type-cap signal is carried out of the fold instead of being
+        # discarded: a type whose page comes back at the cap gets ONE count
         # query to confirm the ceiling actually fired (vs exactly-at-cap).
-        {doc_lists, per_type_capped} =
-          Enum.map_reduce(types, false, fn type, capped ->
+        {rev_nodes, rev_edges, node_ids, _edge_keys, per_type_capped} =
+          Enum.reduce(types, {[], [], MapSet.new(), MapSet.new(), false}, fn type, acc ->
+            {nodes_acc, edges_acc, seen_nodes, seen_edges, capped} = acc
+
             docs = Content.list_documents(type, dataset, list_opts)
 
             capped =
@@ -2302,44 +2354,52 @@ defmodule BarkparkWeb.TasksController do
                 (length(docs) >= per_type_limit and
                    Content.count_documents(type, dataset, list_opts) > per_type_limit)
 
-            {docs, capped}
+            {nodes_acc, seen_nodes} =
+              Enum.reduce(docs, {nodes_acc, seen_nodes}, fn d, {acc_n, seen} ->
+                pid = Content.published_id(d.doc_id)
+
+                if MapSet.member?(seen, pid) do
+                  {acc_n, seen}
+                else
+                  node = %{
+                    id: pid,
+                    doc_id: pid,
+                    type: d.type,
+                    title: d.title || pid,
+                    phantom: false
+                  }
+
+                  {[node | acc_n], MapSet.put(seen, pid)}
+                end
+              end)
+
+            {edges_acc, seen_edges} =
+              docs
+              |> Content.corpus_edges_for_docs(dataset, edge_opts)
+              |> Enum.reduce({edges_acc, seen_edges}, fn e, {acc_e, seen} ->
+                key = {e.from_id, e.to_id, e.field}
+
+                if MapSet.member?(seen, key) do
+                  {acc_e, seen}
+                else
+                  edge = %{from_id: e.from_id, to_id: e.to_id, kind: e.kind}
+                  {[edge | acc_e], MapSet.put(seen, key)}
+                end
+              end)
+
+            # `docs` is dead here — nothing below this line reads it, so the
+            # collect reclaims this type's documents BEFORE the next type's are
+            # read. Without it the heap only shrinks when an allocation happens
+            # to trigger a GC, which on this path is after the corpus is
+            # already resident. The collect is O(live heap), and the live heap
+            # at this point is the projected nodes/edges, not the documents.
+            :erlang.garbage_collect()
+
+            {nodes_acc, edges_acc, seen_nodes, seen_edges, capped}
           end)
 
-        real_nodes =
-          doc_lists
-          |> List.flatten()
-          |> Enum.map(fn d ->
-            pid = Content.published_id(d.doc_id)
-            %{id: pid, doc_id: pid, type: d.type, title: d.title || pid, phantom: false}
-          end)
-          |> Enum.uniq_by(& &1.id)
-
-        node_ids = MapSet.new(real_nodes, & &1.id)
-
-        # Fold over the documents the node phase ALREADY read (doc_lists is in
-        # `types` order), instead of `corpus_edges/3` re-listing every type a
-        # second time, and hand the fold its schema prefetch.
-        #
-        # `dangling: :skip` is the OPT-IN escape from `extract_edges/2`'s
-        # per-target existence query — ONE un-batched round-trip per reference
-        # value per document (~1,300 serial queries on the live corpus), held
-        # against a single checked-out pool connection long enough to hit the
-        # 15s DBConnection checkout ceiling and return a 500. This path NEVER
-        # reads the boolean: the `edges` mapping below keeps only
-        # from_id/to_id/kind/weight/plugin_source, and the phantom-node pass
-        # answers the same "does the target exist?" question in memory off
-        # `node_ids`. The flag is local to THIS call site — /v1/graph/dangling
-        # (Graph.dangling/1), EdgeProjector and corpus_edges/3 read through the
-        # unchanged `:resolve` default and keep resolving.
-        edge_opts = opts |> Keyword.put(:schemas, schemas) |> Keyword.put(:dangling, :skip)
-
-        raw_edges =
-          types
-          |> Enum.zip(doc_lists)
-          |> Enum.flat_map(fn {_type, docs} ->
-            Content.corpus_edges_for_docs(docs, dataset, edge_opts)
-          end)
-          |> Enum.uniq_by(fn e -> {e.from_id, e.to_id, e.field} end)
+        real_nodes = Enum.reverse(rev_nodes)
+        raw_edges = Enum.reverse(rev_edges)
 
         edges =
           Enum.map(raw_edges, fn e ->
