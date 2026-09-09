@@ -374,10 +374,21 @@ try {
         src: "/after.png", alt: "Authored alt", width: 640,
         metadata: { keep: [1, 2] },
       }, "direct replacement preserves the exact type-absent media carrier");
-      assert.equal(canvas._editor.commands.undo(), true);
+      paint.focus();
+      const undo = new window.KeyboardEvent("keydown", {
+        key: "z", metaKey: true, bubbles: true, cancelable: true,
+      });
+      paint.dispatchEvent(undo);
+      assert.equal(undo.defaultPrevented, true,
+        "the focused image control routes native Undo to the canvas");
       assert.deepEqual(canvas._editor.getJSON().content[0].attrs.media, source.slots.media[0],
         "native Undo restores the exact source carrier");
-      assert.equal(canvas._editor.commands.redo(), true);
+      const redo = new window.KeyboardEvent("keydown", {
+        key: "z", metaKey: true, shiftKey: true, bubbles: true, cancelable: true,
+      });
+      paint.dispatchEvent(redo);
+      assert.equal(redo.defaultPrevented, true,
+        "the focused image control routes native Redo to the canvas");
       assert.equal(canvas.flushPendingChanges(), true);
       assert.deepEqual(batches, [[{ op: "patch-block", id: source.id, patch: { slots: {
         ...source.slots,

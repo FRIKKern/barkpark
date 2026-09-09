@@ -705,9 +705,15 @@ export const Card = Node.create({
       };
       const onMediaPaintClick = () => openMediaPicker();
       const onMediaPaintKeydown = (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        openMediaPicker();
+        if ((event.metaKey || event.ctrlKey) && !event.altKey &&
+            (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
+          event.preventDefault();
+          const redo = event.shiftKey || event.key.toLowerCase() === "y";
+          editor.commands[redo ? "redo" : "undo"]();
+        } else if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openMediaPicker();
+        }
       };
       mediaPaint.addEventListener("click", onMediaPaintClick);
       mediaPaint.addEventListener("keydown", onMediaPaintKeydown);
