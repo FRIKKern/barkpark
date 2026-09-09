@@ -55,6 +55,7 @@ DIRS=()
 IGNORES=()
 FROM_FILE=""
 FROM_LABEL=""
+BASELINE=""
 SELFTEST=0
 
 while [ $# -gt 0 ]; do
@@ -63,6 +64,7 @@ while [ $# -gt 0 ]; do
     --ignore)    IGNORES+=("$2"); shift 2 ;;
     --from-file) FROM_FILE="$2"; shift 2 ;;
     --label)     FROM_LABEL="$2"; shift 2 ;;
+    --baseline)  BASELINE="$2"; shift 2 ;;
     --selftest)  SELFTEST=1; shift ;;
     -h|--help)   sed -n '2,40p' "$0"; exit 0 ;;
     *) echo "hex-audit-oracle: unknown argument '$1'" >&2; exit 64 ;;
@@ -134,31 +136,75 @@ for e in kept:
 for e in skipped:
     print(f"[{label}]   ignored  {e['id']:<22} {e['pkg']} {e['ver']}")
 
-# machine line, consumed by the shell caller
+# machine lines, consumed by the shell caller
+for e in kept:
+    print(f"##ENTRY {e['sev']} {e['id']} {e['pkg']} {e['ver']}")
 print(f"##RESULT {label} readable={int(readable)} total={len(kept)} high={high}")
 PY
 
 # summarise <report-file> <label> ; echoes the human report, returns via globals
-R_READABLE=0; R_TOTAL=0; R_HIGH=0
+R_READABLE=0; R_TOTAL=0; R_HIGH=0; R_IDS=""
 summarise() {
   local file="$1" label="$2" out
   out="$(python3 "$PARSER" "$file" "$label" "${IGNORES[@]+"${IGNORES[@]}"}")"
   local rc=$?
   if [ $rc -ne 0 ]; then
     echo "CANNOT READ [$label]: the hex.audit report parser exited $rc."
-    R_READABLE=0; R_TOTAL=0; R_HIGH=0
+    R_READABLE=0; R_TOTAL=0; R_HIGH=0; R_IDS=""
     return 0
   fi
-  # print everything except the machine line
-  echo "$out" | grep -v '^##RESULT '
+  R_IDS="$(echo "$out" | sed -n 's|^##ENTRY [A-Z]* \([^ ]*\) .*|\1|p')"
+  # print everything except the machine lines
+  echo "$out" | grep -v '^##RESULT ' | grep -v '^##ENTRY '
   local m
   m="$(echo "$out" | sed -n 's|^##RESULT .* readable=\([01]\) total=\([0-9]*\) high=\([0-9]*\)$|\1 \2 \3|p')"
   if [ -z "$m" ]; then
     echo "CANNOT READ [$label]: the parser emitted no ##RESULT line."
-    R_READABLE=0; R_TOTAL=0; R_HIGH=0
+    R_READABLE=0; R_TOTAL=0; R_HIGH=0; R_IDS=""
     return 0
   fi
   read -r R_READABLE R_TOTAL R_HIGH <<<"$m"
+}
+
+# ── the baseline ratchet ───────────────────────────────────────────────────
+# WHY A RATCHET AND NOT AN ABSOLUTE FLOOR. Measured 2026-09-09 on origin/main:
+# api/mix.lock ALREADY carries 17 advisories, 4 of them HIGH, with no upstream
+# fix available for several. An absolute "any HIGH reds" rule therefore reds on
+# the CLEAN lock, every run, from day one — a gate that is red before anyone
+# touches it teaches people to ignore it, and it can never demonstrate the one
+# thing criterion 2 asks for (clean green, reverted-lock red).
+#
+# So the CI wiring compares against a RECORDED BASELINE of advisory ids:
+#   an id NOT in the baseline  -> NEW, exit 1 (the red that means something)
+#   a baseline id NOT reported -> CLEARED, printed as a notice, exit 0
+# A ratchet has two failure directions; this one refuses to red when the world
+# got BETTER, and says so out loud instead of silently carrying a stale record.
+#
+# baseline_ids <file> -> echoes one id per line (field 1, '#' comments stripped)
+baseline_ids() {
+  sed -e 's/#.*//' -e 's/^[[:space:]]*//' "$1" | awk 'NF {print $1}' | sort -u
+}
+
+# baseline_verdict <baseline-file> <seen-ids-file>; sets B_NEW / B_CLEARED counts
+B_NEW=0; B_CLEARED=0
+baseline_verdict() {
+  local bfile="$1" sfile="$2" known new cleared
+  known="$(baseline_ids "$bfile")"
+  new="$(comm -13 <(echo "$known") <(sort -u "$sfile"))"
+  cleared="$(comm -23 <(echo "$known") <(sort -u "$sfile"))"
+  B_NEW=$(echo "$new" | awk 'NF' | wc -l | tr -d ' ')
+  B_CLEARED=$(echo "$cleared" | awk 'NF' | wc -l | tr -d ' ')
+  if [ "$B_NEW" -gt 0 ]; then
+    echo "NEW ADVISORIES — not in $bfile ($B_NEW):"
+    echo "$new" | awk 'NF {print "  + " $0}'
+  else
+    echo "NEW ADVISORIES: none. Every reported id is in $bfile."
+  fi
+  if [ "$B_CLEARED" -gt 0 ]; then
+    echo "CLEARED — in the baseline, no longer reported ($B_CLEARED). The world got"
+    echo "BETTER; that is a NOTICE, never a red. Trim these from the baseline:"
+    echo "$cleared" | awk 'NF {print "  - " $0}'
+  fi
 }
 
 # ── selftest ───────────────────────────────────────────────────────────────
@@ -213,6 +259,25 @@ FIX
   summarise "$T/high.txt" fix; [ "$R_HIGH" = 0 ] && ok "--ignore matches the primary id" || no "id-ignore gave high=$R_HIGH"
   IGNORES=("EEF-CVE-1999-99999")
   summarise "$T/high.txt" fix; [ "$R_HIGH" = 1 ] && ok "CONTROL: an --ignore that matches nothing changes nothing" || no "no-match ignore gave high=$R_HIGH"
+
+  # ── the ratchet's own arms, driven over the same code CI runs ────────────
+  printf 'EEF-CVE-2026-65623 bandit 1.12.0 HIGH\n# a comment\nEEF-CVE-2026-54893 swoosh\n' >"$T/base.txt"
+  printf 'EEF-CVE-2026-65623\nEEF-CVE-2026-54893\n' >"$T/seen.same.txt"
+  printf 'EEF-CVE-2026-65623\nEEF-CVE-2026-54893\nEEF-CVE-2026-99999\n' >"$T/seen.new.txt"
+  printf 'EEF-CVE-2026-65623\n' >"$T/seen.fewer.txt"
+  baseline_verdict "$T/base.txt" "$T/seen.same.txt" >/dev/null
+  [ "$B_NEW" = 0 ] && [ "$B_CLEARED" = 0 ] && ok "RATCHET: the baseline's own id set is new=0 cleared=0 (comments stripped)" || no "same gave new=$B_NEW cleared=$B_CLEARED"
+  baseline_verdict "$T/base.txt" "$T/seen.new.txt" >/dev/null
+  [ "$B_NEW" = 1 ] && ok "RATCHET MUTANT: one unrecorded id -> new=1 (this is the red)" || no "new-id gave new=$B_NEW"
+  baseline_verdict "$T/base.txt" "$T/seen.fewer.txt" >/dev/null
+  [ "$B_NEW" = 0 ] && [ "$B_CLEARED" = 1 ] && ok "RATCHET OTHER DIRECTION: a cleared id is a notice (new=0 cleared=1), never a red" || no "fewer gave new=$B_NEW cleared=$B_CLEARED"
+  if [ -f "$ROOT/.github/hex-audit-baseline.txt" ]; then
+    n="$(baseline_ids "$ROOT/.github/hex-audit-baseline.txt" | wc -l | tr -d ' ')"
+    [ "$n" -gt 0 ] && ok "the committed baseline parses to $n ids (a baseline that reads as EMPTY would make every id NEW)" || no "the committed baseline parsed to 0 ids"
+  else
+    no "the committed baseline .github/hex-audit-baseline.txt is missing"
+  fi
+
   rm -rf "$T"
   echo
   echo "selftest: $pass ok, $fail FAIL"
