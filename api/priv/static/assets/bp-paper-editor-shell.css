@@ -1791,6 +1791,34 @@ textarea.bp-paper-figure-caption-input:focus-visible {
 .bp-paper-section-title-editor {
   position: relative; min-width: 0;
 }
+.bp-paper-edit-form.bp-paper-card-title-form {
+  display: block; margin: 0; padding: 0;
+}
+.bp-paper-card-title-owner {
+  position: relative;
+}
+[data-paper-card-title-paint] {
+  display: block; width: 100%; max-width: 100%; margin: 0; padding: 0;
+  border: 0; border-radius: 0; background: transparent; color: inherit;
+  font: inherit; text-align: inherit; letter-spacing: inherit; word-spacing: inherit;
+  white-space: normal; text-wrap: inherit; overflow-wrap: anywhere; cursor: text;
+}
+textarea.bp-paper-inline-text.bp-paper-card-title-input {
+  display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box;
+  margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent;
+  color: inherit; font: inherit; letter-spacing: inherit; word-spacing: inherit;
+  text-align: inherit; resize: none; overflow: hidden; overflow-wrap: anywhere;
+}
+.bp-paper-card-title-input:not(:focus) {
+  position: absolute; inset: 0; opacity: 0; pointer-events: none;
+  clip-path: inset(50%); contain: size;
+}
+.bp-paper-card-title-owner:has(.bp-paper-card-title-input:focus)
+  > [data-paper-card-title-paint] { display: none; }
+[data-paper-card-title-paint]:focus-visible,
+.bp-paper-card-title-input:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
 .bp-paper-card-action-label-owner {
   display: inline-grid; position: relative; max-width: 100%; vertical-align: baseline;
 }
