@@ -284,10 +284,16 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   # (whose `(?<![A-Za-z0-9])` lookbehind is satisfied by the `m` of `\e[31m`) and
   # shipped the credential to an operator's inbox in cleartext. Only the ORDER
   # changes here: the capture itself is still rendered in full and unreordered.
+  #
+  # dr-w23-bl: that hand-rolled pipe IS `FailureCopy.raw/1` (`failure_copy.ex:548`
+  # — `value |> strip_ansi() |> scrub()`), so this boundary NAMES the entry point
+  # instead of re-deriving the order in line. Same two functions, same order,
+  # byte-identical output; what changes is that the order is no longer a thing a
+  # reader here can get wrong, because it is no longer spelled here.
   defp detail(payload) do
     case Map.get(payload, :detail) || Map.get(payload, "detail") do
       d when is_binary(d) and d != "" ->
-        "\n\n#{d |> FailureCopy.strip_ansi() |> FailureCopy.scrub()}"
+        "\n\n#{FailureCopy.raw(d)}"
 
       _ ->
         ""
@@ -341,8 +347,16 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   defp cause_then_capture(payload) do
     case Map.get(payload, :detail) || Map.get(payload, "detail") do
       d when is_binary(d) and d != "" ->
+        # dr-w23-bl: `stripped` STAYS, and it is NOT a step on the way to
+        # `capture` — it is the argument `humanize/1` must receive, for the
+        # reason the paragraph above spells out (an unstripped reason makes
+        # `humanize/1`'s pass-through arm scrub colourised bytes, which is the
+        # leaky order, and the `^capture` equal-arm below then misses). Deleting
+        # this binding as "now redundant" is the exact regression the comment
+        # above exists to prevent. `capture` is `strip_ansi |> scrub` on the same
+        # input, i.e. `FailureCopy.raw/1`, so it names it.
         stripped = FailureCopy.strip_ansi(d)
-        capture = FailureCopy.scrub(stripped)
+        capture = FailureCopy.raw(d)
 
         case FailureCopy.humanize(stripped) do
           ^capture -> "\n\n#{capture}"
