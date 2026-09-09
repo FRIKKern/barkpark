@@ -47,6 +47,34 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContainerBlocksTest do
     assert [%{"slug" => "day", "title" => "Updated", "unknown" => "keep"}] = patch["refs"]
   end
 
+  test "legacy related-copy forms preserve omitted opaque fields while a safe sibling changes" do
+    for opaque <- [%{"legacy" => ["keep"]}, ["keep"], true, 1.5],
+        field <- ["title", "description"],
+        prefer <- [true, false] do
+      sibling = if field == "title", do: "description", else: "title"
+
+      ref = %{
+        "slug" => "duplicate",
+        "prefer_authored_copy" => prefer,
+        "unknown" => %{"keep" => true},
+        field => opaque,
+        sibling => "Before"
+      }
+
+      block = %{"type" => "paper-links", "refs" => [ref, "duplicate"]}
+
+      patch =
+        Blocks.build_block_patch(block, %{
+          "ref-count" => "2",
+          "ref-0-slug" => "duplicate",
+          "ref-0-prefer-authored-copy" => to_string(prefer),
+          "ref-0-#{sibling}" => "Updated"
+        })
+
+      assert patch["refs"] === [Map.put(ref, sibling, "Updated"), "duplicate"]
+    end
+  end
+
   test "paper-links scalar header edits preserve meaningful whitespace without rebuilding refs" do
     refs = [%{"slug" => "day", "unknown" => %{"keep" => true}}, "legacy"]
     block = %{"type" => "paper-links", "refs" => refs}
