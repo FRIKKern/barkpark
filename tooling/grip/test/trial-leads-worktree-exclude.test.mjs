@@ -19,12 +19,14 @@
 // exercised against a temp corpus this test PLANTS, so the subject is always
 // present.
 //
-// AND IT PINS THE SPELLING. Measured on this host: BSD grep (/usr/bin/grep)
-// matches --exclude-dir against the directory BASENAME only, so the obvious
-// spelling `--exclude-dir=.claude/worktrees` skips NOTHING there. A fix that
-// shipped the path form would have been a comment-shaped no-op on the very grep
-// most likely to run, and no timing test on this machine (where `grep` is
-// ugrep, which DOES honour the path form) would have caught it.
+// AND IT PINS THE SPELLING. --exclude-dir matches a directory BASENAME, not a
+// path. Measured on this host 2026-09-10 on BOTH greps this code can reach —
+// /usr/bin/grep (BSD) and ugrep 7.8.4, which shadows `grep` on this PATH — the
+// obvious spelling `--exclude-dir=.claude/worktrees` skipped NOTHING: the
+// planted file under .claude/worktrees/ still matched on both, while
+// `--exclude-dir=.claude` skipped it on both. GNU grep documents the same
+// semantics. A fix that shipped the path form would have been a comment-shaped
+// no-op everywhere, and a timing test would have called it green.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

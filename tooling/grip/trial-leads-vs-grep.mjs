@@ -458,15 +458,16 @@ function grepLinesToAnswer(grepLines) {
 // pass has measured their own filesystem, not this list.
 //
 // IT IS SPELLED `.claude`, NOT `.claude/worktrees`, AND THE SPELLING IS THE
-// FIX. Measured on this host 2026-09-10: BSD grep (/usr/bin/grep) matches
-// `--exclude-dir` against the directory BASENAME only, so
-// `--exclude-dir=.claude/worktrees` skipped NOTHING — the planted file under
-// .claude/worktrees/x still matched — while `--exclude-dir=.claude` and
-// `--exclude-dir=worktrees` each skipped it. (ugrep, which shadows `grep` on
-// this PATH, honours the path form; GNU grep does not.) So the path spelling
-// would have shipped a comment-shaped no-op on the very grep most likely to
-// run. `worktrees` rides alongside as the portable catch for a worktree root
-// parked outside `.claude`.
+// FIX. `--exclude-dir` matches a directory BASENAME, not a path, so the
+// path-shaped entry skips nothing. MEASURED on this host 2026-09-10 against a
+// planted corpus (`gx/.claude/worktrees/p/a.txt` plus `gx/b.txt`), on BOTH
+// greps reachable here — /usr/bin/grep (BSD) and ugrep 7.8.4, which shadows
+// `grep` on this PATH: `--exclude-dir=.claude/worktrees` returned the planted
+// nested file on both, while `--exclude-dir=.claude` skipped it on both. GNU
+// grep documents the same basename semantics. So the path spelling would have
+// shipped a comment-shaped no-op on every grep this code can actually reach.
+// `worktrees` rides alongside as the portable catch for a worktree root parked
+// outside `.claude`.
 export const REPO_WIDE_EXCLUDES = Object.freeze([
   ".git", "node_modules", "_build", "deps", ".turbo", "dist", "build",
   ".claude", "worktrees",
