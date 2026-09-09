@@ -303,7 +303,17 @@ arm_caddy_node_route() { # <port>
   # DELIMITER-ANCHORED (D345): a bare-substring guard matched a prefix SIBLING's
   # marker and returned "already armed" for a site that was never armed at all.
   if has_site_route_marker "$CADDYFILE"; then
-    ROUTE_DETAIL="already armed: $CADDYFILE already carries this site's own $marker block, so the arm wrote nothing (only the upstream port moves on a re-deploy)"
+    # THE BARE PATH (D79) — the marker guard freezes the FIRST shape forever, so
+    # a block armed before #3382 has no `redir @bare_…` and /sites/<slug> (no
+    # trailing slash) still falls through to the slot reverse_proxy. Upgrade THAT
+    # ONE BLOCK in place, guarded by a predicate read from the block's own bytes:
+    # a basePath-shaped block (its matcher already lists the un-suffixed path) is
+    # deliberately left WITHOUT a redir — the pair would 308 each other forever.
+    if upgrade_caddy_bare_path; then
+      ROUTE_DETAIL="already armed, UPGRADED: $CADDYFILE carried this site's own $marker block without a bare-path route, so this run added the /sites/$SITE_SLUG -> /sites/$SITE_SLUG/ 308 redir to that one block in place"
+    else
+      ROUTE_DETAIL="already armed: $CADDYFILE already carries this site's own $marker block, so the arm wrote nothing (only the upstream port moves on a re-deploy; the bare-path check said ${BARE_UPGRADE_VERDICT:-unknown})"
+    fi
     return 0
   fi
   if ! grep -qE 'reverse_proxy[[:space:]]+localhost:(4000|4001)([[:space:]]|$)' "$CADDYFILE"; then
@@ -387,7 +397,17 @@ flip_caddy_node_port() { # <new-port>
     { print }
   ' "$CADDYFILE" > "$tmp" || { rm -f "$tmp"; return 1; }
   if commit_caddyfile "$tmp"; then
-    ROUTE_DETAIL="already armed: this site's $marker block was already in $CADDYFILE, so this run only moved its upstream to localhost:$port (no route was added)"
+    # THE RE-DEPLOY PATH IS THE ONE THAT RUNS (D79). A site that is already live
+    # never enters arm_caddy_node_route again — it comes through HERE — so the
+    # bare-path upgrade has to hang off the flip or it would never fire on an
+    # existing site. A separate read-modify-write on the same held lock, and an
+    # INSERT ONLY: the reverse_proxy line this function just rewrote is copied
+    # through byte for byte, so the two can never fight over the port.
+    if upgrade_caddy_bare_path; then
+      ROUTE_DETAIL="already armed, UPGRADED: this site's $marker block was already in $CADDYFILE, so this run moved its upstream to localhost:$port AND added the missing /sites/$SITE_SLUG -> /sites/$SITE_SLUG/ 308 redir to that one block in place"
+    else
+      ROUTE_DETAIL="already armed: this site's $marker block was already in $CADDYFILE, so this run only moved its upstream to localhost:$port (no route was added; the bare-path check said ${BARE_UPGRADE_VERDICT:-unknown})"
+    fi
     return 0
   fi
   return 1
@@ -644,17 +664,14 @@ do_retire_node() { # <current-slot>
   [ -d "$RELEASES" ] || return 0
   keepa="$(read_slot_build a)"; keepb="$(read_slot_build b)"
   keepp=""; [ -f "$ROOT/.previous" ] && keepp="$(awk '{print $3}' "$ROOT/.previous" 2>/dev/null || true)"
-  local d id i=0
-  while IFS= read -r d; do
-    [ -n "$d" ] || continue
-    id="$(basename "$d")"
-    i=$((i + 1))
-    [ "$i" -le "$RETAIN" ] && continue
-    [ "$id" = "$keepa" ] && continue
-    [ "$id" = "$keepb" ] && continue
-    [ "$id" = "$keepp" ] && continue
-    if rm -rf "$d"; then RETIRED=$((RETIRED + 1)); log "RETIRE: removed old release $id"; fi
-  done < <(ls -1dt "$RELEASES"/*/ 2>/dev/null)
+  # THE SORT KEY IS THE STAGING TIME, not the release dir mtime (see
+  # releases_newest_first in the common lib). `ls -1dt` sorted by mtime, and
+  # STAGE's `cp -a "$SITE_SRC/.next/standalone/."` PRESERVES the builder's
+  # timestamps — so the old key was the BUILDER's clock, and a re-staged
+  # pre-existing build silently inverted the retire order. On EQUAL mtimes GNU
+  # `ls -t` falls back to NAME ASCENDING, i.e. exactly reverse.
+  prune_release_dirs "$RELEASES" "$RETAIN" "$keepa" "$keepb" "$keepp"
+  RETIRED="$PRUNED"
 }
 
 # Best-effort: materialise /usr/local/bin/barkpark-node -> the asdf node (NEVER
@@ -759,8 +776,11 @@ if [ "$MODE" = selftest ]; then
   # .github/workflows/deploy-harnesses.yml runs ("Site deploy engine (Node)
   # self-test", env BARKPARK_SELFTEST_REQUIRE_E2E: "1", ubuntu-latest).
   # ADD rows -> raise the literal in the SAME commit.
-  SELFTEST_FLOOR_MIN=342
-  SELFTEST_FLOOR_FULL=359
+  # 2026-09-09: +33 (342->375, 359->392) for the bare-path upgrade (D79) and the
+  # staging-time RETIRE key (D80). All 33 sit outside both optional blocks, so
+  # BOTH floors move by the same 33.
+  SELFTEST_FLOOR_MIN=375
+  SELFTEST_FLOOR_FULL=392
   TESTS=0; FAILS=0
   check() { local label="$1"; shift; TESTS=$((TESTS + 1)); if "$@"; then echo "  ok   - $label"; else echo "  FAIL - $label"; FAILS=$((FAILS + 1)); fi; }
 
@@ -775,6 +795,7 @@ if [ "$MODE" = selftest ]; then
   T_PORT_E="$(free_port)"; T_PORT_F="$(free_port)"   # basePath site's two slots
   T_PORT_G="$(free_port)"; T_PORT_H="$(free_port)"   # prefix-collision: the LONGER sibling
   T_PORT_I="$(free_port)"; T_PORT_J="$(free_port)"   # prefix-collision: the PREFIX slug
+  T_PORT_K="$(free_port)"; T_PORT_L="$(free_port)"   # the pre-#3382 block's two slots
 
   FAKEBIN="$TD/bin"; SLOTPIDS="$TD/slotpids"; SENV="$TD/slots"; SRC="$TD/src"
   mkdir -p "$FAKEBIN" "$SLOTPIDS" "$SENV" "$SRC"
@@ -1002,6 +1023,125 @@ FAKENPM
   # assertion (a diagnosis must not be invented when nothing was recorded).
   no_log_match() { ! grep -q "$1" "$TD/out.log"; }
   cf_port() { awk -v m="BARKPARK_SITE_ROUTE:selftest" 'index($0,m){i=1} i&&match($0,/localhost:[0-9]+/){p=substr($0,RSTART+10,RLENGTH-10);print p;exit}' "$CF"; }
+
+  # -------------------------------------------------------------------------
+  # RETIRE ORDERS BY STAGING TIME, NOT THE BUILDER'S CLOCK (D80).
+  #
+  # STAGE copies with `cp -a "$SITE_SRC/.next/standalone/."`, and `cp -a`
+  # PRESERVES the source timestamps — so a release dir's mtime is "when the
+  # BUILDER last wrote .next/standalone", not "when this release was staged".
+  # Nine releases staged from one unchanging build all carry the SAME mtime, and
+  # on ties `ls -t` falls back to NAME ASCENDING (measured on GNU coreutils 9.4
+  # AND on BSD ls): the pre-fix engine then deletes r6..r9 — the four NEWEST —
+  # and calls r1..r5 the rollback window.
+  #
+  # The remedy is the staging stamp STAGE writes at <releases>/.staged/<build_id>
+  # and prune_release_dirs reads. Revert the key to `ls -1dt` and the rows naming
+  # r9/r8/r1/r2 go red BY NAME.
+  # -------------------------------------------------------------------------
+  echo "[selftest] RETIRE sorts by STAGING time, not the builder's build mtime (TIED mtimes)"
+  nsv_ROOT="${ROOT:-}"; nsv_RELEASES="${RELEASES:-}"; nsv_RETAIN="${RETAIN:-}"
+  nsv_SLUG="${SITE_SLUG:-}"; nsv_SENV="${SLOT_ENV_DIR:-}"
+  NTR="$TD/tied"; NTRR="$NTR/releases"
+  mkdir -p "$NTRR" "$NTR/slots"
+  for n in 1 2 3 4 5 6 7 8 9; do
+    mkdir -p "$NTRR/r$n"
+    printf 'console.log("r%s")\n' "$n" > "$NTRR/r$n/server.js"
+    touch -t 202607130900 "$NTRR/r$n"   # ALL TIED — one builder output, nine stagings
+    stamp_release_staged "$NTRR" "r$n"  # …staged in order r1 (oldest) .. r9 (newest)
+  done
+  n_tied_distinct="$(for n in 1 2 3 4 5 6 7 8 9; do dir_mtime_epoch "$NTRR/r$n"; echo; done | sort -u | wc -l | tr -d ' ')"
+  check "the fixture really is TIED (one distinct mtime across all nine dirs)" \
+    [ "$n_tied_distinct" = 1 ]
+  check "…and every release carries a staging stamp (the fixture is not vacuous)" \
+    sh -c "[ \"\$(ls -1 '$NTRR/.staged' 2>/dev/null | grep -c '^r[1-9]$' | tr -d ' ')\" = 9 ]"
+  # shellcheck disable=SC2012  # the OLD key IS `ls -t` — measuring it is the point
+  n_prefix_order="$(ls -1dt "$NTRR"/*/ 2>/dev/null | sed 's:.*/\([^/]*\)/$:\1:' | tr '\n' ' ')"
+  n_fixed_order="$(releases_newest_first "$NTRR" | sed 's:.*/\([^/]*\)/$:\1:' | tr '\n' ' ')"
+  check "PRE-FIX KEY: 'ls -1dt' on tied mtimes is NAME-ASCENDING, i.e. oldest-staged first" \
+    [ "$n_prefix_order" = "r1 r2 r3 r4 r5 r6 r7 r8 r9 " ]
+  check "THE FIX: releases_newest_first orders them newest-STAGED first" \
+    [ "$n_fixed_order" = "r9 r8 r7 r6 r5 r4 r3 r2 r1 " ]
+  ROOT="$NTR"; RELEASES="$NTRR"; RETAIN=5; SITE_SLUG=tiedslug; SLOT_ENV_DIR="$NTR/slots"
+  # `.previous` names slot b, so other_slot(a) == the warm previous and the stop
+  # branch is skipped entirely — this block is about the ORDER, nothing else.
+  printf 'b 65533 r9\n' > "$ROOT/.previous"
+  do_retire_node a
+  check "tied RETIRE: kept r9 (newest staged)"  [ -d "$NTRR/r9" ]
+  check "tied RETIRE: kept r8 — the SECOND-NEWEST, which the pre-fix engine deleted" \
+    [ -d "$NTRR/r8" ]
+  check "tied RETIRE: kept r5 (still inside the newest five)" [ -d "$NTRR/r5" ]
+  check "tied RETIRE: removed r1 (oldest staged, which the pre-fix engine KEPT)" \
+    [ ! -d "$NTRR/r1" ]
+  check "tied RETIRE: removed r2 (second-oldest, likewise kept by the pre-fix engine)" \
+    [ ! -d "$NTRR/r2" ]
+  check "tied RETIRE: it removed exactly four"  [ "$RETIRED" = 4 ]
+  check "tied RETIRE: a removed release's staging stamp went with it" \
+    [ ! -f "$NTRR/.staged/r1" ]
+  check "tied RETIRE: a KEPT release's staging stamp survives" [ -f "$NTRR/.staged/r9" ]
+  ROOT="$nsv_ROOT"; RELEASES="$nsv_RELEASES"; RETAIN="$nsv_RETAIN"
+  SITE_SLUG="$nsv_SLUG"; SLOT_ENV_DIR="$nsv_SENV"
+
+  # -------------------------------------------------------------------------
+  # THE BARE-PATH UPGRADE, node side (D79). This engine has emitted a bare-path
+  # route since #3382 — but the marker guard freezes the FIRST shape forever, so
+  # a block armed BEFORE that still has none, and /sites/<slug> (no trailing
+  # slash) falls through to the slot reverse_proxy. The upgrade is guarded by a
+  # predicate read from the BLOCK'S OWN BYTES, which is what lets it tell the
+  # pre-#3382 shape apart from the basePath shape THIS engine writes on purpose
+  # without a redir (adding one there would 308-loop against the app).
+  # -------------------------------------------------------------------------
+  echo "[selftest] the bare-path upgrade reads the BLOCK'S OWN BYTES here too (D79)"
+  NBP="$TD/barepath"; mkdir -p "$NBP"
+  nbp_verdict() { # <slug> <src> <dst> -> the rewrite verdict
+    local __save="${SITE_SLUG:-}" __rc=0
+    SITE_SLUG="$1"; caddy_bare_path_rewrite "$2" "$3" || __rc=$?
+    SITE_SLUG="$__save"; echo "$__rc"
+  }
+  { printf 'example.com {\n'
+    printf '\t# BARKPARK_SITE_ROUTE:pre3382 — node SSR site, armed before the bare-path branch.\n'
+    printf '\thandle_path /sites/pre3382/* {\n'
+    printf '\t\treverse_proxy localhost:5137\n'
+    printf '\t}\n'
+    printf '\treverse_proxy localhost:4000\n'
+    printf '}\n'; } > "$NBP/pre.cf"
+  check "the pre-#3382 fixture really has NO bare-path route (non-vacuous)" \
+    sh -c "! grep -qE 'redir @|@bare_' '$NBP/pre.cf'"
+  check "a pre-#3382 node block is UPGRADABLE (verdict 0)" \
+    [ "$(nbp_verdict pre3382 "$NBP/pre.cf" "$NBP/up1.cf")" = 0 ]
+  check "…it gained the EXACT bare-path matcher" \
+    grep -qx "$(printf '\t@bare_pre3382 path /sites/pre3382')" "$NBP/up1.cf"
+  check "…and the 308 to the canonical slashed form" \
+    grep -qx "$(printf '\tredir @bare_pre3382 /sites/pre3382/ 308')" "$NBP/up1.cf"
+  check "…and the upstream PORT LINE came through untouched (an insert, never a rewrite)" \
+    sh -c "[ \"\$(grep -c 'reverse_proxy localhost:5137' '$NBP/up1.cf')\" = 1 ]"
+  check "a SECOND pass reads it as already covered (verdict 10) — idempotent" \
+    [ "$(nbp_verdict pre3382 "$NBP/up1.cf" "$NBP/up2.cf")" = 10 ]
+  check "…and rewrote nothing (byte-identical)" cmp -s "$NBP/up1.cf" "$NBP/up2.cf"
+  # THE TRAP, on the shape THIS engine actually writes for a basePath site.
+  { printf 'example.com {\n'
+    printf '\t# BARKPARK_SITE_ROUTE:bpnode — node SSR site (basePath), reverse-proxied un-stripped.\n'
+    printf '\t@bare_bpnode path /sites/bpnode /sites/bpnode/*\n'
+    printf '\thandle @bare_bpnode {\n'
+    printf '\t\treverse_proxy localhost:5209\n'
+    printf '\t}\n'
+    printf '\treverse_proxy localhost:4000\n'
+    printf '}\n'; } > "$NBP/bp.cf"
+  check "a basePath-shaped block is recognised as covering the bare path itself (verdict 11)" \
+    [ "$(nbp_verdict bpnode "$NBP/bp.cf" "$NBP/bp.out")" = 11 ]
+  check "…and is left byte-identical: NO bare->slash redir (it would 308-loop with the app)" \
+    cmp -s "$NBP/bp.cf" "$NBP/bp.out"
+  # AND AN UNRECOGNISED SHAPE IS LEFT ALONE RATHER THAN GUESSED AT.
+  { printf 'example.com {\n'
+    printf '\t# BARKPARK_SITE_ROUTE:oddnode — hand-edited, non-stripping handle.\n'
+    printf '\thandle /sites/oddnode/* {\n'
+    printf '\t\treverse_proxy localhost:5301\n'
+    printf '\t}\n'
+    printf '\treverse_proxy localhost:4000\n'
+    printf '}\n'; } > "$NBP/odd.cf"
+  check "an UNRECOGNISED block shape is verdict 12" \
+    [ "$(nbp_verdict oddnode "$NBP/odd.cf" "$NBP/odd.out")" = 12 ]
+  check "…and is left byte-identical" cmp -s "$NBP/odd.cf" "$NBP/odd.out"
 
   echo "[selftest] e2e: first deploy boots slot a, gates it, arms Caddy to :A, walks six stages"
   rc="$(e2e_deploy n1)"
@@ -1253,6 +1393,60 @@ FAKENPM
   check "warm slot a env now RELEASE_DIR=w3"   grep -q "RELEASE_DIR=$TD/sites/warm/releases/w3" "$SENV/warm__a.env"
   check "the OTHER site's Caddy block was NOT touched by the warm deploys (D66 per-site isolation)" \
     [ "$(cf_port)" = "$sel_port_before" ]
+
+  # -------------------------------------------------------------------------
+  # A PRE-#3382 BLOCK IS UPGRADED IN PLACE BY A REAL DEPLOY (D79). The unit rows
+  # above pin the predicate; this drives the WHOLE path — arm_caddy_node_route's
+  # already-armed branch, under with_caddy_lock, committed like every other
+  # Caddyfile read-modify-write — over the shape the box actually carries.
+  # -------------------------------------------------------------------------
+  echo "[selftest] e2e: a pre-#3382 node block gains the bare-path 308 on the next deploy, in place (D79)"
+  # Seed the LIVE Caddyfile with the old shape: this slug's marker, a stripping
+  # handle_path, and an upstream port that belongs to NEITHER of its slots — so
+  # active_slot() reads none and the deploy takes the arm path into the
+  # already-armed branch, which is the branch that upgrades.
+  { printf 'example.com {\n'
+    printf '\t# BARKPARK_SITE_ROUTE:preboot — node SSR site, armed before the bare-path branch.\n'
+    printf '\thandle_path /sites/preboot/* {\n'
+    printf '\t\treverse_proxy localhost:65531\n'
+    printf '\t}\n'
+    printf '\treverse_proxy localhost:4000\n'
+    printf '}\n'; } > "$TD/preboot.Caddyfile"
+  check "the seeded pre-#3382 block really has no bare-path route (non-vacuous)" \
+    sh -c "! grep -qE 'redir @|@bare_' '$TD/preboot.Caddyfile'"
+  pb_rc="$(env PATH="$FAKEBIN:$PATH" SITE_SLUG=preboot BUILD_ID=pb1 CONTENT_REV=pb-rev \
+    SITE_SRC="$SRC" SITE_PORT_A="$T_PORT_K" SITE_PORT_B="$T_PORT_L" \
+    BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$TD/preboot.Caddyfile" \
+    BARKPARK_SITE_DEPLOY_LOCK="$TD/preboot.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+    BARKPARK_SITE_HEALTH_PATH=/ BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    bash "$SELF" > "$TD/preboot.out" 2>&1; echo $?)"
+  check "the deploy over the pre-#3382 block exits 0 (the upgrade is never fatal)" \
+    [ "$pb_rc" = 0 ]
+  check "the block gained the EXACT bare-path matcher, in place" \
+    grep -qx "$(printf '\t@bare_preboot path /sites/preboot')" "$TD/preboot.Caddyfile"
+  check "…and the 308 to the canonical slashed form" \
+    grep -qx "$(printf '\tredir @bare_preboot /sites/preboot/ 308')" "$TD/preboot.Caddyfile"
+  check "…NOT by re-arming: this site's marker still appears exactly once" \
+    sh -c "[ \"\$(grep -c 'BARKPARK_SITE_ROUTE:preboot' '$TD/preboot.Caddyfile')\" = 1 ]"
+  check "…and the handle_path is still there exactly once (no duplicate route)" \
+    sh -c "[ \"\$(grep -c 'handle_path /sites/preboot/\\*' '$TD/preboot.Caddyfile')\" = 1 ]"
+  check "…and the upgrade is announced on the DURABLE machine channel" \
+    grep -q '^BPSTAGE name=ROUTE status=ok build_id=pb1 detail="already armed, UPGRADED: ' "$TD/preboot.out"
+  check "the upgrade left no backup file behind on the happy path" \
+    sh -c "! ls '$TD'/preboot.Caddyfile.bak.* >/dev/null 2>&1"
+  cp "$TD/preboot.Caddyfile" "$TD/preboot.after1"
+  env PATH="$FAKEBIN:$PATH" SITE_SLUG=preboot BUILD_ID=pb2 CONTENT_REV=pb-rev2 \
+    SITE_SRC="$SRC" SITE_PORT_A="$T_PORT_K" SITE_PORT_B="$T_PORT_L" \
+    BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$TD/preboot.Caddyfile" \
+    BARKPARK_SITE_DEPLOY_LOCK="$TD/preboot.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+    BARKPARK_SITE_HEALTH_PATH=/ BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    bash "$SELF" > "$TD/preboot2.out" 2>&1 || true
+  check "a SECOND deploy adds no second redir (the upgrade is idempotent)" \
+    sh -c "[ \"\$(grep -c 'redir @bare_preboot' '$TD/preboot.Caddyfile')\" = 1 ]"
+  check "…and it reports the plain already-armed detail, not another upgrade" \
+    grep -q '^BPSTAGE name=ROUTE status=ok build_id=pb2 detail="already armed: ' "$TD/preboot2.out"
 
   echo "[selftest] e2e: a basePath site arms a NON-stripping 'handle' + health-probes the sub-path (D6)"
   # BARKPARK_SITE_BASEPATH=1 + a .basepath sentinel (so the fake npm also emits the
@@ -2855,6 +3049,10 @@ if [ "$SKIP_BUILD" = 0 ]; then
     log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
   [ -n "$STAGE_ASIDE" ] && rm -rf "$STAGE_ASIDE"
+  # The release is staged AS OF NOW — stamp it, because its own mtime says when
+  # the BUILDER last wrote .next/standalone (cp -a preserves source timestamps)
+  # and RETIRE must not sort on the builder's clock.
+  stamp_release_staged "$RELEASES" "$BUILD_ID"
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
   log "STAGE: standalone + .next/static + public -> releases/$BUILD_ID/ ($staged_size)"
   emit STAGE ok "standalone(+static+public) -> releases/$BUILD_ID ($staged_size)"
