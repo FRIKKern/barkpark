@@ -25,12 +25,19 @@ irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli
 ## 2. Connect to a Barkpark
 
 ```bash
-bp setup          # local · deploy · connect — pick one, it does the rest
+bp setup --target connect --server https://api.example.com --token $TOKEN
 ```
 
+Pass `--target` explicitly. Bare `bp setup` opens the interactive wizard, and a
+wizard needs a TTY — run from an agent's terminal it exits **code 2** with `no
+--target and not an interactive terminal`.
+
 `connect` points `bp` at an existing server (yours or a hosted one) and stores
-the config in `~/.config/barkpark/`. No Barkpark yet? `local` runs one on your
-machine; `deploy` installs on your own server over SSH. Verify:
+the config in `~/.config/barkpark/`; it writes config only and touches no
+database. No Barkpark yet? `bp setup --target local --yes` runs one on your
+machine — **destructive: it runs `mix ecto.reset`, wiping the dev DB**, so stop
+any running dev server first. `--target deploy` installs on your own server over
+SSH. Full route table: [QUICKSTART.md](QUICKSTART.md). Verify:
 
 ```bash
 bp task ready     # empty list = connected, no open work
