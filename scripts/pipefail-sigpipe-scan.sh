@@ -10,6 +10,15 @@
 #
 #     printf '%s\n' "$out" | grep -Eq "$pat"    # 141 when "$out" outruns the pipe buffer
 #
+# THE NUMBER IS PLATFORM-SPECIFIC; THE DEFECT IS NOT.  Measured 2026-09-09: macOS
+# (bash 3.2 + BSD tools) really answers 141 — the producer dies on the signal.
+# ubuntu-latest (bash 5 + GNU coreutils) answers 1 — the producer reports the
+# write error and exits instead of dying.  Either way a TRUE assertion comes back
+# FAILED under pipefail, which is the whole hazard.  Read "141" throughout this
+# file as "a failure the assertion did not earn".  The --selftest asserts the
+# failure and REPORTS the number; keying a control on 141 is what kept this
+# script's own selftest from ever running on the only platform CI has.
+#
 # It is OUTPUT-LENGTH DEPENDENT.  A short producer fits the ~64KB pipe buffer, writes
 # everything before the reader exits, and never sees SIGPIPE — which is exactly why the
 # bug sits latent until an unrelated change makes the output longer, and then produces
@@ -103,7 +112,7 @@ while [ $# -gt 0 ]; do
     shift 2
     ;;
   -h | --help)
-    sed -n '2,62p' "$0"
+    sed -n '2,71p' "$0"
     exit 0
     ;;
   -*) die "unknown option: $1" ;;
@@ -149,21 +158,26 @@ if [ "$selftest" -eq 1 ]; then
   # while the producer still has ~200KB to write.  One 200KB line would not do
   # it — grep would have to read to EOF just to see the line, and never SIGPIPE.
   #
-  # THE PLATFORM SPLIT, and why this arm asks for NON-ZERO and not for 141
-  # (measured 2026-09-09, and it is the reason the whole selftest could not run
-  # in CI before that date — it demanded 141 and Actions reds it):
+  # THE PLATFORM SPLIT, and why these arms ask for NON-ZERO and not for 141.
+  # MEASURED 2026-09-09 on both, and it is the reason the whole selftest could
+  # never run in CI before that date — it demanded 141, and Actions answers 1:
   #
-  #   macOS / bash 3.2   builtin printf takes the default SIGPIPE disposition and
-  #                      dies; pipefail propagates  141.
-  #   ubuntu / bash 5    bash TRAPS the write error in its own builtin, prints
-  #                      `printf: write error: Broken pipe` and returns  1.
+  #                          builtin `printf | grep -q`   external `cat | grep -q`
+  #   macOS 15 / bash 3.2                        141                          141
+  #   ubuntu-latest / bash 5 + GNU coreutils       1                            1
   #
-  # Different number, IDENTICAL defect: the true answer is 0 (grep matched) and
-  # pipefail hands back a FAILURE either way.  Demanding the macOS number turned
-  # a platform difference into a red on the only platform CI has.  So the
-  # assertion is "a TRUE assertion comes back FALSE", and the number is REPORTED
-  # rather than required.  (0a) then pins 141 specifically, on an EXTERNAL
-  # producer, which has no builtin to trap anything.
+  # On GNU the producer reports the write error and exits 1 instead of dying on
+  # the signal; on BSD it dies and pipefail propagates 128+13.  DIFFERENT NUMBER,
+  # IDENTICAL DEFECT: the true answer is 0 (grep matched) and pipefail hands back
+  # a FAILURE either way, which is the entire hazard this scanner hunts.  So the
+  # assertion is "a TRUE assertion comes back FALSE" and the rc is REPORTED, not
+  # required — a control keyed on one platform's number is a control that reds on
+  # the other platform's correct behaviour.  Non-vacuity still holds: if SIGPIPE
+  # and EPIPE both stopped mattering, both arms return 0 and BOTH red.
+  #
+  # (0) uses a bash BUILTIN producer, (0a) an EXTERNAL one, because those are two
+  # different mechanisms (bash's own write-error handling vs. the process's) and
+  # the tree contains both shapes.
   long="hit"
   while [ "${#long}" -lt 200000 ]; do long="$long"$'\n'"$long"; done
   rcbi=0
@@ -176,20 +190,16 @@ if [ "$selftest" -eq 1 ]; then
   else
     sno "(0) printf | grep -q returned 0 — the defect does not reproduce here, so every fixture below is testing a ghost"
   fi
-  # (0a) an EXTERNAL producer is killed by the signal itself: 141 exactly, on
-  # every platform.  This is the arm that would red if a future runtime stopped
-  # SIGPIPE-ing altogether — which (0) alone can no longer tell you, now that it
-  # accepts bash's trapped rc 1 as well.
   printf '%s\n' "$long" >"$std/long.txt"
   rcext=0
   (
     set -o pipefail
     cat "$std/long.txt" | grep -q '^hit$'
   ) 2>/dev/null || rcext=$?
-  if [ "$rcext" -eq 141 ]; then
-    sok "(0a) an external producer (cat) into grep -q really returns 141 under pipefail"
+  if [ "$rcext" -ne 0 ]; then
+    sok "(0a) non-vacuity: an EXTERNAL producer (cat) into grep -q comes back FAILED too (rc $rcext on this box)"
   else
-    sno "(0a) cat | grep -q returned $rcext, not 141 — SIGPIPE is not reaching the producer on this box"
+    sno "(0a) cat | grep -q returned 0 — the external-producer form does not reproduce here"
   fi
   rcfix=0
   (
