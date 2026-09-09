@@ -6,6 +6,7 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
   alias Barkpark.Content
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.StudioLive
+  alias BarkparkWeb.Studio.StudioLive.Blocks
 
   @dataset "production"
 
@@ -22,6 +23,41 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
       )
 
     slug = "studio-contextual-history-#{System.unique_integer([:positive])}"
+    target_slug = "#{slug}-target"
+    sibling_slug = "#{slug}-sibling"
+
+    for linked_slug <- [target_slug, sibling_slug] do
+      {:ok, _paper} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: linked_slug,
+            dataset: @dataset,
+            blocks: [
+              %{
+                "id" => "linked-copy",
+                "type" => "paragraph",
+                "text" => "Linked source stays untouched."
+              }
+            ]
+          })
+        )
+    end
+
+    refs = [
+      %{
+        "slug" => target_slug,
+        "prefer_authored_copy" => true,
+        "title" => "Original target title",
+        "description" => "Original target description",
+        "unknown" => %{"keep" => [true, nil, 1, 1.0]}
+      },
+      %{
+        "slug" => sibling_slug,
+        "title" => "Sibling title",
+        "description" => "Sibling description",
+        "unknown" => %{"sibling" => true}
+      }
+    ]
 
     {:ok, paper} =
       Content.upsert_paper(
@@ -49,7 +85,7 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
               "type" => "paper-links",
               "title" => "Original links heading",
               "description" => "Original links description",
-              "refs" => [%{"slug" => "next", "unknown" => %{"keep" => true}}],
+              "refs" => refs,
               "unknown" => [1, 2]
             }
           ]
@@ -59,7 +95,12 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
     {:ok, view, _html} =
       live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{paper.doc_id}"))
 
-    {:ok, view: view, socket: :sys.get_state(view.pid).socket, slug: slug}
+    {:ok,
+     view: view,
+     socket: :sys.get_state(view.pid).socket,
+     slug: slug,
+     refs: refs,
+     target_slug: target_slug}
   end
 
   test "classifies the history step as a write event" do
@@ -232,6 +273,7 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
   end
 
   test "Studio paper-links description ACK undoes and redoes without touching neighbours", %{
+    refs: refs,
     socket: socket,
     slug: slug
   } do
@@ -286,8 +328,156 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
     links = paper_links(slug)
     assert links["description"] == "  Studio description  "
     assert links["title"] == "Original links heading"
-    assert links["refs"] == [%{"slug" => "next", "unknown" => %{"keep" => true}}]
+    assert links["refs"] === refs
     assert links["unknown"] == [1, 2]
+  end
+
+  test "Studio authored reference description exposes opaque v1 history and preserves linked state",
+       %{
+         refs: refs,
+         socket: socket,
+         slug: slug,
+         target_slug: target_slug
+       } do
+    [target, sibling] = refs
+    linked_before = Content.get_paper(target_slug, @dataset).content
+    forward_id = Ecto.UUID.generate()
+    updated_target = Map.put(target, "description", "  Studio authored description  ")
+
+    assert {:reply,
+            %{
+              saved: true,
+              changed: true,
+              replayed: false,
+              request_id: ^forward_id,
+              history_step: %{version: 1, ref: ^forward_id, action: "undo"},
+              rev: forward_rev
+            } = forward_reply, forward_socket} =
+             StudioLive.handle_event(
+               "paper-block-autosave",
+               reference_copy_params(
+                 target,
+                 "description",
+                 "  Studio authored description  ",
+                 forward_id,
+                 socket.assigns.paper_rev
+               ),
+               socket
+             )
+
+    assert Enum.sort(Map.keys(forward_reply)) ==
+             [:changed, :history_step, :replayed, :request_id, :rev, :saved]
+
+    refute inspect(forward_reply) =~ "Original target description"
+    assert [^updated_target, ^sibling] = paper_links(slug)["refs"]
+    assert Content.get_paper(target_slug, @dataset).content === linked_before
+
+    undo_id = Ecto.UUID.generate()
+
+    assert {:reply,
+            %{
+              saved: true,
+              replayed: false,
+              history_step: %{version: 1, ref: ^undo_id, action: "redo"},
+              rev: undo_rev
+            }, undone_socket} =
+             StudioLive.handle_event(
+               "paper-history-step",
+               %{
+                 "history_ref" => forward_id,
+                 "action" => "undo",
+                 "request_id" => undo_id,
+                 "if_rev" => forward_rev
+               },
+               forward_socket
+             )
+
+    assert paper_links(slug)["refs"] === refs
+    assert Content.get_paper(target_slug, @dataset).content === linked_before
+
+    redo_id = Ecto.UUID.generate()
+
+    assert {:reply,
+            %{
+              saved: true,
+              replayed: false,
+              history_step: %{version: 1, ref: ^redo_id, action: "undo"}
+            }, _redone_socket} =
+             StudioLive.handle_event(
+               "paper-history-step",
+               %{
+                 "history_ref" => undo_id,
+                 "action" => "redo",
+                 "request_id" => redo_id,
+                 "if_rev" => undo_rev
+               },
+               undone_socket
+             )
+
+    assert [^updated_target, ^sibling] = paper_links(slug)["refs"]
+    assert Content.get_paper(target_slug, @dataset).content === linked_before
+  end
+
+  test "Studio authored reference history rejects a newer selected-field value", %{
+    refs: refs,
+    socket: socket,
+    slug: slug,
+    target_slug: target_slug
+  } do
+    [target, sibling] = refs
+    linked_before = Content.get_paper(target_slug, @dataset).content
+    forward_id = Ecto.UUID.generate()
+
+    assert {:reply, %{saved: true, rev: forward_rev}, forward_socket} =
+             StudioLive.handle_event(
+               "paper-block-autosave",
+               reference_copy_params(
+                 target,
+                 "title",
+                 "Saved title",
+                 forward_id,
+                 socket.assigns.paper_rev
+               ),
+               socket
+             )
+
+    newer_target = Map.put(target, "title", "Newer title")
+
+    assert {:ok, %{rev: newer_rev}} =
+             Content.apply_paper_block_op(
+               slug,
+               %{
+                 "op" => "patch-block",
+                 "id" => "links",
+                 "patch" => %{"refs" => [newer_target, sibling]}
+               },
+               @dataset,
+               if_rev: forward_rev
+             )
+
+    request_id = Ecto.UUID.generate()
+
+    assert {:reply,
+            %{
+              saved: false,
+              request_id: ^request_id,
+              rejected: "history_conflict",
+              conflict: true,
+              current_rev: ^newer_rev
+            }, _socket} =
+             StudioLive.handle_event(
+               "paper-history-step",
+               %{
+                 "history_ref" => forward_id,
+                 "action" => "undo",
+                 "request_id" => request_id,
+                 "if_rev" => newer_rev
+               },
+               forward_socket
+             )
+
+    assert [^newer_target, ^sibling] = paper_links(slug)["refs"]
+    assert Content.get_paper(target_slug, @dataset).content === linked_before
   end
 
   test "credential, revoked-token, and read-only refusals happen before history lookup", %{
@@ -497,5 +687,18 @@ defmodule BarkparkWeb.Studio.StudioContextualHistoryHostTest do
     |> Map.fetch!(:content)
     |> Map.fetch!("blocks")
     |> Enum.find(&(&1["id"] == "links"))
+  end
+
+  defp reference_copy_params(ref, field, value, request_id, if_rev) do
+    %{
+      "block_id" => "links",
+      "paper-link-ref-index" => "0",
+      "paper-link-ref-slug" => ref["slug"],
+      "paper-link-ref-field" => field,
+      "paper-link-ref-value" => value,
+      "paper-link-ref-guard" => Blocks.paper_link_ref_guard(ref),
+      "request_id" => request_id,
+      "if_rev" => if_rev
+    }
   end
 end

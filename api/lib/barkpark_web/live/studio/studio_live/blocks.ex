@@ -16,6 +16,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   @card_action_priorities ["primary", "secondary"]
   @action_form_fields ~w(action-label action-href action-priority)
   @action_priorities ["primary", "secondary"]
+  @paper_link_ref_form_keys ~w(block_id paper-link-ref-field paper-link-ref-guard paper-link-ref-index paper-link-ref-slug paper-link-ref-value)
+  @paper_link_ref_guard_max_bytes 16 * 1024
 
   @doc false
   def block_form_source(params), do: Map.drop(params, ["if_rev", "request_id"])
@@ -24,7 +26,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def resolve_block_form(blocks, %{"block_id" => id} = source) when is_binary(id) do
     case find_paper_block(blocks, id) do
       %{} = block ->
-        case validate_block_patch(block, source) do
+        resolver =
+          if paper_link_ref_form?(source),
+            do: resolve_paper_link_ref_form(block, source),
+            else: validate_block_patch(block, source)
+
+        case resolver do
           {:ok, patch} -> {:ok, %{"op" => "patch-block", "id" => id, "patch" => patch}}
           {:error, reason} -> {:error, {:source_validation, reason}}
         end
@@ -35,6 +42,145 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   end
 
   def resolve_block_form(_blocks, _source), do: {:error, :invalid_block_form}
+
+  @doc false
+  def paper_link_reference_copy_admission(%{"type" => "paper-links", "refs" => refs}, index)
+      when is_list(refs) and is_integer(index) and index >= 0 do
+    with ref when is_map(ref) and not is_struct(ref) <- Enum.at(refs, index),
+         true <- Map.get(ref, "prefer_authored_copy") === true,
+         slug when is_binary(slug) <- Map.get(ref, "slug"),
+         trimmed_slug when trimmed_slug != "" <- String.trim(slug),
+         1 <- Enum.count(refs, &(paper_link_ref_trimmed_slug(&1) == trimmed_slug)),
+         guard when is_binary(guard) <- paper_link_ref_guard(ref) do
+      {:ok, %{slug: slug, guard: guard}}
+    else
+      _ -> {:error, :paper_link_reference_copy_unavailable}
+    end
+  end
+
+  def paper_link_reference_copy_admission(_block, _index),
+    do: {:error, :paper_link_reference_copy_unavailable}
+
+  @doc false
+  def paper_link_reference_copy_admission(
+        %{"refs" => refs} = block,
+        index,
+        field
+      )
+      when is_list(refs) and is_integer(index) and index >= 0 and
+             field in ["title", "description"] do
+    with {:ok, admission} <- paper_link_reference_copy_admission(block, index),
+         ref when is_map(ref) and not is_struct(ref) <- Enum.at(refs, index),
+         true <- paper_link_ref_copy_field_representable?(ref, field) do
+      {:ok, admission}
+    else
+      _ -> {:error, :paper_link_reference_copy_unavailable}
+    end
+  end
+
+  def paper_link_reference_copy_admission(_block, _index, _field),
+    do: {:error, :paper_link_reference_copy_unavailable}
+
+  @doc false
+  def paper_link_ref_guard(ref) when is_map(ref) and not is_struct(ref) do
+    identity = Map.drop(ref, ["title", "description"])
+
+    with {:ok, encoded} <- Jason.encode(identity),
+         true <- byte_size(encoded) <= @paper_link_ref_guard_max_bytes,
+         {:ok, decoded} <- Jason.decode(encoded),
+         true <- decoded === identity do
+      digest = :crypto.hash(:sha256, encoded)
+      Base.url_encode64(digest, padding: false)
+    else
+      _ -> nil
+    end
+  end
+
+  def paper_link_ref_guard(_ref), do: nil
+
+  defp paper_link_ref_form?(source) do
+    Enum.any?(Map.keys(source), fn
+      key when is_binary(key) -> String.starts_with?(key, "paper-link-ref-")
+      _key -> false
+    end)
+  end
+
+  defp resolve_paper_link_ref_form(%{"type" => "paper-links"} = block, source) do
+    with true <- Enum.sort(Map.keys(source)) == @paper_link_ref_form_keys,
+         {:ok, index} <- canonical_paper_link_ref_index(source["paper-link-ref-index"]),
+         field when field in ["title", "description"] <- source["paper-link-ref-field"],
+         {:ok, %{slug: slug, guard: expected_guard}} <-
+           paper_link_reference_copy_admission(block, index, field),
+         true <- source["paper-link-ref-slug"] === slug,
+         value when is_binary(value) <- source["paper-link-ref-value"],
+         true <- valid_paper_link_ref_guard?(source["paper-link-ref-guard"], expected_guard),
+         refs when is_list(refs) <- block["refs"],
+         ref when is_map(ref) and not is_struct(ref) <- Enum.at(refs, index) do
+      updated =
+        cond do
+          paper_link_ref_copy_form_value(ref, field) === value -> ref
+          String.trim(value) == "" -> Map.delete(ref, field)
+          true -> Map.put(ref, field, value)
+        end
+
+      patch =
+        if updated === ref, do: %{}, else: %{"refs" => List.replace_at(refs, index, updated)}
+
+      {:ok, patch}
+    else
+      _ -> {:error, :invalid_paper_link_reference_copy}
+    end
+  end
+
+  defp resolve_paper_link_ref_form(_block, _source),
+    do: {:error, :invalid_paper_link_reference_copy}
+
+  defp canonical_paper_link_ref_index(index) when is_binary(index) do
+    case Integer.parse(index) do
+      {parsed, ""} when parsed >= 0 ->
+        if Integer.to_string(parsed) == index, do: {:ok, parsed}, else: :error
+
+      _ ->
+        :error
+    end
+  end
+
+  defp canonical_paper_link_ref_index(_index), do: :error
+
+  defp valid_paper_link_ref_guard?(guard, expected_guard)
+       when is_binary(guard) and is_binary(expected_guard) do
+    byte_size(guard) <= div((@paper_link_ref_guard_max_bytes + 2) * 4, 3) and
+      guard === expected_guard
+  end
+
+  defp valid_paper_link_ref_guard?(_guard, _expected_guard), do: false
+
+  defp paper_link_ref_trimmed_slug(ref) when is_binary(ref), do: String.trim(ref)
+
+  defp paper_link_ref_trimmed_slug(ref) when is_map(ref) and not is_struct(ref) do
+    case Map.get(ref, "slug") do
+      slug when is_binary(slug) -> String.trim(slug)
+      _ -> nil
+    end
+  end
+
+  defp paper_link_ref_trimmed_slug(_ref), do: nil
+
+  defp paper_link_ref_copy_field_representable?(ref, field) do
+    case Map.fetch(ref, field) do
+      :error -> true
+      {:ok, value} -> is_nil(value) or is_binary(value) or is_integer(value)
+    end
+  end
+
+  defp paper_link_ref_copy_form_value(ref, field) do
+    case Map.fetch(ref, field) do
+      :error -> ""
+      {:ok, nil} -> ""
+      {:ok, value} when is_binary(value) -> value
+      {:ok, value} when is_integer(value) -> Integer.to_string(value)
+    end
+  end
 
   @doc false
   def structure_child_locked?(child), do: not is_nil(locked_visible_block_id(child))

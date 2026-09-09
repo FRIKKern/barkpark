@@ -2,7 +2,7 @@
 
 ## Source of truth
 - Status: Active
-- Last refreshed: 2026-09-08
+- Last refreshed: 2026-09-09
 - Primary product surfaces: Public Paper reader, Barkpark Chronicle index, Chronicle day/week/month/year editions, Studio Paper editor, email and TUI Paper views.
 - Evidence reviewed: `api/assets/paper-surface/paper-surface.css`, the PortableDoc image/figure/asciicast renderers, the live Paper relation resolver, `docs/evidence/**`, `tooling/paper-excellence/evidence/**`, the committed Paper Excellence screenshot panel, and fresh multi-viewport Chronicle renders.
 
@@ -99,6 +99,16 @@ Clicking the visible Card title must place the native caret in that title, never
 ## Related-paper heading editing contract
 
 The authored `paper-links` heading and description should be editable in their reader position, with Configure related papers focusing the same canonical fields as fallback. Reuse the reader's presentation rules for default, chapters and timeline layouts; do not duplicate a second visible heading or shift linked cards when a field gains focus. Keep meaningful leading/trailing whitespace and untouched reference carriers/unknown metadata exactly. A displayed default heading must not become authored source on a no-op, and an absent description must not reserve reader space. When no references render, preserve the reader's empty output and keep authoring reachable through fallback controls. Linked labels may resolve from other Papers: this slice must not rewrite those Papers or silently materialize their live copy. Reuse native autosizing, save coordination and history, with explicit conflict recovery and selector-safe field IDs.
+
+## Authored related-card copy editing contract
+
+Direct editing of a related card must respect where its visible words come from. The first slice targets local reference `title` and `description` only when `prefer_authored_copy` is explicitly true, its slug is unique among the current raw references, and the displayed field is authored, not a live fallback. Duplicate-slug references retain their existing Configure path until unambiguous ownership is separately supported. Keep resolved destination text and generated edition/date status read-only; do not materialize live values into the reference or write the linked Paper. Slug changes and ownership-mode changes remain explicit Configure actions. Missing local copy stays reachable through fallback without claiming that the displayed live fallback is authored.
+
+Reuse the canonical default, chapters and timeline card presentation. Editable controls must not be nested inside an anchor; retain an explicit, labelled destination link separate from local field controls while preserving reading order and resting geometry. Each local field has one canonical editing owner, including fallback focus. A save changes only the chosen reference field, preserving all other reference carriers, ordering, IDs, flags, whitespace and unknown metadata. Stale reference indexes, ownership changes and removals must refuse rather than retarget a pending edit. Saved history requires a reviewed, narrow source guard; a whole-reference-array inverse must not silently undo unrelated reference changes. Native source-isolation, history, keyboard and desktop/mobile checks are required before sign-off.
+
+Reference field DOM identity includes its position and a bounded digest of the guarded reference identity, not position alone. Copy-only acknowledgements retain the same native field; replacing or changing its guarded identity creates a different field so retained drafts and native undo cannot migrate to another reference. Unrelated duplicate or malformed references must not suppress history for a uniquely identified target.
+
+Admission is field-specific: absent, nil, text and integer copy have lossless native form representations; opaque maps, lists, booleans and floats remain read-only with an explanation in Configure. A safe sibling field stays editable. Submitting the unchanged form representation preserves the original value and type, including nil and whitespace-only text.
 
 ## Content voice
 - Tone: Clear, warm, specific, and lightly playful; closer to a beautifully edited product journal than an engineering report. Confident about shipped facts, restrained about interpretation, and comfortable saying that a period was mostly maintenance.

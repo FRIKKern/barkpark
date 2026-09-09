@@ -2679,9 +2679,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       block
       |> Map.get("refs", [])
       |> List.wrap()
-      |> Enum.map(&paper_link_ref(&1, resolved, reasons))
+      |> Enum.with_index()
+      |> Enum.map(fn {ref, index} -> paper_link_ref(ref, resolved, reasons, index) end)
       |> Enum.reject(&is_nil/1)
-      |> Enum.map_join(fn ref -> paper_link_card(ref, style, layout) end)
+      |> Enum.map(fn ref -> paper_link_card_presentation(ref, style, layout) end)
+
+    cards_html = Enum.map_join(cards, & &1.html)
 
     title_source = paper_links_form_text(Map.get(block, "title"))
     description_source = paper_links_form_text(Map.get(block, "description"))
@@ -2689,8 +2692,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     description = paper_links_display_text(Map.get(block, "description"))
 
     %{
-      cards_html: cards,
-      empty?: cards == "",
+      cards: cards,
+      cards_html: cards_html,
+      empty?: cards_html == "",
       layout: layout,
       title: title || "Explore the work",
       title_source: title_source,
@@ -2768,11 +2772,11 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp paper_links_grid_style(_layout), do: "display:grid;gap:0.85rem"
 
-  defp paper_link_ref(slug, resolved, reasons) when is_binary(slug) do
-    paper_link_ref(%{"slug" => slug}, resolved, reasons)
+  defp paper_link_ref(slug, resolved, reasons, index) when is_binary(slug) do
+    paper_link_ref(%{"slug" => slug}, resolved, reasons, index)
   end
 
-  defp paper_link_ref(ref, resolved, reasons) when is_map(ref) do
+  defp paper_link_ref(ref, resolved, reasons, index) when is_map(ref) do
     slug = nonblank(Map.get(ref, "slug") || Map.get(ref, :slug))
 
     if slug do
@@ -2782,12 +2786,17 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       authored_description = nonblank(Map.get(ref, "description"))
 
       %{
+        index: index,
         slug: slug,
+        title_source: paper_links_form_text(Map.get(ref, "title")),
+        title_authored?: not is_nil(authored_title),
         title:
           if(prefer_authored_copy,
             do: authored_title || live_value(live, :title) || slug,
             else: live_value(live, :title) || authored_title || slug
           ),
+        description_source: paper_links_form_text(Map.get(ref, "description")),
+        description_authored?: not is_nil(authored_description),
         description:
           if(prefer_authored_copy,
             do: authored_description || live_value(live, :description),
@@ -2807,10 +2816,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  defp paper_link_ref(_, _, _), do: nil
+  defp paper_link_ref(_, _, _, _), do: nil
 
-  defp paper_link_card(ref, _style, "chapters") do
-    href = Util.escape_attr("/papers/" <> ref.slug)
+  defp paper_link_card_presentation(ref, _style, "chapters") do
+    href = "/papers/" <> ref.slug
     featured = if ref.featured, do: "grid-column:1/-1;", else: ""
 
     eyebrow =
@@ -2823,16 +2832,36 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     live_label = if ref.live, do: "Live edition", else: "Edition"
     meta = [live_label, ref.meta] |> Enum.reject(&is_nil/1) |> Enum.join(" · ")
 
-    ~s|<a data-paper-link-card data-chapter href="#{href}" style="#{featured}display:flex;min-height:13rem;flex-direction:column;padding:1.75rem 1.65rem 1.8rem;border-top:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none">| <>
-      eyebrow <>
-      ~s|<strong style="display:block;max-width:22ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.3rem,2.2vw,1.7rem);font-weight:650;line-height:1.18;letter-spacing:-0.018em;color:var(--paper-ink, #17332d)">#{Util.escape_html(ref.title)}</strong>| <>
-      description <>
-      ~s|<span style="display:block;margin-top:auto;padding-top:1.35rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.055em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(meta)} &nbsp;→</span>| <>
-      ~s(</a>)
+    card =
+      Map.merge(ref, %{
+        kind: :chapters,
+        href: href,
+        card_style:
+          "#{featured}display:flex;min-height:13rem;flex-direction:column;padding:1.75rem 1.65rem 1.8rem;border-top:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none",
+        before_title_html: eyebrow,
+        title_style:
+          "display:block;max-width:22ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.3rem,2.2vw,1.7rem);font-weight:650;line-height:1.18;letter-spacing:-0.018em;color:var(--paper-ink, #17332d)",
+        description_style:
+          "display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55",
+        after_copy_html: "",
+        footer_text: meta,
+        footer_style:
+          "display:block;margin-top:auto;padding-top:1.35rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.055em;text-transform:uppercase;color:var(--paper-accent, #1e5347)"
+      })
+
+    html =
+      ~s|<a data-paper-link-card data-chapter href="#{Util.escape_attr(href)}" style="#{card.card_style}">| <>
+        eyebrow <>
+        ~s|<strong style="#{card.title_style}">#{Util.escape_html(ref.title)}</strong>| <>
+        description <>
+        ~s|<span style="#{card.footer_style}">#{Util.escape_html(meta)} &nbsp;→</span>| <>
+        ~s(</a>)
+
+    Map.put(card, :html, html)
   end
 
-  defp paper_link_card(ref, _style, "timeline") do
-    href = Util.escape_attr("/papers/" <> ref.slug)
+  defp paper_link_card_presentation(ref, _style, "timeline") do
+    href = "/papers/" <> ref.slug
     eyebrow = ref.eyebrow || "Edition"
     description = paper_link_description(ref.description)
 
@@ -2841,16 +2870,37 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> Enum.reject(&is_nil/1)
       |> Enum.join(" · ")
 
-    ~s|<a data-paper-link-card data-timeline-stop href="#{href}" style="display:flex;min-height:11rem;flex-direction:column;padding:1.35rem 1.15rem 1.45rem;border-right:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none">| <>
-      ~s|<span style="display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(eyebrow)}</span>| <>
-      ~s|<strong style="display:block;max-width:18ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:1.14rem;font-weight:650;line-height:1.2;color:var(--paper-ink, #17332d)">#{Util.escape_html(ref.title)}</strong>| <>
-      description <>
-      ~s|<span style="display:block;margin-top:auto;padding-top:1rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;color:var(--paper-ink-soft, #55635e)">#{Util.escape_html(status)} &nbsp;→</span>| <>
-      ~s(</a>)
+    card =
+      Map.merge(ref, %{
+        kind: :timeline,
+        href: href,
+        card_style:
+          "display:flex;min-height:11rem;flex-direction:column;padding:1.35rem 1.15rem 1.45rem;border-right:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none",
+        before_title_html:
+          ~s|<span style="display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(eyebrow)}</span>|,
+        title_style:
+          "display:block;max-width:18ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:1.14rem;font-weight:650;line-height:1.2;color:var(--paper-ink, #17332d)",
+        description_style:
+          "display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55",
+        after_copy_html: "",
+        footer_text: status,
+        footer_style:
+          "display:block;margin-top:auto;padding-top:1rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;color:var(--paper-ink-soft, #55635e)"
+      })
+
+    html =
+      ~s|<a data-paper-link-card data-timeline-stop href="#{Util.escape_attr(href)}" style="#{card.card_style}">| <>
+        ~s|<span style="display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(eyebrow)}</span>| <>
+        ~s|<strong style="#{card.title_style}">#{Util.escape_html(ref.title)}</strong>| <>
+        description <>
+        ~s|<span style="#{card.footer_style}">#{Util.escape_html(status)} &nbsp;→</span>| <>
+        ~s(</a>)
+
+    Map.put(card, :html, html)
   end
 
-  defp paper_link_card(ref, style, _layout) do
-    href = Util.escape_attr("/papers/" <> ref.slug)
+  defp paper_link_card_presentation(ref, style, _layout) do
+    href = "/papers/" <> ref.slug
     description = paper_link_description(ref.description)
     reason = paper_link_reason(ref.reason, ref.description)
     metadata = paper_link_metadata(ref)
@@ -2864,12 +2914,30 @@ defmodule Barkpark.PortableDoc.Render.Compose do
           "display:block;padding:14px 16px;border:1px solid #dde7e2;border-radius:8px;color:#17332d;text-decoration:none"
       end
 
-    ~s(<a data-paper-link-card href="#{href}" style="#{card_style}">) <>
-      ~s|<strong style="display:block;font-size:1.02rem;line-height:1.35;color:var(--paper-accent, #1e5347)">#{Util.escape_html(ref.title)}</strong>| <>
-      description <>
-      reason <>
-      metadata <>
-      ~s(</a>)
+    card =
+      Map.merge(ref, %{
+        kind: :default,
+        href: href,
+        card_style: card_style,
+        before_title_html: "",
+        title_style:
+          "display:block;font-size:1.02rem;line-height:1.35;color:var(--paper-accent, #1e5347)",
+        description_style:
+          "display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55",
+        after_copy_html: reason <> metadata,
+        footer_text: nil,
+        footer_style: nil
+      })
+
+    html =
+      ~s(<a data-paper-link-card href="#{Util.escape_attr(href)}" style="#{card_style}">) <>
+        ~s|<strong style="#{card.title_style}">#{Util.escape_html(ref.title)}</strong>| <>
+        description <>
+        reason <>
+        metadata <>
+        ~s(</a>)
+
+    Map.put(card, :html, html)
   end
 
   defp paper_link_description(copy) do

@@ -1559,7 +1559,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       |> Map.put("_paper_links", assigns.paper_links)
       |> Compose.paper_links_presentation(:article)
 
-    assigns = assign(assigns, :presentation, presentation)
+    cards =
+      Enum.map(presentation.cards, fn card ->
+        admission =
+          case Blocks.paper_link_reference_copy_admission(assigns.block, card.index) do
+            {:ok, admitted} -> admitted
+            {:error, _reason} -> nil
+          end
+
+        card
+        |> Map.put(:admission, admission)
+        |> Map.put(
+          :title_admission,
+          paper_link_ref_field_admission(assigns.block, card.index, "title")
+        )
+        |> Map.put(
+          :description_admission,
+          paper_link_ref_field_admission(assigns.block, card.index, "description")
+        )
+      end)
+
+    assigns =
+      assigns
+      |> assign(:presentation, presentation)
+      |> assign(:cards, cards)
 
     ~H"""
     <div class="bp-paper-contextual-preview" data-test-id="paper-links-preview">
@@ -1573,7 +1596,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           style={@presentation.section_style}
         >
           <.paper_links_header_editor block={@block} presentation={@presentation} />
-          <div style={@presentation.grid_style}><%= raw(@presentation.cards_html) %></div>
+          <div style={@presentation.grid_style}>
+            <.paper_link_card_editor :for={card <- @cards} block={@block} card={card} />
+          </div>
         </section>
       <% end %>
     </div>
@@ -1685,6 +1710,206 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     "paper-links-#{field}-" <> Base.url_encode64(block_id, padding: false)
   end
 
+  attr(:block, :map, required: true)
+  attr(:card, :map, required: true)
+
+  defp paper_link_card_editor(%{card: %{admission: nil}} = assigns) do
+    ~H"""
+    <%= raw(@card.html) %>
+    """
+  end
+
+  defp paper_link_card_editor(assigns) do
+    assigns =
+      assigns
+      |> assign(
+        :title_dom_id,
+        paper_link_ref_field_dom_id(
+          "title",
+          assigns.block["id"],
+          assigns.card.index,
+          assigns.card.title_admission
+        )
+      )
+      |> assign(
+        :description_dom_id,
+        paper_link_ref_field_dom_id(
+          "description",
+          assigns.block["id"],
+          assigns.card.index,
+          assigns.card.description_admission
+        )
+      )
+
+    ~H"""
+    <div
+      class="bp-paper-link-ref-card"
+      data-paper-link-card
+      data-paper-link-card-editable
+      data-paper-link-ref-index={@card.index}
+      data-chapter={@card.kind == :chapters && ""}
+      data-timeline-stop={@card.kind == :timeline && ""}
+      style={@card.card_style}
+    >
+      <a
+        class="bp-paper-link-ref-open"
+        data-paper-link-open
+        href={@card.href}
+        aria-label={"Open paper: " <> @card.title}
+      ><span class="bp-paper-link-open-label">Open paper</span></a>
+      <%= raw(@card.before_title_html) %>
+      <.paper_link_ref_title block={@block} card={@card} dom_id={@title_dom_id} />
+      <.paper_link_ref_description block={@block} card={@card} dom_id={@description_dom_id} />
+      <%= raw(@card.after_copy_html) %>
+      <span :if={@card.footer_text} style={@card.footer_style}>
+        <%= @card.footer_text %> &nbsp;→
+      </span>
+    </div>
+    """
+  end
+
+  attr(:block, :map, required: true)
+  attr(:card, :map, required: true)
+  attr(:dom_id, :string, required: true)
+
+  defp paper_link_ref_title(assigns) do
+    ~H"""
+    <div
+      class="bp-paper-link-ref-title-owner"
+      data-paper-link-ref-title-empty={!@card.title_authored? && "true"}
+      style={paper_link_ref_title_owner_style(@card)}
+    >
+      <strong class="bp-paper-link-ref-title-heading" style="font:inherit;color:inherit">
+        <button
+          :if={@card.title_authored? && @card.title_admission}
+          type="button"
+          phx-click={JS.focus(to: "#" <> @dom_id)}
+          aria-label={"Edit related paper title: " <> @card.title}
+          aria-controls={@dom_id}
+          data-paper-link-ref-title-paint
+        ><%= @card.title %></button>
+        <span :if={!@card.title_authored? || !@card.title_admission}><%= @card.title %></span>
+      </strong>
+      <.paper_link_ref_form
+        :if={@card.title_admission}
+        block={@block}
+        card={@card}
+        dom_id={@dom_id}
+        field="title"
+        source={@card.title_source}
+        authored={@card.title_authored?}
+        placeholder={@card.title}
+      />
+    </div>
+    """
+  end
+
+  attr(:block, :map, required: true)
+  attr(:card, :map, required: true)
+  attr(:dom_id, :string, required: true)
+
+  defp paper_link_ref_description(assigns) do
+    ~H"""
+    <div
+      class="bp-paper-link-ref-description-owner"
+      data-paper-link-ref-description-empty={is_nil(@card.description) && "true"}
+      style={@card.description_style}
+    >
+      <span :if={@card.description} class="bp-paper-link-ref-description-paint-wrapper">
+        <button
+          :if={@card.description_authored? && @card.description_admission}
+          type="button"
+          phx-click={JS.focus(to: "#" <> @dom_id)}
+          aria-label="Edit related paper description"
+          aria-controls={@dom_id}
+          data-paper-link-ref-description-paint
+        ><%= @card.description %></button>
+        <span :if={!@card.description_authored? || !@card.description_admission}><%= @card.description %></span>
+      </span>
+      <.paper_link_ref_form
+        :if={@card.description_admission}
+        block={@block}
+        card={@card}
+        dom_id={@dom_id}
+        field="description"
+        source={@card.description_source}
+        authored={@card.description_authored?}
+        placeholder={@card.description || "Add a description"}
+      />
+    </div>
+    """
+  end
+
+  attr(:block, :map, required: true)
+  attr(:card, :map, required: true)
+  attr(:dom_id, :string, required: true)
+  attr(:field, :string, required: true)
+  attr(:source, :string, required: true)
+  attr(:authored, :boolean, required: true)
+  attr(:placeholder, :string, required: true)
+
+  defp paper_link_ref_form(assigns) do
+    ~H"""
+    <form
+      id={@dom_id <> "-form"}
+      class={"bp-paper-edit-form bp-paper-link-ref-#{@field}-form"}
+      phx-submit="paper-edit-block"
+      phx-change="paper-block-autosave"
+      phx-debounce="500"
+      data-test-id={"paper-link-ref-#{@field}-editor"}
+    >
+      <input type="hidden" name="block_id" value={@block["id"]} />
+      <input type="hidden" name="paper-link-ref-index" value={@card.index} />
+      <input type="hidden" name="paper-link-ref-slug" value={@card.admission.slug} />
+      <input type="hidden" name="paper-link-ref-field" value={@field} />
+      <input type="hidden" name="paper-link-ref-guard" value={@card.admission.guard} />
+      <label class="sr-only" for={@dom_id}>Related paper <%= @field %></label>
+      <textarea
+        id={@dom_id}
+        name="paper-link-ref-value"
+        rows="1"
+        class={"bp-paper-inline-text bp-paper-link-ref-#{@field}-input"}
+        aria-label={"Related paper #{@field}"}
+        placeholder={@placeholder}
+        phx-hook="BarkparkPaperAutoSize"
+        tabindex={!@authored && "-1"}
+      ><%= @source %></textarea>
+    </form>
+    """
+  end
+
+  defp paper_link_ref_dom_id(field, block_id, index, guard) do
+    identity_digest =
+      :crypto.hash(:sha256, guard)
+      |> Base.url_encode64(padding: false)
+
+    "paper-link-ref-#{field}-" <>
+      Base.url_encode64(block_id, padding: false) <>
+      "-" <> Integer.to_string(index) <> "-" <> identity_digest
+  end
+
+  defp paper_link_ref_field_admission(block, index, field) do
+    case Blocks.paper_link_reference_copy_admission(block, index, field) do
+      {:ok, admission} -> admission
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp paper_link_ref_field_dom_id(field, block_id, index, %{guard: guard}),
+    do: paper_link_ref_dom_id(field, block_id, index, guard)
+
+  defp paper_link_ref_field_dom_id(_field, _block_id, _index, nil), do: nil
+
+  defp paper_link_ref_panel_focus(dom_id) do
+    JS.remove_attribute("open", to: {:closest, ".bp-paper-contextual-controls"})
+    |> JS.focus(to: "#" <> dom_id)
+  end
+
+  defp paper_link_ref_title_owner_style(%{kind: :default, title_style: style}),
+    do: style <> ";font-weight:bold"
+
+  defp paper_link_ref_title_owner_style(card), do: card.title_style
+
   defp paper_links_field_absent?(block, field) do
     case Map.get(block, field) do
       value when is_binary(value) -> String.trim(value) == ""
@@ -1692,6 +1917,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       _value -> true
     end
   end
+
+  defp paper_link_ref_field_representable?(ref, field)
+       when is_map(ref) and not is_struct(ref) do
+    case Map.fetch(ref, field) do
+      :error -> true
+      {:ok, value} -> is_nil(value) or is_binary(value) or is_integer(value)
+    end
+  end
+
+  defp paper_link_ref_field_representable?(ref, _field) when is_binary(ref), do: true
+  defp paper_link_ref_field_representable?(_ref, _field), do: false
 
   # Per-block-type edit fields. Rich bodies use the canonical WC so its
   # PortableDoc conversion preserves marks and links while text changes.
@@ -2874,20 +3110,72 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   data-ref-index={index}
                 >
                   <legend>Reference <%= index + 1 %></legend>
+                  <% reference_copy_admission =
+                    Blocks.paper_link_reference_copy_admission(@block, index) %>
                   <label class="bp-paper-edit-fieldlabel">
                     Slug
                     <input type="text" name={"ref-#{index}-slug"} class="bp-paper-edit-text"
                            value={Blocks.paper_link_ref_value(ref, "slug") || ""} />
                   </label>
-                  <label class="bp-paper-edit-fieldlabel">
-                    Authored title
-                    <input type="text" name={"ref-#{index}-title"} class="bp-paper-edit-text"
-                           value={Blocks.paper_link_ref_value(ref, "title") || ""} />
-                  </label>
-                  <label class="bp-paper-edit-fieldlabel">
-                    Authored description
-                    <textarea name={"ref-#{index}-description"} class="bp-paper-edit-textarea" rows="2"><%= Blocks.paper_link_ref_value(ref, "description") || "" %></textarea>
-                  </label>
+                  <%= case reference_copy_admission do %>
+                    <% {:ok, admission} -> %>
+                      <%= case Blocks.paper_link_reference_copy_admission(@block, index, "title") do %>
+                        <% {:ok, _field_admission} -> %>
+                          <div class="bp-paper-edit-form">
+                            <span class="bp-paper-edit-fieldlabel">Authored title</span>
+                            <button
+                              type="button"
+                              class="btn btn-ghost btn-sm"
+                              phx-click={paper_link_ref_panel_focus(paper_link_ref_dom_id("title", @id, index, admission.guard))}
+                              aria-controls={paper_link_ref_dom_id("title", @id, index, admission.guard)}
+                              data-paper-link-ref-title-panel-trigger
+                            ><%= if paper_links_field_absent?(ref, "title"), do: "Add title", else: "Edit title" %></button>
+                          </div>
+                        <% {:error, _reason} -> %>
+                          <p class="bp-paper-edit-readonly" data-paper-link-ref-title-readonly>
+                            Authored title has an unsupported shape and is preserved read-only.
+                          </p>
+                      <% end %>
+                      <%= case Blocks.paper_link_reference_copy_admission(@block, index, "description") do %>
+                        <% {:ok, _field_admission} -> %>
+                          <div class="bp-paper-edit-form">
+                            <span class="bp-paper-edit-fieldlabel">Authored description</span>
+                            <button
+                              type="button"
+                              class="btn btn-ghost btn-sm"
+                              phx-click={paper_link_ref_panel_focus(paper_link_ref_dom_id("description", @id, index, admission.guard))}
+                              aria-controls={paper_link_ref_dom_id("description", @id, index, admission.guard)}
+                              data-paper-link-ref-description-panel-trigger
+                            ><%= if paper_links_field_absent?(ref, "description"), do: "Add description", else: "Edit description" %></button>
+                          </div>
+                        <% {:error, _reason} -> %>
+                          <p class="bp-paper-edit-readonly" data-paper-link-ref-description-readonly>
+                            Authored description has an unsupported shape and is preserved read-only.
+                          </p>
+                      <% end %>
+                    <% {:error, _reason} -> %>
+                      <%= if paper_link_ref_field_representable?(ref, "title") do %>
+                        <label class="bp-paper-edit-fieldlabel">
+                          Authored title
+                          <input type="text" name={"ref-#{index}-title"} class="bp-paper-edit-text"
+                                 value={Blocks.paper_link_ref_value(ref, "title") || ""} />
+                        </label>
+                      <% else %>
+                        <p class="bp-paper-edit-readonly" data-paper-link-ref-title-readonly>
+                          Authored title has an unsupported shape and is preserved read-only.
+                        </p>
+                      <% end %>
+                      <%= if paper_link_ref_field_representable?(ref, "description") do %>
+                        <label class="bp-paper-edit-fieldlabel">
+                          Authored description
+                          <textarea name={"ref-#{index}-description"} class="bp-paper-edit-textarea" rows="2"><%= Blocks.paper_link_ref_value(ref, "description") || "" %></textarea>
+                        </label>
+                      <% else %>
+                        <p class="bp-paper-edit-readonly" data-paper-link-ref-description-readonly>
+                          Authored description has an unsupported shape and is preserved read-only.
+                        </p>
+                      <% end %>
+                  <% end %>
                   <label class="bp-paper-edit-fieldlabel">
                     Eyebrow
                     <input type="text" name={"ref-#{index}-eyebrow"} class="bp-paper-edit-text"
