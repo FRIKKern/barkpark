@@ -21,15 +21,27 @@ defmodule BarkparkWeb.Plugs.AuthWriteRateLimit do
        party, comfortably inside a bucket nominally meant to protect the API.
 
   So register gets its own bucket, keyed `{:auth_write, class, client_ip}` and
-  budgeted PER HOUR. Exhausting it cannot spend the general write budget, and
-  exhausting the general write budget cannot spend this one — the two buckets are
-  independent by key.
+  budgeted over an hour-long refill window. Exhausting it cannot spend the
+  general write budget, and exhausting the general write budget cannot spend this
+  one — the two buckets are independent by key.
 
   ## The ceiling
 
-  Default **5 registers per hour per IP** — a human signing up, plus retries and
-  typo-corrections, with room to spare; a mail-amplification loop, no. Bounded
-  above by the same number: ≤5 confirmation mails/hour/IP.
+  Default **5 registers per IP per hour of PROCESS UPTIME** — a human signing up,
+  plus retries and typo-corrections, with room to spare; a mail-amplification
+  loop, no. Bounded above by the same number: ≤5 confirmation mails per IP per
+  hour of uptime.
+
+  NOT A WALL-CLOCK HOURLY CEILING. `Barkpark.RateLimiter`'s bucket is ETS in
+  process memory with no persistence and no cross-restart handoff, so ANY
+  restart — a deploy, a crash, an OOM, a blue/green cutover — resets every
+  bucket and hands every client a fresh 5. On a host that redeploys on merge the
+  effective ceiling is therefore `5 x (1 + restarts per hour)`, and the number of
+  restarts is a property of the deploy cadence, not of this plug. Read it off the
+  host (`systemctl show barkpark -p NRestarts -p ActiveEnterTimestamp`, or the
+  node's `uptime_seconds` in `/status.json`) rather than assuming it is zero. If
+  a guarantee that survives a restart is ever required here, this token bucket is
+  the wrong mechanism — see the dated decision block in `Barkpark.RateLimiter`.
 
   Operator-tunable without a rebuild via `BARKPARK_AUTH_RATE_REGISTER`
   (`config :barkpark, :auth_write_rate_limits` in runtime.exs), mirroring
@@ -39,11 +51,13 @@ defmodule BarkparkWeb.Plugs.AuthWriteRateLimit do
   throttle — invite codes, a domain allowlist, disabling open signup entirely —
   is the instance owner's policy call and deliberately NOT decided here.
 
-  ## Hourly budget on a per-second token bucket
+  ## Hour-long refill window on a per-second token bucket
 
   Same mapping as `Plugs.TicketRateLimit`: `Barkpark.RateLimiter.check/2` is a
-  generic token bucket, so an hourly budget of `N` is `capacity: N,
-  refill_per_sec: N / 3600` — burst the whole hour's allowance, then drip.
+  generic token bucket, so a budget of `N` per hour-long window is `capacity: N,
+  refill_per_sec: N / 3600` — burst the whole window's allowance, then drip. The
+  window is measured from the bucket's own creation, which is the process's
+  lifetime and not the wall clock (see "The ceiling" above).
   `Retry-After` is the seconds to earn one token back from empty,
   `ceil(3600 / N)`.
 
@@ -84,10 +98,14 @@ defmodule BarkparkWeb.Plugs.AuthWriteRateLimit do
   end
 
   @doc """
-  The per-hour ceiling in force for `class`, after config/env overrides.
+  The per-window ceiling in force for `class`, after config/env overrides.
 
   Public so the capabilities/ops surface can state the number it actually
   enforces rather than restating a default that an env var may have moved.
+
+  This is the budget per hour-long refill window on ONE process. It is reset by
+  every restart, so a surface quoting it must not present it as a wall-clock
+  hourly ceiling — see the moduledoc.
   """
   @spec limit_for(atom()) :: pos_integer()
   def limit_for(class) do
