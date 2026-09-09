@@ -67,15 +67,14 @@ defmodule Barkpark.Seeds.Shared do
   if missing. Idempotent: a present Default is reused, never duplicated.
   """
   def ensure_default_scope do
-    default_workspace =
-      case Tenancy.get_default_workspace() do
-        nil ->
-          {:ok, ws} = Tenancy.create_workspace(%{slug: "default", name: "Default Workspace"})
-          ws
-
-        ws ->
-          ws
-      end
+    # WRITER 1 OF 3 for the instance-default seat (task-566dc5be4871353b). The
+    # get-or-create moved into `Tenancy.establish_default_workspace!/0` when the
+    # seat stopped being the `default` slug and became the uncast
+    # `workspaces.is_default` flag: the flag cannot be set through a changeset,
+    # so seeds cannot establish the seat by passing attrs, and the vacant-seat
+    # /slug-still-present case (which the support bracket produces) needs an
+    # adopt rather than a second insert. Same idempotence as before.
+    default_workspace = Tenancy.establish_default_workspace!()
 
     default_project =
       case Tenancy.get_default_project() do
