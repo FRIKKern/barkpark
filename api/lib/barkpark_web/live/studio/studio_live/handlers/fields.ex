@@ -60,11 +60,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # the 30s window, that still exists and whose `rev` has not moved since
         # birth. Type a single character into it (or come back a minute later)
         # and this branch is gone.
+        #
+        # THE TRADE, stated rather than hidden: a human who deliberately wants
+        # TWO untouched blank drafts of one type inside 30 seconds gets the
+        # second press answered instead, and has to type in the first one (or
+        # wait) to get another — which is why the sentence below names that
+        # way out rather than only reporting what happened. The marker is NOT
+        # released by answering, so three presses still leave ONE draft; the
+        # alternative (release after one answer) would have turned the
+        # measured three-press run into two orphans instead of none. Two blank
+        # untouched drafts of the same type, seconds apart, is a shape where
+        # one of them is always the orphan.
         {:noreply,
          socket
          |> put_flash(
            :info,
-           "That “+” already created an untitled #{type} — opening it instead of making a second draft."
+           "That “+” already created an untitled #{type} — opening it instead of making a second draft. Type in it, or wait a moment, to start another."
          )
          |> push_patch(to: Shared.studio_path(socket, path, socket.assigns.dataset))}
 
