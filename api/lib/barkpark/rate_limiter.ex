@@ -3,6 +3,13 @@ defmodule Barkpark.RateLimiter do
   Process-global token-bucket limiter over one ETS table, plus the TRUST
   BOUNDARY every IP-keyed bucket resolves its key through (`client_ip/1`).
 
+  PROCESS-GLOBAL MEANS PROCESS-LIFETIME. The table is created empty by
+  `start_link/1` and is never persisted or handed over, so every restart —
+  deploy, crash, OOM, blue/green cutover — resets every bucket for every key.
+  No budget metered here is a wall-clock guarantee; it is a per-process budget,
+  and callers documenting a window MUST say so. See the dated decision block
+  above `start_link/1` for why durable cross-slot state was rejected.
+
   A bucket is only a limit if the client cannot choose its own key. Callers
   used to read the FIRST `x-forwarded-for` hop unconditionally, which is sound
   only when the header is guaranteed to come from our own front — it is not:
@@ -127,6 +134,80 @@ defmodule Barkpark.RateLimiter do
   # Bounded retry budget for the lock-free debit below. Not a caller option:
   # the bound is a property of the commit protocol, not of any call site.
   @max_commit_attempts 128
+
+  # ── 2026-09-09 · DECISION: the window is documented per-process, NOT made
+  # durable across restarts (acpc-bl-limiter-reset-on-bluegreen-cutover) ──────
+  #
+  # THE FACT. This table is process memory. `start_link/1` creates it empty on
+  # every boot and nothing anywhere writes or reads it across a restart
+  # (`git grep barkpark_rate_limiter -- api cloud deploy tooling internal`
+  # returns this module and its tests, nothing else). So EVERY restart — a
+  # deploy, a crash, an OOM, a blue/green cutover — resets every bucket for
+  # every key, unconditionally. The next request from every client is billed
+  # against a full allowance. This is strictly larger than the @max_entries
+  # ceiling eviction above: that one is conditional on cardinality and shouts;
+  # this one is unconditional and silent.
+  #
+  # It bites the LONG windows hardest. A 60s bucket loses at most 60s of state;
+  # the two 3600s buckets (Plugs.AuthWriteRateLimit, Plugs.TicketRateLimit) lose
+  # up to a full hour, which is the entire budget those plugs exist to enforce.
+  #
+  # OPTION A — DURABLE CROSS-SLOT STATE (REJECTED). Move the bucket to Postgres
+  # (or a shared store) so a restart inherits it. COST, quoted: `check/2` is on
+  # the hot path of every metered request, and the debit is a read-modify-write
+  # that must be atomic — so this is one DB ROUND-TRIP PER METERED REQUEST,
+  # replacing an ETS `select_replace` measured at 0.43us with a network+WAL
+  # commit three to four orders of magnitude slower, on the path whose only job
+  # is to be cheap enough to run before the work. Contention moves from a
+  # lock-free CAS on one ETS row to row locks in the database that also serves
+  # every read. The alternative durable shape — a handoff protocol that dumps
+  # and reloads the table across the deploy — buys nothing for the crash and
+  # OOM cases, adds a step to the deploy path that can fail half-done, and
+  # imports state from the OLD build into the NEW one.
+  #
+  # OPTION B — RE-SCOPE THE DOCUMENTED WINDOW (TAKEN). Say what is actually
+  # enforced: a per-PROCESS budget that resets on any restart. The plugs'
+  # moduledocs and `limit_for/1` now say so. The throttle still does its real
+  # job — it bounds a burst from one client inside one uptime span, which is
+  # what stops a mailbomb in progress — it just is not a wall-clock hourly
+  # guarantee, and no surface may claim it is.
+  #
+  # WHAT THAT COSTS, stated rather than hidden: a client that can TRIGGER a
+  # restart, or that waits for a scheduled deploy, gets a fresh allowance. On a
+  # host that redeploys on merge that is a real amplification factor; on a
+  # single-slot host that redeploys rarely it is close to zero. The factor is
+  # therefore a property of the DEPLOY CADENCE, which is why it is measured per
+  # host and not asserted once — see the PR for this decision.
+  #
+  # WHEN TO REOPEN: if a metered surface ever needs a guarantee that survives a
+  # restart (a paid quota, a legal ceiling, an abuse budget an operator will be
+  # held to), this token bucket is the wrong mechanism and Option A's cost has
+  # to be paid deliberately, on that surface only — never by moving the whole
+  # limiter.
+
+  @doc """
+  The number of live buckets in the limiter table, right now.
+
+  READABLE WITHOUT DISTRIBUTED ERLANG. `@max_entries` decides whether
+  `maybe_prune/1` ever does work, and until this existed nothing outside the
+  private `maybe_prune/1` could observe the number it gates on — the guerrilla
+  node is not distributed (`epmd -names` fails; the unit ExecStarts a bare
+  `mix phx.server`, not a release with `bin/... rpc`), so there was no rpc route
+  to the table either and "does the prune ever fire in production?" had to be
+  DERIVED from restart cadence instead of read.
+
+  Two routes now exist: this function, for anything running in the node, and the
+  telemetry events below, for anything attached to it.
+
+  Returns 0 when the table does not exist (before `start_link/1`), never raises.
+  """
+  @spec table_size() :: non_neg_integer()
+  def table_size do
+    case :ets.whereis(@table) do
+      :undefined -> 0
+      _ -> :ets.info(@table, :size)
+    end
+  end
 
   def start_link(_opts \\ []) do
     case :ets.whereis(@table) do
@@ -441,9 +522,40 @@ defmodule Barkpark.RateLimiter do
   defp maybe_prune(now_ms) do
     size = :ets.info(@table, :size)
 
+    # The size is emitted on EVERY cold-key insert, not only when the prune
+    # fires. A measurement that only appears once the threshold is crossed
+    # cannot answer "how close are we?", which is the question @max_entries
+    # actually poses — and a table that never crosses it would emit nothing at
+    # all, i.e. silence would mean both "healthy" and "not instrumented". The
+    # `:ets.info/2` above is already paid for; this adds a telemetry dispatch,
+    # which with no handlers attached is one ETS lookup.
+    :telemetry.execute(
+      [:barkpark, :rate_limiter, :table],
+      %{size: size, limit: @max_entries},
+      %{}
+    )
+
     if size > @max_entries do
       cutoff = now_ms - @stale_after_ms
       freed = :ets.select_delete(@table, [{{:_, :_, :"$1"}, [{:<, :"$1", cutoff}], [true]}])
+
+      # What the STALE SWEEP freed, separately from what the ceiling eviction
+      # takes afterwards. These are two different events with two different
+      # meanings: a stale delete is behaviour-identical to keeping the row (the
+      # bucket was fully refilled), a ceiling eviction is a rate-limit RESET.
+      # Reporting one number for both would make the harmless case and the
+      # harmful one indistinguishable in the data.
+      :telemetry.execute(
+        [:barkpark, :rate_limiter, :pruned],
+        %{
+          freed: freed,
+          size_before: size,
+          remaining: size - freed,
+          limit: @max_entries,
+          stale_after_ms: @stale_after_ms
+        },
+        %{}
+      )
 
       enforce_ceiling(size - freed)
     end
