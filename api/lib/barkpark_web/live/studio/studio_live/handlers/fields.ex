@@ -32,7 +32,59 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # is the single-truth contract the literal was quietly pre-empting.
   @block_titled_types ["paper"]
 
+  # How long a create press stays "the press you just made". PUSH_TIMEOUT in
+  # phoenix_live_view.js is 30_000ms — after that the client itself has given
+  # up on the reply, so a press beyond this window is a NEW intent, never a
+  # retry of the old one.
+  @create_retry_window_ms 30_000
+
   def new_document(%{"type" => type}, socket) do
+    case retry_of_recent_create(socket, type) do
+      {:ok, %{path: path}} ->
+        # [plus-press-retry-coalesce] THE SECOND PRESS OF "+". spd-w18 measured
+        # the "+" navigating in 6.4s on one build and NEVER within 20s across
+        # three presses on the next — and the desk list still grew "Untitled"
+        # rows, because every one of those presses DID create a document. The
+        # navigation is what went missing, client-side (D242/D265: a push_patch
+        # reply that is dropped in the browser leaves the server believing it
+        # navigated), so no server-side pending assign can be shown for it and
+        # the human, staring at an unmoved screen, presses again.
+        #
+        # So the second press is answered instead of obeyed: re-navigate to the
+        # draft the FIRST press already made, and SAY so. The human ends up
+        # with one Untitled draft and a sentence explaining where it went,
+        # rather than two drafts and silence.
+        #
+        # It cannot eat a genuine second create: `retry_of_recent_create/2`
+        # matches only a document of the SAME type, made by THIS socket, inside
+        # the 30s window, that still exists and whose `rev` has not moved since
+        # birth. Type a single character into it (or come back a minute later)
+        # and this branch is gone.
+        #
+        # THE TRADE, stated rather than hidden: a human who deliberately wants
+        # TWO untouched blank drafts of one type inside 30 seconds gets the
+        # second press answered instead, and has to type in the first one (or
+        # wait) to get another — which is why the sentence below names that
+        # way out rather than only reporting what happened. The marker is NOT
+        # released by answering, so three presses still leave ONE draft; the
+        # alternative (release after one answer) would have turned the
+        # measured three-press run into two orphans instead of none. Two blank
+        # untouched drafts of the same type, seconds apart, is a shape where
+        # one of them is always the orphan.
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           "That “+” already created an untitled #{type} — opening it instead of making a second draft. Type in it, or wait a moment, to start another."
+         )
+         |> push_patch(to: Shared.studio_path(socket, path, socket.assigns.dataset))}
+
+      :none ->
+        create_new_document(type, socket)
+    end
+  end
+
+  defp create_new_document(type, socket) do
     # No hand-rolled `doc_id`: the old `"#{type}-#{:rand.uniform(999_999)}"`
     # drew from a 1M-value space, so on a populated dataset a collision landed
     # in the writer's UPDATE branch and SILENTLY overwrote an unrelated doc (or
@@ -51,13 +103,43 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         new_path = socket.assigns.nav_path ++ [pub_id]
 
         {:noreply,
-         push_patch(socket, to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+         socket
+         |> assign(
+           recent_create: %{
+             type: type,
+             doc_id: doc.doc_id,
+             rev: doc.rev,
+             path: new_path,
+             at: System.monotonic_time(:millisecond)
+           }
+         )
+         |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
       {:error, {:halted, reason}} ->
         {:noreply, put_flash(socket, :error, "Create cancelled: #{reason}")}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to create")}
+    end
+  end
+
+  # See [plus-press-retry-coalesce] above. `{:ok, marker}` means: this press is
+  # indistinguishable from a re-press of one whose answer never reached the
+  # screen, and the document it made is still exactly as it was born.
+  #
+  # `rev` is the untouched test rather than the title or the content, because
+  # both differ per type (a paper is born with a template and NO stored title,
+  # a task with a seeded content map) while `rev` moves on any write of any
+  # type — one predicate, no per-type list to fall out of date.
+  defp retry_of_recent_create(socket, type) do
+    with %{type: ^type, doc_id: doc_id, rev: rev} = marker <-
+           socket.assigns[:recent_create],
+         true <- System.monotonic_time(:millisecond) - marker.at <= @create_retry_window_ms,
+         {:ok, %{rev: ^rev}} <-
+           Content.get_document(doc_id, type, socket.assigns.dataset, Shared.hook_opts(socket)) do
+      {:ok, marker}
+    else
+      _ -> :none
     end
   end
 
