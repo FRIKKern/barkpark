@@ -9,6 +9,7 @@ defmodule Barkpark.StudioChat.ProbeTest do
   use ExUnit.Case, async: false
 
   alias Barkpark.StudioChat.Probe
+  alias Barkpark.TestTmp
 
   # ── config seam ───────────────────────────────────────────────────────────
 
@@ -26,8 +27,7 @@ defmodule Barkpark.StudioChat.ProbeTest do
   # A chmod +x fake binary whose body is `script`. Returns the absolute path,
   # which find_executable resolves directly. Cleaned up on exit.
   defp fake_binary(script) do
-    path =
-      Path.join(System.tmp_dir!(), "probe_fake_#{System.unique_integer([:positive])}.sh")
+    path = TestTmp.path("probe_fake_#{System.unique_integer([:positive])}.sh")
 
     File.write!(path, "#!/bin/sh\n" <> script)
     File.chmod!(path, 0o755)
