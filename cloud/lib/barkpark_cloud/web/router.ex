@@ -199,7 +199,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites/:id/deployments/:dep_id/promote user(s) rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact (write ability)
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/deployments/:dep_id/artifact user(s)  upload a PREBUILT dist for a minted deployment, then start it (write ability)
-      POST    /v1/sites/:id/env    user      replace the encrypted env blob
+      POST    /v1/sites/:id/env    admin     replace the encrypted env blob (admin-or-owner; task-9dfa4854b5e22e94)
       POST    /v1/sites/:id/domains user     add a domain to a site
       DELETE  /v1/sites/:id/domains user     remove a domain from a site — frees the hostname
       POST    /v1/sites/:id/github  admin    link a GitHub repo + branch + webhook secret (manual)
@@ -9001,8 +9001,19 @@ defmodule BarkparkCloud.Web.Router do
 
   # POST /v1/sites/:id/env {env: {...}} → 200 {ok: true}. Replaces the whole
   # encrypted env blob (Vault.encrypt-stored, never echoed back).
+  #
+  # ADMIN-OR-OWNER (owner ruling on task-9dfa4854b5e22e94, built as
+  # task-49f9a3dbb16823ce). This blob is the exact set of secrets injected into
+  # the site's BUILD (GET /v1/builder/sites/:id/env) and into its RUNNING
+  # container (GET /v1/agent/sites/:id/env), and the write is a whole-blob
+  # REPLACE — so a plain member holding only membership could previously wipe
+  # every secret of every site the team owns with one call. It now gates at the
+  # same tier as its sibling secret-write surface, POST/DELETE /v1/env-vars.
+  #
+  # The REPLACE semantics are UNCHANGED by that ruling: `{"env": {}}` still
+  # erases the blob — the ruling gates WHO may call it, not what the call does.
   post "/v1/sites/:id/env" do
-    with_team_site(conn, fn conn, site ->
+    with_team_site(conn, :team_admin, fn conn, site ->
       env = conn.body_params["env"]
 
       cond do
