@@ -202,8 +202,11 @@ defmodule Barkpark.Tasks.CriteriaRequiredFence do
 
   defp flagged?(id, dataset, opts) do
     case Content.get_document(id, "task", dataset, opts) do
-      {:ok, %Document{content: content}} -> fetch(content || %{}, "require_criteria", :require_criteria) == true
-      _ -> false
+      {:ok, %Document{content: content}} ->
+        fetch(content || %{}, "require_criteria", :require_criteria) == true
+
+      _ ->
+        false
     end
   end
 

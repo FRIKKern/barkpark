@@ -440,7 +440,14 @@ defmodule Barkpark.Content.Writer do
          # before any read unless the create is BOTH parented and criteria-less
          # — so it adds no query to any other write.
          :ok <-
-           Barkpark.Tasks.CriteriaRequiredFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
+           Barkpark.Tasks.CriteriaRequiredFence.check(
+             type,
+             attrs,
+             dataset,
+             doc_id,
+             prev_doc,
+             opts
+           ),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
@@ -967,7 +974,14 @@ defmodule Barkpark.Content.Writer do
          # before any read unless the create is BOTH parented and criteria-less
          # — so it adds no query to any other write.
          :ok <-
-           Barkpark.Tasks.CriteriaRequiredFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
+           Barkpark.Tasks.CriteriaRequiredFence.check(
+             type,
+             attrs,
+             dataset,
+             doc_id,
+             prev_doc,
+             opts
+           ),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
