@@ -130,6 +130,7 @@ EXCLUDE_DEFAULT=(
   "chat_tool_renderer"   # bp-studio-chat-excellence-charter.md
   "studio_chat"          # bp-studio-chat-excellence-charter.md
   "/sheet_grid/"         # bp-pds-charter.md (D605, the USER-CPU cost law)
+  "caps_authorization_parity"  # bp-security-remainder-charter.md (arpss-w10 slice roster names this file; its D9/D22/D33 are that charter's)
 )
 
 # Words that may precede `charter` without making the run foreign. Observed in
