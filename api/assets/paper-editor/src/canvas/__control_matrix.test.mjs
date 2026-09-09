@@ -1,6 +1,14 @@
 // Exercise the rendered controls, then inspect their emitted persistence patches.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+
+for (const path of ["../styles.css", "../../../../priv/static/assets/bp-paper-editor-shell.css"]) {
+  const css = readFileSync(new URL(path, import.meta.url), "utf8");
+  assert.match(css,
+    /\.bp-canvas-card\s*>\s*bp-media-picker\.bp-canvas-card__media-picker\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s,
+    `${path} must keep the direct Card picker out of layout while its image owns activation`);
+}
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   pretendToBeVisual: true, url: "http://localhost/",
