@@ -1138,7 +1138,38 @@ jobs:
         # api/test/barkpark/plugins/onixedit/export/ shell to xmllint to validate
         # exported ONIX 3.0 XML against the EDItEUR XSD vendored at
         # api/priv/onix/onix-3.0/. Without this binary the gate would skip on CI.
-        run: sudo apt-get update && sudo apt-get install -y libxml2-utils
+        # The verdict of this step depends ONLY on whether xmllint is installed.
+        # `apt-get update && apt-get install` reddened the REQUIRED Elixir gate
+        # on two consecutive main pushes (runs 34384046770, 34385931963,
+        # 2026-09-09) with ZERO tests run: Google Chrome's apt index, baked into
+        # the runner image and never used by this install, answered "Hash Sum
+        # mismatch", `update` exited non-zero, `&&` never reached `install`.
+        # So: the refresh may fail (retried, then tolerated); the install is
+        # retried and is the decision; the binary is asserted so an absent
+        # package still reds loudly. Never `|| true` on the install itself.
+        # (task-d6a5c09e4738b83e)
+        run: |
+          set -u
+          for i in 1 2 3; do
+            if sudo apt-get update; then break; fi
+            echo "apt-get update attempt ${i}/3 failed — an index this install does not use may be broken; continuing"
+            sleep 5
+          done
+          installed=0
+          for i in 1 2 3; do
+            if sudo apt-get install -y libxml2-utils; then installed=1; break; fi
+            echo "apt-get install libxml2-utils attempt ${i}/3 failed"
+            sleep 10
+          done
+          if [ "$installed" != 1 ]; then
+            echo "::error::libxml2-utils could not be installed after 3 attempts — the ONIX validator tests would silently skip, so this step reds instead"
+            exit 1
+          fi
+          if ! xmllint --version >/dev/null 2>&1; then
+            echo "::error::xmllint is not on PATH after a successful-looking install — refusing to let the validator tests skip"
+            exit 1
+          fi
+          xmllint --version 2>&1
         working-directory: .
 
       - name: Compile (dev, --warnings-as-errors)
