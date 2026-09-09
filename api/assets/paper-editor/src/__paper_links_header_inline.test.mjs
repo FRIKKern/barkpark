@@ -17,6 +17,32 @@ const component = readFileSync(new URL(
 ), "utf8");
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+function liveViewMorph(window, from, to) {
+  if (!window.__bpPaperLinksMorphdom) {
+    window.eval(readFileSync(new URL(
+      "../../../priv/static/assets/phoenix.js",
+      import.meta.url,
+    ), "utf8"));
+    const liveViewSource = readFileSync(new URL(
+      "../../../priv/static/assets/phoenix_live_view.js",
+      import.meta.url,
+    ), "utf8");
+    const instrumented = liveViewSource.replace(
+      ",rt=hn;",
+      ",rt=hn;window.__bpPaperLinksMorphdom=rt;",
+    );
+    assert.notEqual(instrumented, liveViewSource,
+      "the shipped LiveView bundle exposes its vendored morphdom in this test");
+    window.eval(instrumented);
+  }
+  return window.__bpPaperLinksMorphdom(from, to, {
+    getNodeKey: (node) => node?.getAttribute?.("id") || node?.id,
+    onBeforeElUpdated: (fromEl, toEl) => {
+      window.BarkparkPaperEditorBeforeElUpdated(fromEl, toEl);
+    },
+  });
+}
+
 assert.match(component, /bp-paper-links-header-editor/,
   "paper-links renders one direct heading editor in its reader header");
 assert.match(component, /paper-links-title-editor/,
@@ -27,6 +53,10 @@ assert.match(component, /paper-links-title-panel-trigger/,
   "the Configure panel reaches the canonical title field");
 assert.match(component, /paper-links-description-panel-trigger/,
   "the Configure panel reaches the canonical description field");
+assert.ok((component.match(/:if=\{!@empty/g) || []).length >= 2,
+  "a no-reference header omits both reader paint wrappers");
+assert.ok((component.match(/tabindex=\{@empty && "-1"\}/g) || []).length >= 2,
+  "no-reference canonical fields stay out of the keyboard tab order");
 
 assert.match(shell, /\.bp-paper-links-title-form:not\(:focus-within\)\s*\{[^}]*position:\s*absolute[^}]*clip-path:\s*inset\(50%\)/s,
   "the canonical title form adds no resting header geometry");
@@ -51,26 +81,69 @@ const blockId = "related: foo/[header]#?";
 const encodedId = Buffer.from(blockId).toString("base64url");
 const titleId = `paper-links-title-${encodedId}`;
 const descriptionId = `paper-links-description-${encodedId}`;
+const rawWhitespaceTitle = "   ";
+
+const emptyDom = new JSDOM(`<!doctype html><body>
+  <header class="bp-paper-links-header-editor" data-paper-links-header-empty="true">
+    <div class="bp-paper-links-title-owner" data-paper-links-title-default="true">
+      <form class="bp-paper-edit-form bp-paper-links-title-form"
+            data-test-id="paper-links-title-editor">
+        <input type="hidden" name="block_id" value="${blockId}">
+        <textarea id="empty-${titleId}" name="title" tabindex="-1"
+                  placeholder="Explore the work">${rawWhitespaceTitle}</textarea>
+      </form>
+    </div>
+    <div class="bp-paper-links-description-owner" data-paper-links-description-empty="true">
+      <form class="bp-paper-edit-form bp-paper-links-description-form"
+            data-test-id="paper-links-description-editor">
+        <input type="hidden" name="block_id" value="${blockId}">
+        <textarea id="empty-${descriptionId}" name="description" tabindex="-1"></textarea>
+      </form>
+    </div>
+  </header>
+  <button type="button" data-paper-links-title-panel-trigger
+          aria-controls="empty-${titleId}">Edit title</button>
+  <button type="button" data-paper-links-description-panel-trigger
+          aria-controls="empty-${descriptionId}">Edit description</button>
+</body>`);
+assert.equal(emptyDom.window.document.querySelector(".bp-paper-links-title-heading"), null);
+assert.equal(emptyDom.window.document.querySelector(".bp-paper-links-description-paragraph"), null);
+assert.equal(emptyDom.window.document.querySelector("[data-paper-links-title-paint]"), null);
+assert.equal(emptyDom.window.document.querySelector("[data-paper-links-description-paint]"), null);
+for (const field of emptyDom.window.document.querySelectorAll("textarea")) {
+  assert.equal(field.tabIndex, -1, "a visually hidden no-reference field is not a tab stop");
+  const fallback = emptyDom.window.document.querySelector(`[aria-controls="${field.id}"]`);
+  fallback.addEventListener("click", () => field.focus());
+  fallback.click();
+  assert.equal(emptyDom.window.document.activeElement, field,
+    "the Configure fallback can still focus a no-reference field programmatically");
+}
+assert.equal(emptyDom.window.document.querySelector("[name='title']").value, rawWhitespaceTitle,
+  "a whitespace-only source stays exact and separate from the displayed default");
+emptyDom.window.close();
+
 const dom = new JSDOM(`<!doctype html><body>
   <main data-paper-doc-key="production:paper:related-header" data-paper-rev="7">
     <button id="view" data-editing="true">View</button>
     <div class="bp-paper-editor" data-paper-doc-key="production:paper:related-header" data-paper-rev="7">
       <div class="bp-paper-contextual-editor" data-test-id="paper-links-contextual-editor">
         <div class="bp-paper-contextual-preview" data-test-id="paper-links-preview">
-          <div class="bp-paper-links-header-editor" data-paper-links-header-editor>
+          <section data-paper-links>
+          <header class="bp-paper-links-header-editor" data-paper-links-header-editor>
             <div class="bp-paper-links-title-owner" data-paper-links-title-default="true">
-              <h2 class="bp-paper-links-title-heading">
+                <h2 class="bp-paper-links-title-heading">
                 <button type="button" data-paper-links-title-paint
-                        aria-controls="${titleId}">Related papers</button>
+                        aria-controls="${titleId}">Explore the work</button>
               </h2>
               <form class="bp-paper-edit-form bp-paper-links-title-form"
+                    id="paper-links-title-form-${blockId}"
                     phx-submit="paper-edit-block" phx-change="paper-block-autosave"
                     phx-debounce="500" data-test-id="paper-links-title-editor">
                 <input type="hidden" name="block_id" value="${blockId}">
                 <label class="sr-only" for="${titleId}">Related papers title</label>
                 <textarea id="${titleId}" name="title" rows="1"
                           class="bp-paper-inline-text bp-paper-links-title-input"
-                          placeholder="Related papers" phx-hook="BarkparkPaperAutoSize"></textarea>
+                          placeholder="Explore the work" phx-hook="BarkparkPaperAutoSize"></textarea>
               </form>
             </div>
             <div class="bp-paper-links-description-owner" data-paper-links-description-empty="false">
@@ -79,6 +152,7 @@ const dom = new JSDOM(`<!doctype html><body>
                         aria-controls="${descriptionId}">Live description</button>
               </p>
               <form class="bp-paper-edit-form bp-paper-links-description-form"
+                    id="paper-links-description-form-${blockId}"
                     phx-submit="paper-edit-block" phx-change="paper-block-autosave"
                     phx-debounce="500" data-test-id="paper-links-description-editor">
                 <input type="hidden" name="block_id" value="${blockId}">
@@ -88,11 +162,12 @@ const dom = new JSDOM(`<!doctype html><body>
                           phx-hook="BarkparkPaperAutoSize">Live description</textarea>
               </form>
             </div>
-          </div>
+          </header>
           <article data-paper-link-card>
             <h3>Resolved title from another Paper</h3>
             <p>Resolved description from another Paper</p>
           </article>
+          </section>
         </div>
         <details>
           <summary>Configure related papers</summary>
@@ -121,7 +196,7 @@ const dom = new JSDOM(`<!doctype html><body>
       </footer>
     </div>
   </main>
-</body>`, { url: "http://localhost/" });
+</body>`, { url: "http://localhost/", runScripts: "outside-only" });
 const { window } = dom;
 let uuid = 0;
 Object.defineProperty(window, "crypto", { configurable: true, value: {
@@ -147,8 +222,9 @@ assert.match(titleId, /^paper-links-title-[A-Za-z0-9_-]+$/);
 assert.equal(window.document.querySelector(`#${titleId}`), title,
   "the URL-safe field ID remains a valid JS.focus selector for hostile authored IDs");
 assert.equal(window.document.querySelector(`#${descriptionId}`), description);
-assert.equal(title.value, "", "the displayed default title is not materialized into authored source");
-assert.equal(title.placeholder, "Related papers");
+assert.equal(title.value, "",
+  "the displayed default title is not materialized into absent authored source");
+assert.equal(title.placeholder, "Explore the work");
 assert.equal(titleForm.elements.namedItem("block_id").value, blockId);
 assert.equal(descriptionForm.elements.namedItem("block_id").value, blockId);
 assert.equal(window.document.querySelectorAll(".bp-paper-links-title-owner").length, 1);
@@ -205,11 +281,16 @@ const settle = (reply) => {
     : reply);
 };
 
+// These correlated history receipts are synthetic client-protocol fixtures.
+// Server tests own the separate claim that paper-links title and description
+// saves issue authorized history receipts on real Public and Studio hosts.
+
 title.focus();
 title.blur();
 hook.el.click();
 await tick();
-assert.equal(calls.length, 0, "viewing a displayed default title authors no source value");
+assert.equal(calls.length, 0,
+  "viewing a displayed default title sends no patch and keeps its source absent");
 assert.deepEqual(toggles, ["paper-toggle-edit"]);
 toggles.length = 0;
 
@@ -291,6 +372,63 @@ assert.deepEqual(toggles, ["paper-toggle-edit"],
   "View proceeds only after title, description, and reference forms settle");
 await tick();
 
+toggles.length = 0;
+description.focus();
+description.value = "  Draft survives reference transitions  ";
+description.setSelectionRange(2, 16);
+description.dispatchEvent(new window.InputEvent("input", {
+  bubbles: true, inputType: "insertText", data: "Draft",
+}));
+hook.el.click();
+await tick();
+assert.equal(calls.length, 4);
+const transitionCall = calls[3];
+assert.equal(transitionCall.payload.if_rev, 9);
+assert.equal(transitionCall.payload.description, "  Draft survives reference transitions  ");
+settle({
+  saved: true,
+  changed: true,
+  request_id: transitionCall.payload.request_id,
+  rev: 10,
+  history_step: { version: 1, ref: transitionCall.payload.request_id, action: "undo" },
+});
+await tick();
+await tick();
+assert.deepEqual(toggles, ["paper-toggle-edit"],
+  "the description draft drains before a reference transition can repaint its header");
+
+const preview = window.document.querySelector("[data-test-id='paper-links-preview']");
+const originalSection = preview.querySelector("[data-paper-links]");
+const header = preview.querySelector("[data-paper-links-header-editor]");
+const renderedCard = preview.querySelector("[data-paper-link-card]");
+const authoritativeHeader = header.cloneNode(true);
+authoritativeHeader.querySelector(`[id="${titleId}"]`).textContent = "  Chosen heading  ";
+authoritativeHeader.querySelector(`[id="${descriptionId}"]`).textContent =
+  "  Draft survives reference transitions  ";
+const authoritativeHeaderHtml = authoritativeHeader.outerHTML;
+const emptyPreview = window.document.createElement("div");
+emptyPreview.className = preview.className;
+emptyPreview.dataset.testId = "paper-links-preview";
+emptyPreview.innerHTML = authoritativeHeaderHtml;
+liveViewMorph(window, preview, emptyPreview);
+const populatedPreview = window.document.createElement("div");
+populatedPreview.className = preview.className;
+populatedPreview.dataset.testId = "paper-links-preview";
+populatedPreview.innerHTML = `<section data-paper-links>${authoritativeHeaderHtml}${renderedCard.outerHTML}</section>`;
+liveViewMorph(window, preview, populatedPreview);
+const emptyAgainPreview = window.document.createElement("div");
+emptyAgainPreview.className = preview.className;
+emptyAgainPreview.dataset.testId = "paper-links-preview";
+emptyAgainPreview.innerHTML = authoritativeHeaderHtml;
+liveViewMorph(window, preview, emptyAgainPreview);
+assert.equal(window.document.getElementById(titleId), title,
+  "the 0→1→0 reference transition preserves the canonical title textarea instance");
+assert.equal(window.document.getElementById(descriptionId), description,
+  "the 0→1→0 reference transition preserves the canonical description textarea instance");
+assert.equal(description.value, "  Draft survives reference transitions  ");
+assert.deepEqual([description.selectionStart, description.selectionEnd], [2, 16],
+  "the stable textarea carries its saved selection through both reparents");
+
 const undo = window.document.querySelector('[data-paper-history-action="undo"]');
 const redo = window.document.querySelector('[data-paper-history-action="redo"]');
 assert.equal(undo.disabled, false);
@@ -299,28 +437,29 @@ await tick();
 const undoCall = calls.at(-1);
 assert.equal(undoCall.event, "paper-history-step");
 assert.deepEqual(undoCall.payload, {
-  history_ref: descriptionCall.payload.request_id,
+  history_ref: transitionCall.payload.request_id,
   action: "undo",
   request_id: undoCall.payload.request_id,
-  if_rev: 9,
+  if_rev: 10,
 });
 settle({
   saved: true,
   request_id: undoCall.payload.request_id,
-  rev: 10,
+  rev: 11,
   history_step: { version: 1, ref: undoCall.payload.request_id, action: "redo" },
 });
 await tick();
-assert.equal(redo.disabled, false, "acknowledged description Undo exposes only its opaque Redo");
+assert.equal(redo.disabled, false,
+  "a correlated description Undo receipt exposes only its opaque Redo token");
 redo.click();
 await tick();
 const redoCall = calls.at(-1);
 assert.equal(redoCall.payload.history_ref, undoCall.payload.request_id);
-assert.equal(redoCall.payload.if_rev, 10);
+assert.equal(redoCall.payload.if_rev, 11);
 settle({
   saved: true,
   request_id: redoCall.payload.request_id,
-  rev: 11,
+  rev: 12,
   history_step: { version: 1, ref: redoCall.payload.request_id, action: "undo" },
 });
 await tick();
@@ -335,22 +474,22 @@ hook.el.click();
 await tick();
 const nativeUndoCall = calls.at(-1);
 assert.equal(nativeUndoCall.event, "paper-block-autosave");
-assert.equal(nativeUndoCall.payload.if_rev, 11);
+assert.equal(nativeUndoCall.payload.if_rev, 12);
 assert.equal(nativeUndoCall.payload.title, "",
   "native text Undo after an acknowledgement remains a normal scalar save");
 settle({
   saved: true,
   changed: true,
   request_id: nativeUndoCall.payload.request_id,
-  rev: 12,
+  rev: 13,
   history_step: { version: 1, ref: nativeUndoCall.payload.request_id, action: "undo" },
 });
 await tick();
 
 toggles.length = 0;
 description.focus();
-hook._bpPaperExitCoordinator.observeRevision({ rev: 13, apply: () => {
-  window.document.querySelector("main").dataset.paperRev = "13";
+hook._bpPaperExitCoordinator.observeRevision({ rev: 14, apply: () => {
+  window.document.querySelector("main").dataset.paperRev = "14";
 } });
 description.value = "  Exact local description  ";
 description.setSelectionRange(2, 13);
@@ -360,13 +499,13 @@ description.dispatchEvent(new window.InputEvent("input", {
 hook.el.click();
 await tick();
 const rejected = calls.at(-1).payload;
-assert.equal(rejected.if_rev, 12);
+assert.equal(rejected.if_rev, 13);
 assert.equal(rejected.description, "  Exact local description  ");
 settle({
   saved: false,
   conflict: true,
   request_id: rejected.request_id,
-  current_rev: 13,
+  current_rev: 14,
 });
 await tick();
 assert.equal(description.value, "  Exact local description  ");
@@ -379,13 +518,13 @@ keep.click();
 await tick();
 const retried = calls.at(-1).payload;
 assert.notEqual(retried.request_id, rejected.request_id);
-assert.equal(retried.if_rev, 13);
+assert.equal(retried.if_rev, 14);
 assert.equal(retried.description, "  Exact local description  ");
 settle({
   saved: true,
   changed: true,
   request_id: retried.request_id,
-  rev: 14,
+  rev: 15,
   history_step: { version: 1, ref: retried.request_id, action: "undo" },
 });
 await tick();
@@ -393,4 +532,4 @@ assert.equal(hook._bpPaperExitCoordinator.hasUnsaved(), false);
 
 hook.destroyed();
 dom.window.close();
-console.log("PASS paper-links header: isolated scalars, FIFO, history, live-copy guard, and conflict recovery");
+console.log("PASS paper-links header: isolated scalars, FIFO, receipt protocol, live-copy guard, and conflict recovery");

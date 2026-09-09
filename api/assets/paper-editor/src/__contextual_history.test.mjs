@@ -17,9 +17,11 @@ const dom = new JSDOM(`<!doctype html><body>
         <textarea id="caption" name="caption">Caption</textarea>
       </form>
       <footer>
-        <div class="bp-paper-history-controls" role="group" aria-label="Image and caption history">
-          <button type="button" data-paper-history-action="undo" disabled>Undo</button>
-          <button type="button" data-paper-history-action="redo" disabled>Redo</button>
+        <div class="bp-paper-history-controls" role="group" aria-label="Content change history">
+          <button type="button" data-paper-history-action="undo"
+                  aria-label="Undo content change" disabled>Undo</button>
+          <button type="button" data-paper-history-action="redo"
+                  aria-label="Redo content change" disabled>Redo</button>
           <span data-paper-history-status role="status" aria-live="polite"></span>
         </div>
         <span data-test-id="bp-paper-footer-save" role="status"></span>
@@ -97,10 +99,20 @@ const settleSaved = (call, rev, extra = {}) => settleReply({
 });
 
 hook.mounted();
+const sortableHook = {
+  ...Hooks.BarkparkPaperSortable,
+  el: window.document.querySelector(".bp-paper-editor"),
+  pushEvent: hook.pushEvent,
+};
+sortableHook.mounted();
 
 try {
   assert.equal(undo.disabled, true);
   assert.equal(redo.disabled, true);
+  assert.equal(undo.getAttribute("aria-label"), "Undo content change");
+  assert.equal(redo.getAttribute("aria-label"), "Redo content change");
+  assert.equal(undo.closest("[role='group']").getAttribute("aria-label"),
+    "Content change history");
 
   replaceImage("https://example.test/first.jpg");
   const first = calls.at(-1);
@@ -210,16 +222,24 @@ try {
 
   const footer = window.document.querySelector("footer");
   footer.innerHTML = `
-    <div class="bp-paper-history-controls" role="group" aria-label="Image and caption history">
-      <button type="button" data-paper-history-action="undo" disabled>Undo</button>
-      <button type="button" data-paper-history-action="redo" disabled>Redo</button>
+    <div class="bp-paper-history-controls" role="group" aria-label="Content change history">
+      <button type="button" data-paper-history-action="undo"
+              aria-label="Undo content change" disabled>Undo</button>
+      <button type="button" data-paper-history-action="redo"
+              aria-label="Redo content change" disabled>Redo</button>
       <span data-paper-history-status role="status" aria-live="polite"></span>
     </div>
     <span data-test-id="bp-paper-footer-save" role="status"></span>`;
   refreshControlRefs();
-  hook.updated();
-  assert.equal(undo.disabled, false, "a LiveView footer replacement restores Undo state");
-  assert.equal(redo.disabled, false, "a LiveView footer replacement restores Redo state");
+  assert.equal(undo.disabled, true, "the replacement starts with server-rendered disabled state");
+  assert.equal(redo.disabled, true, "the replacement starts with server-rendered disabled state");
+  sortableHook.updated();
+  assert.equal(undo.disabled, false,
+    "the Public sortable hook restores Undo after a LiveView footer replacement");
+  assert.equal(redo.disabled, false,
+    "the Public sortable hook restores Redo after a LiveView footer replacement");
+  assert.equal(undo.getAttribute("aria-label"), "Undo content change");
+  assert.equal(redo.getAttribute("aria-label"), "Redo content change");
 
   const canvasEl = window.document.createElement("div");
   canvasEl.id = "paper-canvas-history-run-0";
@@ -374,6 +394,7 @@ try {
 
   console.log("PASS contextual history: FIFO, opaque retry, redo policy, terminal state, identity reset, native keys");
 } finally {
+  sortableHook.destroyed();
   hook.destroyed();
   dom.window.close();
 }
