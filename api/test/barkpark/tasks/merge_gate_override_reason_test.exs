@@ -140,15 +140,20 @@ defmodule Barkpark.Tasks.MergeGateOverrideReasonTest do
       {task, epoch} = claimed_task!("mg-reason-blank", scope, "builder")
 
       for blank <- ["", "   ", "\n\t"] do
-        assert {:error, :merge_gated_criterion} =
-                 Stamp.stamp(task.id, "builder",
-                   observed_epoch: epoch,
-                   criterion: 1,
-                   criterion_text: @gate_text,
-                   outcome: {:met, @evidence},
-                   merge_gated: blank
-                 ),
-               "#{inspect(blank)} is not a reason"
+        # Bound first so the assertion is on a BOOLEAN: `assert pattern = expr`
+        # is the match macro and swallows any message passed beside it, so the
+        # per-blank label below would never reach a failing run.
+        result =
+          Stamp.stamp(task.id, "builder",
+            observed_epoch: epoch,
+            criterion: 1,
+            criterion_text: @gate_text,
+            outcome: {:met, @evidence},
+            merge_gated: blank
+          )
+
+        assert result == {:error, :merge_gated_criterion},
+               "#{inspect(blank)} is not a reason, but the stamp returned #{inspect(result)}"
       end
     end
   end
@@ -248,7 +253,10 @@ defmodule Barkpark.Tasks.MergeGateOverrideReasonTest do
             %{"merge-gated" => "false"},
             %{"merge-gated" => 0}
           ] do
-        assert {:ok, nil} = Params.stamp_merge_gated(params), "#{inspect(params)}"
+        result = Params.stamp_merge_gated(params)
+
+        assert result == {:ok, nil},
+               "#{inspect(params)} read as #{inspect(result)}, not as NOT ASKED FOR"
       end
     end
 
@@ -259,9 +267,12 @@ defmodule Barkpark.Tasks.MergeGateOverrideReasonTest do
     # itself onto the server.
     test "the bare truthy spellings are a 400 naming what to supply" do
       for v <- [true, 1, "true", "1", "yes", "on"] do
-        assert {:error, :invalid_stamp, msg} = Params.stamp_merge_gated(%{"merge-gated" => v}),
-               "#{inspect(v)} must be refused"
+        result = Params.stamp_merge_gated(%{"merge-gated" => v})
 
+        assert match?({:error, :invalid_stamp, _}, result),
+               "#{inspect(v)} must be refused, but it read as #{inspect(result)}"
+
+        {:error, :invalid_stamp, msg} = result
         assert msg =~ "REASON"
         assert msg =~ "stamp_overrides"
       end
