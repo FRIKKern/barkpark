@@ -102,9 +102,15 @@ defmodule BarkparkCloud.Notifications.SitePublishWaitingAlertTest do
       assert node.oldest_waiting_seconds < SitePublishWaitingAlert.threshold_seconds()
       assert SitePublishWaitingAlert.verdict(envelope) == :clear
 
-      for h <- 0..3, do: sweep(hours(h))
-
+      assert %{waiting: 0, sent: 0} = sweep(@now)
       assert notices() == []
+
+      # AND THE THRESHOLD IS A CLOCK, NOT A LABEL. The same unresolved row
+      # crosses it by doing nothing at all: half an hour later the wait is 3600s
+      # and the SAME rail now fires. Asserting only the silence above would
+      # equally describe a rail that is simply broken.
+      assert %{waiting: 1, sent: 1} = sweep(DateTime.add(@now, 1800, :second))
+      assert [_notice] = notices()
     end
 
     test "the threshold is 3600s and it is quoted against the measured p95" do
@@ -141,6 +147,15 @@ defmodule BarkparkCloud.Notifications.SitePublishWaitingAlertTest do
       assert [recovery] = recoveries()
       assert recovery.status == "sent"
       assert recovery.event == "site_publish_waiting_recovered"
+
+      # THE WAITING NOTICE IS CONSUMED FIRST. `assert_email_sent/1` reads the
+      # OLDEST message still in the mailbox, so asserting the recovery without
+      # taking the alert out first would grade the accusation and call it the
+      # recovery — and every string below would then have to be absent from a
+      # message that never claimed to carry them.
+      assert_email_sent(fn email ->
+        assert email.subject =~ "content still WAITING to reach the web"
+      end)
 
       assert_email_sent(fn email ->
         # THE DURATION, and it is the one the ledger measured — 7200s of wait,
@@ -273,8 +288,16 @@ defmodule BarkparkCloud.Notifications.SitePublishWaitingAlertTest do
 
   # THE ONLY THING THAT RESOLVES A CENSORED ROW: a live row whose bytes answered
   # on the web at a nameable instant.
+  #
+  # IT LANDS A MINUTE BEFORE `at`, and that minute is load-bearing.
+  # `delivery/3`'s door is RIGHT-HALF-OPEN — `where: d.inserted_at < ^to` — so a
+  # row stamped at exactly the sweep instant is OUTSIDE the window the sweep
+  # reads, the site keeps no live mark, and the wait it was meant to resolve
+  # reads as still standing. A fixture that settles a deploy at the same instant
+  # it then asserts recovery on is asserting against a row the query never saw.
   defp settle(team, at) do
     site = team |> Registry.list_sites_for_team() |> hd()
+    at = DateTime.add(at, -60, :second)
 
     Repo.insert_all(Deployment, [row(site, "live", at, became_live_at: at)])
   end

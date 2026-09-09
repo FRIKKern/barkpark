@@ -258,9 +258,11 @@ defmodule BarkparkCloud.Notifications.SitePublishWaitingAlert do
     actually see. This notice is keyed on that wait, not on the attempt count.
 
     WHY THE THRESHOLD IS #{format_duration(@threshold_seconds)}. The measured 95th percentile of time-to-web
-    over a #{format_duration(@window_seconds)} door is 948.782s (cloud-db-1, 2026-08-09, this clock). This
+    over a 24h door is 948.782s (cloud-db-1, 2026-08-09, this clock). This
     threshold sits #{Float.round(@threshold_seconds / 948.782, 2)}x above it, so an ordinary slow publish does not
-    reach your inbox.
+    reach your inbox. A percentile and a threshold measured over different
+    windows are not comparable numbers, so the door this alert reads is the same
+    24h the figure above was taken over.
 
     THIS IS ONE EMAIL PER EPISODE, NOT ONE PER SWEEP. Nothing further is sent
     while the wait stands. When it clears you get exactly one more message
