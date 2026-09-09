@@ -80,18 +80,27 @@ function normalizeActionPriority(p) {
 // has NO server-side JSON normalizer (unlike the field path's media_field_url/1), so a
 // JSON blob written into attrs.media.src renders a broken <img src="{…}"> on the reader
 // (walk.ex image/1). This is the exact JSON-tolerant fallback root.html.heex uses for
-// the field-image path. Non-string, empty/whitespace, or an unparseable envelope → ""
-// (a CLEAR, or a safe degrade — NEVER the raw blob). A bare URL passes through verbatim.
-export function mediaUrlFromValue(raw) {
-  if (typeof raw !== "string") return "";
+// the field-image path. A bare URL (including the intentional empty-string CLEAR)
+// passes through verbatim. The validity bit is important at the event boundary:
+// malformed picker events must be ignored, not mistaken for a clear.
+function parsedMediaUrl(raw) {
+  if (typeof raw !== "string") return { valid: false };
   if (raw.trim().startsWith("{")) {
     try {
-      return JSON.parse(raw).url || "";
+      const parsed = JSON.parse(raw);
+      return typeof parsed?.url === "string"
+        ? { valid: true, src: parsed.url }
+        : { valid: false };
     } catch {
-      return "";
+      return { valid: false };
     }
   }
-  return raw;
+  return { valid: true, src: raw };
+}
+
+export function mediaUrlFromValue(raw) {
+  const parsed = parsedMediaUrl(raw);
+  return parsed.valid ? parsed.src : "";
 }
 
 // The TipTap node NAME is `bpCard` (its portable-doc bpType stays "card"); run-convert
@@ -683,8 +692,12 @@ export const Card = Node.create({
       // {type:"image",src} — NEVER write the raw value. An empty string is a CLEAR →
       // attrs.media=null → round-trips ABSENT (removal lands).
       const onMediaChange = (e) => {
-        const meta = (e.target && e.target.meta) || {};
-        const src = meta.url || mediaUrlFromValue((e.detail && e.detail.value) || "");
+        const metaUrl = e.target?.meta?.url;
+        const parsed = typeof metaUrl === "string" && metaUrl
+          ? { valid: true, src: metaUrl }
+          : parsedMediaUrl(e.detail?.value);
+        if (!parsed.valid) return;
+        const { src } = parsed;
         writeAttr((attrs) => {
           if (src === "") {
             attrs.media = null; // clear → round-trips ABSENT (removal lands)

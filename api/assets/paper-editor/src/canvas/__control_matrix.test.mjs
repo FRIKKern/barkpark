@@ -367,6 +367,42 @@ try {
       paint.click();
       assert.equal(fileOpens, 1, "a missing asset browser falls back to the same picker's file dialog");
 
+      let invalidTransactions = 0;
+      const countInvalidTransaction = () => { invalidTransactions += 1; };
+      canvas._editor.on("transaction", countInvalidTransaction);
+      for (const [name, detail] of [
+        ["missing detail", undefined],
+        ["missing value", {}],
+        ["non-string value", { value: 42 }],
+        ["malformed JSON envelope", { value: "{bad json" }],
+        ["JSON envelope with non-string URL", { value: JSON.stringify({ url: 42 }) }],
+      ]) {
+        picker.dispatchEvent(new window.CustomEvent("bp-change", {
+          bubbles: true, ...(detail === undefined ? {} : { detail }),
+        }));
+        assert.deepEqual(canvas._editor.getJSON().content[0].attrs.media,
+          source.slots.media[0], `${name} leaves the source carrier untouched`);
+      }
+      assert.equal(invalidTransactions, 0,
+        "invalid picker events dispatch no ProseMirror transaction");
+      canvas._editor.off("transaction", countInvalidTransaction);
+
+      picker.dispatchEvent(new window.CustomEvent("bp-change", {
+        bubbles: true, detail: { value: "" },
+      }));
+      assert.equal(canvas._editor.getJSON().content[0].attrs.media, null,
+        "an explicit empty picker value retains the intentional clear behavior");
+      canvas._editor.commands.undo();
+      assert.deepEqual(canvas._editor.getJSON().content[0].attrs.media, source.slots.media[0]);
+
+      picker.meta = { url: "/meta.png" };
+      picker.dispatchEvent(new window.CustomEvent("bp-change", {
+        bubbles: true, detail: { value: "/detail.png" },
+      }));
+      assert.equal(canvas._editor.getJSON().content[0].attrs.media.src, "/meta.png",
+        "a valid parsed picker meta URL takes precedence over serialized detail");
+      canvas._editor.commands.undo();
+      picker.meta = {};
       picker.dispatchEvent(new window.CustomEvent("bp-change", {
         bubbles: true, detail: { value: "/after.png" },
       }));
