@@ -724,7 +724,7 @@ const asciicast: Emit = (b) => {
   const rowsAttr = rows !== undefined && rows >= 6 && rows <= 40 ? ` data-cast-rows="${rows}"` : ''
   return (
     `<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">` +
-    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr}${rowsAttr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>` +
+    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr}${rowsAttr} style="border:1px solid var(--paper-rule, #dde7e2);border-radius:6px;overflow:hidden"></div>` +
     articleFigcaption(caption) +
     `</figure>`
   )
