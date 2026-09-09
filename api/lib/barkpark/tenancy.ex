@@ -412,7 +412,47 @@ defmodule Barkpark.Tenancy do
   @production_dataset_slug "production"
 
   @doc """
-  Returns the seeded Default Workspace, or nil if the backfill hasn't run.
+  Returns the instance-default Workspace, or nil if the seat is VACANT.
+
+  ## The seat is a boolean, not a string — DECIDED 2026-09-09 (task-566dc5be4871353b)
+
+  This used to be `Repo.get_by(Workspace, slug: @default_slug)`, which made a
+  security-relevant SINGLETON identifiable by a MUTABLE, USER-CLAIMABLE string:
+  whoever held the slug WAS the instance default, because `AssignDefaultScope`
+  binds every flat route to this row and `Content.WriteScope.resolve_write_scope/1`
+  stamps an UNSCOPED WRITE with it. PR #12879 made the seat untakeable by a
+  principal at `do_create_workspace_with_owner/3`; it deliberately did not change
+  what IDENTIFIES the seat, and every remaining variant followed from that — a
+  RENAME frees it identically to a delete, since `Workspace.changeset/2` casts
+  `:slug`.
+
+  CHOSEN: `workspaces.is_default`, a boolean with a PARTIAL UNIQUE INDEX
+  (`workspaces_single_default_index`, `WHERE is_default`) so at most one row can
+  hold the seat, and `Workspace.changeset/2` does NOT cast the field — so no
+  attrs map any caller can build reaches it. The seat is therefore not
+  addressable by any user-supplied string at all, and the rename path is CLOSED
+  rather than left unreachable-for-now.
+
+  THE DECIDING CONSTRAINT was the bundle import's PDS-D9 adopt branch
+  (`WorkspaceBundle.adopt_or_refuse_root_slug!/1`), which DELETES an empty
+  `default` shell in-transaction and lets the imported workspace take the slug.
+  A boolean survives that as two SQL statements after the members land, against a
+  table the import already writes — it does not widen that transaction's failure
+  surface, which is exactly why this work was deferred out of the p0.
+
+  REJECTED — a settings/singleton pointer row: same security properties, but it
+  drags a SECOND table into the import transaction and adds an indirection to a
+  function called on every flat `/v1/*` request. REJECTED — a stable well-known
+  UUID: the identity would then be a value the bundle's `workspaces` COPY member
+  carries verbatim, so a crafted bundle claims the seat by shipping that id — the
+  same "identity transferable through user input" defect, relocated not closed.
+
+  DEGRADES TO VACANCY, NEVER TO CAPTURE. A vacant seat returns `nil` here and an
+  unscoped write lands with `workspace_id` NULL — a bounded problem — instead of
+  being attributed to a workspace somebody claimed, which is an unbounded
+  privilege transfer. Vacancy is a NORMAL state, not only a corrupt one:
+  `SupportResetDefaultWorkspaceStep` deletes the row and the following
+  `SupportAdminTokenStep` re-mints it, and the seat is vacant between the two.
 
   Read through `DefaultScopeCache` — `Plugs.AssignDefaultScope` calls this on
   every flat `/v1/*` request, including requests that touch no data at all. A
@@ -422,8 +462,61 @@ defmodule Barkpark.Tenancy do
   @spec get_default_workspace() :: Workspace.t() | nil
   def get_default_workspace do
     DefaultScopeCache.fetch(:default_workspace, fn ->
-      Repo.get_by(Workspace, slug: @default_slug)
+      Repo.get_by(Workspace, is_default: true)
     end)
+  end
+
+  @doc """
+  Get-or-create the instance-default Workspace and ESTABLISH it in the seat.
+
+  The ONE writer that puts a workspace into the seat from application code (the
+  bundle import's adopt branch is the other, and it transfers rather than
+  establishes). Called by `Seeds.Shared.ensure_default_scope/0`, and through it
+  by `mix frt.seed` and the support box's `SupportAdminTokenStep` re-mint.
+
+  Idempotent and vacancy-tolerant in BOTH directions, because the support bracket
+  produces each state on purpose:
+
+    * seat held      → returns the holder untouched.
+    * seat vacant, no `default`-slugged row → mints one and takes the seat.
+    * seat vacant, a `default`-slugged row STILL PRESENT → adopts THAT row rather
+      than trying to insert a second one, which would collide on
+      `workspaces_slug_index`. This is the state a migration leaves behind if the
+      backfill ran while the flag had been cleared, and the state an operator
+      leaves by clearing the flag by hand.
+
+  The seat is taken by a bare `Repo.update_all` on purpose: `is_default` is NOT
+  cast by `Workspace.changeset/2` (see that field's comment), so there is no
+  changeset path to it — which is the property that makes the seat unclaimable.
+  """
+  @spec establish_default_workspace!() :: Workspace.t()
+  def establish_default_workspace! do
+    case get_default_workspace() do
+      %Workspace{} = ws ->
+        ws
+
+      nil ->
+        ws =
+          case Repo.get_by(Workspace, slug: @default_slug) do
+            %Workspace{} = existing ->
+              existing
+
+            nil ->
+              {:ok, minted} =
+                create_workspace(%{slug: @default_slug, name: "Default Workspace"})
+
+              minted
+          end
+
+        {1, _} =
+          Repo.update_all(
+            from(w in Workspace, where: w.id == ^ws.id),
+            set: [is_default: true]
+          )
+
+        DefaultScopeCache.invalidate()
+        %{ws | is_default: true}
+    end
   end
 
   @doc """
@@ -445,7 +538,7 @@ defmodule Barkpark.Tenancy do
         from(p in Project,
           join: w in Workspace,
           on: w.id == p.workspace_id,
-          where: w.slug == ^@default_slug and p.slug == ^@default_slug,
+          where: w.is_default and p.slug == ^@default_slug,
           select: p
         )
       )
@@ -1246,8 +1339,17 @@ defmodule Barkpark.Tenancy do
 
   # ── Instance-singleton seat guard (task-94a6ed8ced1fc547) ───────────────────
   #
-  # `get_default_workspace/0` identifies a security-relevant SINGLETON by a
-  # mutable string — `Repo.get_by(Workspace, slug: @default_slug)`. Whoever holds
+  # HISTORICAL FRAMING, kept because it explains the guard's PLACEMENT. When this
+  # guard was written, `get_default_workspace/0` identified a security-relevant
+  # SINGLETON by a mutable string — `Repo.get_by(Workspace, slug: @default_slug)`.
+  # It no longer does (task-566dc5be4871353b, 2026-09-09: the seat is
+  # `workspaces.is_default`, uncast and partial-unique), so holding the slug no
+  # longer takes the seat and this guard is now DEFENCE IN DEPTH rather than the
+  # wall. It stays: the `default` slug remains reserved, `get_default_project/0`
+  # still keys the PROJECT on it, and a principal minting a workspace under the
+  # instance's own reserved name is a confusion worth refusing on its own terms.
+  # Read the rest of this block as the reason the chokepoint is here rather than
+  # in a controller. Back then: whoever held
   # that slug IS the instance default: `AssignDefaultScope` binds every flat
   # route to it, and `Content.WriteScope.resolve_write_scope/1` stamps an
   # UNSCOPED WRITE with it. So while the seat is vacant, taking the slug takes
@@ -1282,11 +1384,15 @@ defmodule Barkpark.Tenancy do
   # branches and the support box's `case "$code" in 2*|409|422)` tolerance both
   # keep working untouched.
   #
-  # RESIDUE, stated rather than implied: renaming a workspace INTO the slug
-  # bypasses this, since `Workspace.changeset/2` casts `:slug`. There is no
-  # `update_workspace/2` and no HTTP update route today, so it is unreachable —
-  # but the end state is to stop identifying the singleton by a claimable string
-  # at all, which is a data-model change this guard does not attempt.
+  # THE RESIDUE IS DISCHARGED (task-566dc5be4871353b). It used to read: renaming a
+  # workspace INTO the slug bypasses this, since `Workspace.changeset/2` casts
+  # `:slug` — unreachable today (no `update_workspace/2`, no HTTP update route)
+  # but permitted by the changeset, so any fix framed as "you cannot delete the
+  # Default" was incomplete by construction. That end state has now landed: the
+  # singleton is no longer identified by a claimable string at all. A rename into
+  # or out of `default` moves NOTHING, because the seat is `is_default`, which no
+  # changeset casts — so the door stays shut for the `update_workspace/2` nobody
+  # has written yet.
   defp singleton_slug_error(attrs) do
     %Workspace{}
     |> Workspace.changeset(attrs)
