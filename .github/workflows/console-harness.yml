@@ -1525,9 +1525,16 @@ jobs:
       #     selectCells), so a renamed or deleted cell exits 2 rather than
       #     quietly sweeping fewer cells than asked for.
       #
-      # COST — MEASURED, NEVER ESTIMATED. 2 cells x 2 themes x 1 height (800,
-      # the default) x 3 widths = 12 renders. This step's own wall time on a
-      # GitHub runner: COST_PLACEHOLDER
+      # COST — MEASURED, NEVER ESTIMATED, AND IT CARRIES ITS DATE. 2 cells x 2
+      # themes x 1 height (800, the default) x 3 widths = 12 CELLS RENDERED.
+      # This step's own wall time, read off THIS PR's own GitHub Actions run
+      # 34375959436 / job 102548831562 (ubuntu-latest, 2026-09-09): the step
+      # ran 16:19:49 -> 16:19:53, 3.9s end to end, of which the sweep's own
+      # `>> cost` line accounts for `12 cells in 3.2s (0.27s/cell)` — the
+      # remaining ~0.7s is Chrome bring-up and the static serve. The break run
+      # of the same step (34377005308, remedy reverted) measured 12 cells in
+      # 2.5s. NOT a projection from the local box: locally the same command is
+      # 6.1s of render, so a number lifted from a laptop would have been 2x.
       # The FULL render leg stays a developer instrument for the reason argued
       # on the job header above: 25 x 2 x 1 x 21 = 1050 renders, MINUTES.
       - name: Roster phone band — render the members roster at 320/390/620px

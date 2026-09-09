@@ -2551,7 +2551,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    this rule relies on. (The sibling `.set-row-key` that used the same idiom
    went with the team env-var page, ruled 2026-09-02; `.set-row-note` below is
    the surviving twin.) */
-.set-row-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.set-row-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; }
 .set-row-meta { font-size: var(--text-xs); color: var(--muted-text); font-family: var(--mono); }
 /* W22-S3 — the note was the SOLE `.set-row-main` child without `overflow-wrap`.
    Its render host at the time was an env var's free-text comment; that page was
@@ -2613,6 +2613,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    FONT-CONDITIONAL (D218): every px above was measured against an unpinned,
    unasserted face. The ORDERING facts — identity clipped, controls past the
    edge, both gone after this block — survive a face swap; the px do not. */
+@media (max-width: 620px) {
+  .set-row { flex-wrap: wrap; row-gap: var(--space-2); }
+  .set-row-side { flex-basis: 100%; justify-content: flex-end; }
+}
 
 /* ---------------------------------------------------------- responsive */
 /* W13-S4 DETAIL BAND (899px): the detail routes' OWN threshold, split off from
