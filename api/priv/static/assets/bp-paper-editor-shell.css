@@ -1709,6 +1709,9 @@
 .bp-canvas-card__media-paint:focus-visible {
   outline: 2px solid var(--paper-accent); outline-offset: 3px;
 }
+.bp-canvas-card > bp-media-picker.bp-canvas-card__media-picker[hidden] {
+  display: none !important;
+}
 .bp-paper-figure-editor-frame { display: flow-root; }
 [data-paper-figure-image-trigger] { cursor: pointer; outline-offset: 3px; }
 .bp-paper-figure-image-trigger {

@@ -947,6 +947,9 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-canvas-card__media-paint:focus-visible {
   outline: 2px solid var(--paper-accent); outline-offset: 3px;
 }
+.bp-canvas-card > bp-media-picker.bp-canvas-card__media-picker[hidden] {
+  display: none !important;
+}
 /* The card's action slot is the reader's PdButton anchor; mirror the
  * `.bp-paper-surface .bp-button` rules byte-for-byte (the .bp-canvas-action
  * precedent above) so the embedder paints it identically to /papers. */
