@@ -37,11 +37,24 @@
 #   2  drop -q, redirect:  printf '%s\n' "$s" | grep -E "$pat" >/dev/null
 #   3  here-string:  grep -Eq "$pat" <<<"$s"    (no producer process to kill)
 #
+# INPUTS.  *.sh, *.bash — and, since 2026-09-09, *.yml/*.yaml: a GitHub Actions
+# `run:` body IS shell.  Every `run:` block is a SEPARATE process, so pipefail,
+# errexit, heredocs and a pending `rc=$?` are RESET at each block boundary, and a
+# step's starting state comes from its `shell:` key (no key = `bash -e {0}`,
+# pipefail OFF; `shell: bash` = `bash -eo pipefail {0}`, pipefail ON).  See
+# yaml_flatten() below.  Before this the collector took only *.sh/*.bash, so
+# `.github` — its own second default target — contributed 0 of 138 findings while
+# the class's most recent live instance sat in .github/workflows/deploy-harnesses.yml.
+#
 # USAGE:  pipefail-sigpipe-scan.sh [PATH ...]      (default: scripts .github deploy)
 #         --min-confidence high|medium|low         (default: low = report everything)
 #         --count-only
+#         --fail-on-finding                        (exit 1 if anything is reported)
+#         --baseline FILE                          (ratchet: FILE's integer may only fall)
+#         --selftest
 #
-# EXIT: 0 clean scan, findings or not · 1 findings and --fail-on-finding · 2 CANNOT READ.
+# EXIT: 0 clean scan, findings or not · 1 findings and --fail-on-finding, or the
+#       --baseline ratchet BROKEN · 2 CANNOT READ.
 #
 # A FAILED READ IS NEVER BYTE-IDENTICAL TO ZERO FINDINGS: an unreadable input prints a
 # `CANNOT READ:` line to stderr and exits 2.
@@ -53,6 +66,7 @@ min_conf="low"
 count_only=0
 fail_on_finding=0
 selftest=0
+baseline_file=""
 targets=()
 
 die() {
@@ -83,8 +97,13 @@ while [ $# -gt 0 ]; do
     fail_on_finding=1
     shift
     ;;
+  --baseline)
+    [ $# -ge 2 ] || die "--baseline needs a file"
+    baseline_file="$2"
+    shift 2
+    ;;
   -h | --help)
-    sed -n '2,45p' "$0"
+    sed -n '2,62p' "$0"
     exit 0
     ;;
   -*) die "unknown option: $1" ;;
@@ -168,6 +187,191 @@ set -uo pipefail
   say miss-capture 'v="$(printf "%s" "$x" | grep -q foo)"' MISS
   say miss-or-true 'printf "%s" "$x" | grep -q foo || true' MISS
   say miss-comment '# if printf "%s" "$x" | grep -q foo; then :; fi' MISS
+
+  # ── the WORKFLOW arm (task-b090e1c603d686ba) ──────────────────────────────
+  # `.github` was a default target that could never produce a finding, so these
+  # fixtures are the whole proof that it now can — AND that it does not
+  # over-report, which is the failure mode a naive `-o -name '*.yml'` produces.
+  # Every fixture is a whole workflow, and the HIT arms pin the LINE, because a
+  # finding at the wrong line is a scanner that parsed something else.
+  yml() { # yml <name> <HIT|MISS> [<line the single finding must be on>] ; YAML on stdin
+    cat >"$std/$1.yml"
+    local out n
+    out="$(bash "${BASH_SOURCE[0]}" "$std/$1.yml" 2>/dev/null)"
+    n="$(sed -nE 's/.*: ([0-9]+) finding.*/\1/p' <<<"$out")"
+    case "$2:$n" in
+    HIT:0) sno "$1: wanted a finding, got none" ;;
+    MISS:0) sok "$1: correctly silent" ;;
+    MISS:*) sno "$1: wanted silence, reported $n — $(tr '\n' ' ' <<<"$out")" ;;
+    HIT:*)
+      if [ -z "${3:-}" ]; then
+        sok "$1: reported ($n)"
+      elif [ "$n" != 1 ]; then
+        sno "$1: wanted exactly 1 finding on line $3, got $n — $(tr '\n' ' ' <<<"$out")"
+      elif grep -q ":$3: " <<<"$out"; then
+        sok "$1: reported at line $3, and only there"
+      else
+        sno "$1: reported 1 finding but NOT on line $3 — $(tr '\n' ' ' <<<"$out")"
+      fi
+      ;;
+    esac
+  }
+
+  # (1) THE BLOCK BOUNDARY.  Step 1 arms pipefail; step 5 carries the byte-identical
+  # hazard and does NOT.  They are separate processes, so only step 1 is a finding.
+  # If pipefail leaked across the boundary this reports 2 and the line check reds.
+  yml block-reset HIT 9 <<'YML'
+name: t
+on: [push]
+jobs:
+  a:
+    steps:
+      - name: step 1 — arms pipefail, and IS the hazard
+        run: |
+          set -euo pipefail
+          if printf '%s' "$x" | grep -q foo; then :; fi
+      - name: step 2
+        run: echo two
+      - name: step 3
+        run: |
+          echo three
+      - name: step 4 — not a run: step at all
+        uses: actions/checkout@v4
+      - name: step 5 — byte-identical hazard, NO pipefail, SEPARATE shell
+        run: |
+          if printf '%s' "$x" | grep -q foo; then :; fi
+YML
+
+  # (2) THE KNOWN INSTANCE, both arms in one run.  Verbatim from
+  # .github/workflows/deploy-harnesses.yml before and after #16872.
+  yml known-instance-prefix HIT 9 <<'YML'
+name: deploy-harnesses (pre-#16872 excerpt)
+on: [push]
+jobs:
+  a:
+    steps:
+      - run: |
+          set -euo pipefail
+          ctl_out="$(shellcheck -S warning "$ctl/planted.sh" 2>&1)" && ctl_rc=0 || ctl_rc=$?
+          if ! printf '%s' "$ctl_out" | grep -q "SC2034"; then
+            exit 1
+          fi
+YML
+  yml known-instance-postfix MISS <<'YML'
+name: deploy-harnesses (post-#16872 excerpt, the shipped form)
+on: [push]
+jobs:
+  a:
+    steps:
+      - run: |
+          set -euo pipefail
+          ctl_out="$(shellcheck -S warning "$ctl/planted.sh" 2>&1)" && ctl_rc=0 || ctl_rc=$?
+          if ! grep -q "SC2034" <<<"$ctl_out"; then
+            exit 1
+          fi
+YML
+  # …and against the REAL file, not only a copy of it: a fixture proves the
+  # matcher, the live tree proves the fixture is the same shape as the tree.
+  sroot="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+  if [ -r "$sroot/.github/workflows/deploy-harnesses.yml" ]; then
+    live="$(bash "${BASH_SOURCE[0]}" "$sroot/.github/workflows/deploy-harnesses.yml" 2>/dev/null)"
+    if grep -q 'SC2034' <<<"$live"; then
+      sno "live deploy-harnesses.yml: the SHIPPED here-string control is being reported — over-reporting on the real tree"
+    else
+      sok "live deploy-harnesses.yml: the shipped here-string control is NOT reported (and it reads $(sed -nE 's/.*: ([0-9]+) finding.*/\1/p' <<<"$live") other site(s))"
+    fi
+  else
+    sno "live deploy-harnesses.yml: NOT FOUND under $sroot — this arm measured nothing"
+  fi
+
+  # (3) MUST NOT REPORT: a full `grep` reads to EOF, so there is no early exit and
+  # no SIGPIPE.  This is the arm that reds if the YAML path over-reports.
+  yml yaml-miss-grep-full MISS <<'YML'
+name: t
+on: [push]
+jobs:
+  a:
+    steps:
+      - run: |
+          set -euo pipefail
+          if printf '%s\n' "$x" | grep foo >/dev/null; then :; fi
+          printf '%s\n' "$x" | grep -E "$pat" >/dev/null || exit 1
+YML
+
+  # (4) `shell: bash` IS `bash -eo pipefail {0}` — pipefail is on with no `set`
+  # line anywhere in the body.  A scanner that only looks for `set -o pipefail`
+  # text misses every step written this way.
+  yml yaml-shell-bash-arms HIT 9 <<'YML'
+name: t
+on: [push]
+jobs:
+  a:
+    steps:
+      - name: shell bash means -eo pipefail
+        shell: bash
+        run: |
+          if printf '%s' "$x" | grep -q foo; then :; fi
+YML
+
+  # (5) …and the inverse: NO `shell:` key is `bash -e {0}`, pipefail OFF. Same body.
+  yml yaml-default-shell-does-not-arm MISS <<'YML'
+name: t
+on: [push]
+jobs:
+  a:
+    steps:
+      - name: no shell key — Actions default is bash -e, NOT -eo pipefail
+        run: |
+          if printf '%s' "$x" | grep -q foo; then :; fi
+YML
+
+  # (6) a non-shell `shell:` is not shell at all; the body is not scanned.
+  yml yaml-non-shell-body MISS <<'YML'
+name: t
+on: [push]
+jobs:
+  a:
+    steps:
+      - shell: python3 {0}
+        run: |
+          set -euo pipefail
+          if printf '%s' "$x" | grep -q foo; then :; fi
+YML
+
+  # (7) a single-line `run:` is a whole block on one line — it must not be lost.
+  yml yaml-inline-run HIT 8 <<'YML'
+name: t
+on: [push]
+jobs:
+  a:
+    steps:
+      - name: inline
+        shell: bash
+        run: printf '%s' "$x" | grep -q foo
+YML
+
+  # (8) THE RATCHET, both directions, on a fixture whose count is known.
+  bl="$std/bl.txt"
+  printf '# reason lives here\n1\n' >"$bl"
+  bash "${BASH_SOURCE[0]}" --baseline "$bl" "$std/block-reset.yml" >/dev/null 2>&1 &&
+    sok "ratchet: 1 finding vs baseline 1 exits 0" ||
+    sno "ratchet: 1 finding vs baseline 1 did not exit 0"
+  printf '0\n' >"$bl"
+  bash "${BASH_SOURCE[0]}" --baseline "$bl" "$std/block-reset.yml" >/dev/null 2>&1 &&
+    sno "ratchet: 1 finding vs baseline 0 exited 0 — the ratchet does not hold" ||
+    sok "ratchet: 1 finding vs baseline 0 reds"
+  printf '9\n' >"$bl"
+  loose_rc=0
+  loose="$(bash "${BASH_SOURCE[0]}" --baseline "$bl" "$std/block-reset.yml" 2>&1 >/dev/null)" || loose_rc=$?
+  if [ "$loose_rc" -eq 0 ] && grep -q 'RATCHET LOOSE' <<<"$loose"; then
+    sok "ratchet: a FALL says RATCHET LOOSE and does NOT red (rc 0)"
+  else
+    sno "ratchet: a fall printed rc=$loose_rc / $(tr '\n' ' ' <<<"$loose")"
+  fi
+  printf 'not-a-number\n' >"$bl"
+  bash "${BASH_SOURCE[0]}" --baseline "$bl" "$std/block-reset.yml" >/dev/null 2>&1
+  [ "$?" -eq 2 ] && sok "ratchet: an unreadable baseline is CANNOT READ (exit 2), never a pass" ||
+    sno "ratchet: a non-numeric baseline did not exit 2"
 
   echo
   echo "# pass $sp / # fail $sf"
@@ -309,7 +513,7 @@ yaml_flatten() {
   done
 
   local in_body=0 run_indent=-1 body_ok=0
-  local j k dash_ind step_end sh rest pf ee
+  local j k kl dash_ind step_end sh rest pf ee
   for ((i = 0; i < n; i++)); do
     s="${L[i]}"
     t="${s#"${s%%[![:space:]]*}"}"
@@ -354,7 +558,6 @@ yaml_flatten() {
       step_end=$n
       for ((j = i; j >= 0; j--)); do
         [ "${L[j]:dash_ind:2}" = "- " ] || continue
-        [ -z "${L[j]:0:dash_ind}" ] || continue
         case "${L[j]:0:dash_ind}" in *[![:space:]]*) continue ;; esac
         for ((k = j + 1; k < n; k++)); do
           local s2="${L[k]}" t2
@@ -366,10 +569,15 @@ yaml_flatten() {
           fi
         done
         for ((k = j; k < step_end; k++)); do
-          case "${L[k]:run_indent}" in
+          # `- shell: bash` is the SAME key as `  shell: bash` two lines down —
+          # the `- ` opens the mapping and its first key sits at run_indent.
+          # Blanking the dash is what lets one prefix test serve both.
+          kl="${L[k]}"
+          [ "${kl:dash_ind:2}" = "- " ] && kl="${kl:0:dash_ind}  ${kl:dash_ind+2}"
+          case "${kl:0:run_indent}" in *[![:space:]]*) continue ;; esac
+          case "${kl:run_indent}" in
           'shell:'*)
-            case "${L[k]:0:run_indent}" in *[![:space:]]*) continue ;; esac
-            sh="${L[k]:run_indent+6}"
+            sh="${kl:run_indent+6}"
             sh="${sh#"${sh%%[![:space:]]*}"}"
             ;;
           esac
@@ -452,16 +660,16 @@ for f in "${files[@]}"; do
     cannot_read "$f"
     continue
   }
-  # A file with no pipefail anywhere cannot host the defect — condition (a).
-  # Cheap precondition, deliberately loose — `set -u -o pipefail`, `set -euo
-  # pipefail` and `set -o pipefail` must all pass it.  The per-line state machine
-  # below is the real gate; this only skips files that cannot possibly host it.
-  grep -q 'pipefail' "$f" || continue
-
   src="$f"
   yaml_mode=0
   case "$f" in
   *.yml | *.yaml)
+    # `shell: bash` IS `bash -eo pipefail {0}`, so a workflow can be armed with
+    # the word `pipefail` appearing NOWHERE in the file.  Keying the cheap
+    # precondition on that word alone skipped exactly those files — caught by the
+    # yaml-inline-run selftest arm, which is the only fixture here whose prose
+    # does not happen to contain the word.
+    grep -qE 'pipefail|shell:' "$f" || continue
     yaml_mode=1
     [ -n "$flat_tmp" ] || flat_tmp="$(mktemp "${TMPDIR:-/tmp}/pfscan-flat.XXXXXX")" || die "mktemp failed"
     if ! yaml_flatten "$f" >"$flat_tmp"; then
@@ -469,6 +677,13 @@ for f in "${files[@]}"; do
       continue
     fi
     src="$flat_tmp"
+    ;;
+  *)
+    # A file with no pipefail anywhere cannot host the defect — condition (a).
+    # Cheap precondition, deliberately loose — `set -u -o pipefail`, `set -euo
+    # pipefail` and `set -o pipefail` must all pass it.  The per-line state
+    # machine below is the real gate; this only skips files that cannot host it.
+    grep -q 'pipefail' "$f" || continue
     ;;
   esac
 
@@ -546,7 +761,14 @@ for f in "${files[@]}"; do
     esac
 
     # a `rc=$?` / `status=$?` immediately after a pipeline CONSUMES its status.
-    if [ "$prev_pipe_line" -ne 0 ] && [ "$lineno" -eq $((prev_pipe_line + 1)) ]; then
+    if [ "$prev_pipe_line" -ne 0 ] && [ "$lineno" -eq $((prev_pipe_line + 1)) ] &&
+      [ "$(rank "$prev_pipe_conf")" -ge "$min_rank" ]; then
+      # The rank test is on this branch too (added 2026-09-09).  Without it
+      # `--min-confidence high` printed `17 finding(s) — high 16 · low 1`: this
+      # branch is the ONLY producer of a finding that skips the filter every
+      # other site passes through, so the headline count and the breakdown
+      # disagreed — and a ratchet keyed on the headline would have frozen a
+      # number the flag's own name says it excludes.
       case "$line" in
       *=\$\?*)
         findings=$((findings + 1))
@@ -727,6 +949,49 @@ if [ "$cannot" -gt 0 ]; then
   printf '%s: %d input(s) could not be read — this scan is INCOMPLETE\n' "$PROG" "$cannot" >&2
   exit 2
 fi
+
+# ── --baseline: the ratchet ─────────────────────────────────────────────────
+# The count may FALL freely and may never RISE.  A rise is a NEW site and reds.
+# A fall does NOT red, deliberately: a ratchet that fails when the world gets
+# BETTER trains its readers to regenerate the number, and the regeneration is
+# where a real regression gets laundered in.  It prints RATCHET LOOSE instead,
+# loudly, so the next PR through here lowers it on purpose.
+if [ -n "$baseline_file" ]; then
+  if [ ! -r "$baseline_file" ]; then
+    printf 'CANNOT READ: %s (baseline)\n' "$baseline_file" >&2
+    exit 2
+  fi
+  want=""
+  while IFS= read -r bl || [ -n "$bl" ]; do
+    bl="${bl%%#*}"
+    bl="${bl//[[:space:]]/}"
+    [ -n "$bl" ] || continue
+    want="$bl"
+    break
+  done <"$baseline_file"
+  case "$want" in
+  '' | *[!0-9]*)
+    printf 'CANNOT READ: %s carries no integer baseline (read: %s)\n' "$baseline_file" "${want:-<nothing>}" >&2
+    exit 2
+    ;;
+  esac
+  printf '%s: baseline %s (%s, --min-confidence %s) vs %d found\n' \
+    "$PROG" "$want" "$baseline_file" "$min_conf" "$findings"
+  if [ "$findings" -gt "$want" ]; then
+    printf '%s: RATCHET BROKEN — %d finding(s) at confidence >= %s, baseline is %d.\n' \
+      "$PROG" "$findings" "$min_conf" "$want" >&2
+    printf '%s: a NEW pipefail/SIGPIPE site was added. Fix it (here-string, or drop -q and redirect —\n' "$PROG" >&2
+    printf '%s: see the FIXES block at the top of this script). Do NOT raise the number in %s.\n' "$PROG" "$baseline_file" >&2
+    exit 1
+  fi
+  if [ "$findings" -lt "$want" ]; then
+    printf '%s: RATCHET LOOSE — %d finding(s) at confidence >= %s, baseline still says %d.\n' \
+      "$PROG" "$findings" "$min_conf" "$want" >&2
+    printf '%s: this is not a failure, it is progress that has not been banked. Lower the number in\n' "$PROG" >&2
+    printf '%s: %s to %d (and date the change) so the next regression cannot hide in the slack.\n' "$PROG" "$baseline_file" "$findings" >&2
+  fi
+fi
+
 if [ "$fail_on_finding" -eq 1 ] && [ "$findings" -gt 0 ]; then
   exit 1
 fi
