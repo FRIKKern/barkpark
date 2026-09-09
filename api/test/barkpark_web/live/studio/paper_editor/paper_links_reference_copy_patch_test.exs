@@ -23,6 +23,28 @@ defmodule BarkparkWeb.Studio.PaperEditor.PaperLinksReferenceCopyPatchTest do
              )
   end
 
+  test "identity guard is a fixed opaque digest sensitive only to non-copy identity" do
+    ref =
+      authored_ref(%{
+        "title" => "Before",
+        "description" => "Before description",
+        "unknown" => %{"private-marker" => "must-not-reach-the-dom"}
+      })
+
+    guard = Blocks.paper_link_ref_guard(ref)
+    assert is_binary(guard)
+    assert byte_size(guard) == 43
+    assert {:ok, digest} = Base.url_decode64(guard, padding: false)
+    assert byte_size(digest) == 32
+    refute digest =~ "must-not-reach-the-dom"
+
+    assert Blocks.paper_link_ref_guard(Map.put(ref, "title", "After")) === guard
+    assert Blocks.paper_link_ref_guard(Map.put(ref, "description", nil)) === guard
+
+    refute Blocks.paper_link_ref_guard(put_in(ref, ["unknown", "private-marker"], "changed")) ===
+             guard
+  end
+
   test "updates one authored reference field from authoritative source without refolding carriers" do
     first = authored_ref(%{"title" => "Before", "description" => "Before description"})
     sibling = %{"slug" => "sibling", "unknown" => [%{"keep" => true}]}

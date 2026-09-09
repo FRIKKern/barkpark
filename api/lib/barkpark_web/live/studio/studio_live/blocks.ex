@@ -89,7 +89,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
          true <- byte_size(encoded) <= @paper_link_ref_guard_max_bytes,
          {:ok, decoded} <- Jason.decode(encoded),
          true <- decoded === identity do
-      Base.url_encode64(encoded, padding: false)
+      digest = :crypto.hash(:sha256, encoded)
+      Base.url_encode64(digest, padding: false)
     else
       _ -> nil
     end
