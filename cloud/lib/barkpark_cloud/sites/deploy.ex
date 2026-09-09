@@ -2076,7 +2076,21 @@ defmodule BarkparkCloud.Sites.Deploy do
            runtime_target: runtime_target(site)
          }) do
       {:ok, status, body} when status in 200..299 ->
-        target = body["build_id"] || body["target_build"] || body["current_build"]
+        # ONE KEY, TRACED (deploy-reliability W12). This read used to be a
+        # three-way fallback — `body["build_id"] || body["target_build"] ||
+        # body["current_build"]` — which read as "whichever key the box happened
+        # to send wins", i.e. a live identity divergence. It is not: the box's
+        # raw body NEVER reaches here. The only producer of a 2xx rollback reply
+        # is `BoxRelay.HTTP.rollback/2`, which CONSTRUCTS a fresh map
+        # `%{"status" => "rolled_back", "build_id" => target_build(body)}` from
+        # the box's `TARGET_BUILD=<id>` stdout line. `"target_build"` and
+        # `"current_build"` are keys no code in this repo ever puts in a rollback
+        # body, so arms 2 and 3 could never fire — and keeping them advertised a
+        # contract the transport does not have. The real (and unchanged) hazard
+        # is that `"build_id"` is NIL when the box printed no `TARGET_BUILD=`
+        # line; `finish_rollback/4` below narrates that case and logs the
+        # site-pointer write it therefore skips.
+        target = body["build_id"]
         finish_rollback(site, bp, was, target)
 
       {:ok, 409, body} ->

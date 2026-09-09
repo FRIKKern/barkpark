@@ -1877,6 +1877,62 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert payload.slug == site.slug
     end
 
+    # deploy-reliability W12 — WHICH KEY NAMES THE TARGET. `rollback/2` used to
+    # read `body["build_id"] || body["target_build"] || body["current_build"]`,
+    # which reads as "whichever key the box happened to send wins" — a live
+    # identity divergence, since the three keys could name different builds.
+    # They cannot: the box's raw body never reaches `rollback/2`. The only
+    # producer of a 2xx rollback reply is `BoxRelay.HTTP.rollback/2`, which
+    # CONSTRUCTS `%{"status" => "rolled_back", "build_id" => target_build(body)}`
+    # from the box's `TARGET_BUILD=<id>` stdout line, so the other two keys could
+    # never fire. These two tests pin the collapsed contract in both directions.
+    test "the target is read from `build_id` ALONE — the retired fallback keys are not read" do
+      {bp, site} = setup_site()
+
+      {:ok, prev} = Registry.create_deployment(site, %{build_id: "prevbuild0000001"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "building"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "pushing"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "live"})
+      {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000001"})
+      {:ok, site} = Registry.set_site_current_deployment(site, live.id)
+
+      # A body shaped like the retired second and third arms. No transport in
+      # this repo can produce it, so it must NOT move the live pointer — reading
+      # it would mean the plane trusts a key its own relay never sends.
+      FakeBoxRelay.program(
+        rollback:
+          {:ok, 200,
+           %{
+             "status" => "rolled_back",
+             "target_build" => "prevbuild0000001",
+             "current_build" => "prevbuild0000001"
+           }}
+      )
+
+      assert {:ok, result} = Deploy.rollback(site, bp)
+      assert result.deployment_id == nil
+      assert result.previous_deployment_id == live.id
+      assert Repo.get(Site, site.id).current_deployment_id == live.id
+      refute prev.id == Repo.get(Site, site.id).current_deployment_id
+    end
+
+    test "a 2xx rollback body with NO build_id skips the pointer write and still answers ok" do
+      {bp, site} = setup_site()
+
+      {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000002"})
+      {:ok, site} = Registry.set_site_current_deployment(site, live.id)
+
+      # The REAL nil case: `BoxRelay.HTTP` puts the "build_id" key in every 2xx
+      # reply, but its value is nil when the box printed no `TARGET_BUILD=` line.
+      # The route answers 200 and the CLI gates on status alone — so the recorded
+      # truth is that the pointer still names the build we rolled AWAY from.
+      FakeBoxRelay.program(rollback: {:ok, 200, %{"status" => "rolled_back"}})
+
+      assert {:ok, result} = Deploy.rollback(site, bp)
+      assert result.deployment_id == nil
+      assert Repo.get(Site, site.id).current_deployment_id == live.id
+    end
+
     test "a box with no previous release is a FAILURE, not a cheerful no-op" do
       {bp, site} = setup_site()
       FakeBoxRelay.program(rollback: {:ok, 422, %{"error" => "no_previous"}})

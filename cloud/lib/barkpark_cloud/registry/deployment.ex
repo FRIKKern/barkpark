@@ -302,13 +302,40 @@ defmodule BarkparkCloud.Registry.Deployment do
   fenced builder pipeline and the on-box agent flips the live pointer only once
   the new row goes live (superseded deployments stay terminal-`live`).
 
+  IDENTITY TRAVELS WITH THE PIN (deploy-reliability W12). A promote is the
+  documented ROLLBACK primitive — promoting an OLDER artifact IS the rollback —
+  so the one thing the minted row must never lose is WHICH BYTES it is pinned
+  to. `artifact_url` names the location; `artifact_sha256` names the bytes at
+  that location, and `content_rev` names the content they were built from. They
+  are one fact in three fields, and copying only the location made the promoted
+  row unable to answer "what did I roll back TO?" — on the single path where
+  that is the whole question. All three ride together.
+
+  `source` is deliberately NOT carried, and that is not an oversight: it is
+  pipeline provenance ("box-build" | "prebuilt"), not content identity. A
+  promoted row minted as `prebuilt` would be `Deployment.prebuilt?/1`-true with
+  no `SiteArtifact` bytes of its own (the artifact store is keyed on deployment
+  id, and a promote uploads nothing), so `Sites.Deploy` would hand the box a
+  digest with no tarball and the row would sit queued forever. The promoted row
+  rebuilds; it still NAMES the artifact it was promoted from.
+
   `delivery_id` is deliberately absent: a promote is an operator action, not a
   GitHub redelivery, so it must not borrow (and collide on) the delivery-id
   idempotency index. `environment` is left to the schema default ("production").
   """
-  @spec promotion_attrs(t()) :: %{git_ref: String.t() | nil, artifact_url: String.t() | nil}
+  @spec promotion_attrs(t()) :: %{
+          git_ref: String.t() | nil,
+          artifact_url: String.t() | nil,
+          content_rev: String.t() | nil,
+          artifact_sha256: String.t() | nil
+        }
   def promotion_attrs(%__MODULE__{} = source),
-    do: %{git_ref: source.git_ref, artifact_url: source.artifact_url}
+    do: %{
+      git_ref: source.git_ref,
+      artifact_url: source.artifact_url,
+      content_rev: source.content_rev,
+      artifact_sha256: source.artifact_sha256
+    }
 
   @doc """
   Changeset for creating a Deployment. `site_id` is required; `status` is not
