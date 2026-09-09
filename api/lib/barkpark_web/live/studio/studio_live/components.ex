@@ -286,15 +286,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               landmark on the destination, a truthful `aria-expanded` on its
               control, and `inert` on what the panel covers. --%>
         <div class="editor-body editor-panel-main bp-paper-body" inert={@inspector_destination}>
-          <%!-- The accessible name is added ONLY when the always-editable
-                canvas is the surface (@canvas_on keeps the OFF path
-                byte-identical, D3; @show_editor keeps the name honest — an
-                HTML-only legacy paper on the ON path renders a READ-ONLY raw
-                body, which must not be announced as "Editing"). --%>
+          <%!-- The accessible name. On the canvas path it is UNCHANGED: the
+                "Editing …" name is still added only when the always-editable
+                canvas is genuinely the surface (@show_editor keeps it honest —
+                an HTML-only legacy paper on the ON path renders a READ-ONLY raw
+                body and must not be announced as "Editing").
+
+                spd-canvas-off-nonempty-guard — the OFF path used to get NO name
+                at all, because the whole expression was gated on @canvas_on.
+                That left the opt-out arm's landmark anonymous: a screen reader
+                announced a bare `main`, and for a blocks-list document with an
+                empty body there was not a single character inside it either. It
+                now carries the document's TITLE — the truthful name for a
+                surface that is a reading pane until the author presses Edit.
+                It is deliberately NOT "Editing …": the OFF path opens read-only,
+                and borrowing the canvas name would announce a mode the reader
+                is not in. --%>
           <main
             class="bp-paper-shell bp-paper-surface"
             data-test-id="studio-paper-shell"
-            aria-label={@canvas_on && @show_editor && @slug && "Editing #{@title}"}
+            aria-label={
+              @slug &&
+                if(@canvas_on, do: @show_editor && "Editing #{@title}", else: @title)
+            }
           >
             <%!-- Sentinel: rendered once, OUTSIDE the streamed/re-assigned
                   container. It survives a handle_info DOM diff but would be
@@ -338,6 +352,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                       papers (the "stale content after a jump" bug). Within
                       the SAME paper the id is stable, so `{:paper_block}`
                       deltas still diff in place with no remount. --%>
+                <%!-- spd-canvas-off-nonempty-guard — the empty-body sentence
+                      for THIS arm. A blocks-list document whose list is EMPTY
+                      renders a stream container with zero children, and this
+                      arm is where a `BARKPARK_PAPER_CANVAS=0` host lands on
+                      open: the author saw an entirely blank region and was told
+                      nothing about which document it was or how to start it.
+                      The editor arm has said this since spd-w18; the read-only
+                      arm never did, and `blank_body?/1`'s never-blank notice
+                      cannot cover it (a blocks LIST makes `paper_block_mode`
+                      true, so that cond clause is unreachable here).
+
+                      It is a SIBLING of the <article>, never a child: a
+                      `phx-update="stream"` container may only hold stream
+                      children, and a static child inside it would survive every
+                      later insert. `:if` on the block list means the very first
+                      block the author adds removes it. --%>
+                <p
+                  :if={@edit_blocks == []}
+                  class="bp-paper-editor-empty"
+                  data-test-id="paper-blocks-empty-readonly"
+                >
+                  This {@doc_type} (<code>{@slug}</code>) has no body blocks yet. Choose Edit above to add one.
+                </p>
                 <article
                   id={"paper-body-#{@slug}"}
                   data-rev={@paper_rev}
