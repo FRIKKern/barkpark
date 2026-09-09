@@ -32,9 +32,9 @@ name: pipefail SIGPIPE scan
 # Console gate, Elixir gate, PR references an active task) and nothing here can
 # stop a merge. Wiring makes the scan RUN, not BLOCK.
 #
-#   1. the selftest              — fails this job. 21 arms, including a
+#   1. the selftest              — fails this job. 22 arms, including a
 #                                  non-vacuity arm that RUNS the defect and
-#                                  requires the shell to really answer 141.
+#                                  requires the shell to hand a FAILURE back.
 #   2. the HIGH-confidence ratchet — fails this job when the count RISES above
 #                                  scripts/pipefail-sigpipe-baseline.txt. That
 #                                  file carries the number, the command that

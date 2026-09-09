@@ -125,11 +125,11 @@ if [ "${#targets[@]}" -eq 0 ]; then
 fi
 
 # ── --selftest ──────────────────────────────────────────────────────────────
-# Six fixtures, and the FIRST is the non-vacuity arm: it RUNS the defect and
-# asserts the shell really answers 141, so a future libc or bash that stopped
-# SIGPIPE-ing would red this rather than let the scanner hunt a ghost.  The rest
-# pin one discrimination each — the detector must say NO to the near-misses, or
-# a 100%-recall scanner that flags every pipe would pass.
+# The FIRST two are the non-vacuity arms: they RUN the defect and require the
+# shell to really hand a FAILURE back for a TRUE assertion, so a future libc or
+# bash that stopped SIGPIPE-ing would red here rather than let the scanner hunt a
+# ghost.  The rest pin one discrimination each — the detector must say NO to the
+# near-misses, or a 100%-recall scanner that flags every pipe would pass.
 if [ "$selftest" -eq 1 ]; then
   sp=0
   sf=0
@@ -148,17 +148,48 @@ if [ "$selftest" -eq 1 ]; then
   # MANY lines, matching on the FIRST: grep -q must be able to answer and exit
   # while the producer still has ~200KB to write.  One 200KB line would not do
   # it — grep would have to read to EOF just to see the line, and never SIGPIPE.
+  #
+  # THE PLATFORM SPLIT, and why this arm asks for NON-ZERO and not for 141
+  # (measured 2026-09-09, and it is the reason the whole selftest could not run
+  # in CI before that date — it demanded 141 and Actions reds it):
+  #
+  #   macOS / bash 3.2   builtin printf takes the default SIGPIPE disposition and
+  #                      dies; pipefail propagates  141.
+  #   ubuntu / bash 5    bash TRAPS the write error in its own builtin, prints
+  #                      `printf: write error: Broken pipe` and returns  1.
+  #
+  # Different number, IDENTICAL defect: the true answer is 0 (grep matched) and
+  # pipefail hands back a FAILURE either way.  Demanding the macOS number turned
+  # a platform difference into a red on the only platform CI has.  So the
+  # assertion is "a TRUE assertion comes back FALSE", and the number is REPORTED
+  # rather than required.  (0a) then pins 141 specifically, on an EXTERNAL
+  # producer, which has no builtin to trap anything.
   long="hit"
   while [ "${#long}" -lt 200000 ]; do long="$long"$'\n'"$long"; done
-  rc141=0
+  rcbi=0
   (
     set -o pipefail
     printf '%s\n' "$long" | grep -q '^hit$'
-  ) || rc141=$?
-  if [ "$rc141" -eq 141 ]; then
-    sok "(0) non-vacuity: printf | grep -q really returns 141 under pipefail on this shell"
+  ) 2>/dev/null || rcbi=$?
+  if [ "$rcbi" -ne 0 ]; then
+    sok "(0) non-vacuity: a TRUE \`printf | grep -q\` really comes back FAILED under pipefail (rc $rcbi on this box)"
   else
-    sno "(0) printf | grep -q returned $rc141, not 141 — every fixture below is testing a ghost"
+    sno "(0) printf | grep -q returned 0 — the defect does not reproduce here, so every fixture below is testing a ghost"
+  fi
+  # (0a) an EXTERNAL producer is killed by the signal itself: 141 exactly, on
+  # every platform.  This is the arm that would red if a future runtime stopped
+  # SIGPIPE-ing altogether — which (0) alone can no longer tell you, now that it
+  # accepts bash's trapped rc 1 as well.
+  printf '%s\n' "$long" >"$std/long.txt"
+  rcext=0
+  (
+    set -o pipefail
+    cat "$std/long.txt" | grep -q '^hit$'
+  ) 2>/dev/null || rcext=$?
+  if [ "$rcext" -eq 141 ]; then
+    sok "(0a) an external producer (cat) into grep -q really returns 141 under pipefail"
+  else
+    sno "(0a) cat | grep -q returned $rcext, not 141 — SIGPIPE is not reaching the producer on this box"
   fi
   rcfix=0
   (
