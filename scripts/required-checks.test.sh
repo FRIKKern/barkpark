@@ -1766,11 +1766,36 @@ api_stage() {
   # nobody could read. The verdict and the hold now arrive as different integers,
   # so this routes them to different tallies. stderr is KEPT (it carries verify's
   # own BLOCKED: line, which is the only text that names what could not be read).
+  #
+  # AND THE REASON IS NEVER ALLOWED TO COME OUT EMPTY (task-244828df076d1138).
+  # `grep -m1` matches nothing when verify dies BEFORE it can label its own
+  # failure — no `gh` on PATH, a shell error, an OOM — and an empty tail after
+  # the colon renders IDENTICALLY to the reason-free verdict this clause was
+  # rewritten to kill. So the labelled line is a PREFERENCE, not a requirement:
+  # with no marker, the last non-empty line of verify's own combined output is
+  # quoted and SAID to be a fallback. And on any non-zero rc the whole of
+  # verify's output is echoed under the verdict, so the operator reads the
+  # verifier's own words, not this clause's summary of them.
+  rc11_reason() {           # $@ = grep -e args, in preference order; reads RC11_OUT
+    local line
+    line="$(grep -m1 "$@" <<<"$RC11_OUT" || true)"
+    if [ -n "$line" ]; then printf '%s' "$line"; return; fi
+    line="$(grep -v '^[[:space:]]*$' <<<"$RC11_OUT" | tail -1 || true)"
+    if [ -n "$line" ]; then printf 'no labelled line; verify last said: %s' "$line"; return; fi
+    printf 'verify printed NOTHING on stdout or stderr'
+  }
+  rc11_dump() {             # verify's OWN output, verbatim, on the failing paths only
+    echo "  ---- required-checks-verify.sh output (exit $RC11_RC) ----" >&2
+    printf '%s\n' "$RC11_OUT" | sed 's/^/  | /' >&2
+    echo "  ---- end required-checks-verify.sh output ----" >&2
+  }
   RC11_OUT="$(bash "$VERIFY" 2>&1)" && RC11_RC=0 || RC11_RC=$?
   case "$RC11_RC" in
     0) ok "full mode is green on the COMMITTED spec (enforced=$(jq -r .enforced "$SPEC")) — hgw2-s7's slice gate passes" ;;
-    5) blocked "full mode could not READ one of its inputs, so this run has NO verdict about hgw2-s7's slice gate: $(grep -m1 '^BLOCKED:' <<<"$RC11_OUT")" ;;
-    *) bad "full mode reds on the committed spec (exit $RC11_RC) — hgw2-s7's slice gate cannot pass: $(grep -m1 -e '^FAIL:' -e DRIFT <<<"$RC11_OUT")" ;;
+    5) blocked "full mode could not READ one of its inputs (verify exit 5), so this run has NO verdict about hgw2-s7's slice gate: $(rc11_reason -e '^BLOCKED:')"
+       rc11_dump ;;
+    *) bad "full mode reds on the committed spec (verify exit $RC11_RC) — hgw2-s7's slice gate cannot pass: $(rc11_reason -e '^FAIL:' -e DRIFT)"
+       rc11_dump ;;
   esac
 
   if jq -e '.enforced == false' "$SPEC" >/dev/null; then
