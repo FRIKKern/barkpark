@@ -94,8 +94,12 @@ defmodule BarkparkWeb.Studio.StudioLivePlusPressRetryTest do
       assert second =~ @answer,
              "the second press said nothing — that silence is what left three orphan Untitled drafts on production"
 
-      assert [survivor] = papers(),
+      survivors = papers()
+
+      assert length(survivors) == 1,
              "a second draft was created: the press was obeyed instead of answered"
+
+      [survivor] = survivors
 
       assert survivor.doc_id == created.doc_id,
              "the human was re-navigated to a DIFFERENT document than the one their first press made"
