@@ -33,7 +33,7 @@ for pr in $(gh pr list --repo "$REPO" --state open --limit 300 --json number,hea
     *)            skipped=$((skipped+1)); continue;;
   esac
   if out=$(gh pr merge "$pr" --repo "$REPO" --squash --delete-branch 2>&1); then
-    merged=$((merged+1)); echo "$(date -u +%H:%MZ) MERGED #$pr $(gh pr view $pr --repo $REPO --json title --jq .title | cut -c1-80)" >> "$ORCH/merge-sweep.log"
+    merged=$((merged+1)); echo "$(date -u +%H:%MZ) MERGED #$pr $(gh pr view "$pr" --repo "$REPO" --json title --jq .title | cut -c1-80)" >> "$ORCH/merge-sweep.log"
   else
     echo "$(date -u +%H:%MZ) REFUSED #$pr: $(echo "$out" | tail -1 | cut -c1-140)" >> "$ORCH/merge-sweep.log"
   fi

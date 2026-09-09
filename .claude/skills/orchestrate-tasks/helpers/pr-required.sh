@@ -8,8 +8,9 @@
 # (measured 2026-09-02: an EARLY RED section appended here made a lane's watcher report a job
 # name where the verdict should be, and would have stopped the merge sweep merging anything).
 #
-# SELFTEST: `pr-required.sh --selftest` drives six arms (healthy PR / unreadable repo /
-# unreadable head sha / unfetchable check-runs / repo-arg omitted / genuine 0/4) against a stub `gh` on PATH,
+# SELFTEST: `pr-required.sh --selftest` drives seven arms (healthy PR / unreadable repo /
+# unreadable head sha / unfetchable check-runs / a head with NO check runs / repo-arg omitted /
+# genuine 0/4) against a stub `gh` on PATH,
 # from a cwd that is NOT a git repo, and asserts for each that `| tail -1` reads the verdict or
 # the refusal — never an intermediate line — that no refusal contains the string "0/4", and
 # that an HONEST 0/4 (four required contexts present, all failed) still verdicts at exit 0.
@@ -33,6 +34,9 @@ if [ "$1" = api ]; then
   for a in "$@"; do
     case "$a" in
       */check-runs*)   [ "${GH_STUB_BREAK:-}" = runs ] && exit 1
+                       # GH_STUB_BREAK=empty: the fetch SUCCEEDS and returns nothing. A head
+                       # with zero check runs is a fourth unreadable input, not a 0/4.
+                       [ "${GH_STUB_BREAK:-}" = empty ] && exit 0
                        # GH_STUB_ALLRED: the four required contexts EXIST on this head and every
                        # one concluded failure — a real, measured 0/4, not a failed read.
                        c=success; [ "${GH_STUB_ALLRED:-}" = 1 ] && c=failure
@@ -76,6 +80,7 @@ STUB
   case "$out" in *0/4*) printf 'FAIL %-20s the string 0/4 appears in a refusal\n' "unreadable repo"; fails=$((fails+1));; esac
   _arm "unreadable sha"   "CANNOT READ"     3 sha    42 acme/widget
   _arm "unfetchable runs" "CANNOT READ"     3 runs   42 acme/widget
+  _arm "no check runs"    "CANNOT READ"     3 empty  42 acme/widget
   # Arm 5: NO repo argument and `gh repo view` dead — the git-remote fallback must still resolve
   # owner/repo from the directory the SCRIPT lives in, so a lead calling `pr-required.sh <pr>`
   # from any cwd gets a verdict instead of the empty-repo lie. This is the cwd trigger.
@@ -95,7 +100,7 @@ STUB
   ALLRED=1 _arm "genuine 0/4"    "NOT YET: 0/4"    0 ""     42 acme/widget
   unset ALLRED
   rm -rf "$d"
-  if [ "$fails" = 0 ]; then echo "SELFTEST: 6/6 arms pass"; return 0; fi
+  if [ "$fails" = 0 ]; then echo "SELFTEST: 7/7 arms pass"; return 0; fi
   echo "SELFTEST: $fails assertion(s) FAILED"; return 1
 }
 [ "${1:-}" = "--selftest" ] && { selftest; exit $?; }
