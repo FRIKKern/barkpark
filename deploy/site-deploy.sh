@@ -2764,6 +2764,41 @@ FAKECP
         cmp -s "$HU/Caddyfile.after1" "$HU/Caddyfile"
       check "…and it reports the plain already-armed detail, not another upgrade" \
         grep -q '^BPSTAGE name=ROUTE status=ok build_id=hu2 detail="already armed: ' "$HU/up2.out"
+      # ---- THE SECOND UPGRADE ARM: a SHORT hide list is grown, not frozen ----
+      # A block armed AFTER the marker hide landed but BEFORE the junk classes
+      # joined $HIDE_LIST already has `file_server { hide … }`, so the
+      # bare-file_server arm above can NEVER see it — it would keep the two-item
+      # list forever and go on serving `._*` and `.DS_Store`. Shrink the hide
+      # line to exactly that historical shape and re-deploy.
+      sed -i.bak2 "s|^\(\t*\)hide .*|\1hide $PREBUILT_MARK $HEALTH_FAIL_MARK|" "$HU/Caddyfile"
+      rm -f "$HU/Caddyfile.bak2"
+      check "the SHORT-hide fixture really is the historical shape (hide, but no junk in it)" \
+        sh -c "grep -q 'hide ' '$HU/Caddyfile' && ! grep -q 'DS_Store' '$HU/Caddyfile'"
+      env PATH="$HU/bin:$FAKEBIN:$PATH" \
+        SITE_SLUG=hideup BUILD_ID=hu3 CONTENT_REV=rev-1 SITE_SRC="$HUSRC" \
+        BARKPARK_HEALTH_HOST=sites.example.com \
+        BARKPARK_SITES_DIR="$HU/sites" BARKPARK_CADDYFILE="$HU/Caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$HU/deploy.lock" BARKPARK_CADDYFILE_LOCK="$HU/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$HU/up3.out" 2> "$HU/up3.err" || true
+      check "an already-hidden block with a STALE hide list is grown to the full one" \
+        grep -qE "hide .* .DS_Store .* PaxHeader" "$HU/Caddyfile"
+      check "…and it did NOT nest a second file_server block to do it" \
+        sh -c "[ \"\$(grep -c 'file_server {' '$HU/Caddyfile')\" = 1 ]"
+      check "…and exactly one hide line survives" \
+        sh -c "[ \"\$(grep -c 'hide ' '$HU/Caddyfile')\" = 1 ]"
+      check "…and the grown Caddyfile is still REAL-caddy valid" \
+        caddy validate --adapter caddyfile --config "$HU/Caddyfile"
+      cp "$HU/Caddyfile" "$HU/Caddyfile.after3"
+      env PATH="$HU/bin:$FAKEBIN:$PATH" \
+        SITE_SLUG=hideup BUILD_ID=hu4 CONTENT_REV=rev-1 SITE_SRC="$HUSRC" \
+        BARKPARK_HEALTH_HOST=sites.example.com \
+        BARKPARK_SITES_DIR="$HU/sites" BARKPARK_CADDYFILE="$HU/Caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$HU/deploy.lock" BARKPARK_CADDYFILE_LOCK="$HU/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$HU/up4.out" 2> "$HU/up4.err" || true
+      check "the GROWN list is idempotent too (a matching hide line is left alone)" \
+        cmp -s "$HU/Caddyfile.after3" "$HU/Caddyfile"
       # ---- THE OUTCOME, through a real caddy on a real port -----------------
       # The engine's own markers live INSIDE the served tree. .bp-prebuilt-sha256
       # is written by the prebuilt path; .bp-health-failed by a failed gate. Put
