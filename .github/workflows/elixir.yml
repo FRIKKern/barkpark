@@ -1133,6 +1133,13 @@ jobs:
       # If system libvips is ever genuinely needed here, prefer apt caching
       # over re-adding a cold `apt-get update && install` to the critical path.
 
+      - name: MUTATION A (temporary, reverted before merge) — plant a broken apt source so apt-get update MUST fail
+        run: |
+          echo 'deb http://127.0.0.1:9/nope stable main' | sudo tee /etc/apt/sources.list.d/zz-mutation-a.list
+          if sudo apt-get update; then echo "::error::the planted source did not break apt-get update — this mutation proves nothing"; exit 1; fi
+          echo "apt-get update is broken as intended (fixture asserted)"
+        working-directory: .
+
       - name: Install libxml2-utils for ONIX XSD validation (Phase 6 WI5)
         # The :validator-tagged tests under
         # api/test/barkpark/plugins/onixedit/export/ shell to xmllint to validate
