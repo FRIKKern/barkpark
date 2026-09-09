@@ -301,7 +301,7 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	}
 
 	// task_stamp --met: the positionals (worker_id + observed_epoch) land in the
-	// POST body; criterion + met + evidence ride as query params (declared flags).
+	// POST body; criterion + met ride as query params; evidence rides the body.
 	res, err = cs.CallTool(bg, &mcp.CallToolParams{
 		Name: "task_stamp",
 		Arguments: map[string]any{
@@ -323,15 +323,23 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	if stampSent["worker_id"] != "cursor-test" || stampSent["observed_epoch"] != "2" {
 		t.Fatalf("stamp body positionals wrong: %q", stampBody)
 	}
-	// criterion/met/evidence rode as query flags — and never as body.
-	if !strings.Contains(stampQuery, "criterion=1") || !strings.Contains(stampQuery, "met=true") || !strings.Contains(stampQuery, "evidence=gate+green") {
-		t.Fatalf("stamp query = %q, want criterion+met+evidence", stampQuery)
+	// criterion/met ride as query flags; evidence rides the BODY since #17000
+	// (task-b71ece4e1a8d1f6d) — in the query it rode the request line, where
+	// the ~9.9KB wall is.
+	if !strings.Contains(stampQuery, "criterion=1") || !strings.Contains(stampQuery, "met=true") {
+		t.Fatalf("stamp query = %q, want criterion+met", stampQuery)
+	}
+	if strings.Contains(stampQuery, "evidence=") {
+		t.Fatalf("stamp query = %q, evidence must NOT ride the request line", stampQuery)
+	}
+	if stampSent["evidence"] != "gate green" {
+		t.Fatalf("stamp body evidence = %v, want %q (body: %q)", stampSent["evidence"], "gate green", stampBody)
 	}
 	if _, ok := stampSent["criterion"]; ok {
-		t.Fatalf("stamp flags must not leak into the body: %q", stampBody)
+		t.Fatalf("stamp scalar flags must not leak into the body: %q", stampBody)
 	}
 
-	// task_stamp --miss: records a note WITHOUT met; miss+note ride the query.
+	// task_stamp --miss: records a note WITHOUT met; miss rides the query, note the body.
 	stampQuery = ""
 	res, err = cs.CallTool(bg, &mcp.CallToolParams{
 		Name: "task_stamp",
@@ -346,8 +354,15 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("task_stamp miss unexpectedly IsError: %s", mcpContentText(res))
 	}
-	if !strings.Contains(stampQuery, "miss=true") || !strings.Contains(stampQuery, "note=flaky") || strings.Contains(stampQuery, "met=true") {
-		t.Fatalf("stamp miss query = %q, want miss+note and no met", stampQuery)
+	if !strings.Contains(stampQuery, "miss=true") || strings.Contains(stampQuery, "met=true") || strings.Contains(stampQuery, "note=") {
+		t.Fatalf("stamp miss query = %q, want miss, no met, and note in the BODY", stampQuery)
+	}
+	var missSent map[string]any
+	if err := json.Unmarshal(stampBody, &missSent); err != nil {
+		t.Fatalf("stamp miss body did not parse: %v (%q)", err, stampBody)
+	}
+	if missSent["note"] != "flaky, rerunning" {
+		t.Fatalf("stamp miss body note = %v, want %q", missSent["note"], "flaky, rerunning")
 	}
 
 	// task_stamp arg errors, caught client-side before any request:
