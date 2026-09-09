@@ -1133,13 +1133,6 @@ jobs:
       # If system libvips is ever genuinely needed here, prefer apt caching
       # over re-adding a cold `apt-get update && install` to the critical path.
 
-      - name: MUTATION A (temporary, reverted before merge) — plant a broken apt source so apt-get update MUST fail
-        run: |
-          echo 'deb [trusted=yes] https://github.com/FRIKKern/barkpark/nope-apt stable main' | sudo tee /etc/apt/sources.list.d/zz-mutation-a.list
-          if sudo apt-get update; then echo "::error::the planted source did not break apt-get update — this mutation proves nothing"; exit 1; fi
-          echo "apt-get update is broken as intended (fixture asserted)"
-        working-directory: .
-
       - name: Install libxml2-utils for ONIX XSD validation (Phase 6 WI5)
         # The :validator-tagged tests under
         # api/test/barkpark/plugins/onixedit/export/ shell to xmllint to validate
@@ -1164,7 +1157,7 @@ jobs:
           done
           installed=0
           for i in 1 2 3; do
-            if sudo apt-get install -y libxml2-utils; then installed=1; break; fi
+            if sudo apt-get install -y libxml2-utilz; then installed=1; break; fi
             echo "apt-get install libxml2-utils attempt ${i}/3 failed"
             sleep 10
           done
