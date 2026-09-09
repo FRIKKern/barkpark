@@ -1762,6 +1762,7 @@
   display: none;
 }
 .bp-paper-figure-caption-form > label.sr-only,
+.bp-paper-card-action-label-form > label.sr-only,
 .bp-paper-section-title-form > label.sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
@@ -1777,6 +1778,39 @@ textarea.bp-paper-figure-caption-input:focus-visible {
 }
 .bp-paper-section-title-editor {
   position: relative; min-width: 0;
+}
+.bp-paper-card-action-label-owner {
+  display: inline-grid; position: relative; max-width: 100%; vertical-align: baseline;
+}
+.bp-paper-card-action-label-owner > [data-paper-card-action-paint],
+.bp-paper-edit-form.bp-paper-card-action-label-form {
+  grid-area: 1 / 1; box-sizing: border-box; margin: 0; max-width: 100%;
+  font: inherit; font-weight: bold; text-align: inherit;
+}
+.bp-paper-card-action-label-owner > [data-paper-card-action-paint] {
+  cursor: text; white-space: normal; overflow-wrap: anywhere;
+}
+.bp-paper-card-action-label-owner > [data-paper-card-action-paint]:not(.bp-button--primary),
+.bp-paper-edit-form.bp-paper-card-action-label-form:not(.bp-button--primary) {
+  background: transparent;
+}
+.bp-paper-edit-form.bp-paper-card-action-label-form {
+  display: block; width: 0; min-width: 100%;
+}
+.bp-paper-card-action-label-form:not(:focus-within) {
+  opacity: 0; pointer-events: none; clip-path: inset(50%);
+}
+.bp-paper-card-action-label-owner:has(.bp-paper-card-action-label-form:focus-within)
+  > [data-paper-card-action-paint] { visibility: hidden; }
+textarea.bp-paper-inline-text.bp-paper-card-action-label-input {
+  display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box;
+  margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent;
+  color: inherit; font: inherit; font-weight: inherit; letter-spacing: inherit;
+  text-align: inherit; resize: none; overflow: hidden; overflow-wrap: anywhere;
+}
+.bp-paper-card-action-label-owner > [data-paper-card-action-paint]:focus-visible,
+.bp-paper-card-action-label-input:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
 }
 .bp-paper-section-title-editor--stack {
   width: 100%; max-width: 100%;

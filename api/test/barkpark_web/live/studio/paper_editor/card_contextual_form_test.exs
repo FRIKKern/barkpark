@@ -3,6 +3,59 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualFormTest do
 
   alias BarkparkWeb.Studio.StudioLive.Blocks
 
+  test "label-only source changes exactly one field in an existing action" do
+    for priority <- [nil, "secondary", "primary", "quiet"],
+        label <- [nil, "", "  Read  "] do
+      action = %{
+        "id" => "action-owner",
+        "type" => "action",
+        "label" => label,
+        "href" => nil,
+        "priority" => priority,
+        "future" => %{"keep" => [1, true]}
+      }
+
+      block =
+        card(%{
+          "unknown" => true,
+          "slots" => %{
+            "action" => [action],
+            "future" => %{"opaque" => true},
+            "body" => [%{"type" => "paragraph", "content" => inline("Body")}]
+          }
+        })
+
+      assert {:ok, op} =
+               Blocks.resolve_block_form([block], %{
+                 "block_id" => block["id"],
+                 "card-action-label" => "  New <literal>  "
+               })
+
+      changed = Map.merge(block, op["patch"])
+
+      assert changed ==
+               put_in(block, ["slots", "action"], [Map.put(action, "label", "  New <literal>  ")])
+
+      assert {:ok, %{}} =
+               Blocks.validate_block_patch(block, %{"card-action-label" => label || ""})
+    end
+
+    missing_label = card(%{"slots" => %{"action" => [%{"type" => "action", "href" => "/go"}]}})
+    assert {:ok, %{}} = Blocks.validate_block_patch(missing_label, %{"card-action-label" => ""})
+
+    for action <- [
+          [%{"type" => "action", "label" => 12}],
+          [%{"type" => "action"}, %{"type" => "action"}],
+          [%{"type" => "button", "label" => "Other carrier"}]
+        ] do
+      assert {:error, _} =
+               Blocks.resolve_block_form([card(%{"slots" => %{"action" => action}})], %{
+                 "block_id" => "card",
+                 "card-action-label" => "Refused"
+               })
+    end
+  end
+
   test "card form state projects strict singleton chrome without normalizing source" do
     assert Blocks.card_form_state(%{"id" => "bare", "type" => "card"}) ==
              {:ok,
