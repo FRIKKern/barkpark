@@ -99,6 +99,7 @@ esac
 # (pr-task-gate.sh extract_task_ids). ANY existing trailer — this id or another
 # — stops the append, because two DISTINCT ids is a REFUSAL in the gate, not a
 # pick. A second run of this workflow therefore adds nothing.
+# shellcheck disable=SC2016  # the backticks in the ERE are literal, not a command substitution
 if printf '%s' "${PR_BODY:-}" | grep -qiE '^task:[[:space:]]*`?[a-z0-9][a-z0-9._/-]*`?'; then
   echo "dependabot-task-trailer: NO-OP — the body already carries a column-0 'Task:' trailer, so nothing is appended (rc 4)" >&2
   exit 4

@@ -43,6 +43,24 @@ name: dependabot-task-trailer
 # labeled/unlabeled hatch are untouched by this PR.
 
 on:
+  # TWO TRIGGERS, one per job, and the split is deliberate.
+  #
+  # `pull_request` carries a READ-ONLY token and checks out the PR's OWN head —
+  # which is exactly what the self-test job needs: a PR that edits the injector
+  # or its harness must be tested against the version IT ships, not against the
+  # base. It can safely run PR code because that trigger grants no secrets and
+  # no write scope.
+  #
+  # `pull_request_target` carries the writable token the body edit needs, and
+  # runs the BASE ref only. Neither job is reachable from the other's trigger:
+  # each carries an `if: github.event_name == …`.
+  #
+  # The self-test lives in THIS file and not in shell-harnesses.yml for the same
+  # reason pr-task-gate.yml hosts its own: that workflow is workflow-level
+  # `on: paths:` filtered, and a paths-filtered workflow emits NO check run at
+  # all on a PR it skips (D18) — so a PR editing this injector could land with
+  # its harness never having run.
+  pull_request:
   pull_request_target:
     # `opened` is the arm that matters (dependabot opens in bursts). `reopened`
     # and `synchronize` cover a re-opened or force-pushed bump whose body was
@@ -75,6 +93,7 @@ jobs:
     # It is repeated inside the script (which is where it is mutation-tested):
     # this `if:` is the cost saver, the script's clause is the guard.
     if: >-
+      github.event_name == 'pull_request_target' &&
       github.actor == 'dependabot[bot]' &&
       startsWith(github.event.pull_request.head.ref, 'dependabot/')
     steps:
@@ -116,3 +135,20 @@ jobs:
             --repo "${{ github.repository }}" \
             --body-file new-body.txt
           echo "Appended Task: task-3e5d6364196a7cda to PR #${{ github.event.pull_request.number }}." >> "$GITHUB_STEP_SUMMARY"
+
+  selftest:
+    name: Dependabot trailer injector self-test
+    runs-on: ubuntu-latest
+    # `pull_request` only: this job runs the PR's own harness, which is safe
+    # because that trigger's token is read-only and carries no secrets. Under
+    # pull_request_target it would test the base ref and prove nothing about the
+    # change in front of it.
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck the injector and its harness
+        run: shellcheck scripts/dependabot-task-trailer.sh scripts/dependabot-task-trailer.test.sh
+      - name: "Hermetic fixtures: injector arms, author-clause mutation, and the gate's positive control"
+        run: bash scripts/dependabot-task-trailer.test.sh

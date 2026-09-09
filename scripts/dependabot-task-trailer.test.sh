@@ -128,6 +128,7 @@ fi
 echo "── §2 MUTATION: gut the author clause, the human arm must red ──────────"
 
 MUT="$TMP/mutant.sh"
+# shellcheck disable=SC2016  # \$ACTOR is a literal in the sed PATTERN, not an expansion
 sed 's/^if \[ "\$ACTOR" != "dependabot\[bot\]" \]; then$/if false; then/' "$INJECTOR" > "$MUT"
 if ! grep -qF 'if false; then' "$MUT"; then
   bad "MUTATION DID NOT APPLY" "the actor clause was not found in $INJECTOR — this section measured NOTHING"
