@@ -34,10 +34,22 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
       0 -> >=6) was DELETED OUTRIGHT rather than trimmed. Trimming it to its
       surviving property, `elapsed < 1_000`, would have left a green that passes
       identically against a perfectly healthy runner — a control that cannot
-      fail is worse than no control, because it reads as coverage. So the
-      no-`GenServer.call` property is now UNPINNED and this moduledoc says so
-      instead of implying otherwise. Follow-up:
-      `dr-w27-s7-restore-a-wedge-control-that-does-not-need-runner-queue-len`.
+      fail is worse than no control, because it reads as coverage.
+
+  ## RE-PINNED (dr-w27-s7): "a wedged Runner still gets answered"
+
+  The no-`GenServer.call` property is NO LONGER UNPINNED. The control at the
+  bottom of this file restores it WITHOUT the deleted field: the wedge is proven
+  where it lives — `Process.info(wedged, :message_queue_len) >= 6`, read off the
+  parked pid itself — and only then is the route's bounded-time 200 asserted.
+  The precondition is an assertion that CAN fail, so the timing assertion is no
+  longer vacuous, and no payload field observes the wedge (the controller's
+  "Honest limit" still holds: nothing on the wire sees one).
+
+  Its `on_exit` releases the singleton UNCONDITIONALLY — name restored, box
+  drained to idle — which is the defect the original carried: a red mid-wedge
+  leaked the registered name across files and could cascade into
+  `test/barkpark/sites/deploy_runner_door_census_test.exs`.
   """
   # async: false — borrows the DeployRunner singleton's registered name and
   # mutates Application env.
@@ -451,31 +463,116 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
     end
   end
 
-  # ── DELETED (dr-w26-s7): the wedged-Runner positive control ─────────────
+  # ── RESTORED (dr-w27-s7): the wedged-Runner positive control ────────────
   #
-  # There WAS a test here, and it worked: it wedged the Runner's registered name
-  # behind a process parked forever in `receive`, piled six real `DeployRunner.status/1`
-  # callers into that mailbox, and asserted the payload's `runner_queue_len`
-  # rose 0 -> >=6 while the route still answered in under a second. That is a
-  # genuine behavioural proof that no field makes a `GenServer.call`.
+  # dr-w26-s7 deleted the original whole. It observed wedge-ness ONLY through
+  # `runner_queue_len`, the payload field that PR removed for never having
+  # acquired a reader; trimming it to its surviving property, `elapsed < bound`,
+  # would have left a green that passes identically against a perfectly healthy
+  # runner — a control that cannot fail, which reads as coverage it does not
+  # provide.
   #
-  # It was deleted rather than trimmed, and the choice is argued rather than
-  # assumed. Its ONLY observable of wedge-ness was `runner_queue_len`, which
-  # this PR deletes for having no reader in its entire life. What would have
-  # survived a trim is `elapsed < 1_000` — and that assertion passes IDENTICALLY
-  # against a perfectly healthy runner, so a green would no longer tell you the
-  # wedge was ever constructed. A control that cannot fail is worse than an
-  # absent one, because the suite reads as covering something it does not.
-  #
-  # Deleting it also removes a real defect: the test aborted mid-wedge on
-  # failure and LEAKED the singleton's one build slot across tests and across
-  # files, which is why a failing run here could cascade into
-  # `deploy_runner_door_census_test.exs`.
-  #
-  # The no-`GenServer.call` property is now UNPINNED. That is stated here, in
-  # the router comment, and in this module's moduledoc rather than left for
-  # someone to discover. Restoring a control that observes the wedge WITHOUT
-  # the deleted field (measure the wedged pid's own mailbox directly with
-  # `Process.info/2`, then assert the route answers) is filed as
-  # `dr-w27-s7-restore-a-wedge-control-that-does-not-need-runner-queue-len`.
+  # This restoration needs no payload field at all. The wedge is proven where it
+  # actually exists — in the wedged process's OWN mailbox, read with
+  # `Process.info/2` — by an assertion that CAN fail (the six callers can fail to
+  # arrive; the name takeover can fail to take). Only once the wedge is a
+  # measured fact does the timing assertion mean anything, and then it means
+  # exactly what it says: `show/2` did not wait on the Runner.
+  describe "a wedged Runner still gets answered" do
+    test "the wedge is proven on the wedged pid's own mailbox, and the route still answers 200 inside the bound",
+         %{token: token} do
+      # Short status budget so the piling-up callers give up quickly; their
+      # `$gen_call` messages stay in the wedged process's mailbox regardless,
+      # which is what the precondition below measures.
+      put_runner_cfg(status_call_timeout_ms: 150)
+
+      real = Process.whereis(DeployRunner)
+      assert is_pid(real), "the DeployRunner singleton must be alive to be wedged"
+
+      # Parked forever on a message nobody sends: never processes its mailbox.
+      wedged = spawn(fn -> receive do: (:never -> :ok) end)
+
+      # UNCONDITIONAL RELEASE (dr-w27-s7). Registered BEFORE the takeover and
+      # written so that no assertion below can skip it: whatever this test
+      # asserted, failed, or raised, the singleton's registered name points back
+      # at the REAL runner and the box is drained to zero in-flight builds before
+      # the next test — and the next FILE — reads it. The original control
+      # aborted mid-wedge on failure and leaked the singleton across files, which
+      # is why one red here could cascade into
+      # `test/barkpark/sites/deploy_runner_door_census_test.exs`, whose every
+      # `refresh_door_census/1` and `await_in_flight/1` goes through this exact
+      # registered name.
+      on_exit(fn ->
+        if Process.whereis(DeployRunner) == wedged, do: Process.unregister(DeployRunner)
+        Process.exit(wedged, :kill)
+
+        if is_nil(Process.whereis(DeployRunner)) and Process.alive?(real),
+          do: Process.register(real, DeployRunner)
+
+        # The build slot itself: released through the RESTORED runner, so a red
+        # above cannot hand the next file a box that reads busy forever.
+        await_idle_box()
+      end)
+
+      Process.unregister(DeployRunner)
+      Process.register(wedged, DeployRunner)
+
+      # Six real callers do what the control plane does — poll status — and are
+      # never answered.
+      for i <- 1..6 do
+        Task.start(fn -> DeployRunner.status("wedge-probe-#{i}") end)
+      end
+
+      # THE PRECONDITION, AND IT CAN FAIL. Read off the wedged pid directly, not
+      # off the wire: no payload field reports this any more, and that is the
+      # point. If the takeover did not take, or the callers never arrived, this
+      # reds and the timing assertion below is never reached on a box that was
+      # not actually wedged.
+      assert {:message_queue_len, queued} = await_queue_len(wedged, 6, 5_000)
+
+      assert queued >= 6,
+             "the wedge was never established: the parked pid holds #{queued} " <>
+               "unanswered messages, expected at least the 6 status callers"
+
+      started = System.monotonic_time(:millisecond)
+      body = scoped_conn() |> authed(token) |> get(@route) |> json_response(200)
+      elapsed = System.monotonic_time(:millisecond) - started
+
+      # THE PROPERTY: the capability read is not taken down by the wedge it
+      # exists to be readable during. A single `GenServer.call` to the Runner
+      # anywhere in `show/2` blows this.
+      #
+      # THE BOUND, AND ITS MARGIN. `show/2` is a `whereis` + an ETS read + one
+      # small file read: single-digit milliseconds, so 1_000 is ~100x the honest
+      # cost and cannot red on a loaded CI box. A `GenServer.call` introduced
+      # into `show/2` cannot come back at all under this wedge — it either sits
+      # for its timeout (5_000ms by default, 5x the bound) or exits into a 500,
+      # so the mutation cannot squeeze under 1_000 by being fast. Measured by
+      # mutation, not assumed: see the task's evidence.
+      assert elapsed < 1_000,
+             "the capability read must not wait on the Runner (took #{elapsed}ms)"
+
+      # And the wedge is genuinely invisible to the payload, which is exactly the
+      # "Honest limit" the controller moduledoc states: a parked process is as
+      # alive as a healthy one to `Process.whereis/1`.
+      assert body["runner_alive"] == true
+      assert body["configured"] == DeployRunner.enabled?()
+      assert body["door"]["capacity"] == DeployRunner.build_slot_capacity()
+    end
+  end
+
+  defp await_queue_len(pid, at_least, budget_ms) do
+    deadline = System.monotonic_time(:millisecond) + budget_ms
+    do_await_queue_len(pid, at_least, deadline)
+  end
+
+  defp do_await_queue_len(pid, at_least, deadline) do
+    info = Process.info(pid, :message_queue_len)
+
+    cond do
+      match?({:message_queue_len, n} when n >= at_least, info) -> info
+      System.monotonic_time(:millisecond) >= deadline -> info
+      true -> Process.sleep(10) && do_await_queue_len(pid, at_least, deadline)
+    end
+  end
 end

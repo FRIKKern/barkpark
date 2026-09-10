@@ -92,8 +92,18 @@ fixture_ok() { # <path>
 
 # ── fixtures: two delivering runs, both recorded, box serving a recorded sha ──
 RUNS="$TMP/runs.json"
-printf '{"workflow_runs":[{"id":1,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"},{"id":2,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"}]}' \
-  "$SHA_A" "$IN1" "$SHA_B" "$IN2" > "$RUNS"; fixture_ok "$RUNS"
+# `updated_at` is STATED, as the live Actions listing always states it:
+# crown-reconcile's run-interval alibi constraint
+# (dr-w29-s1-followup-run-id-alibi-is-self-reported) checks each row's
+# first_seen_at against the created..updated span of the run it names, and a
+# fixture with no span makes every row here ALIBI-INTERVAL-UNREADABLE (rc 2) —
+# which would red every waiver arm below for a reason that has nothing to do with
+# waivers. Each run is given a 600s span starting at its created_at, so the rows
+# below (first seen at their own run's created_at) sit inside it.
+RUN_END1="$(date -u -r "$((WEXP_EPOCH - 21600 + 600))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$((WEXP_EPOCH - 21600 + 600))" +%Y-%m-%dT%H:%M:%SZ)"
+RUN_END2="$(date -u -r "$((WEXP_EPOCH - 18000 + 600))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$((WEXP_EPOCH - 18000 + 600))" +%Y-%m-%dT%H:%M:%SZ)"
+printf '{"workflow_runs":[{"id":1,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s","updated_at":"%s"},{"id":2,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s","updated_at":"%s"}]}' \
+  "$SHA_A" "$IN1" "$RUN_END1" "$SHA_B" "$IN2" "$RUN_END2" > "$RUNS"; fixture_ok "$RUNS"
 JOBS="$TMP/jobs.json"
 printf '{"1":[{"name":"changes","conclusion":"success"},{"name":"control-plane","conclusion":"success"},{"name":"instance","conclusion":"success"}],"2":[{"name":"changes","conclusion":"success"},{"name":"control-plane","conclusion":"success"},{"name":"instance","conclusion":"success"}]}' > "$JOBS"; fixture_ok "$JOBS"
 CROWN="$TMP/crown.json"

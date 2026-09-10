@@ -1614,7 +1614,39 @@ defmodule BarkparkCloud.DeployLedger do
       # THE SECOND INDEPENDENT COUNT, in the code and not in a test.
       completeness: completeness(scoped, volume, not_attempted_rows),
       boundaries: @boundaries,
+      # THE CLASS VOCABULARY, ON THE WIRE (dr-w16-s3-followup-class-vocabulary-unreachable).
+      # `classes` above is what this WINDOW OBSERVED; this is what the ledger can
+      # ever say. A reader cannot tell those apart from the observed list alone —
+      # a class missing from `classes` means "no rows here", never "no such
+      # class" — so a legend built from the observed rows is a legend that
+      # changes shape with the window, and a CLI that wants a stable one has to
+      # hard-code the enum on the far side of the wire. That is the second
+      # drifting definition `deployCensusDeferredTotal` already cost this
+      # census once.
+      vocabulary: vocabulary(),
       min_sample: @min_sample
+    }
+  end
+
+  # THE THREE ENUMS `classify/2` CAN RETURN, as one node. Written as a named
+  # producer rather than an inline literal for the same reason `site_row/2` is:
+  # the payload census can only walk a named `def`/`defp`.
+  #
+  # These are LISTS OF STRINGS, so the evaluated walk records the node and its
+  # three keys and nothing below them — the class NAMES are data, not wire keys,
+  # and a new class must not red a key-set register.
+  #
+  # It is also the reader that took `classes/0`, `deferred_classes/0` and
+  # `not_attempted_classes/0` off the reachability allowlist: all three were
+  # publics with ZERO callers in `cloud/lib`, kept warm by nine test references
+  # and reachable by no operator (D245). They are read HERE now, and what they
+  # return reaches a human through the census envelope `Web.Router` already
+  # serialises whole — no new route, and no edit to router.ex.
+  defp vocabulary do
+    %{
+      classes: classes(),
+      deferred_classes: deferred_classes(),
+      not_attempted_classes: not_attempted_classes()
     }
   end
 

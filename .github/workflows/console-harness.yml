@@ -720,7 +720,9 @@ jobs:
       # mock.js carry no `run:` line of their own but are IMPORTED by
       # instruments that do, so their bytes execute on every console run.
       # (smoke.mjs, member-authority-sweep.mjs, breakpoint-sweep.mjs,
-      # cssom-parity.mjs, overflow-guard.mjs, fixtures/ready-host-paint/proof.mjs
+      # cssom-parity.mjs, overflow-guard.mjs, hashchange-wiring.mjs (added and
+      # wired by the same commit, as a step of the `modal-oracle` job),
+      # fixtures/ready-host-paint/proof.mjs
       # and five `.test.mjs` suites — seal-predicate, breakpoint-sweep,
       # bringup-retry, ready-host-paint and, since task-e3bd53c0df306521,
       # attention-scenarios — are invoked outright, above; they were never
@@ -1952,6 +1954,64 @@ jobs:
             *)
               verdict UNINTERPRETABLE
               echo "::error title=Modal oracle UNINTERPRETABLE::modal-oracle.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
+      # ── gr-blk-hashchange-listener-wiring-proof ──────────────────────────
+      # A SECOND browser instrument, riding this job rather than a job of its
+      # own. That is a deliberate choice and here is the whole of it: this job
+      # already provisions node 22 and an explicit CHROME (the only two things
+      # hashchange-wiring.mjs needs), it is already an upstream `needs:` of the
+      # REQUIRED `Console gate`, and `Console gate` is fail-closed on
+      # `needs.modal-oracle.result` — so a red here fails the job and BLOCKS the
+      # merge with no edit to the aggregator at all. A separate job would need
+      # three more edits (`needs:`, an `R_*`/`V_*` pair, a `decide` line) and
+      # would move the "decide calls must equal the length of needs:" count that
+      # scripts/console-path-escape-check.test.sh walks.
+      #
+      # WHAT IT COSTS, SAID OUT LOUD RATHER THAN LEFT FOR A READER TO FIND: this
+      # step publishes NO verdict, because the job's single `verdict` output
+      # belongs to the step above and is already written by the time this one
+      # runs. If the oracle passes and this fails, `Console gate` sees
+      # result=failure with verdict=OK and takes its "verdict='OK' but the job
+      # FAILED — cannot tell, therefore red" arm. That is red, fail-closed, and
+      # honest; it simply names this step one line later, in this job's log,
+      # instead of in the aggregate. The `::error` below carries the mechanism.
+      #
+      # WHAT IT ASSERTS, and why no existing gate could: three legs in a real
+      # Chrome that WRITE `location.hash` on a settled page. `__app.test.mjs`
+      # only ever REGISTERS init() inside a node:vm (readyState "loading"), so
+      # the hashchange listener never binds there; `smoke.mjs` reaches every
+      # screen by a LOAD-TIME deep link and never mutates the hash. GR105 was
+      # therefore pinned at the pure decision and unpinned at the wiring —
+      # deleting `if (eff.close) closeModal();` from the listener left every
+      # gate in this repository green. The instrument's header carries the
+      # measured 3x3 mutation matrix.
+      #
+      # ~14s wall for all three legs on a developer host (1.3s when green; a
+      # failing leg spends its 12s settle cap before it will call a miss).
+      - name: Hashchange wiring — does the LIVE listener obey the pure decision?
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/hashchange-wiring.mjs || rc=$?
+          case "$rc" in
+            0)
+              echo "Hashchange wiring: every leg it declared asserted clean in a real browser (the leg roster and the count are printed above)."
+              ;;
+            2)
+              echo "::error title=Hashchange wiring REFUSED::The instrument refused to measure (exit 2) — an ENVIRONMENT, VOCABULARY or PRECONDITION fault, not a wiring defect. NO claim is being made about the hashchange listener in either direction. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a server rooted at another tree squatting the port, an unknown LEG name, or a leg whose PRECONDITION never held — the account modal never opened, a deep link never landed, or no hashchange event was dispatched at all. That last class is a CONSOLE fault as often as an environment one: read the leg's own refusal line."
+              exit 1
+              ;;
+            1)
+              echo "::error title=Hashchange wiring DEFECT::A measured defect in a real browser (exit 1) — this IS about the console's own bytes. The LIVE hashchange listener in init() no longer obeys hashChangeEffects. The failing leg names the mechanism on stderr above, and it is one of three: a route change no longer CLOSES an open modal (the closeModal() call removed from the listener, the listener unbound, or #modal-root selector drift); the legacy #launch bookmark no longer ENDS with the launcher open (closeModal() moved BELOW applyRoute(), so the route's own modal is torn back down); or a legacy-ALIAS hash change now closes a modal it must not (a blanket 'close on any hashchange', the naive reading of GR105). The pure hashChangeEffects tests in __app.test.mjs CANNOT see any of these — that is why this step exists."
+              exit 1
+              ;;
+            *)
+              echo "::error title=Hashchange wiring UNINTERPRETABLE::hashchange-wiring.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
               exit 1
               ;;
           esac
