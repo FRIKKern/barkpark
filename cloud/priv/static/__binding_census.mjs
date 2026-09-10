@@ -236,6 +236,16 @@ import path from "node:path";
 import { bootScenario, flush } from "./__preview__/smoke.mjs";
 import { SCENARIOS, SCENARIO_NAMES, route } from "./__preview__/scenarios.mjs";
 import { scanControls } from "./__preview__/member-authority-sweep.mjs";
+// THE ROUTE -> FENCE TABLE IS NOT HERE ANY MORE (cch-w50-bl). The tier names,
+// the inline-cond overlay and the derivation live in __route_fence.mjs, which
+// member-authority-sweep.mjs imports too — the sweep used to keep a SECOND,
+// typed fence column citing this file's PIN rows in prose. One table now, and
+// (2n) below re-reads the PIN against it so the two cannot drift apart.
+import {
+  A_USER, A_TADMIN, A_PTADMIN, A_PTOWNER, A_OPERATOR, A_USER_OR_PAT, A_ABILITY, H_TEAM_ROLE,
+  INLINE_COND_ROUTES, INLINE_COND_EXCLUDED,
+  ROUTE_TIERS, ELEVATED, fenceFor, overlayGapReport, routeKey,
+} from "./__route_fence.mjs";
 
 const here = path.dirname(new URL(import.meta.url).pathname);
 // ── THE FIXTURE MODE FLAG IS RESOLVED HERE, AT THE `APP` BINDING ────────────
@@ -316,14 +326,11 @@ const src = fs.readFileSync(APP, "utf8");
 // dishonesty is owned by a filed task". It is never a way to quiet the gate.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const A_USER = "Auth.require_user";
-const A_TADMIN = "Auth.require_team_admin";
-const A_PTADMIN = "Auth.require_current_team_admin";
-const A_PTOWNER = "Auth.require_current_team_owner";
-const A_OPERATOR = "Auth.require_platform_operator";
-const A_USER_OR_PAT = "Auth.require_user_or_pat";
-const A_ABILITY = "Auth.require_ability";
-const H_TEAM_ROLE = 'with_team_role(conn, "admin")';
+// The A_* tier names are IMPORTED from __route_fence.mjs (see the header
+// there): the sweep needs the same vocabulary to derive a fence, and two files
+// spelling `Auth.require_user_or_pat` independently is how the strings drift.
+// H_TEAM_ROLE rides with them: the shared derivation has to classify it as
+// elevated, so it is the same string on both sides or neither.
 const H_TEAM_SITE = 'with_team_site(conn, {:ability, "write"})';
 const H_TEAM_SITE_M = "with_team_site(conn, fn)";
 const H_PROXY = "proxy_instance_webhook/2";
@@ -546,45 +553,14 @@ const RESOLVERS = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE INLINE-COND OVERLAY (charter D421) — eight router routes whose refusal of a
-// non-admin lives in a `cond` clause, invisible to any `Auth.*` grep. Recorded
-// here because four of the console's unpredicated elevated writes are elevated
-// ONLY by these, and a census that read `Auth.*` alone would call them member.
-//
-// SIX, NOT SEVEN. cch-w36-s5's brief mandated "the SEVEN post-guard inline-cond
-// routes"; the grep it prescribed returns SIX. The seventh site BY CONTENT is
-// the one reading `admin? = Accounts.team_admin?(user, team)` — invisible to
-// that grep because it binds a local; its line is DERIVED and printed as the
-// overlay's EXCLUDED row, never written down here. It is EXCLUDED BY NAME, not counted: it
-// is a self-scope NARROWING on a GET (the notification delivery log fences a
-// member to their own rows), never a refusal. Inventing a seventh row would
-// have made the overlay wrong in the other direction.
-//
-// EIGHT SINCE PDF-D94 (pdf-bl-console-key-custody): the agent-key POST and its
-// status-poll GET both refuse non-admin sessions inside the same cond shape as
-// POST /v1/fleet/supports (the read narrates a write only admins can make, so
-// it carries the same disjunction). Recorded the day they landed, in the same
-// commit as the routes.
+// THE INLINE-COND OVERLAY (charter D421) — MOVED, NOT DELETED (cch-w50-bl).
+// The routes, the SIX-not-seven ruling, the excluded local-binding site and the
+// never-pin-a-line-number ruling now live in __route_fence.mjs, imported at the
+// top of this file and imported by member-authority-sweep.mjs too. The overlay
+// is half of the route -> fence answer, and the answer is one table or it is
+// two tables that disagree. (2f) below still checks it against router.ex, and
+// (2n) checks the shared table against the PIN.
 // ═══════════════════════════════════════════════════════════════════════════
-
-// THE ROUTES ARE PINNED. THE LINE NUMBERS ARE NOT, AND NEVER AGAIN WILL BE.
-// These six used to carry a typed `line:` that the census PRINTED, and all six
-// were stale (drift 82, 87, 94, 98, 230, 235; router.ex at the recorded 8082 is
-// now a bare `conn`). Pin-and-check was built and REFUSED: router.ex took 102
-// commits in 30 days and all six of these lines moved within a SINGLE calendar
-// day, so a numeral corrected at merge is wrong by the next one — and this
-// census runs FIRST of three in the same CI job (console-harness.yml), so a
-// drift red would convert an unrelated router insertion into a three-census
-// outage. DERIVE AND PRINT; never pin and compare.
-const INLINE_COND_ROUTES = [
-  "POST /v1/fleet/supports",
-  "DELETE /v1/fleet/supports/:id",
-  "POST /v1/barkparks/:id/agent-key",
-  "GET /v1/barkparks/:id/agent-key (status poll — same cond, admin-narrated read)",
-  "POST /v1/launch + POST /v1/go-live (go_live/1)",
-  "POST /v1/resurrect (resurrect/1)",
-];
-const INLINE_COND_EXCLUDED = { why: "self-scope NARROWING on GET /v1/notifications/deliveries — binds `admin?` as a local, never refuses" };
 
 // KEY ON THE TWO PRECISE FORMS, NEVER THE BARE STRING. `grep -n 'team_admin?'
 // router.ex` returns MORE hits than the eight refusal-form sites and the one
@@ -1810,6 +1786,97 @@ if (dupes.length) {
     console.log(`  router.ex:${pad(String(refusalLines[i]), 8)}${INLINE_COND_ROUTES[i]}`);
   }
   console.log(`  EXCLUDED  router.ex:${localLines[0]} — ${INLINE_COND_EXCLUDED.why}`);
+}
+
+// (2n) THE SHARED ROUTE -> FENCE TABLE MUST AGREE WITH THIS PIN (cch-w50-bl).
+// ((2m) is the population split that landed in #17269; this arm is the next letter.)
+//
+// __route_fence.mjs is the ONE route -> fence table, and member-authority-sweep.mjs
+// derives every one of its hook fences from it. Before cch-w50-bl the sweep kept a
+// SECOND, typed fence column whose only tie to this file was a prose citation
+// ("census PIN: runPromote, ruling (a)") that nothing re-read — so the census
+// could move and the sweep would keep answering the old tier, silently, forever.
+//
+// THE FAIL-OPEN THIS ARM EXISTS FOR. A require_*-only derivation is not merely
+// incomplete, it is WRONG IN THE PERMISSIVE DIRECTION: POST /v1/fleet/supports is
+// mounted under Auth.require_user_or_pat and derives to plain member, while its
+// refusal of a non-admin session lives in a `cond` no `Auth.*` grep can see. The
+// shipped derivation layers the inline-cond overlay on top, and the two halves of
+// this arm make that losable from both ends:
+//
+//   · overlayGapReport() — a route typed `overlay_required` whose naive fence is
+//     no longer raised (delete an overlay row and this fires, by route name), or
+//     a route the overlay raises that nobody typed.
+//   · the PIN cross-read — every table row names the PIN key it is proven against,
+//     and this re-reads it: same tier string, and the derived fence's
+//     elevated-ness equal to the row's own `elevated` verdict. Under-fence a route
+//     in the shared table and the census's own pin refutes it here.
+//
+// A table row may decline to name a PIN key, but then it must say WHY and this
+// prints the reason — the PIN is 80 WRITE call sites, so a read route or a band
+// label has nothing there to bind to. Bind or explain is a rule, not a list, which
+// is why a third unbound row cannot appear quietly.
+{
+  const gap = overlayGapReport();
+  if (!gap.ok) {
+    die2([
+      "FAIL(2): the shared route -> fence derivation lost the inline-cond overlay.",
+      "  __route_fence.mjs derives a route's fence from its Auth.require_* tier and THEN raises it",
+      "  with the overlay. Without the raise, a require_*-only answer is fail-open — it calls an",
+      "  admin-fenced route member-reachable, and the console offers a write the server refuses.",
+      "",
+      ...gap.bad.map((b) => "  " + b),
+    ]);
+  }
+
+  const bad = [];
+  const unbound = [];
+  for (const entry of ROUTE_TIERS) {
+    const derived = fenceFor(entry);
+    if (!entry.pin) {
+      if (!entry.why_no_pin) {
+        bad.push(entry.key + " names no PIN key and gives no reason. Bind it to a PIN row, or write why_no_pin.");
+      } else {
+        unbound.push(entry);
+      }
+      continue;
+    }
+    const rows = PIN.filter((r) => routeKey(r.verb, r.route) === routeKey(...entry.pin.split(/\s+(.+)/)));
+    if (!rows.length) {
+      bad.push(entry.key + " claims PIN key `" + entry.pin + "`, and the PIN has no row on that route any more. " +
+        "Either the call site went away (drop the table row, or say why_no_pin) or the route was renamed.");
+      continue;
+    }
+    for (const r of rows) {
+      if ((r.auth_fn || null) !== (entry.auth_fn || null)) {
+        bad.push(entry.key + ": the table says tier `" + entry.auth_fn + "`, PIN row " + r.fn + " says `" + r.auth_fn +
+          "`. One of them is describing a router that no longer exists.");
+      }
+      if (ELEVATED.has(derived) !== !!r.elevated) {
+        bad.push(entry.key + ": the shared derivation answers " + derived + " (elevated=" + ELEVATED.has(derived) +
+          ") and PIN row " + r.fn + " scores elevated=" + !!r.elevated + ". A route cannot be above plain membership " +
+          "for one instrument and at it for the other — that disagreement IS the defect class this table was extracted " +
+          "to end.");
+      }
+    }
+  }
+  if (bad.length) {
+    die2([
+      "FAIL(2): the shared route -> fence table and this PIN disagree.",
+      ...bad.map((b) => "  " + b),
+    ]);
+  }
+
+  const gapKeys = gap.lines.length;
+  console.log("");
+  console.log("shared route->fence table (cch-w50-bl): " + ROUTE_TIERS.length + " route(s), " +
+    (ROUTE_TIERS.length - unbound.length) + " bound to a PIN row and re-read just now");
+  console.log("  a require_*-only derivation UNDER-FENCES " + gapKeys + " of them — the overlay is what catches these:");
+  for (const l of gap.lines) console.log("    " + l);
+  for (const u of unbound) {
+    console.log("  NOT PIN-BOUND  " + u.key + " (" + fenceFor(u) + ")");
+    console.log("                 " + u.why_no_pin);
+  }
 }
 
 // (2g) EVERY PINNED PREDICATE MUST NAME A REAL DECLARATION IN app.js.
