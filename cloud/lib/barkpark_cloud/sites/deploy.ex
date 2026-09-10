@@ -1632,7 +1632,14 @@ defmodule BarkparkCloud.Sites.Deploy do
   defp defer(ctx, %Deployment{} = deployment, reason) do
     site = ctx.site
     cause = deferral_cause(deployment.stage, reason)
-    prior = consecutive_deferrals(site, cause)
+
+    # THE CHAIN ITSELF, not only its length (dr-bl-deferral-scheduled-vs-actual-gap).
+    # `consecutive_deferrals/2` already walked these rows to count them; the
+    # PREVIOUS row's `inserted_at` is the other half of the pace measurement and
+    # it was being dropped on the floor. One scan, both facts.
+    chain = deferral_chain(site, cause)
+    prior = length(chain)
+    pacing = deferral_pacing(deployment, chain)
 
     cond do
       Deployment.prebuilt?(deployment) ->
@@ -1660,11 +1667,20 @@ defmodule BarkparkCloud.Sites.Deploy do
         # written `failed` and never `deferred`: the highest depth a DEFERRED
         # row can carry is 11 (capacity) / 5 (busy), and the abandonment that
         # follows it is 12 / 6 — the same number the sentence interpolates.
-        fail(ctx, abandonment_reason(reason, prior + 1, cause), %{
-          deferral_depth: prior + 1,
-          deferral_bound: max_consecutive_deferrals(cause),
-          deferral_cause: cause
-        })
+        # THE PACE RIDES ALONG (dr-bl-deferral-scheduled-vs-actual-gap). The
+        # terminal round is a real elapsed interval like any other — and it is
+        # the one round where "the box was slow" and "our ladder was slow" have
+        # the most different remedies — so it stamps the pair too. Excluding it
+        # would put a hole at exactly the depth an operator looks at first.
+        fail(
+          ctx,
+          abandonment_reason(reason, prior + 1, cause),
+          Map.merge(pacing, %{
+            deferral_depth: prior + 1,
+            deferral_bound: max_consecutive_deferrals(cause),
+            deferral_cause: cause
+          })
+        )
 
       true ->
         # THE DEPTH TRAVELS (deploy-reliability charter D99, PR #9905). `prior`
@@ -1734,9 +1750,26 @@ defmodule BarkparkCloud.Sites.Deploy do
                 # classifies off the reason string this wave. Write first, read
                 # next wave — a reader flipped in the same change as its producer
                 # cannot be proven to have been broken before.
+                # THE PACE, IN THE SAME WRITE AS THE SHAPE
+                # (dr-bl-deferral-scheduled-vs-actual-gap). `deferral_depth` says
+                # how deep this chain went; these two say how fast, and BOTH
+                # describe the same interval — the gap between the previous
+                # round of this chain and this one — so the ratio an operator
+                # wants is one row's arithmetic and never a self-join.
+                #
+                # A ratio near 1.0 says the chain is CLOCK-paced and the lever is
+                # our OWN ladder (config, in-fence, free). A ratio far above 1.0
+                # says the wait is real contention on the box, and only then does
+                # the concurrency-cap experiment earn its 32 hours. That question
+                # was previously answerable only by hand SQL in a session.
+                #
+                # NULL on depth 1 — no previous round means NO interval, and 0
+                # would read as "the rebuild fired instantly".
                 deferral_depth: prior + 1,
                 deferral_bound: bound,
-                deferral_cause: cause
+                deferral_cause: cause,
+                deferral_scheduled_s: pacing.deferral_scheduled_s,
+                deferral_actual_gap_s: pacing.deferral_actual_gap_s
               })
 
             # A COUNTING DEFECT, not merely a narration one (deploy-reliability
@@ -1869,14 +1902,56 @@ defmodule BarkparkCloud.Sites.Deploy do
   # two different stories, and counting them as one chain spends a site's whole
   # budget on causes that never repeated.
   defp consecutive_deferrals(%Site{} = site, cause) do
+    site |> deferral_chain(cause) |> length()
+  end
+
+  # The SAME scan, returning the rows instead of only their count — most recent
+  # first, so `List.first/1` is the round immediately before the one now being
+  # deferred. `consecutive_deferrals/2` is its length and nothing else, so the
+  # two can never disagree about where a chain starts.
+  defp deferral_chain(%Site{} = site, cause) do
     site
     |> Registry.list_deployments(@deferral_scan_depth, environment: "production")
     |> Enum.drop_while(&(&1.status in ["queued", "building", "pushing"]))
     |> Enum.take_while(fn d ->
       d.status == "deferred" and deferral_cause(d.stage, d.failure_reason) == cause
     end)
-    |> length()
   end
+
+  # THE PACE OF THE INTERVAL THAT JUST ELAPSED
+  # (dr-bl-deferral-scheduled-vs-actual-gap).
+  #
+  # Both numbers describe ONE interval — previous round of this chain → this
+  # round — which is what makes the ratio per-row arithmetic:
+  #
+  #   * SCHEDULED is `deferral_backoff_seconds(length(chain))`. That is not a
+  #     re-derivation from a different rule: the previous round held
+  #     `prior = length(chain) - 1` and re-queued with
+  #     `deferral_backoff_seconds(prior + 1)` — the same expression, the same
+  #     ladder, one owner.
+  #   * ACTUAL is the difference of the two rows' `inserted_at`, which is the
+  #     column the 2,262-deferral hand measurement used, so the recorded field
+  #     and the historical figure are the same quantity.
+  #
+  # AN EMPTY CHAIN RECORDS NOTHING. Depth 1 has no previous round, so there is
+  # no interval to measure, and NULL says that where 0 would claim an instant
+  # rebuild. Same discipline as `health_exit_code`.
+  defp deferral_pacing(%Deployment{} = deployment, chain) do
+    case chain do
+      [] ->
+        %{deferral_scheduled_s: nil, deferral_actual_gap_s: nil}
+
+      [previous | _] ->
+        %{
+          deferral_scheduled_s: deferral_backoff_seconds(length(chain)),
+          deferral_actual_gap_s: elapsed_seconds(previous.inserted_at, deployment.inserted_at)
+        }
+    end
+  end
+
+  # Unmeasurable rather than wrong: a row missing either stamp records NULL.
+  defp elapsed_seconds(%DateTime{} = from, %DateTime{} = to), do: DateTime.diff(to, from)
+  defp elapsed_seconds(_from, _to), do: nil
 
   # The re-queue seam. A PROCESS-LOCAL override wins over the real worker for the
   # same reason `starter/0` documents its own: under `Oban testing: :manual` an
