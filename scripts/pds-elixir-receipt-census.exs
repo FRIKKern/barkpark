@@ -3000,13 +3000,23 @@ defmodule PDS.Census do
   defp boolean_literal_arg_call?({form, _m, args})
        when is_atom(form) and is_list(args) and args != [] do
     form not in [:%{}, :%, :{}, :<<>>, :__block__, :., :__aliases__] and
-      Enum.any?(args, &is_boolean/1)
+      Enum.any?(args, &boolean_literal?/1)
   end
 
   defp boolean_literal_arg_call?({{:., _, _}, _m, args}) when is_list(args) and args != [],
-    do: Enum.any?(args, &is_boolean/1)
+    do: Enum.any?(args, &boolean_literal?/1)
 
   defp boolean_literal_arg_call?(_), do: false
+
+  # THE PARSE IS `literal_encoder`-WRAPPED AND A NAIVE `is_boolean/1` READS ZERO THROUGH
+  # IT. parse_file/1 passes `literal_encoder`, so `false` arrives as
+  # `{:__block__, meta, [false]}` and a guard on the bare value matches NOTHING — which
+  # is not a hypothetical: the first cut of this predicate printed 0 on a corpus that
+  # CONTAINED the worked example, and only the pre-repair control caught it. Both forms
+  # are accepted here so the figure cannot silently become a zero about the encoder.
+  defp boolean_literal?(v) when is_boolean(v), do: true
+  defp boolean_literal?({:__block__, _, [v]}) when is_boolean(v), do: true
+  defp boolean_literal?(_), do: false
 
   defp one_line(s), do: s |> String.replace(~r/\s+/, " ") |> String.slice(0, 90)
 
@@ -9582,6 +9592,24 @@ defmodule PDS.Census do
       expect: ["FAIL  BLIND-SHAPE-SPLIT", "json/2 sites printed 9999", "did not derive"],
       refute: ["PASS  BLIND-SHAPE-SPLIT"],
       proves: "a blind-spot figure invented at the print site reds BY NAME — before this arm the same mutation printed 9999 and exited 0 with CENSUS OK"
+    },
+    # THE SAME ARM, OVER THE FIGURE ADDED IN WAVE 36'S LENS HALF. It is carried
+    # SEPARATELY from the case above and not folded into it, because this figure is 0 on
+    # every corpus this selftest builds and on today's real tree: a figure whose derived
+    # value is 0 is exactly the one where a print-site invention is cheapest to miss, and
+    # the FAIL line names BOTH halves (printed 4242, derived 0) rather than a bare
+    # mismatch. The predicate's own liveness is controlled elsewhere and on purpose —
+    # `501fb9670^`'s scim_users_controller.ex, the pre-repair blob, which this predicate
+    # finds at :78 (printed in the blind-spot block with the command).
+    %{
+      name: "BLIND-SHAPE-LITERAL-ARG-PRINTED-IS-DERIVED",
+      corpus: :full,
+      argv: [],
+      mut: {"    literal_arg = b." <> "ast_literal_arg\n", "    literal_arg = 4242\n"},
+      exit: 1,
+      expect: ["FAIL  BLIND-SHAPE-SPLIT", "literal-argument sites printed 4242", "did not derive"],
+      refute: ["PASS  BLIND-SHAPE-SPLIT"],
+      proves: "the literal-argument blind-spot figure passes through BLIND-SHAPE-SPLIT like the other eight — invent it at the print site and the arm names it, which is what stops a DECLARED blind spot from becoming a decorative one"
     },
     # ROUTED-DISPOSITION-UNSHADOWED, ONE CASE PER BRANCH OF ITS PREDICATE (PDS-D556).
     #
