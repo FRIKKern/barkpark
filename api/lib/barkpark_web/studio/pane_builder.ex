@@ -726,7 +726,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       %{
         type: :doc,
         id: pub_id,
-        title: doc.title || "Untitled",
+        title: row_title(doc),
         is_draft: Content.draft?(doc.doc_id),
         status: doc.status,
         badge: preview_value(doc, Map.get(preview, "badge")),
@@ -740,6 +740,72 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       }
     end)
   end
+
+  # [an-orphan-must-be-nameable] spd-w18-plus-creates-without-navigating,
+  # criterion 2. A "+" press whose navigation never reaches the browser still
+  # leaves a REAL row on the desk: the create succeeded server-side, only the
+  # answer was lost (D242/D265 — `new_document/2` ends in a `push_patch` whose
+  # reply rides the event's own ref, so a frame the browser drops leaves the
+  # server believing it navigated). Three such rows survived on guerrilla
+  # production. Every one of them rendered the same two words: "Untitled".
+  #
+  # THE ROW WAS PRESENT AND NOT IDENTIFIABLE, WHICH IS THE SAME AS UNREACHABLE.
+  # A human looking at three identical "Untitled" rows cannot tell which one
+  # their press made, which are older accidents, or which is safe to delete —
+  # and the desk offers no other handle, because the row's only visible text IS
+  # its title (`components.ex` passes `item.title` straight through to
+  # `pane_doc_item`, with `item[:meta] || item[:updated]` under it, and all
+  # three orphans shared "Updated 2m ago" too).
+  #
+  # So an unnamed row is named out of what the row already carries: its schema
+  # TYPE, and the entropy tail of its `doc_id`. That tail is not decoration —
+  # it is the `id` in the rendered `doc-<id>`, the value `phx-value-id` sends
+  # on select, and the last URL segment that opens the document. The name IS
+  # the path back to it, and two orphans minted in the same second still read
+  # differently.
+  #
+  # THE LITERAL "Untitled" IS MATCHED TOO, not just nil. A paper is born with a
+  # nil title, but `Fields.new_document_attrs/1` STORES the literal "Untitled"
+  # for every fieldful type (task/note/post) — so treating only nil as unnamed
+  # would leave exactly the collision this criterion is about standing on the
+  # non-paper half of the desk. The cost is that a human who deliberately
+  # titles a document "Untitled" sees a type-and-id suffix appended on the desk
+  # row; that is the trade, taken knowingly.
+  #
+  # DERIVED, NEVER STORED. Nothing here writes to the document, which is the
+  # standing [untitled-is-a-fallback-not-a-seed] contract in
+  # `StudioLive.Handlers.Fields`: seeding a title wrote CONTENT into the block
+  # the author was about to type in, and the first keystroke appended to it.
+  # The moment the author types, the real title lands and this fallback is gone.
+  defp row_title(doc) do
+    case doc.title && String.trim(doc.title) do
+      nil -> unnamed_row_title(doc)
+      "" -> unnamed_row_title(doc)
+      "Untitled" -> unnamed_row_title(doc)
+      title -> title
+    end
+  end
+
+  defp unnamed_row_title(doc) do
+    "Untitled #{row_type_word(doc)} · #{doc_id_tail(doc)}"
+  end
+
+  defp row_type_word(%{type: type}) when is_binary(type) and type != "", do: type
+  defp row_type_word(_), do: "document"
+
+  # The entropy half of `<type>-<64 bits>` (`Content.generate_id/1`). Split from
+  # the RIGHT so a type containing a hyphen cannot eat the tail, and fall back
+  # to the whole id for a hand-written `doc_id` that carries no hyphen at all.
+  defp doc_id_tail(%{doc_id: doc_id}) when is_binary(doc_id) and doc_id != "" do
+    pub = Content.published_id(doc_id)
+
+    case String.split(pub, "-") do
+      [only] -> only
+      parts -> List.last(parts)
+    end
+  end
+
+  defp doc_id_tail(_), do: "no id"
 
   # Humanized "Updated N ago" subtitle fallback. The timestamp is already on
   # every Document struct (`content/query.ex` orders by updated_at_desc); this
