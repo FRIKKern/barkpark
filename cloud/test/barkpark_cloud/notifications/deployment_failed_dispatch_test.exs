@@ -462,21 +462,54 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
     end)
   end
 
-  test "the REAPER's fan-out names the deployment its select already held" do
-    # The id was SELECTED at the sweep and thrown away as `_id`; it now rides the
-    # payload. The reaper holds no struct, so stage/code identity are absent
-    # rather than filled in — the alert claims only what the producer had.
+  test "the REAPER's fan-out names the deployment and its code identity" do
+    # dr-w15-bl-reaper-alert-identity-is-id-only. The sweep used to select
+    # `{d.id, d.site_id}` only, so a reaped alert read "Deployment <uuid>" where
+    # a fenced-writer alert read "Deployment <uuid> · stage BUILD · git_ref …".
+    # Every terminal pass now selects the identity columns and builds the map
+    # through `Registry`'s ONE `deployment_identity/1`, so the two rails render
+    # the same line.
     {site, _owner} = setup_site()
-    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "refs/heads/main"})
+
+    # `stage` is nullable telemetry the builder stamps as it goes; a row reaped
+    # mid-BUILD carries one, and the sweep threw it away.
+    Repo.update_all(from(x in Deployment, where: x.id == ^d.id), set: [stage: "BUILD"])
 
     assert {:ok, %{no_source_failed: 1}} = perform_job(StaleDeploymentReaper, %{})
     assert Repo.get(Deployment, d.id).status == "failed"
     assert %{success: 1} = drain_alerts()
 
     assert_email_sent(fn email ->
-      refute email.text_body =~ "stage "
-      refute email.text_body =~ "git_ref"
-      assert email.text_body =~ "Deployment #{d.id}"
+      # BYTE-FOR-BYTE the fenced writer's shape (see §7's first test).
+      assert email.text_body =~ "Deployment #{d.id} · stage BUILD · git_ref refs/heads/main"
+
+      # The identity leads, the cause follows it — same as the fenced rail.
+      assert email.text_body =~ "A deployment for #{site.name} failed.\n\nDeployment #{d.id}"
+    end)
+  end
+
+  test "the REAPER's PLAIN (unjoined) pass carries the identity columns too" do
+    # Pass (i) is not a joined query, and the widening has to hold for both
+    # query shapes the sweep uses — a fix applied only to the joined passes
+    # would leave the stale-builder alert id-only.
+    {site, _owner} = setup_site(%{github_repo: "octo/shop"})
+    {:ok, _d} = Registry.create_deployment(site, %{git_ref: "refs/heads/release"})
+    {:ok, claimed} = Registry.claim_next_deployment("builder-1")
+
+    Repo.update_all(from(x in Deployment, where: x.id == ^claimed.id),
+      set: [claim_epoch: Registry.max_deploy_claims(), stage: "STAGE"]
+    )
+
+    backdate(claimed.id)
+
+    assert {:ok, %{failed: 1}} = perform_job(StaleDeploymentReaper, %{})
+    assert Repo.get(Deployment, claimed.id).status == "failed"
+    assert %{success: 1} = drain_alerts()
+
+    assert_email_sent(fn email ->
+      assert email.text_body =~
+               "Deployment #{claimed.id} · stage STAGE · git_ref refs/heads/release"
     end)
   end
 
