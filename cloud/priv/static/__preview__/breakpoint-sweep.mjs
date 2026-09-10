@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  124 scenarios, 24 rendered, 100 in a COMMITTED residue literal.
+//   SCENARIO  125 scenarios, 24 rendered, 101 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -734,13 +734,19 @@ export const SCENARIO_RESIDUE = {
   "invite-already-member": "hash:#",
   "invite-invalid": "hash:#",
   "loggedout-reset": "hash:#",
-  // no-deeplink — 6
+  // no-deeplink — 7
   "account-modal": "no-deeplink",
   "account-modal-tall": "no-deeplink",
   "account-modal-revoke": "no-deeplink",
   "account-modal-cruel-identity": "no-deeplink",
   "account-modal-2fa-badcode": "no-deeplink",
   "account-modal-2fa-on": "no-deeplink",
+  // cch-w39-s2-fu — the unknown two-factor arm, over a /v1/me that never lands.
+  // Same residue reason as its six siblings and for the same owner: the state's
+  // whole subject is a MODAL control's reachability (#a2f-retry), and that is
+  // modal-oracle's question, not this sweep's. modal-oracle drives it as a
+  // first-class state, so this is a reason, not a gap.
+  "account-modal-me-unreadable": "no-deeplink",
   // path:/activate — 5
   "activate-entry": "path:/activate",
   "activate-confirm": "path:/activate",

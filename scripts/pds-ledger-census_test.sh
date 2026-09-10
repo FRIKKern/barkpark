@@ -108,6 +108,25 @@ envelope() {
     "$count" "$offset" "$limit" "$docs"
 }
 
+# THE SAME ENVELOPE, BUT STATING `result.total` ITSELF.
+#
+# WHY THE PLAIN `envelope` DOES NOT CARRY ONE. `result.total` is a fact about the
+# WHOLE population, and a canned page only knows its own rows -- so the fixture
+# TRANSPORT derives it the way the server does, by counting the distinct `_id`s
+# across every canned page of the lens (see `FixtureTransport._with_derived_total`
+# in the census). That keeps the sixty-odd pre-existing fixtures below honest
+# without making each of them restate, and hand-maintain, a number.
+#
+# This helper is the OVERRIDE, and it is the whole mutation lever for clause 12:
+# a page that states a SHORT total models the server the clause exists to
+# convict, and one that states `null` models a server that ignored `count=true`
+# altogether. A written `total` always beats the derived one.
+envelope_total() {
+  local count=$1 offset=$2 limit=$3 total=$4 docs=$5
+  printf '{"result":{"count":%s,"offset":%s,"limit":%s,"total":%s,"perspective":"published","documents":[%s]}}' \
+    "$count" "$offset" "$limit" "$total" "$docs"
+}
+
 # THE HEALTHY CORPUS. 7 rows over 2 pages of limit 4, so the walk MUST reach
 # page 1 to be complete: `deep-a` and `deep-b` are grandchildren that live only
 # on the second page. Every reason is distinct, every disposition is in
@@ -115,8 +134,12 @@ envelope() {
 # row, `kid-c`, the only LIVE park, carries the STRUCTURED `reopen_trigger`
 # field. That asymmetry is the point: a healthy board is 1 structured against 4
 # prose-only, and the two numbers are reported side by side, never summed.
+# The two OPTIONAL trailing arguments are clause 12's lever: pass `<total0>`
+# `<total1>` and each page STATES that total instead of letting the transport
+# derive the honest 7. Omitted -- which is how every pre-existing caller below
+# invokes it -- the fixture is byte-identical to what it was before clause 12.
 build_healthy() {
-  local dir=$1
+  local dir=$1 total0=${2:-} total1=${3:-}
   local p0 p1
   p0="$(row "$ROOT_SLUG" 'null' open open 'root row. REOPEN: never'),"
   p0+="$(row kid-a "\"$ROOT_SLUG\"" open open 'kid a reason one. REOPEN: alpha'),"
@@ -125,8 +148,13 @@ build_healthy() {
   p1="$(row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta'),"
   p1+="$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),"
   p1+="$(row unrelated 'null' open open 'not under the root at all. REOPEN: foxtrot')"
-  page "$dir" 0 200 "$(envelope 4 0 4 "$p0")"
-  page "$dir" 1 200 "$(envelope 3 4 4 "$p1")"
+  if [[ -n $total0 ]]; then
+    page "$dir" 0 200 "$(envelope_total 4 0 4 "$total0" "$p0")"
+    page "$dir" 1 200 "$(envelope_total 3 4 4 "${total1:-$total0}" "$p1")"
+  else
+    page "$dir" 0 200 "$(envelope 4 0 4 "$p0")"
+    page "$dir" 1 200 "$(envelope 3 4 4 "$p1")"
+  fi
 }
 
 # THE BOUND CORPUS. The healthy board, except that the ROOT ROW DECLARES ITS OWN
@@ -723,6 +751,58 @@ build_healthy "$SKEW"
 page "$SKEW" 1 200 "$(envelope 1 0 4 "$(row deep-a '"kid-a"' open open 'deep a. REOPEN: delta')")"
 expect_status_matching "wrong offset echoed fails closed" 2 "server answered a different page" \
   run --page-limit 4 --fixture-dir "$SKEW"
+echo
+
+# =============================================================================
+# CLAUSE 12 — `count=true`, AND `collected == total`.
+#
+# Clause 1 above proves the server HONOURED the page it was asked for. It cannot
+# prove the walk REACHED THE END, because without a total the only termination
+# signal is `len(docs) < limit` -- and a server that stops early produces a short
+# page exactly as happily as a server that finished. Measured on the live board
+# 2026-07-30: every page came back with `total_field=None`, because the census
+# never sent `count=true`; the wave-27 run terminated on pages [1000,1000,1000,
+# 980] and reported corpus_size 3980 on the short page ALONE. That number could
+# have been 3980 of 3980 or 3980 of 40,000 and the run would have looked
+# identical. These fixtures pin all three ways the total can convict a read.
+# =============================================================================
+echo "clause 12 — collected must equal the total the server states"
+# GREEN CONTROL FIRST: a page that states the CORRECT total must still census
+# cleanly, or the guard has degraded into always-red and every red below is
+# worthless.
+GOODTOTAL="$TMP/total-correct"
+build_healthy "$GOODTOTAL" 7
+expect_status "an explicit CORRECT total censuses cleanly" 0 \
+  run --page-limit 4 --fixture-dir "$GOODTOTAL"
+# THE MUTATION. The source says the population is 5; the walk collected 7 and
+# terminated on a short page. Under the pre-clause-12 census this exited 0.
+SHORTTOTAL="$TMP/total-short"
+build_healthy "$SHORTTOTAL" 5
+expect_status_matching "a SHORT total fails closed" 2 "TRUNCATED WALK: collected 7 distinct task row(s) but the server says result.total=5" \
+  run --page-limit 4 --fixture-dir "$SHORTTOTAL"
+# and the same mutation the other way: a total LARGER than what was collected is
+# the real shape of a truncated walk, and must be just as fatal.
+LONGTOTAL="$TMP/total-long"
+build_healthy "$LONGTOTAL" 40000
+expect_status_matching "a total the walk never reached fails closed" 2 "result.total=40000" \
+  run --page-limit 4 --fixture-dir "$LONGTOTAL"
+# A POPULATION THAT MOVED under the walk: the pages disagree about how big it is,
+# so no single number describes what was read.
+SKEWTOTAL="$TMP/total-disagrees"
+build_healthy "$SKEWTOTAL" 7 9
+expect_status_matching "totals that disagree across pages fail closed" 2 "result.total DISAGREED across the walk" \
+  run --page-limit 4 --fixture-dir "$SKEWTOTAL"
+# A SERVER THAT IGNORED `count=true`. The parameter was sent and the envelope
+# came back with no usable total, which is a transport failure -- NEVER a quiet
+# fallback to "the short page ended it".
+NOTOTAL="$TMP/total-absent"
+build_healthy "$NOTOTAL" null
+expect_status_matching "a 2xx with no usable total fails closed" 2 "result.total is missing or not an int" \
+  run --page-limit 4 --fixture-dir "$NOTOTAL"
+NEGTOTAL="$TMP/total-negative"
+build_healthy "$NEGTOTAL" -1
+expect_status_matching "a negative total fails closed" 2 "result.total=-1 is negative" \
+  run --page-limit 4 --fixture-dir "$NEGTOTAL"
 echo
 
 # =============================================================================
