@@ -1042,7 +1042,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   def handle_event("session-archive", %{"id" => id}, socket) do
     # `archive_session/2` is called at `:global` because the STORE call takes no
     # narrower scope that keeps NULL-owned legacy rows reachable (see
-    # `session_in_tenancy?/2`); `tenancy_permits?/2` is what refuses a
+    # `owner_in_tenancy?/2`); `tenancy_permits?/2` is what refuses a
     # CROSS-TENANT reach.
     #
     # WHAT THIS COMMENT USED TO SAY, and why it no longer does: "the sidebar sees
@@ -5294,11 +5294,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  defp session_in_tenancy?(socket, %{owner_workspace_id: owner}),
-    do: owner_in_tenancy?(socket, owner)
-
-  defp session_in_tenancy?(_socket, _other), do: false
-
   # `StudioChat.get_session/2` clamped to that permitted set: a row outside this
   # socket's tenancy reads back as `nil`, indistinguishable from a row that does
   # not exist — so `handle_params/3` takes its existing "no longer available"
@@ -5307,7 +5302,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # TWO gates, because they answer two different questions and only one of them
   # is armed on each mount (task-60df475d8333e040):
   #
-  #   * `session_in_tenancy?/2` reads `read_workspace_id/1`, which is the URL
+  #   * `owner_in_tenancy?/2` reads `read_workspace_id/1`, which is the URL
   #     workspace and is `nil` on the FLAT mount — that gate is deliberately
   #     open there, because the flat sidebar is the instance-wide superuser view.
   #   * `principal_permits_owner?/2` reads the acting TOKEN's binding, which is
@@ -5326,19 +5321,40 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # `test/barkpark_web/live/studio/chat_flat_route_foreign_session_load_test.exs`.
   defp get_session_in_tenancy(socket, id) do
     case StudioChat.get_session(id, :global) do
-      %{} = session ->
-        if session_in_tenancy?(socket, session) and
-             principal_permits_owner?(socket, session.owner_workspace_id),
-           do: session
-
-      _ ->
-        nil
+      %{} = session -> if load_permits?(socket, session), do: session
+      _ -> nil
     end
   end
 
-  # The SIDEBAR arm of the same rule — and it cannot reuse `session_in_tenancy?/2`
-  # directly, for a reason that is invisible in the source and was caught only by
-  # running it:
+  # ONE binding per mount, and they are NOT interchangeable — a run proved that
+  # too. The scoped mount's truth is the URL workspace; the flat mount has no
+  # URL workspace, so its truth is the acting TOKEN's binding.
+  #
+  # Using the token binding on BOTH would break the scoped mount: `create_token/5`
+  # binds an omitted workspace to the seeded Default, so a scoped admin acting in
+  # workspace B routinely holds a token bound to the Default workspace, and its
+  # OWN ws-B session would stop loading (`pds_chatlive_global_reads_test`'s
+  # positive control is exactly that arm). Using the URL workspace on both leaves
+  # the flat mount ungated, which is the defect this seam is here for.
+  defp load_permits?(socket, %{owner_workspace_id: owner}) do
+    case read_workspace_id(socket) do
+      # Scoped mount: `LiveScope` pinned an authorized URL workspace.
+      ws_id when is_binary(ws_id) -> owner_in_tenancy?(socket, owner)
+      # Flat mount: nothing binds the socket, so ask the token — the same axis
+      # `tenancy_permits?/2` has guarded the id-addressed writes on since #14593.
+      nil -> principal_permits_owner?(socket, owner)
+    end
+  end
+
+  defp load_permits?(_socket, _other), do: false
+
+  # (`session_in_tenancy?/2` used to state the scoped half of `load_permits?/2`
+  # on its own; it had exactly one caller and folding it in is what let the two
+  # mounts state their DIFFERENT bindings side by side.)
+
+  # The SIDEBAR arm of the same rule — and it cannot reuse `owner_in_tenancy?/2`
+  # on the rows it already has, for a reason that is invisible in the source and
+  # was caught only by running it:
   #
   #   `StudioChat.list_sessions/2` carries a narrowing `select` of the sidebar
   #   columns, and `owner_workspace_id` is NOT one of them. Every row it returns
