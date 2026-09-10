@@ -252,6 +252,9 @@ func renderDeliveries(out *writer, sha string, page cloudclient.DeliveriesPage) 
 	out.outf("%s", deliveriesHeader(sha))
 	out.outf("%s", deliveriesPopulationLine(page))
 	out.outf("%s", deliveriesFilterLine(sha, page))
+	if line := deliveriesMixedBasisLine(page); line != "" {
+		out.outf("%s", line)
+	}
 	out.outf("")
 
 	if len(page.Deliveries) == 0 {
@@ -528,12 +531,146 @@ func deliveriesBuiltLine(d cloudclient.PlatformDelivery) string {
 	return deliveriesSeconds(*d.BuildSeconds) + " of build, from the job starting to the deploy finishing"
 }
 
-// deliveriesServingLine renders serving_since, or why it is unknown.
+// deliveriesServingLine renders serving_since, WITH THE CLOCK THAT PRODUCED IT,
+// or why it is unknown.
+//
+// THE INSTANT ALONE IS NOT A FACT AN OPERATOR CAN USE (dr-w29-bl). The two
+// targets derive it differently and the row now says which:
+//
+//	process_start     — cp. /health's serving_since is when THIS BEAM started,
+//	                    not when the sha began being served. A bare restart that
+//	                    deploys nothing moves it FORWARD (measured: 6.4s across
+//	                    two BEAMs running identical code), so any lag measured
+//	                    against it is an UPPER BOUND that reads SMALLER than the
+//	                    truth.
+//	deploy_flip_mtime — instance. The mtime of
+//	                    /opt/barkpark/.instance-deploy-last, which IS the flip
+//	                    instant: the file is written only after the health check
+//	                    and the slot flip.
+//
+// A NULL BASIS IS NOT A THIRD DERIVATION and never renders as one: it says the
+// recorder wrote no basis, which is true of every row older than the column, and
+// the line says the instant above must not be compared to another target's.
+//
+// AN UNRECOGNISED WORD IS PRINTED, NEVER SWALLOWED — same rule the transition
+// line keeps: the vocabulary is closed today, and a writer that invents a third
+// word must be visible on the render rather than collapsing into the null arm.
 func deliveriesServingLine(d cloudclient.PlatformDelivery) string {
 	if d.ServingSince == nil || strings.TrimSpace(*d.ServingSince) == "" {
 		return "UNMETERED — nothing recorded when this sha started serving, so whether it ever reached the web is unknown (never read this as the epoch, and never as 'never live')"
 	}
-	return sanitizeCell(*d.ServingSince)
+	return sanitizeCell(*d.ServingSince) + "\n             " + deliveriesBasisClause(d)
+}
+
+// deliveriesBasisKind is the row's basis as a bare word, "" when the wire sent
+// null or blank. It is the one place the wire's vocabulary is normalised, so the
+// render and the page-level mixed-basis warning can never disagree about what
+// this row's basis is.
+func deliveriesBasisKind(d cloudclient.PlatformDelivery) string {
+	if d.ServingSinceBasis == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(*d.ServingSinceBasis))
+}
+
+// deliveriesBasisClause is the sentence under one row's serving instant, naming
+// the clock that produced it and what that clock is worth.
+func deliveriesBasisClause(d cloudclient.PlatformDelivery) string {
+	switch kind := deliveriesBasisKind(d); kind {
+	case "":
+		return "basis UNRECORDED — which clock produced that instant was NEVER WRITTEN DOWN (the wire sent null, which every row\n" +
+			"             older than the serving_since_basis column carries). It is NOT a third basis and it is NOT process_start:\n" +
+			"             do not compare this instant to another target's, because you cannot tell an upper bound from a flip instant."
+	case "process_start":
+		return "basis process_start — this is when the control plane's BEAM STARTED, not when this sha began being served.\n" +
+			"             A bare restart that deploys nothing moves it FORWARD, so a lag measured against it is an UPPER BOUND\n" +
+			"             that reads SMALLER than the truth. Never compare it to a deploy_flip_mtime instant as if they were the same clock."
+	case "deploy_flip_mtime":
+		return "basis deploy_flip_mtime — the mtime of /opt/barkpark/.instance-deploy-last on the box, which IS the flip instant\n" +
+			"             (written only after the health check and the slot swap). This one is a real serving timestamp, not a bound."
+	default:
+		return "basis " + sanitizeCell(kind) + " — a basis word this reader does not know. The vocabulary it was built against is\n" +
+			"             process_start (cp) and deploy_flip_mtime (instance); treat this instant as UNCOMPARABLE until you have read\n" +
+			"             what wrote it."
+	}
+}
+
+// deliveriesMixedBasisLine is THE REFUSAL TO COMPARE (dr-w29-bl), and it is the
+// reason the column exists at all.
+//
+// This render is a cross-target surface: one sha is delivered to BOTH legs, so a
+// page routinely carries a cp row and an instance row with a serving instant
+// each, one under the other. Subtracting them is the obvious thing to do and it
+// was, until this line, silently wrong — the cp instant is a PROCESS-START upper
+// bound and the instance instant is the FLIP instant, and nothing on screen said
+// so. This line does not compute the comparison and does not hide it: it names
+// every target on the page with the basis its serving instant came from, so a
+// reader who does the arithmetic anyway knows exactly what they mixed.
+//
+// It fires only when serving instants from MORE THAN ONE TARGET are on the page
+// — a single-target page has nothing to mix — and it fires even when both
+// targets carry the SAME basis word, because "these are the same clock" is a
+// fact the reader should be told rather than left to infer from silence.
+func deliveriesMixedBasisLine(page cloudclient.DeliveriesPage) string {
+	order := []string{}
+	bases := map[string]string{}
+	for _, d := range page.Deliveries {
+		if d.ServingSince == nil || strings.TrimSpace(*d.ServingSince) == "" {
+			continue
+		}
+		target := strings.TrimSpace(d.Target)
+		if target == "" {
+			target = "(target NOT NAMED)"
+		}
+		kind := deliveriesBasisKind(d)
+		if kind == "" {
+			kind = "UNRECORDED"
+		}
+		if prev, seen := bases[target]; seen {
+			if prev != kind {
+				bases[target] = prev + " AND " + kind
+			}
+			continue
+		}
+		order = append(order, target)
+		bases[target] = kind
+	}
+	if len(order) < 2 {
+		return ""
+	}
+
+	parts := make([]string, 0, len(order))
+	mixed := false
+	unrecorded := false
+	upperBound := false
+	for _, t := range order {
+		parts = append(parts, t+"="+sanitizeCell(bases[t]))
+		if bases[t] != bases[order[0]] {
+			mixed = true
+		}
+		if strings.Contains(bases[t], "UNRECORDED") {
+			unrecorded = true
+		}
+		if strings.Contains(bases[t], "process_start") {
+			upperBound = true
+		}
+	}
+
+	line := "  MIXED BASES ON THIS PAGE — serving instants below come from " + strconv.Itoa(len(order)) +
+		" targets: " + strings.Join(parts, " · ") + "."
+	if !mixed {
+		return line + "\n  They share one basis, so a difference between them is a difference in the SAME clock."
+	}
+	line += "\n  These are DIFFERENT CLOCKS: a difference between them is NOT a lag, and this reader will not compute one."
+	if upperBound {
+		line += "\n  process_start is the control plane's BEAM start — an UPPER BOUND a bare restart moves forward, so any lag\n" +
+			"  measured against it reads SMALLER than the truth; deploy_flip_mtime is the box's actual flip instant."
+	}
+	if unrecorded {
+		line += "\n  UNRECORDED is not a third clock: that row predates the serving_since_basis column, so which clock produced its\n" +
+			"  instant cannot be recovered from this record at all."
+	}
+	return line
 }
 
 // deliveriesTransitionLine renders THE ROLLBACK VERDICT — what this delivery did

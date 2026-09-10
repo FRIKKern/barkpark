@@ -802,10 +802,11 @@ func TestPlatformDeliveriesFixtureRowsCarryExactlyTheLiveKeySet(t *testing.T) {
 	fx := loadDeliveriesFixture(t)
 	want := append([]string(nil), fx.LiveKeySet...)
 	sort.Strings(want)
-	if len(want) != 15 {
-		t.Fatalf("live_key_set has %d keys, want the 15 PlatformDelivery.to_json/1 emits "+
+	if len(want) != 16 {
+		t.Fatalf("live_key_set has %d keys, want the 16 PlatformDelivery.to_json/1 emits "+
 			"(10 until #10942 added queued_self/pickup/stall_seconds, 13 until #11078 added previous_sha "+
-			"and transition — the rollback verdict; all are LIVE, none are pending)", len(want))
+			"and transition — the rollback verdict, 15 until dr-w29-bl added serving_since_basis — WHICH CLOCK "+
+			"produced serving_since; all are LIVE, none are pending)", len(want))
 	}
 
 	rows := 0
@@ -1103,5 +1104,114 @@ func TestCloudDeliveriesRouteAcceptsTheWorkerPrincipal(t *testing.T) {
 	// ability gate is what keeps a PAT in the door.
 	if !strings.Contains(window, `Auth.require_ability("read")`) {
 		t.Fatalf("GET /v1/deliveries lost its read-ability gate; D385/D412 PAT reachability is not preserved. Guard window:\n%s", window)
+	}
+}
+
+// TestCloudDeliveriesServingLineNamesItsBasis: a serving instant never renders
+// alone. `serving_since` is derived differently per target — process_start on
+// the cp leg is the BEAM's own start (an UPPER BOUND a bare restart moves
+// forward), deploy_flip_mtime on the instance leg is the actual flip instant —
+// and until dr-w29-bl nothing on this render, or in the table behind it, said
+// which. Both live words, and the null, are asserted here: a row that predates
+// the column must say UNRECORDED rather than borrow the cp wording.
+func TestCloudDeliveriesServingLineNamesItsBasis(t *testing.T) {
+	fx := loadDeliveriesFixture(t)
+
+	status, body := deliveriesScenario(t, fx, "two_targets_two_bases")
+	newDeliveriesServer(t, status, string(body))
+	stdout, stderr, code := runDeliveries(t, "table", "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "basis process_start") {
+		t.Fatalf("the cp row's serving line never names its basis:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "UPPER BOUND") {
+		t.Fatalf("process_start renders without saying it is an upper bound:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "basis deploy_flip_mtime") {
+		t.Fatalf("the instance row's serving line never names its basis:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "flip instant") {
+		t.Fatalf("deploy_flip_mtime renders without saying it IS the flip instant:\n%s", stdout)
+	}
+
+	// A row whose basis was never recorded says so IN ITS OWN WORDS. The whole
+	// point of the column is that "not recorded" and "process_start" are
+	// different sentences; rendering the null as either live word would put the
+	// pre-column history of the table under a derivation nobody measured.
+	const sha = "2e38228b0048901b166d915d222cfc47f6f470d6"
+	nullBasis := `{"deliveries":[{"sha":"` + sha + `","delivering_run_id":"31255918184","first_seen_at":"2026-08-08T11:55:11.517221Z",` +
+		`"merged_at":null,"queued_seconds":null,"queued_self_seconds":null,"queued_pickup_seconds":null,` +
+		`"queued_stall_seconds":null,"build_seconds":null,"serving_since":"2026-08-08T11:55:11.517221Z",` +
+		`"serving_since_basis":null,"target":"cp","carried":null,"previous_sha":null,"transition":null,` +
+		`"recorded_at":"2026-08-08T12:23:21.862544Z"}],` +
+		`"count":1,"sha":"` + sha + `","limit":50,"scope":"platform"}`
+	newDeliveriesServer(t, 200, nullBasis)
+	stdout, stderr, code = runDeliveries(t, "table", sha)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "basis UNRECORDED") {
+		t.Fatalf("a null basis must render UNRECORDED:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "basis process_start") {
+		t.Fatalf("a null basis rendered as process_start — the null was coalesced into a live word:\n%s", stdout)
+	}
+}
+
+// TestCloudDeliveriesRefusesToMixBasesAcrossTargets is the cross-target
+// criterion (dr-w29-bl c1): a page carrying serving instants from BOTH legs
+// states which bases it mixed and refuses to compute a lag between them.
+//
+// The naive subtraction on this fixture yields a plausible 13s. It is
+// meaningless: one end is a BEAM start, the other a slot flip.
+func TestCloudDeliveriesRefusesToMixBasesAcrossTargets(t *testing.T) {
+	fx := loadDeliveriesFixture(t)
+	status, body := deliveriesScenario(t, fx, "two_targets_two_bases")
+	newDeliveriesServer(t, status, string(body))
+
+	stdout, stderr, code := runDeliveries(t, "table", "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "MIXED BASES ON THIS PAGE") {
+		t.Fatalf("a page with a serving instant on BOTH targets never warned that it mixes bases:\n%s", stdout)
+	}
+	for _, want := range []string{
+		"cp=process_start",
+		"instance=deploy_flip_mtime",
+		"DIFFERENT CLOCKS",
+		"will not compute one",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the mixed-basis line never says %q:\n%s", want, stdout)
+		}
+	}
+
+	// AND IT DOES NOT FIRE ON A SINGLE-TARGET PAGE. A warning that is always on
+	// is not a warning; fully_clocked carries one cp row and has nothing to mix.
+	status, body = deliveriesScenario(t, fx, "fully_clocked")
+	newDeliveriesServer(t, status, string(body))
+	stdout, stderr, code = runDeliveries(t, "table", "2e38228b0048901b166d915d222cfc47f6f470d6")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if strings.Contains(stdout, "MIXED BASES") {
+		t.Fatalf("the mixed-basis warning fired on a page with ONE target:\n%s", stdout)
+	}
+
+	// NOR ON A TWO-ROW PAGE WHERE ONLY ONE ROW HAS AN INSTANT. two_rows_one_sha
+	// carries a cp row with a serving instant and an instance row with NULL:
+	// there is exactly one instant on that page, so there is nothing to mix and
+	// the warning would be noise.
+	status, body = deliveriesScenario(t, fx, "two_rows_one_sha")
+	newDeliveriesServer(t, status, string(body))
+	stdout, stderr, code = runDeliveries(t, "table", "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if strings.Contains(stdout, "MIXED BASES") {
+		t.Fatalf("the mixed-basis warning fired on a page with only ONE serving instant:\n%s", stdout)
 	}
 }
