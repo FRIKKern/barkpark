@@ -401,6 +401,15 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		}
 		out.outf("")
 	}
+	// THE EPISODE NOTE, printed IMMEDIATELY under the failure-class table it
+	// qualifies and above every other cohort, because it is about one row in
+	// that table and nothing else on this screen. The generic class row gives
+	// BOX_UNREACHABLE a count; this gives it the behaviour the count does not
+	// carry.
+	if line := deployCensusUnreachableEpisodeLine(census); line != "" {
+		out.outf("%s", line)
+		out.outf("")
+	}
 	if len(census.Deferred) > 0 {
 		out.outf("deferrals (in the volume, never in the failure numerator)")
 		for _, c := range census.Deferred {
@@ -422,13 +431,6 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 	// outside it — and nothing else on this screen says they are the same box
 	// being full. It re-classifies nothing.
 	if line := deployCensusCapacityLine(census); line != "" {
-		out.outf("%s", line)
-		out.outf("")
-	}
-	// THE EPISODE NOTE, printed with the failure-class table it qualifies. The
-	// generic class row above gives BOX_UNREACHABLE a count; this gives it the
-	// behaviour that count does not carry.
-	if line := deployCensusUnreachableEpisodeLine(census); line != "" {
 		out.outf("%s", line)
 		out.outf("")
 	}
