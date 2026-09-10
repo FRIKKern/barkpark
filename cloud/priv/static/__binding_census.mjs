@@ -346,6 +346,18 @@ const C_MEMBER_REMOVE = "Accounts.remove_member_as/3";
 const INSTANCE_BAND = "instanceAdminAuthority";
 const F_INST = (read, decide) => ({ band: INSTANCE_BAND, read: read, decide: decide });
 
+// THE LAUNCH-CHECKOUT BAND's fence constructor (cch-w48-bl, band 2 of the ten
+// (2i) left unchecked). launchCheckoutAuthority(me) is three-valued —
+// "unknown" / "owner" / "blocked" — and BOTH of its live read sites are the
+// PIN rows themselves: renderLaunchPlan derives it from meCache at paint time,
+// and renderNewPricing takes it as an argument and re-derives it from a LATE
+// GET /v1/me when the caller passed none. Both then hand the answer to ONE
+// decide helper, launchPlanGridHtml, whose `authority !== "blocked"` fork is
+// what withholds the .new-plan CTA. So this band's (2i-4) accounting closes
+// with READ_EXEMPT EMPTY — no reader is unclaimed, and no hole is asserted.
+const LAUNCH_CHECKOUT_BAND = "launchCheckoutAuthority";
+const F_LCO = (read) => ({ band: LAUNCH_CHECKOUT_BAND, read: read, decide: "launchPlanGridHtml" });
+
 const PIN = [
   // ── account & session self-service — every one of these acts on the caller's
   // ── OWN account, so plain membership is the honest tier.
@@ -450,7 +462,7 @@ const PIN = [
 
   // ── launch + billing
   { fn: "submitLaunchFlow", verb: "POST", route: "/v1/launch", elevated: true, predicate: "launchAuthority", auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w47-s1, re-pinned cch-w48-s4: launchFlow withholds the WHOLE form unless launchAuthority() === \"grant\" — fail-closed on loading and on failed, so there is no submit to reach. NO `fence` PIN: arm (2i) is scoped to the instanceAdminAuthority band this wave, and pinning the launch band without doing its read accounting would be a claim this file cannot back. go_live/1 still refuses non-admin sessions inside a cond, so the overlay stays" },
-  { fn: "renderLaunchPlan", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the plan grid draws its CTA only for an owner authority" },
+  { fn: "renderLaunchPlan", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", fence: F_LCO("renderLaunchPlan"), auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the plan grid draws its CTA only for an owner authority. cch-w48-bl FENCE PIN: renderLaunchPlan is the read (`opts.authority || launchCheckoutAuthority(meCache)` — the || arm is a node-harness override seam, not a second policy), and launchPlanGridHtml is the decide: `withCta = authority !== \"blocked\"` is the single fork, and launchPlanTierHtml is handed `withCta && offered[t.plan]`, so a blocked principal gets the tier cards with NO .new-plan button to bind — the omit shape, not a disabled ghost (GR36)" },
   { fn: "openCancelPlanModal", verb: "POST", route: "/v1/billing/cancel", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "renderBilling returns read-only when !billingIsOwner()" },
   { fn: "openBillingPortal", verb: "POST", route: "/v1/billing/portal", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
   { fn: "subscribe", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
@@ -468,7 +480,7 @@ const PIN = [
   // #new-launch-btn only on "grant". NOT fence-pinned: the launch band's read
   // accounting is not done (cch-w48-bl-fence-pins-for-the-other-eight-bands).
   { fn: "newLaunch", verb: "POST", route: "/v1/launch", elevated: true, predicate: "launchAuthority", auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w48-s1: newLaunchOffer emits #new-launch-btn only on \"grant\"; refuse omits it, unknown withholds it and renders the one exit" },
-  { fn: "renderNewPricing", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the /new plan grid draws its CTA only for an owner authority" },
+  { fn: "renderNewPricing", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", fence: F_LCO("renderNewPricing"), auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the /new plan grid draws its CTA only for an owner authority. cch-w48-bl FENCE PIN: renderNewPricing READS the band itself — when its caller passed no authority it fires one GET /v1/me and calls launchCheckoutAuthority(r.data), repainting only if the answer is \"blocked\" and only while the pricing screen is still mounted. Same decide as its sibling: launchPlanGridHtml owns the omit fork" },
   { fn: "newVercelDeploy", verb: "POST", route: "/v1/barkparks/:*/vercel-deploy", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
   { fn: "newCreateRepo", verb: "POST", route: "/v1/github/repos", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
   { fn: "newSubmitSiteUrl", verb: "POST", route: "/v1/barkparks/:*/site-url", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
