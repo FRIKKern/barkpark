@@ -10082,7 +10082,7 @@ defmodule BarkparkCloud.Registry do
         where:
           d.status == "queued" and s.kind == "container" and is_nil(d.artifact_url) and
             is_nil(s.github_repo),
-        select: {d.id, d.site_id}
+        select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> where(^not_awaiting_prebuilt_upload())
       |> Repo.update_all(
@@ -10106,7 +10106,7 @@ defmodule BarkparkCloud.Registry do
         join: s in Site,
         on: s.id == d.site_id,
         where: d.status == "queued" and s.kind == "static" and is_nil(s.bootstrap_dataset),
-        select: {d.id, d.site_id}
+        select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> Repo.update_all(
         set: [
@@ -10147,7 +10147,7 @@ defmodule BarkparkCloud.Registry do
         where:
           d.status == "queued" and d.claim_epoch == 0 and s.kind in ["static", "node"] and
             d.inserted_at < ^spawn_budget_before,
-        select: {d.id, d.site_id}
+        select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> where(^not_awaiting_prebuilt_upload())
       |> Repo.update_all(
@@ -10183,7 +10183,7 @@ defmodule BarkparkCloud.Registry do
     {upload_missing_failed, upload_missing_rows} =
       from(d in Deployment,
         where: d.status == "queued" and d.inserted_at < ^prebuilt_grace_before,
-        select: {d.id, d.site_id}
+        select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> where(^awaiting_prebuilt_upload())
       |> Repo.update_all(
@@ -10202,7 +10202,7 @@ defmodule BarkparkCloud.Registry do
         where:
           d.status == "building" and d.claimed_at < ^stale_before and
             d.claim_epoch >= ^max_claims,
-        select: {d.id, d.site_id}
+        select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> Repo.update_all(
         set: [
@@ -10237,7 +10237,7 @@ defmodule BarkparkCloud.Registry do
         where:
           d.status == "pushing" and not is_nil(d.claim_worker) and
             d.claimed_at < ^stale_before and d.claim_epoch >= ^max_claims,
-        select: {d.id, d.site_id}
+        select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> Repo.update_all(
         set: [
@@ -10319,7 +10319,7 @@ defmodule BarkparkCloud.Registry do
         where:
           d.status == "pushing" and is_nil(d.claim_worker) and
             d.updated_at < ^handoff_budget_before,
-        select: {d.id, d.site_id}
+        select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> Repo.update_all(
         set: [
@@ -10335,8 +10335,8 @@ defmodule BarkparkCloud.Registry do
     pushing_failed = claimed_pushing_failed + abandoned_pushing_failed
 
     # notifications (wave 28 S6): the reaper is the OTHER half of the covering
-    # set. These four passes are bare `Repo.update_all` writes — no changeset, no
-    # callback — so they never touch `transition_deployment_fenced/4`, and a
+    # set. These seven terminal passes are bare `Repo.update_all` writes — no
+    # changeset, no callback — so they never touch `transition_deployment_fenced/4`, and a
     # route-side-only dispatch would silently miss every reaped deployment. The
     # rows are named via `select:` in the query, NOT the `returning:` option: on
     # this Ecto (3.14.0) / Postgrex (0.22.2) pair `Repo.update_all(q, sets,
@@ -10355,7 +10355,16 @@ defmodule BarkparkCloud.Registry do
       {abandoned_pushing_rows, @instance_unreachable_reason}
     ]
     |> Enum.flat_map(fn {rows, reason} ->
-      Enum.map(rows || [], fn {id, site_id} -> {site_id, reason, %{deployment_id: id}} end)
+      Enum.map(rows || [], fn {id, site_id, stage, git_ref, content_rev, build_id} ->
+        {site_id, reason,
+         deployment_identity(%{
+           id: id,
+           stage: stage,
+           git_ref: git_ref,
+           content_rev: content_rev,
+           build_id: build_id
+         })}
+      end)
     end)
     |> dispatch_reaped_deployment_alerts()
 
@@ -10542,9 +10551,12 @@ defmodule BarkparkCloud.Registry do
   # lives one hop further out. `Notifications.dispatch_site_event/3` resolves the
   # team through the site and names the site in the alert; it never raises.
   #
-  # `identity` is whatever the call site actually HOLDS — the two struct-bearing
-  # sites carry the full identity, the reaper carries the id its `select:`
-  # already named. Nothing is synthesized to fill a gap.
+  # `identity` is whatever the call site actually HOLDS, and as of
+  # dr-w15-bl-reaper-alert-identity-is-id-only that is the SAME identity on every
+  # path: the reaper's seven sweep `select:` clauses carry
+  # `{id, site_id, stage, git_ref, content_rev, build_id}`, so the reaped alert
+  # names the deployment exactly the way a fenced-writer alert does. Nothing is
+  # synthesized to fill a gap — every part is still a real column.
   defp dispatch_deployment_failed(site_id, failure_reason, identity) when is_map(identity) do
     Notifications.dispatch_site_event(
       site_id,
@@ -10579,23 +10591,39 @@ defmodule BarkparkCloud.Registry do
   # is not build time (`Sites.Deploy.record_stage/2` writes RETIRE-skipped
   # console entries onto rows that are already failed — measured median drift
   # 65s, max 2,270s). A fabricated number is worse than an absent one.
+  # TWO CALL SITES, ONE FORMATTER (dr-w15-bl-reaper-alert-identity-is-id-only).
+  # The struct-bearing producers hand it a `%Deployment{}`; the reaper hands it
+  # the plain map its widened `select:` now yields. The struct clause DELEGATES
+  # rather than duplicating, so the two paths cannot drift into naming the same
+  # deployment two different ways — the same "one story, two envelopes" property
+  # `Notifications.Render.deployment_identity/1` exists for, one layer down.
   defp deployment_identity(%Deployment{} = deployment) do
-    %{deployment_id: deployment.id}
-    |> put_present(:stage, deployment.stage)
-    |> put_code_identity(deployment)
+    deployment_identity(%{
+      id: deployment.id,
+      stage: deployment.stage,
+      git_ref: deployment.git_ref,
+      content_rev: deployment.content_rev,
+      build_id: deployment.build_id
+    })
   end
 
-  defp put_code_identity(identity, %Deployment{git_ref: ref}) when is_binary(ref) and ref != "",
+  defp deployment_identity(%{id: id} = row) do
+    %{deployment_id: id}
+    |> put_present(:stage, row.stage)
+    |> put_code_identity(row)
+  end
+
+  defp put_code_identity(identity, %{git_ref: ref}) when is_binary(ref) and ref != "",
     do: Map.put(identity, :git_ref, ref)
 
-  defp put_code_identity(identity, %Deployment{content_rev: rev})
+  defp put_code_identity(identity, %{content_rev: rev})
        when is_binary(rev) and rev != "",
        do: Map.put(identity, :content_rev, rev)
 
-  defp put_code_identity(identity, %Deployment{build_id: id}) when is_binary(id) and id != "",
+  defp put_code_identity(identity, %{build_id: id}) when is_binary(id) and id != "",
     do: Map.put(identity, :build_id, id)
 
-  defp put_code_identity(identity, %Deployment{}), do: identity
+  defp put_code_identity(identity, _row), do: identity
 
   defp put_present(identity, _key, value) when value in [nil, ""], do: identity
   defp put_present(identity, key, value), do: Map.put(identity, key, value)
@@ -10618,16 +10646,16 @@ defmodule BarkparkCloud.Registry do
   #
   # dr-w11-bl-deployment-failed-alarm-fatigue: THE THIRD PRODUCER, NARROWED BY
   # THE SAME PREDICATE. The reaper's rows never pass through
-  # `dispatch_deployment_failed/1` — the four bulk passes are bare
+  # `dispatch_deployment_failed/1` — the seven terminal bulk passes are bare
   # `Repo.update_all` writes — so the gate has to be repeated here or the reaped
   # half of the covering set keeps sending. The filter is on the ENQUEUE and not
   # inside `DeploymentAlertWorker`, so a suppressed alert costs no Oban row at
   # all; the worker's own `dispatch_site_event(_, :deployment_failed, _)` is fed
   # by nothing but this list.
   #
-  # The reaper holds only the `{id, site_id}` its `select:` named, so the policy
-  # gets no `:environment` and asks the site question unqualified. That is not a
-  # gap: `DeployLedger.content_on_web?/1` is production-scoped either way.
+  # The reaper's `select:` names identity columns, never `:environment`, so the
+  # policy asks the site question unqualified. That is not a gap:
+  # `DeployLedger.content_on_web?/1` is production-scoped either way.
   defp dispatch_reaped_deployment_alerts([]), do: :ok
 
   defp dispatch_reaped_deployment_alerts(alerts) do
