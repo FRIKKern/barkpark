@@ -229,6 +229,18 @@ on:
       # named; the lit-allow populations ride "**/*.go" and "**/*.ex".)
       - "scripts/.silencer-counts"
       - "api/.sobelow-skips"
+      # PAPER DIALECT RATCHET (pe-w2-bl-hollow-corpus-repair). Same dotfile hole
+      # as the two entries above: `scripts/**` does not match
+      # scripts/.paper-dialect-baseline, the pinned-count file the whole ratchet
+      # compares against, so raising a number in it triggered NOTHING. The
+      # script itself rides `scripts/**`; of its three measured corpora
+      # (scripts/paper-dialect-ratchet.sh DEFAULT_SOURCES) `cmd/barkpark/testdata`
+      # already rides "cmd/barkpark/**" above — the two under
+      # tooling/paper-excellence/ ride no glob in either block, so a new dirty
+      # fixture landed without the gate that counts it ever running.
+      - "scripts/.paper-dialect-baseline"
+      - "tooling/paper-excellence/rig/fixtures/**"
+      - "tooling/paper-excellence/twin/**"
       # ── the code-comment citation guard's .eex corpus (cgsiw-s5). The step
       # below runs tooling/doc-truth/retired-terms.mjs, whose TERM_EXTS includes
       # `.eex` and whose TERM_EXCLUDE covers node_modules/_build/deps/vendor/
@@ -519,6 +531,18 @@ on:
       # named; the lit-allow populations ride "**/*.go" and "**/*.ex".)
       - "scripts/.silencer-counts"
       - "api/.sobelow-skips"
+      # PAPER DIALECT RATCHET (pe-w2-bl-hollow-corpus-repair). Same dotfile hole
+      # as the two entries above: `scripts/**` does not match
+      # scripts/.paper-dialect-baseline, the pinned-count file the whole ratchet
+      # compares against, so raising a number in it triggered NOTHING. The
+      # script itself rides `scripts/**`; of its three measured corpora
+      # (scripts/paper-dialect-ratchet.sh DEFAULT_SOURCES) `cmd/barkpark/testdata`
+      # already rides "cmd/barkpark/**" above — the two under
+      # tooling/paper-excellence/ ride no glob in either block, so a new dirty
+      # fixture landed without the gate that counts it ever running.
+      - "scripts/.paper-dialect-baseline"
+      - "tooling/paper-excellence/rig/fixtures/**"
+      - "tooling/paper-excellence/twin/**"
       # ── the code-comment citation guard's .eex corpus (cgsiw-s5). The step
       # below runs tooling/doc-truth/retired-terms.mjs, whose TERM_EXTS includes
       # `.eex` and whose TERM_EXCLUDE covers node_modules/_build/deps/vendor/
@@ -1366,11 +1390,54 @@ jobs:
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           node scripts/repo-papers-freshness.mjs
 
+      # PAPER DIALECT RATCHET (pe-w2-bl-hollow-corpus-repair). A text-keyed
+      # inline leaf ({"type":"text","text":…} with no "value") and a bare-string
+      # notes/cards item both render NOTHING behind a 200 — render/inline.ex
+      # reads only "value". The write chokepoint
+      # (BlockOps.normalize_render_shapes/1, #11616) rescues both, but only for
+      # payloads that reach persistence THROUGH it; a payload committed to this
+      # repo as a fixture never does. This step pins a count per in-repo corpus
+      # in scripts/.paper-dialect-baseline and reds when one GROWS. A shrink
+      # never reds, and a NON-VACUITY FLOOR (canonical value-keyed leaves)
+      # REFUSES (2) rather than greening when the walker stops matching — the
+      # first cut of this script shipped with a dead floor and arms A/B/F all
+      # passed anyway.
+      #
+      # --selftest FIRST, per this job's standing idiom: 18 arms plant growth in
+      # both defect shapes, at top level and nested, a both-keys control that
+      # must NOT red, a shrink, and eight distinct ways the gate could go blind
+      # — each proving it exits 2 (REFUSE) rather than reporting clean. It
+      # plants nothing in this tree.
+      #
+      # HONEST LIMIT: CI holds no guerrilla token, so this measures the in-repo
+      # corpora only. The LIVE sweep is `--source <dump> --expect-zero`, run by
+      # hand from a session that holds the token.
+      #
+      # HONEST BLAST RADIUS: this job publishes "Doc budgets + anchors", which
+      # carries an S4 exclusion row in .github/required-checks.json. A red here
+      # is VISIBLE on the pull request and CANNOT block a merge. Wiring it here
+      # makes it RUN, not BLOCK.
+      - name: Paper dialect ratchet self-test (tripwire)
+        id: s36
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/paper-dialect-ratchet.sh --selftest
+
+      - name: Paper dialect ratchet (fails this job)
+        id: s37
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/paper-dialect-ratchet.sh
+
       - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
         if: always()
         env:
           STEP_OUTCOMES: ${{ toJSON(steps) }}
-          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\", \"s30\": \"Dependabot root drift gate self-test (tripwire)\", \"s31\": \"Dependabot root drift gate (fails this job)\", \"s32\": \"Silencer growth ratchet self-test (tripwire)\", \"s33\": \"Silencer growth ratchet (fails this job)\", \"s34\": \"repo-papers snapshot freshness self-test (tripwire)\", \"s35\": \"repo-papers snapshot freshness (fails this job)\"}"
+          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\", \"s30\": \"Dependabot root drift gate self-test (tripwire)\", \"s31\": \"Dependabot root drift gate (fails this job)\", \"s32\": \"Silencer growth ratchet self-test (tripwire)\", \"s33\": \"Silencer growth ratchet (fails this job)\", \"s34\": \"repo-papers snapshot freshness self-test (tripwire)\", \"s35\": \"repo-papers snapshot freshness (fails this job)\", \"s36\": \"Paper dialect ratchet self-test (tripwire)\", \"s37\": \"Paper dialect ratchet (fails this job)\"}"
           JOB_NAME: "Doc budgets + anchors"
           WORKFLOW_FILE: doc-gates.yml
           GITHUB_TOKEN: ${{ github.token }}
