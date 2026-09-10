@@ -177,6 +177,7 @@ defmodule BarkparkCloud.DeployLedger do
 
   import Ecto.Query, warn: false
 
+  alias BarkparkCloud.DeployLedger.ClassContinuity
   alias BarkparkCloud.FailureCopy
   alias BarkparkCloud.Registry.Deployment
   alias BarkparkCloud.Registry.Site
@@ -601,6 +602,32 @@ defmodule BarkparkCloud.DeployLedger do
   @doc "The minimum ATTEMPTED sample below which a rate is refused rather than reported."
   @spec min_sample() :: pos_integer()
   def min_sample, do: @min_sample
+
+  @doc """
+  THE CLASS-CONTINUITY GAUGE over `[from, to)` and the immediately-prior
+  EQUAL-LENGTH window — did a cause class die, or was it renamed?
+
+  Charter D265 clause (iv): the basis is SELF-DERIVED here, by running `census/3`
+  a second time over `[from - (to - from), from)`. No store, no committed
+  baseline, nothing that can go stale between the two readings — and both
+  censuses are produced by the same code, so the gauge cannot be fed a basis
+  shaped by an older version of this module.
+
+  `opts` are passed to BOTH censuses unchanged, so a site-scoped reading is
+  compared against a site-scoped basis and never against the fleet.
+
+      iex> DeployLedger.class_continuity(~U[2026-08-06 00:00:00Z], ~U[2026-08-07 00:00:00Z])
+
+  See `BarkparkCloud.DeployLedger.ClassContinuity` for the verdict vocabulary
+  (`:renamed` / `:repaired` / `:new_cause`) and the refusal shape.
+  """
+  @spec class_continuity(DateTime.t(), DateTime.t(), keyword()) :: map()
+  def class_continuity(%DateTime{} = from, %DateTime{} = to, opts \\ []) do
+    length = DateTime.diff(to, from, :second)
+    basis_from = DateTime.add(from, -length, :second)
+
+    ClassContinuity.gauge(census(basis_from, from, opts), census(from, to, opts))
+  end
 
   @doc "Human-facing one-liner for a class name."
   @spec label(class()) :: String.t()
