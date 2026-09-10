@@ -92,10 +92,14 @@ defmodule BarkparkWeb.Studio.StudioLivePlusOrphanReachableTest do
 
     created = Enum.reject(papers(), &MapSet.member?(before, &1.doc_id))
 
-    assert [doc] = created,
-           "the press did not create exactly one document — the premise of this whole file is that it DOES create one"
+    # Counted, not matched: `assert [doc] = created, "…"` would evaluate the
+    # match first and die of MatchError before `assert/2` ever ran, so the
+    # message below would be dead code on the one path it was written for
+    # (scripts/unreachable-assert-message-check.sh).
+    assert length(created) == 1,
+           "the press created #{length(created)} documents, not 1 — the premise of this whole file is that it DOES create exactly one"
 
-    doc
+    hd(created)
   end
 
   # A REAL drop, not an abandonment: the LiveView process is killed. It is
