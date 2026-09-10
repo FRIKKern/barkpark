@@ -30,6 +30,7 @@ defmodule BarkparkCloud.Registry do
   alias BarkparkCloud.GitHub.CommitDistance
   alias BarkparkCloud.FailureCopy
   alias BarkparkCloud.Notifications
+  alias BarkparkCloud.Notifications.AbandonmentPolicy
   alias BarkparkCloud.Notifications.DeploymentFailedPolicy
   alias BarkparkCloud.Workers.DeploymentAlertWorker
 
@@ -9864,16 +9865,58 @@ defmodule BarkparkCloud.Registry do
   # `create_failed_deployment/3`'s born-failed row — so neither can be narrowed
   # without the other. The struct is what carries `environment`, which is why the
   # gate sits on the /1 arity and not on /3.
+  # dr-w13-bl-abandonment-splits-off-the-flood (charter D193): AND THE CHAIN THE
+  # FLEET GAVE UP ON IS NOT THE SAME EVENT AS THE ONE THAT FAILED. Both terminals
+  # come down this one funnel, so the split is a branch here and nowhere else —
+  # no second producer, no second dispatch, no reaper.
+  #
+  # THE ABANDONMENT BRANCH SITS ABOVE THE NARROWING, and the order is the
+  # ruling. `destroyed_content?/1` suppresses a failure whenever the site is
+  # already serving something, which is TRUE of an abandoned chain almost every
+  # time — the site keeps serving the revision before the one nobody could ship.
+  # Below the gate, the most severe outcome in the fleet would be the quietest.
+  # It is a DIFFERENT question anyway: that predicate asks whether this attempt
+  # cost a reader anything, and this one asks whether the fleet stopped trying.
+  #
+  # The narrowing is otherwise untouched: a routine failure still asks
+  # `destroyed_content?/1` and still dispatches `:deployment_failed`, so this
+  # split reclassifies none of the ~870-a-day flood.
   defp dispatch_deployment_failed(%Deployment{} = deployment) do
-    if DeploymentFailedPolicy.destroyed_content?(deployment) do
-      dispatch_deployment_failed(
-        deployment.site_id,
-        deployment.failure_reason,
-        deployment_identity(deployment)
-      )
-    else
-      :ok
+    cond do
+      AbandonmentPolicy.abandonment?(deployment) ->
+        dispatch_deployment_abandoned(deployment)
+
+      DeploymentFailedPolicy.destroyed_content?(deployment) ->
+        dispatch_deployment_failed(
+          deployment.site_id,
+          deployment.failure_reason,
+          deployment_identity(deployment)
+        )
+
+      true ->
+        :ok
     end
+  end
+
+  # The abandonment payload is the failure payload PLUS the refusal count, which
+  # is what the copy needs to say what was given up on and after how many tries
+  # (charter D194: the CHAIN was abandoned — never "your content never reached
+  # the web", which the data does not support; site `d8e9c2c7` deferred again 68
+  # seconds after its chain died). `refusals/1` answers `nil` on a row that does
+  # not carry the column, and both renderers degrade the clause rather than
+  # invent a number.
+  #
+  # ONE LINE for the `dispatch_site_event(` call, deliberately: `__app.test.mjs`'s
+  # producer census matches its idioms per SOURCE LINE, so a call the formatter
+  # wrapped is INVISIBLE to it and this event would be reported as an orphaned
+  # console offer while the producer sat right here.
+  defp dispatch_deployment_abandoned(%Deployment{} = deployment) do
+    payload =
+      deployment.failure_reason
+      |> deployment_failed_payload(deployment_identity(deployment))
+      |> put_present(:refusals, AbandonmentPolicy.refusals(deployment))
+
+    Notifications.dispatch_site_event(deployment.site_id, :deployment_abandoned, payload)
   end
 
   # Site-keyed, because a Deployment only `belongs_to :site` and the alert's team

@@ -105,6 +105,27 @@ defmodule BarkparkCloud.Notifications.Render do
         {"Deployment failed",
          "A deployment for #{site} failed.#{identity(payload)}#{cause(payload)}", :error}
 
+      # dr-w13-bl-abandonment-splits-off-the-flood (charter D193/D194): the CHAIN
+      # the fleet gave up on, split off `deployment_failed` so the most severe
+      # outcome stops wearing the least severe one's name.
+      #
+      # THE COPY IS BOUNDED BY WHAT THE ROW PROVES (D194). It says the rebuild
+      # CHAIN was given up on, and it may NOT say the content never reached the
+      # web: on site `d8e9c2c7` the chain failed terminally at 01:37:41Z and the
+      # site DEFERRED AGAIN 68 seconds later — `fail/3` does not requeue, the next
+      # webhook mints a fresh chain. Establishing whether the content landed needs
+      # the `content_publishes` join, not this payload. `abandonment_clause/1` is
+      # the one owner of the sentence, shared with `EventEmail`.
+      #
+      # `:error`, like the failure it split off — `channels/discord.ex` paints
+      # `:info` GREEN and `:warning` amber, and a publish nobody will retry is not
+      # either of those.
+      "deployment_abandoned" ->
+        {"Rebuild chain given up on",
+         "The rebuild chain for #{site} #{abandonment_clause(payload)}." <>
+           " A later publish starts a new chain." <>
+           "#{identity(payload)}#{cause(payload)}", :error}
+
       # cch-w29-bl: the auto-deploy PREBUILT refusal. `cause/1`, not a re-typed
       # sentence: the remedy the console shows is
       # `Sites.AutoDeployWorker.refusal_detail/0`, it rides the payload as
@@ -182,6 +203,39 @@ defmodule BarkparkCloud.Notifications.Render do
     ]
     |> Enum.filter(fn {_label, value} -> is_binary(value) and value != "" end)
     |> Enum.map_join(" · ", fn {label, value} -> "#{label} #{value}" end)
+  end
+
+  @doc """
+  WHAT was abandoned, as ONE clause — `"was given up on after 12 refusals"`, or
+  `"was given up on after repeated refusals"` when the row does not carry the
+  count (dr-w13-bl-abandonment-splits-off-the-flood).
+
+  It lives here, and the alert email calls it, for exactly the reason
+  `deployment_identity/1` does: the inbox and the chat channels must not tell one
+  person a different story about the same given-up chain.
+
+  TWO THINGS IT REFUSES TO SAY, both rulings rather than taste (charter D194):
+
+    * anything about the CONTENT. What the fleet abandoned is the rebuild chain;
+      whether the revision it carried is on the web is a `content_publishes`
+      question this payload cannot answer, and a chain that died at 01:37:41Z
+      deferred again 68 seconds later.
+    * a NUMBER it does not hold. `Sites.Deploy`'s abandonment branch stamps
+      `deferral_depth` in the same fenced write that sets the terminal status, so
+      the count is a column on every row written since W28 S6 — and every row
+      written before it renders the countless clause rather than a fabricated
+      "after 1 refusals".
+
+  The payload reaching a chat shaper is the Oban args map, so the key is read
+  under both a string and an atom.
+  """
+  @spec abandonment_clause(map()) :: String.t()
+  def abandonment_clause(payload) when is_map(payload) do
+    case field(payload, :refusals) do
+      1 -> "was given up on after 1 refusal"
+      n when is_integer(n) and n > 1 -> "was given up on after #{n} refusals"
+      _ -> "was given up on after repeated refusals"
+    end
   end
 
   @doc """
