@@ -23,10 +23,16 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 import { forbiddenSpelling, FORBIDDEN_NAMES, LEGAL_SUBSTITUTES, SILENT_PREDICATES } from "./spellings.mjs";
-import { varianceSet, overClaim, isUnknownVariance, CLAIM_CLASS } from "./variance.mjs";
-import { bindClaim } from "./binding.mjs";
+import { varianceSet, overClaim, isUnknownVariance, CLAIM_CLASS, AXIS,
+         BEHAVIOUR_HEADS, BEHAVIOUR_HEAD_PROBES, EXECUTOR_UNREACHABLE_BEHAVIOUR_HEADS } from "./variance.mjs";
+// READ-ONLY import of grip's shipped screen. The lock in section 10 is only
+// worth anything because it asks the LIVE executor, not a copy of its answer.
+import { screenCommand } from "../grip/screen.mjs";
+import { deriveLevel } from "../grip/level.mjs";
+import { bindClaim, deriveTerms } from "./binding.mjs";
 import { loadCorpus, liveAdjudicated } from "./corpus.mjs";
-import { adjudicateCorpus, estimateMs, toFact, PDS_VERDICT } from "./adjudicate.mjs";
+import { adjudicateCorpus, estimateMs, toFact, PDS_VERDICT,
+         storedRecipe, STORED_CLAIM_CLASS, STORED_ORIGIN, SIDECAR_ORIGIN } from "./adjudicate.mjs";
 import { renderVerdict, bannedWordingIn } from "./verdict.mjs";
 import { loadRecipes, DEFAULT_CORPUS, REPO_ROOT, main } from "./rerun-adjudicate.mjs";
 
@@ -318,6 +324,181 @@ function sh(cmd) {
   ok("9.2 a REFUTED ruling is readable as data", Boolean(badRow), JSON.stringify(bad.counts));
   eq("9.3 and reading it did not touch process.exitCode", process.exitCode, before);
   ok("9.4 the CLI entry point is a function that RETURNS an rc", typeof main === "function");
+}
+
+// ── 10. THE ADVERTISED BEHAVIOUR HEADS vs WHAT THE EXECUTOR ALLOWS ───────────
+//
+// A MIRROR NEEDS A LOCK, NOT TWO HAND-WRITTEN COPIES. variance.mjs advertises
+// nine heads as paying for a BEHAVIOUR claim; grip's screen refuses most of
+// them. That divergence is fine — the two answer different questions — but it
+// is only HONEST while the README says so and says so ACCURATELY. All three
+// surfaces are compared here against the live screen, so drift in ANY of them
+// (a head added to variance, a head un-refused in grip, a stale README) reds.
+{
+  // 10.1 the probes really are behaviour commands — otherwise the lock below
+  // would pass over a list of harmless greps and prove nothing.
+  for (const head of BEHAVIOUR_HEADS) {
+    const probe = BEHAVIOUR_HEAD_PROBES[head];
+    const v = varianceSet(probe);
+    ok(`10.1 ${head}: the probe classifies onto BEHAVIOUR`,
+      v.axes.includes(AXIS.BEHAVIOUR), `${probe} → ${JSON.stringify(v.axes)}`);
+  }
+
+  // 10.2 MEASURE, do not assume: hand each probe to the live screen.
+  const refused = [];
+  const admitted = [];
+  const reasons = [];
+  for (const head of BEHAVIOUR_HEADS) {
+    const probe = BEHAVIOUR_HEAD_PROBES[head];
+    const screened = screenCommand(probe);
+    (screened.ok ? admitted : refused).push(head);
+    reasons.push(`      ${screened.ok ? "ADMIT " : "REFUSE"}  ${head.padEnd(8)}$ ${probe}\n                  ${screened.reason}`);
+  }
+  refused.sort();
+
+  eq("10.2 the measured refused set is exactly variance.mjs's stated limit",
+    refused.join(" "), [...EXECUTOR_UNREACHABLE_BEHAVIOUR_HEADS].sort().join(" "));
+  ok("10.3 at least one head IS reachable — a lock over an all-refused list is vacuous",
+    admitted.length > 0, `admitted: ${JSON.stringify(admitted)}`);
+
+  // 10.4 the README's stated-limit line is the third copy, and it is parsed,
+  // never eyeballed. `an absence is never caught by inspection`.
+  const readme = readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
+  const m = /<!--\s*pds-stated-limit:\s*executor-unreachable-behaviour-heads\s*=\s*([^>]*?)-->/.exec(readme);
+  ok("10.4 README.md carries the pds-stated-limit line", Boolean(m));
+  eq("10.5 README's stated limit names exactly the measured refused heads",
+    m ? m[1].trim().split(/\s+/).sort().join(" ") : "(absent)",
+    refused.join(" "));
+
+  process.stdout.write("\n  EXECUTOR REACHABILITY OF THE ADVERTISED BEHAVIOUR HEADS (live screenCommand)\n");
+  for (const line of reasons) process.stdout.write(`${line}\n`);
+}
+
+// ── 11. THE ROW'S OWN STORED RERUN IS READ, AND IT IS SCREENED THE SAME WAY ──
+//
+// WAVE 28 SHIPPED BOTH HALVES OF THIS INSTRUMENT AND NEVER JOINED THEM.
+// `bp task stage --rerun` writes `content.disposition_rerun`; corpus.mjs has
+// normalised that field off every row since day one; and `toFact()` sourced
+// `rerun` from the recipes.json sidecar and NOTHING ELSE. A row carrying a
+// stored rerun was therefore reported PROSE-ONLY / NO-RERUN — "asserted by
+// nobody" — which is FALSE about that row: somebody asserted it, in the field
+// built for it, and the instrument printed the opposite.
+//
+// This section is the JOIN, and it is proven on REAL ROWS. The shipped 172-row
+// snapshot carries ZERO stored reruns, so it can only prove the ABSENCE; the
+// three rows that DO carry one were read verbatim off the live board on
+// 2026-09-10 into fixtures/stored-rerun-rows-2026-09-10.json.
+{
+  const bare = adjudicateCorpus(rows, [], RUN);
+  eq("11.1 the shipped snapshot carries ZERO stored reruns — the disconnect's baseline",
+    bare.storedRerun.rows, 0);
+  ok("11.2 and the census PRINTS that zero rather than assuming it",
+    /stored rerun\s+0 of 172 row\(s\) carry a stored disposition_rerun/.test(renderVerdict(bare, { source: "test" })),
+    renderVerdict(bare, { source: "test" }).split("\n").filter((l) => l.includes("stored rerun")).join(""));
+
+  const stored = liveAdjudicated(loadCorpus(
+    fileURLToPath(new URL("./fixtures/stored-rerun-rows-2026-09-10.json", import.meta.url))));
+  eq("11.3 the live fixture is the three rows that carry one", stored.length, 3);
+  eq("11.4 and the census counts all three", adjudicateCorpus(stored, [], RUN).storedRerun.rows, 3);
+
+  // ── THE BUG, REPRODUCED AND QUOTED, ON A REAL ROW ─────────────────────────
+  // Strip the field and you have EXACTLY what origin/main's adjudicator saw.
+  const real = stored.find((r) => r.doc_id === "pds-bl-remaining-os-create-sinks");
+  const blinded = adjudicateCorpus([{ ...real, disposition_rerun: "" }], [], RUN).rows[0];
+  eq("11.5 BEFORE (the field unread): a stored rerun adjudicates PROSE-ONLY", blinded.verdict, PDS_VERDICT.PROSE_ONLY);
+  eq("11.6 ...with reason NO-RERUN", blinded.reason, "NO-RERUN");
+  ok("11.7 ...and the note says 'asserted by nobody' about a row somebody asserted",
+    blinded.note.includes("asserted by nobody"), blinded.note);
+
+  const report = adjudicateCorpus(stored, [], RUN);
+  const byId = new Map(report.rows.map((r) => [r.doc_id, r]));
+  const pass = byId.get("pds-bl-remaining-os-create-sinks");
+
+  // ── THE PASSING REAL ROW ──────────────────────────────────────────────────
+  // $ git grep -n os.Create origin/main -- internal/cli/context_render.go
+  // The derived term `os.Create` occurs LITERALLY in the row's own title, the
+  // command's rc moves on CONTENT, and it re-derives at HEAD.
+  eq("11.8 AFTER: the same real row RE-DERIVES from its own stored rerun", pass.verdict, PDS_VERDICT.RE_DERIVED);
+  eq("11.9 and the verdict names the row as its source, not the sidecar", pass.origin, STORED_ORIGIN);
+  eq("11.10 the stored rerun's command is the row's, byte for byte", pass.command, real.disposition_rerun);
+  eq("11.11 it is levelled by grip exactly like a sidecar recipe",
+    pass.level, deriveLevel(real.disposition_rerun));
+  eq("11.11b and that level is L3 — a lock over a value nobody pinned proves nothing", pass.level, "L3");
+  eq("11.12 at the FLOOR claim class, because no author declared one", pass.claim_class, STORED_CLAIM_CLASS);
+  eq("11.13 and the floor is `existence`, never `absence` — polarity is never guessed", STORED_CLAIM_CLASS, "existence");
+  ok("11.14 the derived term really is the one bound", deriveTerms(real.disposition_rerun).token === "os.Create",
+    JSON.stringify(deriveTerms(real.disposition_rerun)));
+  ok("11.15 and it occurs literally in the row's own title — a real binding, not a manufactured one",
+    real.title.includes("os.Create"), real.title);
+
+  // ── THE REFUSED REAL ROWS ─────────────────────────────────────────────────
+  // Both grep for an expression the row's TITLE never names. That is a genuine
+  // UNBOUND-CLAIM: the command may well be about the reason prose, but grip is
+  // handed the title as the claim, and this instrument may not silently admit a
+  // command bound to a sentence it was never checked against.
+  for (const id of ["pds-bl-stray-keys-on-acceptance-criteria", "pds-w12-crown-climb-preconditions"]) {
+    const r = byId.get(id);
+    eq(`11.16 ${id} is REFUSED, not quietly admitted`, r.verdict, PDS_VERDICT.REFUSED);
+    eq(`11.17 ${id} refuses at the BINDING screen`, r.reason, "UNBOUND-CLAIM");
+    ok(`11.18 ${id} names the term that failed to bind`,
+      r.note.includes("does not occur in the claim prose"), r.note);
+  }
+  eq("11.19 one of the three real stored reruns re-derives; two refuse — a measured number",
+    `${report.counts[PDS_VERDICT.RE_DERIVED] ?? 0}/${report.counts[PDS_VERDICT.REFUSED] ?? 0}`, "1/2");
+
+  // ── EVERY SCREEN A SIDECAR RECIPE FACES, A STORED RERUN FACES TOO ─────────
+  // Same real row each time; ONLY the stored command moves.
+  const host = rows.find((r) => r.doc_id === "pds-bl-secret-scan-invisible-tables");
+  ok("11.20 the screen host is a real snapshot row whose title names a file",
+    host.title.includes("pds-secret-scan.sh"), host.title);
+  const screened = (command) => adjudicateCorpus([{ ...host, disposition_rerun: command }], [], RUN).rows[0];
+
+  const spelled = screened("git -C /tmp cat-file -t origin/main:scripts/pds-secret-scan.sh");
+  eq("11.21 SPELLING screen: a forbidden spelling in a stored rerun is REFUSED", spelled.verdict, PDS_VERDICT.REFUSED);
+  eq("11.22 ...by name", spelled.reason, "GIT-DASH-C");
+
+  const counted = screened("git rev-list --count origin/main..HEAD -- scripts/pds-secret-scan.sh");
+  eq("11.23 VARIANCE screen: an uncompared count is REFUSED", counted.verdict, PDS_VERDICT.REFUSED);
+  eq("11.24 ...by name", counted.reason, "UNCOMPARED-COUNT");
+
+  const skipped = screened("git rev-list --count origin/main..HEAD -- scripts/pds-secret-scan.sh | grep -qx 0");
+  eq("11.25 VARIANCE screen: an ANCESTRY rc cannot pay for the floor class", skipped.verdict, PDS_VERDICT.REFUSED);
+  eq("11.26 ...by name", skipped.reason, "VARIANCE-SKIP");
+
+  const untermed = screened("bash scripts/pds-secret-scan.sh --selftest");
+  eq("11.27 FAIL-CLOSED: a command whose subject cannot be named is REFUSED", untermed.verdict, PDS_VERDICT.REFUSED);
+  eq("11.28 ...by name, never silently admitted unbound", untermed.reason, "MISSING-TERMS");
+
+  const admitted = screened("git cat-file -t origin/main:scripts/pds-secret-scan.sh");
+  eq("11.29 and a stored rerun that PASSES all three screens re-derives", admitted.verdict, PDS_VERDICT.RE_DERIVED);
+  eq("11.30 ...at the level its command earns",
+    admitted.level, deriveLevel("git cat-file -t origin/main:scripts/pds-secret-scan.sh"));
+  eq("11.30b ...which is L3", admitted.level, "L3");
+
+  // ── PREFERENCE: THE ROW WINS, THE SIDECAR IS THE EXPLICIT FALLBACK ────────
+  const sidecarRow = rows.find((r) => r.doc_id === "pds-bl-harness-not-relocatable");
+  const sidecarOnly = adjudicateCorpus([sidecarRow], recipes, RUN);
+  eq("11.31 FALLBACK: a row with no stored rerun still uses its recipes.json recipe",
+    sidecarOnly.rows[0].origin, SIDECAR_ORIGIN);
+  eq("11.32 ...and the census says so", sidecarOnly.storedRerun.fromSidecar, 1);
+
+  const both = adjudicateCorpus(
+    [{ ...sidecarRow, disposition_rerun: "git cat-file -t origin/main:scripts/pds-pull-proof.sh" }],
+    recipes, RUN);
+  eq("11.33 PREFERENCE: when both exist, the ROW's stored rerun is the one adjudicated",
+    both.rows[0].origin, STORED_ORIGIN);
+  eq("11.34 ...and the shadowed sidecar recipe is reported BY NAME, never silently dropped",
+    both.storedRerun.shadowedRecipes.join(","), "pds-bl-harness-not-relocatable");
+  ok("11.35 ...and the rendered census names it too",
+    renderVerdict(both, { source: "test" }).includes("SHADOWED by the row's own"));
+
+  eq("11.36 storedRecipe() returns null for a row with no stored rerun", storedRecipe(sidecarRow), null);
+
+  process.stdout.write("\n  STORED RERUNS ON THE LIVE BOARD (fixtures/stored-rerun-rows-2026-09-10.json)\n");
+  for (const r of report.rows) {
+    process.stdout.write(`      ${r.verdict.padEnd(11)} ${r.reason.padEnd(18)} ${r.doc_id}\n`);
+    process.stdout.write(`                  $ ${r.command}\n`);
+  }
 }
 
 /** The one term that moved between two claim strings, for the printed ledger. */

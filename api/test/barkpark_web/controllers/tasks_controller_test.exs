@@ -107,6 +107,51 @@ defmodule BarkparkWeb.TasksControllerTest do
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
+  # pds-w27: the byte tripwires must print a REPRODUCIBLE number, and `uniq/1`
+  # cannot give them one. `System.unique_integer([:positive])` climbs through a
+  # run, so its DIGIT COUNT changes — and the tripwires put one id on every one
+  # of 50 cards, so a single extra digit moves the probe by 50 B. Measured on
+  # this file at an unchanged tree: the realistic-mix probe printed 12259 B
+  # twice and then 12209 B on the third run, purely on id width. That is the
+  # same order as the regression the probe exists to catch, so a real +50 B cut
+  # would be indistinguishable from noise.
+  #
+  # `fixed_uniq/2` keeps the uniqueness (the counter is still the id's tail) and
+  # fixes the WIDTH: the card index is zero-padded to 2 and the counter to 9, so
+  # every fixture id is byte-identical run to run. 9 digits is not a guess —
+  # `System.unique_integer/1` is per-VM and a test run does not issue 10^9 of
+  # them; the guard below turns the day it does into a named failure rather than
+  # a silently drifting probe. `assert_fixed_width_ids!/1` pins the property on
+  # the WIRE, so a fixture that quietly reverts to `uniq/1` reds instead of
+  # going back to wobbling.
+  @fixed_uniq_digits 9
+  defp fixed_uniq(prefix, i) do
+    n = System.unique_integer([:positive])
+
+    if n >= 10 ** @fixed_uniq_digits do
+      raise "fixed_uniq/2 counter #{n} exceeds #{@fixed_uniq_digits} digits — " <>
+              "the byte tripwires would start drifting again; widen the pad"
+    end
+
+    pad = &String.pad_leading(Integer.to_string(&1), &2, "0")
+    "#{prefix}-#{pad.(i, 2)}-#{pad.(n, @fixed_uniq_digits)}"
+  end
+
+  # The reproducibility guard the byte probes lean on: every card on the page
+  # carries a doc_id of the SAME byte length, so the printed total cannot move
+  # on id width alone.
+  defp assert_fixed_width_ids!(docs) do
+    widths = docs |> Enum.map(&byte_size(&1["doc_id"])) |> Enum.uniq()
+
+    # `length(widths) == 1` and not `assert [_one] = widths`: a match assertion
+    # raises MatchError and the message below never prints, which is exactly
+    # the diagnosis a future reader of a wobbling probe needs.
+    assert length(widths) == 1,
+           "byte probe is not reproducible: fixture doc_ids have #{length(widths)} " <>
+             "distinct byte lengths (#{inspect(Enum.sort(widths))}) — a ~50 B regression " <>
+             "would be lost in id-length noise; seed ids with fixed_uniq/2"
+  end
+
   # task-e2f5ecca0be9a6d1: bulk fixture for the default-page-size tests. 101
   # rows is one more than the new default, so a bounded page and a complete one
   # are distinguishable by count alone.
@@ -4206,8 +4251,10 @@ defmodule BarkparkWeb.TasksControllerTest do
       ts = "2026-07-19T12:00:00.123456Z"
       # Pre-computed ids so every card can carry `distinct_from` (the dedup
       # gate's own opt-out) — 50 same-shaped fixture cards are exactly what
-      # the duplicate-task wall exists to refuse.
-      ids = for i <- 1..50, do: uniq("mix#{i}")
+      # the duplicate-task wall exists to refuse. FIXED-WIDTH (pds-w27): with
+      # `uniq("mix#{i}")` the ids grew a digit mid-run and the probe below
+      # printed 12259 B twice then 12209 B on an unchanged tree.
+      ids = for i <- 1..50, do: fixed_uniq("mix", i)
 
       seeded =
         for {id, i} <- Enum.with_index(ids, 1), reduce: MapSet.new() do
@@ -4267,9 +4314,28 @@ defmodule BarkparkWeb.TasksControllerTest do
             extra =
               if i in [7, 23], do: Map.put(extra, "lifecycle_status", "blocked"), else: extra
 
-            # disposition — live 5/50, all "open" (Stage.dispositions/0).
+            # disposition — 5/50, the ONE key seeded at its full live ratio
+            # rather than at token presence. Derivation: the 2026-09-07 live
+            # census read at the top of this block measured disposition on
+            # 5 of 50 ready cards at 100 B total — i.e. ~20 B a card, the
+            # width of `"disposition":"open"` and of nothing longer in the
+            # vocabulary. That is the ratio reproduced here, on cards
+            # 6/17/28/39/50, at the value the census's own per-card byte
+            # figure implies (Stage.dispositions/0 = ~w(open parked closed);
+            # the longest term, "parked", is the HOSTILE page's job, not this
+            # one).
+            #
+            # Why this key and not the others: pds-w27 shipped the term onto
+            # the brief card, and the typical-page bound this test asserts is
+            # the bound the epic advertises FOR THAT CARD. At 2/50 the probe
+            # moved 50 B on id width alone (see fixed_uniq/2) — more than the
+            # field it was supposed to be measuring. At 5/50 the field is
+            # worth ~100 B, i.e. the live figure, so dropping the key from the
+            # renderer moves this probe by a legible amount instead of a
+            # rounding error. The remaining keys stay presence-only on
+            # purpose; the density gap is declared in the block above.
             extra =
-              if i in [11, 31],
+              if rem(i, 11) == 6,
                 do:
                   extra
                   |> Map.put("disposition", "open")
@@ -4313,8 +4379,23 @@ defmodule BarkparkWeb.TasksControllerTest do
         |> Enum.sort_by(fn {k, n} -> {-n, k} end)
         |> Enum.map_join(" ", fn {k, n} -> "#{k}:#{n}" end)
 
+      # pds-w27: the tripwire must SEE the field the epic shipped. 5 of 50
+      # cards carry it; if the renderer ever drops the key the probe falls by
+      # ~100 B, which is only legible because the id width below is pinned.
+      assert Enum.count(payload["docs"], &Map.has_key?(&1, "disposition")) == 5,
+             "realistic-mix fixture no longer measures `disposition` — the typical-page " <>
+               "bound would be blind to the field pds-w27 put on the card"
+
+      # pds-w27: reproducibility precondition for the number printed below.
+      assert_fixed_width_ids!(payload["docs"])
+
       bytes = byte_size(resp.resp_body)
-      IO.puts("axi-w2-s2 realistic-mix probe: #{bytes}B for 50 brief ready cards")
+
+      IO.puts(
+        "axi-w2-s2 realistic-mix probe: #{bytes}B for 50 brief ready cards " <>
+          "(#{15_360 - bytes}B headroom under the 15,360B bound)"
+      )
+
       IO.puts("axi-w2-s2 realistic-mix card keys: #{census}")
       assert bytes <= 15_360, "realistic 50-card brief page blew the 15,360 B bound: #{bytes}B"
     end
@@ -4331,7 +4412,9 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       # Pre-computed ids for `distinct_from` — the dedup gate's own opt-out
       # (50 identical hostile cards are the canonical duplicate otherwise).
-      ids = for i <- 1..50, do: uniq("h#{i}")
+      # FIXED-WIDTH (pds-w27): this probe printed 28623 / 28640 / 29740 /
+      # 29790 B across only TWO code states, entirely on id width.
+      ids = for i <- 1..50, do: fixed_uniq("h", i)
 
       for {id, _i} <- Enum.with_index(ids, 1) do
         mk_card_task!(id, title, scope, %{
@@ -4398,8 +4481,16 @@ defmodule BarkparkWeb.TasksControllerTest do
                "truncated fields end with …; full record via bp task get <doc_id>"
              ]
 
+      # pds-w27: reproducibility precondition for the number printed below.
+      assert_fixed_width_ids!(payload["docs"])
+
       bytes = byte_size(resp.resp_body)
-      IO.puts("axi-w2-s2 hostile-ceiling probe: #{bytes}B for 50 maxed brief cards")
+
+      IO.puts(
+        "axi-w2-s2 hostile-ceiling probe: #{bytes}B for 50 maxed brief cards " <>
+          "(#{30_720 - bytes}B headroom under the 30,720B ceiling)"
+      )
+
       assert bytes <= 30_720, "hostile 50-card brief page blew the 30,720 B ceiling: #{bytes}B"
     end
   end

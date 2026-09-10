@@ -161,6 +161,7 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
   monitor watches your PRs and prints only when `pr-required.sh` changes verdict; message `main` only on
   a merge, a close, or a ruling — never an idle note. A lead whose loop fired every 40 s sent six idle
   notes in three minutes and 39 pulses in ten minutes into a box on a diet (2026-09-02); it was stopped.
+  Do not hand-write that loop: run `.claude/skills/orchestrate-tasks/helpers/pulse-loop.sh <worker> <held-file> <log>`, which drops a closed row from the round instead of striking the whole list for it.
 
 - **Decisions file — read it at the top of EVERY loop.** The orchestrator writes rulings, approvals and
   routing to `$ORCH/lead-<lane>/DECISIONS-FROM-MAIN.md` (append-only, a table per date). Inbox

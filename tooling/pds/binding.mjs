@@ -32,7 +32,8 @@
 //
 // Pure. No I/O, no execution. ESM named exports only.
 
-import { CLAIM_CLASSES } from "./variance.mjs";
+import { CLAIM_CLASSES, gitVerb } from "./variance.mjs";
+import { pipelineSegments, segmentTokens } from "../grip/census.mjs";
 
 /** Term keys a recipe may declare. Unknown keys are a REJECTION, never ignored. */
 export const TERM_KEYS = Object.freeze(["ref", "path", "token", "sha", "predicate"]);
@@ -88,4 +89,95 @@ export function bindClaim(recipe = {}) {
   }
 
   return { ok: rejections.length === 0, rejections };
+}
+
+// ── DERIVED TERMS: BINDING A RERUN NOBODY WROTE A RECIPE FOR ─────────────────
+//
+// A SIDECAR RECIPE DECLARES ITS TERMS. A ROW'S STORED `disposition_rerun` — the
+// fourth durable key `bp task stage` writes — is a BARE COMMAND STRING and
+// nothing else. So the binding seam above has no author-declared terms to work
+// with, and the choice is: admit the stored rerun unbound (which is exactly the
+// "a command passing beside a claim it has nothing to do with" failure this file
+// was written to stop, rebuilt inside its own remedy), or DERIVE the terms.
+//
+// THE DERIVATION IS NOT CIRCULAR, AND THAT IS THE WHOLE DESIGN. Terms are read
+// out of the COMMAND — the machine-readable half, which is not the half being
+// screened — and then checked against the ROW'S TITLE, which is the claim
+// `toFact()` already hands grip. The check that can fail is therefore a real
+// one: *does the row's own claim literally name the thing this command reads?*
+// Mutate the title, keep the command byte-identical, and the binding breaks.
+//
+// WHAT IS THE SUBJECT OF A READ:
+//
+//   git grep <pat> <ref> -- <pathspec>   the PATTERN. The pathspec NARROWS the
+//                                        search; it is not what is claimed, and
+//                                        binding on it would refuse every honest
+//                                        row whose title names a token.
+//   git cat-file/show <ref>:<path>       the PATH.
+//   git <verb> … -- <pathspec>           the PATH.
+//   grep/rg/egrep/fgrep <pat> …          the PATTERN.
+//   anything else                        NOTHING. `{}` — and bindClaim then
+//                                        refuses it MISSING-TERMS. Fail closed:
+//                                        a stored rerun whose subject this table
+//                                        cannot name is not silently admitted.
+//
+// A PATH BINDS BY BASENAME, and that is a STATED WEAKENING. An authored recipe
+// declares `path: "scripts/pds-pull-proof.sh"` and binds on the whole pathspec;
+// a row title writes `check-doc-budgets.sh`. Demanding the full pathspec in a
+// title refuses honest work, which is the road truth-grip D3 forbids. So a
+// derived path binding is basename-strength, weaker than an authored one, and
+// the verdict note says so rather than letting the two look alike.
+const MATCHER_HEADS = new Set(["grep", "rg", "egrep", "fgrep"]);
+
+const basename = (p) => String(p).split("/").filter(Boolean).pop() ?? "";
+
+// grip's `segmentTokens` splits on whitespace and does NOT honour shell quoting,
+// so a real stored rerun like
+//   git grep -n 'Enum.all?(list, &is_map/1)' origin/main -- api/…/tasks.ex
+// arrives as the two fragments `'Enum.all?(list,` and `&is_map/1)'`. Binding on
+// the FIRST fragment would be a term the author never wrote, so the quoted run is
+// rejoined from the segment TEXT. Adopting grip's tokeniser and repairing the one
+// case it does not cover beats shipping a sixth shell parser (truth-grip D24).
+function unquote(source, operand) {
+  const q = operand[0];
+  if (q !== "'" && q !== '"') return operand;
+  const start = source.indexOf(operand);
+  if (start < 0) return operand;
+  const end = source.indexOf(q, start + 1);
+  if (end < 0) return operand;
+  return source.slice(start + 1, end);
+}
+
+/** deriveTerms(command) → the terms a bare command binds on. `{}` = none found. */
+export function deriveTerms(command) {
+  const cmd = String(command ?? "").trim();
+  if (cmd === "") return {};
+
+  // The SOURCE segment owns the subject: in `git grep x | wc -l` the claim is
+  // about `x`, and the tail is what variance.mjs is for.
+  const source = pipelineSegments(cmd)[0] ?? cmd;
+  const tokens = segmentTokens(source);
+  const head = String(tokens[0] ?? "").split("/").pop();
+  const firstOperand = (args) => args.find((t) => !t.startsWith("-"));
+
+  if (head === "git") {
+    const { verb, args } = gitVerb(tokens);
+    if (verb === "grep") {
+      const pat = firstOperand(args);
+      return pat ? { token: unquote(source, pat) } : {};
+    }
+    const terms = {};
+    const colon = tokens.find((t) => /^[^\s:]+:[^\s:]+$/.test(t));
+    if (colon) terms.path = basename(colon.slice(colon.indexOf(":") + 1));
+    const dd = args.indexOf("--");
+    if (dd >= 0 && args[dd + 1]) terms.path = basename(args[dd + 1]);
+    return terms;
+  }
+
+  if (MATCHER_HEADS.has(head)) {
+    const pat = firstOperand(tokens.slice(1));
+    return pat ? { token: unquote(source, pat) } : {};
+  }
+
+  return {};
 }

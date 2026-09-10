@@ -70,14 +70,77 @@ the real sample were *true* reasons whose rerun exits nonzero because the claim
 **is** an absence. The discriminator is grip's shipped `admitsAbsenceClaim`,
 never `verdict == ADMITTED`.
 
+## Where a rerun comes from: the row first, the sidecar second
+
+A rerun reaches this instrument two ways, and they are **not** equal.
+
+1. **The row's own `content.disposition_rerun`** — the fourth durable key
+   `bp task stage --rerun` writes. This is the author's record, on the ledger,
+   and it **wins**.
+2. **`recipes.json`** — a repo file somebody re-typed by hand. It is the
+   explicit **fallback**, used when the row carries nothing. When a row carries
+   both, the shadowed recipe is reported by name, never silently dropped.
+
+Wave 28 shipped both halves and never joined them: `corpus.mjs` normalised
+`disposition_rerun` off every row, and `toFact()` read the sidecar and nothing
+else, so a row that carried a stored rerun was reported `PROSE-ONLY / NO-RERUN`
+— *"asserted by nobody"* — about a row somebody had asserted. The verdict line
+now prints **how many rows carry a stored rerun**, including when that number is
+zero, because the way a disconnect survives a whole wave is that nobody prints
+the number.
+
+A stored rerun gets **no free pass**. It goes through `forbiddenSpelling`,
+`bindClaim` and `overClaim` in that order and is levelled by `deriveLevel`,
+exactly like a sidecar recipe. Two things it does not get:
+
+- **A claim class.** Nobody declared one, so it is adjudicated at the *floor*
+  class `existence` — paid for by `EXISTENCE` or `CONTENT` and nothing else.
+  Reading the class out of the command's own variance set would make the
+  variance screen vacuous; reading it out of the prose is the scanner grip
+  already refuted at precision 0.67. `absence` is deliberately **not** the floor
+  despite being paid for by more axes: absence is a *polarity*, and guessing an
+  author's polarity is the one thing this epic may not do.
+- **An author's terms.** They are *derived from the command* — the pattern of a
+  `git grep`, the path of a `git show <ref>:<path>` or a `-- <pathspec>` — and
+  then checked against the row's **title**, which is the claim `toFact()` hands
+  grip. That is not circular: the check that fails is *does the row's own claim
+  literally name what this command reads*. A path binds by **basename**, which
+  is a weaker binding than an authored full-pathspec one, and the note says so.
+  A command whose subject cannot be named binds nothing and is `REFUSED`
+  `MISSING-TERMS` — fail closed, never silently admitted unbound.
+
+Measured on the live board 2026-09-10: three rows carry a stored rerun; one
+re-derives, two are `REFUSED UNBOUND-CLAIM` because the command greps for an
+expression the row's title never names. Those three rows are captured verbatim
+in `fixtures/stored-rerun-rows-2026-09-10.json`; the shipped 172-row
+`live-corpus-2026-07-31.json` snapshot carries **zero**, which is why it can
+only prove the absence.
+
 ## Two things this tree deliberately does not hide
 
-- **The behaviour class cannot be re-derived here.** grip's caller-boundary
-  screen refuses every script runner (`bash`, `sh`, `node`), correctly — they
-  execute arbitrary programs. So a reason that can only be checked by *running*
-  something is reported `REFUSED` with that named reason, and counted. Making
-  that class visible and bounded is the honest move; green-lighting it by
-  construction would be the vacuous green one level up.
+- **The behaviour class is mostly un-re-derivable here, and `variance.mjs`
+  advertises more than the executor will run.** `variance.mjs` classifies nine
+  heads onto `BEHAVIOUR` — `go mix npm pnpm bash sh zsh node python3` — because
+  that is what their *exit codes mean*, which is the only question that table
+  answers. grip's caller-boundary screen answers a different one — *will this
+  census run it* — and fails closed. Measured 2026-09-10 against
+  `screenCommand()`, **seven of the nine are unreachable**, by two layers:
+  `bash`, `sh`, `zsh`, `node` and `python3` are refused at the HEAD (they
+  execute arbitrary programs, correctly refused); `npm` and `pnpm` are
+  allowlisted heads whose behaviour-paying sub-verbs (`test`, `run`) are not on
+  the read-only sub-verb allowlist. Only `go` (`test`, `vet` — not `build`) and
+  `mix` (`test`) survive. The two lists are NOT aligned on purpose: pruning
+  `variance.mjs` down to the executor would make it lie about the shell. So a
+  reason that can only be checked by *running* one of the seven is reported
+  `REFUSED` with that named reason, and counted. Making that class visible and
+  bounded is the honest move; green-lighting it by construction would be the
+  vacuous green one level up.
+
+  <!-- pds-stated-limit: executor-unreachable-behaviour-heads = bash node npm pnpm python3 sh zsh -->
+
+  That comment is not decoration: section 10 of `rerun-adjudicate.test.mjs`
+  parses it, re-runs every head's probe through the live screen, and reds if
+  the prose, the constant in `variance.mjs`, and grip's screen ever disagree.
 - **Two polarised predicates go mute.** `git cat-file -e <ref>:<path>` and
   `… | grep -qx 0` are polarised at the shell and admitted by grip's screen, but
   grip's `classifySilence` rules both NULL-READ because they answer silently by

@@ -3,4 +3,124 @@ title: APIs and SDKs Overview
 description: HTTP endpoints and official client libraries.
 ---
 
-This page is coming in a follow-up commit.
+There is one backend and one content model behind every interface. Pick the
+surface that fits the job: raw HTTP if you are in a language with no Barkpark
+package, `@barkpark/core` from JavaScript or TypeScript, `@barkpark/nextjs` on
+top of it inside an App Router project, or the `bp` CLI from a terminal.
+
+## The HTTP API
+
+Every route is versioned under `/v1` and scoped to a dataset. The scoped form
+carries the workspace and project; the flat form omits them and resolves to the
+default, which is why the quickstart examples are short.
+
+| Route | Auth | What |
+| --- | --- | --- |
+| `GET /v1/data/query/:dataset/:type` | public | List documents of one type. |
+| `GET /v1/data/doc/:dataset/:type/:id` | public | One document. |
+| `POST /v1/data/mutate/:dataset` | token | Create, patch, delete, publish — one atomic commit per request. |
+| `GET /v1/data/listen/:dataset` | token | Server-sent change events. |
+| `GET /v1/data/export/:dataset` | token | The whole dataset as NDJSON. |
+| `GET /v1/schemas/:dataset` | admin | The content model itself. |
+
+Reads are public for schemas marked `visibility: "public"`. Writes always need a
+bearer token, and so does any read that asks for `?perspective=drafts` or
+`?perspective=raw` — an anonymous caller is pinned to `published` no matter what
+the parameter says.
+
+```bash
+curl -s "http://localhost:4000/v1/data/query/production/post"
+
+curl -X POST http://localhost:4000/v1/data/mutate/production \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"mutations":[{"publish":{"id":"hello","type":"post"}}]}'
+```
+
+The full reference — envelope shape, every mutation kind, expansion, error codes,
+and rate limits — is
+[api-v1.md](https://github.com/FRIKKern/barkpark/blob/main/docs/api-v1.md), with a
+machine-readable
+[openapi.json](https://github.com/FRIKKern/barkpark/blob/main/docs/openapi.json)
+beside it.
+
+## The JavaScript packages
+
+Four packages are published and usable today.
+
+| Package | What it is |
+| --- | --- |
+| `@barkpark/core` | The client. Fetch-only transport, zero runtime dependencies; runs in Node, browsers, edge runtimes, and workers. |
+| `@barkpark/codegen` | `barkpark generate` — turns the dataset's schemas into TypeScript. |
+| `@barkpark/nextjs` | App Router integration: RSC fetching, cache tags, Server Actions, draft mode, webhooks. |
+| `@barkpark/react` | Framework-free React renderers for `PortableText`, images, and references. No `next/*` imports. |
+
+Two more names are reserved on npm but **not implemented in 1.0**:
+`@barkpark/groq` (a GROQ DSL) and `@barkpark/nextjs-query` (a TanStack Query
+adapter). Both are `0.0.0-placeholder`; importing `@barkpark/groq` at runtime
+throws. For optimistic updates today, use `useOptimisticDocument()` from
+`@barkpark/nextjs/actions`.
+
+```bash
+npm install @barkpark/core
+```
+
+```ts
+import { createClient } from '@barkpark/core'
+
+const bp = createClient({
+  projectUrl: 'http://localhost:4000',
+  dataset: 'production',
+  apiVersion: '2026-04-01',
+  token: process.env.BARKPARK_TOKEN, // needed for writes and drafts
+})
+
+const posts = await bp.docs('post').order('_createdAt:desc').limit(20).find()
+const one = await bp.doc('post', 'hello', { expand: 'author' })
+await bp.patch('hello', 'post').set({ title: 'Updated' }).commit()
+```
+
+`apiVersion` is required and has no default — `createClient` throws
+`BarkparkValidationError` if it is missing or not `YYYY-MM-DD`. Pin a date and
+leave it alone; the server reports the window it accepts as `minApiVersion` and
+`maxApiVersion` (today `2026-04-01` through `2026-04-17`), so a pinned client
+keeps working while the API moves forward. Every example in these docs uses
+`2026-04-01`.
+
+The client also covers search, media, the content graph, revision history,
+webhook registration and signature verification, tenancy, and `bp.listen()` for
+real-time updates. `fetchRaw(path)` is the escape hatch for anything it does not
+wrap. Every failure is a `BarkparkError` carrying `code`, `serverCode`, `status`,
+`requestId`, and the server's `hint`.
+
+## Typed reads
+
+`barkpark generate` writes one interface per schema plus a `BarkparkTypeMap`.
+Pair the map with `typedClient` and reads narrow to the concrete interface, while
+an unknown type name becomes a compile error:
+
+```ts
+import { createClient, typedClient } from '@barkpark/core'
+import type { BarkparkTypeMap } from './barkpark.types' // run `barkpark generate`
+
+const bp = typedClient<BarkparkTypeMap>(createClient(config))
+
+const post = await bp.doc('post', 'p1') // Post | null
+bp.doc('psot', 'p1') // ✗ compile error — 'psot' isn't a known type
+```
+
+`typedClient` is a type-only wrapper: the runtime object is the one you passed in.
+Mutations and the mixed-type reads (`getBacklinks`, `getGraph`, `getRelated`,
+`listTags`) stay open by design.
+
+## The terminal
+
+`bp` is a single Go binary that is both a CLI and a full TUI, driven by
+`GET /v1/capabilities` so it never drifts from the server it is pointed at.
+`bp capabilities -o json` returns the entire API — every noun, verb, and route —
+in one call, which is also the fastest way to hand the surface to an agent.
+
+## Next
+
+- [Next.js](/docs/framework-guides/nextjs) — the deepest framework integration.
+- [Other frameworks](/docs/framework-guides/other-frameworks) — what to use everywhere else.
+- [Errors](/docs/reference/errors) — the error classes and server codes.
