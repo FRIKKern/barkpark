@@ -221,7 +221,7 @@ defmodule Barkpark.Tasks.Pulse do
             Map.merge(
               %{"pulse" => Map.merge(now, %{"worker" => worker_id, "epoch" => next_epoch})},
               caller_stamp(caller_token_id)
-            |> Map.merge(SessionId.session_stamp(session))
+              |> Map.merge(SessionId.session_stamp(session))
             )
           )
 
