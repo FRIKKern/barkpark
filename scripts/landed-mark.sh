@@ -274,7 +274,12 @@ note()  { echo "landed-mark: $*"; }
 # went to stdout, and a landing must never fail over its own paperwork.
 summary() {
   echo "landed-mark: $*"
-  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  # DOUBLE-PRINT GUARD. .github/workflows/landed-mark.yml already pipes this
+  # script's whole stdout through `tee -a "$GITHUB_STEP_SUMMARY"`, so appending
+  # here as well would print every refusal twice in the one place a lead reads.
+  # The workflow sets LANDED_MARK_STDOUT_IS_SUMMARY=1 to say so; any other
+  # caller (a hand run, a different workflow) gets the append.
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ "${LANDED_MARK_STDOUT_IS_SUMMARY:-0}" != "1" ]; then
     printf '%s\n\n' "landed-mark: $*" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
   fi
 }
@@ -368,17 +373,30 @@ WORD_SPLIT = re.compile(r"[^A-Za-z0-9_./-]+")
 def path_names(p):
     """Every name a changed path answers to: the full path, each of its ancestor
     directories (all depths, top-level included), its basename, and the basename
-    without its extension."""
+    without its extension.
+
+    A LIST, MOST SPECIFIC FIRST, AND NEVER A SET. The caller reports WHICH name
+    matched, and Python randomises str hashing per process — so a set would make
+    the same landing report `api/lib/x.ex` on one run and `api` on the next.
+    MEASURED: the first cut used a set and the selftest arm asserting the
+    reported match failed on some runs and passed on others. An instrument whose
+    answer depends on PYTHONHASHSEED is not an instrument. Most specific first
+    also makes the reported match the most INFORMATIVE one available."""
     parts = [x for x in p.split("/") if x]
     if not parts:
-        return set()
-    names = {p, parts[-1]}
-    for i in range(1, len(parts)):
-        names.add("/".join(parts[:i]))
+        return []
+    names = [p]
+    for i in range(len(parts) - 1, 0, -1):
+        names.append("/".join(parts[:i]))
     base = parts[-1]
+    names.append(base)
     if "." in base:
-        names.add(base.rsplit(".", 1)[0])
-    return {n for n in names if n}
+        names.append(base.rsplit(".", 1)[0])
+    out = []
+    for n in names:
+        if n and n not in out:
+            out.append(n)
+    return out
 
 
 def row_vocabulary(doc, content):

@@ -40,6 +40,12 @@ permissions:
   # where the `Task:` trailer lives, so landed-mark.sh resolves the PR from the
   # sha (REST repos/<o>/<r>/commits/<sha>/pulls) and reads its body. Read-only,
   # and it widens nothing that can write.
+  #
+  # THE CHANGED-PATHS READ rides the SAME scope (task-c3c9922e7d8e3815). Once
+  # the PR is known, landed-mark.sh reads REST repos/<o>/<r>/pulls/<n>/files so
+  # the landing it records says WHAT merged, and so a landing that touched
+  # nothing the row names cannot offer that row a criterion. It is the same
+  # read-only `pull-requests: read` this block already granted — no new scope.
   pull-requests: read
 
 concurrency:
@@ -93,6 +99,11 @@ jobs:
           # on every trailer-less commit and marks nothing. GITHUB_REPOSITORY is
           # set by the runner, so the script needs no repo knob.
           GH_TOKEN: ${{ github.token }}
+          # The `run:` below already pipes this script's stdout through
+          # `tee -a "$GITHUB_STEP_SUMMARY"`, so summary() must NOT also append
+          # to that file — every no-overlap refusal would land in the summary
+          # twice. This says "stdout already IS the summary here".
+          LANDED_MARK_STDOUT_IS_SUMMARY: "1"
         run: |
           set -uo pipefail
           if [ -z "${LEDGER_TOKEN:-}" ]; then
