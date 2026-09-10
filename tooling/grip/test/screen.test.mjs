@@ -435,6 +435,170 @@ test("layer (c) is tested DIRECTLY, so 'unreachable' never quietly becomes 'unte
   }
 });
 
+// ── 4b. THE THREE FALSE REFUSALS, AND THE FENCE AROUND EACH ─────────────────
+//
+// pds-bl-grip-screen-refuses-honest-read-commands. All three are one defect
+// class: a boundary that stops in the wrong place, so an honest READ is refused
+// as a write. D3 says that is not a safe failure — a screen that punishes honest
+// work gets routed around, and prose replaces the rerun.
+
+test("`grep -ln` is a READ: the filesystem rule's boundary cannot match inside a flag", () => {
+  // `\b` matches between the `-` and the `l` of `-ln`, so EVERY `grep -ln` and
+  // `git grep -ln` in the repo was refused as a symlink write. `-ln` (list
+  // matching filenames, no output) is a standard idiom, so this recurred.
+  for (const cmd of [
+    "grep -ln screenCommand tooling/grip/screen.mjs",
+    "git grep -ln screenCommand -- tooling/grip",
+    "grep -rln foo docs",
+    "rg -ln foo",
+    // the same hazard on the other members of the alternation
+    "grep --color -touch x",
+    "ls -chmod",
+  ]) {
+    assert.equal(writeShapeReason(cmd), null, `layer (c) must not read a FLAG as a command head: ${cmd}`);
+  }
+  for (const cmd of ["grep -ln screenCommand tooling/grip/screen.mjs", "git grep -ln screenCommand -- tooling/grip"]) {
+    const v = screenCommand(cmd);
+    assert.equal(v.ok, true, `and the whole screen must admit it: ${cmd} — refused as ${v.reason}`);
+  }
+});
+
+test("PROTECTIVE: a real `ln` write is STILL refused after the boundary change", () => {
+  // The fence for the widening above. If `(?<![-\w])` ever loosens to something
+  // that also excludes a leading `/` or a space, every line here goes green and
+  // layer (c) stops backstopping filesystem mutation entirely.
+  for (const [cmd, why] of [
+    ["ln -s /tmp/a /tmp/b", /filesystem mutation/],
+    ["ln /tmp/a /tmp/b", /filesystem mutation/],
+    ["/usr/bin/ln -sf a b", /filesystem mutation/],
+    ["cat x && ln -s a b", /filesystem mutation/],
+    ["mkdir -p /tmp/x", /filesystem mutation/],
+    ["touch /tmp/x", /filesystem mutation/],
+    ["chmod 755 x.sh", /filesystem mutation/],
+    ["chown me x", /filesystem mutation/],
+    ["chgrp staff x", /filesystem mutation/],
+  ]) {
+    const got = writeShapeReason(cmd);
+    assert.ok(got, `MUST STAY CAUGHT by layer (c): ${cmd}`);
+    assert.match(got, why, `${cmd} → ${got}`);
+  }
+  // …and the whole screen refuses them too (layer (b) gets there first).
+  for (const cmd of ["ln -s /tmp/a /tmp/b", "mkdir -p /tmp/x", "chmod 755 x.sh"]) {
+    assert.equal(screenCommand(cmd).ok, false, `MUST STAY REFUSED: ${cmd}`);
+  }
+});
+
+test("`git merge-base --is-ancestor` is a READ — the carve-out ported from rerun.mjs", () => {
+  // `\bmerge\b` matched inside `merge-base`. merge-base prints a commit id and
+  // writes no ref, no index and no working tree, and `merge-base` is already on
+  // GIT_READ_VERBS — so layer (b) was innocent and layer (c) alone refused it.
+  for (const cmd of [
+    "git merge-base --is-ancestor abc123 origin/main",
+    "git merge-base HEAD origin/main",
+    "git -C /tmp merge-base --is-ancestor A B",
+    "git merge-base --is-ancestor HEAD origin/main && echo YES || echo NO",
+  ]) {
+    assert.equal(writeShapeReason(cmd), null, `layer (c) must not call an ancestry READ a git write: ${cmd}`);
+    const v = screenCommand(cmd);
+    assert.equal(v.ok, true, `and the whole screen must admit it: ${cmd} — refused as ${v.reason}`);
+  }
+});
+
+test("PROTECTIVE: every real `git merge` is STILL refused after the carve-out", () => {
+  // Ported from rerun.test.mjs §6c, which fenced the identical carve-out in the
+  // other module. The lookahead is five characters wide. If it ever widens to
+  // `merge.*`, or the entry is dropped, every line here goes green and layer (c)
+  // stops backstopping the verb that rewrites the working tree.
+  for (const [cmd, why] of [
+    ["git merge", /git write verb/],
+    ["git merge --abort", /git write verb/],
+    ["git merge --continue", /git write verb/],
+    ["git merge origin/main", /git write verb/],
+    ["git merge --no-ff feature/x", /git write verb/],
+    ["git merge -s ours origin/main", /git write verb/],
+    // `mergetool` is a TIGHTENING that rode along with the port: the pre-change
+    // `\bmerge\b` never matched it either (no word boundary between "merge" and
+    // "tool"), so layer (c) would have let an interactive tree-rewriting session
+    // through. Listed before `merge` in the alternation so it is reachable.
+    ["git mergetool", /git write verb/],
+    ["git mergetool --tool=vimdiff", /git write verb/],
+  ]) {
+    const got = writeShapeReason(cmd);
+    assert.ok(got, `MUST STAY CAUGHT by layer (c): ${cmd}`);
+    assert.match(got, why, `${cmd} → ${got}`);
+  }
+  // The rest of the git denylist is untouched by the carve-out.
+  for (const cmd of [
+    "git push origin main", "git commit -m x", "git checkout main", "git switch main",
+    "git reset --hard origin/main", "git rebase origin/main", "git clean -fd",
+    "git apply p.patch", "git am p.patch", "git fetch origin", "git pull",
+    "git cherry-pick abc", "git restore x", "git worktree add /tmp/w b",
+  ]) {
+    assert.ok(writeShapeReason(cmd), `MUST STAY CAUGHT by layer (c): ${cmd}`);
+    assert.equal(screenCommand(cmd).ok, false, `MUST STAY REFUSED: ${cmd}`);
+  }
+  // A STATED BOUND, not a silent one: unlike rerun.mjs's, THIS module's layer-(c)
+  // git entry carries no global-option prefix, so `git -C /tmp/repo merge …` is
+  // invisible to it — layer (b)'s `dropValueGlobals` owns the global-laundered
+  // spelling here and refuses all of them. Asserted through the whole screen so
+  // the coverage claim is true of the gate that actually runs.
+  for (const cmd of [
+    "git -C /tmp/repo merge origin/main",
+    "git -C /tmp/repo push origin main",
+    "git --git-dir /tmp/r/.git merge origin/main",
+    "git -c user.name=x commit -m y",
+  ]) {
+    assert.equal(screenCommand(cmd).ok, false, `a global option must not launder a write verb: ${cmd}`);
+  }
+});
+
+test("`git grep -c` is the SUB-VERB's flag: git's global parse stops at the sub-verb", () => {
+  // gitRule scanned the WHOLE argv for a `-c key=value` global, so `-c` sitting
+  // AFTER the sub-verb — `git grep -c <pattern>` is `--count`, `git log -c` /
+  // `git show -c` is combined-diff format — was read as a config global and
+  // refused "is not a key=value pair". Measured cost: it reddened seven checks
+  // in tooling/pds/rerun-adjudicate.test.mjs.
+  for (const cmd of [
+    "git grep -c completeness origin/main -- internal/cli/export_cmd.go",
+    "git grep -c hzResDone",
+    "git log -c HEAD",
+    "git show -c HEAD",
+    "git -C /tmp grep -c foo",
+    "git -c core.pager=cat grep -c foo",
+  ]) {
+    const v = screenCommand(cmd);
+    assert.equal(v.ok, true, `a sub-verb's own -c must not be read as git's global: ${cmd} — refused as ${v.reason}`);
+  }
+});
+
+test("PROTECTIVE: a PRE-VERB `git -c` config injection is STILL refused", () => {
+  // The fence for the widening above. git accepts its global options only BEFORE
+  // the sub-verb, which is what makes the bound sound — so every real injection
+  // still lands in the scanned region. If `gitSubVerbIndex` ever returned 1 for
+  // these, `git -c diff.external=/tmp/evil.sh diff` goes green and the head
+  // allowlist is void (proven executable in screen.mjs's own comment block).
+  for (const [cmd, why] of [
+    ["git -c diff.external=/tmp/evil.sh diff", /not on the inert config allowlist/],
+    ["git -c core.sshCommand=/tmp/evil.sh fetch", /not on the inert config allowlist/],
+    ["git -c core.pager=less log", /names a PROGRAM git runs/],
+    ["git -c hzResDone log", /is not a key=value pair/],
+    ["git --config-env=alias.x=EVIL log", /not on the inert config allowlist/],
+    ["git --config-env alias.x=EVIL log", /not on the inert config allowlist/],
+    ["git --git-dir=/tmp/r/.git status --short", /names a REPOSITORY/],
+    ["git --exec-path=/tmp/evil log", /sub-programs/],
+  ]) {
+    const v = screenCommand(cmd);
+    assert.equal(v.ok, false, `MUST STAY REFUSED: ${cmd}`);
+    assert.match(v.reason, why, `${cmd} → ${v.reason}`);
+  }
+  // …and the config-SOURCE flags stay refused in ANY position, on purpose:
+  // `--git-dir` is never a read sub-verb's own flag, so there is no honest read
+  // to give back and the fail-closed side is free.
+  for (const cmd of ["git grep --git-dir=/tmp/r/.git foo", "git log --exec-path=/tmp/evil"]) {
+    assert.equal(screenCommand(cmd).ok, false, `a config-source flag is refused after the sub-verb too: ${cmd}`);
+  }
+});
+
 // ── 5. THE THREE NAMED SETS — THE MEASUREMENT IS THE DELIVERABLE ─────────────
 
 test("DANGER SET: every command is REFUSED, with its reason", () => {
@@ -720,7 +884,23 @@ const BP_MANIFEST_TIGHTENING = [
   // verb safe — it trusts no other flag that way either.
   "bp task move legendary-quality-takeover-review-remediation legendary-quality-takeover-root --dry-run -o json",
 ];
-const SCREEN_REACH = WAVE5_REACH + COLLISION_FIX_REACH - BP_MANIFEST_TIGHTENING.length; // 254 + 4 - 1 = 257
+// pds-bl-grip-screen-refuses-honest-read-commands — the merge-base carve-out.
+// The THIRD independent delta, and it is stated as its own named constant for
+// the same reason COLLISION_FIX_REACH was split out of a derived expression: a
+// number that changes meaning when something else moves is the staleness this
+// file's preamble forbids. Named MEMBER BY MEMBER, and asserted below.
+//
+// The other two false-refusal fixes in the same change (`-ln` read as a symlink
+// write; a sub-verb's own `-c` read as git's config global) cost the corpus
+// NOTHING — measured, not assumed: no frozen row spells either, so the whole
+// +4 is merge-base. Their fences live in §4b, not in this count.
+const MERGE_BASE_CARVE_OUT = [
+  "git merge-base --is-ancestor 57e3be94c18abb230724358be97111739093bb12 main && echo ANCESTOR:yes",
+  'git merge-base --is-ancestor 790aeaf0 origin/main && echo "YES ancestor"',
+  "git merge-base --is-ancestor cbe86020d 90b13ad83 && echo YES || echo NO",
+  'git merge-base --is-ancestor 4398c631 origin/main && echo "YES ancestor" || echo "NOT ancestor"',
+];
+const SCREEN_REACH = WAVE5_REACH + COLLISION_FIX_REACH - BP_MANIFEST_TIGHTENING.length + MERGE_BASE_CARVE_OUT.length; // 254 + 4 - 1 + 4 = 261
 
 test("census reach is RE-MEASURED and its delta is accounted for, member by member", () => {
   const corpus = JSON.parse(readFileSync(fileURLToPath(new URL("../fixtures/evidence-corpus.json", import.meta.url)), "utf8"));
@@ -737,7 +917,11 @@ test("census reach is RE-MEASURED and its delta is accounted for, member by memb
       `  tgw12-s1 WIDENINGS  +${COLLISION_FIX_REACH}  four \`git -C <path> <read-verb>\` rows the value-global collision falsely refused\n` +
       `                        (the eaten \`-C\` path read as the sub-verb); named member-by-member in the collision test\n` +
       `  bp-manifest TIGHTENING  -${BP_MANIFEST_TIGHTENING.length}  \`bp task move … --dry-run\`, declared WRITING by bp's own capabilities\n` +
-      `                        manifest; named individually below rather than absorbed into the count`,
+      `                        manifest; named individually below rather than absorbed into the count\n` +
+      `  merge-base WIDENINGS  +${MERGE_BASE_CARVE_OUT.length}  every one a \`git merge-base --is-ancestor\` ancestry READ that layer (c) refused\n` +
+      `                        because \`\\bmerge\\b\` matched inside \`merge-base\`; named member-by-member below.\n` +
+      `                        The same change's other two false-refusal fixes (\`-ln\`, a sub-verb's own \`-c\`)\n` +
+      `                        move this number by ZERO — no frozen row spells either`,
   );
 
   assert.equal(r.admitted, SCREEN_REACH, "the screen's admission over the frozen corpus — re-derive and re-state, never re-baseline silently");
@@ -750,7 +934,17 @@ test("census reach is RE-MEASURED and its delta is accounted for, member by memb
     assert.equal(v.ok, false, `MUST REFUSE: ${cmd}`);
     assert.match(v.reason, /declared WRITING by bp's own capabilities manifest/, `and name why — got: ${v.reason}`);
   }
-  assert.equal(r.admitted, 258 - BP_MANIFEST_TIGHTENING.length, "258 minus the named rows, and nothing else moved");
+  assert.equal(r.admitted, 258 - BP_MANIFEST_TIGHTENING.length + MERGE_BASE_CARVE_OUT.length, "258 minus and plus the named rows, and nothing else moved");
+
+  // MEMBER-BY-MEMBER ACCOUNTING for the +4: each is a row the corpus actually
+  // contains, each is now admitted, and each is a merge-base ancestry read.
+  for (const cmd of MERGE_BASE_CARVE_OUT) {
+    assert.ok(commands.includes(cmd), `the named widening must be a row the corpus actually contains: ${cmd}`);
+    assert.match(cmd, /\bgit merge-base\b/, `every named widening is a merge-base row: ${cmd}`);
+    const v = screenCommand(cmd);
+    assert.equal(v.ok, true, `MUST NOW BE ADMITTED: ${cmd} — refused as ${v.reason}`);
+  }
+  assert.equal(new Set(MERGE_BASE_CARVE_OUT).size, MERGE_BASE_CARVE_OUT.length, "the named widenings must be distinct rows, not one row counted four times");
 });
 
 test("every corpus row the tightenings newly REFUSE is named and justified", () => {
@@ -2539,7 +2733,15 @@ test("tgw12-s2 — the six fixes cost the frozen corpus NOTHING, and that is MEA
   // without re-deriving it.
   const corpus = JSON.parse(readFileSync(CORPUS, "utf8"));
   const commands = corpus.proofs.map((p) => p?.command).filter((c) => typeof c === "string" && c.trim());
-  assert.equal(screenAll(commands).admitted, 257, "tgw12-s2 is a PURE tightening: it must not move corpus reach in either direction");
+  // The literal `257` here was SCREEN_REACH at the time tgw12-s2 shipped, and it
+  // silently re-stated a number this file already owns one place up — so a LATER
+  // wave that legitimately moved reach reddened a test about tgw12-s2's delta.
+  // Bound to SCREEN_REACH instead: this still fails the moment tgw12-s2 refuses
+  // or admits one more row than the accounted total, and the accounting for what
+  // the total IS stays in one place. (Moved by the merge-base carve-out,
+  // pds-bl-grip-screen-refuses-honest-read-commands: 257 -> 261, +4, all four
+  // named member-by-member in the reach test.)
+  assert.equal(screenAll(commands).admitted, SCREEN_REACH, "tgw12-s2 is a PURE tightening: it must not move corpus reach in either direction");
 
   // …and the REASON it costs nothing is that the corpus contains not one row of
   // any shape the six fixes newly refuse. Re-derived here rather than

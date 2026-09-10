@@ -505,7 +505,7 @@ test("an INJECTED runner still bypasses the screen — proving this is a boundar
   assert.notEqual(ruling.verdict, VERDICTS.REJECTED, "the injected path is not screened");
 });
 
-test("the D88 caller-boundary: `git -C` read is now ADMITTED, merge-base write is still REFUSED", () => {
+test("the D88 caller-boundary: `git -C` read and `git merge-base` read are both ADMITTED", () => {
   // Split from a single over-refusal loop after tgw4 (GIT_VALUE_GLOBALS /
   // dropValueGlobals, screen.mjs) taught the screen to skip `git`'s value-taking
   // `-C <dir>` global and reach the real sub-verb. The wire inherits the screen
@@ -521,12 +521,34 @@ test("the D88 caller-boundary: `git -C` read is now ADMITTED, merge-base write i
   const readRuling = adjudicate({ subject: "p", claim: "a discrete claim about it", rerun: readCmd });
   assert.notEqual(readRuling.verdict, VERDICTS.REJECTED, `the admitted read must not be rejected at the boundary: ${readCmd}`);
 
-  // WRITE half: `git merge-base --is-ancestor` still trips the broad \bmerge\b
-  // write-verb regex — an intentional over-refusal not touched this wave, filed
-  // separately as pds-bl-grip-screen-refuses-honest-read-commands. Permanently
-  // pinned here as intended: dropping `merge` from the write-verb regex REDS this.
-  const writeCmd = "git merge-base --is-ancestor HEAD origin/main";
-  assert.equal(screenCommand(writeCmd).ok, false, `the boundary must still refuse the write shape: ${writeCmd}`);
-  const writeRuling = adjudicate({ subject: "p", claim: "a discrete claim about it", rerun: writeCmd });
-  assert.equal(writeRuling.verdict, VERDICTS.REJECTED, `over-refused (fails closed), not executed: ${writeCmd}`);
+  // MERGE-BASE half: was pinned here as an intentional over-refusal (`\bmerge\b`
+  // matched inside `merge-base`), filed as
+  // pds-bl-grip-screen-refuses-honest-read-commands and now FIXED — screen.mjs
+  // carries rerun.mjs's `merge(?!-base)` carve-out and its protective fence.
+  // So this half flips from "still refused" to "now admitted", by the same
+  // NOT-REJECTED shape as the read half above: an ancestry read writes no ref,
+  // no index and no working tree. Reverting the carve-out REDS this.
+  const ancestryCmd = "git merge-base --is-ancestor HEAD origin/main";
+  assert.equal(screenCommand(ancestryCmd).ok, true, `the boundary must now admit the ancestry read: ${ancestryCmd}`);
+  const ancestryRuling = adjudicate({ subject: "p", claim: "a discrete claim about it", rerun: ancestryCmd });
+  assert.notEqual(ancestryRuling.verdict, VERDICTS.REJECTED, `the admitted ancestry read must not be rejected at the boundary: ${ancestryCmd}`);
+});
+
+test("the D88 caller-boundary STILL REFUSES a real git write — the fence on both halves", () => {
+  // The two halves above are both WIDENINGS now, so the loop they were split
+  // from no longer carries a refusal at all. This is its replacement: the
+  // boundary must still fail closed on the verb the carve-out sits next to.
+  // If `merge(?!-base)` ever widens to `merge.*`, or the write-verb entry is
+  // dropped, every line here goes green and the wire starts running commands
+  // that rewrite a working tree.
+  for (const writeCmd of [
+    "git merge origin/main",
+    "git -C /tmp/repo merge origin/main",
+    "git mergetool",
+    "git push origin main",
+  ]) {
+    assert.equal(screenCommand(writeCmd).ok, false, `the boundary must still refuse the write shape: ${writeCmd}`);
+    const writeRuling = adjudicate({ subject: "p", claim: "a discrete claim about it", rerun: writeCmd });
+    assert.equal(writeRuling.verdict, VERDICTS.REJECTED, `refused (fails closed), not executed: ${writeCmd}`);
+  }
 });
