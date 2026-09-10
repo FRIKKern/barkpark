@@ -90,17 +90,23 @@ defmodule BarkparkWeb.TasksControllerReadyClaimWorkerTest do
   # not — a fixed 2024 date can never flake on clock skew.
   @lapsed_ts "2024-01-01T00:00:00.000000Z"
 
-  # The base record every arm below varies by exactly one field.
-  @held_claim %{
+  # The base record every arm below varies by exactly one field. The LIVE
+  # stamp is computed at CALL time, never at compile time: a fixed literal
+  # lapses 2700 s after it was typed and the "live lease" arm turns red by the
+  # clock (it did, in CI, 76 min after this file was written).
+  @held_claim_base %{
     "worker" => "lead-cli-r4",
     "epoch" => 27,
-    "ts_iso" => "2026-09-10T09:00:00.123456Z",
     "work_digest" => "abcd1234deadbeef",
     "now" => %{
       "text" => "wiring the serializer, tests next",
       "ts" => "2026-09-10T09:00:00.123456Z",
       "criterion" => 1
     }
+  }
+
+  defp held_claim,
+    do: Map.put(@held_claim_base, "ts_iso", DateTime.to_iso8601(DateTime.utc_now()))
   }
 
   setup do
@@ -186,7 +192,7 @@ defmodule BarkparkWeb.TasksControllerReadyClaimWorkerTest do
          %{scope: scope, phase_id: phase} do
       id =
         mk_task!(uniq("closed-at"), scope, phase, %{
-          "claim" => Map.put(@held_claim, "closed_at", "2026-09-09T10:00:00.000000Z"),
+          "claim" => Map.put(held_claim(), "closed_at", "2026-09-09T10:00:00.000000Z"),
           "lifecycle_status" => "blocked"
         })
 
@@ -199,7 +205,7 @@ defmodule BarkparkWeb.TasksControllerReadyClaimWorkerTest do
          %{scope: scope, phase_id: phase} do
       id =
         mk_task!(uniq("closed-by"), scope, phase, %{
-          "claim" => Map.put(@held_claim, "closed_by", "lead-cli-r4")
+          "claim" => Map.put(held_claim(), "closed_by", "lead-cli-r4")
         })
 
       assert id in ready_ids(scope, phase)
@@ -209,7 +215,7 @@ defmodule BarkparkWeb.TasksControllerReadyClaimWorkerTest do
          %{scope: scope, phase_id: phase} do
       id =
         mk_task!(uniq("lapsed"), scope, phase, %{
-          "claim" => Map.put(@held_claim, "ts_iso", @lapsed_ts)
+          "claim" => Map.put(held_claim(), "ts_iso", @lapsed_ts)
         })
 
       assert id in ready_ids(scope, phase),
@@ -219,11 +225,11 @@ defmodule BarkparkWeb.TasksControllerReadyClaimWorkerTest do
 
     test "REFUSES: a LIVE lease — the shape the fixture's nine seeds actually had",
          %{scope: scope, phase_id: phase} do
-      live = mk_task!(uniq("live-lease"), scope, phase, %{"claim" => @held_claim})
+      live = mk_task!(uniq("live-lease"), scope, phase, %{"claim" => held_claim()})
 
       lapsed_control =
         mk_task!(uniq("lapsed-ctl"), scope, phase, %{
-          "claim" => Map.put(@held_claim, "ts_iso", @lapsed_ts)
+          "claim" => Map.put(held_claim(), "ts_iso", @lapsed_ts)
         })
 
       ids = ready_ids(scope, phase)
@@ -239,12 +245,12 @@ defmodule BarkparkWeb.TasksControllerReadyClaimWorkerTest do
          %{scope: scope, phase_id: phase} do
       id =
         mk_task!(uniq("no-ts"), scope, phase, %{
-          "claim" => Map.drop(@held_claim, ["ts_iso"])
+          "claim" => Map.drop(held_claim(), ["ts_iso"])
         })
 
       malformed =
         mk_task!(uniq("bad-ts"), scope, phase, %{
-          "claim" => Map.put(@held_claim, "ts_iso", "2026-09-10 09:00:00")
+          "claim" => Map.put(held_claim(), "ts_iso", "2026-09-10 09:00:00")
         })
 
       ids = ready_ids(scope, phase)
@@ -257,7 +263,7 @@ defmodule BarkparkWeb.TasksControllerReadyClaimWorkerTest do
 
     test "the LIFECYCLE is a separate axis: in_progress is refused with the SAME closed claim",
          %{scope: scope, phase_id: phase} do
-      claim = Map.put(@held_claim, "closed_at", "2026-09-09T10:00:00.000000Z")
+      claim = Map.put(held_claim(), "closed_at", "2026-09-09T10:00:00.000000Z")
 
       claimable =
         mk_task!(uniq("axis-blocked"), scope, phase, %{
@@ -283,20 +289,20 @@ defmodule BarkparkWeb.TasksControllerReadyClaimWorkerTest do
          %{conn: conn, scope: scope, phase_id: phase} do
       closed =
         mk_task!(uniq("card-closed"), scope, phase, %{
-          "claim" => Map.put(@held_claim, "closed_at", "2026-09-09T10:00:00.000000Z"),
+          "claim" => Map.put(held_claim(), "closed_at", "2026-09-09T10:00:00.000000Z"),
           "lifecycle_status" => "blocked"
         })
 
       lapsed =
         mk_task!(uniq("card-lapsed"), scope, phase, %{
-          "claim" => Map.put(@held_claim, "ts_iso", @lapsed_ts)
+          "claim" => Map.put(held_claim(), "ts_iso", @lapsed_ts)
         })
 
       # The swept residue: the sweeper NULLS the worker and leaves the rest.
       # This is the one shape the fixture had, and the one that renders nothing.
       swept =
         mk_task!(uniq("card-swept"), scope, phase, %{
-          "claim" => @held_claim |> Map.put("worker", nil) |> Map.put("ts_iso", @lapsed_ts)
+          "claim" => held_claim() |> Map.put("worker", nil) |> Map.put("ts_iso", @lapsed_ts)
         })
 
       payload = ready_page(conn, phase, "brief")
