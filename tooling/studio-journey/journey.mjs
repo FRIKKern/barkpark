@@ -217,6 +217,8 @@ const LEG_C_ROW_CAP = Number(process.env.LEG_C_ROW_CAP_MS || 3000); // per-row, 
 // the bound; that is not the same fix.
 const LEG_C_MAX_ROWS = Number(process.env.LEG_C_MAX_ROWS || 40);
 const LEG_C_PRESS_ATTEMPTS = 2;
+// LEG_C_TRACE=1 prints the per-phase attribution of every census row to stderr.
+const LEG_C_TRACE = process.env.LEG_C_TRACE === "1";
 
 const POLL_TICK = 150; // the poll loop's interval
 const KEY_GAP = 25; // pacing between synthetic keystrokes
@@ -548,17 +550,29 @@ class Page {
   /** A real mouse press/release at the element's centre — the click path the
    *  user takes, hover and focus handlers included. */
   async click(selector) {
+    // LEG_C_TRACE: `clickTiming` is written on EVERY click so the caller can
+    // attribute a slow press to the box evaluate or to one of the three
+    // Input.dispatchMouseEvent round trips, rather than to "the click".
+    const cs = Date.now();
     const box = await this.evaluate(
       `(function(){var el=document.querySelector(${JSON.stringify(selector)});if(!el)return null;` +
         `el.scrollIntoView({block:"center"});var r=el.getBoundingClientRect();` +
         `if(!r.width||!r.height)return null;` +
         `return {x:r.left+r.width/2,y:r.top+r.height/2};})()`,
     );
-    if (!box || box.__throw) return false;
+    const cBox = Date.now();
+    if (!box || box.__throw) { this.clickTiming = { box: cBox - cs, moved: 0, pressed: 0, released: 0, total: cBox - cs, hit: false }; return false; }
     const common = { x: Math.round(box.x), y: Math.round(box.y), button: "left", clickCount: 1 };
     await this.cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...common }, this.sid);
+    const cMoved = Date.now();
     await this.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...common }, this.sid);
+    const cPressed = Date.now();
     await this.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...common }, this.sid);
+    const cDone = Date.now();
+    this.clickTiming = {
+      box: cBox - cs, moved: cMoved - cBox, pressed: cPressed - cMoved,
+      released: cDone - cPressed, total: cDone - cs, hit: true,
+    };
     return true;
   }
 
@@ -2009,8 +2023,15 @@ async function legC(page, ctx, ledger, run) {
  *  facts. This can rescue a raced control; it can never turn a dead one green. */
 async function pressCensusRow(page, rec, deadline) {
   const t0 = Date.now();
+  // THE PHASE TIMER. `LEG_C_TRACE=1` prints one line per row attributing the
+  // row's wall clock to a NAMED phase — locate / witness-before / each click
+  // (split into its box evaluate and its three Input.dispatchMouseEvent round
+  // trips) / each witness-evaluate loop. It exists because the per-row cost was
+  // 2.7x the nominal cap and the overshoot was ASSUMED to be in the click.
+  const trace = { locate: 0, witnessBefore: 0, attempts: [] };
   const selfId = rec.kind === "collapsed_strip" ? rec.id : null;
   const locate = await page.evaluate(censusProbe(rec.key, selfId));
+  trace.locate = Date.now() - t0;
   if (!locate || locate.__throw || !locate.found) {
     return {
       // `missing` is what the walk loop keys the ONE recovery attempt off. It is
@@ -2021,7 +2042,9 @@ async function pressCensusRow(page, rec, deadline) {
     };
   }
   const witnessExpr = censusWitnessProbe(rec, locate.press_selector);
+  const wbT0 = Date.now();
   const before = await page.evaluate(witnessExpr);
+  trace.witnessBefore = Date.now() - wbT0;
   if (!before || before.__throw) {
     return { status: PENDING, witness: "none", presses: 0, waited: Date.now() - t0,
       detail: `the page would not answer a witness probe for this row — ${UNMEASURED}` };
@@ -2041,15 +2064,21 @@ async function pressCensusRow(page, rec, deadline) {
       sel = loc && !loc.__throw ? loc.press_selector : null;
     }
     if (!sel) break;
+    const at = { n: attempt, click: null, evals: 0, evalMs: 0, pauseMs: 0, loopMs: 0 };
+    trace.attempts.push(at);
     landed = (await page.click(sel)) || landed;
+    at.click = page.clickTiming;
     // THE HARD BOUND, and it is why this does not call `poll()`: poll checks its
     // cap AFTER the predicate has run, so its overshoot is as long as one
     // predicate takes — measured 8.1s against a 3.0s cap on a loaded host, which
     // walked LEG C 5s PAST its 90s budget. Here the clock is checked BEFORE every
     // evaluate, so the budget holds to within one round trip.
+    const loopT0 = Date.now();
     const until = Date.now() + Math.max(400, Math.min(LEG_C_ROW_CAP, deadline - Date.now()));
     for (;;) {
+      const evT0 = Date.now();
       const now = await page.evaluate(witnessExpr);
+      at.evals += 1; at.evalMs += Date.now() - evT0;
       if (now && !now.__throw) {
         after = now;
         const w = identityWitness(rec, before, now);
@@ -2057,8 +2086,22 @@ async function pressCensusRow(page, rec, deadline) {
       }
       if (Date.now() >= deadline) { ranOut = true; break; }
       if (Date.now() >= until) break;
+      const pT0 = Date.now();
       await pause(POLL_TICK); // the poll tick — not a wait for anything in particular
+      at.pauseMs += Date.now() - pT0;
     }
+    at.loopMs = Date.now() - loopT0;
+  }
+  if (LEG_C_TRACE) {
+    const parts = trace.attempts.map((a) => {
+      const c = a.click || {};
+      return `attempt${a.n}[click ${c.total ?? "?"}ms (box ${c.box ?? "?"} moved ${c.moved ?? "?"} pressed ${c.pressed ?? "?"} released ${c.released ?? "?"}) ` +
+        `+ witness-loop ${a.loopMs}ms (${a.evals} evaluate(s) = ${a.evalMs}ms, ${a.pauseMs}ms of ${POLL_TICK}ms ticks)]`;
+    });
+    process.stderr.write(
+      `LEG_C_TRACE ${rec.key} :: total ${Date.now() - t0}ms = locate ${trace.locate}ms + witness-before ${trace.witnessBefore}ms + ` +
+      (parts.length ? parts.join(" + ") : "(no press)") + `\n`,
+    );
   }
   const waited = Date.now() - t0;
   // A PLAIN ANCHOR IS NOT A SOCKET PRESS. `plugin_link` rows navigate by href
