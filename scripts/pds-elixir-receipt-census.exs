@@ -2907,13 +2907,13 @@ defmodule PDS.Census do
   end
 
   defp receipt_sites(:parse_error, _path, src),
-    do: Map.merge(%{json: [], put2xx: [], send2xx: []}, grep_receipts(src))
+    do: Map.merge(%{json: [], put2xx: [], send2xx: [], literal_arg: []}, grep_receipts(src))
 
   defp receipt_sites(ast, path, src) do
     {_, acc} =
       ast
       |> unpipe()
-      |> Macro.prewalk(%{json: [], put2xx: [], send2xx: []}, fn
+      |> Macro.prewalk(%{json: [], put2xx: [], send2xx: [], literal_arg: []}, fn
         {:json, m, [conn, _payload]} = node, a ->
           {node, %{a | json: [{path, m[:line], wears_2xx?(conn)} | a.json]}}
 
@@ -2927,8 +2927,98 @@ defmodule PDS.Census do
           {node, a}
       end)
 
+    acc = %{acc | literal_arg: literal_arg_sites(ast, path)}
+
     Map.merge(acc, grep_receipts(src))
   end
+
+  # ------------------------------------------- THE LITERAL-ARGUMENT SHAPE (PDS-D503)
+  #
+  # A SUCCESS VALUE CARRIED BY A LITERAL ARGUMENT, NOT BY A LITERAL KEY. The `ok: true`
+  # lens keys on a literal PAIR inside the payload. `json(conn, render_user(conn, user,
+  # false))` after `{:ok, _} = Scim.deprovision_user(org, user)` claims the deprovision
+  # took, in a body byte-identical to the one it would render if the write had matched
+  # nothing — and it spells no `ok` key at all, so the census's whole population misses
+  # it BY CONSTRUCTION, and so does every declared blind spot above (`send_resp(conn, 2`
+  # covers the bodyless 204 beside it, never this).
+  #
+  # THE WORKED EXAMPLE IS REPAIRED, AND THE SHAPE IS NOT. The site this was derived from
+  # -- `api/lib/barkpark_web/controllers/scim_users_controller.ex` at :77-:78, the SCIM
+  # deprovision PATCH -- was fixed by 501fb9670 (#8952, PDS-D503) to render
+  # `Scim.org_user_active?(org, user)`, read back off the stored rows. So the count over
+  # today's tree is expected to be SMALL, and a small number here is the reason the
+  # predicate needs a control: re-run it against `501fb9670^` and it finds that site
+  # (the command is printed in the block below). An absence nobody controlled is not a
+  # measurement.
+  #
+  # THE PREDICATE, NARROW ON PURPOSE. A payload that is a CALL receiving a BOOLEAN
+  # literal argument. Not integers (`ScimResponse.list_response(resources, total, 1)` is
+  # paging, not a claim), not atoms (a bucket name), not strings. Booleans are the shape
+  # that carries a yes/no CLAIM about a write, which is the thing this epic is about,
+  # and widening past them is how the first draft of this predicate returned 8 rows of
+  # `offset`/`limit`/`:members` and measured nothing.
+  #
+  # ITS OWN BLIND SHAPE, STATED WHERE IT IS COUNTED: this is a SHAPE test, never a
+  # dataflow test. It does not know that the callee renders the argument as a field, and
+  # it cannot see a boolean bound to a variable one line earlier (`active = false` then
+  # `render_user(conn, user, active)`), which is the same build-free limit that makes
+  # `|> put_status(status)` uncountable above. It is a FLOOR.
+  defp literal_arg_sites(ast, path) do
+    {_, acc} =
+      ast
+      |> unpipe()
+      |> Macro.prewalk([], fn
+        {f, m, [_conn, payload]} = node, a when f in [:json, :text, :html] ->
+          {node, collect_literal_arg(a, path, m, payload)}
+
+        {:send_resp, m, [_conn, _status, payload]} = node, a ->
+          {node, collect_literal_arg(a, path, m, payload)}
+
+        {:render, m, [_conn, _template, assigns]} = node, a ->
+          {node, collect_literal_arg(a, path, m, assigns)}
+
+        {{:., _, [_mod, f]}, m, [_conn, payload]} = node, a when f in [:json, :text, :html] ->
+          {node, collect_literal_arg(a, path, m, payload)}
+
+        node, a ->
+          {node, a}
+      end)
+
+    Enum.reverse(acc)
+  end
+
+  defp collect_literal_arg(acc, path, meta, payload) do
+    if boolean_literal_arg_call?(payload),
+      do: [{path, meta[:line], one_line(Macro.to_string(payload))} | acc],
+      else: acc
+  end
+
+  # A CALL, AND NOT A CONTAINER. `%{}`, `%`, `{}`, `<<>>` and `__block__` are literal
+  # containers wearing the {form, meta, args} shape; counting them would fold the
+  # literal-KEY population this census already measures into the literal-ARGUMENT one it
+  # does not, and the whole point of this figure is that the two are disjoint.
+  defp boolean_literal_arg_call?({form, _m, args})
+       when is_atom(form) and is_list(args) and args != [] do
+    form not in [:%{}, :%, :{}, :<<>>, :__block__, :., :__aliases__] and
+      Enum.any?(args, &boolean_literal?/1)
+  end
+
+  defp boolean_literal_arg_call?({{:., _, _}, _m, args}) when is_list(args) and args != [],
+    do: Enum.any?(args, &boolean_literal?/1)
+
+  defp boolean_literal_arg_call?(_), do: false
+
+  # THE PARSE IS `literal_encoder`-WRAPPED AND A NAIVE `is_boolean/1` READS ZERO THROUGH
+  # IT. parse_file/1 passes `literal_encoder`, so `false` arrives as
+  # `{:__block__, meta, [false]}` and a guard on the bare value matches NOTHING — which
+  # is not a hypothetical: the first cut of this predicate printed 0 on a corpus that
+  # CONTAINED the worked example, and only the pre-repair control caught it. Both forms
+  # are accepted here so the figure cannot silently become a zero about the encoder.
+  defp boolean_literal?(v) when is_boolean(v), do: true
+  defp boolean_literal?({:__block__, _, [v]}) when is_boolean(v), do: true
+  defp boolean_literal?(_), do: false
+
+  defp one_line(s), do: s |> String.replace(~r/\s+/, " ") |> String.slice(0, 90)
 
   # THE REFUTED SUBSTRING, STILL TAKEN, ON PURPOSE. Retiring a number silently is the
   # same overstatement this census hunts: 237 stays printed and RELABELLED with its own
@@ -8410,6 +8500,7 @@ defmodule PDS.Census do
     json = Enum.flat_map(parsed, & &1.receipts.json)
     put2xx = Enum.flat_map(parsed, & &1.receipts.put2xx)
     send2xx = Enum.flat_map(parsed, & &1.receipts.send2xx)
+    literal_arg = Enum.flat_map(parsed, &Map.get(&1.receipts, :literal_arg, []))
     grep = Enum.flat_map(parsed, fn f -> Enum.map(f.receipts.grep_lines, &{f.path, &1}) end)
 
     ast_lines = MapSet.new(json, fn {path, line, _} -> {path, line} end)
@@ -8418,6 +8509,8 @@ defmodule PDS.Census do
     %{
       ast_json: length(json),
       ast_json_2xx: Enum.count(json, fn {_, _, wears?} -> wears? end),
+      ast_literal_arg: length(literal_arg),
+      literal_arg_sites: literal_arg,
       ast_put2xx: length(put2xx),
       ast_send2xx: length(send2xx),
       grep_raw: Enum.sum(Enum.map(parsed, & &1.receipts.grep_raw)),
@@ -8459,6 +8552,7 @@ defmodule PDS.Census do
       {"2xx subset", blind.json_2xx, d.ast_json_2xx},
       {"send_resp/3 2xx", blind.send_resp, d.ast_send2xx},
       {"put_status/2 2xx", blind.put2xx, d.ast_put2xx},
+      {"literal-argument sites", blind.literal_arg, d.ast_literal_arg},
       {"legacy substring lines", blind.legacy, d.grep_lines},
       {"legacy substring occurrences", blind.legacy_raw, d.grep_raw},
       {"false positives", blind.fp, fp},
@@ -8484,7 +8578,7 @@ defmodule PDS.Census do
           "the two lenses do not reconcile: legacy #{d.grep_lines} - FP #{fp} = #{d.grep_lines - fp}, but AST #{d.ast_lines} - FN #{fn_} = #{d.ast_lines - fn_}; the FP/FN split does not describe the gap it claims to"
 
         true ->
-          "all 8 printed blind-spot figures re-derived from the same parse · #{d.ast_json} json/2 site(s), #{d.ast_json_2xx} wearing a 2xx literal (a SUBSET, #{d.ast_json_2xx} <= #{d.ast_json}), #{d.ast_send2xx} send_resp/3, #{d.ast_put2xx} put_status/2 · the refuted substring reconciles: #{d.grep_lines} - #{fp} FP == #{d.ast_lines} - #{fn_} FN == #{d.ast_lines - fn_} · BLIND SHAPE: both sides read ONE parse, so a mutation inside receipt_sites/3 moves them together and prints PASS through it"
+          "all #{length(printed)} printed blind-spot figures re-derived from the same parse · #{d.ast_literal_arg} literal-argument site(s) · #{d.ast_json} json/2 site(s), #{d.ast_json_2xx} wearing a 2xx literal (a SUBSET, #{d.ast_json_2xx} <= #{d.ast_json}), #{d.ast_send2xx} send_resp/3, #{d.ast_put2xx} put_status/2 · the refuted substring reconciles: #{d.grep_lines} - #{fp} FP == #{d.ast_lines} - #{fn_} FN == #{d.ast_lines - fn_} · BLIND SHAPE: both sides read ONE parse, so a mutation inside receipt_sites/3 moves them together and prints PASS through it"
       end
 
     [{"BLIND-SHAPE-SPLIT", drifted == [] and subset? and reconciles?, why}]
@@ -8502,6 +8596,7 @@ defmodule PDS.Census do
     json_2xx = b.ast_json_2xx
     send_resp = b.ast_send2xx
     put2xx = b.ast_put2xx
+    literal_arg = b.ast_literal_arg
     legacy = b.grep_lines
     legacy_raw = b.grep_raw
     fp = MapSet.size(b.false_positive)
@@ -8522,6 +8617,40 @@ defmodule PDS.Census do
     p("        MISSES #{fn_} AST line(s) — almost all the piped form `|> json(`, which it cannot")
     p("        see at all. #{legacy} - #{fp} = #{legacy - fp} = #{b.ast_lines} - #{fn_}. The two numbers are")
     p("        INCOMPATIBLE LENSES over one population, never two populations to add.")
+    p("  #{literal_arg}  A SUCCESS VALUE RENDERED FROM A LITERAL ARGUMENT — THE FOURTH DECLARED")
+    p("        BLIND SPOT, AND A DECLARED ONE, NOT A LENS EXTENSION (PDS wave 36 lens half).")
+    p("        The three figures above key on a literal KEY (`ok: true`) or on a bodyless")
+    p("        2xx. NEITHER covers a claim carried in an ARGUMENT: `json(conn,")
+    p("        render_user(conn, user, false))` after `{:ok, _} = Scim.deprovision_user/2`")
+    p("        asserts the deprovision took, spells no `ok` key, and renders a body")
+    p("        byte-identical to the one a no-op write would produce.")
+    p("        THE WORKED EXAMPLE, AND IT IS REPAIRED: scim_users_controller.ex:77-:78 (the")
+    p("        SCIM deprovision PATCH) held exactly that until 501fb9670 (#8952, PDS-D503)")
+    p("        replaced the literal with `Scim.org_user_active?(org, user)`. The bare 204 at")
+    p("        the DELETE beside it was always inside the send_resp(conn, 2xx) figure above;")
+    p("        this render was inside NOTHING until this line existed.")
+    p("        WHY DECLARED AND NOT EXTENDED: reading a literal argument as a RECEIPT needs")
+    p("        the callee's parameter-to-field binding — dataflow this build-free lens")
+    p("        refuses on the same grounds it refuses a computed `ok:` (`ok: not is_nil(id)`")
+    p("        and `ok: user.is_admin` are indistinguishable to an AST lens). Extending would")
+    p("        move `emitted`, and with it the register's denominator, on a GUESS. So the")
+    p("        shape is COUNTED and EXCLUDED: `emitted` does not move, and the register's")
+    p("        completeness claim now names what it is a denominator OVER.")
+    p("        A FLOOR, not a count: a boolean bound to a variable one line earlier is")
+    p("        invisible here, exactly as `|> put_status(status)` is above.")
+    Enum.each(b.literal_arg_sites, fn {path, line, snippet} ->
+      p("        · #{short(path)}:#{line}  #{snippet}")
+    end)
+
+    if literal_arg == 0 do
+      p("        ZERO ON THIS TREE, AND ZERO IS THE READING THAT NEEDS A CONTROL. Re-run the")
+      p("        SAME predicate against the pre-repair blob and it finds the site — that, not")
+      p("        this 0, is what says the predicate is live:")
+      p("          git show 501fb9670^:api/lib/barkpark_web/controllers/scim_users_controller.ex")
+      p("          # then census that one file: literal_arg_sites/2 returns")
+      p("          #   scim_users_controller.ex:78  render_user(conn, user, false)")
+    end
+
     p("  ALSO INVISIBLE: `mix ecto.migrations` reporting `up` (PDS-D311) — it reads a")
     p("  bookkeeping row, never the object the migration claims to have produced.")
     p("  BLIND SHAPE, PRINTED: a status bound to a VARIABLE (`|> put_status(status)`) is")
@@ -8547,6 +8676,7 @@ defmodule PDS.Census do
       json_2xx: json_2xx,
       send_resp: send_resp,
       put2xx: put2xx,
+      literal_arg: literal_arg,
       legacy: legacy,
       legacy_raw: legacy_raw,
       fp: fp,
@@ -9462,6 +9592,24 @@ defmodule PDS.Census do
       expect: ["FAIL  BLIND-SHAPE-SPLIT", "json/2 sites printed 9999", "did not derive"],
       refute: ["PASS  BLIND-SHAPE-SPLIT"],
       proves: "a blind-spot figure invented at the print site reds BY NAME — before this arm the same mutation printed 9999 and exited 0 with CENSUS OK"
+    },
+    # THE SAME ARM, OVER THE FIGURE ADDED IN WAVE 36'S LENS HALF. It is carried
+    # SEPARATELY from the case above and not folded into it, because this figure is 0 on
+    # every corpus this selftest builds and on today's real tree: a figure whose derived
+    # value is 0 is exactly the one where a print-site invention is cheapest to miss, and
+    # the FAIL line names BOTH halves (printed 4242, derived 0) rather than a bare
+    # mismatch. The predicate's own liveness is controlled elsewhere and on purpose —
+    # `501fb9670^`'s scim_users_controller.ex, the pre-repair blob, which this predicate
+    # finds at :78 (printed in the blind-spot block with the command).
+    %{
+      name: "BLIND-SHAPE-LITERAL-ARG-PRINTED-IS-DERIVED",
+      corpus: :full,
+      argv: [],
+      mut: {"    literal_arg = b." <> "ast_literal_arg\n", "    literal_arg = 4242\n"},
+      exit: 1,
+      expect: ["FAIL  BLIND-SHAPE-SPLIT", "literal-argument sites printed 4242", "did not derive"],
+      refute: ["PASS  BLIND-SHAPE-SPLIT"],
+      proves: "the literal-argument blind-spot figure passes through BLIND-SHAPE-SPLIT like the other eight — invent it at the print site and the arm names it, which is what stops a DECLARED blind spot from becoming a decorative one"
     },
     # ROUTED-DISPOSITION-UNSHADOWED, ONE CASE PER BRANCH OF ITS PREDICATE (PDS-D556).
     #
