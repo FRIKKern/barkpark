@@ -859,17 +859,28 @@ defmodule Barkpark.Content.Lifecycle do
   #     Pusher's synthesized publish executes on the REMOTE box through its
   #     MutateController (`source: :api` there), where this same fence already
   #     gates it.
-  #   * COVERED, and this is wider than the slice brief assumed — the GitHub
-  #     automatic publishers thread `source: :github`, NOT `:sync`
-  #     (`plugins/github/link.ex:193` via `mirror_job.ex:560` /
-  #     `inbound_events.ex:172`, and `plugins/github/adopt.ex:178`), so they
-  #     fall through to this gate and the criteria fence applies to them. That
-  #     is the intended direction: `Link.collapse_draft_twin/5` already handles
-  #     a rejected collapse without raising or looping — it logs the reason,
-  #     leaves the draft twin in place and still returns `{:ok, _}`, and the
-  #     next reconcile converges — so a fence refusal degrades to "bookkeeping
-  #     deferred", never to a broken mirror. `pds-bl-github-linkput-auto-publish-erasure`
-  #     stays open for the audit-trail half it does not answer.
+  #   * NOT REACHED by any GitHub caller on main — and an earlier revision of
+  #     this note said the opposite. It claimed the GitHub automatic publishers
+  #     (`plugins/github/link.ex` via `mirror_job.ex` / `inbound_events.ex`,
+  #     and `plugins/github/adopt.ex`) threaded `source: :github` through
+  #     `Content.publish_document/4` and so "fell through to this gate". They
+  #     did once; since #16479 both are PUBLISHED-FIRST fenced writers
+  #     (`Tasks.Internal.fenced_content_write/4` straight onto the published
+  #     row — no `drafts.<id>` twin is minted, so there is no collapse and no
+  #     publish to refuse), and `grep -rn publish_document
+  #     api/lib/barkpark/plugins/github/` matches only the two moduledocs that
+  #     recount the old shape. `source: :github` is still stamped — `Link.put/4`
+  #     threads it into the never-published arm's DRAFT upsert
+  #     (`put_on_draft/5`) and into the fenced write's `mutation_events` row —
+  #     but never into this door. So the coverage claim above was true of
+  #     NOTHING, and this gate has no live `:github` producer to cover.
+  #     The contract a returning GitHub publisher meets is pinned by TEST, not
+  #     by this comment: `publish_door_lifecycle_guard_test.exs` section (h)
+  #     ("source: :github takes the FULL gate, and the producer picks it",
+  #     task-b36741707eabe359 / #17355) — transition + claim checks + the
+  #     criteria fence all apply to `:github`, and only `:sync` is exempt from
+  #     the first two. `pds-bl-github-linkput-auto-publish-erasure` stays open
+  #     for the audit-trail half it does not answer.
   defp ensure_task_publish_transition_legal("task", %Document{} = draft, pid, dataset, opts) do
     case Content.get_document(pid, "task", dataset, opts) do
       {:ok, %Document{content: pub_content}} ->
