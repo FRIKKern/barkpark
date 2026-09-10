@@ -5082,6 +5082,7 @@ defmodule PDS.Census do
       report_register_stale(stale)
       report_register_tags(rows)
       report_register_prose(rows)
+      report_register_callee_split(classified)
     end
   end
 
@@ -5153,6 +5154,170 @@ defmodule PDS.Census do
       wrap(r.note, "      ", "  ")
       p("")
     end)
+  end
+
+
+  # ------------------------------------- THE CALLEE-DERIVED RECEIPT (PDS-D448a lens)
+  #
+  # THE FIFTH DECLARED BLIND SPOT, AND THE ONE THAT COVERS THE WHOLE REGISTER. Every
+  # field of the register key — {path, module.name/arity, head_hash, expr_fp} — is read
+  # off the JUDGED def and off nothing else. head_hash fingerprints that def's head,
+  # expr_fp the receipt container inside its body. So a regression that stays ONE HOP
+  # AWAY, inside a function the def CALLS, moves no field of the key, moves no verdict,
+  # and this whole apparatus prints PASS through it.
+  #
+  # PROVEN BY MUTATION, NOT ARGUED (the wave-47 finding this block answers): rewriting
+  # `Barkpark.Content.SearchIntelligence.record_interaction/3` to discard its real result
+  # and return `{:ok, Ecto.UUID.generate()}` restores the exact pre-repair defect at the
+  # two interaction receipts — every failure renders `ok: true, recorded: true` with a
+  # FABRICATED event id — and the census exits 0 with CENSUS OK, because not one byte
+  # inside either controller def moved.
+  #
+  # THE POPULATION IS THEREFORE MEASURED, NOT GUESSED. `callee_split/1` classifies every
+  # register row that resolved to a live site into exactly three states, and the counts
+  # below are re-derived every run from the same parse the register resolves against:
+  #
+  #   CALLEE-TRUTH  the receipt renders ONLY literals (`ok: true`), and the def's body
+  #                 calls into another module. Everything the receipt asserts happens
+  #                 in the callee. TOTALLY blind: no field of the key can move.
+  #   CALLEE-VALUE  the receipt renders at least one non-literal, and the def's body
+  #                 calls out. expr_fp pins the CALL SITE — the spelling of the call —
+  #                 and says nothing about the callee's body. Blind to the same hop.
+  #   SELF-CONTAINED  the def's body reaches no other module at all. Here, and only
+  #                 here, a behaviour change must move head_hash or expr_fp.
+  #
+  # WHY DECLARED AND NOT CLOSED. Closing it means a BEHAVIOURAL pin per row: a test that
+  # drives the route and reads the stored row back. That is what `basis: :end_to_end`
+  # already means, and the register's own distribution says how far it reaches — the
+  # counts are printed side by side below so the two are read together rather than one
+  # standing in for the other. A DECLARED blind spot with a printed count is not a
+  # repair; it is the refusal to let this instrument's green be quoted as covering a
+  # class it has never issued a request about.
+  #
+  # THE LENS, NAMED WITH THE NUMBER (PDS-D448a). Build-free AST over ONE checkout.
+  # `raw_calls/1` — the same edge extractor the route resolver uses — over the enclosing
+  # def's body, kept to `:remote` edges. Its own blind shapes, stated where they are
+  # counted: a call reached through a runtime-computed module, a call inside a macro this
+  # lens does not expand, and a callee in the SAME module (a local `defp` IS inside this
+  # file but NOT inside the fingerprinted def, so a local-only def counts SELF-CONTAINED
+  # and is a FLOOR, never a ceiling). Every one of those errs toward SELF-CONTAINED, so
+  # the callee-derived figure is a LOWER BOUND on the blind population.
+  defp callee_split(classified) do
+    rows =
+      for {r, status, site} <- resolve_register(classified),
+          status in [:live, :stale, :resurrected],
+          not is_nil(site) do
+        {r, site, callee_state(site)}
+      end
+
+    %{
+      rows: rows,
+      resolved: length(rows),
+      callee_truth: Enum.count(rows, fn {_, _, st} -> st == :callee_truth end),
+      callee_value: Enum.count(rows, fn {_, _, st} -> st == :callee_value end),
+      self_contained: Enum.count(rows, fn {_, _, st} -> st == :self_contained end)
+    }
+  end
+
+  defp callee_state(%{owner: owner, expr: expr}) when not is_nil(owner) do
+    remote? = Enum.any?(raw_calls(owner), &match?({:remote, _, _, _}, &1))
+
+    cond do
+      not remote? -> :self_contained
+      literal_term?(expr) -> :callee_truth
+      true -> :callee_value
+    end
+  end
+
+  defp callee_state(_), do: :self_contained
+
+  defp rows_in_state(s, state) do
+    s.rows |> Enum.filter(fn {_, _, st} -> st == state end) |> Enum.sort_by(fn {_, site, _} -> {site.path, site.line} end)
+  end
+
+  # A TERM WITH NO VARIABLE AND NO CALL IN IT. parse_file/1 parses with a
+  # `literal_encoder`, so every literal arrives wrapped as `{:__block__, meta, [value]}`
+  # and a naive `is_boolean/1`-style guard on the bare value reads ZERO through it — the
+  # same encoder trap the literal-argument predicate documents. Both spellings are taken.
+  # A VARIABLE `{:name, meta, nil}` and a CALL `{f, meta, args}` are both three-tuples
+  # this falls through to `false` on, which is the whole discrimination.
+  defp literal_term?({:__block__, _, [v]}), do: literal_term?(v)
+  defp literal_term?({:%{}, _, kvs}), do: Enum.all?(kvs, &literal_term?/1)
+  defp literal_term?({:{}, _, els}), do: Enum.all?(els, &literal_term?/1)
+  defp literal_term?({:__aliases__, _, _}), do: true
+  defp literal_term?({a, b}), do: literal_term?(a) and literal_term?(b)
+  defp literal_term?(l) when is_list(l), do: Enum.all?(l, &literal_term?/1)
+  defp literal_term?(v) when is_atom(v) or is_number(v) or is_binary(v), do: true
+  defp literal_term?(_), do: false
+
+  defp report_register_callee_split(classified) do
+    s = callee_split(classified)
+    derived = s.callee_truth + s.callee_value
+
+    p("  CALLEE-DERIVED RECEIPTS — THE BLIND SPOT THAT COVERS THIS WHOLE REGISTER")
+    p("  #{derived} of #{s.resolved} resolved row(s) derive what their receipt asserts from a CALLEE, so")
+    p("  no field of the four-field key can move when the regression is one hop away.")
+    p("      CALLEE-TRUTH    #{pad(s.callee_truth)}  receipt is ALL LITERAL and the def calls out — nothing")
+    p("                          the receipt says is computed where the key can see it")
+    p("      CALLEE-VALUE    #{pad(s.callee_value)}  receipt renders a non-literal and the def calls out —")
+    p("                          expr_fp pins the CALL SITE, never the callee's body")
+    p("      SELF-CONTAINED  #{pad(s.self_contained)}  the def reaches no other module; only here must a")
+    p("                          behaviour change move head_hash or expr_fp")
+
+    # THE SMALL SIDE IS ROLLED, AND THAT IS THE CONTROL. 3 of 98 is exactly the figure a
+    # broken predicate produces by accident, and a reader cannot check a bare 3. Naming
+    # the rows makes the lens falsifiable by inspection: open the def, and either it
+    # reaches no other module or this figure is wrong. The 95 is not rolled for the
+    # mirror-image reason — a 95-line roll is a wall nobody reads, and its members are
+    # every OTHER row in the register block above.
+    Enum.each(rows_in_state(s, :self_contained), fn {_r, site, _} ->
+      p("        · #{short(site.path)}:#{site.line}  fn #{label(site.owner)}")
+    end)
+    p("  DECLARED, NEVER CLOSED, AND THE COUNTS SIT SIDE BY SIDE ON PURPOSE. The register's")
+    p("  own distribution above says how many rows carry a BEHAVIOURAL pin (basis")
+    p("  :end_to_end); this figure says how many carry the hole a pin would close. A")
+    p("  DECLARED blind spot is not a repair — it is the refusal to let this census's green")
+    p("  be quoted as covering a class it never issues a request about.")
+    p("  A LOWER BOUND, not a count: a local `defp` callee, a runtime-computed module head")
+    p("  and an unexpanded macro all read SELF-CONTAINED here, so every error in this lens")
+    p("  moves rows OUT of the blind figure and never into it (PDS-D448a).")
+    p("  AND THE ROLL ABOVE IS THAT FLOOR FIRING, NOT A COUNTEREXAMPLE TO IT: all #{s.self_contained}")
+    p("  SELF-CONTAINED row(s) hand their work to a LOCAL defp in the same module that does")
+    p("  call out. They are not rows a regression cannot reach; they are rows this lens")
+    p("  DECLINES to claim, which is why the blind figure is a lower bound and says so.")
+    p("")
+  end
+
+  # -- REGISTER-CALLEE-SPLIT --------------------------------------------------
+  #
+  # THE ARM EXISTS SO THE FIGURE ABOVE CANNOT BE INVENTED AT THE PRINT SITE. It is the
+  # same shape BLIND-SHAPE-SPLIT gives the four blind-spot figures: re-derive, reconcile,
+  # and REFUSE a total that does not account for every resolved row. It asserts NOTHING
+  # about how the split falls — a row moving from CALLEE-TRUTH to SELF-CONTAINED by an
+  # honest repair must not red anybody's build — only that the three states partition the
+  # resolved population exactly once and that the arm is not certifying an empty set.
+  defp register_callee_split_check(classified) do
+    s = callee_split(classified)
+    total = s.callee_truth + s.callee_value + s.self_contained
+    derived = s.callee_truth + s.callee_value
+
+    # 0-OF-N IS NOT A PASS, the same refusal ROSTER-VERDICT-FRESH makes: a resolver that
+    # classifies nothing partitions nothing, and would print a serene `0 of 0`.
+    vacuous? = s.resolved == 0
+
+    why =
+      cond do
+        vacuous? ->
+          "NOT ONE of #{length(@register)} register row(s) resolved to a live site, so this arm partitioned an EMPTY SET — the resolver, not the register, is what failed"
+
+        total != s.resolved ->
+          "the callee split does not partition its own population: #{s.callee_truth} CALLEE-TRUTH + #{s.callee_value} CALLEE-VALUE + #{s.self_contained} SELF-CONTAINED = #{total}, but #{s.resolved} row(s) resolved to a live site — a row is counted twice or not at all"
+
+        true ->
+          "#{derived} of #{s.resolved} resolved register row(s) derive their receipt from a CALLEE (#{s.callee_truth} CALLEE-TRUTH + #{s.callee_value} CALLEE-VALUE), #{s.self_contained} SELF-CONTAINED, and the three partition the population exactly once · DECLARED, NOT COVERED: this arm proves the FIGURE is derived, never that the class is pinned — a regression inside any of those callees still moves no field of the key and still prints PASS here"
+      end
+
+    {"REGISTER-CALLEE-SPLIT", not vacuous? and total == s.resolved, why}
   end
 
   # THE SCOPE PREDICATE. The selftest's synthetic fixture holds none of these paths, so an
@@ -8861,7 +9026,7 @@ defmodule PDS.Census do
         true ->
           "#{fresh} roster verdict(s) still name the def they were derived against — anchor_mfa AND def_fp both re-derived this run, never transcribed" <>
             if(absent > 0, do: " (#{absent} row(s) absent from this corpus — ROSTER-ANCHORS-EXIST owns those)", else: "") <>
-            ". BLIND SHAPE, STATED: both granularities are SAME-FILE. `git show --stat fbc6b80a1` — the repair that made two of these rows stale — also touched scim.ex and accounts.ex, and a future repair confined to a CALLEE moves no byte inside the roster row's own def, so this arm would print PASS through it"
+            ". BLIND SHAPE, STATED: both granularities are SAME-FILE. `git show --stat fbc6b80a1` — the repair that made two of these rows stale — also touched scim.ex and accounts.ex, and a future repair confined to a CALLEE moves no byte inside the roster row's own def, so this arm would print PASS through it — the SAME hop the register's CALLEE-DERIVED figure now counts (see the JUDGMENT REGISTER block: it is DECLARED and COUNTED there, and it is not covered there either)"
       end
 
     {"ROSTER-VERDICT-FRESH", not vacuous? and stale == [] and unresolved == [], why}
@@ -11469,7 +11634,8 @@ defmodule PDS.Census do
           register_retired_intact(classified),
           declared_rows_resolve(classified),
           declared_basis_intact(parsed),
-          roster_check(parsed)
+          roster_check(parsed),
+          register_callee_split_check(classified)
         ]
     end
   end
