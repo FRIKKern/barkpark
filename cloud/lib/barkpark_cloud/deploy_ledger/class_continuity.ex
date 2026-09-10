@@ -162,8 +162,7 @@ defmodule BarkparkCloud.DeployLedger.ClassContinuity do
         attempts_before: attempts_before,
         attempts_after: attempts_after,
         refused: true,
-        reason:
-          "attempts #{attempts_before}/#{attempts_after} below min_sample #{min_sample}",
+        reason: "attempts #{attempts_before}/#{attempts_after} below min_sample #{min_sample}",
         findings: [],
         classes_read: []
       }
@@ -181,17 +180,25 @@ defmodule BarkparkCloud.DeployLedger.ClassContinuity do
     # nobody wrote rows for is absent from both maps and therefore has no reading
     # at all, rather than a 0 → 0 death that alarms forever.
     classes_read =
-      before_shares |> Map.keys() |> Enum.concat(Map.keys(after_shares)) |> Enum.uniq() |> Enum.sort()
+      before_shares
+      |> Map.keys()
+      |> Enum.concat(Map.keys(after_shares))
+      |> Enum.uniq()
+      |> Enum.sort()
 
     deaths =
       classes_read
-      |> Enum.map(fn class -> {class, share(before_shares, class), share(after_shares, class)} end)
+      |> Enum.map(fn class ->
+        {class, share(before_shares, class), share(after_shares, class)}
+      end)
       |> Enum.filter(fn {_c, b, a} -> a == 0.0 and b >= @material_share end)
       |> Enum.map(fn {c, b, _a} -> {c, b} end)
 
     births =
       classes_read
-      |> Enum.map(fn class -> {class, share(before_shares, class), share(after_shares, class)} end)
+      |> Enum.map(fn class ->
+        {class, share(before_shares, class), share(after_shares, class)}
+      end)
       |> Enum.filter(fn {_c, b, a} -> b == 0.0 and a >= @material_share end)
       |> Enum.map(fn {c, _b, a} -> {c, a} end)
 
@@ -202,7 +209,9 @@ defmodule BarkparkCloud.DeployLedger.ClassContinuity do
     # would call that event a repair.
     gains =
       classes_read
-      |> Enum.map(fn class -> {class, share(after_shares, class) - share(before_shares, class)} end)
+      |> Enum.map(fn class ->
+        {class, share(after_shares, class) - share(before_shares, class)}
+      end)
       |> Enum.filter(fn {_c, delta} -> delta > 0.0 end)
 
     lost_total = deaths |> Enum.map(&elem(&1, 1)) |> Enum.sum()
@@ -274,7 +283,9 @@ defmodule BarkparkCloud.DeployLedger.ClassContinuity do
   # as an arithmetic error and is one, at the level a human uses it.
   defp counterparts(entries, total, paired) do
     entries
-    |> Enum.map(fn {class, share} -> %{class: class, share: round2(allocate(share, total, paired))} end)
+    |> Enum.map(fn {class, share} ->
+      %{class: class, share: round2(allocate(share, total, paired))}
+    end)
     |> Enum.reject(&(&1.share == 0.0))
     |> Enum.sort_by(& &1.share, :desc)
     |> Enum.take(@suspects)
