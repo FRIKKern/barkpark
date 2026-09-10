@@ -94,6 +94,7 @@ defmodule Barkpark.Tasks.Close do
       check_worker_id: 1
     ]
 
+  alias Barkpark.Tasks.SessionId
   alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Plugins.Github.Acknowledgement
@@ -152,6 +153,7 @@ defmodule Barkpark.Tasks.Close do
     # Audit stamp: the api_token id that drove this close (nil for internal
     # callers), threaded into the task.closed mutation_event's document map.
     caller_token_id = Keyword.get(opts, :caller_token_id)
+    session = Keyword.get(opts, :session)
     # The two LOUD overrides (PDS-D288/D289). Each is a non-empty reason string;
     # absent (or blank) means "no override", and the corresponding gate refuses.
     overrides = %{
@@ -195,6 +197,7 @@ defmodule Barkpark.Tasks.Close do
           criteria,
           landed,
           caller_token_id,
+          session,
           overrides
         )
     end
@@ -445,6 +448,7 @@ defmodule Barkpark.Tasks.Close do
          criteria,
          landed,
          caller_token_id,
+         session,
          overrides
        ) do
     result =
@@ -594,11 +598,12 @@ defmodule Barkpark.Tasks.Close do
                            artifact_record,
                            worker_id
                          ),
-                         caller_token_id
+                         caller_token_id,
+                         session
                        ) do
                   # THE CLOSER IS NAMED ON EVERY CLOSE (pds-bl-close-audit-gaps).
                   #
-                  # `apply_close_update/9` stamps `closed_by` into the CLAIM, so
+                  # `apply_close_update/10` stamps `closed_by` into the CLAIM, so
                   # a row that was never claimed took its `_ ->` arm and the
                   # whole close — document and event alike — named nobody.
                   # Measured on the guerrilla ledger 2026-09-06: 139 of 6,617
@@ -651,6 +656,7 @@ defmodule Barkpark.Tasks.Close do
                       |> Map.merge(
                         actor_stamp(worker_id, get_in(updated.content, ["claim", "epoch"]))
                       )
+                      |> Map.merge(SessionId.session_stamp(session))
                     )
 
                   unblocked = cascade_unblock_dependents!(updated)
@@ -685,7 +691,7 @@ defmodule Barkpark.Tasks.Close do
   end
 
   # A REPLAY, not a race: this exact worker already closed this row to this
-  # exact status. `closed_by` is stamped by `apply_close_update/9` on every
+  # exact status. `closed_by` is stamped by `apply_close_update/10` on every
   # close that carries a claim, so it is the authorship record, and comparing
   # it to the caller is what separates "your own write landed" from "somebody
   # else got here first".
@@ -1069,7 +1075,7 @@ defmodule Barkpark.Tasks.Close do
   #
   # returned rc=0 and printed `✓ the store holds it — lifecycle_status=cancelled`.
   # Read back: lifecycle `cancelled`, `close_reason` ABSENT, and no record
-  # anywhere of why the work was abandoned. `apply_close_update/9` writes
+  # anywhere of why the work was abandoned. `apply_close_update/10` writes
   # `close_reason` only for a non-empty binary (blank never clobbers a stored
   # value — right for a replay, and the reason this landed silently), so a blank
   # reason on a first close writes NOTHING and says so to nobody. That is the
@@ -1314,7 +1320,8 @@ defmodule Barkpark.Tasks.Close do
          criteria,
          landed,
          override_record,
-         caller_token_id
+         caller_token_id,
+         session
        ) do
     new_rev = generate_rev()
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
@@ -1329,6 +1336,16 @@ defmodule Barkpark.Tasks.Close do
             claim
             |> Map.put("closed_by", worker_id)
             |> Map.put("closed_at", ts_iso)
+            # WHICH SESSION sealed the row (task-f79e39f4992749a5). `closed_by`
+            # is the LANE worker id, so a close by a woken predecessor of the
+            # same lane was indistinguishable from the live session's.
+            # `closed_session` records the server-derived session beside it and
+            # leaves `session` / `session_origin` alone, so a reader can still
+            # see the claim-vs-close split. Attribution only; the close CAS
+            # still fences on `worker + epoch` exactly as before.
+            |> then(fn c ->
+              if is_binary(session), do: Map.put(c, "closed_session", session), else: c
+            end)
 
           doc.content
           |> Map.put("lifecycle_status", new_status)

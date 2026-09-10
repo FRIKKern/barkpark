@@ -1834,6 +1834,14 @@
        --bg-accent is sub-AA (evergreen-light 4.16), so selected rows use --fg. */
     .pane-doc-title { font-size: var(--text-sm); font-weight: 500; color: var(--fg-muted); display: flex; align-items: center; gap: 8px; }
     .pane-doc-item.selected .pane-doc-title { color: var(--fg); }
+    /* Row media (Gyldendal parity E3.3): a schema's list_preview.media
+       thumbnail before the title — Sanity's list preview `media`. The empty
+       variant keeps the box so titles in one pane stay aligned. */
+    .pane-doc-media {
+      width: 28px; height: 28px; border-radius: 4px; flex-shrink: 0; overflow: hidden;
+      display: inline-flex; background: var(--bg-muted); border: 1px solid var(--border);
+    }
+    .pane-doc-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .pane-doc-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
     .pane-doc-dot.published { background: var(--success); }
     .pane-doc-dot.draft { background: var(--warning); }
@@ -3174,6 +3182,10 @@
     /* Validation */
     .field-required { color: var(--destructive); margin-left: 2px; }
     .field-errors { font-size: var(--text-xs); color: var(--destructive); margin-top: 4px; }
+    /* Gyldendal parity E1.6 — warning-level validation, inline + publish bar */
+    .field-warnings { font-size: var(--text-xs); color: var(--warning); margin-top: 4px; }
+    .editor-field.has-warning:not(.has-error) .form-input { border-color: var(--warning); }
+    .bp-validation-warnings { font-size: var(--text-xs); color: var(--warning); margin-left: 12px; }
 
     /* Dataset switcher (hoisted from BarkparkWeb.Studio.DatasetSwitcher) */
     .dataset-switcher { display: inline-flex; align-items: center; gap: 8px; margin-left: 12px; font-size: var(--text-xs); }

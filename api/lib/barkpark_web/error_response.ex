@@ -32,11 +32,12 @@ defmodule BarkparkWeb.ErrorResponse do
   human message while keeping the canonical code/status (resource-specific text).
   """
   # @canonical capability:error-response-emit aka:error_json,enveloped,halt_json,parse_error_json doc:docs/api-v1.md
-  @spec emit(Plug.Conn.t(), term(), String.t() | nil) :: Plug.Conn.t()
-  def emit(conn, reason, message_override \\ nil) do
+  @spec emit(Plug.Conn.t(), term(), String.t() | nil, String.t() | nil) :: Plug.Conn.t()
+  def emit(conn, reason, message_override \\ nil, hint_override \\ nil) do
     reason
     |> Errors.to_envelope(conn)
     |> maybe_override_message(message_override)
+    |> maybe_override_hint(hint_override)
     |> write(conn)
   end
 
@@ -65,6 +66,14 @@ defmodule BarkparkWeb.ErrorResponse do
 
   defp maybe_override_message(env, nil), do: env
   defp maybe_override_message(env, message), do: Map.put(env, :message, message)
+
+  # The code-keyed default hint is put on by `Errors.stamp/2`; a caller that
+  # knows the SPECIFIC remedy (which tier to mint, which flag to pass) replaces
+  # it here so the envelope never names the wrong tier for a denial it did not
+  # make (the public-read perspective clamp used to hint "write/admin" while a
+  # read-tier token was the actual answer — gyldendal friction 68).
+  defp maybe_override_hint(env, nil), do: env
+  defp maybe_override_hint(env, hint), do: Map.put(env, :hint, hint)
 
   defp maybe_put_details(env, details) when details == %{}, do: env
   defp maybe_put_details(env, details), do: Map.put(env, :details, details)

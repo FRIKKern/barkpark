@@ -1493,7 +1493,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # census — they are named by the EVALUATED register below and counted in
   # `@ast_blind_paths`. MEASURED by the PIN CO-EDIT arm on this tree
   # ("@emitted_pinned 169 -> 170"), never summed with an earlier delta.
-  @emitted_pinned 170
+  # 170 -> 171 (dr-w33-bl): `census/3` gains ONE top-level key,
+  # `abandoned_basis` — the three labels (which basis measured it, how much is
+  # historical, how much the backfill wrote) that `abandoned`, an integer, cannot
+  # carry. ONE key, not four: `abandoned_basis/1` returns a single flat STRING,
+  # so the walker counts one map key and there is no interior to move
+  # `@ast_blind_paths` (which is why the vocabulary delta above moved it and this
+  # one does not). RE-MEASURED by the PIN CO-EDIT arm on the tree REBASED onto
+  # #17317 ("@emitted_pinned 170 -> 171") — never summed with the pre-rebase
+  # delta, which was measured against a main that had not yet grown `vocabulary`.
+  @emitted_pinned 171
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -1684,7 +1693,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `DeployCensus`, so it rides free on the NAME union and moves the SITE
   # register instead. MEASURED by the PIN CO-EDIT arm ("@go_tag_pinned 359 ->
   # 362"), never derived from the diff.
-  @go_tag_pinned 362
+  # 362 -> 363 (dr-w33-bl): `DeployCensus` declares ONE new json tag line,
+  # `abandoned_basis`, and the name is new package-wide, so it lands on the NAME
+  # union rather than on the SITE register (`@go_tag_sites` does NOT move).
+  # RE-MEASURED by the PIN CO-EDIT arm on the tree REBASED onto #17317
+  # ("@go_tag_pinned 362 -> 363") — the pre-rebase measurement said 359 -> 360
+  # and is void: it was taken against a main without `DeployVocabulary`.
+  @go_tag_pinned 363
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -4017,6 +4032,7 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
   # walk over a real `census/3` return, never transcribed from the source.
   @emitted_paths [
     "abandoned",
+    "abandoned_basis",
     "abandoned_unreadable",
     "boundaries",
     "boundaries[].instant",

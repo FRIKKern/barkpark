@@ -3293,16 +3293,36 @@ defmodule PDS.Census do
     # write (tasks_controller.ex:587 lives in close_response/3, which touches no Repo
     # verb — the write is Tasks.close/3 in close/2, one frame up). One hop up only:
     # expanding callers transitively would reach the whole tree and mean nothing.
-    {via, via_verbs} =
+    #
+    # NO HALT — THE WHOLE SET, OR THE SENTENCE IS UNFALSIFIABLE (PDS wave 35). This used
+    # to be `Enum.reduce_while(... :halt ...)` and route_tag/1 then printed the FIRST
+    # writing caller as if it were THE caller. tickets_controller.ex:263's render_ticket/3
+    # has SIX call sites (:64 :110 :133 :175 :195 :222) and several of those enclosing defs
+    # genuinely write, so the printed name was one arbitrary member of a set — stable
+    # today only because `callers/2`'s order is, which nothing specifies and no
+    # Elixir/OTP upgrade or corpus reorder promises. NO ARITY KEY REPAIRS THIS: keying on
+    # a scalar arity merely FLIPS which member is printed (it drops every arity-2 caller),
+    # which is the right SHAPE of answer off a wrongly-narrowed candidate set. The repair
+    # is to stop claiming a singular caller: walk every candidate and carry the SET.
+    # `via_verbs` is still the FIRST writer's verb map, so every count downstream —
+    # write?/read?/the sweep — is bit-for-bit what the halting version produced.
+    {vias, via_cands, via_verbs} =
       if start && not Map.has_key?(verbs, :write) do
-        start
-        |> callers(index)
-        |> Enum.reduce_while({nil, %{}}, fn c, acc ->
-          {v, _, _} = bfs([{c, 1, [label(c)]}], index, MapSet.new(), %{}, nil, [], max)
-          if Map.has_key?(v, :write), do: {:halt, {label(c), v}}, else: {:cont, acc}
-        end)
+        cands = callers(start, index)
+
+        writers =
+          Enum.flat_map(cands, fn c ->
+            {v, _, _} = bfs([{c, 1, [label(c)]}], index, MapSet.new(), %{}, nil, [], max)
+            if Map.has_key?(v, :write), do: [{label(c), v}], else: []
+          end)
+
+        {Enum.map(writers, &elem(&1, 0)), length(cands),
+         case writers do
+           [{_, v} | _] -> v
+           [] -> %{}
+         end}
       else
-        {nil, %{}}
+        {[], 0, %{}}
       end
 
     verbs =
@@ -3316,7 +3336,9 @@ defmodule PDS.Census do
       write?: Map.has_key?(verbs, :write),
       read?: Map.has_key?(verbs, :read),
       depth: depth,
-      via_caller: via,
+      via_caller: List.first(vias),
+      via_callers: vias,
+      via_candidates: via_cands,
       chain: chain,
       owner: start
     })
@@ -3826,7 +3848,17 @@ defmodule PDS.Census do
   defp evidence(site, writes, reads) do
     parts =
       [
-        if(site.write?, do: "write-routed at depth #{site.depth}", else: nil),
+        # A CALLER-CREDITED SITE HAS NO OWN DEPTH, and printing "at depth " with nothing
+        # after it was the tell nobody read. Say what actually happened instead.
+        if(site.write? and site.depth,
+          do: "write-routed at depth #{site.depth}",
+          else: nil
+        ),
+        if(site.write? and is_nil(site.depth),
+          do:
+            "write-routed ONLY through its callers — its own body reaches no Repo write within depth #{@evidence_depth}",
+          else: nil
+        ),
         if(site.read? and not site.write?, do: "read-routed only", else: nil),
         if(!site.write? and !site.read?, do: "no Repo verb within depth #{@evidence_depth}", else: nil),
         if(writes != [], do: "local writes: #{Enum.map_join(writes, ",", &elem(&1, 0))}", else: nil),
@@ -4622,6 +4654,52 @@ defmodule PDS.Census do
     p("")
     post_read_roll(classified)
     catch_all_findings(classified)
+    caller_credit_findings(classified)
+  end
+
+  # THE CALLER-CREDIT AUDIT (PDS wave 35). When a site's own function reaches no Repo
+  # write, route/3 walks one hop UP and credits a CALLER's write to the site — and leaves
+  # `depth` nil while doing it. AN EMPTY DEPTH ON A write?=true ROW IS THEREFORE THE
+  # MACHINE-READABLE TELL FOR CALLER-CREDIT, and this block is the audit of it: cheap,
+  # total over the emitted population, and printed on every run with its count, so the
+  # class stops being something a reader has to notice one row at a time. A row naming
+  # MORE THAN ONE writing caller is the unfalsifiable-sentence case the old printer hid;
+  # a row naming exactly one is still a credit the site did not earn in its own body.
+  defp caller_credit_findings(classified) do
+    credited =
+      classified
+      |> Enum.filter(&(&1.write? and is_nil(&1.depth)))
+      |> Enum.sort_by(&{&1.path, &1.line})
+
+    ambiguous = Enum.count(credited, &(length(Map.get(&1, :via_callers, [])) > 1))
+
+    p("  CALLER-CREDIT AUDIT  #{length(credited)} write-routed site(s) carry NO OWN DEPTH — " <>
+        "the write belongs to a CALLER; #{ambiguous} of them name MORE THAN ONE writing caller")
+
+    if credited == [] do
+      p("      none — every write-routed site reaches its own write, at its own depth")
+    else
+      Enum.each(credited, fn s ->
+        vias = Map.get(s, :via_callers, [])
+
+        p("      FINDING  #{short(s.path)}:#{s.line}  fn #{s.owner && label(s.owner) || "?"}")
+
+        p("               #{length(vias)} of #{Map.get(s, :via_candidates, 0)} caller(s) reach a write: " <>
+            Enum.join(vias, ", "))
+
+        p(
+          if length(vias) > 1 do
+            "               AMBIGUOUS — no evidence here selects one of them, so any single " <>
+              "name printed for this site would be unfalsifiable by construction."
+          else
+            "               SOLE WRITER of the candidates, but the write is still the caller's, " <>
+              "not this site's own."
+          end
+        )
+      end)
+    end
+
+    p("")
   end
 
   # THE FINDINGS BLOCK. A shape count is not a finding — a NAMED site with no written basis
@@ -4998,10 +5076,25 @@ defmodule PDS.Census do
   # printed a bare `[WRITE d5]` because its ENCLOSING function routes to a write on the
   # success path. A declared row carrying `route_claim` marks the bracket disputed at the
   # one place that prints it.
+  # THE ATTRIBUTION PRINTER, AND THE ONE PLACE THE SET IS SPELT. A caller-credited row
+  # names EVERY caller that reaches a write, and when there is more than one it says
+  # AMBIGUOUS out loud — that is what makes the sentence falsifiable: point at the row,
+  # read the named callers, and the claim can be checked against the tree. A one-writer
+  # set still prints the name, but qualified by the candidate count it was chosen from,
+  # so "sole" is a measured word rather than an artefact of where the walk stopped.
   defp route_tag(s) do
+    vias = Map.get(s, :via_callers, [])
+    cands = Map.get(s, :via_candidates, 0)
+
     base =
       cond do
-        s.write? and s.via_caller -> "WRITE via caller #{s.via_caller}"
+        s.write? and length(vias) > 1 ->
+          "WRITE via AMBIGUOUS CALLER SET — #{length(vias)} of #{cands} callers reach a write: " <>
+            Enum.join(vias, ", ")
+
+        s.write? and vias != [] ->
+          "WRITE via caller #{hd(vias)} (sole writer of #{cands} callers)"
+
         s.write? -> "WRITE d#{s.depth}"
         s.read? -> "READ"
         true -> "UNROUTED"
@@ -9741,6 +9834,48 @@ defmodule PDS.Census do
       expect: ["CENSUS OK"],
       refute: ["REFUSED: TRUNCATED CORPUS"],
       proves: "with the missing-file comparison dead, a 891-of-892 corpus is certified CENSUS OK at exit 0 — so the population guard is the ONLY thing standing between that truncation and a full-voice green, and no other arm catches it"
+    },
+    # THE CALLER-CREDIT PAIR, AND WHY BOTH HALVES ARE HERE. Both census the REPO: the
+    # synthetic corpus holds no api/lib and emits no caller-credited site at all, so the
+    # audit block would be EMPTY over there and a mutant would be proven exactly where
+    # the arm is switched off (PDS-D541). Neither writes to api/lib — each runs a mutated
+    # copy of THIS file with cwd at the repo, read-only.
+    #
+    # The FIRST case is the PRECONDITION, not a control: it asserts the pristine repo run
+    # actually reaches a multi-caller attribution and names it. Without it the second case
+    # passes vacuously the day the corpus stops holding one, refuting nothing while
+    # reading as a green.
+    %{
+      name: "CALLER-SET-IS-PRINTED",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "CALLER-CREDIT AUDIT",
+        "barkpark_web/controllers/tickets_controller.ex:263",
+        "caller(s) reach a write: BarkparkWeb.TicketsController.",
+        "AMBIGUOUS — no evidence here selects one of them"
+      ],
+      proves: "the repo corpus DOES carry a caller-credited site whose writing-caller set has more than one member, and the census names every member of it — so the mutant below has something real to destroy"
+    },
+    %{
+      name: "CALLER-SET-NOT-NARROWED",
+      corpus: :repo,
+      argv: [],
+      # NARROW THE CANDIDATE SET BACK TO ONE CALLER — the shipped-before behaviour, and
+      # the exact shape a scalar arity key produces: the right SHAPE of answer off a
+      # wrongly-narrowed set. The walk, the counts and the verbs are untouched; only the
+      # SET the printer is handed shrinks to its first member.
+      mut: {"{Enum.map(writers, &elem" <> "(&1, 0)), length(cands),",
+            "{Enum.map(Enum.take(writers, 1), &elem(&1, 0)), length(cands),"},
+      exit: 0,
+      expect: ["CENSUS OK", "CALLER-CREDIT AUDIT"],
+      refute: [
+        "AMBIGUOUS CALLER SET",
+        "AMBIGUOUS — no evidence here selects one of them"
+      ],
+      proves: "narrowing the writing-caller set back to ONE member silently deletes every ambiguity marker while the census still prints CENSUS OK at exit 0 — so the full-set walk in route/3 is the ONLY thing keeping the attribution sentence falsifiable, and no count, no shape and no other arm notices its loss"
     }
   ]
 

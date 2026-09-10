@@ -76,11 +76,20 @@
 //   node cloud/priv/static/__preview__/pin-race.mjs [--json <path>] [--port N]
 //   CHROME=/path/to/chrome  overrides the browser (same contract as modal-oracle).
 //
-// NOT wired into .github/workflows/console-harness.yml ON PURPOSE: on origin/main
-// this instrument exits 1 BY DESIGN (the race is live and this row is forbidden
-// from fixing it), so a CI job would be permanently red for a defect that is
-// filed, not regressed. Wire it in the PR that closes the race — it then becomes
-// the regression guard, green, with this run as its RED-before.
+// WIRED, as of the PR that closed the race (cch-w42-bl / task-8cc4f7c895c11dad):
+// a step of the `modal-oracle` job in .github/workflows/console-harness.yml,
+// which is an upstream `needs:` of the REQUIRED `Console gate`, with the same
+// 0/1/2 wrapper hashchange-wiring.mjs rides. It was deliberately UNWIRED before
+// that: on the pre-fix bytes it exits 1 BY DESIGN, and a job permanently red for
+// a defect that is filed rather than regressed teaches a team to ignore it.
+//
+// THE FIX IT NOW GUARDS is one `storage` listener in app.js's init() delegating
+// to the pure `pinStorageMovesTeam` (grep -n 'function pinStorageMovesTeam'
+// cloud/priv/static/app.js): a tab whose pin moved under it reloads instead of
+// painting. Deleting that mount reds THIS instrument (measured: exit 1, tab A
+// back to "Northwind Ops" over Contoso's rows) while every pure test in
+// __app.test.mjs stays green — which is exactly why the browser leg is the gate
+// and the unit test is not.
 
 import http from "node:http";
 import net from "node:net";

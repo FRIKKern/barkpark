@@ -21,8 +21,28 @@ defmodule Barkpark.Content.Graph do
       `truncation_reason: :fan_out`.
     * `depth > clamped_depth` → stop, `truncation_reason: :depth`.
 
+  A FOURTH condition exists on the `:drafts` path only, and it is not a BFS
+  bound at all — the CORPUS READ under `build_drafts_index/1` can itself stop
+  at `corpus_limit/0`. It reports as `truncation_reason: :corpus_cap` and is
+  detailed by `corpus_truncation` (see below), because a capped corpus is a
+  categorically different defect from a capped walk: it makes the index a
+  PREFIX, which used to render real references as `dangling` phantoms.
+
   `depth` is CLAMPed to `1..5` (clamp, never 4xx). The response ALWAYS carries
-  `truncated` (bool) + `truncation_reason` (atom | nil).
+  `truncated` (bool) + `truncation_reason` (atom | nil) + `corpus_truncation`
+  (map | nil).
+
+  ## `corpus_truncation` — the payload half of the corpus bound
+
+  `nil` on every complete read (and on the whole `:published` path, which has
+  no corpus read). When the drafts corpus read capped:
+
+      %{truncated: true, limit: <corpus_limit/0>, read: <docs actually folded>}
+
+  It exists so a consumer can tell a PHANTOM REFERENCE (a target that really
+  is not there) from an UNREAD one (a target past the bound). Before it, the
+  two were the same `dangling` edge and the truncation was reported as a
+  broken link — a wrong diagnosis, not merely an incomplete one.
 
   ## Perspective
 
@@ -173,7 +193,8 @@ defmodule Barkpark.Content.Graph do
         edges: [%{from_id, to_id, kind, weight, plugin_source}],
         dependents: [ranked node maps],
         truncated: bool,
-        truncation_reason: :node_budget | :fan_out | :depth | nil
+        truncation_reason: :node_budget | :fan_out | :depth | :corpus_cap | nil,
+        corpus_truncation: nil | %{truncated: true, limit: pos_integer, read: non_neg_integer}
       }
   """
   @spec traverse(binary(), keyword()) :: map()
@@ -241,7 +262,12 @@ defmodule Barkpark.Content.Graph do
       edges: Enum.map(edges, &render_edge/1),
       dependents: dependents,
       truncated: state.truncated,
-      truncation_reason: state.reason
+      truncation_reason: state.reason,
+      # The published path reads the materialised `content_edges` table, never
+      # a corpus, so it has no corpus bound to report. Stated, not omitted: the
+      # key is present on EVERY graph response so a consumer never has to read
+      # its absence as "complete".
+      corpus_truncation: nil
     }
   end
 
@@ -260,7 +286,7 @@ defmodule Barkpark.Content.Graph do
     direction = Keyword.get(opts, :direction, :both)
     root_slug = Keyword.get(opts, :root_pub_id) || Content.published_id(root_id)
 
-    {out_index, in_index, edge_list} = build_drafts_index(opts)
+    {out_index, in_index, edge_list, corpus_truncation} = build_drafts_index(opts)
 
     state = %{
       visited: MapSet.new([root_slug]),
@@ -307,8 +333,14 @@ defmodule Barkpark.Content.Graph do
       nodes: nodes ++ phantoms,
       edges: Enum.map(edges, &render_drafts_edge/1),
       dependents: dependents,
-      truncated: state.truncated,
-      truncation_reason: state.reason
+      # A capped corpus truncates the graph just as surely as a BFS bound does,
+      # so it flips the SAME flag — a consumer that only reads `truncated` is
+      # not lied to. `truncation_reason` keeps whichever bound the BFS hit (a
+      # walk that also blew its node budget is still a node-budget walk); when
+      # the walk itself was complete, `:corpus_cap` is the reason.
+      truncated: state.truncated or corpus_truncation != nil,
+      truncation_reason: state.reason || if(corpus_truncation != nil, do: :corpus_cap, else: nil),
+      corpus_truncation: corpus_truncation
     }
   end
 
@@ -409,7 +441,18 @@ defmodule Barkpark.Content.Graph do
         {[], nil}
       end
 
-    if truncated == :cap do
+    corpus_capped? = truncated == :cap
+
+    corpus_truncation =
+      if corpus_capped?,
+        do: %{
+          truncated: true,
+          limit: Keyword.get(opts, :corpus_limit, corpus_limit()),
+          read: length(docs)
+        },
+        else: nil
+
+    if corpus_capped? do
       Logger.warning(
         "Content.Graph: drafts corpus read for dataset=#{dataset} hit its corpus bound at " <>
           "#{length(docs)} docs — the index is built from a PREFIX, so edges to documents " <>
@@ -448,22 +491,26 @@ defmodule Barkpark.Content.Graph do
 
     edge_list =
       docs
-      |> Enum.flat_map(fn doc -> drafts_edges_for_doc(doc, corpus_slugs, edge_opts) end)
+      |> Enum.flat_map(fn doc ->
+        drafts_edges_for_doc(doc, corpus_slugs, corpus_capped?, edge_opts)
+      end)
       |> resolve_core_dangling(dataset, opts)
       |> filter_drafts_edges(opts)
 
     out_index = Enum.group_by(edge_list, & &1.from_id)
     in_index = Enum.group_by(edge_list, & &1.to_id)
 
-    {out_index, in_index, edge_list}
+    {out_index, in_index, edge_list, corpus_truncation}
   end
 
   # THE BATCHED DANGLING PASS. Core edges leave `drafts_edges_for_doc/3` with
   # `dangling: nil` — `extract_edges/2`'s documented "NOT COMPUTED" marker under
-  # `dangling: :skip`. Plugin edges never carry nil: `normalize_plugin_drafts_edge/2`
-  # already decided theirs from `corpus_slugs` (the deliberate lens difference
-  # documented there), so the `nil` test is exactly "a core edge still owing an
-  # answer" and this pass leaves plugin edges alone.
+  # `dangling: :skip`. On a COMPLETE corpus read plugin edges never carry nil:
+  # `normalize_plugin_drafts_edge/3` already decided theirs from `corpus_slugs`
+  # (the deliberate lens difference documented there), so the `nil` test is then
+  # exactly "a core edge still owing an answer". On a CAPPED read a plugin edge
+  # whose target missed the prefix hands its verdict here too — deliberately,
+  # because a prefix cannot prove an absence — and it joins the same batch.
   #
   # ONE `resolvable_targets/3` call for the whole fold: bounded by the number of
   # DISTINCT `refType`s, never by the number of documents or reference values.
@@ -506,7 +553,7 @@ defmodule Barkpark.Content.Graph do
   # drafts graph sees a task's `parent` edge but its dependency edges stay
   # published-graph-only. Hydrating here would be a per-doc query over the
   # whole corpus — exactly the per-request storm this path must avoid.
-  defp drafts_edges_for_doc(doc, corpus_slugs, opts) do
+  defp drafts_edges_for_doc(doc, corpus_slugs, corpus_capped?, opts) do
     dataset = Map.get(doc, :dataset) || Map.get(doc, "dataset") || Keyword.get(opts, :dataset)
     core = Content.extract_edges(doc, opts)
 
@@ -515,7 +562,7 @@ defmodule Barkpark.Content.Graph do
     |> Enum.map(fn
       # Core edges arrive fully formed (dangling/field/refType resolved).
       %{dangling: _} = edge -> edge
-      edge -> normalize_plugin_drafts_edge(edge, corpus_slugs)
+      edge -> normalize_plugin_drafts_edge(edge, corpus_slugs, corpus_capped?)
     end)
   end
 
@@ -555,7 +602,26 @@ defmodule Barkpark.Content.Graph do
   # use drafts-corpus membership — the natural lens for a drafts surface (a
   # draft-only valueref target is a real drafts node, not a phantom), and free
   # of per-target DB reads (constraint: no per-request storms).
-  defp normalize_plugin_drafts_edge(edge, corpus_slugs) do
+  #
+  # WHEN THE CORPUS READ CAPPED, `corpus_slugs` IS A PREFIX AND ITS ABSENCES
+  # MEAN NOTHING. "Not in the corpus set" then conflates "no such document"
+  # with "past the bound", and the second one rendered as a PHANTOM — a
+  # truncation reported as a broken reference. So under a cap the membership
+  # test may only CONFIRM (a hit is still a real drafts node), never DENY: a
+  # miss becomes `nil` — `extract_edges/2`'s "not computed" marker — and the
+  # ALREADY-BATCHED `resolve_core_dangling/3` pass settles it against the DB.
+  # That costs no extra round-trip per edge (the pass runs either way, bounded
+  # by DISTINCT `{to_id, refType}`), so the no-per-request-storm constraint
+  # holds. The lens under a cap is therefore the UNION of the two: dangling
+  # only when the target is in neither the read prefix nor the published DB.
+  defp normalize_plugin_drafts_edge(edge, corpus_slugs, corpus_capped?) do
+    dangling =
+      cond do
+        MapSet.member?(corpus_slugs, edge.to_id) -> false
+        corpus_capped? -> nil
+        true -> true
+      end
+
     %{
       from_id: edge.from_id,
       to_id: edge.to_id,
@@ -563,7 +629,7 @@ defmodule Barkpark.Content.Graph do
       field: Map.get(edge, :field),
       refType: Map.get(edge, :refType),
       plugin_source: Map.get(edge, :plugin_source),
-      dangling: not MapSet.member?(corpus_slugs, edge.to_id)
+      dangling: dangling
     }
   end
 
