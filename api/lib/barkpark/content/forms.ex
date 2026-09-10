@@ -213,7 +213,93 @@ defmodule Barkpark.Content.Forms do
     end
   end
 
+  # ── Gyldendal friction 65/66 — the Classic form's NESTED shapes ──────────
+  #
+  # The editor names an `arrayOf` row `doc[featuredPublications][0]`, and
+  # `Plug.Conn.Query.decode/1` nests a bracket-INDEX segment as a MAP keyed by
+  # the index string — `%{"0" => "pub-…", "1" => "pub-…"}` — never as a list
+  # (only a bare `[]` suffix yields a list). Every whole-form `phx-change` and
+  # `phx-submit` therefore posted the customer's reference arrays as
+  # index-keyed maps, and with no coercion here they were STORED that way: the
+  # twin's Forside draft on 2026-09-10 carried `featuredPublications` as
+  # `{"0": …}` and the site could not read it as a list. The same post carries
+  # a composite row's `image` subfield as the picker's JSON STRING, which the
+  # top-level `image` clause above decodes but a nested one never reached.
+  #
+  # Coerce by the DECLARED element/subfield type, recursively: an index-keyed
+  # map becomes a list in index order, every element is coerced as `of` says,
+  # and every composite subfield present in the posted row is coerced as its
+  # own declaration says. A value already in storage shape passes through
+  # unchanged (a list stays a list, a map image stays a map), so the API
+  # callers that already send typed values see byte-identical writes.
+  defp coerce_field_value(%{"type" => "arrayOf"} = field, val) do
+    of = Map.get(field, "of") || %{}
+
+    case indexed_map_to_list(val) do
+      list when is_list(list) -> Enum.map(list, &coerce_field_value(of, &1))
+      other -> other
+    end
+  end
+
+  defp coerce_field_value(%{"type" => "composite", "fields" => subs}, %{} = val)
+       when is_list(subs) do
+    Enum.reduce(subs, val, fn sub, acc ->
+      name = Map.get(sub, "name")
+
+      case is_binary(name) and Map.fetch(acc, name) do
+        {:ok, v} -> Map.put(acc, name, coerce_field_value(sub, v))
+        _ -> acc
+      end
+    end)
+  end
+
   defp coerce_field_value(_field, val), do: val
+
+  # `%{"0" => a, "2" => c, "1" => b}` → `[a, b, c]`. Only a map whose EVERY key
+  # is a non-negative integer string qualifies; anything else is returned
+  # untouched so a genuinely map-shaped value is never guessed into a list.
+  defp indexed_map_to_list(%{} = map) do
+    keys = Map.keys(map)
+
+    if keys != [] and Enum.all?(keys, &index_key?/1) do
+      keys
+      |> Enum.sort_by(&String.to_integer/1)
+      |> Enum.map(&Map.get(map, &1))
+    else
+      map
+    end
+  end
+
+  defp indexed_map_to_list(other), do: other
+
+  defp index_key?(k) when is_binary(k), do: k != "" and String.match?(k, ~r/^\d+$/)
+  defp index_key?(_), do: false
+
+  @doc """
+  Coerce the Classic form's posted params into STORAGE shape by the schema —
+  the same per-field coercion `build_content/2` applies, without dropping
+  anything. The editor merges the posted params into its form buffer after a
+  save; merging the RAW params put an index-keyed map where the renderer
+  expects a list, so the very next render iterated a map and the buffer
+  drifted from what had just been written. Keys the schema does not declare
+  pass through untouched; a nil schema returns the params as-is.
+  """
+  @spec coerce_params(map(), map() | nil) :: map()
+  def coerce_params(params, nil), do: params
+
+  def coerce_params(params, schema) when is_map(params) do
+    Enum.reduce(schema.fields || [], params, fn field, acc ->
+      key = field["name"]
+
+      case is_binary(key) and Map.fetch(acc, key) do
+        {:ok, ""} -> acc
+        {:ok, val} -> Map.put(acc, key, coerce_field_value(field, val))
+        _ -> acc
+      end
+    end)
+  end
+
+  def coerce_params(params, _schema), do: params
 
   # ── Exp-P3.2 — Classic-save content (the data-loss guard) ─────────────────
   #

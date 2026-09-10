@@ -427,6 +427,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     schema = socket.assigns[:editor_schema]
     type = socket.assigns[:editor_type]
 
+    # Storage shape BEFORE the write and before the buffer merge below: the
+    # browser posts `doc[featuredPublications][0]` rows as an index-keyed map
+    # and a nested image as its JSON string (Gyldendal friction 65/66). The
+    # save path coerces its own copy; the buffer must see the same shape or
+    # the next render walks a map where it expects a list.
+    params = Barkpark.Content.Forms.coerce_params(params, schema)
+
     if doc && type do
       case Content.upsert_draft(
              doc,
