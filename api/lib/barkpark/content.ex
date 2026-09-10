@@ -104,6 +104,25 @@ defmodule Barkpark.Content do
     do: Query.collect_corpus_documents(types, dataset, opts)
 
   @doc """
+  The LIVE-EXTRACT SET — draft twins, plus anything written inside the
+  projector-lag window. See `Content.Query.collect_live_extract_documents/3`.
+  """
+  @spec collect_live_extract_documents([String.t()], String.t(), keyword()) ::
+          {[struct()], nil | :cap}
+  def collect_live_extract_documents(types, dataset, opts \\ []),
+    do: Query.collect_live_extract_documents(types, dataset, opts)
+
+  @doc """
+  Every logical document id in scope and NOT ONE BYTE of `content` — the
+  membership set the drafts graph's phantom lens needs. See
+  `Content.Query.collect_corpus_slugs/3`.
+  """
+  @spec collect_corpus_slugs([String.t()], String.t(), keyword()) ::
+          {[%{doc_id: String.t(), type: String.t()}], nil | :cap}
+  def collect_corpus_slugs(types, dataset, opts \\ []),
+    do: Query.collect_corpus_slugs(types, dataset, opts)
+
+  @doc """
   One page plus an exact `has_more` — `{documents, has_more}`. The page is what
   `list_documents/3` would return; `has_more` says whether any row exists past
   it, so a caller can tell an EXHAUSTED page from a TRUNCATED one (a bare list
