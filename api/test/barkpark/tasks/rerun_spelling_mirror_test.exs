@@ -8,8 +8,17 @@ defmodule Barkpark.Tasks.RerunSpellingMirrorTest do
   re-derived that they agreed, and they already disagreed on four measured
   spellings. Two retyped copies of the expectations would have reproduced the
   original defect one layer up, so there is exactly ONE list —
-  `tooling/pds/fixtures/rerun-spellings.json` — and each suite asserts its own
+  `api/test/fixtures/rerun-spellings.json` — and each suite asserts its own
   column of it. Widen one screen without touching the fixture and THAT side reds.
+
+  WHY THE ONE FILE LIVES UNDER `api/test/fixtures/` AND NOT UNDER
+  `tooling/pds/fixtures/`. `scripts/elixir-path-escape-check.sh` is a ratchet:
+  a test under `api/` may only read a REPO-ROOT path that `elixir.yml`'s
+  dispatcher already dispatches on, and `tooling/pds/**` is not such a path — a
+  fixture there would be read by an Elixir suite that CI never re-runs when the
+  fixture changes, which is a mirror lock that cannot fire. So the shared list
+  sits on the side that already blocks, and the JS gate reaches into `api/` for
+  it. One file, two readers, either way round; only this way round is guarded.
 
   THE FIXTURE IS REACHED BY `__DIR__`, NOT BY CWD. `mix test` runs from `api/`
   and the JS gate runs from the repo root; only a path anchored on the source
@@ -22,7 +31,7 @@ defmodule Barkpark.Tasks.RerunSpellingMirrorTest do
 
   alias Barkpark.Tasks.Stage
 
-  @fixture Path.expand("../../../../tooling/pds/fixtures/rerun-spellings.json", __DIR__)
+  @fixture Path.expand("../../fixtures/rerun-spellings.json", __DIR__)
 
   # Read at COMPILE time so a missing fixture is a compile error, never a
   # skipped test. `File.read!/1` raises on absence; the guards below raise on a
@@ -52,7 +61,9 @@ defmodule Barkpark.Tasks.RerunSpellingMirrorTest do
   # SHIPPED screen rather than from a retyped literal map, so a fixture naming a
   # class the screen does not have is a loud failure instead of a new atom.
   defp known_codes do
-    codes = Enum.map(Stage.forbidden_rerun_shapes(), fn {code, _why} -> code end) ++ [:pipe_masked]
+    codes =
+      Enum.map(Stage.forbidden_rerun_shapes(), fn {code, _why} -> code end) ++ [:pipe_masked]
+
     Map.new(codes, &{Atom.to_string(&1), &1})
   end
 
@@ -67,7 +78,12 @@ defmodule Barkpark.Tasks.RerunSpellingMirrorTest do
     test "the extractor refuses an empty read instead of reporting a clean pass" do
       # The anti-vacuity arm, asserted rather than trusted: prove the loader
       # RAISES on a fixture that would otherwise make every case below vacuous.
-      tmp = Path.join(System.tmp_dir!(), "rerun-spellings-empty-#{System.unique_integer([:positive])}.json")
+      tmp =
+        Path.join(
+          System.tmp_dir!(),
+          "rerun-spellings-empty-#{System.unique_integer([:positive])}.json"
+        )
+
       File.write!(tmp, "")
 
       assert_raise RuntimeError, ~r/EMPTY/, fn ->

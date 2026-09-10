@@ -110,7 +110,7 @@ function tokens(segment) {
  * re-derived it. THE READER MOVED, because the writer's reading is the correct
  * one — `--git-dir` retargets the repository exactly as `-C` does, and a screen
  * that refuses the obvious spelling while admitting its synonym is not a screen.
- * Pinned in fixtures/rerun-spellings.json.
+ * Pinned in api/test/fixtures/rerun-spellings.json.
  */
 function hasRepoRedirect(command) {
   for (const seg of String(command).split(/\||;|&&|\|\|/)) {
@@ -140,7 +140,7 @@ function hasRepoRedirect(command) {
  *
  * A bare `test` with no argument at all is NOT refused — that is not a
  * predicate, it is a typo, and the writer's `\s` does not match it either.
- * Pinned in fixtures/rerun-spellings.json.
+ * Pinned in api/test/fixtures/rerun-spellings.json.
  */
 function hasFilesystemPredicate(command) {
   for (const seg of String(command).split(/\||;|&&|\|\|/)) {
@@ -172,7 +172,7 @@ function hasMergeBaseIsAncestor(command) {
 // :merge_base_ancestor to the writer and TEST-F to the reader — same admit/
 // refuse verdict, different named remedy, invisible to any check that compares
 // only WHICH commands are refused. This array is now in the writer's order, and
-// fixtures/rerun-spellings.json pins multi-breach cases that only pass while
+// api/test/fixtures/rerun-spellings.json pins multi-breach cases that only pass while
 // both orders hold (pds-w28-bl-two-rerun-screens-drift).
 const RULES = Object.freeze([
   {

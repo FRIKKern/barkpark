@@ -286,7 +286,7 @@ defmodule Barkpark.Tasks.Stage do
   # VAR=value assignments before reading the head. This seam did not, so one
   # environment assignment hid the predicate from the WRITER — the only measured
   # drift pointing the unsafe way (a false ACCEPT here, not a false refusal).
-  # Both columns are pinned in tooling/pds/fixtures/rerun-spellings.json.
+  # Both columns are pinned in api/test/fixtures/rerun-spellings.json.
 
   # The pipeline tails that report THEIR success as the check's. `git show
   # origin/main:<deleted> | head -1` exits 0; the bare `git show` exits 128.
@@ -364,7 +364,7 @@ defmodule Barkpark.Tasks.Stage do
   Made public for ONE reason: `tooling/pds/spellings.mjs` is a SECOND screen for
   the same law, and until this row nothing re-derived that the two agreed — they
   already disagreed on four measured spellings. Both seams are now asserted
-  against one committed fixture, `tooling/pds/fixtures/rerun-spellings.json`
+  against one committed fixture, `api/test/fixtures/rerun-spellings.json`
   (this side: `test/barkpark/tasks/rerun_spelling_mirror_test.exs`), and this
   function is what that fixture can reach. `check_rerun/1` is a thin wrapper
   over it, so the mirror measures the real write path and not a copy of it.

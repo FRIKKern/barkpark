@@ -148,7 +148,12 @@ function sh(cmd) {
 // THE EXTRACTOR REFUSES AN EMPTY READ. A lock that can go quiet is not a lock,
 // and this epic has already watched a spotless `# fail 0` prove nothing.
 {
-  const fixturePath = fileURLToPath(new URL("./fixtures/rerun-spellings.json", import.meta.url));
+  // THE ONE LIST LIVES UNDER api/, ON PURPOSE. scripts/elixir-path-escape-check.sh
+  // forbids the Elixir suite from reading a repo-root path elixir.yml does not
+  // dispatch on, and tooling/pds/** is not dispatched — a fixture here would be
+  // read by an Elixir suite CI never re-runs when it changes. So this gate
+  // reaches INTO api/ instead. Still one file; only this direction is guarded.
+  const fixturePath = fileURLToPath(new URL("../../api/test/fixtures/rerun-spellings.json", import.meta.url));
 
   function loadSpellings(path) {
     const raw = readFileSync(path, "utf8"); // throws on a missing fixture
@@ -165,7 +170,7 @@ function sh(cmd) {
   let refusedEmpty = false;
   let refusedNoCases = false;
   try {
-    const tmp = fileURLToPath(new URL("./fixtures/.mirror-lock-probe.json", import.meta.url));
+    const tmp = fileURLToPath(new URL("../../api/test/fixtures/.mirror-lock-probe.json", import.meta.url));
     writeFileSync(tmp, "");
     try { loadSpellings(tmp); } catch { refusedEmpty = true; }
     writeFileSync(tmp, '{"cases":[]}');
