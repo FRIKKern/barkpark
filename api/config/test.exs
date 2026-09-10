@@ -152,6 +152,29 @@ config :barkpark, :allow_private_outbound, true
 # need codelist data seed it explicitly, so skip the boot pass here.
 config :barkpark, run_boot_codelist_seeders: false
 
+# Same corpus, the OTHER door. `run_boot_codelist_seeders: false` above only
+# silences the BOOT pass; a test that calls `Registry.run_all_codelist_seeders/0`
+# (or the admin LV's reload-all / reload-plugin buttons) still walked OnixEdit's
+# two bundled seeders and re-parsed 1.4 MB of ONIX XML + 3.5 MB of Thema JSON,
+# writing each list back as one big JSONB row. On the 2-core CI runner under the
+# saturated suite that pair hit the sandbox's 120_000 ms :ownership_timeout —
+# and because seeder failures are LOGGED, not raised, the triggering test still
+# passed. It was the single largest gap in the Elixir Test job on main:
+# 120068.2 ms in `plugins_live_test.exs:115 reload-all flashes the aggregate
+# result` (run 34429809804) and 119877.8 ms in `registry_collect_test.exs:186
+# run_all_codelist_seeders/0 invokes each plugin's zero-arg seeder functions`
+# (run 34429840562), per scripts/ci-log-gap-census.sh.
+#
+# NO test asserts on the bundled corpus (nothing under api/test/ so much as
+# names onix-issue-73.xml or thema-v1.6-en.json; editeur_test.exs drives a small
+# fixture through parse_xml/2 + seed/2), so turning the bundled pair off costs
+# no coverage — the seeder WALK, which is what those tests assert, still runs
+# over every plugin and still invokes OnixEdit's two seeder funs; they take the
+# already-existing "no snapshot" exit. Defaults TRUE, so dev/prod/boot and
+# priv/repo/seeds.exs keep seeding the real snapshots. A test that wants the
+# real corpus flips it on for its own duration.
+config :barkpark, :seed_bundled_codelist_snapshots, false
+
 # Same sandbox constraint for the core tag-schema registration (charter D12):
 # SchemaBootstrap would upsert the `tag` schema before any test owns a
 # connection. Tests prove the registration path by calling

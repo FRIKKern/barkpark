@@ -1513,6 +1513,89 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp card_action_label_dom_id(block_id),
     do: "card-action-label-" <> Base.url_encode64(block_id, padding: false)
 
+  defp card_title_dom_id(block_id),
+    do: "card-title-" <> Base.url_encode64(block_id, padding: false)
+
+  defp card_title_direct_state(%{"slots" => %{"title" => [%{} = title]}}) do
+    with false <- is_struct(title),
+         "heading" <- title["type"],
+         true <- Map.has_key?(title, "text") and is_binary(title["text"]),
+         true <- card_title_plain_content?(title),
+         {:ok, level} <- card_title_direct_level(title) do
+      {:ok, %{text: title["text"], level: level}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp card_title_direct_state(_block), do: :error
+
+  defp card_title_content_readonly?(%{"slots" => %{"title" => [%{"type" => "heading"} = title]}}) do
+    Map.has_key?(title, "content") and title["content"] not in [nil, []]
+  end
+
+  defp card_title_content_readonly?(_block), do: false
+
+  defp card_title_plain_content?(title) do
+    not Map.has_key?(title, "content") or title["content"] in [nil, []]
+  end
+
+  defp card_title_direct_level(title) do
+    case Map.fetch(title, "level") do
+      :error -> {:ok, 2}
+      {:ok, nil} -> {:ok, 2}
+      {:ok, level} when level in [1, 2, 3] -> {:ok, level}
+      {:ok, "1"} -> {:ok, 1}
+      {:ok, "2"} -> {:ok, 2}
+      {:ok, "3"} -> {:ok, 3}
+      _ -> :error
+    end
+  end
+
+  attr(:block, :map, required: true)
+  attr(:title, :map, required: true)
+
+  defp card_title_editor(assigns) do
+    assigns = assign(assigns, :dom_id, card_title_dom_id(assigns.block["id"]))
+
+    ~H"""
+    <form
+      id={@dom_id <> "-form"}
+      class="bp-paper-edit-form bp-paper-card-title-form"
+      phx-submit="paper-edit-block"
+      phx-change="paper-block-autosave"
+      phx-debounce="500"
+      data-test-id="paper-card-title-form"
+    >
+      <input type="hidden" name="block_id" value={@block["id"]} />
+      <.dynamic_tag
+        tag_name={"h#{@title.level}"}
+        class="bp-paper-card-title-heading bp-paper-card-title-owner"
+        data-paper-card-title-owner
+        data-paper-card-title-empty={@title.text == "" && "true"}
+      >
+        <button
+          type="button"
+          class="bp-paper-card-title-paint"
+          phx-click={JS.focus(to: "#" <> @dom_id)}
+          aria-label={if @title.text == "", do: "Edit card title", else: "Edit card title: " <> @title.text}
+          aria-controls={@dom_id}
+          data-paper-card-title-paint
+        ><%= @title.text %></button>
+        <textarea
+          id={@dom_id}
+          name="card-title"
+          rows="1"
+          class="bp-paper-inline-text bp-paper-card-title-input"
+          aria-label="Card title"
+          placeholder="Card title"
+          phx-hook="BarkparkPaperAutoSize"
+        ><%= @title.text %></textarea>
+      </.dynamic_tag>
+    </form>
+    """
+  end
+
   attr(:block, :map, required: true)
   attr(:state, :map, required: true)
 
@@ -2390,6 +2473,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             <% {:ok, state} -> %>
               <% parts = RenderComponents.card_article_parts(@block) %>
               <% direct_image = @picker_browse && card_image_direct?(@block) %>
+              <% direct_title = card_title_direct_state(@block) %>
+              <% title_content_readonly = card_title_content_readonly?(@block) %>
               <div class="bp-paper-contextual-preview" data-test-id="paper-card-preview">
                 <div class={parts.class}>
                   <%= if direct_image do %>
@@ -2433,7 +2518,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <% else %>
                     <%= raw(parts.media_html) %>
                   <% end %>
-                  <%= raw(parts.title_html) %>
+                  <%= case direct_title do %>
+                    <% {:ok, title} -> %>
+                      <.card_title_editor block={@block} title={title} />
+                    <% :error -> %>
+                      <%= raw(parts.title_html) %>
+                  <% end %>
                   <.card_body_editor block={@block} />
                   <%= if card_action_present?(@block) do %>
                     <.card_action_label_editor block={@block} state={state} />
@@ -2466,8 +2556,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         selected={value == state.tone}
                       ><%= label %></option>
                     </select>
-                    <label class="bp-paper-edit-fieldlabel" for={"card-title-" <> @id}>Title</label>
-                    <input id={"card-title-" <> @id} type="text" name="card-title" class="bp-paper-edit-text" value={state.title} />
+                    <%= case direct_title do %>
+                      <% {:ok, _title} -> %>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm"
+                          data-test-id="paper-card-title-focus"
+                          aria-controls={card_title_dom_id(@id)}
+                          phx-click={contextual_panel_focus(card_title_dom_id(@id))}
+                        >Edit title</button>
+                      <% :error -> %>
+                        <%= if title_content_readonly do %>
+                          <p class="bp-paper-edit-readonly" data-test-id="paper-card-title-readonly">
+                            This Card title uses rich content and remains reader-only here.
+                          </p>
+                        <% else %>
+                          <label class="bp-paper-edit-fieldlabel" for={"card-title-" <> @id}>Title</label>
+                          <input id={"card-title-" <> @id} type="text" name="card-title" class="bp-paper-edit-text" value={state.title} />
+                        <% end %>
+                    <% end %>
                     <%= if direct_image do %>
                       <button
                         type="button"

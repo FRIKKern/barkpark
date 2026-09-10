@@ -58,6 +58,8 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 
 Fetch one document. 404 if missing or the schema is `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published.
 
+**Read-after-write is IMMEDIATE, not eventual.** A mutation is visible on the next read — 63 reads across 3 timed trials on live production, first sample t+0.45s, zero misses (`pds-bl-doc-patch-propagation-lag`). Responses carry `cache-control: max-age=0, private, must-revalidate` and the ETag is folded from the row's own `_id:_rev`, so no shared cache can serve a stale body. What looks like propagation lag is the **draft/published split**: a write that lands on `drafts.<id>` is served by `?perspective=drafts` ONLY — `published`, `raw` and `bp task get` all do an exact-id lookup and keep returning the published row until the draft is published. Diagnose a "missing" write by reading `?perspective=drafts` once, not by polling `published`.
+
 ### 5a. Reference Expansion
 
 `?expand=true` (or `?expand=author,category`) inlines reference fields with the referenced document — single refs and `arrayOf`-of-reference lists, values plain ids or `{_ref: id}`. **Depth 1** only; nested refs and missing targets stay raw (expanded = map, raw = string).

@@ -67,6 +67,12 @@ defmodule Barkpark.Webhooks.Delivery do
     |> validate_required_for_kind()
     |> validate_inclusion(:status, @statuses)
     |> unique_constraint([:endpoint_id, :event_id])
+    # `webhook_deliveries.event_id` REFERENCES `mutation_events(id)`. A document
+    # row claimed after its source event was deleted out-of-band (retention
+    # sweep) violates that FK; without this the insert raises a raw
+    # `Ecto.ConstraintError` (a bare 500 at the replay route) instead of an
+    # honest changeset error the caller can turn into a 404.
+    |> foreign_key_constraint(:event_id)
   end
 
   # Document rows are keyed on (endpoint_id, event_id) — both required so the

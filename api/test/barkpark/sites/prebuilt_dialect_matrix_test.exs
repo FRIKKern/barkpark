@@ -32,7 +32,9 @@ defmodule Barkpark.Sites.PrebuiltDialectMatrixTest do
       `"second"`) while `stage/4` refuses `E_UNSAFE_PARENT` BY DESIGN;
     * on AppleDouble, `bsdtar` consumes `._*` back into xattrs while `:erl_tar`
       stages them as ordinary files — so the two oracles produce different trees
-      for the same bytes;
+      for the same bytes, and `stage/4` agrees with NEITHER: since
+      `ssw11-bl-junk-policy-and-caddy-hide` it REFUSES the archive outright
+      (`E_JUNK_ENTRY`, see below);
     * on the mode row, `:erl_tar.extract/2` cannot even complete
       (`{:error, :eacces}`) because it honours the archive's declared 0644
       directory mode and then cannot write into it.
@@ -112,6 +114,25 @@ defmodule Barkpark.Sites.PrebuiltDialectMatrixTest do
   @appledouble_bytes 163
 
   # ── the pinned matrix ─────────────────────────────────────────────────────
+  #
+  # THE FOUR `:bsdtar` CELLS WERE ACCEPTS AND ARE NOW REFUSALS — deliberately.
+  # This file merged pinning 27/28 cells as ACCEPT, four of them
+  # `:standard_plus_appledouble`: a plain macOS `tar cf -` stages `._.`,
+  # `._index.html`, `._<component>` and `<component>/._page.html` as ordinary
+  # regular files, and a staged file is a SERVED file — an AppleDouble sidecar is
+  # the file's resource fork and every extended attribute, handed to anyone who
+  # asks. Charter D121 filed that; team-lead RULED on 2026-09-02 that the
+  # extractor must REFUSE it with a typed code that names the repack, and
+  # `Barkpark.Sites.PrebuiltArtifact.junk_free/1` now does
+  # (`E_JUNK_ENTRY`). The four cells flip ACCEPT -> REFUSE here in the same PR,
+  # with their `tree:` field LEFT IN PLACE: it still records what those bytes
+  # CONTAIN, and `describe "corrected cells"` reads it.
+  #
+  # This is not a regression for macOS producers, and the matrix is what proves
+  # it: the four `:bsdtar_copyfile_disable` cells stay ACCEPT on all four name
+  # shapes, and `COPYFILE_DISABLE=1` is exactly the incantation the refusal
+  # message prints. The remedy the box advises is a producer the box is measured
+  # to take.
   #
   # Every `expect:` and `typeflags:` below was MEASURED against this repo's
   # `stage/4` at origin/main 468286c17, not transcribed from a design note. The
@@ -257,7 +278,7 @@ defmodule Barkpark.Sites.PrebuiltDialectMatrixTest do
       # version: bsdtar 3.5.3 - libarchive 3.7.4 zlib/1.2.12 liblzma/5.4.3 bz2lib/1.0.8 
       typeflags: "0 x 5 0 x 0 0 x 5 0 x 0",
       sha256: "d22e83b8742fa6690675f4a8176d3a0a61e7b74c06e7283884206f9b099cfff6",
-      expect: {:ok, 8},
+      expect: {:error, "E_JUNK_ENTRY"},
       tree: :standard_plus_appledouble,
       b64:
         "H4sIAJSFoWoC/+2Y3W7TMACFvUkTolzDtXkB105sh0ldpQKTVmlosA3ErqqQerQibUOaQXgIrrjhHv" <>
@@ -279,7 +300,7 @@ defmodule Barkpark.Sites.PrebuiltDialectMatrixTest do
       # version: bsdtar 3.5.3 - libarchive 3.7.4 zlib/1.2.12 liblzma/5.4.3 bz2lib/1.0.8 
       typeflags: "0 x 5 0 x 0 x 0 x 5 x 0 x 0",
       sha256: "d5a5d184433d917fc594ad38da9a792f8ac1b25e2607514433ddb39d8c752846",
-      expect: {:ok, 8},
+      expect: {:error, "E_JUNK_ENTRY"},
       tree: :standard_plus_appledouble,
       b64:
         "H4sIAJSFoWoC/+2ZzW7TQBSF3UoIEdawHl7AmbHnJ5WSSAEqNVJRoS2IriLjTElEfozrQngIVmzYIx" <>
@@ -302,7 +323,7 @@ defmodule Barkpark.Sites.PrebuiltDialectMatrixTest do
       # version: bsdtar 3.5.3 - libarchive 3.7.4 zlib/1.2.12 liblzma/5.4.3 bz2lib/1.0.8 
       typeflags: "0 x 5 0 x 0 x 0 x 5 x 0 x 0",
       sha256: "c7c64d1a2e782731c7971f0115888617891ffb6b87eb802bd756f5a76c769df8",
-      expect: {:ok, 8},
+      expect: {:error, "E_JUNK_ENTRY"},
       tree: :standard_plus_appledouble,
       b64:
         "H4sIAJSFoWoC/+2Z3W7TMBiGs0kIUY7h2NyAayeOvUptpQKTVmlosA3EjqqQurSiPyHLoBxyARxxwj" <>
@@ -325,7 +346,7 @@ defmodule Barkpark.Sites.PrebuiltDialectMatrixTest do
       # version: bsdtar 3.5.3 - libarchive 3.7.4 zlib/1.2.12 liblzma/5.4.3 bz2lib/1.0.8 
       typeflags: "0 x 5 0 x 0 x 0 x 5 0 x 0",
       sha256: "dd0e851d66489af1e90552a1d513de17ddbb4aa843e35f3f656c9b02691564e1",
-      expect: {:ok, 8},
+      expect: {:error, "E_JUNK_ENTRY"},
       tree: :standard_plus_appledouble,
       b64:
         "H4sIAJSFoWoC/+2a327TMBjFvUkIUa7h2ryAaye2w6S2UoFJqzQ02AZiV1VIPVqRtiFkUB6CK264R7" <>
@@ -927,6 +948,15 @@ defmodule Barkpark.Sites.PrebuiltDialectMatrixTest do
       assert row(:bsdtar, :ascii).typeflags == "0 x 5 0 x 0 0 x 5 0 x 0"
       assert row(:bsdtar, :ascii).tree == :standard_plus_appledouble
       assert row(:bsdtar_copyfile_disable, :ascii).tree == :standard
+
+      # AND THAT IS NOW THE DIFFERENCE BETWEEN A DEPLOY AND A 400. The sidecars
+      # are refused (`E_JUNK_ENTRY`), so plain `tar cf -` on macOS no longer
+      # deploys and `COPYFILE_DISABLE=1 tar cf -` still does — on all four name
+      # shapes. The remedy the refusal message prints is measured HERE.
+      for shape <- [:ascii, :nfc, :nfd, :long] do
+        assert row(:bsdtar, shape).expect == {:error, "E_JUNK_ENTRY"}
+        assert {:ok, _} = row(:bsdtar_copyfile_disable, shape).expect
+      end
     end
 
     test "the unsplittability trigger is Go-SPECIFIC: :erl_tar writes a 121-byte component with NO extension header" do
@@ -1154,21 +1184,30 @@ defmodule Barkpark.Sites.PrebuiltDialectMatrixTest do
       refute File.exists?(dest)
     end
 
-    test "AppleDouble: the two oracles contradict, so the ROW pins what stage/4 does",
+    test "AppleDouble: the two oracles contradict, and stage/4 sides with NEITHER — it refuses",
          %{base: base, dest: dest} do
       # bsdtar-as-oracle consumes `._*` back into xattrs and reports 3 entries;
-      # :erl_tar-as-oracle stages them as 4 ordinary files. Neither is "right".
-      # What is measurable, and what this row pins, is that `stage/4` stages them
-      # as regular files — a macOS-packed bundle SERVES four AppleDouble sidecars.
+      # :erl_tar-as-oracle stages them as 4 ordinary files. Neither is "right",
+      # and until `ssw11-bl-junk-policy-and-caddy-hide` this row pinned the
+      # :erl_tar answer as what `stage/4` did — a macOS-packed bundle SERVED four
+      # AppleDouble sidecars, each one a resource fork and an xattr blob.
+      #
+      # It now refuses. The ORACLE half of the row is what keeps this honest: the
+      # archive still CARRIES the four sidecars (asserted below off the pinned
+      # bytes, not off `stage/4`), so this is a changed VERDICT on unchanged
+      # input, not a fixture that quietly lost its junk.
       r = row(:bsdtar, :ascii)
-      assert {{:ok, summary}, _} = stage_b64(r.b64, dest)
-      assert summary.entries == 8
 
-      assert Enum.sort(Enum.map(staged_tree(dest), &elem(&1, 0))) ==
-               oracle_names(r.b64, base)
+      assert "._." in oracle_names(r.b64, base)
+      assert "._index.html" in oracle_names(r.b64, base)
 
-      assert File.lstat!(Path.join(dest, "._.")).size == @appledouble_bytes
-      assert File.lstat!(Path.join(dest, "._index.html")).size == @appledouble_bytes
+      assert {{:error, "E_JUNK_ENTRY", message}, _} = stage_b64(r.b64, dest)
+      refute File.exists?(dest), "a refusal must leave no partial tree"
+
+      # The message has to be actionable or the refusal just breaks macOS.
+      assert message =~ "AppleDouble"
+      assert message =~ "COPYFILE_DISABLE=1"
+      assert message =~ "--exclude=.DS_Store"
     end
   end
 

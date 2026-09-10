@@ -33,6 +33,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   require Logger
 
   alias Barkpark.ChatHosts
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Content.DraftId
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
@@ -1041,7 +1042,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   def handle_event("session-archive", %{"id" => id}, socket) do
     # `archive_session/2` is called at `:global` because the STORE call takes no
     # narrower scope that keeps NULL-owned legacy rows reachable (see
-    # `session_in_tenancy?/2`); `tenancy_permits?/2` is what refuses a
+    # `owner_in_tenancy?/2`); `tenancy_permits?/2` is what refuses a
     # CROSS-TENANT reach.
     #
     # WHAT THIS COMMENT USED TO SAY, and why it no longer does: "the sidebar sees
@@ -2087,7 +2088,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # published twin; a draft-twin echo must not flap the strip). A row is OURS
   # while this session's worker holds its claim and it is in_progress — any
   # other shape (closed, released, reaped, re-claimed elsewhere) drops it.
-  def handle_info({:document_changed, %{type: "task"} = msg}, socket) do
+  #
+  # PAYLOAD-BEARING FRAMES ONLY (task-5d0615ee60143cc8). `subscribe_hand_tasks/1`
+  # now joins BOTH document-list topics, so a workspace-owned task arrives
+  # twice: a payload-free frame on the global topic (`Broadcast.global_msg/1`
+  # strips `:doc`/`:document` there) and the real one on the workspace-keyed
+  # topic. The stripped twin would read an empty content map, compute
+  # `mine? == false`, and DELETE the row from the Doing strip a beat before
+  # the real frame re-added it. Require a `doc` map so it falls through to the
+  # catch-all below.
+  def handle_info({:document_changed, %{type: "task", doc: doc} = msg}, socket)
+      when is_map(doc) do
     id = msg.doc_id
 
     if String.starts_with?(id, "drafts.") do
@@ -5211,17 +5222,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # token IS bound; narrowing on the binding alone would have made every legacy
   # row unmanageable.
   defp tenancy_permits?(socket, id) do
-    case principal_workspace_id(socket) do
-      # No binding at all (no Default workspace) — the genuine :global superuser.
-      nil ->
-        true
+    case StudioChat.get_session(id, :global) do
+      %{owner_workspace_id: owner} -> principal_permits_owner?(socket, owner)
+      # Missing row: not a cross-tenant reach.
+      _ -> true
+    end
+  end
 
-      ws_id ->
-        case StudioChat.get_session(id, :global) do
-          %{owner_workspace_id: owner} when is_binary(owner) -> owner == ws_id
-          # Missing row, or a legacy NULL-owned one: not a cross-tenant reach.
-          _ -> true
-        end
+  # The rule `tenancy_permits?/2` enforces, stated over an OWNER rather than an
+  # id, so the LOAD seam can ask it without a second `get_session/2`. A token
+  # with no binding at all is the genuine `:global` superuser (charter D17/D18);
+  # a NULL-owned row is legacy / pre-tenancy and stays reachable, which is why
+  # this is not a wholesale narrowing to the principal's workspace.
+  defp principal_permits_owner?(socket, owner) do
+    case principal_workspace_id(socket) do
+      nil -> true
+      ws_id -> is_nil(owner) or owner == ws_id
     end
   end
 
@@ -5278,25 +5294,67 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  defp session_in_tenancy?(socket, %{owner_workspace_id: owner}),
-    do: owner_in_tenancy?(socket, owner)
-
-  defp session_in_tenancy?(_socket, _other), do: false
-
   # `StudioChat.get_session/2` clamped to that permitted set: a row outside this
   # socket's tenancy reads back as `nil`, indistinguishable from a row that does
   # not exist — so `handle_params/3` takes its existing "no longer available"
   # branch rather than growing a second refusal path.
+  #
+  # TWO gates, because they answer two different questions and only one of them
+  # is armed on each mount (task-60df475d8333e040):
+  #
+  #   * `owner_in_tenancy?/2` reads `read_workspace_id/1`, which is the URL
+  #     workspace and is `nil` on the FLAT mount — that gate is deliberately
+  #     open there, because the flat sidebar is the instance-wide superuser view.
+  #   * `principal_permits_owner?/2` reads the acting TOKEN's binding, which is
+  #     what `tenancy_permits?/2` has guarded the four id-addressed lifecycle
+  #     clauses on since #14593 — and it is armed on BOTH mounts.
+  #
+  # The second gate is the one this seam was missing. The ~34 socket-own-session
+  # clauses (`send`, `stop_turn`, `approve`, `deny`, `plan-approve`,
+  # `question-*`, `set-model`, …) never take an id off the wire, so
+  # `tenancy_permits?/2` cannot cover them: their tenancy is decided ENTIRELY by
+  # what put a value in `store_session_id`, and that is `load_stored_session/2`,
+  # reached only from here. Proven by run before the gate existed: a
+  # workspace-B-bound admin navigating to `/studio/chat/<ws-A id>` adopted the
+  # foreign id, replayed workspace A's transcript, and `set-model` wrote
+  # workspace A's row —
+  # `test/barkpark_web/live/studio/chat_flat_route_foreign_session_load_test.exs`.
   defp get_session_in_tenancy(socket, id) do
     case StudioChat.get_session(id, :global) do
-      %{} = session -> if session_in_tenancy?(socket, session), do: session
+      %{} = session -> if load_permits?(socket, session), do: session
       _ -> nil
     end
   end
 
-  # The SIDEBAR arm of the same rule — and it cannot reuse `session_in_tenancy?/2`
-  # directly, for a reason that is invisible in the source and was caught only by
-  # running it:
+  # ONE binding per mount, and they are NOT interchangeable — a run proved that
+  # too. The scoped mount's truth is the URL workspace; the flat mount has no
+  # URL workspace, so its truth is the acting TOKEN's binding.
+  #
+  # Using the token binding on BOTH would break the scoped mount: `create_token/5`
+  # binds an omitted workspace to the seeded Default, so a scoped admin acting in
+  # workspace B routinely holds a token bound to the Default workspace, and its
+  # OWN ws-B session would stop loading (`pds_chatlive_global_reads_test`'s
+  # positive control is exactly that arm). Using the URL workspace on both leaves
+  # the flat mount ungated, which is the defect this seam is here for.
+  defp load_permits?(socket, %{owner_workspace_id: owner}) do
+    case read_workspace_id(socket) do
+      # Scoped mount: `LiveScope` pinned an authorized URL workspace.
+      ws_id when is_binary(ws_id) -> owner_in_tenancy?(socket, owner)
+      # Flat mount: nothing binds the socket, so ask the token — the same axis
+      # `tenancy_permits?/2` has guarded the id-addressed writes on since #14593.
+      nil -> principal_permits_owner?(socket, owner)
+    end
+  end
+
+  defp load_permits?(_socket, _other), do: false
+
+  # (`session_in_tenancy?/2` used to state the scoped half of `load_permits?/2`
+  # on its own; it had exactly one caller and folding it in is what let the two
+  # mounts state their DIFFERENT bindings side by side.)
+
+  # The SIDEBAR arm of the same rule — and it cannot reuse `owner_in_tenancy?/2`
+  # on the rows it already has, for a reason that is invisible in the source and
+  # was caught only by running it:
   #
   #   `StudioChat.list_sessions/2` carries a narrowing `select` of the sidebar
   #   columns, and `owner_workspace_id` is NOT one of them. Every row it returns
@@ -6033,11 +6091,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # One-substrate law (chat-task-hands D1): the surface only PROMPTS — every
   # ledger write still goes through the agent's own bp/MCP hands.
 
-  # The whole dataset's document stream — the Doing strip folds task mutations
-  # out of it. Same global topic the SSE listener serves; cheap to filter.
+  # The dataset's document stream — the Doing strip folds task mutations out of
+  # it. Same topics the SSE listener serves; cheap to filter.
   defp subscribe_hand_tasks(socket) do
+    # The document-list stream, tenant-fenced (task-5d0615ee60143cc8). The bare
+    # `documents:<dataset>` topic fans every tenant's frame out to every
+    # subscriber, so `Content.Broadcast` now strips a WORKSPACE-OWNED document's
+    # payload from it and carries the payload on the workspace-keyed topic alone.
+    # `subscribe_documents/2` joins BOTH — the shared layer on the global topic,
+    # this surface's own workspace on the keyed one — so every document arrives
+    # exactly once, WITH its payload, and no foreign tenant's body ever does.
+    #
+    # The workspace is `hand_task_scope/0`'s — the SAME scope the picker and
+    # the agent's own bp hands write in, so the strip folds the rows it can act
+    # on.
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{socket.assigns.dataset}")
+      Broadcast.subscribe_documents(
+        socket.assigns.dataset,
+        Keyword.get(hand_task_scope(), :workspace_id)
+      )
     end
 
     socket

@@ -17,12 +17,15 @@ Never quote a number from a paper. Numbers below were re-derived 2026-09-02.
 
 | Surface | Count | Derivation |
 |---|---|---|
-| Elixir `Tiers.known_types/0` | **79** | `mix run --no-start -e 'IO.inspect(length(Barkpark.PortableDoc.Tiers.known_types()))'` |
-| Elixir `compose.ex` render surface | **79** | the extractor in `tiers_test.exs`; byte-identical set to the above |
+| Elixir `Tiers.known_types/0` | **80** | `mix run --no-start -e 'IO.inspect(length(Barkpark.PortableDoc.Tiers.known_types()))'` |
+| Elixir `compose.ex` render surface | **80** | the extractor in `tiers_test.exs`; byte-identical set to the above |
 | React `REGISTERED_TYPES` | **75** | `Object.keys(DISPATCH).length`; pinned by `toHaveLength(75)` in the react suite |
 | Go `pdrender` registry | **90** | `go/ast` walk for `r.blocks[<string>] =` over non-test files |
 
-79 is the number to cite for "the server renders N block types". It is pinned by
+80 is the number to cite for "the server renders N block types" (79 until #15331
+added `pre-gate-badge`, the pre-gate grandfather mark — a SYNTHESISED type the
+renderer emits and no document ever stores; it counts because the count is of what
+the renderer can render, not of what a writer can author). It is pinned by
 `length(known_types/0)` in `api/test/barkpark/portable_doc/tiers_test.exs`, which
 reds in both directions and reds when a type is added to or removed from the
 `~w()` sigil — the construct that manufactured the rival counts.
@@ -67,7 +70,7 @@ behind an arithmetic claim.
 | canonical 71 ≡ `known_types`; Go a strict superset of both | mobile charter D48 | 79 ≡ 79; the superset claim is **FALSE** — `paper-links` (see D above) |
 | react 66 keys / 59 canonical | charter D48, wave digest | 75 |
 | Go 76 · Go 82 · Go 83 · Go 79 | wave digest, shell-and-cache paper, D48 MUST-RUN | 90 |
-| Elixir 75 = element 29 + widget 43 + section 3 | `tooling/grip/ledger/block-registry-truth-2026-07-31.md` | correct **on its date**; today 79 = element 29 + widget 47 + section 3. Dated fact records are left standing, not rewritten. |
+| Elixir 75 = element 29 + widget 43 + section 3 | `tooling/grip/ledger/block-registry-truth-2026-07-31.md` | correct **on its date**; today 80 = element 30 + widget 47 + section 3. Dated fact records are left standing, not rewritten. |
 
 Papers on the server carry the same retired numbers and are **not** editable from
 this repo — the wave digest, the shell-and-cache paper, and papers-pro-toolkit

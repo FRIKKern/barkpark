@@ -101,8 +101,16 @@ defmodule BarkparkWeb.WebhookController do
         )
         |> Jason.encode!()
 
-      {:ok, delivery} = Dispatcher.replay_delivery(wh, body, eid)
-      json(conn, %{delivery: render_delivery(delivery)})
+      case Dispatcher.replay_delivery(wh, body, eid) do
+        {:ok, delivery} ->
+          json(conn, %{delivery: render_delivery(delivery)})
+
+        # The event or its delivery row was deleted between the guard above and
+        # the claim (`:event_gone` / `:delivery_gone`). Same verdict as an
+        # unknown event id: 404, never a 500 from a bare match on the crash.
+        {:error, _gone} ->
+          event_not_found(conn)
+      end
     else
       :error -> webhook_not_found(conn)
       {:error, :bad_event_id} -> event_not_found(conn)

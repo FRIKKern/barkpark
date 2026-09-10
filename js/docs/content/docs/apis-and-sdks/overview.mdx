@@ -79,6 +79,13 @@ const one = await bp.doc('post', 'hello', { expand: 'author' })
 await bp.patch('hello', 'post').set({ title: 'Updated' }).commit()
 ```
 
+`apiVersion` is required and has no default — `createClient` throws
+`BarkparkValidationError` if it is missing or not `YYYY-MM-DD`. Pin a date and
+leave it alone; the server reports the window it accepts as `minApiVersion` and
+`maxApiVersion` (today `2026-04-01` through `2026-04-17`), so a pinned client
+keeps working while the API moves forward. Every example in these docs uses
+`2026-04-01`.
+
 The client also covers search, media, the content graph, revision history,
 webhook registration and signature verification, tenancy, and `bp.listen()` for
 real-time updates. `fetchRaw(path)` is the escape hatch for anything it does not

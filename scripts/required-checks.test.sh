@@ -6189,13 +6189,32 @@ jobs:
       - run: 'true'
 YML
 sed 's/^on:$/on:/; s/^  push:$/  pull_request:/; s/^    branches: \[main\]$//' "$RC29_PUSH/w.yml" > "$RC29_PR/w.yml"
+# A SECOND, KEPT name in BOTH dirs. Without it the push-only arm leaves the
+# selection EMPTY and the generator's older zero-context refusal ("selection
+# produced ZERO contexts — refusing to emit a spec that protects nothing") exits
+# 1 before any S4 verdict can be read — which is exactly how this section
+# shipped red in #17111 (PR run 34392441135) and stayed red on main: 29a asked
+# for exit 0 from a fixture that can only ever refuse. The kept name is also
+# the control that makes 29a non-vacuous — S4 must exclude ONE name, not all.
+cat > "$RC29_PUSH/kept.yml" <<'YML'
+name: Kept
+on:
+  pull_request:
+jobs:
+  keep:
+    name: Kept gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+cp "$RC29_PUSH/kept.yml" "$RC29_PR/kept.yml"
 RC29_NAMES_SAVE=("${RC27_NAMES[@]}")
-RC27_NAMES=("Push-only gate")
+RC27_NAMES=("Push-only gate" "Kept gate")
 rc27_feed "$RC29_PUSHF" p1 p2 mainA; printf 'mainA\n' > "$RC29_PUSHF/main-shas.txt"
 rc27_feed "$RC29_PRF"   r1 r2 mainA; printf 'mainA\n' > "$RC29_PRF/main-shas.txt"
 
 rc27_gen "$GEN" "$RC29_PUSH" "$RC29_PUSHF" p1 p2
-if [ "$RC27_RC" -eq 0 ] && excluded_by "$RC27_OUT" "Push-only gate" "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD"; then
+if [ "$RC27_RC" -eq 0 ] && excluded_by "$RC27_OUT" "Push-only gate" "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD" && kept_in "$RC27_OUT" "Kept gate"; then
   ok "a name published by a workflow with no pull_request trigger is EXCLUDED as structurally absent — an absent required context reports 'expected' forever (D18), and it is derived from the workflow's own \`on:\` block, not from a list"
 else
   bad "29a the push-only workflow's name was not excluded as structurally absent (exit $RC27_RC): $(grep -E '^  (keep|exclude) ' <<<"$RC27_OUT" | head -2 | tr '\n' '⏎')"
