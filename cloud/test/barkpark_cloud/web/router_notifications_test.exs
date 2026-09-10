@@ -12,6 +12,8 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
   alias BarkparkCloud.Notifications.Delivery
   alias BarkparkCloud.Notifications.EmailSettings
   alias BarkparkCloud.Notifications.EventEmail
+  alias BarkparkCloud.Notifications
+  alias BarkparkCloud.Registry
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Web.Router
 
@@ -610,6 +612,129 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
       conn = call(:get, "/v1/notifications/deliveries", nil, token)
       assert conn.status == 200
       assert body(conn)["deliveries"] == []
+    end
+  end
+
+  # dr-w20-bl — THE TEAM READS ITS OWN FLEET-DIGEST RECEIPT.
+  #
+  # The task that filed this said the receipts were "unreadable by the team they
+  # belong to", the only reader being the operator-gated
+  # GET /v1/operator/deliveries. That premise was already half-stale when it was
+  # written: #9686 dropped this route from `require_team_admin` to `require_user`
+  # with a self-scope, and #11015 (cch-w56-s3) RETRACTED in the router comment
+  # the claim that digest rows are "structurally invisible to the team-scoped
+  # /v1/notifications/deliveries". What was still missing is the thing a
+  # retraction in a comment cannot supply: a test that DRIVES the writer and
+  # reads the row back over the TEAM door. A prose retraction is not a reader.
+  #
+  # These tests therefore drive `Notifications.deliver_fleet_digest/1` — real
+  # team, real membership rows, real Mailer, real `record_delivery/5` insert —
+  # and then dispatch the real route, exactly as `router_operator_test.exs` §4
+  # does for the operator door. A hand-inserted `%Delivery{}` cannot stand in:
+  # the shape a fixture is free to invent is precisely the shape the writer can
+  # never produce, and that is how the operator tests stayed 8/8 green under a
+  # reader that returned nothing on prod.
+  #
+  # THE NON-MEMBER ARM IS A 200 WITH THE ROW ABSENT, NOT A 404 — and the filing
+  # asked for "404/403". Both are honest here and neither is a choice this route
+  # gets to make: it takes NO team id in the request, so there is no id to say
+  # "not found" about. `Auth.resolve_team/2` honours `x-barkpark-team` only after
+  # `get_membership/2` succeeds and otherwise falls back to the caller's own
+  # primary team, so a foreign team's owner is answered from THEIR log (200, no
+  # receipt) and a user with no membership anywhere resolves `current_team = nil`
+  # and is refused 403 before any query runs. Both arms are pinned below.
+  describe "GET /v1/notifications/deliveries — the fleet-digest receipt" do
+    # One real digest run for `team`, returning the Delivery rows it wrote.
+    defp drive_digest(team) do
+      before = Repo.all(Delivery) |> MapSet.new(& &1.id)
+      n = System.unique_integer([:positive])
+      {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+      assert {:ok, %{sent: sent}} = Notifications.deliver_fleet_digest([bp])
+      assert sent > 0, "the digest must actually send for this drive to prove anything"
+      Repo.all(Delivery) |> Enum.reject(&MapSet.member?(before, &1.id))
+    end
+
+    test "an owner reads the receipt a REAL DailyDigestWorker send wrote for their team" do
+      {owner, team, token} = user_with_team()
+      [receipt] = drive_digest(team)
+
+      # The writer's own shape, restated so the reader is tested against reality.
+      assert receipt.event == "fleet_digest"
+      assert receipt.team_id == team.id
+      assert receipt.recipient == owner.email
+
+      rows = filtered(token, "event=fleet_digest")
+
+      assert receipt.id in Enum.map(rows, & &1["id"]),
+             "the team door must return the row a real deliver_fleet_digest/1 run just wrote"
+
+      row = Enum.find(rows, &(&1["id"] == receipt.id))
+      assert row["event"] == "fleet_digest"
+      assert row["status"] == "sent"
+      assert row["recipient"] == receipt.recipient
+    end
+
+    test "a plain MEMBER reads their own digest receipt (self-scoped, not 403)" do
+      {_owner, team, _owner_token} = user_with_team()
+      {member, member_token} = member_of(team, "member")
+
+      receipts = drive_digest(team)
+      mine = Enum.find(receipts, &(&1.recipient == member.email))
+
+      assert mine,
+             "the digest addresses every member, so the member must have a receipt of their own"
+
+      rows = filtered(member_token, "event=fleet_digest")
+      assert mine.id in Enum.map(rows, & &1["id"])
+
+      # And the self-scope is real: the owner's copy of the same send is not on
+      # this member's page.
+      others = Enum.reject(receipts, &(&1.id == mine.id))
+      assert others != [], "this arm needs a second recipient to be a fence test at all"
+
+      for other <- others do
+        refute other.id in Enum.map(rows, & &1["id"])
+      end
+    end
+
+    test "a NON-MEMBER never sees the team's digest receipt" do
+      {_owner, team, _token} = user_with_team()
+      [receipt] = drive_digest(team)
+
+      # A member of a DIFFERENT team: answered from their own log, 200, no row.
+      {_outsider, _other_team, outsider_token} = user_with_team()
+      conn = call(:get, "/v1/notifications/deliveries?event=fleet_digest", nil, outsider_token)
+      assert conn.status == 200
+      refute receipt.id in Enum.map(body(conn)["deliveries"], & &1["id"])
+
+      # And the header cannot be used to reach across: `resolve_team/2` only
+      # honours `x-barkpark-team` after a membership check.
+      spoofed =
+        conn(:get, "/v1/notifications/deliveries?event=fleet_digest")
+        |> put_req_header("authorization", "Bearer #{outsider_token}")
+        |> put_req_header("x-barkpark-team", team.slug)
+        |> Router.call(@opts)
+
+      assert spoofed.status == 200
+      refute receipt.id in Enum.map(body(spoofed)["deliveries"], & &1["id"])
+    end
+
+    test "a user with NO membership anywhere is refused 403, not handed a log" do
+      {_owner, team, _token} = user_with_team()
+      [receipt] = drive_digest(team)
+
+      {:ok, stranger} =
+        Accounts.register_user(%{
+          email: "stranger-#{System.unique_integer([:positive])}@example.com",
+          password: @password
+        })
+
+      {:ok, stranger_token} = Accounts.create_user_session_token(stranger)
+
+      conn = call(:get, "/v1/notifications/deliveries?event=fleet_digest", nil, stranger_token)
+      assert conn.status == 403
+      assert body(conn)["error"] == "forbidden"
+      refute conn.resp_body =~ receipt.id
     end
   end
 

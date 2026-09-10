@@ -500,6 +500,25 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
     }
   ]
 
+  # WHY THE DIGEST *RECEIPT* READ IS NOT A SEVENTH ROW (dr-w20-bl). The daily
+  # digest's Delivery receipt is now provably readable by the team it belongs to
+  # over GET /v1/notifications/deliveries?event=fleet_digest, tier `user`, pinned
+  # in `router_notifications_test.exs` — but that read is NOT a distinct signal
+  # and does not get a row here, for two reasons that are structural rather than
+  # editorial:
+  #
+  #   * it is the SAME signal as `fleet_operator_digest`, seen from the receiving
+  #     end. That row's audience already derives `team_members` and is already
+  #     off the allowlist; a second row over one signal would inflate
+  #     `@signal_floor` without widening what the census can see.
+  #   * Side B for a `:pull` signal is derived from a Go reader in
+  #     `internal/cloudclient` (`@sources`), and NO Go source sends
+  #     /v1/notifications/deliveries — `grep -rn "notifications/deliveries"
+  #     internal/` is empty. A row naming a reader that does not exist fails
+  #     `path_of/1`'s `Map.fetch!` or the extractor, which is a red about this
+  #     file rather than about an audience. When a `bp` command grows that read,
+  #     THAT is the commit that registers it.
+
   # THE ANTI-VACUITY FLOOR. A deleted registry row, or a Go/Elixir syntax change
   # that quietly empties Side B, would otherwise be a silent green: zero signals
   # examined is zero empty audiences found. Committed, and lowered only in the
