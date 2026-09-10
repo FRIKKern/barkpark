@@ -138,6 +138,8 @@ func TestSiteStatusCostNamesItsWindowAndIsNotARate(t *testing.T) {
 		`The charter's "~3.2" is not reproduced anywhere in it`,
 		// c0: the ledger ENDED here, and the line says so rather than hedging.
 		"the server had no page behind this one",
+		// c0: and the bound rides WITH the figures, not only in the census above.
+		"both figures are over THAT window and nothing wider",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("the cost block must carry %q:\n%s", want, stdout)

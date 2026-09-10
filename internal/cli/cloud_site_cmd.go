@@ -3733,16 +3733,25 @@ func siteWalkWindow(walk cloudclient.SiteDeploymentWalk) (siteWindow, bool) {
 // the only structural defence is that the renderer cannot print the figure
 // without printing this beside it.
 func siteWindowBudgetLine(w siteWindow) string {
-	base := fmt.Sprintf("window: %d attempts asked for, read in %d of a budgeted %d round trips at %d rows per request", w.PageLimit, w.Pages, w.PageBudget, w.PageSize)
+	return fmt.Sprintf("window: %d attempts asked for, read in %d of a budgeted %d round trips at %d rows per request", w.PageLimit, w.Pages, w.PageBudget, w.PageSize) + " — " + siteWindowBoundClause(w)
+}
+
+// siteWindowBoundClause is the half of the budget line that says WHICH BOUND
+// ended the read. It is its own function because the cost block needs exactly
+// this clause and not the round-trip arithmetic above it: a cost figure that
+// repeated the whole budget sentence verbatim, two lines under the census that
+// already printed it, would train a reader to skip the one clause that decides
+// whether the figure beside it is a site total or a floor.
+func siteWindowBoundClause(w siteWindow) string {
 	switch w.StoppedBy {
 	case "exhausted":
-		return base + " — the server had no page behind this one, so this IS the site's whole deployment history"
+		return "the server had no page behind this one, so this IS the site's whole deployment history"
 	case "pages":
-		return base + " — the ROUND-TRIP BUDGET ended this read, not the ledger; older attempts exist and were not counted"
+		return "the ROUND-TRIP BUDGET ended this read, not the ledger; older attempts exist and were not counted"
 	case "rows":
-		return base + " — the ROW TARGET ended this read, not the ledger; older attempts exist and were not counted. Widen it with --window"
+		return "the ROW TARGET ended this read, not the ledger; older attempts exist and were not counted. Widen it with --window"
 	default:
-		return base
+		return "this is the window that was read, and nothing is claimed beyond it"
 	}
 }
 
@@ -3869,7 +3878,7 @@ func renderSiteCost(out *writer, w siteWindow, c siteCost) {
 	if c.Unmeasured > 0 && c.Measured > 0 {
 		out.outf("  %d of %d live rows carried no usable became_live_at and are outside those durations", c.Unmeasured, c.Lives)
 	}
-	out.outf("  %s", siteWindowBudgetLine(w))
+	out.outf("  both figures are over THAT window and nothing wider — %s", siteWindowBoundClause(w))
 	out.outf("  %s", siteAttemptsPerLiveSeriesLine())
 }
 
