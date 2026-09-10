@@ -41,9 +41,22 @@ The `bp` CLI scaffolds one for you instead of starting from a blank file:
 
 ```bash
 bp make schema product --out product.json   # commented skeleton, every field type
+$EDITOR product.json                        # fill the blanks, then strip the comments
 bp schema apply --file product.json         # register the type
 bp seed product --count 5 --publish         # fabricate 5 valid sample documents
 ```
+
+The middle step is not optional. The skeleton is guidance, not a schema: it emits
+15 `_comment` keys and leaves literal placeholders such as
+`"codelistId": "<plugin>:<name>"` in place. Its own first line says so —
+
+```json
+"_comment": "schema v2 skeleton — fill the blanks, delete fields/types you don't
+             need, then strip the _comment keys before POSTing to /v1/schemas."
+```
+
+Delete the field placeholders you do not want, replace the ones you do, and
+remove every `_comment` before applying.
 
 ## Two generations of field types
 

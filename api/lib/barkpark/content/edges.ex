@@ -414,6 +414,81 @@ defmodule Barkpark.Content.Edges do
   end
 
   @doc """
+  BATCHED dangling resolution — the `{to_id, ref_type}` pairs that RESOLVE.
+
+  Give it the distinct target pairs of a whole fold and it answers, in a bounded
+  number of queries (one per distinct non-empty `ref_type`, plus one for the
+  untyped pairs), the exact set `resolve_target_existence/4` would have answered
+  `true` for one target at a time. Pairs are `{to_id, ref_type}` with `ref_type`
+  a binary or nil; the returned `MapSet` holds the pairs that resolve, so a
+  caller computes `dangling` as `not MapSet.member?(set, {to_id, ref_type})`.
+
+  SAME LENS, BY CONSTRUCTION — the typed arm delegates to
+  `Content.Query.resolvable_doc_ids/4`, which is `get_document/4`'s own scoping
+  pipeline with `in` instead of `==`; the untyped arm is this module's own
+  type-agnostic `:published` existence query with `in` instead of `==`. Both
+  keep the published lens (`to_id` is published-coalesced and no `drafts.` twin
+  is matched), so a typed and an untyped ref to the same target still never
+  disagree.
+
+  WHY IT EXISTS: `extract_edges/2`'s default `dangling: :resolve` is ONE
+  un-batched round-trip per reference value per document. `Content.Graph`'s
+  drafts fold runs `extract_edges/2` over the WHOLE dataset corpus on every
+  `?drafts=true` request, so that per-value round-trip is unbounded by depth, by
+  the node budget and by the fan-out alike — the shape that made
+  `GET /v1/graph/:id?drafts=true` stop returning on guerrilla
+  (task-051a87de9a085e4d). `dangling: :skip` plus this one pass is the same
+  answer in bounded work.
+  """
+  @spec resolvable_targets([{String.t(), String.t() | nil}], String.t() | nil, keyword()) ::
+          MapSet.t({String.t(), String.t() | nil})
+  def resolvable_targets(pairs, dataset, opts \\ []) when is_list(pairs) do
+    pairs = Enum.uniq(pairs)
+
+    {typed, untyped} =
+      Enum.split_with(pairs, fn {_to_id, ref_type} ->
+        is_binary(ref_type) and ref_type != ""
+      end)
+
+    typed_hits =
+      typed
+      |> Enum.group_by(fn {_to_id, ref_type} -> ref_type end, fn {to_id, _} -> to_id end)
+      |> Enum.flat_map(fn {ref_type, to_ids} ->
+        resolved = Content.resolvable_doc_ids(Enum.uniq(to_ids), ref_type, dataset, opts)
+
+        Enum.flat_map(to_ids, fn to_id ->
+          if MapSet.member?(resolved, to_id), do: [{to_id, ref_type}], else: []
+        end)
+      end)
+
+    untyped_hits = untyped_resolvable(untyped, dataset, opts)
+
+    MapSet.new(typed_hits ++ untyped_hits)
+  end
+
+  defp untyped_resolvable([], _dataset, _opts), do: []
+
+  defp untyped_resolvable(pairs, dataset, opts) do
+    pub_ids = pairs |> Enum.map(fn {to_id, _} -> DraftId.published_id(to_id) end) |> Enum.uniq()
+
+    present =
+      Document
+      |> where([d], d.doc_id in ^pub_ids)
+      |> WriteScope.scope_to_dataset(dataset, opts)
+      |> scope_to_workspace_or_global(
+        Keyword.get(opts, :workspace_id),
+        Keyword.get(opts, :project_id)
+      )
+      |> select([d], d.doc_id)
+      |> Repo.all()
+      |> MapSet.new()
+
+    Enum.filter(pairs, fn {to_id, _} ->
+      MapSet.member?(present, DraftId.published_id(to_id))
+    end)
+  end
+
+  @doc """
   Insert (or REPLACE) a single content edge by its `(from_id, to_id, kind)`
   triple.
 

@@ -60,13 +60,36 @@ test("screenCommand returns {ok, reason} with a non-empty reason in both directi
 
 test("screen.mjs imports NOTHING from rerun.mjs (D29: a denylist verdict must never be read as an allowlist verdict)", () => {
   const src = readFileSync(SCREEN_MJS, "utf8");
-  // screen.mjs may import node: builtins ONLY — never rerun.mjs, never a
-  // third-party dependency. The entry guard (resolve()/fileURLToPath(), the
-  // same form ledger.mjs/backfill.mjs/acceptance.mjs/cli.mjs all use) needs
-  // two of those statically, so the bar is "every import is a node: builtin",
-  // not "zero imports".
+  // screen.mjs may import node: builtins, plus ONE named grip module —
+  // ./provenance.mjs — and nothing else. Never rerun.mjs, never a third-party
+  // dependency. The entry guard (resolve()/fileURLToPath(), the same form
+  // ledger.mjs/backfill.mjs/acceptance.mjs/cli.mjs all use) needs two builtins
+  // statically, so the bar is "every import is on the allowed list", not "zero
+  // imports".
+  //
+  // WHY provenance.mjs IS ON THE LIST AND rerun.mjs NEVER WILL BE. D29 is about
+  // VERDICT COMPOSITION: rerun.mjs answers a different question with a DENYLIST,
+  // and importing it would let a denylist verdict be read as an allowlist one.
+  // provenance.mjs composes no verdict — it reports which tree is running — and
+  // it is the ONE grip module that itself depends on nothing in grip/, which the
+  // transitive assertion below PINS rather than trusts. Without it screen.mjs
+  // was the last runnable entry point whose safety report could not name its
+  // own checkout (D78).
+  const ALLOWED_NON_BUILTIN = ["./provenance.mjs"];
   const imports = [...src.matchAll(/^\s*import\s[^;]*?from\s+["']([^"']+)["']/gm)].map((m) => m[1]);
-  assert.ok(imports.every((i) => i.startsWith("node:")), `screen.mjs must import node: builtins only; found: ${imports.join(", ")}`);
+  const forbidden = imports.filter((i) => !i.startsWith("node:") && !ALLOWED_NON_BUILTIN.includes(i));
+  assert.deepEqual(forbidden, [], `screen.mjs may import node: builtins and ${ALLOWED_NON_BUILTIN.join(", ")} only; found: ${imports.join(", ")}`);
+  // CONTROL: the sweep must actually be READING imports. An empty list would
+  // make the assertion above vacuous — "no forbidden imports" having seen none.
+  assert.ok(imports.length >= 3, `the import sweep found only ${imports.length} imports — it is not reading the file`);
+  // TRANSITIVE: the single allowance holds only while provenance.mjs stays
+  // builtin-only. The day it imports a grip module, screen.mjs has inherited it
+  // and this reds — the allowance is measured, not remembered.
+  const provSrc = readFileSync(fileURLToPath(new URL("../provenance.mjs", import.meta.url)), "utf8");
+  const provImports = [...provSrc.matchAll(/^\s*import\s[^;]*?from\s+["']([^"']+)["']/gm)].map((m) => m[1]);
+  assert.ok(provImports.length > 0, "the provenance.mjs import sweep read nothing");
+  assert.ok(provImports.every((i) => i.startsWith("node:")),
+    `provenance.mjs must stay builtin-only or screen.mjs inherits its dependencies; found: ${provImports.join(", ")}`);
   assert.ok(!/from\s+["'][^"']*rerun\.mjs/.test(src), "screen.mjs must not import rerun.mjs");
   // The dynamic imports it also has are node: builtins, in the CLI only.
   const dynamic = [...src.matchAll(/await import\(["']([^"']+)["']\)/g)].map((m) => m[1]);
@@ -93,6 +116,13 @@ for (const marker of ["#", " ", "?"]) {
     mkdirSync(dir);
     const copy = join(dir, "screen.mjs");
     copyFileSync(SCREEN_MJS, copy);
+    // provenance.mjs rides along because screen.mjs's entry banner imports it
+    // by relative specifier; without it the child dies at MODULE RESOLUTION and
+    // this test reds for a reason that has nothing to do with the URL-special
+    // character it exists to measure. The subject stays the guard: the copied
+    // tree must be runnable so a false isMain is the ONLY way stdout comes back
+    // empty.
+    copyFileSync(fileURLToPath(new URL("../provenance.mjs", import.meta.url)), join(dir, "provenance.mjs"));
     try {
       const run = spawnSync(process.execPath, [copy, "--selftest"], { encoding: "utf8" });
       assert.ok(run.stdout.length > 0, `expected non-empty stdout, got stderr: ${run.stderr}`);

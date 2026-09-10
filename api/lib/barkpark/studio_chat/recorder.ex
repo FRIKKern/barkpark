@@ -22,6 +22,7 @@ defmodule Barkpark.StudioChat.Recorder do
 
   require Logger
 
+  alias Barkpark.Content.Broadcast
   alias Barkpark.{CycleFleet, StudioChat}
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
@@ -257,7 +258,15 @@ defmodule Barkpark.StudioChat.Recorder do
     # Doing strip already ride. NO new bus: task lifecycle writes already
     # broadcast here, and this Recorder only re-broadcasts the ones scoped to
     # its own session on `topic/1`, exactly as `broadcast_workflow/2` does.
-    Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@task_dataset}")
+    #
+    # TENANT-FENCED (task-5d0615ee60143cc8). The bare
+    # `documents:<dataset>` topic fans every tenant's frame out to every
+    # subscriber, so `Content.Broadcast` now strips a WORKSPACE-OWNED document's
+    # payload from it and carries the payload on the workspace-keyed topic alone.
+    # `subscribe_documents/2` joins BOTH — the shared layer on the global topic,
+    # this surface's own workspace on the keyed one — so every document arrives
+    # exactly once, WITH its payload, and no foreign tenant's body ever does.
+    Broadcast.subscribe_documents(@task_dataset, ledger_workspace_id())
 
     # A Task holder authorized this managed attempt but is not the Studio
     # process's principal. Never mint or forward Task hands for that process.
@@ -1002,7 +1011,16 @@ defmodule Barkpark.StudioChat.Recorder do
   # reconnecting client re-reads settled ledger truth, never a replayed
   # transition. NOTHING is persisted here: the durable projection stays exactly
   # what it was, and the separate `task_prime` snapshot contract is untouched.
-  def handle_info({:document_changed, %{type: "task"} = msg}, state) do
+  # PAYLOAD-BEARING FRAMES ONLY (task-5d0615ee60143cc8). Since this Recorder
+  # joins BOTH document-list topics, a workspace-owned task arrives twice: a
+  # payload-free frame on the global topic (`Broadcast.global_msg/1` strips
+  # `:doc`/`:document` there) and the real one on the workspace-keyed topic.
+  # Projecting the stripped twin would read an EMPTY content map — no claim,
+  # no lifecycle_status — and emit a phantom "released" transition. Require a
+  # `doc` map so the stripped twin falls through to the catch-all below and
+  # only the payload-bearing frame is projected.
+  def handle_info({:document_changed, %{type: "task", doc: doc} = msg}, state)
+      when is_map(doc) do
     worker = Runtime.worker_id(state.provider, state.session_id)
 
     case TaskTransition.project(msg, worker, state.touched_tasks) do
@@ -2419,5 +2437,17 @@ defmodule Barkpark.StudioChat.Recorder do
       _ ->
         nil
     end
+  end
+
+  # The workspace the ledger this Recorder projects lives in — the default
+  # workspace `bp`'s `/v1/tasks` writes resolve to (AssignDefaultScope), which
+  # is the scope Studio's own Doing strip uses (`hand_task_scope/0`).
+  defp ledger_workspace_id do
+    case Barkpark.Tenancy.get_default_workspace() do
+      %{id: id} when is_binary(id) -> id
+      _ -> nil
+    end
+  rescue
+    _ -> nil
   end
 end

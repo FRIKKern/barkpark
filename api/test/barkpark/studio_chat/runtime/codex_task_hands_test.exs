@@ -7,6 +7,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexTaskHandsTest do
   alias Barkpark.StudioChat.Runtime.Codex
   alias Barkpark.StudioChat.Runtime.RemoteSecrets
   alias Barkpark.Tenancy
+  alias Barkpark.TestTmp
 
   @fake_app_server Path.expand("../../../fixtures/codex_app_server/fake_app_server.py", __DIR__)
 
@@ -18,7 +19,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexTaskHandsTest do
        %{
          id: "host-1",
          workspace_id: workspace_id,
-         approved_roots: [System.tmp_dir!()],
+         approved_roots: [TestTmp.root()],
          capabilities: %{
            "providers" => %{
              "codex" => %{
@@ -60,7 +61,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexTaskHandsTest do
       )
 
     session_id = Ecto.UUID.generate()
-    log = Path.join(System.tmp_dir!(), "codex_task_hands_#{suffix}.jsonl")
+    log = TestTmp.path("codex_task_hands_#{suffix}.jsonl")
     on_exit(fn -> File.rm(log) end)
 
     assert {:ok, runtime} =
