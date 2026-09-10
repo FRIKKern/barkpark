@@ -182,6 +182,10 @@ on:
       # need naming (task-cb42bf8ab0539891).
       - "scripts/which-gates.sh"
       - "scripts/which-gates.test.sh"
+      # bp-curl (task-ca8fffa7ca885413): the ONE 429 backoff every shell/CI curl
+      # consumer of the BP API sources. Its harness runs a fake loopback server.
+      - "scripts/lib/bp-curl.sh"
+      - "scripts/lib/bp-curl.test.sh"
       # task-5ddbd0702c213aec: which-gates.test.sh cases 6-8 build their scratch
       # trees out of the Elixir census that greps the Go package AND out of the
       # package itself, then mutate both. Same rule as seal-run.test.sh above —
@@ -495,6 +499,10 @@ on:
       # need naming (task-cb42bf8ab0539891).
       - "scripts/which-gates.sh"
       - "scripts/which-gates.test.sh"
+      # bp-curl (task-ca8fffa7ca885413): the ONE 429 backoff every shell/CI curl
+      # consumer of the BP API sources. Its harness runs a fake loopback server.
+      - "scripts/lib/bp-curl.sh"
+      - "scripts/lib/bp-curl.test.sh"
       # task-5ddbd0702c213aec: which-gates.test.sh cases 6-8 build their scratch
       # trees out of the Elixir census that greps the Go package AND out of the
       # package itself, then mutate both. Same rule as seal-run.test.sh above —
@@ -778,6 +786,7 @@ jobs:
       dispatch-selftest: ${{ steps.sets.outputs.dispatch-selftest }}
       deploy-receipt-honesty: ${{ steps.sets.outputs.deploy-receipt-honesty }}
       which-gates: ${{ steps.sets.outputs.which-gates }}
+      bp-curl: ${{ steps.sets.outputs.bp-curl }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -984,6 +993,10 @@ jobs:
           which-gates .github/workflows/cloud.yml
           which-gates .github/workflows/console-harness.yml
           which-gates .github/workflows/go-tests.yml
+          bp-curl scripts/lib/bp-curl.sh
+          bp-curl scripts/lib/bp-curl.test.sh
+          landed-mark scripts/lib/bp-curl.sh
+          task-lease-renew scripts/lib/bp-curl.sh
           deploy-receipt-honesty scripts/deploy-receipt-failure.test.sh
           deploy-receipt-honesty Makefile
           deploy-receipt-honesty .githooks/post-merge
@@ -2555,3 +2568,34 @@ jobs:
         # removed, literal re-hardcoded) proving it is not vacuous.
         # Hermetic — mktemp fixtures, no git, no network, no gh, no bp.
         run: bash scripts/merged-at-committer-tripwire.test.sh
+
+  bp-curl:
+    needs: [changes]
+    if: needs.changes.outputs.bp-curl == 'true'
+    # THE SHARED 429 BACKOFF (task-ca8fffa7ca885413). On origin/main f618d1675
+    # 27 shell/CI/.mjs curl owners against the BP API had ZERO 429 handling;
+    # scripts/lib/bp-curl.sh is the one place the branch now lives, so this
+    # harness is the proof for every consumer that sources it. Hermetic: a
+    # python3 http.server on 127.0.0.1 answers a scripted 429-then-200 / 500 /
+    # Retry-After sequence and LOGS every request, so "retried" and "not
+    # retried" are REQUEST COUNTS, not inferred from the exit code. The header
+    # VALUE is proven to be the one slept (2 vs 0) and a mutant helper with the
+    # retry_after read replaced by a constant reds on that case.
+    name: bp-curl.sh 429 backoff matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: python3 is present (the fake server is python3; absence would be exit 2)
+        id: setup
+        run: |
+          command -v python3 >/dev/null || { echo "::error::python3 is not on PATH; the bp-curl harness cannot run its fake server"; exit 1; }
+      - name: bp-curl.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/lib/bp-curl.sh
+      - name: bp-curl.test.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/lib/bp-curl.test.sh
+      - name: "bp-curl backoff matrix (48 assertions, fake loopback server, ~12s of measured sleeps)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/lib/bp-curl.test.sh
