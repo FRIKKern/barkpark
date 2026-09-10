@@ -337,3 +337,94 @@ TWO ADJUDICATIONS WORTH ARGUING WITH, STATED SO THEY CAN BE.
 | 0964270bfa1c | 13214 | pds-w45-sweep-failopen | non-disposition | wave-45 dispatch table row |
 | 1be9d39387f2 | 13216 | pds-w45-census-ledger-integrity | non-disposition | wave-45 dispatch table row |
 | aaae540d6898 | 13218 | pds-w44-hetzner-offline-door | non-disposition | wave-45 dispatch table row |
+
+
+## THE WAVE-49 BLOCK — 47 arrivals, adjudicated 2026-09-10 at `origin/main` 7c084103c
+
+The 176 rows above resolved; the charter had since grown to 15,222 lines and the sweep
+printed `unresolved-claim arrivals : 47`. These are those 47, one entry each, at that
+frozen tree. Split by class: 21 terminal, 15 non-disposition, 6 non-task, 4 historical, 1 non-terminal.
+
+THE PREMISE THE ROW THAT ORDERED THIS WORK CARRIED IS STALE, AND IT IS RECORDED HERE
+RATHER THAN QUIETLY FIXED. `pds-w43-bl-charter-ledger-sweep-content-red` says
+`--selftest` exits 1. It does not: from a clean `git archive origin/main` root the
+selftest is `rc=0`, `=== SELFTEST OK: 3 of 3 ===`, because the plant assertion was
+decoupled from the corpus into a DELTA. The CONTENT-RED was real and lived on `--check`
+— which is what this block pays.
+
+WHAT WAS NOT DONE, DELIBERATELY. No allowlist was widened, no arm silenced, and
+`scripts/pds-charter-ledger-sweep.sh` is UNTOUCHED by the change that adds this block —
+the same separation the wave-45 block above insists on, for the same reason: a lens edit
+and an adjudication landing together let the two effects mask each other.
+
+THE THREE READINGS WORTH ARGUING WITH.
+
+  - A WAVE **PLAN** TABLE IS `non-disposition`; A WAVE **SHIPPED-SLICE** TABLE IS
+    `terminal`. Both are `| ... slug ... |` rows and the lens cannot tell them apart.
+    The separator used here is what the table's OWN COLUMNS carry: a shipped table
+    carries a PR number and what the merged commit did (charter:2591, :2666, :2720 and
+    kin); a plan table carries a round, a surface and a gate (charter:8454, :12635,
+    :13846, :14229, :14516, :15062). A plan row asserts intent, never a disposition.
+  - `pds-correction-receipt-surfaces-status` (charter:2592) IS NOT THE ID ON THAT LINE.
+    The cell reads `task-pds-correction-receipt-surfaces-status`; the SLUG regex has no
+    `task-` prefix, so it matched a SUFFIX of a real id. Both reads were taken: the bare
+    string answers `rc=4 ok:false not_found`, the prefixed one answers `rc=0 ok:true`
+    lifecycle `done`. `non-task` is the honest class for the STRING the lens produced,
+    and the note carries the real id so no reader concludes the work is unfiled. Same
+    LENS ATTRIBUTION LIMIT already recorded at fingerprint 6526839f4d30.
+  - TWO ROWS ARE ADJUDICATED INTO A `DISAGREES`, NOT AWAY FROM ONE. charter:14484 rules
+    `pds-w46-load-stamp-provenance-doubt` REFUTED (terminal) while the ledger row reads
+    `open`; charter:15219 says `pds-bl-github-linkput-auto-publish-erasure` "stays open"
+    (non-terminal) while the ledger row reads `done`. A class that produced AGREES was
+    available for each by calling it `historical`. It was not taken: a disagreement is a
+    FINDING for the lead, and manufacturing agreement is the disease this file treats.
+
+| fingerprint | line | slug | asserted | note |
+|---|---|---|---|---|
+| 52450d341314 | 2591 | pds-bl-w47-find-event-launders-the-honest-status | terminal | wave-48 shipped-slice table row with its PR (#9599) - asserts the work landed |
+| a46f5694a64c | 2592 | pds-correction-receipt-surfaces-status | non-task | NOT the id in the cell: the cell reads `task-pds-correction-receipt-surfaces-status` and the SLUG regex carries no `task-` prefix, so it matched a SUFFIX of a real id. `bp task get pds-correction-receipt-surfaces-status` -> rc=4 ok:false not_found; `bp task get task-pds-correction-receipt-surfaces-status` -> rc=0 ok:true lifecycle done. This bare string is not a task |
+| da43003b73de | 2593 | pds-w48-react-reference-error-collapse | terminal | wave-48 shipped-slice table row with its PR (#9601) |
+| 30425fd1a380 | 2594 | pds-w48-cli-count-and-birth-receipts | terminal | wave-48 shipped-slice table row with its PR (#9602) |
+| 89997fadfd3a | 2595 | pds-w48-deploy-banner-descends-from-health | terminal | wave-48 shipped-slice table row with its PR (#9603) |
+| 3384ab4785d2 | 2596 | pds-w48-meter-rot-and-duplicate-rate-table | terminal | wave-48 shipped-slice table row with its PR (#9604) |
+| 5d05c298f4bb | 2633 | pds-w49-meter-ci-decision | historical | the wave-48 review's residual-follow-up accounting - "two are now filed and published" records what the LEDGER held at that review, a timestamped observation, not a standing claim about this row's work |
+| 38f4a5010e15 | 2666 | pds-w47-door-census-silences | terminal | wave-47 shipped-slice table row with its PR (#9524) |
+| 642b35fa5743 | 2667 | pds-w47-d448-drift-refuses | terminal | wave-47 shipped-slice table row with its PR (#9525) |
+| a12b446c28dc | 2668 | pds-w47-citation-resolver-repair | terminal | wave-47 shipped-slice table row with its PR (#9526) |
+| b047d307dfbc | 2669 | pds-w47-ledger-denominator-and-blind-spots | terminal | wave-47 shipped-slice table row with its PR (#9527) |
+| b833c3512c5b | 2670 | pds-w47-n1-adjudication | terminal | wave-47 shipped-slice table row with its PR (#9528) |
+| 421f2ee53822 | 2671 | pds-w47-interaction-receipt-pin | terminal | wave-47 shipped-slice table row with its PR (#9529) |
+| 67d7d44c848f | 2682 | pds-w47-measure-and-host-axis | non-disposition | a REVIEW precondition - "a second reviewer is warranted ... when it is dispatched"; `dispatched` is predicated of a FUTURE dispatch, and a dispatch precondition is not a lifecycle claim |
+| a0bc075d5fbe | 2720 | pds-w45-census-ledger-integrity | terminal | wave-46 shipped-slice table row with its PR (#9475) |
+| 7582c858f8c6 | 2721 | pds-w45-bl-sweep-adjudication-frozen-blob | terminal | wave-46 shipped-slice table row with its PR (#9476) |
+| 24f9d35900bf | 2722 | pds-w45-bl-receipt-census-self-claims | terminal | wave-46 shipped-slice table row with its PR (#9477) |
+| 30fa0806cdaa | 2770 | pds-w46-price-ledger-orphan-direction | non-disposition | the slug is a PARENTHETICAL naming the hole wave 46 left; `implausible` is predicated of four shipped load1 STAMPS on the next clause, never of this row |
+| d466ac83035f | 4253 | pds-w36-help-seal-fix | terminal | wave-37 shipped-slice table row with its PR (#8992) |
+| 78af669f8fc6 | 4480 | pds-w33-ledger-postread-remainder | terminal | wave-34 shipped-slice table row with its PR (#8855) |
+| c81fd8cd28c1 | 4572 | pds-w33-ledger-postread-core | terminal | wave-33 shipped-slice table row |
+| 1908f4b59314 | 4574 | pds-bl-record-update-basis-overclaims | terminal | wave-33 shipped-slice table row ("the shipped receipt lie ... replaces the false GET on the resolved id") |
+| c8e14951eb4f | 4654 | pds-bl-support-capacity-degraded-unpinned | terminal | wave-32 shipped-slice table row with its PR (#8752) |
+| 09f9cc731620 | 8454 | pds-w27-round-contradiction-13 | non-disposition | WAVE 27 PLAN dispatch table row (task / round / surface / gate) - a planned slice and its oracle, the same shape already adjudicated non-disposition at fingerprint 3bf877ee312c |
+| 4a0cdf931f3a | 12635 | pds-w40-request-echo-repairs | non-disposition | WAVE 40 PLAN dispatch table row (round / what / slice / surface) |
+| 1ea1c4dabecf | 12636 | pds-w40-derivation-partition | non-disposition | WAVE 40 PLAN dispatch table row |
+| a2fc9690cf9f | 13489 | pds-charter-ledger-sweep.sh | non-task | pds-charter-ledger-sweep.sh is a script filename - THIS instrument's own source file. `class` here is the DOOR CENSUS class (CONTENT-RED), not a task lifecycle. bp task get -> rc=4 ok:false not_found |
+| 807f258d548f | 13625 | pds-ledger-census | non-task | the match is a PREFIX of the two script filenames in the fork-closure key on this line, `{pds-ledger-census_test.sh, pds-ledger-census.sh}`; `free` is predicated of the shasum COST. bp task get pds-ledger-census -> rc=4 ok:false not_found |
+| 9aaad80e1159 | 13846 | pds-w45-census-ledger-integrity | non-disposition | WAVE 46 PLAN dispatch table row (slice / round / slug / surface) |
+| dddaa5e9ab6d | 13848 | pds-w45-bl-receipt-census-self-claims | non-disposition | WAVE 46 PLAN dispatch table row |
+| ebcd15c64559 | 13849 | pds-w45-price-provenance | non-disposition | WAVE 46 PLAN dispatch table row; `class` is predicated of the price COLUMN's refusal to state one |
+| 3fe381c1eff4 | 13910 | pds-w33-bl-catchall-success-clauses | terminal | "IS repaired on main" - a standing claim about the WORK, in the present tense, used as the premise of D677's oracle argument; scored against the live row by the separating rule |
+| ba165eaa393e | 14099 | pds-ledger-census.sh | non-task | pds-ledger-census.sh is a script filename - here the NON-VACUOUS CONTROL of an elixir-path-escape-check run. bp task get -> rc=4 ok:false not_found |
+| 9b92a996d36c | 14113 | pds-bl-w47-measure-all-content-key-price-stale | non-disposition | the slug is a PARENTHETICAL label for the deferred axis; `decisive` is predicated of D664 section 4, not of this row |
+| 8ec67b022352 | 14135 | pds-bl-merge-gated-criteria-carry-the-flag | historical | "is OPEN, PDS-slugged, and parented to task-lifecycle-visibility-epic" records the row's LEDGER STATE at D685's moment, and the load-bearing half of the sentence is the PARENTAGE - a timestamped observation, not a standing claim |
+| 3e3bd058a35e | 14229 | pds-w47-door-census-silences | non-disposition | wave-47 plan dispatch table row; `merged` says why D681 and D682 were folded into ONE slice, not that anything merged to main |
+| 73c7f1c7b3c1 | 14484 | pds-w46-load-stamp-provenance-doubt | terminal | a D-number HEADING ruling the row REFUTED on both legs - a refutation is a terminal disposition by this table's own class text ("paid, CLOSED, MOOT, REFUTED") |
+| 540a1b542b1a | 14516 | pds-w47-measure-and-host-axis | non-disposition | wave-48 plan dispatch table row; `rewritten` is predicated of CRITERION 7, and a criterion edit is not a lifecycle claim |
+| 91e7346b4cd8 | 14520 | pds-w48-react-reference-error-collapse | non-disposition | wave-48 plan dispatch table row; `published` is predicated of the npm PACKAGE that renders nothing on a 500 |
+| 882255fded1f | 14548 | pds-d-number-allocation-arbiter | historical | "remains published, unclaimed, 0/4" is a three-field LEDGER-STATE reading taken at wave 49's decision, the archetype of the historical class |
+| 485f72d4dd6a | 14900 | pds-w49-meter-ci-decision | non-disposition | a CRITERION claim - "CRITERION 2 IS UNSOUND" - the same reading already given to a criterion rewrite at fingerprint 0491b85db045 |
+| 75c3d27fc252 | 14981 | pds-bl-w47-duplicate-d-allocation-pointer | non-disposition | `titled` is predicated of the row's TITLE TEXT ("Nineteen D-numbers name two findings each"), which D714 is refuting as a COUNT; nothing here says what the row's lifecycle is |
+| c6864cbedfc2 | 14988 | pds-record-parity | non-task | pds-record-parity is a DOOR basename (scripts/pds-record-parity.sh, a PDS_DOOR_DISPOSITIONS row); THROUGH is a door-census class, never a task lifecycle. bp task get -> rc=4 ok:false not_found |
+| 1e3b0a498e23 | 15052 | pds-elixir-receipt-census.exs | non-task | scripts/pds-elixir-receipt-census.exs is a script filename; `owned` is predicated of ELIXIR_TEST_ONLY_PATHS. bp task get -> rc=4 ok:false not_found |
+| 4bd90e476ab1 | 15062 | pds-bl-w48-web-sibling-launders | non-disposition | wave-49 plan dispatch table row (slice / round / slug / surface / why) |
+| 913e5714ff20 | 15147 | pds-w1-crown-proof | historical | a LIFECYCLE QUOTE at D717's moment, and a cross-line one: the line ends "is **lifecycle" with "done, 12/12" on the NEXT line, so the same-line lens sees the ASSERTION and never the VALUE - the exact shape this instrument's header documents at charter:6293-6294. Same reading as this slug's other lifecycle quotes (c9cebb359a4d, cd915f1f2a1c) |
+| 36a077ee7043 | 15219 | pds-bl-github-linkput-auto-publish-erasure | non-terminal | "stays open for the audit-trail half neither closure answers" - a standing disposition naming an explicitly UNPAID half of the work, not a moment observation |

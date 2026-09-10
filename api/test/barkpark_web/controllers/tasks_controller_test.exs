@@ -936,6 +936,96 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert message =~ "Nothing was written"
     end
 
+    # ── task-07c21ec0d1d43e90: the override is accepted AND RECORDED ────────
+    #
+    # MEASURED on guerrilla in a sandbox row: this exact POST returned
+    # `ok:true, epoch 1` and the raw document read back carried `.claim` keys
+    # exactly [epoch, ts_iso, work_digest, work_field_digests, worker]. The
+    # reason was consumed by the gate and dropped, while two prose surfaces —
+    # the `--set` flag summary and the refusal text — both promised it lands
+    # "on the record".
+    #
+    # This reads the STORED Document through Repo, never the response body: the
+    # response is rendered from the struct the write returned, so it could be
+    # right while the row is wrong.
+    test "the criteria override lands on the STORED claim record and survives the close",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("override-recorded"), scope, %{"acceptance_criteria" => []})
+      reason = "spike: the shape IS the deliverable, criteria would describe not shape it"
+
+      claim_resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/claim",
+          # The `set` shape — what `bp task claim … --set k=v` actually POSTs.
+          # The controller reads the key flat AND under `set`; the bp path is
+          # the one the measurement used, so it is the one under test.
+          Jason.encode!(%{worker_id: "worker-1", set: %{criteria_unstated_override: reason}})
+        )
+
+      assert claim_resp.status == 200
+      epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
+
+      stored_claim = Repo.get_by!(Document, doc_id: task.doc_id).content["claim"]
+
+      assert stored_claim["criteria_unstated_override"] == reason,
+             "the gate accepted the reason and the row must say so"
+
+      # Control on the read: this IS the claim the POST wrote.
+      assert stored_claim["worker"] == "worker-1"
+      assert stored_claim["epoch"] == epoch
+
+      close_resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{
+            worker_id: "worker-1",
+            observed_epoch: epoch,
+            lifecycle_status: "cancelled",
+            reason: "abandoned: the spike answered the question"
+          })
+        )
+
+      assert close_resp.status == 200
+
+      after_close = Repo.get_by!(Document, doc_id: task.doc_id)
+      assert after_close.content["lifecycle_status"] == "cancelled"
+
+      assert after_close.content["claim"]["criteria_unstated_override"] == reason,
+             "a closed claim must still say why it was allowed to start"
+    end
+
+    # The NEGATIVE direction over the same HTTP path: a row that states criteria
+    # never consulted the override, so a reason sent anyway attests nothing and
+    # must not be stored. If the key appeared here it would mean "somebody typed
+    # a flag", not "this row was waved through the criteria gate".
+    test "a claim that did not need the override stores NO override key",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("override-unneeded"), scope, %{})
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/claim",
+          Jason.encode!(%{
+            worker_id: "worker-1",
+            criteria_unstated_override: "sent, but this row states its criteria"
+          })
+        )
+
+      assert resp.status == 200
+
+      stored_claim = Repo.get_by!(Document, doc_id: task.doc_id).content["claim"]
+      assert stored_claim["worker"] == "worker-1"
+
+      refute Map.has_key?(stored_claim, "criteria_unstated_override"),
+             "an exempt row must carry no override key at all, not an empty one"
+    end
+
     test "fenced_off and not_holder are distinguishable by reason and BOTH teach a remedy",
          %{conn: conn, scope: scope} do
       task = mk_task!(uniq("two-409s"), scope, %{"acceptance_criteria" => []})

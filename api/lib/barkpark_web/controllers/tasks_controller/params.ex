@@ -1371,7 +1371,8 @@ defmodule BarkparkWeb.TasksController.Params do
       ~s|  bp task claim #{doc_id} #{worker_id} --yes\n| <>
       ~s|Containers are exempt already (a decision/goal label, a non-task kind, or a row with | <>
       ~s|children), so if this IS a container, label it rather than overriding. To claim anyway, | <>
-      ~s|on the record: --set criteria_unstated_override="<why this row needs none>".|
+      ~s|on the record: --set criteria_unstated_override="<why this row needs none>" — the reason | <>
+      ~s|is stored as claim.criteria_unstated_override on the claim itself and survives the close.|
   end
 
   @doc """

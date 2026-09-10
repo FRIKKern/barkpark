@@ -65,10 +65,70 @@ the claim class*. Only over-claims are refused — `VARIANCE-SKIP`,
 `PIPE-MASKED-RC`, `UNCOMPARED-COUNT`. Anything that does not classify is
 **demoted to L6, never rejected**.
 
+**2b. A COUNT NOBODY GRADED ASSERTS NOTHING (`variance.mjs`, 2026-09-10).** The
+rule is stated on the **act**, not on a list of spellings: `wc`, `grep -c`,
+`grep -vc`, `git grep -c` and `git rev-list --count` all PRINT a quantity, and
+all are `UNCOMPARED-COUNT` unless the pipeline **ends in an equality grade**
+(`… | grep -qx <n>`), which is the one shape where the number becomes something
+an exit code moves on (axis `QUANTITY`, claim class `quantity`). Until this rule
+existed only `| wc` and an ungraded `--count` were named, so the same population
+claim was **refused** when spelled `wc` and **paid in full** when spelled
+`grep -c` — the screen refused the honest author and admitted the other one. The
+refusal names its substitute rather than only saying no. The other half is
+`binding.mjs`'s **`quantity` term**: a claimed number must occur literally in the
+command *and* in the claim, so mutating the number while holding the command
+byte-identical reds the row (`rerun-adjudicate.test.mjs` §12).
+
 **3. ABSENCE IS FIRST-CLASS (`adjudicate.mjs`).** Four of five FAILED verdicts in
 the real sample were *true* reasons whose rerun exits nonzero because the claim
 **is** an absence. The discriminator is grip's shipped `admitsAbsenceClaim`,
 never `verdict == ADMITTED`.
+
+## Where a rerun comes from: the row first, the sidecar second
+
+A rerun reaches this instrument two ways, and they are **not** equal.
+
+1. **The row's own `content.disposition_rerun`** — the fourth durable key
+   `bp task stage --rerun` writes. This is the author's record, on the ledger,
+   and it **wins**.
+2. **`recipes.json`** — a repo file somebody re-typed by hand. It is the
+   explicit **fallback**, used when the row carries nothing. When a row carries
+   both, the shadowed recipe is reported by name, never silently dropped.
+
+Wave 28 shipped both halves and never joined them: `corpus.mjs` normalised
+`disposition_rerun` off every row, and `toFact()` read the sidecar and nothing
+else, so a row that carried a stored rerun was reported `PROSE-ONLY / NO-RERUN`
+— *"asserted by nobody"* — about a row somebody had asserted. The verdict line
+now prints **how many rows carry a stored rerun**, including when that number is
+zero, because the way a disconnect survives a whole wave is that nobody prints
+the number.
+
+A stored rerun gets **no free pass**. It goes through `forbiddenSpelling`,
+`bindClaim` and `overClaim` in that order and is levelled by `deriveLevel`,
+exactly like a sidecar recipe. Two things it does not get:
+
+- **A claim class.** Nobody declared one, so it is adjudicated at the *floor*
+  class `existence` — paid for by `EXISTENCE` or `CONTENT` and nothing else.
+  Reading the class out of the command's own variance set would make the
+  variance screen vacuous; reading it out of the prose is the scanner grip
+  already refuted at precision 0.67. `absence` is deliberately **not** the floor
+  despite being paid for by more axes: absence is a *polarity*, and guessing an
+  author's polarity is the one thing this epic may not do.
+- **An author's terms.** They are *derived from the command* — the pattern of a
+  `git grep`, the path of a `git show <ref>:<path>` or a `-- <pathspec>` — and
+  then checked against the row's **title**, which is the claim `toFact()` hands
+  grip. That is not circular: the check that fails is *does the row's own claim
+  literally name what this command reads*. A path binds by **basename**, which
+  is a weaker binding than an authored full-pathspec one, and the note says so.
+  A command whose subject cannot be named binds nothing and is `REFUSED`
+  `MISSING-TERMS` — fail closed, never silently admitted unbound.
+
+Measured on the live board 2026-09-10: three rows carry a stored rerun; one
+re-derives, two are `REFUSED UNBOUND-CLAIM` because the command greps for an
+expression the row's title never names. Those three rows are captured verbatim
+in `fixtures/stored-rerun-rows-2026-09-10.json`; the shipped 172-row
+`live-corpus-2026-07-31.json` snapshot carries **zero**, which is why it can
+only prove the absence.
 
 ## Two things this tree deliberately does not hide
 

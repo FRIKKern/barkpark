@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # pr-watch.sh <pr-number>... — THE watcher. Every lead calls this instead of writing its own loop.
 #
+# SIBLING CHECK: held-liveness.sh (in this directory) answers the other half of a lead's loop —
+# this file asks "are my PRs moving", held-liveness.sh asks "are my claims still MINE" by reading
+# the ledger's claim.worker + lease-until for every row in the lane's held.txt and comparing the
+# pulse log's age and pid against the cadence. A watcher that keeps polling PRs whose rows have
+# lapsed back to ready is watching someone else's work. Run both at the top of every loop.
+#
 # WHY THIS FILE EXISTS. Every lead writes an ad-hoc `for p in $prs` PR watcher, and this harness's
 # shell is zsh, which does NOT word-split an unquoted parameter expansion:
 #

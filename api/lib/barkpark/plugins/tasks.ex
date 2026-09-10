@@ -982,7 +982,10 @@ defmodule Barkpark.Plugins.Tasks do
                 "of shaping it. Containers (a decision/goal label, a non-task kind, a row WITH " <>
                 "children) are EXEMPT by name, so label a container rather than overriding it. The " <>
                 "way through is --set criteria_unstated_override=\"<why this row needs none>\", " <>
-                "which lands on the record; a blank or whitespace-only reason is NOT an override. " <>
+                "which lands on the record: the trimmed reason is STORED as " <>
+                "claim.criteria_unstated_override on the claimed row and survives pulse and " <>
+                "close, while a claim that did not need the override carries no such key. A " <>
+                "blank or whitespace-only reason is NOT an override. " <>
                 "This is the flag the refusal's own remedy line names, so that remedy is runnable " <>
                 "as printed."
           }

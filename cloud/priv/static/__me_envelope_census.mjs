@@ -121,12 +121,35 @@ import { SCENARIO_NAMES, route } from "./__preview__/scenarios.mjs";
 const here = path.dirname(new URL(import.meta.url).pathname);
 const ROUTER = process.argv[2] || path.join(here, "../../lib/barkpark_cloud/web/router.ex");
 
+
+// ── THE ONE REFUSAL VOCABULARY (cch-w63-bl) ─────────────────────────────────
+// EVERY exit-2 path in this file ends with exactly ONE line, on STDERR:
+//
+//     !! ME ENVELOPE CENSUS (exit 2): REFUSED TO MEASURE — <reason>
+//
+// It is the same shape __preview__/exit-vocabulary.mjs already emits for the
+// browser instruments, so ONE reader covers the whole console fence. Before
+// this, six of console-unit's nine exit-2 sites spoke a private vocabulary
+// (`REFUSED (2): …` on **STDOUT**, invisible to any stderr-only capture) that no `!!`-anchored capture could see — a gate that CAPTURES the
+// refusing instrument's own summary line would have replaced a wrong sentence
+// with NO sentence, in the wave about silence.
+//
+// THE READER IS scripts/console-refusal-capture.mjs, and its unit test
+// ENUMERATES this file from source: a new exit-2 path that does not go through
+// `refuse2` reds that test. Do not add one.
+const REFUSAL_NAME = "ME ENVELOPE CENSUS";
+const refuse2 = (reason) => {
+  process.stderr.write(`!! ${REFUSAL_NAME} (exit 2): REFUSED TO MEASURE — ${reason}\n`);
+  process.exit(2);
+};
+
 function die2(lines) {
   console.log("── /v1/me ENVELOPE CENSUS ───────────────────────────────────────────────────");
   for (const l of lines) console.log(l);
   console.log("");
-  console.log("REFUSED (2): the census will not report a result it could not measure.");
-  process.exit(2);
+  // The prose above stays on stdout (it is this census's report); the SUMMARY
+  // line moves to stderr, where a capture can see it.
+  refuse2(String(lines[0] || "the census could not measure the /v1/me envelope").replace(/^FAIL\(2\):\s*/, ""));
 }
 
 // ── the server side ─────────────────────────────────────────────────────────

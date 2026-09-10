@@ -105,8 +105,16 @@ defmodule Barkpark.Quiz.Bridge do
     end
   end
 
+  # DELIBERATELY THE GLOBAL TOPIC (task-5d0615ee60143cc8). The Bridge is an
+  # instance-wide daemon: a live quiz room can be bound to a quiz in ANY
+  # workspace, and there is no workspace in context here to key a topic on. It
+  # is safe there because it consumes IDENTITY ONLY — `handle_info` matches
+  # `%{type: "quiz", doc_id: id}` and then RE-READS the document through
+  # `Quiz.load_question/2`. `Content.Broadcast.global_msg/1` strips a
+  # workspace-owned document's `:document`/`:doc` payload from this topic, so
+  # the Bridge keeps every field it reads and no tenant body reaches it.
   defp safe_subscribe(dataset) do
-    Phoenix.PubSub.subscribe(@pubsub, "documents:#{dataset}")
+    Phoenix.PubSub.subscribe(@pubsub, Barkpark.Content.Broadcast.global_list_topic(dataset))
     :ok
   rescue
     # Phoenix.PubSub.subscribe raises ArgumentError when the named PubSub isn't
