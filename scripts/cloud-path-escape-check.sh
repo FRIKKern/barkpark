@@ -87,6 +87,12 @@
 # census: they are asserted on or served as static assets, never read across the
 # tree. It is also why the enumeration walks the WORKING TREE.
 #
+# The existence filter has ONE cost, and it is paid by a separate arm rather
+# than by weakening the filter: a declared producer that is RENAMED stops
+# resolving, so its census row leaves in silence. See THE DECLARATION-LIVENESS
+# ARM below — every CLOUD_PATHS entry must name something that exists, which is
+# the question the census structurally cannot ask.
+#
 # NOT `git ls-files` (honest-gates D31): a prototype that enumerated via git
 # reported "OK: every repo-root read is covered" and exited 0 with the mutation
 # fixture sitting on disk UNTRACKED — a textbook vacuous pass of exactly the
@@ -609,6 +615,79 @@ esac
 # ---------------------------------------------------------------------------
 # --check: the ratchet
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# THE DECLARATION-LIVENESS ARM (dr-w16-bl-escape-census-is-existence-filtered)
+# ---------------------------------------------------------------------------
+# The census is EXISTENCE-FILTERED by design: list_escapes drops any literal
+# whose resolved path is not on disk, because that is what keeps the traversal
+# fixtures (`"../../etc"`, `"../up"`) and the 404 static paths out of it. The
+# price of that filter is paid HERE, not there: RENAME a declared producer file
+# and its literal stops resolving, the read leaves the census in silence, and
+# every other arm still says OK.
+#
+#   * the coverage arm only ever asks "is this census row declared?" — a row
+#     that VANISHED is never asked about;
+#   * the floor only catches a scanner that dies WHOLESALE. Measured on this
+#     tree: the population is 20 against a floor of 6, so fourteen rows could
+#     disappear one at a time and the floor would still pass;
+#   * and the CLOUD_PATHS entry that named the renamed file becomes dead text —
+#     it dispatches on a path nothing in the repo has any more, so the suite
+#     that actually reads the NEW name is no longer dispatched by it.
+#
+# So the declaration is checked in the OTHER direction: every entry in
+# CLOUD_PATHS must name something that exists. An exact entry must be a real
+# path; a `dir/**` entry must be a real directory. That is the check the census
+# structurally cannot make — the census can only see what is still there.
+#
+# It runs FIRST, before the census is even taken, for two reasons: a dead
+# declaration EXPLAINS a shrunken census, so reporting the floor first would
+# hand a reader the symptom instead of the cause; and the arm's verdict is then
+# independent of how many reads the tree happens to hold, which is what lets the
+# harness prove it against a fixture without also having to clear the floor.
+#
+# It resolves against the DECLARATION's own repository — the parent of this
+# script — NOT against $REPO_ROOT. CLOUD_PATH_ESCAPE_ROOT retargets the CENSUS
+# (which cloud/ tree to scan); CLOUD_PATHS is fixed text inside this file making
+# a claim about the tree this file lives in, and checking that claim against a
+# synthetic fixture would be checking it against something it never described.
+# The harness proves the arm the honest way instead: it runs a COPY of this
+# script from inside a fixture repo, so the copy's own parent IS the fixture.
+DECL_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+dead_declarations=0
+while IFS= read -r g; do
+  [ -n "$g" ] || continue
+  case "$g" in
+    */'**')
+      [ -d "$DECL_ROOT/${g%/**}" ] && continue
+      dead_declarations=$((dead_declarations + 1))
+      echo "::error::cloud-path-escape-check: DEAD DECLARATION: '$g' names a directory that does not exist" >&2
+      ;;
+    *)
+      [ -e "$DECL_ROOT/$g" ] && continue
+      dead_declarations=$((dead_declarations + 1))
+      echo "::error::cloud-path-escape-check: DEAD DECLARATION: '$g' names a path that does not exist" >&2
+      ;;
+  esac
+done <<EOF
+$(set_globs cloud)
+EOF
+
+if [ "$dead_declarations" -gt 0 ]; then
+  cat >&2 <<'MSG'
+
+A CLOUD_PATHS entry names a path that is not in the tree. The usual cause is a
+RENAME: the declared producer moved, the Cloud test that reads it now resolves
+to nothing, its census row disappeared without a red (the census is
+existence-filtered), and this declaration now dispatches on a path no file has.
+
+Fix: point the declaration at the file's new name — and check that whatever read
+it (the reason the ruling above it was written) still reads it. If the read is
+genuinely gone, delete the declaration AND its ruling in the same edit.
+MSG
+  exit 1
+fi
+
 census="$(list_escapes | sort -u || true)"
 paths="$(printf '%s\n' "$census" | cut -f1 | sort -u | sed '/^$/d')"
 count="$(printf '%s\n' "$paths" | sed '/^$/d' | wc -l | tr -d ' ')"

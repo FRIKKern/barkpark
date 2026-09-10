@@ -64,6 +64,12 @@ no() {
 # producer's output into a variable first and match that. Use them for EVERY
 # match against a captured string.
 has()      { grep -q  -- "$2" <<<"$1"; }   # substring/BRE anywhere in $1
+has_fixed() { grep -qF -- "$2" <<<"$1"; }  # LITERAL substring — for needles
+                                          # carrying regex metacharacters (a
+                                          # `dir/**` declaration is invalid BRE:
+                                          # BSD grep answers "repetition
+                                          # operator operand invalid" and exits
+                                          # 2, which `has` would read as "absent"
 has_line() { grep -qx -- "$2" <<<"$1"; }   # a whole line of $1 equals the BRE
 
 TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/cloud-path-escape-test.XXXXXX")"
@@ -1232,6 +1238,114 @@ if [ -z "$(grep -Eoh '"\.\./[^"]*"' "$REAL_ROOT/cloud/test/barkpark_cloud/billin
   ok "…and that file genuinely has no \"../…\" literal for the old extractor to find"
 else
   no "billing_client_mirror_test.exs now carries a quoted literal — arm (h) no longer proves the segment reader"
+fi
+echo
+
+# ── case 13: the DECLARATION-LIVENESS arm ──────────────────────────────────
+# dr-w16-bl-escape-census-is-existence-filtered. The census is
+# existence-filtered — a literal that resolves to nothing on disk is dropped, on
+# purpose, so traversal fixtures never enter it. The cost is that RENAMING a
+# declared producer file removes its census row IN SILENCE: the coverage arm
+# only judges rows that are present, and the floor is a lower bound far under
+# the population (20 reads against a floor of 6 when this was written), so the
+# ratchet reports OK while a CLOUD_PATHS entry has gone dead.
+#
+# The arm checks the declaration in the OTHER direction, and it is proved here
+# the only honest way: a COPY of the real script is run from inside a fixture
+# repo, so the copy's own parent — the root its DECL_ROOT resolves to — is that
+# fixture. Nothing is overridden and no env door is opened; the fixture simply
+# IS the repository as far as the copy can tell.
+echo "case 13: a renamed declared producer reds instead of leaving the census"
+
+FXL="$TMPROOT/decl-liveness"
+mkdir -p "$FXL/scripts"
+# Materialise EVERY declared path, derived from --print-set rather than typed:
+# a hand-copied list would go stale the next time CLOUD_PATHS grows, and a stale
+# list here means the control below fires for the WRONG reason.
+decl="$("$SCRIPT" --print-set cloud)"
+while IFS= read -r g; do
+  [ -n "$g" ] || continue
+  case "$g" in
+    */'**') mkdir -p "$FXL/${g%/**}" ;;
+    *)
+      mkdir -p "$FXL/$(dirname -- "$g")"
+      : >"$FXL/$g"
+      ;;
+  esac
+done <<EOF
+$decl
+EOF
+COPY="$FXL/scripts/cloud-path-escape-check.sh"
+cp "$SCRIPT" "$COPY"   # AFTER materialisation: the loop truncates this path
+
+# The arm's verdict must not depend on the census, so it is read out of the
+# OUTPUT, never out of the exit code — this fixture holds no cloud/ reads at
+# all and therefore reds on the floor no matter what the arm says.
+out="$(bash "$COPY" 2>&1)" || true
+if has "$out" "DEAD DECLARATION"; then
+  no "the arm fired with every declared path present — it cannot tell alive from dead: $out"
+else
+  ok "silent while every declared path exists (control)"
+fi
+
+# (a) THE RENAME. Move a declared producer file aside, exactly as a refactor
+#     would, and the declaration that named it must red.
+victim="$(printf '%s\n' "$decl" | grep -v '\*\*$' | grep '/' | head -1)"
+if [ -n "$victim" ] && [ -e "$FXL/$victim" ]; then
+  ok "picked a declared exact-file producer to rename: $victim"
+else
+  no "could not pick a declared exact-file producer from the set"
+fi
+mv "$FXL/$victim" "$FXL/$victim.renamed"
+out="$(bash "$COPY" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) after a declared producer was renamed"
+else
+  no "PASSED with a dead declaration — the census lost the read in silence"
+fi
+if has_fixed "$out" "DEAD DECLARATION: '$victim' names a path that does not exist"; then
+  ok "names the dead declaration ($victim)"
+else
+  no "did not name the dead declaration: $out"
+fi
+if has "$out" "The usual cause is a"; then
+  ok "the message points at a rename rather than at the census"
+else
+  no "the remediation block is missing: $out"
+fi
+mv "$FXL/$victim.renamed" "$FXL/$victim"
+
+# (b) THE DIRECTORY SHAPE. A `dir/**` entry is a claim about a directory, and a
+#     directory that is gone is just as dead as a renamed file — a separate
+#     branch of the arm, so it gets its own mutation.
+dvictim="$(printf '%s\n' "$decl" | grep '\*\*$' | grep -v '^cloud/' | head -1)"
+dvictim="${dvictim%/**}"
+if [ -n "$dvictim" ] && [ -d "$FXL/$dvictim" ]; then
+  ok "picked a declared directory to remove: $dvictim/**"
+else
+  no "could not pick a declared directory from the set"
+fi
+mv "$FXL/$dvictim" "$FXL/$dvictim.renamed"
+out="$(bash "$COPY" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) after a declared directory was renamed"
+else
+  no "PASSED with a dead directory declaration"
+fi
+if has_fixed "$out" "DEAD DECLARATION: '$dvictim/**' names a directory that does not exist"; then
+  ok "names the dead directory declaration ($dvictim/**)"
+else
+  no "did not name the dead directory declaration: $out"
+fi
+mv "$FXL/$dvictim.renamed" "$FXL/$dvictim"
+
+# (c) …and the arm is silent on the REAL tree, so case 1's green is a green
+#     about the repo and not an arm that never runs.
+real_out="$("$SCRIPT" 2>&1)" || true
+if has "$real_out" "DEAD DECLARATION"; then
+  no "a CLOUD_PATHS entry names a path that is not in this tree: $real_out"
+else
+  ok "every CLOUD_PATHS entry names something that exists in this tree"
 fi
 echo
 
