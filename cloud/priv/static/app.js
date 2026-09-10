@@ -25463,13 +25463,25 @@
   // — an OWNER ESCAPE HATCH that the role-change law does NOT have, so an owner
   // MAY remove a peer owner even though they may not re-role them. The tier gate
   // is the route's `with_team_role(conn, "admin")`, modelled by assignableRoles.
-  // The server has no self? branch on this verb; the self row is withheld here
-  // by console ruling (D492 variant B) because the merge-blocking members smoke
-  // pins removes.length === 2 over a 3-row roster whose row 0 IS the actor. That
-  // withheld owner-self Remove is an UNDER-offer, pre-existing on main, filed
-  // separately — it is not this slice's class.
+  // THE SERVER HAS NO self? BRANCH ON THIS VERB, so neither does this predicate
+  // (cch-w44-bl). `isSelf` is kept in the signature for symmetry with
+  // canChangeMemberRole's self? bypass and is DELIBERATELY unread: the general
+  // law already answers the self row correctly, because on your own row the
+  // target role IS ctx.role —
+  //   owner-self  -> the `actor_role == "owner"` hatch fires  -> {:ok, :removed}
+  //   admin-self  -> outranks?("admin","admin") is strict `>` -> {:error, :forbidden}
+  //   member-self -> assignableRoles("member") is empty       -> {:error, :forbidden}
+  // A blanket `if (isSelf) return false` used to sit here (D492 variant B), which
+  // withheld the one server-legal cell of the three: an owner who is NOT the last
+  // owner could not leave their own team from the roster. That is an UNDER-offer,
+  // the mirror image of this epic's usual lie, and it is gone.
+  //
+  // The remaining refusal on the self row is a STATE one, not an authority one:
+  // do_remove rolls back :last_owner (409) for the SOLE owner. That is
+  // isSoleOwnerSelf's question, answered at the call site in memberRowHtml —
+  // exactly as it already is for Change role — never here.
   function canRemoveMember(actorRole, targetRole, isSelf) {
-    if (isSelf) return false;
+    void isSelf;
     if (!assignableRoles(actorRole).length) return false;
     return actorRole === "owner" || memberRoleRank(actorRole) > memberRoleRank(targetRole);
   }
@@ -25539,7 +25551,10 @@
       actions += '<button class="btn btn-ghost btn-sm" data-member-role="' + esc(m.user_id) +
         '" data-role="' + esc(targetRole) + '" data-email="' + esc(m.email) + '" type="button">Change role</button>';
     }
-    if (canRemoveMember(ctx.role, targetRole, isSelf)) {
+    // `lastOwnerSelf` gates BOTH verbs: do_update_role and do_remove roll back
+    // the same :last_owner (409) for the sole owner, so offering either on that
+    // row is a control the server refuses.
+    if (!lastOwnerSelf && canRemoveMember(ctx.role, targetRole, isSelf)) {
       actions += '<button class="btn btn-ghost btn-sm" data-member-remove="' + esc(m.user_id) +
         '" data-email="' + esc(m.email) + '" type="button">Remove</button>';
     }
@@ -25592,7 +25607,12 @@
         members.map(function (m) { return memberRowHtml(m, rowCtx); }).join("") +
       "</div>" +
       (soleOwnerSelf
-        ? '<p class="set-empty">You\'re the only owner, so you can\'t change your own role — ' +
+        // cch-w44-bl: the sole owner's own row now withholds TWO controls, not
+        // one — do_update_role and do_remove roll back the SAME :last_owner —
+        // so the sentence names both. A withheld control with no sentence is a
+        // silently missing control.
+        ? '<p class="set-empty">You\'re the only owner, so you can\'t change your own role ' +
+            "or leave the team &mdash; " +
             "promote another member to owner first.</p>"
         : "") +
       "</section>";

@@ -4666,7 +4666,7 @@ const EXPECTATIONS = {
       assert.ok(body.includes("Team members"), "the roster card heading renders");
       assert.ok(body.includes("Pending invitations"), "the admin-only invitations card renders");
       assert.ok(body.includes("ada@acme.com") && body.includes("lin@acme.com") && body.includes("rex@acme.com"), "every member row renders");
-      assert.ok(body.includes("(you)"), "the acting owner is self-tagged and gets no self-remove");
+      assert.ok(body.includes("(you)"), "the acting owner is self-tagged");
       assert.ok(body.includes("sky@partner.io"), "a pending invitation renders");
       // THREE roles only — the chips read Owner/Admin/Member; NO invented tiers.
       assert.ok(body.includes(">Owner<") && body.includes(">Admin<") && body.includes(">Member<"), "the 3 real role chips render");
@@ -4699,8 +4699,14 @@ const EXPECTATIONS = {
       const wire = (method, re) => ctx.calls.filter((c) => c.method === method && re.test(c.path)).length;
       const panel = reg.get("members-body");
       const removes = panel.querySelectorAll("[data-member-remove]");
+      // TWO, and the reason is STATE, not authority (cch-w44-bl): ada is the SOLE
+      // owner on this roster, so do_remove would roll her own removal back with
+      // :last_owner — the same 409 that already withholds her Change role. On a
+      // roster with a second owner she DOES get a self-Remove; that is the
+      // members-peer-owner scenario, which pins four.
       assert.equal(removes.length, 2,
-        "the two manageable rows carry a wired Remove (the acting owner never self-removes); got " + removes.length);
+        "the two manageable rows carry a wired Remove (the SOLE owner's own row is withheld by " +
+        "the last_owner 409, not by a blanket self rule); got " + removes.length);
       const victimId = removes[0].getAttribute("data-member-remove");
       const victimEmail = removes[0].getAttribute("data-email");
       assert.ok(victimId && victimEmail, "the Remove button must carry both the user id and the email it types against");
@@ -4825,8 +4831,17 @@ const EXPECTATIONS = {
         "an owner must be offered Remove on a PEER OWNER's row — remove_member_as/3's owner escape hatch permits it; offered on " + JSON.stringify(removeOffers));
       assert.deepEqual(roleOffers, ["ada@acme.com", "lin@acme.com", "rex@acme.com"],
         "Change role reaches the two outranked rows and the actor's OWN (self-demotion is a 409 state refusal, not an authority one) — got " + JSON.stringify(roleOffers));
-      assert.deepEqual(removeOffers, ["lin@acme.com", "ozz@acme.com", "rex@acme.com"],
-        "Remove reaches every row but the actor's own — got " + JSON.stringify(removeOffers));
+      // cch-w44-bl: RE-DERIVED BY RUNNING, not by inspection. With the self-Remove
+      // arm flipped this assertion failed with
+      //   "Remove reaches every row but the actor's own — got
+      //    [\"ada@acme.com\",\"lin@acme.com\",\"ozz@acme.com\",\"rex@acme.com\"]"
+      // and ada IS the honest fourth: she is an owner and ozz is a second owner,
+      // so remove_member_as/3 answers {:ok, :removed} for her own row — nothing
+      // about last_owner is in reach. This is the scenario the fixture exists for.
+      assert.deepEqual(removeOffers, ["ada@acme.com", "lin@acme.com", "ozz@acme.com", "rex@acme.com"],
+        "Remove reaches every row INCLUDING the actor's own — an owner who is not the last " +
+        "owner may leave their own team, and remove_member_as/3 has no self? branch to stop " +
+        "them — got " + JSON.stringify(removeOffers));
     },
   },
   // ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ─────────────────────
