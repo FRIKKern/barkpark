@@ -117,6 +117,13 @@ defmodule BarkparkWeb.Studio.ChatKeyJumpPaletteTest do
 
       # Flip to the archived shelf: Gamma is now the ONLY visible row, and 1
       # means Gamma.
+      #
+      # The exact-contents assertion below reads the ARCHIVED shelf, which is
+      # where `ChatSessionResidue.purge!/0` parks residue it can neither delete
+      # nor unpin. Name that cause before asserting, or this reds as a bare list
+      # diff against two foreign UUIDs.
+      Barkpark.ChatSessionResidue.assert_archived_shelf_clean!()
+
       render_click(view, "toggle-archived", %{})
       assert visible_ids(view) == [gamma]
 
