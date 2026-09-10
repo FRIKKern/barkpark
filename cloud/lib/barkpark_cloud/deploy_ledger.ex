@@ -763,8 +763,18 @@ defmodule BarkparkCloud.DeployLedger do
   # same reason: this clause used to match `status` alone, so a capacity refusal,
   # a busy-slug refusal, a broken re-queue and a nil reason ALL answered
   # `BOX_BUSY_DEFERRED` — a taxonomy with one arm cannot be wrong, and was.
+  #
+  # COLUMN FIRST, EXACTLY LIKE THE `failed` ARM ABOVE (dr-w4-bl-deferral-raw-
+  # column-ambiguous). The box's own code word is `box_refusal_code` on the row;
+  # the prose reader is the fallback for rows written before that column and for
+  # synthesised maps that carry no such key. See `box_code/1`.
   def classify(%{status: "deferred"} = row),
-    do: classify_deferred(Map.get(row, :stage), Map.get(row, :failure_reason))
+    do:
+      classify_deferred(
+        Map.get(row, :stage),
+        Map.get(row, :failure_reason),
+        box_code(row)
+      )
 
   def classify(%{status: _other}), do: nil
   def classify(nil), do: nil
@@ -1143,7 +1153,33 @@ defmodule BarkparkCloud.DeployLedger do
   # designed — vacuous RED, the mirror image of the vacuous green this epic
   # refuses. The honest tail rises INSIDE the deferred cohort: in `volume`, out
   # of the numerator, on its own reported line.
-  defp classify_deferred(_stage, reason) when is_binary(reason) do
+  # THE SENTINEL THAT SAYS "A CODE-AWARE WRITER LOOKED, AND THERE WAS NO CODE"
+  # (dr-w4-bl-deferral-raw-column-ambiguous). It has to be a VALUE and not NULL:
+  # NULL already means "nobody recorded a code on this row" — every row written
+  # before the column existed — and collapsing the two would reclassify the
+  # historical corpus, which is D115's whole prohibition.
+  #
+  # It cannot collide with a real code BY CONSTRUCTION, not by luck: a code is
+  # `@code_token`, `^[a-z][a-z0-9_]*$`, which no parenthesis can satisfy. That is
+  # pinned by a test rather than asserted here.
+  @no_box_code "(none)"
+
+  @doc "The sentinel `Sites.Deploy` stamps when a refusal envelope carried no `code`."
+  @spec no_box_code() :: String.t()
+  def no_box_code, do: @no_box_code
+
+  # The box's code word AS DATA, or `nil` when the row carries none — which is
+  # NOT the same as the box having named none (that is `:none`). `nil` is the
+  # only value that hands the question back to the prose reader.
+  defp box_code(row) do
+    case Map.get(row, :box_refusal_code) do
+      @no_box_code -> :none
+      code when is_binary(code) -> {:code, code}
+      _absent -> nil
+    end
+  end
+
+  defp classify_deferred(_stage, reason, column_code) when is_binary(reason) do
     cond do
       # A deferral whose re-queue BROKE is a lost publish, not a re-queue. Rows
       # written before dr-w3 S3 settled `deferred` with this text (the driver now
@@ -1158,26 +1194,42 @@ defmodule BarkparkCloud.DeployLedger do
       refusal_code(reason) != "409" ->
         "DEFERRED_UNCLASSIFIED"
 
-      deferral_code(reason) == {:code, "box_at_capacity"} ->
-        "BOX_AT_CAPACITY_DEFERRED"
-
-      # `already_running` — and the BARE 409 with no code at all, which is D7's
-      # 43%: a codeless 409 predates the concurrent-build cap entirely, so the
-      # only thing it can be is the busy slug. `:none` is that codeless 409 and
-      # NOT `:prose`: a box that sent unreadable words did say something, and
-      # folding it in here would absorb an unnamed cause into the busy bucket.
-      deferral_code(reason) in [:none, {:code, "already_running"}] ->
-        "BOX_BUSY_DEFERRED"
-
+      # THE CODE COMES FROM THE COLUMN WHEN THE ROW HAS ONE, AND ONLY THEN FROM
+      # THE STRING (dr-w4-bl-deferral-raw-column-ambiguous). dr-w4 S6 closed
+      # every spoof a rule over `failure_reason` CAN close and stated the one it
+      # cannot: `refusal_detail/1` renders `{nil, message}` as the bare message,
+      # so a CODELESS envelope whose message is byte-for-byte
+      # `box_at_capacity — <prose>` persists to the same bytes as a genuine
+      # coded refusal. Identical bytes cannot be told apart by any reader of
+      # those bytes. `Sites.Deploy` now records `err["code"]` — read off the
+      # decoded envelope, before any string is built — and this arm prefers it.
+      #
+      # `column_code` is `nil` for a row no code-aware writer touched, and the
+      # prose reader keeps those rows EXACTLY as it classified them before, so
+      # the verbatim 2026-08 corpus does not move (D115).
       true ->
-        "DEFERRED_UNCLASSIFIED"
+        deferred_class_of(column_code || deferral_code(reason))
     end
   end
 
   # A nil reason on a deferred row is the tail too: the driver always writes the
   # box's own words, so a deferral with no reason is a producer this module does
   # not know about.
-  defp classify_deferred(_stage, _reason), do: "DEFERRED_UNCLASSIFIED"
+  defp classify_deferred(_stage, _reason, _column_code), do: "DEFERRED_UNCLASSIFIED"
+
+  # One name per code word, from EITHER source — so a column-written row and a
+  # pre-column row of the same cause can never be given different names.
+  defp deferred_class_of({:code, "box_at_capacity"}), do: "BOX_AT_CAPACITY_DEFERRED"
+
+  # `already_running` — and the BARE 409 with no code at all, which is D7's
+  # 43%: a codeless 409 predates the concurrent-build cap entirely, so the only
+  # thing it can be is the busy slug. `:none` is that codeless 409 and NOT
+  # `:prose`: a box that sent unreadable words did say something, and folding it
+  # in here would absorb an unnamed cause into the busy bucket.
+  defp deferred_class_of(code) when code in [:none, {:code, "already_running"}],
+    do: "BOX_BUSY_DEFERRED"
+
+  defp deferred_class_of(_unnamed), do: "DEFERRED_UNCLASSIFIED"
 
   # The box's own refusal CODE out of a deferral reason: what follows the anchored
   # 409 prefix, up to the driver's own ` — ` suffix separator (the stored reason
