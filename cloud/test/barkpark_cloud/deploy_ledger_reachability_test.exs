@@ -370,11 +370,12 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
     {:refusal_phase, 1, :reachable,
      "start-vs-poll refusal phase, ROUTED AT LAST — the same closer as delivery/3 above, landed by the same PR. `site_deployment_json/3` reads it off the RAW failure_reason, so start-vs-poll is legible over HTTP instead of living only in this suite."},
 
+    {:label, 1, :reachable,
+     "class -> human one-liner. WAS :internal_only (used once while building the census class table); dr-w32-bl gives it an external caller: `Notifications.BoxUnreachableEpisodeAlert.body/1` interpolates `DeployLedger.label(@class)` into the episode notice a human reads, so the sentence the alert quotes and the one-liner the census table carries are ONE string and cannot drift."},
+
     # -- INTERNAL_ONLY — over-public, alive ------------------------------------
     {:classify, 2, :internal_only,
      "the (stage, reason) arm. `classify/1` delegates to it; no other module reaches it. `defp` plus a public wrapper would say the same thing more honestly."},
-    {:label, 1, :internal_only,
-     "class -> human one-liner, used once while building the census class table."},
     {:deferred?, 1, :internal_only,
      "the deferral predicate, used inside census/3's fold. THE `?`-TRAP ROW: the grep sweep scored this at zero and would have deleted a live function."},
     {:not_attempted?, 1, :internal_only,
