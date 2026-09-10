@@ -3768,6 +3768,42 @@
     .modal-header h3 { margin: 0; font-size: var(--text-base); font-weight: 600; }
     .modal-body { padding: 16px 20px 20px; overflow-y: auto; }
 
+    /* Schema-action confirm modal (spd-w5f). `components/confirm_modal.ex`
+       carried this whole surface in a `style="…"` attribute: `position: fixed;
+       inset: 0; background: rgba(0,0,0,0.4); … z-index: 1000;`. Three costs,
+       all fixed here.
+
+       COLOUR. `rgba(0,0,0,0.4)` is a raw literal — the exact spelling charter
+       D53 proved FAILS design/check.mjs Part E while studio-literal-check.sh
+       reports PASS (it does not scan rgba by design). It survived only because
+       it sat inline in an `.ex` file instead of a ledgered stylesheet. The
+       sanctioned form is `hsl(var(--bp-scrim-hsl) / a)`, Δ0 on BOTH gates, and
+       it is the same ink `.modal-backdrop` (0.45) and `.image-picker-overlay`
+       (0.5) already use, so the confirm scrim now themes with them.
+
+       STACKING. `z-index: 1000` was outside the Studio's own tier system
+       entirely (.image-picker-overlay 50, .delete-modal 51, .bp-ae-modal 60).
+       51 is the tier this modal argues for: it is a confirmation dialog, the
+       same role as `.delete-modal`, and it must sit ABOVE the 50-tier pickers
+       and backdrops it can be opened over.
+
+       POSITION stays `fixed`, deliberately — unlike `.modal-backdrop`, which
+       D52 made absolute. This is a behaviour-preserving hoist, not a
+       repositioning: the element was fixed inline, so it is fixed here, and it
+       is inventoried as `.bp-modal-overlay => :layout_sibling` in
+       @fixed_css_inventory (components.ex renders it AFTER the editor shell
+       closes, so it is a sibling of `.editor-panel`, never a descendant). */
+    .bp-modal-overlay {
+      position: fixed; inset: 0; z-index: 51;
+      display: flex; align-items: center; justify-content: center;
+      background: hsl(var(--bp-scrim-hsl) / 0.45);
+    }
+    .bp-modal {
+      background: var(--bg-card); color: var(--fg);
+      padding: 24px; min-width: 420px; max-width: 720px; max-height: 80vh;
+      display: flex; flex-direction: column; gap: 12px; overflow: auto;
+    }
+
     .bp-secondary-candidates {
       list-style: none; margin: 12px 0 0 0; padding: 0;
       max-height: 320px; overflow-y: auto;
