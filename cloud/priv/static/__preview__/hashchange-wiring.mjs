@@ -89,9 +89,20 @@
 //    node cloud/priv/static/__preview__/hashchange-wiring.mjs ; echo "rc=$?"
 //    cp /tmp/app.js.orig cloud/priv/static/app.js
 //
-//  Expected: rc=1, and the failing leg names `closeModal()` and the listener.
-//  The ordering mutation is the same recipe with the two `if (eff…)` lines
-//  swapped; leg 2 is the one that reds.
+//  THE MEASURED MATRIX (this host, Chrome 153, origin/main 4d9bbee5b). Three
+//  mutations, three legs, and every cell was RUN — not reasoned about. Each
+//  mutation reds EXACTLY ONE leg, which is what makes all three legs load-
+//  bearing: drop any one of them and one of these mutations ships green.
+//
+//    mutation of the listener body            leg 1   leg 2   leg 3   rc
+//    ---------------------------------------  -----   -----   -----   --
+//    (committed code — no mutation)             ok      ok      ok      0
+//    delete `if (eff.close) closeModal();`     FAIL     ok      ok      1
+//    swap: applyRoute() before closeModal()      ok    FAIL     ok      1
+//    blanket: `closeModal();` unconditional      ok      ok    FAIL     1
+//
+//  Reproduce the ordering row by swapping the two `if (eff…)` lines, and the
+//  blanket row with `s/if \(eff\.close\) closeModal\(\);/closeModal();/`.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //  RUN
