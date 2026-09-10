@@ -1,4 +1,5 @@
 
+DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/content/validation.ex:286,7DDAFB9
 Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/tickets/attachments.ex:259,31F6FE7
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/sync/pusher.ex:210,104F576
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:410,5761A02
