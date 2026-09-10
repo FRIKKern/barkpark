@@ -55,6 +55,7 @@ defmodule Barkpark.Tasks.BackgroundBroadcastHonestyTest do
   import Ecto.Query
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Content.{Document, Envelope, Revision}
   alias Barkpark.Tasks.{Compactor, Internal, TtlSweeper}
 
@@ -154,7 +155,7 @@ defmodule Barkpark.Tasks.BackgroundBroadcastHonestyTest do
     )
   end
 
-  defp subscribe!, do: Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+  defp subscribe!, do: subscribe_task_stream!()
 
   # ─── the differential ─────────────────────────────────────────────────────
 
@@ -442,5 +443,18 @@ defmodule Barkpark.Tasks.BackgroundBroadcastHonestyTest do
       # Still compacted — a lost fence must not half-restore the row.
       assert is_binary(Repo.get!(Document, task.id).content["compacted_at"])
     end
+  end
+
+  # The task stream, on the topic that CARRIES THE PAYLOAD (task-5d0615ee60143cc8).
+  # These rows are written in the instance-default workspace, and
+  # `Content.Broadcast` now strips `:doc`/`:document` from a WORKSPACE-OWNED
+  # document's frame on the global `documents:<dataset>` topic — the global topic
+  # has no workspace component, so every co-dataset tenant subscribes to it. The
+  # full frame rides `documents:ws:<id>:<dataset>`, which is where an assertion
+  # about the payload belongs (tasks_claim_test's own reconcile arm already
+  # subscribed there).
+  defp subscribe_task_stream! do
+    {ws, _project} = TenancyFixtures.ensure_default_scope!()
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, Broadcast.workspace_list_topic(@dataset, ws.id))
   end
 end
