@@ -6248,6 +6248,197 @@ else
 fi
 RC27_NAMES=("${RC29_NAMES_SAVE[@]}")
 
+section "30. S8 PULL-REQUEST-ONLY: the census samples BRANCH HEADS, so a pull_request-only name never reached the selection at all"
+
+# WHY THIS SECTION EXISTS (cgsi-bl-pr-task-gate-selftest-unclassified). Stage 2
+# iterates the S1 intersection — names that RENDERED on the sampled shas — and
+# every sha this generator samples is a branch head. A workflow triggered only
+# by `pull_request` publishes against a PR's merge ref and NEVER against a
+# commit on main, so no window, however wide, can put its names in front of the
+# selection. The census was structurally blind to an entire class of check name,
+# and the committed spec is the evidence: `PR task gate self-test` and both
+# dependabot rows arrived BY HAND and had to be re-typed as `--expect-unrendered`
+# on every regeneration. S8 derives those candidates from the workflow source.
+#
+# EVERY MECHANISM ARM BELOW IS SYNTHETIC, for the reason §27 states: a clause
+# built on the real tree goes vacuous the day somebody edits the specimen's
+# trigger block. The ONE real-tree arm is the positive control that the class
+# actually sees pr-task-gate.yml, and it asserts about that workflow BY NAME so
+# a trigger edit there reds it loudly instead of quietly.
+
+RC30="$TMP/rc30"; RC30_PR="$RC30/pr"; RC30_PUSH="$RC30/push"; RC30_BARE="$RC30/bare"
+RC30_REQ="$RC30/req"; RC30_FIX="$RC30/fix"
+mkdir -p "$RC30_PR" "$RC30_PUSH" "$RC30_BARE" "$RC30_REQ" "$RC30_FIX"
+RC30_NAME="Seeded PR-only advisory harness"
+RC30_KEPT="Seeded rendering gate"
+
+# The specimen: pull_request-only, NO paths filter, and a STATIC ground for
+# holding it out (a job-level continue-on-error). Its sibling is an ordinary
+# workflow whose name the fixture feed DOES render, so the selection is never
+# empty — without it the generator's zero-context refusal exits before any S8
+# verdict can be read (the trap §29 shipped red on).
+cat > "$RC30_PR/pronly.yml" <<YML
+name: PR only
+on:
+  pull_request:
+jobs:
+  harness:
+    name: $RC30_NAME
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+cat > "$RC30_PR/kept.yml" <<YML
+name: Kept
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  keep:
+    name: $RC30_KEPT
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+# THE NEGATIVE CONTROL — the IDENTICAL specimen with a push arm added, and
+# nothing else changed. If S8 fires here it is keying on something other than
+# the trigger block.
+sed 's/^  pull_request:$/  pull_request:\
+  push:\
+    branches: [main]/' "$RC30_PR/pronly.yml" > "$RC30_PUSH/pronly.yml"
+cp "$RC30_PR/kept.yml" "$RC30_PUSH/kept.yml"
+# THE NEVER-PROMOTES CONTROL — the identical PR-only specimen with NO static
+# ground (the continue-on-error line removed).
+grep -v '^    continue-on-error: true$' "$RC30_PR/pronly.yml" > "$RC30_BARE/pronly.yml"
+cp "$RC30_PR/kept.yml" "$RC30_BARE/kept.yml"
+cp "$RC30_PR/pronly.yml" "$RC30_REQ/pronly.yml"
+cp "$RC30_PR/kept.yml" "$RC30_REQ/kept.yml"
+
+RC30_NAMES_SAVE=("${RC27_NAMES[@]}")
+# THE NON-VACUITY PREMISE, and it is the whole point: the specimen's name is NOT
+# in the feed. Every arm below is about a name no sha rendered.
+RC27_NAMES=("$RC30_KEPT")
+rc27_feed "$RC30_FIX" s30a s30b mainA; printf 'mainA\n' > "$RC30_FIX/main-shas.txt"
+if ! grep -qF "$RC30_NAME" "$RC30_FIX/checkruns-s30a.json"; then
+  ok "the fixture premise holds: '$RC30_NAME' appears in NO sampled feed — every clause below is about a name the census cannot see"
+else
+  bad "30-premise the specimen name IS in the fixture feed — S8 would be indistinguishable from stage 2 and every arm below is vacuous"
+fi
+
+rc27_gen "$GEN" "$RC30_PR" "$RC30_FIX" s30a s30b
+if [ "$RC27_RC" -eq 0 ] && excluded_by "$RC27_OUT" "$RC30_NAME" "S8 PULL-REQUEST-ONLY" && kept_in "$RC27_OUT" "$RC30_KEPT"; then
+  ok "a name published ONLY by a pull_request-only, unfiltered workflow is CLASSIFIED S8 without ever having rendered — derived from the workflow's own \`on:\` block, and the rendering sibling is still kept"
+else
+  bad "30a the pull_request-only name was not classified S8 (exit $RC27_RC): $(grep -E '^  (keep|exclude|s8) ' <<<"$RC27_OUT" | head -3 | tr '\n' '⏎')"
+fi
+
+rc27_gen "$GEN" "$RC30_PUSH" "$RC30_FIX" s30a s30b
+if [ "$RC27_RC" -eq 0 ] && ! grep -qF "  exclude  $RC30_NAME  " <<<"$RC27_OUT"; then
+  ok "…and the IDENTICAL job under a workflow that ALSO carries \`push:\` is NOT claimed by S8 — the stage keys on the trigger block, not on the job, the file or the name"
+else
+  bad "30b S8 claimed a name whose workflow has a branch-head trigger (exit $RC27_RC) — it is excluding on the wrong evidence: $(grep -E '^  (keep|exclude|s8) ' <<<"$RC27_OUT" | head -3 | tr '\n' '⏎')"
+fi
+
+# NEVER PROMOTES. A required context must be a byte-for-byte copy of a name
+# GitHub was OBSERVED to publish (D21); an S8 candidate's string came out of a
+# `name:` TEMPLATE and was observed by nobody. So a candidate with no static
+# ground is left UNACCOUNTED — never written into the required set.
+rc27_gen "$GEN" "$RC30_BARE" "$RC30_FIX" s30a s30b
+if [ "$RC27_RC" -eq 0 ] && ! kept_in "$RC27_OUT" "$RC30_NAME" \
+   && ! grep -qF "  exclude  $RC30_NAME  " <<<"$RC27_OUT" \
+   && grep -qF "s8 unaccounted  $RC30_NAME" <<<"$RC27_OUT"; then
+  ok "…and a PR-only candidate with NO static ground is left UNACCOUNTED rather than promoted — a template-derived string never becomes branch protection"
+else
+  bad "30c the groundless PR-only candidate was not left unaccounted (exit $RC27_RC): $(grep -E '^  (keep|exclude|s8) ' <<<"$RC27_OUT" | head -3 | tr '\n' '⏎')"
+fi
+
+# …AND IT NEVER CONTRADICTS LIVE PROTECTION. A base that REQUIRES the specimen's
+# name must come back with no S8 exclusion row at all: emitting one would put a
+# single context on both lists, off a string this run never observed.
+RC30_BASE="$TMP/rc30-base.json"
+jq -n --arg c "$RC30_NAME" \
+  '{protection:{required_status_checks:{checks:[{context:$c, app_id:15368}]}}, exclusions:[]}' \
+  > "$RC30_BASE"
+RC30_OUT="$(bash "$GEN" --workflows "$RC30_REQ" --fixture-dir "$RC30_FIX" \
+             --merge-base "$RC30_BASE" --sha s30a --sha s30b --explain \
+             --expect-unrendered "$RC30_NAME" 2>&1)" && RC30_RC=0 || RC30_RC=$?
+if [ "$RC30_RC" -eq 0 ] && grep -qF "s8 skip  $RC30_NAME" <<<"$RC30_OUT" \
+   && ! grep -qF "  exclude  $RC30_NAME  " <<<"$RC30_OUT"; then
+  ok "…and a candidate the COMMITTED spec REQUIRES is SKIPPED outright — a static derivation never demotes an observed, live required context into a self-contradicting spec"
+else
+  bad "30d S8 did not skip the committed-required candidate (exit $RC30_RC): $(grep -E '^  (keep|exclude|s8) ' <<<"$RC30_OUT" | head -3 | tr '\n' '⏎')"
+fi
+
+# THE MERGE PRECEDENCE. Every other stage's reason overwrites a stale committed
+# one; an S8 reason must NOT, because a hand row for the same context carries a
+# dated ground and a retirement trigger the derivation cannot restate.
+RC30_HAND="HAND ROW SEEDED BY THE TEST SUITE: the ground and the retirement trigger no derivation can restate"
+RC30_BASE2="$TMP/rc30-base2.json"
+jq -n --arg c "$RC30_NAME" --arg r "$RC30_HAND" \
+  '{protection:{required_status_checks:{checks:[]}}, exclusions:[{context:$c, reason:$r}]}' \
+  > "$RC30_BASE2"
+emit_spec "$TMP/rc30-spec.json" \
+  bash "$GEN" --workflows "$RC30_REQ" --fixture-dir "$RC30_FIX" \
+    --merge-base "$RC30_BASE2" --sha s30a --sha s30b --out "$TMP/rc30-spec.json" || true
+if jq -e --arg c "$RC30_NAME" --arg r "$RC30_HAND" \
+     '[.exclusions[] | select(.context == $c) | .reason] == [$r]' "$TMP/rc30-spec.json" >/dev/null 2>&1; then
+  ok "…and where a committed HAND row already covers an S8 name the base reason survives BYTE-STABLE — S8 states the census gap, it does not overwrite a decision ledger"
+else
+  fail_emit "$(why_emit "the S8 row overwrote the committed hand reason: $(jq -c --arg c "$RC30_NAME" '[.exclusions[] | select(.context == $c) | .reason[0:60]]' "$TMP/rc30-spec.json" 2>&1)")"
+fi
+if jq -e 'any(.exclusions[]; has("derived_class"))' "$TMP/rc30-spec.json" >/dev/null 2>&1; then
+  bad "30e-marker the \`derived_class\` marker LEAKED into the emitted spec — it is internal bookkeeping and must never reach the file"
+else
+  ok "…and the S8 marker never reaches the emitted file (no \`derived_class\` key anywhere in .exclusions)"
+fi
+
+# THE MUTATION — take the head-trigger question out of a COPY of the generator
+# and watch the S8 row vanish, which is the state this repo was in until today:
+# the name unclassified, and answerable only by a human re-typing
+# --expect-unrendered on every regeneration.
+RC30_MUT="$TMP/gen-nos8.sh"
+sed 's%^    workflow_has_head_trigger "\$WORKFLOW_DIR/\$s8f" && continue$%    true \&\& continue # S8 CANDIDATE SET EMPTIED%' "$GEN" > "$RC30_MUT"
+RC30_N="$(grep -c 'S8 CANDIDATE SET EMPTIED' "$RC30_MUT" || true)"
+if [ "$RC30_N" -ne 1 ]; then
+  bad "30f the S8 mutation applied $RC30_N times, not exactly 1 — its condition moved, so the arms above are vacuous"
+elif diff -q "$GEN" "$RC30_MUT" >/dev/null 2>&1; then
+  bad "30f the S8 mutant is byte-identical to the generator — nothing was reverted"
+else
+  ok "the S8 mutation applies exactly once, with a non-empty diff: a copy of the generator no longer builds a pull_request-only candidate set"
+  rc27_gen "$RC30_MUT" "$RC30_PR" "$RC30_FIX" s30a s30b
+  if [ "$RC27_RC" -eq 0 ] && ! grep -qF "  exclude  $RC30_NAME  " <<<"$RC27_OUT"; then
+    ok "…and WITHOUT it the SAME name is classified by NOTHING — unaccounted, invisible to the census, and carried only by a human retyping --expect-unrendered (mutation-proven able to fail)"
+  else
+    bad "30g the unguarded copy still classified the PR-only name (exit $RC27_RC) — the arms above are vacuous: $(grep -E '^  (keep|exclude|s8) ' <<<"$RC27_OUT" | head -3 | tr '\n' '⏎')"
+  fi
+fi
+RC27_NAMES=("${RC30_NAMES_SAVE[@]}")
+
+# THE REAL-TREE POSITIVE CONTROL. The synthetic arms prove the mechanism; this
+# one proves it is pointed at the workflow the task names. pr-task-gate.yml
+# publishes TWO names and they must land on OPPOSITE sides: the harness is
+# classified (it is advisory by intent, and the generator has said so in a
+# constant since long before this stage existed), while the required gate itself
+# is SKIPPED because the committed spec requires it.
+RC30_REAL="$(bash "$GEN" "${FIXARGS[@]}" "${ACK[@]}" --explain 2>&1)" && RC30_RRC=0 || RC30_RRC=$?
+if grep -qF "exclude  PR task gate self-test  — S8 PULL-REQUEST-ONLY (pr-task-gate.yml" <<<"$RC30_REAL"; then
+  ok "the class SEES pr-task-gate.yml: 'PR task gate self-test' is classified S8 off the real workflow tree, on a window that renders neither of that file's names"
+else
+  bad "30h 'PR task gate self-test' was not classified S8 against the real tree (exit $RC30_RRC) — pr-task-gate.yml's trigger block moved, or the stage did: $(grep -E 's8 |exclude  PR task gate' <<<"$RC30_REAL" | head -3 | tr '\n' '⏎')"
+fi
+if grep -qF "s8 skip  PR references an active task" <<<"$RC30_REAL"; then
+  ok "…and its SIBLING, the required context 'PR references an active task', is skipped by the same stage — the two names of one pull_request-only workflow land on opposite sides, so S8 is not a blanket verdict on a file"
+else
+  bad "30i the required sibling was not skipped by S8 (exit $RC30_RRC): $(grep -E 's8 ' <<<"$RC30_REAL" | head -3 | tr '\n' '⏎')"
+fi
+if grep -qF "LOST  PR task gate self-test" <<<"$RC30_REAL"; then
+  bad "30j 'PR task gate self-test' is STILL reported as an unreproduced exclusion — S8 classified it but the loss check did not see the row"
+else
+  ok "…and the row is no longer an EXCLUSION LOSS: the name that had to be re-acknowledged on every regeneration is now derived, which is the gap this section closes"
+fi
+
 section "28. the spec gate's DISPATCHER lists the workflow tree — the input the census clause actually reads"
 
 # WHY THIS CLAUSE EXISTS (task-2e28697e29983544). The required `Required-check
