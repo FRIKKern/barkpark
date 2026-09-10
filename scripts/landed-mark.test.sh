@@ -115,6 +115,7 @@ UNRELATED
 echo
 echo "── MUTANT 2: MUT-PR-FALLBACK replaced by an unconditional empty id"
 MUTANT2="$TMP/landed-mark.mut2.sh"
+# shellcheck disable=SC2016  # the anchor is the SUBJECT's literal text: $sha must NOT expand here.
 ANCHOR2='      trailer_from_pr_body "$sha"; rc=$?'
 HITS2="$(grep -cF -- "$ANCHOR2" "$SUBJECT")"
 if [ "$HITS2" != "1" ]; then
@@ -127,6 +128,7 @@ ok "the MUT-PR-FALLBACK anchor matched exactly once"
 # The fallback is not merely SKIPPED here — it is made to answer "no id, no
 # error", which is precisely the pre-fix behaviour. A mutation to `rc=1` would
 # take the CANNOT-READ arm instead and prove something else.
+# shellcheck disable=SC2016  # a sed script over the SUBJECT's literal text; expansion would break it.
 sed 's/^      trailer_from_pr_body "\$sha"; rc=\$?$/      FALLBACK_ID=""; rc=0/' "$SUBJECT" > "$MUTANT2"
 if cmp -s "$SUBJECT" "$MUTANT2"; then
   echo "landed-mark.test: CANNOT MUTATE — the mutant-2 scratch copy is byte-identical to the original." >&2

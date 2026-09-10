@@ -38,6 +38,7 @@ if [ "${1:-}" = "--selftest" ]; then
   y() { has_task_trailer "$1" && echo yes || echo no; }
   echo "merge-sweep --selftest"
   t "a column-0 trailer is found"            "$(y "$(printf 'prose\n\nTask: task-abc123\n')")" yes
+  # shellcheck disable=SC2016  # the backticks are the FIXTURE — the #5290 shape, not a substitution.
   t "a backtick-wrapped id is found (#5290)" "$(y "$(printf 'Task: `task-abc123`\n')")"        yes
   t "a lowercase label is found"             "$(y "$(printf 'task: task-abc123\n')")"          yes
   t "an INDENTED example is NOT a trailer"   "$(y "$(printf 'see this:\n\n    Task: task-abc\n')")" no
