@@ -8783,14 +8783,24 @@ defmodule PDS.Census do
       name: "ROSTER-FRESH-NOT-VACUOUS",
       corpus: :repo,
       argv: [],
-      # THE 0-OF-8 SHAPE. A resolver that finds no def makes every comparison unreachable,
+      # THE 0-OF-ALL SHAPE. A resolver that finds no def makes every comparison unreachable,
       # which is how a freshness arm certifies an empty set at exit 0 — the LENS-CAN-MISS
       # -ARMED failure mode, wearing this arm's name.
+      #
+      # THE COUNT IS DERIVED FROM @roster, NEVER TYPED. It was the literal "0 stale + 8
+      # unresolved of 8" until the correction-receipt roster row made it 9, and a case
+      # that reds because the roster HONESTLY GREW is a false accusation the next author
+      # would be tempted to answer by weakening the expectation. The discriminator is
+      # unchanged and is still a count: EVERY row unresolved and NONE stale.
       mut:
         {"|> Enum.min_by(&(&1.last - &1.line)" <> ", fn -> nil end)", "|> then(fn _ -> nil end)"},
       exit: 1,
-      expect: ["FAIL  ROSTER-VERDICT-FRESH", "0 stale + 8 unresolved of 8", "UNRESOLVED ANCHOR"],
-      proves: "a resolver that resolves NOTHING reds on a stated unresolved COUNT instead of passing 0-of-8 — an arm that certifies an empty set is the vacuous green this epic refuses"
+      expect: [
+        "FAIL  ROSTER-VERDICT-FRESH",
+        "0 stale + #{length(@roster)} unresolved of #{length(@roster)}",
+        "UNRESOLVED ANCHOR"
+      ],
+      proves: "a resolver that resolves NOTHING reds on a stated unresolved COUNT instead of passing 0-of-#{length(@roster)} — an arm that certifies an empty set is the vacuous green this epic refuses"
     },
     # THE EXCLUSION ANCHOR (PDS-D585), AND WHY ALL THREE CASES CENSUS THE REPO. The arm
     # is scoped to the real corpus by the same predicate the register and roster arms
