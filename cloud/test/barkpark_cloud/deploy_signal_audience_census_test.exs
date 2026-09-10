@@ -230,6 +230,132 @@ defmodule BarkparkCloud.DeploySignalAudience.ExReader do
   end
 end
 
+defmodule BarkparkCloud.DeploySignalAudience.ConsoleReader do
+  @moduledoc """
+  SIDE B, console half: the operator console's deploy cards and the route each
+  one is painted from, read off `cloud/priv/static/app.js` SOURCE.
+
+  A rendered card is a SURFACE, and a surface's audience is whoever can reach
+  the route behind it. The operator page mounts its cards in `operatorPageHtml()`
+  and paints each one in `operatorRefresh()`, so both halves are derived: the
+  card ids and headings from the first, the `operatorPaint("#<id>", <expr>, …)`
+  path expression from the second, with `<expr>` resolved through the file's own
+  `var NAME = "/v1/…"` declarations (and through a path-building function's
+  `return NAME + …`, which is how the census card's window query is spliced).
+
+  The query string is cut the same way `GoReader` cuts it: `?from=&to=` is not
+  part of the route.
+
+  `walker: :broken` selects a deliberately naive card extractor — one that
+  matches `card('…')` with SINGLE quotes, which this file never writes — so this
+  half can be shown to LOSE rather than be trusted on a green it cannot fail.
+  """
+
+  # `card("op-brake-body", "Rollout brake", "…")` inside `operatorPageHtml/0`.
+  @card_re ~r/card\("(op-[a-z-]+-body)",\s*"([^"]+)"/
+  # The BROKEN walker: single-quoted card ids, a form this file never writes.
+  @broken_card_re ~r/card\('(op-[a-z-]+-body)',\s*'([^']+)'/
+
+  # `operatorPaint("#op-brake-body", OPERATOR_AUTOUPDATE, function (data) {`
+  @paint_re ~r/operatorPaint\("#(op-[a-z-]+-body)",\s*([^,]+),/
+
+  @doc "The JS source at `file` — a missing file is a NAMED refusal, never `\"\"`."
+  @spec source(binary()) :: binary()
+  def source(file) do
+    unless File.regular?(file) do
+      raise ArgumentError,
+            "DeploySignalAudience.ConsoleReader: console source not found at #{file}. " <>
+              "The console bundle moved or was renamed — re-point @app_js in the census. " <>
+              "Refusing to derive a surface count from a source that does not exist."
+    end
+
+    File.read!(file)
+  end
+
+  @doc """
+  `[{card_id, heading}]` for every card `operatorPageHtml/0` mounts, in source
+  order. An empty list from the REAL walker is a refusal, not a count of zero:
+  zero cards found is how this census would publish "no zero-viewer surfaces"
+  while the console renders five.
+  """
+  @spec cards(binary(), keyword()) :: [{binary(), binary()}]
+  def cards(src, opts \\ []) do
+    body = body!(src, "operatorPageHtml")
+    re = if opts[:walker] == :broken, do: @broken_card_re, else: @card_re
+    found = Regex.scan(re, body) |> Enum.map(fn [_, id, heading] -> {id, heading} end)
+
+    if found == [] and opts[:walker] != :broken do
+      raise ArgumentError,
+            "DeploySignalAudience.ConsoleReader: operatorPageHtml/0 mounts ZERO cards. " <>
+              "The card grammar changed — re-teach @card_re. Refusing to publish a " <>
+              "zero-viewer count derived from an empty extraction."
+    end
+
+    found
+  end
+
+  @doc """
+  `%{card_id => route_path}` for every `operatorPaint/2..4` call in
+  `operatorRefresh/0`, with the path expression resolved and its query cut.
+  """
+  @spec paints(binary()) :: %{binary() => binary()}
+  def paints(src) do
+    body = body!(src, "operatorRefresh")
+
+    Regex.scan(@paint_re, body)
+    |> Map.new(fn [_, id, expr] -> {id, resolve(src, expr)} end)
+  end
+
+  # A `var NAME = "/v1/…";` declaration, a `name()` path builder, or a literal.
+  defp resolve(src, expr) do
+    expr = String.trim(expr)
+
+    raw =
+      cond do
+        match = Regex.run(~r/^"([^"]*)"$/, expr) -> Enum.at(match, 1)
+        Regex.match?(~r/^[A-Za-z_]\w*$/, expr) -> const(src, expr)
+        match = Regex.run(~r/^([A-Za-z_]\w*)\(/, expr) -> builder(src, Enum.at(match, 1))
+        true -> ""
+      end
+
+    raw |> String.split("?") |> hd()
+  end
+
+  defp const(src, name) do
+    case Regex.run(~r/^\s*var #{Regex.escape(name)}\s*=\s*"([^"]*)"/m, src) do
+      [_, lit] -> lit
+      _ -> ""
+    end
+  end
+
+  # A path builder returns its base constant plus a query: `return NAME + "?…"`.
+  defp builder(src, name) do
+    case body!(src, name) do
+      body ->
+        case Regex.run(~r/return\s+([A-Z_][A-Z0-9_]*)\s*\+/, body) do
+          [_, const_name] -> const(src, const_name)
+          _ -> ""
+        end
+    end
+  end
+
+  # A top-level `  function name(…) { … }` block, closed at its own indentation.
+  defp body!(src, func) do
+    re = ~r/^  function #{Regex.escape(func)}\(.*?^  \}/ms
+
+    case Regex.run(re, src) do
+      [body] ->
+        body
+
+      _ ->
+        raise ArgumentError,
+              "DeploySignalAudience.ConsoleReader: function #{func}/0 not found in the " <>
+                "console source. It was renamed or re-indented — re-point the census. " <>
+                "Refusing to derive an empty body."
+    end
+  end
+end
+
 defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   @moduledoc """
   THE EMPTY-AUDIENCE CENSUS — every deploy-health signal declares the credential
@@ -297,6 +423,7 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
 
   use ExUnit.Case, async: true
 
+  alias BarkparkCloud.DeploySignalAudience.ConsoleReader
   alias BarkparkCloud.DeploySignalAudience.ExReader
   alias BarkparkCloud.DeploySignalAudience.GoReader
   alias BarkparkCloud.RouterTierLens, as: Lens
@@ -309,10 +436,17 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   # here, on purpose — the CLI is NOT in the dispatcher's path set, and a guard
   # reading it would publish a green required context over a guard that never ran.
   @cloudclient Path.expand("../../../internal/cloudclient/client.go", __DIR__)
+  @deliveries Path.expand("../../../internal/cloudclient/deliveries.go", __DIR__)
   @notifications Path.expand("../../lib/barkpark_cloud/notifications.ex", __DIR__)
+
+  # The console bundle. `cloud/priv/static/**` is a CLOUD_PATH, so a console edit
+  # re-runs this census — which is the point of counting its cards here rather
+  # than in a number frozen into prose.
+  @app_js Path.expand("../../priv/static/app.js", __DIR__)
 
   @sources %{
     "internal/cloudclient/client.go" => @cloudclient,
+    "internal/cloudclient/deliveries.go" => @deliveries,
     "cloud/lib/barkpark_cloud/notifications.ex" => @notifications
   }
 
@@ -342,6 +476,13 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
       readers: [%{file: "internal/cloudclient/client.go", func: "RolloutStatus"}]
     },
     %{
+      name: "platform_delivery_record",
+      kind: :pull,
+      what:
+        "THE CROWN read, `bp cloud deliveries <sha>`: the platform's own per-sha delivery record — what was delivered, on whose run, and the clocks around it",
+      readers: [%{file: "internal/cloudclient/deliveries.go", func: "PlatformDeliveries"}]
+    },
+    %{
       name: "fleet_operator_digest",
       kind: :push,
       what:
@@ -363,8 +504,11 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   # that quietly empties Side B, would otherwise be a silent green: zero signals
   # examined is zero empty audiences found. Committed, and lowered only in the
   # same commit as the signal that went away.
-  @signal_floor 5
-  @reader_floor 5
+  # Raised 5 -> 6 by dr-w27-bl-fleet-rollout-state-has-no-human-reader, which
+  # registered `bp cloud deliveries` — the crown read this census was FAILING
+  # OPEN over. Lowered only in the same commit as the signal that goes away.
+  @signal_floor 6
+  @reader_floor 6
 
   # THE PULL-SIDE EMPTY TIERS. `operator` was the whole list until dr-w19-s5,
   # and that made the census's green on a `worker`-tier reader VACUOUS: `worker`
@@ -437,6 +581,23 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
         "control plane and the operator door opens for a real person; when it lands, " <>
         "delete this row."
   }
+
+  # ---------------------------------------------------------------------------
+  # THE ZERO-VIEWER CONSOLE SURFACES (dr-w27-bl-fleet-rollout-state-has-no-human-reader)
+  # ---------------------------------------------------------------------------
+  # The operator console mounts a page of deploy cards behind
+  # `Auth.require_platform_operator/2` on every route it reads. That principal is
+  # the `:platform_admin_emails` allowlist — the same population `fleet_rollout_state`
+  # is allowlisted for above — so every one of those cards is RENDERED CODE WITH
+  # ZERO POSSIBLE VIEWERS, and the count belongs in a census rather than in prose.
+  #
+  # THE FILING SAID FOUR. It is FIVE on main: `operatorPageHtml/0`'s own comment
+  # still says "five cards" while the block comment above `OPERATOR_FLEET` says
+  # "FOUR cards", and the fifth — "Deploy ledger", painted from
+  # GET /v1/operator/deploy-ledger/census — is the one the older sentence predates.
+  # This pin is DERIVED from source on every run and the number below is only the
+  # floor-and-ceiling it must still equal, so a card added or deleted reds HERE.
+  @operator_console_card_pin 5
 
   # ---------------------------------------------------------------------------
   # SIDE B — the derivation
@@ -738,6 +899,134 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
       for {needle, why} <- @runtime_read_needles do
         refute src =~ needle, "#{file} #{why}"
       end
+    end
+  end
+
+  test "c1 — the fleet brake's position is UNREADABLE, and the census names the fenced act" do
+    name = "fleet_rollout_state"
+    reason = Map.fetch!(@empty_audience_allowlist, name)
+
+    audiences =
+      derive()
+      |> Enum.find_value(fn {s, results} -> if s.name == name, do: ok_audiences(results) end)
+
+    # DERIVED, not declared: the door the Go client actually knocks on, and the
+    # tier router.ex actually enforces on it.
+    assert [%{sends: sends, resolves: tier, empty?: true}] = audiences
+
+    assert sends == "GET /v1/operator/autoupdate", """
+    the fleet brake's reader now sends #{sends}. If that is a REACHABLE door the
+    row above is stale and must be deleted; if it is another empty one, say so.
+    """
+
+    assert tier == "operator"
+    assert tier in @empty_pull_tiers
+
+    # The RECORD, by name. This is what the criterion buys when the reader path
+    # cannot be opened by any code change in this repo: the census says WHICH
+    # door, WHICH population, and WHICH act outside this tree would open it.
+    assert reason =~ "/v1/operator/autoupdate",
+           "#{name}: the row must name the door its reader knocks on"
+
+    assert reason =~ ":platform_admin_emails",
+           "#{name}: the row must name the population behind that door"
+
+    assert reason =~ "CLOSER: gr-ops-platform-admin-emails",
+           "#{name}: the row must name the act that would make the brake readable"
+
+    assert reason =~ "PERMANENT HUMAN GATE", """
+    #{name}: the row must say the closer is a FENCED, non-code act. Without that
+    sentence a reader is sent hunting for a slice to write, and there is none —
+    setting PLATFORM_ADMIN_EMAILS on the live control plane is the whole remedy.
+    """
+  end
+
+  test "c2 — every operator console deploy card is a ZERO-VIEWER surface, and the count is published" do
+    src = ConsoleReader.source(@app_js)
+    cards = ConsoleReader.cards(src)
+    paints = ConsoleReader.paints(src)
+
+    assert length(cards) == @operator_console_card_pin, """
+    the operator console mounts #{length(cards)} deploy card(s); the pin is
+    #{@operator_console_card_pin}. A card added or removed changes the honest
+    zero-viewer count — move the pin in the SAME commit, and say which card.
+    """
+
+    assert Enum.sort(Enum.map(cards, &elem(&1, 0))) == Enum.sort(Map.keys(paints)), """
+    a card is mounted that nothing paints, or a paint targets no mounted card:
+      mounted : #{inspect(Enum.map(cards, &elem(&1, 0)))}
+      painted : #{inspect(Map.keys(paints))}
+    """
+
+    rows =
+      for {id, heading} <- cards do
+        path = Map.fetch!(paints, id)
+        {:ok, route} = route_for("GET", path)
+        {:ok, tier} = Lens.tier_of("GET", route)
+        %{id: id, heading: heading, path: path, tier: tier, empty?: tier in @empty_pull_tiers}
+      end
+
+    reachable = Enum.reject(rows, & &1.empty?)
+
+    assert reachable == [], """
+    #{length(reachable)} operator console card(s) now read a REACHABLE route. That
+    is the GOOD direction — the surface grew a viewer — but the published
+    zero-viewer count below is now wrong. Re-state it:
+
+    #{Enum.map_join(reachable, "\n", fn r -> "      #{r.id} (#{r.heading}) reads GET #{r.path} -> #{r.tier}" end)}
+    """
+
+    IO.puts("""
+
+    operator console deploy cards — ZERO-VIEWER SURFACES
+      cards mounted : #{length(rows)}  (every one gated on :platform_admin_emails, which is [] on prod)
+    #{Enum.map_join(rows, "\n", fn r -> "      #{String.pad_trailing(r.id, 16)} #{String.pad_trailing(r.heading, 18)} GET #{String.pad_trailing(r.path, 38)} -> #{r.tier}" end)}
+
+      THE NUMBER THIS CENSUS PUBLISHES ABOUT READERSHIP
+        deploy-health signals with an empty audience : #{map_size(@empty_audience_allowlist)}
+        operator console cards with zero viewers    : #{length(rows)}
+    """)
+  end
+
+  test "ANTI-VACUITY: the BROKEN console walker derives NO cards" do
+    src = ConsoleReader.source(@app_js)
+
+    assert length(ConsoleReader.cards(src)) == @operator_console_card_pin
+
+    assert ConsoleReader.cards(src, walker: :broken) == [], """
+    the BROKEN card walker still found cards. It is kept alive on purpose to
+    prove this half can LOSE: a walker that stopped matching would publish a
+    zero-viewer count of zero and pass.
+    """
+  end
+
+  test "FAIL-CLOSED: a missing console source, or a renamed function, is a NAMED refusal" do
+    gone = Path.expand("../../priv/static/app_renamed.js", __DIR__)
+
+    assert_raise ArgumentError, ~r/console source not found at .*app_renamed\.js/, fn ->
+      ConsoleReader.source(gone)
+    end
+
+    src = ConsoleReader.source(@app_js)
+
+    # A RENAMED function is a refusal too — never an empty card list, which would
+    # publish a zero-viewer count of zero and read as "no such surfaces exist".
+    mangled =
+      String.replace(src, "  function operatorPageHtml(", "  function operatorPageHtmlGone(")
+
+    refute mangled == src, "the control did not mangle anything — re-point it"
+
+    assert_raise ArgumentError, ~r|function operatorPageHtml/0 not found|, fn ->
+      ConsoleReader.cards(mangled)
+    end
+
+    mangled_paint =
+      String.replace(src, "  function operatorRefresh(", "  function operatorRefreshGone(")
+
+    refute mangled_paint == src
+
+    assert_raise ArgumentError, ~r|function operatorRefresh/0 not found|, fn ->
+      ConsoleReader.paints(mangled_paint)
     end
   end
 
