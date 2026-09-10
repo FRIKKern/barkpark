@@ -35,8 +35,31 @@
 import { CLAIM_CLASSES, gitVerb } from "./variance.mjs";
 import { pipelineSegments, segmentTokens } from "../grip/census.mjs";
 
+// ── WHY `quantity` IS A TERM KEY ─────────────────────────────────────────────
+//
+// UNTIL 2026-09-10 THIS LIST HAD NO PLACE FOR A NUMBER, so the number in a claim
+// was bound to nothing and was structurally immune to the mutation method this
+// whole file exists to make possible. MEASURED on wave 29's own spine: two
+// recipes with a BYTE-IDENTICAL command, one claiming the true count and one
+// claiming 9999, received the IDENTICAL verdict — because every declared term
+// (`token`, `path`, `ref`) still occurred literally in both halves, and the only
+// thing that moved was a quantity nothing screened.
+//
+// A count claim is therefore bindable only when the command CARRIES the number,
+// which in practice means an equality-GRADED tail (`… | grep -qx 50`) — the same
+// shape variance.mjs requires before a count pays for anything. The two halves
+// are deliberately joined: a grade with no binding lets the prose drift from the
+// number the shell tests, and a binding with no grade binds to a number nobody
+// asserted.
+//
+// NOT DERIVED FOR A STORED RERUN. `deriveTerms` below reads a bare command and
+// does NOT manufacture a quantity from a grade it finds there: the row's title
+// is the claim, and demanding that a title spell out a graded literal would
+// refuse honest rows over a number the author put in the command on purpose.
+// A quantity binds when an AUTHOR declares it.
+
 /** Term keys a recipe may declare. Unknown keys are a REJECTION, never ignored. */
-export const TERM_KEYS = Object.freeze(["ref", "path", "token", "sha", "predicate"]);
+export const TERM_KEYS = Object.freeze(["ref", "path", "token", "sha", "predicate", "quantity"]);
 
 /**
  * bindClaim(recipe) → { ok, rejections: [{reason, message}] }
