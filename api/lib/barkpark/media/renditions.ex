@@ -28,7 +28,12 @@ defmodule Barkpark.Media.Renditions do
     # 1200×630 whatever the source aspect (portrait sources upscale-and-crop to
     # fill), so the preview manifest can hardcode those dimensions with zero
     # per-asset lookup. `crop: :attention` centres the crop on the salient region.
-    "og" => %{max_width: 1200, max_height: 630, format: "jpg", quality: 85, crop: :attention}
+    "og" => %{max_width: 1200, max_height: 630, format: "jpg", quality: 85, crop: :attention},
+    # `lqip` is the blur placeholder a schema `image` value carries as a data:
+    # URI (Gyldendal parity E1.7, Barkpark.Content.ImageMetadata): a ≤ 24 px
+    # JPEG, a few hundred bytes, generated on demand at save time and eagerly
+    # with the other presets after upload.
+    "lqip" => %{max_width: 24, max_height: 24, format: "jpg", quality: 40}
   }
 
   @doc "All supported preset names."
