@@ -115,7 +115,11 @@ defmodule Barkpark.Tasks.ClaimOverridePersistedTest do
       doc = mk!(scope, %{})
 
       assert {:error, :criteria_unstated} =
-               Tasks.claim_by_id(doc.doc_id, "w-cop", scope ++ [criteria_unstated_override: "   "])
+               Tasks.claim_by_id(
+                 doc.doc_id,
+                 "w-cop",
+                 scope ++ [criteria_unstated_override: "   "]
+               )
 
       assert stored_claim(doc) == %{}
 
