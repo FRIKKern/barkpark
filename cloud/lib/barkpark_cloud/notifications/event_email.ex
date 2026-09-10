@@ -138,6 +138,30 @@ defmodule BarkparkCloud.Notifications.EventEmail do
        "A deployment for #{name(payload)} failed." <>
          "#{identity(payload)}#{cause_then_capture(payload)}"}
 
+  # dr-w13-bl-abandonment-splits-off-the-flood — the chain the fleet GAVE UP ON
+  # gets its own subject line, which is the whole point of the split: an operator
+  # scanning an inbox of "Deployment failed" could not see the one message that
+  # meant nobody is trying any more (charter D193).
+  #
+  # THE SENTENCE HAS ONE OWNER. `Render.abandonment_clause/1` writes it, the same
+  # way `Render.deployment_identity/1` owns the identity line, so the inbox and
+  # Slack cannot disagree about how many refusals a chain took. And it is bounded
+  # by D194: the CHAIN was abandoned — never "your content never reached the web",
+  # which this payload cannot establish.
+  #
+  # `cause_then_capture/1`, exactly like `deployment_failed`: `:detail` here is
+  # the deployment's `failure_reason`, which on an abandonment is the box's own
+  # words followed by the producer's terminal verdict ("…so the instance has been
+  # at its concurrent-build cap for that entire run; check for builds holding
+  # slots without finishing, or raise the cap"). That is the remedy, and it is
+  # rendered rather than re-typed.
+  defp render(:deployment_abandoned, payload, _owner?),
+    do:
+      {"Rebuild chain given up on",
+       "The rebuild chain for #{name(payload)} #{Render.abandonment_clause(payload)}." <>
+         " A later publish starts a new chain." <>
+         "#{identity(payload)}#{cause_then_capture(payload)}"}
+
   # cch-w29-bl — the auto-deploy PREBUILT refusal reaches the inbox.
   #
   # THE REMEDY IS NOT RE-TYPED HERE, and that is the whole point of the arm. The
