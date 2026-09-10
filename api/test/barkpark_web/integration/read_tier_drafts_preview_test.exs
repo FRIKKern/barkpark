@@ -203,7 +203,7 @@ defmodule BarkparkWeb.Integration.ReadTierDraftsPreviewTest do
              "read tier mutate answered #{refused.status}: #{refused.resp_body}"
 
       landed =
-        build_conn()
+        scoped_conn()
         |> authed(write)
         |> post(scoped(ws, project, "data/mutate/#{@dataset}"), mutations)
 
