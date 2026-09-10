@@ -443,6 +443,8 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		out.outf("")
 	}
 
+	renderDeployVocabulary(out, census)
+
 	renderDeployDelivery(out, census.Delivery, siteLimit)
 
 	rows := census.Sites
@@ -476,6 +478,65 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		out.outf("no site had a deploy row in this window — widen it with --days.")
 	}
 }
+
+// renderDeployVocabulary prints the ledger's CLASS ENUM — what it can ever
+// name — as distinct from the three cohort tables above, which are what THIS
+// WINDOW observed (dr-w16-s3-followup-class-vocabulary-unreachable).
+//
+// The distinction is the only reason this section exists. A class absent from
+// `failure classes` means "no rows in this window" and never "no such class",
+// so the one reading nothing else on this screen offers is WHICH named classes
+// did not fire — a clean run and an unmeasured one look identical without it.
+//
+// A nil Vocabulary is a control plane that predates the key: the section is
+// skipped entirely rather than rendered empty, because an empty legend claims
+// the ledger names no classes at all.
+func renderDeployVocabulary(out *writer, census cloudclient.DeployCensus) {
+	v := census.Vocabulary
+	if v == nil {
+		return
+	}
+	if len(v.Classes) == 0 && len(v.DeferredClasses) == 0 && len(v.NotAttemptedClasses) == 0 {
+		return
+	}
+
+	out.outf("class vocabulary (what the ledger can NAME — the tables above are what this window SAW)")
+	out.outf("  %-18s %3d", "failure", len(v.Classes))
+	out.outf("  %-18s %3d  (in the volume, never in the failure numerator)", "deferral", len(v.DeferredClasses))
+	out.outf("  %-18s %3d  (outside every denominator)", "never attempted", len(v.NotAttemptedClasses))
+
+	seen := map[string]bool{}
+	for _, rows := range [][]cloudclient.DeployCensusClass{census.Classes, census.Deferred, census.NotAttempted} {
+		for _, c := range rows {
+			seen[c.Class] = true
+		}
+	}
+	var quiet []string
+	for _, names := range [][]string{v.Classes, v.DeferredClasses, v.NotAttemptedClasses} {
+		for _, n := range names {
+			if !seen[n] {
+				quiet = append(quiet, sanitizeCell(n))
+			}
+		}
+	}
+	if len(quiet) > 0 {
+		shown := quiet
+		suffix := ""
+		if len(shown) > deployCensusQuietClassLimit {
+			shown = shown[:deployCensusQuietClassLimit]
+			suffix = fmt.Sprintf(" … and %d more", len(quiet)-deployCensusQuietClassLimit)
+		}
+		out.outf("  not seen in this window: %d of %d — %s%s",
+			len(quiet), len(quiet)+len(seen), strings.Join(shown, ", "), suffix)
+	}
+	out.outf("")
+}
+
+// deployCensusQuietClassLimit caps the names printed on the "not seen" line.
+// The line reports the FULL count either way and says how many it withheld —
+// a truncation that hides its own size is the silent cut the census's own
+// `truncated` marker exists to end.
+const deployCensusQuietClassLimit = 12
 
 // deployCensusHeadline builds THE line: the rate, its volume, and the
 // denominator it was taken against, all together, never apart.

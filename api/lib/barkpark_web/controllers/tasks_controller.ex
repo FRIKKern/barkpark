@@ -726,6 +726,7 @@ defmodule BarkparkWeb.TasksController do
             |> Params.put_opt(:phase_id, params["phase_id"])
             |> Params.put_opt(:order, order)
             |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+            |> Params.put_opt(:session, session_id(conn, params))
             |> Keyword.merge(Params.execution_policy_opts(params))
             |> Keyword.merge(scope_opts(conn))
 
@@ -860,6 +861,7 @@ defmodule BarkparkWeb.TasksController do
         opts =
           [resources: params["resources"] || []]
           |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+          |> Params.put_opt(:session, session_id(conn, params))
           |> Keyword.merge(Params.execution_policy_opts(params))
           |> Keyword.merge(scope_opts(conn))
           |> Params.put_opt(
@@ -1173,6 +1175,7 @@ defmodule BarkparkWeb.TasksController do
         # rare one. Wire form: `bp task close … --set close_reason_override="…"`.
         |> Params.put_opt(:close_reason_override, params["close_reason_override"])
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       # Snapshot the rail BEFORE the close (from the already-fetched pre-close
       # task) so rail_changed reflects only concurrent actors, not this close.
@@ -1353,6 +1356,7 @@ defmodule BarkparkWeb.TasksController do
         # is there. `stage_supersede/1` reads both wire spellings.
         |> Params.put_opt(:supersede, Params.stage_supersede(params))
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.stage(task.id, state, opts) do
         {:ok, %Document{} = doc} ->
@@ -1535,6 +1539,7 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:merge_gated, merge_gated)
         |> Params.put_opt(:observed_rev, Params.stamp_observed_rev(params))
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.stamp(task.id, worker_id, opts) do
         {:ok, %Document{} = doc} ->
@@ -1601,6 +1606,7 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:note, params["note"])
         |> Params.put_opt(:criterion, criterion)
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.record_landing(task.id, opts) do
         {:ok, %Document{} = doc} ->
@@ -1777,6 +1783,7 @@ defmodule BarkparkWeb.TasksController do
         [text: text]
         |> Params.put_opt(:criterion, criterion)
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.pulse_by_id(task.id, worker_id, opts) do
         {:ok, %Document{} = doc} ->
@@ -1834,6 +1841,7 @@ defmodule BarkparkWeb.TasksController do
         [pr: pr, state: state]
         |> Params.put_opt(:reason, params["reason"])
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.renew_lease_by_id(task.id, opts) do
         {:ok, %Document{} = doc} ->
@@ -2056,7 +2064,13 @@ defmodule BarkparkWeb.TasksController do
       edges: result.edges,
       dependents: result.dependents,
       truncated: result.truncated,
-      truncation_reason: result.truncation_reason
+      truncation_reason: result.truncation_reason,
+      # THE PHANTOM-VS-UNREAD DISCRIMINATOR (task-09889a18f174fcb2). `truncated`
+      # says the graph is partial; this says WHICH bound made it partial and how
+      # much of the corpus was actually read, so a consumer can tell an edge to
+      # a target that does not exist (a real broken reference) from one to a
+      # target the read never reached. `nil` on every complete read.
+      corpus_truncation: result.corpus_truncation
     })
   end
 
@@ -3350,6 +3364,29 @@ defmodule BarkparkWeb.TasksController do
   # worker_id). `nil` for an anonymous / tokenless request — the stamp is then
   # omitted, keeping events backward-compatible. Metadata only; it never
   # affects authorization.
+  # THE SESSION DISCRIMINATOR (task-f79e39f4992749a5). A worker id is
+  # LANE-scoped: every session of the cli lane writes as `lead-cli`, so a
+  # claim / pulse / close by a woken predecessor was byte-indistinguishable
+  # from the live lead's. The caller presents a SECRET key on the
+  # `x-barkpark-session` header (or a `session_key` param); the server never
+  # stores that key — `Tasks.SessionId.derive/2` HMACs it under the endpoint
+  # secret and the calling token, and THAT one-way id is what lands on
+  # `claim.session`. Copying a stored id off a row and presenting it derives a
+  # DIFFERENT id, so a peer's session cannot be replayed from the ledger.
+  # `nil` for a caller that presents nothing: the stamp is then omitted and
+  # the row stays byte-identical, which is how every pre-existing client and
+  # every live claim taken before this shipped keeps working. Metadata only;
+  # it never affects authorization and never fences a CAS.
+  defp session_id(conn, params) do
+    key =
+      case get_req_header(conn, "x-barkpark-session") do
+        [v | _] -> v
+        _ -> params["session_key"]
+      end
+
+    Barkpark.Tasks.SessionId.derive(key, caller_token_id(conn))
+  end
+
   defp caller_token_id(conn) do
     case conn.assigns[:api_token] do
       %{id: id} -> id

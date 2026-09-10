@@ -427,6 +427,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     schema = socket.assigns[:editor_schema]
     type = socket.assigns[:editor_type]
 
+    # Storage shape BEFORE the write and before the buffer merge below: the
+    # browser posts `doc[featuredPublications][0]` rows as an index-keyed map
+    # and a nested image as its JSON string (Gyldendal friction 65/66). The
+    # save path coerces its own copy; the buffer must see the same shape or
+    # the next render walks a map where it expects a list.
+    params = Barkpark.Content.Forms.coerce_params(params, schema)
+
+    # Denormalised image metadata (Gyldendal parity E1.7): a freshly picked
+    # asset arrives as {url, assetId, alt, focal…}; the site needs width /
+    # height / lqip on the stored value. Filled from the asset, never
+    # overwriting what is already there, never raising into the save.
+    params =
+      Barkpark.Media.ImageMetadata.backfill_params(
+        params,
+        schema,
+        socket.assigns.dataset,
+        ScopeHelpers.scope_opts(socket)
+      )
+
     if doc && type do
       case Content.upsert_draft(
              doc,
@@ -437,7 +456,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
              hook_opts(socket)
            ) do
         {:ok, saved_doc, errs} ->
-          new_title = Map.get(params, "title", doc.title)
+          # The persisted title, not the posted one: a titleless type's column
+          # is derived on write (Gyldendal parity E1.8), and the desk row must
+          # show what the store holds.
+          new_title = saved_doc.title || Map.get(params, "title", doc.title)
 
           panes =
             PaneBuilder.update_title(
@@ -453,6 +475,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             editor_form: Map.merge(socket.assigns[:editor_form] || %{}, params),
             save_status: "Saved",
             validation_errors: errs,
+            validation_warnings: validation_warnings(schema, new_title, saved_doc.content),
             cross_violations: compute_cross_violations(schema, params)
           )
           |> maybe_refresh_content_preview()
@@ -1660,6 +1683,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   def compute_cross_violations(schema, form) do
     Barkpark.Content.CrossValidator.violations(schema, form)
   end
+
+  @doc """
+  Warning-level findings for the open document against the schema the Studio
+  resolved (Gyldendal parity E1.6). `%{}` without a schema.
+  """
+  def validation_warnings(nil, _title, _content), do: %{}
+
+  def validation_warnings(schema, title, content),
+    do: Barkpark.Content.Validation.check(content, title, schema).warnings
 
   @doc false
   def resolve_nav_group(_current, _old, nil), do: nil

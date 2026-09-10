@@ -222,4 +222,49 @@ defmodule BarkparkWeb.StudioComponents.PanesTest do
       assert html =~ "pane-doc-badge--new-status"
     end
   end
+
+  describe "pane_doc_item/1 – row media (Gyldendal parity E3.3)" do
+    defp media_assigns do
+      %{
+        phx_click: "select",
+        phx_value_pane: "1",
+        phx_value_id: "pub-1",
+        title: "Over My Dead Body",
+        doc_id: "pub-1",
+        status: "published",
+        is_draft: false
+      }
+    end
+
+    test "a media url renders a lazy thumbnail before the title, and the accessible name is unchanged" do
+      html =
+        render_component(
+          &Panes.pane_doc_item/1,
+          Map.merge(media_assigns(), %{media: "/media/files/d/x/cover.jpg", media_slot: true})
+        )
+
+      assert html =~ ~s(class="pane-doc-media")
+      assert html =~ ~s(src="/media/files/d/x/cover.jpg")
+      assert html =~ ~s(loading="lazy")
+      assert html =~ ~s(alt="")
+      assert html =~ ~s(aria-label="Over My Dead Body, published")
+      assert :binary.match(html, "pane-doc-media") < :binary.match(html, "pane-doc-main")
+    end
+
+    test "a row in a media pane without an image reserves an empty slot so titles align" do
+      html =
+        render_component(
+          &Panes.pane_doc_item/1,
+          Map.merge(media_assigns(), %{media: nil, media_slot: true})
+        )
+
+      assert html =~ ~s(class="pane-doc-media pane-doc-media-empty")
+      refute html =~ "<img"
+    end
+
+    test "a row outside a media pane renders no media markup at all (byte-identical legacy row)" do
+      html = render_component(&Panes.pane_doc_item/1, media_assigns())
+      refute html =~ "pane-doc-media"
+    end
+  end
 end

@@ -79,7 +79,11 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           errors: errors_for(assigns, name),
           on_change: "autosave",
           plugin_name: plugin,
-          path: path
+          path: path,
+          # Picker context for reference / image subfields (Gyldendal E1.6).
+          dataset: Map.get(assigns, :dataset, "production"),
+          scope_prefix: Map.get(assigns, :scope_prefix, ""),
+          api_token_raw: Map.get(assigns, :api_token_raw, "")
         })
 
       "arrayOf" ->

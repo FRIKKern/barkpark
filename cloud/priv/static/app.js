@@ -19111,6 +19111,17 @@
     // this one line routes all three not-an-answer states to the same fail-
     // closed unknown surface, and only a DETERMINATE refuse reaches the member
     // surface below.
+    // cch-w49-bl — THE CALL THIS SCREEN NEVER MADE. Before this line the only
+    // GET /v1/usage/summary in the console was loadOverview's, landing in
+    // module-scoped overviewData.usage, which is null on a #billing deep-link.
+    // It is fired AFTER the subscription guard (a screen that cannot say which
+    // plan you are on has no active tier to put a ceiling on) and it does NOT
+    // gate the paint: the plan card is the answer people came for, the ceiling
+    // is one line under it, and holding the card behind a second read would
+    // trade a real absence for a spinner. The repaint is once — the loaded flag
+    // makes the recursion terminal.
+    if (!billingQuotaLoaded) { loadBillingCeiling().then(function () { renderBilling(); }); }
+
     var band = billingOwnerAuthority();
     if (band !== "grant" && band !== "refuse") { renderBillingMeUnknown(box, band); return; }
 
@@ -19221,6 +19232,7 @@
         planFeatsHtml(planDisplay(plan)) +
         (sub ? '<p class="plan-meta dim">Status: ' + esc(billingStatusLabel(sub)) + "</p>" : "") +
         (periodLine ? '<p class="plan-meta dim">' + esc(periodLine) + "</p>" : "") +
+        planCeilingHtml(billingQuota) +
       "</div>";
   }
 
@@ -19508,6 +19520,7 @@
         '<p class="plan-meta dim">Status: ' + esc(billingStatusLabel(sub)) +
           (sub.started_at ? " &middot; since " + esc(fmtWhen(sub.started_at)) : "") + "</p>" +
         (periodLine ? '<p class="plan-meta dim">' + esc(periodLine) + "</p>" : "") +
+        planCeilingHtml(billingQuota) +
         // GR33: this card is STATE only — the Manage-billing (portal) action and
         // the invoice-less portal copy live in their own .set-section below, so
         // an ACTION section carries the action (never a save-row, never a button
@@ -19771,6 +19784,17 @@
       // carried by the button itself. Measured in a browser before and after —
       // dropping the <p> alone moved this card's button 36px up.
       (t.note ? '<p class="tier-note">' + esc(t.note) + "</p>" : "") +
+      // cch-w49-bl — AND NO CEILING HERE, on ANY of the three cards. The server
+      // exposes no per-plan limits map on any route (Billing.limits/0 is
+      // reachable only through barkpark_limit/1, i.e. for the team's OWN plan),
+      // so two of the three tiers have no signal at all. The third — the team's
+      // current tier — DOES, but its ceiling is already stated one card up, on
+      // the plan-state card that names the active plan, and that card is the
+      // one every #billing actor paints. Rendering it a second time HERE would
+      // add an arm the corpus never opens: this grid stays hidden for every
+      // paid actor until somebody clicks "See all plans", which the absent-arm
+      // guard deliberately does not do — an unreachable branch under a guard
+      // that cannot reach it is a green with no subject, not coverage.
       disclosure +
       btn +
     "</div>";
@@ -20332,6 +20356,65 @@
   // Subscribe button, which is safe because the SERVER is the gate — POST
   // checkout refuses :test_mode itself (422 billing_test_mode).
   var capCache = null;
+
+  // ── cch-w49-bl · THE DERIVED INSTANCE CEILING ────────────────────────────
+  // cch-w49-s1 OMITTED the hand-typed 1/3/10 from every money surface, because
+  // nothing on that screen ever ASKED for a ceiling and no server value backed
+  // the numerals. This is the additive half: the screen asks.
+  //
+  // GET /v1/usage/summary carries `usage.team.instances.quota`, which
+  // Usage.instance_quota/1 derives from Billing.barkpark_limit/1 — the SAME
+  // function the create-time 402 enforces. The Overview's slots meter has read
+  // it honestly since OC16 (overviewSlotsModel, "NEVER hardcoded"); billing
+  // simply never issued the call, so it had nothing to state but a constant.
+  //
+  // THE NIL ARM IS THE POINT, and it is not an error state. The server answers
+  // nil for a team with NO ACTIVE subscription — and, measurably, for a
+  // past_due one too: instance_quota/1 reaches through
+  // Billing.active_subscription/1 (`status == "active"` only) while
+  // /v1/subscription reads live_subscription/1 (active OR past_due), so a
+  // dunning team is told its paid plan name with no derivable ceiling behind
+  // it. Both halves are run-proven together in
+  // cloud/test/barkpark_cloud/web/usage_summary_route_test.exs. Nil OMITS the
+  // line; it never falls back to a catalog numeral, because falling back is
+  // exactly the defect wave 49 removed.
+  var billingQuota = null;        // the ceiling the server derived, or null
+  var billingQuotaLoaded = false; // we have the server's real answer at least once
+
+  // Pure over the envelope so a node test drives every arm without a fetch.
+  // Anything that is not a finite positive integer is NOT a ceiling: the
+  // sampler writes "unmetered" strings into meter values, and Usage clamps the
+  // forever-tier placeholder to nil rather than drawing a bar to a million.
+  function usageInstanceCeiling(usage) {
+    var meter = usage && usage.team && usage.team.instances;
+    var q = meter ? meter.quota : null;
+    return typeof q === "number" && isFinite(q) && q > 0 && q === Math.floor(q) ? q : null;
+  }
+
+  // The rendered ceiling line. "" for nil — OMIT, never invent. Shared by all
+  // three surfaces that name the active plan (the owner plan card, its GR36
+  // member twin, and the current tier card) so a fix scoped to the owner card
+  // can never leave the member reading a different fact — the cch-w55-s3
+  // asymmetry, refused up front.
+  function planCeilingHtml(quota) {
+    if (quota === null || quota === undefined) return "";
+    return '<p class="plan-meta dim">' +
+      esc(quota + (quota === 1 ? " managed instance" : " managed instances")) +
+      " on this plan</p>";
+  }
+
+  // A cold read, once per session. A FAILED read leaves the cache alone and
+  // leaves `billingQuotaLoaded` false — an unanswered ceiling must never render
+  // as an absent one and must never render as a number either, and both of
+  // those are the same OMIT, so there is no error surface here to build.
+  function loadBillingCeiling() {
+    return api("GET", "/v1/usage/summary").then(function (r) {
+      if (!r.ok) return billingQuota;
+      billingQuotaLoaded = true;
+      billingQuota = usageInstanceCeiling(r.data && r.data.usage);
+      return billingQuota;
+    });
+  }
 
   // The declared checkout capability, or "" when the server has not told us.
   // Pure over the cache so the tier renderer takes it as an argument and a node
@@ -25380,13 +25463,25 @@
   // — an OWNER ESCAPE HATCH that the role-change law does NOT have, so an owner
   // MAY remove a peer owner even though they may not re-role them. The tier gate
   // is the route's `with_team_role(conn, "admin")`, modelled by assignableRoles.
-  // The server has no self? branch on this verb; the self row is withheld here
-  // by console ruling (D492 variant B) because the merge-blocking members smoke
-  // pins removes.length === 2 over a 3-row roster whose row 0 IS the actor. That
-  // withheld owner-self Remove is an UNDER-offer, pre-existing on main, filed
-  // separately — it is not this slice's class.
+  // THE SERVER HAS NO self? BRANCH ON THIS VERB, so neither does this predicate
+  // (cch-w44-bl). `isSelf` is kept in the signature for symmetry with
+  // canChangeMemberRole's self? bypass and is DELIBERATELY unread: the general
+  // law already answers the self row correctly, because on your own row the
+  // target role IS ctx.role —
+  //   owner-self  -> the `actor_role == "owner"` hatch fires  -> {:ok, :removed}
+  //   admin-self  -> outranks?("admin","admin") is strict `>` -> {:error, :forbidden}
+  //   member-self -> assignableRoles("member") is empty       -> {:error, :forbidden}
+  // A blanket `if (isSelf) return false` used to sit here (D492 variant B), which
+  // withheld the one server-legal cell of the three: an owner who is NOT the last
+  // owner could not leave their own team from the roster. That is an UNDER-offer,
+  // the mirror image of this epic's usual lie, and it is gone.
+  //
+  // The remaining refusal on the self row is a STATE one, not an authority one:
+  // do_remove rolls back :last_owner (409) for the SOLE owner. That is
+  // isSoleOwnerSelf's question, answered at the call site in memberRowHtml —
+  // exactly as it already is for Change role — never here.
   function canRemoveMember(actorRole, targetRole, isSelf) {
-    if (isSelf) return false;
+    void isSelf;
     if (!assignableRoles(actorRole).length) return false;
     return actorRole === "owner" || memberRoleRank(actorRole) > memberRoleRank(targetRole);
   }
@@ -25456,7 +25551,10 @@
       actions += '<button class="btn btn-ghost btn-sm" data-member-role="' + esc(m.user_id) +
         '" data-role="' + esc(targetRole) + '" data-email="' + esc(m.email) + '" type="button">Change role</button>';
     }
-    if (canRemoveMember(ctx.role, targetRole, isSelf)) {
+    // `lastOwnerSelf` gates BOTH verbs: do_update_role and do_remove roll back
+    // the same :last_owner (409) for the sole owner, so offering either on that
+    // row is a control the server refuses.
+    if (!lastOwnerSelf && canRemoveMember(ctx.role, targetRole, isSelf)) {
       actions += '<button class="btn btn-ghost btn-sm" data-member-remove="' + esc(m.user_id) +
         '" data-email="' + esc(m.email) + '" type="button">Remove</button>';
     }
@@ -25509,7 +25607,12 @@
         members.map(function (m) { return memberRowHtml(m, rowCtx); }).join("") +
       "</div>" +
       (soleOwnerSelf
-        ? '<p class="set-empty">You\'re the only owner, so you can\'t change your own role — ' +
+        // cch-w44-bl: the sole owner's own row now withholds TWO controls, not
+        // one — do_update_role and do_remove roll back the SAME :last_owner —
+        // so the sentence names both. A withheld control with no sentence is a
+        // silently missing control.
+        ? '<p class="set-empty">You\'re the only owner, so you can\'t change your own role ' +
+            "or leave the team &mdash; " +
             "promote another member to owner first.</p>"
         : "") +
       "</section>";
@@ -26281,6 +26384,10 @@
       // session that fetched it — a cold paint reads "" (unknown) and the
       // server stays the gate until the next GET answers.
       capCache = null;
+      // cch-w49-bl: the derived ceiling is per-TEAM. Cleared on the same seam,
+      // so the next account can never read the previous team's ceiling.
+      billingQuota = null;
+      billingQuotaLoaded = false;
       // cch-w1-refetch-storm: the Overview's own snapshot is per-account. Left
       // standing, a scoped tick racing the next sign-in could repaint the new
       // account's Overview from the previous one's fleet/usage/fold. Cleared
@@ -28580,6 +28687,15 @@
       canManageOnboarding: canManageOnboarding,
       billingHasPaidPlan: billingHasPaidPlan,
       billingIsComp: billingIsComp,
+      // cch-w49-bl — the two pure halves of the derived ceiling. The WIRING is
+      // proven by the corpus (billing-portal-return carries the only
+      // usageSummary fixture on the #billing slice and renders 3; the other ten
+      // actors carry none and render nothing), so what these pins add is the
+      // arms the corpus has no fixture for: the "unmetered" string the sampler
+      // writes, the forever-tier placeholder Usage clamps to nil, and the
+      // singular/plural split.
+      usageInstanceCeiling: usageInstanceCeiling,
+      planCeilingHtml: planCeilingHtml,
       planNames: PLAN_NAMES.slice(),
       planDisplay: planDisplay,
       planName: planName,

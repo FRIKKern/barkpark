@@ -7732,6 +7732,97 @@ defmodule BarkparkCloud.Registry do
     |> Enum.find_value(:free, &claim_leg(&1, cutoff))
   end
 
+  @doc """
+  The claim refusal, RENDERED FOR THE CALLER — the wire half of
+  `provisioning_fqdn_claim/2`, and the whole reason it exists is that the leg
+  used to reach nobody.
+
+  `provisioning_fqdn_claim/2` names WHICH leg holds a hostname and writes a
+  careful operator sentence for it. Until this function, that pair reached a
+  human through exactly ONE path: the `Logger.info` in
+  `provisioning_fqdn_taken?/2`, a server log with no UI, no alert and no CLI
+  surface. The API answered `409 {"error":"taken"}` and dropped both, so the
+  operator staring at a refusal could not tell "somebody is paying for that
+  name" from "a provisioning job is mid-flight, wait a minute" — two refusals
+  with opposite remedies rendered as one word.
+
+  Returns a map to MERGE onto a refusal body: `%{}` when this walk does not
+  hold the name (some OTHER surface does — a Site domain, another instance's
+  `custom_host` — and this function has nothing to say about those), or
+  `%{claim_leg: "<leg>", detail: "<caller-safe sentence>"}`.
+
+  ## THE DISCLOSURE DECISION — why the operator sentence does NOT go on the wire
+
+  Every sentence `claim_leg/2` writes opens `row <uuid>`, and three of them
+  characterise the holder further ("belongs to a team with a live subscription
+  that is still ENTITLED", "phoned home at <timestamp>"). The 409 is answered
+  to the CALLER WHO ASKED FOR THE HOSTNAME, who is routinely a DIFFERENT team
+  than the holder — that is the ordinary shape of a name collision. Relaying
+  those sentences verbatim would hand a stranger a foreign instance's primary
+  key and its liveness timeline, which is the same class of leak the
+  `/credentials` and `/bootstrap` routes fail closed on. So the full sentence
+  stays where it already was, in the Logger line, and the wire gets two things
+  that name no row:
+
+    * `claim_leg` — the leg ATOM. The categories themselves say nothing about
+      WHO: `active_subscription` is a fact about the hostname the caller
+      already typed, not an identifier for anybody.
+    * `detail` — a per-leg sentence written FOR the caller, in the second
+      person where it can be, carrying the remedy and no identity.
+
+  The mapping is TOTAL over `claim_leg/2`'s legs and falls back for an
+  unrecognised one, so a leg added there can never leak by accident: a new
+  atom renders the generic sentence until somebody writes it a caller-facing
+  one. The atom itself still reaches the wire, because a coarse category is
+  the part that was worth carrying.
+  """
+  @spec provisioning_fqdn_claim_disclosure(String.t(), Ecto.UUID.t() | nil) :: map()
+  def provisioning_fqdn_claim_disclosure(host, self_id \\ nil) when is_binary(host) do
+    case provisioning_fqdn_claim(host, self_id) do
+      :free -> %{}
+      {:held, leg, _why} -> %{claim_leg: Atom.to_string(leg), detail: caller_claim_detail(leg)}
+    end
+  end
+
+  # The caller-facing half of each leg's sentence: the same verdict
+  # `claim_leg/2` reaches, with the row id, the team and the timestamp taken
+  # OUT and the remedy left IN.
+  defp caller_claim_detail(:admin_credential),
+    do:
+      "That hostname still belongs to an instance the platform holds a live " <>
+        "credential for, so the name is not free to re-attach. Decommission that " <>
+        "instance first, or pick another hostname."
+
+  defp caller_claim_detail(:recent_usage_sample),
+    do:
+      "That hostname was still being reached by the platform within the last " <>
+        "#{@recent_sample_window_hours} hours, so the name is not free to re-attach. " <>
+        "Decommission the instance answering on it first, or pick another hostname."
+
+  defp caller_claim_detail(:active_subscription),
+    do:
+      "That hostname belongs to an instance on a live, still-entitled " <>
+        "subscription. A billed name is never released — pick another hostname."
+
+  defp caller_claim_detail(:agent_reporting),
+    do:
+      "An agent on that hostname has phoned home recently, so the instance " <>
+        "answering on it is live and the name is not free to re-attach."
+
+  defp caller_claim_detail(:active_job),
+    do:
+      "A provisioning job for that hostname is still in flight. Wait for it to " <>
+        "finish and try again, or pick another hostname."
+
+  defp caller_claim_detail(:within_grace),
+    do:
+      "That hostname belongs to an instance younger than the " <>
+        "#{@abandoned_claim_after_days}-day abandonment window, so it is not yet " <>
+        "releasable. Decommission it first, or pick another hostname."
+
+  defp caller_claim_detail(_other),
+    do: "That hostname is held by another instance and is not free to re-attach."
+
   # CONDITIONAL, and that is the whole point: an unconditional
   # `b.id != ^self_id` compiles to SQL `id != NULL` when `self_id` is nil, which
   # is never true — every row would drop out of the walk and EVERY name would

@@ -1487,7 +1487,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # serializer entry point, so they do not move this pin — they move
   # `@ast_blind_paths` instead. MEASURED by the PIN CO-EDIT arm on this tree
   # ("@emitted_pinned 168 -> 169"), never summed with an earlier delta.
-  @emitted_pinned 169
+  # 169 -> 170 (dr-w16-s3-followup-class-vocabulary-unreachable): `census/3`'s
+  # top-level map gains ONE key, `vocabulary`. The node's three inner keys are
+  # written by the `vocabulary/0` helper and are invisible to this source-reading
+  # census — they are named by the EVALUATED register below and counted in
+  # `@ast_blind_paths`. MEASURED by the PIN CO-EDIT arm on this tree
+  # ("@emitted_pinned 169 -> 170"), never summed with an earlier delta.
+  @emitted_pinned 170
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -1671,7 +1677,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # elsewhere in the package, so they ride free on the name union and move the
   # SITE register below instead. MEASURED by the PIN CO-EDIT arm on this tree
   # ("@go_tag_pinned 352 -> 359"), never derived from the diff.
-  @go_tag_pinned 359
+  # 359 -> 362 (dr-w16-s3-followup-class-vocabulary-unreachable):
+  # `DeployVocabulary` declares four tags and THREE of them are new NAMES
+  # (`deferred_classes`, `not_attempted_classes`) plus the field that carries
+  # the node (`vocabulary`). The fourth, `classes`, already existed on
+  # `DeployCensus`, so it rides free on the NAME union and moves the SITE
+  # register instead. MEASURED by the PIN CO-EDIT arm ("@go_tag_pinned 359 ->
+  # 362"), never derived from the diff.
+  @go_tag_pinned 362
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1756,6 +1769,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # (`@go_tag_pinned` does not move) and this row is born at 3.
     "cancelled" => 3,
     "censored" => 3,
+    # dr-w16-s3-followup-class-vocabulary-unreachable: NEWLY DUPLICATED, 1 -> 2.
+    # `classes` was declared once (DeployCensus.Classes — the classes THIS
+    # WINDOW observed). `DeployVocabulary.Classes` is the ledger's whole class
+    # ENUM, a different quantity under the same name, which is exactly the
+    # collision this register exists to keep visible. It rides free on the NAME
+    # union (`@go_tag_pinned` does not move for it) and this row is born at 2.
+    "classes" => 2,
     "clock" => 3,
     "code" => 3,
     "content_rev" => 2,
@@ -2814,6 +2834,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-bl-w8-graced-deploys-are-uncounted KNOWN OPEN — how many START triggers were retried across an untyped 5xx, twin of graced_poll_refusals and the arm that recorded NOTHING in any outcome before this wave. Same custody, same fence, same follow-up."},
     {"site_deployment_json/3", "last_graced_at",
      "dr-bl-w8-graced-deploys-are-uncounted KNOWN OPEN — when the most recent grace of either kind happened. Without it a nonzero count cannot be told from one taken weeks ago; same reason `apply_arming_checked_at` sits beside its verdict two arms up."},
+    {"site_deployment_json/3", "deferral_scheduled_s",
+     "dr-bl-deferral-scheduled-vs-actual-gap KNOWN OPEN — the window the backoff ladder ASKED for on the interval this deferral closes. Its reachable surface this wave is the NAMED READER `DeployLedger.DeferralPacing.report/1`, not the per-deployment wire: `site_deployment_json/3` lives in router.ex, outside this task's fence, exactly as `graced_poll_refusals` records three rows up. Emitting it is the named follow-up (server key + `cloudclient.Deployment` field + rendered line, the D136 rule), and this row is where that is written down."},
+    {"site_deployment_json/3", "deferral_actual_gap_s",
+     "dr-bl-deferral-scheduled-vs-actual-gap KNOWN OPEN — the gap that ACTUALLY elapsed on that same interval, twin of deferral_scheduled_s. The two are only useful as a PAIR (their ratio is the measurement), so they share one custody and one follow-up; shipping one to the wire without the other would put a numerator on a page with no denominator."},
     {"site_deployment_json/3", "delivery_id",
      "RULED — GitHub's X-GitHub-Delivery header (dwb-18). A webhook idempotency key, never a fact about the build; it exists so a redelivered push mints at most one Deployment."},
     {"site_deployment_json/3", "preview_slug",
@@ -2884,8 +2908,19 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # MEASURED, not derived: the SERIALIZER-SIDE arm's un-allowlisted run printed
   # `27 unserialized column(s)` and the SCHEMA-SIDE arm printed
   # `110 schema column(s) collected`.
-  @schema_field_floor 110
-  @schema_unserialized_floor 27
+  # 110 -> 112 (dr-bl-deferral-scheduled-vs-actual-gap): the `deployments` schema
+  # gains `deferral_scheduled_s` and `deferral_actual_gap_s`.
+  # `@schema_unserialized_floor` moves 27 -> 29 for the SAME reason the grace
+  # trio moved it — `site_deployment_json/3` lives in router.ex, outside that
+  # task's fence, so the emit is a named follow-up and the two allowlist rows
+  # above carry the tracker. The columns DO have a reader this wave
+  # (`DeployLedger.DeferralPacing.report/1`); this arm measures the WIRE, and a
+  # floor that stayed at 27 would have claimed a wire key that does not exist.
+  # MEASURED, not derived: the SERIALIZER-SIDE arm's un-allowlisted run printed
+  # `29 unserialized column(s)` and the SCHEMA-SIDE arm printed
+  # `112 schema column(s) collected`.
+  @schema_field_floor 112
+  @schema_unserialized_floor 29
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:
   # `delivery_json/1` (router.ex:9809) is the NOTIFICATIONS delivery serializer,
@@ -3145,7 +3180,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       # a `bl-` segment (`dr-bl-w8-graced-deploys-are-uncounted`). Without this
       # alternative the guard forces such a row to cite an id that does not
       # exist, which is worse than no citation.
-      assert reason =~ ~r/dr-(bl-)?w\d+-[a-z0-9-]+|task-[0-9a-f]+|RULED/,
+      #
+      # THE WAVE SEGMENT IS OPTIONAL ON A `bl-` ID, and that is a MEASURED
+      # correction rather than a loosening: `dr-bl-deferral-scheduled-vs-actual-gap`
+      # is a real ledger row (filed out of dr-w23-s7, adopted by
+      # `dr-backlog-never-started`) whose id carries NO wave at all, so the
+      # `w\d+` this pattern required would have forced a TRUE citation to be
+      # rewritten into a false one. The guard's job is "name a tracker"; a wave
+      # number was an accident of the four ids that happened to exist when it
+      # was written.
+      assert reason =~ ~r/dr-w\d+-[a-z0-9-]+|dr-bl-(w\d+-)?[a-z0-9-]+|task-[0-9a-f]+|RULED/,
              "#{payload}/#{key}: a row must name its tracker, or say RULED and why"
 
       # THE CLASS RULE IS ONE RULE. An explicit row for an `*_encrypted` column
@@ -4171,6 +4215,16 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
     "terminal_failure_rate.sample",
     "total_sites",
     "truncated",
+    # dr-w16-s3-followup-class-vocabulary-unreachable. The class ENUM, as
+    # against `classes[]` above, which is what the WINDOW observed. Its three
+    # values are LISTS OF STRINGS, so the walk records the node and its three
+    # keys and NOTHING below them — a class name is data, not a wire key, and
+    # adding a class must not red a key-set register. Decoded by
+    # `cloudclient.DeployVocabulary` in the same commit.
+    "vocabulary",
+    "vocabulary.classes",
+    "vocabulary.deferred_classes",
+    "vocabulary.not_attempted_classes",
     "volume",
     "window",
     "window.from",
@@ -4185,8 +4239,8 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
   # that NO other producer in the payload writes it. A blind walk loses these
   # together, and the control reds before the register can go quiet.
   #
-  # THIS LIST IS THE c0 ENUMERATION. Twelve producers reach `census/3`'s wire;
-  # eleven of them write at least one key of their own (`site_rows/1` writes
+  # THIS LIST IS THE c0 ENUMERATION. Thirteen producers reach `census/3`'s wire;
+  # twelve of them write at least one key of their own (`site_rows/1` writes
   # none — it delegates every key to `site_row/2` — and `top_class/1` returns a
   # scalar, so neither can be named here), and `refuse_across_boundary/2`,
   # `refuse_class_rows/2` and `straddled_boundary/2` rewrite values in place
@@ -4203,7 +4257,8 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
     {"never_covered_by_environment/1",
      "coverage_cohorts.cohorts[].never_covered_by_environment[].environment"},
     {"coverage_site_row/1", "coverage_cohorts.never_covered_sites[].slug"},
-    {"completeness/3", "completeness.unaccounted"}
+    {"completeness/3", "completeness.unaccounted"},
+    {"vocabulary/0", "vocabulary.classes"}
   ]
 
   # ── c0: how much of the wire the AST census cannot see ───────────────────
@@ -4227,7 +4282,12 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
   # all SEVEN of the node's inner paths. UP, and the reason is the same shape
   # dr-w32 filed — a helper writing to the wire — which is exactly why the
   # EVALUATED census above exists and names all eight.
-  @ast_blind_paths 168
+  # 168 -> 171 (dr-w16-s3-followup-class-vocabulary-unreachable): `vocabulary/0`
+  # is a private helper, so the AST census sees only the top-level `vocabulary`
+  # key its call site writes and is blind to all THREE of the node's inner
+  # paths. UP, and the reason is the same shape as `box_door/1` above — a helper
+  # writing to the wire — which is why the EVALUATED census names all four.
+  @ast_blind_paths 171
 
   @ledger Path.expand("../../lib/barkpark_cloud/deploy_ledger.ex", __DIR__)
 

@@ -14,6 +14,29 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerEnqueueTest do
 
   alias Barkpark.EdgeProjector.ProjectorWorker
 
+  # Two assertions below read the WHOLE queue rather than filtering it
+  # (`assert [job] = all_enqueued(worker: ProjectorWorker)`), so they are only
+  # true if this test's own inserts are the only ProjectorWorker rows the
+  # sandbox can see. That is a PRECONDITION, and it does not hold for free: the
+  # SQL sandbox rolls back what a test writes, but `oban_jobs` rows COMMITTED by
+  # an earlier non-sandboxed run are ordinary visible reads inside the
+  # transaction, with nothing to roll back. On 2026-09-10 the unpartitioned
+  # `barkpark_test` on the dev host carried 1284 leftover `scheduled`
+  # ProjectorWorker rows (519 when this was first measured in August), and 30+
+  # MIX_TEST_PARTITION databases carried their own. A fresh partition starts
+  # empty and hides it, which is why this reads as an intermittent flake rather
+  # than as the deterministic environment fault it is.
+  #
+  # So assert the precondition instead of inheriting it. This DELETE runs inside
+  # the per-test sandbox transaction and is rolled back with everything else, so
+  # it never touches a shared database's committed rows and cannot race a
+  # concurrent suite on the same box.
+  # See tooling/grip/ledger/clean-main-red-baseline-2026-09-10.md §4.
+  setup do
+    Barkpark.Repo.delete_all(Oban.Job)
+    :ok
+  end
+
   describe "enqueue/2 — rebuild op" do
     test "inserts a rebuild job with the given scope and types (normalised: sorted + deduped)" do
       assert {:ok, _job} = ProjectorWorker.enqueue("production", types: ["post", "page"])

@@ -26,6 +26,7 @@ defmodule Barkpark.Content.Writer do
     Labels,
     SchemaDefinition,
     Sheets,
+    TitleDerivation,
     WriteScope
   }
 
@@ -205,7 +206,15 @@ defmodule Barkpark.Content.Writer do
   end
 
   defp do_create_document_from_attrs(type, attrs, dataset, opts) do
-    attrs = from_envelope(attrs)
+    # [own-status-field] The THIRD reading of a flat `status`, resolved from the
+    # SCHEMA rather than from the value — see `declared_status_field?/4`. Asked
+    # HERE, after the refusal above rather than before it, so the refusal path
+    # keeps costing zero Repo reads (a property `writer_test` states in prose
+    # and relies on: those cases run with no sandbox at all).
+    attrs = from_envelope(attrs, declared_status_field?(type, attrs, dataset, opts))
+    # Gyldendal parity E1.8 — a type with no `title` field fills the column from
+    # `list_preview.title`; costs a schema read only when the title is blank.
+    attrs = TitleDerivation.maybe_derive(attrs, type, dataset, opts)
     raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) || generate_id(type)
     doc_id = DraftId.draft_id(raw_id)
 
@@ -791,7 +800,15 @@ defmodule Barkpark.Content.Writer do
   `:after_save` around the DB write, same contract as `create_document/4`.
   """
   def upsert_document(type, attrs, dataset, opts \\ []) do
-    attrs = from_envelope(attrs)
+    # [own-status-field], patch/autosave half: the same schema question the
+    # create door asks, asked here so a flat `status` reaches the same place on
+    # both doors. A document whose type declares its own `status` field would
+    # otherwise have that field lifted away by an UPDATE after surviving its
+    # create.
+    attrs = from_envelope(attrs, declared_status_field?(type, attrs, dataset, opts))
+    # Gyldendal parity E1.8 — see create: the autosave/patch door derives the
+    # title the same way, so an existing titleless row is back-filled on save.
+    attrs = TitleDerivation.maybe_derive(attrs, type, dataset, opts)
     raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id)
     doc_id = raw_id && DraftId.draft_id(raw_id)
 
@@ -1409,10 +1426,35 @@ defmodule Barkpark.Content.Writer do
   # `Sync.Applier.apply_upsert` mirrors an upstream row verbatim inside one
   # transaction, so a refusal would roll back the batch and wedge the replica.
   # `:source` is server-set on every HTTP door, so no request body can reach it.
+  #
+  # THE THIRD BYPASS, NAMED (cch-w29-bl-d307-guard-bypassed-by-create-patch-publish).
+  # Two windows were already enumerated above and closed — `do_upsert_document`'s
+  # own INSERT branch (the legacy `POST /api/documents/task` door), and a
+  # `drafts.`-prefixed `parent_id`. A THIRD was open and, worse, was written
+  # down as a design property rather than a hole: this guard head-matched
+  # `nil = prev_doc`, so it was a BIRTH guard, and a birth guard cannot see the
+  # write that carries the term when the term arrives SECOND. PROVEN LIVE
+  # against guerrilla in wave 29, three calls: create the row BARE under the
+  # epic (lands — absence is the warn tier), PATCH `surface` to the very prose
+  # a create had just been refused for (200), PUBLISH (200). The published row
+  # then read back `"surface":"cloud control plane - probe"` under
+  # `parent_id: cloud-console-hardening-epic`. So "an off-vocabulary term
+  # cannot enter the epic" was false as stated, and the sentence that made it
+  # look intentional — "every UPDATE arriving here is structurally untouched" —
+  # was the reassuring one.
+  #
+  # CLOSED BY DELETING THE `nil` HEAD, not by adding a fourth guard: the clause
+  # now runs on updates too, and the birth/update distinction survives exactly
+  # where it is load-bearing. An update whose merged `surface` is off-vocabulary
+  # is refused UNLESS it equals what the row already carried (`previous_surface/1`
+  # below) — grandfathered rows stay patchable on every other field, which is
+  # what keeps this a guard on the WRITE rather than a retroactive audit of the
+  # corpus. The absent-surface WARN stays birth-only; counting it per patch
+  # would make `grep -c` measure patch traffic instead of filings.
   @cch_epic_parent "cloud-console-hardening-epic"
   @cch_surfaces ~w(console instrument ledger)
 
-  defp ensure_task_surface_declared("task", attrs, doc_id, nil = _prev_doc, opts) do
+  defp ensure_task_surface_declared("task", attrs, doc_id, prev_doc, opts) do
     content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
     parent = Map.get(content, "parent_id") || Map.get(content, :parent_id)
     surface = Map.get(content, "surface") || Map.get(content, :surface)
@@ -1427,25 +1469,48 @@ defmodule Barkpark.Content.Writer do
       blank?(surface) ->
         # ONE greppable line, deliberately (the birth fence's precedent): this
         # fires on every undeclared epic filing, so its value is that it can be
-        # COUNTED — `grep -c "filing law: undeclared surface"`.
-        Logger.warning(
-          "filing law: undeclared surface on epic task birth #{inspect(doc_id)} — no " <>
-            "content.surface (allowed; the backfill is not yet producible — 5 of 56 live " <>
-            "orphans carry one. Declare it with one of: " <>
-            Enum.join(@cch_surfaces, " | ") <> ")"
-        )
+        # COUNTED — `grep -c "filing law: undeclared surface"`. BIRTH ONLY: an
+        # update that leaves the term absent is not a new undeclared filing, and
+        # logging it would make the count grow with unrelated patch traffic.
+        if is_nil(prev_doc) do
+          Logger.warning(
+            "filing law: undeclared surface on epic task birth #{inspect(doc_id)} — no " <>
+              "content.surface (allowed; the backfill is not yet producible — 5 of 56 live " <>
+              "orphans carry one. Declare it with one of: " <>
+              Enum.join(@cch_surfaces, " | ") <> ")"
+          )
+        end
 
         :ok
 
-      surface not in @cch_surfaces ->
-        {:error, {:invalid_task_content, birth_surface_term_error(surface)}}
+      surface in @cch_surfaces ->
+        :ok
+
+      # GRANDFATHERED, and only this: the term is off-vocabulary but the write
+      # does not CHANGE it, so this update did not carry the defect in. Rows
+      # born before the guard (and the ones the create→patch→publish window let
+      # through while it was open) stay patchable on every OTHER field —
+      # criterion 2 of the row. A write that touches `surface` itself falls
+      # through to the refusal below, on an update exactly as on a birth.
+      not is_nil(prev_doc) and surface == previous_surface(prev_doc) ->
+        :ok
 
       true ->
-        :ok
+        {:error, {:invalid_task_content, birth_surface_term_error(surface)}}
     end
   end
 
   defp ensure_task_surface_declared(_type, _attrs, _doc_id, _prev_doc, _opts), do: :ok
+
+  # `attrs` reaching the upsert gate is already the FINAL whole-document content
+  # (patch merging ran in `upsert_document/4`), so the incoming `surface` is the
+  # MERGED value — indistinguishable, on its own, from a term the row already
+  # carried. The previous value is what makes an unrelated patch of a
+  # grandfathered row separable from a patch that writes the term.
+  defp previous_surface(%Document{content: content}),
+    do: Map.get(content || %{}, "surface") || Map.get(content || %{}, :surface)
+
+  defp previous_surface(_prev_doc), do: nil
 
   # The epic slug, drafts-normalised: a draft filing carries
   # `parent_id: "drafts.cloud-console-hardening-epic"` from the same
@@ -1771,7 +1836,7 @@ defmodule Barkpark.Content.Writer do
   @reserved_in ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt doc_id type dataset rev title status content)
 
   @doc false
-  def from_envelope(attrs) do
+  def from_envelope(attrs, own_status? \\ false) do
     cond do
       # Already legacy shape — pass through, but honor a Sanity-style "_id"
       # when no "doc_id" was given. Mixing `_id` with a nested `content` map
@@ -1786,8 +1851,19 @@ defmodule Barkpark.Content.Writer do
       true ->
         id = Map.get(attrs, "_id") || Map.get(attrs, "doc_id")
         title = Map.get(attrs, "title")
-        status = Map.get(attrs, "status", "draft")
-        content = attrs |> Map.drop(@reserved_in) |> keep_own_content_field(attrs)
+
+        # [own-status-field] When the TYPE declares its own `status` field, the
+        # key stops being an envelope key for this write: it is not lifted (the
+        # lifecycle takes its default) and it is not dropped from the fold, so
+        # it lands in `content` like every other declared field.
+        {status, reserved} =
+          if own_status? do
+            {"draft", @reserved_in -- ["status"]}
+          else
+            {Map.get(attrs, "status", "draft"), @reserved_in}
+          end
+
+        content = attrs |> Map.drop(reserved) |> keep_own_content_field(attrs)
 
         %{
           "doc_id" => id,
@@ -2064,6 +2140,90 @@ defmodule Barkpark.Content.Writer do
   end
 
   defp refuse_colliding_status(_attrs), do: :ok
+
+  # [own-status-field] gfr-w1-flat-status-enum-valid-collision: the residue the
+  # refusal above could not reach, and why it is answered from the SCHEMA.
+  #
+  # `refuse_colliding_status/1` can only see the VALUE, and a flat
+  # `"status": "archived"` is byte-identical whether the caller meant the
+  # envelope's lifecycle key or their own order/subscription/stock field. On the
+  # value alone the two are indistinguishable, so the previous behaviour picked
+  # one silently: `archived | completed | active | planning` were written as the
+  # DOCUMENT's lifecycle state and the caller's field vanished from `content`,
+  # HTTP 200, no error. (`published` was additionally coerced to `draft` by the
+  # draft-prefix rule in `create_document/4`, so that one lost the value too.)
+  #
+  # THE SCHEMA IS THE ONLY PLACE THE INTENT IS WRITTEN DOWN, and it is written
+  # down BEFORE the write: a type that declares a `status` field has said, in
+  # its own definition, that `status` is one of its fields. So this asks it. The
+  # rejected alternative was a `_status` envelope key: it resolves the ambiguity
+  # too, but it makes the FLAT envelope's documented `status` (pinned by
+  # `writer_test`'s "coerces flat Sanity-style envelope") a breaking change for
+  # every caller that ever used it, and it asks the caller to know a Barkpark
+  # spelling that no Sanity client emits. A Sanity-style client sends the
+  # document's own fields flat and expects `_`-prefixed keys to be the system's;
+  # a plain `status` on a type whose schema declares `status` is, to that
+  # client, unambiguously its own field.
+  #
+  # BACKWARD COMPATIBILITY, stated: this changes NOTHING for a type that does
+  # not declare a `status` field — the flat envelope's lifecycle `status` keeps
+  # lifting exactly as documented, and the off-vocabulary refusal keeps firing.
+  # The only behaviour that moves belongs to types that declare the field, and
+  # for those the previous behaviour was silent data loss, so there is no
+  # working caller to migrate: nobody was reading back a value that was never
+  # stored. The `writer_test` pins call `from_envelope/1`, whose default is the
+  # legacy reading, so they pass unchanged.
+  #
+  # COST, AND WHERE THE QUESTION IS ASKED. One `get_schema` read, and only when
+  # the flat branch is taken AND a top-level `status` key is present. It is
+  # asked AFTER `refuse_colliding_status/1`, never before, so it can only ever
+  # be reached by a write that was already going to SUCCEED — the branch that
+  # was silently losing data. That ordering is deliberate: `writer_test`'s
+  # collision cases run with no sandbox at all, on the stated property that the
+  # refusal "fires before any Repo access", and moving the read ahead of it
+  # would have made a refusal cost a query.
+  #
+  # THE RESIDUAL, NAMED. Because the refusal runs first, an OFF-vocabulary flat
+  # `status` (`"in_stock"`) is still refused on a declaring type — the schema is
+  # never consulted for it. That is not the defect this row is about: the caller
+  # gets a 422 that NAMES the collision and tells them to nest the document, so
+  # nothing is lost and there is something to act on. The defect was the SILENT
+  # branch, where a lifecycle word was accepted, rewrote the row's lifecycle and
+  # dropped the field with a 200. Making the off-vocabulary arm schema-aware too
+  # means a Repo read on a refusal path, which is a different trade and a
+  # different row.
+  #
+  # A missing schema, a non-list `fields`, or any error reads as NOT DECLARED,
+  # which is today's behaviour: this predicate can only ever move a write from
+  # the lossy reading to the lossless one.
+  defp declared_status_field?(type, attrs, dataset, opts)
+       when is_binary(type) and is_binary(dataset) and is_map(attrs) do
+    cond do
+      is_map(Map.get(attrs, "content")) -> false
+      not Map.has_key?(attrs, "status") -> false
+      true -> schema_declares_status?(type, dataset, opts)
+    end
+  end
+
+  defp declared_status_field?(_type, _attrs, _dataset, _opts), do: false
+
+  # `resolve_schema/3`, not the raw `get_schema/3`: a type declared GLOBALLY
+  # (`workspace_id: nil`) must answer the same way for a tenant-scoped write as
+  # for an unscoped one, or the same document would keep its `status` field in
+  # one workspace and lose it in another. The two-step resolver is the lookup
+  # that walks tenant → workspace → global.
+  defp schema_declares_status?(type, dataset, opts) do
+    case Content.resolve_schema(type, dataset, opts) do
+      {:ok, %{fields: fields}} when is_list(fields) ->
+        Enum.any?(fields, fn
+          f when is_map(f) -> Map.get(f, "name") == "status" or Map.get(f, :name) == "status"
+          _ -> false
+        end)
+
+      _ ->
+        false
+    end
+  end
 
   # Same envelope as the orphan-key refusal: `Content.Errors` already maps
   # `{:error, %Ecto.Changeset{}}` to the canonical 422 `validation_failed`, and

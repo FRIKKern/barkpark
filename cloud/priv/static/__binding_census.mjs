@@ -236,6 +236,16 @@ import path from "node:path";
 import { bootScenario, flush } from "./__preview__/smoke.mjs";
 import { SCENARIOS, SCENARIO_NAMES, route } from "./__preview__/scenarios.mjs";
 import { scanControls } from "./__preview__/member-authority-sweep.mjs";
+// THE ROUTE -> FENCE TABLE IS NOT HERE ANY MORE (cch-w50-bl). The tier names,
+// the inline-cond overlay and the derivation live in __route_fence.mjs, which
+// member-authority-sweep.mjs imports too — the sweep used to keep a SECOND,
+// typed fence column citing this file's PIN rows in prose. One table now, and
+// (2n) below re-reads the PIN against it so the two cannot drift apart.
+import {
+  A_USER, A_TADMIN, A_PTADMIN, A_PTOWNER, A_OPERATOR, A_USER_OR_PAT, A_ABILITY, H_TEAM_ROLE,
+  INLINE_COND_ROUTES, INLINE_COND_EXCLUDED,
+  ROUTE_TIERS, ELEVATED, fenceFor, overlayGapReport, routeKey,
+} from "./__route_fence.mjs";
 
 const here = path.dirname(new URL(import.meta.url).pathname);
 // ── THE FIXTURE MODE FLAG IS RESOLVED HERE, AT THE `APP` BINDING ────────────
@@ -316,14 +326,11 @@ const src = fs.readFileSync(APP, "utf8");
 // dishonesty is owned by a filed task". It is never a way to quiet the gate.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const A_USER = "Auth.require_user";
-const A_TADMIN = "Auth.require_team_admin";
-const A_PTADMIN = "Auth.require_current_team_admin";
-const A_PTOWNER = "Auth.require_current_team_owner";
-const A_OPERATOR = "Auth.require_platform_operator";
-const A_USER_OR_PAT = "Auth.require_user_or_pat";
-const A_ABILITY = "Auth.require_ability";
-const H_TEAM_ROLE = 'with_team_role(conn, "admin")';
+// The A_* tier names are IMPORTED from __route_fence.mjs (see the header
+// there): the sweep needs the same vocabulary to derive a fence, and two files
+// spelling `Auth.require_user_or_pat` independently is how the strings drift.
+// H_TEAM_ROLE rides with them: the shared derivation has to classify it as
+// elevated, so it is the same string on both sides or neither.
 const H_TEAM_SITE = 'with_team_site(conn, {:ability, "write"})';
 const H_TEAM_SITE_M = "with_team_site(conn, fn)";
 const H_PROXY = "proxy_instance_webhook/2";
@@ -546,45 +553,14 @@ const RESOLVERS = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE INLINE-COND OVERLAY (charter D421) — eight router routes whose refusal of a
-// non-admin lives in a `cond` clause, invisible to any `Auth.*` grep. Recorded
-// here because four of the console's unpredicated elevated writes are elevated
-// ONLY by these, and a census that read `Auth.*` alone would call them member.
-//
-// SIX, NOT SEVEN. cch-w36-s5's brief mandated "the SEVEN post-guard inline-cond
-// routes"; the grep it prescribed returns SIX. The seventh site BY CONTENT is
-// the one reading `admin? = Accounts.team_admin?(user, team)` — invisible to
-// that grep because it binds a local; its line is DERIVED and printed as the
-// overlay's EXCLUDED row, never written down here. It is EXCLUDED BY NAME, not counted: it
-// is a self-scope NARROWING on a GET (the notification delivery log fences a
-// member to their own rows), never a refusal. Inventing a seventh row would
-// have made the overlay wrong in the other direction.
-//
-// EIGHT SINCE PDF-D94 (pdf-bl-console-key-custody): the agent-key POST and its
-// status-poll GET both refuse non-admin sessions inside the same cond shape as
-// POST /v1/fleet/supports (the read narrates a write only admins can make, so
-// it carries the same disjunction). Recorded the day they landed, in the same
-// commit as the routes.
+// THE INLINE-COND OVERLAY (charter D421) — MOVED, NOT DELETED (cch-w50-bl).
+// The routes, the SIX-not-seven ruling, the excluded local-binding site and the
+// never-pin-a-line-number ruling now live in __route_fence.mjs, imported at the
+// top of this file and imported by member-authority-sweep.mjs too. The overlay
+// is half of the route -> fence answer, and the answer is one table or it is
+// two tables that disagree. (2f) below still checks it against router.ex, and
+// (2n) checks the shared table against the PIN.
 // ═══════════════════════════════════════════════════════════════════════════
-
-// THE ROUTES ARE PINNED. THE LINE NUMBERS ARE NOT, AND NEVER AGAIN WILL BE.
-// These six used to carry a typed `line:` that the census PRINTED, and all six
-// were stale (drift 82, 87, 94, 98, 230, 235; router.ex at the recorded 8082 is
-// now a bare `conn`). Pin-and-check was built and REFUSED: router.ex took 102
-// commits in 30 days and all six of these lines moved within a SINGLE calendar
-// day, so a numeral corrected at merge is wrong by the next one — and this
-// census runs FIRST of three in the same CI job (console-harness.yml), so a
-// drift red would convert an unrelated router insertion into a three-census
-// outage. DERIVE AND PRINT; never pin and compare.
-const INLINE_COND_ROUTES = [
-  "POST /v1/fleet/supports",
-  "DELETE /v1/fleet/supports/:id",
-  "POST /v1/barkparks/:id/agent-key",
-  "GET /v1/barkparks/:id/agent-key (status poll — same cond, admin-narrated read)",
-  "POST /v1/launch + POST /v1/go-live (go_live/1)",
-  "POST /v1/resurrect (resurrect/1)",
-];
-const INLINE_COND_EXCLUDED = { why: "self-scope NARROWING on GET /v1/notifications/deliveries — binds `admin?` as a local, never refuses" };
 
 // KEY ON THE TWO PRECISE FORMS, NEVER THE BARE STRING. `grep -n 'team_admin?'
 // router.ex` returns MORE hits than the eight refusal-form sites and the one
@@ -658,6 +634,41 @@ const innermost = (pos) => {
   return best;
 };
 const lineOf = (i) => src.slice(0, i).split("\n").length;
+
+// Comments and string bodies blanked, LENGTH PRESERVED, so every offset still
+// maps to the same line in `src`. Blanking matters twice over: this file's own
+// prose says "instanceAdminAuthority()" in half a dozen comments, and counting
+// those as call sites would invent read sites that do not exist. Module-level
+// because arms (2i) and (2o) both need it and two copies could drift.
+const codeMask = (s) => {
+  const out = s.split("");
+  let inS = null, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inS) {
+      if (esc) { esc = false; continue; }
+      if (c === "\\") { esc = true; continue; }
+      if (c === inS) inS = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { inS = c; continue; }
+    if (c === "/" && s[i + 1] === "/") {
+      const nl = s.indexOf("\n", i);
+      const end = nl < 0 ? s.length : nl;
+      for (let k = i; k < end; k++) out[k] = " ";
+      i = end;
+      continue;
+    }
+    if (c === "/" && s[i + 1] === "*") {
+      const close = s.indexOf("*/", i + 2);
+      const end = close < 0 ? s.length : close + 2;
+      for (let k = i; k < end; k++) if (out[k] !== "\n") out[k] = " ";
+      i = end - 1;
+      continue;
+    }
+  }
+  return out.join("");
+};
 
 // Read the FIRST argument expression after `api("VERB",` — up to the top-level
 // comma (or the closing paren for a one-argument call), tracking nesting and
@@ -1812,6 +1823,97 @@ if (dupes.length) {
   console.log(`  EXCLUDED  router.ex:${localLines[0]} — ${INLINE_COND_EXCLUDED.why}`);
 }
 
+// (2n) THE SHARED ROUTE -> FENCE TABLE MUST AGREE WITH THIS PIN (cch-w50-bl).
+// ((2m) is the population split that landed in #17269; this arm is the next letter.)
+//
+// __route_fence.mjs is the ONE route -> fence table, and member-authority-sweep.mjs
+// derives every one of its hook fences from it. Before cch-w50-bl the sweep kept a
+// SECOND, typed fence column whose only tie to this file was a prose citation
+// ("census PIN: runPromote, ruling (a)") that nothing re-read — so the census
+// could move and the sweep would keep answering the old tier, silently, forever.
+//
+// THE FAIL-OPEN THIS ARM EXISTS FOR. A require_*-only derivation is not merely
+// incomplete, it is WRONG IN THE PERMISSIVE DIRECTION: POST /v1/fleet/supports is
+// mounted under Auth.require_user_or_pat and derives to plain member, while its
+// refusal of a non-admin session lives in a `cond` no `Auth.*` grep can see. The
+// shipped derivation layers the inline-cond overlay on top, and the two halves of
+// this arm make that losable from both ends:
+//
+//   · overlayGapReport() — a route typed `overlay_required` whose naive fence is
+//     no longer raised (delete an overlay row and this fires, by route name), or
+//     a route the overlay raises that nobody typed.
+//   · the PIN cross-read — every table row names the PIN key it is proven against,
+//     and this re-reads it: same tier string, and the derived fence's
+//     elevated-ness equal to the row's own `elevated` verdict. Under-fence a route
+//     in the shared table and the census's own pin refutes it here.
+//
+// A table row may decline to name a PIN key, but then it must say WHY and this
+// prints the reason — the PIN is 80 WRITE call sites, so a read route or a band
+// label has nothing there to bind to. Bind or explain is a rule, not a list, which
+// is why a third unbound row cannot appear quietly.
+{
+  const gap = overlayGapReport();
+  if (!gap.ok) {
+    die2([
+      "FAIL(2): the shared route -> fence derivation lost the inline-cond overlay.",
+      "  __route_fence.mjs derives a route's fence from its Auth.require_* tier and THEN raises it",
+      "  with the overlay. Without the raise, a require_*-only answer is fail-open — it calls an",
+      "  admin-fenced route member-reachable, and the console offers a write the server refuses.",
+      "",
+      ...gap.bad.map((b) => "  " + b),
+    ]);
+  }
+
+  const bad = [];
+  const unbound = [];
+  for (const entry of ROUTE_TIERS) {
+    const derived = fenceFor(entry);
+    if (!entry.pin) {
+      if (!entry.why_no_pin) {
+        bad.push(entry.key + " names no PIN key and gives no reason. Bind it to a PIN row, or write why_no_pin.");
+      } else {
+        unbound.push(entry);
+      }
+      continue;
+    }
+    const rows = PIN.filter((r) => routeKey(r.verb, r.route) === routeKey(...entry.pin.split(/\s+(.+)/)));
+    if (!rows.length) {
+      bad.push(entry.key + " claims PIN key `" + entry.pin + "`, and the PIN has no row on that route any more. " +
+        "Either the call site went away (drop the table row, or say why_no_pin) or the route was renamed.");
+      continue;
+    }
+    for (const r of rows) {
+      if ((r.auth_fn || null) !== (entry.auth_fn || null)) {
+        bad.push(entry.key + ": the table says tier `" + entry.auth_fn + "`, PIN row " + r.fn + " says `" + r.auth_fn +
+          "`. One of them is describing a router that no longer exists.");
+      }
+      if (ELEVATED.has(derived) !== !!r.elevated) {
+        bad.push(entry.key + ": the shared derivation answers " + derived + " (elevated=" + ELEVATED.has(derived) +
+          ") and PIN row " + r.fn + " scores elevated=" + !!r.elevated + ". A route cannot be above plain membership " +
+          "for one instrument and at it for the other — that disagreement IS the defect class this table was extracted " +
+          "to end.");
+      }
+    }
+  }
+  if (bad.length) {
+    die2([
+      "FAIL(2): the shared route -> fence table and this PIN disagree.",
+      ...bad.map((b) => "  " + b),
+    ]);
+  }
+
+  const gapKeys = gap.lines.length;
+  console.log("");
+  console.log("shared route->fence table (cch-w50-bl): " + ROUTE_TIERS.length + " route(s), " +
+    (ROUTE_TIERS.length - unbound.length) + " bound to a PIN row and re-read just now");
+  console.log("  a require_*-only derivation UNDER-FENCES " + gapKeys + " of them — the overlay is what catches these:");
+  for (const l of gap.lines) console.log("    " + l);
+  for (const u of unbound) {
+    console.log("  NOT PIN-BOUND  " + u.key + " (" + fenceFor(u) + ")");
+    console.log("                 " + u.why_no_pin);
+  }
+}
+
 // (2g) EVERY PINNED PREDICATE MUST NAME A REAL DECLARATION IN app.js.
 //
 //      WHAT THIS IS: DECAY PROTECTION. Nothing else. `predicate` is a PINNED
@@ -2287,39 +2389,8 @@ if (dupes.length) {
 //               `read`. This is what reds when a row quietly reverts to no
 //               fence, with no graph and no hop walk.
 {
-  // Comments blanked, LENGTH PRESERVED, so every offset still maps to the same
-  // line in `src`. Blanking matters twice over: this file's own prose says
-  // "instanceAdminAuthority()" in half a dozen comments, and counting those as
-  // call sites would invent read sites that do not exist.
-  const codeMask = (s) => {
-    const out = s.split("");
-    let inS = null, esc = false;
-    for (let i = 0; i < s.length; i++) {
-      const c = s[i];
-      if (inS) {
-        if (esc) { esc = false; continue; }
-        if (c === "\\") { esc = true; continue; }
-        if (c === inS) inS = null;
-        continue;
-      }
-      if (c === '"' || c === "'" || c === "`") { inS = c; continue; }
-      if (c === "/" && s[i + 1] === "/") {
-        const nl = s.indexOf("\n", i);
-        const end = nl < 0 ? s.length : nl;
-        for (let k = i; k < end; k++) out[k] = " ";
-        i = end;
-        continue;
-      }
-      if (c === "/" && s[i + 1] === "*") {
-        const close = s.indexOf("*/", i + 2);
-        const end = close < 0 ? s.length : close + 2;
-        for (let k = i; k < end; k++) if (out[k] !== "\n") out[k] = " ";
-        i = end - 1;
-        continue;
-      }
-    }
-    return out.join("");
-  };
+  // codeMask is module-level (see its own note): comments and string bodies
+  // blanked, LENGTH PRESERVED, so every offset still maps to the same line.
   const code = codeMask(src);
 
   const declsOf = (name) => fns.filter((f) => f.name === name);
@@ -2553,6 +2624,282 @@ if (dupes.length) {
     `${byBand.size} band(s) — ` + [...byBand].map(([b, n]) => `${b} ×${n}`).join(", "));
   console.log("  The accounting is over READ SITES, not rows: rows share reads, so a row whose read a");
   console.log("  sibling already claims is NOT discovered here. Anti-decay bookkeeping, never discovery.");
+}
+
+// (2o) A PAINT-TIME BAND READ ON A VIEW loadMe CANNOT RE-ENTER (cch-w48-bl).
+//
+//      THE DEFECT, MEASURED TWICE IN ONE WAVE, ON TWO INDEPENDENTLY-BUILT
+//      SLICES. cch-w48-s2 fenced #site-github on instanceAdminAuthority(), read
+//      INLINE in loadSite. cch-w48-s3 fenced the GitHub card's Disconnect and
+//      its Connect anchor on providerCanWrite(), read off loadGithub's mount.
+//      Both read the band ONCE, at paint time, on a surface loadMe had no
+//      repaint seam for — so a real ADMIN who deep-links before /v1/me answers
+//      takes the CLOSED arm and keeps it for the whole page life. That is
+//      charter D521's stranding shape, reproduced on two new surfaces BY THE
+//      VERY FENCES meant to make this console honest. Both were caught BY HAND
+//      in review, which does not scale: loadMe's success arm now carries eight
+//      such seams and, until this arm, nothing derived the set.
+//
+//      WHAT IS DERIVED, AND OUT OF WHAT. Nothing below is a typed list except
+//      the two named holes, and both of those are checked for staleness.
+//        · THE BANDS — every distinct non-null `predicate` in the PIN that
+//          app.js declares as a function. Not typed here: it grows the day a
+//          row pins a new band, and shrinks when one is retired.
+//        · THE applyRoute-ENTERED SET — read out of applyRoute's OWN DISPATCH
+//          LITERAL: the `if (r.view === "…") …` chain, consequent by
+//          consequent, brace-matched. IT IS NOT A CALL GRAPH, and it must never
+//          become one. Charter D517 refuted that shape BY BUILDING IT: no hop
+//          threshold separated a real fence from operatorRouteAllowed graph
+//          noise, and this console fences by HIDING ELEMENTS, which a call
+//          graph is blind to by category. ZERO hops are walked below.
+//        · THE READERS — the enclosing function of every live call of every
+//          band. The (2i-4) machinery exactly: codeMask so this file's own
+//          prose cannot invent a read site, innermost() for the enclosure.
+//        · THE SEAMS — the calls inside loadMe's SUCCESS arm, brace-matched
+//          from `if (r.ok && r.data) {`. The failed arm answers a different
+//          question (it is terminal) and is not read here.
+//
+//      THE RULE, and why it is over the WHOLE entry list. A view whose
+//      dispatch entry reads a band is decided by that band at paint time. What
+//      it means to PAINT that view is the entry list the literal names for it —
+//      that list IS the definition — so every entry of such a view must be
+//      re-enterable when the answer finally lands: loadMe's success arm calls
+//      it, or calls a NAMED ALTERNATE that re-reads the same band, or the entry
+//      is named in VIEW_SEAM_EXEMPT with a stated reason.
+{
+  const code = codeMask(src);
+  const declsOf = (name) => fns.filter((f) => f.name === name);
+  const esc0 = (n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const KEYWORDS = new Set(["if", "for", "while", "switch", "catch", "return", "function", "typeof", "new", "do", "else"]);
+  const declared = new Set(fns.map((f) => f.name));
+  // Only names app.js DECLARES count as calls: `history.replaceState(` and
+  // `location.assign(` are in these consequents too, and counting them would
+  // demand a loadMe seam for a browser API.
+  const callsIn = (s) => [...new Set(
+    [...s.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)]
+      .map((m) => m[1])
+      .filter((n) => !KEYWORDS.has(n) && declared.has(n)))];
+  const braceSpan = (s, from) => {
+    let d = 0, j = from;
+    for (; j < s.length; j++) {
+      if (s[j] === "{") d++;
+      else if (s[j] === "}") { d--; if (!d) { j++; break; } }
+    }
+    return j;
+  };
+
+  // ── THE BANDS, derived from the PIN's own predicate column ───────────────
+  const BANDS2O = [...new Set(PIN.map((r) => r.predicate).filter((p) => p && declsOf(p).length))].sort();
+  if (!BANDS2O.length) {
+    die2([
+      "FAIL(2o): no PIN row names an authority band app.js declares.",
+      "  This arm derives its band list from the `predicate` column. An empty list would make",
+      "  every check below pass over nothing, which is the one failure mode a fail-closed gate",
+      "  may not have.",
+    ]);
+  }
+
+  // ── THE DISPATCH LITERAL ─────────────────────────────────────────────────
+  const arDecls = declsOf("applyRoute");
+  if (arDecls.length !== 1) {
+    die2([
+      "FAIL(2o): applyRoute is not a single `function applyRoute(` declaration in app.js.",
+      `  Found ${arDecls.length}. The applyRoute-entered set is read out of this function's own`,
+      "  dispatch literal; with no unique declaration there is nothing to read, and this arm",
+      "  refuses rather than guessing. Re-point it — do NOT replace it with a call graph (D517).",
+    ]);
+  }
+  const ar = arDecls[0];
+  const arBody = code.slice(ar.start, ar.end);
+  const DISPATCH = [];
+  {
+    const byView = new Map();
+    const re = /if\s*\(\s*r\.view\s*===\s*"([A-Za-z0-9_-]+)"/g;
+    let m;
+    while ((m = re.exec(arBody))) {
+      const close = arBody.indexOf(")", m.index + m[0].length);
+      if (close < 0) continue;
+      let i = close + 1;
+      while (i < arBody.length && /\s/.test(arBody[i])) i++;
+      const end = arBody[i] === "{" ? braceSpan(arBody, i)
+        : (arBody.indexOf(";", i) < 0 ? arBody.length : arBody.indexOf(";", i) + 1);
+      const row = byView.get(m[1]) || { view: m[1], line: lineOf(ar.start + m.index), entries: [] };
+      row.entries = [...new Set(row.entries.concat(callsIn(arBody.slice(i, end))))];
+      if (!byView.has(m[1])) { byView.set(m[1], row); DISPATCH.push(row); }
+    }
+  }
+  if (!DISPATCH.length) {
+    die2([
+      "FAIL(2o): applyRoute no longer carries an `if (r.view === \"…\")` dispatch literal.",
+      "  The router may have been refactored into a table object or a switch — both are fine",
+      "  shapes, and both need THIS reader re-pointed at the new literal. What is NOT fine is",
+      "  falling back to a call graph to find the view loaders (charter D517).",
+    ]);
+  }
+
+  // ── THE READERS (the (2i-4) machinery, over every derived band) ──────────
+  const readers2O = new Map(); // enclosing fn -> Set(band)
+  for (const band of BANDS2O) {
+    const re = new RegExp("\\b" + esc0(band) + "\\s*\\(", "g");
+    let m;
+    while ((m = re.exec(code))) {
+      if (/\bfunction\s+$/.test(code.slice(Math.max(0, m.index - 40), m.index))) continue;
+      const f = innermost(m.index);
+      const name = f ? f.name : "(top level)";
+      if (!readers2O.has(name)) readers2O.set(name, new Set());
+      readers2O.get(name).add(band);
+    }
+  }
+  const bandsRead = (fn) => readers2O.get(fn) || new Set();
+
+  // ── loadMe's SUCCESS ARM ─────────────────────────────────────────────────
+  const lmDecls = declsOf("loadMe");
+  if (lmDecls.length !== 1) {
+    die2([
+      "FAIL(2o): loadMe is not a single `function loadMe(` declaration in app.js.",
+      `  Found ${lmDecls.length}. Every re-entry seam this arm checks lives in loadMe's success`,
+      "  arm; with no unique declaration the seam set would read EMPTY and this arm would red on",
+      "  every view at once, which is a broken instrument, not a finding.",
+    ]);
+  }
+  const lmBody = code.slice(lmDecls[0].start, lmDecls[0].end);
+  const okAt = lmBody.search(/if\s*\(\s*r\.ok\s*&&\s*r\.data\s*\)\s*\{/);
+  if (okAt < 0) {
+    die2([
+      "FAIL(2o): loadMe no longer opens its success arm with `if (r.ok && r.data) {`.",
+      "  That brace-matched span IS the seam set. Re-point this reader at the new shape; do not",
+      "  widen it to the whole function, because the FAILED arm's re-entries are a different",
+      "  claim (a failed /v1/me is terminal and re-enters to paint the fault, not the grant).",
+    ]);
+  }
+  const successArm = lmBody.slice(lmBody.indexOf("{", okAt), braceSpan(lmBody, lmBody.indexOf("{", okAt)));
+  const SEAMS = new Set(callsIn(successArm));
+
+  // ── THE TWO NAMED HOLES ──────────────────────────────────────────────────
+  //
+  // An ALTERNATE seam: loadMe re-enters something OTHER than the dispatch
+  // entry, on purpose. It is not an exemption — the alternate is still demanded
+  // by name, and it must still READ the band, or it is a repaint that never
+  // re-asks the question and this arm says so.
+  const SEAM_ALIAS = {
+    loadInstance: {
+      seam: "repaintInstanceAuthority",
+      why: "cch-w46-s3/cch-w46-rv decided AGAINST re-entering the loader: reloadInstanceView() hard-returns on the usage and webhooks tabs, so re-entering would fix Overview and leave those two stranded — the exact bug the seam exists to close. repaintInstanceAuthority re-reads instanceAdminAuthority() and re-offers the rail, the header strip and the Updates panel on every tab",
+    },
+  };
+  // A true EXEMPTION: an entry of a band-decided view that needs no seam at
+  // all. Every entry states its reason, and a name here that has stopped being
+  // a dispatch entry of a band-decided view reds below rather than passing.
+  const VIEW_SEAM_EXEMPT = {
+    loadCapabilityMatrix: {
+      why: "READ-ONLY COPY, not an affordance: it paints #provider-matrix from GET /v1/providers/capabilities and offers no control at all — no write, no door, nothing an authority answer could withhold. There is no arm for a late /v1/me to flip, so a seam would re-issue a request to redraw identical bytes",
+    },
+  };
+
+  const decided = DISPATCH.filter((d) => d.entries.some((e) => readers2O.has(e)));
+  const decidedEntries = new Set(decided.flatMap((d) => d.entries));
+
+  const missing = [];
+  const stale = new Set();
+
+  for (const [fn, ex] of Object.entries(VIEW_SEAM_EXEMPT)) {
+    if (!ex.why || ex.why.length < 40) {
+      stale.add(`  VIEW_SEAM_EXEMPT[${fn}] carries no stated reason. A hole nobody named is a lie.`);
+    }
+    if (!decidedEntries.has(fn)) {
+      stale.add(`  VIEW_SEAM_EXEMPT[${fn}] is stale: ${fn} is no longer an entry of any band-decided view in ` +
+        "applyRoute's dispatch literal, so the hole it excuses does not exist any more.");
+    }
+  }
+  for (const [fn, al] of Object.entries(SEAM_ALIAS)) {
+    if (!al.why || al.why.length < 40) {
+      stale.add(`  SEAM_ALIAS[${fn}] carries no stated reason for re-entering ${al.seam} instead of ${fn}.`);
+    }
+    if (!decidedEntries.has(fn)) {
+      stale.add(`  SEAM_ALIAS[${fn}] is stale: ${fn} is no longer an entry of any band-decided view in ` +
+        "applyRoute's dispatch literal.");
+    }
+    if (!declsOf(al.seam).length) {
+      stale.add(`  SEAM_ALIAS[${fn}] names ${al.seam}, which app.js does not declare.`);
+    }
+  }
+
+  for (const d of decided) {
+    const via = d.entries.filter((e) => readers2O.has(e));
+    const viaBands = [...new Set(via.flatMap((e) => [...bandsRead(e)]))];
+    for (const e of d.entries) {
+      if (VIEW_SEAM_EXEMPT[e]) continue;
+      const al = SEAM_ALIAS[e];
+      const need = al ? al.seam : e;
+      if (al && !viaBands.some((b) => bandsRead(al.seam).has(b))) {
+        stale.add(`  SEAM_ALIAS[${e}] names ${al.seam} as the alternate seam for #${d.view}, but ${al.seam} no ` +
+          `longer reads any of that view's bands [${viaBands.join(", ")}] — it repaints without re-asking, so it ` +
+          "cannot heal a surface that was painted on the unknown answer.");
+      }
+      if (!SEAMS.has(need)) {
+        missing.push(`  ${LABEL}:${d.line}  #${d.view} is decided at paint time by ${viaBands.join(", ")} ` +
+          `(read in ${via.join(", ")}); applyRoute enters ${e} to paint it; loadMe's success arm never re-enters ` +
+          (al ? `${need} — ${e}'s pinned alternate seam.` : `${e}.`) +
+          `  STRANDED SURFACE: ${e}. A deep link paints it before /v1/me answers, the fence takes its ` +
+          "closed arm, and nothing re-decides for the rest of the page life.");
+      }
+    }
+  }
+
+  if (missing.length || stale.size) {
+    die2([
+      "FAIL(2o): a view is fenced on an authority band it reads ONCE, at paint time, with no loadMe re-entry.",
+      "  This is charter D521's stranding shape. The band answers /v1/me; a deep link paints the view",
+      "  BEFORE that answer arrives; the fence reads the band once and fails closed; and nothing on the",
+      "  page ever asks again. The user is a real admin looking at the member surface until they reload.",
+      "",
+      "  THE HONEST LIMIT, written here because a gate that overstates its reach is the same lie it is",
+      "  checking for: THIS ARM CLASSIFIES A VIEW ONLY WHEN A DISPATCH ENTRY ITSELF READS A BAND. A view",
+      "  whose band read lives one mount deeper is INVISIBLE to it — loadNotifications paints",
+      "  renderNotifications, which reads notifCanManage; loadMembers paints memberRowHtml, which reads",
+      "  canRemoveMember — and neither view is classified here. That blindness is DELIBERATE: the only",
+      "  way to see through the mount is a call graph, and charter D517 refuted that shape by building",
+      "  it (no hop threshold separates a fence from operatorRouteAllowed noise, and this console fences",
+      "  by HIDING ELEMENTS, which a graph cannot see at all). Note what that costs: loadGithub — one of",
+      "  the two specimens this arm was built for — is caught ONLY because its SIBLING entry loadProviders",
+      "  reads a band and the literal names both under #providers. Had #providers entered loadGithub",
+      "  alone, this arm would have missed the very defect it exists for. It is anti-decay bookkeeping",
+      "  over the entries the literal names, NEVER a discovery instrument for the reads below them.",
+      "",
+      ...missing,
+      ...[...stale],
+      "",
+      "  Fix it by adding the re-entry to loadMe's SUCCESS arm (the eight seams already there are the",
+      "  pattern), or by naming the hole in VIEW_SEAM_EXEMPT with a reason, or — when loadMe deliberately",
+      "  re-enters something else — by pinning that in SEAM_ALIAS. An unexplained exemption is worse",
+      "  than a red.",
+    ]);
+  }
+
+  // The print sits BEHIND the checks, never in front of them.
+  console.log("");
+  console.log(`loadMe re-entry accounting (cch-w48-bl): applyRoute's DISPATCH LITERAL names ${DISPATCH.length} views ` +
+    `(no call graph — D517); ${decided.length} of them are decided at paint time by a band a dispatch entry reads`);
+  console.log(`  bands DERIVED from the PIN's predicate column: ${BANDS2O.join(" · ")}`);
+  console.log("  the literal, verbatim (view -> the functions applyRoute enters to paint it):");
+  for (const d of DISPATCH) {
+    console.log(`    ${LABEL}:${d.line}  ${d.view} -> ${d.entries.join(", ") || "(nothing app.js declares)"}` +
+      (decided.includes(d) ? "   [BAND-DECIDED]" : ""));
+  }
+  for (const d of decided) {
+    const via = d.entries.filter((e) => readers2O.has(e));
+    const viaBands = [...new Set(via.flatMap((e) => [...bandsRead(e)]))];
+    console.log(`  ${d.view}  —  ${viaBands.join(", ")} read in ${via.join(", ")}`);
+    for (const e of d.entries) {
+      const al = SEAM_ALIAS[e];
+      console.log(`    ${e}: ` + (VIEW_SEAM_EXEMPT[e] ? "EXEMPT — " + VIEW_SEAM_EXEMPT[e].why.slice(0, 96) + "…"
+        : al ? `re-entered as ${al.seam} (alias), which re-reads ${[...bandsRead(al.seam)].join(", ")}`
+        : "re-entered by loadMe's success arm"));
+    }
+  }
+  console.log(`  loadMe success-arm seams, DERIVED: ${[...SEAMS].join(", ")}`);
+  console.log("  A view is classified only when a DISPATCH ENTRY reads the band itself. A read one mount");
+  console.log("  deeper (renderNotifications, memberRowHtml) is invisible here, on purpose — D517.");
 }
 
 // (2l) THE NULL-PIN DECAY ARM — PLUMBING DERIVED BY EXECUTION (charter D428).
