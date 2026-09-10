@@ -285,6 +285,19 @@ summary() {
 }
 warn()  { echo "::warning title=Landed mark skipped::landed-mark: $*" >&2; }
 die2()  { echo "landed-mark: CANNOT MEASURE — $*" >&2; exit 2; }
+
+# ── 429 backoff — ONE helper, shared (task-ca8fffa7ca885413) ─────────────────
+# A ledger 429 is BACKPRESSURE, not a fault: scripts/lib/bp-curl.sh sleeps the
+# retry_after the RESPONSE names (bounded), then hands back the final code.
+# Loaded lazily on the first live call so a scratch copy of this script run from
+# a temp dir (the harness's mutants) never reaches it through the fixture door.
+BP_CURL_LIB="${BP_CURL_LIB:-$ROOT/scripts/lib/bp-curl.sh}"
+bp_curl_load() {
+  [ -n "${BP_CURL_LOADED:-}" ] && return 0
+  [ -f "$BP_CURL_LIB" ] || die2 "CANNOT READ ${BP_CURL_LIB} — the shared 429 backoff every ledger call rides is missing"
+  # shellcheck disable=SC1090
+  . "$BP_CURL_LIB"; BP_CURL_LOADED=1
+}
 # The credential refusal is the one loud arm. `::error` so it lifts into the
 # check-run UI instead of dying in a log nobody opens.
 die_auth() {
@@ -811,7 +824,8 @@ ledger_get() { # $1 task id, $2 out file -> echoes an HTTP-ish code
   fi
   local auth=()
   [ -n "${LEDGER_TOKEN:-}" ] && auth=(-H "Authorization: Bearer ${LEDGER_TOKEN}")
-  curl -sS -m 20 -o "$out" -w '%{http_code}' "${auth[@]}" \
+  bp_curl_load
+  bp_curl_code -sS -m 20 -o "$out" "${auth[@]}" \
     "${LEDGER_BASE%/}/v1/tasks/${id}" 2>/dev/null || echo 000
 }
 
@@ -824,7 +838,8 @@ ledger_post() { # $1 task id, $2 body file, $3 out file -> echoes an HTTP-ish co
     echo '{"ok":true}' > "$out"; echo 200
     return 0
   fi
-  curl -sS -m 30 -o "$out" -w '%{http_code}' \
+  bp_curl_load
+  bp_curl_code -sS -m 30 -o "$out" \
     -X POST "${LEDGER_BASE%/}/v1/tasks/${id}/labels" \
     -H "Authorization: Bearer ${LEDGER_TOKEN:-}" \
     -H "Content-Type: application/json" \
@@ -846,7 +861,8 @@ ledger_post_landed() { # $1 task id, $2 body file, $3 out file
     echo '{"ok":true}' > "$out"; echo 200
     return 0
   fi
-  curl -sS -m 30 -o "$out" -w '%{http_code}' \
+  bp_curl_load
+  bp_curl_code -sS -m 30 -o "$out" \
     -X POST "${LEDGER_BASE%/}/v1/tasks/${id}/landed" \
     -H "Authorization: Bearer ${LEDGER_TOKEN:-}" \
     -H "Content-Type: application/json" \
@@ -868,7 +884,8 @@ ledger_post_discharges() { # $1 primary task id, $2 body file, $3 out file
     echo '{"ok":true,"cited":0,"marked":0}' > "$out"; echo 200
     return 0
   fi
-  curl -sS -m 30 -o "$out" -w '%{http_code}' \
+  bp_curl_load
+  bp_curl_code -sS -m 30 -o "$out" \
     -X POST "${LEDGER_BASE%/}/v1/tasks/${id}/discharges" \
     -H "Authorization: Bearer ${LEDGER_TOKEN:-}" \
     -H "Content-Type: application/json" \
@@ -876,7 +893,10 @@ ledger_post_discharges() { # $1 primary task id, $2 body file, $3 out file
 }
 
 # Bounded retry with backoff. 5xx/000 is transient; 401/403 is terminal and
-# never retried (retrying a refused credential just multiplies the log).
+# never retried (retrying a refused credential just multiplies the log). 429 is
+# terminal here too: bp_curl_code already slept the server's own retry_after
+# (bounded), so a 429 that survives it is a quota and this fixed ladder must
+# not become the hardcoded sleep the helper replaced.
 with_retry() { # $1 fn, $2.. args -> sets RC_CODE
   local fn="$1"; shift
   local attempt=1 code delay="$RETRY_DELAY"
@@ -884,7 +904,7 @@ with_retry() { # $1 fn, $2.. args -> sets RC_CODE
     code="$("$fn" "$@")"
     case "$code" in
       2??) RC_CODE="$code"; return 0 ;;
-      401|403|404|409|412|422) RC_CODE="$code"; return 0 ;;
+      401|403|404|409|412|422|429) RC_CODE="$code"; return 0 ;;
     esac
     if [ "$attempt" -ge "$RETRIES" ]; then RC_CODE="$code"; return 0; fi
     note "ledger answered ${code} — retry ${attempt}/${RETRIES} in ${delay}s"

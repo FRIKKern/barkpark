@@ -1679,7 +1679,13 @@ esac
 SH
 cat > "$FAKE/curl" <<'SH'
 #!/usr/bin/env bash
-cat "$CR_FAKE_HEALTH"
+# Honours -o the way curl does (the subject now reads the health body through
+# scripts/lib/bp-curl.sh, which captures the status with -w and the body with
+# -o) and answers 200 as the status.
+out=""; prev=""
+for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
+if [ -n "$out" ]; then cat "$CR_FAKE_HEALTH" > "$out"; else cat "$CR_FAKE_HEALTH"; fi
+printf 200
 SH
 cat > "$FAKE/ssh" <<'SH'
 #!/usr/bin/env bash

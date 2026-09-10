@@ -288,7 +288,10 @@ jobs:
                 kind: "task", lifecycle_status: "open",
                 labels: ["hotfix-override", "merge-gate-override", "proj:task-obsession"],
                 description: $desc }}]}')"
-          code="$(curl -sS -m 20 -o /tmp/hotfix-file.json -w '%{http_code}' \
+          # A ledger 429 is backpressure: scripts/lib/bp-curl.sh sleeps the
+          # retry_after the response names (bounded) before the code lands here.
+          . scripts/lib/bp-curl.sh
+          code="$(bp_curl_code -sS -m 20 -o /tmp/hotfix-file.json \
             -X POST "${LEDGER_BASE%/}/v1/data/mutate/production" \
             -H "Authorization: Bearer ${TASK_TOKEN}" \
             -H "Content-Type: application/json" \
