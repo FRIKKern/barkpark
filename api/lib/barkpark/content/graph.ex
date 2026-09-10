@@ -50,17 +50,50 @@ defmodule Barkpark.Content.Graph do
   published-only (Phase 3) and `traverse_published/2` walks it keyed by
   `documents.id` UUIDs.
 
-  `:drafts` is a token-gated, slower LIVE extract handled by a SEPARATE path
-  (`traverse_drafts/2`): it folds `Content.extract_edges/2` PLUS the plugin
-  `resolve_extract_edges` chain reached through the INVERTED extractor seam
-  (`:edge_extractor_collector`, see `collect_plugin_edges/2` — the lvw-t12
-  fold, so draft papers' valueref/wikilink edges surface pre-publish)
-  over the drafts corpus (`list_documents(type, dataset, perspective:
-  :drafts)`), builds an in-memory edge index keyed by published-coalesced
-  slug, and runs the SAME BFS bound (depth clamp, 1000-node budget, 200/level
-  fan-out, truncation flags) over that index. It NEVER reads the materialised table, which holds no draft
-  rows. Because `extract_edges/2` works in published-slug space, the drafts root
-  is the root's published-coalesced slug (passed as `:root_pub_id`), not a UUID.
+  `:drafts` is a token-gated HYBRID handled by a SEPARATE path
+  (`traverse_drafts/2`).
+
+  IT USED TO SAY: "it NEVER reads the materialised table, which holds no draft
+  rows." THAT SENTENCE IS RETIRED, and here is the reason, because a contract
+  should not change in silence.
+
+  The drafts path folded `Content.extract_edges/2` PLUS the plugin
+  `resolve_extract_edges` chain over the WHOLE dataset corpus on every request.
+  On guerrilla that is 8,597 tasks (~9.5 KB each) and 1,048 papers (~62 KB
+  each): ~150 MB of `content` jsonb read, shipped, JSON-decoded and recursively
+  walked, per request, for a depth-2 graph. Measured live: 18.4 s, then 11.8 s
+  after the read was reshaped (task `graph-endpoint-latency`). A projection
+  cannot rescue it — `Plugins.Bulldocs.extract_edges/2` walks the whole content
+  with no type guard, so the bytes are load-bearing and dropping them buys
+  1.7x, not the 12x needed.
+
+  What IS true is that only 8.4% of those documents have a `drafts.` twin. So
+  the drafts graph now reads:
+
+    * **live, with content** — the documents whose edges cannot be in
+      `content_edges`: every `drafts.` twin (the table is published-only), plus
+      every document written inside the PROJECTOR-LAG WINDOW
+      (`projection_lag_window_s/0` — projection is async and debounced, and
+      nothing records per-document projection state);
+    * **materialised** — every other source's edges, straight from
+      `content_edges`, the same indexed table `traverse_published/2` walks;
+    * **slugs only, no content** — the whole corpus's ids, for the phantom
+      membership lens (56 ms instead of 810 ms over 9,646 documents).
+
+  Edges are keyed by published-coalesced slug (`extract_edges/2`'s key model),
+  so the drafts root is the root's published-coalesced slug (passed as
+  `:root_pub_id`), not a UUID, and the SAME BFS bound runs over the union.
+
+  TWO CONSEQUENCES A READER MUST KNOW:
+
+    1. A published-only document's edges are now as fresh as the projector,
+      not as fresh as the request. `traverse_published/2` has always had that
+      tolerance; the drafts path did not, and now shares it, bounded by the lag
+      window above.
+    2. `content_edges` CANNOT hold a dangling edge (`Content.Edge`: the `to_id`
+      FK forbids it), so phantoms are recovered separately — see
+      `recover_visited_dangling/4`, which re-extracts the ≤ `@node_budget`
+      documents the walk VISITED. Keyed on visited, never on twin status.
 
   ## Dangling / phantom nodes
 
