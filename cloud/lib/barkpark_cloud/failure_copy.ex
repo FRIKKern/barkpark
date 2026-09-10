@@ -195,10 +195,24 @@ defmodule BarkparkCloud.FailureCopy do
   "raw-log order: strip_ansi BEFORE scrub…" AND by a `humanize/1` assertion on a
   colourised non-prefixed key, in `failure_copy_test.exs`.
 
-  RESIDUAL, stated rather than hidden: the OSC shape
-  `"\\e]0;t\\ainapi_key=<secret>"` leaks under BOTH orders — stripping the OSC
-  leaves the `n` of `in` flush against the key, which re-blocks the same
-  lookbehind. Not closed here.
+  THE WELD, closed by dr-osc-residual-strip-fuses-tokens. The order fix above
+  only reaches a capture whose byte LEFT of the escape is not alphanumeric. When
+  it is — `"run\\e[0mapi_key=<secret>"` — stripping the run to nothing welds
+  `run` onto `api_key`, and the welded `n` re-blocks the very lookbehind the
+  order fix was protecting, so the value shipped in cleartext under the FIXED
+  order too. `strip_ansi/1` now replaces a run that sits BETWEEN two
+  alphanumerics with a single space (`@ansi_runs`), so the boundary survives
+  the strip. Justified on the 2,752 CSI adjacencies dr-w22-bl measured on
+  cloud-db-1, not on a fixture: the same scan found ZERO `ESC ]` bytes in
+  154,931 real captured lines, so the OSC shape this was first noticed in is
+  synthetic.
+
+  WHAT IS STILL NOT REDACTED, and is not a strip defect: `"inapi_key=<secret>"`
+  — a plain word ending in an alphanumeric, flush against the key, with no
+  escape anywhere. `scrub/1` leaves it, by the same deliberate decision that
+  leaves `xtoken=` (see the key clause above); `FailureCopy.raw/1` and a bare
+  `scrub/1` return it byte-identically, which is the control proving the strip
+  has nothing to do with it. `failure_copy_test.exs` pins that pair.
 
   Provider-prefixed credentials (including our own `bppat_`/`bpcs_`) are
   order-INDEPENDENT — that clause matches the token itself — so the order only
@@ -507,7 +521,55 @@ defmodule BarkparkCloud.FailureCopy do
   # Ordered: OSC first (it swallows a payload), then CSI, then a bare two-byte
   # escape as the fallback — PCRE alternation is ordered, so the specific arms
   # always win over the catch-all.
-  @ansi ~r/\x1B(?:\][^\x07\x1B]*(?:\x07|\x1B\\)|\[[0-?]*[ -\/]*[@-~]|[ -~])/
+  #
+  # Held as a SOURCE STRING, not only as a compiled regex, because `strip_ansi/1`
+  # needs the same run in two patterns (below) and a second hand-copied literal
+  # is a drift hazard: the day someone teaches one arm about DCS, the other keeps
+  # the old vocabulary and the boundary silently splits in two.
+  @ansi_run "\x1B(?:\\][^\x07\x1B]*(?:\x07|\x1B\\\\)|\\[[0-?]*[ -/]*[@-~]|[ -~])"
+
+  # THE FUSING RUN (dr-osc-residual-strip-fuses-tokens, dr-w22-bl): one or more
+  # escape runs sitting BETWEEN two alphanumerics. Replacing that with the empty
+  # string welds two tokens into one word, and `scrub/1`'s key clause opens with
+  # `(?<![A-Za-z0-9])` — so the weld puts an alphanumeric immediately left of the
+  # key and the scrub never fires:
+  #
+  #     "run\e[0mapi_key=<secret>"  --strip-->  "runapi_key=<secret>"  --scrub-->  UNCHANGED
+  #
+  # dr-w22-s1 fixed the ORDER (strip before scrub), which closes the case where
+  # the byte left of the escape is NOT alphanumeric (`"[INFO]\e[0mapi_key=…"`
+  # strips to `"[INFO]api_key=…"` and redacts). It cannot close this one, because
+  # after the strip there is no boundary left to find. THE POPULATION IS LIVE and
+  # is not OSC-specific: dr-w22-bl measured `[A-Za-z0-9]` immediately followed by
+  # ESC in 2,752 of the ESC-carrying lines on cloud-db-1 — every one a CSI, since
+  # the same scan found ZERO `ESC ]` bytes in 154,931 real captured lines. This
+  # clause is justified on those 2,752 CSI adjacencies, never on an OSC fixture.
+  #
+  # A SPACE, and only where two alphanumerics would otherwise weld. The rule is
+  # deliberately narrower than "replace every stripped run with a space": an
+  # escape that abuts whitespace, a bracket, a quote or the end of the line
+  # already leaves a boundary behind it, so widening the rule would buy no
+  # redaction and would cost a spurious space on the overwhelming majority of
+  # stripped lines (`"\e[31m\e[1m04:34:24\e[22m [ERROR] …"` — every run in it is
+  # at the start or beside a space). Under this clause that line is byte-identical
+  # to what it stripped to before. What changes is exactly the shape that was
+  # being welded, and joining two tokens across a colour change was never the
+  # right rendering of it anyway.
+  # A MAXIMAL run of adjacent escapes, matched as one unit. `strip_ansi/1` splits
+  # on this rather than replacing with a lookbehind/lookahead pair, and the
+  # reason is a trap worth naming: A CSI RUN ENDS IN AN ALPHANUMERIC ITSELF
+  # (`\e[31m` ends in `m`). A `(?<=[A-Za-z0-9])` lookbehind therefore fires on the
+  # SECOND escape of `"\e[31m\e[1m04:34:24"` — it reads the previous run's own
+  # final byte as if it were text — and quietly prepends a space to a line where
+  # nothing was ever welded. Splitting on the maximal run makes the question the
+  # right one: what sits either side of the WHOLE run, in the text.
+  @ansi_runs ~r/(?:#{@ansi_run})+/
+
+  # What a welding run leaves behind. A single space: it is what a terminal
+  # renders for the escape anyway (nothing visible), it restores `scrub/1`'s
+  # lookbehind, and it is idempotent under a second `strip_ansi/1` — no escape
+  # byte survives the first pass, so the split finds one chunk and returns it.
+  @escape_delimiter " "
 
   @doc """
   Strip terminal control sequences from a string bound for a person's screen, an
@@ -524,11 +586,45 @@ defmodule BarkparkCloud.FailureCopy do
   Applied at the display boundary only, beside `scrub/1`: the stored row keeps
   the raw bytes so ops recovery from the DB and the logs is unaffected.
   Non-binaries pass through unchanged. Idempotent.
+
+  IT NEVER WELDS TWO TOKENS. A run that sits between two alphanumerics is
+  replaced by a single space, not by nothing — see `@ansi_runs` for why: an
+  empty replacement puts an alphanumeric flush against the next word, which is
+  precisely what `scrub/1`'s `(?<![A-Za-z0-9])` lookbehind reads as "not a key",
+  so `"run\e[0mapi_key=…"` used to ship its value in cleartext under the FIXED
+  order. Every other run — at the start of the line, beside a space, a bracket, a
+  quote, the end of the line — is still replaced by nothing, so an ordinary
+  colourised capture strips to exactly the bytes it stripped to before.
   """
   @spec strip_ansi(term()) :: term()
-  def strip_ansi(text) when is_binary(text), do: Regex.replace(@ansi, text, "")
+  def strip_ansi(text) when is_binary(text) do
+    case Regex.split(@ansi_runs, text) do
+      [whole] -> whole
+      [first | rest] -> Enum.reduce(rest, first, &rejoin_across_run/2)
+    end
+  end
 
   def strip_ansi(other), do: other
+
+  # Rejoin two text chunks that had an escape run between them. The delimiter
+  # goes in ONLY when both sides would otherwise weld into one word — see
+  # `@ansi_runs`. Every other seam closes up exactly as it did before this
+  # existed, which is what keeps the copy change bounded to the leaking shape.
+  defp rejoin_across_run(next, acc) do
+    if welds?(String.last(acc), String.first(next)) do
+      acc <> @escape_delimiter <> next
+    else
+      acc <> next
+    end
+  end
+
+  defp welds?(left, right) when is_binary(left) and is_binary(right),
+    do: alnum?(left) and alnum?(right)
+
+  defp welds?(_left, _right), do: false
+
+  defp alnum?(<<c>>) when c in ?0..?9 or c in ?A..?Z or c in ?a..?z, do: true
+  defp alnum?(_other), do: false
 
   @doc """
   Fold a RAW remote capture — a console line, an ssh stderr fold, a provider
