@@ -5292,6 +5292,8 @@ defmodule PDS.Census do
   # `:public` is the CALLSITE name and `:none` the SPEC-SIDE spelling of the same bucket
   # (BarkparkWeb.Router.Plugins.auth_matches_scope?/2). Missing it drops every public
   # plugin route silently.
+  # GATED, NOT MERELY DOCUMENTED (PDS wave 48): MOUNT-MACRO-MIRRORED re-derives the
+  # macro's own mapping every run and reds when these two clauses stop agreeing with it.
   defp auth_in_scope?(:none, :public), do: true
   defp auth_in_scope?(auth, scope), do: auth == scope
 
@@ -7232,6 +7234,9 @@ defmodule PDS.Census do
   # DECLARED HERE, WITH THE OTHER REACH ATTRIBUTES, BECAUSE A MODULE ATTRIBUTE IS READ AT
   # DEFINITION TIME: declared next to its user it read `nil` in lv_print_reach/6 above it
   # and printed `auth: nil` in a line whose whole job is to name the bucket.
+  # GATED, NOT MERELY DOCUMENTED (PDS wave 48): MOUNT-MACRO-MIRRORED re-derives the wrap
+  # set from emit_route_ast/1 every run, so "the day the macro gains a second wrapping
+  # bucket" below is now a RED rather than a silent widening of the residual.
   @lvs_macro_wrapped_auth :public_root
 
   defp lv_verdict(pop, comp, route_mods, parsed, index) do
@@ -9403,6 +9408,41 @@ defmodule PDS.Census do
       exit: 0,
       expect: {:citation_drift, :invariant},
       proves: "inserting #{@cite_pad_lines} lines above a cited test moves every citation's resolved LINE and NOTHING else — the resolved blocks are identical, so no line insertion can change a verdict. MEASURED on origin/main before this wave: four citations into #{@cite_pad_file} resolved to a blank line, a comment and a bare assert, and BASIS-FALSIFIERS passed all four"
+    },
+    # THE TWO MOUNT-MACRO MIRROR MUTANTS. Both census the REPO, because the synthetic tree
+    # carries no api/lib/barkpark_web/router/plugins.ex and MOUNT-MACRO-MIRRORED scopes
+    # itself out where the macro is absent — an arm proven only where it is scoped out is
+    # proven nowhere (PDS-D541). Each moves the CENSUS side of the comparison, which is the
+    # only side a selftest may edit; the macro-side directions (a second wrapping bucket, a
+    # remapped exception pair) were proven by hand against a scratch edit of plugins.ex and
+    # are not committed here, because a selftest that edits api/lib is not read-only.
+    %{
+      name: "MOUNT-MIRROR-MAPPING",
+      corpus: :repo,
+      argv: [],
+      mut: {"defp auth_in_scope?(:none, :pub" <> "lic), do: true",
+            "defp auth_in_scope?(:none, :ops), do: true"},
+      exit: 1,
+      expect: [
+        "FAIL  MOUNT-MACRO-MIRRORED",
+        "the macro maps it true, auth_in_scope?/2 says false",
+        "REPAIR THE CENSUS COPY"
+      ],
+      proves: "the census's retyped copy of BarkparkWeb.Router.Plugins.auth_matches_scope?/2 is GATED: move one bucket in it and the auth x scope cross-product re-derived from the macro's own AST names the disagreeing pair and exits 1, instead of the copy quietly selecting the wrong callsite for every :none route"
+    },
+    %{
+      name: "MOUNT-MIRROR-WRAP",
+      corpus: :repo,
+      argv: [],
+      mut: {"@lvs_macro_wrapped_auth :public" <> "_root",
+            "@lvs_macro_wrapped_auth :public_api"},
+      exit: 1,
+      expect: [
+        "FAIL  MOUNT-MACRO-MIRRORED",
+        "wraps and is NOT mirrored",
+        "is mirrored and NO LONGER wraps"
+      ],
+      proves: "the census's retyped copy of the ONE bucket emit_route_ast/1 wraps in its own live_session is GATED: rename it and the wrap set re-derived from the macro's own conditional reds by name, instead of lv_session_index/1 crediting a live_session the macro does not emit"
     }
   ]
 
@@ -10250,7 +10290,8 @@ defmodule PDS.Census do
         register_checks(classified, parsed) ++
         roster_freshness_checks(classified, parsed) ++
         falsifier_check(falsifiers) ++ baseline_checks(drift_rows, classified) ++
-        route_depth_checks(route_closure, classified)
+        route_depth_checks(route_closure, classified) ++
+        mount_mirror_checks(parsed)
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
     p(String.duplicate("-", 78))
@@ -10984,6 +11025,266 @@ defmodule PDS.Census do
       end
 
     {"D448-DRIFT-REFUSES", drifted == [], why}
+  end
+
+  # ------------------------------------------------- the mount-macro mirror gate
+  #
+  # THE CENSUS HAND-MIRRORS THE PLUGIN MOUNT MACRO TWICE, AND UNTIL THIS ARM NOTHING
+  # CHECKED EITHER COPY (PDS wave 48). `auth_in_scope?/2` above is a retyped copy of
+  # `BarkparkWeb.Router.Plugins.auth_matches_scope?/2`, and `@lvs_macro_wrapped_auth` is a
+  # retyped copy of the ONE bucket whose route `emit_route_ast/1` wraps in a live_session
+  # of its own. Both feed lv_session_index/1, which turns them into a DECIDED reach class
+  # — so a copy that stops descending from the macro does not print a smaller claim, it
+  # prints a class the tree does not have.
+  #
+  # ONE SOURCE, BOTH SIDES READ IT — never a third hand-written list. This arm RE-DERIVES
+  # from the macro's own AST, on every run, three things it never types:
+  #
+  #   the bucket universe   the `scope in [...]` literal `plugin_routes/1` guards on
+  #   the mapping           every `auth_matches_scope?/2` clause: the atom-pair
+  #                         exceptions (`:none` -> `:public`) AND the identity catch-all
+  #   the wrap set          every bucket atom compared in a conditional whose branch
+  #                         emits a `live_session` inside `emit_route_ast/1`
+  #
+  # and then compares the mapping BEHAVIOURALLY — the full auth x scope cross-product run
+  # through both predicates — rather than by text. A textual diff of two clause lists reds
+  # on a reformat and greens on a semantically different rewrite; the cross-product reds
+  # on exactly the disagreements that would move a route between buckets.
+  #
+  # A DERIVATION THAT FAILS IS A RED, NEVER A PASS. If the macro is renamed, reshaped, or
+  # grows a `live_session` this walk cannot attribute to a bucket, the arm says so and
+  # exits 1. The alternative — skipping quietly — is the exact state this arm replaces:
+  # a mirror nobody checks, believed because it was once true.
+  #
+  # SCOPED BY CORPUS MEMBERSHIP, AND THE SELFTEST MUTANTS RUN OVER THE REPO. The synthetic
+  # `--selftest` tree carries no router/plugins.ex, so this arm scopes OUT there exactly
+  # as ROSTER-VERDICT-FRESH does — which is why its two mutants declare `corpus: :repo`
+  # (PDS-D541: an arm proven only where it is scoped out is proven nowhere).
+  @plugins_macro_path "api/lib/barkpark_web/router/plugins.ex"
+
+  defp mount_mirror_checks(parsed) do
+    case Enum.find(parsed, &(&1.path == @plugins_macro_path)) do
+      nil -> []
+      %{src: src} -> [mount_mirror_check(src)]
+    end
+  end
+
+  defp mount_mirror_check(src) do
+    case derive_mount_macro(src) do
+      {:error, why} ->
+        {"MOUNT-MACRO-MIRRORED", false,
+         "the mount macro could NOT be re-derived from #{short(@plugins_macro_path)}: #{why} — the census's two hand-mirrors (auth_in_scope?/2 and @lvs_macro_wrapped_auth) are therefore unchecked this run, and a mirror nobody can check is the state this arm exists to refuse. Teach the derivation the macro's new shape; do not delete the arm"}
+
+      {:ok, d} ->
+        drift = mirror_mapping_drift(d) ++ mirror_wrap_drift(d)
+
+        why =
+          if drift == [] do
+            "both hand-mirrors of #{short(@plugins_macro_path)} still descend from it — the auth->scope mapping agrees with auth_in_scope?/2 across all #{mirror_pair_count(d)} auth x scope pair(s) re-derived from the macro's own #{length(d.buckets)}-bucket list, and the wrap set #{inspect(MapSet.to_list(d.wrapped))} (buckets emit_route_ast/1 wraps in a live_session of its own) equals @lvs_macro_wrapped_auth. NOTHING TRANSCRIBED: bucket list, mapping clauses and wrap set all come out of the macro's AST on this run"
+          else
+            "#{length(drift)} mirror disagreement(s) with #{short(@plugins_macro_path)}: " <>
+              Enum.join(drift, " · ") <>
+              " — the census's copy no longer descends from the macro it mirrors, so every DECIDED reach class lv_session_index/1 derives through it names a chain the tree does not have. REPAIR THE CENSUS COPY (auth_in_scope?/2 · @lvs_macro_wrapped_auth) against the macro, never the other way round"
+          end
+
+        {"MOUNT-MACRO-MIRRORED", drift == [], why}
+    end
+  end
+
+  # THE CROSS-PRODUCT, NOT A TEXT DIFF. The auth universe is the macro's bucket list plus
+  # every atom its clause heads name (that is how `:none`, which is spec-side only and in
+  # no bucket list, enters) plus the census's own wrap atom — so a bucket the census still
+  # believes in but the macro dropped is in the product and reds.
+  defp mirror_mapping_drift(d) do
+    for a <- mirror_auths(d), s <- mirror_scopes(d), macro_matches?(d, a, s) != auth_in_scope?(a, s) do
+      "{#{inspect(a)}, #{inspect(s)}} — the macro maps it #{macro_matches?(d, a, s)}, auth_in_scope?/2 says #{auth_in_scope?(a, s)}"
+    end
+  end
+
+  defp mirror_auths(d) do
+    Enum.uniq(d.buckets ++ Enum.map(d.exceptions, &elem(&1, 0)) ++ [@lvs_macro_wrapped_auth])
+  end
+
+  defp mirror_scopes(d), do: Enum.uniq(d.buckets ++ Enum.map(d.exceptions, &elem(&1, 1)))
+
+  defp mirror_pair_count(d), do: length(mirror_auths(d)) * length(mirror_scopes(d))
+
+  defp macro_matches?(d, auth, scope) do
+    MapSet.member?(d.exceptions, {auth, scope}) or (d.identity? and auth == scope)
+  end
+
+  defp mirror_wrap_drift(d) do
+    mirrored = MapSet.new([@lvs_macro_wrapped_auth])
+
+    if MapSet.equal?(d.wrapped, mirrored) do
+      []
+    else
+      unmirrored = d.wrapped |> MapSet.difference(mirrored) |> MapSet.to_list()
+      stale = mirrored |> MapSet.difference(d.wrapped) |> MapSet.to_list()
+
+      [
+        "the wrap set — emit_route_ast/1 wraps #{inspect(MapSet.to_list(d.wrapped))} in a live_session of its own, @lvs_macro_wrapped_auth mirrors #{inspect(MapSet.to_list(mirrored))}" <>
+          if(unmirrored != [], do: "; #{inspect(unmirrored)} wraps and is NOT mirrored, so its routes read sessionless and fall back into the residual", else: "") <>
+          if(stale != [], do: "; #{inspect(stale)} is mirrored and NO LONGER wraps, so lv_session_index/1 credits those routes a live_session the macro does not emit", else: "")
+      ]
+    end
+  end
+
+  # -- the derivation, out of the macro's own AST ------------------------------
+
+  defp derive_mount_macro(src) do
+    case Code.string_to_quoted(src) do
+      {:ok, ast} ->
+        with {:ok, buckets} <- derive_macro_buckets(ast),
+             {:ok, exceptions, identity?} <- derive_macro_mapping(ast),
+             {:ok, wrapped} <- derive_macro_wraps(ast) do
+          {:ok, %{buckets: buckets, exceptions: exceptions, identity?: identity?, wrapped: wrapped}}
+        end
+
+      {:error, _} ->
+        {:error, "the file does not parse as Elixir"}
+    end
+  end
+
+  # The bucket universe is the `scope in [...]` guard `plugin_routes/1` raises on — the
+  # macro's own enumeration of every legal callsite scope. Anchored on the VARIABLE named
+  # `scope`, because the same file also holds `verb in [:get, :post, ...]`.
+  defp derive_macro_buckets(ast) do
+    lists =
+      ast
+      |> Macro.prewalk([], fn
+        {:in, _, [{:scope, _, ctx}, list]} = n, acc when is_atom(ctx) and is_list(list) ->
+          if list != [] and Enum.all?(list, &is_atom/1), do: {n, [list | acc]}, else: {n, acc}
+
+        n, acc ->
+          {n, acc}
+      end)
+      |> elem(1)
+      |> Enum.uniq()
+
+    case lists do
+      [one] -> {:ok, one}
+      [] -> {:error, "no `scope in [...]` bucket list found — the macro's scope guard was renamed or reshaped"}
+      many -> {:error, "#{length(many)} different `scope in [...]` bucket lists found; the derivation cannot pick one"}
+    end
+  end
+
+  # Every `auth_matches_scope?/2` clause, classified. Two shapes are understood and
+  # NOTHING ELSE IS GUESSED: an atom-pair clause returning `true` (an exception, e.g.
+  # `:none` -> `:public`) and the var/var identity catch-all. A `when` guard, a third
+  # shape, or a vanished function all return an error, which reds.
+  defp derive_macro_mapping(ast) do
+    clauses =
+      ast
+      |> Macro.prewalk([], fn
+        {:defp, _, [head, body]} = n, acc ->
+          case mapping_clause_head(head) do
+            nil -> {n, acc}
+            args -> {n, [{args, Keyword.get(body, :do)} | acc]}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+      |> elem(1)
+
+    classified = Enum.map(clauses, &classify_mapping_clause/1)
+
+    cond do
+      clauses == [] ->
+        {:error, "BarkparkWeb.Router.Plugins.auth_matches_scope?/2 no longer exists under that name — the census mirror has nothing left to descend from"}
+
+      Enum.any?(classified, &(&1 == :unknown)) ->
+        {:error,
+         "#{Enum.count(classified, &(&1 == :unknown))} of #{length(clauses)} auth_matches_scope?/2 clause(s) are in a shape this derivation does not model (a guard, or a body that is neither `true` nor `auth == scope`)"}
+
+      not Enum.any?(classified, &(&1 == :identity)) ->
+        {:error, "auth_matches_scope?/2 carries no identity catch-all clause any more, so the mapping is no longer `auth == scope` plus exceptions"}
+
+      true ->
+        {:ok, MapSet.new(for {:exception, pair} <- classified, do: pair), true}
+    end
+  end
+
+  defp mapping_clause_head({:auth_matches_scope?, _, args}) when is_list(args), do: args
+  defp mapping_clause_head({:when, _, [inner | _]}), do: guarded_mapping_head(inner)
+  defp mapping_clause_head(_), do: nil
+
+  # A guarded clause is REPORTED, not skipped: `mapping_clause_head/1` hands it back with a
+  # sentinel arg list that classify_mapping_clause/1 can only call :unknown.
+  defp guarded_mapping_head({:auth_matches_scope?, _, args}) when is_list(args), do: [:__guarded__ | args]
+  defp guarded_mapping_head(_), do: nil
+
+  defp classify_mapping_clause({[a, s], true}) when is_atom(a) and is_atom(s), do: {:exception, {a, s}}
+  defp classify_mapping_clause({[a, s], false}) when is_atom(a) and is_atom(s), do: :ignored
+
+  defp classify_mapping_clause({[{va, _, ca}, {vs, _, cs}], {:==, _, [{va2, _, _}, {vs2, _, _}]}})
+       when is_atom(ca) and is_atom(cs) and va == va2 and vs == vs2,
+       do: :identity
+
+  defp classify_mapping_clause(_), do: :unknown
+
+  # The wrap set: every bucket atom compared inside a conditional whose do-branch emits a
+  # `live_session`. TOTALITY IS ASSERTED — a `live_session` this walk cannot attribute to
+  # a compared atom (an else-branch, a `case`, a clause head) makes the derivation fail
+  # rather than under-report, because an under-reported wrap set greens the arm.
+  defp derive_macro_wraps(ast) do
+    attributed =
+      ast
+      |> Macro.prewalk([], fn
+        {:if, _, [cond_ast, kw]} = n, acc when is_list(kw) ->
+          body = Keyword.get(kw, :do)
+
+          if live_session_count(body) > 0 do
+            {n, [{compared_atoms(cond_ast), live_session_count(body)} | acc]}
+          else
+            {n, acc}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+      |> elem(1)
+
+    total = live_session_count(ast)
+    covered = attributed |> Enum.map(&elem(&1, 1)) |> Enum.sum()
+    atoms = attributed |> Enum.flat_map(&elem(&1, 0)) |> Enum.uniq()
+
+    cond do
+      total == 0 ->
+        {:error, "emit_route_ast/1 emits NO live_session at all any more — the macro stopped wrapping, and the census still credits a wrapped session to every #{inspect(@lvs_macro_wrapped_auth)} route"}
+
+      covered != total ->
+        {:error, "#{total - covered} of #{total} live_session emission(s) sit outside any `if` this walk can attribute to a bucket atom, so the wrap set would be UNDER-reported"}
+
+      Enum.any?(attributed, &(elem(&1, 0) == [])) ->
+        {:error, "a live_session-emitting branch is selected by a condition that compares NO bucket atom, so the bucket it wraps cannot be named"}
+
+      true ->
+        {:ok, MapSet.new(atoms)}
+    end
+  end
+
+  defp compared_atoms(ast) do
+    ast
+    |> Macro.prewalk([], fn
+      {op, _, [l, r]} = n, acc when op in [:==, :===] ->
+        {n, Enum.filter([l, r], &is_atom/1) ++ acc}
+
+      n, acc ->
+        {n, acc}
+    end)
+    |> elem(1)
+    |> Enum.uniq()
+  end
+
+  defp live_session_count(ast) do
+    ast
+    |> Macro.prewalk(0, fn
+      {:live_session, _, args} = n, acc when is_list(args) -> {n, acc + 1}
+      n, acc -> {n, acc}
+    end)
+    |> elem(1)
   end
 
   defp row(label, got, _raw, key) do
