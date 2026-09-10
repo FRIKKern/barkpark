@@ -1409,10 +1409,35 @@ defmodule Barkpark.Content.Writer do
   # `Sync.Applier.apply_upsert` mirrors an upstream row verbatim inside one
   # transaction, so a refusal would roll back the batch and wedge the replica.
   # `:source` is server-set on every HTTP door, so no request body can reach it.
+  #
+  # THE THIRD BYPASS, NAMED (cch-w29-bl-d307-guard-bypassed-by-create-patch-publish).
+  # Two windows were already enumerated above and closed — `do_upsert_document`'s
+  # own INSERT branch (the legacy `POST /api/documents/task` door), and a
+  # `drafts.`-prefixed `parent_id`. A THIRD was open and, worse, was written
+  # down as a design property rather than a hole: this guard head-matched
+  # `nil = prev_doc`, so it was a BIRTH guard, and a birth guard cannot see the
+  # write that carries the term when the term arrives SECOND. PROVEN LIVE
+  # against guerrilla in wave 29, three calls: create the row BARE under the
+  # epic (lands — absence is the warn tier), PATCH `surface` to the very prose
+  # a create had just been refused for (200), PUBLISH (200). The published row
+  # then read back `"surface":"cloud control plane - probe"` under
+  # `parent_id: cloud-console-hardening-epic`. So "an off-vocabulary term
+  # cannot enter the epic" was false as stated, and the sentence that made it
+  # look intentional — "every UPDATE arriving here is structurally untouched" —
+  # was the reassuring one.
+  #
+  # CLOSED BY DELETING THE `nil` HEAD, not by adding a fourth guard: the clause
+  # now runs on updates too, and the birth/update distinction survives exactly
+  # where it is load-bearing. An update whose merged `surface` is off-vocabulary
+  # is refused UNLESS it equals what the row already carried (`previous_surface/1`
+  # below) — grandfathered rows stay patchable on every other field, which is
+  # what keeps this a guard on the WRITE rather than a retroactive audit of the
+  # corpus. The absent-surface WARN stays birth-only; counting it per patch
+  # would make `grep -c` measure patch traffic instead of filings.
   @cch_epic_parent "cloud-console-hardening-epic"
   @cch_surfaces ~w(console instrument ledger)
 
-  defp ensure_task_surface_declared("task", attrs, doc_id, nil = _prev_doc, opts) do
+  defp ensure_task_surface_declared("task", attrs, doc_id, prev_doc, opts) do
     content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
     parent = Map.get(content, "parent_id") || Map.get(content, :parent_id)
     surface = Map.get(content, "surface") || Map.get(content, :surface)
@@ -1427,25 +1452,48 @@ defmodule Barkpark.Content.Writer do
       blank?(surface) ->
         # ONE greppable line, deliberately (the birth fence's precedent): this
         # fires on every undeclared epic filing, so its value is that it can be
-        # COUNTED — `grep -c "filing law: undeclared surface"`.
-        Logger.warning(
-          "filing law: undeclared surface on epic task birth #{inspect(doc_id)} — no " <>
-            "content.surface (allowed; the backfill is not yet producible — 5 of 56 live " <>
-            "orphans carry one. Declare it with one of: " <>
-            Enum.join(@cch_surfaces, " | ") <> ")"
-        )
+        # COUNTED — `grep -c "filing law: undeclared surface"`. BIRTH ONLY: an
+        # update that leaves the term absent is not a new undeclared filing, and
+        # logging it would make the count grow with unrelated patch traffic.
+        if is_nil(prev_doc) do
+          Logger.warning(
+            "filing law: undeclared surface on epic task birth #{inspect(doc_id)} — no " <>
+              "content.surface (allowed; the backfill is not yet producible — 5 of 56 live " <>
+              "orphans carry one. Declare it with one of: " <>
+              Enum.join(@cch_surfaces, " | ") <> ")"
+          )
+        end
 
         :ok
 
-      surface not in @cch_surfaces ->
-        {:error, {:invalid_task_content, birth_surface_term_error(surface)}}
+      surface in @cch_surfaces ->
+        :ok
+
+      # GRANDFATHERED, and only this: the term is off-vocabulary but the write
+      # does not CHANGE it, so this update did not carry the defect in. Rows
+      # born before the guard (and the ones the create→patch→publish window let
+      # through while it was open) stay patchable on every OTHER field —
+      # criterion 2 of the row. A write that touches `surface` itself falls
+      # through to the refusal below, on an update exactly as on a birth.
+      not is_nil(prev_doc) and surface == previous_surface(prev_doc) ->
+        :ok
 
       true ->
-        :ok
+        {:error, {:invalid_task_content, birth_surface_term_error(surface)}}
     end
   end
 
   defp ensure_task_surface_declared(_type, _attrs, _doc_id, _prev_doc, _opts), do: :ok
+
+  # `attrs` reaching the upsert gate is already the FINAL whole-document content
+  # (patch merging ran in `upsert_document/4`), so the incoming `surface` is the
+  # MERGED value — indistinguishable, on its own, from a term the row already
+  # carried. The previous value is what makes an unrelated patch of a
+  # grandfathered row separable from a patch that writes the term.
+  defp previous_surface(%Document{content: content}),
+    do: Map.get(content || %{}, "surface") || Map.get(content || %{}, :surface)
+
+  defp previous_surface(_prev_doc), do: nil
 
   # The epic slug, drafts-normalised: a draft filing carries
   # `parent_id: "drafts.cloud-console-hardening-epic"` from the same
