@@ -315,6 +315,26 @@ defmodule Barkpark.Content.Graph do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
+    # THE SCHEMA LIST IS HOISTED, ONCE (task-051a87de9a085e4d). It is invariant
+    # across the whole fold, and `Content.Edges.extract_edges/2` reads it
+    # `Keyword.get_lazy(:schemas, fn -> Content.list_schemas(dataset, opts) end)`
+    # — so WITHOUT this prefetch the fold issued ONE schema query PER DOCUMENT.
+    # That is the cost `extract_edges/2`'s own doc names ("a 4096-document
+    # corpus issued 4096 identical schema queries … measured live: a 34s first
+    # paint") and the one `corpus_edges/3` already hoists on the published side.
+    # Here it was the difference between a bounded read and a request that never
+    # returned on guerrilla: the drafts fold walks the WHOLE dataset corpus on
+    # every `?drafts=true` call, so its per-document round-trips are unbounded
+    # by depth, by `@node_budget` and by `@fan_out` alike — every bound the
+    # drafts walk owns sits DOWNSTREAM of this fold.
+    #
+    # Prefetching cannot change what any document extracts: every doc in the
+    # fold comes from THIS dataset (the `collect_all_documents(schema.name,
+    # dataset, …)` reads below), so the list handed down is byte-identical to
+    # the one each per-document call would have read for itself.
+    schemas =
+      if is_binary(dataset) and dataset != "", do: Content.list_schemas(dataset, opts), else: []
+
     # WALK THE WHOLE DRAFTS CORPUS. This was `list_documents(limit: 1000)`, and
     # `list_documents/3` CLAMPS :limit to 1000 and returns a bare list — so a
     # dataset with more than 1000 drafts of a type built its adjacency index
@@ -325,8 +345,7 @@ defmodule Barkpark.Content.Graph do
     # that happened to fall past the cap.
     {docs, truncated} =
       if is_binary(dataset) and dataset != "" do
-        dataset
-        |> Content.list_schemas(opts)
+        schemas
         |> Enum.map_reduce(nil, fn schema, trunc_acc ->
           {page, trunc} =
             Content.collect_all_documents(schema.name, dataset,
@@ -364,9 +383,13 @@ defmodule Barkpark.Content.Graph do
       end)
       |> MapSet.new()
 
+    # `:schemas` rides the opts from here down, so `extract_edges/2` reads the
+    # hoisted list instead of querying per document.
+    edge_opts = Keyword.put(opts, :schemas, schemas)
+
     edge_list =
       docs
-      |> Enum.flat_map(fn doc -> drafts_edges_for_doc(doc, corpus_slugs, opts) end)
+      |> Enum.flat_map(fn doc -> drafts_edges_for_doc(doc, corpus_slugs, edge_opts) end)
       |> filter_drafts_edges(opts)
 
     out_index = Enum.group_by(edge_list, & &1.from_id)
