@@ -1895,7 +1895,13 @@ defmodule BarkparkWeb.TasksControllerTest do
       payload = Jason.decode!(resp.resp_body)
       assert payload["ok"] == false
       assert payload["reason"] == "criterion_text_required"
-      assert payload["message"] =~ "--criterion-text"
+      # The remedy the refusal hands over must be the NON-EVALUATING one:
+      # --criterion-text-file <path>, never the inline `--criterion-text "…"`
+      # spelling, whose backticked code spans bash/zsh execute before bp sees
+      # them (task-6576859f2c12a8e8). The refute is the mutation arm: restore
+      # the inline recipe and this test reds.
+      assert payload["message"] =~ "--criterion-text-file"
+      refute payload["message"] =~ ~r/--criterion-text\s+"/
       assert payload["message"] =~ "0-BASED"
 
       # Nothing was written: both criteria are still unmet.
@@ -4705,7 +4711,11 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert [pulse_t, stamp_t, close_t] = payload["help"]
       assert pulse_t =~ "bp task pulse #{doc_id} helper-1 --now"
       assert stamp_t =~ "bp task stamp #{doc_id} helper-1 #{epoch} --criterion 0 --met"
-      assert stamp_t =~ "--criterion-text"
+      # The template teaches the NON-EVALUATING door: the wording rides a file,
+      # so a backticked code span in it is never command-substituted by the
+      # operator's shell (task-6576859f2c12a8e8). The refute is the mutation arm.
+      assert stamp_t =~ "--criterion-text-file"
+      refute stamp_t =~ ~r/--criterion-text\s+"/
       assert close_t =~ "bp task close #{doc_id} helper-1 #{epoch} done"
       refute Enum.any?(payload["help"], &(&1 =~ "drafts."))
     end

@@ -988,13 +988,23 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
   // PRINTED (`124 scenarios · 24 distinct covered by 25 cells · 100 residue over
   // 13 families`), never by adding one to the line above.
-  assert.equal(r.total, 124);
+  // cch-w39-s2-fu adds `account-modal-me-unreadable`: the account modal in front
+  // of a /v1/me that never lands, so modal-oracle can measure #a2f-retry's
+  // reachability in a browser. Total 124 -> 125, residue 100 -> 101. CELLS (25),
+  // distinctCovered (24) and families (13) are DELIBERATELY UNMOVED: it lands in
+  // the residue (modal geometry is modal-oracle's question, not this sweep's)
+  // and its familyOf is `no-deeplink`, a family that already had six members, so
+  // it cannot create a 14th. Both integers were RE-DERIVED by RUNNING `node
+  // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
+  // PRINTED (`125 scenarios · 24 distinct covered by 25 cells · 101 residue over
+  // 13 families`), never by adding one to the line above.
+  assert.equal(r.total, 125);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 100, "100 is the RESIDUE, not the census");
+  assert.equal(r.residue, 101, "101 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 100, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 101, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

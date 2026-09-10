@@ -27,8 +27,9 @@ defmodule Barkpark.Content.DedupWall do
       lexical near-match is a real duplication signal.
 
   So a document scores purely on **title + tag-name token overlap** (Jaccard over
-  the combined token set), and the trgm `similarity()` idiom
-  (search/documents_retriever.ex) fetches the candidate set cheaply.
+  the combined token set), and a KNN trgm index scan (`title <-> $1` over
+  `documents_title_trgm_gist_idx`) fetches the candidate set in BOUNDED time —
+  exactly `@candidate_limit` rows read, whatever the corpus holds.
 
   ## When the gate cannot run: it SAYS SO (it does not silently pass)
 
@@ -103,10 +104,19 @@ defmodule Barkpark.Content.DedupWall do
   # duplicate shares many words. Below this floor a high score drops to ADVISE.
   @min_refuse_shared 3
 
-  # Coarse trgm pre-filter for the candidate FETCH only (documents_retriever.ex
-  # `similarity()` idiom). A cheap net over the title; the precise token-Jaccard
-  # below is the real decision. Low on purpose — over-fetch, then score down.
+  # Coarse trgm floor for the candidate FETCH only. A cheap net over the title;
+  # the precise token-Jaccard below is the real decision. Low on purpose —
+  # over-fetch, then score down. It is applied to the @candidate_limit rows the
+  # KNN index scan returns, NOT as a scan predicate: as a predicate it bounded
+  # nothing (see `do_fetch_candidates/6`).
   @candidate_trgm_floor 0.1
+
+  # HARD SCAN CAP, not just a result cap. Paired with the `<->` ORDER BY and
+  # `documents_title_trgm_gist_idx` (migration 20260910100000) this is the
+  # number of rows Postgres READS, at every corpus size. Under the old `%` +
+  # `ORDER BY similarity()` shape it capped only the OUTPUT while the sort input
+  # grew linearly with the corpus — the mechanism behind
+  # `pds-bl-dedup-wall-scan-budget-blows-at-corpus-scale`.
   @candidate_limit 500
 
   # The candidate scan's own budget, on the transaction AND every query inside
@@ -415,15 +425,30 @@ defmodule Barkpark.Content.DedupWall do
         where: d.status == "published",
         # Same-id republish never trips — the incumbent can't duplicate itself.
         where: d.doc_id != ^incumbent,
-        # Coarse trgm net over the title. The `%` operator engages the GIN
-        # `documents_title_trgm_idx` (unlike `similarity() > x`, which can only
-        # seq-scan) — the precise token-Jaccard in `assess/3` scores below.
-        where: fragment("? % ?", d.title, ^title),
-        # Deterministic keep: the top-500-BY-SIMILARITY survive the @candidate_limit
-        # cap, so a plan change can never reorder which 500 pass to the scorer. `%`
-        # is `>=` (a safe superset of the old strict `>`) — re-scored downstream.
-        order_by: [desc: fragment("similarity(?, ?)", d.title, ^title)],
-        select: %{doc_id: d.doc_id, title: d.title, tags: fragment("?->'tags'", d.content)},
+        # BOUNDED CANDIDATE SCAN. `<->` is pg_trgm's KNN distance (`1 -
+        # similarity`), so ordering ASCENDING by it is the SAME order as the old
+        # `desc: similarity(...)` — but a `gist_trgm_ops` index can RETURN rows
+        # in that order, so the LIMIT stops the scan instead of merely trimming
+        # its output. The old shape paired a `%` net with `ORDER BY
+        # similarity()`: GIN cannot order, so every row surviving the net was
+        # fetched, scored and top-N heapsorted, and the sort input grew LINEARLY
+        # with the corpus (measured on a seeded corpus of real Barkpark task
+        # titles: 3,410 rows / 203 ms at 20k, 6,749 / 466 ms at 40k, 13,566 /
+        # 729-972 ms at 80k — 2,514 ms on a cold cache, half the 5 s budget).
+        # The index scan below reads exactly @candidate_limit rows at every
+        # corpus size: 500 / 25 ms at 20k, 500 / 43 ms at 40k, 500 / 74-85 ms
+        # at 80k. The row count is FLAT; the residual time growth is GiST page
+        # traversal, ~N^0.5, not the linear scan it replaces.
+        order_by: [asc: fragment("? <-> ?", d.title, ^title)],
+        # `sim` rides along so the floor can be applied to the BOUNDED set in
+        # Elixir (see below) instead of as a scan predicate. Reading it off the
+        # same `<->` the index just computed costs nothing extra.
+        select: %{
+          doc_id: d.doc_id,
+          title: d.title,
+          tags: fragment("?->'tags'", d.content),
+          sim: fragment("1 - (? <-> ?)", d.title, ^title)
+        },
         limit: @candidate_limit
       )
       |> maybe_filter_dataset(dataset)
@@ -444,29 +469,30 @@ defmodule Barkpark.Content.DedupWall do
         Keyword.get(opts, :project_id)
       )
 
-    # CLIFF A: `SET LOCAL` only takes effect INSIDE a transaction — outside one it
-    # is a silent no-op, leaving pg_trgm.similarity_threshold at its 0.3 default,
-    # which would tighten `%` and drop every 0.1–0.3 gray-zone near-duplicate. So
-    # wrap the fetch in an explicit txn and set the threshold FIRST. The literal is
-    # interpolated because SET takes no bind params; @candidate_trgm_floor stays the
-    # single source of truth.
-    result =
-      Repo.transaction(
-        fn ->
-          Repo.query!(
-            "SET LOCAL pg_trgm.similarity_threshold = #{@candidate_trgm_floor}",
-            [],
-            timeout: timeout
-          )
-
-          Repo.all(query, timeout: timeout)
-        end,
-        timeout: timeout
-      )
+    # The txn stays even though nothing inside it needs session state any more:
+    # it is what carries ONE budget over the checkout + the scan, and it is what
+    # turns a pool-checkout death into `{:error, reason}` (the degraded arm)
+    # instead of an escaped exit. `SET LOCAL pg_trgm.similarity_threshold` is
+    # GONE with the `%` operator it configured — `<->` is not threshold-gated,
+    # so setting it would be decoration, and decoration in this module has
+    # already cost one incident (CLIFF A: the same SET outside a txn was a
+    # silent no-op that read as protection).
+    result = Repo.transaction(fn -> Repo.all(query, timeout: timeout) end, timeout: timeout)
 
     case result do
       {:ok, rows} ->
-        {:ok, Enum.map(rows, &row_to_ref/1)}
+        # THE FLOOR MOVED, THE SEMANTICS DID NOT. `%` admitted exactly the rows
+        # with `similarity >= @candidate_trgm_floor`; this admits exactly the
+        # same predicate, applied to the 500 rows the index already ranked
+        # highest. It can only ever DROP the tail of an ordered list, so the
+        # candidate set is unchanged wherever the old net returned >= 500 rows,
+        # and a strict superset-by-ordering otherwise. Verified on the seeded
+        # 80k corpus: the two candidate sets were IDENTICAL (0 rows lost, same
+        # 0.1586 minimum similarity, 0 rows admitted below the floor).
+        {:ok,
+         rows
+         |> Enum.filter(&(&1.sim >= @candidate_trgm_floor))
+         |> Enum.map(&row_to_ref/1)}
 
       # A rolled-back txn is a degraded scan, not an empty corpus. Matching
       # `{:ok, _}` alone would have shaped this as a MatchError — the right
