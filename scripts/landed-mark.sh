@@ -88,7 +88,8 @@
 #                                 population in one query
 #       landed:pr-<n>@<sha10>     the fact — which PR, which commit
 #   content.landed gains the same fact as a SENTENCE (POST /v1/tasks/:id/landed):
-#       commits: [<sha>]  prs: ["<n>"]  notes: ["landed on main as <sha> by PR #<n>"]
+#       commits: [<sha>]  prs: ["<n>"]
+#       notes: ["PR #<n> landed on main as <sha> (files: a/b.ex, c/d.ex)"]
 #   and, ONLY where the server's own merge-shaped permit allows it, exactly one
 #   acceptance criterion flips to met=true with that note as its evidence.
 #   Nothing else is written by either door. Not lifecycle_status, not the claim,
@@ -246,6 +247,11 @@ LEDGER_BASE="${LEDGER_BASE:-https://guerrilla.barkpark.cloud}"
 RETRIES="${LANDED_MARK_RETRIES:-3}"
 RETRY_DELAY="${LANDED_MARK_RETRY_DELAY:-2}"
 MAX_COMMITS="${LANDED_MARK_MAX_COMMITS:-100}"
+# How many 100-file pages of `pulls/<n>/files` a single landing may read.
+# 10 pages = 1,000 files; the largest squash on this repo to date is far
+# under that, and a landing that exceeds it is reported as a COUNT with its
+# top-level dirs, never as a truncated list pretending to be complete.
+MAX_FILE_PAGES="${LANDED_MARK_MAX_FILE_PAGES:-10}"
 # owner/repo for the PR-body fallback below. GITHUB_REPOSITORY is set on every
 # Actions runner; LANDED_MARK_REPO exists so a hand run outside CI can name it.
 # Empty is not fatal — it is a distinct CANNOT READ on the fallback, never a
@@ -261,6 +267,22 @@ ARG_RANGE=""
 FIXTURE_DIR="${LANDED_MARK_FIXTURE_DIR:-}"
 
 note()  { echo "landed-mark: $*"; }
+# THE JOB SUMMARY, and stdout ALWAYS. `$GITHUB_STEP_SUMMARY` exists only on a
+# runner, and a refusal that is visible only there is invisible to every hand
+# run and every selftest — so stdout is the primary and the summary file is
+# the addition. An unwritable summary file is not an error: the line already
+# went to stdout, and a landing must never fail over its own paperwork.
+summary() {
+  echo "landed-mark: $*"
+  # DOUBLE-PRINT GUARD. .github/workflows/landed-mark.yml already pipes this
+  # script's whole stdout through `tee -a "$GITHUB_STEP_SUMMARY"`, so appending
+  # here as well would print every refusal twice in the one place a lead reads.
+  # The workflow sets LANDED_MARK_STDOUT_IS_SUMMARY=1 to say so; any other
+  # caller (a hand run, a different workflow) gets the append.
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ "${LANDED_MARK_STDOUT_IS_SUMMARY:-0}" != "1" ]; then
+    printf '%s\n\n' "landed-mark: $*" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+  fi
+}
 warn()  { echo "::warning title=Landed mark skipped::landed-mark: $*" >&2; }
 die2()  { echo "landed-mark: CANNOT MEASURE — $*" >&2; exit 2; }
 # The credential refusal is the one loud arm. `::error` so it lifts into the
@@ -317,6 +339,200 @@ import json, re, sys
 # three spellings, case-insensitive, and nothing else is ever flipped by CI.
 MERGE_RE = re.compile(r"pr\s+merged|merged\s+to\s+main|merged\s+into\s+main", re.I)
 
+# ── THE CHANGED PATHS (task-c3c9922e7d8e3815) ────────────────────────────────
+#
+# THE DEFECT, measured 2026-09-10. PR #15403 changed exactly ONE file,
+# api/Dockerfile, and carried `Task: task-076719e53a42102d` because it UNBLOCKED
+# that row's build. This script marked the row `landed-on-main`. The row is a
+# Studio badge feature; nothing about a Dockerfile implements it. A trailer names
+# the row a PR is FOR, not the row a PR IMPLEMENTS, and an unblocking PR
+# legitimately cites the row it unblocks — so the trailer alone can never carry
+# the difference. What CAN carry it is what the squash actually touched, and that
+# was never recorded: the mark said "PR #15403" and a reader had to go to GitHub
+# to learn it was one Dockerfile.
+#
+# So every landing now records its changed paths, and the recorded sentence is
+# what a lead reads instead of a second lookup.
+#
+# THE LIST OR THE SHAPE OF IT. Up to 40 paths go in verbatim. Past that the
+# sentence would be a wall nobody reads, so it becomes the COUNT plus the
+# top-level directories — which is still enough to answer "did this touch my
+# area?" and is explicitly what the row asked for.
+FILES_INLINE_MAX = 40
+
+# The marker the READER keys on. scripts/lib/landed_open_report.py greps the
+# recorded note for this exact string to tell a "landed, no overlap" row from a
+# "landed" one, so it is a CONSTANT in both files and never a reworded phrase.
+NO_OVERLAP_MARK = "[no overlap with the paths this row names]"
+
+# Splits prose into path-shaped tokens. `/`, `.`, `-` and `_` stay INSIDE a
+# token so `api/lib/barkpark_web/live/paper_live.ex` survives as one word.
+WORD_SPLIT = re.compile(r"[^A-Za-z0-9_./-]+")
+
+
+def path_names(p):
+    """Every name a changed path answers to: the full path, each of its ancestor
+    directories (all depths, top-level included), its basename, and the basename
+    without its extension.
+
+    A LIST, MOST SPECIFIC FIRST, AND NEVER A SET. The caller reports WHICH name
+    matched, and Python randomises str hashing per process — so a set would make
+    the same landing report `api/lib/x.ex` on one run and `api` on the next.
+    MEASURED: the first cut used a set and the selftest arm asserting the
+    reported match failed on some runs and passed on others. An instrument whose
+    answer depends on PYTHONHASHSEED is not an instrument. Most specific first
+    also makes the reported match the most INFORMATIVE one available."""
+    parts = [x for x in p.split("/") if x]
+    if not parts:
+        return []
+    names = [p]
+    for i in range(len(parts) - 1, 0, -1):
+        names.append("/".join(parts[:i]))
+    base = parts[-1]
+    names.append(base)
+    if "." in base:
+        names.append(base.rsplit(".", 1)[0])
+    out = []
+    for n in names:
+        if n and n not in out:
+            out.append(n)
+    return out
+
+
+def row_vocabulary(doc, content):
+    """Every path-shaped token the ROW's own text writes, plus every ancestor
+    prefix of each — so a row naming `api/lib/x.ex` also answers to `api/lib`.
+    Lower-cased, because a path in prose is written both ways."""
+    bits = [str(doc.get("title") or content.get("title") or ""),
+            str(content.get("description") or "")]
+    crit = content.get("acceptance_criteria")
+    if isinstance(crit, list):
+        for c in crit:
+            if isinstance(c, dict):
+                bits.append(str(c.get("criterion") or ""))
+                # DELIBERATELY NOT `evidence`. Evidence is written AFTER the
+                # fact by whoever stamped, and it routinely quotes the very PR
+                # and paths being judged here — reading it would let a landing
+                # vouch for itself. MEASURED on task-076719e53a42102d
+                # 2026-09-10: with evidence in the vocabulary api/Dockerfile
+                # "overlaps" that row (its stamped evidence names the file);
+                # with only title + description + criterion text, which is what
+                # the row asked for, it does not.
+    vocab = set()
+    for tok in WORD_SPLIT.split("\n".join(bits).lower()):
+        tok = tok.strip("./-")
+        if not tok:
+            continue
+        vocab.add(tok)
+        if "/" in tok:
+            parts = [x for x in tok.split("/") if x]
+            for i in range(1, len(parts)):
+                vocab.add("/".join(parts[:i]))
+    return vocab
+
+
+def overlap_verdict(vocab, files):
+    """-> ("overlap", the name that matched) | ("none", "").
+
+    THE RULE, stated once: a landing OVERLAPS a row when ANY of the changed
+    paths' names — the full path, any ancestor directory, the basename, or the
+    basename without its extension — appears as a token in the row's own title,
+    description or criteria. It is keyed on the LANDING, not on a hand-kept list
+    of areas, so it needs no vocabulary to be maintained and no repo tree to be
+    read: what landed decides what to look for.
+
+    DELIBERATELY GENEROUS IN ONE DIRECTION. A top-level directory counts, so a
+    row whose prose merely says "api" overlaps any api/ landing. That makes the
+    NO-OVERLAP verdict rare and hard to earn, which is the correct asymmetry:
+    the verdict WITHHOLDS something, and a false withholding is a lost handover
+    while a false overlap costs one line a human already reads."""
+    for f in files:
+        for n in path_names(f):
+            if n.lower() in vocab:
+                return "overlap", n
+    return "none", ""
+
+
+def read_files_arg(path):
+    """-> (state, files, count). state is "read" or "unknown"; UNKNOWN IS NEVER
+    AN EMPTY LIST. A merged PR changed at least one file, so a zero-length list
+    that claims to be a successful read is a failed read wearing a zero's
+    clothes, and it is demoted here rather than believed."""
+    if not path:
+        return "unknown", [], 0
+    try:
+        d = json.load(open(path))
+    except Exception:
+        return "unknown", [], 0
+    if not isinstance(d, dict):
+        return "unknown", [], 0
+    state = str(d.get("state") or "unknown")
+    files = [str(f) for f in (d.get("files") or []) if isinstance(f, str)]
+    count = d.get("count")
+    count = count if isinstance(count, int) else len(files)
+    if state != "read" or not files:
+        return "unknown", [], 0
+    return "read", files, count
+
+
+def files_phrase(state, files, count, pr, slug):
+    """The parenthetical in the landing sentence. An UNREAD list says so in
+    words — it is never rendered as an empty list, which would read as "this PR
+    changed nothing"."""
+    if state != "read":
+        return "files: UNREAD - GET repos/%s/pulls/%s/files did not answer" % (
+            slug or "<owner>/<repo>", pr or "?")
+    if count > FILES_INLINE_MAX:
+        tops = []
+        for f in files:
+            top = f.split("/")[0] if "/" in f else "(repo root)"
+            if top not in tops:
+                tops.append(top)
+        return "files: %d files across %s" % (count, ", ".join(sorted(tops)))
+    return "files: %s" % ", ".join(files)
+
+
+def cmd_files_count(argv):
+    """One REST page -> how many file objects it holds. Used only to decide
+    whether to ask for another page. rc 1 when the page is not a list."""
+    try:
+        data = json.load(open(argv[0]))
+    except Exception:
+        return 1
+    if not isinstance(data, list):
+        return 1
+    print(len(data))
+    return 0
+
+
+def cmd_files_collect(argv):
+    """argv[0] out file, argv[1:] the REST pages -> {"state","files","count"}.
+
+    rc 1 — a CANNOT READ, never a zero — when a page is not a list of objects
+    carrying `filename`, or when the pages together hold NO files at all."""
+    out, pages = argv[0], argv[1:]
+    files = []
+    for page in pages:
+        try:
+            data = json.load(open(page))
+        except Exception:
+            return 1
+        if not isinstance(data, list):
+            return 1
+        for item in data:
+            if not isinstance(item, dict):
+                return 1
+            name = item.get("filename")
+            if not isinstance(name, str) or not name:
+                return 1
+            if name not in files:
+                files.append(name)
+    if not files:
+        return 1
+    json.dump({"state": "read", "files": files, "count": len(files)}, open(out, "w"))
+    return 0
+
+
 
 def row_content(row):
     doc = row.get("doc", row) or {}
@@ -334,9 +550,23 @@ def union(existing, incoming):
 def cmd_plan(argv):
     row = json.load(open(argv[0]))
     sha, pr = argv[1], argv[2]
+    slug = argv[4] if len(argv) > 4 else ""
     doc, content = row_content(row)
     short = sha[:10]
-    sentence = "landed on main as %s by PR #%s" % (sha, pr) if pr else "landed on main as %s" % sha
+
+    # WHAT LANDED, not just that something did. argv[3] is the {state,files,
+    # count} file scripts/landed-mark.sh's pr_files_for() wrote from REST
+    # `pulls/<n>/files`; a read that failed arrives here as state "unknown" and
+    # says so in the sentence, never as an empty list.
+    files_state, files, files_count = read_files_arg(argv[3] if len(argv) > 3 else "")
+    phrase = files_phrase(files_state, files, files_count, pr, slug)
+
+    # THE WORDING. "PR #n landed on main as <sha> (files: ...)" — a statement
+    # about what merged, never about what was IMPLEMENTED. The mark is evidence
+    # that a PR NAMED this row, and the row asked for it to stop reading like
+    # more than that (task-c3c9922e7d8e3815).
+    head = "PR #%s landed on main as %s" % (pr, sha) if pr else "landed on main as %s" % sha
+    sentence = "%s (%s)" % (head, phrase)
 
     labels = content.get("labels")
     labels = list(labels) if isinstance(labels, list) else []
@@ -366,6 +596,27 @@ def cmd_plan(argv):
             break
     unstampable = str(criteria[hit].get("criterion") or "")[:120] if hit >= 0 else ""
 
+    # ── THE OVERLAP GATE ─────────────────────────────────────────────────────
+    # A landing whose changed paths touch nothing this row's own text names is
+    # not evidence about this row's work, so it does not get to offer a
+    # criterion. UNKNOWN IS NOT NONE: when the file list could not be read the
+    # verdict is "unknown" and NOTHING is withheld — today's behaviour exactly.
+    # Only a PROVEN non-overlap withholds, and it withholds only the criterion
+    # offer; the landing sentence is a fact and is recorded either way.
+    overlap, matched = "unknown", ""
+    if files_state == "read":
+        overlap, matched = overlap_verdict(row_vocabulary(doc, content), files)
+    overlap_refused = -1
+    # MUT-OVERLAP-SKIP: scripts/landed-mark.test.sh replaces this condition with
+    # `if False:` in a scratch copy and requires the section-15 non-overlap arms
+    # to go RED while the positive-control arm stays green.
+    if hit >= 0 and overlap == "none":
+        overlap_refused = hit
+        hit = -1
+        unstampable = ""
+    if overlap == "none":
+        sentence = "%s %s" % (sentence, NO_OVERLAP_MARK)
+
     # WHAT `content.landed` ALREADY HOLDS. The landing sentence goes through
     # POST /v1/tasks/:id/landed, whose union is by VALUE, so the idempotency
     # read has to cover it too — otherwise a re-run skips the labels (already
@@ -384,7 +635,10 @@ def cmd_plan(argv):
     # HALF-marked, and a re-run is exactly what should finish it.
     if all(w in labels for w in wanted) and commit_known:
         print(json.dumps({"action": "noop", "reason": "already marked with %s" % short,
-                          "unstampable": unstampable, "criterion_index": hit}))
+                          "unstampable": unstampable, "criterion_index": hit,
+                          "files_state": files_state, "files_phrase": phrase,
+                          "overlap": overlap, "overlap_match": matched,
+                          "overlap_refused": overlap_refused}))
         return 0
 
     print(json.dumps({
@@ -398,6 +652,11 @@ def cmd_plan(argv):
         # sending the int would be a 422 on a payload that looks right.
         "landed_skip": commit_known,
         "landed_body": landed_body(sha, pr, sentence, hit),
+        "files_state": files_state,
+        "files_phrase": phrase,
+        "overlap": overlap,
+        "overlap_match": matched,
+        "overlap_refused": overlap_refused,
     }))
     return 0
 
@@ -528,7 +787,8 @@ def cmd_pulls_first(argv):
 
 CMDS = {"plan": cmd_plan, "field": cmd_field, "apply-fixture": cmd_apply_fixture,
         "apply-landed-fixture": cmd_apply_landed_fixture,
-        "pulls-first": cmd_pulls_first}
+        "pulls-first": cmd_pulls_first,
+        "files-count": cmd_files_count, "files-collect": cmd_files_collect}
 sys.exit(CMDS[sys.argv[1]](sys.argv[2:]))
 PYEOF
 
@@ -737,6 +997,72 @@ trailer_from_pr_body() { # $1 sha -> sets FALLBACK_ID/_PR/_BODY; rc 4 ambiguous,
   return "$rcx"
 }
 
+# ── THE CHANGED-PATHS READ (task-c3c9922e7d8e3815) ───────────────────────────
+#
+# `GET repos/<o>/<r>/pulls/<n>/files` is a REST call against the standard rate
+# pool, for the same reason the PR lookup above is: the GraphQL pool is small,
+# shared and burned first. It is PAGED — 100 per page — and a caller that reads
+# page 1 and stops reports a 300-file squash as 100 files with no sign that it
+# truncated, so the loop asks for the next page whenever the last one came back
+# full, up to $MAX_FILE_PAGES.
+#
+# A FAILED READ IS NEVER AN EMPTY LIST. Every arm below — no gh, no owner/repo,
+# no PR number, a non-2xx, a page that is not a list of file objects, or a total
+# of zero files (which a merged PR cannot have) — prints its OWN `CANNOT READ`
+# line naming the PR and returns non-zero with state "unknown". The landing
+# sentence then says `files: UNREAD` in words. An empty list would be
+# byte-identical to "this PR changed nothing", which is the exact shape of
+# silence this whole file exists to stop shipping.
+#
+# NOT FATAL TO THE SCRIPT, on purpose and consistent with every other read here:
+# the code is already on main, a red cannot unland it, and a landing that goes
+# unmarked because GitHub rate-limited for ten seconds is the defect landed-mark
+# was written to remove. The READER is non-zero; the RUN is not.
+pr_files_for() { # $1 pr number, $2 out {state,files,count} json -> rc 0 read, 1 CANNOT READ
+  local pr="$1" out="$2" dir page n
+  printf '{"state":"unknown","files":[],"count":0}\n' > "$out"
+  if [ -z "$pr" ]; then
+    warn "CANNOT READ the changed paths — this landing resolved no PR number, so repos/<owner>/<repo>/pulls/<n>/files has no <n> to ask for. The landing is UNMEASURED for paths, not path-less."
+    return 1
+  fi
+  dir="$(mktemp -d -t landed-mark-files.XXXXXX)"
+  if [ -n "$FIXTURE_DIR" ]; then
+    # The hermetic door. Unlike pulls/<sha>.json above, an ABSENT file here is
+    # a CANNOT READ and not an answer: a merged PR always changed something, so
+    # "no file list" can only ever mean the read did not happen.
+    if [ -f "$FIXTURE_DIR/pullfiles/$pr.json" ]; then
+      cp "$FIXTURE_DIR/pullfiles/$pr.json" "$dir/1.json"
+    else
+      warn "CANNOT READ the changed paths for PR #${pr} — the fixture holds no pullfiles/${pr}.json. An absent file list is UNMEASURED, never an empty one."
+      rm -rf "$dir"; return 1
+    fi
+  else
+    command -v gh >/dev/null 2>&1 || { warn "CANNOT READ the changed paths for PR #${pr} — gh is not on PATH. The landing is UNMEASURED for paths, not path-less."; rm -rf "$dir"; return 1; }
+    [ -n "$REPO_SLUG" ] || { warn "CANNOT READ the changed paths for PR #${pr} — no owner/repo (GITHUB_REPOSITORY / LANDED_MARK_REPO is empty). The landing is UNMEASURED for paths, not path-less."; rm -rf "$dir"; return 1; }
+    page=1
+    while [ "$page" -le "$MAX_FILE_PAGES" ]; do
+      if ! gh api -H "Accept: application/vnd.github+json" \
+           "repos/${REPO_SLUG}/pulls/${pr}/files?per_page=100&page=${page}" > "$dir/${page}.json" 2>/dev/null; then
+        warn "CANNOT READ the changed paths for PR #${pr} — GET repos/${REPO_SLUG}/pulls/${pr}/files?per_page=100&page=${page} failed (token scope, rate limit, or network). The landing is UNMEASURED for paths, not path-less."
+        rm -rf "$dir"; return 1
+      fi
+      n="$(python3 "$PYHELPER" files-count "$dir/${page}.json" 2>/dev/null)"
+      if [ -z "$n" ]; then
+        warn "CANNOT READ the changed paths for PR #${pr} — page ${page} of repos/${REPO_SLUG}/pulls/${pr}/files is not a JSON list. The landing is UNMEASURED for paths, not path-less."
+        rm -rf "$dir"; return 1
+      fi
+      [ "$n" -lt 100 ] && break
+      page=$((page + 1))
+    done
+  fi
+  if ! python3 "$PYHELPER" files-collect "$out" "$dir"/*.json 2>/dev/null; then
+    warn "CANNOT READ the changed paths for PR #${pr} — the file pages held no \`filename\` fields, or held zero files, which a merged PR cannot. The landing is UNMEASURED for paths, not path-less."
+    printf '{"state":"unknown","files":[],"count":0}\n' > "$out"
+    rm -rf "$dir"; return 1
+  fi
+  rm -rf "$dir"; return 0
+}
+
 # ── mark ─────────────────────────────────────────────────────────────────────
 MARKED=0; NOOP=0; SKIPPED=0; SCANNED=0; PLANNED=0; LANDINGS=0; DISCHARGES=0
 
@@ -878,33 +1204,61 @@ json.dump(body, open(sys.argv[4], "w"))' "$msgf" "$pr" "$sha" "$dbody"
 
 mark_one() { # $1 task id, $2 sha, $3 pr
   local id="$1" sha="$2" pr="$3"
-  local rowf planf bodyf outf attempt=1
+  local rowf planf bodyf outf filesf attempt=1
   rowf="$(mktemp -t landed-mark-row.XXXXXX)"
   planf="$(mktemp -t landed-mark-plan.XXXXXX)"
   bodyf="$(mktemp -t landed-mark-body.XXXXXX)"
   outf="$(mktemp -t landed-mark-out.XXXXXX)"
+  filesf="$(mktemp -t landed-mark-filesarg.XXXXXX)"
+
+  # WHAT THIS SQUASH TOUCHED, read once per landing and handed to the planner.
+  # A failure here is loud and non-fatal: pr_files_for has already printed its
+  # own CANNOT READ line and left state "unknown" in $filesf.
+  # MUT-FILES-READ: scripts/landed-mark.test.sh replaces this call in a scratch
+  # copy with a hard-coded unknown state and requires the section-15 file arms
+  # to go RED.
+  pr_files_for "$pr" "$filesf"
 
   while :; do
     with_retry ledger_get "$id" "$rowf"
     case "$RC_CODE" in
-      401|403) rm -f "$rowf" "$planf" "$bodyf" "$outf"; die_auth "$RC_CODE" "GET /v1/tasks/${id}" ;;
+      401|403) rm -f "$rowf" "$planf" "$bodyf" "$outf" "$filesf"; die_auth "$RC_CODE" "GET /v1/tasks/${id}" ;;
       2??) : ;;
       404) warn "task ${id} named by ${sha:0:10} is not on the ledger (HTTP 404) — nothing marked."
-           SKIPPED=$((SKIPPED + 1)); rm -f "$rowf" "$planf" "$bodyf" "$outf"; return 0 ;;
+           SKIPPED=$((SKIPPED + 1)); rm -f "$rowf" "$planf" "$bodyf" "$outf" "$filesf"; return 0 ;;
       *)   warn "reading task ${id} returned HTTP ${RC_CODE} — the mark for ${sha:0:10} is skipped, not failed. A mark is a courtesy; the code is already on main."
-           SKIPPED=$((SKIPPED + 1)); rm -f "$rowf" "$planf" "$bodyf" "$outf"; return 0 ;;
+           SKIPPED=$((SKIPPED + 1)); rm -f "$rowf" "$planf" "$bodyf" "$outf" "$filesf"; return 0 ;;
     esac
 
-    if ! python3 "$PYHELPER" plan "$rowf" "$sha" "$pr" > "$planf" 2>/dev/null; then
+    if ! python3 "$PYHELPER" plan "$rowf" "$sha" "$pr" "$filesf" "$REPO_SLUG" > "$planf" 2>/dev/null; then
       warn "could not read task ${id}'s row shape — the mark for ${sha:0:10} is skipped."
-      SKIPPED=$((SKIPPED + 1)); rm -f "$rowf" "$planf" "$bodyf" "$outf"; return 0
+      SKIPPED=$((SKIPPED + 1)); rm -f "$rowf" "$planf" "$bodyf" "$outf" "$filesf"; return 0
     fi
 
-    local action evidence lifecycle idx
+    local action evidence lifecycle idx overlap ovmatch ovrefused fphrase
+    overlap="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("overlap","unknown"))' "$planf")"
+    ovmatch="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("overlap_match",""))' "$planf")"
+    ovrefused="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("overlap_refused",-1))' "$planf")"
+    fphrase="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("files_phrase",""))' "$planf")"
+
+    # THE REFUSAL, PRINTED. It names the row, the PR and the paths compared —
+    # a skip nobody can read is the same as no skip at all. It goes to the job
+    # summary AND to stdout, and it is printed on a dry run too: the whole point
+    # of --dry-run is to see what a real run would decide.
+    if [ "$overlap" = "none" ]; then
+      summary "NO PATH OVERLAP — ${id} vs PR #${pr:-?} (${sha:0:10}). That landing changed [${fphrase#files: }]; this row's own title, description and criteria name none of those paths, none of their parent directories and none of their basenames. The landing sentence is still recorded and the row is still labelled; it is marked as a landing with no overlap, and it is NOT evidence that this row's work shipped."
+    fi
+    if [ "$ovrefused" != "-1" ]; then
+      summary "REFUSED to offer criterion ${ovrefused} on ${id} for PR #${pr:-?} (${sha:0:10}) — the criterion is merge-shaped, but the landing touched [${fphrase#files: }] and the row names none of it. A criterion is not discharged by a merge that did not touch its subject."
+    fi
+    if [ "$overlap" = "overlap" ] && [ -n "$ovmatch" ]; then
+      note "${id}: the landing overlaps this row at \"${ovmatch}\" — the criterion offer is unchanged."
+    fi
+
     action="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["action"])' "$planf")"
     if [ "$action" = "noop" ]; then
       note "${id}: already marked with ${sha:0:10} — no write."
-      NOOP=$((NOOP + 1)); rm -f "$rowf" "$planf" "$bodyf" "$outf"; return 0
+      NOOP=$((NOOP + 1)); rm -f "$rowf" "$planf" "$bodyf" "$outf" "$filesf"; return 0
     fi
     evidence="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["evidence"])' "$planf")"
     lifecycle="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["lifecycle"])' "$planf")"
@@ -925,30 +1279,30 @@ mark_one() { # $1 task id, $2 sha, $3 pr
       # Counted separately. A dry run that reports "0 marked" beside a printed
       # plan reads as a plan that was rejected, which is the opposite of true.
       PLANNED=$((PLANNED + 1))
-      rm -f "$rowf" "$planf" "$bodyf" "$outf"; return 0
+      rm -f "$rowf" "$planf" "$bodyf" "$outf" "$filesf"; return 0
     fi
 
     python3 -c 'import json,sys; json.dump(json.load(open(sys.argv[1]))["body"], open(sys.argv[2],"w"))' "$planf" "$bodyf"
     with_retry ledger_post "$id" "$bodyf" "$outf"
     case "$RC_CODE" in
-      401|403) rm -f "$rowf" "$planf" "$bodyf" "$outf"; die_auth "$RC_CODE" "POST /v1/tasks/${id}/labels" ;;
+      401|403) rm -f "$rowf" "$planf" "$bodyf" "$outf" "$filesf"; die_auth "$RC_CODE" "POST /v1/tasks/${id}/labels" ;;
       2??)
         note "marked ${id}: ${evidence}"
         MARKED=$((MARKED + 1))
         post_landing "$id" "$planf" "$idx" "$unstampable" "$sha"
-        rm -f "$rowf" "$planf" "$bodyf" "$outf"; return 0 ;;
+        rm -f "$rowf" "$planf" "$bodyf" "$outf" "$filesf"; return 0 ;;
       412|409)
         # A holder wrote the row between our read and our write. The rev CAS did
         # its job — re-read and re-plan rather than clobber their stamp.
         if [ "$attempt" -ge "$RETRIES" ]; then
           warn "task ${id} changed under us ${attempt} times (HTTP ${RC_CODE}) — the mark for ${sha:0:10} is skipped, not forced."
-          SKIPPED=$((SKIPPED + 1)); rm -f "$rowf" "$planf" "$bodyf" "$outf"; return 0
+          SKIPPED=$((SKIPPED + 1)); rm -f "$rowf" "$planf" "$bodyf" "$outf" "$filesf"; return 0
         fi
         note "${id}: rev moved (HTTP ${RC_CODE}) — re-reading (attempt ${attempt}/${RETRIES})"
         attempt=$((attempt + 1)); continue ;;
       *)
         warn "writing the mark for ${id} returned HTTP ${RC_CODE} — skipped, not failed."
-        SKIPPED=$((SKIPPED + 1)); rm -f "$rowf" "$planf" "$bodyf" "$outf"; return 0 ;;
+        SKIPPED=$((SKIPPED + 1)); rm -f "$rowf" "$planf" "$bodyf" "$outf" "$filesf"; return 0 ;;
     esac
   done
 }
@@ -1122,18 +1476,33 @@ mkledger() { # $1 dir
   mkdir -p "$1/rows"; : > "$1/writes.log"; : > "$1/landed.log"; : > "$1/discharges.log"
 }
 mkrow() { # $1 ledgerdir, $2 id, $3 lifecycle, $4 assignee, $5 criterion-text ("" = none)
-  python3 - "$1/rows/$2.json" "$2" "$3" "$4" "$5" <<'PY'
+         # $6 description ("" = none), $7 merge_gate on that criterion ("true"/"false"/"" = unset)
+  python3 - "$1/rows/$2.json" "$2" "$3" "$4" "$5" "${6:-}" "${7:-}" <<'PY'
 import json, sys
-path, tid, life, assignee, crit = sys.argv[1:6]
+path, tid, life, assignee, crit, desc, gate = sys.argv[1:8]
 content = {"assignee": assignee, "lifecycle_status": life}
+if desc:
+    content["description"] = desc
 if crit:
+    entry = {"criterion": crit, "met": False, "evidence": ""}
+    if gate in ("true", "false"):
+        entry["merge_gate"] = (gate == "true")
     content["acceptance_criteria"] = [
         {"criterion": "an unrelated first criterion", "met": False, "evidence": ""},
-        {"criterion": crit, "met": False, "evidence": ""},
+        entry,
     ]
 json.dump({"ok": True, "doc": {"doc_id": tid, "rev": "rev0", "title": "fixture row " + tid,
                                "lifecycle_status": life, "content": content}}, open(path, "w"))
 PY
+}
+# The changed-path fixture. REST's own shape — a list of objects keyed
+# `filename` — so the hermetic arms exercise the same parser the wire does.
+mkpullfiles() { # $1 ledgerdir, $2 pr number, $3.. changed paths
+  mkdir -p "$1/pullfiles"
+  python3 - "$1/pullfiles/$2.json" "${@:3}" <<'PYF'
+import json, sys
+json.dump([{"filename": f, "status": "modified"} for f in sys.argv[2:]], open(sys.argv[1], "w"))
+PYF
 }
 # `grep -c` PRINTS a count AND exits 1 when the count is zero, so the house
 # `|| echo 0` idiom fires BOTH sides and yields the two-line string "0\n0" —
@@ -1152,7 +1521,7 @@ mkrow "$L1" task-aaa1 in_progress builder-x ""
 S1="$(mkcommit "$R1" "$(printf 'fix(x): a thing (#4242)\n\nbody prose\n\nTask: `task-aaa1`\n')")"
 OUT="$(run "$R1" "$L1" --sha "$S1" --dry-run)"
 has "$OUT" "task-aaa1" "a backtick-wrapped Task: trailer is read (the #5290 shape)"
-has "$OUT" "landed on main as ${S1} by PR #4242" "the PR number comes off the squash subject"
+has "$OUT" "PR #4242 landed on main as ${S1} (files: UNREAD" "the PR number comes off the squash subject, and an unread file list SAYS SO"
 check "a --dry-run writes NOTHING" "$(writes_in "$L1")" "0"
 has "$OUT" "DRY RUN — scanned 1 commit(s): 1 would be marked" "a dry run says one WOULD be marked, never \"0 marked\""
 
@@ -1496,6 +1865,109 @@ mkpull "$LG" "$SG" 94 "$(printf 'Discharges: task-sib-five c1\n\nTask: task-iii9
 OUT="$(run "$RG" "$LG" --sha "$SG")"
 has "$(cat "$LG/discharges.log")" 'task-sib-five' "a Discharges: line in the PR body reaches /discharges through the fallback"
 has "$OUT" "1 sibling citation(s) posted" "…and the tally counts it"
+
+
+# 15. THE CHANGED PATHS AND THE OVERLAP GATE (task-c3c9922e7d8e3815).
+#     THE DEFECT: PR #15403 changed exactly one file, api/Dockerfile, and
+#     carried `Task: task-076719e53a42102d` because it UNBLOCKED that row's
+#     build. The row is a Studio badge feature; the mark said "landed-on-main"
+#     and carried nothing a lead could check it against without a second trip
+#     to GitHub. Every arm below is hermetic — the file list is read from
+#     $FIXTURE/pullfiles/<pr>.json and never from the network.
+
+# 15a. THE LIST IS RECORDED, IN THE SENTENCE, IN THE ORDER REST GAVE IT.
+R15="$TMPROOT/r15"; L15="$TMPROOT/l15"; mkrepo "$R15"; mkledger "$L15"
+mkrow "$L15" task-fff1 in_progress builder-p "" "the reader lives in api/lib/barkpark_web/live/paper_live.ex"
+S15="$(mkcommit "$R15" "$(printf 'feat(x): paths (#701)\n\nTask: task-fff1\n')")"
+mkpullfiles "$L15" 701 "api/lib/barkpark_web/live/paper_live.ex" "api/test/live/paper_live_test.exs"
+OUT="$(run "$R15" "$L15" --sha "$S15")"
+has "$OUT" "PR #701 landed on main as ${S15} (files: api/lib/barkpark_web/live/paper_live.ex, api/test/live/paper_live_test.exs)" \
+  "MUT-FILES-READ: the landing sentence carries PR, sha AND the changed paths"
+has "$(cat "$L15/landed.log")" "(files: api/lib/barkpark_web/live/paper_live.ex, api/test/live/paper_live_test.exs)" \
+  "MUT-FILES-READ: the file list reaches content.landed through the /landed note"
+hasnt "$(cat "$L15/landed.log")" "implemented" "the landing note never says 'implemented' — a trailer names the row a PR is FOR"
+# Positive control: the row really moved. A sentence over a row nothing reached
+# would be a vacuous green.
+check "the files arm positive control: the row carries the class label" \
+  "$(python3 -c 'import json,sys; print("landed-on-main" in (json.load(open(sys.argv[1]))["doc"]["content"].get("labels") or []))' "$L15/rows/task-fff1.json")" "True"
+
+# 15b. THE #15403 SHAPE. A Dockerfile-only landing against a row whose text
+#      names nothing of the sort. The mark still lands — the PR really did name
+#      this row — but it is marked as a landing with NO overlap, and the
+#      merge-shaped criterion is NOT offered.
+R16="$TMPROOT/r16"; L16="$TMPROOT/l16"; mkrepo "$R16"; mkledger "$L16"
+mkrow "$L16" task-fff2 in_progress builder-p "The PR merged to main and CI is green." \
+  "Pre-gate badge in the paper reader: the grandfathered Papers say so quietly until their next edit."
+S16="$(mkcommit "$R16" "$(printf 'fix(docker): assert only assets that exist (#702)\n\nTask: task-fff2\n')")"
+mkpullfiles "$L16" 702 "api/Dockerfile"
+OUT="$(run "$R16" "$L16" --sha "$S16")"; RC=$?
+check "MUT-OVERLAP-SKIP: a non-overlapping landing still exits 0" "$RC" "0"
+has "$OUT" "NO PATH OVERLAP — task-fff2 vs PR #702" "MUT-OVERLAP-SKIP: the refusal names the row and the PR"
+has "$OUT" "That landing changed [api/Dockerfile]" "MUT-OVERLAP-SKIP: the refusal names the paths compared"
+has "$OUT" "REFUSED to offer criterion 1 on task-fff2" "MUT-OVERLAP-SKIP: the merge-shaped criterion is not offered"
+hasnt "$OUT" "still needs a holder" "MUT-OVERLAP-SKIP: and no holder is asked to seal it"
+has "$OUT" "marked task-fff2" "MUT-OVERLAP-SKIP: the landing is still recorded — the PR did name this row"
+has "$(cat "$L16/landed.log")" "[no overlap with the paths this row names]" \
+  "MUT-OVERLAP-SKIP: the recorded note carries the no-overlap marker the reader keys on"
+check "MUT-OVERLAP-SKIP: the /landed body still carries no criterion" \
+  "$(grep -c '"criterion"' "$L16/landed.log")" "0"
+
+# 15c. THE POSITIVE CONTROL, and it is the arm that makes 15b mean something.
+#      SAME row text, SAME merge_gate:true criterion, a landing that DOES touch
+#      what the row names: the criterion is offered exactly as it was before
+#      this section existed, and no refusal is printed.
+R17="$TMPROOT/r17"; L17="$TMPROOT/l17"; mkrepo "$R17"; mkledger "$L17"
+mkrow "$L17" task-fff3 in_progress builder-p "PR merged after the register lands." \
+  "Pre-gate badge in the paper reader: api/lib/barkpark_web/live/paper_live.ex renders it." true
+S17="$(mkcommit "$R17" "$(printf 'feat(papers): the badge (#703)\n\nTask: task-fff3\n')")"
+mkpullfiles "$L17" 703 "api/lib/barkpark_web/live/paper_live.ex"
+OUT="$(run "$R17" "$L17" --sha "$S17")"
+has "$OUT" "the landing overlaps this row at \"api/lib/barkpark_web/live/paper_live.ex\"" \
+  "MUT-OVERLAP-SKIP positive control: an overlapping landing is named as overlapping"
+has "$OUT" "criterion 1 deliberately NOT flipped" \
+  "MUT-OVERLAP-SKIP positive control: an overlapping landing still offers its merge_gate:true criterion"
+has "$OUT" "still needs a holder" "MUT-OVERLAP-SKIP positive control: …and still hands it to the claim holder"
+hasnt "$OUT" "NO PATH OVERLAP" "MUT-OVERLAP-SKIP positive control: no refusal is printed for an overlapping landing"
+hasnt "$(cat "$L17/landed.log")" "[no overlap" "MUT-OVERLAP-SKIP positive control: the note carries no no-overlap marker"
+
+# 15d. A LANDING BIGGER THAN THE LIST. Past 40 files the sentence becomes the
+#      COUNT plus the top-level dirs — a wall of 300 paths is not a record
+#      anybody reads, and the row asked for exactly this degradation.
+R18="$TMPROOT/r18"; L18="$TMPROOT/l18"; mkrepo "$R18"; mkledger "$L18"
+mkrow "$L18" task-fff4 in_progress builder-p "" "a wide refactor across api and scripts"
+S18="$(mkcommit "$R18" "$(printf 'refactor: wide (#704)\n\nTask: task-fff4\n')")"
+BIG=(); for i in $(seq 1 30); do BIG+=("api/lib/m${i}.ex"); done
+for i in $(seq 1 15); do BIG+=("scripts/s${i}.sh"); done
+mkpullfiles "$L18" 704 "${BIG[@]}"
+OUT="$(run "$R18" "$L18" --sha "$S18")"
+has "$OUT" "(files: 45 files across api, scripts)" "a 45-file landing records the count and its top-level dirs, not a wall"
+hasnt "$OUT" "api/lib/m17.ex" "…and does not paste the whole list into the sentence"
+
+# 15e. AN UNREAD FILE LIST IS UNREAD, AND IT WITHHOLDS NOTHING. Unknown is not
+#      "no overlap": a read that did not happen proves nothing about what the
+#      landing touched, so the criterion offer stays exactly as it was. The
+#      sentence says UNREAD in words — never an empty list, which would read as
+#      "this PR changed nothing".
+R19="$TMPROOT/r19"; L19="$TMPROOT/l19"; mkrepo "$R19"; mkledger "$L19"
+mkrow "$L19" task-fff5 in_progress builder-p "The PR merged to main and CI is green." "nothing in common with anything"
+S19="$(mkcommit "$R19" "$(printf 'fix(x): unread (#705)\n\nTask: task-fff5\n')")"
+OUT="$(run "$R19" "$L19" --sha "$S19" 2>&1)"
+has "$OUT" "CANNOT READ the changed paths for PR #705" "MUT-FILES-READ: an unreadable file list is a distinct CANNOT READ naming the PR"
+has "$OUT" "(files: UNREAD" "MUT-FILES-READ: …and the sentence says UNREAD in words, never an empty list"
+hasnt "$OUT" "NO PATH OVERLAP" "MUT-FILES-READ: an UNREAD list is not a proven non-overlap"
+has "$OUT" "still needs a holder" "MUT-FILES-READ: …so it withholds nothing the old behaviour offered"
+
+# 15f. A READ THAT CAME BACK EMPTY IS A FAILED READ. A merged PR changed at
+#      least one file, so a zero-length list can only mean the read did not
+#      happen — and it must never render as "(files: )".
+R20="$TMPROOT/r20"; L20="$TMPROOT/l20"; mkrepo "$R20"; mkledger "$L20"
+mkrow "$L20" task-fff6 in_progress builder-p "" ""
+S20="$(mkcommit "$R20" "$(printf 'fix(x): empty list (#706)\n\nTask: task-fff6\n')")"
+mkdir -p "$L20/pullfiles"; printf '[]\n' > "$L20/pullfiles/706.json"
+OUT="$(run "$R20" "$L20" --sha "$S20" 2>&1)"
+has "$OUT" "held zero files, which a merged PR cannot" "an empty REST file list is a CANNOT READ, not a zero"
+has "$OUT" "(files: UNREAD" "…and an empty list never renders as an empty file list"
+hasnt "$OUT" "(files: )" "…the sentence is never left with an empty parenthetical"
 
 echo "landed-mark --selftest: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -1030,7 +1030,25 @@ jobs:
           # author's local commit time, which is not a merge instant at all —
           # and `%cd` cannot say "there was no merge". That case is the NULL arm
           # below; 200/200 commits on main today are GitHub-committed.
-          GITHUB_MERGE_COMMITTER="noreply@github.com"
+          #
+          # THE LITERAL IS NOT WRITTEN HERE ANY MORE, and that is the whole
+          # point of this read. It used to be one hard-coded address in this
+          # file, keying an arm that fails SILENTLY: the day merges start
+          # arriving under another identity — a merge queue, a bot, GitHub
+          # changing the address — every row's `merged_at` goes NULL, this job
+          # still reports `delivered=true`, and nothing anywhere reds. The
+          # address now has exactly one definition, in
+          # scripts/merged-at-committer-tripwire.sh, which is also the CHECK
+          # that loses when it stops matching reality (run over this job's own
+          # ranges below, and mutation-proved by
+          # scripts/merged-at-committer-tripwire.test.sh in shell-harnesses.yml).
+          # An empty read is not laundered into the old default: it lands every
+          # row on the NULL arm, which is exactly what the tripwire screams at.
+          MERGED_AT_TRIPWIRE="${GITHUB_WORKSPACE}/scripts/merged-at-committer-tripwire.sh"
+          GITHUB_MERGE_COMMITTER="$(bash "${GITHUB_WORKSPACE}/scripts/merged-at-committer-tripwire.sh" --print-committer)"
+          if [ -z "$GITHUB_MERGE_COMMITTER" ]; then
+            echo "::error::scripts/merged-at-committer-tripwire.sh did not name a merge committer — every row this run builds will land on merged_at's NULL arm"
+          fi
           delivered=true
 
           echo "delivering_ref_sha (github.sha, the TRIGGER — never a row's sha): ${DELIVERING_REF_SHA}"
@@ -1413,6 +1431,35 @@ jobs:
           echo "rows to record: ${count}"
           jq -c '.deliveries[0] // "no rows"' /tmp/pd-payload.json
 
+          # THE TRIPWIRE ON merged_at's NULL ARM. It re-derives, from the very
+          # `%H %cd %ce` lines the rows were built from, which arm each row
+          # landed on, and REFUSES when a batch of three or more produced NO
+          # timestamp at all while naming some OTHER committer. That is not a
+          # direct push (one or two of those is ordinary and stays green) — it
+          # is the merge identity having moved, the failure this job could
+          # previously suffer forever without a single red anywhere.
+          #
+          # IT IS AN `::error::` AND NOT A NON-ZERO EXIT, and the reason is this
+          # job's own first law: the `changes` job anchors its diff base to the
+          # last SUCCESSFUL run of this workflow, so a red here freezes that
+          # anchor and every later merge redeploys both hosts — this epic's
+          # known outage mechanism. The red that CAN be a red lives in CI, on
+          # scripts/merged-at-committer-tripwire.test.sh, which proves the check
+          # loses by mutating the literal.
+          MERGED_AT_LINE="not measured"
+          if [ -x "$MERGED_AT_TRIPWIRE" ] || [ -r "$MERGED_AT_TRIPWIRE" ]; then
+            tripwire_out="$(bash "${GITHUB_WORKSPACE}/scripts/merged-at-committer-tripwire.sh" /tmp/pd-range-cp.txt /tmp/pd-range-instance.txt 2>&1)"
+            tripwire_rc=$?
+            printf '%s\n' "$tripwire_out"
+            MERGED_AT_LINE="$(printf '%s\n' "$tripwire_out" | sed -n 's/^merged_at: \([0-9]*\/[0-9]* row.*\)$/\1/p')"
+            if [ -z "$MERGED_AT_LINE" ]; then MERGED_AT_LINE="no rows measured"; fi
+            if [ "$tripwire_rc" -ne 0 ]; then
+              MERGED_AT_LINE="**TRIPPED** — ${MERGED_AT_LINE}"
+            fi
+          else
+            echo "::error::scripts/merged-at-committer-tripwire.sh is not in this checkout — merged_at's null-rate went unmeasured for run ${RUN_ID}"
+          fi
+
           # WHAT THIS RUN IS ABOUT TO CLAIM, ON THE RUN'S OWN PAGE — the trigger
           # sha and the served shas side by side, because their gap is the whole
           # defect this job was rewritten for and a reader should not need the
@@ -1427,6 +1474,7 @@ jobs:
             echo "| instance serves | \`${INSTANCE_SERVED:-<not recorded>}\` |"
             echo "| build_seconds | cp ${BUILD_CP}, instance ${BUILD_INSTANCE} |"
             echo "| rows | ${count} |"
+            echo "| merged_at | ${MERGED_AT_LINE} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "${count:-0}" -eq 0 ]; then

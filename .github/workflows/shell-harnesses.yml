@@ -399,6 +399,15 @@ on:
       - "Makefile"
       - ".githooks/post-merge"
       - "scripts/deploy-rebuild.sh"
+      # merged_at's COMMITTER TRIPWIRE (dr-w28-followup). Same tenant, same
+      # question one column over: deploy.yml's record-delivery job emits
+      # `merged_at` only for GitHub's own merge committer, and that address now
+      # has ONE definition — in the script below, which is also the check that
+      # loses when it stops matching reality. deploy.yml is already an entry of
+      # this list (deploy convergence, above) and is a guarded SUBJECT here too:
+      # the harness asserts the recorder still calls the tripwire at all.
+      - "scripts/merged-at-committer-tripwire.sh"
+      - "scripts/merged-at-committer-tripwire.test.sh"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -669,6 +678,9 @@ on:
       - "scripts/deploy-receipt-failure.test.sh"
       - "Makefile"
       - ".githooks/post-merge"
+      # merged_at's COMMITTER TRIPWIRE — mirrored from on.pull_request.paths.
+      - "scripts/merged-at-committer-tripwire.sh"
+      - "scripts/merged-at-committer-tripwire.test.sh"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -976,6 +988,9 @@ jobs:
           deploy-receipt-honesty Makefile
           deploy-receipt-honesty .githooks/post-merge
           deploy-receipt-honesty scripts/deploy-rebuild.sh
+          deploy-receipt-honesty scripts/merged-at-committer-tripwire.sh
+          deploy-receipt-honesty scripts/merged-at-committer-tripwire.test.sh
+          deploy-receipt-honesty .github/workflows/deploy.yml
           '
           self=".github/workflows/shell-harnesses.yml"
 
@@ -2521,3 +2536,22 @@ jobs:
         # the pre-repair script reached a REAL `make wasm` around the stubs —
         # four arms assert the escape log is empty.
         run: bash scripts/deploy-receipt-failure.test.sh
+      - name: merged-at-committer-tripwire.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/merged-at-committer-tripwire.sh
+      - name: merged-at-committer-tripwire.test.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/merged-at-committer-tripwire.test.sh
+      - name: "merged_at's NULL arm can still LOSE (30 cases, incl. the mutated committer literal)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # THE ONE ARM THAT MATTERS is F: a scratch copy of the tripwire whose
+        # BLESSED_MERGE_COMMITTER has been rewritten to a foreign address is run
+        # over the batch that is GREEN against the real script, and must exit 1.
+        # That is the incident played forwards — the day merges stop arriving
+        # under GitHub's own merge committer, EVERY platform_deliveries row's
+        # `merged_at` goes NULL while the recorder keeps answering
+        # delivered=true, and before this harness nothing anywhere reddened.
+        # Arm G is its companion: the wiring assertion, with both controls (call
+        # removed, literal re-hardcoded) proving it is not vacuous.
+        # Hermetic — mktemp fixtures, no git, no network, no gh, no bp.
+        run: bash scripts/merged-at-committer-tripwire.test.sh
