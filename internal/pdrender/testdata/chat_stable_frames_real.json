@@ -1,5 +1,20 @@
 {
   "_comment": "A REAL capture, not a hand-authored fixture. These are the `event: stable` / `event: stable_end` frames a PRODUCTION Barkpark (guerrilla.barkpark.cloud) put on a socket during one live chat turn, lifted verbatim out of the raw SSE byte log. Its sibling chat_stable_frames.json is the hand-authored CONTRACT (what the wire must be); this file is the EVIDENCE (what the wire was). Captured by tooling/chat-drive/drive.sh (DRIVE_CAPTURE_ONLY=1) under the D41 safety law — plan mode, no plan card ever allowed, session archived on completion, minted token revoked by body — and re-checked over the raw events.log by tooling/chat-drive/assert-stable-capture.py. To regenerate: run the drive, then `assert-stable-capture.py <out>/events.log --emit -` and restore this `capture` block by hand. Consumer: apps/mobile/__tests__/chatStableFramesReal.test.ts, which replays these bytes through the shipped mobile reducer.",
+  "_preservation": {
+    "status": "PRESERVED PRODUCTION CAPTURE — DO NOT REFRESH, REWRITE, PRETTIFY OR REFORMAT. The bytes ARE the artifact.",
+    "captured_at": "2026-07-28T23:40:42Z/2026-07-28T23:41:10Z",
+    "session": "34a0246f-4acd-4df2-8f8f-bd42fa9624f4, one live chat turn on https://guerrilla.barkpark.cloud, the GREEN production slot (barkpark-slot@green.service), driven by tooling/chat-drive/drive.sh under the D41 safety law",
+    "paid": "A real production run against a live paid slot: total_cost_usd 0.10709139999999999 of billed provider spend (claude/haiku, plan mode). Six frames — five `stable`, one `stable_end` — 2874 committed bytes of turn text in a 7614-byte file.",
+    "cannot_be_regenerated": "Nothing regenerates this file and nothing could without spending another paid live production turn against production, so it cannot be recovered once it is gone — a reformat, a prettifier, a re-serialization or a `refresh the stale fixture` sweep destroys it exactly as completely as `rm` does, and the diff will look like tidying.",
+    "preservation_not_a_drift_lock": "The other consumer fixtures caught by the drift sweep are fixed by making their PRODUCER regenerate them on demand; that is a drift lock, and it keeps the fixture honest against the emitter. This file gets PRESERVATION instead, because the regenerate remedy is unavailable by construction here: regenerating means buying another live production turn. Preservation freezes the bytes; it does NOT keep them current.",
+    "accepted_risk": "STALENESS IS ACCEPTED, DELIBERATELY AND WITH EYES OPEN. If the emitter renames a frame key or changes the `stable` payload shape, the consumers below keep replaying these July 2026 bytes forever and stay green while the real wire has moved. That is a known, recorded hole, not an oversight — it is the price of not spending a paid turn. It is recorded in task-4d809f850c8c322a (criterion 3) and restated in the guard test named under `guard` below; the contract-side check that DOES track the emitter is the hand-authored sibling chat_stable_frames.json, exercised by internal/chat/stable_test.go and api/test.",
+    "consumers": [
+      "apps/mobile/__tests__/chatStableFramesReal.test.ts — the mobile chat surface. Imports this file directly, wraps each recorded envelope with frameEvent() and feeds it to reduce() from apps/mobile/src/chat/reducer.ts (driveAll()). If you change that reducer, this preserved capture is one of the things you are changing the meaning of.",
+      "apps/mobile/__tests__/chatCursorTurnKeyed.test.ts — same mobile reducer, turn-keyed cursor leg; imports this file directly.",
+      "internal/chat/stable_test.go — the Go TUI live-document consumer; loads it via loadStableRealCapture()."
+    ],
+    "guard": "apps/mobile/__tests__/chatStableFramesReal.test.ts pins the SHA-256 of this whole file. If that assertion goes red, revert your change to this file. Do NOT re-pin the hash: re-pinning is the same irreversible loss with an extra step."
+  },
   "scope": "chat-stable-frame-wire-real-capture",
   "capture": {
     "server": "https://guerrilla.barkpark.cloud",
