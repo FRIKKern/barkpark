@@ -75,21 +75,37 @@
 //
 // So the receivers are DERIVED, by a predicate, per NODE of the server tree:
 //
-//     An identifier R in app.js HOLDS a value of node N when R is read for at
-//     least MIN_EVIDENCE distinct properties that are EXCLUSIVE to N — child
-//     key names of N that are not child key names of any other node this census
-//     knows about.
+//     An identifier R in app.js HOLDS a value of node N when the properties R
+//     is read for that are EXCLUSIVE to N — child key names of N no other node
+//     claims — sum to MIN_EVIDENCE, each weighted 1/fanout(k), where fanout is
+//     how many distinct identifiers in all of app.js read a `.k` at all.
 //
-// `d` reads `d.git_ref`, `d.image_tag`, `d.became_live_at` — three names only a
-// deployment has — so `d` holds deployments, and `d.trigger` therefore COUNTS.
-// `entry` reads `entry.source` and `entry.at` and not one deployment-exclusive
-// name, so it does not, and `source` lands on the dead-payload arm where it
-// belongs. The rule is the same rule for `site`, for `user`, for the /v1/me
-// root; nothing is enumerated.
+// The weighting is not decoration and a flat COUNT does not work. `d` reads
+// `d.git_ref`, `d.image_tag`, `d.became_live_at` — names only a deployment has,
+// each read off exactly one identifier in the whole file — and scores 9.5, so
+// `d` holds deployments and `d.trigger` COUNTS. The timeline-entry variable `e`
+// reads `status`, `source` and `detail`, three names no other censused node
+// claims either; a count-of-3 rule recruits it as a deployment and
+// `deployment.source` then reads as "the console reads this", which is exactly
+// the false claim this row's own filing made about app.js:11223. Weighted, `e`
+// scores 0.5 — `status` is read off thirty-one identifiers, `detail` and
+// `source` off six — and `source` lands on the dead-payload arm, where the
+// source says it belongs.
 //
-// MIN_EVIDENCE is 2 rather than 1 because one exclusive property is a
-// coincidence budget the console can afford to spend: `previews_enabled` alone
-// on some unrelated options bag would silently recruit it as a site.
+// MIN_EVIDENCE is 1.0 because that number means something: the evidence of ONE
+// property name that nothing else in app.js reads.
+//
+// HONEST RESIDUAL, and it is not small. A name collision this census cannot see
+// through still recruits: the SSE payload variable reads `site_id` (fanout 1),
+// `detail` and `stage`, scores 1.33, and is counted a deployment receiver — so
+// `deployment.stage` reads as READ when the identifier reading it is a
+// stage-event, not a row. Its sibling case is `last_deployment`, which states
+// SIX names and owns none of them; that node is unaddressable by construction
+// and its verdict is inherited from the deployment shape it collides with (see
+// isRead). Both err toward READ, i.e. toward the arm that FAILS, which is the
+// only safe direction for a gate to be wrong in — and in both the remedy is
+// the same and is correct either way: the producer emits a key the server
+// already sends on every row.
 //
 // ── IT REFUSES RATHER THAN PASSING ──────────────────────────────────────────
 //
