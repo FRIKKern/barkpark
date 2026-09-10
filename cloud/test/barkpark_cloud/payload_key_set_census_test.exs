@@ -1719,7 +1719,22 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # ("@go_tag_pinned 363 -> 364"). The pre-merge
   # measurement said 362 -> 363 and is VOID: it was taken against a main without
   # `abandoned_basis` (#17352). Never summed with that delta.
-  @go_tag_pinned 364
+  # 364 -> 368 (ssw8-site-doctor, MEASURED 2026-09-10 against origin/main at
+  # e741c9a92255adc48cc423f54573f8b82b5c9d9d): `internal/cloudclient/site_doctor.go`
+  # declares `SiteDoctorReport` / `SiteDoctorSubstrate`, whose vocabulary is
+  # already almost entirely package-wide. FOUR names are new to the whole union
+  # — `absent_count`, `repair`, `substrates`, `unknown_count` — so those four move
+  # this pin. The other thirteen (`ok`, `checked_at`, `site`, `id`, `slug`, `name`,
+  # `kind`, `framework`, `instance`, `key`, `state`, `detail`, `unreadable`) already
+  # existed, so they ride free on the NAME union and move the SITE register instead
+  # (`@go_tag_sites` below: eleven bumps, plus `checked_at` and `key` BORN into the
+  # map at 2 — a name declared once is not in the map at all).
+  # RE-MEASURED by the scanner itself, with a CONTROL: the same scan over
+  # origin/main alone returns 364, byte-equal to the value this line replaces, so
+  # the instrument is known to reproduce the census before it is used to change it.
+  # An earlier measurement said 363 -> 367 and is VOID: it was taken against a main
+  # 20 commits older, without `serving_since_basis`. Never summed with that delta.
+  @go_tag_pinned 368
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1804,6 +1819,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # (`@go_tag_pinned` does not move) and this row is born at 3.
     "cancelled" => 3,
     "censored" => 3,
+    # cli/site-doctor-verb (ssw8-site-doctor): NEWLY DUPLICATED, 1 -> 2.
+    # `SiteDoctorReport.CheckedAt` joins the single existing declaration.
+    "checked_at" => 2,
     # dr-w16-s3-followup-class-vocabulary-unreachable: NEWLY DUPLICATED, 1 -> 2.
     # `classes` was declared once (DeployCensus.Classes — the classes THIS
     # WINDOW observed). `DeployVocabulary.Classes` is the ledger's whole class
@@ -1851,7 +1869,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # package-wide, so `@go_tag_pinned` structurally cannot see this site.
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 9 -> 10. `SiteBuildLogRecord.Detail` — the plane's human
     # sentence on a 409/410/502 build-log refusal.
-    "detail" => 10,
+    "detail" => 11,
     # ssw8 (PR #14610): ContentBinding.DocType is the third — the type the
     # control plane actually READ at create, as against the type the site ROW
     # stores. Same name, different measurement: exactly the collision this
@@ -1876,18 +1894,21 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.FinishedAt`
     # joins the single existing declaration.
     "finished_at" => 2,
-    "framework" => 4,
+    "framework" => 5,
     "from" => 2,
     "git_ref" => 2,
     "headroom" => 2,
     "host" => 6,
-    "id" => 13,
+    "id" => 14,
     "image_tag" => 2,
     "in_flight" => 2,
     "inserted_at" => 8,
-    "instance" => 3,
+    "instance" => 4,
     "instances" => 2,
-    "kind" => 4,
+    # cli/site-doctor-verb (ssw8-site-doctor): NEWLY DUPLICATED, 1 -> 2.
+    # `SiteDoctorSubstrate.Key` joins the single existing declaration.
+    "key" => 2,
+    "kind" => 5,
     "label" => 6,
     "last_seen_at" => 2,
     "live" => 2,
@@ -1903,11 +1924,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "mode" => 2,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one name site (11 -> 12). `SiteBuildLogStage.Name` — one stage of the
     # recorded build ladder.
-    "name" => 12,
+    "name" => 13,
     "never_covered" => 3,
     "next_cursor" => 2,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.OK` — the 202 relay envelope's own flag.
-    "ok" => 9,
+    "ok" => 10,
     "oldest_pending_seconds" => 2,
     "p50" => 2,
     "p95" => 2,
@@ -1949,7 +1970,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "seconds" => 2,
     "series" => 2,
     "sha" => 2,
-    "site" => 7,
+    "site" => 8,
     "site_id" => 5,
     # MetricsSpace.Sites joined the three existing `sites` declarations —
     # the deployed-sites section of the host-space report (W6 S4).
@@ -1959,7 +1980,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "sites" => 5,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 7 -> 8. `SiteBuildLogRecord.Slug` — the site slug the box
     # recorded the build under, echoed from the record.
-    "slug" => 8,
+    "slug" => 9,
     "source" => 3,
     "stage" => 3,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 2 -> 3. `SiteBuildLogRecord.Stages` — the recorded stage
@@ -1975,7 +1996,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # unmeasured — the field that stops an absent root rendering as 0 bytes) and
     # MetricsSpaceResidual.Status (computed/undefined/unmeasured). Both are the
     # field a reader BRANCHES on, so only this row can notice a site dying.
-    "state" => 2,
+    "state" => 3,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.Status` — the run state the CLI verdict QUOTES rather than inventing.
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one status site (17 -> 18). `SiteBuildLogStage.Status` — one stage's verdict.
     # 18 -> 19 (dr-w22-s5): `DeployBoxDoorStatus.Status`.
@@ -2007,7 +2028,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "trigger" => 3,
     "unit" => 2,
     "unmetered" => 2,
-    "unreadable" => 2,
+    "unreadable" => 3,
     "unresolved" => 2,
     "updated_at" => 5,
     "url" => 5,
@@ -2044,7 +2065,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # that were declared exactly once and are now duplicated. That split is the
   # register's whole reason to exist: the 14 ride free on the NAME union and
   # `@go_tag_pinned` structurally cannot see any of them.
-  @cloudclient_sources ~w(client.go deliveries.go selfupdate.go site_build_log.go)
+  @cloudclient_sources ~w(client.go deliveries.go selfupdate.go site_build_log.go site_doctor.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
