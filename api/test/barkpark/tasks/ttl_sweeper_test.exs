@@ -126,8 +126,10 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
   #   * `reaped:`    — the row's `rev` advanced (the sweep rewrote it).
   #   * `untouched:` — the row's `rev` AND `content` are byte-identical.
   #
-  # The reported `swept` is used only as a FLOOR (it must be at least the
-  # fixture's own reaped rows), never as an equality, and `skipped` is not
+  # The per-row deltas ARE the proof. The reported `swept` is additionally
+  # checked as a FLOOR (at least the fixture's own reaped rows) — a shape and
+  # sanity check that can never RED on a foreign row, only ever on a sweep that
+  # reported fewer reaps than this fixture demonstrably got. `skipped` is not
   # asserted at all: a foreign row that a concurrent close beat us to lands
   # there and is none of this file's business.
   #
@@ -181,6 +183,10 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
     Map.new(docs, fn doc -> {doc.id, Repo.get!(Document, doc.id)} end)
   end
 
+  # `perform/1` reaps through TWO counters — the lease sweep and the engagement
+  # lapse — so a fixture with one row of each kind lands 1 in each. The floor is
+  # over the rows the job moved in total, not per counter.
+  defp swept_count({:ok, %{swept: n, engagement: %{swept: m}}}), do: n + m
   defp swept_count({:ok, %{swept: n}}), do: n
   defp swept_count(%{swept: n}), do: n
 
