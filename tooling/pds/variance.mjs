@@ -36,6 +36,61 @@
 
 import { pipelineSegments, segmentHead, segmentTokens } from "../grip/census.mjs";
 
+// ── THE BEHAVIOUR HEADS, AND WHAT THE EXECUTOR WILL ACTUALLY RUN ─────────────
+//
+// TWO DIFFERENT QUESTIONS, AND CONFLATING THEM IS THE BUG THIS TABLE EXISTS TO
+// STOP. This module answers *what does an exit code MEAN* — `node --test x`
+// exits 1 on a failed assertion, so its rc genuinely moves on BEHAVIOUR, and a
+// table that denied it would be lying about the shell. grip's caller-boundary
+// screen answers a different question — *will this census RUN it* — and it
+// fails closed on any head that executes an arbitrary program.
+//
+// So the two lists DO NOT MATCH, deliberately, and the mismatch is a STATED
+// LIMIT rather than a defect to be aligned away: aligning variance's table down
+// to the executor would put a false statement about the shell into the one
+// table whose whole job is to be true about the shell.
+//
+// MEASURED 2026-09-10 by handing each probe below to grip's `screenCommand()`
+// (tooling/grip/screen.mjs) — NOT copied from any prose. Seven of the nine
+// heads are unreachable, by two different layers:
+//
+//   bash sh zsh node python3   refused at the HEAD ("runs an arbitrary script
+//                              or inline program" / "executes arbitrary …")
+//   npm pnpm                   HEAD admitted, but every behaviour-paying
+//                              sub-verb (`test`, `run`) is off the read-only
+//                              sub-verb allowlist
+//   go mix                     ADMITTED — `go test`/`go vet` and `mix test`
+//                              (note `go build` is refused: not a read-only verb)
+//
+// The list below is not a second copy of that measurement: section 10 of
+// rerun-adjudicate.test.mjs RE-RUNS the probes through the live screen and reds
+// if this constant, the screen, or README.md's stated-limit line ever disagree.
+
+/** head → the canonical behaviour-paying command for that head. */
+export const BEHAVIOUR_HEAD_PROBES = Object.freeze({
+  go: "go test ./internal/cli -run TestSiteClaimsAreProbedWithResponseTypes",
+  mix: "mix test test/barkpark/tasks_test.exs",
+  npm: "npm test",
+  pnpm: "pnpm test",
+  bash: "bash scripts/roster-drift-check.sh",
+  sh: "sh scripts/roster-drift-check.sh",
+  zsh: "zsh scripts/roster-drift-check.sh",
+  node: "node --test tooling/pds/rerun-adjudicate.test.mjs",
+  python3: "python3 -m pytest",
+});
+
+/** Every head whose exit code pays for a BEHAVIOUR claim. */
+export const BEHAVIOUR_HEADS = Object.freeze(Object.keys(BEHAVIOUR_HEAD_PROBES));
+
+/**
+ * The STATED LIMIT: behaviour heads this table advertises that grip's screen
+ * refuses, so a recipe using one is reported REFUSED and counted, never run.
+ * Mirrored in README.md's `pds-stated-limit:` line and locked by the test.
+ */
+export const EXECUTOR_UNREACHABLE_BEHAVIOUR_HEADS = Object.freeze(
+  ["bash", "node", "npm", "pnpm", "python3", "sh", "zsh"],
+);
+
 /** The axes an exit code can move on. */
 export const AXIS = Object.freeze({
   EXISTENCE: "EXISTENCE",
@@ -139,9 +194,9 @@ export function varianceSet(command) {
   }
 
   // Toolchain runs. These EXECUTE something and answer with the exit code, so
-  // they are the one class that pays for a behaviour claim.
-  if (head === "go" || head === "mix" || head === "npm" || head === "pnpm" ||
-      head === "bash" || head === "sh" || head === "zsh" || head === "node" || head === "python3") {
+  // they are the one class that pays for a behaviour claim. WHICH OF THEM GRIP
+  // WILL ACTUALLY RUN IS A DIFFERENT QUESTION — see BEHAVIOUR_HEAD_PROBES.
+  if (BEHAVIOUR_HEADS.includes(head)) {
     return { axes: [AXIS.BEHAVIOUR], masked: null, why: `\`${head}\` runs a program and answers with its exit code — the only shape that pays for a behaviour claim` };
   }
 
