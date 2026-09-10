@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -357,6 +358,7 @@ func TestEveryLazyClientCarriesTheRetryPolicy(t *testing.T) {
 		{"VerifyInstance / Rollback / TriggerSelfUpdate widening", newHTTPClient(VerifyTimeout), VerifyTimeout},
 		{"FleetDeployCensus widening", newHTTPClient(FleetDeployCensusTimeout), FleetDeployCensusTimeout},
 		{"UploadDeploymentArtifact (ctx-bounded, no client timeout)", newHTTPClient(0), 0},
+		{"SiteDoctor widening", newHTTPClient(SiteDoctorTimeout), SiteDoctorTimeout},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.client.Timeout != tc.timeout {
@@ -376,5 +378,55 @@ func TestInjectedClientIsNotRewritten(t *testing.T) {
 	c := &Client{HTTP: injected}
 	if c.httpClient() != injected {
 		t.Fatal("httpClient() did not return the injected client")
+	}
+}
+
+// THE PREDICATE. The table above is a snapshot of the clients somebody
+// remembered to list; SiteDoctor shipped a bare `&http.Client{Timeout: …}`
+// (#17490) the day after the table was written and nothing reddened, because a
+// list cannot see a sibling it was not told about. So: scan every non-test
+// source file in this package and refuse any `&http.Client{` outside retry.go,
+// which is the one place allowed to construct one. Positive control: retry.go
+// itself must contain the construction, or the scan cannot see what it guards.
+func TestNoSourceFileBuildsABareHTTPClientOutsideRetryGo(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const needle = "&http.Client{"
+	scanned, offenders, control := 0, []string{}, false
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scanned++
+		for i, line := range strings.Split(string(raw), "\n") {
+			code := line
+			if k := strings.Index(code, "//"); k >= 0 {
+				code = code[:k]
+			}
+			if !strings.Contains(code, needle) {
+				continue
+			}
+			if name == "retry.go" {
+				control = true
+				continue
+			}
+			offenders = append(offenders, fmt.Sprintf("%s:%d: %s", name, i+1, strings.TrimSpace(line)))
+		}
+	}
+	if scanned == 0 {
+		t.Fatal("scanned zero source files — the scan cannot see the package it guards")
+	}
+	if !control {
+		t.Fatal("retry.go carries no &http.Client{ construction — the positive control is gone, so an empty offender list proves nothing")
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("%d bare &http.Client{ construction(s) outside retry.go — each one opts out of the 429/retry_after policy; use newHTTPClient(timeout):\n  %s", len(offenders), strings.Join(offenders, "\n  "))
 	}
 }
