@@ -105,6 +105,30 @@ func looksLikeUUID(s string) bool {
 	return true
 }
 
+// openLaunchNote is the browser half of the `bp cloud open` receipt, and it says
+// only what the CLI actually read.
+//
+// WHAT THE CODE KNOWS. browserOpener is openInBrowser (above), which Start()s
+// `open` / `xdg-open` / rundll32 and deliberately never Wait()s, so `bp` returns
+// at once. A nil error therefore means ONE thing: the launcher process was
+// spawned. It is not a window, not a loaded page, not even the browser you use —
+// a handler that exits 1 a millisecond later returns nil here just the same. The
+// previous line, "opening in your browser…", asserted that whole chain on the
+// strength of its first link, which is a success claim about LOCAL state backed
+// by an error return alone (task-c49e91ced1d6fd23).
+//
+// THE FIX IS THE SITE VERB'S, WORD FOR WORD. PR #17491 fixed exactly this shape
+// for `bp cloud site open` (siteOpenLaunchNote, cloud_site_cmd.go) and left this
+// verb's separate envelope for a follow-up row; this IS that follow-up. Keep the
+// claim, name the limit in the same breath, and leave the URL — printed
+// unconditionally and the real deliverable — as the thing that always works.
+//
+// The machine envelope moves with the sentence: the field is `launched`, not
+// `opened`, because a bool named `opened` is the same claim in JSON.
+func openLaunchNote() string {
+	return "handed the URL to your browser launcher — it started without error; the CLI never sees the window, so if nothing came up, open the URL above yourself"
+}
+
 // runCloudOpen is `bp cloud open <target> [<id-or-name>] [--print-only]`.
 func runCloudOpen(out *writer, g globals, args []string) int {
 	if g.help {
@@ -168,30 +192,33 @@ func runCloudOpen(out *writer, g globals, args []string) int {
 	}
 	url := dashboardURL(dashboardBaseURL(cfg), hash)
 
-	opened := false
+	// launched, never `opened`: all this bool records is that the launcher
+	// process started. See openLaunchNote.
+	launched := false
 	if !printOnly && out.isTTY {
 		if berr := browserOpener(url); berr == nil {
-			opened = true
+			launched = true
 		} else {
-			// Opening is best-effort: the URL is already the deliverable. Note the
-			// failure on stderr but do NOT fail the command.
-			out.errf("could not open a browser (%v) — copy the URL above", berr)
+			// Launching is best-effort: the URL is already the deliverable. Note the
+			// failure on stderr but do NOT fail the command. It names the LAUNCHER,
+			// not a browser the CLI never observed.
+			out.errf("could not start a browser launcher (%v) — copy the URL above", berr)
 		}
 	}
 
 	if out.output == "json" || out.output == "yaml" {
 		out.emitStructured(map[string]any{
-			"ok":     true,
-			"target": kind,
-			"url":    url,
-			"opened": opened,
+			"ok":       true,
+			"target":   kind,
+			"url":      url,
+			"launched": launched,
 		})
 		return exitOK
 	}
 
 	out.outf("%s", url)
-	if opened {
-		out.info("opening in your browser…")
+	if launched {
+		out.info("%s", openLaunchNote())
 	}
 	return exitOK
 }

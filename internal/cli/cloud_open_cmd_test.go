@@ -207,7 +207,9 @@ func TestRunCloudOpenUnknownName(t *testing.T) {
 	}
 }
 
-// TestRunCloudOpenJSON emits the {ok,target,url,opened} envelope.
+// TestRunCloudOpenJSON emits the {ok,target,url,launched} envelope. The bool is
+// `launched`, not `opened`: see openLaunchNote — all the CLI reads is that the
+// launcher process started.
 func TestRunCloudOpenJSON(t *testing.T) {
 	withTempConfigHome(t)
 	seedCloudLogin(t, "https://dash.test")
@@ -219,7 +221,7 @@ func TestRunCloudOpenJSON(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit = %d", code)
 	}
-	for _, want := range []string{`"ok":true`, `"target":"sites"`, `"url":"https://dash.test/#sites"`, `"opened":false`} {
+	for _, want := range []string{`"ok":true`, `"target":"sites"`, `"url":"https://dash.test/#sites"`, `"launched":false`} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("json missing %q:\n%s", want, stdout)
 		}
