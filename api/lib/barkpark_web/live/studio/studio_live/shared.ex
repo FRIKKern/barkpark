@@ -434,6 +434,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     # the next render walks a map where it expects a list.
     params = Barkpark.Content.Forms.coerce_params(params, schema)
 
+    # Denormalised image metadata (Gyldendal parity E1.7): a freshly picked
+    # asset arrives as {url, assetId, alt, focal…}; the site needs width /
+    # height / lqip on the stored value. Filled from the asset, never
+    # overwriting what is already there, never raising into the save.
+    params =
+      Barkpark.Media.ImageMetadata.backfill_params(
+        params,
+        schema,
+        socket.assigns.dataset,
+        ScopeHelpers.scope_opts(socket)
+      )
+
     if doc && type do
       case Content.upsert_draft(
              doc,
