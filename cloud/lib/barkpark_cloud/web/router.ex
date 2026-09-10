@@ -63,7 +63,6 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/audit            admin     the team's append-only audit trail (keyset-paginated; ?actor_user_id= / ?action_prefix= narrow it)
       DELETE  /v1/barkparks/:id    admin     remove an instance (deregister; live box → 409)
       GET     /v1/barkparks/:id/events user  the instance's agent-event history (team-scoped)
-      GET     /v1/barkparks/:id/telemetry user  the instance's latest health report, normalized (team-scoped)
       GET     /v1/barkparks/:id/metrics user  a window of health beats as cpu/mem/disk/load series (team-scoped)
       GET     /v1/barkparks/:id/usage user   the console's usage meters, honest per D48 (team-scoped)
       GET     /v1/barkparks/:id/usage/history user  usage-meter series over the trailing 14d of samples, for sparklines (team-scoped)
@@ -293,7 +292,6 @@ defmodule BarkparkCloud.Web.Router do
     Push,
     Registry,
     Repo,
-    Telemetry,
     Usage,
     Vercel,
     Verify,
@@ -10156,50 +10154,20 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # GET /v1/barkparks/:id/telemetry → 200 {telemetry: <envelope> | nil} | 404.
-  # User-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the
-  # sibling events route (wrong-team / absent id are indistinguishable). Pure
-  # OBSERVABILITY over data the agent ALREADY captured (charter decision 16): it
-  # finds the LATEST "health" event in the instance's append-only stream and
-  # re-serves it through `Telemetry.normalize/1` as one stable envelope. A live
-  # instance that has simply not phoned home a health beat yet is NOT an error —
-  # it returns `telemetry: nil` (never 500). The 100-event window is ample: the
-  # per-cycle health beat is by far the most frequent event kind, so the newest
-  # health row lives at the head of the stream.
-  get "/v1/barkparks/:id/telemetry" do
-    conn = Auth.require_user(conn, [])
-
-    cond do
-      conn.halted ->
-        conn
-
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 404, %{error: "not_found"})
-
-      true ->
-        case Registry.recent_events_for_team(
-               conn.assigns.current_team,
-               conn.path_params["id"],
-               100
-             ) do
-          nil ->
-            json(conn, 404, %{error: "not_found"})
-
-          events ->
-            telemetry =
-              case Enum.find(events, &(&1.type == "health")) do
-                nil -> nil
-                event -> Telemetry.normalize(event)
-              end
-
-            json(conn, 200, %{telemetry: telemetry})
-        end
-    end
-  end
+  # REMOVED: GET /v1/barkparks/:id/telemetry (cch-w51-bl-...-rendered-by-nothing).
+  # It re-served `Telemetry.normalize/1`'s envelope for the newest health beat and
+  # had ZERO callers at removal: no console fetch (the only `telemetry` token in
+  # app.js is a comment), no `internal/cli` or `internal/cloudclient` client, no
+  # docs entry. Every fact it carried still has a door — the console reads the raw
+  # beat payload off `/v1/barkparks/:id/events` (`backupStateText`), and the folded
+  # window rides `/v1/barkparks/:id/metrics`, whose `service_health` block is this
+  # same normalizer. A route with no named consumer is authenticated attack surface
+  # and a promise in the wire contract; it is not free because it is small. If one
+  # is ever wanted back, `Telemetry.normalize/1` is untouched and this is six lines.
 
   # GET /v1/barkparks/:id/metrics?points=N → 200 {ok, collected_at, instance,
-  # beat, points, series, latest, pressure, space, service_health} | 404. The time-series companion to
-  # /telemetry (which serves the single latest beat): it folds a WINDOW of the
+  # beat, points, series, latest, pressure, space, service_health} | 404. The ONLY
+  # read surface over the health beat since /telemetry was removed: it folds a WINDOW of the
   # instance's health beats — the vitals the agent now rides on its 60s beat
   # (cpu/mem/disk/load) — into oldest-to-newest series the console's Metrics tab
   # (S12b) and `bp cloud instance top` render. Pure OBSERVABILITY over data the
@@ -10209,7 +10177,7 @@ defmodule BarkparkCloud.Web.Router do
   # deploy). `BarkparkCloud.Metrics.build/3` is the pure, total shaper.
   #
   # USER-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the sibling
-  # telemetry / usage / domain-status routes (wrong-team / absent / malformed id
+  # events / usage / domain-status routes (wrong-team / absent / malformed id
   # are indistinguishable). `points` is clamped (default 30, cap 200) via the
   # shared parse_limit idiom. TOTAL over a sick/silent box: an instance that has
   # never phoned home a beat is a normal 200 with beat.status "absent" and empty
@@ -10270,7 +10238,7 @@ defmodule BarkparkCloud.Web.Router do
 
   # GET /v1/barkparks/:id/usage → 200 {usage: <envelope>} | 404. User-authed +
   # TEAM-SCOPED with the SAME no-existence-leak 404 as the sibling events /
-  # telemetry routes (wrong-team / absent / malformed id are indistinguishable).
+  # metrics routes (wrong-team / absent / malformed id are indistinguishable).
   #
   # Composes the console's usage meters (charter decision D48 — two honesty
   # tiers). The endpoint NEVER 500s on a sick box and NEVER blocks the

@@ -214,11 +214,32 @@ const FIXTURE_FLAGS = ["--add-check", "--remove-check"];
 const fixtureFlagAt = process.argv.findIndex((a) => FIXTURE_FLAGS.includes(a));
 const FIXTURE_MODE = fixtureFlagAt === -1 ? null : process.argv[fixtureFlagAt];
 const FIXTURE_FILE = FIXTURE_MODE ? process.argv[fixtureFlagAt + 1] : null;
+
+// ── THE ONE REFUSAL VOCABULARY (cch-w63-bl) ─────────────────────────────────
+// EVERY exit-2 path in this file ends with exactly ONE line, on STDERR:
+//
+//     !! REFUSAL COPY CENSUS (exit 2): REFUSED TO MEASURE — <reason>
+//
+// It is the same shape __preview__/exit-vocabulary.mjs already emits for the
+// browser instruments, so ONE reader covers the whole console fence. Before
+// this, six of console-unit's nine exit-2 sites spoke a private vocabulary
+// (BARE `FAIL(2):` lines with no prefix at all) that no `!!`-anchored capture could see — a gate that CAPTURES the
+// refusing instrument's own summary line would have replaced a wrong sentence
+// with NO sentence, in the wave about silence.
+//
+// THE READER IS scripts/console-refusal-capture.mjs, and its unit test
+// ENUMERATES this file from source: a new exit-2 path that does not go through
+// `refuse2` reds that test. Do not add one.
+const REFUSAL_NAME = "REFUSAL COPY CENSUS";
+const refuse2 = (reason) => {
+  process.stderr.write(`!! ${REFUSAL_NAME} (exit 2): REFUSED TO MEASURE — ${reason}\n`);
+  process.exit(2);
+};
+
 if (FIXTURE_MODE && !FIXTURE_FILE) {
-  console.error(`FAIL(2): ${FIXTURE_MODE} needs a fixture file argument.`);
   console.error("  e.g. node cloud/priv/static/__refusal_copy_census.mjs --add-check \\");
   console.error("         cloud/priv/static/__refusal_copy.add.fixture.js");
-  process.exit(2);
+  refuse2(`${FIXTURE_MODE} needs a fixture file argument.`);
 }
 
 // AN UNRECOGNISED FLAG IS A REFUSAL, NOT A DEFAULT — and this is here because it
@@ -232,11 +253,10 @@ if (FIXTURE_MODE && !FIXTURE_FILE) {
 for (const a of process.argv.slice(2)) {
   if (!a.startsWith("--")) continue;
   if (FIXTURE_FLAGS.includes(a)) continue;
-  console.error(`FAIL(2): unrecognised argument ${JSON.stringify(a)}.`);
   console.error("  Known flags: " + FIXTURE_FLAGS.join(", ") + ". A run this census does not");
   console.error("  understand is a run it must not answer: falling back to app.js here would print a");
   console.error("  green live census as the answer to a fixture question nobody asked.");
-  process.exit(2);
+  refuse2(`unrecognised argument ${JSON.stringify(a)}.`);
 }
 
 const DEFAULT_APP = path.join(here, "app.js");
@@ -247,9 +267,8 @@ let src;
 try {
   src = fs.readFileSync(APP, "utf8");
 } catch (e) {
-  console.error(`FAIL(2): cannot read the subject — ${APP}`);
   console.error("  " + e.message);
-  process.exit(2);
+  refuse2(`cannot read the subject — ${APP} (${e.message})`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -407,7 +426,7 @@ if (missingFences.length) {
   console.error("  the pin. If a fence was DELETED, this census's central argument no longer holds");
   console.error("  and the file needs re-reasoning, not re-pinning.");
   console.error("");
-  process.exit(2);
+  refuse2("a declared FENCE function is absent from the subject: " + missingFences.join(", "));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -676,7 +695,7 @@ const allRows = [...mapRows, ...fnRows, ...argRows].sort((a, b) => a.line - b.li
     console.error("  Rename one of the functions, or give the key a discriminator. Do NOT pin around");
     console.error("  it: a pin over an ambiguous key certifies nothing.");
     console.error("");
-    process.exit(2);
+    refuse2("an extraction key names two different sites — the pin cannot discriminate them.");
   }
 }
 
@@ -1107,7 +1126,7 @@ if (FIXTURE_MODE) {
     console.error("  This is NOT the census failing on the console. It is the control that proves the");
     console.error("  census CAN fail failing to behave as its own fixture declares. Fix the fixture or");
     console.error("  the arm — never the declaration alone.");
-    process.exit(2);
+    refuse2("the fixture control lost its footing — " + LABEL);
   };
 
   // ── the declarations, read from the fixture's OWN bytes ───────────────────
@@ -1201,9 +1220,8 @@ if (FIXTURE_MODE) {
 const pinByKey = new Map(PIN.map((r) => [r.key, r]));
 if (pinByKey.size !== PIN.length) {
   const dupes = PIN.map((r) => r.key).filter((k, i, a) => a.indexOf(k) !== i);
-  console.error("FAIL(2): duplicate PIN keys — a site is hiding behind another:");
   for (const d of new Set(dupes)) console.error("  " + d);
-  process.exit(2);
+  refuse2("duplicate PIN keys — a site is hiding behind another: " + [...new Set(dupes)].join(", "));
 }
 
 const liveByKey = new Map();
@@ -1259,11 +1277,10 @@ for (const r of crownRows) {
 }
 if (!crownRows.some((r) => r.key === "MAP|ERRORS.forbidden")) {
   console.error("");
-  console.error("FAIL(2): MAP|ERRORS.forbidden is NOT in the derived population.");
   console.error("  That key is the whole reason the MAP kind exists — the site has no enclosing");
   console.error("  function, so no function-granular selector can reach it. Its absence means the");
   console.error("  map-qualification rule stopped admitting ERRORS, not that the console improved.");
-  process.exit(2);
+  refuse2("MAP|ERRORS.forbidden is NOT in the derived population.");
 }
 console.log("");
 

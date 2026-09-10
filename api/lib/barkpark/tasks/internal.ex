@@ -725,6 +725,49 @@ defmodule Barkpark.Tasks.Internal do
   def caller_stamp(token_id) when is_binary(token_id), do: %{"caller_token_id" => token_id}
   def caller_stamp(_), do: %{}
 
+  # ─── THE ACTOR STAMP (tlv-bl-events-actor-attribution) ────────────────────
+  #
+  # WHO held the lease, and on WHICH epoch, at the moment this mutation
+  # committed — stamped ONTO the event so a close/claim is attributable from
+  # the event feed alone.
+  #
+  # THE GAP THIS CLOSES. A done-set audit (wave 7, 2026-08-18) replayed 560
+  # task events and could not attribute a single close to a worker: every
+  # projected row was exactly `{at, doc_id, event, id, rev}`, so per-row close
+  # provenance was recoverable ONLY by fetching each done row's top-level
+  # `content.claim` map — N document reads to answer "who closed what, when".
+  # The claim map is the LIVE lease and is mutable (a later re-claim, a pulse,
+  # a compaction), so it is also not a history: it says who holds the row NOW,
+  # not who closed it THEN. The event is the durable, append-only record, and
+  # this is the field that makes it answer the question.
+  #
+  # WHY IT IS A TYPED STAMP AND NOT AN ENVELOPE KEY. `Tasks.Events`'s
+  # `:payload` projection is `document` MINUS `envelope_keys/0` MINUS
+  # `audit_keys/0`, so an `extra_document` merge surfaces on
+  # `bp task events --payload` the moment it is written, with no reader edit —
+  # the derived-projection contract `events.ex` documents. It is deliberately
+  # NOT an audit key: `caller_token_id` is the bearer the server
+  # AUTHENTICATED, while `actor` is the worker identity the ledger's CAS
+  # actually fenced on, which is the one an auditor reconstructs provenance
+  # from.
+  #
+  # Nil-safe in both slots: a claimless close (139 of 6,617 terminal rows on
+  # the guerrilla ledger carry no claim at all — container and root rows) emits
+  # the keys it has and NO `actor` key when it has neither, so those events
+  # stay byte-identical and go on saying, truthfully, that nobody held the row.
+  @spec actor_stamp(term(), term()) :: map()
+  def actor_stamp(worker, epoch) do
+    actor =
+      %{}
+      |> maybe_put("worker", if(is_binary(worker) and worker != "", do: worker))
+      |> maybe_put("epoch", if(is_integer(epoch), do: epoch))
+
+    if map_size(actor) == 0, do: %{}, else: %{"actor" => actor}
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
   # Every CAS write path bypasses Content's canonical write path
   # (`tap_broadcast/5`), so these mirror its PubSub so the SSE listen endpoint
   # and workspace activity reads see task ops. Content stays the single owner of

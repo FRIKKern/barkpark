@@ -19301,12 +19301,65 @@ test("cch-w30-s1 census: side A parses out of the JAVASCRIPT (never the Elixir)"
     "the parsed sets must be the real ones, not an accidental match");
 });
 
+// cch-w52-bl: ARM (a)'s population used to be NOTIF_EVENTS ALONE, and that was
+// the census's one-directional half. Measured, not argued: adding a fabricated
+// producerless row ["quota_exceeded", …] to NOTIF_ALWAYS_SEND shipped 0 failures
+// on origin/main, while the reverse mutation (deleting a row) DID red arm (b).
+// So the arm that catches "the console promises something nothing sends" was
+// blind over exactly the surface where a producerless promise is WORST — an
+// always-send row bypasses the per-event toggle entirely, so nobody can opt out
+// of the thing that does not exist. The population is now the UNION.
+//
+// NAMED CONSENT, never a blanket skip. An entry here says: this always-send row
+// has no AUTONOMOUS producer in cloud/lib and that is a deliberate design
+// decision, stated with its reason, not an unnoticed orphan. The consent set is
+// itself guarded below — an entry naming a NOTIF_EVENTS row, or naming a row
+// that no longer exists, reds — so consent cannot quietly become a silencer.
+const NOTIF_ALWAYS_SEND_CONSENT = {
+  test:
+    "USER-INITIATED DIAGNOSTIC. `test` has no autonomous producer by design — it " +
+    "fires only when a human presses a test button. Its one real producer is the " +
+    "STRING idiom `enqueue_channel(_, _, \"test\", _)` in `send_test_chat/2` " +
+    "(the per-channel Send test button), which this census's fourth idiom does " +
+    "parse. The EMAIL half was a genuine orphan and was DELETED from " +
+    "`@always_send` in cch-w52-bl; what remains is the chat mechanism, which " +
+    "works. Deleting the console row instead would hide a real always-send event.",
+};
+
 test("cch-w30-s1 census ARM (a): every event the console OFFERS has a producer in cloud/lib", () => {
   const { sites } = notifProducerCensus();
-  const orphans = jsLiteralEvents("NOTIF_EVENTS").filter((ev) => !sites.has(ev));
+  // The UNION: a toggle row and an always-send row are both promises the console
+  // makes, and an always-send row is the stronger one (no toggle to turn it off).
+  const offered = jsLiteralEvents("NOTIF_EVENTS");
+  const always = jsLiteralEvents("NOTIF_ALWAYS_SEND");
+  const population = [...new Set(offered.concat(always))];
+  const orphans = population
+    .filter((ev) => !sites.has(ev))
+    .filter((ev) => !Object.prototype.hasOwnProperty.call(NOTIF_ALWAYS_SEND_CONSENT, ev))
+    .sort();
   assert.deepEqual(orphans, [],
-    "the console offers a toggle for an event NOTHING in cloud/lib dispatches — " +
-    "either delete the row or land a producer; a checkbox is a promise");
+    "the console names an event NOTHING in cloud/lib dispatches — either delete " +
+    "the row, land a producer, or (always-send rows only) add a NAMED, reasoned " +
+    "NOTIF_ALWAYS_SEND_CONSENT entry saying why it has no autonomous producer; " +
+    "a checkbox is a promise, and an always-send row is a promise with no opt-out");
+});
+
+test("cch-w30-s1 census ARM (a): the consent set cannot become a silencer", () => {
+  const always = new Set(jsLiteralEvents("NOTIF_ALWAYS_SEND"));
+  const offered = new Set(jsLiteralEvents("NOTIF_EVENTS"));
+  const keys = Object.keys(NOTIF_ALWAYS_SEND_CONSENT);
+  assert.ok(keys.length >= 1, "the consent map went empty — that is a parser or edit accident, not a clean bill");
+  for (const ev of keys) {
+    // (i) consent is an ALWAYS-SEND-only instrument. A toggle row that lost its
+    // producer must be deleted or wired, never consented.
+    assert.ok(always.has(ev),
+      `consent names \`${ev}\`, which is not a NOTIF_ALWAYS_SEND row` +
+      (offered.has(ev) ? " (it is a NOTIF_EVENTS toggle row — those get deleted or wired, never consented)" : " (stale entry — delete it)"));
+    // (ii) the reason must actually be one. An empty or token string is the
+    // shape a silencer takes on its way in.
+    assert.ok(String(NOTIF_ALWAYS_SEND_CONSENT[ev]).length >= 80,
+      `consent for \`${ev}\` carries no real reason — a named consent is a sentence, not a checkbox`);
+  }
 });
 
 test("cch-w30-s1 census ARM (b): every event the control plane SENDS appears on the console", () => {

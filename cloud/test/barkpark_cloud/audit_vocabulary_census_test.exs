@@ -167,7 +167,48 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
 
   # ── source reading ────────────────────────────────────────────────────────
 
-  defp lib_files, do: Path.wildcard(Path.join(@lib_root, "**/*.ex"))
+  # ── the per-run source memo ───────────────────────────────────────────────
+  #
+  # Every helper below walks `cloud/lib` and needs the COMMENT-STRIPPED lines
+  # of each file. `code_lines/1` used to do `File.read!` + `strip_comments/1`
+  # — a grapheme-by-grapheme walk — on EVERY call, and the helpers call it
+  # once per file per verb (`producer_files/1`), per anchor and per blocker
+  # regex (`lib_lines_matching/1`), plus the three router layers, which re-read
+  # the 16k-line `router.ex` each time. That was 10,025 read+strip passes for
+  # one 27-test run: quadratic in tests x files, and on a loaded CI runner it
+  # blew ExUnit's 60 s default timeout and reddened the required Cloud gate for
+  # every lane (run 34427781831, 2026-09-10). Same class as #17212.
+  #
+  # So: read and strip each file EXACTLY ONCE, in `setup_all`, and let every
+  # helper consume the shared lines. The memo is built at TEST RUN TIME (not at
+  # compile time, which would serve a stale tree after an edit) and erased when
+  # the module finishes. `:persistent_term` rather than the test context so the
+  # private helpers stay callable without threading a map through all of them.
+  setup_all do
+    :persistent_term.put({__MODULE__, :sources}, read_sources())
+    on_exit(fn -> :persistent_term.erase({__MODULE__, :sources}) end)
+    :ok
+  end
+
+  defp read_sources do
+    files = Path.wildcard(Path.join(@lib_root, "**/*.ex"))
+
+    lines =
+      Map.new(files, fn path ->
+        {path, path |> File.read!() |> strip_comments() |> String.split("\n")}
+      end)
+
+    %{files: files, lines: lines}
+  end
+
+  defp sources do
+    case :persistent_term.get({__MODULE__, :sources}, nil) do
+      nil -> read_sources()
+      memo -> memo
+    end
+  end
+
+  defp lib_files, do: sources().files
 
   @doc false
   # Drops `#` comments and heredoc bodies, leaving code. A `#` inside a string
@@ -203,8 +244,12 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
   defp strip_line(["#" | _rest], false, acc), do: strip_line([], false, acc)
   defp strip_line([c | rest], in_string?, acc), do: strip_line(rest, in_string?, [c | acc])
 
+  # Served from the per-run memo above. The fallback keeps the helper honest for
+  # a path outside `cloud/lib/**/*.ex` (and before `setup_all` has run).
   defp code_lines(path) do
-    path |> File.read!() |> strip_comments() |> String.split("\n")
+    Map.get_lazy(sources().lines, path, fn ->
+      path |> File.read!() |> strip_comments() |> String.split("\n")
+    end)
   end
 
   # ── the two sides ─────────────────────────────────────────────────────────

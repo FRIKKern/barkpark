@@ -1600,6 +1600,20 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       "started_at" => DateTime.utc_now() |> DateTime.to_iso8601()
     }
 
+    # A run that carried an uploaded artifact also names its staged tree, so a
+    # re-attach after a BEAM restart can recognise it from disk alone.
+    manifest =
+      case Keyword.get(opts, :prebuilt_dir) do
+        nil ->
+          manifest
+
+        prebuilt_dir ->
+          Map.merge(manifest, %{
+            "prebuilt_dir" => prebuilt_dir,
+            "prebuilt_sha256" => Keyword.get(opts, :prebuilt_sha256, String.duplicate("ab", 32))
+          })
+      end
+
     File.write!(Path.join(dir, "#{slug}.manifest.json"), Jason.encode!(manifest))
     %{unit: unit, status_file: status_file, env_file: env_file}
   end
@@ -2668,6 +2682,256 @@ defmodule Barkpark.Sites.DeployRunnerTest do
 
       for f <- [decoy_status, decoy_log, decoy_env], do: assert(File.exists?(f))
       assert File.exists?(Path.join(decoy_tree, "keep"))
+    end
+  end
+
+  # An engine stub that writes ONLY to the status file — faithful to the real
+  # prebuilt path, where `log()` goes to stdout, `emit()` goes to the status
+  # fold, and BUILD's `tee "$BUILD_LOG"` (the sole writer of the log file) never
+  # runs because BUILD is skipped.
+  defp status_only_engine(build_id) do
+    stub("""
+    echo 'BPSTAGE name=BUILD status=skipped build_id=#{build_id}' >> "$BARKPARK_SITE_STATUS_FILE"
+    echo 'BPSTAGE name=SWITCH status=ok build_id=#{build_id}' >> "$BARKPARK_SITE_STATUS_FILE"
+    exit 0
+    """)
+  end
+
+  # ── the staged prebuilt tree + the log the manifest names ─────────────────
+  #
+  # (ssw9-prebuilt-tree-finalize-sweep / ssw10-bl-prebuilt-tree-and-log-hygiene)
+  # Two properties of the prebuilt lane that only a run-to-finalize test can see:
+  #
+  #   * `<slug>.prebuilt/` used to be removed ONLY by `prune_run_state_dir/1`'s
+  #     LRU eviction, gated on `length(manifests) > @max_tracked_runs` (32).
+  #     Manifests are one-per-SLUG, so on a 12-site box that gate never fires and
+  #     the extracted tree survived a successful deploy, an ordinary deploy, and
+  #     a second prebuilt deploy. Worst case: 32 x the 64 MiB extraction cap =
+  #     2 GiB on a 3.8 GB box.
+  #   * the run's `log_file` is truncated at launch and, on the prebuilt path,
+  #     nothing ever writes it (BUILD's `tee` is the only writer, and BUILD is
+  #     skipped), so the manifest pointed at a 0-byte file.
+  describe "the staged prebuilt tree (ssw9 / ssw10-bl)" do
+    test "is DROPPED at run finalize on the SUCCESS path — no LRU eviction involved, and the release still serves" do
+      dir = run_dir()
+      release = Path.join(dir, "fake-release")
+      {b64, sha} = prebuilt_artifact()
+
+      engine =
+        stub("""
+        # PRECONDITION asserted BY THE ENGINE, mid-run: the staged tree is on
+        # disk and carries the uploaded bytes at the moment STAGE would copy
+        # them. Without this the "it is gone" assertion below could pass on a
+        # tree that was never there.
+        test -f "$PREBUILT_DIR/index.html" || exit 3
+        mkdir -p #{release}
+        cp "$PREBUILT_DIR/index.html" #{release}/index.html
+        echo 'BPSTAGE name=BUILD status=skipped build_id=pbfin' >> "$BARKPARK_SITE_STATUS_FILE"
+        echo 'BPSTAGE name=STAGE status=ok build_id=pbfin' >> "$BARKPARK_SITE_STATUS_FILE"
+        echo 'BPSTAGE name=SWITCH status=ok build_id=pbfin' >> "$BARKPARK_SITE_STATUS_FILE"
+        exit 0
+        """)
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        command: engine
+      )
+
+      staged = Path.join(dir, "pbfin.prebuilt")
+
+      assert DeployRunner.trigger(
+               req("pbfin", build_id: "pbfin", artifact_b64: b64, artifact_sha256: sha)
+             ) == {:ok, :started}
+
+      # PRECONDITION, from the test's side: the tree reached disk and SURVIVED
+      # the run. This is exactly the state the old code left on the box forever.
+      assert File.exists?(Path.join(staged, "index.html"))
+      # …and the engine really read it — the copy exists only if it did.
+      assert File.read!(Path.join(release, "index.html")) =~ "prebuilt"
+
+      # The LRU sweep CANNOT be the thing that cleans up below: it fires only
+      # above @max_tracked_runs = 32 manifests, and this dir holds exactly one.
+      assert length(Path.wildcard(Path.join(dir, "*.manifest.json"))) == 1
+
+      status = DeployRunner.status("pbfin")
+      assert status.state == :done
+      assert status.exit_code == 0
+
+      # THE PROPERTY: gone at finalize, one manifest in the dir.
+      refute File.exists?(staged)
+      assert length(Path.wildcard(Path.join(dir, "*.manifest.json"))) == 1
+
+      # …while the release dir still serves the bytes that were copied out of it.
+      assert File.read!(Path.join(release, "index.html")) =~ "prebuilt"
+    end
+
+    test "is dropped on the FAILURE path too — the caller holds the artifact, and RE-UPLOAD is the only recovery" do
+      dir = run_dir()
+      {b64, sha} = prebuilt_artifact()
+
+      engine =
+        stub("""
+        test -f "$PREBUILT_DIR/index.html" || exit 3
+        echo 'BPSTAGE name=BUILD status=skipped build_id=pbfail' >> "$BARKPARK_SITE_STATUS_FILE"
+        echo 'BPSTAGE name=HEALTH status=failed build_id=pbfail detail="bp-build-id marker mismatch"' >> "$BARKPARK_SITE_STATUS_FILE"
+        exit 13
+        """)
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        command: engine
+      )
+
+      staged = Path.join(dir, "pbfail.prebuilt")
+
+      assert DeployRunner.trigger(
+               req("pbfail", build_id: "pbfail", artifact_b64: b64, artifact_sha256: sha)
+             ) == {:ok, :started}
+
+      assert File.exists?(Path.join(staged, "index.html"))
+
+      status = DeployRunner.status("pbfail")
+      # PRECONDITION: this run really FAILED — a green here would make the
+      # "dropped on failure" claim vacuous.
+      assert status.state == :done
+      assert status.exit_code == 14
+      assert status.failure_reason =~ "bp-build-id marker mismatch"
+
+      refute File.exists?(staged)
+    end
+
+    test "a re-attach after a BEAM restart mid-run does NOT delete a tree the engine has not yet copied" do
+      dir = run_dir()
+      staged = Path.join(dir, "reattach-pb.prebuilt")
+      File.mkdir_p!(staged)
+      File.write!(Path.join(staged, "index.html"), "<h1>not copied yet</h1>")
+
+      seed_manifest(dir, "reattach-pb",
+        build_id: "b7",
+        status: "BPSTAGE name=PLAN status=ok build_id=b7\n",
+        prebuilt_dir: staged
+      )
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        is_active_cmd: {active_only_for("reattach-pb"), []},
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        command: stub("exit 0")
+      )
+
+      pid = start_fresh_runner()
+
+      # PRECONDITION: the run is LIVE across the "restart". A re-attach that saw
+      # it as terminal would say nothing about a MID-RUN tree.
+      status = GenServer.call(pid, {:status, "reattach-pb"})
+      assert status.state == :running
+
+      # THE PROPERTY: the tree the engine has not copied yet is untouched.
+      assert File.read!(Path.join(staged, "index.html")) =~ "not copied yet"
+
+      # CONTROL, same tree, same manifest: once the unit is gone the finalize
+      # drops it — so the survival above is the live state, not an inert path.
+      put_cfg(is_active_cmd: {echo_script("inactive"), []})
+      assert %{state: :done} = GenServer.call(pid, {:status, "reattach-pb"})
+      refute File.exists?(staged)
+    end
+
+    test "the 2 GiB worst case is gone, and the bound that replaced it is NAMED with its derivation" do
+      cap = Barkpark.Sites.PrebuiltArtifact.caps().max_total_bytes
+
+      # Named, derived, and not re-declared: capacity x the extractor's own cap.
+      assert DeployRunner.staged_prebuilt_bound_bytes() ==
+               DeployRunner.build_slot_capacity() * cap
+
+      assert DeployRunner.staged_prebuilt_bound_bytes() == 64 * 1024 * 1024
+
+      # The bound the finalize drop REPLACED: @max_tracked_runs (32) x the same
+      # cap = 2 GiB on a 3.8 GB box.
+      assert 32 * cap == 2 * 1024 * 1024 * 1024
+      assert DeployRunner.staged_prebuilt_bound_bytes() < 32 * cap
+    end
+  end
+
+  describe "the log the manifest names, on a prebuilt deploy (ssw10-bl)" do
+    test "NEGATIVE CONTROL: a box build whose engine writes no log leaves the manifest pointing at an EMPTY file" do
+      dir = run_dir()
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        command: status_only_engine("nolog")
+      )
+
+      assert DeployRunner.trigger(req("pb-nolog", build_id: "nolog")) == {:ok, :started}
+
+      manifest = dir |> Path.join("pb-nolog.manifest.json") |> File.read!() |> Jason.decode!()
+      # This is the shape the bug reported — and on a BOX build it is honest:
+      # the engine simply produced no build output in this stub.
+      assert File.read!(manifest["log_file"]) == ""
+      refute manifest["prebuilt_dir"]
+    end
+
+    test "a prebuilt deploy leaves the file the manifest names NON-EMPTY, naming the digest and the unreproducible property" do
+      dir = run_dir()
+      {b64, sha} = prebuilt_artifact()
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        command: status_only_engine("pblog")
+      )
+
+      assert DeployRunner.trigger(
+               req("pb-log", build_id: "pblog", artifact_b64: b64, artifact_sha256: sha)
+             ) == {:ok, :started}
+
+      # THE ASSERTION IS ON THE FILE THE MANIFEST NAMES — not on a path the test
+      # rebuilt for itself, which is the whole point of the finding.
+      manifest = dir |> Path.join("pb-log.manifest.json") |> File.read!() |> Jason.decode!()
+      assert manifest["prebuilt_dir"] == Path.join(dir, "pb-log.prebuilt")
+
+      contents = File.read!(manifest["log_file"])
+      refute contents == ""
+      assert contents =~ "PREBUILT DEPLOY"
+      assert contents =~ sha
+      assert contents =~ "UNREPRODUCIBLE"
+      assert contents =~ "RE-UPLOAD"
+      assert contents =~ "pblog"
+
+      # …and it reaches the operator through `status/1`'s log, which is what the
+      # control plane renders.
+      status = DeployRunner.status("pb-log")
+      assert status.state == :done
+      assert status.exit_code == 0
+      assert Enum.any?(status.log, &String.contains?(&1, "no build ran on this box"))
+
+      # It must not look like a marker a finalizer reads out of a log.
+      for marker <- [
+            "TORN_DOWN=",
+            "TEARDOWN_FAILED=",
+            "TARGET_BUILD=",
+            "(no_previous)",
+            "(not_supported)",
+            "ROLLED BACK"
+          ] do
+        refute contents =~ marker
+      end
     end
   end
 end

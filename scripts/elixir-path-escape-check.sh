@@ -101,8 +101,19 @@ set -euo pipefail
 #   required gate compiles against a restored dependency tree or rebuilds from
 #   scratch. A PR that edited only the guard would otherwise change what the
 #   prod-compile gate does while skipping the prod-compile gate.
+#   tooling/pds/pre-gate-papers.json is the SECOND @external_resource that
+#   escapes api/, and it is here for the same reason design/** is: it is read at
+#   COMPILE time by api/lib/barkpark/content/papers/pre_gate_register.ex (the
+#   2026-09-02 grandfather register — a runtime read would miss in every release,
+#   which is why it is embedded), so editing it recompiles that module and
+#   changes what the reader renders. Declared as an EXACT FILE, never
+#   `tooling/**`: that tree is the repo's largest and churns constantly, and the
+#   over-inclusion would cost the shim exactly what it exists to save (the same
+#   judgement the templates/** note below records). The register is edited only
+#   when a Paper heals, so the full-suite cost is rare and bounded.
 ELIXIR_COMPILE_PATHS='api/**
 design/**
+tooling/pds/pre-gate-papers.json
 .github/workflows/elixir.yml
 scripts/elixir-path-escape-check.sh
 scripts/elixir-path-escape-check.test.sh

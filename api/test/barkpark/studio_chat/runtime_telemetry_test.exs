@@ -8,6 +8,7 @@ defmodule Barkpark.StudioChat.RuntimeTelemetryTest do
   alias Barkpark.StudioChat.Runtime.Codex.Protocol
   alias Barkpark.StudioChat.Runtime.Event
   alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry}
+  alias Barkpark.TestTmp
 
   defmodule FakeCodex do
     @behaviour Runtime.Adapter
@@ -262,11 +263,7 @@ defmodule Barkpark.StudioChat.RuntimeTelemetryTest do
   end
 
   defp acknowledgement_fixture do
-    path =
-      Path.join(
-        System.tmp_dir!(),
-        "codex_acknowledgement_#{System.unique_integer([:positive])}.py"
-      )
+    path = TestTmp.path("codex_acknowledgement_#{System.unique_integer([:positive])}.py")
 
     File.write!(path, """
     #!/usr/bin/env python3

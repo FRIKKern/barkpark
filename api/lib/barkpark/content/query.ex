@@ -1294,6 +1294,45 @@ defmodule Barkpark.Content.Query do
   end
 
   @doc """
+  BATCHED `get_document/4` EXISTENCE — which of `doc_ids` resolve as `type` in
+  `dataset` under this caller's scope, as a `MapSet` of the ids that do.
+
+  ONE query for the whole list, through the SAME scoping pipeline
+  `get_document/4` runs (`scope_to_dataset` -> `scope_to_workspace_or_global` ->
+  `maybe_scope_to_owner` -> `maybe_scope_to_grants`) with `in` where
+  `get_document/4` has `==`. That identity is the point: it exists so a fold
+  that would otherwise call `get_document/4` once per candidate can ask the same
+  question once for all of them and get the same answers.
+
+  Its caller is `Content.Edges.resolvable_targets/3` (the drafts graph's dangling
+  pass). See `Content.Graph.build_drafts_index/1` for why an un-batched version
+  of this question made `GET /v1/graph/:id?drafts=true` stop returning on
+  guerrilla (task-051a87de9a085e4d).
+  """
+  @spec resolvable_doc_ids([String.t()], String.t() | nil, String.t() | nil, keyword()) ::
+          MapSet.t(String.t())
+  def resolvable_doc_ids([], _type, _dataset, _opts), do: MapSet.new()
+
+  def resolvable_doc_ids(_doc_ids, type, dataset, _opts)
+      when is_nil(type) or is_nil(dataset),
+      do: MapSet.new()
+
+  def resolvable_doc_ids(doc_ids, type, dataset, opts) when is_list(doc_ids) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
+    Document
+    |> where([d], d.doc_id in ^doc_ids and d.type == ^type)
+    |> scope_to_dataset(dataset, opts)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> maybe_scope_to_owner(type, dataset, opts)
+    |> maybe_scope_to_grants(opts)
+    |> select([d], d.doc_id)
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
+  @doc """
   Resolve a wikilink `target` (a human title or alias string) to the single
   best-matching document of `type`, scoped to `dataset` + the caller's tenant.
 

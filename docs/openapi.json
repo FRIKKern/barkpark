@@ -6763,6 +6763,15 @@
         "operationId": "task.events",
         "parameters": [
           {
+            "description": "Narrow the replay to ONE task's events, oldest-first. Optional — omit for the global feed. This is the per-row audit view: `bp task events <id> --payload` answers 'who claimed and closed this row, on which epoch, when' from `payload.actor` without reading the (mutable) live claim map off the document. Composes with --since, so `--since <cursor> <id>` is a per-row tail.",
+            "in": "query",
+            "name": "doc_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Resume cursor: return only events whose id is greater than this (the last event id you saw). Omit to replay from the start of the backlog.",
             "in": "query",
             "name": "since",
@@ -6790,7 +6799,7 @@
             }
           },
           {
-            "description": "Carry each event's typed payload under `payload`. THE RECOVERY CHANNEL for a clobbered note: a `task.staged` event's `payload.staged.superseded_note` is the disposition_reason that stage displaced, and `payload.staged.note` the one it wrote. Off by default — two free-text notes ride in one stamp and a page is 500 events, so every poller that does not ask keeps the lean body it always got.",
+            "description": "Carry each event's typed payload under `payload`. THE ATTRIBUTION CHANNEL: a `task.claimed` / `task.closed` event's `payload.actor` is `{worker, epoch}` — the identity the CAS fenced on — so close provenance is reconstructable from the feed alone (`task.closed` also carries `payload.closed_by`). THE RECOVERY CHANNEL for a clobbered note: a `task.staged` event's `payload.staged.superseded_note` is the disposition_reason that stage displaced, and `payload.staged.note` the one it wrote. Off by default — two free-text notes ride in one stamp and a page is 500 events, so every poller that does not ask keeps the lean body it always got.",
             "in": "query",
             "name": "payload",
             "required": false,

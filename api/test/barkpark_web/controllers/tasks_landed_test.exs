@@ -112,10 +112,14 @@ defmodule BarkparkWeb.TasksLandedTest do
 
       assert body["ok"] == true
 
+      # #17153: a landing whose PR and sha were BOTH known also records the
+      # pair under `landings`, so the sets `prs`/`commits` stop being the only
+      # (and positionally lossy) record of which sha paid which PR.
       assert body["doc"]["content"]["landed"] == %{
                "commits" => ["a1b2c3d"],
                "prs" => ["14993"],
-               "notes" => ["merged to main"]
+               "notes" => ["merged to main"],
+               "landings" => [%{"commit" => "a1b2c3d", "pr" => "14993"}]
              }
 
       # The receipt is only true if the store agrees with it.

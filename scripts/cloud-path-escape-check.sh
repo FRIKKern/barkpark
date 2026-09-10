@@ -87,6 +87,12 @@
 # census: they are asserted on or served as static assets, never read across the
 # tree. It is also why the enumeration walks the WORKING TREE.
 #
+# The existence filter has ONE cost, and it is paid by a separate arm rather
+# than by weakening the filter: a declared producer that is RENAMED stops
+# resolving, so its census row leaves in silence. See THE DECLARATION-LIVENESS
+# ARM below — every CLOUD_PATHS entry must name something that exists, which is
+# the question the census structurally cannot ask.
+#
 # NOT `git ls-files` (honest-gates D31): a prototype that enumerated via git
 # reported "OK: every repo-root read is covered" and exited 0 with the mutation
 # fixture sitting on disk UNTRACKED — a textbook vacuous pass of exactly the
@@ -351,19 +357,34 @@ CLOUD_ESCAPE_EXEMPT='docker-compose.yml	shape 2 — notifications_platform_admin
 # history, not a rule — as producer reads are declared the population grows past
 # it and the floor stays put.
 #
-# A legitimate new escape does NOT raise this number (dr-w16-s1). The floor is a
-# LOWER BOUND on a scanner's liveness, and the harness proves that bound against
-# a synthetic fixture (cloud-path-escape-check.test.sh:59-73) that emits only
-# FIVE covered reads. Raise the floor past what that fixture can produce and the
-# harness's own fixture-tree cases go red on the floor instead of exercising
-# coverage — measured on this tree, a floor of 7 turns a clean
-# "158 passed, 0 failed" into "152 passed, 6 failed". Widen the fixture first,
-# or leave the floor alone.
+# THE FIXTURE USED TO CAP THIS NUMBER, and no longer does
+# (dr-w16-bl-widen-escape-fixture-then-raise-floor). dr-w16-s1 measured that the
+# harness's synthetic fixture emitted only FIVE covered reads, so raising the
+# floor to 7 turned a clean "158 passed, 0 failed" into "152 passed, 6 failed"
+# on the fixture-tree cases — the floor could not follow the population, and at
+# 6 against a population of 20 the scanner could have lost FOURTEEN of twenty
+# reads with this check still passing. The fixture now DERIVES its population
+# from `--print-set cloud` (one materialised path and one covered read per
+# declared cross-tree entry, forms alternating quoted/segment-list), which puts
+# it at 22 and makes it grow with CLOUD_PATHS instead of pinning the floor.
+#
+# So the floor is now the MEASURED population, 20, re-measured on this tree by
+# `--list-escapes | cut -f1 | sort -u | wc -l` and not remembered from a comment.
+# The ORDER matters and cannot be reversed: widen the fixture, then raise the
+# floor in the same commit. Raising it first reds the harness for a reason that
+# has nothing to do with the tree.
+#
+# It stays a LOWER BOUND, not a headcount: the population only grows as producer
+# reads are declared, and a legitimate new escape does not have to raise it. But
+# it is now set CLOSE enough that losing a single row is a red rather than
+# slack. The harness's own fixture sits at 22, two above, so a fixture case that
+# reds on the floor is telling you the SCANNER lost reads — which is exactly the
+# discrimination case 12's not_floor() arms are built on.
 #
 # It is a CONSTANT on purpose. An env-var override would be a one-line CI bypass
 # of the only check that can tell "clean" from "blind", and the harness asserts
 # that setting CLOUD_ESCAPE_MIN changes nothing.
-CLOUD_ESCAPE_MIN=6
+CLOUD_ESCAPE_MIN=20
 
 # CLOUD_PATH_ESCAPE_ROOT retargets the scan at a synthetic fixture tree; the
 # harness is its only caller. It cannot weaken a real run — pointing it at the
@@ -609,6 +630,81 @@ esac
 # ---------------------------------------------------------------------------
 # --check: the ratchet
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# THE DECLARATION-LIVENESS ARM (dr-w16-bl-escape-census-is-existence-filtered)
+# ---------------------------------------------------------------------------
+# The census is EXISTENCE-FILTERED by design: list_escapes drops any literal
+# whose resolved path is not on disk, because that is what keeps the traversal
+# fixtures (`"../../etc"`, `"../up"`) and the 404 static paths out of it. The
+# price of that filter is paid HERE, not there: RENAME a declared producer file
+# and its literal stops resolving, the read leaves the census in silence, and
+# every other arm still says OK.
+#
+#   * the coverage arm only ever asks "is this census row declared?" — a row
+#     that VANISHED is never asked about;
+#   * the floor only catches a scanner that dies WHOLESALE. Measured on this
+#     tree the floor was 6 against a population of 20, so fourteen rows could
+#     disappear one at a time and the floor still passed. Raising the floor to
+#     the population (the same wave's other half) narrows that to zero slack —
+#     but it still cannot tell you WHICH row went, or that a DECLARATION died;
+#   * and the CLOUD_PATHS entry that named the renamed file becomes dead text —
+#     it dispatches on a path nothing in the repo has any more, so the suite
+#     that actually reads the NEW name is no longer dispatched by it.
+#
+# So the declaration is checked in the OTHER direction: every entry in
+# CLOUD_PATHS must name something that exists. An exact entry must be a real
+# path; a `dir/**` entry must be a real directory. That is the check the census
+# structurally cannot make — the census can only see what is still there.
+#
+# It runs FIRST, before the census is even taken, for two reasons: a dead
+# declaration EXPLAINS a shrunken census, so reporting the floor first would
+# hand a reader the symptom instead of the cause; and the arm's verdict is then
+# independent of how many reads the tree happens to hold, which is what lets the
+# harness prove it against a fixture without also having to clear the floor.
+#
+# It resolves against the DECLARATION's own repository — the parent of this
+# script — NOT against $REPO_ROOT. CLOUD_PATH_ESCAPE_ROOT retargets the CENSUS
+# (which cloud/ tree to scan); CLOUD_PATHS is fixed text inside this file making
+# a claim about the tree this file lives in, and checking that claim against a
+# synthetic fixture would be checking it against something it never described.
+# The harness proves the arm the honest way instead: it runs a COPY of this
+# script from inside a fixture repo, so the copy's own parent IS the fixture.
+DECL_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+dead_declarations=0
+while IFS= read -r g; do
+  [ -n "$g" ] || continue
+  case "$g" in
+    */'**')
+      [ -d "$DECL_ROOT/${g%/**}" ] && continue
+      dead_declarations=$((dead_declarations + 1))
+      echo "::error::cloud-path-escape-check: DEAD DECLARATION: '$g' names a directory that does not exist" >&2
+      ;;
+    *)
+      [ -e "$DECL_ROOT/$g" ] && continue
+      dead_declarations=$((dead_declarations + 1))
+      echo "::error::cloud-path-escape-check: DEAD DECLARATION: '$g' names a path that does not exist" >&2
+      ;;
+  esac
+done <<EOF
+$(set_globs cloud)
+EOF
+
+if [ "$dead_declarations" -gt 0 ]; then
+  cat >&2 <<'MSG'
+
+A CLOUD_PATHS entry names a path that is not in the tree. The usual cause is a
+RENAME: the declared producer moved, the Cloud test that reads it now resolves
+to nothing, its census row disappeared without a red (the census is
+existence-filtered), and this declaration now dispatches on a path no file has.
+
+Fix: point the declaration at the file's new name — and check that whatever read
+it (the reason the ruling above it was written) still reads it. If the read is
+genuinely gone, delete the declaration AND its ruling in the same edit.
+MSG
+  exit 1
+fi
+
 census="$(list_escapes | sort -u || true)"
 paths="$(printf '%s\n' "$census" | cut -f1 | sort -u | sed '/^$/d')"
 count="$(printf '%s\n' "$paths" | sed '/^$/d' | wc -l | tr -d ' ')"
@@ -619,7 +715,7 @@ echo "cloud-path-escape-check: $count distinct repo-root read(s) resolved from c
 # FAIL-CLOSED on a neutered scanner. "Nothing found" is never good news here.
 if [ "$count" -lt "$CLOUD_ESCAPE_MIN" ]; then
   echo "::error::cloud-path-escape-check: only $count repo-root read(s) found, floor is $CLOUD_ESCAPE_MIN." >&2
-  echo "  The SCANNER is broken, not the repo clean — the measured population is 6." >&2
+  echo "  The SCANNER is broken, not the repo clean — the floor IS the measured population." >&2
   echo "  Check the grep/find in list_escapes before touching the floor." >&2
   exit 1
 fi

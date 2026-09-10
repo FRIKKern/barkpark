@@ -486,22 +486,40 @@ for (const { row } of foundKeyed) {
 }
 
 // ── refusals: a broken instrument never reports a clean tree ────────────────
-if (overruns.length) {
-  console.error("FAIL(2): the function walk is corrupted — overlapping top-level extents: " + overruns.join(", "));
+
+// ── THE ONE REFUSAL VOCABULARY (cch-w63-bl) ─────────────────────────────────
+// EVERY exit-2 path in this file ends with exactly ONE line, on STDERR:
+//
+//     !! UNKNOWN CENSUS (exit 2): REFUSED TO MEASURE — <reason>
+//
+// It is the same shape __preview__/exit-vocabulary.mjs already emits for the
+// browser instruments, so ONE reader covers the whole console fence. Before
+// this, six of console-unit's nine exit-2 sites spoke a private vocabulary
+// (BARE `FAIL(2):` lines with no prefix at all) that no `!!`-anchored capture could see — a gate that CAPTURES the
+// refusing instrument's own summary line would have replaced a wrong sentence
+// with NO sentence, in the wave about silence.
+//
+// THE READER IS scripts/console-refusal-capture.mjs, and its unit test
+// ENUMERATES this file from source: a new exit-2 path that does not go through
+// `refuse2` reds that test. Do not add one.
+const REFUSAL_NAME = "UNKNOWN CENSUS";
+const refuse2 = (reason) => {
+  process.stderr.write(`!! ${REFUSAL_NAME} (exit 2): REFUSED TO MEASURE — ${reason}\n`);
   process.exit(2);
+};
+
+if (overruns.length) {
+  refuse2("the function walk is corrupted — overlapping top-level extents: " + overruns.join(", "));
 }
 if (!found.length) {
-  console.error("FAIL(2): zero api(\"GET\") call sites found — the extractor is broken, not the tree clean.");
-  process.exit(2);
+  refuse2("zero api(\"GET\") call sites found — the extractor is broken, not the tree clean.");
 }
 if (controlsMissing.length) {
-  console.error("FAIL(2): a positive control is missing from the source: " + controlsMissing.join(" "));
-  process.exit(2);
+  refuse2("a positive control is missing from the source: " + controlsMissing.join(" "));
 }
 if (controlBreaches.length) {
-  console.error("FAIL(2): a positive control now holds a GET call site: " + controlBreaches.join(" ") +
+  refuse2("a positive control now holds a GET call site: " + controlBreaches.join(" ") +
     " — the census can no longer prove it discriminates.");
-  process.exit(2);
 }
 
 // ── THE SET DIFF. Never a count. ────────────────────────────────────────────

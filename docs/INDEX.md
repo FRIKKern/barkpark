@@ -1,22 +1,26 @@
 <!-- doc-tier: agent | canonical-for: doc-catalog | budget: 300tok -->
 # Docs
 
-Cards: cards/{studio,plugins,cli,js-sdk,onix-bokbasen,search-media,tui}.md
+Two reader paths, in order. Agents route from the routing table at the
+repository root.
 
-Contracts: contracts/{writing,webhook-realtime,bokbasen,onix-field-map,schema-v2,tenancy}.md
+**A small collection** (notes, links, a reading list)
+1. [setup/QUICKSTART.md](setup/QUICKSTART.md) — install `bp`
+2. [learn/README.md](learn/README.md) — the model, and the local loop
+3. [cheatsheets/bp.md](cheatsheets/bp.md) — the `bp` command reference
 
-Decisions: decisions/{0001-sdk-envelope,0002-npm-dist-tag,0003-sync-tags,0004-cloud-boundary,deferred}.md
+**A CMS** (a site with authors)
+1. [setup/QUICKSTART.md](setup/QUICKSTART.md) local · [setup/CLOUD-QUICKSTART.md](setup/CLOUD-QUICKSTART.md) hosted
+2. [learn/README.md](learn/README.md) — model your types
+3. [studio/user-guide.md](studio/user-guide.md) — the manual for editors
+4. [api-v1.md](api-v1.md) — read it from your app
 
-Runbooks: ops/{PROD_OPS,npm-rollback-playbook,merge-gates,adding-a-domain,bokbasen-go-live,barkpark-cloud-go-live,realtime-webhook-setup,compatibility,vercel-dns-connect,studio-nav-bug-2026-04-19}.md
+JS docs site: `js/docs` — `pnpm --filter @barkpark/docs dev`.
 
-Learn: learn/{README,plugins-catalog}.md · PHILOSOPHY.md
+**Other supported uses** — [learn/plugins-catalog.md](learn/plugins-catalog.md):
+papers, tasks, sheets, ONIX. Self-host: [setup/GO-LIVE.md](setup/GO-LIVE.md),
+[PHILOSOPHY.md](PHILOSOPHY.md).
 
-Setup: setup/{QUICKSTART,CLOUD-QUICKSTART,GO-LIVE,SETUP,WINDOWS,TASK-SYSTEM,personal-local,CURSOR}.md
-
-Cheatsheets: cheatsheets/{bp,tui,tasks,http-api,papers}.md
-
-Frozen: api-v1.md openapi.json auth.md auth-user-sessions.md cli/{error-exit-table,m0-decisions,HANDBOOK}.md spec/bokbasen-api-contract.md
-
-Domain: search/INTELLIGENCE.md search/ROADMAP.md media/DISCOVERY.md studio/user-guide.md studio/web-components.md plugins/codelists-byo.md snippets/README.md
-
-Epic cycle: a wave produces a wave-strategy Paper, bp tasks, and builder commits — see the bp-epic-cycle workflow.
+Deeper reference: [contracts/schema-v2.md](contracts/schema-v2.md),
+[cards/js-sdk.md](cards/js-sdk.md), plus [ops/](ops/),
+[cheatsheets/](cheatsheets/), [setup/](setup/).

@@ -1304,7 +1304,7 @@ defmodule BarkparkWeb.TasksController.Params do
   @index_flat_keys ~w(view limit offset cursor type kind lifecycle_status parent parent_id phase_id label id_prefix)
   @ready_flat_keys ~w(view limit offset phase_id order worker)
   @prime_flat_keys ~w(view limit offset worker order)
-  @events_flat_keys ~w(since limit)
+  @events_flat_keys ~w(since limit doc_id payload)
 
   @route_filters %{
     index: %{
@@ -1371,7 +1371,8 @@ defmodule BarkparkWeb.TasksController.Params do
       ~s|  bp task claim #{doc_id} #{worker_id} --yes\n| <>
       ~s|Containers are exempt already (a decision/goal label, a non-task kind, or a row with | <>
       ~s|children), so if this IS a container, label it rather than overriding. To claim anyway, | <>
-      ~s|on the record: --set criteria_unstated_override="<why this row needs none>".|
+      ~s|on the record: --set criteria_unstated_override="<why this row needs none>" — the reason | <>
+      ~s|is stored as claim.criteria_unstated_override on the claim itself and survives the close.|
   end
 
   @doc """
@@ -2424,7 +2425,7 @@ defmodule BarkparkWeb.TasksController.Params do
       "The override is the ONE way a --met flips a row the lead closes on merge, and while it was " <>
       "a bare boolean it recorded nothing — a reflex override and a deliberate one were identical " <>
       "on the record. Send merge-gated=<why this stamp is the lead's to make> (bp: " <>
-      "--merge-gated \"PR #123 merged to main as <sha>\"). The reason is persisted beside the stamp " <>
+      "--merge-gated \"PR #17107 merged to main as <sha>\"). The reason is persisted beside the stamp " <>
       "at content.merge_gate_autostamp.stamp_overrides[].reason, on the same write as the flip — " <>
       "the shape close_override.* already uses. It is still an ASSERTION and not a permission."
   end
