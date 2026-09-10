@@ -545,10 +545,25 @@ defmodule Barkpark.Content.Forms do
         "content" => content
       }
 
+      # Validate against the schema the caller RESOLVED (the Studio's scoped
+      # lookup), not an unscoped `get_schema/2` re-read: in a non-default
+      # workspace that re-read answers not_found and validation silently never
+      # ran (Gyldendal parity E1.6 — the same unscoped-lookup class as the
+      # editor's own not-found card). A caller without a schema keeps the
+      # dataset lookup.
       validation_errors =
-        case Content.validate_document(type, new_title, content, dataset) do
-          {:error, errs} -> errs
-          _ -> %{}
+        case schema do
+          nil ->
+            case Content.validate_document(type, new_title, content, dataset) do
+              {:error, errs} -> errs
+              _ -> %{}
+            end
+
+          schema ->
+            case Barkpark.Content.Validation.validate(content, new_title, schema) do
+              {:error, errs} -> errs
+              _ -> %{}
+            end
         end
 
       case Content.upsert_document(type, attrs, dataset, opts) do

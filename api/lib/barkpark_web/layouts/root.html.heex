@@ -3182,6 +3182,10 @@
     /* Validation */
     .field-required { color: var(--destructive); margin-left: 2px; }
     .field-errors { font-size: var(--text-xs); color: var(--destructive); margin-top: 4px; }
+    /* Gyldendal parity E1.6 — warning-level validation, inline + publish bar */
+    .field-warnings { font-size: var(--text-xs); color: var(--warning); margin-top: 4px; }
+    .editor-field.has-warning:not(.has-error) .form-input { border-color: var(--warning); }
+    .bp-validation-warnings { font-size: var(--text-xs); color: var(--warning); margin-left: 12px; }
 
     /* Dataset switcher (hoisted from BarkparkWeb.Studio.DatasetSwitcher) */
     .dataset-switcher { display: inline-flex; align-items: center; gap: 8px; margin-left: 12px; font-size: var(--text-xs); }

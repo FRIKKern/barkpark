@@ -35,6 +35,10 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # fields), no fieldset/details frame of its own. `ArrayField` uses it for a
   # composite ROW, whose collapsible frame + preview summary the array draws.
   attr :bare, :boolean, default: false
+  # Picker context for reference / image subfields (Gyldendal parity E1.6).
+  attr :dataset, :string, default: "production"
+  attr :scope_prefix, :string, default: ""
+  attr :api_token_raw, :string, default: ""
 
   def composite_field(assigns) do
     path = Map.get(assigns, :path, "")
@@ -48,6 +52,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       |> Map.put_new(:path, "")
       |> Map.put_new(:readonly, false)
       |> Map.put_new(:bare, false)
+      |> Map.put_new(:dataset, "production")
+      |> Map.put_new(:scope_prefix, "")
+      |> Map.put_new(:api_token_raw, "")
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:description, description_for(assigns.field))
       |> Map.put(:subfields, assigns.field.fields || [])
@@ -61,6 +68,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         <.composite_body
           field={@field} value={@value} errors={@errors} subfields={@subfields} groups={@groups}
           tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
+            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw}
         />
       <% @depth >= 2 -> %>
         <details class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth} open>
@@ -69,6 +77,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           <.composite_body
             field={@field} value={@value} errors={@errors} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
+            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw}
           />
         </details>
       <% true -> %>
@@ -78,6 +87,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           <.composite_body
             field={@field} value={@value} errors={@errors} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
+            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw}
           />
         </fieldset>
     <% end %>
@@ -103,6 +113,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   attr :readonly, :boolean, required: true
   attr :on_change, :string, default: nil
   attr :plugin_name, :string, default: "core"
+  attr :dataset, :string, default: "production"
+  attr :scope_prefix, :string, default: ""
+  attr :api_token_raw, :string, default: ""
 
   defp composite_body(assigns) do
     ~H"""
@@ -152,7 +165,10 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       on_change: assigns.on_change,
       plugin_name: assigns.plugin_name,
       path: child_path(assigns.path, sub.name),
-      readonly: assigns.readonly
+      readonly: assigns.readonly,
+      dataset: Map.get(assigns, :dataset) || "production",
+      scope_prefix: Map.get(assigns, :scope_prefix) || "",
+      api_token_raw: Map.get(assigns, :api_token_raw) || ""
     }
 
     composite_field(sub_assigns)
@@ -166,7 +182,10 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       on_change: assigns.on_change,
       plugin_name: assigns.plugin_name,
       path: child_path(assigns.path, sub.name),
-      readonly: assigns.readonly
+      readonly: assigns.readonly,
+      dataset: Map.get(assigns, :dataset) || "production",
+      scope_prefix: Map.get(assigns, :scope_prefix) || "",
+      api_token_raw: Map.get(assigns, :api_token_raw) || ""
     }
 
     ArrayField.array_field(sub_assigns)
@@ -262,6 +281,40 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     image_subfield_input(leaf_assigns)
   end
 
+  # Gyldendal parity E1.6 — a composite `reference` subfield mounts the same
+  # bp-reference-picker a top-level reference does (several target types
+  # comma-joined, Sanity's `to: [...]`), bridged into the composite's own input
+  # name. Before this it fell through to a bare text input, so the twin's
+  # feature card asked the author to TYPE a document id next to a type select.
+  defp render_subfield(assigns, %{type: "reference"} = sub) do
+    raw = Map.get(sub, :raw) || %{}
+    types = BarkparkWeb.Components.FieldInputs.reference_types(raw)
+
+    if types == [] do
+      leaf_input(%{
+        field: sub,
+        value: get_value(assigns.value, sub.name, ""),
+        input_name: child_path(assigns.path, sub.name),
+        input_id: input_id(assigns.path, assigns.field.name, sub.name),
+        on_change: assigns.on_change,
+        readonly: assigns.readonly
+      })
+    else
+      value = to_string(get_value(assigns.value, sub.name, "") || "")
+
+      reference_subfield_input(%{
+        input_name: child_path(assigns.path, sub.name),
+        input_id: input_id(assigns.path, assigns.field.name, sub.name),
+        value: value,
+        ref_type: Enum.join(types, ","),
+        dataset: Map.get(assigns, :dataset) || "production",
+        scope_prefix: Map.get(assigns, :scope_prefix) || "",
+        on_change: assigns.on_change,
+        readonly: assigns.readonly
+      })
+    end
+  end
+
   # Fall-through for remaining v1 leaf types (string, slug, richText, …)
   defp render_subfield(assigns, sub) do
     leaf_assigns = %{
@@ -274,6 +327,21 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     }
 
     leaf_input(leaf_assigns)
+  end
+
+  defp reference_subfield_input(assigns) do
+    ~H"""
+    <div id={"bp-ref-wrap-#{@input_id}-#{:erlang.phash2(@value)}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+      <input type="hidden" id={"bp-ref-hidden-#{@input_id}"} name={@input_name} value={@value} phx-change={@on_change} phx-debounce="500" />
+      <bp-reference-picker
+        value={@value}
+        ref-type={@ref_type}
+        dataset={@dataset}
+        scope-prefix={@scope_prefix}
+        data-bridge-target={"bp-ref-hidden-#{@input_id}"}
+      ></bp-reference-picker>
+    </div>
+    """
   end
 
   defp image_subfield_input(assigns) do

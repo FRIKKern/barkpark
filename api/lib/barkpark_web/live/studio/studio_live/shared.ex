@@ -460,6 +460,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             editor_form: Map.merge(socket.assigns[:editor_form] || %{}, params),
             save_status: "Saved",
             validation_errors: errs,
+            validation_warnings: validation_warnings(schema, new_title, saved_doc.content),
             cross_violations: compute_cross_violations(schema, params)
           )
           |> maybe_refresh_content_preview()
@@ -1667,6 +1668,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   def compute_cross_violations(schema, form) do
     Barkpark.Content.CrossValidator.violations(schema, form)
   end
+
+  @doc """
+  Warning-level findings for the open document against the schema the Studio
+  resolved (Gyldendal parity E1.6). `%{}` without a schema.
+  """
+  def validation_warnings(nil, _title, _content), do: %{}
+
+  def validation_warnings(schema, title, content),
+    do: Barkpark.Content.Validation.check(content, title, schema).warnings
 
   @doc false
   def resolve_nav_group(_current, _old, nil), do: nil
