@@ -194,6 +194,24 @@ if config_env() == :prod do
       token: nil
   end
 
+  # cf-origin-ca-wire-and-provision: the Cloudflare ORIGIN CA KEY — a SECOND,
+  # distinct credential from the per-team scoped API token (which lives in
+  # Registry.Vault, never here). It is the account-wide key Cloudflare mints on
+  # its Origin CA page and the ONLY thing `POST /certificates` accepts, in an
+  # `X-Auth-User-Service-Key` header. Env-fed, never a literal: absent, this key
+  # is nil, `Cloudflare.OriginCA.configured?/0` is false and
+  # `Cloudflare.Real.create_origin_ca_cert/2` fails closed with :not_configured
+  # BEFORE building a request — it can NEVER fall back to the API token.
+  #
+  # `:client` is deliberately NOT set here: it stays at its `Cloudflare.Fake`
+  # default, so wiring this key alone changes no behaviour on any live path.
+  # ORIGIN_CA_CERT_DIR overrides the on-box directory the cert/key PATHS are
+  # derived from (default /etc/caddy/cloudflare) — paths only; no bytes are
+  # written on the control plane.
+  config :barkpark_cloud, BarkparkCloud.Cloudflare,
+    origin_ca_key: System.get_env("CLOUDFLARE_ORIGIN_CA_KEY"),
+    origin_ca_dir: System.get_env("ORIGIN_CA_CERT_DIR")
+
   # azure-retail-pricing: wire the REAL transport for the credential-free Azure
   # Retail Prices client only in prod — the same built-in verified-TLS :httpc
   # client the billing/oauth/github seams use (no new dep). The Retail Prices API
