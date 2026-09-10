@@ -71,6 +71,34 @@ defmodule BarkparkCloud.Registry.Deployment do
   # HEALTH certified bytes this fleet produced.
   @sources ~w(box-build prebuilt)
 
+  # dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206): WHOSE DEMAND this
+  # build serves — the axis `trigger` and `source` structurally cannot answer.
+  #
+  # Those two are 99.06% ONE pair on the live control plane (`content-auto` /
+  # `box-build`, 2,415 of 2,438 rows): they say a content publish asked and the
+  # box built, which is true of a customer's publish and of the demo fleet
+  # churning against itself in exactly the same words. 98.4% of a 24h window's
+  # attempts land on five demo sites and six sites took ZERO, so cutting the
+  # amplifier would move every published rate while no instrument could say
+  # whether the fleet got BETTER or the load merely got SMALLER — charter D3's
+  # vacuous green.
+  #
+  #   * "customer"     — the site was classified `customer` when this build was
+  #     minted. Demand the fleet exists to serve.
+  #   * "platform"     — the site was classified `platform`: demo, fixture,
+  #     capstone or internal. Self-inflicted churn.
+  #   * "unclassified" — the site carried NO class. This is NOT a synonym for
+  #     customer and is never collapsed into one: it is the honest record that a
+  #     build happened on a site nobody has classified, and it is exactly the
+  #     population a census must report separately or lie about.
+  #
+  # Stamped at CREATE from `Site.demand_class` and never mutated by a transition
+  # — a build cannot change whose demand it served. It is stored on the ROW
+  # rather than read through a join at census time because a site can be
+  # reclassified, and a census that joined would let today's classification
+  # rewrite what past load was.
+  @demand_classes ~w(customer platform unclassified)
+
   # cch-w34: the `git_ref` column's own ceiling, restated where the WRITE PATH
   # can see it. `deployments.git_ref` is `varchar(255)`; until this attribute
   # existed the only thing enforcing it was Postgres, which does not return an
@@ -157,6 +185,12 @@ defmodule BarkparkCloud.Registry.Deployment do
     # change where it was built). Null-safe by column default, so every
     # pre-W9 row reads as box-build.
     field :source, :string, default: "box-build"
+
+    # dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206): "customer" |
+    # "platform" | "unclassified" — WHOSE DEMAND this build served, as of the
+    # moment it was minted. NULL on every pre-D206 row (no backfill: a backfill
+    # would claim a classification nobody made).
+    field :demand_class, :string
 
     # The sha256 of the uploaded tarball, recorded by the artifact route BEFORE
     # the driver is started — so a prebuilt deployment that reached the box can
@@ -311,6 +345,25 @@ defmodule BarkparkCloud.Registry.Deployment do
   @doc "The valid deploy triggers (provenance): manual | content-auto (charter D49)."
   def triggers, do: @triggers
 
+  @doc """
+  The valid demand classes on a deployment row (charter D206):
+  customer | platform | unclassified.
+  """
+  @spec demand_classes() :: [String.t()]
+  def demand_classes, do: @demand_classes
+
+  @doc """
+  The class to STAMP on a build minted for `site` — the site's own class, or
+  `"unclassified"` when nobody has classified it.
+
+  The fallback is a distinct third value, never `"customer"`: an unlabelled
+  site's churn counted as demand is the precise error this label exists to make
+  impossible.
+  """
+  @spec demand_class_for(term()) :: String.t()
+  def demand_class_for(%{demand_class: class}) when class in @demand_classes, do: class
+  def demand_class_for(_site), do: "unclassified"
+
   @doc "The valid deploy sources (where the bytes were built): box-build | prebuilt (charter D86)."
   def sources, do: @sources
 
@@ -413,12 +466,18 @@ defmodule BarkparkCloud.Registry.Deployment do
       # row (this changeset, never `transition_changeset/2` — a builder must not
       # be able to restate which bytes it was handed).
       :source,
-      :artifact_sha256
+      :artifact_sha256,
+      # charter D206: WHOSE demand. Stamped by `Registry.create_deployment/2`
+      # and `create_failed_deployment/3` from the site's own class — never
+      # supplied by a public caller in practice, but castable here because the
+      # stamp rides in through `attrs` like every other create-time provenance.
+      :demand_class
     ])
     |> validate_required([:site_id])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:trigger, @triggers)
     |> validate_inclusion(:source, @sources)
+    |> validate_inclusion(:demand_class, @demand_classes)
     |> validate_git_ref_length()
     |> assoc_constraint(:site)
     # site-spawner W1: PLAN idempotency backstop. A repeat build_id for the same
@@ -480,12 +539,18 @@ defmodule BarkparkCloud.Registry.Deployment do
       # from the box. Both provenance fields are cast here for exactly that
       # reason.
       :source,
-      :artifact_sha256
+      :artifact_sha256,
+      # charter D206, and the fork comment above is exactly why this line
+      # exists: a preview build is load on the fleet like any other, and a
+      # demand class cast only in `changeset/2` would be silently dropped on
+      # every preview deploy — a census hole that answers 201.
+      :demand_class
     ])
     |> validate_required([:site_id, :branch, :preview_slug, :preview_host])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:environment, @environments)
     |> validate_inclusion(:source, @sources)
+    |> validate_inclusion(:demand_class, @demand_classes)
     |> validate_git_ref_length()
     |> assoc_constraint(:site)
     # dwb-18 twins for the preview path: the same globally-unique delivery_id

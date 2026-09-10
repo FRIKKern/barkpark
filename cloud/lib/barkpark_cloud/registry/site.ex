@@ -105,6 +105,26 @@ defmodule BarkparkCloud.Registry.Site do
   #                        this column exists to retire.
   @binding_verdicts ~w(bound unverified not_applicable never_checked)
 
+  # dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206): the site's
+  # standing DEMAND CLASS — is a publish on this site demand we exist to serve,
+  # or churn we produce ourselves?
+  #
+  #   * "customer" — a real tenant. Its publishes are the load the fleet is FOR.
+  #   * "platform" — a demo, fixture, capstone or internal site. Its publishes
+  #     are self-inflicted: the five site-autodeploy-* webhooks all carry
+  #     types={paper} on ONE shared `production` dataset, so ONE paper publish
+  #     mints five site rebuilds, always.
+  #
+  # NULL is a THIRD state and is a synonym for neither: it means nobody has
+  # classified this site. Reading NULL as "customer" would silently count demo
+  # churn as demand — the exact confusion this column exists to end — so the
+  # deployment-side stamp writes "unclassified" rather than guessing.
+  #
+  # There is deliberately NO default and no list of known demo slugs anywhere in
+  # the code: a class derived from a hard-coded list is a constant wearing a
+  # column's clothes — no fixture can flip it and no regression can red it.
+  @demand_classes ~w(customer platform)
+
   # owner/repo — the only shape GitHub uses for repos, e.g. "FRIKKern/barkpark".
   # Two segments separated by one slash; each segment is letters/digits/_/-/.
   @github_repo_format ~r/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/
@@ -191,6 +211,13 @@ defmodule BarkparkCloud.Registry.Site do
     field :content_binding_verdict, :string, default: "never_checked"
     field :content_binding_checked_at, :utc_datetime_usec
 
+    # dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206): "customer" |
+    # "platform" | NULL (nobody has classified it). Written through
+    # `Registry.classify_site_demand/2`; READ at deployment-create time and
+    # STAMPED onto the deployment row, so a later reclassification never
+    # rewrites what past load was.
+    field :demand_class, :string
+
     # site-spawner W6 (charter D51): CLOUDFLARE-IN-FRONT edge binding. The user's
     # OWN domain (blog.example.com), bound to THIS deployed site through the user's
     # CF account — the OPPOSITE of `Barkpark.custom_host` (platform own-zone, box
@@ -268,6 +295,10 @@ defmodule BarkparkCloud.Registry.Site do
   def serving_modes, do: @serving_modes
   def tls_modes, do: @tls_modes
   def binding_verdicts, do: @binding_verdicts
+
+  @doc "The valid site demand classes (charter D206): customer | platform."
+  @spec demand_classes() :: [String.t()]
+  def demand_classes, do: @demand_classes
   def domain_format, do: @domain_format
 
   @doc """
@@ -499,6 +530,23 @@ defmodule BarkparkCloud.Registry.Site do
     |> cast(attrs, [:theme, :doc_type, :prebuilt_enabled])
     |> validate_theme()
     |> validate_length(:doc_type, min: 1, max: 100)
+  end
+
+  @doc """
+  dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206): the NARROW
+  changeset that classifies a site's demand.
+
+  Deliberately not part of `changeset/2`: classifying a site is an operator act
+  about what the site IS FOR, not a settings edit, and routing it through the
+  wide create/update changeset would let a classification ride along with — or
+  be silently clobbered by — an unrelated write. `nil` is castable on purpose:
+  UNCLASSIFYING a site must be possible, or the column could only ever be wrong
+  in one direction.
+  """
+  def demand_class_changeset(site, attrs) do
+    site
+    |> cast(attrs, [:demand_class])
+    |> validate_inclusion(:demand_class, @demand_classes)
   end
 
   @doc """

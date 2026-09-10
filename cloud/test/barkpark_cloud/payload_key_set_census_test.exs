@@ -2894,6 +2894,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-bl-deferral-scheduled-vs-actual-gap KNOWN OPEN — the window the backoff ladder ASKED for on the interval this deferral closes. Its reachable surface this wave is the NAMED READER `DeployLedger.DeferralPacing.report/1`, not the per-deployment wire: `site_deployment_json/3` lives in router.ex, outside this task's fence, exactly as `graced_poll_refusals` records three rows up. Emitting it is the named follow-up (server key + `cloudclient.Deployment` field + rendered line, the D136 rule), and this row is where that is written down."},
     {"site_deployment_json/3", "deferral_actual_gap_s",
      "dr-bl-deferral-scheduled-vs-actual-gap KNOWN OPEN — the gap that ACTUALLY elapsed on that same interval, twin of deferral_scheduled_s. The two are only useful as a PAIR (their ratio is the measurement), so they share one custody and one follow-up; shipping one to the wire without the other would put a numerator on a page with no denominator."},
+    {"site_deployment_json/3", "demand_class",
+     "dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206) KNOWN OPEN — WHOSE DEMAND this build served (customer | platform | unclassified), stamped at create from the site's own class. Its reachable surface this wave is the NAMED READER `Registry.DemandCensus.census/1`, not the per-deployment wire: `site_deployment_json/3` lives in router.ex, outside this task's fence, exactly as `deferral_scheduled_s` and the grace trio record above. Emitting it is the named follow-up (server key + `cloudclient.Deployment` field + rendered line, the D136 rule), and this row is where that is written down."},
     {"site_deployment_json/3", "delivery_id",
      "RULED — GitHub's X-GitHub-Delivery header (dwb-18). A webhook idempotency key, never a fact about the build; it exists so a redelivered push mints at most one Deployment."},
     {"site_deployment_json/3", "preview_slug",
@@ -2975,16 +2977,28 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # MEASURED, not derived: the SERIALIZER-SIDE arm's un-allowlisted run printed
   # `29 unserialized column(s)` and the SCHEMA-SIDE arm printed
   # `112 schema column(s) collected`.
-  # 112 -> 113 (dr-w29-bl-serving-since-has-no-basis-column): the
-  # `platform_deliveries` schema gains `serving_since_basis` — this branch's own
-  # +1. `@schema_unserialized_floor` does NOT move off main's 29: the column is
-  # emitted by `PlatformDelivery.to_json/1` in the same commit that declares it.
+  # 112 -> 113 (dr-w29-bl-serving-since-has-no-basis-column, #17401, now ON
+  # MAIN): the `platform_deliveries` schema gains `serving_since_basis`.
+  # `@schema_unserialized_floor` did NOT move off 29: the column is emitted by
+  # `PlatformDelivery.to_json/1` in the same commit that declares it.
+  # 113 -> 114 (dr-w13-bl-demand-needs-a-label-before-a-cut): the `deployments`
+  # schema gains `demand_class`. `@schema_unserialized_floor` moves 29 -> 30 for
+  # the SAME reason the deferral pair and the grace trio moved it —
+  # `site_deployment_json/3` lives in router.ex, outside that task's fence, so
+  # the emit is a named follow-up and the allowlist row above carries the
+  # tracker. The column DOES have a reader this wave
+  # (`Registry.DemandCensus.census/1`); this arm measures the WIRE, and a floor
+  # that stayed at 29 would have claimed a wire key that does not exist.
+  # `sites.demand_class` lands in the same commit and moves NEITHER pin: `sites`
+  # is not one of the three censused schema pairs, so no arm in this file can
+  # see it.
   # RE-MEASURED 2026-09-10 on THIS tree merged with origin/main at
-  # ff214d4faabd74d14e20ff3efc75419625f1a151: the SCHEMA-SIDE arm printed `113 schema column(s) collected`. The pre-merge
-  # measurement said 111 and is VOID — it was taken against a main without the
-  # deferral-pacing pair (#17305).
-  @schema_field_floor 113
-  @schema_unserialized_floor 29
+  # 265876e74 (which already carries #17401's +1): the SCHEMA-SIDE arm printed
+  # `114 schema column(s) collected` and the SERIALIZER-SIDE arm printed
+  # `30 unserialized column(s)`. The pre-merge measurement said 113/30 and is
+  # VOID — it was taken against a main without `serving_since_basis`.
+  @schema_field_floor 114
+  @schema_unserialized_floor 30
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:
   # `delivery_json/1` (router.ex:9809) is the NOTIFICATIONS delivery serializer,
