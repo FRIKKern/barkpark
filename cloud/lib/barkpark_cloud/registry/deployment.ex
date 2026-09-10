@@ -197,6 +197,26 @@ defmodule BarkparkCloud.Registry.Deployment do
     # always name the exact bytes it was asked to serve. Nil on a box-build.
     field :artifact_sha256, :string
 
+    # dr-w12-bl-box-build-writes-no-digest (charter D188): THE SERVED RECEIPT.
+    # The sha256 of the release TREE the box measured through its own `current`
+    # symlink AFTER SWITCH committed — the bytes Caddy is actually serving.
+    #
+    # Distinct from `artifact_sha256` above, which digests the UPLOADED TARBALL
+    # on the 6 prebuilt rows of 30,633 and is NULL on every box build. Two
+    # reasons it is not that column: the quantities differ (a compressed archive
+    # vs an extracted tree), and `Registry`'s prebuilt-upload reaper is
+    # `source == "prebuilt" and is_nil(artifact_sha256)` — widening what writes
+    # that column is the one change that would silently redefine "minted but
+    # never uploaded".
+    #
+    # NOT an identity key: one `content_rev` produced FOUR distinct artifacts on
+    # this fleet. It is a RECEIPT of which bytes were served, and its only
+    # comparison is against the box's INDEPENDENT STAGE-time reading of the same
+    # tree (`Sites.Deploy` fails the deployment when the two disagree). NULL on
+    # every pre-D188 row and on any box that predates the marker — "not
+    # measured", never "matched".
+    field :build_sha256, :string
+
     field :claim_worker, :string
     field :claimed_at, :utc_datetime_usec
     field :claim_epoch, :integer, default: 0
@@ -601,6 +621,14 @@ defmodule BarkparkCloud.Registry.Deployment do
       :slot,
       :port,
       :health_exit_code,
+      # charter D188: the SERVED digest, cast here for exactly the reason `slot`
+      # and `health_exit_code` are — it is something the box MEASURED while
+      # driving this build, not something a caller may declare at create. A
+      # create-castable receipt would let a row be born naming bytes nobody
+      # served. It is deliberately not `artifact_sha256`, which stays
+      # create-only: a builder must not be able to restate which bytes it was
+      # HANDED, but it is the only witness of which bytes it SERVED.
+      :build_sha256,
       # deploy-reliability W12 (S6): the chain, as data. Cast HERE and nowhere
       # else — a deferral is a TRANSITION (`queued|building|pushing → deferred`),
       # so the structured chain is written by the same fenced write that settles
