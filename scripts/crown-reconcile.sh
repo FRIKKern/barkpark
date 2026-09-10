@@ -110,6 +110,19 @@
 # that forbids a per-sha API call in the deploy recorder is respected because no
 # call is added anywhere.
 #
+# WHAT IT DOES NOT CATCH, STATED RATHER THAN LEFT TO BE DISCOVERED. The spans of
+# two deploys triggered seconds apart OVERLAP almost entirely — measured live on
+# 2026-09-10, runs 34462907759 (09:51:04Z..10:29:56Z) and 34462929474
+# (09:51:19Z..10:28:13Z), 15s apart and 2214s/2332s long. A row that names its
+# CONCURRENT SIBLING therefore still clears, and no interval test can separate
+# those two: they were both running when the row was written. This constraint
+# closes the id that comes from a DIFFERENT TIME — an older run, a stale retry,
+# a digit transposed onto a run hours away — which is every shape the filing
+# named. Separating concurrent siblings needs a different handle entirely (the
+# row's sha against the run's own commit range), and that is deliberately NOT
+# attempted here: it would cost a per-sha API call, which the deploy recorder's
+# own rule forbids.
+#
 # AND IT REFUSES RATHER THAN CLEARS. A run whose page row carries no readable
 # `updated_at`, or a row whose `first_seen_at` did not parse, has no interval to
 # be judged against — that is ALIBI-INTERVAL-UNREADABLE: deferred by name, in
