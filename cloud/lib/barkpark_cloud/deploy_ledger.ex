@@ -177,6 +177,7 @@ defmodule BarkparkCloud.DeployLedger do
 
   import Ecto.Query, warn: false
 
+  alias BarkparkCloud.FailureCopy
   alias BarkparkCloud.Registry.Deployment
   alias BarkparkCloud.Registry.Site
   alias BarkparkCloud.Repo
@@ -209,6 +210,16 @@ defmodule BarkparkCloud.DeployLedger do
     "SOURCE_UNFETCHABLE",
     "STALE_LEASE",
     "PROCESS_DIED",
+    # dr — THE SIX SHAPES THAT SAT IN `UNCLASSIFIED` WITH THEIR CAUSE ALREADY IN
+    # THE STRING. Each of these five names was written off a REAL production row
+    # (the census beside each arm below), never off a status range and never as a
+    # bucket: a 4xx the ledger has still not seen keeps rising in `UNCLASSIFIED`,
+    # which is the whole reason that class earns its keep.
+    "ARCHIVE_TOO_LARGE_400",
+    "ARCHIVE_UNSUPPORTED_ENTRY_400",
+    "BOX_UNAUTHORIZED_401",
+    "BOX_ROUTE_UNKNOWN_404",
+    "CONTAINER_START_REFUSED_125",
     "UNCLASSIFIED"
   ]
 
@@ -299,6 +310,22 @@ defmodule BarkparkCloud.DeployLedger do
     "SOURCE_UNFETCHABLE" => "the build inputs could not be read",
     "STALE_LEASE" => "the builder lease went stale",
     "PROCESS_DIED" => "the deploy process died abnormally",
+    # The box read the archive's own header and refused it before staging a byte:
+    # the entries DECLARE more than the instance's total cap. The remedy is on
+    # the payload — ship fewer/smaller bytes — never on the box's health.
+    "ARCHIVE_TOO_LARGE_400" =>
+      "the instance refused the upload (HTTP 400): the archive declares more bytes than its total cap",
+    # A tar entry type the box's extractor does not stage. TWO causes with one
+    # shape (see `@agency`): a packer that emitted one, or a box that predates
+    # the extractor's pax arm (BOX-LAGS-CLI, charter D112).
+    "ARCHIVE_UNSUPPORTED_ENTRY_400" =>
+      "the instance refused the upload (HTTP 400): the archive carries a tar entry type its extractor will not stage",
+    "BOX_UNAUTHORIZED_401" =>
+      "the instance rejected the deploy credential (HTTP 401) — the token is missing, expired or wrong for this box",
+    "BOX_ROUTE_UNKNOWN_404" =>
+      "the instance does not know the deploy route at all (HTTP 404) — a box/control-plane version skew",
+    "CONTAINER_START_REFUSED_125" =>
+      "docker on the box refused to start the container (exit 125) — the daemon rejected the run before the image ever ran",
     "UNCLASSIFIED" => "not yet named by the ledger",
     "GITHUB_PUSH_UNBUILDABLE" => "a GitHub push with no source to build from",
     "BOX_BUSY_DEFERRED" => "the box was busy; the rebuild was re-queued, not lost",
@@ -376,6 +403,18 @@ defmodule BarkparkCloud.DeployLedger do
   # second CP applies the same migration at a different time, and a bare literal
   # would silently mis-state the floor there.
   @coalesced_counter_since ~U[2026-08-07 10:02:23Z]
+
+  # THE DOOR MARKER, and it is PROSE. `failure_reason` is the only field both
+  # sides of the 2026-08-05 status boundary write identically for a capacity
+  # refusal, which is why the honest door predicate keys on it rather than on
+  # `status` or on `deferral_cause`.
+  @box_door_marker "%409%box_at_capacity%"
+  @box_door_cause "BOX_AT_CAPACITY_DEFERRED"
+
+  @box_door_predicate "failure_reason LIKE '%409%box_at_capacity%', across ALL statuses"
+  @box_door_cause_predicate "status = 'deferred' AND deferral_cause = 'BOX_AT_CAPACITY_DEFERRED'"
+
+  @box_door_basis "every row in the window whose failure_reason carries the box's own capacity-409 marker, whatever status it settled in — the door's REFUSALS, which is a superset of the door's RE-QUEUES"
 
   @coalesced_basis "attempts that minted NO deployment row (AutoDeployWorker coalesced them onto an in-flight build) — DISJOINT from `volume`, never folded into it"
 
@@ -599,6 +638,19 @@ defmodule BarkparkCloud.DeployLedger do
     "BOX_DEPLOY_DISABLED_503" => :box,
     "BOX_RUNNER_UNAVAILABLE_503" => :box,
     "BOX_RATE_LIMITED_429" => :box,
+    # A 401 is the box refusing the CREDENTIAL it was handed. The deploy token is
+    # minted and rotated on the box side; a site's content cannot make a box say
+    # 401. (1 row, 2026-09.)
+    "BOX_UNAUTHORIZED_401" => :box,
+    # A 404 on the deploy route is a box that does not have the route — a version
+    # skew on the box, which is BOX-LAGS-CLI pointed at the deploy door. The
+    # request was well-formed; the door was not there. (2 rows, 2026-09.)
+    "BOX_ROUTE_UNKNOWN_404" => :box,
+    # `docker run` exit 125 is the DAEMON refusing before the image ran — the
+    # production instance of it is a Created-but-never-started container squatting
+    # the name (`internal/runtime/runtime.go:543`). That is the box's own docker
+    # state, not anything the site built. (1 row, 2026-09.)
+    "CONTAINER_START_REFUSED_125" => :box,
     "ABANDONED_AT_CAPACITY" => :box,
     "ABANDONED_BOX_STUCK" => :box,
     # THE BOX DID NOT ANSWER, or answered with a broken switch. The builder lease
@@ -616,6 +668,12 @@ defmodule BarkparkCloud.DeployLedger do
     # and the corpus 403 a site's own read token earned.
     "BUILD_FAILED" => :site,
     "FORBIDDEN_403" => :site,
+    # THE SITE'S OWN PAYLOAD. The box read the archive's declared totals off its
+    # header and refused before staging a byte; the cap is published and the
+    # bytes are the uploader's. Nothing about the box's health is implicated —
+    # calling this `:box` would accuse a box for a decision the payload forced.
+    # (3 rows, 2026-09 — the largest single shape in this batch.)
+    "ARCHIVE_TOO_LARGE_400" => :site,
     # NEITHER, HONESTLY.
     #
     # `CONTENT_API_403` looks like `FORBIDDEN_403`'s twin and is not: its eleven
@@ -642,6 +700,17 @@ defmodule BarkparkCloud.DeployLedger do
     # the agency map was written, which is precisely the drift a hand-listed set
     # would have merged green.)
     "ABANDONED_UNCLASSIFIED" => :ambiguous,
+    # `ARCHIVE_UNSUPPORTED_ENTRY_400` is NOT its sibling's twin, and the
+    # difference is documented on our own packer. `internal/cli/sites_tarball.go:249`
+    # states that a box which predates the extractor's pax arm answers
+    # E_UNKNOWN_TYPE for bytes every CURRENT box stages — BOX-LAGS-CLI is a
+    # supported product state (charter D112). So one shape carries two causes with
+    # opposite owners: a packer that emitted an entry type nobody stages (`:site`),
+    # or a box too old to stage one that is fine (`:box`). The persisted string
+    # cannot tell them apart, and guessing either way is D148's error in one of
+    # its two directions. It is `:ambiguous` until the box version travels beside
+    # the refusal. (1 row, 2026-09.)
+    "ARCHIVE_UNSUPPORTED_ENTRY_400" => :ambiguous,
     # A timeout can be a swapping box or a build that genuinely got bigger;
     # unfetchable inputs can be an empty artifact url or a box that cannot reach
     # storage; a died process names no owner at all; and UNCLASSIFIED is by
@@ -675,8 +744,12 @@ defmodule BarkparkCloud.DeployLedger do
   `failure_reason` (the census folds over grouped maps, not structs).
   """
   @spec classify(Deployment.t() | map() | nil) :: class() | nil
-  def classify(%{status: "failed"} = row),
-    do: classify(Map.get(row, :stage), Map.get(row, :failure_reason))
+  def classify(%{status: "failed"} = row) do
+    case abandoned_by_columns(row) do
+      nil -> classify(Map.get(row, :stage), Map.get(row, :failure_reason))
+      class -> class
+    end
+  end
 
   # A DEFERRAL is not a failure and not a nil — see `@deferred_classes`. It reads
   # the (stage, RAW reason) pair exactly like the failed arm above, and for the
@@ -688,6 +761,62 @@ defmodule BarkparkCloud.DeployLedger do
 
   def classify(%{status: _other}), do: nil
   def classify(nil), do: nil
+
+  # THE ABANDONMENT PREDICATE, AS DATA (dr-w34-bl). Until this arm the ONLY handle
+  # the ledger had on a given-up publish was `@abandoned` — a regex over the
+  # English sentence `Sites.Deploy.abandonment_reason/3` writes. W28-S6 made that
+  # unnecessary for every row written since: the abandonment branch stamps
+  # `deferral_depth` / `deferral_bound` / `deferral_cause` onto the row it settles
+  # `failed` (`sites/deploy.ex:1583-1587`), so the fact is a column and no longer a
+  # sentence. The prose reader stays as the fallback for the pre-W28 corpus.
+  #
+  # THE PREDICATE IS `depth >= bound`, AND THE `>=` IS THE WHOLE POINT.
+  #
+  #   * NOT `depth == bound`. The producer's guard is `prior >= bound - 1`
+  #     (`sites/deploy.ex:1561`) stamping `prior + 1`, so `>=` is the only relation
+  #     it actually guarantees. OVERSHOOT IS REACHABLE: `consecutive_deferrals/2`
+  #     scans `@deferral_scan_depth` = 14 rows while the busy bound is 6, so a
+  #     chain that grew past 6 without abandoning — two drivers racing the
+  #     head-of-stream scan, or a bound that was lowered after the chain started —
+  #     settles at depth 7..14 against bound 6. `==` drops every one of those rows
+  #     and THE ABANDONMENT COUNT GOES DOWN, which is the same vacuous-green
+  #     inversion `abandoned_class/1`'s D8 arm was fixed to refuse, reintroduced by
+  #     the very swap meant to harden it.
+  #   * NOT `deferral_cause IS NOT NULL`. That column is written on EVERY ordinary
+  #     deferred row too (`sites/deploy.ex:1657-1659`), 1,665 of them against 7
+  #     abandonments — it is a "post-2026-08-07 deferral" marker, not an
+  #     abandonment marker.
+  #
+  # EXCLUSIVITY IS STRUCTURAL, not a second condition to keep in sync: this clause
+  # only runs on `status: "failed"`, and no `deferred` row can satisfy the
+  # predicate anyway because `defer/3` settles the bound-th round `failed` (the
+  # highest depth a deferred row can carry is bound - 1).
+  #
+  # THE CENSUS IS UNTOUCHED BY THIS, ON PURPOSE. `census/3`'s fold groups by
+  # `[site_id, stage, status, failure_reason]` and its group maps carry none of
+  # these keys, so `Map.get/2` answers nil and every census row takes the prose
+  # path byte-identically. Widening that GROUP BY is a SEPARATE, separately-costed
+  # change against the documented ~1,400-groups baseline, and is deliberately not
+  # made here.
+  defp abandoned_by_columns(row) do
+    depth = Map.get(row, :deferral_depth)
+    bound = Map.get(row, :deferral_bound)
+
+    if is_integer(depth) and is_integer(bound) and depth >= bound do
+      abandoned_class_of(Map.get(row, :deferral_cause))
+    end
+  end
+
+  # The stamped cause IS a `@deferred_classes` member — `Sites.Deploy` writes it
+  # straight out of `classify/1`'s deferred arm — so this mapping is the column
+  # twin of `abandoned_class/1`'s prose one, and answers the same three names.
+  # An unnamed or missing cause is `ABANDONED_UNCLASSIFIED` and never `nil`: the
+  # columns already PROVE the row is an abandonment, so dropping it out of the
+  # cohort because its cause is unnamed is D8's inversion (the count falls while
+  # the fleet abandons more).
+  defp abandoned_class_of("BOX_AT_CAPACITY_DEFERRED"), do: "ABANDONED_AT_CAPACITY"
+  defp abandoned_class_of("BOX_BUSY_DEFERRED"), do: "ABANDONED_BOX_STUCK"
+  defp abandoned_class_of(_unnamed), do: "ABANDONED_UNCLASSIFIED"
 
   @doc """
   Classify a FAILED row from its `stage` and its RAW `failure_reason`.
@@ -730,6 +859,13 @@ defmodule BarkparkCloud.DeployLedger do
 
       stage == "BUILD" and build_failure?(reason) ->
         build_class(reason)
+
+      # THE TOOLCHAIN'S OWN WRAPPED STEP ERRORS — the two shapes that are NOT box
+      # refusals (they never match `@refusal`) and NOT the deploy script's
+      # `BUILD failed …` either, so they fell through to the tail with a perfectly
+      # readable cause in the string.
+      class = toolchain_class(reason) ->
+        class
 
       source_unfetchable?(reason) ->
         "SOURCE_UNFETCHABLE"
@@ -869,6 +1005,33 @@ defmodule BarkparkCloud.DeployLedger do
     end
   end
 
+  # THE 400 SPLITS ON THE BOX'S TYPED CODE, and reads it through the ONE parser
+  # that already knows the typed shape. `deferral_code/1` deliberately requires a
+  # lowercase `snake_case` token (`@code_token`), which is the box's PLAIN code
+  # vocabulary; the extractor's refusals are SCREAMING_SNAKE `E_*` codes and would
+  # every one of them read as `:prose` there. Rather than widen a reader whose
+  # narrowness is load-bearing for the 409/503 spoof close, this arm calls
+  # `FailureCopy.typed_refusal_fields/1` — the module that already owns the typed
+  # split, anchored on the same caption, and whose output is the very
+  # `failure_code` key the wire already carries.
+  #
+  # TWO CODES ARE NAMED, and both were read off a real row. A 400 whose code the
+  # ledger has never seen (`E_SYMLINK`, `E_COMPRESSION_RATIO`, `E_TOO_MANY_ENTRIES`,
+  # … all of which `api/lib/barkpark/sites/prebuilt_artifact.ex` can emit) is
+  # `UNCLASSIFIED` on purpose — the same rule the arity-1 tail below states. An
+  # `ARCHIVE_REFUSED_400` bucket over the whole status would name every one of
+  # those in advance and tell nobody when a new one arrived.
+  defp refusal_class("400", reason) do
+    case FailureCopy.typed_refusal_fields(reason) do
+      # 3 rows, 2026-09: "…(HTTP 400): E_TOTAL_TOO_LARGE — the archive's entries
+      # declare more than the 67108864 byte total cap…"
+      {"E_TOTAL_TOO_LARGE", _message} -> "ARCHIVE_TOO_LARGE_400"
+      # 1 row, 2026-09: "…(HTTP 400): E_UNKNOWN_TYPE — …"
+      {"E_UNKNOWN_TYPE", _message} -> "ARCHIVE_UNSUPPORTED_ENTRY_400"
+      _unnamed -> "UNCLASSIFIED"
+    end
+  end
+
   defp refusal_class(code, _reason), do: refusal_class(code)
 
   # `Sites.Deploy.abandonment_reason/3` writes this clause, and nothing else in
@@ -918,9 +1081,19 @@ defmodule BarkparkCloud.DeployLedger do
   defp refusal_class("500"), do: "BOX_500"
   defp refusal_class("503"), do: "BOX_UNAVAILABLE_503"
   defp refusal_class("429"), do: "BOX_RATE_LIMITED_429"
-  # A refusal status the ledger has never named (404, 400, …) is UNCLASSIFIED on
+  # 1 row, 2026-09: "…(HTTP 401): unauthorized — missing or invalid token
+  # [box request_id: …]". The status alone is the whole cause here — a 401 is the
+  # box refusing the credential — so this arm reads NO detail, unlike the 400 and
+  # 503 arms whose status genuinely carries more than one story.
+  defp refusal_class("401"), do: "BOX_UNAUTHORIZED_401"
+  # 2 rows, 2026-09: the BARE "the instance refused the deploy (HTTP 404)", no
+  # code word at all. Same reasoning as the 401.
+  defp refusal_class("404"), do: "BOX_ROUTE_UNKNOWN_404"
+  # A refusal status the ledger has never named (402, 418, …) is UNCLASSIFIED on
   # purpose: inventing a BOX_REFUSED_OTHER bucket would make the taxonomy look
-  # complete while telling nobody a new refusal shape appeared.
+  # complete while telling nobody a new refusal shape appeared. The four codes
+  # named above this line were each written off a production row and NOT off a
+  # status range, which is the only way this tail is ever allowed to shrink.
   defp refusal_class(_other), do: "UNCLASSIFIED"
 
   ## ── The DEFERRED taxonomy ─────────────────────────────────────────────────
@@ -1144,6 +1317,46 @@ defmodule BarkparkCloud.DeployLedger do
     if Regex.match?(@corpus_403, reason), do: "FORBIDDEN_403", else: "BUILD_FAILED"
   end
 
+  # `internal/builder/builder.go:377` wraps the image build's own exit:
+  # `fmt.Errorf("nixpacks build: %w", err)`. 2 rows, 2026-09.
+  #
+  # ANY exit status, deliberately, and this is NOT the catch-all D8 forbids: the
+  # code is the SITE BUILD's own exit and carries nothing the ledger could act on
+  # differently, exactly as `build_failure?/1` above already reads
+  # `"BUILD failed (exit"` for every N. The class it answers is the EXISTING
+  # `BUILD_FAILED`, not a new name, because the meaning and the owner are
+  # identical to the on-box script's: the site's build exited non-zero, and the
+  # remedy is in the site's source. A second name for one meaning splits a class
+  # without giving an operator a different action.
+  @nixpacks_build ~r/^nixpacks build: exit status \d+$/
+
+  # `internal/runtime/runtime.go:565` wraps the container start:
+  # `fmt.Errorf("docker run: %w", err)`. 1 row, 2026-09, at exit 125.
+  #
+  # 125 ONLY, and here the code IS the discriminator: docker's own contract makes
+  # 125 "the daemon/CLI failed before the container ran" — the production case is
+  # a Created-but-never-started container squatting the name, which that file's
+  # own comment at :543 records — while 126/127 mean the container DID run and its
+  # entrypoint failed, and any other status is the app's own exit. Those are three
+  # different remedies for one prefix, so a `docker run: ` prefix arm would be
+  # precisely the bucket that looks complete and reports nothing. An unnamed
+  # `docker run` exit rises in `UNCLASSIFIED`, where someone has to look at it.
+  @docker_run_125 ~r/^docker run: exit status 125$/
+
+  # BOTH ARE FULL-STRING ANCHORED (`^…$`) and therefore need no stage gate. The
+  # BUILD arm above is stage-gated because `"BUILD failed (exit"` is a PREFIX and
+  # a captured log from another stage could carry those bytes; a whole-string
+  # match cannot be a substring of a log, so gating these on a stage would add an
+  # assumption about which stage the producer's row carries — and that assumption
+  # is not verifiable from the classifier.
+  defp toolchain_class(reason) do
+    cond do
+      Regex.match?(@nixpacks_build, reason) -> "BUILD_FAILED"
+      Regex.match?(@docker_run_125, reason) -> "CONTAINER_START_REFUSED_125"
+      true -> nil
+    end
+  end
+
   defp source_unfetchable?(reason) do
     String.starts_with?(reason, "missing site source dir") or
       String.starts_with?(reason, "artifact: artifact_url is empty") or
@@ -1338,6 +1551,34 @@ defmodule BarkparkCloud.DeployLedger do
       # is a COUNT of real rows, and D9's ruling is that counts stay while
       # ratios go.
       deferred_total: deferred_total,
+      # THE DOOR'S OWN DENOMINATOR, read off the DURABLE ROWS and not off the
+      # cause column (dr-w22-s5, charter D379). Every reader of "how often did
+      # the box refuse a slot" has keyed on
+      # `status='deferred' AND deferral_cause='BOX_AT_CAPACITY_DEFERRED'`, and
+      # that predicate is STRUCTURALLY short: `deferral_cause` is written in
+      # exactly one place — `Sites.Deploy.defer/3` — so a capacity 409 that
+      # settled `failed` instead of being re-queued carries the 409 in
+      # `failure_reason` and a NULL cause, and the cause-keyed reader cannot see
+      # it. Measured on the live corpus over the box's own journal window, that
+      # is six rows the door undercounted itself by.
+      #
+      # THE HONEST PREDICATE IS THE PROSE MARKER, ACROSS ALL STATUSES. It is
+      # deliberately NOT a replacement for the `deferred` cohort rows above —
+      # those stay, byte for byte, because they are the correct answer to a
+      # different question ("how much did the door RE-QUEUE"). This term answers
+      # "how often did the door REFUSE", which is the larger set, and it carries
+      # the DIFFERENCE as its own scalar so the gap is DISCLOSED rather than
+      # silently reconciled by a reader who sees only whichever number is
+      # nearer.
+      #
+      # NOT REFUSED ACROSS THE VOCABULARY BOUNDARY, and that is the point of
+      # building it this way: the boundary at 2026-08-05T21:13:50Z is exactly the
+      # instant the same refusal stopped being written `failed` and started being
+      # written `deferred`, so every status-keyed quantity blends two taxonomies
+      # across it. This one keys on `failure_reason`, which BOTH vocabularies
+      # write identically — so it is the one door count a straddling window can
+      # still answer.
+      box_door: box_door(scoped),
       # THE ABSOLUTE COUNT AND ITS COVERAGE, side by side. Neither is refused
       # across the boundary for the same reason `deferred_total` is not: they
       # are counts. `abandoned` is a LOWER BOUND whenever `abandoned_unreadable`
@@ -1433,6 +1674,61 @@ defmodule BarkparkCloud.DeployLedger do
   # about THIS control plane's database, not about this source tree.
   defp coalesced_counter_since do
     Application.get_env(:barkpark_cloud, :coalesced_counter_since, @coalesced_counter_since)
+  end
+
+  # THE DOOR TERM. Two counts over the SAME scoped source the rest of the census
+  # reads — same window, same `:site_ids` narrowing — plus the rows the
+  # cause-keyed reader misses, counted DIRECTLY rather than subtracted.
+  #
+  # `unkeyed` is a THIRD query, not `refusals - cause_keyed`. A subtraction is
+  # signed: a cause-keyed row whose `failure_reason` does not carry the marker
+  # would push the difference negative and the census would print a negative
+  # count of missing rows. Counting the missed rows themselves cannot go
+  # negative and answers the question the operator actually asks — WHICH rows
+  # does the old predicate not see.
+  defp box_door(scoped) do
+    marked = from(d in scoped, where: like(d.failure_reason, ^@box_door_marker))
+
+    refusals = Repo.aggregate(marked, :count, :id)
+
+    cause_keyed =
+      Repo.aggregate(
+        from(d in scoped,
+          where: d.status == "deferred" and d.deferral_cause == ^@box_door_cause
+        ),
+        :count,
+        :id
+      )
+
+    unkeyed =
+      Repo.aggregate(
+        from(d in marked,
+          where:
+            is_nil(d.deferral_cause) or d.status != "deferred" or
+              d.deferral_cause != ^@box_door_cause
+        ),
+        :count,
+        :id
+      )
+
+    by_status =
+      Repo.all(
+        from(d in marked,
+          group_by: d.status,
+          order_by: [desc: count(d.id)],
+          select: %{status: d.status, count: count(d.id)}
+        )
+      )
+
+    %{
+      refusals: refusals,
+      cause_keyed: cause_keyed,
+      unkeyed: unkeyed,
+      by_status: by_status,
+      predicate: @box_door_predicate,
+      cause_predicate: @box_door_cause_predicate,
+      basis: @box_door_basis
+    }
   end
 
   defp coalesced_attempts(scoped, from) do

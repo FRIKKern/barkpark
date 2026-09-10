@@ -5,8 +5,13 @@ Barkpark documentation site — Next.js 15 + Fumadocs v14.
 
 ## Quickstart
 
+This package belongs to the `js/` workspace, not the repository-root one, so
+`--filter @barkpark/docs` matches nothing when run from the root. Run both
+commands from anywhere in the repository:
+
 ```bash
-pnpm --filter @barkpark/docs dev
+pnpm -C js install
+pnpm -C js --filter @barkpark/docs dev
 ```
 
 Open <http://localhost:3000>.

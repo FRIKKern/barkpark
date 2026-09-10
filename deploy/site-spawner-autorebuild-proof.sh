@@ -288,8 +288,11 @@ cleanup() {
       note "         There is no DELETE /v1/sites/:id route yet (see site-spawner-backlog-token-revoke),"
       note "         so it is LEFT IN PLACE deliberately, with its releases dir, Caddy block AND its"
       note "         content-publish webhook row on $INSTANCE. Remove by hand: on $LIVE_HOST →"
-      note "         rm -rf /opt/barkpark/sites/$CREATED_SITE, drop the '# barkpark-site:$CREATED_SITE'"
-      note "         handle_path block from /etc/caddy/Caddyfile, and unregister the box webhook."
+      note "         rm -rf /opt/barkpark/sites/$CREATED_SITE, drop the handle_path block from"
+      note "         /etc/caddy/Caddyfile whose guard comment reads 'BARKPARK_SITE_ROUTE:$CREATED_SITE'"
+      note "         (that marker, NOT the old '# barkpark-site<colon>' string, is what deploy/site-deploy.sh writes;"
+      note "         grepping the old string finds nothing and the route stays live), and"
+      note "         unregister the box webhook."
     fi
     if [ -n "$PUBLISHED_DOCS" ]; then
       note "         The proof PUBLISHED papers into $DATASET (ids: $PUBLISHED_DOCS) — they are real"

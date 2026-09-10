@@ -858,8 +858,20 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 // 60s PER-SLOT ring that re-arms EMPTY on every blue/green flip — a rung keyed
 // on it would flap to "unmeasured" on every deploy, and this fleet deploys
 // constantly. A detail line pays no flap cost: it changes no rank and no
-// bucket, it simply says the sentence D75 exists to make sayable — "this box
-// the table calls healthy is answering ~0.22 5xx/s" — on whatever row it rides.
+// bucket, it simply says the sentence D75 exists to make sayable — "the HTTP
+// router on this box the table calls healthy is answering ~0.22 5xx/s" — on
+// whatever row it rides.
+//
+// AND IT SAYS *ROUTER*, NEVER *BOX* (charter D132). The number counts
+// [:phoenix, :endpoint, :stop] events with a 5xx status, so it is a rate of
+// what the HTTP router ANSWERED and nothing wider. Two failure shapes never
+// reach it: a 5xx the BEAM never served (a Caddy 502/504 over an unresponsive
+// VM — exactly the total-outage case), and a LiveView killed by a pool timeout,
+// which emits no :stop event at all (7 of 2,673 attributed timeouts on blue).
+// So this marker may NOT be worded as box health in either direction: a rate
+// here is not "the box is sick", and — the dangerous half — its ABSENCE is not
+// "the box is well". That is why the zero and unmeasured states print no
+// sentence at all rather than a reassuring one.
 //
 // THE THREE STATES STAY THREE STATES, and none of them is another. The TABLE
 // marker below prints only the positive rate — exactly runawayMarker's policy:
@@ -873,7 +885,7 @@ func err5xxMarker(b cloudclient.Barkpark) string {
 	if p == nil || p.Err5xxPerS == nil || *p.Err5xxPerS <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("answering %.2f 5xx/s (60s per-slot ring — the beat's own number, blind to 5xx the BEAM never served)", *p.Err5xxPerS)
+	return fmt.Sprintf("HTTP router answering %.2f 5xx/s (60s per-slot ring — the beat's own number; a ROUTER rate, never a verdict on the box: blind to 5xx the BEAM never served, and to a LiveView killed mid-request, which emits no stop event to count)", *p.Err5xxPerS)
 }
 
 // err5xxRow is the `-o json` projection of the same reading, and it is where

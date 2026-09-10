@@ -61,8 +61,25 @@ defmodule BarkparkCloud.DeployLedgerTest do
   @r503_unknown "the instance refused the deploy (HTTP 503): shard_draining — the region is being drained"
   @r503_prose "the instance refused the deploy (HTTP 503): everything is on fire right now"
   @r429 "the instance refused the deploy (HTTP 429): rate_limited — try again shortly"
-  # An HTTP status the ledger has never named: 2 rows. Must be UNCLASSIFIED.
+  # 2 rows, 2026-09, BARE — no code word at all. The box does not have the
+  # deploy route: a version skew, and a cause.
   @r404 "the instance refused the deploy (HTTP 404)"
+  # 1 row, 2026-09. Byte-shaped as `box_refusal/3` writes it, request-id stamp
+  # and all.
+  @r401 "the instance refused the deploy (HTTP 401): unauthorized — missing or invalid token [box request_id: F9tPXq2A]"
+  # 3 rows, 2026-09 — the largest single shape in the batch that named these.
+  @r400_too_large "the instance refused the deploy (HTTP 400): E_TOTAL_TOO_LARGE — the archive's entries declare more than the 67108864 byte total cap"
+  # 1 row, 2026-09.
+  @r400_unknown_type "the instance refused the deploy (HTTP 400): E_UNKNOWN_TYPE — unsupported tar entry type \"x\""
+  # A typed 400 the ledger has NEVER been sent — `prebuilt_artifact.ex` can emit
+  # it. It must rise in the tail, not inherit an archive class.
+  @r400_unnamed_code "the instance refused the deploy (HTTP 400): E_SYMLINK — entry \"public/link\" is a symlink — refused"
+  # A 400 whose detail is prose, not a code.
+  @r400_prose "the instance refused the deploy (HTTP 400): the request made no sense to this box"
+  # An HTTP status the ledger has never been sent AT ALL — the tail's own proof,
+  # which must always sit on a status nobody has seen rather than on one someone
+  # has already looked at.
+  @r402 "the instance refused the deploy (HTTP 402)"
   @doc_id "HEALTH gate failed — not switched (exit 14): bp-doc-id marker is empty"
   @doc_id_alt "HEALTH failed — bp-doc-id marker is empty — the SSR rendered nothing"
   @health_slot "HEALTH gate failed — not switched (exit 14): slot a on :8404 returned 502"
@@ -117,6 +134,9 @@ defmodule BarkparkCloud.DeployLedgerTest do
   @gh_push "github push builds require a linked GitHub repo on this site — link a repo to this site, or deploy an artifact via bp deploy"
   # 2 rows: nixpacks. Genuinely unnamed — the honest tail.
   @nixpacks "nixpacks build: exit status 1"
+  # 1 row, 2026-09. `internal/runtime/runtime.go:565` wraps the container start;
+  # 125 is docker's own "the daemon refused before the container ran".
+  @docker_125 "docker run: exit status 125"
 
   # ── The DEFERRED corpus (dr-w3 S3) ────────────────────────────────────────
   # What `Sites.Deploy.defer/3` actually writes: the box's own refusal, plus the
@@ -487,6 +507,189 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert busy =~ "refused 6 rebuilds in a row"
     end
 
+    ## ── dr-w34-bl: the abandonment predicate is `depth >= bound`, off COLUMNS ──
+    #
+    # W28-S6 made the terminal round stamp `deferral_depth` / `deferral_bound` /
+    # `deferral_cause` onto the row it settles `failed`, so the fact an operator
+    # most needs is DATA now and not a sentence. The prose reader above stays for
+    # the pre-W28 corpus; these four arms are the column reader, and arm 4 is the
+    # one no brief carried.
+    #
+    # FIXTURES, NOT A LIVE READ. This worker had no production database; every
+    # number quoted here comes from the filing row and the producer's own source,
+    # and every row below is constructed.
+
+    test "ARM 1 — the columns classify the row even when the PROSE has been reworded off @abandoned" do
+      # The whole point of moving off the regex: reword the sentence and the
+      # prose reader degrades this row to BOX_BUSY_409, silently. The columns
+      # cannot be reworded.
+      reworded =
+        "the instance refused the deploy (HTTP 409): box_at_capacity" <>
+          " — the fleet has stopped retrying this publish after 12 rounds"
+
+      # CONTROL: the reworded prose really is invisible to the old reader.
+      assert DeployLedger.classify("PLAN", reworded) == "BOX_BUSY_409"
+
+      row = %{
+        status: "failed",
+        stage: "PLAN",
+        failure_reason: reworded,
+        deferral_depth: 12,
+        deferral_bound: 12,
+        deferral_cause: "BOX_AT_CAPACITY_DEFERRED"
+      }
+
+      assert DeployLedger.classify(row) == "ABANDONED_AT_CAPACITY"
+
+      assert DeployLedger.classify(%{row | deferral_cause: "BOX_BUSY_DEFERRED"}) ==
+               "ABANDONED_BOX_STUCK"
+
+      # An unnamed cause stays INSIDE the cohort — dropping it out because its
+      # cause is unnamed is the D8 inversion (the count falls while the fleet
+      # abandons more), and it is refused on the column path exactly as on the
+      # prose one.
+      assert DeployLedger.classify(%{row | deferral_cause: "DEFERRED_UNCLASSIFIED"}) ==
+               "ABANDONED_UNCLASSIFIED"
+
+      assert DeployLedger.classify(%{row | deferral_cause: nil}) == "ABANDONED_UNCLASSIFIED"
+    end
+
+    test "ARM 2 — the PROSE fallback still carries the pre-W28 shape, whose columns are NULL" do
+      # `prose_but_unstamped = 0` on the live corpus, so this row can no longer
+      # be produced — which is exactly why it is a FIXTURE and not deleted as
+      # dead code: the rows it covers are already written and still read.
+      row = %{
+        status: "failed",
+        stage: "PLAN",
+        failure_reason: @a_capacity,
+        deferral_depth: nil,
+        deferral_bound: nil,
+        deferral_cause: nil
+      }
+
+      assert DeployLedger.classify(row) == "ABANDONED_AT_CAPACITY"
+
+      # And a row that carries NO chain keys at all — which is every census group
+      # map, see the census guard below — takes the same path.
+      assert DeployLedger.classify(%{status: "failed", stage: "PLAN", failure_reason: @a_busy}) ==
+               "ABANDONED_BOX_STUCK"
+    end
+
+    test "ARM 3 — a DEFERRED row at depth 11 / bound 12 WITH a cause is NOT an abandonment" do
+      deferred = %{
+        status: "deferred",
+        stage: "PLAN",
+        failure_reason: @d_capacity_stamped,
+        deferral_depth: 11,
+        deferral_bound: 12,
+        deferral_cause: "BOX_AT_CAPACITY_DEFERRED"
+      }
+
+      assert DeployLedger.classify(deferred) == "BOX_AT_CAPACITY_DEFERRED"
+      refute String.starts_with?(DeployLedger.classify(deferred), "ABANDONED_")
+
+      # THE ARM THAT CATCHES `deferral_cause IS NOT NULL`. That column is written
+      # on EVERY ordinary deferred round (sites/deploy.ex:1657-1659) — 1,665 rows
+      # against 7 abandonments — so a predicate keyed on it would call this row an
+      # abandonment. It is not keyed on it: the cause is present and the row is
+      # still a deferral.
+      assert is_binary(deferred.deferral_cause)
+
+      # …and exclusivity is STRUCTURAL, not a second condition: even settled
+      # `failed`, 11 >= 12 is false, so the depth alone refuses it.
+      assert DeployLedger.classify(%{deferred | status: "failed"}) == "BOX_BUSY_409"
+    end
+
+    test "ARM 4 — OVERSHOOT: depth 13 against bound 6 is an abandonment, and `==` would drop it" do
+      # REACHABLE, not hypothetical: `consecutive_deferrals/2` scans
+      # @deferral_scan_depth = 14 rows while the busy bound is 6, so a chain that
+      # grew past 6 without abandoning settles at depth 7..14 against bound 6.
+      overshoot = %{
+        status: "failed",
+        stage: "PLAN",
+        failure_reason: @a_busy,
+        deferral_depth: 13,
+        deferral_bound: 6,
+        deferral_cause: "BOX_BUSY_DEFERRED"
+      }
+
+      assert DeployLedger.classify(overshoot) == "ABANDONED_BOX_STUCK"
+
+      # 4b — AND THIS IS THE ARM THAT MEASURES THE PREDICATE. With abandonment
+      # prose intact (4a above) the PROSE FALLBACK answers ABANDONED_BOX_STUCK
+      # too, so swapping `>=` for `==` leaves 4a green: the row's own brief was
+      # wrong about which fixture the mutation reds. The overshoot row whose
+      # prose was ALSO reworded has only the columns to be read by, and `==`
+      # drops it to BOX_BUSY_409.
+      reworded =
+        "the instance refused the deploy (HTTP 409): already_running" <>
+          " — the fleet has stopped retrying this publish after 13 rounds"
+
+      assert DeployLedger.classify("PLAN", reworded) == "BOX_BUSY_409"
+
+      assert DeployLedger.classify(%{overshoot | failure_reason: reworded}) ==
+               "ABANDONED_BOX_STUCK"
+
+      # The boundary itself is INSIDE the predicate — `>` would drop the ordinary
+      # terminal round, which is the same bug pointed the other way.
+      assert DeployLedger.classify(%{
+               overshoot
+               | failure_reason: reworded,
+                 deferral_depth: 6,
+                 deferral_bound: 6
+             }) == "ABANDONED_BOX_STUCK"
+
+      # …and one BELOW the bound is not an abandonment at all.
+      assert DeployLedger.classify(%{
+               overshoot
+               | failure_reason: reworded,
+                 deferral_depth: 5,
+                 deferral_bound: 6
+             }) == "BOX_BUSY_409"
+    end
+
+    test "the CENSUS fold is untouched: a group map has no chain keys and takes the prose path" do
+      # `census/3` groups by [site_id, stage, status, failure_reason] and selects
+      # only those four plus a count, so its rows carry NONE of the chain columns.
+      # Widening that GROUP BY is a separate, separately-costed change against the
+      # documented ~1,400-groups baseline and is deliberately NOT made here — this
+      # asserts the seam change cannot have moved a census number.
+      group = %{
+        site_id: Ecto.UUID.generate(),
+        stage: "PLAN",
+        status: "failed",
+        failure_reason: @a_capacity
+      }
+
+      refute Map.has_key?(group, :deferral_depth)
+      assert DeployLedger.classify(group) == "ABANDONED_AT_CAPACITY"
+      assert DeployLedger.classify(group) == DeployLedger.classify("PLAN", @a_capacity)
+    end
+
+    test "a partial stamp is not a predicate: one column without the other reads nothing" do
+      base = %{status: "failed", stage: "PLAN", failure_reason: @r409_coded}
+
+      # A depth with no bound cannot be compared, and must NOT be guessed against
+      # a default — a bound that defaulted to 0 would make every stamped row an
+      # abandonment.
+      assert DeployLedger.classify(Map.put(base, :deferral_depth, 13)) == "BOX_BUSY_409"
+      assert DeployLedger.classify(Map.put(base, :deferral_bound, 6)) == "BOX_BUSY_409"
+
+      # Non-integers (a string off a JSON round-trip) are not compared either.
+      assert DeployLedger.classify(Map.merge(base, %{deferral_depth: "13", deferral_bound: "6"})) ==
+               "BOX_BUSY_409"
+
+      # The control: with BOTH integers the very same row IS an abandonment, so
+      # the three refusals above are the guard and not a broken fixture.
+      assert DeployLedger.classify(
+               Map.merge(base, %{
+                 deferral_depth: 13,
+                 deferral_bound: 6,
+                 deferral_cause: "BOX_BUSY_DEFERRED"
+               })
+             ) == "ABANDONED_BOX_STUCK"
+    end
+
     test "the box-refusal statuses each get their own name; an unnamed one does not" do
       assert DeployLedger.classify("BUILD", @r500) == "BOX_500"
       assert DeployLedger.classify("HEALTH", @r500) == "BOX_500"
@@ -496,8 +699,71 @@ defmodule BarkparkCloud.DeployLedgerTest do
       # below), so a code-carrying 503 gets the cause's name, not the status'.
       assert DeployLedger.classify("PLAN", @r503) == "BOX_DEPLOY_DISABLED_503"
       assert DeployLedger.classify("BUILD", @r429) == "BOX_RATE_LIMITED_429"
-      # An unnamed refusal status is UNCLASSIFIED, not a catch-all BOX_REFUSED.
-      assert DeployLedger.classify("PLAN", @r404) == "UNCLASSIFIED"
+      # WAS `UNCLASSIFIED`, and that assertion is what this slice inverts: the
+      # 404 is 2 real rows, and "the box does not have the deploy route" is a
+      # cause, not a mystery. The tail's guard moves DOWN to a status nobody has
+      # seen (below), which is the only honest place for it.
+      assert DeployLedger.classify("PLAN", @r404) == "BOX_ROUTE_UNKNOWN_404"
+      assert DeployLedger.classify("PLAN", @r401) == "BOX_UNAUTHORIZED_401"
+
+      # An unnamed refusal status is still UNCLASSIFIED, not a catch-all
+      # BOX_REFUSED — and now proved on a status the ledger has never been sent.
+      assert DeployLedger.classify("PLAN", @r402) == "UNCLASSIFIED"
+    end
+
+    # dr — THE 400 IS THE ONLY NEW STATUS THAT CARRIES TWO STORIES, so it is the
+    # only one that reads a detail. Both codes were read off production rows; a
+    # third `E_*` the ledger has not seen must NOT inherit either name.
+    test "a 400 splits on the box's TYPED code, and an unnamed E_ code still rises" do
+      assert DeployLedger.classify("PLAN", @r400_too_large) == "ARCHIVE_TOO_LARGE_400"
+      assert DeployLedger.classify("PLAN", @r400_unknown_type) == "ARCHIVE_UNSUPPORTED_ENTRY_400"
+
+      # `E_SYMLINK` is a code the box really can emit
+      # (`api/lib/barkpark/sites/prebuilt_artifact.ex`) and the ledger has never
+      # seen on a row. It rises — it is not absorbed by whichever archive class
+      # it most resembles.
+      assert DeployLedger.classify("PLAN", @r400_unnamed_code) == "UNCLASSIFIED"
+
+      # …nor may a 400 whose detail is bare prose be promoted to a typed refusal.
+      assert DeployLedger.classify("PLAN", @r400_prose) == "UNCLASSIFIED"
+
+      # And the two archive classes are NOT one bucket wearing two names.
+      refute DeployLedger.label("ARCHIVE_TOO_LARGE_400") ==
+               DeployLedger.label("ARCHIVE_UNSUPPORTED_ENTRY_400")
+    end
+
+    # dr — THE TWO TOOLCHAIN SHAPES. Neither is a box refusal (neither can match
+    # `@refusal`) and neither is the deploy script's `BUILD failed …`, which is
+    # why both sat in the tail with a readable cause in the string.
+    test "the toolchain's own wrapped step errors are named, and only at the shapes observed" do
+      # `internal/builder/builder.go:377` — the site build exited non-zero. The
+      # EXISTING class, because the meaning and the owner are identical to the
+      # on-box script's.
+      assert DeployLedger.classify("BUILD", @nixpacks) == "BUILD_FAILED"
+      assert DeployLedger.agency("BUILD_FAILED") == :site
+
+      # `internal/runtime/runtime.go:565` — docker refused the run before the
+      # image ran. Its own class, because 125 is the box's docker state.
+      assert DeployLedger.classify("SWITCH", @docker_125) == "CONTAINER_START_REFUSED_125"
+      assert DeployLedger.agency("CONTAINER_START_REFUSED_125") == :box
+
+      # NO STAGE GATE, on purpose: both are whole-string anchored, so the class
+      # cannot depend on an assumption about which stage the producer stamped.
+      assert DeployLedger.classify(nil, @nixpacks) == "BUILD_FAILED"
+      assert DeployLedger.classify("PLAN", @docker_125) == "CONTAINER_START_REFUSED_125"
+
+      # AND THE ANCHOR IS LOAD-BEARING: the same bytes quoted INSIDE another
+      # capture are not a toolchain failure.
+      quoted = "BUILD failed (exit 12): nixpacks build: exit status 1"
+      assert DeployLedger.classify("BUILD", quoted) == "BUILD_FAILED"
+
+      assert DeployLedger.classify("HEALTH", "log line: docker run: exit status 125") ==
+               "UNCLASSIFIED"
+
+      # A `docker run` exit the ledger has NOT seen rises — 126 and 127 mean the
+      # container DID run, which is a different remedy, so a `docker run: `
+      # prefix bucket would report nothing.
+      assert DeployLedger.classify("SWITCH", "docker run: exit status 126") == "UNCLASSIFIED"
     end
 
     test "the refusal prefix is ANCHORED — a build log that merely prints 500 is not a box 500" do
@@ -537,7 +803,9 @@ defmodule BarkparkCloud.DeployLedgerTest do
     test "UNCLASSIFIED CAN GO UP: an unrecognised reason is NOT absorbed by the nearest bucket" do
       novel = "the boxcar shim refused the handshake (code BLERG-7)"
       assert DeployLedger.classify("PLAN", novel) == "UNCLASSIFIED"
-      assert DeployLedger.classify("BUILD", @nixpacks) == "UNCLASSIFIED"
+      # (@nixpacks moved OUT of this list in the same commit that named it — see
+      # the toolchain test above. The tail's proof is carried by rows nobody has
+      # taught the ledger yet, never by rows it has.)
       assert DeployLedger.classify("STAGE", nil) == "UNCLASSIFIED"
 
       # And it is not merely "not the biggest class" — it is the sentinel name,
@@ -967,7 +1235,30 @@ defmodule BarkparkCloud.DeployLedgerTest do
 
       # The gauge must be able to lose: if the enum were empty the loop above
       # would assert nothing at all.
-      assert length(DeployLedger.classes()) >= 18
+      #
+      # THE FLOOR IS THE CURRENT COUNT, NOT A STALE ONE. It read `>= 18` while
+      # the enum held 23, which meant five classes could be DELETED without this
+      # gauge noticing — a floor that trails the enum stops being a floor. The
+      # five names dr's classifier slice added (ARCHIVE_TOO_LARGE_400,
+      # ARCHIVE_UNSUPPORTED_ENTRY_400, BOX_UNAUTHORIZED_401,
+      # BOX_ROUTE_UNKNOWN_404, CONTAINER_START_REFUSED_125) take it to 28, and
+      # each one is asserted BY NAME below so a rename cannot be absorbed by the
+      # count alone.
+      assert length(DeployLedger.classes()) == 28
+
+      for named <- [
+            "ARCHIVE_TOO_LARGE_400",
+            "ARCHIVE_UNSUPPORTED_ENTRY_400",
+            "BOX_UNAUTHORIZED_401",
+            "BOX_ROUTE_UNKNOWN_404",
+            "CONTAINER_START_REFUSED_125"
+          ] do
+        assert named in DeployLedger.classes(),
+               "#{named} left the class enum — the arm that names it now answers a class nobody maps"
+
+        assert Map.has_key?(DeployLedger.agency_map(), named),
+               "#{named} has no agency key — D148 says it would answer :ambiguous and quietly shrink a box numerator"
+      end
     end
 
     test "an unknown class is :ambiguous, NEVER :site" do
@@ -1601,7 +1892,10 @@ defmodule BarkparkCloud.DeployLedgerTest do
   # Byte-verbatim from a run: an untyped poll 500 that outlived the grace.
   @poll500 "the instance refused the build poll (HTTP 500): internal_error — unknown error [box request_id: PB-1] (after tolerating 3 transient box 5xx; the last was: the instance refused the build poll (HTTP 500): internal_error — unknown error [box request_id: PB-1])"
   @poll503_runner "the instance refused the build poll (HTTP 503): deploy_runner_unavailable — the deploy runner did not answer in time [box request_id: F9-poll]"
-  @poll404 "the instance refused the build poll (HTTP 404)"
+  # A poll refusal at a status the ledger has never been sent. WAS 404, which is
+  # now a NAMED class (a box without the route) — and naming it made this test
+  # measure nothing, so the tail's proof moves to a status nobody has seen.
+  @poll402 "the instance refused the build poll (HTTP 402)"
 
   describe "classify/2 — the POLL phase is read, not lost" do
     test "a poll refusal classifies by the same status and code word as a start refusal" do
@@ -1617,7 +1911,12 @@ defmodule BarkparkCloud.DeployLedgerTest do
     end
 
     test "D8 holds on the poll caption too — an unnamed poll status is not absorbed" do
-      assert DeployLedger.classify("BUILD", @poll404) == "UNCLASSIFIED"
+      assert DeployLedger.classify("BUILD", @poll402) == "UNCLASSIFIED"
+
+      # …and a poll refusal at a status that IS named reads the same class as the
+      # start caption, which is the other half of the same rule.
+      assert DeployLedger.classify("BUILD", "the instance refused the build poll (HTTP 404)") ==
+               "BOX_ROUTE_UNKNOWN_404"
     end
 
     test "the PHASE stays readable — the taxonomy does not split on it, so something must" do

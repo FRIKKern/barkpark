@@ -219,8 +219,19 @@ defmodule BarkparkCloud.Registry.Deployment do
     #
     # These ride ALONGSIDE the sentence, which is PRESERVED (Vercel keeps
     # `readyStateReason` beside `readyState`): the prose is the operator's, the
-    # columns are the aggregate's. Written by `Sites.Deploy.defer/3` on
-    # `deferred` rows only — NULL on every other row and on pre-W12 deferrals,
+    # columns are the aggregate's.
+    #
+    # WRITTEN ON TWO KINDS OF ROW, not one. `Sites.Deploy.defer/3` stamps all
+    # three on each `deferred` round (deploy.ex:1657-1659) AND on the TERMINAL
+    # round, which it settles `failed` through the three-arg `fail/3`
+    # (deploy.ex:1583-1587, W28-S6). This comment used to say "`deferred` rows
+    # only — NULL on every other row", which was false from the day that branch
+    # landed and pointed the wrong way: a reader trusting it would conclude the
+    # abandonment cannot be found as data and would go on scanning the prose.
+    # A `failed` row with `deferral_depth >= deferral_bound` IS the abandonment,
+    # and `DeployLedger.classify/1` reads exactly that.
+    #
+    # Still NULL on every row outside a deferral chain, and on pre-W12 deferrals,
     # which are honestly unknown rather than backfilled out of their own prose.
     #
     # `deferral_bound` is the CAUSE's own budget (12 for capacity, 6 for a busy
@@ -244,6 +255,28 @@ defmodule BarkparkCloud.Registry.Deployment do
     # same reason.
     field :coalesced_attempts, :integer, default: 0
     field :coalesced_last_at, :utc_datetime_usec
+
+    # deploy-reliability W8 (dr-bl-w8-graced-deploys-are-uncounted): THE SAVES,
+    # AS DATA. `Sites.Deploy` already counts graced poll refusals — on `ctx`, an
+    # in-memory map that `forget_graced_refusals/1` CLEARS on any poll that
+    # reached the box. That reset is correct for the caption it feeds, and it
+    # means the count survives exactly one way: into the `failure_reason` of a
+    # deploy that failed anyway. Every grace that WORKED left no trace, and the
+    # start-retry arm recorded nothing in any outcome.
+    #
+    # These are the durable counterpart: monotonic per run, independent of
+    # `ctx`, so a reaching poll cannot erase them and a build that went `live`
+    # can still say what it survived. Charter D114 is why it matters — a
+    # one-literal wire rename kills 3 start retries and 45 poll-grace beats with
+    # no line saying so, and "zero saves" is the only shape that regression has.
+    #
+    # NULLABLE (pre-W8 rows are honestly unknown, never a backfilled 0 — on this
+    # column that lie is load-bearing) and NOT castable on any changeset, for the
+    # same reason `coalesced_attempts` is not: they are bumped by an atomic
+    # `UPDATE` mid-run, and a read-modify-write would lose the count.
+    field :graced_poll_refusals, :integer, default: 0
+    field :graced_start_retries, :integer, default: 0
+    field :last_graced_at, :utc_datetime_usec
 
     belongs_to :site, BarkparkCloud.Registry.Site
 
@@ -496,6 +529,12 @@ defmodule BarkparkCloud.Registry.Deployment do
       # a DIFFERENT process than the one holding that row's claim, and a
       # changeset write would be a read-modify-write that loses concurrent
       # attempts — which is the entire count.
+      #
+      # `graced_poll_refusals` / `graced_start_retries` / `last_graced_at` are
+      # NOT here for the same reason (deploy-reliability W8): they are bumped by
+      # an atomic `UPDATE` from inside the poll loop, mid-transition, and a
+      # changeset write would both lose bumps and be refused by the from-status
+      # guard on a run that has not moved status yet.
       :deferral_depth,
       :deferral_bound,
       :deferral_cause,

@@ -2066,12 +2066,28 @@ defmodule Barkpark.Sites.DeployRunnerTest do
         is_active_cmd: {echo_script("active"), []},
         systemctl_stop_cmd: {slow_ctl_script(2, "stopped"), []},
         systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
-        command: stub("exit 0"),
-        ctl_cmd_timeout_ms: 400
+        command: stub("exit 0")
       )
 
       pid = start_fresh_runner()
       assert %{state: :running} = GenServer.call(pid, {:status, "slow-stop"})
+
+      # The 400ms budget belongs to the STOP, and is armed only once the run is
+      # re-attached as :running — never over the re-attach probe itself.
+      # `ctl_cmd_timeout_ms` is ONE budget shared by every control-plane call,
+      # so setting it in the seed put_cfg also bounded the `systemctl is-active`
+      # that init/1's re-attach runs, at 400ms. That probe's script is a plain
+      # `echo active`, but it is EXECUTED FOR THE FIRST TIME here: on macOS the
+      # first exec of a newly written file pays a one-shot Gatekeeper /
+      # code-signing check — measured 490ms on this tree's tmpdir against ~0ms
+      # for every later exec, and ~2ms on the ubuntu runner, which is why CI
+      # never saw it. Over 400ms the probe times out, `is_active` degrades to
+      # the terminal "unknown" by design, and the run finalized :done/-1
+      # ("deploy process died abnormally") before this test could fire the
+      # watchdog at all. Arming the budget after the :running precondition keeps
+      # the deadline under test — the stop — bounded, and leaves the re-attach
+      # probe on the 15s default it was always meant to have.
+      put_cfg(ctl_cmd_timeout_ms: 400)
 
       # Fire the watchdog; its `systemctl stop` HANGS. A call queued behind the
       # handle_info measures its wall-clock (GenServer messages are serial).
