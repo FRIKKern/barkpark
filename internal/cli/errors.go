@@ -851,8 +851,70 @@ func detailLinesForCode(code string, raw json.RawMessage) []string {
 		if lines := resourceConflictLines(d); lines != nil {
 			return lines
 		}
+	case "validation_failed":
+		if lines := validationFailedLines(d); lines != nil {
+			return lines
+		}
 	}
 	return detailLines(raw)
+}
+
+// validationFailedLines renders the CHANGESET shape of a `validation_failed`
+// payload — Ecto's and Barkpark.Tasks.Validation's `{field: [reason, ...]}` map
+// — as one readable `field: reason` line per field.
+//
+// WHY THIS CODE NEEDS ITS OWN RENDERING. The generic detailValue prints a
+// non-string value as compact JSON, which for a reason LIST means the reader
+// gets the brackets and, worse, a second round of escaping on every quote the
+// reason itself contains. Measured against guerrilla on 2026-09-10,
+// `bp doc patch task <id> --set lifecycle_status=...` printed
+//
+//	lifecycle_status: ["must be one of [\"open\", \"done\", ...], got \"\\\"bogus\\\"\""]
+//
+// The rule IS in that line; a human cannot read it out of it, and the row this
+// closes (pds-bl-task-criteria-publish-label-spine-opacity) is exactly the
+// complaint that a refusal a reader cannot act on is unactionable even when the
+// bytes are present. Joining with "; " and dropping the quotes is not a new
+// invention: it is apierr.DetailParts's algorithm, already canonical for the
+// ONE-LINE surfaces (the TUI status bar, wrapped error values), so this makes
+// the two presentations agree instead of drift.
+//
+// THE ADMISSION TEST IS TOTAL, ON PURPOSE: every value must be a NON-EMPTY JSON
+// array of strings. `validation_failed` is the CLI's most overloaded code — the
+// same token carries the changeset map, `invalid_schema_fields`'s
+// `{reason: "..."}`, and label-spine-shaped `{field, rule, index, similar}`
+// payloads whose `similar` array is a LIST OF IDS the reader copies, not a
+// sentence. Joining per-VALUE would quietly reshape those ids; requiring the
+// WHOLE payload to be the changeset shape means this arm fires only where the
+// join is right, and every other payload keeps the generic rendering byte for
+// byte. Returns nil otherwise, so the caller falls back to detailLines — the
+// same contract the three sibling per-code renderers keep.
+func validationFailedLines(d json.RawMessage) []string {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(d, &obj); err != nil || len(obj) == 0 {
+		return nil
+	}
+	joined := make(map[string]string, len(obj))
+	for k, raw := range obj {
+		var reasons []string
+		// `null` and `[]` both decode into an empty slice with NO error, so the
+		// length check is load-bearing: without it a null value would render as
+		// a bare `field: ` line, trading an unreadable line for an empty one.
+		if err := json.Unmarshal(raw, &reasons); err != nil || len(reasons) == 0 {
+			return nil
+		}
+		joined[k] = strings.Join(reasons, "; ")
+	}
+	keys := make([]string, 0, len(joined))
+	for k := range joined {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, k := range keys {
+		lines = append(lines, k+": "+joined[k])
+	}
+	return lines
 }
 
 // maxConflictHolders bounds how many holders a resource_conflict prints, for the
