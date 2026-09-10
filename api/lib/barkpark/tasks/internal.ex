@@ -600,7 +600,14 @@ defmodule Barkpark.Tasks.Internal do
   # landed-open-report.sh) is untouched. A landing that knows only one half
   # still writes that half into its scalar list and no pair — a half-pair would
   # assert an association nobody observed.
-  @landed_keys ~w(prs files capability_slugs commits notes landings)
+  # `file_digests` is the BOUNDED spelling of `files` (task-726717ba693eb424).
+  # A landing that changed more paths than a ledger row should carry verbatim
+  # stores `%{"count" => n, "dirs" => [sorted top-level dirs]}` under this key
+  # INSTEAD of `files`, so the two shapes never mix inside one list and a reader
+  # can tell a verbatim list from a summary by WHICH KEY IS PRESENT rather than
+  # by inspecting the elements. Union-merged like every other key: two big
+  # landings on one row accumulate two digests.
+  @landed_keys ~w(prs files file_digests capability_slugs commits notes landings)
 
   def merge_landed(content, landed) when is_map(landed) and map_size(landed) > 0 do
     existing =
