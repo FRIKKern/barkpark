@@ -392,7 +392,14 @@ def row_vocabulary(doc, content):
         for c in crit:
             if isinstance(c, dict):
                 bits.append(str(c.get("criterion") or ""))
-                bits.append(str(c.get("evidence") or ""))
+                # DELIBERATELY NOT `evidence`. Evidence is written AFTER the
+                # fact by whoever stamped, and it routinely quotes the very PR
+                # and paths being judged here — reading it would let a landing
+                # vouch for itself. MEASURED on task-076719e53a42102d
+                # 2026-09-10: with evidence in the vocabulary api/Dockerfile
+                # "overlaps" that row (its stamped evidence names the file);
+                # with only title + description + criterion text, which is what
+                # the row asked for, it does not.
     vocab = set()
     for tok in WORD_SPLIT.split("\n".join(bits).lower()):
         tok = tok.strip("./-")
@@ -1451,18 +1458,33 @@ mkledger() { # $1 dir
   mkdir -p "$1/rows"; : > "$1/writes.log"; : > "$1/landed.log"; : > "$1/discharges.log"
 }
 mkrow() { # $1 ledgerdir, $2 id, $3 lifecycle, $4 assignee, $5 criterion-text ("" = none)
-  python3 - "$1/rows/$2.json" "$2" "$3" "$4" "$5" <<'PY'
+         # $6 description ("" = none), $7 merge_gate on that criterion ("true"/"false"/"" = unset)
+  python3 - "$1/rows/$2.json" "$2" "$3" "$4" "$5" "${6:-}" "${7:-}" <<'PY'
 import json, sys
-path, tid, life, assignee, crit = sys.argv[1:6]
+path, tid, life, assignee, crit, desc, gate = sys.argv[1:8]
 content = {"assignee": assignee, "lifecycle_status": life}
+if desc:
+    content["description"] = desc
 if crit:
+    entry = {"criterion": crit, "met": False, "evidence": ""}
+    if gate in ("true", "false"):
+        entry["merge_gate"] = (gate == "true")
     content["acceptance_criteria"] = [
         {"criterion": "an unrelated first criterion", "met": False, "evidence": ""},
-        {"criterion": crit, "met": False, "evidence": ""},
+        entry,
     ]
 json.dump({"ok": True, "doc": {"doc_id": tid, "rev": "rev0", "title": "fixture row " + tid,
                                "lifecycle_status": life, "content": content}}, open(path, "w"))
 PY
+}
+# The changed-path fixture. REST's own shape — a list of objects keyed
+# `filename` — so the hermetic arms exercise the same parser the wire does.
+mkpullfiles() { # $1 ledgerdir, $2 pr number, $3.. changed paths
+  mkdir -p "$1/pullfiles"
+  python3 - "$1/pullfiles/$2.json" "${@:3}" <<'PYF'
+import json, sys
+json.dump([{"filename": f, "status": "modified"} for f in sys.argv[2:]], open(sys.argv[1], "w"))
+PYF
 }
 # `grep -c` PRINTS a count AND exits 1 when the count is zero, so the house
 # `|| echo 0` idiom fires BOTH sides and yields the two-line string "0\n0" —
@@ -1825,6 +1847,109 @@ mkpull "$LG" "$SG" 94 "$(printf 'Discharges: task-sib-five c1\n\nTask: task-iii9
 OUT="$(run "$RG" "$LG" --sha "$SG")"
 has "$(cat "$LG/discharges.log")" 'task-sib-five' "a Discharges: line in the PR body reaches /discharges through the fallback"
 has "$OUT" "1 sibling citation(s) posted" "…and the tally counts it"
+
+
+# 15. THE CHANGED PATHS AND THE OVERLAP GATE (task-c3c9922e7d8e3815).
+#     THE DEFECT: PR #15403 changed exactly one file, api/Dockerfile, and
+#     carried `Task: task-076719e53a42102d` because it UNBLOCKED that row's
+#     build. The row is a Studio badge feature; the mark said "landed-on-main"
+#     and carried nothing a lead could check it against without a second trip
+#     to GitHub. Every arm below is hermetic — the file list is read from
+#     $FIXTURE/pullfiles/<pr>.json and never from the network.
+
+# 15a. THE LIST IS RECORDED, IN THE SENTENCE, IN THE ORDER REST GAVE IT.
+R15="$TMPROOT/r15"; L15="$TMPROOT/l15"; mkrepo "$R15"; mkledger "$L15"
+mkrow "$L15" task-fff1 in_progress builder-p "" "the reader lives in api/lib/barkpark_web/live/paper_live.ex"
+S15="$(mkcommit "$R15" "$(printf 'feat(x): paths (#701)\n\nTask: task-fff1\n')")"
+mkpullfiles "$L15" 701 "api/lib/barkpark_web/live/paper_live.ex" "api/test/live/paper_live_test.exs"
+OUT="$(run "$R15" "$L15" --sha "$S15")"
+has "$OUT" "PR #701 landed on main as ${S15} (files: api/lib/barkpark_web/live/paper_live.ex, api/test/live/paper_live_test.exs)" \
+  "MUT-FILES-READ: the landing sentence carries PR, sha AND the changed paths"
+has "$(cat "$L15/landed.log")" "(files: api/lib/barkpark_web/live/paper_live.ex, api/test/live/paper_live_test.exs)" \
+  "MUT-FILES-READ: the file list reaches content.landed through the /landed note"
+hasnt "$(cat "$L15/landed.log")" "implemented" "the landing note never says 'implemented' — a trailer names the row a PR is FOR"
+# Positive control: the row really moved. A sentence over a row nothing reached
+# would be a vacuous green.
+check "the files arm positive control: the row carries the class label" \
+  "$(python3 -c 'import json,sys; print("landed-on-main" in (json.load(open(sys.argv[1]))["doc"]["content"].get("labels") or []))' "$L15/rows/task-fff1.json")" "True"
+
+# 15b. THE #15403 SHAPE. A Dockerfile-only landing against a row whose text
+#      names nothing of the sort. The mark still lands — the PR really did name
+#      this row — but it is marked as a landing with NO overlap, and the
+#      merge-shaped criterion is NOT offered.
+R16="$TMPROOT/r16"; L16="$TMPROOT/l16"; mkrepo "$R16"; mkledger "$L16"
+mkrow "$L16" task-fff2 in_progress builder-p "The PR merged to main and CI is green." \
+  "Pre-gate badge in the paper reader: the grandfathered Papers say so quietly until their next edit."
+S16="$(mkcommit "$R16" "$(printf 'fix(docker): assert only assets that exist (#702)\n\nTask: task-fff2\n')")"
+mkpullfiles "$L16" 702 "api/Dockerfile"
+OUT="$(run "$R16" "$L16" --sha "$S16")"; RC=$?
+check "MUT-OVERLAP-SKIP: a non-overlapping landing still exits 0" "$RC" "0"
+has "$OUT" "NO PATH OVERLAP — task-fff2 vs PR #702" "MUT-OVERLAP-SKIP: the refusal names the row and the PR"
+has "$OUT" "That landing changed [api/Dockerfile]" "MUT-OVERLAP-SKIP: the refusal names the paths compared"
+has "$OUT" "REFUSED to offer criterion 1 on task-fff2" "MUT-OVERLAP-SKIP: the merge-shaped criterion is not offered"
+hasnt "$OUT" "still needs a holder" "MUT-OVERLAP-SKIP: and no holder is asked to seal it"
+has "$OUT" "marked task-fff2" "MUT-OVERLAP-SKIP: the landing is still recorded — the PR did name this row"
+has "$(cat "$L16/landed.log")" "[no overlap with the paths this row names]" \
+  "MUT-OVERLAP-SKIP: the recorded note carries the no-overlap marker the reader keys on"
+check "MUT-OVERLAP-SKIP: the /landed body still carries no criterion" \
+  "$(grep -c '"criterion"' "$L16/landed.log")" "0"
+
+# 15c. THE POSITIVE CONTROL, and it is the arm that makes 15b mean something.
+#      SAME row text, SAME merge_gate:true criterion, a landing that DOES touch
+#      what the row names: the criterion is offered exactly as it was before
+#      this section existed, and no refusal is printed.
+R17="$TMPROOT/r17"; L17="$TMPROOT/l17"; mkrepo "$R17"; mkledger "$L17"
+mkrow "$L17" task-fff3 in_progress builder-p "PR merged after the register lands." \
+  "Pre-gate badge in the paper reader: api/lib/barkpark_web/live/paper_live.ex renders it." true
+S17="$(mkcommit "$R17" "$(printf 'feat(papers): the badge (#703)\n\nTask: task-fff3\n')")"
+mkpullfiles "$L17" 703 "api/lib/barkpark_web/live/paper_live.ex"
+OUT="$(run "$R17" "$L17" --sha "$S17")"
+has "$OUT" "the landing overlaps this row at \"api/lib/barkpark_web/live/paper_live.ex\"" \
+  "MUT-OVERLAP-SKIP positive control: an overlapping landing is named as overlapping"
+has "$OUT" "criterion 1 deliberately NOT flipped" \
+  "MUT-OVERLAP-SKIP positive control: an overlapping landing still offers its merge_gate:true criterion"
+has "$OUT" "still needs a holder" "MUT-OVERLAP-SKIP positive control: …and still hands it to the claim holder"
+hasnt "$OUT" "NO PATH OVERLAP" "MUT-OVERLAP-SKIP positive control: no refusal is printed for an overlapping landing"
+hasnt "$(cat "$L17/landed.log")" "[no overlap" "MUT-OVERLAP-SKIP positive control: the note carries no no-overlap marker"
+
+# 15d. A LANDING BIGGER THAN THE LIST. Past 40 files the sentence becomes the
+#      COUNT plus the top-level dirs — a wall of 300 paths is not a record
+#      anybody reads, and the row asked for exactly this degradation.
+R18="$TMPROOT/r18"; L18="$TMPROOT/l18"; mkrepo "$R18"; mkledger "$L18"
+mkrow "$L18" task-fff4 in_progress builder-p "" "a wide refactor across api and scripts"
+S18="$(mkcommit "$R18" "$(printf 'refactor: wide (#704)\n\nTask: task-fff4\n')")"
+BIG=(); for i in $(seq 1 30); do BIG+=("api/lib/m${i}.ex"); done
+for i in $(seq 1 15); do BIG+=("scripts/s${i}.sh"); done
+mkpullfiles "$L18" 704 "${BIG[@]}"
+OUT="$(run "$R18" "$L18" --sha "$S18")"
+has "$OUT" "(files: 45 files across api, scripts)" "a 45-file landing records the count and its top-level dirs, not a wall"
+hasnt "$OUT" "api/lib/m17.ex" "…and does not paste the whole list into the sentence"
+
+# 15e. AN UNREAD FILE LIST IS UNREAD, AND IT WITHHOLDS NOTHING. Unknown is not
+#      "no overlap": a read that did not happen proves nothing about what the
+#      landing touched, so the criterion offer stays exactly as it was. The
+#      sentence says UNREAD in words — never an empty list, which would read as
+#      "this PR changed nothing".
+R19="$TMPROOT/r19"; L19="$TMPROOT/l19"; mkrepo "$R19"; mkledger "$L19"
+mkrow "$L19" task-fff5 in_progress builder-p "The PR merged to main and CI is green." "nothing in common with anything"
+S19="$(mkcommit "$R19" "$(printf 'fix(x): unread (#705)\n\nTask: task-fff5\n')")"
+OUT="$(run "$R19" "$L19" --sha "$S19" 2>&1)"
+has "$OUT" "CANNOT READ the changed paths for PR #705" "MUT-FILES-READ: an unreadable file list is a distinct CANNOT READ naming the PR"
+has "$OUT" "(files: UNREAD" "MUT-FILES-READ: …and the sentence says UNREAD in words, never an empty list"
+hasnt "$OUT" "NO PATH OVERLAP" "MUT-FILES-READ: an UNREAD list is not a proven non-overlap"
+has "$OUT" "still needs a holder" "MUT-FILES-READ: …so it withholds nothing the old behaviour offered"
+
+# 15f. A READ THAT CAME BACK EMPTY IS A FAILED READ. A merged PR changed at
+#      least one file, so a zero-length list can only mean the read did not
+#      happen — and it must never render as "(files: )".
+R20="$TMPROOT/r20"; L20="$TMPROOT/l20"; mkrepo "$R20"; mkledger "$L20"
+mkrow "$L20" task-fff6 in_progress builder-p "" ""
+S20="$(mkcommit "$R20" "$(printf 'fix(x): empty list (#706)\n\nTask: task-fff6\n')")"
+mkdir -p "$L20/pullfiles"; printf '[]\n' > "$L20/pullfiles/706.json"
+OUT="$(run "$R20" "$L20" --sha "$S20" 2>&1)"
+has "$OUT" "held zero files, which a merged PR cannot" "an empty REST file list is a CANNOT READ, not a zero"
+has "$OUT" "(files: UNREAD" "…and an empty list never renders as an empty file list"
+hasnt "$OUT" "(files: )" "…the sentence is never left with an empty parenthetical"
 
 echo "landed-mark --selftest: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ] || exit 1
