@@ -1635,6 +1635,58 @@ func TestErr5xxThreeStatesStayThree(t *testing.T) {
 	}
 }
 
+// TestErr5xxMarkerIsARouterRateNeverBoxHealth (charter D132): err_5xx_per_s
+// counts [:phoenix, :endpoint, :stop] events carrying a 5xx status, so the ONLY
+// thing it measures is what the HTTP router answered. Two shapes never reach
+// it — a 5xx the BEAM never served, and a LiveView killed by a pool timeout,
+// which emits no stop event — so any surface that words this number as a
+// verdict on the BOX is lying in the reassuring direction. This is the one
+// rendered string in the tree that carries the number to a human eye
+// (`grep -rn Err5xxPerS internal cmd` reaches struct fields, the agent probe and
+// the `-o json` projection; this marker is the only prose), so the wording law
+// is enforced here.
+func TestErr5xxMarkerIsARouterRateNeverBoxHealth(t *testing.T) {
+	cores := 4.0
+	rate := 0.22
+	mark := err5xxMarker(cloudclient.Barkpark{
+		Pressure: &cloudclient.Pressure{CPUCores: &cores, Err5xxPerS: &rate},
+	})
+
+	// It names the SUBJECT of the rate, and the subject is the router.
+	if !strings.Contains(mark, "HTTP router") {
+		t.Errorf("marker = %q — it must name the HTTP router as the thing answering", mark)
+	}
+
+	// It never renders a verdict on the box, in either direction.
+	for _, banned := range []string{"the box is", "healthy", "box health", "unhealthy", "box is fine"} {
+		if strings.Contains(strings.ToLower(mark), banned) {
+			t.Errorf("marker = %q — %q words a router rate as box health", mark, banned)
+		}
+	}
+
+	// It carries BOTH blind spots, not just the Caddy one.
+	if !strings.Contains(mark, "the BEAM never served") {
+		t.Errorf("marker = %q — it drops the 5xx-the-BEAM-never-served blind spot", mark)
+	}
+	if !strings.Contains(mark, "LiveView") {
+		t.Errorf("marker = %q — it drops the killed-LiveView blind spot (no stop event, no sample)", mark)
+	}
+
+	// THE DANGEROUS HALF: absence must stay silent. A measured zero and an
+	// unmeasured window both render NO sentence — a meter blind to the outage
+	// case may never print a clean bill of health.
+	zero := 0.0
+	for name, bp := range map[string]cloudclient.Barkpark{
+		"a measured zero":      {Pressure: &cloudclient.Pressure{CPUCores: &cores, Err5xxPerS: &zero}},
+		"an unmeasured window": {Pressure: &cloudclient.Pressure{CPUCores: &cores}},
+		"no pressure at all":   {},
+	} {
+		if got := err5xxMarker(bp); got != "" {
+			t.Errorf("%s rendered %q — silence is the only honest sentence here", name, got)
+		}
+	}
+}
+
 // TestErr5xxAnsweringReachesTheDetailColumn: the D75 sentence reaches the
 // table — a box the ladder calls ok, answering 0.22 5xx/s, says so on its row.
 func TestErr5xxAnsweringReachesTheDetailColumn(t *testing.T) {
