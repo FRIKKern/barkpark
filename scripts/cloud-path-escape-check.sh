@@ -102,12 +102,20 @@
 #   cloud-path-escape-check.sh                 # the ratchet (CI + the gate)
 #   cloud-path-escape-check.sh --selftest      # run the harness
 #   cloud-path-escape-check.sh --list-escapes  # print the resolved census
-#   cloud-path-escape-check.sh --print-set cloud
+#   cloud-path-escape-check.sh --print-set cloud|census
 #   cloud-path-escape-check.sh --match cloud   # changed paths on stdin
 #                                              # -> prints true|false
+#   cloud-path-escape-check.sh --match census  # the cheap tier: does this diff
+#                                              # touch a tree the reader census
+#                                              # walks? (see THE CENSUS TIER)
+#   cloud-path-escape-check.sh --census-source # the file that tier derives from
 #
 # `--print-set` / `--match` are consumed by the cloud.yml dispatcher, so the
 # workflow and this ratchet can never disagree about what the path set is.
+#
+# TWO SETS, TWO PRICES. `cloud` gates compile+test; `census` gates one small job
+# running one test file. They are answered independently and a diff can select
+# either, both, or neither.
 
 set -euo pipefail
 
@@ -368,6 +376,80 @@ templates/**
 templates/astro-search-starter/src/lib/bp.ts
 templates/search-starter/lib/markers.corpus-status.test.ts'
 
+# ---------------------------------------------------------------------------
+# THE CENSUS TIER — a SECOND, NARROWER verdict
+# (dr-w26-followup-reader-corpus-dispatch)
+# ---------------------------------------------------------------------------
+# `--match cloud` answers ONE question: does this diff need the whole
+# Postgres-backed Cloud compile+test suite? The RESIDUE paragraph above records
+# why api/**, web/** and js/** must NOT be folded into that answer — measured on
+# this tree, declaring them moves suite dispatch from 1641 to 3874 of 5008
+# commits over 60 days (33% -> 77%), with api/** alone accounting for 1438.
+#
+# But the reader-less-instrument census does not need the SUITE. It needs
+# ITSELF. `--match census` is that second, cheaper question: does this diff
+# touch a tree `ReaderScan` walks, and therefore possibly ADD or DELETE a reader
+# for a registered instrument? cloud.yml gates a small `census` job on it — one
+# `mix test` of one file — and never compile+test. So the ROT direction (a
+# reader arriving in api/, web/ or js/) re-runs the census that scores it, on
+# the commit that caused it, at a fraction of the price that was refused.
+#
+# THE ROOTS ARE DERIVED, NEVER TRANSCRIBED. They are read at run time out of the
+# census's own `@roots ~w(...)` declaration in $CENSUS_TEST, so the two cannot
+# drift: add a tree to that corpus and this tier dispatches on it in the SAME
+# commit, with nothing for anyone to remember. A hand-copied list here would be
+# a second declaration of one fact — i.e. exactly the drift this row was filed
+# about, reappearing one file over.
+#
+# NON-VACUITY. A derivation that can silently return NOTHING is worse than a
+# transcription: an empty set answers `false` for every diff, the census job
+# never runs again, and the gate stays green about it. So an unreadable source,
+# a missing `@roots` line, or an empty root list is a HARD ERROR (exit 2) —
+# never an empty set, never a bare `false`. cloud.yml's dispatcher reads any
+# non-true/false answer as uninterpretable and fails the run.
+#
+# What is deliberately NOT re-asked here: whether each derived root EXISTS. That
+# is the census's own arm — `files/1` raises "declared corpus root … does not
+# exist" rather than scanning zero files — and asking it here would red the tier
+# inside every fixture tree that legitimately has no api/.
+CENSUS_TEST='cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs'
+
+# The declared corpus roots, as `dir/**` globs in this file's tiny glob grammar.
+census_globs() {
+  local src="$DECL_ROOT/$CENSUS_TEST" decl root out=""
+
+  if [ ! -f "$src" ]; then
+    echo "cloud-path-escape-check: the census tier's declaration source '$CENSUS_TEST' is not readable at $src." >&2
+    echo "  Refusing to derive an EMPTY corpus: an empty set answers 'false' for every diff, so the census job would silently never run again." >&2
+    exit 2
+  fi
+
+  # `@roots ~w(internal cloud/priv/static web js api)` -> the words inside.
+  # awk over the FILE, not `sed … | head -1`: a pipeline whose reader closes
+  # early hands the writer SIGPIPE, and `set -o pipefail` then promotes 141 over
+  # the match that did occur (the house D37 rule). awk exits on its own.
+  decl="$(awk 'match($0, /@roots[[:space:]]*~w\(/) {
+                 s = substr($0, RSTART + RLENGTH)
+                 i = index(s, ")")
+                 if (i > 0) { print substr(s, 1, i - 1); exit }
+               }' "$src")"
+
+  for root in $decl; do
+    [ -n "$out" ] && out="$out
+"
+    out="$out$root/**"
+  done
+
+  if [ -z "$out" ]; then
+    echo "cloud-path-escape-check: could not derive ANY corpus root from '$CENSUS_TEST'." >&2
+    echo "  Looked for a single-line \`@roots ~w(...)\` declaration and found none, or found an empty one." >&2
+    echo "  This is a hard error, not an empty set: an empty set answers 'false' for every diff and the census job stops running without anything going red." >&2
+    exit 2
+  fi
+
+  printf '%s\n' "$out"
+}
+
 # EXEMPT — census rows that resolve to a real repo-root file but are NOT a
 # repo-root DEPENDENCY. Two shapes qualify, and nothing else does:
 #   1. the read is unreachable from the default `mix test` lane (an excluded tag);
@@ -433,6 +515,16 @@ CLOUD_ESCAPE_MIN=20
 # repo gives the identical verdict.
 REPO_ROOT="${CLOUD_PATH_ESCAPE_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
 
+# The DECLARATION's own repository — the parent of THIS SCRIPT, never
+# $REPO_ROOT, which the harness retargets. The distinction is spelled out at THE
+# DECLARATION-LIVENESS ARM below, which was its only consumer and where it used
+# to be assigned. It moved up here because the census tier's derivation (see THE
+# CENSUS TIER) reads a declaration file off it from inside `--print-set` /
+# `--match`, and those modes `exit 0` long before --check's body is reached: an
+# assignment down there would leave DECL_ROOT unbound under `set -u` and turn
+# every dispatcher call into a hard error.
+DECL_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
@@ -475,9 +567,9 @@ glob_to_ere() {
 # scripts/elixir-path-escape-check.sh, where the harness caught exactly that.
 assert_set_name() {
   case "$1" in
-    cloud) ;;
+    cloud | census) ;;
     *)
-      echo "cloud-path-escape-check: unknown path set '$1' (want cloud)" >&2
+      echo "cloud-path-escape-check: unknown path set '$1' (want cloud or census)" >&2
       exit 2
       ;;
   esac
@@ -487,6 +579,7 @@ set_globs() {
   assert_set_name "$1"
   case "$1" in
     cloud) printf '%s\n' "$CLOUD_PATHS" ;;
+    census) census_globs ;;
   esac
 }
 
@@ -627,8 +720,17 @@ is_exempt() {
 mode="${1:---check}"
 
 case "$mode" in
+  --census-source)
+    # The ONE file the census tier derives its roots from. cloud.yml's `census`
+    # job runs this exact path, and the harness asserts the two agree — a job
+    # that dispatches on one census's corpus while running another is the same
+    # drift in a new costume.
+    printf '%s\n' "$CENSUS_TEST"
+    exit 0
+    ;;
+
   --print-set)
-    assert_set_name "${2:?--print-set needs cloud}"
+    assert_set_name "${2:?--print-set needs a set name (cloud|census)}"
     set_globs "$2"
     exit 0
     ;;
@@ -637,7 +739,7 @@ case "$mode" in
     # changed paths on stdin -> `true` if ANY of them is in the named set.
     # This is what cloud.yml dispatches on, so the workflow and the ratchet
     # can never disagree about what the path set contains.
-    want="${2:?--match needs cloud}"
+    want="${2:?--match needs a set name (cloud|census)}"
     assert_set_name "$want"
     ere="$(set_ere "$want")"
     if grep -Eq -- "$ere"; then
@@ -664,7 +766,7 @@ case "$mode" in
 
   *)
     echo "cloud-path-escape-check: unknown argument '$mode'" >&2
-    echo "usage: $0 [--check|--selftest|--list-escapes|--print-set SET|--match SET]" >&2
+    echo "usage: $0 [--check|--selftest|--list-escapes|--census-source|--print-set SET|--match SET]" >&2
     exit 2
     ;;
 esac
@@ -712,7 +814,8 @@ esac
 # synthetic fixture would be checking it against something it never described.
 # The harness proves the arm the honest way instead: it runs a COPY of this
 # script from inside a fixture repo, so the copy's own parent IS the fixture.
-DECL_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# (DECL_ROOT itself is assigned next to REPO_ROOT at the top — see the note
+# there for why it could not stay here.)
 dead_declarations=0
 while IFS= read -r g; do
   [ -n "$g" ] || continue
