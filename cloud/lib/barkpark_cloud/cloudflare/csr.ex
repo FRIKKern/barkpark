@@ -33,9 +33,32 @@ defmodule BarkparkCloud.Cloudflare.CSR do
   set — the algorithm `parameters` and each attribute's `values`. OTP's
   generated `PKCS-10` encoder accepts EXACTLY `{:asn1_OPENTYPE, binary}` for
   them and `case_clause`-crashes on a bare `<<5, 0>>` or an atom like `:NULL`.
-  The subject attribute value is the opposite shape: it must be the TYPED tuple
-  `{:utf8String, name}`, which the modern `PKIX1Explicit-2009` encoder DER-encodes
-  itself (handing it a pre-encoded binary crashes `enc_X520CommonName`).
+  That shape is stable across OTP versions.
+
+  ## The subject attribute value FLIPPED shape between OTP 27 and OTP 28
+
+  The `AttributeTypeAndValue` value inside the subject `rdnSequence` did NOT
+  stay stable, and it is the one field this module cannot spell as a literal:
+
+    * **OTP 27** — the value is an ASN.1 OPEN TYPE. `enc_AttributeTypeAndValue`
+      hands it straight to `encode_open_type/2`, which calls `byte_size/1` on
+      it, so it must be ALREADY-DER-ENCODED bytes. A `{:utf8String, name}`
+      tuple raises `{:asn1, {:badarg, [{:erlang, :byte_size, [utf8String: …]}`.
+    * **OTP 28** — the modern `PKIX1Explicit-2009` encoder took over and wants
+      the TYPED tuple `{:utf8String, name}`, DER-encoding it itself. Handing it
+      the pre-encoded binary now crashes instead.
+
+  Both shapes produce BYTE-IDENTICAL output on the OTP that accepts them, so
+  there is nothing to choose between them on the wire — only on which encoder
+  is loaded. `request_info_der/2` therefore PROBES rather than branching on
+  `:erlang.system_info(:otp_release)`: it tries the typed tuple, and falls back
+  to `:public_key.der_encode(:X520CommonName, …)` when the encoder refuses it.
+  A version check would have to be re-guessed at every OTP release; a probe
+  asks the encoder that is actually loaded.
+
+  The decode side flipped with it — OTP 27 reads the value back as raw DER,
+  OTP 28 as the typed tuple — so `common_name/1` normalises BOTH, or `verify/1`
+  would report the CN as `<<12, 13, "a.example.com">>` on OTP 27.
 
   ## The self-check
 
@@ -195,26 +218,8 @@ defmodule BarkparkCloud.Cloudflare.CSR do
 
   ## Internals ───────────────────────────────────────────────────────────────
 
-  defp build_csr([common_name | _] = hostnames, private_key) do
-    info =
-      request_info(
-        version: :v1,
-        subject:
-          {:rdnSequence,
-           [[{:AttributeTypeAndValue, @oid_common_name, {:utf8String, common_name}}]]},
-        subjectPKInfo:
-          subject_pk_info(
-            algorithm:
-              pk_algorithm(
-                algorithm: @oid_rsa_encryption,
-                parameters: {:asn1_OPENTYPE, @der_null}
-              ),
-            subjectPublicKey: :public_key.der_encode(:RSAPublicKey, public_key(private_key))
-          ),
-        attributes: [san_attribute(hostnames)]
-      )
-
-    info_der = :public_key.der_encode(:CertificationRequestInfo, info)
+  defp build_csr(hostnames, private_key) do
+    {info, info_der} = request_info_der(hostnames, private_key)
 
     request =
       certification_request(
@@ -229,6 +234,44 @@ defmodule BarkparkCloud.Cloudflare.CSR do
 
     der = :public_key.der_encode(:CertificationRequest, request)
     :public_key.pem_encode([{:CertificationRequest, der, :not_encrypted}])
+  end
+
+  # Builds the CertificationRequestInfo AND its DER together, because which
+  # subject-value shape the loaded OTP accepts is only discoverable by encoding
+  # (see the moduledoc). Returns the record in the shape that actually encoded,
+  # so the outer CertificationRequest re-encodes the SAME bytes the signature
+  # was taken over.
+  defp request_info_der([common_name | _] = hostnames, private_key) do
+    build = fn subject_value ->
+      request_info(
+        version: :v1,
+        subject: {:rdnSequence, [[{:AttributeTypeAndValue, @oid_common_name, subject_value}]]},
+        subjectPKInfo:
+          subject_pk_info(
+            algorithm:
+              pk_algorithm(
+                algorithm: @oid_rsa_encryption,
+                parameters: {:asn1_OPENTYPE, @der_null}
+              ),
+            subjectPublicKey: :public_key.der_encode(:RSAPublicKey, public_key(private_key))
+          ),
+        attributes: [san_attribute(hostnames)]
+      )
+    end
+
+    typed = build.({:utf8String, common_name})
+
+    try do
+      {typed, :public_key.der_encode(:CertificationRequestInfo, typed)}
+    rescue
+      # OTP 27: the value is an open type, so it wants the DER, not the tuple.
+      # A second failure is a REAL fault and is left to propagate.
+      _ ->
+        pre_encoded =
+          build.(:public_key.der_encode(:X520CommonName, {:utf8String, common_name}))
+
+        {pre_encoded, :public_key.der_encode(:CertificationRequestInfo, pre_encoded)}
+    end
   end
 
   # The extensionRequest attribute carrying a subjectAltName over every
@@ -298,7 +341,18 @@ defmodule BarkparkCloud.Cloudflare.CSR do
 
   defp directory_string({_type, value}) when is_binary(value), do: value
   defp directory_string({_type, value}) when is_list(value), do: List.to_string(value)
-  defp directory_string(value) when is_binary(value), do: value
+
+  # OTP 27 hands the attribute value back as the RAW DER of the DirectoryString
+  # (it is an open type there). Returning it verbatim would make verify/1 report
+  # a CN of <<12, 13, "a.example.com">>, so decode one level and re-normalise.
+  defp directory_string(der) when is_binary(der) do
+    :X520CommonName
+    |> :public_key.der_decode(der)
+    |> directory_string()
+  rescue
+    _ -> nil
+  end
+
   defp directory_string(_), do: nil
 
   defp san_hostnames(info) do

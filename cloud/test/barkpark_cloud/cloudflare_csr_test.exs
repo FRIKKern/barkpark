@@ -48,6 +48,26 @@ defmodule BarkparkCloud.Cloudflare.CSRTest do
       assert hosts == ["one.example.com", "two.example.com", "three.example.com"]
     end
 
+    test "the CN lands as a UTF8String TLV in the RAW DER on whichever OTP built it" do
+      cn = "a.example.com"
+      assert {:ok, %{csr: csr}} = CSR.generate([cn], key_size: @key_size)
+      [{:CertificationRequest, der, :not_encrypted}] = :public_key.pem_decode(csr)
+
+      # 0x0C is the UTF8String tag, then the length, then the bytes. This is the
+      # ONE assertion here that does not route through OTP's decoder, which is
+      # exactly why it is worth writing: the subject AttributeTypeAndValue value
+      # is an open type on OTP 27 (wants pre-encoded DER) and a typed tuple on
+      # OTP 28 (wants {:utf8String, cn}), and request_info_der/2 probes for the
+      # shape the loaded encoder accepts. If the two shapes ever stop producing
+      # byte-identical output, or the probe falls through to a CN-less request,
+      # this reds while every decoder-mediated assertion below stays green.
+      assert :binary.match(der, <<12, byte_size(cn)>> <> cn) != :nomatch
+
+      # …and the decode side normalises it back to a plain hostname rather than
+      # handing the caller the raw DER bytes, which is what OTP 27 returns.
+      assert {:ok, %{common_name: ^cn}} = CSR.verify(csr)
+    end
+
     test "each generate/2 call mints a FRESH key pair (no reuse across sites)" do
       {:ok, a} = CSR.generate(["a.example.com"], key_size: @key_size)
       {:ok, b} = CSR.generate(["a.example.com"], key_size: @key_size)
