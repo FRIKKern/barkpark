@@ -30,8 +30,20 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   Buttons emit `phx-click="bulk-publish"` / `"bulk-unpublish"` /
   `"bulk-clear"` against the parent LV. The "Selected" count comes from
   `MapSet.size(@selected_doc_ids)`.
+
+  `bulk-publish` / `bulk-unpublish` render ONLY when `@admin?` — both are
+  `:admin`-tier in `BarkparkWeb.Studio.Caps.classify/1`, so the server halts
+  them for a write-tier member and the bar must not advertise them.
   """
   attr :selected_doc_ids, :any, required: true
+  # THE ADMIN-TIER AFFORDANCE ANSWER, THREADED IN — NEVER RE-DERIVED HERE
+  # (task-ea341f86571c5981). `bulk-publish` and `bulk-unpublish` are
+  # :admin-tier in `BarkparkWeb.Studio.Caps.classify/1`, so a write-tier member
+  # is server-HALTED on both; the bar used to offer them anyway. The value comes
+  # from `Caps.admin_affordance?/1` at the StudioLive call site. `bulk-clear` is
+  # :none-tier and stays for everyone, so a non-admin can still drop a
+  # selection. Default FALSE fails closed.
+  attr :admin?, :boolean, default: false
 
   def bulk_action_bar(assigns) do
     count = MapSet.size(assigns.selected_doc_ids)
@@ -45,12 +57,14 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
         </span>
         <div class="bp-bulk-action-buttons">
           <button
+            :if={@admin?}
             type="button"
             class="btn btn-primary btn-sm"
             phx-click="bulk-publish"
             data-test-id="bulk-publish"
           >Publish selected</button>
           <button
+            :if={@admin?}
             type="button"
             class="btn btn-sm"
             phx-click="bulk-unpublish"
