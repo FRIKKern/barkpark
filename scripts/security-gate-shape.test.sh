@@ -95,11 +95,30 @@ def emit(k, v):
     out.write(f"{k}={v}\n")
 
 
-# D18: a workflow-level paths filter emits NO check run — the required name then
-# sits "is expected." forever and the PR is BLOCKED with nothing to fix.
+# D18: a paths filter on the PULL_REQUEST arm emits NO check run — the required
+# name then sits "is expected." forever and the PR is BLOCKED with nothing to
+# fix. NARROWED TO THAT ARM 2026-09-10 (task-7ef9d81ed33d2b9c), from `any arm`.
+# The reason D18 gives is about a REQUIRED CONTEXT ON A PULL REQUEST, and branch
+# protection never evaluates a push-to-main run: it gates merges INTO main, and
+# the push arm fires after the merge. Reading every arm therefore refused a key
+# on `push:` for a hazard that key cannot cause — and it is the same predicate
+# scripts/shim-trigger-filter-check.sh has always used
+# (`on.pull_request.paths`/`paths-ignore`, nothing else). The mutant below
+# plants its filter on `pull_request`, so this assertion still fires.
 emit("workflow_paths", any(
-    isinstance(v, dict) and ("paths" in v or "paths-ignore" in v)
-    for v in (on or {}).values()))
+    isinstance((on or {}).get(arm), dict)
+    and ("paths" in on[arm] or "paths-ignore" in on[arm])
+    for arm in ("pull_request", "pull_request_target")))
+
+# THE VENUE PIN, the positive half (task-7ef9d81ed33d2b9c). The push:main arm
+# IS paths-filtered on purpose — measured 2026-09-10T11:30Z, 11 of the day's 122
+# stacked push:main runs were this workflow, every one for a superseded sha, and
+# this workflow is per-sha grouped so it never collapses. Asserted TRUE below so
+# deleting that filter is a RED here and not a silent return to a full run per
+# merge; scripts/main-verdict-presence.sh re-derives the same key into the
+# ALWAYS/CONDITIONAL tier of .github/main-push-workflows.txt.
+push = (on or {}).get("push")
+emit("push_paths", isinstance(push, dict) and "paths" in push)
 
 agg = jobs.get(AGG, {})
 needs = list(agg.get("needs", []))
@@ -221,6 +240,7 @@ assert_fact_min() {
 
 echo "case 1: security.yml carries the shim shape"
 assert_fact workflow_paths False
+assert_fact push_paths True
 assert_fact agg_present True
 assert_fact agg_matrix False
 assert_fact agg_if "always()"
@@ -277,7 +297,7 @@ wf = yaml.safe_load(open(src))
 jobs = wf["jobs"]
 agg = jobs["security-gate"]
 step = next(s for s in agg["steps"] if "run" in s)
-assert mode in ("clean", "launder", "unwired", "orphan", "paths", "matrix",
+assert mode in ("clean", "launder", "unwired", "orphan", "paths", "pushpaths", "matrix",
                 "reporter-muted", "reporter-alwaysruns", "reporter-unwired"), mode
 
 if mode == "launder":
@@ -296,6 +316,12 @@ elif mode == "orphan":
 elif mode == "paths":
     on = wf.pop(True, None) or wf.pop("on", None)
     on["pull_request"] = {"paths": ["api/**"]}
+    wf["on"] = on
+elif mode == "pushpaths":
+    # THE VENUE PIN's negative half: strip the push arm's paths filter and the
+    # workflow is back to a full run on every merge to main.
+    on = wf.pop(True, None) or wf.pop("on", None)
+    on["push"].pop("paths", None)
     wf["on"] = on
 elif mode == "matrix":
     agg["strategy"] = {"matrix": {"otp": ["27.0"]}}
@@ -335,7 +361,9 @@ mutant clean    blocking_not_in_needs ""
 mutant launder  coe_in_needs          "sobelow"         # the laundering regression is DETECTED
 mutant unwired  blocking_not_in_needs "mix-audit"       # an unjudged blocking job is DETECTED
 mutant orphan   needs_without_decide  "a11y-ceiling"    # reaching needs is not enough (D36)
-mutant paths    workflow_paths        "True"            # a re-added on:paths is DETECTED
+mutant paths    workflow_paths        "True"            # a re-added pull_request paths is DETECTED
+mutant clean    push_paths            "True"            # the venue pin is TRUE on the shipped file
+mutant pushpaths push_paths           "False"           # deleting the push paths filter is DETECTED
 mutant matrix   agg_matrix            "True"            # a matrixed aggregator is DETECTED
 # The post-verdict exemption is a PREDICATE, and each of its three clauses is
 # proven able to withdraw it.
