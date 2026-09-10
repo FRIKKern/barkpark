@@ -1270,11 +1270,14 @@ defmodule BarkparkWeb.BulldocsLiveTest do
 
         render_hook(view, event, params)
 
-        assert anon_flash(view)["error"] == Edit.anon_denial(),
-               "#{event} was not refused"
-
+        # The MUTATION assertion first: with the guard removed this is the
+        # line that reds, and it reds on the thing the ruling forbids (a row),
+        # not merely on missing refusal copy.
         assert Events.list_for_paper(@anon_slug) == before,
                "#{event} wrote a paper_events row as an anonymous visitor"
+
+        assert anon_flash(view)["error"] == Edit.anon_denial(),
+               "#{event} was not refused"
 
         assert Process.alive?(view.pid), "#{event} killed the reader socket"
       end
