@@ -468,6 +468,16 @@ HEALTH_SECONDS=""    # curl %{time_total} of the attempt that answered
 clean_200() { # <http_code> <curl_rc> -> 0 when the body was read to the end
   [ "$1" = 200 ] && [ "$2" = 0 ]
 }
+# THE DEEP-PATH ASSERTION, in ONE predicate for the same reason clean_200 is one:
+# one place to get it wrong, one place to mutate. A linked route is certified
+# only when there was no link to take (n/a — a genuinely single-page render) or
+# the route this page LINKS TO answered 200. Reduce the second half to `true` and
+# every deep-path row in --self-test goes red while the engine keeps deploying —
+# which is exactly the pre-fix engine, and exactly what the self-test's mutation
+# block reproduces.
+deep_ok() { # <deep-path> <http_code> -> 0 when the linked route is certified
+  [ -z "$1" ] || [ "$2" = 200 ]
+}
 health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
   HEALTH_DETAIL=""
   local slot="$1" bid="$2" port inst path
@@ -585,6 +595,96 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
   # node(s)…"). Read it BEFORE the body is deleted — it is what turns the empty
   # bp-doc-id refusal below from a symptom into a diagnosis.
   got_corpus="$(meta_value "$body" bp-corpus-status)"
+  # DEEP PATH — pick ONE non-root route out of the SERVED html's own links, while
+  # the body is still on disk and the slot is still booted. The fetch itself
+  # happens below, AFTER the marker assertions, so a lying build is still refused
+  # in the marker branch's words rather than in this one's.
+  #
+  # WHY THE TARGET COMES FROM THE HTML AND NEVER FROM THE DISK. This gate curls
+  # exactly one path ("/", the basePath sub-path, or BARKPARK_SITE_HEALTH_PATH)
+  # and asserts three markers on it, so an SSR release whose /d/<slug>/ route
+  # throws at render time — a corpus row the finder page dereferences and the
+  # home page does not, a dynamic segment whose params went empty, a route
+  # handler that 500s — served that 500 to every visitor and STILL switched live.
+  # The static engine closed the same hole (site-deploy.sh's deep-path probe);
+  # the SSR engine kept it. This is that fix, ported.
+  # A disk-derived target could not close it anyway: an SSR route need not
+  # correspond to any file, and enumerating .next/ would ask the app for paths no
+  # visitor's browser ever requests. The page's own href IS the request a browser
+  # will make.
+  #
+  # The extractor hands back a PERCENT-ENCODED, pure-ASCII path, so nothing this
+  # shell or curl touches depends on filename encoding and nothing word-splits.
+  # Root-relative hrefs carry the site base (`/sites/<slug>/`, the bp-site-base
+  # marker the template bakes): strip it — or, failing that, the probe root this
+  # gate already speaks to — and SKIP an href that matches neither rather than
+  # manufacture a refusal out of an off-site link.
+  #
+  # HEALTH_PY is the interpreter the extractor runs on, kept nameable so the
+  # self-test can drive the COULD-NOT-CHECK arm. A probe that could not run has
+  # made no claim, and a gate that made no claim has not gated: refuse, never
+  # "n/a".
+  local HEALTH_PY="${BARKPARK_HEALTH_PY:-python3}"
+  local deep="" deep_code=000 deep_probe_rc=0 site_base="" deep_slow=0 deep_secs=""
+  site_base="$(meta_value "$body" bp-site-base)"
+  if ! command -v "$HEALTH_PY" >/dev/null 2>&1; then
+    deep_probe_rc=127
+  else
+    deep="$("$HEALTH_PY" - "$body" "$site_base" "$path" <<'DEEPPY' 2>/dev/null
+import re, sys, urllib.parse
+html = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+
+
+def norm(b):
+    b = (b or "").strip()
+    if not b:
+        return ""
+    if not b.startswith("/"):
+        b = "/" + b
+    if not b.endswith("/"):
+        b += "/"
+    return b
+
+
+base = norm(sys.argv[2])          # bp-site-base: the prefix the TEMPLATE baked
+root = norm(sys.argv[3]) or "/"   # the path this gate already probes on the raw port
+ATTR = r"(?:href|src)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'>]+))"
+SCHEME = r"^[A-Za-z][A-Za-z0-9+.\-]*:"
+cands = []
+for m in re.finditer(ATTR, html, re.I):
+    raw = (m.group(1) or m.group(2) or m.group(3) or "").strip()
+    if not raw or raw.startswith("//"):
+        continue
+    if re.match(SCHEME, raw):
+        continue
+    p = urllib.parse.unquote(urllib.parse.urlsplit(raw).path)
+    if p.startswith("./"):
+        p = p[2:]
+    if p.startswith("/"):
+        # Strip the prefix this href is expressed in. When the template baked a
+        # site base, that base IS the vocabulary of its own links: an href that
+        # does not start with it points outside this site, and is SKIPPED, never
+        # manufactured into a refusal. With no base marker at all the probe root
+        # is the only prefix there is -- and a root of "/" then matches every
+        # root-relative href, which is correct only BECAUSE there is no base to
+        # contradict it.
+        pre = base or root
+        if not p.startswith(pre):
+            continue
+        p = p[len(pre):]
+    if not p or p in ("index.html", "/"):
+        continue
+    if ".." in p.split("/"):
+        continue
+    cands.append(p)
+if cands:
+    # Non-ASCII first (the encoding cases are the ones that break), then a
+    # page-shaped target, then the shortest — deterministic across runs.
+    cands.sort(key=lambda p: (p.isascii(), not (p.endswith("/") or p.endswith(".html")), len(p), p))
+    print(urllib.parse.quote(cands[0], safe="/"))
+DEEPPY
+)" || deep_probe_rc=$?
+  fi
   rm -f "$body"
   if [ "$got_build" != "$bid" ]; then
     stop_slot "$slot"
@@ -615,6 +715,52 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
     fi
     log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
   fi
+  # ---- THE DEEP-PATH VERDICT --------------------------------------------
+  # Fetched HERE, after the markers, while the slot is still booted: the target
+  # was chosen from the body above. Same two-phase budget as the root probe (D27)
+  # — a deep SSR route renders per request too, so ONE fast attempt at the
+  # ${HEALTH_FAST_MAX}s ceiling and, only if that did not land a clean 200, ONE
+  # patient attempt at the patient ceiling. Slow is a fact about the route, not a
+  # verdict about the release: a deep path that answers 200 late still PASSES and
+  # says SLOW, exactly as the root probe does.
+  if [ "$deep_probe_rc" = 0 ] && [ -n "$deep" ]; then
+    local d_out d_rc=0
+    d_out="$(curl -sL --max-redirs 2 -o /dev/null -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time "$HEALTH_FAST_MAX" "http://127.0.0.1:$port$path$deep" 2>/dev/null)"; d_rc=$?
+    deep_code="${d_out%% *}"; deep_secs="${d_out##* }"; [ -n "$deep_code" ] || deep_code=000
+    if ! clean_200 "$deep_code" "$d_rc"; then
+      log "HEALTH: deep path $path$deep did not clean-200 inside the ${HEALTH_FAST_MAX}s ceiling (got $deep_code, curl exit $d_rc) — one patient probe at ${HEALTH_PATIENT_MAX}s to tell a SLOW route from a BROKEN one"
+      d_out="$(curl -sL --max-redirs 2 -o /dev/null -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time "$HEALTH_PATIENT_MAX" "http://127.0.0.1:$port$path$deep" 2>/dev/null)"; d_rc=$?
+      deep_code="${d_out%% *}"; deep_secs="${d_out##* }"; [ -n "$deep_code" ] || deep_code=000
+      clean_200 "$deep_code" "$d_rc" && deep_slow=1
+    fi
+  fi
+  # THREE-VALUED, never two. An empty $deep means BOTH "no internal link" (n/a,
+  # fine) and "the extractor never ran" (nothing was checked) — and a gate that
+  # prints the n/a prose for the second PASSES every broken release while reading
+  # as a single-page build. Refuse, and name the assertion that was not made.
+  if [ "$deep_probe_rc" != 0 ]; then
+    stop_slot "$slot"
+    HEALTH_DETAIL="deep-path probe COULD-NOT-CHECK: the link extractor ($HEALTH_PY) did not run (exit $deep_probe_rc) — the deep-path assertion was NOT made, so this release is unverified, not healthy; live slot untouched"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+  fi
+  # A REFUSAL, not a warning: a linked route that 404s or 500s is a 404/500 for
+  # visitors, and switching to it ships the hole (charter D116). ACTION FIRST
+  # after the path — emit() clips detail= at 240 chars, so on a pathologically
+  # long path it is the cause hint that degrades, never the "do not retry this
+  # artifact" move. The log line below is unclipped.
+  if ! deep_ok "$deep" "$deep_code"; then
+    stop_slot "$slot"
+    HEALTH_DETAIL="the served page links to $path$deep — the SSR answered HTTP $deep_code there, want 200 (${deep_secs}s). Rebuild; do not retry this artifact. Cause: that route throws at render, or its content row is unreachable while the home page's is; live slot untouched"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+  fi
+  if [ -n "$deep" ] && [ "$deep_slow" = 1 ]; then
+    log "HEALTH: deep path $path$deep serves 200 — SLOW: only on the patient ${HEALTH_PATIENT_MAX}s probe, after ${deep_secs}s (past the ${HEALTH_FAST_MAX}s per-attempt ceiling). Gating it as healthy: it renders."
+  elif [ -n "$deep" ]; then
+    log "HEALTH: deep path $path$deep serves 200 in ${deep_secs}s from the booted slot (site base '${site_base:-/}')"
+  else
+    log "HEALTH: no non-root internal link in the served page — deep-path probe n/a (single-page build)"
+  fi
+  # ------------------------------------------------------------------------
   # The observed latency ALWAYS rides the detail — a stdout-only caller cannot
   # ask the box afterwards, and "how long did it take to render" is the one
   # number that separates a site that is degrading from one that is fine.
@@ -784,8 +930,12 @@ if [ "$MODE" = selftest ]; then
   # processes), and a successful disarm followed by a stop that does not take
   # RESTORES the route byte-identically (no dead route over live processes). All
   # 21 sit outside both optional blocks, so BOTH floors move by the same 21.
-  SELFTEST_FLOOR_MIN=396
-  SELFTEST_FLOOR_FULL=413
+  # 2026-09-10: +38 (396->434, 413->451) for the DEEP-PATH probe — the SSR gate
+  # asserted ONE url, so a release whose LINKED route 404s/500s passed HEALTH and
+  # switched live (ssw11-bl-node-engine-health-one-path). All 38 sit outside both
+  # optional blocks, so BOTH floors move by the same 38.
+  SELFTEST_FLOOR_MIN=434
+  SELFTEST_FLOOR_FULL=451
   TESTS=0; FAILS=0
   check() { local label="$1"; shift; TESTS=$((TESTS + 1)); if "$@"; then echo "  ok   - $label"; else echo "  FAIL - $label"; FAILS=$((FAILS + 1)); fi; }
 
@@ -952,6 +1102,21 @@ bid="${BARKPARK_BUILD_ID:-}"; rev="${BARKPARK_CONTENT_REV:-}"; doc="doc-42"; cor
 # The legacy shape: empty bp-doc-id and NO status marker (a template built before
 # the corpus-status contract) — the gate must refuse AND say the cause is unknown.
 [ -f ./.no-corpus-legacy ] && { doc=""; corpus=""; }
+# DEEP-PATH fixtures. `.deep-link` holds the href the rendered page carries (the
+# ONLY thing the HEALTH deep probe may derive a target from); `.deep-page` holds
+# a release-relative directory the "SSR" actually answers at. Ship the link
+# WITHOUT the page and the release is exactly the shape this probe exists for: a
+# home page that 200s and a linked route that does not.
+link=""; deeppage=""; sitebase=""
+[ -f ./.deep-link ] && link="$(cat ./.deep-link)"
+[ -f ./.deep-page ] && deeppage="$(cat ./.deep-page)"
+[ -f ./.site-base ] && sitebase="$(cat ./.site-base)"
+# The src tree is REUSED across every e2e case in this file, and `mkdir -p` does
+# not un-make anything: a deep page written for one fixture survived into the
+# next, so a "the linked route is GONE" case still served it and the gate
+# correctly passed a release the test believed was broken. Clear the deep-page
+# roots every build. (Caught by exactly that: two refusal rows went green.)
+rm -rf .next/standalone/d .next/standalone/sites
 mkdir -p .next/standalone .next/static public
 printf '// fake next standalone server\n' > .next/standalone/server.js
 {
@@ -962,8 +1127,15 @@ printf '// fake next standalone server\n' > .next/standalone/server.js
   # Emitted ONLY when there is something to record — same conditional the
   # template uses (a healthy render carries no bp-corpus-status at all).
   [ -n "$corpus" ] && printf '<meta name="bp-corpus-status" content="%s">\n' "$corpus"
-  printf '</head><body><h1>SSR</h1></body></html>\n'
+  [ -n "$sitebase" ] && printf '<meta name="bp-site-base" content="%s">\n' "$sitebase"
+  printf '</head><body><h1>SSR</h1>'
+  [ -n "$link" ] && printf '<a href="%s">deep</a>' "$link"
+  printf '</body></html>\n'
 } > .next/standalone/index.html
+if [ -n "$deeppage" ]; then
+  mkdir -p ".next/standalone/$deeppage"
+  printf '<!doctype html><html><body>deep route</body></html>\n' > ".next/standalone/$deeppage/index.html"
+fi
 printf 'chunk\n' > .next/static/chunk.js
 printf 'robots\n' > public/robots.txt
 # Carry the slot-behaviour sentinels INTO the release (STAGE's `cp -a src/.`
@@ -1676,6 +1848,157 @@ FAKENPM
   check "MUTANT: and the truncation was never named at all" \
     no_log_match 'the body was TRUNCATED'
   echo "  mutation proof: with clean_200 reduced to '[ \"\$1\" = 200 ]', a site whose document IS readable at the patient ceiling exits 14 and reports 'the SSR rendered no content document … predates the corpus-status contract' — the three checks above (fast loop refused the truncated 200 / fell through to the patient probe / never claims no content document) all red"
+
+  # -------------------------------------------------------------------------
+  # ONE PATH IS NOT THE SITE (ssw11-bl-node-engine-health-one-path).
+  #
+  # THE SHAPE. Until this block, every assertion this engine made was about ONE
+  # url: "/" (or the basePath sub-path, or BARKPARK_SITE_HEALTH_PATH). A release
+  # whose home page renders and whose LINKED route 404s or 500s therefore passed
+  # HEALTH and SWITCHed live, and the first report was a visitor's. The static
+  # engine closed the identical hole (site-deploy.sh, "HEALTH certifies a page the
+  # served HTML links to"); the SSR engine — where a route can fail for reasons a
+  # file tree cannot show at all — kept it.
+  #
+  # THE TARGET IS THE PAGE'S OWN href, NEVER THE DISK. On SSR that is not a
+  # preference, it is the only option that means anything: routes need not
+  # correspond to files, so an enumeration would ask the app for paths no browser
+  # ever requests, while the rendered href IS the next request a visitor makes.
+  #
+  # FIXTURES. `.deep-link` puts an href in the rendered page; `.deep-page` makes
+  # the "SSR" actually answer there; `.site-base` emits the bp-site-base marker
+  # the base-stripping reads. Ship the link WITHOUT the page and you have the
+  # exact release this gate exists for.
+  # -------------------------------------------------------------------------
+  echo "[selftest] e2e: FAIL-BEFORE — a release whose LINKED route 404s is REFUSED (14), never switched"
+  printf '/sites/deep1/d/hello/\n' > "$SRC/.deep-link"
+  printf '/sites/deep1/\n'         > "$SRC/.site-base"
+  rc="$(sl_deploy deep1 dp1 deep1 "$(free_port)" "$(free_port)")"
+  check "the home page itself was fine: HEALTH read all three markers" \
+    no_log_match 'bp-doc-id marker is empty'
+  check "deploy exits 14 (HEALTH failed)"          [ "$rc" = 14 ]
+  check "no SWITCH stage line at all"              nosaw SWITCH
+  check "the reason NAMES the link it followed"    grep -q 'links to /d/hello/' "$TD/out.log"
+  check "…and the code it got there"               grep -q 'answered HTTP 404 there, want 200' "$TD/out.log"
+  check "…and the next move, before any cause hint (emit() clips detail= at 240)" \
+    grep -q 'Rebuild; do not retry this artifact' "$TD/out.log"
+  check "the refusal ALSO rides the plain human log (dual-channel)" \
+    grep -q '\[site-deploy-node .*HEALTH: the served page links to /d/hello/' "$TD/out.log"
+  check "it did NOT blame the content markers (they were all present)" \
+    no_log_match 'the SSR rendered no content document'
+  check "the broken release is purged"             [ ! -d "$TD/sites/deep1/releases/dp1" ]
+
+  echo "[selftest] e2e: the SAME release with the linked route PRESENT deploys, and the gate names the path it certified"
+  printf 'd/hello\n' > "$SRC/.deep-page"
+  rc="$(sl_deploy deep2 dp2 deep2 "$(free_port)" "$(free_port)")"
+  check "deploy exit 0"                            [ "$rc" = 0 ]
+  check "HEALTH ok"                                saw HEALTH ok dp2
+  check "SWITCH ok"                                saw SWITCH ok dp2
+  check "the gate names the deep path it certified" \
+    grep -q 'deep path /d/hello/ serves 200' "$TD/out.log"
+  check "it was fetched at the BASE-STRIPPED path (the raw port has no /sites/<slug>/ prefix)" \
+    no_log_match 'deep path /sites/deep1/d/hello/'
+  check "it did not degrade to n/a"                no_log_match 'deep-path probe n/a'
+  rm -f "$SRC/.deep-link" "$SRC/.deep-page" "$SRC/.site-base"
+
+  echo "[selftest] e2e: a single-page render (no internal link) passes — the probe is n/a, never a refusal"
+  rc="$(sl_deploy deep3 dp3 deep3 "$(free_port)" "$(free_port)")"
+  check "deploy exit 0"                            [ "$rc" = 0 ]
+  check "and it SAYS the probe was n/a"            grep -q 'deep-path probe n/a (single-page build)' "$TD/out.log"
+
+  echo "[selftest] e2e: an href pointing OUTSIDE this site's base is SKIPPED, not manufactured into a refusal"
+  printf '/some/other/site/page/\n' > "$SRC/.deep-link"
+  printf '/sites/deep4/\n'          > "$SRC/.site-base"
+  rc="$(sl_deploy deep4 dp4 deep4 "$(free_port)" "$(free_port)")"
+  rm -f "$SRC/.deep-link" "$SRC/.site-base"
+  check "deploy exit 0 (an off-site link is not this release's problem)" [ "$rc" = 0 ]
+  check "and the probe reports n/a"                grep -q 'deep-path probe n/a' "$TD/out.log"
+  check "it never fetched the off-site path"       no_log_match '/some/other/site/page/'
+
+  echo "[selftest] e2e: a probe that COULD NOT RUN is a refusal, never an 'n/a' — an unchecked release is not a healthy one"
+  # THREE-VALUED, not two. An empty $deep means both "no internal link" and "the
+  # extractor never ran". Print the n/a prose for the second and a missing
+  # interpreter silently passes every broken release while reading as a
+  # single-page build — the static engine's own regression, ported here as a row.
+  printf '/sites/deep5/d/hello/\n' > "$SRC/.deep-link"
+  printf '/sites/deep5/\n'         > "$SRC/.site-base"
+  printf 'd/hello\n'               > "$SRC/.deep-page"
+  cnc_rc="$(env PATH="$FAKEBIN:$PATH" SITE_SLUG=deep5 BUILD_ID=dp5 CONTENT_REV=sl-rev \
+      SITE_SRC="$SRC" SITE_PORT_A="$(free_port)" SITE_PORT_B="$(free_port)" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TD/deep5.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      BARKPARK_SITE_HEALTH_ATTEMPTS=2 BARKPARK_SITE_HEALTH_FAST_MAX=1 \
+      BARKPARK_HEALTH_PY="$TD/no-such-interpreter" \
+      bash "$SELF" > "$TD/out.log" 2> "$TD/err.log"; echo $?)"
+  check "a release that would otherwise deploy is REFUSED (14) when the extractor is missing" \
+    [ "$cnc_rc" = 14 ]
+  check "and it says COULD-NOT-CHECK"              grep -q 'deep-path probe COULD-NOT-CHECK' "$TD/out.log"
+  check "…naming the interpreter that did not run" grep -q "did not run (exit 127)" "$TD/out.log"
+  check "and it does NOT read as a single-page build" no_log_match 'deep-path probe n/a'
+  rc="$(sl_deploy deep5b dp5b deep5b "$(free_port)" "$(free_port)")"
+  check "CONTROL: exit 0 and the deep path is CERTIFIED" \
+    sh -c "[ '$rc' = 0 ] && grep -q 'deep path /d/hello/ serves 200' '$TD/out.log'"
+  rm -f "$SRC/.deep-link" "$SRC/.site-base" "$SRC/.deep-page"
+
+  echo "[selftest] e2e: a basePath site probes the linked route UNDER its base (base-aware in the other dialect too)"
+  : > "$SRC/.basepath"
+  printf '/sites/deep6/d/x/\n'  > "$SRC/.deep-link"
+  printf '/sites/deep6/\n'      > "$SRC/.site-base"
+  printf 'sites/deep6/d/x\n'    > "$SRC/.deep-page"
+  bp6_deploy() { # <build_id> <port-a> <port-b>
+    env PATH="$FAKEBIN:$PATH" SITE_SLUG=deep6 BUILD_ID="$1" CONTENT_REV=sl-rev \
+      SITE_SRC="$SRC" SITE_PORT_A="$2" SITE_PORT_B="$3" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TD/deep6.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_SITE_BASEPATH=1 BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      BARKPARK_SITE_HEALTH_ATTEMPTS=2 BARKPARK_SITE_HEALTH_FAST_MAX=1 \
+      bash "$SELF" > "$TD/out.log" 2> "$TD/err.log"; echo $?
+  }
+  rc="$(bp6_deploy dp6 "$(free_port)" "$(free_port)")"
+  check "basePath deploy exit 0"                   [ "$rc" = 0 ]
+  check "the deep path was fetched UNDER the base, not at root" \
+    grep -q 'deep path /sites/deep6/d/x/ serves 200' "$TD/out.log"
+  rm -f "$SRC/.deep-page"
+  rc="$(bp6_deploy dp6b "$(free_port)" "$(free_port)")"
+  check "basePath: the same link with the route GONE is refused (14)"  [ "$rc" = 14 ]
+  check "…naming the base-qualified path"          grep -q 'links to /sites/deep6/d/x/' "$TD/out.log"
+  rm -f "$SRC/.basepath" "$SRC/.deep-link" "$SRC/.site-base"
+
+  echo "[selftest] e2e: a PERCENT-ENCODED accented href is fetched as the browser would ask for it"
+  # No accented byte is ever typed here: the on-disk name comes from a numeric
+  # \xNN escape naming the exact UTF-8 encoding, and the href is the ASCII
+  # percent-encoding of the same codepoint. What crosses the shell is ASCII.
+  printf '/sites/deep7/d/caf%%C3%%A9/\n' > "$SRC/.deep-link"
+  printf '/sites/deep7/\n'               > "$SRC/.site-base"
+  printf 'd/caf\xc3\xa9\n'               > "$SRC/.deep-page"
+  rc="$(sl_deploy deep7 dp7 deep7 "$(free_port)" "$(free_port)")"
+  check "accented deep route present: deploy exit 0"  [ "$rc" = 0 ]
+  check "and the gate reports the PERCENT-ENCODED path (pure ASCII on the wire)" \
+    grep -q 'deep path /d/caf%C3%A9/ serves 200' "$TD/out.log"
+  rm -f "$SRC/.deep-page"
+  rc="$(sl_deploy deep7b dp7b deep7b "$(free_port)" "$(free_port)")"
+  check "accented deep route MANGLED away: refused (14)"  [ "$rc" = 14 ]
+  check "…and the refusal names the encoded path"    grep -q 'links to /d/caf%C3%A9/' "$TD/out.log"
+
+  echo "[selftest] e2e: MUTATION PROOF — disable the deep probe's verdict and the 404-linked release deploys green again"
+  # ONE LINE, and it is the whole gate: `deep_ok` stops consulting the code it was
+  # handed. With it, the release whose linked route 404s walks through HEALTH,
+  # SWITCHes, and goes live — which IS the pre-fix engine, reproduced on demand.
+  DPMUT="$TD/mutant-deep-probe-off.sh"; DPMUTLIB="$TD/lib"
+  mkdir -p "$DPMUTLIB"
+  cp "$(cd "$(dirname "$SELF")" && pwd)/lib/site-deploy-common.sh" "$DPMUTLIB/"  # a mutant sources by its OWN dirname
+  awk '{ if ($0 == "  [ -z \"$1\" ] || [ \"$2\" = 200 ]") print "  [ -z \"$1\" ] || true"; else print }' \
+    "$SELF" > "$DPMUT"
+  check "the mutant differs by exactly ONE line (the mutation APPLIED)" \
+    [ "$(diff "$SELF" "$DPMUT" | grep -c '^[<>]')" = 2 ]
+  mrc="$(SL_ENGINE="$DPMUT" sl_deploy deep8 dp8 deep8 "$(free_port)" "$(free_port)")"
+  check "MUTANT: the identical 404-linked release exits 0"      [ "$mrc" = 0 ]
+  check "MUTANT: and it SWITCHES live"                          saw SWITCH ok dp8
+  check "MUTANT: the refusal sentence is never emitted"         no_log_match 'answered HTTP 404 there'
+  check "MUTANT: nothing at all names the linked route as bad"  no_log_match 'Rebuild; do not retry this artifact'
+  rm -f "$SRC/.deep-link" "$SRC/.site-base"
+  echo "  mutation proof: with deep_ok reduced to '[ -z \"\$1\" ] || true', a release whose LINKED route 404s exits 0 and goes live — every FAIL-BEFORE row above (exit 14 / no SWITCH / names the link / names the code / purged) reds"
 
   echo "[selftest] build_failure_reason resolves from the SHARED lib in THIS engine too"
   # The lift's whole point: one copy, both engines. If it ever gets re-forked into

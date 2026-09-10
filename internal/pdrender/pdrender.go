@@ -350,6 +350,7 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["ingress"] = ingressRenderer{ir: ir}
 	r.blocks["eyebrow"] = eyebrowRenderer{}
 	r.blocks["byline"] = bylineRenderer{}
+	r.blocks["pre-gate-badge"] = preGateBadgeRenderer{}
 
 	// field-* leaf blocks.
 	r.blocks["field-string"] = fieldTextRenderer{}

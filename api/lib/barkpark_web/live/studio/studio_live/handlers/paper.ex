@@ -40,7 +40,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
             Shared.paper_stream_items(
               Shared.paper_top_level_blocks(socket),
               socket.assigns.dataset,
-              ScopeHelpers.scope_opts(socket)
+              ScopeHelpers.scope_opts(socket),
+              Shared.paper_doc_id(socket.assigns[:paper_doc])
             ),
             reset: true
           )
@@ -970,7 +971,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
         Shared.paper_stream_items(
           Shared.paper_top_level_blocks(socket),
           socket.assigns.dataset,
-          ScopeHelpers.scope_opts(socket)
+          ScopeHelpers.scope_opts(socket),
+          Shared.paper_doc_id(socket.assigns[:paper_doc])
         ),
         reset: true
       )

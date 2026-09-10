@@ -405,4 +405,170 @@ defmodule BarkparkWeb.RequestStatsTest do
       assert decoded["classes"] == %{}
     end
   end
+
+  # ── The Plug/Phoenix behaviours this meter INHERITS (charter D132) ─────────
+  #
+  # Two of the three facts every latency and 5xx claim rests on are NOT
+  # Barkpark behaviours — they belong to `Plug.Telemetry` and to
+  # `Phoenix.Endpoint.RenderErrors`, so a dependency bump can flip them with no
+  # diff in this repo. They are pinned here through a REAL Phoenix endpoint
+  # (its own `Plug.Telemetry` + its own `Phoenix.Router`), never by calling a
+  # private function, so the thing under test is the hook path itself:
+  #
+  #   1. `Plug.Telemetry.call/2` computes the duration inside
+  #      `Plug.Conn.register_before_send/2` (plug/lib/plug/telemetry.ex), and
+  #      before_send fires on the FIRST `send_chunked/2`. A stream is therefore
+  #      sampled at OPEN, at ~0 ms, and never again — a 25-second SSE stream
+  #      lands as a ~0 ms sample and pulls p95 DOWN.
+  #   2. A raise INSIDE the router is wrapped by `Plug.Conn.WrapperError`
+  #      carrying the conn as it stood at the router — before_send included —
+  #      so `RenderErrors.__catch__/5` renders the 500 ON THAT CONN, the
+  #      callback fires, and the sample lands with the request's FULL duration
+  #      and a 500 status. That is why a 17-second pool-timeout 500 shows up as
+  #      a 17-second sample and a 5xx tick, rather than vanishing.
+  #
+  # The third test is the CONTROL for (2), and it is the boundary nobody should
+  # re-derive the hard way: a raise from an endpoint-level plug OUTSIDE the
+  # router is not wrapped, so `__catch__/5` falls back to the endpoint's
+  # ORIGINAL conn, which carries no before_send. The 500 is still sent to the
+  # client — and the meter never sees it. Without this arm, "a 500 lands"
+  # reads as a law of 500s; it is a law of 500s raised inside the router.
+  defmodule HookController do
+    # A bare Plug, not `use Phoenix.Controller`: Phoenix.Router dispatches with
+    # `plug.call(conn, plug.init(action))`, so this is the same door a real
+    # controller comes through, with none of the view/format ceremony.
+    def init(action), do: action
+
+    def call(%{private: %{hook_test: test}} = conn, :chunked) do
+      conn = Plug.Conn.send_chunked(conn, 200)
+      # The stream is OPEN and the response is NOT finished. Hand the test the
+      # keys and block until it has read the meter.
+      send(test, {:stream_open, self()})
+
+      receive do
+        :release -> :ok
+      after
+        5_000 -> :ok
+      end
+
+      {:ok, conn} = Plug.Conn.chunk(conn, "late\n")
+      conn
+    end
+
+    def call(conn, :boom) do
+      Process.sleep(conn.private.hook_sleep_ms)
+      raise "hook boom — the pool-timeout shape"
+    end
+  end
+
+  defmodule HookRouter do
+    use Phoenix.Router
+
+    get("/chunked", HookController, :chunked)
+    get("/boom", HookController, :boom)
+  end
+
+  Application.put_env(:barkpark, __MODULE__.HookEndpoint,
+    secret_key_base: String.duplicate("x", 64),
+    render_errors: [formats: [json: BarkparkWeb.ErrorJSON], layout: false],
+    server: false
+  )
+
+  defmodule HookEndpoint do
+    use Phoenix.Endpoint, otp_app: :barkpark
+
+    plug(Plug.Telemetry, event_prefix: [:phoenix, :endpoint])
+    plug(:hook_bare_raise)
+    plug(HookRouter)
+
+    # An endpoint-level raise: OUTSIDE the router, so nothing wraps it in a
+    # Plug.Conn.WrapperError carrying the live conn.
+    def hook_bare_raise(%{path_info: ["bare-boom"]}, _opts) do
+      raise "hook bare boom — raised outside the router"
+    end
+
+    def hook_bare_raise(conn, _opts), do: conn
+  end
+
+  describe "the hook path: what Plug.Telemetry + RenderErrors actually sample (D132)" do
+    setup do
+      table = :"req_stats_hook_#{System.unique_integer([:positive])}"
+      name = :"req_stats_hook_proc_#{System.unique_integer([:positive])}"
+      start_supervised!(HookEndpoint)
+      start_supervised!({RequestStats, name: name, table: table})
+      %{name: name}
+    end
+
+    defp hook_call(path, private) do
+      conn =
+        Enum.reduce(private, Plug.Test.conn(:get, path), fn {k, v}, c ->
+          Plug.Conn.put_private(c, k, v)
+        end)
+
+      HookEndpoint.call(conn, HookEndpoint.init([]))
+    end
+
+    test "a chunked response is sampled at stream OPEN, not at close — and exactly once",
+         %{name: name} do
+      parent = self()
+
+      task = Task.async(fn -> hook_call("/chunked", hook_test: parent) end)
+
+      assert_receive {:stream_open, streamer}, 5_000
+
+      # Hold the stream open well past any plausible sub-ms sampling window.
+      Process.sleep(300)
+
+      # THE SAMPLE IS ALREADY IN THE WINDOW while the response is still open,
+      # and it carries the duration to stream OPEN (~0 ms), not the 300+ ms the
+      # stream has been alive.
+      mid = RequestStats.stats(name)
+      assert %{count: 1, classes: %{api: %{count: 1}}} = mid
+      assert mid.p95_ms <= 50
+
+      # Now close the stream…
+      send(streamer, :release)
+      assert %Plug.Conn{state: :chunked} = Task.await(task, 5_000)
+      Process.sleep(50)
+
+      # …and NOTHING new lands: no second sample, and the ~0 ms reading stands.
+      # A 25-second SSE stream is a ~0 ms sample in this window — the reason a
+      # burst of long-lived streams pulls p95 DOWN instead of up.
+      after_close = RequestStats.stats(name)
+      assert after_close.count == 1
+      assert after_close.p95_ms == mid.p95_ms
+    end
+
+    test "a 500 raised INSIDE the router lands with the request's FULL duration and ticks the 5xx rate",
+         %{name: name} do
+      assert_raise RuntimeError, ~r/hook boom/, fn ->
+        hook_call("/boom", hook_sleep_ms: 250)
+      end
+
+      stats = RequestStats.stats(name)
+
+      # One sample, and it carries the whole 250 ms the request spent before it
+      # blew up — the 'Sent 500 in 17330ms' shape, not a 0 ms stub.
+      assert %{count: 1, classes: %{api: %{count: 1}}} = stats
+      assert stats.p95_ms >= 200
+
+      # …and it is counted as an error: a real rate over the same elapsed
+      # seconds, never the empty-window nil and never a 0.0.
+      assert is_float(stats.err_5xx_per_s)
+      assert stats.err_5xx_per_s > 0.0
+    end
+
+    test "CONTROL — a 500 raised OUTSIDE the router is served to the client and sampled by NOBODY",
+         %{name: name} do
+      assert_raise RuntimeError, ~r/hook bare boom/, fn -> hook_call("/bare-boom", []) end
+
+      # The client DID get a 500: RenderErrors rendered and sent one. It just
+      # sent it on the endpoint's original conn, which carries no before_send.
+      assert_received {:plug_conn, :sent}
+      assert_received {_ref, {500, _headers, _body}}
+
+      # So the meter is empty — an unmeasured window, honestly nil, not a 0.0.
+      assert %{count: 0, classes: %{}, err_5xx_per_s: nil, p95_ms: nil} = RequestStats.stats(name)
+    end
+  end
 end

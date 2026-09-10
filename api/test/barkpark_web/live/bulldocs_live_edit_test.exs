@@ -356,21 +356,50 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert block_text(slug, "b-body") == "Original body text"
     end
 
-    test "the reader's OWN events keep working — the gate is not a blanket paper-* block",
+    test "the reader's socket-local events keep working — the gate is not a blanket paper-* block",
+         %{conn: conn, slug: slug} do
+      {:ok, view, _html} = live(conn, "/papers/#{slug}")
+
+      render_hook(view, "rail-select", %{"event-id" => "some-event"})
+      assert assigns_of(view).selected_event_id == "some-event"
+      refute flash_of(view)["error"]
+
+      render_hook(view, "close-diff", %{})
+      assert assigns_of(view).diff_open == false
+      refute flash_of(view)["error"]
+    end
+
+    # Ruling arpss-bulldocs-anon-paper-event-write-ruling (2026-09-10):
+    # `paper-action` used to run on THIS anonymous socket (it acked the click
+    # and wrote a paper_events row). It no longer does. It is still not an
+    # @edit_events member — the second, weaker gate catches it, with its own
+    # copy — which is exactly why the two arms are asserted separately.
+    test "paper-action is refused on an anonymous socket, with the anon copy",
          %{conn: conn, slug: slug} do
       {:ok, view, _html} = live(conn, "/papers/#{slug}")
 
       render_hook(view, "paper-action", %{"action" => "grill"})
 
-      # The handler ran (it acks the click inline); the gate never saw it.
+      assert assigns_of(view).last_action == nil
+      assert flash_of(view)["error"] == Edit.anon_denial()
+      refute flash_of(view)["error"] == Edit.denial()
+      assert Process.alive?(view.pid)
+    end
+
+    # The weaker gate, proved weaker: a READ-only token cannot edit, but it is
+    # a principal, so the reader's own control runs for it.
+    test "paper-action runs for a read-only token — a principal, not a writer",
+         %{conn: conn, slug: slug} do
+      raw = "eol-action-reader-#{System.unique_integer([:positive])}"
+      {:ok, _token} = Auth.create_token(raw, "eol action reader", @dataset, ["read"])
+
+      {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
+
+      assert assigns_of(view).can_edit? == false
+      render_hook(view, "paper-action", %{"action" => "grill"})
+
       assert assigns_of(view).last_action == "grill"
       refute flash_of(view)["error"]
-
-      render_hook(view, "rail-select", %{"event-id" => "some-event"})
-      assert assigns_of(view).selected_event_id == "some-event"
-
-      render_hook(view, "close-diff", %{})
-      assert assigns_of(view).diff_open == false
     end
   end
 

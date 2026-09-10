@@ -117,7 +117,9 @@ defmodule BarkparkCloud.Sites.Deploy do
       `merge_provision_steps` / `merge_provision_console`, where it would replace
       the only copy of the narration that exists.
 
-    * **anything else → `FailureCopy.strip_ansi/1` THEN `FailureCopy.scrub/1`.**
+    * **anything else → `FailureCopy.raw/1` = `FailureCopy.strip_ansi/1` THEN `FailureCopy.scrub/1`.**
+      (The two verbs are named on ONE line deliberately: `failure-copy-scrub-order-check.sh`
+      reads a wrapped mention as a bare, unproven `scrub` and reds.)
       A stage detail is a REMOTE capture (an ssh stderr fold, a provider body, a
       build log line), so it is redacted at every display boundary. `broadcast_stage/2` shipped it RAW:
       driven on a detail carrying `Authorization: Bearer <token>`, the HTTP
@@ -137,8 +139,9 @@ defmodule BarkparkCloud.Sites.Deploy do
   # INSIDE the shape the scrubber matches on and the secret walks out in
   # cleartext (with raw 0x1B bytes attached, which a console then interprets).
   # Strip first, then redact — the order is the fix (dr-w8-s2).
-  def stage_caption(_status, detail),
-    do: detail |> FailureCopy.strip_ansi() |> FailureCopy.scrub()
+  # dr-w23-bl: that composition IS `FailureCopy.raw/1` (`failure_copy.ex:548`),
+  # so the boundary names the entry point rather than re-deriving the order.
+  def stage_caption(_status, detail), do: FailureCopy.raw(detail)
 
   ## ---------------------------------------------------------------------------
   ## Mint
@@ -757,6 +760,12 @@ defmodule BarkparkCloud.Sites.Deploy do
       # and stays terminal on the first answer.
       {:ok, status, body} when status >= 500 ->
         if retries_left > 0 and transient_refusal?(body) do
+          # THE RETRY IS A SAVE, AND A SAVE MUST BE COUNTED (dr-bl-w8). This arm
+          # recorded nothing, in any outcome: a retry that WORKED left the row
+          # indistinguishable from a deploy the box took first time, so the
+          # 3-retry budget charter D114 shows a one-literal rename can delete was
+          # worth exactly zero observable units.
+          record_grace(ctx, :start_retry, box_refusal(status, body, :start))
           Process.sleep(poll_ms())
           start_on_box(ctx, deployment, site, bp, read_token, retries_left - 1)
         else
@@ -1058,9 +1067,80 @@ defmodule BarkparkCloud.Sites.Deploy do
   # the same reset rule `grace_left` follows, so an old blip never colours a
   # later, unrelated verdict.
   defp record_graced_refusal(ctx, caption) do
+    # The ctx tally below feeds the CAPTION and is cleared by the next reaching
+    # poll. The durable signal is emitted HERE, at the same instant, precisely
+    # because it must OUTLIVE that reset — see `record_grace/3`.
+    record_grace(ctx, :poll_refusal, caption)
+
     ctx
     |> Map.update(:graced_refusals, 1, &(&1 + 1))
     |> Map.put(:last_graced_refusal, caption)
+  end
+
+  # THE SAVE, MADE COUNTABLE (dr-bl-w8-graced-deploys-are-uncounted).
+  #
+  # Grace produces two populations: the deploys it could not save (which say so
+  # in `failure_reason`, via `with_graced_note/2`) and the deploys it DID save —
+  # which, until this call existed, said nothing anywhere. `forget_graced_refusals/1`
+  # is why: it `Map.drop`s the ctx tally on any poll that reached the box, which
+  # is the right rule for a caption and erases exactly the successes.
+  #
+  # Charter D114 is the cost of that silence. A one-literal rename of the box's
+  # wire vocabulary drops a code out of `transient_refusal?/1` and kills 3 start
+  # retries and 45 poll-grace beats per deploy; with no counter, the loss shows
+  # up only as a higher failure rate with NO LINE SAYING WHY.
+  #
+  # THREE SURFACES, the shape `Notifications.account_fleet_digest/2` established:
+  #
+  #   * a telemetry event, for anything attached in-process;
+  #   * a ROW IN POSTGRES (`Registry.record_deploy_grace/2`) — the only copy a
+  #     container recreate cannot take with it, and the only one that is
+  #     QUERYABLE rather than greppable. Read it back with
+  #     `Registry.deploy_grace_census/3`;
+  #   * one key=value line `grep site_deploy_grace` finds in the container log,
+  #     because that is what a human tailing a deploy actually reads.
+  #
+  # Each is wrapped: accounting is a side path on a build. It must never be able
+  # to break the deploy it is counting.
+  defp record_grace(ctx, kind, caption) do
+    slug =
+      case Map.get(ctx, :site) do
+        %Site{slug: slug} -> slug
+        _ -> nil
+      end
+
+    safely(fn ->
+      :telemetry.execute(
+        [:barkpark_cloud, :sites, :deploy, :grace],
+        %{count: 1},
+        %{kind: kind, deployment_id: ctx.id, site_slug: slug, caption: caption}
+      )
+    end)
+
+    safely(fn -> Registry.record_deploy_grace(ctx.id, kind) end)
+
+    safely(fn ->
+      Logger.warning(
+        "site_deploy_grace kind=#{kind} deployment=#{ctx.id} site=#{slug} caption=#{inspect(caption)}"
+      )
+    end)
+
+    :ok
+  end
+
+  # A side path that cannot take the build with it. Mirrors
+  # `Notifications.safely/1` — the accounting logs its own failure and returns.
+  defp safely(fun) do
+    fun.()
+    :ok
+  rescue
+    error ->
+      Logger.error("site deploy grace accounting failed: #{Exception.message(error)}")
+      :ok
+  catch
+    kind, reason ->
+      Logger.error("site deploy grace accounting #{kind}: #{inspect(reason)}")
+      :ok
   end
 
   defp forget_graced_refusals(ctx), do: Map.drop(ctx, [:graced_refusals, :last_graced_refusal])

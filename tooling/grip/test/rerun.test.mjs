@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import {
   runRerun, classifyHttp, classifySafety, classifyScope, mixEnvOf, isBuildWarm, probeHttp,
   blankQuotedSpans, classifyFamily, classifySilence, isSilentByDesign,
-  admitsPassClaim, admitsAbsenceClaim, assertAbsenceClaim,
+  admitsPassClaim, admitsAbsenceClaim, assertAbsenceClaim, classifyToolchainFault,
   VERDICT, SCOPE, FAMILY, GripError,
 } from "../rerun.mjs";
 
@@ -1058,4 +1058,118 @@ test("an Elixir/Erlang inline program cannot write through its own stdlib", () =
   ]) {
     assert.equal(classifySafety(cmd).safe, false, `MUST REFUSE: ${cmd}`);
   }
+});
+
+// ── A TOOLCHAIN FAULT IS NOT A REFUTATION ────────────────────────────────────
+//
+// THE SPECIMEN, captured verbatim from this host on 2026-09-10 (origin/main
+// bb175f130) by running the recipe the ledger actually carries:
+//
+//   $ go test ./internal/cli -run TestSiteClaimsAreProbedWithResponseTypes
+//   FAIL	github.com/FRIKKern/barkpark/internal/cli [build failed]
+//   FAIL
+//   # runtime/cgo                                    (stderr)
+//   error: unknown option '-E'                       (stderr)
+//   exit 1
+//
+// and its CONTROL, captured the same way in a scratch module, so the two shapes
+// are measured side by side rather than imagined:
+//
+//   $ CGO_ENABLED=0 go test ./...
+//   --- FAIL: TestGenuineFailure (0.00s)
+//       p_test.go:5: boom: assertion did not hold
+//   FAIL	probe	0.152s
+//   exit 1
+//
+// BOTH EXIT 1. Any rule keyed on the exit code alone rules them identically,
+// which is exactly what FAMILY.UNKNOWN's default branch did: FAILED, and FAILED
+// travels to tooling/pds/adjudicate.mjs as REFUTED / "PASS-CONTRADICTED" — *the
+// command ran and REFUTES the claim* — for a binary that was never built.
+
+const GO_BUILD_FAULT = {
+  exit: 1,
+  stdout: "FAIL\tgithub.com/FRIKKern/barkpark/internal/cli [build failed]\nFAIL\n",
+  stderr: "# runtime/cgo\nerror: unknown option '-E'\n",
+};
+
+const GO_GENUINE_FAILURE = {
+  exit: 1,
+  stdout: "--- FAIL: TestGenuineFailure (0.00s)\n    p_test.go:5: boom: assertion did not hold\nFAIL\nFAIL\tprobe\t0.152s\nFAIL\n",
+  stderr: "",
+};
+
+test("a behaviour recipe that failed to BUILD is UNAVAILABLE, never a refutation", () => {
+  const cmd = "go test ./internal/cli -run TestSiteClaimsAreProbedWithResponseTypes";
+  const r = classifySilence(cmd, GO_BUILD_FAULT);
+
+  assert.equal(r.verdict, VERDICT.UNAVAILABLE, "a build fault says NOTHING about the claim");
+  assert.notEqual(r.verdict, VERDICT.FAILED, "FAILED is what adjudicate.mjs turns into PASS-CONTRADICTED");
+  assert.equal(r.absenceEligible, false);
+  assert.match(r.reason, /never reached an assertion/);
+
+  // The admissibility seam is the property that actually matters: this result
+  // may support NEITHER a pass NOR an absence, so PDS's ruleExecuted falls
+  // through to INCONCLUSIVE instead of REFUTED.
+  assert.equal(admitsPassClaim(r), false);
+  assert.equal(admitsAbsenceClaim({ ...r }), false);
+});
+
+test("a genuinely FAILING test still refutes — the discriminator is not the exit code", () => {
+  const cmd = "go test ./internal/cli -run TestGenuineFailure";
+  const r = classifySilence(cmd, GO_GENUINE_FAILURE);
+
+  assert.equal(r.verdict, VERDICT.FAILED, "an assertion that did not hold IS a refutation");
+  assert.equal(GO_BUILD_FAULT.exit, GO_GENUINE_FAILURE.exit,
+    "both specimens exit 1 — if this ever diverges the pair stops proving anything");
+  assert.equal(classifyToolchainFault(cmd, GO_GENUINE_FAILURE), null,
+    "no build marker in a run that reached its assertions");
+});
+
+test("the fault rule is inert at exit 0 and on a non-toolchain head", () => {
+  // It can only ever DEMOTE a nonzero run. It never manufactures a fault.
+  assert.equal(classifyToolchainFault("go test ./...", { exit: 0, stdout: "ok\tprobe\t0.1s\n", stderr: "" }), null);
+  assert.equal(classifyToolchainFault("go test ./...", { exit: null, stdout: "", stderr: "" }), null);
+  // grep is not a toolchain: its rc1 is a genuine no-match and must stay FAILED.
+  assert.equal(classifyToolchainFault("grep -rn '[build failed]' logs/", { exit: 1, stdout: "", stderr: "" }), null);
+  const grep = classifySilence("grep -rn foo lib/", { exit: 1, stdout: "", stderr: "" });
+  assert.equal(grep.verdict, VERDICT.FAILED, "a real no-match is untouched by the toolchain rule");
+  assert.equal(admitsAbsenceClaim(grep), true);
+});
+
+test("the marker table is keyed BY HEAD — one toolchain's banner does not speak for another", () => {
+  // `node --test` prints whatever a FIXTURE contains. A JS suite whose fixture
+  // holds Go's build banner must not be read as a Go build failure, or grip's
+  // own test output becomes an environment fault.
+  const nodePrintingGoBanner = { exit: 1, stdout: "not ok 12 - FAIL\tprobe [build failed]\n", stderr: "" };
+  assert.equal(classifyToolchainFault("node --test tooling/grip/test/rerun.test.mjs", nodePrintingGoBanner), null,
+    "Go's banner is not in node's marker list");
+  // …while node's OWN resolution fault is caught.
+  assert.match(
+    String(classifyToolchainFault("node --test tooling/grip/test/x.test.mjs",
+      { exit: 1, stdout: "", stderr: "Error: Cannot find module '/x/y.mjs'\n" })),
+    /module could not be resolved/,
+  );
+});
+
+test("the fault rule reaches every toolchain family, not just UNKNOWN", () => {
+  // `go build` is a GO_LISTER → FAMILY.QUERY-LISTER, whose nonzero branch is a
+  // flat `exited N` FAILED. A cgo fault there was laundered exactly the same
+  // way, so the rule had to sit ABOVE the family switch rather than inside a
+  // case.
+  const build = classifySilence("go build ./internal/cli", {
+    exit: 1, stdout: "", stderr: "# runtime/cgo\nerror: unknown option '-E'\n",
+  });
+  assert.equal(build.family, FAMILY.QUERY_LISTER);
+  assert.equal(build.verdict, VERDICT.UNAVAILABLE);
+
+  const mix = classifySilence("mix test test/foo_test.exs", {
+    exit: 1, stdout: "", stderr: "== Compilation error in file lib/foo.ex ==\n",
+  });
+  assert.equal(mix.verdict, VERDICT.UNAVAILABLE);
+
+  // …and a mix run that reached its assertions is still a refutation.
+  const mixReal = classifySilence("mix test test/foo_test.exs", {
+    exit: 1, stdout: "  1) test it works (FooTest)\n1 test, 1 failure\n", stderr: "",
+  });
+  assert.equal(mixReal.verdict, VERDICT.FAILED);
 });

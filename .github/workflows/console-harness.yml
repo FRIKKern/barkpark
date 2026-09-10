@@ -415,6 +415,7 @@ jobs:
         || steps.sweep.outputs.verdict
         || steps.reason-arm-census.outputs.verdict
         || steps.me-envelope-census.outputs.verdict
+        || steps.init-wiring-census.outputs.verdict
         || steps.binding-census.outputs.verdict
         || steps.refusal-copy-census.outputs.verdict
         || steps.agent-event-census.outputs.verdict
@@ -897,9 +898,17 @@ jobs:
 
       # ── STEP ORDER IS PART OF THE INSTRUMENT (cch-w45, wave 45) ────────────
       #
-      # THE FOUR CENSUSES BELOW RUN DERIVED-FIRST, PINNED-SECOND, ON PURPOSE.
+      # THE SEVEN CENSUSES BELOW RUN DERIVED-FIRST, PINNED-SECOND, ON PURPOSE.
       # Read that as a decision, not as the order they happened to be written
       # in — the next slice to add a census has to pick a side.
+      #
+      # THE SIDES, as of cchi-w44-bl (this comment was written when there were
+      # four and is re-derived here rather than left to rot): DERIVED, and so
+      # first, are the reason-arm census, the /v1/me envelope census and the
+      # init wiring census — each computes BOTH sides of its own comparison and
+      # holds no pinned population. PINNED, and so second, are the binding, the
+      # refusal-copy, the agent-event vocabulary and the absence-as-answer
+      # censuses. A new census picks its side by that test and nothing else.
       #
       # GitHub runs a job's steps in file order and every step here carries the
       # default `success()` condition: no step in this workflow has an `if:`
@@ -932,7 +941,13 @@ jobs:
       # precedent) makes all four verdicts independent check-run facts and is
       # strictly better on this axis, but it multiplies four `actions/setup-node`
       # + checkout cycles onto every console PR for a diagnostic gain. Ordering
-      # buys most of it for nothing. If a fifth census lands, revisit.
+      # buys most of it for nothing. The original text here said "if a FIFTH
+      # census lands, revisit"; three have landed since (agent-event, absence-
+      # as-answer, init-wiring) and the answer each time was the same, so the
+      # trigger is restated as a condition rather than a count: revisit when a
+      # census in this job is red often enough for a bookkeeping reason that its
+      # silencing of the ones after it costs a real diagnosis. Adding one more
+      # step is not that event.
 
       # ── THE REASON-ARM CENSUS (charter D448/D449, wave 40) ──────────────────
       #
@@ -1052,6 +1067,63 @@ jobs:
           esac
           if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
           echo "::error title=console-unit ${v} — __me_envelope_census.mjs::__me_envelope_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
+      # ── THE INIT WIRING CENSUS (cchi-w44-bl, wave 44's last Law-0 move) ─────
+      #
+      # The LAST of the derived group, and the one that closes the oldest hole
+      # in this job: a control's HANDLER was pinned and its WIRING was not.
+      #
+      # cloud/priv/static/app.js `init()` attaches every console listener, one
+      # `addEventListener` per control. __app.test.mjs pins the handlers behind
+      # them — it calls those functions directly through the __bpTestHook — and
+      # nothing anywhere called the attachment. MEASURED on this branch, with
+      # the single line
+      #
+      #     if (membersInvite) membersInvite.addEventListener("click", membersInviteClick);
+      #
+      # deleted from init(): __app.test.mjs 1396/1396 pass, __css_check.mjs rc 0,
+      # and all SIX censuses that predate this one rc 0. The Members panel's
+      # Invite button did nothing and this job said the console was fine.
+      #
+      # DERIVED ON BOTH SIDES, WHICH IS WHY IT RUNS HERE AND NOT BELOW: it holds
+      # NO roster of controls. It parses init() into (target, event, handler)
+      # triples and asks two questions the source answers about itself —
+      #   (A) ORPHANED LOOKUP: a `$("#selector")` evaluated at init()'s own
+      #       statement level that never reaches an addEventListener. This is
+      #       the arm the deletion above reds, BY SELECTOR: the
+      #       `var membersInvite = $("#members-invite");` line survives it.
+      #   (B) DANGLING HANDLER: a listener naming a function no declaration in
+      #       app.js provides — it throws at CLICK TIME, where no node test is.
+      # A control added tomorrow is covered without editing this file.
+      #
+      # PROVEN ABLE TO LOSE IN BOTH DIRECTIONS BEFORE THIS STEP WAS WIRED:
+      #   rc=1 — the #members-invite deletion above (arm A, names the selector),
+      #          and a listener wired to an undeclared handler (arm B)
+      #   rc=2 — it REFUSES rather than passes on an input it cannot read: the
+      #          init() anchor absent or ambiguous, a body that does not
+      #          brace-balance, a literal `.addEventListener(` call site no
+      #          triple accounts for, a computed `$( … )` selector it cannot
+      #          name, or a population under the floor. An empty population is
+      #          never a pass.
+      #
+      # It reads cloud/priv/static/app.js ONLY, which the console dispatch set
+      # has always covered (scripts/console-path-escape-check.sh).
+      - name: Init wiring census (every control init() looks up is wired)
+        id: init-wiring-census
+        run: |
+          # Verdict wrapper — same contract as the censuses above.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__init_wiring_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __init_wiring_census.mjs::__init_wiring_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
           exit 1
 
       # THE ELEVATED-WRITE BINDING CENSUS (cch-w37-s4, charter D383/D409/D421).

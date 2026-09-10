@@ -1973,15 +1973,152 @@ async (faceOverride) => {
   //    (D31/D39). The non-vacuity guard below is what makes the drift loud.
   //    THE LIMIT OF THIS, STATED PLAINLY: the forced sample forces exactly ONE
   //    known pointer-events:none occluder — the scrim. An ELEMENT occluder that
-  //    is also pointer-events:none, and that nobody has written yet, would be
-  //    invisible to BOTH samples and would silently not be subtracted. The
-  //    ancestry test catches every normal overlay automatically; it does not
-  //    catch an invisible-to-hit-testing one. Forcing pointer-events globally
-  //    was considered and rejected: it would make every decorative
-  //    pointer-events:none element (icons, gradients, rules) read as an
-  //    occluder and the metric would collapse to noise. This is a real
-  //    remaining hole and is named here rather than left for a verifier to find.
+  //    is also pointer-events:none is invisible to BOTH samples and would
+  //    silently not be subtracted. The ancestry test catches every normal
+  //    overlay automatically; it does not catch an invisible-to-hit-testing one.
+  //
+  //    THAT HOLE IS FORMALLY ACCEPTED (spd-scrim-guard-real-but-wrong-selector-
+  //    untested, 2026-09-10), NOT CLOSED, AND ITS PREMISE IS CORRECTED. This
+  //    comment used to say such an element "nobody has written yet". That was
+  //    false when it was written: root.html.heex ships at least three today —
+  //    '.bp-ae-toast' (position:fixed, z-index:200, pointer-events:none, bottom
+  //    24px and centred, i.e. squarely over the reading column's lowest
+  //    scanline), '.presence-tooltip' (z-index:60, hover-gated) and
+  //    '.presence-dots'. So the hazard is OCCUPIED, not hypothetical.
+  //
+  //    WHY IT IS ACCEPTED RATHER THAN SUBTRACTED. Forcing pointer-events
+  //    globally was considered and rejected: it would make every decorative
+  //    pointer-events:none element (icons, gradients, rules, presence dots) read
+  //    as an occluder and the metric would collapse to noise — the exact
+  //    hand-maintained-list failure D112 abolished, re-imported as a
+  //    hand-maintained EXCEPTION list. And subtraction would be WRONG for this
+  //    metric anyway: 'visible_content_px' answers CAN THE READER SEE THE GLYPH,
+  //    and a pointer-events:none element that is also transparent (the common
+  //    case) does not stop them.
+  //
+  //    WHAT REPLACES THE SILENCE. Acceptance without a tripwire is just the
+  //    hole with better prose, so the blind spot is MEASURED AND NAMED instead
+  //    of subtracted: 'occlusion.invisible_occluder_census' enumerates, per row,
+  //    every element whose computed pointer-events is 'none', that paints, and
+  //    whose rect overlaps the measured band — and reports its overlap in px.
+  //    The census NEVER changes a number (D81: the instrument has no gate
+  //    authority over the figures); it makes a reader of the artifact able to
+  //    see that the blind spot was empty in this run, rather than assume it.
+  //    A nonzero count is a signal to look, not a defect by itself.
+  //
+  //    AND THE SELECTOR'S IDENTITY IS PINNED, because the guard below does not
+  //    pin it. Mutation-proven 2026-09-10 on served sha 4889e332: replacing this
+  //    constant with the b29 SCRIM SUPPRESSOR from root.html.heex — a REAL,
+  //    verbatim, same-host, same-pseudo rule, '.editor-with-preview:has(
+  //    .bp-doc-sidebar.is-open:not([data-user-opened]))::after' — the run exited
+  //    0, wrote a full 54-row artifact and the positive control still reported
+  //    'guard_passed: true' with byte-identical figures, WHILE the injection
+  //    silently missed the pseudo in 18 user-opened rows (pointer_events_forced
+  //    went 'auto' -> 'none'). The non-vacuity guard certifies EFFECT — "some
+  //    rule moved the hit-test" — never IDENTITY. 'scrim_selector_identity'
+  //    below is the identity half: it reads the SHIPPED stylesheet and asserts
+  //    this constant names a rule that actually GENERATES the scrim box, so a
+  //    selector that names a suppressor ('content: none') or names nothing at
+  //    all is loud instead of silently plausible.
   const SCRIM_SELECTOR = '.editor-with-preview:has(.bp-doc-sidebar.is-open)::after';
+
+  // THE IDENTITY SCAN. Reads the rules the BOX actually served and reports every
+  // rule whose selectorText is byte-equal (whitespace-normalised) to the constant
+  // above, with the declarations that rule makes. Classified in Node by
+  // 'classifyScrimSelectorIdentity', which is pure and therefore testable without
+  // a browser, a box or an admin token. Cross-origin sheets (Google Fonts) throw
+  // on '.cssRules' and are COUNTED as unreadable rather than swallowed: a scan
+  // that could not read anything reports 'scan_readable: false' and is treated as
+  // unknown, never as absent — an empty read is not evidence of absence.
+  const scrimSelectorIdentity = (() => {
+    const norm = (v) => String(v).replace(/\s+/g, ' ').trim();
+    const want = norm(SCRIM_SELECTOR);
+    const props = (st) => Array.from({ length: st.length }, (_, i) => st.item(i));
+    const out = {
+      selector: SCRIM_SELECTOR,
+      sheets_total: 0,
+      sheets_readable: 0,
+      sheets_unreadable: 0,
+      matched_rules: [],
+    };
+    const visit = (rules) => {
+      for (const r of rules) {
+        if (r.cssRules) { try { visit(r.cssRules); } catch (e) { /* nested unreadable */ } }
+        if (!r.selectorText || !r.style) continue;
+        for (const one of String(r.selectorText).split(',')) {
+          if (norm(one) !== want) continue;
+          const declared = props(r.style);
+          out.matched_rules.push({
+            selector_text: norm(one),
+            declared_properties: declared,
+            content_declared: declared.indexOf('content') !== -1,
+            content_value: r.style.getPropertyValue('content'),
+            pointer_events: r.style.getPropertyValue('pointer-events'),
+            position: r.style.getPropertyValue('position'),
+            z_index: r.style.getPropertyValue('z-index'),
+            css_text: r.style.cssText,
+          });
+        }
+      }
+    };
+    for (const sheet of Array.from(document.styleSheets)) {
+      out.sheets_total++;
+      let rules = null;
+      try { rules = sheet.cssRules; } catch (e) { out.sheets_unreadable++; continue; }
+      out.sheets_readable++;
+      try { visit(rules); } catch (e) { /* keep what was already collected */ }
+    }
+    out.scan_readable = out.sheets_readable > 0;
+    out.method =
+      'every rule in every READABLE stylesheet, recursing into @media/@container/@supports, whose ' +
+      'selectorText (split on commas, whitespace-normalised) equals SCRIM_SELECTOR exactly. The ' +
+      'declarations are reported so a rule that SUPPRESSES the scrim (content: none) is ' +
+      'distinguishable from the rule that GENERATES it.';
+    return out;
+  })();
+
+  // THE INVISIBLE-OCCLUDER CENSUS. The named, accepted blind spot, made visible.
+  // Rect first, computed style second, deliberately: getComputedStyle on every
+  // node in a 100-row desk is the expensive half, and the rect test throws away
+  // almost all of them before it is reached.
+  const invisibleOccluderCensus = (() => {
+    const found = [];
+    let scanned = 0;
+    for (const el of document.querySelectorAll('*')) {
+      scanned++;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      const ox = Math.min(contentRight, r.right) - Math.max(contentLeft, r.left);
+      const oy = Math.min(bandBottom, r.bottom) - Math.max(bandTop, r.top);
+      if (ox <= 0 || oy <= 0) continue;
+      if (el.contains(surface) || surface.contains(el) || el === surface) continue;
+      const cs = getComputedStyle(el);
+      if (cs.pointerEvents !== 'none') continue;
+      if (cs.visibility === 'hidden' || cs.display === 'none') continue;
+      if (parseFloat(cs.opacity) === 0) continue;
+      found.push({
+        tag: el.tagName.toLowerCase(),
+        class_name: typeof el.className === 'string' ? el.className.slice(0, 120) : null,
+        position: cs.position,
+        z_index: cs.zIndex,
+        opacity: cs.opacity,
+        overlap_over_content_px: round(ox),
+        overlap_height_px: round(oy),
+      });
+    }
+    return {
+      elements_scanned: scanned,
+      count: found.length,
+      elements: found.slice(0, 12),
+      truncated: found.length > 12,
+      note:
+        'ELEMENTS (never pseudo-elements) whose computed pointer-events is none, that paint, and whose ' +
+        'rect overlaps the measured band. They are invisible to BOTH hit-test samples, so they are ' +
+        'NEVER subtracted from any figure — this is a census, not a correction (D81). A nonzero count ' +
+        'is a prompt to look at the row, not a defect. It exists because the alternative was an ' +
+        'accepted blind spot with nothing in the artifact saying whether it was occupied.',
+    };
+  })();
 
   // Snapshot BEFORE injecting, as STRINGS. getComputedStyle returns a LIVE
   // object: holding one and reading it after the restore would compare the page
@@ -2224,6 +2361,8 @@ async (faceOverride) => {
         'full-height overlay moves every line together and must not be diluted. scanline_spread carries ' +
         'the min, the max and the disagreement so nothing is hidden by the choice.',
       non_vacuity: nonVacuity,
+      scrim_selector_identity: scrimSelectorIdentity,
+      invisible_occluder_census: invisibleOccluderCensus,
       restore: restoreCheck,
     },
     measure_note:
@@ -3928,6 +4067,30 @@ async function main() {
               `and look like good news. Re-sync the selector; do not publish this matrix.`);
         }
 
+        // ── SELECTOR IDENTITY IS FATAL TOO, and for a strictly different
+        //    reason than the guard above. The guard dies when the injected rule
+        //    has NO effect; this dies when the rule names the wrong thing while
+        //    still having one. The wrong-but-real mutation of 2026-09-10 passed
+        //    the guard, the positive control AND the restore check — three
+        //    greens over an injection that missed the pseudo in 18 rows. Only a
+        //    read of the served stylesheet catches that, so it is read.
+        const ident = classifyScrimSelectorIdentity(rec.occlusion?.scrim_selector_identity);
+        if (ident.fatal) {
+          die(`SCRIM SELECTOR IDENTITY FAILED at viewport ${width}px, state "${stateId}", face ${face.id} ` +
+              `— verdict ${ident.verdict}.\n\n  ${ident.reason}\n\n` +
+              `  The injected rule is:\n    ${rec.occlusion.restore.injected_rule}\n\n` +
+              `  This is NOT the non-vacuity guard. That one asks whether the injection moved the ` +
+              `hit-test; a rule naming the WRONG real selector can move it and still measure the wrong ` +
+              `box. Re-sync SCRIM_SELECTOR with root.html.heex's scrim GENERATOR — the rule that ` +
+              `declares content, not one of the four that declare content:none — and do not publish ` +
+              `this matrix.`);
+        }
+        if (ident.verdict === 'unknown') {
+          run.warnings.push(
+            `selector identity UNKNOWN at viewport ${width}px, state "${stateId}", face ${face.id}: ` +
+            ident.reason);
+        }
+
         // ── RESTORE MUST BE BYTE-IDENTICAL. This harness mutates a live page it
         //    then keeps measuring; a mutation it failed to undo is a state THIS
         //    HARNESS INVENTED, silently inherited by every row after it.
@@ -4348,10 +4511,41 @@ export function summariseNonVacuity(run) {
     }
   }
 
+  // ── WHAT THE GUARD CAN EVER COVER, stated as a fraction rather than left to
+  //    be inferred from a green (spd-scrim-guard-real-but-wrong-selector-
+  //    untested). The guard has an opinion ONLY where the scrim RENDERS, and the
+  //    scrim can only render where the inspector overlays the document — i.e.
+  //    never in a `default` row. So the default half of the matrix (27 of 54) is
+  //    UNCOVERED BY CONSTRUCTION, not by accident, and that is exactly where
+  //    D136(ii)'s three failing Georgia cells live. A run that reports
+  //    "21 of 21 passed" is saying something about at most the user-opened half
+  //    and NOTHING about those cells.
+  const defaultRows = hitTested.filter((r) => r.inspector_state === 'default');
+  const defaultApplies = defaultRows.filter((r) => r.occlusion.non_vacuity.guard_applies);
+  const coverage = {
+    hit_tested_rows: hitTested.length,
+    default_state_rows: defaultRows.length,
+    default_state_rows_where_guard_applies: defaultApplies.length,
+    rows_where_guard_applies: applies.length,
+    statement:
+      `The guard applied in ${applies.length} of ${hitTested.length} hit-tested rows and in ` +
+      `${defaultApplies.length} of ${defaultRows.length} default-state rows. A default row has no ` +
+      `scrim to detect, so the guard is structurally incapable of covering it — the default half of ` +
+      `the matrix is uncovered BY CONSTRUCTION. Whatever this run's pass count is, it does NOT ` +
+      `validate D136(ii)'s three failing Georgia cells, which are default-state cells.`,
+    history:
+      'The task that added this block quotes an earlier sweep at 21 of 54 rows covered and ZERO ' +
+      'default-state rows. On served sha 4889e332 (2026-09-10) the measured figure was 0 of 54: ' +
+      'D170/D175 suppressed the scrim in every remaining bucket, so no real row renders one at all ' +
+      'and only --positive-control can exercise the guard. Both numbers make the same point — the ' +
+      'covered fraction is a MINORITY of the matrix and never includes a default row.',
+  };
+
   return {
     applies_in_rows: applies.length,
     passed_in_rows: passed.length,
     hit_tested_rows: hitTested.length,
+    coverage,
     scrim_host_present_in_rows: hostPresent,
     scrim_renders_in_rows: scrimRenders,
     vacuous: applies.length === 0,
@@ -4365,6 +4559,72 @@ export function summariseNonVacuity(run) {
       : 'Where the scrim renders, forcing its pointer-events moved the hit-test; the dimming ' +
         'figures in those rows are derived from a rule that actually matches the deployed CSS.',
   };
+}
+
+/**
+ * SELECTOR IDENTITY, CLASSIFIED — the check the non-vacuity guard is not.
+ *
+ * WHY IT EXISTS. The non-vacuity guard proves the injected rule MOVED THE
+ * HIT-TEST. Mutation-proven 2026-09-10: swap SCRIM_SELECTOR for the b29 scrim
+ * SUPPRESSOR — a real, verbatim, same-host, same-pseudo rule from
+ * root.html.heex — and the run exits 0, writes all 54 rows, and the positive
+ * control still says `guard_passed: true`, while the injection silently misses
+ * the pseudo in every user-opened row. Effect is not identity. This reads the
+ * SHIPPED stylesheet and asks the other question: does this constant name a rule
+ * that GENERATES the scrim box?
+ *
+ * PURE, so all four verdicts can be exercised in milliseconds without a browser,
+ * a box or an admin token — the same reason `compareProvenance` is pure.
+ *
+ * `unknown` IS NOT `absent`. A scan that could read no stylesheet at all has
+ * measured nothing; reporting that as "the selector is gone" would be a false
+ * red manufactured out of an empty read.
+ */
+export function classifyScrimSelectorIdentity(scan) {
+  if (!scan || typeof scan !== 'object') {
+    return { verdict: 'unknown', fatal: false, matched_rules: 0, generator_rules: 0,
+             reason: 'no identity scan in this record — an older artifact, or a row measured before ' +
+                     'the scan existed. Nothing was read, so nothing is claimed.' };
+  }
+  if (!scan.scan_readable) {
+    return { verdict: 'unknown', fatal: false, matched_rules: 0, generator_rules: 0,
+             reason: `no stylesheet was readable (${scan.sheets_unreadable ?? '?'} of ` +
+                     `${scan.sheets_total ?? '?'} threw on .cssRules), so the selector was neither ` +
+                     'confirmed nor refuted. An empty read is not evidence of absence.' };
+  }
+  const rules = Array.isArray(scan.matched_rules) ? scan.matched_rules : [];
+  if (rules.length === 0) {
+    return { verdict: 'absent', fatal: true, matched_rules: 0, generator_rules: 0,
+             reason: `${scan.sheets_readable} readable stylesheet(s) were scanned and NOT ONE rule ` +
+                     `has the selector ${scan.selector}. The constant no longer names anything the ` +
+                     'box serves: the injected pointer-events rule is a no-op and every dimming ' +
+                     'figure derived from it is a silent zero.' };
+  }
+  // A rule GENERATES the box only if it declares `content` to something that
+  // generates one. `content: none` is the suppression idiom root.html.heex uses
+  // in four separate places — a selector that names one of those is a selector
+  // that names the OFF switch, which is precisely the wrong-but-real drift.
+  const generates = (r) => {
+    if (!r.content_declared) return false;
+    const v = String(r.content_value ?? '').trim();
+    return v !== '' && v !== 'none' && v !== 'normal';
+  };
+  const generators = rules.filter(generates);
+  if (generators.length === 0) {
+    return { verdict: 'not-a-generator', fatal: true, matched_rules: rules.length, generator_rules: 0,
+             reason: `${rules.length} rule(s) carry the selector ${scan.selector}, but none of them ` +
+                     'generates a box: ' +
+                     rules.map((r) => r.content_declared ? `content:${r.content_value}` : 'no content declaration')
+                          .join(' | ') +
+                     '. The constant names a SUPPRESSOR (or a rule that only tweaks the pseudo), not ' +
+                     'the scrim generator, so forcing pointer-events on it proves nothing about the ' +
+                     'scrim this instrument claims to be subtracting.' };
+  }
+  return { verdict: 'generator', fatal: false, matched_rules: rules.length,
+           generator_rules: generators.length,
+           reason: `${generators.length} of ${rules.length} rule(s) with this selector declare a ` +
+                   'generated box, so the constant names the shipped scrim generator itself — not ' +
+                   'merely something with a hit-test effect.' };
 }
 
 /** The order the human table walks its states: DERIVED FROM THE ROWS, with the

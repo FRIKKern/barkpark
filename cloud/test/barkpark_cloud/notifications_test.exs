@@ -247,12 +247,25 @@ defmodule BarkparkCloud.NotificationsTest do
       {team, _emails} = team_with_members(1)
       {:ok, _} = Notifications.ensure_settings(team)
 
-      # :test is in @always_send — no per-event toggle column, yet it sends.
-      assert :ok = Notifications.dispatch_event(team, :test, %{})
+      # cch-w52-bl: this test used to drive `:test`, which was on `@always_send`
+      # with NO producer anywhere in `cloud/lib` — the test WAS the producer, so
+      # it pinned the allowlist row rather than the rule. `:trial_expiring` is
+      # the same shape with a real one: `TrialExpiryWorker` dispatches it, it is
+      # NOT an `EmailSettings` toggle column (`EmailSettings.events/0` does not
+      # list it, so `event_enabled?/2`'s catch-all answers false), and it has a
+      # real `EventEmail.render/3` arm. So it exercises the identical property —
+      # `should_send?/2`'s `@always_send` clause beats the absent per-event
+      # toggle, and `alerts_enabled: false` still beats `@always_send` — over an
+      # event the control plane actually emits.
+      assert :ok = Notifications.dispatch_event(team, :trial_expiring, %{days: 3, name: "prod"})
       assert_email_sent()
 
+      # The toggle really is absent: this is the arm that would have sent by
+      # per-event opt-in instead of by the allowlist.
+      refute :trial_expiring in EmailSettings.events()
+
       {:ok, _} = Notifications.update_settings(team, %{"alerts_enabled" => false})
-      assert :ok = Notifications.dispatch_event(team, :test, %{})
+      assert :ok = Notifications.dispatch_event(team, :trial_expiring, %{days: 3, name: "prod"})
       # No NEW email beyond the first.
       assert length(Notifications.list_deliveries(team)) == 1
     end

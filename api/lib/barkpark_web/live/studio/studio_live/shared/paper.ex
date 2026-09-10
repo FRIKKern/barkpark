@@ -22,6 +22,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias Barkpark.Content
   alias Barkpark.Content.Labels
   alias Barkpark.Content.Papers.CanvasRunContext
+  alias Barkpark.Content.Papers.PreGateRegister
   alias Barkpark.PortableDoc.Render.SectionLayout
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, TaskResolver}
   alias BarkparkWeb.ScopeHelpers
@@ -2338,7 +2339,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         if(PaperCanvas.paper_canvas_enabled?(),
           do: [],
           else:
-            paper_stream_items(blocks, socket.assigns.dataset, ScopeHelpers.scope_opts(socket))
+            paper_stream_items(
+              blocks,
+              socket.assigns.dataset,
+              ScopeHelpers.scope_opts(socket),
+              paper_doc_id(paper)
+            )
         ),
         reset: true
       )
@@ -2501,7 +2507,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   @doc false
-  def paper_stream_items(blocks, dataset, scope) do
+  def paper_stream_items(blocks, dataset, scope, paper_id \\ nil) do
+    # Grandfather badge (task-597ea451072da061): the SAME seam the /papers
+    # reader uses — `PreGateRegister.annotate/3` on the stored (unresolved)
+    # blocks, before any resolution. Register membership AND a still-refused
+    # gate recheck insert ONE synthesised badge block under the byline; the
+    # stored `blocks` (the save baseline) are never touched, so the badge can
+    # not be saved back into the Paper.
+    stored = blocks
+    blocks = PreGateRegister.annotate(blocks, paper_id, stored)
+
     # pdd-t11 debt fix (2): resolve LIVE task/query blocks the SAME way the
     # /papers reader does — `Content.Papers.resolve_tasks_in_blocks/2`, the ONE
     # producer (doctrine rule 3). Without this, the Studio read-only VIEW render
@@ -2560,6 +2575,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       %{id: paper_stream_block_id(block, index), html: Render.render_block(block, opts)}
     end)
   end
+
+  # The pane doc's id for the pre-gate register lookup (a `%Content.Document{}`
+  # or a plain map); nil when there is no paper — the register answers nil too.
+  @doc false
+  def paper_doc_id(%{doc_id: doc_id}) when is_binary(doc_id), do: doc_id
+  def paper_doc_id(%{"doc_id" => doc_id}) when is_binary(doc_id), do: doc_id
+  def paper_doc_id(_), do: nil
 
   @doc false
   def paper_stream_block_id(block, index) do
@@ -2655,7 +2677,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket
             |> stream(
               :paper_blocks,
-              paper_stream_items(blocks, dataset, ScopeHelpers.scope_opts(socket)),
+              paper_stream_items(
+                blocks,
+                dataset,
+                ScopeHelpers.scope_opts(socket),
+                paper_doc_id(paper)
+              ),
               reset: true
             )
             |> assign(:paper_doc, paper)

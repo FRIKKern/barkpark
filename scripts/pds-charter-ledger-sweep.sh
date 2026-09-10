@@ -216,10 +216,28 @@ def load_ledger():
                       % (limit, offset, r["limit"], r["offset"]))
         if not isinstance(r["documents"], list):
             unchecked("ledger page at offset %d has a non-list 'documents'" % offset)
+        # count is the terminator below, so it is scored against what actually
+        # arrived. A page whose count and documents disagree is a TRANSPORT
+        # FAILURE; read as a short page it ends the walk and hands back a
+        # SMALLER BOARD with no error.
+        if r["count"] != len(r["documents"]):
+            unchecked("ledger page at offset %d says count=%s and delivered %d documents"
+                      % (offset, r["count"], len(r["documents"])))
+        # `hasMore` is EXACT (the server reads limit+1). When it is present it
+        # decides; a short page only ends the walk when nothing contradicts it.
+        has_more = r.get("hasMore")
+        if has_more is not None and not isinstance(has_more, bool):
+            unchecked("ledger page at offset %d has a non-boolean hasMore=%r" % (offset, has_more))
+        if has_more is True and r["count"] < limit:
+            unchecked("ledger page at offset %d delivered %d of %d rows and the server "
+                      "says hasMore=true -- a TRUNCATED page is not the end of the board"
+                      % (offset, r["count"], limit))
         for doc in r["documents"]:
             status[doc["_id"]] = doc.get("lifecycle_status")
         pages.append((offset, r["count"]))
-        if r["count"] < limit:
+        if has_more is False:
+            break
+        if has_more is None and r["count"] < limit:
             break
         offset += limit
         time.sleep(0.4)

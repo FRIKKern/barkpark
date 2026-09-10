@@ -315,6 +315,26 @@ defmodule Barkpark.Content.Graph do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
+    # THE SCHEMA LIST IS HOISTED, ONCE (task-051a87de9a085e4d). It is invariant
+    # across the whole fold, and `Content.Edges.extract_edges/2` reads it
+    # `Keyword.get_lazy(:schemas, fn -> Content.list_schemas(dataset, opts) end)`
+    # — so WITHOUT this prefetch the fold issued ONE schema query PER DOCUMENT.
+    # That is the cost `extract_edges/2`'s own doc names ("a 4096-document
+    # corpus issued 4096 identical schema queries … measured live: a 34s first
+    # paint") and the one `corpus_edges/3` already hoists on the published side.
+    # Here it was the difference between a bounded read and a request that never
+    # returned on guerrilla: the drafts fold walks the WHOLE dataset corpus on
+    # every `?drafts=true` call, so its per-document round-trips are unbounded
+    # by depth, by `@node_budget` and by `@fan_out` alike — every bound the
+    # drafts walk owns sits DOWNSTREAM of this fold.
+    #
+    # Prefetching cannot change what any document extracts: every doc in the
+    # fold comes from THIS dataset (the `collect_all_documents(schema.name,
+    # dataset, …)` reads below), so the list handed down is byte-identical to
+    # the one each per-document call would have read for itself.
+    schemas =
+      if is_binary(dataset) and dataset != "", do: Content.list_schemas(dataset, opts), else: []
+
     # WALK THE WHOLE DRAFTS CORPUS. This was `list_documents(limit: 1000)`, and
     # `list_documents/3` CLAMPS :limit to 1000 and returns a bare list — so a
     # dataset with more than 1000 drafts of a type built its adjacency index
@@ -325,8 +345,7 @@ defmodule Barkpark.Content.Graph do
     # that happened to fall past the cap.
     {docs, truncated} =
       if is_binary(dataset) and dataset != "" do
-        dataset
-        |> Content.list_schemas(opts)
+        schemas
         |> Enum.map_reduce(nil, fn schema, trunc_acc ->
           {page, trunc} =
             Content.collect_all_documents(schema.name, dataset,
@@ -364,15 +383,65 @@ defmodule Barkpark.Content.Graph do
       end)
       |> MapSet.new()
 
+    # THE TWO HOISTS, TOGETHER — they are the whole fix (task-051a87de9a085e4d).
+    #
+    #   `:schemas`  — the invariant schema list, read ONCE above instead of once
+    #                 per document inside `extract_edges/2`.
+    #   `dangling:` — `:skip` here, then ONE batched pass over the DISTINCT
+    #                 `{to_id, refType}` targets of the whole fold
+    #                 (`resolve_core_dangling/3`), instead of one un-batched
+    #                 round-trip per reference value per document.
+    #
+    # Both are pure round-trip removals: `Content.Edges.resolvable_targets/3`
+    # runs `resolve_target_existence/4`'s OWN two predicates (typed via
+    # `get_document/4`'s scoping pipeline, untyped via the type-agnostic
+    # published-lens existence query), so every edge's `dangling` boolean is the
+    # value it had before — computed once for a target instead of once per
+    # occurrence.
+    edge_opts = opts |> Keyword.put(:schemas, schemas) |> Keyword.put(:dangling, :skip)
+
     edge_list =
       docs
-      |> Enum.flat_map(fn doc -> drafts_edges_for_doc(doc, corpus_slugs, opts) end)
+      |> Enum.flat_map(fn doc -> drafts_edges_for_doc(doc, corpus_slugs, edge_opts) end)
+      |> resolve_core_dangling(dataset, opts)
       |> filter_drafts_edges(opts)
 
     out_index = Enum.group_by(edge_list, & &1.from_id)
     in_index = Enum.group_by(edge_list, & &1.to_id)
 
     {out_index, in_index, edge_list}
+  end
+
+  # THE BATCHED DANGLING PASS. Core edges leave `drafts_edges_for_doc/3` with
+  # `dangling: nil` — `extract_edges/2`'s documented "NOT COMPUTED" marker under
+  # `dangling: :skip`. Plugin edges never carry nil: `normalize_plugin_drafts_edge/2`
+  # already decided theirs from `corpus_slugs` (the deliberate lens difference
+  # documented there), so the `nil` test is exactly "a core edge still owing an
+  # answer" and this pass leaves plugin edges alone.
+  #
+  # ONE `resolvable_targets/3` call for the whole fold: bounded by the number of
+  # DISTINCT `refType`s, never by the number of documents or reference values.
+  defp resolve_core_dangling(edges, dataset, opts) do
+    pending = Enum.filter(edges, fn e -> Map.get(e, :dangling) == nil end)
+
+    case pending do
+      [] ->
+        edges
+
+      _ ->
+        resolvable =
+          pending
+          |> Enum.map(fn e -> {e.to_id, Map.get(e, :refType)} end)
+          |> Content.Edges.resolvable_targets(dataset, opts)
+
+        Enum.map(edges, fn e ->
+          if Map.get(e, :dangling) == nil do
+            %{e | dangling: not MapSet.member?(resolvable, {e.to_id, Map.get(e, :refType)})}
+          else
+            e
+          end
+        end)
+    end
   end
 
   # The per-doc union, mirroring `EdgeProjector.Projector.edges_for_doc/2`

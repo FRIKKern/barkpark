@@ -5,6 +5,12 @@
 
 Frozen `/v1`: breaking changes need `/v2`; additive stay in v1.
 
+**Reading this from a JavaScript or TypeScript app?** Use the SDK rather than raw
+`fetch`: `@barkpark/core` wraps these routes (query builder, mutations, media,
+`listen()`), and `@barkpark/nextjs` adds App Router integration. Consumption
+guide: [cards/js-sdk.md](cards/js-sdk.md). Prose docs site: `pnpm -C js install
+&& pnpm -C js --filter @barkpark/docs dev`.
+
 ## 1a. Workspace → Project → Dataset hierarchy
 
 A **Workspace** is the token-bound tenant of **Projects**, **Datasets**, **Documents** (§3). Canonical paths start `/w/:workspace_slug/p/:project_slug/v1/data/...`.
@@ -57,6 +63,8 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
 Fetch one document. 404 if missing or the schema is `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published.
+
+**Read-after-write is IMMEDIATE, not eventual.** A mutation is visible on the next read — 63 reads across 3 timed trials on live production, first sample t+0.45s, zero misses (`pds-bl-doc-patch-propagation-lag`). Responses carry `cache-control: max-age=0, private, must-revalidate` and the ETag is folded from the row's own `_id:_rev`, so no shared cache can serve a stale body. What looks like propagation lag is the **draft/published split**: a write that lands on `drafts.<id>` is served by `?perspective=drafts` ONLY — `published`, `raw` and `bp task get` all do an exact-id lookup and keep returning the published row until the draft is published. Diagnose a "missing" write by reading `?perspective=drafts` once, not by polling `published`.
 
 ### 5a. Reference Expansion
 

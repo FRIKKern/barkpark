@@ -24,6 +24,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   @doc false
   def resolve_block_form(blocks, %{"block_id" => id} = source) when is_binary(id) do
+    cond do
+      exact_card_title_form?(source) ->
+        resolve_card_title_form(blocks, id, source["card-title"])
+
+      malformed_card_title_form?(source) ->
+        {:error, {:source_validation, :invalid_card_title}}
+
+      true ->
+        resolve_general_block_form(blocks, id, source)
+    end
+  end
+
+  def resolve_block_form(_blocks, _source), do: {:error, :invalid_block_form}
+
+  defp resolve_general_block_form(blocks, id, source) do
     case find_paper_block(blocks, id) do
       %{} = block ->
         resolver =
@@ -41,7 +56,67 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end
   end
 
-  def resolve_block_form(_blocks, _source), do: {:error, :invalid_block_form}
+  defp exact_card_title_form?(source),
+    do: MapSet.new(Map.keys(source)) == MapSet.new(["block_id", "card-title"])
+
+  defp malformed_card_title_form?(source) do
+    Map.has_key?(source, "card-title") and
+      not Enum.any?(@card_form_fields -- ["card-title"], &Map.has_key?(source, &1))
+  end
+
+  defp resolve_card_title_form(blocks, id, submitted) when is_binary(submitted) do
+    case paper_blocks_with_id(blocks, id) do
+      [%{"type" => "card", "slots" => slots}]
+      when is_map(slots) and not is_struct(slots) ->
+        case Map.get(slots, "title") do
+          [%{} = title] ->
+            if direct_card_title?(title) do
+              patch =
+                if title["text"] === submitted,
+                  do: %{},
+                  else: %{"slots" => Map.put(slots, "title", [Map.put(title, "text", submitted)])}
+
+              {:ok, %{"op" => "patch-block", "id" => id, "patch" => patch}}
+            else
+              {:error, {:source_validation, :invalid_card_title}}
+            end
+
+          _missing_or_malformed ->
+            {:error, {:source_validation, :invalid_card_title}}
+        end
+
+      [] ->
+        {:error, :block_not_found}
+
+      _duplicate_or_malformed ->
+        {:error, {:source_validation, :invalid_card_title}}
+    end
+  end
+
+  defp resolve_card_title_form(_blocks, _id, _submitted),
+    do: {:error, {:source_validation, :invalid_card_title}}
+
+  defp direct_card_title?(title) do
+    is_map(title) and not is_struct(title) and Map.get(title, "type") === "heading" and
+      Map.has_key?(title, "text") and
+      is_binary(title["text"]) and direct_card_title_content?(title) and
+      direct_card_title_level?(title)
+  end
+
+  defp direct_card_title_content?(title) do
+    case Map.fetch(title, "content") do
+      :error -> true
+      {:ok, value} -> value in [nil, []]
+    end
+  end
+
+  defp direct_card_title_level?(title) do
+    case Map.fetch(title, "level") do
+      :error -> true
+      {:ok, nil} -> true
+      {:ok, level} -> level in [1, 2, 3, "1", "2", "3"]
+    end
+  end
 
   @doc false
   def paper_link_reference_copy_admission(%{"type" => "paper-links", "refs" => refs}, index)
@@ -1063,7 +1138,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   defp card_chrome_patch(block, params) do
     with {:ok, state} <- card_form_state(block),
-         :ok <- validate_card_form_params(params, state) do
+         :ok <- validate_card_form_params(params, state, block) do
       patch = put_card_tone_patch(%{}, state, params)
       slots = if is_map(block["slots"]), do: block["slots"], else: %{}
 
@@ -1335,7 +1410,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end
   end
 
-  defp validate_card_form_params(params, state) do
+  defp validate_card_form_params(params, state, block) do
     known = MapSet.new(@card_form_fields)
     known_present? = Enum.any?(@card_form_fields, &Map.has_key?(params, &1))
 
@@ -1358,10 +1433,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
         params["card-action-priority"] == state.action_priority or
         params["card-action-priority"] in @card_action_priorities
 
-    if known_present? and not unexpected? and binary_values? and tone_valid? and priority_valid?,
-      do: :ok,
-      else: {:error, :invalid_card_form}
+    if known_present? and not unexpected? and binary_values? and tone_valid? and priority_valid? and
+         generic_card_title_allowed?(block, params),
+       do: :ok,
+       else: {:error, :invalid_card_form}
   end
+
+  defp generic_card_title_allowed?(_block, params) when not is_map_key(params, "card-title"),
+    do: true
+
+  defp generic_card_title_allowed?(%{"slots" => slots}, _params)
+       when is_map(slots) and not is_struct(slots) do
+    case Map.get(slots, "title") do
+      [%{} = title] -> direct_card_title_content?(title)
+      _missing_or_malformed -> true
+    end
+  end
+
+  defp generic_card_title_allowed?(_block, _params), do: true
 
   defp put_card_tone_patch(patch, state, params) do
     case Map.fetch(params, "card-tone") do
@@ -3461,6 +3550,48 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   end
 
   def find_paper_block(_blocks, _id), do: nil
+
+  defp paper_blocks_with_id(blocks, id) when is_list(blocks) do
+    Enum.flat_map(blocks, fn
+      block when is_map(block) ->
+        own = if Map.get(block, "id") === id, do: [block], else: []
+
+        nested =
+          cond do
+            Map.get(block, "type") in ["section", "expandable", "terminal"] ->
+              container_children(block)
+
+            Map.get(block, "type") === "steps" and is_list(block["steps"]) ->
+              Enum.flat_map(block["steps"], fn
+                row when is_map(row) -> visible_body_children(row)
+                _row -> []
+              end)
+
+            Map.get(block, "type") === "tabs" and is_list(block["tabs"]) ->
+              Enum.flat_map(block["tabs"], fn
+                %{"blocks" => children} when is_list(children) -> children
+                _row -> []
+              end)
+
+            Map.get(block, "type") === "figure" and is_map(block["child"]) ->
+              [block["child"]]
+
+            Map.get(block, "type") === "columns" and is_list(block["columns"]) ->
+              Enum.flat_map(block["columns"], fn
+                column when is_list(column) -> column
+                _opaque -> []
+              end)
+
+            true ->
+              []
+          end
+
+        own ++ paper_blocks_with_id(nested, id)
+
+      _opaque ->
+        []
+    end)
+  end
 
   @doc false
   def container_children(%{"type" => "expandable"} = block), do: visible_body_children(block)

@@ -49,7 +49,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
         "admin"
       ])
 
-    conn = build_conn() |> init_test_session(%{"api_token" => @admin_token})
+    conn = scoped_conn() |> init_test_session(%{"api_token" => @admin_token})
     {:ok, conn: conn}
   end
 
@@ -958,6 +958,138 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
       {:ok, _view, flat} = live(conn, "/admin/projects")
       refute flat =~ ~s(phx-hook="BarkparkBoardDrag")
+    end
+  end
+
+  # ── THE SCOPED MOUNT WROTE DEFAULT'S ROWS (task-09ef21eb0e6d3ae4) ───────────
+  #
+  # `plugin_routes(scope: :ops)` mounts BoardLive twice: flat at
+  # `/admin/projects` (`live_session :plugin_ops`, no tenant resolver) and
+  # scoped at `/w/:ws/p/:proj/admin/projects` (`live_session :scoped_plugin_ops`,
+  # `{PluginScopeSession, :scope}` + the `session:` builder). The restage write
+  # hardcoded `Tenancy.get_default_workspace/0`, so an operator on workspace B's
+  # board claimed and closed DEFAULT's task rows while the URL, the chrome
+  # scope_prefix and the tab highlight all said B.
+  #
+  # THE FIXTURE IS THE PROOF, so it is built to make the assertion NON-VACUOUS:
+  # TWO workspaces each holding a DIFFERENT live task row, dragged from the mount
+  # whose URL names one of them. A single-workspace fixture, or one whose rows
+  # carry no `workspace_id`, would pass with the bug present.
+  describe "the scoped board writes its OWN workspace (task-09ef21eb0e6d3ae4)" do
+    setup do
+      default_ws = Barkpark.Tenancy.get_default_workspace()
+      assert default_ws, "the Default workspace must be seeded (backfill migration)"
+
+      n = System.unique_integer([:positive])
+
+      {:ok, ws_b} =
+        Barkpark.Tenancy.create_workspace(%{slug: "board-scoped-b-#{n}", name: "Workspace B"})
+
+      {:ok, proj_b} =
+        Barkpark.Tenancy.create_project(ws_b, %{slug: "board-scoped-p-#{n}", name: "Project B"})
+
+      # The membership `ResolveWorkspace` gates the `:scoped_browser` pipeline
+      # on, plus the global "admin" permission `LiveAuth :ops` gates the mount
+      # on. Both are required — the scoped board is behind BOTH doors.
+      raw = "board-scoped-ws-member-#{n}"
+
+      {:ok, token} =
+        Auth.create_token(raw, "board scoped member", "production", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Barkpark.Tenancy.Auth.create_membership(ws_b.id, token.id, "admin", "api_token")
+
+      # One claimable row per workspace, DIFFERENT doc_ids. Both carry a met
+      # criterion because the claim-time gate refuses a criteria-less work row
+      # (task-9554c64bf51a0f81) and this test is about WHERE the write lands,
+      # not about that gate.
+      criteria = [
+        %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+      ]
+
+      scoped_task("sw-b-row", "Workspace B's own task", ws_b.id,
+        lifecycle: "open",
+        priority: 1,
+        criteria: criteria
+      )
+
+      scoped_task("sw-default-row", "Default's task", default_ws.id,
+        lifecycle: "open",
+        priority: 1,
+        criteria: criteria
+      )
+
+      conn = scoped_conn() |> init_test_session(%{"api_token" => raw})
+
+      {:ok, conn: conn, default_ws: default_ws, ws_b: ws_b, proj_b: proj_b, scoped_token: token}
+    end
+
+    test "a drag on /w/B/p/x/admin/projects claims B's row and leaves Default's untouched",
+         %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
+      {:ok, view, _html} =
+        live(conn, "/w/#{ws_b.slug}/p/#{proj_b.slug}/admin/projects")
+
+      html = render_hook(view, "restage", %{"doc_id" => "sw-b-row", "to_col" => "in_progress"})
+
+      # (a) the write landed in the URL's workspace — through the fenced claim
+      # primitive, not a raw Content write.
+      assert html =~ ~s(data-col="in_progress" data-doc-id="sw-b-row")
+
+      b_row = Repo.get_by(Document, doc_id: "sw-b-row")
+      assert b_row.workspace_id == ws_b.id
+      assert b_row.content["lifecycle_status"] == "in_progress"
+      assert get_in(b_row.content, ["claim", "worker"]) == "studio:admin"
+
+      # (b) DEFAULT's row — the one the pre-fix code would have claimed — never
+      # moved. This is the assertion that reds without the fix.
+      default_row = Repo.get_by(Document, doc_id: "sw-default-row")
+      assert default_row.content["lifecycle_status"] == "open"
+      assert get_in(default_row.content, ["claim", "worker"]) == nil
+    end
+
+    test "the scoped mount REFUSES a card belonging to another workspace", %{
+      conn: conn,
+      ws_b: ws_b,
+      proj_b: proj_b
+    } do
+      # The board READS the corpus globally (ruling task-93fb6a1a8a33c93d — the
+      # operator board is instance-wide by design), so Default's card is on the
+      # scoped board too. The write must NOT follow the render: `fetch_live_task/2`
+      # is workspace-fenced, so the drop is refused rather than applied.
+      {:ok, view, _html} =
+        live(conn, "/w/#{ws_b.slug}/p/#{proj_b.slug}/admin/projects")
+
+      html =
+        render_hook(view, "restage", %{"doc_id" => "sw-default-row", "to_col" => "in_progress"})
+
+      assert html =~ "That drop can&#39;t be applied right now."
+
+      default_row = Repo.get_by(Document, doc_id: "sw-default-row")
+      assert default_row.content["lifecycle_status"] == "open"
+    end
+
+    # THE MIRROR (criterion 1). The FLAT mount's charter-D12 posture is
+    # DELIBERATE and unchanged: it carries no `PluginScopeSession` hook, so
+    # `:current_workspace` is absent and the write resolves the seeded Default —
+    # the same scope `bp`'s `/v1/tasks` writes resolve to via AssignDefaultScope.
+    test "the FLAT /admin/projects mount still writes Default, and refuses B's row",
+         %{conn: conn, default_ws: default_ws} do
+      {:ok, view, _html} = live(conn, "/admin/projects")
+
+      html =
+        render_hook(view, "restage", %{"doc_id" => "sw-default-row", "to_col" => "in_progress"})
+
+      assert html =~ ~s(data-col="in_progress" data-doc-id="sw-default-row")
+
+      default_row = Repo.get_by(Document, doc_id: "sw-default-row")
+      assert default_row.workspace_id == default_ws.id
+      assert default_row.content["lifecycle_status"] == "in_progress"
+      assert get_in(default_row.content, ["claim", "worker"]) == "studio:admin"
+
+      # …and workspace B's row is untouched from the flat mount.
+      b_row = Repo.get_by(Document, doc_id: "sw-b-row")
+      assert b_row.content["lifecycle_status"] == "open"
+      assert get_in(b_row.content, ["claim", "worker"]) == nil
     end
   end
 

@@ -6821,6 +6821,110 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  The box-side id of `site`'s LIVE public-read credential, looked up in the
+  site's CURRENT `bootstrap_workspace`/`bootstrap_project` scope.
+
+    * `{:ok, id}` — a live (never-revoked) token carries this site's label there
+    * `:absent`   — the box listed the scope and no live token carries it (or the
+                    site has no binding, so none was ever minted)
+    * `:unknown`  — the inventory could not be read; "I could not look" is never
+                    "it is not there"
+
+  THIS EXISTS FOR THE REBIND, and the ORDER is the whole point. Tokens are listed
+  per (workspace, project) and matched BY LABEL, and a rebind that changes only
+  the DATASET keeps the same workspace/project — so the moment the replacement is
+  minted, TWO live tokens carry `site-read-<slug>` in that one scope and a
+  find-by-label revoke is a coin flip that can kill the credential the site just
+  started using. Name the incumbent BEFORE the mint, revoke it BY ID after; that
+  is exactly the discipline `rotate_site_read_token/1` documents in its step 1.
+  """
+  @spec site_read_token_id(Site.t()) :: {:ok, String.t()} | :absent | :unknown
+  def site_read_token_id(%Site{} = site) do
+    with ws when is_binary(ws) and ws != "" <- site.bootstrap_workspace,
+         proj when is_binary(proj) and proj != "" <- site.bootstrap_project,
+         %Barkpark{} = barkpark <- get_barkpark(site.barkpark_id) do
+      find_workspace_token(barkpark, ws, proj, site_read_token_label(site))
+    else
+      _ -> :absent
+    end
+  end
+
+  @doc """
+  site-spawner `site-rebind-content`: REPOINT a static/node site at a different
+  workspace/project/dataset and swap its scope-bound public-read credential.
+
+  `attrs` carries the FULL new triple (`:bootstrap_workspace`,
+  `:bootstrap_project`, `:bootstrap_dataset`), the PLAINTEXT `:read_token` the
+  caller already minted against that new scope (encrypted here; the plaintext
+  never lands in the DB), the observed `:content_binding_verdict` /
+  `:content_binding_checked_at`, and optionally any settings the same PATCH moved
+  (`:theme`, `:doc_type`, `:prebuilt_enabled`).
+
+  `incumbent` is what `site_read_token_id/1` answered BEFORE the replacement was
+  minted — see that function for why it cannot be looked up here.
+
+  ONE `Repo.update` through the narrow `Site.content_binding_changeset/2`: the
+  binding and the credential that authorizes it move together or not at all. A
+  half-applied rebind (new dataset, old token) is a site that builds 403s.
+
+  THEN the incumbent is revoked, BY ID, in the OLD scope — never before the
+  persist, so there is no instant at which the row names a dead credential.
+
+  Returns `{:ok, site, :ok | :error | :none}` (the third element is the
+  incumbent's fate: confirmed dead / could not confirm / there was none), or
+  `{:error, changeset}` with NOTHING changed and the old credential untouched.
+  """
+  @spec rebind_site_content(Site.t(), map(), {:ok, String.t()} | :absent) ::
+          {:ok, Site.t(), :ok | :error | :none} | {:error, Ecto.Changeset.t()}
+  def rebind_site_content(%Site{} = site, attrs, incumbent) when is_map(attrs) do
+    {plaintext, attrs} = Map.pop(attrs, :read_token)
+
+    attrs =
+      attrs
+      |> Map.take([
+        :bootstrap_workspace,
+        :bootstrap_project,
+        :bootstrap_dataset,
+        :content_binding_verdict,
+        :content_binding_checked_at,
+        :theme,
+        :doc_type,
+        :prebuilt_enabled
+      ])
+      |> Map.put(:read_token_encrypted, encrypt_read_token(plaintext))
+
+    case site |> Site.content_binding_changeset(attrs) |> Repo.update() do
+      {:ok, rebound} -> {:ok, rebound, revoke_rebound_incumbent(site, incumbent)}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  defp encrypt_read_token(plaintext) when is_binary(plaintext) and plaintext != "",
+    do: Vault.encrypt(plaintext)
+
+  # nil reaches `validate_required(:read_token_encrypted)` and becomes a 422 —
+  # never a silently blanked credential.
+  defp encrypt_read_token(_plaintext), do: nil
+
+  defp revoke_rebound_incumbent(_site, :absent), do: :none
+
+  defp revoke_rebound_incumbent(%Site{} = site, {:ok, id}) do
+    case get_barkpark(site.barkpark_id) do
+      %Barkpark{} = barkpark ->
+        revoke_workspace_token(
+          barkpark,
+          site.bootstrap_workspace,
+          site.bootstrap_project,
+          id,
+          site_read_token_label(site)
+        )
+
+      _ ->
+        :error
+    end
+  end
+
   # The scope walk shared by `orphan_site_read_tokens/1` and
   # `site_read_token_census/1`. ONE definition of "which (workspace, project)
   # pairs does this box serve content under" and ONE definition of unreadable, so
@@ -8557,6 +8661,150 @@ defmodule BarkparkCloud.Registry do
       uuid -> Repo.get(Deployment, uuid)
     end
   end
+
+  @doc """
+  deploy-reliability W8: RECORD ONE GRACE EVENT against a deployment — a
+  transient box 5xx the poll loop swallowed (`:poll_refusal`) or a START trigger
+  retried across an untyped 5xx (`:start_retry`).
+
+  THE COUNTER THIS REPLACES DIED OF SUCCESS. `Sites.Deploy` keeps a graced-refusal
+  tally on `ctx`, and `forget_graced_refusals/1` drops it on ANY poll that
+  reached the box — correct for the failure caption it feeds, fatal for
+  measurement: the only graces that were ever counted were the ones that did not
+  work. These columns are monotonic for the life of the run, so a deployment that
+  went `live` BECAUSE grace held can still say so.
+
+  ATOMIC `UPDATE`, never a changeset — the same discipline `coalesced_attempts`
+  follows, and for two reasons here: the bump happens mid-run against a row whose
+  `status` has not moved (a `transition_changeset` would drag the from-status
+  guard into a telemetry write), and a read-modify-write would lose bumps.
+  `COALESCE` because every pre-W8 row is NULL and `NULL + 1` is NULL.
+
+  Best-effort: the return is always `:ok`, an unknown id updates zero rows
+  without raising, and the caller (`Sites.Deploy`) wraps it besides. A deploy
+  must never fail because its own accounting did.
+  """
+  @spec record_deploy_grace(binary(), :poll_refusal | :start_retry) :: :ok
+  def record_deploy_grace(id, kind)
+      when is_binary(id) and kind in [:poll_refusal, :start_retry] do
+    case uuid_or_nil(id) do
+      nil -> :ok
+      uuid -> bump_deploy_grace(uuid, kind, DateTime.utc_now())
+    end
+  end
+
+  defp bump_deploy_grace(uuid, :poll_refusal, now) do
+    from(d in Deployment,
+      where: d.id == ^uuid,
+      update: [
+        set: [
+          graced_poll_refusals: fragment("COALESCE(?, 0) + 1", d.graced_poll_refusals),
+          last_graced_at: ^now
+        ]
+      ]
+    )
+    |> Repo.update_all([])
+
+    :ok
+  end
+
+  defp bump_deploy_grace(uuid, :start_retry, now) do
+    from(d in Deployment,
+      where: d.id == ^uuid,
+      update: [
+        set: [
+          graced_start_retries: fragment("COALESCE(?, 0) + 1", d.graced_start_retries),
+          last_graced_at: ^now
+        ]
+      ]
+    )
+    |> Repo.update_all([])
+
+    :ok
+  end
+
+  @doc """
+  deploy-reliability W8: THE NAMED QUERY over the grace counters — the reachable
+  surface that turns "a rename killed grace" from a rate into a number.
+
+  Folded over a PINNED `inserted_at` window (`from`/`to`), exactly like the
+  deploy ledger's census, so two readers asking the same question over the same
+  window get the same answer. `:site_ids` narrows to a list of site ids (a
+  team-scoped caller); omit it for the fleet.
+
+  Returns:
+
+    * `deployments`             — rows in the window (the denominator).
+    * `graced_poll_refusals`    — transient box 5xx swallowed by the poll loop.
+    * `graced_start_retries`    — START triggers retried across an untyped 5xx.
+    * `deployments_graced`      — rows where either counter is above zero.
+    * `saved`                   — graced rows that nonetheless reached `live`.
+      THIS IS THE NUMBER THE TASK EXISTS FOR: it is the population the grace
+      produced, it was previously unobservable in every outcome, and killing
+      grace (charter D114 — one wire literal) drives it to zero while the
+      failure rate is still climbing for reasons nobody can name.
+    * `unmeasured`              — rows predating the counters (NULL, never 0).
+      A census whose zero could mean "no saves" OR "nobody was counting" cannot
+      be read, so the two are separated rather than summed.
+  """
+  @spec deploy_grace_census(DateTime.t(), DateTime.t(), keyword()) :: map()
+  def deploy_grace_census(%DateTime{} = from_at, %DateTime{} = to_at, opts \\ []) do
+    scoped =
+      from(d in Deployment,
+        where: d.inserted_at >= ^from_at and d.inserted_at < ^to_at
+      )
+      |> scope_grace_census_sites(Keyword.get(opts, :site_ids))
+
+    rows =
+      scoped
+      |> select([d], %{
+        status: d.status,
+        polls: d.graced_poll_refusals,
+        starts: d.graced_start_retries
+      })
+      |> Repo.all()
+
+    # ONE `Repo.all`, every term folded from it — a census assembled from N
+    # independent aggregates can report a `saved` that its own `deployments_graced`
+    # contradicts if a row lands between them.
+    Enum.reduce(
+      rows,
+      %{
+        from: from_at,
+        to: to_at,
+        deployments: 0,
+        graced_poll_refusals: 0,
+        graced_start_retries: 0,
+        deployments_graced: 0,
+        saved: 0,
+        unmeasured: 0
+      },
+      fn row, acc ->
+        polls = row.polls || 0
+        starts = row.starts || 0
+        graced? = polls > 0 or starts > 0
+
+        acc
+        |> Map.update!(:deployments, &(&1 + 1))
+        |> Map.update!(:graced_poll_refusals, &(&1 + polls))
+        |> Map.update!(:graced_start_retries, &(&1 + starts))
+        |> Map.update!(:deployments_graced, &if(graced?, do: &1 + 1, else: &1))
+        |> Map.update!(
+          :saved,
+          &if(graced? and row.status == "live", do: &1 + 1, else: &1)
+        )
+        |> Map.update!(
+          :unmeasured,
+          &if(is_nil(row.polls) and is_nil(row.starts), do: &1 + 1, else: &1)
+        )
+      end
+    )
+  end
+
+  defp scope_grace_census_sites(query, nil), do: query
+
+  defp scope_grace_census_sites(query, site_ids) when is_list(site_ids),
+    do: from(d in query, where: d.site_id in ^site_ids)
 
   @doc """
   gh-5: APPEND one builder-reported LIVE console line to a deployment — the

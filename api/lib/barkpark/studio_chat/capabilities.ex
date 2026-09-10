@@ -107,8 +107,8 @@ defmodule Barkpark.StudioChat.Runtime.Capabilities do
   drift from the code it describes:
 
     * `modes`  ← `Barkpark.StudioChat.Session.modes/0`
-    * `models` ← `BarkparkWeb.Studio.ClaudeChat.models/0`
-    * `efforts` ← `BarkparkWeb.Studio.ClaudeChat.efforts/0`
+    * `models` ← `Barkpark.StudioChat.Provider.Claude.models/0`
+    * `efforts` ← `Barkpark.StudioChat.Provider.Claude.efforts/0`
 
   `agent_spawn_names` is the `Task`/`Agent` set that `chat_tool_renderer.ex`
   sources back OUT of here (`@spawn_names`), closing the loop.

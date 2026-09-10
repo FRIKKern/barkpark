@@ -63,7 +63,6 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/audit            admin     the team's append-only audit trail (keyset-paginated; ?actor_user_id= / ?action_prefix= narrow it)
       DELETE  /v1/barkparks/:id    admin     remove an instance (deregister; live box → 409)
       GET     /v1/barkparks/:id/events user  the instance's agent-event history (team-scoped)
-      GET     /v1/barkparks/:id/telemetry user  the instance's latest health report, normalized (team-scoped)
       GET     /v1/barkparks/:id/metrics user  a window of health beats as cpu/mem/disk/load series (team-scoped)
       GET     /v1/barkparks/:id/usage user   the console's usage meters, honest per D48 (team-scoped)
       GET     /v1/barkparks/:id/usage/history user  usage-meter series over the trailing 14d of samples, for sparklines (team-scoped)
@@ -187,7 +186,9 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites            user      create a hosted Site under a Barkpark
       GET     /v1/sites            user(s)   list the team's sites (across all boxes)
       GET     /v1/sites/:id        user      one site
-      PATCH   /v1/sites/:id        user(s)   update a site's settings (write ability)
+      PATCH   /v1/sites/:id        user(s)   update a site's settings (write ability); a
+                                              workspace+project+dataset REBIND additionally
+                                              needs deploy-or-root and re-mints the read token
       DELETE  /v1/sites/:id        user(s)   delete a site — tear it down on the box + deregister (write ability)
       GET     /v1/sites/:id/domain-status user  per-domain DNS/TLS/serving checklist, CF-mode-aware (team-scoped)
       GET     /v1/sites/:id/doctor user  every substrate this site occupies, three-valued, each absence naming its repair (team-scoped)
@@ -293,7 +294,6 @@ defmodule BarkparkCloud.Web.Router do
     Push,
     Registry,
     Repo,
-    Telemetry,
     Usage,
     Vercel,
     Verify,
@@ -8340,6 +8340,22 @@ defmodule BarkparkCloud.Web.Router do
         |> Map.take(["theme", "doc_type", "prebuilt_enabled"])
         |> Map.new(fn {k, v} -> {String.to_existing_atom(k), v} end)
 
+      # site-spawner `site-rebind-content`: THE CONTENT BINDING half. Read
+      # through `put_site_content_binding/2` — the SAME reader the create door
+      # uses — so both wire spellings (`workspace` and `bootstrap_workspace`) and
+      # the blank-is-absent rule are ONE definition, not two that drift.
+      #
+      # `Map.take/2` back down to the triple on purpose: that helper also folds
+      # doc_type/template/theme/read_token for create, and a PATCH must not be a
+      # back door onto `template` (infrastructural, immutable here) or onto a
+      # BYO `read_token` the control plane never minted and cannot revoke.
+      rebind =
+        %{}
+        |> put_site_content_binding(conn.body_params)
+        |> Map.take([:bootstrap_workspace, :bootstrap_project, :bootstrap_dataset])
+
+      rebinding? = rebind != %{}
+
       # TURNING ON off-box builds is a CAPABILITY GRANT, not a content setting,
       # and it needs the `deploy` ability — the same one domain bind/unbind
       # demands, and for the same reason: it changes what this site will accept
@@ -8373,11 +8389,36 @@ defmodule BarkparkCloud.Web.Router do
                 "no PAT can hold both. Turning it OFF needs only write."
           })
 
+        # A REBIND IS A CREDENTIAL MINT, so it sits at the same bar as enabling
+        # prebuilt and NOT at plain `write`. It names a workspace/project/dataset
+        # and the control plane mints a live public-read token there — the exact
+        # authority `POST /v1/sites` reserves to a SESSION (`Auth.require_user/2`,
+        # no PAT arm at all). Leaving rebind at bare `write` would hand a `write`
+        # PAT a scope-naming mint that no PAT can obtain at create: an escalation
+        # created by the cheaper door, which is the shape this family already
+        # refuses one line above.
+        #
+        # theme/doc_type/prebuilt_enabled=false stay plain `write` — this adds
+        # one gate on one arm, it does not re-tier the route.
+        rebinding? and not may_grant? ->
+          json(conn, 403, %{
+            error: "rebind_ability_required",
+            detail:
+              "repointing a site's content binding MINTS a public-read token in the scope you name — " <>
+                "use a SESSION (the dashboard) or a root credential, the same authority POST /v1/sites " <>
+                "requires to mint one at create. theme, doc_type and prebuilt_enabled need only write."
+          })
+
+        rebinding? ->
+          rebind_site_content(conn, site, rebind, attrs)
+
         attrs == %{} ->
           json(conn, 422, %{
             error: "nothing_to_update",
             detail:
-              "mutable fields: theme (palette), doc_type (featured content type), prebuilt_enabled (accept off-box builds)"
+              "mutable fields: theme (palette), doc_type (featured content type), " <>
+                "prebuilt_enabled (accept off-box builds), workspace + project + dataset " <>
+                "(the content binding — all three together)"
           })
 
         true ->
@@ -8397,6 +8438,116 @@ defmodule BarkparkCloud.Web.Router do
       end
     end)
   end
+
+  # THE REBIND (site-spawner `site-rebind-content`). A static/node site's content
+  # binding used to be write-once at create: a typo'd dataset, or a promotion from
+  # staging to production, meant DELETE + recreate — a new id, a new slug, a new
+  # URL, and every domain re-bound by hand.
+  #
+  # The whole act, in create's own order, with create's own guards:
+  #
+  #   1. `require_rebindable_kind/1` — a container site builds from a repo and has
+  #      no binding to move.
+  #   2. `require_content_triple/1` — THE SAME guard `POST /v1/sites` runs, so a
+  #      partial rebind is refused with byte-identical copy. This is the atomicity
+  #      the row asks for: workspace+project+dataset is ONE value. A PATCH of just
+  #      `dataset` would otherwise mint a token scoped to the OLD workspace and
+  #      the NEW dataset — a binding nobody asked for and nothing validated.
+  #   3. name the INCUMBENT credential BEFORE minting (see
+  #      `Registry.site_read_token_id/1` for why the order is load-bearing).
+  #   4. `mint_site_read_token/3` — the token is scoped to workspace/project/
+  #      dataset, so a moved binding with the old token is a site that builds 403s.
+  #      Same helper, same label, same `mint_failed` 502 as create.
+  #   5. `verify_content_binding/2` — READ the new binding back with the new
+  #      token, and refuse `content_binding_empty` exactly as create does. A
+  #      rebind onto a dataset the site cannot read is the same ghost create
+  #      refuses at the door; it must not be reachable through the side door.
+  #   6. ONE `Repo.update` for binding + credential + verdict (+ any settings the
+  #      same PATCH moved), then revoke the incumbent BY ID in the OLD scope.
+  #
+  # KNOWN, DELIBERATE, AND SHARED WITH CREATE: a step-5 refusal leaves the token
+  # minted in step 4 live on the box (the mint returns a plaintext, not an id, and
+  # naming it costs a second inventory read on a path that is already refusing).
+  # `mix barkpark_cloud.site_read_tokens` is the sweep that finds it, exactly as
+  # it does for a refused create.
+  defp rebind_site_content(conn, site, rebind, settings) do
+    bp = Registry.get_barkpark(site.barkpark_id)
+    # The type the build would read AFTER this PATCH — a request that moves the
+    # dataset AND the doc_type must be verified against the pair it is asking for,
+    # never against the type the row happens to hold now.
+    doc_type = Map.get(settings, :doc_type) || site.doc_type
+
+    with :ok <- require_rebindable_kind(site.kind),
+         :ok <- require_content_triple(rebind),
+         attrs <- rebind |> Map.put(:kind, site.kind) |> Map.put(:doc_type, doc_type),
+         incumbent when incumbent != :unknown <- Registry.site_read_token_id(site),
+         {:ok, attrs} <- mint_site_read_token(bp, attrs, site.slug),
+         {:ok, binding} <- verify_content_binding(bp, attrs),
+         attrs <- attrs |> put_binding_verdict(binding) |> Map.merge(settings),
+         {:ok, updated, revoked} <- Registry.rebind_site_content(site, attrs, incumbent) do
+      push_event(updated.team_id, "sites")
+
+      json(
+        conn,
+        200,
+        Map.merge(
+          %{
+            site: site_json(updated, bp),
+            note:
+              "content binding moved and the read token re-minted for the new scope; " <>
+                "the next deploy builds from it",
+            # The old credential's fate, in the wire's own words — the same
+            # three-valued honesty `DELETE /v1/sites/:id` reports, and for the
+            # same reason: "could not confirm" is not "revoked".
+            previous_read_token: to_string(revoked)
+          },
+          binding_note(binding)
+        )
+      )
+    else
+      {:error, :binding_not_applicable} ->
+        json(conn, 422, %{
+          error: "content_binding_not_applicable",
+          detail:
+            "a #{site.kind} site builds from its own repo — there is no content binding to move"
+        })
+
+      # Byte-identical to create's arm: one refusal, one wording.
+      {:error, {:binding_required, missing}} ->
+        json(conn, 422, %{
+          error: "content_binding_required",
+          detail:
+            "a static site builds FROM your content — bind it with " <>
+              "`--dataset <workspace>/<project>/<dataset>` (missing: #{Enum.join(missing, ", ")})"
+        })
+
+      :unknown ->
+        json(conn, 502, %{
+          error: "read_token_inventory_unreadable",
+          detail:
+            "could not read this site's current credential on #{bp && bp.slug} — a rebind that " <>
+              "cannot name what it replaces would leave a live public-read token behind in the " <>
+              "old scope. Nothing was changed."
+        })
+
+      {:error, {:mint_failed, detail}} ->
+        json(conn, 502, %{error: "read_token_mint_failed", detail: detail})
+
+      {:error, {:binding_empty, detail, menu}} ->
+        json(
+          conn,
+          422,
+          %{error: "content_binding_empty", detail: detail}
+          |> maybe_put_menu(menu)
+        )
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        json(conn, 422, %{error: "invalid_settings", detail: errors(cs)})
+    end
+  end
+
+  defp require_rebindable_kind(kind) when kind in ["static", "node"], do: :ok
+  defp require_rebindable_kind(_kind), do: {:error, :binding_not_applicable}
 
   # DELETE /v1/sites/:id → 200 {ok, status:"deleted"} | error. The inverse of a
   # spawn: tear the site down on its box (stop slots, disarm the Caddy route,
@@ -10156,50 +10307,20 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # GET /v1/barkparks/:id/telemetry → 200 {telemetry: <envelope> | nil} | 404.
-  # User-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the
-  # sibling events route (wrong-team / absent id are indistinguishable). Pure
-  # OBSERVABILITY over data the agent ALREADY captured (charter decision 16): it
-  # finds the LATEST "health" event in the instance's append-only stream and
-  # re-serves it through `Telemetry.normalize/1` as one stable envelope. A live
-  # instance that has simply not phoned home a health beat yet is NOT an error —
-  # it returns `telemetry: nil` (never 500). The 100-event window is ample: the
-  # per-cycle health beat is by far the most frequent event kind, so the newest
-  # health row lives at the head of the stream.
-  get "/v1/barkparks/:id/telemetry" do
-    conn = Auth.require_user(conn, [])
-
-    cond do
-      conn.halted ->
-        conn
-
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 404, %{error: "not_found"})
-
-      true ->
-        case Registry.recent_events_for_team(
-               conn.assigns.current_team,
-               conn.path_params["id"],
-               100
-             ) do
-          nil ->
-            json(conn, 404, %{error: "not_found"})
-
-          events ->
-            telemetry =
-              case Enum.find(events, &(&1.type == "health")) do
-                nil -> nil
-                event -> Telemetry.normalize(event)
-              end
-
-            json(conn, 200, %{telemetry: telemetry})
-        end
-    end
-  end
+  # REMOVED: GET /v1/barkparks/:id/telemetry (cch-w51-bl-...-rendered-by-nothing).
+  # It re-served `Telemetry.normalize/1`'s envelope for the newest health beat and
+  # had ZERO callers at removal: no console fetch (the only `telemetry` token in
+  # app.js is a comment), no `internal/cli` or `internal/cloudclient` client, no
+  # docs entry. Every fact it carried still has a door — the console reads the raw
+  # beat payload off `/v1/barkparks/:id/events` (`backupStateText`), and the folded
+  # window rides `/v1/barkparks/:id/metrics`, whose `service_health` block is this
+  # same normalizer. A route with no named consumer is authenticated attack surface
+  # and a promise in the wire contract; it is not free because it is small. If one
+  # is ever wanted back, `Telemetry.normalize/1` is untouched and this is six lines.
 
   # GET /v1/barkparks/:id/metrics?points=N → 200 {ok, collected_at, instance,
-  # beat, points, series, latest, pressure, space, service_health} | 404. The time-series companion to
-  # /telemetry (which serves the single latest beat): it folds a WINDOW of the
+  # beat, points, series, latest, pressure, space, service_health} | 404. The ONLY
+  # read surface over the health beat since /telemetry was removed: it folds a WINDOW of the
   # instance's health beats — the vitals the agent now rides on its 60s beat
   # (cpu/mem/disk/load) — into oldest-to-newest series the console's Metrics tab
   # (S12b) and `bp cloud instance top` render. Pure OBSERVABILITY over data the
@@ -10209,7 +10330,7 @@ defmodule BarkparkCloud.Web.Router do
   # deploy). `BarkparkCloud.Metrics.build/3` is the pure, total shaper.
   #
   # USER-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the sibling
-  # telemetry / usage / domain-status routes (wrong-team / absent / malformed id
+  # events / usage / domain-status routes (wrong-team / absent / malformed id
   # are indistinguishable). `points` is clamped (default 30, cap 200) via the
   # shared parse_limit idiom. TOTAL over a sick/silent box: an instance that has
   # never phoned home a beat is a normal 200 with beat.status "absent" and empty
@@ -10270,7 +10391,7 @@ defmodule BarkparkCloud.Web.Router do
 
   # GET /v1/barkparks/:id/usage → 200 {usage: <envelope>} | 404. User-authed +
   # TEAM-SCOPED with the SAME no-existence-leak 404 as the sibling events /
-  # telemetry routes (wrong-team / absent / malformed id are indistinguishable).
+  # metrics routes (wrong-team / absent / malformed id are indistinguishable).
   #
   # Composes the console's usage meters (charter decision D48 — two honesty
   # tiers). The endpoint NEVER 500s on a sick box and NEVER blocks the
@@ -11759,8 +11880,11 @@ defmodule BarkparkCloud.Web.Router do
   # below firing (a colourised unclassified capture would otherwise fall to the
   # `cause` arm and print the leaky pass-through paragraph ABOVE the clean one).
   defp class_then_capture(value) do
+    # dr-w23-bl: `stripped` STAYS — it is what `humanize/1` must be fed (see
+    # the paragraph above), not a step toward `capture`. `capture` is
+    # `strip_ansi |> scrub` on the same input, i.e. `FailureCopy.raw/1`.
     stripped = FailureCopy.strip_ansi(value)
-    capture = FailureCopy.scrub(stripped)
+    capture = FailureCopy.raw(value)
 
     case FailureCopy.humanize(stripped) do
       ^capture -> capture
