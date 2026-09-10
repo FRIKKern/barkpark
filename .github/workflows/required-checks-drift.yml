@@ -116,10 +116,10 @@ on:
     # PATHS-FILTERED ON THE push ARM ONLY (2026-09-10, task-7ef9d81ed33d2b9c).
     #
     # MEASURED 2026-09-10T11:30Z: 122 of 207 queued Actions runs were push:main
-    # arms stacked from that day's merges (11 required-checks-drift), every one for a superseded
-    # sha; 84 were cancelled by hand. This workflow is per-sha grouped on main
-    # (see `concurrency:` below), so it does NOT collapse: it costs one full run
-    # per merge, whatever the merge touched.
+    # arms stacked from that day's merges — 11 of them this workflow — every
+    # one for a superseded sha; 84 were cancelled by hand. This workflow is
+    # per-sha grouped on main (see `concurrency:` below), so it does NOT
+    # collapse: it costs one full run per merge, whatever the merge touched.
     #
     # THE FILTER BELOW IS THE WORKFLOW'S OWN INPUT SET — the workflow file plus
     # every tree and script whose contents can change this workflow's verdict.
