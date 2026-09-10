@@ -126,6 +126,10 @@
 
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// Used ONLY inside the isMain block below, and only against stderr (D78). The
+// screen's stdout carries the classification table, and `--census` output is
+// read by eye and by pipe; a banner there would corrupt the answer it labels.
+import { emitProvenance } from "./provenance.mjs";
 
 export const HOST_BOUND = [
   [/\bssh\b/i, "names ssh (remote execution)"],
@@ -2827,6 +2831,12 @@ function selftest() {
 // a new one.
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
+  // FIRST ACT (D78) — before a single classification is printed, say which tree
+  // did the classifying. "DANGER SET 134/134 refused" reads identically from a
+  // 200-commit-stale checkout whose allowlist predates the commands it is
+  // screening, and that is the one reading a safety verdict must never allow.
+  // STDERR only: stdout is the report.
+  emitProvenance();
   const mode = process.argv[2] || "--verify";
   // NO process.exit IN ANY ARM BELOW (charter D92). Every one of these arms has
   // already written to stdout by the time it decides the status: selftest()
