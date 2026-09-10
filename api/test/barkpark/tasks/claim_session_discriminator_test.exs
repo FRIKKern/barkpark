@@ -188,7 +188,10 @@ defmodule Barkpark.Tasks.ClaimSessionDiscriminatorTest do
       # ATTRIBUTION, NOT A FENCE. The successor holds the same lane worker id,
       # so the pulse must SUCCEED — refusing it would orphan the live claim.
       {:ok, _} =
-        Tasks.pulse_by_id(task.id, "lead-cli", text: "successor woke and wrote", session: successor)
+        Tasks.pulse_by_id(task.id, "lead-cli",
+          text: "successor woke and wrote",
+          session: successor
+        )
 
       claim = stored_claim(doc)
 
