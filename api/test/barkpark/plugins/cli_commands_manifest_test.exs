@@ -217,6 +217,36 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Tasks.cli_commands/0" do
+    # THE FILES MANIFEST IS DECLARED, OR NO CALLER CAN SEND ONE
+    # (task-074f50e46e4c926c). The server has stored `content.landed.files`
+    # since PR #17475 and every landing still recorded the sha alone, because
+    # the ONLY thing standing between the two was this declaration: `bp`'s
+    # splitArgs refuses an undeclared `--files` as an unknown flag and sends
+    # NOTHING, so the field was reachable by curl and by nothing a human types.
+    #
+    # `repeatable: true` is load-bearing twice over. Without it a SECOND
+    # `--files` is a usage error (refuseRepeatedFlag: bp will not silently keep
+    # one of two paths), so a manifest is capped at one path; and the Go client
+    # keys the JSON-array body encoding off the same flag, so dropping it turns
+    # `"files": ["a"]` into `"files": "a"` and the server's Landed.check_files/1
+    # 400s the request.
+    test "task.landed declares a repeatable --files flag, the only door to content.landed.files" do
+      landed = Enum.find(Tasks.cli_commands(), &(&1.id == "task.landed"))
+      files = Enum.find(landed.flags, &(&1.name == "files"))
+
+      assert files,
+             "task.landed declares no --files flag, so `bp task landed … --files x` is an " <>
+               "unknown-flag usage error and content.landed.files is unreachable from the CLI"
+
+      assert files.type == "string"
+      assert files[:repeatable] == true
+
+      # The summary is what `bp task landed --help` prints; it has to say the
+      # unit, because "files" plural invites a caller to pass a comma-joined
+      # list as ONE path.
+      assert files.summary =~ "ONE changed path per occurrence"
+    end
+
     test "declares the sixteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 

@@ -1816,7 +1816,18 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 			// whose `criterion-text` needs the snake_case spelling the server
 			// reads. Routed through one helper so the exception cannot be
 			// applied in one call site and forgotten in another.
-			obj[stampBodyKey2(cmd, f.Name)] = values[len(values)-1]
+			key := stampBodyKey2(cmd, f.Name)
+			if f.Repeatable {
+				// A REPEATABLE body flag is a list, so it ships as a JSON array —
+				// EVEN AT LENGTH ONE. Last-wins here would send `"files": "a"` for
+				// a single `--files a`, and a server that types the field as a list
+				// refuses a bare string; the caller would then see a flag that works
+				// at two paths and 400s at one. The whole slice is copied so the
+				// body cannot alias the parsed flag map.
+				obj[key] = append([]string{}, values...)
+				continue
+			}
+			obj[key] = values[len(values)-1]
 		}
 	}
 	// --set fields target: nested under SetKey (e.g. patch's `set`) or, by
@@ -2114,6 +2125,28 @@ func commandFlagBelongsInBody(cmd manifest.Command, name string) bool {
 		case "evidence", "note", "criterion-text":
 			return true
 		}
+	}
+	// task.landed's `--files` MANIFEST rides the body, and it is the one flag on
+	// this command that MUST: it is a LIST, and the query string has no honest
+	// spelling for one here.
+	//
+	// The query-string form would be `files[]=a&files[]=b` — the bracket shape
+	// applyQuery gives a repeated flag, and the shape the server's own refusal
+	// sentence offers as an alternative. It breaks in the ONE-path case, which is
+	// the common case: a single occurrence keeps the plain `files=a` spelling,
+	// Plug decodes that to the STRING "a", and Landed.check_files/1 refuses a
+	// non-list outright — so `--files x` would 400 while `--files x --files y`
+	// worked, an arity-dependent failure no caller could guess. Riding the body
+	// as a JSON array (buildBody emits the whole []string for a repeatable body
+	// flag) makes one path and forty the same shape.
+	//
+	// And it keeps a 40-path manifest off the REQUEST LINE, which is where the
+	// measured wall is (see the task.stamp note above: ~9.9KB of encoded URI is
+	// refused as an unattributable stream error). 40 paths is the server's own
+	// verbatim limit, so the largest legal manifest is the one that would have
+	// come closest to it.
+	if cmd.ID == "task.landed" && name == "files" {
+		return true
 	}
 	return false
 }

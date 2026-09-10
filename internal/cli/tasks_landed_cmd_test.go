@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -49,7 +51,8 @@ const minimalLandedManifest = `{
         {"name": "commit", "type": "string", "summary": "sha"},
         {"name": "pr", "type": "string", "summary": "pr"},
         {"name": "note", "type": "string", "summary": "sentence"},
-        {"name": "criterion", "type": "int", "summary": "idx"}
+        {"name": "criterion", "type": "int", "summary": "idx"},
+        {"name": "files", "type": "string", "repeatable": true, "summary": "one changed path per occurrence"}
       ],
       "writes": true, "batch": false, "paginated": false, "dry_run": false,
       "default_output": "minimal"
@@ -64,6 +67,7 @@ type landedCapture struct {
 	method string
 	path   string
 	query  string
+	body   string
 	hits   int32
 }
 
@@ -75,7 +79,8 @@ func landedTestServer(t *testing.T) *landedCapture {
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/landed") {
 			atomic.AddInt32(&cap.hits, 1)
 			cap.mu.Lock()
-			cap.method, cap.path, cap.query = r.Method, r.URL.Path, r.URL.RawQuery
+			raw, _ := io.ReadAll(r.Body)
+			cap.method, cap.path, cap.query, cap.body = r.Method, r.URL.Path, r.URL.RawQuery, string(raw)
 			cap.mu.Unlock()
 			_, _ = w.Write([]byte(`{"ok":true,"doc":{"doc_id":"bp-task-x"}}`))
 			return
@@ -149,5 +154,99 @@ func TestTaskLandedExecute_TakesNoWorkerOrEpoch(t *testing.T) {
 	}
 	if n := atomic.LoadInt32(&cap.hits); n != 0 {
 		t.Fatalf("landed POST fired %d times on a usage error; want 0 (nothing sent)", n)
+	}
+}
+
+// ─── THE FILES MANIFEST ───────────────────────────────────────────────────────
+//
+// THE DEFECT THESE TWO TESTS CLOSE (task-074f50e46e4c926c). The server has
+// stored `content.landed.files` since PR #17475 and NO caller could populate it:
+// the Go client read only --pr and --commit, so every landing recorded the sha
+// and left WHAT it changed to the --note PROSE. Measured on the row that shipped
+// the server half, task-726717ba693eb424, whose own landing reads
+//
+//	"notes": ["PR #17475 landed on main as 3e873e6e5… (files: api/lib/…/landed.ex, …)"]
+//	           ^ five paths, inside a sentence — and no "files" key at all
+//
+// which is the exact absent-vs-prose collapse the structured key exists to end:
+// a later reader deciding whether a merge covers a row's criteria has to parse
+// English, and the server's own overlap guard (409 landing_files_outside_row)
+// has nothing to measure.
+//
+// WHAT MUST HOLD, AND WHERE EACH HALF LIVES:
+//   - the manifest DECLARES `files` repeatable (api/lib/barkpark/plugins/tasks.ex)
+//     — without the declaration splitArgs refuses `--files` as an unknown flag
+//     and the invocation sends NOTHING;
+//   - commandFlagBelongsInBody routes it to the JSON BODY (run.go), and buildBody
+//     emits the whole slice — so it arrives as a LIST at every arity.
+// Delete either half and one of these two tests reds naming the missing manifest.
+func TestTaskLandedExecute_FilesManifestRidesTheBodyAsAList(t *testing.T) {
+	cap := landedTestServer(t)
+
+	out, code := captureExecuteCode(t, []string{
+		"task", "landed", "bp-task-x",
+		"--commit", "a1b2c3d", "--pr", "14993",
+		"--note", "PR #14993 merged to main",
+		"--files", "api/lib/barkpark/tasks/landed.ex",
+		"--files", "internal/cli/tasks_landed_cmd.go",
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want exitOK (%d) — --files must be a DECLARED flag on task.landed; without the manifest declaration splitArgs refuses it and the landing sends nothing. out:\n%s", code, exitOK, out)
+	}
+
+	cap.mu.Lock()
+	body, query := cap.body, cap.query
+	cap.mu.Unlock()
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("body %q is not JSON: %v", body, err)
+	}
+	files, ok := got["files"].([]any)
+	if !ok {
+		t.Fatalf("the POST body carries no files LIST (body = %s) — the changed-path manifest never left the client, so the landing records the sha and not what it changed", body)
+	}
+	if len(files) != 2 || files[0] != "api/lib/barkpark/tasks/landed.ex" || files[1] != "internal/cli/tasks_landed_cmd.go" {
+		t.Fatalf("files = %v, want both paths in order; a landing manifest that drops or reorders paths is worse than none", files)
+	}
+	// The body is the point: on the request line a 40-path manifest meets the
+	// measured ~9.9KB URI wall as an unattributable stream error.
+	if strings.Contains(query, "files") {
+		t.Errorf("query = %q still carries files — the manifest must ride the BODY, not the request line", query)
+	}
+}
+
+// ARITY ONE IS THE TRAP. `files` rides as a JSON array even when exactly one
+// path is given. The query-string spelling could not do this: applyQuery gives a
+// repeated flag the bracket form `files[]=a&files[]=b` only from the SECOND
+// occurrence, so a single `--files x` would have gone as the scalar `files=x`,
+// Plug would decode the STRING "x", and Landed.check_files/1 refuses a non-list
+// — a flag that worked at two paths and 400'd at one.
+func TestTaskLandedExecute_OneFileIsStillAList(t *testing.T) {
+	cap := landedTestServer(t)
+
+	out, code := captureExecuteCode(t, []string{
+		"task", "landed", "bp-task-x",
+		"--commit", "a1b2c3d",
+		"--files", "internal/cli/run.go",
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want exitOK (%d); out:\n%s", code, exitOK, out)
+	}
+
+	cap.mu.Lock()
+	body := cap.body
+	cap.mu.Unlock()
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("body %q is not JSON: %v", body, err)
+	}
+	if _, isString := got["files"].(string); isString {
+		t.Fatalf("a single --files went out as a STRING (body = %s); the server types files as a list and refuses this with a 400, so the flag would work at two paths and fail at one", body)
+	}
+	files, ok := got["files"].([]any)
+	if !ok || len(files) != 1 || files[0] != "internal/cli/run.go" {
+		t.Fatalf("files = %#v, want the one-element LIST [\"internal/cli/run.go\"] (body = %s)", got["files"], body)
 	}
 }
