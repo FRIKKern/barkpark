@@ -14937,7 +14937,9 @@ defmodule BarkparkCloud.Web.Router do
   # advertises them; the wire cannot carry them.
   #
   # The SUCCESSOR is a queue backend — a table plus an enqueue path from the
-  # console — filed as cloud-13. Until that lands, the one thing this half of
+  # console — which this file already names cloud-13 (the phase that owns it,
+  # per the `GET /v1/agent/commands` comment above; the successor TASK row is
+  # dr-w19-bl's follow-up, not this change). Until that lands, the one thing this half of
   # the rail DOES do is answer honestly: `[]` is a true statement about an
   # empty queue, not a swallowed error. The other half (POST /v1/agent/results)
   # was the dishonest one, and is fixed above: it now counts what it is told

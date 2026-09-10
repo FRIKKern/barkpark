@@ -157,9 +157,15 @@ defmodule BarkparkCloud.AgentCommandResultsTest do
       assert {:ok, _} = AgentCommandResults.classify(%{"id" => "x", "approved" => true})
     end
 
-    test "a non-map entry is :malformed, not silently dropped" do
-      assert {:malformed, _} = AgentCommandResults.classify("not a result")
+    test "a non-map entry is :malformed, and names the SHAPE without echoing the payload" do
+      assert {:malformed, detail} = AgentCommandResults.classify("s3kr3t-payload")
       assert {:malformed, _} = AgentCommandResults.classify(nil)
+
+      # D95 (router_transport_redaction_test.exs): an unparseable body is the
+      # body most likely to carry something nobody vetted. The count is the
+      # signal; the content is not repeated back.
+      refute detail.error =~ "s3kr3t-payload"
+      assert detail.error == "unreadable result entry (string)"
     end
 
     test "the three failure shapes land in THREE distinct buckets" do

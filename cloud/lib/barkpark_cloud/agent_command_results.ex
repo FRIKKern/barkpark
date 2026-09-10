@@ -155,7 +155,14 @@ defmodule BarkparkCloud.AgentCommandResults do
     {outcome, detail}
   end
 
-  def classify(entry), do: {:malformed, %{id: nil, name: nil, error: inspect(entry)}}
+  # The malformed arm names the SHAPE, never the payload. `error: inspect(entry)`
+  # here would both trip the D95 source tripwire in
+  # `router_transport_redaction_test.exs` and be the thing that tripwire is
+  # about: an unparseable body is exactly the body most likely to carry
+  # something nobody vetted, and a count plus a type name is all a reader needs
+  # to know the agent sent something this control plane cannot read.
+  def classify(entry),
+    do: {:malformed, %{id: nil, name: nil, error: "unreadable result entry (#{shape(entry)})"}}
 
   # ── internals ──
 
@@ -193,6 +200,13 @@ defmodule BarkparkCloud.AgentCommandResults do
   defp atom_key("name"), do: :name
   defp atom_key("approved"), do: :approved
   defp atom_key("error"), do: :error
+
+  defp shape(entry) when is_binary(entry), do: "string"
+  defp shape(entry) when is_number(entry), do: "number"
+  defp shape(entry) when is_boolean(entry), do: "boolean"
+  defp shape(entry) when is_nil(entry), do: "null"
+  defp shape(entry) when is_list(entry), do: "list"
+  defp shape(_entry), do: "unknown"
 
   defp barkpark_id(%{id: id}), do: id
   defp barkpark_id(other), do: inspect(other)
