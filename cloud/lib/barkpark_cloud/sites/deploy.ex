@@ -1853,12 +1853,58 @@ defmodule BarkparkCloud.Sites.Deploy do
       " — and it has now refused #{rounds} rebuilds in a row for this site, #{terminal_verdict(cause)}"
   end
 
-  # The deferral's NAMED cause, from the same classifier the ledger reports with —
-  # one owner for the taxonomy, so a chain and a census can never disagree about
-  # what a row is.
+  # The deferral's NAMED cause for the round BEING CREATED, from the same
+  # classifier the ledger reports with — one owner for the taxonomy, so a chain
+  # and a census can never disagree about what a row is.
+  #
+  # THIS ARM IS THE ONE PLACE A SYNTHESISED MAP IS CORRECT, and it stays private
+  # for that reason. `defer/3` calls it on the round it is about to write: no row
+  # carrying this round's chain columns EXISTS yet (they are stamped a few lines
+  # below, out of the value this returns), and the `%Deployment{}` in hand is
+  # still `queued`/`building`, whose `classify/1` arm answers `nil`. So the
+  # status is asserted, not read. Every reader of an ALREADY-WRITTEN row goes
+  # through `deferral_cause_of/1` instead.
   defp deferral_cause(stage, reason) do
     DeployLedger.classify(%{status: "deferred", stage: stage, failure_reason: reason})
   end
+
+  @doc """
+  The NAMED cause of a deployment row that is ALREADY WRITTEN — the whole row,
+  handed to `DeployLedger.classify/1` untouched.
+
+  ## THE RULING (dr-w13-bl-column-first-classify-bypass)
+
+  The chain readers below used to call `deferral_cause/2` with `d.stage` and
+  `d.failure_reason`, which SYNTHESISES `%{status: "deferred", stage: …,
+  failure_reason: …}` — a map carrying no `deferral_depth` / `deferral_bound` /
+  `deferral_cause` key. That made the producer's own chain counter a SECOND
+  reader of the same fact, structurally incapable of seeing a column: the moment
+  `DeployLedger.classify/1` grew a column arm (`abandoned_by_columns/1`,
+  PR #17352) the two readers could name the same row differently, with nothing
+  failing anywhere. Today the divergence is latent — the column arm sits on the
+  `failed` clause only, and the chain scan takes `deferred` rows — but "latent"
+  is a property of the ledger's current shape, not of this call site.
+
+  The ruling is THREADING, not pinning: the chain readers pass the row. Whatever
+  `classify/1` prefers, both readers prefer the same thing, and a future
+  column-first `deferred` arm is honoured here for free instead of silently
+  bypassed.
+
+  ## THE COST OF THE SHAPE, STATED AS A RULING AND NOT LEFT AS A DISCOVERY
+
+  `deferral_cause` on a row holds the LEDGER CLASS (`BOX_AT_CAPACITY_DEFERRED`),
+  because `defer/3` computes it by calling `DeployLedger.classify/1` and stamps
+  the answer. So a column-first read is `classify/1` reading back ITS OWN FROZEN
+  PAST OUTPUT. That is defensible — the class at defer time is the truthful one
+  for that moment — but it means A FUTURE TAXONOMY REPAIR WILL NOT
+  RETROACTIVELY APPLY TO ANY DEFERRED ROW WRITTEN AFTER 2026-08-07. Rename a
+  class, or split one, and the ~1,665 stamped rows keep answering the old name
+  while the NULL-column corpus before that instant is re-read by the new prose
+  rules and answers the new one. Any such repair therefore has to carry a
+  backfill of this column, or accept a dated seam in its own numbers.
+  """
+  @spec deferral_cause_of(map()) :: String.t() | nil
+  def deferral_cause_of(row), do: DeployLedger.classify(row)
 
   defp max_consecutive_deferrals("BOX_AT_CAPACITY_DEFERRED"),
     do: @max_consecutive_capacity_deferrals
@@ -1889,7 +1935,7 @@ defmodule BarkparkCloud.Sites.Deploy do
     |> Enum.drop_while(&(&1.status in ["queued", "building", "pushing"]))
     |> case do
       [%{status: "deferred"} = head | _] ->
-        consecutive_deferrals(site, deferral_cause(head.stage, head.failure_reason))
+        consecutive_deferrals(site, deferral_cause_of(head))
 
       _ ->
         0
@@ -1914,7 +1960,7 @@ defmodule BarkparkCloud.Sites.Deploy do
     |> Registry.list_deployments(@deferral_scan_depth, environment: "production")
     |> Enum.drop_while(&(&1.status in ["queued", "building", "pushing"]))
     |> Enum.take_while(fn d ->
-      d.status == "deferred" and deferral_cause(d.stage, d.failure_reason) == cause
+      d.status == "deferred" and deferral_cause_of(d) == cause
     end)
   end
 
