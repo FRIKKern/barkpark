@@ -1554,6 +1554,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     is_draft={item.is_draft}
                     badge={item[:badge]}
                     meta={item[:meta] || item[:updated]}
+                    media={item[:media]}
+                    media_slot={item[:media_slot] == true}
                     selected={item.id == pane[:selected]}
                     selectable={pane[:type_name] != nil}
                     checked={MapSet.member?(@selected_doc_ids, item.id)}
