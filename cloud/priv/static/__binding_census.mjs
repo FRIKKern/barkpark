@@ -635,6 +635,41 @@ const innermost = (pos) => {
 };
 const lineOf = (i) => src.slice(0, i).split("\n").length;
 
+// Comments and string bodies blanked, LENGTH PRESERVED, so every offset still
+// maps to the same line in `src`. Blanking matters twice over: this file's own
+// prose says "instanceAdminAuthority()" in half a dozen comments, and counting
+// those as call sites would invent read sites that do not exist. Module-level
+// because arms (2i) and (2o) both need it and two copies could drift.
+const codeMask = (s) => {
+  const out = s.split("");
+  let inS = null, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inS) {
+      if (esc) { esc = false; continue; }
+      if (c === "\\") { esc = true; continue; }
+      if (c === inS) inS = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { inS = c; continue; }
+    if (c === "/" && s[i + 1] === "/") {
+      const nl = s.indexOf("\n", i);
+      const end = nl < 0 ? s.length : nl;
+      for (let k = i; k < end; k++) out[k] = " ";
+      i = end;
+      continue;
+    }
+    if (c === "/" && s[i + 1] === "*") {
+      const close = s.indexOf("*/", i + 2);
+      const end = close < 0 ? s.length : close + 2;
+      for (let k = i; k < end; k++) if (out[k] !== "\n") out[k] = " ";
+      i = end - 1;
+      continue;
+    }
+  }
+  return out.join("");
+};
+
 // Read the FIRST argument expression after `api("VERB",` — up to the top-level
 // comma (or the closing paren for a one-argument call), tracking nesting and
 // string state so a comma inside `f(a, b)` or inside a literal cannot end it.
@@ -2354,39 +2389,8 @@ if (dupes.length) {
 //               `read`. This is what reds when a row quietly reverts to no
 //               fence, with no graph and no hop walk.
 {
-  // Comments blanked, LENGTH PRESERVED, so every offset still maps to the same
-  // line in `src`. Blanking matters twice over: this file's own prose says
-  // "instanceAdminAuthority()" in half a dozen comments, and counting those as
-  // call sites would invent read sites that do not exist.
-  const codeMask = (s) => {
-    const out = s.split("");
-    let inS = null, esc = false;
-    for (let i = 0; i < s.length; i++) {
-      const c = s[i];
-      if (inS) {
-        if (esc) { esc = false; continue; }
-        if (c === "\\") { esc = true; continue; }
-        if (c === inS) inS = null;
-        continue;
-      }
-      if (c === '"' || c === "'" || c === "`") { inS = c; continue; }
-      if (c === "/" && s[i + 1] === "/") {
-        const nl = s.indexOf("\n", i);
-        const end = nl < 0 ? s.length : nl;
-        for (let k = i; k < end; k++) out[k] = " ";
-        i = end;
-        continue;
-      }
-      if (c === "/" && s[i + 1] === "*") {
-        const close = s.indexOf("*/", i + 2);
-        const end = close < 0 ? s.length : close + 2;
-        for (let k = i; k < end; k++) if (out[k] !== "\n") out[k] = " ";
-        i = end - 1;
-        continue;
-      }
-    }
-    return out.join("");
-  };
+  // codeMask is module-level (see its own note): comments and string bodies
+  // blanked, LENGTH PRESERVED, so every offset still maps to the same line.
   const code = codeMask(src);
 
   const declsOf = (name) => fns.filter((f) => f.name === name);
@@ -2620,6 +2624,282 @@ if (dupes.length) {
     `${byBand.size} band(s) — ` + [...byBand].map(([b, n]) => `${b} ×${n}`).join(", "));
   console.log("  The accounting is over READ SITES, not rows: rows share reads, so a row whose read a");
   console.log("  sibling already claims is NOT discovered here. Anti-decay bookkeeping, never discovery.");
+}
+
+// (2o) A PAINT-TIME BAND READ ON A VIEW loadMe CANNOT RE-ENTER (cch-w48-bl).
+//
+//      THE DEFECT, MEASURED TWICE IN ONE WAVE, ON TWO INDEPENDENTLY-BUILT
+//      SLICES. cch-w48-s2 fenced #site-github on instanceAdminAuthority(), read
+//      INLINE in loadSite. cch-w48-s3 fenced the GitHub card's Disconnect and
+//      its Connect anchor on providerCanWrite(), read off loadGithub's mount.
+//      Both read the band ONCE, at paint time, on a surface loadMe had no
+//      repaint seam for — so a real ADMIN who deep-links before /v1/me answers
+//      takes the CLOSED arm and keeps it for the whole page life. That is
+//      charter D521's stranding shape, reproduced on two new surfaces BY THE
+//      VERY FENCES meant to make this console honest. Both were caught BY HAND
+//      in review, which does not scale: loadMe's success arm now carries eight
+//      such seams and, until this arm, nothing derived the set.
+//
+//      WHAT IS DERIVED, AND OUT OF WHAT. Nothing below is a typed list except
+//      the two named holes, and both of those are checked for staleness.
+//        · THE BANDS — every distinct non-null `predicate` in the PIN that
+//          app.js declares as a function. Not typed here: it grows the day a
+//          row pins a new band, and shrinks when one is retired.
+//        · THE applyRoute-ENTERED SET — read out of applyRoute's OWN DISPATCH
+//          LITERAL: the `if (r.view === "…") …` chain, consequent by
+//          consequent, brace-matched. IT IS NOT A CALL GRAPH, and it must never
+//          become one. Charter D517 refuted that shape BY BUILDING IT: no hop
+//          threshold separated a real fence from operatorRouteAllowed graph
+//          noise, and this console fences by HIDING ELEMENTS, which a call
+//          graph is blind to by category. ZERO hops are walked below.
+//        · THE READERS — the enclosing function of every live call of every
+//          band. The (2i-4) machinery exactly: codeMask so this file's own
+//          prose cannot invent a read site, innermost() for the enclosure.
+//        · THE SEAMS — the calls inside loadMe's SUCCESS arm, brace-matched
+//          from `if (r.ok && r.data) {`. The failed arm answers a different
+//          question (it is terminal) and is not read here.
+//
+//      THE RULE, and why it is over the WHOLE entry list. A view whose
+//      dispatch entry reads a band is decided by that band at paint time. What
+//      it means to PAINT that view is the entry list the literal names for it —
+//      that list IS the definition — so every entry of such a view must be
+//      re-enterable when the answer finally lands: loadMe's success arm calls
+//      it, or calls a NAMED ALTERNATE that re-reads the same band, or the entry
+//      is named in VIEW_SEAM_EXEMPT with a stated reason.
+{
+  const code = codeMask(src);
+  const declsOf = (name) => fns.filter((f) => f.name === name);
+  const esc0 = (n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const KEYWORDS = new Set(["if", "for", "while", "switch", "catch", "return", "function", "typeof", "new", "do", "else"]);
+  const declared = new Set(fns.map((f) => f.name));
+  // Only names app.js DECLARES count as calls: `history.replaceState(` and
+  // `location.assign(` are in these consequents too, and counting them would
+  // demand a loadMe seam for a browser API.
+  const callsIn = (s) => [...new Set(
+    [...s.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)]
+      .map((m) => m[1])
+      .filter((n) => !KEYWORDS.has(n) && declared.has(n)))];
+  const braceSpan = (s, from) => {
+    let d = 0, j = from;
+    for (; j < s.length; j++) {
+      if (s[j] === "{") d++;
+      else if (s[j] === "}") { d--; if (!d) { j++; break; } }
+    }
+    return j;
+  };
+
+  // ── THE BANDS, derived from the PIN's own predicate column ───────────────
+  const BANDS2O = [...new Set(PIN.map((r) => r.predicate).filter((p) => p && declsOf(p).length))].sort();
+  if (!BANDS2O.length) {
+    die2([
+      "FAIL(2o): no PIN row names an authority band app.js declares.",
+      "  This arm derives its band list from the `predicate` column. An empty list would make",
+      "  every check below pass over nothing, which is the one failure mode a fail-closed gate",
+      "  may not have.",
+    ]);
+  }
+
+  // ── THE DISPATCH LITERAL ─────────────────────────────────────────────────
+  const arDecls = declsOf("applyRoute");
+  if (arDecls.length !== 1) {
+    die2([
+      "FAIL(2o): applyRoute is not a single `function applyRoute(` declaration in app.js.",
+      `  Found ${arDecls.length}. The applyRoute-entered set is read out of this function's own`,
+      "  dispatch literal; with no unique declaration there is nothing to read, and this arm",
+      "  refuses rather than guessing. Re-point it — do NOT replace it with a call graph (D517).",
+    ]);
+  }
+  const ar = arDecls[0];
+  const arBody = code.slice(ar.start, ar.end);
+  const DISPATCH = [];
+  {
+    const byView = new Map();
+    const re = /if\s*\(\s*r\.view\s*===\s*"([A-Za-z0-9_-]+)"/g;
+    let m;
+    while ((m = re.exec(arBody))) {
+      const close = arBody.indexOf(")", m.index + m[0].length);
+      if (close < 0) continue;
+      let i = close + 1;
+      while (i < arBody.length && /\s/.test(arBody[i])) i++;
+      const end = arBody[i] === "{" ? braceSpan(arBody, i)
+        : (arBody.indexOf(";", i) < 0 ? arBody.length : arBody.indexOf(";", i) + 1);
+      const row = byView.get(m[1]) || { view: m[1], line: lineOf(ar.start + m.index), entries: [] };
+      row.entries = [...new Set(row.entries.concat(callsIn(arBody.slice(i, end))))];
+      if (!byView.has(m[1])) { byView.set(m[1], row); DISPATCH.push(row); }
+    }
+  }
+  if (!DISPATCH.length) {
+    die2([
+      "FAIL(2o): applyRoute no longer carries an `if (r.view === \"…\")` dispatch literal.",
+      "  The router may have been refactored into a table object or a switch — both are fine",
+      "  shapes, and both need THIS reader re-pointed at the new literal. What is NOT fine is",
+      "  falling back to a call graph to find the view loaders (charter D517).",
+    ]);
+  }
+
+  // ── THE READERS (the (2i-4) machinery, over every derived band) ──────────
+  const readers2O = new Map(); // enclosing fn -> Set(band)
+  for (const band of BANDS2O) {
+    const re = new RegExp("\\b" + esc0(band) + "\\s*\\(", "g");
+    let m;
+    while ((m = re.exec(code))) {
+      if (/\bfunction\s+$/.test(code.slice(Math.max(0, m.index - 40), m.index))) continue;
+      const f = innermost(m.index);
+      const name = f ? f.name : "(top level)";
+      if (!readers2O.has(name)) readers2O.set(name, new Set());
+      readers2O.get(name).add(band);
+    }
+  }
+  const bandsRead = (fn) => readers2O.get(fn) || new Set();
+
+  // ── loadMe's SUCCESS ARM ─────────────────────────────────────────────────
+  const lmDecls = declsOf("loadMe");
+  if (lmDecls.length !== 1) {
+    die2([
+      "FAIL(2o): loadMe is not a single `function loadMe(` declaration in app.js.",
+      `  Found ${lmDecls.length}. Every re-entry seam this arm checks lives in loadMe's success`,
+      "  arm; with no unique declaration the seam set would read EMPTY and this arm would red on",
+      "  every view at once, which is a broken instrument, not a finding.",
+    ]);
+  }
+  const lmBody = code.slice(lmDecls[0].start, lmDecls[0].end);
+  const okAt = lmBody.search(/if\s*\(\s*r\.ok\s*&&\s*r\.data\s*\)\s*\{/);
+  if (okAt < 0) {
+    die2([
+      "FAIL(2o): loadMe no longer opens its success arm with `if (r.ok && r.data) {`.",
+      "  That brace-matched span IS the seam set. Re-point this reader at the new shape; do not",
+      "  widen it to the whole function, because the FAILED arm's re-entries are a different",
+      "  claim (a failed /v1/me is terminal and re-enters to paint the fault, not the grant).",
+    ]);
+  }
+  const successArm = lmBody.slice(lmBody.indexOf("{", okAt), braceSpan(lmBody, lmBody.indexOf("{", okAt)));
+  const SEAMS = new Set(callsIn(successArm));
+
+  // ── THE TWO NAMED HOLES ──────────────────────────────────────────────────
+  //
+  // An ALTERNATE seam: loadMe re-enters something OTHER than the dispatch
+  // entry, on purpose. It is not an exemption — the alternate is still demanded
+  // by name, and it must still READ the band, or it is a repaint that never
+  // re-asks the question and this arm says so.
+  const SEAM_ALIAS = {
+    loadInstance: {
+      seam: "repaintInstanceAuthority",
+      why: "cch-w46-s3/cch-w46-rv decided AGAINST re-entering the loader: reloadInstanceView() hard-returns on the usage and webhooks tabs, so re-entering would fix Overview and leave those two stranded — the exact bug the seam exists to close. repaintInstanceAuthority re-reads instanceAdminAuthority() and re-offers the rail, the header strip and the Updates panel on every tab",
+    },
+  };
+  // A true EXEMPTION: an entry of a band-decided view that needs no seam at
+  // all. Every entry states its reason, and a name here that has stopped being
+  // a dispatch entry of a band-decided view reds below rather than passing.
+  const VIEW_SEAM_EXEMPT = {
+    loadCapabilityMatrix: {
+      why: "READ-ONLY COPY, not an affordance: it paints #provider-matrix from GET /v1/providers/capabilities and offers no control at all — no write, no door, nothing an authority answer could withhold. There is no arm for a late /v1/me to flip, so a seam would re-issue a request to redraw identical bytes",
+    },
+  };
+
+  const decided = DISPATCH.filter((d) => d.entries.some((e) => readers2O.has(e)));
+  const decidedEntries = new Set(decided.flatMap((d) => d.entries));
+
+  const missing = [];
+  const stale = new Set();
+
+  for (const [fn, ex] of Object.entries(VIEW_SEAM_EXEMPT)) {
+    if (!ex.why || ex.why.length < 40) {
+      stale.add(`  VIEW_SEAM_EXEMPT[${fn}] carries no stated reason. A hole nobody named is a lie.`);
+    }
+    if (!decidedEntries.has(fn)) {
+      stale.add(`  VIEW_SEAM_EXEMPT[${fn}] is stale: ${fn} is no longer an entry of any band-decided view in ` +
+        "applyRoute's dispatch literal, so the hole it excuses does not exist any more.");
+    }
+  }
+  for (const [fn, al] of Object.entries(SEAM_ALIAS)) {
+    if (!al.why || al.why.length < 40) {
+      stale.add(`  SEAM_ALIAS[${fn}] carries no stated reason for re-entering ${al.seam} instead of ${fn}.`);
+    }
+    if (!decidedEntries.has(fn)) {
+      stale.add(`  SEAM_ALIAS[${fn}] is stale: ${fn} is no longer an entry of any band-decided view in ` +
+        "applyRoute's dispatch literal.");
+    }
+    if (!declsOf(al.seam).length) {
+      stale.add(`  SEAM_ALIAS[${fn}] names ${al.seam}, which app.js does not declare.`);
+    }
+  }
+
+  for (const d of decided) {
+    const via = d.entries.filter((e) => readers2O.has(e));
+    const viaBands = [...new Set(via.flatMap((e) => [...bandsRead(e)]))];
+    for (const e of d.entries) {
+      if (VIEW_SEAM_EXEMPT[e]) continue;
+      const al = SEAM_ALIAS[e];
+      const need = al ? al.seam : e;
+      if (al && !viaBands.some((b) => bandsRead(al.seam).has(b))) {
+        stale.add(`  SEAM_ALIAS[${e}] names ${al.seam} as the alternate seam for #${d.view}, but ${al.seam} no ` +
+          `longer reads any of that view's bands [${viaBands.join(", ")}] — it repaints without re-asking, so it ` +
+          "cannot heal a surface that was painted on the unknown answer.");
+      }
+      if (!SEAMS.has(need)) {
+        missing.push(`  ${LABEL}:${d.line}  #${d.view} is decided at paint time by ${viaBands.join(", ")} ` +
+          `(read in ${via.join(", ")}); applyRoute enters ${e} to paint it; loadMe's success arm never re-enters ` +
+          (al ? `${need} — ${e}'s pinned alternate seam.` : `${e}.`) +
+          `  STRANDED SURFACE: ${e}. A deep link paints it before /v1/me answers, the fence takes its ` +
+          "closed arm, and nothing re-decides for the rest of the page life.");
+      }
+    }
+  }
+
+  if (missing.length || stale.size) {
+    die2([
+      "FAIL(2o): a view is fenced on an authority band it reads ONCE, at paint time, with no loadMe re-entry.",
+      "  This is charter D521's stranding shape. The band answers /v1/me; a deep link paints the view",
+      "  BEFORE that answer arrives; the fence reads the band once and fails closed; and nothing on the",
+      "  page ever asks again. The user is a real admin looking at the member surface until they reload.",
+      "",
+      "  THE HONEST LIMIT, written here because a gate that overstates its reach is the same lie it is",
+      "  checking for: THIS ARM CLASSIFIES A VIEW ONLY WHEN A DISPATCH ENTRY ITSELF READS A BAND. A view",
+      "  whose band read lives one mount deeper is INVISIBLE to it — loadNotifications paints",
+      "  renderNotifications, which reads notifCanManage; loadMembers paints memberRowHtml, which reads",
+      "  canRemoveMember — and neither view is classified here. That blindness is DELIBERATE: the only",
+      "  way to see through the mount is a call graph, and charter D517 refuted that shape by building",
+      "  it (no hop threshold separates a fence from operatorRouteAllowed noise, and this console fences",
+      "  by HIDING ELEMENTS, which a graph cannot see at all). Note what that costs: loadGithub — one of",
+      "  the two specimens this arm was built for — is caught ONLY because its SIBLING entry loadProviders",
+      "  reads a band and the literal names both under #providers. Had #providers entered loadGithub",
+      "  alone, this arm would have missed the very defect it exists for. It is anti-decay bookkeeping",
+      "  over the entries the literal names, NEVER a discovery instrument for the reads below them.",
+      "",
+      ...missing,
+      ...[...stale],
+      "",
+      "  Fix it by adding the re-entry to loadMe's SUCCESS arm (the eight seams already there are the",
+      "  pattern), or by naming the hole in VIEW_SEAM_EXEMPT with a reason, or — when loadMe deliberately",
+      "  re-enters something else — by pinning that in SEAM_ALIAS. An unexplained exemption is worse",
+      "  than a red.",
+    ]);
+  }
+
+  // The print sits BEHIND the checks, never in front of them.
+  console.log("");
+  console.log(`loadMe re-entry accounting (cch-w48-bl): applyRoute's DISPATCH LITERAL names ${DISPATCH.length} views ` +
+    `(no call graph — D517); ${decided.length} of them are decided at paint time by a band a dispatch entry reads`);
+  console.log(`  bands DERIVED from the PIN's predicate column: ${BANDS2O.join(" · ")}`);
+  console.log("  the literal, verbatim (view -> the functions applyRoute enters to paint it):");
+  for (const d of DISPATCH) {
+    console.log(`    ${LABEL}:${d.line}  ${d.view} -> ${d.entries.join(", ") || "(nothing app.js declares)"}` +
+      (decided.includes(d) ? "   [BAND-DECIDED]" : ""));
+  }
+  for (const d of decided) {
+    const via = d.entries.filter((e) => readers2O.has(e));
+    const viaBands = [...new Set(via.flatMap((e) => [...bandsRead(e)]))];
+    console.log(`  ${d.view}  —  ${viaBands.join(", ")} read in ${via.join(", ")}`);
+    for (const e of d.entries) {
+      const al = SEAM_ALIAS[e];
+      console.log(`    ${e}: ` + (VIEW_SEAM_EXEMPT[e] ? "EXEMPT — " + VIEW_SEAM_EXEMPT[e].why.slice(0, 96) + "…"
+        : al ? `re-entered as ${al.seam} (alias), which re-reads ${[...bandsRead(al.seam)].join(", ")}`
+        : "re-entered by loadMe's success arm"));
+    }
+  }
+  console.log(`  loadMe success-arm seams, DERIVED: ${[...SEAMS].join(", ")}`);
+  console.log("  A view is classified only when a DISPATCH ENTRY reads the band itself. A read one mount");
+  console.log("  deeper (renderNotifications, memberRowHtml) is invisible here, on purpose — D517.");
 }
 
 // (2l) THE NULL-PIN DECAY ARM — PLUMBING DERIVED BY EXECUTION (charter D428).
