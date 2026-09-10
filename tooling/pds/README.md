@@ -72,12 +72,29 @@ never `verdict == ADMITTED`.
 
 ## Two things this tree deliberately does not hide
 
-- **The behaviour class cannot be re-derived here.** grip's caller-boundary
-  screen refuses every script runner (`bash`, `sh`, `node`), correctly — they
-  execute arbitrary programs. So a reason that can only be checked by *running*
-  something is reported `REFUSED` with that named reason, and counted. Making
-  that class visible and bounded is the honest move; green-lighting it by
-  construction would be the vacuous green one level up.
+- **The behaviour class is mostly un-re-derivable here, and `variance.mjs`
+  advertises more than the executor will run.** `variance.mjs` classifies nine
+  heads onto `BEHAVIOUR` — `go mix npm pnpm bash sh zsh node python3` — because
+  that is what their *exit codes mean*, which is the only question that table
+  answers. grip's caller-boundary screen answers a different one — *will this
+  census run it* — and fails closed. Measured 2026-09-10 against
+  `screenCommand()`, **seven of the nine are unreachable**, by two layers:
+  `bash`, `sh`, `zsh`, `node` and `python3` are refused at the HEAD (they
+  execute arbitrary programs, correctly refused); `npm` and `pnpm` are
+  allowlisted heads whose behaviour-paying sub-verbs (`test`, `run`) are not on
+  the read-only sub-verb allowlist. Only `go` (`test`, `vet` — not `build`) and
+  `mix` (`test`) survive. The two lists are NOT aligned on purpose: pruning
+  `variance.mjs` down to the executor would make it lie about the shell. So a
+  reason that can only be checked by *running* one of the seven is reported
+  `REFUSED` with that named reason, and counted. Making that class visible and
+  bounded is the honest move; green-lighting it by construction would be the
+  vacuous green one level up.
+
+  <!-- pds-stated-limit: executor-unreachable-behaviour-heads = bash node npm pnpm python3 sh zsh -->
+
+  That comment is not decoration: section 10 of `rerun-adjudicate.test.mjs`
+  parses it, re-runs every head's probe through the live screen, and reds if
+  the prose, the constant in `variance.mjs`, and grip's screen ever disagree.
 - **Two polarised predicates go mute.** `git cat-file -e <ref>:<path>` and
   `… | grep -qx 0` are polarised at the shell and admitted by grip's screen, but
   grip's `classifySilence` rules both NULL-READ because they answer silently by

@@ -23,7 +23,11 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 import { forbiddenSpelling, FORBIDDEN_NAMES, LEGAL_SUBSTITUTES, SILENT_PREDICATES } from "./spellings.mjs";
-import { varianceSet, overClaim, isUnknownVariance, CLAIM_CLASS } from "./variance.mjs";
+import { varianceSet, overClaim, isUnknownVariance, CLAIM_CLASS, AXIS,
+         BEHAVIOUR_HEADS, BEHAVIOUR_HEAD_PROBES, EXECUTOR_UNREACHABLE_BEHAVIOUR_HEADS } from "./variance.mjs";
+// READ-ONLY import of grip's shipped screen. The lock in section 10 is only
+// worth anything because it asks the LIVE executor, not a copy of its answer.
+import { screenCommand } from "../grip/screen.mjs";
 import { bindClaim } from "./binding.mjs";
 import { loadCorpus, liveAdjudicated } from "./corpus.mjs";
 import { adjudicateCorpus, estimateMs, toFact, PDS_VERDICT } from "./adjudicate.mjs";
@@ -318,6 +322,54 @@ function sh(cmd) {
   ok("9.2 a REFUTED ruling is readable as data", Boolean(badRow), JSON.stringify(bad.counts));
   eq("9.3 and reading it did not touch process.exitCode", process.exitCode, before);
   ok("9.4 the CLI entry point is a function that RETURNS an rc", typeof main === "function");
+}
+
+// ── 10. THE ADVERTISED BEHAVIOUR HEADS vs WHAT THE EXECUTOR ALLOWS ───────────
+//
+// A MIRROR NEEDS A LOCK, NOT TWO HAND-WRITTEN COPIES. variance.mjs advertises
+// nine heads as paying for a BEHAVIOUR claim; grip's screen refuses most of
+// them. That divergence is fine — the two answer different questions — but it
+// is only HONEST while the README says so and says so ACCURATELY. All three
+// surfaces are compared here against the live screen, so drift in ANY of them
+// (a head added to variance, a head un-refused in grip, a stale README) reds.
+{
+  // 10.1 the probes really are behaviour commands — otherwise the lock below
+  // would pass over a list of harmless greps and prove nothing.
+  for (const head of BEHAVIOUR_HEADS) {
+    const probe = BEHAVIOUR_HEAD_PROBES[head];
+    const v = varianceSet(probe);
+    ok(`10.1 ${head}: the probe classifies onto BEHAVIOUR`,
+      v.axes.includes(AXIS.BEHAVIOUR), `${probe} → ${JSON.stringify(v.axes)}`);
+  }
+
+  // 10.2 MEASURE, do not assume: hand each probe to the live screen.
+  const refused = [];
+  const admitted = [];
+  const reasons = [];
+  for (const head of BEHAVIOUR_HEADS) {
+    const probe = BEHAVIOUR_HEAD_PROBES[head];
+    const screened = screenCommand(probe);
+    (screened.ok ? admitted : refused).push(head);
+    reasons.push(`      ${screened.ok ? "ADMIT " : "REFUSE"}  ${head.padEnd(8)}$ ${probe}\n                  ${screened.reason}`);
+  }
+  refused.sort();
+
+  eq("10.2 the measured refused set is exactly variance.mjs's stated limit",
+    refused.join(" "), [...EXECUTOR_UNREACHABLE_BEHAVIOUR_HEADS].sort().join(" "));
+  ok("10.3 at least one head IS reachable — a lock over an all-refused list is vacuous",
+    admitted.length > 0, `admitted: ${JSON.stringify(admitted)}`);
+
+  // 10.4 the README's stated-limit line is the third copy, and it is parsed,
+  // never eyeballed. `an absence is never caught by inspection`.
+  const readme = readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
+  const m = /<!--\s*pds-stated-limit:\s*executor-unreachable-behaviour-heads\s*=\s*([^>]*?)-->/.exec(readme);
+  ok("10.4 README.md carries the pds-stated-limit line", Boolean(m));
+  eq("10.5 README's stated limit names exactly the measured refused heads",
+    m ? m[1].trim().split(/\s+/).sort().join(" ") : "(absent)",
+    refused.join(" "));
+
+  process.stdout.write("\n  EXECUTOR REACHABILITY OF THE ADVERTISED BEHAVIOUR HEADS (live screenCommand)\n");
+  for (const line of reasons) process.stdout.write(`${line}\n`);
 }
 
 /** The one term that moved between two claim strings, for the printed ledger. */

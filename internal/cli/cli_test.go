@@ -778,7 +778,9 @@ func TestValidPerspective(t *testing.T) {
 func TestRenderError(t *testing.T) {
 	ae := apiError{exit: exitNotFound, code: "not_found", message: "post xyz", requestID: "req-1"}
 
-	// Non-verbose: message + hint only; no code/request_id noise.
+	// Non-verbose: message + hint + the named CODE (pds-w28 — the human shapes
+	// name the code, so a grep for it stops finding silence). request_id stays
+	// verbose-only: it is a per-run support token, not a contract name.
 	var so, se bytes.Buffer
 	renderError(newWriter(&so, &se), ae)
 	s := se.String()
@@ -788,8 +790,11 @@ func TestRenderError(t *testing.T) {
 	if !strings.Contains(s, "hint:") {
 		t.Errorf("not_found should carry a hint:\n%s", s)
 	}
-	if strings.Contains(s, "code:") || strings.Contains(s, "request_id:") {
-		t.Errorf("non-verbose output must not show code/request_id:\n%s", s)
+	if !strings.Contains(s, "  code: not_found\n") {
+		t.Errorf("human shape must name the code:\n%s", s)
+	}
+	if strings.Contains(s, "request_id:") {
+		t.Errorf("non-verbose output must not show request_id:\n%s", s)
 	}
 
 	// Verbose: adds the machine code + request id for support.

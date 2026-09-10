@@ -95,6 +95,7 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 		if !renderErrorEnvelope(out, "not_found", serr.Error(), "", hint) {
 			out.userErr("%v", serr)
 			out.errf("  hint: %s", hint)
+			humanErrorCode(out, "not_found")
 		}
 		return exitNotFound
 	}
@@ -131,6 +132,7 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 	if err != nil {
 		if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
 			out.userErr("request failed: %v", err)
+			humanErrorCode(out, "request_failed")
 		}
 		return exitGeneric
 	}
@@ -162,6 +164,7 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 		if perr != nil {
 			if !renderErrorEnvelope(out, "request_failed", "publish request failed: "+perr.Error(), "", "") {
 				out.userErr("publish request failed: %v", perr)
+				humanErrorCode(out, "request_failed")
 			}
 			return exitGeneric
 		}

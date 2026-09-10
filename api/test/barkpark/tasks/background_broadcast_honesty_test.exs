@@ -284,6 +284,15 @@ defmodule Barkpark.Tasks.BackgroundBroadcastHonestyTest do
     end
   end
 
+  # NOTE — the sweep tallies below are FLOORS, never equalities
+  # (task-9989494a409e6a6e). `TtlSweeper.sweep/1` and `sweep_engagement/1` reap
+  # EVERY expired row in the shared test `documents` table, so an exact
+  # `%{swept: 1, skipped: 0}` is an assertion about the whole fleet's rows, not
+  # this fixture's — it reds for anyone whose only crime is that a concurrent
+  # suite holds an expired claim. What each test below actually owns is the
+  # identified row: the `assert_receive` on THIS doc_id, or the reload proving
+  # THIS lease survived. Those are the assertions; the tally is a floor.
+
   # ─── ARM 2 — ttl_sweeper.ex, the lease reap ───────────────────────────────
 
   describe "ARM 2 — TtlSweeper.sweep/1 (task.lease_expired)" do
@@ -294,7 +303,8 @@ defmodule Barkpark.Tasks.BackgroundBroadcastHonestyTest do
       pre = aged.updated_at
 
       subscribe!()
-      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep(300)
+      assert %{swept: swept} = TtlSweeper.sweep(300)
+      assert swept >= 1
 
       task_doc_id = task.doc_id
       kind = TtlSweeper.event_kind()
@@ -309,8 +319,10 @@ defmodule Barkpark.Tasks.BackgroundBroadcastHonestyTest do
       {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "w-bg-reap", scope)
       _ = age_claim!(claimed, 600)
 
-      assert %{swept: 0, skipped: 1} =
+      assert %{skipped: skipped} =
                with_lost_fence(task.id, fn -> TtlSweeper.sweep(300) end)
+
+      assert skipped >= 1
 
       # The lease survived — a lost fence must not half-reap the row.
       assert Repo.get!(Document, task.id).content["lifecycle_status"] == "in_progress"
@@ -332,7 +344,8 @@ defmodule Barkpark.Tasks.BackgroundBroadcastHonestyTest do
       pre = task.updated_at
 
       subscribe!()
-      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep_engagement(300)
+      assert %{swept: swept} = TtlSweeper.sweep_engagement(300)
+      assert swept >= 1
 
       task_doc_id = task.doc_id
       kind = TtlSweeper.engagement_event_kind()
@@ -351,8 +364,10 @@ defmodule Barkpark.Tasks.BackgroundBroadcastHonestyTest do
           "engagement" => engagement
         })
 
-      assert %{swept: 0, skipped: 1} =
+      assert %{skipped: skipped} =
                with_lost_fence(task.id, fn -> TtlSweeper.sweep_engagement(300) end)
+
+      assert skipped >= 1
 
       assert Repo.get!(Document, task.id).content["lifecycle_status"] == "researching"
     end
