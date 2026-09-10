@@ -571,6 +571,57 @@
 # open because its task lost its github backlink. That is why this arm takes a
 # row instead of making one.)
 #
+# CLAUSE 12 -- `count=true`, AND `collected == total`.
+#
+# Clause 1 proves the server HONOURED the page it was asked for. It could not
+# prove the walk REACHED THE END, and the gap was exactly one query parameter
+# wide: `fetch_page` sent `limit`/`offset`/`order` and NOT `count=true`, so
+# `result.total` never appeared (measured 2026-07-30: `total_field=None` on every
+# page) and the only termination signal left was `len(docs) < limit`. A server
+# that stops early produces a short page exactly as happily as a server that
+# finished. The wave-27 run of this census shows the shape it could not defend:
+# pages [1000,1000,1000,980], corpus_size 3980, terminated on the short page
+# ALONE -- 3980 of 3980 and 3980 of 40,000 are the same transcript.
+#
+# So: every page is asked with `count=true`, `result.total` joins
+# count/offset/limit in the asserted shape (a 2xx that does not carry one means
+# the server IGNORED the parameter -- a transport failure, never a quiet
+# fallback), the totals must AGREE across the walk (a population that moved
+# under the read is unread, not smaller), and the walk must have collected
+# exactly `total` DISTINCT rows or it exits 2. Note the two numbers are named to
+# be confused: `result.count` is rows on THIS page (clause 3 already asserts it
+# against len(documents)); `result.total` is the whole filtered population, and
+# only the second can convict a truncated walk. Verified live 2026-09-10 against
+# guerrilla: 9 pages of 1000, collected 8579, `result.total` 8579 on every page.
+#
+# THE PERSPECTIVE THIS CENSUS READS, AND WHAT THAT COSTS -- A KNOWN BLINDNESS,
+# NOT A DELIBERATE SCOPE.
+#
+# The corpus walk sends NO `perspective` param, so /v1/data/query answers
+# `published` and `result.total` is the PUBLISHED total. That is the right
+# denominator for `collected == total` -- the assertion above compares like with
+# like and is not weakened by it -- but it is NOT the whole store, and calling it
+# "the board" would be a claim this instrument has not earned. Measured live
+# 2026-09-10 with the census's own credential (~/.config/barkpark/config.json,
+# `bp login`) against guerrilla.barkpark.cloud, production/task:
+#
+#     published  total 8579   (what this census walks and asserts against)
+#     drafts     total 8987   (+408)
+#     `drafts.`-prefixed rows in the drafts lens        762
+#       of which twins of a row this census DOES see    354
+#       of which NEVER-PUBLISHED, invisible here        408
+#
+# So 408 rows exist that the corpus walk cannot see AT ALL, and 354 more are seen
+# only in their stale published body while a newer draft twin sits beside them.
+# The armed pair filed as `pds-bl-armed-draft-twin-tagregistry` is in that set.
+# This is a BLINDNESS, stated as one: the published perspective is where the
+# publish wall puts the ledger of record, and every clause here is scoped to it
+# on purpose, but no reader should take `corpus 8579 rows` for "8579 rows exist".
+# The separate drafts lens (clause 7 / clause 9) reads the second perspective and
+# reports its delta; it is the only place in this run that sees those rows, and
+# it is a DELTA, not a re-census. Closing the blindness properly means paging the
+# drafts perspective as a first-class corpus, which this script does not do.
+#
 # EXIT CODES
 #   0  census produced, coherent, and (if asked) the round-done predicate holds
 #   1  --assert-round-done predicate is FALSE — the round is not done
@@ -982,6 +1033,7 @@ class FixtureTransport(object):
 
     def __init__(self, directory):
         self.dir = directory
+        self._totals = {}
 
     def describe(self):
         return "fixture://%s" % self.dir
@@ -1008,7 +1060,7 @@ class FixtureTransport(object):
                 "fixture exhausted: no %s (the read wanted another page and the "
                 "source stopped answering -- that is a truncated read, not a "
                 "smaller board)" % os.path.basename(path_i))
-        return self._read(path_i)
+        return self._read(path_i, kind)
 
     def get_doc(self, path, slug):
         """The anchor read, canned as DIR/paper-<slug>.http. A fixture with no
@@ -1021,7 +1073,44 @@ class FixtureTransport(object):
                 "unresolvable anchor is never a default" % os.path.basename(path_i))
         return self._read(path_i)
 
-    def _read(self, path_i):
+    def _derive_total(self, kind):
+        """`result.total` AS THE SERVER WOULD COMPUTE IT, from the fixture's own
+        corpus: the number of DISTINCT `_id`s across every canned page of this
+        lens. See `_read` for why this is derived rather than written out.
+        """
+        if kind in self._totals:
+            return self._totals[kind]
+        pattern = re.compile(r"^%s-\d+(?:-attempt-\d+)?\.http$" % re.escape(kind))
+        ids = set()
+        for name in sorted(os.listdir(self.dir)):
+            if not pattern.match(name):
+                continue
+            with open(os.path.join(self.dir, name), "rb") as fh:
+                raw = fh.read()
+            head, _, body = raw.partition(b"\n")
+            head = head.decode("utf-8", "replace").strip()
+            try:
+                status = int(head.split()[1])
+            except (IndexError, ValueError):
+                continue
+            if status < 200 or status >= 300:
+                continue
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            result = payload.get("result")
+            if not isinstance(result, dict) or not isinstance(result.get("documents"), list):
+                continue
+            for doc in result["documents"]:
+                if isinstance(doc, dict) and doc.get("_id"):
+                    ids.add(doc["_id"])
+        self._totals[kind] = len(ids)
+        return len(ids)
+
+    def _read(self, path_i, kind=None):
         with open(path_i, "rb") as fh:
             raw = fh.read()
         head, _, body = raw.partition(b"\n")
@@ -1032,7 +1121,35 @@ class FixtureTransport(object):
             status = int(head.split()[1])
         except (IndexError, ValueError):
             die(EXIT_USAGE, "malformed fixture %s: unparsable status in %r" % (path_i, head))
+        if kind is not None and 200 <= status < 300:
+            body = self._with_derived_total(body, kind)
         return status, body
+
+    def _with_derived_total(self, body, kind):
+        """CLAUSE 12 IN THE FIXTURE TRANSPORT. The live endpoint computes
+        `result.total` over the WHOLE filtered population; a canned page cannot,
+        because it only knows its own rows. So the fixture transport does what the
+        server does -- counts the distinct rows the fixture's whole corpus holds --
+        rather than making sixty-odd hand-written fixtures each restate a number
+        they would then have to keep in sync by hand.
+
+        A canned body that WRITES `total` itself always wins, and that is the
+        mutation lever: a fixture stating a SHORT total models exactly the server
+        this clause exists to convict, and the walk must fail closed on it.
+        """
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return body
+        if not isinstance(payload, dict):
+            return body
+        result = payload.get("result")
+        if not isinstance(result, dict) or not isinstance(result.get("documents"), list):
+            return body
+        if "total" in result:
+            return body
+        result["total"] = self._derive_total(kind)
+        return json.dumps(payload).encode("utf-8")
 
 
 # --- paged, shape-asserted read ----------------------------------------------
@@ -1042,7 +1159,14 @@ def fetch_page(transport, dataset, doctype, page_index, offset, limit, pace, ret
                perspective_param=None, kind="page"):
     # The order is NOT optional. Explicit offsets over the server's default
     # `desc: updated_at` page a MUTATING key and can skip a row with no error.
-    query = "limit=%d&offset=%d&order=%s" % (limit, offset, PAGE_ORDER)
+    # CLAUSE 12: `count=true` is what makes `result.total` appear at all. Without
+    # it the envelope carries `count` (rows on THIS page) and nothing else, so a
+    # SHORT page and a TRUNCATED page are byte-identical to the walk and the only
+    # termination signal is `len(docs) < limit` -- a signal a server that stopped
+    # early produces just as happily as a server that finished. The parameter is
+    # not optional and not best-effort: a response that does not carry `total`
+    # back is scored as a transport failure below.
+    query = "limit=%d&offset=%d&order=%s&count=true" % (limit, offset, PAGE_ORDER)
     if perspective_param:
         query += "&perspective=%s" % perspective_param
     path = "/v1/data/query/%s/%s" % (dataset, doctype)
@@ -1100,6 +1224,27 @@ def fetch_page(transport, dataset, doctype, page_index, offset, limit, pace, ret
 
         docs = result["documents"]
 
+        # CLAUSE 12, first half. `count=true` was ASKED FOR, so `result.total` is
+        # part of the asserted shape -- exactly like `count`/`offset`/`limit`
+        # above. A 2xx page with no `total` means the server ignored the
+        # parameter, and a walk that shrugged at that would silently fall back to
+        # the very "short page ends it" termination this clause exists to stop.
+        # NOTE the two are DIFFERENT numbers and the names invite confusing them:
+        # `result.count` is rows on THIS page, `result.total` is rows in the whole
+        # filtered population. Only the second can convict a truncated walk.
+        if "total" not in result or not isinstance(result["total"], int) \
+                or isinstance(result["total"], bool):
+            die(EXIT_FAIL_CLOSED,
+                "HTTP %d but result.total is missing or not an int at offset %d -- "
+                "`count=true` was sent and the server did not answer with a total, so "
+                "`collected == total` cannot be asserted and a SHORT page is "
+                "indistinguishable from a TRUNCATED one" % (status, offset),
+                ["result keys: %s" % sorted(result.keys())[:12]])
+        if result["total"] < 0:
+            die(EXIT_FAIL_CLOSED,
+                "HTTP %d but result.total=%d is negative at offset %d"
+                % (status, result["total"], offset))
+
         # CLAUSE 1: the server must have honoured the page it was ASKED for.
         if result["limit"] != limit:
             die(EXIT_FAIL_CLOSED,
@@ -1129,7 +1274,7 @@ def fetch_page(transport, dataset, doctype, page_index, offset, limit, pace, ret
         perspective = result.get("perspective")
         if not isinstance(perspective, str) or not perspective.strip():
             perspective = "<unset>"
-        return docs, perspective.strip()
+        return docs, perspective.strip(), result["total"]
 
 
 def read_corpus(transport, dataset, doctype, limit, pace, retries,
@@ -1140,10 +1285,13 @@ def read_corpus(transport, dataset, doctype, limit, pace, retries,
     offset = 0
     duplicates = []
     perspectives = []
+    totals = []
     for page_index in range(MAX_PAGES):
-        docs, perspective = fetch_page(
+        docs, perspective, total = fetch_page(
             transport, dataset, doctype, page_index, offset, limit, pace, retries,
             perspective_param, kind)
+        if total not in totals:
+            totals.append(total)
         pages.append(len(docs))
         if perspective not in perspectives:
             perspectives.append(perspective)
@@ -1159,6 +1307,36 @@ def read_corpus(transport, dataset, doctype, limit, pace, retries,
         die(EXIT_FAIL_CLOSED,
             "read did not terminate after %d pages of %d -- refusing to report a "
             "partial board" % (MAX_PAGES, limit))
+    # CLAUSE 12, second half. THE ASSERTION THE WHOLE PARAMETER EXISTS FOR.
+    # Every page has now declared how big the population is; the walk has to have
+    # collected exactly that many DISTINCT rows or it did not finish.
+    #
+    #   * totals that DISAGREE across pages -- the board mutated under the walk,
+    #     so no single number describes what was read. Fail closed: a census over
+    #     a moving population is not a smaller board, it is an unread one.
+    #   * collected < total -- the walk stopped early. This is the fail-open the
+    #     clause was written for: a server that returns a short page before the
+    #     population is exhausted terminates the loop with no error anywhere.
+    #   * collected > total -- likewise incoherent (a duplicated row that survived
+    #     de-duplication, or a total that does not describe this filter).
+    if totals:
+        if len(totals) > 1:
+            die(EXIT_FAIL_CLOSED,
+                "result.total DISAGREED across the walk (%s) -- the population moved "
+                "while it was being read, so no single total describes it and "
+                "`collected == total` cannot be asserted"
+                % ", ".join(str(t) for t in totals))
+        total = totals[0]
+        if len(by_id) != total:
+            die(EXIT_FAIL_CLOSED,
+                "TRUNCATED WALK: collected %d distinct %s row(s) but the server says "
+                "result.total=%d. The walk terminated on a short page while the "
+                "population was NOT exhausted -- exactly the undercount that exits 0 "
+                "when nothing asserts against a total."
+                % (len(by_id), doctype, total),
+                ["page sizes: %s" % ", ".join(str(p) for p in pages),
+                 "duplicates seen: %d" % len(duplicates),
+                 "lens: %s" % (perspective_param or "<default>")])
     if not by_id and require_rows:
         die(EXIT_FAIL_CLOSED,
             "empty population: zero %s rows. A census with nothing in it has not "
