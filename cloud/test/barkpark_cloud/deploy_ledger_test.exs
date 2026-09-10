@@ -593,7 +593,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
       # against 7 abandonments — so a predicate keyed on it would call this row an
       # abandonment. It is not keyed on it: the cause is present and the row is
       # still a deferral.
-      assert deferred.deferral_cause != nil
+      assert is_binary(deferred.deferral_cause)
 
       # …and exclusivity is STRUCTURAL, not a second condition: even settled
       # `failed`, 11 >= 12 is false, so the depth alone refuses it.
@@ -681,8 +681,13 @@ defmodule BarkparkCloud.DeployLedgerTest do
 
       # The control: with BOTH integers the very same row IS an abandonment, so
       # the three refusals above are the guard and not a broken fixture.
-      assert DeployLedger.classify(Map.merge(base, %{deferral_depth: 13, deferral_bound: 6})) ==
-               "ABANDONED_BOX_STUCK"
+      assert DeployLedger.classify(
+               Map.merge(base, %{
+                 deferral_depth: 13,
+                 deferral_bound: 6,
+                 deferral_cause: "BOX_BUSY_DEFERRED"
+               })
+             ) == "ABANDONED_BOX_STUCK"
     end
 
     test "the box-refusal statuses each get their own name; an unnamed one does not" do
@@ -1864,7 +1869,10 @@ defmodule BarkparkCloud.DeployLedgerTest do
   # Byte-verbatim from a run: an untyped poll 500 that outlived the grace.
   @poll500 "the instance refused the build poll (HTTP 500): internal_error — unknown error [box request_id: PB-1] (after tolerating 3 transient box 5xx; the last was: the instance refused the build poll (HTTP 500): internal_error — unknown error [box request_id: PB-1])"
   @poll503_runner "the instance refused the build poll (HTTP 503): deploy_runner_unavailable — the deploy runner did not answer in time [box request_id: F9-poll]"
-  @poll404 "the instance refused the build poll (HTTP 404)"
+  # A poll refusal at a status the ledger has never been sent. WAS 404, which is
+  # now a NAMED class (a box without the route) — and naming it made this test
+  # measure nothing, so the tail's proof moves to a status nobody has seen.
+  @poll402 "the instance refused the build poll (HTTP 402)"
 
   describe "classify/2 — the POLL phase is read, not lost" do
     test "a poll refusal classifies by the same status and code word as a start refusal" do
@@ -1880,7 +1888,12 @@ defmodule BarkparkCloud.DeployLedgerTest do
     end
 
     test "D8 holds on the poll caption too — an unnamed poll status is not absorbed" do
-      assert DeployLedger.classify("BUILD", @poll404) == "UNCLASSIFIED"
+      assert DeployLedger.classify("BUILD", @poll402) == "UNCLASSIFIED"
+
+      # …and a poll refusal at a status that IS named reads the same class as the
+      # start caption, which is the other half of the same rule.
+      assert DeployLedger.classify("BUILD", "the instance refused the build poll (HTTP 404)") ==
+               "BOX_ROUTE_UNKNOWN_404"
     end
 
     test "the PHASE stays readable — the taxonomy does not split on it, so something must" do
