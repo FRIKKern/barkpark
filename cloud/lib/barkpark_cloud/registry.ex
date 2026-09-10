@@ -860,8 +860,75 @@ defmodule BarkparkCloud.Registry do
   """
   @spec delete_barkpark(Barkpark.t()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
   def delete_barkpark(%Barkpark{} = barkpark) do
+    _ = deregister_barkpark_content_webhooks(barkpark)
     _ = revoke_barkpark_site_read_tokens(barkpark)
     Repo.delete(barkpark)
+  end
+
+  # The empty report — the shape `deregister_barkpark_content_webhooks/1` returns
+  # for an instance with no sites. An EMPTY report and an ALL-`:ok` report are
+  # different facts.
+  @empty_content_webhook_report %{ok: [], noop: [], error: []}
+
+  @doc """
+  Deregister the content-publish webhook of EVERY site this instance is about to
+  cascade away — the webhook half of the second door `revoke_barkpark_site_read_tokens/1`
+  already closed for credentials (task-e360d05a2708fdb0).
+
+  WHY IT IS NEEDED AT ALL. `sites.barkpark_id` is `on_delete: :delete_all`, so an
+  instance delete removes its site rows in the DATABASE, without `delete_site/1`
+  — and `delete_site/1` is where the deregister lives. Every content-bound site on
+  a removed instance therefore left a `site-autodeploy-<id>` row on a box the
+  control plane no longer tracks, pointed at a per-site receiver that answers 404
+  forever, re-probed by the box's HALF-OPEN auto-disable latch until it gives up.
+  The instance row was also the last thing that could NAME the box, so nothing
+  could reap it afterwards either.
+
+  ORDER IS LOAD-BEARING, exactly as it is in `delete_site/1`: the site rows ARE
+  the pointers (`bootstrap_dataset` names the list route, the site id names the
+  row), and after `Repo.delete/1` nothing in this database can name what to
+  delete.
+
+  BEST-EFFORT, NEVER BLOCKING, NEVER SILENT. A box that is down does not make its
+  instance undeletable — the CP row is the truth — but every unconfirmed
+  deregister is logged with the box slug and the `site-autodeploy-<id>` names that
+  may still be live. Returns `%{ok: [slug], noop: [slug], error: [slug]}`:
+
+    * `:ok`    — the box confirms no row by this site's name remains
+    * `:noop`  — the site has no content binding (or its instance row is gone),
+                 so there is nothing to deregister
+    * `:error` — the delete was refused, OR the box's list could not be read at
+                 all. An unreadable list is NOT a clean bill of health.
+  """
+  @spec deregister_barkpark_content_webhooks(Barkpark.t()) :: %{
+          ok: [String.t()],
+          noop: [String.t()],
+          error: [String.t()]
+        }
+  def deregister_barkpark_content_webhooks(%Barkpark{} = barkpark) do
+    outcomes =
+      barkpark
+      |> list_sites()
+      |> Enum.map(fn site -> {deregister_content_webhook(site), site} end)
+
+    report =
+      Enum.reduce(outcomes, @empty_content_webhook_report, fn {outcome, site}, acc ->
+        Map.update!(acc, outcome, &[site.slug | &1])
+      end)
+      |> Map.new(fn {outcome, slugs} -> {outcome, Enum.reverse(slugs)} end)
+
+    if report.error != [] do
+      names = Enum.map_join(for({:error, s} <- outcomes, do: s), ", ", &content_webhook_name/1)
+
+      Logger.warning(
+        "instance delete on #{barkpark.slug}: #{length(report.error)} content-publish " <>
+          "webhook(s) could not be confirmed deregistered — #{names} may still be live on the " <>
+          "box, and the site rows that named them are being deleted. Sweep with " <>
+          "`mix barkpark_cloud.content_webhooks`."
+      )
+    end
+
+    report
   end
 
   @doc """
@@ -875,7 +942,16 @@ defmodule BarkparkCloud.Registry do
   `site-autodeploy-*` rows — endpoints whose every delivery 404s against a
   receiver that no longer resolves, until the box auto-disables them. A box that
   is down (or a webhook already gone) never blocks the delete: the CP row is the
-  truth, and the by-name reconciler can reap the leftover later.
+  truth, and the leftover is reaped afterwards by
+  `mix barkpark_cloud.content_webhooks`.
+
+  WHICH IS *NOT* THE RECONCILER, and this doc said it was until stw10's second
+  review measured it. `reconcile_content_webhooks/1` enumerates
+  `list_content_webhook_sites/1` — a query over the LIVE `sites` table — and only
+  ever issues `:put`/`:post`. A site that has been deleted has left that table, so
+  the sweep never looks at its box row and could not delete one if it did. The
+  reap is the mix task above: it enumerates the BOX's `site-autodeploy-*` rows and
+  keeps only the ones whose site id still exists (`orphan_content_webhooks/1`).
 
   ssw8 (charter D40, deferred then and paid here): the site's public-read CONTENT
   TOKEN is REVOKED on the box in the same breath, and for the same reason —
@@ -6274,34 +6350,67 @@ defmodule BarkparkCloud.Registry do
   # failure generator that made content-auto look dead fleet-wide.
   #
   # Best-effort and never blocks the delete: the CP row is the truth, and a box
-  # that is down simply keeps an orphan we can reap later (the same reconciler
-  # above finds it by name).
+  # that is down simply keeps an orphan. THE REAPER IS `orphan_content_webhooks/1`
+  # + `mix barkpark_cloud.content_webhooks` — NOT the reconciler above, which this
+  # comment claimed until stw10's second review measured it: that sweep enumerates
+  # the LIVE `sites` table (`list_content_webhook_sites/1`) and only ever issues
+  # `:put`/`:post`, so a deleted site's row is invisible to it and it could not
+  # delete one anyway.
+  #
+  # THREE OUTCOMES, and `:absent` is `:ok` on purpose — the box answered with a
+  # list and this row is not in it, which is exactly the state a deregister is for.
+  # An `:unknown` list is `:error`, never `:noop`: "I could not look" is not "there
+  # is nothing there", and the caller that reports the leftover
+  # (`deregister_barkpark_content_webhooks/1`) must be able to tell them apart.
   defp deregister_content_webhook(%Site{} = site) do
+    name = content_webhook_name(site)
+
     with dataset when is_binary(dataset) and dataset != "" <- site.bootstrap_dataset,
-         %Barkpark{} = barkpark <- get_barkpark(site.barkpark_id),
-         {:ok, id} <- find_content_webhook(barkpark, dataset, content_webhook_name(site)) do
-      path = "/v1/webhooks/#{URI.encode(dataset)}/#{URI.encode(id)}"
-
-      case relay_admin(barkpark, :delete, path, nil) do
-        {:ok, status, _resp} when status in 200..299 ->
-          :ok
-
-        other ->
-          Logger.warning(
-            "content-publish webhook deregistration for site #{site.id} did not take: #{inspect(other)}"
-          )
-
-          :error
+         %Barkpark{} = barkpark <- get_barkpark(site.barkpark_id) do
+      case find_content_webhook(barkpark, dataset, name) do
+        {:ok, id} -> delete_content_webhook(barkpark, dataset, id, name)
+        :absent -> :ok
+        :unknown -> :error
       end
     else
       _ -> :noop
     end
   end
 
+  @doc """
+  Delete ONE box-side content-publish webhook by its BOX id — the single write
+  behind both the per-site deregister above and the orphan reap
+  (`Mix.Tasks.BarkparkCloud.ContentWebhooks`).
+
+  `:ok` only on a 2xx. Anything else — a box that is down, a non-2xx, a build
+  whose webhook routes predate this one — is `:error` and is LOGGED with the row's
+  name, because the caller is usually deleting the last database row that could
+  name it.
+  """
+  @spec delete_content_webhook(Barkpark.t(), String.t(), String.t(), String.t()) :: :ok | :error
+  def delete_content_webhook(%Barkpark{} = barkpark, dataset, id, name \\ "") do
+    path = "/v1/webhooks/#{URI.encode(dataset)}/#{URI.encode(id)}"
+
+    case relay_admin(barkpark, :delete, path, nil) do
+      {:ok, status, _resp} when status in 200..299 ->
+        :ok
+
+      other ->
+        Logger.warning(
+          "content-publish webhook delete on #{barkpark.slug} did not take for " <>
+            "#{name} (dataset #{dataset}, id #{id}): #{inspect(other)}"
+        )
+
+        :error
+    end
+  end
+
   # The box-side identity of a site's content-publish webhook. ONE definition —
   # registration, reconciliation and deregistration must agree byte-for-byte or
   # the "find by name" lookup silently misses and duplicates instead.
-  defp content_webhook_name(%Site{id: id}), do: "site-autodeploy-#{id}"
+  @content_webhook_name_prefix "site-autodeploy-"
+
+  defp content_webhook_name(%Site{id: id}), do: @content_webhook_name_prefix <> "#{id}"
 
   # The doc-type filter for this site's box webhook: exactly the ONE type its
   # build reads. A site with no doc_type (a row predating the column) falls back
@@ -6387,6 +6496,142 @@ defmodule BarkparkCloud.Registry do
       _ ->
         :unknown
     end
+  end
+
+  ## ── THE REAP (task-e360d05a2708fdb0) ──────────────────────────────────────
+  ##
+  ## Everything above is REGISTRATION-shaped: it starts from a Site row and asks
+  ## the box about it. An ORPHAN has no Site row — that is what makes it an orphan
+  ## — so no query in this module could see one, and the hourly reconciler (which
+  ## enumerates `list_content_webhook_sites/1`, a `sites` query, and only issues
+  ## `:put`/`:post`) is structurally incapable of finding or deleting it. Two
+  ## docstrings promised that reconciler as the reaper for weeks; it never was.
+  ##
+  ## So the reap reads the OTHER WAY ROUND: enumerate what the BOX holds, and keep
+  ## only the rows whose site id still exists in this database. Same shape as
+  ## `orphan_site_read_tokens/1` — the credential half of the identical defect —
+  ## and driven by the same kind of operator tool
+  ## (`mix barkpark_cloud.content_webhooks`, modelled on
+  ## `mix barkpark_cloud.site_read_tokens`).
+
+  @doc """
+  Every `site-autodeploy-*` webhook on `barkpark` whose SITE no longer exists.
+
+  Returns `{:ok, rows}` where each row is
+
+      %{barkpark_slug:, dataset:, id:, name:, site_id:, url:, active?:}
+
+  or:
+
+    * `{:error, :no_dataset}`  — this box serves no dataset we can name, so there
+      is no webhook list to read. Nothing was looked at.
+    * `{:error, :unreadable}`  — every dataset's list came back unreadable (box
+      down / non-2xx / no `webhooks` key). NOT "no orphans": "I could not look" is
+      not "there are none", exactly as `orphan_site_read_tokens/1` states it. One
+      readable dataset out of several is enough to report rows — the unreadable
+      ones simply contribute nothing, and the operator surface says how many.
+
+  WHICH DATASETS ARE SCANNED. The box exposes its webhooks per-dataset
+  (`GET /v1/webhooks/:dataset`), so the sweep needs names: this instance's own
+  `bootstrap_dataset` plus every LIVE site's. A dataset whose sites have ALL been
+  deleted is therefore out of reach by construction — stated because a sweep that
+  quietly cannot see a population is the false green this row is about.
+
+  WHAT COUNTS AS AN ORPHAN, deliberately the NARROW reading: the name parses as
+  `site-autodeploy-<uuid>` AND no `sites` row anywhere in this database carries
+  that id. Not "no site on THIS box": a row whose site moved is somebody's live
+  trigger, and this tool must never be able to kill one. A name that is not a
+  well-formed `site-autodeploy-<uuid>` is not ours and is never touched.
+
+  READ-ONLY. It deletes nothing; `delete_content_webhook/4` is the write, and
+  `mix barkpark_cloud.content_webhooks --reap` re-derives this set before issuing
+  one.
+  """
+  @spec orphan_content_webhooks(Barkpark.t()) ::
+          {:ok, [map()]} | {:error, :no_dataset | :unreadable}
+  def orphan_content_webhooks(%Barkpark{} = barkpark) do
+    case content_webhook_datasets(barkpark) do
+      [] ->
+        {:error, :no_dataset}
+
+      datasets ->
+        results = Enum.map(datasets, fn ds -> {ds, list_box_content_webhooks(barkpark, ds)} end)
+
+        if Enum.all?(results, fn {_ds, r} -> r == :unknown end) do
+          {:error, :unreadable}
+        else
+          rows =
+            for {ds, {:ok, hooks}} <- results,
+                hook <- hooks,
+                row = orphan_content_webhook_row(barkpark, ds, hook),
+                row != nil,
+                do: row
+
+          {:ok, rows}
+        end
+    end
+  end
+
+  # The dataset names this box is known to serve content under: its own bootstrap
+  # dataset plus every live site's. ONE definition, so the audit and the reap can
+  # never disagree about what they looked at.
+  defp content_webhook_datasets(%Barkpark{} = barkpark) do
+    [barkpark.bootstrap_dataset | Enum.map(list_sites(barkpark), & &1.bootstrap_dataset)]
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.uniq()
+  end
+
+  # The box's whole webhook list for one dataset. `:unknown` is the same
+  # deliberately-distinct value `find_content_webhook/3` uses, and for the same
+  # reason: the consequence downstream is a DELETE.
+  defp list_box_content_webhooks(%Barkpark{} = barkpark, dataset) do
+    case relay_admin(barkpark, :get, "/v1/webhooks/#{URI.encode(dataset)}", nil) do
+      {:ok, status, %{"webhooks" => hooks}} when status in 200..299 and is_list(hooks) ->
+        {:ok, hooks}
+
+      _ ->
+        :unknown
+    end
+  end
+
+  # One box webhook row -> an orphan row, or nil. Every rejection below has to be
+  # checked or the reap offers an operator a row it must not delete.
+  defp orphan_content_webhook_row(%Barkpark{} = barkpark, dataset, hook) when is_map(hook) do
+    id = Map.get(hook, "id")
+    name = Map.get(hook, "name")
+
+    with true <- is_binary(id) and id != "",
+         true <- is_binary(name),
+         {:ok, site_id} <- content_webhook_site_id(name),
+         false <- site_exists?(site_id) do
+      %{
+        barkpark_slug: barkpark.slug,
+        dataset: dataset,
+        id: id,
+        name: name,
+        site_id: site_id,
+        url: Map.get(hook, "url"),
+        active?: Map.get(hook, "active")
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp orphan_content_webhook_row(_barkpark, _dataset, _hook), do: nil
+
+  # The INVERSE of `content_webhook_name/1`, and the only place the name is read
+  # back. A name that does not parse as `site-autodeploy-<uuid>` is not ours: it
+  # could be a hand-made hook an operator relies on, and casting it loosely (or
+  # querying with an unparseable id) is how a reap kills something it does not own.
+  defp content_webhook_site_id(@content_webhook_name_prefix <> rest) do
+    Ecto.UUID.cast(rest)
+  end
+
+  defp content_webhook_site_id(_name), do: :error
+
+  defp site_exists?(site_id) do
+    Repo.exists?(from(s in Site, where: s.id == ^site_id))
   end
 
   # The public URL the box POSTs a content-publish delivery to. Per-site receiver
