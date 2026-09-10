@@ -5392,6 +5392,17 @@ defmodule PDS.Census do
     fresh_only_defs = receipt_functions(classified, :proven, [:live])
     proven_defs = receipt_functions(classified, :proven, [:live, :stale])
 
+    # THE FRESHNESS ARM'S OWN SPECIMEN, DERIVED HERE SO AN ARM CAN READ IT
+    # (task-ac55ff2388510d67). `stale_only_defs` is the set of PROVEN register defs that
+    # ONLY the `:stale` half of leg A's status filter admits — delete that `:stale` and
+    # every member reaching one of these leaves leg A. Wave 45 measured this set EMPTY and
+    # printed the zero honestly; it is NOT empty on today's tree, so the half that moved
+    # nothing now moves members and LADDER-STALE-ARM-EXERCISED below asserts that it does.
+    # DERIVED FROM THE TWO SETS ALREADY IN SCOPE — no new committed data, nothing to rot.
+    stale_only_defs = MapSet.difference(proven_defs, fresh_only_defs)
+    stale_only_members = members_reaching(population, index, stale_only_defs)
+    leg_a_live_only = members_reaching(population, index, fresh_only_defs)
+
     ladder = %{
       # COUNTED, NOT ADDED, even here where the cond guarantees disjointness — one
       # traversal over the labels asks nothing of the reader.
@@ -5408,6 +5419,18 @@ defmodule PDS.Census do
       suppressed_judged: MapSet.size(loose_judged) - Enum.count(disposed, &(elem(&1, 1) == :judged)),
       proven_defs: MapSet.size(proven_defs),
       proven_defs_live_only: MapSet.size(fresh_only_defs),
+      # THE :stale ARM, MEASURED RATHER THAN ASSUMED. `stale_arm_dropped` is the arm's
+      # predicate and it is a REACH RELATION, never a count: a member reached by a def
+      # that only the :stale admission carries MUST be in leg A. Both sides move together
+      # on any honest register edit or controller repair, so an honest edit cannot red it.
+      stale_only_defs: Enum.sort(MapSet.to_list(stale_only_defs)),
+      stale_only_members: MapSet.size(stale_only_members),
+      stale_arm_dropped: Enum.sort(MapSet.to_list(MapSet.difference(stale_only_members, leg_a))),
+      leg_a_live_only: MapSet.size(leg_a_live_only),
+      # Carried so the arm can scope itself exactly as the register and roster arms do:
+      # over the synthetic tree the register resolves nothing and an unconditional arm
+      # there would certify an empty set at exit 0.
+      register_scope: register_scope(classified),
       # THE WRONG ANSWER THAT SHARES THE RIGHT ANSWER'S VALUE, derived rather than
       # asserted — and derived as a UNION here too, because a plus is what got this
       # slice written.
@@ -5668,6 +5691,36 @@ defmodule PDS.Census do
   # table is now freshness-checked" without printing the rows it CANNOT key commits this
   # epic's exact over-claim one lens down, so the breakdown and the fraction are OUTPUT,
   # never PR prose.
+  # THE FRESHNESS ARM SAYS WHICH OF ITS TWO STATES IT IS IN, AND IT USED TO SAY ONLY ONE
+  # (task-ac55ff2388510d67). The shipped line was a CONSTANT sentence — "the freshness arm
+  # is a NO-OP ... the same set, because no PROVEN register row is stale right now" —
+  # printed beside two numbers it derived. Wave 45 wrote it when both numbers were 15. By
+  # the time this slice read it the two numbers were 17 and 20 and the prose still said
+  # "the same set": a sentence contradicted by its own arguments, on the one line in the
+  # file whose whole job is to admit what is not exercised. THE SENTENCE IS NOW DERIVED
+  # FROM THE SPECIMEN SET, so it cannot disagree with the figures beside it, and the
+  # MOVES branch names every specimen — a def admitted to leg A by the :stale arm and by
+  # nothing else — so a reader can check the claim against the demotion block above.
+  defp report_stale_arm(lad) do
+    if lad.stale_only_defs == [] do
+      p("      the freshness arm is a NO-OP ON THIS TREE: #{lad.proven_defs_live_only} proven register def(s) at")
+      p("        status :live and #{lad.proven_defs} at :live+:stale — the same set, because no PROVEN register")
+      p("        row is stale right now. NOTHING HERE IS EVIDENCE THAT THE :stale ARM WORKS; the")
+      p("        evidence is the selftest case LADDER-STALE-ARM-SPECIMEN, which MANUFACTURES a")
+      p("        stale PROVEN row and requires it to appear as a STALE SPECIMEN on this line.")
+    else
+      p("      the freshness arm MOVES ON THIS TREE: #{lad.proven_defs_live_only} proven register def(s) at status")
+      p("        :live and #{lad.proven_defs} at :live+:stale, so the :stale half admits #{length(lad.stale_only_defs)} def(s)")
+      p("        and #{lad.stale_only_members} member(s) (leg A #{lad.leg_a_live_only} -> #{lad.leg_a}) that a :live-only leg A would DROP.")
+      p("        Delete the `:stale` from leg A and LADDER-STALE-ARM-EXERCISED reds by name.")
+
+      Enum.each(lad.stale_only_defs, fn {mod, name} ->
+        p("        STALE SPECIMEN  #{mod}.#{name} — a PROVEN register row demoted to")
+        p("                        basis_stale, admitted to leg A by the :stale arm and by nothing else")
+      end)
+    end
+  end
+
   defp report_exclusion_freshness(rows) do
     by = Enum.group_by(rows, &exclusion_tag/1)
     n = fn t -> length(Map.get(by, t, [])) end
@@ -6533,14 +6586,12 @@ defmodule PDS.Census do
       "      "
     )
 
-    p("    THE ZEROES, PRINTED RATHER THAN IMPLIED — two arms that are NOT exercised today:")
+    p("    THE SIDE ARMS, PRINTED RATHER THAN IMPLIED — each says whether it is exercised:")
     p("      precedence suppression removes #{lad.suppressed_rostered} member(s) from ROSTERED and")
     p("        #{lad.suppressed_judged} from JUDGED — the loose roster-reaching and receipt-reaching sets")
     p("        equal the printed counts, so the cond's JUDGED > ROSTERED order hides nothing")
     p("        on this tree and the ladder's legs are unaffected by it either way.")
-    p("      the freshness arm is a NO-OP: #{lad.proven_defs_live_only} proven register def(s) at status :live and")
-    p("        #{lad.proven_defs} at :live+:stale — the same set, because no PROVEN register row is stale")
-    p("        right now. NOTHING BELOW IS EVIDENCE THAT THE :stale ARM WORKS.")
+    report_stale_arm(lad)
 
     p("")
     exfresh = exclusion_freshness(parsed, index)
@@ -8013,8 +8064,58 @@ defmodule PDS.Census do
       {"ROUTED-POPULATION-COMPLETE", ok?, complete_why},
       {"LENS-CAN-MISS", resolved != [], lens_why},
       {"ROUTED-DISPOSITION-UNSHADOWED", disp.shadowed == [], shadow_why}
-    ] ++ exclusion_freshness_checks(d) ++ derivation_checks(d) ++ liveview_checks(d)
+    ] ++
+      exclusion_freshness_checks(d) ++
+      derivation_checks(d) ++ liveview_checks(d) ++ stale_arm_checks(d)
   end
+
+  # THE LADDER'S :stale FRESHNESS ARM STOPS BEING UNGUARDED (task-ac55ff2388510d67).
+  #
+  # WHAT WAS WRONG. Leg A of the PROVEN-BACKED rung admits register rows at status in
+  # [:live, :stale]. Wave 45 measured ZERO PROVEN rows stale, so the `:stale` half moved
+  # no member and deleting it would have changed no printed number — a live branch with
+  # no mutant on it, which is the exact defect this epic exists to file. It printed the
+  # zero, which is the honest minimum, and stopped there.
+  #
+  # WHAT THIS ARM ASSERTS, AND WHY IT IS A RELATION AND NEVER A COUNT. Every member that
+  # reaches a PROVEN register def carried ONLY by the `:stale` admission must be IN leg A.
+  # Both sides are re-derived from the same run, so an honest register edit, a controller
+  # repair, or a re-key moves them TOGETHER and cannot red this. Dropping the `:stale`
+  # from leg A moves exactly one side, and that is the failure it exists for — proven by
+  # the selftest case LADDER-STALE-ARM-REDS-WHEN-DROPPED, which does precisely that.
+  #
+  # NOT EXERCISED IS SAID OUT LOUD RATHER THAN PASSED SILENTLY. If a future tree carries
+  # no stale PROVEN row the predicate is vacuously true, and the PASS sentence says the
+  # arm certified NOTHING — the failure mode a green with no subject has. Its mutant does
+  # not depend on that luck either: LADDER-STALE-ARM-SPECIMEN MANUFACTURES the specimen by
+  # demoting one PROVEN row's expression fingerprint, which is the demotion path
+  # resolve_register/1 owns.
+  #
+  # SCOPED LIKE ITS SIBLINGS. Over the synthetic selftest tree the register resolves zero
+  # rows, so an unconditional arm there would certify an empty set at exit 0 — PDS-D541's
+  # unmutatability. Both mutants therefore census the REPO.
+  defp stale_arm_checks(%{disposition: %{ladder: %{register_scope: :real} = lad}}) do
+    why =
+      cond do
+        lad.stale_arm_dropped != [] ->
+          "#{length(lad.stale_arm_dropped)} member(s) reach a PROVEN register def carried ONLY by the :stale admission and are NOT in leg A — the freshness arm has been dropped from the ladder, so leg A now under-counts PROVEN-BACKED by every one of them: " <>
+            Enum.map_join(Enum.take(lad.stale_arm_dropped, 6), " · ", fn {m, p, mod, a} ->
+              "STALE-ONLY MEMBER #{m} #{p} -> #{mod}.#{a}"
+            end)
+
+        lad.stale_only_defs == [] ->
+          "NOT EXERCISED — no PROVEN register row resolves :stale on this corpus, so the predicate is vacuously true and this PASS certifies NOTHING about the :stale arm. Its evidence is the selftest case LADDER-STALE-ARM-SPECIMEN, which manufactures a stale PROVEN row rather than waiting for the tree to grow one"
+
+        true ->
+          "#{length(lad.stale_only_defs)} PROVEN register def(s) reach leg A through the :stale admission ALONE (" <>
+            Enum.map_join(lad.stale_only_defs, ", ", fn {mod, name} -> "#{mod}.#{name}" end) <>
+            "), and all #{lad.stale_only_members} member(s) they reach are IN leg A · leg A #{lad.leg_a_live_only} -> #{lad.leg_a} · delete the :stale and this arm reds naming the members that fell out"
+      end
+
+    [{"LADDER-STALE-ARM-EXERCISED", lad.stale_arm_dropped == [], why}]
+  end
+
+  defp stale_arm_checks(_), do: []
 
   # SCOPED OUT ON THE SYNTHETIC TREE, exactly like the register and roster arms — see
   # the comment on exclusion_freshness/2 for why an unconditional arm would red the
@@ -9210,6 +9311,67 @@ defmodule PDS.Census do
       expect: ["naive > UNION — the addition would OVERCOUNT by"],
       refute: ["[naive == UNION"],
       proves: "PROVEN-BACKED is ONE Enum.count over ONE MapSet.union and not leg_a + leg_b: a def already carried by leg B is injected into leg A, so the legs now share member(s), the naive addition rises above the union and the union HOLDS. Replace that union with an addition and this case reds, because the addition can only ever print `naive == UNION`"
+    },
+    # THE FRESHNESS ARM'S FIRST MUTANT, AND THE FIRST THING THAT CAN EVER RED WHEN IT IS
+    # DELETED (task-ac55ff2388510d67). Wave 45 printed that the `:stale` half of leg A's
+    # status filter moved nothing; on this tree it moves defs and members, and NOTHING
+    # noticed either way, because no arm read the difference. This case deletes the
+    # `:stale` and requires LADDER-STALE-ARM-EXERCISED to red BY NAME with the members
+    # that fell out of leg A. THE ANCHOR IS SPLIT so the tuple does not match ITSELF —
+    # apply_mutation/2 refuses an ambiguous anchor, and this is the same line
+    # LADDER-UNION-NOT-SUM anchors on, split the same way for the same reason.
+    #
+    # NO NUMBER IS ASSERTED. The expectation is the arm's NAME, its sentence, and the
+    # STALE-ONLY MEMBER token — an honest register edit that changes how many defs are
+    # demoted cannot red it, and a tree that carries no stale PROVEN row at all makes the
+    # arm print NOT EXERCISED, which its sibling case below covers on manufactured data.
+    %{
+      name: "LADDER-STALE-ARM-REDS-WHEN-DROPPED",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"leg_a = members_reaching(population, index, " <>
+           "receipt_functions(classified, :proven, [:live, :stale]))",
+         "leg_a = members_reaching(population, index, " <>
+           "receipt_functions(classified, :proven, [:live]))"},
+      exit: 1,
+      expect: [
+        "FAIL  LADDER-STALE-ARM-EXERCISED",
+        "the freshness arm has been dropped from the ladder",
+        "STALE-ONLY MEMBER "
+      ],
+      refute: ["PASS  LADDER-STALE-ARM-EXERCISED"],
+      proves: "the `:stale` in leg A's status filter is LOAD-BEARING and is now guarded: delete it and LADDER-STALE-ARM-EXERCISED reds by name, naming the member(s) that reach a PROVEN register def only the :stale admission carries. On origin/main that same deletion moved PROVEN-BACKED and every check still printed PASS at exit 0"
+    },
+    # THE SPECIMEN IS MANUFACTURED RATHER THAN BORROWED FROM TODAY'S LUCK. The arm above
+    # is exercised only while some PROVEN register row happens to be demoted; a tree where
+    # every row is fresh makes it print NOT EXERCISED and its mutant go quiet. This case
+    # DEMOTES ONE PROVEN ROW'S EXPRESSION FINGERPRINT — the fourth field of the four-field
+    # key, the only field a re-key moves — so resolve_register/1 must take its {path, mfa}
+    # fallback and resolve the row :stale rather than :live. SecretController.delete/2 is
+    # the chosen row because its {path, mfa} group holds exactly ONE register row, so the
+    # neighbour fence (PDS-D706) cannot orphan it instead.
+    #
+    # IT ASSERTS A NAME, NOT A COUNT. The unmutated run does not print this module as a
+    # STALE SPECIMEN; the mutated one must. That is a discriminator no honest register
+    # edit can flip, and it proves the whole path end to end: demotion -> specimen ->
+    # printed sentence -> the arm's PASS.
+    %{
+      name: "LADDER-STALE-ARM-SPECIMEN",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"\"BarkparkWeb.SecretController.delete/2\", \"115609568\", " <> "\"17468236\"},",
+         "\"BarkparkWeb.SecretController.delete/2\", \"115609568\", " <> "\"999999999\"},"},
+      exit: 0,
+      expect: [
+        "the freshness arm MOVES ON THIS TREE",
+        "STALE SPECIMEN  BarkparkWeb.SecretController.delete",
+        "PASS  LADDER-STALE-ARM-EXERCISED",
+        "CENSUS OK"
+      ],
+      refute: ["the freshness arm is a NO-OP ON THIS TREE"],
+      proves: "the :stale arm can be MADE to fire from committed data alone: demoting one PROVEN register row's expression fingerprint sends resolve_register/1 down its {path, mfa} fallback, the row resolves :stale, and that row's def appears as a NAMED STALE SPECIMEN admitted to leg A by the :stale arm and by nothing else — which is what the printed zero of wave 45 could not show"
     },
     # THE POPULATION BASELINE STOPS BEING ADVISORY (PDS-D678, wave 47), AND THE CORPUS IS
     # THE REPO FOR THE SAME REASON THE ROSTER CASES USE IT: baseline_checks/2 is scoped by

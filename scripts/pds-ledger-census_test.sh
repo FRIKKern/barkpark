@@ -1248,9 +1248,12 @@ echo
 #   synthetic in_progress row whose claim.ts_iso is older than the TTL. That
 #   fixture is the difference between an arm and a decoration.
 #
-#   SHAPE C is reported on its own line and never folded: `open` while still
-#   wearing a finished claim. A worker-keyed check reads it as HELD; an
-#   expiry-keyed check cannot see it at all.
+#   SHAPE C is reported on its own line and never folded: LIVE (open,
+#   in_progress or blocked) while still wearing a finished claim. A worker-keyed
+#   check reads it as HELD; an expiry-keyed check cannot see it at all. Its key
+#   was the LITERAL `open` until wave 47, which made it vacuous on a FULL
+#   denominator — all 19 live specimens on the board are `blocked`. Block (f2)
+#   below pins the denominator, the two refusals, and the mutant.
 #
 # THE GREENS ARE LOAD-BEARING, as everywhere else in this file: a RELEASED
 # claim, a FRESH lease and a TERMINAL row wearing an expired claim must all stay
@@ -1424,6 +1427,109 @@ expect_output_contains "shape C is its own ROW-ID LIST" \
   "$(printf '"lapse_shape_c": [\n    "deep-a"\n  ]')" \
   run --page-limit 4 --fixture-dir "$SHAPEC" --json
 
+# (f2) CLAUSE 7C — THE DENOMINATOR IS STATED, AND THE GREEN IS REFUSABLE
+# (wave 47, pds-bl-w47-stale-claim-third-shape-rescoped criterion 3).
+#
+# THE ARM SHIPPED VACUOUS, ON A NON-EMPTY DENOMINATOR. Its lifecycle key was the
+# LITERAL `open`. Measured board-wide 2026-09-10 over the 7014 claim-carrying
+# task rows: of the 267 non-terminal claim-carrying rows, 19 are shape C and ALL
+# NINETEEN are `blocked` — zero `open`, zero `in_progress`. The predicate
+# therefore matched NOTHING, anywhere, and printed PASS standing beside every
+# specimen it exists to name. That is not an empty-set vacuous green; it is a
+# narrow KEY over a full denominator, which no "did you check for an empty set?"
+# rule catches.
+#
+# THREE THINGS ARE PINNED HERE, AND THE FOURTH IS THE MUTANT:
+#   (i)   the arm PRINTS its denominator, the lifecycle values that denominator
+#         admits, and the specimen count it found;
+#   (ii)  an EMPTY denominator REFUSES — a shape measured over no rows has not
+#         passed, it has failed to run;
+#   (iii) ZERO found while a POSITIVE CONTROL of the same shape stands in the
+#         corpus REFUSES. The control is the claim fingerprint over EVERY
+#         non-terminal row — derived from the corpus, never a hard-coded row id,
+#         which would rot the first time the board moved;
+#   (iv)  reverting the predicate to the literal `open` over a fixture carrying
+#         `blocked` specimens must RED. It is the mutant that proves (iii) is an
+#         arm and not a decoration.
+
+# (i) A BLOCKED row wearing a finished claim IS shape C — the live board's only
+# shape-C lifecycle, and the one the shipped key could not see.
+SHAPECBLOCKED="$TMP/lapse-shape-c-blocked"
+build_healthy "$SHAPECBLOCKED"
+page "$SHAPECBLOCKED" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' blocked open 'deep a reason four. REOPEN: delta' '{"worker":"epic-builder-wave-40","epoch":2,"ts_iso":"2026-07-29T09:00:00.000000Z","closed_at":"2026-07-29T11:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_status_matching "a BLOCKED row wearing a closed claim is shape C (the live board's only shape-C lifecycle)" 1 "row(s) are SHAPE C" \
+  run --page-limit 4 --fixture-dir "$SHAPECBLOCKED" --assert-round-done
+expect_output_contains "the arm NAMES the lifecycle values its denominator admits" \
+  "key: lifecycle in {open, in_progress, blocked} + claim.worker SET + claim.closed_at SET" \
+  run --page-limit 4 --fixture-dir "$SHAPECBLOCKED"
+expect_output_contains "and prints the DENOMINATOR beside the specimen count" \
+  "DENOMINATOR 3 row(s) admit those lifecycles (of 3 live); FOUND 1 specimen(s)" \
+  run --page-limit 4 --fixture-dir "$SHAPECBLOCKED"
+expect_output_contains "the round-done line states the population, never just a ratio" \
+  "denominator admits open/in_progress/blocked; 1 found; 1 control(s), 0 hidden" \
+  run --page-limit 4 --fixture-dir "$SHAPECBLOCKED" --assert-round-done
+expect_output_contains "the blocked specimen rides --json as a ROW-ID LIST" \
+  "$(printf '"lapse_shape_c": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$SHAPECBLOCKED" --json
+
+# (ii) AN EMPTY DENOMINATOR REFUSES. Every closure row is terminal, so the arm
+# admits nobody: its 0 specimens measured nothing and must not read as a green.
+SHAPECNODENOM="$TMP/lapse-shape-c-empty-denominator"
+mkdir -p "$SHAPECNODENOM"
+SHAPECNODENOM_P0="$(row "$ROOT_SLUG" 'null' 'done' closed 'root row. REOPEN: never'),"
+SHAPECNODENOM_P0+="$(row kid-a "\"$ROOT_SLUG\"" 'done' closed 'kid a reason one. REOPEN: alpha'),"
+SHAPECNODENOM_P0+="$(row kid-b "\"$ROOT_SLUG\"" 'done' closed 'kid b reason two. REACTIVATE: bravo'),"
+SHAPECNODENOM_P0+="$(row kid-c "\"$ROOT_SLUG\"" cancelled closed 'kid c reason three. REOPEN: charlie')"
+page "$SHAPECNODENOM" 0 200 "$(envelope 4 0 4 "$SHAPECNODENOM_P0")"
+page "$SHAPECNODENOM" 1 200 "$(envelope 0 4 4 '')"
+expect_status_matching "an EMPTY shape-C denominator refuses the green" 1 "shape C measured an EMPTY denominator" \
+  run --page-limit 4 --fixture-dir "$SHAPECNODENOM" --assert-round-done
+expect_output_contains "and it says WHICH lifecycles nobody held" \
+  "no row in the closure carries any of the lifecycles this arm admits (open, in_progress, blocked)" \
+  run --page-limit 4 --fixture-dir "$SHAPECNODENOM" --assert-round-done
+
+# (iii) ZERO FOUND WITH A POSITIVE CONTROL PRESENT REFUSES. `considering` is
+# non-terminal and NOT admitted, so a `considering` row wearing a finished claim
+# is a specimen of the shape that the admitted set hides — exactly the failure
+# the literal-`open` key was, one lifecycle over.
+SHAPECHIDDEN="$TMP/lapse-shape-c-hidden-control"
+build_healthy "$SHAPECHIDDEN"
+page "$SHAPECHIDDEN" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' considering open 'deep a reason four. REOPEN: delta' '{"worker":"epic-builder-wave-40","epoch":2,"ts_iso":"2026-07-29T09:00:00.000000Z","closed_at":"2026-07-29T11:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_status_matching "zero found with a positive control present refuses the green" 1 "shape C found ZERO over a denominator of 2" \
+  run --page-limit 4 --fixture-dir "$SHAPECHIDDEN" --assert-round-done
+expect_status_matching "and it NAMES the control row rather than counting it" 1 "not the board being clean: deep-a" \
+  run --page-limit 4 --fixture-dir "$SHAPECHIDDEN" --assert-round-done
+
+# THE GREEN IS LOAD-BEARING. A corpus with NO shape-C fingerprint anywhere finds
+# zero, has zero controls, and PASSES — saying out loud that the zero is
+# unexercised. Without this, (ii) and (iii) would just be "always red".
+expect_output_contains "a zero with NO control says so instead of claiming a clean board" \
+  "this 0 is UNEXERCISED: no positive control of this shape exists in the corpus" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "and the field-read control says whether claim.closed_at was ever read" \
+  "CONTROL claim.closed_at read on 0 row(s) of ANY lifecycle -- the key field was NEVER exercised" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "while a corpus that DOES carry the field says it was exercised" \
+  "CONTROL claim.closed_at read on 1 row(s) of ANY lifecycle -- the key field was exercised" \
+  run --page-limit 4 --fixture-dir "$SHAPECBLOCKED"
+
+# (iv) THE MUTANT. The census source with its shape-C lifecycle key reverted to
+# the literal `open` that shipped, run against the fixture whose specimen is
+# `blocked`. It must RED — and it must red through the CONTROL, not through the
+# specimen count, because the mutant's specimen count is exactly the 0 that
+# printed PASS on the live board for as long as the arm existed.
+SHAPECMUTANT="$TMP/pds-ledger-census-mutant-literal-open.sh"
+sed 's/if row_lifecycle in LAPSE_C_LIFECYCLES and worker and claim_field(claim, "closed_at"):/if row_lifecycle == LIFECYCLE_OPEN and worker and claim_field(claim, "closed_at"):/' \
+  "$CENSUS" > "$SHAPECMUTANT"
+expect_status "the mutant is a REAL edit of the source, not a no-op sed" 1 \
+  cmp -s "$CENSUS" "$SHAPECMUTANT"
+expect_status_matching "MUTANT: the literal-\`open\` key reds over a blocked specimen" 1 "shape C found ZERO over a denominator of 3" \
+  bash "$SHAPECMUTANT" --root "$ROOT_SLUG" --pace 0 --retries 0 --page-limit 4 \
+  --fixture-dir "$SHAPECBLOCKED" --assert-round-done
+expect_status_matching "MUTANT: and the control it fails on is the blocked row itself" 1 "not the board being clean: deep-a" \
+  bash "$SHAPECMUTANT" --root "$ROOT_SLUG" --pace 0 --retries 0 --page-limit 4 \
+  --fixture-dir "$SHAPECBLOCKED" --assert-round-done
+
 # (g) THE CONTROL. A board with no claims at all is silent on all three shapes —
 # an arm that reds on the healthy corpus would make every red above meaningless.
 expect_status "the healthy corpus is silent on all three shapes" 0 \
@@ -1435,7 +1541,7 @@ expect_output_contains "shape B reads 0 on a healthy board" \
   "shape B  in_progress held past the lease     0" \
   run --page-limit 4 --fixture-dir "$HEALTHY"
 expect_output_contains "shape C reads 0 on a healthy board" \
-  "shape C  open with a claim never cleared     0" \
+  "shape C  live with a claim never cleared     0" \
   run --page-limit 4 --fixture-dir "$HEALTHY"
 
 # (h) THE LENS IS PRINTED, AND IT IS DERIVED. /v1/data/query answers
