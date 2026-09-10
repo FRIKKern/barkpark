@@ -3,4 +3,105 @@ title: Content Modeling Overview
 description: Schemas, fields, and references in Barkpark.
 ---
 
-This page is coming in a follow-up commit.
+Everything Barkpark stores is a **document**. A document's shape comes from a
+**schema**, and schemas live inside a tenancy hierarchy:
+
+```
+Workspace ──< Project ──< Dataset ──< Documents (typed by a Schema)
+```
+
+A workspace is the hard tenant boundary. A project sits under one workspace, and
+a dataset (`production`, `staging`, …) sits under one project. Reads and writes
+name the dataset: `GET /v1/data/query/production/post`.
+
+## A schema is a named type plus its fields
+
+A schema names a document `type` — `post`, `page`, `paper`, `sheet`, `book` — and
+lists the fields a document of that type may carry. Register one over HTTP or
+from the SDK:
+
+```ts
+await bp.upsertSchema({
+  name: 'post',
+  fields: [
+    { name: 'title', type: 'string' },
+    { name: 'slug', type: 'slug' },
+    { name: 'body', type: 'richText' },
+    { name: 'author', type: 'reference', to: [{ type: 'author' }] },
+  ],
+})
+```
+
+`upsertSchema` is an idempotent register-or-replace; an invalid definition throws
+`BarkparkValidationError` carrying `.issues`, the per-field errors.
+`bp.schemas()` returns every schema in the dataset and `bp.getSchema('post')`
+returns one or `null`.
+
+The `bp` CLI scaffolds one for you instead of starting from a blank file:
+
+```bash
+bp make schema product --out product.json   # commented skeleton, every field type
+bp schema apply --file product.json         # register the type
+bp seed product --count 5 --publish         # fabricate 5 valid sample documents
+```
+
+## Two generations of field types
+
+The eight seed schemas (`post`, `page`, `author`, `category`, `project`,
+`siteSettings`, `navigation`, `colors`) use flat v1 primitives — `string`,
+`text`, `richText`, `number`, `boolean`, `slug`, `image`, `color`,
+`datetime`, `select`, `reference`, `array`.
+
+Plugin-authored schemas can also use four **v2** field types:
+
+| Type | What it is |
+| --- | --- |
+| `composite` | A nested object with named subfields; composites may recurse. |
+| `arrayOf` | A homogeneous array. Its `of` shape descriptor is required. `ordered: true` gives the editor reorder buttons. |
+| `codelist` | A registry-backed enum pinned to an issue, keyed `<plugin>:<name>` — how ONIX code lists are modelled. |
+| `localizedText` | One string per declared language slot, resolved through a fallback chain. |
+
+A schema that uses none of them stays on the flat validator permanently. There is
+no migration deadline pushing legacy schemas onto v2. The full contract, with the
+validation rules and the reserved `bp_` field prefix, is in
+[schema-v2.md](https://github.com/FRIKKern/barkpark/blob/main/docs/contracts/schema-v2.md).
+
+## References are first-class in both directions
+
+A `reference` field stores the target document's id. Read it forwards by
+expanding it, and backwards by asking what points at a document:
+
+```ts
+const posts = await bp.docs('post').expand('author').find()
+posts[0].author.name // the author document, inlined (depth 1)
+
+const { backlinks, count } = await bp.getBacklinks('p1') // who references p1
+const graph = await bp.getGraph('p1', { depth: 3, direction: 'out' })
+const broken = await bp.getDangling() // references whose target is missing
+```
+
+`expand` resolves depth 1 only, and a reference whose target is missing stays a
+raw id string rather than failing the read.
+
+## Drafts, published, and the perspective you read
+
+Every document has three perspectives. **published** is what anonymous readers
+and your app get by default. **drafts** is what Studio, the TUI, and `bp tinker`
+edit. **raw** returns both rows side by side. Publishing copies the draft onto
+the published row; the draft survives until it is discarded.
+
+Anonymous callers are always pinned to `published` — `?perspective=drafts` and
+`?perspective=raw` need a bearer token.
+
+## Generate types from the model
+
+Once the schemas are registered, `barkpark generate` turns them into TypeScript:
+one interface per schema, a `BarkparkTypeMap`, and a `BarkparkAnyDocument`
+discriminated union you can narrow by `_type`. Pair the map with
+`typedClient<BarkparkTypeMap>` and an unknown type name becomes a compile error.
+See [APIs and SDKs](/docs/apis-and-sdks/overview).
+
+## Next
+
+- [Studio Overview](/docs/studio/overview) — what authors see once the model exists.
+- [APIs and SDKs](/docs/apis-and-sdks/overview) — reading the model from an app.
