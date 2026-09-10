@@ -122,7 +122,12 @@ const MASKING_TAILS = new Set([
 // repo's ledgers claims something it never checked.
 const COUNTING_TAILS = new Set(["wc"]);
 
-function gitVerb(tokens) {
+/**
+ * The git VERB and its arguments, skipping the global flags that take a value.
+ * EXPORTED because binding.mjs's `deriveTerms` needs the same split to find a
+ * git read's SUBJECT, and a second copy of this loop is how the two would drift.
+ */
+export function gitVerb(tokens) {
   for (let i = 1; i < tokens.length; i++) {
     const t = tokens[i];
     if (!t.startsWith("-")) return { verb: t, args: tokens.slice(i + 1) };

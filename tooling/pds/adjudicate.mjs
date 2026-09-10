@@ -37,7 +37,7 @@ import { admitsPassClaim, admitsAbsenceClaim, SYNC_TIMEOUT_MS } from "../grip/re
 import { deriveLevel } from "../grip/level.mjs";
 import { forbiddenSpelling } from "./spellings.mjs";
 import { varianceSet, overClaim, isUnknownVariance, CLAIM_CLASS } from "./variance.mjs";
-import { bindClaim } from "./binding.mjs";
+import { bindClaim, deriveTerms } from "./binding.mjs";
 import { hasReason } from "./corpus.mjs";
 
 // ── THE PDS VERDICT VOCABULARY ───────────────────────────────────────────────
@@ -99,6 +99,69 @@ export function toFact(row, recipe = null) {
     rerun: recipe?.command ?? "",
     observed_at: row._createdAt || undefined,
     deps: [],
+  };
+}
+
+// ── THE ROW'S OWN STORED RERUN ───────────────────────────────────────────────
+//
+// WAVE 28 BUILT BOTH HALVES OF THIS INSTRUMENT AND NEVER JOINED THEM. `bp task
+// stage` writes a fourth durable key, `content.disposition_rerun` — one command
+// the author says re-derives the reason — and corpus.mjs has normalised that
+// field off every row since the day it shipped. Nothing read it. `toFact()`
+// sourced `rerun` from the hand-maintained recipes.json sidecar and nothing
+// else, so a row that carried a stored rerun was still reported
+//
+//     PROSE-ONLY / NO-RERUN — "asserted by nobody"
+//
+// which is FALSE about that row: somebody did assert it, in the field built for
+// exactly that, and the instrument printed the opposite. Measured 2026-09-10:
+// 3 live rows carry a stored rerun and all three read that way.
+//
+// SO THE STORED RERUN WINS, AND THE SIDECAR IS THE FALLBACK. The ledger row is
+// the durable, author-written record; recipes.json is a repo file somebody
+// re-typed by hand. When both exist, the row's is the one adjudicated and the
+// shadowed recipe is REPORTED BY NAME rather than silently dropped — a
+// last-write-wins merge is how a wrong value replaces a right one.
+//
+// WHAT A STORED RERUN DOES **NOT** GET, and why:
+//
+//   A CLAIM CLASS. Nobody declared one. Inferring it from the command makes the
+//   variance screen vacuous — every command would trivially pay for the class
+//   read out of its own variance set — and inferring it from the prose is the
+//   scanner grip already built and refuted at precision 0.67. So a stored rerun
+//   is adjudicated at the FLOOR CLASS, `existence`: the weakest class in the
+//   table, paid for by EXISTENCE or CONTENT and by nothing else. A stored
+//   `go test` therefore lands VARIANCE-SKIP, which is correct — it is claiming
+//   BEHAVIOUR that no author ever declared. ABSENCE is deliberately NOT the
+//   floor even though it is paid for by more axes: absence is a POLARITY, and
+//   guessing an author's polarity is the one thing this epic may not do.
+//
+//   A FREE PASS AT ANY OTHER SCREEN. It goes through forbiddenSpelling,
+//   bindClaim and overClaim in that order, exactly like a sidecar recipe, and
+//   `deriveLevel` reads its command the same way.
+export const STORED_ORIGIN = "stored";
+export const SIDECAR_ORIGIN = "sidecar";
+
+/** The floor claim class for a rerun whose author declared none. */
+export const STORED_CLAIM_CLASS = CLAIM_CLASS.EXISTENCE;
+
+/**
+ * storedRecipe(row) → a recipe built from `row.disposition_rerun`, or null.
+ *
+ * The claim is the row's TITLE — the same string `toFact()` already hands grip
+ * as the fact's `claim` — so binding screens the command against the very
+ * sentence the verdict is about.
+ */
+export function storedRecipe(row) {
+  const command = typeof row?.disposition_rerun === "string" ? row.disposition_rerun.trim() : "";
+  if (command === "") return null;
+  return {
+    doc_id: row.doc_id,
+    origin: STORED_ORIGIN,
+    claim_class: STORED_CLAIM_CLASS,
+    claim: typeof row.title === "string" ? row.title : "",
+    terms: deriveTerms(command),
+    command,
   };
 }
 
@@ -185,11 +248,29 @@ export function adjudicateCorpus(rows, recipes = [], opts = {}) {
   const known = new Set(rows.map((r) => r.doc_id));
   const orphanRecipes = [...byRow.keys()].filter((id) => !known.has(id));
 
+  // ── WHICH RERUN IS THIS ROW'S? THE ROW'S OWN, THEN THE SIDECAR ────────────
+  const chosen = new Map();
+  const shadowedRecipes = [];
+  let storedRows = 0;
+  for (const row of rows) {
+    const stored = storedRecipe(row);
+    if (stored) storedRows++;
+    const sidecar = byRow.get(row.doc_id) ?? null;
+    if (stored && sidecar) shadowedRecipes.push(row.doc_id);
+    const pick = stored ?? (sidecar ? { origin: SIDECAR_ORIGIN, ...sidecar } : null);
+    if (pick) chosen.set(row.doc_id, pick);
+  }
+  const storedRerun = {
+    rows: storedRows,
+    adjudicated: [...chosen.values()].filter((r) => r.origin === STORED_ORIGIN).length,
+    fromSidecar: [...chosen.values()].filter((r) => r.origin !== STORED_ORIGIN).length,
+    shadowedRecipes,
+  };
+
   // ── PRE-FLIGHT ────────────────────────────────────────────────────────────
   const refusals = new Map();
   const executable = [];
-  for (const [docId, recipe] of byRow) {
-    if (!known.has(docId)) continue;
+  for (const [docId, recipe] of chosen) {
     const refusal = preScreen(recipe);
     if (refusal) refusals.set(docId, refusal);
     else executable.push(recipe);
@@ -211,6 +292,7 @@ export function adjudicateCorpus(rows, recipes = [], opts = {}) {
       conflicts: [],
       duplicates,
       orphanRecipes,
+      storedRerun,
     };
   }
 
@@ -218,7 +300,7 @@ export function adjudicateCorpus(rows, recipes = [], opts = {}) {
   // Every live adjudicated row goes through grip's admitFact, including the
   // 167 that carry no rerun at all: a prose-only reason is DEMOTED to L6, never
   // rejected (truth-grip D3), and it must appear in the output BY NAME.
-  const facts = rows.map((row) => toFact(row, byRow.get(row.doc_id) ?? null));
+  const facts = rows.map((row) => toFact(row, chosen.get(row.doc_id) ?? null));
   const admission = adjudicateAll(facts, { execute: false });
 
   // ── EXECUTION, ONE RECIPE AT A TIME, INSIDE THE BUDGET ────────────────────
@@ -263,14 +345,15 @@ export function adjudicateCorpus(rows, recipes = [], opts = {}) {
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const admissionRuling = admission.rulings[i];
-    const recipe = byRow.get(row.doc_id) ?? null;
+    const recipe = chosen.get(row.doc_id) ?? null;
     const level = recipe ? deriveLevel(recipe.command) : "L6";
+    const origin = recipe?.origin ?? null;
 
     if (admissionRuling.verdict === VERDICTS.REJECTED) {
       out.push({
         doc_id: row.doc_id, level: null, claim_class: recipe?.claim_class ?? null,
         verdict: PDS_VERDICT.MALFORMED, reason: admissionRuling.label,
-        note: admissionRuling.note, command: recipe?.command ?? "",
+        note: admissionRuling.note, command: recipe?.command ?? "", origin,
       });
       continue;
     }
@@ -278,7 +361,7 @@ export function adjudicateCorpus(rows, recipes = [], opts = {}) {
       out.push({
         doc_id: row.doc_id, level, claim_class: recipe?.claim_class ?? null,
         verdict: PDS_VERDICT.MALFORMED, reason: "CONFLICT",
-        note: admissionRuling.note, command: recipe?.command ?? "",
+        note: admissionRuling.note, command: recipe?.command ?? "", origin,
       });
       continue;
     }
@@ -290,18 +373,18 @@ export function adjudicateCorpus(rows, recipes = [], opts = {}) {
         note: hasReason(row)
           ? "the reason is prose with no rerun command, so nothing about it can be re-derived — L6, asserted by nobody"
           : "the row carries a disposition and NO reason at all",
-        command: "",
+        command: "", origin: null,
       });
       continue;
     }
     const refusal = refusals.get(row.doc_id);
     if (refusal) {
-      out.push({ doc_id: row.doc_id, level, claim_class: recipe.claim_class, verdict: PDS_VERDICT.REFUSED, reason: refusal.reason, note: refusal.message, command: recipe.command });
+      out.push({ doc_id: row.doc_id, level, claim_class: recipe.claim_class, verdict: PDS_VERDICT.REFUSED, reason: refusal.reason, note: refusal.message, command: recipe.command, origin });
       continue;
     }
     const ruling = executed.get(row.doc_id);
     if (!ruling) {
-      out.push({ doc_id: row.doc_id, level, claim_class: recipe.claim_class, verdict: PDS_VERDICT.INCONCLUSIVE, reason: "BUDGET-EXHAUSTED", note: `the execution budget of ${budgetMs}ms ran out before this recipe ran — it is NOT a pass and NOT a failure`, command: recipe.command });
+      out.push({ doc_id: row.doc_id, level, claim_class: recipe.claim_class, verdict: PDS_VERDICT.INCONCLUSIVE, reason: "BUDGET-EXHAUSTED", note: `the execution budget of ${budgetMs}ms ran out before this recipe ran — it is NOT a pass and NOT a failure`, command: recipe.command, origin });
       continue;
     }
     const variance = varianceSet(recipe.command);
@@ -311,12 +394,12 @@ export function adjudicateCorpus(rows, recipes = [], opts = {}) {
         doc_id: row.doc_id, level: "L6", claim_class: recipe.claim_class,
         verdict: PDS_VERDICT.DEMOTED_UNKNOWN, reason: "UNKNOWN-VARIANCE",
         note: `${variance.why} — DEMOTED to L6, never rejected (truth-grip D3). The command still ran and returned ${ruled.verdict}, which is recorded and NOT counted as re-derived.`,
-        command: recipe.command,
+        command: recipe.command, origin,
       });
       continue;
     }
     const ruled = ruleExecuted(recipe, ruling);
-    out.push({ doc_id: row.doc_id, level, claim_class: recipe.claim_class, ...ruled, command: recipe.command });
+    out.push({ doc_id: row.doc_id, level, claim_class: recipe.claim_class, ...ruled, command: recipe.command, origin });
   }
 
   const counts = {};
@@ -336,5 +419,6 @@ export function adjudicateCorpus(rows, recipes = [], opts = {}) {
     conflicts: admission.conflicts.map((c) => c.fact?.subject ?? "(unnamed)"),
     duplicates,
     orphanRecipes,
+    storedRerun,
   };
 }
