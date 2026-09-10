@@ -314,9 +314,12 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
       one, so it gets its own bucket instead of being laundered into either.
     * UNREACHABLE — no caller in `cloud/lib` at all. Every row carries a reason
       and, where one exists, the PR or task that will give it a caller. TEST
-      references do NOT count: `classes/0` has NINE of them and zero lib
+      references do NOT count: `classes/0` HAD NINE of them and zero lib
       callers, which is the D245 disease verbatim — a function the suite keeps
-      warm and no operator can reach.
+      warm and no operator can reach. It is not on this list any more:
+      `census/3`'s `vocabulary/0` reads it, and the enum reaches a human on the
+      census envelope (dr-w16-s3-followup-class-vocabulary-unreachable). The
+      shape it names is what the remaining rows are measured against.
 
   ## The limit of the claim
 
@@ -382,20 +385,26 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
      "keyset cursor writer, used by list_page/2 when it hands back a next page."},
     {:decode_cursor, 1, :internal_only,
      "keyset cursor reader, used by list_page/2 on the way in. Public so the cursor SHAPE test can round-trip it."},
+    # THE CLASS VOCABULARY, ROUTED (dr-w16-s3-followup-class-vocabulary-unreachable).
+    # All three stood on the UNREACHABLE allowlist as "wave-16 follow-up": nine,
+    # three and zero test references between them and ZERO callers in cloud/lib
+    # — the D245 disease verbatim. They are read now, by `census/3`'s
+    # `vocabulary/0` helper, which puts all three enums on the census envelope
+    # `Web.Router.deploy_census_json/2` already serialises whole. So the bucket
+    # is :internal_only (the caller is in this module's own file, which is what
+    # this census means by INTERNAL and it says so rather than laundering it
+    # into :reachable) while an OPERATOR reaches the value over HTTP and through
+    # `bp cloud deployments --legend`. They stay `def` rather than `defp`
+    # because the class-taxonomy assertions call them directly, off the ENUMS
+    # rather than a hand-list (D242).
+    {:classes, 0, :internal_only,
+     "the named-class list. `vocabulary/0` reads it into the census envelope's `vocabulary.classes`, and the Go `DeployVocabulary` decodes it — so the legend a CLI renders is DERIVED from the enum instead of re-typed on the far side of the wire."},
+    {:deferred_classes, 0, :internal_only,
+     "the deferral vocabulary. Same reader: `vocabulary.deferred_classes` on the census envelope. `deferred?/1` still answers MEMBERSHIP internally; this ENUMERATES, which is what a legend and the D242 exhaustiveness assertion both need and membership cannot do."},
+    {:not_attempted_classes, 0, :internal_only,
+     "the never-attempted vocabulary. Deleted by dr-w16-s3 when nothing read it, re-added by dr-w31-s3 with the agency-map exhaustiveness assertion named, and given a LIB reader here: `vocabulary.not_attempted_classes`. A legend that lists the failure classes and hides the tombstone class is an incomplete legend."},
 
     # -- UNREACHABLE — the allowlist, reason + closer ---------------------------
-    {:classes, 0, :unreachable,
-     "the named-class list. NINE test references, ZERO lib callers — the D245 disease verbatim: a suite keeps it warm and no operator can reach it. No route exposes the class vocabulary; filed as wave-16 follow-up rather than deleted, because the class list is the thing a CLI needs to render a legend."},
-    {:deferred_classes, 0, :unreachable,
-     "the deferral vocabulary. THREE test references, ZERO lib callers; `deferred?/1` answers the membership question internally, so this accessor exists for no reader. Same follow-up as classes/0."},
-    # ALLOWLISTED WITH A REASON, both of them, and the reason is the same one:
-    # they exist so an ASSERTION can be keyed off the enums instead of a
-    # hand-list. dr-w16-s3 deleted `not_attempted_classes/0` as the one
-    # genuinely dead public and set equality kept it deleted — this is the
-    # commit that re-adds it, and it is re-added WITH a stated reader rather
-    # than smuggled back in.
-    {:not_attempted_classes, 0, :unreachable,
-     "the never-attempted vocabulary. ZERO lib callers; `not_attempted?/1` answers MEMBERSHIP inside census/3 and cannot ENUMERATE. Its reader is the agency-map exhaustiveness assertion (D242), which must cover `classes/0 ++ not_attempted_classes/0` — every value classify/2 can return — off the ENUMS, because a hand-listed set is a second place to forget and reproduces D224 with a green. Deleted by dr-w16-s3 when nothing at all read it; re-added by dr-w31-s3 with that reader named. CLOSER: the class vocabulary reaches an operator only when a route or the CLI renders a legend — the same follow-up as classes/0 and deferred_classes/0."},
     {:journeys, 3, :unreachable,
      "ATTEMPTS PER RELEASE, run-segmented (D142/D161, dr-bl-w9-journey-metric-run-based). ZERO lib callers TODAY and the row says so rather than laundering a test reference into a caller — `deploy_ledger_journeys_test.exs` is the only thing that calls it, which is the D245 disease's exact shape and is named here instead of hidden. It is NOT on `census/3`'s envelope by choice: that envelope's key set is paired with the Go `cloudclient.DeployCensus` struct by `payload_key_set_census_test.exs`, and both `router.ex` and `internal/cloudclient` are outside this change's fence, so folding it in would land a server key with no wire type. CLOSER, NAMED AND SINGLE: the follow-up that adds `journeys` to `Web.Router.deploy_census_json/2` beside `delivery` and `coverage_cohorts`, its `DeployJourneys` Go struct, and `renderDeployJourneys` in `cloud_deploy_census_cmd.go` — one PR, server key + Go field + rendered line, the D136 rule. That PR moves this row to :reachable and the move is the proof. Until then the figure reaches a human only through `journey_report/1` and this suite."},
     {:journey_report, 1, :unreachable,

@@ -69,12 +69,15 @@ defmodule Barkpark.Content.Graph do
   require Logger
 
   # The drafts fold holds the whole corpus in memory to build its adjacency
-  # indexes, so the walk is bounded on purpose: 20 pages = 20,000 documents per
-  # type, twenty times the 1000-row cap this replaces, and small enough that a
-  # runaway dataset warns instead of exhausting the node. Overridable per call
-  # via :corpus_page_size / :corpus_max_pages.
-  @corpus_page_size 1000
-  @corpus_max_pages 20
+  # indexes, so the read is bounded on purpose: 20,000 documents for the WHOLE
+  # dataset — the same budget the per-type OFFSET walk this replaces carried
+  # (page_size 1000 x max_pages 20), now applied ONCE across every type rather
+  # than to each type separately. That is a strictly TIGHTER memory bound: the
+  # old shape let a five-type dataset materialise 100,000 documents into the
+  # BEAM before any bound fired. Overridable per call via :corpus_limit and
+  # config-overridable (:graph_drafts_corpus_limit) for tests, the same escape
+  # hatch `corpus_scan_limit/0` has and for the same reason.
+  @corpus_limit 20_000
 
   # Bound on the WHOLE-CORPUS scans behind `/v1/graph/orphans` and
   # `/v1/graph/dangling`. Both used to be unbounded `Repo.all/1`s over every
@@ -96,6 +99,16 @@ defmodule Barkpark.Content.Graph do
   @spec corpus_scan_limit() :: pos_integer()
   def corpus_scan_limit,
     do: Application.get_env(:barkpark, :graph_corpus_scan_limit, @corpus_scan_limit)
+
+  @doc """
+  The whole-corpus bound the drafts fold reads under
+  (`build_drafts_index/1`). Config-overridable
+  (`:barkpark, :graph_drafts_corpus_limit`) for TESTS ONLY — a bound whose only
+  proof needs 20,001 fixture rows is a bound nobody tests.
+  """
+  @spec corpus_limit() :: pos_integer()
+  def corpus_limit,
+    do: Application.get_env(:barkpark, :graph_drafts_corpus_limit, @corpus_limit)
 
   alias Barkpark.Repo
   alias Barkpark.Content
@@ -335,37 +348,70 @@ defmodule Barkpark.Content.Graph do
     schemas =
       if is_binary(dataset) and dataset != "", do: Content.list_schemas(dataset, opts), else: []
 
-    # WALK THE WHOLE DRAFTS CORPUS. This was `list_documents(limit: 1000)`, and
-    # `list_documents/3` CLAMPS :limit to 1000 and returns a bare list — so a
-    # dataset with more than 1000 drafts of a type built its adjacency index
-    # from a PREFIX. That is worse here than a short list: `corpus_slugs` below
-    # is derived from `docs`, and the dangling pass treats a target absent from
-    # that set as a PHANTOM reference. A truncated corpus therefore does not
-    # merely hide edges — it INVENTS dangling ones for real, resolvable targets
-    # that happened to fall past the cap.
+    # READ THE WHOLE DRAFTS CORPUS — IN TWO QUERIES, NOT ONE PER TYPE.
+    #
+    # `corpus_slugs` below is derived from `docs`, and the dangling pass treats
+    # a target absent from that set as a PHANTOM reference. A truncated corpus
+    # therefore does not merely hide edges — it INVENTS dangling ones for real,
+    # resolvable targets that fell past the cap. So the read must see the whole
+    # corpus, and it must say so when it could not.
+    #
+    # THE COST THAT WAS HERE (task graph-endpoint-latency). This walked
+    # `Content.collect_all_documents/3` ONCE PER SCHEMA, and that helper pages
+    # with LIMIT/OFFSET over a `DISTINCT ON (regexp_replace(doc_id, ...))`
+    # subquery re-sorted by `updated_at DESC, id`. Neither sort key is indexed,
+    # so every page re-sorted the ENTIRE type corpus twice — carrying the full
+    # `content` jsonb through the sort tuple — to return 1,000 rows. Work was
+    # QUADRATIC in the corpus (pages x corpus) and the outer sort spilled to
+    # disk. Measured locally over 8,000 documents: 47 such reads, 1,046 ms of a
+    # 1,264 ms request; LIVE on guerrilla the same request took 18.4 s.
+    #
+    # `Content.collect_corpus_documents/3` is the same SET in ONE bounded
+    # `DISTINCT ON` per ACL class: one sort, no outer re-sort, no offset walk,
+    # no per-type multiplication. Its moduledoc carries the EXPLAIN.
+    #
+    # TWO CLASSES, NOT ONE QUERY: `Content.Query.base_query/4` appends the
+    # row-ownership ACL only for a type whose schema says `owner_scoped: true`.
+    # One query cannot carry a per-type ACL, so the types are split by that
+    # flag — the hoisted `schemas` list already holds it, so the split costs no
+    # extra read — and each class is read under its OWN lens. Folding them into
+    # a single query would apply one type's ACL to another type's rows.
+    {owned_schemas, plain_schemas} = Enum.split_with(schemas, & &1.owner_scoped)
+
+    # No `perspective:` — `collect_corpus_documents/3` is drafts-merged BY
+    # CONSTRUCTION (its DISTINCT ON prefers the `drafts.` twin), so there is no
+    # perspective to pass and none is accepted.
+    corpus_opts = [
+      limit: Keyword.get(opts, :corpus_limit, corpus_limit()),
+      workspace_id: workspace_id,
+      project_id: project_id,
+      caller_context: Keyword.get(opts, :caller_context)
+    ]
+
     {docs, truncated} =
       if is_binary(dataset) and dataset != "" do
-        schemas
-        |> Enum.map_reduce(nil, fn schema, trunc_acc ->
-          {page, trunc} =
-            Content.collect_all_documents(schema.name, dataset,
-              perspective: :drafts,
-              page_size: Keyword.get(opts, :corpus_page_size, @corpus_page_size),
-              max_pages: Keyword.get(opts, :corpus_max_pages, @corpus_max_pages),
-              workspace_id: workspace_id,
-              project_id: project_id
-            )
+        {plain_docs, plain_trunc} =
+          Content.collect_corpus_documents(
+            Enum.map(plain_schemas, & &1.name),
+            dataset,
+            corpus_opts
+          )
 
-          {page, trunc_acc || trunc}
-        end)
-        |> then(fn {per_type, trunc} -> {Enum.concat(per_type), trunc} end)
+        {owned_docs, owned_trunc} =
+          Content.collect_corpus_documents(
+            Enum.map(owned_schemas, & &1.name),
+            dataset,
+            Keyword.put(corpus_opts, :owner_scoped, true)
+          )
+
+        {plain_docs ++ owned_docs, plain_trunc || owned_trunc}
       else
         {[], nil}
       end
 
     if truncated == :cap do
       Logger.warning(
-        "Content.Graph: drafts corpus walk for dataset=#{dataset} hit its page bound at " <>
+        "Content.Graph: drafts corpus read for dataset=#{dataset} hit its corpus bound at " <>
           "#{length(docs)} docs — the index is built from a PREFIX, so edges to documents " <>
           "beyond the walk render as DANGLING even though their targets exist."
       )
