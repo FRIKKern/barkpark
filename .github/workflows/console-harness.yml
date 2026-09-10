@@ -1145,6 +1145,47 @@ jobs:
           echo "::error title=console-unit ${v} — __me_envelope_census.mjs::__me_envelope_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
           exit 1
 
+      # ── THE SAME CENSUS, GENERALIZED PAST /v1/me (cch-w43-bl) ──────────────
+      #
+      # Wired exactly where its /v1/me sibling is, and for the same reason: this
+      # job is already in console-gate's `needs:`, so a failure here fails the
+      # one required context and no new leaf name is added to
+      # .github/required-checks.json.
+      #
+      # It runs a THREE-way diff — keys(defp <x>_json) x keys(<x>() producer, as
+      # SERVED) x reads(app.js) — over /v1/me, /v1/sites and
+      # /v1/sites/:id/deployments, and it splits the missing set on the read
+      # axis so the two halves are not confused:
+      #   rc=1 — UNPAINTABLE (the server always sends it, app.js READS it, no
+      #          scenario serves it) or INVENTED. On origin/main's corpus that
+      #          named SEVEN: site theme + url, last_deployment failure_class +
+      #          failure_reason, deployment failure_code + failure_message +
+      #          stage
+      #   rc=0 — DEAD PAYLOAD (sent, read by nothing) is REPORTED by name and
+      #          never fails: a fixture is not obliged to model payload no
+      #          surface consumes
+      #   rc=2 — it REFUSES rather than passing: a serializer that is gone or
+      #          ambiguous at the named arity, an unparseable map, a corpus where
+      #          no scenario serves the endpoint, or an app.js node whose reads
+      #          it cannot attribute (which would move every hole to the reported
+      #          arm and exit 0 over a live regression)
+      - name: envelope census, generalized (sites + deployments + /v1/me)
+        id: envelope-census
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__envelope_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __envelope_census.mjs::__envelope_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
       # ── THE INIT WIRING CENSUS (cchi-w44-bl, wave 44's last Law-0 move) ─────
       #
       # The LAST of the derived group, and the one that closes the oldest hole

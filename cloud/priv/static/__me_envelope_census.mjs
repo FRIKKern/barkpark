@@ -121,6 +121,29 @@ import { SCENARIO_NAMES, route } from "./__preview__/scenarios.mjs";
 const here = path.dirname(new URL(import.meta.url).pathname);
 const ROUTER = process.argv[2] || path.join(here, "../../lib/barkpark_cloud/web/router.ex");
 
+// ── THIS FILE IS ALSO A PARSER LIBRARY (cch-w43-bl) ─────────────────────────
+//
+// Everything below the header is reused verbatim by __envelope_census.mjs, the
+// GENERALIZED census that runs the same three-way diff over /v1/sites and
+// /v1/sites/:id/deployments. That census is a SIBLING and not a rewrite for one
+// reason: a second copy of this Elixir map-literal walker would drift from this
+// one, and the two would then disagree about what the server states — a census
+// whose two halves disagree is the failure this instrument exists to catch,
+// wearing the instrument's own coat.
+//
+// The /v1/me behaviour of THIS file is byte-identical to what it was before the
+// split. The main block is guarded by IS_MAIN so an `import` measures nothing,
+// and the shared walkers take their refusal vocabulary from CTX so the sibling
+// refuses in its OWN name (`!! ENVELOPE CENSUS (exit 2): …`) rather than
+// mis-attributing a deployments-map parse failure to the /v1/me census.
+const IS_MAIN = (() => {
+  try {
+    return !!process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname);
+  } catch {
+    return false;
+  }
+})();
+
 
 // ── THE ONE REFUSAL VOCABULARY (cch-w63-bl) ─────────────────────────────────
 // EVERY exit-2 path in this file ends with exactly ONE line, on STDERR:
@@ -152,11 +175,22 @@ function die2(lines) {
   refuse2(String(lines[0] || "the census could not measure the /v1/me envelope").replace(/^FAIL\(2\):\s*/, ""));
 }
 
+// The refusal vocabulary + router path the SHARED walkers below speak. Default
+// is this census's own, so nothing about `node __me_envelope_census.mjs`
+// changes; the sibling census swaps both before it parses anything, so a
+// deployments-map parse failure refuses as ENVELOPE CENSUS and names the
+// deployments serializer rather than /v1/me.
+let CTX = { router: ROUTER, die2, subject: "/v1/me" };
+export function useCensusContext(over) {
+  CTX = Object.assign({}, CTX, over || {});
+  return CTX;
+}
+
 // ── the server side ─────────────────────────────────────────────────────────
 // Blank out Elixir comments and string bodies so brace/paren depth counting and
 // `key:` matching see structure only. Length is preserved so every index into
 // the blanked text is an index into the original.
-function blank(src) {
+export function blank(src) {
   const out = src.split("");
   let i = 0;
   while (i < src.length) {
@@ -181,7 +215,7 @@ function blank(src) {
 }
 
 // The balanced `%{ … }` region starting at `open` (the index of `{`).
-function balanced(text, open) {
+export function balanced(text, open) {
   let depth = 0;
   for (let i = open; i < text.length; i++) {
     const c = text[i];
@@ -196,7 +230,7 @@ function balanced(text, open) {
 // WITHIN the body, because a later `indexOf(segment)` would find the FIRST
 // textual occurrence and could silently walk the wrong nested map: the one
 // failure a census must never have is a confident wrong answer.
-function topLevelSplit(text) {
+export function topLevelSplit(text) {
   const parts = [];
   let depth = 0, from = 0;
   const push = (to) => {
@@ -249,10 +283,10 @@ const RESOLVING = new Set();
 // Resolve a bare local call to the map literal its single clause returns.
 // Refuses — never degrades back to "opaque" — because this census is on the
 // hook for the subtree the moment it can see the helper at all.
-function localHelperMap(blanked, name, self) {
-  const searched = `${path.relative(process.cwd(), ROUTER)} (searched for \`defp ${name}(\`)`;
+export function localHelperMap(blanked, name, self) {
+  const searched = `${path.relative(process.cwd(), CTX.router)} (searched for \`defp ${name}(\`)`;
   if (RESOLVING.has(name)) {
-    die2([
+    CTX.die2([
       `FAIL(2): \`${name}/1\`, reached from \`${self}\`, resolves through itself — this census cannot`,
       `         state a shape for a recursive builder.`,
       `         ${searched}`,
@@ -275,13 +309,13 @@ function localHelperMap(blanked, name, self) {
   let bareClauses = 0;
   while (bare.exec(blanked) !== null) bareClauses++;
   if (clauses.length + bareClauses > 1) {
-    die2([
+    CTX.die2([
       `FAIL(2): \`${name}/…\` has ${clauses.length + bareClauses} clause heads in ${searched} and \`${self}\` could take`,
       `         any of them. This census will not pick one and call it the shape.`,
     ]);
   }
   if (!clauses.length) {
-    die2([
+    CTX.die2([
       `FAIL(2): \`${self}\` is built by the bare local call \`${name}(...)\` and no walkable clause of it`,
       `         exists in ${searched}`,
       bareClauses
@@ -298,11 +332,11 @@ function localHelperMap(blanked, name, self) {
     if (blanked[i] === "(") depth++;
     else if (blanked[i] === ")") { depth--; if (depth === 0) { close = i; break; } }
   }
-  if (close === -1) die2([`FAIL(2): the head of \`${name}\` in ${searched} has unbalanced parens.`]);
+  if (close === -1) CTX.die2([`FAIL(2): the head of \`${name}\` in ${searched} has unbalanced parens.`]);
   const nl = blanked.indexOf("\n", close);
   const headerTail = nl === -1 ? blanked.slice(close + 1) : blanked.slice(close + 1, nl);
   if (!/\bdo\s*$/.test(headerTail)) {
-    die2([
+    CTX.die2([
       `FAIL(2): \`${name}\` in ${searched} is not a plain \`… do\`-block helper (its head continues past`,
       `         the clause line), so \`${self}\`'s shape cannot be read off it.`,
       `         The head, verbatim: ${headerTail.trim().slice(0, 120)}`,
@@ -311,28 +345,187 @@ function localHelperMap(blanked, name, self) {
   let i = nl + 1;
   while (i < blanked.length && /\s/.test(blanked[i])) i++;
   if (blanked.slice(i, i + 2) !== "%{") {
-    die2([
+    CTX.die2([
       `FAIL(2): \`${name}\` in ${searched} does not open on a \`%{\` map literal, so this census cannot`,
       `         say what key paths \`${self}\` carries. It states the subtree or it states nothing.`,
     ]);
   }
   const nested = balanced(blanked, i + 1);
-  if (!nested) die2([`FAIL(2): the map returned by \`${name}\` in ${searched} is unbalanced — refusing to guess its keys.`]);
+  if (!nested) CTX.die2([`FAIL(2): the map returned by \`${name}\` in ${searched} is unbalanced — refusing to guess its keys.`]);
   return nested;
+}
+
+// ── THE SAME RESOLUTION, ADDRESSED BY NAME/ARITY (cch-w43-bl) ───────────────
+//
+// `localHelperMap` above answers "what shape does the ONE clause of this bare
+// call return", and refuses the moment a name has two clause heads. That is the
+// right rule for a call site: a call whose callee has two clauses could take
+// either, and picking one would be a confident wrong answer.
+//
+// A GENERALIZED census asks a different question. It names a serializer up
+// front — `site_json/2` — and `site_json` has TWO heads on main:
+//
+//     defp site_json(s), do: site_json(s, nil)      # the /1 delegator
+//     defp site_json(s, bp) do  %{ … }              # the /2 shape
+//
+// There is no ambiguity to refuse: the arity picks the clause. So this resolver
+// selects heads by ARITY (top-level commas in the parameter list + 1) and then
+// applies the SAME refusals as localHelperMap — >1 head at that arity, a head
+// that continues past `do`, a body that does not open on `%{`, an unbalanced
+// map. It never falls back to "opaque": the whole point of naming a serializer
+// is that this census is on the hook for its keys.
+export function namedHelperMap(blanked, name, arity) {
+  const searched = `${path.relative(process.cwd(), CTX.router)} (searched for \`defp ${name}/${arity}\`)`;
+  const head = new RegExp(`(^|\\n)\\s*defp?\\s+${name}\\s*\\(`, "g");
+  const matches = [];
+  let m;
+  while ((m = head.exec(blanked)) !== null) {
+    const open = m.index + m[0].length - 1; // index of `(`
+    let depth = 0, close = -1;
+    for (let i = open; i < blanked.length; i++) {
+      if (blanked[i] === "(") depth++;
+      else if (blanked[i] === ")") { depth--; if (depth === 0) { close = i; break; } }
+    }
+    if (close === -1) CTX.die2([`FAIL(2): a head of \`${name}\` in ${searched} has unbalanced parens.`]);
+    const params = blanked.slice(open + 1, close);
+    const n = params.trim().length ? topLevelSplit(params).length : 0;
+    if (n === arity) matches.push({ open, close });
+  }
+  if (!matches.length) {
+    CTX.die2([
+      `FAIL(2): no \`defp ${name}/${arity}\` clause in ${searched}.`,
+      `         This census names that serializer as the server side of an endpoint diff. A`,
+      `         serializer it cannot find would derive an EMPTY server key set, and an empty`,
+      `         server side reports every corpus key as INVENTED and no key as missing — a`,
+      `         result, not a measurement.`,
+    ]);
+  }
+  if (matches.length > 1) {
+    CTX.die2([
+      `FAIL(2): \`${name}/${arity}\` has ${matches.length} clause heads in ${searched} and a caller could take`,
+      `         any of them. This census will not pick one and call it the shape.`,
+    ]);
+  }
+  const { close } = matches[0];
+  const nl = blanked.indexOf("\n", close);
+  const headerTail = nl === -1 ? blanked.slice(close + 1) : blanked.slice(close + 1, nl);
+  if (!/\bdo\s*$/.test(headerTail)) {
+    CTX.die2([
+      `FAIL(2): \`${name}/${arity}\` in ${searched} is not a plain \`… do\`-block serializer (its head`,
+      `         continues past the clause line), so its shape cannot be read off it.`,
+      `         The head, verbatim: ${headerTail.trim().slice(0, 120)}`,
+    ]);
+  }
+  let i = nl + 1;
+  while (i < blanked.length && /\s/.test(blanked[i])) i++;
+  if (blanked.slice(i, i + 2) !== "%{") {
+    CTX.die2([
+      `FAIL(2): \`${name}/${arity}\` in ${searched} does not open on a \`%{\` map literal, so this census`,
+      `         cannot say what key paths it states. It states the shape or it states nothing.`,
+    ]);
+  }
+  const nested = balanced(blanked, i + 1);
+  if (!nested) CTX.die2([`FAIL(2): the map returned by \`${name}/${arity}\` in ${searched} is unbalanced — refusing to guess its keys.`]);
+  return nested;
+}
+
+// ── A BARE LOCAL CALL THAT IS PROVABLY A SCALAR (cch-w43-bl) ────────────────
+//
+// `localHelperMap` refuses whenever a bare local name has more than one clause
+// head, and for /v1/me that is exactly right: `onboarding_json/1` has one, and a
+// second head would mean a shape this census cannot pin.
+//
+// The serializers the generalized census walks call bare helpers /v1/me never
+// does, and some have two heads:
+//
+//     defp preview_url(nil, _), do: nil
+//     defp preview_url(host, scheme), do: "#{scheme}://#{host}"
+//
+// NEITHER clause opens on `%{`. There is no hidden map, nothing is being
+// degraded, and refusing here would stop the census measuring the endpoint
+// rather than protect it. So this resolver LOOKS AT EVERY CLAUSE and answers:
+//
+//   a region — exactly one clause returns a map literal (walk it)
+//   null     — EVERY clause is a scalar (a `, do:` one-liner or a `do` block
+//              that does not open on `%{`): genuinely opaque, and provably so
+//   refusal  — the name has no clause here at all (a remote helper this census
+//              cannot read), or MORE THAN ONE clause returns a map and picking
+//              one would be the confident wrong answer the header forbids
+//
+// The difference from localHelperMap is the direction of the default. There, an
+// unresolvable name refuses. Here too — what changed is that "resolved, and it
+// is a scalar" became an ANSWER instead of a refusal. A name that cannot be
+// seen still refuses, so the dodge this closes stays closed.
+export function scalarOrMapHelper(blanked, name, self) {
+  const searched = `${path.relative(process.cwd(), CTX.router)} (searched for \`defp ${name}\`)`;
+  const head = new RegExp(`(^|\\n)\\s*defp?\\s+${name}\\s*(\\(|,|do\\b)`, "g");
+  let seen = 0;
+  const maps = [];
+  let m;
+  while ((m = head.exec(blanked)) !== null) {
+    seen++;
+    let after = m.index + m[0].length - 1; // index of `(`, `,` or `d`
+    if (blanked[after] === "(") {
+      let depth = 0, close = -1;
+      for (let i = after; i < blanked.length; i++) {
+        if (blanked[i] === "(") depth++;
+        else if (blanked[i] === ")") { depth--; if (depth === 0) { close = i; break; } }
+      }
+      if (close === -1) CTX.die2([`FAIL(2): a head of \`${name}\` in ${searched} has unbalanced parens.`]);
+      after = close + 1;
+    }
+    const nl = blanked.indexOf("\n", after);
+    const tail = nl === -1 ? blanked.slice(after) : blanked.slice(after, nl);
+    if (/\bdo\s*$/.test(tail)) {
+      // A `… do` block: the shape is whatever the first non-blank line opens on.
+      let i = nl + 1;
+      while (i < blanked.length && /\s/.test(blanked[i])) i++;
+      if (blanked.slice(i, i + 2) === "%{") {
+        const nested = balanced(blanked, i + 1);
+        if (!nested) CTX.die2([`FAIL(2): the map returned by \`${name}\` in ${searched} is unbalanced — refusing to guess its keys.`]);
+        maps.push(nested);
+      }
+      continue;
+    }
+    // A `, do: …` one-liner. It is a map only if the expression itself opens one.
+    const oneLiner = tail.replace(/^\s*,\s*do:\s*/, "");
+    if (/^%\{/.test(oneLiner.trim())) {
+      const at = blanked.indexOf("%{", after);
+      const nested = balanced(blanked, at + 1);
+      if (!nested) CTX.die2([`FAIL(2): the map returned by \`${name}\` in ${searched} is unbalanced — refusing to guess its keys.`]);
+      maps.push(nested);
+    }
+  }
+  if (!seen) {
+    CTX.die2([
+      `FAIL(2): \`${self}\` is built by the bare local call \`${name}(...)\` and no clause of it exists in`,
+      `         ${searched}`,
+      `         A bare (unqualified) call is a function of this module by construction, so it is`,
+      `         resolvable in principle — reporting the subtree as opaque here would hide however`,
+      `         many key paths it states behind a clean line.`,
+    ]);
+  }
+  if (maps.length > 1) {
+    CTX.die2([
+      `FAIL(2): \`${name}\` in ${searched} returns a map literal from ${maps.length} different clauses and`,
+      `         \`${self}\` could take any of them. This census will not pick one and call it the shape.`,
+    ]);
+  }
+  return maps.length ? maps[0] : null;
 }
 
 // Walk a map body into key paths. `blanked` drives the structure, `raw` is read
 // for nothing but nicer failure messages.
-function walkMap(blanked, region, prefix, out, trail) {
+export function walkMap(blanked, region, prefix, out, trail) {
   const body = blanked.slice(region.start, region.end);
   const segs = topLevelSplit(body);
-  if (!segs.length) die2([`FAIL(2): the map at ${trail || "/v1/me"} parsed to ZERO keys — the response map's shape moved.`]);
+  if (!segs.length) CTX.die2([`FAIL(2): the map at ${trail || CTX.subject} parsed to ZERO keys — the response map's shape moved.`]);
   for (const segment of segs) {
     const seg = segment.text;
     const m = seg.match(/^\s*([a-z_][A-Za-z0-9_]*):\s*([\s\S]*)$/);
     if (!m) {
-      die2([
-        `FAIL(2): a segment of the ${trail || "/v1/me"} response map is not a \`key: value\` pair and this census`,
+      CTX.die2([
+        `FAIL(2): a segment of the ${trail || CTX.subject} response map is not a \`key: value\` pair and this census`,
         `         cannot say what the server states there. The segment, verbatim:`,
         `             ${seg.trim().slice(0, 160)}`,
       ]);
@@ -353,13 +546,42 @@ function walkMap(blanked, region, prefix, out, trail) {
       const local = bareLocalCalls(value);
       if (!local.length) continue; // genuinely opaque: a remote call, a variable, a scalar
       if (local.length > 1) {
-        die2([
-          `FAIL(2): \`${self}\` is built by ${local.length} bare local calls (${local.join(", ")}) and this census`,
-          `         cannot say which one states its shape.`,
-        ]);
+        // Several bare locals in one value. With the DEFAULT resolver that is a
+        // refusal outright — /v1/me has no such value and a new one would be a
+        // shape nobody has looked at. With a resolver that can prove a name
+        // scalar, ask it: `console: Enum.map(d.console, &(&1 |> scrub_entry(…)
+        // |> caption_entry(…)))` pipes an entry through two TRANSFORMERS, and
+        // neither states a shape. Only a value where two names both return maps
+        // is genuinely ambiguous, and that still refuses.
+        if (!CTX.resolveBare) {
+          CTX.die2([
+            `FAIL(2): \`${self}\` is built by ${local.length} bare local calls (${local.join(", ")}) and this census`,
+            `         cannot say which one states its shape.`,
+          ]);
+        }
+        const shaping = local.filter((n) => !RESOLVING.has(n) && CTX.resolveBare(blanked, n, self));
+        if (shaping.length > 1) {
+          CTX.die2([
+            `FAIL(2): \`${self}\` is built by ${shaping.length} bare local calls that each return a map`,
+            `         (${shaping.join(", ")}) and this census cannot say which one states its shape.`,
+          ]);
+        }
+        if (!shaping.length) continue; // every one of them is a proven scalar
+        local.length = 0;
+        local.push(shaping[0]);
       }
       const name = local[0];
-      const nested = localHelperMap(blanked, name, self);
+      // CTX.resolveBare defaults to localHelperMap, whose contract is "resolve
+      // or refuse". The generalized census supplies a resolver that may also
+      // answer NULL — "every clause of this name is a scalar one-liner, so it
+      // hides no map" — because the serializers it walks call scalar helpers
+      // (`preview_url/2`, `content_bound_from_verdict/1`) that /v1/me does not,
+      // and refusing on those would make the census unable to measure the very
+      // endpoints it was widened to cover. NULL is only ever returned after the
+      // resolver has SEEN every clause and found no `%{`; a name it cannot see
+      // still refuses.
+      const nested = (CTX.resolveBare || localHelperMap)(blanked, name, self);
+      if (!nested) continue;
       RESOLVING.add(name);
       walkMap(blanked, nested, self + (isList ? "[]." : "."), out, self);
       RESOLVING.delete(name);
@@ -367,7 +589,7 @@ function walkMap(blanked, region, prefix, out, trail) {
     }
     const absValueStart = region.start + segment.at + (seg.length - value.length);
     const nested = balanced(blanked, absValueStart + rel + 1);
-    if (!nested) die2([`FAIL(2): the nested map under \`${self}\` is unbalanced — refusing to guess its keys.`]);
+    if (!nested) CTX.die2([`FAIL(2): the nested map under \`${self}\` is unbalanced — refusing to guess its keys.`]);
     walkMap(blanked, nested, self + (isList ? "[]." : "."), out, self);
   }
 }
@@ -413,7 +635,7 @@ function serverKeyPaths() {
 // ── the corpus side ─────────────────────────────────────────────────────────
 // Every key path a value carries. Arrays contribute `key[].field`, so a
 // per-element shape is compared against the server's per-element shape.
-function valuePaths(value, prefix, out) {
+export function valuePaths(value, prefix, out) {
   if (Array.isArray(value)) {
     for (const el of value) valuePaths(el, prefix + "[]", out);
     return;
@@ -463,13 +685,13 @@ function corpusKeyPaths() {
 // Server nodes with children are the only ones whose subtree is compared; an
 // opaque node (a call, a scalar) makes no claim about what hangs beneath it,
 // so neither does this census.
-function isOpaque(serverPaths, p) {
+export function isOpaque(serverPaths, p) {
   const stem = p + ".";
   const listStem = p + "[].";
   for (const s of serverPaths) if (s.startsWith(stem) || s.startsWith(listStem)) return false;
   return true;
 }
-function underOpaque(serverPaths, p) {
+export function underOpaque(serverPaths, p) {
   const parts = p.split(".");
   for (let i = 1; i < parts.length; i++) {
     const ancestor = parts.slice(0, i).join(".").replace(/\[\]$/, "");
@@ -478,58 +700,65 @@ function underOpaque(serverPaths, p) {
   return false;
 }
 
-const server = serverKeyPaths();
-const { served, byPath, answered } = corpusKeyPaths();
+// ── THE /v1/me CENSUS ITSELF (runs ONLY as a script) ─────────────────────────
+//
+// Guarded so __envelope_census.mjs can import the walkers above without this
+// block measuring, printing or exiting. Run as a script, everything below is
+// byte-identical to what it was before the library split.
+if (IS_MAIN) {
+  const server = serverKeyPaths();
+  const { served, byPath, answered } = corpusKeyPaths();
 
-// The corpus emits `teams[].id`-shaped paths for arrays; normalise the server's
-// `teams[].id` the same way (walkMap already does). Both sides speak one dialect.
-const missing = [...server].filter((p) => !served.has(p)).sort();
-const invented = [...served].filter((p) => !server.has(p) && !underOpaque(server, p)).sort();
+  // The corpus emits `teams[].id`-shaped paths for arrays; normalise the server's
+  // `teams[].id` the same way (walkMap already does). Both sides speak one dialect.
+  const missing = [...server].filter((p) => !served.has(p)).sort();
+  const invented = [...served].filter((p) => !server.has(p) && !underOpaque(server, p)).sort();
 
-const pad = (s, n) => (s + " ".repeat(n)).slice(0, Math.max(n, s.length));
+  const pad = (s, n) => (s + " ".repeat(n)).slice(0, Math.max(n, s.length));
 
-console.log("── /v1/me ENVELOPE CENSUS ───────────────────────────────────────────────────");
-console.log(`   server  ${path.relative(process.cwd(), ROUTER)} — get "/v1/me" response map`);
-console.log(`   corpus  __preview__/scenarios.mjs — route(name, "GET", "/v1/me") over ${SCENARIO_NAMES.length} scenarios, ${answered} answering 200`);
-console.log("");
-console.log(`   key paths STATED by the server : ${server.size}`);
-console.log(`   key paths SERVED by the corpus : ${served.size} (union; a path counts if ANY scenario serves it)`);
-console.log("");
-for (const p of [...server].sort()) {
-  const who = byPath.get(p) || [];
-  const mark = who.length ? "ok  " : "MISS";
-  const detail = who.length === answered
-    ? "every answering scenario"
-    : who.length
-      ? `${who.length}/${answered} scenarios (e.g. ${who.slice(0, 3).join(", ")})`
-      : "NO SCENARIO SERVES THIS";
-  const tag = isOpaque(server, p) ? "" : "  ·";
-  console.log(`   ${mark}  ${pad(p, 34)}${detail}${tag}`);
-}
-console.log("");
-
-if (!missing.length && !invented.length) {
-  console.log(`PASS: the preview corpus mints the account /v1/me mints — ${server.size} key paths, no MISSING, no INVENTED.`);
-  process.exit(0);
-}
-
-if (missing.length) {
-  console.log(`MISSING — /v1/me states these and NO scenario serves them (${missing.length}):`);
-  for (const p of missing) console.log(`   ${p}`);
+  console.log("── /v1/me ENVELOPE CENSUS ───────────────────────────────────────────────────");
+  console.log(`   server  ${path.relative(process.cwd(), ROUTER)} — get "/v1/me" response map`);
+  console.log(`   corpus  __preview__/scenarios.mjs — route(name, "GET", "/v1/me") over ${SCENARIO_NAMES.length} scenarios, ${answered} answering 200`);
   console.log("");
-  console.log("   Every console read of these key paths is currently certified by a gate that");
-  console.log("   has never rendered them. Widen me() in __preview__/scenarios.mjs (ONE producer,");
-  console.log("   every logged-in scenario) — not the individual scenarios.");
+  console.log(`   key paths STATED by the server : ${server.size}`);
+  console.log(`   key paths SERVED by the corpus : ${served.size} (union; a path counts if ANY scenario serves it)`);
   console.log("");
+  for (const p of [...server].sort()) {
+    const who = byPath.get(p) || [];
+    const mark = who.length ? "ok  " : "MISS";
+    const detail = who.length === answered
+      ? "every answering scenario"
+      : who.length
+        ? `${who.length}/${answered} scenarios (e.g. ${who.slice(0, 3).join(", ")})`
+        : "NO SCENARIO SERVES THIS";
+    const tag = isOpaque(server, p) ? "" : "  ·";
+    console.log(`   ${mark}  ${pad(p, 34)}${detail}${tag}`);
+  }
+  console.log("");
+
+  if (!missing.length && !invented.length) {
+    console.log(`PASS: the preview corpus mints the account /v1/me mints — ${server.size} key paths, no MISSING, no INVENTED.`);
+    process.exit(0);
+  }
+
+  if (missing.length) {
+    console.log(`MISSING — /v1/me states these and NO scenario serves them (${missing.length}):`);
+    for (const p of missing) console.log(`   ${p}`);
+    console.log("");
+    console.log("   Every console read of these key paths is currently certified by a gate that");
+    console.log("   has never rendered them. Widen me() in __preview__/scenarios.mjs (ONE producer,");
+    console.log("   every logged-in scenario) — not the individual scenarios.");
+    console.log("");
+  }
+  if (invented.length) {
+    console.log(`INVENTED — the corpus serves these and /v1/me does not state them (${invented.length}):`);
+    for (const p of invented) console.log(`   ${p}  ← served by ${(byPath.get(p) || []).slice(0, 3).join(", ")}`);
+    console.log("");
+    console.log("   The corpus renders an account the control plane will never send, so anything");
+    console.log("   asserted downstream of these is fiction. Either the fixture is wrong or the");
+    console.log("   route stopped sending them and a console read is now dead.");
+    console.log("");
+  }
+  console.log("FAIL(1): the corpus and the route disagree about what an account looks like.");
+  process.exit(1);
 }
-if (invented.length) {
-  console.log(`INVENTED — the corpus serves these and /v1/me does not state them (${invented.length}):`);
-  for (const p of invented) console.log(`   ${p}  ← served by ${(byPath.get(p) || []).slice(0, 3).join(", ")}`);
-  console.log("");
-  console.log("   The corpus renders an account the control plane will never send, so anything");
-  console.log("   asserted downstream of these is fiction. Either the fixture is wrong or the");
-  console.log("   route stopped sending them and a console read is now dead.");
-  console.log("");
-}
-console.log("FAIL(1): the corpus and the route disagree about what an account looks like.");
-process.exit(1);

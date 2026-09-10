@@ -31394,3 +31394,92 @@ test("cch-w42-bl: the LIVE listener is mounted on window, not merely declared", 
   assert.ok(/pinStorageMovesTeam\(\s*e\.key/.test(src),
     "…and that listener must delegate to pinStorageMovesTeam rather than inline a second copy of it");
 });
+
+// ── cch-w43-bl: THE ENVELOPE CENSUS, RENDERED ────────────────────────────────
+//
+// __envelope_census.mjs proves a key is STATED by the server, READ by app.js and
+// SERVED by no scenario. These three pin the other half of that sentence: that
+// the band those keys drive is now PAINTED by a real preview fixture, through
+// the real render path, and not merely present in a JSON shape.
+//
+// Each of them FAILS on origin/main's scenarios.mjs, and that is the point — a
+// rendered assertion nobody could have written before the producer widened is
+// the only evidence that the widening bought a rendered band rather than a key.
+
+test("cch-w43-bl: every deployment the corpus serves carries a trigger, and deployRow PAINTS its provenance chip", () => {
+  const sites = previewRoute("rollback", "GET", "/v1/sites", {}).body.sites;
+  const site = sites.find((s) => s.slug === "acme-web");
+  assert.ok(site, "the rollback scenario serves acme-web");
+  const deps = previewRoute("rollback", "GET", `/v1/sites/${site.id}/deployments`, {}).body.deployments;
+  assert.ok(deps.length >= 3, `the rollback scenario serves a deploy history (got ${deps.length})`);
+
+  // THE SHAPE: `deployment_json/1` sends `trigger` on every row, so every row
+  // the corpus serves must have one. On origin/main NOT ONE of these rows did.
+  for (const d of deps) {
+    assert.equal(typeof d.trigger, "string",
+      `deployment ${d.id} serves no trigger — deployment_json/1 sends one on every row`);
+    assert.ok(d.trigger.length, `deployment ${d.id} serves an empty trigger`);
+  }
+
+  // THE RENDER: `if (d.trigger) metaBits.push(esc(deployTriggerLabel(d.trigger)))`
+  // — the meta chip a person reads to tell a hand-pressed deploy from a content
+  // publish. It had never been rendered by any preview scenario.
+  const html = hooks.deployRow(deps[0], site.current_deployment_id, null);
+  const meta = /<div class="deploy-meta">([\s\S]*?)<\/div>/.exec(html);
+  assert.ok(meta, "the deploy row paints a meta line");
+  assert.ok(meta[1].includes(hooks.deployTriggerLabel(deps[0].trigger)),
+    `the deploy row's meta line carries the trigger label ` +
+    `"${hooks.deployTriggerLabel(deps[0].trigger)}" — got: ${meta[1]}`);
+
+  // NON-VACUITY: the label is not the empty string, so the assertion above
+  // cannot be satisfied by a meta line that painted nothing.
+  assert.ok(hooks.deployTriggerLabel(deps[0].trigger).length > 0);
+});
+
+test("cch-w43-bl: the corpus serves a THEMED site, and the site-theme select preselects its palette", () => {
+  const sites = previewRoute("site-binding-bound", "GET", "/v1/sites", {}).body.sites;
+
+  // THE SHAPE: `site_json/2` sends `theme` on every row.
+  for (const s of sites) {
+    assert.ok(Object.prototype.hasOwnProperty.call(s, "theme"),
+      `site ${s.slug} serves no theme key — site_json/2 sends one on every row`);
+  }
+
+  // THE RENDER: `siteThemeOptionsHtml(site.theme || "")` marks the site's own
+  // palette selected. Every scenario on origin/main took the `|| ""` floor, so
+  // the "Template default" option was selected in 100% of preview renders and
+  // the selected-a-real-palette arm had never been painted.
+  const themed = sites.find((s) => s.theme);
+  assert.ok(themed, "at least one corpus site carries a non-null theme");
+  const html = hooks.siteThemeOptionsHtml(themed.theme || "");
+  assert.match(html, new RegExp(`<option value="${themed.theme}" selected>`),
+    `the select preselects "${themed.theme}"`);
+  assert.doesNotMatch(html, /<option value="" selected>/,
+    "…and does NOT fall back to Template default, which is the arm main always took");
+});
+
+test("cch-w43-bl: /v1/sites rows and their last_deployment embed state the full serializer shape", () => {
+  const sites = previewRoute("sites", "GET", "/v1/sites", {}).body.sites;
+  assert.ok(sites.length, "the sites scenario serves rows");
+
+  // `url` is stated by `site_json/2` and read by app.js's Visit door
+  // (`if (s && s.url) return s.url`). The LIST surface calls `site_json/1`, so
+  // it is always null there — but ABSENT and null are different wires, and the
+  // corpus served neither key at all.
+  for (const s of sites) {
+    assert.ok(Object.prototype.hasOwnProperty.call(s, "url"),
+      `site ${s.slug} serves no url key — site_json/2 sends one on every row`);
+  }
+
+  // `put_last_deployment/3` folds SIX keys onto every row that has one; the
+  // producer stated four. app.js binds the embed to the same identifier the
+  // deploy rows use (`var d = s && s.last_deployment`).
+  const embeds = sites.map((s) => s.last_deployment).filter(Boolean);
+  assert.ok(embeds.length, "at least one site carries a last_deployment embed");
+  for (const e of embeds) {
+    for (const k of ["status", "trigger", "failure_class", "failure_reason", "inserted_at", "updated_at"]) {
+      assert.ok(Object.prototype.hasOwnProperty.call(e, k),
+        `last_deployment serves no ${k} — last_deployment_json/1 sends it on every row`);
+    }
+  }
+});
