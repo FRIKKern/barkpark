@@ -4028,12 +4028,20 @@
   // fires it from the fenced writer AND from the `with_site_update` writer
   // `settle_live/2` drives, EDGE-TRIGGERED on the prior status so a live → live
   // re-report sends nothing. Arm (b) of the census reds until this row exists.
+  // dr-w13-bl-abandonment-splits-off-the-flood — NINE. `deployment_abandoned` is
+  // the census working in the same direction cch-w29-bl did: its producer
+  // (Registry.dispatch_deployment_abandoned/1, branched off the one
+  // deployment_failed funnel) lands in the same change, and arm (b) reds until
+  // this row names it. It is the chain the fleet GAVE UP ON — the row a person
+  // scanning "Deployment failed" could not pick out, which is why it is worth a
+  // name of its own rather than a severity word inside the old one.
   var NOTIF_EVENTS = [
     ["provision_failed", "Provisioning failed"],
     ["provision_succeeded", "Provisioning succeeded"],
     ["deployment_failed", "Deployment failed"],
     ["deployment_succeeded", "Deployment live"],
     ["deployment_refused", "Deployment refused"],
+    ["deployment_abandoned", "Rebuild chain given up on"],
     ["agent_unreachable", "Instance unreachable"],
     ["agent_reachable", "Instance reachable again"],
     ["subscription_past_due", "Subscription past due"]

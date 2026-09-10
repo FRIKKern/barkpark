@@ -2399,6 +2399,26 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .set-matrix {
   overflow-x: auto;
   margin-top: var(--space-2);
+  /* THE STICKY TOPBAR EATS THE TOP OF ANY SCROLL-INTO-VIEW (dr-w13-bl-
+     abandonment-splits-off-the-flood). `.topbar` (:842) is `position: sticky;
+     top: 0; height: 56px`, so a browser that scrolls this matrix into view
+     lands its first pixel UNDER the bar and the channel headings — the row the
+     sticky `.set-matrix-corner` above exists to keep readable — are the first
+     thing covered. app.js already compensates by hand for exactly this on the
+     credential-remediation box (`CRED_REMEDIATION_GAP`, ~:3189: scrollIntoView,
+     measure `.topbar`'s bottom, scrollBy the difference); `scroll-margin-top`
+     is the same statement declared once, for every alignment, with no script.
+     IT IS NOT COSMETIC AND IT IS NOT HYPOTHETICAL: the matrix grew a ninth row
+     here (`deployment_abandoned`, +56px), and a CENTRED scroll-into-view moves
+     a box's top up by half its growth — measured 69.5px clear of the 56px bar
+     at eight rows, 41.5px (14.5px UNDER it) at nine, in every one of the six
+     light/dark x 768/430/390 cells the overflow guard's
+     W12-narrow-viewport-truth leg drives. With the reservation declared the top
+     lands at 69.5px again and stays there as the roster grows, because the
+     centring now divides the space BELOW the bar. The literal tracks
+     `.topbar`'s own `height`; the narrow-width blocks (:4944) only ever make
+     the bar taller by wrapping, and the guard measures the real cover. */
+  scroll-margin-top: 56px;
   -webkit-mask-image: linear-gradient(to right, currentColor calc(100% - var(--set-matrix-fade)), transparent);
   mask-image: linear-gradient(to right, currentColor calc(100% - var(--set-matrix-fade)), transparent);
   animation-name: set-matrix-edge-fade;

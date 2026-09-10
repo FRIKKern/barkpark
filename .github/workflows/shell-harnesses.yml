@@ -139,6 +139,11 @@ on:
       - "scripts/console-path-escape-check.sh"
       - "scripts/console-path-escape-check.test.sh"
       - ".github/workflows/console-harness.yml"
+      # CONSOLE REFUSAL CAPTURE (task-1cea7edd271d588b). The SUBJECT, not the
+      # harness: scripts/console-refusal-capture.test.mjs is already reached by
+      # the `scripts/*.test.mjs` entry below, but an edit to the capture module
+      # it imports could invalidate the 9 controls without touching the test.
+      - "scripts/console-refusal-capture.mjs"
       - "scripts/pds-ledger-census.sh"
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
@@ -438,6 +443,11 @@ on:
       - "scripts/console-path-escape-check.sh"
       - "scripts/console-path-escape-check.test.sh"
       - ".github/workflows/console-harness.yml"
+      # CONSOLE REFUSAL CAPTURE (task-1cea7edd271d588b). The SUBJECT, not the
+      # harness: scripts/console-refusal-capture.test.mjs is already reached by
+      # the `scripts/*.test.mjs` entry below, but an edit to the capture module
+      # it imports could invalidate the 9 controls without touching the test.
+      - "scripts/console-refusal-capture.mjs"
       - "scripts/pds-ledger-census.sh"
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
@@ -733,6 +743,7 @@ jobs:
       deploy-convergence: ${{ steps.sets.outputs.deploy-convergence }}
       deploy-concurrency: ${{ steps.sets.outputs.deploy-concurrency }}
       console-path-ratchet: ${{ steps.sets.outputs.console-path-ratchet }}
+      console-refusal-capture: ${{ steps.sets.outputs.console-refusal-capture }}
       weekly-changelog-backfill-guard: ${{ steps.sets.outputs.weekly-changelog-backfill-guard }}
       pds-harnesses: ${{ steps.sets.outputs.pds-harnesses }}
       ci-failure-issue-filer: ${{ steps.sets.outputs.ci-failure-issue-filer }}
@@ -827,6 +838,8 @@ jobs:
           console-path-ratchet scripts/console-path-escape-check.sh
           console-path-ratchet scripts/console-path-escape-check.test.sh
           console-path-ratchet .github/workflows/console-harness.yml
+          console-refusal-capture scripts/console-refusal-capture.mjs
+          console-refusal-capture scripts/*.test.mjs
           weekly-changelog-backfill-guard scripts/weekly-changelog-backfill.test.sh
           weekly-changelog-backfill-guard .github/workflows/weekly-changelog.yml
           pds-harnesses scripts/pds-ledger-census.sh
@@ -1431,6 +1444,32 @@ jobs:
         # parent's --selftest (cloud.yml:175, elixir.yml:241), and wiring them
         # twice would buy a second runner for the same assertions.
         run: bash scripts/console-path-escape-check.test.sh
+
+  console-refusal-capture:
+    needs: [changes]
+    if: needs.changes.outputs.console-refusal-capture == 'true'
+    # WHY IT IS A TENANT (task-1cea7edd271d588b, 2026-09-10). #17162 added
+    # scripts/console-refusal-capture.test.mjs beside the capture module and
+    # wired neither: no workflow ran the test, no workflow ran its parent, and
+    # the file carried no `MANUAL PROOF — not wired:` header — so
+    # selftest-wiring-census.sh printed ORPHAN and reddened, in an advisory
+    # context, from the merge onward. R3 was not available (the parent appears
+    # in no workflow either), so this is R1: a direct tenant.
+    #
+    # MEASURED BEFORE BEING WIRED, never wired on inspection: `node --test
+    # scripts/console-refusal-capture.test.mjs` is 9/9 in 0.1 s on this tree,
+    # hermetic — it reads files under cloud/priv/static/ and launches no browser.
+    name: console-refusal-capture.mjs controls
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+      - name: the capture module parses
+        run: node --check scripts/console-refusal-capture.mjs
+      - name: "console-refusal-capture.test.mjs (measured 0 s / 9 tests, hermetic)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: node --test scripts/console-refusal-capture.test.mjs
 
   weekly-changelog-backfill-guard:
     needs: [changes]
