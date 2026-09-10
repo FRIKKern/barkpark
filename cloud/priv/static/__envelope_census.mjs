@@ -36,9 +36,9 @@
 //       downstream of K is fiction. Unchanged from the /v1/me census.
 //
 // Splitting MISSING on the read axis is the whole point of the row. Without it
-// the census on today's main reports SEVENTEEN missing keys across deployments
-// and sites and says nothing about which of them matters — and the honest
-// answer is that exactly TWO do.
+// the census on origin/main reports THIRTY-EIGHT holes across the three
+// endpoints and says nothing about which of them matters — and measured, SEVEN
+// do. The other thirty-one are payload no console surface consumes.
 //
 // ── THE PARSER IS THE /v1/me CENSUS'S OWN ───────────────────────────────────
 //
