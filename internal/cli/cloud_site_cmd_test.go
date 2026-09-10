@@ -65,6 +65,10 @@ type siteCP struct {
 	listResp  fakeResp
 	listHits  int
 	listQuery string
+	// listQueries records EVERY list query in order — listQuery keeps only the
+	// last, which cannot see a keyset walk at all: the whole point of a walk is
+	// that request 2 carries a `before=` the first one handed back.
+	listQueries []string
 	// listSeq, when non-empty, answers the n-th LIST read with its n-th entry
 	// (the last entry repeats) — the --wait-for-live loop reads the list
 	// repeatedly, and its tests need the rebuild to appear live only on a later
@@ -141,6 +145,7 @@ func (cp *siteCP) serve() *httptest.Server {
 		case r.Method == "GET" && path == "/v1/sites/"+testSiteID+"/deployments":
 			cp.listHits++
 			cp.listQuery = r.URL.RawQuery
+			cp.listQueries = append(cp.listQueries, r.URL.RawQuery)
 			if len(cp.listSeq) > 0 {
 				n := cp.listHits
 				if n > len(cp.listSeq) {
@@ -3780,8 +3785,21 @@ func TestRunCloudSiteStatusNamesTheWindowItRead(t *testing.T) {
 	// A count without a denominator is the defect this block exists to fix — and a
 	// derived share is banned outright (charter D174/D142: chains carry no key, so
 	// any percentage over them is unfalsifiable and era-unstable).
-	if strings.Contains(stdout, "%") {
-		t.Fatalf("the window must print counts with denominators, never a rate:\n%s", stdout)
+	//
+	// SCOPED TO THE CENSUS BLOCK, not to stdout (dr-w17-bl-per-site-cost-needs-paging).
+	// The ban is about deriving a share over THIS window's counts — a number that
+	// moves with whatever page you happened to read. It is not a ban on quoting a
+	// DATED fleet measurement whose numerator and denominator both travel with it,
+	// which is what the cost block below prints ("1,837 of 2,124 (86.5%)"). A
+	// stdout-wide substring check cannot tell the two apart, and reading it as a
+	// prohibition on the second is how a surface ends up unable to state the very
+	// fact it exists to state.
+	census := stdout[strings.Index(stdout, "recent attempts"):]
+	if i := strings.Index(census, "\ncost of getting content live"); i >= 0 {
+		census = census[:i]
+	}
+	if strings.Contains(census, "%") {
+		t.Fatalf("the window census must print counts with denominators, never a rate:\n%s", census)
 	}
 	// The census is its OWN block after the KV table, not KV rows — renderKV sorts
 	// alphabetically and pads to the widest key, so census rows would scatter
