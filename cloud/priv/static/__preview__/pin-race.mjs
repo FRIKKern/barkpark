@@ -3,22 +3,37 @@
 // Task: cch-w42-bl-pin-race-needs-a-two-tab-browser-reproduction
 //
 // ── WHAT IT MEASURES ─────────────────────────────────────────────────────────
-// app.js:116 re-reads `localStorage["bp.active-team"]` on EVERY request, and
-// localStorage is shared by every tab on an origin. The team switcher
-// (app.js:6588-6589) writes that key and then reloads ONLY ITS OWN TAB. Nothing
-// in app.js listens for the `storage` event (`grep -n '"storage"' app.js` is
-// empty on origin/main), and `loadMe()` is not called on a route change — so a
-// SECOND tab keeps the team name it cached at boot (`setAccountChip(r.data.team,
-// …)` paints `#account-team` once, from the boot /v1/me) while every subsequent
-// request it makes carries the OTHER team's pin.
+// Every claim below is anchored to a FUNCTION and a grep that re-derives it, per
+// charter D41 — line numbers rot, and this row exists partly BECAUSE its own
+// filing carried rotted ones.
 //
+//   grep -n 'function api(' cloud/priv/static/app.js
+// `api()` re-reads `localStorage.getItem("bp.active-team")` on EVERY request and
+// hangs it on the `x-barkpark-team` header. localStorage is shared by every tab
+// on an origin.
+//
+//   grep -n 'localStorage.setItem("bp.active-team"' cloud/priv/static/app.js
+// The team switcher (inside `renderTeamMenu`'s `[data-team]` click handler)
+// writes that key and then calls `location.reload()` — which reloads ONLY ITS
+// OWN TAB.
+//
+//   grep -n '"storage"' cloud/priv/static/app.js      # EMPTY on origin/main
+// Nothing in app.js listens for the `storage` event, and `loadMe()` is not
+// called on a route change. So a SECOND tab keeps the team name it cached at
+// boot (`setAccountChip(r.data.team, …)` paints `#account-team` once, from the
+// boot /v1/me) while every subsequent request it makes carries the OTHER team's
+// pin.
+//
+//   grep -n 'function loadActivity' cloud/priv/static/app.js
 // The Activity band is where that becomes a rendered lie: `loadActivity()`
-// (app.js:20753) issues GET /v1/audit through the same `api()` and paints the
-// answer into `#activity-body` with NO pin check — no `meTeamPinMoved()` call
-// anywhere in the band. (`meTeamPinMoved` DOES exist and DOES guard three other
-// bands: app.js:18993, :19996, :20078 — teamAuthorityState and its siblings.
-// Activity is not one of them.) So the tab renders team Y's audit trail under
-// team X's label.
+// issues GET /v1/audit through that same `api()` and paints the answer into
+// `#activity-body` with NO pin question asked.
+//
+//   grep -n 'meTeamPinMoved()' cloud/priv/static/app.js
+// …and the console ALREADY HAS the question. `meTeamPinMoved()` exists and
+// guards THREE other bands (`teamAuthorityState` and its two siblings, each
+// returning "stale"). Activity is simply not one of them. The defect is not
+// "no mechanism"; it is "one band skipped the mechanism".
 //
 // ── WHY NOT serve.mjs + mock.js ──────────────────────────────────────────────
 // The reproduction needs a server whose GET /v1/audit ANSWERS DIFFERENTLY per
@@ -444,7 +459,9 @@ async function main() {
       await navigate(B, url);
       await poll(B, ACTIVITY_READY, "tab B's first Activity paint");
 
-      // THE SWITCH, in tab B, exactly as app.js:6588-6589 does it.
+      // THE SWITCH, in tab B, exactly as the switcher's own two statements do it
+      // (grep -n 'localStorage.setItem("bp.active-team"' ../app.js): setItem, then
+      // location.reload().
       await evaluate(B, 'localStorage.setItem("bp.active-team", ' + JSON.stringify(tabBPin) + '); "ok"');
       await reload(B);                 // location.reload()'s effect: TAB B ONLY
       await poll(B, ACTIVITY_READY, "tab B's post-switch Activity paint");
