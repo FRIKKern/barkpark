@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -81,6 +82,17 @@ type manifestRequest struct {
 type dispatchError struct {
 	msg       string
 	withUsage bool
+	// code overrides the envelope error code. Empty means "usage" — the code
+	// every build-stage failure carried before the manifest-drift refusal.
+	code string
+}
+
+// envelopeCode is the error code this failure renders under.
+func (e *dispatchError) envelopeCode() string {
+	if e.code != "" {
+		return e.code
+	}
+	return "usage"
 }
 
 func (e *dispatchError) Error() string { return e.msg }
@@ -95,6 +107,14 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	// Split tail into positional args and command-local flags.
 	posArgs, cmdFlags, err := splitArgs(cmd, tail)
 	if err != nil {
+		// A manifest/parser DRIFT refusal is not a typo: it names the stale
+		// install and the one command that fixes it, so the per-command usage
+		// dump (which would invite retyping the flag away) is suppressed and
+		// the envelope carries its own named code. See manifest_flag_drift.go.
+		var drift *flagDriftError
+		if errors.As(err, &drift) {
+			return nil, &dispatchError{msg: err.Error(), withUsage: false, code: manifestFlagDriftCode}
+		}
 		return nil, &dispatchError{msg: err.Error(), withUsage: true}
 	}
 
@@ -433,9 +453,9 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 
 	req, derr := buildManifestRequest(g, ctx, m, cmd, tail, true)
 	if derr != nil {
-		if !renderErrorEnvelope(out, "usage", derr.msg, "", "") {
+		if !renderErrorEnvelope(out, derr.envelopeCode(), derr.msg, "", "") {
 			out.userErr("%v", derr)
-			humanErrorCode(out, "usage")
+			humanErrorCode(out, derr.envelopeCode())
 			if derr.withUsage {
 				usageCommand(out, cmd)
 			}
@@ -1429,7 +1449,7 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 			}
 			f, ok := byName[name]
 			if !ok {
-				return nil, nil, fmt.Errorf("unknown flag --%s for %s %s", name, cmd.Noun, cmd.Verb)
+				return nil, nil, unknownFlagError(cmd, "--"+name, name)
 			}
 			if f.Type == "bool" {
 				// `--force=false` must not silently set the flag true: an inline
@@ -1466,11 +1486,11 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 		if len(a) == 2 && a[0] == '-' && a != "-" {
 			long, aliased := shortFlagAliases[a]
 			if !aliased {
-				return nil, nil, fmt.Errorf("unknown flag %s for %s %s", a, cmd.Noun, cmd.Verb)
+				return nil, nil, unknownFlagError(cmd, a, "")
 			}
 			f, ok := byName[long]
 			if !ok {
-				return nil, nil, fmt.Errorf("unknown flag %s for %s %s", a, cmd.Noun, cmd.Verb)
+				return nil, nil, unknownFlagError(cmd, a, long)
 			}
 			if f.Type == "bool" {
 				if err := refuseRepeatedFlag(cmd, f, flags[long], "true"); err != nil {
