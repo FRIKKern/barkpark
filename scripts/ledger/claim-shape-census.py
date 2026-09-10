@@ -57,11 +57,31 @@ def get(claim, key):
     return claim.get(key)
 
 
+class SweepRefusal(SystemExit):
+    """A named refusal. A FAILED page is never the end of the board.
+
+    Every arm below used to be a silent `break` or a swallow: the walk stopped
+    early and the census printed a SMALLER DENOMINATOR with exit 0. The read
+    path underneath (GET /v1/data/query/production/task) is the one that 500'd
+    under concurrent write load on 2026-07-30; the caller-side rule is that a
+    page which did not PROVE it is the last one ends the run, not the loop.
+    """
+
+    def __init__(self, offset, msg):
+        super().__init__(f"FATAL: sweep REFUSED at offset {offset}: {msg}")
+
+
 def fetch_all(limit, sleep):
-    """Page `bp task ls` to exhaustion, dedup by doc_id.
+    """Page `bp task ls` to exhaustion, dedup by doc_id -- or refuse.
 
     bp can print a WARNING on stdout before the JSON, so only lines starting
     with '{' are candidates and the LAST one is the payload.
+
+    STRIDE: the offset advances by the rows the page ACTUALLY DELIVERED, never
+    by the requested `--limit`. The server caps a page at 1000 rows
+    (query_controller.ex: `min(1000)`), so `--limit 2000` with `offset += limit`
+    asks for 2000, is served 1000, and then jumps to offset 2000 -- SKIPPING
+    1000 rows with no error at all. Same defect class as the terminator.
     """
     env = dict(os.environ)
     env.pop("BARKPARK_TOKEN", None)  # a stale env token shadows config.json
@@ -71,23 +91,120 @@ def fetch_all(limit, sleep):
             ["bp", "task", "ls", "--limit", str(limit), "--offset", str(offset), "-o", "json"],
             capture_output=True, text=True, env=env,
         )
+        if p.returncode != 0:
+            raise SweepRefusal(offset, f"bp exited {p.returncode}; stderr={p.stderr[:400]}")
         cands = [l for l in p.stdout.splitlines() if l.startswith("{")]
         if not cands:
-            sys.exit(f"FATAL: no JSON at offset {offset}; rc={p.returncode} stderr={p.stderr[:400]}")
-        d = json.loads(cands[-1])
+            raise SweepRefusal(offset, f"no JSON on stdout; rc={p.returncode} "
+                                       f"stderr={p.stderr[:400]}")
+        try:
+            d = json.loads(cands[-1])
+        except ValueError as exc:
+            raise SweepRefusal(offset, f"stdout line is not JSON: {exc}")
+        # A `{"ok": false, "error": ...}` failure PARSES CLEANLY, carries no
+        # `docs` and no `page`, and reads as an empty last page to any caller
+        # that only asks "did it parse?".
+        if d.get("ok") is False:
+            raise SweepRefusal(offset, f"bp returned ok=false: {json.dumps(d)[:400]}")
+        docs = d.get("docs")
+        if not isinstance(docs, list):
+            raise SweepRefusal(offset, f"no `docs` list in the body; keys={sorted(d)[:12]}")
+        page = d.get("page")
+        if not isinstance(page, dict) or "has_more" not in page:
+            raise SweepRefusal(offset, "the body carries no `page.has_more` -- nothing "
+                                       "proves this page is the last one, and a short "
+                                       "page is not a proof")
         pages += 1
-        docs = d.get("docs") or []
         returned_total += len(docs)
         for doc in docs:
             rows[doc["doc_id"]] = doc
-        page = d.get("page") or {}
+        has_more = page.get("has_more")
         print(f"  page {pages}: offset={offset} returned={len(docs)} "
-              f"has_more={page.get('has_more')} unique_so_far={len(rows)}", file=sys.stderr)
-        if not page.get("has_more"):
+              f"has_more={has_more} unique_so_far={len(rows)}", file=sys.stderr)
+        if not has_more:
             break
-        offset += limit
+        if not docs:
+            raise SweepRefusal(offset, "has_more=true but the page delivered 0 rows -- "
+                                       "advancing would spin, breaking would truncate")
+        offset += len(docs)
         time.sleep(sleep)
     return rows, pages, returned_total
+
+
+def selftest() -> int:
+    """PINS fetch_all. No network, no bp, no credential: subprocess.run is
+    stubbed, so every arm drives the REAL pager. Three controls, so a pager that
+    refused everything could not score 100%."""
+    import types
+
+    class _P:
+        def __init__(self, rc, out, err=""):
+            self.returncode, self.stdout, self.stderr = rc, out, err
+
+    def page(n, offset, has_more, ok=True):
+        body = {"docs": [{"doc_id": f"d{offset + i}", "claim": {}} for i in range(n)],
+                "page": {"has_more": has_more}}
+        if not ok:
+            body = {"ok": False, "error": "internal_error"}
+        return _P(0, json.dumps(body) + "\n")
+
+    real_run = subprocess.run
+    bad = []
+
+    def arm(name, want, script, limit=2):
+        seq, seen = list(script), {"argv": []}
+
+        def fake(argv, **kw):
+            seen["argv"].append(argv)
+            i = len(seen["argv"]) - 1
+            return seq[min(i, len(seq) - 1)]
+
+        subprocess.run = fake
+        try:
+            rows, pages, total = fetch_all(limit, 0)
+            got, ok = f"rows={len(rows)} pages={pages} total={total}", (want == "OK")
+        except SystemExit as exc:
+            got, ok = str(exc).splitlines()[0], (want != "OK" and want in str(exc))
+        finally:
+            subprocess.run = real_run
+        print(f"  {'ok  ' if ok else 'FAIL'}  {name:<46} {got[:130]}")
+        if not ok:
+            bad.append(name)
+        return seen["argv"]
+
+    print("claim-shape-census selftest -- fetch_all against a stubbed bp")
+    arm("control: two pages, has_more terminates", "OK",
+        [page(2, 0, True), page(1, 2, False)])
+    arm("control: single empty board", "OK", [page(0, 0, False)])
+    arm("control: bp warning line before JSON", "OK",
+        [_P(0, "WARNING: bp is behind\n" + page(1, 0, False).stdout)])
+
+    arm("MUTATION: bp exits non-zero", "bp exited 1",
+        [page(2, 0, True), _P(1, "", "connection refused")])
+    arm("MUTATION: 200-shaped ok=false body", "ok=false",
+        [page(2, 0, True), page(0, 2, False, ok=False)])
+    arm("MUTATION: no JSON on stdout", "no JSON on stdout",
+        [page(2, 0, True), _P(0, "Internal Server Error\n")])
+    arm("MUTATION: body carries no page.has_more", "no `page.has_more`",
+        [_P(0, json.dumps({"docs": []}))])
+    arm("MUTATION: docs is not a list", "no `docs` list",
+        [_P(0, json.dumps({"docs": None, "page": {"has_more": False}}))])
+    arm("MUTATION: has_more=true with 0 rows", "delivered 0 rows",
+        [page(2, 0, True), page(0, 2, True)])
+
+    # STRIDE: the server caps a page at 1000, so a --limit above the cap must
+    # advance by the rows DELIVERED. `offset += limit` skipped the difference.
+    argv = arm("STRIDE: --limit 2000 served 1000-row pages", "OK",
+               [page(3, 0, True), page(3, 3, True), page(1, 6, False)], limit=2000)
+    offsets = [a[a.index("--offset") + 1] for a in argv]
+    if offsets != ["0", "3", "6"]:
+        bad.append("stride offsets")
+        print(f"  FAIL  {'stride offsets':<46} {offsets} != ['0', '3', '6']")
+    else:
+        print(f"  ok    {'stride offsets advance by rows delivered':<46} {offsets}")
+
+    print(f"claim-shape-census selftest: {len(bad)} failures")
+    return 1 if bad else 0
 
 
 def pct(n, d):
@@ -100,7 +217,12 @@ def main():
     ap.add_argument("--sleep", type=float, default=1.0)
     ap.add_argument("--dump", help="write the raw deduped row set here as JSON")
     ap.add_argument("--from-dump", help="re-analyse a previous --dump instead of re-paging")
+    ap.add_argument("--selftest", action="store_true",
+                    help="pin the pager's refusals against a stubbed bp and exit")
     args = ap.parse_args()
+
+    if args.selftest:
+        return selftest()
 
     if args.from_dump:
         rows = json.load(open(args.from_dump))
@@ -125,6 +247,8 @@ def main():
     else:
         print(f"coverage check pages*size    : {pages * args.limit} >= {returned_total} "
               f"-> {'OK' if pages * args.limit >= returned_total else 'SHORT -- TRUNCATED SWEEP'}")
+        print( "terminator                   : page.has_more=false (a short page is "
+               "never read as the end of the board; see fetch_all)")
 
     print("\nPOSITIVE CONTROL (rows that MUST be present):")
     missing = []
