@@ -8662,6 +8662,150 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  deploy-reliability W8: RECORD ONE GRACE EVENT against a deployment — a
+  transient box 5xx the poll loop swallowed (`:poll_refusal`) or a START trigger
+  retried across an untyped 5xx (`:start_retry`).
+
+  THE COUNTER THIS REPLACES DIED OF SUCCESS. `Sites.Deploy` keeps a graced-refusal
+  tally on `ctx`, and `forget_graced_refusals/1` drops it on ANY poll that
+  reached the box — correct for the failure caption it feeds, fatal for
+  measurement: the only graces that were ever counted were the ones that did not
+  work. These columns are monotonic for the life of the run, so a deployment that
+  went `live` BECAUSE grace held can still say so.
+
+  ATOMIC `UPDATE`, never a changeset — the same discipline `coalesced_attempts`
+  follows, and for two reasons here: the bump happens mid-run against a row whose
+  `status` has not moved (a `transition_changeset` would drag the from-status
+  guard into a telemetry write), and a read-modify-write would lose bumps.
+  `COALESCE` because every pre-W8 row is NULL and `NULL + 1` is NULL.
+
+  Best-effort: the return is always `:ok`, an unknown id updates zero rows
+  without raising, and the caller (`Sites.Deploy`) wraps it besides. A deploy
+  must never fail because its own accounting did.
+  """
+  @spec record_deploy_grace(binary(), :poll_refusal | :start_retry) :: :ok
+  def record_deploy_grace(id, kind)
+      when is_binary(id) and kind in [:poll_refusal, :start_retry] do
+    case uuid_or_nil(id) do
+      nil -> :ok
+      uuid -> bump_deploy_grace(uuid, kind, DateTime.utc_now())
+    end
+  end
+
+  defp bump_deploy_grace(uuid, :poll_refusal, now) do
+    from(d in Deployment,
+      where: d.id == ^uuid,
+      update: [
+        set: [
+          graced_poll_refusals: fragment("COALESCE(?, 0) + 1", d.graced_poll_refusals),
+          last_graced_at: ^now
+        ]
+      ]
+    )
+    |> Repo.update_all([])
+
+    :ok
+  end
+
+  defp bump_deploy_grace(uuid, :start_retry, now) do
+    from(d in Deployment,
+      where: d.id == ^uuid,
+      update: [
+        set: [
+          graced_start_retries: fragment("COALESCE(?, 0) + 1", d.graced_start_retries),
+          last_graced_at: ^now
+        ]
+      ]
+    )
+    |> Repo.update_all([])
+
+    :ok
+  end
+
+  @doc """
+  deploy-reliability W8: THE NAMED QUERY over the grace counters — the reachable
+  surface that turns "a rename killed grace" from a rate into a number.
+
+  Folded over a PINNED `inserted_at` window (`from`/`to`), exactly like the
+  deploy ledger's census, so two readers asking the same question over the same
+  window get the same answer. `:site_ids` narrows to a list of site ids (a
+  team-scoped caller); omit it for the fleet.
+
+  Returns:
+
+    * `deployments`             — rows in the window (the denominator).
+    * `graced_poll_refusals`    — transient box 5xx swallowed by the poll loop.
+    * `graced_start_retries`    — START triggers retried across an untyped 5xx.
+    * `deployments_graced`      — rows where either counter is above zero.
+    * `saved`                   — graced rows that nonetheless reached `live`.
+      THIS IS THE NUMBER THE TASK EXISTS FOR: it is the population the grace
+      produced, it was previously unobservable in every outcome, and killing
+      grace (charter D114 — one wire literal) drives it to zero while the
+      failure rate is still climbing for reasons nobody can name.
+    * `unmeasured`              — rows predating the counters (NULL, never 0).
+      A census whose zero could mean "no saves" OR "nobody was counting" cannot
+      be read, so the two are separated rather than summed.
+  """
+  @spec deploy_grace_census(DateTime.t(), DateTime.t(), keyword()) :: map()
+  def deploy_grace_census(%DateTime{} = from_at, %DateTime{} = to_at, opts \\ []) do
+    scoped =
+      from(d in Deployment,
+        where: d.inserted_at >= ^from_at and d.inserted_at < ^to_at
+      )
+      |> scope_grace_census_sites(Keyword.get(opts, :site_ids))
+
+    rows =
+      scoped
+      |> select([d], %{
+        status: d.status,
+        polls: d.graced_poll_refusals,
+        starts: d.graced_start_retries
+      })
+      |> Repo.all()
+
+    # ONE `Repo.all`, every term folded from it — a census assembled from N
+    # independent aggregates can report a `saved` that its own `deployments_graced`
+    # contradicts if a row lands between them.
+    Enum.reduce(
+      rows,
+      %{
+        from: from_at,
+        to: to_at,
+        deployments: 0,
+        graced_poll_refusals: 0,
+        graced_start_retries: 0,
+        deployments_graced: 0,
+        saved: 0,
+        unmeasured: 0
+      },
+      fn row, acc ->
+        polls = row.polls || 0
+        starts = row.starts || 0
+        graced? = polls > 0 or starts > 0
+
+        acc
+        |> Map.update!(:deployments, &(&1 + 1))
+        |> Map.update!(:graced_poll_refusals, &(&1 + polls))
+        |> Map.update!(:graced_start_retries, &(&1 + starts))
+        |> Map.update!(:deployments_graced, &if(graced?, do: &1 + 1, else: &1))
+        |> Map.update!(
+          :saved,
+          &if(graced? and row.status == "live", do: &1 + 1, else: &1)
+        )
+        |> Map.update!(
+          :unmeasured,
+          &if(is_nil(row.polls) and is_nil(row.starts), do: &1 + 1, else: &1)
+        )
+      end
+    )
+  end
+
+  defp scope_grace_census_sites(query, nil), do: query
+
+  defp scope_grace_census_sites(query, site_ids) when is_list(site_ids),
+    do: from(d in query, where: d.site_id in ^site_ids)
+
+  @doc """
   gh-5: APPEND one builder-reported LIVE console line to a deployment — the
   deploy-side twin of `append_provision_console/2`. Best-effort telemetry: it
   records what the builder narrated regardless of the deployment's current

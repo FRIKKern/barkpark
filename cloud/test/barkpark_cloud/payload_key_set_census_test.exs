@@ -2793,6 +2793,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w18-s5 KNOWN OPEN, ONE ROW DOWN. The census AGGREGATE of this column is already an @known_open :unread row; the per-deployment COLUMN is unserialized as well, so a single site's row cannot show how many publishes joined the build it is looking at."},
     {"site_deployment_json/3", "coalesced_last_at",
      "dr-w18-s5 KNOWN OPEN — the last coalesced attempt's stamp, twin of coalesced_attempts."},
+    {"site_deployment_json/3", "graced_poll_refusals",
+     "dr-bl-w8-graced-deploys-are-uncounted KNOWN OPEN — how many transient box 5xx this run's poll loop swallowed. The column exists so the SAVES stop being invisible (`forget_graced_refusals/1` drops the in-memory tally on every reaching poll, i.e. on every grace that worked), and its reachable surface this wave is the NAMED QUERY `Registry.deploy_grace_census/3`, not the per-deployment wire: `site_deployment_json/3` lives in router.ex, outside this task's fence. Emitting it is the follow-up, and this row is where that is written down."},
+    {"site_deployment_json/3", "graced_start_retries",
+     "dr-bl-w8-graced-deploys-are-uncounted KNOWN OPEN — how many START triggers were retried across an untyped 5xx, twin of graced_poll_refusals and the arm that recorded NOTHING in any outcome before this wave. Same custody, same fence, same follow-up."},
+    {"site_deployment_json/3", "last_graced_at",
+     "dr-bl-w8-graced-deploys-are-uncounted KNOWN OPEN — when the most recent grace of either kind happened. Without it a nonzero count cannot be told from one taken weeks ago; same reason `apply_arming_checked_at` sits beside its verdict two arms up."},
     {"site_deployment_json/3", "delivery_id",
      "RULED — GitHub's X-GitHub-Delivery header (dwb-18). A webhook idempotency key, never a fact about the build; it exists so a redelivered push mints at most one Deployment."},
     {"site_deployment_json/3", "preview_slug",
@@ -2852,8 +2858,19 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # move — all three are serialized in the same commit, which is the point.
   # MEASURED: the SERIALIZER-SIDE arm's neutered-walker assertion printed
   # `left: 106`, which IS the full schema population by construction.
-  @schema_field_floor 107
-  @schema_unserialized_floor 24
+  # 107 -> 110 (dr-bl-w8-graced-deploys-are-uncounted): the `deployments` schema
+  # gains `graced_poll_refusals`, `graced_start_retries` and `last_graced_at`.
+  # `@schema_unserialized_floor` DOES move this time, 24 -> 27, and that is the
+  # honest record: unlike the node-slot trio, these three are NOT serialized in
+  # the same commit — `site_deployment_json/3` lives in router.ex, outside that
+  # task's fence, so the emit is a named follow-up and the three allowlist rows
+  # above carry the tracker. A floor that stayed at 24 would have required
+  # pretending they were emitted.
+  # MEASURED, not derived: the SERIALIZER-SIDE arm's un-allowlisted run printed
+  # `27 unserialized column(s)` and the SCHEMA-SIDE arm printed
+  # `110 schema column(s) collected`.
+  @schema_field_floor 110
+  @schema_unserialized_floor 27
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:
   # `delivery_json/1` (router.ex:9809) is the NOTIFICATIONS delivery serializer,
@@ -3108,7 +3125,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       assert is_binary(key) and key != ""
       assert byte_size(reason) > 40, "#{payload}/#{key}: a reason this short is not a ruling"
 
-      assert reason =~ ~r/dr-w\d+-[a-z0-9-]+|task-[0-9a-f]+|RULED/,
+      # `dr-bl-…` is the SAME ledger's backlog prefix, not a second scheme: a row
+      # adopted by `dr-backlog-never-started` keeps its wave in the id and gains
+      # a `bl-` segment (`dr-bl-w8-graced-deploys-are-uncounted`). Without this
+      # alternative the guard forces such a row to cite an id that does not
+      # exist, which is worse than no citation.
+      assert reason =~ ~r/dr-(bl-)?w\d+-[a-z0-9-]+|task-[0-9a-f]+|RULED/,
              "#{payload}/#{key}: a row must name its tracker, or say RULED and why"
 
       # THE CLASS RULE IS ONE RULE. An explicit row for an `*_encrypted` column
