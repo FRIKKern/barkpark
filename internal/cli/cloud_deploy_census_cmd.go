@@ -905,9 +905,21 @@ func deployCensusAbandonment(census cloudclient.DeployCensus) string {
 	if census.AbandonedUnreadable != nil && *census.AbandonedUnreadable > 0 {
 		return fmt.Sprintf(
 			"abandoned publishes: %d or more — %d failed row(s) recorded no reason, so the abandonment marker could not be read on them (LOWER BOUND)",
-			*census.Abandoned, *census.AbandonedUnreadable)
+			*census.Abandoned, *census.AbandonedUnreadable) + deployCensusAbandonmentLabels(census)
 	}
-	return fmt.Sprintf("abandoned publishes: %d", *census.Abandoned)
+	return fmt.Sprintf("abandoned publishes: %d", *census.Abandoned) + deployCensusAbandonmentLabels(census)
+}
+
+// deployCensusAbandonmentLabels appends the control plane's own three labels to
+// the abandonment sentence — which basis measured it, how much is historical,
+// how much the backfill wrote. VERBATIM from the envelope and never synthesised
+// here: a control plane that does not send them gets no labels rather than a
+// label this reader made up.
+func deployCensusAbandonmentLabels(census cloudclient.DeployCensus) string {
+	if census.AbandonedBasis == nil || strings.TrimSpace(*census.AbandonedBasis) == "" {
+		return ""
+	}
+	return " — " + strings.TrimSpace(*census.AbandonedBasis)
 }
 
 // deployCensusPct renders a rate node as a percentage, or reports that it has
