@@ -18602,6 +18602,61 @@ test("cch-w55-s3: both trial cards — owner and member — carry the same teard
 //     reading would produce) reds every days=0 assertion while days=9 and the
 //     server-side clamp pin stay green.
 
+// ── cch-w49-bl · THE DERIVED CEILING, arm by arm ────────────────────────────
+// The WIRING (renderBilling issues GET /v1/usage/summary; the plan-state card
+// and its GR36 member twin render what came back) is proven by the preview
+// corpus and by smoke.mjs's widened absent-arm guard, which reads the rendered
+// bytes of all eleven #billing actors: billing-portal-return carries the only
+// usageSummary fixture on that slice and states "3 managed instances on this
+// plan"; the other ten carry none and state nothing.
+//
+// What these pins add is the arms no fixture reaches. The sampler writes the
+// STRING "unmetered" into meter values, and Usage.instance_quota/1 clamps the
+// forever-tier placeholder (>= 100_000) to nil rather than drawing a bar to a
+// million — so "a quota field exists" is not "a ceiling was answered", and a
+// truthiness read of it would put the word "unmetered" or a millionth on a
+// money screen. Every non-integer, non-positive value is the SAME silence as an
+// absent one.
+
+test("cch-w49-bl: usageInstanceCeiling answers ONLY a finite positive integer", () => {
+  const q = (quota) => hooks.usageInstanceCeiling({ team: { instances: { value: 1, quota: quota } } });
+  assert.equal(q(3), 3, "the ordinary supporter ceiling the route derives from Billing.barkpark_limit/1");
+  assert.equal(q(1), 1);
+  // Usage clamps the forever placeholder itself; this is the belt to that brace.
+  assert.equal(q(1000000), 1000000, "a large integer IS a ceiling — the clamp is the SERVER's job, not a client re-guess");
+  // …and everything that is not a ceiling reads as silence, not as a value.
+  assert.equal(q("unmetered"), null, "the sampler's own string for an unmetered meter must never reach a screen");
+  assert.equal(q("3"), null, "a numeric STRING is not the number — it would render, then drift");
+  assert.equal(q(null), null);
+  assert.equal(q(undefined), null, "the empty envelope the preview stub answers for a fixtureless actor");
+  assert.equal(q(0), null, "a zero ceiling is not a ceiling; the server never emits one");
+  assert.equal(q(-1), null);
+  assert.equal(q(2.5), null, "a fraction is not an instance count");
+  assert.equal(q(Infinity), null);
+  assert.equal(q(NaN), null);
+  // The envelope itself may be missing at every level — a failed read, a team
+  // meter that degraded to unmetered, the stub's {team:{},instances:[]}.
+  assert.equal(hooks.usageInstanceCeiling(null), null);
+  assert.equal(hooks.usageInstanceCeiling({}), null);
+  assert.equal(hooks.usageInstanceCeiling({ team: {} }), null);
+  assert.equal(hooks.usageInstanceCeiling({ team: { instances: {} } }), null);
+});
+
+test("cch-w49-bl: planCeilingHtml OMITS on nil and never invents a numeral", () => {
+  assert.equal(hooks.planCeilingHtml(null), "", "nil OMITS — the whole ruling of cch-w49-s1");
+  assert.equal(hooks.planCeilingHtml(undefined), "", "and an unanswered read is the same silence as an absent one");
+  const three = hooks.planCeilingHtml(3);
+  assert.match(three, /3 managed instances on this plan/);
+  // The absent-arm guard's own regex must MATCH what this renders — a line the
+  // guard cannot see is a line the guard cannot police.
+  assert.match(three, /\b\d+\s+managed instances?\b/);
+  // Singular is a real state: the free/none ceiling is 1.
+  assert.match(hooks.planCeilingHtml(1), /1 managed instance on this plan/);
+  assert.ok(!/instances/.test(hooks.planCeilingHtml(1)), "one instance is not 'instances'");
+  // No price, ever — the currency half of the guard stays unconditional.
+  assert.ok(!/\$/.test(three), "no amount exists server-side, so no ceiling line may carry one");
+});
+
 test("cch-w50: trialEnded is the terminal predicate — 0 is ENDED, unknown is not", () => {
   assert.equal(hooks.trialEnded(0), true, "0 is the server's clamped terminal value, not a midpoint");
   assert.equal(hooks.trialEnded(-1), true, "and a value below it stays ended, though the server never emits one");

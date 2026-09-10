@@ -3936,6 +3936,35 @@ export const SCENARIOS = {
         is_trial: false,
         trial_days_remaining: null,
       },
+      // ── cch-w49-bl · THE ONE usageSummary FIXTURE ON A BILLING ACTOR ──────
+      // Minted here and NOWHERE else on the #billing slice, deliberately. This
+      // is the only billing actor whose subscription is `active` — the exact
+      // (and only) state for which Usage.instance_quota/1 answers a number, so
+      // it is the one actor where a rendered ceiling is a DERIVED fact rather
+      // than a fixture the console was handed. Every other billing actor keeps
+      // no fixture and therefore keeps the OMIT arm: the stub answers
+      // {team:{},instances:[]}, usageInstanceCeiling() reads null, and
+      // planCeilingHtml() renders "".
+      //
+      // The numeral is the SERVER's, not a choice: `supporter` → 3 is what
+      // Billing.limits/0 answers on a booted BEAM, pinned by running in BOTH
+      // directions — usage_summary_route_test.exs ("an active subscription →
+      // the plan ceiling with warn_at derived": quota 3, warn_at 2) and
+      // billing_client_mirror_test.exs's cross-layer mirror. warn_at 2 is
+      // compose/1's derivation of the same quota, carried so the shape matches
+      // the route's real envelope rather than a hand-built subset.
+      usageSummary: {
+        team: {
+          instances: {
+            value: 1,
+            quota: 3,
+            warn_at: 2,
+            source: "control-plane.team_instances",
+            measured_at: null,
+          },
+        },
+        instances: [],
+      },
       sites: [],
       audit: [],
     },

@@ -142,6 +142,11 @@ const EXPECT = [
   { f: "loadOverview", p: '"/v1/barkparks"', v: "guarded",
     proof: [/markRefreshStale\(\)/],
     why: "full-load failure paints the error state; a background failure marks staleness, never blanks" },
+  // cch-w49-bl: the SECOND reader of this envelope. The billing screen asks for
+  // the ceiling it used to state from a client constant.
+  { f: "loadBillingCeiling", p: '"/v1/usage/summary"', v: "sanctioned",
+    proof: [/if \(!r\.ok\) return billingQuota;/],
+    why: "a failed read leaves the cache and the loaded flag alone, so the ceiling line stays OMITTED — an unanswered ceiling and an absent one are the same silence, never a number" },
   { f: "loadOverview", p: '"/v1/usage/summary"', v: "sanctioned",
     proof: [/res\[0\]\.ok && res\[0\]\.data && res\[0\]\.data\.usage\) \? res\[0\]\.data\.usage : null/],
     why: "null usage renders the slots meter's unknown state — never a fabricated quota" },
