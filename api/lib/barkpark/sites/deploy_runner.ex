@@ -910,16 +910,35 @@ defmodule Barkpark.Sites.DeployRunner do
   every value here is "as of" that instant, not "as of now".
   """
   @spec door_census() :: door_census()
-  def door_census do
+  def door_census, do: door_census(@census_table)
+
+  @doc """
+  `door_census/0` against a NAMED table — the injection seam, and the only way
+  the no-table arm is reachable from a test.
+
+  The "nothing was read" arm (every measurement `nil`, capacity still rendered)
+  is the whole honesty contract of this gauge: a `nil` means UNREAD, never zero.
+  It fires when no Runner has ever run in this BEAM, so `@census_table` does not
+  exist and `census_get/2`'s `ArgumentError` rescue answers `nil`. ExUnit always
+  starts the supervised Runner, so the table ALWAYS exists under test, and the
+  table is OWNED BY THE RUNNER — deleting it means killing a supervised
+  singleton, which is a flake generator across an `async: false` module. Passing
+  a table name that was never created reaches the same arm with nothing killed.
+
+  Not for production callers: `door_census/0` is the real reader.
+  """
+  @doc since: "dr-w22"
+  @spec door_census(atom()) :: door_census()
+  def door_census(table) when is_atom(table) do
     %{
       capacity: build_slot_capacity(),
-      observed_in_flight: census_get(:observed_in_flight),
-      in_flight_slugs: census_get(:in_flight_slugs),
-      refusals_total: census_get(:refusals_total),
-      refusals_since: census_get(:refusals_since),
-      door_open_admissions_total: census_get(:door_open_admissions_total),
-      door_open_admissions: census_get(:door_open_admissions),
-      measured_at: census_get(:measured_at)
+      observed_in_flight: census_get(table, :observed_in_flight),
+      in_flight_slugs: census_get(table, :in_flight_slugs),
+      refusals_total: census_get(table, :refusals_total),
+      refusals_since: census_get(table, :refusals_since),
+      door_open_admissions_total: census_get(table, :door_open_admissions_total),
+      door_open_admissions: census_get(table, :door_open_admissions),
+      measured_at: census_get(table, :measured_at)
     }
   end
 
@@ -1044,8 +1063,14 @@ defmodule Barkpark.Sites.DeployRunner do
     end
   end
 
-  defp census_get(key) do
-    case :ets.lookup(@census_table, key) do
+  defp census_get(key), do: census_get(@census_table, key)
+
+  # `nil` has TWO meanings here and both are UNREAD, never zero: the key was
+  # never written (`[]`), or the table itself does not exist (`ArgumentError` —
+  # no Runner has ever run in this BEAM). A `0` in either arm would report an
+  # idle door where there is no door at all.
+  defp census_get(table, key) do
+    case :ets.lookup(table, key) do
       [{^key, value}] -> value
       [] -> nil
     end
