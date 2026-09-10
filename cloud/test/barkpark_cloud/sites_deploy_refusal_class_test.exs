@@ -25,12 +25,16 @@ defmodule BarkparkCloud.SitesDeployRefusalClassTest do
   use BarkparkCloud.DataCase, async: true
 
   alias BarkparkCloud.{Accounts, DeployLedger, Registry}
-  alias BarkparkCloud.Registry.Deployment
+  alias BarkparkCloud.Registry.{Deployment, Vault}
   alias BarkparkCloud.Sites.Deploy
   alias BarkparkCloud.Sites.FakeBoxRelay
 
   @instance_url "https://acme.barkpark.cloud"
+  @read_token "bpt_public_read_xyz"
 
+  # The same live-instance + static-site fixture `sites_deploy_test.exs` uses: a
+  # url and an encrypted admin token, which is what the provision-succeed path
+  # writes and what the driver needs to reach a box at all.
   defp setup_site do
     n = System.unique_integer([:positive])
     {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
@@ -38,11 +42,25 @@ defmodule BarkparkCloud.SitesDeployRefusalClassTest do
 
     bp =
       bp
-      |> Ecto.Changeset.change(%{url: @instance_url, status: "live"})
-      |> Registry.put_admin_token("bpat_admin_token")
+      |> Ecto.Changeset.change(
+        url: @instance_url,
+        git_commit: "abc123",
+        admin_token_encrypted: Vault.encrypt("instance-admin-token")
+      )
       |> BarkparkCloud.Repo.update!()
 
-    {:ok, site} = Registry.create_site(bp, %{name: "S #{n}", slug: "s-#{n}"})
+    {:ok, site} =
+      Registry.create_site(bp, %{
+        name: "Blog #{n}",
+        slug: "blog-#{n}",
+        kind: "static",
+        framework: "astro",
+        bootstrap_workspace: "acme",
+        bootstrap_project: "blog",
+        bootstrap_dataset: "production",
+        read_token: @read_token
+      })
+
     {bp, site}
   end
 
@@ -62,8 +80,7 @@ defmodule BarkparkCloud.SitesDeployRefusalClassTest do
         refused_row(400, %{
           "error" => %{
             "code" => "E_TOTAL_TOO_LARGE",
-            "message" =>
-              "the archive's entries declare more than the 67108864 byte total cap",
+            "message" => "the archive's entries declare more than the 67108864 byte total cap",
             "request_id" => "F9-too-large"
           }
         })
