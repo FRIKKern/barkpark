@@ -2004,6 +2004,80 @@ expect_status_matching "an --anchor that is not an instant is a usage error" 3 "
   run --page-limit 4 --fixture-dir "$HEALTHY" --anchor "last tuesday"
 
 # =============================================================================
+# CLAUSE 11 — THE READ-BACK ARM IS LIVE-ONLY, AND WHAT IS PINNED HERE IS THAT
+# THIS HARNESS CANNOT RUN IT.
+#
+# Every other clause in this file is proved by making the census red on canned
+# bytes. Clause 11 cannot be, and that is not a gap in the harness -- it is the
+# clause. The arm issues a WRITE and re-reads it; --fixture-dir replaces the
+# transport with files this very script wrote, so a fixture "read-back" reads
+# back whatever the fixture author put there. It would be a green bought by
+# choosing the answer, which is the same fault --anchor and --reason-repo are
+# refused for.
+#
+# So what is pinned below is the REFUSAL and the GUARDS -- reachable with no
+# server, because they fire before any transport is built -- plus the LABEL: the
+# arm's live-only heading is printed on every run, including the runs that do
+# not ask for it, so a reader can see that it exists and did not run. The
+# absence check is paired with a control on the SAME output; an `output lacks X`
+# with nothing that must be present is a check that also passes on an empty
+# string.
+# =============================================================================
+echo
+echo "clause 11 — the read-back arm is LIVE-ONLY and this harness refuses it"
+expect_status_matching "--assert-readback under --fixture-dir is REFUSED" 3 \
+  "LIVE-ONLY arm and is refused under" \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --assert-readback kid-a \
+      --readback-criterion 0 --readback-worker w --readback-epoch 1
+expect_status_matching "and the refusal says WHY a fixture cannot prove it" 3 \
+  "proves the fixture, not the ledger" \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --assert-readback kid-a \
+      --readback-criterion 0 --readback-worker w --readback-epoch 1
+# HOLDER-ONLY AND EPOCH-FENCED, so the arm refuses to guess either. This fires
+# with no --fixture-dir and no server: the guard is argv-only.
+expect_status_matching "--assert-readback without a worker is a usage error" 3 \
+  "--readback-worker is required with --assert-readback" \
+  run --page-limit 4 --assert-readback kid-a --readback-criterion 0 --readback-epoch 1
+expect_status_matching "--assert-readback without an epoch is a usage error" 3 \
+  "--readback-epoch is required with --assert-readback" \
+  run --page-limit 4 --assert-readback kid-a --readback-criterion 0 --readback-worker w
+expect_status_matching "--assert-readback without a criterion is a usage error" 3 \
+  "--readback-criterion is required with --assert-readback" \
+  run --page-limit 4 --assert-readback kid-a --readback-worker w --readback-epoch 1
+# A MODIFIER THAT MODIFIES NOTHING MUST NOT BE REACHABLE -- the same ruling
+# --anchor-unbound carries. Otherwise a run believes it asked for a probe it
+# never armed.
+expect_status_matching "--readback-dry-run alone does nothing and says so" 3 \
+  "--readback-dry-run does nothing without --assert-readback" \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --readback-dry-run
+expect_status_matching "--readback-bp alone does nothing and says so" 3 \
+  "--readback-bp does nothing without --assert-readback" \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --readback-bp /bin/true
+expect_status_matching "the two non-certifying modes are mutually exclusive" 3 \
+  "mutually exclusive" \
+  run --page-limit 4 --assert-readback kid-a --readback-criterion 0 \
+      --readback-worker w --readback-epoch 1 --readback-dry-run --readback-bp /bin/true
+# THE LABEL, ON A RUN THAT DID NOT ASK FOR THE ARM. Both halves are asserted on
+# the same output: the heading must be PRESENT (control) and the arm's own body
+# must be ABSENT (the claim). Without the control, deleting the whole block
+# would pass the absence check.
+expect_output_contains "the LIVE-ONLY label prints on every run" \
+  "LIVE-ONLY ARM: it WRITES, so it can never" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "and it says the hermetic selftest does not carry it" \
+  "NOT in the hermetic selftest" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "a fixture run reports the arm as NOT RUN" \
+  "NOT RUN -- pass --assert-readback" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_lacks "and no fixture run ever executes the write channel" \
+  "  write chan  " \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "the arm states it mints no row and no GitHub issue" \
+  "it creates no task, so it mints no GitHub issue" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+
+# =============================================================================
 # CLAUSE 8 — A REASON, READ AGAINST ITS OWN CITED ARTIFACTS (the wave-27
 # reviewer's own residual, paid in wave 28).
 #

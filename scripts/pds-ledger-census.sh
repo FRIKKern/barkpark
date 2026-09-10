@@ -533,6 +533,31 @@
 # convenience. The precedence (argv, then env, then config) is UNCHANGED; what
 # changes is that it is now legible and its rejection is loud.
 #
+# CLAUSE 11 -- THE READ-BACK ARM (LIVE-ONLY). Every clause above reads. This one
+# WRITES, because the one thing a write channel's receipt cannot be used to
+# check is whether the write landed: a stamp that answered 200 and did not
+# persist has now bitten a reviewer and the lead, and `bp doc patch` on a
+# PUBLISHED task creates a competing DRAFT the board read never shows. The arm
+# stamps ONE criterion of a row the CALLER NAMES (whose claim the caller holds),
+# re-reads criteria_progress from the PUBLISHED perspective, compares it against
+# what the write returned, and WITHDRAWS the probe. Three ways to red: the board
+# disagrees with the receipt; the number did not MOVE (agreement about an
+# unchanged board is the vacuous green); the published rev did not advance.
+#
+# IT IS REFUSED UNDER --fixture-dir, and that refusal is the clause. Canned
+# bytes read back whatever the fixture author wrote, so a fixture-proved
+# read-back proves the fixture -- the same ruling --anchor and --reason-repo
+# carry. The hermetic selftest therefore pins the REFUSAL, the argv guards and
+# the LIVE-ONLY label, and never the arm. It is off by default; a run that does
+# not pass --assert-readback prints the arm as NOT RUN, which is a different
+# sentence from it running and finding nothing.
+#
+# IT MINTS NOTHING. It writes to the row on argv and no other, and there is no
+# code path here that creates a document -- so it mints no GitHub issue. (Six
+# throwaway rows minted six real public issues this wave, one of which is still
+# open because its task lost its github backlink. That is why this arm takes a
+# row instead of making one.)
+#
 # EXIT CODES
 #   0  census produced, coherent, and (if asked) the round-done predicate holds
 #   1  --assert-round-done predicate is FALSE — the round is not done
@@ -541,6 +566,11 @@
 #      undercount used to be able to dodge.
 #   3  usage error
 #   4  SNAPSHOT INCOHERENT: the board moved inside the named window. Re-run.
+#   6  READ-BACK DISAGREEMENT (CLAUSE 11, live-only): a stamp WRITE was issued
+#      and the PUBLISHED re-read does not serve what the write returned -- or
+#      the number the stamp was supposed to move did not move. Its own code,
+#      because "the board does not serve what the write returned" has exactly
+#      one remedy and it is not any of the five above.
 #   5  CANNOT AUTHENTICATE: the credential the census resolved was REJECTED by
 #      the server (401/403). It is its OWN exit code and not a 2, because
 #      "I could not reach the board" and "I was not allowed to read the board"
@@ -556,6 +586,9 @@
 #                                [--assert-reason-artifacts]
 #                                [--reason-sample N] [--reason-sample-seed S]
 #                                [--require-drafts]
+#                                [--assert-readback DOC-ID --readback-criterion N
+#                                 --readback-worker W --readback-epoch E
+#                                 [--readback-dry-run] [--readback-bp CMD]]
 #                                [--fixture-dir DIR] [--server URL] [--token T]
 #   bash scripts/pds-ledger-census_test.sh    # the mutation fixtures
 #
@@ -721,6 +754,14 @@ EXIT_INCOHERENT = 4
 # -- "I could not read the board" and "I was not allowed to read the board" have
 # different remedies, and one exit code for both makes the operator guess.
 EXIT_UNAUTHENTICATED = 5
+
+# CLAUSE 11's OWN CODE, and it is its own for the same reason clause 10's is:
+# "the board does not serve what the write returned" and "I could not read the
+# board" are different faults with different remedies, and an operator who
+# cannot tell them apart debugs the wrong one. A read-back disagreement means
+# the write channel is lying about persistence -- nothing else in this file can
+# produce it.
+EXIT_READBACK_DISAGREE = 6
 
 
 class LensAbsent(Exception):
@@ -2337,6 +2378,10 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
                        % (key, count, ", ".join(report["off_vocabulary_samples"].get(key, []))))
     else:
         out.append("  (none)")
+    # CLAUSE 11 is printed on EVERY run, including the runs that did not ask for
+    # it: a reader must be able to see that the read-back arm exists and did not
+    # run, which is a different sentence from it running and finding nothing.
+    out.extend(render_readback(report.get("readback")))
     return "\n".join(out)
 
 
@@ -2523,6 +2568,424 @@ def round_done_predicate(report):
     return lines, failures
 
 
+# --- CLAUSE 11: the read-back arm (LIVE-ONLY) ---------------------------------
+#
+# A PRINTED REV IS NOT PERSISTENCE. A stamp that answered 200 and did not land
+# has now bitten a reviewer and the lead: `bp doc patch` on a PUBLISHED task
+# creates a competing DRAFT, and the board read never shows it unless a
+# `bp doc publish` follows. Every other clause in this file reads; this one is
+# the only one that WRITES, and it exists because the write channel's own
+# receipt is the one thing it cannot be used to check.
+#
+# WHY IT CANNOT RIDE --fixture-dir. The selftest's transport is canned bytes: a
+# fixture can be made to "read back" whatever the fixture author wants, so a
+# read-back proved against a fixture proves the fixture, not the ledger. The arm
+# is therefore REFUSED under --fixture-dir (exit 3) and says so, and what the
+# hermetic selftest checks is exactly that REFUSAL -- never the arm.
+#
+# IT MINTS NOTHING. The arm writes to ONE row: the row named on argv by the
+# caller, who must already hold its claim. It never creates a task, so it never
+# mints a GitHub issue (six throwaway rows minted six real public issues this
+# wave, one of which is still open because its task lost its github backlink).
+# There is no code path here that POSTs a document.
+#
+# IT MUST MOVE THE QUANTITY IT READS BACK. A stamp that changes nothing is read
+# back as "agrees" on a board where the write never landed at all -- the exact
+# vacuous green this epic exists to kill. So the arm takes a criterion that is
+# currently NOT met, flips it (criteria_progress.met MUST rise by 1), reads it
+# back, and then WITHDRAWS it (criteria_progress.met MUST fall back). Two
+# comparisons, in opposite directions, and a run in which the number did not
+# move is a FAILURE, not a pass.
+#
+# IT PUTS THE ROW BACK. The withdrawal is not politeness, it is the arm's second
+# half: `--withdraw` lowers met, leaves the original evidence in place and
+# appends a signed {who,why,when,superseded_evidence} record, so the probe is on
+# the record instead of being erased. A withdrawal that FAILS is reported as a
+# finding, loudly, with the exact command to undo it by hand -- a probe that
+# leaves a fabricated `met` behind is worse than no probe.
+#
+# THE TWO NON-CERTIFYING MODES, both LABELLED in the output and in --json:
+#   --readback-dry-run  runs a REAL `bp ... --dry-run` (which sends nothing) and
+#                       asserts the published row is UNCHANGED. Both channels are
+#                       real; no write is issued; it proves the comparator agrees
+#                       when it should, and it certifies nothing.
+#   --readback-bp CMD   replaces the WRITE channel only. The published read stays
+#                       real, so a stub that reports a landed stamp over a board
+#                       where nothing landed is the RED direction, on the real
+#                       ledger. It can never manufacture a certifying green: any
+#                       run carrying it prints NOT CERTIFYING and says why.
+
+
+def criteria_of(doc):
+    """The acceptance criteria list, wherever this envelope keeps it.
+
+    /v1/data/query and /v1/data/doc flatten content.* to the top level; the
+    /v1/tasks stamp envelope keeps it under doc.content. Both shapes are read
+    and the one that answered is NAMED in the report -- a reader must never have
+    to guess which key a number came off.
+    """
+    for path in (("acceptance_criteria",),
+                 ("content", "acceptance_criteria"),
+                 ("doc", "acceptance_criteria"),
+                 ("doc", "content", "acceptance_criteria")):
+        node = doc
+        for key in path:
+            node = node.get(key) if isinstance(node, dict) else None
+            if node is None:
+                break
+        if isinstance(node, list):
+            return node, ".".join(path)
+    return None, None
+
+
+def progress_of(criteria):
+    """criteria_progress, RE-DERIVED from the criteria themselves.
+
+    Not read off a `criteria_progress` key even when one is present: that key is
+    the SERVER's arithmetic over the same list, and an arm that compares the
+    server's summary against the server's summary is comparing one number to
+    itself. `met` is counted case-exact on boolean True -- a string "true" is
+    not a met flag, and treating it as one is how a fabricated done gets counted.
+    """
+    met = 0
+    for item in criteria:
+        if isinstance(item, dict) and item.get("met") is True:
+            met += 1
+    return {"met": met, "total": len(criteria)}
+
+
+def read_published_task(transport, dataset, doc_id):
+    """THE PUBLISHED PERSPECTIVE, for one row, AFTER the write.
+
+    /v1/data/doc does NOT echo a `perspective` (the paged endpoint does, and
+    clause 7's lens line derives it from there). So the lens evidence here is
+    the row's own `_draft` flag, asserted to be exactly False -- and that is
+    named as the evidence rather than the word "published" being assumed. A read
+    that came back as a draft is the very fault this arm hunts, so it is a
+    finding, not a footnote.
+    """
+    path = "/v1/data/doc/%s/task/%s" % (dataset, doc_id)
+    status, body = transport.get_doc(path, doc_id)
+    if status in UNAUTHENTICATED_STATUSES:
+        refuse_unauthenticated(transport, status, "the read-back row `%s`" % doc_id, body)
+    if status < 200 or status >= 300:
+        die(EXIT_FAIL_CLOSED,
+            "HTTP %d reading back `%s` -- a row that cannot be re-read is never "
+            "a row that landed" % (status, doc_id),
+            ["GET %s" % path,
+             "body: %s" % body[:300].decode("utf-8", "replace")])
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        die(EXIT_FAIL_CLOSED, "HTTP %d but unparseable body reading back `%s`: %s"
+            % (status, doc_id, exc))
+    result = payload.get("result") if isinstance(payload, dict) else None
+    if not isinstance(result, dict):
+        die(EXIT_FAIL_CLOSED,
+            "HTTP %d but no `result` object reading back `%s` -- the shape a "
+            "cleanly-parsing failure envelope takes" % (status, doc_id))
+    criteria, key_path = criteria_of(result)
+    if criteria is None:
+        die(EXIT_FAIL_CLOSED,
+            "the published row `%s` carries no acceptance_criteria list -- there "
+            "is no quantity to read back" % doc_id)
+    return {
+        "rev": result.get("_rev"),
+        "draft": result.get("_draft"),
+        "id": result.get("_id"),
+        "criteria": criteria,
+        "criteria_key": key_path,
+        "progress": progress_of(criteria),
+    }
+
+
+def run_bp(command, argv, dry_run):
+    """THE WRITE CHANNEL: `bp`, as a subprocess, with the campaign's env fence.
+
+    BARKPARK_TOKEN is REMOVED from the child's environment (`env -u
+    BARKPARK_TOKEN bp ...` is the campaign's own rule -- a published-pinned
+    token in the environment silently outranks ~/.config/barkpark/config.json)
+    and `--yes` is passed, because a write that stops for a prod confirmation
+    inside an instrument hangs it. Both are visible in the printed argv.
+    """
+    child_env = dict(os.environ)
+    child_env.pop("BARKPARK_TOKEN", None)
+    full = list(command) + list(argv) + ["--yes"]
+    if dry_run:
+        full.append("--dry-run")
+    full += ["-o", "json"]
+    try:
+        proc = subprocess.run(full, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              env=child_env, timeout=120)
+    except OSError as exc:
+        die(EXIT_FAIL_CLOSED, "cannot run the write channel %r: %s" % (full[0], exc))
+    except subprocess.TimeoutExpired:
+        die(EXIT_FAIL_CLOSED, "the write channel timed out after 120s: %s" % " ".join(full))
+    out = proc.stdout.decode("utf-8", "replace")
+    err = proc.stderr.decode("utf-8", "replace")
+    parsed = None
+    # The receipt may be preceded by human lines on stdout, so the LAST
+    # balanced-looking JSON object is taken. A receipt that cannot be parsed is
+    # reported as unparsed and compared as such -- never silently treated as
+    # agreement.
+    start = out.find("{")
+    while start != -1:
+        try:
+            parsed = json.loads(out[start:])
+            break
+        except ValueError:
+            start = out.find("{", start + 1)
+    return {
+        "argv": " ".join(full),
+        "rc": proc.returncode,
+        "stdout": out[-4000:],
+        "stderr": err[-4000:],
+        "receipt": parsed,
+    }
+
+
+def readback_arm(transport, dataset, args):
+    """CLAUSE 11's whole body. Returns the report block; prints nothing."""
+    doc_id = args.assert_readback
+    index = args.readback_criterion
+    certifying = not (args.readback_dry_run or args.readback_bp)
+    command = args.readback_bp.split() if args.readback_bp else ["bp"]
+
+    block = {
+        "row": doc_id,
+        "criterion": index,
+        "certifying": certifying,
+        "mode": ("dry-run (a REAL bp --dry-run: no write is issued)"
+                 if args.readback_dry_run
+                 else ("stubbed write channel: %s" % args.readback_bp)
+                 if args.readback_bp else "live write"),
+        "write_command": " ".join(command),
+        "dry_run": bool(args.readback_dry_run),
+        "findings": [],
+        "steps": [],
+    }
+
+    before = read_published_task(transport, dataset, doc_id)
+    block["baseline"] = before["progress"]
+    block["baseline_rev"] = before["rev"]
+    block["criteria_key"] = before["criteria_key"]
+    if before["draft"] is not False:
+        block["findings"].append(
+            "the PRE-read of `%s` came back with _draft=%r, not False -- the "
+            "published perspective is not what answered, so nothing read back "
+            "here is evidence about the board" % (doc_id, before["draft"]))
+        return block
+    if index < 0 or index >= len(before["criteria"]):
+        die(EXIT_USAGE,
+            "--readback-criterion %d is out of range: `%s` has %d criteria "
+            "(ZERO-BASED -- the first criterion is 0)"
+            % (index, doc_id, len(before["criteria"])))
+    target = before["criteria"][index]
+    text = target.get("criterion")
+    if not isinstance(text, str) or not text.strip():
+        die(EXIT_USAGE,
+            "criterion %d of `%s` has no stored wording, so the stamp's "
+            "off-by-one guard (--criterion-text) cannot be satisfied" % (index, doc_id))
+    if target.get("met") is True and not args.readback_dry_run:
+        die(EXIT_USAGE,
+            "criterion %d of `%s` is ALREADY met: this arm must MOVE the quantity "
+            "it reads back, and a stamp that changes nothing reads back as "
+            "`agrees` on a board where the write never landed -- which is the "
+            "vacuous green this arm exists to kill. Name an UNMET criterion."
+            % (index, doc_id))
+
+    evidence = ("pds-ledger-census --assert-readback probe, %s -- this stamp is a "
+                "PERSISTENCE PROBE and the same run withdraws it; it is not proof "
+                "of any criterion" % datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+    stamp_argv = ["task", "stamp", doc_id, args.readback_worker,
+                  str(args.readback_epoch),
+                  "--criterion", str(index),
+                  "--criterion-text", text,
+                  "--met", "--evidence", evidence]
+    write = run_bp(command, stamp_argv, args.readback_dry_run)
+    block["steps"].append({"step": "stamp", "argv": write["argv"], "rc": write["rc"]})
+    block["stamp_rc"] = write["rc"]
+    block["stamp_stderr"] = write["stderr"]
+
+    if args.readback_dry_run:
+        # NOTHING WAS SENT, so the ONLY honest expectation is that the published
+        # row did not move. This is a real bp and a real published read agreeing
+        # about a board neither of them changed -- and it certifies nothing,
+        # which is why it says so.
+        after = read_published_task(transport, dataset, doc_id)
+        block["after"] = after["progress"]
+        block["after_rev"] = after["rev"]
+        block["expected"] = before["progress"]
+        if write["rc"] != 0:
+            block["findings"].append(
+                "the dry-run write channel exited %d, so no comparison was made: %s"
+                % (write["rc"], (write["stderr"] or write["stdout"])[:300]))
+        if after["progress"] != before["progress"] or after["rev"] != before["rev"]:
+            block["findings"].append(
+                "--readback-dry-run SENT NOTHING and the published row MOVED "
+                "anyway: %r rev %s -> %r rev %s. Either another writer is on this "
+                "row or the dry-run is not dry."
+                % (before["progress"], before["rev"], after["progress"], after["rev"]))
+        return block
+
+    if write["rc"] != 0:
+        block["findings"].append(
+            "the stamp WRITE failed (rc=%d) -- there is nothing to read back. A "
+            "claim is required and it must be LIVE at the epoch you passed: %s"
+            % (write["rc"], (write["stderr"] or write["stdout"])[:400]))
+        return block
+
+    returned = None
+    if isinstance(write["receipt"], dict):
+        criteria, key_path = criteria_of(write["receipt"])
+        if criteria is not None:
+            returned = progress_of(criteria)
+            block["write_returned_key"] = key_path
+    if returned is None:
+        block["findings"].append(
+            "the write channel's receipt carries no acceptance_criteria list, so "
+            "THE VALUE THE WRITE RETURNED IS UNKNOWN and there is nothing to "
+            "compare the read-back against. This is a FINDING, not a pass: an "
+            "unreadable receipt is exactly what a green built on a printed rev "
+            "looks like. stdout: %s" % write["stdout"][:400])
+    block["write_returned"] = returned
+
+    after = read_published_task(transport, dataset, doc_id)
+    block["after"] = after["progress"]
+    block["after_rev"] = after["rev"]
+    block["expected"] = {"met": before["progress"]["met"] + 1,
+                         "total": before["progress"]["total"]}
+
+    # (1) THE WRITE'S OWN RECEIPT vs THE PUBLISHED BOARD. This is the whole arm.
+    if returned is not None and after["progress"] != returned:
+        block["findings"].append(
+            "DISAGREEMENT: the write returned criteria_progress %r and the "
+            "PUBLISHED read-back of `%s` says %r. The write's receipt is not what "
+            "the board serves -- the classic shape is a patch that landed on a "
+            "competing DRAFT and was never published."
+            % (returned, doc_id, after["progress"]))
+    # (2) THE QUANTITY MUST HAVE MOVED. Without this the arm greens on a board
+    # where the stamp did nothing at all and both reads agree about the old
+    # number -- agreement with nothing is not persistence.
+    if after["progress"]["met"] != before["progress"]["met"] + 1:
+        block["findings"].append(
+            "THE NUMBER DID NOT MOVE: baseline met=%d, expected %d after a --met "
+            "stamp on criterion %d, published read-back says met=%d. A stamp that "
+            "printed success and changed nothing is the exact fault this arm exists "
+            "to catch."
+            % (before["progress"]["met"], before["progress"]["met"] + 1, index,
+               after["progress"]["met"]))
+    # (3) THE PUBLISHED REV MUST HAVE ADVANCED. A rev that did not move under a
+    # successful write is the draft-shadow fingerprint even when the counts
+    # happen to agree.
+    if after["rev"] == before["rev"]:
+        block["findings"].append(
+            "the PUBLISHED rev of `%s` is unchanged (%s) after a stamp that "
+            "reported success -- the write did not reach the published row"
+            % (doc_id, before["rev"]))
+    if after["draft"] is not False:
+        block["findings"].append(
+            "the read-back of `%s` came back with _draft=%r, not False" % (doc_id, after["draft"]))
+
+    # THE SECOND HALF: put the row back, and read THAT back too. The withdrawal
+    # moves the same number in the OPPOSITE direction, so the arm has proved the
+    # channel in both directions before it ever prints a verdict.
+    undo_argv = ["task", "stamp", doc_id, args.readback_worker,
+                 str(args.readback_epoch),
+                 "--criterion", str(index),
+                 "--criterion-text", text,
+                 "--withdraw", "--note",
+                 "withdrawing the pds-ledger-census read-back probe: the stamp above "
+                 "was a persistence probe, never proof of this criterion"]
+    undo = run_bp(command, undo_argv, False)
+    block["steps"].append({"step": "withdraw", "argv": undo["argv"], "rc": undo["rc"]})
+    block["withdraw_rc"] = undo["rc"]
+    block["withdraw_stderr"] = undo["stderr"]
+    if undo["rc"] != 0:
+        block["findings"].append(
+            "THE PROBE STAMP WAS NOT WITHDRAWN (rc=%d) and criterion %d of `%s` is "
+            "LEFT MET BY THIS RUN. Undo it by hand:\n    env -u BARKPARK_TOKEN bp "
+            "task stamp %s %s %s --criterion %d --criterion-text '<the stored "
+            "wording>' --withdraw --note 'read-back probe' --yes\n    %s"
+            % (undo["rc"], index, doc_id, doc_id, args.readback_worker,
+               args.readback_epoch, index, (undo["stderr"] or undo["stdout"])[:300]))
+        return block
+    restored = read_published_task(transport, dataset, doc_id)
+    block["restored"] = restored["progress"]
+    block["restored_rev"] = restored["rev"]
+    undo_returned = None
+    if isinstance(undo["receipt"], dict):
+        criteria, _ = criteria_of(undo["receipt"])
+        if criteria is not None:
+            undo_returned = progress_of(criteria)
+    block["withdraw_returned"] = undo_returned
+    if undo_returned is not None and restored["progress"] != undo_returned:
+        block["findings"].append(
+            "DISAGREEMENT (withdraw): the write returned criteria_progress %r and "
+            "the PUBLISHED read-back says %r" % (undo_returned, restored["progress"]))
+    if restored["progress"] != before["progress"]:
+        block["findings"].append(
+            "the row was NOT restored: baseline criteria_progress %r, after the "
+            "withdrawal %r. This run has moved the board it was measuring."
+            % (before["progress"], restored["progress"]))
+    return block
+
+
+def render_readback(block):
+    """CLAUSE 11 in the human render. The LIVE-ONLY label is printed on every
+    run of the arm, green or red, because a label a reader has only ever seen in
+    a failure is a label they cannot recognise in a pass."""
+    out = ["", "read-back after stamp (CLAUSE 11 -- LIVE-ONLY ARM: it WRITES, so it can never",
+           "                        run under --fixture-dir and is NOT in the hermetic selftest)"]
+    if not block:
+        out.append("  NOT RUN -- pass --assert-readback <row-id> (a row whose claim you hold).")
+        out.append("  This arm mints NOTHING: it writes to the row you name and no other,")
+        out.append("  and it creates no task, so it mints no GitHub issue.")
+        return out
+    out.append("  row         %s   criterion %d (ZERO-BASED)" % (block["row"], block["criterion"]))
+    out.append("  mode        %s" % block["mode"])
+    out.append("  write chan  %s   (BARKPARK_TOKEN unset for the child; --yes passed)"
+               % block["write_command"])
+    out.append("  read chan   GET /v1/data/doc -- it echoes NO `perspective`, so the lens")
+    out.append("              evidence is the row's own _draft flag, asserted False")
+    out.append("  criteria at %s   (met counted case-exact on boolean true)"
+               % (block.get("criteria_key") or "<unresolved>"))
+    if not block["certifying"]:
+        out.append("  NOT CERTIFYING -- this run cannot green the arm. %s" % (
+            "A --dry-run sends nothing, so it proves the comparator agrees about a "
+            "board nobody changed."
+            if "dry-run" in block["mode"]
+            else "The write channel is a STUB; only the published read is real, which is "
+                 "how the RED direction is proved without corrupting a row."))
+    out.append("  baseline    %r  rev %s" % (block.get("baseline"), block.get("baseline_rev")))
+    if block.get("dry_run"):
+        out.append("  write said  NOTHING WAS SENT -- `bp --dry-run` prints the request and stops")
+    else:
+        out.append("  write said  %r%s" % (block.get("write_returned"),
+                                           "" if block.get("write_returned") is not None
+                                           else "   <- UNREADABLE RECEIPT"))
+    out.append("  read back   %r  rev %s" % (block.get("after"), block.get("after_rev")))
+    out.append("  expected    %r" % (block.get("expected"),))
+    if "restored" in block:
+        out.append("  restored    %r  rev %s   (the probe stamp was WITHDRAWN, "
+                   "evidence preserved)" % (block["restored"], block.get("restored_rev")))
+    for step in block.get("steps") or []:
+        out.append("      %-9s rc=%d  %s" % (step["step"], step["rc"], step["argv"]))
+    if block["findings"]:
+        out.append("  FINDINGS    %d" % len(block["findings"]))
+        for finding in block["findings"]:
+            for i, line in enumerate(finding.splitlines()):
+                out.append("      %s%s" % ("- " if i == 0 else "  ", line))
+    elif block.get("dry_run"):
+        out.append("  FINDINGS    0   nothing was sent and the published row did not move.")
+        out.append("              THIS PROVES NOTHING ABOUT PERSISTENCE -- it proves the two")
+        out.append("              channels agree about a board neither of them changed.")
+    else:
+        out.append("  FINDINGS    0   the write's receipt and the published board agree,")
+        out.append("              and the number MOVED in both directions")
+    return out
+
+
 def main(argv):
     parser = argparse.ArgumentParser(add_help=True, prog="pds-ledger-census.sh")
     parser.add_argument("--root", default=DEFAULT_ROOT)
@@ -2576,6 +3039,35 @@ def main(argv):
                              "to print because one of its arms is blind tells the "
                              "reader less than one that prints and says so. A "
                              "CERTIFYING run passes it.")
+    parser.add_argument("--assert-readback", metavar="DOC-ID",
+                        help="CLAUSE 11, LIVE-ONLY. Stamp ONE criterion of the row "
+                             "you name (whose claim you must already hold), re-read "
+                             "criteria_progress from the PUBLISHED perspective, "
+                             "compare it against what the write returned, then "
+                             "WITHDRAW the probe stamp. Refused under --fixture-dir: "
+                             "a read-back proved against canned bytes proves the "
+                             "fixture. It creates NO row, so it mints no GitHub issue.")
+    parser.add_argument("--readback-criterion", type=int, metavar="N",
+                        help="ZERO-BASED index of the criterion to move. It must be "
+                             "UNMET: an arm whose stamp changes nothing reads back as "
+                             "`agrees` on a board where the write never landed.")
+    parser.add_argument("--readback-worker", metavar="WORKER",
+                        help="the worker id holding the claim (stamp is holder-only)")
+    parser.add_argument("--readback-epoch", metavar="EPOCH",
+                        help="the CURRENT claim epoch -- every pulse advances it, so a "
+                             "claim-time value is stale (bp task get <id> -o json "
+                             "-> .doc.claim.epoch)")
+    parser.add_argument("--readback-dry-run", action="store_true",
+                        help="run a REAL `bp ... --dry-run` (which sends nothing) and "
+                             "assert the published row is UNCHANGED. Both channels are "
+                             "real, no write is issued, and the run is labelled NOT "
+                             "CERTIFYING because it moved nothing.")
+    parser.add_argument("--readback-bp", metavar="CMD",
+                        help="replace the WRITE channel only (the published read stays "
+                             "real). This is how the RED direction is proved without "
+                             "corrupting a row -- a stub that reports a landed stamp "
+                             "over a board where nothing landed. Any run carrying it "
+                             "prints NOT CERTIFYING; it can never buy a green.")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--fixture-dir")
     parser.add_argument("--server")
@@ -2617,6 +3109,38 @@ def main(argv):
         die(EXIT_USAGE,
             "--reason-repo is the SELFTEST's repo and is refused outside --fixture-dir: "
             "a repo chosen by argv is a repo where every citation can be made to resolve")
+    # CLAUSE 11'S GUARDS. The first one is the whole live-only ruling: this arm
+    # WRITES, and --fixture-dir is canned bytes, so a fixture could be made to
+    # read back whatever its author wanted. A read-back proved that way proves
+    # the fixture. The hermetic selftest checks THIS REFUSAL and never the arm.
+    if args.assert_readback and args.fixture_dir:
+        die(EXIT_USAGE,
+            "--assert-readback is a LIVE-ONLY arm and is refused under "
+            "--fixture-dir: it issues a WRITE and re-reads it, and a read-back "
+            "proved against canned bytes proves the fixture, not the ledger. It "
+            "is deliberately absent from the hermetic selftest for that reason.")
+    if not args.assert_readback:
+        for flag, value in (("--readback-criterion", args.readback_criterion),
+                            ("--readback-worker", args.readback_worker),
+                            ("--readback-epoch", args.readback_epoch),
+                            ("--readback-dry-run", args.readback_dry_run or None),
+                            ("--readback-bp", args.readback_bp)):
+            if value is not None and value is not False:
+                die(EXIT_USAGE, "%s does nothing without --assert-readback" % flag)
+    else:
+        for flag, value in (("--readback-criterion", args.readback_criterion),
+                            ("--readback-worker", args.readback_worker),
+                            ("--readback-epoch", args.readback_epoch)):
+            if value is None:
+                die(EXIT_USAGE,
+                    "%s is required with --assert-readback: a stamp is holder-only "
+                    "and epoch-fenced, and this arm will not guess either" % flag)
+        if args.readback_dry_run and args.readback_bp:
+            die(EXIT_USAGE,
+                "--readback-dry-run and --readback-bp are mutually exclusive: one "
+                "issues no write through a real bp, the other issues one through a "
+                "stub, and a run that asked for both has not said what it wants")
+
     if args.reason_sample is not None and args.reason_sample < 1:
         die(EXIT_USAGE, "--reason-sample %d must be >= 1" % args.reason_sample)
 
@@ -2677,8 +3201,17 @@ def main(argv):
     drafts, drafts_unread = read_drafts_lens(
         transport, args.dataset, args.doctype, args.page_limit, args.pace, args.retries)
 
+    # CLAUSE 11, ON THE FAR SIDE OF THE CLAUSE-5 WINDOW, beside the drafts lens
+    # and for a stronger version of the same reason: this arm WRITES. A write
+    # issued inside the named window would make the census's own snapshot an
+    # average of a board it moved itself -- exactly what clause 5 refuses, with
+    # the census as the culprit. `finished` is already stamped here, so nothing
+    # the arm does can be mistaken for part of the snapshot.
+    readback = readback_arm(transport, args.dataset, args) if args.assert_readback else None
+
     report = census(corpus, closure, depth_of, started, finished, duplicates, anchor,
                     lease_ttl)
+    report["readback"] = readback
     report["blind_spots"] = blind_spots(
         corpus, closure, args.root, drafts, drafts_unread, started, lease_ttl)
     # The credential is a property of the READ, so it is reported on every run --
@@ -2774,6 +3307,18 @@ def main(argv):
              "so ~/.config/barkpark/config.json is used). Counting the published "
              "answer as zero drafts is NOT a remedy: it manufactures a clean board "
              "out of a permission the caller does not have."])
+
+    # CLAUSE 11'S VERDICT. It sits AFTER the report is printed, exactly as
+    # clauses 5 and 9 do -- a run that refuses without printing what it measured
+    # has destroyed the evidence the operator needs -- and BEFORE the round-done
+    # block, because a board whose write channel is lying about persistence
+    # cannot certify anything the round-done predicate would say about it.
+    if report.get("readback") and report["readback"]["findings"]:
+        die(EXIT_READBACK_DISAGREE,
+            "READ-BACK DISAGREEMENT on `%s`: the PUBLISHED board does not serve "
+            "what the write returned. A printed rev is not persistence."
+            % report["readback"]["row"],
+            report["readback"]["findings"])
 
     # THE HUMAN BLOCK FOLLOWS THE HUMAN STREAM. Under --json stdout is the
     # machine channel and every human line goes to stderr, which is the whole
