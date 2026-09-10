@@ -533,6 +533,31 @@
 # convenience. The precedence (argv, then env, then config) is UNCHANGED; what
 # changes is that it is now legible and its rejection is loud.
 #
+# CLAUSE 11 -- THE READ-BACK ARM (LIVE-ONLY). Every clause above reads. This one
+# WRITES, because the one thing a write channel's receipt cannot be used to
+# check is whether the write landed: a stamp that answered 200 and did not
+# persist has now bitten a reviewer and the lead, and `bp doc patch` on a
+# PUBLISHED task creates a competing DRAFT the board read never shows. The arm
+# stamps ONE criterion of a row the CALLER NAMES (whose claim the caller holds),
+# re-reads criteria_progress from the PUBLISHED perspective, compares it against
+# what the write returned, and WITHDRAWS the probe. Three ways to red: the board
+# disagrees with the receipt; the number did not MOVE (agreement about an
+# unchanged board is the vacuous green); the published rev did not advance.
+#
+# IT IS REFUSED UNDER --fixture-dir, and that refusal is the clause. Canned
+# bytes read back whatever the fixture author wrote, so a fixture-proved
+# read-back proves the fixture -- the same ruling --anchor and --reason-repo
+# carry. The hermetic selftest therefore pins the REFUSAL, the argv guards and
+# the LIVE-ONLY label, and never the arm. It is off by default; a run that does
+# not pass --assert-readback prints the arm as NOT RUN, which is a different
+# sentence from it running and finding nothing.
+#
+# IT MINTS NOTHING. It writes to the row on argv and no other, and there is no
+# code path here that creates a document -- so it mints no GitHub issue. (Six
+# throwaway rows minted six real public issues this wave, one of which is still
+# open because its task lost its github backlink. That is why this arm takes a
+# row instead of making one.)
+#
 # EXIT CODES
 #   0  census produced, coherent, and (if asked) the round-done predicate holds
 #   1  --assert-round-done predicate is FALSE — the round is not done
