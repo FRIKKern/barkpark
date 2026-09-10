@@ -241,6 +241,26 @@ const FLOOR_SITE = "5b2c1e00-0000-4000-8000-0000000000c1";
 const MODAL_OPEN = "(function(){var r=document.getElementById('modal-root');return !!(r && !r.hidden && r.querySelector('.modal-card'));})()";
 const openWith = (sel) => `${MODAL_OPEN} && !!document.querySelector('#modal-root ${sel}')`;
 const clickOne = (sel) => `(function(){var e=document.querySelector(${JSON.stringify(sel)});if(!e) throw new Error('no ${sel} to click');e.click();return true;})()`;
+// ── `land` IS A PAINT CHECK, NEVER A BARE EXISTENCE CHECK ────────────────────
+// Every control below already lives in index.html before its view is routed in,
+// so `document.getElementById('members-invite')` is TRUE from the moment the
+// parser reaches that line — while the node sits inside a `hidden` section, box
+// 0x0. nav() polls readiness every 100ms and runs the rendered-host floor
+// (ready-host-paint.mjs) the INSTANT it flips, so a bare existence check hands
+// the floor an invisible host and the whole guard exits 2 (REFUSED), taking
+// every other leg's verdict with it. MEASURED on two different hosts in CI on
+// this branch: `#modal-root` (hidden until init opens the dialog) and
+// `#members-invite` (hidden until #settings/members routes).
+//
+// `shown` states what the leg actually needs, in the floor's OWN terms: at
+// least one match with a non-zero border box. It is deliberately written as a
+// LITERAL, SINGLE-QUOTED `document.querySelectorAll('…')` so the floor still
+// DERIVES the selector from it and paint-checks it — a readiness expression
+// built from variables derives nothing, which would silence the floor rather
+// than satisfy it. `some` over ALL matches, not the first: `#fleet-add-support,
+// #fleet-add-support-cta` is a two-host selector whose first match in document
+// order is not always the painted one.
+const shown = (sel) => `[].slice.call(document.querySelectorAll('${sel}')).some(function(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0;})`;
 
 // THE ROSTER, derived from the bytes: every distinct `openModal(` caller in
 // cloud/priv/static/app.js, found by name rather than counted from the filing
@@ -282,86 +302,86 @@ const MODAL_CENSUS = [
   { body: "account (2FA on)", scen: "account-modal-2fa-on", suffix: "&modal=account",
     land: openWith(".am-modal"), open: openWith(".am-modal") },
   { body: "account (session revoke confirm)", scen: "account-modal-revoke", suffix: "&modal=account",
-    land: "document.querySelector('.session-row .btn')",
+    land: shown(".session-row .btn"),
     drive: clickOne(".session-row .btn"), open: openWith(".confirm-modal, form") },
   { body: "token create", scen: "tokens-populated", suffix: "#settings/tokens",
-    land: "document.getElementById('token-add')", drive: clickOne("#token-add"),
+    land: shown("#token-add"), drive: clickOne("#token-add"),
     open: openWith("#token-name") },
   { body: "token revoke confirm", scen: "tokens-revoke", suffix: "#settings/tokens",
-    land: "document.querySelector('.token-revoke[data-id]')",
+    land: shown(".token-revoke[data-id]"),
     drive: clickOne(".token-revoke[data-id]"), open: MODAL_OPEN },
   { body: "member invite", scen: "members-populated", suffix: "#settings/members",
-    land: "document.getElementById('members-invite')", drive: clickOne("#members-invite"),
+    land: shown("#members-invite"), drive: clickOne("#members-invite"),
     open: openWith("#invite-submit") },
   { body: "member role change", scen: "members-populated", suffix: "#settings/members",
-    land: "document.querySelector('[data-member-role]')", drive: clickOne("[data-member-role]"),
+    land: shown("[data-member-role]"), drive: clickOne("[data-member-role]"),
     open: MODAL_OPEN },
   { body: "member remove confirm", scen: "members-populated", suffix: "#settings/members",
-    land: "document.querySelector('[data-member-remove]')", drive: clickOne("[data-member-remove]"),
+    land: shown("[data-member-remove]"), drive: clickOne("[data-member-remove]"),
     open: MODAL_OPEN },
   { body: "invite revoke confirm", scen: "members-populated", suffix: "#settings/members",
-    land: "document.querySelector('[data-invite-revoke]')", drive: clickOne("[data-invite-revoke]"),
+    land: shown("[data-invite-revoke]"), drive: clickOne("[data-invite-revoke]"),
     open: MODAL_OPEN },
   { body: "webhook create", scen: "webhooks-panel", suffix: `#instance/${FLOOR_INST}/webhooks`,
-    land: "document.querySelector('[data-wh-new]')", drive: clickOne("[data-wh-new]"),
+    land: shown("[data-wh-new]"), drive: clickOne("[data-wh-new]"),
     open: MODAL_OPEN },
   { body: "webhook edit", scen: "webhooks-panel", suffix: `#instance/${FLOOR_INST}/webhooks`,
-    land: "document.querySelector('[data-wh-edit]')", drive: clickOne("[data-wh-edit]"),
+    land: shown("[data-wh-edit]"), drive: clickOne("[data-wh-edit]"),
     open: MODAL_OPEN },
   { body: "webhook delete confirm", scen: "webhooks-panel", suffix: `#instance/${FLOOR_INST}/webhooks`,
-    land: "document.querySelector('[data-wh-delete]')", drive: clickOne("[data-wh-delete]"),
+    land: shown("[data-wh-delete]"), drive: clickOne("[data-wh-delete]"),
     open: MODAL_OPEN },
   { body: "site env editor", scen: "env-editor", suffix: `#site/${FLOOR_SITE}`,
-    land: "document.getElementById('site-env-edit')", drive: clickOne("#site-env-edit"),
+    land: shown("#site-env-edit"), drive: clickOne("#site-env-edit"),
     open: MODAL_OPEN },
   { body: "site deploy confirm", scen: "env-editor", suffix: `#site/${FLOOR_SITE}`,
-    land: "document.getElementById('site-deploy')", drive: clickOne("#site-deploy"),
+    land: shown("#site-deploy"), drive: clickOne("#site-deploy"),
     open: MODAL_OPEN },
   // `rollback`, not `env-editor`: #site-github renders only when the deployment
   // reports a configured GitHub App AND the actor holds admin authority, and
   // `rollback` is the fixture that carries `github: {configured: true}`. Driven
   // on env-editor the readiness poll times out — the door is honestly withheld.
   { body: "site github", scen: "rollback", suffix: `#site/${FLOOR_SITE}`,
-    land: "document.getElementById('site-github')", drive: clickOne("#site-github"),
+    land: shown("#site-github"), drive: clickOne("#site-github"),
     open: MODAL_OPEN },
   { body: "deployment promote confirm", scen: "rollback", suffix: `#site/${FLOOR_SITE}`,
-    land: "document.querySelector('.dep-promote')", drive: clickOne(".dep-promote"),
+    land: shown(".dep-promote"), drive: clickOne(".dep-promote"),
     open: MODAL_OPEN },
   { body: "site create", scen: "sites-on-instance", suffix: `#instance/${FLOOR_INST}`,
-    land: "document.getElementById('site-new-btn')", drive: clickOne("#site-new-btn"),
+    land: shown("#site-new-btn"), drive: clickOne("#site-new-btn"),
     open: MODAL_OPEN },
   { body: "instance update confirm", scen: "instance-behind", suffix: `#instance/${FLOOR_INST_BEHIND}`,
-    land: "document.getElementById('inst-update')", drive: clickOne("#inst-update"),
+    land: shown("#inst-update"), drive: clickOne("#inst-update"),
     open: MODAL_OPEN },
   { body: "instance attach domain", scen: "panel-overview", suffix: `#instance/${FLOOR_INST}`,
-    land: "document.getElementById('inst-domain')", drive: clickOne("#inst-domain"),
+    land: shown("#inst-domain"), drive: clickOne("#inst-domain"),
     open: MODAL_OPEN },
   { body: "autoupdate pin", scen: "instance-behind", suffix: `#instance/${FLOOR_INST_BEHIND}`,
-    land: "document.querySelector('[data-au=\"pin\"]')", drive: clickOne('[data-au="pin"]'),
+    land: shown('[data-au="pin"]'), drive: clickOne('[data-au="pin"]'),
     open: MODAL_OPEN },
   { body: "fleet add support", scen: "fleet-support-empty", suffix: `#instance/${FLOOR_INST}`,
-    land: "document.querySelector('#fleet-add-support, #fleet-add-support-cta')",
+    land: shown("#fleet-add-support, #fleet-add-support-cta"),
     drive: clickOne("#fleet-add-support, #fleet-add-support-cta"), open: MODAL_OPEN },
   { body: "offload a task", scen: "fleet-support-online", suffix: `#instance/${FLOOR_INST}`,
-    land: "document.querySelector('[data-offload-support]')",
+    land: shown("[data-offload-support]"),
     drive: clickOne("[data-offload-support]"), open: MODAL_OPEN },
   { body: "launch wizard", scen: "mixed-fleet", suffix: "#overview",
-    land: "document.getElementById('scope-switch')",
+    land: shown("#scope-switch"),
     drive: "(function(){document.getElementById('scope-switch').click();var l=document.getElementById('scope-launch');if(!l) throw new Error('no #scope-launch in the scope menu');l.click();return true;})()",
     open: openWith("#launch-modal-slot") },
   { body: "provider credential", scen: "providers-empty", suffix: "#settings/providers",
-    land: "document.getElementById('scope-switch')",
+    land: shown("#scope-switch"),
     drive: "(function(){document.getElementById('scope-switch').click();var l=document.getElementById('scope-launch');if(!l) throw new Error('no #scope-launch in the scope menu');l.click();window.setTimeout(function(){var c=document.querySelector('#modal-root .launch-connect-provider');if(c) c.click();},1200);return true;})()",
     open: "!!document.querySelector('#modal-root #cred-token')" },
   { body: "command palette", scen: "mixed-fleet", suffix: "#overview",
-    land: "document.getElementById('scope-switch')",
+    land: shown("#scope-switch"),
     drive: "(function(){document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',metaKey:true,bubbles:true}));return true;})()",
     open: openWith(".cmdk") },
   { body: "archive resurrect", scen: "fleet-archives-stored", suffix: "#fleet",
-    land: "document.querySelector('.archive-resurrect-btn')",
+    land: shown(".archive-resurrect-btn"),
     drive: clickOne(".archive-resurrect-btn"), open: MODAL_OPEN },
   { body: "plan cancel", scen: "billing-portal-return", suffix: "#billing",
-    land: "document.getElementById('plan-cancel')", drive: clickOne("#plan-cancel"),
+    land: shown("#plan-cancel"), drive: clickOne("#plan-cancel"),
     open: MODAL_OPEN },
   // ── NOT REACHED, and why. Each of these opens ONLY from a SERVER answer the
   //    preview corpus does not mint, so no gesture chain in this harness can
