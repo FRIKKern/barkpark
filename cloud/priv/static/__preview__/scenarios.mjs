@@ -527,6 +527,20 @@ function site(over) {
       domains: [],
       scale_mode: "always_on",
       port: 3000,
+      // cch-w43-bl (the envelope census, generalized past /v1/me): `theme` and
+      // `url` are stated by `site_json/2` on EVERY site row and READ by app.js
+      // (`themeSel.value = site.theme || ""` and `siteThemeOptionsHtml(site.theme
+      // || "")` preselect the palette; `if (s && s.url) return s.url` is the
+      // Visit door). This producer stated NEITHER, so no preview scenario could
+      // paint either band and every gate downstream of them certified a site the
+      // console had never been shown.
+      //
+      // Null is the honest default for both, and for different reasons: an
+      // unthemed site takes the template default (the select's own "" option),
+      // and the LIST surface calls `site_json/1` → `site_json(s, nil)`, which
+      // makes `url` nil for every row it serves. A row that IS themed overrides.
+      theme: null,
+      url: null,
       // ssw8 (charter D82): the ELEVEN binding fields site_json/2 serializes.
       // The factory emitted 21 fields and NOT ONE of them was a binding field,
       // so no fixture could express binding truth at all. Shape derived from
@@ -600,6 +614,14 @@ const boundSite = site({
   bootstrap_workspace: "acme", bootstrap_project: "site", bootstrap_dataset: "production",
   workspace: "acme", project: "site", dataset: "production",
   content_bound: true,
+  // cch-w43-bl: the corpus's ONE themed site. `site_json/2` sends `theme` on
+  // every row and app.js preselects the site-theme <select> from it, but until
+  // this line NO fixture carried a non-null theme, so the selected-option band
+  // had never been painted by any scenario — the select rendered its "Template
+  // default" arm in 100% of preview renders and the gate certified the other
+  // arm by never rendering it. A site that already declares a template is where
+  // a palette belongs.
+  theme: "ember",
 });
 // `content_bound` is DELETED, not false: a control plane that predates the field
 // says nothing, and "nothing" must not be read as "no".
@@ -632,12 +654,22 @@ const bindingSites = [boundSite, unknownBindingSite, mismatchedBindingSite];
 // gets its own states-complete rows: live / rebuilding / deploy-failed /
 // never-deployed — one per pill role. Real fields only; the invented
 // Marketing/Docs "kind" taxonomy has no field to render.
-const lastDeploy = (status, trigger, ago) => ({
+// cch-w43-bl (the envelope census, generalized): `put_last_deployment/3` folds
+// `last_deployment_json/1` onto every /v1/sites row, and that helper states SIX
+// keys — status, trigger, failure_class, failure_reason, inserted_at,
+// updated_at. This producer stated four. app.js binds the embed to the very
+// identifier the deploy rows use (`var d = s && s.last_deployment`), so the two
+// unstated keys are read off it exactly as they are read off a deployment.
+// Null is the honest default: a last deploy that did not fail has no class and
+// no reason.
+const lastDeploy = (status, trigger, ago, over) => Object.assign({
   status,
   trigger,
+  failure_class: null,
+  failure_reason: null,
   updated_at: tMinus(ago),
   inserted_at: tMinus(ago + 120),
-});
+}, over || {});
 // cch-w16-s4 (charter D199) — THE FIXTURE FIDELITY REPAIR. Until this slice
 // `site()` defaulted `current_deployment_id: null` and NOT ONE list row
 // overrode it, so the corpus asserted a state the SERVER CANNOT PRODUCE: pill
@@ -1065,6 +1097,29 @@ function deployment(over) {
       // fail. The key is on the base shape so a fixture that forgets it is a
       // missing key rather than a different wire.
       failure_class: null,
+      // cch-w43-bl (the envelope census, generalized): the THREE remaining keys
+      // `deployment_json/1` states on every row that app.js reads and this
+      // producer did not state.
+      //
+      //   * trigger — `deployTriggerLabel(d.trigger)` is a meta chip on BOTH
+      //     deploy rows (production and preview) and `d.trigger ===
+      //     "content-auto"` gates the auto-deploy copy. Only a handful of
+      //     hand-overridden rows carried it, so the DEFAULT row — the one behind
+      //     most of the corpus — rendered a deploy list with no provenance chip
+      //     at all, which is a shape the server cannot produce: every real row
+      //     has a trigger. "manual" is the honest default (someone pressed
+      //     Deploy); content-auto rows override.
+      //   * failure_code / failure_message — the box's refusal, UNFUSED
+      //     (`{ code: d.failure_code, message: d.failure_message }`). Null on
+      //     every row that is not a typed box refusal, which is the default.
+      trigger: "manual",
+      failure_code: null,
+      failure_message: null,
+      // `stage` rides the same base shape (`DeployLedger` stamps it) and is null
+      // on a row no stage was recorded for. Carried so a fixture that omits it
+      // is a MISSING key rather than a different wire — dr-w1-s2's rule for
+      // `failure_class` above, applied to the sibling it left behind.
+      stage: null,
       became_live_at: null,
       environment: "production",
       branch: null,

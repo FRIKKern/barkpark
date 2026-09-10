@@ -123,6 +123,7 @@ export const NORMALISED = [
   { file: "cloud/priv/static/__refusal_copy_census.mjs", name: "REFUSAL COPY CENSUS" },
   { file: "cloud/priv/static/__reason_arm_census.mjs", name: "REASON ARM CENSUS" },
   { file: "cloud/priv/static/__me_envelope_census.mjs", name: "ME ENVELOPE CENSUS" },
+  { file: "cloud/priv/static/__envelope_census.mjs", name: "ENVELOPE CENSUS" },
   { file: "cloud/priv/static/__init_wiring_census.mjs", name: "INIT WIRING CENSUS" },
   { file: "cloud/priv/static/__agent_event_vocabulary_census.mjs", name: "AGENT EVENT VOCABULARY CENSUS" },
   { file: "cloud/priv/static/__unknown_census.mjs", name: "UNKNOWN CENSUS" },
