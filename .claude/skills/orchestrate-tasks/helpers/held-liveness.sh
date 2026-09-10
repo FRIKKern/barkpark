@@ -99,7 +99,7 @@ iso_epoch() {
 # expected worker (`w="$EXPECT"`), i.e. trust the local list instead of the ledger. Arm 2 goes
 # red and no other arm does — which is precisely the defect this helper exists to catch.
 selftest() {
-  local d rc out fails=0 now
+  local d rc out fails=0
   _ind() { while IFS= read -r _l; do printf '      | %s\n' "$_l"; done; }
   d=$(mktemp -d) || return 1
   mkdir -p "$d/bin" "$d/rows" "$d/lane"
@@ -127,7 +127,6 @@ EOF
   }
   _ago() { date -u -v-"$1"M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$1 minutes ago" +%Y-%m-%dT%H:%M:%SZ; }
   _in()  { date -u -v+"$1"M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$1 minutes"      +%Y-%m-%dT%H:%M:%SZ; }
-  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   _run() { # _run <label> <expected-exit> -- <args...>  ; stdout in $out, rc in $rc
     local label="$1" wantrc="$2"; shift 3
@@ -230,7 +229,7 @@ EOF
   printf '%s\n' task-aaa task-bbb > "$d/lane/held.txt"
 
   echo "== arm 8: a done row is CLOSED + a TRIM advisory, not a violation (exit stays 0)"
-  _row task-bbb lead-x "$(_ago 200)" done
+  _row task-bbb lead-x "$(_ago 200)" "done"
   if _run "arm8 runs" 0 -- "$d/lane" --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log"; then
     _last "arm8 verdict is OK"      'liveness: OK'
     _want "arm8 names the closed row" 1 '^task-bbb .*CLOSED'
