@@ -14,6 +14,7 @@ defmodule Barkpark.Tasks.Claim do
       current_epoch: 1,
       insert_mutation_event!: 5,
       caller_stamp: 1,
+      actor_stamp: 2,
       task_broadcast: 4,
       emit_broadcasts: 1
     ]
@@ -482,7 +483,14 @@ defmodule Barkpark.Tasks.Claim do
             @event_task_claimed,
             observed_rev,
             "api",
-            caller_stamp(caller_token_id)
+            # tlv-bl-events-actor-attribution: WHO took the lease and on WHICH
+            # epoch, stamped on the event itself. `caller_stamp/1` names the
+            # AUTHENTICATED bearer; this names the worker identity the CAS
+            # fences on — the one a `close` must later cite, and the one an
+            # audit reconstructing "who held this row when" needs. Surfaces on
+            # `bp task events --payload` as `payload.actor` with no reader edit
+            # (Tasks.Events projects `document` minus envelope minus audit).
+            Map.merge(caller_stamp(caller_token_id), actor_stamp(worker_id, next_epoch))
           )
 
         {:ok, updated, [task_broadcast(updated, @event_task_claimed, ev, observed_rev)]}
@@ -545,7 +553,14 @@ defmodule Barkpark.Tasks.Claim do
             @event_task_claimed,
             observed_rev,
             "api",
-            caller_stamp(caller_token_id)
+            # tlv-bl-events-actor-attribution: WHO took the lease and on WHICH
+            # epoch, stamped on the event itself. `caller_stamp/1` names the
+            # AUTHENTICATED bearer; this names the worker identity the CAS
+            # fences on — the one a `close` must later cite, and the one an
+            # audit reconstructing "who held this row when" needs. Surfaces on
+            # `bp task events --payload` as `payload.actor` with no reader edit
+            # (Tasks.Events projects `document` minus envelope minus audit).
+            Map.merge(caller_stamp(caller_token_id), actor_stamp(worker_id, next_epoch))
           )
 
         {:ok, updated, [task_broadcast(updated, @event_task_claimed, ev, observed_rev)]}

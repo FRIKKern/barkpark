@@ -640,7 +640,9 @@ defmodule Barkpark.Plugins.Tasks do
     * `ready` — `GET /v1/tasks/ready` (paginated). READ, table.
     * `events` — `GET /v1/tasks/events?since=<id>` (keyset replay over
       `mutation_events`, id-ASC; the response carries the next `cursor` +
-      `has_more`). READ, json.
+      `has_more`). Takes an OPTIONAL positional `<doc_id>` that rides as
+      `?doc_id=` and narrows the replay to ONE task's history — the per-row
+      audit view. READ, json.
     * `get` — `GET /v1/tasks/:doc_id`. READ, table.
     * `claim` — `POST /v1/tasks/:doc_id/claim`. WRITES, minimal receipt.
     * `close` — `POST /v1/tasks/:doc_id/close`. WRITES, minimal receipt.
@@ -868,7 +870,21 @@ defmodule Barkpark.Plugins.Tasks do
           "Replay task events since a cursor — a keyset stream over mutation_events, id-ASC. Pass --since <id> (the last event id you saw); the response carries the next `cursor` + `has_more`. The one poll feed every surface reads; omit --since to replay from the start.",
         http: %{method: "GET", path_template: "/v1/tasks/events"},
         auth_tier: "read",
-        args: [],
+        # OPTIONAL positional (tlv-bl-events-actor-attribution). The template
+        # has no `:doc_id` placeholder, so the CLI's arg binder routes it to the
+        # query string on this read — `bp task events <id>` IS
+        # `GET /v1/tasks/events?doc_id=<id>`. Before it, the command declared
+        # ZERO args and any positional was refused ("too many arguments for
+        # task events"), so a per-row audit had to replay the whole backlog.
+        args: [
+          %{
+            name: "doc_id",
+            required: false,
+            type: "string",
+            summary:
+              "Narrow the replay to ONE task's events, oldest-first. Optional — omit for the global feed. This is the per-row audit view: `bp task events <id> --payload` answers 'who claimed and closed this row, on which epoch, when' from `payload.actor` without reading the (mutable) live claim map off the document. Composes with --since, so `--since <cursor> <id>` is a per-row tail."
+          }
+        ],
         flags: [
           %{
             name: "since",
@@ -892,7 +908,7 @@ defmodule Barkpark.Plugins.Tasks do
             name: "payload",
             type: "bool",
             summary:
-              "Carry each event's typed payload under `payload`. THE RECOVERY CHANNEL for a clobbered note: a `task.staged` event's `payload.staged.superseded_note` is the disposition_reason that stage displaced, and `payload.staged.note` the one it wrote. Off by default — two free-text notes ride in one stamp and a page is 500 events, so every poller that does not ask keeps the lean body it always got."
+              "Carry each event's typed payload under `payload`. THE ATTRIBUTION CHANNEL: a `task.claimed` / `task.closed` event's `payload.actor` is `{worker, epoch}` — the identity the CAS fenced on — so close provenance is reconstructable from the feed alone (`task.closed` also carries `payload.closed_by`). THE RECOVERY CHANNEL for a clobbered note: a `task.staged` event's `payload.staged.superseded_note` is the disposition_reason that stage displaced, and `payload.staged.note` the one it wrote. Off by default — two free-text notes ride in one stamp and a page is 500 events, so every poller that does not ask keeps the lean body it always got."
           }
         ],
         writes: false,
