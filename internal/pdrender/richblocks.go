@@ -618,3 +618,31 @@ func bylineText(m map[string]any) string {
 	}
 	return attrStr(m, "text")
 }
+
+// ── pre-gate badge ─────────────────────────────────────────────────────────
+// Mirrors compose_block("pre-gate-badge") + walk.ex's `pre-gate` role: the
+// quiet mark a Paper wears when it is named in the 2026-09-02 grandfather
+// register AND its stored blocks are still refused by the block gate
+// (Barkpark.Content.Papers.PreGateRegister.annotate/3 synthesises it below the
+// masthead byline; it is never stored, so a fixture only carries it if it came
+// off the reader stream).
+//
+// The reader draws it in caps-mono at 0.72rem in the callout tone foreground,
+// under the byline rule. The terminal stand-in for that is the eyebrow
+// treatment — upper-cased, letter-spaced — in the DIM weight rather than the
+// accent, because the whole point of the mark is that it must not compete with
+// the title block. `title` (the register's reader_behaviour) has no terminal
+// home and is deliberately dropped: a hover explanation is a GUI affordance.
+type preGateBadgeRenderer struct{}
+
+func (preGateBadgeRenderer) Render(b Block, ctx RenderCtx) []string {
+	text := strings.ToUpper(sanitizeText(attrStr(b.Attrs, "label")))
+	if text == "" {
+		return nil
+	}
+	spaced := letterSpace(text)
+	if lipgloss.Width(spaced) > ctx.Width {
+		spaced = text
+	}
+	return wrapLines(ctx.Theme.Byline.Render(spaced), ctx.Width)
+}

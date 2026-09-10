@@ -51,6 +51,7 @@ defmodule BarkparkWeb.BulldocsLive do
 
   alias Barkpark.Content
   alias Barkpark.Content.Labels
+  alias Barkpark.Content.Papers.PreGateRegister
   alias Barkpark.Plugins.Bulldocs.Events
   alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render
@@ -1027,7 +1028,14 @@ defmodule BarkparkWeb.BulldocsLive do
         |> assign(:paper_link_details, Map.get(resolvers, :paper_links, %{}))
         |> stream(
           :blocks,
-          to_stream_items(resolved, paper_article?(paper), resolvers)
+          to_stream_items(
+            # Grandfather badge (task-597ea451072da061): register membership AND
+            # the STORED blocks still refused by the gate → one synthesised block
+            # under the byline. Resolved blocks render; stored blocks decide.
+            PreGateRegister.annotate(resolved, paper.doc_id, blocks),
+            paper_article?(paper),
+            resolvers
+          )
         )
 
       _ ->
@@ -1382,7 +1390,11 @@ defmodule BarkparkWeb.BulldocsLive do
             |> ensure_document_changes_subscription(paper, refs)
             |> stream(
               :blocks,
-              to_stream_items(resolved, article?, resolvers),
+              to_stream_items(
+                PreGateRegister.annotate(resolved, paper.doc_id, blocks),
+                article?,
+                resolvers
+              ),
               reset: true
             )
             |> assign(:rev, paper_rev(paper))
