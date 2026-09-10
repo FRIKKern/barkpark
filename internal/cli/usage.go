@@ -467,7 +467,21 @@ func suggestUnknownNoun(out *writer, tree *manifest.Tree, tier, typed string, pr
 			out.errf("run `barkpark login` — or pass `--token <tok>` — with a credential that grants it, then retry.")
 		}, tierHiddenHint(prov), tierHiddenMsg(prov), typed, label, cred)
 	}
-	return usageErrHintf(out, func() { usageSuggestNouns(out, tree, typed) }, nounHint(tree, typed), "unknown command %q", typed)
+	return usageErrHintf(out, func() {
+		usageSuggestNouns(out, tree, typed)
+		// A REFUSAL FROM A CLIENT THAT KNOWS IT IS BEHIND MUST SAY SO
+		// (pds-bl-bp-search-false-negative). `unknown command "search"` is
+		// literally how six independent agents in one wave concluded the verb
+		// did not exist and fell back to grep — dispatch is manifest-driven, so
+		// the server had declared it the whole time and only their bp's copy was
+		// old. staleClientNote reads the already-persisted update-check cache
+		// (no network, no latency, "" whenever staleness is not PROVEN), and it
+		// lives inside this closure, which usageErrHintf runs only on human
+		// output — so -o json/yaml stdout stays byte-identical.
+		if note := staleClientNote(); note != "" {
+			out.errf("%s", note)
+		}
+	}, nounHint(tree, typed), "unknown command %q", typed)
 }
 
 // tierHiddenMsg is the machine-readable refusal for a tier-hidden noun. The
