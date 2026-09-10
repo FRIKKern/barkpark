@@ -60,9 +60,12 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    exit 0 for PRs that were at 3/4. (`scripts/bp-merge.sh` takes NO argument — it derives the PR from the current branch, so
    it only works from inside that PR's worktree). Red required checks: fix or
    hand back; never bypass, never auto-merge.
-8. **Stamp + close** (you): `bp task stamp <id> lead-<lane> <epoch> --criterion N
-   --criterion-text "<exact text>" --met --evidence "PR #… merged <sha>"` per met criterion
-   (index is ZERO-based; a merge-gate criterion needs `--merge-gated`); then
+8. **Stamp + close** (you): take the wording FROM THE ROW into a file — `bp task get <id> -o json |
+   jq -r '.doc.content.acceptance_criteria[N].criterion' > crit.txt` — then `bp task stamp <id>
+   lead-<lane> <epoch> --criterion N --criterion-text-file crit.txt --met --evidence "PR #… merged
+   <sha>"` per met criterion (index is ZERO-based; a merge-gate criterion needs `--merge-gated`).
+   NEVER pass the wording inline: a backticked code span in a double-quoted shell argument is
+   COMMAND SUBSTITUTION, so your shell executes the criterion before bp ever sees it. Then
    `bp task close <id> lead-<lane> <epoch> done "<reason>" --yes` — the lifecycle word
    `done` is a REQUIRED fifth positional; omit it and your reason lands in the lifecycle
    slot and errors `invalid_lifecycle:<your whole sentence>`. A 409 `doc_changed_since_claim`
