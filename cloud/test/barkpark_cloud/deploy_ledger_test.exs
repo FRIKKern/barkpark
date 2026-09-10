@@ -1235,7 +1235,30 @@ defmodule BarkparkCloud.DeployLedgerTest do
 
       # The gauge must be able to lose: if the enum were empty the loop above
       # would assert nothing at all.
-      assert length(DeployLedger.classes()) >= 18
+      #
+      # THE FLOOR IS THE CURRENT COUNT, NOT A STALE ONE. It read `>= 18` while
+      # the enum held 23, which meant five classes could be DELETED without this
+      # gauge noticing — a floor that trails the enum stops being a floor. The
+      # five names dr's classifier slice added (ARCHIVE_TOO_LARGE_400,
+      # ARCHIVE_UNSUPPORTED_ENTRY_400, BOX_UNAUTHORIZED_401,
+      # BOX_ROUTE_UNKNOWN_404, CONTAINER_START_REFUSED_125) take it to 28, and
+      # each one is asserted BY NAME below so a rename cannot be absorbed by the
+      # count alone.
+      assert length(DeployLedger.classes()) == 28
+
+      for named <- [
+            "ARCHIVE_TOO_LARGE_400",
+            "ARCHIVE_UNSUPPORTED_ENTRY_400",
+            "BOX_UNAUTHORIZED_401",
+            "BOX_ROUTE_UNKNOWN_404",
+            "CONTAINER_START_REFUSED_125"
+          ] do
+        assert named in DeployLedger.classes(),
+               "#{named} left the class enum — the arm that names it now answers a class nobody maps"
+
+        assert Map.has_key?(DeployLedger.agency_map(), named),
+               "#{named} has no agency key — D148 says it would answer :ambiguous and quietly shrink a box numerator"
+      end
     end
 
     test "an unknown class is :ambiguous, NEVER :site" do
