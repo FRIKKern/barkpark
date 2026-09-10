@@ -76,6 +76,18 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       (measured: a legitimate 10 001-file accented `dist/` refused
       `E_TOO_MANY_ENTRIES`).
 
+    * **Packaging junk is REFUSED, not skipped (`E_JUNK_ENTRY`).** `.DS_Store`,
+      AppleDouble `._*` sidecars and a real `PaxHeader` directory entry are not
+      site content, and a staged file is a SERVED file: `._index.html` hands out
+      a resource fork and extended attributes, `.DS_Store` hands out the packing
+      machine's directory listing including names never shipped. A skip was
+      rejected for the same reason the GNU `L`/`K` skip was: it stages a tree the
+      caller did not author and cannot see, and it forces `entries` to either
+      count what was never written or under-report what arrived. The refusal
+      message names the repack, and the dialect matrix already pins that exact
+      producer (`COPYFILE_DISABLE=1` bsdtar) as an ACCEPT on all four name
+      shapes — so the advice is measured, not guessed.
+
     * **Modes are sanitized, and setuid/setgid/sticky is a REFUSAL.** We write
       0644/0755 ourselves and ignore Uid/Gid; an archive that asks for a setuid
       bit is not asking for something a static bundle needs.
@@ -598,7 +610,8 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     with {:ok, name} <- effective_name(header, state),
          :ok <- mode_bits(header),
          {:ok, size} <- effective_size(header, type, state),
-         {:ok, path} <- safe_path(name, type, state) do
+         {:ok, path} <- safe_path(name, type, state),
+         :ok <- junk_free(name) do
       # The pending override has now been applied AND re-validated: drop it so it
       # can never leak onto a second entry.
       state = %{state | pax: nil}
@@ -871,6 +884,80 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   defp pax_dangling_message do
     "the archive ends with a pax extension header that describes no entry — an extension " <>
       "header must be followed by the file or directory it describes"
+  end
+
+  # ── PACKAGING JUNK: refused, never skipped (charter D121) ─────────────────
+  #
+  # `.DS_Store`, AppleDouble sidecars (`._*`) and a REAL `PaxHeader` directory
+  # entry are not site content. Today they are ACCEPTED: measured on origin/main
+  # 22c60a6a8, an all-ustar junk archive stages `.DS_Store`, `._.`,
+  # `._index.html`, `PaxHeader/` and `PaxHeader/index.html`, and every one is
+  # then FETCHABLE — a `._index.html` sidecar carries the file's resource fork
+  # and extended attributes, `.DS_Store` leaks the directory listing of the
+  # machine that packed it, including the names of files never shipped.
+  #
+  # THE RULING (team-lead, 2026-09-02, recorded on `ssw11-bl-junk-policy-and-caddy-hide`):
+  # REFUSE with a typed code that NAMES THE REPACK. Not skip, for the reason
+  # this module already gives for the GNU `L`/`K` headers and the pax shadow
+  # names: a silent skip stages a tree the caller did not author and cannot see,
+  # and `entries` would then have to either count something never written or
+  # under-report what the archive held. A refusal cannot lie about a skipped
+  # entry, because there is no skipped entry — `entries` is only ever reported
+  # on the `{:ok, _}` path, and this arm never reaches it.
+  #
+  # The remedy is a MEASURED one, not a guess: the dialect matrix already pins
+  # `:bsdtar_copyfile_disable` as an ACCEPT on all four name shapes
+  # (`prebuilt_dialect_matrix_test.exs`), so the exact incantation this message
+  # prints is a producer the box is proven to take.
+  #
+  # This is EXTRACTOR-side only. `isIgnored` in the Go CLI stays exact-match per
+  # D93 — a prefix rule there would silently DELETE a legitimately-named `._foo`
+  # from a project deploy, and hand-rolled archives arriving on the artifact
+  # route never execute a line of Go. Here the rule is a REFUSAL, so a caller who
+  # genuinely means to ship a file called `._foo` is told so and can rename it.
+  defp junk_free(name) do
+    case Enum.find(String.split(name, "/", trim: true), &junk_segment?/1) do
+      nil -> :ok
+      segment -> {:error, "E_JUNK_ENTRY", junk_message(name, segment)}
+    end
+  end
+
+  defp junk_segment?(".DS_Store"), do: true
+  defp junk_segment?("PaxHeader"), do: true
+
+  defp junk_segment?(segment) do
+    String.starts_with?(segment, "._") or Regex.match?(~r/\APaxHeaders(\.\d+)?\z/, segment)
+  end
+
+  @repack "COPYFILE_DISABLE=1 tar --no-xattrs --exclude='._*' --exclude=.DS_Store " <>
+            "-czf site.tar.gz -C ./dist ."
+
+  defp junk_message(name, segment) do
+    "entry #{inspect(name)} is #{junk_kind(segment)} — refused, because a static bundle " <>
+      "SERVES what it stages: a `._*` sidecar hands out the file's resource fork and " <>
+      "extended attributes, and a `.DS_Store` hands out the packing machine's directory " <>
+      "listing. Repack without it — verified on bsdtar 3.5.3 (libarchive 3.7.4) and " <>
+      "GNU tar 1.35: `#{@repack}`" <> junk_extra(segment)
+  end
+
+  defp junk_kind(".DS_Store"), do: "a macOS Finder `.DS_Store` metadata file"
+
+  defp junk_kind(segment) do
+    if String.starts_with?(segment, "._"),
+      do: "a macOS AppleDouble sidecar (`._*`)",
+      else: "a `#{segment}` pseudo-directory, which is a tar EXTENSION-HEADER name, not content"
+  end
+
+  defp junk_extra(".DS_Store"), do: "."
+
+  defp junk_extra(segment) do
+    if String.starts_with?(segment, "._"),
+      do:
+        ". If you genuinely ship a file whose name starts with `._`, rename it: the box " <>
+          "cannot tell it apart from a sidecar, and neither can the browser.",
+      else:
+        ". A directory actually NAMED `#{segment}` collides with the pax pseudo-paths every " <>
+          "tar writer emits; rename it in the source tree."
   end
 
   defp gnu_longname_message(flag) do
