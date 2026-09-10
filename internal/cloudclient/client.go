@@ -2712,6 +2712,136 @@ func (c *Client) ListSpawnSiteDeployments(ctx context.Context, siteID string, li
 	return page, nil
 }
 
+// SiteDeploymentPageMax is the server's hard per-window cap on
+// GET /v1/sites/:id/deployments: `limit` above this is clamped by the control
+// plane, not honoured. It is a WIRE FACT, declared here so a walk's round-trip
+// budget is derived from the real page size rather than from a number the caller
+// hoped for — a budget computed against 500 would promise a quarter of the trips
+// it actually spends.
+const SiteDeploymentPageMax = 200
+
+// SiteDeploymentWalkBudget is a bounded keyset walk's PLAN, stated before the
+// first request rather than discovered after the last.
+//
+// WHY A PLAN AND NOT TWO INTS. A site accrues one deployment row per push, and
+// the route hands out at most SiteDeploymentPageMax rows per round trip — so
+// "read this site's cost" is a request for Rows/PageSize round trips, and a
+// caller that does not state that number up front has not decided how much of
+// someone's rate limit it is going to spend. `bp sites` already pays extra round
+// trips per site; a cost walk added on top of that is an N+1 unless the N is
+// bounded HERE and printed by whoever renders the result.
+//
+//	Rows     — how many rows the caller wants, at most.
+//	PageSize — rows per request; clamped into [1, SiteDeploymentPageMax].
+//	MaxPages — the round-trip ceiling, derived from the two above.
+type SiteDeploymentWalkBudget struct {
+	Rows     int
+	PageSize int
+	MaxPages int
+}
+
+// NewSiteDeploymentWalkBudget derives the round-trip budget from a row target.
+// pageSize <= 0 means "ask for the biggest window the server will give", which
+// is the fewest round trips for a given row count.
+func NewSiteDeploymentWalkBudget(rows, pageSize int) SiteDeploymentWalkBudget {
+	if rows < 1 {
+		rows = 1
+	}
+	if pageSize <= 0 || pageSize > SiteDeploymentPageMax {
+		pageSize = SiteDeploymentPageMax
+	}
+	if pageSize > rows {
+		pageSize = rows
+	}
+	pages := rows / pageSize
+	if rows%pageSize != 0 {
+		pages++
+	}
+	return SiteDeploymentWalkBudget{Rows: rows, PageSize: pageSize, MaxPages: pages}
+}
+
+// SiteDeploymentWalk is what a bounded walk actually read, and — the half that
+// makes it quotable — WHERE IT STOPPED.
+//
+// ListSpawnSiteDeployments returns one page and a cursor; a caller that follows
+// the cursor and then reports `len(rows)` has produced a number that is either a
+// site total or a floor, and NOTHING in the return value says which. That is the
+// defect this type exists to close: `Truncated` is true exactly when the server
+// still had a cursor to give when the walk stopped, so a renderer can never quote
+// a bounded read as a site's whole history.
+//
+// StoppedBy names the bound in the walk's own vocabulary — "rows" (the row target
+// was reached), "pages" (the round-trip budget was spent), "exhausted" (the server
+// stopped sending a cursor: this IS the whole ledger) — so the rendered line can
+// say which bound bit rather than a generic "there may be more".
+type SiteDeploymentWalk struct {
+	Deployments []SiteDeployment
+	Budget      SiteDeploymentWalkBudget
+	Pages       int
+	Truncated   bool
+	StoppedBy   string
+}
+
+// WalkSpawnSiteDeployments follows `next_cursor` across GET /v1/sites/:id/deployments
+// until the budget is spent or the server stops sending a cursor, newest-first.
+//
+// It is the WIDE twin of ListDeploymentsAll, and it differs in the one way that
+// matters to anything that quotes a number off it: ListDeploymentsAll truncates
+// at maxRows and returns a plain slice, so its caller cannot tell a complete
+// ledger from a floor. This returns the bound it stopped on.
+//
+// A repeated cursor is an error, never an infinite request stream — a server bug
+// must not become an unbounded client loop.
+func (c *Client) WalkSpawnSiteDeployments(ctx context.Context, siteID string, budget SiteDeploymentWalkBudget) (SiteDeploymentWalk, error) {
+	if budget.PageSize <= 0 || budget.MaxPages <= 0 || budget.Rows <= 0 {
+		budget = NewSiteDeploymentWalkBudget(budget.Rows, budget.PageSize)
+	}
+	walk := SiteDeploymentWalk{Budget: budget, StoppedBy: "exhausted"}
+	seen := map[string]bool{}
+	before := ""
+	for walk.Pages < budget.MaxPages {
+		want := budget.PageSize
+		if left := budget.Rows - len(walk.Deployments); left < want {
+			want = left
+		}
+		if want <= 0 {
+			break
+		}
+		page, err := c.ListSpawnSiteDeployments(ctx, siteID, want, before)
+		if err != nil {
+			return SiteDeploymentWalk{}, err
+		}
+		walk.Pages++
+		walk.Deployments = append(walk.Deployments, page.Deployments...)
+		cursor := strings.TrimSpace(page.NextCursor)
+		if cursor == "" || len(page.Deployments) == 0 {
+			// The server has nothing behind this window: what we hold IS the ledger.
+			walk.StoppedBy = "exhausted"
+			walk.Truncated = false
+			return walk, nil
+		}
+		if seen[cursor] {
+			return SiteDeploymentWalk{}, fmt.Errorf("deployments walk: server repeated cursor %q — refusing to loop", cursor)
+		}
+		seen[cursor] = true
+		before = cursor
+		if len(walk.Deployments) >= budget.Rows {
+			walk.Deployments = walk.Deployments[:budget.Rows]
+			walk.Truncated = true
+			walk.StoppedBy = "rows"
+			return walk, nil
+		}
+	}
+	// Fell out of the loop with a live cursor in hand: the round-trip budget, not
+	// the ledger, is what ended this read.
+	walk.Truncated = true
+	walk.StoppedBy = "pages"
+	if len(walk.Deployments) > budget.Rows {
+		walk.Deployments = walk.Deployments[:budget.Rows]
+	}
+	return walk, nil
+}
+
 // DeployRate is one rate NODE from the fleet deploy census: a percentage that
 // can never travel without the denominator that produced it, and that REFUSES
 // to be a percentage below `min_sample` rather than reporting a number nobody
