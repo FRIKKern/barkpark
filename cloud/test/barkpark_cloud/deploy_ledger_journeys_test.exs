@@ -317,6 +317,87 @@ defmodule BarkparkCloud.DeployLedgerJourneysTest do
     end
   end
 
+  describe "the rendered report" do
+    test "one mixed corpus, rendered whole — every cohort on every side carries its journey count" do
+      # THE EVIDENCE LINE FOR THE CRITERIA, pinned as an EQUALITY rather than a
+      # `=~`: a substring match on "2.00 attempts over 3 journeys" would still
+      # pass if the excluded-UNMETERED clause fell off the end of the line, and
+      # that clause is the whole of criterion 3. So the cohort lines are compared
+      # WHOLE, in order, per side.
+      #
+      # The corpus is deliberately mixed: metered and unmetered heads, a
+      # contended run, a failed-terminated run, an open run with no terminal row,
+      # and one run that straddles the D137 door.
+      pre_site = site_fixture()
+
+      deployments!(pre_site, [
+        %{inserted_at: ~U[2026-08-06 09:00:00Z], status: "live", content_rev: "a1a1a1a1a1a1"},
+        %{inserted_at: ~U[2026-08-06 09:05:00Z], status: "live", content_rev: "a1a1a1a1a1a1"},
+        %{inserted_at: ~U[2026-08-06 09:10:00Z], status: "deferred", content_rev: "a2a2a2a2a2a2"},
+        %{inserted_at: ~U[2026-08-06 09:11:00Z], status: "deferred", content_rev: "a2a2a2a2a2a2"},
+        %{inserted_at: ~U[2026-08-06 09:12:00Z], status: "deferred", content_rev: "a2a2a2a2a2a2"},
+        %{inserted_at: ~U[2026-08-06 09:13:00Z], status: "live", content_rev: "a2a2a2a2a2a2"}
+      ])
+
+      unmetered_site = site_fixture()
+
+      deployments!(unmetered_site, [
+        %{inserted_at: ~U[2026-08-06 10:00:00Z], status: "deferred", content_rev: ""},
+        %{inserted_at: ~U[2026-08-06 10:01:00Z], status: "live", content_rev: ""},
+        %{inserted_at: ~U[2026-08-06 10:02:00Z], status: "deferred", content_rev: "b1b1b1b1b1b1"},
+        %{inserted_at: ~U[2026-08-06 10:03:00Z], status: "failed", content_rev: "b1b1b1b1b1b1"}
+      ])
+
+      post_site = site_fixture()
+
+      deployments!(post_site, [
+        %{inserted_at: ~U[2026-08-06 23:00:00Z], status: "deferred", content_rev: "c1c1c1c1c1c1"},
+        %{inserted_at: ~U[2026-08-06 23:01:00Z], status: "live", content_rev: "c1c1c1c1c1c1"},
+        %{inserted_at: ~U[2026-08-06 23:02:00Z], status: "live", content_rev: nil},
+        %{inserted_at: ~U[2026-08-06 23:03:00Z], status: "deferred", content_rev: "c2c2c2c2c2c2"}
+      ])
+
+      straddling_site = site_fixture()
+
+      deployments!(straddling_site, [
+        %{inserted_at: ~U[2026-08-06 22:00:00Z], status: "deferred", content_rev: "d1d1d1d1d1d1"},
+        %{inserted_at: ~U[2026-08-06 22:50:00Z], status: "live", content_rev: "d1d1d1d1d1d1"}
+      ])
+
+      lines =
+        DeployLedger.journeys(@from, @to,
+          site_ids: [pre_site.id, unmetered_site.id, post_site.id, straddling_site.id]
+        )
+        |> DeployLedger.journey_report()
+
+      assert Enum.drop(lines, 6) == [
+               "  PRE-DOOR (run ended before the boundary)",
+               "    live-terminated  : 2.00 attempts over 3 journeys (6 attempts; 1 UNMETERED journeys excluded)",
+               "    contended subset : 4.00 attempts over 1 journeys (4 attempts; 1 UNMETERED journeys excluded)",
+               "    failed-terminated: 2.00 attempts over 1 journeys (2 attempts; 0 UNMETERED journeys excluded)",
+               "    open runs (no terminal row in window, never metered): 0",
+               "  POST-DOOR (run began at or after the boundary)",
+               "    live-terminated  : 2.00 attempts over 1 journeys (2 attempts; 1 UNMETERED journeys excluded)",
+               "    contended subset : 2.00 attempts over 1 journeys (2 attempts; 0 UNMETERED journeys excluded)",
+               "    failed-terminated: REFUSED over 0 journeys (0 UNMETERED journeys excluded)",
+               "    open runs (no terminal row in window, never metered): 1",
+               "  STRADDLING (began before the door, ended after — its own bucket, never a side)",
+               "    live-terminated  : 2.00 attempts over 1 journeys (2 attempts; 0 UNMETERED journeys excluded)",
+               "    contended subset : 2.00 attempts over 1 journeys (2 attempts; 0 UNMETERED journeys excluded)",
+               "    failed-terminated: REFUSED over 0 journeys (0 UNMETERED journeys excluded)",
+               "    open runs (no terminal row in window, never metered): 0"
+             ]
+
+      # The six header lines the drop above skipped are the ones carrying the
+      # window, the segmentation rule, the basis, the unmetered rule and the
+      # door — asserted for PRESENCE here so the drop count cannot silently
+      # start swallowing a cohort line.
+      assert length(lines) == 21
+      assert Enum.at(lines, 1) =~ "window        : 2026-08-06T00:00:00Z -> 2026-08-07T00:00:00Z"
+      assert Enum.at(lines, 5) =~ "regime door   : 2026-08-06T22:24:16Z (charter D137)"
+    end
+  end
+
   # ── fixtures ───────────────────────────────────────────────────────────────
 
   defp pre(site), do: site |> node_for() |> side(:pre)
