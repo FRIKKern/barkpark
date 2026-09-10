@@ -65,6 +65,20 @@ the claim class*. Only over-claims are refused — `VARIANCE-SKIP`,
 `PIPE-MASKED-RC`, `UNCOMPARED-COUNT`. Anything that does not classify is
 **demoted to L6, never rejected**.
 
+**2b. A COUNT NOBODY GRADED ASSERTS NOTHING (`variance.mjs`, 2026-09-10).** The
+rule is stated on the **act**, not on a list of spellings: `wc`, `grep -c`,
+`grep -vc`, `git grep -c` and `git rev-list --count` all PRINT a quantity, and
+all are `UNCOMPARED-COUNT` unless the pipeline **ends in an equality grade**
+(`… | grep -qx <n>`), which is the one shape where the number becomes something
+an exit code moves on (axis `QUANTITY`, claim class `quantity`). Until this rule
+existed only `| wc` and an ungraded `--count` were named, so the same population
+claim was **refused** when spelled `wc` and **paid in full** when spelled
+`grep -c` — the screen refused the honest author and admitted the other one. The
+refusal names its substitute rather than only saying no. The other half is
+`binding.mjs`'s **`quantity` term**: a claimed number must occur literally in the
+command *and* in the claim, so mutating the number while holding the command
+byte-identical reds the row (`rerun-adjudicate.test.mjs` §12).
+
 **3. ABSENCE IS FIRST-CLASS (`adjudicate.mjs`).** Four of five FAILED verdicts in
 the real sample were *true* reasons whose rerun exits nonzero because the claim
 **is** an absence. The discriminator is grip's shipped `admitsAbsenceClaim`,

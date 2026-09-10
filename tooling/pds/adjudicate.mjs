@@ -76,10 +76,15 @@ export const COST_MS = Object.freeze({
   REFUSED: 0,      // refused before execution: nothing runs, nothing is spent
 });
 
+// THE ESTIMATE MUST PRICE WHAT WILL ACTUALLY RUN, and `preScreen` — not
+// `forbiddenSpelling` alone — is what decides that. Pricing a recipe the
+// pre-flight is about to refuse charges the budget for a child process nobody
+// will start, and then the budget the caller sets and the budget this module
+// measures are two different numbers wearing one name.
 export function estimateMs(recipes = []) {
   let total = 0;
   for (const r of recipes) {
-    if (forbiddenSpelling(r.command)) continue; // refused before execution
+    if (preScreen(r)) continue; // refused before execution: nothing runs, nothing is spent
     const v = varianceSet(r.command);
     total += v.axes.includes("BEHAVIOUR") ? COST_MS.TOOLCHAIN : COST_MS.GIT_READ;
   }
