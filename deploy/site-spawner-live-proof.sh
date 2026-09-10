@@ -337,8 +337,11 @@ cleanup() {
       else
         note "cleanup: DELETE FAILED for '$s' (exit $dx): $(cli_err "${TMP:-/tmp}/del-$s.json" "${TMP:-/tmp}/del-$s.err")"
         note "         Remove by hand: \`$BP cloud site delete $s --yes\`, or on $LIVE_HOST →"
-        note "         rm -rf /opt/barkpark/sites/$s and drop the '# barkpark-site:$s' guarded"
-        note "         handle_path block from /etc/caddy/Caddyfile. The site's read token is STILL LIVE."
+        note "         rm -rf /opt/barkpark/sites/$s and drop the guarded handle_path block from"
+        note "         /etc/caddy/Caddyfile — the one whose guard comment reads 'BARKPARK_SITE_ROUTE:$s'."
+        note "         (That marker, NOT the old '# barkpark-site<colon>' string, is what this engine"
+        note "         writes; grepping the old string finds nothing and the route stays live.)"
+        note "         The site's read token is STILL LIVE."
       fi
     done
   else

@@ -2547,14 +2547,19 @@ const siteStatesDomains = {
 // that no longer exists, which is the exact shape wave 30 exists to remove;
 // `__app.test.mjs`'s bidirectional census guards app.js but has no reach into
 // this file, so it stayed green.
+//
+// NINE AS OF dr-w13-bl-abandonment-splits-off-the-flood. `deployment_abandoned`
+// is the given-up rebuild chain, split off `deployment_failed` with its own
+// column, producer, renderer arms and console row in one change — so the fixture
+// seeds it too, and it is default-ON like every other failure.
 const NOTIF_EVENT_KEYS = [
   "provision_succeeded", "provision_failed", "deployment_failed",
-  "deployment_succeeded", "deployment_refused",
+  "deployment_succeeded", "deployment_refused", "deployment_abandoned",
   "agent_reachable", "agent_unreachable", "subscription_past_due",
 ];
 const NOTIF_CHAT_EVENTS = NOTIF_EVENT_KEYS.concat(["test"]);
 const NOTIF_CHANNEL_TYPES = ["discord", "slack", "telegram", "pushover", "webhook"];
-const NOTIF_DEFAULT_ON = ["provision_failed", "deployment_failed", "deployment_refused", "agent_unreachable", "subscription_past_due"];
+const NOTIF_DEFAULT_ON = ["provision_failed", "deployment_failed", "deployment_refused", "deployment_abandoned", "agent_unreachable", "subscription_past_due"];
 function notifSettings(over) {
   const base = {
     transport: "instance",
