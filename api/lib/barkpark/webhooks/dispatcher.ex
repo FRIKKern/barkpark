@@ -671,27 +671,55 @@ defmodule Barkpark.Webhooks.Dispatcher do
   `status`/`last_status_code`/`last_latency_ms`/`last_error_text` overwritten
   with this attempt's verdict. Used by the operator-console replay route to
   re-send a stored event to THIS webhook. Returns `{:ok, delivery}` with the
-  refreshed row so the caller can report the verdict.
+  refreshed row so the caller can report the verdict, or `{:error, :delivery_gone}`
+  / `{:error, :event_gone}` when the row this replay needs vanished underneath it
+  (see `resolve_replay_row/2`) — an honest tuple, never a crash, and never an
+  HTTP post against a delivery row that does not exist.
   """
   def replay_delivery(webhook, body, event_id) when is_integer(event_id) do
-    delivery =
-      case Webhooks.get_delivery(webhook.id, event_id) do
-        nil ->
-          case Webhooks.claim_delivery(webhook.id, event_id) do
-            {:ok, d} -> d
-            # A concurrent claim beat us to the row (negligible for a synchronous
-            # admin replay, but never crash on the race) — re-fetch and reuse it.
-            {:error, :already_delivered} -> Webhooks.get_delivery(webhook.id, event_id)
-          end
+    with {:ok, delivery} <- resolve_replay_row(webhook, event_id) do
+      warn_if_unsigned(webhook)
+      {_timestamp, headers} = build_request(webhook, body, event_id)
+      {latency_ms, result} = timed_post(webhook.url, body, headers)
+      record_single_attempt(delivery, result, latency_ms)
+    end
+  end
 
-        d ->
-          d
-      end
+  # Resolve the delivery row a replay records onto: reuse the existing one, or
+  # claim a fresh one. BOTH failure modes here are concurrent-DELETE races, and
+  # both used to reach `record_single_attempt/3` (or Postgres) as a raw crash:
+  #
+  #   * `:delivery_gone` — the claim conflicted (`:already_delivered`) but the
+  #     re-fetch came back NIL, i.e. the winning row was deleted between the two
+  #     statements. The old code passed that nil straight into
+  #     `record_single_attempt/3`, where `delivery.attempts` raised BadMapError.
+  #   * `:event_gone` — the `mutation_events` row disappeared between the
+  #     controller's existence guard and this insert, so the FK on
+  #     `webhook_deliveries.event_id` refuses the claim. With
+  #     `foreign_key_constraint(:event_id)` on the changeset that arrives as a
+  #     changeset error instead of a raw `Ecto.ConstraintError`.
+  defp resolve_replay_row(webhook, event_id) do
+    case Webhooks.get_delivery(webhook.id, event_id) do
+      nil ->
+        case Webhooks.claim_delivery(webhook.id, event_id) do
+          {:ok, d} ->
+            {:ok, d}
 
-    warn_if_unsigned(webhook)
-    {_timestamp, headers} = build_request(webhook, body, event_id)
-    {latency_ms, result} = timed_post(webhook.url, body, headers)
-    record_single_attempt(delivery, result, latency_ms)
+          # A concurrent claim beat us to the row (negligible for a synchronous
+          # admin replay, but never crash on the race) — re-fetch and reuse it.
+          {:error, :already_delivered} ->
+            case Webhooks.get_delivery(webhook.id, event_id) do
+              nil -> {:error, :delivery_gone}
+              d -> {:ok, d}
+            end
+
+          {:error, %Ecto.Changeset{}} ->
+            {:error, :event_gone}
+        end
+
+      d ->
+        {:ok, d}
+    end
   end
 
   # Record the terminal verdict of ONE synchronous attempt onto `delivery`: bump
