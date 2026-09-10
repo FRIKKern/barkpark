@@ -68,6 +68,37 @@ defmodule BarkparkCloud.Cloudflare.CSRTest do
       assert {:ok, %{common_name: ^cn}} = CSR.verify(csr)
     end
 
+    test "the SAN dNSNames land in the RAW DER — the emit side, decoder-free" do
+      hosts = ["one.example.com", "*.one.example.com"]
+      assert {:ok, %{csr: csr}} = CSR.generate(hosts, key_size: @key_size)
+      [{:CertificationRequest, der, :not_encrypted}] = :public_key.pem_decode(csr)
+
+      # The DIAGNOSTIC SPLIT. When the parse-back below reports `[]`, exactly one
+      # of two things is true: the CSR never carried a subjectAltName, or the
+      # reader could not see one that is right there in the bytes. Only a
+      # byte-level assertion tells them apart, so this one goes hunting in the
+      # DER itself: the extensionRequest OID (1.2.840.113549.1.9.14), the
+      # subjectAltName OID (2.5.29.17), and each hostname under tag 0x82
+      # (context-specific 2 = dNSName). It stays green when OTP renames the
+      # decoded attribute record — which is precisely what made the parse-back
+      # return `[]` on OTP 27 while `openssl req -text` printed the SAN.
+      assert :binary.match(
+               der,
+               <<0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x0E>>
+             ) !=
+               :nomatch
+
+      assert :binary.match(der, <<0x06, 0x03, 0x55, 0x1D, 0x11>>) != :nomatch
+
+      for host <- hosts do
+        assert :binary.match(der, <<0x82, byte_size(host)>> <> host) != :nomatch,
+               "#{host} is not a dNSName in the DER"
+      end
+
+      # …and the reader agrees with the bytes.
+      assert {:ok, %{hostnames: ^hosts}} = CSR.verify(csr)
+    end
+
     test "each generate/2 call mints a FRESH key pair (no reuse across sites)" do
       {:ok, a} = CSR.generate(["a.example.com"], key_size: @key_size)
       {:ok, b} = CSR.generate(["a.example.com"], key_size: @key_size)

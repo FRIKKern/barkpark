@@ -360,11 +360,17 @@ defmodule BarkparkCloud.Cloudflare.CSR do
     |> request_info(:attributes)
     |> Kernel.||([])
     |> Enum.flat_map(fn
-      # OTP DECODES the attribute as `:Attribute` even though the .hrl record it
-      # is ENCODED from is `CertificationRequestInfo_attributes_SETOF` — match
-      # both rather than guessing which side of the round trip we are on.
-      {tag, @oid_extension_request, values}
-      when tag in [:Attribute, :CertificationRequestInfo_attributes_SETOF] ->
+      # Match the SHAPE, never the record tag. The tag OTP puts on this
+      # attribute is not stable in either direction: it is
+      # `CertificationRequestInfo_attributes_SETOF` on the ENCODE side (that is
+      # the .hrl record this module builds), `:Attribute` when OTP 28's decoder
+      # reads it back, and `:"AttributePKCS-10"` when OTP 27's does — which is
+      # exactly how a CSR whose DER `openssl req -text` shows a correct
+      # `X509v3 Subject Alternative Name` still parsed back here as `[]`. An
+      # enumeration of tags is a snapshot of the OTP releases someone happened
+      # to try; the extensionRequest OID in field 2 over a list of values in
+      # field 3 is the rule.
+      {_tag, @oid_extension_request, values} when is_list(values) ->
         Enum.flat_map(values, &extension_hostnames/1)
 
       _ ->
