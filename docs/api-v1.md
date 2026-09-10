@@ -5,6 +5,12 @@
 
 Frozen `/v1`: breaking changes need `/v2`; additive stay in v1.
 
+**Reading this from a JavaScript or TypeScript app?** Use the SDK rather than raw
+`fetch`: `@barkpark/core` wraps these routes (query builder, mutations, media,
+`listen()`), and `@barkpark/nextjs` adds App Router integration. Consumption
+guide: [cards/js-sdk.md](cards/js-sdk.md). Prose docs site: `pnpm -C js install
+&& pnpm -C js --filter @barkpark/docs dev`.
+
 ## 1a. Workspace → Project → Dataset hierarchy
 
 A **Workspace** is the token-bound tenant of **Projects**, **Datasets**, **Documents** (§3). Canonical paths start `/w/:workspace_slug/p/:project_slug/v1/data/...`.
