@@ -19120,18 +19120,19 @@ test("G-04 notifMatrixSectionHtml: 6 columns, dashed defaults, honest always-sen
   assert.match(html, /set-matrix-off/);
 });
 
-test("cch-w30-s1: the matrix offers EIGHT toggles — the two still-producerless ones stay gone", () => {
+test("cch-w30-s1: the matrix offers NINE toggles — the two still-producerless ones stay gone", () => {
   const s = { channels: [], event_routes: {}, chat_default_on: [] };
   const html = hooks.notifMatrixSectionHtml(s);
   // Eight toggle rows × six columns = 48 cells, and not one of them names an
   // event nothing can send. A regressed row would fail the census below too;
   // this leg is the person-facing half — what the page actually draws.
   //
-  // cch-w29-bl moved this 36 → 42; cch-w30-bl moved it 42 → 48. The count is
+  // cch-w29-bl moved this 36 → 42; cch-w30-bl moved it 42 → 48;
+  // dr-w13-bl-abandonment-splits-off-the-flood moved it 48 → 54. The count is
   // EXACT on purpose and the number is not the assertion: the two loops below
   // are. A row moves this number only together with its producer, because arm
   // (a) of the census below reds on an offer with nothing behind it.
-  assert.equal((html.match(/set-matrix-cell/g) || []).length, 48, "8 events × 6 channels");
+  assert.equal((html.match(/set-matrix-cell/g) || []).length, 54, "9 events × 6 channels");
   // NOT OFFERED, FOR TWO DIFFERENT REASONS — and the difference matters.
   //
   // `member_invited` is still the original case: no producer at all.
@@ -19158,7 +19159,12 @@ test("cch-w30-s1: the matrix offers EIGHT toggles — the two still-producerless
   // fired from BOTH writers that can reach the `live` terminal and edge-triggered
   // on the prior status. It moves lists here for exactly one reason: arm (b) of
   // the census below now reds while this row is absent.
-  for (const live of ["deployment_failed", "deployment_refused", "deployment_succeeded"]) {
+  // The ninth, drawn: dr-w13-bl-abandonment-splits-off-the-flood.
+  // `deployment_abandoned` is the given-up rebuild chain, branched off the one
+  // `dispatch_deployment_failed/1` funnel in the same change — so arm (b) reds
+  // while this row is absent, exactly as it did for the eighth.
+  for (const live of ["deployment_failed", "deployment_refused", "deployment_succeeded",
+                      "deployment_abandoned"]) {
     assert.match(html, new RegExp(`data-event="${live}"`),
       `${live} has a producer in cloud/lib — the console must offer its toggle`);
   }

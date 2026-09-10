@@ -2547,14 +2547,19 @@ const siteStatesDomains = {
 // that no longer exists, which is the exact shape wave 30 exists to remove;
 // `__app.test.mjs`'s bidirectional census guards app.js but has no reach into
 // this file, so it stayed green.
+//
+// NINE AS OF dr-w13-bl-abandonment-splits-off-the-flood. `deployment_abandoned`
+// is the given-up rebuild chain, split off `deployment_failed` with its own
+// column, producer, renderer arms and console row in one change — so the fixture
+// seeds it too, and it is default-ON like every other failure.
 const NOTIF_EVENT_KEYS = [
   "provision_succeeded", "provision_failed", "deployment_failed",
-  "deployment_succeeded", "deployment_refused",
+  "deployment_succeeded", "deployment_refused", "deployment_abandoned",
   "agent_reachable", "agent_unreachable", "subscription_past_due",
 ];
 const NOTIF_CHAT_EVENTS = NOTIF_EVENT_KEYS.concat(["test"]);
 const NOTIF_CHANNEL_TYPES = ["discord", "slack", "telegram", "pushover", "webhook"];
-const NOTIF_DEFAULT_ON = ["provision_failed", "deployment_failed", "deployment_refused", "agent_unreachable", "subscription_past_due"];
+const NOTIF_DEFAULT_ON = ["provision_failed", "deployment_failed", "deployment_refused", "deployment_abandoned", "agent_unreachable", "subscription_past_due"];
 function notifSettings(over) {
   const base = {
     transport: "instance",
@@ -5236,6 +5241,46 @@ export const SCENARIOS = {
         const m = me("Guerrilla");
         return Object.assign({}, m, { user: Object.assign({}, m.user, { two_factor_enabled: true }) });
       })(),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      accountSessions: accountSessions,
+    },
+  },
+  // cch-w39-s2-fu — THE UNKNOWN ARM, AS A BROWSER-REACHABLE STATE.
+  // cch-w39-s2 shipped `#a2f-retry` on the two-factor panel's unknown arm and
+  // proved it by node test only: markup plus the loadMe() re-entry SHAPE. A
+  // modal control's reachability is not a markup question — the whole failure
+  // class this file's oracle exists for (#4592) is a control that EXISTS in the
+  // DOM and cannot be reached on screen — so the control needed a state a
+  // browser could actually land on, and no scenario in this corpus put the
+  // account modal in front of a /v1/me that never answers.
+  //
+  // It consumes the `meFault` override cch-w37-s6 already merged (route() in
+  // this file) rather than minting a second failure idiom, and it is STICKY (no
+  // `times`): this state's subject is the unknown that PERSISTS, and a fault
+  // that heals would repaint the determinate panel out from under the assertion.
+  //
+  // WHY THE MODAL OPENS AT ALL. mock.js's ?modal=account drive waits for the
+  // account chip to carry a real email and gives up after 40 tries. That
+  // give-up branch was UNREACHABLE until cch-w39-s2 fixed its `> 40` / `< 40`
+  // off-by-one, so before that commit a scenario shaped like this one simply
+  // stopped, silently, with no modal to measure. This is the first fixture that
+  // reaches it — and it is what makes `modal-oracle`'s account-2fa-unknown
+  // state land instead of timing out.
+  //
+  // The `account-modal` NAME PREFIX auto-enrols it in shoot.sh's screenshot set
+  // (GR76) with zero harness change — intended: the honest-unknown panel is a
+  // state a human should get an eye on, and it is exactly the frame where a
+  // regression would repaint the determinate "Off" pill.
+  "account-modal-me-unreadable": {
+    label: "Account modal — /v1/me never lands: the two-factor row reads Unknown, offers Retry, and never offers setup",
+    authed: true,
+    deepLink: "",
+    data: {
+      me: me("Guerrilla"),
+      meFault: { status: 500, body: { error: "internal" } },
       barkparks: [liveInstance],
       subscription: activeSub,
       sites: [],

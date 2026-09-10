@@ -404,6 +404,18 @@ defmodule BarkparkCloud.DeployLedger do
   # would silently mis-state the floor there.
   @coalesced_counter_since ~U[2026-08-07 10:02:23Z]
 
+  # THE DOOR MARKER, and it is PROSE. `failure_reason` is the only field both
+  # sides of the 2026-08-05 status boundary write identically for a capacity
+  # refusal, which is why the honest door predicate keys on it rather than on
+  # `status` or on `deferral_cause`.
+  @box_door_marker "%409%box_at_capacity%"
+  @box_door_cause "BOX_AT_CAPACITY_DEFERRED"
+
+  @box_door_predicate "failure_reason LIKE '%409%box_at_capacity%', across ALL statuses"
+  @box_door_cause_predicate "status = 'deferred' AND deferral_cause = 'BOX_AT_CAPACITY_DEFERRED'"
+
+  @box_door_basis "every row in the window whose failure_reason carries the box's own capacity-409 marker, whatever status it settled in — the door's REFUSALS, which is a superset of the door's RE-QUEUES"
+
   @coalesced_basis "attempts that minted NO deployment row (AutoDeployWorker coalesced them onto an in-flight build) — DISJOINT from `volume`, never folded into it"
 
   # What each rate's denominator COUNTS — the D34 convention label, emitted so no
@@ -1539,6 +1551,34 @@ defmodule BarkparkCloud.DeployLedger do
       # is a COUNT of real rows, and D9's ruling is that counts stay while
       # ratios go.
       deferred_total: deferred_total,
+      # THE DOOR'S OWN DENOMINATOR, read off the DURABLE ROWS and not off the
+      # cause column (dr-w22-s5, charter D379). Every reader of "how often did
+      # the box refuse a slot" has keyed on
+      # `status='deferred' AND deferral_cause='BOX_AT_CAPACITY_DEFERRED'`, and
+      # that predicate is STRUCTURALLY short: `deferral_cause` is written in
+      # exactly one place — `Sites.Deploy.defer/3` — so a capacity 409 that
+      # settled `failed` instead of being re-queued carries the 409 in
+      # `failure_reason` and a NULL cause, and the cause-keyed reader cannot see
+      # it. Measured on the live corpus over the box's own journal window, that
+      # is six rows the door undercounted itself by.
+      #
+      # THE HONEST PREDICATE IS THE PROSE MARKER, ACROSS ALL STATUSES. It is
+      # deliberately NOT a replacement for the `deferred` cohort rows above —
+      # those stay, byte for byte, because they are the correct answer to a
+      # different question ("how much did the door RE-QUEUE"). This term answers
+      # "how often did the door REFUSE", which is the larger set, and it carries
+      # the DIFFERENCE as its own scalar so the gap is DISCLOSED rather than
+      # silently reconciled by a reader who sees only whichever number is
+      # nearer.
+      #
+      # NOT REFUSED ACROSS THE VOCABULARY BOUNDARY, and that is the point of
+      # building it this way: the boundary at 2026-08-05T21:13:50Z is exactly the
+      # instant the same refusal stopped being written `failed` and started being
+      # written `deferred`, so every status-keyed quantity blends two taxonomies
+      # across it. This one keys on `failure_reason`, which BOTH vocabularies
+      # write identically — so it is the one door count a straddling window can
+      # still answer.
+      box_door: box_door(scoped),
       # THE ABSOLUTE COUNT AND ITS COVERAGE, side by side. Neither is refused
       # across the boundary for the same reason `deferred_total` is not: they
       # are counts. `abandoned` is a LOWER BOUND whenever `abandoned_unreadable`
@@ -1634,6 +1674,61 @@ defmodule BarkparkCloud.DeployLedger do
   # about THIS control plane's database, not about this source tree.
   defp coalesced_counter_since do
     Application.get_env(:barkpark_cloud, :coalesced_counter_since, @coalesced_counter_since)
+  end
+
+  # THE DOOR TERM. Two counts over the SAME scoped source the rest of the census
+  # reads — same window, same `:site_ids` narrowing — plus the rows the
+  # cause-keyed reader misses, counted DIRECTLY rather than subtracted.
+  #
+  # `unkeyed` is a THIRD query, not `refusals - cause_keyed`. A subtraction is
+  # signed: a cause-keyed row whose `failure_reason` does not carry the marker
+  # would push the difference negative and the census would print a negative
+  # count of missing rows. Counting the missed rows themselves cannot go
+  # negative and answers the question the operator actually asks — WHICH rows
+  # does the old predicate not see.
+  defp box_door(scoped) do
+    marked = from(d in scoped, where: like(d.failure_reason, ^@box_door_marker))
+
+    refusals = Repo.aggregate(marked, :count, :id)
+
+    cause_keyed =
+      Repo.aggregate(
+        from(d in scoped,
+          where: d.status == "deferred" and d.deferral_cause == ^@box_door_cause
+        ),
+        :count,
+        :id
+      )
+
+    unkeyed =
+      Repo.aggregate(
+        from(d in marked,
+          where:
+            is_nil(d.deferral_cause) or d.status != "deferred" or
+              d.deferral_cause != ^@box_door_cause
+        ),
+        :count,
+        :id
+      )
+
+    by_status =
+      Repo.all(
+        from(d in marked,
+          group_by: d.status,
+          order_by: [desc: count(d.id)],
+          select: %{status: d.status, count: count(d.id)}
+        )
+      )
+
+    %{
+      refusals: refusals,
+      cause_keyed: cause_keyed,
+      unkeyed: unkeyed,
+      by_status: by_status,
+      predicate: @box_door_predicate,
+      cause_predicate: @box_door_cause_predicate,
+      basis: @box_door_basis
+    }
   end
 
   defp coalesced_attempts(scoped, from) do

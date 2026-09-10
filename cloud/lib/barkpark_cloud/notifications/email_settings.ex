@@ -82,8 +82,19 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
   # is handled, by an edge guard on the PRIOR status, not by leaving the toggle
   # deleted. It defaults OFF — it is a SUCCESS, and the rule above is
   # failures-on / successes-off.
+  # dr-w13-bl-abandonment-splits-off-the-flood — NINE. `deployment_abandoned` is
+  # the chain the fleet GAVE UP ON (`Sites.Deploy`'s abandonment branch →
+  # `Registry.dispatch_deployment_abandoned/1`), split off `deployment_failed` so
+  # the most severe outcome in the fleet stops arriving under the same name as
+  # ~870 routine failures a day (charter D193). Producer, both renderer arms, the
+  # console row and the column land in ONE change, exactly as the rule above
+  # demands. It defaults ON: a publish that was given up on is a FAILURE, and the
+  # rule is failures-on / successes-off. It is a NARROWER event than
+  # `deployment_failed`, never a wider one — a team that mutes it still gets
+  # nothing it was not already getting.
   @events ~w(provision_succeeded provision_failed
              deployment_succeeded deployment_failed deployment_refused
+             deployment_abandoned
              agent_reachable agent_unreachable
              subscription_past_due)a
 
@@ -104,6 +115,7 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
     field :deployment_succeeded, :boolean, default: false
     field :deployment_failed, :boolean, default: true
     field :deployment_refused, :boolean, default: true
+    field :deployment_abandoned, :boolean, default: true
     field :agent_reachable, :boolean, default: false
     field :agent_unreachable, :boolean, default: true
     field :subscription_past_due, :boolean, default: true
