@@ -2064,7 +2064,13 @@ defmodule BarkparkWeb.TasksController do
       edges: result.edges,
       dependents: result.dependents,
       truncated: result.truncated,
-      truncation_reason: result.truncation_reason
+      truncation_reason: result.truncation_reason,
+      # THE PHANTOM-VS-UNREAD DISCRIMINATOR (task-09889a18f174fcb2). `truncated`
+      # says the graph is partial; this says WHICH bound made it partial and how
+      # much of the corpus was actually read, so a consumer can tell an edge to
+      # a target that does not exist (a real broken reference) from one to a
+      # target the read never reached. `nil` on every complete read.
+      corpus_truncation: result.corpus_truncation
     })
   end
 
