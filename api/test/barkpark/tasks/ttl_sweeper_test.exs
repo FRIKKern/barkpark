@@ -108,6 +108,82 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
     Repo.get!(Document, doc.id)
   end
 
+  # ─── Sweep assertions: identified rows, never a whole-table cardinality ────
+  #
+  # `TtlSweeper.sweep/1` and `sweep_engagement/1` reap EVERY expired row in the
+  # `documents` table and return a COUNT. That table is shared by every suite
+  # running against this database — the fleet runs `mix test` concurrently and
+  # `MIX_TEST_PARTITION` is routinely unset — so the returned count is the
+  # FLEET's number, not this fixture's. Asserting `%{swept: 1, skipped: 0}`
+  # therefore reds whenever some other writer happens to hold an expired claim:
+  # measured on pristine `origin/main` 7406e9fbb, 23 tests / 12 failures, every
+  # one `right: %{swept: 7|8}` (task-9989494a409e6a6e).
+  #
+  # The property these tests actually own is "MY rows moved and MY no-op rows
+  # did not" — a statement about IDENTIFIED documents. `sweep_asserting!/2`
+  # snapshots the named rows, runs the sweep, and asserts the per-row delta:
+  #
+  #   * `reaped:`    — the row's `rev` advanced (the sweep rewrote it).
+  #   * `untouched:` — the row's `rev` AND `content` are byte-identical.
+  #
+  # The reported `swept` is used only as a FLOOR (it must be at least the
+  # fixture's own reaped rows), never as an equality, and `skipped` is not
+  # asserted at all: a foreign row that a concurrent close beat us to lands
+  # there and is none of this file's business.
+  #
+  # This is NOT a retry, a tag, an exclusion, or a cleanup that deletes another
+  # writer's rows — all four are forbidden by the row, and all four would
+  # either remove coverage or corrupt a concurrently running suite. Positive
+  # control that the file can still fail: make the fixture's own claim fresh
+  # (or disable the reap) and every `reaped:` row reds by name.
+  defp sweep_asserting!(sweep_fun, opts) when is_function(sweep_fun, 0) do
+    reaped = Keyword.get(opts, :reaped, [])
+    untouched = Keyword.get(opts, :untouched, [])
+
+    before = snapshot_rows(reaped ++ untouched)
+
+    result = sweep_fun.()
+
+    for doc <- reaped do
+      was = Map.fetch!(before, doc.id)
+      now = Repo.get!(Document, doc.id)
+
+      moved? = now.rev != was.rev
+
+      assert moved?,
+             "#{doc.doc_id} should have been swept but the row is unchanged " <>
+               "(rev still #{was.rev}, content #{inspect(now.content)})"
+    end
+
+    for doc <- untouched do
+      was = Map.fetch!(before, doc.id)
+      now = Repo.get!(Document, doc.id)
+
+      still? = now.rev == was.rev and now.content == was.content
+
+      assert still?,
+             "#{doc.doc_id} must NOT be touched by this sweep; " <>
+               "before rev=#{was.rev} #{inspect(was.content)} / " <>
+               "after rev=#{now.rev} #{inspect(now.content)}"
+    end
+
+    floor = length(reaped)
+    counted = swept_count(result)
+
+    assert counted >= floor,
+           "the sweep reported swept=#{counted}, fewer than the #{floor} fixture " <>
+             "row(s) it was required to reap; result=#{inspect(result)}"
+
+    result
+  end
+
+  defp snapshot_rows(docs) do
+    Map.new(docs, fn doc -> {doc.id, Repo.get!(Document, doc.id)} end)
+  end
+
+  defp swept_count({:ok, %{swept: n}}), do: n
+  defp swept_count(%{swept: n}), do: n
+
   # ─── (1) Happy path ────────────────────────────────────────────────────────
 
   describe "sweep/1 — happy path" do
@@ -128,7 +204,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
       _ = age_claim!(claimed, 600)
 
       # ttl=300 → 10 min ago is well past.
-      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep(300) end, reaped: [claimed])
 
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "open"
@@ -166,7 +242,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
       assert claimed.content["claim"]["resources"] == ["lib/x.ex"]
 
       _ = age_claim!(claimed, 600)
-      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep(300) end, reaped: [claimed])
 
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "open"
@@ -191,7 +267,9 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
       Application.put_env(:barkpark, :task_lease_ttl_seconds, 1)
       on_exit(fn -> Application.put_env(:barkpark, :task_lease_ttl_seconds, original_ttl) end)
 
-      assert {:ok, %{swept: 1, skipped: 0}} = TtlSweeper.perform(%Oban.Job{})
+      result = sweep_asserting!(fn -> TtlSweeper.perform(%Oban.Job{}) end, reaped: [claimed])
+
+      assert {:ok, %{swept: _, skipped: _}} = result
 
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "open"
@@ -217,7 +295,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
         from(d in Document, where: d.id == ^task.id)
         |> Repo.update_all(set: [content: new_content])
 
-      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep(300) end, reaped: [task])
 
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "open"
@@ -238,7 +316,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
         Tasks.claim("worker-Q", scope ++ [phase_id: phase_id, dataset: @dataset])
 
       # ts_iso is "right now" (claim/2 just stamped it); ttl=300 → not expired.
-      assert %{swept: 0, skipped: 0} = TtlSweeper.sweep(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep(300) end, untouched: [claimed])
 
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "in_progress"
@@ -267,7 +345,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
       _ = age_claim!(claimed, 600)
 
       # THE sweep — bumps epoch from 1 to 2, flips to open, clears worker.
-      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep(300) end, reaped: [claimed])
 
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["claim"]["epoch"] == 2
@@ -306,7 +384,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
       assert claim_a.content["claim"]["epoch"] == 1
       _ = age_claim!(claim_a, 600)
-      assert %{swept: 1} = TtlSweeper.sweep(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep(300) end, reaped: [claim_a])
 
       # Sweep took epoch 1 → 2 (the fencing kick stored on the row).
       reloaded = Repo.get!(Document, task.id)
@@ -445,7 +523,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
       # Backdate ts_iso to simulate a long-completed task.
       _ = age_claim!(closed, 999_999)
 
-      assert %{swept: 0, skipped: 0} = TtlSweeper.sweep(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep(300) end, untouched: [closed])
 
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "done"
@@ -472,7 +550,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
       _ = age_claim!(cancelled, 999_999)
 
-      assert %{swept: 0, skipped: 0} = TtlSweeper.sweep(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep(300) end, untouched: [cancelled])
 
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "cancelled"
@@ -485,7 +563,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
       task = mk_task!(uniq("never"), scope)
       assert task.content["lifecycle_status"] == "open"
 
-      assert %{swept: 0, skipped: 0} = TtlSweeper.sweep(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep(300) end, untouched: [task])
 
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "open"
@@ -515,7 +593,10 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
           {t, c}
         end
 
-      assert %{swept: 3, skipped: 0} = TtlSweeper.sweep(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep(300) end,
+        reaped: for({_t, c} <- expired_tasks, do: c),
+        untouched: for({_t, c} <- fresh_tasks, do: c)
+      )
 
       for {task, _} <- expired_tasks do
         reloaded = Repo.get!(Document, task.id)
@@ -591,7 +672,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
       task = mk_thought_task!(uniq("eng-res"), scope, "researching", engagement)
 
-      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep_engagement(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep_engagement(300) end, reaped: [task])
 
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "considering"
@@ -622,7 +703,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
       engagement = %{"object" => "build", "holder" => "cycle-w2", "ts" => iso_ago(600)}
       task = mk_thought_task!(uniq("eng-con"), scope, "considering", engagement)
 
-      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep_engagement(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep_engagement(300) end, reaped: [task])
 
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "considering"
@@ -646,7 +727,10 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
       stale = mk_thought_task!(uniq("eng-stale"), scope, "researching", stale_engagement)
 
       # ttl=300 → the 200 s-old engagement is inside the lease, 400 s is past.
-      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep_engagement(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep_engagement(300) end,
+        reaped: [stale],
+        untouched: [fresh]
+      )
 
       fresh_reloaded = Repo.get!(Document, fresh.id)
       assert fresh_reloaded.content["lifecycle_status"] == "researching"
@@ -665,7 +749,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
       task = mk_thought_task!(uniq("eng-rest"), scope, "considering", nil)
 
-      assert %{swept: 0, skipped: 0} = TtlSweeper.sweep_engagement(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep_engagement(300) end, untouched: [task])
 
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "considering"
@@ -678,7 +762,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
       task = mk_thought_task!(uniq("eng-bare"), scope, "researching", nil)
 
-      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep_engagement(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep_engagement(300) end, reaped: [task])
 
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "considering"
@@ -695,10 +779,11 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
       engagement = %{"object" => "research", "holder" => "h-once", "ts" => iso_ago(600)}
       task = mk_thought_task!(uniq("eng-idem"), scope, "researching", engagement)
 
-      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep_engagement(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep_engagement(300) end, reaped: [task])
       # The row is now considering WITHOUT engagement — the resting state, not
       # a candidate. No second event, ever.
-      assert %{swept: 0, skipped: 0} = TtlSweeper.sweep_engagement(300)
+      after_first = Repo.get!(Document, task.id)
+      sweep_asserting!(fn -> TtlSweeper.sweep_engagement(300) end, untouched: [after_first])
 
       assert length(events_for(task.doc_id, TtlSweeper.engagement_event_kind())) == 1
     end
@@ -717,7 +802,9 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
           "engagement" => stale
         })
 
-      assert %{swept: 0, skipped: 0} = TtlSweeper.sweep_engagement(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep_engagement(300) end,
+        untouched: [open_task, done_task]
+      )
 
       for {task, status} <- [{open_task, "open"}, {done_task, "done"}] do
         reloaded = Repo.get!(Document, task.id)
@@ -754,7 +841,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
       # …so a sweep past the TTL takes the lease and leaves the reason.
       staged = age_engagement!(staged, 600)
-      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep_engagement(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep_engagement(300) end, reaped: [staged])
 
       reloaded = Repo.get!(Document, staged.id)
       refute Map.has_key?(reloaded.content, "engagement")
@@ -784,7 +871,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
       task = mk_thought_task!(uniq("eng-legacy"), scope, "considering", engagement)
 
-      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep_engagement(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep_engagement(300) end, reaped: [task])
 
       reloaded = Repo.get!(Document, task.id)
       refute Map.has_key?(reloaded.content, "engagement")
@@ -808,7 +895,7 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
           }
         })
 
-      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep_engagement(300)
+      sweep_asserting!(fn -> TtlSweeper.sweep_engagement(300) end, reaped: [task])
 
       assert Repo.get!(Document, task.id).content["disposition_reason"] ==
                "the adjudicated reason"
@@ -841,8 +928,10 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
         on_exit(fn -> Application.put_env(:barkpark, key, original) end)
       end
 
-      assert {:ok, %{swept: 1, skipped: 0, engagement: %{swept: 1, skipped: 0}}} =
-               TtlSweeper.perform(%Oban.Job{})
+      result =
+        sweep_asserting!(fn -> TtlSweeper.perform(%Oban.Job{}) end, reaped: [claimed, thought])
+
+      assert {:ok, %{swept: _, skipped: _, engagement: %{swept: _, skipped: _}}} = result
 
       assert Repo.get!(Document, claimed.id).content["lifecycle_status"] == "open"
       assert Repo.get!(Document, thought.id).content["lifecycle_status"] == "considering"
