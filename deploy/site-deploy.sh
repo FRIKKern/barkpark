@@ -141,6 +141,21 @@ HEALTH_FAIL_MARK=".bp-health-failed"
 # template (that rebuild passes HEALTH on genuine markers and goes live with the
 # WRONG bytes), and purge_failed_release refuses to delete it into one.
 PREBUILT_MARK=".bp-prebuilt-sha256"
+# Dropped inside EVERY release dir this engine stages, box-build and prebuilt
+# alike: the sha256 of the staged tree itself (charter D188).  It is a RECEIPT of
+# WHICH BYTES this release carries, never an identity key — one content_rev has
+# produced four distinct artifacts, so the build is not reproducible and no
+# digest here is a content address.  It is deliberately NOT $PREBUILT_MARK:
+# that file's recorded meaning is "these bytes arrived from an UPLOAD, and this
+# is the digest the CP verified for the tarball", and two decisions read its mere
+# PRESENCE (PLAN refuses to rebuild such a release from the provisioned template;
+# purge_failed_release refuses to delete it).  Writing a box-build digest there
+# would silently reclassify every box-build release as un-rebuildable, and would
+# put a TARBALL digest and a TREE digest in one filename.
+BUILD_MARK=".bp-build-sha256"
+# The digest stage_dir_into_release measured for THIS run's staged tree, "" when
+# it could not be taken.  Narrated on STAGE; re-measured independently at SWITCH.
+STAGED_SHA=""
 # THE file_server HIDE LIST — ONE definition, read by the fresh arm AND by the
 # in-place upgrade, so the two can never drift (a value on two surfaces needs one
 # lock). Caddy matches each pattern with path.Match against the request path and,
@@ -152,7 +167,8 @@ PREBUILT_MARK=".bp-prebuilt-sha256"
 # and Caddy's hide has no "except" — a blanket dotfile rule would 404 it with no
 # way back. Named classes only, and the reason for each:
 #
-#   .bp-prebuilt-sha256 / .bp-health-failed — this engine's own release markers.
+#   .bp-prebuilt-sha256 / .bp-build-sha256 / .bp-health-failed — this engine's own
+#                release markers.
 #   .DS_Store  — the packing machine's directory listing, INCLUDING the names of
 #                files that were never shipped.
 #   ._*        — a macOS AppleDouble sidecar: the file's resource fork and its
@@ -165,7 +181,7 @@ PREBUILT_MARK=".bp-prebuilt-sha256"
 # Barkpark.Sites.PrebuiltArtifact), so nothing NEW stages them. This hide is for
 # what is ALREADY on disk: a refusal is not retroactive, and every release staged
 # before that change is still live and still fetchable.
-HIDE_LIST="$PREBUILT_MARK $HEALTH_FAIL_MARK .DS_Store ._* PaxHeader .git .env"
+HIDE_LIST="$PREBUILT_MARK $BUILD_MARK $HEALTH_FAIL_MARK .DS_Store ._* PaxHeader .git .env"
 # log() and emit() (the BPSTAGE machine protocol) live in the common lib.
 
 # ---- Mode dispatch ---------------------------------------------------------
@@ -625,6 +641,71 @@ purge_failed_release() {
   log "HEALTH: purged releases/$BUILD_ID — a redeploy of this build_id rebuilds from source instead of re-gating broken bytes"
 }
 
+# ---------------------------------------------------------------------------
+# THE RELEASE RECEIPT (charter D188).  Every release this engine stages records
+# the sha256 of its own served tree, so "which bytes went live" is answerable
+# from the box AND comparable against the control-plane row.  Before this, only
+# the PREBUILT arm kept any receipt at all and it recorded the UPLOADED TARBALL,
+# not the tree — so for a box build (30,627 of 30,633 rows) a wrong artifact
+# could be served and no instrument anywhere would disagree with itself.
+#
+# NOT an identity key, and never to be used as one: one content_rev has produced
+# four distinct artifacts on this fleet.  This digest answers "are the bytes I
+# staged the bytes that are live", nothing more.
+#
+# sha256_stdin: the box is Linux (coreutils sha256sum), the SELF-TEST runs on
+# stock macOS bash 3.2 (shasum).  Both, or the digest is empty and every caller
+# degrades to "not measured" rather than to a wrong answer.
+sha256_stdin() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | cut -d' ' -f1
+  else
+    printf ''
+  fi
+}
+
+# release_tree_digest <dir> — 64 hex over the tree's FILES, names included, or ""
+# when the dir is gone or no sha256 tool exists.  The engine's OWN markers are
+# excluded: they are written INTO the tree after it is measured (and $BUILD_MARK
+# would otherwise hash itself), so excluding them is what makes the STAGE-time
+# read and the SWITCH-time re-read the same quantity.
+#
+# `-exec … +` then a text sort (rather than find -print0 | sort -z | xargs -0):
+# BSD sort has no -z on the macOS the self-test runs on, and sha256sum/shasum both
+# escape a newline-bearing name rather than emitting a raw newline.
+release_tree_digest() { # <dir>
+  local dir="$1"
+  [ -d "$dir" ] || { printf ''; return 0; }
+  ( cd "$dir" 2>/dev/null || exit 0
+    find . -type f \
+      ! -name "$PREBUILT_MARK" ! -name "$BUILD_MARK" ! -name "$HEALTH_FAIL_MARK" \
+      -exec "$SHA_CMD" {} + 2>/dev/null \
+    | LC_ALL=C sort \
+    | sha256_stdin )
+}
+
+# The per-file digest command release_tree_digest hands to find(1).  Resolved
+# once, because `find -exec` needs a program name, not a shell function.
+if command -v sha256sum >/dev/null 2>&1; then SHA_CMD=sha256sum
+elif command -v shasum >/dev/null 2>&1; then SHA_CMD="shasum"
+else SHA_CMD=""
+fi
+
+# write_release_receipt <reldir> — measure the staged tree and drop $BUILD_MARK
+# in it.  Best-effort in BOTH directions: a box with no sha256 tool, or a
+# read-only release dir, costs the receipt and never the deploy.  Echoes the
+# digest (empty when it could not be taken) so the caller can narrate it.
+write_release_receipt() { # <reldir>
+  local reldir="$1" sha=""
+  [ -n "$SHA_CMD" ] || { printf ''; return 0; }
+  sha="$(release_tree_digest "$reldir")"
+  printf '%s' "$sha" | grep -qE '^[0-9a-f]{64}$' || { printf ''; return 0; }
+  printf '%s\n' "$sha" > "$reldir/$BUILD_MARK" 2>/dev/null || true
+  printf '%s' "$sha"
+}
+
 # STAGE's one copy idiom, shared by the two arms that produce bytes (a local
 # build's dist/, and an uploaded prebuilt tree).  Stage into a .partial dir, then
 # swap it in, so a crash mid-copy never leaves a half-populated
@@ -680,6 +761,11 @@ stage_dir_into_release() { # <srcdir> <what> [prebuilt_sha256]
   # must not sort on the builder's clock. Best-effort: a stamp that cannot be
   # written costs the ordering precision, never the deploy.
   stamp_release_staged "$RELEASES" "$BUILD_ID"
+  # THE RECEIPT (D188).  Taken AFTER the rename, over the tree that is now the
+  # release, and for BOTH arms — a prebuilt release's $PREBUILT_MARK names the
+  # uploaded TARBALL, which is not the quantity a "did the live tree change"
+  # comparison needs.  STAGED_SHA is read by the STAGE narration below.
+  STAGED_SHA="$(write_release_receipt "$RELDIR")"
   return 0
 }
 
@@ -1550,6 +1636,34 @@ FAKENPM
     check "current -> releases/e1"             [ "$(livenow)" = releases/e1 ]
     check "npm really ran"                     grep -q 'npm run build' "$SRC/.npm-calls"
 
+    echo "[selftest] e2e: a BOX-BUILD release records WHICH bytes it carries (D188)"
+    # Before this, only the PREBUILT arm kept a receipt, and it recorded the
+    # uploaded TARBALL — so for a box build (30,627 of 30,633 prod rows) nothing
+    # on the box or on the row could name the served bytes, and a wrong artifact
+    # could be served with no instrument anywhere disagreeing with itself.
+    E1_SHA="$(cat "$E2E_SITE/releases/e1/.bp-build-sha256" 2>/dev/null || true)"
+    check "the box-build release wrote .bp-build-sha256" \
+      sh -c "printf '%s' '$E1_SHA' | grep -qE '^[0-9a-f]{64}$'"
+    check "STAGE narrates the digest on stdout" \
+      grep -q "BPSTAGE name=STAGE status=ok build_id=e1 .*bp-build-sha256=$E1_SHA" "$E2E/out.log"
+    check "SWITCH narrates an INDEPENDENT re-read of the LIVE tree" \
+      grep -q "BPSTAGE name=SWITCH status=ok build_id=e1 .*bp-served-sha256=$E1_SHA" "$E2E/out.log"
+    # The receipt is a receipt, not an identity key: it must be a function of the
+    # BYTES, and the two readings agree only because nothing moved between them.
+    check "the digest is REPRODUCIBLE over the same tree" \
+      sh -c "[ \"\$(cd '$E2E_SITE/releases/e1' && find . -type f ! -name '.bp-build-sha256' ! -name '.bp-prebuilt-sha256' ! -name '.bp-health-failed' -exec $SHA_CMD {} + | LC_ALL=C sort | $SHA_CMD | cut -d' ' -f1)\" = '$E1_SHA' ]"
+    # MUTATION, in the direction that matters: change one served byte and the
+    # digest must MOVE.  A digest that survives an edit certifies nothing.
+    cp "$E2E_SITE/releases/e1/index.html" "$E2E/e1-index.bak"
+    printf '<!--tamper-->' >> "$E2E_SITE/releases/e1/index.html"
+    E1_SHA_AFTER="$(cd "$E2E_SITE/releases/e1" && find . -type f ! -name '.bp-build-sha256' ! -name '.bp-prebuilt-sha256' ! -name '.bp-health-failed' -exec $SHA_CMD {} + | LC_ALL=C sort | $SHA_CMD | cut -d' ' -f1)"
+    check "one tampered byte MOVES the digest"  [ "$E1_SHA_AFTER" != "$E1_SHA" ]
+    check "the RECORDED receipt still names the ORIGINAL bytes — i.e. the tamper is DETECTABLE" \
+      [ "$(cat "$E2E_SITE/releases/e1/.bp-build-sha256" 2>/dev/null)" != "$E1_SHA_AFTER" ]
+    cp "$E2E/e1-index.bak" "$E2E_SITE/releases/e1/index.html"
+    check "the tree is restored (the digest comes back)" \
+      sh -c "[ \"\$(cd '$E2E_SITE/releases/e1' && find . -type f ! -name '.bp-build-sha256' ! -name '.bp-prebuilt-sha256' ! -name '.bp-health-failed' -exec $SHA_CMD {} + | LC_ALL=C sort | $SHA_CMD | cut -d' ' -f1)\" = '$E1_SHA' ]"
+
     echo "[selftest] e2e: a no-op redeploy of the live build speaks on every stage"
     : > "$SRC/.npm-calls"
     rc="$(e2e_deploy e1)"
@@ -1829,7 +1943,7 @@ FAKENPM
       grep -qE '^BPSTAGE name=BUILD status=skipped build_id=pb1 detail="prebuilt bytes \(.*, sha256 0123456789ab\) - no build ran on this box"' "$E2E/pb.out"
     check "STAGE genuinely RAN (started)"             pb_saw STAGE started pb1
     check "STAGE ok names the prebuilt digest" \
-      grep -qE '^BPSTAGE name=STAGE status=ok build_id=pb1 detail="prebuilt bytes -> releases/pb1 \(.*sha256 0123456789ab\)"' "$E2E/pb.out"
+      grep -qE '^BPSTAGE name=STAGE status=ok build_id=pb1 detail="prebuilt bytes -> releases/pb1 \(.*sha256 0123456789ab\) bp-build-sha256=[0-9a-f]{64}"' "$E2E/pb.out"
     check "HEALTH ok"                                 pb_saw HEALTH ok pb1
     check "SWITCH ok"                                 pb_saw SWITCH ok pb1
     check "current -> releases/pb1"                   [ "$(pb_livenow)" = releases/pb1 ]
@@ -3592,7 +3706,7 @@ if [ "$PLAN_MODE" = build ]; then
   stage_dir_into_release "$SITE_SRC/dist" "dist/"
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
   log "STAGE: dist/ -> releases/$BUILD_ID/ ($staged_size)"
-  emit STAGE ok "dist/ -> releases/$BUILD_ID ($staged_size)"
+  emit STAGE ok "dist/ -> releases/$BUILD_ID ($staged_size) bp-build-sha256=${STAGED_SHA:-none}"
 elif [ "$PLAN_MODE" = prebuilt ]; then
   # THE BUILD LEFT THE BOX (D88).  No npm, no node_modules, no CPU contention
   # with the API that serves this site — just the shippable output, staged.
@@ -3602,7 +3716,7 @@ elif [ "$PLAN_MODE" = prebuilt ]; then
   stage_dir_into_release "$PREBUILT_DIR" "prebuilt bytes" "$PREBUILT_SHA256"
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
   log "STAGE: prebuilt bytes -> releases/$BUILD_ID/ ($staged_size, sha256 $PREBUILT_SHORT)"
-  emit STAGE ok "prebuilt bytes -> releases/$BUILD_ID ($staged_size, sha256 $PREBUILT_SHORT)"
+  emit STAGE ok "prebuilt bytes -> releases/$BUILD_ID ($staged_size, sha256 $PREBUILT_SHORT) bp-build-sha256=${STAGED_SHA:-none}"
 else
   # An already-staged redeploy used to emit NEITHER a BUILD nor a STAGE line — the
   # second path that hung a stage-watching orchestrator forever.
@@ -3891,7 +4005,15 @@ if ! do_switch; then
   exit 16
 fi
 log "SWITCH: '$SITE_SLUG' current -> releases/$BUILD_ID (atomic)"
-emit SWITCH ok "current -> releases/$BUILD_ID"
+# THE SERVED RECEIPT (D188).  An INDEPENDENT re-measurement, taken through the
+# `current` symlink AFTER the flip committed — not a re-print of STAGED_SHA.  It
+# is the only reading in this script taken over the tree Caddy is actually
+# serving, and the control plane compares the two: a SWITCH digest that differs
+# from the STAGE digest means the bytes that went live are not the bytes this run
+# staged, which is precisely the disagreement no instrument could raise before.
+SERVED_SHA="$(release_tree_digest "$CURRENT")"
+log "SWITCH: serving bp-served-sha256=${SERVED_SHA:-none} (staged ${STAGED_SHA:-none})"
+emit SWITCH ok "current -> releases/$BUILD_ID bp-served-sha256=${SERVED_SHA:-none}"
 
 # ---- RETIRE (D8) — keep newest N=5 ----------------------------------------
 # Emits even when it removes nothing — measured SILENT on 3 of 6 live deploys,
