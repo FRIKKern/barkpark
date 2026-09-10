@@ -34,6 +34,7 @@ lib/barkpark/release/secrets.ex	write_env
 lib/barkpark/repo.ex	set_local_statement_timeout!
 lib/barkpark/self_update/runner.ex	bounded_preflight
 lib/barkpark/sites/deploy_runner.ex	bounded_cmd
+lib/barkpark/sites/deploy_runner.ex	drop_staged_prebuilt
 lib/barkpark/sites/deploy_runner.ex	ensure_run_state_dir
 lib/barkpark/sites/deploy_runner.ex	entry_mtime
 lib/barkpark/sites/deploy_runner.ex	evict_build_log

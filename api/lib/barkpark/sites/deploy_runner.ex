@@ -2187,6 +2187,12 @@ defmodule Barkpark.Sites.DeployRunner do
   # manifest naming a path outside the run-state dir is REFUSED and logged, never
   # followed. That is the one property that keeps this from being an arbitrary
   # `rm -rf` driven by a file.
+  #
+  # Reachability: `dir` is the `prebuilt_dir` this module itself named under
+  # `run_state_dir()`, and it reaches `File.rm_rf/1` only through `sweep_path/3`,
+  # which invokes the fun only when the expanded path sits under the expanded
+  # `run_state_dir()`; anything else is logged and returns `:refused`.
+  # sobelow_skip ["Traversal.FileModule"]
   defp drop_staged_prebuilt(%{prebuilt_dir: dir}) when is_binary(dir),
     do: sweep_path(run_state_dir(), dir, &File.rm_rf/1)
 
