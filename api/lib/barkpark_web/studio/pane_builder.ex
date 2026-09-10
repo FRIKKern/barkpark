@@ -888,7 +888,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # row title in `list_preview.title`; when the column is blank the row shows
   # that field's value (the same rule the write path uses to fill the column),
   # and only a document with neither falls back to the unnamed-row spelling.
-  defp row_title(doc, schema \\ nil) do
+  defp row_title(doc, schema) do
     case doc.title && String.trim(doc.title) do
       nil -> preview_title(doc, schema) || unnamed_row_title(doc)
       "" -> preview_title(doc, schema) || unnamed_row_title(doc)
