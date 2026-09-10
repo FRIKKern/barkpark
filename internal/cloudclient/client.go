@@ -12,9 +12,13 @@
 // but it shares no code and no types: the two clients answer to different
 // services and must be free to drift.
 //
-// YAGNI by design (cloud-12b): no retries, no pagination, no websocket, no warm-
-// pool poll. The 25 methods below are exactly the surface the user-facing `bp`
-// Cloud commands drive; the real provisioning happens server-side and is
+// YAGNI by design (cloud-12b): no pagination, no websocket, no warm-pool poll.
+// The ONE exception is backpressure: the control plane answers 429 with the
+// number of seconds to wait, and treating that as a hard failure reports a
+// one-second throttle as a broken service. Every lazily-built client here comes
+// from newHTTPClient (retry.go), which installs a 429-ONLY retry — no 500 is
+// ever repeated. The 25 methods below are exactly the surface the user-facing
+// `bp` Cloud commands drive; the real provisioning happens server-side and is
 // reflected back in the returned Barkpark row.
 package cloudclient
 
@@ -446,7 +450,7 @@ func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: DefaultTimeout}
+	return newHTTPClient(DefaultTimeout)
 }
 
 // url joins the (trimmed) BaseURL with a leading-slash path segment. It is the
@@ -1184,7 +1188,7 @@ func (c *Client) DomainStatus(ctx context.Context, id string) (DomainStatusResul
 	// only the lazily-built fallback is widened, and only for this call.
 	dc := *c
 	if dc.HTTP == nil {
-		dc.HTTP = &http.Client{Timeout: DomainStatusTimeout}
+		dc.HTTP = newHTTPClient(DomainStatusTimeout)
 	}
 	status, raw, err := dc.do(ctx, "GET", "/v1/barkparks/"+esc(id)+"/domain-status", true, nil)
 	if err != nil {
@@ -1521,7 +1525,7 @@ func (c *Client) VerifyInstance(ctx context.Context, id string) (VerifyResult, e
 	// only the lazily-built fallback is widened, and only for this call.
 	vc := *c
 	if vc.HTTP == nil {
-		vc.HTTP = &http.Client{Timeout: VerifyTimeout}
+		vc.HTTP = newHTTPClient(VerifyTimeout)
 	}
 	status, raw, err := vc.do(ctx, "POST", "/v1/barkparks/"+esc(id)+"/verify", true, nil)
 	if err != nil {
@@ -2635,7 +2639,7 @@ func (c *Client) UploadDeploymentArtifact(ctx context.Context, siteID, deploymen
 
 	client := c.HTTP
 	if client == nil {
-		client = &http.Client{}
+		client = newHTTPClient(0)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -3532,7 +3536,7 @@ func (c *Client) FleetDeployCensus(ctx context.Context, from, to time.Time) (Dep
 	// untouched; only the lazily-built fallback is widened, and only for this call.
 	cc := *c
 	if cc.HTTP == nil {
-		cc.HTTP = &http.Client{Timeout: FleetDeployCensusTimeout}
+		cc.HTTP = newHTTPClient(FleetDeployCensusTimeout)
 	}
 	status, body, err := cc.do(ctx, "GET", "/v1/deploy-ledger/census?"+q.Encode(), true, nil)
 	if err != nil {
@@ -4302,7 +4306,7 @@ func (c *Client) Rollback(ctx context.Context, id string) (RollbackResult, error
 	// (tests) is honored untouched; only the lazily-built fallback is widened.
 	rc := *c
 	if rc.HTTP == nil {
-		rc.HTTP = &http.Client{Timeout: VerifyTimeout}
+		rc.HTTP = newHTTPClient(VerifyTimeout)
 	}
 	status, raw, err := rc.do(ctx, "POST", "/v1/barkparks/"+esc(id)+"/rollback", true, nil)
 	if err != nil {
