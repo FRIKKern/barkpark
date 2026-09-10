@@ -29,14 +29,20 @@ const drafts = bp.withConfig({ perspective: 'drafts' })
 Pair the client with `@barkpark/codegen`'s generated `BarkparkTypeMap` for fully typed reads — `doc`/`docs`/`getDocuments` narrow by document type, and an unknown type name is a compile error.
 
 ```ts
-import { typedClient } from '@barkpark/core'
-import type { BarkparkTypeMap, Post } from './barkpark.types' // run `barkpark generate`
+import { createClient, typedClient } from '@barkpark/core'
+import type { BarkparkTypeMap } from './barkpark.types' // run `barkpark generate`
 
-const bp = typedClient<BarkparkTypeMap>(client)
+const bp = typedClient<BarkparkTypeMap>(
+  createClient({
+    projectUrl: 'https://api.example.com',
+    dataset: 'production',
+    apiVersion: '2026-04-01',
+  }),
+)
 
 const post = await bp.doc('post', 'p1') // Post | null
 const posts = await bp.getDocuments('post', ['p1', 'p2']) // Array<Post | null>
-await bp.docs('post').eq('status', 'published').find() // Post[]
+const published = await bp.docs('post').eq('status', 'published').find() // Post[]
 bp.doc('psot', 'p1') // ✗ compile error — 'psot' isn't a known type
 ```
 
