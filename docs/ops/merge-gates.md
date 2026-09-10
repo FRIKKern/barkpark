@@ -806,10 +806,10 @@ because `@canonical capability:` markers in source files must be re-checked
 when a code rename rots a marker. The workflow also fires on changes to the
 gate scripts themselves and to the workflow file.
 
-### The doc-gates roster (it is not two scripts — it is twenty-five)
+### The doc-gates roster (it is not two scripts — it is twenty-six)
 
 `doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
-undersells it: it runs **25 steps labelled `(fails this job)`** plus 7
+undersells it: it runs **26 steps labelled `(fails this job)`** plus 8
 `(tripwire)` self-tests that prove a scanner still reds on a planted defect. A
 PR touching one `.ex` file runs all of them.
 
@@ -828,11 +828,12 @@ stops a merge**, and `doc-gates` **cannot block a merge** by itself. That is the
 whole of its authority.
 
 (The count read 17 until 2026-08-07 — `Never-cancel-main concurrency ratchet`
-and `Nil-polarity fail-closed gate` were missing from the table below. The 22 is
+and `Nil-polarity fail-closed gate` were missing from the table below. The 26 is
 derived by running, not transcribed:
 
 ```bash
-grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml   # → 22
+grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml   # → 26
+grep -cE '^[[:space:]]*- name: .*\(tripwire\)'        .github/workflows/doc-gates.yml   # → 8
 ```
 
 §20 CLAUSE
@@ -840,7 +841,7 @@ grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates
 below, and the workflow drift apart, and it counts the UNION of both labels so a
 revert to the old name is still counted rather than read as zero. RESIDUE, named
 rather than left to be tripped over: the unanchored `grep -c '(fails this job)'`
-returns **23**, because `.github/workflows/doc-gates.yml` quotes both labels
+returns **28**, because `.github/workflows/doc-gates.yml` quotes both labels
 inside its own corrective header — anchor on `- name:`, as above. §20 CLAUSE
 11's pass message also still spells the label `(blocking)`; it compares NUMBERS,
 so its verdict is unaffected.) In workflow order:
@@ -872,6 +873,7 @@ so its verdict is unaffected.) In workflow order:
 | 23 | Dependabot root drift | `scripts/dependabot-roots-check.sh` |
 | 24 | Silencer growth ratchet | `scripts/silencer-growth-ratchet.sh` |
 | 25 | repo-papers snapshot freshness | `node scripts/repo-papers-freshness.mjs` (+ its `(tripwire)` self-test step; added by #17151, 2026-09-09) |
+| 26 | Paper dialect ratchet | `scripts/paper-dialect-ratchet.sh` (+ its `(tripwire)` self-test step; shrink-only counts of text-keyed inline leaves and malformed widget items per in-repo paper corpus, with a non-vacuity floor that REFUSES rather than greens) |
 
 Run any of them locally with the same command CI uses — they are ordinary
 scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s
