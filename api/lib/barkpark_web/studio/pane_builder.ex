@@ -833,7 +833,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # row of a media-declaring type reserves the slot so titles align.
         media: media_field && media_url(content_value(doc, media_field)),
         media_slot: media_field != nil,
-        title: row_title(doc),
+        title: row_title(doc, schema),
         is_draft: Content.draft?(doc.doc_id),
         status: doc.status,
         badge: preview_value(doc, Map.get(preview, "badge")),
@@ -884,14 +884,21 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # `StudioLive.Handlers.Fields`: seeding a title wrote CONTENT into the block
   # the author was about to type in, and the first keystroke appended to it.
   # The moment the author types, the real title lands and this fallback is gone.
-  defp row_title(doc) do
+  # Gyldendal parity E1.8 — a type without a `title` field (author) names its
+  # row title in `list_preview.title`; when the column is blank the row shows
+  # that field's value (the same rule the write path uses to fill the column),
+  # and only a document with neither falls back to the unnamed-row spelling.
+  defp row_title(doc, schema \\ nil) do
     case doc.title && String.trim(doc.title) do
-      nil -> unnamed_row_title(doc)
-      "" -> unnamed_row_title(doc)
-      "Untitled" -> unnamed_row_title(doc)
+      nil -> preview_title(doc, schema) || unnamed_row_title(doc)
+      "" -> preview_title(doc, schema) || unnamed_row_title(doc)
+      "Untitled" -> preview_title(doc, schema) || unnamed_row_title(doc)
       title -> title
     end
   end
+
+  defp preview_title(doc, schema),
+    do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)
 
   defp unnamed_row_title(doc) do
     "Untitled #{row_type_word(doc)} · #{doc_id_tail(doc)}"

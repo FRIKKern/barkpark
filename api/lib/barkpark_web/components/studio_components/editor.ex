@@ -566,7 +566,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <div class="editor-panel" data-role="content">
         <.document_header
           dataset={@dataset}
-          title={@editor_doc.title || singleton_title(@editor_schema) || "Untitled"}
+          title={@editor_doc.title || preview_title(@editor_doc, @editor_schema) || singleton_title(@editor_schema) || "Untitled"}
           focus_on_mount={@focus_on_mount}
         >
           <:status_pill>
@@ -1090,9 +1090,21 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # Gyldendal parity E1.5 — see the Title input comment in the shell.
   defp title_input?(nil), do: true
 
+  # Gyldendal parity E1.8: a type with no `title` field renders no synthetic
+  # Title input when something else backs the list rows — a singleton (the
+  # header shows the schema title) OR a `list_preview.title` field (the title
+  # column is derived from it on write). A titleless type with neither keeps
+  # the input: it is the only thing that can name its rows.
   defp title_input?(schema) do
-    not (singleton?(schema) and is_nil(Enum.find(schema.fields, &(&1["name"] == "title"))))
+    has_title_field = not is_nil(Barkpark.Content.TitleDerivation.title_field(schema))
+
+    has_title_field or
+      not (singleton?(schema) or
+             is_binary(Barkpark.Content.TitleDerivation.preview_title_field(schema)))
   end
+
+  defp preview_title(doc, schema),
+    do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)
 
   defp singleton_title(schema) do
     if schema && singleton?(schema) && title_input?(schema) == false, do: schema.title, else: nil

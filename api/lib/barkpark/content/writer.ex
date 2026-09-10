@@ -26,6 +26,7 @@ defmodule Barkpark.Content.Writer do
     Labels,
     SchemaDefinition,
     Sheets,
+    TitleDerivation,
     WriteScope
   }
 
@@ -211,6 +212,9 @@ defmodule Barkpark.Content.Writer do
     # keeps costing zero Repo reads (a property `writer_test` states in prose
     # and relies on: those cases run with no sandbox at all).
     attrs = from_envelope(attrs, declared_status_field?(type, attrs, dataset, opts))
+    # Gyldendal parity E1.8 — a type with no `title` field fills the column from
+    # `list_preview.title`; costs a schema read only when the title is blank.
+    attrs = TitleDerivation.maybe_derive(attrs, type, dataset, opts)
     raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) || generate_id(type)
     doc_id = DraftId.draft_id(raw_id)
 
@@ -802,6 +806,9 @@ defmodule Barkpark.Content.Writer do
     # otherwise have that field lifted away by an UPDATE after surviving its
     # create.
     attrs = from_envelope(attrs, declared_status_field?(type, attrs, dataset, opts))
+    # Gyldendal parity E1.8 — see create: the autosave/patch door derives the
+    # title the same way, so an existing titleless row is back-filled on save.
+    attrs = TitleDerivation.maybe_derive(attrs, type, dataset, opts)
     raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id)
     doc_id = raw_id && DraftId.draft_id(raw_id)
 
