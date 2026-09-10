@@ -49,7 +49,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
         "admin"
       ])
 
-    conn = build_conn() |> init_test_session(%{"api_token" => @admin_token})
+    conn = scoped_conn() |> init_test_session(%{"api_token" => @admin_token})
     {:ok, conn: conn}
   end
 
@@ -1019,7 +1019,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
         criteria: criteria
       )
 
-      conn = build_conn() |> init_test_session(%{"api_token" => raw})
+      conn = scoped_conn() |> init_test_session(%{"api_token" => raw})
 
       {:ok, conn: conn, default_ws: default_ws, ws_b: ws_b, proj_b: proj_b, scoped_token: token}
     end
