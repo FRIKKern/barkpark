@@ -124,6 +124,38 @@
 #   CRON_PROBE_POLL_TRIES  how many times to look for the dispatched run (12)
 #   CRON_PROBE_POLL_SLEEP  seconds between those looks (5)
 
+# INTERPRETER GUARD — MEASURED 2026-09-09 by RUNNING it, not by grepping
+# (task-b896488e115d1eed). `sh scripts/cron-overdue-probe.sh` on this Mac's bash 3.2.57 in
+# POSIX mode (which is what /bin/sh is here) exited 0.
+#
+# WHY THAT 0 IS A LIE HERE: the process substitution(s) at line(s) 307, 308 sit
+# inside a command substitution, so bash parses them only when the $( ) is
+# expanded. Under POSIX mode that expansion printed
+#   scripts/cron-overdue-probe.sh: command substitution: syntax error near unexpected token `('
+# to stderr, the captured variable came back EMPTY, and an empty diff/comm reads
+# as "no drift" — after which this script printed its own OK/PASS/VERDICT line.
+# The verdict was rendered; the comparison behind it never ran. That was observed
+# in the 2026-09-09 census, on a clean tree, in this script's own output.
+#
+# CI IS NOT EXPOSED: every workflow invokes this with `bash`. This is an agent-
+# and operator-facing trap — someone typing `sh scripts/cron-overdue-probe.sh` out of habit —
+# and it is recorded here as one, not overstated as a CI hole.
+#
+# The guard below is copied verbatim (modulo the script name) from
+# scripts/required-checks.test.sh:119-129. It must stay POSIX-parseable and must
+# stay ABOVE the first process substitution: bash reads incrementally, so
+# anything the guard sits after is code a POSIX-mode shell has already run.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "cron-overdue-probe.sh: needs bash (this script uses process substitution); run: bash scripts/cron-overdue-probe.sh${1:+ $1}" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "cron-overdue-probe.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/cron-overdue-probe.sh${1:+ $1}" >&2
+    exit 2
+    ;;
+esac
+
 set -uo pipefail
 
 REPO_ROOT="${CRON_PROBE_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -171,6 +203,8 @@ grip-suite.yml|periodic|1440|2026-09-06: nightly Grip suite (cron 03:25Z); carri
 landed-open-report.yml|report|1440|2026-09-07: daily ledger digest (cron 06:27Z), wired in #16640. Classified report, not critical: its own header states a red here means THE READ FAILED, findings exit 0 to the step summary, and it deliberately carries no push: arm so it renders no check run anywhere. A day late is a day late — and report class is what leaves check_fallbacks satisfied without inventing a trigger this workflow was designed not to have.
 main-gate-watch.yml|critical|30|2026-09-03: the second scream on main tip verdicts. push-refused:scripts/main-gate-watch.test.sh — a push arm was MEASURED harmful (wave 60 D721: 2 of 2 push runs red on tip 026c5b1d78 while main was green, because ~15 s after a merge no check-run row exists yet) and a committed test reds if one comes back. Its fallback is THIS probe: a workflow that may not carry a trigger fallback must at least be watched for silence.
 paper-readers.yml|report|1440|2026-09-03: daily paper-reader digest; did not run at all on 09-03, which is the tolerated case for a report.
+pipefail-sigpipe-scan.yml|periodic|10080|2026-09-09: weekly repo-state scan for pipelines that can return 141 instead of a verdict (cron 41 5 * * 1, wired in #17081). PERIODIC because the whole point is the sweep, not the minute: the class it hunts is latent and static, a week late costs nothing, and it carries push: branches [main] plus a pull_request arm, so a week of cron silence still leaves it running on every merge. Same shape as the twoslash/grip-suite/deploy-harnesses rows.
+pr-meta.yml|periodic|1440|2026-09-09: the nightly venue of the filebase aesthetics critic (cron 17 5 * * *), moved off the PR path in #17079 because it was 573 s of a 615 s run for an advisory that cannot block a merge. PERIODIC, not critical: the critic is an advisory score sweep with its own watcher, it is ADDITIONALLY armed by push: branches [main] (scoped to changes under tooling/aesthetics/ or this workflow), and a skipped night costs a score sample, not a safety net.
 renew-mail-cert.yml|report|43200|2026-09-03: monthly certificate renewal. 3x a month is a 90-day bound, which is not a useful alarm — the certificate expiry is the alarm, and it is watched where it lands, not here.
 required-checks-drift.yml|periodic|1440|2026-09-03: daily drift audit of the required set; carries push: branches [main] already.
 scaffy-catalog-drift.yml|report|1440|2026-09-03: daily catalog drift digest; carries push: branches [main].

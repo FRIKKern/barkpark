@@ -431,7 +431,7 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     # `:session` branch is textually FIRST, so a lens that reads the joined
     # helper body first-hit-wins hands `require_user` to all ELEVEN delegating
     # /v1/sites routes — and the distinctions this family draws (a PAT reaches
-    # six of them and is turned away from five; one of those five is admin-only)
+    # six of them and is turned away from five; two of those five are admin-only)
     # become unsayable in the contract a CLI or SDK author reads.
     #
     # This is a GATE defect, never a live auth hole: every one of the eleven
@@ -439,7 +439,6 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     session_only = [
       {"GET", "/v1/sites/:id/deployments"},
       {"GET", "/v1/sites/:id/previews"},
-      {"POST", "/v1/sites/:id/env"},
       {"POST", "/v1/sites/:id/domains"}
     ]
 
@@ -447,7 +446,12 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     # is a different tier, and folding it into session_only would re-assert the
     # `user` cell this route no longer enforces.
     admin_only = [
-      {"POST", "/v1/sites/:id/github"}
+      {"POST", "/v1/sites/:id/github"},
+      # Moved off `:session` by the owner ruling on task-9dfa4854b5e22e94
+      # (built as task-49f9a3dbb16823ce): the site env blob is a whole-blob
+      # REPLACE of the secrets injected into the site's build and runtime, so
+      # it now sits at the same tier as POST/DELETE /v1/env-vars.
+      {"POST", "/v1/sites/:id/env"}
     ]
 
     pat_reachable = [
@@ -494,22 +498,32 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
 
     # THE DISCRIMINATION, stated as an inequality so it cannot pass vacuously:
     # two routes into the same helper, differing only in the mode they pass.
-    assert raw_route_guard("POST", "/v1/sites/:id/env") !=
+    # (The `:session` exemplar is DOMAINS, not ENV — env moved to `:team_admin`
+    # under the owner ruling on task-9dfa4854b5e22e94, and an exemplar that
+    # changes mode stops discriminating the mode it was chosen for.)
+    assert raw_route_guard("POST", "/v1/sites/:id/domains") !=
              raw_route_guard("PATCH", "/v1/sites/:id"),
-           "POST /v1/sites/:id/env (:session) and PATCH /v1/sites/:id ({:ability, \"write\"}) " <>
+           "POST /v1/sites/:id/domains (:session) and PATCH /v1/sites/:id ({:ability, \"write\"}) " <>
              "collapsed to one guard key — the lens is back to first-clause-wins"
 
-    assert guard_tier()[raw_route_guard("POST", "/v1/sites/:id/env")] == "user"
+    assert guard_tier()[raw_route_guard("POST", "/v1/sites/:id/domains")] == "user"
     assert guard_tier()[raw_route_guard("PATCH", "/v1/sites/:id")] == "user(s)"
 
     # THREE modes, three tiers, from one helper — the same inequality extended to
     # `:team_admin`, so a lens that collapsed it back onto `:session` reds here.
     assert raw_route_guard("POST", "/v1/sites/:id/github") !=
-             raw_route_guard("POST", "/v1/sites/:id/env"),
-           "POST /v1/sites/:id/github (:team_admin) and POST /v1/sites/:id/env (:session) " <>
+             raw_route_guard("POST", "/v1/sites/:id/domains"),
+           "POST /v1/sites/:id/github (:team_admin) and POST /v1/sites/:id/domains (:session) " <>
              "collapsed to one guard key — the lens is back to first-clause-wins"
 
     assert guard_tier()[raw_route_guard("POST", "/v1/sites/:id/github")] == "admin"
+
+    # The re-tiered route itself, asserted on BOTH halves: the body now takes the
+    # `:team_admin` arm and the table row says `admin`. If either half moves
+    # without the other, this reds — which is the whole point of the row moving
+    # in the same commit as the enforcement.
+    assert raw_route_guard("POST", "/v1/sites/:id/env") == "require_team_admin"
+    assert documented_tier("POST", "/v1/sites/:id/env") == "admin"
 
     # …and `user(s)` must survive normalization as its own tier, or the census
     # folds it back into `user` and both halves agree again by construction.

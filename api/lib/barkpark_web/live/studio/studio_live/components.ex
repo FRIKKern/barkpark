@@ -25,6 +25,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # HTTP 500 on /studio/rest and /studio/plugins). The literal `name="…"` sites
   # in this file stay literal — the icons tripwire owns those.
   alias BarkparkWeb.Icons
+  alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths}
   alias BarkparkWeb.Studio.StudioLive.Shared
@@ -73,6 +74,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:sidebar_slug_draft, :string, default: nil)
   attr(:sidebar_slug_feedback, :any, default: nil)
   attr(:workspace_label, :string, default: nil)
+  # task-be3b3aa6da5df3a2 (instance 3) — threaded PAST this component to the
+  # inspector, exactly like `width_bucket` above: this view does not read with
+  # it, `paper_metadata_sidebar/1` does.
+  attr(:scope, :list, default: [])
   # sup-w5 — the socket-owned save mirror (Shared.Paper computes both on every
   # write). Threaded into the canvas <.paper_block_editor> below so the footer
   # echoes the REAL status and a plugin-halt raises the shared banner, instead
@@ -483,6 +488,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           :if={@paper_doc}
           paper_doc={@paper_doc}
           dataset={@dataset}
+          scope={@scope}
           workspace_label={@workspace_label}
           panel_open={@sidebar_open}
           user_opened={@sidebar_user_opened}
@@ -589,6 +595,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:paper_doc, :map, required: true)
   attr(:dataset, :string, required: true)
   attr(:workspace_label, :string, default: nil)
+  # task-be3b3aa6da5df3a2 (instance 3) — THE TENANT SCOPE, threaded as data.
+  # The Relations rows below resolve each reference's TITLE through
+  # `Content.reference_title/4`, and the 3-arity call this replaced dropped
+  # `workspace_id`, `project_id`, `caller_context` AND `grant_scoped` — every
+  # narrowing the body of the SAME paper applies when it resolves the SAME
+  # reference (`Shared.Paper.paper_stream_items/3`). A component function is
+  # handed `assigns` and nothing else, so the scope has to ARRIVE here; the
+  # only call site computes it with `ScopeHelpers.scope_opts_from_assigns/1`,
+  # the one seam (never a hand-rolled `[workspace_id: …]` copy).
+  # Default `[]` keeps an un-threaded call site byte-identical to the 3-arity
+  # behaviour it had, rather than silently failing closed mid-render.
+  attr(:scope, :list, default: [])
   attr(:panel_open, :boolean, default: true)
   # D91. Distinct from `panel_open` and NOT a synonym for it: `panel_open` is
   # the server's state (and it also gates whether the body/title exist in the
@@ -682,7 +700,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             Map.put(
               rel,
               :title,
-              Barkpark.Content.reference_title(rel.id, rel.ref_type, assigns.dataset)
+              Barkpark.Content.reference_title(
+                rel.id,
+                rel.ref_type,
+                assigns.dataset,
+                assigns.scope
+              )
             )
           end)
       )
@@ -1609,6 +1632,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_halt={Map.get(assigns, :paper_halt)}
           shares_admin?={@caps.admin}
           dataset={@dataset}
+          scope={ScopeHelpers.scope_opts_from_assigns(assigns)}
           scope_prefix={@scope_prefix}
           streams={@streams}
           backlinks_used_by={@backlinks_used_by}

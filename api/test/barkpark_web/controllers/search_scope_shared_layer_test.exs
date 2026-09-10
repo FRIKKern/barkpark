@@ -76,6 +76,11 @@ defmodule BarkparkWeb.SearchScopeSharedLayerTest do
       from(w in Workspace, where: w.slug == "default")
       |> Repo.update_all(set: [slug: "default-vacated-#{System.unique_integer([:positive])}"])
 
+    # The seat is `workspaces.is_default` since task-566dc5be4871353b, so the
+    # rename above frees the SLUG and vacates nothing. One shared definition of
+    # "vacate", so the next identity change moves one line, not thirteen.
+    vacate_default_seat!()
+
     refute Tenancy.get_default_workspace(),
            "the Default seat is OCCUPIED — every absence assertion below would " <>
              "pass by tenant-equality instead of by the sentinel, i.e. vacuously"

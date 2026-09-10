@@ -1028,7 +1028,7 @@ defmodule Barkpark.Tasks.Close do
   defp check_close_artifact(%Document{} = doc, "done", reason, landed, override_reason) do
     cond do
       close_artifact_exempt?(doc) -> {:ok, nil}
-      close_artifact?(reason, landed) -> {:ok, nil}
+      close_artifact?(reason, landed, stored_landed(doc)) -> {:ok, nil}
       is_nil(override_reason) -> {:error, :close_reason_needs_artifact}
       true -> {:ok, %{"reason" => override_reason, "close_reason" => reason}}
     end
@@ -1124,12 +1124,48 @@ defmodule Barkpark.Tasks.Close do
   # `$ ` (the shell-prompt convention every close packet in this repo uses).
   @run_block ~r/```|(?:^|\n)[ \t]*\$ \S/
 
-  defp close_artifact?(reason, landed) do
+  # THREE ARMS, AND THE ORDER IS THE POINT (cch-w63). The STRUCTURED field is
+  # asked first and second; prose is the last resort, not the first.
+  #
+  #   1. the caller's `landed` digest — what this close asserts.
+  #   2. the row's STORED `content.landed` — what the merge path already
+  #      RECORDED, at merge time, without anyone being awake.
+  #   3. the prose reason.
+  #
+  # ARM 2 IS THE NEW ONE AND IT CLOSES A MEASURED HOLE. `POST
+  # /v1/tasks/:id/landed` (Tasks.Landed, PR #14993) is called by
+  # .github/workflows/landed-mark.yml on every push to main and writes
+  # `content.landed = %{"prs" => [...], "commits" => [...]}` on the row the
+  # squash body's `Task:` trailer names. That is the structured row-to-PR link
+  # this gate exists to demand — and until now the gate could not see it: it
+  # read ONLY the digest the CLOSER passed. A row whose merge sha was recorded
+  # by CI days earlier still had to have the same two facts RETYPED INTO PROSE
+  # (`#17092 ... 3aea6e99a`) before it could close done, and the `@pr_number` +
+  # `@hex_sha` regexes below are what accepted the retyping. So the machine
+  # already held the answer and made a human reconstruct it from a sentence,
+  # which is the reconstruction the structured field was built to end.
+  #
+  # IT CANNOT WEAKEN THE GATE. `landed_artifact?/1` is unchanged and is the same
+  # predicate all three arms are judged by: a PR number AND a 7-40 hex sha. A
+  # stored digest that names only a PR, only a commit, or neither still fails
+  # arm 2 exactly as a caller-supplied one does, and a row with no
+  # `content.landed` at all reaches arm 3 with the behaviour it has today. The
+  # only closes this admits are closes whose evidence the SERVER ITSELF wrote.
+  defp close_artifact?(reason, landed, stored) do
     landed_artifact?(landed) or
+      landed_artifact?(stored) or
       (is_binary(reason) and
          (Regex.match?(@run_block, reason) or
             (Regex.match?(@pr_number, reason) and Regex.match?(@hex_sha, reason))))
   end
+
+  # The row's own landing record, as the merge path left it. `nil` for a row
+  # that never landed — `landed_artifact?/1`'s non-map clause reads that as no
+  # artifact, so an absent key is never an accidental pass.
+  defp stored_landed(%Document{content: content}) when is_map(content),
+    do: Map.get(content, "landed")
+
+  defp stored_landed(_doc), do: nil
 
   # The structured twin of the prose form: a land digest that names BOTH a PR and
   # a commit. `%{"prs" => [...], "commit" => <sha>}` is written by the lead seal

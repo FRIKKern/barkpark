@@ -199,7 +199,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites/:id/deployments/:dep_id/promote user(s) rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact (write ability)
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/deployments/:dep_id/artifact user(s)  upload a PREBUILT dist for a minted deployment, then start it (write ability)
-      POST    /v1/sites/:id/env    user      replace the encrypted env blob
+      POST    /v1/sites/:id/env    admin     replace the encrypted env blob (admin-or-owner; task-9dfa4854b5e22e94)
       POST    /v1/sites/:id/domains user     add a domain to a site
       DELETE  /v1/sites/:id/domains user     remove a domain from a site — frees the hostname
       POST    /v1/sites/:id/github  admin    link a GitHub repo + branch + webhook secret (manual)
@@ -9068,8 +9068,19 @@ defmodule BarkparkCloud.Web.Router do
 
   # POST /v1/sites/:id/env {env: {...}} → 200 {ok: true}. Replaces the whole
   # encrypted env blob (Vault.encrypt-stored, never echoed back).
+  #
+  # ADMIN-OR-OWNER (owner ruling on task-9dfa4854b5e22e94, built as
+  # task-49f9a3dbb16823ce). This blob is the exact set of secrets injected into
+  # the site's BUILD (GET /v1/builder/sites/:id/env) and into its RUNNING
+  # container (GET /v1/agent/sites/:id/env), and the write is a whole-blob
+  # REPLACE — so a plain member holding only membership could previously wipe
+  # every secret of every site the team owns with one call. It now gates at the
+  # same tier as its sibling secret-write surface, POST/DELETE /v1/env-vars.
+  #
+  # The REPLACE semantics are UNCHANGED by that ruling: `{"env": {}}` still
+  # erases the blob — the ruling gates WHO may call it, not what the call does.
   post "/v1/sites/:id/env" do
-    with_team_site(conn, fn conn, site ->
+    with_team_site(conn, :team_admin, fn conn, site ->
       env = conn.body_params["env"]
 
       cond do
@@ -11815,8 +11826,11 @@ defmodule BarkparkCloud.Web.Router do
   # below firing (a colourised unclassified capture would otherwise fall to the
   # `cause` arm and print the leaky pass-through paragraph ABOVE the clean one).
   defp class_then_capture(value) do
+    # dr-w23-bl: `stripped` STAYS — it is what `humanize/1` must be fed (see
+    # the paragraph above), not a step toward `capture`. `capture` is
+    # `strip_ansi |> scrub` on the same input, i.e. `FailureCopy.raw/1`.
     stripped = FailureCopy.strip_ansi(value)
-    capture = FailureCopy.scrub(stripped)
+    capture = FailureCopy.raw(value)
 
     case FailureCopy.humanize(stripped) do
       ^capture -> capture
@@ -14111,8 +14125,40 @@ defmodule BarkparkCloud.Web.Router do
       slug: site && site.slug,
       domains: (site && site.domains) || [],
       preview_slug: d.preview_slug,
-      preview_host: d.preview_host
+      preview_host: d.preview_host,
+      # cf-agent-sites-tls-channel: the CP→box TLS channel. The box derives its
+      # Caddy TLS mode from serving_mode (internal/runtime/runtime.go
+      # tlsModeForServing: cf_proxied → `tls internal`, everything else →
+      # on_demand), and until this key rode the claim the field was zero-valued
+      # on every real box — so a Cloudflare-proxied origin fell back to
+      # on-demand ACME, whose challenge cannot complete through the proxy, and
+      # served a 526.
+      #
+      # ONLY serving_mode travels. The Site row also carries `tls_mode`
+      # ("on_demand" | "cf_internal" | "cf_origin_ca"), but that is a SECOND
+      # vocabulary the box does not speak (caddyfile.TLSMode* is "on_demand" |
+      # "internal" | "origin_ca"), and cf-box-render-internal-tls already made
+      # the box derive its TLS mode from serving_mode. Shipping tls_mode too
+      # would put two sources of the same truth on one wire.
+      serving_mode: agent_serving_mode(site)
     })
+  end
+
+  # The serving mode the agent claim carries, read STRAIGHT FROM THE RECORD —
+  # the same rule `BarkparkCloud.DomainStatus` applies. `Map.get/2` (not struct
+  # access) so a row whose schema predates the `serving_mode` column degrades to
+  # "direct" (fail-closed to the pure-standalone on-demand path) instead of
+  # putting a JSON null on the wire; a nil site degrades the same way.
+  # Public (`@doc false`) for ONE reason: the absent-column degrade cannot be
+  # reached through the HTTP wire — a row read out of Postgres always HAS the
+  # column — so the fail-closed rule is asserted against the function itself.
+  @doc false
+  def agent_serving_mode(site) do
+    case Map.get(site || %{}, :serving_mode) do
+      "cf_proxied" -> "cf_proxied"
+      :cf_proxied -> "cf_proxied"
+      _ -> "direct"
+    end
   end
 
   # Scope check: does deployment_id's site belong to barkpark? Used by the

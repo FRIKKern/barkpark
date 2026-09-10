@@ -1,0 +1,155 @@
+name: dependabot-task-trailer
+
+# THE BOT PATH THROUGH THE TASK GATE (task-361f1ad90eb1b46e, remedy (c)).
+#
+# MEASURED 2026-09-09 with `gh pr list --state open --search "head:dependabot/"`:
+# 33 open non-draft `dependabot/` PRs, 0 carrying a `Task:` trailer, and the
+# required context `PR references an active task` read completed/failure on
+# every sampled head. Not one of them can merge, and each keeps paying CI.
+# The gate is CORRECT and the dependabot grouping is fine — there was simply no
+# way for a BOT to reference a ledger row.
+#
+# This workflow supplies the reference and nothing else: it appends
+# `Task: task-3e5d6364196a7cda` — ONE standing row for dependency bumps — to a
+# dependabot PR's body. The gate then evaluates that PR exactly like any other.
+# NOBODY IS EXEMPTED. A human PR with no trailer still reds; that is the
+# positive control in scripts/dependabot-task-trailer.test.sh §3, and it is the
+# reason remedy (a) ("if: github.actor != 'dependabot[bot]'" on the enforcing
+# steps) was rejected — it weakens a required gate by author.
+#
+# ── WHY pull_request_target AND NOT pull_request ────────────────────────────
+# GitHub gives a workflow triggered by `pull_request` from dependabot a READ-ONLY
+# GITHUB_TOKEN, regardless of the `permissions:` block — `pull-requests: write`
+# is silently downgraded, so `gh pr edit --body` would 403 on exactly the PRs
+# this exists for. `pull_request_target` runs in the BASE repo's context with a
+# writable token, which is why it is the only trigger that can do this job.
+#
+# THE RISK THAT CARRIES, and how it is closed: pull_request_target has repo
+# secrets and a write token while the PR's head is untrusted. So this workflow
+# NEVER CHECKS OUT OR EXECUTES PR CODE. actions/checkout on pull_request_target
+# defaults to the BASE ref (github.ref is the base branch), and that default is
+# taken deliberately and stated here rather than left implicit: the only thing
+# executed is scripts/dependabot-task-trailer.sh AS IT EXISTS ON THE BASE
+# BRANCH. No `ref:` override, no build, no dependency install, no PR script.
+# The PR contributes exactly three strings, all consumed as `env:` (never
+# interpolated into a shell body, where a crafted branch name would be code):
+# the actor, the head ref, and the body.
+#
+# ── WHY THE GATE RE-EVALUATES AFTER THE EDIT ────────────────────────────────
+# Editing a PR body emits a `pull_request` event of type `edited`, and
+# pr-task-gate.yml ALREADY lists `edited` in its `types:` (it is documented
+# there as load-bearing, for the sticky-red case). So this file does not edit
+# pr-task-gate.yml at all, and neither of that file's two escape hatches is
+# touched by this PR: not its cutoff step, and not its `hotfix!`
+# labeled/unlabeled pair.
+
+on:
+  # TWO TRIGGERS, one per job, and the split is deliberate.
+  #
+  # `pull_request` carries a READ-ONLY token and checks out the PR's OWN head —
+  # which is exactly what the self-test job needs: a PR that edits the injector
+  # or its harness must be tested against the version IT ships, not against the
+  # base. It can safely run PR code because that trigger grants no secrets and
+  # no write scope.
+  #
+  # `pull_request_target` carries the writable token the body edit needs, and
+  # runs the BASE ref only. Neither job is reachable from the other's trigger:
+  # each carries an `if: github.event_name == …`.
+  #
+  # The self-test lives in THIS file and not in shell-harnesses.yml for the same
+  # reason pr-task-gate.yml hosts its own: that workflow is workflow-level
+  # `on: paths:` filtered, and a paths-filtered workflow emits NO check run at
+  # all on a PR it skips (D18) — so a PR editing this injector could land with
+  # its harness never having run.
+  pull_request:
+  pull_request_target:
+    # `opened` is the arm that matters (dependabot opens in bursts). `reopened`
+    # and `synchronize` cover a re-opened or force-pushed bump whose body was
+    # never stamped. NOT `edited`: this workflow EDITS the body, so `edited`
+    # would make it its own trigger — the rc-4 idempotence clause breaks that
+    # loop on the first pass, but a self-triggering workflow that relies on a
+    # predicate to stop is one bug away from an infinite loop, so the trigger is
+    # simply not listed.
+    types: [opened, reopened, synchronize]
+
+# contents: read is the floor; pull-requests: write is the ONE elevation, and it
+# is what `gh pr edit --body` needs. Nothing here writes code, contents or
+# checks.
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  # Per PR, and NOT cancel-in-progress: two runs for the same PR must serialise
+  # rather than race, because both would read the same un-stamped body and the
+  # second append would create the two-distinct-ids state the gate REFUSES.
+  group: dependabot-task-trailer-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  trailer:
+    name: Dependabot PRs carry the standing task trailer
+    runs-on: ubuntu-latest
+    # The author clause, at the JOB level so a human PR spends no runner time.
+    # It is repeated inside the script (which is where it is mutation-tested):
+    # this `if:` is the cost saver, the script's clause is the guard.
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.actor == 'dependabot[bot]' &&
+      startsWith(github.event.pull_request.head.ref, 'dependabot/')
+    steps:
+      - name: Checkout the BASE ref only (never PR code)
+        uses: actions/checkout@v4
+        # No `ref:` — on pull_request_target the default is the base branch.
+        # Overriding it to the PR head is what turns this trigger into a
+        # remote-code-execution primitive. Do not add one.
+
+      - name: Decide whether a trailer is needed
+        id: decide
+        env:
+          ACTOR: ${{ github.actor }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -uo pipefail
+          rc=0
+          bash scripts/dependabot-task-trailer.sh > new-body.txt || rc=$?
+          echo "rc=${rc}" >> "$GITHUB_OUTPUT"
+          case "$rc" in
+            0) echo "append=1" >> "$GITHUB_OUTPUT"
+               echo "A Task: trailer will be appended to PR #${{ github.event.pull_request.number }}." >> "$GITHUB_STEP_SUMMARY" ;;
+            3) echo "append=0" >> "$GITHUB_OUTPUT"
+               echo "NO-OP: not a dependabot PR. The task gate decides this PR on its own merits." >> "$GITHUB_STEP_SUMMARY" ;;
+            4) echo "append=0" >> "$GITHUB_OUTPUT"
+               echo "NO-OP: this PR body already carries a Task: trailer (idempotent)." >> "$GITHUB_STEP_SUMMARY" ;;
+            *) echo "::error title=dependabot-task-trailer could not decide::The decision script exited ${rc}, which is neither append (0) nor either no-op (3, 4). Refusing to edit a PR body on a verdict that was not reached. See the step log."
+               exit 1 ;;
+          esac
+
+      - name: Append the standing trailer
+        if: steps.decide.outputs.append == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh pr edit "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --body-file new-body.txt
+          echo "Appended Task: task-3e5d6364196a7cda to PR #${{ github.event.pull_request.number }}." >> "$GITHUB_STEP_SUMMARY"
+
+  selftest:
+    name: Dependabot trailer injector self-test
+    runs-on: ubuntu-latest
+    # `pull_request` only: this job runs the PR's own harness, which is safe
+    # because that trigger's token is read-only and carries no secrets. Under
+    # pull_request_target it would test the base ref and prove nothing about the
+    # change in front of it.
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck the injector and its harness
+        run: shellcheck scripts/dependabot-task-trailer.sh scripts/dependabot-task-trailer.test.sh
+      - name: "Hermetic fixtures: injector arms, author-clause mutation, and the gate's positive control"
+        run: bash scripts/dependabot-task-trailer.test.sh

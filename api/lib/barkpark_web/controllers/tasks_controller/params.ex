@@ -2376,15 +2376,57 @@ defmodule BarkparkWeb.TasksController.Params do
 
   @doc """
   Reads the LEAD-OWNED, UNENFORCED `--merge-gated` override off a stamp
-  request, from the
-  kebab manifest flag (query key `merge-gated`) or the snake JSON body key.
-  Absent / anything but a truthy scalar → `false`: the override must be ASKED
-  FOR, never inferred, because it is the one flag that lets a caller flip a
-  row the lead owns.
+  request, from the kebab manifest flag (query key `merge-gated`) or the snake
+  JSON body key. It is no longer a boolean: THE OVERRIDE CARRIES ITS REASON.
+
+  Returns `{:ok, reason}` for a non-blank string, `{:ok, nil}` when the override
+  was not asked for (absent, blank, or an explicitly falsy scalar — the override
+  must be ASKED FOR, never inferred, because it is the one flag that lets a
+  caller flip a row the lead owns), and `{:error, :invalid_stamp, msg}` for the
+  LEGACY BARE-BOOLEAN spelling (`merge-gated=true`, `1`, `yes`, `on`).
+
+  THE BARE BOOLEAN IS REFUSED, NOT SILENTLY ACCEPTED. While it was a boolean the
+  override cost one word and recorded nothing, so a reflex override and a
+  deliberate one were byte-identical on the record. Accepting `true` here as "an
+  override with no reason" would keep exactly that hole open for every direct
+  POST and every unupgraded client — and the merge-gate verdict itself was moved
+  server-side precisely because a CLI-only guard is bypassed by a direct POST.
+  This REFUSES more than before and permits nothing new: no criterion becomes
+  stampable that was not stampable already.
   """
-  @spec stamp_merge_gated(map()) :: boolean()
+  @spec stamp_merge_gated(map()) ::
+          {:ok, String.t() | nil} | {:error, :invalid_stamp, String.t()}
   def stamp_merge_gated(params) do
-    stamp_flag?(Map.get(params, "merge_gated") || Map.get(params, "merge-gated"))
+    merge_gated_reason(Map.get(params, "merge_gated") || Map.get(params, "merge-gated"))
+  end
+
+  @merge_gated_bare_truthy [true, 1, "true", "1", "yes", "on", "TRUE", "True", "Yes", "On"]
+
+  # The falsy spellings a boolean flag used to accept. They are NOT a reason —
+  # a caller spelling the override off asked for no override, and reading
+  # "false" as a signed sentence would let the word `false` release a gate.
+  @merge_gated_bare_falsy ["false", "0", "no", "off", "FALSE", "False", "No", "Off"]
+
+  defp merge_gated_reason(v) when v in @merge_gated_bare_truthy,
+    do: {:error, :invalid_stamp, merge_gated_reason_message()}
+
+  defp merge_gated_reason(v) when is_binary(v) do
+    case String.trim(v) do
+      "" -> {:ok, nil}
+      reason -> if reason in @merge_gated_bare_falsy, do: {:ok, nil}, else: {:ok, reason}
+    end
+  end
+
+  defp merge_gated_reason(_), do: {:ok, nil}
+
+  defp merge_gated_reason_message do
+    "merge-gated now takes a REASON, not a boolean: you sent the bare truthy spelling. " <>
+      "The override is the ONE way a --met flips a row the lead closes on merge, and while it was " <>
+      "a bare boolean it recorded nothing — a reflex override and a deliberate one were identical " <>
+      "on the record. Send merge-gated=<why this stamp is the lead's to make> (bp: " <>
+      "--merge-gated \"PR #123 merged to main as <sha>\"). The reason is persisted beside the stamp " <>
+      "at content.merge_gate_autostamp.stamp_overrides[].reason, on the same write as the flip — " <>
+      "the shape close_override.* already uses. It is still an ASSERTION and not a permission."
   end
 
   @doc """

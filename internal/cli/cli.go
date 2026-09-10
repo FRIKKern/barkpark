@@ -427,6 +427,17 @@ func Execute(args []string) int {
 			return exitOK
 		}
 		return runDoctor(out, rest[1:])
+	case "latency":
+		// `bp latency [--name <handle>] [--url <url>] [--token <tok>]` — name
+		// WHICH route is slow, from the per-route dispatch histogram the box
+		// already serves at GET /v1/instance/metrics and nothing read. Its own
+		// flags are not globals, so they arrive in rest. Refuses (non-zero, no
+		// figure) when the slot is too young for a since-boot cumulative read.
+		if g.help {
+			printRouteLatencyHelp(out)
+			return exitOK
+		}
+		return runRouteLatency(out, g, rest[1:])
 	case "server":
 		// `bp server ls` is an alias for `bp servers`; it dispatches from the
 		// nounBuiltins registry above. `server` is NOT a manifest noun, so no
@@ -653,6 +664,17 @@ func Execute(args []string) int {
 	}
 	if noun == "task" && verb == "pulse" {
 		return runTaskPulse(out, g, ctx, m, *cmd, tail)
+	}
+
+	// `bp task landed` — client-side ergonomic wrapper: `--pr N` with no
+	// `--commit` resolves N to `mergeCommit.oid`, never the branch tip. This
+	// repo squash-merges, so a branch tip is `diverged` from main forever and a
+	// landing recorded against it is a merge record no reader can
+	// ancestor-check. The POST is unchanged; the wrapper only fills in the sha
+	// it resolved, or REFUSES (it never falls back to headRefOid). See
+	// tasks_landed_cmd.go.
+	if noun == "task" && verb == "landed" {
+		return runTaskLanded(out, g, ctx, m, *cmd, tail)
 	}
 
 	return runCommand(out, g, ctx, m, *cmd, tail)

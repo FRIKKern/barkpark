@@ -258,8 +258,8 @@ defmodule BarkparkCloud.SitesDeployTest do
     end
   end
 
-  # ssw8 — WHAT the content revision is derived from, and what it says when it
-  # could not be read.
+  # ssw8 / charter D162 — WHAT the content revision is derived from, and what it
+  # says when it could not be read.
   #
   # The revision used to be sha256 of the WHOLE analytics body, whose
   # `recent_activity` is the last 50 mutation events for the entire dataset —
@@ -269,9 +269,54 @@ defmodule BarkparkCloud.SitesDeployTest do
   # FAILED it minted a random `"u" <> hex` marker that was shipped to the box,
   # baked into `<meta name="bp-content-rev">` and then asserted EQUAL by HEALTH —
   # a green certified by comparing an invented value to itself.
+  #
+  # The FIRST fix filtered that window down to the bound type. It could not work,
+  # and the docstring that said it did was false: the box truncates to 50 events
+  # BEFORE the cloud filters, so another type's churn EVICTS the bound type out of
+  # the window and moves the hash with zero publishes of that type (D162: ≈19
+  # minutes of history on the live fleet, a real publish demonstrated evicted to
+  # EMPTY inside 20 minutes, ≥24 % of a day's distinct revisions eviction
+  # artefacts). The probe now asks the box a TYPE-SCOPED published question
+  # instead of filtering a fleet-shared firehose, so there is no window to evict.
   describe "content_rev — published + type-scoped, honest when unreadable" do
+    @query_path "/w/acme/p/blog/v1/data/query/production/post"
     @analytics_path "/w/acme/p/blog/v1/data/analytics/production"
 
+    # The box's answer to the type-scoped published query: this type's published
+    # `total` plus the newest published document of the type.
+    defp query(opts) do
+      docs =
+        case Keyword.get(opts, :head, {"hello", "r1", "2026-07-28T10:00:00Z"}) do
+          nil -> []
+          {id, rev, updated} -> [%{"_id" => id, "_rev" => rev, "_updatedAt" => updated}]
+        end
+
+      body = %{
+        "result" => %{
+          "perspective" => "published",
+          "documents" => docs,
+          "count" => length(docs),
+          "limit" => 1,
+          "offset" => 0,
+          "hasMore" => false,
+          "total" => Keyword.get(opts, :total, 2)
+        },
+        "syncTags" => [],
+        "ms" => 1,
+        "etag" => "e",
+        "schemaHash" => "s"
+      }
+
+      {:ok, %{status: 200, body: Jason.encode!(body)}}
+    end
+
+    defp event(id, type, doc_id, mutation, ts) do
+      %{"id" => id, "type" => type, "doc_id" => doc_id, "mutation" => mutation, "timestamp" => ts}
+    end
+
+    # The DATASET-WIDE analytics body — the fleet-shared 50-event firehose the
+    # projection used to hash. Programmed alongside the query path so a test can
+    # churn it and prove the revision does NOT follow.
     defp analytics(fields) do
       body =
         %{
@@ -285,17 +330,27 @@ defmodule BarkparkCloud.SitesDeployTest do
       {:ok, %{status: 200, body: Jason.encode!(body)}}
     end
 
-    defp event(id, type, doc_id, mutation, ts) do
-      %{"id" => id, "type" => type, "doc_id" => doc_id, "mutation" => mutation, "timestamp" => ts}
+    defp program_box(query_response, analytics_response \\ analytics([])) do
+      StudioLinkFakeHttpClient.program(%{
+        @query_path => query_response,
+        @analytics_path => analytics_response
+      })
     end
 
-    defp program_analytics(response),
-      do: StudioLinkFakeHttpClient.program(%{@analytics_path => response})
-
-    test "draft churn and other types do NOT move the revision — the no-op survives a live dataset" do
+    # THE EVICTION PIN (task dr-w11-bl-content-rev-projection-evicts, charter
+    # D162). RED before the fix, and red for the exact reason the row names: the
+    # bound type's published event starts inside the dataset-wide window, another
+    # type's churn fills all 50 slots, and the old projection's post-hoc filter
+    # returns [] where it returned [e1] — a moved revision, a fresh build_id and a
+    # rebuild of byte-identical output, with ZERO publishes of the bound type in
+    # between. The site's own published content — the count and the newest
+    # published document — is held BYTE-IDENTICAL across the two reads, so the
+    # only thing that changed is other types' churn.
+    test "another type's churn EVICTING the bound type from the activity window does NOT move the revision" do
       {bp, site} = setup_site()
 
-      program_analytics(
+      program_box(
+        query(total: 2, head: {"hello", "r1", "2026-07-28T10:00:00Z"}),
         analytics(
           recent_activity: [
             event("e1", "post", "hello", "createOrReplace", "2026-07-28T10:00:00Z")
@@ -304,11 +359,102 @@ defmodule BarkparkCloud.SitesDeployTest do
       )
 
       assert {:ok, d1} = Deploy.enqueue(site, bp)
+      assert is_binary(d1.content_rev) and d1.content_rev != ""
+
+      # SETTLE FIRST — otherwise this test has no subject. `recover_conflict/3`
+      # answers `{:duplicate, active}` for the still-`queued` d1 whenever the
+      # re-keyed `(site_id, environment)` index refuses the insert, and it does
+      # that for a DIFFERENT build_id too. Left in flight, the assertion below
+      # passes on the defective code for a reason that has nothing to do with the
+      # revision: it measures the one-active-build guard, not the projection.
+      # With d1 settled, only a repeat `build_id` can produce `:duplicate`.
+      settle(d1)
+
+      # 50 slots of `task` churn later, the bound type's only published event has
+      # been truncated off the end of the window. Nothing this site publishes
+      # changed: same published total, same newest published document.
+      program_box(
+        query(total: 2, head: {"hello", "r1", "2026-07-28T10:00:00Z"}),
+        analytics(
+          total_documents: 53,
+          types: [
+            %{"type" => "post", "total" => 3, "published" => 2, "drafts" => 1},
+            %{"type" => "task", "total" => 50, "published" => 50, "drafts" => 0}
+          ],
+          recent_activity:
+            for i <- 50..1//-1 do
+              minute = String.pad_leading(Integer.to_string(i), 2, "0")
+              event("t#{i}", "task", "t-#{i}", "patch", "2026-07-28T11:#{minute}:00Z")
+            end
+        )
+      )
+
+      assert {:duplicate, dup} = Deploy.enqueue(site, bp),
+             "an evicted activity window must not mint a new build of byte-identical output"
+
+      assert dup.id == d1.id and dup.build_id == d1.build_id
+      assert dup.content_rev == d1.content_rev
+      assert length(Registry.list_deployments(site, 10)) == 1
+    end
+
+    # The same eviction, one rung below `enqueue/5` — the revision itself, with no
+    # deployment row and therefore no index in the way. This is the assertion the
+    # row's invariant is literally about: the projection's answer must not move
+    # when only ANOTHER TYPE churns.
+    test "the revision itself is unmoved by another type's churn filling the activity window" do
+      {bp, site} = setup_site()
+
+      program_box(
+        query(total: 2, head: {"hello", "r1", "2026-07-28T10:00:00Z"}),
+        analytics(
+          recent_activity: [
+            event("e1", "post", "hello", "createOrReplace", "2026-07-28T10:00:00Z")
+          ]
+        )
+      )
+
+      assert {:ok, rev_before} = Deploy.content_rev_probe(site, bp)
+
+      program_box(
+        query(total: 2, head: {"hello", "r1", "2026-07-28T10:00:00Z"}),
+        analytics(
+          total_documents: 53,
+          types: [
+            %{"type" => "post", "total" => 3, "published" => 2, "drafts" => 1},
+            %{"type" => "task", "total" => 50, "published" => 50, "drafts" => 0}
+          ],
+          recent_activity:
+            for i <- 50..1//-1 do
+              minute = String.pad_leading(Integer.to_string(i), 2, "0")
+              event("t#{i}", "task", "t-#{i}", "patch", "2026-07-28T11:#{minute}:00Z")
+            end
+        )
+      )
+
+      assert {:ok, rev_after} = Deploy.content_rev_probe(site, bp)
+
+      assert rev_after == rev_before,
+             "the bound type published nothing between these two reads — only `task` churn " <>
+               "evicted its event out of the dataset-wide window"
+    end
+
+    test "draft churn and other types do NOT move the revision — the no-op survives a live dataset" do
+      {bp, site} = setup_site()
+
+      program_box(query(total: 2, head: {"hello", "r1", "2026-07-28T10:00:00Z"}))
+
+      assert {:ok, d1} = Deploy.enqueue(site, bp)
+      # Settle it: an in-flight d1 makes `:duplicate` the answer to EVERY second
+      # enqueue (see the eviction pin above), which would make this test green
+      # over a projection that had moved.
+      settle(d1)
 
       # The SAME published content, on a dataset that has since churned: a draft
       # of the bound type was saved, an unrelated `task` was closed, the totals
-      # and the draft counts moved with them. Nothing the site PUBLISHES changed.
-      program_analytics(
+      # and the draft counts moved with them. Nothing the site PUBLISHES changed —
+      # so the type-scoped published answer is unchanged too.
+      program_box(
+        query(total: 2, head: {"hello", "r1", "2026-07-28T10:00:00Z"}),
         analytics(
           total_documents: 5,
           types: [
@@ -323,35 +469,24 @@ defmodule BarkparkCloud.SitesDeployTest do
         )
       )
 
-      assert {:duplicate, ^d1} = Deploy.enqueue(site, bp),
+      assert {:duplicate, dup} = Deploy.enqueue(site, bp),
              "a draft-only / other-type mutation must not mint a new build of byte-identical output"
 
+      assert dup.id == d1.id and dup.build_id == d1.build_id
       assert length(Registry.list_deployments(site, 10)) == 1
     end
 
     test "a real PUBLISHED change to the bound type DOES move the revision — the fix is not a constant" do
       {bp, site} = setup_site()
 
-      program_analytics(
-        analytics(
-          recent_activity: [
-            event("e1", "post", "hello", "createOrReplace", "2026-07-28T10:00:00Z")
-          ]
-        )
-      )
+      program_box(query(total: 2, head: {"hello", "r1", "2026-07-28T10:00:00Z"}))
 
       assert {:ok, d1} = Deploy.enqueue(site, bp)
 
-      # A published post is edited: same count, a new published event of the bound
-      # type. The site's output really does change, so the build must.
-      program_analytics(
-        analytics(
-          recent_activity: [
-            event("e2", "post", "hello", "createOrReplace", "2026-07-28T10:05:00Z"),
-            event("e1", "post", "hello", "createOrReplace", "2026-07-28T10:00:00Z")
-          ]
-        )
-      )
+      # A published post is edited: same count, but the edit sets its
+      # `updated_at`, so it is the head of the `_updatedAt:desc` order with a new
+      # `_rev`. The site's output really does change, so the build must.
+      program_box(query(total: 2, head: {"hello", "r2", "2026-07-28T10:05:00Z"}))
 
       # (deploy-truth W1: one active build per site, so each mint settles before
       # the next — three builds in flight at once is exactly what the re-keyed
@@ -362,14 +497,8 @@ defmodule BarkparkCloud.SitesDeployTest do
       refute d2.build_id == d1.build_id
       settle(d2)
 
-      # …and so does a brand-new published document of the bound type, even if the
-      # activity window has rolled past every event.
-      program_analytics(
-        analytics(
-          types: [%{"type" => "post", "total" => 4, "published" => 3, "drafts" => 1}],
-          recent_activity: []
-        )
-      )
+      # …and so does a brand-new published document of the bound type.
+      program_box(query(total: 3, head: {"world", "r3", "2026-07-28T10:09:00Z"}))
 
       assert {:ok, d3} = Deploy.enqueue(site, bp)
       refute d3.content_rev in [d1.content_rev, d2.content_rev]
@@ -378,7 +507,7 @@ defmodule BarkparkCloud.SitesDeployTest do
     test "an UNREADABLE box ships an EMPTY content_rev — never a fabricated one — and still rebuilds" do
       {bp, site} = setup_site()
 
-      program_analytics({:ok, %{status: 502, body: "upstream down"}})
+      program_box({:ok, %{status: 502, body: "upstream down"}})
 
       assert {:ok, d1} = Deploy.enqueue(site, bp)
 
@@ -411,12 +540,37 @@ defmodule BarkparkCloud.SitesDeployTest do
     test "the probe reports :error (not a value) when the box cannot be read" do
       {bp, site} = setup_site()
 
-      program_analytics({:ok, %{status: 502, body: "upstream down"}})
+      program_box({:ok, %{status: 502, body: "upstream down"}})
       assert Deploy.content_rev_probe(site, bp) == :error
 
-      program_analytics(analytics([]))
+      program_box(query([]))
       assert {:ok, rev} = Deploy.content_rev_probe(site, bp)
       assert byte_size(rev) == 12
+    end
+
+    # The read is TYPE-SCOPED at the door, not filtered after the fact — the
+    # difference the row is about. Asserted against the URL the fake actually
+    # saw, so a projection that quietly went back to the dataset-wide firehose
+    # reds here even if its hash happened to agree.
+    test "the probe reads the type-scoped PUBLISHED query, never the dataset-wide activity window" do
+      {bp, site} = setup_site()
+
+      program_box(query([]))
+      assert {:ok, _rev} = Deploy.content_rev_probe(site, bp)
+
+      urls = Enum.map(StudioLinkFakeHttpClient.requests(), & &1.url)
+
+      assert Enum.any?(urls, &String.contains?(&1, "/v1/data/query/production/post")),
+             "expected a type-scoped published read, saw #{inspect(urls)}"
+
+      assert Enum.any?(urls, &String.contains?(&1, "perspective=published")),
+             "the admin token sees drafts too — the perspective must be pinned: #{inspect(urls)}"
+
+      assert Enum.any?(urls, &String.contains?(&1, "count=true")),
+             "the published TOTAL is half the projection: #{inspect(urls)}"
+
+      refute Enum.any?(urls, &String.contains?(&1, "/v1/data/analytics/")),
+             "the dataset-wide 50-event window is the defect — it must not be read at all"
     end
   end
 
@@ -1875,6 +2029,62 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert [{:rollback, payload}] = FakeBoxRelay.calls()
       assert payload.mode == "rollback"
       assert payload.slug == site.slug
+    end
+
+    # deploy-reliability W12 — WHICH KEY NAMES THE TARGET. `rollback/2` used to
+    # read `body["build_id"] || body["target_build"] || body["current_build"]`,
+    # which reads as "whichever key the box happened to send wins" — a live
+    # identity divergence, since the three keys could name different builds.
+    # They cannot: the box's raw body never reaches `rollback/2`. The only
+    # producer of a 2xx rollback reply is `BoxRelay.HTTP.rollback/2`, which
+    # CONSTRUCTS `%{"status" => "rolled_back", "build_id" => target_build(body)}`
+    # from the box's `TARGET_BUILD=<id>` stdout line, so the other two keys could
+    # never fire. These two tests pin the collapsed contract in both directions.
+    test "the target is read from `build_id` ALONE — the retired fallback keys are not read" do
+      {bp, site} = setup_site()
+
+      {:ok, prev} = Registry.create_deployment(site, %{build_id: "prevbuild0000001"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "building"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "pushing"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "live"})
+      {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000001"})
+      {:ok, site} = Registry.set_site_current_deployment(site, live.id)
+
+      # A body shaped like the retired second and third arms. No transport in
+      # this repo can produce it, so it must NOT move the live pointer — reading
+      # it would mean the plane trusts a key its own relay never sends.
+      FakeBoxRelay.program(
+        rollback:
+          {:ok, 200,
+           %{
+             "status" => "rolled_back",
+             "target_build" => "prevbuild0000001",
+             "current_build" => "prevbuild0000001"
+           }}
+      )
+
+      assert {:ok, result} = Deploy.rollback(site, bp)
+      assert result.deployment_id == nil
+      assert result.previous_deployment_id == live.id
+      assert Repo.get(Site, site.id).current_deployment_id == live.id
+      refute prev.id == Repo.get(Site, site.id).current_deployment_id
+    end
+
+    test "a 2xx rollback body with NO build_id skips the pointer write and still answers ok" do
+      {bp, site} = setup_site()
+
+      {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000002"})
+      {:ok, site} = Registry.set_site_current_deployment(site, live.id)
+
+      # The REAL nil case: `BoxRelay.HTTP` puts the "build_id" key in every 2xx
+      # reply, but its value is nil when the box printed no `TARGET_BUILD=` line.
+      # The route answers 200 and the CLI gates on status alone — so the recorded
+      # truth is that the pointer still names the build we rolled AWAY from.
+      FakeBoxRelay.program(rollback: {:ok, 200, %{"status" => "rolled_back"}})
+
+      assert {:ok, result} = Deploy.rollback(site, bp)
+      assert result.deployment_id == nil
+      assert Repo.get(Site, site.id).current_deployment_id == live.id
     end
 
     test "a box with no previous release is a FAILURE, not a cheerful no-op" do

@@ -793,7 +793,7 @@ defmodule Barkpark.Tasks.StampTest do
                  criterion: 1,
                  criterion_text: text,
                  outcome: {:met, "PR #123 merged, sha an ancestor of origin/main"},
-                 merge_gated: true
+                 merge_gated: "PR #1 merged to main; the lead is closing the gate"
                )
 
       row = Enum.at(stamped.content["acceptance_criteria"], 1)
@@ -1234,7 +1234,7 @@ defmodule Barkpark.Tasks.StampTest do
           observed_epoch: epoch,
           criterion: 1,
           criterion_text: text,
-          merge_gated: true,
+          merge_gated: "PR #1 merged to main; the lead is closing the gate",
           outcome: {:met, "PR #123 merged"}
         )
 

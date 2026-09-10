@@ -85,8 +85,29 @@ jobs:
     # Never a silent false: fail, or run everything.
     name: Dispatch (console paths)
     runs-on: ubuntu-latest
+    # ── THE VERDICT CHANNEL, EXTENDED TO THE DISPATCHER (D776, wave 64) ─────
+    # Same contract as every other channel in this file — read only to choose
+    # the sentence a human reads, never consulted by anything that computes
+    # pass/fail. Wired here because this job was the LAST exit-2-capable one
+    # without a channel, and it was carried as the single NAMED exemption in
+    # the D776 emitter (scripts/console-path-escape-check.test.sh, case 8).
+    # `scripts/console-path-escape-check.sh --match console` exits 2 on an
+    # unknown path-set name and on a path set that resolved to an EMPTY pattern;
+    # under `set -euo pipefail` that 2 used to propagate and kill this job with
+    # no verdict at all, so a REFUSAL to compute the path set reached the merge
+    # button as a bare `FAIL changes (dispatcher): failure` — indistinguishable
+    # from a dispatcher that MEASURED an unresolvable base.
+    #
+    # Only ONE step here can publish (the `sets` step below); the checkout has
+    # no exit-2 vocabulary, and a job that dies there publishes nothing, which
+    # the aggregator reads as "no verdict published" exactly as before.
+    #
+    # This does NOT change the dispatcher's fail-closed contract: every path
+    # below that cannot answer still `exit 1`s, and `console` is still never
+    # emitted as a guess. The verdict only NAMES which kind of red this is.
     outputs:
       console: ${{ steps.sets.outputs.console }}
+      verdict: ${{ steps.sets.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -139,6 +160,17 @@ jobs:
         run: |
           set -euo pipefail
 
+          # THE VERDICT WRAPPER (see this job's `outputs:` note). Published
+          # BEFORE the exit, in the same step that exits — the shape proven to
+          # survive `exit 1` on run 31136979488. `${GITHUB_OUTPUT:-}` is guarded
+          # so publishing a verdict can never itself become the failure: this
+          # step body is extracted and executed by the harness with no
+          # GITHUB_OUTPUT bound, and an unguarded redirect would die under
+          # `set -u` before the classification could print. `return 0` so a
+          # `verdict …` call is never the last command whose status `set -e`
+          # reads.
+          verdict() { if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$1" >> "$GITHUB_OUTPUT"; fi; return 0; }
+
           event="${{ github.event_name }}"
           if [ "$event" != "pull_request" ]; then
             # push-to-main (and anything else): NEVER skip. Main is the branch
@@ -151,7 +183,8 @@ jobs:
 
           base="${{ github.event.pull_request.base.sha }}"
           if [ -z "$base" ]; then
-            echo "::error::dispatcher: the PR carries no base sha. Refusing to guess — a guessed base skips the harness and reports green."
+            verdict REFUSED
+            echo "::error::dispatcher REFUSED: the PR carries no base sha. Refusing to guess — a guessed base skips the harness and reports green."
             exit 1
           fi
 
@@ -161,7 +194,8 @@ jobs:
             git fetch --no-tags --quiet origin "$base" 2>/dev/null || true
           fi
           if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-            echo "::error::dispatcher: PR base sha ${base} is not resolvable in this checkout. Refusing to emit a path verdict from an unknown base."
+            verdict REFUSED
+            echo "::error::dispatcher REFUSED: PR base sha ${base} is not resolvable in this checkout. Refusing to emit a path verdict from an unknown base."
             exit 1
           fi
 
@@ -173,7 +207,8 @@ jobs:
           # the base's ENTIRE content and dispatches true for the wrong reason,
           # which is exactly the "verdict from an unknown base" this job refuses.
           if ! git merge-base "$base" HEAD >/dev/null 2>&1; then
-            echo "::error::dispatcher: PR base ${base} and HEAD share NO common ancestor, so the three-dot diff is undefined. Refusing to emit a path verdict — and refusing a two-dot fallback, which would sweep in the base's entire content. Rebase the branch onto its base branch."
+            verdict REFUSED
+            echo "::error::dispatcher REFUSED: PR base ${base} and HEAD share NO common ancestor, so the three-dot diff is undefined. Refusing to emit a path verdict — and refusing a two-dot fallback, which would sweep in the base's entire content. Rebase the branch onto its base branch."
             exit 1
           fi
 
@@ -207,17 +242,35 @@ jobs:
           fi
 
           # The path set is declared ONCE, in the ratchet that proves it.
-          console="$(printf '%s\n' "$changed" | bash scripts/console-path-escape-check.sh --match console)"
+          #
+          # THE EXIT CODE IS CAPTURED, NOT SWALLOWED. `--match` exits 2 when it
+          # REFUSES to answer — an unknown path-set name, or a set name that
+          # resolved to an EMPTY pattern (an empty ERE matches every line, so
+          # the script refuses rather than return it). Left bare under
+          # `set -euo pipefail` that 2 killed this step with no classification,
+          # and the merge button read a refusal as an ordinary failure.
+          rc=0
+          console="$(printf '%s\n' "$changed" | bash scripts/console-path-escape-check.sh --match console)" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            case "$rc" in
+              2) v=REFUSED ;;
+              *) v=UNINTERPRETABLE ;;
+            esac
+            verdict "$v"
+            echo "::error::dispatcher ${v}: scripts/console-path-escape-check.sh --match console exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause. No path verdict is emitted — the harness runs or the gate reds, never a silent skip."
+            exit 1
+          fi
 
           case "${console}" in
             true | false) ;;
             *)
-              echo "::error::dispatcher: refusing to emit the uninterpretable verdict console=${console}."
+              verdict UNINTERPRETABLE
+              echo "::error::dispatcher UNINTERPRETABLE: refusing to emit the uninterpretable path answer console=${console}."
               exit 1
               ;;
           esac
 
-          echo "verdict: console=${console}"
+          echo "path answer: console=${console}"
           echo "console=${console}" >> "$GITHUB_OUTPUT"
 
   path-escape:
@@ -351,15 +404,21 @@ jobs:
     # none of which has an exit-2 vocabulary. Empty is read by the aggregator as
     # "no verdict published", exactly as before this channel existed.
     outputs:
+      # LISTED IN STEP ORDER, so this chain can be read straight against the
+      # step list below. Only one step can have published (a job stops at its
+      # first failing step and a passing step publishes nothing), so `||` picks
+      # that one whatever the order; the order is here for the reader, not for
+      # the semantics. The derived censuses precede the pinned ones — see the
+      # step-order note above the census family.
       verdict: >-
-        ${{ steps.sweep.outputs.verdict
-        || steps.member-authority.outputs.verdict
-        || steps.binding-census.outputs.verdict
-        || steps.refusal-copy-census.outputs.verdict
-        || steps.unknown-census.outputs.verdict
+        ${{ steps.member-authority.outputs.verdict
+        || steps.sweep.outputs.verdict
         || steps.reason-arm-census.outputs.verdict
         || steps.me-envelope-census.outputs.verdict
-        || steps.agent-event-census.outputs.verdict }}
+        || steps.binding-census.outputs.verdict
+        || steps.refusal-copy-census.outputs.verdict
+        || steps.agent-event-census.outputs.verdict
+        || steps.unknown-census.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
 
@@ -836,6 +895,165 @@ jobs:
       - name: CSS/token drift gate
         run: node cloud/priv/static/__css_check.mjs
 
+      # ── STEP ORDER IS PART OF THE INSTRUMENT (cch-w45, wave 45) ────────────
+      #
+      # THE FOUR CENSUSES BELOW RUN DERIVED-FIRST, PINNED-SECOND, ON PURPOSE.
+      # Read that as a decision, not as the order they happened to be written
+      # in — the next slice to add a census has to pick a side.
+      #
+      # GitHub runs a job's steps in file order and every step here carries the
+      # default `success()` condition: no step in this workflow has an `if:`
+      # (all five `if:` hits are job-level) and none has `continue-on-error`
+      # (all five hits are comments BANNING it under D19). So the FIRST census
+      # to exit 1 SKIPS every census after it. Measured on b00d793c0: one
+      # unpinned elevated write added to app.js reds the binding census, and
+      # the reason-arm and /v1/me censuses — both rc 0 on that same tree — never
+      # run. Their honest state for that run is "I could not look", not "clean".
+      #
+      # WHAT THIS IS NOT: it is not a false green. `console-gate` is
+      # `if: always()` and computes `bad` from `needs.*.result` alone, so a red
+      # census correctly reds the required context and blocks the merge either
+      # way. The cost is purely DIAGNOSTIC — two instruments that would have
+      # spoken are silent, so the run cannot say "the census moved AND the
+      # envelope is still honest." Do not write this up as blinding a gate.
+      #
+      # WHY DERIVED-FIRST IS THE RIGHT SIDE OF THE COIN: a hand-pinned EXPECT
+      # should never be allowed to gate a derived diff. The reason-arm and
+      # /v1/me censuses compute BOTH sides (router.ex's emission sites, the
+      # served /v1/me bodies) and hold no pinned population, so they cannot be
+      # red for a re-pinning reason. The binding and refusal-copy censuses
+      # carry pinned rows — 339 refusal-copy sites hash the SENTENCE — so they
+      # are the steps most often red for a bookkeeping reason, and exactly the
+      # ones that should not silence a derived instrument. The four steps have
+      # no dependency on each other (verified: all rc 0 in ANY order on a clean
+      # tree), so the order is free to be chosen this way.
+      #
+      # THE ALTERNATIVE, NOT TAKEN AND WHY: one job per census (D17's
+      # precedent) makes all four verdicts independent check-run facts and is
+      # strictly better on this axis, but it multiplies four `actions/setup-node`
+      # + checkout cycles onto every console PR for a diagnostic gain. Ordering
+      # buys most of it for nothing. If a fifth census lands, revisit.
+
+      # ── THE REASON-ARM CENSUS (charter D448/D449, wave 40) ──────────────────
+      #
+      # Sibling to the elevated-write binding census BELOW (it used to sit
+      # above this step; see the step-order note at the top of this family), and
+      # the same shape of instrument: it reads a fact out of the ELIXIR tree
+      # that the console's own harness is structurally incapable of seeing.
+      # DERIVED on both sides — router.ex's emission sites against app.js's
+      # FORBIDDEN_REASON_COPY arms — which is why it runs before the pinned
+      # censuses rather than behind them.
+      #
+      # Auth.forbidden/2 can merge a `reason:` CAUSE around a 403 — for refusals
+      # where no static authority label would be true (a rank-relative member
+      # refusal: the SAME admin refused on a peer admin succeeds on a plain
+      # member). The console maps those through FORBIDDEN_REASON_COPY. A cause
+      # with no arm there does NOT degrade to silence: forbiddenEvidenceCopy
+      # returns null, friendly() falls through, and the person reads the curated
+      # `forbidden` entry — a sentence written for a different refusal entirely.
+      # That is exactly how a plain team admin clicking Remove on a peer admin
+      # came to read "Only the team owner can manage billing." (charter D448).
+      #
+      # WHY IT CANNOT BE A CASE IN __app.test.mjs, and this is not a merge-window
+      # convenience: the bug is a key that was NEVER WRITTEN, so there is nothing
+      # in app.js to diff and no drift to detect — the map is complete with
+      # respect to itself. The only oracle for "which causes exist" is the
+      # EMITTER, in another language in another tree. Measured (D449): adding the
+      # two missing arms to app.js alone ships 919/919 green and smoke 104/104.
+      #
+      # PROVEN ABLE TO LOSE, IN BOTH DIRECTIONS, BEFORE THIS STEP WAS WIRED:
+      #   rc=1 — against origin/main's app.js it names all three emission sites
+      #          (router.ex:4958 twice, via the dynamic binding it resolves one
+      #          hop back, and :4997 literal), and clears the moment the arms land
+      #   rc=2 — it REFUSES to measure rather than pass on an input it cannot
+      #          read: an unresolvable `reason:` binding, a renamed/removed
+      #          FORBIDDEN_REASON_COPY, an unrecognised evidence key, or a
+      #          zero-emission census (a broken extractor is not a clean tree)
+      #
+      # It reads cloud/lib/barkpark_cloud/web/router.ex, which is already in the
+      # console dispatch set (scripts/console-path-escape-check.sh), so a router
+      # edit that grows a new cause reaches this step.
+      - name: Refusal reason-arm census (router causes ⊆ console arms)
+        id: reason-arm-census
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__reason_arm_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __reason_arm_census.mjs::__reason_arm_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
+      # ── THE /v1/me ENVELOPE CENSUS (charter D478/D480/D481, wave 43) ────────
+      #
+      # Another sibling in this family, and the one that audits the HARNESS
+      # ITSELF rather than app.js. Everything the OTHER censuses in this job
+      # certify — the two pinned ones below included — and everything
+      # __app.test.mjs and smoke.mjs certify, is certified against
+      # ONE fixture producer: `me()` in __preview__/scenarios.mjs, the single
+      # builder behind every logged-in scenario's GET /v1/me. If that producer
+      # mints a different account than the route mints, this whole job is a
+      # required context telling every merge the console renders correctly for
+      # an account nobody can ever hold.
+      #
+      # It was: before wave 43 me() emitted FOUR of /v1/me's SIX top-level keys
+      # — no `teams`, no `team_authority` — so all 93 logged-in scenarios took
+      # app.js's pre-wave-42 compatibility floors and the `grant` authority band
+      # had never been painted by any instrument in the repo.
+      #
+      # RUNTIME, NOT A SOURCE SCAN, and that is the load-bearing choice (D480):
+      # it calls the exported route(name, "GET", "/v1/me") over every scenario
+      # and reads the body that comes back, which covers mock.js and smoke.mjs
+      # in one pass (both delegate to that same route()). A scan of me()'s
+      # literal would report `user.platform_operator` as a hole; it is not one —
+      # operatorMe() raises it and the census prints it as served by 5 of 93.
+      #
+      # NOT A COUNT, EITHER SIDE (D383's rule, applied here): both sides are
+      # derived sets — the server's from a brace-balanced walk of the
+      # `get "/v1/me"` response map in router.ex, the corpus's from the served
+      # bodies — and the gate is their symmetric difference, reported by KEY
+      # PATH including nesting. There is no expected total in the file, so a
+      # commit that drops one key and adds another cannot hold the gate green.
+      #
+      # PROVEN ABLE TO LOSE, BOTH DIRECTIONS, BEFORE THIS STEP WAS WIRED:
+      #   rc=1 — against origin/main's corpus it names all TEN missing key paths
+      #          over two subjects (teams + 4 nested, team_authority + 4 nested)
+      #          with INVENTED empty, and clears the moment me() is widened
+      #   rc=1 — a NESTED server key a top-level diff would miss (user.locale
+      #          added inside the `user:` sub-map) reds by name
+      #   rc=2 — it REFUSES to measure rather than pass: an unreadable or
+      #          renamed /v1/me clause, a response map it cannot brace-balance,
+      #          a segment that is not `key: value`, a zero-key parse, or a
+      #          corpus where not one scenario answers 200
+      #
+      # It reads cloud/lib/barkpark_cloud/web/router.ex, already in the console
+      # dispatch set (scripts/console-path-escape-check.sh), so a route edit
+      # that grows or drops an envelope key reaches this step. No new leaf name
+      # in .github/required-checks.json: this job is already in console-gate's
+      # `needs:`, so a failure here fails the one required context.
+      - name: /v1/me envelope census (route keys ≡ preview corpus keys)
+        id: me-envelope-census
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__me_envelope_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __me_envelope_census.mjs::__me_envelope_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
       # THE ELEVATED-WRITE BINDING CENSUS (cch-w37-s4, charter D383/D409/D421).
       #
       # The console draws write affordances. Forty of the seventy-nine are above
@@ -925,123 +1143,10 @@ jobs:
           echo "::error title=console-unit ${v} — __refusal_copy_census.mjs::__refusal_copy_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
           exit 1
 
-      # ── THE REASON-ARM CENSUS (charter D448/D449, wave 40) ──────────────────
-      #
-      # Sibling to the binding census above, and the same shape of instrument:
-      # it reads a fact out of the ELIXIR tree that the console's own harness is
-      # structurally incapable of seeing.
-      #
-      # Auth.forbidden/2 can merge a `reason:` CAUSE around a 403 — for refusals
-      # where no static authority label would be true (a rank-relative member
-      # refusal: the SAME admin refused on a peer admin succeeds on a plain
-      # member). The console maps those through FORBIDDEN_REASON_COPY. A cause
-      # with no arm there does NOT degrade to silence: forbiddenEvidenceCopy
-      # returns null, friendly() falls through, and the person reads the curated
-      # `forbidden` entry — a sentence written for a different refusal entirely.
-      # That is exactly how a plain team admin clicking Remove on a peer admin
-      # came to read "Only the team owner can manage billing." (charter D448).
-      #
-      # WHY IT CANNOT BE A CASE IN __app.test.mjs, and this is not a merge-window
-      # convenience: the bug is a key that was NEVER WRITTEN, so there is nothing
-      # in app.js to diff and no drift to detect — the map is complete with
-      # respect to itself. The only oracle for "which causes exist" is the
-      # EMITTER, in another language in another tree. Measured (D449): adding the
-      # two missing arms to app.js alone ships 919/919 green and smoke 104/104.
-      #
-      # PROVEN ABLE TO LOSE, IN BOTH DIRECTIONS, BEFORE THIS STEP WAS WIRED:
-      #   rc=1 — against origin/main's app.js it names all three emission sites
-      #          (router.ex:4958 twice, via the dynamic binding it resolves one
-      #          hop back, and :4997 literal), and clears the moment the arms land
-      #   rc=2 — it REFUSES to measure rather than pass on an input it cannot
-      #          read: an unresolvable `reason:` binding, a renamed/removed
-      #          FORBIDDEN_REASON_COPY, an unrecognised evidence key, or a
-      #          zero-emission census (a broken extractor is not a clean tree)
-      #
-      # It reads cloud/lib/barkpark_cloud/web/router.ex, which is already in the
-      # console dispatch set (scripts/console-path-escape-check.sh), so a router
-      # edit that grows a new cause reaches this step.
-      - name: Refusal reason-arm census (router causes ⊆ console arms)
-        id: reason-arm-census
-        run: |
-          # Verdict wrapper — same contract as the first one in this job.
-          set -uo pipefail
-          rc=0
-          node cloud/priv/static/__reason_arm_census.mjs || rc=$?
-          [ "$rc" -eq 0 ] && exit 0
-          case "$rc" in
-            2) v=REFUSED ;;
-            1) v=MEASURED_DEFECT ;;
-            *) v=UNINTERPRETABLE ;;
-          esac
-          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
-          echo "::error title=console-unit ${v} — __reason_arm_census.mjs::__reason_arm_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
-          exit 1
-
-      # ── THE /v1/me ENVELOPE CENSUS (charter D478/D480/D481, wave 43) ────────
-      #
-      # The third sibling in this family, and the one that audits the HARNESS
-      # ITSELF rather than app.js. Everything the two steps above certify, and
-      # everything __app.test.mjs and smoke.mjs certify, is certified against
-      # ONE fixture producer: `me()` in __preview__/scenarios.mjs, the single
-      # builder behind every logged-in scenario's GET /v1/me. If that producer
-      # mints a different account than the route mints, this whole job is a
-      # required context telling every merge the console renders correctly for
-      # an account nobody can ever hold.
-      #
-      # It was: before wave 43 me() emitted FOUR of /v1/me's SIX top-level keys
-      # — no `teams`, no `team_authority` — so all 93 logged-in scenarios took
-      # app.js's pre-wave-42 compatibility floors and the `grant` authority band
-      # had never been painted by any instrument in the repo.
-      #
-      # RUNTIME, NOT A SOURCE SCAN, and that is the load-bearing choice (D480):
-      # it calls the exported route(name, "GET", "/v1/me") over every scenario
-      # and reads the body that comes back, which covers mock.js and smoke.mjs
-      # in one pass (both delegate to that same route()). A scan of me()'s
-      # literal would report `user.platform_operator` as a hole; it is not one —
-      # operatorMe() raises it and the census prints it as served by 5 of 93.
-      #
-      # NOT A COUNT, EITHER SIDE (D383's rule, applied here): both sides are
-      # derived sets — the server's from a brace-balanced walk of the
-      # `get "/v1/me"` response map in router.ex, the corpus's from the served
-      # bodies — and the gate is their symmetric difference, reported by KEY
-      # PATH including nesting. There is no expected total in the file, so a
-      # commit that drops one key and adds another cannot hold the gate green.
-      #
-      # PROVEN ABLE TO LOSE, BOTH DIRECTIONS, BEFORE THIS STEP WAS WIRED:
-      #   rc=1 — against origin/main's corpus it names all TEN missing key paths
-      #          over two subjects (teams + 4 nested, team_authority + 4 nested)
-      #          with INVENTED empty, and clears the moment me() is widened
-      #   rc=1 — a NESTED server key a top-level diff would miss (user.locale
-      #          added inside the `user:` sub-map) reds by name
-      #   rc=2 — it REFUSES to measure rather than pass: an unreadable or
-      #          renamed /v1/me clause, a response map it cannot brace-balance,
-      #          a segment that is not `key: value`, a zero-key parse, or a
-      #          corpus where not one scenario answers 200
-      #
-      # It reads cloud/lib/barkpark_cloud/web/router.ex, already in the console
-      # dispatch set (scripts/console-path-escape-check.sh), so a route edit
-      # that grows or drops an envelope key reaches this step. No new leaf name
-      # in .github/required-checks.json: this job is already in console-gate's
-      # `needs:`, so a failure here fails the one required context.
-      - name: /v1/me envelope census (route keys ≡ preview corpus keys)
-        id: me-envelope-census
-        run: |
-          # Verdict wrapper — same contract as the first one in this job.
-          set -uo pipefail
-          rc=0
-          node cloud/priv/static/__me_envelope_census.mjs || rc=$?
-          [ "$rc" -eq 0 ] && exit 0
-          case "$rc" in
-            2) v=REFUSED ;;
-            1) v=MEASURED_DEFECT ;;
-            *) v=UNINTERPRETABLE ;;
-          esac
-          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
-          echo "::error title=console-unit ${v} — __me_envelope_census.mjs::__me_envelope_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
-          exit 1
-
       # ── agent-event vocabulary census — A TITLE IS A PROMISE ────────────────
-      # Fourth sibling of the three censuses above, and the same law: the
+      # Sibling of the four censuses above (it was written as the fourth of
+      # three; the family has grown and been reordered since), and the same
+      # law: the
       # instance Timeline must not name an event type nothing in the control
       # plane can write, and must not leave a type that IS written rendering as
       # a raw lowercase slug. Before wave 51, TLV_EVENT_TITLES gave human
@@ -1153,8 +1258,12 @@ jobs:
 
       # THE CENSUS'S FIXTURE CONTROL (cch-w40-s3, charter D452).
       #
-      # The step above is the gate. Until this one landed, nothing showed that
-      # gate LOSING. Its only committed control was (2d), which proves the census
+      # THE ELEVATED-WRITE BINDING CENSUS is the gate these four cells control.
+      # It is not the step immediately above — this comment said "the step
+      # above" and stopped being true the moment another census was appended
+      # between them, so the census is NAMED here and adjacency is no longer
+      # load-bearing. Until this control landed, nothing showed that gate
+      # LOSING. Its only committed control was (2d), which proves the census
       # can SEE the decisive POST /v1/providers pair — not that the ADD/REMOVE
       # set diff, the arm that actually reds a merge, can fire at all. A gate
       # never observed losing is a gate being trusted.
@@ -1177,8 +1286,8 @@ jobs:
       # directions are re-measured at rescue time; neither the unfreezing nor the
       # retained guard is asserted from reading.
       #
-      # SEPARATE STEPS, NOT CASES IN __app.test.mjs — the same reason the census
-      # step above states in its own comment, and it is true again this wave:
+      # SEPARATE STEPS, NOT CASES IN __app.test.mjs — the same reason the
+      # binding census states in its own comment, and it is true again this wave:
       # other slices are editing that file, and a census that has to merge with
       # them is a census that gets weakened to land.
       #
@@ -1831,8 +1940,12 @@ jobs:
           V_TIER: ${{ needs.tier-floor-render.outputs.verdict }}
           V_OVERFLOW: ${{ needs.overflow-guard.outputs.verdict }}
           V_MODAL: ${{ needs.modal-oracle.outputs.verdict }}
-          # D776: the ratchet is the LAST exit-2-capable job to get a channel.
           V_ESCAPE: ${{ needs.path-escape.outputs.verdict }}
+          # D776, wave 64: the DISPATCHER, the last exit-2-capable job to get a
+          # channel and the one that used to be the emitter's single named
+          # exemption. It reaches an exit 2 through the ratchet's `--match`
+          # mode; that refusal is now classified rather than propagated.
+          V_CHANGES: ${{ needs.changes.outputs.verdict }}
         run: |
           set -euo pipefail
 
@@ -1880,8 +1993,9 @@ jobs:
           #   literal string NEVER for jobs that must always run. A skip is
           #   accepted only against a gate-value of exactly 'false'.
           #   verdict is OPTIONAL and ADVISORY: jobs that publish one (the three
-          #   browser instruments, and console-unit for its seven exit-2-capable
-          #   steps) get their failure NAMED; jobs that do not
+          #   browser instruments, console-unit for its exit-2-capable steps,
+          #   the path-escape ratchet, and — since wave 64 — the dispatcher
+          #   itself) get their failure NAMED; jobs that do not
           #   pass nothing and are judged exactly as before. It is read on the
           #   failure path ONLY, and cannot reach `bad` from there either.
           decide() {
@@ -1999,7 +2113,7 @@ jobs:
           # The dispatcher itself may never skip: without it there are no gate
           # values, so nothing downstream can be judged. Same for the ratchet,
           # which is deliberately unfiltered.
-          decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
+          decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"          "${V_CHANGES:-}"
           # `:-` on the VERDICT arguments ONLY, never on an `R_*`: an unbound
           # R_* must keep dying under `set -u` (that LOUD death is how D209's
           # missing-`env:` wiring mistake is caught). A verdict is advisory, and

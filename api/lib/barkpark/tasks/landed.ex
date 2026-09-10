@@ -393,12 +393,30 @@ defmodule Barkpark.Tasks.Landed do
   # deliberate: `content.landed` is a UNION of lists, so a second landing mark
   # on the same row accumulates a second commit rather than replacing the
   # first.
+  # `landings` is the PAIRED entry, and it is written ONLY when this one call
+  # knew BOTH halves (cch-w63). `prs` and `commits` are parallel lists that
+  # accumulate across calls, so on a row with four landings they say WHICH four
+  # PRs and WHICH four shas and never which sha paid which PR — the join lived
+  # only in the `notes` sentence, which is prose. Here both scalars are in hand
+  # at once, so the association is recorded where it was observed instead of
+  # being re-derived downstream from a sentence.
+  #
+  # A call carrying only one half writes only that half's scalar list and NO
+  # pair. Emitting `%{"pr" => n}` with no commit would be a pair asserting an
+  # association this caller never had, which is the absent-vs-empty collapse
+  # this tree refuses everywhere else.
   defp digest(commit, pr, note) do
     %{}
     |> put_present("commits", commit)
     |> put_present("prs", pr)
     |> put_present("notes", note)
+    |> put_landing(pr, commit)
   end
+
+  defp put_landing(map, pr, commit) when is_binary(pr) and is_binary(commit),
+    do: Map.put(map, "landings", [%{"pr" => pr, "commit" => commit}])
+
+  defp put_landing(map, _pr, _commit), do: map
 
   defp put_present(map, _key, nil), do: map
   defp put_present(map, key, value), do: Map.put(map, key, [value])

@@ -362,6 +362,8 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
      "THE PER-BOX DEPLOY VITAL (dr-w10-s1). Its ONE caller is `Web.Router`'s GET /v1/barkparks handler, which prefetches it beside the pmap/dmap/hmap/qmap trio and threads it into `barkpark_json/6` — so the number that says a box is failing 46.28% of its terminal deploys reaches the fleet row instead of sitting one JOIN away in the same database, read by nothing. It is public for that route and for nothing else; its bucket is :reachable from the day it lands, which is the whole D136 point (server key + Go field + rendered column in ONE PR)."},
     {:min_sample, 0, :reachable,
      "THE REFUSAL FLOOR, CALLED AT LAST (dr-bl-rate-notice). Its UNREACHABLE row read \"TWO test references and ZERO lib callers; `census/3` reads the `@min_sample` ATTRIBUTE directly, and `router.ex:3534` names the function only in a COMMENT\" — this is the move that closes it. `Notifications.DeployRateAlert.body/2` interpolates `DeployLedger.min_sample()` into the sentence a human reads (\"A RATE REFUSES ITSELF BELOW n = 200\"), and `deploy_rate_alert_worker_test.exs` asserts the rate node's `min_sample` EQUALS this accessor — so the floor the email quotes and the floor the census enforces are one value, and a change to `@min_sample` cannot leave a stale number in an operator's inbox."},
+    {:content_on_web?, 1, :reachable,
+     "IS ANYTHING OF THIS SITE ANSWERING ON THE WEB (dr-w11-bl-deployment-failed-alarm-fatigue). `delivery/3`'s own `live_marks` clause asked as an existence question, with two deliberate differences stated on its @doc: NO window (a site that went live in January and has not deployed since is still serving), and UNMETERED rows count (a `live` row with a NULL `became_live_at` is still content on the web — jarl-website alone has 55). Its ONE caller is `Notifications.DeploymentFailedPolicy.destroyed_content?/1`, which turns the verdict into \"does this failed attempt earn a customer email\" — the narrowing that took `deployment_failed` off 870 emails a day about attempts that stranded nothing. Public for that caller and no other; it is REACHABLE from the day it lands, and the `?`-trap row above is why its bucket is measured by the AST walker and not by grep."},
     {:refusal_phase, 1, :reachable,
      "start-vs-poll refusal phase, ROUTED AT LAST — the same closer as delivery/3 above, landed by the same PR. `site_deployment_json/3` reads it off the RAW failure_reason, so start-vs-poll is legible over HTTP instead of living only in this suite."},
 
@@ -405,8 +407,8 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
   # under it, and a legitimate change RAISES them in the same commit — where the
   # set-equality assertions red on that same change anyway, so a floor can never
   # be the only thing a change has to satisfy.
-  @publics_floor 19
-  @call_sites_floor 21
+  @publics_floor 20
+  @call_sites_floor 22
 
   # ---------------------------------------------------------------------------
 

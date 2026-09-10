@@ -117,7 +117,9 @@ defmodule BarkparkCloud.Sites.Deploy do
       `merge_provision_steps` / `merge_provision_console`, where it would replace
       the only copy of the narration that exists.
 
-    * **anything else → `FailureCopy.strip_ansi/1` THEN `FailureCopy.scrub/1`.**
+    * **anything else → `FailureCopy.raw/1` = `FailureCopy.strip_ansi/1` THEN `FailureCopy.scrub/1`.**
+      (The two verbs are named on ONE line deliberately: `failure-copy-scrub-order-check.sh`
+      reads a wrapped mention as a bare, unproven `scrub` and reds.)
       A stage detail is a REMOTE capture (an ssh stderr fold, a provider body, a
       build log line), so it is redacted at every display boundary. `broadcast_stage/2` shipped it RAW:
       driven on a detail carrying `Authorization: Bearer <token>`, the HTTP
@@ -137,8 +139,9 @@ defmodule BarkparkCloud.Sites.Deploy do
   # INSIDE the shape the scrubber matches on and the secret walks out in
   # cleartext (with raw 0x1B bytes attached, which a console then interprets).
   # Strip first, then redact — the order is the fix (dr-w8-s2).
-  def stage_caption(_status, detail),
-    do: detail |> FailureCopy.strip_ansi() |> FailureCopy.scrub()
+  # dr-w23-bl: that composition IS `FailureCopy.raw/1` (`failure_copy.ex:548`),
+  # so the boundary names the entry point rather than re-deriving the order.
+  def stage_caption(_status, detail), do: FailureCopy.raw(detail)
 
   ## ---------------------------------------------------------------------------
   ## Mint
@@ -469,7 +472,8 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   # The content revision baked into the build (and into the `bp-content-rev`
   # marker HEALTH asserts). Only the box can see the dataset, so we ask it — over
-  # the scoped analytics path, relayed with the INSTANCE ADMIN token
+  # the scoped, TYPE-FILTERED published document query (see
+  # `content_rev_probe/2`), relayed with the INSTANCE ADMIN token
   # (`Registry.relay_admin/4`). NOT the site's own public-read token: that token
   # is the BUILD's credential and never leaves the deploy payload, so the probe
   # and the build read the dataset through two different credentials.
@@ -496,8 +500,8 @@ defmodule BarkparkCloud.Sites.Deploy do
   READ the site's content revision from its box, WITHOUT the fail-open — the
   honest half of `content_rev/2`.
 
-  `{:ok, rev}` when the box answered its scoped analytics read; `:error` when it
-  did not (box down, no admin token, non-2xx, unbound triple).
+  `{:ok, rev}` when the box answered its scoped, type-filtered published read;
+  `:error` when it did not (box down, no admin token, non-2xx, unbound triple).
 
   stw9 (charter D57): this exists so a SCHEDULED caller can tell "content
   unchanged" from "I could not look". `content_rev/2` degrades an unreadable
@@ -508,21 +512,50 @@ defmodule BarkparkCloud.Sites.Deploy do
   the box builds forever. `TemplateFreshnessWorker` probes first and SKIPS the
   site on `:error`.
 
-  ## What the revision is derived FROM (ssw8)
+  ## What the revision is derived FROM (ssw8, corrected by charter D162)
 
-  NOT the whole analytics body. That body's `recent_activity` is the last 50
-  mutation events for the DATASET — every type, drafts included — so hashing it
-  moved the revision on activity the site does not publish: an unrelated task
-  closing, or anyone saving a draft, minted a fresh `build_id` and a full rebuild
-  of byte-identical output (~53/hour measured on a live dataset), and the
-  idempotent no-op the `(site_id, build_id)` index exists to produce was dead.
+  NOT the analytics body, and no longer any part of it. That body's
+  `recent_activity` is the last 50 mutation events for the DATASET — every type,
+  drafts included — so hashing it whole moved the revision on activity the site
+  does not publish: an unrelated task closing, or anyone saving a draft, minted a
+  fresh `build_id` and a full rebuild of byte-identical output (~53/hour measured
+  on a live dataset), and the idempotent no-op the `(site_id, build_id)` index
+  exists to produce was dead.
 
-  So the revision is derived from a PROJECTION of what this site actually
-  publishes: the PUBLISHED document count for the site's bound `doc_type`, plus
-  the published mutation events of that type still inside the activity window.
-  Published-only and type-filtered on both halves — a draft edit or another type's
-  churn cannot move it, while a real publish (a new document, or an edit to an
-  existing published one of the bound type) does.
+  The first correction filtered that window down to the bound `doc_type` and
+  dropped `drafts.`-prefixed ids, and this docstring then claimed "a draft edit
+  or another type's churn cannot move it". THAT CLAIM WAS FALSE, and the reason
+  is an ordering the filter cannot reach: **the box truncates to the last 50
+  events BEFORE the cloud filters**, so the filter only ever sees what survived
+  another type's churn. Evicting the bound type out of the window moves the hash
+  with zero publishes of that type. Measured on the live fleet (charter D162):
+  all 13 sites share `(default, default, production)`; the live window held 48
+  `task` events against 2 `paper`, so eleven production sites derived their whole
+  revision from ONE event; `task` churn ran 16:1 over `paper`, giving the 50-slot
+  window ≈19 minutes of history; and around a real publish the projection was
+  DEMONSTRATED going 1 event → EMPTY across 20 minutes with zero publishes of the
+  bound type in between. ≥24 % of the distinct revisions seen in 24 h were
+  eviction artefacts, each one a real rebuild of byte-identical output.
+
+  A BIGGER FILTER CANNOT FIX A TRUNCATED INPUT. So the probe no longer reads a
+  fleet-shared firehose at all — it asks the box the question it actually has,
+  over the TYPE-SCOPED published document query
+  (`GET …/v1/data/query/:dataset/:type?perspective=published&count=true&limit=1`),
+  and hashes two things:
+
+    * `total` — the PUBLISHED document count for this type alone. A publish, an
+      unpublish and a delete each move it.
+    * the newest published document's `_id`, `_rev` and `_updatedAt`. An edit to
+      any already-published document of the type sets its `updated_at`, so it
+      becomes the head of the query's default `_updatedAt:desc` order and all
+      three move with it — this is the edit detector the activity window used to
+      be.
+
+  Neither half is a window, so neither half can be evicted: another type's churn,
+  a draft save and an unrelated task closing are not in the ANSWER, rather than
+  being filtered out of it after the fact. Published-only on both halves —
+  `perspective=published` is pinned explicitly because the instance-admin token
+  this rides would otherwise see drafts too.
   """
   @spec content_rev_probe(Site.t(), Barkpark.t()) :: {:ok, String.t()} | :error
   def content_rev_probe(%Site{} = site, %Barkpark{} = bp) do
@@ -535,8 +568,7 @@ defmodule BarkparkCloud.Sites.Deploy do
          # but an unbound type must degrade to :error (unknown ⇒ nonce ⇒ rebuild),
          # never raise a FunctionClauseError inside the deploy hot path.
          doc_type when is_binary(doc_type) <- site.doc_type,
-         path <-
-           "/w/#{URI.encode(ws)}/p/#{URI.encode(proj)}/v1/data/analytics/#{URI.encode(ds)}",
+         path <- published_query_path(ws, proj, ds, doc_type),
          {:ok, status, body} when status in 200..299 <- Registry.relay_admin(bp, :get, path, nil) do
       rev =
         :sha256
@@ -550,43 +582,46 @@ defmodule BarkparkCloud.Sites.Deploy do
     end
   end
 
-  # The published, type-scoped projection of an analytics body — a LIST, not a
+  # The type-scoped published read. `perspective=published` pins the half the
+  # site actually serves, `count=true` asks for this type's published total, and
+  # `limit=1` holds the body to the single newest document — the endpoint's
+  # default order is `_updatedAt:desc`, so that one row IS the head of the type.
+  defp published_query_path(ws, proj, ds, doc_type) do
+    "/w/#{URI.encode(ws)}/p/#{URI.encode(proj)}/v1/data/query/#{URI.encode(ds)}/" <>
+      "#{URI.encode(doc_type)}?perspective=published&count=true&limit=1"
+  end
+
+  # The published, type-scoped projection of the box's answer — a LIST, not a
   # map, so its JSON encoding is ordered and stable regardless of key traversal.
   defp content_projection(body, doc_type) when is_binary(doc_type) do
-    [doc_type, published_count(body, doc_type), published_events(body, doc_type)]
+    result = query_result(body)
+    [doc_type, published_total(result), published_head(result)]
   end
 
-  # The published-document count for the bound type. The instance splits
-  # `published` from `drafts` per type (`Barkpark.Content.Analytics.document_stats/2`);
-  # an older box that reports only `total` falls back to it rather than to 0 —
-  # a coarser signal, never a silently frozen one.
-  defp published_count(%{"types" => types}, doc_type) when is_list(types) do
-    Enum.find_value(types, 0, fn
-      %{"type" => ^doc_type} = row -> row["published"] || row["total"] || 0
-      _ -> false
-    end)
-  end
+  # The query door answers `%{"result" => inner, …}`, except when the caller has
+  # switched the envelope off (`barkpark_filterresponse`), where the inner map IS
+  # the body. Accept both rather than degrade a valid answer to an empty
+  # projection — an empty projection is a CONSTANT, and a constant revision
+  # dedupes every rebuild of a changed site into the `(site_id, build_id)` no-op.
+  defp query_result(%{"result" => %{} = result}), do: result
+  defp query_result(%{} = body), do: body
+  defp query_result(_body), do: %{}
 
-  defp published_count(_body, _doc_type), do: 0
+  # The type's PUBLISHED document count, straight from `?count=true`. A box old
+  # enough to ignore that flag reports no `total`, which degrades to `nil` — the
+  # head document below still moves on every edit and every new publish — and
+  # never to 0, which would read as "this type is empty" and collide with a
+  # genuinely empty type.
+  defp published_total(%{"total" => total}) when is_integer(total), do: total
+  defp published_total(_result), do: nil
 
-  # The bound type's PUBLISHED events inside the activity window, projected to the
-  # fields that identify a content change (which document, which mutation, when).
-  # `id` is deliberately dropped: it is a per-event uuid that would make two
-  # otherwise-identical windows differ. Drafts carry a `drafts.`-prefixed doc_id
-  # (the instance's own published/draft discriminator) and are excluded.
-  defp published_events(%{"recent_activity" => events}, doc_type) when is_list(events) do
-    events
-    |> Enum.filter(fn
-      %{"type" => ^doc_type, "doc_id" => doc_id} when is_binary(doc_id) ->
-        not String.starts_with?(doc_id, "drafts.")
+  # The newest published document of the bound type — `_id`, `_rev`, `_updatedAt`.
+  # `_rev` alone would do on a box that always sets it; the triple is kept because
+  # an older row can carry a nil `_rev`, and then `_updatedAt` still moves.
+  defp published_head(%{"documents" => [doc | _]}) when is_map(doc),
+    do: [doc["_id"], doc["_rev"], doc["_updatedAt"]]
 
-      _ ->
-        false
-    end)
-    |> Enum.map(&[&1["doc_id"], &1["mutation"], &1["timestamp"]])
-  end
-
-  defp published_events(_body, _doc_type), do: []
+  defp published_head(_result), do: []
 
   ## ---------------------------------------------------------------------------
   ## Drive
@@ -2076,7 +2111,21 @@ defmodule BarkparkCloud.Sites.Deploy do
            runtime_target: runtime_target(site)
          }) do
       {:ok, status, body} when status in 200..299 ->
-        target = body["build_id"] || body["target_build"] || body["current_build"]
+        # ONE KEY, TRACED (deploy-reliability W12). This read used to be a
+        # three-way fallback — `body["build_id"] || body["target_build"] ||
+        # body["current_build"]` — which read as "whichever key the box happened
+        # to send wins", i.e. a live identity divergence. It is not: the box's
+        # raw body NEVER reaches here. The only producer of a 2xx rollback reply
+        # is `BoxRelay.HTTP.rollback/2`, which CONSTRUCTS a fresh map
+        # `%{"status" => "rolled_back", "build_id" => target_build(body)}` from
+        # the box's `TARGET_BUILD=<id>` stdout line. `"target_build"` and
+        # `"current_build"` are keys no code in this repo ever puts in a rollback
+        # body, so arms 2 and 3 could never fire — and keeping them advertised a
+        # contract the transport does not have. The real (and unchanged) hazard
+        # is that `"build_id"` is NIL when the box printed no `TARGET_BUILD=`
+        # line; `finish_rollback/4` below narrates that case and logs the
+        # site-pointer write it therefore skips.
+        target = body["build_id"]
         finish_rollback(site, bp, was, target)
 
       {:ok, 409, body} ->

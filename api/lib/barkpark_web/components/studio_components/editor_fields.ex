@@ -15,6 +15,8 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   """
   use Phoenix.Component
 
+  alias BarkparkWeb.ScopeHelpers
+
   # ── Document actions chrome (Task barkpark-3yq) ───────────────────────────
   # Three small components for the Sanity-style document actions: bulk
   # publish floating action bar, read-only secondary editor card, and the
@@ -245,11 +247,18 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   attr :dataset, :string, required: true
   attr :current_workspace, :map, default: nil
   attr :current_project, :map, default: nil
+  # task-be3b3aa6da5df3a2 (instance 4) — the grant-narrowing flag, threaded so
+  # `ScopeHelpers.scope_opts_from_assigns/1` can read it out of THESE assigns.
+  # A function component is handed only its DECLARED attrs, so without this
+  # declaration the helper's `maybe_grant_scoped/2` clause could never match
+  # and a `:share_read` viewer's presence tooltip would keep resolving titles
+  # un-narrowed — the exact narrowing the hand-rolled copy dropped.
+  attr :grant_scoped_read, :boolean, default: false
 
   def presence_nav(assigns) do
     ~H"""
     <div class="presence-nav" id="presence-hook" phx-hook="PresenceIdentity">
-      <% scope_opts = build_scope_opts(@current_workspace, @current_project) %>
+      <% scope_opts = ScopeHelpers.scope_opts_from_assigns(assigns) %>
       <% others = Enum.reject(@presences, & &1.user_id == @user_id) %>
       <%= for p <- others do %>
         <% p_doc_title = resolve_presence_doc_title(p, @dataset, scope_opts) %>
@@ -296,19 +305,18 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   defp truncate_text(text, max) when byte_size(text) <= max, do: text
   defp truncate_text(text, max), do: String.slice(text, 0, max - 1) <> "..."
 
-  # Build scope opts from the workspace/project assigns the parent LV holds.
-  # Mirrors `BarkparkWeb.ScopeHelpers.scope_opts(%Socket{})` for the Socket
-  # variant — no `memoize: true` (LV processes are long-lived; see sknf).
-  # Nil-safe: an absent workspace or project drops its key entirely.
-  defp build_scope_opts(workspace, project) do
-    []
-    |> put_scope_key(:workspace_id, workspace)
-    |> put_scope_key(:project_id, project)
-  end
-
-  defp put_scope_key(opts, _key, nil), do: opts
-  defp put_scope_key(opts, key, %{id: id}), do: Keyword.put(opts, key, id)
-  defp put_scope_key(opts, _key, _other), do: opts
+  # task-be3b3aa6da5df3a2 (instance 4) — `build_scope_opts/2` LIVED HERE, and
+  # its own comment said it "mirrors" `ScopeHelpers.scope_opts(%Socket{})`. It
+  # did not: it emitted `workspace_id` and `project_id` ONLY, while the real
+  # helper ALSO puts `caller_context` unconditionally and `grant_scoped` for a
+  # grant-derived caller. `<.presence_nav>` renders on EVERY Studio surface
+  # (layouts/studio.html.heex), and `resolve_presence_doc_title/3` below prints
+  # `doc.title` for any `p.doc_id` in the presence list, so the dropped
+  # `grant_scoped` voided the grant narrowing on the one read a `:share_read`
+  # viewer sees in the chrome. The copy is GONE — this component now calls the
+  # seam, `ScopeHelpers.scope_opts_from_assigns/1`, which is the clause
+  # `scope_opts(%Phoenix.LiveView.Socket{})` itself delegates to, so the two
+  # can never drift again.
 
   defp resolve_presence_doc_title(presence, dataset, scope_opts) do
     type = presence.type

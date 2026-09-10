@@ -3855,13 +3855,45 @@ defmodule Barkpark.Content.Papers.BlockOps do
       block,
       "items",
       Enum.map(items, fn
-        item when is_list(item) -> normalize_inline_nodes(item)
+        item when is_list(item) -> item |> unwrap_block_wrappers() |> normalize_inline_nodes()
         item -> item
       end)
     )
   end
 
   defp normalize_list_item_leaves(block), do: block
+
+  # A list item's entry is an ARRAY OF INLINE NODES. A block-level node sitting
+  # in it — `{"type":"paragraph","content":[…]}` or the `"list-item"` twin —
+  # carries its text one level too deep. #15701 taught the READER to unwrap it
+  # (render/inline.ex `unwrap_block_wrappers/1`); this is the WRITE half, so
+  # stored documents converge on the canonical inline array instead of relying
+  # on every reader being forgiving forever. Measured 2026-09-02: 75 items
+  # across 4 published papers (56 `paragraph`-wrapped, 19 `list-item`-wrapped)
+  # rendered as `<li><span></span></li>`, and NOTHING on the write path caught
+  # it — `render_block_errors/2` accepts the item because the item IS a list and
+  # it never looks at the leaves, and `normalize_wrapped_list_item/1` only
+  # unwraps an ITEM-level map of `map_size == 1`, so a two-key
+  # `{"type","content"}` node inside the array falls straight through.
+  #
+  # SAME PREDICATE AND SAME DEPTH AS THE RENDERER, deliberately: a non-empty
+  # `content` list, exactly ONE level, no recursion. That makes the rewrite
+  # RENDER-PRESERVING — the reader would have unwrapped precisely these nodes
+  # anyway, so normalizing on write can never change what a paper displays.
+  #
+  # SCOPED TO LIST ITEMS, not to every inline array on the write path. The
+  # reader can afford the shared walk because unwrapping there is a display
+  # choice it re-makes on every request; a WRITE is permanent, and a block's
+  # `content` is not always an inline array (nested-block containers put real
+  # blocks there), so a generic write-side unwrap could flatten authored
+  # structure. A list item's entry always IS an inline array, so this arm is
+  # unambiguous. The non-list contexts stay covered by the reader's unwrap.
+  defp unwrap_block_wrappers(nodes) when is_list(nodes) do
+    Enum.flat_map(nodes, fn
+      %{"content" => [_ | _] = inner} -> inner
+      node -> [node]
+    end)
+  end
 
   defp normalize_table_leaves(%{"type" => "table"} = block) do
     block =

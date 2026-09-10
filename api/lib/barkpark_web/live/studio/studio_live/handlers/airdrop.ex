@@ -95,11 +95,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Airdrop do
   closed to `[]` with no workspace in context.
   """
   def airdrop_suggest(params, socket) do
+    principal = principal(socket)
     ws = socket.assigns[:current_workspace]
     prefix = params["grantee_email"] || ""
 
+    # task-be3b3aa6da5df3a2 (instance 5) — THE PRINCIPAL IS THE MISSING FENCE.
+    # The tenancy was already right (`ws.id` narrows to this workspace); what
+    # this read lacked was the guard BOTH its siblings open with
+    # (`airdrop_open/2`, `airdrop_create/2`: `is_nil(principal) ->`). It matters
+    # because `airdrop-suggest` is absent from `@readonly_events`, so LiveScope
+    # halts share/grant sockets here — but `:anonymous_default` attaches NO gate
+    # at all (`live_scope.ex`), so under `BARKPARK_PUBLIC_DEMO_STUDIO` an
+    # anonymous Default-workspace viewer could prefix-enumerate member emails.
+    # Fails closed to `[]`, the same shape the no-workspace arm already returned.
     suggestions =
-      if is_nil(ws),
+      if is_nil(principal) or is_nil(ws),
         do: [],
         else: Accounts.search_by_email_prefix(prefix, ws.id)
 

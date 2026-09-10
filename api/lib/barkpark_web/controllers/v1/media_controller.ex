@@ -620,14 +620,21 @@ defmodule BarkparkWeb.V1.MediaController do
     if RequireWritePermission.granted?(conn), do: :ok, else: {:error, :forbidden}
   end
 
-  # Force-release privilege for `undo_checkout`. NOTE: write==force-release is
-  # DELIBERATE here — any write token may release ANY actor's checkout lock,
-  # diverging from the pure-admin sibling `Access.admin?/1` (access.ex). The
-  # holder-only fallback in `Checkout.ensure_can_release/3` is therefore dead on
-  # the API path (`require_write` runs first, so admin? is always true). This is
-  # the current, intended posture; whether it SHOULD tighten to true-admin is
-  # tracked separately (felix-w28-bl-checkout-tighten-adjudication) — do not
-  # change behavior here.
+  # FORCE-RELEASE IS ADMIN-ONLY (felix-w28-bl-checkout-tighten-adjudication,
+  # ruled 2026-09-09). This helper used to fold "write" in alongside "admin", so
+  # ANY write token could release ANY other editor's checkout lock and the
+  # holder-only fallback in `Checkout.ensure_can_release/3` was dead on the API
+  # path. That fold was copy-paste, not design — it was unique against the
+  # pure-admin siblings `Media.Storage.Access.admin?/1` (access.ex) and
+  # `Studio.Caps.admin?/1` (studio/caps.ex).
+  #
+  # The posture now: `require_write/1` still gates the route, so a write token
+  # reaches `Checkout.undo_checkout/4` — but with `admin? == false`, which means
+  # it may release ONLY a lock it holds itself (the `holder == actor` branch of
+  # `ensure_can_release/3`, now live rather than dead). Releasing SOMEONE ELSE's
+  # lock requires a true `admin` permission. A stuck lock is an annoyance; a
+  # silent steal of another editor's in-flight work is not.
+  #
   # A token-less principal reaches here since the account arm on `require_write/1`
   # (and, before it, `share_writer`). `Auth.has_permission?/2` is
   # `permission in (token.permissions || [])`, so a nil token RAISES BadMapError
@@ -635,7 +642,7 @@ defmodule BarkparkWeb.V1.MediaController do
   defp admin?(conn) do
     case conn.assigns[:api_token] do
       %Barkpark.Auth.ApiToken{} = token ->
-        Auth.has_permission?(token, "admin") or Auth.has_permission?(token, "write")
+        Auth.has_permission?(token, "admin")
 
       _ ->
         false

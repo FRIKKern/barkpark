@@ -243,6 +243,8 @@ defmodule BarkparkCloud.PlatformDelivery do
     |> validate_format(:previous_sha, ~r/^[0-9a-f]{7,64}$/,
       message: "must be a lowercase hex commit sha (7-64 chars)"
     )
+    |> reject_null_sha(:sha)
+    |> reject_null_sha(:previous_sha)
     |> validate_inclusion(:target, @targets)
     |> validate_number(:queued_seconds, greater_than_or_equal_to: 0)
     |> validate_number(:build_seconds, greater_than_or_equal_to: 0)
@@ -267,6 +269,27 @@ defmodule BarkparkCloud.PlatformDelivery do
   end
 
   defp normalize(_other), do: %{}
+
+  # THE NULL SHA. `~r/^[0-9a-f]{7,64}$/` admits
+  # `0000000000000000000000000000000000000000` — git's own "no object" sentinel,
+  # and the shape a shell script writes when `git rev-parse` produced nothing.
+  # A verifier posted exactly that row and it became, for a while, the platform's
+  # second-ever durable memory of its own deploys: a commit that does not exist.
+  #
+  # The check is deliberately NARROW: not-all-zeros, no egress. A resolvability
+  # check would need to reach a git remote and would refuse legitimate rows for a
+  # fork or a `gc`'d object; a "no repeated character" rule would refuse
+  # `bbbb…` shas that are merely improbable, not impossible. Only the all-zeros
+  # sentinel is IMPOSSIBLE as a real commit, and it is the observed pollution.
+  defp reject_null_sha(changeset, field) do
+    validate_change(changeset, field, fn ^field, value ->
+      if is_binary(value) and value =~ ~r/^0+$/ do
+        [{field, "must not be the all-zeros null sha"}]
+      else
+        []
+      end
+    end)
+  end
 
   defp stringify(v) when is_integer(v), do: Integer.to_string(v)
   defp stringify(v), do: v

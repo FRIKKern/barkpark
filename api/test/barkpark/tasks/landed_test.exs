@@ -150,7 +150,9 @@ defmodule Barkpark.Tasks.LandedTest do
       assert reload(doc).content["landed"] == %{
                "commits" => ["a1b2c3d"],
                "prs" => ["14993"],
-               "notes" => ["merged to main"]
+               "notes" => ["merged to main"],
+               # cch-w63: the PAIR, recorded by the caller that knew both halves.
+               "landings" => [%{"pr" => "14993", "commit" => "a1b2c3d"}]
              }
     end
 
@@ -165,7 +167,17 @@ defmodule Barkpark.Tasks.LandedTest do
                "commits" => ["aaa", "bbb"],
                # "1" arrived twice and appears once
                "prs" => ["1"],
-               "notes" => ["second"]
+               "notes" => ["second"],
+               # AND THIS IS WHY THE PAIRED KEY EXISTS (cch-w63). Read the two
+               # scalar lists above and the row says PR "1" and shas "aaa" and
+               # "bbb" — it cannot say which sha paid it, because the dedupe
+               # that makes `prs` a SET destroyed the positional correspondence
+               # a reader would otherwise be tempted to assume. `landings`
+               # keeps both associations because each was recorded whole.
+               "landings" => [
+                 %{"pr" => "1", "commit" => "aaa"},
+                 %{"pr" => "1", "commit" => "bbb"}
+               ]
              }
     end
 
