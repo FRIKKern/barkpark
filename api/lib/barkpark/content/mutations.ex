@@ -64,6 +64,7 @@ defmodule Barkpark.Content.Mutations do
 
   alias Barkpark.Repo
   alias Barkpark.Content
+  alias Barkpark.Tasks.QueueGate
 
   alias Barkpark.Content.{
     BoundFieldSync,
@@ -390,7 +391,8 @@ defmodule Barkpark.Content.Mutations do
         end
 
       _ ->
-        with {:ok, doc} <- Content.create_document(type, attrs, dataset, opts),
+        with :ok <- ensure_create_not_forking_published_task(type, id, dataset, opts),
+             {:ok, doc} <- Content.create_document(type, attrs, dataset, opts),
              do: {:ok, doc, "create"}
     end
   end
@@ -411,7 +413,8 @@ defmodule Barkpark.Content.Mutations do
     # case structurally (see their heads), so the importer shape
     # (migration 20260528100000 seeds already-`done` rows) keeps working while
     # a write ONTO a live claimed/open task is fenced exactly like a patch.
-    with :ok <- ensure_rev(existing, expected),
+    with :ok <- ensure_create_not_forking_published_task(type, id, dataset, opts),
+         :ok <- ensure_rev(existing, expected),
          :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
          :ok <- ensure_disposition_via_verb(type, existing, incoming_content(attrs), opts),
@@ -433,7 +436,8 @@ defmodule Barkpark.Content.Mutations do
         end
 
       _ ->
-        with {:ok, doc} <- Content.create_document(type, attrs, dataset, opts),
+        with :ok <- ensure_create_not_forking_published_task(type, id, dataset, opts),
+             {:ok, doc} <- Content.create_document(type, attrs, dataset, opts),
              do: {:ok, doc, "create"}
     end
   end
@@ -1282,6 +1286,143 @@ defmodule Barkpark.Content.Mutations do
   # the draft-first clause, whose `id &&` guard already handles it.
   defp published_first_patch?(id, type),
     do: is_binary(id) and type in @published_first_patch_types and not DraftId.draft?(id)
+
+  # ── The create family's published-first fence (task-f0de48637a21d3dc) ──────
+  #
+  # THE DOOR. `patch` on a bare `type:task` id is published-first (above) and
+  # LANDS through `land_patch/5`. The CREATE family is not: `create`,
+  # `createOrReplace` and `createIfNotExists` resolve `existing` from
+  # `DraftId.draft_id(id)` ALONE, and `Writer.create_document/4` always
+  # draft-prefixes its write target. Name an id that already has a PUBLISHED
+  # task row and the published row is invisible to the whole clause: `existing`
+  # is nil, so `ensure_claim_not_dropped`, `ensure_task_close_is_cas`,
+  # `ensure_disposition_via_verb` and `ensure_adoption_adjudicated` are all
+  # structurally exempt (each has an explicit `nil` head), and the write lands a
+  # `drafts.<id>` twin carrying `claim: null` / `lifecycle_status: "open"`
+  # beside a published row that may be claimed and in progress. The receipt says
+  # rc=0 and `results[0].id = "drafts.<id>"`; nothing says a fork happened.
+  # Measured on guerrilla 2026-09-10: 354 of 8625 published task rows carry such
+  # a twin, 218 of them disagreeing with their published row on
+  # `lifecycle_status` and 244 on `claim` — and on every one of them
+  # `bp doc patch <bare id>` is refused until somebody discards or publishes the
+  # twin.
+  #
+  # THE RULING (lead-api-r7). Two outcomes, split on whether anybody is holding
+  # the row RIGHT NOW:
+  #
+  #   * the published row carries a LIVE claim → REFUSE, in the same
+  #     `{:invalid_task_content, %{field => [msg]}}` family (422
+  #     `validation_failed`) the publish door and `ensure_claim_not_dropped`
+  #     already use. This is the shape that destroys work: a lane holds a lease
+  #     and the fork parks an unclaimed, `open` copy of its row where no reader
+  #     looks.
+  #   * no live claim → LAND AS TODAY and say so, through the same
+  #     `Warnings.put/2` channel the patch door uses for
+  #     `patch.forked_published`. Importers, seeders and migrations that
+  #     re-write settled task rows by id keep working; they just stop being
+  #     silent about which row they wrote.
+  #
+  # A birth on a FRESH id (no published row) is untouched — the whole fence is
+  # behind a published-row lookup. `source: :sync` is exempt BEFORE the lookup,
+  # exactly as `ensure_claim_not_dropped` exempts it: `Sync.Applier.apply_upsert`
+  # mirrors upstream rows with `createOrReplace` + the full remote document, and
+  # a refusal there rolls the whole replication batch back with no operator
+  # recourse. `:source` is server-set (`MutateController` prepends `source:
+  # :api`), so a request body can never reach the exempt value.
+  #
+  # "LIVE" IS NOT RE-DERIVED HERE. `Tasks.QueueGate.execution_class/2` is the
+  # one place that answers "does anybody hold this row", and it is live in three
+  # parts: a non-blank `claim.worker`, no close stamp, AND a lease that has not
+  # lapsed (`claim_lease_live?/1`, measured against the same
+  # `:task_lease_ttl_seconds` `TtlSweeper` reaps on). Called with a nil worker it
+  # returns `"foreign_claimed"` exactly when that private `live_claim_worker/1`
+  # is non-nil — and `"foreign_claimed"` is DERIVED-ONLY (`validate_state/1`
+  # refuses to persist it), so the answer cannot be spoofed by a stored gate.
+  @doc """
+  Refuse — or advise on — a create-family write that names an existing
+  PUBLISHED `type:task` row.
+
+  Returns `:ok` (possibly after queueing a `create.forked_published` advisory)
+  or `{:error, {:invalid_task_content, details}}`. Public because the legacy
+  door (`POST /api/documents/:type` → `Content.upsert_document/4`) forks the
+  same twin without passing through `apply_mutations/3`.
+  """
+  @spec ensure_create_not_forking_published_task(
+          String.t() | nil,
+          String.t() | nil,
+          String.t(),
+          keyword()
+        ) :: :ok | {:error, {:invalid_task_content, map()}}
+  def ensure_create_not_forking_published_task(type, id, dataset, opts) do
+    with true <- forkable_create_target?(type, id, opts),
+         {:ok, published} <-
+           Content.get_document(DraftId.published_id(id), type, dataset, opts) do
+      if live_claim?(published) do
+        {:error, {:invalid_task_content, create_fork_error(id, published)}}
+      else
+        warn_create_forked_published(id)
+        :ok
+      end
+    else
+      _ -> :ok
+    end
+  end
+
+  defp forkable_create_target?(type, id, opts) do
+    is_binary(id) and type in @published_first_patch_types and not DraftId.draft?(id) and
+      Keyword.get(opts, :source, :api) == :api
+  end
+
+  defp live_claim?(%{content: content}) when is_map(content),
+    do: QueueGate.execution_class(content, nil) == "foreign_claimed"
+
+  defp live_claim?(_published), do: false
+
+  defp create_fork_error(id, published) do
+    twin = DraftId.draft_id(id)
+    claim = Map.get(published.content || %{}, "claim") || %{}
+    worker = claim["worker"]
+    epoch = claim["epoch"]
+
+    held =
+      if is_binary(worker) do
+        " held by #{inspect(worker)}" <> if(is_integer(epoch), do: " at epoch #{epoch}", else: "")
+      else
+        ""
+      end
+
+    %{
+      "_id" => [
+        "refusing to fork the published task `#{id}`. A create-family write " <>
+          "(`create` / `createOrReplace` / `createIfNotExists`, and " <>
+          "`POST /api/documents/task`) ALWAYS writes `drafts.<id>`, so this one would mint " <>
+          "the draft twin `#{twin}` beside a published row carrying a LIVE claim#{held}. " <>
+          "No canonical reader serves that twin (`GET /v1/tasks/#{id}`, the board and the " <>
+          "ready queue are all published-first), and because the twin is a brand-new row " <>
+          "every task birth guard (claim preservation, close-CAS, disposition-by-verb, " <>
+          "adoption) sees no existing row and is structurally exempt — so the write would " <>
+          "strand a claim-less `open` copy of a claimed, in-progress row and report success. " <>
+          "Sanctioned verbs: move the claim with `bp task release #{id} <worker> <epoch>` or " <>
+          "`bp task close #{id} <worker> <epoch>` (or let the lease lapse) and resend; edit " <>
+          "the published row with `bp doc patch task #{id}`, which is published-first and " <>
+          "lands in one transaction; or address the twin deliberately by name, " <>
+          "`\"_id\": \"#{twin}\"`."
+      ]
+    }
+  end
+
+  defp warn_create_forked_published(id) do
+    Warnings.put(
+      "create.forked_published",
+      "this create-family mutation names the published task `#{id}` but writes a DRAFT twin " <>
+        "(`drafts.#{id}`): the published row is untouched, and every canonical reader " <>
+        "(/v1/data/doc, /v1/tasks/:id, the board, the queue) keeps serving it until the twin " <>
+        "is published — `bp doc publish task #{id}` lands it, " <>
+        "`bp doc discard-draft task #{id}` drops it. Allowed because the published row " <>
+        "carries no live claim; the same write against a claimed row is refused.",
+      "warning"
+    )
+  end
 
   defp published_first_patch_base(id, type, dataset, opts) do
     case Content.get_document(id, type, dataset, opts) do
