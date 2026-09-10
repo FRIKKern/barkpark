@@ -3123,11 +3123,70 @@ export const OPEN_CONTROLS = [
   { selector: '[data-test-id="sidebar-dismiss"]',      grammar: 'the SAME button under its Tier-3 destination spelling (#5014, components.ex:425)' },
 ];
 
+// ── did that click LAND? (charter D184's 1440 wide-bucket no-op) ─────────────
+//
+// THE OBSERVATION. Once in four full sweeps against `bc64d869a`, three real
+// clicks at 1440 never produced `[data-user-opened]`: the aside sat at
+// `width_px 41, left_px 1399, user_opened false, bucket "wide"` — the collapsed
+// rail. The filing read that as "click 1 collapsed the 300px default and clicks
+// 2-3 no-opped against an already-collapsed rail", i.e. the desk refusing to
+// re-open from collapsed.
+//
+// THE HANDLER SOURCE REFUTES THAT SECOND HALF, and the refutation is total, not
+// a judgement call. `Handlers.Paper.sidebar_toggle_panel/1`
+// (studio_live/handlers/paper.ex:198-206) is:
+//
+//     open?           = sidebar_open == true
+//     asked?          = sidebar_user_opened == true
+//     wide?           = width_bucket in [nil, "wide"]
+//     painted_closed? = open? and not asked? and not wide?
+//     next_open?      = if painted_closed?, do: true, else: not open?
+//     assign(sidebar_open: next_open?, sidebar_user_opened: next_open?)
+//
+// `sidebar_user_opened` is assigned the SAME value as `sidebar_open` on every
+// pass, and at `wide` the branch is a pure alternator. Enumerate all four entry
+// states and the marker is stamped in at most TWO clicks from every one of
+// them — there is no assign combination in which a collapsed rail declines to
+// re-open. A three-click failure therefore PROVES that at least two of the
+// three clicks never reached the handler at all: they were swallowed (a
+// re-render swapping the button node under the pointer, a socket that had not
+// finished joining), not answered with "no".
+//
+// AND THE OLD LOOP COULD NOT TELL. It captured `after` on every iteration and
+// then read exactly one field of it, `after.user_opened`. A click that
+// transitioned the rail 300px -> 41px and a click that changed NOTHING both
+// counted as one unit of the three-click budget and both produced the identical
+// skip. So a single transient swallow spent a third of the budget, and the
+// failure text could not say which of the two worlds it was in.
+//
+// This is the seam that closes that: a click is LANDED only if the observable
+// sidebar state moved. Landed clicks spend the toggle budget (they are real
+// steps of a state machine that needs at most two). A no-transition click
+// spends a SEPARATE, bounded swallow allowance — D138 permits bounded retries
+// on this named abort by name — and is reported as such.
+//
+// PURE, and exported, so it is testable without a browser
+// (`scripts/studio-desk-open-leg-swallowed-click.test.mjs`).
+export function classifyOpenClick(before, after) {
+  if (!after) return { outcome: 'sidebar-absent', landed: true };
+  if (after.user_opened) return { outcome: 'user-opened', landed: true };
+  if (!before) return { outcome: 'no-baseline', landed: true };
+  const moved =
+    before.user_opened !== after.user_opened ||
+    before.is_open_class !== after.is_open_class ||
+    before.width_px !== after.width_px ||
+    before.left_px !== after.left_px ||
+    before.transform !== after.transform;
+  if (!moved) return { outcome: 'no-transition', landed: false };
+  if (after.width_px < before.width_px) return { outcome: 'collapsed-by-us', landed: true };
+  return { outcome: 'widened', landed: true };
+}
+
 // EXPORTED for the same reason `compareProvenance` is (see its note): a forcing
 // repro must drive this leg directly against a fixture that renames the control
 // between clicks, because a full authenticated sweep is far too heavy to be the
 // only way to see the D178 fix hold. `scripts/measurements/open-leg-repro.mjs`.
-export async function openInspectorByRealClick(page, { maxClicks = 3, fatal = true } = {}) {
+export async function openInspectorByRealClick(page, { maxClicks = 3, maxSwallowed = 2, fatal = true } = {}) {
   const unreachable = (reason) => {
     if (fatal) dieRetryable('user-opened-marker', reason);
     return { reached: false, skip_reason: reason };
@@ -3163,7 +3222,17 @@ export async function openInspectorByRealClick(page, { maxClicks = 3, fatal = tr
   const before = await observe();
   const clicks = [];
   const spellingsUsed = [];
-  for (let i = 1; i <= maxClicks; i++) {
+  // TWO budgets, not one (D184). `landed` counts clicks the desk ANSWERED — the
+  // real steps of a state machine that needs at most two of them. `swallowed`
+  // counts clicks that moved nothing, which are not toggle steps at all and
+  // must not spend the toggle budget; they get their own bounded allowance,
+  // which is the bounded retry D138 permits on this named abort.
+  let landed = 0;
+  let swallowed = 0;
+  let prev = before;
+  let i = 0;
+  while (landed < maxClicks) {
+    i++;
     // RE-RESOLVE EVERY ITERATION (D178). `firstPresent()` is a non-blocking
     // `.count()` probe across BOTH spellings — it never auto-waits, so a control
     // that is gone is answered in milliseconds instead of after a 10s timeout
@@ -3185,11 +3254,14 @@ export async function openInspectorByRealClick(page, { maxClicks = 3, fatal = tr
     await page.waitForTimeout(150);
     await waitForDeskSettled(page);
     const after = await observe();
-    clicks.push({ click: i, control: now.selector, after });
+    const verdict = classifyOpenClick(prev, after);
+    clicks.push({ click: i, control: now.selector, outcome: verdict.outcome, landed: verdict.landed, after });
     if (after?.user_opened) {
       return {
         reached: true,
         clicks_needed: i,
+        clicks_landed: landed + 1,
+        clicks_swallowed: swallowed,
         control: now.selector,
         grammar: now.grammar,
         controls_clicked: spellingsUsed,
@@ -3207,13 +3279,39 @@ export async function openInspectorByRealClick(page, { maxClicks = 3, fatal = tr
           : 'one click: below the wide bucket the panel is painted closed, so a click means OPEN.',
       };
     }
+    if (verdict.landed) {
+      landed++;
+    } else {
+      swallowed++;
+      if (swallowed > maxSwallowed) break;
+      // A swallowed click means the desk was mid-render or mid-join under the
+      // pointer. Give it a settle before spending the allowance again.
+      await page.waitForTimeout(400);
+      await waitForDeskSettled(page);
+    }
+    prev = after;
   }
+  const swallowedVerdict = swallowed > 0
+    ? `${swallowed} of those ${i} click(s) moved NOTHING observable on .bp-doc-sidebar (no change to ` +
+      `data-user-opened, .is-open, width, left or transform), so they never reached ` +
+      `Handlers.Paper.sidebar_toggle_panel/1 — the desk did not answer "no", it did not answer at ` +
+      `all. That is a SWALLOWED click (a re-render swapping the button under the pointer, or a socket ` +
+      `still joining), not the desk refusing to re-open` +
+      (swallowed > maxSwallowed
+        ? `, and the bounded allowance of ${maxSwallowed} was exhausted.`
+        : '.')
+    : `every one of those ${i} click(s) LANDED (the rail moved each time) and the marker still never ` +
+      `appeared. sidebar_toggle_panel/1 assigns sidebar_user_opened the SAME value as sidebar_open on ` +
+      `every pass and alternates at the wide bucket, so the marker is reachable in at most TWO landed ` +
+      `clicks from any entry state — landed clicks that do not stamp it are a DESK finding, not this ` +
+      `harness running out of budget.`;
   return unreachable(
-    `INSTRUMENT FAILURE — ${maxClicks} real clicks on ${[...new Set(spellingsUsed)].join(' then ')} ` +
+    `INSTRUMENT FAILURE — ${i} real clicks on ${[...new Set(spellingsUsed)].join(' then ')} ` +
+    `(${landed} landed, ${swallowed} swallowed; budget ${maxClicks} landed + ${maxSwallowed} swallowed) ` +
     `never produced [data-user-opened] on .bp-doc-sidebar. The harness never reached the user-opened ` +
     `state, so it has NO user-opened measurement to report — this is not a desk fact and must not be ` +
-    `recorded as one (D97).\n\n  What it saw after each click:\n` +
-    clicks.map((c) => `      click ${c.click} (${c.control}): ${JSON.stringify(c.after)}`).join('\n'));
+    `recorded as one (D97).\n\n  VERDICT: ${swallowedVerdict}\n\n  What it saw after each click:\n` +
+    clicks.map((c) => `      click ${c.click} (${c.control}) [${c.outcome}]: ${JSON.stringify(c.after)}`).join('\n'));
 }
 
 // ── dismissal, the destination, and the round trip ───────────────────────────
