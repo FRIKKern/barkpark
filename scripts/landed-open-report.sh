@@ -288,8 +288,18 @@ cmd_selftest() {
              "acceptance_criteria":[{"criterion":"kids ship","met":false}]}},
  {"doc_id":"task-gate-1","title":"human gate","lifecycle_status":"in_progress",
   "content":{"labels":["landed-on-main","landed:pr-15093@dddddd4444"],
-             "acceptance_criteria":[{"criterion":"a lead signs off on the rollout","met":false}]}}
-],"page":{"returned":5,"has_more":false,"limit":500,"offset":0}}
+             "acceptance_criteria":[{"criterion":"a lead signs off on the rollout","met":false}]}},
+ {"doc_id":"task-nolap-1","title":"the #15403 shape","lifecycle_status":"open","child_count":0,
+  "content":{"labels":["landed-on-main","landed:pr-15403@8ca3cb5a0c"],
+             "landed":{"commits":["8ca3cb5a0c"],"prs":["15403"],
+                       "notes":["PR #15403 landed on main as 8ca3cb5a0c (files: api/Dockerfile) [no overlap with the paths this row names]"]},
+             "acceptance_criteria":[{"criterion":"the badge renders","met":false}]}},
+ {"doc_id":"task-lap-1","title":"a landing that did overlap","lifecycle_status":"open","child_count":0,
+  "content":{"labels":["landed-on-main","landed:pr-15404@9ba3cb5a0c"],
+             "landed":{"commits":["9ba3cb5a0c"],"prs":["15404"],
+                       "notes":["PR #15404 landed on main as 9ba3cb5a0c (files: api/lib/x.ex)"]},
+             "acceptance_criteria":[{"criterion":"the badge renders","met":false}]}}
+],"page":{"returned":7,"has_more":false,"limit":500,"offset":0}}
 JSON
 
   out="$(bash "$SELF" --fixture "$fx" 2>&1)"; rc=$?
@@ -309,8 +319,28 @@ JSON
   case "$(bash "$SELF" --fixture "$fx" 2>&1 | sed -n '/^walked /q;p')" in
     *task-done-1*) echo "FAIL: a DONE row leaked into the live list"; fail=1 ;;
   esac
-  case "$out" in *"walked 5 rows, 4 carry landed-on-main, 3 live"*) ;;
+  case "$out" in *"walked 7 rows, 6 carry landed-on-main, 5 live"*) ;;
     *) echo "FAIL: trailer wrong. got: $(printf '%s' "$out" | tail -2)"; fail=1 ;; esac
+
+  # THE NO-OVERLAP SPLIT (task-c3c9922e7d8e3815). task-nolap-1 is the #15403
+  # shape: a real landing whose recorded note says the changed paths touch
+  # nothing the row names. It must be LISTED (it is still a landing) and it
+  # must be FLAGGED, so a lead can tell it from task-lap-1 — same label, same
+  # lifecycle, a landing that DID overlap.
+  case "$out" in *task-nolap-1*) ;;
+    *) echo "FAIL: a no-overlap landing was filtered out instead of flagged"; fail=1 ;; esac
+  case "$out" in *"task-nolap-1"*"[NO-OVERLAP]"*) ;;
+    *) echo "FAIL: the NO-OVERLAP flag is missing from task-nolap-1"; fail=1 ;; esac
+  # THE NEGATIVE CONTROL, and it is what makes the flag mean anything: a row
+  # whose recorded landing carries NO no-overlap marker must NOT be flagged.
+  case "$out" in *"task-lap-1"*"[NO-OVERLAP]"*)
+      echo "FAIL: NO-OVERLAP leaked onto task-lap-1, whose landing overlapped"; fail=1 ;; esac
+  # And the rows marked before paths were ever recorded carry no verdict at
+  # all — an absent verdict must not be rendered as either answer.
+  case "$out" in *"task-live-1"*"[NO-OVERLAP]"*)
+      echo "FAIL: NO-OVERLAP leaked onto a row that carries no landing verdict"; fail=1 ;; esac
+  case "$out" in *"1 of the 5 live rows below carry ONLY landings with NO PATH OVERLAP"*) ;;
+    *) echo "FAIL: the report does not count the no-overlap population separately"; fail=1 ;; esac
   [ "$rc" -eq 0 ] || { echo "FAIL: a clean fixture read exited $rc, want 0"; fail=1; }
 
   # --exit-on-findings must turn the same finding into a 3.
