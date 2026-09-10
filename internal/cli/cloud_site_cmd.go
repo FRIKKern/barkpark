@@ -3733,11 +3733,7 @@ func siteWalkWindow(walk cloudclient.SiteDeploymentWalk) (siteWindow, bool) {
 // the only structural defence is that the renderer cannot print the figure
 // without printing this beside it.
 func siteWindowBudgetLine(w siteWindow) string {
-	spent := fmt.Sprintf("%d round trip", w.Pages)
-	if w.Pages != 1 {
-		spent += "s"
-	}
-	base := fmt.Sprintf("read in %s of up to %d (%d rows per request, %d asked for)", spent, w.PageBudget, w.PageSize, w.PageLimit)
+	base := fmt.Sprintf("window: %d attempts asked for, read in %d of a budgeted %d round trips at %d rows per request", w.PageLimit, w.Pages, w.PageBudget, w.PageSize)
 	switch w.StoppedBy {
 	case "exhausted":
 		return base + " — the server had no page behind this one, so this IS the site's whole deployment history"
