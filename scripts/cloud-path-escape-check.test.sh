@@ -101,7 +101,7 @@ trap cleanup EXIT
 # not_floor() arms say so out loud. A fixture built entirely out of quoted
 # literals would have let a dead segment reader sit green.
 make_fixture() {
-  local root="$1" g i=0 decl segs seg out
+  local root="$1" g i=0 decl segs seg out targets t
   mkdir -p "$root/cloud/lib" "$root/cloud/test/barkpark_cloud" "$root/scripts"
   : >"$root/cloud/docker-compose.yml"
 
@@ -114,7 +114,14 @@ make_fixture() {
   while IFS= read -r g; do
     [ -n "$g" ] || continue
     case "$g" in
-      */'**') mkdir -p "$root/${g%/**}" ;;
+      */'**')
+        mkdir -p "$root/${g%/**}"
+        # …plus ONE file INSIDE it. A `dir/**` entry is a claim about the
+        # directory AND everything under it, and (2) below emits a read of both
+        # shapes; a read only enters the census if it RESOLVES, so the file has
+        # to be here.
+        : >"$root/${g%/**}/fixture-probe.txt"
+        ;;
       *)
         mkdir -p "$root/$(dirname -- "$g")"
         : >"$root/$g"
@@ -124,8 +131,21 @@ make_fixture() {
 $decl
 EOF
 
-  # (2) one covered read per declared path OUTSIDE cloud/. Anything inside
-  #     cloud/ is not an escape and would never enter the census.
+  # (2) one covered read per declared path OUTSIDE cloud/ — TWO for a `dir/**`
+  #     entry, the directory itself and a file under it, because the glob claims
+  #     both and a fixture that only ever reads the directory has not exercised
+  #     the `(/|$)` half of the anchor. Anything inside cloud/ is not an escape
+  #     and would never enter the census.
+  #
+  #     IT IS ALSO WHAT KEEPS THE FIXTURE ABOVE THE FLOOR. The population is
+  #     derived from the declared set, so FOLDING five exact entries into two
+  #     globs (dr-w26-s4-followup-widen-escape-harness) took it from 22 to 19
+  #     against a floor of 20 — and every fixture case then redded on the floor,
+  #     for a reason that had nothing to do with the tree. A set can legitimately
+  #     get SHORTER while covering strictly more; counting one read per LINE made
+  #     the fixture mistake that for a shrinking population. Measured after this
+  #     change: 19 declared entries outside cloud/, 8 of them globs, so 27 reads
+  #     against a floor of 20.
   out="$root/cloud/test/barkpark_cloud/covered_test.exs"
   : >"$out"
   while IFS= read -r g; do
@@ -135,20 +155,29 @@ EOF
     # unconditionally is a foot-gun: `/**` is the glob `/*`, so it also eats the
     # last component of an EXACT entry — deploy/site-deploy.sh became `deploy`,
     # and the fixture quietly emitted 15 distinct reads instead of 22.
-    case "$g" in */'**') g="${g%/**}" ;; esac
-    i=$((i + 1))
-    if [ $((i % 2)) -eq 0 ]; then
-      # SEGMENT LIST — `[__DIR__, "..", "..", "..", "a", "b"]`
-      segs=""
-      while [ -n "$g" ]; do
-        seg="${g%%/*}"
-        if [ "$seg" = "$g" ]; then g=""; else g="${g#*/}"; fi
-        segs="$segs, \"$seg\""
-      done
-      printf '  @r%d Path.join([__DIR__, "..", "..", ".."%s])\n' "$i" "$segs" >>"$out"
-    else
-      printf '  @r%d Path.expand("../../../%s", __DIR__)\n' "$i" "$g" >>"$out"
-    fi
+    case "$g" in
+      */'**') targets="${g%/**}
+${g%/**}/fixture-probe.txt" ;;
+      *) targets="$g" ;;
+    esac
+    while IFS= read -r t; do
+      [ -n "$t" ] || continue
+      i=$((i + 1))
+      if [ $((i % 2)) -eq 0 ]; then
+        # SEGMENT LIST — `[__DIR__, "..", "..", "..", "a", "b"]`
+        segs=""
+        while [ -n "$t" ]; do
+          seg="${t%%/*}"
+          if [ "$seg" = "$t" ]; then t=""; else t="${t#*/}"; fi
+          segs="$segs, \"$seg\""
+        done
+        printf '  @r%d Path.join([__DIR__, "..", "..", ".."%s])\n' "$i" "$segs" >>"$out"
+      else
+        printf '  @r%d Path.expand("../../../%s", __DIR__)\n' "$i" "$t" >>"$out"
+      fi
+    done <<EOF
+$targets
+EOF
   done <<EOF
 $decl
 EOF
@@ -323,10 +352,25 @@ check_match "js/packages/create-barkpark-app/templates" cloud true
 # …and the whole point of the shim: these must NOT run the Cloud suite.
 check_match "docs/ops/merge-gates.md" cloud false
 check_match "README.md" cloud false
+# …and the whole point of the shim: these must NOT run the Cloud suite. api/,
+# web/ and js/ are three of `ReaderScan.roots/0`'s five trees and they stay
+# FALSE on purpose — declaring them was built and costed at 2233 newly-
+# dispatching commits per 60 days, and held; the remedy is re-filed for the
+# gates lane as a job-level condition on that one census (re-filed for gates
+# 2026-09-10). These three lines are what will flip when it lands, and until
+# then they are the measurement of the gap, not an oversight.
 check_match "api/lib/barkpark.ex" cloud false
 check_match "api/test/barkpark/some_test.exs" cloud false
 check_match "web/src/app/page.tsx" cloud false
-check_match ".github/workflows/elixir.yml" cloud false
+check_match "js/packages/sdk/src/client.ts" cloud false
+check_match "docs/cards/cli.md" cloud false
+check_match "tooling/grip/ledger/x.md" cloud false
+# THE CALLER CORPUS IS declared, so these two FLIPPED from false to true
+# (dr-w26-s4-followup-widen-escape-harness): the arm walks the whole `scripts`
+# and `.github/workflows` directories, so any file in them must dispatch — not
+# just the handful the set used to name by hand.
+check_match "scripts/some-new-caller.sh" cloud true
+check_match ".github/workflows/elixir.yml" cloud true
 # every declared glob selects the set it is declared in
 while IFS= read -r g; do
   [ -n "$g" ] || continue
@@ -982,12 +1026,37 @@ git -C "$DR" -c user.email=t@t -c user.name=t commit -qm docs >/dev/null 2>&1
 dispatch "docs-only PR" 0 false pull_request "$BASE_SHA"
 
 # an api-only PR must ALSO skip — this is the one D89 named as the deadlock the
-# workflow-level filter caused, and the shim's reason for existing.
+# workflow-level filter caused, and the shim's reason for existing. It stays
+# `false` HERE while the reader census still walks api/: declaring `api/**` was
+# measured at 1438 newly-dispatching commits over 60 days and held, with the
+# remedy re-filed for the gates lane as a job-level condition on that one test
+# (re-filed for gates 2026-09-10). This arm is where that flip will be shown.
 git -C "$DR" checkout -q -b apionly "$BASE_SHA"
 printf 'x\n' >"$DR/api/lib/a.ex"
 git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm api >/dev/null 2>&1
 dispatch "api-only PR" 0 false pull_request "$BASE_SHA"
+
+# A SCRIPTS-ONLY PR NOW DISPATCHES — the caller-corpus widening, shown END TO END
+# through cloud.yml's own dispatcher step rather than asserted about the set.
+# Before `scripts/**` this probe answered false: a caller added in a NEW scripts/
+# file did not re-run the arm that scores it, so the route kept reading
+# caller-less until somebody else's cloud-touching PR paid for it.
+git -C "$DR" checkout -q -b scriptsonly "$BASE_SHA"
+mkdir -p "$DR/scripts"
+printf 'x\n' >"$DR/scripts/some-new-caller.sh"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm scripts >/dev/null 2>&1
+dispatch "scripts-only PR (the caller-corpus widening)" 0 true pull_request "$BASE_SHA"
+
+# …and a docs-only PR still skips, so the pair above measures the SET and not a
+# dispatcher that lost the ability to answer either way.
+git -C "$DR" checkout -q -b docsonly2 "$BASE_SHA"
+mkdir -p "$DR/docs"
+printf 'x\n' >"$DR/docs/caller-corpus-note.md"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm docs2 >/dev/null 2>&1
+dispatch "docs-only PR (control for the scripts flip)" 0 false pull_request "$BASE_SHA"
 
 # the vendored-template SOURCE selects the set — the #963→#969 drift guard
 git -C "$DR" checkout -q -b templates "$BASE_SHA"

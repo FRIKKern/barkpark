@@ -3883,13 +3883,27 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
                "a PR editing it would SKIP the Cloud gate that runs this census"
     end
 
-    # The four entries dr-w26-s4 added, by name. `.github/workflows/deploy.yml`
-    # is the one that matters most: before it, a deploy.yml-only PR dispatched
-    # NOTHING in this set, so the recorder could land — or vanish — with no code
-    # gate at all.
-    for entry <- ["cloud/lib/**", "deploy/**", "internal/**", ".github/workflows/deploy.yml"] do
+    # The four entries dr-w26-s4 added, by name — the workflow one now as the
+    # DIRECTORY it became. `.github/workflows/deploy.yml` is the entry that
+    # mattered most: before it, a deploy.yml-only PR dispatched NOTHING in this
+    # set, so the recorder could land — or vanish — with no code gate at all. It
+    # was folded into `.github/workflows/**` by
+    # dr-w26-s4-followup-widen-escape-harness, because this arm walks the WHOLE
+    # `.github/workflows` directory and an exact-file pin rots the moment a
+    # caller moves one file over. The glob is strictly stronger here: it still
+    # covers deploy.yml, and it also covers the next workflow the corpus reads.
+    for entry <- ["cloud/lib/**", "deploy/**", "internal/**", ".github/workflows/**"] do
       assert entry in declared, "CLOUD_PATHS lost #{entry} — dr-w26-s4's declaration"
     end
+
+    # …and the ruling the fold must not have thrown away: whatever shape the
+    # entry takes, a deploy.yml-only PR still dispatches this suite.
+    assert Enum.any?(
+             declared,
+             &(&1 == ".github/workflows/deploy.yml" or &1 == ".github/workflows/**")
+           ),
+           "nothing in CLOUD_PATHS dispatches on .github/workflows/deploy.yml — the recorder " <>
+             "seam this arm scores can land, or vanish, with no code gate at all"
   end
 
   defp fmt_routes(set) do
