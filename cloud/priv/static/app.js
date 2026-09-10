@@ -19989,6 +19989,61 @@
     return localStorage.getItem("bp.active-team") !== meTeamPin;
   }
 
+  // cch-w42-bl — THE CROSS-TAB PIN, AND WHY THE ANSWER IS ONE LISTENER RATHER
+  // THAN N GUARDED BANDS.
+  //
+  // The reproduction (cloud/priv/static/__preview__/pin-race.mjs, two real
+  // Chrome tabs on one localStorage) showed a tab that never switched teams
+  // painting the OTHER team's audit rows under its own team's heading. The
+  // mechanism is not a missing guard on one band; it is that the pin is
+  // GLOBAL to the tab and nothing told the tab it moved:
+  //
+  // Re-derive the counts below. The needle is written ESCAPED on purpose: the
+  // per-GET-call-site census in __app.test.mjs parses this file for the literal
+  // call form, so a comment quoting it verbatim is counted as two more call
+  // sites whose "path" is this prose (measured — it reds that census by name).
+  //
+  //   grep -cE 'api\("GET"' cloud/priv/static/app.js             # 66 GET sites
+  //   grep -nE 'api\("GET"' cloud/priv/static/app.js | grep -c noAuth   # 5
+  //
+  // api() hangs `x-barkpark-team` on EVERY request that is not `noAuth`, so 61
+  // of those 66 GETs — and 135 of the 147 api() call sites overall — change
+  // their answer the instant another tab writes the key. The bands they paint,
+  // derived from those call sites rather than from any filing, are: activity /
+  // audit, fleet (barkparks + their credentials, events, usage, usage history,
+  // metrics, domain status, bootstrap, agent-key), sites (list, detail,
+  // deployments, previews, domain status), archives, webhooks and their
+  // deliveries, tokens, notification settings and deliveries, members and
+  // invitations, subscription, usage summary, onboarding, providers and
+  // provider catalogs/overviews/capabilities, the GitHub installation and repo
+  // list, and /v1/me itself. Teaching each of those to ask meTeamPinMoved()
+  // would be sixty-one edits that leave the SIXTY-SECOND band — the one a
+  // later wave adds — open by default, and would leave every WRITE (POST,
+  // PATCH, DELETE) unguarded besides. A rendered lie is the loud half of the
+  // defect; a write landing on a team the person is not looking at is the
+  // quiet half, and only the reload closes both.
+  //
+  // WHAT IT COSTS, STATED RATHER THAN LEFT TO BE DISCOVERED: a tab reloads
+  // under the person without being asked, and anything unsubmitted in that tab
+  // (a half-filled invite, a modal's form state, a scroll position) is lost.
+  // That is the price of the honest alternative — showing team X's name over
+  // team Y's data is not a smaller harm, it is a tenancy lie — and it is paid
+  // only in the tab that is ALREADY stale, only at the moment another tab
+  // moved the pin, which is a deliberate act the person just performed.
+  //
+  // The DECISION is pure and node-pinned (`pinStorageMovesTeam`) so a unit test
+  // can hold it without a DOM; the listener in init() is the two-line mount.
+  // The event's own oldValue/newValue are read rather than localStorage,
+  // because the reload must be driven by WHAT CHANGED, not by a re-read that
+  // races a third tab. A same-value write is not a move: the storage event does
+  // not fire for one per spec, and if a browser fired it anyway a reload would
+  // be pure cost. `key === null` (a whole-store clear) is likewise not a move
+  // of THIS key.
+  function pinStorageMovesTeam(key, oldValue, newValue) {
+    if (key !== "bp.active-team") return false;
+    return oldValue !== newValue;
+  }
+
   // The team authority the SERVER states, as a five-valued band — never a
   // boolean. /v1/me now carries `team_authority` {team_id, role, admin, owner},
   // resolved server-side from Authz and nil exactly when the account is
@@ -26955,6 +27010,18 @@
       if (eff.route) applyRoute();
     });
 
+    // cch-w42-bl — THE CROSS-TAB PIN. Another tab moved `bp.active-team`; every
+    // request this tab makes from here on carries the NEW team while every
+    // pixel on screen describes the OLD one. The decision is the pure
+    // pinStorageMovesTeam() above (which spells out the derivation and the
+    // cost); this is its only mount. `storage` never fires in the tab that did
+    // the write, so the switcher's own location.reload() is not doubled.
+    window.addEventListener("storage", function (e) {
+      if (!e) return;
+      if (!pinStorageMovesTeam(e.key, e.oldValue, e.newValue)) return;
+      location.reload();
+    });
+
     // Cmd/Ctrl+K — the global command palette. preventDefault is UNCONDITIONAL for
     // the combo (Ctrl+K is readline kill-line inside inputs — never let it fire);
     // opening then no-ops while any modal is open (one modal root), before sign-in,
@@ -28432,6 +28499,8 @@
       // them. (repaintLaunchAuthority wraps this one and three more surfaces;
       // the offer claim is about these two buttons alone.)
       meTeamPinMoved: meTeamPinMoved,
+      // cch-w42-bl — the cross-tab reload decision, pinned without a DOM.
+      pinStorageMovesTeam: pinStorageMovesTeam,
       refreshLaunchOffers: refreshLaunchOffers,
       // cch-w43-bl — the invite landing's membership set, node-pinned on its
       // own rather than only through the state machine that consumes it.

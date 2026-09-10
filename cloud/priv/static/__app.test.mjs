@@ -31341,3 +31341,56 @@ test("cch-w49-bl: the OWNER gets every one of the five — so no pin above can b
   assert.ok(o.membersHtml.includes("data-member-role") || o.membersHtml.includes("data-member-remove"),
     "…and is offered at least one row verb over the other member");
 });
+
+// ── cch-w42-bl: the cross-tab team pin ───────────────────────────────────────
+// The RENDERED half of this fix is proved in two real Chrome tabs by
+// cloud/priv/static/__preview__/pin-race.mjs (wired into console-harness.yml as
+// a step of the modal-oracle job). What lives HERE is the pure decision the
+// live `storage` listener delegates to — the part a browser run cannot pin
+// cheaply, and the part a mutation would most quietly widen or narrow.
+//
+// NON-VACUITY, said out loud: `pinStorageMovesTeam` is exported from app.js's
+// own __bpTestHook block, so an assertion below can only pass against the
+// shipped function. There is no local re-implementation in this file.
+test("cch-w42-bl: pinStorageMovesTeam fires for a MOVED team pin and for nothing else", () => {
+  const f = hooks.pinStorageMovesTeam;
+  assert.equal(typeof f, "function", "app.js must export the cross-tab pin decision");
+
+  // 1 · THE DEFECT'S OWN EVENT. Another tab switched teams: the reload is the
+  //     whole fix, and the instrument's RACE leg is exactly this event.
+  assert.equal(f("bp.active-team", "team-A", "team-B"), true,
+    "a moved pin must reload the stale tab");
+  // A first write (no prior value) and a removal are both real moves.
+  assert.equal(f("bp.active-team", null, "team-B"), true, "…first write of the pin is a move");
+  assert.equal(f("bp.active-team", "team-A", null), true, "…and so is clearing it");
+
+  // 2 · THE CONTROL LEG'S EVENT. Both tabs on one team: a same-value write is
+  //     not a move, and a reload there would be pure cost with no defect to pay
+  //     for. This is the assertion that makes arm 1 a decision rather than a
+  //     blanket "reload on any storage event".
+  assert.equal(f("bp.active-team", "team-A", "team-A"), false,
+    "a same-value write is not a move");
+  assert.equal(f("bp.active-team", null, null), false, "…nor is null-to-null");
+
+  // 3 · EVERY OTHER KEY. The console writes bpcloud.session and a theme key
+  //     through the same localStorage; neither invalidates a painted team.
+  for (const k of ["bpcloud.session", "bp.theme", "bp.active-teams", "", "bp.active-tea"]) {
+    assert.equal(f(k, "x", "y"), false, "key " + JSON.stringify(k) + " must not force a reload");
+  }
+  // A whole-store clear() delivers key === null. It is not a move of THIS key.
+  assert.equal(f(null, null, null), false, "a localStorage.clear() event is not a pin move");
+});
+
+test("cch-w42-bl: the LIVE listener is mounted on window, not merely declared", () => {
+  // The decision above is inert without its mount, and a mutation that deletes
+  // the addEventListener leaves every pure test in this file green — which is
+  // precisely how this defect class shipped in the first place. app.js carried
+  // ZERO "storage" listeners before this wave (that absence is quoted in
+  // pin-race.mjs's header as the mechanism), so asserting one exists is a real
+  // ratchet and not a tautology.
+  const src = APP_SRC;
+  assert.ok(/window\.addEventListener\(\s*"storage"/.test(src),
+    'app.js must mount a "storage" listener — without it the pure decision is never asked');
+  assert.ok(/pinStorageMovesTeam\(\s*e\.key/.test(src),
+    "…and that listener must delegate to pinStorageMovesTeam rather than inline a second copy of it");
+});
