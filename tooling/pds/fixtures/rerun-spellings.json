@@ -1,0 +1,143 @@
+{
+  "note": "THE ONE LAW, WRITTEN ONCE (pds-w28-bl-two-rerun-screens-drift). Wave 28 landed two hand-maintained screens for 'which rerun spellings are legal': the Elixir WRITE seam (api/lib/barkpark/tasks/stage.ex @forbidden_rerun_shapes, reachable as Barkpark.Tasks.Stage.rerun_refusal_code/1) and the JS READ seam (tooling/pds/spellings.mjs forbiddenSpelling). Neither re-derived that it agreed with the other, and three measured spellings already disagreed. This file is the mirror lock: BOTH suites read THIS file and assert their own column against it. It is never two retyped copies. A spelling that is not listed here is not screened by anything that would notice a widening.",
+  "loader_contract": "Both loaders MUST refuse an empty or unparseable read (zero cases) rather than pass vacuously. A lock that can go quiet is not a lock. Elixir: api/test/barkpark/tasks/rerun_spelling_mirror_test.exs. JS: tooling/pds/rerun-adjudicate.test.mjs section 3b.",
+  "precedence": {
+    "why": "A fixture that pins only the VALUE SET is blind to an arm ORDER swapped on one side: a command can breach two rules, and the screen reports the FIRST match, which is the one the author has to fix first. Wave 28 shipped the two screens with arms 2 and 4 transposed — `test -f x && git merge-base --is-ancestor a b` was :merge_base_ancestor to the writer and TEST-F to the reader. So the order is pinned too, and multi_breach cases below only pass while both orders hold.",
+    "elixir": ["repo_redirect", "merge_base_ancestor", "command_substitution", "filesystem_predicate", "pipe_masked"],
+    "js": ["GIT-DASH-C", "MERGE-BASE-IS-ANCESTOR", "COMMAND-SUBSTITUTION", "TEST-F"]
+  },
+  "class_map": {
+    "repo_redirect": "GIT-DASH-C",
+    "merge_base_ancestor": "MERGE-BASE-IS-ANCESTOR",
+    "command_substitution": "COMMAND-SUBSTITUTION",
+    "filesystem_predicate": "TEST-F",
+    "pipe_masked": "PIPE-MASKED-RC"
+  },
+  "class_map_note": "pipe_masked maps to PIPE-MASKED-RC, which is NOT a spellings.mjs rule name — it is variance.mjs's over-claim label. The mismatch is deliberate and is exactly what forces the divergence sentence on that case: the two seams handle pipe masking at DIFFERENT layers, and the lock must not be able to call that agreement.",
+  "agreement_rule": "For every case: class_map[case.elixir] must equal case.js, OR case.divergence must be a non-empty sentence saying why the two seams are deliberately different there. Both suites assert this, so an undocumented widening of either screen reds.",
+  "cases": [
+    {
+      "command": "git -C /tmp show origin/main:README.md",
+      "elixir": "repo_redirect",
+      "js": "GIT-DASH-C",
+      "why": "the classic chdir retarget: the auditor and the author are not reading the same tree"
+    },
+    {
+      "command": "git -C/tmp show origin/main:README.md",
+      "elixir": "repo_redirect",
+      "js": "GIT-DASH-C",
+      "why": "the glued -C<dir> cluster is the same redirect with the space removed"
+    },
+    {
+      "command": "git -C log push origin main",
+      "elixir": "repo_redirect",
+      "js": "GIT-DASH-C",
+      "why": "measured 2026-07-31: grip's own read-only screen ADMITS this, reading `log` as the sub-verb; both seams refuse the shape one layer up"
+    },
+    {
+      "command": "git --git-dir=/tmp/x/.git show origin/main:README.md",
+      "elixir": "repo_redirect",
+      "js": "GIT-DASH-C",
+      "why": "RESOLVED DISAGREEMENT 1 of 4. --git-dir retargets the repository exactly as -C does. The writer refused it from day one; the reader did not (hasGitDashC tested only for -C). The READER moved."
+    },
+    {
+      "command": "git --work-tree=/tmp/x show origin/main:README.md",
+      "elixir": "repo_redirect",
+      "js": "GIT-DASH-C",
+      "why": "RESOLVED DISAGREEMENT 2 of 4. Same redirect, other half. The READER moved."
+    },
+    {
+      "command": "git show -C origin/main",
+      "elixir": null,
+      "js": null,
+      "why": "CONTROL, AND THE REASON THE SCAN STOPS AT THE SUB-VERB. `-C` AFTER the sub-verb is diff copy-detection, not a chdir. Both seams must stay quiet, or the census loses honest reads for nothing. This is the case a careless widening of the repo-redirect arm reds."
+    },
+    {
+      "command": "git merge-base --is-ancestor abc123 origin/main",
+      "elixir": "merge_base_ancestor",
+      "js": "MERGE-BASE-IS-ANCESTOR",
+      "why": "refused by grip's shipped screen for the wrong stated reason; PDS states the true one instead of patching another epic's module"
+    },
+    {
+      "command": "git rev-list --count origin/main..$(git rev-parse HEAD) | grep -x 0",
+      "elixir": "command_substitution",
+      "js": "COMMAND-SUBSTITUTION",
+      "why": "the screened text is not the text that runs; the inner probe's exit code is swallowed"
+    },
+    {
+      "command": "git log --format=`echo %H` origin/main",
+      "elixir": "command_substitution",
+      "js": "COMMAND-SUBSTITUTION",
+      "why": "backticks are the same splice with the older spelling"
+    },
+    {
+      "command": "test -f api/lib/barkpark/tasks/stage.ex",
+      "elixir": "filesystem_predicate",
+      "js": "TEST-F",
+      "why": "asserts about the local CHECKOUT at an unknown head; an uncommitted file makes it true"
+    },
+    {
+      "command": "[ -f README.md ]",
+      "elixir": "filesystem_predicate",
+      "js": "TEST-F",
+      "why": "`[` is `test` under its other name"
+    },
+    {
+      "command": "test x = x",
+      "elixir": "filesystem_predicate",
+      "js": "TEST-F",
+      "why": "RESOLVED DISAGREEMENT 3 of 4. A bare `test ` with no -flag. The writer refused any test/[ followed by whitespace; the reader (hasTestF) additionally demanded a -flag argument, so `test x = x` — which asserts nothing about origin/main at all, and is the shape a tautology hides in — walked through the read seam. The READER moved."
+    },
+    {
+      "command": "FOO=1 test -f README.md",
+      "elixir": "filesystem_predicate",
+      "js": "TEST-F",
+      "why": "RESOLVED DISAGREEMENT 4 of 4 — NOT in the filing; found by building this fixture. The reader's tokens() strips leading VAR=value assignments before reading the head, the writer's regex did not, so a single environment assignment hid the predicate from the WRITE seam. This is the one disagreement pointing the UNSAFE way (a false ACCEPT at the write seam), so the WRITER moved: @forbidden_rerun_shapes' filesystem_predicate arm now steps over leading assignments the way tokens() does."
+    },
+    {
+      "command": "test -f x && git merge-base --is-ancestor a b",
+      "elixir": "merge_base_ancestor",
+      "js": "MERGE-BASE-IS-ANCESTOR",
+      "multi_breach": ["merge_base_ancestor", "filesystem_predicate"],
+      "why": "THE ORDER CASE. Two rules fire; the first-listed wins. Wave 28 shipped the arms transposed — writer said :merge_base_ancestor, reader said TEST-F — so a set-only fixture would have called this pair identical. The READER's RULES array was reordered to the writer's order."
+    },
+    {
+      "command": "git -C /tmp merge-base --is-ancestor a b",
+      "elixir": "repo_redirect",
+      "js": "GIT-DASH-C",
+      "multi_breach": ["repo_redirect", "merge_base_ancestor"],
+      "why": "the redirect is arm 1 on both sides and outranks the ancestry rule; pins the top of the order"
+    },
+    {
+      "command": "git show origin/main:README.md | head -1",
+      "elixir": "pipe_masked",
+      "js": null,
+      "divergence": "INTENDED, AND RECORDED RATHER THAN CLOSED. The write seam refuses a formatting pipeline tail as a fifth shape (check_rerun_pipe_tail/1) because a stored rerun that cannot fail is worthless at write time. The read seam deliberately does NOT refuse it at the SPELLING layer: tooling/pds/variance.mjs already grades it one layer over as the PIPE-MASKED-RC over-claim, which demotes the claim instead of discarding the row, and that is a more informative answer for an already-stored command. Adding a fifth RULE here would double-screen it and change adjudication output. The direction is safe: the writer is stricter, so the failure mode is a false REFUSAL at write time, never a false accept.",
+      "why": "`git show origin/main:<gone>` exits 128; the same command piped to `head -1` exits 0 — the formatter launders the failure into a pass"
+    },
+    {
+      "command": "git rev-list --count origin/main..abc | grep -x 0",
+      "elixir": null,
+      "js": null,
+      "why": "LEGAL SUBSTITUTE (ancestry). A comparing tail is not a formatting tail — both seams must stay quiet or the refusals name a remedy that cannot be written."
+    },
+    {
+      "command": "git cat-file -t origin/main:api/lib/barkpark/tasks/stage.ex",
+      "elixir": null,
+      "js": null,
+      "why": "LEGAL SUBSTITUTE (existence). Note the two seams advertise DIFFERENT existence substitutes (-e vs -t) for reasons documented in each file; both ACCEPT both, which is what this fixture pins."
+    },
+    {
+      "command": "git cat-file -e origin/main:api/lib/barkpark/tasks/stage.ex",
+      "elixir": null,
+      "js": null,
+      "why": "LEGAL SUBSTITUTE named by the Elixir seam and listed by the JS seam as a SILENT_PREDICATE; legal to both screens either way"
+    },
+    {
+      "command": "git grep -n disposition_rerun origin/main -- api/lib/barkpark/tasks/stage.ex",
+      "elixir": null,
+      "js": null,
+      "why": "LEGAL SUBSTITUTE (content)"
+    }
+  ]
+}

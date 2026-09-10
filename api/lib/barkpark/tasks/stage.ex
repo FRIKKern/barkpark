@@ -275,10 +275,18 @@ defmodule Barkpark.Tasks.Stage do
     {:command_substitution, ~r/\$\(|`/,
      "command substitution (`$( … )` / backticks) reports the OUTER command's exit code, " <>
        "so the inner probe's failure is swallowed"},
-    {:filesystem_predicate, ~r/(?:^|[|;&]\s*)(?:test|\[)\s/,
+    {:filesystem_predicate, ~r/(?:^|[|;&]\s*)(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:test|\[)\s/,
      "a `test` / `[` predicate asserts about the local CHECKOUT — per-machine state that " <>
        "says nothing about origin/main"}
   ]
+
+  # Why the assignment prefix is stepped over (pds-w28-bl-two-rerun-screens-drift):
+  # `FOO=1 test -f README.md` runs the SAME predicate, and the READ seam's
+  # tokeniser (tooling/pds/spellings.mjs `tokens/1`) already stripped leading
+  # VAR=value assignments before reading the head. This seam did not, so one
+  # environment assignment hid the predicate from the WRITER — the only measured
+  # drift pointing the unsafe way (a false ACCEPT here, not a false refusal).
+  # Both columns are pinned in tooling/pds/fixtures/rerun-spellings.json.
 
   # The pipeline tails that report THEIR success as the check's. `git show
   # origin/main:<deleted> | head -1` exits 0; the bare `git show` exits 128.
@@ -347,6 +355,30 @@ defmodule Barkpark.Tasks.Stage do
   @spec forbidden_rerun_shapes() :: [{atom(), String.t()}]
   def forbidden_rerun_shapes,
     do: Enum.map(@forbidden_rerun_shapes, fn {c, _re, why} -> {c, why} end)
+
+  @doc """
+  THE WRITE SEAM'S SCREEN, AS A PURE FUNCTION — `nil` when the rerun is legal,
+  otherwise the refusal code (`:repo_redirect`, `:merge_base_ancestor`,
+  `:command_substitution`, `:filesystem_predicate`, `:pipe_masked`).
+
+  Made public for ONE reason: `tooling/pds/spellings.mjs` is a SECOND screen for
+  the same law, and until this row nothing re-derived that the two agreed — they
+  already disagreed on four measured spellings. Both seams are now asserted
+  against one committed fixture, `tooling/pds/fixtures/rerun-spellings.json`
+  (this side: `test/barkpark/tasks/rerun_spelling_mirror_test.exs`), and this
+  function is what that fixture can reach. `check_rerun/1` is a thin wrapper
+  over it, so the mirror measures the real write path and not a copy of it.
+
+  ORDER IS PART OF THE ANSWER: a command may breach several arms and the FIRST
+  match is what the refusal names. The fixture pins the order, not just the set.
+  """
+  @spec rerun_refusal_code(String.t()) :: atom() | nil
+  def rerun_refusal_code(rerun) when is_binary(rerun) do
+    case Enum.find(@forbidden_rerun_shapes, fn {_code, re, _why} -> Regex.match?(re, rerun) end) do
+      {code, _re, _why} -> code
+      nil -> if pipe_masked?(rerun), do: :pipe_masked, else: nil
+    end
+  end
 
   @doc """
   The lowercase-canonical adjudication vocabulary. A `:disposition` is trimmed
@@ -659,9 +691,9 @@ defmodule Barkpark.Tasks.Stage do
   defp check_rerun(nil), do: :ok
 
   defp check_rerun(rerun) when is_binary(rerun) do
-    case Enum.find(@forbidden_rerun_shapes, fn {_code, re, _why} -> Regex.match?(re, rerun) end) do
-      {code, _re, _why} -> {:error, {:unfalsifiable_rerun, code, rerun}}
-      nil -> check_rerun_pipe_tail(rerun)
+    case rerun_refusal_code(rerun) do
+      nil -> :ok
+      code -> {:error, {:unfalsifiable_rerun, code, rerun}}
     end
   end
 
@@ -669,12 +701,8 @@ defmodule Barkpark.Tasks.Stage do
   # | head -1` is therefore 0 where the bare `git show` is 128 — the formatter
   # launders a failure into a pass. A last stage that COMPARES (grep -q, diff,
   # cmp, …) is fine; a last stage that merely formats is not.
-  defp check_rerun_pipe_tail(rerun) do
-    if String.contains?(rerun, "|") and formatting_tail?(last_pipeline_stage(rerun)) do
-      {:error, {:unfalsifiable_rerun, :pipe_masked, rerun}}
-    else
-      :ok
-    end
+  defp pipe_masked?(rerun) do
+    String.contains?(rerun, "|") and formatting_tail?(last_pipeline_stage(rerun))
   end
 
   defp last_pipeline_stage(rerun) do

@@ -18,7 +18,7 @@
 //
 // Run: node tooling/pds/rerun-adjudicate.test.mjs
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
@@ -133,6 +133,95 @@ function sh(cmd) {
   // `git show -C` is a diff copy-detection flag, NOT a chdir. Over-refusing it
   // would cost honest reads for nothing.
   ok("3.5 `git show -C` (copy detection) is not swept in", forbiddenSpelling("git show -C origin/main") === null);
+}
+
+// ── 3b. THE MIRROR LOCK: ONE COMMITTED SPELLING LIST, TWO SCREENS ────────────
+//
+// pds-w28-bl-two-rerun-screens-drift. Wave 28 shipped this file AND the Elixir
+// write seam (api/lib/barkpark/tasks/stage.ex @forbidden_rerun_shapes) as two
+// hand-maintained answers to one question, and nothing re-derived that they
+// agreed. They already disagreed on four measured spellings and on the ORDER of
+// two arms. The fix is not a third copy of the expectations: it is ONE file,
+// fixtures/rerun-spellings.json, that both suites read and assert their own
+// column of. The Elixir half is api/test/barkpark/tasks/rerun_spelling_mirror_test.exs.
+//
+// THE EXTRACTOR REFUSES AN EMPTY READ. A lock that can go quiet is not a lock,
+// and this epic has already watched a spotless `# fail 0` prove nothing.
+{
+  const fixturePath = fileURLToPath(new URL("./fixtures/rerun-spellings.json", import.meta.url));
+
+  function loadSpellings(path) {
+    const raw = readFileSync(path, "utf8"); // throws on a missing fixture
+    if (raw.trim() === "") throw new Error(`rerun-spellings.json is EMPTY: ${path}`);
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data.cases) || data.cases.length === 0) {
+      throw new Error("rerun-spellings.json carries no cases — the mirror lock would pass vacuously");
+    }
+    return data;
+  }
+
+  // The anti-vacuity arm, RUN rather than trusted: the loader must throw on
+  // exactly the two shapes that would otherwise turn every case below green.
+  let refusedEmpty = false;
+  let refusedNoCases = false;
+  try {
+    const tmp = fileURLToPath(new URL("./fixtures/.mirror-lock-probe.json", import.meta.url));
+    writeFileSync(tmp, "");
+    try { loadSpellings(tmp); } catch { refusedEmpty = true; }
+    writeFileSync(tmp, '{"cases":[]}');
+    try { loadSpellings(tmp); } catch { refusedNoCases = true; }
+    unlinkSync(tmp);
+  } catch (err) {
+    ok("3b.0 anti-vacuity probe ran", false, String(err));
+  }
+  ok("3b.1 the extractor REFUSES an empty fixture read", refusedEmpty);
+  ok("3b.2 the extractor REFUSES a zero-case fixture", refusedNoCases);
+
+  const fx = loadSpellings(fixturePath);
+  ok("3b.3 the shared fixture is substantive", fx.cases.length >= 15, `${fx.cases.length} cases`);
+
+  // Column 1: this screen's verdict on every case.
+  let drift = 0;
+  for (const c of fx.cases) {
+    const got = forbiddenSpelling(c.command)?.name ?? null;
+    if (got !== c.js) drift++;
+    ok(`3b.4 ${JSON.stringify(c.command)} → ${c.js}`, got === c.js,
+      `fixture ${c.js}, measured ${got} — ${c.why}`);
+  }
+  eq("3b.5 zero drift between this screen and the shared list", drift, 0);
+
+  // Column 2: the ORDER. A fixture pinning only the value set is blind to two
+  // arms transposed — the admit/refuse verdict is identical, the NAMED remedy
+  // is not, and that is precisely how wave 28 shipped.
+  ok("3b.6 the fixture's js precedence IS this file's RULES order",
+    JSON.stringify(fx.precedence.js) === JSON.stringify([...FORBIDDEN_NAMES]),
+    `fixture ${JSON.stringify(fx.precedence.js)} vs shipped ${JSON.stringify([...FORBIDDEN_NAMES])}`);
+
+  const multi = fx.cases.filter((c) => Array.isArray(c.multi_breach));
+  ok("3b.7 at least one multi-breach case pins the arm order", multi.length > 0);
+  for (const c of multi) {
+    // CONTROL: a multi-breach case only tests precedence if the other classes
+    // really fire on it. Map each declared elixir class to its js name and
+    // require the winner to be the FIRST one in this file's order.
+    const names = c.multi_breach.map((k) => fx.class_map[k]).filter(Boolean);
+    const first = FORBIDDEN_NAMES.find((n) => names.includes(n));
+    const got = forbiddenSpelling(c.command)?.name ?? null;
+    ok(`3b.8 ${JSON.stringify(c.command)} reports the first-listed of ${names.join("/")}`,
+      got === first, `expected ${first}, got ${got}`);
+  }
+
+  // Column 3: every case where the two seams differ carries a WRITTEN reason.
+  // A disagreement is allowed; an undocumented one is the original defect.
+  for (const c of fx.cases) {
+    const mirrored = c.elixir ? fx.class_map[c.elixir] : null;
+    const documented = typeof c.divergence === "string" && c.divergence.trim() !== "";
+    if (mirrored !== c.js) {
+      ok(`3b.9 divergence on ${JSON.stringify(c.command)} is written down`, documented,
+        `elixir ${c.elixir} mirrors to ${mirrored}, js ${c.js}, no divergence sentence`);
+    } else {
+      ok(`3b.10 ${JSON.stringify(c.command)} agrees and claims no divergence`, !documented);
+    }
+  }
 }
 
 // ── 4. VARIANCE-SKIP, NOT STRICT POLARITY ────────────────────────────────────
