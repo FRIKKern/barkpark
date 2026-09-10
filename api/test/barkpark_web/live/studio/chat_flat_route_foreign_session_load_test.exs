@@ -80,7 +80,13 @@ defmodule BarkparkWeb.Studio.ChatFlatRouteForeignSessionLoadTest do
     raw = "chatflat-bound-b-#{System.unique_integer([:positive])}"
 
     {:ok, _} =
-      Auth.create_token(raw, "chat flat ws-b admin", "production", ["read", "write", "admin"], ws_b.id)
+      Auth.create_token(
+        raw,
+        "chat flat ws-b admin",
+        "production",
+        ["read", "write", "admin"],
+        ws_b.id
+      )
 
     foreign = session_owned_by!(ws_a, "ws-A private chat")
     own = session_owned_by!(ws_b, "ws-B own chat")
@@ -113,7 +119,7 @@ defmodule BarkparkWeb.Studio.ChatFlatRouteForeignSessionLoadTest do
   describe "flat :admin_studio — /studio/chat/:session_id with a ws-B-bound admin token" do
     test "a workspace-A session is REFUSED onto the socket, and no second hop can reach it",
          %{conn: conn, foreign: foreign} do
-      {view, html} = mount_flat!(conn, "#{@flat_path}/#{foreign.id}")
+      {view, _html} = mount_flat!(conn, "#{@flat_path}/#{foreign.id}")
 
       assigns = :sys.get_state(view.pid).socket.assigns
 
@@ -123,11 +129,20 @@ defmodule BarkparkWeb.Studio.ChatFlatRouteForeignSessionLoadTest do
                "(store_session_id == #{inspect(assigns[:store_session_id])}) — every " <>
                "socket-own-session clause is now a cross-tenant write by a second hop"
 
-      # PRESENCE #2 — workspace A's transcript is not on the screen. The string
-      # was written to the store in setup, so its absence is a refusal and not a
-      # missing fixture.
-      refute html =~ "WS-A-SECRET-TRANSCRIPT-LINE",
-             "workspace-A's transcript rendered on a ws-B-bound admin's socket"
+      # PRESENCE #2 — workspace A's TRANSCRIPT is not replayed onto the socket.
+      # Asserted on the `:messages` assign, not on the page HTML, and that
+      # distinction was forced by a run: `append_message/2` denormalises a
+      # `summary` preview onto the session ROW, and the flat SIDEBAR lists every
+      # owner's rows on purpose (charter D17/D18, pinned by `chat_live_test`'s
+      # tenant-seam case), so the marker appears in the page even with the load
+      # refused. That sidebar breadth is a separate, pre-existing and deliberate
+      # question; this row is about what lands on the SOCKET.
+      refute Enum.any?(
+               assigns[:messages] || [],
+               &(to_string(&1[:text] || "") =~ "WS-A-SECRET-TRANSCRIPT-LINE")
+             ),
+             "workspace-A's transcript was replayed onto a ws-B-bound admin's socket " <>
+               "(messages: #{inspect(assigns[:messages])})"
 
       # PRESENCE #3 — the SECOND HOP. `set-model` takes no id off the wire; it
       # writes to whatever `store_session_id` holds. With the load refused there
@@ -180,13 +195,20 @@ defmodule BarkparkWeb.Studio.ChatFlatRouteForeignSessionLoadTest do
                "not exercise the nil-principal path"
 
       conn = init_test_session(conn, %{"api_token" => raw})
-      {view, html} = mount_flat!(conn, "#{@flat_path}/#{foreign.id}")
+      {view, _html} = mount_flat!(conn, "#{@flat_path}/#{foreign.id}")
 
-      assert :sys.get_state(view.pid).socket.assigns[:store_session_id] == foreign.id,
+      assigns = :sys.get_state(view.pid).socket.assigns
+
+      assert assigns[:store_session_id] == foreign.id,
              "the unbound instance superuser lost the :global load the flat route is for"
 
-      assert html =~ "WS-A-SECRET-TRANSCRIPT-LINE",
-             "the unbound instance superuser lost the replayed transcript"
+      assert Enum.any?(
+               assigns[:messages] || [],
+               &(to_string(&1[:text] || "") =~ "WS-A-SECRET-TRANSCRIPT-LINE")
+             ),
+             "the unbound instance superuser lost the replayed transcript — the same " <>
+               "read the bound principal is refused above, so this arm is what tells " <>
+               "the tenancy gate apart from a broken loader"
     end
   end
 
@@ -252,8 +274,11 @@ defmodule BarkparkWeb.Studio.ChatFlatRouteForeignSessionLoadTest do
       Barkpark.StudioChat.RuntimeSupervisor
       |> DynamicSupervisor.which_children()
       |> Enum.each(fn
-        {_, pid, _, _} when is_pid(pid) -> DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)
-        _ -> :ok
+        {_, pid, _, _} when is_pid(pid) ->
+          DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)
+
+        _ ->
+          :ok
       end)
 
       if prev,

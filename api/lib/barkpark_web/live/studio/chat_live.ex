@@ -5222,17 +5222,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # token IS bound; narrowing on the binding alone would have made every legacy
   # row unmanageable.
   defp tenancy_permits?(socket, id) do
-    case principal_workspace_id(socket) do
-      # No binding at all (no Default workspace) — the genuine :global superuser.
-      nil ->
-        true
+    case StudioChat.get_session(id, :global) do
+      %{owner_workspace_id: owner} -> principal_permits_owner?(socket, owner)
+      # Missing row: not a cross-tenant reach.
+      _ -> true
+    end
+  end
 
-      ws_id ->
-        case StudioChat.get_session(id, :global) do
-          %{owner_workspace_id: owner} when is_binary(owner) -> owner == ws_id
-          # Missing row, or a legacy NULL-owned one: not a cross-tenant reach.
-          _ -> true
-        end
+  # The rule `tenancy_permits?/2` enforces, stated over an OWNER rather than an
+  # id, so the LOAD seam can ask it without a second `get_session/2`. A token
+  # with no binding at all is the genuine `:global` superuser (charter D17/D18);
+  # a NULL-owned row is legacy / pre-tenancy and stays reachable, which is why
+  # this is not a wholesale narrowing to the principal's workspace.
+  defp principal_permits_owner?(socket, owner) do
+    case principal_workspace_id(socket) do
+      nil -> true
+      ws_id -> is_nil(owner) or owner == ws_id
     end
   end
 
@@ -5298,10 +5303,36 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # socket's tenancy reads back as `nil`, indistinguishable from a row that does
   # not exist — so `handle_params/3` takes its existing "no longer available"
   # branch rather than growing a second refusal path.
+  #
+  # TWO gates, because they answer two different questions and only one of them
+  # is armed on each mount (task-60df475d8333e040):
+  #
+  #   * `session_in_tenancy?/2` reads `read_workspace_id/1`, which is the URL
+  #     workspace and is `nil` on the FLAT mount — that gate is deliberately
+  #     open there, because the flat sidebar is the instance-wide superuser view.
+  #   * `principal_permits_owner?/2` reads the acting TOKEN's binding, which is
+  #     what `tenancy_permits?/2` has guarded the four id-addressed lifecycle
+  #     clauses on since #14593 — and it is armed on BOTH mounts.
+  #
+  # The second gate is the one this seam was missing. The ~34 socket-own-session
+  # clauses (`send`, `stop_turn`, `approve`, `deny`, `plan-approve`,
+  # `question-*`, `set-model`, …) never take an id off the wire, so
+  # `tenancy_permits?/2` cannot cover them: their tenancy is decided ENTIRELY by
+  # what put a value in `store_session_id`, and that is `load_stored_session/2`,
+  # reached only from here. Proven by run before the gate existed: a
+  # workspace-B-bound admin navigating to `/studio/chat/<ws-A id>` adopted the
+  # foreign id, replayed workspace A's transcript, and `set-model` wrote
+  # workspace A's row —
+  # `test/barkpark_web/live/studio/chat_flat_route_foreign_session_load_test.exs`.
   defp get_session_in_tenancy(socket, id) do
     case StudioChat.get_session(id, :global) do
-      %{} = session -> if session_in_tenancy?(socket, session), do: session
-      _ -> nil
+      %{} = session ->
+        if session_in_tenancy?(socket, session) and
+             principal_permits_owner?(socket, session.owner_workspace_id),
+           do: session
+
+      _ ->
+        nil
     end
   end
 
