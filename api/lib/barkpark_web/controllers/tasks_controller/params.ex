@@ -1610,10 +1610,14 @@ defmodule BarkparkWeb.TasksController.Params do
 
   def criteria_hint(:criterion_text_required, :stamp),
     do:
-      ~s|--met requires --criterion-text "<the criterion's exact stored wording>". | <>
-        ~s|--criterion N is a 0-BASED index — the FIRST criterion is 0 — and is unverifiable on its own: | <>
-        ~s|an unguarded index silently flips whatever row it lands on. Read the wording from | <>
-        ~s|`bp task get <id>` at acceptance_criteria[N].criterion and pass it verbatim. --miss needs no text.|
+      ~s|--met requires the criterion's EXACT stored wording alongside --criterion N. Pass it from a FILE — | <>
+        ~s|--criterion-text-file <path>, or `-` to read it from stdin — and NEVER by retyping the wording as an | <>
+        ~s|inline shell argument: criterion wording is MARKDOWN, and a `backticked code span` inside a double-quoted | <>
+        ~s|argument is COMMAND SUBSTITUTION, so bash/zsh EXECUTE it and bp is handed text that is not the stored | <>
+        ~s|wording. --criterion N is a 0-BASED index — the FIRST criterion is 0 — and is unverifiable on its own: | <>
+        ~s|an unguarded index silently flips whatever row it lands on. Recipe: | <>
+        ~s|bp task get <id> -o json \| jq -r '.doc.content.acceptance_criteria[N].criterion' > crit.txt, then | <>
+        ~s|--criterion N --criterion-text-file crit.txt. --miss needs no text.|
 
   def criteria_hint(:criterion_text_required, :close),
     do:
@@ -1717,7 +1721,9 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|That row is not: it carries no "merge_gate": true, and its wording says nothing about being merge-gated | <>
         ~s|or about a PR being merged to main. Nothing was written (the flip and the landing sentence ride one CAS). | <>
         ~s|A criterion proven by WORK is stamped by whoever did the work — `bp task stamp <id> <worker> <epoch> | <>
-        ~s|--criterion N --criterion-text "…" --met --evidence "…"`. If this row really is the lead's merge gate, | <>
+        ~s|--criterion N --criterion-text-file <file holding the exact wording> --met --evidence "…"` | <>
+        ~s|(the wording rides a FILE, never an inline shell argument — a `backticked code span` in it would be | <>
+        ~s|COMMAND SUBSTITUTION). If this row really is the lead's merge gate, | <>
         ~s|mark it "merge_gate": true on the criterion and the landing mark will seal it. | <>
         ~s|Re-run without --criterion to record the landing sentence alone.|
 
@@ -1739,7 +1745,9 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|row, not the builder"; it never meant "a merge closes it", and a landing notice flipping this one | <>
         ~s|would stamp your --note as proof of a run nobody made. Nothing was written (the flip and the landing | <>
         ~s|sentence ride one CAS). Whoever DID the demo stamps it: `bp task stamp <id> <worker> <epoch> | <>
-        ~s|--criterion N --criterion-text "…" --met --evidence "…"`. If a merge really does discharge this row, | <>
+        ~s|--criterion N --criterion-text-file <file holding the exact wording> --met --evidence "…"` | <>
+        ~s|(the wording rides a FILE, never an inline shell argument — a `backticked code span` in it would be | <>
+        ~s|COMMAND SUBSTITUTION). If a merge really does discharge this row, | <>
         ~s|say so on the criterion — "merge_discharges": true — and the landing mark will seal it from then on. | <>
         ~s|Re-run without --criterion to record the landing sentence alone.|
 
@@ -1788,8 +1796,10 @@ defmodule BarkparkWeb.TasksController.Params do
     do:
       ~s|acceptance criteria #{Enum.join(indices, ", ")} (0-BASED) are not met on the task AS STORED, and criteria | <>
         ~s|flipped in this very close command do not count — that would be the closer grading its own homework. | <>
-        ~s|Stamp them as you prove them (`bp task stamp <id> <worker> <epoch> --criterion N --criterion-text "…" | <>
-        ~s|--met --evidence "…"`), or close over them on the record: --set criteria_override="<why it is done anyway>".|
+        ~s|Stamp them as you prove them (`bp task stamp <id> <worker> <epoch> --criterion N | <>
+        ~s|--criterion-text-file <file holding the exact wording> --met --evidence "…"` — the wording rides a FILE, | <>
+        ~s|never an inline shell argument, because a `backticked code span` in it would be COMMAND SUBSTITUTION), | <>
+        ~s|or close over them on the record: --set criteria_override="<why it is done anyway>".|
 
   # THE RAISE GATE (task-8ca0bd7a8ed50f14). The refusal has to say the thing the
   # caller is about to get wrong: it is NOT "you may not cancel this row" — the
@@ -1806,7 +1816,9 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|WITHOUT the met flips and put what you learned in the reason. Lowering met, clearing evidence and | <>
         ~s|editing criterion text all still land on this close — only raising is refused. If a criterion really | <>
         ~s|IS proven, prove it before you abandon the row: bp task stamp <id> <worker> <epoch> --criterion N | <>
-        ~s|--criterion-text "<verbatim>" --met --evidence "…", then close. There is no override, on purpose.|
+        ~s|--criterion-text-file <file holding the verbatim wording> --met --evidence "…", then close | <>
+        ~s|(a FILE, not an inline argument — a `backticked code span` in the wording would be COMMAND SUBSTITUTION). | <>
+        ~s|There is no override, on purpose.|
 
   # The reporter loop (`Github.Acknowledgement`). This refusal must carry three
   # things the caller cannot get anywhere else: WHO is waiting (someone outside
@@ -2077,7 +2089,7 @@ defmodule BarkparkWeb.TasksController.Params do
 
   defp stamp_template(id, worker, epoch, index) do
     ~s|bp task stamp #{id} #{worker} #{epoch} --criterion #{index} --met --evidence "..." | <>
-      ~s|--criterion-text "<acceptance_criteria[#{index}].criterion, verbatim>"|
+      ~s|--criterion-text-file <file holding acceptance_criteria[#{index}].criterion, verbatim>|
   end
 
   defp close_template(id, worker, epoch) do
