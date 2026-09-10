@@ -349,6 +349,33 @@ const C_MEMBER_REMOVE = "Accounts.remove_member_as/3";
 const INSTANCE_BAND = "instanceAdminAuthority";
 const F_INST = (read, decide) => ({ band: INSTANCE_BAND, read: read, decide: decide });
 
+// THE LAUNCH-CHECKOUT BAND's fence constructor (cch-w48-bl, band 2 of the ten
+// (2i) left unchecked). launchCheckoutAuthority(me) is three-valued —
+// "unknown" / "owner" / "blocked" — and BOTH of its live read sites are the
+// PIN rows themselves: renderLaunchPlan derives it from meCache at paint time,
+// and renderNewPricing takes it as an argument and re-derives it from a LATE
+// GET /v1/me when the caller passed none. Both then hand the answer to ONE
+// decide helper, launchPlanGridHtml, whose `authority !== "blocked"` fork is
+// what withholds the .new-plan CTA. So this band's (2i-4) accounting closes
+// with READ_EXEMPT EMPTY — no reader is unclaimed, and no hole is asserted.
+const LAUNCH_CHECKOUT_BAND = "launchCheckoutAuthority";
+const F_LCO = (read) => ({ band: LAUNCH_CHECKOUT_BAND, read: read, decide: "launchPlanGridHtml" });
+
+// THE LAUNCH BAND's fence constructor (cch-w48-bl, band 3). launchAuthority()
+// is FIVE-valued — "loading"/"failed"/"stale"/"grant"/"refuse" — and it is the
+// most-read band in the console: EIGHT live read sites. Only two of them stand
+// in front of a write, and those two are the rows pinned below. The other five
+// are NAVIGATION: they hide or omit a DOOR into the launch wizard (the scope
+// menu row, the two header buttons, the palette action) or write the overview
+// SUBTITLE. app.js names them itself at the launchFlow read — "the four OFFER
+// sites ... branch on `=== \"refuse\"`". They cannot be claimed as a row's
+// `read`, because this census pins rows at WRITE call sites and none of the
+// five is one, so they are named in READ_EXEMPT with that reason. That is a
+// hole with a stated reason, not a pass: if any of them stops reading the band
+// the exemption goes stale and (2i-4) reds on it.
+const LAUNCH_BAND = "launchAuthority";
+const F_LAUNCH = (read, decide) => ({ band: LAUNCH_BAND, read: read, decide: decide });
+
 const PIN = [
   // ── account & session self-service — every one of these acts on the caller's
   // ── OWN account, so plain membership is the honest tier.
@@ -452,8 +479,8 @@ const PIN = [
   { fn: "resumeStudioLogin", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "second call site on the same route as :5544" },
 
   // ── launch + billing
-  { fn: "submitLaunchFlow", verb: "POST", route: "/v1/launch", elevated: true, predicate: "launchAuthority", auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w47-s1, re-pinned cch-w48-s4: launchFlow withholds the WHOLE form unless launchAuthority() === \"grant\" — fail-closed on loading and on failed, so there is no submit to reach. NO `fence` PIN: arm (2i) is scoped to the instanceAdminAuthority band this wave, and pinning the launch band without doing its read accounting would be a claim this file cannot back. go_live/1 still refuses non-admin sessions inside a cond, so the overlay stays" },
-  { fn: "renderLaunchPlan", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the plan grid draws its CTA only for an owner authority" },
+  { fn: "submitLaunchFlow", verb: "POST", route: "/v1/launch", elevated: true, predicate: "launchAuthority", fence: F_LAUNCH(["launchFlow", "repaintLaunchAuthority"], "launchFlow"), auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w47-s1, re-pinned cch-w48-s4: launchFlow withholds the WHOLE form unless launchAuthority() === \"grant\" — fail-closed on loading and on failed, so there is no submit to reach. cch-w48-bl DOES the read accounting the old note said this file could not back, and PINS the fence. READ AND DECIDE ARE THE SAME FUNCTION HERE, on purpose: launchFlow asks the band and immediately forks on the answer in its own body (refuse draws launchRefusalHtml and returns; loading/failed draw the one exit), so there is no threaded value and no pure helper to name — the D530 split is a shape this console uses where the read happens at a DOM mount, and this one does not. READ TWICE: repaintLaunchAuthority re-asks when a late /v1/me lands and re-enters launchFlow only on a MOVED answer. go_live/1 still refuses non-admin sessions inside a cond, so the overlay stays" },
+  { fn: "renderLaunchPlan", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", fence: F_LCO("renderLaunchPlan"), auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the plan grid draws its CTA only for an owner authority. cch-w48-bl FENCE PIN: renderLaunchPlan is the read (`opts.authority || launchCheckoutAuthority(meCache)` — the || arm is a node-harness override seam, not a second policy), and launchPlanGridHtml is the decide: `withCta = authority !== \"blocked\"` is the single fork, and launchPlanTierHtml is handed `withCta && offered[t.plan]`, so a blocked principal gets the tier cards with NO .new-plan button to bind — the omit shape, not a disabled ghost (GR36)" },
   { fn: "openCancelPlanModal", verb: "POST", route: "/v1/billing/cancel", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "renderBilling returns read-only when !billingIsOwner()" },
   { fn: "openBillingPortal", verb: "POST", route: "/v1/billing/portal", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
   { fn: "subscribe", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
@@ -470,8 +497,8 @@ const PIN = [
   // takes launchAuthority()'s band through newLaunchOffer, which emits
   // #new-launch-btn only on "grant". NOT fence-pinned: the launch band's read
   // accounting is not done (cch-w48-bl-fence-pins-for-the-other-eight-bands).
-  { fn: "newLaunch", verb: "POST", route: "/v1/launch", elevated: true, predicate: "launchAuthority", auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w48-s1: newLaunchOffer emits #new-launch-btn only on \"grant\"; refuse omits it, unknown withholds it and renders the one exit" },
-  { fn: "renderNewPricing", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the /new plan grid draws its CTA only for an owner authority" },
+  { fn: "newLaunch", verb: "POST", route: "/v1/launch", elevated: true, predicate: "launchAuthority", fence: F_LAUNCH("renderNewLaunch", "newLaunchOffer"), auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w48-s1: newLaunchOffer emits #new-launch-btn only on \"grant\"; refuse omits it, unknown withholds it and renders the one exit. cch-w48-bl FENCE PIN: renderNewLaunch is the read (`newLaunchOffer(launchAuthority(), tpl)`) and newLaunchOffer is the decide — the classic D530 split, the answer threaded as a value into a pure helper. renderNewLaunch also binds the submit ONLY on offer.mode === \"grant\", so a refused principal has no form to submit" },
+  { fn: "renderNewPricing", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", fence: F_LCO("renderNewPricing"), auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the /new plan grid draws its CTA only for an owner authority. cch-w48-bl FENCE PIN: renderNewPricing READS the band itself — when its caller passed no authority it fires one GET /v1/me and calls launchCheckoutAuthority(r.data), repainting only if the answer is \"blocked\" and only while the pricing screen is still mounted. Same decide as its sibling: launchPlanGridHtml owns the omit fork" },
   { fn: "newVercelDeploy", verb: "POST", route: "/v1/barkparks/:*/vercel-deploy", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
   { fn: "newCreateRepo", verb: "POST", route: "/v1/github/repos", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
   { fn: "newSubmitSiteUrl", verb: "POST", route: "/v1/barkparks/:*/site-url", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
@@ -2309,6 +2336,21 @@ if (dupes.length) {
   // band it is the ACTUAL state: all four of its read sites are claimed.
   const READ_EXEMPT = {
     // band: [{ fn: "<enclosing fn>", why: "<a stated reason, because a hole nobody named is a lie>" }]
+    //
+    // cch-w48-bl. The launch band is read by EIGHT functions and only two of
+    // them stand in front of a write; the five below gate a DOOR into the
+    // launch wizard, or a sentence about it, and this census pins rows at
+    // WRITE call sites, so no row can honestly claim them. Each is a hole with
+    // a reason. Note what the exemption does NOT excuse: the arm still demands
+    // every name here be a LIVE read of the band, so deleting the read out of
+    // any of the five reds (2i-4) as a stale exemption.
+    launchAuthority: [
+      { fn: "renderScopeMenu", why: "NAV, not a write: it omits the #scope-launch row from the scope menu on a determinate \"refuse\". The menu re-renders on every open, so it re-asks the band itself and has no repaint seam a row could claim" },
+      { fn: "setHeaderLaunchHidden", why: "NAV, not a write: it sets `.hidden` on #overview-launch / #fleet-launch — the two header DOORS into the wizard. It is a one-line DOM setter shared by both buttons and by refreshLaunchOffers; the write it fronts is submitLaunchFlow, whose own fence (launchFlow) withholds the form behind these doors" },
+      { fn: "refreshLaunchOffers", why: "NAV, not a write: it drives setHeaderLaunchHidden for those same two header doors after a fleet load, because that path never re-enters the wizard. Same affordance as setHeaderLaunchHidden, one hop up" },
+      { fn: "paintOverviewHead", why: "COPY, not an affordance at all: the only thing this read changes is the text of #overview-sub — launchRefusalCopy().title on a determinate refusal, the shipped line otherwise. There is no control here to withhold, so there is nothing for a row to pin" },
+      { fn: "paletteActionItems", why: "NAV, not a write: it filters the act-launch entry out of the palette on a determinate \"refuse\". The palette re-emits on every open and, like the scope menu, keeps the row on \"loading\"/\"failed\" rather than deleting an owner's action over a slow /v1/me" },
+    ],
   };
 
   if (!FENCED.length) {

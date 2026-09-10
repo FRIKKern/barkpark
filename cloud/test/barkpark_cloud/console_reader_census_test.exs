@@ -1382,6 +1382,45 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "coded 404 for a deleted webhook, discriminated server-side; the panel " <>
           "caller's fallback renders. Flip: a wave rules the deleted-webhook " <>
           "sentence owed."
+    },
+    # -------------------------------------------------------------- site-rebind arm
+    # site-spawner `site-rebind-content`: PATCH /v1/sites/:id gained a content-
+    # binding arm (workspace+project+dataset together, re-minting the scope-bound
+    # public-read token). It ships SERVER-SIDE ONLY — app.js has no rebind control
+    # on the site settings panel, which posts theme/doc_type/prebuilt_enabled and
+    # nothing else. Every row here flips the moment that control ships.
+    %{
+      code: "content_binding_not_applicable",
+      site: "router.ex rebind_site_content (PATCH /v1/sites/:id, rebind arm)",
+      reason:
+        "UNREACHABLE from the console today: no app.js caller sends workspace/" <>
+          "project/dataset on the settings PATCH, so the rebind arm is never entered, " <>
+          "and this refusal additionally needs a CONTAINER site (which has no binding " <>
+          "to move). CLI/API only. Flip: a console rebind control ships — it must then " <>
+          "hide the control on container sites AND read this code."
+    },
+    %{
+      code: "read_token_inventory_unreadable",
+      site: "router.ex rebind_site_content (PATCH /v1/sites/:id, rebind arm)",
+      reason:
+        "UNREACHABLE from the console today (no app.js rebind caller). A 502 raised " <>
+          "when the box's token inventory cannot be listed, so the incumbent read " <>
+          "credential cannot be NAMED before the replacement is minted; the request " <>
+          "refuses having changed nothing. Operator-facing, retryable. Flip: a console " <>
+          "rebind control ships — this 502 is the one a user WILL hit on a flaky box, " <>
+          "so it owes a sentence then."
+    },
+    %{
+      code: "rebind_ability_required",
+      site: "router.ex PATCH /v1/sites/:id (rebind ability cond arm)",
+      reason:
+        "UNREACHABLE from the console BY CONSTRUCTION, not merely by absence: a " <>
+          "browser session carries [\"root\"], which satisfies the deploy-or-root gate, " <>
+          "so a console caller could never be refused by it even once the control " <>
+          "ships. It exists to refuse a bare `write` PAT, which is a CLI credential. " <>
+          "The sibling deploy_ability_required IS read only because its slug is quoted " <>
+          "in app.js's shared 403 branch. Flip: the console ever authenticates with a " <>
+          "non-root credential."
     }
   ]
 

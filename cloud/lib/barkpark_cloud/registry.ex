@@ -6820,6 +6820,110 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  The box-side id of `site`'s LIVE public-read credential, looked up in the
+  site's CURRENT `bootstrap_workspace`/`bootstrap_project` scope.
+
+    * `{:ok, id}` — a live (never-revoked) token carries this site's label there
+    * `:absent`   — the box listed the scope and no live token carries it (or the
+                    site has no binding, so none was ever minted)
+    * `:unknown`  — the inventory could not be read; "I could not look" is never
+                    "it is not there"
+
+  THIS EXISTS FOR THE REBIND, and the ORDER is the whole point. Tokens are listed
+  per (workspace, project) and matched BY LABEL, and a rebind that changes only
+  the DATASET keeps the same workspace/project — so the moment the replacement is
+  minted, TWO live tokens carry `site-read-<slug>` in that one scope and a
+  find-by-label revoke is a coin flip that can kill the credential the site just
+  started using. Name the incumbent BEFORE the mint, revoke it BY ID after; that
+  is exactly the discipline `rotate_site_read_token/1` documents in its step 1.
+  """
+  @spec site_read_token_id(Site.t()) :: {:ok, String.t()} | :absent | :unknown
+  def site_read_token_id(%Site{} = site) do
+    with ws when is_binary(ws) and ws != "" <- site.bootstrap_workspace,
+         proj when is_binary(proj) and proj != "" <- site.bootstrap_project,
+         %Barkpark{} = barkpark <- get_barkpark(site.barkpark_id) do
+      find_workspace_token(barkpark, ws, proj, site_read_token_label(site))
+    else
+      _ -> :absent
+    end
+  end
+
+  @doc """
+  site-spawner `site-rebind-content`: REPOINT a static/node site at a different
+  workspace/project/dataset and swap its scope-bound public-read credential.
+
+  `attrs` carries the FULL new triple (`:bootstrap_workspace`,
+  `:bootstrap_project`, `:bootstrap_dataset`), the PLAINTEXT `:read_token` the
+  caller already minted against that new scope (encrypted here; the plaintext
+  never lands in the DB), the observed `:content_binding_verdict` /
+  `:content_binding_checked_at`, and optionally any settings the same PATCH moved
+  (`:theme`, `:doc_type`, `:prebuilt_enabled`).
+
+  `incumbent` is what `site_read_token_id/1` answered BEFORE the replacement was
+  minted — see that function for why it cannot be looked up here.
+
+  ONE `Repo.update` through the narrow `Site.content_binding_changeset/2`: the
+  binding and the credential that authorizes it move together or not at all. A
+  half-applied rebind (new dataset, old token) is a site that builds 403s.
+
+  THEN the incumbent is revoked, BY ID, in the OLD scope — never before the
+  persist, so there is no instant at which the row names a dead credential.
+
+  Returns `{:ok, site, :ok | :error | :none}` (the third element is the
+  incumbent's fate: confirmed dead / could not confirm / there was none), or
+  `{:error, changeset}` with NOTHING changed and the old credential untouched.
+  """
+  @spec rebind_site_content(Site.t(), map(), {:ok, String.t()} | :absent) ::
+          {:ok, Site.t(), :ok | :error | :none} | {:error, Ecto.Changeset.t()}
+  def rebind_site_content(%Site{} = site, attrs, incumbent) when is_map(attrs) do
+    {plaintext, attrs} = Map.pop(attrs, :read_token)
+
+    attrs =
+      attrs
+      |> Map.take([
+        :bootstrap_workspace,
+        :bootstrap_project,
+        :bootstrap_dataset,
+        :content_binding_verdict,
+        :content_binding_checked_at,
+        :theme,
+        :doc_type,
+        :prebuilt_enabled
+      ])
+      |> Map.put(:read_token_encrypted, encrypt_read_token(plaintext))
+
+    case site |> Site.content_binding_changeset(attrs) |> Repo.update() do
+      {:ok, rebound} -> {:ok, rebound, revoke_rebound_incumbent(site, incumbent)}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  defp encrypt_read_token(plaintext) when is_binary(plaintext) and plaintext != "",
+    do: Vault.encrypt(plaintext)
+
+  # nil reaches `validate_required(:read_token_encrypted)` and becomes a 422 —
+  # never a silently blanked credential.
+  defp encrypt_read_token(_plaintext), do: nil
+
+  defp revoke_rebound_incumbent(_site, :absent), do: :none
+
+  defp revoke_rebound_incumbent(%Site{} = site, {:ok, id}) do
+    case get_barkpark(site.barkpark_id) do
+      %Barkpark{} = barkpark ->
+        revoke_workspace_token(
+          barkpark,
+          site.bootstrap_workspace,
+          site.bootstrap_project,
+          id,
+          site_read_token_label(site)
+        )
+
+      _ ->
+        :error
+    end
+  end
+
   # The scope walk shared by `orphan_site_read_tokens/1` and
   # `site_read_token_census/1`. ONE definition of "which (workspace, project)
   # pairs does this box serve content under" and ONE definition of unreadable, so
