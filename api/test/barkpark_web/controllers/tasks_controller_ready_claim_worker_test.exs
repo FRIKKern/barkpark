@@ -107,7 +107,6 @@ defmodule BarkparkWeb.TasksControllerReadyClaimWorkerTest do
 
   defp held_claim,
     do: Map.put(@held_claim_base, "ts_iso", DateTime.to_iso8601(DateTime.utc_now()))
-  }
 
   setup do
     {:ok, _} = Auth.create_token(@token, "test-ready-claim-worker", "test", ["read", "write"])
