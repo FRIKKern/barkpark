@@ -88,6 +88,8 @@
 # bash 3.2 compatible (macOS system bash).
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 
 SELF="$(basename "$0")"
 SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd)"
@@ -600,7 +602,7 @@ step_0a() {
 
   local status code version uptime
   status="$(mktmp)"
-  code="$(http_code "$(curl -sS -o "$status" -w '%{http_code}' --max-time 30 "$SOURCE_BASE/status.json" 2>/dev/null || true)")"
+  code="$(http_code "$(bp_curl_code -sS -o "$status" --max-time 30 "$SOURCE_BASE/status.json" 2>/dev/null || true)")"
   if [ "$code" != "200" ]; then
     fail 0a "GET $SOURCE_BASE/status.json -> $code (the source is not answering; nothing downstream is believable)"
     return 0
@@ -1243,7 +1245,7 @@ src_total() { # type perspective -> integer (or empty)
 
 src_total_anon() { # type perspective -> integer (or empty) — NO Authorization
   local t="$1" p="$2"
-  curl -sS --max-time "${PDS_HTTP_TIMEOUT:-120}" \
+  bp_curl_body -sS --max-time "${PDS_HTTP_TIMEOUT:-120}" \
     "$SOURCE_BASE/v1/data/query/$SOURCE_DS/$t?perspective=$p&count=true&limit=0" \
     | jqp 'd["result"]["total"]' 2>/dev/null || true
 }
@@ -2499,7 +2501,7 @@ reboot_target() { # 0 = the target answered HTTP again
   "$TARGET_TREE/bin/barkpark" up >"$BARKPARK_HOME/reboot.log" 2>&1 || return 1
   i=0
   while [ "$i" -lt 90 ]; do
-    code="$(http_code "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$TARGET_BASE/api/schemas" 2>/dev/null || true)")"
+    code="$(http_code "$(bp_curl_code -sS -o /dev/null --max-time 10 "$TARGET_BASE/api/schemas" 2>/dev/null || true)")"
     [ "$code" = "200" ] && return 0
     i=$((i + 1))
     sleep 1
@@ -2861,7 +2863,7 @@ step_8() {
   local status code uptime_now
   uptime_now=""
   status="$(mktmp)"
-  code="$(http_code "$(curl -sS -o "$status" -w '%{http_code}' --max-time 30 "$SOURCE_BASE/status.json" 2>/dev/null || true)")"
+  code="$(http_code "$(bp_curl_code -sS -o "$status" --max-time 30 "$SOURCE_BASE/status.json" 2>/dev/null || true)")"
   if [ "$code" = "200" ]; then
     uptime_now="$(jqp 'd.get("uptime_seconds","")' <"$status" 2>/dev/null || true)"
     case "$uptime_now" in ''|*[!0-9]*) uptime_now="" ;; esac
