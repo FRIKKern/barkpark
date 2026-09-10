@@ -65,18 +65,27 @@ task, a phase is a task with children) is built the same way: tasks are just doc
 Scaffold a type, fill it with sample data, and poke at it — no Studio needed:
 
 ```bash
-bp make schema product --out product.json   # scaffold a schema v2 skeleton — fill the blanks
-bp schema apply --file product.json          # register the type
+bp make schema product --out product.json    # scaffold a schema v2 skeleton
+$EDITOR product.json                          # fill the blanks, strip the _comment keys
+bp schema apply --file product.json           # register the type
 bp seed product --count 5 --publish           # fabricate + publish 5 sample documents
-bp tinker                                     # REPL: `query product` lists them, `doc product <id>` shows one
+bp doc create product --set title=Anvil       # or write one yourself
+bp doc query product --limit 5                # read it back through the API
+bp tinker                                     # REPL: `query product`, `doc product <id>`
 ```
 
 `bp make schema` writes a commented skeleton covering every field type, so authoring is
-fill-the-blanks instead of reading the contract. `bp seed` generates schema-valid values
-per field; `--publish` makes them visible to the published API your app reads (drop it to
-keep them as drafts). `bp tinker` opens an authenticated REPL that defaults to the `drafts`
-perspective — so even unpublished drafts show immediately; switch with `perspective
-published` to see what a public reader gets.
+fill-the-blanks instead of reading the contract. **Edit it before you apply it** — the
+skeleton emits 15 `_comment` guidance keys and literal placeholders such as
+`"codelistId": "<plugin>:<name>"`, and its own first line tells you to strip the comments
+before POSTing. `bp seed` generates schema-valid values per field; `--publish` makes them
+visible to the published API your app reads (drop it to keep them as drafts).
+
+`bp doc query` is the same read your application will do — `--perspective drafts` shows
+unpublished work, and the default published view is what an anonymous reader gets.
+`bp tinker` opens an authenticated REPL that defaults to the `drafts` perspective, so
+even unpublished drafts show immediately; switch with `perspective published` to see the
+public view.
 
 ## Self-host and own Barkpark
 
