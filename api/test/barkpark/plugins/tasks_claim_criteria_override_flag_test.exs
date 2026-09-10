@@ -5,7 +5,7 @@ defmodule Barkpark.Plugins.TasksClaimCriteriaOverrideFlagTest do
       To claim anyway, on the record: --set criteria_unstated_override="<why …>"
 
   The server honours that key (`tasks_controller.ex` reads it flat AND under
-  `set`; `Tasks.Claim.override_given?/1` accepts it). The CLI did not: `bp` is
+  `set`; `Tasks.Claim.override_reason/1` accepts it). The CLI did not: `bp` is
   manifest-driven, `task.claim` declared only `resources` and
   `observed_rail_rev`, and so `bp task claim <id> <w> --set
   criteria_unstated_override=… --yes` died with

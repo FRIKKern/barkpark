@@ -116,10 +116,10 @@ defmodule Barkpark.Tasks.Claim do
             else
               with :ok <- check_executable_for_targeted_claim(doc, worker_id),
                    :ok <- check_ready_for_targeted_claim(doc),
-                   :ok <- check_criteria_stated(doc, opts),
+                   {:ok, override_reason} <- check_criteria_stated(doc, opts),
                    :ok <- check_deps_satisfied(doc),
                    :ok <- check_resources_free(resources, doc.id, workspace_id, project_id) do
-                do_claim(doc, worker_id, resources, opts)
+                do_claim(doc, worker_id, resources, opts, override_reason)
               end
             end
         end
@@ -263,18 +263,42 @@ defmodule Barkpark.Tasks.Claim do
   #
   # The exemptions come from `Tasks.CriteriaExemption`, the same definition the
   # close door reads, so the two cannot drift about what a container is.
+  #
+  # RETURNS THE REASON, NOT JUST `:ok` (task-07c21ec0d1d43e90). The refusal text
+  # and the `--set` flag summary both promise the reason lands "on the record",
+  # and for a while that promise was false: the gate consumed the string and
+  # dropped it, so a criteria-less row claimed WITH a reason read back exactly
+  # like one claimed with none, and every override was unauditable after the
+  # fact. So this door hands the reason back to the writer.
+  #
+  # THE REASON IS RETURNED ONLY WHEN THE GATE PASSED BECAUSE OF IT. An exempt
+  # row (a container, or a row that already states criteria) never needed an
+  # override, so a reason sent alongside one is NOT recorded — otherwise the
+  # stored key would stop meaning "this claim was waved through" and start
+  # meaning "somebody typed a flag", which is not an attestation of anything.
+  # The `cond` order is what makes that true: `exempt?` is tested FIRST.
   defp check_criteria_stated(%Document{} = doc, opts) do
     cond do
-      CriteriaExemption.exempt?(doc) -> :ok
-      override_given?(opts) -> :ok
+      CriteriaExemption.exempt?(doc) -> {:ok, nil}
+      reason = override_reason(opts) -> {:ok, reason}
       true -> {:error, :criteria_unstated}
     end
   end
 
-  defp override_given?(opts) do
+  # The trimmed reason, or nil when none was given. A blank or whitespace-only
+  # string is NOT an override (the flag summary says so verbatim), and what gets
+  # stored is the TRIMMED text, so the record never carries the caller's
+  # incidental whitespace.
+  defp override_reason(opts) do
     case Keyword.get(opts, :criteria_unstated_override) do
-      reason when is_binary(reason) -> String.trim(reason) != ""
-      _ -> false
+      reason when is_binary(reason) ->
+        case String.trim(reason) do
+          "" -> nil
+          trimmed -> trimmed
+        end
+
+      _ ->
+        nil
     end
   end
 
@@ -397,7 +421,7 @@ defmodule Barkpark.Tasks.Claim do
     end
   end
 
-  defp do_claim(%Document{} = doc, worker_id, resources, opts) do
+  defp do_claim(%Document{} = doc, worker_id, resources, opts, override_reason \\ nil) do
     task_policy = Map.get(doc.content || %{}, "execution_policy")
 
     case ExecutionPolicy.resolve(
@@ -412,7 +436,8 @@ defmodule Barkpark.Tasks.Claim do
           worker_id,
           resources,
           Keyword.get(opts, :caller_token_id),
-          snapshot
+          snapshot,
+          override_reason
         )
 
       {:error, errors} ->
@@ -439,7 +464,14 @@ defmodule Barkpark.Tasks.Claim do
     end
   end
 
-  defp do_claim_resolved(%Document{} = doc, worker_id, resources, caller_token_id, snapshot) do
+  defp do_claim_resolved(
+         %Document{} = doc,
+         worker_id,
+         resources,
+         caller_token_id,
+         snapshot,
+         override_reason
+       ) do
     observed_rev = doc.rev
     new_rev = generate_rev()
     next_epoch = current_epoch(doc) + 1
@@ -466,6 +498,19 @@ defmodule Barkpark.Tasks.Claim do
       end)
       |> then(fn claim ->
         if is_nil(snapshot), do: claim, else: Map.put(claim, "execution_policy", snapshot)
+      end)
+      # THE ATTESTATION (task-07c21ec0d1d43e90). Present ONLY on a claim that
+      # got through the criteria gate because a reason was given; absent — the
+      # key itself, not an empty string — on every other claim. That asymmetry
+      # is the whole value: `claim.criteria_unstated_override` existing IS the
+      # statement "this row was claimed with zero acceptance criteria, and here
+      # is why". `close` and `pulse` both rewrite `claim` by Map.put-ing onto
+      # the map they read, so the key rides through a lease renewal, a pulse
+      # and a close (done or cancelled) without either of them naming it.
+      |> then(fn claim ->
+        if is_nil(override_reason),
+          do: claim,
+          else: Map.put(claim, "criteria_unstated_override", override_reason)
       end)
 
     new_content =
