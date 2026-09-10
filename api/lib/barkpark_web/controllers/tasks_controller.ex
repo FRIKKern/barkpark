@@ -726,7 +726,7 @@ defmodule BarkparkWeb.TasksController do
             |> Params.put_opt(:phase_id, params["phase_id"])
             |> Params.put_opt(:order, order)
             |> Params.put_opt(:caller_token_id, caller_token_id(conn))
-          |> Params.put_opt(:session, session_id(conn, params))
+            |> Params.put_opt(:session, session_id(conn, params))
             |> Keyword.merge(Params.execution_policy_opts(params))
             |> Keyword.merge(scope_opts(conn))
 
@@ -1175,7 +1175,7 @@ defmodule BarkparkWeb.TasksController do
         # rare one. Wire form: `bp task close … --set close_reason_override="…"`.
         |> Params.put_opt(:close_reason_override, params["close_reason_override"])
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
-          |> Params.put_opt(:session, session_id(conn, params))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       # Snapshot the rail BEFORE the close (from the already-fetched pre-close
       # task) so rail_changed reflects only concurrent actors, not this close.
@@ -1356,7 +1356,7 @@ defmodule BarkparkWeb.TasksController do
         # is there. `stage_supersede/1` reads both wire spellings.
         |> Params.put_opt(:supersede, Params.stage_supersede(params))
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
-          |> Params.put_opt(:session, session_id(conn, params))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.stage(task.id, state, opts) do
         {:ok, %Document{} = doc} ->
@@ -1539,7 +1539,7 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:merge_gated, merge_gated)
         |> Params.put_opt(:observed_rev, Params.stamp_observed_rev(params))
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
-          |> Params.put_opt(:session, session_id(conn, params))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.stamp(task.id, worker_id, opts) do
         {:ok, %Document{} = doc} ->
@@ -1606,7 +1606,7 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:note, params["note"])
         |> Params.put_opt(:criterion, criterion)
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
-          |> Params.put_opt(:session, session_id(conn, params))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.record_landing(task.id, opts) do
         {:ok, %Document{} = doc} ->
@@ -1783,7 +1783,7 @@ defmodule BarkparkWeb.TasksController do
         [text: text]
         |> Params.put_opt(:criterion, criterion)
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
-          |> Params.put_opt(:session, session_id(conn, params))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.pulse_by_id(task.id, worker_id, opts) do
         {:ok, %Document{} = doc} ->
@@ -1841,7 +1841,7 @@ defmodule BarkparkWeb.TasksController do
         [pr: pr, state: state]
         |> Params.put_opt(:reason, params["reason"])
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
-          |> Params.put_opt(:session, session_id(conn, params))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.renew_lease_by_id(task.id, opts) do
         {:ok, %Document{} = doc} ->
