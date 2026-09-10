@@ -280,7 +280,9 @@ post_renew() { # -> echoes an HTTP-ish code, body lands in $BODYF
     -X POST "${LEDGER_BASE%/}/v1/tasks/${TASK_ID}/renew" \
     -H "Authorization: Bearer ${LEDGER_TOKEN}" \
     -H "Content-Type: application/json" \
-    --data-binary "@${REQF}" 2>/dev/null || echo 000
+    --data-binary "@${REQF}" || echo 000
+  # stderr is NOT discarded any more: bp-curl's "waiting Ns (the server asked
+  # for it)" and BP-CURL-RATE-LIMITED lines are the audit trail of a 429.
 }
 
 # Bounded retry with backoff. 5xx and 000 (timeout / connection failure) are
