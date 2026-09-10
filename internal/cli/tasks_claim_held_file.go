@@ -57,7 +57,7 @@ func recordHeldClaim(path, docID string) error {
 	if !present {
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
-			return fmt.Errorf("could not open held file %s: %w", path, err)
+			return fmt.Errorf("could not open held file %s to record %s: %w — this claim is NOT protected", path, docID, err)
 		}
 		if _, err := f.WriteString(docID + "\n"); err != nil {
 			f.Close()
