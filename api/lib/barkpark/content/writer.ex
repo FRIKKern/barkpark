@@ -465,6 +465,11 @@ defmodule Barkpark.Content.Writer do
   end
 
   defp create_after_dedup(type, attrs, dataset, ctx, prev_doc, opts) do
+    # THE CREATOR STAMP (task-aa3502ad7645afbd). Server-set, here, so the
+    # `:before_save` payload below already carries it. See
+    # `stamp_task_creator/4`.
+    attrs = stamp_task_creator(type, attrs, prev_doc, opts)
+
     # XSS hardening: the raw mutate/Writer path stores content verbatim, so an
     # attacker-supplied content["body_html"] would persist and later be emitted
     # raw() to the anonymous /papers reader. Scrub it here (covers create AND
@@ -1007,6 +1012,12 @@ defmodule Barkpark.Content.Writer do
   end
 
   defp upsert_after_gate(type, attrs, dataset, ctx, prev_doc, opts) do
+    # THE CREATOR STAMP (task-aa3502ad7645afbd). This door has its own INSERT
+    # branch (`do_upsert_after_gate`'s `_ ->` clause), which is a BIRTH by the
+    # same definition every birth guard above uses — so the stamp rides here
+    # too, or `POST /api/documents/task` would file an unattributable row.
+    attrs = stamp_task_creator(type, attrs, prev_doc, opts)
+
     # The UPDATE half of the mutate-path schema check (task-41a740fd6701ec28).
     # One call covers both branches below: `attrs` reaching here is already the
     # FINAL whole-document content (patch merging, projection and block-id fill
@@ -1540,6 +1551,121 @@ defmodule Barkpark.Content.Writer do
       ]
     }
   end
+
+  # ── THE CREATOR STAMP (task-aa3502ad7645afbd) ────────────────────────────────
+  #
+  # THE INVARIANT: `content.created_by` on a task document is a fact the SERVER
+  # wrote about the request, never a field the request supplied. A body key of
+  # that name is DISCARDED on the way in — on a birth it is replaced by the
+  # calling principal, on an update it is replaced by whatever the stored row
+  # already carried — so no request body can reach the stored value on any
+  # write, in either direction. That is the same shape `:source` already has
+  # (server-set on every HTTP door), and it is the whole point: the ledger has
+  # been burned by treating a self-reported label as proof, and a client-
+  # supplied creator would be exactly that.
+  #
+  # THE SOURCE IS THE PRINCIPAL, not the door: `CallerContext.actor_stamp/1`
+  # already answers "who to name on a record this caller writes", and it is
+  # what the revision path records. An api_token yields
+  # `{"api_token", <token id>}`, a Studio user session `{"user", <user id>}`.
+  #
+  # WHO GETS STAMPED, AND WHO HONESTLY DOES NOT. The stamp is written only when
+  # the principal has an IDENTITY to name — a non-nil `actor_id` — and only when
+  # the write is not replication:
+  #
+  #   * `/v1/data/mutate` (MutateController) and `POST /api/documents/:type`
+  #     (LegacyController) carry a `:caller_context` built from the verified
+  #     bearer token, so both stamp.
+  #   * The Studio LiveView (`studio_live/shared.ex`, `source: :studio`) carries
+  #     a user-session context, so it stamps `{"user", <id>}`.
+  #   * `bp task create` and the MCP `task_create` tool are CLIENTS of the two
+  #     HTTP doors above (they POST `/v1/tasks`, which resolves through
+  #     `Content.apply_mutations`), so they inherit the stamp — there is no
+  #     third birth path to teach.
+  #   * `Sync.Applier` (`source: :sync`) is EXEMPT and checked first, for the
+  #     sibling guards' reason: replication mirrors an upstream row VERBATIM,
+  #     and an upstream row's own `created_by` must survive the copy rather than
+  #     be overwritten with the replica's identity.
+  #   * The inbound GitHub bridge (`Github.Intake`, `source: :github`) and the
+  #     background workers pass no `:caller_context`, so they yield a nil
+  #     `actor_id` and are left UNSTAMPED. That is deliberate: a birth with
+  #     nobody to name reads as unattributed, which is the truth, rather than as
+  #     `"anonymous"`, which would be a value a reader could mistake for one.
+  #
+  # NOTHING IS REFUSED. This buys traceability, not prevention — the
+  # unadjudicated-birth WARN above is the precedent, and this tier is quieter
+  # still: an unattributable birth lands with no stamp and no log line, because
+  # the ABSENCE of the key is itself the greppable signal
+  # (`content.created_by is null`), unlike a disposition whose absence is
+  # indistinguishable from a legacy row.
+  #
+  # PRE-EXISTING ROWS STAY HONESTLY UNATTRIBUTED. There is no backfill: the
+  # ~9,075 rows born before this have no creator to recover, and the update arm
+  # below is what keeps them that way — a patch to a legacy row DROPS a
+  # body-supplied `created_by` rather than crediting whoever touched the row
+  # next, which is the exact failure the row was filed against.
+  defp stamp_task_creator("task", attrs, prev_doc, opts) do
+    if Keyword.get(opts, :source, :api) == :sync do
+      attrs
+    else
+      put_created_by(attrs, resolved_created_by(prev_doc, opts))
+    end
+  end
+
+  defp stamp_task_creator(_type, attrs, _prev_doc, _opts), do: attrs
+
+  # A BIRTH (`prev_doc == nil`) names the caller; an UPDATE restores whatever
+  # the stored row carried, which is `nil` for every row born before this
+  # shipped. Either way the caller's own value never survives.
+  defp resolved_created_by(nil = _prev_doc, opts) do
+    case Barkpark.Content.CallerContext.actor_stamp_from_opts(opts) do
+      %{actor_id: id, actor_kind: kind, actor_label: label} when is_binary(id) ->
+        base = %{
+          "kind" => kind,
+          "id" => id,
+          "at" => DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+        }
+
+        if is_binary(label), do: Map.put(base, "label", label), else: base
+
+      _ ->
+        nil
+    end
+  end
+
+  defp resolved_created_by(%Document{content: content}, _opts) when is_map(content),
+    do: Map.get(content, "created_by")
+
+  defp resolved_created_by(_prev_doc, _opts), do: nil
+
+  # Writes back under whichever `content` key the attrs already used (internal
+  # callers build atom-keyed attrs; the HTTP doors build string-keyed ones), and
+  # deletes BOTH spellings of the key first so a body cannot smuggle one in
+  # under the other.
+  defp put_created_by(attrs, stamp) when is_map(attrs) do
+    {key, content} =
+      cond do
+        is_map(Map.get(attrs, "content")) -> {"content", Map.get(attrs, "content")}
+        is_map(Map.get(attrs, :content)) -> {:content, Map.get(attrs, :content)}
+        true -> {nil, nil}
+      end
+
+    cond do
+      # No content map to stamp into. A task birth always carries one; the
+      # shapes that do not are the legacy/flat ones `from_envelope/1` already
+      # refuses downstream, and manufacturing a `content` map here would
+      # CLOBBER a non-map `content` field on the way to that refusal.
+      is_nil(key) ->
+        attrs
+
+      true ->
+        cleaned = content |> Map.delete("created_by") |> Map.delete(:created_by)
+        content = if is_nil(stamp), do: cleaned, else: Map.put(cleaned, "created_by", stamp)
+        Map.put(attrs, key, content)
+    end
+  end
+
+  defp put_created_by(attrs, _stamp), do: attrs
 
   defp blank?(value) when is_binary(value), do: String.trim(value) == ""
   defp blank?(nil), do: true
