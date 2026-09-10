@@ -326,7 +326,8 @@ defmodule Barkpark.Content.Lifecycle do
                   {pub_result, prev_pub_rev} =
                     case Content.get_document(pid, type, dataset, opts) do
                       {:ok, existing} ->
-                        existing = lock_published_paper(existing, type)
+                        existing = lock_published_row(existing, type)
+                        :ok = assert_no_criteria_regression!(existing, pub_attrs, type)
                         pub_attrs = advance_paper_publish_revision(pub_attrs, existing, type)
                         {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
 
@@ -488,12 +489,67 @@ defmodule Barkpark.Content.Lifecycle do
   # fence with content["rev"]. Never copy an old draft's counter onto that row.
   # Lock before reading the counter so a concurrent op cannot make us reuse its
   # revision between this read and the published update. Other types are unchanged.
-  defp lock_published_paper(%Document{id: id}, "paper") do
+  #
+  # ── WHY "task" JOINED "paper" (pds-bl-stamp-writeback-reverts-a-stamped-criterion)
+  #
+  # The lock is not paper-specific machinery; it is what makes the in-transaction
+  # re-read of the published row AUTHORITATIVE. Every type whose published row is
+  # ALSO written by a second, non-publish door needs it, and "task" is exactly
+  # that: `Barkpark.Tasks.{Claim,Pulse,Stamp,...}` write the published row in
+  # place through `Internal.fenced_content_write/4` while `publish_after_gate/5`
+  # copies the draft's content over it wholesale. The published-row read at the
+  # top of `do_publish_document/4` — the one `criteria_fence/2` is evaluated
+  # against — happens BEFORE the authoring wall, before the `:before_publish`
+  # hook chain and outside any transaction, so a stamp that lands in that
+  # window returns `ok: true` and is then silently overwritten by this update.
+  # `FOR UPDATE` here plus `assert_no_criteria_regression!/3` below moves the
+  # verdict onto a row nothing can move until this transaction ends.
+  #
+  # The "paper" arm is byte-identical to what it was: same query, same
+  # `Repo.rollback(:not_found)`, same passthrough for every other type.
+  defp lock_published_row(%Document{id: id}, type) when type in ["paper", "task"] do
     Repo.one(from(d in Document, where: d.id == ^id, lock: "FOR UPDATE")) ||
       Repo.rollback(:not_found)
   end
 
-  defp lock_published_paper(existing, _type), do: existing
+  defp lock_published_row(existing, _type), do: existing
+
+  # THE CRITERIA FENCE, RE-EVALUATED WHERE THE WRITE ACTUALLY HAPPENS.
+  #
+  # `ensure_task_publish_transition_legal/5` already runs `criteria_fence/2`
+  # at the publish door, and that gate keeps ALL of its teeth — it is what
+  # gives a caller a side-effect-free refusal before the wall and the hooks
+  # run. What it cannot do is speak for the row as it will be at UPDATE time:
+  # it reads the published row outside the transaction, and the window between
+  # that read and this write is real wall-clock time (the exemption read, the
+  # label-spine check, the tag-registry check, the dedup scan, the whole
+  # `:before_publish` hook chain). A `Tasks.Stamp` landing anywhere in there
+  # answered `ok: true` to its caller and then lost the flip AND the evidence
+  # to `"content" => pub_content` below — observed during PDS wave 23, and
+  # reproduced deterministically by
+  # `test/barkpark/tasks/stamp_publish_lost_update_test.exs`.
+  #
+  # REFUSAL, NOT MERGE, and deliberately so. Merging the stamped criterion
+  # back into the draft's list would publish content no author ever wrote and
+  # would have to guess how a re-ordered or re-worded draft list lines up with
+  # the proven one. The refusal reuses the SAME `{:invalid_task_content, _}`
+  # shape and the SAME message the door-level fence emits, so a caller cannot
+  # tell which of the two refused it and no new error vocabulary reaches the
+  # HTTP layer, the CLI exit-code table or the sync applier's error classes.
+  # `Repo.rollback/1` from inside the transaction unwinds the published update
+  # and the fenced draft delete together, so the draft survives to be rebased
+  # — the same remedy the door-level refusal names.
+  #
+  # Every publish SOURCE is covered here, `:sync` included, matching the
+  # door-level rule that a stamped proof is erasable by no replication payload.
+  defp assert_no_criteria_regression!(%Document{content: pub_content}, pub_attrs, "task") do
+    case criteria_fence(pub_content || %{}, pub_attrs["content"] || %{}) do
+      :ok -> :ok
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp assert_no_criteria_regression!(_existing, _pub_attrs, _type), do: :ok
 
   defp advance_paper_publish_revision(attrs, %Document{content: current}, "paper") do
     Map.update!(attrs, "content", fn content ->

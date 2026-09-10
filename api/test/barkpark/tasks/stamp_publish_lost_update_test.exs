@@ -27,9 +27,10 @@ defmodule Barkpark.Tasks.StampPublishLostUpdateTest do
   the published row into `existing` and does
   `existing |> Document.changeset(pub_attrs) |> Repo.update()`. That re-read is
   used for the paper revision counter and the broadcast's `prev_pub_rev`; the
-  criteria fence is never re-evaluated against it, and for `type: "task"`
-  `lock_published_paper/2` falls to its passthrough clause, so there is neither
-  a `FOR UPDATE` lock nor a rev fence on the published row.
+  criteria fence WAS never re-evaluated against it, and for `type: "task"`
+  `lock_published_paper/2` fell to its passthrough clause, so there was neither
+  a `FOR UPDATE` lock nor a rev fence on the published row. Both halves are
+  closed below.
 
   Anything that lands in that window is therefore silently overwritten. The
   window is real wall-clock time: the authoring wall alone issues the exemption
@@ -48,14 +49,16 @@ defmodule Barkpark.Tasks.StampPublishLostUpdateTest do
   the publish is REFUSED. That arm proves the fixture, the fence and the stamp
   all work, which is what makes the second arm's verdict mean something.
 
-  ### The second test is a CHARACTERIZATION, and it must be inverted by the fix
+  ### The second test WAS a characterization; it is now the GUARD
 
-  `Barkpark.Content.Lifecycle` is outside this change's fence, so the second
-  test asserts the DEFECT as it ships today rather than the property that ought
-  to hold. It is written so the fix flips exactly two lines, both marked
-  `FLIP ON FIX`, from "the stamp was reverted" to "the stamp survived (or the
-  publish was refused)". Do not delete it: re-run it against the fix and invert
-  it, and it becomes the mutation detector the row asks for.
+  It shipped asserting the DEFECT (two lines marked `FLIP ON FIX`) because
+  `Barkpark.Content.Lifecycle` was outside the reproducing change's fence. Both
+  lines have since been INVERTED against the fix: `lock_published_row/2` now
+  locks the published row `FOR UPDATE` for `"task"` as well as `"paper"`, and
+  `assert_no_criteria_regression!/3` re-evaluates `criteria_fence/2` against
+  that locked row INSIDE the publish transaction, so the publish that would
+  overwrite the stamp is refused instead. Reverting either half reds this test
+  by name — that is the mutation proof the row asks for.
 
   THE PROPERTY THE FIX MUST HOLD: a stamp that returned `ok: true` is never
   reverted by a concurrent non-stamp write. The mechanism has to be inside the
@@ -112,7 +115,12 @@ defmodule Barkpark.Tasks.StampPublishLostUpdateTest do
     end
 
     previous = Application.get_env(:barkpark, :plugins)
-    Application.put_env(:barkpark, :plugins, Barkpark.Plugins.Registry.all() ++ [InterleavedWriter])
+
+    Application.put_env(
+      :barkpark,
+      :plugins,
+      Barkpark.Plugins.Registry.all() ++ [InterleavedWriter]
+    )
 
     on_exit(fn ->
       case previous do
@@ -148,7 +156,13 @@ defmodule Barkpark.Tasks.StampPublishLostUpdateTest do
             "kind" => "task",
             "lifecycle_status" => "open",
             "description" => @description,
-            "tags" => [%{"tag" => "fixture-tag-1", "strength" => 85, "rationale" => "this row is filed under the PDS epic backlog"}],
+            "tags" => [
+              %{
+                "tag" => "fixture-tag-1",
+                "strength" => 85,
+                "rationale" => "this row is filed under the PDS epic backlog"
+              }
+            ],
             "acceptance_criteria" => criteria()
           }
         },
@@ -267,21 +281,30 @@ defmodule Barkpark.Tasks.StampPublishLostUpdateTest do
 
       [first, _second] = published_criteria(doc_id)
 
-      # FLIP ON FIX (1/2): today the publish SUCCEEDS over the stamp. Once the
-      # fence (or a rev fence) moves inside the transaction this becomes
-      # `assert {:error, {:invalid_task_content, _}} = publish_result`.
-      assert {:ok, %Document{}} = publish_result
+      # FLIPPED (1/2) — this WAS the characterization `assert {:ok, %Document{}}
+      # = publish_result`. The fence is now re-evaluated inside the publish
+      # transaction against the published row read under `FOR UPDATE`
+      # (`Lifecycle.assert_no_criteria_regression!/3`), so the publish that
+      # would overwrite the stamp is REFUSED with the same
+      # `{:invalid_task_content, _}` shape the door-level fence uses. Putting
+      # the guard back (drop the in-transaction fence, or narrow
+      # `lock_published_row/2` back to "paper" only) reds this line.
+      assert {:error, {:invalid_task_content, errors}} = publish_result
 
-      # FLIP ON FIX (2/2): today the stored row has lost the flip AND the
-      # evidence — met back to false, evidence back to "" — which is byte-for-
-      # byte the wave-23 observation. Once fixed this becomes
-      # `assert first["met"] == true`.
-      assert first["met"] == false,
-             "the publish window no longer reverts a stamped criterion — the defect " <>
-               "`pds-bl-stamp-writeback-reverts-a-stamped-criterion` describes is FIXED. " <>
-               "Invert both FLIP ON FIX assertions in this test; it is now the guard."
+      assert %{"acceptance_criteria" => [message]} = errors
+      assert message =~ "would clear the `met: true` flag for acceptance criterion 0"
 
-      assert first["evidence"] == ""
+      # FLIPPED (2/2) — this WAS `assert first["met"] == false` plus
+      # `assert first["evidence"] == ""`, byte-for-byte the wave-23
+      # observation. The stamp that answered `ok: true` inside the publish
+      # window now SURVIVES the publish, evidence included.
+      assert first["met"] == true,
+             "the publish window reverted a stamped criterion — the defect " <>
+               "`pds-bl-stamp-writeback-reverts-a-stamped-criterion` describes is BACK. " <>
+               "A stamp that returned ok:true was overwritten by a concurrent publish " <>
+               "whose draft predates it."
+
+      assert first["evidence"] == "CI run 12345: 431 tests, 0 failures"
     end
   end
 end
