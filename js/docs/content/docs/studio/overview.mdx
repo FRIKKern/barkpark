@@ -3,4 +3,79 @@ title: Studio Overview
 description: What the Studio is and how authors use it.
 ---
 
-This page is coming in a follow-up commit.
+Studio is the editing interface that ships with every Barkpark server. It is a
+Phoenix LiveView application served by the same process as the API, so there is
+nothing extra to deploy, build, or host. Open it at `/studio` on a local server:
+
+```
+http://localhost:4000/studio
+```
+
+The canonical, fully-scoped URL is
+`/w/<workspace>/p/<project>/d/<dataset>/studio`. `/studio/<dataset>` redirects to
+the workspace resolved from your session, so most people never type the long form.
+
+## The desk
+
+Studio is a multi-pane desk. You drill from left to right, and each pane is its
+own URL segment, so any state you can see you can also link to.
+
+```
++--------------+-----------------+-----------+---------------------------------+
+|  Structure   |  All Post       |  p1       |  Editor pane: p1                |
+|  Book        |  drafts.book-…  |  book-…   |  [tabs] [violations]            |
+|  …           |                 |           |  fields…                        |
++--------------+-----------------+-----------+---------------------------------+
+```
+
+One exception is worth knowing before you share a link: the active editor **tab**
+lives in the LiveView socket rather than the URL, so a shared link always opens on
+the default tab. Desk filter chips (`?desk=drafts`) do live in the URL and are
+shareable.
+
+## Editing is draft-first
+
+Opening a published document and typing into a field creates a draft; the
+published copy is untouched until you publish. The editor header carries the
+actions that move a document through that lifecycle:
+
+| Action | What it does |
+| --- | --- |
+| Publish / Unpublish | Move the draft onto the published row, or take it back down. |
+| Diff | Field-level comparison of a draft against its published twin. |
+| History | Past revisions, with restore. |
+| Duplicate | Clone the document as a new draft. |
+| Open another | Load a second document side by side, read-only. |
+| Delete | Remove the document, after a reference check. |
+
+Bulk publish and unpublish work from the document list: tick rows and a floating
+action bar appears.
+
+## Everyone sees the same edit
+
+Studio, the API, the `bp` TUI, and the JavaScript SDK all write to one backend,
+and every mutation broadcasts over Phoenix PubSub. A change made in one Studio tab
+shows up in another within a few hundred milliseconds, and a document written by
+`POST /v1/data/mutate/:dataset` appears in an open desk without a reload. There is
+no separate sync step and no import job.
+
+## Fields come from the schema
+
+The editor renders whatever the document's schema declares — including the v2
+field types, which get purpose-built components: nested `composite` objects,
+`arrayOf` lists with reorder buttons when `ordered` is set, `codelist` pickers
+backed by the codelist registry, and per-language slots for `localizedText`.
+Model the type first ([Content Modeling](/docs/content-modeling/overview)) and the
+editor follows.
+
+Books are the one type with a hand-built form: 47 ONIX 3.0 fields split across
+eight tabs, a live XML preview, and a violations panel that blocks submission on
+errors while letting warnings through.
+
+## Where to go next
+
+- [Content Modeling](/docs/content-modeling/overview) — the schemas the editor renders.
+- [APIs and SDKs](/docs/apis-and-sdks/overview) — reading the published result from an app.
+- The [operator's guide](https://github.com/FRIKKern/barkpark/blob/main/docs/studio/user-guide.md)
+  is the task-by-task manual for people who edit content full time, including the
+  ONIX import and Bokbasen submission procedures.
