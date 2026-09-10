@@ -501,7 +501,8 @@ defmodule Barkpark.Content.Lifecycle do
   # top of `do_publish_document/4` — the one `criteria_fence/2` is evaluated
   # against — happens BEFORE the authoring wall, before the `:before_publish`
   # hook chain and outside any transaction, so a stamp that lands in that
-  # window returns `ok: true` and is then silently overwritten by this update.
+  # window answers its caller with a success receipt and is then silently
+  # overwritten by this update.
   # `FOR UPDATE` here plus `assert_no_criteria_regression!/3` below moves the
   # verdict onto a row nothing can move until this transaction ends.
   #
@@ -524,7 +525,7 @@ defmodule Barkpark.Content.Lifecycle do
   # that read and this write is real wall-clock time (the exemption read, the
   # label-spine check, the tag-registry check, the dedup scan, the whole
   # `:before_publish` hook chain). A `Tasks.Stamp` landing anywhere in there
-  # answered `ok: true` to its caller and then lost the flip AND the evidence
+  # answered its caller with a success receipt and then lost the flip AND the evidence
   # to `"content" => pub_content` below — observed during PDS wave 23, and
   # reproduced deterministically by
   # `test/barkpark/tasks/stamp_publish_lost_update_test.exs`.
