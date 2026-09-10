@@ -178,9 +178,16 @@ defmodule Barkpark.Tasks.LandedFilesTest do
       doc = task!(scope)
 
       for bad <- [["api/a.ex", 5], "api/a.ex", %{"path" => "api/a.ex"}, 7] do
-        assert {:error, :invalid_files} =
-                 Tasks.record_landing(doc.id, pr: "1", note: "merged", files: bad),
-               "expected #{inspect(bad)} to be refused"
+        # Bind first, then assert on a boolean. `assert pattern = expr, msg` is
+        # the MACRO form: it reports the match itself and DROPS the message, so
+        # the sentence naming which `bad` value got through would never print —
+        # and with four values in one loop that sentence is the only thing that
+        # says WHICH one. Comparing a bound result keeps it, and lets the
+        # message carry the value actually returned.
+        result = Tasks.record_landing(doc.id, pr: "1", note: "merged", files: bad)
+
+        assert result == {:error, :invalid_files},
+               "expected #{inspect(bad)} to be refused, got #{inspect(result)}"
       end
 
       # NOTHING WAS WRITTEN — the refusal precedes the transaction, so the
