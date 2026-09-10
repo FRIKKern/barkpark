@@ -68,9 +68,72 @@ that matter.
 Two are **persistent** (subtract them always). Two are **intermittent** — if you
 see them, they are still main's, not yours.
 
-## 3 — The full Elixir suite on clean, unmodified origin/main
+## 3 — The full Elixir suite on clean, unmodified origin/main is GREEN
 
-See §4 of this file — filled in from `full-suite.log`.
+The task row's central premise — "THE FULL SUITE ON CLEAN, UNMODIFIED origin/main
+IS NOT GREEN: 27 doctests, 13015 tests, 2 failures" — **no longer holds.**
+
+Run 2026-09-10 in a worktree cut from `origin/main` at
+`3b77af02bd6c2888ba2f51d279c9b82de6a6cf8e`, under a private partition, output to
+a FILE (never piped to `tail` — that pipe is what lost the second failure in
+August):
+
+```
+$ cd <wt>/api && CC=/usr/bin/clang MIX_TEST_PARTITION=r4w8 MIX_ENV=test \
+    mix test > full-suite.log 2>&1; echo EXIT=$?
+
+Finished in 531.9 seconds (77.4s async, 454.4s sync)
+30 doctests, 20020 tests, 0 failures (32 excluded)
+EXIT=0
+```
+
+`grep -cE '^\s+[0-9]+\) test ' full-suite.log` → **0**. There is no failure
+block to name, so "identify the second failure" is moot: today there is neither
+a first nor a second. The suite also grew from 13015 tests to 20020 since the
+August measurement, so the two are not even the same population.
+
+READ THIS CAVEAT BEFORE QUOTING THE GREEN. The run used a **freshly created**
+`MIX_TEST_PARTITION`, so its `oban_jobs` started empty and
+`ProjectorWorkerEnqueueTest` could not hit the residue described in §4. A green
+full suite is therefore evidence about the CODE on main, not about a database
+that has been run against before. On a reused partition, expect §4's failure.
+
+## 3b — The proof that §4 is not a code defect, in the same run
+
+The suite run above **generated its own residue**: the partition held 0 rows
+before it and **27 committed `scheduled` ProjectorWorker rows after it**. That
+turns the next run in the same partition into a control, and it fires:
+
+```
+$ psql -tA -d barkpark_testr4w8 -c "select worker, state, count(*) from oban_jobs group by 1,2"
+Barkpark.EdgeProjector.ProjectorWorker|scheduled|27
+
+# WITHOUT the fix (test file reverted to origin/main's version):
+$ mix test test/barkpark/edge_projector/       # EXIT=2
+71 tests, 1 failure
+
+  1) test enqueue/2 — uniqueness across types (lvw-t11-followup-dedup) type-list
+     ORDER cannot defeat the dedup (types normalised at enqueue)
+     (Barkpark.EdgeProjector.ProjectorWorkerEnqueueTest)
+     test/barkpark/edge_projector/projector_worker_enqueue_test.exs:103
+     match (=) failed
+     code:  assert [job] = all_enqueued(worker: ProjectorWorker)
+     left:  [job]
+     right: [%Oban.Job{id: 7028, state: "scheduled", queue: "edge_projector",
+              worker: "Barkpark.EdgeProjector.ProjectorWorker", ...}, ...]
+
+# WITH the fix, same database, same 27 rows:
+$ mix test test/barkpark/edge_projector/       # EXIT=0
+71 tests, 0 failures
+
+$ psql -tA -d barkpark_testr4w8 -c "select count(*) from oban_jobs"
+27
+```
+
+The third command is the one that matters: the row count is **27 before and 27
+after** the green run. The `delete_all` runs inside the sandbox transaction and
+is rolled back with it, so the fix cannot clobber a shared database's committed
+rows or race a concurrent agent's suite on the same box.
 
 ## 4 — ProjectorWorkerEnqueueTest: the `oban_jobs` residue is LIVE and much
 ##     bigger than the August measurement
@@ -176,5 +239,5 @@ psql -l -t | awk -F'|' '{print $1}' | tr -d ' ' | grep '^barkpark_test' |
 The August measurement was taken while two processes from another session ran
 10h47m at 602 CPU-minutes each, deliberately spawning 24 busy-loops apiece. Every
 wall-clock timing from that window is worthless. The 2026-09-10 suite run below
-was taken on a host also running a multi-worker campaign; treat its DURATION as
-an upper bound and its FAILURE SET as the signal.
+was taken on a host also running a multi-worker campaign; treat its DURATION
+(531.9s) as an upper bound and its FAILURE SET (empty) as the signal.
