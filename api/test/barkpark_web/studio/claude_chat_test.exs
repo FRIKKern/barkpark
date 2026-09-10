@@ -7,6 +7,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
   """
   use ExUnit.Case, async: false
 
+  alias Barkpark.StudioChat.Provider.Claude.Session, as: ClaudeSession
   alias BarkparkWeb.Studio.ClaudeChat
 
   # A stub bridge for the TOOL-connector seam (connectors D69/D73). It plays the
@@ -886,7 +887,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       assert_raise ArgumentError, fn -> Port.close(port) end
 
       assert :ok =
-               ClaudeChat.Session.terminate(:normal, %{
+               ClaudeSession.terminate(:normal, %{
                  port: port,
                  stderr_path: stderr_path,
                  mcp_config_path: mcp_path
@@ -907,7 +908,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     # overflow test above got a :DOWN carrying
     #
     #   {:badarg, [{:erlang, :port_close, [#Port<0.536>]},
-    #              {ClaudeChat.Session, :handle_info, 2, claude_chat.ex}]}
+    #              {Provider.Claude.Session, :handle_info, 2, claude.ex}]}
     #
     # instead of {:claude_chat_error, :buffer_overflow, _}. The raise skipped
     # the send to the sink AND turned the intended {:stop, :normal, _} into a
@@ -948,7 +949,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       state = %{port: port, buffer: "", sink: self(), stderr_path: nil}
 
       assert {:stop, :normal, %{port: nil}} =
-               ClaudeChat.Session.handle_info({port, {:data, chunk}}, state)
+               ClaudeSession.handle_info({port, {:data, chunk}}, state)
 
       assert_receive {:claude_chat_error, :buffer_overflow, _tail}, 100
     end

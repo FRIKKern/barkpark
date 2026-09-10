@@ -74,6 +74,13 @@ lib/barkpark/studio_chat.ex	delete_session_attachments
 lib/barkpark/studio_chat.ex	read_attachment
 lib/barkpark/studio_chat.ex	store_attachment
 lib/barkpark/studio_chat/probe.ex	run
+lib/barkpark/studio_chat/provider/claude.ex	cleanup_mcp
+lib/barkpark/studio_chat/provider/claude.ex	cleanup_mcp_file
+lib/barkpark/studio_chat/provider/claude.ex	cleanup_stderr
+lib/barkpark/studio_chat/provider/claude.ex	init
+lib/barkpark/studio_chat/provider/claude.ex	read_stderr_tail
+lib/barkpark/studio_chat/provider/claude.ex	rewrite_mcp_config
+lib/barkpark/studio_chat/provider/claude.ex	write_mcp_config
 lib/barkpark/studio_chat/runtime/codex/readiness.ex	version
 lib/barkpark/studio_chat/titles.ex	run
 lib/barkpark/tasks/queue_gate.ex	fetch
@@ -122,10 +129,3 @@ lib/barkpark_web/controllers/workspace_controller.ex	with_spilled_body
 lib/barkpark_web/layouts.ex	paper_stylesheet
 lib/barkpark_web/live/studio/chat_live.ex	consume_attachments
 lib/barkpark_web/plugs/idempotency.ex	replay
-lib/barkpark_web/studio/claude_chat.ex	cleanup_mcp
-lib/barkpark_web/studio/claude_chat.ex	cleanup_mcp_file
-lib/barkpark_web/studio/claude_chat.ex	cleanup_stderr
-lib/barkpark_web/studio/claude_chat.ex	init
-lib/barkpark_web/studio/claude_chat.ex	read_stderr_tail
-lib/barkpark_web/studio/claude_chat.ex	rewrite_mcp_config
-lib/barkpark_web/studio/claude_chat.ex	write_mcp_config
