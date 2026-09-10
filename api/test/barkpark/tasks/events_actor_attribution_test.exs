@@ -314,7 +314,8 @@ defmodule Barkpark.Tasks.EventsActorAttributionTest do
       # No claim: the container/root shape. 139 of 6,617 terminal rows on the
       # guerrilla ledger are legitimately claimless, and the ledger has to go on
       # saying, truthfully, that nobody ever held them.
-      {:ok, _, :closed} = Close.close_with_receipt(doc.id, "lead-nobody", observed_epoch: nil, reason: @artifact)
+      {:ok, _, :closed} =
+        Close.close_with_receipt(doc.id, "lead-nobody", observed_epoch: nil, reason: @artifact)
 
       [row] = rows_for(since, doc.doc_id, "task.closed")
       actor = get_in(row, [:payload, "actor"])
