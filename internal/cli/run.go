@@ -366,6 +366,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		if merr != nil {
 			if !renderErrorEnvelope(out, "usage", merr.Error(), "", "") {
 				out.userErr("%v", merr)
+				humanErrorCode(out, "usage")
 				usageCommand(out, cmd)
 			}
 			return exitUsage
@@ -393,6 +394,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		if serr != nil {
 			if !renderErrorEnvelope(out, "usage", serr.Error(), "", "") {
 				out.userErr("%v", serr)
+				humanErrorCode(out, "usage")
 				usageCommand(out, cmd)
 			}
 			return exitUsage
@@ -424,6 +426,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	if derr != nil {
 		if !renderErrorEnvelope(out, "usage", derr.msg, "", "") {
 			out.userErr("%v", derr)
+			humanErrorCode(out, "usage")
 			if derr.withUsage {
 				usageCommand(out, cmd)
 			}
@@ -440,6 +443,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		if serr != nil {
 			if !renderErrorEnvelope(out, "usage", serr.Error(), "", "") {
 				out.userErr("%v", serr)
+				humanErrorCode(out, "usage")
 			}
 			return exitUsage
 		}
@@ -542,6 +546,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	if err != nil {
 		if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
 			out.userErr("request failed: %v", err)
+			humanErrorCode(out, "request_failed")
 		}
 		return exitGeneric
 	}
@@ -717,6 +722,7 @@ func refuseWithRemedy(out *writer, code, msg, hint string) {
 	if hint != "" {
 		out.errf("  hint: %s", hint)
 	}
+	humanErrorCode(out, code)
 }
 
 // unreadableListPageHint is the one wording both list-page refusals share —
@@ -2534,9 +2540,7 @@ func renderError(out *writer, ae apiError) {
 	if h := ae.hint(); h != "" {
 		out.errf("  hint: %s", h)
 	}
-	if ae.code != "" {
-		out.info("  code: %s", ae.code)
-	}
+	humanErrorCode(out, ae.code)
 	if ae.requestID != "" {
 		out.info("  request_id: %s", ae.requestID)
 	}
@@ -3228,6 +3232,7 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 		if err != nil {
 			if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
 				out.userErr("request failed: %v", err)
+				humanErrorCode(out, "request_failed")
 			}
 			return exitGeneric, false
 		}
@@ -3273,6 +3278,7 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 				msg := fmt.Sprintf("pagination stalled at offset %d: full page repeats offset %d", offset, firstOffset)
 				if !renderErrorEnvelope(out, "pagination_stalled", msg, "", "") {
 					out.userErr("%s", msg)
+					humanErrorCode(out, "pagination_stalled")
 				}
 				return exitGeneric, false
 			}

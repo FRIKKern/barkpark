@@ -97,6 +97,7 @@ func runTokenCreate(out *writer, g globals, ctx manifest.Context, tail []string)
 	if rerr != nil {
 		if !renderErrorEnvelope(out, "request_failed", "request failed: "+rerr.Error(), "", "") {
 			out.userErr("request failed: %v", rerr)
+			humanErrorCode(out, "request_failed")
 		}
 		return exitGeneric
 	}

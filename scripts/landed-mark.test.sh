@@ -36,7 +36,7 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "  PASS  $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "  FAIL  $1"; }
 
-echo "landed-mark.test.sh — armed run, then one disarmed arm"
+echo "landed-mark.test.sh — armed run, then two disarmed arms"
 echo
 
 # ── ARMED ────────────────────────────────────────────────────────────────────
@@ -101,6 +101,70 @@ a 401 from the ledger exits 1
 an OPEN row named by a landed trailer is listed
 two distinct ids are refused, not picked
 UNRELATED
+
+# ── MUTANT 2: the PR-body fallback is gutted ────────────────────────────────
+# The second property this file guards, added 2026-09-10. This repo squashes
+# with COMMIT_MESSAGES, so the commit on main carries the BRANCH's messages and
+# not the PR body — where the `Task:` trailer actually lives. Measured over
+# origin/main 2026-09-09 16:00Z..23:00Z: 30 squash commits with a `(#N)`
+# subject carried no column-0 `Task:` line, all 30 resolved to a task row
+# through their PR body, and none of those rows carried the mark for its sha.
+# Gut the fallback and the script goes back to silence — which is
+# indistinguishable from "this commit really names no task", which is why the
+# defect went unnoticed for a whole campaign.
+echo
+echo "── MUTANT 2: MUT-PR-FALLBACK replaced by an unconditional empty id"
+MUTANT2="$TMP/landed-mark.mut2.sh"
+# shellcheck disable=SC2016  # the anchor is the SUBJECT's literal text: $sha must NOT expand here.
+ANCHOR2='      trailer_from_pr_body "$sha"; rc=$?'
+HITS2="$(grep -cF -- "$ANCHOR2" "$SUBJECT")"
+if [ "$HITS2" != "1" ]; then
+  echo "landed-mark.test: CANNOT MUTATE — the MUT-PR-FALLBACK anchor matched ${HITS2} time(s), not 1." >&2
+  echo "A mutation that did not apply is not a catch. Re-anchor the harness." >&2
+  exit 2
+fi
+ok "the MUT-PR-FALLBACK anchor matched exactly once"
+
+# The fallback is not merely SKIPPED here — it is made to answer "no id, no
+# error", which is precisely the pre-fix behaviour. A mutation to `rc=1` would
+# take the CANNOT-READ arm instead and prove something else.
+# shellcheck disable=SC2016  # a sed script over the SUBJECT's literal text; expansion would break it.
+sed 's/^      trailer_from_pr_body "\$sha"; rc=\$?$/      FALLBACK_ID=""; rc=0/' "$SUBJECT" > "$MUTANT2"
+if cmp -s "$SUBJECT" "$MUTANT2"; then
+  echo "landed-mark.test: CANNOT MUTATE — the mutant-2 scratch copy is byte-identical to the original." >&2
+  exit 2
+fi
+ok "the mutant-2 copy really differs from the original"
+chmod +x "$MUTANT2"
+
+MUT2_OUT="$(LANDED_MARK_EXTRACTOR="$ROOT/scripts/pr-task-gate.sh" bash "$MUTANT2" --selftest 2>&1)"; MUT2_RC=$?
+echo "$MUT2_OUT" | tail -n 1
+if [ "$MUT2_RC" -ne 0 ]; then ok "the gutted-fallback copy's selftest FAILS (rc ${MUT2_RC})"
+else bad "the gutted-fallback copy's selftest still passed — §14 guards nothing"; fi
+
+while IFS= read -r want; do
+  if grep -qF "FAIL  $want" <<<"$MUT2_OUT"; then ok "gutting the fallback reddens: ${want}"
+  else bad "gutting the fallback did NOT redden: ${want}"; fi
+done <<'WANTED2'
+MUT-PR-FALLBACK: the fallback says WHERE the id came from
+MUT-PR-FALLBACK: a trailer that lives only in the PR body still marks the row
+MUT-PR-FALLBACK: the fallback really wrote (1 label POST)
+MUT-PR-FALLBACK positive control: the row carries the class label
+WANTED2
+
+# The NEGATIVE arms of §14 must SURVIVE. They assert that nothing is written,
+# and a gutted fallback writes nothing either — so if one of them reddens here,
+# it was never measuring the fallback at all.
+while IFS= read -r want; do
+  if grep -qF "PASS  $want" <<<"$MUT2_OUT"; then ok "unrelated arm stays green: ${want}"
+  else bad "gutting the fallback smeared onto an unrelated arm: ${want}"; fi
+done <<'UNRELATED2'
+the fallback finding NO PR writes NOTHING
+a PR body with no COLUMN-0 trailer writes NOTHING
+a commit-message trailer is used and the PR body is never consulted
+a 401 from the ledger exits 1
+an OPEN row named by a landed trailer is listed
+UNRELATED2
 
 echo
 echo "landed-mark.test.sh: ${PASS} passed, ${FAIL} failed"

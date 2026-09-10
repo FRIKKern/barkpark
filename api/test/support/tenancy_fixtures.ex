@@ -35,6 +35,7 @@ defmodule Barkpark.TenancyFixtures do
   alias Barkpark.{Content, Media, Tenancy}
 
   import ExUnit.Assertions
+  import Ecto.Query, only: [from: 2]
 
   @default_dataset "test"
 
@@ -176,11 +177,12 @@ defmodule Barkpark.TenancyFixtures do
   """
   @spec ensure_default_scope!() :: {Tenancy.Workspace.t(), Tenancy.Project.t()}
   def ensure_default_scope! do
-    ws =
-      case Tenancy.get_default_workspace() do
-        nil -> create_workspace!("default")
-        ws -> ws
-      end
+    # `establish_default_workspace!/0`, not `create_workspace!("default")`: since
+    # task-566dc5be4871353b the instance-default seat is `workspaces.is_default`
+    # (uncast, partial-unique), so minting the SLUG no longer takes the seat and
+    # a fixture that only minted the row would hand every caller a
+    # `get_default_workspace/0` of nil.
+    ws = Tenancy.establish_default_workspace!()
 
     project =
       case Tenancy.get_default_project() do
@@ -189,6 +191,47 @@ defmodule Barkpark.TenancyFixtures do
       end
 
     {ws, project}
+  end
+
+  @doc """
+  Vacate the instance-default seat, and return the workspace that held it (or
+  `nil`).
+
+  ONE definition of "vacate", because the seat has now moved once. It used to be
+  the `default` SLUG, so every suite that needed a vacant seat renamed or deleted
+  a row and that was that; task-566dc5be4871353b moved it to the uncast
+  `workspaces.is_default` column, and thirteen suites' hand-rolled renames
+  silently stopped vacating anything — not one of them failed loudly on the
+  property they were pinning, they failed on their own setup, which is the good
+  outcome only because the setups happened to assert. Call this instead of
+  writing a fourteenth.
+
+  The seat is cleared by a bare `update_all` because that is the ONLY way to
+  clear it: no changeset casts the field. The singleton cache is busted after,
+  since a raw write bypasses every `Barkpark.Tenancy` path that would.
+
+  It does NOT touch the slug. A caller that also needs the `default` slug free
+  (to mint its own `default`-slugged row without colliding on
+  `workspaces_slug_index`) renames it separately and explicitly — the two are
+  different things now, which is the whole point of the change.
+  """
+  @spec vacate_default_seat!() :: Tenancy.Workspace.t() | nil
+  def vacate_default_seat! do
+    held = Tenancy.get_default_workspace()
+
+    {_n, _} =
+      Barkpark.Repo.update_all(
+        from(w in Tenancy.Workspace, where: w.is_default == true),
+        set: [is_default: false]
+      )
+
+    Tenancy.DefaultScopeCache.invalidate()
+
+    refute Tenancy.get_default_workspace(),
+           "vacate_default_seat!/0 did not vacate the seat — the instance-default identity " <>
+             "moved again and this fixture no longer knows where it lives"
+
+    held
   end
 
   # Build [workspace_id: ..., project_id: ...] from fixtures, dropping a nil
