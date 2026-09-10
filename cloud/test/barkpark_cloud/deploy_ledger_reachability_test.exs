@@ -396,6 +396,10 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
     # than smuggled back in.
     {:not_attempted_classes, 0, :unreachable,
      "the never-attempted vocabulary. ZERO lib callers; `not_attempted?/1` answers MEMBERSHIP inside census/3 and cannot ENUMERATE. Its reader is the agency-map exhaustiveness assertion (D242), which must cover `classes/0 ++ not_attempted_classes/0` — every value classify/2 can return — off the ENUMS, because a hand-listed set is a second place to forget and reproduces D224 with a green. Deleted by dr-w16-s3 when nothing at all read it; re-added by dr-w31-s3 with that reader named. CLOSER: the class vocabulary reaches an operator only when a route or the CLI renders a legend — the same follow-up as classes/0 and deferred_classes/0."},
+    {:journeys, 3, :unreachable,
+     "ATTEMPTS PER RELEASE, run-segmented (D142/D161, dr-bl-w9-journey-metric-run-based). ZERO lib callers TODAY and the row says so rather than laundering a test reference into a caller — `deploy_ledger_journeys_test.exs` is the only thing that calls it, which is the D245 disease's exact shape and is named here instead of hidden. It is NOT on `census/3`'s envelope by choice: that envelope's key set is paired with the Go `cloudclient.DeployCensus` struct by `payload_key_set_census_test.exs`, and both `router.ex` and `internal/cloudclient` are outside this change's fence, so folding it in would land a server key with no wire type. CLOSER, NAMED AND SINGLE: the follow-up that adds `journeys` to `Web.Router.deploy_census_json/2` beside `delivery` and `coverage_cohorts`, its `DeployJourneys` Go struct, and `renderDeployJourneys` in `cloud_deploy_census_cmd.go` — one PR, server key + Go field + rendered line, the D136 rule. That PR moves this row to :reachable and the move is the proof. Until then the figure reaches a human only through `journey_report/1` and this suite."},
+    {:journey_report, 1, :unreachable,
+     "the RENDERED lines of `journeys/3` — figure, journey count and excluded UNMETERED count on ONE line, joined next to the numbers so no consumer can print the ratio without its population. ZERO lib callers for the same reason `journeys/3` has none, and it is public for the same closer: it exists so the Go renderer's line format is DERIVED from the server rather than re-typed on the far side of the wire, which is how `deployCensusDeferredTotal` became a second drifting definition of a number the server already had. Same single closer PR as `journeys/3`."},
     {:agency_map, 0, :unreachable,
      "the full class -> agency map. ZERO lib callers by design: `agency/1` is the READ path (census/3 uses it, see its :internal_only row) and answers per class, but it cannot list the map's KEYS, so the second direction of the exhaustiveness assertion — 'a key that is not a class' — is unprovable without this accessor. That direction is the one that catches an agency for a class somebody renamed, which is the failure that let an 18-class taxonomy and a 17-key map merge past each other. Allowlisted rather than deleted because deleting it deletes that direction. CLOSER: it stops being unreachable the day a lib caller needs the whole map (a legend, or an agency roll-up), not before."}
   ]
@@ -407,7 +411,7 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
   # under it, and a legitimate change RAISES them in the same commit — where the
   # set-equality assertions red on that same change anyway, so a floor can never
   # be the only thing a change has to satisfy.
-  @publics_floor 20
+  @publics_floor 22
   @call_sites_floor 22
 
   # ---------------------------------------------------------------------------

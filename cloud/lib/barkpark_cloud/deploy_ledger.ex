@@ -2723,4 +2723,319 @@ defmodule BarkparkCloud.DeployLedger do
       box_caused: rate_basis(box_caused, failed, @basis_failed)
     }
   end
+
+  ## ── The release journey — a RUN, never a rev group (D142/D161) ────────────
+
+  # THE SEGMENTATION, CARRIED IN THE PAYLOAD. A journey figure whose segmentation
+  # rule is not printed beside it cannot be audited, and this rule is the whole
+  # finding: the SAME corpus reads 695 journeys segmented by run and a different,
+  # smaller number segmented by `content_rev`, because one rev went live ELEVEN
+  # times in 61 minutes.
+  @journey_segmentation "a maximal RUN of rows for ONE `site_id`, ordered by `inserted_at` ASC (`id` breaks ties), terminated by the next `live`/`failed` row. Never a `content_rev` group: D162 rules that column is not a revision, it is not injective, and it recurs — one rev went live 11 times in 61 minutes, so a rev group is a content EPOCH and not a release"
+
+  # WHAT THIS METRIC IS, AND — LOUDLY — WHAT IT IS NOT. `delivery/3`'s @doc
+  # rejects run-keying for the WAIT clock and it is right to: a `failed` row
+  # CLOSES a run, so consecutive failures become singleton runs of identically
+  # 0.0 s and site d8e9c2c7's 6 h 17 m outage decomposes into 82 runs, 80 of them
+  # 0.0 s. D161 scopes that refusal exactly: *"segment by RUN, never by rev
+  # group, continues to govern the abandoned rate and attempt-cluster reporting
+  # unchanged; it does NOT govern a latency."* THIS IS AN ATTEMPT COUNT. It
+  # publishes NO elapsed time at all — not a p50, not a p95, not a max — for
+  # precisely the reason `delivery/3` says it must not, and the wire carries no
+  # seconds key it could be misread through.
+  @journey_basis "ATTEMPTS PER TERMINATED JOURNEY — a COUNT of rows, never an elapsed time. Run-keying is structurally unfit for a wait clock (D161: 80 of one site's 82 runs read 0.0 s across a 6 h 17 m outage) and this node therefore publishes no seconds key of any kind"
+
+  # Terminal FOR A JOURNEY, which is a narrower word than terminal for a ROW.
+  # `cancelled` settles a row and is counted terminal by `@basis_terminal`, but a
+  # cancellation does not answer "did this content reach the web", so a run is
+  # NOT closed by one: the cancelled row joins the run and the next `live`/`failed`
+  # row closes it. Stated here rather than assumed, because a reader who imports
+  # `@basis_terminal`'s meaning gets a different segmentation.
+  @journey_terminal_statuses ~w(live failed)
+
+  # THE REGIME BOUNDARY (charter D137), the instant guerrilla cut blue/green.
+  # `box_at_capacity` has ZERO rows before 22:29:27Z and `already_running`'s last
+  # row is 19:37:26Z — the two 409 classes have zero temporal overlap, so what
+  # changed at this instant is a CODE PATH going live, not the load. NO FIGURE
+  # CROSSES IT: this node reports each cohort per SIDE, and a run that straddles
+  # the instant is its own third bucket rather than being assigned to a side by a
+  # tiebreak nobody could audit.
+  @journey_regime_boundary %{
+    subject: "blue/green deploy path",
+    instant: ~U[2026-08-06 22:24:16Z],
+    method: "systemd_unit_transition",
+    source: "charter D137",
+    voids:
+      "no rate crosses this instant. Pre-door 1,032 failed / 1,611 terminal = 64.1%; post-door 8 failed / 223 terminal = 3.6% with 677 of 900 rows ABSORBED, while live/hr roughly DOUBLED. An attempts-per-release figure taken across the door is a blend of two deploy paths, so every cohort below is reported per side and a straddling run is bucketed as STRADDLING, never folded into either side"
+  }
+
+  # THE UNMETERED RULE, stated as a value and not as a comment. A journey whose
+  # HEAD rev is NULL or the empty sentinel is counted and named, never folded
+  # into the metered population: 78 rows in 24 h carry a NULL `content_rev`, and
+  # the empty string is precisely what `Sites.Deploy`'s `@unknown_content_rev`
+  # degrades to on a STRAINED box — the exact condition under which an
+  # attempts-per-release figure is most load-bearing and most easily faked.
+  @journey_unmetered "a journey whose HEAD `content_rev` is NULL or the empty `@unknown_content_rev` sentinel. UNMETERED: outside the numerator AND the denominator, reported as its own count beside the figure it is excluded from. Folding it in fabricates releases out of rows nobody can attribute to any content, and it does so hardest on a strained box"
+
+  # The three buckets, in the order a reader wants them. `straddling` is LAST and
+  # is a bucket rather than a side, which is why it is named here beside them
+  # instead of being derived from a comparison somewhere in the fold.
+  @journey_sides [:pre, :post, :straddling]
+
+  @doc """
+  ATTEMPTS PER RELEASE over a PINNED window, segmented by RUN.
+
+  Ten waves of this epic counted ROWS. A customer does not experience a row: a
+  customer experiences a JOURNEY — the attempts that had to be made before
+  something reached the web — and the ledger could not answer "how many attempts
+  does one release cost" at all.
+
+  ## The segmentation, and the one it refuses
+
+  #{@journey_segmentation}
+
+  Segmenting by `content_rev` group instead makes ELEVEN releases of one rev
+  read as ONE, so attempts-per-release inflates by exactly the collapse factor
+  and the fleet reads worse than it is on the corpus where the rev recurs most.
+  That is not a tuning choice; it is a different question with the same name.
+
+  ## ORDER ASC, AND TAKE THE HEAD OFF THE ORDER
+
+  A DESC-ordered window defines the journey BACKWARDS — the terminal becomes the
+  group MINIMUM — and the query returns a confident wrong answer rather than an
+  error (1,345 journeys / 1.7264 attempts against the true 695 / 2.00). The run
+  number here is `count of terminal rows STRICTLY BEFORE this row`, computed
+  `order by inserted_at asc, id asc`, which makes the terminal the last row of
+  its own group by construction. The head rev is the FIRST row's rev in that
+  order and never `min(content_rev)`: a sha256 prefix has no ordering, so `min`
+  returns whichever hex sorts lowest and that is not a fact about time.
+
+  ## What it is NOT
+
+  #{@journey_basis}
+
+  ## UNMETERED, never folded
+
+  #{@journey_unmetered}
+
+  ## Per side of the regime boundary, always
+
+  Every cohort is reported per side of #{DateTime.to_iso8601(@journey_regime_boundary.instant)}
+  (#{@journey_regime_boundary.source}). A run that STRADDLES the instant is its
+  own bucket: it began under one deploy path and ended under the other, so
+  assigning it to either side would put attempts from the pre-door path into a
+  post-door figure.
+
+  ## The cohorts
+
+  * `live` — journeys terminated by a `live` row. THE fleet attempts-per-release.
+  * `live_contended` — the SUBSET of those with at least one `deferred` row in
+    the run. The direction's "4.0 attempts/release" is true of this subset only;
+    quoting it as the fleet number is the same sin as quoting the fleet number
+    at a contended site.
+  * `failed` — journeys terminated by a `failed` row. Attempts per failure.
+  * `open_runs` — trailing rows with no terminal row in the window. NOT a
+    journey, never metered, counted so a reader can see how much of the window
+    is still running.
+  """
+  @spec journeys(DateTime.t(), DateTime.t(), keyword()) :: map()
+  def journeys(%DateTime{} = from, %DateTime{} = to, opts \\ []) do
+    site_ids = Keyword.get(opts, :site_ids)
+
+    scoped =
+      from(d in Deployment,
+        where: d.inserted_at >= ^from and d.inserted_at < ^to
+      )
+      |> scope_to_sites(site_ids)
+
+    # ONE `Repo.all`, and the run number is computed IN THE QUERY so the ordering
+    # that defines a journey is auditable in the SQL rather than reconstructed in
+    # Elixir. `rows between unbounded preceding and 1 preceding` counts terminals
+    # STRICTLY BEFORE the row, so every row of a run shares a number and the
+    # terminal is the group's last row by construction.
+    #
+    # THE `coalesce` IS LOAD-BEARING AND WAS FOUND BY A RED, NOT BY READING. A
+    # SUM over an EMPTY frame is NULL, not 0 — so the FIRST row of every site
+    # partition came back `run_no: nil` while its successors came back `0`, and
+    # `Enum.group_by/2` put the head of every journey in a group of its own. The
+    # figure that produced was not an error: it was a confidently wrong
+    # attempts-per-release, one attempt light on every site, which is exactly the
+    # failure shape this whole metric exists to refuse.
+    rows =
+      Repo.all(
+        from(d in scoped,
+          select: %{
+            id: d.id,
+            site_id: d.site_id,
+            inserted_at: d.inserted_at,
+            status: d.status,
+            content_rev: d.content_rev,
+            run_no:
+              fragment(
+                "coalesce(sum(case when ? in ('live','failed') then 1 else 0 end) over (partition by ? order by ? asc, ? asc rows between unbounded preceding and 1 preceding), 0)",
+                d.status,
+                d.site_id,
+                d.inserted_at,
+                d.id
+              )
+          }
+        )
+      )
+
+    journeys =
+      rows
+      |> Enum.group_by(&{&1.site_id, &1.run_no})
+      |> Enum.map(fn {_key, run} -> journey_row(run) end)
+
+    %{
+      window: %{from: from, to: to},
+      segmentation: @journey_segmentation,
+      basis: @journey_basis,
+      unmetered_rule: @journey_unmetered,
+      terminal_statuses: @journey_terminal_statuses,
+      boundary: @journey_regime_boundary,
+      sides: Enum.map(@journey_sides, &journey_side(journeys, &1))
+    }
+  end
+
+  # A run -> a journey. Sorted on the SAME key the window used, so the head this
+  # reads and the head the run number was computed from cannot disagree.
+  defp journey_row(run) do
+    sorted = Enum.sort_by(run, &{&1.inserted_at, &1.id})
+    head = hd(sorted)
+    last = List.last(sorted)
+
+    %{
+      site_id: head.site_id,
+      attempts: length(sorted),
+      head_rev: head.content_rev,
+      metered: journey_metered?(head.content_rev),
+      contended: Enum.any?(sorted, &(&1.status == "deferred")),
+      terminal: if(last.status in @journey_terminal_statuses, do: last.status, else: nil),
+      started_at: head.inserted_at,
+      ended_at: last.inserted_at
+    }
+  end
+
+  # THE UNMETERED PREDICATE, two clauses and no `if`. `@unreadable_content_rev`
+  # is the SAME empty-string constant `deferral_outcome/3` refuses on, reused
+  # rather than re-typed: a second literal is a second place for the sentinel to
+  # drift.
+  defp journey_metered?(nil), do: false
+  defp journey_metered?(@unreadable_content_rev), do: false
+  defp journey_metered?(rev) when is_binary(rev), do: true
+
+  # Which side of the door a journey belongs to. A run wholly before the instant
+  # is `:pre`; a run that BEGINS at or after it is `:post`; anything else began
+  # before and ended after, which is `:straddling` and is not a side at all.
+  defp journey_side_of(%{started_at: started, ended_at: ended}) do
+    instant = @journey_regime_boundary.instant
+
+    cond do
+      DateTime.compare(ended, instant) == :lt -> :pre
+      DateTime.compare(started, instant) != :lt -> :post
+      true -> :straddling
+    end
+  end
+
+  defp journey_side(journeys, side) do
+    mine = Enum.filter(journeys, &(journey_side_of(&1) == side))
+    live = Enum.filter(mine, &(&1.terminal == "live"))
+
+    %{
+      side: side,
+      live: journey_cohort(live, "attempts per LIVE-terminated journey (a release)"),
+      live_contended:
+        journey_cohort(
+          Enum.filter(live, & &1.contended),
+          "attempts per LIVE-terminated journey carrying at least one `deferred` row — the CONTENDED subset, never the fleet figure"
+        ),
+      failed:
+        journey_cohort(
+          Enum.filter(mine, &(&1.terminal == "failed")),
+          "attempts per FAILED-terminated journey"
+        ),
+      # NOT a cohort and deliberately not given a rate: a run with no terminal row
+      # in the window has not cost its attempts yet, and dividing by it would
+      # publish a release that has not happened.
+      open_runs: Enum.count(mine, &is_nil(&1.terminal))
+    }
+  end
+
+  # The figure, its journey count, and the population it EXCLUDED — one node, so
+  # a renderer cannot put the ratio on the operator's screen without the count it
+  # was taken over.
+  defp journey_cohort(journeys, basis) do
+    {metered, unmetered} = Enum.split_with(journeys, & &1.metered)
+    count = length(metered)
+    attempts = Enum.reduce(metered, 0, &(&1.attempts + &2))
+
+    %{
+      basis: basis,
+      journeys: count,
+      attempts: attempts,
+      unmetered_journeys: length(unmetered),
+      unmetered_attempts: Enum.reduce(unmetered, 0, &(&1.attempts + &2)),
+      attempts_per_journey: if(count == 0, do: nil, else: Float.round(attempts / count, 2)),
+      refused: count == 0,
+      reason:
+        if(count == 0,
+          do:
+            "no METERED journey in this cohort — it is empty, or every journey in it has a NULL/empty head `content_rev`",
+          else: nil
+        )
+    }
+  end
+
+  @doc """
+  `journeys/3` rendered as the lines an operator reads — the figure and its
+  journey count ON THE SAME LINE, always.
+
+  A ratio printed without the population it was taken over is the defect this
+  whole epic keeps re-finding, and a renderer that has to fetch the count from a
+  second key is a renderer that will one day forget. So the join happens HERE,
+  next to the numbers, and every consumer inherits it.
+
+  Returns a list of strings, one per line, with no trailing newline.
+  """
+  @spec journey_report(map()) :: [binary()]
+  def journey_report(%{sides: sides} = node) do
+    [
+      "DEPLOY JOURNEYS — a release journey is a RUN, never a `content_rev` group",
+      "  window        : #{DateTime.to_iso8601(node.window.from)} -> #{DateTime.to_iso8601(node.window.to)}",
+      "  segmentation  : #{node.segmentation}",
+      "  basis         : #{node.basis}",
+      "  unmetered     : #{node.unmetered_rule}",
+      "  regime door   : #{DateTime.to_iso8601(node.boundary.instant)} (#{node.boundary.source}) — every figure below is per SIDE; a run that straddles the door is its own bucket"
+    ] ++ Enum.flat_map(sides, &journey_side_lines/1)
+  end
+
+  defp journey_side_lines(side) do
+    [
+      "  #{journey_side_caption(side.side)}",
+      "    live-terminated  : #{journey_cohort_line(side.live)}",
+      "    contended subset : #{journey_cohort_line(side.live_contended)}",
+      "    failed-terminated: #{journey_cohort_line(side.failed)}",
+      "    open runs (no terminal row in window, never metered): #{side.open_runs}"
+    ]
+  end
+
+  defp journey_side_caption(:pre), do: "PRE-DOOR (run ended before the boundary)"
+  defp journey_side_caption(:post), do: "POST-DOOR (run began at or after the boundary)"
+
+  defp journey_side_caption(:straddling),
+    do: "STRADDLING (began before the door, ended after — its own bucket, never a side)"
+
+  # THE ONE LINE. Figure, journey count and the excluded UNMETERED count travel
+  # together or not at all — including on the refusal arm, which still prints the
+  # unmetered count because "REFUSED" plus a non-zero exclusion is a different
+  # fact from "REFUSED" plus an empty cohort.
+  defp journey_cohort_line(%{refused: true} = c),
+    do: "REFUSED over 0 journeys (#{c.unmetered_journeys} UNMETERED journeys excluded)"
+
+  defp journey_cohort_line(c) do
+    "#{:erlang.float_to_binary(c.attempts_per_journey, decimals: 2)} attempts over " <>
+      "#{c.journeys} journeys (#{c.attempts} attempts; " <>
+      "#{c.unmetered_journeys} UNMETERED journeys excluded)"
+  end
 end
