@@ -5273,6 +5273,26 @@ defmodule PDS.Census do
     Enum.each(rows_in_state(s, :self_contained), fn {_r, site, _} ->
       p("        · #{short(site.path)}:#{site.line}  fn #{label(site.owner)}")
     end)
+    p("  MUTATION-EXERCISED OUTSIDE THE INTERACTION TWINS, so the class is proven and not")
+    p("  extrapolated from its one worked example. Rewriting Barkpark.Plugins.Settings")
+    p("  .delete/2 so the transaction reads `case {:ok, rec} do` instead of `case Repo")
+    p("  .delete(rec, stale_error_field: :plugin_name) do` leaves the row IN THE TABLE, still")
+    p("  logs the audit, and still renders `%{ok: true}` at plugin_settings_controller.ex:83")
+    p("  — a CALLEE-TRUTH row of this register. `elixir scripts/pds-elixir-receipt-census.exs`")
+    p("  exits 0 with CENSUS OK, PASS REGISTER-COMPLETE and PASS REGISTER-CALLEE-SPLIT, every")
+    p("  verdict and every four-field key unmoved.")
+    p("  AND THE HALF THAT IS NOT THIS CENSUS'S: that mutant DOES red ExUnit —")
+    p("  plugin_settings_controller_test.exs `admin lifecycle PUT then DELETE -> subsequent")
+    p("  GET returns 404`, 12 tests / 1 failure, left 200 right 404. The row IS behaviourally")
+    p("  pinned; what is blind is this instrument. The distinction is the whole point: the")
+    p("  census's green costs nothing for this class, and a reader must not read it as the")
+    p("  thing standing behind those receipts.")
+    p("  THE BOUNDARY, FOUND BY A CONTROL RATHER THAN ASSUMED. Two further mutants that")
+    p("  REMOVED a call edge (Github.InboundEvents.handle/2's `route(payload, opts)` replaced")
+    p("  by a fabricated `{:ok, :detached, ...}`) DID red this census, at exit 1 — on")
+    p("  ROUTE-DEPTH-IS-CLOSURE, a call-GRAPH-SHAPE arm, never on a receipt verdict. The")
+    p("  census can see a callee APPEAR or VANISH from the graph. It cannot see a callee that")
+    p("  is still called and now lies. That, exactly, is the population counted above.")
     p("  DECLARED, NEVER CLOSED, AND THE COUNTS SIT SIDE BY SIDE ON PURPOSE. The register's")
     p("  own distribution above says how many rows carry a BEHAVIOURAL pin (basis")
     p("  :end_to_end); this figure says how many carry the hole a pin would close. A")
@@ -9391,8 +9411,53 @@ defmodule PDS.Census do
       argv: [],
       mut: nil,
       exit: 0,
-      expect: ["CENSUS OK", "PASS  ROSTER-VERDICT-FRESH", "PASS  D448-DRIFT-REFUSES"],
+      expect: ["CENSUS OK", "PASS  ROSTER-VERDICT-FRESH", "PASS  D448-DRIFT-REFUSES", "PASS  REGISTER-CALLEE-SPLIT"],
       proves: "the arm is GREEN on the unmodified repo, so each red below is its mutation and not a tree that was already failing (the population baseline rides this same case: it is in scope over the repo corpus and nowhere else)"
+    },
+    # REGISTER-CALLEE-SPLIT, ONE CASE PER BRANCH OF ITS PREDICATE.
+    #
+    # WHAT THIS ARM CAN AND CANNOT BUY, STATED WHERE IT IS PROVEN. The printed block and
+    # this arm read ONE call to `callee_split/1`, so a mutation INSIDE that function moves
+    # both together — the same blind shape BLIND-SHAPE-SPLIT declares about itself, and
+    # the reason the printed figure carries no second number to invent: every line of the
+    # block interpolates a field of that one struct. What the two cases below buy is that
+    # the COUNTING cannot be quietly falsified: perturb a bucket and the partition breaks;
+    # perturb the resolver and the arm refuses to certify an empty set.
+    %{
+      name: "REGISTER-CALLEE-SPLIT-PARTITIONS",
+      corpus: :repo,
+      argv: [],
+      # THE FIGURE, INVENTED. A bucket set to a literal is the cheapest way a blind-spot
+      # count becomes decorative: the block still prints a serene three-line split and the
+      # total no longer accounts for every resolved row.
+      mut:
+        {"      self_contained: Enum.count(rows, fn {_, _, st} -> st " <> "== :self_contained end)",
+         "      self_contained: 0"},
+      exit: 1,
+      expect: [
+        "FAIL  REGISTER-CALLEE-SPLIT",
+        "does not partition its own population",
+        "a row is counted twice or not at all"
+      ],
+      refute: ["PASS  REGISTER-CALLEE-SPLIT"],
+      proves: "a callee-derived bucket invented rather than counted reds BY NAME — without this arm the same mutation prints a three-line split that sums to less than its own population and exits 0 with CENSUS OK"
+    },
+    %{
+      name: "REGISTER-CALLEE-SPLIT-NOT-VACUOUS",
+      corpus: :repo,
+      argv: [],
+      # THE 0-OF-N SHAPE, and it is the shape a REPAIR to resolve_register/1 could produce
+      # by accident: classify nothing, partition nothing, and 0 == 0 passes forever.
+      mut:
+        {"          status in [:live, :stale, " <> ":resurrected],", "          status in [],"},
+      exit: 1,
+      expect: [
+        "FAIL  REGISTER-CALLEE-SPLIT",
+        "partitioned an EMPTY SET",
+        "the resolver, not the register, is what failed"
+      ],
+      refute: ["PASS  REGISTER-CALLEE-SPLIT"],
+      proves: "an arm that classifies nothing REFUSES instead of certifying, so the blind-spot figure cannot become a vacuous 0 of 0 the way a freshness arm did in wave 44"
     },
     %{
       name: "ROSTER-DEF-FP-MOVED",
