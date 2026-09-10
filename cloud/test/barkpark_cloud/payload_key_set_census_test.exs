@@ -2921,6 +2921,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-bl-deferral-scheduled-vs-actual-gap KNOWN OPEN — the window the backoff ladder ASKED for on the interval this deferral closes. Its reachable surface this wave is the NAMED READER `DeployLedger.DeferralPacing.report/1`, not the per-deployment wire: `site_deployment_json/3` lives in router.ex, outside this task's fence, exactly as `graced_poll_refusals` records three rows up. Emitting it is the named follow-up (server key + `cloudclient.Deployment` field + rendered line, the D136 rule), and this row is where that is written down."},
     {"site_deployment_json/3", "deferral_actual_gap_s",
      "dr-bl-deferral-scheduled-vs-actual-gap KNOWN OPEN — the gap that ACTUALLY elapsed on that same interval, twin of deferral_scheduled_s. The two are only useful as a PAIR (their ratio is the measurement), so they share one custody and one follow-up; shipping one to the wire without the other would put a numerator on a page with no denominator."},
+    {"site_deployment_json/3", "box_refusal_code",
+     "dr-w4-bl-deferral-raw-column-ambiguous KNOWN OPEN — the box's OWN refusal code word, recorded off the decoded 409 envelope so a deferral's class stops being read out of forgeable bytes. Its reachable surface this wave is `DeployLedger.classify/1` itself (the deferred arm prefers this column over the prose), not the per-deployment wire: `site_deployment_json/3` lives in router.ex, outside this task's fence, exactly as `deferral_scheduled_s` and the grace trio record above. Emitting it is the named follow-up (server key + `cloudclient.Deployment` field + rendered line, the D136 rule), and this row is where that is written down. It is worth emitting: it is the ONE field that says whether the box named the cause of a deferral or the ledger inferred it."},
     {"site_deployment_json/3", "demand_class",
      "dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206) KNOWN OPEN — WHOSE DEMAND this build served (customer | platform | unclassified), stamped at create from the site's own class. Its reachable surface this wave is the NAMED READER `Registry.DemandCensus.census/1`, not the per-deployment wire: `site_deployment_json/3` lives in router.ex, outside this task's fence, exactly as `deferral_scheduled_s` and the grace trio record above. Emitting it is the named follow-up (server key + `cloudclient.Deployment` field + rendered line, the D136 rule), and this row is where that is written down."},
     {"site_deployment_json/3", "delivery_id",
@@ -3028,8 +3030,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # exactly one: `deployments.build_sha256` joins the schema side (114 -> 115)
   # and, being deliberately off the wire, the unserialized side too (30 -> 31).
   # Its @schema_allowlist row below carries the reason.
-  @schema_field_floor 115
-  @schema_unserialized_floor 31
+  # dr-w4-bl-deferral-raw-column-ambiguous moves BOTH pins by exactly one:
+  # `deployments.box_refusal_code` joins the schema side (115 -> 116) and, being
+  # deliberately off the wire this wave (`site_deployment_json/3` is in
+  # router.ex, outside the fence), the unserialized side too (31 -> 32). Its
+  # @schema_allowlist row below carries the reason and names the follow-up.
+  # MEASURED on this tree with the 999-technique, never derived: both floors set
+  # to 999 and the refusals printed `116 schema column(s) collected` and
+  # `32 unserialized column(s)`.
+  @schema_field_floor 116
+  @schema_unserialized_floor 32
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:
   # `delivery_json/1` (router.ex:9809) is the NOTIFICATIONS delivery serializer,
