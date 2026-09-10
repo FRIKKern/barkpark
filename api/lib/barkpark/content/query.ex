@@ -285,8 +285,115 @@ defmodule Barkpark.Content.Query do
   def collect_corpus_documents([], _dataset, _opts), do: {[], nil}
 
   def collect_corpus_documents(types, dataset, opts) when is_list(types) do
-    limit = opts |> Keyword.get(:limit, @corpus_limit) |> max(1)
+    types
+    |> corpus_query(dataset, opts)
+    |> corpus_read(opts)
+  end
 
+  @doc """
+  The LIVE-EXTRACT SET: the documents whose edges cannot be trusted to the
+  materialised `content_edges` table, and therefore must be re-extracted from
+  their `content` on this request.
+
+  Two clauses, and both are PREDICATES rather than lists — a list of "the
+  special documents" is a snapshot that goes wrong the moment the corpus moves.
+
+    1. `doc_id LIKE 'drafts.%'` — a draft twin. `content_edges` is
+       published-only by construction (`EdgeProjector.Lifecycle` projects at
+       `perspective: :published`), so a draft's edges are NOWHERE in it. This
+       is the clause that makes the hybrid correct.
+
+    2. `updated_at > :live_since` — THE PROJECTOR-LAG WINDOW. Projection is
+       asynchronous and debounced: `ProjectorWorker` enqueues with
+       `schedule_in: 5` seconds, dedups on `unique: [period: 30]` across
+       `:available`/`:scheduled`/`:executing` (so a save inside that window
+       rides an already-scheduled job that may predate it), runs on a
+       concurrency-2 queue, and the DEFAULT op is a full per-scope REBUILD
+       under a `timeout: 60_000` transaction. A document saved moments ago can
+       therefore have stale edges, or none, and NOTHING in the schema says so —
+       `content_edges` carries no per-document projection marker and
+       `documents` has no `edges_projected_at`. A `doc.updated_at > max(its
+       edges' updated_at)` detector would not close the hole either: a rebuild
+       is delete-then-insert, so a document that SHOULD have edges and has none
+       yet is indistinguishable from one that genuinely has none. The window is
+       the honest instrument: it needs no marker and no migration, and it is a
+       strict superset of "possibly not yet projected".
+
+  Pass `:live_since` as a `DateTime`; omit it (or pass `nil`) to take clause 1
+  alone. Same `{documents, nil | :cap}` contract, same identity model and same
+  draft-preferred `DISTINCT ON` as `collect_corpus_documents/3`.
+  """
+  @spec collect_live_extract_documents([String.t()], String.t(), keyword()) ::
+          {[Document.t()], nil | :cap}
+  def collect_live_extract_documents(types, dataset, opts \\ [])
+
+  def collect_live_extract_documents([], _dataset, _opts), do: {[], nil}
+
+  def collect_live_extract_documents(types, dataset, opts) when is_list(types) do
+    drafts_prefix = DraftId.drafts_prefix() <> "%"
+
+    base = corpus_query(types, dataset, opts)
+
+    base =
+      case Keyword.get(opts, :live_since) do
+        %DateTime{} = since ->
+          where(base, [d], like(d.doc_id, ^drafts_prefix) or d.updated_at > ^since)
+
+        _ ->
+          where(base, [d], like(d.doc_id, ^drafts_prefix))
+      end
+
+    corpus_read(base, opts)
+  end
+
+  @doc """
+  The corpus SLUG SET — every logical document id in scope, and NOT ONE BYTE OF
+  `content`.
+
+  The drafts graph needs this set to decide whether a plugin edge's target is a
+  real document or a phantom, and that question is answered by MEMBERSHIP
+  alone. Selecting `content` for it cost 810 ms over a 9,646-document corpus
+  (241 MB decoded); selecting `doc_id` and `type` costs 56 ms. Measured, same
+  corpus, same `DISTINCT ON`.
+
+  Returns `{[%{doc_id: String.t(), type: String.t()}], nil | :cap}`.
+  """
+  @spec collect_corpus_slugs([String.t()], String.t(), keyword()) ::
+          {[%{doc_id: String.t(), type: String.t()}], nil | :cap}
+  def collect_corpus_slugs(types, dataset, opts \\ [])
+
+  def collect_corpus_slugs([], _dataset, _opts), do: {[], nil}
+
+  def collect_corpus_slugs(types, dataset, opts) when is_list(types) do
+    types
+    |> corpus_query(dataset, opts)
+    |> select([d], %{doc_id: d.doc_id, type: d.type})
+    |> corpus_read(opts)
+  end
+
+  @doc """
+  The `documents.id` PKs of a scoped corpus, as a QUERY for use in a
+  `subquery/1`.
+
+  `content_edges` carries no tenancy columns — an edge is scoped by its
+  endpoints — so the drafts graph's materialised arm scopes its read by asking
+  "is this edge's SOURCE one of the documents this caller may read". Handing it
+  this query rather than a hand-written `where` keeps ONE scoping pipeline:
+  dataset, workspace/project, grants and (per class) the row-ownership ACL are
+  applied by exactly the code every other corpus read uses.
+  """
+  @spec corpus_scope_ids_query([String.t()], String.t(), keyword()) :: Ecto.Query.t()
+  def corpus_scope_ids_query(types, dataset, opts \\ []) when is_list(types) do
+    types
+    |> corpus_query(dataset, opts)
+    |> select([d], d.id)
+  end
+
+  # The scoped, un-distincted base every corpus read shares. Mirrors
+  # `base_query/4` minus the single-type `where` and the filter map: one type
+  # list, the tenancy scope, the grant scope, and the row-ownership ACL when the
+  # caller says this class of types opts into it.
+  defp corpus_query(types, dataset, opts) do
     base =
       Document
       |> where([d], d.type in ^types)
@@ -297,13 +404,16 @@ defmodule Barkpark.Content.Query do
       )
       |> maybe_scope_to_grants(opts)
 
-    base =
-      if Keyword.get(opts, :owner_scoped, false),
-        do: scope_to_owner(base, Keyword.get(opts, :caller_context)),
-        else: base
+    if Keyword.get(opts, :owner_scoped, false),
+      do: scope_to_owner(base, Keyword.get(opts, :caller_context)),
+      else: base
+  end
 
-    # One read of `limit + 1`: the extra row is the honest truncation probe —
-    # it is present exactly when the corpus is larger than the bound.
+  # One read of `limit + 1`: the extra row is the honest truncation probe — it
+  # is present exactly when the set is larger than the bound.
+  defp corpus_read(base, opts) do
+    limit = opts |> Keyword.get(:limit, @corpus_limit) |> max(1)
+
     rows =
       from(d in base,
         distinct: [

@@ -543,6 +543,13 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # spd-bl-focus-after-select — threaded through to document_header above.
   attr :focus_on_mount, :boolean, default: false
 
+  # THE ADMIN-TIER AFFORDANCE ANSWER, THREADED IN — NEVER RE-DERIVED HERE
+  # (task-ea341f86571c5981). `Caps.admin_affordance?/1` at the StudioLive call
+  # site reads the already-derived `:caps` assign; this component only consults
+  # the boolean. Default FALSE fails closed: a caller that forgets to thread it
+  # hides the admin-tier doc actions rather than advertising them.
+  attr :admin?, :boolean, default: false
+
   slot :extra_actions
   slot :empty_state
 
@@ -602,6 +609,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   action={action}
                   editor_doc={@editor_doc}
                   dataset={@dataset}
+                  admin?={@admin?}
                   workspace_slug={scope_slug(@parent_assigns, :current_workspace)}
                   project_slug={scope_slug(@parent_assigns, :current_project)}
                 />
@@ -768,6 +776,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
     * `"event"` → `<button phx-click=<opts.event>>`
     * `"modal"` → `<button phx-click="schema_action" phx-value-name=<name>>`
+      — rendered ONLY when `@admin?`, because `schema_action` is `:admin`-tier
+      in `BarkparkWeb.Studio.Caps.classify/1`
     * `"link"`  → `<a href=<interpolated-href>>`
 
   Class / style / `data-test-id` are read off `opts` so the host's built-in
@@ -783,6 +793,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # carry :workspace / :project placeholders alongside :dataset / :id.
   attr :workspace_slug, :string, default: ""
   attr :project_slug, :string, default: ""
+  # See `studio_editor_shell/1`'s note: the `"modal"` kind dispatches
+  # `schema_action`, which `Caps.classify/1` rules :admin-tier, so it renders
+  # only for an admin seat. `"event"` and `"link"` actions are unaffected.
+  attr :admin?, :boolean, default: false
 
   def doc_action_button(assigns) do
     ~H"""
@@ -807,6 +821,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         ><.doc_action_glyph action={@action} /></a>
       <% "modal" -> %>
         <button
+          :if={@admin?}
           type="button"
           class={action_button_class(@action)}
           style={action_button_style(@action)}

@@ -49,6 +49,14 @@ defmodule BarkparkCloud.Notifications.DeployRateAlertState do
   # is an outcome, a wait is an unfinished one.
   @waiting_verdicts ~w(waiting clear unmeasured)
 
+  # The BOX_UNREACHABLE episode alarm's own vocabulary. `unmeasured` is shared
+  # with both siblings and means the same thing in all three — nobody could read
+  # it. `episode` is deliberately NOT spelled `red`: a red RATE is a settled
+  # outcome about deploys that ran, while an episode of the box being
+  # unreachable is a DELIVERY failure about deploys that never started, and the
+  # two must not become interchangeable words on one row.
+  @unreachable_verdicts ~w(episode clear unmeasured)
+
   schema "deploy_rate_alert_states" do
     field :verdict, :string
     field :consecutive_red, :integer, default: 0
@@ -72,6 +80,24 @@ defmodule BarkparkCloud.Notifications.DeployRateAlertState do
     field :waiting_observed_at, :utc_datetime_usec
     field :waiting_longest_seconds, :float
 
+    # dr-w32-bl-box-unreachable-needs-an-episode-alarm — THE THIRD SIGNAL ON THE
+    # SAME ROW, edge-guarded the same way, against the same team, on the same
+    # hourly tick.
+    #
+    # It needs no consecutive counter either, and for its own reason: the
+    # reading is a COUNT over a pinned hour against a threshold (3 rows across
+    # 2 sites) derived to sit outside both the measured quiet baseline and the
+    # median episode, so the threshold is the debounce.
+    #
+    # The two peak columns exist because the RECOVERY message fires when the
+    # window no longer contains the episode: the numbers it quotes cannot be
+    # recomputed at that moment and must have been kept.
+    field :unreachable_verdict, :string
+    field :unreachable_alerted_at, :utc_datetime_usec
+    field :unreachable_observed_at, :utc_datetime_usec
+    field :unreachable_peak_rows, :integer
+    field :unreachable_peak_sites, :integer
+
     belongs_to :team, BarkparkCloud.Accounts.Team
 
     timestamps(type: :utc_datetime_usec)
@@ -84,6 +110,9 @@ defmodule BarkparkCloud.Notifications.DeployRateAlertState do
 
   @doc "The verdict words the publish-waiting half of this row accepts."
   def waiting_verdicts, do: @waiting_verdicts
+
+  @doc "The verdict words the BOX_UNREACHABLE episode half of this row accepts."
+  def unreachable_verdicts, do: @unreachable_verdicts
 
   def changeset(state, attrs) do
     state
@@ -98,11 +127,17 @@ defmodule BarkparkCloud.Notifications.DeployRateAlertState do
       :waiting_verdict,
       :waiting_alerted_at,
       :waiting_observed_at,
-      :waiting_longest_seconds
+      :waiting_longest_seconds,
+      :unreachable_verdict,
+      :unreachable_alerted_at,
+      :unreachable_observed_at,
+      :unreachable_peak_rows,
+      :unreachable_peak_sites
     ])
     |> validate_required([:team_id, :verdict])
     |> validate_inclusion(:verdict, @verdicts)
     |> validate_inclusion(:waiting_verdict, @waiting_verdicts)
+    |> validate_inclusion(:unreachable_verdict, @unreachable_verdicts)
     |> validate_number(:consecutive_red, greater_than_or_equal_to: 0)
     |> assoc_constraint(:team)
     |> unique_constraint(:team_id)

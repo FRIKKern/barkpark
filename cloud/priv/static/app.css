@@ -6952,3 +6952,65 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .detail-title-row .status-pill-dot { margin-top: 5.5px; }
 .instance-card-head .status-pill-detail,
 .detail-title-row .status-pill-detail { overflow: visible; text-overflow: clip; }
+
+/* ═══ THE SHARED `.modal-card` MIN-CONTENT FLOOR, CENSUSED AND CLOSED ═══════
+   cch-w22-s4 reflowed the ACCOUNT modal and filed the rest, guessing "15+"
+   bodies with unmeasured floors. They are now MEASURED, by
+   `overflow-guard.mjs --defect W22-shared-modal-card-min-content-floor`: the
+   roster is derived from every `openModal(` caller in app.js (32 bodies, 28
+   driven, 4 named unreachable with the server answer the preview corpus cannot
+   mint), each driven at 320/360/390/430 in both themes with its card's
+   min-content floor read by forcing `width: min-content; max-width: none` and
+   restoring it.
+
+   THE ANSWER IS TWO, NOT FIFTEEN. At 320 the root offers 272px (320 minus its
+   own `var(--space-6)` padding on each side) and exactly two bodies demand more
+   than that AND lack any automatic-minimum escape, so exactly two turn
+   `.modal-root` into a silent sideways scroller:
+
+     fleet add support (`#support-form`)  floor 281.53  root 330/320  (+10)
+     plan cancel       (`#cancel-go`)     floor 274.19  root 322/320  (+2)
+
+   Every other over-floor body already has BOTH halves and measures clean:
+   the account family (287.61 at 320) carries s4's own `:has(.am-modal)` track
+   clamp and reflow; the command palette (285.91) escapes for a reason worth
+   recording — `.modal-root:has(.cmdk) .modal-card` declares `overflow: hidden`,
+   and a grid item whose overflow is not `visible` has an automatic minimum size
+   of ZERO, so its track never sizes to its content. A FLOOR OVER THE LINE IS
+   THEREFORE NOT THE DEFECT; the defect is a floor over the line with an
+   automatic minimum still in force, and only the driven root scrollWidth tells
+   the two apart. The census reports both numbers for that reason.
+
+   BOTH HALVES, PER BODY, NEVER THE CLAMP ALONE — s4's rule, and its reason
+   holds: a clamped card whose content was not reflowed shrinks its box to the
+   viewport while the content keeps its old width and paints over the card's own
+   border and background. The guard measures that half-remedy shape separately
+   (descendants outside the CARD, not merely outside the viewport) and it is
+   zero here.
+
+   THE REFLOW LEVER IS THE ONE s4 PROVED: a wrapping flex container's
+   min-content is the LARGEST item contribution, not the SUM. Bisected by the
+   guard, both floors are `.modal-actions` and nothing else — 231.53 = "Cancel"
+   + gap + "Add support server", 224.19 = "Keep my plan" + gap + "Cancel plan".
+   Wrapping drops each to its widest single button (150.53 / 113.33), and since
+   `.modal-actions .btn` is already `flex: 1` a wrapped line holds one
+   full-width button, which is the honest phone composition. The row wraps ONLY
+   when it genuinely stops fitting: measured, both stay on one line at 360 and
+   above, so nothing changes on any width that was already fine.
+
+   SCOPED, NOT GLOBAL, AND 620 IS NOT A NEW BREAKPOINT. `#support-form` and
+   `#cancel-go` are the two bodies that were measured; a body that was not
+   measured does not get a clamp on the strength of a neighbour's numbers. 620
+   is an existing head in this stylesheet (s4's phone band uses it), so
+   `breakpoint-sweep.mjs`'s derived axis is unchanged.
+
+   Px are font-conditional (D218). The ORDINAL fact — a dialog scrolling
+   sideways with no visible affordance — is not. */
+@media (max-width: 620px) {
+  .modal-root:has(#support-form),
+  .modal-root:has(#cancel-go) { grid-template-columns: minmax(0, 1fr); }
+  .modal-root:has(#support-form) .modal-card,
+  .modal-root:has(#cancel-go) .modal-card { min-width: 0; }
+  .modal-root:has(#support-form) .modal-actions,
+  .modal-root:has(#cancel-go) .modal-actions { flex-wrap: wrap; row-gap: var(--space-2); }
+}

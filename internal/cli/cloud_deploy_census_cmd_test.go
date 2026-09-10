@@ -3296,3 +3296,47 @@ func TestCloudDeploymentsVocabularyAbsenceRendersNothing(t *testing.T) {
 		t.Fatalf("an envelope with NO vocabulary key rendered a legend anyway:\n%s", stdout)
 	}
 }
+
+// TestDeployCensusUnreachableEpisodeLine pins the OPERATOR SURFACE for
+// BOX_UNREACHABLE (dr-w32-bl-box-unreachable-needs-an-episode-alarm).
+//
+// Before this line the class reached a human only through the generic class-row
+// loop, which prints a name, a count and a share and is identical for every
+// class. That is true and insufficient here: the class is EPISODIC and
+// self-healing, so a count over a wide window counts blips, and it is a DELIVERY
+// failure, so the obvious remedy a bare count suggests — rebuild the sites — is
+// the wrong action.
+//
+// The two arms are the test. The zero arm is the control: without it the
+// present arm would also pass on a line that printed unconditionally, which
+// would put incident vocabulary on a screen that recorded no incident.
+func TestDeployCensusUnreachableEpisodeLine(t *testing.T) {
+	present := cloudclient.DeployCensus{
+		Classes: []cloudclient.DeployCensusClass{
+			{Class: "BOX_UNREACHABLE", Label: "the instance could not be reached at all", Count: 9},
+			{Class: "BUILD_FAILED", Label: "the build failed", Count: 4},
+		},
+	}
+
+	got := deployCensusUnreachableEpisodeLine(present)
+	for _, want := range []string{
+		"BOX_UNREACHABLE 9",
+		"DELIVERY failure",
+		"EPISODIC",
+		"--from/--to",
+		"3 or more rows across 2 or more sites inside 60 minutes",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the episode line %q is missing %q", got, want)
+		}
+	}
+
+	// THE CONTROL. A window with no rows of this class has no episode to
+	// describe, and the line must be absent rather than rendered at zero.
+	absent := cloudclient.DeployCensus{
+		Classes: []cloudclient.DeployCensusClass{{Class: "BUILD_FAILED", Label: "the build failed", Count: 4}},
+	}
+	if line := deployCensusUnreachableEpisodeLine(absent); line != "" {
+		t.Fatalf("no BOX_UNREACHABLE rows must render no episode line, got %q", line)
+	}
+}

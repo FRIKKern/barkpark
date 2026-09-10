@@ -609,11 +609,28 @@ defmodule BarkparkWeb.QueryController do
   # drafts where they exist and published rows where they do not, so a
   # published-only document must not start 404ing under `?perspective=drafts`.
   #
-  # `:published` and `:raw` keep the exact-id lookup, and they genuinely coincide
-  # here: doc-get addresses ONE row by id, so "raw" (no perspective filter) and
-  # "published" resolve to the same row. A caller that spells `drafts.<id>`
-  # still gets that row — the documented bare-`bp doc get` asymmetry, which is a
-  # different thing from an explicit flag being ignored.
+  # `:raw` means NO perspective filter, so it prefers the row the id names and
+  # falls back to the draft twin when the bare id names nothing
+  # (task-aa22f3bd921e1c56). Before that fallback existed, `doc get <type>
+  # <publishedId> --perspective raw` answered not_found for an unpublished
+  # document that `doc patch`, `doc publish`, `doc discardDraft` and `doc
+  # delete` all reach by the SAME bare id — `Mutations.get_patch_base/4` and
+  # `Content.publish_document/4` each try `drafts.<id>`. So the read-back
+  # straight after a create reported the document did not exist, which is the
+  # false negative that makes an operator or an agent retry the create and
+  # produce duplicates. The accepted id set is now one set across read and
+  # write.
+  #
+  # The order is the opposite of `:drafts` on purpose. Under `:drafts` the twin
+  # WINS when both rows exist, because the caller asked for the unpublished
+  # edit. Under `:raw` the exact row wins, because the caller named a row; the
+  # twin is reached only when the bare id resolves to nothing, and
+  # `drafts.<id>` still names it explicitly.
+  #
+  # `:published` keeps the exact-id lookup with no fallback, and that is the
+  # correct answer rather than the same defect: publishing is the act of making
+  # a document public, so an unpublished document is genuinely absent from the
+  # published perspective.
   #
   # NO NEW EXPOSURE, and this is the part worth checking rather than assuming.
   # `AnonPerspective.resolve/2` pins every anonymous and `public-read` caller to
@@ -621,18 +638,29 @@ defmodule BarkparkWeb.QueryController do
   # names a `drafts.` id. For an authed caller nothing widens either: doc-get
   # already served `GET /v1/data/doc/:ds/:type/drafts.<id>` to any read token, so
   # honouring the flag reaches the SAME row by a different spelling. Pinned both
-  # ways in query_controller_perspective_test.exs.
+  # ways in query_controller_perspective_test.exs, and for `:raw` in
+  # doc_get_id_parity_test.exs.
   defp get_document_for_perspective(conn, doc_id, type, dataset, params) do
     case AnonPerspective.resolve(conn, params) do
-      :drafts ->
-        case Content.get_document(DraftId.draft_id(doc_id), type, dataset, scope_opts(conn)) do
-          {:ok, draft} -> {:ok, draft}
-          _ -> Content.get_document(doc_id, type, dataset, scope_opts(conn))
-        end
-
-      _ ->
-        Content.get_document(doc_id, type, dataset, scope_opts(conn))
+      :drafts -> first_hit(conn, [DraftId.draft_id(doc_id), doc_id], type, dataset)
+      :raw -> first_hit(conn, [doc_id, DraftId.draft_id(doc_id)], type, dataset)
+      _ -> Content.get_document(doc_id, type, dataset, scope_opts(conn))
     end
+  end
+
+  # Try each spelling in order and answer with the first row that resolves.
+  # `DraftId.draft_id/1` is idempotent, so a caller who already spelled
+  # `drafts.<id>` asks the same question twice and gets the same answer — no
+  # second row is reachable that the exact-id lookup would not have found.
+  defp first_hit(conn, spellings, type, dataset) do
+    opts = scope_opts(conn)
+
+    Enum.reduce_while(spellings, {:error, :not_found}, fn spelling, acc ->
+      case Content.get_document(spelling, type, dataset, opts) do
+        {:ok, _doc} = ok -> {:halt, ok}
+        _ -> {:cont, acc}
+      end
+    end)
   end
 
   # ─── ?resolve=tasks — the API resolve seam (p-resolve-seam) ────────────────

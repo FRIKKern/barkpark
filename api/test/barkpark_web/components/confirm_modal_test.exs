@@ -91,4 +91,51 @@ defmodule BarkparkWeb.Components.ConfirmModalTest do
       refute html =~ ~s(data-test-id="confirm-modal-real")
     end
   end
+
+  describe "the scrim is a stylesheet rule, not an inline style (spd-w5f)" do
+    # The rendered markup is the honest subject here: `root.html.heex` can hold
+    # a perfect `.bp-modal-overlay` rule while the component still ALSO emits
+    # its own `style="position: fixed; …; background: rgba(0,0,0,0.4)"`, and the
+    # inline one wins the cascade. Only the emitted HTML says which is live.
+    setup do
+      %{
+        html:
+          render_component(&ConfirmModal.confirm_modal/1, %{
+            id: "m1",
+            title: "Title",
+            body: "Body",
+            on_cancel: "cancel",
+            on_confirm: "confirm"
+          })
+      }
+    end
+
+    test "the overlay carries the class and no inline position/background", %{html: html} do
+      assert html =~ ~s(class="bp-modal-overlay"),
+             "the scrim lost the class its root.html.heex rule is keyed on"
+
+      refute html =~ "position:",
+             "confirm_modal emits an inline `position:` again — that is invisible " <>
+               "to the root stylesheet and re-grows @inline_fixed_inventory in " <>
+               "test/barkpark_web/studio/editor_panel_containment_test.exs"
+
+      refute html =~ "background:",
+             "confirm_modal emits an inline `background:` again — a colour " <>
+               "declaration here is not scanned by scripts/studio-literal-check.sh"
+    end
+
+    test "no raw colour literal survives anywhere in the markup", %{html: html} do
+      for literal <- ["rgba(", "rgb(", "#0", "#f"] do
+        refute String.contains?(html, literal),
+               "confirm_modal emits the raw colour literal #{inspect(literal)}; the " <>
+                 "sanctioned form is a token, e.g. hsl(var(--bp-scrim-hsl) / 0.45)"
+      end
+    end
+
+    test "z-index 1000 is gone — the scrim uses the Studio tier system", %{html: html} do
+      refute html =~ "z-index",
+             "the overlay declares its own z-index; the tiers (50/51/60) live in " <>
+               "root.html.heex so they can be compared against each other"
+    end
+  end
 end

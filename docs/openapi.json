@@ -175,6 +175,7 @@
                   "runtime_unavailable",
                   "schema_has_documents",
                   "schema_unknown",
+                  "searchable_text_too_large",
                   "session_restarting",
                   "session_start_failed",
                   "share_expired",

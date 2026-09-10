@@ -732,11 +732,26 @@ out = open(sys.argv[2], "w")
 on = wf.get(True, wf.get("on"))            # PyYAML parses bare `on:` as True
 jobs = wf["jobs"]
 def emit(k, v): out.write(f"{k}={v}\n")
-# D18: a workflow-level paths filter emits NO check run — the required name then
-# sits "is expected." forever and the PR is BLOCKED with nothing to fix.
+# D18: a paths filter on the PULL_REQUEST arm emits NO check run — the required
+# name `Console gate` then sits "is expected." forever and the PR is BLOCKED with
+# nothing to fix. NARROWED TO THAT ARM 2026-09-10 (task-7ef9d81ed33d2b9c), from
+# `any arm`: D18's reason is about a REQUIRED CONTEXT ON A PULL REQUEST, and
+# branch protection never evaluates a push-to-main run — it gates merges INTO
+# main, and the push arm fires after the merge. It is the same predicate
+# scripts/shim-trigger-filter-check.sh has always used. The mutant below plants
+# its filter on `pull_request`, so this fact still FIRES.
 emit("workflow_paths", any(
-    isinstance(v, dict) and ("paths" in v or "paths-ignore" in v)
-    for v in (on or {}).values()))
+    isinstance((on or {}).get(arm), dict)
+    and ("paths" in on[arm] or "paths-ignore" in on[arm])
+    for arm in ("pull_request", "pull_request_target")))
+# THE VENUE PIN (task-7ef9d81ed33d2b9c). The push:main arm IS paths-filtered on
+# purpose — measured 2026-09-10T11:30Z, 16 of the day's 122 stacked push:main
+# runs were this workflow, every one for a superseded sha, and it is per-sha
+# grouped so it never collapses. Asserted TRUE below, with its own negative
+# mutation, so deleting that filter REDS here instead of quietly restoring a
+# full harness run per merge.
+push = (on or {}).get("push")
+emit("push_paths", isinstance(push, dict) and "paths" in push)
 agg = jobs.get("console-gate", {})
 emit("agg_present", bool(agg))
 emit("agg_matrix", "strategy" in agg and "matrix" in agg.get("strategy", {}))
@@ -922,6 +937,7 @@ PY
     esac
   }
   assert_fact workflow_paths False
+  assert_fact push_paths True
   assert_fact agg_present True
   assert_fact agg_matrix False
   assert_fact agg_if "always()"
@@ -1063,7 +1079,25 @@ PY
   if [ "$(sed -n 's|^workflow_paths=||p' "$TMPROOT/paths.facts")" = "True" ]; then
     ok "  mutation[paths]: re-adding on:pull_request:paths is DETECTED"
   else
-    no "  mutation[paths]: a workflow-level paths key was NOT detected — the D18 fact is decorative"
+    no "  mutation[paths]: a pull_request paths key was NOT detected — the D18 fact is decorative"
+  fi
+
+  # ...and the venue pin's NEGATIVE half. Strip the push arm's paths filter and
+  # push_paths must go False, or the True above is an emitter that never looked.
+  QMUT="$TMPROOT/pushpaths-mutant.yml"
+  python3 - "$WF" "$QMUT" <<'PY'
+import sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+on = wf.pop(True, None) or wf.pop("on", None)
+on["push"].pop("paths", None)
+wf["on"] = on
+yaml.safe_dump(wf, open(sys.argv[2], "w"))
+PY
+  python3 "$EMIT" "$QMUT" "$TMPROOT/pushpaths.facts"
+  if [ "$(sed -n 's|^push_paths=||p' "$TMPROOT/pushpaths.facts")" = "False" ]; then
+    ok "  mutation[pushpaths]: deleting the push:main paths filter is DETECTED"
+  else
+    no "  mutation[pushpaths]: the push arm's paths key was NOT read — the venue pin is decorative"
   fi
 
   # ── post-verdict mutation matrix ──────────────────────────────────────────

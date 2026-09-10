@@ -824,12 +824,27 @@ jobs:
       # is the ONE source of the white ladder; the Elixir emitters read it at
       # compile time, and the --st-* CSS tone tokens are GENERATED from it. This
       # gate fails if any surface hand-drifts a tone or a glyph role away from it.
+      #
+      # --selftest runs FIRST, IN THIS SAME STEP (cgsi-s8 idiom; the selftest
+      # itself is cgsi-bl-status-manifest-no-selftest). This gate was wired BARE
+      # here — it had no --selftest to run, so none of its five parts had ever
+      # been shown to RED and CI could never catch a weakened one. The 15-arm
+      # harness copies the gate and the six files it reads into a throwaway
+      # tree, plants one violation per part in turn (a drifted tone value, an
+      # orphan .bp-g--<role> class, a missing one, a drifted Go roleGlyph, a
+      # drifted Go roleLabel, a reordered STATUS_ROLES entry, a drifted mobile
+      # ROLE_LABEL), asserts the REAL gate exits 1 naming that part, and
+      # restores the planted file to prove it greens again. It plants nothing in
+      # this repo. Same step, not a later one: Actions skips a job's remaining
+      # steps once one fails, so a trailing tripwire never runs on exactly the
+      # runs where the gate reddened.
       - name: Status manifest drift gate (fails this job)
         id: s9
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/status-manifest-check.sh --selftest
           bash scripts/status-manifest-check.sh
 
       # Preview-contract cross-surface parity tripwire (preview-contract W4,

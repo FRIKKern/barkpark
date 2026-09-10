@@ -171,7 +171,7 @@ pnpm-lock.yaml none pnpm lockfile
 pnpm-workspace.yaml none the pnpm workspace definition
 run.sh none local run helper
 scaffy none scaffy templates and catalog
-scripts none the gate and ops scripts
+scripts cloud the gate and ops scripts; cloud-path-escape-check.sh declares scripts/** (dr-w26-s4), so cloud.yml dispatches on it
 sdk none generated SDK artefacts
 templates cloud,go project templates both suites read
 tooling none standalone tooling trees
