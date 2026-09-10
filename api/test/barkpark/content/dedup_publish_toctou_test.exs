@@ -150,21 +150,7 @@ defmodule Barkpark.Content.DedupPublishToctouTest do
             LabelFixtures.paper_attrs(%{
               "slug" => slug,
               "dataset" => @dataset,
-              "blocks" => [
-                %{
-                  "id" => "tpl-title",
-                  "type" => "heading",
-                  "level" => 1,
-                  "role" => "title",
-                  "locked" => true,
-                  "text" => title
-                },
-                %{
-                  "id" => "p1",
-                  "type" => "paragraph",
-                  "content" => [%{"type" => "text", "value" => "Body for #{slug}."}]
-                }
-              ]
+              "blocks" => title_blocks(title, slug)
             })
           )
         end)
@@ -177,6 +163,63 @@ defmodule Barkpark.Content.DedupPublishToctouTest do
     assert length(published_ids()) == 1
     assert Enum.count(results, &match?({:ok, %Document{}}, &1)) == 1
     assert Enum.count(results, &match?({:error, {:duplicate_of, _}}, &1)) == 1
+  end
+
+  test "the paper-birth broadcast fires AFTER commit, not inside the lock's transaction" do
+    # THE HAZARD THE FIRST DRAFT OF THIS FIX INTRODUCED (independent review,
+    # lead-api-r4). Wrapping `persist_blocks_doc/10` whole moved its tail
+    # pre-commit, and `broadcast_paper_update/1` is a RAW
+    # `Phoenix.PubSub.broadcast` — `Broadcast.write_atomically/1` defers and
+    # flushes the QUEUED kind, it cannot defer that one. So the message went
+    # out while the row was still invisible to every other connection.
+    #
+    # The probe is a SEPARATE process on its OWN unboxed connection: it reads
+    # `documents` the instant the message lands. A pre-commit broadcast makes
+    # that read miss; a post-commit one makes it hit. Nothing here inspects
+    # implementation — it asks the question a real subscriber asks.
+    LabelFixtures.register_tags!(@dataset)
+    slug = "broadcast-order"
+    test_pid = self()
+
+    # The broadcaster keys the topic on the row's RESOLVED workspace, so the
+    # probe has to subscribe to the same one. `upsert_paper` falls back to the
+    # seeded Default workspace when the caller asserts no scope.
+    %{rows: [[raw_ws]]} = Repo.query!("SELECT id FROM workspaces WHERE slug = 'default' LIMIT 1")
+    {:ok, workspace_id} = Ecto.UUID.cast(raw_ws)
+    topic = Barkpark.Content.Broadcast.paper_topic(slug, workspace_id, @dataset)
+
+    probe =
+      spawn_link(fn ->
+        :ok = Sandbox.checkout(Repo, sandbox: false)
+
+        Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
+
+        send(test_pid, :subscribed)
+
+        receive do
+          {:paper_updated, _} ->
+            send(test_pid, {:visible?, Repo.exists?(row_query(slug))})
+        after
+          15_000 -> send(test_pid, {:visible?, :no_message})
+        end
+      end)
+
+    assert_receive :subscribed, 5_000
+
+    {:ok, _} =
+      Content.upsert_paper(
+        LabelFixtures.paper_attrs(%{
+          "slug" => slug,
+          "dataset" => @dataset,
+          "blocks" => title_blocks("Broadcast ordering probe paper", slug)
+        })
+      )
+
+    assert_receive {:visible?, visible}, 20_000
+    Process.unlink(probe)
+
+    assert visible == true,
+           "the {:paper_updated, _} broadcast reached a subscriber before the row was committed"
   end
 
   test "the scope lock key is disjoint from the task/session families" do
@@ -228,6 +271,32 @@ defmodule Barkpark.Content.DedupPublishToctouTest do
     after
       20_000 -> raise "only one publish reached the dedup barrier — the race never set up"
     end
+  end
+
+  defp title_blocks(title, slug) do
+    [
+      %{
+        "id" => "tpl-title",
+        "type" => "heading",
+        "level" => 1,
+        "role" => "title",
+        "locked" => true,
+        "text" => title
+      },
+      %{
+        "id" => "p1",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Body for #{slug}."}]
+      }
+    ]
+  end
+
+  defp row_query(slug) do
+    from(d in Document,
+      where:
+        d.doc_id == ^slug and d.dataset == ^@dataset and d.type == ^@type_name and
+          d.status == "published"
+    )
   end
 
   defp park(test_pid) do
