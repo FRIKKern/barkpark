@@ -666,6 +666,103 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert DeployLedger.classify(group) == DeployLedger.classify("PLAN", @a_capacity)
     end
 
+    ## ── dr-w13-bl-column-first-classify-bypass: ONE READER, NOT TWO ──────────
+    #
+    # `Sites.Deploy`'s chain counter classifies deferral rows too, and it used to
+    # do it by SYNTHESISING `%{status: "deferred", stage: …, failure_reason: …}`
+    # out of two fields — a map that carries no chain column, so it was
+    # structurally incapable of taking the column arm above no matter what
+    # `classify/1` preferred. The ruling on that row is THREADING: the chain
+    # readers hand `DeployLedger.classify/1` the WHOLE row, via the public
+    # `Sites.Deploy.deferral_cause_of/1`. These two tests are the guard.
+
+    test "the producer's chain reader is threaded the ROW — the column arm cannot be bypassed" do
+      # THE DISAGREEMENT FIXTURE. The prose says an ordinary 409 (no abandonment
+      # sentence anywhere in it); the columns say a 12-round capacity
+      # abandonment. One row, two sources, two DIFFERENT answers — so whichever
+      # answer comes back names the winner, which is what the bare-map fixtures
+      # elsewhere in this file structurally cannot do.
+      disagreeing = %{
+        status: "failed",
+        stage: "PLAN",
+        failure_reason: @r409_coded,
+        deferral_depth: 12,
+        deferral_bound: 12,
+        deferral_cause: "BOX_AT_CAPACITY_DEFERRED"
+      }
+
+      # CONTROL: the prose, read alone, really is the OTHER answer — so a green
+      # below is a preference and not two arms that happen to agree.
+      assert DeployLedger.classify("PLAN", @r409_coded) == "BOX_BUSY_409"
+
+      # THE COLUMNS WIN in the ledger. Delete `abandoned_by_columns/1`'s call from
+      # the `failed` clause and this line reds with BOX_BUSY_409 on the right.
+      assert DeployLedger.classify(disagreeing) == "ABANDONED_AT_CAPACITY"
+
+      # AND THEY WIN IN THE PRODUCER, for the same reason and out of the same
+      # function. `deferral_cause_of/1` is what `deferral_chain/2` and
+      # `current_deferral_depth/1` classify with. Restore the bypassed shape —
+      # `deferral_cause(d.stage, d.failure_reason)` — and this line reds with
+      # BOX_BUSY_DEFERRED on the right: the synthesised map drops the status AND
+      # all three columns.
+      assert Deploy.deferral_cause_of(disagreeing) == "ABANDONED_AT_CAPACITY"
+      assert Deploy.deferral_cause_of(disagreeing) == DeployLedger.classify(disagreeing)
+    end
+
+    test "on the DEFERRED clause prose still wins — and the producer follows it there too" do
+      # The column arm sits on the `failed` clause ONLY; the `deferred` clause is
+      # prose-first on purpose (dr-w13-s3), because 1,818 live rows carry NULL
+      # columns. Disagreement fixture again, pointed the other way: the column
+      # says BUSY, the prose says CAPACITY.
+      deferred = %{
+        status: "deferred",
+        stage: "PLAN",
+        failure_reason: @d_capacity_stamped,
+        deferral_depth: 3,
+        deferral_bound: 12,
+        deferral_cause: "BOX_BUSY_DEFERRED"
+      }
+
+      assert DeployLedger.classify(deferred) == "BOX_AT_CAPACITY_DEFERRED"
+
+      # THE INVARIANT THIS ROW EXISTS FOR, and the only one that survives a
+      # change of preference: the producer's chain reader and the ledger name
+      # this row IDENTICALLY. It holds today because prose wins on both sides,
+      # and it keeps holding the day the `deferred` clause goes column-first —
+      # which, under the synthesised map, is exactly when it would have broken.
+      assert Deploy.deferral_cause_of(deferred) == DeployLedger.classify(deferred)
+    end
+
+    test "the stamped cause is classify/1's OWN past output — post-2026-08-07 rows are FROZEN" do
+      # `defer/3` computes `deferral_cause` by calling `DeployLedger.classify/1`
+      # and stamps the answer, so a column-first read is the classifier reading
+      # back its own frozen output.
+      stamped =
+        DeployLedger.classify(%{
+          status: "deferred",
+          stage: "PLAN",
+          failure_reason: @d_capacity_stamped
+        })
+
+      assert stamped == "BOX_AT_CAPACITY_DEFERRED"
+
+      # THE CONSEQUENCE, AS A RULING AND NOT A DISCOVERY: that frozen string is
+      # what the column arm maps, so a future taxonomy repair (a rename, a split)
+      # will NOT retroactively apply to any deferred row written after
+      # 2026-08-07 — the prose corpus before that instant is re-read by the new
+      # rules and answers the new name, while these rows keep answering the old
+      # one. Such a repair has to carry a backfill of this column, or accept a
+      # dated seam in its own numbers.
+      assert DeployLedger.classify(%{
+               status: "failed",
+               stage: "PLAN",
+               failure_reason: @r409_coded,
+               deferral_depth: 12,
+               deferral_bound: 12,
+               deferral_cause: stamped
+             }) == "ABANDONED_AT_CAPACITY"
+    end
+
     test "a partial stamp is not a predicate: one column without the other reads nothing" do
       base = %{status: "failed", stage: "PLAN", failure_reason: @r409_coded}
 

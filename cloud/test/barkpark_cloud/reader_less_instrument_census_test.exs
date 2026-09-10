@@ -496,13 +496,25 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
 
   Two further limits, stated rather than discovered later:
 
-    * DISPATCH. `.github/workflows/cloud.yml` dispatches this suite on
-      `cloud/**` and the paths declared in `scripts/cloud-path-escape-check.sh`.
-      `internal/`, `web/`, `js/` and `api/` are NOT declared there, so a commit
-      that adds a reader ONLY in those trees does not re-run this census; the
-      ROT is caught on the next cloud-touching commit, not on the commit that
-      caused it. That declaration lives in a file dr-w26-s4-census-scores-a-caller-less-producer owns, so it is filed
-      (`dr-w26-followup-reader-corpus-dispatch`), not smuggled into this slice.
+    * DISPATCH — STILL OPEN, and now routed rather than merely filed.
+      `.github/workflows/cloud.yml` dispatches this suite on `cloud/**` and the
+      paths declared in `scripts/cloud-path-escape-check.sh`. `internal/` IS
+      declared there; `web/`, `js/` and `api/` are NOT, so a commit that adds a
+      reader ONLY in those three trees does not re-run this census, and the ROT
+      is caught on the next cloud-touching commit rather than on the commit that
+      caused it. The direction is safe — a LATE red, never a false green.
+
+      THE OBVIOUS FIX WAS MEASURED AND REFUSED, which is why this paragraph is
+      still here. Declaring `api/**`, `web/**` and `js/**` was built and costed
+      on this tree: over 60 days / 5008 commits on main it moves dispatch from
+      1641 to 3874 commits, i.e. 33% -> 77% of all commits running the
+      Postgres-backed Cloud `test` job, with `api/**` alone accounting for 1438.
+      Paying that to re-run ONE census file is the wrong shape: the census does
+      not need the whole Cloud suite dispatched, it needs ITSELF dispatched. So
+      the remedy moved to a job-level path condition on this test plus a
+      census-only tier in the ratchet, re-filed for the gates lane 2026-09-10.
+      The number is recorded here so the next reader does not re-derive it and
+      reach the same dead end.
     * FAILING OPEN. An instrument nobody registered is invisible here, exactly
       as `deploy_signal_audience_census_test.exs` admits of its own registry.
       Nothing syntactic closes that hole. `queued_seconds` WAS the honest

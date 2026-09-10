@@ -64,10 +64,13 @@ on:
       # a co-triggering merge — without this line a runner/.mjs-only change lands
       # on main but never reaches guerrilla (charter D275, W35).
       - "scripts/connectors/**"
-      # deploy-filter-exempt: editing THIS workflow deploys nothing by itself —
-      # the next real code merge carries it. Marked explicitly so
+      # deploy-filter-exempt[cp,instance]: editing THIS workflow deploys nothing
+      # by itself — the next real code merge carries it. Marked explicitly, and
+      # BOUNDED to the two jobs it deliberately does not target, so
       # scripts/check-deployyml-filters.sh can tell "deliberately targetless"
-      # from "silently dropped".
+      # from "silently dropped": an exempt entry must be a single file (a tree
+      # that starts this workflow must deploy something) and every named job's
+      # regex must indeed NOT match it.
       - ".github/workflows/deploy.yml"
 
 # ── ONE GROUP PER PUSH SHA (task-8e5eae5c71635a5e) ──────────────────────────
@@ -1101,6 +1104,11 @@ jobs:
           # upper bound is a real datum; it is NOT the flip instant.
           CP_SERVED_SHA=""
           CP_SERVING_SINCE=""
+          # THE BASIS, AS A WORD THE TABLE CAN HOLD (W29). Not a new measurement:
+          # the two lines below already SAY this in prose, and until now nothing
+          # wrote it down, so a reader of platform_deliveries could not tell a
+          # process-start upper bound from a flip instant.
+          CP_SERVING_SINCE_BASIS="process_start"
           if [ "$CP_RESULT" = "success" ]; then
             health="$(curl -s --max-time 15 https://barkpark.cloud/health)"
             health_rc=$?
@@ -1129,6 +1137,7 @@ jobs:
           # name — reading it would MINT the first_seen_at it claims to observe.
           INSTANCE_SERVED=""
           INSTANCE_SINCE=""
+          INSTANCE_SERVING_SINCE_BASIS="deploy_flip_mtime"
           if [ "$INSTANCE_RESULT" = "success" ]; then
             INSTANCE_SERVED="$(resolve_served instance "$INSTANCE_SERVED_SHA")"
             if [ $? -ne 0 ] || [ -z "$INSTANCE_SERVED" ]; then
@@ -1152,6 +1161,14 @@ jobs:
             build="$4"
             out="$5"
             served="$6"
+            # WHICH CLOCK produced $serving (W29). Passed in by the caller rather
+            # than derived from $target here, so the word sits beside the code
+            # that actually read the value: the cp leg's comes from /health,
+            # whose own payload calls it process-derived, and the instance leg's
+            # is the mtime of .instance-deploy-last. Empty when this leg captured
+            # no serving_since at all — then no basis key is emitted either, and
+            # the column reads NULL: "not recorded", never a third basis.
+            serving_basis="$7"
             rangefile="/tmp/pd-range-${target}.txt"
             transition=unknown
             measured=0
@@ -1271,12 +1288,13 @@ jobs:
               --arg prev "$prev" \
               --arg transition "$transition" \
               --arg serving "$serving" \
+              --arg serving_basis "$serving_basis" \
               --arg merge_committer "$GITHUB_MERGE_COMMITTER" \
               --argjson measured "$measured" \
               --argjson queued "$QUEUED" \
               --argjson self "$SELF" \
               --argjson build "$build" \
-              '$lines | split("\n") | map(select(length > 0)) | map(split(" ")) | map({sha: .[0], delivering_run_id: $run, first_seen_at: $first_seen, merged_at: (if .[2] == $merge_committer then .[1] else null end), target: $target, queued_seconds: $queued, queued_self_seconds: $self, queued_pickup_seconds: null, queued_stall_seconds: null, build_seconds: $build, transition: $transition} + (if $measured == 1 then {carried: (.[0] != $head)} else {} end) + (if ($prev | length) > 0 then {previous_sha: $prev} else {} end) + (if ($serving | length) > 0 then {serving_since: $serving} else {} end))' > "$out"
+              '$lines | split("\n") | map(select(length > 0)) | map(split(" ")) | map({sha: .[0], delivering_run_id: $run, first_seen_at: $first_seen, merged_at: (if .[2] == $merge_committer then .[1] else null end), target: $target, queued_seconds: $queued, queued_self_seconds: $self, queued_pickup_seconds: null, queued_stall_seconds: null, build_seconds: $build, transition: $transition} + (if $measured == 1 then {carried: (.[0] != $head)} else {} end) + (if ($prev | length) > 0 then {previous_sha: $prev} else {} end) + (if ($serving | length) > 0 then {serving_since: $serving} else {} end) + (if ($serving | length) > 0 and ($serving_basis | length) > 0 then {serving_since_basis: $serving_basis} else {} end))' > "$out"
             if [ $? -ne 0 ]; then
               echo "::warning::${target}: the row payload could not be built — no row for this leg"
               printf '[]' > "$out"
@@ -1378,7 +1396,7 @@ jobs:
           printf '[]' > /tmp/pd-rows-cp.json
           printf '[]' > /tmp/pd-rows-instance.json
           if [ "$CP_RESULT" = "success" ] && [ -n "$CP_SERVED_SHA" ]; then
-            rows_for cp "$CP_PREVIOUS_SHA" "$CP_SERVING_SINCE" "$BUILD_CP" /tmp/pd-rows-cp.json "$CP_SERVED_SHA"
+            rows_for cp "$CP_PREVIOUS_SHA" "$CP_SERVING_SINCE" "$BUILD_CP" /tmp/pd-rows-cp.json "$CP_SERVED_SHA" "$CP_SERVING_SINCE_BASIS"
             if [ $? -ne 0 ]; then delivered=false; fi
           elif [ "$CP_RESULT" = "success" ]; then
             echo "control-plane deployed but could not be anchored — no cp row (delivered=false above)"
@@ -1386,7 +1404,7 @@ jobs:
             echo "control-plane result=${CP_RESULT} — no cp row"
           fi
           if [ "$INSTANCE_RESULT" = "success" ] && [ -n "$INSTANCE_SERVED" ]; then
-            rows_for instance "$INSTANCE_PREVIOUS_SHA" "$INSTANCE_SINCE" "$BUILD_INSTANCE" /tmp/pd-rows-instance.json "$INSTANCE_SERVED"
+            rows_for instance "$INSTANCE_PREVIOUS_SHA" "$INSTANCE_SINCE" "$BUILD_INSTANCE" /tmp/pd-rows-instance.json "$INSTANCE_SERVED" "$INSTANCE_SERVING_SINCE_BASIS"
             if [ $? -ne 0 ]; then delivered=false; fi
           elif [ "$INSTANCE_RESULT" = "success" ]; then
             echo "instance deployed but could not be anchored — no instance row (delivered=false above)"

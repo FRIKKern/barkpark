@@ -118,9 +118,11 @@ set -euo pipefail
 # Glob grammar, deliberately tiny: `dir/**` = that directory and everything
 # under it; anything else = one exact file path. No other wildcards.
 #
-#   cloud/**                              the app under gate
-#   .github/workflows/cloud.yml           a change to the shim runs the suite
-#   scripts/cloud-path-escape-check*.sh   likewise for the ratchet itself
+#   cloud/**                the app under gate
+#   .github/workflows/**    a change to the shim — or to any workflow the
+#                           censuses read — runs the suite
+#   scripts/**              likewise for the ratchet itself, and for every
+#                           script the caller corpus walks
 #
 # The two cross-tree entries are MEASURED reads, not guesses (see
 # --list-escapes):
@@ -128,9 +130,11 @@ set -euo pipefail
 #       cloud/test/…/providers_capabilities_contract_test.exs Path.expand()s the
 #       Go fixture and asserts BYTE EQUALITY against the served JSON. Edit the
 #       Go side alone and, unfiltered, the contract test never runs.
-#   scripts/async_env_seam_scan.exs
-#       cloud/test/…/async_global_seam_guard_test.exs Code.require_file()s the
-#       scanner and drives it. The scanner IS the code under test there.
+#   scripts/async_env_seam_scan.exs — RULING KEPT, ENTRY FOLDED into
+#       `scripts/**` below. cloud/test/…/async_global_seam_guard_test.exs
+#       Code.require_file()s the scanner and drives it. The scanner IS the code
+#       under test there, so this is still a MEASURED read; it is no longer a
+#       separate line because the directory glob already dispatches on it.
 #   internal/cloudclient/** — dr-w10-s4.
 #       cloud/test/…/payload_key_set_census_test.exs reads the Go package's
 #       `json:"…"` struct tags and censuses them AGAINST the Elixir serializers'
@@ -171,10 +175,12 @@ set -euo pipefail
 # so an api/test/** edit can in principle change what that scanner reports. It
 # is NOT declared, on purpose: an api/test/** trigger would run the whole Cloud
 # Elixir suite plus a Postgres service on every api-only PR — the shim would
-# cost precisely what it exists to save. The SCANNER is declared instead, which
-# covers every change to the scanning logic itself; what remains uncovered is a
-# new api/test fixture that the scanner would newly flag. That residue is named
-# here rather than left for a reader to discover.
+# cost precisely what it exists to save. That refusal was RE-MEASURED, not
+# inherited: see THE WIDENING below, where `api/**` was built, costed at 1438
+# newly-dispatching commits over 60 days, and held. The SCANNER is declared
+# instead, which covers every change to the scanning logic itself; what remains
+# uncovered is a new api/test fixture that the scanner would newly flag. That
+# residue is named here rather than left for a reader to discover.
 #
 # deploy/site-deploy.sh — cch-w27-s2. `sites_deploy_stage_caption_test.exs`
 # DERIVES its corpus from the box engine rather than typing it: it reads the
@@ -247,13 +253,15 @@ set -euo pipefail
 #       every root the arm walks appears here BY NAME. The arm asserts exactly
 #       that, which is what turns this block from a voluntary note into
 #       something that can lose: delete a root here and the Cloud suite reds.
-#   .github/workflows/deploy.yml is declared as an EXACT FILE, not
-#       `.github/workflows/**`. It is the only workflow the arm reads (the
-#       recorder seam), and the directory glob is both the expensive shape
-#       (D270: 145 newly-dispatching commits / 60 days) and one the harness pins
-#       against — cloud-path-escape-check.test.sh asserts elixir.yml does NOT
-#       match. Before this line a deploy.yml-only PR dispatched NOTHING in this
-#       set: the recorder could land, or vanish, with no code gate at all.
+#   .github/workflows/deploy.yml — RULING KEPT, ENTRY FOLDED into
+#       `.github/workflows/**` below. It is the workflow the arm reads (the
+#       recorder seam), and before it was declared at all a deploy.yml-only PR
+#       dispatched NOTHING in this set: the recorder could land, or vanish, with
+#       no code gate at all. It was declared as an EXACT FILE on the D270 cost
+#       argument and because the harness pinned exact-entry semantics THROUGH
+#       it; both of those are gone (see THE WIDENING below), and the arm walks
+#       the whole `.github/workflows` directory, so the honest declaration is
+#       the directory.
 #
 # internal/cli/cloud/dns.go, internal/cli/cloud/dns_cloud.go —
 # dr-w22-bl-internal-cli-trips-zero-required-gates. These two CLI-side DNS
@@ -292,18 +300,54 @@ set -euo pipefail
 # explicit, and the cloud/lib-reader arm below is what makes the design/-era
 # shape FATAL rather than covered.
 #
-# RESIDUE, named rather than left to be found: `scripts/` is represented here by
-# three EXACT files, not `scripts/**`, because the harness pins exact-entry
-# semantics through `scripts/async_env_seam_scan.exs.orig` and a directory glob
-# turns that case red (measured: 164 passed, 1 failed). So a caller added in a
-# NEW scripts/ file does not itself dispatch this suite. The direction is safe —
-# the arm keeps scoring that route caller-less until the next Cloud-dispatching
-# PR, i.e. a LATE red, never a false green — but it is a hole, and closing it
-# means widening the harness first.
+# THE WIDENING — dr-w26-s4-followup-widen-escape-harness. Two directory globs
+# replace what used to be four exact files plus a written-down hole:
+#
+#   scripts/**            THE CALLER CORPUS walks the whole `scripts` directory.
+#   .github/workflows/**  …and the whole `.github/workflows` directory.
+#       Represented by exact files, both roots dispatched only on the handful of
+#       paths that happened to be named: a caller added in a NEW scripts/ file,
+#       or in a workflow other than deploy.yml, did not itself re-run the arm
+#       that scores it. The direction was safe (a LATE red, never a false green)
+#       and it was still a hole — the corpus walks a DIRECTORY, so the honest
+#       declaration is a directory glob. An exact-file pin also rots the moment a
+#       caller moves one file over, and the arm then reports "caller-less" about
+#       a route that IS called: a FALSE RED that reads exactly like the true one.
+#       What used to block this: the harness pinned exact-entry prefix semantics
+#       THROUGH `scripts/async_env_seam_scan.exs.orig` and
+#       `.github/workflows/cloud.yml.bak`, so either glob turned case 6 red. Those
+#       probes now run on a synthetic set under `docs/prefix-probe/` that no
+#       widening can reach, which is what unblocked this line.
+#
+# THE COST OF THIS HALF, measured on this tree rather than assumed: over the last
+# 60 days / 5008 commits on main, these two globs newly dispatch 957 commits
+# (scripts/** 656, .github/workflows/** 301). D270 costed `.github/workflows/**`
+# at 145 newly-dispatching commits per 60 days; re-measured here it is 301, so
+# that figure was low by roughly a factor of two and the ratio it argued from
+# should not be re-used without re-measuring.
+#
+# RESIDUE, named rather than left to be found — api/**, web/**, js/** are
+# DELIBERATELY NOT DECLARED. `reader_less_instrument_census_test.exs`'s
+# `ReaderScan.roots/0` is five trees — internal, cloud/priv/static, web, js, api.
+# Two are covered (`internal/**`, and cloud/priv/static under `cloud/**`); the
+# other three are not, so a commit that ADDS a reader in api/, web/ or js/ — the
+# ROT direction, the GOOD direction — does not re-run the census that would
+# delete the stale row, and the red lands on some later cloud-touching commit.
+#
+# The three globs WERE built and costed on this tree before being held: they move
+# dispatch from 1641 to 3874 of 5008 commits over 60 days, i.e. 33% -> 77% of all
+# commits running the Postgres-backed Cloud `test` job, with `api/**` alone
+# accounting for 1438 of the 2233 newly-dispatching commits. D270's numbers are
+# an order of magnitude under that. Paying it here is the wrong SHAPE, not merely
+# the wrong price: the reader census does not need the whole Cloud suite
+# dispatched on an api-only PR, it needs ITSELF dispatched. So the remedy is
+# re-filed for the gates lane as a job-level path condition on that one test plus
+# a census-only tier in this script — re-filed for gates 2026-09-10. Until that
+# lands the gap is real, the direction is safe, and the measurement is written
+# down here so nobody re-derives it and reaches the same dead end.
 CLOUD_PATHS='cloud/**
 cloud/lib/**
-.github/workflows/cloud.yml
-.github/workflows/deploy.yml
+.github/workflows/**
 cloud/priv/audit-actions.json
 deploy/**
 deploy/site-deploy.sh
@@ -319,9 +363,7 @@ api/test/support/totp_test_helper.ex
 api/lib/barkpark_web/controllers/site_deploy_controller.ex
 api/test/support/fixtures/box_capacity_refusal.json
 js/packages/create-barkpark-app/templates/**
-scripts/async_env_seam_scan.exs
-scripts/cloud-path-escape-check.sh
-scripts/cloud-path-escape-check.test.sh
+scripts/**
 templates/**
 templates/astro-search-starter/src/lib/bp.ts
 templates/search-starter/lib/markers.corpus-status.test.ts'

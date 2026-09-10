@@ -573,8 +573,61 @@ defmodule PDS.Census do
     # reaches the fenced write. Conserved rows unmoved (textual 109 / ast 100 / phantom 9 /
     # consumer 4 / emitted 96 / unrouted 12); the route closes at 10 as before. Reverting the
     # three adopt files alone returns all eight rows to == (proven in the PR).
-    write: 60,
-    read: 26,
+    # RE-DERIVED AGAIN 2026-09-10 at acrc-dedup-toctou-serialize (PR #17321, the
+    # publish/dedup cross-doc_id scope lock): 60 -> 57 and 26 -> 29. Wrapping the
+    # paper-birth row write in `Broadcast.write_atomically/1` inserted ONE closure hop
+    # between `BlockOps.persist_blocks_doc`'s callers and the `Repo.insert`/`Repo.update`
+    # that used to sit in the same def — `persist_blocks_doc_serialized/9` ->
+    # write_atomically's `fn` -> `write_blocks_doc_row/7`. THREE receipts downstream of
+    # that write can no longer reach a write verb inside the depth-6 budget and land in
+    # the READ class; `emitted` (98), `phantom` (9), `consumer` (4) and `unrouted` (12)
+    # all read `==` in the same run, so the three did NOT fall out of the route relation
+    # — exactly the shape task-a0ce4e18f6776400 and #16147 recorded above, and a row that
+    # did not move is evidence too.
+    #
+    # THE THREE, NAMED — from `--sites` diffed against origin/main (603a0531e), not from
+    # reading the patch:
+    #   barkpark_web/controllers/bulldocs_ingest_controller.ex:492
+    #       BulldocsIngestController.sync_create_persist/6   [WRITE d6] -> [READ]
+    #   barkpark_web/controllers/bulldocs_ingest_controller.ex:783
+    #       BulldocsIngestController.ingest_blocks/4         [WRITE d6] -> [READ]
+    #   barkpark_web/controllers/bulldocs_ingest_controller.ex:925
+    #       BulldocsIngestController.ingest_html_write/2     [WRITE d6] -> [READ]
+    #
+    # THE FOURTH SITE IS THE CONTROL, and it is why the cause is ONE HOP and not three
+    # broken routes: `bulldocs_ingest_controller.ex:1013`
+    # (`BulldocsIngestController.ingest_session/2`) moved [WRITE d5] -> [WRITE d6]. It had
+    # one depth of slack, spent it, and stayed in the write class. The census's own depth
+    # table says the same thing from the other side: write-routed reads 57 @6 here against
+    # 60 @6 on main, and 62 @7 here — the budget, not the code.
+    #
+    # ISOLATED BY RUN, never by reading the diff: reverting ONLY
+    # api/lib/barkpark/content/papers/block_ops.ex to its origin/main bytes and re-running
+    # the census printed all eight rows `==` and CENSUS OK at rc 0. The PR's other three
+    # lib files move NOTHING — lifecycle.ex, dedup_wall.ex and authoring_wall.ex each add
+    # code that holds no `ok: true` literal and sits on no receipt's route to a Repo verb;
+    # its test file is outside the corpus (api/lib/**/*.ex) entirely.
+    #
+    # WHAT WAS *NOT* DONE, DELIBERATELY — the same ruling task-a0ce4e18f6776400 wrote
+    # above. The hop is removable: inlining the row write back into
+    # `persist_blocks_doc_serialized/9` would keep the baseline at 60/26. But the closure
+    # is not decoration — `write_atomically/1` owns the deferred-broadcast queue and the
+    # commit shape, and the split is what keeps the paper-birth broadcast tail AFTER
+    # commit (the defect independent review caught on this same PR). Restructuring the FIX
+    # to flatter the LENS is editing the literal blind wearing better clothes. The three
+    # receipts still reach the same write; only this census's depth budget stopped seeing
+    # it, and PDS-D480 already ruled the depth is a compliance dial, not a claim about the
+    # code.
+    #
+    # DERIVED BY THE INSTRUMENT ITSELF, not typed from memory: these two numbers are the
+    # `derived` half of this census's own D448-DRIFT-REFUSES line, run from the repo root
+    # on the tree this commit ships, amended in the SAME commit as the change that moved
+    # them (PDS-D448a). Lens unchanged (build-free AST, :binary.matches/2 substring
+    # counts, route depth 6, @write_verbs without `transaction`, corpus api/lib/**/*.ex).
+    # Engine printed live by that run:
+    #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
+    write: 57,
+    read: 29,
     unrouted: 12
   }
 

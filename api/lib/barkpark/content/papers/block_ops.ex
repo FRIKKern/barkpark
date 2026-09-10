@@ -478,7 +478,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # content type. Threading `type` through here is safe by construction.
     case enforce_blocks_wall(type, content, title, existing, dataset, slug, scope_attrs, opts) do
       {:ok, content} ->
-        persist_blocks_doc(
+        persist_blocks_doc_serialized(
           type,
           content,
           attrs,
@@ -495,9 +495,120 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  # The Repo write + broadcast tail, reached only once the wall passed (or an
-  # audited caller bypassed it).
-  defp persist_blocks_doc(type, content, attrs, existing, dataset, slug, scope_attrs, title, opts) do
+  # ── THE CROSS-doc_id TOCTOU CLOSE, paper-birth leg (acrc-dedup-toctou-serialize) ──
+  #
+  # `enforce_blocks_wall/8` ran E4 above, OUTSIDE any transaction, so its
+  # verdict describes a corpus nothing is holding still. Two paper births with
+  # DIFFERENT slugs and near-duplicate titles both pass it (each is excluded
+  # from its own candidate scan by `d.doc_id != incumbent`, and neither row
+  # exists yet for the other to see) and both then commit the duplicate pair
+  # the wall exists to refuse.
+  #
+  # The per-slug `pg_advisory_xact_lock` on `upsert_blocks_doc/3`'s non-paper
+  # leg does NOT cover this: two different slugs hash to two different keys, so
+  # the two writers never meet. The key here is the SCOPE, not the row —
+  # `DedupWall.publish_scope_lock_key/3`, shared byte-for-byte with the
+  # lifecycle publish path so a paper born through ingest and one born through
+  # a lifecycle publish serialize against EACH OTHER, not merely within their
+  # own door.
+  #
+  # `bypass_wall: true` (audited call sites only) skips the re-check exactly as
+  # it skips `enforce_blocks_wall/8` — an unwalled write must stay byte-identical
+  # to the pre-mount behaviour, and it must not pay for a lock it never needed.
+  # The transaction still opens: `persist_blocks_doc/10`'s single Repo write is
+  # the only thing inside it, so an unwalled write is one extra BEGIN/COMMIT and
+  # no lock at all.
+  defp persist_blocks_doc_serialized(
+         type,
+         content,
+         attrs,
+         existing,
+         dataset,
+         slug,
+         scope_attrs,
+         title,
+         opts
+       ) do
+    scope = paper_scope(existing, scope_attrs)
+
+    ref = %Document{
+      doc_id: slug,
+      type: type,
+      dataset: dataset,
+      title: title,
+      content: content,
+      workspace_id: scope[:workspace_id],
+      project_id: scope[:project_id]
+    }
+
+    lock_opts =
+      opts
+      |> Keyword.put(:workspace_id, scope[:workspace_id])
+      |> Keyword.put(:project_id, scope[:project_id])
+
+    # ONLY THE ROW WRITE IS INSIDE THE BOUNDARY, and that is the whole design.
+    # Before this change `persist_blocks_doc/10` ran with NO transaction open,
+    # so all four of its tail calls ran after the row was durable. The first
+    # draft of this fix wrapped the whole function and silently moved them
+    # PRE-commit — caught in independent review (lead-api-r4), and each one is
+    # a different hazard, so name them individually:
+    #
+    #   * `broadcast_paper_update/1` — a RAW `Phoenix.PubSub.broadcast`, NOT
+    #     routed through `Broadcast.maybe_broadcast/2`. `write_atomically/1`
+    #     defers and flushes the queued kind; it cannot defer this one. Fired
+    #     pre-commit, a subscriber that refetches on the message reads the OLD
+    #     paper. RUNS AFTER COMMIT.
+    #   * `enqueue_edge_projection/1` → `ProjectorWorker.enqueue_upsert/3` →
+    #     `Oban.insert/1`. It would RIDE the transaction (correct, and rolled
+    #     back with it) — but a debounced job scheduled for state a later arm
+    #     could still doom is not worth the coupling. RUNS AFTER COMMIT.
+    #   * `save_upsert_revision/5` → `Broadcast.save_revision/5`, which already
+    #     handles `in_transaction?` with a savepoint, so it was safe either
+    #     way. RUNS AFTER COMMIT, unchanged from before.
+    #   * `maybe_append_paper_event/3` → `Bulldocs.Events.create_event/1`,
+    #     whose own broadcast would be QUEUED by `maybe_broadcast/2` inside a
+    #     transaction and then DROPPED, because nothing flushes the queue of a
+    #     boundary this function does not own. RUNS AFTER COMMIT.
+    #
+    # `Broadcast.write_atomically/1` rather than a bare `Repo.transaction`: it
+    # is the house helper that owns the deferred-broadcast queue on any write
+    # that DOES route through `maybe_broadcast/2`, it commits on
+    # `{:ok, %Document{}}` and returns any other term UNCHANGED after rolling
+    # back — so the `{:error, changeset}` arm keeps its exact shape and no
+    # longer commits an empty transaction. When a transaction is already open
+    # (the non-paper leg's per-slug lock) it runs the function as is.
+    written =
+      Broadcast.write_atomically(fn ->
+        with :ok <- recheck_dedup(ref, type, slug, dataset, lock_opts, opts) do
+          write_blocks_doc_row(type, content, existing, dataset, slug, scope_attrs, title)
+        end
+      end)
+
+    case written do
+      {:ok, %Document{} = doc} ->
+        persist_blocks_doc_tail(doc, attrs, type, dataset, slug, existing, opts)
+
+      other ->
+        other
+    end
+  end
+
+  # `bypass_wall: true` (audited call sites only) skips the re-check exactly as
+  # it skips `enforce_blocks_wall/8` — an unwalled write must stay
+  # byte-identical to the pre-mount behaviour, and it must not pay for a lock
+  # it never needed.
+  defp recheck_dedup(ref, type, slug, dataset, lock_opts, opts) do
+    if Keyword.get(opts, :bypass_wall, false) do
+      :ok
+    else
+      AuthoringWall.recheck_dedup_under_scope_lock(ref, type, slug, dataset, lock_opts)
+    end
+  end
+
+  # The Repo write, reached only once the wall passed (or an audited caller
+  # bypassed it). Runs INSIDE the publish-scope lock's transaction; everything
+  # that used to follow it lives in `persist_blocks_doc_tail/7`, after commit.
+  defp write_blocks_doc_row(type, content, existing, dataset, slug, scope_attrs, title) do
     doc_attrs = %{
       "doc_id" => slug,
       "type" => type,
@@ -529,25 +640,27 @@ defmodule Barkpark.Content.Papers.BlockOps do
         Repo.insert(changeset)
       end
 
-    case result do
-      {:ok, doc} ->
-        save_upsert_revision(doc, type, dataset, existing, opts)
-        broadcast_paper_update(doc)
-        enqueue_edge_projection(doc)
-        # P6.U1: append a goal-path lifecycle event ALONGSIDE the paper save,
-        # gated strictly on a present `event_type` so ordinary streaming saves
-        # never create events. The paper save is the source of truth — an
-        # event-insert failure is logged and swallowed, never propagated.
-        #
-        # W1.5-C: the event FOLLOWS the paper's (goal's) scope — stamp it with
-        # the saved doc's resolved workspace/project (Default fallback already
-        # applied to the doc above) so a goal's events share the goal's scope.
-        maybe_append_paper_event(attrs, slug, doc)
-        {:ok, doc}
+    result
+  end
 
-      error ->
-        error
-    end
+  # The broadcast/projection/history tail. Reached ONLY on a committed row —
+  # `write_atomically/1` has returned, so `Repo.in_transaction?()` is false here
+  # and every one of these runs against durable state, exactly as it did before
+  # the publish-scope lock existed.
+  defp persist_blocks_doc_tail(%Document{} = doc, attrs, type, dataset, slug, existing, opts) do
+    save_upsert_revision(doc, type, dataset, existing, opts)
+    broadcast_paper_update(doc)
+    enqueue_edge_projection(doc)
+    # P6.U1: append a goal-path lifecycle event ALONGSIDE the paper save,
+    # gated strictly on a present `event_type` so ordinary streaming saves
+    # never create events. The paper save is the source of truth — an
+    # event-insert failure is logged and swallowed, never propagated.
+    #
+    # W1.5-C: the event FOLLOWS the paper's (goal's) scope — stamp it with
+    # the saved doc's resolved workspace/project (Default fallback already
+    # applied to the doc above) so a goal's events share the goal's scope.
+    maybe_append_paper_event(attrs, slug, doc)
+    {:ok, doc}
   end
 
   # [paper-upsert-unlogged-clobber] Record the version-history row for a paper

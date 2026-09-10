@@ -1502,7 +1502,18 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # one does not). RE-MEASURED by the PIN CO-EDIT arm on the tree REBASED onto
   # #17317 ("@emitted_pinned 170 -> 171") — never summed with the pre-rebase
   # delta, which was measured against a main that had not yet grown `vocabulary`.
-  @emitted_pinned 171
+  # 171 -> 172 (dr-w29-bl-serving-since-has-no-basis-column): `to_json/1` on
+  # PlatformDelivery gains ONE key, `serving_since_basis` — WHICH CLOCK produced
+  # that row's `serving_since` (process_start on the cp leg, an upper bound a
+  # bare restart moves forward; deploy_flip_mtime on the instance leg, the flip
+  # instant). This branch's own +1, and ONLY +1: `to_json/1` gains a single flat
+  # STRING key, no interior node.
+  # RE-MEASURED 2026-09-10 by the PIN CO-EDIT arm on THIS tree merged with
+  # origin/main at ff214d4faabd74d14e20ff3efc75419625f1a151
+  # ("@emitted_pinned 171 -> 172"). The pre-merge
+  # measurement said 170 -> 171 and is VOID: it was taken against a main that had
+  # not yet grown `abandoned_basis` (#17352). Never summed with that delta.
+  @emitted_pinned 172
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -1699,7 +1710,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # RE-MEASURED by the PIN CO-EDIT arm on the tree REBASED onto #17317
   # ("@go_tag_pinned 362 -> 363") — the pre-rebase measurement said 359 -> 360
   # and is void: it was taken against a main without `DeployVocabulary`.
-  @go_tag_pinned 363
+  # 363 -> 364 (dr-w29-bl-serving-since-has-no-basis-column):
+  # `cloudclient.PlatformDelivery` declares ONE new tag, `serving_since_basis`,
+  # and the name is new to the whole union — no other struct in the tree carries
+  # it, so it moves BOTH this pin and one site. This branch's own +1.
+  # RE-MEASURED 2026-09-10 by the PIN CO-EDIT arm on THIS tree merged with
+  # origin/main at ff214d4faabd74d14e20ff3efc75419625f1a151
+  # ("@go_tag_pinned 363 -> 364"). The pre-merge
+  # measurement said 362 -> 363 and is VOID: it was taken against a main without
+  # `abandoned_basis` (#17352). Never summed with that delta.
+  @go_tag_pinned 364
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2934,7 +2954,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # MEASURED, not derived: the SERIALIZER-SIDE arm's un-allowlisted run printed
   # `29 unserialized column(s)` and the SCHEMA-SIDE arm printed
   # `112 schema column(s) collected`.
-  @schema_field_floor 112
+  # 112 -> 113 (dr-w29-bl-serving-since-has-no-basis-column): the
+  # `platform_deliveries` schema gains `serving_since_basis` — this branch's own
+  # +1. `@schema_unserialized_floor` does NOT move off main's 29: the column is
+  # emitted by `PlatformDelivery.to_json/1` in the same commit that declares it.
+  # RE-MEASURED 2026-09-10 on THIS tree merged with origin/main at
+  # ff214d4faabd74d14e20ff3efc75419625f1a151: the SCHEMA-SIDE arm printed `113 schema column(s) collected`. The pre-merge
+  # measurement said 111 and is VOID — it was taken against a main without the
+  # deferral-pacing pair (#17305).
+  @schema_field_floor 113
   @schema_unserialized_floor 29
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:
@@ -3922,13 +3950,27 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
                "a PR editing it would SKIP the Cloud gate that runs this census"
     end
 
-    # The four entries dr-w26-s4 added, by name. `.github/workflows/deploy.yml`
-    # is the one that matters most: before it, a deploy.yml-only PR dispatched
-    # NOTHING in this set, so the recorder could land — or vanish — with no code
-    # gate at all.
-    for entry <- ["cloud/lib/**", "deploy/**", "internal/**", ".github/workflows/deploy.yml"] do
+    # The four entries dr-w26-s4 added, by name — the workflow one now as the
+    # DIRECTORY it became. `.github/workflows/deploy.yml` is the entry that
+    # mattered most: before it, a deploy.yml-only PR dispatched NOTHING in this
+    # set, so the recorder could land — or vanish — with no code gate at all. It
+    # was folded into `.github/workflows/**` by
+    # dr-w26-s4-followup-widen-escape-harness, because this arm walks the WHOLE
+    # `.github/workflows` directory and an exact-file pin rots the moment a
+    # caller moves one file over. The glob is strictly stronger here: it still
+    # covers deploy.yml, and it also covers the next workflow the corpus reads.
+    for entry <- ["cloud/lib/**", "deploy/**", "internal/**", ".github/workflows/**"] do
       assert entry in declared, "CLOUD_PATHS lost #{entry} — dr-w26-s4's declaration"
     end
+
+    # …and the ruling the fold must not have thrown away: whatever shape the
+    # entry takes, a deploy.yml-only PR still dispatches this suite.
+    assert Enum.any?(
+             declared,
+             &(&1 == ".github/workflows/deploy.yml" or &1 == ".github/workflows/**")
+           ),
+           "nothing in CLOUD_PATHS dispatches on .github/workflows/deploy.yml — the recorder " <>
+             "seam this arm scores can land, or vanish, with no code gate at all"
   end
 
   defp fmt_routes(set) do

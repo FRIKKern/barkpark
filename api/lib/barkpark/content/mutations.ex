@@ -163,9 +163,132 @@ defmodule Barkpark.Content.Mutations do
     rescue
       e ->
         Broadcast.clear_deferred_broadcasts()
-        reraise(e, __STACKTRACE__)
+
+        case classify_search_vector_overflow(e, mutations) do
+          {:ok, reason} -> {:error, reason}
+          :no -> reraise(e, __STACKTRACE__)
+        end
     end
   end
+
+  # ── The tsvector cap is a CALLER fault, not an engine fault ────────────────
+  #
+  # `documents.search_vector` is a GENERATED ALWAYS ... STORED column (migration
+  # 20260614220000_search_vector_fields — NOT the 20260526181000 original, which
+  # has since been dropped and re-added twice). It folds `title` plus every
+  # string value in the `content` jsonb through `to_tsvector`/`jsonb_to_tsvector`.
+  # Postgres caps ONE tsvector at 1 048 575 bytes; past that the INSERT raises
+  # `Postgrex.Error` SQLSTATE 54000 (`:program_limit_exceeded`) from inside the
+  # transaction. Nothing rescued it, so it escaped `apply_mutations/3` and
+  # Phoenix's RenderErrors rendered a bare 500 `internal_error` — which tells the
+  # caller to RETRY a request that will fail identically forever, and books a
+  # client mistake against the server's error rate. Measured live on guerrilla
+  # 2026-09-10 (task-655f368ae5c72120): an 800 000-byte high-entropy body → 500.
+  #
+  # It is translated HERE, not in `MutateController`, for two reasons:
+  #
+  #   * the exception is raised by the WRITER, and every caller of
+  #     `apply_mutations/3` (the HTTP mutate door, the plugin write paths, the
+  #     Studio's LiveView saves) inherits the typed refusal instead of only the
+  #     one door a controller rescue would cover;
+  #   * this rescue already exists — it is the deferred-broadcast cleanup — and
+  #     the `{:error, reason}` shape it now returns is exactly what the door
+  #     already routes through `Content.Errors.to_envelope/2`. No new seam.
+  #
+  # NARROW BY CONSTRUCTION: only SQLSTATE 54000 whose message names `tsvector`
+  # is claimed. Every other `Postgrex.Error` — and every other exception — is
+  # reraised byte-identically, so no real engine fault is laundered into a 4xx.
+  #
+  # WHY 422 AND NOT 413: the cap is on the DERIVED tsvector, not on the request.
+  # A 2 000 000-byte LOW-entropy body succeeds while an 800 000-byte high-entropy
+  # one fails, so `payload_too_large` ("reduce the request body — it exceeds the
+  # maximum allowed size") would be an actively false instruction. 422 is this
+  # codebase's slot for "well-formed, but I cannot act on it as sent"
+  # (`workspace_scope_required`, `batch_too_large`, `create_wall`).
+  @tsvector_limit_bytes 1_048_575
+
+  defp classify_search_vector_overflow(
+         %Postgrex.Error{postgres: %{code: :program_limit_exceeded, message: message}},
+         mutations
+       )
+       when is_binary(message) do
+    if String.contains?(message, "tsvector") do
+      {:ok, {:searchable_text_too_large, @tsvector_limit_bytes, largest_text_field(mutations)}}
+    else
+      :no
+    end
+  end
+
+  defp classify_search_vector_overflow(_e, _mutations), do: :no
+
+  # WHICH field overflowed. Postgres reports only a total byte count, so the
+  # culprit is located from the payload the caller actually sent: the longest
+  # string value across the batch, named by its `<doc id>` and JSON-pointer path.
+  # That is a heuristic and the envelope's message says so — but it is the one
+  # datum that turns "something in your write was too big" into an edit the
+  # caller can make. Returns nil when the batch carries no string worth naming.
+  defp largest_text_field(mutations) when is_list(mutations) do
+    mutations
+    |> Enum.flat_map(&mutation_payloads/1)
+    |> Enum.flat_map(fn payload ->
+      doc_id = payload["_id"] || payload[:_id]
+      payload |> strings_with_paths("") |> Enum.map(fn {path, len} -> {doc_id, path, len} end)
+    end)
+    |> case do
+      [] -> nil
+      candidates -> candidates |> Enum.max_by(fn {_id, _path, len} -> len end) |> drop_length()
+    end
+  end
+
+  defp largest_text_field(_), do: nil
+
+  defp drop_length({doc_id, path, bytes}), do: %{document: doc_id, field: path, bytes: bytes}
+
+  # A mutation is `%{"createOrReplace" => payload}` etc.; a `patch` nests the
+  # document body one level deeper under `set`/`setIfMissing`/`append`/….
+  defp mutation_payloads(mutation) when is_map(mutation) do
+    Enum.flat_map(mutation, fn
+      {_op, %{} = payload} ->
+        nested =
+          payload
+          |> Map.take(["set", "setIfMissing", "append", "prepend", "unset", "inc", "dec"])
+          |> Map.values()
+          |> Enum.filter(&is_map/1)
+
+        [payload | nested]
+
+      _ ->
+        []
+    end)
+  end
+
+  defp mutation_payloads(_), do: []
+
+  # Every string leaf of a payload, keyed by JSON pointer. Keys that begin with
+  # `_` (`_id`, `_type`, `_rev`) are skipped: they are identity, never body, and
+  # `title`/`content.*` are what the generated column actually reads.
+  defp strings_with_paths(%{} = map, prefix) do
+    Enum.flat_map(map, fn {key, value} ->
+      key = to_string(key)
+
+      if String.starts_with?(key, "_") do
+        []
+      else
+        strings_with_paths(value, prefix <> "/" <> key)
+      end
+    end)
+  end
+
+  defp strings_with_paths(list, prefix) when is_list(list) do
+    list
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {value, idx} ->
+      strings_with_paths(value, prefix <> "/" <> to_string(idx))
+    end)
+  end
+
+  defp strings_with_paths(value, prefix) when is_binary(value), do: [{prefix, byte_size(value)}]
+  defp strings_with_paths(_value, _prefix), do: []
 
   # ── The `duplicate_of` compensation, OUTSIDE the batch transaction ─────────
   #

@@ -156,6 +156,75 @@ defmodule Barkpark.Content.AuthoringWall do
   end
 
   @doc """
+  Re-run E4 ALONE, inside the caller's transaction, under the publish-scope
+  advisory lock — the cross-doc_id TOCTOU close (acrc-dedup-toctou-serialize).
+
+  `enforce/5` runs the whole wall BEFORE the write transaction opens, and must:
+  it is where the author-fixable 422s and the terminal 409 are decided, where
+  the exemption ratchet is spent, and where the `before_publish` hook seam sits.
+  But a gate that runs before a transaction opens says nothing about the state
+  at COMMIT. Two publishes with DIFFERENT doc_ids and near-duplicate titles both
+  pass `enforce/5` at t0 (each is excluded from its own candidate scan, neither
+  is committed when the other looks) and both commit — the duplicate pair the
+  wall exists to refuse.
+
+  This is the second half of that contract, and the ORDER inside it is the whole
+  mechanism:
+
+    1. `DedupWall.lock_publish_scope!/3` — taken FIRST, on the (type, workspace,
+       dataset) scope, and held to commit/rollback by `pg_advisory_xact_lock`.
+    2. `DedupWall.guard/4` — the SAME verdict `enforce/5` computed, recomputed
+       against the corpus as it stands now that this transaction owns the scope.
+
+  A concurrent publish in the same scope is therefore either fully committed
+  before this scan runs (and is SEEN, so this one is refused with the ordinary
+  `{:error, {:duplicate_of, _}}`) or blocked at step 1 until this one commits
+  (and sees it, and is refused). There is no interleaving in which both pass.
+
+  MUST be called inside an open transaction. Outside one, `pg_advisory_xact_lock`
+  acquires and releases within the single statement and serializes nothing —
+  silently, which is why both call sites take it as the first statement inside
+  their `Repo.transaction`.
+
+  Returns `:ok`, or the raw `{:error, {:duplicate_of, payload}}` /
+  `{:error, {:dedup_unavailable, message}}` tuple, telemetry emitted at the same
+  seam `enforce/5` uses. Non-walled types and grandfathered docs are `:ok`
+  without taking the lock — they never reach E4 through `enforce/5` either, so
+  locking for them would be pure throughput cost.
+  """
+  @spec recheck_dedup_under_scope_lock(
+          Document.t() | map(),
+          String.t(),
+          String.t() | nil,
+          String.t(),
+          keyword()
+        ) ::
+          :ok | {:error, {:duplicate_of, map()} | {:dedup_unavailable, String.t()}}
+  def recheck_dedup_under_scope_lock(ref, type, pid, dataset, opts \\ [])
+
+  def recheck_dedup_under_scope_lock(ref, type, pid, dataset, opts)
+      when type in @walled_types do
+    exempt? = is_binary(pid) and Exemptions.member?(pid, dataset)
+
+    if exempt? do
+      :ok
+    else
+      :ok = DedupWall.lock_publish_scope!(type, dataset, opts)
+
+      case DedupWall.guard(ref, type, dataset, Keyword.put(opts, :dedup_in_transaction, true)) do
+        :ok ->
+          :ok
+
+        {:error, {code, _}} = error when code in [:duplicate_of, :dedup_unavailable] ->
+          emit_wall_rejection(code, type, dataset)
+          error
+      end
+    end
+  end
+
+  def recheck_dedup_under_scope_lock(_ref, _type, _pid, _dataset, _opts), do: :ok
+
+  @doc """
   Dry-run the whole wall and return EVERY failing gate at once (BPML
   masterplan W0's validate-all): where `enforce/5` is a `with` chain that
   stops at the first refusal — correct for a real write — this runs each gate

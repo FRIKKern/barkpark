@@ -42,6 +42,34 @@
 # This hardening makes an advisory security guard honest; it does not make it
 # blocking.
 #
+# SCAN SET: `*.ex` AND `*.exs` under the scan root (default api/lib), decided
+# 2026-09-10 (row cgsi-bl-s7-tenant-scope-exs-blindspot). The walk used to be
+# `fn.endswith(".ex")`, which is FALSE for `foo.exs` — so an identical fail-open
+# `scope_to_workspace_or_global/3` call, or a by-PK `Repo.get(Document, id)`,
+# written in a `.exs` under api/lib was invisible to this gate forever. Widening
+# the walk is the SAFE direction for a security scanner (it can only add reds),
+# and it was free: `find api/lib -name '*.exs' | wc -l` = 0 on 2026-09-10, so
+# closing the hole moved the baseline by nothing. A `.ex`/`.exs` split would have
+# been a rule the next author has to know; there is no reason a fail-open tenant
+# read is safer because the file compiles at runtime instead of at build time.
+#
+# ACCEPTED OVER-MATCH (decided 2026-09-10, same row): the scanner strips only
+# `@doc`/`@moduledoc` heredocs, so a fail-open function name written inside a
+# PLAIN heredoc or a string literal — `"""\n never call
+# scope_to_workspace_or_global(q, nil) \n"""` — still counts as a hit and reds
+# the gate. This is a FALSE RED, and it is ACCEPTED, not fixed. Narrowing a
+# security scanner is the risky direction: every string-position exclusion is a
+# new place to hide a real call (Elixir has `#{}` interpolation, sigils, nested
+# heredocs and `Code.eval_string/1`, so "it is in a string" is not the same as
+# "it does not run"). The harm is bounded and self-announcing: the author sees
+# the file:line, and the escape hatch is one reviewed `# global-read: <reason>`
+# comment — the SAME hatch a real deliberate read uses, so a waiver on prose is
+# greppable and reviewable rather than silent. Do NOT narrow this without a
+# control proving a real fail-open call in a string-ADJACENT position still reds;
+# the --selftest's four out-of-position marker shapes (red/marker-below-the-read,
+# red/marker-in-another-function, red/marker-in-moduledoc-heredoc,
+# red/marker-last-line-of-plain-heredoc) are the pins that must survive it.
+#
 # Modeled on scripts/studio-literal-check.sh (Python scanner + allowlist + a
 # per-line annotation escape hatch). bash 3.2 compatible.
 #
@@ -149,6 +177,68 @@ EX
   fi
   rm -f "$TMP/lib/barkpark/content/leak.ex"
   bash "$SELF" >/dev/null 2>&1 || fail_selftest "tree did not return to green after removing the planted leak"
+
+  # --- .exs is IN the scan set (2026-09-10, cgsi-bl-s7-tenant-scope-exs-blindspot)
+  # The walk used to be `fn.endswith(".ex")`, which is FALSE for `foo.exs`: the
+  # three probes below all passed GREEN before the widening. They are the control
+  # that the scan set never silently narrows back to `.ex` only.
+  EXS="$TMP/lib/barkpark/content/leak_script.exs"
+
+  # (d) a NEW unjustified fail-open read in a .exs → must RED, naming the .exs file.
+  cat > "$EXS" <<'EX'
+defmodule Demo.LeakScript do
+  def read(q) do
+    q |> Scope.scope_to_workspace_or_global(nil, nil)
+  end
+end
+EX
+  if bash "$SELF" >/dev/null 2>&1; then
+    fail_selftest "a NEW unjustified fail-open read in a .exs did NOT red the gate"
+  fi
+  exs_out="$(bash "$SELF" 2>&1 || true)"
+  case "$exs_out" in
+    *"leak_script.exs:3"*) ;;
+    *) fail_selftest "the .exs red did not name leak_script.exs:3 (got: $exs_out)" ;;
+  esac
+
+  # (e) the SAME .exs read, justified → must PASS (the waiver hatch works in .exs).
+  cat > "$EXS" <<'EX'
+defmodule Demo.LeakScript do
+  def read(q) do
+    # global-read: selftest — deliberate cross-tenant read in a script file
+    q |> Scope.scope_to_workspace_or_global(nil, nil)
+  end
+end
+EX
+  bash "$SELF" >/dev/null 2>&1 || fail_selftest "a justified (# global-read:) read in a .exs did NOT pass"
+
+  # (f) a NEW by-PK Repo.get(Document, id) in a .exs → must RED.
+  cat > "$EXS" <<'EX'
+defmodule Demo.LeakScript do
+  def read(id), do: Repo.get(Document, id)
+end
+EX
+  if bash "$SELF" >/dev/null 2>&1; then
+    fail_selftest "a NEW by-PK Repo.get(Document, id) in a .exs did NOT red the gate"
+  fi
+  rm -f "$EXS"
+  bash "$SELF" >/dev/null 2>&1 || fail_selftest "tree did not return to green after removing the planted .exs leak"
+
+  # A scan root holding ONLY .exs files is a real scan, not an empty one: the
+  # ex_files==0 "broken gate" guard must NOT fire when the sources are scripts.
+  ONLY_EXS="$TMP/only-exs"
+  mkdir -p "$ONLY_EXS/barkpark"
+  cat > "$ONLY_EXS/barkpark/only.exs" <<'EX'
+defmodule Demo.OnlyExs do
+  def read(q, ws, proj), do: Scope.scope_to_workspace_or_global(q, ws, proj)
+end
+EX
+  only_out="$(TENANT_SCOPE_LIB="$ONLY_EXS" bash "$SELF" 2>&1 || true)"
+  case "$only_out" in
+    *"holds no *.ex"*) fail_selftest "a scan root of only .exs files was reported as empty: $only_out" ;;
+    *"only.exs:2"*) ;;
+    *) fail_selftest "a .exs-only scan root neither red on its planted read nor named it (got: $only_out)" ;;
+  esac
 
   # --- the waiver is a COMMENT, not a substring -------------------------------
   # Each probe plants ONE file holding a live, unbaselined fail-open read plus a
@@ -381,7 +471,7 @@ EX
   set -e
   [ "$unknown_rc" = "2" ] || fail_selftest "an unknown argument exited $unknown_rc, expected 2"
 
-  echo "tenant-scope-check --selftest: PASS — gate reds on new fail-open + by-PK reads and on all 5 marker spoofs + 4 out-of-position markers + a missing/empty scan root; passes when genuinely justified (15 live marker forms + inline waiver); unknown args exit 2."
+  echo "tenant-scope-check --selftest: PASS — gate reds on new fail-open + by-PK reads in BOTH .ex and .exs and on all 5 marker spoofs + 4 out-of-position markers + a missing/empty scan root; passes when genuinely justified (15 live marker forms + inline waiver + a .exs waiver); a .exs-only scan root is a real scan; unknown args exit 2."
   exit 0
 fi
 
@@ -570,12 +660,15 @@ if not os.path.isdir(lib):
           "  not a clean tree." % lib)
     sys.exit(1)
 
-# Walk api/lib/**/*.ex, collect non-exempt occurrences.
+# Walk api/lib/**/*.{ex,exs}, collect non-exempt occurrences.
 ex_files = 0
 occurrences = []  # (rel, kind, norm, lineno)
 for dirpath, _dirs, files in os.walk(lib):
     for fn in sorted(files):
-        if not fn.endswith(".ex"):
+        # `.ex` AND `.exs`: `endswith(".ex")` alone is FALSE for `foo.exs`, and a
+        # fail-open tenant read is no safer for living in a script file. See the
+        # SCAN SET note in the script header (2026-09-10).
+        if not (fn.endswith(".ex") or fn.endswith(".exs")):
             continue
         ex_files += 1
         path = os.path.join(dirpath, fn)
@@ -586,7 +679,7 @@ for dirpath, _dirs, files in os.walk(lib):
             occurrences.append((rel, kind, norm, lineno))
 
 if ex_files == 0:
-    print("tenant-scope-check: FAILED — scan root holds no *.ex files: %s\n"
+    print("tenant-scope-check: FAILED — scan root holds no *.ex/*.exs files: %s\n"
           "  The gate scanned nothing. An empty scan root is a broken gate, not\n"
           "  a clean tree." % lib)
     sys.exit(1)
