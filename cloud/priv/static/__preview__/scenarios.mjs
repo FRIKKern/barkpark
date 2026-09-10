@@ -5248,6 +5248,46 @@ export const SCENARIOS = {
       accountSessions: accountSessions,
     },
   },
+  // cch-w39-s2-fu — THE UNKNOWN ARM, AS A BROWSER-REACHABLE STATE.
+  // cch-w39-s2 shipped `#a2f-retry` on the two-factor panel's unknown arm and
+  // proved it by node test only: markup plus the loadMe() re-entry SHAPE. A
+  // modal control's reachability is not a markup question — the whole failure
+  // class this file's oracle exists for (#4592) is a control that EXISTS in the
+  // DOM and cannot be reached on screen — so the control needed a state a
+  // browser could actually land on, and no scenario in this corpus put the
+  // account modal in front of a /v1/me that never answers.
+  //
+  // It consumes the `meFault` override cch-w37-s6 already merged (route() in
+  // this file) rather than minting a second failure idiom, and it is STICKY (no
+  // `times`): this state's subject is the unknown that PERSISTS, and a fault
+  // that heals would repaint the determinate panel out from under the assertion.
+  //
+  // WHY THE MODAL OPENS AT ALL. mock.js's ?modal=account drive waits for the
+  // account chip to carry a real email and gives up after 40 tries. That
+  // give-up branch was UNREACHABLE until cch-w39-s2 fixed its `> 40` / `< 40`
+  // off-by-one, so before that commit a scenario shaped like this one simply
+  // stopped, silently, with no modal to measure. This is the first fixture that
+  // reaches it — and it is what makes `modal-oracle`'s account-2fa-unknown
+  // state land instead of timing out.
+  //
+  // The `account-modal` NAME PREFIX auto-enrols it in shoot.sh's screenshot set
+  // (GR76) with zero harness change — intended: the honest-unknown panel is a
+  // state a human should get an eye on, and it is exactly the frame where a
+  // regression would repaint the determinate "Off" pill.
+  "account-modal-me-unreadable": {
+    label: "Account modal — /v1/me never lands: the two-factor row reads Unknown, offers Retry, and never offers setup",
+    authed: true,
+    deepLink: "",
+    data: {
+      me: me("Guerrilla"),
+      meFault: { status: 500, body: { error: "internal" } },
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      accountSessions: accountSessions,
+    },
+  },
   // ── MVP-0 Personal Dev Fleet (PDF-D84/D88/D92): the fleet card states ──────
   "fleet-support-provisioning": {
     label: "Fleet card — a support mid-provision: the SUPPORT theater (6 rungs, secure included) under the main",

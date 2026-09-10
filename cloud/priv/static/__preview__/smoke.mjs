@@ -1792,6 +1792,37 @@ const EXPECTATIONS = {
       assert.ok(!html.includes('id="a2f-start"'), "an enrolled account is never offered setup again");
     },
   },
+  // cch-w39-s2-fu — THE UNKNOWN ARM, at rest. The browser half of this state
+  // lives in modal-oracle.mjs (its `account-modal-me-unreadable` state drives
+  // ?modal=account over a /v1/me that never lands and asserts #a2f-retry is
+  // HIT-TESTABLE); this is the composition half, and it exists so the anatomy
+  // is pinned in the node harness the way the OFF and ON anatomies next door
+  // already are. meCache is `null` on purpose — that IS the unknown: a read
+  // that never landed, not an envelope that said no.
+  "account-modal-me-unreadable": {
+    what: "the two-factor row when /v1/me never lands — an Unknown badge, a Retry, and NO setup offer (offering setup is itself the determinate claim)",
+    check(reg, hooks) {
+      assert.ok(SCENARIOS["account-modal-me-unreadable"].data.meFault,
+        "the browser half of this state needs a /v1/me that fails the READ while `me` stays present");
+      // null, not {}: `accountModel(session, null)` is exactly what
+      // openAccountModal builds while meCache is unset.
+      const model = hooks.accountModel({ team_id: "team_abc" }, null);
+      assert.equal(model.twoFactorEnabled, null,
+        "an unread /v1/me must arrive here as null — neither true nor false is a fact we hold");
+      hooks.openModal(hooks.accountModalHtml(model, "failed"));
+      const html = reg.get("modal-body").innerHTML || "";
+      assert.ok(html.includes('id="a2f-badge"'), "the badge still renders");
+      assert.ok(html.includes(">Unknown<"), "the badge must read Unknown");
+      assert.ok(!/>On</.test(html) && !/>Off</.test(html),
+        "the badge must read NEITHER On NOR Off — both are claims about this account's security");
+      assert.ok(html.includes('id="a2f-retry"'), "the unknown arm must offer a way to re-read");
+      assert.ok(html.includes('id="a2f-unknown-line"'), "the unknown arm must say what it does not know");
+      assert.ok(!html.includes('id="a2f-start"'),
+        "setup must NOT be offered — the offer asserts by existing that there is nothing set up");
+      assert.ok(!html.includes('id="a2f-otp"') && !html.includes('id="a2f-regen"'),
+        "no enroll form and no on-row: the unknown arm renders neither determinate state");
+    },
+  },
   loggedout: {
     what: "the sign-in screen (no shell)",
     check(reg) {

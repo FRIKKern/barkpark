@@ -1119,6 +1119,128 @@ FIX
     fail=$((fail+1)); echo "  FAIL b9 exit=$b_ok_rc — the guard refuses a real measured zero, which would make a working breaker unreportable"
   fi
   echo
+
+  # -------------------------------------------------------------------------
+  # j1-j7 — THE --job-latency MODE. Added 2026-09-09/10 on task-33742276cf0a35b1
+  # because the mode landed (#17108, 25c73e08e) with ZERO selftest arms: the
+  # criterion that row exists to settle names this script as its instrument, and
+  # an instrument nothing can red is a claim, not a measurement. Every arm below
+  # drives the REAL job_latency() through --raw-in, so the fixtures exercise the
+  # shipped jl_analyze and not a copy of its rule.
+  cat > "$tmp/jl.jsonl" <<'FIX'
+{"__jlchunk__":true,"lo":"2026-09-09T00:00:00Z","hi":"2026-09-10T00:00:00Z","total_count":3,"listed":3}
+{"__jljob__":true,"name":"Test (Elixir 1.18.4 / OTP 27)","run_id":900001,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z","steps":[{"name":"Run the suite","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z"},{"name":"PROBE","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:00:01Z"}]}
+{"__jljob__":true,"name":"Test (Elixir 1.18.4 / OTP 27)","run_id":900002,"conclusion":"skipped","started_at":"2026-09-09T11:00:00Z","completed_at":"2026-09-09T10:59:59Z","steps":[{"name":"Set up job","conclusion":"skipped","started_at":"2026-09-09T11:00:00Z","completed_at":"2026-09-09T10:59:59Z"}]}
+{"__jljob__":true,"name":"Compile closure","run_id":900001,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:20:00Z","steps":[{"name":"compile","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:20:00Z"}]}
+FIX
+  local jl
+  jl=$(bash "$0" --job-latency --since 2026-09-09T00:00:00Z --until 2026-09-10T00:00:00Z \
+         --job-prefix "Test (Elixir" --probe-step "PROBE" --raw-in "$tmp/jl.jsonl" --json 2>/dev/null)
+  local jl_rc=$?
+  local jl_get='import json,sys;d=json.load(sys.stdin);print(eval(sys.argv[1],{},{"d":d}))'
+
+  # j1 — the prefix SELECTS. The 20-minute `Compile closure` job in the same run
+  # must not reach any number this mode prints; if it did, job-minutes would read
+  # 30.0 instead of 10.0 and the mode would be measuring the workflow, not the job.
+  local jl_sel jl_seen jl_min
+  jl_sel=$(printf '%s' "$jl" | python3 -c "$jl_get" 'd["jobs_selected"]')
+  jl_seen=$(printf '%s' "$jl" | python3 -c "$jl_get" 'd["jobs_seen"]')
+  jl_min=$(printf '%s' "$jl" | python3 -c "$jl_get" 'd["job_minutes_total"]')
+  if [ "$jl_rc" = "0" ] && [ "$jl_seen" = "3" ] && [ "$jl_sel" = "2" ] && [ "$jl_min" = "10.0" ]; then
+    pass=$((pass+1)); echo "  ok   j1 the job prefix discriminates — 3 jobs seen, 2 selected, and the 20-min sibling job in the SAME run contributes 0 (10.0 job-minutes, not 30.0)"
+  else
+    fail=$((fail+1)); echo "  FAIL j1 rc=$jl_rc seen=$jl_seen selected=$jl_sel job_minutes=$jl_min — expected 0/3/2/10.0"
+  fi
+
+  # j2 — THE ARM THE -1s FIX EXISTS FOR, and the one the shipped guard did not
+  # have. GitHub stamps a `skipped` job's completed_at ONE SECOND BEFORE its
+  # started_at. Run 900002 above is that shape AND carries a timestamped step, so
+  # it clears `if pairs:`; only the sign check keeps its -1s out of the median.
+  # Without that check wall n=2 and the median is 299.5s — a number that is not a
+  # latency of anything. Remove the `>= 0` condition in jl_analyze and this arm reds.
+  local jl_wn jl_wmed
+  jl_wn=$(printf '%s' "$jl" | python3 -c "$jl_get" 'd["wall_seconds"]["n"]')
+  jl_wmed=$(printf '%s' "$jl" | python3 -c "$jl_get" 'd["wall_seconds"]["median"]')
+  if [ "$jl_wn" = "1" ] && [ "$jl_wmed" = "600.0" ]; then
+    pass=$((pass+1)); echo "  ok   j2 a skipped job's -1s wall is NOT pooled into the median (n=1, median 600.0s = the one job that ran)"
+  else
+    fail=$((fail+1)); echo "  FAIL j2 wall n=$jl_wn median=${jl_wmed}s — expected 1/600.0; a -1s row is being read as a latency"
+  fi
+
+  # j3 — and the naive pooled answer is asserted by name, so the arm says WHICH
+  # bug it catches rather than merely agreeing with today's output.
+  if [ "$jl_wmed" != "299.5" ]; then
+    pass=$((pass+1)); echo "  ok   j3 the pooled-with--1s answer (299.5s) is NOT what we report"
+  else
+    fail=$((fail+1)); echo "  FAIL j3 reported the pooled answer that includes a skipped job"
+  fi
+
+  # j4 — the probe tally must discriminate the three states it exists to tell
+  # apart: the step ran, the step is ABSENT from the job, and (j6) it FAILED.
+  local jl_probe
+  jl_probe=$(printf '%s' "$jl" | python3 -c "$jl_get" 'sorted(d["probe"].items())')
+  if [ "$jl_probe" = "[('step-absent', 1), ('success', 1)]" ]; then
+    pass=$((pass+1)); echo "  ok   j4 the probe tally separates a step that RAN from a job that never carried the step"
+  else
+    fail=$((fail+1)); echo "  FAIL j4 probe tally is $jl_probe — expected [('step-absent', 1), ('success', 1)]"
+  fi
+
+  # j5 — THE SILENT-CAP GUARD. GitHub's list API stops at 1000 items; the day a
+  # chunk exceeds it, this census quietly becomes a sample and every median it
+  # prints is drawn from a truncated population. A chunk whose `listed` is short
+  # of its own `total_count` must surface in chunks_short_of_total_count.
+  cat > "$tmp/jl-capped.jsonl" <<'FIX'
+{"__jlchunk__":true,"lo":"2026-09-09T00:00:00Z","hi":"2026-09-10T00:00:00Z","total_count":1400,"listed":1000}
+{"__jljob__":true,"name":"Test (Elixir 1.18.4 / OTP 27)","run_id":900003,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z","steps":[{"name":"Run the suite","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z"}]}
+FIX
+  local jl_cap jl_capn
+  jl_cap=$(bash "$0" --job-latency --since 2026-09-09T00:00:00Z --until 2026-09-10T00:00:00Z \
+             --job-prefix "Test (Elixir" --raw-in "$tmp/jl-capped.jsonl" --json 2>/dev/null)
+  jl_capn=$(printf '%s' "$jl_cap" | python3 -c "$jl_get" 'len(d["census"]["chunks_short_of_total_count"])')
+  local jl_uncapn
+  jl_uncapn=$(printf '%s' "$jl" | python3 -c "$jl_get" 'len(d["census"]["chunks_short_of_total_count"])')
+  if [ "$jl_capn" = "1" ] && [ "$jl_uncapn" = "0" ]; then
+    pass=$((pass+1)); echo "  ok   j5 a chunk that listed 1000 of 1400 is flagged as short of its own total_count, and a complete chunk is NOT (the guard discriminates)"
+  else
+    fail=$((fail+1)); echo "  FAIL j5 capped=$jl_capn uncapped=$jl_uncapn — expected 1/0"
+  fi
+
+  # j6 — a DEAD probe names its run. `xref-probe: DEAD` reds nothing in CI by
+  # design (continue-on-error), so the run id printed here is the only trace that
+  # every test selection in that run silently fell back to ALL.
+  cat > "$tmp/jl-dead.jsonl" <<'FIX'
+{"__jlchunk__":true,"lo":"2026-09-09T00:00:00Z","hi":"2026-09-10T00:00:00Z","total_count":1,"listed":1}
+{"__jljob__":true,"name":"Test (Elixir 1.18.4 / OTP 27)","run_id":900004,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z","steps":[{"name":"Run the suite","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z"},{"name":"PROBE","conclusion":"failure","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:00:01Z"}]}
+FIX
+  local jl_dead jl_deadids
+  jl_dead=$(bash "$0" --job-latency --since 2026-09-09T00:00:00Z --until 2026-09-10T00:00:00Z \
+              --job-prefix "Test (Elixir" --probe-step "PROBE" --raw-in "$tmp/jl-dead.jsonl" --json 2>/dev/null)
+  jl_deadids=$(printf '%s' "$jl_dead" | python3 -c "$jl_get" 'd["probe_dead_run_ids"]')
+  if [ "$jl_deadids" = "[900004]" ]; then
+    pass=$((pass+1)); echo "  ok   j6 a FAILED probe step names its run id (900004) instead of vanishing into a tally"
+  else
+    fail=$((fail+1)); echo "  FAIL j6 probe_dead_run_ids is $jl_deadids — expected [900004]"
+  fi
+
+  # j7 — AN EMPTY COLLECTION IS NOT A ZERO MEASUREMENT. A raw feed with a chunk
+  # row and no job rows must REFUSE (non-zero, CANNOT READ on stderr), never print
+  # a tidy table of zeroes that reads like a win in a before/after.
+  cat > "$tmp/jl-empty.jsonl" <<'FIX'
+{"__jlchunk__":true,"lo":"2026-09-09T00:00:00Z","hi":"2026-09-10T00:00:00Z","total_count":0,"listed":0}
+FIX
+  local jl_erc jl_emsg
+  jl_emsg=$(bash "$0" --job-latency --since 2026-09-09T00:00:00Z --until 2026-09-10T00:00:00Z \
+              --raw-in "$tmp/jl-empty.jsonl" --json 2>&1 >/dev/null); jl_erc=$?
+  case "$jl_emsg" in
+    *"CANNOT READ"*) jl_emsg=CANNOT_READ ;;
+    *) jl_emsg=NO_REFUSAL ;;
+  esac
+  if [ "$jl_erc" != "0" ] && [ "$jl_emsg" = "CANNOT_READ" ]; then
+    pass=$((pass+1)); echo "  ok   j7 a zero-job feed REFUSES (rc $jl_erc) with a CANNOT READ line — an empty collection never prints as a measured zero"
+  else
+    fail=$((fail+1)); echo "  FAIL j7 rc=$jl_erc msg=$jl_emsg — a zero-job feed printed a table instead of refusing"
+  fi
+
   echo "SELFTEST: $pass passed, $fail failed."
   [ "$fail" -eq 0 ]
 }
@@ -2126,7 +2248,18 @@ for j in sel:
         # real jobs dragged the "median wall time" to 867s and 446s — a 48% drop
         # that was mostly a change in the SKIPPED SHARE, not in how long the job
         # takes. A median over a pool a third of which is -1 is not a latency.
-        if st and ct: wall.append((ct - st).total_seconds())
+        # AND the span must be non-negative. The nesting above already keeps out a
+        # `skipped` job in the shape GitHub emits TODAY (0 of 143 prefix-matching
+        # jobs on 2026-09-09 carried a timestamped step, measured on this row,
+        # task-33742276cf0a35b1), so today the guard is INCIDENTAL: it holds because
+        # skipped jobs arrive step-less, not because anything checks the sign. A
+        # skipped job that DID carry one timestamped step would sail through `if
+        # pairs:` and drop its -1s into the median, and the line this function prints
+        # would still say `EXECUTED jobs only`. Make the printed claim true by test,
+        # not by the shape of an upstream payload we do not control. Arm j2 reds
+        # without this condition.
+        if st and ct and (ct - st).total_seconds() >= 0:
+            wall.append((ct - st).total_seconds())
     else:
         zero_step += 1
     hit = [s for s in (j.get("steps") or []) if (s.get("name") or "") == probe]
