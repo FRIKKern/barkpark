@@ -74,7 +74,22 @@ defmodule BarkparkCloud.Notifications do
   # `TrialExpiryWorker`'s teardown arm, naming the instances it just tore down —
   # and a per-event opt-in toggle for "we destroyed your instances" would be an
   # offer to be un-told a fact. It still honours `alerts_enabled`.
-  @always_send ~w(test trial_expiring trial_expired)a
+  #
+  # cch-w52-bl: `test` is GONE from THIS attribute, and ONLY this one. It was the
+  # same D360 shape as `general` — `git grep 'dispatch_event(.*:test' cloud/lib`
+  # is EMPTY, so no producer in the control plane ever emitted it, and the only
+  # callers were four tests acting as synthetic producers. Worse than dead:
+  # `EventEmail` has no `:test` render arm, so had anyone ever landed a producer
+  # the allowlist invited, it would have bypassed every per-event toggle and
+  # mailed the whole team under the catch-all subject "Barkpark Cloud
+  # notification". `EmailSettings.events/0` does not list it either, so the
+  # wave-42 email census could not see it.
+  #
+  # The STRING `"test"` in `@chat_always_send` below is a DIFFERENT decision and
+  # it STAYS: `send_test_chat/2` genuinely produces it through
+  # `enqueue_channel(_, _, "test", _)`, and the per-channel "Send test" buttons
+  # depend on it. Two attributes, two rulings.
+  @always_send ~w(trial_expiring trial_expired)a
 
   # cch-w52-s3 — the carrier every TRANSACTIONAL send rides, named once. This is
   # provable from code, not inferred from state: `Mailer`'s moduledoc says
