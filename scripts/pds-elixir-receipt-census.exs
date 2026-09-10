@@ -965,7 +965,6 @@ defmodule PDS.Census do
     {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
     {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
-    {:post, "/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms/promote", "BarkparkWeb.SearchController", :promote_search_synonym, :status_only_receipt},
     {:post, "/v1/fleet/support-tokens", "BarkparkWeb.FleetSupportTokenController", :create, :status_only_receipt},
@@ -1006,7 +1005,6 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
-    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout, :status_only_receipt},
@@ -1149,7 +1147,6 @@ defmodule PDS.Census do
     {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal} => {"BarkparkWeb.CycleFleetController.seal/2", 1, "42433904"},
     {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate} => {"BarkparkWeb.MutateController.mutate/2", 2, "26705772"},
     {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore} => {"BarkparkWeb.HistoryController.restore/2", 1, "109652942"},
-    {:post, "/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction} => {"BarkparkWeb.SearchController.correction/2", 1, "19866096"},
     {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym} => {"BarkparkWeb.SearchController.create_search_synonym/2", 1, "12081343"},
     {:post, "/v1/data/search/:dataset/synonyms/promote", "BarkparkWeb.SearchController", :promote_search_synonym} => {"BarkparkWeb.SearchController.promote_search_synonym/2", 1, "49650472"},
     {:post, "/v1/fleet/support-tokens", "BarkparkWeb.FleetSupportTokenController", :create} => {"BarkparkWeb.FleetSupportTokenController.create/2", 1, "10356438"},
@@ -1190,7 +1187,6 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal} => {"BarkparkWeb.CycleFleetController.seal/2", 1, "42433904"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate} => {"BarkparkWeb.MutateController.mutate/2", 2, "26705772"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore} => {"BarkparkWeb.HistoryController.restore/2", 1, "109652942"},
-    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction} => {"BarkparkWeb.SearchController.correction/2", 1, "19866096"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym} => {"BarkparkWeb.SearchController.create_search_synonym/2", 1, "12081343"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout} => {"BarkparkWeb.V1.MediaController.checkout/2", 1, "12930699"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout} => {"BarkparkWeb.V1.MediaController.undo_checkout/2", 1, "124774745"},
@@ -1628,6 +1624,11 @@ defmodule PDS.Census do
       anchor_mfa: "BarkparkWeb.ChatHostController.event/2", def_fp: "62380347",
       verdict: "UNJUDGED", basis: :stub_mapping_only,
       note: "re-renders the callee's :accepted tag faithfully; the tag's truth against any stored row is a separate question this row does not answer."},
+    %{path: "api/lib/barkpark_web/controllers/search_controller.ex",
+      literal: "recorded: status == :recorded,",
+      anchor_mfa: "BarkparkWeb.SearchController.correction/2", def_fp: "94313079",
+      verdict: "PROVEN", basis: :end_to_end,
+      note: "ARRIVES AS A ROSTER ROW BECAUSE THE EVIDENCE ARRIVED FIRST, NOT AS BOOKKEEPING. correction/2 left this lens's literal population at #9600 — it stopped spelling `ok: true` and now renders `ok: status != :error` beside a `status:` discriminator for the five causally different outcomes record_correction/3 answers — so no register row can name it and BOTH of its routed arrivals (`post /v1/data/search/:dataset/correction` and `post /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/correction`) sat in @routed_excluded as :status_only_receipt. A roster row attaches to the DEF, so ONE row disposes both, which is why the two exclusion tuples and their two @exclusion_anchors entries are REMOVED in the same commit — ROUTED-DISPOSITION-UNSHADOWED would otherwise red on a committed row naming a member this run disposes ROSTERED. WHY PROVEN, AND WHY NOT SOONER: the earlier proposal to write this row was refused precisely because it would have counted the SCOPED MIRROR as proven on a suite that never dispatched to it — correction_receipt_test.exs drives the flat route only and its own moduledoc says so. #16521 removed that objection by running the mirror: scoped_search_intel_receipt_test.exs `the five-way correction receipt is identical on the scoped and flat paths` posts all five inputs through :scoped_api under a member token and asserts five DISTINCT receipts on the SCOPED path, `a scoped correction writes a row carrying the URL's workspace_id` reads the written row back, and the C0 cases pin that the mirror fails closed for an anonymous caller and for a member of another workspace. end_to_end is earned on both legs: each case asserts the receipt AND the `search_intel_events` correction row count behind it. MUTATION-EXERCISED at 2e3ee4f6c — re-laundering correction/2 (destructure `status` away, render `ok: true` again) reds `the five-way correction receipt is identical on the scoped and flat paths` with `five causally different outcomes collapsed on the SCOPED path` and `a scoped correction writes a row carrying the URL's workspace_id` on `body[\"status\"]` nil, alongside 6 flat-route cases: 14 tests, 8 failures. Restored: 14 tests, 0 failures. def_fp DERIVED, never typed — a planted def_fp: \"PROBE\" row made ROSTER-VERDICT-FRESH print `def_fp moved PROBE -> 94313079`, and any further edit to correction/2, `mix format` included, moves it again and demotes this row to UNJUDGED."},
     %{path: "api/lib/barkpark_web/controllers/pulse_controller.ex",
       literal: "def preflight(conn, _params), do: send_resp(conn, 204,",
       anchor_mfa: "BarkparkWeb.PulseController.preflight/2", def_fp: "131930615",
@@ -8782,14 +8783,24 @@ defmodule PDS.Census do
       name: "ROSTER-FRESH-NOT-VACUOUS",
       corpus: :repo,
       argv: [],
-      # THE 0-OF-8 SHAPE. A resolver that finds no def makes every comparison unreachable,
+      # THE 0-OF-ALL SHAPE. A resolver that finds no def makes every comparison unreachable,
       # which is how a freshness arm certifies an empty set at exit 0 — the LENS-CAN-MISS
       # -ARMED failure mode, wearing this arm's name.
+      #
+      # THE COUNT IS DERIVED FROM @roster, NEVER TYPED. It was the literal "0 stale + 8
+      # unresolved of 8" until the correction-receipt roster row made it 9, and a case
+      # that reds because the roster HONESTLY GREW is a false accusation the next author
+      # would be tempted to answer by weakening the expectation. The discriminator is
+      # unchanged and is still a count: EVERY row unresolved and NONE stale.
       mut:
         {"|> Enum.min_by(&(&1.last - &1.line)" <> ", fn -> nil end)", "|> then(fn _ -> nil end)"},
       exit: 1,
-      expect: ["FAIL  ROSTER-VERDICT-FRESH", "0 stale + 8 unresolved of 8", "UNRESOLVED ANCHOR"],
-      proves: "a resolver that resolves NOTHING reds on a stated unresolved COUNT instead of passing 0-of-8 — an arm that certifies an empty set is the vacuous green this epic refuses"
+      expect: [
+        "FAIL  ROSTER-VERDICT-FRESH",
+        "0 stale + #{length(@roster)} unresolved of #{length(@roster)}",
+        "UNRESOLVED ANCHOR"
+      ],
+      proves: "a resolver that resolves NOTHING reds on a stated unresolved COUNT instead of passing 0-of-#{length(@roster)} — an arm that certifies an empty set is the vacuous green this epic refuses"
     },
     # THE EXCLUSION ANCHOR (PDS-D585), AND WHY ALL THREE CASES CENSUS THE REPO. The arm
     # is scoped to the real corpus by the same predicate the register and roster arms
@@ -9218,11 +9229,30 @@ defmodule PDS.Census do
     # THE TWO SEAM REPAIRS, EACH WITH ITS OWN MUTANT ON ITS OWN CLAUSE (PDS-D480).
     #
     # THE ASSERTION IS THE ARTEFACT ITSELF, WHICH IS WHY IT IS WORTH MAKING. Disable
-    # either resolution and the route relation goes flat at 6 again — ROUTE-DEPTH-IS-CLOSURE
-    # reds with "the route relation closes at 6 on this run", which is wave 35's shipped
-    # sentence, reproduced on demand. That is the claim this slice refutes, restored by a
-    # one-clause mutation and named in the output. A drift row rides along as the second
-    # half: killing a live edge cannot leave the population untouched.
+    # either resolution and the route relation COLLAPSES — ROUTE-DEPTH-IS-CLOSURE reds
+    # with "@route_depth is typed <N> but the route relation closes at <M> on this run",
+    # the closure sentence reproduced on demand. That is the claim this slice refutes,
+    # restored by a one-clause mutation and named in the output. A drift row rides along
+    # as the second half: killing a live edge cannot leave the population untouched.
+    #
+    # THE COLLAPSED DEPTH IS NO LONGER PINNED, AND THAT IS THE REPAIR THIS FILE ALREADY
+    # PRESCRIBES ONE CASE UP. Both expectations carried the literal "the route relation
+    # closes at 6 on this run" — wave 35's shipped sentence — and it stopped being true
+    # without anyone touching these cases: the seams the tree grew since move the
+    # collapsed closure to 8, so BOTH cases sat dead-red, exit 1 as required and the
+    # pinned digit never printed. That is exactly the failure the D448 banner above names
+    # ("THE DERIVED SIDE IS THE TREE'S AND IS DELIBERATELY LEFT UNPINNED ... pinning it is
+    # what left the sibling arm below dead-red for two waves"), and the sibling it names
+    # IS this pair. So the expectation now stops one word before the tree's digit, and the
+    # TYPED side derives from @route_depth. RE-TYPING THE 6 AS AN 8 WAS THE OTHER OPTION
+    # AND IT IS THE ONE THIS INSTRUMENT EXISTS TO REFUSE: it would buy a green until the
+    # next seam lands and re-arm the same dead red.
+    #
+    # WHAT IS LEFT IS STILL A DISCRIMINATOR, NOT A TAUTOLOGY. The unmutated run PASSES
+    # ROUTE-DEPTH-IS-CLOSURE, so this sentence cannot appear at all unless the closure
+    # MOVED off the typed literal — which is the whole claim — and `refute` holds the
+    # other side. That the arm reds on a wrong TYPED side too, not only on a collapsed
+    # tree, is proven separately by ROUTE-DEPTH-TYPED-SIDE-REDS below.
     #
     # WHY THE REPO CORPUS. Both seams are api/lib shapes (`&default_ingest/2`,
     # `mod = Module.concat(...)` then `mod.ingest(...)`). The synthetic tree carries
@@ -9241,11 +9271,11 @@ defmodule PDS.Census do
       exit: 1,
       expect: [
         "FAIL  ROUTE-DEPTH-IS-CLOSURE",
-        "the route relation closes at 6 on this run",
+        "@route_depth is typed #{@route_depth} but the route relation closes at",
         "FAIL  D448-DRIFT-REFUSES"
       ],
       refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
-      proves: "the capture edge is LIVE, not decorative: read the arity literal as nil — which is what a naive `when is_integer(a)` guard does to a literal_encoder-wrapped 2 — and `intake_fun/0` resolves to Application.get_env alone again, the whole github seam falls back into UNROUTED, and the depth table goes flat at 6. The census then prints wave 35's own closure sentence, so the case asserts the artefact this slice removes rather than a number that moved"
+      proves: "the capture edge is LIVE, not decorative: read the arity literal as nil — which is what a naive `when is_integer(a)` guard does to a literal_encoder-wrapped 2 — and `intake_fun/0` resolves to Application.get_env alone again, the whole github seam falls back into UNROUTED, and the depth table closes SHALLOWER than the typed @route_depth. The census then prints its own closure sentence, so the case asserts the artefact this slice removes rather than a number that moved"
     },
     %{
       name: "CONCAT-BINDS-THE-VARIABLE",
@@ -9257,11 +9287,42 @@ defmodule PDS.Census do
       exit: 1,
       expect: [
         "FAIL  ROUTE-DEPTH-IS-CLOSURE",
-        "the route relation closes at 6 on this run",
+        "@route_depth is typed #{@route_depth} but the route relation closes at",
         "FAIL  D448-DRIFT-REFUSES"
       ],
       refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
-      proves: "the Module.concat binding is LIVE: refuse to read the two-alias concat and every `mod.f(...)` edge loses its module, so `default_ingest/2` resolves to Module.concat alone and the table goes flat at 6 again. The mutation keeps a and b in scope (`a && b && nil`) so it is a RESOLUTION failure and not an unused-variable warning — the clause still runs, it just declines to bind"
+      proves: "the Module.concat binding is LIVE: refuse to read the two-alias concat and every `mod.f(...)` edge loses its module, so `default_ingest/2` resolves to Module.concat alone and the table closes SHALLOWER than the typed @route_depth again. The mutation keeps a and b in scope (`a && b && nil`) so it is a RESOLUTION failure and not an unused-variable warning — the clause still runs, it just declines to bind"
+    },
+    # THE OTHER DIRECTION, SO THE DERIVATION ABOVE IS NOT A TAUTOLOGY. The two seam cases
+    # stopped pinning the collapsed depth, which leaves a fair question: does the arm red
+    # because the TREE moved, or would it print that sentence over anything? This case
+    # moves the TYPED side and nothing else — the budget attribute one lower, against an
+    # untouched corpus — and the arm reds naming both numbers. The comparison is therefore
+    # live on both of its operands, and the seam cases' shortened expectation is a real
+    # read. THE PROSE HERE MUST NOT SPELL THE ATTRIBUTE AND ITS VALUE side by side: the
+    # anchor is the file's own text, apply_mutation/2 refuses an ambiguous one, and this
+    # comment saying the digit out loud made its own case red MUTATION ANCHOR AMBIGUOUS.
+    #
+    # THE DERIVED SIDE IS UNPINNED HERE TOO, for the reason the banner above gives: the
+    # typed side is @route_depth - 1 because this case injected it, and what follows
+    # "closes at" is the tree's and belongs to nobody's literal. D448-DRIFT-REFUSES is NOT
+    # in the expectation and that is measured, not assumed: the population rows are
+    # derived from the swept closure rather than from the typed budget, so this mutation
+    # leaves them untouched and that arm stays PASS.
+    %{
+      name: "ROUTE-DEPTH-TYPED-SIDE-REDS",
+      corpus: :repo,
+      argv: [],
+      mut: {"@route_depth " <> Integer.to_string(@route_depth),
+            "@route_depth " <> Integer.to_string(@route_depth - 1)},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTE-DEPTH-IS-CLOSURE",
+        "@route_depth is typed #{@route_depth - 1} but the route relation closes at",
+        "RE-DERIVE the literal, never re-type it"
+      ],
+      refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
+      proves: "ROUTE-DEPTH-IS-CLOSURE compares a TYPED literal against a LIVE sweep and reds when either side moves — mistyping the budget alone, with the corpus untouched, reds by name. Without this case the two seam cases' expectation could not tell a live comparison from a sentence the run always prints"
     },
     %{
       name: "D448-BASELINE-REFUSES",
