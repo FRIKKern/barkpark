@@ -54,9 +54,17 @@
   <BarkparkWeb.ShareMeta.head preview={assigns[:preview]} page_title={assigns[:page_title]} />
   <%!-- asciinema-player CSS for `asciicast` blocks (a stylesheet, not a blocking
         <script> — the golden no-blocking-script-in-head rule covers JS; the
-        player JS itself loads `defer` in the body alongside mermaid). Pinned to
-        3.8.0, the version proven in .artifacts/proofs-index.html. --%>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.css" />
+        player JS itself loads `defer` in the body alongside mermaid).
+        SELF-HOSTED off `/assets/`, no longer cdn.jsdelivr.net: an asciicast
+        paper used to be dead behind a strict CSP, in an air-gapped reader, or
+        with the CDN blocked, and every reader page paid a third-party
+        connection for it. Vendored 3.8.0 — the SAME version and the SAME
+        upstream dist bytes this line used to name; provenance, digests and the
+        re-vendor commands are in
+        priv/static/assets/asciinema-player.LICENSE.txt. Nothing about the
+        emitted asciicast markup changed, so the three render engines' golden
+        parity fixtures are untouched. --%>
+  <link rel="stylesheet" href="/assets/asciinema-player.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     body { margin: 0; background: #0b0b0d; color: #e7e7ea;
@@ -2565,10 +2573,16 @@
         diagram <pre> elements arrive AFTER the initial parse. --%>
   <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   <%!-- asciinema-player engine for `asciicast` blocks. Same `defer` discipline
-        as mermaid (NEVER blocking in <head>); the PaperMermaid hook's
-        runAsciicast() mounts a player per `div.bp-asciicast`, with the same
-        deferred-load retry guard. Pinned to 3.8.0 (proven CDN/version). --%>
-  <script defer src="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.min.js"></script>
+        as mermaid (NEVER blocking in <head>, still at the bottom of <body>);
+        the PaperMermaid hook's runAsciicast() mounts a player per
+        `div.bp-asciicast`, with the same deferred-load retry guard.
+        SELF-HOSTED off `/assets/` (see the stylesheet note in <head>): the
+        vendored 3.8.0 bundle carries its `vt` WebAssembly inline as a base64
+        `data:` payload and references no external URL, so once it is local the
+        player makes exactly ONE request — the `fetch()` of the recording named
+        by `data-cast-src`. It still defines the same `window.AsciinemaPlayer`
+        global the hook below waits on. --%>
+  <script defer src="/assets/asciinema-player.min.js"></script>
   <script src="/assets/phoenix.js"></script>
   <script src="/assets/phoenix_live_view.js"></script>
   <%!-- The zero-dependency Canvas2D corpus-graph renderer (same asset Studio
