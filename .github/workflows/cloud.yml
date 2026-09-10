@@ -307,7 +307,15 @@ jobs:
       - name: Compile (warnings as errors)
         run: mix compile --warnings-as-errors
       - name: Format check
-        run: mix format --check-formatted
+        # THE VERSION IS PART OF THE VERDICT. This job formats with Elixir
+        # ${{ matrix.elixir }}; dev checkouts run 1.19.x, and the two formatters
+        # disagree — so a green local `mix format --check-formatted` is NOT this
+        # gate (task-417026dfc4826971, PR #17482). Say so AT THE POINT OF
+        # FAILURE, or the next agent spends a cycle re-running the green one.
+        run: |
+          if mix format --check-formatted; then exit 0; fi
+          echo "::error title=Cloud format gate ran Elixir ${{ matrix.elixir }}::This job formatted with Elixir ${{ matrix.elixir }} (pinned in .github/workflows/cloud.yml). Dev checkouts run 1.19.x and the two formatters DISAGREE, so a green local 'cd cloud && mix format --check-formatted' does not measure this gate — and a local 'mix format' will rewrite gate-correct bytes into gate-red ones. Reproduce the gate locally with: make cloud-format-check"
+          exit 1
 
   test:
     name: Cloud control-plane (test)
