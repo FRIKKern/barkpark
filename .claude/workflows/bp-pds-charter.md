@@ -15222,5 +15222,7 @@ for no dataset carrying tasks, so this is a test-level proof of an ARMED path, e
 it was filed. That is the point: fail-closed costs nothing while the path is cold, and it never silently
 destroys stamped evidence once the path warms. **A future sync-of-tasks feature must now design its
 reconciliation deliberately, against a door that refuses it** — and this decision is the reason it must,
-rather than inheriting a hole nobody re-derived. `pds-bl-github-linkput-auto-publish-erasure` stays open
-for the audit-trail half neither closure answers.
+rather than inheriting a hole nobody re-derived. LEDGER NOTE 2026-09-10 (lead-gates-r4, from #17222's
+charter-ledger sweep): `pds-bl-github-linkput-auto-publish-erasure` is `done` on the ledger — closed by the
+lead after #13122 merged with every criterion stamped — so it does NOT stay open; the audit-trail half
+neither closure answers has no open row tracking it and needs one if anyone wants it built.
