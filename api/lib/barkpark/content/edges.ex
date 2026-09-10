@@ -475,6 +475,7 @@ defmodule Barkpark.Content.Edges do
       Document
       |> where([d], d.doc_id in ^pub_ids)
       |> WriteScope.scope_to_dataset(dataset, opts)
+      # global-read: untyped_resolvable/3 is the untyped arm of the SAME presence question resolvable_targets/3 asks typed via Content.resolvable_doc_ids/4, and it mirrors the baselined fail-open read at edges.ex:409 in this module. Its only caller is resolvable_targets/3 <- Content.Graph.build_drafts_index/1, whose :workspace_id comes from BarkparkWeb.ScopeHelpers.scope_opts/1 — a binary id or the :shared_only sentinel on every HTTP request (GET /v1/graph/:id -> TasksController.graph_show/2), never nil. nil here means a Studio LiveView socket (the :legacy arm omits the key) or a direct internal caller; failing closed would drop every untyped reference to a phantom in that pane while the typed arm, reading through get_document/4's fail-open pipeline, still resolved them.
       |> scope_to_workspace_or_global(
         Keyword.get(opts, :workspace_id),
         Keyword.get(opts, :project_id)

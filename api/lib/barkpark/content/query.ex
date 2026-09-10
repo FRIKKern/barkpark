@@ -398,6 +398,7 @@ defmodule Barkpark.Content.Query do
       Document
       |> where([d], d.type in ^types)
       |> scope_to_dataset(dataset, opts)
+      # global-read: corpus_query/3 is the corpus twin of base_query/4 (same module, line ~465, baselined fail-open) and MUST keep that nil-posture. Its three public callers — collect_live_extract_documents/3, collect_corpus_slugs/3 and corpus_scope_ids_query/3 — are reached only from Content.Graph.build_drafts_index/1, which threads :workspace_id straight out of BarkparkWeb.ScopeHelpers.scope_opts/1. Over HTTP that is ALWAYS a binary workspace id or the :shared_only sentinel (never nil), so this arm is unreachable from a request; nil arrives only from an internal caller or a Studio LiveView socket (ScopeHelpers' :legacy arm OMITS the key, and Studio.PaneBuilder then hands Graph.traverse/2 an empty scope keyword). Failing closed here would return zero rows to the Studio GraphView pane while its un-batched sibling base_query/4 kept reading globally over the very same opts.
       |> scope_to_workspace_or_global(
         Keyword.get(opts, :workspace_id),
         Keyword.get(opts, :project_id)
@@ -1550,6 +1551,7 @@ defmodule Barkpark.Content.Query do
     Document
     |> where([d], d.doc_id in ^doc_ids and d.type == ^type)
     |> scope_to_dataset(dataset, opts)
+    # global-read: resolvable_doc_ids/4 is the BATCHED get_document/4 (line ~1512, baselined fail-open) and its whole contract is that the two answer identically — same opts, same scope_to_dataset -> scope_to_workspace_or_global -> maybe_scope_to_owner -> maybe_scope_to_grants pipeline, `in` where the single has `==`. A fail-CLOSED nil arm here would make the batch and the single DISAGREE on exactly the nil-workspace caller, which is the one case the batching was introduced to make cheaper. Tenancy is supplied by the same caller chain as get_document/4: Content.Edges.resolvable_targets/3 <- Content.Graph.build_drafts_index/1 <- ScopeHelpers.scope_opts/1, which over HTTP yields a binary id or :shared_only, never nil; nil is the documented internal / Studio-socket bridge.
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> maybe_scope_to_owner(type, dataset, opts)
     |> maybe_scope_to_grants(opts)
