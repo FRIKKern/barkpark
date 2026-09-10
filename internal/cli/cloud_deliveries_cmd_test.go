@@ -1215,3 +1215,41 @@ func TestCloudDeliveriesRefusesToMixBasesAcrossTargets(t *testing.T) {
 		t.Fatalf("the mixed-basis warning fired on a page with only ONE serving instant:\n%s", stdout)
 	}
 }
+
+// TestCloudDeliveriesTwoNullBasesAreNotAgreement: the shape EVERY page has
+// today. No row in the live table carries a basis yet, so a cp row and an
+// instance row both render UNRECORDED — and two nulls are NOT one clock. The
+// cp null hides a process start and the instance null hides a flip instant,
+// which is the original defect exactly; a line saying "they share one basis"
+// here would restate it under the new column's name.
+//
+// Measured against the live control plane on 2026-09-10: sha 832add74…, nine
+// rows, both legs, every serving_since_basis absent from the wire.
+func TestCloudDeliveriesTwoNullBasesAreNotAgreement(t *testing.T) {
+	const sha = "832add74a95cc051e96347f5d322c2e673f68038"
+	row := func(target, serving string) string {
+		return `{"sha":"` + sha + `","delivering_run_id":"34466699843","first_seen_at":"2026-09-10T11:19:29.000000Z",` +
+			`"merged_at":null,"queued_seconds":null,"queued_self_seconds":null,"queued_pickup_seconds":null,` +
+			`"queued_stall_seconds":null,"build_seconds":null,"serving_since":"` + serving + `",` +
+			`"serving_since_basis":null,"target":"` + target + `","carried":false,"previous_sha":null,` +
+			`"transition":null,"recorded_at":"2026-09-10T11:19:35.601920Z"}`
+	}
+	body := `{"deliveries":[` + row("instance", "2026-09-10T10:53:25.000000Z") + `,` +
+		row("cp", "2026-09-10T11:05:19.951065Z") + `],` +
+		`"count":2,"sha":"` + sha + `","limit":20,"scope":"platform"}`
+	newDeliveriesServer(t, 200, body)
+
+	stdout, stderr, code := runDeliveries(t, "table", sha)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "MIXED BASES ON THIS PAGE") {
+		t.Fatalf("two targets with serving instants and no warning:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "SAME clock") {
+		t.Fatalf("two UNRECORDED bases were reported as agreement — the original defect, renamed:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "NEITHER basis was recorded, and that is NOT agreement") {
+		t.Fatalf("the null-on-both-legs case never says the two nulls are not one clock:\n%s", stdout)
+	}
+}

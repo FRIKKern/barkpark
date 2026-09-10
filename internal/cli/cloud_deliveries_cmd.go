@@ -658,8 +658,19 @@ func deliveriesMixedBasisLine(page cloudclient.DeliveriesPage) string {
 
 	line := "  MIXED BASES ON THIS PAGE — serving instants below come from " + strconv.Itoa(len(order)) +
 		" targets: " + strings.Join(parts, " · ") + "."
-	if !mixed {
+	if !mixed && !unrecorded {
 		return line + "\n  They share one basis, so a difference between them is a difference in the SAME clock."
+	}
+	if !mixed {
+		// SAME WORD, AND THE WORD IS "UNRECORDED" — which is not agreement.
+		// Every row written before the serving_since_basis column carries a null
+		// basis on BOTH legs, and those two nulls hide two DIFFERENT clocks (the
+		// cp leg's process start and the box's flip instant). Saying "they share
+		// one basis" here would be the original defect wearing the new column's
+		// clothes.
+		return line + "\n  NEITHER basis was recorded, and that is NOT agreement: both rows predate the serving_since_basis column,\n" +
+			"  and a null on the cp leg hides a process start where a null on the instance leg hides a flip instant.\n" +
+			"  This reader will not compute a lag between them, and neither should you."
 	}
 	line += "\n  These are DIFFERENT CLOCKS: a difference between them is NOT a lag, and this reader will not compute one."
 	if upperBound {
