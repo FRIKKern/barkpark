@@ -40,7 +40,7 @@ import { createBarkparkServer } from '@barkpark/nextjs/server'
 const client = createClient({
   projectUrl: process.env.BARKPARK_PROJECT_URL!,
   dataset: process.env.BARKPARK_DATASET ?? 'production',
-  apiVersion: '2026-04-12',
+  apiVersion: '2026-04-01',
 })
 
 export const barkpark = createBarkparkServer({
