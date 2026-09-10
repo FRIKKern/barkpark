@@ -518,6 +518,8 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck disable=SC1091
+. "$REPO_ROOT/scripts/lib/bp-curl.sh"   # 429 backoff for every LOCAL curl below, shared (task-ca8fffa7ca885413)
 
 REPO="${GITHUB_REPOSITORY:-FRIKKern/barkpark}"
 WINDOW_HOURS=24
@@ -1022,7 +1024,7 @@ crown_read() {
       return 0
       ;;
     pat)
-      http="$(curl -s -o "$WORK/body.json" -w '%{http_code}' --max-time 30 \
+      http="$(bp_curl_code -s -o "$WORK/body.json" --max-time 30 \
         -H "authorization: Bearer $CROWN_API_TOKEN" "$API_BASE/v1/deliveries?$qs")"
       if [ "$http" != "200" ]; then
         READS_FAILED=$((READS_FAILED + 1))
@@ -1702,7 +1704,7 @@ if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
   if [ -n "$HEALTH_FIXTURE" ]; then
     if [ -f "$HEALTH_FIXTURE" ]; then cp "$HEALTH_FIXTURE" "$WORK/health.json"; else : > "$WORK/health.json"; fi
   else
-    curl -s --max-time 20 "$HEALTH_URL" > "$WORK/health.json" 2>/dev/null
+    bp_curl_code -s --max-time 20 -o "$WORK/health.json" "$HEALTH_URL" >/dev/null 2>&1 || : > "$WORK/health.json"
   fi
   SERVING_SHA="$(jq -r '.serving_sha // .git_sha // empty' "$WORK/health.json" 2>/dev/null)"
   if [ -z "$SERVING_SHA" ]; then
