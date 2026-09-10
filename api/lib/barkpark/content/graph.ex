@@ -99,6 +99,24 @@ defmodule Barkpark.Content.Graph do
   # hatch `corpus_scan_limit/0` has and for the same reason.
   @corpus_limit 20_000
 
+  # THE PROJECTOR-LAG WINDOW. Every document written inside it joins the
+  # live-extract set, because `content_edges` may not have caught up. Derived
+  # from `Barkpark.EdgeProjector.ProjectorWorker`, not guessed: `schedule_in:
+  # 5` seconds of debounce, `unique: [period: 30]` across
+  # `:available`/`:scheduled`/`:executing` (a save inside that window rides an
+  # already-scheduled job that may predate it), a concurrency-2 queue, and a
+  # default REBUILD op under a `timeout: 60_000` transaction — ~95 s before the
+  # queue backlog term, which on a write-hot board is the one that moves. 120 s
+  # is that derivation plus headroom. Config-overridable
+  # (`:barkpark, :graph_projection_lag_window_s`) for TESTS ONLY.
+  @projection_lag_window_s 120
+
+  # Bound on the MATERIALISED arm — the `content_edges` read that replaces
+  # live-extracting the published-only corpus. Five times `@node_budget`, the
+  # same ratio `@corpus_scan_limit` takes to it, so the edge set the walk draws
+  # from stays strictly more generous than the walk it feeds.
+  @materialised_edge_limit 50_000
+
   # Bound on the WHOLE-CORPUS scans behind `/v1/graph/orphans` and
   # `/v1/graph/dangling`. Both used to be unbounded `Repo.all/1`s over every
   # published document in scope, and `dangling/1` then paid a per-document
@@ -130,9 +148,28 @@ defmodule Barkpark.Content.Graph do
   def corpus_limit,
     do: Application.get_env(:barkpark, :graph_drafts_corpus_limit, @corpus_limit)
 
+  @doc """
+  The projector-lag window in SECONDS (`build_drafts_index/1`). Every document
+  written inside it is live-extracted regardless of whether it has a draft
+  twin. Config-overridable (`:barkpark, :graph_projection_lag_window_s`) for
+  TESTS ONLY — a window whose only proof needs a two-minute sleep is a window
+  nobody tests.
+  """
+  @spec projection_lag_window_s() :: non_neg_integer()
+  def projection_lag_window_s,
+    do: Application.get_env(:barkpark, :graph_projection_lag_window_s, @projection_lag_window_s)
+
+  @doc """
+  The bound on the materialised `content_edges` read behind the drafts graph.
+  Config-overridable (`:barkpark, :graph_materialised_edge_limit`) for TESTS.
+  """
+  @spec materialised_edge_limit() :: pos_integer()
+  def materialised_edge_limit,
+    do: Application.get_env(:barkpark, :graph_materialised_edge_limit, @materialised_edge_limit)
+
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{Document, Edge, Scope}
+  alias Barkpark.Content.{Document, DraftId, Edge, Scope}
 
   # The INVERTED plugin edge-extractor seam. The kernel (`content`) must hold no
   # compile-time reference to a feature concept, and `Barkpark.Plugins.Registry`
@@ -306,10 +343,29 @@ defmodule Barkpark.Content.Graph do
         %{id: slug, doc_id: slug, type: nil, title: slug, phantom: false}
       end)
 
-    # Phantoms: drafts-corpus dangling targets reachable from the visited set.
-    phantoms =
+    # PHANTOM RECOVERY. Under the hybrid a published-only document's dangling
+    # out-edge is in NO table (`content_edges` cannot hold one), so it is
+    # re-extracted from the ≤ `@node_budget` documents the walk actually
+    # visited. See `recover_visited_dangling/4` for why doing this AFTER the
+    # walk is exact rather than merely convenient.
+    already_seen =
+      MapSet.new(edge_list, fn e -> {e.from_id, e.to_id, e.kind} end)
+
+    recovered =
+      recover_visited_dangling(visited, already_seen, Keyword.get(opts, :dataset), opts)
+
+    dangling_edges =
       edge_list
       |> Enum.filter(fn e -> e.dangling and e.from_id in visited end)
+      |> Kernel.++(recovered)
+
+    # The recovered edges never reached `state.edges` (they were not in the
+    # index the BFS walked), so they are appended to the rendered edge list —
+    # the payload must show the broken reference, not only its phantom node.
+    edges = edges ++ Enum.reject(recovered, fn e -> e in edges end)
+
+    phantoms =
+      dangling_edges
       |> Enum.uniq_by(& &1.to_id)
       |> Enum.map(fn e ->
         %{
@@ -380,39 +436,44 @@ defmodule Barkpark.Content.Graph do
     schemas =
       if is_binary(dataset) and dataset != "", do: Content.list_schemas(dataset, opts), else: []
 
-    # READ THE WHOLE DRAFTS CORPUS — IN TWO QUERIES, NOT ONE PER TYPE.
+    # ── THE HYBRID READ (task graph-endpoint-latency) ──────────────────────
     #
-    # `corpus_slugs` below is derived from `docs`, and the dangling pass treats
-    # a target absent from that set as a PHANTOM reference. A truncated corpus
-    # therefore does not merely hide edges — it INVENTS dangling ones for real,
-    # resolvable targets that fell past the cap. So the read must see the whole
-    # corpus, and it must say so when it could not.
+    # This used to read EVERY document of EVERY type and extract its edges. On
+    # guerrilla that is 8,597 tasks (~9.5 KB each) + 1,048 papers (~62 KB each)
+    # = ~150 MB of `content` jsonb off disk, over the wire, JSON-decoded into
+    # the BEAM and then recursively walked by the plugin extractors — on EVERY
+    # `?drafts=true` request. Reproduced locally at that exact shape: 241 MB
+    # decoded, 1,027 ms end to end (SQL 811 ms + BEAM 216 ms); live 11.8 s.
     #
-    # THE COST THAT WAS HERE (task graph-endpoint-latency). This walked
-    # `Content.collect_all_documents/3` ONCE PER SCHEMA, and that helper pages
-    # with LIMIT/OFFSET over a `DISTINCT ON (regexp_replace(doc_id, ...))`
-    # subquery re-sorted by `updated_at DESC, id`. Neither sort key is indexed,
-    # so every page re-sorted the ENTIRE type corpus twice — carrying the full
-    # `content` jsonb through the sort tuple — to return 1,000 rows. Work was
-    # QUADRATIC in the corpus (pages x corpus) and the outer sort spilled to
-    # disk. Measured locally over 8,000 documents: 47 such reads, 1,046 ms of a
-    # 1,264 ms request; LIVE on guerrilla the same request took 18.4 s.
+    # A PROJECTION CANNOT FIX IT, and the arithmetic is why. Measured on the
+    # same corpus: reading with `content` 810 ms, `doc_id`+`type` only 56 ms,
+    # plus one server-side jsonb key 93 ms. So projection works — but
+    # `Plugins.Bulldocs.extract_edges/2` runs `BodyWalk.collect` over the WHOLE
+    # content (ref / href / wikilink / valueref at ANY depth) and has NO type
+    # guard, so a paper IS its body and a task must keep `brief.blocks`.
+    # Projecting buys ~150 MB -> ~85 MB: 1.7x, not the 12x needed.
     #
-    # `Content.collect_corpus_documents/3` is the same SET in ONE bounded
-    # `DISTINCT ON` per ACL class: one sort, no outer re-sort, no offset walk,
-    # no per-type multiplication. Its moduledoc carries the EXPLAIN.
+    # SO THE ROWS GO, NOT THE BYTES. Of guerrilla's 10,528 documents, 882
+    # (8.4%) have a `drafts.` twin. The other 91.6% are published-only and
+    # their edges are ALREADY in `content_edges` — the narrow, indexed table
+    # `traverse_published/2` walks in 0.46 s.
     #
-    # TWO CLASSES, NOT ONE QUERY: `Content.Query.base_query/4` appends the
-    # row-ownership ACL only for a type whose schema says `owner_scoped: true`.
-    # One query cannot carry a per-type ACL, so the types are split by that
-    # flag — the hoisted `schemas` list already holds it, so the split costs no
-    # extra read — and each class is read under its OWN lens. Folding them into
-    # a single query would apply one type's ACL to another type's rows.
+    # THREE BOUNDED READS, each reporting its own cap:
+    #   1. the LIVE-EXTRACT SET, with content — draft twins plus anything
+    #      written inside the projector-lag window;
+    #   2. the corpus SLUG SET, without content — the phantom lens;
+    #   3. the MATERIALISED edges of everything else.
+    #
+    # TWO CLASSES PER READ, NOT ONE QUERY: `Content.Query.base_query/4` appends
+    # the row-ownership ACL only for a type whose schema says
+    # `owner_scoped: true`. One query cannot carry a per-type ACL, so the types
+    # are split by that flag — the hoisted `schemas` list already holds it, so
+    # the split costs no extra read — and each class is read under its OWN
+    # lens. Folding them would apply one type's ACL to another type's rows.
     {owned_schemas, plain_schemas} = Enum.split_with(schemas, & &1.owner_scoped)
+    owned_types = Enum.map(owned_schemas, & &1.name)
+    plain_types = Enum.map(plain_schemas, & &1.name)
 
-    # No `perspective:` — `collect_corpus_documents/3` is drafts-merged BY
-    # CONSTRUCTION (its DISTINCT ON prefers the `drafts.` twin), so there is no
-    # perspective to pass and none is accepted.
     corpus_opts = [
       limit: Keyword.get(opts, :corpus_limit, corpus_limit()),
       workspace_id: workspace_id,
@@ -420,27 +481,70 @@ defmodule Barkpark.Content.Graph do
       caller_context: Keyword.get(opts, :caller_context)
     ]
 
-    {docs, truncated} =
-      if is_binary(dataset) and dataset != "" do
-        {plain_docs, plain_trunc} =
-          Content.collect_corpus_documents(
-            Enum.map(plain_schemas, & &1.name),
-            dataset,
-            corpus_opts
-          )
+    both_classes = fn read ->
+      {plain, plain_trunc} = read.(plain_types, corpus_opts)
+      {owned, owned_trunc} = read.(owned_types, Keyword.put(corpus_opts, :owner_scoped, true))
+      {plain ++ owned, plain_trunc || owned_trunc}
+    end
 
-        {owned_docs, owned_trunc} =
-          Content.collect_corpus_documents(
-            Enum.map(owned_schemas, & &1.name),
-            dataset,
-            Keyword.put(corpus_opts, :owner_scoped, true)
-          )
+    dataset? = is_binary(dataset) and dataset != ""
 
-        {plain_docs ++ owned_docs, plain_trunc || owned_trunc}
+    # READ 1 — the live-extract set, WITH content. Bounded by the number of
+    # draft twins plus the lag window, never by the corpus.
+    live_since = DateTime.add(DateTime.utc_now(), -projection_lag_window_s(), :second)
+
+    {live_docs, live_trunc} =
+      if dataset? do
+        both_classes.(fn types, o ->
+          Content.collect_live_extract_documents(
+            types,
+            dataset,
+            Keyword.put(o, :live_since, live_since)
+          )
+        end)
       else
         {[], nil}
       end
 
+    # READ 2 — the corpus SLUG set, WITHOUT content. `corpus_slugs` decides
+    # whether a plugin edge's target is a real document or a phantom, and that
+    # question is membership, not content: 56 ms instead of 810 ms.
+    {slug_rows, slug_trunc} =
+      if dataset? do
+        both_classes.(fn types, o -> Content.collect_corpus_slugs(types, dataset, o) end)
+      else
+        {[], nil}
+      end
+
+    corpus_slugs =
+      slug_rows
+      |> Enum.map(fn row ->
+        Content.published_id(Map.get(row, :doc_id) || Map.get(row, "doc_id"))
+      end)
+      |> MapSet.new()
+
+    live_slugs =
+      live_docs
+      |> Enum.map(fn doc ->
+        Content.published_id(Map.get(doc, :doc_id) || Map.get(doc, "doc_id"))
+      end)
+      |> MapSet.new()
+
+    # READ 3 — the MATERIALISED arm. Every edge whose SOURCE is not in the
+    # live-extract set, read from `content_edges` and rendered into the same
+    # slug-keyed shape the live fold produces.
+    {materialised, mat_trunc} =
+      if dataset? do
+        both_classes.(fn types, o ->
+          if types == [],
+            do: {[], nil},
+            else: materialised_drafts_edges(types, live_slugs, dataset, Keyword.merge(opts, o))
+        end)
+      else
+        {[], nil}
+      end
+
+    truncated = live_trunc || slug_trunc || mat_trunc
     corpus_capped? = truncated == :cap
 
     corpus_truncation =
@@ -448,29 +552,26 @@ defmodule Barkpark.Content.Graph do
         do: %{
           truncated: true,
           limit: Keyword.get(opts, :corpus_limit, corpus_limit()),
-          read: length(docs)
+          # `read` is THE MEMBERSHIP SET's size, not a sum of three arms. The
+          # number a consumer needs is "how many documents the phantom lens
+          # saw", because that is the set whose truncation turns a real target
+          # into a reported phantom — the exact lie `corpus_truncation` exists
+          # to deny. The live-extract and materialised arms have their own
+          # bounds and flip the same flag, but their sizes answer a different
+          # question and summing them would answer none.
+          read: length(slug_rows)
         },
         else: nil
 
     if corpus_capped? do
       Logger.warning(
-        "Content.Graph: drafts corpus read for dataset=#{dataset} hit its corpus bound at " <>
-          "#{length(docs)} docs — the index is built from a PREFIX, so edges to documents " <>
-          "beyond the walk render as DANGLING even though their targets exist."
+        "Content.Graph: drafts graph read for dataset=#{dataset} hit a bound " <>
+          "(live_extract=#{inspect(live_trunc)} slugs=#{inspect(slug_trunc)} " <>
+          "materialised=#{inspect(mat_trunc)}) — the index is built from a PREFIX, so " <>
+          "edges to documents beyond it may render as DANGLING even though their targets " <>
+          "exist."
       )
     end
-
-    # Corpus slug set for the plugin-edge dangling pass (see
-    # drafts_edges_for_doc/3). Scope-safe by construction: `docs` came from the
-    # workspace/project-scoped `list_documents/3` read above, so a target that
-    # exists only OUTSIDE the caller's scope is absent here and stays dangling
-    # (fail closed).
-    corpus_slugs =
-      docs
-      |> Enum.map(fn doc ->
-        Content.published_id(Map.get(doc, :doc_id) || Map.get(doc, "doc_id"))
-      end)
-      |> MapSet.new()
 
     # THE TWO HOISTS, TOGETHER — they are the whole fix (task-051a87de9a085e4d).
     #
@@ -490,17 +591,165 @@ defmodule Barkpark.Content.Graph do
     edge_opts = opts |> Keyword.put(:schemas, schemas) |> Keyword.put(:dangling, :skip)
 
     edge_list =
-      docs
+      live_docs
       |> Enum.flat_map(fn doc ->
         drafts_edges_for_doc(doc, corpus_slugs, corpus_capped?, edge_opts)
       end)
       |> resolve_core_dangling(dataset, opts)
+      |> Kernel.++(materialised)
       |> filter_drafts_edges(opts)
 
     out_index = Enum.group_by(edge_list, & &1.from_id)
     in_index = Enum.group_by(edge_list, & &1.to_id)
 
     {out_index, in_index, edge_list, corpus_truncation}
+  end
+
+  # ── THE MATERIALISED ARM ───────────────────────────────────────────────────
+  #
+  # Every edge in `content_edges` whose SOURCE document is NOT in the
+  # live-extract set, rendered into the same slug-keyed map shape the live fold
+  # produces so the BFS cannot tell the two apart.
+  #
+  # `dangling: false`, ALWAYS, and it is a fact rather than an assumption:
+  # `Content.Edge`'s moduledoc — "the `to_id` FK rejects any `to_id` that is
+  # not a real `documents.id`, so a dangling edge is UNSTORABLE — this table
+  # holds ONLY resolvable edges. There is deliberately NO `:dangling` field."
+  # That is exactly why the visited-set recovery pass in `traverse_drafts/2`
+  # exists: a published-only document's BROKEN reference is in no table, so it
+  # has to be re-extracted from the document at render time.
+  #
+  # `field`/`refType` are nil. They are read ONLY when rendering a phantom
+  # (`via_field`, `refType`), and a materialised edge is never dangling and so
+  # never a phantom. `kind` IS the source field's name on a core edge
+  # (graph-edge-seam), which is what live extraction emits too, so kind-filtering
+  # behaves identically across both arms.
+  #
+  # SCOPE. `content_edges` carries no tenancy columns — an edge is scoped by its
+  # endpoints. Scoping the FROM document is sufficient: `Content.Edges.add_edge/4`
+  # resolves both endpoint slugs under one writer scope, so a stored edge cannot
+  # straddle two scopes. The TO document is joined only to recover its slug.
+  defp materialised_drafts_edges(types, live_slugs, dataset, opts) do
+    limit = Keyword.get(opts, :materialised_edge_limit, materialised_edge_limit())
+    scoped_ids = Content.corpus_scope_ids_query(types, dataset, opts)
+
+    rows =
+      from(e in Edge,
+        join: f in Document,
+        on: f.id == e.from_id,
+        join: t in Document,
+        on: t.id == e.to_id,
+        where: e.from_id in subquery(scoped_ids),
+        select: %{
+          from_id: f.doc_id,
+          to_id: t.doc_id,
+          kind: e.kind,
+          plugin_source: e.plugin_source
+        },
+        limit: ^(limit + 1)
+      )
+      |> Repo.all()
+
+    {rows, truncated} =
+      if length(rows) > limit, do: {Enum.take(rows, limit), :cap}, else: {rows, nil}
+
+    edges =
+      rows
+      |> Enum.map(fn row ->
+        %{
+          from_id: Content.published_id(row.from_id),
+          to_id: Content.published_id(row.to_id),
+          kind: row.kind,
+          field: nil,
+          refType: nil,
+          plugin_source: row.plugin_source,
+          dangling: false
+        }
+      end)
+      # THE OVERRIDE. A document in the live-extract set has just been extracted
+      # from its CURRENT content; its materialised rows are the previous
+      # published state and would double-count or resurrect a removed reference.
+      # Keyed on the SOURCE only — an edge INTO a live doc is still that other
+      # document's edge and stays.
+      |> Enum.reject(fn e -> MapSet.member?(live_slugs, e.from_id) end)
+
+    {edges, truncated}
+  end
+
+  # ── PHANTOM RECOVERY ───────────────────────────────────────────────────────
+  #
+  # The dangling out-edges of the VISITED nodes, re-extracted from those
+  # documents. This is the pass the row cut makes necessary: `content_edges`
+  # cannot hold a dangling edge (the `to_id` FK forbids it), so a published-only
+  # document's broken reference is invisible to the materialised arm — the edge
+  # would vanish AND its phantom node with it, silently.
+  #
+  # WHY POST-BFS IS EXACT. The pre-hybrid code built the whole corpus edge list,
+  # walked it, and then kept `e.dangling and e.from_id in visited` — so the
+  # phantom set was ALWAYS "the dangling out-edges of the visited nodes" and
+  # nothing else survived that filter. A dangling edge's target is BY DEFINITION
+  # not a document, so `drafts_bfs/7` can never expand through one; adding these
+  # edges after the walk therefore cannot change `visited`, `distance`,
+  # `dependents` or the BFS truncation flags. Same set, computed from the ≤
+  # `@node_budget` documents that render instead of from the whole corpus.
+  #
+  # ONE STATED DIVERGENCE: a dangling neighbour used to consume `@fan_out`
+  # budget during the walk and no longer does, so a node with more than 200
+  # dangling references could report `:fan_out` before and not now. That is the
+  # honest direction — the hybrid truncates LESS — and the depth trip-wire
+  # already excludes dangling neighbours from its boundary test.
+  #
+  # KEYED ON VISITED, NOT ON TWIN STATUS. A published-only document that the
+  # walk reached is re-extracted exactly like a draft twin, which is what keeps
+  # the published arm of the phantom contract alive.
+  defp recover_visited_dangling(visited, already, dataset, opts) do
+    docs = hydrate_slugs(visited, dataset, opts)
+
+    if docs == [] do
+      []
+    else
+      schemas =
+        if is_binary(dataset) and dataset != "", do: Content.list_schemas(dataset, opts), else: []
+
+      edge_opts = opts |> Keyword.put(:schemas, schemas) |> Keyword.put(:dangling, :skip)
+
+      docs
+      |> Enum.flat_map(fn doc ->
+        drafts_edges_for_doc(doc, MapSet.new(visited), false, edge_opts)
+      end)
+      |> resolve_core_dangling(dataset, opts)
+      |> Enum.filter(fn e -> e.dangling end)
+      |> filter_drafts_edges(opts)
+      |> Enum.reject(fn e -> MapSet.member?(already, {e.from_id, e.to_id, e.kind}) end)
+    end
+  end
+
+  # The visited slugs' documents, drafts-preferred, in ONE keyed read bounded by
+  # `@node_budget`. Never the corpus.
+  defp hydrate_slugs([], _dataset, _opts), do: []
+
+  defp hydrate_slugs(slugs, dataset, opts) do
+    prefixed = Enum.map(slugs, fn slug -> DraftId.drafts_prefix() <> slug end)
+    wanted = Enum.take(slugs ++ prefixed, 2 * @node_budget)
+
+    Document
+    |> where([d], d.doc_id in ^wanted)
+    |> scope_query(opts)
+    |> then(fn q ->
+      if is_binary(dataset) and dataset != "", do: where(q, [d], d.dataset == ^dataset), else: q
+    end)
+    |> Repo.all()
+    |> prefer_draft_twin()
+  end
+
+  # Draft-preferred, mirroring the corpus read's DISTINCT ON tiebreaker: when
+  # both twins came back, the `drafts.` row wins.
+  defp prefer_draft_twin(docs) do
+    docs
+    |> Enum.group_by(fn d -> {d.type, Content.published_id(d.doc_id)} end)
+    |> Enum.map(fn {_key, group} ->
+      Enum.find(group, fn d -> DraftId.draft?(d.doc_id) end) || hd(group)
+    end)
   end
 
   # THE BATCHED DANGLING PASS. Core edges leave `drafts_edges_for_doc/3` with

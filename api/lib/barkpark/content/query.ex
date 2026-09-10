@@ -371,6 +371,24 @@ defmodule Barkpark.Content.Query do
     |> corpus_read(opts)
   end
 
+  @doc """
+  The `documents.id` PKs of a scoped corpus, as a QUERY for use in a
+  `subquery/1`.
+
+  `content_edges` carries no tenancy columns — an edge is scoped by its
+  endpoints — so the drafts graph's materialised arm scopes its read by asking
+  "is this edge's SOURCE one of the documents this caller may read". Handing it
+  this query rather than a hand-written `where` keeps ONE scoping pipeline:
+  dataset, workspace/project, grants and (per class) the row-ownership ACL are
+  applied by exactly the code every other corpus read uses.
+  """
+  @spec corpus_scope_ids_query([String.t()], String.t(), keyword()) :: Ecto.Query.t()
+  def corpus_scope_ids_query(types, dataset, opts \\ []) when is_list(types) do
+    types
+    |> corpus_query(dataset, opts)
+    |> select([d], d.id)
+  end
+
   # The scoped, un-distincted base every corpus read shares. Mirrors
   # `base_query/4` minus the single-type `where` and the filter map: one type
   # list, the tenancy scope, the grant scope, and the row-ownership ACL when the
