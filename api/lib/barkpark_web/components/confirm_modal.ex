@@ -37,9 +37,15 @@ defmodule BarkparkWeb.Components.ConfirmModal do
 
   ## Styling
 
-  Uses inline styles for now (matches the existing book_editor publish
-  modal). A future pass can hoist these into `app.css` under
-  `.modal-backdrop` / `.modal-content`.
+  The scrim and the card are `root.html.heex` rules — `.bp-modal-overlay`
+  and `.bp-modal` (spd-w5f). They used to be `style="…"` attributes on this
+  component, which hid a raw `rgba(0,0,0,0.4)` scrim from
+  `scripts/studio-literal-check.sh` and put the overlay on `z-index: 1000`,
+  outside the Studio's own 50/51/60 tier system. Keep new positional and
+  colour declarations in that stylesheet, next to `.modal-backdrop`: an
+  inline `position:`/`background:` here is invisible to the colour ratchet
+  and re-grows `@inline_fixed_inventory` in
+  `test/barkpark_web/studio/editor_panel_containment_test.exs`.
   """
 
   use Phoenix.Component
@@ -66,12 +72,8 @@ defmodule BarkparkWeb.Components.ConfirmModal do
       aria-modal="true"
       aria-labelledby={"#{@id}-title"}
       data-test-id="confirm-modal"
-      style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000;"
     >
-      <div
-        class="bp-modal card"
-        style="background: var(--bg-card); color: var(--fg); padding: 24px; min-width: 420px; max-width: 720px; max-height: 80vh; display: flex; flex-direction: column; gap: 12px; overflow: auto;"
-      >
+      <div class="bp-modal card">
         <h2 id={"#{@id}-title"} class="h3" style="margin: 0;"><%= @title %></h2>
         <p :if={@body} class="text-sm text-muted" style="margin: 0;"><%= @body %></p>
 
