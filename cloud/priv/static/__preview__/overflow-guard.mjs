@@ -252,13 +252,35 @@ const clickOne = (sel) => `(function(){var e=document.querySelector(${JSON.strin
 // gesture; `open` is the poll that says THIS body — not merely some dialog — is
 // up. An entry with `unreachable` states why, and states it in terms of what
 // the PREVIEW CORPUS cannot produce, never "it was hard".
+// `?modal=account` OPENS THE DIALOG FROM INIT, so `land` for those three must
+// name the OPEN card and never the shell. `#modal-root` ships in index.html
+// carrying the `hidden` attribute (cloud/priv/static/index.html:566), so
+// `document.getElementById('modal-root')` is TRUE from the moment the parser
+// reaches that line — before init has opened anything. nav() polls readiness
+// every 100ms and runs the rendered-host floor the instant it flips, so
+// whichever side of that race the runner lands on decides the run: the poll
+// that fires first sees one matched node, box 0x0, opacity "1", nothing
+// animating — the display:none class the floor exists to refuse — and the
+// whole guard exits 2 (REFUSED), taking every other leg's verdict with it.
+// MEASURED, deterministically, by dropping `&modal=account` from the first
+// entry so the modal is provably closed at the gate: `READY HOST NOT PAINTED:
+// "#modal-root" matches 1 node(s) … box 0x0, computed opacity "1", no
+// animation running` — the CI refusal verbatim. The gesture-driven entries
+// below were never exposed: their `land` names a control INSIDE the dialog,
+// which matches ZERO nodes while it is shut, and a zero-match selector is
+// skipped by the floor rather than judged.
+//
+// The remedy is to make readiness say what the leg actually needs: `land` is
+// now the body's own `open` poll, so the gate cannot flip until the card is
+// mounted AND painting. It also STRENGTHENS the floor — `#modal-root .am-modal`
+// is a literal selector the floor now derives and paint-checks too.
 const MODAL_CENSUS = [
   { body: "account (2FA off)", scen: "account-modal", suffix: "&modal=account",
-    land: "document.getElementById('modal-root')", open: openWith(".am-modal") },
+    land: openWith(".am-modal"), open: openWith(".am-modal") },
   { body: "account (2FA enroll)", scen: "account-modal-2fa-badcode", suffix: "&modal=account",
-    land: "document.getElementById('modal-root')", open: openWith(".a2f-enroll") },
+    land: openWith(".a2f-enroll"), open: openWith(".a2f-enroll") },
   { body: "account (2FA on)", scen: "account-modal-2fa-on", suffix: "&modal=account",
-    land: "document.getElementById('modal-root')", open: openWith(".am-modal") },
+    land: openWith(".am-modal"), open: openWith(".am-modal") },
   { body: "account (session revoke confirm)", scen: "account-modal-revoke", suffix: "&modal=account",
     land: "document.querySelector('.session-row .btn')",
     drive: clickOne(".session-row .btn"), open: openWith(".confirm-modal, form") },
