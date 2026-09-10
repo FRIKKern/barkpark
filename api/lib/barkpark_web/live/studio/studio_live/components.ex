@@ -1822,6 +1822,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             editor_is_draft={@editor_is_draft}
             dataset={@dataset}
             validation_errors={@validation_errors}
+            validation_warnings={@validation_warnings}
             cross_violations={@cross_violations}
             save_status={@save_status}
             doc_conflict={@doc_conflict}
