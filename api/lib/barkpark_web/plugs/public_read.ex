@@ -104,6 +104,17 @@ defmodule BarkparkWeb.Plugs.PublicRead do
 
   def init(opts), do: opts
 
+  # The code-keyed default hint for "forbidden" reads "use a token with
+  # write/admin permission" — a tier this clamp never consulted, and the wrong
+  # remedy: the READ tier (`TokenController` allowlist, `bp token create <label>
+  # --permissions read`) reads drafts and raw inside its own workspace and is
+  # refused every write. A preview pipeline needs exactly that tier, not write.
+  # Naming it here is what turns a 403 into a fix (gyldendal friction 68).
+  @perspective_hint "public-read tokens are pinned to the published perspective. " <>
+                      "To read drafts or raw, mint a READ-tier token for this workspace " <>
+                      "(bp -w <workspace> -p <project> token create <label> --permissions read): " <>
+                      "it reads unpublished content in its own workspace and is refused every write."
+
   def call(conn, _opts) do
     if public_read_token?(conn), do: enforce(conn), else: conn
   end
@@ -139,7 +150,7 @@ defmodule BarkparkWeb.Plugs.PublicRead do
         )
 
       not allowed_perspective?(conn) ->
-        deny(conn, {:error, :forbidden}, "perspective not allowed")
+        deny(conn, {:error, :forbidden}, "perspective not allowed", @perspective_hint)
 
       not schema_public?(conn) ->
         deny(conn, {:error, :not_found}, "not found")
@@ -238,5 +249,6 @@ defmodule BarkparkWeb.Plugs.PublicRead do
   # A second marker for the same slug is a duplicate the docs-anchors gate rejects
   # by design, and the line below is a private `defp`, which that gate also rejects
   # — a pointer to an owner is not a claim to be one.
-  defp deny(conn, reason, message), do: ErrorResponse.emit(conn, reason, message)
+  defp deny(conn, reason, message, hint \\ nil),
+    do: ErrorResponse.emit(conn, reason, message, hint)
 end
