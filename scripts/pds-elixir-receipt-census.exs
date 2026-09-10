@@ -9229,11 +9229,30 @@ defmodule PDS.Census do
     # THE TWO SEAM REPAIRS, EACH WITH ITS OWN MUTANT ON ITS OWN CLAUSE (PDS-D480).
     #
     # THE ASSERTION IS THE ARTEFACT ITSELF, WHICH IS WHY IT IS WORTH MAKING. Disable
-    # either resolution and the route relation goes flat at 6 again — ROUTE-DEPTH-IS-CLOSURE
-    # reds with "the route relation closes at 6 on this run", which is wave 35's shipped
-    # sentence, reproduced on demand. That is the claim this slice refutes, restored by a
-    # one-clause mutation and named in the output. A drift row rides along as the second
-    # half: killing a live edge cannot leave the population untouched.
+    # either resolution and the route relation COLLAPSES — ROUTE-DEPTH-IS-CLOSURE reds
+    # with "@route_depth is typed <N> but the route relation closes at <M> on this run",
+    # the closure sentence reproduced on demand. That is the claim this slice refutes,
+    # restored by a one-clause mutation and named in the output. A drift row rides along
+    # as the second half: killing a live edge cannot leave the population untouched.
+    #
+    # THE COLLAPSED DEPTH IS NO LONGER PINNED, AND THAT IS THE REPAIR THIS FILE ALREADY
+    # PRESCRIBES ONE CASE UP. Both expectations carried the literal "the route relation
+    # closes at 6 on this run" — wave 35's shipped sentence — and it stopped being true
+    # without anyone touching these cases: the seams the tree grew since move the
+    # collapsed closure to 8, so BOTH cases sat dead-red, exit 1 as required and the
+    # pinned digit never printed. That is exactly the failure the D448 banner above names
+    # ("THE DERIVED SIDE IS THE TREE'S AND IS DELIBERATELY LEFT UNPINNED ... pinning it is
+    # what left the sibling arm below dead-red for two waves"), and the sibling it names
+    # IS this pair. So the expectation now stops one word before the tree's digit, and the
+    # TYPED side derives from @route_depth. RE-TYPING THE 6 AS AN 8 WAS THE OTHER OPTION
+    # AND IT IS THE ONE THIS INSTRUMENT EXISTS TO REFUSE: it would buy a green until the
+    # next seam lands and re-arm the same dead red.
+    #
+    # WHAT IS LEFT IS STILL A DISCRIMINATOR, NOT A TAUTOLOGY. The unmutated run PASSES
+    # ROUTE-DEPTH-IS-CLOSURE, so this sentence cannot appear at all unless the closure
+    # MOVED off the typed literal — which is the whole claim — and `refute` holds the
+    # other side. That the arm reds on a wrong TYPED side too, not only on a collapsed
+    # tree, is proven separately by ROUTE-DEPTH-TYPED-SIDE-REDS below.
     #
     # WHY THE REPO CORPUS. Both seams are api/lib shapes (`&default_ingest/2`,
     # `mod = Module.concat(...)` then `mod.ingest(...)`). The synthetic tree carries
@@ -9252,11 +9271,11 @@ defmodule PDS.Census do
       exit: 1,
       expect: [
         "FAIL  ROUTE-DEPTH-IS-CLOSURE",
-        "the route relation closes at 6 on this run",
+        "@route_depth is typed #{@route_depth} but the route relation closes at",
         "FAIL  D448-DRIFT-REFUSES"
       ],
       refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
-      proves: "the capture edge is LIVE, not decorative: read the arity literal as nil — which is what a naive `when is_integer(a)` guard does to a literal_encoder-wrapped 2 — and `intake_fun/0` resolves to Application.get_env alone again, the whole github seam falls back into UNROUTED, and the depth table goes flat at 6. The census then prints wave 35's own closure sentence, so the case asserts the artefact this slice removes rather than a number that moved"
+      proves: "the capture edge is LIVE, not decorative: read the arity literal as nil — which is what a naive `when is_integer(a)` guard does to a literal_encoder-wrapped 2 — and `intake_fun/0` resolves to Application.get_env alone again, the whole github seam falls back into UNROUTED, and the depth table closes SHALLOWER than the typed @route_depth. The census then prints its own closure sentence, so the case asserts the artefact this slice removes rather than a number that moved"
     },
     %{
       name: "CONCAT-BINDS-THE-VARIABLE",
@@ -9268,11 +9287,42 @@ defmodule PDS.Census do
       exit: 1,
       expect: [
         "FAIL  ROUTE-DEPTH-IS-CLOSURE",
-        "the route relation closes at 6 on this run",
+        "@route_depth is typed #{@route_depth} but the route relation closes at",
         "FAIL  D448-DRIFT-REFUSES"
       ],
       refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
-      proves: "the Module.concat binding is LIVE: refuse to read the two-alias concat and every `mod.f(...)` edge loses its module, so `default_ingest/2` resolves to Module.concat alone and the table goes flat at 6 again. The mutation keeps a and b in scope (`a && b && nil`) so it is a RESOLUTION failure and not an unused-variable warning — the clause still runs, it just declines to bind"
+      proves: "the Module.concat binding is LIVE: refuse to read the two-alias concat and every `mod.f(...)` edge loses its module, so `default_ingest/2` resolves to Module.concat alone and the table closes SHALLOWER than the typed @route_depth again. The mutation keeps a and b in scope (`a && b && nil`) so it is a RESOLUTION failure and not an unused-variable warning — the clause still runs, it just declines to bind"
+    },
+    # THE OTHER DIRECTION, SO THE DERIVATION ABOVE IS NOT A TAUTOLOGY. The two seam cases
+    # stopped pinning the collapsed depth, which leaves a fair question: does the arm red
+    # because the TREE moved, or would it print that sentence over anything? This case
+    # moves the TYPED side and nothing else — the budget attribute one lower, against an
+    # untouched corpus — and the arm reds naming both numbers. The comparison is therefore
+    # live on both of its operands, and the seam cases' shortened expectation is a real
+    # read. THE PROSE HERE MUST NOT SPELL THE ATTRIBUTE AND ITS VALUE side by side: the
+    # anchor is the file's own text, apply_mutation/2 refuses an ambiguous one, and this
+    # comment saying the digit out loud made its own case red MUTATION ANCHOR AMBIGUOUS.
+    #
+    # THE DERIVED SIDE IS UNPINNED HERE TOO, for the reason the banner above gives: the
+    # typed side is @route_depth - 1 because this case injected it, and what follows
+    # "closes at" is the tree's and belongs to nobody's literal. D448-DRIFT-REFUSES is NOT
+    # in the expectation and that is measured, not assumed: the population rows are
+    # derived from the swept closure rather than from the typed budget, so this mutation
+    # leaves them untouched and that arm stays PASS.
+    %{
+      name: "ROUTE-DEPTH-TYPED-SIDE-REDS",
+      corpus: :repo,
+      argv: [],
+      mut: {"@route_depth " <> Integer.to_string(@route_depth),
+            "@route_depth " <> Integer.to_string(@route_depth - 1)},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTE-DEPTH-IS-CLOSURE",
+        "@route_depth is typed #{@route_depth - 1} but the route relation closes at",
+        "RE-DERIVE the literal, never re-type it"
+      ],
+      refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
+      proves: "ROUTE-DEPTH-IS-CLOSURE compares a TYPED literal against a LIVE sweep and reds when either side moves — mistyping the budget alone, with the corpus untouched, reds by name. Without this case the two seam cases' expectation could not tell a live comparison from a sentence the run always prints"
     },
     %{
       name: "D448-BASELINE-REFUSES",
