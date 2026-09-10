@@ -2425,7 +2425,7 @@ defmodule BarkparkWeb.TasksController.Params do
       "The override is the ONE way a --met flips a row the lead closes on merge, and while it was " <>
       "a bare boolean it recorded nothing — a reflex override and a deliberate one were identical " <>
       "on the record. Send merge-gated=<why this stamp is the lead's to make> (bp: " <>
-      "--merge-gated \"PR #123 merged to main as <sha>\"). The reason is persisted beside the stamp " <>
+      "--merge-gated \"PR #17107 merged to main as <sha>\"). The reason is persisted beside the stamp " <>
       "at content.merge_gate_autostamp.stamp_overrides[].reason, on the same write as the flip — " <>
       "the shape close_override.* already uses. It is still an ASSERTION and not a permission."
   end
