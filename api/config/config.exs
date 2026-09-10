@@ -43,6 +43,14 @@ config :barkpark, BarkparkWeb.Endpoint,
   pubsub_server: Barkpark.PubSub,
   live_view: [signing_salt: "MXGKAyTI"]
 
+# The core→web layering seam (task-ad931ba2e0d0bdf4). `Barkpark.StudioChat.*`
+# must not name `BarkparkWeb`, but the Studio chat's spawned children still need
+# this node's API URL/port. Handing the endpoint module across as CONFIG DATA
+# keeps core free of any compile-time or runtime dependency on the web layer —
+# a headless consumer just leaves this unset (or overrides :endpoint_url /
+# :endpoint_port) and `Barkpark.StudioChat.Endpoints` still answers.
+config :barkpark, :studio_chat, endpoint: BarkparkWeb.Endpoint
+
 # Configure Elixir's Logger
 # Tenant scope keys (workspace_id/workspace_slug/project_id/dataset) are stamped
 # by BarkparkWeb.Plugs.TenantLogMetadata (API pipelines) + StudioLive (LiveView)

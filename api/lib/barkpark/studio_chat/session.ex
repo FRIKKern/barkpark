@@ -25,15 +25,19 @@ defmodule Barkpark.StudioChat.Session do
   @title_sources ~w(default ai human)
   @providers ~w(claude codex)
   @execution_targets ~w(managed registered_host)
-  # Permission modes the CLI accepts (mirrors BarkparkWeb.Studio.ClaudeChat.modes/0,
-  # kept here so the context layer validates a mode without reaching into web).
-  # The two constants move TOGETHER (charter D48). `bypassPermissions` is a legal
-  # PERSISTED mode — the store validates inclusion so the armed ceremony can write
-  # it — but it is reachable only through that ceremony (ClaudeChat.normalize_mode
-  # fails every untrusted string closed to plan). The retired `default` is NOT in
-  # this list: an existing row keeps spawning it verbatim, but no NEW switch lands
-  # it (a legacy-`default` select re-pick normalizes to plan).
-  @modes ~w(plan acceptEdits auto dontAsk manual bypassPermissions)
+  # Permission modes the CLI accepts. READ from the provider, not re-typed: this
+  # used to be a hand-kept MIRROR of the web wrapper's list with a comment asking
+  # the two to "move TOGETHER" — an unlocked mirror, which is exactly the drift
+  # this task removes (task-ad931ba2e0d0bdf4). Now there is ONE list, in core, and
+  # the compiler binds it here at compile time.
+  #
+  # `bypassPermissions` is a legal PERSISTED mode — the store validates inclusion
+  # so the armed ceremony can write it — but it is reachable only through that
+  # ceremony (`Provider.Claude.normalize_mode/1` fails every untrusted string
+  # closed to plan, charter D48). The retired `default` is NOT in this list: an
+  # existing row keeps spawning it verbatim, but no NEW switch lands it (a
+  # legacy-`default` select re-pick normalizes to plan).
+  @modes Barkpark.StudioChat.Provider.Claude.modes()
 
   # The herd-layer semantic axis (chat-tui charter D38/D40): what the AGENT is
   # doing, persisted by the Recorder at its publish_activity seam. Four states
