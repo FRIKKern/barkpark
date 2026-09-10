@@ -121,7 +121,7 @@ function bpParseMediaValue(raw) {
 // migration wrote every cover with all three) is never stripped of it by an
 // alt-text or focal-point edit, and a fresh pick carries the dimensions the
 // asset document knows. lqip for a fresh pick is filled server-side on save
-// (Barkpark.Content.ImageMetadata) — the picker never invents one.
+// (Barkpark.Media.ImageMetadata) — the picker never invents one.
 function bpSerializeMediaValue(url, assetId, extra) {
   const e = extra || {};
   const alt = typeof e.alt === "string" ? e.alt : "";

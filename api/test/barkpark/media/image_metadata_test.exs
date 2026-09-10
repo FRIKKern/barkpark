@@ -1,4 +1,4 @@
-defmodule Barkpark.Content.ImageMetadataTest do
+defmodule Barkpark.Media.ImageMetadataTest do
   @moduledoc """
   Gyldendal parity E1.7 (task-e2eab81cc3e87047): a schema-declared `image`
   value saved without its denormalised metadata is back-filled from the media
@@ -13,7 +13,7 @@ defmodule Barkpark.Content.ImageMetadataTest do
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Content
-  alias Barkpark.Content.ImageMetadata
+  alias Barkpark.Media.ImageMetadata
   alias Barkpark.Media
   alias Barkpark.Media.Renditions
   alias Barkpark.Media.Storage.MediaFile

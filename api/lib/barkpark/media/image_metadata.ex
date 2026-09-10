@@ -1,4 +1,4 @@
-defmodule Barkpark.Content.ImageMetadata do
+defmodule Barkpark.Media.ImageMetadata do
   @moduledoc """
   Back-fills the denormalised image metadata a schema-declared `image` value
   carries — `url`, `width`, `height`, `lqip` — from the media asset it points
@@ -26,16 +26,20 @@ defmodule Barkpark.Content.ImageMetadata do
   save path.
 
   Sources, in order: the `mediaAsset` document's `fileInfo` (url, width,
-  height — written by `Barkpark.Media.Processing` after upload); the blob
-  itself via `Barkpark.Media.Probe` when `fileInfo` has no dimensions yet; and
-  for `lqip` the `"lqip"` rendition preset (a ≤ 24 px JPEG, base64-encoded as
-  a `data:` URI), generated on demand through `Barkpark.Media.Renditions` —
+  height — written by `Barkpark.Media.Processing` after upload), reached
+  through `Barkpark.Media.asset_doc_for_file/3`; the blob itself via
+  `Barkpark.Media.Probe` when `fileInfo` has no dimensions yet; and for
+  `lqip` the `"lqip"` rendition preset (a ≤ 24 px JPEG, base64-encoded as a
+  `data:` URI), generated on demand through `Barkpark.Media.Renditions` —
   never fabricated.
+
+  Lives under `Barkpark.Media` (not `Content`): it is the media concept that
+  knows blobs, asset documents and renditions; the Studio save path calls it
+  from the web layer, and the content kernel keeps no edge to media.
   """
 
   alias Barkpark.Media
   alias Barkpark.Media.{Blobstore, Probe, Renditions}
-  alias Barkpark.Plugins.Media.Assets
 
   require Logger
 
@@ -116,24 +120,20 @@ defmodule Barkpark.Content.ImageMetadata do
   # ── one image ───────────────────────────────────────────────────────────────
 
   defp do_backfill(image, file_id, dataset, scope) do
-    asset = Assets.find_by_media_file_id(file_id, dataset, scope)
-    file_info = asset_file_info(asset)
+    case Media.get_file(file_id, scope) do
+      {:ok, %Media.Storage.MediaFile{} = file} ->
+        file_info = asset_file_info(Media.asset_doc_for_file(file, dataset, scope))
 
-    image =
-      image
-      |> put_missing("url", Map.get(file_info, "url"))
-      |> put_missing("width", int(Map.get(file_info, "width")))
-      |> put_missing("height", int(Map.get(file_info, "height")))
+        image
+        |> put_missing("url", Map.get(file_info, "url"))
+        |> put_missing("width", int(Map.get(file_info, "width")))
+        |> put_missing("height", int(Map.get(file_info, "height")))
+        |> maybe_probe_dimensions(file)
+        |> maybe_lqip(file)
 
-    file =
-      case Media.get_file(file_id, scope) do
-        {:ok, %Media.Storage.MediaFile{} = f} -> f
-        _ -> nil
-      end
-
-    image
-    |> maybe_probe_dimensions(file)
-    |> maybe_lqip(file)
+      _ ->
+        image
+    end
   end
 
   defp asset_file_info(%{content: %{"fileInfo" => %{} = fi}}), do: fi
@@ -141,8 +141,6 @@ defmodule Barkpark.Content.ImageMetadata do
 
   # Dimensions from the blob when the asset document has none yet (a fresh
   # upload whose processing job has not run, or a pre-processing row).
-  defp maybe_probe_dimensions(image, nil), do: image
-
   defp maybe_probe_dimensions(image, file) do
     if blank?(Map.get(image, "width")) or blank?(Map.get(image, "height")) do
       with {:ok, path} <- Blobstore.ensure_local(file),
@@ -162,8 +160,6 @@ defmodule Barkpark.Content.ImageMetadata do
   # Only when the rendition backend can decode the blob — Renditions gates on
   # the raster mime set and answers {:error, _} otherwise, which leaves `lqip`
   # unset rather than fabricated.
-  defp maybe_lqip(image, nil), do: image
-
   defp maybe_lqip(image, file) do
     if blank?(Map.get(image, "lqip")) do
       with {:ok, rel} <- Renditions.ensure(file, @lqip_preset),
