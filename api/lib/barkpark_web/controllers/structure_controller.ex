@@ -53,6 +53,7 @@ defmodule BarkparkWeb.StructureController do
     # the legacy "document id == type name" reading.
     |> put_present(:docId, node.doc_id)
     |> put_present(:orderings, node.orderings)
+    |> put_present(:tree, node.tree)
     |> put_items(node.items)
     |> put_child(node.child)
   end

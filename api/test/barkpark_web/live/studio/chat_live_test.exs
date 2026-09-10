@@ -3024,6 +3024,12 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "the empty archived shelf teaches instead of showing nothing", %{conn: conn} do
+      # This test's whole subject is an EMPTY archived shelf, so it is the one
+      # assertion committed residue can never coexist with: `purge!/0` archives
+      # every pinned row it cannot delete, straight onto this shelf. Name that
+      # cause rather than reding on a 40KB `=~` diff.
+      Barkpark.ChatSessionResidue.assert_archived_shelf_clean!()
+
       {:ok, view, _html} = live(conn, "/studio/chat")
       html = render_click(element(view, ~s([data-test-id="chat-archived-toggle"])))
       assert html =~ "No archived chats"

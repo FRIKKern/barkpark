@@ -1493,13 +1493,27 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # census — they are named by the EVALUATED register below and counted in
   # `@ast_blind_paths`. MEASURED by the PIN CO-EDIT arm on this tree
   # ("@emitted_pinned 169 -> 170"), never summed with an earlier delta.
-  # 170 -> 171 (dr-w29-bl-serving-since-has-no-basis-column): `to_json/1` on
+  # 170 -> 171 (dr-w33-bl): `census/3` gains ONE top-level key,
+  # `abandoned_basis` — the three labels (which basis measured it, how much is
+  # historical, how much the backfill wrote) that `abandoned`, an integer, cannot
+  # carry. ONE key, not four: `abandoned_basis/1` returns a single flat STRING,
+  # so the walker counts one map key and there is no interior to move
+  # `@ast_blind_paths` (which is why the vocabulary delta above moved it and this
+  # one does not). RE-MEASURED by the PIN CO-EDIT arm on the tree REBASED onto
+  # #17317 ("@emitted_pinned 170 -> 171") — never summed with the pre-rebase
+  # delta, which was measured against a main that had not yet grown `vocabulary`.
+  # 171 -> 172 (dr-w29-bl-serving-since-has-no-basis-column): `to_json/1` on
   # PlatformDelivery gains ONE key, `serving_since_basis` — WHICH CLOCK produced
   # that row's `serving_since` (process_start on the cp leg, an upper bound a
   # bare restart moves forward; deploy_flip_mtime on the instance leg, the flip
-  # instant). MEASURED by the PIN CO-EDIT arm on this tree ("@emitted_pinned
-  # 170 -> 171"), never summed with an earlier delta.
-  @emitted_pinned 171
+  # instant). This branch's own +1, and ONLY +1: `to_json/1` gains a single flat
+  # STRING key, no interior node.
+  # RE-MEASURED 2026-09-10 by the PIN CO-EDIT arm on THIS tree merged with
+  # origin/main at ff214d4faabd74d14e20ff3efc75419625f1a151
+  # ("@emitted_pinned 171 -> 172"). The pre-merge
+  # measurement said 170 -> 171 and is VOID: it was taken against a main that had
+  # not yet grown `abandoned_basis` (#17352). Never summed with that delta.
+  @emitted_pinned 172
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -1690,12 +1704,22 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `DeployCensus`, so it rides free on the NAME union and moves the SITE
   # register instead. MEASURED by the PIN CO-EDIT arm ("@go_tag_pinned 359 ->
   # 362"), never derived from the diff.
-  # 362 -> 363 (dr-w29-bl-serving-since-has-no-basis-column):
+  # 362 -> 363 (dr-w33-bl): `DeployCensus` declares ONE new json tag line,
+  # `abandoned_basis`, and the name is new package-wide, so it lands on the NAME
+  # union rather than on the SITE register (`@go_tag_sites` does NOT move).
+  # RE-MEASURED by the PIN CO-EDIT arm on the tree REBASED onto #17317
+  # ("@go_tag_pinned 362 -> 363") — the pre-rebase measurement said 359 -> 360
+  # and is void: it was taken against a main without `DeployVocabulary`.
+  # 363 -> 364 (dr-w29-bl-serving-since-has-no-basis-column):
   # `cloudclient.PlatformDelivery` declares ONE new tag, `serving_since_basis`,
   # and the name is new to the whole union — no other struct in the tree carries
-  # it, so it moves BOTH this pin and one site. MEASURED by the PIN CO-EDIT arm
-  # ("@go_tag_pinned 362 -> 363"), never derived from the diff.
-  @go_tag_pinned 363
+  # it, so it moves BOTH this pin and one site. This branch's own +1.
+  # RE-MEASURED 2026-09-10 by the PIN CO-EDIT arm on THIS tree merged with
+  # origin/main at ff214d4faabd74d14e20ff3efc75419625f1a151
+  # ("@go_tag_pinned 363 -> 364"). The pre-merge
+  # measurement said 362 -> 363 and is VOID: it was taken against a main without
+  # `abandoned_basis` (#17352). Never summed with that delta.
+  @go_tag_pinned 364
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2845,6 +2869,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-bl-w8-graced-deploys-are-uncounted KNOWN OPEN — how many START triggers were retried across an untyped 5xx, twin of graced_poll_refusals and the arm that recorded NOTHING in any outcome before this wave. Same custody, same fence, same follow-up."},
     {"site_deployment_json/3", "last_graced_at",
      "dr-bl-w8-graced-deploys-are-uncounted KNOWN OPEN — when the most recent grace of either kind happened. Without it a nonzero count cannot be told from one taken weeks ago; same reason `apply_arming_checked_at` sits beside its verdict two arms up."},
+    {"site_deployment_json/3", "deferral_scheduled_s",
+     "dr-bl-deferral-scheduled-vs-actual-gap KNOWN OPEN — the window the backoff ladder ASKED for on the interval this deferral closes. Its reachable surface this wave is the NAMED READER `DeployLedger.DeferralPacing.report/1`, not the per-deployment wire: `site_deployment_json/3` lives in router.ex, outside this task's fence, exactly as `graced_poll_refusals` records three rows up. Emitting it is the named follow-up (server key + `cloudclient.Deployment` field + rendered line, the D136 rule), and this row is where that is written down."},
+    {"site_deployment_json/3", "deferral_actual_gap_s",
+     "dr-bl-deferral-scheduled-vs-actual-gap KNOWN OPEN — the gap that ACTUALLY elapsed on that same interval, twin of deferral_scheduled_s. The two are only useful as a PAIR (their ratio is the measurement), so they share one custody and one follow-up; shipping one to the wire without the other would put a numerator on a page with no denominator."},
     {"site_deployment_json/3", "delivery_id",
      "RULED — GitHub's X-GitHub-Delivery header (dwb-18). A webhook idempotency key, never a fact about the build; it exists so a redelivered push mints at most one Deployment."},
     {"site_deployment_json/3", "preview_slug",
@@ -2915,14 +2943,27 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # MEASURED, not derived: the SERIALIZER-SIDE arm's un-allowlisted run printed
   # `27 unserialized column(s)` and the SCHEMA-SIDE arm printed
   # `110 schema column(s) collected`.
-  # 110 -> 111 (dr-w29-bl-serving-since-has-no-basis-column): the
-  # `platform_deliveries` schema gains `serving_since_basis`.
-  # `@schema_unserialized_floor` does NOT move: the column is emitted by
-  # `PlatformDelivery.to_json/1` in the same commit that declares it.
-  # MEASURED, not derived: the SCHEMA-SIDE arm printed
-  # `111 schema column(s) collected`.
-  @schema_field_floor 111
-  @schema_unserialized_floor 27
+  # 110 -> 112 (dr-bl-deferral-scheduled-vs-actual-gap): the `deployments` schema
+  # gains `deferral_scheduled_s` and `deferral_actual_gap_s`.
+  # `@schema_unserialized_floor` moves 27 -> 29 for the SAME reason the grace
+  # trio moved it — `site_deployment_json/3` lives in router.ex, outside that
+  # task's fence, so the emit is a named follow-up and the two allowlist rows
+  # above carry the tracker. The columns DO have a reader this wave
+  # (`DeployLedger.DeferralPacing.report/1`); this arm measures the WIRE, and a
+  # floor that stayed at 27 would have claimed a wire key that does not exist.
+  # MEASURED, not derived: the SERIALIZER-SIDE arm's un-allowlisted run printed
+  # `29 unserialized column(s)` and the SCHEMA-SIDE arm printed
+  # `112 schema column(s) collected`.
+  # 112 -> 113 (dr-w29-bl-serving-since-has-no-basis-column): the
+  # `platform_deliveries` schema gains `serving_since_basis` — this branch's own
+  # +1. `@schema_unserialized_floor` does NOT move off main's 29: the column is
+  # emitted by `PlatformDelivery.to_json/1` in the same commit that declares it.
+  # RE-MEASURED 2026-09-10 on THIS tree merged with origin/main at
+  # ff214d4faabd74d14e20ff3efc75419625f1a151: the SCHEMA-SIDE arm printed `113 schema column(s) collected`. The pre-merge
+  # measurement said 111 and is VOID — it was taken against a main without the
+  # deferral-pacing pair (#17305).
+  @schema_field_floor 113
+  @schema_unserialized_floor 29
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:
   # `delivery_json/1` (router.ex:9809) is the NOTIFICATIONS delivery serializer,
@@ -3182,7 +3223,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       # a `bl-` segment (`dr-bl-w8-graced-deploys-are-uncounted`). Without this
       # alternative the guard forces such a row to cite an id that does not
       # exist, which is worse than no citation.
-      assert reason =~ ~r/dr-(bl-)?w\d+-[a-z0-9-]+|task-[0-9a-f]+|RULED/,
+      #
+      # THE WAVE SEGMENT IS OPTIONAL ON A `bl-` ID, and that is a MEASURED
+      # correction rather than a loosening: `dr-bl-deferral-scheduled-vs-actual-gap`
+      # is a real ledger row (filed out of dr-w23-s7, adopted by
+      # `dr-backlog-never-started`) whose id carries NO wave at all, so the
+      # `w\d+` this pattern required would have forced a TRUE citation to be
+      # rewritten into a false one. The guard's job is "name a tracker"; a wave
+      # number was an accident of the four ids that happened to exist when it
+      # was written.
+      assert reason =~ ~r/dr-w\d+-[a-z0-9-]+|dr-bl-(w\d+-)?[a-z0-9-]+|task-[0-9a-f]+|RULED/,
              "#{payload}/#{key}: a row must name its tracker, or say RULED and why"
 
       # THE CLASS RULE IS ONE RULE. An explicit row for an `*_encrypted` column
@@ -3996,6 +4046,7 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
   # walk over a real `census/3` return, never transcribed from the source.
   @emitted_paths [
     "abandoned",
+    "abandoned_basis",
     "abandoned_unreadable",
     "boundaries",
     "boundaries[].instant",

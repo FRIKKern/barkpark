@@ -18,8 +18,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
       content = Content.build_content(socket.assigns.editor_form, socket.assigns[:editor_schema])
       title = Map.get(socket.assigns.editor_form, "title", doc.title)
 
-      case Content.validate_document(type, title, content, socket.assigns.dataset) do
-        {:error, errs} ->
+      # Errors gate the publish; warnings (schema `"level": "warning"`, Gyldendal
+      # parity E1.6) ride along in the assign so the bar still shows them after
+      # a successful publish — Sanity's warning nags, it never blocks.
+      %{errors: errs, warnings: warns} =
+        case socket.assigns[:editor_schema] do
+          # No resolved schema: the pre-existing dataset lookup, errors only.
+          nil ->
+            case Content.validate_document(type, title, content, socket.assigns.dataset) do
+              {:error, errs} -> %{errors: errs, warnings: %{}}
+              _ -> %{errors: %{}, warnings: %{}}
+            end
+
+          schema ->
+            Barkpark.Content.Validation.check(content, title, schema)
+        end
+
+      socket = assign(socket, validation_warnings: warns)
+
+      case errs do
+        errs when errs != %{} ->
           {:noreply,
            socket
            |> assign(validation_errors: errs)

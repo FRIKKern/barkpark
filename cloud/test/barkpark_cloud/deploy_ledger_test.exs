@@ -3884,6 +3884,76 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert is_integer(after_firing.abandoned)
     end
 
+    ## ── dr-w33-bl: the published number carries its THREE LABELS ────────────
+    #
+    # `abandoned: 7` reads as a live gauge of a live writer. On the corpus this
+    # epic measured it is nothing of the kind: every counted row is HISTORICAL,
+    # its chain columns were written by the BACKFILL and not by `defer/3`, and
+    # the count itself was taken by the PROSE reader because `census/3`'s fold
+    # carries no chain columns at all. Three labels, one string, on the wire —
+    # not in a charter a later wave has to find.
+
+    test "the published abandonment number carries basis, historical and backfill labels", %{
+      site: site
+    } do
+      # An EMPTY window first, so the labels are proven to be DERIVED and not a
+      # constant sentence: with nothing to count there is no newest instant to
+      # name, and the sentence says so instead of naming one.
+      empty = DeployLedger.census(~U[2026-07-20 00:00:00Z], ~U[2026-07-21 00:00:00Z])
+      assert empty.abandoned == 0
+      assert empty.abandoned_basis =~ "HISTORICAL: no abandonment matched in this window"
+      assert empty.abandoned_basis =~ "0 of 0 counted row(s)"
+      refute empty.abandoned_basis =~ "newest counted abandonment"
+
+      fence_firing!(site, @fence_capacity, 12, 10)
+      fired = DeployLedger.census(@ab_from, @ab_to)
+      assert fired.abandoned == 1
+
+      # LABEL 1 — WHICH BASIS MEASURED IT. Structural, not a preference: the
+      # fold groups by [site_id, stage, status, failure_reason] and selects only
+      # those four plus a count, so `abandoned_by_columns/1` sees nil on every
+      # group map and the count is a PROSE reading even though `classify/1`
+      # reads columns when it has them.
+      assert fired.abandoned_basis =~ "basis: PROSE"
+      assert fired.abandoned_basis =~ "`depth >= bound`"
+
+      # LABEL 2 — HISTORICAL. The newest counted abandonment is NAMED, so a
+      # reader can see the number is a record of the past and not a live gauge.
+      assert fired.abandoned_basis =~ "HISTORICAL: newest counted abandonment 2026-07-15"
+
+      # LABEL 3 — BACKFILL-WRITTEN. This fixture settles in July, before the
+      # live writer's first chain stamp (2026-08-07T10:12:35.033826Z), so its
+      # chain columns could only have come from the backfill migration.
+      assert fired.abandoned_basis =~ "BACKFILL-WRITTEN: 1 of 1 counted row(s)"
+      assert fired.abandoned_basis =~ "0 were writer-stamped"
+
+      # THE CONTROL, and it is the whole reason label 3 is DERIVED: the same
+      # abandonment settled AFTER that instant is WRITER-stamped, and the
+      # sentence flips. A hardcoded "all backfill" label could not do this.
+      deployment!(site, %{
+        stage: "PLAN",
+        failure_reason:
+          Deploy.abandonment_reason(
+            @fence_capacity,
+            12,
+            DeployLedger.classify(%{
+              status: "deferred",
+              stage: "PLAN",
+              failure_reason: @fence_capacity
+            })
+          ),
+        inserted_at: ~U[2026-08-20 12:00:00Z]
+      })
+
+      later = DeployLedger.census(~U[2026-08-19 00:00:00Z], ~U[2026-08-21 00:00:00Z])
+      assert later.abandoned == 1
+      assert later.abandoned_basis =~ "BACKFILL-WRITTEN: 0 of 1 counted row(s)"
+      assert later.abandoned_basis =~ "1 were writer-stamped"
+      assert later.abandoned_basis =~ "HISTORICAL: newest counted abandonment 2026-08-20"
+
+      refute fired.abandoned_basis == later.abandoned_basis
+    end
+
     # THE ARM THE WHOLE EPIC KEEPS RE-LEARNING: absent and zero are different
     # worlds. A failed row that recorded no reason at all cannot be TESTED for
     # abandonment — the marker is prose in `failure_reason` — so the predicate

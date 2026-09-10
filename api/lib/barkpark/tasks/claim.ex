@@ -25,6 +25,7 @@ defmodule Barkpark.Tasks.Claim do
   alias Barkpark.Repo
   alias Barkpark.Tasks.Blockers
   alias Barkpark.Tasks.CriteriaExemption
+  alias Barkpark.Tasks.SessionId
   alias Barkpark.Tasks.TwinResolver
   alias Barkpark.Tasks.{ExecutionPolicy, Queue, QueueGate, Validation, WorkDigest}
 
@@ -112,7 +113,7 @@ defmodule Barkpark.Tasks.Claim do
             if renewal?(doc, worker_id) do
               with :ok <- check_executable_for_targeted_claim(doc, worker_id),
                    :ok <- validate_renewal_execution_policy(doc, opts) do
-                do_renew(doc, worker_id, caller_token_id)
+                do_renew(doc, worker_id, caller_token_id, Keyword.get(opts, :session))
               end
             else
               with :ok <- check_executable_for_targeted_claim(doc, worker_id),
@@ -438,7 +439,8 @@ defmodule Barkpark.Tasks.Claim do
           resources,
           Keyword.get(opts, :caller_token_id),
           snapshot,
-          override_reason
+          override_reason,
+          Keyword.get(opts, :session)
         )
 
       {:error, errors} ->
@@ -471,7 +473,8 @@ defmodule Barkpark.Tasks.Claim do
          resources,
          caller_token_id,
          snapshot,
-         override_reason
+         override_reason,
+         session
        ) do
     observed_rev = doc.rev
     new_rev = generate_rev()
@@ -513,6 +516,17 @@ defmodule Barkpark.Tasks.Claim do
           do: claim,
           else: Map.put(claim, "criteria_unstated_override", override_reason)
       end)
+      # THE SESSION DISCRIMINATOR (task-f79e39f4992749a5). `worker` is
+      # LANE-scoped, so two sessions of one lane write an identical claim.
+      # `session` is a server-derived, one-way id of the key the caller
+      # presented (Barkpark.Tasks.SessionId) — never the key itself, never
+      # replayable from the stored row. `session_origin` freezes the session
+      # that CREATED this lease so a later renew / pulse / close by a
+      # DIFFERENT session of the same lane is visible from the row alone.
+      # ATTRIBUTION, NEVER A FENCE: the CAS below is byte-unchanged and still
+      # fences on `worker + epoch` only. A sessionless caller (every client
+      # that predates this) writes NO key and its claim stays byte-identical.
+      |> SessionId.put_session_origin(session)
 
     new_content =
       doc.content
@@ -535,7 +549,9 @@ defmodule Barkpark.Tasks.Claim do
             # audit reconstructing "who held this row when" needs. Surfaces on
             # `bp task events --payload` as `payload.actor` with no reader edit
             # (Tasks.Events projects `document` minus envelope minus audit).
-            Map.merge(caller_stamp(caller_token_id), actor_stamp(worker_id, next_epoch))
+            caller_stamp(caller_token_id)
+            |> Map.merge(actor_stamp(worker_id, next_epoch))
+            |> Map.merge(SessionId.session_stamp(session))
           )
 
         {:ok, updated, [task_broadcast(updated, @event_task_claimed, ev, observed_rev)]}
@@ -572,7 +588,7 @@ defmodule Barkpark.Tasks.Claim do
   # refresh, digest untouched) and adds the `claim.now` now-line — but as its
   # OWN path, holder-gated with NO re-claim fall-through: a lapsed lease must
   # pulse `:not_holder`, never silently re-claim through do_claim below.
-  defp do_renew(%Document{content: content} = doc, worker_id, caller_token_id) do
+  defp do_renew(%Document{content: content} = doc, worker_id, caller_token_id, session) do
     observed_rev = doc.rev
     new_rev = generate_rev()
     claim = Map.get(content, "claim") || %{}
@@ -583,6 +599,13 @@ defmodule Barkpark.Tasks.Claim do
       claim
       |> Map.put("epoch", next_epoch)
       |> Map.put("ts_iso", ts_iso)
+      # The renewing SESSION overwrites `claim.session`; `session_origin` is
+      # left exactly as the original claim wrote it. `session != session_origin`
+      # on a live row is therefore the reported signal that two sessions of one
+      # lane touched it (scripts/ledger/claim-health.sh). Attribution only —
+      # a renewal by a different session is still allowed, as it must be: the
+      # lane worker id is the fence and it has not changed.
+      |> SessionId.put_session(session)
 
     # Keep worker + assignee (already this caller). Only the claim lease moves.
     new_content =
@@ -605,7 +628,9 @@ defmodule Barkpark.Tasks.Claim do
             # audit reconstructing "who held this row when" needs. Surfaces on
             # `bp task events --payload` as `payload.actor` with no reader edit
             # (Tasks.Events projects `document` minus envelope minus audit).
-            Map.merge(caller_stamp(caller_token_id), actor_stamp(worker_id, next_epoch))
+            caller_stamp(caller_token_id)
+            |> Map.merge(actor_stamp(worker_id, next_epoch))
+            |> Map.merge(SessionId.session_stamp(session))
           )
 
         {:ok, updated, [task_broadcast(updated, @event_task_claimed, ev, observed_rev)]}

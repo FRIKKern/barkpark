@@ -196,6 +196,69 @@ defmodule BarkparkCloud.Web.RouterAttachDomainTest do
       assert active_attaches(bp) == 0
     end
 
+    # dr-w26-bl-claim-leg-refusal-reaches-no-human — THE LEG REACHES THE WIRE.
+    #
+    # The test above holds the name with another instance's `custom_host`, a
+    # surface `provisioning_fqdn_claim/2` does not walk, so its body is the bare
+    # `taken` and stays that way. THIS one holds the name with another
+    # instance's PROVISIONING FQDN — the walk that writes `{:held, leg, why}` —
+    # and asserts the leg lands on the body, that MUTATING which leg holds it
+    # changes the body, and that the row-identifying half of the operator
+    # sentence does NOT ride along.
+    test "held by a provisioning FQDN → 409 taken CARRIES the leg, and mutating the leg changes the body" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = session_token(user)
+
+      # The holder: an old, silent row whose url IS @domain, holding the name on
+      # its decryptable admin credential.
+      holder =
+        barkpark_fixture(elem(user_with_team(), 1))
+        |> Ecto.Changeset.change(
+          url: "https://" <> @domain,
+          inserted_at: DateTime.add(DateTime.utc_now(), -30, :day)
+        )
+        |> Repo.update!()
+
+      holder =
+        holder |> Ecto.Changeset.change(admin_token_encrypted: "ciphertext") |> Repo.update!()
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: @domain}, token)
+      credential_body = json_body(conn)
+
+      assert conn.status == 409
+      assert credential_body["error"] == "taken"
+      assert credential_body["claim_leg"] == "admin_credential"
+      assert credential_body["detail"] =~ "live credential"
+
+      # THE DISCLOSURE FENCE. The operator sentence names the holding row, its
+      # team and its liveness timeline; the caller is a DIFFERENT team, so none
+      # of that may ride the wire.
+      rendered = Enum.join(Map.values(credential_body), " ")
+      refute rendered =~ holder.id
+      refute rendered =~ holder.team_id
+
+      # MUTATION — the leg, and only the leg. Drop the credential and let the
+      # row phone home instead: the SAME hostname, the SAME refusal, a different
+      # leg, and the body must say so.
+      holder
+      |> Ecto.Changeset.change(admin_token_encrypted: nil, last_seen_at: DateTime.utc_now())
+      |> Repo.update!()
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: @domain}, token)
+      reporting_body = json_body(conn)
+
+      assert conn.status == 409
+      assert reporting_body["error"] == "taken"
+      assert reporting_body["claim_leg"] == "agent_reporting"
+      refute reporting_body["claim_leg"] == credential_body["claim_leg"]
+      refute reporting_body["detail"] == credential_body["detail"]
+
+      # And nothing was written or enqueued on either refusal.
+      assert Registry.get_barkpark(bp.id).custom_host == nil
+      assert active_attaches(bp) == 0
+    end
+
     test "double-enqueue: a second attach while one is in flight → 409 already_attaching, still ONE active job" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)

@@ -244,6 +244,9 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   attr :user_color, :string, required: true
   attr :presences, :list, default: []
   attr :editor_doc, :map, default: nil
+  # Gyldendal parity E1.8 — a titleless type names its document through
+  # list_preview.title; the "me" location reads it the way the header does.
+  attr :editor_schema, :map, default: nil
   attr :dataset, :string, required: true
   attr :current_workspace, :map, default: nil
   attr :current_project, :map, default: nil
@@ -291,7 +294,7 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
               title={"#{@user_name} — profile"} aria-label={@user_name <> " — open your profile"}>
         <div class="presence-me-info">
           <span class="presence-me-name"><%= @user_name %></span>
-          <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: @editor_doc.title || "Untitled", else: "browsing"), 24) %></span>
+          <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: @editor_doc.title || Barkpark.Content.TitleDerivation.preview_title(@editor_doc, @editor_schema) || "Untitled", else: "browsing"), 24) %></span>
         </div>
         <div class="presence-me" style={"background: #{@user_color}"} aria-hidden="true">
           <%= String.first(@user_name) %>

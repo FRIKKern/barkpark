@@ -4666,7 +4666,7 @@ const EXPECTATIONS = {
       assert.ok(body.includes("Team members"), "the roster card heading renders");
       assert.ok(body.includes("Pending invitations"), "the admin-only invitations card renders");
       assert.ok(body.includes("ada@acme.com") && body.includes("lin@acme.com") && body.includes("rex@acme.com"), "every member row renders");
-      assert.ok(body.includes("(you)"), "the acting owner is self-tagged and gets no self-remove");
+      assert.ok(body.includes("(you)"), "the acting owner is self-tagged");
       assert.ok(body.includes("sky@partner.io"), "a pending invitation renders");
       // THREE roles only — the chips read Owner/Admin/Member; NO invented tiers.
       assert.ok(body.includes(">Owner<") && body.includes(">Admin<") && body.includes(">Member<"), "the 3 real role chips render");
@@ -4699,8 +4699,14 @@ const EXPECTATIONS = {
       const wire = (method, re) => ctx.calls.filter((c) => c.method === method && re.test(c.path)).length;
       const panel = reg.get("members-body");
       const removes = panel.querySelectorAll("[data-member-remove]");
+      // TWO, and the reason is STATE, not authority (cch-w44-bl): ada is the SOLE
+      // owner on this roster, so do_remove would roll her own removal back with
+      // :last_owner — the same 409 that already withholds her Change role. On a
+      // roster with a second owner she DOES get a self-Remove; that is the
+      // members-peer-owner scenario, which pins four.
       assert.equal(removes.length, 2,
-        "the two manageable rows carry a wired Remove (the acting owner never self-removes); got " + removes.length);
+        "the two manageable rows carry a wired Remove (the SOLE owner's own row is withheld by " +
+        "the last_owner 409, not by a blanket self rule); got " + removes.length);
       const victimId = removes[0].getAttribute("data-member-remove");
       const victimEmail = removes[0].getAttribute("data-email");
       assert.ok(victimId && victimEmail, "the Remove button must carry both the user id and the email it types against");
@@ -4825,8 +4831,17 @@ const EXPECTATIONS = {
         "an owner must be offered Remove on a PEER OWNER's row — remove_member_as/3's owner escape hatch permits it; offered on " + JSON.stringify(removeOffers));
       assert.deepEqual(roleOffers, ["ada@acme.com", "lin@acme.com", "rex@acme.com"],
         "Change role reaches the two outranked rows and the actor's OWN (self-demotion is a 409 state refusal, not an authority one) — got " + JSON.stringify(roleOffers));
-      assert.deepEqual(removeOffers, ["lin@acme.com", "ozz@acme.com", "rex@acme.com"],
-        "Remove reaches every row but the actor's own — got " + JSON.stringify(removeOffers));
+      // cch-w44-bl: RE-DERIVED BY RUNNING, not by inspection. With the self-Remove
+      // arm flipped this assertion failed with
+      //   "Remove reaches every row but the actor's own — got
+      //    [\"ada@acme.com\",\"lin@acme.com\",\"ozz@acme.com\",\"rex@acme.com\"]"
+      // and ada IS the honest fourth: she is an owner and ozz is a second owner,
+      // so remove_member_as/3 answers {:ok, :removed} for her own row — nothing
+      // about last_owner is in reach. This is the scenario the fixture exists for.
+      assert.deepEqual(removeOffers, ["ada@acme.com", "lin@acme.com", "ozz@acme.com", "rex@acme.com"],
+        "Remove reaches every row INCLUDING the actor's own — an owner who is not the last " +
+        "owner may leave their own team, and remove_member_as/3 has no self? branch to stop " +
+        "them — got " + JSON.stringify(removeOffers));
     },
   },
   // ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ─────────────────────
@@ -6049,13 +6064,50 @@ function assertFixtureShapePins() {
 // 4-5x per boot while the registry hands back the same node, so listeners
 // accumulate and an even count makes the toggle dead — a click-opened grid
 // measures the harness, not the app.
+//
+// ── cch-w49-bl · WIDENED, NOT DELETED ────────────────────────────────────────
+// The screen now ASKS: renderBilling issues GET /v1/usage/summary and renders
+// `usage.team.instances.quota` — the same value Billing.barkpark_limit/1
+// enforces at create time — on the ACTIVE tier only. A flat ban on every
+// ceiling numeral would have forbidden exactly that fix, so the ceiling arm
+// becomes an ALLOWLIST and the allowed value is read out of the SCENARIO'S OWN
+// FIXTURE, never named here:
+//
+//     allowed = SCENARIOS[name].data.usageSummary.team.instances.quota
+//
+// A hand-typed numeral therefore still reds — there is no fixture for it to
+// match — which is the property this guard existed for and the one criterion 0
+// mutation-proves. An actor with NO fixture has an EMPTY allowlist, so for the
+// other billing actors this assertion is bit-for-bit the ban it was before.
+//
+// THE PRICE ARM IS UNCHANGED AND UNCONDITIONAL. No amount exists anywhere
+// server-side (STRIPE_PRICE_* are price ids), so no payload can ever carry one
+// and there is nothing an allowlist could be keyed on.
 const MONEY_CURRENCY_RE = /\$\s?\d[\d,]*/;
 const MONEY_CEILING_RE = /\b\d+\s+managed instances?\b/;
+const MONEY_CEILING_RE_G = /\b(\d+)\s+managed instances?\b/g;
 const MONEY_CONTAINERS = ["billing-recommended", "billing-tiers"];
+
+// The ceilings THIS scenario's own payload carries, as rendered strings. Empty
+// for every scenario without a usageSummary fixture — i.e. the flat ban.
+function payloadCeilings(name) {
+  const d = (SCENARIOS[name] && SCENARIOS[name].data) || {};
+  const q = d.usageSummary && d.usageSummary.team && d.usageSummary.team.instances
+    ? d.usageSummary.team.instances.quota
+    : null;
+  if (typeof q !== "number" || !Number.isInteger(q) || q <= 0) return new Set();
+  return new Set([String(q)]);
+}
 
 async function assertBillingStatesNoNumeralItCannotSupport() {
   const names = SCENARIO_NAMES.filter((n) => (SCENARIOS[n].deepLink || "") === "#billing");
   const broken = [];
+  // Counted so the widened arm cannot pass by rendering NOTHING: this guard is
+  // absent-arm, and an absent-arm guard is greenest when the feature is dead.
+  // The count is printed, and floored at 1 below — the corpus mints exactly one
+  // billing actor with a usageSummary fixture (billing-portal-return), so a
+  // derivation that stopped working reds here rather than reading as purity.
+  let backedCount = 0;
   if (names.length < 6) {
     broken.push("only " + names.length + " scenario(s) deep-link #billing (6 are committed) — the corpus slice this " +
       "guard reads has shrunk, and an assertion over a shrunken slice is a false green, not a pass");
@@ -6078,19 +6130,37 @@ async function assertBillingStatesNoNumeralItCannotSupport() {
       continue;
     }
     const cur = union.match(MONEY_CURRENCY_RE);
-    const ceil = union.match(MONEY_CEILING_RE);
-    if (cur || ceil) {
+    // EVERY ceiling occurrence is checked, not the first: an allowed numeral
+    // appearing before a hand-typed one would otherwise hide it.
+    const allowed = payloadCeilings(name);
+    const unbacked = [...union.matchAll(MONEY_CEILING_RE_G)]
+      .filter((m) => !allowed.has(m[1]))
+      .map((m) => m[0]);
+    const backed = [...union.matchAll(MONEY_CEILING_RE_G)].filter((m) => allowed.has(m[1]));
+    if (backed.length) backedCount++;
+    if (cur || unbacked.length) {
       broken.push(name + ": the billing surface STATES " +
         [cur ? "a price " + JSON.stringify(cur[0]) : null,
-         ceil ? "a ceiling " + JSON.stringify(ceil[0]) : null].filter(Boolean).join(" and ") +
-        " — no server value backs either one (no amount exists in the tree; the ceiling is never fetched on this " +
-        "screen), so the console must state the tier, the features and the CTA, and state no number");
+         unbacked.length
+           ? "a ceiling " + unbacked.map((x) => JSON.stringify(x)).join(", ") +
+             " that this actor's payload does not carry" +
+             (allowed.size ? " (it carries " + [...allowed].join(", ") + ")" : " (it carries no quota at all)")
+           : null].filter(Boolean).join(" and ") +
+        " — no server value backs it (no amount exists in the tree; a ceiling is only true when " +
+        "usage.team.instances.quota answered it), so the console must state the tier, the features and the CTA, " +
+        "and state no number it was not told");
     }
+  }
+  if (!backedCount) {
+    broken.push("NO billing actor rendered a payload-backed ceiling — the corpus mints exactly one " +
+      "(billing-portal-return's usageSummary fixture), so the derivation this guard was widened for is dead and " +
+      "the widened arm is passing on absence rather than on honesty");
   }
   process.stdout.write(
     "  " + (broken.length ? "FAIL" : "ok  ") + " billing-numerals — " + names.length +
     " #billing actor(s) × " + MONEY_CONTAINERS.length + " container(s): " +
-    (broken.length ? broken.length + " stating a numeral no server value supports" : "no unsupported numeral stated") + "\n");
+    (broken.length ? broken.length + " stating a numeral no server value supports"
+      : "no unsupported numeral stated; " + backedCount + " stating a payload-backed ceiling") + "\n");
   if (broken.length) {
     process.stdout.write("\nbilling absent-arm guard failed:\n  " + broken.join("\n  ") + "\n");
     process.exit(1);

@@ -219,7 +219,48 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
               plugin_name: assigns.plugin_name,
               path: row_path,
               readonly: assigns.readonly,
-              bare: true
+              bare: true,
+              # Picker context for reference / image subfields inside the row
+              # (Gyldendal parity E1.6) — a scoped workspace's picker must
+              # search its own scope, not the flat default.
+              dataset: assigns[:dataset] || "production",
+              scope_prefix: assigns[:scope_prefix] || "",
+              api_token_raw: assigns[:api_token_raw] || ""
+            })
+        })
+
+      # Gyldendal parity E1.6 (task-cd8e10ca44ccb932 criterion 1) — an image
+      # ROW is Sanity's image array item («Fremhevete bilder»): the same
+      # bp-media-picker a top-level image field mounts (hotspot / alt opt-ins
+      # from the element declaration), inside a collapsed row whose summary
+      # shows the thumbnail and the alt text. Before this the row fell through
+      # to a bare text input holding the image's JSON.
+      "image" ->
+        opts = subfield_attr(item, :raw) || %{}
+        map = image_row_map(row_value)
+
+        item_row(%{
+          item: item,
+          idx: idx,
+          preview: %{
+            title: image_row_title(map, item),
+            subtitle: nil,
+            media: media_url(map)
+          },
+          open: map == %{},
+          row_id: "bp-item-" <> sanitize_id("#{assigns.field.name}#{row_path}"),
+          body:
+            image_row(%{
+              wrap_id: ref_row_id(assigns.field, row_path, map, idx),
+              input_name: row_path,
+              row_value: if(map == %{}, do: "", else: Jason.encode!(map)),
+              hotspot: image_opt(opts, "hotspot"),
+              alt: image_opt(opts, "alt"),
+              dataset: assigns[:dataset] || "production",
+              scope_prefix: assigns[:scope_prefix] || "",
+              api_token_raw: assigns[:api_token_raw] || "",
+              on_change: assigns.on_change,
+              readonly: assigns.readonly
             })
         })
 
@@ -460,8 +501,76 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
 
   # refType lives on the RAW field map (a v1 leaf key parse/2 preserves
   # verbatim); parsed %Field{} carries it under .raw, plain maps directly.
-  defp ref_type_of(%{raw: %{} = raw}), do: raw["refType"] || ""
-  defp ref_type_of(%{} = item), do: item["refType"] || Map.get(item, :ref_type) || ""
+  # Several target types (Sanity `to: [...]`) ride comma-joined — the same
+  # attribute shape FieldInputs emits (Gyldendal parity E1.6).
+  defp ref_type_of(%{raw: %{} = raw}), do: ref_type_of(raw)
+
+  defp ref_type_of(%{} = item) do
+    case BarkparkWeb.Components.FieldInputs.reference_types(item) do
+      [] -> Map.get(item, :ref_type) || ""
+      types -> Enum.join(types, ",")
+    end
+  end
+
+  # An image row's stored value: the object, its JSON string, or nothing.
+  defp image_row_map(%{} = m), do: m
+
+  defp image_row_map(v) when is_binary(v) do
+    case String.trim(v) do
+      "" ->
+        %{}
+
+      t when binary_part(t, 0, 1) == "{" ->
+        with({:ok, %{} = m} <- Jason.decode(t), do: m, else: (_ -> %{"url" => v}))
+
+      _ ->
+        %{"url" => v}
+    end
+  end
+
+  defp image_row_map(_), do: %{}
+
+  defp image_row_title(map, item) do
+    case Map.get(map, "alt") do
+      alt when is_binary(alt) and alt != "" ->
+        alt
+
+      _ ->
+        case Map.get(map, "url") do
+          url when is_binary(url) and url != "" -> url |> String.split("/") |> List.last()
+          _ -> title_for(item) || "Image"
+        end
+    end
+  end
+
+  defp image_opt(opts, key) when is_map(opts) do
+    if Map.get(opts, key) == true or get_in(opts, ["options", key]) == true, do: true, else: nil
+  end
+
+  defp image_opt(_, _), do: nil
+
+  defp image_row(assigns) do
+    ~H"""
+    <div id={@wrap_id} phx-update="ignore" phx-hook="BarkparkFieldBridge" class="bp-array-image-row">
+      <input
+        type="hidden"
+        id={"#{@wrap_id}-h"}
+        name={@input_name}
+        value={@row_value}
+        phx-change={@on_change}
+      />
+      <bp-media-picker
+        value={@row_value}
+        dataset={@dataset}
+        scope-prefix={@scope_prefix}
+        data-bridge-target={"#{@wrap_id}-h"}
+        data-token={@api_token_raw}
+        hotspot={@hotspot}
+        alt={@alt}
+      ></bp-media-picker>
+    </div>
+    """
+  end
 
   defp leaf_input(assigns) do
     ~H"""

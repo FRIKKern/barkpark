@@ -9977,14 +9977,21 @@ test("C10: memberRowHtml — manage controls are role-gated, and the self row is
   assert.ok(!member.includes("data-member-remove"));
   // cch-w42-s3: this test used to be named "self-hidden" and assert only the
   // Remove half, which is how it stayed green through an authority rewrite that
-  // changed the other half. The self row is TWO answers now: Remove withheld
-  // (console ruling, D492 variant B), Change role RENDERED — update_member_role_as/4's
-  // self? branch bypasses the rank arm, so self-demotion is server-legal. Both
-  // halves are asserted here so neither can move in silence.
+  // changed the other half. The self row is TWO answers now, and cch-w44-bl made
+  // them per-ACTOR: Change role is RENDERED (update_member_role_as/4's self?
+  // branch bypasses the rank arm), and Remove follows remove_member_as/3, which
+  // has NO self? branch — so an acting ADMIN on their own row still gets none
+  // (outranks?("admin","admin") is strict `>` → 403) while an acting OWNER does
+  // (the `actor_role == "owner"` hatch → {:ok, :removed}). Both halves, both
+  // actors, so none of it can move in silence.
   const self = hooks.memberRowHtml(m, { role: "admin", userId: "u2" });
   assert.match(self, /\(you\)/);
-  assert.ok(!self.includes("data-member-remove"), "Remove stays withheld on your own row");
+  assert.ok(!self.includes("data-member-remove"),
+    "an ADMIN's own row must carry no Remove — remove_member_as/3 answers {:error, :forbidden}");
   assert.match(self, /data-member-role="u2"/, "Change role is offered on your own row");
+  const selfOwner = hooks.memberRowHtml(m, { role: "owner", userId: "u2" });
+  assert.match(selfOwner, /data-member-remove="u2"/,
+    "an OWNER's own row must carry Remove — the server honours it whenever they are not the last owner");
 });
 
 // ── cch-w42-s3: THE MEMBERS ROW READS THE TARGET'S RANK, PER VERB ───────────
@@ -10026,11 +10033,17 @@ const MEMBER_AUTHORITY_MATRIX = [
   // ── THE SELF ROW: two per-verb answers, never one boolean.
   // Change role is REAL on your own row (update_member_role_as/4's self? branch
   // bypasses the rank arm; last_owner is a 409 STATE refusal the server owns,
-  // not an authority one, so it does not withhold the control). Remove is
-  // withheld on the self row by console ruling — the server has no self? branch
-  // on that verb, so this is a known UNDER-offer, pre-existing on main, filed
-  // separately; it is pinned here so it stays a DECISION and not a drift.
-  ["owner acting on THEIR OWN row", "owner", "owner", true, true, false],
+  // not an authority one, so it does not withhold the control). Remove now
+  // follows the SAME rule — cch-w44-bl deleted the blanket `if (isSelf) return
+  // false`, because remove_member_as/3 has no self? branch either and the
+  // general law already answers all three self cells the way the server does:
+  //   owner-self  -> the `actor_role == "owner"` hatch  -> {:ok, :removed}   OFFER
+  //   admin-self  -> strict outranks?("admin","admin")  -> {:error, :forbidden} OMIT
+  //   member-self -> below the route's admin floor      -> {:error, :forbidden} OMIT
+  // These rows hand in a ctx with NO roster, so isSoleOwnerSelf has no opinion
+  // and the last_owner STATE guard does not fire — this is the authority answer,
+  // pure. The state half is pinned by the cch-w45-s2 block below.
+  ["owner acting on THEIR OWN row", "owner", "owner", true, true, true],
   ["member acting on THEIR OWN row", "member", "member", true, false, false],
   // The self row's target role comes from ctx.role, NEVER the roster row's own
   // m.role: this cell hands memberRowHtml an INCOHERENT row (an acting admin
@@ -10151,8 +10164,11 @@ test("cch-w45-s2: the sole owner's own row omits the Change-role the server 409s
   // The peers are untouched — this guard is about ONE cell, not the panel.
   assert.ok(panel.includes('data-member-role="usr_lin"'), "the admin peer still offers Change role");
   assert.ok(panel.includes('data-member-role="usr_rex"'), "the member peer still offers Change role");
-  // …and Remove is not disturbed in either direction (self stays withheld by
-  // the pre-existing D492 ruling, peers keep theirs).
+  // …and Remove is withheld on the SAME row for the SAME reason (cch-w44-bl):
+  // do_remove rolls the sole owner's own removal back with :last_owner too, so
+  // both verbs on ada's row are 409s. The peers keep theirs.
+  assert.ok(!panel.includes('data-member-remove="usr_ada"'),
+    "the SOLE owner's own row must not offer a Remove do_remove rolls back with :last_owner");
   assert.equal((panel.match(/data-member-remove="/g) || []).length, 2);
 });
 
@@ -10162,14 +10178,20 @@ test("cch-w45-s2: the withheld control is OMITTED, never a disabled ghost", () =
   assert.match(selfRow, /\(you\)/, "it is the self row");
   assert.match(selfRow, /class="set-chip">Owner</, "and it still states the role it will not let you change");
   assert.ok(!selfRow.includes("data-member-role"), "no Change-role ghost");
+  assert.ok(!selfRow.includes("data-member-remove"), "no Remove ghost either (cch-w44-bl)");
   assert.ok(!selfRow.includes("disabled"), "an omitted control must not ship as a disabled button");
-  assert.ok(!selfRow.includes(">Change role<"), "and the label must not survive as inert text");
+  assert.ok(!selfRow.includes(">Change role<") && !selfRow.includes(">Remove<"),
+    "and neither label may survive as inert text");
 });
 
 test("cch-w45-s2: the panel says WHY the sole owner's row lost its control", () => {
   const panel = hooks.membersPanelHtml(SOLE_OWNER_ROSTER, [], ADA_CTX);
   assert.match(panel, /only owner[\s\S]*promote another member to owner first/,
     "an omission with no sentence is a silently missing control");
+  // cch-w44-bl: TWO controls are withheld on that row now, and the sentence
+  // names both — a sentence that covers half the omission is half a lie.
+  assert.match(panel, /can't change your own role or leave the team/,
+    "the sole-owner sentence must name the withheld Remove as well as the withheld Change role");
   // A team with two owners gets no sentence — nothing was withheld.
   const twoOwners = SOLE_OWNER_ROSTER.map((m) =>
     m.user_id === "usr_lin" ? Object.assign({}, m, { role: "owner" }) : m);
@@ -10185,6 +10207,13 @@ test("cch-w45-s2: the guard FAILS OPEN on every roster it cannot fully read", ()
     m.user_id === "usr_lin" ? Object.assign({}, m, { role: "owner" }) : m);
   assert.ok(selfRow(twoOwners).includes('data-member-role="usr_ada"'),
     "a second owner makes the self-demotion legal — the control must be offered");
+  // …and the self-REMOVE with it (cch-w44-bl): a second owner is exactly what
+  // takes do_remove's :last_owner rollback out of reach, so remove_member_as/3
+  // answers {:ok, :removed} and withholding the button is an UNDER-offer.
+  assert.ok(selfRow(twoOwners).includes('data-member-remove="usr_ada"'),
+    "an owner who is not the last owner must be able to leave their own team");
+  assert.ok(selfRow(undefined).includes('data-member-remove="usr_ada"'),
+    "a ctx with no roster carries no state knowledge — offer the Remove too");
   // 2. A row missing its role — the owner count is unknowable, so no opinion.
   const illegible = SOLE_OWNER_ROSTER.map((m) =>
     m.user_id === "usr_rex" ? Object.assign({}, m, { role: undefined }) : m);
@@ -10258,9 +10287,17 @@ test("cch-w42-s3: the two predicates disagree on owner-vs-owner, exactly as the 
     "remove_member_as/3 opens with `actor_role == \"owner\" or` — the hatch is real");
   assert.equal(hooks.canChangeMemberRole("owner", "owner", false), false,
     "update_member_role_as/4 has no hatch and outranks?/2 is strict `>`");
-  // And the self? bypass lives on ONE verb only.
+  // And the self? bypass lives on ONE verb only — canRemoveMember has none,
+  // exactly like remove_member_as/3, so its self answers are just the general
+  // law applied to targetRole === ctx.role (cch-w44-bl).
   assert.equal(hooks.canChangeMemberRole("admin", "admin", true), true);
-  assert.equal(hooks.canRemoveMember("owner", "owner", true), false);
+  assert.equal(hooks.canRemoveMember("owner", "owner", true), true,
+    "an owner is not the exception to their own escape hatch — remove_member_as/3 " +
+    "answers {:ok, :removed} on their own row whenever they are not the last owner");
+  assert.equal(hooks.canRemoveMember("admin", "admin", true), false,
+    "an admin's own row IS refused, and by the rank arm, not by a self rule");
+  assert.equal(hooks.canRemoveMember("member", "member", true), false,
+    "a member is below the route's own with_team_role(conn, \"admin\") floor");
 });
 
 test("cch-w42-s3: roleModalOptionsHtml — a currentRole with no matching option stages NOTHING", () => {
@@ -18601,6 +18638,61 @@ test("cch-w55-s3: both trial cards — owner and member — carry the same teard
 //   * `trialEnded` weakened to `days < 0` (the shape a "days can't be zero"
 //     reading would produce) reds every days=0 assertion while days=9 and the
 //     server-side clamp pin stay green.
+
+// ── cch-w49-bl · THE DERIVED CEILING, arm by arm ────────────────────────────
+// The WIRING (renderBilling issues GET /v1/usage/summary; the plan-state card
+// and its GR36 member twin render what came back) is proven by the preview
+// corpus and by smoke.mjs's widened absent-arm guard, which reads the rendered
+// bytes of all eleven #billing actors: billing-portal-return carries the only
+// usageSummary fixture on that slice and states "3 managed instances on this
+// plan"; the other ten carry none and state nothing.
+//
+// What these pins add is the arms no fixture reaches. The sampler writes the
+// STRING "unmetered" into meter values, and Usage.instance_quota/1 clamps the
+// forever-tier placeholder (>= 100_000) to nil rather than drawing a bar to a
+// million — so "a quota field exists" is not "a ceiling was answered", and a
+// truthiness read of it would put the word "unmetered" or a millionth on a
+// money screen. Every non-integer, non-positive value is the SAME silence as an
+// absent one.
+
+test("cch-w49-bl: usageInstanceCeiling answers ONLY a finite positive integer", () => {
+  const q = (quota) => hooks.usageInstanceCeiling({ team: { instances: { value: 1, quota: quota } } });
+  assert.equal(q(3), 3, "the ordinary supporter ceiling the route derives from Billing.barkpark_limit/1");
+  assert.equal(q(1), 1);
+  // Usage clamps the forever placeholder itself; this is the belt to that brace.
+  assert.equal(q(1000000), 1000000, "a large integer IS a ceiling — the clamp is the SERVER's job, not a client re-guess");
+  // …and everything that is not a ceiling reads as silence, not as a value.
+  assert.equal(q("unmetered"), null, "the sampler's own string for an unmetered meter must never reach a screen");
+  assert.equal(q("3"), null, "a numeric STRING is not the number — it would render, then drift");
+  assert.equal(q(null), null);
+  assert.equal(q(undefined), null, "the empty envelope the preview stub answers for a fixtureless actor");
+  assert.equal(q(0), null, "a zero ceiling is not a ceiling; the server never emits one");
+  assert.equal(q(-1), null);
+  assert.equal(q(2.5), null, "a fraction is not an instance count");
+  assert.equal(q(Infinity), null);
+  assert.equal(q(NaN), null);
+  // The envelope itself may be missing at every level — a failed read, a team
+  // meter that degraded to unmetered, the stub's {team:{},instances:[]}.
+  assert.equal(hooks.usageInstanceCeiling(null), null);
+  assert.equal(hooks.usageInstanceCeiling({}), null);
+  assert.equal(hooks.usageInstanceCeiling({ team: {} }), null);
+  assert.equal(hooks.usageInstanceCeiling({ team: { instances: {} } }), null);
+});
+
+test("cch-w49-bl: planCeilingHtml OMITS on nil and never invents a numeral", () => {
+  assert.equal(hooks.planCeilingHtml(null), "", "nil OMITS — the whole ruling of cch-w49-s1");
+  assert.equal(hooks.planCeilingHtml(undefined), "", "and an unanswered read is the same silence as an absent one");
+  const three = hooks.planCeilingHtml(3);
+  assert.match(three, /3 managed instances on this plan/);
+  // The absent-arm guard's own regex must MATCH what this renders — a line the
+  // guard cannot see is a line the guard cannot police.
+  assert.match(three, /\b\d+\s+managed instances?\b/);
+  // Singular is a real state: the free/none ceiling is 1.
+  assert.match(hooks.planCeilingHtml(1), /1 managed instance on this plan/);
+  assert.ok(!/instances/.test(hooks.planCeilingHtml(1)), "one instance is not 'instances'");
+  // No price, ever — the currency half of the guard stays unconditional.
+  assert.ok(!/\$/.test(three), "no amount exists server-side, so no ceiling line may carry one");
+});
 
 test("cch-w50: trialEnded is the terminal predicate — 0 is ENDED, unknown is not", () => {
   assert.equal(hooks.trialEnded(0), true, "0 is the server's clamped terminal value, not a midpoint");
@@ -31248,4 +31340,57 @@ test("cch-w49-bl: the OWNER gets every one of the five — so no pin above can b
   assert.ok(o.membersHtml.includes("Pending invitations"), "…and reads the invitations section");
   assert.ok(o.membersHtml.includes("data-member-role") || o.membersHtml.includes("data-member-remove"),
     "…and is offered at least one row verb over the other member");
+});
+
+// ── cch-w42-bl: the cross-tab team pin ───────────────────────────────────────
+// The RENDERED half of this fix is proved in two real Chrome tabs by
+// cloud/priv/static/__preview__/pin-race.mjs (wired into console-harness.yml as
+// a step of the modal-oracle job). What lives HERE is the pure decision the
+// live `storage` listener delegates to — the part a browser run cannot pin
+// cheaply, and the part a mutation would most quietly widen or narrow.
+//
+// NON-VACUITY, said out loud: `pinStorageMovesTeam` is exported from app.js's
+// own __bpTestHook block, so an assertion below can only pass against the
+// shipped function. There is no local re-implementation in this file.
+test("cch-w42-bl: pinStorageMovesTeam fires for a MOVED team pin and for nothing else", () => {
+  const f = hooks.pinStorageMovesTeam;
+  assert.equal(typeof f, "function", "app.js must export the cross-tab pin decision");
+
+  // 1 · THE DEFECT'S OWN EVENT. Another tab switched teams: the reload is the
+  //     whole fix, and the instrument's RACE leg is exactly this event.
+  assert.equal(f("bp.active-team", "team-A", "team-B"), true,
+    "a moved pin must reload the stale tab");
+  // A first write (no prior value) and a removal are both real moves.
+  assert.equal(f("bp.active-team", null, "team-B"), true, "…first write of the pin is a move");
+  assert.equal(f("bp.active-team", "team-A", null), true, "…and so is clearing it");
+
+  // 2 · THE CONTROL LEG'S EVENT. Both tabs on one team: a same-value write is
+  //     not a move, and a reload there would be pure cost with no defect to pay
+  //     for. This is the assertion that makes arm 1 a decision rather than a
+  //     blanket "reload on any storage event".
+  assert.equal(f("bp.active-team", "team-A", "team-A"), false,
+    "a same-value write is not a move");
+  assert.equal(f("bp.active-team", null, null), false, "…nor is null-to-null");
+
+  // 3 · EVERY OTHER KEY. The console writes bpcloud.session and a theme key
+  //     through the same localStorage; neither invalidates a painted team.
+  for (const k of ["bpcloud.session", "bp.theme", "bp.active-teams", "", "bp.active-tea"]) {
+    assert.equal(f(k, "x", "y"), false, "key " + JSON.stringify(k) + " must not force a reload");
+  }
+  // A whole-store clear() delivers key === null. It is not a move of THIS key.
+  assert.equal(f(null, null, null), false, "a localStorage.clear() event is not a pin move");
+});
+
+test("cch-w42-bl: the LIVE listener is mounted on window, not merely declared", () => {
+  // The decision above is inert without its mount, and a mutation that deletes
+  // the addEventListener leaves every pure test in this file green — which is
+  // precisely how this defect class shipped in the first place. app.js carried
+  // ZERO "storage" listeners before this wave (that absence is quoted in
+  // pin-race.mjs's header as the mechanism), so asserting one exists is a real
+  // ratchet and not a tautology.
+  const src = APP_SRC;
+  assert.ok(/window\.addEventListener\(\s*"storage"/.test(src),
+    'app.js must mount a "storage" listener — without it the pure decision is never asked');
+  assert.ok(/pinStorageMovesTeam\(\s*e\.key/.test(src),
+    "…and that listener must delegate to pinStorageMovesTeam rather than inline a second copy of it");
 });

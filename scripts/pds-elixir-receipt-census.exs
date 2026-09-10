@@ -66,6 +66,9 @@
 #   elixir scripts/pds-elixir-receipt-census.exs            # full corpus census
 #   elixir scripts/pds-elixir-receipt-census.exs --sites    # + every emitted site, one per line
 #   elixir scripts/pds-elixir-receipt-census.exs --files-from FILE   # corpus-refusal rehearsal
+#        FILE must BE the api/lib population, file for file (tree_population/0 minus the
+#        announced @files_from_allowlist). A strict subset is REFUSED at exit 2 by name —
+#        it is not a smaller corpus, it is a census of a population nobody chose.
 #   elixir scripts/pds-elixir-receipt-census.exs --keys     # STDOUT: the register key, TSV, one line per emitted site
 #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys # STDOUT: the EXCLUSION anchor, TSV, one line per @routed_excluded row
 #   elixir scripts/pds-elixir-receipt-census.exs --citations # STDOUT: every evidence citation RESOLVED BY CONTENT, TSV: path, line, block fingerprint, marker
@@ -756,7 +759,7 @@ defmodule PDS.Census do
     # THE LIVE ROUTE THE WAVE-42 FIXTURE ADDS. MANDATORY, not decorative: `live` is a
     # ROUTED-WRITE method, so without this row every --selftest run exits 1 on
     # `FAIL ROUTED-POPULATION-COMPLETE … UNDISPOSED ARRIVAL live /studio/fixture`. That
-    # is the disposition table refusing an arrival, NOT guard_corpus!/1 (which never
+    # is the disposition table refusing an arrival, NOT guard_corpus!/3 (which never
     # refuses on this), and it fires whether or not the named module is written.
     {:live, "/studio/fixture", "Barkpark.Filler.FixtureLive", nil, :selftest_fixture},
     # THE FOUR PLUGIN-MOUNT ARRIVALS THE WAVE-43 FIXTURE ADDS. Three are MOUNTED (the
@@ -2519,7 +2522,7 @@ defmodule PDS.Census do
     files = corpus(opts)
 
     banner()
-    guard_corpus!(files)
+    guard_corpus!(files, opts)
 
     parsed = Enum.map(files, &parse_file/1)
     index = build_index(parsed)
@@ -2555,14 +2558,26 @@ defmodule PDS.Census do
 
   # THE GLOB IS RELATIVE TO CWD, DELIBERATELY. `--selftest` censuses a synthetic tree by
   # running this same file with `cd:` set to a tmp dir — the sentinels at the top of this
-  # module are relative literals for the same reason. (The `--files-from` seam does NOT
-  # work for fixtures: guard_corpus!/1 runs before parse_file/1 and ORs the corpus floor
-  # with the sentinel check on one cond arm, so no fixture list is both small enough to
-  # mutate and large enough to pass.)
-  defp corpus(%{files_from: nil}), do: Path.wildcard("api/lib/**/*.ex") |> Enum.sort()
+  # module are relative literals for the same reason. (The `--files-from` seam still does
+  # NOT work for fixtures, and now for a stronger reason than the floor: the list must BE
+  # the tree population, so no fixture list is both small enough to mutate and equal to a
+  # tree the fixture does not have.)
+  defp corpus(%{files_from: nil}), do: tree_population()
 
   defp corpus(%{files_from: path}),
-    do: path |> File.read!() |> String.split("\n", trim: true)
+    do:
+      path
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.sort()
+
+  # ONE EXPRESSION, TWO SEAMS. The flagless corpus IS this, and the `--files-from` guard
+  # compares against this, so a supplied list is measured against the very population the
+  # unflagged run would have censused. Two spellings of "the corpus" could drift apart;
+  # one cannot, and the drift is the whole defect.
+  defp tree_population, do: Path.wildcard("api/lib/**/*.ex") |> Enum.sort()
 
   defp banner do
     {otp, erts} = {System.otp_release(), :erlang.system_info(:version)}
@@ -2587,11 +2602,84 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- corpus guard
 
+  # ------------------------------------------- the --files-from population guard
+  #
+  # A FLOOR AND THREE SENTINELS ARE NOT A POPULATION. Before this arm, guard_corpus!
+  # refused an EMPTY list, a list missing a sentinel, and a list under @corpus_floor — and
+  # nothing else, so any list that cleared 600 and carried the three sentinels BECAME "the
+  # corpus". MEASURED on origin/main f14dd319f: a `--files-from` list of 891 of the 892
+  # files under api/lib, dropping only api/lib/barkpark_web/gettext.ex, printed CENSUS OK
+  # at exit 0 — the census certifying, in full voice, a population nobody chose.
+  #
+  # THE ROW'S OWN RECIPE IS NOT THE PROOF, AND SAYING SO IS THE POINT. Dropping
+  # tasks_controller.ex exits 1 today on ROUTED-POPULATION-COMPLETE, REGISTER-COMPLETE and
+  # D448-DRIFT-REFUSES — because those arms happen to SEE that file. That is luck, not a
+  # guard: the truncation the arms cannot see is the one that greens, which is exactly the
+  # corpus above.
+  #
+  # SO THE LIST IS MEASURED AGAINST THE TREE, NEVER AGAINST A THRESHOLD. Expected is
+  # tree_population/0 — the same expression the flagless corpus uses — minus
+  # @files_from_allowlist, which is EMPTY and is PRINTED on every run that has one, because
+  # an unannounced exemption is how a subset becomes a population again. A file the tree
+  # holds and the list omits, a path the list holds and the tree does not, and a line the
+  # list repeats (a duplicate double-counts every site in it) are each NAMED and refused at
+  # exit 2.
+  @files_from_allowlist []
+  @files_from_named 12
+
+  defp files_from_divergence(_files, %{files_from: nil}), do: :none
+
+  defp files_from_divergence(files, %{files_from: _path}) do
+    expected = tree_population() -- @files_from_allowlist
+    listed = MapSet.new(files)
+    missing = Enum.reject(expected, &MapSet.member?(listed, &1))
+    extra = Enum.reject(files, &(&1 in expected))
+    dupes = Enum.uniq(files -- Enum.uniq(files))
+
+    if missing == [] and extra == [] and dupes == [],
+      do: :none,
+      else: {missing, extra, dupes, length(expected)}
+  end
+
+  defp files_from_refusal({missing, extra, dupes, expected_n}, opts) do
+    [
+      "--files-from #{opts.files_from} is NOT the api/lib population: #{length(missing)} file(s) MISSING from the list, #{length(extra)} path(s) the tree does not hold, #{length(dupes)} duplicated line(s) — against an expected #{expected_n}#{allowlist_note()}"
+    ] ++
+      named_paths("MISSING from the list", missing) ++
+      named_paths("NOT IN THE TREE", extra) ++
+      named_paths("DUPLICATED in the list", dupes) ++
+      [
+        "A list can clear the #{@corpus_floor}-file floor and carry every sentinel and STILL be truncated:",
+        "drop one file the arms cannot see and every check prints its green over a population",
+        "nobody chose. The census takes its population from the tree, never from the caller's word."
+      ]
+  end
+
+  defp named_paths(_label, []), do: []
+
+  defp named_paths(label, paths) do
+    shown = Enum.map(Enum.take(paths, @files_from_named), &"#{label}: #{&1}")
+    rest = length(paths) - @files_from_named
+
+    if rest > 0, do: shown ++ ["#{label}: … and #{rest} more"], else: shown
+  end
+
+  # THE EXEMPTION IS ALWAYS SPOKEN. An allowlist that only lived in the source would let a
+  # reader of the run believe the list equalled the tree when it equalled the tree minus
+  # whatever a previous author found inconvenient.
+  defp allowlist_note do
+    case @files_from_allowlist do
+      [] -> ""
+      l -> " · announced allowlist (#{length(l)}): #{Enum.join(l, ", ")}"
+    end
+  end
+
   # `announce?` is false for --keys ONLY, whose stdout is machine-read TSV and must carry
   # nothing else. The REFUSAL is never quiet: a truncated corpus still exits 2 and says so.
-  defp guard_corpus!(files, announce? \\ true) do
+  defp guard_corpus!(files, opts, announce? \\ true) do
     set = MapSet.new(files)
     missing = Enum.reject(@sentinels, &MapSet.member?(set, &1))
+    divergence = files_from_divergence(files, opts)
 
     cond do
       files == [] ->
@@ -2610,8 +2698,16 @@ defmodule PDS.Census do
             ]
         )
 
+      divergence != :none ->
+        refuse(files_from_refusal(divergence, opts))
+
       announce? ->
         p("corpus      #{length(files)} .ex files under api/lib · sentinels present: #{Enum.join(@sentinels, ", ")}")
+
+        if opts.files_from,
+          do:
+            p("            --files-from #{opts.files_from} · IS the api/lib population, file for file#{allowlist_note()}")
+
         p("")
 
       true ->
@@ -3197,16 +3293,36 @@ defmodule PDS.Census do
     # write (tasks_controller.ex:587 lives in close_response/3, which touches no Repo
     # verb — the write is Tasks.close/3 in close/2, one frame up). One hop up only:
     # expanding callers transitively would reach the whole tree and mean nothing.
-    {via, via_verbs} =
+    #
+    # NO HALT — THE WHOLE SET, OR THE SENTENCE IS UNFALSIFIABLE (PDS wave 35). This used
+    # to be `Enum.reduce_while(... :halt ...)` and route_tag/1 then printed the FIRST
+    # writing caller as if it were THE caller. tickets_controller.ex:263's render_ticket/3
+    # has SIX call sites (:64 :110 :133 :175 :195 :222) and several of those enclosing defs
+    # genuinely write, so the printed name was one arbitrary member of a set — stable
+    # today only because `callers/2`'s order is, which nothing specifies and no
+    # Elixir/OTP upgrade or corpus reorder promises. NO ARITY KEY REPAIRS THIS: keying on
+    # a scalar arity merely FLIPS which member is printed (it drops every arity-2 caller),
+    # which is the right SHAPE of answer off a wrongly-narrowed candidate set. The repair
+    # is to stop claiming a singular caller: walk every candidate and carry the SET.
+    # `via_verbs` is still the FIRST writer's verb map, so every count downstream —
+    # write?/read?/the sweep — is bit-for-bit what the halting version produced.
+    {vias, via_cands, via_verbs} =
       if start && not Map.has_key?(verbs, :write) do
-        start
-        |> callers(index)
-        |> Enum.reduce_while({nil, %{}}, fn c, acc ->
-          {v, _, _} = bfs([{c, 1, [label(c)]}], index, MapSet.new(), %{}, nil, [], max)
-          if Map.has_key?(v, :write), do: {:halt, {label(c), v}}, else: {:cont, acc}
-        end)
+        cands = callers(start, index)
+
+        writers =
+          Enum.flat_map(cands, fn c ->
+            {v, _, _} = bfs([{c, 1, [label(c)]}], index, MapSet.new(), %{}, nil, [], max)
+            if Map.has_key?(v, :write), do: [{label(c), v}], else: []
+          end)
+
+        {Enum.map(writers, &elem(&1, 0)), length(cands),
+         case writers do
+           [{_, v} | _] -> v
+           [] -> %{}
+         end}
       else
-        {nil, %{}}
+        {[], 0, %{}}
       end
 
     verbs =
@@ -3220,7 +3336,9 @@ defmodule PDS.Census do
       write?: Map.has_key?(verbs, :write),
       read?: Map.has_key?(verbs, :read),
       depth: depth,
-      via_caller: via,
+      via_caller: List.first(vias),
+      via_callers: vias,
+      via_candidates: via_cands,
       chain: chain,
       owner: start
     })
@@ -3730,7 +3848,17 @@ defmodule PDS.Census do
   defp evidence(site, writes, reads) do
     parts =
       [
-        if(site.write?, do: "write-routed at depth #{site.depth}", else: nil),
+        # A CALLER-CREDITED SITE HAS NO OWN DEPTH, and printing "at depth " with nothing
+        # after it was the tell nobody read. Say what actually happened instead.
+        if(site.write? and site.depth,
+          do: "write-routed at depth #{site.depth}",
+          else: nil
+        ),
+        if(site.write? and is_nil(site.depth),
+          do:
+            "write-routed ONLY through its callers — its own body reaches no Repo write within depth #{@evidence_depth}",
+          else: nil
+        ),
         if(site.read? and not site.write?, do: "read-routed only", else: nil),
         if(!site.write? and !site.read?, do: "no Repo verb within depth #{@evidence_depth}", else: nil),
         if(writes != [], do: "local writes: #{Enum.map_join(writes, ",", &elem(&1, 0))}", else: nil),
@@ -3981,7 +4109,7 @@ defmodule PDS.Census do
   # STDERR for the same reason.
   defp keys_run(opts) do
     files = corpus(opts)
-    guard_corpus!(files, false)
+    guard_corpus!(files, opts, false)
 
     parsed = Enum.map(files, &parse_file/1)
     index = build_index(parsed)
@@ -4526,6 +4654,52 @@ defmodule PDS.Census do
     p("")
     post_read_roll(classified)
     catch_all_findings(classified)
+    caller_credit_findings(classified)
+  end
+
+  # THE CALLER-CREDIT AUDIT (PDS wave 35). When a site's own function reaches no Repo
+  # write, route/3 walks one hop UP and credits a CALLER's write to the site — and leaves
+  # `depth` nil while doing it. AN EMPTY DEPTH ON A write?=true ROW IS THEREFORE THE
+  # MACHINE-READABLE TELL FOR CALLER-CREDIT, and this block is the audit of it: cheap,
+  # total over the emitted population, and printed on every run with its count, so the
+  # class stops being something a reader has to notice one row at a time. A row naming
+  # MORE THAN ONE writing caller is the unfalsifiable-sentence case the old printer hid;
+  # a row naming exactly one is still a credit the site did not earn in its own body.
+  defp caller_credit_findings(classified) do
+    credited =
+      classified
+      |> Enum.filter(&(&1.write? and is_nil(&1.depth)))
+      |> Enum.sort_by(&{&1.path, &1.line})
+
+    ambiguous = Enum.count(credited, &(length(Map.get(&1, :via_callers, [])) > 1))
+
+    p("  CALLER-CREDIT AUDIT  #{length(credited)} write-routed site(s) carry NO OWN DEPTH — " <>
+        "the write belongs to a CALLER; #{ambiguous} of them name MORE THAN ONE writing caller")
+
+    if credited == [] do
+      p("      none — every write-routed site reaches its own write, at its own depth")
+    else
+      Enum.each(credited, fn s ->
+        vias = Map.get(s, :via_callers, [])
+
+        p("      FINDING  #{short(s.path)}:#{s.line}  fn #{s.owner && label(s.owner) || "?"}")
+
+        p("               #{length(vias)} of #{Map.get(s, :via_candidates, 0)} caller(s) reach a write: " <>
+            Enum.join(vias, ", "))
+
+        p(
+          if length(vias) > 1 do
+            "               AMBIGUOUS — no evidence here selects one of them, so any single " <>
+              "name printed for this site would be unfalsifiable by construction."
+          else
+            "               SOLE WRITER of the candidates, but the write is still the caller's, " <>
+              "not this site's own."
+          end
+        )
+      end)
+    end
+
+    p("")
   end
 
   # THE FINDINGS BLOCK. A shape count is not a finding — a NAMED site with no written basis
@@ -4902,10 +5076,25 @@ defmodule PDS.Census do
   # printed a bare `[WRITE d5]` because its ENCLOSING function routes to a write on the
   # success path. A declared row carrying `route_claim` marks the bracket disputed at the
   # one place that prints it.
+  # THE ATTRIBUTION PRINTER, AND THE ONE PLACE THE SET IS SPELT. A caller-credited row
+  # names EVERY caller that reaches a write, and when there is more than one it says
+  # AMBIGUOUS out loud — that is what makes the sentence falsifiable: point at the row,
+  # read the named callers, and the claim can be checked against the tree. A one-writer
+  # set still prints the name, but qualified by the candidate count it was chosen from,
+  # so "sole" is a measured word rather than an artefact of where the walk stopped.
   defp route_tag(s) do
+    vias = Map.get(s, :via_callers, [])
+    cands = Map.get(s, :via_candidates, 0)
+
     base =
       cond do
-        s.write? and s.via_caller -> "WRITE via caller #{s.via_caller}"
+        s.write? and length(vias) > 1 ->
+          "WRITE via AMBIGUOUS CALLER SET — #{length(vias)} of #{cands} callers reach a write: " <>
+            Enum.join(vias, ", ")
+
+        s.write? and vias != [] ->
+          "WRITE via caller #{hd(vias)} (sole writer of #{cands} callers)"
+
         s.write? -> "WRITE d#{s.depth}"
         s.read? -> "READ"
         true -> "UNROUTED"
@@ -5605,7 +5794,7 @@ defmodule PDS.Census do
   # what they say and the one-line summary goes to STDERR.
   defp exclusion_keys_run(opts) do
     files = corpus(opts)
-    guard_corpus!(files, false)
+    guard_corpus!(files, opts, false)
 
     parsed = Enum.map(files, &parse_file/1)
     index = build_index(parsed)
@@ -8552,7 +8741,7 @@ defmodule PDS.Census do
   # THE SEAM IS CWD INJECTION. corpus/1 globs `api/lib/**/*.ex` relative to the working
   # directory and @sentinels are relative literals, so a synthetic tree in a tmp dir is
   # censused verbatim by running this same file with `cd:` set to it. The `--files-from`
-  # seam does NOT work for fixtures: guard_corpus!/1 runs before parse_file/1 and ORs the
+  # seam does NOT work for fixtures: guard_corpus!/3 runs before parse_file/1 and ORs the
   # corpus floor with the sentinel check on ONE cond arm, so no fixture list is both small
   # enough to mutate and large enough to pass.
   #
@@ -8566,7 +8755,7 @@ defmodule PDS.Census do
   # RELATION (keys lines == emitted, both read off the same invocation). A selftest that
   # pinned POST-READ or the unclassified denominator would red the build on every honest
   # lens correction, which is the defect this epic keeps filing, not the guard. PDS-D467b:
-  # CORPUS-INTACT is structurally unreachable in normal operation — guard_corpus!/1 exits 2
+  # CORPUS-INTACT is structurally unreachable in normal operation — guard_corpus!/3 exits 2
   # on exactly the condition that arm tests — so it is proven by BYPASSING the guard.
   @self_source Path.expand(__ENV__.file)
   @pair_atom "ok:" <> " true"
@@ -9605,6 +9794,88 @@ defmodule PDS.Census do
         "is mirrored and NO LONGER wraps"
       ],
       proves: "the census's retyped copy of the ONE bucket emit_route_ast/1 wraps in its own live_session is GATED: rename it and the wrap set re-derived from the macro's own conditional reds by name, instead of lv_session_index/1 crediting a live_session the macro does not emit"
+    },
+    # THE POPULATION GUARD, BOTH DIRECTIONS. Both census the REPO because the guard compares
+    # the supplied list against the api/lib tree, and the synthetic corpus holds no api/lib
+    # at all — over there `expected` is EMPTY and a mutant would be proven exactly where the
+    # arm is switched off (PDS-D541). Neither case writes to api/lib: each writes a file
+    # LIST into the selftest root and hands it to `--files-from`.
+    %{
+      name: "FILES-FROM-SUBSET-REFUSED",
+      corpus: :repo,
+      argv: [],
+      files_from: "api/lib/barkpark_web/controllers/tasks_controller.ex",
+      mut: nil,
+      exit: 2,
+      expect: [
+        "REFUSED: TRUNCATED CORPUS",
+        "is NOT the api/lib population",
+        "MISSING from the list: api/lib/barkpark_web/controllers/tasks_controller.ex"
+      ],
+      proves: "the filed recipe — every api/lib file but ONE non-sentinel controller — is refused AT THE GUARD, by name, at exit 2, instead of being adopted as 'the corpus' for clearing a 600-file floor while carrying three sentinels"
+    },
+    %{
+      name: "FILES-FROM-GUARD-IS-LIVE",
+      corpus: :repo,
+      argv: [],
+      # THE FILE THE ARMS CANNOT SEE, which is what makes this the load-bearing half.
+      # gettext.ex carries no `ok: true`, no Repo call, no route and no register row, so
+      # with the comparison dead EVERY integrity check certifies the truncated corpus —
+      # MEASURED on origin/main f14dd319f: CENSUS OK, rc 0, 891 of 892 files. Dropping
+      # tasks_controller.ex instead would prove nothing here: three arms red on it anyway,
+      # so the case would pass with the guard removed. If a future tree grows a receipt into
+      # gettext.ex this case reds HERE, loudly, and the repair is to re-pick a file the arms
+      # still cannot see — never to weaken the expectation.
+      files_from: "api/lib/barkpark_web/gettext.ex",
+      mut:
+        {"missing = Enum.reject(expec" <> "ted, &MapSet.member?(listed, &1))",
+         "missing = []"},
+      exit: 0,
+      expect: ["CENSUS OK"],
+      refute: ["REFUSED: TRUNCATED CORPUS"],
+      proves: "with the missing-file comparison dead, a 891-of-892 corpus is certified CENSUS OK at exit 0 — so the population guard is the ONLY thing standing between that truncation and a full-voice green, and no other arm catches it"
+    },
+    # THE CALLER-CREDIT PAIR, AND WHY BOTH HALVES ARE HERE. Both census the REPO: the
+    # synthetic corpus holds no api/lib and emits no caller-credited site at all, so the
+    # audit block would be EMPTY over there and a mutant would be proven exactly where
+    # the arm is switched off (PDS-D541). Neither writes to api/lib — each runs a mutated
+    # copy of THIS file with cwd at the repo, read-only.
+    #
+    # The FIRST case is the PRECONDITION, not a control: it asserts the pristine repo run
+    # actually reaches a multi-caller attribution and names it. Without it the second case
+    # passes vacuously the day the corpus stops holding one, refuting nothing while
+    # reading as a green.
+    %{
+      name: "CALLER-SET-IS-PRINTED",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "CALLER-CREDIT AUDIT",
+        "barkpark_web/controllers/tickets_controller.ex:263",
+        "caller(s) reach a write: BarkparkWeb.TicketsController.",
+        "AMBIGUOUS — no evidence here selects one of them"
+      ],
+      proves: "the repo corpus DOES carry a caller-credited site whose writing-caller set has more than one member, and the census names every member of it — so the mutant below has something real to destroy"
+    },
+    %{
+      name: "CALLER-SET-NOT-NARROWED",
+      corpus: :repo,
+      argv: [],
+      # NARROW THE CANDIDATE SET BACK TO ONE CALLER — the shipped-before behaviour, and
+      # the exact shape a scalar arity key produces: the right SHAPE of answer off a
+      # wrongly-narrowed set. The walk, the counts and the verbs are untouched; only the
+      # SET the printer is handed shrinks to its first member.
+      mut: {"{Enum.map(writers, &elem" <> "(&1, 0)), length(cands),",
+            "{Enum.map(Enum.take(writers, 1), &elem(&1, 0)), length(cands),"},
+      exit: 0,
+      expect: ["CENSUS OK", "CALLER-CREDIT AUDIT"],
+      refute: [
+        "AMBIGUOUS CALLER SET",
+        "AMBIGUOUS — no evidence here selects one of them"
+      ],
+      proves: "narrowing the writing-caller set back to ONE member silently deletes every ambiguity marker while the census still prints CENSUS OK at exit 0 — so the full-set walk in route/3 is the ONLY thing keeping the attribution sentence falsifiable, and no count, no shape and no other arm notices its loss"
     }
   ]
 
@@ -9681,16 +9952,49 @@ defmodule PDS.Census do
       script = Path.join(root, "case-#{:erlang.phash2(c.name)}.exs")
       File.write!(script, mutated)
       dir = Map.fetch!(dirs, c.corpus)
+      argv = case_argv(c, root, dir)
 
       # NEVER PIPED: System.cmd hands back the child's own status, which is the whole
       # point — `cmd | tail` reports tail's status and once logged an exit-2 refusal as 0.
-      {out, code} = System.cmd("elixir", [script | c.argv], cd: dir, stderr_to_stdout: true)
+      {out, code} = System.cmd("elixir", [script | argv], cd: dir, stderr_to_stdout: true)
 
       judge_selftest_case(base, c, out, code, {script, dir, dirs})
     else
       {:error, why} -> Map.merge(base, %{ok?: false, why: why})
     end
   end
+
+  # THE TRUNCATED LIST IS DERIVED FROM THE TREE ON EVERY RUN, NEVER COMMITTED. A committed
+  # list is a snapshot: the day a file is added it stops being "the population minus one"
+  # and becomes "the population minus one, and minus everything written since", and the
+  # case would then be measuring its own staleness instead of the guard. Both refusals
+  # below are raises, not skips — a case that hands the guard the FULL population passes
+  # while proving nothing, and a case that drops a SENTINEL is caught by the older arm and
+  # never reaches the population comparison at all.
+  defp case_argv(%{files_from: drop} = c, root, dir) when is_binary(drop) do
+    all =
+      dir
+      |> Path.join("api/lib/**/*.ex")
+      |> Path.wildcard()
+      |> Enum.map(&Path.relative_to(&1, dir))
+      |> Enum.sort()
+
+    unless drop in all do
+      raise "selftest case #{c.name} drops #{drop}, which this tree does not hold — the list " <>
+              "would BE the population and the case would pass while proving nothing"
+    end
+
+    if drop in @sentinels do
+      raise "selftest case #{c.name} drops the sentinel #{drop} — the sentinel arm refuses it " <>
+              "first and the population guard is never reached"
+    end
+
+    path = Path.join(root, "files-from-#{:erlang.phash2(c.name)}.txt")
+    File.write!(path, Enum.join(all -- [drop], "\n") <> "\n")
+    c.argv ++ ["--files-from", path]
+  end
+
+  defp case_argv(c, _root, _dir), do: c.argv
 
   # ------------------------------------------------------- the citation report
   #
@@ -10418,7 +10722,7 @@ defmodule PDS.Census do
        if length(files) >= @corpus_floor do
          "#{length(files)} files >= #{@corpus_floor}"
        else
-         "#{length(files)} files is BELOW the #{@corpus_floor} floor — the corpus is truncated and every zero below it is unearned (normally unreachable: guard_corpus!/1 exits 2 on this same condition first)"
+         "#{length(files)} files is BELOW the #{@corpus_floor} floor — the corpus is truncated and every zero below it is unearned (normally unreachable: guard_corpus!/3 exits 2 on this same condition first)"
        end},
       {"LENS-LOSES-NOTHING", textual == length(ast_sites) + length(phantoms),
        if textual == length(ast_sites) + length(phantoms) do

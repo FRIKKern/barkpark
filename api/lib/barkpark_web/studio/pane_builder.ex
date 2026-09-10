@@ -458,9 +458,26 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           selected: Enum.at(rest, 0)
         }
 
-        editor = build_editor(type_name, schema, rest, dataset, opts, active_group)
+        # Gyldendal parity E3.3 — a tree root: the next segment names a row
+        # to DRILL, not a document to open (see `walk_tree/8`).
+        case Map.get(node, :tree) do
+          %{"parent" => parent} when is_binary(parent) and rest != [] ->
+            walk_tree(
+              rest,
+              1,
+              panes ++ [doc_pane],
+              type_name,
+              schema,
+              parent,
+              node,
+              dataset,
+              opts
+            )
 
-        {panes ++ [doc_pane], editor}
+          _ ->
+            editor = build_editor(type_name, schema, rest, dataset, opts, active_group)
+            {panes ++ [doc_pane], editor}
+        end
 
       %{type: :document, type_name: type_name} = node ->
         schema =
@@ -496,6 +513,90 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
       _ ->
         {panes, nil}
+    end
+  end
+
+  # ── Gyldendal parity E3.3 — the hierarchy walk ─────────────────────────────
+  #
+  # Sanity's `buildCategoryTree`: opening a row of a tree list yields a pane
+  # with THAT document on top (openable), a divider carrying the child count
+  # and the level, then its children — each drillable the same way. Row ids
+  # are PUBLISHED ids and the children are read under the `:drafts`
+  # perspective, so a child with unpublished edits renders once (the
+  # published/draft pair collapses at SQL level). The pane's own address is
+  # stamped by `walk_and_stamp/5` like every other pane, so a row click
+  # appends the row id: clicking the parent row on top (`[…, id, id]`) opens
+  # the editor; clicking a child (`[…, id, child]`) drills one level deeper.
+  # A segment that is neither still opens as a document (a re-parented deep
+  # link) — the #1851 never-unreachable guarantee.
+  defp walk_tree([id | rest], level, panes, type_name, schema, parent, node, dataset, opts) do
+    pub_id = Content.published_id(id)
+
+    case Content.fetch_doc_with_draft(type_name, pub_id, dataset, scope(opts)) do
+      {nil, _, _} ->
+        {panes, nil}
+
+      {doc, _is_draft, _has_pub} ->
+        list_opts =
+          [perspective: :drafts, filter_map: %{parent => %{"eq" => pub_id}}] ++ scope(opts)
+
+        list_opts =
+          case desk_order(nil, schema, Map.get(node, :orderings)) do
+            [] -> list_opts
+            order -> Keyword.put(list_opts, :order, order)
+          end
+
+        {children, filter_error} = list_documents_preflighted(type_name, dataset, list_opts)
+
+        divider = %{
+          type: :divider,
+          id: "#{pub_id}-children",
+          label:
+            if(children == [],
+              do: "Ingen underkategorier",
+              else: "Underkategorier (#{length(children)}) — Nivå #{level}"
+            )
+        }
+
+        pane = %{
+          title: doc.title || (schema && schema.title) || type_name,
+          icon: node.icon || (schema && schema.icon),
+          type_name: type_name,
+          role: :list,
+          priority: :active,
+          desk_groups: [],
+          active_desk: nil,
+          filter_error: filter_error,
+          tree_level: level,
+          items: doc_items([doc], schema) ++ [divider] ++ doc_items(children, schema),
+          selected: rest |> Enum.at(0) |> then(&(&1 && Content.published_id(&1)))
+        }
+
+        child_ids = MapSet.new(children, &Content.published_id(&1.doc_id))
+
+        case rest do
+          [] ->
+            {panes ++ [pane], nil}
+
+          [next | _] = rest ->
+            next_pub = Content.published_id(next)
+
+            if next_pub != pub_id and MapSet.member?(child_ids, next_pub) do
+              walk_tree(
+                rest,
+                level + 1,
+                panes ++ [pane],
+                type_name,
+                schema,
+                parent,
+                node,
+                dataset,
+                opts
+              )
+            else
+              {panes ++ [pane], build_editor(type_name, schema, rest, dataset, opts, nil)}
+            end
+        end
     end
   end
 
@@ -719,6 +820,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
   defp doc_items(docs, schema) do
     preview = schema_list_preview(schema)
+    media_field = preview_field(Map.get(preview, "media"))
 
     Enum.map(docs, fn doc ->
       pub_id = Content.published_id(doc.doc_id)
@@ -726,7 +828,12 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       %{
         type: :doc,
         id: pub_id,
-        title: doc.title || "Untitled",
+        # Gyldendal parity E3.3 — `list_preview.media` names an image field;
+        # the row carries its url (nil when the document has none) and every
+        # row of a media-declaring type reserves the slot so titles align.
+        media: media_field && media_url(content_value(doc, media_field)),
+        media_slot: media_field != nil,
+        title: row_title(doc, schema),
         is_draft: Content.draft?(doc.doc_id),
         status: doc.status,
         badge: preview_value(doc, Map.get(preview, "badge")),
@@ -740,6 +847,79 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       }
     end)
   end
+
+  # [an-orphan-must-be-nameable] spd-w18-plus-creates-without-navigating,
+  # criterion 2. A "+" press whose navigation never reaches the browser still
+  # leaves a REAL row on the desk: the create succeeded server-side, only the
+  # answer was lost (D242/D265 — `new_document/2` ends in a `push_patch` whose
+  # reply rides the event's own ref, so a frame the browser drops leaves the
+  # server believing it navigated). Three such rows survived on guerrilla
+  # production. Every one of them rendered the same two words: "Untitled".
+  #
+  # THE ROW WAS PRESENT AND NOT IDENTIFIABLE, WHICH IS THE SAME AS UNREACHABLE.
+  # A human looking at three identical "Untitled" rows cannot tell which one
+  # their press made, which are older accidents, or which is safe to delete —
+  # and the desk offers no other handle, because the row's only visible text IS
+  # its title (`components.ex` passes `item.title` straight through to
+  # `pane_doc_item`, with `item[:meta] || item[:updated]` under it, and all
+  # three orphans shared "Updated 2m ago" too).
+  #
+  # So an unnamed row is named out of what the row already carries: its schema
+  # TYPE, and the entropy tail of its `doc_id`. That tail is not decoration —
+  # it is the `id` in the rendered `doc-<id>`, the value `phx-value-id` sends
+  # on select, and the last URL segment that opens the document. The name IS
+  # the path back to it, and two orphans minted in the same second still read
+  # differently.
+  #
+  # THE LITERAL "Untitled" IS MATCHED TOO, not just nil. A paper is born with a
+  # nil title, but `Fields.new_document_attrs/1` STORES the literal "Untitled"
+  # for every fieldful type (task/note/post) — so treating only nil as unnamed
+  # would leave exactly the collision this criterion is about standing on the
+  # non-paper half of the desk. The cost is that a human who deliberately
+  # titles a document "Untitled" sees a type-and-id suffix appended on the desk
+  # row; that is the trade, taken knowingly.
+  #
+  # DERIVED, NEVER STORED. Nothing here writes to the document, which is the
+  # standing [untitled-is-a-fallback-not-a-seed] contract in
+  # `StudioLive.Handlers.Fields`: seeding a title wrote CONTENT into the block
+  # the author was about to type in, and the first keystroke appended to it.
+  # The moment the author types, the real title lands and this fallback is gone.
+  # Gyldendal parity E1.8 — a type without a `title` field (author) names its
+  # row title in `list_preview.title`; when the column is blank the row shows
+  # that field's value (the same rule the write path uses to fill the column),
+  # and only a document with neither falls back to the unnamed-row spelling.
+  defp row_title(doc, schema) do
+    case doc.title && String.trim(doc.title) do
+      nil -> preview_title(doc, schema) || unnamed_row_title(doc)
+      "" -> preview_title(doc, schema) || unnamed_row_title(doc)
+      "Untitled" -> preview_title(doc, schema) || unnamed_row_title(doc)
+      title -> title
+    end
+  end
+
+  defp preview_title(doc, schema),
+    do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)
+
+  defp unnamed_row_title(doc) do
+    "Untitled #{row_type_word(doc)} · #{doc_id_tail(doc)}"
+  end
+
+  defp row_type_word(%{type: type}) when is_binary(type) and type != "", do: type
+  defp row_type_word(_), do: "document"
+
+  # The entropy half of `<type>-<64 bits>` (`Content.generate_id/1`). Split from
+  # the RIGHT so a type containing a hyphen cannot eat the tail, and fall back
+  # to the whole id for a hand-written `doc_id` that carries no hyphen at all.
+  defp doc_id_tail(%{doc_id: doc_id}) when is_binary(doc_id) and doc_id != "" do
+    pub = Content.published_id(doc_id)
+
+    case String.split(pub, "-") do
+      [only] -> only
+      parts -> List.last(parts)
+    end
+  end
+
+  defp doc_id_tail(_), do: "no id"
 
   # Humanized "Updated N ago" subtitle fallback. The timestamp is already on
   # every Document struct (`content/query.ex` orders by updated_at_desc); this
@@ -779,6 +959,21 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       _ -> nil
     end
   end
+
+  # A list_preview spec is a content-field name or `%{"field" => f, …}`.
+  defp preview_field(field) when is_binary(field) and field != "", do: field
+
+  defp preview_field(%{} = spec),
+    do: preview_field(Map.get(spec, "field") || Map.get(spec, :field))
+
+  defp preview_field(_), do: nil
+
+  # The url off a stored image value: the E1 `image` object and the twin's
+  # denormalised composite both carry `url`; a bare string is a url already.
+  # Anything else (an asset id alone, a malformed value) renders no thumbnail.
+  defp media_url(%{"url" => url}) when is_binary(url) and url != "", do: url
+  defp media_url(url) when is_binary(url) and url != "", do: url
+  defp media_url(_), do: nil
 
   defp schema_list_preview(nil), do: %{}
 
