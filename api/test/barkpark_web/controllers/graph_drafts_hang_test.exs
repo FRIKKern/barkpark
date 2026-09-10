@@ -48,10 +48,10 @@ defmodule BarkparkWeb.GraphDraftsHangTest do
   is the quantity that grows with the corpus. Each test also carries an ExUnit
   `timeout:` so a genuine non-return REDS the test instead of wedging the suite.
 
-  MUTATION PROOF: revert `build_drafts_index/1`'s prefetch (drop the `:schemas`
-  and `:dangling` opts it now threads into `drafts_edges_for_doc/3`) and
-  "the drafts index is built with a BOUNDED number of queries" reds with a count
-  that scales with @corpus_size; restore and it is green.
+  MUTATION PROOF: revert `build_drafts_index/1`'s two hoists (drop the `:schemas`
+  and `dangling: :skip` opts it now threads into `drafts_edges_for_doc/3`, and the
+  `resolve_core_dangling/3` pass) and both slope tests below red with a count that
+  scales with the corpus; restore and they are green.
   """
 
   use BarkparkWeb.ConnCase, async: false
@@ -61,15 +61,20 @@ defmodule BarkparkWeb.GraphDraftsHangTest do
   @token "barkpark-test-graph-drafts-hang"
   @dataset "production"
 
-  # Big enough that an O(corpus) query storm is unmistakable next to the
-  # constant the fixed path pays, small enough to seed in a couple of seconds.
-  @corpus_size 120
+  # THE MEASUREMENT IS A SLOPE, NOT A CEILING. The fixed drafts read pays a real
+  # constant — one corpus page per SCHEMA in the dataset, and the test env
+  # registers ~160 of them — so any absolute budget here would be a number about
+  # the fixture roster, not about this defect. What the defect IS, exactly, is a
+  # per-DOCUMENT round-trip: the same request over a corpus 4x larger must cost
+  # the SAME queries. Measure both, compare.
+  @corpus_small 60
+  @corpus_large 240
 
-  # The bound. The fixed drafts index pays a fixed handful of reads (token,
-  # scope, schema list, one page per schema type, the root lookup) plus the
-  # per-type corpus pages — never a per-DOCUMENT read. 60 leaves generous room
-  # for the fixed prelude while staying far below @corpus_size.
-  @query_budget 60
+  # Slack on the comparison. The two reads are the same shape, so the honest
+  # expectation is equality; a handful of queries of headroom keeps an unrelated
+  # fixed-cost read (a cache miss, a schema registration) from flapping the pin
+  # while still being ~1/50th of the growth the unfixed path shows.
+  @slope_slack 10
 
   # Wall-clock ceiling for the whole request, and the ExUnit timeout that makes
   # a genuine non-return a RED rather than a wedged suite.
@@ -130,13 +135,16 @@ defmodule BarkparkWeb.GraphDraftsHangTest do
   defp seed_corpus!(n, scope) do
     root = uniq("drafts-hang-root")
     mk_draft_only!(root, scope, %{"related" => root})
-
-    for i <- 1..n do
-      mk_draft_only!(uniq("drafts-hang-filler-#{i}"), scope, %{"related" => root})
-    end
-
+    add_fillers!(n, root, scope)
     root
   end
+
+  defp add_fillers!(n, root, scope) when n > 0 do
+    for _ <- 1..n, do: mk_draft_only!(uniq("drafts-hang-filler"), scope, %{"related" => root})
+    :ok
+  end
+
+  defp add_fillers!(_n, _root, _scope), do: :ok
 
   # Count Repo queries issued while `fun` runs, in THIS process (ConnCase is
   # single-process, so the handler's process filter keeps a concurrently running
@@ -166,44 +174,62 @@ defmodule BarkparkWeb.GraphDraftsHangTest do
 
   describe "GET /v1/graph/:id at the drafts perspective terminates in bounded work" do
     @tag timeout: @test_timeout_ms
-    test "the drafts index is built with a BOUNDED number of queries (?drafts=true)",
+    test "?drafts=true costs the SAME queries on a 4x larger drafts corpus",
          %{conn: conn, scope: scope} do
-      root = seed_corpus!(@corpus_size, scope)
+      root = seed_corpus!(@corpus_small, scope)
 
-      {resp, queries, ms} =
+      {resp_small, q_small, ms_small} =
         with_query_count(fn -> conn |> bearer() |> get("/v1/graph/#{root}?drafts=true") end)
 
-      assert resp.status == 200,
-             "?drafts=true on a #{@corpus_size}-document drafts corpus answered " <>
-               "#{resp.status}: #{resp.resp_body}"
+      assert resp_small.status == 200,
+             "?drafts=true answered #{resp_small.status}: #{resp_small.resp_body}"
 
-      assert queries <= @query_budget,
-             "GET /v1/graph/:id?drafts=true issued #{queries} queries over a " <>
-               "#{@corpus_size}-document drafts corpus (budget #{@query_budget}, took #{ms}ms). " <>
-               "The drafts fold is paying a PER-DOCUMENT round-trip — " <>
-               "Content.Graph.build_drafts_index/1 is not hoisting the schema list " <>
-               "and/or is resolving dangling per reference value. That is the shape " <>
-               "that makes this request never return on a production-sized corpus " <>
+      # Same dataset, same root — only the corpus around it grows.
+      add_fillers!(@corpus_large - @corpus_small, root, scope)
+
+      {resp_large, q_large, ms_large} =
+        with_query_count(fn -> conn |> bearer() |> get("/v1/graph/#{root}?drafts=true") end)
+
+      assert resp_large.status == 200,
+             "?drafts=true answered #{resp_large.status} on the larger corpus: " <>
+               resp_large.resp_body
+
+      assert q_large <= q_small + @slope_slack,
+             "GET /v1/graph/:id?drafts=true issued #{q_small} queries over " <>
+               "#{@corpus_small} drafts documents (#{ms_small}ms) and #{q_large} over " <>
+               "#{@corpus_large} (#{ms_large}ms) — the cost GROWS WITH THE CORPUS. " <>
+               "Content.Graph.build_drafts_index/1 folds the WHOLE dataset corpus on " <>
+               "every drafts request, so a per-document round-trip there is bounded by " <>
+               "nothing the endpoint owns: not depth, not @node_budget, not @fan_out. " <>
+               "That is why this request stopped returning at all on guerrilla " <>
                "(task-051a87de9a085e4d)."
     end
 
     @tag timeout: @test_timeout_ms
-    test "the same bound holds for the ?perspective=drafts spelling",
+    test "the ?perspective=drafts spelling carries the SAME slope",
          %{conn: conn, scope: scope} do
-      root = seed_corpus!(@corpus_size, scope)
+      root = seed_corpus!(@corpus_small, scope)
 
-      {resp, queries, ms} =
+      {resp_small, q_small, _} =
         with_query_count(fn ->
           conn |> bearer() |> get("/v1/graph/#{root}?perspective=drafts")
         end)
 
-      assert resp.status == 200,
-             "?perspective=drafts answered #{resp.status}: #{resp.resp_body}"
+      assert resp_small.status == 200, resp_small.resp_body
 
-      assert queries <= @query_budget,
-             "?perspective=drafts issued #{queries} queries over a #{@corpus_size}-document " <>
-               "drafts corpus (budget #{@query_budget}, took #{ms}ms) — the two spellings " <>
-               "reach the same fold, so they must carry the same bound."
+      add_fillers!(@corpus_large - @corpus_small, root, scope)
+
+      {resp_large, q_large, _} =
+        with_query_count(fn ->
+          conn |> bearer() |> get("/v1/graph/#{root}?perspective=drafts")
+        end)
+
+      assert resp_large.status == 200, resp_large.resp_body
+
+      assert q_large <= q_small + @slope_slack,
+             "?perspective=drafts issued #{q_small} queries over #{@corpus_small} drafts " <>
+               "documents and #{q_large} over #{@corpus_large} — the two spellings reach " <>
+               "the same fold, so they must carry the same slope."
     end
 
     @tag timeout: @test_timeout_ms
@@ -212,19 +238,23 @@ defmodule BarkparkWeb.GraphDraftsHangTest do
       # The control the live probes supply: on guerrilla a truly absent id
       # answers 404 in 70ms UNDER ?drafts=true. If that ever starts paying the
       # fold, the 404 arm has moved BELOW the traversal.
-      seed_corpus!(@corpus_size, scope)
+      root = seed_corpus!(@corpus_small, scope)
       absent = uniq("drafts-hang-absent")
 
-      {resp, queries, ms} =
+      {resp, q_absent, ms} =
         with_query_count(fn -> conn |> bearer() |> get("/v1/graph/#{absent}?drafts=true") end)
 
       assert resp.status == 404,
              "an absent id answered #{resp.status} at ?drafts=true: #{resp.resp_body}"
 
-      assert queries <= @query_budget,
-             "an ABSENT id at ?drafts=true issued #{queries} queries (budget " <>
-               "#{@query_budget}, #{ms}ms) — the 404 must be decided before the " <>
-               "corpus fold, never after it."
+      {_present, q_present, _} =
+        with_query_count(fn -> conn |> bearer() |> get("/v1/graph/#{root}?drafts=true") end)
+
+      assert q_absent < q_present,
+             "an ABSENT id at ?drafts=true issued #{q_absent} queries (#{ms}ms) — as many " <>
+               "as the resolving root's #{q_present}. The 404 must be decided BEFORE the " <>
+               "corpus fold, never after it; that ordering is what makes an absent id " <>
+               "answer in 70ms on guerrilla while a resolving one does not answer at all."
     end
 
     @tag timeout: @test_timeout_ms
@@ -251,8 +281,17 @@ defmodule BarkparkWeb.GraphDraftsHangTest do
              end),
              "the drafts graph lost the draft->draft `related` edge: #{resp.resp_body}"
 
-      assert Enum.any?(body["nodes"], fn n -> n["id"] == target end),
-             "the drafts graph did not reach the referenced draft node: #{resp.resp_body}"
+      # THE PRESERVED SEMANTIC, PINNED SO THE FIX CANNOT MOVE IT. A core edge's
+      # `dangling` is resolved under the :published lens (Content.Edges'
+      # `resolve_target_existence/4`, and the gap-#2 contract in its comment), so
+      # a DRAFT-ONLY target renders as a PHANTOM even on a drafts graph. That is
+      # today's behaviour and the batched pass reproduces it exactly — batching
+      # removes round-trips, it does not change the lens.
+      assert Enum.any?(body["nodes"], fn n ->
+               n["phantom"] == true and n["broken_id"] == target and n["via_field"] == "related"
+             end),
+             "the drafts graph lost the phantom for the draft-only target — the " <>
+               "batched dangling pass changed the :published lens: #{resp.resp_body}"
     end
   end
 end

@@ -126,6 +126,15 @@ defmodule Barkpark.Content do
     do: Query.get_documents_by_ids(doc_ids, dataset, opts)
 
   @doc """
+  Batched `get_document/4` EXISTENCE for one type — see
+  `Barkpark.Content.Query.resolvable_doc_ids/4`.
+  """
+  @spec resolvable_doc_ids([String.t()], String.t() | nil, String.t() | nil, keyword()) ::
+          MapSet.t(String.t())
+  def resolvable_doc_ids(doc_ids, type, dataset, opts \\ []),
+    do: Query.resolvable_doc_ids(doc_ids, type, dataset, opts)
+
+  @doc """
   Grant-narrowed COUNT companion to `get_documents_by_ids/3`: how many of the
   given `doc_ids` this caller may see under the same dataset/workspace/owner/grant
   scoping. Fail-closed. Delegates to `Barkpark.Content.Query.count_documents_by_ids/3`.
