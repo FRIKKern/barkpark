@@ -8310,8 +8310,40 @@ defmodule BarkparkCloud.Registry do
           {:ok, Deployment.t()} | {:error, Ecto.Changeset.t()}
   def create_deployment(%Site{} = site, attrs \\ %{}) do
     %Deployment{}
-    |> Deployment.changeset(Map.put(attrs, :site_id, site.id))
+    |> Deployment.changeset(stamp_demand_class(attrs, site))
     |> Repo.insert()
+  end
+
+  @doc """
+  dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206): classify a site's
+  DEMAND — `"customer"`, `"platform"`, or `nil` to un-classify it.
+
+  This is the ONLY writer of `sites.demand_class`, and it is an operator act:
+  the class says what a site IS FOR, and nothing in the code infers it. There is
+  no list of known demo slugs anywhere — a class derived from a hard-coded list
+  could never disagree with the list, so no fixture could make it lose. Every
+  deployment minted AFTER this call carries the new class; every deployment
+  minted before keeps the class it was stamped with, which is why the census can
+  be read as a time series at all.
+  """
+  @spec classify_site_demand(Site.t(), String.t() | nil) ::
+          {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
+  def classify_site_demand(%Site{} = site, class) do
+    site
+    |> Site.demand_class_changeset(%{demand_class: class})
+    |> Repo.update()
+  end
+
+  # charter D206: the ONE place a build's demand class is chosen. Every create
+  # path funnels through it, so a new writer inherits the stamp by construction
+  # rather than by remembering — and `Deployment.demand_class_for/1` writes
+  # "unclassified" for a site nobody has classified rather than guessing
+  # "customer", which is the misclassification this whole label exists to make
+  # visible instead of invisible.
+  defp stamp_demand_class(attrs, %Site{} = site) do
+    attrs
+    |> Map.put(:site_id, site.id)
+    |> Map.put(:demand_class, Deployment.demand_class_for(site))
   end
 
   @doc """
@@ -8358,7 +8390,7 @@ defmodule BarkparkCloud.Registry do
       Repo.transaction(fn ->
         with {:ok, queued} <-
                %Deployment{}
-               |> Deployment.changeset(Map.put(attrs, :site_id, site.id))
+               |> Deployment.changeset(stamp_demand_class(attrs, site))
                |> Repo.insert(),
              {:ok, failed} <-
                queued
@@ -8561,15 +8593,18 @@ defmodule BarkparkCloud.Registry do
         evict_oldest_preview_branch(site.id, cap)
       end
 
-      attrs = %{
-        site_id: site.id,
-        environment: "preview",
-        branch: branch,
-        preview_slug: slug,
-        preview_host: host,
-        git_ref: sha,
-        delivery_id: delivery_id
-      }
+      attrs =
+        stamp_demand_class(
+          %{
+            environment: "preview",
+            branch: branch,
+            preview_slug: slug,
+            preview_host: host,
+            git_ref: sha,
+            delivery_id: delivery_id
+          },
+          site
+        )
 
       case %Deployment{} |> Deployment.preview_changeset(attrs) |> Repo.insert() do
         {:ok, dep} -> dep
