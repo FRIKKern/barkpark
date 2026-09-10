@@ -156,7 +156,10 @@ defmodule BarkparkCloud.RegistryNameClaimCensusTest do
   catches it only if the behavioural fixture happens to violate the new
   conjunct. A leg can also be weakened at its SOURCE — the `select` that
   computes `has_admin_token` / `recent_sample` / `live_subscription` is not
-  censused here. Those are the next rung, and they are not built.
+  censused here. That rung IS built, next door:
+  `registry_name_claim_select_census_test.exs` pins the select's key list
+  against `claim_leg/2`'s own reads and pins each computed expression
+  (including both EXISTS fragments) in a test of its own.
 
   This guard has NO human reader. Nothing prints its result to an operator;
   it fires only in CI, only on a diff that touches these lines. So it has to be

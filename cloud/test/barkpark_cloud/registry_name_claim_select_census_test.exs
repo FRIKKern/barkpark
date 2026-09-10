@@ -419,7 +419,7 @@ defmodule BarkparkCloud.RegistryNameClaimSelectCensusTest do
                conjuncts now: #{inspect(shape.conjuncts)}
 
              Two conjuncts, no more: the row link and the window bound. An ADDED
-             conjuncts narrows the hard block — rows the usage sampler demonstrably
+             conjunct narrows the hard block — rows the usage sampler demonstrably
              reached inside the window stop holding their hostname, and the
              platform hands a name to the next tenant while it is still
              transmitting to the old box. A REMOVED conjunct is the opposite bug
