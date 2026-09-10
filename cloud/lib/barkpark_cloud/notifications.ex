@@ -581,7 +581,7 @@ defmodule BarkparkCloud.Notifications do
     #     comprehension ran zero times and traced nothing. Resolve first, send
     #     inside the branch, and the consented withhold stays derivable.
     targets =
-      for {team_id, rows} <- Enum.group_by(barkparks, & &1.team_id),
+      for {team_id, rows} <- digest_audience(barkparks),
           is_binary(team_id),
           recipients = team_member_emails(team_id),
           recipients != [],
@@ -1104,6 +1104,53 @@ defmodule BarkparkCloud.Notifications do
     else
       0
     end
+  end
+
+  # WHICH TEAMS THE DIGEST IS FOR — the UNION of instance-owning and site-owning
+  # teams (dr-w33-bl), keyed to `{team_id, rows}` so the caller's comprehension
+  # is unchanged and `rows` stays "this team's instances, possibly none".
+  #
+  # It used to be `Enum.group_by(barkparks, & &1.team_id)` alone: audience by
+  # BARKPARK INSTANCE ownership, with sites entering only later as the SCOPE of
+  # the reading. That keyed the mail on the wrong noun. The headline payload is
+  # deploy health, deploys belong to SITES, and a team that owned sites but no
+  # instance was measured by nobody and mailed by nobody — silently, because the
+  # accounting counts recipients and covered INSTANCES and such a team
+  # contributes zero to both, so the run reads as complete.
+  #
+  # That state is not exotic: `sites.barkpark_id` cascades on delete (so a
+  # deleted box takes its sites), but `Registry.create_site/2` stamps `team_id`
+  # from the box AT CREATE TIME and never again, so moving a box between teams
+  # leaves its sites behind on the old one.
+  #
+  # `Map.put_new` and not `Map.merge`: a team that owns BOTH must keep its
+  # instance rows. The site-owning read is additive by construction, so no team
+  # the old derivation reached can be dropped by this one.
+  defp digest_audience(barkparks) do
+    by_instance = Enum.group_by(barkparks, & &1.team_id)
+
+    Enum.reduce(site_owning_team_ids(), by_instance, fn team_id, acc ->
+      Map.put_new(acc, team_id, [])
+    end)
+  end
+
+  # The distinct teams that own at least one row in `sites`.
+  #
+  # A FAILURE DEGRADES TO THE OLD AUDIENCE, never to a broken send: this read is
+  # a side path on a best-effort operator email, and the same rule
+  # `team_site_ids/1` and `account_fleet_digest/2` follow applies here. `[]`
+  # means "no team was ADDED", which is exactly the pre-dr-w33 behaviour — the
+  # instance-owning teams still get their mail.
+  defp site_owning_team_ids do
+    Site
+    |> where([s], not is_nil(s.team_id))
+    |> select([s], s.team_id)
+    |> distinct(true)
+    |> Repo.all()
+  rescue
+    _ -> []
+  catch
+    :exit, _ -> []
   end
 
   # THE SITE IDS ONE TEAM OWNS — the narrowing the digest's deploy reading is
