@@ -59,10 +59,15 @@ defmodule Barkpark.Content.DedupPublishToctouTest do
   @dataset "dedup_toctou_race"
   @type_name "paper"
 
-  # Near-duplicate on purpose: 8 shared tokens, one extra word apart — far
-  # above the wall's refuse band (sim >= 0.55 AND shared >= 3).
+  # Near-duplicate on purpose. The two titles differ only by trailing
+  # STOPWORDS ("at it", both in DedupWall's @stopwords), so their scored token
+  # sets are IDENTICAL and the pair sits at the top of the refuse band
+  # (sim >= 0.55 AND shared >= 3) whatever tag fixture a given arm uses. An
+  # earlier draft differed by one real word and measured 0.5333 on the
+  # paper-birth arm — INSIDE the advise band, so the wall correctly declined to
+  # refuse and the arm proved nothing about the lock.
   @title_a "Serialize the publish dedup path against the check insert race"
-  @title_b "Serialize the publish dedup path against the check insert race window"
+  @title_b "Serialize the publish dedup path against the check insert race at it"
 
   setup do
     :ok = Sandbox.checkout(Repo, sandbox: false)
@@ -120,6 +125,60 @@ defmodule Barkpark.Content.DedupPublishToctouTest do
     assert is_list(payload.similar)
   end
 
+  test "paper-birth arm — two concurrent near-dup paper births, exactly one commits" do
+    # THE SECOND DOOR. `BlockOps.upsert_blocks_doc/3` births PUBLISHED rows by
+    # direct Repo write, with its own AuthoringWall mount, and its per-slug
+    # advisory lock gives two different slugs two different keys — so before
+    # this change it carried the identical race. It takes the SAME scope key as
+    # the lifecycle path, so the two doors also exclude each OTHER.
+    LabelFixtures.register_tags!(@dataset)
+
+    test_pid = self()
+
+    Application.put_env(
+      :barkpark,
+      :dedup_wall_post_check_barrier,
+      {@dataset, :pre_txn, fn -> park(test_pid) end}
+    )
+
+    tasks =
+      for {slug, title} <- [{"paper-a", @title_a}, {"paper-b", @title_b}] do
+        Task.async(fn ->
+          :ok = Sandbox.checkout(Repo, sandbox: false)
+
+          Content.upsert_paper(
+            LabelFixtures.paper_attrs(%{
+              "slug" => slug,
+              "dataset" => @dataset,
+              "blocks" => [
+                %{
+                  "id" => "tpl-title",
+                  "type" => "heading",
+                  "level" => 1,
+                  "role" => "title",
+                  "locked" => true,
+                  "text" => title
+                },
+                %{
+                  "id" => "p1",
+                  "type" => "paragraph",
+                  "content" => [%{"type" => "text", "value" => "Body for #{slug}."}]
+                }
+              ]
+            })
+          )
+        end)
+      end
+
+    parked = for _ <- 1..2, do: assert_parked()
+    Enum.each(parked, &send(&1, :release))
+    results = Enum.map(tasks, &Task.await(&1, 30_000))
+
+    assert length(published_ids()) == 1
+    assert Enum.count(results, &match?({:ok, %Document{}}, &1)) == 1
+    assert Enum.count(results, &match?({:error, {:duplicate_of, _}}, &1)) == 1
+  end
+
   test "the scope lock key is disjoint from the task/session families" do
     key = DedupWall.publish_scope_lock_key("paper", @dataset, nil)
     assert key == "dedup:paper:global:#{@dataset}"
@@ -146,16 +205,7 @@ defmodule Barkpark.Content.DedupPublishToctouTest do
     Application.put_env(
       :barkpark,
       :dedup_wall_post_check_barrier,
-      {@dataset, phase,
-       fn ->
-         send(test_pid, {:parked, self()})
-
-         receive do
-           :release -> :ok
-         after
-           15_000 -> flunk_async("barrier never released")
-         end
-       end}
+      {@dataset, phase, fn -> park(test_pid) end}
     )
 
     tasks =
@@ -180,7 +230,15 @@ defmodule Barkpark.Content.DedupPublishToctouTest do
     end
   end
 
-  defp flunk_async(msg), do: raise(msg)
+  defp park(test_pid) do
+    send(test_pid, {:parked, self()})
+
+    receive do
+      :release -> :ok
+    after
+      15_000 -> raise "barrier never released"
+    end
+  end
 
   defp seed_draft!(doc_id, title) do
     {:ok, _} =
@@ -203,7 +261,17 @@ defmodule Barkpark.Content.DedupPublishToctouTest do
     |> Repo.all()
   end
 
+  # UNBOXED MEANS REALLY COMMITTED, so the teardown has to reach EVERY table
+  # this dataset touched — not just `documents`. The first version cleaned only
+  # documents and reddened three unrelated tests in
+  # `after_write_listener_seam_test.exs`: their `all_enqueued/1` assertions read
+  # `oban_jobs` GLOBALLY, and the FindabilityPosttest jobs these publishes really
+  # enqueued were still sitting there. A sandboxed neighbour cannot see a
+  # sandboxed test's rows; it sees every one of ours.
   defp purge_dataset do
     Repo.delete_all(from(d in Document, where: d.dataset == ^@dataset))
+
+    Repo.query!("DELETE FROM oban_jobs WHERE args->>'dataset' = $1", [@dataset])
+    :ok
   end
 end
