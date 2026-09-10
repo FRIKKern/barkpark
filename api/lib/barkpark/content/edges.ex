@@ -455,6 +455,7 @@ defmodule Barkpark.Content.Edges do
       |> Enum.group_by(fn {_to_id, ref_type} -> ref_type end, fn {to_id, _} -> to_id end)
       |> Enum.flat_map(fn {ref_type, to_ids} ->
         resolved = Content.resolvable_doc_ids(Enum.uniq(to_ids), ref_type, dataset, opts)
+
         Enum.flat_map(to_ids, fn to_id ->
           if MapSet.member?(resolved, to_id), do: [{to_id, ref_type}], else: []
         end)
