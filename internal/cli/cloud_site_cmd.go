@@ -2236,8 +2236,35 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 	return exitOK
 }
 
-// runCloudSiteOpen is `bp cloud site open <site>` — print (and, on a tty, open)
-// the live PATH url https://<instance>.barkpark.cloud/sites/<slug>/.
+// siteOpenLaunchNote is the browser half of the `bp cloud site open` receipt,
+// and it says only what the CLI actually read.
+//
+// WHAT THE CODE KNOWS. browserOpener is openInBrowser, which Start()s `open` /
+// `xdg-open` / rundll32 and deliberately never Wait()s, so `bp` returns at once.
+// A nil error therefore means ONE thing: the launcher process was spawned. It is
+// not a window, not a loaded page, not even the browser you use — a handler that
+// exits 1 a millisecond later returns nil here just the same. The previous line,
+// "opening in your browser…", asserted that whole chain on the strength of its
+// first link, which is a success claim about LOCAL state backed by an error
+// return alone (site-spawner W8, ssw8-site-open-and-status-claims).
+//
+// THE FIX IS THE DEPLOY VERDICT'S. renderSiteDeployVerdict does not stop saying
+// "live"; it says live AND names what it did not check ("the CLI did not fetch
+// that URL … confirm with `curl -sI`"). Same shape here: report the launch,
+// state the limit in the same breath, and leave the URL — which is printed
+// unconditionally and IS the deliverable — as the thing that always works.
+//
+// The machine envelope changed with it: the field is `launched`, not `opened`,
+// because a bool named `opened` is the same claim in JSON. No consumer read the
+// old key (the site verb had no tests and no docs quoting it; `bp cloud open`
+// keeps its own envelope and is a separate row).
+func siteOpenLaunchNote() string {
+	return "handed the URL to your browser launcher — it started without error; the CLI never sees the window, so if nothing came up, open the URL above yourself"
+}
+
+// runCloudSiteOpen is `bp cloud site open <site>` — print (and, on a tty, hand to
+// the browser launcher) the live PATH url
+// https://<instance>.barkpark.cloud/sites/<slug>/.
 func runCloudSiteOpen(out *writer, g globals, args []string) int {
 	const usage = "bp cloud site open <site> [--print-only]"
 	a, err := parseHzArgs(args, nil, []string{"print-only"}, usage)
@@ -2266,22 +2293,24 @@ func runCloudSiteOpen(out *writer, g globals, args []string) int {
 		return useError(out, "failed", fmt.Sprintf("site %q has no live URL yet — deploy it first with `bp cloud site deploy %s`", ref, ref), exitGeneric)
 	}
 
-	opened := false
+	// launched, never `opened`: all this bool records is that the launcher
+	// process started. See siteOpenLaunchNote.
+	launched := false
 	if !a.bools["print-only"] && out.isTTY {
 		if berr := browserOpener(url); berr == nil {
-			opened = true
+			launched = true
 		} else {
-			out.errf("could not open a browser (%v) — copy the URL above", berr)
+			out.errf("could not start a browser launcher (%v) — copy the URL above", berr)
 		}
 	}
 
 	if out.machineOut() {
-		out.emitStructured(map[string]any{"ok": true, "site": spawnSiteRef(site), "url": url, "opened": opened})
+		out.emitStructured(map[string]any{"ok": true, "site": spawnSiteRef(site), "url": url, "launched": launched})
 		return exitOK
 	}
 	out.outf("%s", url)
-	if opened {
-		out.info("opening in your browser…")
+	if launched {
+		out.info("%s", siteOpenLaunchNote())
 	}
 	return exitOK
 }
@@ -2586,6 +2615,26 @@ func sitePublishTriggerLine(trigger string) string {
 // `ledger` is the rest of that same page (newest first, `newest` included) — it
 // feeds ONE thing: the right-censored "still waiting" bound in the time-to-web
 // line, which must be taken from the OLDEST waiting row, not the newest.
+//
+// WHY `bp cloud site status` IS NOT IN successClaimRegistry, WRITTEN DOWN RATHER
+// THAN LEFT IMPLICIT (site-spawner W8, ssw8-site-open-and-status-claims). The
+// success-claim law binds a verb that CLAIMS A POST-CONDITION IT PRODUCED: it may
+// not report success on an exit code alone. This function produces nothing. It is
+// a pure read view — it relays fields the control plane sent for a site and its
+// deployments and mints no verdict of its own about a change (the one judgement it
+// does make, live-vs-newest-failed above, exists precisely to STOP the relayed
+// "live" from over-claiming). With no post-condition asserted there is nothing for
+// the registry's property — would the printed sentence change if the response said
+// the opposite? — to bite on beyond what the status tests already pin, so the row
+// is deliberately absent, not overlooked.
+//
+// The open verb is the opposite case and was fixed instead of exempted: see
+// siteOpenLaunchNote. It is likewise unenrolled, but for a different reason —
+// its post-condition (a browser launcher started) is LOCAL, so it has no server
+// response to vary, and the registry's site arm (siteResponseTypedRows plus the
+// renderSite prefix) requires probes that internal/cloudclient RETURNS. Enrolling
+// a bool there would need a probe pair the verb cannot honestly supply; the honest
+// closer was to make the sentence itself state what it did not read.
 func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) map[string]any {
 	m := map[string]any{
 		"site":      spawnSiteRef(s),
