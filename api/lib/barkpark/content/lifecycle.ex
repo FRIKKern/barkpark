@@ -323,6 +323,38 @@ defmodule Barkpark.Content.Lifecycle do
             Broadcast.write_atomically(fn ->
               txn =
                 Repo.transaction(fn ->
+                  # ── THE CROSS-doc_id TOCTOU CLOSE (acrc-dedup-toctou-serialize) ──
+                  #
+                  # FIRST STATEMENT IN THE TRANSACTION, and it must stay first.
+                  # `AuthoringWall.enforce/5` above ran E4 BEFORE this
+                  # transaction existed, so its verdict describes a corpus that
+                  # nothing holds still. Two publishes carrying DIFFERENT
+                  # doc_ids and near-duplicate titles both pass it — each is
+                  # excluded from its own candidate scan (`d.doc_id !=
+                  # incumbent`), and neither is committed when the other looks —
+                  # and both then commit the duplicate pair the wall exists to
+                  # refuse. `lock_published_row/2` below cannot see it: that is
+                  # a `FOR UPDATE` on the INCUMBENT row, and in this race
+                  # neither publish has an incumbent at all.
+                  #
+                  # So the scope is locked and E4 is recomputed inside the lock,
+                  # held to commit. The loser blocks on the lock, then scans a
+                  # corpus that now contains the winner, and is refused with the
+                  # ORDINARY `{:duplicate_of, _}` shape — routed below into the
+                  # same `discard_draft_refused_as_duplicate/5` the pre-txn
+                  # refusal takes, so a caller cannot tell which of the two
+                  # gates refused it.
+                  case AuthoringWall.recheck_dedup_under_scope_lock(
+                         %{draft | content: pub_content},
+                         type,
+                         pid,
+                         dataset,
+                         opts
+                       ) do
+                    :ok -> :ok
+                    {:error, reason} -> Repo.rollback(reason)
+                  end
+
                   {pub_result, prev_pub_rev} =
                     case Content.get_document(pid, type, dataset, opts) do
                       {:ok, existing} ->
@@ -368,21 +400,18 @@ defmodule Barkpark.Content.Lifecycle do
               end
             end)
 
-          # Publishing a SHEET refreshes its PUBLISHED embedders with the
-          # now-published content (the draft-save path deliberately skips
-          # them — see Sheets.refresh_sheet_embeds). Publish writes the
-          # published row directly (not through Writer's upsert tap), so
-          # the write-through must be invoked here explicitly.
-          Sheets.tap_sheet_writethrough(result)
+          # A `duplicate_of` refused by the IN-TRANSACTION re-check above is
+          # the same verdict as one refused before the transaction opened, and
+          # it must end the same way: the rolled-back transaction left the
+          # draft in place, so the terminal-refusal draft discard runs here.
+          # Nothing else below applies — no row was published.
+          case result do
+            {:error, {:duplicate_of, dup_payload}} ->
+              discard_draft_refused_as_duplicate(draft, dup_payload, type, dataset, opts)
 
-          # Publishing a doc that declares `content.supersedes` stamps the
-          # predecessor with `superseded_by` (the DedupWall exemption's other
-          # half): a correction nobody can find from the row they are reading
-          # is not a correction. Best-effort AFTER the publish committed — a
-          # stamp failure must never fail the publish that carries the fix.
-          tap_supersession_stamp(result, type, dataset, opts)
-
-          WriteScope.fire_after(result, :after_publish, payload)
+            _ ->
+              publish_after_commit(result, payload, type, dataset, opts)
+          end
       end
     else
       # ── THE REFUSAL MUST NOT MANUFACTURE A STRANDED DRAFT ──────────────────
@@ -428,6 +457,27 @@ defmodule Barkpark.Content.Lifecycle do
       {:error, _reason} = error ->
         error
     end
+  end
+
+  # The post-commit tail of a successful publish, unchanged except for being
+  # named: it is now reached only when the transaction actually committed (a
+  # `duplicate_of` refused by the in-transaction re-check routes elsewhere).
+  defp publish_after_commit(result, payload, type, dataset, opts) do
+    # Publishing a SHEET refreshes its PUBLISHED embedders with the
+    # now-published content (the draft-save path deliberately skips
+    # them — see Sheets.refresh_sheet_embeds). Publish writes the
+    # published row directly (not through Writer's upsert tap), so
+    # the write-through must be invoked here explicitly.
+    Sheets.tap_sheet_writethrough(result)
+
+    # Publishing a doc that declares `content.supersedes` stamps the
+    # predecessor with `superseded_by` (the DedupWall exemption's other
+    # half): a correction nobody can find from the row they are reading
+    # is not a correction. Best-effort AFTER the publish committed — a
+    # stamp failure must never fail the publish that carries the fix.
+    tap_supersession_stamp(result, type, dataset, opts)
+
+    WriteScope.fire_after(result, :after_publish, payload)
   end
 
   # Rev-fenced discard of the draft a `duplicate_of` refusal just rejected.

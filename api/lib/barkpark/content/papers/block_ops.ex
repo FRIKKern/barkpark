@@ -478,7 +478,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # content type. Threading `type` through here is safe by construction.
     case enforce_blocks_wall(type, content, title, existing, dataset, slug, scope_attrs, opts) do
       {:ok, content} ->
-        persist_blocks_doc(
+        persist_blocks_doc_serialized(
           type,
           content,
           attrs,
@@ -492,6 +492,88 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
       {:error, _} = error ->
         error
+    end
+  end
+
+  # ── THE CROSS-doc_id TOCTOU CLOSE, paper-birth leg (acrc-dedup-toctou-serialize) ──
+  #
+  # `enforce_blocks_wall/8` ran E4 above, OUTSIDE any transaction, so its
+  # verdict describes a corpus nothing is holding still. Two paper births with
+  # DIFFERENT slugs and near-duplicate titles both pass it (each is excluded
+  # from its own candidate scan by `d.doc_id != incumbent`, and neither row
+  # exists yet for the other to see) and both then commit the duplicate pair
+  # the wall exists to refuse.
+  #
+  # The per-slug `pg_advisory_xact_lock` on `upsert_blocks_doc/3`'s non-paper
+  # leg does NOT cover this: two different slugs hash to two different keys, so
+  # the two writers never meet. The key here is the SCOPE, not the row —
+  # `DedupWall.publish_scope_lock_key/3`, shared byte-for-byte with the
+  # lifecycle publish path so a paper born through ingest and one born through
+  # a lifecycle publish serialize against EACH OTHER, not merely within their
+  # own door.
+  #
+  # `bypass_wall: true` (audited call sites only) skips the re-check exactly as
+  # it skips `enforce_blocks_wall/8` — an unwalled write must stay byte-identical
+  # to the pre-mount behaviour, and it must not pay for a lock it never needed.
+  # The transaction still opens: `persist_blocks_doc/10`'s single Repo write is
+  # the only thing inside it, so an unwalled write is one extra BEGIN/COMMIT and
+  # no lock at all.
+  defp persist_blocks_doc_serialized(
+         type,
+         content,
+         attrs,
+         existing,
+         dataset,
+         slug,
+         scope_attrs,
+         title,
+         opts
+       ) do
+    scope = paper_scope(existing, scope_attrs)
+
+    ref = %Document{
+      doc_id: slug,
+      type: type,
+      dataset: dataset,
+      title: title,
+      content: content,
+      workspace_id: scope[:workspace_id],
+      project_id: scope[:project_id]
+    }
+
+    lock_opts =
+      opts
+      |> Keyword.put(:workspace_id, scope[:workspace_id])
+      |> Keyword.put(:project_id, scope[:project_id])
+
+    txn =
+      Repo.transaction(fn ->
+        unless Keyword.get(opts, :bypass_wall, false) do
+          case AuthoringWall.recheck_dedup_under_scope_lock(ref, type, slug, dataset, lock_opts) do
+            :ok -> :ok
+            {:error, reason} -> Repo.rollback(reason)
+          end
+        end
+
+        persist_blocks_doc(
+          type,
+          content,
+          attrs,
+          existing,
+          dataset,
+          slug,
+          scope_attrs,
+          title,
+          opts
+        )
+      end)
+
+    case txn do
+      # The inner result IS the return value (same contract as the non-paper
+      # leg above): every failure leg returns before, or IS, the single Repo
+      # write, so there is nothing partial to undo.
+      {:ok, inner} -> inner
+      {:error, reason} -> {:error, reason}
     end
   end
 

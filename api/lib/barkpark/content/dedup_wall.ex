@@ -148,6 +148,120 @@ defmodule Barkpark.Content.DedupWall do
   @spec thresholds() :: %{refuse: float(), advise: float(), min_refuse_shared: non_neg_integer()}
   def thresholds, do: %{refuse: @refuse, advise: @advise, min_refuse_shared: @min_refuse_shared}
 
+  # ── The publish-scope serialization lock (acrc-dedup-toctou-serialize) ──────
+  #
+  # THE RACE THIS EXISTS FOR is NOT the same-row one `Lifecycle.lock_published_row/2`
+  # closes (#17244, `FOR UPDATE` on the INCUMBENT). It is the CROSS-doc_id one:
+  # two publishes carrying DIFFERENT doc_ids and near-duplicate titles, in the
+  # same (type, workspace, dataset) scope. Each excludes its OWN id from the
+  # candidate scan (`where: d.doc_id != ^incumbent`) and neither is committed
+  # when the other looks, so under snapshot isolation BOTH pass E4 and BOTH
+  # commit — a duplicate PAIR that the wall was built to refuse. There is no row
+  # to `FOR UPDATE` (neither exists yet) and no unique index that can express
+  # the predicate (it is a fuzzy trigram+Jaccard verdict; live uniqueness is the
+  # exact `[:doc_id, :type, :dataset_id]` of migration 20260527134000). The only
+  # thing left to serialize on is the SCOPE itself.
+  #
+  # KEY DERIVATION, and why it cannot collide with the task family:
+  #
+  #     hashtext("dedup:" <> type <> ":" <> (workspace_id || "global") <> ":" <> dataset)
+  #
+  # Every other advisory-lock family in this codebase is built by
+  # `Barkpark.Tasks.LockKey` and every one of its strings starts with `task:`,
+  # `task-resources` or `listener:` (`lib/barkpark/tasks/lock_key.ex`), and
+  # `BlockOps.upsert_blocks_doc/3`'s non-paper leg takes `"<type>:<slug>"`
+  # (today `session:…`). A `dedup:`-prefixed string is in NONE of those sets, so
+  # the two lock families are disjoint by prefix: a `Tasks.Internal.fenced_content_write`
+  # holding `task:<uuid>` never blocks a publish, and a publish never blocks it.
+  # `hashtext` collisions are possible in principle (it is a 32-bit hash) and
+  # harmless in kind: the worst case is two unrelated scopes serializing against
+  # each other, i.e. throughput, never correctness.
+  #
+  # The workspace segment is `"global"` for a nil workspace_id because that is
+  # exactly the corpus `Scope.scope_to_workspace_or_global/3` pools: a flat /
+  # Default publish compares against the shared surface, so it must serialize
+  # against the other flat / Default publishes. NOTE THE DELIBERATE ASYMMETRY:
+  # a SCOPED publish reads workspace-OR-global but locks only its own workspace
+  # key, so a scoped publish and a global one do not exclude each other. That is
+  # a residual window, and it is the honest one — locking every scoped publish
+  # against the single global key would serialize the whole corpus.
+  @dedup_lock_prefix "dedup:"
+
+  @doc """
+  The advisory-lock key string for a publish scope. Exposed so tests and the
+  two call sites share ONE derivation — two writers that build the key
+  differently do not exclude each other and NOTHING raises (see
+  `Barkpark.Tasks.LockKey`'s moduledoc for the same failure in the task family).
+  """
+  @spec publish_scope_lock_key(String.t(), String.t(), String.t() | nil) :: String.t()
+  def publish_scope_lock_key(type, dataset, workspace_id) do
+    ws = if is_binary(workspace_id) and workspace_id != "", do: workspace_id, else: "global"
+    @dedup_lock_prefix <> type <> ":" <> ws <> ":" <> to_string(dataset)
+  end
+
+  @doc """
+  Take the publish-scope advisory lock. MUST be called inside an open
+  transaction: `pg_advisory_xact_lock` is released at commit/rollback, so
+  taking it outside one acquires and releases it in the same statement and
+  serializes nothing.
+  """
+  @spec lock_publish_scope!(String.t(), String.t(), keyword()) :: :ok
+  def lock_publish_scope!(type, dataset, opts \\ []) do
+    if scope_lock_enabled?() do
+      key = publish_scope_lock_key(type, dataset, Keyword.get(opts, :workspace_id))
+      _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [key])
+    end
+
+    :ok
+  end
+
+  # THE CONTROL, not a feature flag. A lock is the one kind of fix whose
+  # absence is invisible to every single-process test: with it removed the
+  # suite stays green, because nothing a serial test does can interleave. So
+  # the race harness (`dedup_publish_toctou_test.exs`) needs a way to run its
+  # OWN scenario with the lock off and observe the double-insert — a RED arm
+  # that lives in CI beside the GREEN one instead of in a commit message
+  # nobody can re-run. Default is ON, in every environment; the harness sets
+  # it false for one test and restores it in `on_exit`. It is deliberately NOT
+  # a config knob: no config file sets it, and turning it off in prod would
+  # re-open exactly the TOCTOU this module documents.
+  defp scope_lock_enabled?,
+    do: Application.get_env(:barkpark, :dedup_publish_scope_lock, true) != false
+
+  # TEST-ONLY BARRIER SEAM. The cross-doc_id race needs both publishes to have
+  # PASSED E4 before either commits, and nothing in a serial test can produce
+  # that interleaving on its own. This is where a harness rendezvouses the two:
+  # a `{dataset, phase, fun/0}` triple in the app env, invoked ONLY for the
+  # named dataset (so a concurrently-running async test in another dataset
+  # never touches it) and only in the named PHASE.
+  #
+  # The phase matters, and each arm needs the OTHER one:
+  #
+  #   * `:pre_txn` — the GREEN arm. Both publishes are parked after passing E4
+  #     and before either opens its transaction; releasing them then makes the
+  #     scope lock the only thing standing between two duplicate commits.
+  #   * `:in_txn` — the RED arm, and ONLY valid with the scope lock disabled.
+  #     Both publishes are parked INSIDE their transactions, after the
+  #     re-check, before either commits; releasing them commits both. With the
+  #     lock ENABLED this would deadlock by construction (the parked process
+  #     holds the lock the other is waiting for), which is precisely why it is
+  #     the arm that demonstrates the unserialized double-insert.
+  #
+  # Alternatives rejected: `:erlang.trace` on a private function (binds the
+  # harness to an implementation detail that mix format could rename), and a
+  # `RAISE EXCEPTION` trigger on `documents` (aborts the transaction it is
+  # supposed to pause, so it can never demonstrate a double COMMIT).
+  defp post_check_barrier(result, dataset, opts) do
+    phase = if Keyword.get(opts, :dedup_in_transaction, false), do: :in_txn, else: :pre_txn
+
+    case Application.get_env(:barkpark, :dedup_wall_post_check_barrier) do
+      {^dataset, ^phase, fun} when is_function(fun, 0) -> fun.()
+      _ -> :ok
+    end
+
+    result
+  end
+
   @doc """
   The blocking guard mounted in `Content.Lifecycle.publish_document/4`. Refuses a
   near-duplicate publish; advise-band matches pass (they surface as warnings via
@@ -200,7 +314,9 @@ defmodule Barkpark.Content.DedupWall do
         :ok
 
       true ->
-        gate(ref, type, dataset, opts)
+        ref
+        |> gate(type, dataset, opts)
+        |> post_check_barrier(dataset, opts)
     end
   end
 
@@ -393,6 +509,21 @@ defmodule Barkpark.Content.DedupWall do
   # (body, blocks, acceptance criteria …) was pure transfer cost. The trgm
   # predicate and its ordering are untouched — both run on the `title` COLUMN,
   # not on the projection, so the GIN index is still the one doing the work.
+  # THE SCAN'S TRANSACTION IS A BUDGET CARRIER, NOT AN ISOLATION BOUNDARY (see
+  # the comment at its call site). When the caller is ALREADY inside a
+  # transaction — the publish-scope re-check of
+  # `AuthoringWall.recheck_dedup_under_scope_lock/5` — wrapping again would
+  # merely JOIN that transaction (Ecto nests without a savepoint by default),
+  # and a connection death inside it would then escape as an exception rather
+  # than resolving to the `{:degraded, _}` arm. So under `:dedup_in_transaction`
+  # the scan runs bare and the module-level `rescue` (CLIFF B) is what converts
+  # a pool/DB failure into the same fail-LOUD `{:error, {:dedup_unavailable, _}}`
+  # the un-nested path produces.
+  defp run_candidate_scan(query, timeout, false),
+    do: Repo.transaction(fn -> Repo.all(query, timeout: timeout) end, timeout: timeout)
+
+  defp run_candidate_scan(query, timeout, true), do: {:ok, Repo.all(query, timeout: timeout)}
+
   defp fetch_candidates(ref, type, dataset, opts) do
     title = field_str(ref, :title)
     timeout = Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms)
@@ -477,7 +608,7 @@ defmodule Barkpark.Content.DedupWall do
     # so setting it would be decoration, and decoration in this module has
     # already cost one incident (CLIFF A: the same SET outside a txn was a
     # silent no-op that read as protection).
-    result = Repo.transaction(fn -> Repo.all(query, timeout: timeout) end, timeout: timeout)
+    result = run_candidate_scan(query, timeout, Keyword.get(opts, :dedup_in_transaction, false))
 
     case result do
       {:ok, rows} ->
