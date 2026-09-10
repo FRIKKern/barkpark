@@ -286,7 +286,10 @@ cleanup() {
       note "         and a node site also leaves a RUNNING systemd slot process. It is LEFT IN PLACE"
       note "         deliberately. Remove by hand on $LIVE_HOST:"
       note "           systemctl stop 'barkpark-site@${s}__blue' 'barkpark-site@${s}__green' 2>/dev/null"
-      note "           rm -rf /opt/barkpark/sites/$s  and drop its '# barkpark-site:$s' Caddy block."
+      note "           rm -rf /opt/barkpark/sites/$s  and drop its Caddy block — the one whose"
+      note "           guard comment reads 'BARKPARK_SITE_ROUTE:$s' (that marker, NOT the old '# barkpark-site<colon>' string,"
+      note "           is what deploy/site-deploy-node.sh writes; grepping the old string finds nothing"
+      note "           and the route stays live)."
     done
   fi
   [ -n "${TMP:-}" ] && rm -rf "$TMP"
