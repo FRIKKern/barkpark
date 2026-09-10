@@ -181,6 +181,26 @@ defmodule BarkparkCloud.DemandCensusTest do
       assert c.by_class["unclassified"] == 2
     end
 
+    test "platform_share's denominator is the CLASSIFIED rows, not every attempt" do
+      demo = site_fixture("mixed-demo")
+      tenant = site_fixture("mixed-tenant")
+      unknown = site_fixture("mixed-unknown")
+
+      attempts(demo, "platform", 3)
+      attempts(tenant, "customer", 1)
+      attempts(unknown, "unclassified", 6)
+
+      c = DemandCensus.census(window_hours: 24)
+
+      assert c.total == 10
+      assert c.classified_total == 4
+
+      # 3 of the 4 rows anyone has classified are churn. Over all ten attempts
+      # it would read 30.0% — a reassuringly small number manufactured by
+      # counting rows nobody measured into the denominator.
+      assert c.platform_share == 75.0
+    end
+
     test "a site reclassified mid-window is reported with no class, not one of its two" do
       site = site_fixture("switcher")
       attempts(site, "platform", 3)
