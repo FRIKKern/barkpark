@@ -86,6 +86,10 @@ defmodule Barkpark.Content.Errors do
     # The PRODUCER half of the same rule — `Barkpark.Tasks.DatasetTwinFence`.
     "dataset_twin" =>
       "A task with this _id already exists in another dataset of this workspace/project, and a second copy would make the id ambiguous for every by-id reader. Write to the dataset that already holds it (details.datasets), use a different _id, or — if a genuinely separate copy is intended — resend with content.dataset_twin_intended: true.",
+    # Postgres' per-tsvector 1 048 575-byte cap, hit by the generated
+    # `documents.search_vector` column (task-655f368ae5c72120). Was a bare 500.
+    "searchable_text_too_large" =>
+      "This document's searchable text (its title plus every string in content) exceeds Postgres' 1048575-byte full-text index limit. Shorten or split the document — details.field names the longest string in your payload, which is the likely culprit. Note the limit is on the derived index, not the request: a long, repetitive body can pass where a shorter, high-entropy one fails.",
     # quota_exceeded stays the LAST entry: scaffy/commands/add-error-shape.scaffy
     # anchors its hint-append on this exact comma-free tail.
     "quota_exceeded" =>
@@ -469,6 +473,44 @@ defmodule Barkpark.Content.Errors do
       status: 422,
       details: %{workspaces: workspaces}
     }
+
+  # The generated `documents.search_vector` column overflowed Postgres' single
+  # tsvector cap (SQLSTATE 54000, `:program_limit_exceeded`), translated by
+  # `Content.Mutations.classify_search_vector_overflow/2`. 422 — the request is
+  # well-formed and the cap is on the DERIVED index, not on the body, so
+  # `payload_too_large` (413) would tell the caller to shrink the wrong thing:
+  # a 2 MB low-entropy body indexes fine while an 800 KB high-entropy one does
+  # not. `details.limit_bytes` names the limit; `details.field` names the
+  # longest string in the submitted payload (with its document id and byte
+  # size) so the caller knows WHERE to cut.
+  defp build({:error, {:searchable_text_too_large, limit_bytes, field}})
+       when is_integer(limit_bytes) do
+    details =
+      case field do
+        %{document: doc_id, field: path, bytes: bytes} ->
+          %{limit_bytes: limit_bytes, document: doc_id, field: path, field_bytes: bytes}
+
+        _ ->
+          %{limit_bytes: limit_bytes}
+      end
+
+    message =
+      case field do
+        %{field: path, bytes: bytes} when is_binary(path) ->
+          "the document's searchable text exceeds the #{limit_bytes}-byte full-text index limit; " <>
+            "the largest field in this write is #{path} (#{bytes} bytes)"
+
+        _ ->
+          "the document's searchable text exceeds the #{limit_bytes}-byte full-text index limit"
+      end
+
+    %{
+      code: "searchable_text_too_large",
+      message: message,
+      status: 422,
+      details: details
+    }
+  end
 
   defp build({:error, :quota_exceeded}),
     do: %{code: "quota_exceeded", message: "workspace write quota exceeded", status: 402}
