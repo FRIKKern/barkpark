@@ -679,6 +679,37 @@ defmodule BarkparkWeb.Studio.Caps do
     do: put_flash(socket, :error, "You don't have access to do that.")
 
   @doc """
+  THE `:admin` AFFORDANCE PREDICATE — the ONE function a render site asks
+  "may this seat see an admin-tier door?".
+
+  It takes the ALREADY-DERIVED caps map (the `:caps` assign, stamped by
+  `StudioLive.refresh_caps/1` from `derive/1`) and reads its `:admin` key. It
+  derives NOTHING: there is exactly one place in the system that decides
+  workspace-scoped seat authority (`derive/1` / `admin?/1`, both spelling the
+  seat through `Tenancy.Auth.seat_capabilities/3`), and this function's whole
+  job is to keep render sites from growing a SECOND one.
+
+  WHY IT EXISTS RATHER THAN `@caps.admin` INLINE. `schema_action` and
+  `bulk-publish` / `bulk-unpublish` are `:admin`-tier in `classify/1`, so the
+  gate refuses them for a write-tier member — but the editor rendered their
+  buttons to everyone, advertising a door already decided against
+  (task-ea341f86571c5981). The fix threads THIS answer to the two components as
+  an `admin?` attr. A role or tier comparison written at the button would
+  re-derive authorization at the render site, which is how duplicate predicates
+  accumulate.
+
+  HIDDEN IS NOT DENIED. This is cosmetic honesty layered ON TOP of the
+  server-side halt in `gate/3`, never a replacement for it: a forged
+  `schema_action` from a write-tier member is still halted by the gate whatever
+  this returns.
+
+  Fails CLOSED: a missing/false/non-boolean `:admin`, or a non-map, is `false`.
+  """
+  @spec admin_affordance?(any()) :: boolean
+  def admin_affordance?(caps) when is_map(caps), do: Map.get(caps, :admin) == true
+  def admin_affordance?(_), do: false
+
+  @doc """
   THE `:write` TIER, AND THE ONLY COPY OF IT. Takes an assigns MAP plus an
   already-derived caps map, so both enforcement points read one rule:
 

@@ -26,6 +26,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # in this file stay literal — the icons tripwire owns those.
   alias BarkparkWeb.Icons
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths}
   alias BarkparkWeb.Studio.StudioLive.Shared
@@ -1816,6 +1817,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           </div>
         <% else %>
           <.studio_editor_shell
+            admin?={Caps.admin_affordance?(@caps)}
             focus_on_mount={@focus_doc_on_open}
             editor_doc={@editor_doc}
             editor_schema={@editor_schema}
@@ -1907,7 +1909,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       />
 
       <!-- E3 bulk publish floating action bar -->
-      <.bulk_action_bar selected_doc_ids={@selected_doc_ids} />
+      <.bulk_action_bar
+        selected_doc_ids={@selected_doc_ids}
+        admin?={Caps.admin_affordance?(@caps)}
+      />
 
       <!-- Schema-action ConfirmModal — gated by `confirm_modal` assign -->
       <%= if @confirm_modal do %>
