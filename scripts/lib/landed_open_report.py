@@ -37,6 +37,45 @@ GATE_RE = re.compile(
 )
 PARENT_KINDS = ("epic", "goal", "initiative")
 
+# ── THE THIRD FALSE-POSITIVE CLASS: A LANDING THAT TOUCHED NOTHING THIS ROW
+# NAMES (task-c3c9922e7d8e3815) ───────────────────────────────────────────────
+#
+# MEASURED 2026-09-10: PR #15403 changed exactly one file, api/Dockerfile, and
+# carried `Task: task-076719e53a42102d` because it UNBLOCKED that row's build.
+# The row is a Studio badge feature. It got a `landed-on-main` label, and in
+# THIS report it sat beside rows whose work really did ship — indistinguishable,
+# because the label alone cannot carry the difference.
+#
+# scripts/landed-mark.sh now compares the landing's changed paths against the
+# row's own title, description and criteria, and writes the verdict INTO the
+# recorded landing note. This reader keys on that exact marker. The string is a
+# CONSTANT in both files: a reworded phrase here silently stops flagging, which
+# is the same failure as never flagging.
+#
+# NOT FILTERED OUT, FLAGGED — the same rule PARENT and GATE? follow. A landing
+# with no overlap is still a landing, and a lead may still want to see it; what
+# it is not is evidence that this row's work shipped.
+NO_OVERLAP_MARK = "[no overlap with the paths this row names]"
+
+
+def landing_overlap(content, sha, pr):
+    """-> "none" | "yes" | "?" for the landings recorded on this row.
+
+    "?" is a real answer and it is NOT "yes": rows marked before landed-mark.sh
+    recorded paths (and rows whose file list could not be read) carry no verdict
+    at all, and reporting them as overlapping would be inventing one."""
+    landed = content.get("landed")
+    notes = landed.get("notes") if isinstance(landed, dict) else None
+    if not isinstance(notes, list):
+        return "?"
+    mine = [n for n in notes if isinstance(n, str) and n
+            and ((sha and sha in n) or (pr and ("PR #%s " % pr) in n))]
+    if not mine:
+        return "?"
+    if all(NO_OVERLAP_MARK in n for n in mine):
+        return "none"
+    return "yes"
+
 
 def norm_labels(raw):
     """`labels` is sometimes an array of STRINGS and sometimes an array of
@@ -152,7 +191,14 @@ def cmd_scan(argv):
                 fact, pr, sha = lab, m.group(1) or "", m.group(2)
                 break
         met, total, texts = criteria_tally(content)
+        overlap = landing_overlap(content, sha, pr)
+        flags = flags_for(doc, content, texts)
+        # MUT-NO-OVERLAP-FLAG: scripts/landed-open-report.test.sh replaces this
+        # condition in a scratch copy and requires the selftest to go RED.
+        if overlap == "none":
+            flags.append("NO-OVERLAP")
         hits.append({
+            "overlap": overlap,
             "doc_id": doc.get("doc_id") or doc.get("id") or content.get("doc_id") or "?",
             "lifecycle": lifecycle,
             "live": lifecycle in LIVE,
@@ -161,7 +207,7 @@ def cmd_scan(argv):
             "fact": fact or "landed:<no-sha-label>",
             "pr": pr,
             "sha": sha,
-            "flags": flags_for(doc, content, texts),
+            "flags": flags,
             "assignee": content.get("assignee") or doc.get("assignee") or "-",
             "title": (doc.get("title") or content.get("title") or "")[:80],
         })
@@ -205,6 +251,15 @@ def cmd_render(argv):
         return (0, -a) if isinstance(a, (int, float)) else (1, 0)
 
     live.sort(key=key)
+    # THE TWO POPULATIONS, COUNTED SEPARATELY. A reader that prints one list
+    # makes "landed" and "landed, no overlap" look like the same debt; they are
+    # not, and the second is the one a lead should discount first.
+    nolap = [r for r in live if r.get("overlap") == "none"]
+    if nolap:
+        print("  %d of the %d live rows below carry ONLY landings with NO PATH OVERLAP "
+              "[NO-OVERLAP] — a PR named the row, and what it changed touches nothing "
+              "the row's own text names. Landed, but not evidence this row's work shipped."
+              % (len(nolap), len(live)))
     for r in live:
         a = ages.get(r["sha"])
         age = "%dd" % int(a) if isinstance(a, (int, float)) else "?"
