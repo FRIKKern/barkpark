@@ -220,9 +220,11 @@ defmodule BarkparkWeb.TasksControllerReadyClaimWorkerTest do
     test "REFUSES: a LIVE lease — the shape the fixture's nine seeds actually had",
          %{scope: scope, phase_id: phase} do
       live = mk_task!(uniq("live-lease"), scope, phase, %{"claim" => @held_claim})
-      lapsed_control = mk_task!(uniq("lapsed-ctl"), scope, phase, %{
-        "claim" => Map.put(@held_claim, "ts_iso", @lapsed_ts)
-      })
+
+      lapsed_control =
+        mk_task!(uniq("lapsed-ctl"), scope, phase, %{
+          "claim" => Map.put(@held_claim, "ts_iso", @lapsed_ts)
+        })
 
       ids = ready_ids(scope, phase)
 
