@@ -309,11 +309,24 @@
 #   stale in_progress row rather than waiting for one. An arm that has never
 #   fired is not an arm.
 #
-#   SHAPE C — OPEN WITH A CLAIM THAT WAS NEVER CLEARED. Key: lifecycle_status ==
-#   `open` AND claim.worker is set AND claim.closed_at is set: a reopened row
-#   still wearing the finished claim. A worker-keyed check reads it as HELD; an
-#   expiry-keyed check ignores it entirely. Reported on its own line, never
-#   folded into A or B, because its remedy is a third thing.
+#   SHAPE C — LIVE WITH A CLAIM THAT WAS NEVER CLEARED. Key: lifecycle_status in
+#   LAPSE_C_LIFECYCLES (open, in_progress, blocked) AND claim.worker is set AND
+#   claim.closed_at is set: a live row still wearing the finished claim. A
+#   worker-keyed check reads it as HELD; an expiry-keyed check ignores it
+#   entirely. Reported on its own line, never folded into A or B, because its
+#   remedy is a third thing.
+#
+#   THE KEY WAS THE LITERAL `open` UNTIL WAVE 47, AND THAT MADE THE ARM VACUOUS
+#   ON A FULL DENOMINATOR. Measured board-wide 2026-09-10: of the 267
+#   non-terminal claim-carrying rows, 19 are shape C and ALL NINETEEN are
+#   `blocked` — zero `open`, zero `in_progress`. The arm therefore matched
+#   nothing, anywhere, and printed PASS standing next to every specimen it
+#   exists to name. No "did you check for an empty set?" rule catches that: the
+#   set was not empty, the KEY was narrow. So the arm now STATES the population
+#   it measured (denominator, admitted lifecycle values, specimens found) and
+#   REFUSES a green two ways — an empty denominator, and zero found while a
+#   corpus-derived positive control of the same shape stands outside the
+#   admitted set. See LAPSE_C_LIFECYCLES for the reason `blocked` is admitted.
 #
 # THREE SHAPES, THREE REMEDIES, AND THE OUTPUT SAYS WHICH: A is a re-open lie
 # (re-claim and close it on the evidence already on the row); B needs
@@ -696,6 +709,33 @@ LEASE_TTL_ENV = "BARKPARK_TASK_LEASE_TTL_SECONDS"
 # TERMINAL_LIFECYCLE), and they are CASE-EXACT like every other value read here.
 LIFECYCLE_OPEN = "open"
 LIFECYCLE_IN_PROGRESS = "in_progress"
+LIFECYCLE_BLOCKED = "blocked"
+
+# CLAUSE 7C -- THE LIFECYCLE VALUES SHAPE C ADMITS, AND WHY `blocked` IS ONE OF
+# THEM (wave 47, pds-bl-w47-stale-claim-third-shape-rescoped criterion 3).
+#
+# THE ARM WAS VACUOUS ON THE LIVE BOARD, ON A NON-EMPTY DENOMINATOR. It keyed on
+# `lifecycle_status == "open"` literally. Measured board-wide 2026-09-10 over the
+# 7014 claim-carrying task rows: of the 267 non-terminal claim-carrying rows, 19
+# are shape C -- and ALL NINETEEN are `blocked`. ZERO are `open`. ZERO are
+# `in_progress`. So the literal-`open` key matched nothing, anywhere, ever, and
+# printed PASS while every real specimen stood beside it. Shape C is the
+# signature of a claim that was CLOSED and whose row then moved to `blocked`;
+# `blocked` is not an edge of the shape, it IS the shape's live lifecycle.
+#
+# THE ADMITTED SET IS THEREFORE open + in_progress + blocked: the three
+# lifecycles a row can hold while an agent could still be handed it. `open` and
+# `in_progress` are kept even though they measured 0 -- a shape's key is not
+# narrowed to today's census -- and `considering` and TERMINAL_LIFECYCLE are
+# excluded, because a finished claim on a finished (or not-yet-real) row is the
+# lifecycle working, not a stale claim.
+#
+# THE CHOICE IS NOT LOAD-BEARING FOR DETECTION, AND THAT IS THE POINT. The arm's
+# control set (lapse_c_controls) is keyed on the claim fingerprint over EVERY
+# non-terminal row, ignoring this tuple entirely. Any future narrowing of the
+# admitted set -- including a revert to literal `open` -- leaves a specimen the
+# control sees and the arm does not, and the arm REFUSES rather than greens.
+LAPSE_C_LIFECYCLES = (LIFECYCLE_OPEN, LIFECYCLE_IN_PROGRESS, LIFECYCLE_BLOCKED)
 
 # THE DENOMINATOR'S LENS, IN ONE PLACE. Every "N of the open PDS rows" claim
 # divides by the count of closure rows whose `lifecycle_status` is EXACTLY this
@@ -1845,12 +1885,34 @@ def lapse_shapes(rows, started, lease_ttl):
     lapse_b = []
     lapse_b_overdue = {}
     lapse_c = []
+    # CLAUSE 7C's DENOMINATOR AND ITS TWO CONTROLS, all counted in this one
+    # pass so no second traversal can drift from the first.
+    lapse_c_denominator = 0     # rows whose lifecycle the arm ADMITS
+    lapse_c_controls = []       # fingerprint over EVERY non-terminal row
+    lapse_c_closed_at_seen = 0  # rows of ANY lifecycle carrying claim.closed_at
     for row in rows:
+        row_lifecycle_all = row.get("lifecycle_status") or ""
+        if row_lifecycle_all in LAPSE_C_LIFECYCLES:
+            lapse_c_denominator += 1
         claim = claim_of(row)
         if claim is None:
             continue
-        row_lifecycle = row.get("lifecycle_status") or ""
+        row_lifecycle = row_lifecycle_all
         worker = claim_field(claim, "worker")
+        if claim_field(claim, "closed_at"):
+            # FIELD-READ CONTROL. Not a specimen and never a failure -- a `done`
+            # row wearing a closed claim is the lifecycle working. It exists so
+            # that a ZERO on the line below can be told apart from a projection
+            # that never delivered `claim.closed_at` at all.
+            lapse_c_closed_at_seen += 1
+        if (row_lifecycle not in TERMINAL_LIFECYCLE
+                and worker and claim_field(claim, "closed_at")):
+            # HIDDEN-SPECIMEN CONTROL. Same claim fingerprint as shape C, keyed
+            # on NOTHING but "the row is not finished" -- deliberately WIDER
+            # than LAPSE_C_LIFECYCLES, and derived from the corpus, never from a
+            # row id that can rot. A specimen in here that shape C did not find
+            # is the admitted set hiding it.
+            lapse_c_controls.append(row["_id"])
         if (row_lifecycle == LIFECYCLE_OPEN
                 and not worker
                 and claim_field(claim, "previous_worker")
@@ -1880,17 +1942,26 @@ def lapse_shapes(rows, started, lease_ttl):
             if age > lease_ttl:
                 lapse_b.append(row["_id"])
                 lapse_b_overdue[row["_id"]] = round(age - lease_ttl, 2)
-        if row_lifecycle == LIFECYCLE_OPEN and worker and claim_field(claim, "closed_at"):
+        if row_lifecycle in LAPSE_C_LIFECYCLES and worker and claim_field(claim, "closed_at"):
             # SHAPE C. Reported on its own line and NEVER folded: a worker-keyed
             # check reads it as held, an expiry-keyed check cannot see it at all,
-            # and its remedy is a third thing.
+            # and its remedy is a third thing. The lifecycle key is the TUPLE
+            # and never the literal `open` -- see LAPSE_C_LIFECYCLES: all 19
+            # specimens on the live board are `blocked`, so the literal key
+            # matched zero of them and passed vacuously.
             lapse_c.append(row["_id"])
+    found_c = set(lapse_c)
     return {
         "shape_a": sorted(lapse_a),
         "shape_a_work_evidence": sorted(lapse_a_work),
         "shape_b": sorted(lapse_b),
         "shape_b_overdue_seconds": lapse_b_overdue,
         "shape_c": sorted(lapse_c),
+        "shape_c_denominator": lapse_c_denominator,
+        "shape_c_lifecycles": list(LAPSE_C_LIFECYCLES),
+        "shape_c_controls": sorted(lapse_c_controls),
+        "shape_c_hidden": sorted(i for i in lapse_c_controls if i not in found_c),
+        "shape_c_closed_at_seen": lapse_c_closed_at_seen,
     }
 
 
@@ -2062,6 +2133,11 @@ def census(corpus, closure, depth_of, started, finished, duplicates, anchor=None
     lapse_b = lapse["shape_b"]
     lapse_b_overdue = lapse["shape_b_overdue_seconds"]
     lapse_c = lapse["shape_c"]
+    lapse_c_denominator = lapse["shape_c_denominator"]
+    lapse_c_lifecycles = lapse["shape_c_lifecycles"]
+    lapse_c_controls = lapse["shape_c_controls"]
+    lapse_c_hidden = lapse["shape_c_hidden"]
+    lapse_c_closed_at_seen = lapse["shape_c_closed_at_seen"]
 
     off_vocab = Counter()
     off_vocab_samples = defaultdict(list)
@@ -2120,6 +2196,15 @@ def census(corpus, closure, depth_of, started, finished, duplicates, anchor=None
         "lapse_shape_b": sorted(lapse_b),
         "lapse_shape_b_overdue_seconds": lapse_b_overdue,
         "lapse_shape_c": sorted(lapse_c),
+        # CLAUSE 7C. The arm STATES the population it measured -- denominator,
+        # the lifecycle values that denominator admits, and the specimen count
+        # -- and carries the two controls that let a ZERO be told apart from a
+        # blindness. See LAPSE_C_LIFECYCLES.
+        "lapse_shape_c_denominator": lapse_c_denominator,
+        "lapse_shape_c_lifecycles": lapse_c_lifecycles,
+        "lapse_shape_c_controls": lapse_c_controls,
+        "lapse_shape_c_hidden": lapse_c_hidden,
+        "lapse_shape_c_closed_at_seen": lapse_c_closed_at_seen,
         "lease_ttl_seconds": lease_ttl,
         "off_vocabulary": dict(off_vocab),
         "off_vocabulary_samples": {k: v for k, v in off_vocab_samples.items()},
@@ -2361,9 +2446,26 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
     out.append("           key: in_progress + held longer than the TTL -- NEVER expired_at, which the REAP")
     out.append("           writes, so an expired_at-keyed check passes VACUOUSLY on this shape forever")
     out.append("           REMEDY: `bp task release` -- shape B cannot self-heal while the lease is held")
-    out.append("  shape C  open with a claim never cleared %5d%s"
+    out.append("  shape C  live with a claim never cleared %5d%s"
                % (len(report["lapse_shape_c"]), _eg(report["lapse_shape_c"])))
-    out.append("           key: open + claim.worker SET + claim.closed_at SET")
+    out.append("           key: lifecycle in {%s} + claim.worker SET + claim.closed_at SET"
+               % ", ".join(report["lapse_shape_c_lifecycles"]))
+    out.append("           DENOMINATOR %d row(s) admit those lifecycles (of %d live); FOUND %d specimen(s)"
+               % (report["lapse_shape_c_denominator"], report["live"],
+                  len(report["lapse_shape_c"])))
+    out.append("           CONTROL claim.closed_at read on %d row(s) of ANY lifecycle -- %s"
+               % (report["lapse_shape_c_closed_at_seen"],
+                  "the key field was exercised"
+                  if report["lapse_shape_c_closed_at_seen"]
+                  else "the key field was NEVER exercised, so a 0 above is UNREAD, not measured"))
+    out.append("           CONTROL %d live row(s) carry the shape-C claim fingerprint under ANY "
+               "non-terminal lifecycle;"
+               % len(report["lapse_shape_c_controls"]))
+    out.append("           %d of them sit OUTSIDE the admitted set%s"
+               % (len(report["lapse_shape_c_hidden"]), _eg(report["lapse_shape_c_hidden"])))
+    if not report["lapse_shape_c"] and not report["lapse_shape_c_controls"]:
+        out.append("           this 0 is UNEXERCISED: no positive control of this shape exists in "
+                   "the corpus")
     out.append("           REMEDY: clear the stale claim -- a worker-keyed check reads this row as HELD")
     out.append("")
     out.extend(render_reason_artifacts(report, report.get("reason_artifacts_armed")))
@@ -2554,15 +2656,50 @@ def round_done_predicate(report):
                         "REMEDY: `bp task release`: %s"
                         % (len(lapse_b), LIFECYCLE_IN_PROGRESS, report["lease_ttl_seconds"],
                            ", ".join(lapse_b[:8]) + (", ..." if len(lapse_b) > 8 else "")))
-    lines.append("  open rows with NO stale claim (shape C)       %d/%d    %s   (worker SET and closed_at SET)"
-                 % (report["live"] - len(lapse_c), report["live"],
-                    "PASS" if not lapse_c else "FAIL"))
+    # CLAUSE 7C -- THE DENOMINATOR IS STATED AND THE GREEN IS REFUSABLE
+    # (pds-bl-w47-stale-claim-third-shape-rescoped c3). The line names the
+    # population it measured, not just a ratio: the count of rows whose
+    # lifecycle the arm ADMITS, the admitted values themselves, and the
+    # specimens found. Two ways this arm may NOT report a green:
+    #   (i)  the denominator is EMPTY -- a shape measured over no rows has not
+    #        passed, it has failed to run (the same rule clause 0 applies to an
+    #        empty corpus);
+    #   (ii) it found ZERO while a positive control of the SAME shape stands in
+    #        the corpus outside the admitted set. That control is derived from
+    #        the claim fingerprint over every non-terminal row -- never from a
+    #        hard-coded row id, which would rot the first time the board moved.
+    #        This is the arm that reds the literal-`open` key that shipped: all
+    #        19 live specimens are `blocked`, so the old predicate found 0 while
+    #        19 controls stood beside it, and printed PASS.
+    lapse_c_hidden = report["lapse_shape_c_hidden"]
+    lapse_c_denom = report["lapse_shape_c_denominator"]
+    lapse_c_refused = (not lapse_c_denom) or (not lapse_c and lapse_c_hidden)
+    lines.append("  rows with NO stale claim (shape C)            %d/%d    %s   "
+                 "(denominator admits %s; %d found; %d control(s), %d hidden)"
+                 % (lapse_c_denom - len(lapse_c), lapse_c_denom,
+                    "FAIL" if (lapse_c or lapse_c_refused) else "PASS",
+                    "/".join(report["lapse_shape_c_lifecycles"]), len(lapse_c),
+                    len(report["lapse_shape_c_controls"]), len(lapse_c_hidden)))
+    if not lapse_c_denom:
+        failures.append("shape C measured an EMPTY denominator -- no row in the closure carries "
+                        "any of the lifecycles this arm admits (%s), so its 0 specimens is not a "
+                        "measurement and must never be read as a green"
+                        % ", ".join(report["lapse_shape_c_lifecycles"]))
+    elif not lapse_c and lapse_c_hidden:
+        failures.append("shape C found ZERO over a denominator of %d admitting %s, but %d POSITIVE "
+                        "CONTROL row(s) carry the shape-C claim fingerprint (worker SET and "
+                        "closed_at SET) under a non-terminal lifecycle this arm does NOT admit -- "
+                        "the zero is the KEY being too narrow, not the board being clean: %s"
+                        % (lapse_c_denom, ", ".join(report["lapse_shape_c_lifecycles"]),
+                           len(lapse_c_hidden),
+                           ", ".join(lapse_c_hidden[:8])
+                           + (", ..." if len(lapse_c_hidden) > 8 else "")))
     if lapse_c:
-        failures.append("%d row(s) are SHAPE C -- `open` while still wearing a finished claim "
+        failures.append("%d row(s) are SHAPE C -- live (%s) while still wearing a finished claim "
                         "(worker SET and closed_at SET); a worker-keyed check reads them as HELD "
                         "and an expiry-keyed check cannot see them at all. REMEDY: clear the "
                         "stale claim: %s"
-                        % (len(lapse_c),
+                        % (len(lapse_c), "/".join(report["lapse_shape_c_lifecycles"]),
                            ", ".join(lapse_c[:8]) + (", ..." if len(lapse_c) > 8 else "")))
 
     return lines, failures
