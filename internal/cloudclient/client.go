@@ -2924,6 +2924,16 @@ type DeployCensus struct {
 	// `-o json` re-emits Raw verbatim — no Go struct in this package named it,
 	// so no human render could.
 	CoalescedAttempts *DeployCoalescedAttempts `json:"coalesced_attempts"`
+	// BoxDoor is the dr-w22-s5 addition: the door's own denominator, keyed on the
+	// capacity-409 PROSE MARKER in failure_reason across ALL statuses, rather than
+	// on `deferral_cause` — which is written in exactly one code path, so a
+	// capacity refusal that settled `failed` carries a NULL cause and is invisible
+	// to every cause-keyed reader.
+	//
+	// A POINTER, and not for style: a control plane older than this term sends no
+	// key, and a zero-valued struct would render "the door refused 0 times" over a
+	// window in which it refused thousands. nil MUST render as NOT MEASURED.
+	BoxDoor *DeployBoxDoor `json:"box_door"`
 	// TotalSites and Truncated are the dr-w24 server-side cut markers.
 	// `DeployLedger.census/3` clamps `sites` at 50 rows and has always cut
 	// SILENTLY on this wire: before these two fields the CLI's own "… and N
@@ -2998,6 +3008,35 @@ type DeployCoalescedAttempts struct {
 	Reason  string `json:"reason"`
 	Since   string `json:"since"`
 	Basis   string `json:"basis"`
+}
+
+// DeployBoxDoor is the box door's REFUSAL count beside the door's RE-QUEUE
+// count, with the rows the second one cannot see carried as its own scalar.
+//
+// Refusals counts every row in the window whose failure_reason carries the
+// capacity-409 marker, in WHATEVER status it settled. CauseKeyed counts what the
+// old predicate saw — status='deferred' AND deferral_cause=BOX_AT_CAPACITY_DEFERRED.
+// Unkeyed is the producer's DIRECT count of the marked rows the cause-keyed
+// predicate misses; it is deliberately not derived here as Refusals-CauseKeyed,
+// because that subtraction is signed and this reader must not be able to print a
+// negative count of missing rows.
+//
+// ByStatus is the marked population split by the status it settled in — the
+// evidence for the gap, on the same line as the gap.
+type DeployBoxDoor struct {
+	Refusals       int                   `json:"refusals"`
+	CauseKeyed     int                   `json:"cause_keyed"`
+	Unkeyed        int                   `json:"unkeyed"`
+	ByStatus       []DeployBoxDoorStatus `json:"by_status"`
+	Predicate      string                `json:"predicate"`
+	CausePredicate string                `json:"cause_predicate"`
+	Basis          string                `json:"basis"`
+}
+
+// DeployBoxDoorStatus is ONE status bucket of the marked door population.
+type DeployBoxDoorStatus struct {
+	Status string `json:"status"`
+	Count  int    `json:"count"`
 }
 
 // DeployDeliveryWindow is the delivery census's PINNED window WITH its width —

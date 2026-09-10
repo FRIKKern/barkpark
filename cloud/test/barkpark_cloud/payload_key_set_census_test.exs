@@ -1482,7 +1482,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # walker counts the map key, not the node's interior. The serializer's arity
   # moved 5 -> 6 in the same change (the fifth prefetch argument), which is why
   # every `barkpark_json/5` name in this file is now `/6`.
-  @emitted_pinned 168
+  # 168 -> 169 (dr-w22-s5): `census/3` gains ONE top-level key, `box_door`. The
+  # node's seven inner keys live in `box_door/1`, which is not a censused
+  # serializer entry point, so they do not move this pin — they move
+  # `@ast_blind_paths` instead. MEASURED by the PIN CO-EDIT arm on this tree
+  # ("@emitted_pinned 168 -> 169"), never summed with an earlier delta.
+  @emitted_pinned 169
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -1659,7 +1664,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # evicted_at, exit_code, journal_command, log_bytes, log_path, log_state,
   # record, unit_name. The struct's other 14 tags already existed as names
   # package-wide and land entirely in the SITE register below.
-  @go_tag_pinned 352
+  # 352 -> 359 (dr-w22-s5): `DeployBoxDoor` and `DeployBoxDoorStatus` declare
+  # NINE json tag lines and the NAME union grows by SEVEN — `box_door`,
+  # `refusals`, `cause_keyed`, `unkeyed`, `by_status`, `predicate` and
+  # `cause_predicate`. `basis`, `status` and `count` were already declared
+  # elsewhere in the package, so they ride free on the name union and move the
+  # SITE register below instead. MEASURED by the PIN CO-EDIT arm on this tree
+  # ("@go_tag_pinned 352 -> 359"), never derived from the diff.
+  @go_tag_pinned 359
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1721,7 +1733,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "as_of" => 5,
     "at" => 2,
     "barkpark_id" => 4,
-    "basis" => 6,
+    # 6 -> 7 (dr-w22-s5): `DeployBoxDoor.Basis`.
+    "basis" => 7,
     "became_live_at" => 2,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.BuildID` joins
     # the single existing declaration — the recorder's key, echoed on EVERY
@@ -1755,7 +1768,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # carries the same ONE tag site an `int` would.
     # dr-bl-w7: 7 -> 8. MetricsSpaceConsumerRoot.Count — how many children the
     # walk FOUND, so a capped `top` list can say it is capped.
-    "count" => 8,
+    # 8 -> 9 (dr-w22-s5): `DeployBoxDoorStatus.Count`.
+    "count" => 9,
     # Pressure's HOST cpu busy-percent and RunawayProc's PER-PROCESS lifetime
     # average share one name and are different measurements — exactly the
     # collision this register exists to keep visible.
@@ -1909,7 +1923,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "state" => 2,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.Status` — the run state the CLI verdict QUOTES rather than inventing.
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one status site (17 -> 18). `SiteBuildLogStage.Status` — one stage's verdict.
-    "status" => 18,
+    # 18 -> 19 (dr-w22-s5): `DeployBoxDoorStatus.Status`.
+    "status" => 19,
     "team" => 4,
     "team_id" => 6,
     "template" => 2,
@@ -3975,6 +3990,22 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
     "boundaries[].source",
     "boundaries[].subject",
     "boundaries[].voids",
+    # dr-w22-s5. The box door's OWN denominator, keyed on the capacity-409 prose
+    # marker across ALL statuses rather than on `deferral_cause` — a column
+    # written in exactly one code path, so a capacity refusal that settled
+    # `failed` carries a NULL cause and no cause-keyed reader can see it. Every
+    # path here is decoded by `cloudclient.DeployBoxDoor` in the same commit.
+    # `by_status[]`'s own two keys (`status`, `count`) are NOT registered: the
+    # evaluated payload this census walks carries an EMPTY list for it, so those
+    # paths are not on this wire to be named. They ride `DeployBoxDoorStatus`.
+    "box_door",
+    "box_door.basis",
+    "box_door.by_status",
+    "box_door.cause_keyed",
+    "box_door.cause_predicate",
+    "box_door.predicate",
+    "box_door.refusals",
+    "box_door.unkeyed",
     "cancelled",
     "classes",
     "classes[].agency",
@@ -4215,7 +4246,12 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
   # PINNED, and the direction of travel is DOWN. Narrow the AST census's blind
   # spot and this number falls; it must never rise without a reason written
   # beside it.
-  @ast_blind_paths 161
+  # 161 -> 168 (dr-w22-s5): `box_door/1` is a private helper, so the AST census
+  # sees only the top-level `box_door` key its call site writes and is blind to
+  # all SEVEN of the node's inner paths. UP, and the reason is the same shape
+  # dr-w32 filed — a helper writing to the wire — which is exactly why the
+  # EVALUATED census above exists and names all eight.
+  @ast_blind_paths 168
 
   @ledger Path.expand("../../lib/barkpark_cloud/deploy_ledger.ex", __DIR__)
 

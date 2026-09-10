@@ -219,8 +219,19 @@ defmodule BarkparkCloud.Registry.Deployment do
     #
     # These ride ALONGSIDE the sentence, which is PRESERVED (Vercel keeps
     # `readyStateReason` beside `readyState`): the prose is the operator's, the
-    # columns are the aggregate's. Written by `Sites.Deploy.defer/3` on
-    # `deferred` rows only — NULL on every other row and on pre-W12 deferrals,
+    # columns are the aggregate's.
+    #
+    # WRITTEN ON TWO KINDS OF ROW, not one. `Sites.Deploy.defer/3` stamps all
+    # three on each `deferred` round (deploy.ex:1657-1659) AND on the TERMINAL
+    # round, which it settles `failed` through the three-arg `fail/3`
+    # (deploy.ex:1583-1587, W28-S6). This comment used to say "`deferred` rows
+    # only — NULL on every other row", which was false from the day that branch
+    # landed and pointed the wrong way: a reader trusting it would conclude the
+    # abandonment cannot be found as data and would go on scanning the prose.
+    # A `failed` row with `deferral_depth >= deferral_bound` IS the abandonment,
+    # and `DeployLedger.classify/1` reads exactly that.
+    #
+    # Still NULL on every row outside a deferral chain, and on pre-W12 deferrals,
     # which are honestly unknown rather than backfilled out of their own prose.
     #
     # `deferral_bound` is the CAUSE's own budget (12 for capacity, 6 for a busy

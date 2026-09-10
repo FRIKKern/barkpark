@@ -114,7 +114,17 @@ defmodule BarkparkCloud.Notifications do
   # it (the `email_notification_settings.deployment_refused` column landed in the
   # same change), so D342(d)'s objection to a column-less per-event mute does not
   # apply.
+  # dr-w13-bl-abandonment-splits-off-the-flood: `deployment_abandoned` joins them
+  # under the same rule, and under a stronger form of it — it is the chain the
+  # fleet gave up on, the most severe deploy outcome there is, and it was already
+  # reaching chat as part of `deployment_failed` (which is default-on) before the
+  # split. Leaving it out would make the split a SILENCING for every Slack-only
+  # team. It has a checkbox behind it (the
+  # `email_notification_settings.deployment_abandoned` column lands in the same
+  # change), so D342(d)'s objection to a column-less per-event mute does not
+  # apply.
   @chat_default_on ~w(provision_failed deployment_failed deployment_refused
+                      deployment_abandoned
                       agent_unreachable subscription_past_due)
 
   # Events that ignore `event_routes` and always fan to every enabled chat channel.
