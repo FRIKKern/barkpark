@@ -1734,7 +1734,18 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # the instrument is known to reproduce the census before it is used to change it.
   # An earlier measurement said 363 -> 367 and is VOID: it was taken against a main
   # 20 commits older, without `serving_since_basis`. Never summed with that delta.
-  @go_tag_pinned 368
+  # 368 -> 369 (#17479 cli/cloudclient-429, MEASURED 2026-09-10T21:35Z against
+  # origin/main at a0552783c, i.e. AFTER #17490 landed site_doctor.go): retry.go
+  # is the SIXTH non-test source (the 429/Retry-After backoff the control
+  # plane's throttle needs). It declares 5 tag sites and exactly ONE new NAME —
+  # `retry_after`, at two sites. `error`, `code` and `details` were already in
+  # the package vocabulary, so those three sites ride free on the NAME union and
+  # land in the SITE register below. CONTROL: the same scan over origin/main
+  # alone returns 368, byte-equal to the value this line replaces. Two earlier
+  # measurements (363 -> 364, then 368 -> 369 pre-computed at 20:00Z) were
+  # re-run, not summed; had #17479 landed BEFORE site_doctor.go the value would
+  # have been 365, which is why order-flipped deltas are never added.
+  @go_tag_pinned 369
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1830,7 +1841,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # union (`@go_tag_pinned` does not move for it) and this row is born at 2.
     "classes" => 2,
     "clock" => 3,
-    "code" => 3,
+    # 2026-09-10 #17479: 3 -> 4, retry.go added. The throttle envelope's
+    # `details.code` — an existing name at a new site.
+    "code" => 4,
     "content_rev" => 2,
     # MetricsSpaceSites.Count joined the five existing `count` declarations
     # — the deployed-sites walk (host-space report, W6 S4). ssw8 (PR #14610)
@@ -1870,6 +1883,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 9 -> 10. `SiteBuildLogRecord.Detail` — the plane's human
     # sentence on a 409/410/502 build-log refusal.
     "detail" => 11,
+    # 2026-09-10 #17479: ADD => 2, retry.go added. NEWLY DUPLICATED, 1 -> 2: the
+    # retry envelope's `details` object joins the single declaration in client.go.
+    "details" => 2,
     # ssw8 (PR #14610): ContentBinding.DocType is the third — the type the
     # control plane actually READ at create, as against the type the site ROW
     # stores. Same name, different measurement: exactly the collision this
@@ -1881,7 +1897,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — the refusal envelope `decodeSelfUpdatePin/1` reads.
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 9 -> 10. `SiteBuildLogRecord.Error` — the build-log
     # refusal slug (not_found / box_unbound / build_log_evicted / box_unreachable).
-    "error" => 10,
+    # 2026-09-10 #17479: 10 -> 11, retry.go added. The 429 envelope's `error`.
+    "error" => 11,
     "evidence" => 2,
     "failed" => 2,
     # deploy/sites-embed-failure-cause: `SiteDeploymentEmbed` (internal/cloudclient) is a THIRD declaration — the fleet list embed learned to name the cause.
@@ -1953,6 +1970,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # which is why it is not the health beat's `as_of`.
     "reported_at" => 2,
     "required" => 2,
+    # 2026-09-10 #17479: ADD => 2, retry.go added. NEWLY DUPLICATED and the only
+    # NEW NAME on this branch (the sole reason `@go_tag_pinned` moved at all):
+    # `retry_after` is declared at BOTH levels of the throttle envelope — top and
+    # inside `details` — so it is born at 2.
+    "retry_after" => 2,
     # dr-bl-w7: `residual` crossed INTO this register. It was declared ONCE
     # (DeployCensus, the attempted-rows remainder) and is now declared on
     # MetricsSpace too — the space reading's own remainder, the bytes no
@@ -2065,7 +2087,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # that were declared exactly once and are now duplicated. That split is the
   # register's whole reason to exist: the 14 ride free on the NAME union and
   # `@go_tag_pinned` structurally cannot see any of them.
-  @cloudclient_sources ~w(client.go deliveries.go selfupdate.go site_build_log.go site_doctor.go)
+  # 2026-09-10 #17479: retry.go added — the SIXTH non-test source, the client-side
+  # 429/Retry-After backoff. All three registers were re-measured against
+  # origin/main on the rebased tree (after #17490), not derived from the diff.
+  @cloudclient_sources ~w(client.go deliveries.go retry.go selfupdate.go site_build_log.go site_doctor.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
