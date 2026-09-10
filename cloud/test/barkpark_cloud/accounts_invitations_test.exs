@@ -485,19 +485,19 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
                Accounts.update_member_role_as(admin, team, admin, "member")
     end
 
-    test "owner on THEMSELVES: BOTH verbs allow it — the cell the console knowingly under-offers" do
-      # The console withholds `Remove` on the self row (charter D492 variant B)
-      # because the pure authority mirror reds the merge-blocking members smoke,
-      # whose 3-row roster has the actor at row 0. That withholding is a CONSOLE
-      # RULING that contradicts the server, filed as
-      # cch-w44-bl-self-row-underoffers-three-server-legal-cells — and an
-      # under-offer, not this epic's offered-but-refused class.
+    test "owner on THEMSELVES: BOTH verbs allow it — and the console now offers both" do
+      # WAS the cell the console knowingly under-offered: it withheld `Remove` on
+      # the self row (charter D492 variant B) while the server answered
+      # {:ok, :removed}. cch-w44-bl closed that gap — `canRemoveMember` no longer
+      # opens with a blanket `if (isSelf) return false`, and the console's
+      # MEMBER_AUTHORITY_MATRIX cell "owner acting on THEIR OWN row" now pins
+      # Remove as OFFERED. This test is the SERVER half of that pair: it is what
+      # makes the offered button honest, so if it reds, the console is over-
+      # offering and cloud/priv/static/__app.test.mjs must move with it.
       #
-      # It is pinned HERE so the contradiction stays a decision rather than
-      # decaying into a belief. If this test ever reds, the server moved TOWARD
-      # the console and the withholding stopped being an under-offer — at which
-      # point the console's matrix cell and the backlog task must be revisited
-      # together, not silently.
+      # The only refusal left on an owner's own row is STATE, not authority —
+      # the sole-owner arm at the bottom of this test — and the console models
+      # exactly that one with `isSoleOwnerSelf`, never with a self rule.
       {owner1, team} = owned_team()
       owner2 = user_fixture()
       {:ok, _} = Accounts.add_member(team, owner2, "owner")
@@ -512,8 +512,29 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
       {:ok, _} = Accounts.add_member(team2, owner4, "owner")
       # remove_member_as/3 has no `self?` branch, so the OWNER ESCAPE HATCH at
       # accounts.ex:1722 answers for the self row too: an owner may remove
-      # themselves. The console does not offer it.
+      # themselves. The console offers it (cch-w44-bl).
       assert {:ok, :removed} = Accounts.remove_member_as("owner", team2, owner3)
+    end
+
+    test "the SOLE owner on themselves: :last_owner, a STATE refusal — never :forbidden" do
+      # THE PRECONDITION FOR THE CONSOLE'S ONE REMAINING SELF-ROW OMISSION.
+      # cch-w44-bl gates the self Remove on `isSoleOwnerSelf`, i.e. on STATE,
+      # and that is only honest if the sole owner's own removal is refused by
+      # do_remove's `locked_owner_count(team) <= 1 -> Repo.rollback(:last_owner)`
+      # rather than by an authority arm. The two answers are NOT interchangeable:
+      # a :forbidden here would mean the withholding belongs in canRemoveMember,
+      # a :last_owner means it belongs where it now is.
+      #
+      # THE CONTROL is the test above: on a team with a SECOND owner the very
+      # same call answers {:ok, :removed}. Without it this assertion could not
+      # tell "the sole-owner guard fired" from "owners can never self-remove".
+      {owner, team} = owned_team()
+      assert [%{role: "owner"}] = Accounts.list_team_members(team)
+
+      assert {:error, :last_owner} = Accounts.remove_member_as("owner", team, owner)
+      # …and the refusal ROLLED BACK: the membership survives, so the console is
+      # withholding a control over a member who is genuinely still there.
+      assert %TeamMembership{role: "owner"} = Accounts.get_membership(team, owner)
     end
   end
 

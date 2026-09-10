@@ -5161,8 +5161,22 @@ defmodule BarkparkCloud.Web.Router do
               "#{existing} itself is still allowed."
         })
 
+      # dr-w26-bl-claim-leg-refusal-reaches-no-human: `taken` alone is one word
+      # for refusals with opposite remedies — "somebody is paying for that name"
+      # and "a provisioning job is mid-flight, wait a minute" rendered
+      # identically, while `provisioning_fqdn_claim/2` knew which. The LEG and a
+      # caller-safe sentence now ride the body; the operator sentence that names
+      # the holding ROW stays in the Logger line, because this 409 is answered to
+      # a caller who is routinely a different team than the holder. The merge is
+      # ADDITIVE — `error: "taken"` is unchanged, and a name held by some OTHER
+      # surface (a Site domain, another instance's custom_host, or a lost race on
+      # the unique index) contributes no keys at all.
       {:error, :taken} ->
-        json(conn, 409, %{error: "taken"})
+        json(
+          conn,
+          409,
+          Map.merge(%{error: "taken"}, Registry.provisioning_fqdn_claim_disclosure(domain, bp.id))
+        )
 
       {:error, %Ecto.Changeset{}} ->
         json(conn, 422, %{error: "invalid_domain"})

@@ -367,6 +367,145 @@ defmodule BarkparkCloud.RegistryNameClaimCensusTest do
     end
   end
 
+  ## ─────────────────────────────────────────────────────────────────────────
+  ## RUNG 3 — the leg REACHES A HUMAN, and the operator sentence does not
+  ## (dr-w26-bl-claim-leg-refusal-reaches-no-human)
+  ## ─────────────────────────────────────────────────────────────────────────
+
+  # One holder per leg, keyed by the leg it is built to fire. The hosts are
+  # distinct so the six can be built inside one test without colliding.
+  @leg_holders %{
+    admin_credential: "disclosure-credential.barkpark.cloud",
+    recent_usage_sample: "disclosure-sample.barkpark.cloud",
+    active_subscription: "disclosure-subscription.barkpark.cloud",
+    agent_reporting: "disclosure-reporting.barkpark.cloud",
+    active_job: "disclosure-job.barkpark.cloud",
+    within_grace: "disclosure-grace.barkpark.cloud"
+  }
+
+  describe "rung 3: provisioning_fqdn_claim_disclosure/2 renders every leg for the caller" do
+    # Side A again: the leg set is read off `claim_leg/2`'s AST, not typed here.
+    # A leg added to the predicate with no caller-facing sentence reds THIS arm
+    # rather than silently rendering the generic fallback on the wire.
+    test "the render is TOTAL over the legs the predicate can return" do
+      assert Enum.sort(Extract.legs(source())) == Enum.sort(Map.keys(@leg_holders)),
+             """
+             `claim_leg/2` returns #{inspect(Extract.legs(source()))} but the caller-facing
+             render is exercised for #{inspect(Map.keys(@leg_holders))}. A leg with no
+             caller sentence still reaches the wire as an atom, and its `detail` falls
+             back to the generic line — write it one, and add it here.
+             """
+    end
+
+    test "each leg lands on the disclosure map with a caller sentence of its own" do
+      details =
+        for {leg, host} <- @leg_holders, into: %{} do
+          team = team_fixture()
+          ghost = hold(leg, team, host)
+
+          assert {:held, ^leg, why} = Registry.provisioning_fqdn_claim(host)
+
+          disclosure = Registry.provisioning_fqdn_claim_disclosure(host)
+
+          assert disclosure.claim_leg == Atom.to_string(leg),
+                 "#{leg}: the disclosure map carried #{inspect(disclosure.claim_leg)}"
+
+          # THE FENCE. The operator sentence opens `row <uuid>` and three legs
+          # characterise the holder further; the caller is routinely another
+          # team, so none of that may cross the wire.
+          assert why =~ ghost.id
+          refute disclosure.detail =~ ghost.id
+          refute disclosure.detail =~ ghost.team_id
+          refute disclosure.detail =~ "row "
+          refute disclosure.detail == why
+
+          {leg, disclosure.detail}
+        end
+
+      # Not one sentence six times: a render that collapsed every leg onto the
+      # fallback would satisfy every assertion above.
+      assert length(Enum.uniq(Map.values(details))) == map_size(details),
+             "two legs render the SAME sentence, so the leg is not doing any work: " <>
+               inspect(details)
+    end
+
+    test "a name no leg holds contributes NO keys — the refusal stays bare" do
+      team = team_fixture()
+      ghost_row(team, "disclosure-free.barkpark.cloud")
+
+      assert :free = Registry.provisioning_fqdn_claim("disclosure-free.barkpark.cloud")
+      assert Registry.provisioning_fqdn_claim_disclosure("disclosure-free.barkpark.cloud") == %{}
+    end
+
+    test "self_id excludes the asking row, so a re-attach discloses nothing" do
+      team = team_fixture()
+
+      mine =
+        team
+        |> ghost_row("disclosure-mine.barkpark.cloud")
+        |> Ecto.Changeset.change(last_seen_at: DateTime.utc_now())
+        |> Repo.update!()
+
+      assert %{claim_leg: "agent_reporting"} =
+               Registry.provisioning_fqdn_claim_disclosure("disclosure-mine.barkpark.cloud")
+
+      assert Registry.provisioning_fqdn_claim_disclosure(
+               "disclosure-mine.barkpark.cloud",
+               mine.id
+             ) == %{}
+    end
+  end
+
+  # Build a row that holds `host` on exactly `leg`. Every one but `:within_grace`
+  # starts from `ghost_row/2` (old and silent), so the leg under construction is
+  # the only thing keeping the claim.
+  defp hold(:admin_credential, team, host) do
+    team
+    |> ghost_row(host)
+    |> Ecto.Changeset.change(admin_token_encrypted: "ciphertext")
+    |> Repo.update!()
+  end
+
+  defp hold(:recent_usage_sample, team, host) do
+    ghost = ghost_row(team, host)
+
+    Repo.insert!(%Sample{
+      barkpark_id: ghost.id,
+      envelope: %{"meters" => %{}},
+      measured_at: DateTime.add(DateTime.utc_now(), -5, :minute)
+    })
+
+    ghost
+  end
+
+  defp hold(:active_subscription, team, host) do
+    ghost = ghost_row(team, host)
+    Repo.insert!(%Subscription{team_id: team.id, plan: "supporter", status: "active"})
+    ghost
+  end
+
+  defp hold(:agent_reporting, team, host) do
+    team
+    |> ghost_row(host)
+    |> Ecto.Changeset.change(last_seen_at: DateTime.utc_now())
+    |> Repo.update!()
+  end
+
+  defp hold(:active_job, team, host) do
+    ghost = ghost_row(team, host)
+    {:ok, _job} = Registry.enqueue_provision_job(ghost)
+    ghost
+  end
+
+  # The one leg a ghost row cannot carry: it fires on YOUTH, so the row must be
+  # fresh rather than 30 days old.
+  defp hold(:within_grace, team, host) do
+    team
+    |> barkpark_fixture()
+    |> Ecto.Changeset.change(url: "https://" <> host)
+    |> Repo.update!()
+  end
+
   ## Fixtures
 
   defp team_fixture do

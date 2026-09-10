@@ -639,7 +639,15 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               </div>
             <% end %>
 
-            <form phx-submit="save" phx-change="autosave" id="editor-form">
+            <%!-- phx-auto-recover="ignore" (Gyldendal friction 65/66): LiveView
+                  1.1 re-posts EVERY id-bearing form[phx-change] on socket rejoin
+                  (getFormsForRecovery filters only on the ignore attribute), so a
+                  deploy restart, a laptop waking, or a network blip turned an
+                  untouched editor into an "autosave" of the browser's whole form
+                  — a draft with no keystroke, and before Forms.coerce_params a
+                  corrupt one. Autosave already persists each change within its
+                  500 ms debounce, so recovery has nothing to restore. --%>
+            <form phx-submit="save" phx-change="autosave" phx-auto-recover="ignore" id="editor-form">
               <%!-- The synthetic Title input backs the `title` column every
                     list row shows. A SINGLETON that declares no `title`
                     field (the twin's Forside — Sanity's `preview.prepare`
