@@ -1,205 +1,300 @@
 defmodule BarkparkCloud.DeployLedger.ClassContinuity do
   @moduledoc """
-  A cause class whose count goes to zero while its COHORT total holds is a
-  rename, not a quiet fleet — deploy-reliability W12, charter D179.
+  THE CLASS-CONTINUITY GAUGE: did a cause class DIE, or was it RENAMED?
+  Deploy-reliability W18, charter **D265** — replacing the W12/D179 gauge that
+  stood here.
 
   ## The event this exists for
 
-  On **2026-08-06 22:19:52Z** guerrilla took `ef77af274` (#9827, the typed
-  `box_at_capacity` door) and 9m35s later the deferral cause class silently
-  swapped: `BOX_BUSY_DEFERRED` → `BOX_AT_CAPACITY_DEFERRED`
-  (`DeployLedger.classify_deferred/2`). Both classes live INSIDE the deferred
-  cohort, so `failure_rate` — which is keyed on the cohort, not the class —
-  never twitched. Nothing anywhere went red. But every instrument, alert and
-  dashboard keyed on the CAUSE CLASS lost its entire population in one box
-  restart, with no signal at all.
+  Between 2026-08-01 and 2026-08-06 guerrilla's published failure rate fell from
+  87% of attempts to ~1%. Roughly sixty percent of that collapse is a RENAME.
+  HTTP-409 box contention used to settle `status='failed'` and be classified
+  `BOX_BUSY_409`; from `2026-08-05 21:27:11.41321` the same physical refusal
+  settles `status='deferred'` and classifies `BOX_AT_CAPACITY_DEFERRED`. The
+  rows never stopped arriving. Only their name changed.
 
-  That is the wave's own thesis one level below where it was scoped: not a
-  status swap, a CLASS swap. The signature is cheap: a class's count falls to
-  zero across two windows while the cohort it sits in keeps its rows.
+  On the daily shape either side of that (08-01 `2217/284/1933/0`, 08-06
+  `2205/566/866/773` as volume/live/failed/deferred) the mass that vanished from
+  `BOX_BUSY_409` — **76.68% of all attempts** — did not go to zero. 35.06% of
+  attempts reappeared in a DIFFERENT COHORT as deferrals, and the rest moved to
+  sibling failure classes. An instrument that cannot say that out loud will
+  report every future taxonomy change as a fix.
 
-  ## The discrimination, both ways
+  ## Why the D179 gauge could not say it, and what changed
 
-  A check that only tests the firing half is a tautology dressed as coverage.
-  The whole value here is the second arm, so the rule is written as a
-  SUBTRACTION rather than as a threshold on the cohort total:
+  The gauge that stood here read COUNTS inside ONE cohort — `census.deferred` or
+  `census.classes`, one at a time — and its verdict vocabulary was
+  `:renamed | :went_quiet | :cohort_drained | :below_floor`. Three consequences,
+  all fatal for the event above:
 
-      cohort_drop = cohort_before - cohort_after
-      retained    = count_before - cohort_drop
+    * **The successor lives in the other cohort.** On specimen (a) the D179 gauge
+      does fire `:renamed` on `BOX_BUSY_409`, but its `absorbed_by` can only name
+      failure classes — it never sees the 773 deferrals that are the actual
+      successor, because they are not in the cohort it was handed.
+    * **A cohort-relative reading is not commensurable.** Turned into a share
+      against its own cohort the same event reads `87.95% of failures`; against
+      attempts it reads `76.68% of attempts`. Only the second can be compared
+      with a deferred-cohort birth, and that comparison IS the
+      `:renamed`-vs-`:repaired` judgement.
+    * **It cannot print `:repaired`.** A gauge whose vocabulary has no word for
+      "this class genuinely went away and nothing wears its name" is a gauge that
+      cannot lose.
 
-  `retained` is the part of the vanished class's population the cohort still
-  holds. It answers "where did those rows GO?" with the only two possible
-  answers:
+  ## The contract (charter D265, clauses i–ix)
 
-    * `retained` ≈ 0 — the cohort shed exactly that class's rows. The class went
-      QUIET. Silent. (This is also the whole-cohort drain: a cohort that empties
-      sheds every class's population, so `retained` is ≤ 0 for all of them.)
-    * `retained` > 0 — the cohort kept rows the class used to own. Those rows
-      are still being written; something else is wearing their name now. FIRE.
-
-  Reading the cohort total alone cannot tell those apart, which is precisely how
-  2026-08-06 got through: an operator watching `failure_rate` saw a number that
-  HELD, and a held number is what a rename looks like from above.
+    * **(i)** the denominator is `census.volume` — ATTEMPTS — for every class in
+      every cohort, so a failed-cohort death and a deferred-cohort birth are
+      measured on one ruler;
+    * **(ii)** there is **NO volume tolerance anywhere**. Of the seven daily
+      volumes since 08-01 (2217, 2042, 1050, 527, 878, 2205, 1638) exactly one
+      adjacent pair survives a ±10% gate, so any "volume holds" clause is
+      unusable on this corpus and would mute the gauge on six days in seven;
+    * **(iii)** the only floor is `census.min_sample` (200), applied to BOTH
+      windows, returning this module's own refusal shape — same key set, no
+      percentage anywhere;
+    * **(iv)** the basis is the immediately-prior EQUAL-LENGTH window, derived by
+      `DeployLedger.census/3` itself (`DeployLedger.class_continuity/3`). No
+      store, no committed baseline, nothing that can go stale;
+    * **(v)** it iterates the UNION of classes PRESENT in the two censuses, never
+      `@classes`/`deferred_classes()`. Reading the code's enum makes every
+      minted-but-unseen class a 0 → 0 death forever and turns adding a class NAME
+      into an alarm generator;
+    * **(vi)** a material death (≥ #{1.0}% of attempts) is `:renamed` when
+      ≥ 75% of its lost share was absorbed elsewhere, and `:repaired` otherwise
+      — that is the arm that lets this gauge LOSE;
+    * **(vii)** a birth is `:new_cause`, never `:renamed`, so nobody is told a
+      brand-new cause was a relabel;
+    * **(viii)** a class absent from BOTH windows is SILENT;
+    * **(ix)** deaths and births are PAIRED by absorbed share and the UNPAIRED
+      remainder is reported on BOTH sides. The W12 probe suppressed every birth
+      whenever any death existed; that hole is not copied here.
 
   ## What it does NOT claim
 
-  A finding is "this class lost its population to a sibling", never "the code was
-  renamed". A genuine cause change — the fleet really did stop being busy and
-  started being at capacity — produces the identical signature, and SHOULD: the
-  instrument keyed on the old class is just as blind either way, and that is the
-  harm being detected. `:absorbed_by` names the suspects by gain so the reader
-  can settle which it was in one look.
+  A finding is "this class's share moved to other classes", never "the code was
+  renamed". A genuine cause change produces the identical signature and SHOULD:
+  the instrument keyed on the old class is equally blind either way, and that is
+  the harm being detected. `counterparts` names the suspects by share so a reader
+  settles which it was in one look.
 
-  ## Shape
+  ## Cohorts read
 
-  Consumes `DeployLedger.census/3`'s own class rows verbatim —
-  `census.deferred` (the deferred cohort) and `census.classes` (the failure
-  cohort) are both lists of `%{class: _, count: _}` — so no second, drifting
-  definition of "a class row" lives here. `check_census/4` takes the two censuses
-  and names the cohort key.
-
-  Counts only. Nothing in this module reads `share`, so it is unaffected by the
-  vocabulary-boundary ratio refusals (D9: counts stay, ratios go), and it is
-  therefore usable across exactly the windows a rate cannot be computed over —
-  which is where a vocabulary swap lives.
+  `census.classes` (the failure cohort) and `census.deferred` (the deferral
+  cohort) TOGETHER — both are populations inside `volume`, which is what makes
+  one denominator legitimate for both. `not_attempted` is deliberately excluded:
+  those rows are DISJOINT from `volume` by construction (D19 tombstones), so a
+  share of attempts is not defined for them.
   """
 
-  # A class with a handful of rows going to zero is noise: a quiet weekend on a
-  # small cohort produces it constantly. The floor is on the VANISHED class's
-  # own before-count, never on the cohort — a cohort floor would mute a small
-  # class inside a large cohort, which is the exact 2026-08-06 shape at a
-  # smaller scale.
-  @min_count 10
+  # Below this share of attempts a death is noise: a class of a dozen rows on a
+  # 2,000-attempt day dies and is reborn constantly. Expressed in SHARE and not
+  # in rows on purpose — a row floor means something different on a 300-attempt
+  # day than on a 2,700-attempt one, and the corpus spans exactly that range.
+  @material_share 1.0
 
-  # How much of the vanished population the cohort may shed before "it went
-  # quiet" stops being the honest reading. Rows do not arrive in round numbers;
-  # 10% keeps a cohort that shed 690 of a 698-row class silent.
-  @tolerance 0.10
+  # How much of a dead class's lost share must have turned up elsewhere before
+  # "it was relabelled" beats "it was fixed". Not a tolerance on volume — this
+  # is a ratio between two shares of the SAME denominator, which is the only
+  # comparison D265 permits.
+  @absorption_floor 0.75
 
-  # How many suspects `:absorbed_by` carries. Enough to see the successor and
-  # that it is the successor; not a dump of every class that moved a row.
-  @suspects 3
+  # How many counterparts a finding carries. Enough to see the successor and see
+  # that it IS the successor; not a dump of every class that moved a row.
+  @suspects 5
 
-  @type class_row :: %{required(:class) => String.t(), required(:count) => non_neg_integer()}
-  @type verdict :: :renamed | :went_quiet | :cohort_drained | :below_floor
+  @basis "share of ATTEMPTS (`census.volume`) for every class in every cohort — a failure-cohort death and a deferral-cohort birth are measured on ONE denominator, which is what makes them comparable (D265 i)"
+
+  @type verdict :: :renamed | :repaired | :new_cause
 
   @typedoc "One class's continuity reading across the two windows."
   @type finding :: %{
           class: String.t(),
+          kind: :death | :birth,
           verdict: verdict(),
-          count_before: non_neg_integer(),
-          count_after: non_neg_integer(),
-          cohort_before: non_neg_integer(),
-          cohort_after: non_neg_integer(),
-          cohort_drop: integer(),
-          retained: integer(),
-          absorbed_by: [%{class: String.t(), gain: pos_integer()}]
+          share_before: float(),
+          share_after: float(),
+          moved_share: float(),
+          absorbed_share: float(),
+          unpaired_share: float(),
+          counterparts: [%{class: String.t(), share: float()}]
+        }
+
+  @typedoc """
+  The gauge's envelope. The key set is IDENTICAL in the measured and the refused
+  arm — a refusal a reader has to pattern-match differently is a wire-shape
+  change, which is the mistake `refuse_class_rows/2` in `DeployLedger` was
+  rewritten to stop making.
+  """
+  @type envelope :: %{
+          basis: String.t(),
+          min_sample: pos_integer(),
+          attempts_before: non_neg_integer(),
+          attempts_after: non_neg_integer(),
+          refused: boolean(),
+          reason: String.t() | nil,
+          findings: [finding()],
+          classes_read: [String.t()]
         }
 
   @doc """
-  The findings that FIRE — every class whose population the cohort kept under
-  another name.
+  The gauge, over two `DeployLedger.census/3` envelopes of EQUAL LENGTH, the
+  second immediately following the first.
 
-  Options: `:min_count` (default #{@min_count}), `:tolerance` (default
-  #{@tolerance}).
+  Returns every material death and every material birth with its verdict, or
+  this module's refusal when either window is below `census.min_sample`.
+
+  @canonical capability:deploy-class-continuity-gauge aka:class_continuity,rename_vs_repair,cause-class-rename doc:.claude/workflows/bp-deploy-reliability-charter.md#D265
   """
-  @spec check([class_row()], [class_row()], keyword()) :: [finding()]
-  def check(before_rows, after_rows, opts \\ []) do
-    before_rows
-    |> verdicts(after_rows, opts)
-    |> Enum.filter(&(&1.verdict == :renamed))
-  end
+  @spec gauge(map(), map()) :: envelope()
+  def gauge(before_census, after_census) do
+    attempts_before = Map.fetch!(before_census, :volume)
+    attempts_after = Map.fetch!(after_census, :volume)
+    min_sample = Map.fetch!(after_census, :min_sample)
 
-  @doc """
-  Every candidate's reading, firing or not — so SILENCE is inspectable and
-  testable rather than an absence a test can only assert vacuously.
-
-  A candidate is a class that carried rows in the before window and carries none
-  in the after window. A class still present is not a continuity question and
-  gets no row here.
-  """
-  @spec verdicts([class_row()], [class_row()], keyword()) :: [finding()]
-  def verdicts(before_rows, after_rows, opts \\ []) do
-    min_count = Keyword.get(opts, :min_count, @min_count)
-    tolerance = Keyword.get(opts, :tolerance, @tolerance)
-
-    before = counts(before_rows)
-    after_ = counts(after_rows)
-
-    cohort_before = total(before)
-    cohort_after = total(after_)
-    cohort_drop = cohort_before - cohort_after
-
-    before
-    |> Enum.filter(fn {class, count} -> count > 0 and Map.get(after_, class, 0) == 0 end)
-    |> Enum.map(fn {class, count} ->
+    # CLAUSE (iii). BOTH windows, and the refusal names both samples and the
+    # floor — an operator must not have to guess which side was thin. Nothing
+    # below this line runs when it fires, so no percentage can be printed off a
+    # sample too small to carry one.
+    if attempts_before < min_sample or attempts_after < min_sample do
       %{
-        class: class,
-        verdict: verdict(count, cohort_after, cohort_drop, min_count, tolerance),
-        count_before: count,
-        count_after: 0,
-        cohort_before: cohort_before,
-        cohort_after: cohort_after,
-        cohort_drop: cohort_drop,
-        retained: count - cohort_drop,
-        absorbed_by: absorbed_by(before, after_)
+        basis: @basis,
+        min_sample: min_sample,
+        attempts_before: attempts_before,
+        attempts_after: attempts_after,
+        refused: true,
+        reason:
+          "attempts #{attempts_before}/#{attempts_after} below min_sample #{min_sample}",
+        findings: [],
+        classes_read: []
       }
-    end)
-    |> Enum.sort_by(& &1.count_before, :desc)
+    else
+      measure(before_census, after_census, attempts_before, attempts_after, min_sample)
+    end
   end
 
-  # ORDER IS THE POINT, and the arms are not interchangeable.
-  #
-  # `:below_floor` first: a class of 3 rows produces every other verdict by
-  # accident, so it never earns one of them.
-  #
-  # `:cohort_drained` before `:went_quiet`: an emptied cohort satisfies the
-  # quiet arm arithmetically for every class in it, and reporting six classes as
-  # independently "quiet" hides the one fact that explains all six.
-  defp verdict(count, cohort_after, _cohort_drop, min_count, _tolerance)
-       when count < min_count or cohort_after == 0 do
-    if count < min_count, do: :below_floor, else: :cohort_drained
+  defp measure(before_census, after_census, attempts_before, attempts_after, min_sample) do
+    before_shares = shares(before_census, attempts_before)
+    after_shares = shares(after_census, attempts_after)
+
+    # CLAUSE (v) AND (viii) IN ONE LINE. The universe is what the two windows
+    # OBSERVED, never `DeployLedger.classes()`/`deferred_classes()`: a class
+    # nobody wrote rows for is absent from both maps and therefore has no reading
+    # at all, rather than a 0 → 0 death that alarms forever.
+    classes_read =
+      before_shares |> Map.keys() |> Enum.concat(Map.keys(after_shares)) |> Enum.uniq() |> Enum.sort()
+
+    deaths =
+      classes_read
+      |> Enum.map(fn class -> {class, share(before_shares, class), share(after_shares, class)} end)
+      |> Enum.filter(fn {_c, b, a} -> a == 0.0 and b >= @material_share end)
+      |> Enum.map(fn {c, b, _a} -> {c, b} end)
+
+    births =
+      classes_read
+      |> Enum.map(fn class -> {class, share(before_shares, class), share(after_shares, class)} end)
+      |> Enum.filter(fn {_c, b, a} -> b == 0.0 and a >= @material_share end)
+      |> Enum.map(fn {c, _b, a} -> {c, a} end)
+
+    # WHERE THE SHARE WENT — every class that GAINED share, birth or survivor
+    # alike. "Absorbed elsewhere" is not "absorbed by a new name": on specimen
+    # (a) part of the vanished 409 mass reappears as deferrals (a birth) and part
+    # as growth in sibling failure classes, and a pool that counted only births
+    # would call that event a repair.
+    gains =
+      classes_read
+      |> Enum.map(fn class -> {class, share(after_shares, class) - share(before_shares, class)} end)
+      |> Enum.filter(fn {_c, delta} -> delta > 0.0 end)
+
+    lost_total = deaths |> Enum.map(&elem(&1, 1)) |> Enum.sum()
+    gained_total = gains |> Enum.map(&elem(&1, 1)) |> Enum.sum()
+
+    # CLAUSE (ix). The paired pool is the share that BOTH sides can account for;
+    # what each side is left holding is its unpaired remainder, reported on that
+    # side rather than silently dropped.
+    paired = min(lost_total, gained_total)
+
+    death_findings =
+      Enum.map(deaths, fn {class, lost} ->
+        absorbed = allocate(lost, lost_total, paired)
+
+        %{
+          class: class,
+          kind: :death,
+          verdict: if(absorbed >= @absorption_floor * lost, do: :renamed, else: :repaired),
+          share_before: round2(lost),
+          share_after: 0.0,
+          moved_share: round2(lost),
+          absorbed_share: round2(absorbed),
+          unpaired_share: round2(lost - absorbed),
+          counterparts: counterparts(gains, gained_total, absorbed)
+        }
+      end)
+
+    birth_findings =
+      Enum.map(births, fn {class, gained} ->
+        # CLAUSE (vii): the verdict is `:new_cause` unconditionally. How much of
+        # it a death explains is a NUMBER beside the verdict, never a promotion
+        # to `:renamed` — an operator must not be told a brand-new cause is a
+        # relabel because some unrelated class happened to die in the same window.
+        explained = allocate(gained, gained_total, paired)
+
+        %{
+          class: class,
+          kind: :birth,
+          verdict: :new_cause,
+          share_before: 0.0,
+          share_after: round2(gained),
+          moved_share: round2(gained),
+          absorbed_share: round2(explained),
+          unpaired_share: round2(gained - explained),
+          counterparts: counterparts(deaths, lost_total, explained)
+        }
+      end)
+
+    %{
+      basis: @basis,
+      min_sample: min_sample,
+      attempts_before: attempts_before,
+      attempts_after: attempts_after,
+      refused: false,
+      reason: nil,
+      findings: Enum.sort_by(death_findings ++ birth_findings, & &1.moved_share, :desc),
+      classes_read: classes_read
+    }
   end
 
-  defp verdict(count, _cohort_after, cohort_drop, _min_count, tolerance) do
-    # The cohort shed (near enough) this class's whole population: those rows
-    # stopped being written, they were not relabelled.
-    if cohort_drop >= count * (1 - tolerance), do: :went_quiet, else: :renamed
-  end
+  # Each side's proportional cut of the paired pool. A death that lost half of
+  # everything that died is credited with half of what was absorbed.
+  defp allocate(_share, total, _paired) when total == 0, do: 0.0
+  defp allocate(share, total, paired), do: share / total * paired
 
-  # The siblings that GREW, biggest gain first. Named, not accused: a reader
-  # settles a real cause change from a rename by looking at whether one sibling
-  # gained about what the vanished class lost.
-  defp absorbed_by(before, after_) do
-    after_
-    |> Enum.map(fn {class, count} -> %{class: class, gain: count - Map.get(before, class, 0)} end)
-    |> Enum.filter(&(&1.gain > 0))
-    |> Enum.sort_by(& &1.gain, :desc)
+  # THE SUSPECTS, SCALED TO THIS FINDING'S OWN PAIRED AMOUNT — never to the
+  # global pool. A birth explained by 35.06 points must not carry a counterpart
+  # labelled 63.82: a counterpart share larger than the finding it sits on reads
+  # as an arithmetic error and is one, at the level a human uses it.
+  defp counterparts(entries, total, paired) do
+    entries
+    |> Enum.map(fn {class, share} -> %{class: class, share: round2(allocate(share, total, paired))} end)
+    |> Enum.reject(&(&1.share == 0.0))
+    |> Enum.sort_by(& &1.share, :desc)
     |> Enum.take(@suspects)
   end
 
-  # Accepts census class rows (maps carrying `:class` and `:count`) or a plain
-  # `%{class => count}` map, and sums duplicates rather than letting the last one
-  # win — a caller that concatenated two cohorts' rows must not silently lose the
-  # first one's counts.
-  defp counts(rows) when is_list(rows) do
-    Enum.reduce(rows, %{}, fn %{class: class, count: count}, acc ->
+  # CLAUSE (i). BOTH attempted cohorts, folded onto ONE denominator. The census's
+  # own `share` node is NOT read: `classes[].share` is denominated on `failed`
+  # and `deferred[].share` on `volume`, so reading them would put two different
+  # rulers in one comparison — and `classes[].share` is additionally REFUSED
+  # (pct: nil) across the vocabulary boundary, which is precisely the window this
+  # gauge exists to read.
+  defp shares(census, attempts) do
+    (Map.fetch!(census, :classes) ++ Map.fetch!(census, :deferred))
+    |> Enum.reduce(%{}, fn %{class: class, count: count}, acc ->
       Map.update(acc, class, count, &(&1 + count))
     end)
+    |> Map.new(fn {class, count} -> {class, count * 100 / attempts} end)
   end
 
-  defp counts(rows) when is_map(rows), do: rows
+  defp share(shares, class), do: Map.get(shares, class, 0.0)
 
-  defp total(counts), do: counts |> Map.values() |> Enum.sum()
-
-  @doc """
-  `check/3` over two `DeployLedger.census/3` results and one cohort key —
-  `:deferred` (the deferral cohort, where 2026-08-06 happened) or `:classes`
-  (the failure cohort).
-  """
-  @spec check_census(map(), map(), :deferred | :classes, keyword()) :: [finding()]
-  def check_census(before_census, after_census, cohort, opts \\ [])
-      when cohort in [:deferred, :classes] do
-    check(Map.fetch!(before_census, cohort), Map.fetch!(after_census, cohort), opts)
-  end
+  defp round2(x), do: Float.round(x * 1.0, 2)
 end
