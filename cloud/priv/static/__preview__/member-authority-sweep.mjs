@@ -921,8 +921,10 @@ async function main() {
   return bad ? 1 : 0;
 }
 
-// Importable (nothing imports it today; the guard keeps that door honest and
-// matches breakpoint-sweep.mjs / smoke.mjs) — only run when executed.
+// Importable (__binding_census.mjs imports scanControls from here for its
+// population-split arm, rather than shipping a second control scanner that could
+// disagree with this one; the guard keeps that door honest and matches
+// breakpoint-sweep.mjs / smoke.mjs) — only run when executed.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main()
     .then((code) => process.exit(code))

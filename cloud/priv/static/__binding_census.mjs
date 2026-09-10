@@ -233,6 +233,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { bootScenario, flush } from "./__preview__/smoke.mjs";
+import { SCENARIOS, SCENARIO_NAMES, route } from "./__preview__/scenarios.mjs";
+import { scanControls } from "./__preview__/member-authority-sweep.mjs";
 
 const here = path.dirname(new URL(import.meta.url).pathname);
 // ── THE FIXTURE MODE FLAG IS RESOLVED HERE, AT THE `APP` BINDING ────────────
@@ -1080,6 +1083,313 @@ const die2 = (lines) => {
   for (const l of lines) console.error(l);
   refuse2(String(lines[0] || "the census lost its footing").replace(/^FAIL\(2\):\s*/, ""));
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// (2m) THE POPULATION SPLIT — the unpredicated column is THREE populations
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// THE DEFECT THIS ARM CLOSES (cchi-w46-bl-elevated-writes-column-conflates-
+// three-populations). Everything above prints ONE number for the unpredicated
+// elevated writes, under a sentence that reads "an affordance a plain member
+// can see, click, and be refused for". That sentence is true of SOME of them
+// and unprovable for the rest, and the column could not tell you which:
+//
+//   PROVEN-REACHABLE   a member-actor scenario RENDERS the offer. The console
+//                      is handing a plain member a write the server refuses.
+//                      This is the disease. It is the only population the
+//                      one-number column's sentence was ever true of.
+//   PROVEN-OMITTED     the corpus renders the offer, NO member-actor scenario
+//                      does, and a member-actor scenario painted the very
+//                      mount it renders into. The member stood on that surface
+//                      and the offer was not there.
+//   UNOBSERVABLE       nothing renders it at all, or the only mounts that do
+//                      are mounts no member actor ever paints. The corpus
+//                      cannot speak, so NO guard over the row — present or
+//                      absent — can be proven by rendering it.
+//
+// An instrument that adds those three together and prints the sum is telling a
+// merge something it cannot support: it counts a proven-omitted affordance as
+// one a member can click, and it counts an unobservable one as a measurement.
+//
+// HOW IT MEASURES: the RENDERED BYTES, through smoke.mjs's own shim — the same
+// renderer member-authority-sweep.mjs boots, and the same nesting-aware control
+// scanner, imported rather than re-implemented. A source-text scan cannot do
+// this job: the console's fencing idiom is hide-or-don't-wire the element, so
+// the string is in app.js either way (charter D505). Nothing here is typed from
+// a transcript — every scenario in the committed corpus is booted on this run.
+//
+// WHAT IT DOES NOT CLAIM. PROVEN-OMITTED is ABSENCE IN THE MEMBER'S BYTES, never
+// a fence. A member fixture differs from a privileged one in DATA as well as in
+// actor, and an offer that only renders per-row is absent from an empty roster
+// for a reason that has nothing to do with authority. So a row leaves the
+// unpredicated list on a FENCE, exactly as the block above says — never on this
+// arm's verdict. This arm classifies; it does not absolve.
+// The corpus-wide control floor. DERIVED by running this sweep and reading the
+// number it PRINTED, then set well under it: the threat is a corpus that stopped
+// painting, not one that grew. Every scenario's every mount contributes, so this
+// is not a per-screen expectation and grows monotonically with the corpus.
+const CONTROL_FLOOR = 1000;
+
+const OFFERS = [
+  {
+    key: "submitProviderCred|POST /v1/providers",
+    id: "cred-submit", withoutData: "data-connect-submit",
+    what: "the launch wizard's credential SHEET (openProviderCredential's modal body). THE ID IS SHARED " +
+      "with the PREDICATED inline sibling and the two are told apart ONLY by data-connect-submit, which " +
+      "renderConnectCard's button carries and this one does not — a probe keyed on the bare id would " +
+      "attribute the sibling's renders to this row, which is exactly the mis-reading this arm exists to end",
+  },
+  {
+    key: "submitAgentKey|POST /v1/barkparks/:*/agent-key",
+    data: "data-agent-key-send",
+    what: "supportRowHtml's Deliver-key button, one per LIVE support row",
+  },
+  {
+    key: "newVercelDeploy|POST /v1/barkparks/:*/vercel-deploy",
+    id: "new-vercel-claim",
+    what: "the post-launch theater's Vercel claim button",
+  },
+  {
+    key: "newCreateRepo|POST /v1/github/repos",
+    id: "new-gh-create",
+    what: "the post-launch theater's Create-GitHub-repo button",
+  },
+  {
+    key: "newRenderFailed|POST /v1/barkparks/:*/retry",
+    id: "new-retry",
+    what: "the post-launch theater's Retry-setup button on the failed arm",
+  },
+];
+
+// THE OFFER SET IS A PREDICATE OVER THE PIN, NOT A LIST BESIDE IT. A new
+// unpredicated row with no offer spec would otherwise be silently classified by
+// nobody and quietly drop out of the three counts — the same conflation one
+// level down. Both directions red.
+{
+  const want = new Set(pinnedUnpredicated.map(keyOf));
+  const have = new Set(OFFERS.map((o) => o.key));
+  const missing = [...want].filter((k) => !have.has(k));
+  const extra = [...have].filter((k) => !want.has(k));
+  if (missing.length || extra.length) {
+    die2([
+      "FAIL(2m): the offer specs and the UNPREDICATED population do not describe the same rows.",
+      ...missing.map((k) => `  NO OFFER SPEC  ${k}` +
+        " — it is pinned unpredicated and this arm cannot say which population it is in."),
+      ...extra.map((k) => `  ORPHAN SPEC    ${k}` +
+        " — no unpredicated PIN row carries this key; the row was fixed or re-keyed and the spec did not follow."),
+      "",
+      "  Add or delete the spec in the same commit that moves the row. An offer spec names the",
+      "  SELECTOR the console draws, so it is checkable against the shipped file; a stale one is not.",
+    ]);
+  }
+}
+
+// THE CONTROL, and it is load-bearing. Three of the five verdicts below are
+// ZEROES, and an absence read off a broken instrument looks exactly like an
+// absence read off a working one. So the same sweep, on the same run, probes a
+// control that MUST be found — a plain member-reachable button drawn on a
+// member-actor screen. If it comes back zero, or comes back with no member-actor
+// render, the sweep did not see and every zero above it is manufactured.
+const CONTROL_PROBE = {
+  key: "CONTROL|#site-new-btn",
+  id: "site-new-btn",
+  what: "openCreateSiteModal's + New site — pinned MEMBER in this census, and drawn on a member-actor instance screen",
+};
+
+// THE FILING'S FIVE, RE-DERIVED BY SELECTOR. The row that ordered this arm named
+// five ids as its unobservable population and pinned each to an app.js LINE. The
+// lines rotted (D41) and two of the five are not unpredicated rows at all any
+// more, so re-deriving the CLAIM means asking the corpus about the SELECTORS and
+// letting the answer land where it lands. Each name is checked against the
+// shipped file below, so a rotted id reds instead of answering "zero" forever.
+const FILING_FIVE = [
+  { key: "FILING|#github-disconnect", id: "github-disconnect" },
+  { key: "FILING|#github-connect-go", id: "github-connect-go" },
+  { key: "FILING|#github-disconnect-site", id: "github-disconnect-site" },
+  { key: "FILING|#new-vercel-claim", id: "new-vercel-claim" },
+  { key: "FILING|#new-gh-create", id: "new-gh-create" },
+];
+{
+  const rotted = FILING_FIVE.filter((f) => src.indexOf('id="' + f.id + '"') === -1);
+  if (rotted.length) {
+    die2([
+      "FAIL(2m): a selector this arm reports a ZERO for is no longer authored in the console.",
+      ...rotted.map((f) => `  #${f.id}`),
+      "",
+      "  A zero-render verdict over a selector the file does not draw is vacuously true and says",
+      "  NOTHING about the affordance. Re-derive the id from the shipped file, or delete the entry.",
+    ]);
+  }
+}
+
+const PROBES = [...OFFERS, CONTROL_PROBE, ...FILING_FIVE];
+const probeMatches = (c, p) => {
+  if (p.id && c.id !== p.id) return false;
+  if (p.data && !c.data.includes(p.data)) return false;
+  if (p.withoutData && c.data.includes(p.withoutData)) return false;
+  return true;
+};
+
+// The actor axis is DERIVED, never typed: a scenario is a member-actor scenario
+// when its own GET /v1/me answers role === "member". Same derivation
+// member-authority-sweep.mjs uses, and for the same reason — a typed actor list
+// dates the moment the corpus grows.
+const meRole = (name) => {
+  try {
+    const r = route(name, "GET", "/v1/me", {});
+    return r && r.body ? r.body.role || null : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const renderHits = new Map(PROBES.map((p) => [p.key, []]));
+const paintedMounts = new Map();
+const bootFailures = [];
+let controlsScanned = 0;
+for (const name of SCENARIO_NAMES) {
+  let boot;
+  try {
+    boot = bootScenario(name, {});
+    await flush();
+  } catch (e) {
+    bootFailures.push(`  ${name} — ${e && e.message ? e.message : e}`);
+    continue;
+  }
+  const painted = new Set();
+  for (const [mountId, el] of boot.registry) {
+    const html = el && typeof el.innerHTML === "string" ? el.innerHTML : "";
+    if (!html) continue;
+    painted.add(mountId);
+    const { controls } = scanControls(html);
+    controlsScanned += controls.length;
+    for (const c of controls) {
+      for (const p of PROBES) {
+        if (probeMatches(c, p)) renderHits.get(p.key).push({ scenario: name, mount: mountId });
+      }
+    }
+  }
+  paintedMounts.set(name, painted);
+}
+
+const memberScenarios = SCENARIO_NAMES.filter((n) => meRole(n) === "member");
+const memberMounts = new Set();
+for (const n of memberScenarios) for (const m of paintedMounts.get(n) || []) memberMounts.add(m);
+
+// (2m-i) THE SWEEP'S OWN FOOTING. Every one of these makes a zero MEAN something.
+{
+  const broken = [];
+  if (bootFailures.length) {
+    broken.push("  " + bootFailures.length + " scenario(s) failed to boot — a scenario that never rendered",
+      "  cannot be counted as one that did not render the offer:", ...bootFailures);
+  }
+  if (!memberScenarios.length) {
+    broken.push("  ZERO member-actor scenarios in the corpus. Without one, PROVEN-REACHABLE and",
+      "  PROVEN-OMITTED are both unreachable verdicts and every row would classify UNOBSERVABLE",
+      "  by construction — a uniform verdict, which is the signature of a broken instrument.");
+  }
+  if (controlsScanned < CONTROL_FLOOR) {
+    broken.push(`  only ${controlsScanned} control(s) scanned across the whole corpus, under the floor of ` +
+      `${CONTROL_FLOOR}. A corpus that painted almost nothing answers "absent" to everything.`);
+  }
+  const ctrl = renderHits.get(CONTROL_PROBE.key);
+  const ctrlMember = ctrl.filter((h) => meRole(h.scenario) === "member");
+  if (!ctrl.length) {
+    broken.push("  the CONTROL probe #" + CONTROL_PROBE.id + " was found in ZERO scenarios. It is drawn by a",
+      "  pinned member-tier writer on a screen this corpus renders, so a zero here is the SWEEP",
+      "  failing to see — and every zero it reports is then manufactured, not measured.");
+  } else if (!ctrlMember.length) {
+    broken.push("  the CONTROL probe #" + CONTROL_PROBE.id + " renders in " + ctrl.length + " scenario(s) but in no",
+      "  MEMBER-actor one. The member arm of this sweep is then unexercised, so \"no member-actor",
+      "  scenario renders it\" is a sentence this run cannot earn about anything.");
+  }
+  if (broken.length) {
+    die2(["FAIL(2m): the rendered-bytes sweep cannot support a verdict.", "", ...broken]);
+  }
+}
+
+// (2m-ii) THE SPLIT.
+const populations = OFFERS.map((o) => {
+  const hits = renderHits.get(o.key);
+  const memberHits = hits.filter((h) => meRole(h.scenario) === "member");
+  const onMemberMount = hits.filter((h) => memberMounts.has(h.mount));
+  const scenarios = [...new Set(hits.map((h) => h.scenario))];
+  const mounts = [...new Set(hits.map((h) => h.mount))];
+  let population, why;
+  if (memberHits.length) {
+    population = "PROVEN-REACHABLE";
+    why = "rendered to a plain member in " + [...new Set(memberHits.map((h) => h.scenario))].join(", ");
+  } else if (hits.length && onMemberMount.length) {
+    population = "PROVEN-OMITTED";
+    why = "renders in " + scenarios.length + " scenario(s) into #" + mounts.join(", #") +
+      "; a member-actor scenario paints that mount and does NOT draw it";
+  } else if (hits.length) {
+    population = "UNOBSERVABLE";
+    why = "renders only into #" + mounts.join(", #") + ", which NO member-actor scenario paints — the " +
+      "member never reached the surface, so its absence measures REACH, not authority";
+  } else {
+    population = "UNOBSERVABLE";
+    why = "renders in ZERO committed scenarios — nothing can be said, and no guard over it can be proven";
+  }
+  return { ...o, hits, scenarios, mounts, population, why };
+});
+
+const countOf = (p) => populations.filter((x) => x.population === p).length;
+const POP = {
+  reachable: countOf("PROVEN-REACHABLE"),
+  omitted: countOf("PROVEN-OMITTED"),
+  unobservable: countOf("UNOBSERVABLE"),
+};
+
+console.log("");
+console.log(`population split : ${pinnedUnpredicated.length} UNPREDICATED = ${POP.reachable} PROVEN-REACHABLE · ` +
+  `${POP.omitted} PROVEN-OMITTED · ${POP.unobservable} UNOBSERVABLE`);
+console.log(`                   DERIVED this run from the rendered bytes of all ${SCENARIO_NAMES.length} committed scenario(s) ` +
+  `(${memberScenarios.length} member-actor,`);
+console.log(`                   ${controlsScanned} controls scanned). PROVEN-OMITTED is absence in the member's bytes, NEVER a fence:`);
+console.log("                   a member fixture differs in DATA as well as in actor. A row leaves the list above");
+console.log("                   on a FENCE, never on this verdict.");
+for (const p of populations) {
+  console.log("  " + pad(p.population, 18) + p.key);
+  console.log("  " + " ".repeat(18) + p.why);
+}
+console.log("  " + pad("CONTROL", 18) + "#" + CONTROL_PROBE.id + " — " +
+  renderHits.get(CONTROL_PROBE.key).length + " render(s), " +
+  renderHits.get(CONTROL_PROBE.key).filter((h) => meRole(h.scenario) === "member").length +
+  " of them member-actor. The sweep can SEE; the zeroes above are measurements.");
+
+console.log("");
+console.log("the filing's five ids, RE-DERIVED BY SELECTOR (its app.js line numbers had rotted, and two of");
+console.log("the five are no longer unpredicated rows at all — the census owner column says which):");
+for (const f of FILING_FIVE) {
+  const hits = renderHits.get(f.key);
+  const owner = OFFERS.find((o) => o.id === f.id);
+  const scen = [...new Set(hits.map((h) => h.scenario))];
+  console.log("  " + pad("#" + f.id, 26) +
+    (hits.length ? `${hits.length} render(s) in ${scen.join(", ")}` : "ZERO renders in the committed corpus") +
+    (owner ? `   [unpredicated PIN row ${owner.key}]` : "   [not an unpredicated PIN row]"));
+}
+
+// THE PIN ON THE SPLIT. Same doctrine as EXPECT below: the numbers are the
+// receipt. Moving one means saying, in the commit message, WHICH direction the
+// console moved — a row that becomes PROVEN-REACHABLE is a defect arriving, and
+// one that leaves UNOBSERVABLE means the corpus grew a scenario that can finally
+// see it. Neither should land silently.
+const EXPECT_POPULATIONS = { reachable: 0, omitted: 1, unobservable: 4 };
+if (POP.reachable !== EXPECT_POPULATIONS.reachable ||
+    POP.omitted !== EXPECT_POPULATIONS.omitted ||
+    POP.unobservable !== EXPECT_POPULATIONS.unobservable) {
+  die2([
+    "FAIL(2m): the unpredicated population no longer splits the way this census documents.",
+    `  expected  ${EXPECT_POPULATIONS.reachable} reachable · ${EXPECT_POPULATIONS.omitted} omitted · ${EXPECT_POPULATIONS.unobservable} unobservable`,
+    `  found     ${POP.reachable} reachable · ${POP.omitted} omitted · ${POP.unobservable} unobservable`,
+    "",
+    "  REACHABLE GOING UP is the disease itself: the console has started drawing an elevated write",
+    "  to a plain member. UNOBSERVABLE GOING DOWN is good news and still needs saying — the corpus",
+    "  grew an actor or a state that can finally see the offer. Move the pin in the same commit.",
+  ]);
+}
+
 
 // (2a) THE VACUITY FLOOR. Not "79 seen" — 79 RESOLVED TO A ROUTE.
 if (unresolved.length) {
