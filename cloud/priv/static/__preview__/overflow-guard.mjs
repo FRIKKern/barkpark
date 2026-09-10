@@ -236,6 +236,7 @@ const DEFECTS = [
   "W34-deploy-detail-render-bound",
   "W50-site-row-three-hosts-cruel-by-fixture",
   "W22-shared-modal-card-min-content-floor",
+  "W19-topbar-vertical-cost",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -1563,6 +1564,173 @@ async function main() {
       // measured count"). The MISSING/0px arms above fail per-cell; this arm
       // is the backstop that cannot be satisfied by an empty loop.
       if (measured === 0) fail(D, `#billing-chip measured in ZERO cells across 2 scenarios x ${PHONE_WIDTHS.length} widths x 2 themes — the leg no longer reaches the population it certifies`);
+    }
+
+    // ── W19: THE 620 WRAP'S VERTICAL PRICE, PINNED AS A RATIO ──────────────
+    // cch-w19-s2 (PR #8945) made the topbar WRAP at <=620 to stop the money
+    // message being cut. It bought horizontal legibility with vertical space
+    // and nothing in this file priced the trade: every leg above asks whether
+    // something is CLIPPED, which is structurally blind to a header that grows
+    // by stacking whole lines. `header.topbar` is `position: sticky` chrome
+    // stacked above `main.content`, so every pixel it gains is a pixel the
+    // first screen loses on a phone.
+    //
+    // WHY A RATIO AND NOT A PIXEL (the filing asked for a RELATION, charter
+    // D218). A 4px font-face delta moves every absolute number in this file,
+    // so `h <= 120` is a guard that reds on a font swap and says nothing about
+    // the wrap. The ratio's numerator and denominator move TOGETHER under a
+    // font delta: the phone-band height is divided by the SAME PAGE's
+    // unwrapped height, measured live at 621 in the same scenario, the same
+    // theme and the same run. What it prices is exactly the wrap — how many
+    // times taller the header gets when it stacks.
+    //
+    // AND THE DENOMINATOR IS ITSELF PINNED, which is the half a ratio alone
+    // gets wrong. Make the topbar taller at EVERY width and the ratio does not
+    // move: 2.12 stays 2.12 while the person loses the same pixels. So the
+    // 621 baseline is separately held under a fraction of the VIEWPORT height
+    // — the other relation the filing offers — and the two together bound the
+    // absolute cost without pinning a pixel.
+    //
+    // SIBLING, NOT DUPLICATE: breakpoint-sweep.mjs's SHELL_CHROME_CEILING
+    // (378.5) already pins `aside.sidebar` + `header.topbar` bottom, and its
+    // header names this very wrap as the growth it catches. It is an absolute
+    // pixel, it pools the sidebar in, and its width axis is DERIVED from
+    // app.css's @media boundaries — so on a bare run it never reaches a phone
+    // width at all, and the one CI invocation that does (`--render --widths
+    // 320,390,620 --cell members,members-member`) drives the MEMBERS cells,
+    // where no billing chip is in the header. This leg is the billing-scenario
+    // half at phone widths, expressed as a relation.
+    if (requested.includes("W19-topbar-vertical-cost")) {
+      const D = "W19-topbar-vertical-cost";
+      // The band the wrap owns, plus 621 as the first width ABOVE it — the
+      // unwrapped control, and this leg's denominator.
+      const TB_SCENS = ["billing-trial", "billing-past-due"];
+      const TB_WIDTHS = [320, 360, 375, 390, 430, 470, 500, 620];
+      const TB_BASELINE_WIDTH = 621;
+      // MEASURED ON THIS TREE (the numbers are in the PR body, per cell): the
+      // worst phone-band cell is 2.12x its own 621 baseline. 2.25 leaves
+      // roughly 7px of slack at a 56px baseline — LESS than one wrapped line
+      // (~19px at the shipped type), so a header that stacks one more line
+      // reds, while a font-metric wobble does not.
+      const TB_GROWTH_CEILING = 2.25;
+      // The denominator's own bound, against the viewport: 56 / 800 = 0.07.
+      const TB_BASELINE_VH = 0.1;
+      const tbCells = TB_SCENS.length * 2 * (TB_WIDTHS.length + 1);
+      process.stdout.write(
+        `\n${D} — ${TB_SCENS.length} billing scenarios x 2 themes x ${TB_WIDTHS.length} phone widths ` +
+        `+ the ${TB_BASELINE_WIDTH} unwrapped baseline (${tbCells} cells; header.topbar border-box height, ` +
+        `main.content top offset, and the growth RATIO against each row's own ${TB_BASELINE_WIDTH} height)\n`,
+      );
+      let tbMeasured = 0, tbBarsSeen = 0, tbOverGrowth = 0, tbOverBase = 0, tbZero = 0;
+      let worstRatio = 0, worstRatioAt = "none", worstTop = 0, worstTopAt = "none";
+      const probe = (
+        `(function(){` +
+        `var v=document.querySelector('section.view:not([hidden])');` +
+        `var d=document.documentElement;` +
+        // COUNTED, not first-match: a zero here is the vacuity refusal below,
+        // and a silently-renamed class must read as zero rather than as a
+        // clean cell.
+        `var bars=document.querySelectorAll('header.topbar');` +
+        `var c=document.querySelector('main.content');` +
+        `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),vw:d.clientWidth,vh:d.clientHeight,` +
+        `bars:bars.length,h:null,bottom:null,pos:null,contentTop:null,chip:null};` +
+        `if(bars.length){var r=bars[0].getBoundingClientRect();` +
+        `out.h=Math.round(r.height*100)/100; out.bottom=Math.round(r.bottom*100)/100;` +
+        `out.pos=getComputedStyle(bars[0]).position;}` +
+        `if(c){out.contentTop=Math.round(c.getBoundingClientRect().top*100)/100;}` +
+        `var ch=document.getElementById('billing-chip');` +
+        `if(ch&&!ch.hidden){out.chip=(ch.textContent||'').trim().slice(0,40);}` +
+        `return out;})()`
+      );
+      for (const scen of TB_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter at the baseline width and assert the chip is LIVE before any
+          // height is read — a header measured without its billing chip is the
+          // 56px control wearing the phone band's name.
+          await setViewport(TB_BASELINE_WIDTH);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}`,
+            `document.querySelector('header.topbar') && (function(){var c=document.getElementById('billing-chip');return c && !c.hidden;})()`,
+          );
+          const base = await evalJs(probe);
+          const row = [];
+          if (!base || !base.bars) {
+            tbZero++;
+            fail(D, `${scen}/${theme}@${TB_BASELINE_WIDTH}: ZERO header.topbar matched — the baseline this row's whole ratio divides by was never measured, so no cell below it certifies anything. This is a refusal, not a pass`);
+            process.stdout.write(`   topbar ${scen}/${theme}  baseline UNMEASURED — row skipped\n`);
+            continue;
+          }
+          tbMeasured++;
+          tbBarsSeen += base.bars;
+          if (base.pos !== "sticky") {
+            fail(D, `${scen}/${theme}@${TB_BASELINE_WIDTH}: header.topbar computes position:${base.pos}, not sticky — this leg prices STACKED chrome, and a topbar that scrolls away costs the first screen nothing. The premise it measures under is gone`);
+          }
+          const baseBudget = Math.round(TB_BASELINE_VH * base.vh * 100) / 100;
+          if (base.h > baseBudget) {
+            tbOverBase++;
+            fail(D, `${scen}/${theme}@${TB_BASELINE_WIDTH}: the UNWRAPPED topbar is ${base.h}px against a ${baseBudget}px ceiling (${TB_BASELINE_VH} of a ${base.vh}px viewport) — this is the ratio's own denominator, and a header that grows at EVERY width moves the person's pixels without moving the ratio one bit`);
+          }
+          row.push(`${TB_BASELINE_WIDTH}:h${base.h} top${base.contentTop} [BASE]`);
+          for (const width of TB_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(probe);
+            if (!m || !m.bars) {
+              tbZero++;
+              fail(D, `${scen}/${theme}@${width}: ZERO header.topbar matched — nothing was measured in this cell and an empty measurement is not a clean one`);
+              row.push(`${width}:0bars`);
+              continue;
+            }
+            tbMeasured++;
+            tbBarsSeen += m.bars;
+            if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply, so the dark half of this row measured the light one`);
+            if (m.chip == null) {
+              fail(D, `${scen}/${theme}@${width}: #billing-chip is absent or hidden — the header measured here is not the one this scenario is about, and its height is the control's, not the wrap's`);
+            }
+            const ratio = Math.round((m.h / base.h) * 10000) / 10000;
+            const topFrac = m.contentTop == null ? null : Math.round((m.contentTop / m.vh) * 10000) / 10000;
+            if (ratio > worstRatio) { worstRatio = ratio; worstRatioAt = `${scen}/${theme}@${width}`; }
+            if (m.contentTop != null && m.contentTop > worstTop) { worstTop = m.contentTop; worstTopAt = `${scen}/${theme}@${width}`; }
+            if (ratio > TB_GROWTH_CEILING) {
+              tbOverGrowth++;
+              fail(D, `${scen}/${theme}@${width}: header.topbar is ${m.h}px — ${ratio}x its own ${TB_BASELINE_WIDTH} baseline of ${base.h}px, over the ${TB_GROWTH_CEILING}x ceiling — ${(m.h - base.h * TB_GROWTH_CEILING).toFixed(2)}px past the bar, on a header that has grown ${(m.h - base.h).toFixed(2)}px over its own unwrapped self. That is the top of every phone's first screen: main.content now starts ${m.contentTop} down a ${m.vh}px viewport`);
+            }
+            row.push(`${width}:h${m.h} x${ratio} top${m.contentTop}${topFrac == null ? "" : `(${topFrac})`}`);
+          }
+          process.stdout.write(`   topbar ${scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      // THE DENOMINATOR, PRINTED. The ✓ below is a claim about THESE cells.
+      process.stdout.write(
+        `   MEASURED ${tbMeasured} of ${tbCells} header.topbar cells ` +
+        `(${TB_SCENS.length} scenarios x ${TB_WIDTHS.length + 1} widths x 2 themes; ` +
+        `${tbBarsSeen} header.topbar element(s) seen, ${tbZero} cell(s) matched none)\n`,
+      );
+      // A leg that measured nothing certifies nothing. This arm cannot be
+      // satisfied by an empty loop, a renamed class or a screen that stopped
+      // rendering the shell.
+      if (tbMeasured === 0) {
+        fail(D, `header.topbar measured in ZERO of ${tbCells} cells — the leg no longer reaches the population it certifies, and an empty sweep is a REFUSAL, never a pass`);
+      } else if (tbMeasured < tbCells) {
+        process.stdout.write(
+          `   ! only ${tbMeasured} of ${tbCells} cells were MEASURED — the remaining ${tbCells - tbMeasured} are ✗ above ` +
+          `and this band is NOT certified for them\n`,
+        );
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${tbMeasured} / ${tbCells} cells clean: the phone-band topbar peaks at ${worstRatio}x its own ` +
+          `${TB_BASELINE_WIDTH} baseline (${worstRatioAt}) against a ${TB_GROWTH_CEILING}x ceiling, and the ` +
+          `baseline itself stays under ${TB_BASELINE_VH} of the viewport. THE COST IS NOW PRICED, NOT ARGUED: ` +
+          `worst main.content top offset ${worstTop}px at ${worstTopAt}`,
+        );
+        okLine(
+          `THE RELATION IS THE POINT, and both halves can lose. The ratio divides by the SAME page's unwrapped ` +
+          `height read live at ${TB_BASELINE_WIDTH}, so a font-metric delta (D218) moves numerator and denominator ` +
+          `together and does not red this leg — while one more wrapped line (~19px at the shipped type, against ` +
+          `a ${TB_BASELINE_WIDTH}px-wide baseline that measures 56px tall) does. The baseline's own viewport fraction is what stops a header that grows at ` +
+          `EVERY width from hiding inside an unchanged ratio`,
+        );
+      }
     }
 
     // ── GR109: the stacked attention row is left-aligned, not centred ───────
