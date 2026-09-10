@@ -2959,7 +2959,39 @@ type DeployCensus struct {
 	// A nil slice is a control plane that sent none; the render layer already
 	// treats "no boundary rows" as "no provenance to offer", never as an error.
 	Boundaries []DeployCensusBoundary `json:"boundaries"`
-	Raw        []byte                 `json:"-"`
+	// Vocabulary is the class enum the ledger can EVER return, as distinct from
+	// Classes, which is what this WINDOW observed
+	// (dr-w16-s3-followup-class-vocabulary-unreachable). The difference is the
+	// whole point: a class absent from Classes means "no rows in this window",
+	// never "no such class", so a legend built from Classes changes shape with
+	// the window and a CLI that wants a stable one has to hard-code the enum on
+	// this side of the wire — the second drifting definition
+	// deployCensusDeferredTotal already cost this census once.
+	//
+	// A POINTER, for the same reason every neighbour above is one: a control
+	// plane older than this key sends nothing, and a zero-valued struct would
+	// render an EMPTY legend — "the ledger names no failure classes" — which is
+	// the most flattering possible reading of an absence. nil MUST render as
+	// NOT SENT.
+	Vocabulary *DeployVocabulary `json:"vocabulary"`
+	Raw        []byte            `json:"-"`
+}
+
+// DeployVocabulary is the three closed enums `DeployLedger.classify/2` can
+// return: the failure classes, the deferral classes (counted in volume, never
+// in a failure numerator) and the never-attempted classes (never in a rate
+// DENOMINATOR at all). Three lists and not one, because the three are
+// arithmetically different and a legend that flattens them invites a reader to
+// sum across them.
+//
+// Every field is a plain []string: the class NAMES are data, not wire keys, so
+// a class added to the ledger's enum changes no shape here and reds no key-set
+// register. A nil slice is a control plane that sent that enum empty; the
+// render says so rather than printing a blank section.
+type DeployVocabulary struct {
+	Classes             []string `json:"classes"`
+	DeferredClasses     []string `json:"deferred_classes"`
+	NotAttemptedClasses []string `json:"not_attempted_classes"`
 }
 
 // DeployCensusCompleteness is the envelope's own audit of itself: a SECOND,

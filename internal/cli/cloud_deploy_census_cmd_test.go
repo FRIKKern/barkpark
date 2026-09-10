@@ -3167,3 +3167,70 @@ func TestDeployCensusPctRendersEnvelopeVerbatim(t *testing.T) {
 		t.Error("a node without pct must never yield a percentage")
 	}
 }
+
+// censusVocabularyEnvelope carries the dr-w16-s3 class ENUM beside an OBSERVED
+// class table that is a strict subset of it: `classes` names one class, the
+// vocabulary names three, so the "not seen in this window" line has something
+// true to say and cannot be produced by echoing the observed rows.
+const censusVocabularyEnvelope = `{
+  "window": {"from": "2026-07-31T00:00:00Z", "to": "2026-08-07T00:00:00Z"},
+  "volume": 2216,
+  "failed": 832,
+  "failure_rate": {"sample": 2216, "pct": 37.5, "numerator": 832, "min_sample": 200, "refused": false, "reason": null},
+  "classes": [
+    {"class": "BOX_BUSY_409", "label": "the box was already deploying", "agency": "box", "count": 832, "share": {"sample": 832, "pct": 100.0, "numerator": 832, "min_sample": 200, "refused": false, "reason": null}}
+  ],
+  "not_attempted": [],
+  "sites": [],
+  "vocabulary": {
+    "classes": ["BOX_BUSY_409", "UNCLASSIFIED"],
+    "deferred_classes": ["BOX_AT_CAPACITY_DEFERRED"],
+    "not_attempted_classes": ["GITHUB_PUSH_UNBUILDABLE"]
+  },
+  "min_sample": 200
+}`
+
+// TestCloudDeploymentsVocabularyNamesWhatTheWindowDidNotSee: the legend's whole
+// reason to exist. `classes` is what the WINDOW saw; a class missing from it
+// means "no rows here" and never "no such class", and nothing else on the
+// screen can tell those apart. The line must carry the counts AND the names.
+func TestCloudDeploymentsVocabularyNamesWhatTheWindowDidNotSee(t *testing.T) {
+	newCensusServer(t, 200, censusVocabularyEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "class vocabulary (what the ledger can NAME") {
+		t.Fatalf("no vocabulary section rendered:\n%s", stdout)
+	}
+	line := censusLineContaining(t, stdout, "not seen in this window")
+	// THREE of the four named classes had no row in this window; BOX_BUSY_409
+	// did, so it must NOT be on this line — an implementation that listed the
+	// whole enum would pass a bare "contains UNCLASSIFIED" check.
+	for _, want := range []string{"3 of 4", "UNCLASSIFIED", "BOX_AT_CAPACITY_DEFERRED", "GITHUB_PUSH_UNBUILDABLE"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("quiet-class line %q missing %q", line, want)
+		}
+	}
+	if strings.Contains(line, "BOX_BUSY_409") {
+		t.Fatalf("quiet-class line %q names a class this window DID see", line)
+	}
+}
+
+// TestCloudDeploymentsVocabularyAbsenceRendersNothing: a control plane older
+// than the key sends none, and an empty legend claiming the ledger names no
+// classes is the ABSENT-collapsed-into-ZERO defect this epic is named for.
+func TestCloudDeploymentsVocabularyAbsenceRendersNothing(t *testing.T) {
+	newCensusServer(t, 200, censusCompleteEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	if strings.Contains(stdout, "class vocabulary") || strings.Contains(stdout, "not seen in this window") {
+		t.Fatalf("an envelope with NO vocabulary key rendered a legend anyway:\n%s", stdout)
+	}
+}
