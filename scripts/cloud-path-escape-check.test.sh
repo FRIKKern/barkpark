@@ -327,9 +327,6 @@ check_match "api/lib/barkpark.ex" cloud false
 check_match "api/test/barkpark/some_test.exs" cloud false
 check_match "web/src/app/page.tsx" cloud false
 check_match ".github/workflows/elixir.yml" cloud false
-# exact-file entries must not match by prefix
-check_match "scripts/async_env_seam_scan.exs.orig" cloud false
-check_match ".github/workflows/cloud.yml.bak" cloud false
 # every declared glob selects the set it is declared in
 while IFS= read -r g; do
   [ -n "$g" ] || continue
@@ -339,6 +336,72 @@ while IFS= read -r g; do
 done <<EOF
 $("$SCRIPT" --print-set cloud)
 EOF
+
+# ── EXACT-ENTRY PREFIX SEMANTICS, proved on a SYNTHETIC set ────────────────
+# `glob_to_ere` anchors an exact entry with `^…$` and a `dir/**` entry with
+# `^dir(/|$)`. Both anchors are load-bearing: lose the `$` and the exact entry
+# `x.md` starts dispatching on `x.md.bak`; lose the `(/|$)` and `js/**` starts
+# dispatching on `js-legacy/`.
+#
+# THIS USED TO BE PROVED WITH REAL DECLARED PATHS — `scripts/async_env_seam_scan.exs.orig`
+# and `.github/workflows/cloud.yml.bak` — and that choice made the harness veto
+# a widening it has no opinion about: the moment `scripts/**` or
+# `.github/workflows/**` is declared, those two probes become TRUE and the case
+# reds for a reason that has nothing to do with the anchors it exists to pin.
+# A probe drawn from the set under test cannot survive a change to that set.
+#
+# So the probes now live on a SYNTHETIC set, under `docs/prefix-probe/`, which
+# is declared nowhere and is therefore immune to every future widening. The
+# rewrite is applied to a COPY of the script — CLOUD_PATHS is fixed text, so
+# there is no env door to open and none is opened.
+PFX="$TMPROOT/prefix-semantics"
+mkdir -p "$PFX"
+PCOPY="$PFX/cloud-path-escape-check.sh"
+PAWK="$PFX/rewrite-cloud-paths.awk"
+cat >"$PAWK" <<'AWK'
+BEGIN { q = sprintf("%c", 39) }
+!done && index($0, "CLOUD_PATHS=" q) == 1 {
+  print "CLOUD_PATHS=" q "docs/prefix-probe/exact-entry.md"
+  print "docs/prefix-probe/globbed/**" q
+  inblock = 1
+  done = 1
+  next
+}
+inblock { if (substr($0, length($0), 1) == q) inblock = 0; next }
+{ print }
+AWK
+awk -f "$PAWK" "$SCRIPT" >"$PCOPY"
+
+# THE CONTROL FIRST. If the rewrite missed, the copy still carries the REAL set
+# and every probe below would be answering a question about CLOUD_PATHS instead
+# of about the anchors — green, and about nothing.
+pset="$(bash "$PCOPY" --print-set cloud)"
+if [ "$pset" = "docs/prefix-probe/exact-entry.md
+docs/prefix-probe/globbed/**" ]; then
+  ok "the synthetic set took (control) — the probes below test the anchors, not CLOUD_PATHS"
+else
+  no "the CLOUD_PATHS rewrite did not take; probes would be vacuous. got: $pset"
+fi
+
+pcheck() {
+  local got
+  got="$(bash "$PCOPY" --match cloud <<<"$1")"
+  if [ "$got" = "$2" ]; then
+    ok "synthetic set: '$1' -> $2"
+  else
+    no "synthetic set: '$1' -> $got, wanted $2"
+  fi
+}
+pcheck "docs/prefix-probe/exact-entry.md" true
+pcheck "docs/prefix-probe/globbed" true
+pcheck "docs/prefix-probe/globbed/deep/probe.txt" true
+# an exact entry must not match by PREFIX …
+pcheck "docs/prefix-probe/exact-entry.md.bak" false
+pcheck "docs/prefix-probe/exact-entry.mdx" false
+# … nor by SUFFIX, and a directory glob must break on a segment boundary
+pcheck "vendor/docs/prefix-probe/exact-entry.md" false
+pcheck "docs/prefix-probe/globbed-legacy/probe.txt" false
+pcheck "docs/prefix-probe/other/probe.txt" false
 echo
 
 # ── case 7: a bad set name is an error, not a silent false ──────────────────
