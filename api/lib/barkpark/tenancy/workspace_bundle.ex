@@ -588,7 +588,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         # any trigger/constraint DDL, so the empty-shell delete's FK cascades
         # AND teardown triggers (workspaces_teardown_cycle_ledger) fire with
         # everything live.
-        if mode == :merge, do: adopt_or_refuse_root_slug!(manifest)
+        # Returns :seat_evicted when the empty shell it deleted was the row
+        # holding `is_default` — the seat must then be TRANSFERRED to the
+        # imported workspace once its row lands (settle_default_seat!/2 below).
+        adopted =
+          if mode == :merge, do: adopt_or_refuse_root_slug!(manifest), else: :ok
 
         # Only tables that exist on the target participate in the DDL passes;
         # a manifest member the target schema lacks behaves as before — a
@@ -638,6 +642,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         # so a manifest that under-declares itself is caught by what it did, not
         # by what it said. Inside the transaction, so the refusal un-creates it.
         assert_landed_root_slug_matches_expectation!(manifest, ctx.expected_root_slug)
+
+        # The instance-default seat, settled from the ROWS rather than from what
+        # the bundle claimed about them. Two statements, same table the members
+        # already wrote — see settle_default_seat!/2.
+        settle_default_seat!(manifest, adopted)
 
         # LAST, and deliberately AFTER restore_member_fks!/1: the grant is the
         # only row this transaction writes through Ecto rather than COPY, and
@@ -1288,6 +1297,25 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # export — the column stays in the manifest's column list (so the member is
   # still COPY-importable), it just never carries the value. Empty in W1; the
   # seam exists so adding a scrub entry needs no engine change.
+  # THE INSTANCE-DEFAULT SEAT NEVER TRAVELS IN A BUNDLE (task-566dc5be4871353b).
+  #
+  # `workspaces.is_default` is the seat `Tenancy.get_default_workspace/0` reads,
+  # and the root `workspaces` member is a RAW `COPY` that reaches no changeset —
+  # so a member carrying `is_default = t` would land the flag directly, which is
+  # the very "identity transferable through user input" defect the seat was moved
+  # off the slug to close, merely relocated from a string to a column.
+  #
+  # Exported as the literal `false` rather than dropped from the column list: the
+  # arity of the dump must keep matching the manifest's `columns`, and the column
+  # is `NOT NULL` so the `{:scrub_fields, _}` seam (which emits `NULL`) cannot
+  # carry it. A re-export of a re-import is still byte-identical — `false` is the
+  # only value the column can hold on either side of the trip.
+  #
+  # This is the EXPORT half. `settle_default_seat!/2` is the import half, and it
+  # is the load-bearing one: a bundle is caller-supplied, so a crafted manifest
+  # can always claim otherwise. Neither wall is trusted to be the only one.
+  defp select_expr("workspaces", "is_default", _ctx), do: "false"
+
   defp select_expr(table, col, ctx) do
     if col in scrub_fields(table, ctx), do: "NULL", else: "t.#{qi(col)}"
   end
@@ -1674,8 +1702,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   #   * `Workspace.changeset/2`'s `validate_exclusion(:slug, @reserved_slugs)`
   #     — refuses the routing-prefix names (admin, api, studio, media, …).
   #
-  # WHY THAT MATTERS. `Tenancy.get_default_workspace/0` is
-  # `Repo.get_by(Workspace, slug: "default")`. Whoever holds that slug IS the
+  # WHY THAT MATTERS. When this guard was written `Tenancy.get_default_workspace/0`
+  # was `Repo.get_by(Workspace, slug: "default")` — since task-566dc5be4871353b
+  # it reads the uncast `workspaces.is_default` column instead, so holding the
+  # slug no longer takes the seat and `settle_default_seat!/2` polices the seat
+  # itself. This guard remains the wall for the SLUG (a reserved name an import
+  # may not squat while vacant). Back then, whoever held that slug IS the
   # instance default: `AssignDefaultScope` binds every flat route to it, and
   # `Content.WriteScope.resolve_write_scope/1` stamps an UNSCOPED WRITE with
   # it. The `unique_index(:workspaces, [:slug])` the import route's own comment
@@ -1823,9 +1855,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
       [[existing_id]] ->
         if empty_shell?(existing_id) do
+          # READ THE SEAT BEFORE THE DELETE — after it, the row is gone and
+          # nothing left in the transaction can tell whether the shell we just
+          # evicted was the instance default or an ordinary same-slug workspace.
+          held_seat? = holds_default_seat?(existing_id)
+
           case Tenancy.delete_workspace(existing_id) do
             {:ok, _} ->
-              :ok
+              if held_seat?, do: :seat_evicted, else: :ok
 
             {:error, reason} ->
               Repo.rollback(
@@ -1856,6 +1893,64 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       |> hd()
 
     document_count == 0 and media_count == 0
+  end
+
+  defp holds_default_seat?(ws_id) do
+    Repo.query!("SELECT is_default FROM workspaces WHERE id = $1::text::uuid", [ws_id]).rows ==
+      [[true]]
+  end
+
+  # ── The instance-default seat, across an import (task-566dc5be4871353b) ──────
+  #
+  # `Tenancy.get_default_workspace/0` no longer resolves the singleton by the
+  # `default` slug; it reads `workspaces.is_default`, a column no changeset casts
+  # and a PARTIAL UNIQUE INDEX (`workspaces_single_default_index`) keeps to at
+  # most one row. Import is the ONE path that must move it, and the one path that
+  # must never let a caller move it, so both halves live here:
+  #
+  # CLEAR, unconditionally and first. The root `workspaces` member arrives by raw
+  # `COPY` off a caller-supplied tar, reaching neither `Workspace.changeset/2`
+  # nor `Tenancy`'s seat guard. `select_expr/3` above exports the column as
+  # `false`, so no bundle THIS instance produced can carry a claim — but a
+  # crafted one can, and with the seat vacant (which the adopt branch's own
+  # delete makes true a few statements earlier) it would simply land and CAPTURE
+  # the instance default. Clearing first also means the SET below can never
+  # collide with the row it is about to replace.
+  #
+  # SET only on `:seat_evicted` — the adopt branch deleted an empty shell that
+  # was ITSELF holding the seat. That is the supported production flow
+  # `bp cloud support add --ws default` drives (SupportResetDefaultWorkspaceStep
+  # → SupportAdminTokenStep re-mints an empty default → merge-import replaces the
+  # shell), and it is the only shape in which an import is entitled to the seat:
+  # the instance gave the seat away by its own hand, in this transaction, to the
+  # row this import is replacing. Any other import leaves the seat exactly where
+  # it found it.
+  #
+  # TWO statements, on a table the import already writes, inside the transaction
+  # that is already open — the adopt branch's failure surface is unchanged, which
+  # is the constraint that decided the boolean-column shape over a pointer row.
+  #
+  # DEGRADES TO VACANCY, NEVER TO CAPTURE: if the transfer is somehow skipped the
+  # instance is left with no default (`get_default_workspace/0` → nil, unscoped
+  # writes stamp `workspace_id` NULL — bounded), never with a default the
+  # importer chose.
+  defp settle_default_seat!(manifest, adopted) do
+    ws_id = manifest["workspace_id"]
+
+    Repo.query!(
+      "UPDATE workspaces SET is_default = false WHERE id = $1::text::uuid AND is_default",
+      [ws_id]
+    )
+
+    if adopted == :seat_evicted do
+      Repo.query!("UPDATE workspaces SET is_default = true WHERE id = $1::text::uuid", [ws_id])
+    end
+
+    # Raw SQL, so it bypassed every `Barkpark.Tenancy` write that busts the
+    # singleton cache. `Plugs.AssignDefaultScope` reads through that cache on
+    # every flat request; a stale entry here would serve the evicted shell.
+    Barkpark.Tenancy.DefaultScopeCache.invalidate()
+    :ok
   end
 
   # ── Cross-tenant blob-path refusal (task-918106d49c62563e) ──────────────────

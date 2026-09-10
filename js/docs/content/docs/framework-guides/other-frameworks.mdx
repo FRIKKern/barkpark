@@ -1,0 +1,90 @@
+---
+title: Other frameworks
+description: What to use when there is no framework-specific Barkpark package.
+---
+
+Next.js is the only framework with a dedicated Barkpark package. That is a
+deliberate limit, not an omission waiting to be filled: there is no
+`@barkpark/remix`, `@barkpark/sveltekit`, `@barkpark/astro`, or `@barkpark/vue`,
+and this page will not pretend otherwise.
+
+Everywhere else you use `@barkpark/core` directly. It is a plain fetch client with
+no runtime dependencies and no framework assumptions, so the integration work is
+small and the same in every host.
+
+## The whole integration
+
+```bash
+npm install @barkpark/core
+```
+
+```ts
+// lib/barkpark.ts
+import { createClient } from '@barkpark/core'
+
+export const bp = createClient({
+  projectUrl: process.env.BARKPARK_PROJECT_URL!,
+  dataset: 'production',
+  apiVersion: '2026-04-01',
+  token: process.env.BARKPARK_TOKEN, // server-side only; omit for public reads
+})
+```
+
+Call it from whatever your framework calls a server-side data loader — a Remix or
+React Router `loader`, a SvelteKit `+page.server.ts` `load`, an Astro component's
+frontmatter, a Nuxt server route, an Express handler, a build script:
+
+```ts
+const posts = await bp.docs('post').order('_createdAt:desc').limit(20).find()
+const post = await bp.doc('post', slug, { expand: 'author' })
+```
+
+The client runs in Node, browsers, edge runtimes, and workers. Keep the token on
+the server: a client with a token can read drafts and write.
+
+## What you give up, and what you rebuild
+
+The Next.js package exists because Next.js has framework-specific machinery worth
+wrapping. Without it you own four things yourself:
+
+| Concern | Do it yourself with |
+| --- | --- |
+| Cache invalidation | Register a webhook (`bp.createWebhook`) and call your framework's own purge/revalidate API from the handler. |
+| Webhook verification | `verifyWebhookSignature()` from `@barkpark/core` — Web Crypto HMAC with replay defense, works in any runtime. Verify before you parse. |
+| Previews / drafts | Gate a route on your own session or cookie, then read through `bp.withConfig({ perspective: 'drafts' })`. |
+| Live updates | `bp.listen('post')` returns an async iterable of change events and reconnects on its own. Call `.unsubscribe()` in your cleanup. |
+
+```ts
+// A framework-agnostic webhook handler
+const body = await req.text() // the raw body — do not re-serialize
+const ok = await verifyWebhookSignature({
+  body,
+  signature: req.headers.get('x-barkpark-signature'),
+  secret: process.env.BARKPARK_WEBHOOK_SECRET!,
+})
+if (!ok) return new Response('bad signature', { status: 401 })
+const event = parseWebhookEvent(body) // verify FIRST, then parse
+```
+
+## Rendering rich text
+
+`@barkpark/react` renders Barkpark's block content, images, and references, and it
+imports nothing from `next/*` — any React 19 host can use it, including
+server-rendered React inside another framework. The repository carries an Astro
+build that server-renders those components into a static page with zero client
+JavaScript, and a test harness that checks the resulting DOM against the Next.js
+output; a second package deliberately ships a hydrated island to prove the
+zero-JavaScript assertions can fail. Both are test-only and unpublished, so treat
+them as evidence that the render path works rather than as a supported Astro
+integration.
+
+Read the
+[published-preview advisory](https://github.com/FRIKKern/barkpark/blob/main/js/packages/react/README.md)
+before you depend on `@barkpark/react` from npm: in every published version, a
+failed reference fetch renders as "document not found", so a 401 or a 500 is
+indistinguishable from a genuine 404. Pass your own `fetcher` prop until the fix
+ships.
+
+Outside JavaScript entirely, talk to the
+[HTTP API](/docs/apis-and-sdks/overview) directly — it is the same surface every
+package is built on.

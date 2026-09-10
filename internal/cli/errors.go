@@ -716,6 +716,45 @@ func renderErrorEnvelopeDetailed(out *writer, code, msg, requestID, hint string,
 	return false
 }
 
+// humanErrorCode writes the machine-readable error `code` as the LAST
+// continuation line of a refusal on the HUMAN shapes (table/minimal).
+//
+// THE DECISION (task pds-w28-named-codes-invisible-in-human-shapes). The named
+// code reached only -o json and -o yaml: renderErrorEnvelopeDetailed switches on
+// out.output and returns false for table/minimal, and every caller then printed
+// the human message alone. So of 27 measured default-read refusals only the 9
+// machine-shaped ones carried the literal `unreadable_list_page`; the other 18
+// red correctly at rc=1 while a grep for the code found silence. Same for
+// pagination_stalled, request_failed and usage. -o minimal is what --quiet and
+// every write receipt resolve to — the shape an agent gets — so "the code exists
+// but you cannot see it" is a half-honest refusal.
+//
+// Two alternatives were rejected, and the tests in errors_named_code_test.go
+// fail under BOTH:
+//
+//  1. "minimal joins the machine shapes" — emit the JSON envelope on stdout for
+//     -o minimal too. Rejected: minimal's SUCCESS output is a terse receipt
+//     line, not JSON (resolveOutputForCommand :140), and --quiet resolves to it
+//     (:146). A shape whose success is one bare id and whose failure is a JSON
+//     document is a worse contract than either half, and it would move bytes
+//     from stderr to stdout for every quiet write in every existing script.
+//  2. "record that codes are json/yaml-only" — document the gap and stop
+//     implying otherwise. Rejected: docs/cli/error-exit-table.md is the
+//     canonical map from code to exit status and is written for whoever reads
+//     the refusal; a code a reader cannot read is not a map.
+//
+// So: the human line names the code. It costs one short stderr line, keeps the
+// machine envelope exactly where it was (stdout, json/yaml only), and leaves the
+// exit ladder untouched. Empty code prints nothing, so a code-less refusal is
+// byte-identical to before. Placed LAST, after message/details/hint, because it
+// is the support token, not the fact or the advice.
+func humanErrorCode(out *writer, code string) {
+	if code == "" {
+		return
+	}
+	out.errf("  code: %s", code)
+}
+
 // useErrorDetailed is useError plus the envelope `details` payload — the same
 // two-channel contract (machine envelope on stdout for -o json/yaml, human line
 // on stderr otherwise) with a per-error `details` object routed through
@@ -728,6 +767,7 @@ func useErrorDetailed(out *writer, code, msg string, exit int, details json.RawM
 		return exit
 	}
 	out.userErr("%s", msg)
+	humanErrorCode(out, code)
 	return exit
 }
 
@@ -969,6 +1009,7 @@ func usageErrHintf(out *writer, usageHelp func(), hint, format string, args ...a
 	msg := fmt.Sprintf(format, args...)
 	if !renderErrorEnvelope(out, "usage", msg, "", hint) {
 		out.userErr("%s", msg)
+		humanErrorCode(out, "usage")
 		if usageHelp != nil {
 			usageHelp()
 		}
@@ -996,6 +1037,7 @@ func fetchSnapshotErr(out *writer, verb string, err error) int {
 	msg := fmt.Sprintf("%s: %v", verb, err)
 	if !renderErrorEnvelope(out, "fetch_failed", msg, "", "") {
 		out.userErr("%s", msg)
+		humanErrorCode(out, "fetch_failed")
 	}
 	return exitGeneric
 }
