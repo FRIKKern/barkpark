@@ -2119,9 +2119,11 @@ defmodule BarkparkWeb.Router do
     # `BarkparkWeb.InstanceSiteDeployController` (read its moduledoc for why
     # each field's producer is the one that cannot lie) and pinned by
     # `InstanceSiteDeployControllerTest`. No field makes a GenServer.call, so a
-    # WEDGED runner still gets an answer — true of the code, but NO LONGER
-    # PINNED BY A TEST: the wedge control observed the wedge only through
-    # `runner_queue_len` and went with it (dr-w26-s7).
+    # WEDGED runner still gets an answer — and that IS pinned by a test again
+    # (dr-w27-s7): the restored "a wedged Runner still gets answered" control
+    # proves the wedge on the parked pid's own mailbox with `Process.info/2`
+    # instead of through the deleted `runner_queue_len` field, so it survives
+    # dr-w26-s7's deletion.
     #
     # WHY ADMIN: `door.in_flight_slugs` is `DeployRunner.door_census/0`'s list
     # of every site slug building on the box right now — other tenants' site

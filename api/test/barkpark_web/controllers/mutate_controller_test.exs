@@ -324,23 +324,44 @@ defmodule BarkparkWeb.MutateControllerTest do
       refute Map.has_key?(doc.content, "status")
     end
 
-    # MEASURED, and pinned as a RECORDED FACT rather than an endorsement — the
-    # same discipline the scalar-content gap got before it was fixed. A flat
-    # `status` whose value HAPPENS to be a lifecycle word is byte-identical
-    # whether the caller meant the envelope or their own field, so the refusal
-    # cannot fire: the value rewrites the document's lifecycle state while the
-    # caller's field vanishes. Closing it needs a contract change (a `_status`
-    # envelope key, or consulting the type's schema for a declared `status`
-    # field), which is a different blast radius. Filed as
-    # gfr-w1-flat-status-enum-valid-collision.
-    test "KNOWN RESIDUE: an enum-VALID status collision is still ambiguous and still lands",
+    # ── THE RESIDUE, CLOSED (gfr-w1-flat-status-enum-valid-collision) ──────
+    #
+    # REPLACES "KNOWN RESIDUE: an enum-VALID status collision is still
+    # ambiguous and still lands", which pinned the data loss as a recorded fact.
+    # The refusal above can only see the VALUE, and a flat `"status":"archived"`
+    # is byte-identical whether the caller meant the envelope or their own
+    # field. The SCHEMA is where the intent is written down, so the schema is
+    # what is asked: a type that DECLARES a `status` field gets its own field,
+    # and every other type keeps the documented envelope reading.
+
+    setup do
+      # An `order` whose own schema declares `status` — the shape the residue
+      # was losing.
+      Content.upsert_schema(
+        %{
+          "name" => "order",
+          "title" => "Order",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "status", "type" => "string"},
+            %{"name" => "slug", "type" => "string"}
+          ]
+        },
+        "test"
+      )
+
+      :ok
+    end
+
+    test "a lifecycle-WORD status on a type that declares its own `status` lands in content, " <>
+           "and the document's lifecycle is untouched",
          %{conn: conn} do
       resp =
         mutate(conn, [
           %{
             "create" => %{
-              "_id" => "collide-status-residue",
-              "_type" => "post",
+              "_id" => "own-status-archived",
+              "_type" => "order",
               "title" => "Archived order",
               "status" => "archived",
               "slug" => "the-slug"
@@ -349,10 +370,118 @@ defmodule BarkparkWeb.MutateControllerTest do
         ])
 
       assert resp.status == 200
-      {:ok, doc} = Content.get_document("drafts.collide-status-residue", "post", "test")
-      # The caller's "archived" became the DOCUMENT's lifecycle state...
+      {:ok, doc} = Content.get_document("drafts.own-status-archived", "order", "test")
+
+      # The caller's field is THEIR field...
+      assert doc.content["status"] == "archived"
+      # ...and the document is an ordinary new draft.
+      assert doc.status == "draft"
+      assert doc.content["slug"] == "the-slug"
+    end
+
+    test "the same for every other lifecycle word, `published` included — which the " <>
+           "draft-prefix rule used to rewrite to `draft`",
+         %{conn: conn} do
+      for word <- ~w(completed active planning published) do
+        assert mutate(conn, [
+                 %{
+                   "create" => %{
+                     "_id" => "own-status-#{word}",
+                     "_type" => "order",
+                     "title" => "Order #{word}",
+                     "status" => word
+                   }
+                 }
+               ]).status == 200
+
+        {:ok, doc} = Content.get_document("drafts.own-status-#{word}", "order", "test")
+        assert doc.content["status"] == word
+        assert doc.status == "draft"
+      end
+    end
+
+    # THE RESIDUAL, pinned as a test rather than left implicit: the refusal runs
+    # BEFORE the schema is consulted (so a refusal costs no Repo read — the
+    # property `writer_test`'s collision cases depend on), which means an
+    # OFF-vocabulary flat `status` is still refused even on a declaring type.
+    # Nothing is LOST there: the 422 names the collision and the way out. It is
+    # the silent 200 that this row exists to close.
+    test "an OFF-vocabulary value on a declaring type is still refused — the 422 names the " <>
+           "collision, and nothing is silently dropped",
+         %{conn: conn} do
+      resp =
+        mutate(conn, [
+          %{
+            "create" => %{
+              "_id" => "own-status-in-stock",
+              "_type" => "order",
+              "title" => "In stock",
+              "status" => "in_stock"
+            }
+          }
+        ])
+
+      assert resp.status == 422
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "validation_failed"
+      assert [message] = body["error"]["details"]["status"]
+      assert message =~ "lifecycle"
+      assert message =~ "content"
+
+      assert match?(
+               {:error, _},
+               Content.get_document("drafts.own-status-in-stock", "order", "test")
+             )
+    end
+
+    # The create FAMILY, not one verb: `createOrReplace` funnels through the same
+    # `create_document/4`, so the schema question is asked there too.
+    test "createOrReplace on a declaring type keeps the caller's field", %{conn: conn} do
+      assert mutate(conn, [
+               %{
+                 "createOrReplace" => %{
+                   "_id" => "own-status-cor",
+                   "_type" => "order",
+                   "title" => "Order",
+                   "status" => "completed"
+                 }
+               }
+             ]).status == 200
+
+      {:ok, doc} = Content.get_document("drafts.own-status-cor", "order", "test")
+      assert doc.content["status"] == "completed"
+      assert doc.status == "draft"
+    end
+
+    # OUT OF SCOPE, said out loud rather than left as a silent gap: a `patch`
+    # whose `set` carries `status` is DISCARDED on a declaring type — the row
+    # keeps the value the create stored and the lifecycle is untouched. That is
+    # `Content.Mutations`' own set-key routing, a different door from the flat
+    # envelope this row is about, and it loses nothing that was already stored.
+    # Filed separately rather than smuggled in here.
+
+    # BACKWARD COMPATIBILITY, as a test rather than a claim: `post` declares no
+    # `status` field, so the documented flat envelope reading is unchanged for
+    # it — the lifecycle word lifts, and the off-vocabulary value is still
+    # refused by the sibling guard above.
+    test "a type that declares NO `status` field keeps the documented envelope reading",
+         %{conn: conn} do
+      resp =
+        mutate(conn, [
+          %{
+            "create" => %{
+              "_id" => "no-own-status-archived",
+              "_type" => "post",
+              "title" => "Archived post",
+              "status" => "archived",
+              "slug" => "the-slug"
+            }
+          }
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.no-own-status-archived", "post", "test")
       assert doc.status == "archived"
-      # ...and their own field is not in content. This is the residue.
       refute Map.has_key?(doc.content, "status")
     end
   end
