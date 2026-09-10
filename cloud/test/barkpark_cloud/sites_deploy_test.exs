@@ -1165,6 +1165,77 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert Repo.get(Deployment, clean.id).deferral_depth == nil
     end
 
+    # dr-bl-deferral-scheduled-vs-actual-gap. The chain's SHAPE is data (above);
+    # its PACE was not. Nobody could tell whether a retry waited because the box
+    # was busy or because our OWN ladder told it to — the question the
+    # concurrency-cap experiment turns on — without hand SQL over `inserted_at`.
+    #
+    # The two columns describe THE SAME interval (previous round → this round),
+    # so this test backdates the first deferral by a known 61 seconds and reads
+    # BOTH numbers off the second row: 61 actual against the 60s window the
+    # ladder asked for. A ratio, from one row, with no self-join.
+    #
+    # IT CAN LOSE, twice over: delete `deferral_actual_gap_s:` from the
+    # transition in `Deploy.defer/3` and the 61 assertion reds on nil; delete
+    # `deferral_scheduled_s:` and the ladder assertion reds on nil. Neither
+    # deletion touches a single assertion in the two tests around it.
+    test "the chain's PACE is data too — the scheduled window and the actual gap, on the same row" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{"error" => %{"code" => "box_at_capacity", "message" => "1 of 1 build slots in use"}}}
+      )
+
+      {:ok, first} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(first.id)
+      first_row = Repo.get(Deployment, first.id)
+
+      # ROUND 1 RECORDS NOTHING, and that is the honest reading: there is no
+      # previous round, so no interval elapsed. A 0 here would say the rebuild
+      # fired instantly.
+      assert first_row.deferral_depth == 1
+      assert first_row.deferral_scheduled_s == nil
+      assert first_row.deferral_actual_gap_s == nil
+
+      # Age the first round by a KNOWN gap, so the second row's measurement is
+      # a number this test chose rather than whatever the suite's clock did.
+      backdated = DateTime.add(first_row.inserted_at, -61, :second)
+
+      {1, _} =
+        Repo.update_all(
+          from(d in Deployment, where: d.id == ^first.id),
+          set: [inserted_at: backdated]
+        )
+
+      {:ok, second} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(second.id)
+      second_row = Repo.get(Deployment, second.id)
+
+      assert second_row.deferral_depth == 2
+
+      # ACTUAL: the difference of the two rows' `inserted_at` — the SAME column
+      # and the same arithmetic the 2,262-deferral hand measurement used.
+      assert second_row.deferral_actual_gap_s == 61
+
+      # SCHEDULED: the window the ladder asked for when round 1 re-queued. Read
+      # off `deferral_backoff_seconds/1` and never a literal, so an operator who
+      # stretched `AUTODEPLOY_DEBOUNCE_S` does not red this test with a config.
+      assert second_row.deferral_scheduled_s == Deploy.deferral_backoff_seconds(1)
+
+      # Round 3 climbs the ladder with the chain: depth 3's scheduled window is
+      # the one depth 2 asked for, which is a longer window than depth 1's.
+      {:ok, third} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(third.id)
+      third_row = Repo.get(Deployment, third.id)
+
+      assert third_row.deferral_depth == 3
+      assert third_row.deferral_scheduled_s == Deploy.deferral_backoff_seconds(2)
+      assert third_row.deferral_scheduled_s > second_row.deferral_scheduled_s
+      assert is_integer(third_row.deferral_actual_gap_s)
+    end
+
     # dr-w28 S6. The previous test makes every DEFERRED round queryable — and
     # left the one row that matters most out of it. The terminal round is the
     # publish the fleet GAVE UP ON, and `fail/2` wrote only status /
