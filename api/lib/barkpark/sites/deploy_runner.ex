@@ -1117,8 +1117,32 @@ defmodule Barkpark.Sites.DeployRunner do
   # `lock_triple/1` with the two `:error` cases KEPT APART: `:absent` is
   # conclusive (no file, so nothing holds this gate) while `{:unreadable, _}` is
   # ignorance — the door admits on it, and that admission is counted.
+  #
+  # Reachability: `path` is always a `build_gate_lock_candidates/0` entry —
+  # `$BARKPARK_BUILD_GATE_LOCK`, else app config, else the compile-time
+  # `@default_build_gate_lock` (:388), plus `${TMPDIR:-/tmp}` joined with the
+  # compile-time `@build_gate_lock_basename` (:389). Two in-app call sites and
+  # no others: `lock_triple/1` (:1110) and `foreign_build_in_flight?/1` (:1244,
+  # `Enum.map(build_gate_lock_candidates(), ...)`). Neither takes a request
+  # value or a slug. `lock_triple/1` is PUBLIC purely for testability and would
+  # stat whatever an in-app caller handed it — an existence oracle returning a
+  # dev:inode triple, no content read, no write; today its only non-test caller
+  # is the door itself.
+  #
+  # Sobelow 0.14.1's Traversal.FileModule does not list `stat`, so this site is
+  # SILENT today and the annotation waives nothing YET. It is written anyway:
+  # every other File-module call site in this module carries a traced block, and
+  # a Sobelow bump that adds `stat` to that detector would otherwise red this
+  # code on an unrelated future PR — inside an ADVISORY job, i.e. as a warning
+  # on a green board. dr-bl-w5-lock-triple-file-stat-unwaived.
+  #
+  # The annotation sits BELOW the @spec, not above the block, because this @spec
+  # wraps: sobelow-inline-overlap-check.sh's DETACHED predicate skips lines that
+  # START with `@`, so a wrapped spec's continuation line reads as the bound
+  # construct and the check reds. Sobelow binds to the `defp` either way.
   @spec lock_triple_status(String.t()) ::
           {:ok, String.t()} | :absent | {:unreadable, File.posix()}
+  # sobelow_skip ["Traversal.FileModule"]
   defp lock_triple_status(path) do
     case File.stat(path) do
       {:ok, %File.Stat{major_device: dev, inode: inode}} ->

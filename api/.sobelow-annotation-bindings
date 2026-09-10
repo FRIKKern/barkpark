@@ -43,6 +43,7 @@ lib/barkpark/sites/deploy_runner.ex	fold_served_file
 lib/barkpark/sites/deploy_runner.ex	fold_status_file
 lib/barkpark/sites/deploy_runner.ex	foreign_build_in_flight?
 lib/barkpark/sites/deploy_runner.ex	fresh_run_files
+lib/barkpark/sites/deploy_runner.ex	lock_triple_status
 lib/barkpark/sites/deploy_runner.ex	log_stat
 lib/barkpark/sites/deploy_runner.ex	prune_build_logs
 lib/barkpark/sites/deploy_runner.ex	prune_orphan_run_files
