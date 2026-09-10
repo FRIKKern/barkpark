@@ -68,8 +68,10 @@
 //
 // The naive read test is `grep '\.trigger' app.js`, and on this very endpoint it
 // gives the WRONG answer twice over. The filing that produced this row claimed
-// `deployment.source` was read at app.js:11223. It is not: every `.source` in
-// app.js hangs off a timeline/audit entry, not off a deployment. A name-keyed
+// a `deployment.source` read in app.js and cited a line for it. There is no such
+// read: every `.source` in app.js hangs off a timeline/audit-verify entry
+// (`tlvCoalesceKey`, `tlvVerdictOf` and the timeline sort beside them) or off
+// `providerIdentityModel`'s stored-id check — never off a deployment. A name-keyed
 // grep cannot tell those apart, and a hand-written list of "deployment
 // variables" is a snapshot that rots the first time someone renames one.
 //
@@ -87,7 +89,7 @@
 // reads `status`, `source` and `detail`, three names no other censused node
 // claims either; a count-of-3 rule recruits it as a deployment and
 // `deployment.source` then reads as "the console reads this", which is exactly
-// the false claim this row's own filing made about app.js:11223. Weighted, `e`
+// the false claim this row's own filing made. Weighted, `e`
 // scores 0.5 — `status` is read off thirty-one identifiers, `detail` and
 // `source` off six — and `source` lands on the dead-payload arm, where the
 // source says it belongs.
@@ -436,7 +438,8 @@ for (const n of NODES) {
     // and `detail`, three names no OTHER censused node claims, and a count-of-3
     // rule recruits it as a deployment. `deployment.source` then reads as
     // "read by the console", which is exactly the false claim this row's own
-    // filing made about app.js:11223.
+    // filing made — it cited a line for a deployment `.source` read that app.js
+    // has never had.
     const score = hits.reduce((a, k) => a + 1 / Math.max(1, fanout(k)), 0);
     if (score >= MIN_EVIDENCE) n.receivers.push({ recv, hits, score });
   }
