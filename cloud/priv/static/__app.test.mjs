@@ -9977,14 +9977,21 @@ test("C10: memberRowHtml — manage controls are role-gated, and the self row is
   assert.ok(!member.includes("data-member-remove"));
   // cch-w42-s3: this test used to be named "self-hidden" and assert only the
   // Remove half, which is how it stayed green through an authority rewrite that
-  // changed the other half. The self row is TWO answers now: Remove withheld
-  // (console ruling, D492 variant B), Change role RENDERED — update_member_role_as/4's
-  // self? branch bypasses the rank arm, so self-demotion is server-legal. Both
-  // halves are asserted here so neither can move in silence.
+  // changed the other half. The self row is TWO answers now, and cch-w44-bl made
+  // them per-ACTOR: Change role is RENDERED (update_member_role_as/4's self?
+  // branch bypasses the rank arm), and Remove follows remove_member_as/3, which
+  // has NO self? branch — so an acting ADMIN on their own row still gets none
+  // (outranks?("admin","admin") is strict `>` → 403) while an acting OWNER does
+  // (the `actor_role == "owner"` hatch → {:ok, :removed}). Both halves, both
+  // actors, so none of it can move in silence.
   const self = hooks.memberRowHtml(m, { role: "admin", userId: "u2" });
   assert.match(self, /\(you\)/);
-  assert.ok(!self.includes("data-member-remove"), "Remove stays withheld on your own row");
+  assert.ok(!self.includes("data-member-remove"),
+    "an ADMIN's own row must carry no Remove — remove_member_as/3 answers {:error, :forbidden}");
   assert.match(self, /data-member-role="u2"/, "Change role is offered on your own row");
+  const selfOwner = hooks.memberRowHtml(m, { role: "owner", userId: "u2" });
+  assert.match(selfOwner, /data-member-remove="u2"/,
+    "an OWNER's own row must carry Remove — the server honours it whenever they are not the last owner");
 });
 
 // ── cch-w42-s3: THE MEMBERS ROW READS THE TARGET'S RANK, PER VERB ───────────
@@ -10026,11 +10033,17 @@ const MEMBER_AUTHORITY_MATRIX = [
   // ── THE SELF ROW: two per-verb answers, never one boolean.
   // Change role is REAL on your own row (update_member_role_as/4's self? branch
   // bypasses the rank arm; last_owner is a 409 STATE refusal the server owns,
-  // not an authority one, so it does not withhold the control). Remove is
-  // withheld on the self row by console ruling — the server has no self? branch
-  // on that verb, so this is a known UNDER-offer, pre-existing on main, filed
-  // separately; it is pinned here so it stays a DECISION and not a drift.
-  ["owner acting on THEIR OWN row", "owner", "owner", true, true, false],
+  // not an authority one, so it does not withhold the control). Remove now
+  // follows the SAME rule — cch-w44-bl deleted the blanket `if (isSelf) return
+  // false`, because remove_member_as/3 has no self? branch either and the
+  // general law already answers all three self cells the way the server does:
+  //   owner-self  -> the `actor_role == "owner"` hatch  -> {:ok, :removed}   OFFER
+  //   admin-self  -> strict outranks?("admin","admin")  -> {:error, :forbidden} OMIT
+  //   member-self -> below the route's admin floor      -> {:error, :forbidden} OMIT
+  // These rows hand in a ctx with NO roster, so isSoleOwnerSelf has no opinion
+  // and the last_owner STATE guard does not fire — this is the authority answer,
+  // pure. The state half is pinned by the cch-w45-s2 block below.
+  ["owner acting on THEIR OWN row", "owner", "owner", true, true, true],
   ["member acting on THEIR OWN row", "member", "member", true, false, false],
   // The self row's target role comes from ctx.role, NEVER the roster row's own
   // m.role: this cell hands memberRowHtml an INCOHERENT row (an acting admin
@@ -10151,8 +10164,11 @@ test("cch-w45-s2: the sole owner's own row omits the Change-role the server 409s
   // The peers are untouched — this guard is about ONE cell, not the panel.
   assert.ok(panel.includes('data-member-role="usr_lin"'), "the admin peer still offers Change role");
   assert.ok(panel.includes('data-member-role="usr_rex"'), "the member peer still offers Change role");
-  // …and Remove is not disturbed in either direction (self stays withheld by
-  // the pre-existing D492 ruling, peers keep theirs).
+  // …and Remove is withheld on the SAME row for the SAME reason (cch-w44-bl):
+  // do_remove rolls the sole owner's own removal back with :last_owner too, so
+  // both verbs on ada's row are 409s. The peers keep theirs.
+  assert.ok(!panel.includes('data-member-remove="usr_ada"'),
+    "the SOLE owner's own row must not offer a Remove do_remove rolls back with :last_owner");
   assert.equal((panel.match(/data-member-remove="/g) || []).length, 2);
 });
 
@@ -10162,14 +10178,20 @@ test("cch-w45-s2: the withheld control is OMITTED, never a disabled ghost", () =
   assert.match(selfRow, /\(you\)/, "it is the self row");
   assert.match(selfRow, /class="set-chip">Owner</, "and it still states the role it will not let you change");
   assert.ok(!selfRow.includes("data-member-role"), "no Change-role ghost");
+  assert.ok(!selfRow.includes("data-member-remove"), "no Remove ghost either (cch-w44-bl)");
   assert.ok(!selfRow.includes("disabled"), "an omitted control must not ship as a disabled button");
-  assert.ok(!selfRow.includes(">Change role<"), "and the label must not survive as inert text");
+  assert.ok(!selfRow.includes(">Change role<") && !selfRow.includes(">Remove<"),
+    "and neither label may survive as inert text");
 });
 
 test("cch-w45-s2: the panel says WHY the sole owner's row lost its control", () => {
   const panel = hooks.membersPanelHtml(SOLE_OWNER_ROSTER, [], ADA_CTX);
   assert.match(panel, /only owner[\s\S]*promote another member to owner first/,
     "an omission with no sentence is a silently missing control");
+  // cch-w44-bl: TWO controls are withheld on that row now, and the sentence
+  // names both — a sentence that covers half the omission is half a lie.
+  assert.match(panel, /can't change your own role or leave the team/,
+    "the sole-owner sentence must name the withheld Remove as well as the withheld Change role");
   // A team with two owners gets no sentence — nothing was withheld.
   const twoOwners = SOLE_OWNER_ROSTER.map((m) =>
     m.user_id === "usr_lin" ? Object.assign({}, m, { role: "owner" }) : m);
@@ -10185,6 +10207,13 @@ test("cch-w45-s2: the guard FAILS OPEN on every roster it cannot fully read", ()
     m.user_id === "usr_lin" ? Object.assign({}, m, { role: "owner" }) : m);
   assert.ok(selfRow(twoOwners).includes('data-member-role="usr_ada"'),
     "a second owner makes the self-demotion legal — the control must be offered");
+  // …and the self-REMOVE with it (cch-w44-bl): a second owner is exactly what
+  // takes do_remove's :last_owner rollback out of reach, so remove_member_as/3
+  // answers {:ok, :removed} and withholding the button is an UNDER-offer.
+  assert.ok(selfRow(twoOwners).includes('data-member-remove="usr_ada"'),
+    "an owner who is not the last owner must be able to leave their own team");
+  assert.ok(selfRow(undefined).includes('data-member-remove="usr_ada"'),
+    "a ctx with no roster carries no state knowledge — offer the Remove too");
   // 2. A row missing its role — the owner count is unknowable, so no opinion.
   const illegible = SOLE_OWNER_ROSTER.map((m) =>
     m.user_id === "usr_rex" ? Object.assign({}, m, { role: undefined }) : m);
@@ -10258,9 +10287,17 @@ test("cch-w42-s3: the two predicates disagree on owner-vs-owner, exactly as the 
     "remove_member_as/3 opens with `actor_role == \"owner\" or` — the hatch is real");
   assert.equal(hooks.canChangeMemberRole("owner", "owner", false), false,
     "update_member_role_as/4 has no hatch and outranks?/2 is strict `>`");
-  // And the self? bypass lives on ONE verb only.
+  // And the self? bypass lives on ONE verb only — canRemoveMember has none,
+  // exactly like remove_member_as/3, so its self answers are just the general
+  // law applied to targetRole === ctx.role (cch-w44-bl).
   assert.equal(hooks.canChangeMemberRole("admin", "admin", true), true);
-  assert.equal(hooks.canRemoveMember("owner", "owner", true), false);
+  assert.equal(hooks.canRemoveMember("owner", "owner", true), true,
+    "an owner is not the exception to their own escape hatch — remove_member_as/3 " +
+    "answers {:ok, :removed} on their own row whenever they are not the last owner");
+  assert.equal(hooks.canRemoveMember("admin", "admin", true), false,
+    "an admin's own row IS refused, and by the rank arm, not by a self rule");
+  assert.equal(hooks.canRemoveMember("member", "member", true), false,
+    "a member is below the route's own with_team_role(conn, \"admin\") floor");
 });
 
 test("cch-w42-s3: roleModalOptionsHtml — a currentRole with no matching option stages NOTHING", () => {
