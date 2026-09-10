@@ -750,10 +750,26 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     # gravitational sun and bands dependents into BFS blast-rings. Dropping it
     # would silently re-center the graph on an arbitrary serialization-order
     # node. Fall back to the queried id (a real node id) when traverse omits it.
-    %{nodes: result.nodes, edges: result.edges, root: result.root || id}
+    # Thread the CORPUS truncation through. `Graph.traverse/2` reads the drafts
+    # corpus behind a document ceiling; over it the graph is PARTIAL and its
+    # unread targets render as phantom/dangling edges. Dropping the field here
+    # would let the Studio pane present that truncation as phantom references.
+    #
+    # `corpus_truncation` (nil | %{truncated: true, limit: _, read: _}) is the
+    # ONLY field that means the corpus specifically — the sibling `truncated`
+    # boolean is also true for BFS node-budget/fan-out/depth clamps, and
+    # `truncation_reason` lets a BFS bound win the tie and mask a real corpus
+    # cap. Carried verbatim; GraphView.corpus_truncation/1 does the validating.
+    %{
+      nodes: result.nodes,
+      edges: result.edges,
+      root: result.root || id,
+      corpus_truncation: Map.get(result, :corpus_truncation)
+    }
   end
 
-  defp graph_payload(_doc, _dataset, _scope_kw), do: %{nodes: [], edges: []}
+  defp graph_payload(_doc, _dataset, _scope_kw),
+    do: %{nodes: [], edges: [], corpus_truncation: nil}
 
   # Resolve a doc_id to its `%Document{}` WITHOUT knowing its schema type — the
   # blast-radius pane roots on ANY content doc, so type-agnostic resolution is
