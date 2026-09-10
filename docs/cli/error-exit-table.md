@@ -128,7 +128,7 @@ keyed on the resolved output shape, never the verb:
 | `-o` shape | stdout | stderr |
 |---|---|---|
 | `json` / `yaml` | the `{ok:false, error:{code,message,details,hint,request_id}}` envelope — **exactly one document** | silent |
-| `table` / `minimal` | *(empty)* | the human line, `details`, the hint, then `  code: <code>` — always, not under `-v` (`humanErrorCode`, task `pds-w28-named-codes-invisible-in-human-shapes`); `request_id` stays `-v`-only |
+| `table` / `minimal` | *(empty)* | human line, `details`, hint, `  code: <code>`; `request_id` on `-v` |
 
 This holds for EVERY refusal, the publish-wall rows included — even the two
 `bp task create --publish` mints with no server round trip. It is why
