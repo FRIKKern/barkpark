@@ -40,6 +40,7 @@ defmodule BarkparkCloud.Notifications do
   alias BarkparkCloud.Workers.ChatNotificationWorker
 
   alias BarkparkCloud.Notifications.{
+    BoxUnreachableEpisodeAlert,
     ChannelConfig,
     Channels,
     Delivery,
@@ -1151,6 +1152,243 @@ defmodule BarkparkCloud.Notifications do
     _ -> []
   catch
     :exit, _ -> []
+  end
+
+  @doc """
+  dr-w32-bl-box-unreachable-needs-an-episode-alarm — ONE SWEEP of the
+  BOX_UNREACHABLE EPISODE alarm over every team, plus its RECOVERY counterpart.
+
+  Returns `%{teams, episodes, sent, latched, recovered}`.
+
+  ## The reading is a SHAPE, and it is never per row
+
+  `BoxUnreachableEpisodeAlert.read/2` counts this team's `BOX_UNREACHABLE` rows
+  and the DISTINCT SITES they fell on inside a pinned window, and the verdict
+  needs BOTH terms. That is the whole point of the slice: measured over 24 days
+  this class fires in 58 episodes whose MEDIAN IS ONE ROW, so a per-row producer
+  would send 58 emails about 58 boxes that came back by themselves and be muted
+  inside a week. The threshold's derivation from the quiet baseline is written
+  where the constants are, in `BoxUnreachableEpisodeAlert`.
+
+  ## The edge guard is the LATCH, and it is the whole of it
+
+      tick 1  episode, alerted_at nil    -> SEND, latch
+      tick 2  episode, alerted_at set    -> latched, send nothing
+      tick 3  clear,   alerted_at set    -> SEND RECOVERY, clear the latch
+      tick 4  clear,   alerted_at nil    -> nothing
+
+  Remove the `not is_nil(before.unreachable_alerted_at)` clause below and the
+  largest measured episode (14 rows over 1h51m) becomes two emails instead of
+  one — the per-tick producer charter D14 forbids.
+
+  ## RECOVERY, and why the numbers come off the STATE row
+
+  Every one of the 58 measured episodes self-healed, so a recovery message is
+  not a nicety here — it is most of what an operator wants. It quotes the PEAK
+  shape carried on the state row, because by the time the verdict goes clear the
+  window no longer contains the episode and the numbers cannot be recomputed.
+
+  An `:unmeasured` reading sends NO recovery and does NOT clear the latch: a
+  team whose site list became unreadable has not been told good news.
+
+  ## It adds NO vocabulary, and rides `agent_unreachable`
+
+  Not `deployment_failed`, which its two siblings ride. `agent_unreachable`
+  already means, in this team's own settings, "tell me when this instance cannot
+  be reached" — the same subject as every row this alarm counts, one grain
+  coarser. A team that muted it has answered this question already, and a new
+  event atom would be a migration, a console matrix row and a bidirectional
+  vocabulary census entry for a switch nobody needed.
+  """
+  @spec deliver_box_unreachable_episode_notices(keyword()) :: %{
+          teams: non_neg_integer(),
+          episodes: non_neg_integer(),
+          sent: non_neg_integer(),
+          latched: non_neg_integer(),
+          recovered: non_neg_integer()
+        }
+  def deliver_box_unreachable_episode_notices(opts \\ []) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+
+    team_ids =
+      Registry.all_barkparks()
+      |> Enum.map(& &1.team_id)
+      |> Enum.filter(&is_binary/1)
+      |> Enum.uniq()
+
+    zero = %{teams: 0, episodes: 0, sent: 0, latched: 0, recovered: 0}
+
+    Enum.reduce(team_ids, zero, fn team_id, acc ->
+      reading = read_unreachable_shape(team_id, now)
+      verdict = BoxUnreachableEpisodeAlert.verdict(reading)
+
+      before = get_or_build_deploy_rate_state(team_id)
+      state = advance_unreachable_state(before, team_id, verdict, reading, now)
+
+      acc = %{acc | teams: acc.teams + 1}
+      acc = if verdict == :episode, do: %{acc | episodes: acc.episodes + 1}, else: acc
+
+      cond do
+        # RECOVERY. `before` carries the peak, because `advance_unreachable_state/5`
+        # has already cleared it off the row: the episode's numbers must be taken
+        # from the state as it was when the episode ended.
+        verdict == :clear and not is_nil(before.unreachable_alerted_at) ->
+          episode = DateTime.diff(now, before.unreachable_alerted_at)
+
+          n =
+            send_unreachable_recovery(
+              team_id,
+              before.unreachable_peak_rows || 0,
+              before.unreachable_peak_sites || 0,
+              episode
+            )
+
+          %{acc | recovered: acc.recovered + n}
+
+        verdict != :episode ->
+          acc
+
+        # THE EDGE GUARD. Delete this clause and every hour of one episode mails.
+        not is_nil(before.unreachable_alerted_at) ->
+          %{acc | latched: acc.latched + 1}
+
+        true ->
+          sent = send_unreachable_notice(team_id, reading)
+
+          # STAMPED WHATEVER THE TRANSPORT SAID, for the reason both siblings
+          # record: retrying a failed send on the next tick turns one bad relay
+          # hour into an hourly retry storm against the same inbox. The failure
+          # is visible as a `failed` Delivery row.
+          latch_unreachable_state(state, now)
+
+          %{acc | sent: acc.sent + sent}
+      end
+    end)
+  end
+
+  # A team whose site list could not be read is UNMEASURED, never CLEAR — the
+  # same fail-closed shape `read_waiting_envelope/2` uses, and for the same
+  # reason: `team_site_ids/1` answers `{:error, …}` rather than `nil` so a DB
+  # failure can never silently widen this into a fleet-wide read.
+  defp read_unreachable_shape(team_id, now) do
+    case team_site_ids(team_id) do
+      ids when is_list(ids) -> BoxUnreachableEpisodeAlert.read(now, ids)
+      {:error, _reason} -> %{unmeasured: true}
+    end
+  rescue
+    _e -> %{unmeasured: true}
+  catch
+    :exit, _reason -> %{unmeasured: true}
+  end
+
+  # THE EPISODE HALF of the state machine, and it is three rules.
+  #
+  # `episode` CARRIES the latch forward and keeps the WORST shape the episode
+  # has shown — an episode that deepens must not reset the numbers the recovery
+  # message will quote. `clear` drops both. `unmeasured` touches NEITHER: an
+  # unreadable tick is not evidence the box came back, and clearing the latch on
+  # one would re-arm the same accusation for the next readable tick.
+  defp advance_unreachable_state(existing, team_id, verdict, reading, now) do
+    attrs =
+      case verdict do
+        :episode ->
+          %{
+            unreachable_verdict: "episode",
+            unreachable_alerted_at: existing.unreachable_alerted_at,
+            unreachable_peak_rows:
+              max(Map.get(reading, :rows, 0), existing.unreachable_peak_rows || 0),
+            unreachable_peak_sites:
+              max(Map.get(reading, :sites, 0), existing.unreachable_peak_sites || 0)
+          }
+
+        :clear ->
+          %{
+            unreachable_verdict: "clear",
+            unreachable_alerted_at: nil,
+            unreachable_peak_rows: nil,
+            unreachable_peak_sites: nil
+          }
+
+        :unmeasured ->
+          %{
+            unreachable_verdict: "unmeasured",
+            unreachable_alerted_at: existing.unreachable_alerted_at,
+            unreachable_peak_rows: existing.unreachable_peak_rows,
+            unreachable_peak_sites: existing.unreachable_peak_sites
+          }
+      end
+
+    attrs =
+      Map.merge(attrs, %{
+        team_id: team_id,
+        unreachable_observed_at: now,
+        # NEITHER SIBLING'S VERDICT IS INVENTED HERE. `verdict` is NOT NULL on
+        # this table and the row may not exist yet; the honest word for a team
+        # this tick sees first is `unmeasured`, never `clear`. An EXISTING row's
+        # rate verdict is carried through untouched.
+        verdict: existing.verdict || "unmeasured"
+      })
+
+    {:ok, state} =
+      existing
+      |> DeployRateAlertState.changeset(attrs)
+      |> Repo.insert_or_update()
+
+    state
+  end
+
+  defp latch_unreachable_state(%DeployRateAlertState{} = state, now) do
+    {:ok, latched} =
+      state
+      |> DeployRateAlertState.changeset(%{
+        team_id: state.team_id,
+        verdict: state.verdict || "unmeasured",
+        unreachable_verdict: "episode",
+        unreachable_alerted_at: now
+      })
+      |> Repo.update()
+
+    latched
+  end
+
+  defp send_unreachable_notice(team_id, reading) do
+    dispatch_unreachable_email(team_id, "box_unreachable_episode", fn recipient ->
+      BoxUnreachableEpisodeAlert.build(reading, recipient)
+    end)
+  end
+
+  defp send_unreachable_recovery(team_id, peak_rows, peak_sites, episode_seconds) do
+    dispatch_unreachable_email(team_id, "box_unreachable_recovered", fn recipient ->
+      BoxUnreachableEpisodeAlert.build_recovery(
+        peak_rows,
+        peak_sites,
+        episode_seconds,
+        recipient
+      )
+    end)
+  end
+
+  # GATED ON `agent_unreachable`, not on `deployment_failed`. Every row this
+  # alarm counts is a deploy that could not be DELIVERED because the instance did
+  # not answer, which is the fact that toggle already governs — see the sweep's
+  # moduledoc for why riding an existing atom is the honest route and a new one
+  # would be three surfaces of vocabulary for no new question.
+  defp dispatch_unreachable_email(team_id, event_name, build_fun) do
+    settings = get_or_create_settings(team_id)
+
+    if EmailSettings.event_enabled?(settings, :agent_unreachable) do
+      recipients = team_id |> team_member_emails() |> Enum.uniq()
+
+      Enum.count(recipients, fn recipient ->
+        result = recipient |> build_fun.() |> Mailer.deliver()
+
+        record_delivery(team_id, recipient, event_name, "alert", result, @platform_carrier)
+
+        match?({:ok, _}, result)
+      end)
+    else
+      0
+    end
   end
 
   # THE SITE IDS ONE TEAM OWNS — the narrowing the digest's deploy reading is

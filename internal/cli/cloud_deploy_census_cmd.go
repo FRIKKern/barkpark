@@ -425,6 +425,13 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		out.outf("%s", line)
 		out.outf("")
 	}
+	// THE EPISODE NOTE, printed with the failure-class table it qualifies. The
+	// generic class row above gives BOX_UNREACHABLE a count; this gives it the
+	// behaviour that count does not carry.
+	if line := deployCensusUnreachableEpisodeLine(census); line != "" {
+		out.outf("%s", line)
+		out.outf("")
+	}
 	// THE DOOR'S OWN DENOMINATOR, printed immediately under the cross-reference
 	// that names the two cohorts, because it is the line that says the two
 	// cohorts do not add up to the door.
@@ -757,6 +764,59 @@ func deployCensusCapacityLine(census cloudclient.DeployCensus) string {
 		"Same full box, two cohorts. This reader does not move either row: whether an abandoned publish belongs in the failure numerator is a judgment, not a rendering.",
 		abandoned, deferred)
 }
+
+// deployCensusUnreachableEpisodeLine is the OPERATOR SURFACE for BOX_UNREACHABLE
+// (dr-w32-bl-box-unreachable-needs-an-episode-alarm).
+//
+// Before this line, the class reached a human ONLY as a generic row in the
+// failure-class table — a name, a count and a share, rendered by the same loop
+// that renders BUILD_FAILED. That table is true and it is not enough, because
+// this class does not behave like the others: measured over 24 days on the live
+// ledger, its 143 rows fall into 58 EPISODES across 6 sites and EVERY ONE
+// SELF-HEALED, the largest after 1h51m and the MEDIAN AFTER ONE SINGLE ROW. An
+// operator reading "BOX_UNREACHABLE 143" in a multi-day census has no way to
+// tell 143 separate outages from 58 blips, and the count alone invites the wrong
+// action — rebuilding sites whose deploys were never delivered to the box at
+// all.
+//
+// SO THE LINE SAYS THE THREE THINGS THE COUNT CANNOT:
+//
+//   - the rows are a DELIVERY failure, not a build failure: the control plane
+//     could not reach the box, so nothing ran on it and nothing is half-done;
+//   - the class is EPISODIC and self-healing, so a count over a wide window is a
+//     count of blips, and the way to see episode structure is to narrow --from
+//     and --to (which is why this line names those flags);
+//   - an alarm exists and what its shape is, so the operator knows whether
+//     silence means "nobody is watching" or "no episode crossed the bar".
+//
+// The threshold quoted here is stated as a SHAPE and must stay in step with
+// `BoxUnreachableEpisodeAlert.min_rows/0`, `min_sites/0` and `window_minutes/0`
+// on the control plane, which is where its derivation from the quiet baseline is
+// written down.
+//
+// It returns "" when the window holds no rows of this class: a note about an
+// absent class is noise, and printing it at zero would put an incident vocabulary
+// on a screen that recorded no incident.
+func deployCensusUnreachableEpisodeLine(census cloudclient.DeployCensus) string {
+	n := deployCensusClassCount(census.Classes, "BOX_UNREACHABLE")
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("BOX_UNREACHABLE %d in this window is a DELIVERY failure, not a build failure: the control plane could not reach the instance, so these deploys never started on it and nothing on the box is half-finished — re-publish and they go through. "+
+		"This class is EPISODIC and self-heals (measured: 143 rows over 24 days were 58 episodes, median ONE row, largest 1h51m), so a count over a wide window counts blips, not outages — narrow --from/--to to about an hour to see one episode's real shape. "+
+		"An alarm already watches it: %d or more rows across %d or more sites inside %d minutes mails the team once per episode, and once again when it clears.",
+		n, boxUnreachableAlarmRows, boxUnreachableAlarmSites, boxUnreachableAlarmWindowMinutes)
+}
+
+// The alarm's shape, as the control plane's BoxUnreachableEpisodeAlert defines
+// it. Named constants rather than literals in the format string so a reader
+// grepping for the alarm's terms finds them, and so the two halves of the
+// sentence cannot drift apart in an edit.
+const (
+	boxUnreachableAlarmRows          = 3
+	boxUnreachableAlarmSites         = 2
+	boxUnreachableAlarmWindowMinutes = 60
+)
 
 // deployCensusDoorLine renders the box door's own denominator: how often the
 // door REFUSED, beside how often the cause-keyed reader could SEE it refuse.
