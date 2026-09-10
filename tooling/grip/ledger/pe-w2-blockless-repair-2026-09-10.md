@@ -101,6 +101,27 @@ path — legitimately readable, deliberately left alone.
 | `deploy-reliability-wave-33-2026-08-09` | 200 | 105 | 83961 | 80325 |
 | `deploy-reliability-wave-34-2026-08-10` | 200 | 83 | 64254 | 66914 |
 
+### The shipped repair tool, dry-run over all 53 — the fidelity proof
+
+`200` and a character count still do not prove the prose is the ORIGINAL prose. The
+converter that shipped with `c2de1e51c` re-derives the text from the legacy `body`
+ProseMirror source and diffs it against the blocks actually stored, so its own dry-run
+is the stronger instrument. Run from the worktree, no `--apply`:
+
+    $ node tooling/paper-repair/repair-paper-blocks.mjs $(cat named.txt | tr '\n' ' ')
+    ; exit=0, 53 slugs
+
+    $ grep -E '^  [A-Z]' dryrun.txt | sed 's/[0-9][0-9]*/N/g' | sort | uniq -c
+       3   REFUSE html_only paper — it renders today; writing blocks would arm its divergence 422
+      50   VERIFY already carries a top-level blocks list (N blocks) · body text identical (N chars) · reader 200
+
+**50/53: blocks present, body text IDENTICAL to the legacy ProseMirror source, reader 200.**
+**3/53: deploy-reliability-wave-27/-28/-29 — the tool REFUSES them by design** (`html_only`:
+they serve their prose off `body_html`, and writing `blocks` over them would arm the
+`:divergent` 422 they currently dodge). Those three are readable — measured above at
+96,038 / 89,121 / 71,993 chars of rendered prose — and are correctly left alone.
+**Zero slugs had anything to repair. Nothing was written.**
+
 ### Controls (a uniform 200 is also what a broken instrument prints)
 
 | control | command | result |
