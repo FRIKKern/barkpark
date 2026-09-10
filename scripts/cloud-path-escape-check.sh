@@ -755,10 +755,31 @@ echo "cloud-path-escape-check: scanning \$REPO_ROOT=$REPO_ROOT"
 echo "cloud-path-escape-check: $count distinct repo-root read(s) resolved from cloud/lib + cloud/test"
 
 # FAIL-CLOSED on a neutered scanner. "Nothing found" is never good news here.
+#
+# BUT THE RED HAS TWO CAUSES AND THIS BRANCH CANNOT SEE WHICH
+# (dr-w17-bl-escape-floor-cannot-lose-in-either-direction). A population under
+# the floor is EITHER a scanner that went blind on an unchanged tree OR a
+# cross-tree read that was legitimately DELETED — a retired producer-reading
+# test drops the population with nothing wrong anywhere. The message below must
+# therefore name BOTH, and must not tell an operator with a perfectly clean repo
+# to go hunt a bug in list_escapes. The harness pins that (case 5).
 if [ "$count" -lt "$CLOUD_ESCAPE_MIN" ]; then
   echo "::error::cloud-path-escape-check: only $count repo-root read(s) found, floor is $CLOUD_ESCAPE_MIN." >&2
-  echo "  The SCANNER is broken, not the repo clean — the floor IS the measured population." >&2
-  echo "  Check the grep/find in list_escapes before touching the floor." >&2
+  echo "  TWO CAUSES PRODUCE THIS RED, and this check cannot tell them apart. Do not" >&2
+  echo "  assume the first one just because it is the one the floor was built for:" >&2
+  echo "  1. THE SCANNER IS NEUTERED. A grep or find inside list_escapes stopped" >&2
+  echo "     matching, so reads that still exist are no longer seen. The tree is" >&2
+  echo "     unchanged and the instrument went blind. Read list_escapes first." >&2
+  echo "  2. A CROSS-TREE READ WAS DELETED. A producer-reading test was retired, a" >&2
+  echo "     fixture removed, a declaration dropped — and the population really is" >&2
+  echo "     smaller. THAT IS LEGITIMATE and the repo is fine. The remedy is to lower" >&2
+  echo "     CLOUD_ESCAPE_MIN to the new population in the SAME commit that removed" >&2
+  echo "     the read, naming which read went. It is never to work around this error." >&2
+  echo "  TELL THEM APART: run --list-escapes and diff it against the last green run." >&2
+  echo "  Rows that vanished while their readers still exist => cause 1. Rows whose" >&2
+  echo "  readers are gone from the tree => cause 2." >&2
+  echo "  The floor is a LOWER BOUND. It is not the population, and being under it is" >&2
+  echo "  not by itself proof that anything is broken." >&2
   exit 1
 fi
 

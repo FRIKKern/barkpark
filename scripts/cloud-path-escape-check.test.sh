@@ -311,10 +311,45 @@ if [ "$rc" -ne 0 ]; then
 else
   no "reported CLEAN with 1 read — a neutered scanner would pass"
 fi
-if has "$out" "SCANNER is broken, not the repo clean"; then
-  ok "says the scanner is broken, not that the repo is clean"
+if has "$out" "THE SCANNER IS NEUTERED"; then
+  ok "names a neutered scanner as a cause"
 else
-  no "wrong diagnosis: $out"
+  no "the below-floor message no longer names a neutered scanner: $out"
+fi
+
+# THE DROP DIRECTION (dr-w17-bl-escape-floor-cannot-lose-in-either-direction).
+# The floor can lose in BOTH directions. A population under it is EITHER a blind
+# scanner on an unchanged tree OR a cross-tree read that was legitimately
+# DELETED — retire a producer-reading test and the population really does drop,
+# with nothing broken anywhere. The message used to assert exactly one of those
+# ("The SCANNER is broken, not the repo clean"), which is a MISDIAGNOSIS SHIPPED
+# AS AN ERROR STRING at the one moment an operator is reading it. These arms pin
+# that both causes are named and that neither is asserted over the other.
+if has "$out" "DELETED"; then
+  ok "…and names a DELETED cross-tree read as the other possible cause"
+else
+  no "the below-floor message blames only the scanner — a legitimate deletion reds here too: $out"
+fi
+if has "$out" "SCANNER is broken, not the repo clean"; then
+  no "the message still ASSERTS the scanner is at fault; a deletion produces this same red"
+else
+  ok "…and does not assert one cause over the other"
+fi
+# It must also tell the operator how to DISCRIMINATE, not merely list two
+# possibilities — a message that names both causes and no way to separate them
+# is the same dead end in longer words.
+if has "$out" "--list-escapes"; then
+  ok "…and points at --list-escapes as the way to tell the two causes apart"
+else
+  no "the message names two causes but no way to tell them apart: $out"
+fi
+# And it must not restate the floor as the population: the floor is a lower
+# bound, and the old line ("the floor IS the measured population") is what made
+# the drop direction unthinkable in the first place.
+if has "$out" "LOWER BOUND"; then
+  ok "…and says out loud that the floor is a lower bound, not the population"
+else
+  no "the message does not say the floor is a lower bound: $out"
 fi
 # and the floor is NOT overridable outside the harness
 out="$(CLOUD_PATH_ESCAPE_ROOT="$FX3" CLOUD_ESCAPE_MIN=1 "$SCRIPT" 2>&1)" && rc=0 || rc=$?
