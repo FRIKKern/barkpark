@@ -8,6 +8,8 @@ lib/barkpark/media/blobstore/s3.ex	put_file
 lib/barkpark/media/blobstore/s3.ex	warm_cache
 lib/barkpark/media/delivery/search.ex	run_tags_facet_sql
 lib/barkpark/media/image_backend/magick.ex	run_bounded
+lib/barkpark/media/image_metadata.ex	maybe_lqip
+lib/barkpark/media/renditions.ex	delete_for_file
 lib/barkpark/media/renditions.ex	generate
 lib/barkpark/plugins/bulldocs.ex	register_schemas
 lib/barkpark/plugins/frt.ex	load_schema!
