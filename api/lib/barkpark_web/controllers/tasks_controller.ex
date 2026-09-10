@@ -103,6 +103,7 @@ defmodule BarkparkWeb.TasksController do
   alias Barkpark.Content.Errors
   alias Barkpark.Tasks.Citations
   alias Barkpark.Tasks.Edge
+  alias Barkpark.Tasks.Landed
   alias Barkpark.Tasks.QueueGate
   alias Barkpark.Tasks.TwinResolver
   alias Barkpark.Tasks.Validation
@@ -1595,8 +1596,16 @@ defmodule BarkparkWeb.TasksController do
   # write-tier (RequireWriteForMutation) — what it drops is the HOLDER gate, not
   # authentication. `Tasks.Landed` owns the blast radius: content.landed plus at
   # most ONE merge-shaped criterion.
+  #
+  # `files` (task-726717ba693eb424) is the CHANGED PATHS, and it is checked
+  # HERE — a list of strings or a 400 naming the field — because the union it
+  # feeds has accepted a `files` key all along while this verb never wrote one,
+  # so the one shape a caller must never get back is a 2xx that says the paths
+  # landed. With `criterion`, those same paths are what `Tasks.Landed` compares
+  # against the row before it permits the flip.
   def landed(conn, %{"doc_id" => doc_id} = params) do
     with {:ok, criterion} <- Params.parse_landed_criterion(params["criterion"]),
+         {:ok, files} <- landed_files(params["files"]),
          :ok <- Params.check_landed_payload(params, criterion),
          {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
       opts =
@@ -1604,13 +1613,26 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:commit, params["commit"])
         |> Params.put_opt(:pr, params["pr"])
         |> Params.put_opt(:note, params["note"])
+        |> Params.put_opt(:files, files)
         |> Params.put_opt(:criterion, criterion)
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
         |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.record_landing(task.id, opts) do
         {:ok, %Document{} = doc} ->
-          json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
+          json(
+            conn,
+            Map.merge(
+              %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))},
+              Landed.overlap_report(task, files, criterion)
+            )
+          )
+
+        # The overlap refusal carries its own sentence: it has to name the row,
+        # the PR and BOTH sides of the comparison, none of which a static hint
+        # keyed on the token could know.
+        {:error, {:landing_files_outside_row, message}} ->
+          conflict(conn, :landing_files_outside_row, :landed, %{message: message})
 
         {:error, reason} ->
           # Every remaining failure is a STATE conflict (the index does not
@@ -1624,6 +1646,17 @@ defmodule BarkparkWeb.TasksController do
 
       {:error, :not_found} ->
         not_found(conn, "task not found")
+    end
+  end
+
+  # ONE shape rule, owned by the module that stores the value — the 400 here and
+  # the `:invalid_files` a direct `Tasks.record_landing/2` gets are the same
+  # check, so the door and the store cannot drift into disagreeing about what a
+  # storable `files` is.
+  defp landed_files(raw) do
+    case Landed.check_files(raw) do
+      {:ok, files} -> {:ok, files}
+      {:error, message} -> {:error, :invalid_landed, message}
     end
   end
 
