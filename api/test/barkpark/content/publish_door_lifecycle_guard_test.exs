@@ -426,4 +426,129 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
     assert pub.content["lifecycle_status"] == "open"
     assert [%{"met" => true}] = pub.content["acceptance_criteria"]
   end
+
+  # ── (h) source: :github takes the FULL gate, and the producer picks it ────
+  #
+  # task-b36741707eabe359. Until this section, the coverage claim at
+  # `lifecycle.ex`'s exemption site — "the GitHub automatic publishers thread
+  # `source: :github`, NOT `:sync`, so they fall through to this gate" — was
+  # carried by PROSE and pinned by nothing: `grep -c github` over this file and
+  # `lifecycle_test.exs` was 0, and the only test file carrying `source:
+  # :github` (`plugins/github/drain_worker_test.exs`) asserts the outbox
+  # exclusion, a different property. Threading `:sync` from a github producer
+  # instead of `:github` reddened NO test.
+  #
+  # Two independent pins, because the claim has two halves:
+  #
+  #   * the DOOR half — `:github` is not `:sync`, so it takes the else arm:
+  #     transition + claim + criteria, all of them. Asserted against the
+  #     matching `:sync` arm on the SAME shape, so collapsing the two arms
+  #     (`== :sync` → `in [:sync, :github]`) reds here.
+  #   * the PRODUCER half — the door only sees `:github` because
+  #     `Github.Link`/`Github.Adopt` put it there. A source-literal anchor pins
+  #     that choice, so swapping `Keyword.put_new(opts, :source, :github)` for
+  #     `Keyword.put(opts, :source, :sync)` reds here even though the producer
+  #     path itself no longer reaches `publish_document/4` (both modules became
+  #     published-first fenced writers in #16479 — the door half above is the
+  #     contract, this is its producer-side tripwire).
+
+  test "a github-sourced publish cannot blank a met:true flag or a non-empty evidence " <>
+         "string — the criteria fence is reached for :github",
+       %{scope: scope} do
+    publish_proof_bearing!("pdg-gh-erase", scope)
+
+    _draft =
+      stage_draft!(
+        "pdg-gh-erase",
+        %{
+          "acceptance_criteria" => [
+            %{"criterion" => "it works", "met" => false, "evidence" => ""}
+          ]
+        },
+        scope,
+        :sync
+      )
+
+    assert {:error, {:invalid_task_content, %{"acceptance_criteria" => [message]}}} =
+             Content.publish_document(
+               "pdg-gh-erase",
+               "task",
+               @dataset,
+               scope ++ [source: :github]
+             )
+
+    assert message =~ "clear the `met: true` flag"
+
+    pub = published!("pdg-gh-erase", scope)
+
+    assert [%{"met" => true, "evidence" => "run output pasted"}] =
+             pub.content["acceptance_criteria"]
+  end
+
+  test "THE ARM DISCRIMINATOR: an open→done forge is REFUSED from :github and PASSES " <>
+         "from :sync — the two arms cannot be collapsed silently",
+       %{scope: scope} do
+    # One shape, two sources. The criteria fence is source-blind, so it cannot
+    # tell the arms apart; the TRANSITION check can, and that is the whole
+    # content of "`:github` is not `:sync`".
+    mk_task!("pdg-gh-forge", scope, %{}, "Refit the harbour crane hydraulics before winter")
+    {:ok, _} = Content.publish_document("pdg-gh-forge", "task", @dataset, scope)
+    _draft = stage_draft!("pdg-gh-forge", %{"lifecycle_status" => "done"}, scope, :sync)
+
+    assert {:error, {:invalid_task_content, %{"lifecycle_status" => [message]}}} =
+             Content.publish_document(
+               "pdg-gh-forge",
+               "task",
+               @dataset,
+               scope ++ [source: :github]
+             )
+
+    assert message =~ "\"open\""
+    assert message =~ "\"done\""
+    assert message =~ "bp task close"
+    assert published!("pdg-gh-forge", scope).content["lifecycle_status"] == "open"
+
+    # POSITIVE CONTROL, same shape, source :sync: the mirror-verbatim arm
+    # exempts the transition, so the identical publish SUCCEEDS. Without this
+    # the refusal above proves nothing about WHICH arm ran.
+    mk_task!("pdg-gh-forge-sync", scope, %{}, "Translate the spring seed catalogue into Nynorsk")
+    {:ok, _} = Content.publish_document("pdg-gh-forge-sync", "task", @dataset, scope)
+    _ = stage_draft!("pdg-gh-forge-sync", %{"lifecycle_status" => "done"}, scope, :sync)
+
+    assert {:ok, synced} =
+             Content.publish_document(
+               "pdg-gh-forge-sync",
+               "task",
+               @dataset,
+               scope ++ [source: :sync]
+             )
+
+    assert synced.content["lifecycle_status"] == "done"
+  end
+
+  # The producer-side anchor. `Link.put/4` and `Adopt.adopt/3` each default
+  # `:source` to `:github` with `put_new` — `put_new`, so an explicit caller
+  # source wins, and `:github`, so the door above sees the full-gate arm. A
+  # producer that threads `:sync` instead would buy itself the transition +
+  # claim exemptions the arm discriminator just measured, silently. This is the
+  # falsifier for that swap.
+  @source_anchor "Keyword.put_new(opts, :source, :github)"
+
+  test "producer anchor: the github write paths default :source to :github, once each" do
+    for rel <- [
+          "lib/barkpark/plugins/github/link.ex",
+          "lib/barkpark/plugins/github/adopt.ex"
+        ] do
+      path = Path.expand(Path.join([__DIR__, "..", "..", "..", rel]))
+      source = File.read!(path)
+
+      hits = length(String.split(source, @source_anchor)) - 1
+
+      assert hits == 1,
+             "#{rel}: expected exactly 1 occurrence of #{@source_anchor}, found #{hits}. " <>
+               "If the default source moved off :github, the publish door's full-gate " <>
+               "arm (transition + claim + criteria) is no longer what a github write " <>
+               "takes — see section (h) above and task-b36741707eabe359."
+    end
+  end
 end

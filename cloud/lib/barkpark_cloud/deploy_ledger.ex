@@ -380,7 +380,7 @@ defmodule BarkparkCloud.DeployLedger do
       method: "schema_commit",
       source: "#10248",
       voids:
-        "the deferral chain columns are NULL before this instant — every deferral is still prose in `failure_reason`. No count in this envelope reads them yet, so nothing refuses on it; a later wave that aggregates chain depth must."
+        "the deferral chain columns are NULL before this instant — every deferral is still prose in `failure_reason`. `classify/1` NOW READS THEM (`abandoned_by_columns/1`, `depth >= bound`) on any row that carries them, falling back to the prose regex when they are NULL, so a pre-instant row is named by prose and a post-instant one by columns. Nothing REFUSES on this boundary: the two bases were reconciled to exact agreement before the reader swapped (7 == 7, prose-but-unstamped 0, predicate-but-not-failed 0), and `census/3`'s fold still carries no chain columns at all — see `abandoned_basis`."
     },
     %{
       subject: "deferral_cause / deferral_depth / deferral_bound",
@@ -408,6 +408,13 @@ defmodule BarkparkCloud.DeployLedger do
   # sides of the 2026-08-05 status boundary write identically for a capacity
   # refusal, which is why the honest door predicate keys on it rather than on
   # `status` or on `deferral_cause`.
+  # THE ABANDONMENT PROSE MARKER, AS A SQL `LIKE` (the `@abandoned` regex's
+  # sargable twin) and the instant the live writer first stamped a chain column.
+  # Together they let `abandoned_basis/1` say which basis measured the published
+  # count and how much of it the BACKFILL wrote rather than `defer/3`.
+  @abandonment_marker "% — and it has now refused %rebuilds in a row for this site,%"
+  @chain_columns_first_write ~U[2026-08-07 10:12:35.033826Z]
+
   @box_door_marker "%409%box_at_capacity%"
   @box_door_cause "BOX_AT_CAPACITY_DEFERRED"
 
@@ -798,6 +805,36 @@ defmodule BarkparkCloud.DeployLedger do
   # path byte-identically. Widening that GROUP BY is a SEPARATE, separately-costed
   # change against the documented ~1,400-groups baseline, and is deliberately not
   # made here.
+  # ── THE FOUR BLIND SPOTS OF THIS GAUGE (dr-w33-bl) ────────────────────────
+  #
+  # Each is derived from the PRODUCER's source, not guessed, and each makes the
+  # count below read LOW — never high. Written HERE, beside the predicate, so a
+  # reader of the number meets them without having to find a charter.
+  #
+  #   1. PREBUILT DEPLOYS NEVER ENTER THE GAUGE. `Sites.Deploy.defer/3`'s FIRST
+  #      `cond` arm sends a prebuilt publish straight to `fail/3` with NO extra
+  #      map, so it stamps no `deferral_depth`/`deferral_bound` and appends no
+  #      abandonment sentence. A prebuilt chain can be refused forever and BOTH
+  #      bases — columns and prose — stay silent on it.
+  #
+  #   2. A LOST FENCED CAS ERASES AN ABANDONMENT FROM BOTH BASES, SILENTLY.
+  #      `fail/3` settles the terminal round under a fenced compare-and-set; when
+  #      another writer wins the fence the row is never written as `failed` with
+  #      the extra, and nothing alerts. The abandonment HAPPENED and no basis
+  #      records it, so this count has no coverage term for it.
+  #
+  #   3. PREVIEW CAN NEVER ABANDON. The chain counters scan
+  #      `environment: "production"` only, so `consecutive_deferrals/2` reads 0
+  #      for every preview chain, the bound is never reached, and a preview
+  #      publish refused a hundred times in a row is structurally incapable of
+  #      producing an `ABANDONED_*` row.
+  #
+  #   4. SCAN DEPTH BOUNDS THE BOUND. `@deferral_scan_depth` is
+  #      `@max_consecutive_capacity_deferrals + 2` = 14, so a capacity cap raised
+  #      PAST 14 makes the terminal arm structurally unreachable: the scan can
+  #      never observe a chain long enough to satisfy `prior >= bound - 1`, the
+  #      gauge becomes a permanent zero, and NOTHING fails anywhere to say so.
+  #      Raising the cap is therefore a change to this gauge, not only to retries.
   defp abandoned_by_columns(row) do
     depth = Map.get(row, :deferral_depth)
     bound = Map.get(row, :deferral_bound)
@@ -1586,6 +1623,13 @@ defmodule BarkparkCloud.DeployLedger do
       # carrying a comment.
       abandoned: abandoned,
       abandoned_unreadable: abandoned_unreadable,
+      # THE THREE LABELS THE COUNT ABOVE CANNOT CARRY AS AN INTEGER (dr-w33-bl,
+      # charter D559): WHICH BASIS measured it, how much of it is HISTORICAL,
+      # and how much of it the BACKFILL wrote rather than the live writer. A
+      # bare `abandoned: 7` reads as a live gauge of a live writer; it is not
+      # one, and the wire now says so in the same envelope instead of leaving it
+      # to a wave to rediscover.
+      abandoned_basis: abandoned_basis(scoped),
       not_attempted: not_attempted_rows,
       sites: Enum.take(sites, site_limit),
       # THE TRUNCATION MARKER. `site_limit` has always defaulted to 50 and has
@@ -1718,6 +1762,50 @@ defmodule BarkparkCloud.DeployLedger do
   # count of missing rows. Counting the missed rows themselves cannot go
   # negative and answers the question the operator actually asks — WHICH rows
   # does the old predicate not see.
+  # WHICH BASIS MEASURED `abandoned`, AND WHAT THE ROWS UNDER IT ARE. Derived,
+  # never asserted: the two population terms are read off the scoped rows here.
+  #
+  # THE BASIS IS PROSE, AND THAT IS STRUCTURAL. `census/3`'s fold groups by
+  # `[site_id, stage, status, failure_reason]` and selects only those four plus a
+  # count, so its group maps carry NO chain columns — `abandoned_by_columns/1`'s
+  # `Map.get/2` answers nil on every one of them and the count above is named by
+  # the `@abandoned` regex, not by `depth >= bound`. The classifier reading
+  # columns did NOT make this number a column reading.
+  defp abandoned_basis(scoped) do
+    marked =
+      from(d in scoped,
+        where: d.status == "failed" and like(d.failure_reason, ^@abandonment_marker)
+      )
+
+    counted = Repo.aggregate(marked, :count, :id)
+    newest = Repo.aggregate(marked, :max, :inserted_at)
+
+    writer_stamped =
+      Repo.aggregate(
+        from(d in marked, where: d.inserted_at >= ^@chain_columns_first_write),
+        :count,
+        :id
+      )
+
+    first_write = DateTime.to_iso8601(@chain_columns_first_write)
+
+    historical =
+      case newest do
+        nil -> "HISTORICAL: no abandonment matched in this window"
+        %DateTime{} = t -> "HISTORICAL: newest counted abandonment #{DateTime.to_iso8601(t)}"
+        t -> "HISTORICAL: newest counted abandonment #{NaiveDateTime.to_iso8601(t)}"
+      end
+
+    "basis: PROSE — `failure_reason` matched the abandonment sentence; the census fold " <>
+      "carries no `deferral_depth`/`deferral_bound`, so `classify/1`'s column predicate " <>
+      "(`depth >= bound`) did not run on this count. " <>
+      historical <>
+      ". BACKFILL-WRITTEN: #{counted - writer_stamped} of #{counted} counted row(s) settled " <>
+      "before #{first_write}, the live writer's first chain stamp, so their chain columns came " <>
+      "from the backfill migration and not from `Sites.Deploy.defer/3`; #{writer_stamped} " <>
+      "were writer-stamped."
+  end
+
   defp box_door(scoped) do
     marked = from(d in scoped, where: like(d.failure_reason, ^@box_door_marker))
 

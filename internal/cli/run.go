@@ -159,6 +159,15 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 
 	// Tier-appropriate credential.
 	headers := authHeaders(cmd, ctx)
+	// THE SESSION DISCRIMINATOR (task-f79e39f4992749a5). Rides EVERY manifest
+	// request, not only the claim: a pulse, a stamp and a close are the writes
+	// a woken predecessor of the same lane makes, and they were the ones the
+	// ledger could not attribute. The server HMACs this and stores the result
+	// on `claim.session`; it never stores the key itself. A caller with no key
+	// sends no header and the row stays byte-identical to a pre-session write.
+	if key := sessionKey(); key != "" {
+		headers[sessionHeader] = key
+	}
 	if needsPerspectiveAuth || needsDraftIDAuth {
 		// doc get/ls/query are public at their default published perspective,
 		// so their manifest tier must remain `none`. Drafts and raw are

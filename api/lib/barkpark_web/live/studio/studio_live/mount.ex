@@ -177,6 +177,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       access_workspace_grants: [],
       access_error: nil,
       validation_errors: %{},
+      # Warning-level findings (schema `"level": "warning"` rules, Gyldendal
+      # parity E1.6): rendered inline and counted in the publish bar, never a
+      # gate on save or publish.
+      validation_warnings: %{},
       # ── Cross-field validations (Task barkpark-cgn) ──────────────────
       # Populated after every autosave by `Barkpark.Content.CrossValidator
       # .violations/2`. Each entry is a string-keyed map carrying name,

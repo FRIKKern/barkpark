@@ -32,6 +32,12 @@ import (
 // tracks that half) and this stays purely diagnostic.
 func runTaskClaim(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
 	rc := runCommand(out, g, ctx, m, cmd, tail)
+	if rc == exitOK {
+		// CLAIMING AND PROTECTING ARE ONE ACT (task-f79e39f4992749a5). The
+		// claim landed; now it has to reach the file the pulse loop reads, and
+		// the append has to be PROVEN by a readback. See recordHeldClaim.
+		return recordClaimInHeldFile(out, cmd, tail)
+	}
 	if rc != exitConflict {
 		return rc
 	}
@@ -246,4 +252,27 @@ func claimVerdict(requestedWorker, lifecycle string, claim apiclient.ClaimInfo, 
 		return fmt.Sprintf("held live by %s — wait for them to release or close it, or ask them to hand it off", claim.Worker)
 	}
 	return fmt.Sprintf("RELEASED but claim.worker is still stale-set to %s (bp task stage can leave it behind across a lifecycle move) — you are the WRONG WORKER for this stale field; only %s can currently re-enter", claim.Worker, claim.Worker)
+}
+
+// recordClaimInHeldFile appends the just-claimed doc id to BARKPARK_HELD_FILE
+// and reads it back. Returns exitOK when there is no held file configured (the
+// default — no existing invocation changes), and exitGeneric with a loud
+// message when the append could not be PROVEN, because an unprotected claim
+// that reports success is exactly the failure this row was filed for.
+func recordClaimInHeldFile(out *writer, cmd manifest.Command, tail []string) int {
+	path := heldFilePath()
+	if path == "" {
+		return exitOK
+	}
+	req, ok := claimRequestOf(cmd, tail)
+	if !ok || req.docID == "" {
+		out.errf("held-file: could not resolve the claimed doc id from the request; %s NOT updated — this claim may never be pulsed\n", path)
+		return exitGeneric
+	}
+	if err := recordHeldClaim(path, req.docID); err != nil {
+		out.errf("held-file: %v\n", err)
+		return exitGeneric
+	}
+	out.errf("held-file: %s recorded in %s (readback confirmed)\n", req.docID, path)
+	return exitOK
 }

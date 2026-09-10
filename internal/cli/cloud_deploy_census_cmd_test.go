@@ -204,6 +204,68 @@ func TestDeployCensusAbandonmentThreeStates(t *testing.T) {
 	}
 }
 
+// TestDeployCensusAbandonmentCarriesItsThreeLabels pins dr-w33-bl: a bare
+// `abandoned: 7` reads as a live gauge of a live writer, and on the corpus this
+// epic measured it is nothing of the kind. The control plane's own three labels
+// — which basis measured it, how much is historical, how much the backfill
+// wrote — must reach the operator's screen VERBATIM, and must be ABSENT rather
+// than invented when the control plane does not send them.
+func TestDeployCensusAbandonmentCarriesItsThreeLabels(t *testing.T) {
+	seven, zero, four := 7, 0, 4
+	basis := "basis: PROSE — the census fold carries no chain columns. " +
+		"HISTORICAL: newest counted abandonment 2026-08-07T03:41:33Z. " +
+		"BACKFILL-WRITTEN: 7 of 7 counted row(s) settled before the live writer's first chain stamp; 0 were writer-stamped."
+
+	// DECODED OFF THE WIRE, not hand-built: a struct edit that drops the
+	// `json:"abandoned_basis"` tag reds here and not only in the renderer.
+	const payload = `{"abandoned":7,"abandoned_unreadable":0,"abandoned_basis":"basis: PROSE — x. HISTORICAL: y. BACKFILL-WRITTEN: 7 of 7 counted row(s); 0 were writer-stamped."}`
+
+	var decoded cloudclient.DeployCensus
+	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if decoded.AbandonedBasis == nil {
+		t.Fatalf("abandoned_basis did not decode — the struct tag is missing")
+	}
+	for _, want := range []string{"basis: PROSE", "HISTORICAL:", "BACKFILL-WRITTEN:"} {
+		if !strings.Contains(deployCensusAbandonment(decoded), want) {
+			t.Fatalf("the rendered sentence dropped %q: %q", want, deployCensusAbandonment(decoded))
+		}
+	}
+
+	// The labels ride BOTH endings — the exact count and the lower bound.
+	exact := deployCensusAbandonment(cloudclient.DeployCensus{
+		Abandoned: &seven, AbandonedUnreadable: &zero, AbandonedBasis: &basis,
+	})
+	if !strings.Contains(exact, "abandoned publishes: 7") || !strings.Contains(exact, "BACKFILL-WRITTEN: 7 of 7") {
+		t.Fatalf("the exact ending lost the count or the labels: %q", exact)
+	}
+
+	bounded := deployCensusAbandonment(cloudclient.DeployCensus{
+		Abandoned: &seven, AbandonedUnreadable: &four, AbandonedBasis: &basis,
+	})
+	if !strings.Contains(bounded, "LOWER BOUND") || !strings.Contains(bounded, "basis: PROSE") {
+		t.Fatalf("the lower-bound ending lost the bound or the labels: %q", bounded)
+	}
+
+	// THE CONTROL, and it is the point: an older control plane sends no labels,
+	// and this reader must then say NOTHING about the basis rather than assert
+	// one it did not measure.
+	silent := deployCensusAbandonment(cloudclient.DeployCensus{Abandoned: &seven, AbandonedUnreadable: &zero})
+	if silent != "abandoned publishes: 7" {
+		t.Fatalf("a control plane that sent no labels got labels anyway: %q", silent)
+	}
+
+	// …and an EMPTY string is the same silence, not a dangling em dash.
+	empty := ""
+	blank := deployCensusAbandonment(cloudclient.DeployCensus{
+		Abandoned: &seven, AbandonedUnreadable: &zero, AbandonedBasis: &empty,
+	})
+	if blank != "abandoned publishes: 7" {
+		t.Fatalf("an empty basis rendered a separator with nothing after it: %q", blank)
+	}
+}
+
 // TestDeployCensusClassRowDecodesAndRendersAgency pins the dr-w31 fix:
 // DeployLedger emits `agency` on every class row and it must (a) decode onto
 // DeployCensusClass.Agency and (b) render as an "accuses:" cell — an older

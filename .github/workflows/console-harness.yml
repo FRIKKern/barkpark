@@ -2016,6 +2016,60 @@ jobs:
               ;;
           esac
 
+      # ── cch-w42-bl — THE CROSS-TAB TEAM PIN, IN TWO REAL CHROME TABS ────────
+      # A THIRD browser instrument riding this job, for the reasons the block
+      # above gives verbatim: node 22 and an explicit CHROME are already
+      # provisioned here, this job is already an upstream `needs:` of the
+      # REQUIRED `Console gate`, and that aggregator is fail-closed on
+      # `needs.modal-oracle.result` — so a red here blocks the merge with no
+      # edit to the aggregator, no new `R_*`/`V_*` pair, and no change to the
+      # "decide calls == length of needs:" count scripts/console-path-escape-
+      # check.test.sh walks. It publishes no verdict output for the same reason
+      # the hashchange step does not; `Console gate` then takes its "verdict
+      # ='OK' but the job FAILED — cannot tell, therefore red" arm.
+      #
+      # WHAT IT ASSERTS, and why nothing else here could: two tabs in ONE
+      # browser context share ONE localStorage. Tab B switches team (writes
+      # bp.active-team, reloads ITSELF) and tab A — same page life, no reload —
+      # clicks Refresh on Activity. Before the fix, tab A painted the OTHER
+      # team's audit rows under its own team's heading: a tenancy lie, measured,
+      # captured at tooling/grip/ledger/cch-w42-pinrace.capture-2026-09-10.json.
+      # `__app.test.mjs` runs ONE realm in a node:vm and can therefore never
+      # have two tabs; `smoke.mjs` never touches localStorage from a second
+      # document; `modal-oracle`/`hashchange-wiring` each drive a single target.
+      #
+      # THE CONTROL LEG IS PART OF THE GATE, not a nicety: it runs the identical
+      # two-tab dance with BOTH tabs on one team and requires tab A to stay
+      # coherent. If the fixture cannot tell the two teams apart, the race leg's
+      # verdict would be worthless in EITHER direction, so the instrument exits
+      # 2 (this step's red-with-no-claim arm) rather than report a clean bill.
+      #
+      # ~25s wall for both legs on a developer host.
+      - name: Cross-tab team pin — does a stale tab refuse to paint another team's data?
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/pin-race.mjs || rc=$?
+          case "$rc" in
+            0)
+              echo "Cross-tab team pin: the CONTROL leg was coherent and the RACE leg found no mislabel — tab A's rendered team label and its rendered rows agree after another tab moved bp.active-team (both readings, with port and role in the same evaluated object, are printed above)."
+              ;;
+            2)
+              echo "::error title=Cross-tab pin race REFUSED::The instrument refused to measure (exit 2) — an ENVIRONMENT or CONTROL fault, not a tenancy defect. NO claim is being made about the team pin in either direction: nothing here says the console is clean and nothing here says it leaks. Fix what the log names: the Chrome binary (or CHROME pointing at a non-executable), a foreign tree squatting the port (the instrument asserts the served app.js/app.css are THIS tree's bytes and refuses if not), a DevTools port Chrome never published, a tab that never reached its first Activity paint inside the 12s cap — or the CONTROL LEG DISAGREEING, which means the fixture cannot tell the two teams apart and is a fault in the instrument, not in app.js."
+              exit 1
+              ;;
+            1)
+              echo "::error title=Cross-tab pin race DEFECT::A measured tenancy defect in two real Chrome tabs (exit 1) — this IS about the console's own bytes. Tab A rendered ONE team's audit rows under ANOTHER team's label after tab B moved the shared bp.active-team key; the two readings and the offending rows are printed above. The mechanism: api() re-reads bp.active-team on every request, so the moment another tab writes it this tab's data changes team while its chrome still names the old one. The fix this guards is the \`storage\` listener in init() delegating to pinStorageMovesTeam (grep -n 'function pinStorageMovesTeam' cloud/priv/static/app.js) — deleting that mount reproduces exactly this red while every pure test in __app.test.mjs stays green, which is why this step exists and the unit tests are not enough."
+              exit 1
+              ;;
+            *)
+              echo "::error title=Cross-tab pin race UNINTERPRETABLE::pin-race.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
   console-gate:
     # ── THE AGGREGATOR — the one name that should carry branch protection ──
     #

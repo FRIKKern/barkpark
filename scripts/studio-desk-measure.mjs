@@ -1555,6 +1555,51 @@ async function mintTicket({ base, token }) {
 // typo in here used to be discoverable only after ssh, a minted ticket, a login
 // and a drill, i.e. at the most expensive possible moment. `new Function(...)`
 // over this export parses it in milliseconds and costs nothing.
+
+/**
+ * THE UNSAMPLED-OCCLUDER PREDICATE (spd-b36), pure and shared.
+ *
+ * It runs IN THE PAGE — the census below interpolates this function's own
+ * source into PAGE_MEASURE with ${classifyUnsampledCandidate} — and it runs in
+ * `node --test` from this same export. One text, two callers: a test that
+ * passed while the page ran different logic would be exactly the vacuous green
+ * this instrument exists to abolish.
+ *
+ * Input is PLAIN DATA already read off the element, never a node, so the
+ * verdict is checkable without a browser:
+ *   rect                {left,right,top,bottom,width,height} in viewport px
+ *   band                {contentLeft,contentRight,bandTop,bandBottom}
+ *   pointer_events / visibility / display / opacity   computed strings
+ *   surface_related     true if the element IS the surface, contains it, or
+ *                       is contained by it — never an occluder of it
+ *   sampled             true if it was the topmost element at some probed point
+ *   contains_sampled    true if it CONTAINS a topmost winner; the point landed
+ *                       on its own paint through a child, so it was not
+ *                       stepped over
+ *
+ * Returns { residue, reason, overlap_over_content_px, overlap_height_px }.
+ * `reason` names the FIRST disqualifier, so a zero census can say which test
+ * every candidate died on rather than only that it was empty.
+ */
+export function classifyUnsampledCandidate(c) {
+  const r = c.rect || {};
+  const b = c.band || {};
+  const ox = Math.min(b.contentRight, r.right) - Math.max(b.contentLeft, r.left);
+  const oy = Math.min(b.bandBottom, r.bottom) - Math.max(b.bandTop, r.top);
+  const out = { residue: false, reason: null, overlap_over_content_px: ox, overlap_height_px: oy };
+  if (!(r.width > 0) || !(r.height > 0)) { out.reason = 'zero-area rect'; return out; }
+  if (!(ox > 0) || !(oy > 0)) { out.reason = 'does not overlap the band'; return out; }
+  if (c.surface_related) { out.reason = 'is the surface or in its ancestry'; return out; }
+  if (c.sampled) { out.reason = 'already sampled — the metric saw it'; return out; }
+  if (c.contains_sampled) { out.reason = 'contains a sampled winner — its own paint was probed'; return out; }
+  if (c.pointer_events === 'none') { out.reason = 'pointer-events:none — invisible_occluder_census owns it'; return out; }
+  if (c.visibility === 'hidden' || c.display === 'none') { out.reason = 'not painting'; return out; }
+  if (parseFloat(c.opacity) === 0) { out.reason = 'fully transparent'; return out; }
+  out.residue = true;
+  out.reason = 'overlaps the band, paints, hit-testable, and no probed point ever landed on it';
+  return out;
+}
+
 export const PAGE_MEASURE = /* js */ `
 async (faceOverride) => {
   const px = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
@@ -1863,6 +1908,13 @@ async (faceOverride) => {
   const BISECT_TOL_PX = 0.5;
   const VIS = 0, OCC = 1, OFF = 2;
 
+  // EVERY topmost element the natural sample ever landed on. Collected here,
+  // not re-derived later, because the only honest definition of "the scanlines
+  // stepped over it" is "it was never the topmost element at any point this run
+  // actually sampled" — including the bisection probes, which are sampled
+  // points too. See 'unsampledOccluderCensus' below.
+  const sampledTopmost = new Set();
+
   const describe = (t) => {
     if (!t) return '(nothing — outside the viewport)';
     return t.tagName.toLowerCase() +
@@ -1882,6 +1934,7 @@ async (faceOverride) => {
     if (x < 0 || y < 0 || x > window.innerWidth - 1 || y > window.innerHeight - 1) return OFF;
     const top = document.elementsFromPoint(x, y)[0] || null;
     if (!top) return OFF;
+    sampledTopmost.add(top);
     return (top === surface || surface.contains(top)) ? VIS : OCC;
   };
 
@@ -1960,6 +2013,11 @@ async (faceOverride) => {
     : [];
 
   const naturalLines = scanYs.map(scanLineAt).filter(Boolean);
+
+  // Snapshot BEFORE the forced pass injects anything. The forced sample is a
+  // page this harness invented; an element that only becomes topmost under an
+  // injected rule was never sampled by the metric that ships.
+  const naturalSampledTopmost = new Set(sampledTopmost);
 
   // ── the forced sample. A pseudo-element has NO inline style, so the two
   //    mutate-measure-restore sites above (which set element.style) cannot
@@ -2117,6 +2175,104 @@ async (faceOverride) => {
         'NEVER subtracted from any figure — this is a census, not a correction (D81). A nonzero count ' +
         'is a prompt to look at the row, not a defect. It exists because the alternative was an ' +
         'accepted blind spot with nothing in the artifact saying whether it was occupied.',
+    };
+  })();
+
+  // THE UNSAMPLED-OCCLUDER CENSUS (spd-b36). The OTHER way a real occluder
+  // reaches zero in this metric, and the one the invisible census cannot see.
+  //
+  // 'invisible_occluder_census' names the pointer-events:none hole. It is not
+  // the only hole. An occluder with ORDINARY pointer-events is caught by the
+  // ancestry test perfectly — but only where a point is sampled, and the five
+  // scanlines sit at 10/30/50/70/90% of the band, i.e. one fifth of the band
+  // height apart. Horizontal chrome shorter than that spacing can sit squarely
+  // over the reading column and be stepped over by every line.
+  //
+  // MEASURED, not reasoned (2026-09-10, deployed guerrilla, viewport 1280x900,
+  // /studio/paper/epic-paper-beauty-reference-wave-2026-07-31, band 146-899):
+  //   .bp-bulk-action-bar, summoned for real by ticking one list-pane checkbox
+  //   while the paper surface stayed open — position:fixed, z-index 50,
+  //   pointer-events AUTO, rect top 830 h 50, overlapping 422.6px of the
+  //   content width and 50px of the band — was topmost at 0 of 240 sampled
+  //   points, and the row still read visible 240/240. The 0.9 line sits at
+  //   823.7, six pixels above the bar's top edge.
+  //   .bp-paper-format, summoned by a right-click inside the surface, likewise:
+  //   115.5px x 26px over the band, topmost at 0 of 240 points.
+  // Neither appears in 'invisible_occluder_census' — their pointer-events are
+  // auto, so that census correctly excludes them — and neither moves any
+  // figure. Two REAL, concurrent, user-summonable occluders, counted by
+  // nothing.
+  //
+  // THIS CENSUS CHANGES NO NUMBER EITHER (D81). Subtracting it would be the
+  // wrong remedy twice over: the band-overlap rectangle is not the occluded
+  // WIDTH of the reading line (the metric measures a column, not an area), and
+  // raising the scan density to catch a 9px bubble would multiply the cost of
+  // every row for chrome that does not narrow the column. What was missing was
+  // not a subtraction — it was any statement at all that these existed.
+  const unsampledOccluderCensus = (() => {
+    const classify = ${classifyUnsampledCandidate};
+    const band = { contentLeft, contentRight, bandTop, bandBottom };
+    const found = [];
+    const reasons = {};
+    let scanned = 0;
+    for (const el of document.querySelectorAll('*')) {
+      scanned++;
+      const r = el.getBoundingClientRect();
+      // Cheap rejects first, deliberately: getComputedStyle on every node of a
+      // 100-row desk is the expensive half and the rect throws away almost all
+      // of them before it is reached.
+      if (r.width <= 0 || r.height <= 0) continue;
+      const ox = Math.min(contentRight, r.right) - Math.max(contentLeft, r.left);
+      const oy = Math.min(bandBottom, r.bottom) - Math.max(bandTop, r.top);
+      if (ox <= 0 || oy <= 0) continue;
+      const surfaceRelated = el.contains(surface) || surface.contains(el) || el === surface;
+      let containsSampled = false;
+      if (!surfaceRelated && !naturalSampledTopmost.has(el)) {
+        for (const t of naturalSampledTopmost) { if (el.contains(t)) { containsSampled = true; break; } }
+      }
+      const cs = getComputedStyle(el);
+      const v = classify({
+        rect: { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height },
+        band,
+        pointer_events: cs.pointerEvents,
+        visibility: cs.visibility,
+        display: cs.display,
+        opacity: cs.opacity,
+        surface_related: surfaceRelated,
+        sampled: naturalSampledTopmost.has(el),
+        contains_sampled: containsSampled,
+      });
+      reasons[v.reason] = (reasons[v.reason] || 0) + 1;
+      if (!v.residue) continue;
+      found.push({
+        tag: el.tagName.toLowerCase(),
+        class_name: typeof el.className === 'string' ? el.className.slice(0, 120) : null,
+        position: cs.position,
+        z_index: cs.zIndex,
+        pointer_events: cs.pointerEvents,
+        overlap_over_content_px: round(v.overlap_over_content_px),
+        overlap_height_px: round(v.overlap_height_px),
+      });
+    }
+    return {
+      elements_scanned: scanned,
+      count: found.length,
+      elements: found.slice(0, 12),
+      truncated: found.length > 12,
+      // A zero census that cannot say WHY every candidate was rejected is
+      // indistinguishable from a census whose predicate never ran.
+      reject_reasons: reasons,
+      scanline_spacing_px: round(bandHeight > 2 ? bandHeight * 0.2 : 0),
+      band_height_px: round(bandHeight),
+      sampled_topmost_count: naturalSampledTopmost.size,
+      note:
+        'Elements that PAINT, whose pointer-events are NOT none, whose rect overlaps the measured ' +
+        'band, and which were topmost at NONE of the points the natural sample actually probed. The ' +
+        'ancestry test would have counted every one of them had a scanline crossed it; the five lines ' +
+        'sit scanline_spacing_px apart, so horizontal chrome shorter than that can be stepped over ' +
+        'entirely. This is a census, never a correction (D81): a nonzero count is a prompt to look at ' +
+        'the row, not a defect by itself. Elements that CONTAIN a sampled winner are excluded — the ' +
+        'point landed on their own paint, through a child.',
     };
   })();
 
@@ -2363,6 +2519,7 @@ async (faceOverride) => {
       non_vacuity: nonVacuity,
       scrim_selector_identity: scrimSelectorIdentity,
       invisible_occluder_census: invisibleOccluderCensus,
+      unsampled_occluder_census: unsampledOccluderCensus,
       restore: restoreCheck,
     },
     measure_note:

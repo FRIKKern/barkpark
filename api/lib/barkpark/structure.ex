@@ -81,7 +81,13 @@ defmodule Barkpark.Structure do
       doc_id: nil,
       # Gyldendal parity E3.2 — a `:document_type_list` node may carry its own
       # sort ([%{"field", "direction"}]); nil = the schema's `desk.orderings`.
-      orderings: nil
+      orderings: nil,
+      # Gyldendal parity E3.3 — a `:document_type_list` node whose rows DRILL
+      # instead of opening: `%{"parent" => <content path>}` marks the list as a
+      # hierarchy (Sanity's «Hierarkisk struktur»). The node itself stays a type
+      # list (no new wire node type — old Go TUIs keep rendering it as the
+      # parentless root list); PaneBuilder walks the children pane by pane.
+      tree: nil
     ]
   end
 
@@ -1186,6 +1192,34 @@ defmodule Barkpark.Structure do
         icon: item["icon"],
         type: :list,
         items: children
+      }
+    end
+  end
+
+  # Gyldendal parity E3.3 — `tree`: Sanity's «Kategorier → Hierarkisk struktur».
+  # The node is the ROOT pane: a type list filtered to the documents whose
+  # `parent` path is null (Sanity's «Hovedkategorier»). Every deeper pane is
+  # built on the walk (PaneBuilder), because the children depend on the row
+  # the editor opened. `parent` is the content path the children point at
+  # (`content.parent` for a reference field named parent).
+  #
+  #   {"kind":"tree","title":"Hierarkisk struktur","type":"category",
+  #    "parent":"content.parent","orderings":[…]}
+  defp declared_item_to_node(%{"kind" => "tree"} = item, idx, _ctx) do
+    type = item["type"]
+    parent = item["parent"]
+
+    if is_binary(type) and type != "" and is_binary(parent) and parent != "" do
+      %Node{
+        id: item["id"] || "#{idx}-#{type}-tree",
+        title: item["title"] || type,
+        icon: item["icon"],
+        type: :document_type_list,
+        type_name: type,
+        visibility: :public,
+        filter: %{parent => %{"is" => "null"}},
+        orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil),
+        tree: %{"parent" => parent}
       }
     end
   end
