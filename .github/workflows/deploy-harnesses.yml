@@ -228,6 +228,26 @@ jobs:
         env:
           BARKPARK_SELFTEST_REQUIRE_E2E: "1"
         run: bash deploy/site-deploy-node.sh --self-test
+      # THE STRANGER'S FIRST RUN, offline half. site-spawner-first-run.sh walks
+      # DISCOVER -> CREATE -> DEPLOY -> VISIT -> UNDO from zero with no ssh and
+      # no fixture; --self-check drives all 15 of its typed reds against
+      # synthetic input, plus one REAL-CORPUS arm that greps every deploy/*.sh
+      # cleanup note for a Caddy marker the engine does not write (the
+      # documented manual recovery named `# barkpark-site:<slug>` for the whole
+      # of wave 8 while site-deploy.sh writes BARKPARK_SITE_ROUTE:<slug>, so a
+      # stranger following our own scripts grepped for a string nothing writes).
+      # That arm is the reason this step is registered rather than left to a
+      # human: it reds when ANY deploy script re-introduces the dead marker.
+      # Offline and ~0.1 s.
+      - name: Stranger first-run journey self-check
+        run: bash deploy/site-spawner-first-run.sh --self-check
+      # Its sibling's failure paths, which were NOT registered anywhere before
+      # this (found while writing the step above: the live proof ships a
+      # --self-check that drives ~60 judges and nothing in CI ran it, so its
+      # named reds were unexercised dead code between live walks). Offline and
+      # ~0.25 s.
+      - name: Site spawner live-proof judges self-check
+        run: bash deploy/site-spawner-live-proof.sh --self-check
       # Every timer-driven unit in deploy/systemd/ carries an OnFailure= handler,
       # that handler exists in-tree, and no scheduled service sets a Restart=
       # that would defer the failed state past it. Before task-0633ab45951a5780
