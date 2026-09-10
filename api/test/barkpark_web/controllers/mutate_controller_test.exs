@@ -1710,26 +1710,107 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert missing?("cchw28-draft-parent")
     end
 
-    test "the guard is a BIRTH guard: an UPDATE to a live epic row is untouched",
+    # ── THE CREATE→PATCH→PUBLISH BYPASS (cch-w29), closed ──────────────────
+    #
+    # REPLACES "the guard is a BIRTH guard: an UPDATE to a live epic row is
+    # untouched", which pinned this hole as a design property. Proven live in
+    # wave 29 against guerrilla in three calls; here it is the same three calls
+    # against the route, and every arm below answers 200 on the birth-only
+    # tree.
+
+    test "the PATCH that carries an off-vocabulary surface onto a live epic row is REFUSED",
          %{conn: conn} do
-      assert file_row(conn, "cchw28-live", %{"surface" => "console"}).status == 200
+      assert file_row(conn, "cchw29-live", %{"surface" => "console"}).status == 200
 
-      # A patch that puts an off-vocabulary term on an EXISTING row is not this
-      # guard's business — `prev_doc` is non-nil, so it head-matches away. Said
-      # out loud because it is the guard's honest residual harm.
-      resp =
-        mutate(conn, [
-          %{
-            "patch" => %{
-              "id" => "cchw28-live",
-              "type" => "task",
-              "set" => %{"surface" => "dashboard"}
-            }
-          }
-        ])
+      resp = set_surface(conn, "cchw29-live", "cloud control plane - probe")
 
-      assert resp.status == 200
-      assert task_content("cchw28-live")["surface"] == "dashboard"
+      assert resp.status == 422
+      error = Jason.decode!(resp.resp_body)["error"]
+      assert error["code"] == "validation_failed"
+      assert [message] = error["details"]["surface"]
+      assert message =~ "console"
+
+      # The batch rolled back: the sanctioned term the row was born with stands.
+      assert task_content("cchw29-live")["surface"] == "console"
+    end
+
+    test "create BARE, patch the surface, publish: the term never reaches the published row",
+         %{conn: conn} do
+      # The publish wall (label spine + tag registry) is a separate door; satisfy
+      # it up front so step 3 can only fail for a `surface` reason.
+      Barkpark.LabelFixtures.register_tags!("test", ["honest-gates"])
+
+      # 1. bare birth under the epic — absence is the warn tier, so it lands.
+      # The description and tags are the PUBLISH WALL's label spine, not this
+      # guard's business; without them step 3 would 422 for an unrelated reason
+      # and the probe would prove nothing about `surface`.
+      assert file_row(conn, "cchw29-3call", %{
+               "description" => "A bare filing under the epic, carrying no surface at all.",
+               "tags" => [
+                 %{
+                   "tag" => "honest-gates",
+                   "strength" => 80,
+                   "rationale" => "the filing-law door is the instrument under probe here"
+                 }
+               ]
+             }).status == 200
+
+      # 2. the patch that was the whole bypass.
+      assert set_surface(conn, "cchw29-3call", "cloud control plane - probe").status == 422
+
+      # 3. publish anyway — there is nothing off-vocabulary left to carry.
+      assert mutate(conn, [%{"publish" => %{"id" => "cchw29-3call", "type" => "task"}}]).status ==
+               200
+
+      {:ok, published} = Content.get_document("cchw29-3call", "task", "test")
+      refute Map.has_key?(published.content, "surface")
+    end
+
+    test "a SANCTIONED term can still be patched onto a live epic row", %{conn: conn} do
+      assert file_row(conn, "cchw29-promote", %{}).status == 200
+      assert set_surface(conn, "cchw29-promote", "ledger").status == 200
+      assert task_content("cchw29-promote")["surface"] == "ledger"
+    end
+
+    test "an UNRELATED patch of an epic row still succeeds — including one whose " <>
+           "off-vocabulary surface predates the guard",
+         %{conn: conn} do
+      # Sanctioned row, unrelated field: untouched by the guard.
+      assert file_row(conn, "cchw29-unrelated", %{"surface" => "console"}).status == 200
+
+      assert mutate(conn, [
+               %{
+                 "patch" => %{
+                   "id" => "cchw29-unrelated",
+                   "type" => "task",
+                   "set" => %{"priority" => 3}
+                 }
+               }
+             ]).status == 200
+
+      assert task_content("cchw29-unrelated")["priority"] == 3
+      assert task_content("cchw29-unrelated")["surface"] == "console"
+
+      # GRANDFATHERED: a row that already carries an off-vocabulary term (born
+      # through the window while it was open, or before the guard existed —
+      # simulated here with the non-`:api` source that replication uses) stays
+      # patchable on every other field. The guard refuses the write that
+      # CARRIES the term, not the corpus that already holds it.
+      assert file_row(conn, "cchw29-grandfathered", %{"surface" => "dashboard"}, source: :worker).status ==
+               200
+
+      assert mutate(conn, [
+               %{
+                 "patch" => %{
+                   "id" => "cchw29-grandfathered",
+                   "type" => "task",
+                   "set" => %{"priority" => 3}
+                 }
+               }
+             ]).status == 200
+
+      assert task_content("cchw29-grandfathered")["priority"] == 3
+      assert task_content("cchw29-grandfathered")["surface"] == "dashboard"
     end
 
     # ── THE UPSERT BYPASS (do_upsert_document's own INSERT branch) ──────────
@@ -1775,6 +1856,40 @@ defmodule BarkparkWeb.MutateControllerTest do
 
     defp file_row(conn, id, content_extra),
       do: create_row(conn, id, Map.put(content_extra, "parent_id", @epic))
+
+    # A birth the guard cannot see: `:source` is server-set on every HTTP door,
+    # so this writes through the Writer directly to stand in for a row that
+    # already carried an off-vocabulary term before the door existed.
+    defp file_row(_conn, id, content_extra, source: source) do
+      {:ok, _doc} =
+        Barkpark.Content.Writer.create_document(
+          "task",
+          %{
+            "doc_id" => id,
+            "title" => "Filing-law fixture #{id}",
+            "content" =>
+              Map.merge(
+                %{
+                  "kind" => "task",
+                  "lifecycle_status" => "open",
+                  "priority" => 1,
+                  "parent_id" => @epic
+                },
+                content_extra
+              )
+          },
+          "test",
+          source: source
+        )
+
+      %{status: 200}
+    end
+
+    defp set_surface(conn, id, term) do
+      mutate(conn, [
+        %{"patch" => %{"id" => id, "type" => "task", "set" => %{"surface" => term}}}
+      ])
+    end
 
     # The legacy door folds every non-reserved top-level key into `content`,
     # and hardcodes dataset "production" — so this fixture reads back through
