@@ -127,11 +127,11 @@ def main():
               f"-> {'OK' if pages * args.limit >= returned_total else 'SHORT -- TRUNCATED SWEEP'}")
 
     print("\nPOSITIVE CONTROL (rows that MUST be present):")
-    missing = 0
+    missing = []
     for pcid in POSITIVE_CONTROLS:
         r = rows.get(pcid)
         if r is None:
-            missing += 1
+            missing.append(pcid)
             print(f"  MISSING  {pcid}   <-- the sweep cannot see a row it was told about")
         else:
             cl = r.get("claim") or {}
@@ -139,6 +139,11 @@ def main():
                   f"claim.worker={cl.get('worker')!r} epoch={cl.get('epoch')} "
                   f"expired_at={get(cl,'expired_at')!r} closed_at={get(cl,'closed_at')!r}")
     if missing:
+        # A CONTROL THAT ONLY PRINTS IS A DECORATION (wave 47). This line said
+        # "every zero below is UNTRUSTWORTHY" and then the process exited 0, so
+        # a caller reading the exit code got a pass over a sweep that could not
+        # see rows it was told about. It now leaves via the same refusal the
+        # empty denominator does.
         print("  ** control failed: every zero below is UNTRUSTWORTHY **")
 
     # ---- lifecycle + claim presence ---------------------------------------
@@ -229,6 +234,46 @@ def main():
         cl = r["claim"]
         print(f"      {r['doc_id']}  worker={cl.get('worker')!r} closed_at={cl.get('closed_at')}")
 
+    # ---- SHAPE C: THE DENOMINATOR, NAMED, AND THE REFUSAL BESIDE IT -------
+    # (wave 47, pds-bl-w47-stale-claim-third-shape-rescoped criterion 3.)
+    # A printer with no verdict cannot report a false green -- but it also
+    # cannot report a true one, and a reader takes "D. ... : 0" for a clean
+    # board. So the population is STATED, not implied: the denominator, the
+    # lifecycle values it actually admits (DERIVED from the rows swept, never
+    # a list this file remembers), and the specimen count. Two things it
+    # refuses to let a reader assume:
+    #   - an EMPTY denominator is not a pass, it is a sweep that measured
+    #     nothing -- exit 1;
+    #   - a ZERO over a non-empty denominator is stated as UNEXERCISED unless
+    #     a specimen was actually seen. `scripts/pds-ledger-census.sh` shipped
+    #     for weeks reading `lifecycle_status == "open"` literally while ALL 19
+    #     live specimens were `blocked`: a full denominator and a narrow key.
+    admitted = sorted({(r.get("lifecycle_status") or "<unset>") for r in open_with_claim})
+    print("\n  DENOMINATOR STATED: %d row(s) carry a claim and a non-terminal lifecycle"
+          % D)
+    print("    lifecycles ADMITTED (derived from the rows swept): %s"
+          % (", ".join(admitted) if admitted else "(none -- the denominator is EMPTY)"))
+    print("    lifecycles EXCLUDED as terminal: %s" % ", ".join(sorted(CLOSED_LIFECYCLES)))
+    print("    SPECIMENS FOUND (bucket D, the third shape): %d" % len(b_third))
+    if missing:
+        print("    REFUSED: %d named positive control row(s) the sweep was told about were NOT"
+              " seen (%s). Nothing above is a measurement of the board."
+              % (len(missing), ", ".join(missing)))
+    if D == 0:
+        print("    REFUSED: the denominator is EMPTY. Zero specimens over zero rows is not a"
+              " clean board, it is a sweep that measured nothing.")
+        shape_c_refusal = ("shape C measured an EMPTY denominator -- no swept row carries a claim "
+                           "under a non-terminal lifecycle")
+    elif missing:
+        shape_c_refusal = ("the sweep could not see %d named positive control row(s) (%s), so every "
+                           "zero it printed is UNTRUSTWORTHY" % (len(missing), ", ".join(missing)))
+    elif not b_third:
+        print("    This 0 is UNEXERCISED: no row of this shape was seen anywhere in the sweep,"
+              " so it proves the sweep found none -- not that the key can find one.")
+        shape_c_refusal = None
+    else:
+        shape_c_refusal = None
+
     # ---- SHAPE D (crit 6): lifecycle=open WITH a live claim.worker --------
     ghost = [r for r in with_claim
              if r.get("lifecycle_status") == "open" and get(r["claim"], "worker")]
@@ -243,6 +288,15 @@ def main():
         print(f"    {r['doc_id']}  worker={cl.get('worker')!r} epoch={cl.get('epoch')} ts={cl.get('ts_iso')}")
     print("=" * 78)
 
+    # THE ONLY NON-ZERO EXIT. Finding specimens is a FINDING and stays exit 0 --
+    # this file is a census, not a merge gate, and callers read its stdout. A
+    # denominator of zero is different in kind: nothing was measured, so nothing
+    # printed above may be read as a result.
+    if shape_c_refusal:
+        print("REFUSAL: %s" % shape_c_refusal, file=sys.stderr)
+        return 1
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
