@@ -1463,6 +1463,50 @@
     @container content (min-width: 720px) {
       .editor-panel .bp-paper-surface { min-inline-size: calc(55ch + 2 * var(--paper-gutter)); }
     }
+    /* THE MEASURE'S UPPER HALF (spd-b7). The floor above is one end of a
+       55-70ch band; this is the other, and until now the band had no other
+       end — the only thing stopping the Studio surface from widening was the
+       shared `.bp-paper-surface { max-width: 660px }` block far below, a
+       pixel number that says nothing about characters and that the public
+       reader owns.
+
+       STUDIO-SCOPED, for the floor's own reason: the bare `.bp-paper-surface`
+       is shared with the public reader, the chat bubbles (chat_live.ex) and
+       the swatch demo (swatch_live.ex), and neither of the latter two carries
+       a neutraliser for an inline-size constraint.
+
+       WHY `min()` AND NOT A BARE `70ch`. `max-inline-size` here and
+       `max-width` on the shared block are THE SAME PROPERTY in a horizontal
+       writing mode and cascade together, so this (0,2,0) selector REPLACES
+       the 660px cap rather than joining it. A bare
+       `calc(70ch + 2 * var(--paper-gutter))` would therefore WIDEN the Studio
+       surface past the 660px column the public reader renders and break the
+       View/Edit measure-parity contract measure_parity_test.exs pins. The
+       `min()` lets the clamp tighten the measure and never loosen it:
+       whichever term is narrower is the used value. The px term is not a
+       free literal — measure_parity_test.exs asserts it equals the shared
+       block's own `max-width`, read off the sheet, so the two cannot drift.
+
+       WHAT IT CLOSES TODAY: ZERO pixels, measured in Chrome on this branch at
+       viewports 900 / 1280 / 2560 — the surface resolves to 660px at all
+       three and `max-inline-size` computes to 660px, because on the native
+       Source Serif 4 face 70ch + 80px lands above the cap. This ships as the
+       band's missing HALF and never as a measure fix, the same honesty
+       D93/D103 demanded of the floor's token. The ch term is what bites if
+       the type scale ever moves the character advance far enough that 70ch of
+       prose fits inside the cap.
+
+       UNGATED, unlike the floor. The floor sits behind
+       `@container content (min-width: 720px)` because raising a MINIMUM in a
+       column that cannot honour it manufactures a horizontal scrollbar (D39).
+       A MAXIMUM can only ever remove width, so it needs no gate — and for the
+       same reason it needs no phone neutraliser beside the
+       `html[data-width-bucket="phone"] ... { min-inline-size: 0 }` line at the
+       bottom of this sheet: at phone the column is already narrower than
+       either term. */
+    .editor-panel .bp-paper-surface {
+      max-inline-size: min(calc(70ch + 2 * var(--paper-gutter)), 660px);
+    }
     /* Classic-editor measure floor (D40). This lived at the top of this
        section as `.editor-panel .editor-body { min-inline-size: 48ch }` and
        had NEVER once applied: `.editor-with-preview .editor-panel-main {
