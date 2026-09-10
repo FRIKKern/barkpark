@@ -141,13 +141,18 @@ defmodule Barkpark.Papers.PublicPaperScopeTest do
           })
         )
 
-      # Simulate "no seeded Default tenant" without an FK-entangled teardown:
-      # rename the Default workspace's slug so the slug-keyed
-      # `Tenancy.get_default_workspace/0` (looks up slug == "default") returns
-      # nil — the exact precondition the fail-closed branch guards.
+      # Simulate "no seeded Default tenant" without an FK-entangled teardown.
+      # This used to be a RENAME, back when `Tenancy.get_default_workspace/0`
+      # looked up `slug == "default"`. Since task-566dc5be4871353b the seat is
+      # the uncast `workspaces.is_default` column, so a rename vacates nothing —
+      # which is precisely the property that change bought. The rename is kept
+      # only so the row is also unreachable by name; the seat is cleared by the
+      # shared fixture.
       Tenancy.get_default_workspace()
       |> Ecto.Changeset.change(slug: "not-default-#{System.unique_integer([:positive])}")
       |> Repo.update!()
+
+      vacate_default_seat!()
 
       assert Tenancy.get_default_workspace() == nil
 
