@@ -148,6 +148,12 @@ on:
       # #963->#969-class gap as above.
       - "docs/setup/CODEX.md"
       - "docs/setup/AGENTS-MD.md"
+      # Onramp span golden (scripts/onramp-span.golden). Test
+      # TestOnrampSpanGoldenContainsCanonicalBody reads it from DISK and asserts
+      # it still CONTAINS agentsMDCanonicalBody; a --regen-onramp-golden blesses
+      # whatever sits between the markers with NO .go diff, so the Go suite must
+      # run on THIS PR. Same #963->#969-class gap as above (cgsi-s6 follow-up).
+      - "scripts/onramp-span.golden"
       # ── CROSS-TREE READS OUTSIDE internal/ (task-bb930319aeac0266) ─────────
       # Measured 2026-09-06 after TWO Go main-reds in one day, both through the
       # same hole: the Go suite reads source and fixtures under api/ and
