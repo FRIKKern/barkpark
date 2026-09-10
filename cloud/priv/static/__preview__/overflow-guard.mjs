@@ -224,7 +224,224 @@ const DEFECTS = [
   "W29-deploy-rail-live-url-wrap",
   "W34-deploy-detail-render-bound",
   "W50-site-row-three-hosts-cruel-by-fixture",
+  "W22-shared-modal-card-min-content-floor",
 ];
+
+// ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
+// THE PHONE BAND, same four widths the account leg above drives (480 is the
+// account body's own upper edge and belongs to that leg, not to this one).
+const FLOOR_WIDTHS = [320, 360, 390, 430];
+
+// The instance / site ids the preview corpus mints (scenarios.mjs → IDS). Spelt
+// out rather than imported: scenarios.mjs is a 340KB module and this file needs
+// exactly three strings from it.
+const FLOOR_INST = "5b2c1e00-0000-4000-8000-0000000000a1";
+const FLOOR_INST_BEHIND = "5b2c1e00-0000-4000-8000-0000000000a2";
+const FLOOR_SITE = "5b2c1e00-0000-4000-8000-0000000000c1";
+const MODAL_OPEN = "(function(){var r=document.getElementById('modal-root');return !!(r && !r.hidden && r.querySelector('.modal-card'));})()";
+const openWith = (sel) => `${MODAL_OPEN} && !!document.querySelector('#modal-root ${sel}')`;
+const clickOne = (sel) => `(function(){var e=document.querySelector(${JSON.stringify(sel)});if(!e) throw new Error('no ${sel} to click');e.click();return true;})()`;
+
+// THE ROSTER, derived from the bytes: every distinct `openModal(` caller in
+// cloud/priv/static/app.js, found by name rather than counted from the filing
+// row (which said "15+"). `openConfirmModal` is the shared confirm SHELL and
+// appears here once per distinct BODY it is given, because the floor is a
+// property of the content, not of the shell.
+//
+// `land` is the screen that must exist before the gesture runs; `drive` is the
+// gesture; `open` is the poll that says THIS body — not merely some dialog — is
+// up. An entry with `unreachable` states why, and states it in terms of what
+// the PREVIEW CORPUS cannot produce, never "it was hard".
+const MODAL_CENSUS = [
+  { body: "account (2FA off)", scen: "account-modal", suffix: "&modal=account",
+    land: "document.getElementById('modal-root')", open: openWith(".am-modal") },
+  { body: "account (2FA enroll)", scen: "account-modal-2fa-badcode", suffix: "&modal=account",
+    land: "document.getElementById('modal-root')", open: openWith(".a2f-enroll") },
+  { body: "account (2FA on)", scen: "account-modal-2fa-on", suffix: "&modal=account",
+    land: "document.getElementById('modal-root')", open: openWith(".am-modal") },
+  { body: "account (session revoke confirm)", scen: "account-modal-revoke", suffix: "&modal=account",
+    land: "document.querySelector('.session-row .btn')",
+    drive: clickOne(".session-row .btn"), open: openWith(".confirm-modal, form") },
+  { body: "token create", scen: "tokens-populated", suffix: "#settings/tokens",
+    land: "document.getElementById('token-add')", drive: clickOne("#token-add"),
+    open: openWith("#token-name") },
+  { body: "token revoke confirm", scen: "tokens-revoke", suffix: "#settings/tokens",
+    land: "document.querySelector('.token-revoke[data-id]')",
+    drive: clickOne(".token-revoke[data-id]"), open: MODAL_OPEN },
+  { body: "member invite", scen: "members-populated", suffix: "#settings/members",
+    land: "document.getElementById('members-invite')", drive: clickOne("#members-invite"),
+    open: openWith("#invite-submit") },
+  { body: "member role change", scen: "members-populated", suffix: "#settings/members",
+    land: "document.querySelector('[data-member-role]')", drive: clickOne("[data-member-role]"),
+    open: MODAL_OPEN },
+  { body: "member remove confirm", scen: "members-populated", suffix: "#settings/members",
+    land: "document.querySelector('[data-member-remove]')", drive: clickOne("[data-member-remove]"),
+    open: MODAL_OPEN },
+  { body: "invite revoke confirm", scen: "members-populated", suffix: "#settings/members",
+    land: "document.querySelector('[data-invite-revoke]')", drive: clickOne("[data-invite-revoke]"),
+    open: MODAL_OPEN },
+  { body: "webhook create", scen: "webhooks-panel", suffix: `#instance/${FLOOR_INST}/webhooks`,
+    land: "document.querySelector('[data-wh-new]')", drive: clickOne("[data-wh-new]"),
+    open: MODAL_OPEN },
+  { body: "webhook edit", scen: "webhooks-panel", suffix: `#instance/${FLOOR_INST}/webhooks`,
+    land: "document.querySelector('[data-wh-edit]')", drive: clickOne("[data-wh-edit]"),
+    open: MODAL_OPEN },
+  { body: "webhook delete confirm", scen: "webhooks-panel", suffix: `#instance/${FLOOR_INST}/webhooks`,
+    land: "document.querySelector('[data-wh-delete]')", drive: clickOne("[data-wh-delete]"),
+    open: MODAL_OPEN },
+  { body: "site env editor", scen: "env-editor", suffix: `#site/${FLOOR_SITE}`,
+    land: "document.getElementById('site-env-edit')", drive: clickOne("#site-env-edit"),
+    open: MODAL_OPEN },
+  { body: "site deploy confirm", scen: "env-editor", suffix: `#site/${FLOOR_SITE}`,
+    land: "document.getElementById('site-deploy')", drive: clickOne("#site-deploy"),
+    open: MODAL_OPEN },
+  // `rollback`, not `env-editor`: #site-github renders only when the deployment
+  // reports a configured GitHub App AND the actor holds admin authority, and
+  // `rollback` is the fixture that carries `github: {configured: true}`. Driven
+  // on env-editor the readiness poll times out — the door is honestly withheld.
+  { body: "site github", scen: "rollback", suffix: `#site/${FLOOR_SITE}`,
+    land: "document.getElementById('site-github')", drive: clickOne("#site-github"),
+    open: MODAL_OPEN },
+  { body: "deployment promote confirm", scen: "rollback", suffix: `#site/${FLOOR_SITE}`,
+    land: "document.querySelector('.dep-promote')", drive: clickOne(".dep-promote"),
+    open: MODAL_OPEN },
+  { body: "site create", scen: "sites-on-instance", suffix: `#instance/${FLOOR_INST}`,
+    land: "document.getElementById('site-new-btn')", drive: clickOne("#site-new-btn"),
+    open: MODAL_OPEN },
+  { body: "instance update confirm", scen: "instance-behind", suffix: `#instance/${FLOOR_INST_BEHIND}`,
+    land: "document.getElementById('inst-update')", drive: clickOne("#inst-update"),
+    open: MODAL_OPEN },
+  { body: "instance attach domain", scen: "panel-overview", suffix: `#instance/${FLOOR_INST}`,
+    land: "document.getElementById('inst-domain')", drive: clickOne("#inst-domain"),
+    open: MODAL_OPEN },
+  { body: "autoupdate pin", scen: "instance-behind", suffix: `#instance/${FLOOR_INST_BEHIND}`,
+    land: "document.querySelector('[data-au=\"pin\"]')", drive: clickOne('[data-au="pin"]'),
+    open: MODAL_OPEN },
+  { body: "fleet add support", scen: "fleet-support-empty", suffix: `#instance/${FLOOR_INST}`,
+    land: "document.querySelector('#fleet-add-support, #fleet-add-support-cta')",
+    drive: clickOne("#fleet-add-support, #fleet-add-support-cta"), open: MODAL_OPEN },
+  { body: "offload a task", scen: "fleet-support-online", suffix: `#instance/${FLOOR_INST}`,
+    land: "document.querySelector('[data-offload-support]')",
+    drive: clickOne("[data-offload-support]"), open: MODAL_OPEN },
+  { body: "launch wizard", scen: "mixed-fleet", suffix: "#overview",
+    land: "document.getElementById('scope-switch')",
+    drive: "(function(){document.getElementById('scope-switch').click();var l=document.getElementById('scope-launch');if(!l) throw new Error('no #scope-launch in the scope menu');l.click();return true;})()",
+    open: openWith("#launch-modal-slot") },
+  { body: "provider credential", scen: "providers-empty", suffix: "#settings/providers",
+    land: "document.getElementById('scope-switch')",
+    drive: "(function(){document.getElementById('scope-switch').click();var l=document.getElementById('scope-launch');if(!l) throw new Error('no #scope-launch in the scope menu');l.click();window.setTimeout(function(){var c=document.querySelector('#modal-root .launch-connect-provider');if(c) c.click();},1200);return true;})()",
+    open: "!!document.querySelector('#modal-root #cred-token')" },
+  { body: "command palette", scen: "mixed-fleet", suffix: "#overview",
+    land: "document.getElementById('scope-switch')",
+    drive: "(function(){document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',metaKey:true,bubbles:true}));return true;})()",
+    open: openWith(".cmdk") },
+  { body: "archive resurrect", scen: "fleet-archives-stored", suffix: "#fleet",
+    land: "document.querySelector('.archive-resurrect-btn')",
+    drive: clickOne(".archive-resurrect-btn"), open: MODAL_OPEN },
+  { body: "plan cancel", scen: "billing-portal-return", suffix: "#billing",
+    land: "document.getElementById('plan-cancel')", drive: clickOne("#plan-cancel"),
+    open: MODAL_OPEN },
+  // ── NOT REACHED, and why. Each of these opens ONLY from a SERVER answer the
+  //    preview corpus does not mint, so no gesture chain in this harness can
+  //    produce it. Their floors are UNKNOWN, and that is the honest word.
+  { body: "token reveal (write-once PAT)",
+    unreachable: "opens on the 201 from POST /v1/tokens (revealToken). modal-oracle.mjs OWNS this body — it drives the real mint chain on `tokens-reveal` and asserts it at its own two cells — so measuring it here would be a second, divergent owner of one dialog rather than new coverage" },
+  { body: "webhook secret reveal (rotate)",
+    unreachable: "showWebhookSecretModal opens only on a 200 from POST /v1/…/webhooks/:id/rotate carrying `secret`; the preview corpus answers rotate with no secret, so the dialog has no fixture" },
+  { body: "instance update conflict",
+    unreachable: "openUpdateConflictModal opens only on a 409 from the update POST whose body parses to a `pinned` conflict; the corpus has no 409-conflict update fixture" },
+  { body: "invite reveal (accept URL)",
+    unreachable: "revealInvite opens only on the 201 from POST /v1/teams/:id/invitations carrying `accept_url`; the corpus answers the create with no accept_url, so the sheet has no fixture" },
+];
+
+// THE PROBE. Borrow-and-restore, because a leg that leaves `width: min-content`
+// on the card poisons every cell after it.
+const FLOOR_PROBE_JS = `(function(){
+  var root=document.getElementById('modal-root');
+  var card=root&&root.querySelector('.modal-card');
+  if(!root||!card) return {open:false};
+  var d=document.documentElement;
+  var cs=getComputedStyle(root);
+  var avail=root.clientWidth-parseFloat(cs.paddingLeft||0)-parseFloat(cs.paddingRight||0);
+  var pw=card.style.getPropertyValue('width'), pwp=card.style.getPropertyPriority('width');
+  var px=card.style.getPropertyValue('max-width'), pxp=card.style.getPropertyPriority('max-width');
+  var pn=card.style.getPropertyValue('min-width'), pnp=card.style.getPropertyPriority('min-width');
+  card.style.setProperty('width','min-content','important');
+  card.style.setProperty('max-width','none','important');
+  card.style.setProperty('min-width','auto','important');
+  var floor=+card.getBoundingClientRect().width.toFixed(2);
+  card.style.removeProperty('width'); card.style.removeProperty('max-width'); card.style.removeProperty('min-width');
+  if(pw) card.style.setProperty('width',pw,pwp);
+  if(px) card.style.setProperty('max-width',px,pxp);
+  if(pn) card.style.setProperty('min-width',pn,pnp);
+  void card.offsetWidth;
+  var spill=[], outside=[], padded=[], wide=[], all=root.querySelectorAll('*'), vw=d.clientWidth;
+  var cr=card.getBoundingClientRect();
+  var ccs=getComputedStyle(card);
+  var inL=cr.left+parseFloat(ccs.borderLeftWidth||0)+parseFloat(ccs.paddingLeft||0);
+  var inR=cr.right-parseFloat(ccs.borderRightWidth||0)-parseFloat(ccs.paddingRight||0);
+  var rr=root.getBoundingClientRect();
+  for(var i=0;i<all.length;i++){
+    var el=all[i], r=el.getBoundingClientRect();
+    if(r.width<=0||r.height<=0) continue;
+    var cn=(typeof el.className==='string'&&el.className.trim())?'.'+el.className.trim().split(/\\s+/).join('.'):'';
+    var nm=(el.id?'#'+el.id:el.tagName.toLowerCase())+cn;
+    if(r.left<-0.5||r.right>vw+0.5) spill.push({s:nm,l:+r.left.toFixed(2),r:+r.right.toFixed(2)});
+    // THE HALF-REMEDY DETECTOR (cch-w22-s4's stated reason for scoping its track
+    // clamp): a clamped card whose CONTENT was never reflowed keeps its old
+    // width and paints over the card's own border and background. That leaves
+    // the VIEWPORT scan clean while the dialog looks broken, so it is measured
+    // separately — against the card's own border box, and only for descendants
+    // of the card itself.
+    if(card.contains(el) && (r.left<cr.left-0.5||r.right>cr.right+0.5)) outside.push({s:nm,l:+r.left.toFixed(2),r:+r.right.toFixed(2)});
+    // …and the SOFTER shape one step in: content that has eaten the card's own
+    // padding but has not yet crossed its border. Reported, never failed — the
+    // card still looks whole, and calling it a defect would make the census
+    // unable to tell 'looks broken' from 'is tight'.
+    // OUT-OF-FLOW DESCENDANTS ARE EXCLUDED HERE, and only here: .modal-x is
+    // absolutely positioned at top/right 12px, so it lives in the card's
+    // padding BY DESIGN and would otherwise print this note on every cell in
+    // the census. The border-box check above still sees it.
+    if(card.contains(el) && el!==card && (r.left<inL-0.5||r.right>inR+0.5)){
+      var pos=getComputedStyle(el).position;
+      if(pos!=='absolute'&&pos!=='fixed') padded.push({s:nm,l:+r.left.toFixed(2),r:+r.right.toFixed(2)});
+    }
+    // WHO IS ACTUALLY WIDE. The root scrolls by the widest right edge in its
+    // own scroll box; naming it is the difference between 'the dialog scrolls'
+    // and a remedy that can be written. (No backticks in this string: it is a
+    // template literal, and one would end it mid-probe.)
+    var rir=r.right-rr.left+root.scrollLeft;
+    wide.push({s:nm,x:+rir.toFixed(2),w:+r.width.toFixed(2),sw:el.scrollWidth,cw:el.clientWidth});
+  }
+  wide.sort(function(a,b){return b.x-a.x;});
+  // THE BISECT, run only when the floor is over the line: which ROW of the body
+  // actually demands the width. This is cch-w22-s4's hand method made part of
+  // the instrument — force width:min-content on each of the card's own children
+  // in turn and read its box. Without it a remedy is guesswork, and s4's own
+  // finding (clamping an item does NOT lower a flex container's contribution)
+  // is unverifiable from the card total alone.
+  var bisect=[];
+  if(floor>avail+0.5){
+    var kids=card.querySelectorAll('*');
+    for(var k=0;k<kids.length;k++){
+      var kd=kids[k];
+      var kw=kd.style.getPropertyValue('width'), kwp=kd.style.getPropertyPriority('width');
+      kd.style.setProperty('width','min-content','important');
+      var kb=+kd.getBoundingClientRect().width.toFixed(2);
+      kd.style.removeProperty('width'); if(kw) kd.style.setProperty('width',kw,kwp);
+      var kcn=(typeof kd.className==='string'&&kd.className.trim())?'.'+kd.className.trim().split(/\\s+/).join('.'):'';
+      bisect.push({s:(kd.id?'#'+kd.id:kd.tagName.toLowerCase())+kcn,mc:kb});
+    }
+    bisect.sort(function(a,b){return b.mc-a.mc;});
+    bisect=bisect.slice(0,5);
+  }
+  return {open:true,floor:floor,avail:+avail.toFixed(2),vw:vw,
+    cardL:+cr.left.toFixed(2),cardR:+cr.right.toFixed(2),cardW:+cr.width.toFixed(2),
+    rsw:root.scrollWidth,rcw:root.clientWidth,psw:d.scrollWidth,pcw:d.clientWidth,
+    descN:all.length,spillN:spill.length,spill:spill.slice(0,4),
+    outN:outside.length,out:outside.slice(0,4),padN:padded.length,pad:padded.slice(0,3),
+    wideN:wide.length,wide:wide.slice(0,3),bisect:bisect};
+})()`;
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
 // instance-card-head -- cloud/priv/static/__preview__ .github` exited 1 with no
@@ -3583,6 +3800,163 @@ async function main() {
           `while the QR sat at x=-135; the viewport-relative rects are what a person gets`,
         );
       }
+    }
+
+    // ── W22: THE SHARED `.modal-card` MIN-CONTENT FLOOR, CENSUSED ───────────
+    //    cch-w22-s4 reflowed the ACCOUNT modal and filed the rest: `.modal-root`
+    //    is a grid whose implicit `auto` column's minimum IS the card's
+    //    min-content, and `.modal-card { width: 100%; max-width: 420px }` is a
+    //    CAP — it can only narrow the card below the space OFFERED, never below
+    //    the width its own content DEMANDS. So every body sharing `.modal-card`
+    //    has a floor, and any floor above viewport-minus-the-root's-padding
+    //    turns `.modal-root` into a silent horizontal scroller on a phone.
+    //
+    //    THE MEASUREMENT, and why it is not a scrollWidth read. A floor is an
+    //    INTRINSIC property of the body's content; the sideways scroll is its
+    //    CONSEQUENCE, and the consequence can be masked (by a track clamp) while
+    //    the floor is untouched — which is exactly the half-remedy s4 refused to
+    //    ship. So each cell measures BOTH: `width: min-content` forced on the
+    //    card with `max-width: none` (the floor itself, borrow-and-restore), AND
+    //    the resting geometry — `.modal-root` scrollWidth/clientWidth plus EVERY
+    //    descendant's viewport rect, iterated, never sampled (D228).
+    //
+    //    THE ROSTER IS DERIVED FROM THE BYTES, not from the row's "15+":
+    //    `grep -n 'openModal(' cloud/priv/static/app.js` names 28 distinct
+    //    openers. Each is either given a real gesture chain here or NAMED
+    //    UNREACHABLE with the reason — a body silently omitted is a body whose
+    //    floor this leg would be claiming to know and does not.
+    if (requested.includes("W22-shared-modal-card-min-content-floor")) {
+      const D = "W22-shared-modal-card-min-content-floor";
+      process.stdout.write(
+        `\n${D} — ${MODAL_CENSUS.length} \`.modal-card\` bodies (every openModal() caller in app.js),` +
+        ` ${MODAL_CENSUS.filter((e) => !e.unreachable).length} driven x ${FLOOR_WIDTHS.length} phone widths x 2 themes` +
+        ` (floor = card width:min-content, borrowed and restored; every #modal-root descendant iterated)\n`,
+      );
+      // A bounded poll for a gesture's effect. `nav` owns the LOAD; a modal
+      // opens on a click whose async chain has no load event to key on.
+      const floorWait = async (expr) => {
+        for (let w = 0; w < 6000; w += 100) {
+          let v = false;
+          try { v = !!(await evalJs(`!!(${expr})`)); } catch { /* mid-repaint */ }
+          if (v) return true;
+          await sleep(100);
+        }
+        return false;
+      };
+      // MODAL_FLOOR_ONLY is a DEBUG narrowing for working a single body, and it
+      // is refused in CI: a leg that can be silently reduced to one dialog is a
+      // leg whose census count means nothing. It prints what it dropped.
+      const only = (process.env.MODAL_FLOOR_ONLY || "").trim();
+      const roster = only ? MODAL_CENSUS.filter((e) => e.body.includes(only)) : MODAL_CENSUS;
+      if (only) process.stdout.write(`   !! MODAL_FLOOR_ONLY=${JSON.stringify(only)} — ${MODAL_CENSUS.length - roster.length} of ${MODAL_CENSUS.length} bodies DROPPED. This run is a debug narrowing and censuses nothing.\n`);
+      // SETTLE BEFORE MEASURING. `.modal-card` carries `animation: modal-in`
+      // (150ms, opacity + translateY + scale(0.99)). Measured mid-flight the
+      // card reports a SCALED box — the first draft of this leg read the plan
+      // cancel body as 271.76px at x=25.41 (a 0.99 scale of its rest width from
+      // a rest origin of 24) and reported a 2px sideways scroll that does not
+      // exist at rest. Same reasoning as ready-host-paint.mjs's settle: a host
+      // judged mid-fade-in is a host judged wrong.
+      const settleCard = async () => {
+        for (let w = 0; w < 2000; w += 50) {
+          let running = 0;
+          try {
+            running = await evalJs(
+              `(function(){var c=document.querySelector('#modal-root .modal-card');if(!c) return 0;` +
+              `if(!c.getAnimations) return 0;` +
+              `return c.getAnimations({subtree:true}).filter(function(a){return a.playState==='running';}).length;})()`,
+            );
+          } catch { /* mid-repaint */ }
+          if (!running) return true;
+          await sleep(50);
+        }
+        return false;
+      };
+      let reached = 0, named = 0, floorCells = 0, overFloor = 0, spillCells = 0, cardSpillCells = 0, padCells = 0, unsettled = 0;
+      const census = [];
+      for (const e of roster) {
+        if (e.unreachable) {
+          named++;
+          process.stdout.write(`   – ${e.body}: NOT REACHED — ${e.unreachable}\n`);
+          census.push({ body: e.body, reached: false, why: e.unreachable });
+          continue;
+        }
+        let openedOnce = false;
+        for (const theme of ["light", "dark"]) {
+          await setViewport(900);
+          const url = `${BASE}/?scen=${e.scen}&theme=${theme}${e.suffix || ""}`;
+          await nav(url, e.land);
+          if (e.drive) { try { await evalJs(e.drive); } catch (err) { fail(D, `${e.body}/${theme}: the gesture chain threw (${err.message}) — nothing about this body was measured`); continue; } }
+          if (!(await floorWait(e.open))) {
+            fail(D, `${e.body}/${theme}: declared REACHABLE but the dialog never opened (waited on ${e.open}) — an unreached body is not a clean body, and its floor is still unknown`);
+            continue;
+          }
+          openedOnce = true;
+          const row = [];
+          for (const width of FLOOR_WIDTHS) {
+            await setViewport(width);
+            if (!(await settleCard())) {
+              unsettled++;
+              fail(D, `${e.body}/${theme}@${width}: the card still had a RUNNING animation after 2000ms — every box below would be a mid-flight layout, so this cell was not measured`);
+              continue;
+            }
+            const m = await evalJs(FLOOR_PROBE_JS);
+            floorCells++;
+            if (!m.open) {
+              fail(D, `${e.body}/${theme}@${width}: #modal-root carries no .modal-card at this width — the dialog closed itself under the resize, so this cell measured nothing`);
+              row.push(`${width}:closed`);
+              continue;
+            }
+            const over = m.floor > m.avail + 0.5;
+            if (over) {
+              overFloor++;
+              if (m.bisect && m.bisect.length) {
+                process.stdout.write(`     · ${e.body}/${theme}@${width} floor ${m.floor} > ${m.avail} offered — widest rows: ${m.bisect.map((b) => `${b.s} ${b.mc}`).join(", ")}\n`);
+              }
+            }
+            row.push(`${width}:${m.floor}/${m.avail}${over ? "!" : ""}`);
+            census.push({ body: e.body, theme, width, floor: m.floor, avail: m.avail, over, rsw: m.rsw, rcw: m.rcw, spill: m.spillN });
+            // THE OBSERVABLE, which is what a person actually suffers. Reported
+            // per cell whether or not the floor is over the line — a body can
+            // spill for a reason that is not its floor, and that is a finding too.
+            if (m.rsw > m.rcw + 0.5) {
+              spillCells++;
+              fail(D, `${e.body}/${theme}@${width}: \`.modal-root\` scrollWidth ${m.rsw} > clientWidth ${m.rcw} — the dialog scrolls sideways by ${Math.round(m.rsw - m.rcw)}px with no visible affordance (card min-content floor ${m.floor} against ${m.avail} of offered width). The page reads clean: documentElement ${m.psw}/${m.pcw}. Card is ${m.cardW}px at ${m.cardL}..${m.cardR}; widest in the root's scroll box: ${m.wide.map((x) => `${x.s} to x=${x.x} (${x.w}px, scroll ${x.sw}/${x.cw})`).join(", ") || "none named"}`);
+            }
+            if (m.spillN > 0) {
+              fail(D, `${e.body}/${theme}@${width}: ${m.spillN} of ${m.descN} #modal-root descendants rest OUTSIDE the ${m.vw}px viewport — e.g. ${m.spill.map((s) => `${s.s} at ${s.l}..${s.r}`).join(", ")}`);
+            }
+            if (m.padN > 0) {
+              padCells++;
+              process.stdout.write(`     · ${e.body}/${theme}@${width}: ${m.padN} descendant(s) have eaten the card's own padding (content box ${m.cardW}px wide) but stay inside its border — reported, not failed: ${m.pad.map((x) => `${x.s} ${x.l}..${x.r}`).join(", ")}\n`);
+            }
+            if (m.outN > 0) {
+              cardSpillCells++;
+              fail(D, `${e.body}/${theme}@${width}: ${m.outN} of ${m.descN} descendants paint OUTSIDE the card's own box (card ${m.cardL}..${m.cardR}, ${m.cardW}px wide against a ${m.floor}px min-content floor) — e.g. ${m.out.map((s) => `${s.s} at ${s.l}..${s.r}`).join(", ")}. This is the HALF-REMEDY shape: the track was clamped and the content was not reflowed`);
+            }
+          }
+          process.stdout.write(`   ${e.body} · ${theme}  ${row.join("  ")}\n`);
+        }
+        if (openedOnce) reached++;
+      }
+      // AUDITED: a census that reached nothing is not a clean census.
+      if (only) {
+        fail(D, `MODAL_FLOOR_ONLY was set to ${JSON.stringify(only)} — ${roster.length} of ${MODAL_CENSUS.length} bodies were driven. A narrowed run can never report a clean census, so it reds by construction rather than printing a claim about bodies it never opened.`);
+      } else if (floorCells === 0) {
+        fail(D, `ZERO cells measured across ${MODAL_CENSUS.length} declared bodies — not one dialog opened, so this leg certifies nothing`);
+      } else if (reached === 0) {
+        fail(D, `ZERO of ${MODAL_CENSUS.length} bodies were reached — every entry named itself unreachable, which is a census of nothing`);
+      } else if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${floorCells} cells across ${reached} REACHED bodies (${named} named unreachable, roster derived from ` +
+          `${MODAL_CENSUS.length} openModal() callers in app.js): every card's min-content floor measured by forcing ` +
+          `width:min-content with max-width:none and restoring it, at ${FLOOR_WIDTHS.join("/")} in both themes. ` +
+          `${overFloor} floor(s) exceed the offered width; ${spillCells} cell(s) scroll sideways; ${cardSpillCells} ` +
+          `cell(s) paint outside the card's own border box (${padCells} more merely eat its padding); every #modal-root descendant ITERATED for a rect outside the ` +
+          `viewport AND (for card descendants) outside the card, never sampled. Every cell was measured only after the ` +
+          `card's own animations had stopped running (${unsettled} cells refused for an unsettled card)`,
+        );
+      }
+      process.stdout.write(`   census rows: ${census.length}\n`);
     }
 
     // ── W15: the fleet row's CELLS, which every leg above is blind to ───────

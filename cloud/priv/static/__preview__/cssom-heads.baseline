@@ -638,7 +638,15 @@
 # baseline is 1342 (-2)" with "MISSES 0", "CSSOM style rules 1340" and "flattened
 # selectors 1286 authored / 1286 CSSOM" on the same run. Both numbers are copied
 # from that printout, never from arithmetic.
-1342
+# 2026-09-10 — 1342 -> 1345 (cchi-w22-bl-shared-modal-card-min-content-floor). THREE new
+# heads at the tail of app.css, all inside the EXISTING `@media (max-width: 620px)` head
+# (no new breakpoint): the `:has(#support-form)` / `:has(#cancel-go)` track clamp, the
+# `.modal-card { min-width: 0 }` that lets the card shrink to it, and the `.modal-actions
+# { flex-wrap: wrap }` content reflow those two bodies needed. The run printed
+# "FAIL app.css — baseline mismatch with 0 misses": MISSES 0 is what makes this an
+# unrecorded ADD rather than a parity defect. styleguide.html PASSED unchanged at 84.
+# Bumped in the SAME COMMIT as the CSS hunk (D158).
+1345
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
 # rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout
