@@ -50,6 +50,7 @@ lib/barkpark/sites/deploy_runner.ex	prune_terminal_records
 lib/barkpark/sites/deploy_runner.ex	read_log_tail
 lib/barkpark/sites/deploy_runner.ex	read_manifest
 lib/barkpark/sites/deploy_runner.ex	read_terminal_record
+lib/barkpark/sites/deploy_runner.ex	seed_prebuilt_log
 lib/barkpark/sites/deploy_runner.ex	sweep_path
 lib/barkpark/sites/deploy_runner.ex	tombstone
 lib/barkpark/sites/deploy_runner.ex	unlink_env

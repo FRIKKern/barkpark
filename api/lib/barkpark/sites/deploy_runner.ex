@@ -2731,9 +2731,11 @@ defmodule Barkpark.Sites.DeployRunner do
   # Reachability: `path` is `launch_unit/2`'s freshly built `log_file`
   # (run_state_dir + a validated slug + the run tag); the digest is the
   # already-verified `artifact_sha256`.
-  # sobelow_skip ["Traversal.FileModule"]
   defp seed_prebuilt_log(%DeployRequest{artifact_b64: nil}, _path), do: :ok
 
+  # (the nil-artifact clause above makes no file call; the waiver belongs to
+  # THIS clause, the one that writes.)
+  # sobelow_skip ["Traversal.FileModule"]
   defp seed_prebuilt_log(%DeployRequest{} = req, path) do
     lines = [
       "[site-deploy] PREBUILT DEPLOY — no build ran on this box.",
