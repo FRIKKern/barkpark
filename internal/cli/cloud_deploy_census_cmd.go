@@ -425,6 +425,13 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		out.outf("%s", line)
 		out.outf("")
 	}
+	// THE DOOR'S OWN DENOMINATOR, printed immediately under the cross-reference
+	// that names the two cohorts, because it is the line that says the two
+	// cohorts do not add up to the door.
+	if line := deployCensusDoorLine(census.BoxDoor); line != "" {
+		out.outf("%s", line)
+		out.outf("")
+	}
 	renderDeployDeferralWait(out, census.DeferralWait)
 	renderDeployCoverageCohorts(out, census.CoverageCohorts, pinnedWindow)
 
@@ -688,6 +695,78 @@ func deployCensusCapacityLine(census cloudclient.DeployCensus) string {
 	return fmt.Sprintf("box capacity is ONE cause reported through TWO cohorts: ABANDONED_AT_CAPACITY %d (in the failure classes, INSIDE the failure numerator) and BOX_AT_CAPACITY_DEFERRED %d (in the deferrals, OUTSIDE it). "+
 		"Same full box, two cohorts. This reader does not move either row: whether an abandoned publish belongs in the failure numerator is a judgment, not a rendering.",
 		abandoned, deferred)
+}
+
+// deployCensusDoorLine renders the box door's own denominator: how often the
+// door REFUSED, beside how often the cause-keyed reader could SEE it refuse.
+//
+// It exists because the two numbers are not the same number and every screen so
+// far printed only the second. `deferral_cause` is written in exactly one code
+// path (`Sites.Deploy.defer/3`), so a capacity 409 that terminated `failed`
+// rather than being re-queued carries the 409 marker in `failure_reason` and a
+// NULL cause — a real refusal at the same door, invisible to a predicate keyed
+// on the cause column.
+//
+// IT DISCLOSES THE GAP, IT DOES NOT RECONCILE IT. The deferral rows above are
+// unchanged; this line names its OWN population (the producer's predicate, in
+// the producer's words), gives the refusal count, and states the difference as a
+// number the producer counted rather than one this reader subtracted. Where the
+// gap is non-zero it also prints the status split, because "6 of these settled
+// failed" is the evidence for the sentence and a reader who cannot see it has to
+// take the gap on trust.
+//
+// A nil node prints NOT MEASURED, never a zero: a control plane that predates
+// the term has not measured the door, and rendering that silence as "the door
+// refused 0 times" is the flattering reading of an absence.
+//
+// It returns "" only when the term was measured and the door was never touched
+// in this window — refusals AND cause_keyed both zero. A window in which the
+// door never opened has no door to report, and printing "0, and the old reader
+// misses 0 of them" would assert a discrepancy this window did not have.
+func deployCensusDoorLine(d *cloudclient.DeployBoxDoor) string {
+	if d == nil {
+		return "box door NOT MEASURED: this control plane sends no box_door term, so how often the box refused a slot is UNKNOWN — the deferral rows above are the door's RE-QUEUES, which is a LOWER BOUND on its refusals, not a count of them."
+	}
+	if d.Refusals == 0 && d.CauseKeyed == 0 {
+		return ""
+	}
+
+	predicate := strings.TrimSpace(d.Predicate)
+	if predicate == "" {
+		predicate = "the control plane named no predicate for this population"
+	}
+	causePredicate := strings.TrimSpace(d.CausePredicate)
+	if causePredicate == "" {
+		causePredicate = "the cause-keyed predicate was not named"
+	}
+
+	line := fmt.Sprintf("box door — REFUSALS %d over its own population (%s). The cause-keyed reader (%s) sees %d",
+		d.Refusals, sanitizeCell(predicate), sanitizeCell(causePredicate), d.CauseKeyed)
+
+	if d.Unkeyed == 0 {
+		return line + ", and MISSES NONE of them in this window — the two predicates agree here, which is a measurement of this window and not a property of the door."
+	}
+	return line + fmt.Sprintf(", MISSING %d of them: %s. The deferral rows above are unchanged and still correct for what they count; this is the larger question (how often the door REFUSED, not how often it RE-QUEUED), and the difference is disclosed here rather than reconciled away.",
+		d.Unkeyed, deployCensusDoorStatusSplit(d.ByStatus))
+}
+
+// deployCensusDoorStatusSplit renders the marked population's status split —
+// the evidence for the gap, in the producer's own buckets. It never invents a
+// bucket: a producer that sent no split gets a sentence saying so, because a
+// silent omission here would leave the gap number standing on nothing.
+func deployCensusDoorStatusSplit(rows []cloudclient.DeployBoxDoorStatus) string {
+	if len(rows) == 0 {
+		return "the control plane sent no status split for the marked rows, so WHERE the missed rows settled is unstated"
+	}
+	parts := make([]string, 0, len(rows))
+	for _, r := range rows {
+		status := strings.TrimSpace(r.Status)
+		if status == "" {
+			status = "(no status)"
+		}
+		parts = append(parts, fmt.Sprintf("%s %d", sanitizeCell(status), r.Count))
+	}
+	return "the marked rows settled " + strings.Join(parts, ", ")
 }
 
 // deployCensusClassCount reads ONE named class count out of a cohort, or 0 when
