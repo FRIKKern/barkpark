@@ -230,24 +230,41 @@ defmodule BarkparkWeb.GraphDraftsCorpusReadTest do
     end
 
     @tag timeout: @test_timeout_ms
-    test "two types sharing one doc_id stay two documents", %{conn: conn, scope: scope} do
+    test "two types sharing one doc_id contribute BOTH their edges", %{conn: conn, scope: scope} do
       # THE IDENTITY LEG. Row identity is (doc_id, type, dataset_id), so the
       # single-query corpus read MUST distinct on (type, slug). Distinct-ing on
-      # the slug alone would collapse a `post` and an `article` that share a
-      # doc_id into one row — a document silently missing from the fold, and
-      # therefore a real reference rendered as a phantom.
+      # the slug alone collapses a `post` and an `article` that share a doc_id
+      # into ONE row — one of the two documents silently missing from the fold,
+      # and every edge IT owns gone with it.
+      #
+      # Asserting the edge INTO the shared slug would not see that: that edge is
+      # extracted from the SOURCE's content and survives either way. What only
+      # the surviving row can produce is its OWN outbound edge — so give the two
+      # rows DIFFERENT targets and demand both. Which row a collapse would keep
+      # is arbitrary; requiring both reds on either.
       {:ok, _} = upsert_ref_schema!("article", scope)
 
       shared = uniq("corpus-read-shared")
-      mk_draft_only!(shared, scope, %{})
+      post_target = uniq("corpus-read-target-post")
+      article_target = uniq("corpus-read-target-article")
+
+      # PUBLISHED, both of them. A core edge's `dangling` is decided under the
+      # :published lens, and the BFS does not expand a dangling target — so a
+      # draft-only `shared` would render as a phantom and NEITHER row's out-edge
+      # would appear, which would make this test red for a reason that is not
+      # the identity leg.
+      mk_draft_only!(shared, scope, %{"related" => post_target})
+      {:ok, _} = Content.publish_document(shared, "post", @dataset, scope)
 
       {:ok, _} =
         Content.create_document(
           "article",
-          %{"doc_id" => shared, "title" => shared, "content" => %{}},
+          %{"doc_id" => shared, "title" => shared, "content" => %{"related" => article_target}},
           @dataset,
           scope
         )
+
+      {:ok, _} = Content.publish_document(shared, "article", @dataset, scope)
 
       source = uniq("corpus-read-twin-source")
       mk_draft_only!(source, scope, %{"related" => shared})
@@ -256,11 +273,14 @@ defmodule BarkparkWeb.GraphDraftsCorpusReadTest do
       assert resp.status == 200, resp.resp_body
 
       body = Jason.decode!(resp.resp_body)
+      targets = for e <- body["edges"], e["from_id"] == shared, do: e["to_id"]
 
-      assert Enum.any?(body["edges"], fn e ->
-               e["from_id"] == source and e["to_id"] == shared
-             end),
-             "the edge to the doc_id shared by two types vanished: #{resp.resp_body}"
+      assert post_target in targets and article_target in targets,
+             "the doc_id shared by two types contributed only #{inspect(targets)} — the corpus " <>
+               "read collapsed the two rows into one. DISTINCT ON must carry `type` as well " <>
+               "as the slug: row identity is (doc_id, type, dataset_id), and a document " <>
+               "dropped from the fold takes every edge it owns with it (and turns real " <>
+               "references into phantoms). Body: #{resp.resp_body}"
     end
   end
 end
