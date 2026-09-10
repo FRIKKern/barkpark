@@ -181,6 +181,7 @@ func TestNeverRetriesAnythingElse(t *testing.T) {
 	}{
 		{"400 validation", http.StatusBadRequest, `{"error":{"code":"validation_failed"}}`, "a refusal is an answer; repeating it is noise"},
 		{"401 unauthorized", http.StatusUnauthorized, `{"error":{"code":"auth"}}`, "a bad token is not transient"},
+		{"403 forbidden", http.StatusForbidden, `{"error":{"code":"forbidden"}}`, "a permission refusal is a decision, not a blip — repeating it cannot change the answer"},
 		{"404 not found", http.StatusNotFound, `{"error":{"code":"not_found"}}`, "absence is not a blip"},
 		// 429 USED TO BE A ROW HERE, and its stated reason — "hammering a rate
 		// limiter is the opposite of helping" — was right about hammering and
