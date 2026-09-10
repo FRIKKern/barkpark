@@ -1,0 +1,65 @@
+---
+title: Templates
+description: Scaffold a working Barkpark app with create-barkpark-app.
+---
+
+`create-barkpark-app` writes a complete project — a Next.js front end, the schemas,
+sample content, and a `docker-compose.yml` that brings up the Phoenix API and
+Postgres. It is the shortest route from nothing to a site you can edit in Studio.
+
+```bash
+npm create barkpark-app my-site
+# pnpm create barkpark-app my-site  ·  pnpm dlx cba my-site
+```
+
+| Flag | What it does |
+| --- | --- |
+| `-t, --template <name>` | `website-starter` or `blog-starter`. |
+| `--hosted-demo` | Point at the public read-only dataset at `https://barkpark.dev` instead of running Docker. |
+| `-y, --yes` | Accept every default. |
+| `--skip-install` | Do not run the package install. |
+| `--skip-git` | Do not `git init`. |
+
+## The two templates
+
+**`blog-starter`** — a blog. Schemas: `post`, `author`, `tag`. A paginated home
+feed, author pages, tag archives, draft-mode preview, per-page metadata with
+OpenGraph, `sitemap.ts` and `robots.ts`, and branded `not-found` / `error` /
+`loading` states. The seed script writes 2 authors, 3 tags, and 7 posts, one of
+them left as a draft so preview has something to show.
+
+**`website-starter`** — a marketing site. Schemas: `page`, `post`, `author`.
+
+Both are Next.js 15 App Router on React 19 and TypeScript, wired with
+`@barkpark/nextjs` for server fetching and draft mode, `@barkpark/react`'s
+`PortableDoc` for rich text, and Tailwind CSS.
+
+## After the scaffold
+
+```bash
+cd my-site
+cp .env.example .env.local
+docker compose up -d       # Phoenix API on :4000, Postgres on :5432
+npm run seed               # sample content
+npm run barkpark generate  # TypeScript types from the schemas
+npm run dev                # Next.js on :3000
+```
+
+The app is on `http://localhost:3000` and Studio on
+`http://localhost:4000/studio`. Edit a post in Studio and the change reaches the
+site through the webhook handler the template already ships.
+
+One step is easy to miss: `.env.example` ships the placeholder token
+`changeme-barkpark-dev-token`. Replace it in `.env.local` with
+`barkpark-dev-token`, the value the API seeds on first boot, or every
+authenticated call fails.
+
+That dev token carries read, write, and admin scope and must not survive into
+production. The templates enforce it — with `NODE_ENV=production` and no
+`BARKPARK_SERVER_TOKEN` set, `lib/barkpark.ts` throws at startup instead of
+quietly falling back to the dev token.
+
+## Next
+
+- [Next.js](/docs/framework-guides/nextjs) — what the template's integration code is doing.
+- [Studio Overview](/docs/studio/overview) — the editing side of the same project.

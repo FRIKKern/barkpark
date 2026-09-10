@@ -3,4 +3,119 @@ title: Next.js
 description: Use Barkpark with Next.js App Router.
 ---
 
-This page is coming in a follow-up commit.
+`@barkpark/nextjs` is the deepest integration Barkpark ships. It is built for the
+App Router, React Server Components, and the Next.js caching model. There is no
+Pages Router support.
+
+```bash
+npm install @barkpark/core @barkpark/nextjs
+npm install @barkpark/react   # optional: PortableText / image / reference renderers
+```
+
+`@barkpark/core` is always paired with it — the Next.js package composes on top of
+the runtime-agnostic client rather than replacing it.
+
+## Environment
+
+```
+# .env.local
+BARKPARK_PROJECT_URL=https://cms.example.com
+BARKPARK_DATASET=production
+BARKPARK_SERVER_TOKEN=sk_live_********      # draft reads and writes only
+BARKPARK_PREVIEW_SECRET=***********         # signs draft-mode URLs
+```
+
+Keep the `BARKPARK_` prefix rather than `NEXT_PUBLIC_`: `BARKPARK_SERVER_TOKEN`
+must never reach the browser bundle. The `/server` entrypoint imports
+`server-only`, so pulling it into a Client Component fails at build time.
+
+## One server client
+
+```ts
+// app/lib/barkpark.ts
+import 'server-only'
+import { createClient } from '@barkpark/core'
+import { createBarkparkServer } from '@barkpark/nextjs/server'
+
+const client = createClient({
+  projectUrl: process.env.BARKPARK_PROJECT_URL!,
+  dataset: process.env.BARKPARK_DATASET ?? 'production',
+  apiVersion: '2026-04-12',
+})
+
+export const barkpark = createBarkparkServer({
+  client,
+  serverToken: process.env.BARKPARK_SERVER_TOKEN!,
+})
+
+export const { barkparkFetch } = barkpark
+```
+
+`barkparkFetch` attaches the dataset-scoped cache tag to every request, and
+switches to `cache: 'no-store'` when Next.js draft mode is enabled — so the same
+call reads published content for visitors and drafts inside a preview.
+
+## The nine entrypoints
+
+| Import | Runs in | What it gives you |
+| --- | --- | --- |
+| `@barkpark/nextjs/server` | RSC, route handlers | `createBarkparkServer`, `defineLive`, `barkparkFetch` |
+| `@barkpark/nextjs/client` | Browser | `BarkparkLive`, `BarkparkLiveProvider`, `startLiveSubscription` |
+| `@barkpark/nextjs/actions` | Server Actions | `defineActions`, `useOptimisticDocument` |
+| `@barkpark/nextjs/webhook` | Route handler | `createWebhookHandler` |
+| `@barkpark/nextjs/draft-mode` | Route handler | `createDraftModeRoutes` |
+| `@barkpark/nextjs/revalidate` | Route / action | `revalidateBarkpark` |
+| `@barkpark/nextjs/preload` | RSC layout | preload helpers |
+| `@barkpark/nextjs/csp` | middleware / proxy | `createCspMiddleware`, `buildCspPolicy`, `generateNonce`, `cspMatcher` |
+| `@barkpark/nextjs` (root) | — | public types |
+
+One trap worth stating plainly: the root entry exports `revalidateBarkpark` as a
+**stub that throws**. The working implementation is `@barkpark/nextjs/revalidate`.
+Import it from the subpath.
+
+## Cache tags
+
+`defineActions()` binds `createDoc`, `patchDoc`, `publish`, and `unpublish`, and
+fans out revalidate tags after each one:
+
+```
+bp:ds:<dataset>:doc:<id>
+bp:ds:<dataset>:type:<type>
+```
+
+When both `workspace` and `project` are configured, the scoped form is used
+instead:
+
+```
+bp:ws:<workspace>:p:<project>:ds:<dataset>:doc:<id>
+bp:ws:<workspace>:p:<project>:ds:<dataset>:type:<type>
+```
+
+`revalidateBarkpark()` turns a mutation payload — a document id, a type, or a
+whole webhook body — into the matching `revalidateTag()` calls, which is how a
+publish in Studio invalidates exactly the pages that showed that document. The tag
+convention is fixed by
+[ADR-0003](https://github.com/FRIKKern/barkpark/blob/main/docs/decisions/0003-sync-tags.md).
+
+## Live updates and previews
+
+`BarkparkLive` opens the SSE subscription in the browser and calls a debounced
+`router.refresh()` on each event, so Server Components re-render without a full
+page load. `createDraftModeRoutes()` mounts a GET/DELETE pair that verifies an
+HMAC-signed preview URL and flips `draftMode().enable()`; from then on every
+`barkparkFetch` reads the `drafts` perspective.
+
+## Deeper guides
+
+Per-surface walkthroughs live in the repository, each with type-checked examples:
+[setup](https://github.com/FRIKKern/barkpark/blob/main/docs/framework-guides/nextjs/setup.mdx),
+[server components](https://github.com/FRIKKern/barkpark/blob/main/docs/framework-guides/nextjs/server-components.mdx),
+[server actions](https://github.com/FRIKKern/barkpark/blob/main/docs/framework-guides/nextjs/server-actions.mdx),
+[revalidation](https://github.com/FRIKKern/barkpark/blob/main/docs/framework-guides/nextjs/revalidation.mdx),
+[draft mode](https://github.com/FRIKKern/barkpark/blob/main/docs/framework-guides/nextjs/draft-mode.mdx),
+[preload pattern](https://github.com/FRIKKern/barkpark/blob/main/docs/framework-guides/nextjs/preload-pattern.mdx),
+[portable text](https://github.com/FRIKKern/barkpark/blob/main/docs/framework-guides/nextjs/portable-text.mdx),
+and [image loader](https://github.com/FRIKKern/barkpark/blob/main/docs/framework-guides/nextjs/image-loader.mdx).
+
+The fastest way to see all of it wired together is a scaffold —
+[Templates](/docs/templates/overview).

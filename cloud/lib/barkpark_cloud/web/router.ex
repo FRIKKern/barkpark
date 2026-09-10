@@ -11759,8 +11759,11 @@ defmodule BarkparkCloud.Web.Router do
   # below firing (a colourised unclassified capture would otherwise fall to the
   # `cause` arm and print the leaky pass-through paragraph ABOVE the clean one).
   defp class_then_capture(value) do
+    # dr-w23-bl: `stripped` STAYS — it is what `humanize/1` must be fed (see
+    # the paragraph above), not a step toward `capture`. `capture` is
+    # `strip_ansi |> scrub` on the same input, i.e. `FailureCopy.raw/1`.
     stripped = FailureCopy.strip_ansi(value)
-    capture = FailureCopy.scrub(stripped)
+    capture = FailureCopy.raw(value)
 
     case FailureCopy.humanize(stripped) do
       ^capture -> capture

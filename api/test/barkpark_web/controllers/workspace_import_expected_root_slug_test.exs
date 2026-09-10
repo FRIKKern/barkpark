@@ -50,6 +50,11 @@ defmodule BarkparkWeb.WorkspaceImportExpectedRootSlugTest do
         set: [slug: "parked-for-expected-root-slug-test"]
       )
 
+    # The seat is `workspaces.is_default` since task-566dc5be4871353b, so the
+    # rename above frees the SLUG and vacates nothing. One shared definition of
+    # "vacate", so the next identity change moves one line, not thirteen.
+    vacate_default_seat!()
+
     refute Tenancy.get_default_workspace()
 
     raw = "ws-expected-slug-#{System.unique_integer([:positive])}"

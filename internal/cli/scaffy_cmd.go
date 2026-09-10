@@ -502,6 +502,7 @@ func scaffyEngineError(out *writer, verb string, err error, usageHelp func()) in
 				}
 			}
 			out.userErr("scaffy %s: command failed validation — nothing applied", verb)
+			humanErrorCode(out, "validation")
 		}
 		return exitValidation
 	case errors.As(err, &driftErr):
@@ -510,6 +511,7 @@ func scaffyEngineError(out *writer, verb string, err error, usageHelp func()) in
 				out.outf("%s", f.String())
 			}
 			out.userErr("scaffy %s: drift refusal — nothing written", verb)
+			humanErrorCode(out, "drift")
 		}
 		return exitValidation
 	case errors.As(err, &pathErr), errors.Is(err, fs.ErrNotExist):

@@ -133,6 +133,11 @@ defmodule BarkparkWeb.EmptyScopeSharedLayerTest do
     Repo.update_all(from(w in Workspace, where: w.slug == ^"default"),
       set: [slug: "vacated-#{System.unique_integer([:positive])}"]
     )
+
+    # The seat is `workspaces.is_default` since task-566dc5be4871353b, so the
+    # rename above frees the SLUG and vacates nothing. One shared definition of
+    # "vacate", so the next identity change moves one line, not thirteen.
+    vacate_default_seat!()
   end
 
   defp seat! do
@@ -350,16 +355,25 @@ defmodule BarkparkWeb.EmptyScopeSharedLayerTest do
       # nothing — this is the check that stops this suite rotting into a green
       # that means nothing.
       #
-      # This reaches A through `AssignDefaultScope` (A now HOLDS the "default"
-      # slug), which is only possible because the probe token carries no
-      # workspace binding — see the setup. A bound token would resolve its own
-      # workspace first and this arm would go blind, which is exactly how it
-      # reddened on task-28c3f7f0987d6e85 before the fixture was repaired.
+      # This reaches A through `AssignDefaultScope` (A now HOLDS the seat), which
+      # is only possible because the probe token carries no workspace binding —
+      # see the setup. A bound token would resolve its own workspace first and
+      # this arm would go blind, which is exactly how it reddened on
+      # task-28c3f7f0987d6e85 before the fixture was repaired.
+      #
+      # SEATING A USED TO BE `set: [slug: "default"]`, and that it no longer
+      # works is the fix in task-566dc5be4871353b read from the other direction:
+      # taking the string no longer takes the seat. The seat is
+      # `workspaces.is_default`, which no changeset casts, so the fixture has to
+      # reach for the column the same way the two legitimate writers do.
       vacate!()
       ws_a = Repo.get_by(Workspace, slug: "esl-a")
 
       {1, _} =
-        Repo.update_all(from(w in Workspace, where: w.id == ^ws_a.id), set: [slug: "default"])
+        Repo.update_all(from(w in Workspace, where: w.id == ^ws_a.id), set: [is_default: true])
+
+      Barkpark.Tenancy.DefaultScopeCache.invalidate()
+      assert Barkpark.Tenancy.get_default_workspace().id == ws_a.id
 
       {_s, b} = fetch(raw, "/v1/data/query/#{@ds}/post")
 

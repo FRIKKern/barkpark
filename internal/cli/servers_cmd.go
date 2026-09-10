@@ -361,6 +361,7 @@ func useError(out *writer, code, msg string, exit int) int {
 		return exit
 	}
 	out.userErr("%s", msg)
+	humanErrorCode(out, code)
 	return exit
 }
 
