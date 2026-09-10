@@ -244,6 +244,32 @@ var claimDispositions = []claimDisposition{
 		Post:     []string{"Theme"},
 	},
 
+	// ── cloud_site_doctor.go — the per-substrate receipt (ssw8) ─────────────
+	// The identity is the ROW that was examined (same site, same clock, same
+	// substrate key) plus, on the honesty row, the server's own sentences —
+	// held byte-identical so the pair cannot pass by printing two different
+	// strings. The axis is the substrate's STATE and the three report-level
+	// numbers that state moves.
+	{
+		Name: "renderSiteDoctorReport/absent-vs-present",
+		Identity: []string{
+			"Site.ID", "Site.Slug", "CheckedAt", "UnknownCount",
+			"Substrates.#1.Key", "Substrates.#1.Detail",
+		},
+		Post: []string{"OK", "AbsentCount", "Substrates.#1.State", "Substrates.#1.Repair"},
+	},
+	{
+		// Unreadable is declared @len, not by value: the axis is whether the
+		// doctor ABSTAINED on this substrate at all, which is exactly what a
+		// by-value comparison of two lists would have blurred.
+		Name: "renderSiteDoctorReport/unknown-is-not-absent",
+		Identity: []string{
+			"Site.ID", "Site.Slug", "CheckedAt",
+			"Substrates.#1.Key", "Substrates.#1.Detail", "Substrates.#1.Repair",
+		},
+		Post: []string{"OK", "AbsentCount", "UnknownCount", "Unreadable@len", "Substrates.#1.State"},
+	},
+
 	// ── tasks_stamp_cmd.go — the ledger row the store actually holds ────────
 	{Name: "renderStampVerdict", Identity: []string{"Criterion"}, Post: []string{"Met", "Evidence"}},
 

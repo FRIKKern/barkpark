@@ -109,6 +109,14 @@ func runCloudSite(out *writer, g globals, args []string) int {
 		return runCloudSiteDelete(out, g, rest)
 	case "status":
 		return runCloudSiteStatus(out, g, rest)
+	// `doctor` is the READ-ONLY diagnosis (ssw8-site-doctor): `status` answers
+	// "what is this site's newest/live build", `doctor` answers "which of the
+	// substrates a site occupies actually exist, and what repairs the ones that
+	// do not". They are deliberately separate verbs — folding the per-substrate
+	// report into `status` would put a ten-probe synchronous read behind the
+	// verb people run in a loop.
+	case "doctor":
+		return runCloudSiteDoctor(out, g, rest)
 	case "open":
 		return runCloudSiteOpen(out, g, rest)
 	case "preflight":
@@ -3621,6 +3629,7 @@ USAGE
   bp cloud site rollback  <site>
   bp cloud site delete    <site> [--yes]                            tear the site down  (alias: rm)
   bp cloud site status    <site> [--window <attempts>]
+  bp cloud site doctor    <site>                                   read every substrate this site occupies and name the repair
   bp cloud site open       <site> [--print-only]
   bp cloud site preflight [--dir <path>] [--skip-build]
   bp cloud site settings  <site> [--theme <palette>] [--doc-type <type>] [--prebuilt-enabled true|false]
