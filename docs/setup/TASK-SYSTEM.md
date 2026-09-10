@@ -31,7 +31,7 @@ The `task` schema auto-registers each boot (idempotent on `(name, dataset)`); tw
 
 ## Point an AI agent at it
 
-**Register the movement.** Every unit of work runs under a claimed task: if no row names it, create one and claim it FIRST, then work. The doctrine, why unregistered work is unrecoverable, and the three ways registration silently does not land: [AGENT-ONRAMPS](AGENT-ONRAMPS.md#register-the-movement). It also gates merge ([merge-gates](../ops/merge-gates.md)).
+**Register the movement.** Every unit of work runs under a claimed task: if no row names it, create one and claim it FIRST, then work. The doctrine, why unregistered work is unrecoverable, and the three ways registration silently does not land: [AGENT-ONRAMPS](AGENT-ONRAMPS.md#register-the-movement).
 
 **Gates come from the PATHS, not the lane**: `bash scripts/which-gates.sh` prints what your diff dispatches.
 
@@ -52,7 +52,7 @@ curl -X POST $API/v1/data/mutate/production -H "Authorization: Bearer $TOKEN" -H
 
 > **Draft prefix:** `create` lands as `drafts.t1`; the task endpoints resolve bare `t1` (published `t1` wins). That is *resolution*, not *listing*: an unpaired `drafts.<id>` task IS listed as itself; only a twinned one collapses. Lifecycle is independent of draft/publish. `bp doc patch` writes the DRAFT (`bp doc publish <type> <id> --yes` lands it) — except a `type:task`, which lands published.
 
-**4. Claim → stamp → close.** Use a stable `worker_id` per agent. Every prod write — `create`, `claim`, `pulse`, `stamp`, `release`, `close`, `doc patch`/`publish` — needs `--yes`; without it `bp` aborts (`prod write not confirmed`) and sends nothing (a batch missing it no-ops silently). Reading back (`-o json`): criteria at `doc.content.acceptance_criteria`, lease at `doc.claim` — the top level looks empty (§6).
+**4. Claim → stamp → close.** Use a stable `worker_id` per agent. Every prod write — `create`, `claim`, `pulse`, `stamp`, `release`, `close`, `doc patch`/`publish` — needs `--yes`; without it `bp` aborts (`prod write not confirmed`) and sends nothing (a batch missing it no-ops silently). Reading back (`-o json`): criteria at `doc.content.acceptance_criteria`, lease at `doc.claim` (§6).
 
 ```bash
 bp task next agent-1          # queue claim, priority order; prints doc_id + epoch; no_ready (HTTP 200, not an error) when empty
@@ -108,13 +108,13 @@ Stamp at three moments ([ledger rule 6](../../.claude/workflows/bp-loop-ledger.m
 `.github/workflows/pr-task-gate.yml` runs `scripts/pr-task-gate.sh` as the REQUIRED check "PR references an active task" on `opened`, `synchronize`, `reopened`, `edited`. Four rules:
 
 - **Exactly one `Task: <doc_id>` at column 0** of the PR body. Two DISTINCT ids make `extract_task_id` exit 4 (ambiguous) and the check reds. A PR landing several rows keeps ONE `Task:` and cites the rest as `Discharges:` (below). Restating the same id twice is fine; ids are deduplicated.
-- **The claim is read when the gate RUNS, not when the PR opened.** Pass = the row is `in_progress` with a `claim.worker`, `done` with a `claim.closed_by`, or `open` with a claim live at the PR's `created_at`. Never claimed, lapsed BEFORE the PR opened, cancelled, or wrong worker = fail. Hold the claim until the PR MERGES — pulse every ~18 min (**Lease + epoch**).
+- **The claim is read when the gate RUNS, not when the PR opened.** Pass = the row is `in_progress` with a `claim.worker`, `done` with a `claim.closed_by`, or `open` with a claim live at the PR's `created_at`. Never claimed, lapsed BEFORE the PR opened, cancelled, or wrong worker = fail. Hold the claim until the PR MERGES — pulse every ~18 min.
 - **A second row the merge discharged: `Discharges: <doc_id> c<N>`** at column 0, repeatable; the gate matches `^Task:` only. Push-to-main POSTs it to `/v1/tasks/<primary>/discharges`, noting `discharge_marks` on criterion N (PR, sha, primary); never `met`.
 - **A red in the body is fixed by editing the body**, not by a commit — `edited` re-triggers the workflow. Exit 2 (ledger unreachable) and 3 (credential refused) are the workflow's, not yours: re-run once the ledger is up.
 
 ## The cmux bridge — a pane that owns its task
 
-A cmux pane can auto-own its task. `bp cmux install --print` prints the four hooks + worker-id; `--merge --yes` folds them into `~/.claude/settings.json` (deduped, backup first). The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one lease: with `BARKPARK_TASK=<doc_id>`, **SessionStart** claims; **PreToolUse** **pulses** ≤1/60s (holder-only renew; now-line = `tool_name` + cwd basename, never the transcript; a lost lease answers `not_holder`, never a re-claim); **Stop**/**SessionEnd** close on the epoch the pulse stamped (re-claiming only if that stamp is stale) IFF every criterion is met (published met-flips need a re-publish) — else LEAVE it claimed. Hooks exit 0 with empty stdout, so a dead server can't harm the agent (`bp cmux status`). No `uninstall`: remove hook groups by hand.
+A cmux pane can auto-own its task. `bp cmux install --print` prints the four hooks + worker-id; `--merge --yes` folds them into `~/.claude/settings.json` (deduped, backup first). The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one lease: with `BARKPARK_TASK=<doc_id>`, **SessionStart** claims; **PreToolUse** **pulses** ≤1/60s (holder-only renew; now-line = `tool_name` + cwd basename, never the transcript; a lost lease answers `not_holder`, never a re-claim); **Stop**/**SessionEnd** close on the pulse's stamped epoch IFF every criterion is met (published met-flips need a re-publish) — so a `merge_gate:true` criterion is the fence, `met:false` until a merge autostamps it (#3039, #15090) — else LEAVE it claimed. Hooks exit 0 with empty stdout, so a dead server can't harm the agent (`bp cmux status`). No `uninstall`: remove hook groups by hand.
 
 ## Working with your AI in Studio
 

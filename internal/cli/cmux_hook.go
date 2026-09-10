@@ -25,6 +25,48 @@ package cli
 // silent. The breadcrumb write is best-effort and panic-guarded — it can never
 // change the exit code, touch stdout, or re-panic out of the top-level recover.
 //
+// THE EXTERNAL-GATE POLICY (pds-bl-merge-gate-key-unimplemented). Of the three
+// candidate policies the filing named — (a) an explicit external-gate field the
+// hook must respect, (b) the hook sniffing for unmerged-PR criteria, (c) no
+// unattended close at all — barkpark shipped (a), and it is the policy this hook
+// implements: a criterion the AUTHOR declared `"merge_gate": true` is EXCLUDED
+// FROM AUTOMATIC COMPLETION. It is not a criterion this pane can satisfy; it is
+// the record of an event outside the pane, and only that event may flip it.
+//
+// The hook enforces it WITHOUT naming merge_gate, and deliberately so. The flag
+// is honoured at the doors that can actually judge it, all server-side:
+//
+//	stamp door   — `Tasks.Stamp` refuses a builder `--met` on a merge-gated
+//	               criterion with `merge_gated_criterion` unless `--merge-gated
+//	               <reason>` is typed, which records an override receipt. The
+//	               predicate `Criteria.merge_gated?/1` is flag-OR-PROSE, so a
+//	               criterion that merely READS as a merge gate is refused too
+//	               (#13006 keyed the guard on the STORED flag and declared the
+//	               `--merge-gated` escape hatch).
+//	merge door   — `Tasks.Close.autostamp_merge_gate/6` flips the gate at
+//	               close time on a real land digest (#3039, #11531), and
+//	               `reconcile_merge_gate/3` flips it from a merge webhook with
+//	               no claim, worker or epoch (#5742); `bp task landed` is the
+//	               non-holder door CI can call (#15090).
+//	withdraw door— `--withdraw` is the only verb that LOWERS a met flag (#14825).
+//
+// So by the time a merge_gate criterion reads `met:true`, the merge HAPPENED.
+// The hook's whole contribution is that it never treats an unmet criterion as
+// met — `acceptanceAllMet` requires the JSON literal true on EVERY entry, gated
+// or not — so a declared-but-unmerged gate keeps the row nonterminal through
+// Stop after Stop. Policy (a)'s wording "skip merge_gate criteria when computing
+// completion" must NOT be read as `continue`: skipping a gate would close an
+// unmerged task SOONER. Pinned by cmux_hook_merge_gate_test.go, which reds under
+// exactly that mutation.
+//
+// COMPATIBILITY / MIGRATION. Zero wire change and zero behaviour change: the
+// flag is opt-in, absent on most criteria, and a row that never declares one is
+// judged exactly as before. The migration is EDITORIAL — a criterion fenced by
+// prose alone ("MERGE-GATED — DO NOT STAMP EARLY") is fenced at the stamp door
+// but is indistinguishable from any other met criterion HERE once something has
+// stamped it, so authors must declare the flag. `bp task create` already warns
+// on the under-declared shape (`merge_gate_unflagged`, tasks_create_cmd.go).
+//
 // CARDINAL fail-safe contract (design §7): a hook must NEVER break the agent.
 // EVERY path exits 0 (incl a panic → recover → 0); NOTHING is written to stdout
 // (diagnostics go to stderr, and only under --dry-run or BP_CMUX_DEBUG); the
