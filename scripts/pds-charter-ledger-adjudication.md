@@ -378,6 +378,12 @@ THE THREE READINGS WORTH ARGUING WITH.
     (non-terminal) while the ledger row reads `done`. A class that produced AGREES was
     available for each by calling it `historical`. It was not taken: a disagreement is a
     FINDING for the lead, and manufacturing agreement is the disease this file treats.
+    RECONCILED 2026-09-10 (lead-gates-r4, task-651da856c5d4e560), on the side that was wrong
+    each time: the pds-w46 ledger row was closed `cancelled` citing PDS-D698 (the charter was
+    right; the row was stale-open), and the charter's "stays open" sentence at :15219 was
+    replaced by a dated LEDGER NOTE saying the row is `done` (the ledger was right; the prose
+    was stale). Both lines now read AGREES; the old :15219 row above is superseded by the
+    :15220 row.
 
 | fingerprint | line | slug | asserted | note |
 |---|---|---|---|---|
@@ -427,4 +433,4 @@ THE THREE READINGS WORTH ARGUING WITH.
 | 1e3b0a498e23 | 15052 | pds-elixir-receipt-census.exs | non-task | scripts/pds-elixir-receipt-census.exs is a script filename; `owned` is predicated of ELIXIR_TEST_ONLY_PATHS. bp task get -> rc=4 ok:false not_found |
 | 4bd90e476ab1 | 15062 | pds-bl-w48-web-sibling-launders | non-disposition | wave-49 plan dispatch table row (slice / round / slug / surface / why) |
 | 913e5714ff20 | 15147 | pds-w1-crown-proof | historical | a LIFECYCLE QUOTE at D717's moment, and a cross-line one: the line ends "is **lifecycle" with "done, 12/12" on the NEXT line, so the same-line lens sees the ASSERTION and never the VALUE - the exact shape this instrument's header documents at charter:6293-6294. Same reading as this slug's other lifecycle quotes (c9cebb359a4d, cd915f1f2a1c) |
-| 36a077ee7043 | 15219 | pds-bl-github-linkput-auto-publish-erasure | non-terminal | "stays open for the audit-trail half neither closure answers" - a standing disposition naming an explicitly UNPAID half of the work, not a moment observation |
+| 338138d091e2 | 15220 | pds-bl-github-linkput-auto-publish-erasure | terminal | the dated LEDGER NOTE that replaced the "stays open" sentence on 2026-09-10 (charter reconciled with the ledger, task-651da856c5d4e560): it states the row is `done` on the ledger, closed after #13122 - a terminal claim, and the ledger agrees |

@@ -1,0 +1,128 @@
+{
+  "instrument": "pin-race",
+  "startedAt": "2026-09-10T10:01:43.541Z",
+  "port": 55593,
+  "legs": {
+    "control": {
+      "name": "control",
+      "tabAPin": "team-11111111-1111-1111-1111-111111111111",
+      "tabBPin": "team-11111111-1111-1111-1111-111111111111",
+      "beforeA": {
+        "tab": "control:tabA",
+        "port": "55593",
+        "href": "http://127.0.0.1:55593/#activity",
+        "role": "admin",
+        "meState": "loaded",
+        "teamAuthorityState": "grant",
+        "meTeamPinMoved": false,
+        "livePin": "team-11111111-1111-1111-1111-111111111111",
+        "renderedTeamLabel": "Northwind Ops",
+        "renderedTeamLabelHtml": "<span class=\"ws-name\" id=\"account-team\">Northwind Ops</span>",
+        "renderedRows": [
+          "x-side@northwind.example created a site"
+        ],
+        "renderedActivityHtml": "<div class=\"tlv-row\" data-tlv-key=\"a:aud-X-1\"><div class=\"tlv-head\"><span class=\"tlv-badge tlv-badge--audit\">audit</span><span class=\"tlv-title\">x-side@northwind.example created a site</span><span class=\"tlv-when\" title=\"10/09/2026, 11:00:00\">1h ago</span><button class=\"tlv-toggle\" type=\"button\" data-tlv-toggle=\"\" aria-expanded=\"false\">Details</button></div><pre class=\"tlv-detail\" hidden=\"\">{\n  \"name\": \"NORTHWIND-ONLY-SITE\"\n}</pre></div>"
+      },
+      "afterB": {
+        "tab": "control:tabB",
+        "port": "55593",
+        "href": "http://127.0.0.1:55593/#activity",
+        "role": "admin",
+        "meState": "loaded",
+        "teamAuthorityState": "grant",
+        "meTeamPinMoved": false,
+        "livePin": "team-11111111-1111-1111-1111-111111111111",
+        "renderedTeamLabel": "Northwind Ops",
+        "renderedTeamLabelHtml": "<span class=\"ws-name\" id=\"account-team\">Northwind Ops</span>",
+        "renderedRows": [
+          "x-side@northwind.example created a site"
+        ],
+        "renderedActivityHtml": "<div class=\"tlv-row\" data-tlv-key=\"a:aud-X-1\"><div class=\"tlv-head\"><span class=\"tlv-badge tlv-badge--audit\">audit</span><span class=\"tlv-title\">x-side@northwind.example created a site</span><span class=\"tlv-when\" title=\"10/09/2026, 11:00:00\">1h ago</span><button class=\"tlv-toggle\" type=\"button\" data-tlv-toggle=\"\" aria-expanded=\"false\">Details</button></div><pre class=\"tlv-detail\" hidden=\"\">{\n  \"name\": \"NORTHWIND-ONLY-SITE\"\n}</pre></div>"
+      },
+      "afterA": {
+        "tab": "control:tabA",
+        "port": "55593",
+        "href": "http://127.0.0.1:55593/#activity",
+        "role": "admin",
+        "meState": "loaded",
+        "teamAuthorityState": "grant",
+        "meTeamPinMoved": false,
+        "livePin": "team-11111111-1111-1111-1111-111111111111",
+        "renderedTeamLabel": "Northwind Ops",
+        "renderedTeamLabelHtml": "<span class=\"ws-name\" id=\"account-team\">Northwind Ops</span>",
+        "renderedRows": [
+          "x-side@northwind.example created a site"
+        ],
+        "renderedActivityHtml": "<div class=\"tlv-row\" data-tlv-key=\"a:aud-X-1\"><div class=\"tlv-head\"><span class=\"tlv-badge tlv-badge--audit\">audit</span><span class=\"tlv-title\">x-side@northwind.example created a site</span><span class=\"tlv-when\" title=\"10/09/2026, 11:00:00\">1h ago</span><button class=\"tlv-toggle\" type=\"button\" data-tlv-toggle=\"\" aria-expanded=\"false\">Details</button></div><pre class=\"tlv-detail\" hidden=\"\">{\n  \"name\": \"NORTHWIND-ONLY-SITE\"\n}</pre></div>"
+      }
+    },
+    "race": {
+      "name": "race",
+      "tabAPin": "team-11111111-1111-1111-1111-111111111111",
+      "tabBPin": "team-22222222-2222-2222-2222-222222222222",
+      "beforeA": {
+        "tab": "race:tabA",
+        "port": "55593",
+        "href": "http://127.0.0.1:55593/#activity",
+        "role": "admin",
+        "meState": "loaded",
+        "teamAuthorityState": "grant",
+        "meTeamPinMoved": false,
+        "livePin": "team-11111111-1111-1111-1111-111111111111",
+        "renderedTeamLabel": "Northwind Ops",
+        "renderedTeamLabelHtml": "<span class=\"ws-name\" id=\"account-team\">Northwind Ops</span>",
+        "renderedRows": [
+          "x-side@northwind.example created a site"
+        ],
+        "renderedActivityHtml": "<div class=\"tlv-row\" data-tlv-key=\"a:aud-X-1\"><div class=\"tlv-head\"><span class=\"tlv-badge tlv-badge--audit\">audit</span><span class=\"tlv-title\">x-side@northwind.example created a site</span><span class=\"tlv-when\" title=\"10/09/2026, 11:00:00\">1h ago</span><button class=\"tlv-toggle\" type=\"button\" data-tlv-toggle=\"\" aria-expanded=\"false\">Details</button></div><pre class=\"tlv-detail\" hidden=\"\">{\n  \"name\": \"NORTHWIND-ONLY-SITE\"\n}</pre></div>"
+      },
+      "afterB": {
+        "tab": "race:tabB",
+        "port": "55593",
+        "href": "http://127.0.0.1:55593/#activity",
+        "role": "admin",
+        "meState": "loaded",
+        "teamAuthorityState": "grant",
+        "meTeamPinMoved": false,
+        "livePin": "team-22222222-2222-2222-2222-222222222222",
+        "renderedTeamLabel": "Contoso Labs",
+        "renderedTeamLabelHtml": "<span class=\"ws-name\" id=\"account-team\">Contoso Labs</span>",
+        "renderedRows": [
+          "y-side@contoso.example minted an API token"
+        ],
+        "renderedActivityHtml": "<div class=\"tlv-row\" data-tlv-key=\"a:aud-Y-1\"><div class=\"tlv-head\"><span class=\"tlv-badge tlv-badge--audit\">audit</span><span class=\"tlv-title\">y-side@contoso.example minted an API token</span><span class=\"tlv-when\" title=\"10/09/2026, 11:05:00\">57m ago</span><button class=\"tlv-toggle\" type=\"button\" data-tlv-toggle=\"\" aria-expanded=\"false\">Details</button></div><pre class=\"tlv-detail\" hidden=\"\">{\n  \"name\": \"CONTOSO-ONLY-TOKEN\"\n}</pre></div>"
+      },
+      "afterA": {
+        "tab": "race:tabA",
+        "port": "55593",
+        "href": "http://127.0.0.1:55593/#activity",
+        "role": "admin",
+        "meState": "loaded",
+        "teamAuthorityState": "stale",
+        "meTeamPinMoved": true,
+        "livePin": "team-22222222-2222-2222-2222-222222222222",
+        "renderedTeamLabel": "Northwind Ops",
+        "renderedTeamLabelHtml": "<span class=\"ws-name\" id=\"account-team\">Northwind Ops</span>",
+        "renderedRows": [
+          "y-side@contoso.example minted an API token"
+        ],
+        "renderedActivityHtml": "<div class=\"tlv-row\" data-tlv-key=\"a:aud-Y-1\"><div class=\"tlv-head\"><span class=\"tlv-badge tlv-badge--audit\">audit</span><span class=\"tlv-title\">y-side@contoso.example minted an API token</span><span class=\"tlv-when\" title=\"10/09/2026, 11:05:00\">57m ago</span><button class=\"tlv-toggle\" type=\"button\" data-tlv-toggle=\"\" aria-expanded=\"false\">Details</button></div><pre class=\"tlv-detail\" hidden=\"\">{\n  \"name\": \"CONTOSO-ONLY-TOKEN\"\n}</pre></div>"
+      }
+    }
+  },
+  "appJsBytes": 1586526,
+  "browser": "Chrome/153.0.8010.36",
+  "node": "v22.22.0",
+  "controlCoherent": true,
+  "verdict": "REPRODUCED",
+  "_provenance": {
+    "task": "cch-w42-bl-pin-race-needs-a-two-tab-browser-reproduction",
+    "produced_by": "cloud/priv/static/__preview__/pin-race.mjs",
+    "tree": "console/pin-race off origin/main d3211b053",
+    "app_js_served": "verbatim, byte-compared against disk before Chrome launched",
+    "exit_code": 1,
+    "reading": "Every object is ONE Runtime.evaluate carrying port + role WITH the bytes it describes (D432).",
+    "control_leg": "both tabs pinned to Northwind Ops; tab A rendered Northwind label over Northwind rows -> the fixture CAN tell the teams apart",
+    "mutation_proof": "same instrument, same fixture, app.js + one storage listener (window.addEventListener('storage', e => e.key==='bp.active-team' && location.reload())) -> exit 0, tab A repainted as Contoso Labs over Contoso rows. The exit-0 arm is reachable; exit 1 is not hardwired."
+  }
+}

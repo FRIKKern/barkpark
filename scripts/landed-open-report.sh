@@ -290,16 +290,21 @@ cmd_selftest() {
   "content":{"labels":["landed-on-main","landed:pr-15093@dddddd4444"],
              "acceptance_criteria":[{"criterion":"a lead signs off on the rollout","met":false}]}},
  {"doc_id":"task-nolap-1","title":"the #15403 shape","lifecycle_status":"open","child_count":0,
-  "content":{"labels":["landed-on-main","landed:pr-15403@8ca3cb5a0c"],
-             "landed":{"commits":["8ca3cb5a0c"],"prs":["15403"],
-                       "notes":["PR #15403 landed on main as 8ca3cb5a0c (files: api/Dockerfile) [no overlap with the paths this row names]"]},
+  "content":{"labels":["landed-on-main","landed:pr-15403@ffff15403f"],
+             "landed":{"commits":["ffff15403f"],"prs":["15403"],
+                       "notes":["PR #15403 landed on main as ffff15403f (files: api/Dockerfile) [no overlap with the paths this row names]"]},
              "acceptance_criteria":[{"criterion":"the badge renders","met":false}]}},
  {"doc_id":"task-lap-1","title":"a landing that did overlap","lifecycle_status":"open","child_count":0,
   "content":{"labels":["landed-on-main","landed:pr-15404@9ba3cb5a0c"],
              "landed":{"commits":["9ba3cb5a0c"],"prs":["15404"],
                        "notes":["PR #15404 landed on main as 9ba3cb5a0c (files: api/lib/x.ex)"]},
-             "acceptance_criteria":[{"criterion":"the badge renders","met":false}]}}
-],"page":{"returned":7,"has_more":false,"limit":500,"offset":0}}
+             "acceptance_criteria":[{"criterion":"the badge renders","met":false}]}},
+ {"doc_id":"task-otherland-1","title":"a landed dict that says nothing about THIS landing","lifecycle_status":"open","child_count":0,
+  "content":{"labels":["landed-on-main","landed:pr-16000@aaaa160000"],
+             "landed":{"commits":["bbbb161111"],"prs":["16111"],
+                       "notes":["PR #16111 landed on main as bbbb161111 (files: web/x.ts) [no overlap with the paths this row names]"]},
+             "acceptance_criteria":[{"criterion":"a thing","met":false}]}}
+],"page":{"returned":8,"has_more":false,"limit":500,"offset":0}}
 JSON
 
   out="$(bash "$SELF" --fixture "$fx" 2>&1)"; rc=$?
@@ -319,7 +324,7 @@ JSON
   case "$(bash "$SELF" --fixture "$fx" 2>&1 | sed -n '/^walked /q;p')" in
     *task-done-1*) echo "FAIL: a DONE row leaked into the live list"; fail=1 ;;
   esac
-  case "$out" in *"walked 7 rows, 6 carry landed-on-main, 5 live"*) ;;
+  case "$out" in *"walked 8 rows, 7 carry landed-on-main, 6 live"*) ;;
     *) echo "FAIL: trailer wrong. got: $(printf '%s' "$out" | tail -2)"; fail=1 ;; esac
 
   # THE NO-OVERLAP SPLIT (task-c3c9922e7d8e3815). task-nolap-1 is the #15403
@@ -327,19 +332,44 @@ JSON
   # nothing the row names. It must be LISTED (it is still a landing) and it
   # must be FLAGGED, so a lead can tell it from task-lap-1 — same label, same
   # lifecycle, a landing that DID overlap.
-  case "$out" in *task-nolap-1*) ;;
-    *) echo "FAIL: a no-overlap landing was filtered out instead of flagged"; fail=1 ;; esac
-  case "$out" in *"task-nolap-1"*"[NO-OVERLAP]"*) ;;
+  # ONE ROW'S LINE, NEVER THE WHOLE REPORT. `case "$out" in *A*[FLAG]*` matches
+  # across LINES: it says only that A appears somewhere before some flag, so it
+  # passes or fails on the SORT ORDER of the report. MEASURED 2026-09-10 — the
+  # first cut of these three arms was written that way, went green on a machine
+  # where the fixture's sha happened to resolve to a real commit (which sorts
+  # aged rows first) and RED in CI where it did not. The fixture shas are
+  # unresolvable now, and every assertion below reads exactly one row's line.
+  local nolap_line lap_line live_line other_line
+  nolap_line="$(printf '%s\n' "$out" | sed -n '/^task-nolap-1[[:space:]]/p')"
+  lap_line="$(printf '%s\n' "$out" | sed -n '/^task-lap-1[[:space:]]/p')"
+  live_line="$(printf '%s\n' "$out" | sed -n '/^task-live-1[[:space:]]/p')"
+  other_line="$(printf '%s\n' "$out" | sed -n '/^task-otherland-1[[:space:]]/p')"
+  # The precondition, asserted: an arm that reads an EMPTY line would pass its
+  # negative control without measuring anything.
+  [ -n "$nolap_line" ] || { echo "FAIL: a no-overlap landing was filtered out instead of flagged"; fail=1; }
+  [ -n "$lap_line" ] || { echo "FAIL: the overlapping-landing control row is absent from the report"; fail=1; }
+  [ -n "$live_line" ] || { echo "FAIL: the no-verdict control row is absent from the report"; fail=1; }
+  [ -n "$other_line" ] || { echo "FAIL: the other-landing control row is absent from the report"; fail=1; }
+  case "$nolap_line" in *"[NO-OVERLAP]"*) ;;
     *) echo "FAIL: the NO-OVERLAP flag is missing from task-nolap-1"; fail=1 ;; esac
   # THE NEGATIVE CONTROL, and it is what makes the flag mean anything: a row
   # whose recorded landing carries NO no-overlap marker must NOT be flagged.
-  case "$out" in *"task-lap-1"*"[NO-OVERLAP]"*)
+  case "$lap_line" in *"[NO-OVERLAP]"*)
       echo "FAIL: NO-OVERLAP leaked onto task-lap-1, whose landing overlapped"; fail=1 ;; esac
-  # And the rows marked before paths were ever recorded carry no verdict at
-  # all — an absent verdict must not be rendered as either answer.
-  case "$out" in *"task-live-1"*"[NO-OVERLAP]"*)
+  # And a row marked before paths were ever recorded carries no verdict at all
+  # — an absent verdict must not be rendered as either answer.
+  case "$live_line" in *"[NO-OVERLAP]"*)
       echo "FAIL: NO-OVERLAP leaked onto a row that carries no landing verdict"; fail=1 ;; esac
-  case "$out" in *"1 of the 5 live rows below carry ONLY landings with NO PATH OVERLAP"*) ;;
+  # THE HARDER ABSENT-VERDICT CASE, and the one that makes `if not mine` do any
+  # work: task-otherland-1 HAS a landed dict, and every note in it is about a
+  # DIFFERENT sha and a different PR. Its own landing (landed:pr-16000@aaaa160000)
+  # carries no verdict, so it must not inherit the marker sitting in a note that
+  # is not about it. Without this row the `not mine -> "?"` arm is unreachable:
+  # every other unverdicted row here has no landed dict at all and exits one
+  # branch earlier.
+  case "$other_line" in *"[NO-OVERLAP]"*)
+      echo "FAIL: a row inherited NO-OVERLAP from a note about a DIFFERENT landing"; fail=1 ;; esac
+  case "$out" in *"1 of the 6 live rows below carry ONLY landings with NO PATH OVERLAP"*) ;;
     *) echo "FAIL: the report does not count the no-overlap population separately"; fail=1 ;; esac
   [ "$rc" -eq 0 ] || { echo "FAIL: a clean fixture read exited $rc, want 0"; fail=1; }
 

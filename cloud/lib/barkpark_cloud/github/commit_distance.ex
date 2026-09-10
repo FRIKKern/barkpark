@@ -89,7 +89,11 @@ defmodule BarkparkCloud.GitHub.CommitDistance do
       indistinguishable from any other 403. The safety half of the rule holds
       (a refusal never becomes a 0); the diagnostic half does not, and widening
       the shared transport to carry headers is deliberately not this slice's
-      job.
+      job. The SWEEP-level half of that budget problem — N boxes on one sha
+      costing N calls, and a rate-limited tail going silently unmeasured — is
+      handled by `BarkparkCloud.GitHub.CommitDistanceSweep`, which memoizes per
+      compare URL within a tick and reports the unmeasured count per DISTINCT
+      reason.
     * EGRESS from the control-plane container to `api.github.com` is UNPROVEN by
       any test — the first real hourly sweep is the proof.
     * This changes NO autoupdate behaviour: `update_state` and every gate that
@@ -151,9 +155,7 @@ defmodule BarkparkCloud.GitHub.CommitDistance do
   # ── HTTP ──
 
   defp compare(opts, served_sha) do
-    repo = config(opts, :repo, @default_repo)
-    branch = config(opts, :branch, @default_branch)
-    url = "#{@api_base}/repos/#{repo}/compare/#{served_sha}...#{branch}"
+    url = compare_url(served_sha, opts)
 
     case call(opts, %{method: :get, url: url, headers: @headers, body: ""}) do
       {:ok, %{status: 200, body: body}} ->
@@ -182,10 +184,36 @@ defmodule BarkparkCloud.GitHub.CommitDistance do
     end
   end
 
-  # A client that raises is a transport failure like any other — this module's
-  # contract is that it never raises, and the caller's sweep must not care.
-  defp call(opts, request) do
-    case client(opts) do
+  @doc """
+  The exact compare URL this module would call for `served_sha` — the same
+  string a caller's per-tick memo is keyed on, so a memo can never key on a
+  URL that diverges from the one actually requested. Depends only on the
+  `:repo`/`:branch` config, never on the injected client.
+  """
+  @spec compare_url(String.t(), keyword()) :: String.t()
+  def compare_url(served_sha, opts \\ []) do
+    repo = config(opts, :repo, @default_repo)
+    branch = config(opts, :branch, @default_branch)
+    "#{@api_base}/repos/#{repo}/compare/#{served_sha}...#{branch}"
+  end
+
+  @doc """
+  Resolve the injected HTTP client (explicit `:http_client` opt → application
+  env → the real transport). Public so a per-tick sweep can WRAP the very
+  client this module would otherwise call, instead of bypassing it — a test's
+  injected fake stays in the path.
+  """
+  @spec resolve_client(keyword()) :: (map() -> term()) | module() | nil
+  def resolve_client(opts \\ []), do: client(opts)
+
+  @doc """
+  Invoke a resolved client on one request, total. A client that raises is a
+  transport failure like any other — this module's contract is that it never
+  raises, and the caller's sweep must not care.
+  """
+  @spec invoke((map() -> term()) | module() | nil, map()) :: term()
+  def invoke(client, request) do
+    case client do
       nil ->
         {:error, :http_client_not_configured}
 
@@ -200,6 +228,8 @@ defmodule BarkparkCloud.GitHub.CommitDistance do
   catch
     kind, reason -> {:error, {:client_threw, kind, reason}}
   end
+
+  defp call(opts, request), do: invoke(client(opts), request)
 
   # ── Verdict mapping ──
 

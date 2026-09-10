@@ -4327,14 +4327,23 @@ defmodule BarkparkWeb.TasksControllerTest do
     #
     # ALSO NOT COVERED, each measured while writing this:
     #
-    #   * `claim` — 936 B on the live page, STRUCTURALLY UNREACHABLE from a
-    #     ready fixture. A claim naming a worker takes the row off the ready
-    #     queue outright: seeding nine worker-bearing claims dropped the page
-    #     from 50 cards to 41. The live board serves nine ready cards that DO
-    #     render a claim, so live carries a claim shape this fixture cannot
-    #     construct; the seeded residues here are worker-less and render
-    #     nothing, which the card-key census printed below makes visible
-    #     instead of leaving to be inferred from a byte count.
+    #   * `claim` — WAS the standing example here and is no longer one
+    #     (task-2df8d2db70e2070d). This block used to say a worker-bearing
+    #     claim "takes the row off the ready queue outright", inferred from
+    #     nine seeds that dropped the page from 50 cards to 41. That mechanism
+    #     does not exist. The gate is the LEASE, not the worker:
+    #     `QueueGate.executable_query/0`, which `Queue.ready_query/1` mounts,
+    #     admits a worker-bearing claim on THREE arms — `claim.closed_at`
+    #     non-blank, `claim.closed_by` non-blank, or `claim.ts_iso` older than
+    #     `QueueGate.lease_ttl_seconds/0` — and fails CLOSED otherwise, which
+    #     is what those nine live-lease seeds hit. Measured live 2026-09-10 on
+    #     `bp task ready --limit 300`: 17 of 300 cards render a worker-bearing
+    #     claim, SIXTEEN on the closed_at arm and ONE on a 66.8 h lapsed lease.
+    #     So the residues below now carry a WORKER in the admitting shapes and
+    #     the key rides this probe instead of being measured as zero. The full
+    #     predicate reading, the live characterisation and the both-direction
+    #     mutation proof live in
+    #     `tasks_controller_ready_claim_worker_test.exs`.
     #   * `status` — 32 B live (2/50 rows are drafts) against 50/50 here, since
     #     `mk_card_task!/4` creates drafts. This fixture OVERCOUNTS that key by
     #     roughly 770 B; it is the one place the fixture is heavier than live.
@@ -4373,8 +4382,21 @@ defmodule BarkparkWeb.TasksControllerTest do
                 do: Map.put(extra, "parent_id", "phase-mix-#{rem(i, 3)}"),
                 else: extra
 
-            # 7/50 claim residues with a now-line (worker-less — a task with a
-            # LIVE claim worker is never ready); 3 of those now-lines past 160.
+            # 7/50 claim residues, each NAMING A WORKER and each in a shape the
+            # ready gate admits (task-2df8d2db70e2070d). Live 2026-09-10 is
+            # 17/300 worker-bearing claim cards — 16 on the `closed_at` arm,
+            # 1 on a lapsed lease — so the split here is 6 closed + 1 lapsed,
+            # the live ratio at this page size. `ts` is a 2026-07 stamp, i.e.
+            # already far past the QueueGate.lease_ttl_seconds/0 window, so
+            # card 50 rides arm 3 on its own. 3 of the now-lines run past 160.
+            #
+            # A worker-LESS residue renders no claim block at all
+            # (`Params.brief_claim/1`, task-7385811ef5120f3a) — which is the
+            # shape this fixture used to seed on all seven, so `claim` measured
+            # 0/50 here against 936 B live and no regression in that block could
+            # move this probe. The card-key census printed below is what makes
+            # the count visible rather than inferred, and the explicit
+            # assertion after it is what keeps it from silently returning to 0.
             extra =
               if i >= 44 do
                 now_text =
@@ -4382,12 +4404,22 @@ defmodule BarkparkWeb.TasksControllerTest do
                     do: String.duplicate("now-line words that ramble on ", 10),
                     else: "wiring the serializer, tests next (#{i})"
 
-                Map.put(extra, "claim", %{
+                claim = %{
+                  "worker" => "builder-#{i}",
                   "epoch" => 3,
                   "ts_iso" => ts,
                   "work_digest" => "abcd1234deadbeef",
                   "now" => %{"text" => now_text, "ts" => ts}
-                })
+                }
+
+                claim =
+                  if i == 50,
+                    do: claim,
+                    else: Map.put(claim, "closed_at", "2026-07-19T13:00:00.000000Z")
+
+                extra
+                |> Map.put("claim", claim)
+                |> Map.put("lifecycle_status", "blocked")
               else
                 extra
               end
@@ -4407,6 +4439,10 @@ defmodule BarkparkWeb.TasksControllerTest do
 
             # lifecycle_status — live 9/50 non-"open"; `blocked` is the one
             # value queue.ex admits besides open, and put_unless/4 emits it.
+            # These two are the claim-less blocked rows; the seven claim
+            # residues above are blocked too (live: 16 of 17 claim-bearing ready
+            # cards are), which lands this key at 9/50 — the live figure named
+            # at the top of this block.
             extra =
               if i in [7, 23], do: Map.put(extra, "lifecycle_status", "blocked"), else: extra
 
@@ -4481,6 +4517,19 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert Enum.count(payload["docs"], &Map.has_key?(&1, "disposition")) == 5,
              "realistic-mix fixture no longer measures `disposition` — the typical-page " <>
                "bound would be blind to the field pds-w27 put on the card"
+
+      # task-2df8d2db70e2070d: the probe must SEE the key it used to measure as
+      # zero. 7 of 50 cards render a claim and every one names its holder — a
+      # worker-less residue renders nothing, so a fixture that regressed to
+      # that shape would silently take `claim` back out of the bound.
+      claim_cards = Enum.filter(payload["docs"], &Map.has_key?(&1, "claim"))
+
+      assert length(claim_cards) == 7,
+             "realistic-mix fixture renders #{length(claim_cards)} claim blocks, not 7 — " <>
+               "the typical-page bound is blind to the 936 B `claim` carries live"
+
+      assert Enum.all?(claim_cards, &is_binary(&1["claim"]["worker"])),
+             "a rendered claim block with no holder — brief_claim/1 changed under this fixture"
 
       # pds-w27: reproducibility precondition for the number printed below.
       assert_fixed_width_ids!(payload["docs"])

@@ -241,6 +241,24 @@ defmodule BarkparkCloud.Registry.Deployment do
     field :deferral_bound, :integer
     field :deferral_cause, :string
 
+    # dr-bl-deferral-scheduled-vs-actual-gap: THE CHAIN'S PACE, beside its
+    # shape. The three columns above say how DEEP a chain went; these two say
+    # how FAST, and they describe THE SAME INTERVAL — the gap between the
+    # previous deferral of this chain and this one — so the scheduled-vs-actual
+    # ratio is per-row arithmetic and never a self-join.
+    #
+    #   * `deferral_scheduled_s`  — the window `deferral_backoff_seconds/1`
+    #     asked for when the PREVIOUS round re-queued.
+    #   * `deferral_actual_gap_s` — `inserted_at(this) - inserted_at(previous)`.
+    #
+    # NULLABLE AND NEVER DEFAULTED, for the same reason `health_exit_code` is:
+    # depth 1 has no previous round, so there IS no interval, and a 0 would
+    # render "no gap was measured" as "the rebuild fired instantly". Written by
+    # `Sites.Deploy.defer/3` in the same fenced transition as the depth trio;
+    # NULL on every pre-existing row, never backfilled.
+    field :deferral_scheduled_s, :integer
+    field :deferral_actual_gap_s, :integer
+
     # deploy-reliability W12 (S6): THE ATTEMPTS THAT MINTED NO ROW.
     # `Sites.AutoDeployWorker.defer_behind_running_build/2` refuses a second
     # concurrent build in the control plane and writes NO deployment row — the
@@ -538,6 +556,8 @@ defmodule BarkparkCloud.Registry.Deployment do
       :deferral_depth,
       :deferral_bound,
       :deferral_cause,
+      :deferral_scheduled_s,
+      :deferral_actual_gap_s,
       :claim_worker,
       :claimed_at,
       :claim_epoch
