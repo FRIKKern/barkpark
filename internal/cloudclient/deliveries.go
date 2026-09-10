@@ -51,7 +51,20 @@ import (
 )
 
 // PlatformDelivery is one row of the platform delivery record — exactly the
-// FIFTEEN keys PlatformDelivery.to_json/1 emits, in its order.
+// SIXTEEN keys PlatformDelivery.to_json/1 emits, in its order.
+//
+// THE SIXTEENTH IS `serving_since_basis` (dr-w29-bl), AND IT IS WHAT MAKES
+// `ServingSince` COMPARABLE — or refusable. The two targets derive that instant
+// from different clocks: the cp leg's comes from /health and is PROCESS-derived
+// (a bare restart that deploys nothing moves it FORWARD, so a lag measured
+// against it is an UPPER BOUND that reads SMALLER), while the instance leg's is
+// the mtime of /opt/barkpark/.instance-deploy-last — the flip instant itself.
+// The recorder always knew which; until this key nothing wrote it down, so a
+// reader comparing the two targets' `serving_since` mixed an upper bound with a
+// real timestamp and could not tell. It is a *string for the same reason
+// `carried` is a *bool: NULL means the recorder wrote NO basis (every row older
+// than the column), which is NOT a third derivation, and a plain string would
+// decode that into "" and render as a fourth silent state.
 //
 // IT WAS THIRTEEN UNTIL dr-w27-s2, AND THE TWO MISSING ONES WERE THE ROLLBACK
 // VERDICT. #11078 added `previous_sha` and `transition` to the serializer;
@@ -117,6 +130,7 @@ type PlatformDelivery struct {
 	QueuedStallSeconds  *int    `json:"queued_stall_seconds"`
 	BuildSeconds        *int    `json:"build_seconds"`
 	ServingSince        *string `json:"serving_since"`
+	ServingSinceBasis   *string `json:"serving_since_basis"`
 	Target              string  `json:"target"`
 	Carried             *bool   `json:"carried"`
 	PreviousSHA         *string `json:"previous_sha"`

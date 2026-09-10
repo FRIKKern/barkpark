@@ -974,6 +974,7 @@ defmodule BarkparkCloud.PlatformDeliveryTest do
                :queued_stall_seconds,
                :recorded_at,
                :serving_since,
+               :serving_since_basis,
                :sha,
                :target,
                :transition
@@ -1100,6 +1101,107 @@ defmodule BarkparkCloud.PlatformDeliveryTest do
 
       assert conn.status == 200
       assert body(conn) == %{"ok" => true, "received" => 2, "recorded" => 2}
+    end
+  end
+
+  ## 9. THE BASIS — WHICH CLOCK produced serving_since (dr-w29-bl)
+
+  describe "the serving_since_basis column" do
+    test "it is NULLABLE with NO default in the DATABASE" do
+      # Catalog-only, like `transition` above and for the same reason: a default
+      # would mint a derivation for every row written before the column existed,
+      # and there is no fact on this control plane from which those rows could be
+      # reclassified. NULL means NOT RECORDED and is not a third basis.
+      %{rows: rows} =
+        Repo.query!(
+          "SELECT column_name, is_nullable, column_default FROM information_schema.columns " <>
+            "WHERE table_name = 'platform_deliveries' AND column_name = 'serving_since_basis'"
+        )
+
+      assert [["serving_since_basis", "YES", nil]] = rows
+    end
+
+    test "THE TWO LIVE VALUES ARE DISTINGUISHED — one row per target, each carrying its own basis" do
+      # c0's evidence in one assertion: the cp leg's serving_since is
+      # process-derived and the instance leg's is the flip instant, and the TABLE
+      # now says which is which rather than leaving a reader to guess from
+      # `target`.
+      assert {:ok, %{recorded: 2}} =
+               PlatformDelivery.record_all([
+                 row(%{
+                   "delivering_run_id" => "basis-cp-run",
+                   "target" => "cp",
+                   "serving_since" => "2026-08-08T11:55:11.517221Z",
+                   "serving_since_basis" => "process_start"
+                 }),
+                 row(%{
+                   "delivering_run_id" => "basis-instance-run",
+                   "target" => "instance",
+                   "serving_since" => "2026-08-08T11:54:58.000000Z",
+                   "serving_since_basis" => "deploy_flip_mtime"
+                 })
+               ])
+
+      assert {:ok, cp} = fetch_by_run("basis-cp-run")
+      assert {:ok, instance} = fetch_by_run("basis-instance-run")
+
+      assert cp.target == "cp"
+      assert cp.serving_since_basis == "process_start"
+      assert instance.target == "instance"
+      assert instance.serving_since_basis == "deploy_flip_mtime"
+
+      # And the two instants are NOT the same clock: subtracting them is the
+      # comparison this column exists to make refusable.
+      refute cp.serving_since_basis == instance.serving_since_basis
+    end
+
+    test "the vocabulary is exactly the two live bases, and a third word is REFUSED" do
+      assert PlatformDelivery.serving_since_bases() == ~w(process_start deploy_flip_mtime)
+
+      assert {:error, {:invalid_row, 0, errors}} =
+               PlatformDelivery.record_all([
+                 row(%{
+                   "delivering_run_id" => "bad-basis-run",
+                   "serving_since_basis" => "wall_clock"
+                 })
+               ])
+
+      assert %{serving_since_basis: ["is invalid"]} = errors
+      assert {:error, {:no_row_for_run, _}} = fetch_by_run("bad-basis-run")
+    end
+
+    test "an omitted basis stays NULL — a writer that does not name one records no derivation" do
+      assert {:ok, %{recorded: 1}} =
+               PlatformDelivery.record_all([row(%{"delivering_run_id" => "no-basis-run"})])
+
+      assert {:ok, stored} = fetch_by_run("no-basis-run")
+      assert is_nil(stored.serving_since_basis)
+
+      json = PlatformDelivery.to_json(stored)
+      assert Map.has_key?(json, :serving_since_basis)
+      assert is_nil(json.serving_since_basis)
+    end
+
+    test "the READER route renders the basis in the response BYTES" do
+      # A column no reader can see is not a record. Asserted over the rendered
+      # bytes rather than over to_json/1, so a serializer change that never
+      # reaches the route reds here.
+      {user, team} = user_with_team()
+      token = pat(user, team, ["read"])
+
+      assert {:ok, %{recorded: 1}} =
+               PlatformDelivery.record_all([
+                 row(%{
+                   "delivering_run_id" => "basis-wire-run",
+                   "target" => "instance",
+                   "serving_since_basis" => "deploy_flip_mtime"
+                 })
+               ])
+
+      conn = call(:get, "/v1/deliveries?sha=#{@sha}", nil, token)
+      assert conn.status == 200
+      assert conn.resp_body =~ "serving_since_basis"
+      assert conn.resp_body =~ "deploy_flip_mtime"
     end
   end
 
