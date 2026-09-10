@@ -2704,8 +2704,16 @@ emit_spec "$TMP/nounion-spec.json" \
   bash "$NOUNION" "${SEEDARGS[@]}" "${ACK[@]}" --expect-unrendered "$SEEDNAME" \
   --expect-unrendered "$PRSEEDNAME" \
   --out "$TMP/nounion-spec.json" || true
-if jq -e --arg c "$SEEDNAME" \
-     '([.exclusions[].context] | index($c) | not) and (.exclusions | length < 20)' \
+# THE SECOND CONJUNCT IS A RELATION, NEVER A TYPED FLOOR. It stood as
+# `length < 20` — the derived count of the day — and S8 (§30) legitimately grew
+# the DERIVED set past it by classifying pull_request-only names the census
+# could not see, reddening a mutation arm that had nothing to say about S8. The
+# claim being made is "the un-merged run emits FEWER rows than the seeded base
+# carries", so it is written against the base rather than against a number
+# somebody has to re-earn every time the derivation gets better.
+if jq -e --arg c "$SEEDNAME" --slurpfile base "$SEEDX" \
+     '([.exclusions[].context] | index($c) | not)
+      and (.exclusions | length) < ($base[0].exclusions | length)' \
      "$TMP/nounion-spec.json" >/dev/null 2>&1; then
   ok "…and without it the IDENTICAL run drops the seeded row and emits $(jq '.exclusions | length' "$TMP/nounion-spec.json") of $(jq '.exclusions | length' "$SEEDX") (mutation-proven able to fail)"
 else
