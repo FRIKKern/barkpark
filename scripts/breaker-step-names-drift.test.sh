@@ -69,6 +69,33 @@ ARM = 'main-red-breaker.sh'
 bad = []
 notes = []
 covered = 0
+checked_files = 0
+
+
+def is_decide(st):
+    """The Decide step, not merely a step that MENTIONS the breaker.
+
+    shell-harnesses.yml runs `bash -n scripts/main-red-breaker.sh` as a syntax
+    check and lists the path in a dispatch table; a substring match called both
+    of those Decide steps. The real one is a ONE-LINE run body that execs the
+    breaker AND carries STEP_OUTCOMES in its env — the map it feeds."""
+    if not isinstance(st, dict):
+        return False
+    body = str(st.get('run') or '')
+    lines = [l for l in body.strip().splitlines() if l.strip()]
+    if len(lines) != 1 or not lines[0].strip().rstrip('"').endswith(ARM):
+        return False
+    return 'STEP_OUTCOMES' in (st.get('env') or {})
+
+
+def has_step_names_env(jobs):
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        for st in (job.get('steps') or []):
+            if isinstance(st, dict) and 'STEP_NAMES' in (st.get('env') or {}):
+                return True
+    return False
 
 for path in sys.argv[1:]:
     try:
@@ -93,7 +120,7 @@ for path in sys.argv[1:]:
         # after Decide (which the breaker can never see) is not miscounted.
         decide_i = None
         for i, st in enumerate(steps):
-            if isinstance(st, dict) and ARM in str(st.get('run') or ''):
+            if is_decide(st):
                 decide_i = i
                 break
         if decide_i is None:
@@ -160,15 +187,30 @@ for path in sys.argv[1:]:
         covered += len(gate_ids)
 
     if breaker_jobs == 0:
-        bad.append("%s: matched the STEP_NAMES derivation but has NO job whose "
-                   "steps exec %s — the guard would cover this file with zero "
-                   "assertions" % (path, ARM))
+        # A candidate that only MENTIONS the token in prose (a comment, a step
+        # name, a dispatch path table) is not a breaker-wired workflow and is
+        # dropped from the set, loudly. A candidate that carries a real
+        # STEP_NAMES env key but no Decide step is drift: that map feeds nothing.
+        if has_step_names_env(jobs):
+            bad.append("%s: carries a STEP_NAMES env key but has NO Decide step "
+                       "that execs %s — that map feeds nothing" % (path, ARM))
+        else:
+            notes.append("%s: matched the derivation on a PROSE mention only "
+                         "(no STEP_NAMES env key anywhere) — excluded from the "
+                         "checked set" % path)
+    else:
+        checked_files += 1
 
 for n in notes:
     print("NOTE: " + n)
 for b in bad:
     print("DRIFT-FAIL: " + b)
-print("checked %d gate step id(s) across %d workflow file(s)" % (covered, len(sys.argv) - 1))
+if checked_files == 0:
+    print("DRIFT-FAIL: no candidate file carried a breaker Decide step — the "
+          "checked set is EMPTY and this run asserts nothing")
+    bad.append("empty checked set")
+print("checked %d gate step id(s) across %d breaker-wired workflow file(s) "
+      "(%d candidate(s) from the derivation)" % (covered, checked_files, len(sys.argv) - 1))
 sys.exit(1 if bad else 0)
 PY
 }
@@ -179,7 +221,10 @@ for rel in "${WFS[@]}"; do abs+=("$ROOT/$rel"); done
 out="$(drift_check "${abs[@]}" 2>&1)"
 rc=$?
 if [ "$rc" -eq 0 ]; then
-  ok "1) every shipped STEP_NAMES map matches its job's gate steps — $(printf '%s' "$out" | tail -1)"
+  ok "1) every shipped STEP_NAMES map matches its job's gate steps — $(tail -1 <<<"$out")"
+  # NOTEs are the non-failing half of the verdict (id-less advisory steps,
+  # prose-only candidates). Printed on green too: nothing is skipped silently.
+  grep -F 'NOTE: ' <<<"$out"
 else
   no "1) the shipped tree DRIFTS:"
   printf '%s\n' "$out"
@@ -212,8 +257,11 @@ PY
   local mout mrc
   mout="$(drift_check "$copy" 2>&1)"
   mrc=$?
-  if [ "$mrc" -ne 0 ] && printf '%s' "$mout" | grep -qF "$want"; then
-    ok "$label — mutant reds, naming: $(printf '%s' "$mout" | grep -F "$want" | head -1)"
+  # herestrings, never `printf | grep -q`: with pipefail a reader that closes
+  # early SIGPIPEs the writer and the pipeline returns 141, so the assertion
+  # would flip to FAIL under a long mutant output.
+  if [ "$mrc" -ne 0 ] && grep -qF -- "$want" <<<"$mout"; then
+    ok "$label — mutant reds, naming: $(grep -m1 -F -- "$want" <<<"$mout")"
   else
     no "$label — mutant did NOT red on '$want' (rc=$mrc); got: $mout"
   fi
@@ -253,14 +301,23 @@ s = s.replace('      - name: Doc byte budgets (fails this job)\n', '      - name
 assert s != old, 'anchor drifted: the s1 step name is not in the expected form'" \
   "the breaker would ask main about a name it never had"
 
-# ── case 5: the untouched tree is still green after the mutants ──────────────
+# M4: the Decide step's exec line replaced. The map survives, so the file is
+# still a candidate — and a candidate whose map feeds nothing is drift, not a
+# reason to drop the file from the checked set.
+mutate "5) the Decide exec line dropped while STEP_NAMES stays" \
+  "old = s
+s = s.replace('        run: bash \"\$GITHUB_WORKSPACE/scripts/main-red-breaker.sh\"', '        run: true', 1)
+assert s != old, 'anchor drifted: the Decide exec line is not in the expected form'" \
+  "carries a STEP_NAMES env key but has NO Decide step"
+
+# ── case 6: the untouched tree is still green after the mutants ──────────────
 # The mutants run on copies; this re-reads the real files and proves the harness
 # left nothing behind and is not stuck red.
 out2="$(drift_check "${abs[@]}" 2>&1)"
 if [ $? -eq 0 ]; then
-  ok "5) the untouched tree re-reads green after the mutants — $(printf '%s' "$out2" | tail -1)"
+  ok "6) the untouched tree re-reads green after the mutants — $(tail -1 <<<"$out2")"
 else
-  no "5) the untouched tree is NOT green on re-read: $out2"
+  no "6) the untouched tree is NOT green on re-read: $out2"
 fi
 
 echo

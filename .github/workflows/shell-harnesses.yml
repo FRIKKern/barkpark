@@ -200,6 +200,7 @@ on:
       - "scripts/breaker-capture.sh"
       - "scripts/stale-tree-regression-check.sh"
       - "scripts/stale-tree-ci-wiring.test.sh"
+      - "scripts/breaker-step-names-drift.test.sh"
       - ".github/workflows/required-checks-drift.yml"
       - ".github/workflows/security.yml"
       - ".github/workflows/go-format.yml"
@@ -517,6 +518,7 @@ on:
       - "scripts/breaker-capture.sh"
       - "scripts/stale-tree-regression-check.sh"
       - "scripts/stale-tree-ci-wiring.test.sh"
+      - "scripts/breaker-step-names-drift.test.sh"
       - ".github/workflows/required-checks-drift.yml"
       - ".github/workflows/security.yml"
       - ".github/workflows/go-format.yml"
@@ -903,6 +905,7 @@ jobs:
           tooling-harnesses scripts/breaker-capture.sh
           tooling-harnesses scripts/stale-tree-regression-check.sh
           tooling-harnesses scripts/stale-tree-ci-wiring.test.sh
+          tooling-harnesses scripts/breaker-step-names-drift.test.sh
           tooling-harnesses .github/workflows/required-checks-drift.yml
           tooling-harnesses .github/workflows/doc-gates.yml
           tooling-harnesses .github/workflows/security.yml
@@ -1690,6 +1693,20 @@ jobs:
           python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
           bash -n scripts/stale-tree-regression-check.sh
           bash scripts/stale-tree-ci-wiring.test.sh
+      - name: "STEP_NAMES maps match their gate steps (every breaker-wired workflow)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # The sibling above is hard-pinned to ONE job in required-checks-drift.yml.
+        # This one DERIVES its subject set from `git grep -l STEP_NAMES --
+        # .github/workflows` (5 files, 61 gate ids today) and refuses an empty
+        # set, so a sixth breaker-wired workflow is covered the day it lands.
+        # Mutants run on a COPY of doc-gates.yml (the largest map): id removed,
+        # step added without an entry, step renamed under a stale name.
+        # PyYAML is load-bearing: without it the harness exits 2
+        # (HARNESS-UNAVAILABLE, never a pass), so install rather than skip.
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
+          bash -n scripts/breaker-step-names-drift.test.sh
+          bash scripts/breaker-step-names-drift.test.sh
       - name: fleet-run verdict matrix
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash tooling/fleet/fleet-run-verdict-test.sh
