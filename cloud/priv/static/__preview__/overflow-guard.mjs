@@ -90,6 +90,16 @@
 //        for .bp-console-toggle (pre-fix: 260px/12px/12px — the later base
 //        rules discarded the media block's declarations at equal
 //        specificity). Includes the .bp-console.is-collapsed twin control.
+//        GATED ON THE CASCADE (cch-w19-bl-gr115-intermittent-ua-defaults):
+//        every assertion in this leg reads a COMPUTED STYLE, so on a document
+//        app.css never reached every one of them is a UA default — which is
+//        what run 30714372486 printed as SIX findings a one-declaration
+//        mutation could not have caused, while run 30714465001 on
+//        byte-identical content printed the leg clean. stylesheet-applied.mjs
+//        establishes the precondition IN THE MEASUREMENT'S OWN EVALUATE and
+//        refuses at exit 2 when it fails; its witnesses are BASE declarations
+//        outside the 720 block, so a genuinely cascade-dead rule still exits 1
+//        (all three directions driven locally — see that file's header).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //  EVIDENCE HYGIENE, EACH PROVEN LIVE THIS EPIC (GR125)
@@ -185,6 +195,7 @@ import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.
 import { assertReadyHostsPaint as assertFloor } from "./ready-host-paint.mjs";
 import { selectDefects } from "./defect-selection.mjs";
 import { attentionScenarios } from "./attention-scenarios.mjs";
+import { stylesheetProbeJs, stylesheetRefusal, stylesheetVerdict } from "./stylesheet-applied.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
@@ -1713,6 +1724,10 @@ async function main() {
         `var out={bpMax:getComputedStyle(body).maxHeight,bpFs:getComputedStyle(body).fontSize,` +
         `togFs:getComputedStyle(tog).fontSize,newMax:getComputedStyle(nb).maxHeight,` +
         `newFs:getComputedStyle(nb).fontSize};` +
+        // THE CASCADE PRECONDITION, read in THIS evaluate — see
+        // stylesheet-applied.mjs. A second round trip would judge a
+        // different moment than the one it excuses.
+        `out.css=` + stylesheetProbeJs("host") + `;` +
         // Twin control (.bp-console.is-collapsed, GR115): transition:none on the
         // caret first, or the synchronous read returns the transition's START
         // value and manufactures a false red.
@@ -1723,6 +1738,23 @@ async function main() {
         `out.caretTransform=getComputedStyle(caret).transform;` +
         `host.remove();return out;})()`,
       );
+      // ── THE CASCADE PRECONDITION, BEFORE ANY COMPARISON ────────────────
+      // Every assertion below reads a COMPUTED STYLE, so every one of them is
+      // a UA default on a document app.css never reached — which is exactly
+      // the six findings run 30714372486 printed and run 30714465001, on
+      // byte-identical content, did not. That is an ENVIRONMENT fact and it
+      // speaks as exit 2. The witnesses are BASE declarations outside the
+      // @media block this leg hunts, so a genuinely cascade-dead 720-block
+      // rule moves none of them and still exits 1.
+      const cascade = stylesheetVerdict(m.css);
+      if (cascade.kind !== "ok") {
+        await die(stylesheetRefusal({
+          url: `${BASE}/?scen=empty&theme=light`,
+          reason: cascade.reason,
+          report: m.css,
+        }));
+        return;
+      }
       // 40vh of the 800px emulated viewport = 320px; pre-fix computes 260px.
       if (m.bpMax !== "320px") fail("GR115-bpconsole-dead-rule", `.bp-console-body max-height computes ${m.bpMax}, expected 320px (40vh @ 800) — the 720-block cap is cascade-dead`);
       if (m.bpFs !== "13px") fail("GR115-bpconsole-dead-rule", `.bp-console-body font-size computes ${m.bpFs}, expected 13px — the legibility floor ("no theater text falls below 13px") is false`);
