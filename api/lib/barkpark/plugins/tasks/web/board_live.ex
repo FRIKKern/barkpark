@@ -174,6 +174,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Content
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Content.Document
   alias Barkpark.Content.MutationEvent
   alias Barkpark.Content.Scope
@@ -197,7 +198,14 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     connected = connected?(socket)
 
     if connected do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+      # The document-list stream, tenant-fenced (task-5d0615ee60143cc8). The bare
+      # `documents:<dataset>` topic fans every tenant's frame out to every
+      # subscriber, so `Content.Broadcast` now strips a WORKSPACE-OWNED document's
+      # payload from it and carries the payload on the workspace-keyed topic alone.
+      # `subscribe_documents/2` joins BOTH — the shared layer on the global topic,
+      # this surface's own workspace on the keyed one — so every document arrives
+      # exactly once, WITH its payload, and no foreign tenant's body ever does.
+      Broadcast.subscribe_documents(@dataset, board_workspace_id())
       Process.send_after(self(), :refresh, @refresh_ms)
     end
 
@@ -3784,5 +3792,16 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   defp empty_board?(board) do
     board.cancelled_count == 0 and
       Enum.all?(Board.columns(), fn col -> board.columns[col] == [] end)
+  end
+
+  # The workspace whose task payloads this board renders. The board reads the
+  # flat/default scope (`Board.snapshot/1` is workspace-less), which is the
+  # scope `bp`'s own `/v1/tasks` writes resolve to via AssignDefaultScope — so
+  # the default workspace's keyed topic is the one carrying its cards.
+  defp board_workspace_id do
+    case Tenancy.get_default_workspace() do
+      %{id: id} when is_binary(id) -> id
+      _ -> nil
+    end
   end
 end

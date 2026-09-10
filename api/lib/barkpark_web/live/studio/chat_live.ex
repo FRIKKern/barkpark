@@ -33,6 +33,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   require Logger
 
   alias Barkpark.ChatHosts
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Content.DraftId
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
@@ -2087,7 +2088,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # published twin; a draft-twin echo must not flap the strip). A row is OURS
   # while this session's worker holds its claim and it is in_progress — any
   # other shape (closed, released, reaped, re-claimed elsewhere) drops it.
-  def handle_info({:document_changed, %{type: "task"} = msg}, socket) do
+  #
+  # PAYLOAD-BEARING FRAMES ONLY (task-5d0615ee60143cc8). `subscribe_hand_tasks/1`
+  # now joins BOTH document-list topics, so a workspace-owned task arrives
+  # twice: a payload-free frame on the global topic (`Broadcast.global_msg/1`
+  # strips `:doc`/`:document` there) and the real one on the workspace-keyed
+  # topic. The stripped twin would read an empty content map, compute
+  # `mine? == false`, and DELETE the row from the Doing strip a beat before
+  # the real frame re-added it. Require a `doc` map so it falls through to the
+  # catch-all below.
+  def handle_info({:document_changed, %{type: "task", doc: doc} = msg}, socket)
+      when is_map(doc) do
     id = msg.doc_id
 
     if String.starts_with?(id, "drafts.") do
@@ -6033,11 +6044,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # One-substrate law (chat-task-hands D1): the surface only PROMPTS — every
   # ledger write still goes through the agent's own bp/MCP hands.
 
-  # The whole dataset's document stream — the Doing strip folds task mutations
-  # out of it. Same global topic the SSE listener serves; cheap to filter.
+  # The dataset's document stream — the Doing strip folds task mutations out of
+  # it. Same topics the SSE listener serves; cheap to filter.
   defp subscribe_hand_tasks(socket) do
+    # The document-list stream, tenant-fenced (task-5d0615ee60143cc8). The bare
+    # `documents:<dataset>` topic fans every tenant's frame out to every
+    # subscriber, so `Content.Broadcast` now strips a WORKSPACE-OWNED document's
+    # payload from it and carries the payload on the workspace-keyed topic alone.
+    # `subscribe_documents/2` joins BOTH — the shared layer on the global topic,
+    # this surface's own workspace on the keyed one — so every document arrives
+    # exactly once, WITH its payload, and no foreign tenant's body ever does.
+    #
+    # The workspace is `hand_task_scope/0`'s — the SAME scope the picker and
+    # the agent's own bp hands write in, so the strip folds the rows it can act
+    # on.
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{socket.assigns.dataset}")
+      Broadcast.subscribe_documents(
+        socket.assigns.dataset,
+        Keyword.get(hand_task_scope(), :workspace_id)
+      )
     end
 
     socket
