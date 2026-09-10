@@ -37,8 +37,16 @@ defmodule Barkpark.Accounts do
   def change_user_registration(attrs \\ %{}),
     do: User.registration_changeset(%User{}, attrs)
 
-  @spec get_user(binary()) :: User.t() | nil
-  def get_user(id), do: Repo.get(User, id)
+  @spec get_user(binary() | nil) :: User.t() | nil
+  def get_user(id) do
+    # Guard the :binary_id cast: a non-UUID id would raise Ecto.Query.CastError
+    # the moment a caller wires a raw path param in. A malformed id matches no
+    # row -> nil, matching the guarded siblings (auth, media, tenancy, scim, ...).
+    case Repo.uuid_or_nil(id) do
+      nil -> nil
+      uuid -> Repo.get(User, uuid)
+    end
+  end
 
   @spec get_user_by_email(String.t()) :: User.t() | nil
   def get_user_by_email(email) when is_binary(email),

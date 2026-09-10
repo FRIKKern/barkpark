@@ -41,6 +41,29 @@ defmodule Barkpark.AccountsTest do
     end
   end
 
+  describe "get_user/1 (binary_id cast guard)" do
+    test "a malformed id returns nil instead of raising Ecto.Query.CastError" do
+      # RED WITHOUT THE GUARD: a bare Repo.get(User, "not-a-uuid") binds a
+      # non-UUID to a :binary_id primary key and raises Ecto.Query.CastError.
+      assert is_nil(Accounts.get_user("not-a-uuid"))
+      assert is_nil(Accounts.get_user(""))
+      assert is_nil(Accounts.get_user(nil))
+      assert is_nil(Accounts.get_user(42))
+    end
+
+    test "a well-formed id that matches no row returns nil" do
+      assert is_nil(Accounts.get_user(Ecto.UUID.generate()))
+    end
+
+    test "POSITIVE CONTROL: a real user's id still returns the user" do
+      user = user_fixture()
+      assert %User{id: id} = Accounts.get_user(user.id)
+      assert id == user.id
+      # String form is what a path param would carry; must still hit the row.
+      assert Accounts.get_user("#{user.id}").id == user.id
+    end
+  end
+
   describe "get_user_by_email_and_password/2" do
     test "returns the user only on a correct password" do
       user = user_fixture(%{email: "login@example.com"})
