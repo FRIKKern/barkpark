@@ -1304,7 +1304,7 @@ defmodule BarkparkWeb.TasksController.Params do
   @index_flat_keys ~w(view limit offset cursor type kind lifecycle_status parent parent_id phase_id label id_prefix)
   @ready_flat_keys ~w(view limit offset phase_id order worker)
   @prime_flat_keys ~w(view limit offset worker order)
-  @events_flat_keys ~w(since limit)
+  @events_flat_keys ~w(since limit doc_id payload)
 
   @route_filters %{
     index: %{
