@@ -1493,7 +1493,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # census — they are named by the EVALUATED register below and counted in
   # `@ast_blind_paths`. MEASURED by the PIN CO-EDIT arm on this tree
   # ("@emitted_pinned 169 -> 170"), never summed with an earlier delta.
-  @emitted_pinned 170
+  # 170 -> 171 (dr-w29-bl-serving-since-has-no-basis-column): `to_json/1` on
+  # PlatformDelivery gains ONE key, `serving_since_basis` — WHICH CLOCK produced
+  # that row's `serving_since` (process_start on the cp leg, an upper bound a
+  # bare restart moves forward; deploy_flip_mtime on the instance leg, the flip
+  # instant). MEASURED by the PIN CO-EDIT arm on this tree ("@emitted_pinned
+  # 170 -> 171"), never summed with an earlier delta.
+  @emitted_pinned 171
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -1684,7 +1690,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `DeployCensus`, so it rides free on the NAME union and moves the SITE
   # register instead. MEASURED by the PIN CO-EDIT arm ("@go_tag_pinned 359 ->
   # 362"), never derived from the diff.
-  @go_tag_pinned 362
+  # 362 -> 363 (dr-w29-bl-serving-since-has-no-basis-column):
+  # `cloudclient.PlatformDelivery` declares ONE new tag, `serving_since_basis`,
+  # and the name is new to the whole union — no other struct in the tree carries
+  # it, so it moves BOTH this pin and one site. MEASURED by the PIN CO-EDIT arm
+  # ("@go_tag_pinned 362 -> 363"), never derived from the diff.
+  @go_tag_pinned 363
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2904,7 +2915,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # MEASURED, not derived: the SERIALIZER-SIDE arm's un-allowlisted run printed
   # `27 unserialized column(s)` and the SCHEMA-SIDE arm printed
   # `110 schema column(s) collected`.
-  @schema_field_floor 110
+  # 110 -> 111 (dr-w29-bl-serving-since-has-no-basis-column): the
+  # `platform_deliveries` schema gains `serving_since_basis`.
+  # `@schema_unserialized_floor` does NOT move: the column is emitted by
+  # `PlatformDelivery.to_json/1` in the same commit that declares it.
+  # MEASURED, not derived: the SCHEMA-SIDE arm printed
+  # `111 schema column(s) collected`.
+  @schema_field_floor 111
   @schema_unserialized_floor 27
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:
