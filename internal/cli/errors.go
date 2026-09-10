@@ -293,6 +293,7 @@ var codeExit = map[string]int{
 	"source_not_found":           exitValidation, // 422, bulldocs_ingest_controller.ex:1478
 	"payload_too_large":          exitValidation, // 413, errors.ex:736
 	"import_body_too_large":      exitValidation, // 413, workspace_controller.ex:992
+	"searchable_text_too_large":  exitValidation, // 422, content/mutations.ex:216 (tsvector cap)
 	// 402. There is no payment/quota bucket in the 0-8 scheme, and inventing
 	// one would redefine the published table. 5 is the honest neighbour: it
 	// says "not retryable as sent", which is the fact a wrapper needs.
