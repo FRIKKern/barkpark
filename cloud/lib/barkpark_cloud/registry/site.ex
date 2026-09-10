@@ -501,6 +501,44 @@ defmodule BarkparkCloud.Registry.Site do
     |> validate_length(:doc_type, min: 1, max: 100)
   end
 
+  @doc """
+  site-spawner `site-rebind-content`: the REBIND changeset — a static/node site
+  changes WHICH workspace/project/dataset it builds from, and swaps the
+  scope-bound public-read credential in the SAME write.
+
+  Deliberately NOT `changeset/2`: a wide cast over a site struct loaded earlier
+  in the request would write back whatever that struct happened to hold for
+  `domains`, `env_encrypted` or `current_deployment_id`. It builds ON
+  `settings_changeset/2` so a PATCH that moves the binding AND the theme/doc_type
+  in one request lands as ONE `Repo.update` — the binding and the credential that
+  authorizes it can never be half-applied.
+
+  All three binding columns are `validate_required`: the triple is the unit, and
+  a row holding two of three is precisely the half-bound ghost the create door
+  (`require_content_triple/1`) exists to refuse. `read_token_encrypted` is
+  required for the same reason `read_token_changeset/2` requires it — a rebind
+  that blanked the credential would take the site dark on its next build.
+  """
+  def content_binding_changeset(site, attrs) do
+    site
+    |> settings_changeset(attrs)
+    |> cast(attrs, [
+      :bootstrap_workspace,
+      :bootstrap_project,
+      :bootstrap_dataset,
+      :read_token_encrypted,
+      :content_binding_verdict,
+      :content_binding_checked_at
+    ])
+    |> validate_required([
+      :bootstrap_workspace,
+      :bootstrap_project,
+      :bootstrap_dataset,
+      :read_token_encrypted
+    ])
+    |> validate_inclusion(:content_binding_verdict, @binding_verdicts)
+  end
+
   defp validate_github_repo(changeset) do
     case get_change(changeset, :github_repo) do
       nil ->

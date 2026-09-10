@@ -186,7 +186,9 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites            user      create a hosted Site under a Barkpark
       GET     /v1/sites            user(s)   list the team's sites (across all boxes)
       GET     /v1/sites/:id        user      one site
-      PATCH   /v1/sites/:id        user(s)   update a site's settings (write ability)
+      PATCH   /v1/sites/:id        user(s)   update a site's settings (write ability); a
+                                              workspace+project+dataset REBIND additionally
+                                              needs deploy-or-root and re-mints the read token
       DELETE  /v1/sites/:id        user(s)   delete a site — tear it down on the box + deregister (write ability)
       GET     /v1/sites/:id/domain-status user  per-domain DNS/TLS/serving checklist, CF-mode-aware (team-scoped)
       GET     /v1/sites/:id/doctor user  every substrate this site occupies, three-valued, each absence naming its repair (team-scoped)
@@ -8338,6 +8340,22 @@ defmodule BarkparkCloud.Web.Router do
         |> Map.take(["theme", "doc_type", "prebuilt_enabled"])
         |> Map.new(fn {k, v} -> {String.to_existing_atom(k), v} end)
 
+      # site-spawner `site-rebind-content`: THE CONTENT BINDING half. Read
+      # through `put_site_content_binding/2` — the SAME reader the create door
+      # uses — so both wire spellings (`workspace` and `bootstrap_workspace`) and
+      # the blank-is-absent rule are ONE definition, not two that drift.
+      #
+      # `Map.take/2` back down to the triple on purpose: that helper also folds
+      # doc_type/template/theme/read_token for create, and a PATCH must not be a
+      # back door onto `template` (infrastructural, immutable here) or onto a
+      # BYO `read_token` the control plane never minted and cannot revoke.
+      rebind =
+        %{}
+        |> put_site_content_binding(conn.body_params)
+        |> Map.take([:bootstrap_workspace, :bootstrap_project, :bootstrap_dataset])
+
+      rebinding? = rebind != %{}
+
       # TURNING ON off-box builds is a CAPABILITY GRANT, not a content setting,
       # and it needs the `deploy` ability — the same one domain bind/unbind
       # demands, and for the same reason: it changes what this site will accept
@@ -8371,11 +8389,36 @@ defmodule BarkparkCloud.Web.Router do
                 "no PAT can hold both. Turning it OFF needs only write."
           })
 
+        # A REBIND IS A CREDENTIAL MINT, so it sits at the same bar as enabling
+        # prebuilt and NOT at plain `write`. It names a workspace/project/dataset
+        # and the control plane mints a live public-read token there — the exact
+        # authority `POST /v1/sites` reserves to a SESSION (`Auth.require_user/2`,
+        # no PAT arm at all). Leaving rebind at bare `write` would hand a `write`
+        # PAT a scope-naming mint that no PAT can obtain at create: an escalation
+        # created by the cheaper door, which is the shape this family already
+        # refuses one line above.
+        #
+        # theme/doc_type/prebuilt_enabled=false stay plain `write` — this adds
+        # one gate on one arm, it does not re-tier the route.
+        rebinding? and not may_grant? ->
+          json(conn, 403, %{
+            error: "rebind_ability_required",
+            detail:
+              "repointing a site's content binding MINTS a public-read token in the scope you name — " <>
+                "use a SESSION (the dashboard) or a root credential, the same authority POST /v1/sites " <>
+                "requires to mint one at create. theme, doc_type and prebuilt_enabled need only write."
+          })
+
+        rebinding? ->
+          rebind_site_content(conn, site, rebind, attrs)
+
         attrs == %{} ->
           json(conn, 422, %{
             error: "nothing_to_update",
             detail:
-              "mutable fields: theme (palette), doc_type (featured content type), prebuilt_enabled (accept off-box builds)"
+              "mutable fields: theme (palette), doc_type (featured content type), " <>
+                "prebuilt_enabled (accept off-box builds), workspace + project + dataset " <>
+                "(the content binding — all three together)"
           })
 
         true ->
@@ -8395,6 +8438,116 @@ defmodule BarkparkCloud.Web.Router do
       end
     end)
   end
+
+  # THE REBIND (site-spawner `site-rebind-content`). A static/node site's content
+  # binding used to be write-once at create: a typo'd dataset, or a promotion from
+  # staging to production, meant DELETE + recreate — a new id, a new slug, a new
+  # URL, and every domain re-bound by hand.
+  #
+  # The whole act, in create's own order, with create's own guards:
+  #
+  #   1. `require_rebindable_kind/1` — a container site builds from a repo and has
+  #      no binding to move.
+  #   2. `require_content_triple/1` — THE SAME guard `POST /v1/sites` runs, so a
+  #      partial rebind is refused with byte-identical copy. This is the atomicity
+  #      the row asks for: workspace+project+dataset is ONE value. A PATCH of just
+  #      `dataset` would otherwise mint a token scoped to the OLD workspace and
+  #      the NEW dataset — a binding nobody asked for and nothing validated.
+  #   3. name the INCUMBENT credential BEFORE minting (see
+  #      `Registry.site_read_token_id/1` for why the order is load-bearing).
+  #   4. `mint_site_read_token/3` — the token is scoped to workspace/project/
+  #      dataset, so a moved binding with the old token is a site that builds 403s.
+  #      Same helper, same label, same `mint_failed` 502 as create.
+  #   5. `verify_content_binding/2` — READ the new binding back with the new
+  #      token, and refuse `content_binding_empty` exactly as create does. A
+  #      rebind onto a dataset the site cannot read is the same ghost create
+  #      refuses at the door; it must not be reachable through the side door.
+  #   6. ONE `Repo.update` for binding + credential + verdict (+ any settings the
+  #      same PATCH moved), then revoke the incumbent BY ID in the OLD scope.
+  #
+  # KNOWN, DELIBERATE, AND SHARED WITH CREATE: a step-5 refusal leaves the token
+  # minted in step 4 live on the box (the mint returns a plaintext, not an id, and
+  # naming it costs a second inventory read on a path that is already refusing).
+  # `mix barkpark_cloud.site_read_tokens` is the sweep that finds it, exactly as
+  # it does for a refused create.
+  defp rebind_site_content(conn, site, rebind, settings) do
+    bp = Registry.get_barkpark(site.barkpark_id)
+    # The type the build would read AFTER this PATCH — a request that moves the
+    # dataset AND the doc_type must be verified against the pair it is asking for,
+    # never against the type the row happens to hold now.
+    doc_type = Map.get(settings, :doc_type) || site.doc_type
+
+    with :ok <- require_rebindable_kind(site.kind),
+         :ok <- require_content_triple(rebind),
+         attrs <- rebind |> Map.put(:kind, site.kind) |> Map.put(:doc_type, doc_type),
+         incumbent when incumbent != :unknown <- Registry.site_read_token_id(site),
+         {:ok, attrs} <- mint_site_read_token(bp, attrs, site.slug),
+         {:ok, binding} <- verify_content_binding(bp, attrs),
+         attrs <- attrs |> put_binding_verdict(binding) |> Map.merge(settings),
+         {:ok, updated, revoked} <- Registry.rebind_site_content(site, attrs, incumbent) do
+      push_event(updated.team_id, "sites")
+
+      json(
+        conn,
+        200,
+        Map.merge(
+          %{
+            site: site_json(updated, bp),
+            note:
+              "content binding moved and the read token re-minted for the new scope; " <>
+                "the next deploy builds from it",
+            # The old credential's fate, in the wire's own words — the same
+            # three-valued honesty `DELETE /v1/sites/:id` reports, and for the
+            # same reason: "could not confirm" is not "revoked".
+            previous_read_token: to_string(revoked)
+          },
+          binding_note(binding)
+        )
+      )
+    else
+      {:error, :binding_not_applicable} ->
+        json(conn, 422, %{
+          error: "content_binding_not_applicable",
+          detail:
+            "a #{site.kind} site builds from its own repo — there is no content binding to move"
+        })
+
+      # Byte-identical to create's arm: one refusal, one wording.
+      {:error, {:binding_required, missing}} ->
+        json(conn, 422, %{
+          error: "content_binding_required",
+          detail:
+            "a static site builds FROM your content — bind it with " <>
+              "`--dataset <workspace>/<project>/<dataset>` (missing: #{Enum.join(missing, ", ")})"
+        })
+
+      :unknown ->
+        json(conn, 502, %{
+          error: "read_token_inventory_unreadable",
+          detail:
+            "could not read this site's current credential on #{bp && bp.slug} — a rebind that " <>
+              "cannot name what it replaces would leave a live public-read token behind in the " <>
+              "old scope. Nothing was changed."
+        })
+
+      {:error, {:mint_failed, detail}} ->
+        json(conn, 502, %{error: "read_token_mint_failed", detail: detail})
+
+      {:error, {:binding_empty, detail, menu}} ->
+        json(
+          conn,
+          422,
+          %{error: "content_binding_empty", detail: detail}
+          |> maybe_put_menu(menu)
+        )
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        json(conn, 422, %{error: "invalid_settings", detail: errors(cs)})
+    end
+  end
+
+  defp require_rebindable_kind(kind) when kind in ["static", "node"], do: :ok
+  defp require_rebindable_kind(_kind), do: {:error, :binding_not_applicable}
 
   # DELETE /v1/sites/:id → 200 {ok, status:"deleted"} | error. The inverse of a
   # spawn: tear the site down on its box (stop slots, disarm the Caddy route,
