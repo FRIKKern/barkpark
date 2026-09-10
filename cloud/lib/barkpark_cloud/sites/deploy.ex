@@ -75,6 +75,11 @@ defmodule BarkparkCloud.Sites.Deploy do
   # for "on the box, going live"), and only then `live`.
   @switch_stage "SWITCH"
 
+  # The stage that COPIES the bytes into the release dir. charter D188: it is
+  # where the box takes its first digest of the tree, against which SWITCH's
+  # independent re-reading is compared.
+  @stage_stage "STAGE"
+
   # The `code_rev` a box that has reported NEITHER a git commit NOR a version
   # falls back to. It is a constant, so it freezes that half of `build_id` — see
   # `code_rev_known?/1`, which exists so a scheduled caller can SEE that.
@@ -1326,6 +1331,13 @@ defmodule BarkparkCloud.Sites.Deploy do
     |> maybe_put(:port, report.served_port)
     |> maybe_put(:slot, slot_name(ctx.site, report.served_port, report.served_slot))
     |> maybe_put(:health_exit_code, report.health_exit_code)
+    # charter D188. The SERVED reading, not the staged one: `build_sha256` is
+    # the row's claim about the bytes in front of users, so it must be the
+    # measurement taken through `current` after SWITCH. Omitted (never nil-ed)
+    # when the box narrated none, for the same reason `health_exit_code` is —
+    # a column overwritten with a value nobody measured is worse than an empty
+    # one.
+    |> maybe_put(:build_sha256, report.served_sha256)
   end
 
   defp maybe_put(attrs, _key, nil), do: attrs
@@ -1376,6 +1388,42 @@ defmodule BarkparkCloud.Sites.Deploy do
   # and the deployment together, in ONE transaction — no window where the
   # deployment says `live` but the site still points at the previous build.
   defp settle_live(ctx, report) do
+    case artifact_receipt(report) do
+      :ok -> settle_live_now(ctx, report)
+      {:error, reason} -> fail(ctx, reason, measured(ctx, report))
+    end
+  end
+
+  # THE SERVED ARTIFACT AGAINST THE ROW'S CLAIM (charter D188).
+  #
+  # The box takes TWO independent digests of the release tree: one at STAGE, over
+  # what it just copied in, and one at SWITCH, over whatever `current` resolves
+  # to once the flip has committed. They are the same quantity measured twice
+  # across the one operation that can change which bytes are live.
+  #
+  # Equal is the whole story of a correct deploy. UNEQUAL means the tree that
+  # went live is not the tree this run staged — a release dir swapped underneath
+  # the flip, a `current` left pointing at a neighbour, an out-of-band write
+  # between the copy and the symlink. Before this, nothing on the box and nothing
+  # on the row could raise that disagreement for a box build: 30,627 of 30,633
+  # prod rows carried `artifact_sha256` NULL and the box wrote
+  # `.bp-prebuilt-sha256` only on the prebuilt arm, so a wrong artifact could be
+  # served with every instrument agreeing.
+  #
+  # SILENCE IS NOT A MISMATCH. A box that predates the D188 markers narrates
+  # neither token, and one that has no sha256 tool narrates `none`, which
+  # `stage_digest/3` already answers nil for — both leave the deployment alone.
+  # Only two digests that BOTH exist and DIFFER fail the row. A gate that read
+  # "missing" as "wrong" would fail every deploy on the fleet the day it shipped.
+  defp artifact_receipt(%{built_sha256: built, served_sha256: served})
+       when is_binary(built) and is_binary(served) and built != served do
+    {:error,
+     "the box served a different release than the one it staged (staged #{built}, serving #{served}) — the bytes in front of users are not this build's; the live release was NOT recorded, re-deploy this build_id"}
+  end
+
+  defp artifact_receipt(_report), do: :ok
+
+  defp settle_live_now(ctx, report) do
     attrs =
       Map.merge(measured(ctx, report), %{
         status: "live",
@@ -2706,7 +2754,9 @@ defmodule BarkparkCloud.Sites.Deploy do
           failure_reason: String.t() | nil,
           served_port: pos_integer() | nil,
           served_slot: String.t() | nil,
-          health_exit_code: non_neg_integer() | nil
+          health_exit_code: non_neg_integer() | nil,
+          built_sha256: String.t() | nil,
+          served_sha256: String.t() | nil
         }
   def normalize_report(body) when is_map(body) do
     stages =
@@ -2742,7 +2792,18 @@ defmodule BarkparkCloud.Sites.Deploy do
       #     "this box never measured health" into "its health gate passed".
       served_port: nonneg_int(body["served_port"]),
       served_slot: nonblank(body["served_slot"]),
-      health_exit_code: nonneg_int(body["health_exit_code"])
+      health_exit_code: nonneg_int(body["health_exit_code"]),
+      # charter D188 — THE TWO RECEIPTS, read out of the stage details the box
+      # already narrates. They ride the DETAIL rather than a new top-level key
+      # on purpose: `served_port` and `health_exit_code` reach this map only
+      # because `api/lib/barkpark/sites/deploy_runner.ex` and its controller
+      # lift them into the status body, and that surface is a different tree
+      # from this one. The stage array is already transported verbatim, so a
+      # detail token needs no producer change and cannot be dropped by a box
+      # that predates it — such a box simply narrates no token, and nil is the
+      # honest "not measured".
+      built_sha256: stage_digest(stages, @stage_stage, "bp-build-sha256"),
+      served_sha256: stage_digest(stages, @switch_stage, "bp-served-sha256")
     }
   end
 
@@ -2754,7 +2815,9 @@ defmodule BarkparkCloud.Sites.Deploy do
       failure_reason: nil,
       served_port: nil,
       served_slot: nil,
-      health_exit_code: nil
+      health_exit_code: nil,
+      built_sha256: nil,
+      served_sha256: nil
     }
 
   # An integer the box measured, or nil. A JSON `null`, a missing key, a blank
@@ -2770,6 +2833,34 @@ defmodule BarkparkCloud.Sites.Deploy do
   end
 
   defp nonneg_int(_), do: nil
+
+  # A 64-hex digest the box narrated in ONE named stage's detail, or nil.
+  #
+  # Scoped to the stage, never to the whole log: the two tokens name two
+  # INDEPENDENT readings of the same tree (STAGE measures what it just staged,
+  # SWITCH re-measures what `current` resolves to after the flip), and the whole
+  # point is that they can disagree. A search across all stages would find
+  # whichever came first and quietly make the comparison self-satisfying.
+  #
+  # Anything that is not 64 lowercase hex is nil — including the literal `none`
+  # the box narrates on a host with no sha256 tool. "Could not measure" must
+  # never render as a digest.
+  defp stage_digest(stages, stage_name, token) when is_list(stages) do
+    stages
+    |> Enum.filter(&(&1.name == stage_name))
+    |> Enum.find_value(fn stage -> digest_token(stage[:detail] || stage["detail"], token) end)
+  end
+
+  defp stage_digest(_stages, _stage_name, _token), do: nil
+
+  defp digest_token(detail, token) when is_binary(detail) do
+    case Regex.run(~r/\b#{Regex.escape(token)}=([0-9a-f]{64})\b/, detail) do
+      [_, sha] -> sha
+      _ -> nil
+    end
+  end
+
+  defp digest_token(_detail, _token), do: nil
 
   defp normalize_stage(%{} = s) do
     name = s["name"] || s["stage"]

@@ -58,7 +58,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/agent/report     agent     land a health report (health + events)
       POST    /v1/agent/space      agent     land the disk-consumption payload (event only)
       GET     /v1/agent/commands   agent     approved-command queue (empty for now)
-      POST    /v1/agent/results    agent     ack command results
+      POST    /v1/agent/results    agent     count + ack command results (rejected/timed_out/failed)
       GET     /v1/barkparks        user      the team's registered Barkparks (+provision_status)
       GET     /v1/audit            admin     the team's append-only audit trail (keyset-paginated; ?actor_user_id= / ?action_prefix= narrow it)
       DELETE  /v1/barkparks/:id    admin     remove an instance (deregister; live box → 409)
@@ -276,6 +276,7 @@ defmodule BarkparkCloud.Web.Router do
 
   alias BarkparkCloud.{
     Accounts,
+    AgentCommandResults,
     ArchiveStore,
     Azure,
     Billing,
@@ -1504,12 +1505,25 @@ defmodule BarkparkCloud.Web.Router do
   # POST /v1/agent/results — body is a JSON array of CommandResult. With an empty
   # queue the agent never POSTs here, but the route exists and acks so a future
   # queue source has its landing spot. → 200 {ok: true}.
+  #
+  # The body is READ before the ack (dr-w19-bl). It used to be dropped on the
+  # floor: `require_agent` then a bare 200, over a payload in which the agent
+  # had faithfully recorded an allowlist rejection (`approved: false`), a
+  # blown 5-minute deadline ("timed out after ...") or a non-zero exit. A 200 OK
+  # over a discarded failure report is a capability that cannot complain.
+  # `AgentCommandResults.record/2` buckets each entry and emits a per-failure
+  # `Logger.warning` plus one telemetry event, so each of those three is
+  # countable; the STATUS stays 200 because the Go agent has no retry behaviour
+  # to drive off anything else and inventing one here would change the wire
+  # contract from the server side.
   post "/v1/agent/results" do
     conn = Auth.require_agent(conn, [])
 
     if conn.halted do
       conn
     else
+      _ = AgentCommandResults.record(conn.assigns.current_barkpark, conn.body_params)
+
       json(conn, 200, %{ok: true})
     end
   end
@@ -14906,6 +14920,30 @@ defmodule BarkparkCloud.Web.Router do
 
   # The approved-command queue source. Empty by default; a configurable stub lets
   # a test (or cloud-13) inject commands without a queue backend.
+  #
+  # THE RAIL ABOVE THIS IS INERT IN PRODUCTION, AND THAT IS NOT A COMMENT ABOUT
+  # THE FUTURE — IT IS THE STATE TODAY (dr-w19-bl). There is NO producer:
+  #
+  #     git grep -n command_queue -- cloud/lib cloud/config
+  #     → router.ex: this definition, and its ONE caller (GET /v1/agent/commands)
+  #
+  # No `cloud/config/*.exs` sets `config :barkpark_cloud, __MODULE__,
+  # command_queue: ...`, and nothing in `cloud/lib` writes the key at runtime.
+  # `Application.get_env/3`'s default therefore ALWAYS wins outside a test, so
+  # `GET /v1/agent/commands` always answers `[]`, the Go agent's
+  # `len(cmds) == 0` fast-path in `RunOnce` always fires, and the six
+  # allowlisted actions in `internal/agent/commands.go` (restart, rebuild,
+  # backup, update, doctor, logs) can never be dispatched. The console
+  # advertises them; the wire cannot carry them.
+  #
+  # The SUCCESSOR is a queue backend — a table plus an enqueue path from the
+  # console — which this file already names cloud-13 (the phase that owns it,
+  # per the `GET /v1/agent/commands` comment above; the successor TASK row is
+  # dr-w19-bl's follow-up, not this change). Until that lands, the one thing this half of
+  # the rail DOES do is answer honestly: `[]` is a true statement about an
+  # empty queue, not a swallowed error. The other half (POST /v1/agent/results)
+  # was the dishonest one, and is fixed above: it now counts what it is told
+  # rather than acking 200 over a discarded failure.
   defp command_queue do
     Application.get_env(:barkpark_cloud, __MODULE__, [])
     |> Keyword.get(:command_queue, [])

@@ -2899,6 +2899,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w24-s4 KNOWN OPEN — the freshness stamp of apply_arming, same custody and same measurement as its twin above. Without it an `unarmed` verdict cannot be told from one taken a month ago, which is the whole reason the column exists beside the verdict."},
     {"barkpark_json/6", "updated_at",
      "RULED — deliberately off the wire: it moves on every hourly status poll, so a renderer diffing it would report 'something changed' about a box nothing happened to. `inserted_at` IS emitted, under its wire name created_at."},
+    {"site_deployment_json/3", "build_sha256",
+     "dr-w12-bl-box-build-writes-no-digest KNOWN OPEN (charter D188) — the sha256 of the release tree the box measured through `current` AFTER SWITCH committed. Its reader THIS wave is server-side and per-row: `Sites.Deploy.artifact_receipt/1` compares it against the box's independent STAGE-time reading and refuses to record the deployment live when the two disagree. `site_deployment_json/3` lives in router.ex, a 15k-line shared registry file outside this task's fence, and emitting it also needs a `SiteDeployment` Go struct field (internal/cloudclient) or `json.Unmarshal` silently drops it — both are the follow-up, and this row is where that is written down."},
     {"site_deployment_json/3", "claim_worker",
      "dr-w24-s4 KNOWN OPEN — which builder claimed this deployment. Lease bookkeeping today; it becomes a wire vital the moment two builders can race, which is the failure mode this epic exists for."},
     {"site_deployment_json/3", "claimed_at",
@@ -3022,8 +3024,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `114 schema column(s) collected` and the SERIALIZER-SIDE arm printed
   # `30 unserialized column(s)`. The pre-merge measurement said 113/30 and is
   # VOID — it was taken against a main without `serving_since_basis`.
-  @schema_field_floor 114
-  @schema_unserialized_floor 30
+  # dr-w12-bl-box-build-writes-no-digest (charter D188) moves BOTH pins by
+  # exactly one: `deployments.build_sha256` joins the schema side (114 -> 115)
+  # and, being deliberately off the wire, the unserialized side too (30 -> 31).
+  # Its @schema_allowlist row below carries the reason.
+  @schema_field_floor 115
+  @schema_unserialized_floor 31
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:
   # `delivery_json/1` (router.ex:9809) is the NOTIFICATIONS delivery serializer,

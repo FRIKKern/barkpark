@@ -160,6 +160,19 @@ defmodule Barkpark.Media.ImageMetadata do
   # Only when the rendition backend can decode the blob — Renditions gates on
   # the raster mime set and answers {:error, _} otherwise, which leaves `lqip`
   # unset rather than fabricated.
+  # Reachability: `rel` is never caller data — it is `Renditions.ensure/2`'s
+  # return value (lib/barkpark/media/renditions.ex:93), which is always
+  # `cache_relative/4`'s output (lib/barkpark/media/renditions.ex:186):
+  # `Path.join(["_renditions", id, "<preset><suffix>.<ext>"])` over a fixed
+  # literal prefix, the `MediaFile` `:binary_id` UUID
+  # (lib/barkpark/media/storage/media_file.ex:5), the `@presets` key
+  # `@lqip_preset` and that preset's own declared format. This call passes NO
+  # opts, so `watermark_profile/1` yields "none" and the suffix is the empty
+  # string — no argument of `maybe_lqip/2` reaches any path component.
+  # `Media.file_path/1` (lib/barkpark/media.ex:930) then joins that under
+  # `Media.upload_dir/0`, so the read is confined to one file inside the
+  # rendition cache root.
+  # sobelow_skip ["Traversal.FileModule"]
   defp maybe_lqip(image, file) do
     if blank?(Map.get(image, "lqip")) do
       with {:ok, rel} <- Renditions.ensure(file, @lqip_preset),
