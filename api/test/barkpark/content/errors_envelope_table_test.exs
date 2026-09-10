@@ -75,6 +75,18 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
        "workspace_scope_required", 422, []},
       {"workspace_scope_required/workspaces", {:error, {:workspace_scope_required, ["a", "b"]}},
        "workspace_scope_required", 422, [:details]},
+      # The generated documents.search_vector column overflowed Postgres' single
+      # tsvector cap (SQLSTATE 54000). 422, NOT the 413 payload_too_large the
+      # request-body bound emits: the cap is on the derived index, so the two must
+      # never collapse into one code.
+      {"searchable_text_too_large/located",
+       {:error,
+        {:searchable_text_too_large, 1_048_575,
+         %{document: "doc-1", field: "/body", bytes: 1_700_000}}}, "searchable_text_too_large",
+       422, [:details]},
+      {"searchable_text_too_large/unlocated",
+       {:error, {:searchable_text_too_large, 1_048_575, nil}}, "searchable_text_too_large", 422,
+       [:details]},
       {"quota_exceeded", {:error, :quota_exceeded}, "quota_exceeded", 402, []},
       {"quota_exceeded/quota", {:error, {:quota_exceeded, %{writes: 10}}}, "quota_exceeded", 402,
        [:details]},

@@ -483,32 +483,31 @@ defmodule Barkpark.Content.Errors do
   # not. `details.limit_bytes` names the limit; `details.field` names the
   # longest string in the submitted payload (with its document id and byte
   # size) so the caller knows WHERE to cut.
-  defp build({:error, {:searchable_text_too_large, limit_bytes, field}})
+  defp build({:error, {:searchable_text_too_large, limit_bytes, %{} = field}})
        when is_integer(limit_bytes) do
-    details =
-      case field do
-        %{document: doc_id, field: path, bytes: bytes} ->
-          %{limit_bytes: limit_bytes, document: doc_id, field: path, field_bytes: bytes}
-
-        _ ->
-          %{limit_bytes: limit_bytes}
-      end
-
-    message =
-      case field do
-        %{field: path, bytes: bytes} when is_binary(path) ->
-          "the document's searchable text exceeds the #{limit_bytes}-byte full-text index limit; " <>
-            "the largest field in this write is #{path} (#{bytes} bytes)"
-
-        _ ->
-          "the document's searchable text exceeds the #{limit_bytes}-byte full-text index limit"
-      end
+    %{document: doc_id, field: path, bytes: bytes} = field
 
     %{
       code: "searchable_text_too_large",
-      message: message,
+      message:
+        "the document's searchable text exceeds the #{limit_bytes}-byte full-text index limit; " <>
+          "the largest field in this write is #{path} (#{bytes} bytes)",
       status: 422,
-      details: details
+      details: %{limit_bytes: limit_bytes, document: doc_id, field: path, field_bytes: bytes}
+    }
+  end
+
+  # The batch carried no string worth naming (a delete/publish op, or a payload
+  # whose text all lives somewhere the locator does not walk). The limit is still
+  # named; only the WHERE is absent — and it is absent rather than guessed.
+  defp build({:error, {:searchable_text_too_large, limit_bytes, _field}})
+       when is_integer(limit_bytes) do
+    %{
+      code: "searchable_text_too_large",
+      message:
+        "the document's searchable text exceeds the #{limit_bytes}-byte full-text index limit",
+      status: 422,
+      details: %{limit_bytes: limit_bytes}
     }
   end
 
