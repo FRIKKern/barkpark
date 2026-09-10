@@ -2638,7 +2638,7 @@ defmodule Barkpark.Sites.DeployRunner do
 
   # Start a fresh status + log so a redeploy of the same slug never folds a
   # previous run's stages.
-  # Reachability: the only call site (:477) passes `[status_file, log_file]`,
+  # Reachability: the only call site (`launch_unit/2`, the `with` at :1524 as of 2026-09-10) passes `[status_file, log_file]`,
   # both just built from run_state_dir + a validated slug.
   # sobelow_skip ["Traversal.FileModule"]
   defp fresh_run_files(paths) do
