@@ -444,7 +444,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
              hook_opts(socket)
            ) do
         {:ok, saved_doc, errs} ->
-          new_title = Map.get(params, "title", doc.title)
+          # The persisted title, not the posted one: a titleless type's column
+          # is derived on write (Gyldendal parity E1.8), and the desk row must
+          # show what the store holds.
+          new_title = saved_doc.title || Map.get(params, "title", doc.title)
 
           panes =
             PaneBuilder.update_title(
