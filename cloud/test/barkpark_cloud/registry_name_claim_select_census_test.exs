@@ -351,7 +351,8 @@ defmodule BarkparkCloud.RegistryNameClaimSelectCensusTest do
       # itself. `not is_nil(b.x) and <anything>` parses as `and` at the top and
       # reds here — which is the whole point, since an extra conjunct narrows
       # the hard block without touching a leg.
-      assert {:not, _, [{:is_nil, _, [field]}]} = Extract.select_value(source(), :has_admin_token),
+      assert {:not, _, [{:is_nil, _, [field]}]} =
+               Extract.select_value(source(), :has_admin_token),
              """
              has_admin_token is no longer a bare `not is_nil(...)`:
 
