@@ -6049,13 +6049,50 @@ function assertFixtureShapePins() {
 // 4-5x per boot while the registry hands back the same node, so listeners
 // accumulate and an even count makes the toggle dead — a click-opened grid
 // measures the harness, not the app.
+//
+// ── cch-w49-bl · WIDENED, NOT DELETED ────────────────────────────────────────
+// The screen now ASKS: renderBilling issues GET /v1/usage/summary and renders
+// `usage.team.instances.quota` — the same value Billing.barkpark_limit/1
+// enforces at create time — on the ACTIVE tier only. A flat ban on every
+// ceiling numeral would have forbidden exactly that fix, so the ceiling arm
+// becomes an ALLOWLIST and the allowed value is read out of the SCENARIO'S OWN
+// FIXTURE, never named here:
+//
+//     allowed = SCENARIOS[name].data.usageSummary.team.instances.quota
+//
+// A hand-typed numeral therefore still reds — there is no fixture for it to
+// match — which is the property this guard existed for and the one criterion 0
+// mutation-proves. An actor with NO fixture has an EMPTY allowlist, so for the
+// other billing actors this assertion is bit-for-bit the ban it was before.
+//
+// THE PRICE ARM IS UNCHANGED AND UNCONDITIONAL. No amount exists anywhere
+// server-side (STRIPE_PRICE_* are price ids), so no payload can ever carry one
+// and there is nothing an allowlist could be keyed on.
 const MONEY_CURRENCY_RE = /\$\s?\d[\d,]*/;
 const MONEY_CEILING_RE = /\b\d+\s+managed instances?\b/;
+const MONEY_CEILING_RE_G = /\b(\d+)\s+managed instances?\b/g;
 const MONEY_CONTAINERS = ["billing-recommended", "billing-tiers"];
+
+// The ceilings THIS scenario's own payload carries, as rendered strings. Empty
+// for every scenario without a usageSummary fixture — i.e. the flat ban.
+function payloadCeilings(name) {
+  const d = (SCENARIOS[name] && SCENARIOS[name].data) || {};
+  const q = d.usageSummary && d.usageSummary.team && d.usageSummary.team.instances
+    ? d.usageSummary.team.instances.quota
+    : null;
+  if (typeof q !== "number" || !Number.isInteger(q) || q <= 0) return new Set();
+  return new Set([String(q)]);
+}
 
 async function assertBillingStatesNoNumeralItCannotSupport() {
   const names = SCENARIO_NAMES.filter((n) => (SCENARIOS[n].deepLink || "") === "#billing");
   const broken = [];
+  // Counted so the widened arm cannot pass by rendering NOTHING: this guard is
+  // absent-arm, and an absent-arm guard is greenest when the feature is dead.
+  // The count is printed, and floored at 1 below — the corpus mints exactly one
+  // billing actor with a usageSummary fixture (billing-portal-return), so a
+  // derivation that stopped working reds here rather than reading as purity.
+  let backedCount = 0;
   if (names.length < 6) {
     broken.push("only " + names.length + " scenario(s) deep-link #billing (6 are committed) — the corpus slice this " +
       "guard reads has shrunk, and an assertion over a shrunken slice is a false green, not a pass");
@@ -6078,19 +6115,37 @@ async function assertBillingStatesNoNumeralItCannotSupport() {
       continue;
     }
     const cur = union.match(MONEY_CURRENCY_RE);
-    const ceil = union.match(MONEY_CEILING_RE);
-    if (cur || ceil) {
+    // EVERY ceiling occurrence is checked, not the first: an allowed numeral
+    // appearing before a hand-typed one would otherwise hide it.
+    const allowed = payloadCeilings(name);
+    const unbacked = [...union.matchAll(MONEY_CEILING_RE_G)]
+      .filter((m) => !allowed.has(m[1]))
+      .map((m) => m[0]);
+    const backed = [...union.matchAll(MONEY_CEILING_RE_G)].filter((m) => allowed.has(m[1]));
+    if (backed.length) backedCount++;
+    if (cur || unbacked.length) {
       broken.push(name + ": the billing surface STATES " +
         [cur ? "a price " + JSON.stringify(cur[0]) : null,
-         ceil ? "a ceiling " + JSON.stringify(ceil[0]) : null].filter(Boolean).join(" and ") +
-        " — no server value backs either one (no amount exists in the tree; the ceiling is never fetched on this " +
-        "screen), so the console must state the tier, the features and the CTA, and state no number");
+         unbacked.length
+           ? "a ceiling " + unbacked.map((x) => JSON.stringify(x)).join(", ") +
+             " that this actor's payload does not carry" +
+             (allowed.size ? " (it carries " + [...allowed].join(", ") + ")" : " (it carries no quota at all)")
+           : null].filter(Boolean).join(" and ") +
+        " — no server value backs it (no amount exists in the tree; a ceiling is only true when " +
+        "usage.team.instances.quota answered it), so the console must state the tier, the features and the CTA, " +
+        "and state no number it was not told");
     }
+  }
+  if (!backedCount) {
+    broken.push("NO billing actor rendered a payload-backed ceiling — the corpus mints exactly one " +
+      "(billing-portal-return's usageSummary fixture), so the derivation this guard was widened for is dead and " +
+      "the widened arm is passing on absence rather than on honesty");
   }
   process.stdout.write(
     "  " + (broken.length ? "FAIL" : "ok  ") + " billing-numerals — " + names.length +
     " #billing actor(s) × " + MONEY_CONTAINERS.length + " container(s): " +
-    (broken.length ? broken.length + " stating a numeral no server value supports" : "no unsupported numeral stated") + "\n");
+    (broken.length ? broken.length + " stating a numeral no server value supports"
+      : "no unsupported numeral stated; " + backedCount + " stating a payload-backed ceiling") + "\n");
   if (broken.length) {
     process.stdout.write("\nbilling absent-arm guard failed:\n  " + broken.join("\n  ") + "\n");
     process.exit(1);
