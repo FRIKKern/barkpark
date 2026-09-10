@@ -51,6 +51,7 @@ defmodule BarkparkWeb.BulldocsLive do
 
   alias Barkpark.Content
   alias Barkpark.Content.Labels
+  alias Barkpark.Content.Papers.PreGateRegister
   alias Barkpark.Plugins.Bulldocs.Events
   alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render
@@ -279,6 +280,13 @@ defmodule BarkparkWeb.BulldocsLive do
       # at all. `:last_action` acknowledges the most recent click inline.
       |> assign(:paper_actions, paper_actions(paper))
       |> assign(:last_action, nil)
+      # Ruling arpss-bulldocs-anon-paper-event-write-ruling (2026-09-10):
+      # anonymous visitors are READ ONLY on the public reader. `:can_act?` is
+      # the RENDER half of that — an anonymous visitor is not shown a control
+      # the server would refuse. The binding half is `Edit.attach_gate/1`,
+      # which halts the four `paper_events` writers for a principal-less
+      # socket whether or not a button was ever rendered.
+      |> assign(:can_act?, Edit.principal?(socket.assigns))
       # P6.U4 Simplify control. `:simplify?` gates the button (true only when the
       # paper carries a goal_id — Simplify applies to any goal-bearing paper).
       # `:pending_simplify` holds the in-flight `simplified-<n>` branch name once a
@@ -1027,7 +1035,14 @@ defmodule BarkparkWeb.BulldocsLive do
         |> assign(:paper_link_details, Map.get(resolvers, :paper_links, %{}))
         |> stream(
           :blocks,
-          to_stream_items(resolved, paper_article?(paper), resolvers)
+          to_stream_items(
+            # Grandfather badge (task-597ea451072da061): register membership AND
+            # the STORED blocks still refused by the gate → one synthesised block
+            # under the byline. Resolved blocks render; stored blocks decide.
+            PreGateRegister.annotate(resolved, paper.doc_id, blocks),
+            paper_article?(paper),
+            resolvers
+          )
         )
 
       _ ->
@@ -1382,7 +1397,11 @@ defmodule BarkparkWeb.BulldocsLive do
             |> ensure_document_changes_subscription(paper, refs)
             |> stream(
               :blocks,
-              to_stream_items(resolved, article?, resolvers),
+              to_stream_items(
+                PreGateRegister.annotate(resolved, paper.doc_id, blocks),
+                article?,
+                resolvers
+              ),
               reset: true
             )
             |> assign(:rev, paper_rev(paper))
@@ -1537,8 +1556,15 @@ defmodule BarkparkWeb.BulldocsLive do
             empty set (no/unknown source_doc) renders no bar at all. Each click
             fires "paper-action" which records the intent as a paper_events
             row (routing Option B — orchestrator reads them; no daemon, no
-            nonce). `:last_action` shows a small inline confirmation. --%>
-      <div :if={@paper_actions != []} id="paper-action-bar" class="bp-paper-actions">
+            nonce). `:last_action` shows a small inline confirmation.
+            Rendered only for an identified viewer (`@can_act?`): the event
+            behind these buttons WRITES, and the ruling makes an anonymous
+            visitor read-only. The server gate is the real fence. --%>
+      <div
+        :if={@paper_actions != [] and @can_act?}
+        id="paper-action-bar"
+        class="bp-paper-actions"
+      >
         <button
           :for={action <- @paper_actions}
           type="button"
@@ -1562,7 +1588,7 @@ defmodule BarkparkWeb.BulldocsLive do
             of scope here). Once a request is pending (`@pending_simplify`),
             Accept/Reject render and record the user's decision on that branch.
             `:last_simplify` shows a small inline confirmation. --%>
-      <div :if={@simplify?} id="paper-simplify" class="bp-paper-simplify">
+      <div :if={@simplify? and @can_act?} id="paper-simplify" class="bp-paper-simplify">
         <button
           type="button"
           class="bp-paper-action"

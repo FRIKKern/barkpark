@@ -640,7 +640,9 @@ defmodule Barkpark.Plugins.Tasks do
     * `ready` — `GET /v1/tasks/ready` (paginated). READ, table.
     * `events` — `GET /v1/tasks/events?since=<id>` (keyset replay over
       `mutation_events`, id-ASC; the response carries the next `cursor` +
-      `has_more`). READ, json.
+      `has_more`). Takes an OPTIONAL positional `<doc_id>` that rides as
+      `?doc_id=` and narrows the replay to ONE task's history — the per-row
+      audit view. READ, json.
     * `get` — `GET /v1/tasks/:doc_id`. READ, table.
     * `claim` — `POST /v1/tasks/:doc_id/claim`. WRITES, minimal receipt.
     * `close` — `POST /v1/tasks/:doc_id/close`. WRITES, minimal receipt.
@@ -868,7 +870,21 @@ defmodule Barkpark.Plugins.Tasks do
           "Replay task events since a cursor — a keyset stream over mutation_events, id-ASC. Pass --since <id> (the last event id you saw); the response carries the next `cursor` + `has_more`. The one poll feed every surface reads; omit --since to replay from the start.",
         http: %{method: "GET", path_template: "/v1/tasks/events"},
         auth_tier: "read",
-        args: [],
+        # OPTIONAL positional (tlv-bl-events-actor-attribution). The template
+        # has no `:doc_id` placeholder, so the CLI's arg binder routes it to the
+        # query string on this read — `bp task events <id>` IS
+        # `GET /v1/tasks/events?doc_id=<id>`. Before it, the command declared
+        # ZERO args and any positional was refused ("too many arguments for
+        # task events"), so a per-row audit had to replay the whole backlog.
+        args: [
+          %{
+            name: "doc_id",
+            required: false,
+            type: "string",
+            summary:
+              "Narrow the replay to ONE task's events, oldest-first. Optional — omit for the global feed. This is the per-row audit view: `bp task events <id> --payload` answers 'who claimed and closed this row, on which epoch, when' from `payload.actor` without reading the (mutable) live claim map off the document. Composes with --since, so `--since <cursor> <id>` is a per-row tail."
+          }
+        ],
         flags: [
           %{
             name: "since",
@@ -892,7 +908,7 @@ defmodule Barkpark.Plugins.Tasks do
             name: "payload",
             type: "bool",
             summary:
-              "Carry each event's typed payload under `payload`. THE RECOVERY CHANNEL for a clobbered note: a `task.staged` event's `payload.staged.superseded_note` is the disposition_reason that stage displaced, and `payload.staged.note` the one it wrote. Off by default — two free-text notes ride in one stamp and a page is 500 events, so every poller that does not ask keeps the lean body it always got."
+              "Carry each event's typed payload under `payload`. THE ATTRIBUTION CHANNEL: a `task.claimed` / `task.closed` event's `payload.actor` is `{worker, epoch}` — the identity the CAS fenced on — so close provenance is reconstructable from the feed alone (`task.closed` also carries `payload.closed_by`). THE RECOVERY CHANNEL for a clobbered note: a `task.staged` event's `payload.staged.superseded_note` is the disposition_reason that stage displaced, and `payload.staged.note` the one it wrote. Off by default — two free-text notes ride in one stamp and a page is 500 events, so every poller that does not ask keeps the lean body it always got."
           }
         ],
         writes: false,
@@ -966,7 +982,10 @@ defmodule Barkpark.Plugins.Tasks do
                 "of shaping it. Containers (a decision/goal label, a non-task kind, a row WITH " <>
                 "children) are EXEMPT by name, so label a container rather than overriding it. The " <>
                 "way through is --set criteria_unstated_override=\"<why this row needs none>\", " <>
-                "which lands on the record; a blank or whitespace-only reason is NOT an override. " <>
+                "which lands on the record: the trimmed reason is STORED as " <>
+                "claim.criteria_unstated_override on the claimed row and survives pulse and " <>
+                "close, while a claim that did not need the override carries no such key. A " <>
+                "blank or whitespace-only reason is NOT an override. " <>
                 "This is the flag the refusal's own remedy line names, so that remedy is runnable " <>
                 "as printed."
           }
@@ -1284,7 +1303,7 @@ defmodule Barkpark.Plugins.Tasks do
             name: "merge-gated",
             type: "string",
             summary:
-              "TAKES A REASON, NOT A BARE FLAG: --merge-gated \"<why this stamp is the lead's to make, e.g. PR #123 merged to main as abc1234>\". A bare --merge-gated is refused (bp: merge_gated_reason_required; a direct POST of merge-gated=true: 400 with the same ruling) — while it was a boolean the override cost one word and recorded nothing, so a reflex override and a deliberate one were byte-identical on the record. The reason is PERSISTED on the same write as the flip, at content.merge_gate_autostamp.stamp_overrides[].reason, beside the asserted_worker and the ts — the shape close_override.* already uses. LEAD-OWNED, ON YOUR HONOUR — the server does NOT check that you are a lead, and CANNOT: it authenticates your api_token, not the worker_id you typed. Passing this flag is an ASSERTION, not a permission, and it is RECORDED as one — a record is appended to content.merge_gate_autostamp.stamp_overrides carrying \"verified\": false, your asserted_worker, and the authenticated_token_id the server actually authenticated. The override lets a --met flip a MERGE GATE (a criterion the lead closes when the PR merges). Without it such a stamp is refused (409 merge_gated_criterion), which is the point — flipping a gate before the PR exists fabricates a done. A criterion counts as a gate if it carries \"merge_gate\": true, or (when it carries no explicit \"merge_gate\" key) if its wording mentions MERGE-GATED / MERGE GATE. That prose fallback is deliberately wide and mis-fires on ~3.5% of marker-bearing rows that merely DISCUSS merge-gating; the fix for those is to set \"merge_gate\": false on the criterion, not to reach for this flag."
+              "TAKES A REASON, NOT A BARE FLAG: --merge-gated \"<why this stamp is the lead's to make, e.g. PR #17107 merged to main as 2ee884f75>\". A bare --merge-gated is refused (bp: merge_gated_reason_required; a direct POST of merge-gated=true: 400 with the same ruling) — while it was a boolean the override cost one word and recorded nothing, so a reflex override and a deliberate one were byte-identical on the record. The reason is PERSISTED on the same write as the flip, at content.merge_gate_autostamp.stamp_overrides[].reason, beside the asserted_worker and the ts — the shape close_override.* already uses. LEAD-OWNED, ON YOUR HONOUR — the server does NOT check that you are a lead, and CANNOT: it authenticates your api_token, not the worker_id you typed. Passing this flag is an ASSERTION, not a permission, and it is RECORDED as one — a record is appended to content.merge_gate_autostamp.stamp_overrides carrying \"verified\": false, your asserted_worker, and the authenticated_token_id the server actually authenticated. The override lets a --met flip a MERGE GATE (a criterion the lead closes when the PR merges). Without it such a stamp is refused (409 merge_gated_criterion), which is the point — flipping a gate before the PR exists fabricates a done. A criterion counts as a gate if it carries \"merge_gate\": true, or (when it carries no explicit \"merge_gate\" key) if its wording mentions MERGE-GATED / MERGE GATE. That prose fallback is deliberately wide and mis-fires on ~3.5% of marker-bearing rows that merely DISCUSS merge-gating; the fix for those is to set \"merge_gate\": false on the criterion, not to reach for this flag."
           }
         ],
         writes: true,

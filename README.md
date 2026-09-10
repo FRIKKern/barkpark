@@ -36,6 +36,6 @@ Local and remote instances hold separate data; transfers are explicit today.
 
 [Run locally](docs/setup/QUICKSTART.md) · [Open Studio](https://api.barkpark.cloud/studio) · [Deploy a server](docs/setup/GO-LIVE.md) · [Connect an agent](docs/setup/AGENT-ONRAMPS.md)
 
-[Documentation](docs/INDEX.md) · [Build a plugin](docs/cards/plugins.md) · [Principles](docs/PHILOSOPHY.md)
+[Documentation](docs/INDEX.md) · [JavaScript docs site](js/docs) · [Build a plugin](docs/cards/plugins.md) · [Principles](docs/PHILOSOPHY.md)
 
 [MIT licensed](LICENSE). Optional [Barkpark Cloud](https://barkpark.cloud) hosting funds development.

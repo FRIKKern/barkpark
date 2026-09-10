@@ -131,46 +131,22 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
   defp tier_tokens, do: Lens.tier_tokens()
   defp guard_tier, do: Lens.guard_tier()
 
-  # Routes whose post-guard `Auth.forbidden(required: …)` is NOT a tier and must
-  # not be read as one — a NAMED consent list, exactly like @unresolved_consent,
-  # asserted below in both directions so it cannot rot.
-  @elevation_consent %{
-    {"POST", "/v1/tokens"} =>
-      "the 403 is PAYLOAD-conditional, not principal-conditional: any member may " <>
-        "mint a `read` PAT, and `create_personal_access_token/3` refuses only when " <>
-        "the requested abilities include deploy/root/write (anti-escalation). The " <>
-        "row's `user` is correct — an `admin` cell here would tell every member " <>
-        "they cannot mint the token they can in fact mint. `user` and not `user(s)`: " <>
-        "the outer guard IS `Auth.require_user`, so PAT management is session-only, " <>
-        "exactly as the comment above the route says."
-  }
-
-  # Rows whose guard this resolver CANNOT reach, each with the reason it cannot.
-  # This is a NAMED consent list, not a silent skip: an unresolved row that is not
-  # listed here fails the census, and a listed row that becomes resolvable fails it
-  # too, so the list cannot rot in either direction.
-  @unresolved_consent %{
-    {"GET", "/v1/events"} =>
-      "authenticates inline in `require_user_sse/1` — Bearer OR a single-use `?ticket=` — " <>
-        "invoking neither `Auth.require_*` nor `with_team_role/3`. That bespoke dual path is " <>
-        "exactly what the row's starred `user*` tier documents."
-  }
+  # The two NAMED consent lists moved to `RouterTierLens` (cause-only tripwire,
+  # cchi-w40-bl) so a second census reads the SAME rulings instead of minting a
+  # second opinion about the same rows. They are still asserted in BOTH
+  # directions below — this file remains the place they cannot rot.
+  defp elevation_consent, do: Lens.elevation_consent()
+  defp unresolved_consent, do: Lens.unresolved_consent()
 
   # The census must not shrink silently. If a refactor makes currently-resolvable
   # rows unresolvable, the split moves and this reds — lower it deliberately, in
   # the same commit as the routes you removed, or not at all.
   @resolved_floor 161
 
-  defp documented_tier(method, path) do
-    moduledoc_block()
-    |> String.split("\n")
-    |> Enum.find_value(fn line ->
-      case Regex.run(@tier_row_re, line) do
-        [_, ^method, ^path, tier] -> if tier in tier_tokens(), do: tier, else: nil
-        _ -> nil
-      end
-    end)
-  end
+  # ONE derivation of the declared tier column, in the lens, so the cause-only
+  # tripwire (`router_cause_only_refusal_test.exs`) reads the same rows this
+  # census does instead of carrying a second copy of @tier_row_re.
+  defp documented_tier(method, path), do: Lens.declared_tier(method, path)
 
   # Every tier-bearing row of the table: {METHOD, path, tier-as-written}.
   defp tier_rows do
@@ -196,12 +172,8 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
   defp guard_in(body, defs, depth), do: Lens.guard_in(body, defs, depth)
 
   # The guard the row is censused against: the raw guard, minus any elevation the
-  # consent list has ruled is not a tier (see @elevation_consent).
-  defp route_guard(method, path) do
-    guard = raw_route_guard(method, path)
-
-    if Map.has_key?(@elevation_consent, {method, path}), do: base_guard(guard), else: guard
-  end
+  # consent list has ruled is not a tier (see `RouterTierLens.elevation_consent/0`).
+  defp route_guard(method, path), do: Lens.route_guard(method, path)
 
   # {resolved, unresolved} — resolved carries {method, path, documented, enforced},
   # unresolved carries {method, path, documented, why}.
@@ -237,41 +209,41 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     # (1) Not vacuously green: the census must actually reach nearly all of its
     # population, and every row it cannot reach must be NAMED with a reason.
     unnamed =
-      Enum.reject(unresolved, fn {m, p, _, _} -> Map.has_key?(@unresolved_consent, {m, p}) end)
+      Enum.reject(unresolved, fn {m, p, _, _} -> Map.has_key?(unresolved_consent(), {m, p}) end)
 
     assert unnamed == [], """
     #{length(unnamed)} tier-bearing row(s) have no resolvable guard AND no entry in
-    @unresolved_consent. A row the resolver cannot reach is a row this census is
+    `RouterTierLens.unresolved_consent/0`. A row the resolver cannot reach is a row this census is
     green over BY CONSTRUCTION. Either teach `guard_in/3` the idiom, or add the row
-    to @unresolved_consent WITH the reason it is unreachable:
+    to `RouterTierLens.unresolved_consent/0` WITH the reason it is unreachable:
 
     #{Enum.map_join(unnamed, "\n", fn {m, p, t, why} -> "  #{m} #{p} (doc: #{t}) — #{inspect(why)}" end)}
     """
 
     # (2) The consent list cannot rot: every consented row must still exist AND
     # still be genuinely unresolvable.
-    for {{m, p}, reason} <- @unresolved_consent do
+    for {{m, p}, reason} <- unresolved_consent() do
       assert Enum.any?(rows, fn {rm, rp, _} -> {rm, rp} == {m, p} end),
-             "@unresolved_consent names #{m} #{p}, which is no longer a tier-bearing " <>
+             "`RouterTierLens.unresolved_consent/0` names #{m} #{p}, which is no longer a tier-bearing " <>
                "route-table row. Drop the consent entry."
 
       assert Enum.any?(unresolved, fn {rm, rp, _, _} -> {rm, rp} == {m, p} end),
-             "@unresolved_consent excuses #{m} #{p} (#{reason}) but the resolver now " <>
+             "`RouterTierLens.unresolved_consent/0` excuses #{m} #{p} (#{reason}) but the resolver now " <>
                "RESOLVES it. Delete the consent entry so the row is censused."
     end
 
     # (2b) The ELEVATION consent list cannot rot in either direction either: every
     # consented row must still exist AND its body must still perform the elevation
     # the entry excuses. If the refusal goes away, the excuse must go with it.
-    for {{m, p}, reason} <- @elevation_consent do
+    for {{m, p}, reason} <- elevation_consent() do
       assert Enum.any?(rows, fn {rm, rp, _} -> {rm, rp} == {m, p} end),
-             "@elevation_consent names #{m} #{p}, which is no longer a tier-bearing " <>
+             "`RouterTierLens.elevation_consent/0` names #{m} #{p}, which is no longer a tier-bearing " <>
                "route-table row. Drop the consent entry."
 
       raw = raw_route_guard(m, p)
 
       assert raw != nil and raw != base_guard(raw),
-             "@elevation_consent excuses #{m} #{p} (#{reason}) but its body no longer " <>
+             "`RouterTierLens.elevation_consent/0` excuses #{m} #{p} (#{reason}) but its body no longer " <>
                "performs a post-guard elevation (raw guard: #{inspect(raw)}). Delete the " <>
                "consent entry so the row is censused on its guard alone."
     end

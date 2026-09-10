@@ -488,11 +488,24 @@ defmodule BarkparkWeb.TasksController do
       # does not ask gets the byte-identical page it always got.
       payload? = params["payload"] in ["1", "true", true]
 
+      # tlv-bl-events-actor-attribution: the per-row audit narrowing. `?doc_id=`
+      # (which `bp task events <id>` sends as its one positional) restricts the
+      # replay to ONE task's mutation history instead of making the caller page
+      # the global backlog and filter client-side. Blank/absent is nil, which
+      # `Tasks.Events.replay_since/3` reads as unscoped — so every existing
+      # poller's request is byte-identical.
+      doc_id =
+        case params["doc_id"] do
+          v when is_binary(v) -> if String.trim(v) == "", do: nil, else: v
+          _ -> nil
+        end
+
       rows =
         Tasks.Events.replay_since(dataset, since,
           limit: limit,
           workspace_id: workspace_id,
-          payload: payload?
+          payload: payload?,
+          doc_id: doc_id
         )
 
       cursor =

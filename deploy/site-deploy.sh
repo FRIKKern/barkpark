@@ -141,6 +141,31 @@ HEALTH_FAIL_MARK=".bp-health-failed"
 # template (that rebuild passes HEALTH on genuine markers and goes live with the
 # WRONG bytes), and purge_failed_release refuses to delete it into one.
 PREBUILT_MARK=".bp-prebuilt-sha256"
+# THE file_server HIDE LIST — ONE definition, read by the fresh arm AND by the
+# in-place upgrade, so the two can never drift (a value on two surfaces needs one
+# lock). Caddy matches each pattern with path.Match against the request path and,
+# for a pattern carrying no separator, against the BASE NAME — so `._*` catches
+# an AppleDouble sidecar at any depth and `.DS_Store` catches it in any directory.
+#
+# Why this list and not a blanket `.*`: `/.well-known/` is a REAL path a static
+# site is asked for (apple-app-site-association, assetlinks.json, security.txt),
+# and Caddy's hide has no "except" — a blanket dotfile rule would 404 it with no
+# way back. Named classes only, and the reason for each:
+#
+#   .bp-prebuilt-sha256 / .bp-health-failed — this engine's own release markers.
+#   .DS_Store  — the packing machine's directory listing, INCLUDING the names of
+#                files that were never shipped.
+#   ._*        — a macOS AppleDouble sidecar: the file's resource fork and its
+#                extended attributes, served verbatim.
+#   PaxHeader  — a tar extension-header pseudo-directory that reached disk.
+#   .git       — a repo staged whole is the entire history, remotes included.
+#   .env       — the shape every "static" bundle eventually smuggles a key in.
+#
+# The extractor now REFUSES the junk classes outright (E_JUNK_ENTRY,
+# Barkpark.Sites.PrebuiltArtifact), so nothing NEW stages them. This hide is for
+# what is ALREADY on disk: a refusal is not retroactive, and every release staged
+# before that change is still live and still fetchable.
+HIDE_LIST="$PREBUILT_MARK $HEALTH_FAIL_MARK .DS_Store ._* PaxHeader .git .env"
 # log() and emit() (the BPSTAGE machine protocol) live in the common lib.
 
 # ---- Mode dispatch ---------------------------------------------------------
@@ -2219,6 +2244,20 @@ FAKECP
       grep -qE 'hide .*\.bp-health-failed' "$RF/Caddyfile.ok"
     check "the hide rides INSIDE a file_server block, not loose in the site" \
       grep -qE 'file_server \{' "$RF/Caddyfile.ok"
+    # PACKAGING JUNK, charter D121. A release staged before the extractor learned
+    # to refuse `._*`/`.DS_Store`/`PaxHeader` still carries them, and a staged
+    # file is a SERVED file: `._index.html` is the resource fork plus every
+    # extended attribute, `.DS_Store` is the packing machine's directory listing.
+    # Pinned by NAME so dropping one from $HIDE_LIST reds that one row.
+    for hidden in .DS_Store '._\*' PaxHeader .git .env; do
+      check "the armed file_server HIDES $hidden" \
+        grep -qE "hide .* $hidden( |$)" "$RF/Caddyfile.ok"
+    done
+    # The carve-out is a DECISION, not an omission: `/.well-known/` is a real
+    # path a static site is asked for and Caddy's hide has no "except", so a
+    # blanket `.*` would 404 it irreversibly. This row reds if someone adds one.
+    check "the hide is NOT a blanket dotfile rule (it would 404 /.well-known/)" \
+      sh -c "! grep -qE 'hide .*(^| )[.][*]( |\$)' '$RF/Caddyfile.ok'"
     check "the armed Caddyfile is still brace-balanced with the nested block" \
       bash -c "[ \$(grep -c '{' '$RF/Caddyfile.ok') = \$(grep -c '}' '$RF/Caddyfile.ok') ]"
     check "armed run emits NO ROUTE failure"             absent '^BPSTAGE name=ROUTE status=failed' "$RF/ok.out"
@@ -2671,6 +2710,7 @@ FAKECP
         printf '}\n'; } > "$HU/Caddyfile"
       check "the pre-hide fixture really is the un-hidden shape (no hide anywhere)" \
         sh -c "! grep -q 'hide ' '$HU/Caddyfile'"
+      cp "$HU/Caddyfile" "$HU/Caddyfile.prehide"
       check "the pre-hide fixture validates on a REAL caddy (it is a shape the box runs)" \
         caddy validate --adapter caddyfile --config "$HU/Caddyfile"
       # A deploy of the SAME slug: the marker is present, so this run takes the
@@ -2724,32 +2764,101 @@ FAKECP
         cmp -s "$HU/Caddyfile.after1" "$HU/Caddyfile"
       check "…and it reports the plain already-armed detail, not another upgrade" \
         grep -q '^BPSTAGE name=ROUTE status=ok build_id=hu2 detail="already armed: ' "$HU/up2.out"
+      # ---- THE SECOND UPGRADE ARM: a SHORT hide list is grown, not frozen ----
+      # A block armed AFTER the marker hide landed but BEFORE the junk classes
+      # joined $HIDE_LIST already has `file_server { hide … }`, so the
+      # bare-file_server arm above can NEVER see it — it would keep the two-item
+      # list forever and go on serving `._*` and `.DS_Store`. Shrink the hide
+      # line to exactly that historical shape and re-deploy.
+      sed -i.bak2 "s|^\(\t*\)hide .*|\1hide $PREBUILT_MARK $HEALTH_FAIL_MARK|" "$HU/Caddyfile"
+      rm -f "$HU/Caddyfile.bak2"
+      check "the SHORT-hide fixture really is the historical shape (hide, but no junk in it)" \
+        sh -c "grep -q 'hide ' '$HU/Caddyfile' && ! grep -q 'DS_Store' '$HU/Caddyfile'"
+      env PATH="$HU/bin:$FAKEBIN:$PATH" \
+        SITE_SLUG=hideup BUILD_ID=hu3 CONTENT_REV=rev-1 SITE_SRC="$HUSRC" \
+        BARKPARK_HEALTH_HOST=sites.example.com \
+        BARKPARK_SITES_DIR="$HU/sites" BARKPARK_CADDYFILE="$HU/Caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$HU/deploy.lock" BARKPARK_CADDYFILE_LOCK="$HU/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$HU/up3.out" 2> "$HU/up3.err" || true
+      check "an already-hidden block with a STALE hide list is grown to the full one" \
+        grep -qE "hide .* .DS_Store .* PaxHeader" "$HU/Caddyfile"
+      check "…and it did NOT nest a second file_server block to do it" \
+        sh -c "[ \"\$(grep -c 'file_server {' '$HU/Caddyfile')\" = 1 ]"
+      check "…and exactly one hide line survives" \
+        sh -c "[ \"\$(grep -c 'hide ' '$HU/Caddyfile')\" = 1 ]"
+      check "…and the grown Caddyfile is still REAL-caddy valid" \
+        caddy validate --adapter caddyfile --config "$HU/Caddyfile"
+      cp "$HU/Caddyfile" "$HU/Caddyfile.after3"
+      env PATH="$HU/bin:$FAKEBIN:$PATH" \
+        SITE_SLUG=hideup BUILD_ID=hu4 CONTENT_REV=rev-1 SITE_SRC="$HUSRC" \
+        BARKPARK_HEALTH_HOST=sites.example.com \
+        BARKPARK_SITES_DIR="$HU/sites" BARKPARK_CADDYFILE="$HU/Caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$HU/deploy.lock" BARKPARK_CADDYFILE_LOCK="$HU/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$HU/up4.out" 2> "$HU/up4.err" || true
+      check "the GROWN list is idempotent too (a matching hide line is left alone)" \
+        cmp -s "$HU/Caddyfile.after3" "$HU/Caddyfile"
       # ---- THE OUTCOME, through a real caddy on a real port -----------------
       # The engine's own markers live INSIDE the served tree. .bp-prebuilt-sha256
       # is written by the prebuilt path; .bp-health-failed by a failed gate. Put
       # both in the LIVE release the way the box has them, then ask for them.
       printf 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n' > "$HUROOT/.bp-prebuilt-sha256"
       printf 'hu1\n' > "$HUROOT/.bp-health-failed"
+      # PACKAGING JUNK (D121). The extractor now REFUSES these, but a refusal is
+      # not retroactive: every release staged before it is still live and still
+      # carries them, which is precisely the tree this fixture is.
+      printf 'Bud1\n' > "$HUROOT/.DS_Store"
+      printf 'AppleDouble-resource-fork\n' > "$HUROOT/._index.html"
+      mkdir -p "$HUROOT/PaxHeader"
+      printf '30 mtime=1754000000.0\n' > "$HUROOT/PaxHeader/index.html"
       check "both release markers really are inside the served tree (the fixture is non-vacuous)" \
         sh -c "[ -f '$HUROOT/.bp-prebuilt-sha256' ] && [ -f '$HUROOT/.bp-health-failed' ] && [ -f '$HUROOT/index.html' ]"
-      HU_PORT=0; HU_PID=""
-      for HU_TRY in 38211 38307 38419 38523 38631; do
-        { printf '{\n\tadmin off\n\tauto_https off\n}\n'
-          printf ':%s {\n' "$HU_TRY"
-          sed -n '/BARKPARK_SITE_ROUTE:hideup/,/^\t}$/p' "$HU/Caddyfile"
-          printf '}\n'; } > "$HU/serve.caddy"
-        caddy run --config "$HU/serve.caddy" --adapter caddyfile >"$HU/caddy.log" 2>&1 &
-        HU_PID=$!
-        for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-          if [ "$(curl -s -o /dev/null --max-time 2 -w '%{http_code}' "http://127.0.0.1:$HU_TRY/sites/hideup/" 2>/dev/null)" = 200 ]; then
-            HU_PORT="$HU_TRY"; break
-          fi
-          sleep 0.25
+      check "the junk files really are inside the served tree too (the BEFORE rows are non-vacuous)" \
+        sh -c "[ -f '$HUROOT/.DS_Store' ] && [ -f '$HUROOT/._index.html' ] && [ -f '$HUROOT/PaxHeader/index.html' ]"
+      # Serve a GIVEN Caddyfile's hideup block on a real caddy and a real port.
+      # Factored out because the junk-hide proof needs the SAME tree served
+      # TWICE — once through the PRE-HIDE block (the BEFORE) and once through the
+      # upgraded one (the AFTER). A hide row that only ever runs against the
+      # upgraded config cannot tell "hidden" from "never there".
+      hu_serve() {
+        HU_PORT=0; HU_PID=""
+        for HU_TRY in 38211 38307 38419 38523 38631 38747 38851; do
+          { printf '{\n\tadmin off\n\tauto_https off\n}\n'
+            printf ':%s {\n' "$HU_TRY"
+            sed -n '/BARKPARK_SITE_ROUTE:hideup/,/^\t}$/p' "$1"
+            printf '}\n'; } > "$HU/serve.caddy"
+          caddy run --config "$HU/serve.caddy" --adapter caddyfile >"$HU/caddy.log" 2>&1 &
+          HU_PID=$!
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+            if [ "$(curl -s -o /dev/null --max-time 2 -w '%{http_code}' "http://127.0.0.1:$HU_TRY/sites/hideup/" 2>/dev/null)" = 200 ]; then
+              HU_PORT="$HU_TRY"; break
+            fi
+            sleep 0.25
+          done
+          [ "$HU_PORT" != 0 ] && break
+          kill "$HU_PID" 2>/dev/null; wait "$HU_PID" 2>/dev/null; HU_PID=""
         done
-        [ "$HU_PORT" != 0 ] && break
-        kill "$HU_PID" 2>/dev/null; wait "$HU_PID" 2>/dev/null; HU_PID=""
-      done
+      }
+      hu_stop() { [ -n "$HU_PID" ] && { kill "$HU_PID" 2>/dev/null; wait "$HU_PID" 2>/dev/null; }; HU_PID=""; }
       hu_code() { curl -s -o /dev/null --max-time 5 -w '%{http_code}' "http://127.0.0.1:$HU_PORT$1"; }
+
+      # ---- BEFORE: the same tree, served through the PRE-HIDE block ---------
+      hu_serve "$HU/Caddyfile.prehide"
+      check "the PRE-HIDE block came up on a REAL caddy (this suite owns the port)" \
+        [ "$HU_PORT" != 0 ]
+      check "BEFORE: .DS_Store is FETCHABLE through the pre-hide file_server (200)" \
+        [ "$(hu_code /sites/hideup/.DS_Store)" = 200 ]
+      check "BEFORE: the AppleDouble sidecar ._index.html is FETCHABLE too (200)" \
+        [ "$(hu_code /sites/hideup/._index.html)" = 200 ]
+      check "BEFORE: PaxHeader/index.html is FETCHABLE too (200)" \
+        [ "$(hu_code /sites/hideup/PaxHeader/index.html)" = 200 ]
+      check "BEFORE: .bp-prebuilt-sha256 is FETCHABLE (this is the shape guerrilla runs)" \
+        [ "$(hu_code /sites/hideup/.bp-prebuilt-sha256)" = 200 ]
+      hu_stop
+
+      # ---- AFTER: the SAME tree, served through the UPGRADED block ----------
+      hu_serve "$HU/Caddyfile"
       # A false 200/404 off a port a PEER holds is the trap here: assert the
       # fixture itself came up before believing any status code below.
       check "the upgraded block came up on a REAL caddy (this suite owns the port)" \
@@ -2760,7 +2869,13 @@ FAKECP
         [ "$(hu_code /sites/hideup/.bp-prebuilt-sha256)" = 404 ]
       check "real caddy: .bp-health-failed returns 404 too — the failed-gate state is no longer disclosed" \
         [ "$(hu_code /sites/hideup/.bp-health-failed)" = 404 ]
-      [ -n "$HU_PID" ] && { kill "$HU_PID" 2>/dev/null; wait "$HU_PID" 2>/dev/null; }
+      check "AFTER: .DS_Store returns 404 — the packing machine's listing is gone" \
+        [ "$(hu_code /sites/hideup/.DS_Store)" = 404 ]
+      check "AFTER: ._index.html returns 404 — the resource fork is gone" \
+        [ "$(hu_code /sites/hideup/._index.html)" = 404 ]
+      check "AFTER: PaxHeader/index.html returns 404 — the tar pseudo-directory is gone" \
+        [ "$(hu_code /sites/hideup/PaxHeader/index.html)" = 404 ]
+      hu_stop
     fi
   fi
 
@@ -3583,7 +3698,7 @@ arm_caddy_site_route() {
     # ---------------------------------------------------------------------
     local upgraded=0
     local utmp; utmp="$(mktemp)"
-    if BP_MARK="$(site_route_marker_re)" BP_HIDE="$PREBUILT_MARK $HEALTH_FAIL_MARK" awk '
+    if BP_MARK="$(site_route_marker_re)" BP_HIDE="$HIDE_LIST" awk '
       BEGIN { m = ENVIRON["BP_MARK"]; hide = ENVIRON["BP_HIDE"]; n = 0 }
       !inb && $0 ~ m { inb = 1; depth = 0; opened = 0; print; next }
       inb {
@@ -3591,6 +3706,17 @@ arm_caddy_site_route() {
           match($0, /^[ \t]*/); ind = substr($0, 1, RLENGTH)
           printf "%sfile_server {\n%s\thide %s\n%s}\n", ind, ind, hide, ind
           n++
+        } else if ($0 ~ /^[ \t]*hide[ \t]/) {
+          # A block armed AFTER the marker hide landed but BEFORE the junk
+          # classes joined the list: it already has `file_server { hide … }`, so
+          # the bare-file_server arm above can never see it and it would keep the
+          # SHORT list forever. Rewrite the hide line itself — but only when it
+          # actually differs, or every deploy would rewrite, validate and reload
+          # Caddy for no change (the idempotence row pins this).
+          match($0, /^[ \t]*/); ind = substr($0, 1, RLENGTH)
+          cur = $0; sub(/^[ \t]*hide[ \t]+/, "", cur)
+          if (cur == hide) print
+          else { printf "%shide %s\n", ind, hide; n++ }
         } else print
         o = gsub(/[{]/, "&"); c = gsub(/[}]/, "&"); depth += o - c
         if (o > 0) opened = 1
@@ -3609,7 +3735,7 @@ arm_caddy_site_route() {
           rm -f "$ubak"
           upgraded=1
           systemctl reload caddy 2>/dev/null || true
-          log "upgraded the already-armed /sites/$SITE_SLUG file_server to hide $PREBUILT_MARK $HEALTH_FAIL_MARK"
+          log "upgraded the already-armed /sites/$SITE_SLUG file_server to hide $HIDE_LIST"
         else
           cp -a "$ubak" "$CADDYFILE" && rm -f "$ubak"
           log "caddy validate rejected the /sites/$SITE_SLUG hide upgrade — reverted, Caddy untouched"
@@ -3631,7 +3757,7 @@ arm_caddy_site_route() {
     upgrade_caddy_bare_path && bare_upgraded=1
     if [ "$upgraded" = 1 ] || [ "$bare_upgraded" = 1 ]; then
       local what=""
-      [ "$upgraded" = 1 ] && what="hide $PREBUILT_MARK and $HEALTH_FAIL_MARK"
+      [ "$upgraded" = 1 ] && what="hide $HIDE_LIST"
       if [ "$bare_upgraded" = 1 ]; then
         [ -n "$what" ] && what="$what, and "
         what="${what}add the bare-path 308 redir (/sites/$SITE_SLUG -> /sites/$SITE_SLUG/, which used to fall through to the slot reverse_proxy)"
@@ -3670,9 +3796,12 @@ arm_caddy_site_route() {
 		# The release-root markers ($PREBUILT_MARK / $HEALTH_FAIL_MARK) live INSIDE
 		# the served tree. Un-hidden, a plain GET discloses the artifact digest
 		# and — worse — that the LIVE release is one the engine already knows
-		# failed its health gate. hide keeps them internal.
+		# failed its health gate. hide keeps them internal. The rest of \$HIDE_LIST
+		# is packaging junk and repo/secret shapes: a staged file is a SERVED file,
+		# and a release staged before the extractor learned to refuse junk still
+		# has \`.DS_Store\` and \`._*\` sidecars sitting in its root.
 		file_server {
-			hide $PREBUILT_MARK $HEALTH_FAIL_MARK
+			hide $HIDE_LIST
 		}
 	}
 SITEROUTE

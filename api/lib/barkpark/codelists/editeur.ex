@@ -205,7 +205,7 @@ defmodule Barkpark.Codelists.EDItEUR do
     plugin = Keyword.get(opts, :plugin, @plugin_default)
     issue = Keyword.get(opts, :issue, @bundled_issue)
 
-    case bundled_path() do
+    case bundled_snapshot_source(&bundled_path/0, @bundled_filename) do
       {:error, :not_found} ->
         Logger.info(
           "Codelists.EDItEUR: bundled snapshot #{@bundled_filename} not found on disk — skipping seed"
@@ -282,7 +282,7 @@ defmodule Barkpark.Codelists.EDItEUR do
     plugin = Keyword.get(opts, :plugin, @plugin_default)
     issue = Keyword.get(opts, :issue, @thema_issue)
 
-    case thema_bundled_path() do
+    case bundled_snapshot_source(&thema_bundled_path/0, @thema_bundled_path) do
       {:error, :not_found} ->
         Logger.info(
           "Codelists.EDItEUR: bundled Thema snapshot #{@thema_bundled_path} not found on disk — skipping seed"
@@ -592,5 +592,48 @@ defmodule Barkpark.Codelists.EDItEUR do
     # Plugin settings may not be available in every test environment; treat
     # any error as "no path configured" rather than crashing the resolver.
     _ -> {:error, :not_found}
+  end
+
+  # ── Bundled-snapshot seeding switch (CI stall, 2026-09-10) ──────────────
+  #
+  # The two bundled snapshots are large: `priv/codelists/onix-issue-73.xml`
+  # is 1.4 MB of XML and `priv/codelists/thema-1.6/thema-v1.6-en.json` is
+  # 3.5 MB of JSON, and `Codelists.register/3` writes each parsed list as one
+  # big JSONB row. On a 2-core CI runner with the whole suite competing for
+  # CPU that pair costs up to ~120 s — long enough to blow the Ecto sandbox's
+  # 120_000 ms `:ownership_timeout` (config/test.exs already names "the
+  # EDItEUR/Thema codelist seed's big JSONB register" as the reason its
+  # per-hold watchdog is 45 s). Because `run_all_codelist_seeders/0` LOGS
+  # seeder failures instead of raising, the test that triggered it still
+  # PASSED — a 120 s wait that goes green. Measured on main runs 34429809804
+  # (120068.2 ms, plugins_live_test.exs:115) and 34429840562 (119877.8 ms,
+  # registry_collect_test.exs:186); scripts/ci-log-gap-census.sh scored it as
+  # the single largest >=10 s gap in the Test job.
+  #
+  # `config :barkpark, :seed_bundled_codelist_snapshots` (default TRUE, so
+  # dev/prod/boot/seeds.exs are unaffected) lets config/test.exs turn the
+  # bundled pair off. NO test asserts on the bundled corpus: every codelist
+  # assertion in test/barkpark/codelists/editeur_test.exs runs over a small
+  # fixture through `parse_xml/2` + `seed/2`, and the only callers of
+  # `seed_bundled/0` / `seed_thema/0` under test reach them transitively via
+  # `Registry.run_all_codelist_seeders/0`, which they exercise for its
+  # WALK, never for what OnixEdit's seeders write. A test that does want the
+  # real snapshot flips it back on for its own duration.
+  #
+  # The disabled path returns the same `{:ok, :no_snapshot}` the missing-file
+  # path already returns, so no caller or spec changes.
+  @spec bundled_snapshot_source((-> {:ok, Path.t()} | {:error, :not_found}), String.t()) ::
+          {:ok, Path.t()} | {:error, :not_found}
+  defp bundled_snapshot_source(locator, filename) do
+    if Application.get_env(:barkpark, :seed_bundled_codelist_snapshots, true) do
+      locator.()
+    else
+      Logger.info(
+        "Codelists.EDItEUR: bundled snapshot seeding disabled by config " <>
+          "(:seed_bundled_codelist_snapshots) — skipping #{filename}"
+      )
+
+      {:error, :not_found}
+    end
   end
 end

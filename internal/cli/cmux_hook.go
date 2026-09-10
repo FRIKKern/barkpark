@@ -461,6 +461,29 @@ func hookCloseAtEpoch(c *apiclient.Client, task, worker string, epoch int, dbg, 
 	rev := ""
 	if fresh, gotFresh := c.GetPerspective("task", task, "drafts"); gotFresh {
 		rev = docRev(fresh)
+
+		// RE-PROVE ACCEPTANCE ON THE ROW THE BYPASS WILL CAS AGAINST.
+		//
+		// hookStopClose proved acceptance on ITS read, and that verdict was
+		// good enough for a close with the work-digest fence ARMED — the fence
+		// is exactly what catches a criterion rewritten under the claim. But we
+		// only get here BECAUSE the fence refused, and D82's observed_rev CAS
+		// SKIPS the fence (close.ex short-circuits check_work_digest the moment
+		// observed_rev is non-nil). So on this arm the pre-amendment verdict is
+		// the only thing standing between an out-of-band criterion rewrite and
+		// a silent unattended close, and it is not enough: `doc_changed_since_
+		// claim:acceptance_criteria` is precisely the refusal that says the
+		// criteria we judged are not the criteria on the row.
+		//
+		// The fresh read is already in hand for the rev. Judging it costs
+		// nothing and makes the bypass a CAS against a row we have actually
+		// proven, rather than a CAS against a rev whose content we never
+		// looked at. When the drift really was the agent ticking its own boxes
+		// the fresh row is still all-met and this changes nothing.
+		if total, allMet := acceptanceAllMet(fresh); total == 0 || !allMet {
+			fail("Stop: the brief changed under this claim and the fresh row's acceptance is NOT proven (%d criteria, all met=%v) — not closing; the observed_rev bypass skips the work-digest fence, so it must not carry a verdict from the pre-amendment read", total, allMet)
+			return false, false
+		}
 	}
 	if rev == "" {
 		// Without a current rev there is no sanctioned bypass, and a rev-less

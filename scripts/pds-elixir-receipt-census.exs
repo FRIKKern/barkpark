@@ -965,7 +965,6 @@ defmodule PDS.Census do
     {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
     {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
-    {:post, "/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms/promote", "BarkparkWeb.SearchController", :promote_search_synonym, :status_only_receipt},
     {:post, "/v1/fleet/support-tokens", "BarkparkWeb.FleetSupportTokenController", :create, :status_only_receipt},
@@ -1006,7 +1005,6 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
-    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout, :status_only_receipt},
@@ -1149,7 +1147,6 @@ defmodule PDS.Census do
     {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal} => {"BarkparkWeb.CycleFleetController.seal/2", 1, "42433904"},
     {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate} => {"BarkparkWeb.MutateController.mutate/2", 2, "26705772"},
     {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore} => {"BarkparkWeb.HistoryController.restore/2", 1, "109652942"},
-    {:post, "/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction} => {"BarkparkWeb.SearchController.correction/2", 1, "19866096"},
     {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym} => {"BarkparkWeb.SearchController.create_search_synonym/2", 1, "12081343"},
     {:post, "/v1/data/search/:dataset/synonyms/promote", "BarkparkWeb.SearchController", :promote_search_synonym} => {"BarkparkWeb.SearchController.promote_search_synonym/2", 1, "49650472"},
     {:post, "/v1/fleet/support-tokens", "BarkparkWeb.FleetSupportTokenController", :create} => {"BarkparkWeb.FleetSupportTokenController.create/2", 1, "10356438"},
@@ -1190,7 +1187,6 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal} => {"BarkparkWeb.CycleFleetController.seal/2", 1, "42433904"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate} => {"BarkparkWeb.MutateController.mutate/2", 2, "26705772"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore} => {"BarkparkWeb.HistoryController.restore/2", 1, "109652942"},
-    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction} => {"BarkparkWeb.SearchController.correction/2", 1, "19866096"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym} => {"BarkparkWeb.SearchController.create_search_synonym/2", 1, "12081343"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout} => {"BarkparkWeb.V1.MediaController.checkout/2", 1, "12930699"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout} => {"BarkparkWeb.V1.MediaController.undo_checkout/2", 1, "124774745"},
@@ -1628,6 +1624,11 @@ defmodule PDS.Census do
       anchor_mfa: "BarkparkWeb.ChatHostController.event/2", def_fp: "62380347",
       verdict: "UNJUDGED", basis: :stub_mapping_only,
       note: "re-renders the callee's :accepted tag faithfully; the tag's truth against any stored row is a separate question this row does not answer."},
+    %{path: "api/lib/barkpark_web/controllers/search_controller.ex",
+      literal: "recorded: status == :recorded,",
+      anchor_mfa: "BarkparkWeb.SearchController.correction/2", def_fp: "94313079",
+      verdict: "PROVEN", basis: :end_to_end,
+      note: "ARRIVES AS A ROSTER ROW BECAUSE THE EVIDENCE ARRIVED FIRST, NOT AS BOOKKEEPING. correction/2 left this lens's literal population at #9600 — it stopped spelling `ok: true` and now renders `ok: status != :error` beside a `status:` discriminator for the five causally different outcomes record_correction/3 answers — so no register row can name it and BOTH of its routed arrivals (`post /v1/data/search/:dataset/correction` and `post /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/correction`) sat in @routed_excluded as :status_only_receipt. A roster row attaches to the DEF, so ONE row disposes both, which is why the two exclusion tuples and their two @exclusion_anchors entries are REMOVED in the same commit — ROUTED-DISPOSITION-UNSHADOWED would otherwise red on a committed row naming a member this run disposes ROSTERED. WHY PROVEN, AND WHY NOT SOONER: the earlier proposal to write this row was refused precisely because it would have counted the SCOPED MIRROR as proven on a suite that never dispatched to it — correction_receipt_test.exs drives the flat route only and its own moduledoc says so. #16521 removed that objection by running the mirror: scoped_search_intel_receipt_test.exs `the five-way correction receipt is identical on the scoped and flat paths` posts all five inputs through :scoped_api under a member token and asserts five DISTINCT receipts on the SCOPED path, `a scoped correction writes a row carrying the URL's workspace_id` reads the written row back, and the C0 cases pin that the mirror fails closed for an anonymous caller and for a member of another workspace. end_to_end is earned on both legs: each case asserts the receipt AND the `search_intel_events` correction row count behind it. MUTATION-EXERCISED at 2e3ee4f6c — re-laundering correction/2 (destructure `status` away, render `ok: true` again) reds `the five-way correction receipt is identical on the scoped and flat paths` with `five causally different outcomes collapsed on the SCOPED path` and `a scoped correction writes a row carrying the URL's workspace_id` on `body[\"status\"]` nil, alongside 6 flat-route cases: 14 tests, 8 failures. Restored: 14 tests, 0 failures. def_fp DERIVED, never typed — a planted def_fp: \"PROBE\" row made ROSTER-VERDICT-FRESH print `def_fp moved PROBE -> 94313079`, and any further edit to correction/2, `mix format` included, moves it again and demotes this row to UNJUDGED."},
     %{path: "api/lib/barkpark_web/controllers/pulse_controller.ex",
       literal: "def preflight(conn, _params), do: send_resp(conn, 204,",
       anchor_mfa: "BarkparkWeb.PulseController.preflight/2", def_fp: "131930615",
@@ -5291,6 +5292,8 @@ defmodule PDS.Census do
   # `:public` is the CALLSITE name and `:none` the SPEC-SIDE spelling of the same bucket
   # (BarkparkWeb.Router.Plugins.auth_matches_scope?/2). Missing it drops every public
   # plugin route silently.
+  # GATED, NOT MERELY DOCUMENTED (PDS wave 48): MOUNT-MACRO-MIRRORED re-derives the
+  # macro's own mapping every run and reds when these two clauses stop agreeing with it.
   defp auth_in_scope?(:none, :public), do: true
   defp auth_in_scope?(auth, scope), do: auth == scope
 
@@ -5389,6 +5392,17 @@ defmodule PDS.Census do
     fresh_only_defs = receipt_functions(classified, :proven, [:live])
     proven_defs = receipt_functions(classified, :proven, [:live, :stale])
 
+    # THE FRESHNESS ARM'S OWN SPECIMEN, DERIVED HERE SO AN ARM CAN READ IT
+    # (task-ac55ff2388510d67). `stale_only_defs` is the set of PROVEN register defs that
+    # ONLY the `:stale` half of leg A's status filter admits — delete that `:stale` and
+    # every member reaching one of these leaves leg A. Wave 45 measured this set EMPTY and
+    # printed the zero honestly; it is NOT empty on today's tree, so the half that moved
+    # nothing now moves members and LADDER-STALE-ARM-EXERCISED below asserts that it does.
+    # DERIVED FROM THE TWO SETS ALREADY IN SCOPE — no new committed data, nothing to rot.
+    stale_only_defs = MapSet.difference(proven_defs, fresh_only_defs)
+    stale_only_members = members_reaching(population, index, stale_only_defs)
+    leg_a_live_only = members_reaching(population, index, fresh_only_defs)
+
     ladder = %{
       # COUNTED, NOT ADDED, even here where the cond guarantees disjointness — one
       # traversal over the labels asks nothing of the reader.
@@ -5405,6 +5419,18 @@ defmodule PDS.Census do
       suppressed_judged: MapSet.size(loose_judged) - Enum.count(disposed, &(elem(&1, 1) == :judged)),
       proven_defs: MapSet.size(proven_defs),
       proven_defs_live_only: MapSet.size(fresh_only_defs),
+      # THE :stale ARM, MEASURED RATHER THAN ASSUMED. `stale_arm_dropped` is the arm's
+      # predicate and it is a REACH RELATION, never a count: a member reached by a def
+      # that only the :stale admission carries MUST be in leg A. Both sides move together
+      # on any honest register edit or controller repair, so an honest edit cannot red it.
+      stale_only_defs: Enum.sort(MapSet.to_list(stale_only_defs)),
+      stale_only_members: MapSet.size(stale_only_members),
+      stale_arm_dropped: Enum.sort(MapSet.to_list(MapSet.difference(stale_only_members, leg_a))),
+      leg_a_live_only: MapSet.size(leg_a_live_only),
+      # Carried so the arm can scope itself exactly as the register and roster arms do:
+      # over the synthetic tree the register resolves nothing and an unconditional arm
+      # there would certify an empty set at exit 0.
+      register_scope: register_scope(classified),
       # THE WRONG ANSWER THAT SHARES THE RIGHT ANSWER'S VALUE, derived rather than
       # asserted — and derived as a UNION here too, because a plus is what got this
       # slice written.
@@ -5665,6 +5691,36 @@ defmodule PDS.Census do
   # table is now freshness-checked" without printing the rows it CANNOT key commits this
   # epic's exact over-claim one lens down, so the breakdown and the fraction are OUTPUT,
   # never PR prose.
+  # THE FRESHNESS ARM SAYS WHICH OF ITS TWO STATES IT IS IN, AND IT USED TO SAY ONLY ONE
+  # (task-ac55ff2388510d67). The shipped line was a CONSTANT sentence — "the freshness arm
+  # is a NO-OP ... the same set, because no PROVEN register row is stale right now" —
+  # printed beside two numbers it derived. Wave 45 wrote it when both numbers were 15. By
+  # the time this slice read it the two numbers were 17 and 20 and the prose still said
+  # "the same set": a sentence contradicted by its own arguments, on the one line in the
+  # file whose whole job is to admit what is not exercised. THE SENTENCE IS NOW DERIVED
+  # FROM THE SPECIMEN SET, so it cannot disagree with the figures beside it, and the
+  # MOVES branch names every specimen — a def admitted to leg A by the :stale arm and by
+  # nothing else — so a reader can check the claim against the demotion block above.
+  defp report_stale_arm(lad) do
+    if lad.stale_only_defs == [] do
+      p("      the freshness arm is a NO-OP ON THIS TREE: #{lad.proven_defs_live_only} proven register def(s) at")
+      p("        status :live and #{lad.proven_defs} at :live+:stale — the same set, because no PROVEN register")
+      p("        row is stale right now. NOTHING HERE IS EVIDENCE THAT THE :stale ARM WORKS; the")
+      p("        evidence is the selftest case LADDER-STALE-ARM-SPECIMEN, which MANUFACTURES a")
+      p("        stale PROVEN row and requires it to appear as a STALE SPECIMEN on this line.")
+    else
+      p("      the freshness arm MOVES ON THIS TREE: #{lad.proven_defs_live_only} proven register def(s) at status")
+      p("        :live and #{lad.proven_defs} at :live+:stale, so the :stale half admits #{length(lad.stale_only_defs)} def(s)")
+      p("        and #{lad.stale_only_members} member(s) (leg A #{lad.leg_a_live_only} -> #{lad.leg_a}) that a :live-only leg A would DROP.")
+      p("        Delete the `:stale` from leg A and LADDER-STALE-ARM-EXERCISED reds by name.")
+
+      Enum.each(lad.stale_only_defs, fn {mod, name} ->
+        p("        STALE SPECIMEN  #{mod}.#{name} — a PROVEN register row demoted to")
+        p("                        basis_stale, admitted to leg A by the :stale arm and by nothing else")
+      end)
+    end
+  end
+
   defp report_exclusion_freshness(rows) do
     by = Enum.group_by(rows, &exclusion_tag/1)
     n = fn t -> length(Map.get(by, t, [])) end
@@ -6530,14 +6586,12 @@ defmodule PDS.Census do
       "      "
     )
 
-    p("    THE ZEROES, PRINTED RATHER THAN IMPLIED — two arms that are NOT exercised today:")
+    p("    THE SIDE ARMS, PRINTED RATHER THAN IMPLIED — each says whether it is exercised:")
     p("      precedence suppression removes #{lad.suppressed_rostered} member(s) from ROSTERED and")
     p("        #{lad.suppressed_judged} from JUDGED — the loose roster-reaching and receipt-reaching sets")
     p("        equal the printed counts, so the cond's JUDGED > ROSTERED order hides nothing")
     p("        on this tree and the ladder's legs are unaffected by it either way.")
-    p("      the freshness arm is a NO-OP: #{lad.proven_defs_live_only} proven register def(s) at status :live and")
-    p("        #{lad.proven_defs} at :live+:stale — the same set, because no PROVEN register row is stale")
-    p("        right now. NOTHING BELOW IS EVIDENCE THAT THE :stale ARM WORKS.")
+    report_stale_arm(lad)
 
     p("")
     exfresh = exclusion_freshness(parsed, index)
@@ -7231,6 +7285,9 @@ defmodule PDS.Census do
   # DECLARED HERE, WITH THE OTHER REACH ATTRIBUTES, BECAUSE A MODULE ATTRIBUTE IS READ AT
   # DEFINITION TIME: declared next to its user it read `nil` in lv_print_reach/6 above it
   # and printed `auth: nil` in a line whose whole job is to name the bucket.
+  # GATED, NOT MERELY DOCUMENTED (PDS wave 48): MOUNT-MACRO-MIRRORED re-derives the wrap
+  # set from emit_route_ast/1 every run, so "the day the macro gains a second wrapping
+  # bucket" below is now a RED rather than a silent widening of the residual.
   @lvs_macro_wrapped_auth :public_root
 
   defp lv_verdict(pop, comp, route_mods, parsed, index) do
@@ -8007,8 +8064,58 @@ defmodule PDS.Census do
       {"ROUTED-POPULATION-COMPLETE", ok?, complete_why},
       {"LENS-CAN-MISS", resolved != [], lens_why},
       {"ROUTED-DISPOSITION-UNSHADOWED", disp.shadowed == [], shadow_why}
-    ] ++ exclusion_freshness_checks(d) ++ derivation_checks(d) ++ liveview_checks(d)
+    ] ++
+      exclusion_freshness_checks(d) ++
+      derivation_checks(d) ++ liveview_checks(d) ++ stale_arm_checks(d)
   end
+
+  # THE LADDER'S :stale FRESHNESS ARM STOPS BEING UNGUARDED (task-ac55ff2388510d67).
+  #
+  # WHAT WAS WRONG. Leg A of the PROVEN-BACKED rung admits register rows at status in
+  # [:live, :stale]. Wave 45 measured ZERO PROVEN rows stale, so the `:stale` half moved
+  # no member and deleting it would have changed no printed number — a live branch with
+  # no mutant on it, which is the exact defect this epic exists to file. It printed the
+  # zero, which is the honest minimum, and stopped there.
+  #
+  # WHAT THIS ARM ASSERTS, AND WHY IT IS A RELATION AND NEVER A COUNT. Every member that
+  # reaches a PROVEN register def carried ONLY by the `:stale` admission must be IN leg A.
+  # Both sides are re-derived from the same run, so an honest register edit, a controller
+  # repair, or a re-key moves them TOGETHER and cannot red this. Dropping the `:stale`
+  # from leg A moves exactly one side, and that is the failure it exists for — proven by
+  # the selftest case LADDER-STALE-ARM-REDS-WHEN-DROPPED, which does precisely that.
+  #
+  # NOT EXERCISED IS SAID OUT LOUD RATHER THAN PASSED SILENTLY. If a future tree carries
+  # no stale PROVEN row the predicate is vacuously true, and the PASS sentence says the
+  # arm certified NOTHING — the failure mode a green with no subject has. Its mutant does
+  # not depend on that luck either: LADDER-STALE-ARM-SPECIMEN MANUFACTURES the specimen by
+  # demoting one PROVEN row's expression fingerprint, which is the demotion path
+  # resolve_register/1 owns.
+  #
+  # SCOPED LIKE ITS SIBLINGS. Over the synthetic selftest tree the register resolves zero
+  # rows, so an unconditional arm there would certify an empty set at exit 0 — PDS-D541's
+  # unmutatability. Both mutants therefore census the REPO.
+  defp stale_arm_checks(%{disposition: %{ladder: %{register_scope: :real} = lad}}) do
+    why =
+      cond do
+        lad.stale_arm_dropped != [] ->
+          "#{length(lad.stale_arm_dropped)} member(s) reach a PROVEN register def carried ONLY by the :stale admission and are NOT in leg A — the freshness arm has been dropped from the ladder, so leg A now under-counts PROVEN-BACKED by every one of them: " <>
+            Enum.map_join(Enum.take(lad.stale_arm_dropped, 6), " · ", fn {m, p, mod, a} ->
+              "STALE-ONLY MEMBER #{m} #{p} -> #{mod}.#{a}"
+            end)
+
+        lad.stale_only_defs == [] ->
+          "NOT EXERCISED — no PROVEN register row resolves :stale on this corpus, so the predicate is vacuously true and this PASS certifies NOTHING about the :stale arm. Its evidence is the selftest case LADDER-STALE-ARM-SPECIMEN, which manufactures a stale PROVEN row rather than waiting for the tree to grow one"
+
+        true ->
+          "#{length(lad.stale_only_defs)} PROVEN register def(s) reach leg A through the :stale admission ALONE (" <>
+            Enum.map_join(lad.stale_only_defs, ", ", fn {mod, name} -> "#{mod}.#{name}" end) <>
+            "), and all #{lad.stale_only_members} member(s) they reach are IN leg A · leg A #{lad.leg_a_live_only} -> #{lad.leg_a} · delete the :stale and this arm reds naming the members that fell out"
+      end
+
+    [{"LADDER-STALE-ARM-EXERCISED", lad.stale_arm_dropped == [], why}]
+  end
+
+  defp stale_arm_checks(_), do: []
 
   # SCOPED OUT ON THE SYNTHETIC TREE, exactly like the register and roster arms — see
   # the comment on exclusion_freshness/2 for why an unconditional arm would red the
@@ -8782,14 +8889,24 @@ defmodule PDS.Census do
       name: "ROSTER-FRESH-NOT-VACUOUS",
       corpus: :repo,
       argv: [],
-      # THE 0-OF-8 SHAPE. A resolver that finds no def makes every comparison unreachable,
+      # THE 0-OF-ALL SHAPE. A resolver that finds no def makes every comparison unreachable,
       # which is how a freshness arm certifies an empty set at exit 0 — the LENS-CAN-MISS
       # -ARMED failure mode, wearing this arm's name.
+      #
+      # THE COUNT IS DERIVED FROM @roster, NEVER TYPED. It was the literal "0 stale + 8
+      # unresolved of 8" until the correction-receipt roster row made it 9, and a case
+      # that reds because the roster HONESTLY GREW is a false accusation the next author
+      # would be tempted to answer by weakening the expectation. The discriminator is
+      # unchanged and is still a count: EVERY row unresolved and NONE stale.
       mut:
         {"|> Enum.min_by(&(&1.last - &1.line)" <> ", fn -> nil end)", "|> then(fn _ -> nil end)"},
       exit: 1,
-      expect: ["FAIL  ROSTER-VERDICT-FRESH", "0 stale + 8 unresolved of 8", "UNRESOLVED ANCHOR"],
-      proves: "a resolver that resolves NOTHING reds on a stated unresolved COUNT instead of passing 0-of-8 — an arm that certifies an empty set is the vacuous green this epic refuses"
+      expect: [
+        "FAIL  ROSTER-VERDICT-FRESH",
+        "0 stale + #{length(@roster)} unresolved of #{length(@roster)}",
+        "UNRESOLVED ANCHOR"
+      ],
+      proves: "a resolver that resolves NOTHING reds on a stated unresolved COUNT instead of passing 0-of-#{length(@roster)} — an arm that certifies an empty set is the vacuous green this epic refuses"
     },
     # THE EXCLUSION ANCHOR (PDS-D585), AND WHY ALL THREE CASES CENSUS THE REPO. The arm
     # is scoped to the real corpus by the same predicate the register and roster arms
@@ -9195,6 +9312,67 @@ defmodule PDS.Census do
       refute: ["[naive == UNION"],
       proves: "PROVEN-BACKED is ONE Enum.count over ONE MapSet.union and not leg_a + leg_b: a def already carried by leg B is injected into leg A, so the legs now share member(s), the naive addition rises above the union and the union HOLDS. Replace that union with an addition and this case reds, because the addition can only ever print `naive == UNION`"
     },
+    # THE FRESHNESS ARM'S FIRST MUTANT, AND THE FIRST THING THAT CAN EVER RED WHEN IT IS
+    # DELETED (task-ac55ff2388510d67). Wave 45 printed that the `:stale` half of leg A's
+    # status filter moved nothing; on this tree it moves defs and members, and NOTHING
+    # noticed either way, because no arm read the difference. This case deletes the
+    # `:stale` and requires LADDER-STALE-ARM-EXERCISED to red BY NAME with the members
+    # that fell out of leg A. THE ANCHOR IS SPLIT so the tuple does not match ITSELF —
+    # apply_mutation/2 refuses an ambiguous anchor, and this is the same line
+    # LADDER-UNION-NOT-SUM anchors on, split the same way for the same reason.
+    #
+    # NO NUMBER IS ASSERTED. The expectation is the arm's NAME, its sentence, and the
+    # STALE-ONLY MEMBER token — an honest register edit that changes how many defs are
+    # demoted cannot red it, and a tree that carries no stale PROVEN row at all makes the
+    # arm print NOT EXERCISED, which its sibling case below covers on manufactured data.
+    %{
+      name: "LADDER-STALE-ARM-REDS-WHEN-DROPPED",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"leg_a = members_reaching(population, index, " <>
+           "receipt_functions(classified, :proven, [:live, :stale]))",
+         "leg_a = members_reaching(population, index, " <>
+           "receipt_functions(classified, :proven, [:live]))"},
+      exit: 1,
+      expect: [
+        "FAIL  LADDER-STALE-ARM-EXERCISED",
+        "the freshness arm has been dropped from the ladder",
+        "STALE-ONLY MEMBER "
+      ],
+      refute: ["PASS  LADDER-STALE-ARM-EXERCISED"],
+      proves: "the `:stale` in leg A's status filter is LOAD-BEARING and is now guarded: delete it and LADDER-STALE-ARM-EXERCISED reds by name, naming the member(s) that reach a PROVEN register def only the :stale admission carries. On origin/main that same deletion moved PROVEN-BACKED and every check still printed PASS at exit 0"
+    },
+    # THE SPECIMEN IS MANUFACTURED RATHER THAN BORROWED FROM TODAY'S LUCK. The arm above
+    # is exercised only while some PROVEN register row happens to be demoted; a tree where
+    # every row is fresh makes it print NOT EXERCISED and its mutant go quiet. This case
+    # DEMOTES ONE PROVEN ROW'S EXPRESSION FINGERPRINT — the fourth field of the four-field
+    # key, the only field a re-key moves — so resolve_register/1 must take its {path, mfa}
+    # fallback and resolve the row :stale rather than :live. SecretController.delete/2 is
+    # the chosen row because its {path, mfa} group holds exactly ONE register row, so the
+    # neighbour fence (PDS-D706) cannot orphan it instead.
+    #
+    # IT ASSERTS A NAME, NOT A COUNT. The unmutated run does not print this module as a
+    # STALE SPECIMEN; the mutated one must. That is a discriminator no honest register
+    # edit can flip, and it proves the whole path end to end: demotion -> specimen ->
+    # printed sentence -> the arm's PASS.
+    %{
+      name: "LADDER-STALE-ARM-SPECIMEN",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"\"BarkparkWeb.SecretController.delete/2\", \"115609568\", " <> "\"17468236\"},",
+         "\"BarkparkWeb.SecretController.delete/2\", \"115609568\", " <> "\"999999999\"},"},
+      exit: 0,
+      expect: [
+        "the freshness arm MOVES ON THIS TREE",
+        "STALE SPECIMEN  BarkparkWeb.SecretController.delete",
+        "PASS  LADDER-STALE-ARM-EXERCISED",
+        "CENSUS OK"
+      ],
+      refute: ["the freshness arm is a NO-OP ON THIS TREE"],
+      proves: "the :stale arm can be MADE to fire from committed data alone: demoting one PROVEN register row's expression fingerprint sends resolve_register/1 down its {path, mfa} fallback, the row resolves :stale, and that row's def appears as a NAMED STALE SPECIMEN admitted to leg A by the :stale arm and by nothing else — which is what the printed zero of wave 45 could not show"
+    },
     # THE POPULATION BASELINE STOPS BEING ADVISORY (PDS-D678, wave 47), AND THE CORPUS IS
     # THE REPO FOR THE SAME REASON THE ROSTER CASES USE IT: baseline_checks/2 is scoped by
     # register_scope/1, so over the synthetic tree the arm is not in the checks list at all
@@ -9218,11 +9396,30 @@ defmodule PDS.Census do
     # THE TWO SEAM REPAIRS, EACH WITH ITS OWN MUTANT ON ITS OWN CLAUSE (PDS-D480).
     #
     # THE ASSERTION IS THE ARTEFACT ITSELF, WHICH IS WHY IT IS WORTH MAKING. Disable
-    # either resolution and the route relation goes flat at 6 again — ROUTE-DEPTH-IS-CLOSURE
-    # reds with "the route relation closes at 6 on this run", which is wave 35's shipped
-    # sentence, reproduced on demand. That is the claim this slice refutes, restored by a
-    # one-clause mutation and named in the output. A drift row rides along as the second
-    # half: killing a live edge cannot leave the population untouched.
+    # either resolution and the route relation COLLAPSES — ROUTE-DEPTH-IS-CLOSURE reds
+    # with "@route_depth is typed <N> but the route relation closes at <M> on this run",
+    # the closure sentence reproduced on demand. That is the claim this slice refutes,
+    # restored by a one-clause mutation and named in the output. A drift row rides along
+    # as the second half: killing a live edge cannot leave the population untouched.
+    #
+    # THE COLLAPSED DEPTH IS NO LONGER PINNED, AND THAT IS THE REPAIR THIS FILE ALREADY
+    # PRESCRIBES ONE CASE UP. Both expectations carried the literal "the route relation
+    # closes at 6 on this run" — wave 35's shipped sentence — and it stopped being true
+    # without anyone touching these cases: the seams the tree grew since move the
+    # collapsed closure to 8, so BOTH cases sat dead-red, exit 1 as required and the
+    # pinned digit never printed. That is exactly the failure the D448 banner above names
+    # ("THE DERIVED SIDE IS THE TREE'S AND IS DELIBERATELY LEFT UNPINNED ... pinning it is
+    # what left the sibling arm below dead-red for two waves"), and the sibling it names
+    # IS this pair. So the expectation now stops one word before the tree's digit, and the
+    # TYPED side derives from @route_depth. RE-TYPING THE 6 AS AN 8 WAS THE OTHER OPTION
+    # AND IT IS THE ONE THIS INSTRUMENT EXISTS TO REFUSE: it would buy a green until the
+    # next seam lands and re-arm the same dead red.
+    #
+    # WHAT IS LEFT IS STILL A DISCRIMINATOR, NOT A TAUTOLOGY. The unmutated run PASSES
+    # ROUTE-DEPTH-IS-CLOSURE, so this sentence cannot appear at all unless the closure
+    # MOVED off the typed literal — which is the whole claim — and `refute` holds the
+    # other side. That the arm reds on a wrong TYPED side too, not only on a collapsed
+    # tree, is proven separately by ROUTE-DEPTH-TYPED-SIDE-REDS below.
     #
     # WHY THE REPO CORPUS. Both seams are api/lib shapes (`&default_ingest/2`,
     # `mod = Module.concat(...)` then `mod.ingest(...)`). The synthetic tree carries
@@ -9241,11 +9438,11 @@ defmodule PDS.Census do
       exit: 1,
       expect: [
         "FAIL  ROUTE-DEPTH-IS-CLOSURE",
-        "the route relation closes at 6 on this run",
+        "@route_depth is typed #{@route_depth} but the route relation closes at",
         "FAIL  D448-DRIFT-REFUSES"
       ],
       refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
-      proves: "the capture edge is LIVE, not decorative: read the arity literal as nil — which is what a naive `when is_integer(a)` guard does to a literal_encoder-wrapped 2 — and `intake_fun/0` resolves to Application.get_env alone again, the whole github seam falls back into UNROUTED, and the depth table goes flat at 6. The census then prints wave 35's own closure sentence, so the case asserts the artefact this slice removes rather than a number that moved"
+      proves: "the capture edge is LIVE, not decorative: read the arity literal as nil — which is what a naive `when is_integer(a)` guard does to a literal_encoder-wrapped 2 — and `intake_fun/0` resolves to Application.get_env alone again, the whole github seam falls back into UNROUTED, and the depth table closes SHALLOWER than the typed @route_depth. The census then prints its own closure sentence, so the case asserts the artefact this slice removes rather than a number that moved"
     },
     %{
       name: "CONCAT-BINDS-THE-VARIABLE",
@@ -9257,11 +9454,42 @@ defmodule PDS.Census do
       exit: 1,
       expect: [
         "FAIL  ROUTE-DEPTH-IS-CLOSURE",
-        "the route relation closes at 6 on this run",
+        "@route_depth is typed #{@route_depth} but the route relation closes at",
         "FAIL  D448-DRIFT-REFUSES"
       ],
       refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
-      proves: "the Module.concat binding is LIVE: refuse to read the two-alias concat and every `mod.f(...)` edge loses its module, so `default_ingest/2` resolves to Module.concat alone and the table goes flat at 6 again. The mutation keeps a and b in scope (`a && b && nil`) so it is a RESOLUTION failure and not an unused-variable warning — the clause still runs, it just declines to bind"
+      proves: "the Module.concat binding is LIVE: refuse to read the two-alias concat and every `mod.f(...)` edge loses its module, so `default_ingest/2` resolves to Module.concat alone and the table closes SHALLOWER than the typed @route_depth again. The mutation keeps a and b in scope (`a && b && nil`) so it is a RESOLUTION failure and not an unused-variable warning — the clause still runs, it just declines to bind"
+    },
+    # THE OTHER DIRECTION, SO THE DERIVATION ABOVE IS NOT A TAUTOLOGY. The two seam cases
+    # stopped pinning the collapsed depth, which leaves a fair question: does the arm red
+    # because the TREE moved, or would it print that sentence over anything? This case
+    # moves the TYPED side and nothing else — the budget attribute one lower, against an
+    # untouched corpus — and the arm reds naming both numbers. The comparison is therefore
+    # live on both of its operands, and the seam cases' shortened expectation is a real
+    # read. THE PROSE HERE MUST NOT SPELL THE ATTRIBUTE AND ITS VALUE side by side: the
+    # anchor is the file's own text, apply_mutation/2 refuses an ambiguous one, and this
+    # comment saying the digit out loud made its own case red MUTATION ANCHOR AMBIGUOUS.
+    #
+    # THE DERIVED SIDE IS UNPINNED HERE TOO, for the reason the banner above gives: the
+    # typed side is @route_depth - 1 because this case injected it, and what follows
+    # "closes at" is the tree's and belongs to nobody's literal. D448-DRIFT-REFUSES is NOT
+    # in the expectation and that is measured, not assumed: the population rows are
+    # derived from the swept closure rather than from the typed budget, so this mutation
+    # leaves them untouched and that arm stays PASS.
+    %{
+      name: "ROUTE-DEPTH-TYPED-SIDE-REDS",
+      corpus: :repo,
+      argv: [],
+      mut: {"@route_depth " <> Integer.to_string(@route_depth),
+            "@route_depth " <> Integer.to_string(@route_depth - 1)},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTE-DEPTH-IS-CLOSURE",
+        "@route_depth is typed #{@route_depth - 1} but the route relation closes at",
+        "RE-DERIVE the literal, never re-type it"
+      ],
+      refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
+      proves: "ROUTE-DEPTH-IS-CLOSURE compares a TYPED literal against a LIVE sweep and reds when either side moves — mistyping the budget alone, with the corpus untouched, reds by name. Without this case the two seam cases' expectation could not tell a live comparison from a sentence the run always prints"
     },
     %{
       name: "D448-BASELINE-REFUSES",
@@ -9342,6 +9570,41 @@ defmodule PDS.Census do
       exit: 0,
       expect: {:citation_drift, :invariant},
       proves: "inserting #{@cite_pad_lines} lines above a cited test moves every citation's resolved LINE and NOTHING else — the resolved blocks are identical, so no line insertion can change a verdict. MEASURED on origin/main before this wave: four citations into #{@cite_pad_file} resolved to a blank line, a comment and a bare assert, and BASIS-FALSIFIERS passed all four"
+    },
+    # THE TWO MOUNT-MACRO MIRROR MUTANTS. Both census the REPO, because the synthetic tree
+    # carries no api/lib/barkpark_web/router/plugins.ex and MOUNT-MACRO-MIRRORED scopes
+    # itself out where the macro is absent — an arm proven only where it is scoped out is
+    # proven nowhere (PDS-D541). Each moves the CENSUS side of the comparison, which is the
+    # only side a selftest may edit; the macro-side directions (a second wrapping bucket, a
+    # remapped exception pair) were proven by hand against a scratch edit of plugins.ex and
+    # are not committed here, because a selftest that edits api/lib is not read-only.
+    %{
+      name: "MOUNT-MIRROR-MAPPING",
+      corpus: :repo,
+      argv: [],
+      mut: {"defp auth_in_scope?(:none, :pub" <> "lic), do: true",
+            "defp auth_in_scope?(:none, :ops), do: true"},
+      exit: 1,
+      expect: [
+        "FAIL  MOUNT-MACRO-MIRRORED",
+        "the macro maps it true, auth_in_scope?/2 says false",
+        "REPAIR THE CENSUS COPY"
+      ],
+      proves: "the census's retyped copy of BarkparkWeb.Router.Plugins.auth_matches_scope?/2 is GATED: move one bucket in it and the auth x scope cross-product re-derived from the macro's own AST names the disagreeing pair and exits 1, instead of the copy quietly selecting the wrong callsite for every :none route"
+    },
+    %{
+      name: "MOUNT-MIRROR-WRAP",
+      corpus: :repo,
+      argv: [],
+      mut: {"@lvs_macro_wrapped_auth :public" <> "_root",
+            "@lvs_macro_wrapped_auth :public_api"},
+      exit: 1,
+      expect: [
+        "FAIL  MOUNT-MACRO-MIRRORED",
+        "wraps and is NOT mirrored",
+        "is mirrored and NO LONGER wraps"
+      ],
+      proves: "the census's retyped copy of the ONE bucket emit_route_ast/1 wraps in its own live_session is GATED: rename it and the wrap set re-derived from the macro's own conditional reds by name, instead of lv_session_index/1 crediting a live_session the macro does not emit"
     }
   ]
 
@@ -10189,7 +10452,8 @@ defmodule PDS.Census do
         register_checks(classified, parsed) ++
         roster_freshness_checks(classified, parsed) ++
         falsifier_check(falsifiers) ++ baseline_checks(drift_rows, classified) ++
-        route_depth_checks(route_closure, classified)
+        route_depth_checks(route_closure, classified) ++
+        mount_mirror_checks(parsed)
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
     p(String.duplicate("-", 78))
@@ -10923,6 +11187,266 @@ defmodule PDS.Census do
       end
 
     {"D448-DRIFT-REFUSES", drifted == [], why}
+  end
+
+  # ------------------------------------------------- the mount-macro mirror gate
+  #
+  # THE CENSUS HAND-MIRRORS THE PLUGIN MOUNT MACRO TWICE, AND UNTIL THIS ARM NOTHING
+  # CHECKED EITHER COPY (PDS wave 48). `auth_in_scope?/2` above is a retyped copy of
+  # `BarkparkWeb.Router.Plugins.auth_matches_scope?/2`, and `@lvs_macro_wrapped_auth` is a
+  # retyped copy of the ONE bucket whose route `emit_route_ast/1` wraps in a live_session
+  # of its own. Both feed lv_session_index/1, which turns them into a DECIDED reach class
+  # — so a copy that stops descending from the macro does not print a smaller claim, it
+  # prints a class the tree does not have.
+  #
+  # ONE SOURCE, BOTH SIDES READ IT — never a third hand-written list. This arm RE-DERIVES
+  # from the macro's own AST, on every run, three things it never types:
+  #
+  #   the bucket universe   the `scope in [...]` literal `plugin_routes/1` guards on
+  #   the mapping           every `auth_matches_scope?/2` clause: the atom-pair
+  #                         exceptions (`:none` -> `:public`) AND the identity catch-all
+  #   the wrap set          every bucket atom compared in a conditional whose branch
+  #                         emits a `live_session` inside `emit_route_ast/1`
+  #
+  # and then compares the mapping BEHAVIOURALLY — the full auth x scope cross-product run
+  # through both predicates — rather than by text. A textual diff of two clause lists reds
+  # on a reformat and greens on a semantically different rewrite; the cross-product reds
+  # on exactly the disagreements that would move a route between buckets.
+  #
+  # A DERIVATION THAT FAILS IS A RED, NEVER A PASS. If the macro is renamed, reshaped, or
+  # grows a `live_session` this walk cannot attribute to a bucket, the arm says so and
+  # exits 1. The alternative — skipping quietly — is the exact state this arm replaces:
+  # a mirror nobody checks, believed because it was once true.
+  #
+  # SCOPED BY CORPUS MEMBERSHIP, AND THE SELFTEST MUTANTS RUN OVER THE REPO. The synthetic
+  # `--selftest` tree carries no router/plugins.ex, so this arm scopes OUT there exactly
+  # as ROSTER-VERDICT-FRESH does — which is why its two mutants declare `corpus: :repo`
+  # (PDS-D541: an arm proven only where it is scoped out is proven nowhere).
+  @plugins_macro_path "api/lib/barkpark_web/router/plugins.ex"
+
+  defp mount_mirror_checks(parsed) do
+    case Enum.find(parsed, &(&1.path == @plugins_macro_path)) do
+      nil -> []
+      %{src: src} -> [mount_mirror_check(src)]
+    end
+  end
+
+  defp mount_mirror_check(src) do
+    case derive_mount_macro(src) do
+      {:error, why} ->
+        {"MOUNT-MACRO-MIRRORED", false,
+         "the mount macro could NOT be re-derived from #{short(@plugins_macro_path)}: #{why} — the census's two hand-mirrors (auth_in_scope?/2 and @lvs_macro_wrapped_auth) are therefore unchecked this run, and a mirror nobody can check is the state this arm exists to refuse. Teach the derivation the macro's new shape; do not delete the arm"}
+
+      {:ok, d} ->
+        drift = mirror_mapping_drift(d) ++ mirror_wrap_drift(d)
+
+        why =
+          if drift == [] do
+            "both hand-mirrors of #{short(@plugins_macro_path)} still descend from it — the auth->scope mapping agrees with auth_in_scope?/2 across all #{mirror_pair_count(d)} auth x scope pair(s) re-derived from the macro's own #{length(d.buckets)}-bucket list, and the wrap set #{inspect(MapSet.to_list(d.wrapped))} (buckets emit_route_ast/1 wraps in a live_session of its own) equals @lvs_macro_wrapped_auth. NOTHING TRANSCRIBED: bucket list, mapping clauses and wrap set all come out of the macro's AST on this run"
+          else
+            "#{length(drift)} mirror disagreement(s) with #{short(@plugins_macro_path)}: " <>
+              Enum.join(drift, " · ") <>
+              " — the census's copy no longer descends from the macro it mirrors, so every DECIDED reach class lv_session_index/1 derives through it names a chain the tree does not have. REPAIR THE CENSUS COPY (auth_in_scope?/2 · @lvs_macro_wrapped_auth) against the macro, never the other way round"
+          end
+
+        {"MOUNT-MACRO-MIRRORED", drift == [], why}
+    end
+  end
+
+  # THE CROSS-PRODUCT, NOT A TEXT DIFF. The auth universe is the macro's bucket list plus
+  # every atom its clause heads name (that is how `:none`, which is spec-side only and in
+  # no bucket list, enters) plus the census's own wrap atom — so a bucket the census still
+  # believes in but the macro dropped is in the product and reds.
+  defp mirror_mapping_drift(d) do
+    for a <- mirror_auths(d), s <- mirror_scopes(d), macro_matches?(d, a, s) != auth_in_scope?(a, s) do
+      "{#{inspect(a)}, #{inspect(s)}} — the macro maps it #{macro_matches?(d, a, s)}, auth_in_scope?/2 says #{auth_in_scope?(a, s)}"
+    end
+  end
+
+  defp mirror_auths(d) do
+    Enum.uniq(d.buckets ++ Enum.map(d.exceptions, &elem(&1, 0)) ++ [@lvs_macro_wrapped_auth])
+  end
+
+  defp mirror_scopes(d), do: Enum.uniq(d.buckets ++ Enum.map(d.exceptions, &elem(&1, 1)))
+
+  defp mirror_pair_count(d), do: length(mirror_auths(d)) * length(mirror_scopes(d))
+
+  defp macro_matches?(d, auth, scope) do
+    MapSet.member?(d.exceptions, {auth, scope}) or (d.identity? and auth == scope)
+  end
+
+  defp mirror_wrap_drift(d) do
+    mirrored = MapSet.new([@lvs_macro_wrapped_auth])
+
+    if MapSet.equal?(d.wrapped, mirrored) do
+      []
+    else
+      unmirrored = d.wrapped |> MapSet.difference(mirrored) |> MapSet.to_list()
+      stale = mirrored |> MapSet.difference(d.wrapped) |> MapSet.to_list()
+
+      [
+        "the wrap set — emit_route_ast/1 wraps #{inspect(MapSet.to_list(d.wrapped))} in a live_session of its own, @lvs_macro_wrapped_auth mirrors #{inspect(MapSet.to_list(mirrored))}" <>
+          if(unmirrored != [], do: "; #{inspect(unmirrored)} wraps and is NOT mirrored, so its routes read sessionless and fall back into the residual", else: "") <>
+          if(stale != [], do: "; #{inspect(stale)} is mirrored and NO LONGER wraps, so lv_session_index/1 credits those routes a live_session the macro does not emit", else: "")
+      ]
+    end
+  end
+
+  # -- the derivation, out of the macro's own AST ------------------------------
+
+  defp derive_mount_macro(src) do
+    case Code.string_to_quoted(src) do
+      {:ok, ast} ->
+        with {:ok, buckets} <- derive_macro_buckets(ast),
+             {:ok, exceptions, identity?} <- derive_macro_mapping(ast),
+             {:ok, wrapped} <- derive_macro_wraps(ast) do
+          {:ok, %{buckets: buckets, exceptions: exceptions, identity?: identity?, wrapped: wrapped}}
+        end
+
+      {:error, _} ->
+        {:error, "the file does not parse as Elixir"}
+    end
+  end
+
+  # The bucket universe is the `scope in [...]` guard `plugin_routes/1` raises on — the
+  # macro's own enumeration of every legal callsite scope. Anchored on the VARIABLE named
+  # `scope`, because the same file also holds `verb in [:get, :post, ...]`.
+  defp derive_macro_buckets(ast) do
+    lists =
+      ast
+      |> Macro.prewalk([], fn
+        {:in, _, [{:scope, _, ctx}, list]} = n, acc when is_atom(ctx) and is_list(list) ->
+          if list != [] and Enum.all?(list, &is_atom/1), do: {n, [list | acc]}, else: {n, acc}
+
+        n, acc ->
+          {n, acc}
+      end)
+      |> elem(1)
+      |> Enum.uniq()
+
+    case lists do
+      [one] -> {:ok, one}
+      [] -> {:error, "no `scope in [...]` bucket list found — the macro's scope guard was renamed or reshaped"}
+      many -> {:error, "#{length(many)} different `scope in [...]` bucket lists found; the derivation cannot pick one"}
+    end
+  end
+
+  # Every `auth_matches_scope?/2` clause, classified. Two shapes are understood and
+  # NOTHING ELSE IS GUESSED: an atom-pair clause returning `true` (an exception, e.g.
+  # `:none` -> `:public`) and the var/var identity catch-all. A `when` guard, a third
+  # shape, or a vanished function all return an error, which reds.
+  defp derive_macro_mapping(ast) do
+    clauses =
+      ast
+      |> Macro.prewalk([], fn
+        {:defp, _, [head, body]} = n, acc ->
+          case mapping_clause_head(head) do
+            nil -> {n, acc}
+            args -> {n, [{args, Keyword.get(body, :do)} | acc]}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+      |> elem(1)
+
+    classified = Enum.map(clauses, &classify_mapping_clause/1)
+
+    cond do
+      clauses == [] ->
+        {:error, "BarkparkWeb.Router.Plugins.auth_matches_scope?/2 no longer exists under that name — the census mirror has nothing left to descend from"}
+
+      Enum.any?(classified, &(&1 == :unknown)) ->
+        {:error,
+         "#{Enum.count(classified, &(&1 == :unknown))} of #{length(clauses)} auth_matches_scope?/2 clause(s) are in a shape this derivation does not model (a guard, or a body that is neither `true` nor `auth == scope`)"}
+
+      not Enum.any?(classified, &(&1 == :identity)) ->
+        {:error, "auth_matches_scope?/2 carries no identity catch-all clause any more, so the mapping is no longer `auth == scope` plus exceptions"}
+
+      true ->
+        {:ok, MapSet.new(for {:exception, pair} <- classified, do: pair), true}
+    end
+  end
+
+  defp mapping_clause_head({:auth_matches_scope?, _, args}) when is_list(args), do: args
+  defp mapping_clause_head({:when, _, [inner | _]}), do: guarded_mapping_head(inner)
+  defp mapping_clause_head(_), do: nil
+
+  # A guarded clause is REPORTED, not skipped: `mapping_clause_head/1` hands it back with a
+  # sentinel arg list that classify_mapping_clause/1 can only call :unknown.
+  defp guarded_mapping_head({:auth_matches_scope?, _, args}) when is_list(args), do: [:__guarded__ | args]
+  defp guarded_mapping_head(_), do: nil
+
+  defp classify_mapping_clause({[a, s], true}) when is_atom(a) and is_atom(s), do: {:exception, {a, s}}
+  defp classify_mapping_clause({[a, s], false}) when is_atom(a) and is_atom(s), do: :ignored
+
+  defp classify_mapping_clause({[{va, _, ca}, {vs, _, cs}], {:==, _, [{va2, _, _}, {vs2, _, _}]}})
+       when is_atom(ca) and is_atom(cs) and va == va2 and vs == vs2,
+       do: :identity
+
+  defp classify_mapping_clause(_), do: :unknown
+
+  # The wrap set: every bucket atom compared inside a conditional whose do-branch emits a
+  # `live_session`. TOTALITY IS ASSERTED — a `live_session` this walk cannot attribute to
+  # a compared atom (an else-branch, a `case`, a clause head) makes the derivation fail
+  # rather than under-report, because an under-reported wrap set greens the arm.
+  defp derive_macro_wraps(ast) do
+    attributed =
+      ast
+      |> Macro.prewalk([], fn
+        {:if, _, [cond_ast, kw]} = n, acc when is_list(kw) ->
+          body = Keyword.get(kw, :do)
+
+          if live_session_count(body) > 0 do
+            {n, [{compared_atoms(cond_ast), live_session_count(body)} | acc]}
+          else
+            {n, acc}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+      |> elem(1)
+
+    total = live_session_count(ast)
+    covered = attributed |> Enum.map(&elem(&1, 1)) |> Enum.sum()
+    atoms = attributed |> Enum.flat_map(&elem(&1, 0)) |> Enum.uniq()
+
+    cond do
+      total == 0 ->
+        {:error, "emit_route_ast/1 emits NO live_session at all any more — the macro stopped wrapping, and the census still credits a wrapped session to every #{inspect(@lvs_macro_wrapped_auth)} route"}
+
+      covered != total ->
+        {:error, "#{total - covered} of #{total} live_session emission(s) sit outside any `if` this walk can attribute to a bucket atom, so the wrap set would be UNDER-reported"}
+
+      Enum.any?(attributed, &(elem(&1, 0) == [])) ->
+        {:error, "a live_session-emitting branch is selected by a condition that compares NO bucket atom, so the bucket it wraps cannot be named"}
+
+      true ->
+        {:ok, MapSet.new(atoms)}
+    end
+  end
+
+  defp compared_atoms(ast) do
+    ast
+    |> Macro.prewalk([], fn
+      {op, _, [l, r]} = n, acc when op in [:==, :===] ->
+        {n, Enum.filter([l, r], &is_atom/1) ++ acc}
+
+      n, acc ->
+        {n, acc}
+    end)
+    |> elem(1)
+    |> Enum.uniq()
+  end
+
+  defp live_session_count(ast) do
+    ast
+    |> Macro.prewalk(0, fn
+      {:live_session, _, args} = n, acc when is_list(args) -> {n, acc + 1}
+      n, acc -> {n, acc}
+    end)
+    |> elem(1)
   end
 
   defp row(label, got, _raw, key) do

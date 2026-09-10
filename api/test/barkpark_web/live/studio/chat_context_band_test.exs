@@ -175,31 +175,78 @@ defmodule BarkparkWeb.Studio.ChatContextBandTest do
       assert has_element_with_mismatch?(html, "host"), message
     end
 
-    test "a session owned by a different workspace than the viewer's names BOTH", %{
+    test "a session owned by a different workspace than the viewer's names BOTH" do
+      # RESOLVER-LEVEL, and it was route-level until task-60df475d8333e040.
+      #
+      # This arm used to stage its disagreement by opening a foreign-workspace
+      # session on the FLAT mount, above a comment that said the tenancy clamp
+      # there "is open — which is precisely the mount on which a foreign-workspace
+      # session can be opened at all". That openness was the defect: the flat
+      # load seam now asks the acting token's binding (`load_permits?/2`), the
+      # same axis the band reads for the viewer half, so the two halves can no
+      # longer disagree through `ChatLive` on either mount — the scoped mount
+      # admits only its own workspace or a NULL-owned row, and the flat mount now
+      # admits only the token's own or a NULL-owned row.
+      #
+      # The disagreement is still a state `resolve/1` must report honestly (any
+      # future caller can hand it two workspaces), so the arm keeps its subject
+      # and moves to the resolver, where it can be staged without a hole.
+      identity =
+        ContextIdentity.resolve(%{
+          endpoint: "http://example.test",
+          viewer_workspace: "ctxb-viewer-ws",
+          session_workspace: "ctxb-other-ws",
+          project: nil,
+          scope_dataset: nil,
+          mount_dataset: nil,
+          execution_target: "managed",
+          cwd: nil
+        })
+
+      field = ContextIdentity.field(identity, "workspace")
+      rendered = ContextIdentity.Field.display(field)
+
+      message = """
+      the workspace field must REPORT the scope disagreement, naming both workspaces.
+        session's own workspace (the headline): ctxb-other-ws
+        viewer's workspace (the claim):         ctxb-viewer-ws
+        rendered:                               #{inspect(rendered)}
+      """
+
+      assert String.contains?(rendered, "ctxb-other-ws"), message
+      assert String.contains?(rendered, "ctxb-viewer-ws"), message
+      assert field.mismatch?, message
+    end
+
+    test "the flat mount no longer opens a foreign-workspace session at all", %{
       conn: conn,
       ws: ws,
       n: n
     } do
+      # The other half of the arm above, kept at ROUTE level: what used to stage
+      # the band's workspace disagreement is now refused outright
+      # (task-60df475d8333e040). The acting token is bound to `ws` by the setup.
       {:ok, other} = Tenancy.create_workspace(%{slug: "ctxb-other-#{n}", name: "Other #{n}"})
-      sid = managed_session!(other, nil)
+      foreign = managed_session!(other, nil)
+      own = managed_session!(ws, nil)
 
-      # The FLAT mount: no URL scope, so the viewer's workspace is the acting
-      # token's own (`ws`), and the tenancy clamp is open — which is precisely
-      # the mount on which a foreign-workspace session can be opened at all.
-      {:ok, _view, html} = live(conn, "/studio/chat/#{sid}")
-      rendered = band(html, "workspace")
+      refute other.id == ws.id,
+             "the foreign session is in the viewer's own workspace — nothing is refused"
 
-      message = """
-      the workspace field must REPORT the scope disagreement, naming both workspaces.
-        session's own workspace (the headline): #{other.slug}
-        viewer's workspace (the claim):         #{ws.slug}
-        rendered:                               #{inspect(rendered)}
-      """
+      {:ok, _view, foreign_html} = live(conn, "/studio/chat/#{foreign}")
 
-      assert String.contains?(rendered, other.slug), message
-      assert String.contains?(rendered, ws.slug), message
-      assert String.contains?(rendered, "⚠"), message
-      assert has_element_with_mismatch?(html, "workspace"), message
+      assert foreign_html =~ "no longer available",
+             "the flat mount opened a session owned by workspace #{other.slug}"
+
+      # The control: the SAME conn opens its OWN workspace's session, so the
+      # refusal above is a tenancy check and not a broken loader.
+      {:ok, _view, own_html} = live(conn, "/studio/chat/#{own}")
+
+      refute own_html =~ "no longer available",
+             "the viewer could not open its OWN workspace's session"
+
+      assert band(own_html, "workspace") == "workspace #{ws.slug}",
+             "the band did not name the viewer's own workspace on the session it DID open"
     end
 
     test "an agreeing workspace carries NO warning — the ⚠ is not decoration", %{

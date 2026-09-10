@@ -82,6 +82,7 @@ defmodule Barkpark.Tasks.Close do
       insert_mutation_event!: 3,
       insert_mutation_event!: 5,
       caller_stamp: 1,
+      actor_stamp: 2,
       merge_criteria: 2,
       merge_landed: 2,
       normalize_landed_list: 1,
@@ -637,7 +638,19 @@ defmodule Barkpark.Tasks.Close do
                       @event_task_closed,
                       observed_rev,
                       "api",
-                      Map.put(caller_stamp(caller_token_id), "closed_by", worker_id)
+                      # tlv-bl-events-actor-attribution: `closed_by` alone
+                      # names the actor but not the LEASE it acted on, so two
+                      # closes by the same worker across a re-claim are
+                      # indistinguishable on the feed. `actor` adds the epoch
+                      # the CAS actually fenced on, read from the row AS
+                      # WRITTEN (`updated`) rather than from the request, so
+                      # the event records what committed. A claimless close
+                      # (container / root rows) stamps no `actor` key at all.
+                      caller_stamp(caller_token_id)
+                      |> Map.put("closed_by", worker_id)
+                      |> Map.merge(
+                        actor_stamp(worker_id, get_in(updated.content, ["claim", "epoch"]))
+                      )
                     )
 
                   unblocked = cascade_unblock_dependents!(updated)

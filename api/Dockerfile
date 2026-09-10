@@ -92,11 +92,11 @@ COPY api/priv priv
 # build context BEFORE `mix compile`, or the module compiles against nothing and
 # says so nowhere. Fail the image here, by name, instead. Add a line per asset
 # when a new @external_resource points outside api/.
-# NOTE: /tooling/pds/pre-gate-papers.json joins this list the moment #15234
-# (the register) is on main — until then an assertion on it would red every
-# image build for a file nobody has merged yet (lead-papers, 2026-09-02).
+# #15234 (the register) is on main, so the promised line is here: the pre-gate
+# register is now asserted by name, exactly as the 2026-09-02 note said it would be.
 RUN set -e; for f in \
-      /design/status-manifest.json; do \
+      /design/status-manifest.json \
+      /tooling/pds/pre-gate-papers.json; do \
       [ -f "$f" ] || { echo "compile-time asset missing from the build context: $f (add its COPY above)"; exit 1; }; \
     done
 

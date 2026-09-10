@@ -273,8 +273,16 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # a COST, not a mutation, and the fence rules on mutation. `require_platform_operator`
   # delegates to `require_user`, so it lands in the SESSION bucket: `total` and
   # `session` each rise by exactly one; machine and public are untouched.
-  @baseline_total 72
-  @baseline_session 52
+  # 2026-09-10: 71 / 51 / 8 / 12. ONE ROUTE WAS REMOVED —
+  # `GET /v1/barkparks/:id/telemetry`, dropped by
+  # cch-w51-bl-metrics-latest-block-is-produced-and-rendered-by-nothing: it had
+  # ZERO callers (no console fetch, no `internal/cli` or `internal/cloudclient`
+  # client, no docs entry) while re-serving the full normalized envelope behind
+  # `Auth.require_user/2`. It was a SESSION route, so `total` and `session` each
+  # fall by exactly one; machine and public are untouched. A removal owes no
+  # `side_effecting_get?/1` ruling — the fence rules on routes that exist.
+  @baseline_total 71
+  @baseline_session 51
   @baseline_machine 8
   @baseline_public 12
 
