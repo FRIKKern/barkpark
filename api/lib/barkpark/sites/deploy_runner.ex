@@ -2551,7 +2551,48 @@ defmodule Barkpark.Sites.DeployRunner do
     String.trim(line) == "" or Regex.match?(@stage_re, line)
   end
 
-  # site-deploy.sh's typed exit codes (its header block is the contract).
+  # site-deploy.sh's typed exit codes (its header block, :79-86, is the contract).
+  #
+  # PRUNE-OR-PIN, DECIDED (dr-w15-bl-exit-label-dead-templates). Wave 15 measured
+  # that production has EVER produced three of these — 14 (3,688 rows), 12
+  # (1,575), 10 (1) — and filed the other eleven as candidates for removal. THE
+  # ZEROS ARE REAL; THE INFERENCE FROM THEM WAS NOT. "No row has worn this label"
+  # is a statement about what the fleet has SUFFERED, not about what the engine
+  # can EMIT, and every clause below has a live producer on main today:
+  #
+  #     2   deploy/site-deploy.sh:179   unknown flag
+  #    10   :3497, :3533                BUILD: missing site source dir
+  #    11   :3157/:3160/:3380/:3382/:3410/:3428/:3432/:3454/:3501
+  #    12   :3571                       BUILD failed
+  #    13   :655/:665/:675/:3586/:3590  STAGE failed
+  #    14   :3623                       HEALTH gate failed
+  #    15   :3517                       gave up waiting for a lock
+  #    16   :3891                       SWITCH failed
+  #    21   :3226/:3229/:3232 (+ do_rollback:305/307 return 21)
+  #    22   :3224 (+ do_rollback:301 return 22)
+  #    23   :3214
+  #    24   do_rollback:317/318 return 24; deploy/site-deploy-node.sh:3115/3123/3127
+  #    -1   THIS module: :693 (port died with no exit_status) and
+  #         `deploy_outcome/2`'s stages==[] / no-terminal arms
+  #    -2   THIS module: :738 (the unit deadline watchdog)
+  #  fallback  every bare `exit 1` in site-deploy.sh (:1274, :1458, :1489, :2034,
+  #         :2401, :2454, :2695, :2903), and a 25 arriving under a DEPLOY mode
+  #
+  # So NOTHING IS REMOVED. Every clause is retained AS A TRIPWIRE for a condition
+  # this fleet has not yet met: deleting one does not delete the exit, it routes a
+  # documented engine failure into the generic fallback, and the operator loses
+  # the one sentence that names what broke. The population that WOULD justify a
+  # prune is "codes the engine can no longer produce" — currently empty.
+  #
+  # Every clause is asserted by name in test/barkpark/sites/deploy_runner_test.exs
+  # ("every typed exit code maps to its own honest label", the 23/25 mode tests,
+  # the deadline test, and the abnormal-rollback test) — a retained tripwire with
+  # a real producer and no assertion is the rot this decision exists to avoid.
+  #
+  # BYTE-FROZEN, and not by convention: cloud/lib/barkpark_cloud/deploy_ledger.ex
+  # :919 `String.starts_with?(reason, "deploy process died abnormally")`, and its
+  # PROCESS_DIED copy at :312, read the -1 bytes below. Re-wording that clause
+  # silently reclassifies every abnormal deploy in the ledger.
   defp exit_label(2), do: "usage error (exit 2)"
   defp exit_label(10), do: "missing site source dir (exit 10)"
   defp exit_label(11), do: "missing or invalid required input (exit 11)"
