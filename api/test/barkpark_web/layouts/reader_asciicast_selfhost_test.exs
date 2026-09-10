@@ -48,7 +48,9 @@ defmodule BarkparkWeb.Layouts.ReaderAsciicastSelfhostTest do
         Barkpark.LabelFixtures.paper_attrs(%{
           slug: @slug,
           body_html:
-            ~s(<section id="b1"><div class="bp-asciicast" data-cast-src="/media/files/2026/09/demo.cast"></div></section>),
+            ~s(<section id="b1"><p>A paper carrying a terminal recording, so the ) <>
+              ~s(reader page emits the player tags this test reads.</p>) <>
+              ~s(<div class="bp-asciicast" data-cast-src="/media/files/2026/09/demo.cast"></div></section>),
           event_type: "plan-written"
         })
       )
@@ -102,18 +104,27 @@ defmodule BarkparkWeb.Layouts.ReaderAsciicastSelfhostTest do
       assert File.read!(@js) =~ "AsciinemaPlayer"
     end
 
-    test "neither asset references any external URL" do
-      for path <- [@js, @css] do
-        src = File.read!(path)
-
-        assert Regex.scan(~r{https?://[^\s"'()]+}, src) == [],
-               "#{path} reaches off-origin — self-hosting it would relocate the CDN dependency, not remove it"
-      end
+    test "the engine references no external URL at all" do
+      assert Regex.scan(~r{https?://[^\s"'()]+}, File.read!(@js)) == [],
+             "#{@js} reaches off-origin — self-hosting it would relocate the CDN " <>
+               "dependency, not remove it"
     end
 
-    test "the stylesheet pulls no url(...) resource" do
-      assert Regex.scan(~r/url\(/, File.read!(@css)) == [],
-             "a url(...) in the CSS is a font/image fetch the offline proof would miss"
+    test "the stylesheet fetches nothing: no url(...), no @import" do
+      # NOT an `https?://` scan like the engine's. The stylesheet carries six
+      # http(s) URLs and every one is inside a `/* … */` theme attribution
+      # (draculatheme.com, base16, nord, solarized ×2, Tango) — prose, not a
+      # request. `url(...)` and `@import` are the two constructs that would
+      # actually fetch, so those are what this asserts. Rewriting it as a
+      # blanket URL scan would go red on a comment and teach the next reader to
+      # delete the check.
+      css = File.read!(@css)
+
+      assert Regex.scan(~r/url\(/, css) == [],
+             "a url(...) is a font/image fetch the offline proof would miss"
+
+      assert Regex.scan(~r/@import/, css) == [],
+             "an @import pulls a whole second stylesheet, possibly off-origin"
     end
 
     test "the WebAssembly ships inline, as a base64 data: payload" do

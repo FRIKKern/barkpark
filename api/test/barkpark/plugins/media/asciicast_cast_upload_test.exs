@@ -2,41 +2,46 @@ defmodule Barkpark.Plugins.Media.AsciicastCastUploadTest do
   @moduledoc """
   pe-bl-asciicast-selfhost — Barkpark can HOST the `.cast` file.
 
-  Half of "an asciicast plays with the CDN blocked" is the player (vendored,
-  see `BarkparkWeb.Layouts.ReaderAsciicastSelfhostTest`); the other half is the
-  recording, which until now could only be an off-site URL because nothing had
-  ever put a `.cast` through media.
+  Half of "an asciicast plays with the CDN blocked" is the player (vendored;
+  see `BarkparkWeb.Layouts.ReaderAsciicastSelfhostTest`). The other half is the
+  recording, which until now was always somebody else's URL because nothing had
+  ever put a `.cast` through the media door.
 
   THE FILING EXPECTED AN ALLOWLIST TO WIDEN. There is none to widen.
-  `Barkpark.Media.validate_upload/3` reads `:allowed_mime_types` /
-  `:allowed_extensions` from config, both `[]` in `config/config.exs:240-241`,
-  and an empty list is documented as allow-all — media has a DENYLIST
-  (`MediaFile.dangerous_mime?/1`: svg/html/xml/js), not an allowlist. So `.cast`
-  needed no code change to be accepted, and this file is the proof of that
-  claim rather than a test of new code. It is worth its bytes because the
-  claim is load-bearing and non-obvious, and because three separate mechanisms
-  could silently break it: a future allowlist, the MIME neutralizer, and the
+  `Barkpark.Media.upload/3` calls `validate_upload/3`, which reads
+  `:allowed_mime_types` / `:allowed_extensions` from app config — both `[]` in
+  `config/config.exs:240-241`, and an empty list is documented there as
+  allow-all. Media enforces a DENYLIST (`MediaFile.dangerous_mime?/1`:
+  svg/html/xml/js), never an allowlist. `.cast` therefore needed no code change
+  to be accepted, and this file is the PROOF of that claim rather than a test
+  of new code. It earns its bytes because the claim is load-bearing and
+  non-obvious, and because three independent mechanisms could silently falsify
+  it later: a future allowlist, the dangerous-mime neutralizer, and the
   extension-preserving filename generator.
 
-  What is pinned:
+  It drives the REAL HTTP door — `POST /media/upload` then
+  `GET /media/files/*path` — rather than `Media.upload/3` in-process, because
+  the published URL is what a paper stores and it is the controller, not the
+  context, that mints it.
 
-    * A `.cast` upload is ACCEPTED (no allowlist rejection).
-    * Its `.cast` extension SURVIVES into the published `path`, so the URL a
-      paper stores really ends in `.cast`.
-    * Its recorded mime is NOT collapsed by `neutralize_dangerous_mime/1` —
-      an asciicast is JSON-shaped text, and `Probe.sniff_bytes/1` must not
-      mistake it for markup.
-    * `GET /media/files/*path` returns 200 and the EXACT bytes. Byte identity
-      is the assertion that matters: asciinema-player 3.x fetches the
-      recording with `fetch()` and parses `response.text()`, ignoring the
-      content-type entirely (independently observed in
-      `tooling/grip/ledger/asciicast-local-proof-2026-07-31.json`: "the mime is
-      NOT a blocker"), so what it needs from us is the bytes, not a label.
-    * `Render.Util.safe_url/1` returns the media URL UNCHANGED — the root-
-      relative form takes the `String.starts_with?(trimmed, "/")` arm — so the
-      `asciicast` block can point at a Barkpark-hosted recording. This is the
-      seam the row called out: the block "takes an external src URL only"
-      because `safe_url` refuses `data:`, not because it refuses same-origin.
+  Pinned here:
+
+    * A `.cast` upload is ACCEPTED: 201, with a `/media/files/...` URL.
+    * The `.cast` extension SURVIVES into that URL.
+    * The recorded mime is NOT collapsed by the dangerous-mime neutralizer —
+      an asciicast is JSON-shaped text and `Probe.sniff_bytes/1` must not read
+      it as markup.
+    * `GET` of that URL returns 200 and the EXACT bytes. Byte identity is the
+      whole contract: asciinema-player 3.x fetches the recording with
+      `fetch()` and parses `response.text()`, never inspecting the
+      content-type (independently observed in
+      `tooling/grip/ledger/asciicast-local-proof-2026-07-31.json` — "the mime
+      is NOT a blocker"). What the player needs from us is bytes, not a label.
+    * `Render.Util.safe_url/1` returns that URL UNCHANGED — a root-relative
+      path takes the `String.starts_with?(trimmed, "/")` arm — so an
+      `asciicast` block can point at a Barkpark-hosted recording. That is the
+      seam the row named: the block took "an external src URL only" because
+      `safe_url` refuses `data:` URIs, not because it refuses same-origin.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -45,61 +50,77 @@ defmodule Barkpark.Plugins.Media.AsciicastCastUploadTest do
   alias Barkpark.PortableDoc.Render.Figures
   alias Barkpark.PortableDoc.Render.Util
 
-  @dataset "production"
-
-  # A minimal, REAL asciicast v2 file: a header object line, then two output
-  # frames. Small enough to inline, complete enough that asciinema-player
-  # renders text from it.
+  # A minimal but REAL asciicast v2 file: the header object line, then two
+  # output frames. Small enough to inline; complete enough that the player
+  # paints text from it.
   @cast """
   {"version": 2, "width": 80, "height": 6, "timestamp": 1757462400, "env": {"SHELL": "/bin/zsh", "TERM": "xterm-256color"}}
   [0.1, "o", "barkpark self-hosted asciicast\\r\\n"]
   [0.6, "o", "no cdn required\\r\\n"]
   """
 
-  defp upload_cast!(name \\ "demo.cast") do
-    tmp = Path.join(System.tmp_dir!(), "bp-cast-#{:rand.uniform(1_000_000)}.cast")
+  setup do
+    Barkpark.Auth.create_token(
+      "barkpark-cast-token",
+      "dev",
+      "asciicast-selfhost",
+      ["read", "write", "admin"]
+    )
+
+    :ok
+  end
+
+  defp cast_upload do
+    tmp = Path.join(System.tmp_dir!(), "barkpark-cast-#{:rand.uniform(1_000_000)}.cast")
     File.write!(tmp, @cast)
-
-    {:ok, file} =
-      Media.upload(
-        %Plug.Upload{path: tmp, filename: name, content_type: "application/octet-stream"},
-        @dataset
-      )
-
-    on_exit(fn -> File.rm(tmp) end)
-    file
+    %Plug.Upload{path: tmp, filename: "demo.cast", content_type: "application/octet-stream"}
   end
 
-  describe "a .cast upload" do
-    test "is accepted — media's allowlist is empty, i.e. allow-all" do
-      file = upload_cast!()
-      assert file.id
-      assert file.original_name == "demo.cast"
-      assert file.size == byte_size(@cast)
+  defp upload_cast!(conn) do
+    body =
+      conn
+      |> put_req_header("authorization", "Bearer barkpark-cast-token")
+      |> post(~p"/media/upload", %{"file" => cast_upload()})
+      |> json_response(201)
+
+    "/media/files/" <> relative = body["url"]
+    on_exit(fn -> File.rm(Path.join(Media.upload_dir(), relative)) end)
+
+    body
+  end
+
+  describe "POST /media/upload with a .cast" do
+    test "is accepted — media's allowlist is empty, i.e. allow-all", %{conn: conn} do
+      body = upload_cast!(conn)
+
+      assert is_binary(body["id"])
+      assert body["size"] == byte_size(@cast)
+      assert String.starts_with?(body["url"], "/media/files/")
     end
 
-    test "keeps its .cast extension in the published path" do
-      file = upload_cast!()
+    test "keeps the .cast extension in the published URL", %{conn: conn} do
+      body = upload_cast!(conn)
 
-      assert String.ends_with?(file.path, ".cast"),
-             "the stored path is what a paper links to; losing the extension would " <>
-               "change what the URL claims to be"
+      assert String.ends_with?(body["url"], ".cast"),
+             "the URL is what a paper stores; losing the extension would change " <>
+               "what the link claims to be"
     end
 
-    test "is not collapsed by the dangerous-mime neutralizer" do
-      file = upload_cast!()
+    test "the recorded mime is not collapsed by the dangerous-mime neutralizer",
+         %{conn: conn} do
+      body = upload_cast!(conn)
 
-      refute MediaFile.dangerous_mime?(file.mime_type),
-             "an asciicast is JSON-shaped text; if the sniffer ever read it as " <>
-               "markup the row would be rewritten to octet-stream as an XSS defence"
+      refute MediaFile.dangerous_mime?(body["mimeType"]),
+             "an asciicast is JSON-shaped text; were the sniffer ever to read it " <>
+               "as markup the row would be rewritten to octet-stream as an XSS defence"
     end
   end
 
-  describe "the serve edge" do
-    test "returns the exact recording bytes", %{conn: conn} do
-      file = upload_cast!()
+  describe "GET the hosted recording" do
+    test "returns 200 and the exact recording bytes", %{conn: conn} do
+      body = upload_cast!(conn)
 
-      resp = get(conn, "/media/files/#{file.path}")
+      resp = get(conn, body["url"])
 
       assert resp.status == 200
 
@@ -110,17 +131,15 @@ defmodule Barkpark.Plugins.Media.AsciicastCastUploadTest do
   end
 
   describe "the asciicast block accepts the media URL" do
-    test "safe_url leaves a root-relative /media/files/... URL untouched" do
-      file = upload_cast!()
-      url = "/media/files/#{file.path}"
+    test "safe_url leaves the /media/files/... URL untouched", %{conn: conn} do
+      url = upload_cast!(conn)["url"]
 
       assert Util.safe_url(url) == url,
              "safe_url refuses data: URIs, not same-origin paths"
     end
 
-    test "the article-mode figure carries it as data-cast-src" do
-      file = upload_cast!()
-      url = "/media/files/#{file.path}"
+    test "the article-mode figure carries it as data-cast-src", %{conn: conn} do
+      url = upload_cast!(conn)["url"]
 
       html = Figures.asciicast_html(url, "", "", nil, :article)
 
