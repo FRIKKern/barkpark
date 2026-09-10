@@ -77,29 +77,93 @@ cleanup() { rm -rf "$TMPROOT"; }
 trap cleanup EXIT
 
 # Build a synthetic mini-repo whose cloud/ tree escapes to known repo-root paths.
+#
+# THE POPULATION IS DERIVED FROM THE DECLARED SET, NOT TYPED
+# (dr-w16-bl-widen-escape-fixture-then-raise-floor). This fixture used to emit
+# exactly FIVE covered reads, and that number was load-bearing in the wrong
+# direction: it CAPPED CLOUD_ESCAPE_MIN. dr-w16-s1 measured that raising the
+# floor to 7 turned "158 passed, 0 failed" into "152 passed, 6 failed" on the
+# fixture-tree cases — so the real population could grow (20 by the time this
+# was written) while the floor stayed at 6, and the scanner could silently lose
+# FOURTEEN of twenty reads with the floor still passing.
+#
+# So the fixture reads `--print-set cloud` and, for every declared path outside
+# cloud/, (1) materialises it and (2) emits one covered read of it. The fixture
+# population is then >= the number of declared cross-tree paths BY
+# CONSTRUCTION, and it follows CLOUD_PATHS automatically: declare a new producer
+# and the fixture grows with it, instead of pinning the floor to a hand-typed
+# list that rots on the next declaration.
+#
+# THE FORMS ALTERNATE — odd reads are quoted literals, even reads are SEGMENT
+# LISTS. That is the case-12 canary, kept and strengthened. Neuter the
+# segment-list reader and the fixture population HALVES (22 -> 11), which is far
+# under the floor, so every fixture case reds on the floor and case 12's
+# not_floor() arms say so out loud. A fixture built entirely out of quoted
+# literals would have let a dead segment reader sit green.
 make_fixture() {
-  local root="$1"
-  mkdir -p "$root/cloud/lib" "$root/cloud/test/barkpark_cloud" \
-    "$root/internal/cli/cloud" "$root/scripts" \
-    "$root/js/packages/create-barkpark-app/templates"
-  : >"$root/internal/cli/cloud/providers_capabilities.json"
-  : >"$root/scripts/async_env_seam_scan.exs"
-  : >"$root/js/packages/create-barkpark-app/templates/package.json"
+  local root="$1" g i=0 decl segs seg out
+  mkdir -p "$root/cloud/lib" "$root/cloud/test/barkpark_cloud" "$root/scripts"
   : >"$root/cloud/docker-compose.yml"
-  # Five covered reads — over the floor of 4 so the coverage cases exercise
-  # coverage, not the floor.
-  cat >"$root/cloud/test/barkpark_cloud/covered_test.exs" <<'EX'
-  @a Path.expand("../../../internal/cli/cloud/providers_capabilities.json", __DIR__)
-  @b Path.expand("../../../scripts/async_env_seam_scan.exs", __DIR__)
-  @c Path.expand("../../../js/packages/create-barkpark-app/templates", __DIR__)
-  @d Path.expand("../../../js/packages/create-barkpark-app/templates/package.json", __DIR__)
-  @e Path.expand("../../../scripts/cloud-path-escape-check.sh", __DIR__)
+
+  decl="$("$SCRIPT" --print-set cloud)"
+
+  # (1) materialise every declared path — an exact entry as a file, a `dir/**`
+  #     entry as a directory. Reads only enter the census if they RESOLVE, and
+  #     it is also what keeps the declaration-liveness arm (case 13) honest on
+  #     a fixture root.
+  while IFS= read -r g; do
+    [ -n "$g" ] || continue
+    case "$g" in
+      */'**') mkdir -p "$root/${g%/**}" ;;
+      *)
+        mkdir -p "$root/$(dirname -- "$g")"
+        : >"$root/$g"
+        ;;
+    esac
+  done <<EOF
+$decl
+EOF
+
+  # (2) one covered read per declared path OUTSIDE cloud/. Anything inside
+  #     cloud/ is not an escape and would never enter the census.
+  out="$root/cloud/test/barkpark_cloud/covered_test.exs"
+  : >"$out"
+  while IFS= read -r g; do
+    [ -n "$g" ] || continue
+    case "$g" in cloud | cloud/*) continue ;; esac
+    # Strip the glob suffix ONLY from a `dir/**` entry. `${g%/**}` applied
+    # unconditionally is a foot-gun: `/**` is the glob `/*`, so it also eats the
+    # last component of an EXACT entry — deploy/site-deploy.sh became `deploy`,
+    # and the fixture quietly emitted 15 distinct reads instead of 22.
+    case "$g" in */'**') g="${g%/**}" ;; esac
+    i=$((i + 1))
+    if [ $((i % 2)) -eq 0 ]; then
+      # SEGMENT LIST — `[__DIR__, "..", "..", "..", "a", "b"]`
+      segs=""
+      while [ -n "$g" ]; do
+        seg="${g%%/*}"
+        if [ "$seg" = "$g" ]; then g=""; else g="${g#*/}"; fi
+        segs="$segs, \"$seg\""
+      done
+      printf '  @r%d Path.join([__DIR__, "..", "..", ".."%s])\n' "$i" "$segs" >>"$out"
+    else
+      printf '  @r%d Path.expand("../../../%s", __DIR__)\n' "$i" "$g" >>"$out"
+    fi
+  done <<EOF
+$decl
+EOF
+
   # traversal-attack fixtures: asserted on, never read — must NOT be counted
+  cat >>"$out" <<'EX'
   @x "../etc/passwd"
   @y "../up"
 EX
   cp "$SCRIPT" "$root/scripts/" 2>/dev/null || true
 }
+
+# The floor, read out of the script rather than remembered here. A harness that
+# hard-codes the constant it is checking cannot notice the two of them drifting.
+FLOOR="$(sed -n 's/^CLOUD_ESCAPE_MIN=\([0-9][0-9]*\)$/\1/p' "$SCRIPT" | head -1)"
 
 echo "cloud-path-escape-check.test.sh"
 echo
@@ -116,8 +180,8 @@ fi
 # The count is the anti-vacuity signal: a run that says "0 reads" is a broken
 # scanner, and this case would notice it even if the floor were removed.
 n="$(printf '%s' "$out" | sed -n 's/^cloud-path-escape-check: \([0-9]*\) distinct.*/\1/p')"
-if [ "${n:-0}" -ge 6 ]; then
-  ok "resolved $n repo-root reads (at least CLOUD_ESCAPE_MIN=6; the floor is a lower bound, not the population)"
+if [ "${n:-0}" -ge "$FLOOR" ]; then
+  ok "resolved $n repo-root reads (at least CLOUD_ESCAPE_MIN=$FLOOR; the floor is a lower bound, not the population)"
 else
   no "resolved only ${n:-0} repo-root reads — scanner is under-matching"
 fi
