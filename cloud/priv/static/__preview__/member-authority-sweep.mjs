@@ -439,7 +439,16 @@ const PIN_MEMBER_SCENARIOS = 9;
 // and renderCurrentPlan both sit behind renderBilling's own owner fence. 124 was
 // RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the committed
 // corpus grew to 124 scenario(s), pinned at 123"), never by adding one.
-const PIN_TOTAL_SCENARIOS = 124;
+// 124 -> 125 (cch-w39-s2-fu): `account-modal-me-unreadable`, the corpus's first
+// fixture that puts the ACCOUNT MODAL in front of a /v1/me that never lands, so
+// modal-oracle can measure the unknown two-factor arm's Retry in a browser. The
+// member slice STAYS at 9 — the case the note above forbids bumping: this
+// fixture's `me` is the corpus's ordinary OWNER (`me("Guerrilla")`), and its
+// meFault means `meRole()` reads the 500 body and answers null, so it cannot
+// enter the member set by construction. 125 was RE-DERIVED by RUNNING this
+// sweep and reading what it PRINTED ("the committed corpus grew to 125
+// scenario(s), pinned at 124"), never by adding one.
+const PIN_TOTAL_SCENARIOS = 125;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;
