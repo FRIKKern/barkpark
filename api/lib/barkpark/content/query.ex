@@ -33,6 +33,14 @@ defmodule Barkpark.Content.Query do
   # The public page bounds, named so `list_documents/3`, `list_documents_page/3`
   # and the HTTP layer that echoes them back cannot drift apart.
   @max_limit 1000
+
+  # Whole-corpus bound for `collect_corpus_documents/3` — the in-memory fold
+  # read behind the drafts graph. Twenty times the `@max_limit` page, matching
+  # the (page_size 1000 x max_pages 20) budget the per-type OFFSET walk it
+  # replaces carried, but applied ONCE to the whole corpus rather than to each
+  # type: peak memory is now bounded by one number instead of by
+  # (types x pages).
+  @corpus_limit 20_000
   @max_offset 100_000
 
   @doc """
@@ -207,6 +215,114 @@ defmodule Barkpark.Content.Query do
   end
 
   defp finish(acc), do: acc |> Enum.reverse() |> Enum.concat()
+
+  @doc """
+  Read a WHOLE dataset corpus for an in-memory fold — every document of every
+  named `types`, drafts-merged, in ONE query per ACL class instead of one
+  OFFSET page per type.
+
+  ## Why this exists and `collect_all_documents/3` does not serve it
+
+  `collect_all_documents/3` pages with `LIMIT/OFFSET` over
+  `list_with_drafts_merged/4`, and that query is a `DISTINCT ON
+  (regexp_replace(doc_id, '^drafts\.', ''))` subquery re-sorted by `updated_at
+  DESC, id`. Neither sort key is indexed, so EVERY page re-sorts the ENTIRE
+  type corpus TWICE, carrying the full `content` jsonb through the sort tuple.
+  Total work is therefore QUADRATIC in the corpus (pages x corpus), and the
+  outer sort spills to disk. Measured on an 8,000-document corpus
+  (`EXPLAIN (ANALYZE, BUFFERS)`, page 6 of 8):
+
+      Limit (actual time=70.158..70.255 rows=1000)
+        Sort (actual time=69.764..70.122 rows=6000)
+          Sort Key: s0.updated_at DESC, s0.id
+          Sort Method: external merge  Disk: 2336kB
+          -> Unique (actual rows=8001)
+             -> Sort (actual rows=8001) Sort Method: quicksort  Memory: 2747kB
+
+  — 8,001 rows sorted to return 1,000, once per page. The whole-request cost
+  of `GET /v1/graph/:id?drafts=true` was 47 such reads (`Content.Graph`'s fold
+  walked every schema in the dataset), 1,046 ms of 1,264 ms.
+
+  A fold does not need ORDER and does not need OFFSET: it needs the set, once.
+  So this reads it as ONE bounded `DISTINCT ON` — a single sort, no outer
+  re-sort, no offset walk, no per-type multiplication.
+
+  ## Options
+
+    * `:limit` — hard bound on documents returned (default #{@corpus_limit}).
+      Unlike `collect_all_documents/3`'s per-TYPE `max_pages` bound this is a
+      WHOLE-CORPUS bound, so the caller's peak memory is bounded by one number
+      rather than by (types x pages).
+    * `:owner_scoped` — when `true`, appends the row-ownership ACL
+      (`scope_to_owner/2`) exactly as `base_query/4` does for an
+      `owner_scoped: true` type. Callers holding the schema list MUST split
+      their types by that flag and make one call per class; a mixed call would
+      apply one type's ACL to another's rows.
+    * `:workspace_id` / `:project_id` / `:caller_context` — as `list_documents/3`.
+
+  ## Identity
+
+  `DISTINCT ON (type, regexp_replace(doc_id, '^drafts\.', ''))` — the `type`
+  leg is LOAD-BEARING. Row identity is `(doc_id, type, dataset_id)`, so two
+  different types may legitimately carry the same `doc_id`; distinct-ing on the
+  slug alone would silently collapse `task/foo` and `paper/foo` into one row.
+  The per-type reads this replaces could not make that mistake; this one must
+  not either.
+
+  Draft-preferred, same as `list_with_drafts_merged/4`: the `CASE WHEN doc_id
+  LIKE 'drafts.%' THEN 0 ELSE 1 END` tiebreaker puts the draft twin first, so
+  `DISTINCT ON` keeps it over its published twin.
+
+  Returns `{documents, nil | :cap}` with the same contract as
+  `collect_all_documents/3`: `nil` means the corpus is exhausted and `docs` is
+  all of it; `:cap` means the bound stopped the read and `docs` is a PREFIX
+  that must not be reported as complete.
+  """
+  @spec collect_corpus_documents([String.t()], String.t(), keyword()) ::
+          {[Document.t()], nil | :cap}
+  def collect_corpus_documents(types, dataset, opts \\ [])
+
+  def collect_corpus_documents([], _dataset, _opts), do: {[], nil}
+
+  def collect_corpus_documents(types, dataset, opts) when is_list(types) do
+    limit = opts |> Keyword.get(:limit, @corpus_limit) |> max(1)
+
+    base =
+      Document
+      |> where([d], d.type in ^types)
+      |> scope_to_dataset(dataset, opts)
+      |> scope_to_workspace_or_global(
+        Keyword.get(opts, :workspace_id),
+        Keyword.get(opts, :project_id)
+      )
+      |> maybe_scope_to_grants(opts)
+
+    base =
+      if Keyword.get(opts, :owner_scoped, false),
+        do: scope_to_owner(base, Keyword.get(opts, :caller_context)),
+        else: base
+
+    # One read of `limit + 1`: the extra row is the honest truncation probe —
+    # it is present exactly when the corpus is larger than the bound.
+    rows =
+      from(d in base,
+        distinct: [
+          d.type,
+          fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)
+        ],
+        order_by: [
+          asc: d.type,
+          asc: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
+          asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 0 ELSE 1 END", d.doc_id)
+        ],
+        limit: ^(limit + 1)
+      )
+      |> Repo.all()
+
+    if length(rows) > limit,
+      do: {Enum.take(rows, limit), :cap},
+      else: {rows, nil}
+  end
 
   @doc """
   Count documents matching the same type / scope / filter / perspective as

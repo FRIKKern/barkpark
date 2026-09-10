@@ -92,6 +92,18 @@ defmodule Barkpark.Content do
     do: Query.collect_all_documents(type, dataset, opts)
 
   @doc """
+  The WHOLE-CORPUS read for an in-memory fold: every document of every named
+  type, drafts-merged, in ONE query per ACL class. The bounded, single-sort
+  counterpart to `collect_all_documents/3`'s per-type OFFSET walk — see
+  `Content.Query.collect_corpus_documents/3` for the measured plan that made
+  the difference.
+  """
+  @spec collect_corpus_documents([String.t()], String.t(), keyword()) ::
+          {[struct()], nil | :cap}
+  def collect_corpus_documents(types, dataset, opts \\ []),
+    do: Query.collect_corpus_documents(types, dataset, opts)
+
+  @doc """
   One page plus an exact `has_more` — `{documents, has_more}`. The page is what
   `list_documents/3` would return; `has_more` says whether any row exists past
   it, so a caller can tell an EXHAUSTED page from a TRUNCATED one (a bare list
