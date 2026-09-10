@@ -56,11 +56,26 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
 
   @repo_root Path.expand("../../../..", __DIR__)
   @canonical "api/priv/static/assets/bp-graph.js"
-  @mirrors [
-    "web/public/bp-graph.js",
-    "templates/search-starter/public/bp-graph.js",
-    "templates/astro-search-starter/public/bp-graph.js"
-  ]
+
+  # The paths are written INLINE at the read site, never assembled from a
+  # module attribute, on purpose: scripts/elixir-path-escape-check.sh resolves
+  # `Path.join(@root_anchor, "<literal>")` and cannot see a literal that lives
+  # in a separate attribute. MEASURED on this tree — with the mirrors read via
+  # an attribute list the ratchet printed "50 distinct repo-root read(s) ... OK"
+  # and dispatched on none of them; with the literals inline it requires all
+  # three to be declared. Written this way, the ratchet enforces the
+  # ELIXIR_TEST_ONLY_PATHS declaration that puts these three files into the
+  # Elixir dispatcher's path set, so a mirror-only PR runs this suite instead
+  # of skipping it.
+  defp canonical_path, do: Path.join(@repo_root, "api/priv/static/assets/bp-graph.js")
+
+  defp mirror_paths do
+    [
+      Path.join(@repo_root, "web/public/bp-graph.js"),
+      Path.join(@repo_root, "templates/search-starter/public/bp-graph.js"),
+      Path.join(@repo_root, "templates/astro-search-starter/public/bp-graph.js")
+    ]
+  end
 
   # A real bp-graph.js is ~3400 lines. Anything this small is a truncated or
   # replaced read, not a widget: refuse rather than scan it.
@@ -83,7 +98,7 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
 
   describe "canonical bp-graph.js" do
     test "every HTML sink escapes server-derived operands" do
-      src = read_or_refuse!(Path.join(@repo_root, @canonical))
+      src = read_or_refuse!(canonical_path())
       lines = String.split(src, "\n")
       owners = function_owners(lines)
 
@@ -141,7 +156,7 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
     end
 
     test "TYPE_HEX is a literal colour map, which is what makes it presentational" do
-      src = read_or_refuse!(Path.join(@repo_root, @canonical))
+      src = read_or_refuse!(canonical_path())
 
       [_, body] = Regex.run(~r/var TYPE_HEX = \{(.*?)\n  \};/s, src)
 
@@ -176,11 +191,16 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
 
   describe "mirror copies" do
     test "all four copies of bp-graph.js are byte-identical" do
-      canonical = read_or_refuse!(Path.join(@repo_root, @canonical))
+      canonical = read_or_refuse!(canonical_path())
       canonical_hash = :crypto.hash(:sha256, canonical) |> Base.encode16(case: :lower)
 
-      for mirror <- @mirrors do
-        body = read_or_refuse!(Path.join(@repo_root, mirror))
+      assert length(mirror_paths()) == 3,
+             "expected three mirror copies of bp-graph.js; scanner lists " <>
+               inspect(mirror_paths())
+
+      for path <- mirror_paths() do
+        mirror = Path.relative_to(path, @repo_root)
+        body = read_or_refuse!(path)
         hash = :crypto.hash(:sha256, body) |> Base.encode16(case: :lower)
 
         assert hash == canonical_hash,
@@ -286,7 +306,14 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
 
         cond do
           is_nil(base) ->
-            {[violation(op, line_idx, lines, "not a literal, not esc()-wrapped, not declared presentational")], []}
+            {[
+               violation(
+                 op,
+                 line_idx,
+                 lines,
+                 "not a literal, not esc()-wrapped, not declared presentational"
+               )
+             ], []}
 
           MapSet.member?(seen, base) ->
             {[], []}
@@ -359,7 +386,8 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
 
   defp esc_arg(op), do: op |> String.slice(4..-2//1) |> String.trim()
 
-  defp presentational?(op), do: Enum.any?(@presentational, fn {rx, _why} -> Regex.match?(rx, op) end)
+  defp presentational?(op),
+    do: Enum.any?(@presentational, fn {rx, _why} -> Regex.match?(rx, op) end)
 
   # `node.type` -> "node"; `swHex` -> "swHex"; `f(x)` -> nil (a call is not a
   # variable we can resolve, so it must be declared presentational).
@@ -422,9 +450,10 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
 
     idx =
       Enum.find_value(toks, fn {i, ch, depth, mode, prev, nxt} ->
-        if mode == :code and depth == 0 and ch == ?= and nxt != ?= and prev not in [?=, ?!, ?<, ?>],
-          do: i,
-          else: nil
+        if mode == :code and depth == 0 and ch == ?= and nxt != ?= and
+             prev not in [?=, ?!, ?<, ?>],
+           do: i,
+           else: nil
       end)
 
     case idx do
@@ -490,17 +519,25 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
         |> split_top(?:)
         |> Enum.flat_map(&expand_operand/1)
 
-      length(ors) > 1 -> Enum.flat_map(ors, &expand_operand/1)
-      length(ands) > 1 -> Enum.flat_map(ands, &expand_operand/1)
-      length(plus) > 1 -> Enum.flat_map(plus, &expand_operand/1)
-      true -> [op]
+      length(ors) > 1 ->
+        Enum.flat_map(ors, &expand_operand/1)
+
+      length(ands) > 1 ->
+        Enum.flat_map(ands, &expand_operand/1)
+
+      length(plus) > 1 ->
+        Enum.flat_map(plus, &expand_operand/1)
+
+      true ->
+        [op]
     end
   end
 
   defp unwrap_parens(s) do
     s = String.trim(s)
 
-    if String.starts_with?(s, "(") and String.ends_with?(s, ")") and balanced?(String.slice(s, 1..-2//1)) do
+    if String.starts_with?(s, "(") and String.ends_with?(s, ")") and
+         balanced?(String.slice(s, 1..-2//1)) do
       unwrap_parens(String.slice(s, 1..-2//1))
     else
       s
@@ -510,7 +547,9 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
   defp split_top(s, ch) do
     idxs =
       tokens(s)
-      |> Enum.filter(fn {_i, c, depth, mode, _p, _n} -> mode == :code and depth == 0 and c == ch end)
+      |> Enum.filter(fn {_i, c, depth, mode, _p, _n} ->
+        mode == :code and depth == 0 and c == ch
+      end)
       |> Enum.map(fn {i, _c, _d, _m, _p, _n} -> i end)
 
     slice_at(s, idxs, 1)
@@ -561,7 +600,9 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
 
   defp top_level_semicolon?(s) do
     tokens(s)
-    |> Enum.any?(fn {_i, ch, depth, mode, _p, _n} -> mode == :code and depth == 0 and ch == ?; end)
+    |> Enum.any?(fn {_i, ch, depth, mode, _p, _n} ->
+      mode == :code and depth == 0 and ch == ?;
+    end)
   end
 
   defp blank_strings(s) do
@@ -643,11 +684,15 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
   end
 
   defp do_tokens([?[ | rest], i, depth, {:re, _}, prev, acc) do
-    do_tokens(rest, i + 1, depth, {:re, true}, prev, [{i, ?[, depth, {:re, true}, prev, nil} | acc])
+    do_tokens(rest, i + 1, depth, {:re, true}, prev, [
+      {i, ?[, depth, {:re, true}, prev, nil} | acc
+    ])
   end
 
   defp do_tokens([?] | rest], i, depth, {:re, _}, prev, acc) do
-    do_tokens(rest, i + 1, depth, {:re, false}, prev, [{i, ?], depth, {:re, false}, prev, nil} | acc])
+    do_tokens(rest, i + 1, depth, {:re, false}, prev, [
+      {i, ?], depth, {:re, false}, prev, nil} | acc
+    ])
   end
 
   defp do_tokens([?/ | rest], i, depth, {:re, false}, _prev, acc) do
