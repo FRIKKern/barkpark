@@ -137,7 +137,10 @@ defmodule BarkparkCloud.SitesDeployArtifactReceiptTest do
       # Only STAGE narrates. The row must stay NULL rather than record a staged
       # digest as if it were a measurement of what went live.
       {result, final, _site} =
-        run_with("dist/ -> releases/b1 (12K) bp-build-sha256=#{@staged}", "current -> releases/b1")
+        run_with(
+          "dist/ -> releases/b1 (12K) bp-build-sha256=#{@staged}",
+          "current -> releases/b1"
+        )
 
       assert {:ok, :live} = result
       assert is_nil(final.build_sha256)
