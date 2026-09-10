@@ -1014,7 +1014,19 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       # never exit 23). The old pin here drove {23, "rollback: …"} under a
       # deploy request, a state the shell cannot produce; the honest 23 pins
       # live below, driven under the modes that CAN exit 23.
+      #
+      # dr-w15: the table is now TOTAL over `exit_label/1`'s deploy-voiced
+      # clauses. Wave 15 measured eleven of them at zero PRODUCTION rows and
+      # proposed a prune; every one has a live producer in the engine (the
+      # traced list sits above the clause group), so each is retained as a
+      # tripwire — and a retained tripwire with no assertion is exactly the
+      # thing that rots. 2/10/11 and the generic fallback are pinned here; 12
+      # above; 23/25 by mode below; -2 by the deadline test; -1 by the
+      # abnormal-rollback test.
       for {code, fragment, slug} <- [
+            {2, "usage error (exit 2)", "exit-2"},
+            {10, "missing site source dir (exit 10)", "exit-10"},
+            {11, "missing or invalid required input (exit 11)", "exit-11"},
             {13, "STAGE failed", "exit-13"},
             {14, "HEALTH gate failed", "exit-14"},
             # Exit 15 has TWO producers — the box's fleet build gate and the
@@ -1023,7 +1035,11 @@ defmodule Barkpark.Sites.DeployRunnerTest do
             {16, "SWITCH failed", "exit-16"},
             {21, "rollback: no previous release", "exit-21"},
             {22, "rollback: not supported", "exit-22"},
-            {24, "rollback failed", "exit-24"}
+            {24, "rollback failed", "exit-24"},
+            # The generic fallback. NOT a dead template: site-deploy.sh exits a
+            # bare 1 in eight places (:1274, :1458, :1489, :2034, :2401, :2454,
+            # :2695, :2903), none of which is a typed code.
+            {1, "deploy failed (exit 1)", "exit-fallback-1"}
           ] do
         put_cfg(enabled: true, command: stub("echo 'the real reason #{code}'; exit #{code}"))
 
@@ -1780,6 +1796,43 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       assert status.state == :done
       assert status.exit_code == 21
       assert status.failure_reason =~ "no previous release (exit 21)"
+    end
+
+    test "a rollback whose log names no typed marker is an abnormal end (-1), deploy-voiced" do
+      dir = run_dir()
+
+      # dr-w15: the positive pin for `exit_label(-1)`. Its bytes are BYTE-FROZEN
+      # — cloud/lib/barkpark_cloud/deploy_ledger.ex:919 starts_with-matches them
+      # to classify PROCESS_DIED — and until now every api-side assertion on this
+      # clause was a `refute` under a teardown. This is the state that produces
+      # it: a FLIP FAILURE (the engine's exit 24) logs no distinct marker, so
+      # `rollback_outcome/1` finds neither a typed code nor a success line and
+      # falls through to a fail-closed -1, in the deploy/rollback voice.
+      engine =
+        stub("""
+        echo 'rollback flip failed — Caddy untouched, still on b7 (fail closed)' >> "$BARKPARK_SITE_LOG_FILE"
+        exit 24
+        """)
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        rollback_command: engine
+      )
+
+      assert DeployRunner.trigger(req("unitrb-1", mode: "rollback")) == {:ok, :started}
+
+      status = DeployRunner.status("unitrb-1")
+      assert status.state == :done
+      assert status.exit_code == -1
+
+      # The frozen bytes, asserted as a PREFIX — which is how the cloud ledger
+      # reads them.
+      assert String.starts_with?(status.failure_reason, "deploy process died abnormally")
+      assert status.failure_reason =~ "fail closed"
     end
 
     test "a successful teardown finalizes exit 0, not an abnormal death" do

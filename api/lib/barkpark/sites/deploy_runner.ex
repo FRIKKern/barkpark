@@ -910,16 +910,35 @@ defmodule Barkpark.Sites.DeployRunner do
   every value here is "as of" that instant, not "as of now".
   """
   @spec door_census() :: door_census()
-  def door_census do
+  def door_census, do: door_census(@census_table)
+
+  @doc """
+  `door_census/0` against a NAMED table — the injection seam, and the only way
+  the no-table arm is reachable from a test.
+
+  The "nothing was read" arm (every measurement `nil`, capacity still rendered)
+  is the whole honesty contract of this gauge: a `nil` means UNREAD, never zero.
+  It fires when no Runner has ever run in this BEAM, so `@census_table` does not
+  exist and `census_get/2`'s `ArgumentError` rescue answers `nil`. ExUnit always
+  starts the supervised Runner, so the table ALWAYS exists under test, and the
+  table is OWNED BY THE RUNNER — deleting it means killing a supervised
+  singleton, which is a flake generator across an `async: false` module. Passing
+  a table name that was never created reaches the same arm with nothing killed.
+
+  Not for production callers: `door_census/0` is the real reader.
+  """
+  @doc since: "dr-w22"
+  @spec door_census(atom()) :: door_census()
+  def door_census(table) when is_atom(table) do
     %{
       capacity: build_slot_capacity(),
-      observed_in_flight: census_get(:observed_in_flight),
-      in_flight_slugs: census_get(:in_flight_slugs),
-      refusals_total: census_get(:refusals_total),
-      refusals_since: census_get(:refusals_since),
-      door_open_admissions_total: census_get(:door_open_admissions_total),
-      door_open_admissions: census_get(:door_open_admissions),
-      measured_at: census_get(:measured_at)
+      observed_in_flight: census_get(table, :observed_in_flight),
+      in_flight_slugs: census_get(table, :in_flight_slugs),
+      refusals_total: census_get(table, :refusals_total),
+      refusals_since: census_get(table, :refusals_since),
+      door_open_admissions_total: census_get(table, :door_open_admissions_total),
+      door_open_admissions: census_get(table, :door_open_admissions),
+      measured_at: census_get(table, :measured_at)
     }
   end
 
@@ -1044,8 +1063,14 @@ defmodule Barkpark.Sites.DeployRunner do
     end
   end
 
-  defp census_get(key) do
-    case :ets.lookup(@census_table, key) do
+  defp census_get(key), do: census_get(@census_table, key)
+
+  # `nil` has TWO meanings here and both are UNREAD, never zero: the key was
+  # never written (`[]`), or the table itself does not exist (`ArgumentError` —
+  # no Runner has ever run in this BEAM). A `0` in either arm would report an
+  # idle door where there is no door at all.
+  defp census_get(table, key) do
+    case :ets.lookup(table, key) do
       [{^key, value}] -> value
       [] -> nil
     end
@@ -1092,8 +1117,32 @@ defmodule Barkpark.Sites.DeployRunner do
   # `lock_triple/1` with the two `:error` cases KEPT APART: `:absent` is
   # conclusive (no file, so nothing holds this gate) while `{:unreadable, _}` is
   # ignorance — the door admits on it, and that admission is counted.
+  #
+  # Reachability: `path` is always a `build_gate_lock_candidates/0` entry —
+  # `$BARKPARK_BUILD_GATE_LOCK`, else app config, else the compile-time
+  # `@default_build_gate_lock` (:388), plus `${TMPDIR:-/tmp}` joined with the
+  # compile-time `@build_gate_lock_basename` (:389). Two in-app call sites and
+  # no others: `lock_triple/1` (:1110) and `foreign_build_in_flight?/1` (:1244,
+  # `Enum.map(build_gate_lock_candidates(), ...)`). Neither takes a request
+  # value or a slug. `lock_triple/1` is PUBLIC purely for testability and would
+  # stat whatever an in-app caller handed it — an existence oracle returning a
+  # dev:inode triple, no content read, no write; today its only non-test caller
+  # is the door itself.
+  #
+  # Sobelow 0.14.1's Traversal.FileModule does not list `stat`, so this site is
+  # SILENT today and the annotation waives nothing YET. It is written anyway:
+  # every other File-module call site in this module carries a traced block, and
+  # a Sobelow bump that adds `stat` to that detector would otherwise red this
+  # code on an unrelated future PR — inside an ADVISORY job, i.e. as a warning
+  # on a green board. dr-bl-w5-lock-triple-file-stat-unwaived.
+  #
+  # The annotation sits BELOW the @spec, not above the block, because this @spec
+  # wraps: sobelow-inline-overlap-check.sh's DETACHED predicate skips lines that
+  # START with `@`, so a wrapped spec's continuation line reads as the bound
+  # construct and the check reds. Sobelow binds to the `defp` either way.
   @spec lock_triple_status(String.t()) ::
           {:ok, String.t()} | :absent | {:unreadable, File.posix()}
+  # sobelow_skip ["Traversal.FileModule"]
   defp lock_triple_status(path) do
     case File.stat(path) do
       {:ok, %File.Stat{major_device: dev, inode: inode}} ->
@@ -2526,7 +2575,48 @@ defmodule Barkpark.Sites.DeployRunner do
     String.trim(line) == "" or Regex.match?(@stage_re, line)
   end
 
-  # site-deploy.sh's typed exit codes (its header block is the contract).
+  # site-deploy.sh's typed exit codes (its header block, :79-86, is the contract).
+  #
+  # PRUNE-OR-PIN, DECIDED (dr-w15-bl-exit-label-dead-templates). Wave 15 measured
+  # that production has EVER produced three of these — 14 (3,688 rows), 12
+  # (1,575), 10 (1) — and filed the other eleven as candidates for removal. THE
+  # ZEROS ARE REAL; THE INFERENCE FROM THEM WAS NOT. "No row has worn this label"
+  # is a statement about what the fleet has SUFFERED, not about what the engine
+  # can EMIT, and every clause below has a live producer on main today:
+  #
+  #     2   deploy/site-deploy.sh:179   unknown flag
+  #    10   :3497, :3533                BUILD: missing site source dir
+  #    11   :3157/:3160/:3380/:3382/:3410/:3428/:3432/:3454/:3501
+  #    12   :3571                       BUILD failed
+  #    13   :655/:665/:675/:3586/:3590  STAGE failed
+  #    14   :3623                       HEALTH gate failed
+  #    15   :3517                       gave up waiting for a lock
+  #    16   :3891                       SWITCH failed
+  #    21   :3226/:3229/:3232 (+ do_rollback:305/307 return 21)
+  #    22   :3224 (+ do_rollback:301 return 22)
+  #    23   :3214
+  #    24   do_rollback:317/318 return 24; deploy/site-deploy-node.sh:3115/3123/3127
+  #    -1   THIS module: :693 (port died with no exit_status) and
+  #         `deploy_outcome/2`'s stages==[] / no-terminal arms
+  #    -2   THIS module: :738 (the unit deadline watchdog)
+  #  fallback  every bare `exit 1` in site-deploy.sh (:1274, :1458, :1489, :2034,
+  #         :2401, :2454, :2695, :2903), and a 25 arriving under a DEPLOY mode
+  #
+  # So NOTHING IS REMOVED. Every clause is retained AS A TRIPWIRE for a condition
+  # this fleet has not yet met: deleting one does not delete the exit, it routes a
+  # documented engine failure into the generic fallback, and the operator loses
+  # the one sentence that names what broke. The population that WOULD justify a
+  # prune is "codes the engine can no longer produce" — currently empty.
+  #
+  # Every clause is asserted by name in test/barkpark/sites/deploy_runner_test.exs
+  # ("every typed exit code maps to its own honest label", the 23/25 mode tests,
+  # the deadline test, and the abnormal-rollback test) — a retained tripwire with
+  # a real producer and no assertion is the rot this decision exists to avoid.
+  #
+  # BYTE-FROZEN, and not by convention: cloud/lib/barkpark_cloud/deploy_ledger.ex
+  # :919 `String.starts_with?(reason, "deploy process died abnormally")`, and its
+  # PROCESS_DIED copy at :312, read the -1 bytes below. Re-wording that clause
+  # silently reclassifies every abnormal deploy in the ledger.
   defp exit_label(2), do: "usage error (exit 2)"
   defp exit_label(10), do: "missing site source dir (exit 10)"
   defp exit_label(11), do: "missing or invalid required input (exit 11)"
