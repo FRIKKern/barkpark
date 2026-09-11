@@ -2887,9 +2887,10 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.main-workflow-rollup == 'true'
     # THE DENOMINATOR IS THE TREE (task-b4aa15924d214156). main-gate-watch.sh
-    # reads branch protection's required set and stale-verdict-watch.sh reads
-    # the open-PR population; neither can report a workflow nobody told it to
-    # look at, so a workflow that drifted out of the watched set — or that has
+    # derives its roster from the contexts branch protection holds, and
+    # stale-verdict-watch.sh derives its from the open-PR population; neither
+    # can report a workflow nobody told it to look at, so one that drifted out
+    # of the watched set — or that has
     # never had a run on main at all — reads as an absence, and an absence
     # reads as a green. This roll-up enumerates .github/workflows/ off the
     # tree, prints the count it enumerated, and prints a zero-run workflow in
