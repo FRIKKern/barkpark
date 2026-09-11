@@ -3025,6 +3025,29 @@ const cruelPinnedInstance = { ...cruelInstance, pinned_release: cruelPinnedRelea
 // the total, that sets min-content, so the fixture below is a single unbroken
 // run — and 2000 chars (registry.ex's only known string cap) would only make
 // the same defect louder, never a different one.
+// AND RAISING THIS NUMBER BUYS NOTHING ON `.bp-tl-fail` — MEASURED, so nobody
+// re-derives it (cchi-w25-bl-w21-bp-tl-fail-cell-is-an-identity-under-anywhere).
+// Since wave 24 put `overflow-wrap: anywhere` on that box, its per-element
+// `scrollWidth > clientWidth` test is an IDENTITY: every unbreakable run is
+// broken at the content edge, and the same declaration floors the box's
+// min-content at one glyph so `documentElement.scrollWidth` cannot move either.
+// Driven HERE, 512 -> 5000 (one unbroken alnum run, 39132px of ink against
+// 3993px): the leg's WIDTH half is BYTE-IDENTICAL — the #instance width row,
+// the per-host populations and the "cells clean" line all unchanged, exit 0
+// both times. (Be precise about the half: the TIGHT-FIT HEIGHT lines added
+// after the original finding DO move — `.bp-tl-fail` 398.88px/20 line boxes to
+// 3413.88px/180 at 320 — and stay green, because that bound is a ratio by
+// design (D206), not a pixel. So "the whole table is byte-identical" is now
+// too strong; "the width cell cannot move" is the exact and still-true claim.)
+// The leg's `cruelMin: 512` does not catch that either: it is a `>=`
+// FLOOR, so a 10x LENGTHENING sails through while only a SHORTENING reds.
+// So length is not what that cell measures any more, and the remedy is not a
+// bigger number here — it is the TORN-TOKEN bound the leg now carries beside
+// the width cell (overflow-guard.mjs, the `tokens:` field on the #instance
+// row), which asks the one question `anywhere` can get wrong: was a token that
+// would have FIT its line broken anyway. Leaving this at 512 keeps the fixture
+// at its smallest MEASURED biting length, which is what the paragraph above
+// derived it as.
 const CRUEL_PROVISION_ERROR_LEN = 512;
 // A base64 body echoed back from a provider API is the realistic shape of an
 // error with no break opportunity in it: no space, no hyphen, no slash, no dot.
@@ -4556,12 +4579,15 @@ export const SCENARIOS = {
   // overflows anywhere in the corpus (the w15 measurement: sw == cw == 240 in
   // EVERY cell). Same data, the cruel box's route.
   "instance-cruel-detail": {
-    label: "Instance detail — cruel content: the 253-char custom host reaches .detail-url-text, with the copy-btn carrying the full value",
+    label: "Instance detail — cruel content: the 253-char custom host reaches .detail-url-text, and a 255-char pinned_release reaches the Autoupdate rail's .badge",
     authed: true,
     deepLink: "#instance/5b2c1e00-0000-4000-8000-0000000000c1",
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
-      barkparks: [cruelInstance, cruelProvisionErrorInstance, liveInstance],
+      // cchi-w22-bl-the-pinned-release-badge-does-not-break: the pinned twin, so
+      // the DETAIL route is driven at the pinned_release cap. Same row, same
+      // order, same 253-char host — one extra field.
+      barkparks: [cruelPinnedInstance, cruelProvisionErrorInstance, liveInstance],
       subscription: activeSub,
       sites: [],
       audit: [],

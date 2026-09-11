@@ -21,6 +21,7 @@
     "size": "turbo run size",
     "changeset": "changeset",
     "version-packages": "changeset version",
+    "selftest:changesets": "node scripts/changelog-batched.selftest.mjs",
     "release": "turbo run build && changeset publish"
   },
   "devDependencies": {

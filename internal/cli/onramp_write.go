@@ -30,6 +30,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -704,6 +705,47 @@ func atomicWriteFile(path string, data []byte) error {
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		os.Remove(tmp.Name())
+		return fmt.Errorf("rename to %s: %w", path, err)
+	}
+	return nil
+}
+
+// atomicWriteStream is atomicWriteFile's streaming twin, for a sink whose bytes
+// are produced by an encoder writing INTO an io.Writer rather than handed over
+// as a finished []byte (png.Encode, io.Copy, a tar stream). Same law: the bytes
+// land in a same-directory temp file and are promoted by rename only once write
+// returned nil, so a mid-stream failure destroys nothing but our own half-write.
+// The named-after-the-destination temp ("."+base+".part-*") matches the pattern
+// the hetzner object-get and instance-export sinks hand-rolled inline; this is
+// the shared seam they described. Mode lands 0644 — what a bare os.Create would
+// have produced under the usual 0022 umask — so a conversion is byte- AND
+// mode-identical on the success path.
+func atomicWriteStream(path string, write func(io.Writer) error) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".part-*")
+	if err != nil {
+		return fmt.Errorf("create temp in %s: %w", dir, err)
+	}
+	tmpName := tmp.Name()
+	if err := write(tmp); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("chmod temp %s: %w", tmpName, err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("close temp %s: %w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
 		return fmt.Errorf("rename to %s: %w", path, err)
 	}
 	return nil

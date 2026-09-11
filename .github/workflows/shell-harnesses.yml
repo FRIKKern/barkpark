@@ -139,6 +139,14 @@ on:
       - "scripts/console-path-escape-check.sh"
       - "scripts/console-path-escape-check.test.sh"
       - ".github/workflows/console-harness.yml"
+      # THE CLOUD/CONSOLE AGGREGATOR SHAPE RATCHET
+      # (cch-w11-bl-aggregator-decide-shape-ratchet). It reads all THREE
+      # aggregator workflows — cloud.yml and console-harness.yml as subjects,
+      # elixir.yml as the reference `decide()` — so an edit to ANY of the three
+      # must run it. cloud.yml is already an entry above (seal-run-guard);
+      # elixir.yml is not, and is added here.
+      - "scripts/cloud-console-gate-shape.test.sh"
+      - ".github/workflows/elixir.yml"
       # CONSOLE REFUSAL CAPTURE (task-1cea7edd271d588b). The SUBJECT, not the
       # harness: scripts/console-refusal-capture.test.mjs is already reached by
       # the `scripts/*.test.mjs` entry below, but an edit to the capture module
@@ -150,6 +158,9 @@ on:
       - "scripts/pds-record-parity.test.sh"
       - "scripts/pds-scratch-target.sh"
       - "scripts/pds-scratch-target_test.sh"
+      - "scripts/pds-read-preflight-audit.sh"
+      - "scripts/pds-read-preflight-audit_test.sh"
+      - "scripts/pds-crown-stamp.sh"
       - "scripts/file-ci-failure-issue.sh"
       - "scripts/file-ci-failure-issue.test.sh"
       - "scripts/install-cli.sh"
@@ -470,6 +481,14 @@ on:
       - "scripts/console-path-escape-check.sh"
       - "scripts/console-path-escape-check.test.sh"
       - ".github/workflows/console-harness.yml"
+      # THE CLOUD/CONSOLE AGGREGATOR SHAPE RATCHET
+      # (cch-w11-bl-aggregator-decide-shape-ratchet). It reads all THREE
+      # aggregator workflows — cloud.yml and console-harness.yml as subjects,
+      # elixir.yml as the reference `decide()` — so an edit to ANY of the three
+      # must run it. cloud.yml is already an entry above (seal-run-guard);
+      # elixir.yml is not, and is added here.
+      - "scripts/cloud-console-gate-shape.test.sh"
+      - ".github/workflows/elixir.yml"
       # CONSOLE REFUSAL CAPTURE (task-1cea7edd271d588b). The SUBJECT, not the
       # harness: scripts/console-refusal-capture.test.mjs is already reached by
       # the `scripts/*.test.mjs` entry below, but an edit to the capture module
@@ -481,6 +500,9 @@ on:
       - "scripts/pds-record-parity.test.sh"
       - "scripts/pds-scratch-target.sh"
       - "scripts/pds-scratch-target_test.sh"
+      - "scripts/pds-read-preflight-audit.sh"
+      - "scripts/pds-read-preflight-audit_test.sh"
+      - "scripts/pds-crown-stamp.sh"
       - "scripts/file-ci-failure-issue.sh"
       - "scripts/file-ci-failure-issue.test.sh"
       - "scripts/install-cli.sh"
@@ -888,6 +910,9 @@ jobs:
           console-path-ratchet scripts/console-path-escape-check.sh
           console-path-ratchet scripts/console-path-escape-check.test.sh
           console-path-ratchet .github/workflows/console-harness.yml
+          console-path-ratchet scripts/cloud-console-gate-shape.test.sh
+          console-path-ratchet .github/workflows/cloud.yml
+          console-path-ratchet .github/workflows/elixir.yml
           console-refusal-capture scripts/console-refusal-capture.mjs
           console-refusal-capture scripts/*.test.mjs
           weekly-changelog-backfill-guard scripts/weekly-changelog-backfill.test.sh
@@ -898,6 +923,9 @@ jobs:
           pds-harnesses scripts/pds-record-parity.test.sh
           pds-harnesses scripts/pds-scratch-target.sh
           pds-harnesses scripts/pds-scratch-target_test.sh
+          pds-harnesses scripts/pds-read-preflight-audit.sh
+          pds-harnesses scripts/pds-read-preflight-audit_test.sh
+          pds-harnesses scripts/pds-crown-stamp.sh
           pds-harnesses scripts/pr-task-gate.sh
           ci-failure-issue-filer scripts/file-ci-failure-issue.sh
           ci-failure-issue-filer scripts/file-ci-failure-issue.test.sh
@@ -1506,6 +1534,29 @@ jobs:
         # parent's --selftest (cloud.yml:175, elixir.yml:241), and wiring them
         # twice would buy a second runner for the same assertions.
         run: bash scripts/console-path-escape-check.test.sh
+      - name: python3 + PyYAML are present (the shape ratchet yaml-PARSES three workflows)
+        id: pyyaml
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # INSTALL rather than demand, the same idiom as deploy-concurrency
+        # above: whether the runner image ships PyYAML is an image fact, and a
+        # red reading `ModuleNotFoundError: yaml` teaches nothing about this
+        # repo. A missing python3 stays a hard, named failure.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image" >&2
+            exit 1
+          }
+          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
+          python3 -c "import yaml; print('PyYAML', yaml.__version__)"
+      - name: cloud.yml + console-harness.yml aggregator shape (73 assertions, 22 planted mutants)
+        if: ${{ !cancelled() && steps.pyyaml.outcome == 'success' }}
+        # Selftest AND subject in one run, by construction: case 5 re-runs the
+        # very emitter that produced the live verdicts over deliberately-broken
+        # copies of both workflows, so a neutered detector reds here before its
+        # green is read. Both directions the row names are in it — softening
+        # decide()'s skipped arm moves the executed 24-cell grid, and a job
+        # outside the aggregator's needs-set lands in blocking_not_in_needs.
+        run: bash scripts/cloud-console-gate-shape.test.sh
 
   console-refusal-capture:
     needs: [changes]
@@ -1589,6 +1640,11 @@ jobs:
       - name: pds-scratch-target two-root coexistence + teardown
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/pds-scratch-target_test.sh
+      - name: pds-read-preflight-audit census ratchet + crown-stamp refusal pairs (stub bp, no server)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # 4 arms, each a mutation beside a control. pds-crown-stamp.sh is a
+        # subject of arm 3, so an edit to it re-runs this job.
+        run: bash scripts/pds-read-preflight-audit_test.sh
 
   ci-failure-issue-filer:
     needs: [changes]

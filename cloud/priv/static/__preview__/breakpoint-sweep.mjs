@@ -265,6 +265,7 @@ import { fileURLToPath } from "node:url";
 import { IDS, SCENARIOS } from "./scenarios.mjs";
 import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
 import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
+import { createCrossDocumentNavigator } from "./same-document-nav-census.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(process.env.BREAKPOINT_SWEEP_ROOT || path.resolve(HERE, ".."));
@@ -2005,7 +2006,18 @@ async function withBrowser(fn) {
   // A FRESH TARGET PER CELL is what buys liveness: Page.navigate to a URL that
   // differs only in its hash is a SAME-DOCUMENT navigation, so a previous
   // cell's stylesheet state and injected rules survive into the next one.
+  // The SAME-DOCUMENT GUARD (cch-w24-bl-hash-only-nav-is-same-document). This
+  // leg's fresh-target-per-cell discipline above already makes every navigation
+  // cross-document, so this guard is expected to catch ZERO — and it says zero
+  // out loud on every run, which is the only thing that distinguishes "the
+  // discipline holds" from "nobody is checking". It is wired anyway because the
+  // discipline is a CONVENTION: the day a cell reuses a session (or openCell
+  // stops parking on about:blank), this is what refuses to let the next cell
+  // inherit its predecessor's stylesheets. openCell resets it, because a NEW
+  // target's blank page shares no URL with the old target's last one.
+  const crossDoc = createCrossDocumentNavigator("breakpoint-sweep");
   const openCell = async () => {
+    crossDoc.reset();
     const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
     const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
     await cdp.send("Runtime.enable", {}, sessionId);
@@ -2030,7 +2042,7 @@ async function withBrowser(fn) {
   // refusal below owns the verdict, and its message carries the `present:`
   // diagnostic a bare timeout does not.
   const navSettle = async (sessionId, url, readyExpr, cap = SETTLE_CAP) => {
-    await cdp.send("Page.navigate", { url }, sessionId);
+    await cdp.send("Page.navigate", { url: crossDoc.next(url) }, sessionId);
     for (let w = 0; w < cap; w += 50) {
       let ready = false;
       // Pinned OUTSIDE the catch: a swallowed refusal would burn the whole cap
@@ -2099,6 +2111,7 @@ async function withBrowser(fn) {
   try {
     return await fn({ cdp, evalJs, navSettle, openCell, closeCell, die, teardown });
   } finally {
+    out(crossDoc.line());
     await teardown();
   }
 }
