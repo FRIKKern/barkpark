@@ -275,20 +275,22 @@ defmodule Barkpark.PdsElixirCensusTest do
       |> Enum.map(fn {name, task} -> {name, Task.await(task, 540_000)} end)
       |> Map.new()
 
-    {:ok,
-     census: census,
-     # THE BYTES AS THEY WERE BEFORE ANY ARM RAN. Read above, at the top of setup_all,
-     # strictly before the four arms are spawned — which is what lets the --routed-rows
-     # test compare the file against its own pre-run state and call the flag write-free.
-     source: source,
-     elixir: elixir,
-     root: root,
-     runs: results,
-     anchors: %{
-       classification: occurrences(source, @mutant_from),
-       baseline: occurrences(source, baseline_from)
-     },
-     baseline: %{from: baseline_from, derived: derived, mutated: mutated}}
+    {
+      :ok,
+      # THE BYTES AS THEY WERE BEFORE ANY ARM RAN. Read above, at the top of setup_all,
+      # strictly before the four arms are spawned — which is what lets the --routed-rows
+      # test compare the file against its own pre-run state and call the flag write-free.
+      census: census,
+      source: source,
+      elixir: elixir,
+      root: root,
+      runs: results,
+      anchors: %{
+        classification: occurrences(source, @mutant_from),
+        baseline: occurrences(source, baseline_from)
+      },
+      baseline: %{from: baseline_from, derived: derived, mutated: mutated}
+    }
   end
 
   test "the receipt census runs GREEN over the live corpus", ctx do
@@ -338,7 +340,8 @@ defmodule Barkpark.PdsElixirCensusTest do
 
     assert rc == 0, "expected `--routed-rows` over a green tree to exit 0, got #{rc}:\n#{out}"
 
-    assert out =~ "PASTE-READY @routed_excluded PROPOSAL (--routed-rows) — A PROPOSAL, NEVER A WRITE",
+    assert out =~
+             "PASTE-READY @routed_excluded PROPOSAL (--routed-rows) — A PROPOSAL, NEVER A WRITE",
            out
 
     for section <- ["ADD ", "DELETE ", "RE-CLASS "] do
