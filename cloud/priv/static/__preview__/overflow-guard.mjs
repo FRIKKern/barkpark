@@ -163,21 +163,36 @@
 //  read identically under both, and the run prints the reserved track width it
 //  measured either way.
 //
-//  HONEST SCOPE — A WORKFLOW DOES RUN THIS FILE, AND IT IS NOT A REQUIRED CHECK
-//  (corrects charter D109, which this header carried as "THIS FILE IS RUN BY NO
-//  WORKFLOW" long after it stopped being true). Re-derived, by line:
-//  `.github/workflows/console-harness.yml:487` declares the `overflow-guard:`
-//  job ("Overflow guard (rendered)"), whose `run:` block opens at :508 and
-//  invokes `node cloud/priv/static/__preview__/overflow-guard.mjs` at :511, one
-//  invocation with no `--defect`, on every console-touching PR. What remains
-//  true is the WEAKER sentence, and only that one: the job reaches branch
-//  protection through `Console gate`, which is ADVISORY — the live required set
-//  is `Elixir gate` and `PR references an active task`, and `grep -n "Overflow
-//  guard" .github/required-checks.json` returns nothing. So its red is VISIBLE
-//  and does not by itself block a merge. It is also still a developer tripwire
-//  and the seal predicate's shell-out. A header that quotes a workflow — or an
-//  exit code — has to be re-driven when it is quoted, or the guard's own
-//  documentation becomes the untested sentence this guard exists to replace.
+//  HONEST SCOPE — A WORKFLOW DOES RUN THIS FILE, AND IT REACHES A REQUIRED
+//  CHECK (corrects charter D109, which this header carried as "THIS FILE IS RUN
+//  BY NO WORKFLOW" long after it stopped being true). ANCHORED BY NAME, NEVER
+//  BY LINE — the two previous revisions of this paragraph both cited line
+//  numbers in `.github/workflows/console-harness.yml`, and both were stale
+//  within a wave because every insert above the job shifts them. Re-derive
+//  with names, which do not move:
+//    grep -n '^  overflow-guard:' .github/workflows/console-harness.yml
+//    grep -n 'name: Overflow guard (rendered)' .github/workflows/console-harness.yml
+//    grep -n 'overflow-guard.mjs' .github/workflows/console-harness.yml
+//  The job id is `overflow-guard`, its rendered check-run context is
+//  `Overflow guard (rendered)`, and its step "Overflow guard — every defect leg
+//  in one browser run" invokes `node
+//  cloud/priv/static/__preview__/overflow-guard.mjs` ONCE with no `--defect`,
+//  on every console-touching PR. The job reaches branch protection through the
+//  aggregator `Console gate`, which IS in the live required set — re-derive
+//  that too rather than trusting this sentence:
+//    python3 -c "import json;print([c['context'] for c in json.load(open('.github/required-checks.json'))['protection']['required_status_checks']['checks']])"
+//    grep -n 'Overflow guard' .github/required-checks.json
+//  The first prints the four required contexts (`Cloud gate`, `Console gate`,
+//  `Elixir gate`, `PR references an active task`); the second now MATCHES, on
+//  an S3-SUBSUMED exclusion row saying this leaf is already enforced through
+//  the aggregator. The header's old sentence — "`Console gate` is ADVISORY" and
+//  "that grep returns nothing" — is FALSE on both halves as of a333e4b58, and
+//  is corrected here rather than deleted so the next reader sees the drift.
+//  A red here therefore does block a merge, through `Console gate`. It is also
+//  still a developer tripwire and the seal predicate's shell-out. A header that
+//  quotes a workflow — or an exit code — has to be re-driven when it is quoted,
+//  or the guard's own documentation becomes the untested sentence this guard
+//  exists to replace.
 //  The history is worth keeping straight: a tree whose body scrolled 106px at
 //  390px passed every required context because nothing measured below 700px and
 //  nothing ran this file. The second half of that has since been fixed.
