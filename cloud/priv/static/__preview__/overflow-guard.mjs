@@ -279,6 +279,7 @@ const DEFECTS = [
   "W19-topbar-vertical-cost",
   "W24-activity-feed-phone-band",
   "W35-hash-nav-hidden-view-residue",
+  "W20-type-floor-instances",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -10610,6 +10611,172 @@ async function main() {
           `which depends on what each leg then measures per element. A registered exposure is a walk whose ` +
           `output is entry-path-dependent, nothing stronger; the ${tally.unresolved} runtime-built selectors are ` +
           `outside the census altogether and are listed above rather than counted as clean`,
+        );
+      }
+    }
+
+
+    // ── W20 TYPE FLOOR: WHAT THE DECLARATIONS ACTUALLY PAINT ────────────────
+    // BLOCK-SCOPED (D247): every axis, selector and literal below belongs to
+    // this leg alone, and the only thing it imports is the floor's own module.
+    //
+    // WHY A BROWSER LEG AT ALL, when __preview__/type-floor.mjs already parses
+    // app.css and __app.test.mjs already reds on it. Because the source parse
+    // answers "is this declaration below the floor" and the filing row's claim
+    // is a different sentence: "228 of 1560 TEXT-BEARING INSTANCES compute
+    // below it, 48 of them the front screen's own CPU / RAM / DISK / DOCS
+    // legend". A declaration is one line; an instance is a painted box, and no
+    // count of lines predicts one. This leg counts the boxes, per route, in a
+    // real browser, at build time — the source parse is not its evidence and it
+    // is not the source parse's.
+    //
+    // It is also the half that sees what a stylesheet parse cannot: cascade.
+    // A rule raised to `var(--text-xs)` that is then OUTRANKED by a sub-floor
+    // declaration elsewhere still paints small, and only a computed style says
+    // so. (Today none is — but "today none is" is a measurement, not a
+    // property of the file.)
+    //
+    // HONEST LIMITS, stated rather than discovered later: this leg reads
+    // ELEMENT computed styles with at least one non-whitespace direct text
+    // child. It does NOT see `::before`/`::after` content (the chip glyphs and
+    // the `.oauth-divider` rules are drawn there), it does not see text inside
+    // a closed `<details>` or a `hidden` ancestor (deliberately — those are not
+    // painted), and it measures ONE fixture per route.
+    if (requested.includes("W20-type-floor-instances")) {
+      const D = "W20-type-floor-instances";
+      const { FLOOR_PX: TF_FLOOR, ALLOWLIST: TF_ALLOW, audit: tfAudit, APP_CSS: TF_CSS } =
+        await import("./type-floor.mjs");
+
+      // THE 30 CELLS the filing row measured: 5 routes x 3 phone widths x 2
+      // themes. Same shape, so the before/after numbers in the PR body are
+      // comparable to the census that opened the row.
+      const TF_WIDTHS = [320, 390, 430];
+      const TF_ROUTES = [
+        { name: "overview", scen: "mixed-fleet", hash: "#overview", view: "view-overview",
+          // ID-ANCHORED ON PURPOSE: a bare `document.querySelector('.instance-card')`
+          // is a DOCUMENT-WIDE walk, and W35's census (view-scope-census.mjs, run
+          // over this file's own bytes) refuses one that can match inside a hidden
+          // view — `.instance-card` matches 5 nodes in a hidden #view-overview.
+          ready: `document.querySelector('#overview-body .instance-card')` },
+        { name: "billing", scen: "billing-past-due", hash: "#billing", view: "view-billing",
+          ready: `document.querySelector('#billing-plan-section .set-h') && !document.querySelector('#billing-recommended .loading')` },
+        { name: "activity", scen: "activity", hash: "#activity", view: "view-activity",
+          ready: `document.querySelector('#activity-body .tlv-row')` },
+        { name: "sites", scen: "mixed-fleet", hash: "#sites", view: "view-sites",
+          ready: `document.querySelector('#sites-body .site-row')` },
+        { name: "fleet", scen: "mixed-fleet", hash: "#fleet", view: "view-fleet",
+          ready: `document.querySelector('.fleet-row')` },
+      ];
+
+      // ANTI-VACUITY 0 — THE INSTRUMENT AND THE FLOOR ARE THE SAME FLOOR.
+      // The allowlist this leg exempts elements by is the SAME committed
+      // literal the source parse uses; it is not re-typed here, because two
+      // copies of an exemption list drift and the drift is silent.
+      const tfSource = tfAudit(fs.readFileSync(TF_CSS, "utf8"));
+      if (tfSource.errors.length) {
+        fail(D, `the SOURCE parse already refuses app.css (${tfSource.errors.length} error(s)) — fix type-floor.mjs's findings before reading this leg's instance counts:\n     ${tfSource.errors.join("\n     ")}`);
+      }
+      if (!(TF_FLOOR > 0) || TF_ALLOW.length === 0) {
+        return die(`${D}: the floor module handed back floor=${TF_FLOOR} and a ${TF_ALLOW.length}-entry allowlist — an empty exemption list would make every cell below vacuously strict and a zero floor would make it vacuously green. Nothing was measured.`);
+      }
+      const TF_SEL = TF_ALLOW.map((a) => a.selector);
+
+      process.stdout.write(
+        `\n${D} — ${TF_ROUTES.length} routes x ${TF_WIDTHS.length} phone widths x 2 themes ` +
+        `(${TF_ROUTES.length * TF_WIDTHS.length * 2} cells; every painted element with a direct text node, ` +
+        `computed font-size vs the ${TF_FLOOR}px floor --text-xs publishes). Source parse: ` +
+        `${tfSource.decls.length} declarations, ${tfSource.below.length} below the floor, all ` +
+        `${TF_ALLOW.length} by NAME in the committed literal (${TF_SEL.join(", ")})\n`,
+      );
+
+      const tfProbe = (floor, allow) =>
+        `(function(){` +
+        `var ALLOW=${JSON.stringify(allow)};` +
+        `var v=document.querySelector('section.view:not([hidden])');` +
+        `var out={view:v?v.id:'none',theme:document.documentElement.getAttribute('data-theme'),total:0,below:0,allowed:0,viol:[],hist:{}};` +
+        `var all=document.body.querySelectorAll('*');` +
+        `for(var i=0;i<all.length;i++){var e=all[i];` +
+        `if(e.closest('[hidden]'))continue;` +
+        `var r=e.getBoundingClientRect();if(r.width===0&&r.height===0)continue;` +
+        `var t='';for(var j=0;j<e.childNodes.length;j++){var n=e.childNodes[j];if(n.nodeType===3)t+=n.nodeValue;}` +
+        `if(!t.replace(/\\s+/g,''))continue;` +
+        `out.total++;` +
+        `var fsz=parseFloat(getComputedStyle(e).fontSize);` +
+        `if(!(fsz<${floor}))continue;` +
+        `out.below++;out.hist[String(fsz)]=(out.hist[String(fsz)]||0)+1;` +
+        `var ok=false;for(var a=0;a<ALLOW.length;a++){try{if(e.matches(ALLOW[a])){ok=true;break;}}catch(err){}}` +
+        `if(ok){out.allowed++;continue;}` +
+        `var cls=(typeof e.className==='string'&&e.className)?('.'+e.className.split(/\\s+/).filter(Boolean).join('.')):'';` +
+        `var d=e.tagName.toLowerCase()+cls;` +
+        `var f=null;for(var q=0;q<out.viol.length;q++)if(out.viol[q].sel===d&&out.viol[q].px===fsz)f=out.viol[q];` +
+        `if(f)f.n++;else out.viol.push({sel:d,px:fsz,n:1,text:t.replace(/\\s+/g,' ').trim().slice(0,26)});}` +
+        `return out;})()`;
+
+      let tfCells = 0, tfText = 0, tfBelow = 0, tfAllowed = 0, tfViol = 0;
+      const tfPerRoute = new Map();
+      const tfHist = {};
+      for (const rt of TF_ROUTES) {
+        for (const theme of ["light", "dark"]) {
+          // Enter WIDE and assert the LANDED view: `?scen=` alone renders
+          // #overview, and a phantom route would print five copies of the
+          // front screen's numbers under five different names.
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${rt.scen}&theme=${theme}${rt.hash}`,
+            `${rt.ready} && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id===${JSON.stringify(rt.view)};})()`,
+          );
+          const line = [];
+          for (const width of TF_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(tfProbe(TF_FLOOR, TF_SEL));
+            tfCells++;
+            if (m.view !== rt.view) {
+              fail(D, `${rt.name}/${theme}@${width}: the visible view is ${m.view}, not ${rt.view} — this cell measured another screen`);
+              continue;
+            }
+            if (m.total === 0) {
+              fail(D, `${rt.name}/${theme}@${width}: ZERO text-bearing elements — the walk is defeated, not clean`);
+              continue;
+            }
+            tfText += m.total; tfBelow += m.below; tfAllowed += m.allowed;
+            for (const k of Object.keys(m.hist)) tfHist[k] = (tfHist[k] || 0) + m.hist[k];
+            const prev = tfPerRoute.get(rt.name) || { text: 0, below: 0, allowed: 0 };
+            tfPerRoute.set(rt.name, { text: prev.text + m.total, below: prev.below + m.below, allowed: prev.allowed + m.allowed });
+            for (const v of m.viol) {
+              tfViol += v.n;
+              fail(D, `${rt.name}/${theme}@${width}: ${v.n} instance(s) of ${v.sel} compute ${v.px}px, below the ${TF_FLOOR}px floor ("${v.text}") — raise the declaration or name it in type-floor.mjs's literal allowlist`);
+            }
+            line.push(`${width}:${m.total}t ${m.below}<f (${m.allowed} allow)`);
+          }
+          process.stdout.write(`   ${rt.name}/${theme}  ${line.join("  ")}\n`);
+        }
+      }
+
+      if (!failures.some((f) => f.defect === D)) {
+        const hist = Object.keys(tfHist).map(Number).sort((a, b) => a - b).map((k) => `${k}px:${tfHist[k]}`).join(" / ");
+        const perRoute = [...tfPerRoute.entries()]
+          .map(([n, v]) => `${n} ${v.below}/${v.text}`).join(" · ");
+        okLine(
+          `THE INSTANCE COUNT IS DRIVEN, NOT QUOTED: ${tfCells} cells, ${tfText} painted text-bearing ` +
+          `instances, ${tfBelow} of them below ${TF_FLOOR}px — and ALL ${tfAllowed} of those match one of the ` +
+          `${TF_ALLOW.length} selectors named in type-floor.mjs's committed literal allowlist, ` +
+          `${tfViol} unexplained. Below-floor histogram ${hist || "(empty)"}. Per route (below/text): ` +
+          `${perRoute}. The filing census read 228 of 1560 across the same 30-cell shape`,
+        );
+        okLine(
+          `THE TWO HALVES MEASURE DIFFERENT THINGS AND NEITHER IS THE OTHER'S EVIDENCE: the source parse ` +
+          `(type-floor.mjs, run above on app.css's own bytes) read ${tfSource.decls.length} font-size-bearing ` +
+          `declarations — ${tfSource.decls.filter((d) => d.prop === "font").length} of them the \`font:\` ` +
+          `SHORTHAND a \`grep font-size:\` census cannot see — and found ${tfSource.below.length} below the ` +
+          `floor, every one allowlisted by name. This leg then asked what those declarations PAINT. A ` +
+          `declaration raised in source but outranked in the cascade would be green there and red here`,
+        );
+        okLine(
+          `HONEST LIMIT: element computed styles with a direct non-whitespace text child only. ` +
+          `\`::before\`/\`::after\` content is NOT measured (several chips draw their glyph there), nor is ` +
+          `anything under a \`hidden\` ancestor or sized 0x0, and each route is driven on ONE fixture ` +
+          `(${TF_ROUTES.map((r) => `${r.name}:${r.scen}`).join(", ")}). A sub-floor pseudo-element is outside ` +
+          `this leg's reach and outside the source parse's blind spot both — it is covered by neither`,
         );
       }
     }

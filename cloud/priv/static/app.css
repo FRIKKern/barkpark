@@ -341,7 +341,7 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   align-items: center;
   gap: 5px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 0 6px;
   border: 1px solid var(--border);
   border-radius: var(--pill);
@@ -398,6 +398,25 @@ html[data-bp-theme="iris"][data-theme="dark"] {
      sizes the SPA already uses; the whole-file migration is the decision-24
      sweep. Shared primitives below consume these now. */
   --text-xs: 12px;   --leading-xs: 1.4;
+  /* --text-xs IS THE LEGIBILITY FLOOR, AND IT IS NOW ENFORCED (cch-w20-bl).
+     It used to be a promise this file broke 48 times: 44 `font-size:` lines
+     below 12px plus `.deploy-console-toggle`'s `font:` SHORTHAND, which a
+     `grep font-size:` census cannot see. Driven across 30 cells they painted
+     324 of 2052 text-bearing instances under the floor — 120 of them the front
+     screen's own CPU / RAM / DISK / DOCS legend (`.instance-card-stat-k`), and
+     no committed instrument refused any of it (that 10px -> 6px left
+     __css_check at 0 errors and overflow-guard's W18 leg at 28/28 clean).
+     40 declarations were raised TO the floor — to `var(--text-xs)`, never
+     through it: this is the minimum change that makes the published scale
+     true, not a density bump. SEVEN sites stay below it, each named
+     INDIVIDUALLY with its own written reason in the committed literal
+     ALLOWLIST in __preview__/type-floor.mjs (they size a GLYPH or a monogram
+     inside a box declared on the same rule, not prose). There is no class
+     waiver, and a stale entry there is FATAL, not a log line (charter D180).
+     The refusal runs from __app.test.mjs; the instance counts come from
+     `overflow-guard.mjs --defect W20-type-floor-instances`.
+     13px is a DIFFERENT, narrower contract — `.bp-console`'s theater floor,
+     asserted in a browser by overflow-guard GR115. It is not relaxed here. */
   --text-sm: 13px;   --leading-sm: 1.45;
   --text-base: 14px; --leading-base: 1.5;
   --text-lg: 16px;   --leading-lg: 1.4;
@@ -822,7 +841,7 @@ select.form-input {
 .oauth-divider {
   display: flex; align-items: center; gap: 12px;
   margin: 20px 0; color: var(--cc-fg4);
-  font-family: var(--mono); font-size: 10.5px;
+  font-family: var(--mono); font-size: var(--text-xs);
   text-transform: uppercase; letter-spacing: 0.14em;
 }
 .oauth-divider::before, .oauth-divider::after {
@@ -1070,7 +1089,7 @@ select.form-input {
 /* fleetInfraLine — .fleet-meta's denser twin (region · size only), on the v4
    instance card where the full region·size·version·channel·autoupdate line would
    crowd the stat row. Same mono voice, one step quieter and one step tighter. */
-.fleet-infra { font-size: 11px; color: var(--dim); font-family: var(--mono); margin-top: 2px; }
+.fleet-infra { font-size: var(--text-xs); color: var(--dim); font-family: var(--mono); margin-top: 2px; }
 .fleet-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .fleet-version { font-size: 12px; color: var(--dim); font-family: var(--mono); }
 /* The inline update chip (v4 "vX available"). Orthogonal to the status pill —
@@ -1079,7 +1098,7 @@ select.form-input {
   display: inline-flex; align-items: center; gap: 6px;
   height: 22px; padding: 0 9px;
   border: 1px solid var(--border); border-radius: var(--pill);
-  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  font-family: var(--mono); font-size: var(--text-xs); font-weight: 500;
   white-space: nowrap; color: var(--text);
 }
 .fleet-update-dot { width: 6px; height: 6px; border-radius: var(--pill); background: var(--dim); flex: 0 0 auto; }
@@ -1105,7 +1124,7 @@ select.form-input {
 .fresh-badge {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 9px; border-radius: var(--pill);
-  font-size: 11px; font-weight: 500; line-height: 1.2; white-space: nowrap;
+  font-size: var(--text-xs); font-weight: 500; line-height: 1.2; white-space: nowrap;
   background: var(--muted-surface); color: var(--muted-text);
   border: 1px solid var(--border);
 }
@@ -1378,7 +1397,7 @@ select.form-input {
 .choice-name { font-size: 14px; font-weight: 600; }
 .choice-sub { font-size: 12px; color: var(--muted-text); margin-top: 1px; }
 .choice-chev { color: var(--dim); font-size: 18px; line-height: 1; }
-.choice-tag { font-size: 11px; color: var(--muted-text); background: var(--muted-surface); padding: 2px 8px; border-radius: var(--pill); }
+.choice-tag { font-size: var(--text-xs); color: var(--muted-text); background: var(--muted-surface); padding: 2px 8px; border-radius: var(--pill); }
 
 /* brand tiles — provider colours, not shipped logos. Hetzner + Azure read from
    the shared --provider-* identity tokens (S4) so the picker tile, the fleet
@@ -1518,7 +1537,7 @@ select.form-input {
 .plan-head { display: flex; align-items: center; gap: 10px; }
 .plan-name { font-size: 18px; font-weight: 700; }
 .plan-rec {
-  font-size: 11px; font-weight: 600; color: var(--ok);
+  font-size: var(--text-xs); font-weight: 600; color: var(--ok);
   border: 1px solid hsl(var(--ok-hsl) / 0.4);
   background: hsl(var(--ok-hsl) / 0.1);
   padding: 2px 8px; border-radius: var(--pill);
@@ -1649,7 +1668,7 @@ select.form-input {
 .inst-overview > * + * { margin-top: 20px; }
 .rail-group + .rail-group { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
 .rail-group-label {
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -2081,7 +2100,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   background: var(--muted-surface);
   border: none; border-bottom: 1px solid var(--border);
   color: var(--muted-text);
-  font: 600 11px var(--font); letter-spacing: 0.02em; text-transform: uppercase;
+  font: 600 var(--text-xs) var(--font); letter-spacing: 0.02em; text-transform: uppercase;
   cursor: pointer;
 }
 .deploy-console.is-collapsed .deploy-console-toggle { border-bottom: none; }
@@ -2123,7 +2142,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .token-dot { color: var(--dim); }
 .token-chip {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 1px 7px;
   border-radius: 999px;
   background: rgba(127, 127, 127, 0.12);
@@ -3940,7 +3959,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .spark--neutral { color: var(--dim); }
 .instance-card-stats { display: flex; align-items: center; gap: 18px; padding-top: 4px; }
 .instance-card-stat { display: flex; flex-direction: column; gap: 2px; }
-.instance-card-stat-k { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; color: var(--dim); }
+.instance-card-stat-k { font-family: var(--mono); font-size: var(--text-xs); letter-spacing: 0.08em; color: var(--dim); }
 .instance-card-stat-v { font-size: 13px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 .instance-card-stat-v.is-warn { color: var(--warn); }
 .instance-card-studio { margin-left: auto; color: var(--ok); font-weight: 600; }
@@ -3960,7 +3979,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .runway-mark {
   flex: 0 0 auto; width: 22px; height: 22px; border-radius: var(--pill);
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 700;
+  font-size: var(--text-xs); font-weight: 700;
   border: 1px solid var(--border); color: var(--text); background: transparent;
 }
 .runway-step.is-done .runway-mark { border-color: hsl(var(--ok-hsl) / 0.28); background: var(--ok-soft); color: var(--ok); }
@@ -4273,7 +4292,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .wh-events { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .wh-event-chip {
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: var(--mono);
   padding: 2px 7px;
   border-radius: var(--radius-sm);
@@ -4311,7 +4330,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .cli-chip-code {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--muted-text);
   white-space: nowrap;
   overflow: hidden;
@@ -4359,7 +4378,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   display: inline-flex;
   align-items: center;
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   font-weight: 600;
   padding: 2px 9px;
   border-radius: 99px;
@@ -4406,7 +4425,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .wh-del-err {
   flex-basis: 100%;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--danger);
   word-break: break-word;
 }
@@ -4501,7 +4520,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   display: inline-block;
   margin-left: 8px;
   padding: 1px 8px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   border-radius: var(--pill);
   background: var(--ok-soft);
@@ -4585,7 +4604,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .tlv-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .tlv-badge {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -4627,7 +4646,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   margin: 8px 0 0;
   padding: 10px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--text);
   background: var(--muted-surface);
@@ -4685,7 +4704,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .vf-chip-glyph { flex: 0 0 auto; }
 .vf-chip--pass .vf-chip-glyph { color: var(--ok); }
 .vf-chip--fail .vf-chip-glyph { color: var(--danger); }
-.vf-chip-code { font-family: var(--mono); font-size: 11px; color: var(--muted-text); }
+.vf-chip-code { font-family: var(--mono); font-size: var(--text-xs); color: var(--muted-text); }
 .vf-meta { margin-top: 10px; font-size: 12px; color: var(--muted-text); }
 .vf-note {
   display: flex;
@@ -5211,7 +5230,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .cmdk-row-meta { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .cmdk-row-hint { font-size: 12px; color: var(--muted-text); }
 .cmdk-row-group {
-  font-size: 11px;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted-text);
@@ -5542,7 +5561,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   flex: 0 0 auto;
   display: inline-flex; align-items: center;
   height: 20px; padding: 0 9px;
-  font-size: 11px; font-weight: 600;
+  font-size: var(--text-xs); font-weight: 600;
   border-radius: var(--pill);
   background: hsl(var(--info-hsl) / 0.16);
   color: var(--info);
@@ -5622,7 +5641,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .ws-name { font-size: var(--text-base); font-weight: 700; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-plan {
   flex: 0 0 auto; padding: 2px 8px; border-radius: var(--pill);
-  font-size: 10.5px; font-weight: 600;
+  font-size: var(--text-xs); font-weight: 600;
   background: hsl(var(--primary-hsl) / 0.12); color: var(--primary);
 }
 .ws-caret { flex: 0 0 auto; margin-left: auto; opacity: 0.55; color: var(--muted-text); }
@@ -5639,14 +5658,14 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .nav-find:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--cc-bg-side), 0 0 0 4px var(--ring); }
 .nav-find-ico { flex: 0 0 auto; }
 .nav-find-key {
-  margin-left: auto; font-family: var(--mono); font-size: 10.5px;
+  margin-left: auto; font-family: var(--mono); font-size: var(--text-xs);
   padding: 1px 6px; border: 1px solid rgba(var(--cc-line-rgb), 0.12); border-radius: 5px;
 }
 
 /* nav layers + eyebrows */
 .nav-layer { display: flex; flex-direction: column; gap: 2px; }
 .nav-eyebrow {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+  font-family: var(--mono); font-size: var(--text-xs); letter-spacing: 0.14em;
   color: var(--cc-fg4); padding: 8px 10px 4px; text-transform: uppercase;
 }
 .nav-group { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(var(--cc-line-rgb), 0.06); display: flex; flex-direction: column; gap: 2px; }
@@ -5707,7 +5726,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .nav-account:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--cc-bg-side), 0 0 0 4px var(--ring); }
 .acct-id { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
 .acct-name { font-size: var(--text-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.acct-email { font-size: 11.5px; color: var(--cc-fg4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-email { font-size: var(--text-xs); color: var(--cc-fg4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- topbar: instance-scope dropdown ---------- */
 .topbar-scope { position: relative; }
@@ -5727,7 +5746,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 6px;
   display: flex; flex-direction: column; gap: 2px;
 }
-.scope-eyebrow { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--cc-fg4); padding: 6px 10px 4px; text-transform: uppercase; }
+.scope-eyebrow { font-family: var(--mono); font-size: var(--text-xs); letter-spacing: 0.14em; color: var(--cc-fg4); padding: 6px 10px 4px; text-transform: uppercase; }
 .scope-empty { padding: 10px; font-size: var(--text-sm); color: var(--muted-text); }
 .scope-item {
   display: flex; align-items: center; gap: 10px;
@@ -5787,9 +5806,9 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: 10px; font-weight: 600;
 }
 .team-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.team-sub { display: block; font-size: 11px; font-weight: 400; color: var(--muted-text); }
+.team-sub { display: block; font-size: var(--text-xs); font-weight: 400; color: var(--muted-text); }
 .team-role {
-  flex: 0 0 auto; font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em;
+  flex: 0 0 auto; font-family: var(--mono); font-size: var(--text-xs); letter-spacing: 0.04em;
   color: var(--cc-fg4); text-transform: lowercase;
 }
 .team-check { flex: 0 0 auto; color: var(--text); font-size: 12px; }
@@ -5899,7 +5918,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    new rules ride the v4 ladder (--cc-*) directly — no new legacy-alias uses. */
 .trial-chip {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.02em;
   padding: 3px 9px;
@@ -5922,7 +5941,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .dunning-head { display: flex; align-items: center; gap: 10px; }
 .dunning-plan {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   padding: 2px 8px;
   border-radius: var(--pill);
@@ -5934,7 +5953,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .dunning-body { margin: 0; max-width: 62ch; }
 
 /* Quota-honest tier cards: the real ceiling, mono, right above the action. */
-.tier-quota { font-family: var(--mono); font-size: 11px; color: var(--cc-fg3); margin: 0 0 12px; }
+.tier-quota { font-family: var(--mono); font-size: var(--text-xs); color: var(--cc-fg3); margin: 0 0 12px; }
 
 /* GR20 topbar billing chip — sits AHEAD of the SSE liveness chip; trial rides
    the info blue, past-due the danger red. It is a link to #billing. */
@@ -6112,7 +6131,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .detail-rail--cards .rail-group + .rail-group { margin-top: 14px; padding-top: 14px; border-top: none; }
 .detail-rail--cards .rail-group-label {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   font-weight: 500;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -6189,7 +6208,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 /* The "× N" count rides the title in mono — repetition reads as a figure. */
 .tlv-coalesce-count {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--muted-text);
 }
@@ -6255,7 +6274,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .dom-kind {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--muted-text);
   border: 1px solid var(--border);
   border-radius: var(--pill);
@@ -6279,7 +6298,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border: 1px solid var(--border);
   background: var(--muted-surface);
   color: var(--muted-text);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   white-space: nowrap;
   max-width: 100%;
@@ -6329,7 +6348,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: 12px;
   line-height: 1.5;
 }
-.dom-meta { margin-top: 7px; font-size: 11px; color: var(--dim); }
+.dom-meta { margin-top: 7px; font-size: var(--text-xs); color: var(--dim); }
 /* The site-detail Domains section: painted only when the site has attached
    domains (the mount leaves it empty otherwise — no empty shell, D17). */
 .site-domains { margin-top: 22px; }
@@ -6504,7 +6523,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .am-head .modal-section { margin-bottom: 8px; }
 
 /* ---- two-factor ---- */
-.a2f-badge { height: 20px; padding: 0 8px; font-size: 11px; }
+.a2f-badge { height: 20px; padding: 0 8px; font-size: var(--text-xs); }
 .a2f-badge--on { background: var(--success); color: var(--primary-fg); }
 .a2f-badge--off { background: var(--muted-surface); color: var(--muted-text); }
 .a2f-panel { margin-top: 2px; }
@@ -6710,7 +6729,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .fleet-presence--provisioning { color: var(--info); background: var(--info-soft); border-color: transparent; }
 .fleet-presence--offline { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
 .fleet-presence--unknown { color: var(--muted-text); }
-.fleet-presence-cap { font-family: var(--mono); font-size: 11.5px; color: var(--muted-text); }
+.fleet-presence-cap { font-family: var(--mono); font-size: var(--text-xs); color: var(--muted-text); }
 
 /* BYO model key — a visible named step, never a hidden afterthought (PDF-D88). */
 .support-key-step { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 6px; }
@@ -6727,7 +6746,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .fleet-row--support { margin-left: 28px; }
 .fleet-role-chip {
   display: inline-block; margin-left: 8px; padding: 1px 7px;
-  font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
   color: var(--muted-text); border: 1px solid var(--border); border-radius: 999px;
   vertical-align: 1px;
 }
