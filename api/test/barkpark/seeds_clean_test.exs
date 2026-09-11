@@ -122,6 +122,30 @@ defmodule Barkpark.SeedsCleanTest do
     assert Auth.has_permission?(token, "admin")
   end
 
+  # pds-bl-owner-walk-reaches-the-mint AC#3. The banner is a COPY-PASTEABLE
+  # instruction; a hardcoded http://localhost:4000 cannot work on any box not on
+  # the default port (observed against a :47016 personal box) — the same defect
+  # class as a vacuous green.
+  #
+  # WHAT THIS TEST CANNOT DO, stated so nobody reads more into it. The suite's
+  # own endpoint IS on 4000: config/runtime.exs runs in EVERY env and sets
+  # `http: [port: PORT || 4000]`, overriding test.exs's 4002. So in-process the
+  # old literal and the derived value are the same string, and no assertion here
+  # can tell them apart. The differential is run OUT of process, where PORT can
+  # differ, and is recorded on the task row:
+  #
+  #     PORT=47016 MIX_ENV=test mix run -e \
+  #       'IO.puts(Barkpark.Seeds.Clean.connect_url())'   # => http://localhost:47016
+  #
+  # What this DOES pin is that the banner never re-acquires a literal of its
+  # own: it must print exactly what connect_url/0 returns, whatever that is.
+  test "the connect line prints connect_url/0 — never a literal of its own" do
+    output = run_clean()
+
+    assert output =~ "--server #{Barkpark.Seeds.Clean.connect_url()} --token <token>"
+    assert Barkpark.Seeds.Clean.connect_url() =~ ~r{\Ahttps?://[^:/]+:\d+\z}
+  end
+
   test "second run is a no-op: mints no second token, never clobbers the paper" do
     run_clean()
 

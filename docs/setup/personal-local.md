@@ -1,102 +1,95 @@
 <!-- doc-tier: human | canonical-for: personal-local-stack | budget: 800tok -->
 # Personal-local Barkpark (`barkpark up`)
 
-Wave 5 of the convergence project: run the whole stack with one command, no
-manual Postgres, no hand-rolled secrets. Everything Barkpark-private lives under
-`$BARKPARK_HOME` (default `~/.barkpark`).
+The whole stack in one command — no manual Postgres, no hand-rolled secrets.
+Everything Barkpark-private lives under `$BARKPARK_HOME` (default `~/.barkpark`).
 
 ## One command
 
 ```bash
-cd api && mix deps.get && cd ..   # once per fresh clone/worktree — see below
+cd api && mix deps.get && cd ..   # once per fresh clone/worktree — see Traps
 bin/barkpark up
+bin/barkpark token                # the key to /studio — printed ONCE
 ```
 
-> **First boot on a fresh worktree needs `mix deps.get` first.** `up` never runs it: step 1 shells out to `mix run --no-start -e 'Barkpark.Release.Secrets.write_env(…)'` inside `api/`, so with no `deps/` the very first step dies in a compile error rather than anything that names the real cause.
+`up` does, in order:
 
-That does, in order:
-
-1. **Secrets** (`Barkpark.Release.Secrets`) — first run generates `SECRET_KEY_BASE`,
+1. **Secrets** (`Barkpark.Release.Secrets`) — writes `SECRET_KEY_BASE`,
    `PREVIEW_JWT_SECRET`, `BARKPARK_CLOAK_KEY`, `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET`,
-   and `BARKPARK_KEK` (the master envelope KEK — without it the `:prod` boot below
-   raises) into `~/.barkpark/.env` and `chmod 0600`s it. Re-runs only top up
-   *missing* keys — existing values are never overwritten and never printed. It
-   also writes `BARKPARK_ALLOW_BUNDLE_IMPORT=1` (personal-local is the free twin you
-   *pull cloud data into*, so it opts into workspace-bundle import; a hand-set `=0`
-   is never clobbered).
-2. **Managed Postgres** (`bin/barkpark-pg start`) — a Barkpark-private Postgres
-   on **port 5433**, bound to `127.0.0.1` only, with its data dir at
-   `~/.barkpark/pgdata`. First run `initdb`s it; later runs detect and reuse the
-   existing data dir. It never touches a system/dev Postgres on 5432.
+   `BARKPARK_KEK` (the envelope KEK — `:prod` raises without it) and
+   `BARKPARK_ALLOW_BUNDLE_IMPORT=1` into `~/.barkpark/.env`, `chmod 0600`. Re-runs
+   top up only *missing* keys; existing values are never overwritten or printed.
+2. **Managed Postgres** (`bin/barkpark-pg start`) — Barkpark-private, **port
+   5433**, `127.0.0.1` only, data dir `~/.barkpark/pgdata`, `initdb`d once then
+   reused. Never touches a system/dev Postgres on 5432.
 3. **Migrate** — `mix ecto.migrate` against the managed instance.
-4. **Boot** — `mix phx.server` in `MIX_ENV=prod` (so `config/runtime.exs` reads
-   the managed `DATABASE_URL` and the generated secrets), then prints the URL.
-
-`barkpark up` is safe to re-run: an already-running Postgres and server are
-detected and left alone.
+4. **Boot** — `mix phx.server` under `MIX_ENV=prod`, then prints the URL **and
+   whether this box has an admin credential yet**. Safe to re-run: a running
+   Postgres and server are left alone.
 
 | Command | Effect |
 |---|---|
-| `barkpark up` | ensure secrets → start PG → migrate → boot → print URL |
-| `barkpark reload` | restart the server so config changes take effect (PG stays up) |
+| `barkpark up` | secrets → PG → migrate → boot → URL + credential state |
+| `barkpark token` | mint this box's admin credential (idempotent), print it once |
+| `barkpark reload` | restart the server so config changes take effect |
 | `barkpark stop` | stop the server and the managed Postgres |
 | `barkpark status` | report Postgres + server state |
 | `barkpark psql …` | psql shell on the managed Postgres |
 
-### Locating Postgres tools
+## Getting an admin token
 
-`barkpark-pg` finds `initdb`/`pg_ctl`/`psql` in this priority order:
+`up` never mints one, so a fresh box boots with `api_tokens` empty: `/studio`
+302s to a `/login` offering Email+Password against **0 users** and API token
+against **0 tokens**, and there is no `/register`. `bin/barkpark token` is the key.
 
-1. `$BARKPARK_PG_BIN` (explicit override),
-2. Postgres.app bundled versions (newest),
-3. Homebrew `postgresql@NN` kegs (newest),
-4. whatever is on `PATH`.
+It runs the **clean** seed profile (pinned — the `demo` default would install a
+shared plaintext dev token), mints `bp_admin_<24B base64url>` scoped
+`read,write,admin`, stores only its SHA-256, and prints it **once**. Paste it into
+`/login` → *API token*, or hand it to `bp setup --target connect --server
+http://localhost:PORT --token bp_admin_…`. Re-running is safe: the seed skips
+while an unrevoked admin token is present, so it never mints a second key beside
+a live one. `bp login` is a **cloud** verb and cannot target a local box.
 
-The Postgres **major.minor** that created the data dir is pinned in
-`~/.barkpark/PG_VERSION_PINNED`. Starting against a different *major* version
-fails fast with a clear message rather than a cryptic `pg_ctl` error, because
-Postgres cannot open a data dir across major versions.
+## Traps
 
-## CONFIG-RELOAD FOOTGUN (read this)
-
-Barkpark reads its secrets and tokens from `~/.barkpark/.env` **at boot only**.
-Neither `mix phx.server` nor a `mix release` hot-reloads `config/*.exs` or
-re-reads the env file while running. So when you change a value in
-`~/.barkpark/.env` — most commonly `BARKPARK_INGEST_TOKEN` — the running server
-keeps the **old** value until it is restarted.
-
-That is why `barkpark reload` exists. It is a full stop + start of the server
-process (Postgres keeps running), which re-sources `~/.barkpark/.env` and
-re-runs `config/runtime.exs`:
-
-```bash
-$EDITOR ~/.barkpark/.env      # change BARKPARK_INGEST_TOKEN
-bin/barkpark reload           # new token now in effect
-```
-
-Editing the env file without `reload` is a silent no-op against the running
-server — the single most common Wave-5 footgun, and the reason this command is
-not just `up` run twice.
+- **`mix deps.get` first, once per fresh clone/worktree.** `up` never runs it, and
+  step 1 shells out to `mix run --no-start -e …` in `api/`, so with no `deps/` it
+  dies in a compile error that names nothing real.
+- **`CC=/usr/bin/clang` if a NIF fails to build** — a `cc` shim on `PATH` shadows
+  the real compiler.
+- **Keep `$BARKPARK_HOME` short (under ~85 chars).** `barkpark-pg` puts the Unix
+  socket dir inside it (`-k`) and socket paths cap near 104 bytes; a deep path
+  fails inside `pg_ctl`, nowhere that explains itself.
+- **Never pipe `up` into `tail`/`head`.** It leaves a detached server holding the
+  pipe's write end, so the pipeline never returns — it looks like a hung launcher.
+- **Postgres tools** resolve via `$BARKPARK_PG_BIN`, Postgres.app, Homebrew
+  `postgresql@NN` kegs, `PATH`; the data dir's major.minor is pinned in
+  `~/.barkpark/PG_VERSION_PINNED` and a different *major* fails fast.
+- **`.env` is read at BOOT ONLY** — nothing re-reads it while running, so editing
+  it (most commonly `BARKPARK_INGEST_TOKEN`) is a silent no-op against the live
+  server. `bin/barkpark reload` is the fix: a full stop + start of the server
+  process, Postgres untouched.
 
 ## Overrides
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `BARKPARK_HOME` | `~/.barkpark` | root for data dir, env file, logs, pidfile |
+| `BARKPARK_HOME` | `~/.barkpark` | data dir, env file, logs, pidfile (keep it SHORT) |
 | `BARKPARK_PG_PORT` | `5433` | managed Postgres port |
-| `BARKPARK_PG_BIN` | autodetect | force a specific Postgres `bin/` |
+| `BARKPARK_PG_BIN` | autodetect | force a Postgres `bin/` |
 | `PORT` | `4000` | HTTP port the server listens on |
 | `PHX_HOST` | `localhost` | host for `Endpoint` URL + `check_origin` |
-| `BARKPARK_MIX_ENV` | `prod` | the env `up`/`reload` boot under |
-| `BARKPARK_MEDIA_DIR` | `api/uploads` | media blob root — point it at a portable data dir so pulled cloud blobs land beside your data (read at boot; `reload` picks it up) |
-| `BARKPARK_ALLOW_BUNDLE_IMPORT` | `1` (set by `up`) | allow workspace-bundle import into this instance; fail-closed everywhere else |
+| `BARKPARK_MIX_ENV` | `prod` | env `up`/`reload` boot under |
+| `BARKPARK_KEK` | generated | envelope KEK; `:prod` raises without it — never hand-edit a live one |
+| `BARKPARK_MEDIA_DIR` | `api/uploads` | media blob root — read at boot; `reload` picks it up |
+| `BARKPARK_ALLOW_BUNDLE_IMPORT` | `1` (set by `up`) | allow bundle import here; fail-closed elsewhere |
 
 ## Pulling cloud data down (blob push)
 
-The Personal-Local twin is a **pull target**: `bp cloud workspace import` copies a
-cloud workspace's rows into it, and the blobs are re-pointed via an admin-gated
-raw-blob write — `PUT /api/workspaces/:workspace_slug/media/blob/*path` (bytes
-written verbatim at a strictly-validated relative path; traversal/absolute paths
-are refused `422`). It is a bare infra route, absent from the capabilities
-manifest. A media row whose blob has not been pushed yet serves an honest `404`
-(never a `500`), so an import mid-flight degrades cleanly.
+The twin is a **pull target**: `bp cloud workspace import` copies a cloud
+workspace's rows in; blobs are re-pointed via an admin-gated raw-blob write,
+`PUT /api/workspaces/:workspace_slug/media/blob/*path` (bytes verbatim at a
+strictly-validated relative path; traversal/absolute refused `422`).
+"Admin-gated" means the token from `barkpark token`. A bare infra route, absent
+from the manifest. A media row whose blob is not pushed yet serves an honest
+`404`, so a mid-flight import degrades cleanly.
