@@ -73,13 +73,32 @@ run() { # run <root> <paths-file> -> stdout+stderr in $out, status in $status
 # length-dependent, so it stays hidden until the output grows. `>/dev/null`
 # drains instead: same verdict, no signal.
 says() { printf '%s\n' "$out" | grep -E "^$1[[:space:]]+$2([[:space:]]|$)" >/dev/null; }
+
+# THE CLOUD GATE PRINTS TWO ROWS — `[cloud]` and `[census]`. cloud.yml's
+# dispatcher answers two path sets off one primitive, so the wrapper's
+# disambiguator (one primitive, more than one call site) names the set. The
+# `[census]` half only became VISIBLE to the scan when the dispatchers pinned
+# their path-set script to the merge ref (task-3a81e68f7027ca98): before that
+# the literal-only call-site pattern silently missed the here-string form, and
+# the Cloud gate's cheaper tier was dispatched with nothing reporting it.
+#
+# THE CENSUS TIER DERIVES ITS CORPUS FROM A FILE IN THE TREE, so any scratch
+# tree the wrapper is pointed at must carry that file — otherwise `--match
+# census` REFUSES (exit 2), the wrapper reports CANNOT READ, and an INCOMPLETE
+# FIXTURE reads as a broken instrument.
+CENSUS_DECL="$(bash "$ROOT/scripts/cloud-path-escape-check.sh" --census-source)"
+[ -n "$CENSUS_DECL" ] || die "cloud-path-escape-check.sh --census-source printed nothing — cannot populate the scratch trees"
+carry_census_decl() { # carry_census_decl <tree-root>
+  mkdir -p "$1/$(dirname "$CENSUS_DECL")" || die "cannot build $1/$(dirname "$CENSUS_DECL")"
+  cp "$ROOT/$CENSUS_DECL" "$1/$CENSUS_DECL" || die "cannot copy the census declaration into $1"
+}
 has() { printf '%s\n' "$out" | grep -E "$1" >/dev/null; }
 
 # ── case 1: the #16608 file set ─────────────────────────────────────────────
 echo "case 1: the PR #16608 file set dispatches Cloud and Console"
 run "$ROOT" "$TMP/set-a"
 [ $status -eq 0 ] && ok "exit 0" || no "exit $status, wanted 0 — output: $out"
-says "Cloud gate" DISPATCHED && ok "Cloud gate DISPATCHED" || no "Cloud gate not DISPATCHED — output: $out"
+says "Cloud gate \[cloud\]" DISPATCHED && ok "Cloud gate DISPATCHED" || no "Cloud gate not DISPATCHED — output: $out"
 says "Console gate" DISPATCHED && ok "Console gate DISPATCHED" || no "Console gate not DISPATCHED — output: $out"
 has '\(required\)' && ok "required contexts marked from .github/required-checks.json" || no "no (required) marker — output: $out"
 
@@ -87,7 +106,7 @@ has '\(required\)' && ok "required contexts marked from .github/required-checks.
 echo "case 2: api/lib/barkpark/tasks.ex skips Cloud and Console, dispatches Elixir"
 run "$ROOT" "$TMP/set-b"
 [ $status -eq 0 ] && ok "exit 0" || no "exit $status, wanted 0 — output: $out"
-says "Cloud gate" SKIPPED && ok "Cloud gate SKIPPED" || no "Cloud gate not SKIPPED — output: $out"
+says "Cloud gate \[cloud\]" SKIPPED && ok "Cloud gate SKIPPED" || no "Cloud gate not SKIPPED — output: $out"
 says "Console gate" SKIPPED && ok "Console gate SKIPPED" || no "Console gate not SKIPPED — output: $out"
 has '^Elixir gate \[test\][[:space:]]+DISPATCHED' && ok "Elixir gate [test] DISPATCHED" || no "Elixir gate [test] not DISPATCHED — output: $out"
 
@@ -127,6 +146,7 @@ cp "$ROOT"/scripts/*-path-escape-check.sh "$MUT/scripts/" 2>/dev/null || die "no
 cp "$SCRIPT" "$MUT/scripts/" || die "cannot copy the wrapper"
 cp "$ROOT"/.github/workflows/*.yml "$MUT/.github/workflows/" 2>/dev/null || die "no workflows to copy"
 cp "$ROOT/.github/required-checks.json" "$MUT/.github/" || die "cannot copy the required-checks spec"
+carry_census_decl "$MUT"
 
 VICTIM="$MUT/scripts/console-path-escape-check.sh"
 [ -f "$VICTIM" ] || die "the mutation target is absent from the scratch tree before the mutation"
@@ -144,7 +164,7 @@ status=$?
 [ $status -ne 0 ] && ok "exit $status (non-zero) under the mutation" || no "exit 0 under the mutation — a failed read went unreported"
 has '^CANNOT READ: scripts/console-path-escape-check\.sh' && ok "CANNOT READ names the missing primitive" || no "no CANNOT READ line naming console-path-escape-check.sh — output: $out"
 says "Console gate" SKIPPED && no "the missing primitive printed as SKIPPED — the exact confusion this arm exists to forbid" || ok "no SKIPPED row for the missing primitive"
-says "Cloud gate" DISPATCHED && ok "the surviving primitives still answer" || no "the mutation took the whole run down — output: $out"
+says "Cloud gate \[cloud\]" DISPATCHED && ok "the surviving primitives still answer" || no "the mutation took the whole run down — output: $out"
 
 # ── case 5: the git-range input, hermetically ───────────────────────────────
 # The default input is a RANGE, not --stdin, and a range flows through a
@@ -158,6 +178,7 @@ cp "$ROOT"/scripts/*-path-escape-check.sh "$RANGE_TREE/scripts/" || die "no prim
 cp "$SCRIPT" "$RANGE_TREE/scripts/" || die "cannot copy the wrapper"
 cp "$ROOT"/.github/workflows/*.yml "$RANGE_TREE/.github/workflows/" || die "no workflows to copy"
 cp "$ROOT/.github/required-checks.json" "$RANGE_TREE/.github/" || die "cannot copy the required-checks spec"
+carry_census_decl "$RANGE_TREE"
 (
   cd "$RANGE_TREE" || exit 2
   git init -q . && git add -A &&
@@ -273,7 +294,7 @@ fi
 out="$(WHICH_GATES_ROOT="$C7" bash "$C7/scripts/which-gates.sh" 'HEAD~1..HEAD' 2>&1)"
 status=$?
 [ $status -eq 0 ] && ok "exit 0" || no "exit $status — output: $out"
-says "Cloud gate" DISPATCHED && ok "the Cloud gate still reads DISPATCHED (the rows are unchanged)" || no "Cloud gate row lost — output: $out"
+says "Cloud gate \[cloud\]" DISPATCHED && ok "the Cloud gate still reads DISPATCHED (the rows are unchanged)" || no "Cloud gate row lost — output: $out"
 has '^PAYLOAD CENSUS COUPLING' && no "the note fired on a Go change with no tag delta — it will be ignored inside a week" || ok "no coupling note: nothing in the census can have moved"
 
 # And the same tree, ONE tag added, MUST fire — or the arm above proves nothing:
@@ -379,10 +400,15 @@ has '^Console gate[[:space:]]+DISPATCHED' && ok "and it is labelled 'Console gat
 C9="$TMP/c9"
 census_tree "$C9"
 C9_WF="$C9/.github/workflows/console-harness.yml"
-inv_before="$(grep -cE '\| bash scripts/console-path-escape-check\.sh --match console' "$C9_WF" || true)"
-[ "$inv_before" -eq 1 ] || die "expected exactly 1 piped invocation in console-harness.yml, found $inv_before — this arm's mutation has no target"
-sed -E 's;\| bash (scripts/console-path-escape-check\.sh --match console);| echo "would run \1";' "$C9_WF" >"$C9_WF.t" && mv "$C9_WF.t" "$C9_WF"
-inv_after="$(grep -cE '\| bash scripts/console-path-escape-check\.sh --match console' "$C9_WF" || true)"
+# THE PINNED SHAPE (task-3a81e68f7027ca98): the dispatcher shells
+# `bash "$pin_script" --match console`, and the primitive's literal name lives
+# in the step's `pin_script=` assignment. The mutation turns THAT invocation
+# into prose and leaves both mentions — the assignment and the refusal message
+# — standing, so the arm still discriminates invocation from mention.
+inv_before="$(grep -cF 'bash "$pin_script" --match console' "$C9_WF" || true)"
+[ "$inv_before" -eq 1 ] || die "expected exactly 1 pinned invocation in console-harness.yml, found $inv_before — this arm's mutation has no target"
+sed -E 's;bash "\$pin_script" (--match console);echo "would run scripts/console-path-escape-check.sh \1";' "$C9_WF" >"$C9_WF.t" && mv "$C9_WF.t" "$C9_WF"
+inv_after="$(grep -cF 'bash "$pin_script" --match console' "$C9_WF" || true)"
 mention_after="$(grep -cF 'scripts/console-path-escape-check.sh --match console' "$C9_WF" || true)"
 if [ "$inv_after" -eq 0 ] && [ "$mention_after" -gt 0 ]; then
   ok "mutation APPLIED: the invocation is gone, $mention_after quoted MENTION(s) of it remain"
@@ -391,7 +417,7 @@ else
 fi
 out="$(WHICH_GATES_ROOT="$C9" bash "$C9/scripts/which-gates.sh" --stdin <"$TMP/set-a" 2>&1)"
 has '^Console gate' && no "a workflow that only MENTIONS the primitive still printed a Console gate row — the scan reads prose as dispatch: $out" || ok "no Console gate row from mentions alone — the scan reads INVOCATIONS"
-says "Cloud gate" DISPATCHED && ok "the surviving dispatchers still answer under the mutation" || no "the mutation took out more than its target — output: $out"
+says "Cloud gate \[cloud\]" DISPATCHED && ok "the surviving dispatchers still answer under the mutation" || no "the mutation took out more than its target — output: $out"
 
 # ── the tally ───────────────────────────────────────────────────────────────
 echo

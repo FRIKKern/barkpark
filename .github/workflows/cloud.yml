@@ -283,8 +283,20 @@ jobs:
           # holding bytes then takes SIGPIPE that `set -o pipefail` promotes over
           # the match that DID occur (the house D37 rule). A here-string has no
           # writer process. The `cloud` call carried that pipe until this change.
+          # THE `--match` STAYS AT THE CALL SITE, spelled out. scripts/which-gates.sh
+          # discovers "which gate will this diff dispatch" by scraping the
+          # dispatch call sites out of these workflows, and it keys on
+          # `--match <set>` at command position. Hiding the flag inside the
+          # helper made that scan find ZERO call sites repo-wide and print its
+          # CANNOT READ (measured 2026-09-11, task-3a81e68f7027ca98) — so the
+          # helper takes the flag verbatim and refuses anything else, and the
+          # two calls below read exactly as the console and elixir ones do.
           match_set() {
-            local want="$1" out rc=0
+            local flag="$1" want="$2" out rc=0
+            if [ "$flag" != "--match" ]; then
+              echo "::error::dispatcher: match_set takes '--match <set>' verbatim (got '${flag}')."
+              exit 1
+            fi
             out="$(bash "$pin_script" --match "$want" <<<"$changed")" || rc=$?
             case "$out" in
               true | false)
@@ -296,8 +308,8 @@ jobs:
             printf 'true'
           }
 
-          cloud="$(match_set cloud)"
-          census="$(match_set census)"
+          cloud="$(match_set --match cloud)"
+          census="$(match_set --match census)"
 
           # Belt and braces. `match_set` cannot return anything but true|false,
           # so this loop is unreachable TODAY — it is kept as the guard on a
