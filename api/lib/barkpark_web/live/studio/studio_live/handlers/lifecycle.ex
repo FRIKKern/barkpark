@@ -271,6 +271,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # `grant_target_denied?/3` are the SAME copies the chokepoint asks, in the
   # same order, with the same refusals.
   #
+  # WHAT THIS DOES NOT CLOSE, SAID PLAINLY. `TreeCodelistField` still assigns
+  # its own `:selected` in `handle_event("tree_node_select", …)` before the
+  # notify, and LiveView does not re-invoke a component whose assigns did not
+  # change — so a denied principal's PICKER still paints the clicked row until
+  # something else moves the block's value. Closing that needs the `readonly`
+  # prop to actually reach the component, i.e. a capability attr plumbed
+  # through `PaperEditor.paper_block_fields/1` (14 callsites) to the
+  # `codelist`+`variant: "tree"` render head in `PaperFieldBlock`. It is a UI
+  # AFFORDANCE, exactly like `SheetGrid`'s snapshot prop: a stale-TRUE one
+  # costs a denied write at this seam, never a persisted one.
+  #
   # DEFENCE IN DEPTH, NOT THE ONLY WALL. The chokepoint already refuses the
   # resulting `{:paper_op, …}`, so persisted state was safe. What was NOT safe
   # is what a refusal at the chokepoint leaves behind: `send_update` runs

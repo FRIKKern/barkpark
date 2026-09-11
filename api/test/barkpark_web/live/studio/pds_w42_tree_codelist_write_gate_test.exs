@@ -200,6 +200,27 @@ defmodule BarkparkWeb.Studio.PdsW42TreeCodelistWriteGateTest do
     end
   end
 
+  # `PaperFieldBlock`'s OWN `:value` / `:pending_value?`, read out of the
+  # LiveView channel's component table. This is the state `send_update/3`
+  # moves — the thing the hop's gate stops and the chokepoint's refusal does
+  # NOT undo, because the chokepoint refuses AFTER `PaperFieldBlock.update/2`
+  # has already assigned the forged value and marked it pending, and a pending
+  # value is retained across the parent's echo BY DESIGN (the focus-preserving
+  # local-first contract in the component's moduledoc).
+  defp field_block_state(view, dom_id) do
+    {cids, _ids, _counter} = :sys.get_state(view.pid).components
+
+    Enum.find_value(cids, :not_found, fn {_cid, entry} ->
+      case entry do
+        {BarkparkWeb.Studio.PaperFieldBlock, ^dom_id, assigns, _private, _prints} ->
+          {Map.get(assigns, :value), Map.get(assigns, :pending_value?)}
+
+        _ ->
+          nil
+      end
+    end)
+  end
+
   describe "a write-denied principal driving the tree-codelist select chain" do
     test "the chain is refused and persisted state is unchanged", %{conn: conn} do
       System.delete_env("BARKPARK_PAPER_CANVAS")
@@ -224,7 +245,7 @@ defmodule BarkparkWeb.Studio.PdsW42TreeCodelistWriteGateTest do
       assert stored_value(slug) == @old_code
     end
 
-    test "the component's own value does not move either — no forged code echoed back",
+    test "the hop itself is stopped — PaperFieldBlock's own value never takes the forged code",
          %{conn: conn} do
       System.delete_env("BARKPARK_PAPER_CANVAS")
       slug = "pds-w42-tree-echo"
@@ -232,15 +253,22 @@ defmodule BarkparkWeb.Studio.PdsW42TreeCodelistWriteGateTest do
 
       view = open!(conn, @readonly, slug)
       assert_write_denied_socket!(view)
-      assert rendered_tree_value(view) == @old_code
+
+      # PRECONDITION, asserted rather than assumed: the component table really
+      # does hold this block, and it holds the PERSISTED value with nothing
+      # pending. A `:not_found` here would make the post-assertion vacuous.
+      assert field_block_state(view, "paper-fb-" <> @block_id) == {@old_code, false}
 
       tree_node_select(view, @forged_code)
 
-      # NON-VACUOUS: revert the gate in Lifecycle.tree_codelist_change/2 and
-      # this prints `left: "ESCALATED"` — send_update reaches
-      # PaperFieldBlock.update/2, which assigns the forged code and marks it
-      # pending, so the denied principal's editor renders it back.
-      assert rendered_tree_value(view) == @old_code
+      # NON-VACUOUS BY MUTATION: revert the gate in
+      # `Lifecycle.tree_codelist_change/2` and this prints
+      # `left: {"ESCALATED", true}` — `send_update` reaches
+      # `PaperFieldBlock.update(%{tree_value: …})`, which assigns the forged
+      # code and marks it pending BEFORE the chokepoint ever sees the
+      # `{:paper_op, …}` it then refuses. The store is safe either way; the
+      # component's state is not.
+      assert field_block_state(view, "paper-fb-" <> @block_id) == {@old_code, false}
       assert stored_value(slug) == @old_code
     end
   end
@@ -263,7 +291,7 @@ defmodule BarkparkWeb.Studio.PdsW42TreeCodelistWriteGateTest do
       # the denial above is about the PRINCIPAL and not about the chain being
       # broken for everyone.
       assert stored_value(slug) == @forged_code
-      assert rendered_tree_value(view) == @forged_code
+      assert field_block_state(view, "paper-fb-" <> @block_id) == {@forged_code, false}
     end
   end
 end
