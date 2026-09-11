@@ -135,6 +135,102 @@ probe "deploy.sh (one-box provisioning bring-up probe)" \
 probe "internal/cli/cloud/support.go (SupportLocalHealthProbe)" \
   "$(extract_path 'support.go' internal/cli/cloud/support.go 's|^const SupportLocalHealthProbe = .curl -fsS http://localhost:4000\(/[^ ]*\) .*|\1|p')"
 
+# ── the cli fence (internal/cli + internal/provisioner). Nine probe sites, each
+# extracted from its OWN file: reverting any one of them reds this harness
+# without anyone editing this file.
+probe "internal/cli/cloud/restore_driver.go (restoreHealthURL — the on-box agent's self-probe)" \
+  "$(extract_path 'restore_driver const' internal/cli/cloud/restore_driver.go 's|^const restoreHealthURL = "http://localhost:4000\(/[^"]*\)"$|\1|p')"
+
+probe "internal/cli/cloud/restore_driver.go (restoreDataScript post-restore wait)" \
+  "$(extract_path 'restore_driver script' internal/cli/cloud/restore_driver.go 's|^curl -sf -m 60 .*4000}\(/[^"]*\)".*|\1|p')"
+
+probe "internal/cli/cloud_deploy_cmd.go (deploySmokeURLs — the API check printed on success)" \
+  "$(extract_path 'deploy smoke urls' internal/cli/cloud_deploy_cmd.go '/return \[\]string{/{n;s|.*"\(/[^"]*\)".*|\1|p;}')"
+
+probe "internal/cli/cloud_support_cmd.go (supportEnableImportStep restart wait)" \
+  "$(extract_path 'cloud support import step' internal/cli/cloud_support_cmd.go 's|^for i in \$(seq 1 60); do curl -fsS http://localhost:4000\(/[^ ]*\) .*|\1|p')"
+
+probe "internal/cli/hetzner_instance_cmd.go (instHealth — resurrect/adopt/eject gate)" \
+  "$(extract_path 'instHealth' internal/cli/hetzner_instance_cmd.go 's|^	url := "https://" + fqdn + "\(/[^"]*\)"$|\1|p')"
+
+probe "internal/cli/hetzner_instance_transfer_cmd.go (post-import health wait)" \
+  "$(extract_path 'instance transfer' internal/cli/hetzner_instance_transfer_cmd.go 's|^curl -sf -m 60 .*4000}\(/[^"]*\)".*|\1|p')"
+
+probe "internal/cli/setup/assets/deploy.sh (the VENDORED provisioning bring-up probe bp ships to every box)" \
+  "$(extract_path 'vendored deploy.sh' internal/cli/setup/assets/deploy.sh 's|.*bp_health_probe "http://localhost:\$APP_PORT\(/[^"]*\)".*|\1|p')"
+
+probe "internal/cli/setup/local.go (barkparkAnswering — the 'is a server already up?' fallback)" \
+  "$(extract_path 'setup local' internal/cli/setup/local.go 's|.*range \[\]string{"/v1/capabilities", "\(/[^"]*\)"}.*|\1|p')"
+
+probe "internal/provisioner/support.go (supportEnableImportStep restart wait)" \
+  "$(extract_path 'provisioner support' internal/provisioner/support.go 's|^for i in \$(seq 1 60); do curl -fsS http://localhost:4000\(/[^ ]*\) .*|\1|p')"
+
+echo ""
+echo "---- CENSUS: who is STILL on the sunset route (a predicate over the tree, not a list)"
+# A line is a PROBE when it names api/schemas AND carries a fetch verb. Positive
+# matching, deliberately: an exclusion list ("drop anything with echo") already
+# produced a MEASURED false absence here — Makefile:299 and run.sh:18 both pipe
+# their probe through `|| echo 000` and vanished from the census.
+#
+# Scope is the shipping health surface: the root entry points, the deploy/setup
+# scripts, and the Go CLI + provisioner. Tests, testdata and this harness are
+# excluded — they are ABOUT the route, they do not gate on it.
+census_files() {
+  git ls-files deploy.sh run.sh Makefile bin/barkpark docker-compose.yml \
+    'scripts/*.sh' 'scripts/*.ps1' 'deploy/*.sh' 'internal/cli/*' 'internal/provisioner/*' \
+    | grep -vE '(_test\.(go|sh)|\.test\.sh|/testdata/|^scripts/sunset-route-consumers)'
+}
+census_probes() {
+  local files; files="$(census_files)"
+  # shellcheck disable=SC2086  # deliberate word-splitting: one grep over the set
+  grep -nE 'api/schemas' $files 2>/dev/null \
+    | grep -vE ':[0-9]+:[[:space:]]*(#|//)' \
+    | grep -E '(curl|wget|bp_curl_[a-z]+|bp_health_probe|Invoke-WebRequest|http\.Get|client\.Get|HealthURL[[:space:]]*=|healthcheck)'
+}
+
+# CONTROL: the census must be able to SEE the route at all. If the file set or
+# the grep is broken, "zero remaining" is free — the failure mode that made the
+# exclusion-list version lie. api/router.ex is where the route is DEFINED, so a
+# census that cannot find it there is not measuring anything.
+if git grep -qn 'api/schemas' -- api/lib/barkpark_web/router.ex; then
+  ok "c3. CONTROL — the census grep can still see /api/schemas where it is DEFINED (api/lib/barkpark_web/router.ex)"
+else
+  bad "c3. CONTROL — /api/schemas is not greppable in api/lib/barkpark_web/router.ex; every census verdict below is unearned"
+fi
+CENSUS_FILE_COUNT="$(census_files | wc -l | tr -d ' ')"
+if [ "$CENSUS_FILE_COUNT" -gt 100 ]; then
+  ok "c4. CONTROL — the census covers $CENSUS_FILE_COUNT files (a collapsed file set cannot report a free zero)"
+else
+  bad "c4. CONTROL — the census covers only $CENSUS_FILE_COUNT files; the path globs stopped matching"
+fi
+
+CENSUS="$(census_probes || true)"
+printf '%s\n' "${CENSUS:-  (no probe anywhere on the health surface still names /api/schemas)}" | sed 's/^/  census: /' | cut -c1-160
+
+# THE CLI FENCE: this task's half. Zero, no ledger, no exceptions.
+CLI_LEFT="$(printf '%s\n' "$CENSUS" | grep -E '^internal/(cli|provisioner)/' || true)"
+check "cli fence (internal/cli, internal/provisioner) has ZERO probes left on the sunset route" \
+  "" "$(printf '%s' "$CLI_LEFT")"
+
+# THE API FENCE: not this task's half (task-631beef14cef7460 splits the work by
+# fence). A shrink-only ledger of FILES — never line numbers, which move. It
+# fails in BOTH directions: a file that acquires a probe and is not listed is a
+# REGRESSION; a listed file that no longer has one is a STALE entry to delete.
+API_LEDGER='Makefile
+bin/barkpark
+run.sh
+scripts/pds-pull-proof.sh
+scripts/setup-windows.ps1'
+API_LEFT="$(printf '%s\n' "$CENSUS" | grep -vE '^internal/(cli|provisioner)/' | cut -d: -f1 | sort -u | grep -v '^$' || true)"
+UNLEDGERED="$(comm -23 <(printf '%s\n' "$API_LEFT") <(printf '%s\n' "$API_LEDGER" | sort))"
+STALE="$(comm -13 <(printf '%s\n' "$API_LEFT") <(printf '%s\n' "$API_LEDGER" | sort))"
+check "no UNLEDGERED file gained a sunset-route probe (a new one is a regression)" "" "$(printf '%s' "$UNLEDGERED")"
+if [ -n "$STALE" ]; then
+  bad "the api-fence ledger is STALE — these files no longer probe the sunset route, delete them from API_LEDGER in this file: $(printf '%s' "$STALE" | tr '\n' ' ')"
+else
+  ok "the api-fence ledger names exactly the files still to be repointed ($(printf '%s\n' "$API_LEDGER" | wc -l | tr -d ' ') left, api lane's half)"
+fi
+
 echo ""
 echo "---- THE TWO DOCS name the surviving route"
 for d in deploy/uptime-kuma/README.md deploy/README.md; do
