@@ -19,7 +19,7 @@
       "cell": "stat-partial-row__light__1280",
       "file": "stat-partial-row__light__1280.jpeg",
       "scale": 2,
-      "bytes": 508457,
+      "bytes": 533815,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -113,15 +113,15 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8,
-        8
+        7,
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 11,
-          "emptyTracks": 5,
+          "emptyTracks": 3,
           "probe": {
             "hit": "div.bp-stats",
             "hitIsStrip": true,
@@ -129,9 +129,9 @@
           }
         },
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 11,
-          "emptyTracks": 5,
+          "emptyTracks": 3,
           "probe": {
             "hit": "div.bp-stats",
             "hitIsStrip": true,
@@ -142,11 +142,12 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 3,
+        "total": 47,
         "heavy": 3,
         "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
+          "1": 44,
           "2": 3
         },
         "heavyRules": [
@@ -162,7 +163,7 @@
           },
           {
             "px": 2,
-            "y": 1154,
+            "y": 1180.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -172,7 +173,7 @@
           },
           {
             "px": 2,
-            "y": 1809.9,
+            "y": 1869.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -182,13 +183,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "stat-partial-row__light__1920",
       "file": "stat-partial-row__light__1920.jpeg",
       "scale": 2,
-      "bytes": 553898,
+      "bytes": 582736,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -311,11 +312,12 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 3,
+        "total": 47,
         "heavy": 3,
         "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
+          "1": 44,
           "2": 3
         },
         "heavyRules": [
@@ -331,7 +333,7 @@
           },
           {
             "px": 2,
-            "y": 1154,
+            "y": 1200,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -341,7 +343,7 @@
           },
           {
             "px": 2,
-            "y": 1809.9,
+            "y": 1907.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -351,13 +353,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "stat-partial-row__dark__1280",
       "file": "stat-partial-row__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 508439,
+      "bytes": 527750,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -451,15 +453,15 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8,
-        8
+        7,
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 11,
-          "emptyTracks": 5,
+          "emptyTracks": 3,
           "probe": {
             "hit": "div.bp-stats",
             "hitIsStrip": true,
@@ -467,9 +469,9 @@
           }
         },
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 11,
-          "emptyTracks": 5,
+          "emptyTracks": 3,
           "probe": {
             "hit": "div.bp-stats",
             "hitIsStrip": true,
@@ -480,11 +482,12 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 3,
+        "total": 47,
         "heavy": 3,
         "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
+          "1": 44,
           "2": 3
         },
         "heavyRules": [
@@ -500,7 +503,7 @@
           },
           {
             "px": 2,
-            "y": 1154,
+            "y": 1180.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -510,7 +513,7 @@
           },
           {
             "px": 2,
-            "y": 1809.9,
+            "y": 1869.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -520,13 +523,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "stat-partial-row__dark__1920",
       "file": "stat-partial-row__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 553294,
+      "bytes": 576416,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -649,11 +652,12 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 3,
+        "total": 47,
         "heavy": 3,
         "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
+          "1": 44,
           "2": 3
         },
         "heavyRules": [
@@ -669,7 +673,7 @@
           },
           {
             "px": 2,
-            "y": 1154,
+            "y": 1200,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -679,7 +683,7 @@
           },
           {
             "px": 2,
-            "y": 1809.9,
+            "y": 1907.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -689,7 +693,7 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     }
   ]
 }

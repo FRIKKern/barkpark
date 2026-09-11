@@ -25,10 +25,10 @@ so the natural repo-relative invocation
 | `render.exs` | renders a fixture through the real `PortableDoc.Render` + the real bulldocs layout |
 | `shoot.mjs` | serves the rendered page on loopback and photographs it, asserting DOM content |
 | `census.mjs` | the heavy-rule census — one measurement function, run on the artifact AND on a rendered paper |
-| `gate.sh` | render + shoot a committed fixture (`heggemsnes-act` by default, `--panel` for all 8); nonzero on any content failure |
-| `baseline.sh` | the same path, writing into `baselines/` so a refresh is a reviewable diff |
+| `gate.sh` | render + shoot a committed fixture (`heggemsnes-act` by default, `--panel` for all 9); nonzero on any content failure |
+| `baseline.sh` | the same path, writing into `baselines/` so a refresh is a reviewable diff; its no-argument slug list is DERIVED from `fixtures/*.json`, so a new fixture cannot be added without the default re-baseline covering it |
 | `fetch-fixtures.sh` | pulls paper blocks from Barkpark via `bp` and rewrites `fixtures/*.json`; its default slug list is every **published** fixture (`design-probe` is authored and has no live doc — `eight-minute-erasure` once drifted purely by being absent from this list) |
-| `fixtures/` | 8 papers, each stamped with the `source_rev` it was taken from (`design-probe` and `stat-partial-row` are authored, not published) |
+| `fixtures/` | 9 papers, each stamped with the `source_rev` it was taken from (`design-probe` and `stat-partial-row` are authored, not published) |
 | `baselines/` | the committed panel (see below) |
 
 ## How it stays hermetic
@@ -108,7 +108,8 @@ default moves, the rig reds rather than silently re-baselining every shot.
 
 ## Baselines
 
-`baselines/` holds the 8-paper panel: `design-probe`, `eight-minute-erasure`,
+`baselines/` holds the 9-paper panel: `agent-flight-recorder-charter`,
+`design-probe`, `eight-minute-erasure`,
 `heggemsnes-act`, `hobby-hardening-capstone`, `mechanical-spacing-doctrine`,
 `paper-excellence-wave-2026-08-12`, `portabledoc-showcase`, `stat-partial-row`
 — **full page**,
@@ -229,6 +230,23 @@ The check **can lose**, proven by mutation on a copy of
 A red here is a review item, not a re-baseline reflex: read the drifted numbers,
 then `bash tooling/paper-excellence/rig/baseline.sh <slug>` **only** once the
 change behind them is the intended one.
+
+### The 2026-09-11 re-baseline (task-7b197c9b4bef6664)
+
+The panel was last captured 2026-09-03 (`28ff345fe`) and the rig then died for a
+week on the wrapper-parity tripwire (fixed by #17264), so nothing could
+re-baseline. Every drifted class was reviewed against the commit that produced it
+before the panel was re-shot; none was a reader defect:
+
+| drifted measurement | cause |
+|---|---|
+| `rules.total` / `rules.byWeight.1` up on every fixture with stats or a table | **#15806** — `.bp-stat` gained a hairline border + radius (2 edges per tile) and `.bp-table` a full hairline frame; `tr:last-child .bp-table__td` lost its underline. On `design-probe`: 6 `bp-hr` + 3 table rules = 9 → 6 + 4 table + 8 stat = 18 |
+| `statTracks` / `statRemainder[].tracks` 8 → 7 at 1280 only | **#15806** — `.bp-stats` gap 1px → 12px. `auto-fit minmax(140px,1fr)` over the 1180px band: ⌊1181/141⌋ = 8 → ⌊1192/152⌋ = 7. The 1360px band still yields 9 either way, which is why only the 1280 cells moved |
+| `bandRows[].width` / `left` / `right` / `inkWidth` | **#15806** — the same table frame and stats gap; the stats strips lose 2px of ink to their cells' own borders (1180 → 1178) |
+| `rules.heavyRules[].y` shifted a few px | downstream of the two above: every boundary below a re-sized table or stats strip moves with it |
+| `sectionBeats[6]` on `eight-minute-erasure`: `container` 16px/1px → `heading` 92px/2px, `rules.heavy` 6 → 7 | **#15806** — compose drops a section container's leading rule pair when its first child is a heading, and the section-head device sizes that h2. The rig learned the shape in this change (see `STRUCTURAL_RULE_SELECTOR`) |
+| `captionCpl` / `captionWidth` 453.5 → 400.4px | **#17088** — `figcaption` moved off ~200 bytes of inline system-ui italic onto the one `.bp-figcaption` rule (serif, roman). Different type, different measure |
+| `blockedRequests` 3 → 1 on every cell | **#17235** — asciinema-player's CSS and JS are served from `/assets/` instead of `cdn.jsdelivr.net`. This is the PAGE asking for less off-host, not the rig blocking more: `shoot.mjs`'s rule is still "any host that is not 127.0.0.1" and has not changed |
 
 `--panel` runs every `fixtures/*.json` in one command. Measured on 2026-08-17
 (with the crown measurements in): all 7 pass, **56 shots / 1888 content

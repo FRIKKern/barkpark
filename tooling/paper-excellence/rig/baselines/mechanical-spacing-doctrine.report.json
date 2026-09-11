@@ -19,7 +19,7 @@
       "cell": "mechanical-spacing-doctrine__light__1280",
       "file": "mechanical-spacing-doctrine__light__1280.jpeg",
       "scale": 2,
-      "bytes": 826032,
+      "bytes": 850002,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -87,11 +87,11 @@
         },
         {
           "kind": "bp-table",
-          "width": 1105.2,
+          "width": 1119.2,
           "offCentre": 0,
-          "left": 87.4,
-          "right": 1192.6,
-          "inkWidth": 1105.2,
+          "left": 80.4,
+          "right": 1199.6,
+          "inkWidth": 1117.2,
           "inkOffCentre": 0
         }
       ],
@@ -133,12 +133,12 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 3,
           "emptyTracks": 0,
           "probe": null
@@ -147,18 +147,18 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 11,
+        "total": 18,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 6,
+          "1": 13,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 852.7,
+            "y": 859.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -168,7 +168,7 @@
           },
           {
             "px": 2,
-            "y": 1397.7,
+            "y": 1404.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -178,7 +178,7 @@
           },
           {
             "px": 2,
-            "y": 1799.1,
+            "y": 1814.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -188,7 +188,7 @@
           },
           {
             "px": 2,
-            "y": 2409.5,
+            "y": 2424.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -198,7 +198,7 @@
           },
           {
             "px": 2,
-            "y": 2900.2,
+            "y": 2915.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -208,13 +208,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "mechanical-spacing-doctrine__light__1920",
       "file": "mechanical-spacing-doctrine__light__1920.jpeg",
       "scale": 2,
-      "bytes": 901976,
+      "bytes": 925698,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -282,11 +282,11 @@
         },
         {
           "kind": "bp-table",
-          "width": 1105.2,
+          "width": 1119.2,
           "offCentre": 0,
-          "left": 407.4,
-          "right": 1512.6,
-          "inkWidth": 1105.2,
+          "left": 400.4,
+          "right": 1519.6,
+          "inkWidth": 1117.2,
           "inkOffCentre": 0
         }
       ],
@@ -342,18 +342,18 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 11,
+        "total": 18,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 6,
+          "1": 13,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 852.7,
+            "y": 859.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -363,7 +363,7 @@
           },
           {
             "px": 2,
-            "y": 1397.7,
+            "y": 1404.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -373,7 +373,7 @@
           },
           {
             "px": 2,
-            "y": 1799.1,
+            "y": 1814.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -383,7 +383,7 @@
           },
           {
             "px": 2,
-            "y": 2409.5,
+            "y": 2424.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -393,7 +393,7 @@
           },
           {
             "px": 2,
-            "y": 2900.2,
+            "y": 2915.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -403,13 +403,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "mechanical-spacing-doctrine__dark__1280",
       "file": "mechanical-spacing-doctrine__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 824159,
+      "bytes": 838464,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -477,11 +477,11 @@
         },
         {
           "kind": "bp-table",
-          "width": 1105.2,
+          "width": 1119.2,
           "offCentre": 0,
-          "left": 87.4,
-          "right": 1192.6,
-          "inkWidth": 1105.2,
+          "left": 80.4,
+          "right": 1199.6,
+          "inkWidth": 1117.2,
           "inkOffCentre": 0
         }
       ],
@@ -523,12 +523,12 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 3,
           "emptyTracks": 0,
           "probe": null
@@ -537,18 +537,18 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 11,
+        "total": 18,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 6,
+          "1": 13,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 852.7,
+            "y": 859.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -558,7 +558,7 @@
           },
           {
             "px": 2,
-            "y": 1397.7,
+            "y": 1404.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -568,7 +568,7 @@
           },
           {
             "px": 2,
-            "y": 1799.1,
+            "y": 1814.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -578,7 +578,7 @@
           },
           {
             "px": 2,
-            "y": 2409.5,
+            "y": 2424.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -588,7 +588,7 @@
           },
           {
             "px": 2,
-            "y": 2900.2,
+            "y": 2915.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -598,13 +598,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "mechanical-spacing-doctrine__dark__1920",
       "file": "mechanical-spacing-doctrine__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 900066,
+      "bytes": 914267,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -672,11 +672,11 @@
         },
         {
           "kind": "bp-table",
-          "width": 1105.2,
+          "width": 1119.2,
           "offCentre": 0,
-          "left": 407.4,
-          "right": 1512.6,
-          "inkWidth": 1105.2,
+          "left": 400.4,
+          "right": 1519.6,
+          "inkWidth": 1117.2,
           "inkOffCentre": 0
         }
       ],
@@ -732,18 +732,18 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 11,
+        "total": 18,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 6,
+          "1": 13,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 852.7,
+            "y": 859.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -753,7 +753,7 @@
           },
           {
             "px": 2,
-            "y": 1397.7,
+            "y": 1404.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -763,7 +763,7 @@
           },
           {
             "px": 2,
-            "y": 1799.1,
+            "y": 1814.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -773,7 +773,7 @@
           },
           {
             "px": 2,
-            "y": 2409.5,
+            "y": 2424.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -783,7 +783,7 @@
           },
           {
             "px": 2,
-            "y": 2900.2,
+            "y": 2915.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -793,7 +793,7 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     }
   ]
 }
