@@ -305,6 +305,7 @@ const DEFECTS = [
   "W20-type-floor-instances",
   "W23-overview-digest-activity-row",
   "W27-failed-bar-announces-the-count",
+  "W22-url-remedy-pricing",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -9328,6 +9329,34 @@ async function main() {
       // changes character. All five are DRIVEN — every one of them measured
       // spilling with the wrap deleted (see the mutation lines below).
       const ROW_WIDTHS = [320, 390, 430, 620, 900];
+      // ── THE `.site-meta` LINE BUDGET BAND (this row).
+      //
+      // Every assertion in this leg before this one scores CLIPPING —
+      // scrollWidth vs clientWidth — and a `.site-meta` that WRAPS clips
+      // nothing. It is clean by every existing measure while costing the row a
+      // whole extra line, which is the one thing a person reading a list
+      // actually sees. So the count of LINES is measured here, and it is
+      // measured per track, because the two builders do not agree.
+      //
+      // THE FILED PREMISE WAS THAT `.site-meta` STAYS ON ONE LINE AT 320 ONCE A
+      // ROW CARRIES A DOMAIN COUNT. IT DOES NOT, AND THAT IS NOT A REGRESSION.
+      // The measurement is written down in app.js above `siteMoreDomainsSeg`
+      // (grep -n 'WHAT IT COSTS, MEASURED' cloud/priv/static/app.js): on the
+      // #sites row "the meta line wraps at 320/360/390 and the row grows
+      // 166 -> 184px (+18, exactly one 18px line); at 430 it does not wrap";
+      // "on the instance-workspace card the shorter meta line absorbs it with
+      // NO wrap at any width". The shipped bytes do exactly that, and this
+      // sweep reproduces it independently — so what is pinned here is the
+      // MEASURED TRUTH per track per width, not the claim, and 430 is driven
+      // because it is the documented width at which the global row stops
+      // wrapping. A budget that asserted "one line everywhere" would red main
+      // on the first run; a budget that asserted "at most two" would not notice
+      // the global row going to three. Exact equality, both directions.
+      //
+      // 360 IS DRIVEN BY NO OTHER CELL OF THIS LEG. It is added here rather
+      // than to ROW_WIDTHS so the "all five measured spilling with the wrap
+      // deleted" record above stays exactly as wide as the run that proved it.
+      const META_LINE_WIDTHS = [320, 360, 390, 430];
       // The reachability ceiling. Stated as the viewport height rather than a
       // literal so the two can never drift apart.
       const ROW_HEIGHT_CEILING = HEIGHT;
@@ -9355,6 +9384,14 @@ async function main() {
           // property of the fixture.
           sitePill: true,
           sitePillWhy: null,
+          // THE MEASURED LINE COUNT OF THIS BUILDER'S `.site-meta`, DECLARED
+          // PER WIDTH (this row), the sitePill/sitePillWhy precedent above.
+          // Asserted by EQUALITY in both directions: a third line is a row
+          // that grew, and a row that silently drops to one means either the
+          // segment stopped painting or the meta line lost content — both
+          // findings, neither a moved number.
+          metaLines: { 320: 2, 360: 2, 390: 2, 430: 1 },
+          metaLinesWhy: "app.js's own pre-ship measurement above siteMoreDomainsSeg (grep -n 'WHAT IT COSTS, MEASURED' cloud/priv/static/app.js): on the #sites row \"the meta line wraps at 320/360/390 and the row grows 166 -> 184px (+18, exactly one 18px line); at 430 it does not wrap\". The global row carries `fw · on <instance> · updated <when>` BEFORE the count — the longest meta string of the two builders — so 320-390 is the band where the count does not fit beside it",
         },
         {
           scen: "sites-on-instance",
@@ -9373,6 +9410,14 @@ async function main() {
           // this annotation reds instead of quietly widening the leg's meaning.
           sitePill: false,
           sitePillWhy: "the compact siteRow emits no `.site-status` wrapper — its only `.status-pill` is the payload-conditional binding chip (siteBindingChip -> siteBindingPill, \"\" when the binding model is silent), which no row is obliged to carry",
+          // The compact row's meta is `fw · <repo@branch>` and nothing else,
+          // so the same segment lands on a much shorter line. app.js: "on the
+          // instance-workspace card the shorter meta line absorbs it with NO
+          // wrap at any width (128 -> 128 at 320)". Declared ONE at every
+          // driven width, which is what makes the global track's TWO a
+          // property of that builder rather than of the segment.
+          metaLines: { 320: 1, 360: 1, 390: 1, 430: 1 },
+          metaLinesWhy: "the compact siteRow's meta line is `framework · repo@branch` only — no instance link, no `updated …` clause — so the count rides a line with room for it at every driven width (app.js's pre-ship measurement: 128 -> 128px at 320)",
         },
       ];
       for (const t of TRACKS) {
@@ -9401,6 +9446,15 @@ async function main() {
         `because a clip-only scorer reads a shredded 0px box as clean\n`,
       );
       let cells = 0, hostCells = 0, hostSpill = 0, pageOver = 0, tall = 0, cruelSeen = 0, maxRowH = 0;
+      // The line-budget half. `metaSubjects` is the POPULATION the assertion is
+      // about: rows whose `.site-meta` actually paints a `+N more domain(s)`
+      // count. A row without one is NOT the subject — its meta line is a
+      // strictly shorter string by construction, so scoring it would
+      // manufacture a green that says nothing about the segment. `metaCells`
+      // counts the cells that reached the assertion at all, so a sweep that
+      // measured nothing cannot read as a sweep that measured clean.
+      let metaCells = 0, metaSubjects = 0, metaOver = 0, metaUnder = 0, metaMissing = 0;
+      const metaSubjectTracks = new Map(TRACKS.map((t) => [t.scen, 0]));
       // cch-w19-bl-w13 criterion 4. `sitePills` is the population the owing
       // track is held to; `sitePillLabels` is its second-order half; `chipPills`
       // is the binding chips, counted so they can be PRINTED and never mistaken
@@ -9551,7 +9605,118 @@ async function main() {
             );
           }
           process.stdout.write(`   ${t.scen}/${theme}  ${line.join("  ")}\n`);
+          // ── THE `.site-meta` LINE BUDGET (this row), SAME PAGE, NO RE-NAV.
+          // The claim is about the WIDTH, not the entry path, and a second
+          // nav() per theme would double this leg's browser cost for nothing.
+          //
+          // THE INSTRUMENT IS Range.getClientRects OVER THE META'S OWN
+          // CONTENTS. `.site-meta` is a block, so `meta.getClientRects()` is
+          // ONE box at any line count — it cannot answer this question at all.
+          // A Range over its contents has one rect per line box, and distinct
+          // rounded `top` values is the line count. height / line-height is
+          // carried beside it per cell as the corroborating second reading,
+          // never as the verdict: a meta whose line-height resolved to
+          // `normal` would make that ratio a guess, and the printed pair is
+          // what lets a reader see the two readings agree.
+          const metaLine = [];
+          for (const width of META_LINE_WIDTHS) {
+            await setViewport(width);
+            const mm = await evalJs(
+              `(function(){` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `if(!v) return {view:'none',rows:[]};` +
+              // Scoped to the LIVE VIEW and then to the ROW (cch-w24-s5's
+              // remedy): this addition puts NO new document-wide walk in the
+              // file, so the W35 residue register is untouched by it.
+              `var rows=[].slice.call(v.querySelectorAll('.site-row')).map(function(row){` +
+              `  var id=row.getAttribute('data-id');` +
+              `  var meta=row.querySelector('.site-meta');` +
+              `  if(!meta) return {id:id,meta:0};` +
+              `  var txt=(meta.textContent||'');` +
+              // THE SUBJECT TEST, read off the PAINTED TEXT rather than off the
+              // fixture: siteMoreDomainsSeg emits "+N more domain(s)" or
+              // NOTHING AT ALL, so a row with no match genuinely carries none.
+              `  var seg=txt.match(/\\+(\\d+) more domains?/);` +
+              `  var rg=document.createRange(); rg.selectNodeContents(meta);` +
+              `  var tops=[];` +
+              `  [].slice.call(rg.getClientRects()).forEach(function(r){` +
+              `    if(r.width<=0||r.height<=0) return;` +
+              `    var k=Math.round(r.top*2)/2;` +
+              `    if(tops.indexOf(k)<0) tops.push(k);});` +
+              `  var lh=parseFloat(getComputedStyle(meta).lineHeight);` +
+              `  var h=meta.getBoundingClientRect().height;` +
+              `  return {id:id,meta:1,dc:seg?Number(seg[1]):0,lines:tops.length,len:txt.length,` +
+              `    lh:(lh===lh)?Math.round(lh*10)/10:null,h:Math.round(h*10)/10,` +
+              `    hl:(lh===lh&&lh>0)?Math.round(h/lh*100)/100:null};});` +
+              `return {view:v.id,rows:rows};})()`,
+            );
+            if (mm.view !== t.view) {
+              fail(D, `${t.scen}/${theme}@${width}: the .site-meta line-budget sweep rendered section.view "${mm.view}", asked for "${t.view}" — no meta line on this cell was measured`);
+              metaLine.push(`${width}:?`);
+              continue;
+            }
+            metaCells++;
+            const noMeta = mm.rows.filter((r) => !r.meta);
+            metaMissing += noMeta.length;
+            for (const r of noMeta) {
+              fail(D, `${t.scen}/${theme}@${width}: the .site-row ${r.id} has no \`.site-meta\` host at all — ${t.builder} emits one unconditionally, so the line the domain count is supposed to ride does not exist and nothing about this row was measured`);
+            }
+            const want = t.metaLines[width];
+            const subjects = mm.rows.filter((r) => r.meta && r.dc > 0);
+            metaSubjects += subjects.length;
+            metaSubjectTracks.set(t.scen, metaSubjectTracks.get(t.scen) + subjects.length);
+            for (const r of subjects) {
+              if (typeof want !== "number") {
+                fail(D, `${t.scen}/${theme}@${width}: the track declares no \`metaLines\` entry for ${width}px, so the .site-row ${r.id}'s meta (measured ${r.lines} line(s)) was compared against nothing — a driven width with no declaration is an unmeasured width, not a clean one`);
+                continue;
+              }
+              if (r.lines === want) continue;
+              if (r.lines > want) metaOver++; else metaUnder++;
+              fail(D, `${t.scen}/${theme}@${width}: the .site-row ${r.id}'s \`.site-meta\` — the one carrying "+${r.dc} more domain${r.dc === 1 ? "" : "s"}" — renders on ${r.lines} line(s), ${r.lines > want ? "MORE" : "FEWER"} than the ${want} this track declares (${r.len} characters; Range.getClientRects over the meta's own contents found ${r.lines} distinct line-box tops, corroborated by height/line-height ${r.h}/${r.lh} = ${r.hl}). ${r.lines > want ? `The domain count costs this row an extra line it did not cost before on ${t.builder}` : `The meta line got SHORTER on ${t.builder} — either the count stopped riding it or the line lost content; a row that improves is still a row that changed`}. The declaration's basis: ${t.metaLinesWhy}`);
+            }
+            // PRINTED PER CELL, clean or not — the MEASURED line count per
+            // subject row, keyed by the tail of its data-id, beside what the
+            // track declared. A red run is the run whose table a reader most
+            // needs, so this line is unconditional (the W13 precedent).
+            metaLine.push(
+              `${width}:${subjects.length}/${mm.rows.length}r want${want === undefined ? "?" : want} ` +
+              (subjects.length
+                ? subjects.map((r) => `${String(r.id).slice(-4)}+${r.dc}=${r.lines}L h${r.h}/lh${r.lh}=${r.hl}`).join(" ")
+                : "NO-SUBJECT"),
+            );
+          }
+          process.stdout.write(`   ${t.scen}/${theme}  meta-line  ${metaLine.join("  ")}\n`);
         }
+      }
+      // ── THE LINE-BUDGET PRECONDITION, AND IT IS A REFUSAL (exit 2), NOT A
+      // fail(). "The meta lines came out as declared" is a statement about the
+      // rows CARRYING A DOMAIN COUNT. A fixture row without one paints a
+      // strictly shorter string, so scoring it proves nothing about the
+      // segment — an all-clean sweep over a corpus with no subject is the exact
+      // shape of green this leg exists to deny, and it is an ENVIRONMENT fault
+      // (the fixture stopped supplying the subject), which is what exit 2
+      // means in this file. Refused BEFORE the OK lines, never after them.
+      if (metaCells === 0) {
+        return die(`${D}: the .site-meta line-budget sweep reached ZERO cells across ${META_LINE_WIDTHS.join("/")} on ${TRACKS.length} tracks x 2 themes — the band was never driven, so its verdict is about nothing`);
+      }
+      if (metaSubjects === 0) {
+        return die(`${D}: ${metaCells} cell(s) swept at ${META_LINE_WIDTHS.join("/")} and NOT ONE .site-row painted a \`+N more domain(s)\` count in its \`.site-meta\` — no fixture site has two or more \`domains\` entries (siteExtraDomains returns 0 below length 2, and siteMoreDomainsSeg then emits nothing at all), so the row this assertion is about is not on the page. A fixture row WITHOUT a domain count is NOT the subject; refusing rather than printing a clean line about rows that were never it`);
+      }
+      for (const t of TRACKS) {
+        if (metaSubjectTracks.get(t.scen) === 0) {
+          return die(`${D}: the ${t.scen} track (${t.builder}) swept ${META_LINE_WIDTHS.join("/")} with ZERO rows carrying a domain count while the other track had some — \`siteMoreDomainsSeg\` is spliced VERBATIM INTO BOTH row builders, so this builder's half of the line budget went unmeasured and the leg's green would be one builder's. Put a site with 2+ \`domains\` on this track's fixture rather than letting the other builder's rows carry the verdict`);
+        }
+      }
+      // THE LINE-BUDGET CENSUS, printed UNCONDITIONALLY beside the pill one.
+      process.stdout.write(
+        `\n   ${D} — \`.site-meta\` LINE BUDGET, per track, MEASURED vs DECLARED:\n` +
+        `   ${"track".padEnd(20)}${"subjects".padEnd(10)}${META_LINE_WIDTHS.map((w) => `${w}px`.padEnd(7)).join("")}basis\n`,
+      );
+      for (const t of TRACKS) {
+        process.stdout.write(
+          `   ${t.scen.padEnd(20)}${String(metaSubjectTracks.get(t.scen)).padEnd(10)}` +
+          `${META_LINE_WIDTHS.map((w) => `${t.metaLines[w]}L`.padEnd(7)).join("")}${t.metaLinesWhy}\n`,
+        );
       }
       // cch-w19-bl-w13 criterion 4, THE NON-VACUITY NET. The per-row refusals
       // above are the real assertion; this one is what survives an edit that
@@ -9633,6 +9798,36 @@ async function main() {
           `width is 619, and no --render cell at 320 is wired into CI (Q3 BELOW THE FOLD at 320 is a SHELL ` +
           `property and would red main on shipped bytes). This leg reaches that band through overflow-guard, ` +
           `whose CI invocation carries no --defect flag and therefore runs it`,
+        );
+        okLine(
+          `THE MEETING OF THE DOMAIN COUNT AND THE META LINE IS MEASURED AT LAST (this row): every assertion ` +
+          `above scores CLIPPING, scrollWidth vs clientWidth, and a \`.site-meta\` that WRAPS clips nothing — so ` +
+          `this whole leg read clean while the "+N more domains" segment could have been costing every row an ` +
+          `extra line, which is the only part of it a person scrolling a list sees. ${metaSubjects} subject ` +
+          `row-cell(s) across ${META_LINE_WIDTHS.join("/")} x 2 themes x ${TRACKS.length} builders ` +
+          `(${metaCells} cells), ${metaOver} over the declaration and ${metaUnder} under it, ${metaMissing} rows ` +
+          `with no \`.site-meta\` host at all. The instrument is Range.getClientRects over the meta's OWN ` +
+          `CONTENTS — the element is a block, so its own rect is ONE box at any line count and cannot answer ` +
+          `this — with height/line-height printed beside every cell as the corroborating second reading`,
+        );
+        okLine(
+          `THE FILED PREMISE WAS FALSE AND THE MEASUREMENT IS WHAT SAYS SO: this row was cut on the claim that ` +
+          `\`.site-meta\` stays on ONE line at 320 once a row carries a domain count. On the #sites row it does ` +
+          `NOT, it takes TWO, and that was measured and written down BEFORE the segment shipped (app.js above ` +
+          `\`siteMoreDomainsSeg\`: "the meta line wraps at 320/360/390 and the row grows 166 -> 184px (+18, ` +
+          `exactly one 18px line); at 430 it does not wrap"). So what is pinned here is the measured truth per ` +
+          `track per width — ` + TRACKS.map((t) => `${t.scen} ${META_LINE_WIDTHS.map((w) => `${w}:${t.metaLines[w]}L`).join(" ")}`).join("; ") + ` — ` +
+          `by EQUALITY in both directions. 430 is driven because it is the documented width at which the global ` +
+          `row stops wrapping: a budget of "one line everywhere" would red main on its first run, and a budget ` +
+          `of "at most two" would not notice the global row reaching three`,
+        );
+        okLine(
+          `THE SUBJECT IS ASSERTED, NOT ASSUMED: a row enters the line-budget assertion only when its PAINTED ` +
+          `meta text matches \`+N more domain(s)\` — the string \`siteMoreDomainsSeg\` emits, or emits NOTHING at ` +
+          `all when \`siteExtraDomains\` reads under two \`domains\` entries. A run whose fixture holds no such ` +
+          `row REFUSES (exit 2) rather than printing this line, per track as well as in total, because a clean ` +
+          `sweep over a corpus with no subject is a green about the wrong rows. Measured subjects per track: ` +
+          TRACKS.map((t) => `${t.scen} ${metaSubjectTracks.get(t.scen)}`).join(", "),
         );
       }
     }
@@ -11896,6 +12091,299 @@ async function main() {
           `transition, so \`patchProvisionOverall\`'s in-place re-announcement on a LIVE run is covered by the ` +
           `pure-helper harness only (the \`cch-w27-s6\` tests in __app.test.mjs). What is now covered in a ` +
           `browser, and was covered nowhere before, is the mounted terminal bar on both failed fixtures`,
+        );
+      }
+    }
+
+
+    // ── W22-URL-REMEDY-PRICING: the three candidates, DRIVEN, not argued ─────
+    //    cch-w22-bl-url-remedy-candidates-never-priced. The row this pays back
+    //    (cch-w18-bl-instance-card-url-ellipsised-on-phone, criterion 1) asked
+    //    for at least THREE candidates driven cell-for-cell — (a) render the
+    //    address without its scheme, (b) let the line wrap, (c) shrink the
+    //    token — each with its own clipped-cell count, and said in terms: "A
+    //    candidate is not eliminated by argument."
+    //
+    //    WHAT SHIPPED INSTEAD (#8984): (a)+(b) TOGETHER — `displayUrl(bp)`
+    //    strips the scheme at both text sites and `.instance-card-url` gained
+    //    `overflow-wrap: break-word` — with (a)-alone killed in a PR sentence
+    //    ("the shave alone cannot BOUND anything: a 63-char slug at the DNS cap
+    //    plus @base_domain is an 85-character address") and (c) never driven at
+    //    all. The sentence is true. It is still a sentence, and the ledger
+    //    asked for a number.
+    //
+    //    THIS LEG PRICES THEM. It edits NOTHING under app.js/app.css: each
+    //    candidate is applied as a RUNTIME override — one injected <style> rule
+    //    on `.instance-card-url` plus the text the candidate would have put in
+    //    the node — measured, and restored inside the same synchronous pass, so
+    //    no later leg and no later cell sees a mutated DOM or a leftover sheet.
+    //
+    //    FIVE TRACKS, and the first one is why the other four mean anything:
+    //      none    the PRE-remedy state: `https://…` in the node, no wrap. The
+    //              positive control. If THIS scores zero clipped cells the grid
+    //              cannot separate anything and the leg REFUSES (exit 2).
+    //      a       shave alone:  displayUrl text, `overflow-wrap: normal`.
+    //      b       wrap alone:   `https://…` text, `overflow-wrap: break-word`.
+    //      c       shrink alone: `https://…` text, no wrap, font-size at the
+    //              legibility floor (URL_SHRINK_FLOOR).
+    //      a+b     what #8984 shipped, re-measured beside its alternatives.
+    //
+    //    TWO CORPORA, because the shipped leg's OWN history proves one of them
+    //    cannot separate the candidates. `W18-overview-card-pill` measures the
+    //    fixture's addresses (~32 chars shaved) and a DNS-cap stress string in
+    //    the same cell precisely because on the KIND strings the shave alone
+    //    clears every CARD_WIDTH — revert the stylesheet and that loop still
+    //    scores clean. So every track here is driven twice: once on the
+    //    fixture's own addresses and once on the 85-character address a real
+    //    customer can create (63-char slug at the API's validate_length cap +
+    //    `-5b2c1e.barkpark.cloud`), injected the way the W18 leg injects its
+    //    stress string — by swapping the text node, never by editing a fixture.
+    //
+    //    (c) IS PRICED TWICE OVER. A shrink is not a boolean: it either clears
+    //    at a size a person can read or it does not. So beside its clipped-cell
+    //    count at the floor, each cell reports the font-size that WOULD clear
+    //    the control's own string there (12px * clientWidth / scrollWidth) —
+    //    the number that says whether (c) lost on legibility or on arithmetic.
+    const URL_SHRINK_FLOOR = 9;       // px — the smallest mono the address is read at
+    const URL_SHIPPED_PX = 12;        // px — app.css's `.instance-card-url` font-size
+    // The same worst-case address the W18 leg stresses with, spelt out here so
+    // the two legs cannot drift apart silently. 63 `a` + 22 = 85 characters.
+    const URL_CAP_SHAVED = new Array(64).join("a") + "-5b2c1e.barkpark.cloud";
+    const URL_TRACKS = [
+      { key: "none", label: "pre-remedy control (scheme kept, no wrap)", scheme: true, css: "overflow-wrap: normal !important; word-break: normal !important;", px: URL_SHIPPED_PX },
+      { key: "a", label: "(a) shave alone", scheme: false, css: "overflow-wrap: normal !important; word-break: normal !important;", px: URL_SHIPPED_PX },
+      { key: "b", label: "(b) wrap alone", scheme: true, css: "overflow-wrap: break-word !important; word-break: normal !important;", px: URL_SHIPPED_PX },
+      { key: "c", label: `(c) shrink alone @ ${URL_SHRINK_FLOOR}px`, scheme: true, css: `overflow-wrap: normal !important; word-break: normal !important; font-size: ${URL_SHRINK_FLOOR}px !important;`, px: URL_SHRINK_FLOOR },
+      // THE SHIPPED TRACK IS DRIVEN WITHOUT AN OVERRIDE — `css: ""`, `live:
+      // true` — and that is the difference between pricing a candidate and
+      // guarding a product. Every other track forces its rule with
+      // `!important`, so a forced `a+b` would score a flawless zero on a tree
+      // where app.css's `overflow-wrap: break-word` had been deleted: the leg
+      // would be measuring its own stylesheet. Here the live cascade governs,
+      // its computed wrap and size are REPORTED rather than asserted, and the
+      // only thing judged is whether the address still fits — so deleting the
+      // shipped declaration reds this leg at exit 1 on the geometry, which is
+      // what a regression looks like.
+      { key: "a+b", label: "(a)+(b) — what #8984 shipped, on the LIVE cascade", scheme: false, css: "", live: true, px: URL_SHIPPED_PX, wrap: "break-word" },
+    ];
+    if (requested.includes("W22-url-remedy-pricing")) {
+      const D = "W22-url-remedy-pricing";
+      // The 320/360/390 sub-grid the filed criterion names, driven inside the
+      // full CARD_WIDTHS sweep so the phone band is scored separately AND the
+      // tablet/desktop cells are not quietly dropped.
+      const PRICE_PHONE = [320, 360, 390];
+      const cellCount = CARD_SCENS.length * CARD_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${URL_TRACKS.length} candidate tracks x ${CARD_SCENS.length} scenarios x ` +
+        `${CARD_WIDTHS.length} widths x 2 themes (${cellCount} cells per track, ` +
+        `${cellCount * URL_TRACKS.length} measurements) x 2 corpora (the fixture's own addresses, and the ` +
+        `${URL_CAP_SHAVED.length}-char DNS cap). Phone sub-grid = ${PRICE_PHONE.join("/")} ` +
+        `(${CARD_SCENS.length * PRICE_PHONE.length * 2} cells), the band the filed criterion names\n`,
+      );
+      // clipped[corpus][track] = cells where ANY non-empty address had
+      // scrollWidth > clientWidth. vclip likewise for scrollHeight.
+      const zero = () => Object.fromEntries(URL_TRACKS.map((t) => [t.key, 0]));
+      const tally = { kind: zero(), cruel: zero() };
+      const phoneTally = { kind: zero(), cruel: zero() };
+      const vtally = { kind: zero(), cruel: zero() };
+      const worstShrink = { kind: URL_SHIPPED_PX, cruel: URL_SHIPPED_PX };
+      let cells = 0, nodesSeen = 0, emptySeen = 0;
+      const liveComputed = new Set();
+      for (const scen of CARD_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#overview`,
+            `document.querySelector('.instance-card-url') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+          );
+          const row = [];
+          for (const width of CARD_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              // SCOPED to the visible view, and PLURAL. A document-wide walk
+              // here would read the addresses of every parked view in the SPA
+              // shell and price a screen nobody is looking at.
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `if(!v) return {view:'none'};` +
+              `var d=document.documentElement;` +
+              `var out={view:v.id,theme:d.getAttribute('data-theme'),nodes:0,empty:0,tracks:{},refusal:null};` +
+              `var nodes=[].slice.call(v.querySelectorAll('.instance-card-url')).filter(function(e){return (e.textContent||'').trim();});` +
+              `out.empty=v.querySelectorAll('.instance-card-url').length-nodes.length;` +
+              `out.nodes=nodes.length;` +
+              `if(!nodes.length) return out;` +
+              // THE PREMISE, ASSERTED RATHER THAN ASSUMED. Every track below
+              // reconstructs the pre-remedy string by putting `https://` back
+              // on. That is only the inverse of `displayUrl` while the SHIPPED
+              // text is actually shaved — if a future edit puts the scheme back
+              // in the node, "https://" + text is a double scheme and every
+              // number in this leg is about a string the product never renders.
+              `var orig=nodes.map(function(e){return (e.textContent||'').trim();});` +
+              `for(var i=0;i<orig.length;i++){ if(orig[i].indexOf('://')>=0){ out.refusal='the rendered address "'+orig[i].slice(0,48)+'" already carries its scheme — displayUrl() no longer shaves, so this leg cannot reconstruct the pre-remedy string and every candidate below would be priced on a double-schemed address'; return out; } }` +
+              `var CAP=${JSON.stringify(URL_CAP_SHAVED)};` +
+              `var sheet=document.createElement('style');document.head.appendChild(sheet);` +
+              `var TRACKS=${JSON.stringify(URL_TRACKS)};` +
+              `try{` +
+              `for(var ti=0;ti<TRACKS.length;ti++){` +
+              `  var tr=TRACKS[ti];` +
+              `  sheet.textContent='.instance-card-url{'+tr.css+'}';` +
+              `  var rec={clip:{kind:0,cruel:0},vclip:{kind:0,cruel:0},worst:{kind:null,cruel:null},live:null,shrink:{kind:${URL_SHIPPED_PX},cruel:${URL_SHIPPED_PX}}};` +
+              `  var corpora=[['kind',null],['cruel',CAP]];` +
+              `  for(var ci=0;ci<corpora.length;ci++){` +
+              `    var cname=corpora[ci][0], forced=corpora[ci][1];` +
+              `    for(var i=0;i<nodes.length;i++){` +
+              `      var e=nodes[i];` +
+              `      var shaved=forced===null?orig[i]:forced;` +
+              `      var want=tr.scheme?('https://'+shaved):shaved;` +
+              `      e.textContent=want;` +
+              // APPLIED, OR THE LEG REFUSES. A candidate priced through a rule
+              // the cascade discarded scores a beautiful zero and measures the
+              // shipped stylesheet under another name.
+              `      var cs=getComputedStyle(e);` +
+              `      if((e.textContent||'')!==want){ out.refusal='track '+tr.key+': the '+cname+' address did not land in the node'; return out; }` +
+              `      if(cname==='cruel' && (e.textContent||'').length!==CAP.length+(tr.scheme?8:0)){ out.refusal='track '+tr.key+': the cruel address is '+(e.textContent||'').length+' chars in the DOM, expected '+(CAP.length+(tr.scheme?8:0)); return out; }` +
+              // APPLIED, ASSERTED APPLIED — for the FORCED tracks only. The
+              // live track has no override to verify; its computed pair is
+              // recorded below and printed, never asserted, because asserting
+              // it would turn a stylesheet regression into an exit-2 refusal
+              // ("nothing was measured") when it is exactly a measured defect.
+              `      if(!tr.live){` +
+              `        if(Math.round(parseFloat(cs.fontSize))!==tr.px){ out.refusal='track '+tr.key+': computed font-size is '+cs.fontSize+', the candidate asked for '+tr.px+'px — the override did not apply, so this candidate could not be priced'; return out; }` +
+              `        var wantWrap=tr.css.indexOf('break-word')>=0?'break-word':'normal';` +
+              `        if(cs.overflowWrap!==wantWrap){ out.refusal='track '+tr.key+': computed overflow-wrap is "'+cs.overflowWrap+'", the candidate asked for "'+wantWrap+'" — the override did not apply'; return out; }` +
+              `      } else { rec.live=cs.overflowWrap+'/'+cs.fontSize; }` +
+              `      var r=e.getBoundingClientRect();` +
+              `      if(r.width<=0||r.height<=0){ out.refusal='track '+tr.key+': the '+cname+' address paints a '+r.width+'x'+r.height+' box — it did not paint at all'; return out; }` +
+              `      if(e.scrollWidth>e.clientWidth){` +
+              `        rec.clip[cname]++;` +
+              `        var pct=Math.round((1-e.clientWidth/e.scrollWidth)*100);` +
+              `        if(!rec.worst[cname]||pct>rec.worst[cname].pct) rec.worst[cname]={i:i,sw:e.scrollWidth,cw:e.clientWidth,pct:pct,n:want.length};` +
+              `      }` +
+              `      if(e.scrollHeight>e.clientHeight) rec.vclip[cname]++;` +
+              // THE SHRINK PRICE, taken off the control track only: the size
+              // that WOULD have cleared this cell's own string at this width.
+              `      if(tr.key==='none'&&e.scrollWidth>e.clientWidth){` +
+              `        var need=Math.floor(${URL_SHIPPED_PX}*e.clientWidth/e.scrollWidth);` +
+              `        if(need<rec.shrink[cname]) rec.shrink[cname]=need;` +
+              `      }` +
+              `    }` +
+              `  }` +
+              `  out.tracks[tr.key]=rec;` +
+              `}` +
+              `}finally{` +
+              // RESTORED IN THE SAME PASS — sheet removed, every text node put
+              // back — so nothing after this eval sees the pricing rig.
+              `  sheet.remove();` +
+              `  for(var i=0;i<nodes.length;i++) nodes[i].textContent=orig[i];` +
+              `}` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-overview") {
+              return die(`${D}: ${scen}/${theme}@${width} rendered section.view "${m.view}", asked for "view-overview" — the hash did not route, so no candidate was priced on the front screen`);
+            }
+            if (m.theme !== theme) {
+              return die(`${D}: ${scen}/${theme}@${width} computed data-theme "${m.theme}" — the theme did not apply and the two theme columns are the same measurement twice`);
+            }
+            if (m.refusal) {
+              return die(`${D}: ${scen}/${theme}@${width} — ${m.refusal}`);
+            }
+            if (!m.nodes) {
+              return die(`${D}: ${scen}/${theme}@${width} rendered ZERO non-empty .instance-card-url (${m.empty} empty node(s)) — the front screen printed no address, so nothing could be priced here`);
+            }
+            nodesSeen += m.nodes;
+            emptySeen += m.empty;
+            const phone = PRICE_PHONE.includes(width);
+            const cellBits = [];
+            for (const tr of URL_TRACKS) {
+              const rec = m.tracks[tr.key];
+              for (const corpus of ["kind", "cruel"]) {
+                if (rec.clip[corpus]) {
+                  tally[corpus][tr.key]++;
+                  if (phone) phoneTally[corpus][tr.key]++;
+                }
+                if (rec.vclip[corpus]) vtally[corpus][tr.key]++;
+                if (tr.key === "none" && rec.shrink[corpus] < worstShrink[corpus]) worstShrink[corpus] = rec.shrink[corpus];
+              }
+              if (rec.live) liveComputed.add(rec.live);
+              cellBits.push(`${tr.key}:${rec.clip.kind}k/${rec.clip.cruel}c`);
+            }
+            // THE ONLY ASSERTION IN THIS LEG, and it is about the SHIPPED
+            // remedy, not about the candidates: pricing an alternative must
+            // never red a run, but the winner regressing must. The candidates
+            // are COUNTED and printed; only `a+b` is judged.
+            const shipped = m.tracks["a+b"];
+            if (shipped.clip.kind || shipped.clip.cruel) {
+              const w = shipped.worst.cruel || shipped.worst.kind;
+              fail(D, `${scen}/${theme}@${width}: the SHIPPED remedy (a)+(b) clipped ${shipped.clip.kind} fixture address(es) and ${shipped.clip.cruel} at the ${URL_CAP_SHAVED.length}-char DNS cap — url${w.i} scrollWidth ${w.sw} > clientWidth ${w.cw}, ${w.pct}% of a ${w.n}-character address unrendered. The remedy this leg was written to price has stopped bounding the thing it shipped for`);
+            }
+            if (shipped.vclip.kind || shipped.vclip.cruel) {
+              fail(D, `${scen}/${theme}@${width}: the SHIPPED remedy wraps the address into a box that then HIDES lines — scrollHeight > clientHeight on ${shipped.vclip.kind} fixture and ${shipped.vclip.cruel} DNS-cap address(es). \`overflow: hidden\` on .instance-card-url eats whole lines with nothing painted to say so, which is the horizontal defect turned ninety degrees`);
+            }
+            row.push(`${width}:${m.nodes}u ${cellBits.join(" ")}`);
+          }
+          process.stdout.write(`   ${scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      // THE SEPARATION REFUSAL. A pricing grid on which the PRE-REMEDY state
+      // does not clip has priced nothing: every candidate would score a
+      // flawless zero and the winner would be whichever one was listed first.
+      if (!tally.cruel.none && !tally.kind.none) {
+        return die(`${D}: the pre-remedy control clipped ZERO of ${cells} cells on BOTH corpora — there is no defect on this grid, so the ${URL_TRACKS.length - 1} candidates were compared against nothing. Either the fixture addresses shrank or the card got wider; re-derive the corpus before trusting any count in this file`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        const line = (corpus) => URL_TRACKS.map((t) => `${t.key}=${tally[corpus][t.key]}/${cells}`).join("  ");
+        const pcells = CARD_SCENS.length * PRICE_PHONE.length * 2;
+        const pline = (corpus) => URL_TRACKS.map((t) => `${t.key}=${phoneTally[corpus][t.key]}/${pcells}`).join("  ");
+        okLine(
+          `THE THREE CANDIDATES, PRICED — clipped cells out of ${cells} (${CARD_SCENS.join(" + ")} x ` +
+          `${CARD_WIDTHS.join("/")} x light+dark), ${nodesSeen} non-empty address node(s) measured ` +
+          `(${emptySeen} empty nodes asserted about nothing — a provisioning box renders a chip, not an address). ` +
+          `KIND corpus (the fixture's own addresses): ${line("kind")}. CRUEL corpus (the ` +
+          `${URL_CAP_SHAVED.length}-char DNS cap): ${line("cruel")}`,
+        );
+        okLine(
+          `THE PHONE SUB-GRID the filed criterion names (${PRICE_PHONE.join("/")} x ${CARD_SCENS.length} scenarios ` +
+          `x 2 themes = ${pcells} cells): KIND ${pline("kind")} | CRUEL ${pline("cruel")}`,
+        );
+        okLine(
+          `WHY THE KIND CORPUS CANNOT PICK A WINNER, as a number rather than as the claim it used to be: on the ` +
+          `fixture's own addresses candidate (a) — the scheme shave ALONE, no wrap — scores ` +
+          `${tally.kind.a} clipped cells, the same as the shipped ${tally.kind["a+b"]}. Reverting the stylesheet ` +
+          `is invisible on this corpus. At the DNS cap the two separate: (a) alone ${tally.cruel.a}, ` +
+          `(a)+(b) ${tally.cruel["a+b"]}. That separation is the whole reason the cruel address is injected`,
+        );
+        okLine(
+          `CANDIDATE (c), DRIVEN FOR THE FIRST TIME (the filed row's own words: "never driven at all"). At the ` +
+          `${URL_SHRINK_FLOOR}px legibility floor it clips ${tally.cruel.c} of ${cells} cells at the DNS cap ` +
+          `(${tally.kind.c} on the fixture corpus) against ${URL_SHIPPED_PX}px shipped. The size that WOULD have ` +
+          `cleared the worst cell is ${worstShrink.cruel}px at the cap (${worstShrink.kind}px on the fixture ` +
+          `strings) — derived from the control's own scrollWidth/clientWidth at ${URL_SHIPPED_PX}px, not guessed. ` +
+          `(c) does not lose on taste: it loses because the address does not fit at any size a person reads, and ` +
+          `it bounds nothing — the NEXT character re-opens the defect, which is the property (b) has and (a)/(c) ` +
+          `structurally cannot`,
+        );
+        okLine(
+          `VERTICAL COST, the axis a shrink and a wrap trade against each other: wrapping candidates hide lines ` +
+          `in ${vtally.cruel.b + vtally.cruel["a+b"]} cell(s) at the cap ((b) ${vtally.cruel.b}, (a)+(b) ` +
+          `${vtally.cruel["a+b"]}) — \`.instance-card-url\` carries \`overflow: hidden\`, so a wrap that outgrows ` +
+          `its box eats whole lines silently. The shipped track is ASSERTED on this axis; the alternatives are ` +
+          `counted only`,
+        );
+        okLine(
+          `THE SHIPPED TRACK WAS MEASURED ON THE LIVE CASCADE, not on an override of this leg's own making: ` +
+          `computed \`overflow-wrap\`/\`font-size\` on \`.instance-card-url\` across all ${cells} cells was ` +
+          `${[...liveComputed].join(", ")}. Delete app.css's \`overflow-wrap: break-word\` and the (a)+(b) ` +
+          `column goes red on GEOMETRY at exit 1 — the four candidate tracks force their rules with ` +
+          `\`!important\` and would each score exactly what they score today`,
+        );
+        okLine(
+          `NOTHING UNDER app.js OR app.css IS IN THIS LEG'S DIFF. Every candidate is a runtime override — one ` +
+          `injected <style> on \`.instance-card-url\` plus the text that candidate would have rendered — applied, ` +
+          `asserted APPLIED at the computed style (a candidate the cascade discarded would score a perfect zero ` +
+          `and be measuring the shipped sheet under another name: that is an exit-2 refusal here, not a pass), ` +
+          `measured, and restored with the sheet removed inside the same synchronous pass. The DOM walk is scoped ` +
+          `to \`section.view:not([hidden])\` and PLURAL`,
         );
       }
     }
