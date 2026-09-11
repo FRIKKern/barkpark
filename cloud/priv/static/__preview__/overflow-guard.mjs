@@ -11615,9 +11615,11 @@ async function main() {
       );
       if (neverPainted.length) {
         process.stdout.write(
-          `   ! ${neverPainted.length} view(s) NEVER GREW past their shipped shell (${neverPainted.join(", ")}) — ` +
-          `every selector that only ever paints there reads 0 hidden matches below for a reason that is not ` +
-          `about the selector. Those columns are UNMEASURED, not clean\n`,
+          `   ! ${neverPainted.length} view(s) NEVER GREW past their shipped shell on ${SCEN} ` +
+          `(${neverPainted.join(", ")}) — every selector that only ever paints there reads 0 hidden matches ` +
+          `below for a reason that is not about the selector. Those columns are UNMEASURED HERE; the operator ` +
+          `pass further down re-asks the question on a fixture that CAN open view-operator, and what is left ` +
+          `over after it is the honest hole\n`,
         );
       }
 
