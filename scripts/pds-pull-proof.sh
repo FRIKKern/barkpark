@@ -96,6 +96,9 @@
 #                        anyway after any FAIL, any ABORT or a non-zero exit)
 #   PDS_ARTIFACT_ROOT    default /tmp — the parent of pds-proof-art.<run tag>,
 #                        and the directory --sweep-artifacts walks
+#   PDS_PROOF_ARTIFACTS  ART_DIR outright. A directory you name here and that
+#                        already exists is NEVER removed by the trap: the harness
+#                        only ever deletes a directory it created itself
 #   PDS_SWEEP_MIN_AGE_HOURS  default 24 — an UNMARKED artifact directory younger
 #                        than this is refused by the sweep: the pre-marker
 #                        backlog is unmarked, so "no marker" alone can never mean
@@ -553,6 +556,22 @@ AMMO_FILE=""
 # THE PLAN
 # ═════════════════════════════════════════════════════════════════════════════
 
+# THE SSH-LESS ESCAPE HATCH, AND IT IS REAL NOW (PDS-D642).
+# step 0b's FIX text has always told the operator to `export PDS_DEPLOYED_SHA`.
+# No code read it — it was the ONLY occurrence of that name in the whole file,
+# inside a prose string — so an operator who followed the harness's own
+# remediation got no effect and no warning. It is read here, and ONLY when SSH
+# resolved nothing: a measured pin always wins over an asserted one, never the
+# other way round. It is tagged so every line quoting it discloses it.
+apply_deployed_sha_override() {
+  [ -z "$DEPLOYED_SHA" ] || return 0
+  [ -n "${PDS_DEPLOYED_SHA:-}" ] || return 0
+  DEPLOYED_SHA="$(printf '%s' "$PDS_DEPLOYED_SHA" | tr -d '[:space:]')"
+  DEPLOYED_SHA_SOURCE="operator-asserted"
+  info "deployed sha    $DEPLOYED_SHA  (OPERATOR-ASSERTED via PDS_DEPLOYED_SHA — this run did NOT measure it against the box)"
+  return 0
+}
+
 sha_provenance_note() { # -> the disclosure that must ride beside an asserted pin
   case "$DEPLOYED_SHA_SOURCE" in
     operator-asserted) printf ' [sha OPERATOR-ASSERTED via PDS_DEPLOYED_SHA — believed, not measured against the box this run; every claim dated by it is only as good as that assertion]' ;;
@@ -844,17 +863,7 @@ step_0a() {
   else
     info "deployed sha    UNRESOLVED over SSH ($SOURCE_SSH, key $SOURCE_SSH_KEY)"
   fi
-  # THE SSH-LESS ESCAPE HATCH, AND IT IS REAL NOW (PDS-D642).
-  # step 0b's FIX text has always told the operator to `export PDS_DEPLOYED_SHA`.
-  # No code read it: an operator who followed the harness's own remediation got
-  # no effect and no warning. It is read HERE, and only when SSH resolved
-  # nothing — a measured pin always wins over an asserted one, never the other
-  # way round — and it is tagged so every line that quotes it discloses it.
-  if [ -z "$DEPLOYED_SHA" ] && [ -n "${PDS_DEPLOYED_SHA:-}" ]; then
-    DEPLOYED_SHA="$(printf '%s' "$PDS_DEPLOYED_SHA" | tr -d '[:space:]')"
-    DEPLOYED_SHA_SOURCE="operator-asserted"
-    info "deployed sha    $DEPLOYED_SHA  (OPERATOR-ASSERTED via PDS_DEPLOYED_SHA — this run did NOT measure it against the box)"
-  fi
+  apply_deployed_sha_override
   if command -v gh >/dev/null 2>&1; then
     local last_deploy
     last_deploy="$(gh run list --workflow deploy.yml --branch main --limit 1 \
