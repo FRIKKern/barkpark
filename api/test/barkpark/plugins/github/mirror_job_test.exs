@@ -52,7 +52,8 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
   use Barkpark.DataCase, async: false
   use Oban.Testing, repo: Barkpark.Repo
 
-  alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
+  alias Barkpark.{Content, LabelFixtures, Repo, Tasks, TenancyFixtures}
+  alias Barkpark.Content.Lifecycle
   alias Barkpark.Plugins.Github.{Auth, Conflicts, Link, MirrorJob}
   alias Barkpark.Plugins.Github.MirrorJobTest.{ProjectsStub, RelationsStub}
 
@@ -121,14 +122,35 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
     end
   end
 
+  # A task the mirror is ALLOWED to project: created, then PUBLISHED. The publish
+  # is not decoration — `MirrorJob`'s publish gate refuses a task with no
+  # published row (`{:cancel, :unpublished}`), because an issue is a public
+  # promise and a draft is not. `mk_draft_only_task!/3` below is the ungated
+  # shape, used by the publish-gate tests.
   defp mk_task!(doc_id, content, scope) do
+    _draft = mk_draft_only_task!(doc_id, content, scope)
+    {:ok, doc} = Content.publish_document(doc_id, "task", @dataset, scope)
+    doc
+  end
+
+  # A task that exists ONLY as `drafts.<doc_id>` — exactly what `bp task create`
+  # writes before anyone publishes. The mirror must not project this.
+  defp mk_draft_only_task!(doc_id, content, scope) do
     {:ok, doc} =
       Content.create_document(
         "task",
         %{
           "doc_id" => doc_id,
           "title" => Map.get(content, "title", doc_id),
-          "content" => Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content)
+          # `mk_task!/3` PUBLISHES, and the authoring wall refuses a publish
+          # without a non-trivial description + registered weighted tags. The
+          # caller's own content still wins on clash, so a test that asserts on
+          # the projected body keeps its description.
+          "content" =>
+            LabelFixtures.with_registered_labels(
+              Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content),
+              @dataset
+            )
         },
         @dataset,
         scope
@@ -169,9 +191,17 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
     fast() ++ [projects_mod: ProjectsStub, relations_mod: RelationsStub] ++ extra
   end
 
+  # PUBLISHED-FIRST, the same rule `Link.put/4` writes by: the bookkeeping stamp
+  # lands on the published row when one exists, and on the draft otherwise.
   defp reload(doc_id, scope) do
-    {:ok, doc} = Content.get_document(Content.draft_id(doc_id), "task", @dataset, scope)
-    doc
+    case Content.get_document(doc_id, "task", @dataset, scope) do
+      {:ok, doc} ->
+        doc
+
+      _ ->
+        {:ok, doc} = Content.get_document(Content.draft_id(doc_id), "task", @dataset, scope)
+        doc
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -185,7 +215,13 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
     } do
       stub_token(bypass)
       id = uniq("gh")
-      _task = mk_task!(id, %{"title" => "Mirror me", "description" => "do the thing"}, scope)
+
+      _task =
+        mk_task!(
+          id,
+          %{"title" => "Mirror me", "description" => "do the thing the ledger asked for"},
+          scope
+        )
 
       {:ok, body_ref} = Agent.start_link(fn -> nil end)
 
@@ -321,7 +357,13 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       register_schemas!(tenant)
 
       id = uniq("gh")
-      _task = mk_task!(id, %{"title" => "Tenant task", "description" => "scoped"}, tenant)
+
+      _task =
+        mk_task!(
+          id,
+          %{"title" => "Tenant task", "description" => "scoped to its own workspace and project"},
+          tenant
+        )
 
       Bypass.expect_once(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
         Plug.Conn.resp(conn, 201, Jason.encode!(%{"number" => 314, "state" => "open"}))
@@ -625,7 +667,14 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
     } do
       stub_token(bypass)
       id = uniq("gh")
-      _task = mk_task!(id, %{"title" => "Steady", "description" => "unchanged"}, scope)
+
+      _task =
+        mk_task!(
+          id,
+          %{"title" => "Steady", "description" => "unchanged between the two reconciles"},
+          scope
+        )
+
       {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 31, state: "synced"}, scope)
 
       # The GET reflects back exactly what we last PATCHed. We can't compute the
@@ -822,6 +871,202 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       {:ok, _} = current |> Ecto.Changeset.change(content: content) |> Repo.update()
 
       assert :ok = MirrorJob.reconcile(id, @dataset, fast())
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # PUBLISH GATE — an issue is a public promise; a draft is not.
+  # ---------------------------------------------------------------------------
+
+  describe "reconcile/2 — publish gate" do
+    # Counts every POST /issues the reconcile makes. ZERO is the assertion the
+    # gate exists for: a draft-only task must not MINT a real numbered issue.
+    defp count_creates(bypass) do
+      {:ok, calls} = Agent.start_link(fn -> 0 end)
+
+      Bypass.stub(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
+        Agent.update(calls, &(&1 + 1))
+        Plug.Conn.resp(conn, 201, Jason.encode!(%{"number" => 9001, "state" => "open"}))
+      end)
+
+      calls
+    end
+
+    test "a task that exists ONLY as a draft → {:cancel, :unpublished}, ZERO create_issue calls",
+         %{bypass: bypass, scope: scope} do
+      # Exactly what `bp task create` writes: the `drafts.<id>` row, nothing
+      # published. Its draft-create mutation event drains to this reconcile.
+      stub_token(bypass)
+      id = uniq("gh")
+      _draft = mk_draft_only_task!(id, %{"title" => "Never published"}, scope)
+      calls = count_creates(bypass)
+
+      result = MirrorJob.reconcile(id, @dataset, fast())
+
+      # ASSERTED FIRST, so deleting the gate reds on the OBSERVED create_issue
+      # call rather than only on the return value. The gate's whole point: no
+      # issue is minted, so discarding this draft cannot orphan one (the live
+      # 8425/8426 shape).
+      minted = Agent.get(calls, & &1)
+
+      assert minted == 0,
+             "the mirror made #{minted} create_issue call(s) for a NEVER-PUBLISHED draft"
+
+      assert {:cancel, :unpublished} = result
+      assert Link.get(reload(id, scope)) == nil
+    end
+
+    test "the SAME doc after publish → the issue is created", %{bypass: bypass, scope: scope} do
+      # Deferred, not lost: publishing emits its own mutation event, the drain
+      # re-enqueues, and this second reconcile mirrors.
+      stub_token(bypass)
+      id = uniq("gh")
+
+      _draft =
+        mk_draft_only_task!(
+          id,
+          LabelFixtures.with_registered_labels(%{"title" => "Published second"}, @dataset),
+          scope
+        )
+
+      calls = count_creates(bypass)
+      result = MirrorJob.reconcile(id, @dataset, fast())
+      minted = Agent.get(calls, & &1)
+
+      assert minted == 0,
+             "the mirror made #{minted} create_issue call(s) BEFORE the publish"
+
+      assert {:cancel, :unpublished} = result
+
+      {:ok, _published} = Content.publish_document(id, "task", @dataset, scope)
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, fast())
+      assert Agent.get(calls, & &1) == 1
+      assert Link.get(reload(id, scope))["issue"] == 9001
+    end
+
+    test "REGRESSION CONTROL: a PUBLISHED task with a live draft twin still mirrors", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      # The gate asks only whether a published row EXISTS. A synced task being
+      # edited (draft twin alive beside the published row) must keep converging.
+      stub_token(bypass)
+      id = uniq("gh")
+      num = 4242
+      _task = mk_task!(id, %{"title" => "Published with a twin"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: num, state: "synced"}, scope)
+
+      # Fork a live draft twin beside the published row — the shape an in-flight
+      # edit of a synced task has: the twin carries the published content
+      # (`content.github` included) with one field changed.
+      published = reload(id, scope)
+
+      {:ok, twin} =
+        Content.upsert_document(
+          "task",
+          %{
+            "doc_id" => id,
+            "title" => "Published with a twin",
+            "content" =>
+              Map.put(published.content, "description", "Edited in the live draft twin.")
+          },
+          @dataset,
+          scope
+        )
+
+      assert twin.doc_id == Content.draft_id(id)
+
+      assert {:ok, %Content.Document{}} =
+               Content.get_document(id, "task", @dataset, scope)
+
+      stub_get(bypass, num)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/#{num}", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => num, "state" => "open"}))
+      end)
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, fast())
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # UNPUBLISH RETRACTION — the publish gate's other half.
+  #
+  # The gate refuses to MINT an issue for a never-published task. But a task
+  # that WAS published, WAS mirrored, and is later UNPUBLISHED
+  # (`Content.Lifecycle.unpublish_document/4` deletes the published row and
+  # copies its content — `content.github` included — onto the draft) hits that
+  # same gate. Cancelling there would strand a live, OPEN issue with no
+  # published row behind it: exactly the orphan class the gate was written to
+  # prevent, reached by unpublish instead of discard. So: retract the promise
+  # rather than abandon it — CLOSE the issue, then cancel.
+  # ---------------------------------------------------------------------------
+
+  describe "reconcile/2 — unpublish retraction" do
+    test "an unpublished, PREVIOUSLY-SYNCED task CLOSES its issue instead of stranding it open",
+         %{bypass: bypass, scope: scope} do
+      stub_token(bypass)
+      id = uniq("gh")
+      num = 7788
+
+      _task = mk_task!(id, %{"title" => "Published, mirrored, then retracted"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: num, state: "synced"}, scope)
+
+      {:ok, _draft} = Lifecycle.unpublish_document(id, "task", @dataset, scope)
+
+      # PRECONDITIONS — assert the setup, never its exit code. The published row
+      # must be GONE (else the publish gate never fires and this test measures
+      # the ordinary update path), and the issue bookkeeping must have SURVIVED
+      # onto the draft (else there is no issue number to close and the test
+      # would pass for the wrong reason).
+      assert {:error, _} = Content.get_document(id, "task", @dataset, scope)
+      assert Link.get(reload(id, scope))["issue"] == num
+
+      calls = count_creates(bypass)
+      {:ok, body_ref} = Agent.start_link(fn -> nil end)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/#{num}", fn conn ->
+        {json, conn} = read_json_body(conn)
+        Agent.update(body_ref, fn _ -> json end)
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => num, "state" => "closed"}))
+      end)
+
+      result = MirrorJob.reconcile(id, @dataset, fast())
+
+      body = Agent.get(body_ref, & &1)
+
+      assert body["state"] == "closed",
+             "the retracted task's issue ##{num} was left #{inspect(body && body["state"])}"
+
+      assert body["state_reason"] == "not_planned"
+      assert {:cancel, :unpublished_closed} = result
+
+      # A retraction NEVER mints a replacement issue.
+      assert Agent.get(calls, & &1) == 0
+    end
+
+    test "CONTROL: an unpublished task that was NEVER mirrored still {:cancel, :unpublished}",
+         %{bypass: bypass, scope: scope} do
+      # No `content.github.issue` → nothing to close. The retraction arm must
+      # not invent a GitHub call for a task that never had an issue.
+      stub_token(bypass)
+      id = uniq("gh")
+
+      _task = mk_task!(id, %{"title" => "Published then retracted, never mirrored"}, scope)
+      {:ok, _draft} = Lifecycle.unpublish_document(id, "task", @dataset, scope)
+
+      assert {:error, _} = Content.get_document(id, "task", @dataset, scope)
+      assert Link.get(reload(id, scope)) == nil
+
+      calls = count_creates(bypass)
+
+      Bypass.stub(bypass, "PATCH", "/repos/#{@repo}/issues/9001", fn conn ->
+        Plug.Conn.resp(conn, 200, "{}")
+      end)
+
+      assert {:cancel, :unpublished} = MirrorJob.reconcile(id, @dataset, fast())
+      assert Agent.get(calls, & &1) == 0
     end
   end
 
@@ -1086,7 +1331,17 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
     } do
       stub_token(bypass)
       id = uniq("gh")
-      _task = mk_task!(id, %{"title" => "Blocked task", "description" => "human brief"}, scope)
+
+      _task =
+        mk_task!(
+          id,
+          %{
+            "title" => "Blocked task",
+            "description" => "human brief for the blocked task fixture"
+          },
+          scope
+        )
+
       {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 80, state: "synced"}, scope)
 
       stub_get(bypass, 80)

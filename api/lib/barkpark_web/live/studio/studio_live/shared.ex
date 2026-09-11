@@ -1170,6 +1170,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         editor_blocks_identity_error: editor_blocks_identity_error,
         editor_blocks_synth?: editor_blocks_synth?,
         editor_empty: editor_empty,
+        # E3.5: set only when the walk ALIASED a dead head (friction 67) and
+        # opened a document — the LiveView rewrites the URL to it once.
+        editor_canonical_path: editor && editor[:canonical_path],
         save_status:
           if(same_doc?,
             do: socket.assigns[:save_status] || "",

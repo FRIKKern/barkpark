@@ -1,0 +1,47 @@
+# POSIX-mode vacuous-green census roster — the NEGATIVES of scripts/posix-vacuous-green-census.sh.
+#
+# Format: <path>|<sh_exit_code>|<class>|<measured_on>|<note>
+# One line per scripts/*.sh that contains `<(`, is NOT interpreter-guarded, and is
+# NOT comment-only — i.e. every file the census would otherwise red. An entry is a
+# claim that the file was RUN under /bin/sh and did NOT produce a vacuous green.
+#
+# Classes:
+#   truncated-red  the POSIX parse error killed it; the caller reads a non-zero exit
+#   refused-red    it refused for its own reason (config/usage/env) before the `<(`
+#   completed-red  it ran to completion under sh and exited non-zero, stdout byte-
+#                  identical to a `bash` control
+#   honest-green   it ran to completion under sh and exited 0, and a `bash` control
+#                  proves nothing was skipped (differences, if any, are quoted)
+#
+# `honest-green` is the only class that may carry exit code 0, and it REQUIRES the
+# bash-control note. Anything measured to exit 0 while truncated does not belong on
+# this roster at all — it gets the interpreter guard instead.
+#
+# MEASURED 2026-09-11 on origin/main 038d310fce9e65b543e333cfd87d2db23634db60,
+# macOS /bin/sh = bash 3.2.57(1) in POSIX mode, by RUNNING each file, not by
+# grepping it (task cch-w53-fu-posix-vacuous-green-census-across-scripts).
+# Seven network/ledger scripts were run with a stub PATH (no-op bp/gh/psql/curl/
+# createdb/dropdb) so no write could escape; that is noted per line.
+scripts/breaker-step-names-drift.test.sh|2|truncated-red|2026-09-11|parse error at line 50, 0 assertions attempted
+scripts/check-doc-budgets.sh|2|truncated-red|2026-09-11|parse error at line 451, no output
+scripts/cloud-console-gate-shape.test.sh|0|honest-green|2026-09-11|cmd-subst error at line 698 costs only an `ok` message's cell count; all 73 assertions ran, 73 passed/0 failed under BOTH sh and bash; diff vs bash control = 2 cosmetic lines
+scripts/crown-reconcile.sh|3|refused-red|2026-09-11|stub PATH; `CONFIG: no way to read the crown` fires long before the `<(` at line 1370
+scripts/doc-gates-paths-parity-check.sh|2|truncated-red|2026-09-11|cmd-subst error at line 331 kills it, no output
+scripts/failure-copy-scrub-order-check.sh|2|truncated-red|2026-09-11|parse error at line 212, no output
+scripts/go-format-drift-ceiling.sh|2|truncated-red|2026-09-11|cmd-subst error at line 72 kills it, no output
+scripts/hex-audit-oracle.sh|3|completed-red|2026-09-11|146 stdout lines, byte-identical to the bash control which also exits 3
+scripts/main-verdict-presence.sh|2|truncated-red|2026-09-11|parse error at line 343, no output
+scripts/pds-draft-twin-sweep.sh|2|truncated-red|2026-09-11|stub PATH; parse error at line 379, no output
+scripts/pds-read-preflight-audit.sh|2|truncated-red|2026-09-11|stub PATH; parse error at line 155, no output
+scripts/pds-record-parity.sh|2|truncated-red|2026-09-11|parse error at line 861 after 2 stdout lines
+scripts/pds-secret-scan.sh|2|truncated-red|2026-09-11|parse error at line 151, no output
+scripts/pds-window-sentinel_test.sh|2|truncated-red|2026-09-11|cmd-subst error at line 49, no output
+scripts/pipefail-sigpipe-scan.sh|2|truncated-red|2026-09-11|parse error at line 434, no output
+scripts/pr-task-gate.sh|1|refused-red|2026-09-11|stub PATH; its own `::error title=PR is not task-backed` FAIL fires before the `<(` at line 469
+scripts/prod-build-cache-guard.sh|2|truncated-red|2026-09-11|parse error at line 86, no output
+scripts/reap-test-databases.sh|3|refused-red|2026-09-11|stub PATH; `cannot read $PGDATA — REFUSING to reap` fires before the `<(` at line 182
+scripts/registration-deadlock-sweep.sh|2|truncated-red|2026-09-11|stub PATH; cmd-subst error at line 189 kills it
+scripts/required-checks-generate.sh|1|refused-red|2026-09-11|stub PATH; `FAIL: at least one --sha is required` fires before the `<(` at line 834
+scripts/vips-hedge-tripwire.sh|2|truncated-red|2026-09-11|parse error at line 134, no output
+scripts/workflow-module-exec-smoke.sh|2|truncated-red|2026-09-11|parse error at line 82, no output
+scripts/workflow-module-smoke.sh|2|truncated-red|2026-09-11|parse error at line 36, no output

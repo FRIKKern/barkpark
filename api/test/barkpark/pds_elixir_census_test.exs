@@ -256,6 +256,16 @@ defmodule Barkpark.PdsElixirCensusTest do
       baseline: fn ->
         mutant = write_mutant(dir, "baseline", source, baseline_from, baseline_to)
         System.cmd(elixir, [mutant], cd: root, stderr_to_stdout: true)
+      end,
+      # THE DISPOSITION REGEN AFFORDANCE, ON THE SAME REQUIRED GATE. `--routed-rows`
+      # prints paste-ready @routed_excluded rows for every undisposed member and NEVER
+      # writes a file. Two arms, and only one of them is a full corpus walk: the typo arm
+      # refuses in parse_args/3 and exits before the glob, so it costs milliseconds.
+      routed_rows: fn ->
+        System.cmd(elixir, [census, "--routed-rows"], cd: root, stderr_to_stdout: true)
+      end,
+      routed_rows_typo: fn ->
+        System.cmd(elixir, [census, "--routed-row"], cd: root, stderr_to_stdout: true)
       end
     ]
 
@@ -265,16 +275,22 @@ defmodule Barkpark.PdsElixirCensusTest do
       |> Enum.map(fn {name, task} -> {name, Task.await(task, 540_000)} end)
       |> Map.new()
 
-    {:ok,
-     census: census,
-     elixir: elixir,
-     root: root,
-     runs: results,
-     anchors: %{
-       classification: occurrences(source, @mutant_from),
-       baseline: occurrences(source, baseline_from)
-     },
-     baseline: %{from: baseline_from, derived: derived, mutated: mutated}}
+    {
+      :ok,
+      # THE BYTES AS THEY WERE BEFORE ANY ARM RAN. Read above, at the top of setup_all,
+      # strictly before the four arms are spawned — which is what lets the --routed-rows
+      # test compare the file against its own pre-run state and call the flag write-free.
+      census: census,
+      source: source,
+      elixir: elixir,
+      root: root,
+      runs: results,
+      anchors: %{
+        classification: occurrences(source, @mutant_from),
+        baseline: occurrences(source, baseline_from)
+      },
+      baseline: %{from: baseline_from, derived: derived, mutated: mutated}
+    }
   end
 
   test "the receipt census runs GREEN over the live corpus", ctx do
@@ -285,6 +301,79 @@ defmodule Barkpark.PdsElixirCensusTest do
     assert out =~ "CENSUS OK",
            "the census exited 0 without printing its own green verdict — an exit code alone is " <>
              "not a receipt (the epic's law since wave 22). Output:\n#{out}"
+  end
+
+  # THE HYPOTHESIS COLUMN'S TWO ARMS, READ OFF THE PLAIN RUN — no new subprocess, so this
+  # door is free. It asserts the PASS lines AND the tripwire's refusal by name: the arm
+  # that matters here is a REFUSAL, and "the tripwire did not fire" reads identically
+  # whether it was refused or was never reached at all (a control says nothing about the
+  # precondition). Both sentences are required, so the precondition is asserted too.
+  test "RESPONSE-CARRIES-THE-READ is armed and REFUSES its own tripwire", ctx do
+    {out, rc} = ctx.runs.plain
+
+    assert rc == 0, out
+
+    assert out =~ "PASS  RESPONSE-CARRIES-THE-READ-PINNED",
+           "the hypothesis arm is not in the integrity block at all, or it went red. A " <>
+             "hypothesis column nobody can see arm is a column nobody knows is asleep.\n#{out}"
+
+    assert out =~ "PASS  RESPONSE-CARRIES-READ-REFUSES-CAPTURE",
+           "the tripwire arm is missing or red. An arm that fires on a runtime-configured " <>
+             "capture is matching SYNTAX rather than evidence and must not ship.\n#{out}"
+
+    assert out =~
+             "barkpark_web/controllers/github_status_controller.ex:65  health: status_fun().()",
+           "the tripwire site was never REACHED by this run, so the refusal above is a control " <>
+             "over an absent site and proves nothing. Re-derive the anchor before editing " <>
+             "this assertion away.\n#{out}"
+
+    refute out =~ "HYPOTHESIS  barkpark_web/controllers/github_status_controller.ex",
+           "the arm emitted a HYPOTHESIS for the tripwire — the one site it must leave " <>
+             "UNJUDGED.\n#{out}"
+  end
+
+  # THE AFFORDANCE IS A PROPOSAL, AND THE NEGATIVE HALF IS THE ONE THAT MATTERS. The run
+  # must print the three proposal sections and must NOT print any sentence claiming it
+  # edited the census — the point of the flag is that a HUMAN decides the class.
+  test "--routed-rows emits a PASTE-READY proposal and never writes the file", ctx do
+    {out, rc} = ctx.runs.routed_rows
+
+    assert rc == 0, "expected `--routed-rows` over a green tree to exit 0, got #{rc}:\n#{out}"
+
+    assert out =~
+             "PASTE-READY @routed_excluded PROPOSAL (--routed-rows) — A PROPOSAL, NEVER A WRITE",
+           out
+
+    for section <- ["ADD ", "DELETE ", "RE-CLASS "] do
+      assert out =~ section,
+             "the proposal is missing its #{section}section — all three directions are " <>
+               "emitted on every run, including the zeroes, so a reader never has to " <>
+               "wonder whether a direction was checked.\n#{out}"
+    end
+
+    assert File.read!(ctx.census) == ctx.source,
+           "the census script CHANGED while `--routed-rows` ran. The flag emits a PROPOSAL " <>
+             "and must never write @routed_excluded: a flag that edits the table in place " <>
+             "launders an arrival into an exclusion with no human ruling attached, which is " <>
+             "the false compliance PDS-D469 demoted static shapes for. (`ctx.source` was read " <>
+             "in setup_all BEFORE any arm was spawned, so this comparison is against the " <>
+             "pre-run bytes, not against itself.)"
+
+    assert out =~ "CENSUS OK", out
+  end
+
+  test "--routed-rows is on the STRICT ARGV list: an adjacent misspelling exits 2", ctx do
+    {out, rc} = ctx.runs.routed_rows_typo
+
+    assert rc == 2,
+           "expected `--routed-row` (one character short of the real flag) to REFUSE at exit " <>
+             "2, got #{rc}. A swallowed near-miss prints the ordinary census and reads as " <>
+             "'the affordance found nothing', which is the worst answer this flag could " <>
+             "give.\n#{out}"
+
+    assert out =~ "REFUSED: UNKNOWN ARGUMENT", out
+    assert out =~ ~s(unknown argument "--routed-row"), out
+    assert out =~ "--routed-rows", out
   end
 
   test "the gate CAN red: a one-token mutant exits 1 with FAIL  CLASSIFICATION-TOTAL", ctx do

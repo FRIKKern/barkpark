@@ -647,6 +647,29 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
               "#{e.code} during #{e.phase}; retrying in #{backoff}ms"
           )
 
+          # THE REFUSAL IS OBSERVABLE, and it is observable HERE — after the
+          # refusal is final for this attempt and BEFORE the backoff sleep, so
+          # a handler runs strictly between "attempt N was refused" and
+          # "attempt N+1 starts". Nothing in production attaches to it (a
+          # `:telemetry.execute` with no handlers is a single ETS lookup), and
+          # nothing about the import's behaviour depends on it. It exists
+          # because the ALTERNATIVE — a test that guesses, on a clock, when the
+          # import is parked and when it has given up — is a wall-clock race
+          # that CI load wins (run 34584565394: the contending holder released
+          # after the THIRD refusal and the import had already, correctly, given
+          # up). Handlers run synchronously in THIS process, so a contending
+          # session released from a handler is released before the sleep below
+          # even begins — an ORDER, not a duration.
+          #
+          # Emitted on retryable refusals only: the terminal one already has a
+          # raised, named `ImportLockError`, which is a louder observable than
+          # any event.
+          :telemetry.execute(
+            [:barkpark, :workspace_bundle, :import, :lock_refused],
+            %{attempt: attempt, backoff_ms: backoff},
+            %{phase: e.phase, code: e.code, budget: budget, timeout: e.timeout}
+          )
+
           Process.sleep(backoff)
           run_import_attempt(manifest, dumps, mode, ctx, attempt + 1)
       end

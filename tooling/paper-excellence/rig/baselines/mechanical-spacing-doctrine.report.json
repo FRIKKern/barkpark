@@ -19,7 +19,7 @@
       "cell": "mechanical-spacing-doctrine__light__1280",
       "file": "mechanical-spacing-doctrine__light__1280.jpeg",
       "scale": 2,
-      "bytes": 850002,
+      "bytes": 857127,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -159,7 +159,7 @@
           {
             "px": 2,
             "y": 859.4,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -169,7 +169,7 @@
           {
             "px": 2,
             "y": 1404.4,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -179,7 +179,7 @@
           {
             "px": 2,
             "y": 1814.5,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -189,7 +189,7 @@
           {
             "px": 2,
             "y": 2424.9,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -199,7 +199,7 @@
           {
             "px": 2,
             "y": 2915.6,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -214,7 +214,7 @@
       "cell": "mechanical-spacing-doctrine__light__1920",
       "file": "mechanical-spacing-doctrine__light__1920.jpeg",
       "scale": 2,
-      "bytes": 925698,
+      "bytes": 934532,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -354,7 +354,7 @@
           {
             "px": 2,
             "y": 859.4,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -364,7 +364,7 @@
           {
             "px": 2,
             "y": 1404.4,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -374,7 +374,7 @@
           {
             "px": 2,
             "y": 1814.5,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -384,7 +384,7 @@
           {
             "px": 2,
             "y": 2424.9,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -394,7 +394,7 @@
           {
             "px": 2,
             "y": 2915.6,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -409,7 +409,7 @@
       "cell": "mechanical-spacing-doctrine__dark__1280",
       "file": "mechanical-spacing-doctrine__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 838464,
+      "bytes": 845237,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -549,7 +549,7 @@
           {
             "px": 2,
             "y": 859.4,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -559,7 +559,7 @@
           {
             "px": 2,
             "y": 1404.4,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -569,7 +569,7 @@
           {
             "px": 2,
             "y": 1814.5,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -579,7 +579,7 @@
           {
             "px": 2,
             "y": 2424.9,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -589,7 +589,7 @@
           {
             "px": 2,
             "y": 2915.6,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -604,7 +604,7 @@
       "cell": "mechanical-spacing-doctrine__dark__1920",
       "file": "mechanical-spacing-doctrine__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 914267,
+      "bytes": 922699,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -744,7 +744,7 @@
           {
             "px": 2,
             "y": 859.4,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -754,7 +754,7 @@
           {
             "px": 2,
             "y": 1404.4,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -764,7 +764,7 @@
           {
             "px": 2,
             "y": 1814.5,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -774,7 +774,7 @@
           {
             "px": 2,
             "y": 2424.9,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -784,7 +784,7 @@
           {
             "px": 2,
             "y": 2915.6,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [

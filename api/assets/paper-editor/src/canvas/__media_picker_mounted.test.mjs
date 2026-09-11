@@ -196,7 +196,11 @@ try {
         patch: {
           value: JSON.stringify({
             url: "/media/first.png",
-            assetId: "asset-first",
+            // Gyldendal friction 78: the picker stores the CANONICAL bare blob id —
+            // the asset browser hands over the document id ("asset-first") and the
+            // picker strips the prefix so a fresh pick spells assetId like the
+            // migration did (bpCanonicalAssetId).
+            assetId: "first",
             alt: "first.png",
           }),
         },
@@ -310,7 +314,7 @@ try {
         patch: {
           value: JSON.stringify({
             url: "/media/fast.png",
-            assetId: "asset-fast",
+            assetId: "fast",
             alt: "fast.png",
           }),
         },
@@ -359,7 +363,7 @@ try {
         patch: {
           value: JSON.stringify({
             url: "/media/uploaded.png",
-            assetId: "asset-uploaded",
+            assetId: "uploaded",
           }),
         },
       },

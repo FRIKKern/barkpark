@@ -6530,6 +6530,165 @@ else
   fi
 fi
 
+section "31. --deadlock refuses a spec this checkout carries but origin/main has MOVED PAST — and cannot refuse the apply workflow"
+
+# WHY THIS SECTION EXISTS (cchi-w51-bl-verify-never-checks-its-own-spec-freshness).
+# required-checks-verify.sh used to contain zero occurrences of `origin/main`,
+# `git show` or `git fetch`: it verified whatever .github/required-checks.json
+# the checkout happened to carry. In the modes that also read live protection
+# that is covered — compare_protection diffs the FULL live object and reds on a
+# context mismatch. `--deadlock` reads no live side at all, and scripts/
+# bp-merge.sh resolves the verifier out of whatever checkout the merger sits in,
+# so a stale checkout's merge pre-flight PASSED having subtracted 2 of the 4
+# live required contexts. That exposure is reproduced below rather than
+# described, and the mutation arm shows the pre-fix verifier passing on the
+# identical fixture.
+#
+# THE OBSTACLE THE REFUSAL IS DESIGNED AROUND is the other half of the section:
+# required-checks-apply.sh calls this verifier as its post-PUT read-back with an
+# explicit `--spec`, in FULL mode, and applying a CHANGED spec is the whole
+# point of apply. Arms (e), (f) and (g) prove the clause cannot reach it.
+
+RC31="$TMP/rc31"
+rm -rf "$RC31"; mkdir -p "$RC31/repo/scripts/lib" "$RC31/repo/.github"
+cp "$VERIFY" "$RC31/repo/scripts/required-checks-verify.sh"
+cp "$REPO_ROOT/scripts/lib/check-runs.sh" "$RC31/repo/scripts/lib/check-runs.sh"
+RC31_V="$RC31/repo/scripts/required-checks-verify.sh"
+
+# THE "LIVE" SPEC — what origin/main requires in the fixture. Derived from the
+# committed spec so this section widens with the real one instead of reding on
+# the PR that registers a name.
+cp "$SPEC" "$RC31/live.json"
+RC31_DROP="$(SPEC_CONTEXTS | head -1)"
+RC31_KEEP_N="$(SPEC_CONTEXTS | grep -c . || true)"
+jq -c '[ .protection.required_status_checks.checks[]
+        | { name: .context, conclusion: "success", started_at: "2026-07-28T01:00:00Z" } ]
+      | { check_runs: . }' "$RC31/live.json" > "$RC31/runs.json"
+
+cp "$RC31/live.json" "$RC31/repo/.github/required-checks.json"
+git -C "$RC31/repo" init -q -b main >/dev/null 2>&1
+git -C "$RC31/repo" add -A >/dev/null 2>&1
+git -C "$RC31/repo" -c user.email=rc31@example.invalid -c user.name=rc31 commit -qm "the spec origin/main requires" >/dev/null 2>&1
+git -C "$RC31/repo" update-ref refs/remotes/origin/main "$(git -C "$RC31/repo" rev-parse HEAD)"
+# ...and NOW the working tree goes stale: one context origin/main requires is
+# dropped, which is the direction that makes the set difference skip a gate.
+jq --arg d "$RC31_DROP" '.protection.required_status_checks.checks =
+    [ .protection.required_status_checks.checks[] | select(.context != $d) ]' \
+  "$RC31/live.json" > "$RC31/repo/.github/required-checks.json"
+
+# (a) THE PRECONDITION, ASSERTED RATHER THAN ASSUMED. A fixture that silently
+#     failed to go stale would make every arm below a vacuous green.
+RC31_ORIGIN_N="$(git -C "$RC31/repo" show origin/main:.github/required-checks.json | jq '.protection.required_status_checks.checks | length')"
+RC31_LOCAL_N="$(jq '.protection.required_status_checks.checks | length' "$RC31/repo/.github/required-checks.json")"
+if [ "$RC31_ORIGIN_N" = "$RC31_KEEP_N" ] && [ "$RC31_LOCAL_N" -eq $((RC31_ORIGIN_N - 1)) ] && [ "$RC31_LOCAL_N" -ge 1 ]; then
+  ok "(a) the fixture reached the state under test: origin/main requires $RC31_ORIGIN_N context(s), the checkout's working tree lists $RC31_LOCAL_N, and \"$RC31_DROP\" is the one it lost"
+else
+  bad "(a) the stale-checkout fixture did not reach its state (origin/main=$RC31_ORIGIN_N, local=$RC31_LOCAL_N, spec=$RC31_KEEP_N) — every arm of §31 would be vacuous"
+fi
+
+# (b) THE REFUSAL. The bp-merge.sh pre-flight shape exactly: --deadlock, a sha,
+#     and NO --spec, run out of the stale checkout.
+RC31_B_OUT="$(bash "$RC31_V" --deadlock --runs "$RC31/runs.json" --sha probe 2>&1)" && RC31_B=0 || RC31_B=$?
+if [ "$RC31_B" -eq 5 ] \
+   && grep -q '^BLOCKED: spec freshness' <<<"$RC31_B_OUT" \
+   && grep -q "only-on-origin-main: $RC31_DROP" <<<"$RC31_B_OUT"; then
+  ok "(b) the stale checkout's --deadlock pre-flight is BLOCKED (exit 5) and names the context it lost by name: \"$RC31_DROP\""
+else
+  bad "(b) a stale checkout's --deadlock pre-flight did not refuse (exit $RC31_B, wanted 5): $(head -1 <<<"$RC31_B_OUT")"
+fi
+
+# (c) AND IT NEVER SAYS THEY AGREE. A refusal that also printed the detector's
+#     green line would be worse than no refusal — two verdicts, one run.
+if ! grep -qE 'every required context appears in|^OK:' <<<"$RC31_B_OUT"; then
+  ok "(c) the refusal carries NO agreement sentence — the set difference never ran, and the output does not claim it did"
+else
+  bad "(c) the stale-spec refusal ALSO printed an agreement line: $(grep -E 'every required context appears in|^OK:' <<<"$RC31_B_OUT" | head -1)"
+fi
+
+# (d) THE MUTATION — the pre-fix behaviour, reproduced on the identical fixture
+#     by disarming the call site rather than by describing what used to happen.
+sed 's/^        spec_freshness_check$/        : # DISARMED BY \&31(d)/' "$RC31_V" > "$RC31/repo/scripts/mutant.sh"
+if ! grep -q 'DISARMED BY' "$RC31/repo/scripts/mutant.sh"; then
+  bad "(d) the §31 mutation did not apply — the call site moved, so this control proves nothing and (b) is unanchored"
+else
+  RC31_D_OUT="$(bash "$RC31/repo/scripts/mutant.sh" --deadlock --runs "$RC31/runs.json" --sha probe 2>&1)" && RC31_D=0 || RC31_D=$?
+  if [ "$RC31_D" -eq 0 ] && grep -q 'every required context appears in' <<<"$RC31_D_OUT"; then
+    ok "(d) with the clause disarmed the IDENTICAL stale checkout exits 0 saying every required context is present — the exposure reproduced, and (b) is what closes it"
+  else
+    bad "(d) the disarmed mutant did not reproduce the vacuous pass (exit $RC31_D) — (b) may be reding for some other reason"
+  fi
+fi
+
+# (e) THE ESCAPE APPLY RELIES ON, exercised on the SAME stale spec: naming the
+#     file with --spec is a statement about which file the caller means, and it
+#     is honoured. Nothing else in the command line changed.
+RC31_E_OUT="$(bash "$RC31_V" --deadlock --spec "$RC31/repo/.github/required-checks.json" --runs "$RC31/runs.json" --sha probe 2>&1)" && RC31_E=0 || RC31_E=$?
+if [ "$RC31_E" -eq 0 ] && grep -q 'spec freshness: SKIPPED' <<<"$RC31_E_OUT"; then
+  ok "(e) the SAME stale spec, named with --spec, is verified without a freshness refusal (exit 0) — the escape is the flag, not the path, so apply.sh's \`--spec \"\$SPEC\"\` is a deliberate statement even when \$SPEC is the default path"
+else
+  bad "(e) an explicitly-named spec was still refused on freshness (exit $RC31_E): $(head -1 <<<"$RC31_E_OUT")"
+fi
+
+# (f) THE APPLY SHAPE ITSELF — full mode, explicit --spec, a spec that DIFFERS
+#     from the committed one, run against the real repo's §6/§7 fixtures. The
+#     clause must not emit one word here: this is the post-PUT read-back, and a
+#     refusal would red apply on the workflow it exists to serve.
+RC31_F_OUT="$(bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe 2>&1)" && RC31_F=0 || RC31_F=$?
+if [ "$RC31_F" -eq 0 ] && ! grep -q 'spec freshness' <<<"$RC31_F_OUT"; then
+  ok "(f) the apply read-back shape (full mode, explicit --spec) reaches its verdict with the freshness clause emitting nothing at all — it is not merely tolerated there, it never runs"
+else
+  bad "(f) the apply read-back shape did not stay clean (exit $RC31_F, freshness lines: $(grep -c 'spec freshness' <<<"$RC31_F_OUT" || true))"
+fi
+
+# (g) AND THE CALL SITE IS LIFTED FROM apply.sh, never restated — if apply ever
+#     stops passing --spec, or starts asking for --deadlock, (f) stops covering
+#     it and this arm is what says so.
+RC31_APPLY="$REPO_ROOT/scripts/required-checks-apply.sh"
+RC31_CALL="$(grep -n 'required-checks-verify\.sh' "$RC31_APPLY" | grep -v '^\s*#' | grep 'bash ' | head -1 || true)"
+if [ -n "$RC31_CALL" ] && grep -q -- '--spec' <<<"$RC31_CALL" && ! grep -q -- '--deadlock' "$RC31_APPLY"; then
+  ok "(g) apply.sh's own verifier call (line ${RC31_CALL%%:*}) passes --spec and the file never asks for --deadlock — immune on BOTH keys, read out of the file rather than asserted from memory"
+else
+  bad "(g) apply.sh's verifier call no longer matches what the freshness clause was scoped around (call: ${RC31_CALL:-none found}) — re-derive the scoping before trusting (f)"
+fi
+
+# (h) A MISSING origin/main REF IS "I COULD NOT LOOK", NEVER "THEY AGREE". The
+#     spec is restored to origin/main's exact bytes first, so the ONLY thing
+#     this arm changes is whether the ref can be read.
+cp "$RC31/live.json" "$RC31/repo/.github/required-checks.json"
+git -C "$RC31/repo" update-ref -d refs/remotes/origin/main
+RC31_H_OUT="$(bash "$RC31_V" --deadlock --runs "$RC31/runs.json" --sha probe 2>&1)" && RC31_H=0 || RC31_H=$?
+if [ "$RC31_H" -eq 5 ] \
+   && grep -q 'no origin/main ref' <<<"$RC31_H_OUT" \
+   && grep -q 'COULD NOT LOOK' <<<"$RC31_H_OUT" \
+   && ! grep -qE 'every required context appears in|^OK:' <<<"$RC31_H_OUT"; then
+  ok "(h) with the origin/main ref ABSENT the run exits 5 on its own distinct line (\"no origin/main ref … I COULD NOT LOOK\") and prints no agreement — a failed look is never rendered as agreement"
+else
+  bad "(h) an absent origin/main ref did not report a could-not-look (exit $RC31_H): $(head -1 <<<"$RC31_H_OUT")"
+fi
+
+# (i) THE CONTROL FOR (h): restore the ref, change NOTHING else, and the same
+#     command passes. Without this, (h) could be reding on the fixture rather
+#     than on the missing ref.
+git -C "$RC31/repo" update-ref refs/remotes/origin/main "$(git -C "$RC31/repo" rev-parse HEAD)"
+RC31_I_OUT="$(bash "$RC31_V" --deadlock --runs "$RC31/runs.json" --sha probe 2>&1)" && RC31_I=0 || RC31_I=$?
+if [ "$RC31_I" -eq 0 ] && grep -q 'spec freshness: every context origin/main requires' <<<"$RC31_I_OUT"; then
+  ok "(i) the ref restored and nothing else touched, the identical command exits 0 — (h) measured the ref, not the fixture"
+else
+  bad "(i) the control did not pass with the ref restored (exit $RC31_I): $(head -1 <<<"$RC31_I_OUT")"
+fi
+
+# (j) EXTRA LOCAL CONTEXTS ARE TOLERATED, and the reason is directional: a name
+#     this copy ADDS can only make the subtraction stricter, so its worst
+#     outcome is a named DEADLOCK (3). A name it LOST is the silent direction.
+jq '.protection.required_status_checks.checks += [{"context":"A name no workflow emits","app_id":15368}]' \
+  "$RC31/live.json" > "$RC31/repo/.github/required-checks.json"
+RC31_J_OUT="$(bash "$RC31_V" --deadlock --runs "$RC31/runs.json" --sha probe 2>&1)" && RC31_J=0 || RC31_J=$?
+if [ "$RC31_J" -eq 3 ] && ! grep -q 'spec freshness: this checkout' <<<"$RC31_J_OUT"; then
+  ok "(j) a spec that ADDS a context passes freshness and lands on the detector's own exit 3 — the growth direction is never converted into a hold, so a PR registering a name can still be merged through bp-merge"
+else
+  bad "(j) an ADDED context did not fall through to the deadlock detector (exit $RC31_J, wanted 3): $(head -1 <<<"$RC31_J_OUT")"
+fi
+
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
   echo "  Run without --hermetic, with a token carrying admin on this repo, to exercise them."

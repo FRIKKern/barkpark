@@ -1353,6 +1353,76 @@ $seam_roots
 EOF
   fi
 fi
+# ── the scaffy-duels METER entries (2026-09-11, pds-w49-meter-ci-decision) ─
+# METER.md §6 decided that `tooling/scaffy-duels/meter.py` is to be WIRED, and
+# named the only blocking route: these declarations plus
+# api/test/barkpark/pds_meter_rider_test.exs, riding the required `Elixir gate`.
+# A workflow-level `on: paths:` filter is refused as the venue (S4: such a
+# workflow can never be required), so if these arms stop passing the instrument
+# is back to where wave 48 found it — correct, fast, and run by nothing.
+#
+# DERIVED FROM THE RIDER, NOT PINNED HERE. Every `"../../../tooling/…"` literal
+# in the rider is a read `--list-escapes` resolves and `--check` demands be
+# dispatched; this loop asserts the OTHER half — that the dispatcher answers
+# true for each. Add a read to the rider without declaring it and case 3 reds;
+# declare it and this loop starts covering it, with no edit here. Deriving ZERO
+# literals is itself a failure, or the loop passes vacuously the day the grep
+# stops matching.
+rider="$REAL_ROOT/api/test/barkpark/pds_meter_rider_test.exs"
+if [ ! -f "$rider" ]; then
+  no "api/test/barkpark/pds_meter_rider_test.exs is missing — meter.py is wired to nothing again"
+else
+  # `|| true` covers ONLY the grep, for the reason the seam-scan block above
+  # records at length: under `set -euo pipefail` a non-matching grep in a
+  # command substitution kills the harness mid-case with no tally.
+  meter_lits="$(grep -Eoh '"\.\./\.\./\.\./tooling/scaffy-duels/[^"]*"' "$rider" || true)"
+  meter_lits="$(sed -e 's/^"\.\.\/\.\.\/\.\.\///' -e 's/"$//' <<<"$meter_lits" | LC_ALL=C sort -u)"
+  # EXISTENCE-FILTERED, MIRRORING THE CENSUS. `list_escapes` discards a literal
+  # that resolves to nothing on disk, so a path-shaped string in the rider's
+  # moduledoc is not a read and must not be required to dispatch. MEASURED: an
+  # `…`-elided path inside a prose heading reded this loop for a reason foreign
+  # to what it measures, while `--check` correctly ignored it. Filtering here
+  # keeps the two halves asking the same question.
+  meter_real=""
+  while IFS= read -r meter_path; do
+    [ -n "$meter_path" ] || continue
+    [ -e "$REAL_ROOT/$meter_path" ] || continue
+    meter_real="$meter_real$meter_path
+"
+  done <<EOF
+$meter_lits
+EOF
+  meter_lits="$meter_real"
+  if [ -z "$meter_lits" ]; then
+    no "derived ZERO tooling/scaffy-duels reads from the rider — the arms below would pass vacuously"
+  else
+    ok "derived meter reads from the rider: $(tr '\n' ' ' <<<"$meter_lits")"
+    while IFS= read -r meter_path; do
+      [ -n "$meter_path" ] || continue
+      check_match "$meter_path" test true
+    done <<EOF
+$meter_lits
+EOF
+  fi
+fi
+# The corpus is declared as a TREE on purpose: the change that rotted METER.md
+# was an ADDED envelope, and an added file has no name this list could have
+# carried in advance. The literal below is deliberately a filename that does
+# not exist.
+check_match "tooling/scaffy-duels/results/a-duel-not-yet-run--A--1.agent.json" test true
+# TEST-only, never compile: nothing in api/ links against the instrument.
+check_match "tooling/scaffy-duels/meter.py" compile false
+check_match "tooling/scaffy-duels/results/a-duel-not-yet-run--A--1.agent.json" compile false
+# FOUR DECLARATIONS, not `tooling/**` and not `tooling/scaffy-duels/**`. The
+# neighbours below are in the same directory and must stay OUT — a PR touching
+# only them has no business paying for the full Elixir suite.
+check_match "tooling/scaffy-duels/README.md" test false
+check_match "tooling/scaffy-duels/run-cell.sh" test false
+check_match "tooling/scaffy-duels/matrix.json" test false
+check_match "tooling/grip/ledger/some-note.md" test false
+# exact-file entries must not match by prefix (the sibling arms above)
+check_match "tooling/scaffy-duels/meter.py.bak" test false
+check_match "tooling/scaffy-duels/METER.md.orig" test false
 # Every compile path is also a test path. The invariant belongs to the SETS,
 # not to any `needs` edge between the jobs: compile ⊆ test must hold however
 # the graph is wired. elixir.yml's dispatcher asserts it at runtime and hard-

@@ -19,7 +19,7 @@
       "cell": "paper-excellence-wave-2026-08-12__light__1280",
       "file": "paper-excellence-wave-2026-08-12__light__1280.jpeg",
       "scale": 2,
-      "bytes": 5967855,
+      "bytes": 5986207,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -258,7 +258,7 @@
           {
             "px": 2,
             "y": 798.4,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -268,7 +268,7 @@
           {
             "px": 2,
             "y": 1282.5,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -278,7 +278,7 @@
           {
             "px": 2,
             "y": 2115.3,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -288,7 +288,7 @@
           {
             "px": 2,
             "y": 3202.6,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -298,7 +298,7 @@
           {
             "px": 2,
             "y": 4064.2,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -308,7 +308,7 @@
           {
             "px": 2,
             "y": 5456.9,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -318,7 +318,7 @@
           {
             "px": 2,
             "y": 7863.8,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -328,7 +328,7 @@
           {
             "px": 2,
             "y": 9100,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -338,7 +338,7 @@
           {
             "px": 2,
             "y": 10964.5,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -348,7 +348,7 @@
           {
             "px": 2,
             "y": 12527,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -358,7 +358,7 @@
           {
             "px": 2,
             "y": 13839.7,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -368,7 +368,7 @@
           {
             "px": 2,
             "y": 14924.4,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -383,7 +383,7 @@
       "cell": "paper-excellence-wave-2026-08-12__light__1920",
       "file": "paper-excellence-wave-2026-08-12__light__1920.jpeg",
       "scale": 2,
-      "bytes": 6315496,
+      "bytes": 6344576,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -622,7 +622,7 @@
           {
             "px": 2,
             "y": 779.2,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -632,7 +632,7 @@
           {
             "px": 2,
             "y": 1263.3,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -642,7 +642,7 @@
           {
             "px": 2,
             "y": 2096.2,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -652,7 +652,7 @@
           {
             "px": 2,
             "y": 3183.4,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -662,7 +662,7 @@
           {
             "px": 2,
             "y": 4045,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -672,7 +672,7 @@
           {
             "px": 2,
             "y": 5437.7,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -682,7 +682,7 @@
           {
             "px": 2,
             "y": 7844.6,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -692,7 +692,7 @@
           {
             "px": 2,
             "y": 9002.6,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -702,7 +702,7 @@
           {
             "px": 2,
             "y": 10788.7,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -712,7 +712,7 @@
           {
             "px": 2,
             "y": 12299,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -722,7 +722,7 @@
           {
             "px": 2,
             "y": 13611.8,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -732,7 +732,7 @@
           {
             "px": 2,
             "y": 14644.3,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -747,7 +747,7 @@
       "cell": "paper-excellence-wave-2026-08-12__dark__1280",
       "file": "paper-excellence-wave-2026-08-12__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 5908832,
+      "bytes": 5928177,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -986,7 +986,7 @@
           {
             "px": 2,
             "y": 798.4,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -996,7 +996,7 @@
           {
             "px": 2,
             "y": 1282.5,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1006,7 +1006,7 @@
           {
             "px": 2,
             "y": 2115.3,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1016,7 +1016,7 @@
           {
             "px": 2,
             "y": 3202.6,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1026,7 +1026,7 @@
           {
             "px": 2,
             "y": 4064.2,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1036,7 +1036,7 @@
           {
             "px": 2,
             "y": 5456.9,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1046,7 +1046,7 @@
           {
             "px": 2,
             "y": 7863.8,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1056,7 +1056,7 @@
           {
             "px": 2,
             "y": 9100,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1066,7 +1066,7 @@
           {
             "px": 2,
             "y": 10964.5,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1076,7 +1076,7 @@
           {
             "px": 2,
             "y": 12527,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1086,7 +1086,7 @@
           {
             "px": 2,
             "y": 13839.7,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1096,7 +1096,7 @@
           {
             "px": 2,
             "y": 14924.4,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1111,7 +1111,7 @@
       "cell": "paper-excellence-wave-2026-08-12__dark__1920",
       "file": "paper-excellence-wave-2026-08-12__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 6258877,
+      "bytes": 6286790,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -1350,7 +1350,7 @@
           {
             "px": 2,
             "y": 779.2,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1360,7 +1360,7 @@
           {
             "px": 2,
             "y": 1263.3,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1370,7 +1370,7 @@
           {
             "px": 2,
             "y": 2096.2,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1380,7 +1380,7 @@
           {
             "px": 2,
             "y": 3183.4,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1390,7 +1390,7 @@
           {
             "px": 2,
             "y": 4045,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1400,7 +1400,7 @@
           {
             "px": 2,
             "y": 5437.7,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1410,7 +1410,7 @@
           {
             "px": 2,
             "y": 7844.6,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1420,7 +1420,7 @@
           {
             "px": 2,
             "y": 9002.6,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1430,7 +1430,7 @@
           {
             "px": 2,
             "y": 10788.7,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1440,7 +1440,7 @@
           {
             "px": 2,
             "y": 12299,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1450,7 +1450,7 @@
           {
             "px": 2,
             "y": 13611.8,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1460,7 +1460,7 @@
           {
             "px": 2,
             "y": 14644.3,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
