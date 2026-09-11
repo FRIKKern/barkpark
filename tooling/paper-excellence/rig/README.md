@@ -253,6 +253,29 @@ before the panel was re-shot; none was a reader defect:
 assertions** in the default four-width set, and **28 shots** under
 `--panel --check`.
 
+### `--panel` is a census, not a build gate (2026-09-11, task-ce0684110c7373f9)
+
+Until 2026-09-11 the fixture loop ran under `set -e`: the FIRST failing fixture
+aborted the whole command, every fixture behind it was never run, and — because
+the only summary line came after the loop — a truncated run printed no summary
+at all and read as complete. With a known-red fixture sorting mid-list, the back
+half of the panel was structurally invisible and nothing said so.
+
+`--panel` now keeps going. Every fixture runs, each gets one `PASS`/`FAIL`
+verdict line, and the run closes with its own coverage:
+
+```
+rig/gate: --- panel census ---
+rig/gate:   PASS  design-probe
+rig/gate:   FAIL  hobby-hardening-capstone
+rig/gate: panel: 9 fixtures committed, 9 attempted, 8 passed, 1 failed, 72 shots in …
+```
+
+The census prints from an `EXIT` trap, so even a hard abort names what it did
+not reach (`N fixture(s) NOT REACHED — …`). The exit code is still nonzero when
+anything failed — it is just deferred to the end. `--stop-on-first-failure`
+restores the old fail-fast arm for callers who want a build gate.
+
 The PASS line counts **this run's** shots, read from the `report.json` this run
 wrote. `find`ing the out-dir counted every image ever left there, so a 7-fixture
 loop over one out-dir reported `8/16/24/…` while each fixture wrote 8 — a number
