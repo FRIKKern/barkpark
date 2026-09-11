@@ -2104,7 +2104,6 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-
   # THE ONE blank-field reader every empty-chrome guard in this module shares, so
   # no two block types (and no two style arms of one type) can ever disagree about
   # what "blank" means. Extracted from `blank_code_source?/1` above VERBATIM —
