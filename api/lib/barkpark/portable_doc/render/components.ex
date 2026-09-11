@@ -66,9 +66,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
   @doc """
   Render a `task-detail` block: the "open a task and SEE it" card — a vertical
   stack of CONDITIONAL sections (a thin task stays thin), matching the design
-  spec §15: title · meta line · timestamps · status timeline · criteria
-  checklist with evidence · dependencies in words · children rail · papers rail
-  · labels. The task map is at `block["task"]` (or the block itself).
+  spec's component inventory (`.claude/workflows/bp-task-design-language-spec.md`
+  §4, table row `task-detail`): title · meta line · timestamps · status timeline
+  · criteria checklist with evidence · dependencies in words · children rail ·
+  papers rail · labels. The task map is at `block["task"]` (or the block itself).
   """
   def task_detail_html(block) when is_map(block) do
     t =
