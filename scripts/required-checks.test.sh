@@ -5034,6 +5034,225 @@ else
 fi
 
 
+
+section "21b. the annotation merge-gates.md quotes \`verbatim\` is DERIVED from cloud.yml, and the prose around it is held"
+
+# WHAT §21 LEAVES OPEN (cch-w51-bl-nothing-ran-prose-unguarded). §21 above holds
+# BOTH sides of the roster TABLE and states that window as its own limit. The
+# three PROSE parts of the same page section are unguarded: the taxonomy
+# sentence, the fenced annotation quoted "verbatim from cloud.yml", and the
+# `Where a merger reads it` gh api recipe. Delete any of them and §21 stays
+# green. The quote is the dangerous one — it is a TRANSCRIPTION, so rewording
+# cloud.yml's message leaves the page quoting the old wording under the word
+# "verbatim" and nothing reds. Control, on the tree this file ships in:
+# `git grep -n "no Cloud job" -- scripts/ .github/` returns exactly one hit,
+# .github/workflows/cloud.yml. No guard named that string before this section.
+#
+# MECHANISM, and why it is deliberately NOT an exact-bytes compare. cloud.yml
+# emits the message as ONE line joined by `%0A`; the page renders it hard-wrapped
+# at ~72 columns, and one segment — `Not dispatched:${not_dispatched}` — is
+# shell-interpolated at run time and cannot be known here at all. A byte
+# comparison across that rewrap is a guaranteed false red in a merge-blocking
+# suite, which is worse than the miss it replaces. So: split the workflow message
+# on `%0A`, drop the interpolated segment, collapse whitespace on BOTH sides, and
+# assert SUBSTRING CONTAINMENT of each remaining segment in the
+# whitespace-collapsed fenced block. Re-wrapping the page is free (clause 5
+# proves it at a width the page never uses); rewording either side is not.
+
+RC21B_CLOUD_YML="$REPO_ROOT/.github/workflows/cloud.yml"
+
+# SIDE A. The message cloud.yml actually emits, one quotable segment per line.
+rc21b_segments() { # <cloud.yml>
+  sed -n 's/^.*::notice title=Cloud gate: green — nothing ran:://p' "$1" \
+    | sed 's/"[[:space:]]*$//' \
+    | awk '{ gsub(/%0A/, "\n"); print }' \
+    | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+    | grep -v -e '^Not dispatched:' -e '^$' || true
+}
+
+# SIDE B. The fenced block on the page that carries the annotation body. Keyed on
+# the block's CONTENT, never on a line number and never on "the first fence after
+# some heading": the page has several fenced blocks and they move.
+rc21b_fence() { # <doc>
+  awk '
+    /^```/ {
+      if (inb) { if (hit) { print buf; exit } ; inb = 0; next }
+      inb = 1; buf = ""; hit = 0; next
+    }
+    inb { buf = buf " " $0; if (index($0, "NOTHING CLOUD RAN")) hit = 1 }
+  ' "$1"
+}
+
+rc21b_norm() { tr '\n' ' ' | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//'; }
+
+# `DRIFT` = a segment cloud.yml emits that the page's quote no longer contains.
+# `UNRESOLVED` = a side came back empty or short, which must REFUSE rather than
+# pass: a containment check over zero segments is green for any page at all.
+rc21b_report() { # <cloud.yml> <doc>
+  local segs fence flat n seg
+  segs="$(rc21b_segments "$1")"
+  fence="$(rc21b_fence "$2")"
+  n="$(printf '%s\n' "$segs" | { grep -c . || true; } | tr -d ' ')"
+  if [ "$n" -lt 3 ]; then
+    printf 'UNRESOLVED\tside A derived %s quotable segment(s) from %s; the message carries 3 — refusing rather than passing on an empty read\n' "$n" "$1"
+    return
+  fi
+  if [ -z "$fence" ]; then
+    printf 'UNRESOLVED\t%s carries no fenced block holding the annotation body — the page side derived empty\n' "$2"
+    return
+  fi
+  flat="$(printf '%s\n' "$fence" | rc21b_norm)"
+  while IFS= read -r seg; do
+    [ -n "$seg" ] || continue
+    seg="$(printf '%s\n' "$seg" | rc21b_norm)"
+    case "$flat" in
+      *"$seg"*) ;;
+      *) printf 'DRIFT\t%s\n' "$seg" ;;
+    esac
+  done <<EOF
+$segs
+EOF
+}
+
+# The other two prose parts. Presence only — these are the page's OWN sentences,
+# with no second source to derive them from, so a stricter rule here would buy
+# false reds and no truth. `<id>` inside the recipe is a literal placeholder.
+rc21b_prose_report() { # <doc>
+  local flat a
+  flat="$(rc21b_norm < "$1")"
+  while IFS= read -r a; do
+    [ -n "$a" ] || continue
+    case "$flat" in
+      *"$a"*) ;;
+      *) printf 'PROSE-GONE\t%s\n' "$a" ;;
+    esac
+  done <<'EOF'
+### NOT APPLICABLE — the required green that ran nothing
+That green means **NOT APPLICABLE to this diff** — never "the suite passed".
+**Where a merger reads it.**
+gh api repos/FRIKKern/barkpark/check-runs/<id>/annotations
+EOF
+}
+
+# CLAUSE 1 — POSITIVE CONTROL: the guard can SEE. An extraction that came back
+# empty would make every containment below vacuously true, so the segment count
+# is asserted before anything is compared with it.
+RC21B_SEGS="$(rc21b_segments "$RC21B_CLOUD_YML")"
+RC21B_N="$(printf '%s\n' "$RC21B_SEGS" | { grep -c . || true; } | tr -d ' ')"
+if [ "$RC21B_N" -eq 3 ]; then
+  ok "derived $RC21B_N quotable segments from cloud.yml's \`::notice\` body, nothing typed (the interpolated \`Not dispatched:\` segment is excluded by construction — it has no fixed text)"
+else
+  bad "side A derived $RC21B_N segment(s) from cloud.yml, expected 3 — every containment clause below would be vacuous:"
+  printf '%s\n' "$RC21B_SEGS" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 2 — the page side selects the annotation fence and nothing else.
+RC21B_FENCE="$(rc21b_fence "$MERGE_GATES_DOC")"
+RC21B_FLINES="$(printf '%s\n' "$RC21B_FENCE" | { grep -c . || true; } | tr -d ' ')"
+if [ -n "$RC21B_FENCE" ] && [ "$RC21B_FLINES" -eq 1 ]; then
+  ok "…and selected the page's annotation fence by its CONTENT, not by position — one block, $(printf '%s' "$RC21B_FENCE" | wc -c | tr -d ' ') bytes"
+else
+  bad "the fence selector read $RC21B_FLINES block(s) — it is keyed too loosely or found nothing"
+fi
+
+# CLAUSE 3 — THE FALSE-POSITIVE CENSUS, direction one: the live page and the live
+# workflow, both unmodified. This is the clause slice s5 declined to ship without.
+RC21B_OUT="$(rc21b_report "$RC21B_CLOUD_YML" "$MERGE_GATES_DOC")"
+if [ -z "$RC21B_OUT" ]; then
+  ok "every segment cloud.yml emits is present in the page's \`verbatim\` quote — the word is earned, not asserted (0 findings against unmodified in-repo prose)"
+else
+  bad "merge-gates.md's \`verbatim\` quote no longer carries what cloud.yml emits:"
+  printf '%s\n' "$RC21B_OUT" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 4 — the two prose parts §21's table window cannot see.
+RC21B_PROSE="$(rc21b_prose_report "$MERGE_GATES_DOC")"
+if [ -z "$RC21B_PROSE" ]; then
+  ok "…and the NOT APPLICABLE heading, the taxonomy sentence and the \`Where a merger reads it\` \`gh api\` recipe are all still on the page"
+else
+  bad "part of the NOT APPLICABLE section's prose is gone while §21's roster table stayed intact — exactly the blind spot this section exists for:"
+  printf '%s\n' "$RC21B_PROSE" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 5 — THE REWRAP CONTROL, and the whole reason this is containment and not
+# a diff. Render the SAME segments folded at 40 columns, a width the page never
+# uses, and the section must stay green. Without this clause nobody can tell a
+# derivation from a byte compare that happens to agree today.
+RC21B_REWRAP="$TMP/rc21b-rewrap.md"
+{ echo '```'; printf '%s\n' "$RC21B_SEGS" | fold -s -w 40; echo '```'; } > "$RC21B_REWRAP"
+if [ -z "$(rc21b_report "$RC21B_CLOUD_YML" "$RC21B_REWRAP")" ]; then
+  ok "…and the same body re-wrapped at 40 columns still passes — the clause compares WORDS, so re-flowing the page is free and cannot manufacture a red in a merge-blocking suite"
+else
+  bad "a pure re-wrap of the annotation body reddened the clause — this is the exact-bytes failure mode the section was built to avoid:"
+  rc21b_report "$RC21B_CLOUD_YML" "$RC21B_REWRAP" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 6 — MUTATION, the defect itself: reword cloud.yml, touch not one byte of
+# the page. Paired with the unmodified-COPY control below, so the red is
+# attributable to the rewording and not to reading a scratch file.
+RC21B_WF_CTL="$TMP/rc21b-cloud-control.yml"
+cp "$RC21B_CLOUD_YML" "$RC21B_WF_CTL"
+if [ -z "$(rc21b_report "$RC21B_WF_CTL" "$MERGE_GATES_DOC")" ]; then
+  ok "…and an unmodified COPY of cloud.yml stays green — the mutation arm below measures the rewording, not the copy"
+else
+  bad "a byte-identical copy of cloud.yml reddened — the mutation arm below would prove nothing"
+fi
+RC21B_WF_MUT="$TMP/rc21b-cloud-reworded.yml"
+sed "s/never as 'the Cloud suite passed'/never as 'the Cloud suite was verified'/" \
+  "$RC21B_CLOUD_YML" > "$RC21B_WF_MUT"
+RC21B_MUT_OUT="$(rc21b_report "$RC21B_WF_MUT" "$MERGE_GATES_DOC")"
+if [ "$(printf '%s\n' "$RC21B_MUT_OUT" | { grep -c '^DRIFT' || true; } | tr -d ' ')" -eq 1 ] \
+   && case "$RC21B_MUT_OUT" in *"the Cloud suite was verified"*) true ;; *) false ;; esac; then
+  ok "…and REWORDING one line of cloud.yml's message (page untouched) reds this section BY THE LINE — exactly one DRIFT, naming the new wording the page does not carry"
+else
+  bad "rewording cloud.yml's message left the page's \`verbatim\` quote unchallenged — the transcription is still a transcription:"
+  printf '%s\n' "$RC21B_MUT_OUT" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 7 — MUTATION, direction two: delete the taxonomy sentence from a scratch
+# COPY of the page. §21's roster table is untouched, so §21 stays green; this
+# section must not.
+RC21B_DOC_CUT="$TMP/rc21b-doc-cut.md"
+sed 's/That green means \*\*NOT APPLICABLE to this diff\*\* — never/That green is fine — never/' \
+  "$MERGE_GATES_DOC" > "$RC21B_DOC_CUT"
+RC21B_CUT_OUT="$(rc21b_prose_report "$RC21B_DOC_CUT")"
+if [ "$(printf '%s\n' "$RC21B_CUT_OUT" | { grep -c '^PROSE-GONE' || true; } | tr -d ' ')" -eq 1 ]; then
+  ok "…and rewriting the taxonomy sentence on a scratch page reds it BY NAME while the other three anchors stay green — the roster table being intact buys nothing here"
+else
+  bad "the taxonomy sentence can be rewritten without a red:"
+  printf '%s\n' "$RC21B_CUT_OUT" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 8 — THE REFUSAL. Strip the emission from a scratch cloud.yml: side A is
+# now empty, and an empty side must REFUSE, never pass. This is the failure mode
+# that would otherwise make the whole section a green with no subject.
+RC21B_WF_GONE="$TMP/rc21b-cloud-stripped.yml"
+grep -v 'title=Cloud gate: green' "$RC21B_CLOUD_YML" > "$RC21B_WF_GONE"
+RC21B_GONE_OUT="$(rc21b_report "$RC21B_WF_GONE" "$MERGE_GATES_DOC")"
+case "$RC21B_GONE_OUT" in
+  UNRESOLVED*) ok "…and a cloud.yml with the \`::notice\` stripped makes this section REFUSE (UNRESOLVED), never pass — an empty extraction cannot be mistaken for agreement" ;;
+  *) bad "an empty side A did not refuse (got '${RC21B_GONE_OUT:-nothing}') — the section can go green having compared nothing" ;;
+esac
+
+# CLAUSE 9 — the in-repo false-positive census, REPORTED not asserted, on §21
+# clause 4's precedent: the shipped matcher is only ever pointed at
+# merge-gates.md, so another .md growing an annotation fence is a fact worth
+# seeing and never a reason for a merge-blocking suite to red.
+# PRE-FILTERED BY ONE GREP, not a per-file awk over the whole tree: the fence
+# selector only ever takes a block containing `NOTHING CLOUD RAN`, so a file
+# without that string cannot contribute a row, and walking every .md to learn
+# that costs this merge-blocking suite minutes for a figure it only reports.
+RC21B_CORPUS=0
+while IFS= read -r md; do
+  [ -n "$md" ] || continue
+  [ "$md" = "$MERGE_GATES_DOC" ] && continue
+  [ -n "$(rc21b_fence "$md")" ] && RC21B_CORPUS=$((RC21B_CORPUS + 1))
+done <<EOF
+$(grep -rlF --include='*.md' --exclude-dir=.git --exclude-dir=node_modules \
+    --exclude-dir=_build --exclude-dir=deps -- 'NOTHING CLOUD RAN' "$REPO_ROOT" 2>/dev/null || true)
+EOF
+ok "…census: $RC21B_CORPUS other tracked .md file(s) in the repo carry a fence this selector would take (the clause is pointed at merge-gates.md alone; the figure is reported so a second copy of this quote becomes visible)"
+
 section "22. the merge-truth prose clause reads the WHOLE TRACKED corpus, and tells an assertion apart from a record of one"
 
 # THE BLIND SPOT THIS SECTION PINS (cch-w34). `advisory_prose_check` scans
