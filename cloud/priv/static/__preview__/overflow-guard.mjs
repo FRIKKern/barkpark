@@ -8816,12 +8816,22 @@ async function main() {
       );
       let cells = 0, hostsSeen = 0, torn = 0, pageOver = 0, stressRuns = 0, stressSpill = 0;
       let boxOver = 0, midCells = 0, midBoxOver = 0, midPageOver = 0;
+      const stepPop = [];
       for (const theme of ["light", "dark"]) {
         await setViewport(FAIL_WIDTHS[FAIL_WIDTHS.length - 1]);
         await nav(
           `${BASE}${sc.pathname}${sc.search}&scen=theater-failed&theme=${theme}`,
-          `document.querySelector('.new-failed') && document.querySelector('.new-step-detail') && document.querySelector('.new-console-text')`,
+          // D228 on the STEP CAPTIONS (task-39ebd948f40660e3): this gate read
+          // `document.querySelector('.new-step-detail')` and entered on the
+          // FIRST step's caption, while the cells below measure every rendered
+          // hostname run on the screen. The theater renders its steps into
+          // `#new-body` one list at a time, so a screen caught between steps was
+          // measurable and certifiable. `#new-body` is an id host, not a view —
+          // the /new theater is its own page, outside every `section.view` —
+          // which is also why this count is not spelled with the live-view idiom.
+          `document.querySelector('.new-failed') && document.querySelectorAll('#new-body .new-step-detail').length > 0 && document.querySelector('.new-console-text')`,
         );
+        stepPop.push(`${theme}:${await evalJs(`document.querySelectorAll('#new-body .new-step-detail').length`)}`);
         const row = [];
         for (const width of FAIL_WIDTHS) {
           await setViewport(width);
@@ -9034,7 +9044,9 @@ async function main() {
         okLine(
           `${cells} / ${cells} cells clean (${hostsSeen} rendered "${HOSTNAME}" text runs measured — EVERY one on the ` +
           `screen, not a pinned selector) across ${FAIL_WIDTHS.join("/")} in both themes; ${torn} torn hostnames, ` +
-          `${pageOver} pages scrolling sideways. Cells print hosts-found and, when torn, the count`,
+          `${pageOver} pages scrolling sideways. Cells print hosts-found and, when torn, the count. The readiness ` +
+          `gate stood in front of ${stepPop.join(" / ")} .new-step-detail caption(s) under #new-body — counted, not ` +
+          `assumed (D228), so a theater caught between steps cannot pass for a finished one`,
         );
         okLine(
           `THE CRUEL HALF RAN ${stressRuns} time(s) at ${FAIL_WIDTHS[0]} with ${stressSpill} box spill(s): a ` +
@@ -11498,15 +11510,26 @@ async function main() {
           // is a DOCUMENT-WIDE walk, and W35's census (view-scope-census.mjs, run
           // over this file's own bytes) refuses one that can match inside a hidden
           // view — `.instance-card` matches 5 nodes in a hidden #view-overview.
-          ready: `document.querySelector('#overview-body .instance-card')` },
+          // D228 (task-39ebd948f40660e3): COUNTED, not "at least one". The gate
+          // used to enter on the first card of a five-card fixture while the
+          // cells below walk every text-bearing element on the screen, so a
+          // grid caught mid-paint was measured and certified. `pop` is the same
+          // selector the gate waits on; the leg prints what it stood in front of.
+          pop: "#overview-body .instance-card",
+          ready: `document.querySelectorAll('#overview-body .instance-card').length > 0` },
         { name: "billing", scen: "billing-past-due", hash: "#billing", view: "view-billing",
           ready: `document.querySelector('#billing-plan-section .set-h') && !document.querySelector('#billing-recommended .loading')` },
         { name: "activity", scen: "activity", hash: "#activity", view: "view-activity",
           ready: `document.querySelector('#activity-body .tlv-row')` },
         { name: "sites", scen: "mixed-fleet", hash: "#sites", view: "view-sites",
-          ready: `document.querySelector('#sites-body .site-row')` },
+          pop: "#sites-body .site-row",
+          ready: `document.querySelectorAll('#sites-body .site-row').length > 0` },
         { name: "fleet", scen: "mixed-fleet", hash: "#fleet", view: "view-fleet",
-          ready: `document.querySelector('.fleet-row')` },
+          // AND SCOPED WHILE WE ARE HERE: a bare `.fleet-row` is the
+          // document-wide walk the comment on the overview route above refuses,
+          // and this route was spelling it. The live-view idiom is cch-w24-s5's.
+          pop: "section.view:not([hidden]) .fleet-row",
+          ready: `document.querySelectorAll('section.view:not([hidden]) .fleet-row').length > 0` },
       ];
 
       // ANTI-VACUITY 0 — THE INSTRUMENT AND THE FLOOR ARE THE SAME FLOOR.
@@ -11554,6 +11577,7 @@ async function main() {
         `return out;})()`;
 
       let tfCells = 0, tfText = 0, tfBelow = 0, tfAllowed = 0, tfViol = 0;
+      const tfPop = [];
       const tfPerRoute = new Map();
       const tfHist = {};
       for (const rt of TF_ROUTES) {
@@ -11566,6 +11590,9 @@ async function main() {
             `${BASE}/?scen=${rt.scen}&theme=${theme}${rt.hash}`,
             `${rt.ready} && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id===${JSON.stringify(rt.view)};})()`,
           );
+          if (rt.pop && theme === "light") {
+            tfPop.push(`${rt.name}:${await evalJs(`document.querySelectorAll(${JSON.stringify(rt.pop)}).length`)}`);
+          }
           const line = [];
           for (const width of TF_WIDTHS) {
             await setViewport(width);
@@ -11602,7 +11629,8 @@ async function main() {
           `instances, ${tfBelow} of them below ${TF_FLOOR}px — and ALL ${tfAllowed} of those match one of the ` +
           `${TF_ALLOW.length} selectors named in type-floor.mjs's committed literal allowlist, ` +
           `${tfViol} unexplained. Below-floor histogram ${hist || "(empty)"}. Per route (below/text): ` +
-          `${perRoute}. The filing census read 228 of 1560 across the same 30-cell shape`,
+          `${perRoute}. The filing census read 228 of 1560 across the same 30-cell shape. The readiness gates that ` +
+          `count their population (D228) stood in front of ${tfPop.join(", ")} element(s)`,
         );
         okLine(
           `THE TWO HALVES MEASURE DIFFERENT THINGS AND NEITHER IS THE OTHER'S EVIDENCE: the source parse ` +

@@ -434,7 +434,6 @@ export const SINGULAR_REGISTER = [
 
   // ── W24 / W26: the /new deploy theater ──
   { leg: "W24-theater-failed-hostname-whole", selector: ".new-failed", reason: "singleton-by-layout: one failure panel per theater screen — also the readiness gate for it" },
-  { leg: "W24-theater-failed-hostname-whole", selector: ".new-step-detail", reason: "readiness: waits for the first step caption; the torn-hostname measurement below is plural over the steps" },
   { leg: "W24-theater-failed-hostname-whole", selector: ".new-console-text", reason: "readiness: waits for the console pane to paint before its text is measured" },
   { leg: "W24-theater-failed-hostname-whole", selector: ".new-theater-grid", reason: "singleton-by-layout: one theater grid per screen; the STEPS inside it are counted plurally in the same probe" },
   { leg: "W26-new-ready-and-launch-bounded", selector: ".new-ready", reason: "singleton-by-layout: one ready card per theater screen" },
@@ -446,12 +445,9 @@ export const SINGULAR_REGISTER = [
   { leg: "W35-hash-nav-hidden-view-residue", selector: "section.view:not([hidden]) .fleet-row[data-id]", reason: "the tour needs ONE instance id to drill into; any row's `data-id` serves, and the row is already scoped to the visible view" },
   { leg: "W35-hash-nav-hidden-view-residue", selector: "section.view:not([hidden]) .site-row[data-id]", reason: "the same, for the site drill-down" },
   { leg: "W50-site-row-three-hosts-cruel-by-fixture", arg: "'${t.ready}') && (function(){var v=document.quer", reason: "readiness built from the cell table's own `ready` string, one per host cell" },
-  { leg: "W20-type-floor-instances", selector: "#overview-body .instance-card", reason: "readiness for the overview screen; the type-floor measurement itself walks every text node under the view" },
   { leg: "W20-type-floor-instances", selector: "#billing-plan-section .set-h", reason: "readiness for the billing screen: one section heading, under an id host" },
   { leg: "W20-type-floor-instances", selector: "#billing-recommended .loading", reason: "readiness, NEGATED: waits for the recommended panel to stop showing a spinner — the question is whether ANY loading node remains, so one match is enough to keep waiting" },
   { leg: "W20-type-floor-instances", selector: "#activity-body .tlv-row", reason: "readiness for the activity feed: the first row proves the feed painted" },
-  { leg: "W20-type-floor-instances", selector: "#sites-body .site-row", reason: "readiness for the sites screen: the first row proves the list painted" },
-  { leg: "W20-type-floor-instances", selector: ".fleet-row", reason: "readiness for the fleet screen: the first row proves the list painted" },
 ];
 
 /** A singular walk's stable identity: the owning leg plus what it walks. */
