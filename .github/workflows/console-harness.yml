@@ -747,16 +747,16 @@ jobs:
           # wrapper for this, needs node >= 22 (fs.globSync) and this job is
           # pinned to node 20 by cloud/priv/static/__node-version.
           #
-          # FLOOR 113 — RE-DERIVED 2026-09-11 at a333e4b58 from this file's own
+          # FLOOR 119 — RE-DERIVED 2026-09-11 at 50f5dcbf9 from this file's own
           # registrations, and the derivation is BOTH counts because they differ:
-          #   grep -c '^test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 113
-          #   grep -c  'test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 128
-          # 113 is the floor. The 15-line gap is NOT nested or loop-generated
+          #   grep -c '^test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 119
+          #   grep -c  'test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 135
+          # 119 is the floor. The 16-line gap is NOT nested or loop-generated
           # registrations: every extra line is a `RegExp.prototype.test(` call
-          # inside an assertion or a comment quoting one (lines 149, 261, 1030,
-          # 1219, 1258, 1562, 1587, 1590, 1614, 1834, 1836, 1957, 2699, 2761,
-          # 2797 — 2699 carries two, so `grep -o` counts 129 occurrences against
-          # 128 lines). List them with
+          # inside an assertion or a comment quoting one (lines 149, 261, 1045,
+          # 1234, 1273, 1577, 1602, 1605, 1629, 1849, 1851, 1972, 2714, 2776,
+          # 2812, 2981 — 2714 carries two, so `grep -o` counts 136 occurrences
+          # against 135 lines). List them with
           # `grep -n 'test(' <file> | grep -v '^[0-9]*:test('` before trusting
           # either number.
           #
@@ -766,9 +766,14 @@ jobs:
           # pin re-earned`, run 34589153152, job "Console client unit harness").
           # `-lt` never reds on GROWTH, so seven added arms — wave 28's among
           # them — bought no coverage: the whole wave could be deleted again
-          # and 106 would still be met. Re-derive and bump this literal in the
-          # SAME PR that grows the suite, or the ratchet silently stops
-          # ratcheting. Deletion is what this must catch, and now does.
+          # and 106 would still be met. AND IT HAPPENED AGAIN INSIDE THIS PR:
+          # #17798 merged six more arms while this branch was open, taking the
+          # anchored count 113 -> 119 without reddening anything, and the 113
+          # written here a day earlier was already stale before it could merge.
+          # That is the whole failure mode, twice in one week. Re-derive and
+          # bump this literal in the SAME PR that grows the suite, or the
+          # ratchet silently stops ratcheting. Deletion is what this must
+          # catch, and now does.
           #
           # THE OLD COMMENT HERE WAS FALSE, and it is corrected rather than
           # deleted: it read "an unanchored grep for `test(` finds the same 101",
@@ -778,20 +783,20 @@ jobs:
           # grep -c 'test('`). The two counts have always disagreed; the prose
           # asserted agreement and nothing measured it. Five precondition
           # controls landed since, taking the anchored count 101 -> 106, and
-          # wave 28's arms took it 106 -> 113.
+          # wave 28's arms took it 106 -> 113, and #17798's took it 113 -> 119.
           # Exact: growth never reds (`-lt`), deletion does.
           # Same self-test as the console harness step above: the parser must still
           # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
           # step's literal, or this floor has gone blind and its green means nothing.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -lt 113 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against floor 113 — this floor can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -lt 119 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against floor 119 — this floor can no longer lose"; exit 1; }
           PATH="$shim:$PATH" node --test cloud/priv/static/__preview__/seal-predicate.test.mjs 2>&1 | tee /tmp/seal-predicate-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/seal-predicate-tests.txt)
-          if [ "${tally:-0}" -lt 113 ]; then
-            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed floor is 113 — a test file that still LOADS but registers nothing exits 0 as one passing test, so this is what a gutted harness looks like. Restore the tests, or lower this literal deliberately."
+          if [ "${tally:-0}" -lt 119 ]; then
+            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed floor is 119 — a test file that still LOADS but registers nothing exits 0 as one passing test, so this is what a gutted harness looks like. Restore the tests, or lower this literal deliberately."
             exit 1
           fi
-          echo "seal predicate tests: ${tally} tests, floor 113 — the pin re-earned"
+          echo "seal predicate tests: ${tally} tests, floor 119 — the pin re-earned"
           if [ -s "$log" ]; then
             echo "::error title=Seal predicate suite reached the NETWORK::The Console gate is a required context; a suite that curls a host this repo does not own is green only while that host is up. Calls recorded:"
             cat "$log"
