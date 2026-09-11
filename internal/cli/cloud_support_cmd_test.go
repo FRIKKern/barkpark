@@ -2089,3 +2089,150 @@ func TestCloudSupportAddNoTeamFlipParity(t *testing.T) {
 		}
 	}
 }
+
+// TestCloudSupportAddSuccessCarriesTheMainsRosterReading is the DETECTOR for the
+// other half of the supportAddRun.success gap (the max-class half shipped first).
+//
+// THE GAP: stepOnline polls the main until the roster row truthfully reads
+// online-with-capacity — the strongest post-condition `support add` has, because
+// it is what the MAIN observed rather than what this verb asked for — and then
+// threw both facts away. supportAddRun carried no field for them, so the final
+// receipt could not name them on either surface.
+//
+// WHY THIS IS NOT VACUOUS. The roster status and capacity DO appear earlier in
+// the human stream: stepOnline's own "✓ online — hex reads …" progress line
+// carries them, and a bare strings.Contains(stdout, …) would pass on origin/main
+// on that line alone. So the human arm slices stdout at the success banner and
+// asserts on the TAIL only — and asserts the banner is present first, or the
+// slice would be empty and every arm vacuous. The json arm has the mirror
+// property for free: under -o json the progress narration goes to STDERR and
+// stdout is the one final document, so a parsed support.roster is the receipt's
+// own field and nothing else's.
+//
+// RED ON origin/main: both subtests fail there — the success receipt's tail
+// carries neither the status nor the capacity, and support.roster is absent from
+// the machine document.
+func TestCloudSupportAddSuccessCarriesTheMainsRosterReading(t *testing.T) {
+	// Deliberately NOT the statuses the earlier narration would print for a
+	// default fixture: "blocked" plus a capacity value ("xl-42") that exists
+	// nowhere else in the run, so a match can only come from a carried fact.
+	const wantStatus = "blocked"
+	const wantClass = "xl-42"
+	rosterRow := func() map[string]any {
+		return map[string]any{
+			"worker": "hex", "status": wantStatus,
+			"capacity": map[string]any{"max_class": wantClass, "slots_free": 1},
+		}
+	}
+
+	t.Run("table", func(t *testing.T) {
+		supportEnvIsolate(t)
+		runner := newFakeSupportRunner()
+		supportHappyWiring(t, runner)
+		main := newSupportMainRecorder()
+		main.rosterRow = rosterRow()
+		srv := main.serve(t)
+		supportSeedCP(t, srv.URL)
+
+		stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex")
+		if code != exitOK {
+			t.Fatalf("want exit %d, got %d\nstdout:\n%s\nstderr:\n%s", exitOK, code, stdout, stderr)
+		}
+		const banner = "✓ support hex is ONLINE"
+		idx := strings.Index(stdout, banner)
+		if idx < 0 {
+			t.Fatalf("the success banner %q is missing — every arm below would slice an empty tail "+
+				"and pass vacuously\nstdout:\n%s", banner, stdout)
+		}
+		receipt := stdout[idx:]
+		// The control: the tail really is the receipt (it carries a line the
+		// success summary owns and the progress narration never prints).
+		if !strings.Contains(receipt, "  main:") {
+			t.Fatalf("fixture drift: the slice after %q does not look like the success summary\ntail:\n%s", banner, receipt)
+		}
+		for _, want := range []string{wantStatus, wantClass} {
+			if !strings.Contains(receipt, want) {
+				t.Errorf("the success receipt never names %q — the roster reading the poll ACCEPTED ON "+
+					"(the main's own observation of the listener) died inside stepOnline instead of reaching "+
+					"the operator's summary.\nreceipt:\n%s", want, receipt)
+			}
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		supportEnvIsolate(t)
+		runner := newFakeSupportRunner()
+		supportHappyWiring(t, runner)
+		main := newSupportMainRecorder()
+		main.rosterRow = rosterRow()
+		srv := main.serve(t)
+		supportSeedCP(t, srv.URL)
+
+		stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok", output: "json"}, "add", "hex")
+		if code != exitOK {
+			t.Fatalf("want exit %d, got %d\nstdout:\n%s\nstderr:\n%s", exitOK, code, stdout, stderr)
+		}
+		var doc struct {
+			Support struct {
+				Roster struct {
+					Read     bool           `json:"read"`
+					Status   string         `json:"status"`
+					Capacity map[string]any `json:"capacity"`
+				} `json:"roster"`
+			} `json:"support"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+			t.Fatalf("stdout is not one JSON document under -o json: %v\nstdout:\n%s", err, stdout)
+		}
+		if !doc.Support.Roster.Read {
+			t.Errorf("support.roster.read is false after a poll that DID read the main's row — "+
+				"the machine receipt reports the measurement as never taken.\nstdout:\n%s", stdout)
+		}
+		if doc.Support.Roster.Status != wantStatus {
+			t.Errorf("support.roster.status = %q, want %q — the machine receipt does not carry the status "+
+				"the online poll accepted on.\nstdout:\n%s", doc.Support.Roster.Status, wantStatus, stdout)
+		}
+		if got, _ := doc.Support.Roster.Capacity["max_class"].(string); got != wantClass {
+			t.Errorf("support.roster.capacity.max_class = %q, want %q — the capacity the MAIN reported is "+
+				"not in the machine receipt.\nstdout:\n%s", got, wantClass, stdout)
+		}
+	})
+}
+
+// TestSupportRosterFactNarrationStatesTheUnreadPoll pins the composer's degraded
+// fork, which the pair property alone cannot reach: an unread poll must be SAID
+// to be unread, never printed as an empty tail an operator reads as a measured
+// fact. Same shape as TestSupportCapacityNarrationStatesTheDegradedMeasure.
+//
+// MUTATION-PROVEN: making the degraded branch return "" fails the non-empty arm;
+// making it return the measured wording fails the names-the-degradation arm.
+func TestSupportRosterFactNarrationStatesTheUnreadPoll(t *testing.T) {
+	unread := supportRosterFactNarration("", nil)
+	if strings.TrimSpace(unread) == "" {
+		t.Fatalf("supportRosterFactNarration(\"\", nil) = %q — a poll that never read the main's row must be "+
+			"STATED, never printed as an empty tail", unread)
+	}
+	low := strings.ToLower(unread)
+	for _, want := range []string{"not read", "degraded"} {
+		if !strings.Contains(low, want) {
+			t.Errorf("supportRosterFactNarration(\"\", nil) = %q, want it to name the degradation (%q)", unread, want)
+		}
+	}
+	measured := supportRosterFactNarration("idle", map[string]any{"max_class": "medium"})
+	if unread == measured {
+		t.Errorf("the unread sentence is byte-identical to a MEASURED one — the receipt cannot tell the "+
+			"operator which happened.\nboth: %q", unread)
+	}
+	for _, leak := range []string{"idle", "medium"} {
+		if strings.Contains(unread, leak) {
+			t.Errorf("supportRosterFactNarration(\"\", nil) = %q names %q — a reading that never happened must "+
+				"not read like one that did", unread, leak)
+		}
+	}
+	// An empty status with a real capacity is NOT the degraded case: something
+	// was read, so the receipt must print it rather than claim nothing arrived.
+	if half := supportRosterFactNarration("", map[string]any{"max_class": "medium"}); half == unread {
+		t.Errorf("a row that carried a capacity but no status prints the unread sentence — the receipt "+
+			"discards a reading the main really did make.\nboth: %q", unread)
+	}
+}

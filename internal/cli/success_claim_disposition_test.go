@@ -184,6 +184,13 @@ var claimDispositions = []claimDisposition{
 	// carries no class at all, so the post-condition the receipt must switch on is
 	// still the box's raw stdout.
 	{Name: "supportAddRun.success/max-class-degraded", Post: []string{"capacity_stdout"}},
+	// The MAIN'S reading. Both paths are LOAD-BEARING and must not be tidied to
+	// one: arm 3 synthesises a single-axis pair through probeVaryingOnly, so
+	// dropping the status from the composer while it still prints the capacity
+	// (or the reverse) reds exactly one of them. The box is not in the probe at
+	// all — it is held fixed at supportSuccessHost outside it — so there is no
+	// identity path to declare here.
+	{Name: "supportAddRun.success/roster-fact", Post: []string{"status", "capacity.max_class"}},
 	{
 		Name:     "supportAddRun.success",
 		Identity: []string{"ID", "Name"},
