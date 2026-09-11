@@ -339,6 +339,16 @@ on:
       - "scripts/branch-owner.test.sh"
       - "scripts/pr-overlap.sh"
       - "scripts/pr-overlap.test.sh"
+      # ── PRINCIPAL GATE (task-226f1718bb56d489 + task-b512e2d54791f042).
+      # Three harnesses that POST real side effects on an ambient credential.
+      # Their --selftest matrices drive a FAKE curl and assert the exit code
+      # BESIDE the recorded argv, so "refused" and "refused BEFORE the write"
+      # stay distinguishable. The shared gate is the fourth entry: one
+      # implementation, so a mutation there must red all three lanes.
+      - "scripts/media-smoke.sh"
+      - "scripts/pdf-efficiency-proof.sh"
+      - "scripts/pdf-kill-listener-proof.sh"
+      - "scripts/lib/principal-gate.sh"
       # ── LANDED MARK (task-2e16f1390ffc064f) ─────────────────────────────────
       # Per file, never a directory glob — D26 — with two exceptions, both
       # INPUTS rather than neighbours. scripts/pr-task-gate.sh OWNS the `Task:`
@@ -691,6 +701,12 @@ on:
       - "scripts/branch-owner.test.sh"
       - "scripts/pr-overlap.sh"
       - "scripts/pr-overlap.test.sh"
+      # PRINCIPAL GATE — mirrored from on.pull_request.paths (the parity check
+      # at the end of this workflow reds unless the two lists are set-equal).
+      - "scripts/media-smoke.sh"
+      - "scripts/pdf-efficiency-proof.sh"
+      - "scripts/pdf-kill-listener-proof.sh"
+      - "scripts/lib/principal-gate.sh"
       # ── LANDED MARK (task-2e16f1390ffc064f) — mirrors the pull_request list
       # above, globs included. A lane wired on PRs only goes dark the moment a
       # merge lands, and landed-mark.sh's whole subject IS the merge.
@@ -889,6 +905,7 @@ jobs:
       doc-gates-paths-parity: ${{ steps.sets.outputs.doc-gates-paths-parity }}
       merge-gate-bridge: ${{ steps.sets.outputs.merge-gate-bridge }}
       fleet-coordination-harnesses: ${{ steps.sets.outputs.fleet-coordination-harnesses }}
+      principal-gate-harnesses: ${{ steps.sets.outputs.principal-gate-harnesses }}
       compose-smoke-dispatcher: ${{ steps.sets.outputs.compose-smoke-dispatcher }}
       workflow-trigger-coverage: ${{ steps.sets.outputs.workflow-trigger-coverage }}
       orphan-harnesses: ${{ steps.sets.outputs.orphan-harnesses }}
@@ -1085,6 +1102,10 @@ jobs:
           fleet-coordination-harnesses scripts/branch-owner.test.sh
           fleet-coordination-harnesses scripts/pr-overlap.sh
           fleet-coordination-harnesses scripts/pr-overlap.test.sh
+          principal-gate-harnesses scripts/media-smoke.sh
+          principal-gate-harnesses scripts/pdf-efficiency-proof.sh
+          principal-gate-harnesses scripts/pdf-kill-listener-proof.sh
+          principal-gate-harnesses scripts/lib/principal-gate.sh
           compose-smoke-dispatcher scripts/compose-smoke-dispatch.test.sh
           compose-smoke-dispatcher .github/workflows/compose-smoke.yml
           compose-smoke-dispatcher scripts/env-census.py
@@ -2465,6 +2486,49 @@ jobs:
   #
   # All three harnesses stub git, gh and bp; nothing reaches the network, a
   # credential, or the real repo. python3 is the sole unstubbed dependency.
+  principal-gate-harnesses:
+    needs: [changes]
+    if: needs.changes.outputs.principal-gate-harnesses == 'true'
+    name: media-smoke / pdf-proof principal-gate matrices
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: python3 is present (the gate parses the receipt with it)
+        id: setup
+        # pg_url_host and pg_capabilities_tier are python3 one-liners. Without
+        # python3 every host would parse as '' and every arm would refuse — the
+        # suite would go green on a gate that cannot read anything. Make the
+        # dependency fail BY NAME instead.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image — the principal gate parses URLs and receipts with it" >&2
+            exit 1
+          }
+          python3 --version
+      - name: principal-gate library syntax check
+        run: bash -n scripts/lib/principal-gate.sh
+      - name: media-smoke.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/media-smoke.sh
+      - name: media-smoke principal gate (4 arms, fake curl, no network)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # NO `continue-on-error` here or anywhere in this file. It launders a
+        # red into a green job conclusion.
+        run: bash scripts/media-smoke.sh --selftest
+      - name: pdf-efficiency-proof.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/pdf-efficiency-proof.sh
+      - name: pdf-efficiency-proof principal gate (5 arms, no scratch boot)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/pdf-efficiency-proof.sh --selftest
+      - name: pdf-kill-listener-proof.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/pdf-kill-listener-proof.sh
+      - name: pdf-kill-listener-proof principal gate (5 arms, no scratch boot)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/pdf-kill-listener-proof.sh --selftest
+
   fleet-coordination-harnesses:
     needs: [changes]
     if: needs.changes.outputs.fleet-coordination-harnesses == 'true'
