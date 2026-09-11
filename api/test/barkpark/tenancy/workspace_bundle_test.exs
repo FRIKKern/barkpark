@@ -2010,14 +2010,23 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       # caught doing it in the wild): a SECOND, non-sandbox connection holding
       # AccessShareLock, which conflicts with the AccessExclusiveLock every
       # ALTER TABLE in the import's DDL passes needs.
-      hold_access_share_lock!("documents")
+      conn = hold_access_share_lock!("documents")
 
       {elapsed_us, error} =
-        :timer.tc(fn ->
-          assert_raise WorkspaceBundle.ImportLockError, fn ->
-            WorkspaceBundle.import_bundle(bundle)
-          end
-        end)
+        try do
+          :timer.tc(fn ->
+            assert_raise WorkspaceBundle.ImportLockError, fn ->
+              WorkspaceBundle.import_bundle(bundle)
+            end
+          end)
+        after
+          # RELEASED HERE, not by the supervisor at test teardown. An open
+          # transaction on a supervised Postgrex pool outlives the test body by
+          # however long shutdown takes, and this lock is on a table EVERY
+          # bundle test's import must ALTER — an earlier draft of this test let
+          # it leak and reddened an unrelated merge-import test at seed 741453.
+          release_access_share_lock!(conn)
+        end
 
       assert error.phase == :drop_member_fks
       assert error.code == "ddl_lock_not_available"
@@ -2038,15 +2047,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   end
 
   # A real second backend, OUTSIDE the ExUnit sandbox, parked in an open
-  # transaction holding AccessShareLock on `table` for the rest of the test.
-  # Supervised, so the lock is released when the test ends however it ends.
+  # transaction holding AccessShareLock on `table`. Linked to the test process,
+  # so a crash frees it; the caller MUST still release it explicitly.
   defp hold_access_share_lock!(table) do
     conn_opts =
       Repo.config()
       |> Keyword.take([:hostname, :port, :username, :password, :database, :socket_dir, :ssl])
       |> Keyword.put(:pool_size, 1)
 
-    conn = start_supervised!({Postgrex, conn_opts})
+    {:ok, conn} = Postgrex.start_link(conn_opts)
 
     {:ok, _} = Postgrex.query(conn, "BEGIN", [])
 
@@ -2054,6 +2063,58 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       Postgrex.query(conn, "LOCK TABLE public.#{quote_ident(table)} IN ACCESS SHARE MODE", [])
 
     conn
+  end
+
+  # ROLLBACK is what actually frees the lock, server-side and synchronously;
+  # stopping the pool afterwards just reclaims the backend. Both matter: this
+  # lock sits on a table EVERY bundle test's import must ALTER, so leaving it
+  # to process teardown reddens whichever unrelated test runs next (an earlier
+  # draft of this test did exactly that at seed 741453).
+  defp release_access_share_lock!(conn) do
+    _ = Postgrex.query(conn, "ROLLBACK", [])
+    _ = GenServer.stop(conn, :normal, 5_000)
+    await_no_foreign_lock!("documents", 5_000)
+  end
+
+  # PROVE the release rather than assume it. Stopping the pool does not by
+  # itself guarantee the backend is gone, and a surviving AccessShareLock on a
+  # table every bundle import must ALTER reappears as an ImportLockError in
+  # whichever unrelated test runs next — a leak that reads as a defect in the
+  # fix under test. Read from the sandbox connection, which is a DIFFERENT
+  # backend, so `pid <> pg_backend_pid()` isolates the holder we planted.
+  defp await_no_foreign_lock!(table, budget_ms) do
+    held? = fn ->
+      scalar(
+        """
+        SELECT count(*)
+        FROM pg_locks l
+        JOIN pg_class c ON c.oid = l.relation
+        WHERE l.locktype = 'relation'
+          AND l.granted
+          AND l.pid <> pg_backend_pid()
+          AND c.relname = $1
+        """,
+        [table]
+      ) > 0
+    end
+
+    deadline = System.monotonic_time(:millisecond) + budget_ms
+
+    Stream.repeatedly(fn ->
+      if held?.() and System.monotonic_time(:millisecond) < deadline do
+        Process.sleep(25)
+        :retry
+      else
+        :done
+      end
+    end)
+    |> Enum.find(&(&1 == :done))
+
+    refute held?.(),
+           "the planted AccessShareLock on #{table} survived its release — the next test's " <>
+             "import would fail on it"
+
+    :ok
   end
 
   # ── seed + helpers ────────────────────────────────────────────────────────────
