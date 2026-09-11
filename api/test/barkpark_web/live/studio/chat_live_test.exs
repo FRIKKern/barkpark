@@ -5420,6 +5420,54 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert replay_chip == live_chip
       assert replay_chip =~ "/admin/projects?task=task-d76fa14f63626556"
     end
+
+    # task-5a49dc55626ea80d (scc-w12-chip-replay-cap). The test ABOVE hand-writes
+    # the replayed row's `output`, so it never meets the Recorder's 4,000-char
+    # raw-text cap; this one drives the REAL recorder with a >100 KB result and
+    # reopens the same session, which is the path a large MCP read actually
+    # takes. The raw text in the row is truncated mid-JSON and cannot decode —
+    # the persisted chip envelope is what keeps the chip a chip.
+    test "a >4 KB result recorded for real still renders its chip when the session reopens",
+         %{conn: conn} do
+      output =
+        Jason.encode!(%{
+          "ok" => true,
+          "docs" =>
+            for i <- 1..700 do
+              %{
+                "doc_id" => "task-cap#{i}",
+                "title" => "Capped result #{i} #{String.duplicate("x", 120)}",
+                "type" => "task"
+              }
+            end
+        })
+
+      assert byte_size(output) > 100_000
+
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, live_view, _} = live(conn, "/studio/chat")
+      render_submit(element(live_view, "form[phx-submit=send]"), %{"message" => "go"})
+      sid = store_id(live_view)
+      send_tool_use(sid, "mcp__barkpark__task_ready", %{})
+      send_frame(sid, tool_result_frame("toolu_x", output))
+
+      live_html = render(live_view)
+      assert live_html =~ "700 results"
+      assert live_html =~ "/admin/projects?task=task-cap1"
+
+      # the store never holds the 100 KB body — the cap is untouched
+      row =
+        StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["tool_use_id"] == "toolu_x"))
+
+      assert String.length(row.metadata["output"]) == 4_000
+      refute match?({:ok, _}, Jason.decode(row.metadata["output"]))
+
+      {:ok, _replay_view, replay_html} = live(conn, "/studio/chat/#{sid}")
+
+      assert replay_html =~ "700 results"
+      assert chip_fragment(replay_html) == chip_fragment(live_html)
+    end
   end
 
   describe "nested agent traces (charter D40)" do

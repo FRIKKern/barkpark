@@ -51,13 +51,18 @@ set -euo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REAL_ROOT="$(cd -- "$HERE/.." && pwd)"
 
-# The four aggregators, as `<workflow-file>:<job-key>`. The gate NAME and the
+# The gate aggregators, as `<workflow-file>:<job-key>`. The gate NAME and the
 # expected sentence are derived from the YAML, not from this list; this list
-# only says WHICH files must carry the shape.
+# only says WHICH files must carry the shape. ci.yml joined on 2026-09-11
+# (pds-bl-w48-web-gate-cannot-block-and-greens-vacuously): it gained the shim
+# when its `pull_request` paths filter was deleted, and `Web gate` is the name
+# proposed for registration, so it must carry the disclosure from day one
+# rather than after the fact.
 GATES='elixir.yml:elixir-gate
 cloud.yml:cloud-gate
 console-harness.yml:console-gate
-security.yml:security-gate'
+security.yml:security-gate
+ci.yml:web-gate'
 
 pass=0
 fail=0
@@ -196,6 +201,12 @@ emit("notice_after_exit", ei != -1 and ni != -1 and ni > ei)
 # was computed from was actually read: a parser that stopped matching would
 # report a serene "0" forever.
 emit("decide_consumes_count", len(re.findall(r'^\s*decide\s+"', run, re.M)))
+# …against the SIZE OF THE NEEDS SET, which is what the count must equal. A
+# bare constant floor could only catch a neutered reader; equality also catches
+# an upstream sitting in `needs` that nothing judges — the `blocking_not_in_needs`
+# defect from scripts/security-gate-shape.test.sh, read from the other side.
+needs = agg.get("needs") or []
+emit("needs_count", len(needs) if isinstance(needs, list) else 1)
 out.close()
 PY
 
@@ -259,14 +270,19 @@ for spec in $GATES; do
     no "$file: the notice is not guarded by 'if [ \"\$dispatched\" -eq 0 ]'"
   [ "$(fact notice_after_exit)" = "True" ] && ok "$file: notice sits after the fail-closed exit" ||
     no "$file: the notice can be reached on a RED run"
-  # Populated-parser floor: 0 here means the reader stopped matching, not that
-  # the workflow got simpler.
+  # Populated-parser floor AND the coverage equality. 0 means the reader stopped
+  # matching; anything less than the needs set means an upstream nothing judges.
+  # DERIVED from the YAML, never a constant: a constant of 4 would have barred
+  # an honest three-upstream aggregator while saying nothing about a seven-job
+  # one that judges six.
   case "$(fact decide_consumes_count)" in
     '' | *[!0-9]*) no "$file: decide_consumes_count = '$(fact decide_consumes_count)' — the emitter is broken" ;;
-    *) if [ "$(fact decide_consumes_count)" -ge 4 ]; then
-         ok "$file: decide calls read = $(fact decide_consumes_count) (>= 4)"
+    *) if [ "$(fact decide_consumes_count)" -lt 3 ]; then
+         no "$file: decide calls read = $(fact decide_consumes_count), under the parser floor of 3 — the reader is neutered, not the workflow clean"
+       elif [ "$(fact decide_consumes_count)" = "$(fact needs_count)" ]; then
+         ok "$file: decide calls read = $(fact decide_consumes_count), one per job in needs ($(fact needs_count))"
        else
-         no "$file: decide calls read = $(fact decide_consumes_count), wanted >= 4 — the reader is neutered, not the workflow clean"
+         no "$file: decide calls read = $(fact decide_consumes_count) but needs holds $(fact needs_count) job(s) — every upstream in needs must be judged, or the aggregator greens while one of them reds"
        fi ;;
   esac
 done

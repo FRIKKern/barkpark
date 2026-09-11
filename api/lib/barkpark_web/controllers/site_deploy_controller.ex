@@ -224,15 +224,23 @@ defmodule BarkparkWeb.SiteDeployController do
       {:ok, slug} ->
         requested_build_id = Map.get(params, "build_id")
 
-        if record_requested?(params) do
-          json(conn, render_build_record(DeployRunner.build_record(slug, requested_build_id)))
-        else
-          status = DeployRunner.status(slug)
+        cond do
+          # THE BYTES DOOR (dr-bl-recorder-http-read-path c1). Nested INSIDE
+          # `record=1` on purpose: `bytes=1` alone changes nothing, so the live
+          # poll's contract is untouched by a caller that sets only the new flag.
+          record_requested?(params) and bytes_requested?(params) ->
+            build_log_bytes(conn, slug, requested_build_id)
 
-          case resolve_status_match(status, requested_build_id) do
-            :serve -> json(conn, render_status(status))
-            :not_found -> build_id_mismatch(conn, slug, requested_build_id)
-          end
+          record_requested?(params) ->
+            json(conn, render_build_record(DeployRunner.build_record(slug, requested_build_id)))
+
+          true ->
+            status = DeployRunner.status(slug)
+
+            case resolve_status_match(status, requested_build_id) do
+              :serve -> json(conn, render_status(status))
+              :not_found -> build_id_mismatch(conn, slug, requested_build_id)
+            end
         end
 
       {:error, code, message} ->
@@ -248,6 +256,15 @@ defmodule BarkparkWeb.SiteDeployController do
   # rather than silently switching response shapes.
   defp record_requested?(params) do
     Map.get(params, "record") in ["1", "true", "yes", "on"]
+  end
+
+  # THE SECOND OPT-IN, and it only means anything alongside `record=1`. A box
+  # serving bytes is a strictly larger surface than one serving the structured
+  # record, so it gets its own flag rather than widening what `record=1` returns:
+  # a caller that has always asked for the record keeps receiving byte-identical
+  # answers, and `render_build_record/1`'s field list is untouched by this slice.
+  defp bytes_requested?(params) do
+    Map.get(params, "bytes") in ["1", "true", "yes", "on"]
   end
 
   @doc """
@@ -579,6 +596,109 @@ defmodule BarkparkWeb.SiteDeployController do
   end
 
   defp cap_reason(other), do: other
+
+  # ── GET ?record=1&bytes=1 — THE BYTES DOOR (dr-bl-recorder-http-read-path c1) ──
+  #
+  # WHY THIS IS A SECOND FLAG AND NOT A WIDER RECORD. The record door above is
+  # read by the control plane's `Sites.BuildLog` and its 404/410/200 shapes are
+  # load-bearing on that end. Serving bytes needs answers the record door has no
+  # vocabulary for — chiefly a REFUSAL for a log that exists and may not be shown —
+  # so the bytes ride their own opt-in with their own statuses, and every existing
+  # caller's response is byte-identical to what it was.
+  #
+  # FOUR ANSWERS, SEPARATED BY STATUS CODE so a client that reads nothing but the
+  # status cannot conflate them:
+  #
+  #   * 200 — the bytes, as a BOUNDED TAIL (`DeployRunner.build_log_tail/2`), or a
+  #     definite "there are none": `log_state` `missing` / `never_recorded` with a
+  #     null `tail`. Those are complete answers, the same way the record door
+  #     answers `never_recorded` with a 200.
+  #   * 410 `build_log_evicted` — a tombstone says retention took the bytes.
+  #   * 422 `build_log_unscrubbed` — THE REFUSAL. The record's `log_scrub` is nil:
+  #     the bytes were NEVER FOLDED, so they may still carry a plaintext
+  #     `BARKPARK_TOKEN=`. Deliberately its OWN status, not a 404 and not a 200
+  #     with an empty tail: an operator must be able to tell "withheld" from
+  #     "gone", and a monitor must be able to count it. 422 rather than 403 —
+  #     the credential presented is fine, it is the RESOURCE's state that makes
+  #     it unservable, and 403 is already this scope's auth answer.
+  #   * 500 `build_log_unreadable` — the file is there and could not be read.
+  #
+  # THE FIELD LIST IS EXPLICIT AND IDENTICAL ON EVERY SHAPE, refusals included.
+  # One key set means a caller never has to branch on status to know what it
+  # holds, and a field the recorder grows later is invisible here until a human
+  # adds it — the same law `render_build_record/1` states, and it matters more
+  # here, because this is the door that does serve bytes.
+  defp build_log_bytes(conn, slug, build_id) do
+    case DeployRunner.build_log_tail(slug, build_id) do
+      {:ok, served} ->
+        json(conn, render_build_log_bytes(served, nil))
+
+      {:error, :unscrubbed, record} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(
+          render_build_log_bytes(
+            record,
+            {"build_log_unscrubbed",
+             "this build's recorded log was never folded through the secret scrubber " <>
+               "(log_scrub is null), so its bytes may carry a plaintext credential and " <>
+               "are withheld — the bytes exist, this is a refusal and not an absence"}
+          )
+        )
+
+      {:error, :evicted, record} ->
+        conn
+        |> put_status(:gone)
+        |> json(
+          render_build_log_bytes(
+            record,
+            {"build_log_evicted",
+             "retention reclaimed this build's log bytes; the terminal record survives " <>
+               "to say so and retrying cannot bring them back"}
+          )
+        )
+
+      {:error, :unreadable, record} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(
+          render_build_log_bytes(
+            record,
+            {"build_log_unreadable", "this build's log could not be read off the box"}
+          )
+        )
+
+      # `missing` and `never_recorded` — definite answers, so 200, exactly as the
+      # record door answers them. The null `tail` plus the honest `log_state` is
+      # the whole content.
+      {:error, _state, record} ->
+        json(conn, render_build_log_bytes(record, nil))
+    end
+  end
+
+  defp render_build_log_bytes(record, error) do
+    base = %{
+      slug: record.slug,
+      build_id: record.build_id,
+      record: Atom.to_string(record.record),
+      log_state: Atom.to_string(record.log_state),
+      # THE FIELD A BYTE DOOR MUST READ. Echoed on every shape so a caller can
+      # see WHY a refusal was a refusal, and so a 200 carries the proof that the
+      # bytes it holds were folded.
+      log_scrub: record.log_scrub,
+      log_path: record.log_path,
+      log_bytes: record.log_bytes,
+      tail_bytes: Map.get(record, :tail_bytes),
+      truncated: Map.get(record, :truncated, false),
+      tail: Map.get(record, :tail),
+      evicted_at: record_iso(record.evicted_at)
+    }
+
+    case error do
+      nil -> base
+      {code, message} -> Map.put(base, :error, %{code: code, message: message})
+    end
+  end
 
   defp render_status(status) do
     %{
