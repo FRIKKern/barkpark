@@ -26475,6 +26475,14 @@ test("cch-w51-s2 arm C: a real non-test BackupProbe is wired, and the console no
 // throws ReferenceError (TDZ) on any fixture declared further down. Keep this
 // anchor BELOW the file's LAST top-level `await` (measured cch-w61-s1: node 20
 // and node 22 both crash a group planted above it).
+// THAT RULE IS ENFORCED BY A PROGRAM, NOT BY THIS PARAGRAPH. Until cchi-w61 it
+// was prose only, and prose cannot red: `scripts/console-tdz-order-check.mjs`
+// now measures this MARK line's number against the line of the file's LAST
+// depth-0 `await` and fails by name (`ZONE ANCHOR ORDER`) when the mark is not
+// below it. It reds on the CAUSE — an anchor out of position, with the
+// crossing count still 0 — rather than waiting for the first generated group
+// that happens to read a late binding. It runs on every PR in
+// console-harness.yml's deliberately unfiltered `path-escape` job.
 // Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
 
 // ── cch-w58-s6 · THE FLEET ROW STATES THE VERIFICATION ANSWER ──────────────
