@@ -112,7 +112,10 @@ defmodule Barkpark.PortableDoc.Render.InlineBlockWrapperParityTest do
         %{
           "type" => "strong",
           "children" => [
-            %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "under a mark"}]}
+            %{
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "under a mark"}]
+            }
           ]
         }
       ]
