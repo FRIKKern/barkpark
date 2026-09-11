@@ -1734,10 +1734,12 @@ jobs:
       - name: pds-scratch-target two-root coexistence + teardown
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/pds-scratch-target_test.sh
-      - name: pds-read-preflight-audit census ratchet + crown-stamp refusal pairs (stub bp, no server)
+      - name: pds-read-preflight-audit census ratchet + crown-stamp refusal/read-back pairs (stub bp, no server)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # 4 arms, each a mutation beside a control. pds-crown-stamp.sh is a
-        # subject of arm 3, so an edit to it re-runs this job.
+        # 5 arms, each a mutation beside a control. pds-crown-stamp.sh is a
+        # subject of arms 3 and 5, so an edit to it re-runs this job. Arm 5 is
+        # the read-back evidence diff: a stub bp that ACKS a met-to-met stamp and
+        # drops the evidence must red, the honest stub must stay green.
         run: bash scripts/pds-read-preflight-audit_test.sh
 
   ci-failure-issue-filer:
