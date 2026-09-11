@@ -671,7 +671,9 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   reaches the census by landing in source, not by someone remembering to add a
   row. On its first run it found four, three of which had never been registered,
   and one of those three — `site_build_log` — turned out to be addressed to
-  nobody.
+  nobody. That finding is CLOSED: `dr-w19-site-build-log-is-operator-only`
+  re-pointed the route at the team-scoped door its siblings use, the rot assertion
+  below reddened on the stale allowlist row, and the row was deleted by name.
 
   And the boundary still MOVES LOUDLY: when a reader is re-pointed at a reachable
   route, or a signal's last reachable reader is taken away, the diff says so on
@@ -895,23 +897,22 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
     # edit at all. The rot assertion below reddened in its own words ("This is
     # the GOOD direction: its closer landed. Delete the allowlist row.") and the
     # row is gone in the same commit as the re-address that closed it.
-    # FOUND BY THE DERIVATION, NOT BY A HUMAN (dr-w19-audience-registry-fail-open).
-    # `site_build_log` had no row in this file at all until the candidate set
-    # named it; the census had been green over it for nine waves.
-    "site_build_log" =>
-      "EMPTY BY CONSTRUCTION — `SiteBuildLog` sends " <>
-        "GET /v1/sites/*/deployments/*/build-log, and the router enforces tier " <>
-        "`operator` on it, which is the `:platform_admin_emails` allowlist: unset on " <>
-        "prod, unsettable through any route, console action or User field. The Go " <>
-        "method's own doc comment says it in its own words — 'Bearer, operator-gated'. " <>
-        "So the ONE deploy-health read that carries a failed build's ACTUAL LOG TEXT, " <>
-        "rather than a failure-class label, is readable by zero accounts, while its " <>
-        "sibling reads on the same resource (GET /v1/sites/*/deployments, tier `user`) " <>
-        "are reachable by every team member. This row is the census admitting a hole " <>
-        "it only just became able to see, not excusing it. " <>
-        "CLOSER: dr-w19-site-build-log-is-operator-only — re-point the read at the " <>
-        "team-scoped door its siblings already use; when it lands, the rot assertion " <>
-        "below reds and orders this row deleted by name.",
+    # `site_build_log` used to sit here, and it was FOUND BY THE DERIVATION, NOT BY
+    # A HUMAN (dr-w19-audience-registry-fail-open) — it had no row in this file at
+    # all until the candidate set named it, and the census had been green over it
+    # for nine waves. Its reader sends GET /v1/sites/*/deployments/*/build-log,
+    # which the router enforced at tier `operator`: the `:platform_admin_emails`
+    # allowlist, unset on prod and unsettable through any route, console action or
+    # User field. So the ONE deploy-health read that carries a failed build's
+    # ACTUAL LOG TEXT, rather than a failure-class label, was readable by zero
+    # accounts while its sibling reads on the same resource
+    # (GET /v1/sites/*/deployments/*, tier `user(s)`) answered every member of the
+    # owning team. Its named CLOSER (dr-w19-site-build-log-is-operator-only) is
+    # THIS branch: the route now goes through `with_team_site(conn, {:ability,
+    # "read"}, …)` — the sibling's own door — so Side B derives tier `user(s)` and
+    # the rot assertion below reddened in its own words ("This is the GOOD
+    # direction: its closer landed. Delete the allowlist row."). The row is gone in
+    # the same commit as the re-point that closed it.
     "fleet_rollout_state" =>
       "EMPTY BY CONSTRUCTION — but the CONSTRUCTION MOVED, and so did the reason. " <>
         "`platform_admin_emails/0` reads `[]` when the config key is unset, so the " <>
@@ -1399,10 +1400,13 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   #   * `SpawnSiteDeployment` — GET /v1/sites/*/deployments/*. Registered as
   #     `site_deployment_detail`; derives tier `user`, reachable.
   #   * `SiteBuildLog` — GET /v1/sites/*/deployments/*/build-log. Registered as
-  #     `site_build_log`, and it is the FINDING: the route is operator-gated (the
-  #     Go doc comment says so in its own words), so the one deploy-health read
-  #     that carries a failed build's actual log text is addressed to a
-  #     population of zero. It is in the allowlist above with its filed closer.
+  #     `site_build_log`, and it WAS the FINDING: the route was operator-gated, so
+  #     the one deploy-health read that carries a failed build's actual log text
+  #     was addressed to a population of zero. CLOSED by
+  #     dr-w19-site-build-log-is-operator-only — the route now takes
+  #     `with_team_site(conn, {:ability, "read"}, …)`, derives tier `user(s)`, and
+  #     is reachable by every member of the team that owns the site. Its allowlist
+  #     row is deleted; the rot assertion is what ordered that deletion.
   #   * `deliver_deploy_rate_notices` — the deploy-failure-RATE alert. Registered
   #     as `site_deploy_rate_alert`; reaches `team_member_emails/1` through one
   #     hop, so its audience is `team_members` and it is reachable.

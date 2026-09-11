@@ -269,14 +269,30 @@ defmodule Barkpark.PdsDoorCensusTest do
     # denominator. It arrived with no disposition row, so main read UNDISPOSED 3 of
     # 42 and this pin refuted 6 at 56c290852 — the pin did its job. RE-DERIVED by
     # running the census on this tree: it prints `harnesses : 7` and names the file.
-    assert out =~ ~r/harnesses\s+: 7 /,
-           "the derived harness count moved off 7. Harness-hood is derived from the " <>
-             "*_test.sh / *.test.sh name; if an eighth harness landed (or one left), " <>
+    #
+    # AN EIGHTH HARNESS LANDED, AND THIS LINE SAYS SO ON PURPOSE (2026-09-11):
+    # scripts/pds-live-hetzner-placement-group_test.sh, the offline harness for
+    # the diagnostic half of the Hetzner placement-group runner (#17687, 9db224f2c).
+    # It is a harness by the same derived *_test.sh rule, it is wired into
+    # shell-harnesses.yml (pds-hetzner-offline job, not a required context, so its
+    # disposition row is PRICE, not THROUGH), and it belongs in the WITH-HARNESSES
+    # denominator. It arrived with no disposition row, so main read UNDISPOSED 1 of
+    # 44 and this pin refuted 7 — the pin did its job a second time in one day.
+    # RE-DERIVED by running the census on this tree: it prints `harnesses : 8` and
+    # names the file.
+    assert out =~ ~r/harnesses\s+: 8 /,
+           "the derived harness count moved off 8. Harness-hood is derived from the " <>
+             "*_test.sh / *.test.sh name; if a ninth harness landed (or one left), " <>
              "say so on purpose.\n#{out}"
+
+    assert out =~ "pds-live-hetzner-placement-group_test.sh",
+           "the census stopped naming pds-live-hetzner-placement-group_test.sh among its " <>
+             "derived harnesses. The count above would still read 8 if a DIFFERENT harness " <>
+             "had replaced it, so the count alone does not pin which files it counted.\n#{out}"
 
     assert out =~ "pds-read-preflight-audit_test.sh",
            "the census stopped naming pds-read-preflight-audit_test.sh among its derived " <>
-             "harnesses. The count above would still read 7 if a DIFFERENT harness had " <>
+             "harnesses. The count above would still read 8 if a DIFFERENT harness had " <>
              "replaced it, so the count alone does not pin which files it counted.\n#{out}"
 
     assert out =~ "pds-pull-proof_test.sh",

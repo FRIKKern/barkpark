@@ -560,6 +560,12 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
   # fires for them, so the D38 law is untouched for anything we don't name.
   @mcp_prefix "mcp__barkpark__"
 
+  # The persisted chip envelope's version, read from its OWN writer at COMPILE
+  # time (`Barkpark.StudioChat.McpChip`) rather than retyped: a reader and a
+  # writer that disagree on this number silently stop chipping every replayed
+  # row, which is exactly the failure this envelope exists to fix.
+  @chip_envelope_version Barkpark.StudioChat.McpChip.version()
+
   # Summarize law (charter payload law): task_ready shipped 112,838 chars in ONE
   # block. A chip NEVER dumps a result set — it shows at most this many hits with
   # an honest "+N more"; the store keeps everything for the generic ⎿ row.
@@ -632,22 +638,68 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
   public reader (`/papers/`). Pure + total — the SAME call on the live-append
   and replayed paths yields identical HTML (the `diff?`/`spawn?` parity
   precedent).
+
+  The optional third argument is the persisted chip ENVELOPE
+  (`metadata.mcp_chip`, written by `Barkpark.StudioChat.McpChip` — charter D64,
+  task-5a49dc55626ea80d). The Recorder caps a row's raw `output` at 4,000
+  characters, so a result past that lands in the store cut mid-object and could
+  never decode; the envelope carries the same classification facts in a compact
+  versioned form, and is preferred when present. A LIVE row has none and takes
+  the `output` path exactly as before, so small results are byte-unchanged on
+  both paths. A malformed, unknown-version, or redacted envelope falls THROUGH
+  to `output` — and a truncated `output` then honestly yields the generic row.
   """
-  @spec chip(String.t() | nil, String.t() | nil) :: map() | nil
-  def chip(tool, output) when is_binary(tool) and is_binary(output) do
+  @spec chip(String.t() | nil, String.t() | nil, map() | nil) :: map() | nil
+  def chip(tool, output, envelope \\ nil)
+
+  def chip(tool, output, envelope) when is_binary(tool) do
+    structured_chip(tool, envelope) || raw_chip(tool, output)
+  end
+
+  def chip(_, _, _), do: nil
+
+  defp raw_chip(tool, output) when is_binary(output) do
     with true <- String.starts_with?(tool, @mcp_prefix),
          {:ok, payload} when is_map(payload) <- decode_payload(output),
          false <- payload["ok"] == false do
-      suffix =
-        binary_part(tool, byte_size(@mcp_prefix), byte_size(tool) - byte_size(@mcp_prefix))
-
-      build_chip(suffix, payload)
+      build_chip(mcp_suffix(tool), payload)
     else
       _ -> nil
     end
   end
 
-  def chip(_, _), do: nil
+  defp raw_chip(_, _), do: nil
+
+  # The persisted envelope path. The version must match EXACTLY: a future shape
+  # is unknown here and degrades to the generic row rather than being
+  # half-interpreted. The reduced payload is the SAME shape a full one is, so it
+  # goes through the identical `build_chip/2` — there is no second classifier to
+  # drift. Only the summarized counts are restored afterwards, because "+N more"
+  # is a receipt and a truncated list must not report itself as the whole set.
+  defp structured_chip(tool, %{"v" => @chip_envelope_version, "payload" => payload} = envelope)
+       when is_map(payload) do
+    with true <- String.starts_with?(tool, @mcp_prefix),
+         %{} = chip <- build_chip(mcp_suffix(tool), payload) do
+      restore_totals(chip, envelope)
+    else
+      _ -> nil
+    end
+  end
+
+  defp structured_chip(_, _), do: nil
+
+  defp restore_totals(%{kind: :search, hits: hits} = chip, %{"list_total" => total})
+       when is_integer(total) and total >= 0,
+       do: %{chip | total: total, overflow: max(total - length(hits), 0)}
+
+  defp restore_totals(%{kind: :prime, ready: ready} = chip, %{"ready_total" => total})
+       when is_integer(total) and total >= 0,
+       do: %{chip | ready_total: total, overflow: max(total - length(ready), 0)}
+
+  defp restore_totals(chip, _envelope), do: chip
+
+  defp mcp_suffix(tool),
+    do: binary_part(tool, byte_size(@mcp_prefix), byte_size(tool) - byte_size(@mcp_prefix))
 
   defp decode_payload(output) do
     case Jason.decode(output) do

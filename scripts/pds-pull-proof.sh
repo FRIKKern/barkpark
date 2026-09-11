@@ -325,7 +325,13 @@ head_step() { # id title
 art_marker_field() { # field dir -> value on stdout (empty when unreadable)
   local f="$1" d="$2"
   [ -f "$d/$ART_MARKER_NAME" ] || return 0
-  sed -n "s/^$f:[[:space:]]*//p" "$d/$ART_MARKER_NAME" 2>/dev/null | head -n 1
+  # NOT `sed … | head -n 1`: `head` exits after one line, `sed` takes SIGPIPE on
+  # the rest of the marker file, and under this script's `set -euo pipefail` the
+  # bare pipeline's 141 KILLS THE HARNESS — on a marker file that is merely
+  # longer than the pipe buffer.  Capture, then take the first line in the shell.
+  local raw
+  raw="$(sed -n "s/^$f:[[:space:]]*//p" "$d/$ART_MARKER_NAME" 2>/dev/null || true)"
+  [ -n "$raw" ] && printf '%s\n' "${raw%%$'\n'*}"
   return 0
 }
 
@@ -1022,6 +1028,13 @@ banner() {
   say "     and only as the FIRING control for steps 3 and 4. Its memory figure is"
   say "     measured by a 1 Hz ps sampler over SSH during that export; no cgroup"
   say "     number and no survey number is reprinted as this run's."
+  say "   · RSS scope — that peak is WHOLE-PROCESS beam.smp RSS over the export"
+  say "     window, NOT export-exclusive. The same BEAM serves the live content"
+  say "     API throughout, and \`ps -o rss=\` cannot separate export-caused memory"
+  say "     from concurrent request traffic at OS granularity — doing so would"
+  say "     need per-Erlang-process instrumentation this harness does not have."
+  say "     Read it as a box-level OOM-risk ceiling (PDS-D31), never as the"
+  say "     export's own cost."
   say ""
   say "  THE SCAN'S OWN LIMITS, VERBATIM (they bound every 'clean' below):"
   say "   1. VERBATIM-VALUE-BASED ONLY. It matches the exact bytes it was given. It"
@@ -2137,6 +2150,19 @@ full_meta_field() { # key -> the value recorded in the .meta sidecar (empty if a
   awk -v k="$1:" '$1 == k { $1=""; sub(/^[ \t]+/, ""); print; exit }' "$FULL_META"
 }
 
+# ── RSS ATTRIBUTION ACROSS INVOCATIONS (pds-bl-step8-cross-invocation-gap) ──
+# The RSS peak lives in a per-invocation RUN_TAG-keyed artifact directory, so
+# ONLY the invocation that actually spent the attempt has one. A reuse
+# invocation measured nothing, and must say so rather than letting the parked
+# sidecar's figure read as its own. Reads $FULL_META and nothing else.
+rss_reuse_attribution() { # -> the sentence a reusing invocation prints
+  local meta_run meta_peak
+  meta_run="$(full_meta_field run_id)"
+  meta_peak="$(full_meta_field rss_peak_kb)"
+  printf 'this invocation measured NO RSS of its own — it spent 0 attempts and reused the parked bundle. The peak recorded beside it (%s KB) was measured by run %s and is attributed to THAT invocation, never to run %s (tag %s).' \
+    "${meta_peak:-unknown}" "${meta_run:-unknown}" "$RUN_ID" "$RUN_TAG"
+}
+
 full_attempts() { # -> integer (never empty — an empty/garbage counter file reads 0)
   local n=""
   if [ -f "$FULL_ATTEMPTS_FILE" ]; then
@@ -2179,6 +2205,8 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
       if [ -z "$meta_sha" ] || [ "$meta_sha" = "unresolved" ]; then
         info "                PROVENANCE UNKNOWN — this bundle records no served sha, so the controls taken off it are NOT dated by step 0a's pin. Say so in the transcript."
       fi
+      FULL_RSS_LINE="$(rss_reuse_attribution)"
+      info "                RSS ATTRIBUTION — $FULL_RSS_LINE"
       return 0
     fi
   fi
@@ -2367,6 +2395,7 @@ wall_seconds:   $((t1 - t0))
 taken_at:       $(date -u '+%Y-%m-%dT%H:%M:%SZ')
 attempt:        $spent_now of $FULL_BUDGET
 rss_method:     1 Hz ps -o rss= -p <beam pid> over SSH, no slot restart
+rss_scope:      WHOLE-PROCESS beam.smp RSS over the export window, ambient live-API traffic INCLUDED — not export-exclusive
 rss_peak_kb:    $peak_kb
 rss_baseline_kb: ${baseline_kb:-unknown}
 run_id:         $RUN_ID
@@ -3004,16 +3033,35 @@ GUARDED_COLUMNS="title icon visibility owner_scoped fields cors_origins desk_gro
 #   34  plugin-declared    Bootstrap walks them every boot. SURVIVE stamped,
 #                          REVERT cleared. These, and only these, are the guard.
 #    1  `tag`              TagRegistry writes it every boot from a five-key map,
-#                          BEFORE register_all_schemas/0 and outside the guard
-#                          entirely (PDS-D125). REVERTS on both legs.
+#                          BEFORE register_all_schemas/0 and outside BOOTSTRAP's
+#                          registry walk — but NOT outside the guard. It goes
+#                          through the SAME `Tenancy.pulled_schema_row/2`
+#                          predicate as the 34 — PDS-D125/D126, in
+#                          `Content.TagRegistry.register_attrs!/2` — so it
+#                          SURVIVES stamped and REVERTS cleared, exactly like
+#                          them. It is excluded for SCOPING reasons, not for
+#                          want of a guard: (a) its skip is logged by
+#                          `Content.TagRegistry.skip_pulled/2`, not by Bootstrap,
+#                          so counting it reds the ROSTER DRIFT tripwire below
+#                          at 35-against-34 on a healthy target (PDS-D129);
+#                          (b) its five-key map reverts only FOUR of the eight
+#                          guarded columns — `owner_scoped`, `cors_origins`,
+#                          `desk_groups` and `list_preview` are absent from its
+#                          attrs and `cast/3` never touches them — so leg B's
+#                          "did EVERY ONE of the eight move" (PDS-D130) would
+#                          hang red on the other four; (c)
+#                          `SchemaBootstrap.init/1` hardcodes dataset
+#                          "production" (PDS-D145), so its writer does not run
+#                          at all when SOURCE_DS is not production.
 #    1  `metric`           declared by no local plugin, so Bootstrap's
 #                          Registry.all() walk never visits it. SURVIVES FOREVER
 #                          on both legs.
 #
-# A table-wide sentinel therefore reds leg A on `tag` and hangs leg B red
-# forever on `metric` — and the transcript would show a digest that moved with
-# the stamp present, which reads exactly like "the guard failed". Scope IS the
-# fix, not a detail of it.
+# A table-wide sentinel therefore hangs leg B red — forever on `metric`, and on
+# the four columns TagRegistry never writes for `tag` — and reds the ROSTER
+# DRIFT tripwire at 35-against-34. On `metric` the transcript would also show a
+# digest that moved with the stamp present, which reads exactly like "the guard
+# failed". Scope IS the fix, not a detail of it.
 #
 # There is NO SQL discriminator for "plugin-declared": `schema_definitions` has
 # 23 columns and none records a source (`dataset_id IS NULL` is an artefact of
@@ -3390,6 +3438,24 @@ step_7() {
 # FAIL (the signal fired) and ABORT (there is no signal) are different outcomes
 # and this step never collapses one into the other.
 
+# ── THE CROSS-INVOCATION PIN TRIPLE (pds-bl-step8-cross-invocation-gap) ─────
+# Step 8's guarantee is strictly PROCESS-LOCAL: it has no baseline from any
+# earlier invocation, so it can only say that THIS process's 0a and THIS
+# process's 8 agree. PDS-D101 makes a deferred 3/4 a SECOND full --all
+# invocation, so a real transcript can span several — and contiguity ACROSS them
+# is a check a reader has to make by hand. This prints the (run tag, 0a sha,
+# 8 sha) triple on ONE grep-able line so that check is mechanical: chain the
+# lines in transcript order and every run's sha_8 must equal the next run's
+# sha_0a. Pure: it reads globals and prints, it decides nothing.
+PIN_TRIPLE_PREFIX="PDS-PIN-TRIPLE"
+pin_triple_line() { # sha_now uptime_now -> ONE machine-readable line
+  printf '%s run_tag=%s run_id=%s sha_0a=%s sha_8=%s uptime_0a=%s uptime_8=%s pin_source=%s' \
+    "$PIN_TRIPLE_PREFIX" "$RUN_TAG" "$RUN_ID" \
+    "${DEPLOYED_SHA:-unresolved}" "${1:-unresolved}" \
+    "${DEPLOYED_UPTIME_0A:-unresolved}" "${2:-unresolved}" \
+    "${DEPLOYED_SHA_SOURCE:-unknown}"
+}
+
 step_8() {
   head_step 8 "CLOSING RE-PIN — did the source redeploy under this run?"
 
@@ -3412,6 +3478,7 @@ step_8() {
     info "sha at 0a       $DEPLOYED_SHA"
     info "sha now         $sha_now"
     if [ "$sha_now" != "$DEPLOYED_SHA" ]; then
+      info "$(pin_triple_line "$sha_now" "")"
       fail 8 "THE SOURCE REDEPLOYED UNDER THIS RUN: $DEPLOYED_SHA -> $sha_now. Every differential above straddles two builds and none of it is safe to quote. Re-run against a settled box."
       return 0
     fi
@@ -3443,6 +3510,8 @@ step_8() {
     return 0
   fi
 
+  info "$(pin_triple_line "$sha_now" "$uptime_now")"
+  info "cross-invocation THIS RUNG IS PROCESS-LOCAL and does not claim otherwise. It holds no baseline from any earlier invocation, so it vouches for NOTHING about: (a) the interval BETWEEN invocations — a deploy landing after one run's green step 8 and before the next run's 0a is invisible to both; (b) anything carried across them, notably a parked full bundle, which is gated separately by its own .meta served_sha; (c) the TARGET's state — the pin is source-side only. A transcript spanning more than one invocation is contiguous only if a reader chains the $PIN_TRIPLE_PREFIX lines above in transcript order and checks that each run's sha_8 equals the next run's sha_0a."
   pass 8 "the source did not move under this run: ${sha_now:+sha re-read over SSH is unchanged ($sha_now)}${sha_now:+; }uptime_seconds ${DEPLOYED_UPTIME_0A:-?} -> ${uptime_now:-?} (monotonic). Every source-derived number above is dated by the SAME build."
 }
 

@@ -47,8 +47,10 @@
 # EXIT CODES   0 = agree · 1 = DRIFT (measured: live, spec and rendered names
 #              disagree, or a workflow's prose contradicts the spec)
 #              3 = DEADLOCK · 4 = RE-RUN
-#              5 = BLOCKED — an input could not be READ or a producer refused.
-#              This run reached NO verdict about the required set.
+#              5 = BLOCKED — an input could not be READ, a producer refused, or
+#              (--deadlock only) the spec this checkout carries is STALE against
+#              origin/main and the set difference would have run without names
+#              GitHub enforces. This run reached NO verdict about the required set.
 #              64 = USAGE (the caller typed it wrong — not a measurement,
 #              so it must not borrow drift's word or its code)
 #
@@ -99,7 +101,11 @@
 #   scripts/required-checks-verify.sh                 # full three-way check
 #   scripts/required-checks-verify.sh --branch <b>    # live-read b, not .branch
 #   scripts/required-checks-verify.sh --ci            # the CI guard
-#   scripts/required-checks-verify.sh --deadlock      # detector only
+#   scripts/required-checks-verify.sh --deadlock      # detector only; also
+#                                                     refuses a spec this checkout
+#                                                     carries but origin/main has
+#                                                     moved past (see
+#                                                     spec_freshness_check)
 #   scripts/required-checks-verify.sh --selftest      # mutation-prove the clauses
 
 set -euo pipefail
@@ -137,7 +143,17 @@ CHECK_RUNS_LIB="${BARKPARK_CHECK_RUNS_LIB:-$REPO_ROOT/scripts/lib/check-runs.sh}
 # widen away.
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
-SPEC="$REPO_ROOT/.github/required-checks.json"
+SPEC_REL=".github/required-checks.json"
+SPEC="$REPO_ROOT/$SPEC_REL"
+# DID THE CALLER NAME THE SPEC, OR DID THIS SCRIPT DEFAULT TO WHATEVER THE
+# CHECKOUT CARRIES? The freshness clause below turns on exactly that difference,
+# and it keys on the FLAG rather than on the path the flag carries. A caller who
+# types `--spec .github/required-checks.json` has made a statement about which
+# file it means; a caller who types nothing has made no statement at all and is
+# relying on the checkout being current. Keying on the resolved path would
+# collapse those two into one — required-checks-apply.sh passes `--spec "$SPEC"`
+# where $SPEC is that very default path.
+SPEC_EXPLICIT=0
 # Read the live protection of a branch OTHER than the one the spec names. The
 # only caller is required-checks-apply.sh --branch <throwaway>, whose live
 # probe applies to a scratch branch and must then verify THAT branch. Without
@@ -190,6 +206,112 @@ read_spec() {
 spec_repo()   { jq -r '.repo'   "$SPEC"; }
 spec_branch() { if [ -n "$BRANCH_OVERRIDE" ]; then printf '%s' "$BRANCH_OVERRIDE"; else jq -r '.branch' "$SPEC"; fi; }
 spec_enforced() { jq -r '.enforced == true' "$SPEC"; }
+
+# ── the FOURTH input: is THIS COPY of the spec the one main requires? ───
+#
+# THE HOLE (cchi-w51-bl, measured 2026-08-09). Until this clause there was not
+# one occurrence of `origin/main`, `git show` or `git fetch` in this file: it
+# verified whatever `.github/required-checks.json` the checkout happened to
+# carry and called the agreement OK. That is harmless in the modes that ALSO
+# read live protection (compare_protection diffs the full live object, so a
+# stale spec reds there on its own). It is not harmless in `--deadlock`, which
+# reads the spec and the rendered check names and NOTHING live. scripts/
+# bp-merge.sh resolves this script out of whatever checkout the merger sits in
+# and runs `--deadlock` as its merge pre-flight, so a stale checkout's
+# pre-flight PASSES having subtracted the wrong set: measured on this wave, a
+# 652-commit-stale copy loaded 2 of the 4 live required contexts and exited 0.
+# Two names that GitHub will block on were never asked about, and the answer
+# still read "every required context is present on this head."
+#
+# WHY THIS IS SCOPED TO --deadlock AND TO THE DEFAULT SPEC, rather than bolted
+# on as a blanket "local spec differs from origin/main" refusal. The obstacle
+# was measured before the guard was written: required-checks-apply.sh calls this
+# script as its post-PUT read-back (`--spec "$SPEC"`, full mode), and applying a
+# CHANGED spec is the entire point of apply. A blanket refusal would red apply
+# on the one workflow it exists to serve — a WRONG REFUSE, which for an
+# instrument is worse than the blindness it replaces. Both keys are therefore
+# structural rather than negotiated:
+#
+#   1. MODE. Only `--deadlock` runs this. It is the only mode with no live
+#      side to check the spec against, and its only caller (bp-merge.sh's
+#      pre-flight) never legitimately edits the spec.
+#   2. THE FLAG. Only a run that did NOT pass `--spec` runs this. `--spec` says
+#      "I mean THIS file, on purpose"; its absence says "whatever the checkout
+#      carries", which is precisely the assumption at risk.
+#
+# apply.sh is immune on BOTH keys and needs no escape clause and no edit. The
+# escape nonetheless exists and is named: `--spec .github/required-checks.json`
+# means this file deliberately, and is the documented way to run the pre-flight
+# on a branch that is deliberately editing the required set.
+#
+# THE COMPARISON IS ONE-DIRECTIONAL, and the direction is the dangerous one.
+# Only contexts origin/main requires and this copy does NOT list are a refusal.
+# Extra local contexts are tolerated for the same reason `deadlock_check`
+# tolerates extra rendered names: a name this copy adds can only make the set
+# difference STRICTER, so its worst outcome is a false DEADLOCK (exit 3), which
+# is named, printed and actionable. A name this copy has LOST is the silent
+# direction — it makes the subtraction skip a gate nobody will mention again.
+# So a PR that ADDS a required context can still merge through bp-merge; one
+# that REMOVES a required name from the spec gets told so by name.
+#
+# 5 (BLOCKED), NOT 1 (DRIFT), AND THE REASON IS WHAT THE RUN CAN CLAIM. Drift
+# here is a verdict about the repo: I read all sides and they disagree. A stale
+# spec is not that — the repo may be perfectly healthy and this copy simply is
+# not entitled to say so, because the set it subtracted is not the set GitHub
+# enforces. That is the BLOCKED sentence verbatim: this run reached NO verdict
+# about the required set. bp-merge.sh already translates 5 into a named refusal
+# ("the pre-flight is BLOCKED: it could not READ an input"), and
+# required-checks.test.sh already translates it into the suite's HOLD, so the
+# refusal lands correctly at both existing call sites without either changing.
+#
+# KNOWN LIMIT, NAMED RATHER THAN IMPLIED. The refusal lives in the copy being
+# asked. A checkout old enough to predate this commit carries a verify.sh with
+# no freshness clause at all and cannot refuse — this closes the case where the
+# SPEC is stale and the SCRIPT is not, which is the common shape (a branch cut
+# before a spec change, a long-lived worktree, a revert), and does not close the
+# case where the whole checkout predates the guard. Closing that one means
+# resolving the verifier itself from origin/main inside bp-merge.sh, which is a
+# change to how the merge verb loads its own tools and belongs in its own PR.
+spec_freshness_check() {
+  local live missing n
+
+  if ! command -v git >/dev/null 2>&1; then
+    blocked "spec freshness: git is not on PATH, so I COULD NOT LOOK at origin/main:$SPEC_REL. This is NOT \"the spec and main agree\" — nothing was compared."
+  fi
+  if ! git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    blocked "spec freshness: $REPO_ROOT is not a git checkout, so I COULD NOT LOOK at origin/main:$SPEC_REL. This is NOT \"the spec and main agree\" — nothing was compared."
+  fi
+  # The ref, checked BY NAME and before the read. `git show origin/main:<path>`
+  # on a checkout with no such ref fails with a message about the PATH, which
+  # reads like a missing file rather than a missing ref.
+  if ! git -C "$REPO_ROOT" rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+    blocked "spec freshness: this checkout has no origin/main ref, so I COULD NOT LOOK at the spec main requires (run \`git fetch origin main\`). This is NOT \"the spec and main agree\" — nothing was compared."
+  fi
+  if ! live="$(git -C "$REPO_ROOT" show "origin/main:$SPEC_REL" 2>&1)"; then
+    blocked "spec freshness: cannot read origin/main:$SPEC_REL — $(head -1 <<<"$live"). I COULD NOT LOOK; this is NOT \"the spec and main agree\"."
+  fi
+  if ! jq -e '.protection.required_status_checks.checks | length > 0' <<<"$live" >/dev/null 2>&1; then
+    blocked "spec freshness: origin/main:$SPEC_REL is not readable as a spec with at least one required context, so I COULD NOT LOOK. This is NOT \"the spec and main agree\"."
+  fi
+
+  # Process substitution, not pipes into comm: a `blocked` inside either side
+  # would exit only its own subshell, so both sides are materialised by jq -e
+  # (already proven readable above for `live`, and by read_spec for $SPEC).
+  missing="$(comm -23 \
+    <(jq -r '.protection.required_status_checks.checks[].context' <<<"$live" | LC_ALL=C sort -u) \
+    <(jq -r '.protection.required_status_checks.checks[].context' "$SPEC" | LC_ALL=C sort -u))"
+
+  if [ -n "$missing" ]; then
+    n="$(printf '%s\n' "$missing" | wc -l | tr -d ' ')"
+    blocked "spec freshness: this checkout's $SPEC_REL is STALE — origin/main requires $n context(s) it does not list:
+$(printf '%s\n' "$missing" | sed 's/^/         only-on-origin-main: /')
+         The set difference below would have run WITHOUT those names, so a pass
+         would have certified a required set this copy has never heard of. This
+         is a HOLD, not a finding about the head: rebase onto origin/main (or
+         pass --spec $SPEC_REL to mean this file on purpose) and ask again."
+  fi
+  say "  spec freshness: every context origin/main requires is listed by this checkout's $SPEC_REL."
+}
 
 # ── the live read-back ───────────────────────────────────────────────────────
 # Unreadable is FAILURE. Wave 1's review found three guards that turned an
@@ -2065,7 +2187,7 @@ MD
 main() {
   while [ $# -gt 0 ]; do
     case "$1" in
-      --spec) SPEC="$2"; shift 2 ;;
+      --spec) SPEC="$2"; SPEC_EXPLICIT=1; shift 2 ;;
       --branch) BRANCH_OVERRIDE="$2"; shift 2 ;;
       --readback) READBACK_FILE="$2"; shift 2 ;;
       --runs) RUNS_FILE="$2"; shift 2 ;;
@@ -2088,6 +2210,15 @@ main() {
     selftest) selftest ;;
     deadlock)
       read_spec
+      # The freshness clause runs HERE and only here: --deadlock has no live
+      # side, and a caller who did not name a spec is trusting the checkout.
+      # See spec_freshness_check for why both keys are structural and why
+      # required-checks-apply.sh (full mode, explicit --spec) is immune to both.
+      if [ "$SPEC_EXPLICIT" -eq 0 ]; then
+        spec_freshness_check
+      else
+        say "  spec freshness: SKIPPED — the caller named the spec with --spec, which is a deliberate statement about which file it means."
+      fi
       deadlock_check "${HEAD_SHA:-$(recent_pr_head)}"
       ;;
     ci)   run_ci ;;

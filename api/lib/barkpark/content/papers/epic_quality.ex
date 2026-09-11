@@ -38,6 +38,15 @@ defmodule Barkpark.Content.Papers.EpicQuality do
   publication. Closing the hole properly means mounting the wall on the ops
   door for every gate, tag-scoped and ratcheted — a separate contract change,
   not a two-cap patch.
+
+  The ruling is the same one recorded on the wire contract: the `/ops` door is
+  an EDIT door and this floor is a PUBLISH-TIME property, not an invariant of
+  the stored row. `docs/contracts/plugin-http-api.md` carries it for HTTP
+  callers, with the caveat that a Paper edited only via `/ops` after its last
+  publish can sit past this floor indefinitely.
+  (task-4ff0ef8d27e6453b ruled it here; task-14107740b20c92fa ruled it on the
+  HTTP contract and pinned it in
+  `test/barkpark_web/controllers/bulldocs_ops_door_edit_contract_test.exs`.)
   """
 
   @canonical_tag "epic-cycle-wave-paper"
