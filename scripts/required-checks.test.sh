@@ -2524,7 +2524,21 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # the frozen pair (2026-07-31), so this window can never render it.
         # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named
         # exactly this one as MISSING ACK_EX before it was typed here.
-        --expect-unrendered "Cloud reader-corpus census")
+        --expect-unrendered "Cloud reader-corpus census"
+        # ── 2026-09-11 (task-140f66187298e9fe): the three ci.yml names
+        # a333e4b58 (#17668) created — the aggregator `web-gate` and its
+        # `changes` / `path-escape` leaves — plus shell-harnesses.yml's
+        # `place-directory-install` (#17665). All four postdate the frozen
+        # pair (2026-07-31), so this window can never render them; the ci.yml
+        # three additionally render on a main head ONLY when the diff touches
+        # a web path (#17668 kept the `push:` arm's paths filter on purpose),
+        # so exactly ONE of the 43 main heads after a333e4b58 carries them.
+        # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named
+        # exactly these four as MISSING ACK_EX before they were typed here.
+        --expect-unrendered "Web gate"
+        --expect-unrendered "Dispatch (web paths)"
+        --expect-unrendered "Web path-escape ratchet"
+        --expect-unrendered "place-directory install.sh read-back claims")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
