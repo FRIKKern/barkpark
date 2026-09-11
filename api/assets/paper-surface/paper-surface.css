@@ -411,7 +411,7 @@ html[data-theme="dark"] .bp-paper-body {
    the SAME spacing: with zero bottom margins, additive==collapsed. This single
    source feeds both surfaces; the first heading is clamped to 0 by each surface's
    :first-child rule. */
-.bp-paper-surface h1 { font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
+.bp-paper-surface h1 { font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 0.8em 0 0; }
 /* ── THE DISPLAY VOICE (device 3, charter D29/D36) ────────────────────────────
    A section head is the one place the paper speaks in its display voice, and
    that voice is BIG AND LIGHT: ~2.0x the body (36px over 18px), weight 400, a
@@ -475,6 +475,10 @@ html[data-theme="dark"] .bp-paper-body {
   margin-top: var(--bp-section-beat);
   border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
   padding-top: var(--bp-section-gap);
+  margin-inline: var(--bp-evidence-pull, 0px);
+  width: var(--bp-evidence-width, 100%);
+  box-sizing: border-box;
+  padding-inline: calc(0px - var(--bp-evidence-pull, 0px));
 }
 /* The SAME device for a level-2 heading that OPENS a `section` container. The
    container is one box deeper than a bare block (stream item, then the box div
@@ -491,6 +495,10 @@ html[data-theme="dark"] .bp-paper-body {
   margin-top: var(--bp-section-beat);
   border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
   padding-top: var(--bp-section-gap);
+  margin-inline: var(--bp-evidence-pull, 0px);
+  width: var(--bp-evidence-width, 100%);
+  box-sizing: border-box;
+  padding-inline: calc(0px - var(--bp-evidence-pull, 0px));
 }
 /* `hyphens: manual` — the explicit OFF, not the absence of a rule. Automatic
    hyphenation earns its keep in JUSTIFIED text, where the alternative is rivers
@@ -663,11 +671,12 @@ html[data-theme="dark"] .bp-paper-body {
   overflow-wrap: break-word;
 }
 .bp-paper-surface .bp-role-byline {
-  border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem;
+  border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0.75rem 0 2rem;
   color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em;
 }
 .bp-paper-surface .bp-role-ingress {
   color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em;
+  margin-top: 20px;
 }
 .bp-paper-surface .bp-role-pullquote {
   display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem;

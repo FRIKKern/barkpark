@@ -209,9 +209,17 @@ if [ "$SELFTEST" = "1" ]; then
   # find the read verb `bp doc ls` — without it, an empty result would prove the
   # grep is broken rather than the file clean.
   WRITE_VERBS='bp (doc )?(publish|patch|mutate|discard-draft|delete|create)|bp task (close|stamp|claim|create|pulse)'
-  if grep -nE "$WRITE_VERBS" "$0" | grep -v '^ *[0-9]*: *#' | grep -v 'WRITE_VERBS=' | grep -q .; then
+  # The verdict is `[ -n "$hits" ]`, NOT `… | grep -q .`.  That terminal `grep -q`
+  # exits on the first hit, the upstream greps take SIGPIPE, and under
+  # `set -o pipefail` the pipeline returns 141 — which lands in the `else` arm
+  # and prints "no write verb in this file".  The arm FAILS OPEN precisely when
+  # there is MORE violation evidence than the pipe buffer holds.  (The remaining
+  # `grep | grep -v | grep -v` stages all read to EOF, so none of them is the
+  # early-exit shape.)  `|| true`: a clean file makes the last `grep -v` exit 1.
+  write_verb_hits="$(grep -nE "$WRITE_VERBS" "$0" | grep -v '^ *[0-9]*: *#' | grep -v 'WRITE_VERBS=' || true)"
+  if [ -n "$write_verb_hits" ]; then
     echo "selftest READONLY FAIL — a write verb appears in this file:"
-    grep -nE "$WRITE_VERBS" "$0" | grep -v '^ *[0-9]*: *#' | grep -v 'WRITE_VERBS='
+    printf '%s\n' "$write_verb_hits"
     rc=1
   else
     echo "selftest READONLY ok   — no write verb in this file"

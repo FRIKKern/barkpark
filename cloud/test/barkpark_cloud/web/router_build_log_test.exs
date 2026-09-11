@@ -1,6 +1,6 @@
 defmodule BarkparkCloud.Web.RouterBuildLogTest do
   @moduledoc """
-  `dr-bl-recorder-http-read-path` — the operator read path for the black box
+  `dr-bl-recorder-http-read-path` — the TEAM-SCOPED read path for the black box
   recorder, addressed BY DEPLOYMENT ID.
 
   THE HOLE THIS FILE PINS. Wave 2 made a failed deploy's build output durable and
@@ -10,14 +10,35 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
   the route does not exist and `GET /v1/sites/:id/deployments/:dep_id/build-log`
   falls through the router to its catch-all.
 
-  WHAT IS DELIBERATELY NOT ASSERTED. No test here asserts a live 200 from the
-  operator gate in PRODUCTION. `PLATFORM_ADMIN_EMAILS` is unset in prod
-  (`gr-ops-platform-admin-emails`), so the route is 403-dark there for every real
-  account. These tests set the allowlist in Application config for the test
-  process, exactly as `ContentSecretMintTest` and `RouterOperatorTest` do — which
-  proves the GATE and the ROUTE, and claims nothing about production.
+  THE SECOND HOLE, and the one `dr-w19-site-build-log-is-operator-only` closed.
+  The route shipped `Auth.require_platform_operator`-gated, which is the
+  `:platform_admin_emails` allowlist — unset on prod, unsettable through any
+  route, console action or User field (`gr-ops-platform-admin-emails`). This file
+  used to say so and then set the allowlist in Application config so its own
+  tests could pass, which proved the gate and the route while claiming nothing
+  about production — where the answer for EVERY real account was 403. A team
+  member whose site failed to build could not read why.
 
-  `async: false` — the operator allowlist is process-global Application config.
+  It now takes `with_team_site(conn, {:ability, "read"}, …)`, the same door
+  `GET /v1/sites/:id/deployments/:dep_id` uses. So the gate arms below are the
+  ones that matter in production and not only in a test process:
+
+    * a member of the team that owns the site reads it (200) — SESSION or a
+      read-ability PAT, because the Go client sends a Bearer PAT;
+    * a member of ANOTHER team gets 404, not 403 — existence-leak parity with
+      every other `/v1/sites/:id/*` route;
+    * a platform operator who is not a member of the owning team ALSO gets 404:
+      the door is team-scoped, and operator-ness is no longer a key to it;
+    * an anonymous caller gets 401.
+
+  WHAT IS DELIBERATELY NOT ASSERTED. Nothing here claims the route serves raw log
+  BYTES — it never has, and the widening did not change that. The box refuses
+  them (the build env file carries `BARKPARK_TOKEN=` in plaintext) and §5 below
+  pins the control plane's own field allowlist over the box's reply in both
+  directions.
+
+  `async: false` — one arm still writes the process-global operator allowlist, to
+  prove operator-ness buys nothing here.
   """
   use BarkparkCloud.DataCase, async: false
 
@@ -43,17 +64,11 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
 
   ## Fixtures -----------------------------------------------------------------
 
-  defp team_fixture do
-    n = System.unique_integer([:positive])
-    {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
-    team
-  end
-
-  defp live_bp(team \\ nil) do
+  defp live_bp(team) do
     n = System.unique_integer([:positive])
 
     {:ok, bp} =
-      Registry.register_barkpark(team || team_fixture(), %{name: "BP #{n}", slug: "bp-#{n}"})
+      Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
 
     bp
     |> Ecto.Changeset.change(
@@ -90,23 +105,55 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
     d |> Ecto.Changeset.change(status: "failed") |> Repo.update!()
   end
 
-  defp operator_fixture do
+  # A user and the team they own — the shape every read arm needs, because the
+  # site must belong to THIS user's team for the team-scoped door to open.
+  defp member_fixture do
     n = System.unique_integer([:positive])
-    {:ok, user} = Accounts.register_user(%{email: "op-#{n}@example.com", password: @password})
-    {:ok, team} = Accounts.create_team(%{name: "OpTeam #{n}", slug: "opteam-#{n}"})
+    {:ok, user} = Accounts.register_user(%{email: "member-#{n}@example.com", password: @password})
+    {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-m-#{n}"})
     {:ok, _} = Accounts.add_member(team, user, "owner")
+    {user, team}
+  end
+
+  # A member of the owning team, plus that team's live instance, site and a
+  # terminal deployment on it. One helper because every arm below needs the same
+  # four rows and the ONLY thing that varies is who asks.
+  defp owned_site do
+    {user, team} = member_fixture()
+    bp = live_bp(team)
+    site = site_fixture(bp)
+    dep = deployment_fixture(site)
+    %{user: user, team: team, site: site, deployment: dep}
+  end
+
+  # A user of some OTHER team. Nothing about them touches the site under test.
+  defp foreign_user_fixture do
+    {user, _team} = member_fixture()
+    user
+  end
+
+  # A platform operator — and, deliberately, NOT a member of the team that owns
+  # the site under test. Writes the process-global allowlist, which is why this
+  # file is `async: false`.
+  defp operator_fixture do
+    {user, _team} = member_fixture()
     Application.put_env(:barkpark_cloud, :platform_admin_emails, [user.email])
     user
   end
 
-  defp plain_user_fixture do
-    n = System.unique_integer([:positive])
-    {:ok, user} = Accounts.register_user(%{email: "plain-#{n}@example.com", password: @password})
-    {:ok, team} = Accounts.create_team(%{name: "PlainTeam #{n}", slug: "plainteam-#{n}"})
-    {:ok, _} = Accounts.add_member(team, user, "owner")
-    user
+  defp read_pat(user, team) do
+    {:ok, token, _stored} =
+      Accounts.create_personal_access_token(user, team, %{
+        name: "build-log-read-#{System.unique_integer([:positive])}",
+        abilities: ["read"]
+      })
+
+    token
   end
 
+  # `user` may be nil (anonymous), a %User{} (minted a session token), or a
+  # `{:token, binary}` pair — the PAT arm, which is the credential the Go client
+  # actually presents.
   defp get_build_log(site_id, dep_id, user) do
     conn = conn(:get, "/v1/sites/#{site_id}/deployments/#{dep_id}/build-log")
 
@@ -114,6 +161,9 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
       case user do
         nil ->
           conn
+
+        {:token, token} ->
+          put_req_header(conn, "authorization", "Bearer #{token}")
 
         user ->
           {:ok, token} = Accounts.create_user_session_token(user)
@@ -133,17 +183,14 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
     # 404 `not_found` with NO `deployment_id` key, because nothing resolved a
     # deployment. A 200 carrying the deployment's own id can only come from a
     # route that looked it up.
-    test "an operator reads a recorded build by DEPLOYMENT ID and the answer names that deployment" do
-      operator = operator_fixture()
-      bp = live_bp()
-      site = site_fixture(bp)
-      dep = deployment_fixture(site)
+    test "a team member reads a recorded build by DEPLOYMENT ID and the answer names that deployment" do
+      %{user: user, site: site, deployment: dep} = owned_site()
 
       FakeBoxRelay.program(
         build_record: FakeBoxRelay.terminal_record(site.slug, dep.build_id, "available")
       )
 
-      conn = get_build_log(site.id, dep.id, operator)
+      conn = get_build_log(site.id, dep.id, user)
 
       assert conn.status == 200
       assert body(conn)["deployment_id"] == dep.id
@@ -156,8 +203,8 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
     # not move the answer: the older deployment's own build_id is what goes to the
     # box. This is the property the whole build_id keying exists for.
     test "a later deployment on the same site does not change what the older one reads" do
-      operator = operator_fixture()
-      bp = live_bp()
+      {user, team} = member_fixture()
+      bp = live_bp(team)
       site = site_fixture(bp)
       old = deployment_fixture(site, %{build_id: "bld-old"})
       _newer = deployment_fixture(site, %{build_id: "bld-new"})
@@ -166,7 +213,7 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
         build_record: FakeBoxRelay.terminal_record(site.slug, "bld-old", "available")
       )
 
-      conn = get_build_log(site.id, old.id, operator)
+      conn = get_build_log(site.id, old.id, user)
 
       assert conn.status == 200
       assert body(conn)["build_id"] == "bld-old"
@@ -182,13 +229,13 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
 
   describe "'evicted' / 'never recorded' / 'no such deployment' are three answers" do
     setup do
-      operator = operator_fixture()
-      bp = live_bp()
+      {user, team} = member_fixture()
+      bp = live_bp(team)
       site = site_fixture(bp)
-      %{operator: operator, site: site}
+      %{user: user, site: site}
     end
 
-    test "evicted is 410 and names when retention took it", %{operator: op, site: site} do
+    test "evicted is 410 and names when retention took it", %{user: user, site: site} do
       dep = deployment_fixture(site)
 
       FakeBoxRelay.program(
@@ -198,7 +245,7 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
           )
       )
 
-      conn = get_build_log(site.id, dep.id, op)
+      conn = get_build_log(site.id, dep.id, user)
 
       assert conn.status == 410
       assert body(conn)["error"] == "build_log_evicted"
@@ -206,22 +253,22 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
       assert body(conn)["available"] == false
     end
 
-    test "never recorded is 200 with a definite log_state", %{operator: op, site: site} do
+    test "never recorded is 200 with a definite log_state", %{user: user, site: site} do
       dep = deployment_fixture(site)
 
       FakeBoxRelay.program(
         build_record: FakeBoxRelay.terminal_record(site.slug, dep.build_id, "never_recorded")
       )
 
-      conn = get_build_log(site.id, dep.id, op)
+      conn = get_build_log(site.id, dep.id, user)
 
       assert conn.status == 200
       assert body(conn)["log_state"] == "never_recorded"
       assert body(conn)["available"] == false
     end
 
-    test "no such deployment is 404 not_found", %{operator: op, site: site} do
-      conn = get_build_log(site.id, Ecto.UUID.generate(), op)
+    test "no such deployment is 404 not_found", %{user: user, site: site} do
+      conn = get_build_log(site.id, Ecto.UUID.generate(), user)
 
       assert conn.status == 404
       assert body(conn)["error"] == "not_found"
@@ -230,7 +277,7 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
     # THE CRITERION, ASSERTED AS ONE POSITIVE FACT: the three statuses are three
     # DIFFERENT numbers. Collapse any two and this compares equal and fails —
     # which is what a bare `assert status == 404` on each could never catch.
-    test "the three statuses are pairwise distinct", %{operator: op, site: site} do
+    test "the three statuses are pairwise distinct", %{user: user, site: site} do
       evicted = deployment_fixture(site)
       never = deployment_fixture(site)
 
@@ -238,14 +285,14 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
         build_record: FakeBoxRelay.terminal_record(site.slug, evicted.build_id, "evicted")
       )
 
-      evicted_status = get_build_log(site.id, evicted.id, op).status
+      evicted_status = get_build_log(site.id, evicted.id, user).status
 
       FakeBoxRelay.program(
         build_record: FakeBoxRelay.terminal_record(site.slug, never.build_id, "never_recorded")
       )
 
-      never_status = get_build_log(site.id, never.id, op).status
-      absent_status = get_build_log(site.id, Ecto.UUID.generate(), op).status
+      never_status = get_build_log(site.id, never.id, user).status
+      absent_status = get_build_log(site.id, Ecto.UUID.generate(), user).status
 
       assert Enum.sort([evicted_status, never_status, absent_status]) == [200, 404, 410]
     end
@@ -253,7 +300,7 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
     # `missing` is the box's FOURTH state and must not be laundered into either of
     # the two claims above: retention did not do it, and it is not "never".
     test "missing is its own answer, not evicted and not never_recorded", %{
-      operator: op,
+      user: user,
       site: site
     } do
       dep = deployment_fixture(site)
@@ -262,18 +309,18 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
         build_record: FakeBoxRelay.terminal_record(site.slug, dep.build_id, "missing")
       )
 
-      conn = get_build_log(site.id, dep.id, op)
+      conn = get_build_log(site.id, dep.id, user)
 
       assert conn.status == 200
       assert body(conn)["log_state"] == "missing"
     end
 
     # An unreachable box is "we do not know" — never "nothing was recorded".
-    test "an unreachable box is 502, not a log-state claim", %{operator: op, site: site} do
+    test "an unreachable box is 502, not a log-state claim", %{user: user, site: site} do
       dep = deployment_fixture(site)
       FakeBoxRelay.program(build_record: {:error, :instance_error})
 
-      conn = get_build_log(site.id, dep.id, op)
+      conn = get_build_log(site.id, dep.id, user)
 
       assert conn.status == 502
       assert body(conn)["error"] == "box_unreachable"
@@ -282,34 +329,86 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
     end
   end
 
-  ## 3. The operator gate ------------------------------------------------------
+  ## 3. The team gate ----------------------------------------------------------
 
-  describe "the surface is operator-gated" do
-    test "an authenticated non-operator gets 403 and the box is never asked" do
-      _operator = operator_fixture()
-      plain = plain_user_fixture()
-      bp = live_bp()
-      site = site_fixture(bp)
-      dep = deployment_fixture(site)
+  describe "the surface is team-scoped, not operator-gated (dr-w19-site-build-log-is-operator-only)" do
+    # THE CLOSER'S OWN ARM. Put `Auth.require_platform_operator(conn, [])` back in
+    # front of this route and this test reds with 403 where it expects 200: the
+    # user is a real owner of the team that owns the site, and the operator
+    # allowlist is EMPTY in this test — which is exactly prod's shape
+    # (`gr-ops-platform-admin-emails`). The audience census's rot assertion is the
+    # other half of the same proof, from source rather than from a request.
+    test "a member of the owning team reads the log, with NO operator allowlist set" do
+      Application.put_env(:barkpark_cloud, :platform_admin_emails, [])
+      %{user: user, site: site, deployment: dep} = owned_site()
 
       FakeBoxRelay.program(
         build_record: FakeBoxRelay.terminal_record(site.slug, dep.build_id, "available")
       )
 
-      conn = get_build_log(site.id, dep.id, plain)
+      conn = get_build_log(site.id, dep.id, user)
 
-      assert conn.status == 403
-      # BOTH ARMS IN ONE RUN: the gate must FIRE here, and the identical fixture
-      # under `operator_fixture()` above is the specimen it must let through. A
-      # refusal that also never reached the box proves the gate is in front of the
-      # relay, not behind it.
+      assert conn.status == 200
+      assert body(conn)["log_state"] == "available"
+    end
+
+    # `{:ability, "read"}`, not `:session`: `SiteBuildLog` in
+    # internal/cloudclient/site_build_log.go sends a Bearer PAT. A session-only
+    # door would leave the ONLY reader of this signal outside it — a different
+    # empty audience wearing a nicer tier name.
+    test "a read-ability PAT reaches it — the credential the Go client presents" do
+      Application.put_env(:barkpark_cloud, :platform_admin_emails, [])
+      %{user: user, team: team, site: site, deployment: dep} = owned_site()
+
+      FakeBoxRelay.program(
+        build_record: FakeBoxRelay.terminal_record(site.slug, dep.build_id, "available")
+      )
+
+      conn = get_build_log(site.id, dep.id, {:token, read_pat(user, team)})
+
+      assert conn.status == 200
+      assert body(conn)["deployment_id"] == dep.id
+    end
+
+    # 404, NEVER 403 — existence-leak parity with every other /v1/sites/:id/*
+    # route (`GET /v1/sites/:id/deployments/:dep_id` says the same thing in the
+    # same words). And the box is never asked, which proves the gate sits in
+    # front of the relay rather than behind it.
+    test "a member of ANOTHER team gets 404, not 403, and the box is never asked" do
+      %{site: site, deployment: dep} = owned_site()
+      stranger = foreign_user_fixture()
+
+      FakeBoxRelay.program(
+        build_record: FakeBoxRelay.terminal_record(site.slug, dep.build_id, "available")
+      )
+
+      conn = get_build_log(site.id, dep.id, stranger)
+
+      assert conn.status == 404
+      assert body(conn)["error"] == "not_found"
+      assert FakeBoxRelay.calls() == []
+    end
+
+    # BOTH DIRECTIONS OF THE RE-POINT IN ONE RUN. The arm above proves a team
+    # member is now IN; this one proves the old key no longer opens anything it
+    # should not: platform-operator-ness is not membership, so an operator who is
+    # not on the owning team gets the same 404 a stranger does.
+    test "a platform OPERATOR who is not on the owning team still gets 404" do
+      %{site: site, deployment: dep} = owned_site()
+      operator = operator_fixture()
+
+      FakeBoxRelay.program(
+        build_record: FakeBoxRelay.terminal_record(site.slug, dep.build_id, "available")
+      )
+
+      conn = get_build_log(site.id, dep.id, operator)
+
+      assert conn.status == 404
       assert FakeBoxRelay.calls() == []
     end
 
     test "an anonymous caller gets 401" do
-      bp = live_bp()
-      site = site_fixture(bp)
-      dep = deployment_fixture(site)
+      %{site: site, deployment: dep} = owned_site()
 
       conn = get_build_log(site.id, dep.id, nil)
 
@@ -321,27 +420,27 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
 
   describe "scoping and pre-recorder rows" do
     test "a deployment belonging to ANOTHER site is 404 through this site's URL" do
-      op = operator_fixture()
-      bp = live_bp()
+      {user, team} = member_fixture()
+      bp = live_bp(team)
       site_a = site_fixture(bp)
       site_b = site_fixture(bp)
       dep_b = deployment_fixture(site_b)
 
-      conn = get_build_log(site_a.id, dep_b.id, op)
+      conn = get_build_log(site_a.id, dep_b.id, user)
 
       assert conn.status == 404
       assert body(conn)["error"] == "not_found"
     end
 
     test "a pre-recorder deployment with no build_id answers never_recorded WITHOUT asking the box" do
-      op = operator_fixture()
-      bp = live_bp()
+      {user, team} = member_fixture()
+      bp = live_bp(team)
       site = site_fixture(bp)
       dep = deployment_fixture(site, %{build_id: nil})
 
       FakeBoxRelay.program([])
 
-      conn = get_build_log(site.id, dep.id, op)
+      conn = get_build_log(site.id, dep.id, user)
 
       assert conn.status == 200
       assert body(conn)["log_state"] == "never_recorded"

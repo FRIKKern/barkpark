@@ -2802,6 +2802,61 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       assert index["docs"] |> Enum.map(& &1["doc_id"]) |> Enum.sort() == Enum.sort(child_ids)
     end
+
+    # dr-bl-w6-phantom-draft-twins-accumulate-on-the-rail.
+    #
+    # THE SHAPE THIS PINS: a NEVER-PUBLISHED child — an unpaired `drafts.<id>`
+    # row with NO published twin anywhere in scope. That is the residue the row
+    # measured (`drafts.dr-w34-bl-5658-blocks-its-own-routing-fix`: status
+    # "draft", `bp doc get task <bare-id>` → not_found), NOT the twinned
+    # double-count, which `Tasks.Query.collapse_twins/1` already closed (the
+    # test two above pins it).
+    #
+    # It rides the rail BY RULING (the non-vacuity test directly above), so the
+    # defect is not that it is there — it is that the summary did not SAY so.
+    # `children` is the sole producer of `child_count` and carries each child's
+    # criteria_progress, so a denominator built off this array counted a
+    # never-published row with no way to know. The parent's own render and every
+    # brief list card already carry `status` under the omit-when-"published"
+    # law; the rail did not.
+    #
+    # RED BEFORE: `assert summary["status"] == "draft"` fails with
+    # `left: nil` — `child_summary/1` emitted no `status` key at all.
+    test "dr-bl-w6: a never-published draft child is NAMED status:draft on the rail",
+         %{conn: conn, scope: scope} do
+      root = mk_published_task!(uniq("phantom-root"), scope, %{})
+      published = mk_published_task!(uniq("phantom-pub"), scope, %{"parent_id" => root})
+
+      # Never published: `Content.create_document/4` forces every new row
+      # through `DraftId.draft_id/1`, so this lands at `drafts.<id>` with
+      # `status: "draft"` and NO published twin.
+      draft = mk_task!(uniq("phantom-draft"), scope, %{"parent_id" => root})
+      assert String.starts_with?(draft.doc_id, "drafts.")
+      assert draft.status == "draft"
+
+      payload = conn |> authed() |> get("/v1/tasks/#{root}") |> json_response(200)
+
+      by_id = Map.new(payload["children"], &{&1["doc_id"], &1})
+
+      # The ruling is UNCHANGED: the draft child is still on the rail and still
+      # counted. This slice makes it legible, it does not evict it.
+      assert payload["child_count"] == 2
+      assert Map.has_key?(by_id, draft.doc_id)
+      assert Map.has_key?(by_id, published)
+
+      summary = by_id[draft.doc_id]
+      assert summary["status"] == "draft"
+
+      # The negative arm: a published child's summary is byte-identical to what
+      # it was — the steady state is OMITTED, never shipped as "published".
+      refute Map.has_key?(by_id[published], "status")
+
+      # And the discriminator is USABLE: the audit the row could not run.
+      never_published =
+        payload["children"] |> Enum.filter(&(&1["status"] == "draft")) |> Enum.map(& &1["doc_id"])
+
+      assert never_published == [draft.doc_id]
+    end
   end
 
   describe "POST /v1/tasks/:doc_id/claim — targeted (w7-08)" do
