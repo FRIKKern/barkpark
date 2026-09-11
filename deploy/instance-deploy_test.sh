@@ -52,6 +52,10 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/instance-deploy.sh"
+# An app-VALID KEK: base64 of 32 raw bytes (44 chars, one trailing '='), the
+# shape api/config/runtime.exs decodes. Alphanumeric on purpose so it can be
+# grepped for literally.
+VALID_KEK="JZPvbTh4LQuig6PAB7REzJsG5kaHfwCaHNeXFz784Pg="
 fails=0
 pass() { echo "  PASS: $*"; }
 fail() { echo "  FAIL: $*"; fails=$((fails + 1)); }
@@ -297,7 +301,12 @@ EOF
   # wrapper is that we never rely on it.
   printf '#!/usr/bin/env node\n// fake cloud-sandbox-runner (harness source, %s)\nprocess.exit(0)\n' "$RANDOM" > "$APP/scripts/connectors/cloud-sandbox-runner.mjs"
   chmod 0755 "$APP/scripts/connectors/cloud-sandbox-runner.mjs"
-  printf 'BARKPARK_KEK=x\nBARKPARK_CLOAK_KEY=y\nPREVIEW_JWT_SECRET=z\nBARKPARK_RELEASE_CAPTURE_HMAC_SECRET=h\nDATABASE_URL=postgres://bp:pw@localhost/bp\n' > "$APP/.env"
+  # The KEK fixture must be a value the APP accepts: api/config/runtime.exs
+  # demands Base.decode64(BARKPARK_KEK) yield exactly 32 raw bytes and RAISES
+  # otherwise. The old fixture was `BARKPARK_KEK=x`, which every deploy now
+  # (correctly) repairs — a sandbox whose baseline is a value prod refuses
+  # cannot tell "left untouched" from "silently replaced".
+  printf 'BARKPARK_KEK=%s\nBARKPARK_CLOAK_KEY=y\nPREVIEW_JWT_SECRET=z\nBARKPARK_RELEASE_CAPTURE_HMAC_SECRET=h\nDATABASE_URL=postgres://bp:pw@localhost/bp\n' "$VALID_KEK" > "$APP/.env"
   cp "$HERE/systemd/barkpark-slot@.service" "$APP/deploy/systemd/"
   cp "$HERE/systemd/barkpark-mcp.service" "$APP/deploy/systemd/"
   cp "$HERE/systemd/barkpark-connectors.service" "$APP/deploy/systemd/"
@@ -1293,6 +1302,79 @@ check "queued: the heartbeat names seconds waited AND the unchanged 1800s budget
   "grep -qE 'still queued for the deploy lock — [0-9]+s waited of 1800s max' '$TMP/out.log'"
 check "queued: the lock was actually taken, not bypassed (the deploy flipped Caddy)" \
   "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
+rm -rf "$TMP"
+
+echo
+echo "== Case: secret backfill repairs an EMPTY or app-invalid value, not only an absent line (task-facd9f8a6d4d45c9) =="
+# The backfill used to be absence-only: `grep -q '^VAR='`. A line that is PRESENT
+# but empty matches that grep, got no backfill, and after the boot refusals such a
+# box fails EVERY deploy until a human edits .env. Four states, all here.
+
+# (1) ABSENT line — the case the loop was always designed for.
+setup_case
+grep -v '^BARKPARK_KEK=' "$APP/.env" > "$TMP/env.new" && mv "$TMP/env.new" "$APP/.env"
+rc="$(run_deploy 200 kekabsentsha)"
+check "absent KEK: exit 0"                       "[ '$rc' = '0' ]"
+check "absent KEK: appended"                     "[ \"\$(grep -c '^BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
+check "absent KEK: the minted value is app-valid (base64 of 32 bytes)" \
+  "grep -qE '^BARKPARK_KEK=[A-Za-z0-9+/]{43}=\$' '$APP/.env'"
+check "absent KEK: logged as an ADD, not a repair"  "grep -q 'added missing BARKPARK_KEK to .env' '$TMP/out.log'"
+rm -rf "$TMP"
+
+# (2) PRESENT but EMPTY — the whole point of this row. The mutation proof: revert
+# the fix in instance-deploy.sh and THIS arm is the one that fails.
+setup_case
+sed 's/^BARKPARK_KEK=.*/BARKPARK_KEK=/' "$APP/.env" > "$TMP/env.new" && mv "$TMP/env.new" "$APP/.env"
+check "empty KEK: the fixture really is empty before the deploy" "grep -q '^BARKPARK_KEK=\$' '$APP/.env'"
+rc="$(run_deploy 200 kekemptysha)"
+check "empty KEK: exit 0"                        "[ '$rc' = '0' ]"
+check "empty KEK: no longer empty"               "! grep -q '^BARKPARK_KEK=\$' '$APP/.env'"
+check "empty KEK: REPLACED by an app-valid secret" \
+  "grep -qE '^BARKPARK_KEK=[A-Za-z0-9+/]{43}=\$' '$APP/.env'"
+check "empty KEK: exactly one line, no duplicate" "[ \"\$(grep -c '^BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
+check "empty KEK: the log names the EMPTY case"   "grep -q 'repaired BARKPARK_KEK in .env — the line is PRESENT but EMPTY' '$TMP/out.log'"
+# The same repair covers the other three variables the loop names — and nothing else.
+sed 's/^PREVIEW_JWT_SECRET=.*/PREVIEW_JWT_SECRET=/' "$APP/.env" > "$TMP/env.new" && mv "$TMP/env.new" "$APP/.env"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"; rm -f "$APP/.instance-deploy-last"
+rc="$(run_deploy 200 jwtemptysha)"
+check "empty PREVIEW_JWT_SECRET: repaired too"   "! grep -q '^PREVIEW_JWT_SECRET=\$' '$APP/.env'"
+check "empty PREVIEW_JWT_SECRET: named in the log" \
+  "grep -q 'repaired PREVIEW_JWT_SECRET in .env — the line is PRESENT but EMPTY' '$TMP/out.log'"
+check "repair does not widen: DATABASE_URL untouched" \
+  "grep -q '^DATABASE_URL=postgres://bp:pw@localhost/bp\$' '$APP/.env'"
+rm -rf "$TMP"
+
+# (3) PRESENT with a value the APP refuses — wrong length / undecodable. This is
+# the old fixture's own value (`x`), which runtime.exs raises on.
+setup_case
+sed 's/^BARKPARK_KEK=.*/BARKPARK_KEK=x/' "$APP/.env" > "$TMP/env.new" && mv "$TMP/env.new" "$APP/.env"
+rc="$(run_deploy 200 kekbadsha)"
+check "invalid KEK: exit 0"                      "[ '$rc' = '0' ]"
+check "invalid KEK: the refused value is gone"   "! grep -q '^BARKPARK_KEK=x\$' '$APP/.env'"
+check "invalid KEK: REPLACED by an app-valid secret" \
+  "grep -qE '^BARKPARK_KEK=[A-Za-z0-9+/]{43}=\$' '$APP/.env'"
+check "invalid KEK: the log names the REFUSED-VALUE case" \
+  "grep -q 'repaired BARKPARK_KEK in .env — the value is not base64 of 32 bytes' '$TMP/out.log'"
+# A wrong-LENGTH but decodable value (base64 of 16 bytes) is refused the same way:
+# it decodes fine and is still not 32 bytes, so a decode-only check would pass it.
+sed 's|^BARKPARK_KEK=.*|BARKPARK_KEK=AAAAAAAAAAAAAAAAAAAAAA==|' "$APP/.env" > "$TMP/env.new" && mv "$TMP/env.new" "$APP/.env"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"; rm -f "$APP/.instance-deploy-last"
+rc="$(run_deploy 200 kek16sha)"
+check "16-byte KEK: decodable but WRONG LENGTH — still repaired" \
+  "! grep -q '^BARKPARK_KEK=AAAAAAAAAAAAAAAAAAAAAA==\$' '$APP/.env'"
+check "16-byte KEK: the replacement is 32 bytes' worth" \
+  "grep -qE '^BARKPARK_KEK=[A-Za-z0-9+/]{43}=\$' '$APP/.env'"
+rm -rf "$TMP"
+
+# (4) A VALID value is LEFT ALONE — byte-identical, not rewritten, not logged.
+setup_case
+rc="$(run_deploy 200 kekgoodsha)"
+check "valid KEK: exit 0"                        "[ '$rc' = '0' ]"
+check "valid KEK: byte-identical after the deploy" \
+  "grep -q '^BARKPARK_KEK=$VALID_KEK\$' '$APP/.env'"
+check "valid KEK: exactly one line"              "[ \"\$(grep -c '^BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
+check "valid KEK: NOT reported as repaired"      "! grep -q 'repaired BARKPARK_KEK' '$TMP/out.log'"
+check "valid KEK: NOT reported as added"         "! grep -q 'added missing BARKPARK_KEK' '$TMP/out.log'"
 rm -rf "$TMP"
 
 echo
