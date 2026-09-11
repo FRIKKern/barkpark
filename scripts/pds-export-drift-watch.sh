@@ -332,8 +332,11 @@ cmd_cost_model() {
       }
       printf "%d %d %d %d", n+0, v+0, c+0, e+0
     }' "$LOG")"
-  set -- $counts
-  total="${1:-0}"; void="${2:-0}"; clean="${3:-0}"; excluded="${4:-0}"
+  # `read`, not `set -- $counts`: positional splitting of a command substitution
+  # is where an off-by-one silently rebinds every field, and this block's four
+  # numbers are the whole model. A short read leaves the tail at its 0 default.
+  read -r total void clean excluded <<<"$counts"
+  total="${total:-0}"; void="${void:-0}"; clean="${clean:-0}"; excluded="${excluded:-0}"
 
   local decided=$((void + clean))
   say ""
@@ -513,9 +516,11 @@ STUB
   for i in 1 2 3 4 5 6 7 8; do
     printf 'T\tS%s\t0\tCLEAN\t\tx\tx\tn\n' "$i" >>"$PDS_DRIFT_LOG"
   done
-  printf 'T\tS9\t0\tCLEAN\t\tx\tx\tn\nT\tS9\t12\tDRIFT-DEPLOY-RUNNING\t7\tx\tx\tn\n' >>"$PDS_DRIFT_LOG"
-  printf 'T\tS10\t0\tDRIFT-SHA-MOVED\t\ty\tx\tn\n' >>"$PDS_DRIFT_LOG"
-  printf 'T\tS11\t0\tUNMEASURED\t\t\tx\tn\n' >>"$PDS_DRIFT_LOG"
+  {
+    printf 'T\tS9\t0\tCLEAN\t\tx\tx\tn\nT\tS9\t12\tDRIFT-DEPLOY-RUNNING\t7\tx\tx\tn\n'
+    printf 'T\tS10\t0\tDRIFT-SHA-MOVED\t\ty\tx\tn\n'
+    printf 'T\tS11\t0\tUNMEASURED\t\t\tx\tn\n'
+  } >>"$PDS_DRIFT_LOG"
   out="$(PATH="$P" "$self" cost-model --min-sessions 5 2>&1)"; rc=$?
   st_check "model: 2 void of 10 decidable reads 20.0%" 0 "$rc" "20.0%" "$out"
   st_check "  and the all-blind session is EXCLUDED, not counted clean" 0 "$rc" "EXCLUDED (all blind) .... 1" "$out"
