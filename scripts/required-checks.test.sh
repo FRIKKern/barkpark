@@ -2502,7 +2502,19 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Filebase aesthetics critic (advisory, main + nightly)"
         --expect-unrendered "pipefail SIGPIPE scan"
         --expect-unrendered "pipefail scan — did the scanner's inputs move?"
-        --expect-unrendered "Mark the task rows this push landed")
+        --expect-unrendered "Mark the task rows this push landed"
+        # ── 2026-09-11 (task-81e94e76691f2089): the four names
+        # `Required-check spec drift (advisory)` reported `unaccounted` on run
+        # 34551911401 and this PR gave rows in .exclusions. Two are
+        # astro-finder-render-smoke.yml (landed d70c20e98f) and two are new
+        # shell-harnesses.yml jobs — all four postdate the frozen pair
+        # (2026-07-31), so this window can never render them. DERIVED, not
+        # remembered: scripts/required-checks-ack-derive.sh named exactly these
+        # four as MISSING ACK_EX before they were typed here.
+        --expect-unrendered "Does this diff touch the Astro finder surface?"
+        --expect-unrendered "Finder island renders (headless chromium)"
+        --expect-unrendered "bp-curl.sh 429 backoff matrix"
+        --expect-unrendered "console-refusal-capture.mjs controls")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
