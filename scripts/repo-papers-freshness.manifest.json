@@ -3,7 +3,8 @@
     "Freshness map for .demo-content/repo-papers/*.json, read by scripts/repo-papers-freshness.mjs.",
     "source   = the docs/ file the snapshot is a copy OF. Both directions are enforced: a snapshot with no row here, or a row whose source is gone, REFUSES (exit 2) rather than passing.",
     "baseline = how many hard terms in that snapshot the checker could not find in its source ON THE DAY THIS FILE WAS SEEDED (2026-09-10, origin/main 3fc9bb07f). It is a DEBT NUMBER, not a permission: the gate reds when it grows, never when it shrinks. Some of it is real staleness and some is transcription noise the mirroring introduced; the checker names every term either way, and shrinking a baseline is the only way to retire it.",
-    "exempt   = a divergence someone DELIBERATELY decided to keep, one entry per term, each with a written reason of at least 20 characters. The gate fails closed on an entry with no justification AND on an entry whose term stopped diverging, so this list cannot grow silently and cannot rot. It is empty today because nobody has yet justified one; a growing list of unexplained entries is a failure of this mechanism, not a use of it."
+    "exempt   = a divergence someone DELIBERATELY decided to keep, one entry per term, each with a written reason of at least 20 characters. The gate fails closed on an entry with no justification AND on an entry whose term stopped diverging, so this list cannot grow silently and cannot rot. It is empty today because nobody has yet justified one; a growing list of unexplained entries is a failure of this mechanism, not a use of it.",
+    "2026-09-11 re-pin: cheatsheets-bp 5->0, setup-task-system 55->0, studio-user-guide 1->0. Those three snapshots went OVER baseline when #17198 (bp.md), #17268 (studio/user-guide.md) and #17272/#17320 (setup/TASK-SYSTEM.md) rewrote their source docs, so the snapshots were REGENERATED from the current docs rather than the baselines raised; the pre-existing debt went out with the regenerated blocks, so the baselines follow it down. No exemption was added."
   ],
   "snapshot_dir": ".demo-content/repo-papers",
   "papers": {
@@ -64,7 +65,7 @@
     },
     "cheatsheets-bp": {
       "source": "docs/cheatsheets/bp.md",
-      "baseline": 5,
+      "baseline": 0,
       "exempt": []
     },
     "cheatsheets-http-api": {
@@ -229,7 +230,7 @@
     },
     "setup-task-system": {
       "source": "docs/setup/TASK-SYSTEM.md",
-      "baseline": 55,
+      "baseline": 0,
       "exempt": []
     },
     "setup-windows": {
@@ -249,7 +250,7 @@
     },
     "studio-user-guide": {
       "source": "docs/studio/user-guide.md",
-      "baseline": 1,
+      "baseline": 0,
       "exempt": []
     },
     "studio-web-components": {
