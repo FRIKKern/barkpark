@@ -259,6 +259,55 @@ pid_live_ours() { # $1 = pid · $2 = meta file (may be absent)
   return 3
 }
 
+# ── THE PER-RUN TRANSCRIPT BOUNDARY ──────────────────────────────────────────
+#
+# run_tag = cksum(PDS_RUN_ID), so a REUSED PDS_RUN_ID reuses the run dir, and
+# fire_detached opens transcript.log O_APPEND and never truncates. classify()
+# and cmd_collect then grep the WHOLE file for ^EXIT:/^RESULT: — so a re-arm
+# onto a run_tag whose dir already holds a FINISHED transcript reads the PRIOR
+# run's terminal verdict and calls a live climb FINISHED. A verdict must only
+# ever be read from THIS run's lines.
+#
+# The fix is a boundary, not a truncation: the prior transcript is EVIDENCE (it
+# is how the previous outcome is diagnosed at all), and deleting it to make the
+# read correct would trade one blindness for another. arm stamps one line
+# immediately before the fork; every verdict-bearing read is taken from the
+# lines AFTER the LAST such line.
+#
+# It is stamped ONLY when the log already exists. A first arm must leave the
+# path ABSENT, or NO-TRANSCRIPT — the empty-log signature of a SyntaxError in
+# the detach program — could never fire again, which is the same class of
+# defect with the polarity flipped.
+#
+# A transcript with no boundary reads whole-file, unchanged: that is every
+# pre-boundary run dir, and every pre-w14 FINISHED-nosent transcript.
+RUN_BOUNDARY_RE='^===== PDS-RUN-BOUNDARY '
+
+stamp_run_boundary() { # $1 = transcript path · $2 = run_tag  -> 0 always
+  local t="${1:-}" tag="${2:-}"
+  [ -n "$t" ] && [ -f "$t" ] || return 0
+  printf '===== PDS-RUN-BOUNDARY %s armed_at=%s launcher_pid=%s =====\n' \
+    "$tag" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" >> "$t"
+}
+
+# Print ONLY the lines the CURRENT run wrote. A function, not four inline greps,
+# so the selftest can reach it directly (same reason as assert_child_up).
+run_slice() { # $1 = transcript path
+  local t="${1:-}" n
+  [ -n "$t" ] && [ -f "$t" ] || return 0
+  n="$(grep -nE "$RUN_BOUNDARY_RE" "$t" 2>/dev/null | tail -1 | cut -d: -f1 || true)"
+  if is_int "${n:-}"; then tail -n +"$(( n + 1 ))" "$t"; else cat "$t"; fi
+}
+
+# How many prior runs this transcript holds (0 = never reused).
+run_boundary_count() { # $1 = transcript path
+  local t="${1:-}" n
+  [ -n "$t" ] && [ -f "$t" ] || { printf '0\n'; return 0; }
+  n="$(grep -cE "$RUN_BOUNDARY_RE" "$t" 2>/dev/null || true)"
+  is_int "${n:-}" || n=0
+  printf '%s\n' "$n"
+}
+
 # ── THE FORK (PDS-D243 + PDS-D249) ───────────────────────────────────────────
 #
 # The ONE place this file detaches, and the ONE place the budget is resolved.
@@ -613,6 +662,18 @@ cmd_arm() {
   write_child_script "$child" "$run_tag"
   payload="exec /bin/bash $(printf '%q' "$child")"
 
+  # A reused PDS_RUN_ID lands in a run dir that may already hold a FINISHED
+  # transcript, and fire_detached appends to it. Fence THIS run's lines off
+  # before the fork so no verdict is ever read from the previous run's
+  # ^EXIT:/^RESULT:. Stamped only on reuse — see stamp_run_boundary's header.
+  if [ -f "$log" ]; then
+    stamp_run_boundary "$log" "$run_tag"
+    say "transcript $log ALREADY EXISTS — run_tag $run_tag is being re-armed."
+    info "It now holds $(run_boundary_count "$log") prior run(s). The previous"
+    info "transcript is KEPT, not truncated; every state read from here on is"
+    info "taken from the lines AFTER the boundary just stamped."
+  fi
+
   fire_detached "$run_tag" "$FULL_ATTEMPTS_FILE" "$log" "$payload" "$pid_file"
 
   pid="$(cat "$pid_file" 2>/dev/null | tr -d ' \n')"
@@ -706,8 +767,13 @@ classify() { # $1 = transcript · $2 = pid file  -> prints the state token
 
   [ -f "$t" ] || { printf 'NO-TRANSCRIPT\n'; return 0; }
 
-  sent="$(grep -c '^EXIT: ' "$t" 2>/dev/null || true)"
-  res="$(grep -c '^RESULT:' "$t" 2>/dev/null || true)"
+  # SCOPED TO THIS RUN. Both greps read run_slice, not the file: a reused
+  # run_tag appends to the previous run's transcript, and the whole-file read
+  # returned the PRIOR run's terminal verdict for a climb that is still
+  # climbing. With no boundary in the file, run_slice IS the whole file, so
+  # every pre-boundary transcript classifies exactly as before.
+  sent="$(run_slice "$t" | grep -c '^EXIT: ' || true)"
+  res="$(run_slice "$t" | grep -c '^RESULT:' || true)"
   is_int "$sent" || sent=0
   is_int "$res"  || res=0
 
@@ -771,7 +837,10 @@ assert_child_up() {
   marker=0
   i=0
   while [ "$i" -lt "$settle" ]; do
-    if [ -f "$t" ] && grep -qF 'child up' "$t" 2>/dev/null; then marker=1; break; fi
+    # SCOPED, and counted rather than `grep -q`: a prior run's own `child up`
+    # would otherwise satisfy this run's arrival marker instantly. `grep -qF`
+    # on a pipe also exits 141 on SIGPIPE, which would read as "no marker".
+    if [ "$(run_slice "$t" | grep -cF 'child up' || true)" -gt 0 ]; then marker=1; break; fi
     sleep 1
     i=$(( i + 1 ))
   done
@@ -789,7 +858,7 @@ assert_child_up() {
 }
 
 cmd_collect() {
-  local tag="" t="" p="" state pid rc lines sd_stamp fire_stamp pw_stamp
+  local tag="" t="" p="" state pid rc lines priors sd_stamp fire_stamp pw_stamp
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -821,9 +890,17 @@ cmd_collect() {
   [ -n "$tag" ] && info "run_tag     $tag"
 
   if [ -f "$t" ]; then
-    lines="$(wc -l < "$t" | tr -d ' ')"
+    # Counts, like the verdict, describe THIS run — the file may hold several.
+    priors="$(run_boundary_count "$t")"
+    lines="$(run_slice "$t" | wc -l | tr -d ' ')"
     info "lines       $lines"
-    info "draws       $(grep -c '^DRAW' "$t" 2>/dev/null || true)"
+    info "draws       $(run_slice "$t" | grep -c '^DRAW' || true)"
+    if [ "$priors" -gt 0 ]; then
+      info "reused      YES — this transcript holds $priors prior run(s)."
+      info "            Every figure and state above is read ONLY from the"
+      info "            lines after the last PDS-RUN-BOUNDARY; the earlier"
+      info "            run(s) are still in the file, above it."
+    fi
   fi
 
   case "$state" in
@@ -862,9 +939,11 @@ cmd_collect() {
       # pre-warm exists to catch. So each claim is made only where its own
       # stamp proves it, and an unrecognised transcript is called UNDIAGNOSED
       # rather than assigned a cost that was never measured.
-      sd_stamp="$(grep -cE '^\[[^]]+\] STAND-DOWN — ' "$t" 2>/dev/null || true)"
-      fire_stamp="$(grep -cE '^\[[^]]+\] FIRE — draw ' "$t" 2>/dev/null || true)"
-      pw_stamp="$(grep -cE '^\[[^]]+\] prewarm: FAILED rc=' "$t" 2>/dev/null || true)"
+      # SCOPED like classify's: on a reused run_tag a PRIOR run's FIRE stamp
+      # would otherwise decide THIS run's attempt-cost claim.
+      sd_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] STAND-DOWN — ' || true)"
+      fire_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] FIRE — draw ' || true)"
+      pw_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] prewarm: FAILED rc=' || true)"
       is_int "$sd_stamp"   || sd_stamp=0
       is_int "$fire_stamp" || fire_stamp=0
       is_int "$pw_stamp"   || pw_stamp=0
@@ -1016,9 +1095,9 @@ cmd_collect() {
 
   if [ -f "$t" ]; then
     rule
-    say "last 12 lines"
+    say "last 12 lines (this run only)"
     rule
-    tail -12 "$t" | sed 's/^/  /'
+    run_slice "$t" | tail -12 | sed 's/^/  /'
   fi
   rule
 
@@ -1059,7 +1138,7 @@ cmd_selftest() {
   local scratch real_attempts_before real_attempts_after
   local real_lock_before real_lock_after
   local t0 t1 elapsed pid line pgid ppid stat budget seeded expect
-  local state live_pid dead_pid out i
+  local state live_pid dead_pid out i reuse_log
 
   real_attempts_before="$(cat /tmp/pds-full-export/attempts 2>/dev/null || echo '<none>')"
   real_lock_before=absent; [ -d /tmp/pds-full-export/lock ] && real_lock_before=present
@@ -1319,6 +1398,105 @@ DUMMY
     *"do NOT re-arm"*) ok "the unproven case still warns against re-arming on this evidence alone" ;;
     *)                 bad "the do-not-re-arm warning was lost from the unproven case" ;;
   esac
+
+  # ── 4d · a re-armed run_tag never classifies off the PRIOR run's verdict ──
+  #
+  # (pds-bl-launcher-statedir-fresh-transcript.) run_tag = cksum(PDS_RUN_ID),
+  # so a reused run id reuses the run dir; fire_detached appends and never
+  # truncates; classify used to grep the WHOLE file. A re-arm onto a dir
+  # holding a FINISHED transcript therefore read that transcript's ^EXIT: and
+  # ^RESULT: and called a live climb FINISHED.
+  say ""
+  say "4d · a reused run dir reads THIS run's lines, never the prior run's"
+
+  mkdir -p "$scratch/reuse"
+  reuse_log="$scratch/reuse/transcript.log"
+  printf '%s\n' "$$" > "$scratch/reuse/child.pid"
+  printf 'pid_fingerprint=%s\n' "$(pid_fingerprint "$$")" > "$scratch/reuse/meta"
+
+  # A PRIOR run that FINISHED, seeded exactly where a re-arm would find it.
+  {
+    printf '[2026-07-20T01:00:00Z] child up — pid=111\n'
+    printf 'DRAW\t1\t2026-07-20T01:00:00Z\tverdict=FIRE\n'
+    printf '[2026-07-20T01:05:00Z] FIRE — draw 1 of 240 qualified.\n'
+    printf 'RESULT: PASS (prior run)\n'
+    printf 'EXIT: 0\n'
+  } > "$reuse_log"
+  state="$(classify "$reuse_log" "$scratch/reuse/child.pid")"
+  check "$state" "FINISHED" "the seeded prior transcript really does classify FINISHED (precondition)"
+
+  # THE RE-ARM. stamp_run_boundary is the arm-side half, reached directly for
+  # the same reason assert_child_up is: the selftest never runs cmd_arm.
+  stamp_run_boundary "$reuse_log" "deadbeef"
+  out="$(run_boundary_count "$reuse_log")"
+  check "$out" "1" "arm stamps exactly one boundary onto the reused transcript"
+  out="$(grep -c 'RESULT: PASS (prior run)' "$reuse_log" || true)"
+  check "$out" "1" "the prior transcript is KEPT, not truncated — it is still evidence"
+
+  # …and the new child starts writing, mid-rung, no sentinel of its own.
+  {
+    printf '[2026-07-21T07:00:00Z] child up — pid=%s\n' "$$"
+    printf 'STEP 3 — the full export\n'
+  } >> "$reuse_log"
+  state="$(classify "$reuse_log" "$scratch/reuse/child.pid")"
+  check "$state" "STILL-RUNNING" "a re-arm over a FINISHED transcript is NOT misread as FINISHED"
+
+  # The slice is the mechanism, asserted in its own right, both directions.
+  out="$(run_slice "$reuse_log" | grep -c '^EXIT: ' || true)"
+  check "$out" "0" "run_slice hides the prior run's sentinel"
+  out="$(run_slice "$reuse_log" | grep -c '^STEP 3' || true)"
+  check "$out" "1" "run_slice shows this run's own lines"
+  out="$(run_slice "$reuse_log" | grep -c '^DRAW' || true)"
+  check "$out" "0" "the draw count is this run's, not the prior run's"
+
+  # And when the CURRENT run finishes, its OWN terminal verdict is read.
+  printf 'RESULT: PASS (current run)\nEXIT: 0\n' >> "$reuse_log"
+  state="$(classify "$reuse_log" "$scratch/reuse/child.pid")"
+  check "$state" "FINISHED" "the current run's own terminal verdict still classifies FINISHED"
+
+  # NO BOUNDARY = whole file, unchanged. This is every pre-boundary run dir and
+  # every pre-w14 transcript; a scoping fix that broke them would be a
+  # regression dressed as a fix.
+  printf 'RESULT: PASS (legacy)\n' > "$scratch/legacy.log"
+  state="$(classify "$scratch/legacy.log" "$scratch/dummy.pid")"
+  check "$state" "FINISHED-nosent" "a transcript with no boundary still reads whole-file"
+
+  # A FIRST arm must leave the path ABSENT, or NO-TRANSCRIPT — the empty-log
+  # signature of a SyntaxError in the detach program — could never fire again.
+  stamp_run_boundary "$scratch/never-armed.log" "cafe0003"
+  if [ -f "$scratch/never-armed.log" ]; then
+    bad "stamp_run_boundary CREATED a transcript on a first arm — NO-TRANSCRIPT is now unreachable"
+  else
+    ok "a first arm leaves the transcript absent (NO-TRANSCRIPT stays reachable)"
+  fi
+
+  # collect says the transcript is reused rather than silently showing a slice.
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$reuse_log" --pid-file "$scratch/reuse/child.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"reused      YES"*) ok "collect declares that the transcript holds prior runs" ;;
+    *)                   bad "collect reads a slice without saying the transcript was reused" ;;
+  esac
+  case "$out" in
+    *"RESULT: PASS (prior run)"*) bad "collect's tail leaks the prior run's lines into this run's report" ;;
+    *)                            ok "collect's tail is scoped to this run" ;;
+  esac
+
+  # c1: the anti-stack guard and the BARKPARK_HOME reuse are UNTOUCHED by the
+  # scoping change. The predicate itself is proved live at 4b; these two pin
+  # that cmd_arm still calls it and still refuses, since a boundary that
+  # silently disarmed the OOM guard would be far worse than the bug it fixes.
+  # shellcheck disable=SC2016  # these patterns are SOURCE TEXT, matched literally
+  out="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -c 'pid_live_ours "$prev_pid"' || true)"
+  check "${out:-0}" "1" "cmd_arm still runs the identity-aware anti-stack check on the previous run"
+  # shellcheck disable=SC2016
+  out="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -c 'is STILL-RUNNING (pid \$prev_pid)' || true)"
+  check "${out:-0}" "1" "cmd_arm still REFUSES to stack a second climb on a genuinely live child"
+  # shellcheck disable=SC2016
+  out="$(sed -n '/^fire_detached()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -c 'BARKPARK_HOME="/tmp/pds-w14.\$run_tag"' || true)"
+  check "${out:-0}" "1" "BARKPARK_HOME reuse is preserved (/tmp/pds-w14.\$run_tag, PDS-D233)"
 
   # NO-TRANSCRIPT
   state="$(classify "$scratch/absent.log" "$scratch/dummy.pid")"
