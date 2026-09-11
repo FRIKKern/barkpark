@@ -202,6 +202,17 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
   { type: 'eyebrow', block: { type: 'eyebrow', text: 'KICKER' }, marker: 'bp-role-eyebrow' },
   { type: 'byline', block: { type: 'byline', items: ['Ada', 'Grace'] }, marker: 'bp-role-byline' },
   {
+    type: 'pre-gate-badge',
+    block: {
+      type: 'pre-gate-badge',
+      label: 'Published before the block gate',
+      title: 'Every block renders.',
+      tone: 'neutral',
+      anchor: 'byline',
+    },
+    marker: 'bp-pregate bp-pregate--neutral bp-pregate--tucked',
+  },
+  {
     type: 'ingress',
     block: { type: 'ingress', content: [{ type: 'text', value: 'Lead.' }] },
     marker: 'bp-role-ingress',
@@ -643,7 +654,8 @@ describe('PortableDoc — the type-keyed renderer', () => {
     // scaffy:add-block-type CodeTabs MARK:js-count-code-tabs
     // scaffy:add-block-type Tabs MARK:js-count-tabs
     // + 1: field-number (B085) React emitter (pbw-fix-field-number-react).
-    expect(registered).toHaveLength(75)
+    // + 1: pre-gate-badge (#17199's reader-synthesised badge; docgates-s27).
+    expect(registered).toHaveLength(76)
   })
 
   it('composes a whole kitchen-sink array in one render without throwing', () => {
