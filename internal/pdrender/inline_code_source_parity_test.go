@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -92,5 +93,28 @@ func TestInlineCodeWhitespaceValueWinsOverChildren(t *testing.T) {
 	}
 	if got := inlineCodeSource(node); got != " " {
 		t.Fatalf("first NON-EMPTY, not non-blank: got %q, want %q", got, " ")
+	}
+}
+
+// A bare ARRAY where an inline node was expected — `content: [[{text…}]]`,
+// flattened one level too shallow by an upstream author path. 59 live
+// paragraphs + 18 list blocks carry the shape (2026-07-25 census). The Elixir
+// twin wraps the composed children in a PdText (inline.ex `compose_inline(l)
+// when is_list(l)`) and the SDK emits a `<span>` (inline.tsx renderInline,
+// `if (Array.isArray(node))`); this reader alone returned "" and the text
+// vanished in the TUI.
+//
+// DRIFT PROOF: delete the `case []any` arm of InlineRenderer.node and this
+// reds while the Elixir and JS legs stay green.
+func TestBareArrayInlineNodeRendersItsChildren(t *testing.T) {
+	ir := InlineRenderer{theme: DarkTheme()}
+	nodes := []any{
+		[]any{
+			map[string]any{"type": "text", "value": "nested_array_survives()"},
+		},
+	}
+	got := ir.Inline(nodes, RenderCtx{})
+	if !strings.Contains(got, "nested_array_survives()") {
+		t.Fatalf("bare-array inline node dropped its text: got %q", got)
 	}
 }

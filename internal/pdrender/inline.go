@@ -38,6 +38,19 @@ func (ir InlineRenderer) node(n any, ctx RenderCtx, insideLink bool) string {
 		return toStr(v)
 	case fmt.Stringer:
 		return v.String()
+	case []any:
+		// A bare ARRAY where an inline node was expected (`content: [[{text…}]]`
+		// — flattened one level too shallow by an upstream author path). Both
+		// twins already survive it and this reader alone returned "" (the text
+		// VANISHED in the TUI): inline.ex `compose_inline(l) when is_list(l)`
+		// wraps the composed children in a PdText, and inline.tsx renderInline
+		// does `if (Array.isArray(node)) return \`<span>${renderInlines(node)}</span>\``.
+		// The TUI has no wrapper element, so the children render in place.
+		var b strings.Builder
+		for _, child := range v {
+			b.WriteString(ir.node(child, ctx, insideLink))
+		}
+		return b.String()
 	case map[string]any:
 		return ir.typed(v, ctx, insideLink)
 	default:
