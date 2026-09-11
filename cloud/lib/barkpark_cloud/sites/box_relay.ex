@@ -71,9 +71,24 @@ defmodule BarkparkCloud.Sites.BoxRelay do
   """
   @callback build_record(Barkpark.t(), String.t(), String.t()) :: reply()
 
+  @doc """
+  Read the recorded build log's BYTES for a finished deploy — a BOUNDED TAIL, or
+  the box's refusal (`dr-bl-recorder-http-read-path` c1).
+
+  A strictly larger surface than `build_record/3`, so it is a separate verb with a
+  separate opt-in on the wire (`record=1&bytes=1`). The box refuses with 422
+  `build_log_unscrubbed` for a record whose `log_scrub` is nil — bytes that were
+  never folded through the secret scrubber — and that refusal is relayed, never
+  reinterpreted: this end invents nothing about bytes it did not receive.
+
+  A READ, for the same reason `build_record/3` is: a box whose credential was
+  refused is exactly the box whose last failed build a human needs to read.
+  """
+  @callback build_log_bytes(Barkpark.t(), String.t(), String.t()) :: reply()
+
   # The verbs that only READ the box. Everything else is a WRITE and is fenced
   # below for a box that has already refused our stored admin credential.
-  @reads [:poll_deploy, :build_record]
+  @reads [:poll_deploy, :build_record, :build_log_bytes]
 
   @spec start_deploy(Barkpark.t(), map()) :: reply()
   def start_deploy(bp, payload), do: dispatch(bp, :start_deploy, [bp, payload])
@@ -83,6 +98,10 @@ defmodule BarkparkCloud.Sites.BoxRelay do
 
   @spec build_record(Barkpark.t(), String.t(), String.t()) :: reply()
   def build_record(bp, slug, build_id), do: dispatch(bp, :build_record, [bp, slug, build_id])
+
+  @spec build_log_bytes(Barkpark.t(), String.t(), String.t()) :: reply()
+  def build_log_bytes(bp, slug, build_id),
+    do: dispatch(bp, :build_log_bytes, [bp, slug, build_id])
 
   @spec rollback(Barkpark.t(), map()) :: reply()
   def rollback(bp, payload), do: dispatch(bp, :rollback, [bp, payload])
@@ -161,6 +180,24 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
   @impl true
   def build_record(bp, slug, build_id) do
     query = URI.encode_query(%{"slug" => slug, "build_id" => build_id, "record" => "1"})
+    Registry.relay_admin(bp, :get, @path <> "?" <> query, nil)
+  end
+
+  # `bytes=1` rides ON TOP of `record=1` — the box's `bytes_requested?/1` only
+  # means anything alongside the record flag. A box too old to know it answers the
+  # RECORD, which carries no `tail` key at all; `Sites.BuildLogBytes` reads that as
+  # a shape it does not understand rather than as an empty log, so an old box can
+  # never be mistaken for one reporting no bytes.
+  @impl true
+  def build_log_bytes(bp, slug, build_id) do
+    query =
+      URI.encode_query(%{
+        "slug" => slug,
+        "build_id" => build_id,
+        "record" => "1",
+        "bytes" => "1"
+      })
+
     Registry.relay_admin(bp, :get, @path <> "?" <> query, nil)
   end
 

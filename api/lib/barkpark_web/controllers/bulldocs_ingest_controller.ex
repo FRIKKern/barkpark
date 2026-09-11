@@ -147,10 +147,21 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # SHARED by the validate dry-run and the create-on-push arm below so the two
   # doors cannot drift: what the dry-run reports IS what a create enforces.
   defp paper_wall_violations(conn, ref) do
+    ref |> paper_wall_tuples() |> Enum.map(&wall_violation(conn, &1))
+  end
+
+  # The raw tuple list, BEFORE it is flattened into violation maps. The create
+  # door needs the tuples themselves because one of them is not a violation at
+  # all: `{:dedup_unavailable, _}` is a transient OUTAGE (the scan could not
+  # run), and `validate_all/5` — correctly, for a dry-run that always answers
+  # 200 — collects it beside the author's own refusals. Flatten first and that
+  # distinction is gone; see `sync_create/5`.
+  defp paper_wall_tuples(ref) do
     Barkpark.Content.AuthoringWall.validate_all(ref, "paper", ref.doc_id, ref.dataset)
-    |> Enum.map(fn tuple ->
-      {:error, tuple} |> Errors.to_envelope(conn) |> Map.delete(:status)
-    end)
+  end
+
+  defp wall_violation(conn, tuple) do
+    {:error, tuple} |> Errors.to_envelope(conn) |> Map.delete(:status)
   end
 
   # The paper structural gates (template declarations + the hollow-body check)
@@ -189,7 +200,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
       then `Content.upsert_paper` (which re-runs the wall as the authority
       BEFORE any Repo write). A wall refusal is a 422 `create_wall` envelope
       carrying EVERY violation under `errors`, and writes NOTHING — no draft,
-      no partial row. `baseRev` is not consulted on this arm (the scaffold
+      no partial row. A dedup OUTAGE is not one of those violations: it is
+      lifted out of the wall's list and answered 503 `storage_unavailable` /
+      `dedup_unavailable` with `retry-after`, the same envelope the blocks and
+      body_html legs answer. `baseRev` is not consulted on this arm (the scaffold
       anchors at rev 0; an EXISTING slug still 412s on a stale anchor). The
       document's own `<paper slug>` must match the pushed path slug (422
       `slug_mismatch` otherwise — the path is the identity);
@@ -398,13 +412,17 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # copy already authenticated on).
   #
   # Wall order, deliberately validate-first: the SAME shared helpers the
-  # validate dry-run uses (`paper_wall_violations/2` + `paper_structure_
+  # validate dry-run uses (`paper_wall_tuples/1` + `paper_structure_
   # violations/1`) run over the parsed document and, on ANY violation, refuse
   # with every violation in ONE 422 — before `upsert_paper` is even called, so
   # a wall-refused create provably writes NOTHING. The upsert then re-runs the
   # wall as the AUTHORITY (enforce_blocks_wall sits before the Repo insert in
   # BlockOps — its own refusals also precede any write); its residual errors
   # (a dedup race, a changeset) route through the same envelopes as ingest.
+  #
+  # Validate-first is why the outage has to be lifted before the fold: the
+  # precheck is the FIRST thing that meets a degraded dedup scan, so whatever
+  # it decides is the answer this door gives. See the seam in `sync_create/5`.
   #
   # NOTE the deliberate absence of a locked title stamp: BPML cannot spell
   # `role`/`locked`, and `Diff.derive/2` compares blocks by FULL map equality —
@@ -444,24 +462,58 @@ defmodule BarkparkWeb.BulldocsIngestController do
         }
       }
 
-      case paper_wall_violations(conn, ref) ++ paper_structure_violations(blocks) do
-        [] ->
-          sync_create_persist(conn, slug, parsed, blocks, dataset, scope)
+      wall_tuples = paper_wall_tuples(ref)
 
-        violations ->
-          conn
-          |> put_status(:unprocessable_entity)
-          |> json(%{
-            error: %{
-              code: "create_wall",
-              message:
-                "no paper #{slug} exists yet; creating it ran the full publish wall, which refused — nothing was written",
-              hint:
-                "fix each violation below; see them before pushing with the dry-run: bp paper push #{slug} --check (POST /v1/plugins/bulldocs/papers/validate)",
-              errors: violations
-            }
-          })
+      # THE OUTAGE IS NOT A VIOLATION. `validate_all/5` returns one flat list,
+      # and exactly one member of it describes the WALL failing rather than the
+      # document failing: `{:dedup_unavailable, reason}` means the duplicate
+      # scan could not complete, so nothing was checked and nothing was
+      # refused on its merits. Folded in with the author's refusals it becomes
+      # a 422 `create_wall` — an author-fixable verdict for a transient
+      # database outage, which no amount of editing the paper can clear, and
+      # which a retrying client has no machine-readable reason to retry.
+      #
+      # So it is lifted out FIRST and answered with the SAME builder the blocks
+      # and body_html legs use (`dedup_unavailable_error/2`: 503,
+      # `storage_unavailable`/`dedup_unavailable`, the retry hint, the
+      # `retry-after` header) — one envelope, one owner, four doors. Nothing is
+      # written either way: this still precedes `sync_create_persist/6`.
+      #
+      # Only the create door lifts it. The validate dry-run keeps reporting the
+      # tuple as data inside its always-200 `{valid, violations}` reply, which
+      # is that endpoint's whole contract — it renders VERDICTS, it does not
+      # take transport positions.
+      case Enum.find(wall_tuples, &match?({:dedup_unavailable, _}, &1)) do
+        {:dedup_unavailable, reason} ->
+          dedup_unavailable_error(conn, reason)
+
+        nil ->
+          sync_create_walled(conn, slug, parsed, blocks, dataset, scope, wall_tuples)
       end
+    end
+  end
+
+  defp sync_create_walled(conn, slug, parsed, blocks, dataset, scope, wall_tuples) do
+    violations =
+      Enum.map(wall_tuples, &wall_violation(conn, &1)) ++ paper_structure_violations(blocks)
+
+    case violations do
+      [] ->
+        sync_create_persist(conn, slug, parsed, blocks, dataset, scope)
+
+      violations ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{
+            code: "create_wall",
+            message:
+              "no paper #{slug} exists yet; creating it ran the full publish wall, which refused — nothing was written",
+            hint:
+              "fix each violation below; see them before pushing with the dry-run: bp paper push #{slug} --check (POST /v1/plugins/bulldocs/papers/validate)",
+            errors: violations
+          }
+        })
     end
   end
 

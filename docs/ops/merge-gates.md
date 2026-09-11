@@ -644,8 +644,10 @@ Elixir security gates, path-triggered on `api/**`:
    baseline holding **ONLY entries that provably cannot carry an inline
    `# sobelow_skip` annotation**, enumerated by type and count. The floor is a
    property of sobelow 0.14.1's architecture, not of the baseline's size: it is
-   **9** today, out of a baseline of 41 rows
-   (`grep -c '^[A-Za-z]' api/.sobelow-skips`), in two mechanical classes.
+   **9** today, out of the baseline that
+   `grep -c '^[A-Za-z]' api/.sobelow-skips` prints — **35** rows read at
+   a333e4b58 on 2026-09-11, a dated snapshot and not a live fact — in two
+   mechanical classes.
    Derive both numbers rather than quoting this paragraph — it said **10** and
    **8** until 2026-09-01, having predicted its own decay two paragraphs down
    and never been re-derived after the fix landed:
