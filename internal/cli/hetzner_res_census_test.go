@@ -1016,6 +1016,8 @@ func TestHetznerResourceDispositionsAreBoundToRealCode(t *testing.T) {
 		}
 		src[path] = string(b)
 	}
+	// RULING 1's binding scope: the enclosing function of each emitting site.
+	bodies := hzResEnclosingBodies(t)
 
 	for key, wheres := range c.keys {
 		disp, ok := hzResDispositions[key]
@@ -1044,16 +1046,39 @@ func TestHetznerResourceDispositionsAreBoundToRealCode(t *testing.T) {
 		}
 
 		// RULING 1 — the companion grep: the named symbol is actually CALLED
-		// from the source file that emits this key.
-		file, _, _ := strings.Cut(wheres[0], ":")
-		body, seen := src[file]
-		if !seen {
+		// from the FUNCTION that emits this key.
+		//
+		// PDS-D446b — WHY THE SITE AND NOT THE FILE. This grep used to run over
+		// the whole source file, and a whole-file grep is not a binding: twelve
+		// destroy rows are paid by the SAME symbol (hzResDestroyed), spread
+		// across four files, so any one of them could lose its confirming read —
+		// swap its hzResDestroyed call for a bare hzResDone — and the grep would
+		// still find the ELEVEN OTHER calls and stay green. That is the exact
+		// class of failure the Elixir port hit as arm-A5 (PDS-D449): file-scope
+		// proximity reads like a binding because colocation is usually true, and
+		// is not one. RULING 2 directly above already binds per-row; this arm now
+		// does too, against the enclosing function of the emitting site.
+		where, _, _ := strings.Cut(wheres[0], " (via ")
+		file, _, _ := strings.Cut(where, ":")
+		if _, scanned := src[file]; !scanned {
 			t.Errorf("%q is emitted from %q, which is not one of the scanned sources %v", key, file, hzResSourceFiles(t))
 			continue
 		}
+		// REFUSES BY NAME rather than widening. A site this scan cannot resolve
+		// to an enclosing function must not silently fall back to the file-scope
+		// grep that PDS-D446b removed — that fallback is the hole.
+		body, resolved := bodies[where]
+		if !resolved {
+			t.Errorf("%q is emitted at %s, which this scan could not resolve to an enclosing function — RULING 1 "+
+				"REFUSES rather than falling back to the file-scope grep that let a destroy lose its confirming "+
+				"read while eleven sibling calls kept the row green", key, where)
+			continue
+		}
 		if !strings.Contains(body, symbol+"(") {
-			t.Errorf("%q claims to be paid by %s, but %s never CALLS %s — the row describes code that is not "+
-				"there, which is the one failure a prose ledger cannot catch by itself", key, symbol, file, symbol)
+			t.Errorf("%q claims to be paid by %s, but the function emitting it at %s never CALLS %s — the row "+
+				"describes code that is not there, which is the one failure a prose ledger cannot catch by "+
+				"itself. (%s does still mention %s elsewhere; that is why this arm reads the SITE, not the file.)",
+				key, symbol, where, symbol, file, symbol)
 		}
 	}
 
@@ -1373,6 +1398,67 @@ func hzResSourceText(t *testing.T) map[string]string {
 		text[path] = string(b)
 	}
 	return text
+}
+
+// hzResEnclosingBodies is RULING 1's BINDING SCOPE: the source text of the
+// function that contains each emitting site, keyed by the "file:line" the
+// census records for that site.
+//
+// It exists because the paying symbol must bind to the EMITTING FUNCTION.
+// hzResDestroyed is both an emitter and apparatus, so a destroy site IS its
+// hzResDestroyed call; take that call away (hzResDone in its place) and the
+// function no longer pays for its receipt. A file-scope grep cannot see that:
+// the twelve destroy rows live in four files, so every file that holds one
+// holds at least two, and the survivors keep the grep green.
+//
+// LENS: keyed by emitting site, not by function — a function holding two
+// emitter calls appears under two keys with the same body text, which is the
+// behaviour RULING 1 wants (each ROW is checked against the code that emits IT).
+func hzResEnclosingBodies(t *testing.T) map[string]string {
+	t.Helper()
+	fset, files := hzResParseSources(t)
+	text := hzResSourceText(t)
+	bodies := map[string]string{}
+	for path, file := range files {
+		src, ok := text[path]
+		if !ok {
+			t.Fatalf("parsed %s but could not read its text — the two passes disagree about the population", path)
+		}
+		for _, d := range file.Decls {
+			decl, ok := d.(*ast.FuncDecl)
+			if !ok || decl.Body == nil {
+				continue
+			}
+			if hzResApparatus[decl.Name.Name] {
+				continue // the apparatus forwarding to hzResDone is not a verb site
+			}
+			lo, hi := fset.Position(decl.Body.Pos()).Offset, fset.Position(decl.Body.End()).Offset
+			if lo < 0 || hi > len(src) || lo >= hi {
+				t.Fatalf("%s: could not slice the body of %s (offsets %d..%d of %d bytes)",
+					path, decl.Name.Name, lo, hi, len(src))
+			}
+			body := src[lo:hi]
+			ast.Inspect(decl.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				name, bound := hzResCalleeName(call.Fun)
+				if !bound {
+					return true // hzResSitesFromSource already refuses this shape by name
+				}
+				if _, isEmitter := hzResEmitters[name]; !isEmitter {
+					return true
+				}
+				bodies[fmt.Sprintf("%s:%d", path, fset.Position(call.Pos()).Line)] = body
+				return true
+			})
+		}
+	}
+	if len(bodies) == 0 {
+		t.Fatalf("resolved ZERO emitting sites to an enclosing function — RULING 1 would be vacuous")
+	}
+	return bodies
 }
 
 // hzResExprText returns e's source, whitespace collapsed to single spaces.

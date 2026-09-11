@@ -41,6 +41,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -286,6 +287,14 @@ func TestPDSLiveManifestStatusAndBodyCohere(t *testing.T) {
 // and so is any kind whose message does not name its own collection — `network`
 // answers "entity not found" and needs an override, which weakens this arm for
 // that one row and says so in the manifest.
+//
+// THE ID HALF OF THAT LIMIT IS NOT UNIVERSAL, AND IS NO LONGER UNMEASURED.
+// TestPDSWrongPathArmBindsTheIDWhereverTheBodyNamesOne below measures the corpus
+// instead of generalising from `volume`: five of the ten harvested 404s DO echo
+// the requested id and are now BOUND to it, and the other five name no id at all
+// and are pinned by name as permanently unbindable. That test is also where the
+// message_token_override roster is pinned, so a SECOND override costs an edit —
+// the reason-length guard below only catches an override with no reason at all.
 var pdsSegmentInRequest = regexp.MustCompile(`/v1/([a-z_]+)/`)
 
 // pdsExpectedMessageToken derives the token from the manifest's own `request`
@@ -356,6 +365,155 @@ func TestPDSLiveFixturesComeFromTheirDeclaredPath(t *testing.T) {
 	if pdsExpectedMessageToken("GET /v1/volumes/999999999", "") != "volume" {
 		t.Error("an empty override did not fall through to the derived token")
 	}
+}
+
+// ─── THE ID ARM, AND THE PART OF THE CORPUS THAT CANNOT HAVE ONE ─────────────
+//
+// The wrong-path arm above is containment on the COLLECTION token. Its stated
+// limit was that a right-collection/WRONG-ID harvest is invisible to it, on the
+// premise that "GET /v1/volumes/1 and GET /v1/volumes/999999999 produce the SAME
+// message token". THAT PREMISE IS TRUE OF SOME KINDS AND FALSE OF OTHERS, and
+// the difference was never measured — it was generalised from `volume`, which
+// happens to be one of the silent ones.
+//
+// MEASURED over the whole harvested corpus (LENS: the http_status == 404 rows of
+// testdata/pds_live_hetzner_fixtures.json, one body per flat kind — ten rows
+// today; not "all Hetzner 404s", and not "all fixtures"):
+//
+//	FIVE kinds ECHO THE REQUESTED ID in the message and can be bound —
+//	certificate ("certificate with ID 999999999 not found"), firewall (quotes it:
+//	"with ID '999999999'"), floating-ip, load-balancer, primary-ip.
+//	FIVE kinds NAME NO ID AT ALL and are permanently unbindable from the body —
+//	network ("entity not found"), placement-group ("placement group not found"),
+//	server, volume, zone.
+//
+// So this test does BOTH halves of the row: it BINDS the id wherever the body
+// exposes one (a wrong-id harvest for those five now reds), and it RECORDS the
+// residual as permanent BY NAME with the measured reason, re-measured every run
+// rather than asserted in a comment. A kind moving between the two lists costs
+// an edit here — in the shrinking direction that is a real regression in the
+// API's error text, and in the growing direction it is free binding nobody
+// should get silently.
+//
+// IT ALSO PINS THE OVERRIDE ROSTER AT EXACTLY ONE. A message_token_override does
+// not weaken the wrong-path arm a little: for the row carrying it, that arm
+// stops detecting a wrong-COLLECTION harvest at all — a hole of size one per
+// entry. The reason-length guard in the arm above catches an override filed with
+// NO stated reason; it cannot catch a SECOND override filed with a
+// plausible-looking one. This does.
+func TestPDSWrongPathArmBindsTheIDWhereverTheBodyNamesOne(t *testing.T) {
+	m := loadPDSLiveManifest(t)
+
+	bound, rows := 0, 0
+	var silent []string
+	for _, f := range m.Fixtures {
+		if f.HTTPStatus != 404 {
+			continue
+		}
+		rows++
+		want := pdsIDInRequest(f.Request)
+		if want == "" {
+			t.Errorf("%s (%s): no id could be read from request %q — an id binding cannot be taken over a row "+
+				"whose own request names no id", f.File, f.Kind, f.Request)
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join("testdata", f.File))
+		if err != nil {
+			t.Fatalf("%s: %v", f.File, err)
+		}
+		got := pdsIDsInMessage(pdsErrorEnvelope(body).Error.Message)
+		if len(got) == 0 {
+			silent = append(silent, f.Kind)
+			continue
+		}
+		bound++
+		// THE BINDING. The message named an id; it must be the id the manifest
+		// says was requested. A body harvested at a DIFFERENT id of the right
+		// collection passes status, content-type, error.code and the collection
+		// token — and reds here.
+		if !slices.Contains(got, want) {
+			t.Errorf("%s (%s): the manifest says this body was harvested at id %s, but its message names id(s) %v "+
+				"— %q. Either the harvest read a different id than the manifest records, or the manifest was "+
+				"edited away from the body it describes",
+				f.File, f.Kind, want, got, pdsErrorEnvelope(body).Error.Message)
+		}
+	}
+	if rows < 2 {
+		t.Fatalf("only %d rows carried http_status 404 — this arm is vacuous below two", rows)
+	}
+	if bound < 2 {
+		t.Fatalf("only %d of %d harvested bodies named ANY id — with fewer than two the binding arm above never "+
+			"runs on real data and this test is decorative", bound, rows)
+	}
+	t.Logf("ID BINDING: %d of %d harvested 404 bodies name an id and are bound; %d are silent %v "+
+		"(LENS: http_status==404 rows of the live manifest, one body per flat kind)", bound, rows, len(silent), silent)
+
+	// THE PERMANENT RESIDUE, PINNED BY NAME. These kinds' 404s name no id, so
+	// NOTHING in the body can distinguish a wrong-id harvest for them: for these
+	// five the row's stated limit is not a gap to close, it is a property of the
+	// API, and it is recorded here with the measurement that established it.
+	sort.Strings(silent)
+	const wantSilent = "network,placement-group,server,volume,zone"
+	if strings.Join(silent, ",") != wantSilent {
+		t.Errorf("the set of kinds whose 404 message names NO id is %q, pinned at %q. Measured 2026-08-01 by "+
+			"--harvest-only: these are the kinds for which a right-collection/wrong-id harvest is PERMANENTLY "+
+			"undetectable from the body, because the body has nothing to compare. A kind leaving this set gained a "+
+			"binding for free; a kind joining it LOST one — either way say which, here, in the same edit",
+			strings.Join(silent, ","), wantSilent)
+	}
+
+	// THE CONTROLS. A binding arm that cannot red, and a silence count read by a
+	// detector that finds nothing, are the same failure wearing two costumes.
+	if got := pdsIDsInMessage("certificate with ID 1 not found"); !slices.Contains(got, "1") || slices.Contains(got, "999999999") {
+		t.Fatalf("the id detector misread a planted WRONG-ID message: got %v — the binding above would never red", got)
+	}
+	if got := pdsIDsInMessage("firewall with ID '999999999' not found"); !slices.Contains(got, "999999999") {
+		t.Fatalf("the id detector missed a QUOTED id: got %v — firewall's real shape would count as silent", got)
+	}
+	if got := pdsIDsInMessage("entity not found"); len(got) != 0 {
+		t.Fatalf("the id detector invented ids in a message that has none: %v — the silent set would never fill", got)
+	}
+
+	// ---- THE OVERRIDE ROSTER, PINNED BY NAME AT ONE. -----------------------
+	var roster []string
+	for _, f := range m.Fixtures {
+		if f.HTTPStatus != 404 || f.MessageTokenOverride == "" {
+			continue
+		}
+		roster = append(roster, f.Kind+"="+f.MessageTokenOverride)
+	}
+	sort.Strings(roster)
+	const wantRoster = "network=entity"
+	if strings.Join(roster, ",") != wantRoster {
+		t.Errorf("the message_token_override roster is %q, pinned at %q. `network` is the one flat kind whose 404 "+
+			"says %q — naming no collection at all — so for THAT row the wrong-path arm detects nothing. A second "+
+			"override belongs in the same edit as this pin, carrying the live measurement that forced it",
+			strings.Join(roster, ","), wantRoster, "entity not found")
+	}
+}
+
+// pdsIDInRequest reads the id out of a manifest `request` line. It is separate
+// from pdsSegmentInRequest on purpose: that one deliberately keeps ONLY the
+// collection segment, and widening it to carry the id would change what the
+// wrong-path arm compares.
+var pdsIDInRequestRe = regexp.MustCompile(`/v1/[a-z_]+/(\d+)`)
+
+func pdsIDInRequest(request string) string {
+	mm := pdsIDInRequestRe.FindStringSubmatch(request)
+	if len(mm) != 2 {
+		return ""
+	}
+	return mm[1]
+}
+
+// pdsIDsInMessage returns every decimal run in a 404 message. Runs, not one
+// match: `firewall` quotes its id and a future message could name two. An EMPTY
+// result is the discriminator the silent-set pin above keys on, so this must
+// find an id wherever one exists — the controls check both directions.
+var pdsDigitsRe = regexp.MustCompile(`\d+`)
+
+func pdsIDsInMessage(message string) []string {
+	return pdsDigitsRe.FindAllString(message, -1)
 }
 
 // ─── THE LENGTH RELAXATION ───────────────────────────────────────────────────
