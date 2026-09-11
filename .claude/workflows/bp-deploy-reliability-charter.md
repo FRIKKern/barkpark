@@ -13942,3 +13942,29 @@ operator route must still treat a 403 as a first-class outcome and surface it, n
 stands on its own window and is untouched; the window read above is a DIFFERENT, later window and its
 `failure_rate 9.45%` may not be laid beside D516's `17.79%` without both windows printed.
 
+### D610 — 2026-09-11 — D469'S OFFLINE RULE CANNOT REACH A TASK TITLE. THE PROSE-ROT CLASS HAS NO AUTOMATED GUARD ON THE LEDGER, AND `dr-w27-bl-…` IS RETITLED BY HAND.
+
+**The retitle, done.** `dr-w27-bl-deferral-cause-is-null-on-59-percent` was titled
+*"59.7% of deferrals cannot name a cause, and the vocabulary changed twice inside one week"* — a decaying
+percentage over a CLOSED population, stated in the present tense. Patched and published at 2026-09-11T13:53:32Z
+(`bp doc patch task … --set title=… --yes`, then `bp doc publish task … --yes`). The row now reads:
+
+> The NULL-cause deferral population closed at 2026-08-07T10:01:54Z; the vocabulary changed twice in the week before it
+
+**The row was NOT closed and its criteria were NOT touched.** Read back at 2026-09-11T13:53:42Z:
+`lifecycle_status: open`, `acceptance_criteria` length 3 before and 3 after, and the three criterion strings
+compare byte-identical (`met` false → false on all three). The two live criteria survive verbatim:
+(2) *"Any rate this epic publishes states which vocabulary window it covers, and refuses to span
+2026-08-05T21:27:11 or the 2026-08-07 cause switch silently"* and (3) *"The interaction with dr-w27-s5 ARM D is
+recorded: the deferred population is a floor because a lost defer CAS produces no deferred row"*. The slug still
+embeds `59-percent`; that fossil is accepted, as the filing said.
+
+**THE GAP, RULED.** D469's prose-rot rule is **syntactic and offline by construction** — "no network in the
+unit gate" — and it scans instrument FILES in this repo. A Barkpark task title is a server-side row in the
+`production` dataset, reachable only over HTTP. **So the rule structurally cannot see the surface this defect
+lived on, and this class has NO automated guard.** Nothing in CI reds when a ledger title freezes a decaying
+number or narrates a closed population in the present tense; nothing did for the 33 days this title stood. The
+only mechanism is review, and review is what caught this one. **Naming that is the guard we have.** A network
+tier that could reach titles would have to run against prod on every PR, which D469 already refused for a
+reason that has not changed; the honest state is *known gap, deliberately unguarded, documented here so the next
+reader does not assume a gate exists.*
