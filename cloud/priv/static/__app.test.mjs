@@ -4729,6 +4729,152 @@ test("dr-w5-followup (c11): D42's FACTUAL ARM survives the change — a SILENCE 
   assert.equal(hooks.bucketOf(full), "attention");
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// console-r9: THE UNMETERED MARKER — the unreadable/quiet split, and its LOCK.
+//
+// THE DEFECT THIS CLOSES. `strained` and `filling` shipped on this surface, so
+// a box OVER a fence is legible. A box we CANNOT MEASURE was not: a beating box
+// running an agent that predates the vitals beat rendered "Healthy" with an
+// empty meta line — byte-identical to a box every one of whose vitals we read
+// and found calm. The green was the same; only one of them had a measurement
+// behind it.
+//
+// WHERE THE LOCK IS. The rung words (`strained`, `filling`) are pinned across
+// surfaces by __fixtures__/attention_order.json (decision 32) and the D32 tests
+// above. This sentence is NOT a rung and is deliberately absent from that
+// fixture, so the fixture cannot pin it — and a sentence living in Go and in
+// app.js with a test each is an UNLOCKED MIRROR. The lock is therefore the
+// FRESHNESS TEST directly below: it decodes the sentence out of the Go source
+// and holds the SPA's to it, so a reword on either surface reds here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The Go twin's function body, sliced by its own signature and the next
+// top-level `func` — a sentence that moved into a NEIGHBOURING function cannot
+// satisfy this grep, which is the whole point of slicing rather than scanning.
+function goFuncBody(src, name) {
+  const start = src.indexOf("func " + name + "(");
+  assert.ok(start > 0, "internal/cli/cloud_status_cmd.go no longer declares " + name +
+    " — the cross-surface pin has lost its ANCHOR, not its meaning");
+  const end = src.indexOf("\nfunc ", start + 1);
+  return src.slice(start, end < 0 ? src.length : end);
+}
+
+test("console-r9 (LOCK): the unmetered sentence is READ OUT OF the Go twin, never restated here", () => {
+  const GO = fs.readFileSync(new URL("../../../internal/cli/cloud_status_cmd.go", import.meta.url), "utf8");
+  const body = goFuncBody(GO, "unmeteredMarker");
+
+  // THE SENTENCE. Exactly one non-empty return, or the lock cannot say which
+  // string IS the marker — and an ambiguous lock is not a lock.
+  const returns = [...body.matchAll(/return\s+"([^"]*)"/g)].map((m) => m[1]).filter((s) => s !== "");
+  assert.equal(returns.length, 1,
+    "unmeteredMarker no longer has exactly one non-empty return (" + returns.length +
+    "); the lock cannot name THE sentence");
+  const GO_SENTENCE = returns[0];
+  // Non-vacuity: the grep found real prose, not "" === "".
+  assert.ok(GO_SENTENCE.length > 20 && /\S+\s+\S+/.test(GO_SENTENCE),
+    "the decoded Go sentence is not prose: " + JSON.stringify(GO_SENTENCE));
+
+  // TERM-IDENTICAL. The SPA's marker, for the shape that produces it, is the
+  // Go string byte-for-byte. Reword either surface and this reds.
+  const unreadable = VITAL_BOX({});                       // beating, zero readable vitals
+  assert.equal(hooks.unmeteredMarker(unreadable), GO_SENTENCE);
+
+  // THE KEYING RULE IS LOCKED TOO, not just the words: the Go body keys on the
+  // PRESENCE of reported_at and on cpu_cores, and on no clock. A staleness
+  // window added on either side is a fabricated number (the honesty law), and
+  // it would show up here as a new field the body reads.
+  assert.match(body, /ReportedAt/, "the Go marker stopped keying on reported_at");
+  assert.match(body, /CPUCores/, "the Go marker stopped keying on cpu_cores");
+  assert.doesNotMatch(body, /time\.Now|Since\(|ParseTime|RFC3339/,
+    "the Go marker grew a staleness clock — the SPA twin has none, and no measurement justifies one");
+
+  // ...and the SPA twin reads the same two fields and no clock either. Sliced
+  // the same way: from its own `function` line to the next top-level one.
+  const jsStart = APP_SRC.indexOf("function unmeteredMarker(bp)");
+  assert.ok(jsStart > 0, "app.js no longer declares unmeteredMarker");
+  const jsEnd = APP_SRC.indexOf("\n  function ", jsStart + 1);
+  const JS = APP_SRC.slice(jsStart, jsEnd < 0 ? APP_SRC.length : jsEnd);
+  assert.match(JS, /reported_at/, "the SPA marker stopped keying on reported_at");
+  assert.match(JS, /cpu_cores/, "the SPA marker stopped keying on cpu_cores");
+  assert.doesNotMatch(JS, /Date\.now|getTime|new Date/,
+    "the SPA marker grew a staleness clock the Go twin does not have");
+});
+
+test("console-r9 (c1): the THREE DEGENERATE ARMS render differently from each other AND from a pressured row", () => {
+  // Four boxes off ONE payload shape. Before this slice, arms 2 and 3 produced
+  // IDENTICAL rows; the assertion that they differ is the whole criterion.
+  const NEVER_REPORTED = {
+    ...LIVE_BOX, id: "b-never", name: "never",
+    last_seen_at: null,
+    // A box the CP has never heard from has no beat, so no beat timestamp.
+    pressure: PRESSURE({ reported_at: null }),
+  };
+  const UNREADABLE = { ...VITAL_BOX({}), id: "b-unread", name: "unread" };
+  const QUIET = {
+    ...VITAL_BOX({
+      cpu_cores: 8, cpu_percent: 4.1, mem_used_percent: 31.0,
+      load1: 0.21, load15: 0.34, disk_used_percent: 41.7,
+      swap_used_percent: 0, swap_total_bytes: 0,
+    }), id: "b-quiet", name: "quiet",
+  };
+  const PRESSURED = { ...VITAL_BOX({ cpu_cores: 2, load15: 3.6 }), id: "b-hot", name: "hot" };
+
+  // ── THE RUNGS. The marker is a DETAIL LINE: it must move NO box's rung.
+  assert.equal(hooks.classifyBp(NEVER_REPORTED), "unreported");
+  assert.equal(hooks.classifyBp(UNREADABLE), "ok", "an unreadable box is a SILENCE, never a rung (D69/D42)");
+  assert.equal(hooks.classifyBp(QUIET), "ok");
+  assert.equal(hooks.classifyBp(PRESSURED), "strained");
+
+  // ── THE MARKER, all four arms, both directions in one run.
+  assert.equal(hooks.unmeteredMarker(NEVER_REPORTED), "",
+    "a box that never beat must not be called UNREADABLE — that claims we heard something");
+  assert.notEqual(hooks.unmeteredMarker(UNREADABLE), "", "the unreadable arm is the one that fires");
+  assert.equal(hooks.unmeteredMarker(QUIET), "", "a box whose vitals we READ has nothing unreadable to say");
+  assert.equal(hooks.unmeteredMarker(PRESSURED), "");
+  assert.equal(hooks.unmeteredMarker({ ...LIVE_BOX }), "",
+    "an ABSENT pressure key (a pre-contract control plane) is not a beating box");
+
+  // ── THE RENDERS. Four fleet rows, and no two of them are the same row.
+  const rows = {
+    never: hooks.fleetRow(NEVER_REPORTED, {}),
+    unreadable: hooks.fleetRow(UNREADABLE, {}),
+    quiet: hooks.fleetRow(QUIET, {}),
+    pressured: hooks.fleetRow(PRESSURED, {}),
+  };
+  const names = Object.keys(rows);
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      // Strip the id/name, which differ by construction, so the comparison is
+      // about the PRESSURE ANSWER and not about the label on the box.
+      const strip = (h) => h.replace(/b-[a-z]+/g, "ID").replace(/>(never|unread|quiet|hot)</g, ">NAME<");
+      assert.notEqual(strip(rows[names[i]]), strip(rows[names[j]]),
+        names[i] + " and " + names[j] + " render as the SAME row — the arm is not distinguishable on screen");
+    }
+  }
+
+  // ...and each one says its OWN thing, so "different" is not different-by-accident.
+  assert.ok(rows.never.includes("Never reported"), "the never-reported arm lost its words");
+  assert.ok(rows.unreadable.includes("vitals unreadable"), "the unreadable arm renders no marker");
+  assert.ok(rows.pressured.includes("Under load") && rows.pressured.includes("load 3.6 on 2 cores"),
+    "the pressured arm lost its measured reason");
+
+  // THE NEGATIVE ARM, same run: the marker appears on NEITHER of the two rows
+  // that have no rollout gap, so the assertion above is not matching markup
+  // every row happens to carry.
+  for (const k of ["never", "quiet", "pressured"]) {
+    assert.equal(rows[k].includes("vitals unreadable"), false,
+      "the " + k + " row wears the unreadable marker it has not earned");
+  }
+  // The unreadable row is otherwise an ORDINARY healthy row — the marker rides
+  // ON the pill, it does not replace it (D69: detail line, not a rung).
+  assert.match(rows.unreadable, /status-pill--ok/);
+  assert.equal(rows.unreadable.includes("Under load") || rows.unreadable.includes("Disk filling"), false);
+
+  // Evidence only, no advice (D332(d)) — the same bar the vitals reasons meet.
+  assert.doesNotMatch(hooks.unmeteredMarker(UNREADABLE),
+    /retry|try again|check the|contact|restart|reinstall|should|make sure|verify|upgrade/i);
+});
+
 test("dr-w5-followup (c2): EVERY statusPill render site is enumerated FROM THE CODE, and every one paints the new states", () => {
   // ── HOW THE SITE SET IS DERIVED. Not from a list in the task row (which said
   // six): every `statusPill(` CALL in app.js, minus its own definition, mapped

@@ -7288,6 +7288,45 @@
     return "disk " + vital1(disk) + "% used (fills at " + vital1(FILLING_DISK_PCT) + "%)";
   }
 
+  // ── THE UNMETERED MARKER (charter D69) — A DETAIL LINE, NEVER A RUNG ───────
+  //
+  // Ported verbatim from the Go twin (internal/cli/cloud_status_cmd.go
+  // `unmeteredMarker`), and it exists because THREE VERY DIFFERENT BOXES were
+  // rendering as one green row on this surface:
+  //
+  //   never-reported  — the CP has never heard a byte. Already its own rung
+  //                     (`unreported`, "Never reported") with its own evidence.
+  //   UNREADABLE      — the box IS beating (`reported_at` is set) and not one
+  //                     vital can be read off it (`cpu_cores` null): it runs an
+  //                     agent that predates the vitals beat. Until this marker
+  //                     it rendered "Healthy", byte-identical to —
+  //   measured-quiet  — every vital present, every one calm. A box we looked at.
+  //
+  // Folding the middle one into the last is how the fleet list answered "which
+  // of my boxes is under pressure right now" with a green that had NO
+  // measurement behind it. An operator should SEE the rollout gap rather than
+  // infer it from an absence.
+  //
+  // NOT A RUNG, deliberately, and this is the Go twin's ruling kept: a rung for
+  // it would be vocabulary for what is really a rollout gap, and a status minted
+  // in the SPA alone is exactly the drift decision 32 exists to prevent
+  // (`unmetered` is absent from __fixtures__/attention_order.json ON PURPOSE).
+  // It rides in the meta line on top of whatever the pill already said — the
+  // same place, and the same rule, as fleetSlotUnitsText.
+  //
+  // Keyed on the PRESENCE of reported_at, NOT on its age: nothing measured here
+  // justifies a staleness window, and inventing one would be the fabricated
+  // number the honesty law refuses.
+  function unmeteredMarker(bp) {
+    var p = pressureOf(bp);
+    // Never beat at all — that is `unreported`, a DIFFERENT fact with its own
+    // rung and its own words. Saying "unreadable" over it would claim we heard
+    // something from a box we have never heard from.
+    if (!p || typeof p.reported_at !== "string" || p.reported_at.trim() === "") return "";
+    if (vitalNum(p.cpu_cores) != null) return "";  // vitals readable — nothing to say
+    return "vitals unreadable — agent predates the vitals beat";
+  }
+
   // ── slot_units (#14886): IS THE BLUE/GREEN DEPLOY PAIR INTACT ───────────────
   //
   // The one fact on a fleet row that is not about the host at all, and the one
@@ -7494,6 +7533,13 @@
     // person scans first. Silent on every other state — see fleetSlotUnitsText.
     var su = fleetSlotUnitsText(bp);
     if (su) parts.push(esc(su));
+    // The unmetered marker sits HERE — after the slot-unit clause and before
+    // nothing, the same position the Go table gives it in its detail chain
+    // (reason · queuedDeployAge · slotUnit · runaway · err5xx · UNMETERED ·
+    // boxDeployRate). It is the segment that stops a box we CANNOT measure from
+    // passing for a box we measured and found calm.
+    var um = unmeteredMarker(bp);
+    if (um) parts.push(esc(um));
     return parts.length ? '<div class="fleet-meta">' + parts.join(" · ") + "</div>" : "";
   }
 
@@ -28284,6 +28330,9 @@
       // through classifyBp's one-word answer.
       loadPerCore: loadPerCore, strainedBox: strainedBox, fillingBox: fillingBox,
       strainedReason: strainedReason, fillingReason: fillingReason,
+      // The DETAIL MARKER, exported beside the rungs it is deliberately not one
+      // of, so the harness can probe the unreadable/quiet split directly.
+      unmeteredMarker: unmeteredMarker,
       STRAINED_LOAD15_PER_CORE: STRAINED_LOAD15_PER_CORE,
       STRAINED_LOAD1_PER_CORE: STRAINED_LOAD1_PER_CORE,
       FILLING_DISK_PCT: FILLING_DISK_PCT,
