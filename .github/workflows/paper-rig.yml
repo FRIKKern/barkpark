@@ -1,0 +1,191 @@
+name: paper-rig
+
+# The paper render rig (tooling/paper-excellence/rig/) in CI.
+#
+# THE HOLE THIS CLOSES (pe-w2-rig-ci-image-baselines). The rig was green
+# locally and wired into NOTHING: no workflow ran gate.sh, so every assertion
+# it makes about the reading surface — the `.bp-paper-article` wrapper, the
+# `bp-paper-surface` class list, a live paragraph inside it, a resolved
+# `max-width`, a non-empty image file — was a laptop-only fact. A renderer or
+# paper-CSS change reached main having been photographed by nobody.
+#
+# ADVISORY, ON PURPOSE. This name is deliberately NOT in
+# .github/required-checks.json. The rig shoots through headless Chromium and
+# its numeric arms (characters-per-line, font metrics) are host-dependent by
+# construction — see rig/README.md §Deliberate limits — so a red here is a
+# review item, never a merge block, until the Linux baselines have lived long
+# enough to be trusted as an oracle. It also carries a workflow-level `paths:`
+# filter, which required-checks.json forbids for a REQUIRED name (a filtered
+# workflow emits no check run at all on a non-matching head, and the pull
+# request then waits forever on a context that will never report). Filtered +
+# advisory is the consistent pair; filtered + required is the deadlock.
+#
+# TWO MODES:
+#
+#   push / pull_request  →  `gate.sh` on the default fixture. Renders through
+#                           the real PortableDoc.Render + the real bulldocs
+#                           layout, photographs 8 cells (2 schemes x 4 widths)
+#                           and asserts on DOM CONTENT, never on an HTTP
+#                           status. It does NOT pass --check: the committed
+#                           report.json oracle is a numeric diff and the
+#                           numbers are face-dependent (below).
+#
+#   workflow_dispatch    →  `recapture: true` runs baseline.sh INSIDE this
+#                           image and uploads rig/baselines/ as an artifact.
+#                           A `rig-recapture` LABEL on a pull request does the
+#                           same thing, and exists because `workflow_dispatch`
+#                           is only dispatchable once the workflow file is on
+#                           the DEFAULT branch — so the capture that has to
+#                           happen BEFORE the first merge has no dispatch route.
+#                           That is the only honest way to produce Linux
+#                           baselines: capturing them on a laptop and calling
+#                           them the CI numbers is the guess this task exists
+#                           to stop. The runner image string is printed and
+#                           recorded in the README beside the numbers.
+#
+# WHY NOT --check YET. On macOS the paper serif stack resolves to Iowan Old
+# Style; a Linux image has neither Iowan nor Source Serif 4 and falls further
+# down the stack, so CPL and font metrics differ BY HOST. Until the baselines
+# in this repo were captured in this image, `--check` would have compared a
+# Linux run against macOS numbers and reddened on the font fallback rather
+# than on a layout regression. See rig/README.md §Baselines.
+#
+# WHY THE PATH SET. The rig measures the rendered reading surface, so its
+# triggers are the four trees that can move it: the renderer
+# (api/lib/barkpark/portable_doc/**), the paper CSS
+# (api/assets/paper-surface/**), the LiveView that owns the
+# `<main class="bp-paper-shell bp-paper-surface bp-paper-article">` wrapper the
+# rig asserts against (api/lib/barkpark_web/live/bulldocs_live.ex), and the rig
+# itself. The push and pull_request lists are byte-identical: a glob on one
+# side only is silent in both directions — on pull_request only, the gate goes
+# dark at the merge; on push only, it reds on protected main where nobody can
+# land the fix through.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/lib/barkpark/portable_doc/**"
+      - "api/assets/paper-surface/**"
+      - "api/lib/barkpark_web/live/bulldocs_live.ex"
+      - "tooling/paper-excellence/rig/**"
+      - ".github/workflows/paper-rig.yml"
+  pull_request:
+    paths:
+      - "api/lib/barkpark/portable_doc/**"
+      - "api/assets/paper-surface/**"
+      - "api/lib/barkpark_web/live/bulldocs_live.ex"
+      - "tooling/paper-excellence/rig/**"
+      - ".github/workflows/paper-rig.yml"
+  workflow_dispatch:
+    inputs:
+      recapture:
+        description: "Re-capture rig/baselines/ inside this runner image and upload the panel as an artifact"
+        type: boolean
+        default: false
+
+concurrency:
+  group: paper-rig-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  # Never cancel main; collapse superseded PR runs. Same shape as paper-editor.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  rig:
+    name: Render rig (gate.sh)
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+      # render.exs starts the Endpoint (server: false) but never the Repo, so
+      # there is no database here and no postgres service. These are the
+      # config/runtime.exs shaped vars the test env still wants present.
+      SECRET_KEY_BASE: ci-secret-key-base-not-used-in-test-env-just-needs-64-chars-padding
+      BARKPARK_CLOAK_KEY: ci-cloak-key-32-chars-padding-aaa
+      PREVIEW_JWT_SECRET: ci-preview-jwt-secret-not-used-padding
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image string is EVIDENCE, not decoration: the baselines are only
+      # meaningful next to the image that produced them, and rig/README.md
+      # §Baselines records what this prints.
+      - name: Record the runner image
+        run: |
+          echo "ImageOS=${ImageOS:-unknown} ImageVersion=${ImageVersion:-unknown}"
+          cat /etc/os-release | head -2
+          fc-list | wc -l
+
+      # Same pins elixir.yml's blocking Test job uses — the prod pin, not a
+      # looser `~> 1.15` reading of api/mix.exs.
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27.0"
+          elixir-version: "1.18.4"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            api/deps
+            api/_build
+          key: ${{ runner.os }}-paper-rig-mix-27.0-1.18.4-${{ hashFiles('api/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-paper-rig-mix-27.0-1.18.4-
+
+      - name: Fetch deps
+        working-directory: api
+        run: mix deps.get
+
+      # Playwright is installed GLOBALLY and pointed at via PLAYWRIGHT_DIR,
+      # which is the resolution order shoot.mjs documents ($PLAYWRIGHT_DIR
+      # first, then candidate node_modules roots). Nothing under js/ is
+      # installed for this job: the rig needs a browser, not the SDK monorepo.
+      # The global root is not a fixed path under actions/setup-node — ask npm
+      # where it put the package rather than hardcoding one.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-1.59.1
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright + chromium
+        run: |
+          set -eu
+          npm install --global playwright@1.59.1
+          npx playwright install --with-deps chromium
+          echo "PLAYWRIGHT_DIR=$(npm root -g)/playwright" >> "$GITHUB_ENV"
+
+      # THE GATE. Nonzero on any content assertion failure. Not piped to
+      # anything: a gate piped to `tail` reports tail's exit code.
+      - name: Render rig gate
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.recapture }}
+        run: bash tooling/paper-excellence/rig/gate.sh
+
+      # THE RE-CAPTURE. Writes into rig/baselines/ in the checkout, prints the
+      # diff against the committed panel, and uploads the result. The workflow
+      # does NOT commit: a run that can push to the branch it is testing is a
+      # loop, and a human reviewing `git diff --stat` before the commit is the
+      # whole point of a baseline being reviewable.
+      - name: Re-capture baselines inside this image
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.recapture) || contains(github.event.pull_request.labels.*.name, 'rig-recapture') }}
+        run: bash tooling/paper-excellence/rig/baseline.sh
+
+      - name: Baseline diff against the committed panel
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.recapture) || contains(github.event.pull_request.labels.*.name, 'rig-recapture') }}
+        run: |
+          git -C "$GITHUB_WORKSPACE" status --short -- tooling/paper-excellence/rig/baselines
+          git -C "$GITHUB_WORKSPACE" diff --stat -- tooling/paper-excellence/rig/baselines
+
+      - name: Upload the re-captured panel
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.recapture) || contains(github.event.pull_request.labels.*.name, 'rig-recapture') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rig-baselines-${{ github.run_id }}
+          path: tooling/paper-excellence/rig/baselines
+          retention-days: 14

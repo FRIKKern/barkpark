@@ -19,7 +19,7 @@
       "cell": "agent-flight-recorder-charter__light__1280",
       "file": "agent-flight-recorder-charter__light__1280.jpeg",
       "scale": 2,
-      "bytes": 1087033,
+      "bytes": 1081331,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -70,7 +70,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.9,
+      "proseCpl": 72,
       "proseCplSamples": 5,
       "captionCpl": null,
       "captionWidth": null,
@@ -156,7 +156,7 @@
         "heavyRules": [
           {
             "px": 2,
-            "y": 702.1,
+            "y": 728,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -166,7 +166,7 @@
           },
           {
             "px": 2,
-            "y": 1486,
+            "y": 1511.9,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -176,7 +176,7 @@
           },
           {
             "px": 2,
-            "y": 2143.6,
+            "y": 2169.5,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -186,7 +186,7 @@
           },
           {
             "px": 2,
-            "y": 2681.5,
+            "y": 2707.4,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -196,7 +196,7 @@
           },
           {
             "px": 2,
-            "y": 3332.8,
+            "y": 3358.8,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -212,7 +212,7 @@
       "cell": "agent-flight-recorder-charter__light__1920",
       "file": "agent-flight-recorder-charter__light__1920.jpeg",
       "scale": 2,
-      "bytes": 1164555,
+      "bytes": 1162719,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -263,7 +263,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.9,
+      "proseCpl": 72,
       "proseCplSamples": 5,
       "captionCpl": null,
       "captionWidth": null,
@@ -289,11 +289,11 @@
         },
         {
           "kind": "bp-table",
-          "width": 1207.4,
+          "width": 1219.4,
           "offCentre": 0,
-          "left": 356.3,
-          "right": 1563.7,
-          "inkWidth": 1205.4,
+          "left": 350.3,
+          "right": 1569.7,
+          "inkWidth": 1217.4,
           "inkOffCentre": 0
         }
       ],
@@ -349,7 +349,7 @@
         "heavyRules": [
           {
             "px": 2,
-            "y": 702.1,
+            "y": 728,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -359,7 +359,7 @@
           },
           {
             "px": 2,
-            "y": 1433.8,
+            "y": 1459.8,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -369,7 +369,7 @@
           },
           {
             "px": 2,
-            "y": 2091.4,
+            "y": 2117.3,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -379,7 +379,7 @@
           },
           {
             "px": 2,
-            "y": 2629.3,
+            "y": 2655.3,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -389,7 +389,7 @@
           },
           {
             "px": 2,
-            "y": 3280.7,
+            "y": 3306.6,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -405,7 +405,7 @@
       "cell": "agent-flight-recorder-charter__dark__1280",
       "file": "agent-flight-recorder-charter__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 1074679,
+      "bytes": 1076316,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -456,7 +456,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.9,
+      "proseCpl": 72,
       "proseCplSamples": 5,
       "captionCpl": null,
       "captionWidth": null,
@@ -542,7 +542,7 @@
         "heavyRules": [
           {
             "px": 2,
-            "y": 702.1,
+            "y": 728,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -552,7 +552,7 @@
           },
           {
             "px": 2,
-            "y": 1486,
+            "y": 1511.9,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -562,7 +562,7 @@
           },
           {
             "px": 2,
-            "y": 2143.6,
+            "y": 2169.5,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -572,7 +572,7 @@
           },
           {
             "px": 2,
-            "y": 2681.5,
+            "y": 2707.4,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -582,7 +582,7 @@
           },
           {
             "px": 2,
-            "y": 3332.8,
+            "y": 3358.8,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -598,7 +598,7 @@
       "cell": "agent-flight-recorder-charter__dark__1920",
       "file": "agent-flight-recorder-charter__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 1151873,
+      "bytes": 1157346,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -649,7 +649,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.9,
+      "proseCpl": 72,
       "proseCplSamples": 5,
       "captionCpl": null,
       "captionWidth": null,
@@ -675,11 +675,11 @@
         },
         {
           "kind": "bp-table",
-          "width": 1207.4,
+          "width": 1219.4,
           "offCentre": 0,
-          "left": 356.3,
-          "right": 1563.7,
-          "inkWidth": 1205.4,
+          "left": 350.3,
+          "right": 1569.7,
+          "inkWidth": 1217.4,
           "inkOffCentre": 0
         }
       ],
@@ -735,7 +735,7 @@
         "heavyRules": [
           {
             "px": 2,
-            "y": 702.1,
+            "y": 728,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -745,7 +745,7 @@
           },
           {
             "px": 2,
-            "y": 1433.8,
+            "y": 1459.8,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -755,7 +755,7 @@
           },
           {
             "px": 2,
-            "y": 2091.4,
+            "y": 2117.3,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -765,7 +765,7 @@
           },
           {
             "px": 2,
-            "y": 2629.3,
+            "y": 2655.3,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -775,7 +775,7 @@
           },
           {
             "px": 2,
-            "y": 3280.7,
+            "y": 3306.6,
             "width": 1360,
             "parts": 1,
             "structural": true,
