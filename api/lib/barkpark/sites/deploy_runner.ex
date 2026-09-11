@@ -331,6 +331,29 @@ defmodule Barkpark.Sites.DeployRunner do
   # known", never a guess at which half is serving.
   @served_slots ~w(a b)
 
+  # ── THE ROUTE ARMING CHANNEL (charter D607) ───────────────────────────────
+  #
+  # Both engines emit, after their Caddy arming attempt,
+  #
+  #     BPSTAGE name=ROUTE status=<ok|failed> build_id=<id> detail="armed: …"
+  #
+  # (deploy/site-deploy.sh, deploy/site-deploy-node.sh). ROUTE is deliberately
+  # NOT in `@stage_names` — it is a MEASUREMENT of what the box did to Caddy,
+  # never a verdict on the deployment, exactly as SERVED above is. Admitting it
+  # to the whitelist would route it into `deploy_outcome/2`, whose first clause
+  # is "the latest stage with status `failed` decides the run": a `ROUTE
+  # status=failed` would then set `exit_code = stage_exit_code("ROUTE")` = -1
+  # (the catch-all clause — ROUTE has no code of its own) and a failure_reason,
+  # on a run that had already SWITCHed cleanly. A non-fatal arming miss would
+  # start reporting as an abnormally-ended deploy, and whether an arming miss is
+  # fatal at all is precisely the ruling `dr-w19-bl-arm-route-incidence-then-fatal`
+  # has not made yet.
+  #
+  # So: its own regex, its own fold, its own two keys on the status map — the
+  # SERVED shape, for the SERVED reason. Both statuses are matched, because the
+  # whole point of this channel is that a `failed` arming can be SEEN.
+  @route_re ~r/\bBPSTAGE\s+name=ROUTE\s+status=(ok|failed)(?:\s+build_id=\S*)?(?:\s+detail="([^"]*)")?/
+
   # systemctl is-active states that mean the build is STILL running. Everything
   # else (inactive / failed / deactivating / unknown / "") is terminal or gone.
   @active_states ~w(active activating reloading)
@@ -1803,6 +1826,7 @@ defmodule Barkpark.Sites.DeployRunner do
     log = read_log_tail(manifest.log_file)
     stages = fold_status_file(manifest.status_file, manifest.build_id)
     {served_port, served_slot} = fold_served_file(manifest.status_file)
+    {route_status, route_detail} = fold_route_file(manifest.status_file)
 
     base = %{
       slug: manifest.slug,
@@ -1813,6 +1837,8 @@ defmodule Barkpark.Sites.DeployRunner do
       stages: stages,
       served_port: served_port,
       served_slot: served_slot,
+      route_status: route_status,
+      route_detail: route_detail,
       log: log,
       log_state: disk_log_state(manifest.log_file),
       log_path: manifest.log_file,
@@ -1875,6 +1901,30 @@ defmodule Barkpark.Sites.DeployRunner do
         |> Enum.reduce({nil, nil}, fn line, acc ->
           case parse_served_line(line) do
             {:ok, port, slot} -> {port, slot}
+            :skip -> acc
+          end
+        end)
+
+      {:error, _} ->
+        {nil, nil}
+    end
+  end
+
+  # THE ROUTE CHANNEL'S fold — `fold_served_file/1`'s twin over the same durable
+  # file, latest-wins. `{nil, nil}` when the run emitted no ROUTE line at all
+  # (every engine older than 2026-08-08, and any run that died before arming),
+  # which is the honest "nobody measured this", not a passing zero.
+  # Reachability: `path` is always `manifest.status_file` (run_state_dir + a
+  # charset-validated slug), never request data.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp fold_route_file(path) do
+    case File.read(path) do
+      {:ok, contents} ->
+        contents
+        |> String.split("\n", trim: true)
+        |> Enum.reduce({nil, nil}, fn line, acc ->
+          case parse_route_line(line) do
+            {:ok, status, detail} -> {status, detail}
             :skip -> acc
           end
         end)
@@ -2439,6 +2489,27 @@ defmodule Barkpark.Sites.DeployRunner do
   end
 
   def parse_served_line(_), do: :skip
+
+  @doc """
+  Parse one durable-status-file line as the ROUTE arming measurement.
+
+  `{:ok, status, detail}` for a well-formed `BPSTAGE name=ROUTE` line (status is
+  the RAW `ok`/`failed` token, detail the engine's own prose — `armed: …`,
+  `already armed: …`, or the failure's reason), `:skip` for anything else.
+
+  Public for the same reason `parse_served_line/1` is: the fold and its tests
+  read the ONE parser, so the wire contract cannot drift between them.
+  """
+  @spec parse_route_line(String.t()) :: {:ok, String.t(), String.t() | nil} | :skip
+  def parse_route_line(line) when is_binary(line) do
+    case Regex.run(@route_re, line, capture: :all_but_first) do
+      [status] -> {:ok, status, nil}
+      [status, detail] -> {:ok, status, blank_to_nil(detail)}
+      _no_match -> :skip
+    end
+  end
+
+  def parse_route_line(_), do: :skip
 
   defp served_port(raw) do
     case Integer.parse(raw) do
@@ -3093,6 +3164,11 @@ defmodule Barkpark.Sites.DeployRunner do
       # asks a terminal record what THIS build ended up serving.
       "served_port" => Map.get(render, :served_port),
       "served_slot" => Map.get(render, :served_slot),
+      # The arming measurement outlives the unit for the same reason the served
+      # slot does: the Caddyfile it was read out of has moved on by the time
+      # anyone asks a terminal record what THIS build did to the route.
+      "route_status" => Map.get(render, :route_status),
+      "route_detail" => Map.get(render, :route_detail),
       "log_file" => log_file,
       "log_bytes" => file_size(log_file),
       "log_state" => Atom.to_string(live_log_state(log_file)),
@@ -3273,6 +3349,8 @@ defmodule Barkpark.Sites.DeployRunner do
       stages: record["stages"] || [],
       served_port: record["served_port"],
       served_slot: record["served_slot"],
+      route_status: record["route_status"],
+      route_detail: record["route_detail"],
       unit_name: record["unit_name"],
       journal_command: record["journal_command"] || journal_command(record["unit_name"]),
       mode: record["mode"],
@@ -3305,6 +3383,8 @@ defmodule Barkpark.Sites.DeployRunner do
       stages: Enum.map(rendered.stages, &decode_record_stage/1),
       served_port: rendered.served_port,
       served_slot: rendered.served_slot,
+      route_status: rendered.route_status,
+      route_detail: rendered.route_detail,
       exit_code: rendered.exit_code,
       failure_reason: rendered.failure_reason,
       # The BYTES are not served here — the record survived, the log may not
@@ -3768,6 +3848,8 @@ defmodule Barkpark.Sites.DeployRunner do
       stages: [],
       served_port: nil,
       served_slot: nil,
+      route_status: nil,
+      route_detail: nil,
       exit_code: nil,
       failure_reason: nil,
       log: [],
@@ -3795,6 +3877,13 @@ defmodule Barkpark.Sites.DeployRunner do
       stages: run.stages,
       served_port: run.served_port,
       served_slot: run.served_slot,
+      # The in-process Port fallback (dev / CI / macOS) does NOT fold the durable
+      # status file — it streams stdout — so it has no arming measurement to
+      # report. `nil` is the honest answer here, and it is deliberate: a test
+      # that could see a ROUTE outcome on THIS path would be vacuous against
+      # production, which runs systemd-run + `reconstruct/2`.
+      route_status: nil,
+      route_detail: nil,
       exit_code: run.exit_code,
       failure_reason: run.failure_reason,
       log: Enum.reverse(run.log),
