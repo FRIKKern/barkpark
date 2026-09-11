@@ -895,13 +895,27 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       assert body["unit_name"] == "bp-site-build-boom.service"
       assert body["journal_command"]
       assert body["log_state"] == "available"
-      assert body["log_bytes"] == 64
+
+      # THE HEAL, observed through the door (dr-bl-recorder-http-read-path c2).
+      # This fixture is a PRE-SCRUB record on purpose: raw bytes on disk, no
+      # `log_scrub` stamp, and a `log_bytes` that was never true of the file
+      # (64 against a 52-byte log). Reading it folds the log and re-measures, so
+      # the answer now describes the bytes that are actually there.
+      assert body["log_bytes"] == File.stat!(log).size
+      refute body["log_bytes"] == 64
+
+      # …and the STORED ARTIFACT — not the response — is what changed.
+      on_disk = File.read!(log)
+      refute on_disk =~ "bppat_"
+      assert on_disk =~ "BARKPARK_TOKEN=[redacted]"
+      assert on_disk =~ "npm ERR! 401 Unauthorized"
 
       # THE SECURITY BOUNDARY, asserted POSITIVELY against the exact bytes on
       # disk rather than by hoping no field carries them. The build env file
-      # carries BARKPARK_TOKEN in plaintext and the shared scrubber's measured
-      # leak rate against this token shape is 95.1%, which is why the bytes are
-      # refused rather than scrubbed.
+      # carries BARKPARK_TOKEN in plaintext; the bytes on disk are now folded at
+      # write (and healed on read, above), but THIS DOOR still does not serve
+      # them — serving them is c1, and it needs a cap, a tail rule and a refusal
+      # for an unstamped record.
       encoded = Jason.encode!(body)
       refute encoded =~ "bppat_"
       refute encoded =~ "BARKPARK_TOKEN"

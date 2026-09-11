@@ -132,19 +132,28 @@ defmodule Barkpark.Sites.DeployRunner do
   function. `serving-memory.json` is the one record ruled intentionally
   unswept: it has a FIXED name, so it is bounded at one by construction.
 
-  This slice keeps the record on the BOX. No raw log bytes are exposed over
-  HTTP here: the build env file carries `BARKPARK_TOKEN=` in plaintext and the
-  recorded log is written to disk VERBATIM — nothing scrubs it at write.
+  This slice keeps the record on the BOX; no raw log bytes are exposed over HTTP
+  here. What CHANGED 2026-09-11 (dr-bl-recorder-http-read-path c2) is the state
+  of the bytes themselves: the deploy shell's `tee` still writes the log
+  VERBATIM, but `write_terminal_record/2` now folds that file in place with
+  `Barkpark.Sites.BuildLogScrub.raw/1` (`strip_ansi |> scrub`) before it measures
+  it, and stamps the pattern-set version it used onto the record as
+  `log_scrub`. The scrubber compiles the SAME `cloud/priv/secret-scrub.exs` the
+  control plane's display boundary does — one pattern set, two apps.
 
-  CORRECTED 2026-09-08 (task-04e89e88f056aa38). This used to read "the display
-  scrubber does not yet know that shape, so the read path ships after the
-  scrubber does". It knows the shape now. DERIVATION, re-read on main on
-  2026-09-08 in `cloud/lib/barkpark_cloud/failure_copy.ex`: `@secret_patterns`
-  carries a dedicated `bppat_`/`bpcs_`/`bp_<kind>_` arm, closing a leak that
-  file measures at 94.3%; and `raw/1` = `strip_ansi |> scrub` closed a separate
-  ordering leak it measures at 2000/2000 = 100%. Both landed fixes are
-  DISPLAY-BOUNDARY scrubbers, so neither one touches the bytes on disk — which
-  is why the read path is STILL withheld, now for the reason that is true.
+  THE WINDOW IS NAMED, NOT HIDDEN. Between the first `tee` write and finalize
+  the bytes on disk are raw; the fold is at finalize, not at write-per-line, and
+  a box that dies mid-build leaves a raw log behind. That run finalizes (and so
+  folds) on the next `status/1` — the manifest is deliberately left on disk for
+  exactly that — and `build_record/2` heals any unstamped record whose log is
+  still there. A record with `log_scrub: nil` is the honest statement that its
+  bytes were never folded.
+
+  HISTORY, kept because it is the reason the read path was withheld: as of
+  2026-09-08 the two landed fixes (the `bppat_`/`bpcs_`/`bp_<kind>_` arm closing
+  a 94.3% shape-blindness leak, and `raw/1` = `strip_ansi |> scrub` closing a
+  2000/2000 ordering leak) were BOTH display-boundary scrubbers, so neither one
+  touched the bytes on disk. That is the hole this write-boundary fold closes.
 
   ## Fail-closed
 
@@ -482,18 +491,17 @@ defmodule Barkpark.Sites.DeployRunner do
   recorded answers `:never_recorded` and carries nothing. Those used to be the
   same map.
 
-  `:log_path` is a path ON THE BOX. The bytes are deliberately NOT returned —
-  they carry the build env's plaintext `BARKPARK_TOKEN` and NOTHING SCRUBS THEM
-  AT WRITE, so whatever the build printed sits on disk in the clear.
+  `:log_path` is a path ON THE BOX and `:log_scrub` says what state its bytes are
+  in: the pattern-set version they were folded with, or `nil` for NOT FOLDED.
+  This function still does not RETURN the bytes — that is a separate door and a
+  separate criterion — but as of 2026-09-11 they are no longer raw on disk:
+  `write_terminal_record/2` folds the log with `BuildLogScrub.raw/1` before
+  measuring it, and this read heals a record that predates that fold (see
+  `heal_unscrubbed_log/1`).
 
-  CORRECTED 2026-09-08 (task-04e89e88f056aa38). The old wording — "no scrubber
-  on this box is trusted with that shape yet" — is no longer true, and was never
-  the operative fact. DERIVATION, re-read on main on 2026-09-08 in
-  `cloud/lib/barkpark_cloud/failure_copy.ex`: `@secret_patterns` gained a
-  `bppat_`/`bpcs_`/`bp_<kind>_` arm (closing a 94.3% shape-blindness leak) and
-  `raw/1` = `strip_ansi |> scrub` closed a 2000/2000 = 100% ordering leak. Both
-  are DISPLAY-BOUNDARY scrubbers; the WRITE path still has none, and that — not
-  a scrubber's competence — is what this refusal rests on.
+  A caller that ever does serve the bytes must read `:log_scrub` and refuse a
+  `nil`. It is `nil` for a record written before the fold existed whose log has
+  since been evicted (nothing left to heal), and for a fold that hit an IO error.
   """
   @spec build_record(String.t(), String.t() | nil) :: map()
   def build_record(slug, build_id \\ nil) when is_binary(slug) do

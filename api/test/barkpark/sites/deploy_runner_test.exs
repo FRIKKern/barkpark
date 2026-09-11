@@ -20,6 +20,7 @@ defmodule Barkpark.Sites.DeployRunnerTest do
 
   import ExUnit.CaptureLog
 
+  alias Barkpark.Sites.BuildLogScrub
   alias Barkpark.Sites.DeployRequest
   alias Barkpark.Sites.DeployRunner
   alias Barkpark.Sites.Provisioner
@@ -2376,6 +2377,156 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       # An EXACT -u query (measured 0.16s), never a glob (measured 121s).
       assert record.journal_command == "journalctl --no-pager -u #{record.unit_name}"
       refute record.journal_command =~ "*"
+    end
+  end
+
+  describe "the recorded log is SCRUBBED AT WRITE (dr-bl-recorder-http-read-path c2)" do
+    # A real-shape Barkpark PAT — `bppat_` + a 43-char url-safe base64 body with
+    # the `-`/`_` that the bare high-entropy clause structurally cannot see.
+    @pat "bppat_7Kd-Qm2xTf9Zb_LpV4nA1sJhR0yWuEcG3iOtXvB"
+
+    # A build that prints what a real one prints: the env fold of this box's own
+    # token, colourised by the PTY, plus a colourised key=value.
+    defp leaky_engine do
+      stub("""
+      printf '\\033[31m\\033[1m04:34:24\\033[22m [build] BARKPARK_TOKEN=#{@pat} exported\\n' >> "$BARKPARK_SITE_LOG_FILE"
+      printf 'run\\033[0mapi_key=s3cretValueGoesHere1\\n' >> "$BARKPARK_SITE_LOG_FILE"
+      echo "npm ERR! build failed (exit 12)" >> "$BARKPARK_SITE_LOG_FILE"
+      # THE CONTROL COPY: byte-identical output, written to a path the recorder
+      # does not fold. Without it, `refute bytes =~ "\\e["` would pass just as
+      # happily on a stub that never emitted an escape byte at all.
+      cp "$BARKPARK_SITE_LOG_FILE" "$BARKPARK_SITE_LOG_FILE.unfolded"
+      echo "BPSTAGE name=SWITCH status=ok build_id=$BUILD_ID" >> "$BARKPARK_SITE_STATUS_FILE"
+      exit 0
+      """)
+    end
+
+    test "THE STORED BYTES carry no token and no colour once the record is durable" do
+      dir = run_dir()
+      recorder_cfg(dir, command: leaky_engine())
+
+      deploy_and_finalize("scrubbed", "s1")
+
+      log = Path.join(dir, "scrubbed-s1.log")
+
+      # THE PRECONDITION, measured rather than assumed: the build really did
+      # print a live token and real 0x1B bytes. This is the same output, copied
+      # by the stub to a path nothing folds.
+      unfolded = File.read!(log <> ".unfolded")
+      assert unfolded =~ @pat
+      assert unfolded =~ "\e["
+      assert unfolded =~ "s3cretValueGoesHere1"
+
+      # READ THE ARTIFACT, never a rendered response — that is the criterion's
+      # own proof method, and it is what stops a display-boundary scrub from
+      # satisfying it.
+      bytes = File.read!(log)
+
+      # POSITIVE FACTS FIRST: the redaction landed exactly where the secret was,
+      # which a build that printed nothing could not produce.
+      assert bytes =~ "BARKPARK_TOKEN=[redacted]"
+      assert bytes =~ "run api_key=[redacted]"
+      # …and the copy a person needs survived untouched.
+      assert bytes =~ "npm ERR! build failed (exit 12)"
+
+      refute bytes =~ @pat
+      refute bytes =~ "bppat_"
+      refute bytes =~ "s3cretValueGoesHere1"
+      refute bytes =~ "\e["
+    end
+
+    test "log_bytes describes the SCRUBBED file, not the raw one it replaced" do
+      dir = run_dir()
+      recorder_cfg(dir, command: leaky_engine())
+
+      deploy_and_finalize("measured", "m1")
+
+      log = Path.join(dir, "measured-m1.log")
+      record = DeployRunner.build_record("measured", "m1")
+
+      assert record.log_bytes == File.stat!(log).size
+      assert record.log_bytes == byte_size(File.read!(log))
+      # …and the file it describes is the FOLDED one. Without this the equality
+      # above is equally true of a raw file measured raw — it would pin the
+      # arithmetic and say nothing about the bytes.
+      refute File.read!(log) =~ @pat
+      assert File.read!(log) =~ "BARKPARK_TOKEN=[redacted]"
+      # The stamp says WHICH pattern set folded these bytes. Without it nothing
+      # downstream may treat the log as safe.
+      assert record.log_scrub == BuildLogScrub.version()
+    end
+
+    test "the fold leaves no `.scrub-*` temp file in the run-state dir" do
+      dir = run_dir()
+      recorder_cfg(dir, command: leaky_engine())
+
+      deploy_and_finalize("notmp", "n1")
+
+      leftovers = dir |> File.ls!() |> Enum.filter(&(&1 =~ ".scrub-"))
+      assert leftovers == []
+    end
+
+    test "an UNSTAMPED record whose log is still on disk heals on the next read" do
+      dir = run_dir()
+      recorder_cfg(dir, command: leaky_engine())
+
+      deploy_and_finalize("healme", "h1")
+      log = Path.join(dir, "healme-h1.log")
+      record_path = Path.join(dir, "healme-h1.terminal.json")
+
+      # Put the box back in its PRE-SCRUB state by hand: raw bytes on disk and a
+      # record with no stamp — exactly what a build recorded before this fold
+      # existed, or one whose box died mid-fold, leaves behind.
+      raw = "[build] BARKPARK_TOKEN=#{@pat}\n"
+      File.write!(log, raw)
+
+      record =
+        record_path
+        |> File.read!()
+        |> Jason.decode!()
+        |> Map.delete("log_scrub")
+        |> Map.put("log_bytes", byte_size(raw))
+
+      File.write!(record_path, Jason.encode!(record))
+
+      # THE PRECONDITION, asserted rather than assumed: the bytes really are raw
+      # and the record really is unstamped at this point.
+      assert File.read!(log) =~ @pat
+      refute Map.has_key?(record, "log_scrub")
+
+      healed = DeployRunner.build_record("healme", "h1")
+
+      refute File.read!(log) =~ @pat
+      assert File.read!(log) =~ "BARKPARK_TOKEN=[redacted]"
+      assert healed.log_scrub == BuildLogScrub.version()
+      assert healed.log_bytes == File.stat!(log).size
+
+      # The heal is DURABLE — it rewrote the record, so the next read does no
+      # work and answers the same.
+      persisted = record_path |> File.read!() |> Jason.decode!()
+      assert persisted["log_scrub"] == BuildLogScrub.version()
+      assert persisted["log_bytes"] == File.stat!(log).size
+    end
+
+    test "an unstamped record whose log is GONE stays unstamped — no phantom claim" do
+      dir = run_dir()
+      recorder_cfg(dir, command: leaky_engine())
+
+      deploy_and_finalize("gonelog", "g1")
+      record_path = Path.join(dir, "gonelog-g1.terminal.json")
+
+      record =
+        record_path |> File.read!() |> Jason.decode!() |> Map.delete("log_scrub")
+
+      File.write!(record_path, Jason.encode!(record))
+      File.rm!(Path.join(dir, "gonelog-g1.log"))
+
+      read = DeployRunner.build_record("gonelog", "g1")
+
+      # There is nothing to fold, so there is nothing to claim: `nil` is the
+      # honest answer, and `missing` is still the honest log_state.
+      assert read.log_scrub == nil
+      assert read.log_state == :missing
     end
   end
 

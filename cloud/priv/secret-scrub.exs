@@ -218,6 +218,16 @@ ansi_run = "\x1B(?:\\][^\x07\x1B]*(?:\x07|\x1B\\\\)|\\[[0-?]*[ -/]*[@-~]|[ -~])"
     {"a DB URL's userinfo", "ecto://deploy:hunter2swordfish@db.internal:5432/barkpark_prod",
      "ecto://[redacted]@db.internal:5432/barkpark_prod"},
     {"an ordinary build line is byte-identical", "npm ERR! build failed (exit 12)",
-     "npm ERR! build failed (exit 12)"}
+     "npm ERR! build failed (exit 12)"},
+    # BARE, in prose — no key, no `=`. This is the vector the PREFIX ARM alone
+    # answers: after the ANSI strip, an env fold like `BARKPARK_TOKEN=<pat>` is
+    # already covered by the key clause, so a corpus of key-shaped rows would
+    # stay green with the `bppat_`/`bpcs_`/`bp_<kind>_` arm deleted. These two
+    # are what make deleting it a RED.
+    {"our own PAT bare in prose — the prefix arm's own vector",
+     "fetch refused: the pat bppat_7Kd-Qm2xTf9Zb_LpV4nA1sJhR0yWuEcG3iOtXvB is not valid for this workspace",
+     "fetch refused: the pat [redacted] is not valid for this workspace"},
+    {"a minted box admin credential, bare", "bp_admin_9xKq2LmN4pR7sT1vW3yZ5aC8eF0hJ6b was rotated",
+     "[redacted] was rotated"}
   ]
 }

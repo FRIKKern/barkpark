@@ -36,12 +36,22 @@ defmodule Barkpark.Sites.BuildLogScrub do
 
   ## The order is the whole point
 
-  `raw/1` is `strip_ansi |> scrub`, never the reverse. A CSI sequence parks an
-  alphanumeric immediately left of a key, which defeats `scrub/1`'s
-  `(?<![A-Za-z0-9])` lookbehind — measured at 95.1% leakage for a colourised
-  `bppat_` token under the reverse order (charter D29). A raw build log is PTY
-  output: it is colourised by construction, so this is the common case here, not
-  the corner.
+  `raw/1` is `strip_ansi |> scrub`, never the reverse. A CSI run ENDS IN AN
+  ALPHANUMERIC of its own (`\e[0m` ends in `m`), so scrubbing first parks a
+  letter immediately left of the key and `scrub/1`'s `(?<![A-Za-z0-9])`
+  lookbehind never fires: `"run\e[0mapi_key=<value>"` ships its value in
+  cleartext under the reverse order. `build_log_scrub_lock_test.exs` MEASURES
+  both orders on that shape rather than quoting a figure.
+
+  A NUMBER THIS DOC DELIBERATELY DOES NOT CLAIM: charter D29's 95.1% is the
+  leak rate of `scrub/1` ALONE against `BARKPARK_TOKEN=<pat>`, measured BEFORE
+  the pattern set learned the `bppat_`/`bpcs_`/`bp_<kind>_` prefix. With that arm
+  present our own PAT redacts under EITHER order (the arm matches the token, not
+  the syntax around it) — the test asserts that too, so the ordering rule rests
+  on the shape that is still order-sensitive, not on a retired measurement.
+
+  A raw build log is PTY output: it is colourised by construction, so this is the
+  common case here, not the corner.
 
   ## Line-oriented, on purpose
 
