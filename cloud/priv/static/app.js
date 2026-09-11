@@ -10091,7 +10091,30 @@
     var code = data.error;
     if (code && typeof code === "object") code = code.code;
 
-    if (code === "taken") return "That domain is already in use.";
+    // dr-w26-bl-console-relays-the-claim-leg: the 409 `taken` body carries
+    // `claim_leg` — WHICH population holds the hostname (admin_credential,
+    // recent_usage_sample, active_subscription, agent_reporting, active_job,
+    // within_grace) — plus a caller-safe `detail` sentence written for that
+    // leg. This arm used to answer all six with one fixed string, so refusals
+    // with OPPOSITE remedies ("somebody is paying for that name" vs "a job is
+    // mid-flight, wait a minute") rendered identically and the leg reached a
+    // human only through the raw API response. Relay both, exactly the way the
+    // already_attached arm below relays `detail`. Server-derived strings; the
+    // caller renders via textContent, never markup. The fixed sentence stays as
+    // the no-detail fallback: a name held by some OTHER surface (a Site domain,
+    // another instance's custom_host, a lost race on the unique index) merges
+    // no keys at all, and that body must still say something true.
+    // The fixed sentence stays at RETURN POSITION deliberately: __refusal_copy_census.mjs
+    // pins refusal copy by (enclosing fn, sha1 of the literal) and only sees literals
+    // inside a return expression. Hoisting it into a `var` initializer made the pinned
+    // FN|attachDomainFailureCopy row read as a REMOVE — a live sentence that had fallen
+    // out of the census population. Keep the fallback inside the returned expression.
+    if (code === "taken") {
+      var takenLeg = typeof data.claim_leg === "string" && data.claim_leg ? data.claim_leg : "";
+      var takenDetail = typeof data.detail === "string" && data.detail ? data.detail : "";
+      var takenSuffix = takenLeg ? " (" + takenLeg + ")" : "";
+      return (takenDetail || "That domain is already in use.") + takenSuffix;
+    }
     if (code === "already_attaching") return "An attach is already running.";
     // Relay the plane's own sentence — it names the host that is in the way,
     // which is the only actionable part of this refusal. Server-derived string,

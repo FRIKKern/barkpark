@@ -24213,6 +24213,112 @@ test("cch-w54-bl: already_attached relays the plane's sentence — the host in t
     "already_attached must not be confused with `taken` — taken is ANOTHER surface holding the host");
 });
 
+// ── dr-w26-bl: the 409 `taken` refusal names WHICH population holds the host ──
+//
+// POST /v1/barkparks/:id/domain merges `claim_leg` + a caller-safe `detail`
+// onto the 409 taken body (registry.ex provisioning_fqdn_claim_disclosure/2,
+// TOTAL over claim_leg/2's six legs). The console answered every one of them
+// with the fixed string "That domain is already in use.", so a refusal whose
+// remedy is "pick another hostname, that name is billed" and one whose remedy
+// is "wait a minute, a job is in flight" rendered IDENTICALLY and the leg
+// reached a human only through the raw API response.
+//
+// Driven per LEG, all six, because the leg is the axis that used to collapse.
+test("dr-w26-bl: the taken 409 relays the claim leg and its caller-safe detail — six refusals, six sentences", () => {
+  const f = hooks.attachDomainFailureCopy;
+
+  // The six legs claim_leg/2 can return, each with the caller-facing sentence
+  // caller_claim_detail/1 writes for it (registry.ex), trimmed to its remedy.
+  const legs = {
+    admin_credential:
+      "That hostname still belongs to an instance the platform holds a live credential for, " +
+      "so the name is not free to re-attach. Decommission that instance first, or pick another hostname.",
+    recent_usage_sample:
+      "That hostname was still being reached by the platform within the last 24 hours, " +
+      "so the name is not free to re-attach.",
+    active_subscription:
+      "That hostname belongs to an instance on a live, still-entitled subscription. " +
+      "A billed name is never released — pick another hostname.",
+    agent_reporting:
+      "An agent on that hostname has phoned home recently, so the instance answering on it " +
+      "is live and the name is not free to re-attach.",
+    active_job:
+      "A provisioning job for that hostname is still in flight. Wait for it to finish and " +
+      "try again, or pick another hostname.",
+    within_grace:
+      "That hostname belongs to an instance younger than the 30-day abandonment window, " +
+      "so it is not yet releasable. Decommission it first, or pick another hostname.",
+  };
+
+  const rendered = {};
+  for (const [leg, detail] of Object.entries(legs)) {
+    const out = f(409, { error: "taken", claim_leg: leg, detail });
+    rendered[leg] = out;
+    assert.ok(out.indexOf(detail) === 0,
+      leg + ": the plane's caller-safe sentence must be relayed, not replaced — got " + JSON.stringify(out));
+    assert.ok(out.indexOf(leg) !== -1,
+      leg + ": the LEG itself must reach the person — it is the category that says which remedy applies");
+    assert.equal(out.indexOf("That domain is already in use."), -1,
+      leg + ": the fixed string must not survive a body that carried a detail");
+  }
+
+  // THE MUTATION, ON THE AXIS THAT COLLAPSED: six legs, six DISTINCT sentences.
+  // Pre-fix this set had size 1 for every leg.
+  assert.equal(new Set(Object.values(rendered)).size, 6,
+    "six legs must render six distinct sentences — a collapsed set is the pre-fix defect");
+
+  // MUTATING THE LEG ALONE (same detail) changes the rendered sentence.
+  const sameDetail = "That hostname is held by another instance and is not free to re-attach.";
+  assert.notEqual(
+    f(409, { error: "taken", claim_leg: "active_job", detail: sameDetail }),
+    f(409, { error: "taken", claim_leg: "active_subscription", detail: sameDetail }),
+    "the leg is READ: swapping only claim_leg must change what the person is shown");
+
+  // THE FALLBACK: no detail on the body (a name held by some OTHER surface — a
+  // Site domain, another instance's custom_host, a lost race on the unique
+  // index — merges no keys at all) keeps the fixed sentence.
+  assert.equal(f(409, { error: "taken" }), "That domain is already in use.",
+    "a keyless taken body still says something true");
+  assert.equal(f(409, { error: "taken", claim_leg: "active_job" }),
+    "That domain is already in use. (active_job)",
+    "a leg with no detail still reaches the person, on top of the fixed fallback");
+  assert.equal(f(409, { error: "taken", detail: "" }), "That domain is already in use.",
+    "an empty detail is not a sentence");
+
+  // The neighbouring arms are UNTOUCHED by this change.
+  assert.equal(f(409, { error: "already_attaching" }), "An attach is already running.");
+  assert.equal(
+    f(409, { error: "already_attached", custom_host: "host-a.barkpark.cloud" }),
+    "This instance already answers on host-a.barkpark.cloud.",
+    "already_attached still relays its own host — it is a DIFFERENT refusal from taken");
+});
+
+test("dr-w26-bl: the relayed taken detail is RENDERED via textContent (a server sentence never becomes markup)", async () => {
+  const saved = { fetch: sandbox.fetch, document: sandbox.document };
+  const dom = recordingDom(["domain-input", "domain-error", "domain-go"]);
+  dom.els["domain-input"].value = "taken.barkpark.cloud";
+  sandbox.fetch = fetchStub(409, {
+    error: "taken",
+    claim_leg: "active_subscription",
+    detail:
+      "That hostname belongs to an instance on a live, still-entitled subscription. " +
+      "A billed name is never released — pick another hostname.",
+  });
+  sandbox.document = dom.document;
+  try {
+    hooks.attachDomain({ id: "bp1", name: "Production" });
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  } finally { Object.assign(sandbox, saved); }
+  const errEl = dom.els["domain-error"];
+  assert.equal(errEl.hidden, false, "the inline error shows");
+  assert.match(errEl.textContent, /still-entitled subscription/,
+    "the plane's caller-safe sentence reaches the user through the DOM");
+  assert.match(errEl.textContent, /active_subscription/,
+    "…and so does the leg that says WHICH remedy applies");
+  assert.deepEqual(errEl.writes, [],
+    "the arm writes textContent only — the recording DOM records every innerHTML write and saw none");
+});
+
 test("cch-w40-bl: domain_not_pointed is RENDERED via textContent on the live arm (server IPs never become markup)", async () => {
   // The impure drive proves the wire → DOM path: the measured IP reaches the
   // inline error through textContent, not the false sentence. This is the leg that
