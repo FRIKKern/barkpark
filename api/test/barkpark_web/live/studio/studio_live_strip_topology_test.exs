@@ -34,6 +34,10 @@ defmodule BarkparkWeb.Studio.StudioLiveStripTopologyTest do
       editor_doc:       nil
       sidebar_user_opened: false
 
+  Those figures are not remembered, they are PRINTED by the run itself:
+
+      D180_TRANSCRIPT=1 mix test test/barkpark_web/live/studio/studio_live_strip_topology_test.exs
+
   ## The reserved `["open", "paper", id]` head, driven END-TO-END
 
   D180's comment named this route from source only. Here it is DRIVEN: a
@@ -42,6 +46,21 @@ defmodule BarkparkWeb.Studio.StudioLiveStripTopologyTest do
   read off the live socket. That topology has ONE pane (the reserved head adds
   none), so the strip is pane 0 and `take(nav_path, 0) == []` — the desk root.
   Still a document-close, one level deeper than the ordinary path's exit.
+
+      patched_to:  "/w/default/p/default/d/production/studio/open/paper/<slug>"
+      nav_path AFTER the backlink click: ["open", "paper", "<slug>"]
+      panes:                             ["pane-structure"]
+      editor open:                       true
+      strips SUMMONED:                   ["pane-structure"]
+      nav_path AFTER the strip click:    []
+      editor open AFTER:                 false
+
+  ## What is STILL inferred, and stays inferred
+
+  The `["graph", id]` head. It is not driven here and this file makes no
+  claim about it: the graph view renders no inspector, so `inspector_open?`
+  never becomes true and the Tier-2 ladder has no strip to leave behind.
+  There is no ladder measurement to take on that route.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -154,6 +173,22 @@ defmodule BarkparkWeb.Studio.StudioLiveStripTopologyTest do
 
   defp live_assigns(view), do: :sys.get_state(view.pid).socket.assigns
 
+  # RE-DERIVABLE EVIDENCE. Every figure the moduledoc quotes is printed by this
+  # helper, so the transcript above is reproducible rather than remembered:
+  #
+  #     D180_TRANSCRIPT=1 mix test test/barkpark_web/live/studio/studio_live_strip_topology_test.exs
+  #
+  # Quiet by default so CI logs stay readable; the assertions, not the print,
+  # are what fail.
+  defp transcript(label, kvs) do
+    if System.get_env("D180_TRANSCRIPT") == "1" do
+      IO.puts("\n== #{label} ==")
+      Enum.each(kvs, fn {k, v} -> IO.puts("   #{k}: #{inspect(v)}") end)
+    end
+
+    :ok
+  end
+
   describe "D180 at nav depth 3 — a paper nested under a declared group" do
     test "the surviving strip is the LAST pane, and its click still closes the document",
          %{conn: conn} do
@@ -165,6 +200,12 @@ defmodule BarkparkWeb.Studio.StudioLiveStripTopologyTest do
       before_html = bucket(view, "standard")
       before_ids = pane_ids(before_html)
       before_assigns = live_assigns(view)
+
+      transcript("depth 3 — BEFORE the strip click",
+        nav_path: before_assigns[:nav_path],
+        panes: before_ids,
+        editor_open: editor_body_tag(before_html) != ""
+      )
 
       # PRECONDITION 1 — this really is the topology the filing said was
       # unmeasured. Without three panes the whole test is the old 2-pane case
@@ -215,6 +256,15 @@ defmodule BarkparkWeb.Studio.StudioLiveStripTopologyTest do
 
       after_html = render(view)
       after_assigns = live_assigns(view)
+
+      transcript("depth 3 — AFTER the strip click",
+        strips_summoned: strips,
+        nav_path: after_assigns[:nav_path],
+        panes: pane_ids(after_html),
+        editor_open: editor_body_tag(after_html) != "",
+        editor_doc: after_assigns[:editor_doc],
+        sidebar_user_opened: after_assigns[:sidebar_user_opened]
+      )
 
       # 1 — the truncation dropped exactly the document id, not a whole level.
       assert after_assigns[:nav_path] == ["library", "papers"], """
@@ -290,6 +340,13 @@ defmodule BarkparkWeb.Studio.StudioLiveStripTopologyTest do
       opened_html = render(view)
       opened_assigns = live_assigns(view)
 
+      transcript("reserved head — AFTER the backlink click",
+        patched_to: backlink_path,
+        nav_path: opened_assigns[:nav_path],
+        panes: pane_ids(opened_html),
+        editor_open: editor_body_tag(opened_html) != ""
+      )
+
       assert opened_assigns[:nav_path] == ["open", "paper", @referrer_slug], """
       nav_path after the backlink click is #{inspect(opened_assigns[:nav_path])}.
       """
@@ -322,6 +379,15 @@ defmodule BarkparkWeb.Studio.StudioLiveStripTopologyTest do
 
       after_html = render(view)
       after_assigns = live_assigns(view)
+
+      transcript("reserved head — AFTER the strip click",
+        strips_summoned: strips,
+        nav_path: after_assigns[:nav_path],
+        panes: pane_ids(after_html),
+        editor_open: editor_body_tag(after_html) != "",
+        editor_doc: after_assigns[:editor_doc],
+        sidebar_user_opened: after_assigns[:sidebar_user_opened]
+      )
 
       # `Enum.take(nav_path, 0) == []` — the desk root, skipping the Papers
       # list the ordinary path would have returned to. One level deeper an exit

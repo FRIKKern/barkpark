@@ -1380,16 +1380,55 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # -> the Papers list; ["open", "paper", slug] -> {0, "Structure"} -> the desk
   # root. No off-by-one to fix.
   #
-  # SCOPE, STATED HONESTLY RATHER THAN GENERALISED: every figure above comes
-  # from a 2-SEGMENT paper path (panes = [Structure, Papers]). A deeper nav
-  # path would make the surviving strip an INTERMEDIATE pane, where `take/2`
-  # lands on a list instead of closing the document. That case is NOT measured
-  # here — it is filed as `b47-strip-behaviour-unmeasured-beyond-two-panes`.
-  # This ruling claims the 2-segment topology only.
+  # SCOPE — WIDENED BY MEASUREMENT (b47), NOT BY ARGUMENT. The figures above
+  # were first taken on a 2-SEGMENT paper path (panes = [Structure, Papers]),
+  # and this comment used to claim that topology ONLY, because b47 predicted
+  # that a DEEPER path would make the surviving strip an INTERMEDIATE pane
+  # where `take/2` lands on a list with the document still open.
   #
-  # Locked by `studio_live_navigational_truth_test.exs`, which pins the pane
-  # ids AND editor-open false AND `sidebar_user_opened == false` — pane ids
-  # alone would stay green if the reset chain above were refactored away.
+  # THAT PREDICTION IS REFUTED BY EXECUTION. The clause below hands `:strip`
+  # to `idx == num_panes - 1` and `:hidden` to every other index, so the
+  # surviving strip is the LAST pane at EVERY depth — it is never an
+  # intermediate one, and the ladder cannot produce the case b47 feared.
+  # Driven live on a DECLARED desk that nests a `documentTypeList` of papers
+  # inside a `list` group, giving three panes:
+  #
+  #   nav_path BEFORE:  ["library", "papers", <slug>]
+  #   panes BEFORE:     ["pane-structure", "pane-library", "pane-papers"]
+  #   editor open:      true
+  #   strips SUMMONED:  ["pane-papers"]       # the LAST pane, not intermediate
+  #   nav_path AFTER:   ["library", "papers"]
+  #   panes AFTER:      ["pane-structure", "pane-library", "pane-papers"]
+  #   editor open:      false
+  #
+  # So the ruling now reads: FOR AN ORDINARY PAPER PATH AT ANY DEPTH, the
+  # surviving strip is the last pane and its click closes the document,
+  # because the last pane is addressed by `Enum.take(nav_path, num_panes - 1)`
+  # and that drops exactly the one segment the editor consumed — the doc id.
+  #
+  # THE RESERVED `["open", "paper", id]` HEAD, NO LONGER INFERRED. This
+  # comment previously named that route from source. It is now driven
+  # END-TO-END: a materialised inbound edge renders a real Relations
+  # backlink row, the row's `open-backlink` click is dispatched, and the head
+  # is read off the live socket. The reserved head contributes NO pane, so
+  # the root pane IS the last pane, `Enum.take(nav_path, 0) == []`, and the
+  # exit lands on the desk root — one level deeper than the ordinary path's
+  # exit, and still a document-close:
+  #
+  #   nav_path AFTER the backlink click: ["open", "paper", <slug>]
+  #   panes:                             ["pane-structure"]
+  #   nav_path AFTER the strip click:    []
+  #   editor open AFTER:                 false
+  #
+  # STILL NOT MEASURED, AND THIS RULING DOES NOT CLAIM IT: the `["graph", id]`
+  # head, which cannot reach the ladder at all (the graph view renders no
+  # inspector, so `inspector_open?` never becomes true there).
+  #
+  # Locked by `studio_live_navigational_truth_test.exs` (depth 2) and
+  # `studio_live_strip_topology_test.exs` (depth 3 + the backlink route),
+  # which pin the pane ids AND editor-open false AND
+  # `sidebar_user_opened == false` — pane ids alone would stay green if the
+  # reset chain above were refactored away.
   def display_state(idx, num_panes, true, "standard", true) do
     if idx == num_panes - 1, do: :strip, else: :hidden
   end
