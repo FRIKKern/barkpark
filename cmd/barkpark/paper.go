@@ -113,8 +113,14 @@ func barkparkPaperTheme() pdrender.Theme {
 	t.Heading[1] = lipgloss.NewStyle().Bold(true).Foreground(accent)  // highlight → L2
 	t.Heading[2] = lipgloss.NewStyle().Bold(true).Foreground(dimText) // dim → L3
 
-	// Code block: a left accent bar (mirrors doc.css's 3px border) + a chroma
-	// style picked by background.
+	// Code block: a left accent bar + a chroma style picked by background. The bar
+	// is TUI-ONLY and has no stylesheet counterpart: the web article code block
+	// paints a flat --paper-bg-deep slab with `border:0`
+	// (Figures.code_block_html/1), and its 3px --bp-codeblock-accent-w left bar was
+	// retired with task-ddb1e0ab09a62466 (see the code-BLOCK frame token comment in
+	// api/assets/paper-surface/paper-surface.css). The 3px accent-bar idiom this
+	// borrows survives on the pullquote: `.bp-paper-surface .bp-role-pullquote`
+	// `border-left: 3px solid var(--paper-reading-accent)`.
 	t.CodeBar = lipgloss.NewStyle().Foreground(accent)
 	if dark {
 		t.ChromaStyle = "monokai"
