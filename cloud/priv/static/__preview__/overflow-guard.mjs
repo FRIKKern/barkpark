@@ -7154,6 +7154,121 @@ async function main() {
           kindMax: 64,
           predicate: "a person on the sites list can tell their sites apart by the name they typed — the whole name, not the leading fragment that happened to fit",
         },
+        // ── cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche ──────────
+        //    TWO MORE 255-CAP TEXT HOSTS, found while building the cap→host
+        //    edge table and not taken in wave 22. Both were UNLISTED here and
+        //    unpopulated in the corpus: the fixture values live beside their
+        //    derivations in scenarios.mjs (`cruelAccountLogin` /
+        //    `cruelPinnedRelease`), and the cruel side of both is the same
+        //    `fleet-cruel-content` every row above uses.
+        //
+        //    THE FILING'S NUMBERS WERE STALE, AND E11 IS WHY THEY ARE NOT
+        //    REPLACED WITH NEW ONES (charter D41): every host below is anchored
+        //    by FUNCTION, with the grep that re-derives it —
+        //    `githubCardHtml()` for `.fleet-name`
+        //    (grep -n 'function githubCardHtml' cloud/priv/static/app.js),
+        //    `fleetMetaHtml()` / `fleetAutoupdateText()` for `.fleet-meta`, and
+        //    `openPinModal()` for the write. The filed line numbers (2473 for
+        //    the card, 6794-6822 for the pin modal, app.css 989 for the meta
+        //    rule) all point at unrelated code on this tree; the app.css rule
+        //    is the one citation kept as a number, because E11's ban is
+        //    shape-scoped to `app.js:<digits>` and app.css cites itself by line
+        //    throughout. The filing also reported
+        //    `grep -c account_login scenarios.mjs = 0`; it is 5 on this tree —
+        //    four of them the SAME 16-character "acme-engineering", which is
+        //    the condition the row actually describes (populated, never cruel),
+        //    not absence.
+        {
+          hash: "#settings/providers", view: "view-providers", sel: ".fleet-name", ready: ".fleet-row",
+          scopes: ".fleet-main, .fleet-row",
+          scens: [
+            { scen: "fleet-cruel-content", hash: "#settings/providers" },
+            { scen: "providers-connected", hash: "#settings/providers" },
+          ],
+          cap: "installation.account_login <= 255 — validate_length(:account_login, max: 255) in Installation.changeset/2 (github/installation.ex:48) AND the varchar(255) column (`add :account_login, :string`, priv/repo/migrations/20260702160000_create_github_installations.exs:18). The EFFECTIVE cap is the min of those two and nothing downstream shortens it: githubCardHtml esc()s the value into `'GitHub · ' + login` with no truncation of its own, so the host renders 9 + 255 = 264 characters",
+          // INADMISSIBLE, and the derivation is a WRITE-PATH one rather than a
+          // role one (L2, no write was run). NO Barkpark request field carries
+          // this value: `POST /v1/github/installations` (router.ex:5753, team
+          // admin) reads only `installation_id` from the body, and
+          // `GitHub.record_installation/2` (github.ex:114) takes the login from
+          // `client().get_installation/1` — `Real.get_installation/1` reading
+          // `decoded["account"]["login"]` off api.github.com (github/real.ex:
+          // 51-56). So no person can type 255 characters into this host through
+          // this system, and the row is an UPPER BOUND, exactly as
+          // `.instance-card-name` above is — NOT a reachability claim.
+          //
+          // IT STILL PAYS RENT, and that is why it is listed rather than
+          // dropped: the producer is a third-party API this repo does not
+          // bound, and the two layers that DO bound it (changeset + column)
+          // both sit at 255. If GitHub ever answers with a long account login,
+          // 255 characters is what this card must survive, and no other
+          // instrument would have found out.
+          class: "INADMISSIBLE",
+          cruelMin: 255,
+          // `providers-connected` renders "GitHub · acme-engineering" (25
+          // characters). 64 is the ceiling every row in this table uses, and it
+          // sits comfortably above a real GitHub login — github.com itself does
+          // not mint one anywhere near it — while a drift toward the 255-char
+          // twin reds.
+          kindMax: 64,
+          predicate: "a person who connected GitHub can read WHICH account Barkpark is acting through — the whole login, not the fragment that fits before the Connected badge",
+        },
+        {
+          hash: "#fleet", view: "view-fleet", sel: ".fleet-meta", ready: ".fleet-row",
+          scopes: ".fleet-main, .fleet-row",
+          scens: ["fleet-cruel-content", "mixed-fleet"],
+          cap: "barkpark.pinned_release <= 255 — validate_length(:pinned_release, max: 255) in autoupdate_changeset/2 (registry/barkpark.ex:981) AND the varchar(255) column (`add :pinned_release, :string`, priv/repo/migrations/20260707110000_add_autoupdate_to_barkparks.exs:20). The changeset's ONLY other clause is an update_change TRIM (barkpark.ex:977-980) — no format regex, so a length-only cruel string is server-legal here, unlike site.domains above. The downstream derivation LENGTHENS: fleetAutoupdateText renders `\"pinned \" + vRel(pinned_release)` and vRel prepends a \"v\" to anything that does not carry one, so the fixture starts with \"v\" and the segment paints exactly 262 characters",
+          // CRUEL, and this one IS a reachability claim (L2 — a source
+          // derivation, no write was run). `PATCH /v1/barkparks/:id/autoupdate`
+          // (router.ex:4271, Auth.require_current_team_admin) casts the body's
+          // `pinned_release` straight into the narrow autoupdate_changeset, and
+          // the console writes it from `#pin-input` (app.js openPinModal,
+          // :11164-11192) — an input with NO `maxlength` attribute and no
+          // client-side format check, submitted as
+          // `$("#pin-input").value.trim()`. A team admin types the value and
+          // the server keeps all 255 characters of it.
+          //
+          // THE HOST HAS NO WRAP PROTECTION: `.fleet-meta` (app.css:1069)
+          // declares font-size, colour, font-family and margin-top and NOTHING
+          // about wrapping or overflow — which is why the fixture string is a
+          // single unbroken token (scenarios.mjs refuses one that is not).
+          class: "CRUEL",
+          cruelMin: 255,
+          // `mixed-fleet`'s meta line is the ordinary region · size · version ·
+          // channel · autoupdate sentence. 64 is this table's shared ceiling and
+          // is the number to move — with its measurement quoted — if an
+          // ordinary fleet row ever legitimately renders a longer meta line.
+          kindMax: 64,
+          predicate: "a person scanning their fleet can read WHAT VERSION a box is frozen on — the tag they typed into the pin box, whole, not the leading fragment that fit before the row ran out",
+        },
+      ];
+      // ── THE REFUSAL HALF OF THE LEDGER (cchi-w22-bl-cruel-corpus-uncovered-
+      //    caps-second-tranche). A family that cannot be DRIVEN is not the same
+      //    as a family with no verdict, and the table above has no room for it:
+      //    every row there walks cells and dies on "zero NON-EMPTY selector".
+      //    So an uncoverable host lands HERE, with the same evidence a row
+      //    carries plus the one thing a row does not need — what the corpus
+      //    would have to grow for the row to become drivable. It is PRINTED in
+      //    the ok-lines below, so a reader sees the listed population and the
+      //    refused one together and a future corpus change can flip an entry
+      //    into CRUEL_ROUTES instead of rediscovering it.
+      const CRUEL_REFUSALS = [
+        {
+          field: "barkpark.vercel_deploy_url",
+          // THE KEY RENAME, RECORDED (the row's criterion 3). A name-keyed
+          // census over app.js for `vercel_deploy_url` returns ZERO and
+          // declares the field unrendered. It is rendered — under a DIFFERENT
+          // KEY, as both the href and the link text, three times.
+          from: "vercel.ex:125 (serialized as deployment_url)",
+          // The filing pinned `vercel.ex:107`; on origin/main the
+          // `deployment_url: bp.vercel_deploy_url` line of `Vercel.state/1` is
+          // :125. The FILE and the SYMBOL are what to re-derive against:
+          // `grep -n 'deployment_url' cloud/lib/barkpark_cloud/vercel.ex`.
+          host: ".new-fineprint .mono — href AND text on all THREE arms of the claim ladder: vercelClaimLinkHtml(), vercelClaimedHtml() and vercelClaimUnknownHtml() (re-derive: grep -n 'function vercelClaim' cloud/priv/static/app.js)",
+          cap: "barkpark.vercel_deploy_url <= 255 — validate_length(:vercel_deploy_url, max: 255) in vercel_changeset/2 (registry/barkpark.ex:1027) AND the varchar(255) column (`add :vercel_deploy_url, :string`, priv/repo/migrations/20260705200000_add_vercel_claim_to_barkparks.exs:10). No downstream derivation shortens it; the producer LENGTHENS by 8 (`\"https://\" <> url`, vercel/real.ex:61)",
+          reachability: "L2 (source derivation, no write run) — MACHINE-WRITTEN, never person-typed. The sole writer is Vercel.deploy_for/1 -> persist/2 (vercel.ex:76-88, :194-203), whose value is `deployed.deployment_url` from client().deploy_project/3; in prod that is Real.deploy_project/3 returning `\"https://\" <> deployment[\"url\"]` from api.vercel.com (vercel/real.ex:51-62). Its one caller is POST /v1/barkparks/:id/vercel-deploy (router.ex:5292)",
+          why: "UNREACHABLE BY THE CORPUS, at two independent rungs, and neither is a fixture VALUE this slice could add. (1) `vercelClaimHtml` renders nothing unless `boot.vercel` is present, and `boot` is GET /v1/barkparks/:id/bootstrap — a path scenarios.mjs's route() does not model, so it falls to the terminal `/v1/` 200 {} and `boot.vercel` is undefined in EVERY scenario. (2) Even with that arm, the host lives on the /new READY screen, which `newRenderReady` reaches only from `newCheckStatus`'s poll (re-derive: grep -n 'function newRenderReady\\|function newCheckStatus' cloud/priv/static/app.js) — ZERO scenarios deep-link `#new`, so there is no hash that lands there. Covering it needs a bootstrap route arm carrying a `vercel` block AND a scenario that drives the create flow to `step === \"ready\"`, which is a corpus build, not a cruel string",
+        },
       ];
       // Per-scenario hash, normalized once. A row may hand `scens` a bare
       // scenario name (the hash is the row's) or `{ scen, hash }` (its own).
@@ -7202,6 +7317,21 @@ async function main() {
           fail(D, `axis check ${at}: the row is missing its ${!route.cap ? "cap citation" : "person-facing predicate"} — a cruel row that cannot say which cap it is cut to, or which person it is for, is a fixture with no claim attached`);
         }
       }
+      // THE REFUSAL TABLE'S OWN SHAPE CHECK. An entry that cannot say which
+      // KEY it is serialized under, which cap it carries, how its reachability
+      // was settled, or WHY nothing drives it is not a recorded verdict — it is
+      // a note. The `from:` field is the one this table exists for: it is the
+      // answer to a name-keyed grep that returned zero.
+      for (const r of CRUEL_REFUSALS) {
+        for (const f of ["field", "from", "host", "cap", "reachability", "why"]) {
+          if (!r[f]) {
+            fail(D, `refusal check \`${r.field || "<unnamed>"}\`: the entry is missing its \`${f}\` — an uncoverable family with an incomplete record is indistinguishable from a family nobody looked at`);
+          }
+        }
+        if (!/^L1|^L2/.test(r.reachability || "")) {
+          fail(D, `refusal check \`${r.field}\`: the reachability verdict does not open with L1 (a write that was run) or L2 (a source derivation) — an unlabelled verdict is the kind this epic has been wrong about twice`);
+        }
+      }
       if (!CRUEL_WIDTHS.some((w) => w <= 899) || !CRUEL_WIDTHS.some((w) => w >= 900)) {
         fail(D, `axis check: the width set does not straddle 899 — \`.fleet-row\` is column-direction below and row-direction above, so a bound proven on one side is unproven on the other`);
       }
@@ -7220,7 +7350,23 @@ async function main() {
       const HEIGHT_SLACK = 1;
       let cells = 0, seen = 0, spilled = 0, pageOver = 0, wentKind = 0, wentCruel = 0;
       let heightsSeen = 0, tooTall = 0;
+      // ── PER-HOST POPULATIONS (cchi-w22-bl-cruel-corpus-uncovered-caps-
+      //    second-tranche). The aggregate `spilled` is one number over five
+      //    families: a new row that measures NOTHING and a new row that
+      //    measures a clean host print the same 0. So every row keeps its own
+      //    tally and the ok-line prints it PER HOST — the population it drove,
+      //    the non-empty nodes it measured, the longest string it saw on each
+      //    side of the axis, and the offending cells including the zeros. A
+      //    survived-contact verdict is only a verdict with the numbers beside
+      //    it.
+      const perHost = new Map();
+      const statOf = (r) => {
+        const k = `${r.hash} ${r.sel}`;
+        if (!perHost.has(k)) perHost.set(k, { cells: 0, seen: 0, spilled: 0, pageOver: 0, cruelMax: 0, kindMax: 0 });
+        return perHost.get(k);
+      };
       for (const route of CRUEL_ROUTES) {
+        const st = statOf(route);
         for (const cell of cruelCells(route)) {
           const scen = cell.scen;
           // The naming rule, restated where it is USED: a fixture is cruel iff
@@ -7310,6 +7456,7 @@ async function main() {
                 `return out;})()`,
               );
               cells++;
+              st.cells++;
               if (m.view !== route.view) {
                 fail(D, `${scen}/${theme}@${width}${cell.hash}: rendered section.view "${m.view}", asked for "${route.view}" — the hash did not route, so nothing below this line measures ${route.sel}`);
                 row.push(`${width}:?`);
@@ -7322,6 +7469,9 @@ async function main() {
                 continue;
               }
               seen += m.n;
+              st.seen += m.n;
+              if (isCruel) { if (m.longest > st.cruelMax) st.cruelMax = m.longest; }
+              else if (m.longest > st.kindMax) st.kindMax = m.longest;
               // ── THE AXIS, ASSERTED IN BOTH DIRECTIONS (D285) ──────────────
               // The one-sided version — a name regex here, a load-time throw in
               // the fixture that fires only when a CRUEL string SHORTENS — left
@@ -7338,10 +7488,12 @@ async function main() {
               }
               if (m.psw > m.pcw) {
                 pageOver++;
+                st.pageOver++;
                 fail(D, `${scen}/${theme}@${width}${cell.hash}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the page is off-screen sideways. A host on this route has no bound, so it never clips ITSELF: it pushes the PAGE, which is invisible to an element-only scorer`);
               }
               for (const b of m.bad) {
                 spilled++;
+                st.spilled++;
                 fail(D, `${scen}/${theme}@${width}${cell.hash} el${b.i} in \`${b.scope}\` (matched \`${route.sel}\`): scrollWidth ${b.sw} > clientWidth ${b.cw} — ${Math.round((1 - b.cw / b.sw) * 100)}% of a ${b.len}-character value ("${b.t}…") is not rendered. Computed ON THE MEASURED ELEMENT: overflow-wrap "${b.ow}", white-space "${b.ws}", text-overflow "${b.te}", overflow "${b.ov}". The scope named here is the wrapper a remedy has to be authored against — not the row's selector`);
               }
               row.push(`${width}:${m.n}x${m.worst}${m.bad.length ? "!" + m.bad.length : ""}${m.psw > m.pcw ? "P" + (m.psw - m.pcw) : ""}`);
@@ -7394,6 +7546,23 @@ async function main() {
       if (cells !== cellCount) {
         fail(D, `run check: drove ${cells} cells, the table declares ${cellCount} — the loop measured a different corpus than the header announced, so a "cells clean" line here would be counted over ${Math.abs(cellCount - cells)} cell(s) nobody drove`);
       }
+      // ── THE PER-HOST POPULATION TABLE, PRINTED UNCONDITIONALLY ────────────
+      // Not inside the ok-lines below: those print only when this leg took no
+      // failure at all, and the numbers a reader most needs — which host
+      // carried the offending cells — are exactly the numbers a failing run
+      // withholds if they ride a green-only line. Zeros are printed too: a
+      // host whose cruel twin found nothing gets its survived-contact verdict
+      // WITH its population, which is the only thing that separates it from a
+      // host that measured nothing at all.
+      process.stdout.write(`   ${D} — per-host populations (cells / non-empty nodes / longest cruel / longest kind / offending cells / pages over)\n`);
+      for (const [k, v] of perHost) {
+        process.stdout.write(
+          `      ${k}  cells ${v.cells}  nodes ${v.seen}  cruelMax ${v.cruelMax}  kindMax ${v.kindMax}  offending ${v.spilled}  pageOver ${v.pageOver}\n`,
+        );
+      }
+      for (const r of CRUEL_REFUSALS) {
+        process.stdout.write(`      REFUSED ${r.field} -> ${r.host}  from: ${r.from}  offending 0 (NOT MEASURED — see the refusal entry)\n`);
+      }
       if (!failures.some((f) => f.defect === D)) {
         okLine(
           `${cells} / ${cells} cells clean (${seen} non-empty ${CRUEL_ROUTES.map((r) => r.sel).join(" / ")} measured) across ` +
@@ -7418,6 +7587,20 @@ async function main() {
           `could have told 19 line boxes from 220. A LONGER error moves both sides together and stays green (D206: a ` +
           `pixel pin would pin the fixture string); only LAYOUT waste — a min-height, a per-line margin, a second copy ` +
           `of the box — moves the measured side alone`,
+        );
+        okLine(
+          `PER HOST, including the zeros (cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche): ` +
+          [...perHost].map(([k, v]) => `${k} ${v.spilled}/${v.cells} offending over ${v.seen} nodes (cruel ${v.cruelMax} / kind ${v.kindMax})`).join("; ") +
+          `. The aggregate number above is five families deep, so a row that measured NOTHING and a row that measured a CLEAN host both printed 0 into it; ` +
+          `these are the populations behind each verdict. A 0 beside a non-zero \`nodes\` count and a cruelMax at or above the row's floor is a SURVIVED-CONTACT verdict — the host was driven at its cap and held`,
+        );
+        okLine(
+          `and the REFUSAL half of the ledger, printed rather than dropped: ` +
+          (CRUEL_REFUSALS.length
+            ? CRUEL_REFUSALS.map((r) => `${r.field} (${r.from}) -> ${r.host}, ${r.reachability.split(" —")[0]}`).join("; ")
+            : "none") +
+          `. ${CRUEL_REFUSALS.length} famil${CRUEL_REFUSALS.length === 1 ? "y" : "ies"} carr${CRUEL_REFUSALS.length === 1 ? "ies" : "y"} a cap, a host and a settled reachability verdict and STILL cannot be driven by this corpus — the reason is in the entry's \`why\`, and it names what the corpus would have to grow. ` +
+          `The \`from:\` field is the point: a name-keyed grep for \`vercel_deploy_url\` over app.js returns ZERO and declares the field unrendered, because the SPA reads it under the key \`deployment_url\``,
         );
         okLine(
           `each finding names the WRAPPER SCOPE it measured (${CRUEL_ROUTES.map((r) => r.scopes).join(" | ")}) rather than the ` +
