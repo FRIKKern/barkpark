@@ -158,15 +158,47 @@ const stripComments = (src) =>
 
 const EXIT2 = /process\.exit\(2\)|process\.exitCode\s*=\s*2/;
 
-function fenceEmitters() {
-  const out = [];
-  for (const dir of FENCE_GLOBS) {
+// SCANNED, then FILTERED — the two numbers are kept apart on purpose. An arm
+// that reports "0 emitters" because its directory rule matched no files is
+// indistinguishable, in a green run, from one that really found no exit-2 path;
+// so `scanned` is returned alongside and asserted non-zero per arm below.
+function fenceScan() {
+  const scanned = [];
+  const emitters = [];
+  for (const { dir, match } of FENCE_GLOBS) {
     for (const f of fs.readdirSync(path.join(ROOT, dir)).sort()) {
-      if (!f.endsWith(".mjs")) continue;
+      if (!match.test(f)) continue;
       const rel = `${dir}/${f}`;
       if (fs.statSync(path.join(ROOT, rel)).isDirectory()) continue;
-      if (EXIT2.test(stripComments(read(rel)))) out.push(rel);
+      scanned.push({ dir, rel });
+      if (EXIT2.test(stripComments(read(rel)))) emitters.push(rel);
     }
+  }
+  return { scanned, emitters };
+}
+
+function fenceEmitters() {
+  return fenceScan().emitters;
+}
+
+// ── THE LINES A FILE CAN PUBLISH, READ OUT OF ITS OWN BYTES ──────────────────
+//
+// Not a manifest sample, not a paraphrase: every `!!…` run in the file's CODE
+// (comments stripped), with the interpolations this tree actually uses resolved
+// from the same source. `REFUSAL_NAME` is read from the file's own declaration,
+// so a rename moves the derived line with it and cannot silently un-cover the
+// emitter.
+function publishableRefusalLines(rel) {
+  const src = stripComments(read(rel));
+  const decl = /const REFUSAL_NAME = "([^"]+)"/.exec(src);
+  const resolve = (t) =>
+    t
+      .replace(/\$\{REFUSAL_NAME\}/g, decl ? decl[1] : "INSTRUMENT NAME")
+      .replace(/\$\{instrument\}/g, "INSTRUMENT NAME")
+      .replace(/\$\{[^}]*\}/g, "X");
+  const out = [];
+  for (const m of src.matchAll(/!![^"'`\n]*/g)) {
+    out.push(resolve(m[0]).replace(/\\n[\s\S]*$/, "").replace(/\s+$/, ""));
   }
   return out;
 }
@@ -227,6 +259,44 @@ test("cch-w63-bl (DERIVED): each conforming emitter still carries its literal pr
       `${e.file} no longer writes ${JSON.stringify(marker)} — either it was renamed (update this manifest) ` +
       `or the capture now points at a prefix nothing publishes`);
     assert.equal(captureRefusal(e.sample + "\n"), e.sample, `MISSED ${e.file}'s own sample`);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// (4) THE POSITIVE CONTROL — DERIVED BOTH WAYS
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The orphan test above reds when an emitter is not NAMED. This one reds when a
+// named emitter is not READ: for every exit-2 file the scan finds that is not
+// excluded, at least one `!!` line the file's own code can publish must come
+// back from captureRefusal(). It needs no manifest entry to work, so it also
+// covers a file whose entry someone deletes AND re-adds to EXCLUDED by mistake
+// — and it reds on the mutation "delete the `!!` from an emitter's refuse
+// helper", which the manifest-only form survives.
+test("cch-w63-bl (DERIVED): every non-excluded exit-2 emitter publishes a line THIS capture reads", () => {
+  const excluded = new Set(EXCLUDED.map((e) => e.file));
+  const subjects = fenceEmitters().filter((f) => !excluded.has(f));
+  assert.ok(subjects.length >= 13,
+    `the subject set collapsed to ${subjects.length}; this control would be vacuous`);
+  const blind = [];
+  for (const rel of subjects) {
+    const lines = publishableRefusalLines(rel);
+    const hit = lines.find((l) => isRefusalLine(l));
+    if (!hit) blind.push(`${rel}\n      candidates its code carries: ` +
+      (lines.length ? lines.slice(0, 6).map((l) => JSON.stringify(l)).join("\n        ") : "(none)"));
+  }
+  assert.deepEqual(blind, [],
+    "an exit-2 emitter whose own refusal line scripts/console-refusal-capture.mjs CANNOT read.\n" +
+    "Either the emitter stopped speaking the shape, or the capture was narrowed:\n  " + blind.join("\n  "));
+});
+
+test("cch-w63-bl (DERIVED): each fence arm actually reached files", () => {
+  const { scanned } = fenceScan();
+  for (const { dir } of FENCE_GLOBS) {
+    const n = scanned.filter((s) => s.dir === dir).length;
+    assert.ok(n > 0,
+      `fence arm ${dir} matched 0 files — a directory rule that reaches nothing reports ` +
+      `"no emitters here" forever, whatever the tree grows.`);
   }
 });
 
