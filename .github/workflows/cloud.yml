@@ -514,7 +514,7 @@ jobs:
       # happens to ship (the same discipline every other node-running workflow
       # in this repo already follows). ~5s.
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
       - name: Cache deps

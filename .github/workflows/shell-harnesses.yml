@@ -1297,7 +1297,7 @@ jobs:
         id: setup
         # fs.globSync needs node >= 22; the runner refuses BY NAME below that
         # rather than throwing a TypeError that reads like a bug in the suite.
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: node-test-floor.test.sh syntax check
