@@ -147,4 +147,8 @@ const upstream = require("@changesets/changelog-github").default;
 module.exports = {
   getReleaseLine: upstream.getReleaseLine,
   getDependencyReleaseLine: upstream.getDependencyReleaseLine,
+  // Exposed for scripts/changelog-batched.selftest.mjs, which exercises the
+  // gate and the transient classifier offline. Not part of the changelog
+  // generator contract — changesets only ever reads the two functions above.
+  __testables: { createGate, isTransient, withRetry },
 };
