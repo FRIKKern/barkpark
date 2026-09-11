@@ -219,8 +219,12 @@ defmodule BarkparkWeb.SiteDeployStatusPayloadConformanceTest do
 
       done = await_done("stage-payload-conf")
 
-      assert [stage | _] = done["stages"],
+      stages = done["stages"]
+
+      assert is_list(stages) and stages != [],
              "the run narrated no stages — there is nothing here to compare, and a vacuous pass is exactly what this lock exists to stop"
+
+      [stage | _] = stages
 
       assert Enum.sort(Map.keys(stage)) == fx(["status", "stage", "emitted"]),
              drift_message("render_stage/1", Map.keys(stage), fx(["status", "stage", "emitted"]))
