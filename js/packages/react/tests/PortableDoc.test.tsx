@@ -1178,3 +1178,27 @@ describe('field-number block (B085)', () => {
     expect(html).toContain('Unsupported block: field-molarity')
   })
 })
+
+describe('task-detail empty state (parity2-bug-taskdetail-empty-state)', () => {
+  it('an unresolved task-detail renders the bp-tdetail--empty placeholder, not nothing', () => {
+    for (const block of [
+      { type: 'task-detail', task: { title: '' } },
+      { type: 'task-detail', task: { title: '   ' } },
+      { type: 'task-detail', query: { parent_id: 'nope' } },
+      { type: 'task-detail', task: {} },
+    ] as Block[]) {
+      const html = renderPortableDocument([block])
+      expect(html).toContain('<div class="bp-tdetail bp-tdetail--empty">No matching tasks.</div>')
+      expect(html).not.toContain('bp-tdetail__title')
+    }
+  })
+
+  it('a resolved task-detail is untouched by the empty state', () => {
+    const html = renderPortableDocument([
+      { type: 'task-detail', task: { title: 'real', status: 'ready' } },
+    ] as Block[])
+    expect(html).toContain('<div class="bp-tdetail__title">real</div>')
+    expect(html).not.toContain('bp-tdetail--empty')
+    expect(html).not.toContain('No matching tasks.')
+  })
+})

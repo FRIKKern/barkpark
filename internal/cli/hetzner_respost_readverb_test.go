@@ -178,4 +178,3 @@ func TestHzCommandResolvesDiscriminates(t *testing.T) {
 		t.Errorf("`bp cloud hetzner zone get` is not a command; probe said it resolves: %q", said)
 	}
 }
-

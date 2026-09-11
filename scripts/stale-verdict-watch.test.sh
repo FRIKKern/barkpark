@@ -34,6 +34,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WATCH="$REPO_ROOT/scripts/stale-verdict-watch.sh"
 WF="$REPO_ROOT/.github/workflows/stale-verdict-watch.yml"
+ROUTE="$REPO_ROOT/scripts/stale-verdict-watch-route.sh"
 CONTENDED="$REPO_ROOT/.github/workflows/main-gate-watch.yml"
 SPEC="$REPO_ROOT/.github/required-checks.json"
 DOC="$REPO_ROOT/docs/ops/merge-gates.md"
@@ -47,10 +48,24 @@ trap cleanup EXIT
 ok()      { PASS=$((PASS + 1)); echo "  ok   $*"; }
 bad()     { FAIL=$((FAIL + 1)); echo "  FAIL $*" >&2; }
 section() { echo; echo "── $* ──"; }
+# The rc->outcome arms live in scripts/stale-verdict-watch-route.sh since the
+# read faults were split onto their own check-run name (task-bc902e08cdfd2ee7).
+# These two helpers let the probes below assert the SAME facts they asserted
+# when the arms were a `case` inside the yml, by DRIVING the router rather than
+# grepping a `run:` block.
+route_exit() {  # role rc -> prints the exit code, never dies
+  local r=0
+  bash "$ROUTE" "$1" "$2" >/dev/null 2>&1 || r=$?
+  echo "$r"
+}
+route_say() {   # role rc -> prints what the router says
+  bash "$ROUTE" "$1" "$2" 2>&1 || true
+}
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 [ -f "$WATCH" ] || { echo "missing $WATCH" >&2; exit 2; }
 [ -f "$WF" ]    || { echo "missing $WF" >&2; exit 2; }
+[ -f "$ROUTE" ] || { echo "missing $ROUTE" >&2; exit 2; }
 
 # Plain array + `while read`, never `mapfile`: this harness must run on stock
 # macOS bash 3.2 as well as on CI's bash 5.
@@ -250,14 +265,19 @@ out="$(run_watch "$TMP/d-blind-one.json")"; rc=$?
 [ "$rc" = "2" ] && ok "mutation: one classified row demotes BLIND to the exit-2 warning" \
   || bad "mutation: expected exit 2 once a row was classified, got $rc — 5 is not tracking coverage"
 
-# The workflow must ANSWER a 5, and it must fail the run. Without this arm the
-# `*)` fallthrough would call it "not a verdict it defines".
-grep -qE '^\s+5\) echo "::error::BLIND RUN' "$WF" \
-  && ok "the workflow has its own 5) arm and sentence for BLIND" \
-  || bad "the workflow has no 5) arm — a blind run would fall through to the undefined-verdict branch"
-grep -qE '^\s+5\) echo .*exit 1 ;;' "$WF" \
-  && ok "…and arm 5 exits 1, so a blind run can no longer conclude success" \
-  || bad "arm 5 does not exit 1 — the blind run still reports green"
+# The ROUTER must ANSWER a 5, and it must fail the run. Without this arm the
+# `*)` fallthrough would call it "not a verdict it defines". The arms moved out
+# of the yml and into scripts/stale-verdict-watch-route.sh when the read faults
+# were split onto their own check-run name (task-bc902e08cdfd2ee7); the sentences
+# are the SAME sentences, and this probe followed them rather than being deleted.
+grep -q '::error::BLIND RUN' "$ROUTE" \
+  && ok "the router has its own 5) arm and sentence for BLIND" \
+  || bad "the router has no BLIND arm — a blind run would fall through to the undefined-verdict branch"
+blind_rc=0
+bash "$ROUTE" fault 5 >/dev/null 2>&1 || blind_rc=$?
+[ "$blind_rc" != 0 ] \
+  && ok "…and the router exits $blind_rc on rc=5, so a blind run can no longer conclude success" \
+  || bad "the router passes on rc=5 — the blind run still reports green"
 grep -q "^#             5 = BLIND" "$WATCH" \
   && ok "the script's own EXIT CODES header documents 5 where the arms are defined" \
   || bad "EXIT CODES header does not document 5"
@@ -265,7 +285,7 @@ grep -q "^#             5 = BLIND" "$WATCH" \
 # Arm 5's copy is NOT arm 1's. An exit-1 stale green cannot clear itself and
 # says so; a blind read is transient and the next run re-reads it. Copying arm
 # 1's sentence here would teach the reader to ignore a self-clearing alarm.
-arm5="$(grep -E '^\s+5\) echo' "$WF")"
+arm5="$(grep -E '::error::BLIND RUN' "$ROUTE")"
 grep -q "keep failing every 30 minutes" <<<"$arm5" \
   && bad "arm 5 repeats arm 1's 'it will keep failing every 30 minutes' — a blind read self-clears on the next poll" \
   || ok "arm 5 does not repeat arm 1's 'keep failing every 30 minutes'"
@@ -374,10 +394,14 @@ grep -q "^#             4 = COMPUTE fault" "$WATCH" && ok "the script's own EXIT
   || bad "EXIT CODES header does not document 4"
 grep -q "^#             3 = CONFIGURATION fault" "$WATCH" && ok "…and still documents 3 as configuration" \
   || bad "EXIT CODES header lost its 3"
-grep -qE '^\s+4\) echo "::error::COMPUTE FAULT' "$WF" && ok "the workflow has its own arm and sentence for 4" \
-  || bad "the workflow has no 4) arm — an undefined-verdict fallthrough would call it 'not a verdict it defines'"
-grep -qE '^\s+3\) echo "::error::CONFIGURATION FAULT' "$WF" && ok "…and the 3 arm still speaks about the credential" \
-  || bad "the workflow lost its 3 arm"
+case "$(route_say fault 4)" in
+  *"::error::COMPUTE FAULT"*) ok "the router has its own arm and sentence for 4" ;;
+  *) bad "the router has no 4 arm — an undefined-verdict fallthrough would call it 'not a verdict it defines'" ;;
+esac
+case "$(route_say fault 3)" in
+  *"::error::CONFIGURATION FAULT"*credential*) ok "…and the 3 arm still speaks about the credential" ;;
+  *) bad "the router lost its 3 arm, or it stopped naming the credential: $(route_say fault 3)" ;;
+esac
 
 # ═══ (k) the payload is too big for argv, on BOTH kernels, and still computes ═
 section "(k) a payload above Linux MAX_ARG_STRLEN *and* macOS's total argv still computes"
@@ -537,18 +561,20 @@ out="$(env PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" \
 # (l-g) the workflow must ANSWER both codes, and both must FAIL the run. This
 # is the half of the defect the script alone cannot fix: rc=2 was mapped to
 # exit 0 under a sentence that itself reads "That is a SILENCE, not a green."
-grep -qE '^\s+6\) echo "::error::UNREACHABLE' "$WF" \
-  && ok "(l-g) the workflow has its own 6) arm for UNREACHABLE" \
-  || bad "(l-g) the workflow has no 6) arm — an unreachable run would fall through to the undefined-verdict branch"
-grep -qE '^\s+6\) echo .*exit 1 ;;' "$WF" && ok "(l-g) …and arm 6 exits 1" \
+arm6="$(route_say fault 6)"
+arm7="$(route_say fault 7)"
+case "$arm6" in
+  *"::error::UNREACHABLE"*) ok "(l-g) the router has its own 6 arm for UNREACHABLE" ;;
+  *) bad "(l-g) the router has no 6 arm — an unreachable run would fall through to the undefined-verdict branch" ;;
+esac
+[ "$(route_exit fault 6)" = 1 ] && ok "(l-g) …and arm 6 exits 1" \
   || bad "(l-g) arm 6 does not exit 1 — a run that read nothing still reports green"
-grep -qE '^\s+7\) echo "::error::DISTANCE UNREADABLE' "$WF" \
-  && ok "(l-g) the workflow has its own 7) arm for DISTANCE UNREADABLE" \
-  || bad "(l-g) the workflow has no 7) arm"
-grep -qE '^\s+7\) echo .*exit 1 ;;' "$WF" && ok "(l-g) …and arm 7 exits 1" \
+case "$arm7" in
+  *"::error::DISTANCE UNREADABLE"*) ok "(l-g) the router has its own 7 arm for DISTANCE UNREADABLE" ;;
+  *) bad "(l-g) the router has no 7 arm" ;;
+esac
+[ "$(route_exit fault 7)" = 1 ] && ok "(l-g) …and arm 7 exits 1" \
   || bad "(l-g) arm 7 does not exit 1"
-arm6="$(grep -E '^\s+6\) echo' "$WF")"
-arm7="$(grep -E '^\s+7\) echo' "$WF")"
 grep -qi "poll budget" <<<"$arm6" && grep -qi "commits api" <<<"$arm7" \
   && ok "(l-g) the two arms name DIFFERENT remedies (the poll budget vs the commits API) — which is why they are two codes" \
   || bad "(l-g) the 6 and 7 arms do not name distinct remedies: 6='$arm6' 7='$arm7'"
@@ -558,11 +584,11 @@ grep -qi "credential" <<<"$arm7" && grep -qi "that read worked" <<<"$arm7" \
 
 # Arm 2 keeps its exit 0 — it is the genuine partial-coverage warning — but it
 # must no longer claim to cover the read that never happened.
-arm2="$(grep -E '^\s+2\) echo' "$WF")"
+arm2="$(route_say verdict 2)"
 grep -q "could not be read" <<<"$arm2" \
   && bad "arm 2 still says the pull-request list could not be read — that condition is exit 6 now, and arm 2 concludes SUCCESS" \
   || ok "arm 2 no longer claims to cover an unread pull-request list"
-grep -q "exit 0 ;;" <<<"$arm2" && ok "…and arm 2 keeps exit 0: partial coverage really is a warning" \
+[ "$(route_exit verdict 2)" = 0 ] && ok "…and arm 2 keeps exit 0: partial coverage really is a warning" \
   || bad "arm 2 no longer exits 0: $arm2"
 
 # The codes must be documented where they are defined, or the header drifts off
@@ -1334,6 +1360,240 @@ else
   bad "(r7b) the mutation did not apply — (r7) would prove nothing"
 fi
 
+
+
+# ═══ (m) a READ FAULT and a STALE GREEN red under DIFFERENT check-run names ══
+# task-bc902e08cdfd2ee7. The defect: ONE step of ONE job named `Stale verdict
+# watch` mapped rc 1 ("a conflicted PR is asserting a stale green — go rebase or
+# close #N") and rc 3/4/5/6/7/9 ("this run could not look, and names no pull
+# request") all to `exit 1`. MEASURED on run 34589487018 (2026-09-11T10:29:43Z,
+# main): rc 6 UNREACHABLE rendered as name `Stale verdict watch`, conclusion
+# `failure` — character for character what an rc-1 verdict renders.
+#
+# The proof has to FORCE BOTH, which is why the rc->outcome table lives in
+# scripts/stale-verdict-watch-route.sh instead of in a `run:` block nobody can
+# drive offline. Two halves, and BOTH are needed:
+#   (a) the router: for every rc, exactly the right role reds.
+#   (b) the wiring: the workflow actually gives the two roles two different job
+#       NAMES, and actually skips the verdict job on every read-fault rc. A
+#       perfect router wired into one job proves nothing.
+section "(m) a read fault and a stale green scream under different names"
+
+route_rc() {  # role rc -> prints exit code, never dies
+  local r=0
+  bash "$ROUTE" "$1" "$2" >/dev/null 2>&1 || r=$?
+  echo "$r"
+}
+# The fence, modelled from the verdict job's `if:` in the workflow. The wiring
+# half below proves the workflow really carries exactly this set, so this
+# function cannot quietly disagree with the YAML.
+FAULT_RCS="3 4 5 6 7 9"
+verdict_job() {
+  case " $FAULT_RCS " in
+    *" $1 "*) echo skipped; return ;;
+  esac
+  [ -z "$1" ] && { echo skipped; return; }
+  if [ "$(route_rc verdict "$1")" = 0 ]; then echo green; else echo RED; fi
+}
+fault_job() {
+  if [ "$(route_rc fault "$1")" = 0 ]; then echo green; else echo RED; fi
+}
+
+while read -r rc want_fault want_verdict note; do
+  got_fault="$(fault_job "$rc")"
+  got_verdict="$(verdict_job "$rc")"
+  if [ "$got_fault" = "$want_fault" ] && [ "$got_verdict" = "$want_verdict" ]; then
+    ok "rc=$rc: 'Stale verdict watch read fault' $got_fault, 'Stale verdict watch' $got_verdict ($note)"
+  else
+    bad "rc=$rc: fault job $got_fault (want $want_fault), verdict job $got_verdict (want $want_verdict) — $note"
+  fi
+done <<'TABLE'
+0 green green clean:-neither-check-run-screams,-and-the-VERDICT-name-publishes-the-green
+1 green RED stale-green:-ONLY-'Stale-verdict-watch'-screams
+2 green green PARTIAL-warning:-neither-check-run-screams
+3 RED skipped CONFIGURATION-FAULT:-ONLY-the-fault-name-screams
+4 RED skipped COMPUTE-FAULT:-ONLY-the-fault-name-screams
+5 RED skipped BLIND-RUN:-ONLY-the-fault-name-screams
+6 RED skipped UNREACHABLE-(run-34589487018):-ONLY-the-fault-name-screams,-verdict-name-SKIPPED-not-green
+7 RED skipped DISTANCE-UNREADABLE:-ONLY-the-fault-name-screams
+8 green RED BASELINE-DRIFT:-ONLY-'Stale-verdict-watch'-screams
+9 RED skipped ROLLUP-BUDGET:-ONLY-the-fault-name-screams
+TABLE
+
+# THE TWO ROWS THAT CARRY THE WHOLE DEFECT, asserted AGAINST EACH OTHER rather
+# than only against constants: the PAIR of check-run conclusions must DIFFER
+# between a real stale green (rc 1) and the measured transport silence (rc 6),
+# and the name that screams must not be the same name. If a future edit fused
+# the classes again, every row above could still be re-baselined one-by-one
+# while this one could not be satisfied at all without a real split.
+pair1="$(fault_job 1)/$(verdict_job 1)"
+pair6="$(fault_job 6)/$(verdict_job 6)"
+if [ "$pair1" != "$pair6" ] && [ "$(verdict_job 1)" = RED ] && [ "$(fault_job 6)" = RED ] \
+   && [ "$(fault_job 1)" != RED ] && [ "$(verdict_job 6)" != RED ]; then
+  ok "a stale green (fault/verdict = $pair1) and an UNREACHABLE transport silence ($pair6) scream under DIFFERENT names"
+else
+  bad "a stale green ($pair1) and an UNREACHABLE transport silence ($pair6) are not separated by name — the classes are fused"
+fi
+
+# On a read fault the verdict name must be SKIPPED, never green: "this run read
+# no population" must not render as "nothing is asserting a stale green". A
+# `|| true` softening would show up here as `green`.
+for f in $FAULT_RCS; do
+  if [ "$(verdict_job "$f")" = skipped ]; then
+    ok "on rc=$f 'Stale verdict watch' is SKIPPED, not green — no population, no verdict"
+  else
+    bad "on rc=$f 'Stale verdict watch' renders $(verdict_job "$f") — a run that read nothing must never report success"
+  fi
+done
+
+# The defensive arm: if the fence ever drifts and a read-fault rc DOES reach the
+# verdict role, it must red as a ROUTING ERROR rather than answer a question it
+# cannot.
+for f in $FAULT_RCS; do
+  if [ "$(route_rc verdict "$f")" != 0 ]; then
+    ok "if the fence drifts and rc=$f reaches the verdict role anyway, the router reds instead of guessing"
+  else
+    bad "the verdict role passes on rc=$f — a drifted fence would render a green verdict with no population behind it"
+  fi
+done
+
+# An rc the script does not define, and a MISSING rc (the shape an empty
+# `needs.<job>.outputs.rc` takes when the upstream job died before writing
+# GITHUB_OUTPUT), must never read as a pass in either role.
+for bogus in 11 "" "x"; do
+  bf="$(route_rc fault "$bogus")"; bv="$(route_rc verdict "$bogus")"
+  if [ "$bf" != 0 ] && [ "$bv" != 0 ]; then
+    ok "an undefined rc ('${bogus}') reds in both roles (fault=$bf verdict=$bv) — never a silent pass"
+  else
+    bad "an undefined rc ('${bogus}') passed a role (fault=$bf verdict=$bv)"
+  fi
+done
+
+# ── MUTANT 1: the router SOFTENED. Every `exit 1` becomes `exit 0`; the rc=6
+# fault arm must then pass, and the table above asserts it must not.
+sed 's|^        exit 1$|        exit 0|' "$ROUTE" > "$TMP/route-softened.sh"
+if cmp -s "$ROUTE" "$TMP/route-softened.sh"; then
+  bad "(m) the softened-router mutant was never BUILT (no exit-1 arm matched) — the next assertion would prove nothing"
+else
+  mr=0
+  bash "$TMP/route-softened.sh" fault 6 >/dev/null 2>&1 || mr=$?
+  if [ "$mr" = 0 ]; then
+    ok "(m) MUTANT 1: a softened router passes on rc=6, and the table above asserts it must RED"
+  else
+    bad "(m) MUTANT 1 did not reach the arm (softened copy still exits $mr on rc=6) — the table is unproven"
+  fi
+fi
+
+# ── MUTANT 2: the router emits the FAULT name UNCONDITIONALLY (criterion 1's
+# named mutation). Its fault role reds on rc=1 too, so the pair assertion above
+# — which requires `fault_job 1 != RED` — must fail. Modelled by re-running the
+# pair test against the mutant rather than by re-asserting a constant.
+sed 's@^      0.1.2.8)$@      99)@' "$ROUTE" > "$TMP/route-always-fault.sh"
+if grep -q '^      99)$' "$TMP/route-always-fault.sh" 2>/dev/null; then
+  m_fault1=0
+  bash "$TMP/route-always-fault.sh" fault 1 >/dev/null 2>&1 || m_fault1=$?
+  if [ "$m_fault1" != 0 ]; then
+    ok "(m) MUTANT 2: a router that emits the fault name unconditionally reds the fault role on rc=1 (exit $m_fault1), which the pair assertion above forbids"
+  else
+    bad "(m) MUTANT 2 did not take: the always-fault copy still passes the fault role on rc=1"
+  fi
+else
+  bad "(m) MUTANT 2 was never BUILT — the pass-through arm did not match, so criterion 1's named mutation is unproven"
+fi
+
+# ── MUTANT 3: the two jobs RE-FUSED. Drop rc 6 from the fence and the verdict
+# job would red on a transport silence exactly as it reds on a stale green —
+# which is the original defect. Re-run the pair test with the fused fence.
+fused_verdict_6="$( if [ "$(route_rc verdict 6)" = 0 ]; then echo green; else echo RED; fi )"
+if [ "$fused_verdict_6/$(fault_job 6)" = "RED/RED" ] && [ "$fused_verdict_6" = "$(verdict_job 1)" ]; then
+  ok "(m) MUTANT 3: with rc 6 dropped from the fence the verdict name reds on a transport silence (RED), identical to rc=1 — the fence is what separates them"
+else
+  bad "(m) MUTANT 3 proves nothing: an unfenced rc=6 renders '$fused_verdict_6' on the verdict role, so the fence is not what carries the split"
+fi
+
+# ── (b) THE WIRING. Two distinct job NAMES, each shelling its own role, and the
+# verdict job fenced off EVERY read-fault rc. Parsed as YAML, not grepped: a
+# `name:` is a structural fact, and a grep over prose that ARGUES about these
+# names would match its own explanation.
+wiring_read() {  # <yaml-file> <expected fault rcs>
+  python3 - "$1" "$2" <<'PYWIRE'
+import sys, re, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+expected = set(sys.argv[2].split())
+jobs = d.get("jobs") or {}
+def job_with(role):
+    hits = []
+    for jid, j in jobs.items():
+        for st in (j.get("steps") or []):
+            if ("stale-verdict-watch-route.sh %s" % role) in (st.get("run") or ""):
+                hits.append((jid, j.get("name") or jid, str(j.get("if") or "")))
+    return hits
+f, v = job_with("fault"), job_with("verdict")
+problems = []
+if len(f) != 1: problems.append("expected exactly 1 job shelling the router as `fault`, found %d" % len(f))
+if len(v) != 1: problems.append("expected exactly 1 job shelling the router as `verdict`, found %d" % len(v))
+if not problems:
+    (fid, fname, fif), (vid, vname, vif) = f[0], v[0]
+    if fid == vid:
+        problems.append("both roles run in the SAME job `%s` — the failure classes still share one check-run name" % fid)
+    if fname == vname:
+        problems.append("both jobs render the SAME check-run name %r" % fname)
+    if fname != "Stale verdict watch read fault":
+        problems.append("the fault job's check-run name is %r" % fname)
+    if vname != "Stale verdict watch":
+        problems.append("the verdict job RENAMED the pre-existing check run to %r — the old name must keep publishing" % vname)
+    vifq = vif.replace('"', "'")
+    fenced = set(re.findall(r"!=\s*'(\d+)'", vifq))
+    if fenced != expected:
+        problems.append("the verdict job `%s` fences off %s, expected %s — an unfenced read fault would red it as a stale green"
+                        % (vid, sorted(fenced) or "nothing", sorted(expected)))
+    if "!= ''" not in vifq:
+        problems.append("the verdict job `%s` does not fence off an EMPTY rc — a dead upstream would read as a verdict" % vid)
+    if "needs" not in (jobs[vid] or {}):
+        problems.append("the verdict job `%s` does not `needs:` the job that produces the rc" % vid)
+    if not problems:
+        print("OK %s|%s|fenced=%s" % (fname, vname, ",".join(sorted(fenced))))
+if problems:
+    print("BAD " + "; ".join(problems))
+PYWIRE
+}
+
+if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" >/dev/null 2>&1; then
+  wiring="$(wiring_read "$WF" "$FAULT_RCS")" || wiring="BAD the wiring reader itself failed"
+  case "$wiring" in
+    OK\ *) ok "the workflow wires the roles to two different check-run names: ${wiring#OK }" ;;
+    *)     bad "workflow wiring: ${wiring#BAD }" ;;
+  esac
+
+  # ── MUTANT 4: the FENCE DROPPED from the YAML. Delete the rc-6 exclusion and
+  # the wiring reader must say so — otherwise the reader is decoration.
+  grep -v "outputs.rc != '6'" "$WF" > "$TMP/wf-unfenced.yml"
+  if cmp -s "$WF" "$TMP/wf-unfenced.yml"; then
+    bad "(m) MUTANT 4 was never BUILT — no rc-6 exclusion line matched in $WF"
+  else
+    mw="$(wiring_read "$TMP/wf-unfenced.yml" "$FAULT_RCS")" || mw="BAD reader failed"
+    case "$mw" in
+      BAD*) ok "(m) MUTANT 4: dropping rc 6 from the verdict job's fence is CAUGHT by the wiring reader — ${mw#BAD }" ;;
+      *)    bad "(m) MUTANT 4 SURVIVED: the wiring reader accepted a workflow with no rc-6 fence ($mw)" ;;
+    esac
+  fi
+
+  # ── MUTANT 5: the two jobs RENAMED to one name. The reader must refuse.
+  sed "s|^    name: Stale verdict watch read fault$|    name: Stale verdict watch|" "$WF" > "$TMP/wf-onename.yml"
+  if cmp -s "$WF" "$TMP/wf-onename.yml"; then
+    bad "(m) MUTANT 5 was never BUILT — the fault job's name line did not match"
+  else
+    mw2="$(wiring_read "$TMP/wf-onename.yml" "$FAULT_RCS")" || mw2="BAD reader failed"
+    case "$mw2" in
+      BAD*) ok "(m) MUTANT 5: giving both jobs ONE check-run name is CAUGHT — ${mw2#BAD }" ;;
+      *)    bad "(m) MUTANT 5 SURVIVED: the reader accepted two jobs under one name ($mw2)" ;;
+    esac
+  fi
+else
+  bad "python3+pyyaml unavailable — the wiring half of section (m) CANNOT READ, and an unread wiring is not a proven one"
+fi
+
+bash -n "$ROUTE" && ok "stale-verdict-watch-route.sh passes bash -n" || bad "stale-verdict-watch-route.sh has a syntax error"
 
 echo "── stale-verdict-watch: $PASS passed, $FAIL failed ──"
 [ "$FAIL" -eq 0 ] || exit 1

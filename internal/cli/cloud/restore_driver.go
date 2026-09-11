@@ -105,7 +105,16 @@ func (e *RestoreExecutor) restoreRunner(kind, ip string) StepRunner {
 // restoreHealthURL is where the on-box agent self-probes after a resurrect. The
 // agent runs ON the box, so localhost is the truthful target (and needs no fqdn
 // threaded through the interface's agentless InstallAgent signature).
-const restoreHealthURL = "http://localhost:4000/api/schemas"
+//
+// The path is /status.json, NOT the legacy /api/schemas: that route pipes
+// through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+// `sunset: Wed, 31 Dec 2026 23:59:59 GMT`. The agent gates on the STATUS CODE,
+// so on 2027-01-01 a perfectly healthy resurrected box would self-report
+// unhealthy forever. /status.json is `pipe_through(:api)` only (no deprecation
+// scope, no token) and is strictly stronger: StatusController.show_json/2 ->
+// Barkpark.Status.health/0 runs a bare Repo.all/1, so an unreachable database
+// answers 500 rather than 200.
+const restoreHealthURL = "http://localhost:4000/status.json"
 
 // dbNameSafe fences a database name before it is interpolated into the restore
 // shell — a postgres identifier, so anything outside [A-Za-z0-9_] is refused
@@ -428,7 +437,7 @@ if [ -s "$STAGE/` + bundleMediaName + `" ]; then mkdir -p /opt/barkpark/api/uplo
 (set +e; set -a; . /opt/barkpark/.env; set +a; cd /opt/barkpark/api && bash -lc 'mix ecto.migrate' >/dev/null 2>&1; true)
 systemctl start barkpark
 PORT=$(grep '^PORT=' /opt/barkpark/.env | cut -d= -f2)
-curl -sf -m 60 --retry 30 --retry-delay 3 --retry-connrefused "http://localhost:${PORT:-4000}/api/schemas" > /dev/null
+curl -sf -m 60 --retry 30 --retry-delay 3 --retry-connrefused "http://localhost:${PORT:-4000}/status.json" > /dev/null
 echo BP_RESTORE_OK`
 }
 
