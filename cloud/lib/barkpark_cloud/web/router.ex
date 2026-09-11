@@ -197,6 +197,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites/:id/deployments/:dep_id user(s)  one deployment (read ability)
       POST    /v1/sites/:id/rollback user(s) roll a site back to a prior deployment (write ability)
       GET     /v1/sites/:id/deployments/:dep_id/build-log user(s)  the black box recorder's durable per-build record for THAT deployment (read ability; 404 no such deployment / 410 evicted / 200 with an honest log_state)
+      GET     /v1/sites/:id/deployments/:dep_id/build-log/bytes operator  the recorded build log's BYTES for THAT deployment — a bounded tail (422 when the bytes were never scrubbed / 410 evicted / 404 no such deployment / 200 with an honest log_state)
       POST    /v1/sites/:id/deployments/:dep_id/promote user(s) rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact (write ability)
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/deployments/:dep_id/artifact user(s)  upload a PREBUILT dist for a minted deployment, then start it (write ability)
@@ -9000,6 +9001,39 @@ defmodule BarkparkCloud.Web.Router do
 
       json(conn, status, payload)
     end)
+  end
+
+  # GET /v1/sites/:id/deployments/:dep_id/build-log/bytes → the recorded build
+  # log's BYTES, read BY DEPLOYMENT ID (dr-bl-recorder-http-read-path c1).
+  #
+  # A SUB-ROUTE, not a field on the record route above: serving bytes needs a
+  # REFUSAL (422 build_log_unscrubbed, for a record whose log_scrub is nil) that
+  # the record route's published 404/410/200 contract has no room for, and
+  # widening that route would let an existing caller's 200 silently become a 422.
+  # Everything else is inherited verbatim, so 404 and 410 mean here exactly what
+  # they mean next door.
+  #
+  # OPERATOR-GATED, AND DELIBERATELY NOT TEAM-SCOPED LIKE THE ROUTE ABOVE.
+  # #17693 widened that one to `{:ability, "read"}` and its security frame names
+  # the exact condition it widened under: "the widening moved WHO may ask, never
+  # WHAT is served … Not raw log bytes, and never has." THIS route serves the
+  # bytes, so that argument does not reach it and the audience does not move with
+  # it. `Auth.require_platform_operator/2` is 403-dark in production today
+  # (`gr-ops-platform-admin-emails`), which this route INHERITS from the row this
+  # task was filed under — no criterion here asserts a live 200 from it, and
+  # widening it is a separate decision with a separate secret-boundary review.
+  # All policy lives in `Sites.BuildLogBytes`.
+  get "/v1/sites/:id/deployments/:dep_id/build-log/bytes" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      {status, body} =
+        Sites.BuildLogBytes.for_deployment(conn.path_params["id"], conn.path_params["dep_id"])
+
+      json(conn, status, body)
+    end
   end
 
   # POST /v1/sites/:id/rollback → 200 {ok, status, deployment_id,
