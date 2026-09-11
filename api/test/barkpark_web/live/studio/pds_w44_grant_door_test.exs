@@ -355,10 +355,17 @@ defmodule BarkparkWeb.Studio.PdsW44GrantDoorTest do
              )
   @door_module BarkparkWeb.Studio.StudioLive.Shared.Paper
 
-  # `grant_target_denied?/3`'s whole body (paper.ex:152) — the arm pds-w44 added.
-  # Substituting it for the constant `false` restores the PRE-FIX door exactly:
+  # `grant_target_denied?/3`'s whole body — the arm pds-w44 added. Substituting
+  # it for the constant `false` restores the PRE-FIX door exactly:
   # `paper_pane_op/2`'s cond is left with only the target-less `write_denied?/1`.
-  @door_expression "grant_graded?(socket.assigns) and not grant_admits_target?(socket, type, doc_id)"
+  #
+  # The ladder itself now lives in `Caps.grant_target_denied?/4` (ONE owner,
+  # shared with the SheetGrid route), so the body this excises is the paper
+  # surface's CALL into that owner — including the fresh grant load that is this
+  # surface's one deliberate difference. Excising it removes the paper door
+  # exactly as before; the sheet door is proven separately by
+  # `pds_w41_livescope_component_bypass_test.exs`.
+  @door_expression "Caps.grant_target_denied?(socket.assigns, active_grants(socket), type, doc_id)"
   @door_substitution "false"
 
   describe "NON-VACUITY" do
@@ -414,14 +421,13 @@ defmodule BarkparkWeb.Studio.PdsW44GrantDoorTest do
       # leave `:ignore_module_conflict` globally TRUE for the rest of the suite,
       # silently swallowing genuine module-conflict warnings in every later test.
       #
-      # THE MUTANT COMPILE IS LOUD, AND EVERY WARNING IS EXPECTED — counted from
-      # the run, not guessed: 10, all downstream of the arm becoming the literal
-      # `false`. 3 unused variables (`socket`, `type`, `doc_id`, now unread by
-      # `grant_target_denied?/3`), 4 now-unreachable functions
-      # (`write_target_scope/3`, `grant_graded?/1`, `grant_admits_target?/3`,
-      # `active_grants/1`), and 3 "this clause in cond will never match" — one at
-      # EACH of the door's three call sites (paper.ex:233, :306, :716), which is
-      # itself the type checker confirming the substitution reached all of them.
+      # THE MUTANT COMPILE IS LOUD, AND EVERY WARNING IS EXPECTED — all of them
+      # downstream of the arm becoming the literal `false`: unused variables
+      # (`socket`, `type`, `doc_id`, now unread by `grant_target_denied?/3`),
+      # the now-unreachable `active_grants/1` (the helpers it used to feed live
+      # in `Caps` since the ladder hoist), and "this clause in cond will never
+      # match" — one at EACH of the door's three call sites, which is itself the
+      # type checker confirming the substitution reached all of them.
       # They do not fail the run. A reviewer seeing them has found the
       # substitution working, not a bug.
       try do
