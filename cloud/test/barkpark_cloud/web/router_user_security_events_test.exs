@@ -185,9 +185,13 @@ defmodule BarkparkCloud.Web.RouterUserSecurityEventsTest do
 
       # A row id that is not the caller's is a 404, and a 404 must not produce.
       stranger = session(user_fixture())
-      %{"sessions" => [stranger_row]} = json_body(call(:get, "/v1/account/sessions", nil, stranger))
 
-      assert call(:delete, "/v1/account/sessions/" <> stranger_row["id"], nil, token).status == 404
+      %{"sessions" => [stranger_row]} =
+        json_body(call(:get, "/v1/account/sessions", nil, stranger))
+
+      assert call(:delete, "/v1/account/sessions/" <> stranger_row["id"], nil, token).status ==
+               404
+
       assert actions(trail(token)) == ["session_revoked"]
     end
 
@@ -205,7 +209,12 @@ defmodule BarkparkCloud.Web.RouterUserSecurityEventsTest do
 
       # The act completed with nothing left to reach: still a fact, still a row.
       assert json_body(call(:delete, "/v1/account/sessions", nil, token)) == %{"revoked" => 0}
-      assert actions(trail(token)) == ["sessions_revoked_everywhere", "sessions_revoked_everywhere"]
+
+      assert actions(trail(token)) == [
+               "sessions_revoked_everywhere",
+               "sessions_revoked_everywhere"
+             ]
+
       assert hd(trail(token))["metadata"] == %{"revoked" => 0}
     end
 
@@ -321,7 +330,9 @@ defmodule BarkparkCloud.Web.RouterUserSecurityEventsTest do
       assert hd(limited)["id"] == hd(rows)["id"]
 
       # An absurd limit clamps to the 200 ceiling instead of asking for the table.
-      assert length(json_body(call(:get, "/v1/me/security-events?limit=100000", nil, token))["events"]) ==
+      assert length(
+               json_body(call(:get, "/v1/me/security-events?limit=100000", nil, token))["events"]
+             ) ==
                3
     end
   end
@@ -413,7 +424,10 @@ defmodule BarkparkCloud.Web.RouterUserSecurityEventsTest do
       user = user_fixture()
 
       assert {:error, cs} =
-               Accounts.record_user_security_event(%{user_id: user.id, action: "password.changed"})
+               Accounts.record_user_security_event(%{
+                 user_id: user.id,
+                 action: "password.changed"
+               })
 
       assert "is invalid" in errors_on(cs).action
     end
