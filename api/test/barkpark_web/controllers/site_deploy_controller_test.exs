@@ -676,10 +676,23 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       # here and this pin is the proof: `echo hi` reports no HEALTH stage, and an
       # unmeasured health code is OMITTED rather than defaulted to 0 (0 is the
       # SUCCESS code, so a default would certify a gate that never ran).
+      #
+      # deploy-reliability W21 (charter D608): +route_status +route_detail, and
+      # they are PRESENT-AND-NULL here rather than absent — the opposite of
+      # `health_exit_code` one line up, because the value a default would invent
+      # differs. An invented health code is 0, which IS the success code, so only
+      # absence is honest there. `route_status` is a string; `null` reads as
+      # "nobody measured this" on its face, exactly like `served_slot` does. This
+      # run (`echo hi`) emits no ROUTE line at all, so both are null and the key
+      # set still carries them.
       assert Map.keys(done) |> Enum.sort() == ~w(
                build_id content_rev exit_code failure_reason finished_at log mode
-               served_port served_slot slug stages started_at state
+               route_detail route_status served_port served_slot slug stages
+               started_at state
              )
+
+      assert done["route_status"] == nil
+      assert done["route_detail"] == nil
     end
 
     test "a non-empty build_id that does not match the served run is 404", %{conn: conn} do

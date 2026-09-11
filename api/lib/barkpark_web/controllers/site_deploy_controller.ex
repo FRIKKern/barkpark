@@ -518,6 +518,15 @@ defmodule BarkparkWeb.SiteDeployController do
       log_bytes: record.log_bytes,
       exit_code: record.exit_code,
       failure_reason: cap_reason(record.failure_reason),
+      # THE ARM DECISION, on the TERMINAL door too (charter D608). It outlives
+      # the unit for the same reason the served slot does: the Caddyfile it was
+      # read out of has moved on by the time anyone asks a finished build what it
+      # did to the route. `build_record/2` already carries both keys on every
+      # shape it can answer in (`render_terminal_record/1` lifts them out of the
+      # record JSON, `absent_record/2` nils them), so the live status door and
+      # this one cannot disagree about a build.
+      route_status: Map.get(record, :route_status),
+      route_detail: Map.get(record, :route_detail),
       # The BPSTAGE fold. Retained separately from the 500-line log ring and
       # IMMUNE to it, so these survive after the log itself is evicted — which
       # is what makes this record useful at the end of a retention window
@@ -582,6 +591,29 @@ defmodule BarkparkWeb.SiteDeployController do
       # crash this door.
       served_port: Map.get(status, :served_port),
       served_slot: Map.get(status, :served_slot),
+      # THE ARM DECISION (charter D608). Both engines emit
+      # `BPSTAGE name=ROUTE status=<ok|failed> detail="…"` into the durable
+      # status file after their Caddy arming attempt, and `fold_route_file/1`
+      # lifts it into the status map as a SIBLING of `stages` — deliberately not
+      # a stage, because a name inside `@stage_names` reaches `stage_exit_code/1`
+      # and would turn a report into a verdict on a run that already emitted
+      # SWITCH ok.
+      #
+      # Until this key existed the decision was durable and UNREPORTED: the run
+      # knew it, the record kept it, and nothing downstream could read it — the
+      # control plane's `deployments` table carried a ROUTE outcome on 0 of
+      # 19,327 console-bearing rows. This is the wire half of that.
+      #
+      # NIL-HONEST, never omitted — the opposite discipline from
+      # `health_exit_code` below, and the difference is the value that would be
+      # invented. An unmeasured health code would be invented as 0, which IS the
+      # success code, so absence is the only honest answer there. `route_status`
+      # is a STRING; an unmeasured one is `null` and reads as "nobody measured
+      # this" on its face, exactly like `served_slot` beside it. A box older than
+      # the ROUTE engines (or a run that died before arming) sends `null`, and
+      # the cloud consumer omits a nil rather than writing it over a column.
+      route_status: Map.get(status, :route_status),
+      route_detail: Map.get(status, :route_detail),
       started_at: iso(status.started_at),
       finished_at: iso(status.finished_at)
     }
@@ -620,6 +652,19 @@ defmodule BarkparkWeb.SiteDeployController do
 
   defp atom_or_nil(nil), do: nil
   defp atom_or_nil(atom) when is_atom(atom), do: Atom.to_string(atom)
+
+  # A BINARY IS ALREADY THE ANSWER, and this clause is not defensive padding —
+  # without it `GET ?record=1` raised `FunctionClauseError` (a 500) on EVERY
+  # record a real run ever wrote. `write_terminal_record/2` persists
+  # `"mode" => to_string(manifest.mode)` and `"runtime_target" =>
+  # to_string(manifest.runtime_target)`, `render_terminal_record/1` hands those
+  # strings straight through, and `render_build_record/1` then called
+  # `atom_or_nil/1` on `"deploy"`. The suite missed it because the one fixture
+  # exercising this door omits both keys, so the only clause it ever reached was
+  # the `nil` one — a green over a door that could not answer about a build that
+  # exists. The live-status path is unaffected (`status_from_record/1` re-atomizes
+  # both through `safe_atom/3`), which is why the two doors disagreed at all.
+  defp atom_or_nil(value) when is_binary(value), do: value
 
   defp iso(nil), do: nil
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)

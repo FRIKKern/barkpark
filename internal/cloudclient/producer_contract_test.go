@@ -289,6 +289,12 @@ func TestProducerExtractorIsNotBlind(t *testing.T) {
 	//            reddened main's Go gate from 3d238fdd8 (2026-09-06 17:21Z) until
 	//            the count moved (#16547); this arm would have printed the two
 	//            names instead.
+	//   36 -> 38 (#17640, task dr-w21-bl-route-decision-reaches-no-plane):
+	//            +route_status, +route_detail — the box's Caddy ARM decision
+	//            (charter D608's SIBLING channel, never a stage). This arm did
+	//            print both names, which is how the addition was found; neither
+	//            is decoded by cloudclient yet, and the cloud-side census carries
+	//            two matching `:unread` rows naming that follow-up.
 	if missing, extra := producerKeySetDiff(producer); len(missing)+len(extra) > 0 {
 		if len(missing) > 0 {
 			t.Errorf("the extractor no longer finds %v, which deployment_json/1 (+ "+
@@ -312,7 +318,8 @@ func TestProducerExtractorIsNotBlind(t *testing.T) {
 // serializer's own order, so a diff of this literal reads like a diff of the
 // serializer) followed by site_deployment_json/3's two Map.put additions.
 // Pinned 2026-09-06 against origin/main 4e7dd109f: 34 + 2 = 36 keys, the same
-// population the retired producerKeyCount named.
+// population the retired producerKeyCount named. Re-measured 2026-09-11 against
+// origin/main f707ef829 with #17640's serializer hunk applied: 36 + 2 = 38.
 var expectedProducerKeys = []string{
 	// deployment_json/1
 	"id", "site_id", "status", "git_ref", "artifact_url", "image_tag",
@@ -321,7 +328,13 @@ var expectedProducerKeys = []string{
 	"deferral_bound", "deferral_cause", "became_live_at", "environment", "branch",
 	"preview_host", "preview_url", "trigger", "source", "artifact_sha256",
 	"console", "detail", "build_id", "content_rev", "stage", "slot", "port",
-	"health_exit_code", "inserted_at", "updated_at",
+	"health_exit_code",
+	// #17640 (task dr-w21-bl-route-decision-reaches-no-plane, charter D608): the
+	// box's Caddy ARM decision. Emitted immediately after `health_exit_code` in
+	// deployment_json/1, and listed here in that same position so a diff of this
+	// literal keeps reading like a diff of the serializer.
+	"route_status", "route_detail",
+	"inserted_at", "updated_at",
 	// site_deployment_json/3
 	"stages", "url",
 }
