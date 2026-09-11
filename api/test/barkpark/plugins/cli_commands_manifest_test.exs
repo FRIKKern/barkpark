@@ -214,6 +214,45 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       refute view.writes
       assert Enum.all?([open, log, publish, link_task, touch], & &1.writes)
     end
+
+    test "bulldocs.publish's summary names the if-rev fence and the ops route that carries it" do
+      # WORDING PIN (task dr-w32-bl-post-papers-silently-ignores-ifrev).
+      # `POST /v1/plugins/bulldocs/papers` is an UNFENCED create-or-replace; it
+      # now REFUSES a body carrying `ifRev`/`if_rev` with a 400 naming the
+      # sibling ops route (BulldocsIngestController.refuse_unfenced_if_rev/2).
+      # That refusal is honest but invisible until you trip it: the asymmetry
+      # between `bulldocs publish` (no fence) and `bulldocs patch --if-rev`
+      # (fenced, 412 on a stale rev) was discoverable ONLY by reading the
+      # controller. The manifest summary is where a reader meets a verb —
+      # it flows to `bp bulldocs publish --help` and to docs/openapi.json —
+      # so the fence has to be stated there. This test reds if the sentence
+      # goes away.
+      publish = Enum.find(Bulldocs.cli_commands(), &(&1.id == "bulldocs.publish"))
+      summary = publish.summary
+
+      assert summary =~ "if-rev",
+             "bulldocs.publish's summary must name the if-rev fence, or the " <>
+               "asymmetry with bulldocs.patch is invisible. Got: #{summary}"
+
+      assert summary =~ "ifRev/if_rev is refused 400",
+             "bulldocs.publish's summary must say the key is REFUSED (not " <>
+               "honoured, not ignored) — that is the behaviour the route ships. " <>
+               "Got: #{summary}"
+
+      assert summary =~ "/v1/plugins/bulldocs/papers/:slug/ops",
+             "bulldocs.publish's summary must name the route that actually " <>
+               "carries the fence. Got: #{summary}"
+
+      assert summary =~ "bp bulldocs patch --if-rev",
+             "bulldocs.publish's summary must name the CLI verb a fenced caller " <>
+               "should use instead. Got: #{summary}"
+
+      # Non-vacuity: the route the sentence points at is the one bulldocs.patch
+      # is actually grounded in, so this pin cannot drift away from the manifest.
+      patch = Enum.find(Bulldocs.cli_commands(), &(&1.id == "bulldocs.patch"))
+      assert patch.http.path_template == "/v1/plugins/bulldocs/papers/:slug/ops"
+      assert patch.verb == "patch"
+    end
   end
 
   describe "Tasks.cli_commands/0" do
