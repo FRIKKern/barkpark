@@ -44,6 +44,14 @@
 # where it still fabricates 32 reds. That column is why REFUSED_INSTRUMENTS below
 # is a hard refusal and not a warning.
 #
+# THAT TABLE IS DATED, AND THE PREDICATE ROW HAS SINCE CHANGED SHAPE (2026-09-11,
+# 628b88afe): seal-predicate.test.mjs now REFUSES at load with exit 3
+# (NO_OBJECT_DATABASE) instead of degrading, so shape D reads `0 / 1 rc 1` — one
+# refusing FILE, not 32 fabricated reds — and shape E reads 106 / 0 rc 0, not
+# 97 / 0. The rows above are kept as the measurement that PRODUCED the refusal
+# list; re-run them before quoting them. The verdict is unchanged either way: an
+# export still cannot run that suite, honestly or otherwise.
+#
 # THE PORT NO-OP, recorded here because briefs kept relying on it for isolation:
 # `PREVIEW_PORT` is read at __preview__/serve.mjs:38 and NOWHERE ELSE. The sweep
 # reads BREAKPOINT_SWEEP_PORT (default 4207) and the guard reads
@@ -89,7 +97,7 @@ REQUIRED_PATHS=(
 # ── Instruments that CANNOT be answered from an extraction, and why ──────────
 # Format: <path>|<one-line reason>. Refused loudly, by name, on every run.
 REFUSED_INSTRUMENTS=(
-  "cloud/priv/static/__preview__/seal-predicate.test.mjs|walks up to a repo root and shells out to git; 32 of 97 fabricated reds in a full export at 7af839d56a, 0 in a worktree"
+  "cloud/priv/static/__preview__/seal-predicate.test.mjs|walks up to a repo root and shells out to git. IT NO LONGER FABRICATES REDS — objectDatabaseRefusal() runs before the first test is registered and the file refuses at LOAD with exit 3 (NO_OBJECT_DATABASE). MEASURED 2026-09-11 at 628b88afe: \`git archive HEAD | tar -x -C <dir> && cd <dir> && node --test cloud/priv/static/__preview__/seal-predicate.test.mjs\` prints the refusal and \`# tests 1 / # pass 0 / # fail 1\` (the runner re-codes one refusing FILE, not 106 reds); bare \`node <file>\` in the same tree exits 3 having run 0 tests; the same suite in a worktree registers 106 tests. So the refusal is HONEST but still USELESS here: an export can never run these 106 assertions, which is why this row stays a hard refusal. The old number on this row (32 of 97 fabricated reds at 7af839d56a) described the pre-refusal shape and is history, not the mechanism — the table at the head of this file is that same pre-refusal measurement."
   "cloud/priv/static/__preview__/seal-predicate.mjs|same root walk; clause (b) ancestry legs answer about the extraction, not the commit (D318, D782)"
 )
 
