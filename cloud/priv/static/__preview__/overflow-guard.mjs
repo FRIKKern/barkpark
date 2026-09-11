@@ -8176,6 +8176,11 @@ async function main() {
         `H1 + .detail-url-text vs the page)\n`,
       );
       let cells = 0, pageOver = 0, h1Uncut = 0, urlUncut = 0;
+      // cchi-w22-bl-the-pinned-release-badge-does-not-break: the THIRD host on
+      // this page, driven by the same fixture. POPULATION IS PRINTED, not
+      // implied — a leg that says "0 offending" beside an unstated node count is
+      // the survived-contact verdict this corpus has already been burned by.
+      let pinCells = 0, pinNodes = 0, pinLen = 0, pinUncued = 0, pinWorstSw = 0, pinWorstCw = 0, pinWorstH = 0;
       for (const theme of ["light", "dark"]) {
         await setViewport(1000);
         await nav(
@@ -8191,8 +8196,43 @@ async function main() {
             `var d=document.documentElement;` +
             `var h1=document.querySelector('.detail-title-row h1');` +
             `var url=document.querySelector('.detail-url-text');` +
+            // THE PIN BADGE, measured with the D253 cue predicate's own three
+            // legs (charter D253, the .set-row-name arm): `mw` is a
+            // width:min-content clone appended into the element's OWN parent so
+            // every inherited breaking value is the real one, `tw` is the widest
+            // TEXT run reachable through display:inline only (a line holding one
+            // atomic inline has nothing to ellipsize), and `ox` is read by name
+            // because `overflow` is a shorthand that can serialise "visible clip".
+            `var pins=[];` +
+            `Array.prototype.forEach.call(document.querySelectorAll('.update-panel-body .rail-row .v .badge'),function(n){` +
+            `  var cs=getComputedStyle(n);` +
+            `  var cl=n.cloneNode(true);` +
+            `  cl.style.cssText+=';position:absolute!important;left:-99999px!important;top:0!important;visibility:hidden!important;width:min-content!important;max-width:none!important;min-width:0!important;height:auto!important;overflow:visible!important;flex:0 0 auto!important;';` +
+            `  n.parentNode.appendChild(cl);` +
+            `  var mw=Math.ceil(cl.getBoundingClientRect().width);` +
+            `  cl.parentNode.removeChild(cl);` +
+            `  var tw=0;` +
+            `  (function walk(e){` +
+            `    for(var k=0;k<e.childNodes.length;k++){var ch=e.childNodes[k];` +
+            `      if(ch.nodeType===3){` +
+            `        if(!(ch.nodeValue||'').trim()) continue;` +
+            `        var rg=document.createRange();rg.selectNodeContents(ch);` +
+            `        var rl=rg.getClientRects();` +
+            `        for(var q=0;q<rl.length;q++) tw=Math.max(tw,rl[q].width);` +
+            `      } else if(ch.nodeType===1){` +
+            `        var dd=getComputedStyle(ch).display;` +
+            `        if(dd==='inline'||dd==='contents') walk(ch);` +
+            `      }` +
+            `    }})(n);` +
+            `  var t=(n.textContent||'').trim();` +
+            `  var pr=n.parentNode;` +
+            `  pins.push({sw:n.scrollWidth,cw:n.clientWidth,h:Math.round(n.getBoundingClientRect().height),` +
+            `    w:Math.round(n.getBoundingClientRect().width),pw:pr?pr.clientWidth:null,` +
+            `    te:cs.textOverflow,ov:cs.overflow,ox:cs.overflowX,ws:cs.whiteSpace,mw:mw,` +
+            `    tw:Math.round(tw*100)/100,len:t.length,t:t.slice(0,18)});` +
+            `});` +
             `return {view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,` +
-            `h1sw:h1?h1.scrollWidth:null,h1cw:h1?h1.clientWidth:null,` +
+            `h1sw:h1?h1.scrollWidth:null,h1cw:h1?h1.clientWidth:null,pins:pins,` +
             `usw:url?url.scrollWidth:null,ucw:url?url.clientWidth:null};})()`,
           );
           cells++;
@@ -8228,6 +8268,54 @@ async function main() {
             urlUncut++;
             fail(D, `${theme}@${width}: .detail-url-text clientWidth ${m.ucw} > its own scrollWidth ${m.usw} — an impossible box, the measurement itself is broken`);
           }
+          // ── THE PIN BADGE ARM (cchi-w22-bl-the-pinned-release-badge-does-
+          //    not-break). `autoupdatePolicyLabel()` paints
+          //    "Pinned to " + vRel(pinned_release) into the Autoupdate rail row
+          //    as a `.badge` inside `.rail-row .v`. `.rail-row .v` breaks; the
+          //    `.badge` did not, and at the 255-char cap the pill grew to the
+          //    whole string and took the PAGE to 2054 against a 320 viewport
+          //    (24/24 cells, both themes, measured on this branch before the
+          //    fix). The page arm above would catch that — but only while the
+          //    fixture is cruel, so the fixture's own cruelty is asserted here
+          //    as well: an empty population, or a pin that quietly shortened,
+          //    reds rather than certifying a page that nothing was driving.
+          if (m.pins.length === 0) {
+            fail(D, `${theme}@${width}: zero \`.update-panel-body .rail-row .v .badge\` rendered — the Autoupdate policy row did not paint, so the pin host was not measured and this cell is not a pass`);
+          } else {
+            pinCells++;
+            pinNodes += m.pins.length;
+            const pin = m.pins.find((n) => n.len > 200);
+            if (!pin) {
+              fail(D, `${theme}@${width}: ${m.pins.length} policy badge(s) rendered but the longest is ${Math.max(...m.pins.map((n) => n.len))} characters — the fixture's 255-char pinned_release is not reaching this host, the leg has GONE KIND`);
+            } else {
+              pinLen = pin.len;
+              pinWorstSw = Math.max(pinWorstSw, pin.sw);
+              pinWorstCw = Math.max(pinWorstCw, pin.cw);
+              pinWorstH = Math.max(pinWorstH, pin.h);
+              // The D253 predicate, verbatim from the members-roster arm: a cue
+              // "can paint" only where `text-overflow: ellipsis` meets a box
+              // that actually clips HORIZONTALLY and a line with a real text run
+              // and NO break opportunity inside the box (mw > cw). A zero `mw`
+              // makes it false and FLAGS, never exempts.
+              // THE CONTAINMENT ARM, and it is the one that names the HOST on a
+              // regression. An UNCAPPED `white-space: nowrap` pill does not clip
+              // — its own box simply GROWS to the whole string, so
+              // `scrollWidth > clientWidth` is FALSE on it and the cue arm below
+              // stays silent while the page drags. What is true is that the pill
+              // is then wider than the `.rail-row .v` that contains it. One
+              // pixel of slack for sub-pixel rounding; the defect this catches
+              // measured 1941 inside 250.
+              if (pin.pw !== null && pin.w > pin.pw + 1) {
+                pinUncued++;
+                fail(D, `${theme}@${width}: the Autoupdate \`.badge\` "${pin.t}…" (${pin.len} painted chars, pinned_release at its 255 cap) is ${pin.w}px wide inside a ${pin.pw}px \`.rail-row .v\` — the pill overflows the rail value that contains it, and the page reads ${m.psw} against ${m.pcw}`);
+              }
+              const cuePaints = pin.te === "ellipsis" && pin.ox !== "visible" && pin.mw > pin.cw && pin.tw > 0;
+              if (pin.sw > pin.cw && !cuePaints) {
+                pinUncued++;
+                fail(D, `${theme}@${width}: the Autoupdate \`.badge\` "${pin.t}…" (${pin.len} chars) has scrollWidth ${pin.sw} > clientWidth ${pin.cw} — ${pin.sw - pin.cw}px of the pinned release is hidden with NO cue that can paint (min-content ${pin.mw} vs clientWidth ${pin.cw}, widest text run ${pin.tw}; computed text-overflow "${pin.te}", overflow "${pin.ov}", overflow-x "${pin.ox}", white-space "${pin.ws}")`);
+              }
+            }
+          }
           const bad = (over ? 1 : 0);
           row.push(`${width}:${m.psw}${bad ? "!" : ""}`);
         }
@@ -8241,6 +8329,15 @@ async function main() {
           `${cells} / ${cells} cells clean (${DETAIL_WIDTHS.join("/")} x 2 themes on instance-cruel-detail — the ` +
           `253-char custom_host and 255-char name fixture) — 0 pages dragging sideways, 0 h1 break-word failures, ` +
           `0 impossible .detail-url-text boxes`,
+        );
+        okLine(
+          `PIN HOST POPULATION (task-02a521fea7beeb2f): ${pinNodes} \`.update-panel-body .rail-row .v .badge\` nodes over ` +
+          `${pinCells} / ${cells} cells, the pinned one carrying ${pinLen} painted characters ("Pinned to " + a 255-char ` +
+          `pinned_release at its validate_length cap) — ${pinUncued} badges clipped with no cue that can paint (D253: ` +
+          `text-overflow ellipsis + a box that clips horizontally + min-content > clientWidth + a real text run, ` +
+          `measured, never inferred from a declaration). Worst badge geometry across the sweep: scrollWidth ` +
+          `${pinWorstSw} vs clientWidth ${pinWorstCw}, height ${pinWorstH}px, and no badge wider than the ` +
+          `\`.rail-row .v\` holding it — the pill stays one row tall and inside its own rail value`,
         );
         okLine(
           `TWO HOSTS, ONE PAGE (task-df8a6fced3a408a8): the original finding named .detail-url-text alone; ` +
