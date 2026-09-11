@@ -220,13 +220,20 @@ func TestActiveWithNoMainPIDIsNotServing(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Result WITH the exit status — the PR #14863 case, measured 2026-09-01.
+//
+// THE FIXTURE BELOW MODELS A LEGACY BOX, NOT TODAY'S FLEET: #14863 landed
+// SuccessExitStatus=143 in deploy/systemd/barkpark-site@.service (merged
+// 2026-09-02), preflight-enforced by deploy/site-deploy-node.sh.
 // ---------------------------------------------------------------------------
 
 func TestFailedSiteUnitsCarryTheirExitStatusAndTheCapAnnouncesItself(t *testing.T) {
 	units := append(blueFailedGreenServing(),
-		// Both live on guerrilla right now: Result=exit-code, ExecMainStatus=143.
+		// Measured on guerrilla 2026-09-01: Result=exit-code, ExecMainStatus=143.
 		// 143 is 128+15 — Next.js exiting on the SIGTERM of its own retire, filed
-		// by systemd as an exit code because the unit lacks SuccessExitStatus=143.
+		// by systemd as an exit code because that box's unit file predates
+		// SuccessExitStatus=143. A box deployed since #14863 stops clean and emits
+		// no such row; a LEGACY box not yet redeployed still does, which is why this
+		// path stays covered.
 		slotUnit("barkpark-site@search__b.service", "failed", "failed", "exit-code", 0, 143,
 			"Tue 2026-09-01 11:07:52 UTC"),
 		slotUnit("barkpark-site@search-capstone__a.service", "failed", "failed", "exit-code", 0, 143,

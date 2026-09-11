@@ -206,12 +206,21 @@ func TestEditorPaneShowsThePaperReadFailureNotice(t *testing.T) {
 // vocabulary — a second, divergent error shape in the same TUI is worse than
 // the bug. Same glyph, same dim styling, same second line.
 func TestPaperNoticeMatchesTheEstablishedFailureVocabulary(t *testing.T) {
+	const sharedFailureLine = "the request failed"
 	notice := strings.Join(paperReadFailedNotice(), "\n")
 	if !strings.Contains(notice, "✕ "+paperReadFailedLine) {
 		t.Errorf("paper notice lost the shared ✕ prefix:\n%s", notice)
 	}
-	if !strings.Contains(notice, "the server refused or is unreachable") {
+	if !strings.Contains(notice, sharedFailureLine) {
 		t.Errorf("paper notice lost the shared second line:\n%s", notice)
+	}
+	failedList := strings.Join(failedDocListInterior(), "\n")
+	if !strings.Contains(failedList, sharedFailureLine) {
+		t.Errorf("failed document list lost the shared second line:\n%s", failedList)
+	}
+	failedDocument := (model{}).renderReadFailedState(60, 14)
+	if !strings.Contains(failedDocument, sharedFailureLine) {
+		t.Errorf("failed document state lost the shared second line:\n%s", failedDocument)
 	}
 	// It must never borrow the doc-list wording — that one asserts emptiness.
 	if strings.Contains(notice, "No documents yet") {

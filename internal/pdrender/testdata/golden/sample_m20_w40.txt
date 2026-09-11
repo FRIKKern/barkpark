@@ -1,6 +1,13 @@
 CHART — COMPACT UNITS + MAX-2-SERIES    
 ────────────────────────────────────    
                                         
+The y-axis learns compact units (45.5M) 
+so a large-value chart keeps a narrow   
+gutter, and a chart renders at most the 
+first two series — the third is dropped 
+from the plot, the legend, AND the auto-
+scale.                                  
+                                        
 Revenue vs cost over six weeks (NOK)    
 45.5M┤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡠⠔⠊⠉⠉⠒⠒⠒⠤⠤
   33M┤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⡠⠤⠒⠒⠢⠤⠤⢄⣀⡠⠔⠊⠁⠀⠀⠀⠀⠀⠀⢀⣀⡠⠤

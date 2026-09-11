@@ -42,6 +42,24 @@ export function renderVerdict(report, { source = "(unnamed)", listProseOnly = tr
   // figure with no meter named beside it is the defect, whatever its value.
   for (const line of blindSpotNote()) out.push(line);
 
+  // ── THE PRODUCER/CONSUMER CENSUS ────────────────────────────────────────────
+  //
+  // PRINTED ALWAYS, INCLUDING AT ZERO, AND BEFORE THE REFUSED-TO-START RETURN.
+  // Wave 28 shipped a producer (`bp task stage --rerun`, which writes
+  // content.disposition_rerun) and a consumer (this adjudicator) that never met,
+  // and the way that survived a whole wave is that NOBODY EVER PRINTED THE
+  // NUMBER. A zero here is the finding; a zero that is never rendered is an
+  // assumption. So the count of rows carrying a stored rerun rides beside the
+  // verdict, and it says which half of the instrument each adjudicated command
+  // came from.
+  const sr = report.storedRerun ?? { rows: 0, adjudicated: 0, fromSidecar: 0, shadowedRecipes: [] };
+  out.push(
+    `  stored rerun  ${sr.rows} of ${rows.length} row(s) carry a stored disposition_rerun (the durable key \`bp task stage --rerun\` writes); ` +
+    `${sr.adjudicated} adjudicated from the row itself, ${sr.fromSidecar} from the recipes.json sidecar fallback` +
+    (sr.shadowedRecipes.length ? `, ${sr.shadowedRecipes.length} sidecar recipe(s) SHADOWED by the row's own (${sr.shadowedRecipes.join(", ")})` : "") +
+    "."
+  );
+
   if (report.status === "REFUSED-TO-START") {
     out.push("");
     out.push(report.message);
@@ -109,7 +127,7 @@ export function renderVerdict(report, { source = "(unnamed)", listProseOnly = tr
     for (const r of set) {
       out.push(`  ${r.doc_id}  [${r.claim_class ?? "-"} ${r.level ?? "-"}] ${r.reason}`);
       out.push(`      ${r.note}`);
-      if (r.command) out.push(`      $ ${r.command}`);
+      if (r.command) out.push(`      $ ${r.command}${r.origin === "stored" ? "   [stored on the row]" : r.origin === "sidecar" ? "   [recipes.json sidecar]" : ""}`);
     }
   }
 

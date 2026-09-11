@@ -1,4 +1,4 @@
-.PHONY: deploy rebuild restart status logs seed seed-check setup dev update doctor reap-test-dbs test clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots wasm
+.PHONY: deploy rebuild restart status logs seed seed-check setup dev update doctor reap-test-dbs test clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots cloud-format-check wasm
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -296,7 +296,7 @@ deploy: ## Deploy: pull main — the .githooks/post-merge hook does the clean re
 	echo ">> Pulled. The post-merge hook cleaned _build/prod, recompiled and restarted (recorded outcome: $$outcome)."; \
 	code=000; i=0; \
 	while [ "$$i" -lt "$(BP_DEPLOY_POLL_ATTEMPTS)" ]; do \
-	  code="$$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:4000/api/schemas 2>/dev/null || echo 000)"; \
+	  code="$$(bash -c '. scripts/lib/bp-curl.sh; bp_curl_code -s -o /dev/null --max-time 5 http://localhost:4000/api/schemas' 2>/dev/null || echo 000)"; \
 	  if [ "$$code" = "200" ]; then break; fi; \
 	  i=$$((i + 1)); \
 	  sleep "$(BP_DEPLOY_POLL_SLEEP)"; \
@@ -357,6 +357,15 @@ format: ## Run mix format on api/ (writes changes)
 
 format-check: ## Run mix format --check-formatted on api/ (read-only, mirrors CI gate)
 	cd api && mix format --check-formatted
+
+# cloud/ IS NOT api/. The Cloud gate (.github/workflows/cloud.yml, compile job)
+# pins Elixir 1.18.1 while this fleet's Macs run 1.19.x, and the two formatters
+# DISAGREE — so `cd cloud && mix format --check-formatted` can exit 0 on bytes
+# the gate reds (task-417026dfc4826971, PR #17482). The target below reads the
+# pin out of cloud.yml, OBTAINS that Elixir, and runs the gate's own command
+# under it. Never restate the version here — one declaration, in the workflow.
+cloud-format-check: ## Run cloud/'s format gate under the Elixir cloud.yml pins (NOT your PATH's)
+	bash scripts/cloud-format-check.sh
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 

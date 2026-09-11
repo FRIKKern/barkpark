@@ -324,6 +324,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        id: setup
         with:
           # depth 2, not 0. On a pull_request the checked-out ref is the merge
           # commit, so HEAD^1 IS the base sha and `git diff HEAD^1 HEAD` is
@@ -412,6 +413,7 @@ jobs:
         run: bash scripts/elixir-path-escape-check.sh --selftest
 
       - name: Every repo-root read is dispatched on
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/elixir-path-escape-check.sh
 
       # ── the wave-33 skip-disclosure ratchet, riding this job ─────────────
@@ -433,6 +435,7 @@ jobs:
       # ratchet blocks the merge — strictly stronger placement than its sibling,
       # which hangs off a context branch protection does not require.
       - name: The four gates announce their skips (the ratchet must be able to fail)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/gate-announces-skips.test.sh
 
       # ── the merge-authority claim guard, riding this job for one reason ───
@@ -456,10 +459,49 @@ jobs:
       # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
       # name, so required-checks-verify.sh's roster is unchanged.
       - name: The merge-authority claim guard must be able to fail
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/merge-authority-claim-check.test.sh
 
       - name: No workflow or card claims merge authority the spec denies
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/merge-authority-claim-check.sh
+
+      # ── the unrecognised-top-level default (task-fb7857b984ff5ff8) ────────
+      # Every path set in this tree fails OPEN. Re-derived live on origin/main
+      # ad7f16319 with each ratchet's own `--match`, a head touching only
+      # `brandnewdir/x.txt` answers cloud=false console=false compile=false
+      # test=false go=false — nothing dispatches, every expensive leaf is
+      # skipped, and a skip publishes success. Four green names over a diff not
+      # one of them read.
+      #
+      # scripts/toplevel-classifier-check.sh is the DEFAULT for that case: it
+      # enumerates the top-level entries the repo knows and reds on one it does
+      # not, naming the path and how to classify it. It widens NO path set and
+      # adds no dispatch condition anywhere, so the check-run roster on a diff
+      # confined to known directories is unchanged.
+      #
+      # HERE for the reason every step above it is here: this job carries no
+      # `if:`, no continue-on-error and no `needs`, and it is judged NEVER by
+      # the aggregator below — so it can never be skipped into a green.
+      #
+      # A STEP and not a job, for the two reasons written above the
+      # skip-disclosure ratchet: a new job here reds the sibling path-escape
+      # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
+      # name, so required-checks-verify.sh's roster is unchanged.
+      # THE RATCHET RUNS FIRST, and that ordering is load-bearing. One red step
+      # skips every step after it in the same job, so a harness placed ahead of
+      # the ratchet would render its own terse assertion text on exactly the
+      # head the ratchet exists to explain. Measured on probe PR #16659: the
+      # harness reddened with `FAIL 11a unregistered: brandnewdir` and the
+      # classifier's own refusal, which names the path and prints how to
+      # classify it, never rendered at all.
+      - name: Every changed top-level entry is one the repo knows
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/toplevel-classifier-check.sh
+
+      - name: The top-level classifier must be able to fail (27-case harness)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/toplevel-classifier-check.sh --selftest
 
       # ── the vips hedge, now a tripwire instead of a 39-second bill ────────
       # mix-prod-compile below used to `apt-get install libvips-dev` purely as
@@ -473,6 +515,7 @@ jobs:
       # path-escape harnesses via `blocking_not_in_needs`, and a step adds no
       # rendered check name, so required-checks-verify.sh's roster is unchanged.
       - name: The vips hedge tripwire must be able to fail
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/vips-hedge-tripwire.sh --selftest
 
       # NAME THIS STEP WITHOUT THE MODE TOKEN. A `name:` is not a comment, so
@@ -480,6 +523,7 @@ jobs:
       # on the first real run — the guard catching its own wiring, which is the
       # correct behaviour and the reason the name reads around the token.
       - name: A platform-provided vips mode is never selected bare
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/vips-hedge-tripwire.sh
 
       # ── the diff-scoped format verdict, end to end ───────────────────────
@@ -495,6 +539,7 @@ jobs:
       # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
       # name, so required-checks-verify.sh's roster is unchanged.
       - name: A touched unformatted file reds the gate, an untouched one does not
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/format-diff-scope.test.sh
 
       # ── the Elixir pin-agreement gate (task-0c3081a2e534bdfc) ────────────
@@ -544,6 +589,7 @@ jobs:
       # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
       # name, so required-checks-verify.sh's roster is unchanged.
       - name: The PR test selector must fail safe (47-case harness)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/elixir-impacted-tests.sh --selftest
 
       # The pinned half of the selector's ALWAYS set is the net under the tests
@@ -552,6 +598,7 @@ jobs:
       # dropped one would shrink that net with no symptom at all, so the
       # existence of every pin is asserted separately from the harness.
       - name: Every pinned ALWAYS test still exists
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/elixir-impacted-tests.sh --check-pins
 
       # The main-red attribution reporter (elixir-main-red-attribution.yml) runs
@@ -561,13 +608,93 @@ jobs:
       # a proof that only runs when the thing it proves is already firing has
       # never been observed to fail.
       - name: The main-red attribution reporter must be able to report a miss
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/elixir-main-red-attribution.test.sh
 
       - name: The pin-agreement gate must be able to fail
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/toolchain-skew-check.sh --selftest
 
       - name: The production Elixir pin is covered by the jobs that test it
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/toolchain-skew-check.sh
+
+      # ── the ACK_EX deriver (task-188100520e018ee4), riding this job ───────
+      # A row added to `.github/required-checks.json`'s `.exclusions` that the
+      # frozen fixture pair cannot re-derive must ALSO be acknowledged in the
+      # `ACK_EX` array of scripts/required-checks.test.sh — "the SIXTH place a
+      # new name has to pay", in that file's own words. Nothing enforced the
+      # coupling on the PR that adds the row. #17111 (c19d7c7ab) added four
+      # rows and paid five of the six places: `Required-check spec gate` went
+      # red on its own head (run 34392441135) and on every main push after it,
+      # and because that context is NOT one of the required four, the merge
+      # went through and main stayed red for ~3 hours until #17148 (006d93bcd)
+      # typed the four lines.
+      #
+      # HERE, and the venue is the whole point: `Required-check spec gate` is
+      # the context that already reds on this defect, and it cannot stop a
+      # merge (.github/required-checks.json holds it out under S7). This job
+      # carries no `if:`, no continue-on-error and no `needs`, and it is in
+      # `elixir-gate`'s `needs` with the gate value NEVER — so a red here reds
+      # `Elixir gate`, one of the four REQUIRED contexts. The required set is
+      # not widened by one name: a step publishes no check-run name of its own.
+      #
+      # A STEP and not a job, for the two reasons written above the
+      # skip-disclosure ratchet: a new job here reds the sibling path-escape
+      # harnesses via `blocking_not_in_needs`, and a step adds no rendered
+      # check name, so required-checks-verify.sh's roster is unchanged.
+      #
+      # SCOPED, because it costs two full generator passes (minutes), and
+      # scoped in the SAME fail-open shape as `Does this diff reach the
+      # harness?` above: only a positive, successful determination that none of
+      # the inputs changed can write `skip`; a non-pull_request event, an
+      # unresolvable HEAD^1, a `git diff` that errors or an empty file list all
+      # fall through to `run`. This step always exits 0 so a broken condition
+      # cannot red the job — an unwritten output reads as "not skip".
+      #
+      # THE WHOLE .github/workflows TREE IS DELIBERATELY NOT IN THE PREDICATE,
+      # unlike the spec gate's own dispatcher (§28 of required-checks.test.sh).
+      # The defect this step catches cannot exist until a row is written into
+      # `.exclusions`; a new job name in some other workflow is caught there,
+      # by the gate that reads the workflow tree entire. Widening it here would
+      # put minutes on a REQUIRED context for every workflow edit in the repo.
+      - name: Does this diff reach the ACK_EX deriver?
+        id: ack-ex-scope
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: |
+          decision=run
+          why="not a pull_request — the deriver always runs on push to main"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            why="could not determine the diff — failing toward running"
+            if base="$(git rev-parse --verify --quiet HEAD^1)" && [ -n "$base" ]; then
+              if changed="$(git diff --name-only "$base" HEAD)" && [ -n "$changed" ]; then
+                # D37: never `printf … | grep -q`. Under pipefail a matching
+                # grep exits 0, printf dies of SIGPIPE, 141 wins, and the match
+                # reads as a miss. A here-string has no writer to kill.
+                if grep -qE \
+                     '^(\.github/required-checks\.json|scripts/required-checks[.-][^/]*|scripts/fixtures/registration-flip/.*|\.github/workflows/elixir\.yml)$' \
+                     <<<"$changed"; then
+                  why="the diff touches the exclusions ledger, the harness, the generator, the frozen fixtures, or this workflow"
+                else
+                  decision=skip
+                  why="the diff touches none of the deriver's inputs"
+                fi
+              fi
+            fi
+          fi
+          echo "ack-ex deriver ${decision}: ${why}"
+          echo "decision=${decision}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      # `--selftest` and not a bare run: the selftest performs the SAME
+      # comparison against the real tree (so this step is the verdict, not just
+      # a proof-of-proof) and then re-runs it against a scratch copy with one
+      # real ACK_EX name deleted, which must red BY NAME, and against the
+      # restored copy, which must green. One derivation, both directions.
+      # `!= 'skip'`, never `== 'run'`: a missing or garbled output must RUN.
+      - name: Every unrenderable .exclusions row is acknowledged in ACK_EX
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && steps.ack-ex-scope.outputs.decision != 'skip' }}
+        run: bash scripts/required-checks-ack-derive.sh --selftest
 
   format:
     # ADVISORY format signal — NOT a merge gate. This job pins THE FORMATTER
@@ -943,6 +1070,43 @@ jobs:
         working-directory: .
         run: bash scripts/unreachable-assert-message-check.sh
 
+      # ── comment-status-literal ratchet, riding this job ──────────────────
+      # A STEP, not a job, for exactly the reason the ratchet above records:
+      # security-gate-shape.test.sh and the *-path-escape-check.test.sh suite
+      # derive `blocking_not_in_needs` FROM this YAML and demand a new blocking
+      # job be added to the aggregator's `needs` — which then leaves their
+      # `env -i` exercises without the new R_* var and dies on `set -u`.
+      #
+      # THE DEFECT: PR #16888 tightened 32 multi-status refusal assertions and,
+      # in 20 of its explanatory comments, QUOTED the bracket literal it had
+      # just removed (`# old \`in [401, 403, 404]\` was green on…`). Those
+      # comments then answered every grep for the REMAINING work, in exactly
+      # the ten files already fixed. PR #16918 rewords them — but a cleanup
+      # only removes INSTANCES, and PR #16912 authored a FRESH one a single
+      # commit after the defect was named. This step removes the RATE.
+      #
+      # SEVERITY: searchability, not correctness. No test asserts anything
+      # different because of a comment; what is lost is the reliability of the
+      # instrument used to find the rest of a class defect.
+      #
+      # It rides mix-test because that is the blocking job that already has
+      # Elixir on PATH — the scanner reads the tokenizer's own comment list via
+      # Code.string_to_quoted_with_comments/2, so a `#` inside a heredoc or a
+      # sigil is not mistaken for a comment. It runs BEFORE deps/compile: the
+      # scanner needs neither.
+      #
+      # --selftest FIRST (distrust vacuous green). Ten arms, including one that
+      # proves a CLEAN tree passes and four that drive the REAL api/test on a
+      # scratch copy — without those, a scanner that always reports "clean"
+      # would satisfy a can-it-red test while measuring nothing.
+      - name: The comment-status-literal guard must be able to fail
+        working-directory: .
+        run: bash scripts/comment-status-literal-check.sh --selftest
+
+      - name: No NEW status literals in comments (never-worse ratchet)
+        working-directory: .
+        run: bash scripts/comment-status-literal-check.sh
+
       # ── client-ip trust-boundary ratchet, riding this job ────────────────
       # Same STEP-not-a-job reasoning as the ratchet above: adding a blocking
       # job would trip the aggregator `needs` checks in the path-escape suite.
@@ -1051,7 +1215,38 @@ jobs:
         # api/test/barkpark/plugins/onixedit/export/ shell to xmllint to validate
         # exported ONIX 3.0 XML against the EDItEUR XSD vendored at
         # api/priv/onix/onix-3.0/. Without this binary the gate would skip on CI.
-        run: sudo apt-get update && sudo apt-get install -y libxml2-utils
+        # The verdict of this step depends ONLY on whether xmllint is installed.
+        # `apt-get update && apt-get install` reddened the REQUIRED Elixir gate
+        # on two consecutive main pushes (runs 34384046770, 34385931963,
+        # 2026-09-09) with ZERO tests run: Google Chrome's apt index, baked into
+        # the runner image and never used by this install, answered "Hash Sum
+        # mismatch", `update` exited non-zero, `&&` never reached `install`.
+        # So: the refresh may fail (retried, then tolerated); the install is
+        # retried and is the decision; the binary is asserted so an absent
+        # package still reds loudly. Never `|| true` on the install itself.
+        # (task-d6a5c09e4738b83e)
+        run: |
+          set -u
+          for i in 1 2 3; do
+            if sudo apt-get update; then break; fi
+            echo "apt-get update attempt ${i}/3 failed — an index this install does not use may be broken; continuing"
+            sleep 5
+          done
+          installed=0
+          for i in 1 2 3; do
+            if sudo apt-get install -y libxml2-utils; then installed=1; break; fi
+            echo "apt-get install libxml2-utils attempt ${i}/3 failed"
+            sleep 10
+          done
+          if [ "$installed" != 1 ]; then
+            echo "::error::libxml2-utils could not be installed after 3 attempts — the ONIX validator tests would silently skip, so this step reds instead"
+            exit 1
+          fi
+          if ! xmllint --version >/dev/null 2>&1; then
+            echo "::error::xmllint is not on PATH after a successful-looking install — refusing to let the validator tests skip"
+            exit 1
+          fi
+          xmllint --version 2>&1
         working-directory: .
 
       - name: Compile (dev, --warnings-as-errors)
@@ -1867,3 +2062,114 @@ jobs:
             echo "::notice title=Elixir gate: green — nothing ran::NOTHING ELIXIR RAN on this head.%0AElixir gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Elixir job executed', never as 'the Elixir suite passed'."
           fi
           echo "Elixir gate: every upstream job either succeeded or was legitimately not dispatched."
+
+  report-main-failure:
+    # ── THE RED THAT REACHES A HUMAN ─────────────────────────────────────────
+    #
+    # WHY THIS EXISTS, MEASURED. On origin/main a327775de the per-workflow
+    # caller count of scripts/file-ci-failure-issue.sh read: console-harness 2,
+    # cloud 2, elixir 0, go-tests 0, security 0 (an impossible-script-name
+    # control grep returned 0 against 36 real hits, so the count discriminates).
+    # The reporting path was built for two of the five gate workflows and never
+    # for the other three. The live instance: commit cdb49a3228548a69c is an
+    # ancestor of origin/main and carries `Elixir gate` FAILURE at
+    # 2026-09-07T03:23:00Z with Cloud and Console green — A REQUIRED CONTEXT
+    # CONCLUDED FAILURE ON A COMMIT THAT IS ON MAIN, and no path existed that
+    # would tell anyone. Had it been Console gate, issue #13332 is what would
+    # have been filed. This job is that path for the Elixir lane.
+    #
+    # WHY NOT A HISTORY WALK. scripts/main-gate-watch.sh is deliberately
+    # TIP-SCOPED and its lines 26-32 say why: walked per-commit over main's last
+    # 25 commits it reds on 23 of 25, 15 purely as MISSING — 92% noise. That
+    # reasoning is correct and is NOT touched here. The remedy is the PUSH RUN'S
+    # OWN failure arm: it fires on the run that actually failed and needs no
+    # history walk at all. cdb49a322 stopped being the tip within minutes, so
+    # tip-scoping and this arm are complementary, not alternatives.
+    #
+    # WHAT THIS BUYS, ON THE RECORD (issue #6377). This buys "REACHES AN ISSUE",
+    # not "reaches a human". #11714 is still open with 949 comments, every
+    # author github-actions[bot] and zero human replies. A durable, keyed,
+    # timestamped record of a post-merge red beats no record — that is the trade
+    # being made, deliberately, and it is not a claim that anyone reads it.
+    #
+    # Shape, every part load-bearing (ported byte-for-byte from
+    # console-harness.yml's arm — the four gate workflows must not drift):
+    #
+    #   * `needs: [elixir-gate]` — it reports on the AGGREGATOR'S verdict, the
+    #     name branch protection reads, not on any single leaf.
+    #
+    #   * `if: failure() && …` — `failure()` is true when an ancestor FAILED and
+    #     is FALSE for `cancelled`. A cancelled main-push run (queue-depth-1
+    #     displacement) executes zero substantive jobs and has nothing to
+    #     report; filing for it would be noise that trains people to ignore the
+    #     real ones.
+    #
+    #   * `github.ref == 'refs/heads/main'` — a failing PR already has a human
+    #     attached to it. Only main's post-merge red is ownerless.
+    #
+    #   * THE DRILL BRANCH. `github.head_ref == 'ci-drill/main-push-failure-arm'`
+    #     is a NAMED, EXACT-MATCH self-test hatch, and it exists because an arm
+    #     gated on `github.ref == 'refs/heads/main'` CANNOT BE OBSERVED FIRING
+    #     BEFORE IT REACHES THE DEFAULT BRANCH — none of the five gate workflows carries
+    #     `workflow_dispatch`, and a `workflow_dispatch` added on a branch is
+    #     not dispatchable until it is on the default branch. Without this hatch
+    #     the arm would ship as the vacuous-green shape this repo keeps
+    #     rediscovering: wired, never once seen to fire. On the drill branch the
+    #     failure key is a DISTINCT drill key, so a drill can never comment on
+    #     the real main issue. Re-prove this arm at any time by branching
+    #     `ci-drill/main-push-failure-arm`, breaking one upstream job, and
+    #     opening a PR.
+    #
+    #   * `permissions:` is JOB-LEVEL and must stay that way. The repository's
+    #     `default_workflow_permissions` is "read", so the issue POST 403s
+    #     without an explicit `issues: write` — but a WORKFLOW-level block would
+    #     silently re-scope the token of every other job in this file.
+    #
+    # It cannot warn-and-pass: scripts/file-ci-failure-issue.sh exits 1 whenever
+    # the alert was not delivered. A red here means "main is broken AND nobody
+    # was told" — worse than the failure it was reporting, so it is worth its
+    # own red. It never affects `Elixir gate`, which has already published its
+    # verdict by then. This job publishes the check name `Report main-push
+    # failure to a human`, which is NOT in .github/required-checks.json and must
+    # never be added to it.
+    name: Report main-push failure to a human
+    needs: [elixir-gate]
+    if: >-
+      failure()
+      && (github.ref == 'refs/heads/main'
+          || github.head_ref == 'ci-drill/main-push-failure-arm')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: ${{ github.ref == 'refs/heads/main' && 'elixir-main' || 'ci-drill-main-push-failure-arm' }}
+          CI_FAILURE_DETAIL: |
+            The `Elixir gate` REQUIRED context is RED on a push to `main`.
+            This is POST-MERGE: the breakage is already on the default branch,
+            and every PR branched from this tip inherits it.
+
+            Read the aggregator's "Decide (fail-closed over every upstream
+            result)" step first — its `::error::` names which upstream job is
+            not in the allow-set: `mix-test`, `mix-prod-compile`,
+            `validation-perf`, `path-escape`, `format (diff-scoped)`, or the
+            `changes` dispatcher itself. A `cancelled` or empty upstream result
+            is a FAILURE here by design, not a flake to re-run blind.
+
+            NOTE the neighbouring arm: elixir-main-red-attribution.yml also
+            files against this lane, but ONLY when its verdict is `SKIPPED`
+            (key `elixir-pr-test-selector-miss`). It does not cover a plain
+            red, which is what this job covers.
+            This issue is idempotent per key: an ongoing failure appends a
+            comment rather than opening a new issue. CLOSE IT once main is green
+            again — the next main-push failure opens a fresh one.
+
+            If `ci-drill-main-push-failure-arm` is the key in the title, this is
+            a DRILL from the `ci-drill/main-push-failure-arm` branch proving the
+            arm can fire. It accuses nothing. Close it.
+        run: bash scripts/file-ci-failure-issue.sh

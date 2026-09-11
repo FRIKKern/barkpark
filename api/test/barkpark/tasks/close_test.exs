@@ -54,6 +54,31 @@ defmodule Barkpark.Tasks.CloseTest do
     :ok
   end
 
+  # cch-w65: the close-time merge-gate autostamp now needs a WITNESS — a PR the
+  # server itself observed merging into THIS task, via that PR's own `Task:`
+  # trailer, recorded under `merge_gate_autostamp.merge_event` by
+  # `Close.reconcile_merge_gate/3`. Every test below whose subject is the STAMP
+  # (its evidence, its idempotence, its precedence against a caller update) seeds
+  # that witness so it keeps measuring what it was written to measure; the tests
+  # whose subject is the FABRICATION deliberately do not. Seeded as content
+  # rather than driven through the webhook because the reconcile would also flip
+  # the criterion met, leaving the close-time autostamp nothing to do.
+  defp witness!(task_id, prs) do
+    foreign_patch_content!(task_id, %{
+      "merge_gate_autostamp" => %{
+        "merge_event" => %{
+          "verified" => true,
+          "source" => "github_merge_event",
+          "indices" => [],
+          "asserted_worker" => "github-merge",
+          "prs" => Enum.map(prs, &to_string/1),
+          "landed" => "PR " <> Enum.map_join(prs, ", ", &"##{&1}"),
+          "ts" => "2026-09-07T00:00:00Z"
+        }
+      }
+    })
+  end
+
   # PDS-D291 (the close-artifact gate): the base fixture carries ONE MET
   # acceptance criterion. Not decoration — without it every `done` close in this
   # file would trip the new gate, which refuses a `done` close of a kind:task row
@@ -982,6 +1007,8 @@ defmodule Barkpark.Tasks.CloseTest do
           "claim" => %{"worker" => "lead-w", "epoch" => 5}
         })
 
+      :ok = witness!(task.id, [456])
+
       assert {:ok, closed} =
                Close.close(task.id, "lead-w",
                  observed_epoch: 5,
@@ -1033,6 +1060,8 @@ defmodule Barkpark.Tasks.CloseTest do
           "claim" => %{"worker" => "lead-w", "epoch" => 2}
         })
 
+      :ok = witness!(task.id, [3157])
+
       # No caller `criteria` payload at all — the synthetic update is the ONLY
       # criteria write, so a missing guard would abort the whole close.
       assert {:ok, closed} =
@@ -1062,7 +1091,19 @@ defmodule Barkpark.Tasks.CloseTest do
         %{"criterion" => "", "met" => false, "merge_gate" => true}
       ]
 
-      task = mk_task!(uniq("mg-textless"), scope, %{"acceptance_criteria" => textless})
+      # THE FRONT DOOR NOW REFUSES THIS SHAPE (cdd-criteria-shape-gate): a blank
+      # `criterion` is unstampable, so `Validation.criteria_violation/1` halts it
+      # at create. That refusal does NOT make this test moot — it makes it a
+      # LEGACY-DATA test, which is what it always really was. Rows carrying a
+      # textless criterion exist in the store today (measured 2026-09-07: 3 live
+      # task rows), written before the gate, and the auto-stamp still has to meet
+      # them. So the row is INSTALLED BEHIND the write gate, exactly as history
+      # installed it, and the downstream guard is measured on it unchanged.
+      # Building it through the front door instead would only prove the front
+      # door works, which is a different file's job.
+      task = mk_task!(uniq("mg-textless"), scope, %{"acceptance_criteria" => []})
+      :ok = foreign_patch_content!(task.id, %{"acceptance_criteria" => textless})
+      task = Repo.get!(Document, task.id)
 
       # A text-less gate is NOT auto-stampable, so the D289 gate still counts it
       # unmet — the lead's seal close names why it is closing over it.
@@ -1133,6 +1174,8 @@ defmodule Barkpark.Tasks.CloseTest do
 
       task =
         mk_task!(uniq("mg-caller-wins"), scope, %{"acceptance_criteria" => @merge_gate_criteria})
+
+      :ok = witness!(task.id, [456])
 
       assert {:ok, closed} =
                Close.close(task.id, "lead-w",
@@ -1220,11 +1263,14 @@ defmodule Barkpark.Tasks.CloseTest do
   # epic's PR it never touched — and the ledger read exactly like an honest lead
   # seal.
   #
-  # Neither refused shape is built here: an authority check keyed on `worker_id`
-  # is VACUOUS (it is a client-supplied body param — close.ex:26-31), and a
-  # GitHub round-trip cannot run under `pg_advisory_xact_lock`. What is built is
-  # PROVENANCE: the sentence stops asserting a lead and a merge, and the
-  # deduction leaves a durable, machine-readable receipt.
+  # PROVENANCE was built first: the sentence stopped asserting a lead and a
+  # merge, and the deduction started leaving a durable, machine-readable receipt.
+  # cch-w65 then built the REFUSAL on the axis that is checkable without leaving
+  # the transaction — PR-references-task, joined against the merge webhook's own
+  # trailer-resolved observation (`Close.witnessed_prs/2`). The authority axis is
+  # still NOT built and cannot be keyed on `worker_id`, which is a client-supplied
+  # body param (see the "NONE OF THIS IS AUTHORIZATION" note in the Close header);
+  # a GitHub round-trip still cannot run under `pg_advisory_xact_lock`.
   describe "close/3 — the merge-gate autostamp records what it actually observed" do
     @fabrication_criteria [
       %{"criterion" => "work built", "met" => true, "evidence" => "local run"},
@@ -1235,7 +1281,7 @@ defmodule Barkpark.Tasks.CloseTest do
       }
     ]
 
-    test "a scratch worker citing a FOREIGN PR still stamps the gate — but the ledger no longer claims a lead or a merge, and the deduction leaves a trace",
+    test "a scratch worker citing a FOREIGN PR is REFUSED — the server stamps no gate for a PR it never saw land here",
          %{scope: scope} do
       Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
 
@@ -1245,8 +1291,11 @@ defmodule Barkpark.Tasks.CloseTest do
           "claim" => %{"worker" => "scratch-w", "epoch" => 1}
         })
 
-      # PR #11435 belongs to a DIFFERENT epic; this task never touched it.
-      assert {:ok, closed} =
+      # PR #11435 belongs to a DIFFERENT epic; this task never touched it, and
+      # no merge webhook ever resolved it here. cch-w65: this used to return
+      # {:ok, doc} with the gate stamped met and NO close_override, because the
+      # autostamp's deduction erased its own trace from the criteria gate.
+      assert {:error, {:criteria_unmet, [1]}} =
                Close.close(task.id, "scratch-w",
                  observed_epoch: 1,
                  lifecycle_status: "done",
@@ -1254,18 +1303,47 @@ defmodule Barkpark.Tasks.CloseTest do
                  caller_token_id: "tok-42"
                )
 
-      gate = Enum.at(closed.content["acceptance_criteria"], 1)
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["lifecycle_status"] == "open", "the close must not land"
+      assert Enum.at(reloaded.content["acceptance_criteria"], 1)["met"] == false
+      refute Map.has_key?(reloaded.content, "merge_gate_autostamp")
+    end
 
-      # The stamp itself is UNCHANGED — 76 of 2,064 recorded closes are foreign
-      # lead seals (D288/D289) and deleting close-time autostamp would break the
-      # seal ritual. What changed is what the ledger SAYS about it.
+    test "a WITNESSED close still stamps — and the ledger still refuses to claim a lead or a merge, and still leaves a trace",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("witnessed-seal"), scope, %{
+          "acceptance_criteria" => @fabrication_criteria,
+          "claim" => %{"worker" => "lead-w", "epoch" => 1}
+        })
+
+      # The server watched PR #11435 arrive on THIS task via that PR's own
+      # `Task:` trailer. 76 of 2,064 recorded closes are foreign lead seals
+      # (D288/D289), so the seal ritual has to keep working — what the witness
+      # removes is the ability to seal against a PR nothing observed.
+      :ok = witness!(task.id, [11_435])
+
+      assert {:ok, closed} =
+               Close.close(task.id, "lead-w",
+                 observed_epoch: 1,
+                 lifecycle_status: "done",
+                 landed: %{"prs" => [11_435]},
+                 caller_token_id: "tok-42"
+               )
+
+      gate = Enum.at(closed.content["acceptance_criteria"], 1)
       assert gate["met"] == true
 
+      # cch-w65 criterion 2, unchanged: the witness is a PR→task join, NOT proof
+      # that the closer is a lead and NOT a merge this call observed, so the
+      # sentence must still claim neither.
       refute gate["evidence"] =~ "lead-closed",
              "the evidence must not assert a LEAD nothing authenticated"
 
       refute gate["evidence"] =~ "on merge",
-             "the evidence must not assert a MERGE nothing observed"
+             "the evidence must not assert a MERGE this call observed"
 
       assert gate["evidence"] =~ "UNVERIFIED merge-gate autostamp"
       assert gate["evidence"] =~ "caller-asserted land digest"
@@ -1279,11 +1357,12 @@ defmodule Barkpark.Tasks.CloseTest do
       assert record["source"] == "close_landed_digest"
       assert record["indices"] == [1], "the trace names the exact rows it deducted"
       assert record["landed"] == "PR #11435"
+      assert record["witnessed_prs"] == ["11435"], "and the join it leaned on"
       assert is_binary(record["ts"])
 
       # Both actors, labelled for what they are: the name the caller CLAIMED and
       # the token the server actually AUTHENTICATED.
-      assert record["asserted_worker"] == "scratch-w"
+      assert record["asserted_worker"] == "lead-w"
       assert record["authenticated_token_id"] == "tok-42"
 
       # One atomic write — the stamp and its confession land together.
@@ -1300,6 +1379,8 @@ defmodule Barkpark.Tasks.CloseTest do
         mk_task!(uniq("autostamp-internal"), scope, %{
           "acceptance_criteria" => @fabrication_criteria
         })
+
+      :ok = witness!(task.id, [7])
 
       assert {:ok, closed} =
                Close.close(task.id, "lead-w",
@@ -1359,6 +1440,13 @@ defmodule Barkpark.Tasks.CloseTest do
           "acceptance_criteria" => @fabrication_criteria
         })
 
+      # cch-w65: the close-time stamp needs the same PR witnessed on this task.
+      # It lands the two records SIDE BY SIDE on ONE document, which is a
+      # sharper version of this test than two documents were: the verified and
+      # the unverified claim now sit in the same key and still cannot be
+      # confused for each other.
+      :ok = witness!(asserted_task.id, [456])
+
       assert {:ok, closed} =
                Close.close(asserted_task.id, "lead-w",
                  observed_epoch: 0,
@@ -1382,7 +1470,10 @@ defmodule Barkpark.Tasks.CloseTest do
                "github_merge_event"
 
       assert closed.content["merge_gate_autostamp"]["close"]["verified"] == false
-      refute Map.has_key?(closed.content["merge_gate_autostamp"], "merge_event")
+      assert closed.content["merge_gate_autostamp"]["merge_event"]["verified"] == true
+
+      assert closed.content["merge_gate_autostamp"]["close"]["source"] ==
+               "close_landed_digest"
     end
 
     test "a later verified merge event does NOT erase the earlier unverified assertion",
@@ -1396,6 +1487,7 @@ defmodule Barkpark.Tasks.CloseTest do
       ]
 
       task = mk_task!(uniq("autostamp-both"), scope, %{"acceptance_criteria" => unstamped})
+      :ok = witness!(task.id, [11_435])
 
       # A close asserts gate #1 only (the caller's own explicit update wins #2's
       # index, so the autostamp leaves it for the merge event).
@@ -2012,10 +2104,20 @@ defmodule Barkpark.Tasks.CloseTest do
 
       task = mk_task!(uniq("crit-text-whole"), scope, %{"acceptance_criteria" => @rubric})
 
+      # The lifecycle is `done` and not `blocked` because of the raise gate
+      # (task-8ca0bd7a8ed50f14): an ABANDON close may no longer raise `met`, and
+      # this arm's whole subject is a rubric paste that raises one row while
+      # lowering another. `done` + `criteria_override` keeps the subject — one
+      # write, mixed met values, resolution by TEXT — on a lifecycle where the
+      # raise is legal. Rewriting the arm rather than dropping the raise matters:
+      # a paste with no raise would still pass if text-keyed resolution broke on
+      # the met=true branch, which is precisely the branch this arm guards.
       assert {:ok, closed} =
                Close.close(task.id, "w",
                  observed_epoch: 0,
-                 lifecycle_status: "blocked",
+                 lifecycle_status: "done",
+                 reason: "shipped in PR #14349, sha 66b329c959",
+                 criteria_override: "the second rubric row is closed over, on the record",
                  criteria: [
                    %{
                      "criterion" => "the reader survives a nil workspace",
@@ -2031,7 +2133,7 @@ defmodule Barkpark.Tasks.CloseTest do
                %{"met" => false}
              ] = closed.content["acceptance_criteria"]
 
-      assert closed.content["lifecycle_status"] == "blocked"
+      assert closed.content["lifecycle_status"] == "done"
     end
 
     test "a text that matches NO stored row is refused and writes nothing", %{scope: scope} do

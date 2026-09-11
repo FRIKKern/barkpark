@@ -51,7 +51,7 @@ set -uo pipefail
 
 SRC="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 SRC="$(cd "$SRC" && pwd)"
-for f in Makefile .githooks/post-merge scripts/deploy-rebuild.sh; do
+for f in Makefile .githooks/post-merge scripts/deploy-rebuild.sh scripts/lib/bp-curl.sh; do
   [ -f "$SRC/$f" ] || { echo "FATAL: $SRC/$f is missing — cannot test a tree without the subjects."; exit 2; }
 done
 
@@ -177,10 +177,14 @@ ARM_N=0
 new_tree() {
   ARM_N=$((ARM_N+1))
   T="$ROOT/arm$ARM_N"
-  mkdir -p "$T/scripts" "$T/.githooks" "$T/api/_build/prod" "$T/.git"
+  mkdir -p "$T/scripts/lib" "$T/.githooks" "$T/api/_build/prod" "$T/.git"
   cp "$SRC/Makefile" "$T/Makefile"
   cp "$SRC/.githooks/post-merge" "$T/.githooks/post-merge"
   cp "$SRC/scripts/deploy-rebuild.sh" "$T/scripts/deploy-rebuild.sh"
+  # make deploy's own probe sources this (429 backoff, task-c2f96f8121c64601);
+  # the recipe reaches it by a path relative to -C, so the sandbox must carry it
+  # or the probe degrades to `|| echo 000` and every happy arm reds.
+  cp "$SRC/scripts/lib/bp-curl.sh" "$T/scripts/lib/bp-curl.sh"
   chmod +x "$T/.githooks/post-merge" "$T/scripts/deploy-rebuild.sh"
   echo OLD > "$T/api/_build/prod/marker"
   DANGER="$T/danger.log"; : > "$DANGER"

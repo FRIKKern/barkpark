@@ -328,13 +328,34 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 // reported "the tree has a measured defect" when the truth was "the instrument
 // could not read its input". Exit 2 here, with the file named — a checker that
 // cannot see its inputs must make NO claim about the tree, in either direction.
+
+// ── THE ONE REFUSAL VOCABULARY (cch-w63-bl) ─────────────────────────────────
+// EVERY exit-2 path in this file ends with exactly ONE line, on STDERR:
+//
+//     !! CSS CHECK (exit 2): REFUSED TO MEASURE — <reason>
+//
+// It is the same shape __preview__/exit-vocabulary.mjs already emits for the
+// browser instruments, so ONE reader covers the whole console fence. Before
+// this, six of console-unit's nine exit-2 sites spoke a private vocabulary
+// (`REFUSED (2): …` with no `!!`) that no `!!`-anchored capture could see — a gate that CAPTURES the
+// refusing instrument's own summary line would have replaced a wrong sentence
+// with NO sentence, in the wave about silence.
+//
+// THE READER IS scripts/console-refusal-capture.mjs, and its unit test
+// ENUMERATES this file from source: a new exit-2 path that does not go through
+// `refuse2` reds that test. Do not add one.
+const REFUSAL_NAME = "CSS CHECK";
+const refuse2 = (reason) => {
+  process.stderr.write(`!! ${REFUSAL_NAME} (exit 2): REFUSED TO MEASURE — ${reason}\n`);
+  process.exit(2);
+};
+
 const readOrRefuse = (abs, label) => {
   try {
     return fs.readFileSync(abs, "utf8");
   } catch (e) {
     console.error(`FAIL(2): required input ${label} not readable at ${abs} — ${e.message}`);
-    console.error("REFUSED (2): __css_check will not report a result it could not measure.");
-    process.exit(2);
+    refuse2(`required input ${label} is not readable at ${abs} (${e.message}). __css_check will not report a result it could not measure.`);
   }
 };
 const read = (f) => readOrRefuse(path.join(dir, f), f);

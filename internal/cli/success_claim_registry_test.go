@@ -125,6 +125,37 @@ type claimSite struct {
 
 func strp(s string) *string { return &s }
 
+// siteDoctorWebhookUnreadable and siteDoctorWebhookRepair are the SERVER's own
+// sentences, held identical across the unknown/absent pair so the printed
+// difference can only be the STATE — not two different strings the row authored.
+const (
+	siteDoctorWebhookUnreadable = "the box's webhook list could not be read, so whether the row exists is UNMEASURED"
+	siteDoctorWebhookRepair     = "the hourly ContentWebhookReconciler re-arms this row idempotently; there is NO on-demand verb"
+)
+
+// siteDoctorReportFixture is the shared doctor report the two enrolled rows vary
+// from. It is rebuilt on every call (the substrate slice included), so a mutation
+// applied by one half can never leak into the other.
+func siteDoctorReportFixture(mut func(*cloudclient.SiteDoctorReport)) cloudclient.SiteDoctorReport {
+	r := cloudclient.SiteDoctorReport{
+		OK:        true,
+		CheckedAt: "2026-09-10T09:00:00Z",
+		Site: cloudclient.SiteDoctorSite{
+			ID: "11111111-2222-3333-4444-555555555555", Slug: "blog", Name: "Blog",
+			Kind: "static", Framework: "astro", Instance: "acme",
+		},
+		Substrates: []cloudclient.SiteDoctorSubstrate{
+			{Key: "cp_row", State: cloudclient.SiteDoctorPresent, Detail: "the control-plane `sites` row exists"},
+			{Key: "content_webhook", State: cloudclient.SiteDoctorPresent, Detail: "the box carries this site's content-publish webhook"},
+		},
+		Unreadable: []string{},
+	}
+	if mut != nil {
+		mut(&r)
+	}
+	return r
+}
+
 // successClaimRegistry is the enrolled set. Add a row when you add a receipt.
 func successClaimRegistry() []claimSite {
 	autoupdate := func(verb string) func(*writer, any) {
@@ -540,6 +571,57 @@ func successClaimRegistry() []claimSite {
 			},
 			Backed:       spawnSiteRowFixture(func(s *cloudclient.SpawnSite) { s.Theme = "ember" }),
 			Contradicted: spawnSiteRowFixture(func(s *cloudclient.SpawnSite) { s.Theme = "fjord" }),
+		},
+
+		// ── cloud_site_doctor.go — the per-substrate receipt (ssw8-site-doctor) ──
+		// The doctor is a READ verb, so its "claim" is not "I changed something":
+		// it is "here is what exists, and here is what to do about what does not".
+		// Both halves are cloudclient.SiteDoctorReport — the type GET
+		// /v1/sites/:id/doctor decodes into — so the printed difference can only
+		// come from the server's answer.
+		{
+			// The substrate verdict itself. A webhook the box does NOT carry is a
+			// site that will never receive a content publish, and the receipt has
+			// to read differently from the one that says it is armed.
+			Name: "renderSiteDoctorReport/absent-vs-present",
+			Render: func(out *writer, resp any) {
+				renderSiteDoctorReport(out, "blog", resp.(cloudclient.SiteDoctorReport))
+			},
+			Backed: siteDoctorReportFixture(nil),
+			Contradicted: siteDoctorReportFixture(func(r *cloudclient.SiteDoctorReport) {
+				r.Substrates[1].State = cloudclient.SiteDoctorAbsent
+				r.Substrates[1].Repair = siteDoctorWebhookRepair
+				r.OK = false
+				r.AbsentCount = 1
+			}),
+		},
+		{
+			// THE HONESTY AXIS, and the reason this row exists at all. The server
+			// is three-valued on purpose: `unknown` means the doctor could not
+			// PERFORM that read, `absent` is a claim that the substrate is gone —
+			// and the operator's next move is opposite in the two cases (do NOT
+			// arm a webhook on the strength of a failed read). A receipt that
+			// printed the same bytes for both would reintroduce, one layer out,
+			// the exact collapse the route was built to prevent.
+			Name: "renderSiteDoctorReport/unknown-is-not-absent",
+			Render: func(out *writer, resp any) {
+				renderSiteDoctorReport(out, "blog", resp.(cloudclient.SiteDoctorReport))
+			},
+			Backed: siteDoctorReportFixture(func(r *cloudclient.SiteDoctorReport) {
+				r.Substrates[1].State = cloudclient.SiteDoctorUnknown
+				r.Substrates[1].Detail = siteDoctorWebhookUnreadable
+				r.Substrates[1].Repair = siteDoctorWebhookRepair
+				r.UnknownCount = 1
+				r.Unreadable = []string{"content_webhook"}
+			}),
+			Contradicted: siteDoctorReportFixture(func(r *cloudclient.SiteDoctorReport) {
+				r.Substrates[1].State = cloudclient.SiteDoctorAbsent
+				r.Substrates[1].Detail = siteDoctorWebhookUnreadable
+				r.Substrates[1].Repair = siteDoctorWebhookRepair
+				r.OK = false
+				r.AbsentCount = 1
+				r.Unreadable = []string{}
+			}),
 		},
 
 		// ── tasks_stamp_cmd.go — the LEDGER ROW the store actually holds ────────
@@ -960,6 +1042,9 @@ var requiredEnrollments = []string{
 	"renderSiteRolledBack",
 	"renderSiteDeleted",
 	"renderSiteSettingsUpdated",
+	// ssw8 — the doctor receipt, the read verb whose whole value is the third
+	// value (unknown) staying distinguishable from the second (absent).
+	"renderSiteDoctorReport",
 	// PDS wave 26 — the ledger writer this epic's own evidence is made of,
 	// and its two siblings on the same ledger (pds-w26-close-pulse-readback).
 	"renderStampVerdict",
@@ -1124,6 +1209,7 @@ var siteResponseTypedRows = []string{
 	"renderSiteRolledBack",
 	"renderSiteDeleted",
 	"renderSiteSettingsUpdated",
+	"renderSiteDoctorReport",
 }
 
 // provenanceOutOfScope is the EXPLICIT grandfather set for

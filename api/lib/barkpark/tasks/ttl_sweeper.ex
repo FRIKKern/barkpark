@@ -574,15 +574,10 @@ defmodule Barkpark.Tasks.TtlSweeper do
       mutation: @event_task_lease_expired,
       rev: doc.rev,
       previous_rev: previous_rev,
-      document: %{
-        "doc_id" => doc.doc_id,
-        "type" => doc.type,
-        "title" => doc.title,
-        "status" => doc.status,
-        "content" => doc.content,
-        "rev" => doc.rev,
-        "lease_expired" => payload
-      },
+      # The envelope half comes from ONE definition (`Internal.envelope_document/1`)
+      # so the events feed's payload projection — `document` minus the envelope
+      # — stays correct for this hand-rolled insert too.
+      document: Map.put(Internal.envelope_document(doc), "lease_expired", payload),
       workspace_id: doc.workspace_id,
       project_id: doc.project_id,
       dataset_id: doc.dataset_id,
@@ -748,15 +743,7 @@ defmodule Barkpark.Tasks.TtlSweeper do
       mutation: @event_task_engagement_lapsed,
       rev: doc.rev,
       previous_rev: previous_rev,
-      document: %{
-        "doc_id" => doc.doc_id,
-        "type" => doc.type,
-        "title" => doc.title,
-        "status" => doc.status,
-        "content" => doc.content,
-        "rev" => doc.rev,
-        "engagement_lapsed" => payload
-      },
+      document: Map.put(Internal.envelope_document(doc), "engagement_lapsed", payload),
       workspace_id: doc.workspace_id,
       project_id: doc.project_id,
       dataset_id: doc.dataset_id,

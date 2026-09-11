@@ -28,11 +28,11 @@
 //   bpTable            group:"block", content:"bpTableRow+", isolating (a hard
 //                      boundary so backspace/join at an edge can't merge a paragraph
 //                      INTO the table or pull a row OUT — the v1 no-nesting guard),
-//                      defining, selectable. bpId/bpType ONLY (the grid data lives in
-//                      the PM child nodes, which is what earns free inline-mark
-//                      editing — contrast code-node.js storing text in a `value` attr
-//                      because its interior is non-PM). A node-view (chrome + tbody
-//                      contentDOM).
+//                      defining, selectable. bpId/bpType plus a PRIVATE, non-rendered
+//                      source carrier (the editable grid still lives in PM child nodes,
+//                      which is what earns free inline-mark editing — contrast
+//                      code-node.js storing text in a `value` attr because its interior
+//                      is non-PM). A node-view (chrome + tbody contentDOM).
 //   bpTableRow         NO group (can NEVER appear at doc top level — only inside
 //                      bpTable's content expression), content:"(bpTableHeaderCell |
 //                      bpTableCell)+", defining. No node-view.
@@ -62,7 +62,7 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 
 // Shared bpId/bpType attr skeleton (the role-nodes.js roleAttributes shape). Only the
-// bpTable carries these — rows/cells are INTERNAL PM structure with NO bpId (one id
+// bpTable carries identity — rows/cells are INTERNAL PM structure with NO bpId (one id
 // for the whole table sidesteps per-cell id minting + intra-table duplicate_id).
 function tableAttributes() {
   return {
@@ -77,6 +77,29 @@ function tableAttributes() {
       renderHTML: (attrs) =>
         attrs.bpType ? { "data-bp-type": attrs.bpType } : {},
     },
+    // Private source carrier used by run-convert's lossless storage lens. It is
+    // deliberately absent from DOM parsing/rendering: pasted HTML can never mint
+    // authoritative source metadata, while getJSON/history keep it with the node.
+    bpTableSource: {
+      default: null,
+      rendered: false,
+      keepOnSplit: false,
+      parseHTML: () => null,
+    },
+  };
+}
+
+function tableCellAttributes() {
+  return {
+    // The exact authored cell carrier (scalar, inline array, or content-map).
+    // It follows its PM cell through row/column moves; newly inserted cells get
+    // null, so an opaque identity is never duplicated onto fresh grid space.
+    bpTableCellSource: {
+      default: null,
+      rendered: false,
+      keepOnSplit: false,
+      parseHTML: () => null,
+    },
   };
 }
 
@@ -87,8 +110,8 @@ function tableAttributes() {
 // ragged intermediate never persists (the rectangular-grid invariant).
 
 // Extract the live bpTable node into a plain row descriptor list:
-//   [{ header:bool, cells:[Fragment|null, …] }, …]
-// A null cell means "empty inline body" (rebuilt as a contentless cell). header is
+//   [{ header:bool, cells:[{content:Fragment|null,source:object|null}, …] }, …]
+// A null content means "empty inline body" (rebuilt as a contentless cell). header is
 // uniform per row (a header row's cells are ALL bpTableHeaderCell); a row loses
 // header-ness the moment any cell is a body cell.
 function extractRows(tableNode) {
@@ -97,7 +120,10 @@ function extractRows(tableNode) {
     const cells = [];
     let header = rowNode.childCount > 0;
     rowNode.forEach((cellNode) => {
-      cells.push(cellNode.content && cellNode.content.size ? cellNode.content : null);
+      cells.push({
+        content: cellNode.content && cellNode.content.size ? cellNode.content : null,
+        source: cellNode.attrs?.bpTableCellSource || null,
+      });
       if (cellNode.type.name !== "bpTableHeaderCell") header = false;
     });
     rows.push({ header, cells });
@@ -105,11 +131,12 @@ function extractRows(tableNode) {
   return rows;
 }
 
-function buildCell(schema, header, frag) {
+function buildCell(schema, header, cell) {
   const type = schema.nodes[header ? "bpTableHeaderCell" : "bpTableCell"];
+  const attrs = cell.source ? { bpTableCellSource: cell.source } : null;
   // Omit content for an empty cell (a contentless inline* cell, rendering an empty
   // <td>/<th> exactly like an empty callout body).
-  return frag ? type.create(null, frag) : type.create(null);
+  return cell.content ? type.create(attrs, cell.content) : type.create(attrs);
 }
 
 function buildRowNodes(schema, rows) {
@@ -135,7 +162,10 @@ function bodyRowCount(rows) {
 const TRANSFORMS = {
   addRow(rows) {
     const n = colCount(rows) || 1;
-    rows.push({ header: false, cells: new Array(n).fill(null) });
+    rows.push({
+      header: false,
+      cells: Array.from({ length: n }, () => ({ content: null, source: null })),
+    });
   },
   removeRow(rows) {
     if (bodyRowCount(rows) <= 1) return;
@@ -147,7 +177,7 @@ const TRANSFORMS = {
     }
   },
   addCol(rows) {
-    rows.forEach((r) => r.cells.push(null));
+    rows.forEach((r) => r.cells.push({ content: null, source: null }));
   },
   removeCol(rows) {
     if (colCount(rows) <= 1) return;
@@ -192,8 +222,8 @@ function collectCellStarts(tableNode, tablePos) {
 }
 
 // Move the caret to the previous (dir=-1) / next (dir=1) cell. Returns false when the
-// caret is not in a table (default Tab/Enter proceeds) and true otherwise — including
-// at a grid edge, where it swallows the key so focus never escapes the editor.
+// caret is outside the table or at a grid edge, allowing native focus navigation
+// to reach the surrounding controls instead of trapping keyboard users.
 function moveCell(editor, dir) {
   const { state } = editor;
   const { $from } = state.selection;
@@ -206,9 +236,9 @@ function moveCell(editor, dir) {
   const curCellStart = $from.before(ci.depth) + 1;
   const starts = collectCellStarts(tableNode, tablePos);
   const idx = starts.indexOf(curCellStart);
-  if (idx === -1) return true;
+  if (idx === -1) return false;
   const target = idx + dir;
-  if (target < 0 || target >= starts.length) return true;
+  if (target < 0 || target >= starts.length) return false;
   editor.chain().focus().setTextSelection(starts[target]).run();
   return true;
 }
@@ -457,6 +487,9 @@ export const BpTableCell = Node.create({
   name: "bpTableCell",
   content: "inline*",
   defining: true,
+  addAttributes() {
+    return tableCellAttributes();
+  },
   parseHTML() {
     return [{ tag: "td" }];
   },
@@ -469,6 +502,9 @@ export const BpTableHeaderCell = Node.create({
   name: "bpTableHeaderCell",
   content: "inline*",
   defining: true,
+  addAttributes() {
+    return tableCellAttributes();
+  },
   parseHTML() {
     return [{ tag: "th" }];
   },

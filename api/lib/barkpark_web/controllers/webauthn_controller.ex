@@ -111,9 +111,18 @@ defmodule BarkparkWeb.WebauthnController do
         metadata: %{"credential" => cred.id}
       })
 
-      # A passkey is a strong, phishing-resistant factor — mint an already-fresh
-      # session so a sensitive action right after login isn't re-challenged.
-      SessionIssuer.issue(conn, user, mfa_verified: true)
+      # era-bl-allowed-auth-methods: a passkey is a LOCAL door too. An org that
+      # narrowed its allow-list without naming "passkey" gets it closed here,
+      # same predicate as the password and magic-link doors. Default (no
+      # policy) leaves this path untouched.
+      if SessionIssuer.auth_method_blocked?(user, "passkey") do
+        SessionIssuer.deny_auth_method(conn, user, "passkey")
+      else
+        # A passkey is a strong, phishing-resistant factor — mint an
+        # already-fresh session so a sensitive action right after login isn't
+        # re-challenged.
+        SessionIssuer.issue(conn, user, mfa_verified: true)
+      end
     else
       _ ->
         error(

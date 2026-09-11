@@ -96,11 +96,16 @@
 //    count is PINNED so corpus growth is NAMED rather than silently absorbed.
 // L2 ROUTE ATTRIBUTION IN THE HOOK TABLE IS TYPED, NOT DERIVED. UNACCOUNTED and
 //    DEAD ROW guard completeness in BOTH directions, but a row naming the WRONG
-//    route is caught by nothing here. Deriving hook -> handler -> api() is
-//    exactly D505's refuted problem and this file does not promise it. Each
-//    row's fence cites the __binding_census.mjs PIN row it was read from; the
-//    census remains the owner of route -> fence truth, and shipping a SECOND
-//    derived table that could disagree with it is deliberately not done.
+//    ROUTE is caught by nothing here. Deriving hook -> handler -> api() is
+//    exactly D505's refuted problem and this file does not promise it.
+//    THE FENCE IS NO LONGER TYPED THOUGH (cch-w50-bl). A row names a route and
+//    the fence is LOOKED UP in __route_fence.mjs, the one route -> fence table,
+//    which __binding_census.mjs imports too and re-reads against its own PIN.
+//    Until this wave every row carried a hand-typed `fence:` beside a PROSE
+//    citation of the census row it had been read from — two tables that could
+//    disagree, with nothing in the tree able to notice. A route this file names
+//    that the shared table does not carry now answers `unknown`, and unknown is
+//    still never a pass: it reds as UNFENCED.
 //
 // ── BLIND SPOTS, NAMED ───────────────────────────────────────────────────────
 // B1 the static shell beyond the launch pair: index.html authors ~24 buttons.
@@ -124,6 +129,7 @@ import { fileURLToPath } from "node:url";
 import { bootScenario, makeDom, flush } from "./smoke.mjs";
 import { SCENARIOS, SCENARIO_NAMES, route } from "./scenarios.mjs";
 import { parseStaticControlIds } from "./breakpoint-sweep.mjs";
+import { F_CLIENT, F_UNKNOWN, ELEVATED, fenceForRoute, overlayGapReport } from "../__route_fence.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_HTML = path.join(HERE, "..", "index.html");
@@ -218,16 +224,15 @@ export function hookKey(c) {
   return c.tag;
 }
 
-// ── the fence vocabulary ─────────────────────────────────────────────────────
-// ELEVATED = above plain team membership. Anything else is member-reachable.
-// `unknown` exists ONLY so an author can be forced to answer: a routed row
-// carrying it is an UNFENCED red, never a pass.
-const F_MEMBER = "member";        // any team member may call it
-const F_SELF = "self";            // self-scoped (your own account/token)
-const F_CLIENT = "client";        // no route at all — navigation, clipboard, disclosure
-const F_ADMIN = "elevated:team_admin";
-const F_UNKNOWN = "unknown";
-const ELEVATED = new Set([F_ADMIN]);
+// ── the fence vocabulary — IMPORTED, not restated (cch-w50-bl) ──────────────
+// The words AND the answers come from __route_fence.mjs. This file used to
+// declare the five constants itself and then type one of them onto every row by
+// hand; the census declared the same five and its own overlay. `fenceForRoute`
+// is that module's derivation: the router's Auth.require_* tier, RAISED by the
+// inline-cond overlay for the routes whose refusal of a non-admin lives in a
+// `cond` (POST /v1/fleet/supports is the measured specimen — require_user_or_pat
+// at the router, so a tier-only read calls it member-reachable and the console
+// would offer a member a write the server refuses).
 
 // ── THE HOOK TABLE ───────────────────────────────────────────────────────────
 // One row per hook identity a member-actor screen can render. `route` is the
@@ -236,33 +241,33 @@ const ELEVATED = new Set([F_ADMIN]);
 // row, or the markup itself for client-only controls. See LIMIT L2: these are
 // TYPED, and a row naming the wrong route is caught by nothing here.
 const HOOKS = [
-  { key: "a", route: null, fence: F_CLIENT, what: "breadcrumb / bare in-app link", source: "markup: hash navigation" },
-  { key: "a.inst-tab", route: null, fence: F_CLIENT, what: "instance detail tab", source: "markup: hash navigation" },
-  { key: "a.nav-link.nav-sub", route: null, fence: F_CLIENT, what: "instance section nav", source: "markup: hash navigation" },
-  { key: "a.site-open", route: null, fence: F_CLIENT, what: "open the live site URL", source: "markup: target=_blank anchor" },
-  { key: "a.btn.btn-ghost.btn-sm.site-open", route: null, fence: F_CLIENT, what: "Visit button in the site detail head", source: "markup: target=_blank anchor" },
-  { key: "button.copy-btn[data-copy]", route: null, fence: F_CLIENT, what: "copy a CLI command / id to the clipboard", source: "markup: data-copy delegate" },
-  { key: "button#inst-open-studio", route: null, fence: F_CLIENT, what: "open Studio in a new tab", source: "markup: window.open" },
-  { key: "button#inst-cli-toggle", route: null, fence: F_CLIENT, what: "disclose the bp CLI lifecycle rail", source: "markup: aria-controls disclosure" },
-  { key: "button.deploy-console-toggle", route: null, fence: F_CLIENT, what: "expand a deploy's build console", source: "markup: local disclosure" },
-  { key: "button.actfilter-chip[data-notif-del-axis][data-notif-del-value]", route: null, fence: F_CLIENT, what: "deliveries filter chip", source: "markup: client-side filter" },
-  { key: "input#notif-del-event", route: null, fence: F_CLIENT, what: "deliveries event filter input", source: "markup: client-side filter" },
-  { key: "button#notif-del-load-more", route: "GET /v1/notifications/deliveries", fence: F_MEMBER, what: "paginate deliveries", source: "census: read path; the inline-cond overlay records the deliveries route as a self-scope NARROWING, never a refusal" },
-  { key: "button#site-new-btn", route: "POST /v1/sites", fence: F_MEMBER, what: "open the create-site modal", source: "census PIN: openCreateSiteModal — any member may create a site" },
-  { key: "button#site-deploy", route: "POST /v1/sites/:*/deploy", fence: F_MEMBER, what: "deploy the site", source: "census PIN: runDeploy / createAndDeploy, ruling (a)" },
-  { key: "button#site-rollback", route: "POST /v1/sites/:*/rollback", fence: F_MEMBER, what: "roll the site back", source: "census PIN: runSiteRollback, ruling (a)" },
-  { key: "button.btn.btn-ghost.btn-sm.dep-promote[data-dep-id][data-kind]", route: "POST /v1/sites/:*/deployments/:*/promote", fence: F_MEMBER, what: "promote a deployment", source: "census PIN: runPromote, ruling (a)" },
-  { key: "button#site-delete", route: "DELETE /v1/sites/:*", fence: F_MEMBER, what: "delete the site (destroy-tier confirm)", source: "census PIN: runSiteDelete — with_team_site {:ability,\"write\"} and a session carries [\"root\"], ruling (a); the INSTANCE Decommission is a different, higher band" },
-  { key: "button#site-env-edit", route: "POST /v1/sites/:*/env", fence: F_MEMBER, what: "edit site env vars", source: "census PIN: openSiteEnvModal — team-scoped member action" },
-  { key: "select#site-theme-select", route: "PATCH /v1/sites/:*", fence: F_MEMBER, what: "pin the deploy theme", source: "census PIN: loadSite, ruling (a)" },
-  { key: "button.btn.btn-primary.btn-sm[data-vf-run]", route: "POST /v1/barkparks/:*/verify", fence: F_MEMBER, what: "run verification now", source: "census PIN: runVerifyNow — team-scoped member action" },
-  { key: "button.btn.btn-ghost.btn-sm.token-revoke[data-id][data-name]", route: "DELETE /v1/tokens/:*", fence: F_SELF, what: "revoke your own token", source: "census PIN: confirmRevokeToken — self-scope" },
-  { key: "button.btn.btn-ghost.btn-sm[data-life-retry]", route: null, fence: F_CLIENT, what: "retry the lifecycle read that failed", source: "markup: re-issues the same GET the view already made" },
+  { key: "a", route: null, what: "breadcrumb / bare in-app link", source: "markup: hash navigation" },
+  { key: "a.inst-tab", route: null, what: "instance detail tab", source: "markup: hash navigation" },
+  { key: "a.nav-link.nav-sub", route: null, what: "instance section nav", source: "markup: hash navigation" },
+  { key: "a.site-open", route: null, what: "open the live site URL", source: "markup: target=_blank anchor" },
+  { key: "a.btn.btn-ghost.btn-sm.site-open", route: null, what: "Visit button in the site detail head", source: "markup: target=_blank anchor" },
+  { key: "button.copy-btn[data-copy]", route: null, what: "copy a CLI command / id to the clipboard", source: "markup: data-copy delegate" },
+  { key: "button#inst-open-studio", route: null, what: "open Studio in a new tab", source: "markup: window.open" },
+  { key: "button#inst-cli-toggle", route: null, what: "disclose the bp CLI lifecycle rail", source: "markup: aria-controls disclosure" },
+  { key: "button.deploy-console-toggle", route: null, what: "expand a deploy's build console", source: "markup: local disclosure" },
+  { key: "button.actfilter-chip[data-notif-del-axis][data-notif-del-value]", route: null, what: "deliveries filter chip", source: "markup: client-side filter" },
+  { key: "input#notif-del-event", route: null, what: "deliveries event filter input", source: "markup: client-side filter" },
+  { key: "button#notif-del-load-more", route: "GET /v1/notifications/deliveries", what: "paginate deliveries", source: "census: read path; the inline-cond overlay records the deliveries route as a self-scope NARROWING, never a refusal" },
+  { key: "button#site-new-btn", route: "POST /v1/sites", what: "open the create-site modal", source: "census PIN: openCreateSiteModal — any member may create a site" },
+  { key: "button#site-deploy", route: "POST /v1/sites/:*/deploy", what: "deploy the site", source: "census PIN: runDeploy / createAndDeploy, ruling (a)" },
+  { key: "button#site-rollback", route: "POST /v1/sites/:*/rollback", what: "roll the site back", source: "census PIN: runSiteRollback, ruling (a)" },
+  { key: "button.btn.btn-ghost.btn-sm.dep-promote[data-dep-id][data-kind]", route: "POST /v1/sites/:*/deployments/:*/promote", what: "promote a deployment", source: "census PIN: runPromote, ruling (a)" },
+  { key: "button#site-delete", route: "DELETE /v1/sites/:*", what: "delete the site (destroy-tier confirm)", source: "census PIN: runSiteDelete — with_team_site {:ability,\"write\"} and a session carries [\"root\"], ruling (a); the INSTANCE Decommission is a different, higher band" },
+  { key: "button#site-env-edit", route: "POST /v1/sites/:*/env", what: "edit site env vars", source: "census PIN: openSiteEnvModal — team-scoped member action" },
+  { key: "select#site-theme-select", route: "PATCH /v1/sites/:*", what: "pin the deploy theme", source: "census PIN: loadSite, ruling (a)" },
+  { key: "button.btn.btn-primary.btn-sm[data-vf-run]", route: "POST /v1/barkparks/:*/verify", what: "run verification now", source: "census PIN: runVerifyNow — team-scoped member action" },
+  { key: "button.btn.btn-ghost.btn-sm.token-revoke[data-id][data-name]", route: "DELETE /v1/tokens/:*", what: "revoke your own token", source: "census PIN: confirmRevokeToken — self-scope" },
+  { key: "button.btn.btn-ghost.btn-sm[data-life-retry]", route: null, what: "retry the lifecycle read that failed", source: "markup: re-issues the same GET the view already made" },
   // The two DISABLED shapes. They still need rows — accounting is not
   // conditional on being enabled — and their fence is recorded as elevated so
   // that the day one of them renders ENABLED to a member, it is a FINDING and
   // not a silent new key.
-  { key: "button.btn.btn-ghost.btn-sm", route: "POST /v1/instances/:*/lifecycle", fence: F_ADMIN, what: "instance lifecycle verb, drawn disabled-and-explained for a member (D428)", source: "census: the lifecycle band is team_admin; a member gets the disabled ghost with the grant sentence" },
+  { key: "button.btn.btn-ghost.btn-sm", route: "POST /v1/instances/:*/lifecycle", what: "instance lifecycle verb, drawn disabled-and-explained for a member (D428)", source: "census: the lifecycle band is team_admin; a member gets the disabled ghost with the grant sentence" },
   // cch-w46-bl RE-KEYED THIS ROW, and the re-key IS the fix landing. `button.btn.btn-sm`
   // was the GENERIC COLLIDING KEY this row's filing names as the harm: the CLI rail's
   // refused arm emitted a bare `<button class="btn btn-sm" type="button" disabled>` with
@@ -282,8 +287,15 @@ const HOOKS = [
   // The row ABOVE keeps its class-only key on purpose: `button.btn.btn-ghost.btn-sm` is
   // adminWriteControlHtml's disabled arm, which is still hookless and belongs to a later
   // PR. The two rows differing is the honest state of the tree today, not an oversight.
-  { key: "button.btn.btn-sm[data-life-verb]", route: "POST /v1/instances/:*/lifecycle", fence: F_ADMIN, what: "the CLI rail's lifecycle verb, drawn disabled for a member — one identity whether offered or refused (cch-w46-bl)", source: "same band as the row above" },
+  { key: "button.btn.btn-sm[data-life-verb]", route: "POST /v1/instances/:*/lifecycle", what: "the CLI rail's lifecycle verb, drawn disabled for a member — one identity whether offered or refused (cch-w46-bl)", source: "same band as the row above" },
 ];
+// THE DERIVATION, applied once to every row that names a route (cch-w50-bl).
+// A client-only row (route null) is `client`; a routed row gets the shared
+// table's answer, and a route that table does not carry gets `unknown` — which
+// the UNFENCED arm below reds on. Assigning here rather than at each use keeps
+// every downstream reader (findings text, the WATCHED report, the AUTHORITY
+// verdict) reading ONE value that was looked up ONCE.
+for (const h of HOOKS) h.fence = h.route ? fenceForRoute(h.route) : F_CLIENT;
 const HOOK_BY_KEY = new Map(HOOKS.map((h) => [h.key, h]));
 
 // ── watched JS-emitted controls, read ONLY through their mount (H4) ──────────
@@ -294,23 +306,24 @@ const HOOK_BY_KEY = new Map(HOOKS.map((h) => [h.key, h]));
 const WATCHED = [
   {
     id: "site-github", mount: "site-body", scenario: "site-member", twin: "rollback",
-    route: "POST /v1/sites/:*/github/connect", fence: F_ADMIN, assert: true,
+    route: "POST /v1/sites/:*/github/connect", assert: true,
     minted: "cch-w48-s2 (#10446) — siteDetailHtml emits #site-github only when the instance-band authority answers \"grant\"",
   },
   {
     id: "github-disconnect", mount: "github-card", scenario: "providers-member", twin: "providers-connected",
-    route: "DELETE /v1/github/installation", fence: F_ADMIN, assert: false,
+    route: "DELETE /v1/github/installation", assert: false,
     minted: "cch-w48-s3 — githubCardHtml omits #github-disconnect unless providerCanWrite()",
     why_not: "D535: zero /v1/github handlers in the corpus, so EVERY actor paints the \"Not configured\" arm and the control is absent for owner and member alike. Asserting absence here would pass on a DOM that never rendered it",
   },
 ];
+for (const w of WATCHED) w.fence = fenceForRoute(w.route);
 
 // ── the static shell's launch pair (H5) ──────────────────────────────────────
 // Their fence is a `.hidden` PROPERTY app.js sets, which NO byte reflects — the
 // exact case the union predicate exists for.
 const STATIC_LAUNCH = ["overview-launch", "fleet-launch"];
 const LAUNCH_ROUTE = "POST /v1/launch";
-const LAUNCH_FENCE = F_ADMIN; // inline-cond overlay: go_live/1 refuses non-admins inside a cond
+const LAUNCH_FENCE = fenceForRoute(LAUNCH_ROUTE); // the overlay is what raises it: go_live/1 refuses non-admins inside a cond
 
 // ── CONCEALED: hidden containers with no pointer at them ─────────────────────
 // The openability rule reads `aria-controls` and NOTHING else, so a JS-only
@@ -439,7 +452,16 @@ const PIN_MEMBER_SCENARIOS = 9;
 // and renderCurrentPlan both sit behind renderBilling's own owner fence. 124 was
 // RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the committed
 // corpus grew to 124 scenario(s), pinned at 123"), never by adding one.
-const PIN_TOTAL_SCENARIOS = 124;
+// 124 -> 125 (cch-w39-s2-fu): `account-modal-me-unreadable`, the corpus's first
+// fixture that puts the ACCOUNT MODAL in front of a /v1/me that never lands, so
+// modal-oracle can measure the unknown two-factor arm's Retry in a browser. The
+// member slice STAYS at 9 — the case the note above forbids bumping: this
+// fixture's `me` is the corpus's ordinary OWNER (`me("Guerrilla")`), and its
+// meFault means `meRole()` reads the 500 body and answers null, so it cannot
+// enter the member set by construction. 125 was RE-DERIVED by RUNNING this
+// sweep and reading what it PRINTED ("the committed corpus grew to 125
+// scenario(s), pinned at 124"), never by adding one.
+const PIN_TOTAL_SCENARIOS = 125;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;
@@ -750,7 +772,9 @@ async function main() {
       }
       if (row.fence === F_UNKNOWN) {
         broken.push("UNFENCED " + name + " → " + c.key + " (" + (row.route || "no route recorded") +
-          "): the row's fence is `unknown`, and unknown is never a pass.");
+          "): the row's fence is `unknown` — __route_fence.mjs carries no entry for " + row.route +
+          ", so nothing derived a tier for it. Record the route in the shared table (and bind it to its census PIN " +
+          "row) or fix the route this row names. Unknown is never a pass.");
         continue;
       }
       const elevated = ELEVATED.has(row.fence);
@@ -784,6 +808,22 @@ async function main() {
         "blessing a defect that no longer exists.");
     }
   }
+
+  // 3b — THE SHARED FENCE TABLE'S OWN HEALTH (cch-w50-bl). Every fence above
+  // was LOOKED UP, so this file no longer holds an opinion that could quietly
+  // disagree with the census — but a lookup inherits the shared derivation's
+  // faults too, and the worst of them is fail-open: read a route's
+  // Auth.require_* tier ALONE and POST /v1/fleet/supports answers `member`,
+  // because its refusal of a non-admin session lives in a `cond`. The overlay is
+  // what catches that, so this sweep asserts the overlay is still DOING it —
+  // per route, by name, in both directions (a route typed as needing the raise
+  // that no longer gets one, and a route that gets one nobody typed). Delete an
+  // overlay row and BOTH instruments red: the census in (2n), this file here.
+  const fenceGap = overlayGapReport();
+  out("  " + (fenceGap.ok ? "ok  " : "FAIL") + " route-fence     — a require_*-only derivation under-fences " +
+    fenceGap.lines.length + " route(s); the shared inline-cond overlay catches them" +
+    (fenceGap.lines.length ? ":\n" + fenceGap.lines.map((l) => "                    " + l).join("\n") : "") + "\n");
+  for (const b of fenceGap.bad) broken.push("SHARED FENCE TABLE: " + b);
 
   // 4 — the floor. The only remaining defence against a corpus that renders
   // nothing and passes.
@@ -921,8 +961,10 @@ async function main() {
   return bad ? 1 : 0;
 }
 
-// Importable (nothing imports it today; the guard keeps that door honest and
-// matches breakpoint-sweep.mjs / smoke.mjs) — only run when executed.
+// Importable (__binding_census.mjs imports scanControls from here for its
+// population-split arm, rather than shipping a second control scanner that could
+// disagree with this one; the guard keeps that door honest and matches
+// breakpoint-sweep.mjs / smoke.mjs) — only run when executed.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main()
     .then((code) => process.exit(code))

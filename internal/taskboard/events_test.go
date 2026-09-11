@@ -314,43 +314,66 @@ func TestPoll_Delta_ReListsExactlyOnce(t *testing.T) {
 	}
 }
 
-func TestPoll_DrainWalksPagesWithoutReListingPerPage(t *testing.T) {
-	// A cold cursor (0) sits behind the whole backlog. The catch-up walk must
-	// page forward WITHOUT re-listing per page — the one re-list is owed at the
-	// end. Three full pages then a final empty one: 4 polls, 1 re-list.
-	cs := newCountingServer(t,
-		TaskEventsPage{OK: true, Events: []TaskEvent{{ID: 100}}, Cursor: 100, HasMore: true},
-		TaskEventsPage{OK: true, Events: []TaskEvent{{ID: 200}}, Cursor: 200, HasMore: true},
-		TaskEventsPage{OK: true, Events: []TaskEvent{{ID: 300}}, Cursor: 300, HasMore: true},
-		TaskEventsPage{OK: true, Cursor: 300},
-	)
-	m := pollModel(cs, steadyClock())
+func TestPoll_DrainSeeksTheTipAndReListsExactlyOnce(t *testing.T) {
+	// A cold cursor (0) sits behind the whole backlog. The catch-up must reach
+	// the tip WITHOUT re-listing per page — the one re-list is owed at the end —
+	// and it must reach it by SEEKING rather than walking (events_seek_test.go
+	// owns the request budget; this test owns the re-list contract around it).
+	//
+	// This replaces the old three-page-walk version. The invariant it guarded is
+	// unchanged and still asserted here; what changed is how the cursor travels,
+	// so scripting three walked pages would now measure a path the loop no longer
+	// takes.
+	f := &syntheticFeed{tip: 12345}
+	m := seekModel(t, f)
 
 	relists := 0
-	for i := 0; i < 4; i++ {
-		nm, cmd := m.handleEventsPoll(eventsPollMsg{gen: m.eventsGen})
-		m = nm
-		res := firstEventsResult(t, runCmd(cmd))
-		nm2, cmd2 := m.handleEventsResult(res)
-		m = nm2
-		for _, out := range runCmd(cmd2) {
-			if snap, ok := out.(snapshotMsg); ok {
+	settled := false
+	queue := []tea.Msg{eventsPollMsg{gen: m.eventsGen}}
+	for len(queue) > 0 && len(queue) < 64 {
+		msg := queue[0]
+		queue = queue[1:]
+		var cmd tea.Cmd
+		switch v := msg.(type) {
+		case eventsPollMsg:
+			m, cmd = m.handleEventsPoll(v)
+		case eventsResultMsg:
+			if v.err == nil && !v.page.HasMore && len(v.page.Events) == 0 {
+				settled = true
+			}
+			m, cmd = m.handleEventsResult(v)
+		default:
+			continue
+		}
+		for _, out := range runCmd(cmd) {
+			switch o := out.(type) {
+			case snapshotMsg:
 				relists++
-				m, _ = m.applySnapshot(snap)
+				if !settled {
+					t.Fatal("re-listed during the catch-up — the walk to the tip must be list-free")
+				}
+				m, _ = m.applySnapshot(o)
+			case eventsPollMsg:
+				if !settled {
+					queue = append(queue, out)
+				}
+			case eventsResultMsg:
+				queue = append(queue, out)
 			}
 		}
-		if i < 3 && relists != 0 {
-			t.Fatalf("re-listed during the catch-up walk at page %d — the walk must be list-free", i)
-		}
 	}
+
 	if relists != 1 {
-		t.Fatalf("re-lists after a 3-page drain = %d, want exactly 1", relists)
+		t.Fatalf("re-lists after a full catch-up = %d, want exactly 1", relists)
 	}
-	if m.eventCursor != 300 {
-		t.Fatalf("cursor after the drain = %d, want 300", m.eventCursor)
+	if m.eventCursor != f.tip {
+		t.Fatalf("cursor after the catch-up = %d, want the tip %d", m.eventCursor, f.tip)
 	}
 	if m.drainOwed || m.drainPages != 0 {
 		t.Fatalf("drain state not cleared: owed=%v pages=%d", m.drainOwed, m.drainPages)
+	}
+	if m.pollInFlight {
+		t.Fatal("pollInFlight still held after the catch-up settled — the chain would never poll again")
 	}
 }
 

@@ -54,6 +54,17 @@ defmodule Barkpark.Tasks.Close do
   #     real rows cancelled with `""` in one minute, rc=0, `close_reason` absent.
   #     `done` and `blocked` are exempt BY NAME. There is NO override and NO
   #     default — the escape hatch is to pass the reason.
+  #   * CRITERIA RAISE (task-8ca0bd7a8ed50f14) — a `cancelled` or `blocked` close
+  #     whose `criteria` payload flips any criterion's `met` from false to TRUE
+  #     is REFUSED (`{:criteria_raised_on_abandon, indices}`). This is the exact
+  #     complement of the CRITERIA gate above: D289 exempts those two lifecycles
+  #     from being REQUIRED to prove criteria, and that exemption was silently
+  #     also letting them WRITE proof. Main's ruling: A CANCEL MAY ABANDON
+  #     ACCEPTANCE CRITERIA. IT MAY NEVER ASSERT THEM. Lowering met, clearing
+  #     evidence and editing criterion text stay allowed on both lifecycles, and
+  #     every exemption above is untouched — a cancel over UNMET criteria still
+  #     closes. There is NO override, for the same reason CANCEL REASON has
+  #     none: the honest move is to not assert it.
   #
   # NONE OF THIS IS AUTHORIZATION. `worker_id` arrives as a client-supplied body
   # param (`tasks_controller.ex` close/2), never from the api_token, so a caller
@@ -71,6 +82,7 @@ defmodule Barkpark.Tasks.Close do
       insert_mutation_event!: 3,
       insert_mutation_event!: 5,
       caller_stamp: 1,
+      actor_stamp: 2,
       merge_criteria: 2,
       merge_landed: 2,
       normalize_landed_list: 1,
@@ -82,6 +94,7 @@ defmodule Barkpark.Tasks.Close do
       check_worker_id: 1
     ]
 
+  alias Barkpark.Tasks.SessionId
   alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Plugins.Github.Acknowledgement
@@ -140,6 +153,7 @@ defmodule Barkpark.Tasks.Close do
     # Audit stamp: the api_token id that drove this close (nil for internal
     # callers), threaded into the task.closed mutation_event's document map.
     caller_token_id = Keyword.get(opts, :caller_token_id)
+    session = Keyword.get(opts, :session)
     # The two LOUD overrides (PDS-D288/D289). Each is a non-empty reason string;
     # absent (or blank) means "no override", and the corresponding gate refuses.
     overrides = %{
@@ -183,6 +197,7 @@ defmodule Barkpark.Tasks.Close do
           criteria,
           landed,
           caller_token_id,
+          session,
           overrides
         )
     end
@@ -373,6 +388,7 @@ defmodule Barkpark.Tasks.Close do
           "source" => "github_merge_event",
           "indices" => indices,
           "asserted_worker" => worker_id,
+          "prs" => asserted_prs(landed),
           "landed" => landed_summary(landed),
           "ts" => ts_iso
         })
@@ -432,6 +448,7 @@ defmodule Barkpark.Tasks.Close do
          criteria,
          landed,
          caller_token_id,
+         session,
          overrides
        ) do
     result =
@@ -520,6 +537,13 @@ defmodule Barkpark.Tasks.Close do
                      # are unmet" is the wrong thing to say — re-read first.
                      :ok <- check_work_digest(doc, observed_rev_opt),
                      :ok <- check_criteria_payload(doc, criteria),
+                     # THE RAISE GATE (task-8ca0bd7a8ed50f14). Runs AFTER the payload
+                     # dry-run so a malformed entry keeps its own error, and
+                     # BEFORE D289 because D289 is exempt on exactly the two
+                     # lifecycles this gate exists for. Main's ruling, verbatim:
+                     # A CANCEL MAY ABANDON ACCEPTANCE CRITERIA. IT MAY NEVER
+                     # ASSERT THEM.
+                     :ok <- check_criteria_raise(doc, new_status, criteria),
                      # AHEAD of the criteria gate, and a test caught why. The
                      # acknowledgement criterion IS an acceptance criterion, so
                      # with the order reversed D289 fires first and the caller
@@ -574,11 +598,12 @@ defmodule Barkpark.Tasks.Close do
                            artifact_record,
                            worker_id
                          ),
-                         caller_token_id
+                         caller_token_id,
+                         session
                        ) do
                   # THE CLOSER IS NAMED ON EVERY CLOSE (pds-bl-close-audit-gaps).
                   #
-                  # `apply_close_update/9` stamps `closed_by` into the CLAIM, so
+                  # `apply_close_update/10` stamps `closed_by` into the CLAIM, so
                   # a row that was never claimed took its `_ ->` arm and the
                   # whole close — document and event alike — named nobody.
                   # Measured on the guerrilla ledger 2026-09-06: 139 of 6,617
@@ -618,7 +643,20 @@ defmodule Barkpark.Tasks.Close do
                       @event_task_closed,
                       observed_rev,
                       "api",
-                      Map.put(caller_stamp(caller_token_id), "closed_by", worker_id)
+                      # tlv-bl-events-actor-attribution: `closed_by` alone
+                      # names the actor but not the LEASE it acted on, so two
+                      # closes by the same worker across a re-claim are
+                      # indistinguishable on the feed. `actor` adds the epoch
+                      # the CAS actually fenced on, read from the row AS
+                      # WRITTEN (`updated`) rather than from the request, so
+                      # the event records what committed. A claimless close
+                      # (container / root rows) stamps no `actor` key at all.
+                      caller_stamp(caller_token_id)
+                      |> Map.put("closed_by", worker_id)
+                      |> Map.merge(
+                        actor_stamp(worker_id, get_in(updated.content, ["claim", "epoch"]))
+                      )
+                      |> Map.merge(SessionId.session_stamp(session))
                     )
 
                   unblocked = cascade_unblock_dependents!(updated)
@@ -653,7 +691,7 @@ defmodule Barkpark.Tasks.Close do
   end
 
   # A REPLAY, not a race: this exact worker already closed this row to this
-  # exact status. `closed_by` is stamped by `apply_close_update/9` on every
+  # exact status. `closed_by` is stamped by `apply_close_update/10` on every
   # close that carries a claim, so it is the authorship record, and comparing
   # it to the caller is what separates "your own write landed" from "somebody
   # else got here first".
@@ -722,6 +760,81 @@ defmodule Barkpark.Tasks.Close do
     case merge_criteria(content, criteria) do
       {:ok, _dry_run} -> :ok
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # THE RAISE GATE (task-8ca0bd7a8ed50f14) — the WRITING half of the honesty
+  # exemptions, which nothing guarded.
+  #
+  # Every honesty gate on this path exempts `cancelled` and `blocked` BY NAME,
+  # and that is right for the REQUIRING half: abandoning acceptance criteria is
+  # what cancelling MEANS. It is wrong for the WRITING half, because the same
+  # command that abandons the row can flip a criterion to met on its way out and
+  # the exemption removes the only thing that was stopping it. MEASURED
+  # 2026-09-08 on the live server: `close … cancelled --set criteria:=[{met:
+  # true}]` and the identical `blocked` close both returned EXIT 0 over a
+  # `"merge_gate" => true` criterion, leaving met=true on a terminal row with no
+  # override and no autostamp trace — while `bp task stamp --met` on the SAME
+  # criterion refuses at exit 5 and names its own detector. One door guarded and
+  # loud, another unguarded and silent, both writing the same field.
+  #
+  # SCOPED TO RAISING, and to raising only. Lowering `met`, clearing evidence
+  # and editing criterion text all still land on a cancel — a closer correcting
+  # the record downward is the honest direction, and refusing it would make
+  # cancelling harder, which the row's own criterion 2 rules out. The predicate
+  # is a met-bit DIFF against the doc as read inside this txn, not a scan of the
+  # payload's shape: a text-keyed entry, an index-keyed entry and a re-assert of
+  # an already-met criterion all resolve through `merge_criteria/2` first, so
+  # none of them can route around it and an idempotent no-op is not punished.
+  #
+  # NOT limited to `merge_gate` criteria. The gate that made this measurable was
+  # a merge gate, but the principle is about the LIFECYCLE, not the marker: a
+  # cancelled row asserting ANY criterion it never proved is the same lie in a
+  # smaller font.
+  defp check_criteria_raise(_doc, status, _criteria)
+       when status not in ~w(cancelled blocked),
+       do: :ok
+
+  defp check_criteria_raise(_doc, _status, []), do: :ok
+
+  defp check_criteria_raise(%Document{content: content}, _status, criteria)
+       when is_list(criteria) do
+    case raised_criteria_indices(content, criteria) do
+      [] -> :ok
+      indices -> {:error, {:criteria_raised_on_abandon, indices}}
+    end
+  end
+
+  # A non-list payload is `:invalid_criteria`, which `check_criteria_payload/2`
+  # already refused one line earlier. Falling through as :ok here keeps THAT the
+  # error the caller hears rather than shadowing it with this one.
+  defp check_criteria_raise(_doc, _status, _criteria), do: :ok
+
+  # The met-bit diff. `merge_criteria/2` is pure over the content map, so this
+  # is the same dry-run the payload check just made, read for a different fact.
+  # An error is impossible here in practice (the payload check ran first) and is
+  # answered `[]` rather than crashing, so this gate can never be the one that
+  # reports a malformed payload.
+  defp raised_criteria_indices(content, criteria) do
+    case merge_criteria(content, criteria) do
+      {:ok, merged} ->
+        stored = met_bits(content)
+
+        merged
+        |> met_bits()
+        |> Enum.with_index()
+        |> Enum.filter(fn {met, index} -> met and not Enum.at(stored, index, false) end)
+        |> Enum.map(fn {_met, index} -> index end)
+
+      {:error, _reason} ->
+        []
+    end
+  end
+
+  defp met_bits(content) do
+    case Map.get(content, "acceptance_criteria") do
+      list when is_list(list) -> Enum.map(list, &(Map.get(&1, "met") == true))
+      _ -> []
     end
   end
 
@@ -934,7 +1047,7 @@ defmodule Barkpark.Tasks.Close do
   defp check_close_artifact(%Document{} = doc, "done", reason, landed, override_reason) do
     cond do
       close_artifact_exempt?(doc) -> {:ok, nil}
-      close_artifact?(reason, landed) -> {:ok, nil}
+      close_artifact?(reason, landed, stored_landed(doc)) -> {:ok, nil}
       is_nil(override_reason) -> {:error, :close_reason_needs_artifact}
       true -> {:ok, %{"reason" => override_reason, "close_reason" => reason}}
     end
@@ -962,7 +1075,7 @@ defmodule Barkpark.Tasks.Close do
   #
   # returned rc=0 and printed `✓ the store holds it — lifecycle_status=cancelled`.
   # Read back: lifecycle `cancelled`, `close_reason` ABSENT, and no record
-  # anywhere of why the work was abandoned. `apply_close_update/9` writes
+  # anywhere of why the work was abandoned. `apply_close_update/10` writes
   # `close_reason` only for a non-empty binary (blank never clobbers a stored
   # value — right for a replay, and the reason this landed silently), so a blank
   # reason on a first close writes NOTHING and says so to nobody. That is the
@@ -1030,12 +1143,48 @@ defmodule Barkpark.Tasks.Close do
   # `$ ` (the shell-prompt convention every close packet in this repo uses).
   @run_block ~r/```|(?:^|\n)[ \t]*\$ \S/
 
-  defp close_artifact?(reason, landed) do
+  # THREE ARMS, AND THE ORDER IS THE POINT (cch-w63). The STRUCTURED field is
+  # asked first and second; prose is the last resort, not the first.
+  #
+  #   1. the caller's `landed` digest — what this close asserts.
+  #   2. the row's STORED `content.landed` — what the merge path already
+  #      RECORDED, at merge time, without anyone being awake.
+  #   3. the prose reason.
+  #
+  # ARM 2 IS THE NEW ONE AND IT CLOSES A MEASURED HOLE. `POST
+  # /v1/tasks/:id/landed` (Tasks.Landed, PR #14993) is called by
+  # .github/workflows/landed-mark.yml on every push to main and writes
+  # `content.landed = %{"prs" => [...], "commits" => [...]}` on the row the
+  # squash body's `Task:` trailer names. That is the structured row-to-PR link
+  # this gate exists to demand — and until now the gate could not see it: it
+  # read ONLY the digest the CLOSER passed. A row whose merge sha was recorded
+  # by CI days earlier still had to have the same two facts RETYPED INTO PROSE
+  # (`#17092 ... 3aea6e99a`) before it could close done, and the `@pr_number` +
+  # `@hex_sha` regexes below are what accepted the retyping. So the machine
+  # already held the answer and made a human reconstruct it from a sentence,
+  # which is the reconstruction the structured field was built to end.
+  #
+  # IT CANNOT WEAKEN THE GATE. `landed_artifact?/1` is unchanged and is the same
+  # predicate all three arms are judged by: a PR number AND a 7-40 hex sha. A
+  # stored digest that names only a PR, only a commit, or neither still fails
+  # arm 2 exactly as a caller-supplied one does, and a row with no
+  # `content.landed` at all reaches arm 3 with the behaviour it has today. The
+  # only closes this admits are closes whose evidence the SERVER ITSELF wrote.
+  defp close_artifact?(reason, landed, stored) do
     landed_artifact?(landed) or
+      landed_artifact?(stored) or
       (is_binary(reason) and
          (Regex.match?(@run_block, reason) or
             (Regex.match?(@pr_number, reason) and Regex.match?(@hex_sha, reason))))
   end
+
+  # The row's own landing record, as the merge path left it. `nil` for a row
+  # that never landed — `landed_artifact?/1`'s non-map clause reads that as no
+  # artifact, so an absent key is never an accidental pass.
+  defp stored_landed(%Document{content: content}) when is_map(content),
+    do: Map.get(content, "landed")
+
+  defp stored_landed(_doc), do: nil
 
   # The structured twin of the prose form: a land digest that names BOTH a PR and
   # a commit. `%{"prs" => [...], "commit" => <sha>}` is written by the lead seal
@@ -1065,7 +1214,7 @@ defmodule Barkpark.Tasks.Close do
 
   defp unmet_after_autostamp(%Document{content: content}, landed, ack_override) do
     autostamped =
-      if is_map(landed) and map_size(landed) > 0 do
+      if is_map(landed) and map_size(landed) > 0 and witnessed_prs(content, landed) != [] do
         content
         |> merge_gate_synthetics("", MapSet.new())
         |> MapSet.new(&Map.get(&1, "index"))
@@ -1171,7 +1320,8 @@ defmodule Barkpark.Tasks.Close do
          criteria,
          landed,
          override_record,
-         caller_token_id
+         caller_token_id,
+         session
        ) do
     new_rev = generate_rev()
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
@@ -1186,6 +1336,16 @@ defmodule Barkpark.Tasks.Close do
             claim
             |> Map.put("closed_by", worker_id)
             |> Map.put("closed_at", ts_iso)
+            # WHICH SESSION sealed the row (task-f79e39f4992749a5). `closed_by`
+            # is the LANE worker id, so a close by a woken predecessor of the
+            # same lane was indistinguishable from the live session's.
+            # `closed_session` records the server-derived session beside it and
+            # leaves `session` / `session_origin` alone, so a reader can still
+            # see the claim-vs-close split. Attribution only; the close CAS
+            # still fences on `worker + epoch` exactly as before.
+            |> then(fn c ->
+              if is_binary(session), do: Map.put(c, "closed_session", session), else: c
+            end)
 
           doc.content
           |> Map.put("lifecycle_status", new_status)
@@ -1272,6 +1432,38 @@ defmodule Barkpark.Tasks.Close do
     # names them as caller-asserted rather than verified. Both ride this single
     # rev-CAS write, so an autostamp and its confession land together or not at
     # all — the same discipline `close_override` already follows.
+
+    # THE CLOSE-BODY DOOR (cch-w56-bl). `--set criteria:=[…]` flips the identical
+    # `met` bit `Tasks.Stamp` guards, and nothing on this path ever asked whether
+    # the criterion was a merge gate. A `done` close is stopped only
+    # INCIDENTALLY, by the D289 criteria gate counting unmet criteria; a
+    # `cancelled` close is exempt from every honesty gate on this path BY NAME —
+    # correct on its own, since abandoning acceptance criteria is what cancelling
+    # means, and wrong in combination, because the same command can flip a
+    # declared gate to met on its way out. Measured on the live server: exit
+    # zero, no flag, no marker check, no trace, and the met bit is what survives.
+    #
+    # A RECEIPT, NOT A REFUSAL. Refusing here would strand the legitimate arrears
+    # sweep — a lead closing a genuinely merged, fully-green carrier by hand is
+    # how 215 of these have been stamped — so the close still succeeds and the
+    # ledger now names what was asserted. It is computed from the CALLER's own
+    # criteria, deliberately BEFORE the synthetics are appended below: the
+    # autostamp has its own `"close"` record, and counting its indices here
+    # would confess the same act twice under two different names.
+    new_content =
+      merge_autostamp_record(
+        new_content,
+        "close_body_flips",
+        close_body_flip_record(
+          doc,
+          criteria,
+          worker_id,
+          caller_token_id,
+          new_status,
+          ts_iso
+        )
+      )
+
     autostamps = autostamp_merge_gate(doc, criteria, worker_id, new_status, landed, ts_iso)
     criteria = if is_list(criteria), do: criteria ++ autostamps, else: criteria
 
@@ -1279,7 +1471,14 @@ defmodule Barkpark.Tasks.Close do
       merge_autostamp_record(
         new_content,
         "close",
-        close_autostamp_record(autostamps, worker_id, caller_token_id, landed, ts_iso)
+        close_autostamp_record(
+          autostamps,
+          worker_id,
+          caller_token_id,
+          landed,
+          witnessed_prs(doc.content, landed),
+          ts_iso
+        )
       )
 
     with {:ok, new_content} <- merge_criteria(new_content, criteria) do
@@ -1354,9 +1553,13 @@ defmodule Barkpark.Tasks.Close do
   # computation — a second traversal could disagree with the one that wrote.
   defp autostamp_merge_gate(%Document{} = doc, criteria, worker_id, "done", landed, ts_iso)
        when is_map(landed) and map_size(landed) > 0 and is_list(criteria) do
-    targeted = MapSet.new(criteria, &Map.get(&1, "index"))
-    evidence = compose_merge_gate_evidence(doc, worker_id, landed, ts_iso)
-    merge_gate_synthetics(doc.content, evidence, targeted)
+    if witnessed_prs(doc.content, landed) == [] do
+      []
+    else
+      targeted = MapSet.new(criteria, &Map.get(&1, "index"))
+      evidence = compose_merge_gate_evidence(doc, worker_id, landed, ts_iso)
+      merge_gate_synthetics(doc.content, evidence, targeted)
+    end
   end
 
   defp autostamp_merge_gate(_doc, _criteria, _worker, _status, _landed, _ts_iso), do: []
@@ -1383,9 +1586,10 @@ defmodule Barkpark.Tasks.Close do
   #     `verified: true`.
   @autostamp_key "merge_gate_autostamp"
 
-  defp close_autostamp_record([], _worker_id, _caller_token_id, _landed, _ts_iso), do: nil
+  defp close_autostamp_record([], _worker_id, _caller_token_id, _landed, _witnessed, _ts_iso),
+    do: nil
 
-  defp close_autostamp_record(autostamps, worker_id, caller_token_id, landed, ts_iso) do
+  defp close_autostamp_record(autostamps, worker_id, caller_token_id, landed, witnessed, ts_iso) do
     %{
       "verified" => false,
       "source" => "close_landed_digest",
@@ -1393,9 +1597,63 @@ defmodule Barkpark.Tasks.Close do
       "asserted_worker" => worker_id,
       "authenticated_token_id" => caller_token_id,
       "landed" => landed_summary(landed),
+      "witnessed_prs" => witnessed,
       "ts" => ts_iso
     }
   end
+
+  # THE CLOSE-BODY FLIP RECORD (cch-w56-bl), in `close_autostamp_record/6`'s
+  # shape and under its key: one act, one record, naming every declared merge
+  # gate this close body raised from unmet to met.
+  #
+  # IT KEYS ON THE TRANSITION, not on being named. A criterion already met is
+  # not raised by a close that mentions it, so mentioning it asserts nothing —
+  # the same reason `merge_gate_synthetics/3` skips an already-met gate. And it
+  # keys on the STORED criterion via `Criteria.merge_gated?/1`, never on the
+  # caller's own text: the verdict has to come from what the ledger holds.
+  #
+  # `lifecycle_status` is recorded because it is the whole point. Every honesty
+  # gate on this path exempts `cancelled` by name — which is why that arm flipped
+  # declared gates at exit zero — so a reader must be able to see, on the record
+  # itself, which close carried the flip.
+  #
+  # A close that raised no gate writes nothing (the nil clause below), so an
+  # honest close stays byte-identical.
+  defp close_body_flip_record(%Document{} = doc, criteria, worker_id, token_id, status, ts_iso)
+       when is_list(criteria) do
+    stored = Map.get(doc.content || %{}, "acceptance_criteria")
+
+    indices =
+      criteria
+      |> Enum.filter(fn update ->
+        is_map(update) and Map.get(update, "met") == true and
+          raises_a_gate?(Criteria.at(stored, Map.get(update, "index")))
+      end)
+      |> Enum.map(&Map.get(&1, "index"))
+
+    case indices do
+      [] ->
+        nil
+
+      _ ->
+        %{
+          "verified" => false,
+          "source" => "close_body_criteria",
+          "indices" => indices,
+          "lifecycle_status" => status,
+          "asserted_worker" => worker_id,
+          "authenticated_token_id" => token_id,
+          "ts" => ts_iso
+        }
+    end
+  end
+
+  defp close_body_flip_record(_doc, _criteria, _worker, _token, _status, _ts), do: nil
+
+  defp raises_a_gate?(nil), do: false
+
+  defp raises_a_gate?(entry),
+    do: Map.get(entry, "met") != true and Criteria.merge_gated?(entry)
 
   # A close that autostamped nothing writes nothing (mirrors
   # `merge_override_record/2`: an honest close leaves no receipt to explain
@@ -1497,6 +1755,96 @@ defmodule Barkpark.Tasks.Close do
     "auto: UNVERIFIED merge-gate autostamp — no merge observed; caller-asserted land digest " <>
       "from worker #{inspect(worker_id)} (epoch #{epoch}) naming #{landed_summary(landed)} at #{ts_iso}"
   end
+
+  # THE WITNESS (cch-w65). The close-time autostamp used to fire on the caller's
+  # bytes alone: any non-empty `landed` map on a terminal `done` close stamped
+  # every `merge_gate: true` criterion met, and `unmet_after_autostamp/3` deducted
+  # those same indices from the D289 criteria gate, so the close carried no
+  # `close_override` record either. Nothing checked WHO was closing or WHETHER
+  # the cited PR had anything to do with this task. A scratch worker paid a merge
+  # gate citing a foreign epic's merged PR that it had never touched, and the
+  # ledger stamped it.
+  #
+  # This closes the PR-REFERENCES-TASK axis, and it closes it against the server's
+  # OWN observation rather than the caller's assertion. The `pull_request` merge
+  # webhook resolves a merged PR to a task through THAT PR's `Task: <doc_id>`
+  # trailer (`Plugins.Github.MergeEvents`), and `write_reconcile/5` persists what
+  # it saw under `@autostamp_key`'s "merge_event" sub-key. So the ledger already
+  # holds a verified PR→task join; the close path simply never read it. Now it
+  # does: a close-time autostamp fires only for a PR the server watched arrive on
+  # THIS task, and an unwitnessed assertion stamps nothing.
+  #
+  # The refusal is deliberately NOT a new error. The gate is left unmet, so the
+  # existing criteria gate refuses the close and names the index, and a closer who
+  # means it passes `criteria_override` — which is RECORDED in
+  # `close_override.criteria`. That is the whole change in one sentence: a silent
+  # fabrication becomes a signed one.
+  #
+  # NO NETWORK CALL IS ADDED, and none may be: this runs under
+  # `pg_advisory_xact_lock`, where a GitHub round-trip would trade a fabrication
+  # bug for an availability bug.
+  #
+  # WHAT THIS DOES NOT CLOSE: the ACTOR-AUTHORITY axis. `worker_id` is a
+  # client-supplied body param (see the "NONE OF THIS IS AUTHORIZATION" note in
+  # this module's header) and proves nothing, and `caller_token_id` — the bearer
+  # the server really authenticated — carries no lead/reviewer role this ledger
+  # models, so there is no authority to check it against. A caller who holds a
+  # write token can still name any worker. What they can no longer do is have the
+  # server manufacture a proof for a PR it never saw land here.
+  defp witnessed_prs(content, landed) when is_map(content) and is_map(landed) do
+    asserted = asserted_prs(landed)
+
+    case asserted do
+      [] ->
+        []
+
+      _ ->
+        observed = MapSet.new(observed_prs(content))
+        Enum.filter(asserted, &MapSet.member?(observed, &1))
+    end
+  end
+
+  defp witnessed_prs(_content, _landed), do: []
+
+  # The PR numbers a caller's land digest names, as strings — the SAME key
+  # vocabulary `landed_summary/1` reads, so the evidence sentence and the witness
+  # join can never disagree about which PRs were asserted.
+  defp asserted_prs(landed) when is_map(landed) do
+    (Map.get(landed, "prs") || Map.get(landed, safe_atom("prs")))
+    |> normalize_landed_list()
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp asserted_prs(_landed), do: []
+
+  # The PR numbers the server itself observed merging into THIS task. Records
+  # written before this key existed carry only the prose summary, so those are
+  # read back through the `#<number>` shape `landed_summary/1` emits — a whole
+  # token, never a substring, so a witnessed #45 cannot vouch for an asserted
+  # #456.
+  defp observed_prs(content) do
+    case get_in(content, [@autostamp_key, "merge_event"]) do
+      %{} = record ->
+        case asserted_prs(record) do
+          [] -> summary_prs(Map.get(record, "landed"))
+          prs -> prs
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  defp summary_prs(summary) when is_binary(summary) do
+    ~r/#(\d+)/
+    |> Regex.scan(summary)
+    |> Enum.map(fn [_, number] -> number end)
+    |> Enum.uniq()
+  end
+
+  defp summary_prs(_summary), do: []
 
   defp landed_summary(landed) do
     prs = normalize_landed_list(Map.get(landed, "prs") || Map.get(landed, safe_atom("prs")))

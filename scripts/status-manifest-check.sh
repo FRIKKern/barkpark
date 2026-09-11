@@ -41,8 +41,21 @@
 # The Elixir emitters need no check here: Render.StatusVocab reads THIS manifest
 # at compile time, so they cannot diverge by construction.
 #
-# Usage: scripts/status-manifest-check.sh [--write]
+# Usage: scripts/status-manifest-check.sh [--write | --selftest]
+#
+#   --selftest — prove every part above can still RED. Until cgsi-bl-status-
+#     manifest-no-selftest this gate had NO selftest at all (its only modes were
+#     the bare check and --write), so none of its five parts had ever been shown
+#     to fail on a planted violation: a comparator that quietly stopped
+#     discriminating would have gone on printing PASS lines forever. The harness
+#     builds a THROWAWAY copy of the tree (this script plus the six files it
+#     reads), plants ONE violation per arm, re-invokes THIS script inside that
+#     copy — so the assertions drive the shipping comparator, not a second copy
+#     of it — and then restores the planted file and re-runs to prove the arm
+#     greens again. It plants NOTHING in this repo.
 set -euo pipefail
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$(dirname "$0")/.."
 
 MANIFEST="design/status-manifest.json"
@@ -57,14 +70,226 @@ WEB_TS="web/lib/component-projections.ts"
 MOBILE_TSX="apps/mobile/src/papers/portabledoc/blocks/taskboard.tsx"
 # `MODE="${1:-check}"` used to pass ANY argument straight through to the Python,
 # which treats everything that is not `--write` as check mode — so a typo, or a
-# `--selftest` this gate does not have, ran the ordinary check and exited 0.
-# Refuse what we do not understand instead.
+# `--selftest` this gate did not have, ran the ordinary check and exited 0.
+# Refuse what we do not understand instead. `--selftest` is whitelisted here
+# (cgsi-bl-status-manifest-no-selftest) and handled below, BEFORE the Python:
+# it never reaches the check body's argv.
 MODE="check"
 if [ "${1:-}" = "--write" ]; then
   MODE="--write"
+elif [ "${1:-}" = "--selftest" ]; then
+  MODE="selftest"
 elif [ -n "${1:-}" ]; then
-  echo "status-manifest-check: unknown argument '$1' (expected --write or none)" >&2
+  echo "status-manifest-check: unknown argument '$1' (expected --write, --selftest or none)" >&2
   exit 2
+fi
+
+# ── selftest: prove each part can still RED, and greens again on restore ─────
+#
+# The six files above ARE the gate's whole input. Each arm copies them (plus
+# this script) into a throwaway tree, plants exactly ONE violation, and runs the
+# copied script there — `cd "$(dirname "$0")/.."` makes the copy read the
+# throwaway tree, so the REAL parts run against the planted corpus and this repo
+# is never touched. Every arm asserts three things, in this order:
+#   1. the PLANT actually changed bytes (a silently-failed plant would make the
+#      green that follows vacuous — the planter exits 3 and the arm fails),
+#   2. the gate exits 1 and NAMES the part it reds in,
+#   3. restoring that one file from the real tree greens the gate again — so the
+#      red is attributable to the plant and not to a broken throwaway tree.
+ST_PLANT_PY='
+import json, re, sys
+root, kind = sys.argv[1], sys.argv[2]
+CSS  = root + "/api/assets/paper-surface/paper-surface.css"
+GO   = root + "/internal/pdrender/gridblocks.go"
+TSX  = root + "/js/packages/react/src/inline.tsx"
+MOB  = root + "/apps/mobile/src/papers/portabledoc/blocks/taskboard.tsx"
+MAN  = root + "/design/status-manifest.json"
+
+def rd(p): return open(p).read()
+def wr(p, s): open(p, "w").write(s)
+
+man = json.load(open(MAN))
+first_role = man["roles"][0]["role"]
+
+def go_first_value(txt, name, newval):
+    mm = re.search(r"var %s = map\[string\]string\{(.*?)\n\}" % name, txt, re.DOTALL)
+    if not mm:
+        print("PLANT FAILED: var %s not found" % name, file=sys.stderr); sys.exit(3)
+    body = mm.group(1)
+    em = re.search(r"\"([a-z_]+)\":\s*\"([^\"]*)\"", body)
+    if not em:
+        print("PLANT FAILED: no entry inside %s" % name, file=sys.stderr); sys.exit(3)
+    s, e = mm.start(1) + em.start(2), mm.start(1) + em.end(2)
+    return txt[:s] + newval + txt[e:], "drifted %s[%s] from %r to %r" % (name, em.group(1), em.group(2), newval)
+
+if kind == "tone":
+    txt = rd(CSS)
+    mk = re.search(r"(/\* BEGIN GENERATED: status-tones[^\n]*\*/\n)(.*?)(\n/\* END GENERATED: status-tones \*/)", txt, re.DOTALL)
+    if not mk:
+        print("PLANT FAILED: tone markers not found", file=sys.stderr); sys.exit(3)
+    blk = mk.group(2)
+    tm = re.search(r"(--st-[a-z0-9-]+:\s*)([^;]+)(;)", blk)
+    if not tm:
+        print("PLANT FAILED: no --st-* token in the generated block", file=sys.stderr); sys.exit(3)
+    newblk = blk[:tm.start(2)] + "#010203" + blk[tm.end(2):]
+    out, note = txt[:mk.start(2)] + newblk + txt[mk.end(2):], "hand-drifted the %svalue in the generated tone block to #010203" % tm.group(1)
+    path = CSS
+elif kind == "orphan-glyph":
+    txt = rd(CSS); out = txt + "\n.bp-g--zzdrift::before { content: \"?\"; }\n"
+    note = "hand-added an orphan glyph class .bp-g--zzdrift (no such manifest role)"; path = CSS
+elif kind == "missing-glyph":
+    txt = rd(CSS); out = txt.replace(".bp-g--" + first_role, ".bp-hidden-g--" + first_role)
+    note = "renamed the .bp-g--%s rule out of existence (manifest role loses its glyph class)" % first_role; path = CSS
+elif kind == "go-glyph":
+    txt = rd(GO); out, note = go_first_value(txt, "roleGlyph", "¤"); path = GO
+elif kind == "go-label":
+    txt = rd(GO); out, note = go_first_value(txt, "roleLabel", "drifted"); path = GO
+elif kind == "ts-reorder":
+    txt = rd(TSX)
+    am = re.search(r"STATUS_ROLES[^=]*=\s*\[(.*?)\n\]", txt, re.DOTALL)
+    if not am:
+        print("PLANT FAILED: STATUS_ROLES array not found", file=sys.stderr); sys.exit(3)
+    objs = list(re.finditer(r"\{[^{}]*\}", am.group(1), re.DOTALL))
+    if len(objs) < 2:
+        print("PLANT FAILED: fewer than two role objects in STATUS_ROLES", file=sys.stderr); sys.exit(3)
+    a, b = objs[0], objs[1]
+    inner = am.group(1)
+    swapped = inner[:a.start()] + b.group(0) + inner[a.end():b.start()] + a.group(0) + inner[b.end():]
+    out = txt[:am.start(1)] + swapped + txt[am.end(1):]
+    note = "swapped the first two STATUS_ROLES entries (manifest ORDER broken)"; path = TSX
+elif kind == "mobile-label":
+    txt = rd(MOB)
+    am = re.search(r"(?:export\s+)?const\s+ROLE_LABEL\b[^=]*=\s*\{(.*?)\n\}", txt, re.DOTALL)
+    if not am:
+        print("PLANT FAILED: ROLE_LABEL object not found", file=sys.stderr); sys.exit(3)
+    em = re.search(r"([A-Za-z_][A-Za-z0-9_]*\s*:\s*.)([^\x27\"]*)(.\s*,)", am.group(1))
+    if not em:
+        print("PLANT FAILED: no entry inside ROLE_LABEL", file=sys.stderr); sys.exit(3)
+    s, e = am.start(1) + em.start(2), am.start(1) + em.end(2)
+    out = txt[:s] + "Drifted" + txt[e:]
+    note = "hand-drifted the first ROLE_LABEL value to Drifted"; path = MOB
+else:
+    print("PLANT FAILED: unknown plant kind %r" % kind, file=sys.stderr); sys.exit(3)
+
+if out == txt:
+    print("PLANT FAILED: %s is byte-identical after planting %r" % (path, kind), file=sys.stderr)
+    sys.exit(3)
+wr(path, out)
+print(note)
+print(path)
+'
+
+st_selftest() {
+  local tmp bad=0 total=0
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  local -a INPUTS=(
+    "design/status-manifest.json"
+    "api/assets/paper-surface/paper-surface.css"
+    "internal/pdrender/gridblocks.go"
+    "js/packages/react/src/inline.tsx"
+    "web/lib/component-projections.ts"
+    "apps/mobile/src/papers/portabledoc/blocks/taskboard.tsx"
+  )
+
+  say() {
+    total=$((total + 1))
+    if [ "$2" -eq 0 ]; then echo "  ok    $1"; else echo "  FAIL  $1"; bad=$((bad + 1)); fi
+  }
+
+  mk_tree() {
+    local d="$1" f
+    rm -rf "$d"; mkdir -p "$d/scripts"
+    cp "$SELF" "$d/scripts/status-manifest-check.sh"
+    for f in "${INPUTS[@]}"; do
+      mkdir -p "$d/$(dirname "$f")"
+      cp "$ROOT/$f" "$d/$f"
+    done
+  }
+
+  run_tree() { # $1 tree, $2 output file -> echoes rc
+    local rc=0
+    bash "$1/scripts/status-manifest-check.sh" > "$2" 2>&1 || rc=$?
+    echo "$rc"
+  }
+
+  arm() { # $1 label, $2 plant kind, $3 expected part token in stderr
+    local label="$2" kind="$2" want="$3" d="$tmp/t" rc plantrc note path
+    label="$1"
+    mk_tree "$d"
+
+    # CONTROL: the throwaway tree, unplanted, must GREEN. A red here means the
+    # copy itself is broken and every "red" below would be unattributable.
+    rc="$(run_tree "$d" "$tmp/pre")"
+    if [ "$rc" -ne 0 ]; then
+      say "$label — pristine throwaway tree GREENS before planting (got $rc)" 1
+      sed 's/^/        /' "$tmp/pre"
+      return
+    fi
+
+    plantrc=0
+    python3 -c "$ST_PLANT_PY" "$d" "$kind" > "$tmp/plant" 2>&1 || plantrc=$?
+    if [ "$plantrc" -ne 0 ]; then
+      say "$label — plant applied (planter exit $plantrc)" 1
+      sed 's/^/        /' "$tmp/plant"
+      return
+    fi
+    note="$(sed -n '1p' "$tmp/plant")"
+    path="$(sed -n '2p' "$tmp/plant")"
+
+    rc="$(run_tree "$d" "$tmp/out")"
+    if [ "$rc" -eq 1 ] && grep -q "$want" "$tmp/out"; then
+      say "$label — RED (exit 1, \"$want\"): $note" 0
+    else
+      say "$label — expected exit 1 naming \"$want\", got $rc: $note" 1
+      sed 's/^/        /' "$tmp/out"
+      return
+    fi
+
+    # RESTORE: put the single planted file back; the same tree must GREEN again.
+    cp "$ROOT/${path#$d/}" "$path"
+    rc="$(run_tree "$d" "$tmp/post")"
+    if [ "$rc" -eq 0 ]; then
+      say "$label — GREEN again after restoring ${path#$d/}" 0
+    else
+      say "$label — restore should GREEN, got $rc" 1
+      sed 's/^/        /' "$tmp/post"
+    fi
+  }
+
+  echo "status-manifest-check --selftest (throwaway tree; plants nothing in this repo)"
+
+  arm "part 1 tone block"        tone           "part 1: FAILED"
+  arm "part 2 orphan glyph"      orphan-glyph   "part 2: FAILED"
+  arm "part 2 missing glyph"     missing-glyph  "part 2: FAILED"
+  arm "part 3 Go roleGlyph"      go-glyph       "part 3: FAILED"
+  arm "part 4 Go roleLabel"      go-label       "part 4: FAILED"
+  arm "part 5 TS role order"     ts-reorder     "part 5: FAILED"
+  arm "part 5b mobile label"     mobile-label   "part 5: FAILED"
+
+  # ARG DISPATCH — an unknown flag is still a refusal (2), not a silent check.
+  local rc=0
+  bash "$SELF" --no-such-flag > "$tmp/arg" 2>&1 || rc=$?
+  if [ "$rc" -eq 2 ] && grep -q -- "--no-such-flag" "$tmp/arg"; then
+    say "unknown argument -> exit 2, names the argument" 0
+  else
+    say "unknown argument -> exit 2, names the argument (got $rc)" 1
+    sed 's/^/        /' "$tmp/arg"
+  fi
+
+  echo ""
+  if [ "$bad" -eq 0 ]; then
+    echo "status-manifest-check --selftest: PASS ($total/$total)"
+    return 0
+  fi
+  echo "status-manifest-check --selftest: FAILED ($bad of $total case(s))"
+  return 1
+}
+
+if [ "$MODE" = "selftest" ]; then
+  st_selftest
+  exit $?
 fi
 
 python3 - "$MANIFEST" "$CSS" "$MODE" "$GO" "$REACT_TSX" "$WEB_TS" "$MOBILE_TSX" <<'PY'

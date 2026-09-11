@@ -56,12 +56,17 @@ on:
     branches: [main]
   workflow_dispatch:
   pull_request:
-    # Deliberately narrow: this trigger exists ONLY so the harness below is not
-    # orphaned. Being paths-filtered also keeps every name in this file out of
-    # the required set.
+    # Two reasons, and only two. The first two entries keep the harness below
+    # from being orphaned. The third is the DRIFT arm (2026-09-07,
+    # task-16df558f0d748713): an unclassified `schedule:` used to be discovered
+    # on main, where it disarmed the live probe for ~15h50m; a workflow-touching
+    # PR now answers the same question before the merge, in the harness job's
+    # `--config-only` step. Still paths-filtered, so every name in this file
+    # stays out of the required set (generator stage S4).
     paths:
       - "scripts/cron-overdue-probe.sh"
       - ".github/workflows/cron-overdue-probe.yml"
+      - ".github/workflows/**"
 
 permissions:
   contents: read
@@ -106,7 +111,19 @@ jobs:
 
       # The probe's own tripwire, first. If it stops being able to red on a
       # faked six-hour gap, everything below is decoration — and this run says
-      # so before it says anything about cron.
+      # so before it says anything about cron. That ordering is KEPT, on
+      # purpose: the step below still carries no `if:`, so a genuinely broken
+      # probe still skips it. What changed (2026-09-07, task-16df558f0d748713)
+      # is WHAT this step is allowed to be broken BY. It used to also assert
+      # that every scheduled workflow in the tree is classified — a fact about
+      # repo CONFIGURATION, not about whether the probe can detect a gap — so
+      # one unclassified `schedule:` skipped the live overdue read as if the
+      # tripwire itself had failed. Measured: 42 consecutive failing runs and
+      # the overdue check dark for ~15h50m (2026-09-07T01:09:42Z..~16:59Z),
+      # with main-gate-watch.yml — whose ONLY fallback is this probe, because
+      # scripts/main-gate-watch.test.sh forbids it a push arm — 238m past a 90m
+      # bound and nothing saying so. The selftest now asks only the mechanism
+      # question; the configuration question is the third step below.
       - name: Prove the probe can red on a faked gap (--selftest)
         run: bash scripts/cron-overdue-probe.sh --selftest
 
@@ -120,9 +137,29 @@ jobs:
           case "$rc" in
             0) exit 0 ;;
             1) echo "::error::A CRITICAL-CADENCE WORKFLOW IS SILENT AND COULD NOT BE FIRED (named above). Lag alone is no longer this verdict: a cron-only critical workflow past its bound is DISPATCHED by this probe (workflow_dispatch, run id printed above), so reaching exit 1 means one of four things — the dispatch was refused, the dispatched run never appeared, a workflow that HAS a push: arm has gone quiet anyway, or a critical workflow has no run row at all. Read which one is printed above; a re-run of this probe is not the remedy."; exit 1 ;;
-            2) echo "::error::THE TABLE AND THE TREE DISAGREE — a workflow carries a schedule: trigger with no classification line, or a critical cadence has no trigger fallback. An unclassified schedule is one nobody has decided about; classify it in scripts/cron-overdue-probe.sh."; exit 1 ;;
+            2) echo "::error::THE TABLE AND THE TREE DISAGREE — a workflow carries a schedule: trigger with no classification line, or a critical cadence has no trigger fallback. An unclassified schedule is one nobody has decided about; classify it in scripts/cron-overdue-probe.sh. THE CRON VERDICT ABOVE STILL STANDS: since 2026-09-07 the script runs the overdue read even on a drift and prints both verdicts, and this code is reached only when that read came back CLEAN — a scream (1) or an unreadable run list (3) owns the exit code instead."; exit 1 ;;
             3) echo "::error::UNKNOWN — the Actions run list could not be read, so this probe does not know whether anything fired. That is not a pass."; exit 1 ;;
             *) echo "::error::cron-overdue-probe.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
+          esac
+
+      # THE CONFIGURATION QUESTION, ASKED SEPARATELY AND ASKED LAST.
+      # `if: !cancelled()` and not the default `success()`: this step is the one
+      # that must survive a red above it, because the whole defect being fixed
+      # here (task-16df558f0d748713) was one question suppressing another. It is
+      # a REFUSAL, not a warning — it fails the step, fails the job, and fails
+      # the workflow run, so it renders exactly as loudly as the cron verdict
+      # does, on the same push:main check run the fleet already watches. What it
+      # no longer does is decide whether the live overdue read gets to run.
+      - name: Is every scheduled workflow classified? (--config-only)
+        if: ${{ !cancelled() }}
+        run: |
+          set -uo pipefail
+          rc=0
+          bash scripts/cron-overdue-probe.sh --config-only || rc=$?
+          case "$rc" in
+            0) exit 0 ;;
+            2) echo "::error::THE TABLE AND THE TREE DISAGREE — a workflow carries a schedule: trigger with no classification line, or a critical cadence has no trigger fallback. An unclassified schedule is one nobody has decided about; classify it in scripts/cron-overdue-probe.sh (class, interval, and a DATED note). This is a CONFIGURATION refusal and it is independent of the cron verdict in the step above — read both."; exit 1 ;;
+            *) echo "::error::cron-overdue-probe.sh --config-only exited $rc, which is not a verdict it defines"; exit 1 ;;
           esac
 
   cron-overdue-harness:
@@ -136,3 +173,13 @@ jobs:
         run: bash -n scripts/cron-overdue-probe.sh
       - name: Mutation proofs (--selftest)
         run: bash scripts/cron-overdue-probe.sh --selftest
+      # THE DRIFT, CAUGHT BEFORE IT IS ON MAIN. This job's pull_request paths
+      # now include `.github/workflows/**` for this step alone: adding a
+      # `schedule:` without a classification line is the exact change that
+      # disarmed the live probe for ~15h50m on 2026-09-07, and it was only ever
+      # discovered after the merge. Reads no run list and touches no network.
+      # This job is not in .github/required-checks.json and cannot block the
+      # merge — it is a visible red on the PR that names the missing line,
+      # which is the whole cost of the drift when it is caught here.
+      - name: Every scheduled workflow is classified (--config-only)
+        run: bash scripts/cron-overdue-probe.sh --config-only

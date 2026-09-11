@@ -98,6 +98,140 @@ defmodule Barkpark.PortableDoc.TableEditingTest do
       assert {:ok, ^table} = TableEditing.merge_cells(table, shape(table), [])
     end
 
+    test "projects one metadata-bearing canonical chain through a sanitized v2 cell lens" do
+      table = metadata_table()
+      before = :erlang.term_to_binary(table)
+
+      assert {:ok, projection} = TableEditing.project(table)
+
+      assert projection.rows == [
+               [
+                 [
+                   %{
+                     "type" => "link",
+                     "href" => "/before",
+                     "children" => [%{"type" => "text", "value" => "Before"}]
+                   }
+                 ],
+                 text("Canonical")
+               ]
+             ]
+
+      assert projection.shape == %{
+               "v" => 2,
+               "head" => %{"state" => "absent"},
+               "rows" => [
+                 %{
+                   "kind" => "array",
+                   "cells" => [
+                     %{
+                       "kind" => "inline-array",
+                       "inline" => %{
+                         "v" => 1,
+                         "anchors" => ["link", "text"],
+                         "opaque" => ["link", "text"]
+                       }
+                     },
+                     "inline-array"
+                   ]
+                 }
+               ]
+             }
+
+      refute inspect(projection.shape) =~ "opaque-values"
+      assert :erlang.term_to_binary(table) == before
+    end
+
+    test "protects metadata on an arbitrary recognized formatting role" do
+      inline = [
+        %{
+          "type" => "strong",
+          "children" => text("Bold"),
+          "vendor" => %{"source" => "import"}
+        }
+      ]
+
+      table = %{"id" => "marked", "type" => "table", "rows" => [[inline]]}
+
+      assert {:ok,
+              %{
+                rows: [[[%{"type" => "strong", "children" => [%{"type" => "text"}]}]]],
+                shape: %{
+                  "v" => 2,
+                  "rows" => [
+                    %{
+                      "cells" => [
+                        %{
+                          "inline" => %{
+                            "anchors" => ["strong", "text"],
+                            "opaque" => ["strong"]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }} = TableEditing.project(table)
+
+      change = [
+        %{
+          "area" => "body",
+          "row" => 0,
+          "column" => 0,
+          "content" => [%{"type" => "strong", "children" => text("Edited")}]
+        }
+      ]
+
+      assert {:ok, updated} = TableEditing.merge_cells(table, shape(table), change)
+
+      assert get_in(updated, ["rows", Access.at(0), Access.at(0), Access.at(0), "vendor"]) ==
+               %{"source" => "import"}
+    end
+
+    test "describes a protected content-map cell without exposing its metadata" do
+      cell = %{
+        "content" => [
+          %{"type" => "text", "value" => "Cell", "qa" => %{"keep" => "leaf"}}
+        ],
+        "cell-meta" => %{"keep" => true}
+      }
+
+      table = %{"id" => "content-map", "type" => "table", "rows" => [[cell]]}
+
+      assert {:ok, projection} = TableEditing.project(table)
+      assert projection.rows == [[text("Cell")]]
+
+      assert get_in(projection.shape, [
+               "rows",
+               Access.at(0),
+               "cells",
+               Access.at(0)
+             ]) == %{
+               "kind" => "content-map",
+               "inline" => %{"v" => 1, "anchors" => ["text"], "opaque" => ["text"]}
+             }
+
+      refute inspect(projection) =~ "keep"
+
+      change = [
+        %{"area" => "body", "row" => 0, "column" => 0, "content" => text("Edited")}
+      ]
+
+      assert {:ok, updated} = TableEditing.merge_cells(table, projection.shape, change)
+
+      assert get_in(updated, ["rows", Access.at(0), Access.at(0), "cell-meta"]) == %{
+               "keep" => true
+             }
+
+      assert get_in(updated, [
+               "rows",
+               Access.at(0),
+               Access.at(0),
+               "content",
+               Access.at(0)
+             ]) == %{"type" => "text", "value" => "Edited", "qa" => %{"keep" => "leaf"}}
+    end
+
     test "rejects unsupported reader dialects and lossy inline shapes without changing them" do
       base = %{"id" => "table", "type" => "table", "rows" => [[text("cell")]]}
 
@@ -127,7 +261,7 @@ defmodule Barkpark.PortableDoc.TableEditingTest do
         Map.put(base, "rows", []),
         Map.put(base, "rows", [[]]),
         Map.put(base, "rows", [[[%{"type" => "unknown", "value" => "lost"}]]]),
-        Map.put(base, "rows", [[[%{"type" => "text", "value" => "x", "meta" => true}]]]),
+        Map.put(base, "rows", [[[%{"type" => "text", "value" => "x", "marks" => []}]]]),
         Map.put(base, "rows", [[[%{"type" => "strong", "children" => []}]]]),
         Map.put(base, "rows", [
           [[%{"type" => "strong", "children" => [hd(strong("nested"))]}]]
@@ -175,12 +309,338 @@ defmodule Barkpark.PortableDoc.TableEditingTest do
       assert updated["table-meta"] == table["table-meta"]
     end
 
+    test "reattaches source metadata after merging canonical semantics into the same chain" do
+      table = metadata_table()
+      shape = shape(table)
+
+      changed = [
+        %{
+          "area" => "body",
+          "row" => 0,
+          "column" => 0,
+          "content" => [
+            %{
+              "type" => "link",
+              "href" => "/before",
+              "children" => text("After")
+            }
+          ]
+        }
+      ]
+
+      assert {:ok, updated} = TableEditing.merge_cells(table, shape, changed)
+
+      assert get_in(updated, ["rows", Access.at(0), Access.at(0)]) == [
+               %{
+                 "type" => "link",
+                 "href" => "/before",
+                 "children" => [
+                   %{
+                     "type" => "text",
+                     "value" => "After",
+                     "_key" => "text-source-key",
+                     "producer" => %{"offset" => 7}
+                   }
+                 ],
+                 "_key" => "link-source-key",
+                 "producer" => %{"relation" => "primary"},
+                 "opaque-values" => %{
+                   "nil" => nil,
+                   "empty-map" => %{},
+                   "empty-list" => [],
+                   "boolean" => false,
+                   "integer" => 1,
+                   "float" => 1.0
+                 }
+               }
+             ]
+
+      assert Enum.at(hd(updated["rows"]), 1) == text("Canonical")
+
+      assert project!(updated).rows == [
+               [
+                 [
+                   %{
+                     "type" => "link",
+                     "href" => "/before",
+                     "children" => text("After")
+                   }
+                 ],
+                 text("Canonical")
+               ]
+             ]
+
+      retargeted = put_in(hd(changed), ["content", Access.at(0), "href"], "/retargeted")
+
+      assert TableEditing.merge_cells(table, shape, [retargeted]) ==
+               {:error, :invalid_cells}
+
+      descriptor_path = ["rows", Access.at(0), "cells", Access.at(0), "inline"]
+
+      malformed_shapes = [
+        Map.put(shape, "v", 2.0),
+        put_in(shape, descriptor_path ++ ["v"], 1.0),
+        put_in(shape, descriptor_path ++ ["anchors"], []),
+        put_in(shape, descriptor_path ++ ["anchors"], ["text", "link"]),
+        put_in(shape, descriptor_path ++ ["opaque"], []),
+        put_in(shape, descriptor_path ++ ["opaque"], ["text", "link"]),
+        put_in(shape, descriptor_path ++ ["extra"], true)
+      ]
+
+      for malformed <- malformed_shapes do
+        assert TableEditing.merge_cells(table, malformed, changed) == {:error, :stale_shape}
+      end
+
+      assert get_in(updated, [
+               "rows",
+               Access.at(0),
+               Access.at(0),
+               Access.at(0),
+               "opaque-values"
+             ]) == %{
+               "nil" => nil,
+               "empty-map" => %{},
+               "empty-list" => [],
+               "boolean" => false,
+               "integer" => 1,
+               "float" => 1.0
+             }
+
+      assert get_in(updated, [
+               "rows",
+               Access.at(0),
+               Access.at(0),
+               Access.at(0),
+               "opaque-values",
+               "integer"
+             ]) ===
+               1
+
+      assert get_in(updated, [
+               "rows",
+               Access.at(0),
+               Access.at(0),
+               Access.at(0),
+               "opaque-values",
+               "float"
+             ]) ===
+               1.0
+    end
+
+    test "keeps text anchors stable while metadata-free wrappers change" do
+      source = [
+        %{
+          "type" => "link",
+          "href" => "/removable",
+          "children" => [
+            %{"type" => "text", "value" => "Before", "tracking" => %{"keep" => true}}
+          ]
+        }
+      ]
+
+      table = %{"id" => "stable-anchor", "type" => "table", "rows" => [[source]]}
+      projection = project!(table)
+
+      assert get_in(projection.shape, [
+               "rows",
+               Access.at(0),
+               "cells",
+               Access.at(0),
+               "inline"
+             ]) == %{"v" => 1, "anchors" => ["text"], "opaque" => ["text"]}
+
+      change = [
+        %{
+          "area" => "body",
+          "row" => 0,
+          "column" => 0,
+          "content" => [%{"type" => "strong", "children" => text("After")}]
+        }
+      ]
+
+      assert {:ok, updated} = TableEditing.merge_cells(table, projection.shape, change)
+
+      assert get_in(updated, [
+               "rows",
+               Access.at(0),
+               Access.at(0),
+               Access.at(0),
+               "children",
+               Access.at(0),
+               "tracking"
+             ]) == %{"keep" => true}
+    end
+
+    test "keeps protected text editable through a metadata-free wikilink" do
+      source = [
+        %{
+          "type" => "wikilink",
+          "target" => "paper-one",
+          "alias" => "Paper one",
+          "docId" => "paper-one-id",
+          "children" => [
+            %{"type" => "text", "value" => "Before", "tracking" => %{"keep" => true}}
+          ]
+        }
+      ]
+
+      table = %{"id" => "wikilink-text", "type" => "table", "rows" => [[source]]}
+      projection = project!(table)
+
+      assert get_in(projection.shape, [
+               "rows",
+               Access.at(0),
+               "cells",
+               Access.at(0),
+               "inline"
+             ]) == %{"v" => 1, "anchors" => ["text"], "opaque" => ["text"]}
+
+      change = [
+        %{
+          "area" => "body",
+          "row" => 0,
+          "column" => 0,
+          "content" => [
+            %{
+              "type" => "wikilink",
+              "target" => "paper-two",
+              "children" => text("After")
+            }
+          ]
+        }
+      ]
+
+      assert {:ok, updated} = TableEditing.merge_cells(table, projection.shape, change)
+
+      assert get_in(updated, [
+               "rows",
+               Access.at(0),
+               Access.at(0),
+               Access.at(0),
+               "children",
+               Access.at(0),
+               "tracking"
+             ]) == %{"keep" => true}
+
+      assert get_in(updated, ["rows", Access.at(0), Access.at(0), Access.at(0), "target"]) ==
+               "paper-two"
+    end
+
+    test "preserves opaque wikilink metadata and refuses semantic retargeting" do
+      source = [
+        %{
+          "type" => "wikilink",
+          "target" => "paper-one",
+          "alias" => "Paper one",
+          "docId" => "paper-one-id",
+          "children" => text("Before"),
+          "vendor" => %{"keep" => true}
+        }
+      ]
+
+      table = %{"id" => "opaque-wikilink", "type" => "table", "rows" => [[source]]}
+      projection = project!(table)
+
+      assert get_in(projection.shape, [
+               "rows",
+               Access.at(0),
+               "cells",
+               Access.at(0),
+               "inline"
+             ]) == %{
+               "v" => 1,
+               "anchors" => ["wikilink", "text"],
+               "opaque" => ["wikilink"]
+             }
+
+      edit_text = [
+        %{
+          "area" => "body",
+          "row" => 0,
+          "column" => 0,
+          "content" => [
+            %{
+              "type" => "wikilink",
+              "target" => "paper-one",
+              "alias" => "Paper one",
+              "docId" => "paper-one-id",
+              "children" => text("After")
+            }
+          ]
+        }
+      ]
+
+      assert {:ok, updated} = TableEditing.merge_cells(table, projection.shape, edit_text)
+
+      assert get_in(updated, ["rows", Access.at(0), Access.at(0), Access.at(0), "vendor"]) ==
+               %{"keep" => true}
+
+      for {key, value} <- [
+            {"target", "paper-two"},
+            {"alias", "Changed alias"},
+            {"docId", "paper-two-id"}
+          ] do
+        retargeted = put_in(hd(edit_text), ["content", Access.at(0), key], value)
+
+        assert TableEditing.merge_cells(table, projection.shape, [retargeted]) ==
+                 {:error, :invalid_cells}
+      end
+    end
+
+    test "rejects ambiguous metadata chains and removal of a metadata-bearing wrapper" do
+      table = metadata_table()
+
+      assert TableEditing.merge_cells(table, shape(table), [
+               %{
+                 "area" => "body",
+                 "row" => 0,
+                 "column" => 0,
+                 "content" => text("Wrapper removed")
+               }
+             ]) == {:error, :invalid_cells}
+
+      for inline <- [
+            [
+              %{"type" => "text", "value" => "one", "_key" => "one"},
+              %{"type" => "text", "value" => "two"}
+            ],
+            [%{"type" => "link", "href" => "/empty", "children" => []}],
+            [
+              %{
+                "type" => "unknown",
+                "children" => [%{"type" => "text", "value" => "hidden", "_key" => "x"}]
+              }
+            ],
+            [%{"type" => "text", "value" => "collision", "href" => "/not-text-metadata"}],
+            [%{"type" => "text", "value" => "value", "text" => "fallback"}],
+            [%{"type" => "text", "value" => "value", "marks" => [%{"type" => "strong"}]}],
+            [%{"type" => "text", "value" => "value", "content" => text("hidden")}],
+            [
+              %{
+                "type" => "link",
+                "href" => "/target",
+                "children" => text("visible"),
+                "content" => text("hidden")
+              }
+            ],
+            [%{"type" => "text", "value" => "value", "rel" => "semantic"}],
+            [%{"type" => "text", "value" => "value", "class" => "semantic"}],
+            [%{"type" => "text", "value" => "value", "title" => "semantic"}]
+          ] do
+        unsupported = put_in(table, ["rows", Access.at(0), Access.at(0)], inline)
+        assert TableEditing.project(unsupported) == {:error, :read_only_shape}
+      end
+    end
+
     test "rejects stale shapes, unsupported sources, malformed changes, and positional ambiguity" do
       table = mixed_table()
       shape = shape(table)
       valid = %{"area" => "body", "row" => 0, "column" => 0, "content" => text("Edited")}
 
       assert TableEditing.merge_cells(table, Map.put(shape, "v", 2), [valid]) ==
+               {:error, :stale_shape}
+
+      assert TableEditing.merge_cells(table, Map.put(shape, "v", 1.0), [valid]) ==
                {:error, :stale_shape}
 
       assert TableEditing.merge_cells(%{"type" => "table"}, shape, [valid]) ==
@@ -327,6 +787,50 @@ defmodule Barkpark.PortableDoc.TableEditingTest do
       assert TableEditing.apply_action(table, Map.put(shape, "v", 2), "add-row") ==
                {:error, :stale_shape}
     end
+
+    test "downgrades v2 to canonical v1 after deleting the final protected carrier" do
+      [protected, canonical] = hd(metadata_table()["rows"])
+
+      row_table = %{
+        "id" => "row-downgrade",
+        "type" => "table",
+        "rows" => [[protected], [[%{"type" => "text", "value" => "remaining"}]]]
+      }
+
+      assert shape(row_table)["v"] == 2
+
+      assert {:ok, row_updated} =
+               TableEditing.apply_action(row_table, shape(row_table), "remove-row:0")
+
+      assert shape(row_updated)["v"] == 1
+
+      column_table = %{
+        "id" => "column-downgrade",
+        "type" => "table",
+        "rows" => [[protected, canonical]]
+      }
+
+      assert shape(column_table)["v"] == 2
+
+      assert {:ok, column_updated} =
+               TableEditing.apply_action(column_table, shape(column_table), "remove-column:0")
+
+      assert shape(column_updated)["v"] == 1
+
+      header_table = %{
+        "id" => "header-downgrade",
+        "type" => "table",
+        "head" => [protected],
+        "rows" => [[canonical]]
+      }
+
+      assert shape(header_table)["v"] == 2
+
+      assert {:ok, header_updated} =
+               TableEditing.apply_action(header_table, shape(header_table), "remove-header")
+
+      assert shape(header_updated)["v"] == 1
+    end
   end
 
   defp shape(table), do: project!(table).shape
@@ -357,6 +861,42 @@ defmodule Barkpark.PortableDoc.TableEditingTest do
           ],
           "row-meta" => %{"keep" => [1, 2]}
         }
+      ]
+    }
+  end
+
+  defp metadata_table do
+    %{
+      "id" => "metadata-table",
+      "type" => "table",
+      "rows" => [
+        [
+          [
+            %{
+              "type" => "link",
+              "href" => "/before",
+              "children" => [
+                %{
+                  "type" => "text",
+                  "value" => "Before",
+                  "_key" => "text-source-key",
+                  "producer" => %{"offset" => 7}
+                }
+              ],
+              "_key" => "link-source-key",
+              "producer" => %{"relation" => "primary"},
+              "opaque-values" => %{
+                "nil" => nil,
+                "empty-map" => %{},
+                "empty-list" => [],
+                "boolean" => false,
+                "integer" => 1,
+                "float" => 1.0
+              }
+            }
+          ],
+          text("Canonical")
+        ]
       ]
     }
   end

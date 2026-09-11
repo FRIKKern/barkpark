@@ -24,6 +24,7 @@
 // the slash menu does (default_block parity, asserted in __smoke.mjs).
 
 import { SlashMenu } from "../slash-menu.js";
+import { closeHistory } from "@tiptap/pm/history";
 import { TextSelection, NodeSelection } from "@tiptap/pm/state";
 import {
   CANVAS_SLASH_TYPES,
@@ -125,6 +126,12 @@ function insertNodeAtSelection(editor, node) {
   } catch (_e) {
     // Selection placement is best-effort; the insert itself already landed.
   }
+  // A boundary replacement lands either inside a nested block+ body (Section) or
+  // on a structural atom (Table). Merging that transform with the trigger
+  // paragraph's history can make undo attempt an invalid empty `doc`, especially
+  // after the server stamps generated ids. Keep the transform as its own event:
+  // undo restores the trigger paragraph first, then an earlier undo may remove it.
+  if (["section", "table"].includes(node.attrs?.bpType)) tr = closeHistory(tr);
   view.dispatch(tr);
   editor.commands.focus();
   return true;

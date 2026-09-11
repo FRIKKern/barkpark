@@ -7,6 +7,11 @@
 #                                           effects, always exit 0.
 #   scripts/pds-pull-proof.sh --all         run the whole ladder.
 #   scripts/pds-pull-proof.sh --only 0a,7   run a subset (same rules).
+#   scripts/pds-pull-proof.sh --sweep-artifacts [--apply]
+#                                           list the stale artifact directories
+#                                           this harness can PROVE it owns, and
+#                                           with --apply remove exactly those.
+#                                           Refuses everything else, by name.
 #   scripts/pds-pull-proof.sh --help
 #
 # WHY THIS EXISTS BEFORE THE ENGINES DO (PDS-D39, "the proof is the program").
@@ -78,11 +83,32 @@
 #                        (the pass then says so: nothing proved the comparator
 #                        can fail)
 #   PDS_STEP6_GUARD_DEMO=0  skip step 6's guard-off control (same honesty)
+#   PDS_STEP1_GRAIN_DEMO=0  skip step 1's manifest-grain negative control — the
+#                        locally built mis-grained bundles that prove the
+#                        PDS-D61/D62 guard can REFUSE. On by default (it costs no
+#                        network, no export and no credentials); the pass then
+#                        says so, because the green is weaker without it.
 #   PDS_PROOF_LIB=1      load the rungs as a library without running any
+#   PDS_DEPLOYED_SHA     the SSH-less deploy pin, READ ONLY when SSH resolved no
+#                        sha of its own. It is believed, never verified, so every
+#                        line dating a claim by it says OPERATOR-ASSERTED.
+#   PDS_KEEP_ARTIFACTS=1 keep this run's ART_DIR on a CLEAN exit (it is kept
+#                        anyway after any FAIL, any ABORT or a non-zero exit)
+#   PDS_ARTIFACT_ROOT    default /tmp — the parent of pds-proof-art.<run tag>,
+#                        and the directory --sweep-artifacts walks
+#   PDS_PROOF_ARTIFACTS  ART_DIR outright. A directory you name here and that
+#                        already exists is NEVER removed by the trap: the harness
+#                        only ever deletes a directory it created itself
+#   PDS_SWEEP_MIN_AGE_HOURS  default 24 — an UNMARKED artifact directory younger
+#                        than this is refused by the sweep: the pre-marker
+#                        backlog is unmarked, so "no marker" alone can never mean
+#                        "abandoned"
 #
 # bash 3.2 compatible (macOS system bash).
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 
 SELF="$(basename "$0")"
 SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd)"
@@ -120,7 +146,28 @@ RUN_ID="${PDS_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 RUN_TAG="$(printf '%s' "$RUN_ID" | cksum | awk '{printf "%x", $1}')"
 export BARKPARK_HOME="${BARKPARK_HOME:-/tmp/pds-proof.$RUN_TAG}"
 export PDS_SCRATCH_POINTER="${PDS_SCRATCH_POINTER:-/tmp/pds-scratch.$RUN_TAG.last}"
-ART_DIR="${PDS_PROOF_ARTIFACTS:-/tmp/pds-proof-art.$RUN_TAG}"
+ART_ROOT="${PDS_ARTIFACT_ROOT:-/tmp}"
+ART_DIR="${PDS_PROOF_ARTIFACTS:-$ART_ROOT/pds-proof-art.$RUN_TAG}"
+# THE ARTIFACT LEAK, AND WHY THE FIX IS OWNERSHIP RATHER THAN `rm -rf` (PDS-D641)
+#
+# ART_DIR used to be created and never removed: 18 stale /tmp/pds-proof-art.*
+# directories totalling 952 MB were measured on the scratch-target host, each
+# holding a real dev-profile export of PRODUCTION content in a world-readable
+# /tmp. But the naive fix — rm -rf the pattern on exit — is WORSE than the leak:
+# this wave runs beside two other cycles, and a concurrent run's ART_DIR looks
+# exactly like a stale one from outside.
+#
+# So removal is gated on PROVEN OWNERSHIP, never on a name match alone:
+#   · ART_DIR_OWNED is set ONLY when THIS process created the directory itself
+#     (an operator-supplied PDS_PROOF_ARTIFACTS pointing at a pre-existing
+#     directory is therefore NEVER removed — we did not make it, we do not take
+#     it), and
+#   · a marker file named this run: run_id, run_tag, pid and host, re-read at
+#     exit. A directory re-owned under us between mkdir and exit is refused.
+# Retained on ANY non-clean outcome (non-zero exit, any FAIL, any ABORT) and on
+# PDS_KEEP_ARTIFACTS=1, because the thing you want after a failure is the bundle.
+ART_MARKER_NAME=".pds-proof-owner"
+ART_DIR_OWNED=""
 MAX_HOME_LEN=85
 
 # ── the ONE full-fidelity export (PDS-D69/D70/D71) ───────────────────────────
@@ -230,11 +277,64 @@ head_step() { # id title
   rule
 }
 
+# ── artifact ownership ──────────────────────────────────────────
+
+art_marker_field() { # field dir -> value on stdout (empty when unreadable)
+  local f="$1" d="$2"
+  [ -f "$d/$ART_MARKER_NAME" ] || return 0
+  sed -n "s/^$f:[[:space:]]*//p" "$d/$ART_MARKER_NAME" 2>/dev/null | head -n 1
+  return 0
+}
+
+art_dir_ensure() { # create ART_DIR, claiming ownership ONLY if we made it
+  if [ ! -d "$ART_DIR" ]; then
+    mkdir -p "$ART_DIR" || return 1
+    {
+      printf 'harness: pds-pull-proof.sh\n'
+      printf 'run_id:  %s\n' "$RUN_ID"
+      printf 'run_tag: %s\n' "$RUN_TAG"
+      printf 'pid:     %s\n' "$$"
+      printf 'host:    %s\n' "$(uname -n 2>/dev/null || echo unknown)"
+      printf 'created: %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    } >"$ART_DIR/$ART_MARKER_NAME" 2>/dev/null || true
+    ART_DIR_OWNED=1
+  elif [ -z "$ART_DIR_OWNED" ] && [ "$(art_marker_field run_id "$ART_DIR")" = "$RUN_ID" ]; then
+    # our own directory from earlier in THIS process (the marker names this run)
+    ART_DIR_OWNED=1
+  fi
+  return 0
+}
+
+art_dir_cleanup() { # exit_status — called from the EXIT trap, must never abort it
+  local rc="${1:-0}"
+  [ -n "$ART_DIR_OWNED" ] || return 0
+  [ -d "$ART_DIR" ] || return 0
+  if [ -n "${PDS_KEEP_ARTIFACTS:-}" ]; then
+    printf '  artifacts RETAINED at %s (PDS_KEEP_ARTIFACTS is set)\n' "$ART_DIR"
+    return 0
+  fi
+  if [ "$rc" != "0" ] || [ "${N_FAIL:-0}" -gt 0 ] || [ "${N_ABORT:-0}" -gt 0 ]; then
+    printf '  artifacts RETAINED for diagnosis at %s (exit %s, %s FAIL, %s ABORT) — sweep later with PDS_ARTIFACT_ROOT=%s %s --sweep-artifacts --apply\n' \
+      "$ART_DIR" "$rc" "${N_FAIL:-0}" "${N_ABORT:-0}" "$ART_ROOT" "$SELF"
+    return 0
+  fi
+  # Re-read the marker at exit: a directory re-owned under us is not ours to remove.
+  if [ "$(art_marker_field run_id "$ART_DIR")" != "$RUN_ID" ]; then
+    printf '  artifacts REFUSED at %s — the owner marker no longer names this run (%s); left in place\n' \
+      "$ART_DIR" "$RUN_ID"
+    return 0
+  fi
+  rm -rf "$ART_DIR" 2>/dev/null || true
+  printf '  artifacts removed: %s (this run created it and its marker still named this run)\n' "$ART_DIR"
+  return 0
+}
+
 # ── temp hygiene ─────────────────────────────────────────────────────────────
 
 TMP_FILES=""
 TMP_DIRS=""
 cleanup() {
+  local rc=$?
   local f d
   for f in $TMP_FILES; do [ -f "$f" ] && rm -f "$f"; done
   for d in $TMP_DIRS; do [ -d "$d" ] && rm -rf "$d"; done
@@ -244,6 +344,8 @@ cleanup() {
   [ -n "$FULL_LOCK_OWNED" ] && [ -d "$FULL_LOCK" ] && rmdir "$FULL_LOCK" 2>/dev/null || true
   # A step-5 failure demo must never leave a blob truncated on the target.
   restore_blob_backup
+  # THIS RUN'S OWN artifacts, and nobody else's (see the ART_DIR block above).
+  art_dir_cleanup "$rc"
   return 0
 }
 trap cleanup EXIT
@@ -397,7 +499,7 @@ ensure_bp() { # 0 = $BP_BIN is a fresh binary that speaks the dialect
     BP_WHY="go is not on PATH, so a fresh bp cannot be built from this worktree (the installed bp predates the pull dialect and must not be used)"
     return 1
   fi
-  mkdir -p "$ART_DIR"
+  art_dir_ensure
   local out log cc
   out="$ART_DIR/bp"
   log="$ART_DIR/bp-build.log"
@@ -441,6 +543,11 @@ restore_blob_backup() {
 # ── cross-step state (derived at RUN time, never from a snapshot) ────────────
 
 DEPLOYED_SHA=""
+# HOW the sha above was obtained: "ssh" (measured off the box's own git HEAD
+# this run) or "operator-asserted" (PDS_DEPLOYED_SHA, believed, never verified).
+# It is carried, not discarded, because an asserted pin WEAKENS every claim it
+# dates and the transcript must say so wherever it prints one (PDS-D642).
+DEPLOYED_SHA_SOURCE=""
 DEPLOYED_VERSION=""
 DEPLOYED_UPTIME_0A=""
 DEV_BUNDLE=""
@@ -450,6 +557,29 @@ AMMO_FILE=""
 # ═════════════════════════════════════════════════════════════════════════════
 # THE PLAN
 # ═════════════════════════════════════════════════════════════════════════════
+
+# THE SSH-LESS ESCAPE HATCH, AND IT IS REAL NOW (PDS-D642).
+# step 0b's FIX text has always told the operator to `export PDS_DEPLOYED_SHA`.
+# No code read it — it was the ONLY occurrence of that name in the whole file,
+# inside a prose string — so an operator who followed the harness's own
+# remediation got no effect and no warning. It is read here, and ONLY when SSH
+# resolved nothing: a measured pin always wins over an asserted one, never the
+# other way round. It is tagged so every line quoting it discloses it.
+apply_deployed_sha_override() {
+  [ -z "$DEPLOYED_SHA" ] || return 0
+  [ -n "${PDS_DEPLOYED_SHA:-}" ] || return 0
+  DEPLOYED_SHA="$(printf '%s' "$PDS_DEPLOYED_SHA" | tr -d '[:space:]')"
+  DEPLOYED_SHA_SOURCE="operator-asserted"
+  info "deployed sha    $DEPLOYED_SHA  (OPERATOR-ASSERTED via PDS_DEPLOYED_SHA — this run did NOT measure it against the box)"
+  return 0
+}
+
+sha_provenance_note() { # -> the disclosure that must ride beside an asserted pin
+  case "$DEPLOYED_SHA_SOURCE" in
+    operator-asserted) printf ' [sha OPERATOR-ASSERTED via PDS_DEPLOYED_SHA — believed, not measured against the box this run; every claim dated by it is only as good as that assertion]' ;;
+    *) printf '' ;;
+  esac
+}
 
 plan_row() { # id | title | precondition | today
   printf '  %-4s %s\n' "$1" "$2"
@@ -466,6 +596,8 @@ cmd_plan() {
   say "scratch root:  $BARKPARK_HOME  (${#BARKPARK_HOME} bytes, cap $MAX_HOME_LEN)"
   say "pointer:       $PDS_SCRATCH_POINTER"
   say "artifacts:     $ART_DIR   (RUN-scoped — invisible to the next run, by design)"
+  say "               removed on a CLEAN exit by this run's own trap; kept after any FAIL/ABORT"
+  say "               or with PDS_KEEP_ARTIFACTS=1. Backlog: $SELF --sweep-artifacts"
   say "full export:   $FULL_TAR"
   say "               budget=$FULL_BUDGET attempt(s) · spent so far=$([ -f "$FULL_ATTEMPTS_FILE" ] && cat "$FULL_ATTEMPTS_FILE" || echo 0) · on-disk bundle=$([ -s "$FULL_TAR" ] && echo "PRESENT ($(wc -c <"$FULL_TAR" | tr -d ' ') bytes, would be REUSED for 0 attempts)" || echo absent)"
   say "               min MemAvailable on the source before it is taken: ${FULL_MIN_MEM_MB} MB"
@@ -492,7 +624,7 @@ cmd_plan() {
 
   plan_row 1 "THE PULL — export --profile dev + import --yes --merge, both --with-blobs" \
     "a booted scratch target + a bp built FROM THIS WORKTREE (the installed one predates the dialect)" \
-    "RUNNABLE. Runs the PAIR (PDS-D58) with explicit -s/--token on both calls — BARKPARK_TOKEN is read NOWHERE. ASSERTS: (1) the built bp advertises --profile/--merge/--with-blobs in its own --help; (2) the export exits 0 and the tar carries a manifest; (3) the manifest's dataset EQUALS the dataset asked for — a workspace-grain bundle ABORTS naming pds-w4-pull-dataset-flag rather than being imported (PDS-D61/D62); (4) the import exits 0 and its receipt names tables+rows; (5) blob failures exit non-zero by the CLI's own contract. --merge is MANDATORY: mode=clean answers an opaque 500 (25P02 at workspace_bundle.ex:233) on a populated target. PDS-D9 adoption is reported by diffing the workspaces row across the import — the CLI never says it."
+    "RUNNABLE. Runs the PAIR (PDS-D58) with explicit -s/--token on both calls — BARKPARK_TOKEN is read NOWHERE. ASSERTS: (1) the built bp advertises --profile/--merge/--with-blobs in its own --help; (2) the export exits 0 and the tar carries a manifest; (3) the manifest's dataset EQUALS the dataset asked for — a workspace-grain bundle ABORTS naming pds-w4-pull-dataset-flag rather than being imported (PDS-D61/D62) — and that assertion carries a NEGATIVE CONTROL, on by default (PDS_STEP1_GRAIN_DEMO=0 to skip, and the pass then says so), which puts five locally built manifests through the same assertion and FAILs the step unless it refuses every mis-grained one; (4) the import exits 0 and its receipt names tables+rows; (5) blob failures exit non-zero by the CLI's own contract. --merge is MANDATORY: mode=clean answers an opaque 500 (25P02 at workspace_bundle.ex:233) on a populated target. PDS-D9 adoption is reported by diffing the workspaces row across the import — the CLI never says it."
 
   plan_row 2 "RAW-PERSPECTIVE CENSUS — per-type ?perspective=raw&count=true, BOTH ends" \
     "source HTTP; for the target half, step 1's import" \
@@ -529,6 +661,105 @@ cmd_plan() {
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
+# THE SWEEP — the pre-existing backlog, and the four things it REFUSES
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# The trap above only ever owns the directories THIS harness creates from here
+# on. The 952 MB already on disk predates it, so it needs a deliberate operator
+# verb — and that verb's whole design is what it will NOT touch:
+#
+#   REFUSED  a name this harness does not make      (not $ART_ROOT/pds-proof-art.<hex>)
+#   REFUSED  a directory owned by another unix user (stat uid != ours)
+#   REFUSED  a marker naming a LIVE pid on THIS host — a concurrent cycle owns it
+#   REFUSED  a directory younger than PDS_SWEEP_MIN_AGE_HOURS (default 24) when
+#            it carries no marker at all — the legacy backlog is unmarked, so
+#            "no marker" can never by itself mean "abandoned"
+#   REFUSED  this run's own ART_DIR
+#
+# It is a DRY RUN unless --apply is passed, and it prints the reason for every
+# directory on both sides of the line. There is no wildcard rm anywhere in it:
+# each removal names one path the loop proved it owns.
+
+art_uid_of() { # dir -> numeric owner uid ('' when unreadable)
+  stat -f %u "$1" 2>/dev/null || stat -c %u "$1" 2>/dev/null || true
+}
+
+art_dir_age_hours_ok() { # dir min_hours -> 0 when OLDER than min_hours
+  local d="$1" h="$2" found
+  found="$(find "$d" -maxdepth 0 -mmin +"$((h * 60))" 2>/dev/null || true)"
+  [ -n "$found" ]
+}
+
+cmd_sweep_artifacts() { # [--apply]
+  local apply=0 d name uid me pid host marker min_age kb
+  [ "${1:-}" = "--apply" ] && apply=1
+  min_age="${PDS_SWEEP_MIN_AGE_HOURS:-24}"
+  me="$(id -u)"
+
+  rule
+  say "PDS CROWN PROOF — ARTIFACT SWEEP over $ART_ROOT/pds-proof-art.*"
+  say "$([ "$apply" = 1 ] && echo 'MODE: --apply — proven-owned directories WILL be removed' || echo 'MODE: dry run — nothing is removed. Re-run with --apply to act.')"
+  say "unmarked directories must be older than ${min_age}h · this run is $RUN_ID (tag $RUN_TAG)"
+  rule
+
+  local n_own=0 n_refused=0 bytes_own=0
+  for d in "$ART_ROOT"/pds-proof-art.*; do
+    [ -e "$d" ] || continue
+    name="$(basename "$d")"
+    if [ ! -d "$d" ]; then
+      printf '  REFUSED  %-46s not a directory\n' "$name"; n_refused=$((n_refused + 1)); continue
+    fi
+    case "$name" in
+      pds-proof-art.*[!0-9a-f]*|pds-proof-art.)
+        printf '  REFUSED  %-46s not a name this harness makes (expected pds-proof-art.<hex run tag>)\n' "$name"
+        n_refused=$((n_refused + 1)); continue ;;
+    esac
+    if [ "$d" = "$ART_DIR" ]; then
+      printf '  REFUSED  %-46s THIS run owns it and is still using it\n' "$name"
+      n_refused=$((n_refused + 1)); continue
+    fi
+    uid="$(art_uid_of "$d")"
+    if [ -z "$uid" ] || [ "$uid" != "$me" ]; then
+      printf '  REFUSED  %-46s owned by uid %s, not by uid %s — another unix user\n' "$name" "${uid:-unreadable}" "$me"
+      n_refused=$((n_refused + 1)); continue
+    fi
+    marker="$(art_marker_field run_id "$d")"
+    if [ -n "$marker" ]; then
+      pid="$(art_marker_field pid "$d")"
+      host="$(art_marker_field host "$d")"
+      if [ "$host" != "$(uname -n 2>/dev/null || echo unknown)" ]; then
+        printf '  REFUSED  %-46s marker names host %s, not this one — liveness undecidable here\n' "$name" "${host:-unknown}"
+        n_refused=$((n_refused + 1)); continue
+      fi
+      if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        printf '  REFUSED  %-46s pid %s is ALIVE on this host — a concurrent run owns it (%s)\n' "$name" "$pid" "$marker"
+        n_refused=$((n_refused + 1)); continue
+      fi
+    elif ! art_dir_age_hours_ok "$d" "$min_age"; then
+      printf '  REFUSED  %-46s no owner marker AND younger than %sh — cannot be proved abandoned\n' "$name" "$min_age"
+      n_refused=$((n_refused + 1)); continue
+    fi
+
+    n_own=$((n_own + 1))
+    kb="$(du -sk "$d" 2>/dev/null | awk 'NR==1{print $1}')"
+    case "${kb:-}" in ''|*[!0-9]*) kb=0 ;; esac
+    bytes_own=$((bytes_own + kb))
+    if [ "$apply" = 1 ]; then
+      rm -rf "$d" 2>/dev/null || true
+      printf '  REMOVED  %-46s %s\n' "$name" "$([ -n "$marker" ] && echo "marker run $marker, pid ${pid:-?} not alive" || echo "unmarked and older than ${min_age}h")"
+    else
+      printf '  WOULD    %-46s %s\n' "$name" "$([ -n "$marker" ] && echo "marker run $marker, pid ${pid:-?} not alive" || echo "unmarked and older than ${min_age}h")"
+    fi
+  done
+
+  rule
+  say "$n_own directory(ies) proved owned ($((bytes_own / 1024)) MB) · $n_refused refused"
+  [ "$apply" = 1 ] || say "Nothing was removed. Re-run: $SELF --sweep-artifacts --apply"
+  rule
+  return 0
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
 # THE BANNER — the transcript opens by bounding every claim it is about to make
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -543,6 +774,14 @@ banner() {
   say "HONESTY BANNER — what this transcript does and does not claim."
   say ""
   say "  SOURCE          $SOURCE_BASE (workspace=$SOURCE_WS dataset=$SOURCE_DS)"
+  if [ -n "${PDS_DEPLOYED_SHA:-}" ]; then
+    say "  PIN OVERRIDE    PDS_DEPLOYED_SHA IS SET (${PDS_DEPLOYED_SHA}). If step 0a resolves"
+    say "                  no sha over SSH it will use that value — BELIEVED, not measured"
+    say "                  against the box this run. Every line dating a claim by it then"
+    say "                  says OPERATOR-ASSERTED, and step 8's sha re-pin is skipped,"
+    say "                  because a measured re-pin would convict the assertion rather"
+    say "                  than a redeploy. A measured pin always wins over this one."
+  fi
   say "  SERVED          resolved live in step 0a and printed there — version AND"
   say "                  git sha. Auto-deploy has been observed NOT firing, so the"
   say "                  box may be running older code than main; if it is, the"
@@ -566,6 +805,11 @@ banner() {
   say "     No schema_migrations HTTP surface exists; a stale build prints the same"
   say "     /status.json green (PDS-D47). Step 8 re-pins the same sha at the CLOSE:"
   say "     everything between them is dated by ONE build or the run says so."
+  say "   · Artifact scope — this run's artifacts live at $ART_DIR and are removed"
+  say "     by its own EXIT trap on a clean finish, scoped to a marker naming THIS"
+  say "     run. No other session's directory is ever touched; the backlog needs the"
+  say "     deliberate \`$SELF --sweep-artifacts --apply\`, which refuses by name"
+  say "     anything it cannot prove it owns."
   say "   · Refusal scope — step 7 proves the source refuses a MERGE import. The"
   say "     clean/restore mode is NOT gated by that flag, so 'guerrilla cannot be"
   say "     written' is a claim this transcript does not make (PDS-D73)."
@@ -595,7 +839,7 @@ step_0a() {
 
   local status code version uptime
   status="$(mktmp)"
-  code="$(http_code "$(curl -sS -o "$status" -w '%{http_code}' --max-time 30 "$SOURCE_BASE/status.json" 2>/dev/null || true)")"
+  code="$(http_code "$(bp_curl_code -sS -o "$status" --max-time 30 "$SOURCE_BASE/status.json" 2>/dev/null || true)")"
   if [ "$code" != "200" ]; then
     fail 0a "GET $SOURCE_BASE/status.json -> $code (the source is not answering; nothing downstream is believable)"
     return 0
@@ -616,10 +860,12 @@ step_0a() {
   # number and two different builds print it identically).
   if ssh_available; then
     DEPLOYED_SHA="$(ssh_src 'cd /opt/barkpark && git rev-parse HEAD' | tr -d '[:space:]' || true)"
+    [ -n "$DEPLOYED_SHA" ] && DEPLOYED_SHA_SOURCE="ssh"
     info "deployed sha    $DEPLOYED_SHA  (source of truth: the box's own git HEAD over SSH)"
   else
     info "deployed sha    UNRESOLVED over SSH ($SOURCE_SSH, key $SOURCE_SSH_KEY)"
   fi
+  apply_deployed_sha_override
   if command -v gh >/dev/null 2>&1; then
     local last_deploy
     last_deploy="$(gh run list --workflow deploy.yml --branch main --limit 1 \
@@ -628,7 +874,7 @@ step_0a() {
   fi
 
   # The one budgeted export: DEV profile. Never :full here (PDS-D31/D44).
-  mkdir -p "$ART_DIR"
+  art_dir_ensure
   local bundle hdr t0 t1 bytes elapsed fname
   bundle="$ART_DIR/dev-$SOURCE_WS-$SOURCE_DS.tar"
   hdr="$(mktmp)"
@@ -681,7 +927,7 @@ step_0a() {
   fi
 
   DEV_BUNDLE="$bundle"
-  pass 0a "source pinned: version=$version sha=${DEPLOYED_SHA:-unresolved}; dev dialect LIVE (HTTP 200, $bytes bytes, ${elapsed}s, $members members, profile=$profile dataset=$dataset, source_* present)"
+  pass 0a "source pinned: version=$version sha=${DEPLOYED_SHA:-unresolved}$(sha_provenance_note); dev dialect LIVE (HTTP 200, $bytes bytes, ${elapsed}s, $members members, profile=$profile dataset=$dataset, source_* present)"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -703,7 +949,7 @@ step_0b() {
 
   if [ -z "$DEPLOYED_SHA" ]; then
     abort 0b "env:deployed-sha-unresolved" \
-      "no run-time source of the deployed sha. /status.json carries a version string, not a sha. FIX: make SSH reachable (PDS_SOURCE_SSH=$SOURCE_SSH, key $SOURCE_SSH_KEY) or export PDS_DEPLOYED_SHA=<sha> from an authenticated source. Asserting on the version string alone would be exactly the vacuous green this step exists to refuse."
+      "no run-time source of the deployed sha. /status.json carries a version string, not a sha. FIX (in this order): make SSH reachable (PDS_SOURCE_SSH=$SOURCE_SSH, key $SOURCE_SSH_KEY) — that is the only MEASURED pin. Failing that, \`export PDS_DEPLOYED_SHA=<sha>\` from an authenticated source: step 0a reads it, but only when SSH resolved nothing, and every line dating a claim by it then carries the words OPERATOR-ASSERTED, because the harness is believing you rather than the box. Asserting on the version string alone would be exactly the vacuous green this step exists to refuse."
     return 0
   fi
 
@@ -722,11 +968,25 @@ step_0b() {
   fi
 
   if [ "$DEPLOYED_SHA" = "$worktree_sha" ]; then
-    pass 0b "deployed sha EQUALS the worktree the target migrated from ($worktree_sha)"
+    pass 0b "deployed sha EQUALS the worktree the target migrated from ($worktree_sha)$(sha_provenance_note)"
     return 0
   fi
 
-  if ! git -C "$REPO_ROOT" merge-base --is-ancestor "$DEPLOYED_SHA" "$worktree_sha"; then
+  # ANCESTRY IS GUARDED, never bare. `merge-base --is-ancestor` folds "the worktree
+  # genuinely does not contain it" and "my walk was truncated before it got there"
+  # into the SAME rc=1, and THIS script runs on the CP box, whose checkout the
+  # deploy-reliability charter records as SHALLOW. A bare rc=1 there would print
+  # FAIL 0b — "the box is serving code this worktree does not contain" — off a
+  # question the checkout could not answer. scripts/ancestry-guard.sh probes ref,
+  # object and walk-truncation separately and exits 2 when no claim is sound; that
+  # is an ABORT (a blocker to clear), never a FAIL (a verdict about the deploy).
+  "$REPO_ROOT/scripts/ancestry-guard.sh" --repo "$REPO_ROOT" "$DEPLOYED_SHA" "$worktree_sha" >/dev/null 2>&1
+  _anc_rc=$?
+  if [ "$_anc_rc" = 2 ]; then
+    abort 0b "readable git history" "$("$REPO_ROOT/scripts/ancestry-guard.sh" --repo "$REPO_ROOT" "$DEPLOYED_SHA" "$worktree_sha" 2>&1) — the containment of $DEPLOYED_SHA in $worktree_sha is UNDECIDABLE in this checkout, so neither a pass nor a fail may be recorded. Deepen the checkout (git fetch --unshallow) or re-derive with: gh api repos/FRIKKern/barkpark/compare/$DEPLOYED_SHA...$worktree_sha --jq .status"
+    return 0
+  fi
+  if [ "$_anc_rc" != 0 ]; then
     fail 0b "the deployed sha $DEPLOYED_SHA is NOT an ancestor of the worktree $worktree_sha — the source is serving code this worktree does not contain, so a schema differential against it is unsound"
     return 0
   fi
@@ -743,7 +1003,7 @@ step_0b() {
     info "below describes the DEPLOYED build, not main."
   fi
 
-  pass 0b "deploy provenance holds: the deployed sha $DEPLOYED_SHA IS AN ANCESTOR OF the worktree the target migrated from ($worktree_sha), $ahead commit(s) behind — $code_ahead code, $docs_ahead docs-only"
+  pass 0b "deploy provenance holds$(sha_provenance_note): the deployed sha $DEPLOYED_SHA IS AN ANCESTOR OF the worktree the target migrated from ($worktree_sha), $ahead commit(s) behind — $code_ahead code, $docs_ahead docs-only"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -925,6 +1185,123 @@ print(v)' "$d/manifest.json" 2>/dev/null)"
   return "$rc"
 }
 
+# ── THE GRAIN VERDICT, AS ONE CALLABLE (PDS-D20) ─────────────────────────────
+#
+# The PDS-D61/D62 grain-hazard guard used to live INLINE in step_1, which is why
+# it was the one asserting rung nobody could point a control at. It is the same
+# comparison, moved behind a name so a locally built bundle can be put through
+# the EXACT assertion the live bundle goes through. stdout and the exit code of
+# every branch step_1 prints are unchanged — the abort/fail/info wording below is
+# byte-for-byte what it was.
+#
+# grain_verdict <tar> <want_dataset> -> one line on stdout:
+#     <verdict>|<profile>|<dataset>|<profile_rc>|<dataset_rc>
+#
+#   ok                the manifest is dev-profile and dataset-grain, as asked
+#   no-dataset        NO dataset field: a WORKSPACE-grain bundle (or nothing was
+#                     readable at all — manifest_field rc 2, PDS-D261)
+#   dataset-mismatch  a dataset field naming a DIFFERENT dataset
+#   profile-mismatch  right dataset, but not the scrubbed dev profile
+grain_verdict() {
+  local tar="$1" want="$2" p d prc=0 drc=0 v
+  p="$(manifest_field "$tar" profile)" || prc=$?
+  d="$(manifest_field "$tar" dataset)" || drc=$?
+  if [ -z "$d" ]; then
+    v="no-dataset"
+  elif [ "$d" != "$want" ]; then
+    v="dataset-mismatch"
+  elif [ "$p" != "dev" ]; then
+    v="profile-mismatch"
+  else
+    v="ok"
+  fi
+  printf '%s|%s|%s|%s|%s\n' "$v" "$p" "$d" "$prc" "$drc"
+}
+
+# THE ROUTING IS DATA, NOT A COMMENT. step_1 raises its ABORT with whatever this
+# returns, so the control can assert that a workspace-grain manifest really does
+# route to pds-w4-pull-dataset-flag — if someone re-points the branch, the
+# control reds instead of silently agreeing with itself.
+GRAIN_ABORT_TASK="pds-w4-pull-dataset-flag"
+grain_blocker() { # <verdict> -> the bp task an ABORT on that verdict waits on
+  case "$1" in
+    no-dataset) printf '%s\n' "$GRAIN_ABORT_TASK" ;;
+    *)          printf '\n' ;;
+  esac
+}
+
+# ── STEP 1'S NEGATIVE CONTROL (PDS-D20) ──────────────────────────────────────
+#
+# Step 1 was, until this control, the ONLY asserting rung with nothing that
+# FIRES. It had been run live and its assertion had MATCHED against a real
+# export — which proves the assertion was evaluated, and proves nothing at all
+# about whether it is capable of refusing. An assertion never observed failing is
+# not known to assert.
+#
+# So: build the mis-grained bundles here, on this machine, and put them through
+# grain_verdict — the same function the live bundle goes through, in the same
+# process, this run. It needs no network, no export, no credentials and no target,
+# which is why it runs BEFORE the environment preconditions: a default run on any
+# machine exercises it even when the rung goes on to ABORT for want of a target.
+#
+# Returns 0 when every fixture was classified as expected; on any miss it has
+# ALREADY called `fail 1` and returns 1 — a control that does not fire is a FAIL
+# of the step it controls, never a footnote.
+GRAIN_DEMO_NOTE=""
+grain_control() {
+  local dir want other name expect body json f v n=0 bad=0 blk
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/pds-grain.XXXXXX")"
+  TMP_DIRS="$TMP_DIRS $dir"
+  want="$SOURCE_DS"
+  other="$SOURCE_DS-not-the-one-asked-for"
+
+  say ""
+  info "GRAIN CONTROL (PDS-D20) — the SAME assertion, this run, against manifests"
+  info "  built HERE (no network, no export, no credentials). The manifest line"
+  info "  below is a measurement only if this assertion has been SEEN to refuse:"
+
+  while IFS='|' read -r name expect body; do
+    [ -z "${name:-}" ] && continue
+    f="$dir/$name.tar"
+    if [ "$body" = "@NOTATAR@" ]; then
+      # not a tar at all — the HTML error page of PDS-D261. manifest_field
+      # answers rc 2 (nothing readable), which must still be a refusal.
+      printf '<html><body>502 Bad Gateway</body></html>\n' >"$f"
+    else
+      json="$(printf '%s' "$body" | sed -e "s#@WANT@#$want#g" -e "s#@OTHER@#$other#g")"
+      mkdir -p "$dir/$name"
+      printf '%s\n' "$json" >"$dir/$name/manifest.json"
+      tar -cf "$f" -C "$dir/$name" manifest.json
+    fi
+    v="$(grain_verdict "$f" "$want" | cut -d'|' -f1)"
+    n=$((n + 1))
+    if [ "$v" = "$expect" ]; then
+      info "  $name -> $v (expected $expect)"
+    else
+      info "  $name -> $v (expected $expect)  *** DID NOT FIRE ***"
+      bad=$((bad + 1))
+    fi
+  done <<'GRAIN_FIXTURES'
+happy-dev-dataset|ok|{"profile":"dev","dataset":"@WANT@"}
+workspace-grain-no-dataset|no-dataset|{"profile":"dev"}
+wrong-dataset|dataset-mismatch|{"profile":"dev","dataset":"@OTHER@"}
+unscrubbed-profile|profile-mismatch|{"profile":"full","dataset":"@WANT@"}
+not-a-bundle-at-all|no-dataset|@NOTATAR@
+GRAIN_FIXTURES
+
+  if [ "$bad" -ne 0 ]; then
+    fail 1 "THE GRAIN CONTROL DID NOT FIRE: $bad of $n locally built manifests were classified WRONG by the same grain assertion the live bundle goes through. Until it has been shown capable of refusing a workspace-grain bundle, step 1's manifest line proves only that the comparison was evaluated (PDS-D20). Nothing was exported and nothing was imported."
+    return 1
+  fi
+  blk="$(grain_blocker no-dataset)"
+  if [ "$blk" != "pds-w4-pull-dataset-flag" ]; then
+    fail 1 "THE GRAIN CONTROL DID NOT FIRE: a dataset-less (workspace-grain) manifest routes to blocker '${blk:-<none>}', not the pds-w4-pull-dataset-flag ABORT this rung claims to raise for it (PDS-D61/D62). Nothing was exported and nothing was imported."
+    return 1
+  fi
+  info "  $n/$n classified as expected, and a workspace-grain manifest routes to ABORT $blk."
+  return 0
+}
+
 # WHAT pds-w1-pull-cli ACTUALLY SHIPPED (corrected at wave-3 review). This step
 # was authored expecting a single `bp dev pull` verb. That verb does NOT exist:
 # the pull front door landed as the EXISTING pair, extended —
@@ -949,6 +1326,21 @@ step_1() {
   say "  mirrored typo would aim it at production."
   say ""
 
+  # ── the negative control, BEFORE the preconditions ────────────────────────
+  #
+  # Deliberately ahead of load_target/ensure_bp: it needs neither, and putting it
+  # after them would mean a machine with no scratch target ABORTs step 1 without
+  # ever exercising the assertion — which is the vacuous default this control
+  # exists to remove. On by default (PDS_STEP1_GRAIN_DEMO=0 to skip).
+  if [ "${PDS_STEP1_GRAIN_DEMO:-1}" = "1" ]; then
+    grain_control || return 0
+    GRAIN_DEMO_NOTE=" The grain assertion was CONTROLLED this run: five manifests built on this machine were put through it and it refused every mis-grained one — a dataset-less workspace-grain bundle routes to ABORT $GRAIN_ABORT_TASK — while accepting the correctly grained one."
+  else
+    GRAIN_DEMO_NOTE=" NOTE: the grain control was DISABLED (PDS_STEP1_GRAIN_DEMO=0), so nothing this run proved the manifest-grain assertion is capable of REFUSING a workspace-grain bundle; the green is weaker for it."
+    info "grain control   DISABLED (PDS_STEP1_GRAIN_DEMO=0) — the pass below is weaker for it: nothing proved the manifest-grain assertion can refuse"
+  fi
+  say ""
+
   if ! load_target; then
     abort 1 "env:scratch-target-not-booted" \
       "there is no target to import into ($BARKPARK_HOME/scratch.env absent). FIX: $(target_hint)"
@@ -964,7 +1356,7 @@ step_1() {
 
   local tar out rc t0 t1
   tar="$ART_DIR/pull-$SOURCE_WS-$SOURCE_DS.tar"
-  mkdir -p "$ART_DIR"
+  art_dir_ensure
   out="$(mktmp)"
 
   # ── the workspaces row BEFORE the import (PDS-D9 adoption fires silently) ──
@@ -1006,24 +1398,25 @@ step_1() {
   # A workspace-grain bundle wearing a dev command line is the silent-wrong-
   # answer hazard of this whole wave: it imports fine, and every census below
   # then measures a workspace, not the dataset the transcript claims.
-  local m_ds m_profile m_prc=0 m_drc=0 m_note
-  m_profile="$(manifest_field "$tar" profile)" || m_prc=$?
-  m_ds="$(manifest_field "$tar" dataset)" || m_drc=$?
+  local m_ds m_profile m_prc=0 m_drc=0 m_note m_verdict
+  IFS='|' read -r m_verdict m_profile m_ds m_prc m_drc <<GRAIN_VERDICT
+$(grain_verdict "$tar" "$SOURCE_DS")
+GRAIN_VERDICT
   # rc 2 is NOT "the field is absent" — it is "nothing was readable here". Saying
   # <absent> for both is the conflation PDS-D261 removed from full_meta_ok.
   m_note=""
   [ "$m_prc" -eq 2 ] && m_note=" — manifest UNREADABLE (no extractable manifest.json, or it is not a JSON object), so neither field below is an absence, it is a non-answer"
   info "manifest        profile='${m_profile:-$([ "$m_prc" -eq 2 ] && echo '<unreadable>' || echo '<absent>')}' dataset='${m_ds:-$([ "$m_drc" -eq 2 ] && echo '<unreadable>' || echo '<absent>')}' (asked for profile=dev dataset=$SOURCE_DS)$m_note"
-  if [ -z "$m_ds" ]; then
-    abort 1 "pds-w4-pull-dataset-flag" \
+  if [ "$m_verdict" = "no-dataset" ]; then
+    abort 1 "$(grain_blocker "$m_verdict")" \
       "the exported manifest carries NO dataset field — this is a WORKSPACE-GRAIN bundle wearing a dataset command line. Refusing to import it: every per-type census downstream would silently describe the whole workspace while the transcript claimed dataset=$SOURCE_DS (PDS-D61/D62). The bundle is on disk at $tar if you want to look."
     return 0
   fi
-  if [ "$m_ds" != "$SOURCE_DS" ]; then
+  if [ "$m_verdict" = "dataset-mismatch" ]; then
     fail 1 "the exported manifest says dataset='$m_ds' but the export asked for '$SOURCE_DS' — the scope flag is not reaching the engine. Nothing was imported."
     return 0
   fi
-  if [ "$m_profile" != "dev" ]; then
+  if [ "$m_verdict" = "profile-mismatch" ]; then
     fail 1 "the exported manifest says profile='${m_profile:-<absent>}' but the export asked for 'dev' — this bundle is NOT scrubbed and must not be treated as one. Nothing was imported."
     return 0
   fi
@@ -1071,7 +1464,7 @@ step_1() {
   pds_blind_spot_note \
     "date +%s, WALL CLOCK around an HTTP/CLI call issued from this shell — an OS clock outside every BEAM (PDS-D633 placement (a)); the BEAM doing the work is the remote SERVER, so no in-BEAM meter is reachable. A LATENCY, never a price (PDS-D605)" \
     "exit 0 in Ns"
-  pass 1 "the pull ran through the front-door PAIR: export --profile dev --dataset $SOURCE_DS --with-blobs ($bytes bytes, $n_blobs blobs) then import --yes --merge --with-blobs into $TARGET_BASE, exit 0 in $((t1 - t0))s. Manifest grain ASSERTED dataset=$m_ds profile=$m_profile. Receipt: ${receipt:-<none printed>}"
+  pass 1 "the pull ran through the front-door PAIR: export --profile dev --dataset $SOURCE_DS --with-blobs ($bytes bytes, $n_blobs blobs) then import --yes --merge --with-blobs into $TARGET_BASE, exit 0 in $((t1 - t0))s. Manifest grain ASSERTED dataset=$m_ds profile=$m_profile. Receipt: ${receipt:-<none printed>}.$GRAIN_DEMO_NOTE"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1079,9 +1472,28 @@ step_1() {
 # ═════════════════════════════════════════════════════════════════════════════
 
 # Bare-slug E3 tables, from api/lib/barkpark/tenancy/workspace_bundle/catalog.ex
-# (@e3_dataset_keyed). Derived from the source at run time when it is readable;
-# this fallback is only used to NAME the exclusion, never to assert a count.
+# (@e3_dataset_keyed). This literal is only ever used to NAME the pre-declared
+# PDS-D45 exclusion, never to assert a count. It is NOT silently authoritative:
+# e3_bare_slug_derive below reads @e3_dataset_keyed out of the catalog source at
+# run time, and step 2 FAILS LOUDLY if the two disagree. The literal is used
+# unchecked only when the source is unreadable, and the run says so when it is.
 E3_BARE_SLUG_FALLBACK="preview_token_jti shares"
+E3_BARE_SLUG_SOURCE_REL="api/lib/barkpark/tenancy/workspace_bundle/catalog.ex"
+
+# The derivation the comment above promises. Prints the space-separated table
+# list from the catalog's `@e3_dataset_keyed ~w(...)` attribute, or nothing (and
+# a non-zero exit) when the source is unreadable or the attribute does not parse
+# — an unparseable source must read as "not derived", never as "derived empty",
+# because an empty derivation would otherwise mismatch the literal and red a
+# healthy run for a reason that has nothing to do with the catalog's contents.
+e3_bare_slug_derive() {
+  local src="$REPO_ROOT/$E3_BARE_SLUG_SOURCE_REL" out
+  [ -r "$src" ] || return 1
+  out="$(sed -n 's/^[[:space:]]*@e3_dataset_keyed[[:space:]]*~w(\([^)]*\)).*/\1/p' "$src" \
+          | head -n 1 | tr -s '[:space:]' ' ' | sed 's/^ *//; s/ *$//')"
+  [ -n "$out" ] || return 1
+  printf '%s' "$out"
+}
 
 src_total() { # type perspective -> integer (or empty)
   local t="$1" p="$2"
@@ -1091,7 +1503,7 @@ src_total() { # type perspective -> integer (or empty)
 
 src_total_anon() { # type perspective -> integer (or empty) — NO Authorization
   local t="$1" p="$2"
-  curl -sS --max-time "${PDS_HTTP_TIMEOUT:-120}" \
+  bp_curl_body -sS --max-time "${PDS_HTTP_TIMEOUT:-120}" \
     "$SOURCE_BASE/v1/data/query/$SOURCE_DS/$t?perspective=$p&count=true&limit=0" \
     | jqp 'd["result"]["total"]' 2>/dev/null || true
 }
@@ -1262,8 +1674,18 @@ step_2() {
   say "  nothing. tables/shares.copy is 0 BYTES in the full bundle for exactly this"
   say "  reason. Discovering it mid-run looks like data loss; it is a known,"
   say "  bounded ownership artifact."
-  local bare_slug shares_rows owners
+  local bare_slug shares_rows owners e3_derived
   bare_slug="$E3_BARE_SLUG_FALLBACK"
+  e3_derived="$(e3_bare_slug_derive || true)"
+  if [ -z "$e3_derived" ]; then
+    info "bare-slug E3 list NOT derived this run ($E3_BARE_SLUG_SOURCE_REL unreadable, or its @e3_dataset_keyed did not parse) — the exclusion below is named from the in-script literal, UNCHECKED against the catalog"
+  elif [ "$e3_derived" != "$E3_BARE_SLUG_FALLBACK" ]; then
+    fail 2 "THE BARE-SLUG E3 TABLE LIST HAS MOVED: $E3_BARE_SLUG_SOURCE_REL declares @e3_dataset_keyed = '$e3_derived', this harness names '$E3_BARE_SLUG_FALLBACK'. The PDS-D45 pre-declared shortfall would name the WRONG tables, so step 2's honest shortfall declaration would be quietly wrong rather than loudly wrong. FIX: set E3_BARE_SLUG_FALLBACK to '$e3_derived' and re-read the exclusion prose above it."
+    return 0
+  else
+    bare_slug="$e3_derived"
+    info "bare-slug E3 list DERIVED this run from $E3_BARE_SLUG_SOURCE_REL (@e3_dataset_keyed = '$e3_derived') and it MATCHES the in-script literal"
+  fi
   if ssh_available; then
     shares_rows="$(src_psql "SELECT count(*) FROM shares WHERE dataset='$SOURCE_DS'" | tr -d '[:space:]' || true)"
     owners="$(src_psql "SELECT count(DISTINCT p.workspace_id) FROM datasets d JOIN projects p ON p.id=d.project_id WHERE d.slug='$SOURCE_DS'" | tr -d '[:space:]' || true)"
@@ -1620,7 +2042,7 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   # when no sampler can be started the run says so and quotes nothing (below).
   local rss_log rss_pid beam_pid beam_all beam_n baseline_kb peak_kb
   rss_log="$ART_DIR/full-export-rss.log"
-  mkdir -p "$ART_DIR"
+  art_dir_ensure
   : >"$rss_log"
   beam_pid=""; rss_pid=""; beam_all=""; beam_n=0
   if ssh_available; then
@@ -1888,7 +2310,7 @@ print(c.index("id")+1, c.index("doc_id")+1, c.index("type")+1, len(c))' "$bdir/m
     return 0
   fi
 
-  local fdir f_cols f_i_docid f_i_type f_rows
+  local fdir f_cols f_i_docid f_i_type f_n_cols f_docs_copy f_docs_rows f_first_fields f_rows
   fdir="$(mktemp -d "${TMPDIR:-/tmp}/pds-full.XXXXXX")"
   TMP_DIRS="$TMP_DIRS $fdir"
   if ! tar -xf "$FULL_TAR" -C "$fdir" manifest.json tables/documents.copy 2>/dev/null; then
@@ -1901,19 +2323,52 @@ d=json.load(open(sys.argv[1]))
 t=[x for x in d["tables"] if x["name"]=="documents"]
 if not t: sys.exit(1)
 c=t[0]["columns"]
-print(c.index("doc_id")+1, c.index("type")+1)' "$fdir/manifest.json" 2>/dev/null || true)"
+print(c.index("doc_id")+1, c.index("type")+1, len(c))' "$fdir/manifest.json" 2>/dev/null || true)"
   if [ -z "$f_cols" ]; then
     fail 3 "the full bundle's manifest does not describe a documents member — the control cannot be run"
     return 0
   fi
   f_i_docid="$(printf '%s' "$f_cols" | awk '{print $1}')"
   f_i_type="$(printf '%s' "$f_cols" | awk '{print $2}')"
+  f_n_cols="$(printf '%s' "$f_cols" | awk '{print $3}')"
+
+  # (d0) THE CONTROL'S PARSE IS AN ASSERTION TOO — the mirror of (b0) above.
+  # The dev leg refuses to trust its tab-split until the member is shown to BE
+  # COPY TEXT; the control leg used to parse blind. Its polarity ("> 0") means a
+  # broken grammar collapses NF, matches nothing, and surfaces as the generic
+  # "THE CONTROL DID NOT FIRE" — which BLAMES THE AMMO for a grammar problem.
+  # So the same three assertions run here, and they fail with a NAMED grammar
+  # message that says the ammo is not the suspect.
+  if ! int_ok "$f_n_cols"; then
+    fail 3 "CONTROL GRAMMAR, NOT AMMO: the FULL bundle manifest's documents column count read as '${f_n_cols:-<empty>}', not an integer — the control's COPY TEXT grammar assertion cannot be evaluated, and an unevaluated grammar check makes the control's own count vacuous."
+    return 0
+  fi
+  f_docs_copy="$fdir/tables/documents.copy"
+  if [ ! -s "$f_docs_copy" ]; then
+    fail 3 "CONTROL GRAMMAR, NOT AMMO: tables/documents.copy is absent or empty in the FULL bundle — a control that counts zero over an empty member has not been shown capable of a non-zero at all, so it says nothing about the ammo and nothing about the dev bundle's zero."
+    return 0
+  fi
+  f_docs_rows="$(first_int "$(grep -c . "$f_docs_copy" 2>/dev/null)")"
+  f_first_fields="$(first_int "$(head -n 1 "$f_docs_copy" | awk -F'\t' '{print NF}')")"
+  if ! int_ok "$f_first_fields"; then
+    fail 3 "CONTROL GRAMMAR, NOT AMMO: the FULL bundle's tables/documents.copy first row yielded no field count — the member could not be read as text at all, so the control's COPY TEXT grammar assertion cannot be evaluated."
+    return 0
+  fi
+  if [ "$f_first_fields" -ne "$f_n_cols" ]; then
+    fail 3 "CONTROL GRAMMAR, NOT AMMO: the FULL bundle's tables/documents.copy is not the COPY TEXT grammar this control parses — its first row splits into $f_first_fields tab-separated fields, its own manifest declares $f_n_cols columns. A tab-split scan of a non-text dump finds nothing for ANY ammo, so the doc_id is not the suspect: the member's grammar is."
+    return 0
+  fi
+  info "control grammar COPY TEXT confirmed in the FULL bundle: $f_docs_rows row(s), first row = $f_first_fields fields = its manifest's $f_n_cols columns"
+
+  # The non-empty predicates on a and b mirror the dev leg's (u != "") guard.
+  # Empty ammo compared against a field an NF-short member does not have matches
+  # EVERY line, which would manufacture a firing control out of garbage.
   f_rows="$(awk -F'\t' -v a="$doc_id" -v b="$pub_id" -v idc="$f_i_docid" -v it="$f_i_type" '
-            $it == "ticket" || $idc == a || $idc == b { n++ } END { print n + 0 }' \
-            "$fdir/tables/documents.copy" 2>/dev/null || echo ERR)"
+            $it == "ticket" || (a != "" && $idc == a) || (b != "" && $idc == b) { n++ }
+            END { print n + 0 }' "$f_docs_copy" 2>/dev/null || echo ERR)"
   info "full bundle     ticket ROWS in tables/documents.copy: $f_rows (the control must be > 0)"
   if ! int_ok "$f_rows" || [ "$f_rows" -eq 0 ]; then
-    fail 3 "THE CONTROL DID NOT FIRE: the FULL bundle carries $f_rows ticket rows too. Either the ammo (doc_id=$doc_id) is wrong or this bundle is not full fidelity — and until the assertion is shown capable of a non-zero, the dev bundle's zero above proves nothing (PDS-D20)."
+    fail 3 "THE CONTROL DID NOT FIRE — AND IT IS NOT A GRAMMAR PROBLEM: the FULL bundle's COPY TEXT grammar was CONFIRMED above ($f_docs_rows rows, first row = $f_first_fields fields = its manifest's $f_n_cols columns), so the parse is sound and this count of $f_rows is a real read. That leaves AMMO or FIDELITY: either the ammo (doc_id=$doc_id) is wrong, or this bundle is not full fidelity — and until the assertion is shown capable of a non-zero, the dev bundle's zero above proves nothing (PDS-D20)."
     return 0
   fi
 
@@ -2347,7 +2802,7 @@ reboot_target() { # 0 = the target answered HTTP again
   "$TARGET_TREE/bin/barkpark" up >"$BARKPARK_HOME/reboot.log" 2>&1 || return 1
   i=0
   while [ "$i" -lt 90 ]; do
-    code="$(http_code "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$TARGET_BASE/api/schemas" 2>/dev/null || true)")"
+    code="$(http_code "$(bp_curl_code -sS -o /dev/null --max-time 10 "$TARGET_BASE/api/schemas" 2>/dev/null || true)")"
     [ "$code" = "200" ] && return 0
     i=$((i + 1))
     sleep 1
@@ -2690,8 +3145,12 @@ step_8() {
 
   local sha_now
   sha_now=""
-  if [ -n "$DEPLOYED_SHA" ] && ssh_available; then
+  if [ -n "$DEPLOYED_SHA" ] && [ "$DEPLOYED_SHA_SOURCE" = "ssh" ] && ssh_available; then
     sha_now="$(ssh_src 'cd /opt/barkpark && git rev-parse HEAD' | tr -d '[:space:]' || true)"
+  elif [ "$DEPLOYED_SHA_SOURCE" = "operator-asserted" ]; then
+    # A measured re-pin differing from an ASSERTED one convicts the assertion,
+    # not the box, and this rung is about the box. Fall through to uptime.
+    info "sha re-pin      SKIPPED — 0a's pin was OPERATOR-ASSERTED (PDS_DEPLOYED_SHA), so a mismatch here would convict the assertion rather than a redeploy. The uptime signal below is this rung's evidence."
   fi
   if [ -n "$sha_now" ]; then
     info "sha at 0a       $DEPLOYED_SHA"
@@ -2709,7 +3168,7 @@ step_8() {
   local status code uptime_now
   uptime_now=""
   status="$(mktmp)"
-  code="$(http_code "$(curl -sS -o "$status" -w '%{http_code}' --max-time 30 "$SOURCE_BASE/status.json" 2>/dev/null || true)")"
+  code="$(http_code "$(bp_curl_code -sS -o "$status" --max-time 30 "$SOURCE_BASE/status.json" 2>/dev/null || true)")"
   if [ "$code" = "200" ]; then
     uptime_now="$(jqp 'd.get("uptime_seconds","")' <"$status" 2>/dev/null || true)"
     case "$uptime_now" in ''|*[!0-9]*) uptime_now="" ;; esac
@@ -2886,12 +3345,20 @@ main() {
       summary
       exit $?
       ;;
+    --sweep-artifacts)
+      [ $# -le 2 ] || die "--sweep-artifacts takes at most --apply (got: $*)"
+      if [ $# -eq 2 ] && [ "$2" != "--apply" ]; then
+        die "--sweep-artifacts understands only --apply (got: $2). A flag this parser does not understand is REFUSED, never silently dropped (PDS-D89)."
+      fi
+      cmd_sweep_artifacts "${2:-}"
+      exit 0
+      ;;
     -h|--help|help)
-      sed -n '2,83p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,/^# bash 3\.2 compatible/p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
-      printf 'usage: %s {--plan|--all|--only <ids>|--help}\n' "$SELF" >&2
+      printf 'usage: %s {--plan|--all|--only <ids>|--sweep-artifacts [--apply]|--help}\n' "$SELF" >&2
       exit 3
       ;;
   esac

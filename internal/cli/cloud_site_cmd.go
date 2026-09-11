@@ -11,7 +11,7 @@ package cli
 //	bp cloud site deploy    <site> [--no-follow] [--wait-for-live <deadline>]   (alias: build)
 //	bp cloud site rollback  <site>
 //	bp cloud site delete    <site> [--yes]         (alias: rm)
-//	bp cloud site status    <site>
+//	bp cloud site status    <site> [--window <attempts>]
 //	bp cloud site open      <site> [--print-only]
 //
 // It is a THIN driver over internal/cloudclient's spawner methods, rendered
@@ -40,9 +40,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -107,6 +109,14 @@ func runCloudSite(out *writer, g globals, args []string) int {
 		return runCloudSiteDelete(out, g, rest)
 	case "status":
 		return runCloudSiteStatus(out, g, rest)
+	// `doctor` is the READ-ONLY diagnosis (ssw8-site-doctor): `status` answers
+	// "what is this site's newest/live build", `doctor` answers "which of the
+	// substrates a site occupies actually exist, and what repairs the ones that
+	// do not". They are deliberately separate verbs — folding the per-substrate
+	// report into `status` would put a ten-probe synchronous read behind the
+	// verb people run in a loop.
+	case "doctor":
+		return runCloudSiteDoctor(out, g, rest)
 	case "open":
 		return runCloudSiteOpen(out, g, rest)
 	case "preflight":
@@ -2105,8 +2115,8 @@ func renderSiteSettingsUpdated(out *writer, ref string, site cloudclient.SpawnSi
 }
 
 func runCloudSiteStatus(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site status <site>"
-	a, err := parseHzArgs(args, nil, nil, usage)
+	const usage = "bp cloud site status <site> [--window <attempts>]"
+	a, err := parseHzArgs(args, []string{"window"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -2114,6 +2124,13 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 		return useError(out, "usage", fmt.Sprintf("want exactly one <site> (usage: %s)", usage), exitUsage)
 	}
 	ref := a.pos[0]
+	// THE ROUND-TRIP BUDGET IS DECIDED HERE, BEFORE THE FIRST REQUEST. The default
+	// is one page — byte-for-byte the read this verb has always done — and a wider
+	// --window buys more rows at a stated, bounded number of extra round trips.
+	windowRows, werr := siteStatusWindowSize(a)
+	if werr != nil {
+		return useError(out, "usage", werr.Error(), exitUsage)
+	}
 
 	cfg, ok := siteCloudConfig(out, "read a site's status")
 	if !ok {
@@ -2156,15 +2173,23 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 	// flattering number available. Erring optimistic is the direction this epic
 	// exists to eliminate. Row [0] is still the newest, so every existing reader of
 	// `newest` is unchanged; the rest of the page feeds the censored bound only.
+	//
+	// W17 (dr-w17-bl-per-site-cost-needs-paging): the single call became a BOUNDED
+	// KEYSET WALK. The route caps a window at 200 rows and hands back a
+	// next_cursor, so a per-site cost figure taken off one page is page-local —
+	// "3.57 attempts per live" measured on a site's newest 200 rows is not that
+	// site's cost, and nothing in the old return value could say so. The walk
+	// carries the bound it stopped on, and every figure rendered below names it.
 	var newest *cloudclient.SiteDeployment
 	var ledger []cloudclient.SiteDeployment
-	page, lerr := cfg.CloudClient().ListSpawnSiteDeployments(cloudCtx(), id, siteStatusLedgerPage, "")
+	var walk cloudclient.SiteDeploymentWalk
+	walk, lerr := cfg.CloudClient().WalkSpawnSiteDeployments(cloudCtx(), id, cloudclient.NewSiteDeploymentWalkBudget(windowRows, 0))
 	switch {
 	case lerr != nil:
 		out.errf("could not read this site's newest deployment (%v) — the header below describes the LIVE build only, and a newer failed deploy would not show here", lerr)
-	case len(page.Deployments) > 0:
-		ledger = page.Deployments
-		n := page.Deployments[0]
+	case len(walk.Deployments) > 0:
+		ledger = walk.Deployments
+		n := walk.Deployments[0]
 		newest = &n
 	}
 
@@ -2184,7 +2209,7 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 		// The window rides as its OWN node, present only when a page was actually
 		// read — an absent `window` means "this status could not read the ledger",
 		// which is the one thing a zeroed census would hide.
-		if w, ok := siteReadWindow(ledger); ok {
+		if w, ok := siteWalkWindow(walk); ok {
 			payload["window"] = siteWindowMap(w)
 		}
 		out.emitStructured(payload)
@@ -2192,8 +2217,15 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 	}
 
 	renderKV(out, spawnSiteStatusMap(site, dep, newest, ledger))
-	if w, ok := siteReadWindow(ledger); ok {
+	if w, ok := siteWalkWindow(walk); ok {
 		renderSiteWindow(out, w)
+		// THE COST, BESIDE THE OUTCOME AND NOT FOLDED INTO IT (D220: this is the
+		// typed table path; `-o json` above stays a passthrough of the rows and the
+		// window census). The census says what happened; these two say what it cost.
+		if c, ok := siteWindowCost(ledger); ok {
+			renderSiteCost(out, w, c)
+		}
+		renderSiteDeferralFraming(out, w, ledger)
 	}
 	if dep == nil {
 		out.outf("")
@@ -2212,8 +2244,35 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 	return exitOK
 }
 
-// runCloudSiteOpen is `bp cloud site open <site>` — print (and, on a tty, open)
-// the live PATH url https://<instance>.barkpark.cloud/sites/<slug>/.
+// siteOpenLaunchNote is the browser half of the `bp cloud site open` receipt,
+// and it says only what the CLI actually read.
+//
+// WHAT THE CODE KNOWS. browserOpener is openInBrowser, which Start()s `open` /
+// `xdg-open` / rundll32 and deliberately never Wait()s, so `bp` returns at once.
+// A nil error therefore means ONE thing: the launcher process was spawned. It is
+// not a window, not a loaded page, not even the browser you use — a handler that
+// exits 1 a millisecond later returns nil here just the same. The previous line,
+// "opening in your browser…", asserted that whole chain on the strength of its
+// first link, which is a success claim about LOCAL state backed by an error
+// return alone (site-spawner W8, ssw8-site-open-and-status-claims).
+//
+// THE FIX IS THE DEPLOY VERDICT'S. renderSiteDeployVerdict does not stop saying
+// "live"; it says live AND names what it did not check ("the CLI did not fetch
+// that URL … confirm with `curl -sI`"). Same shape here: report the launch,
+// state the limit in the same breath, and leave the URL — which is printed
+// unconditionally and IS the deliverable — as the thing that always works.
+//
+// The machine envelope changed with it: the field is `launched`, not `opened`,
+// because a bool named `opened` is the same claim in JSON. No consumer read the
+// old key (the site verb had no tests and no docs quoting it; `bp cloud open`
+// keeps its own envelope and is a separate row).
+func siteOpenLaunchNote() string {
+	return "handed the URL to your browser launcher — it started without error; the CLI never sees the window, so if nothing came up, open the URL above yourself"
+}
+
+// runCloudSiteOpen is `bp cloud site open <site>` — print (and, on a tty, hand to
+// the browser launcher) the live PATH url
+// https://<instance>.barkpark.cloud/sites/<slug>/.
 func runCloudSiteOpen(out *writer, g globals, args []string) int {
 	const usage = "bp cloud site open <site> [--print-only]"
 	a, err := parseHzArgs(args, nil, []string{"print-only"}, usage)
@@ -2242,22 +2301,24 @@ func runCloudSiteOpen(out *writer, g globals, args []string) int {
 		return useError(out, "failed", fmt.Sprintf("site %q has no live URL yet — deploy it first with `bp cloud site deploy %s`", ref, ref), exitGeneric)
 	}
 
-	opened := false
+	// launched, never `opened`: all this bool records is that the launcher
+	// process started. See siteOpenLaunchNote.
+	launched := false
 	if !a.bools["print-only"] && out.isTTY {
 		if berr := browserOpener(url); berr == nil {
-			opened = true
+			launched = true
 		} else {
-			out.errf("could not open a browser (%v) — copy the URL above", berr)
+			out.errf("could not start a browser launcher (%v) — copy the URL above", berr)
 		}
 	}
 
 	if out.machineOut() {
-		out.emitStructured(map[string]any{"ok": true, "site": spawnSiteRef(site), "url": url, "opened": opened})
+		out.emitStructured(map[string]any{"ok": true, "site": spawnSiteRef(site), "url": url, "launched": launched})
 		return exitOK
 	}
 	out.outf("%s", url)
-	if opened {
-		out.info("opening in your browser…")
+	if launched {
+		out.info("%s", siteOpenLaunchNote())
 	}
 	return exitOK
 }
@@ -2562,6 +2623,26 @@ func sitePublishTriggerLine(trigger string) string {
 // `ledger` is the rest of that same page (newest first, `newest` included) — it
 // feeds ONE thing: the right-censored "still waiting" bound in the time-to-web
 // line, which must be taken from the OLDEST waiting row, not the newest.
+//
+// WHY `bp cloud site status` IS NOT IN successClaimRegistry, WRITTEN DOWN RATHER
+// THAN LEFT IMPLICIT (site-spawner W8, ssw8-site-open-and-status-claims). The
+// success-claim law binds a verb that CLAIMS A POST-CONDITION IT PRODUCED: it may
+// not report success on an exit code alone. This function produces nothing. It is
+// a pure read view — it relays fields the control plane sent for a site and its
+// deployments and mints no verdict of its own about a change (the one judgement it
+// does make, live-vs-newest-failed above, exists precisely to STOP the relayed
+// "live" from over-claiming). With no post-condition asserted there is nothing for
+// the registry's property — would the printed sentence change if the response said
+// the opposite? — to bite on beyond what the status tests already pin, so the row
+// is deliberately absent, not overlooked.
+//
+// The open verb is the opposite case and was fixed instead of exempted: see
+// siteOpenLaunchNote. It is likewise unenrolled, but for a different reason —
+// its post-condition (a browser launcher started) is LOCAL, so it has no server
+// response to vary, and the registry's site arm (siteResponseTypedRows plus the
+// renderSite prefix) requires probes that internal/cloudclient RETURNS. Enrolling
+// a bool there would need a probe pair the verb cannot honestly supply; the honest
+// closer was to make the sentence itself state what it did not read.
 func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) map[string]any {
 	m := map[string]any{
 		"site":      spawnSiteRef(s),
@@ -2631,6 +2712,22 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 		}
 		if au := strings.TrimSpace(dep.ArtifactURL); au != "" {
 			m["artifact"] = hzCell(au)
+		}
+		// THE SERVED SLOT AND THE HEALTH VERDICT, in words rather than a bare
+		// number. `-o json` carries the raw `slot` / `port` / `health_exit_code`
+		// for scripts; a human reading this header needs to be told WHICH of the
+		// three states it got, because two of them look alike from a distance:
+		// exit 0 means the gate RAN and PASSED, and no key at all means nobody
+		// ever measured it. The rows are therefore never printed empty.
+		if line := siteServedSlotLine(dep.Slot, dep.Port); line != "" {
+			m["served slot"] = line
+		}
+		// Shown for NODE sites only. A static deploy has no health gate and never
+		// will, so a permanent "not measured" dash on every static status header
+		// would be noise that teaches the reader to ignore the row — while on a
+		// node deploy that same dash is the finding.
+		if siteIsNode(s.Kind, s.RuntimeTarget) {
+			m["health"] = siteHealthGateLine(dep.HealthExitCode)
 		}
 		// A deploy that did not go live owes the reader a reason — the deployment's
 		// failure_reason, else the failed stage's streamed detail.
@@ -3100,6 +3197,17 @@ type siteWindow struct {
 	Newest    string
 	PageFull  bool
 	PageLimit int
+
+	// The WALK's own record (dr-w17-bl-per-site-cost-needs-paging). Zero on a
+	// single-page read, which is exactly what a zero should mean here: no walk was
+	// performed. Truncated is the load-bearing one — it is true when the server
+	// still had a cursor to give when the read stopped, which is the difference
+	// between a count that is this site's history and a count that is a FLOOR.
+	Pages      int
+	PageBudget int
+	PageSize   int
+	Truncated  bool
+	StoppedBy  string
 }
 
 // siteReadWindow measures the page. It reports only what the rows say.
@@ -3178,7 +3286,9 @@ func renderSiteWindow(out *writer, w siteWindow) {
 	if w.Stampless > 0 && w.Oldest != "" {
 		out.outf("  %d of %d rows carried no readable inserted_at and are outside that span", w.Stampless, w.Rows)
 	}
-	if w.PageFull {
+	if w.Truncated || w.Pages > 0 {
+		out.outf("  %s", siteWindowBudgetLine(w))
+	} else if w.PageFull {
 		out.outf("  the page came back full at %d rows, so older attempts exist that this status did not read", w.PageLimit)
 	}
 }
@@ -3211,6 +3321,18 @@ func siteWindowMap(w siteWindow) map[string]any {
 	}
 	if w.Stampless > 0 {
 		m["attempts_without_a_stamp"] = w.Stampless
+	}
+	// The WALK's bound, machine-side. `truncated` is the key a script must read
+	// before quoting `attempts_read` as anything: true means the server still had
+	// a cursor when this read stopped, so the count is a FLOOR. Emitted only when a
+	// walk actually ran, so a single-page envelope is byte-identical to the shape
+	// every existing reader already parses.
+	if w.Pages > 0 {
+		m["pages_read"] = w.Pages
+		m["page_budget"] = w.PageBudget
+		m["page_size"] = w.PageSize
+		m["truncated"] = w.Truncated
+		m["stopped_by"] = w.StoppedBy
 	}
 	return m
 }
@@ -3273,6 +3395,53 @@ func siteStalenessMap(dep, newest *cloudclient.SiteDeployment, ledger []cloudcli
 	return m
 }
 
+// siteServedSlotLine renders the blue/green position the box MEASURED Caddy to be
+// proxying to after SWITCH, plus the loopback port it answers on.
+//
+// THREE OUTCOMES, THREE SENTENCES, and the third is the one worth writing code
+// for: the producer can send a port with a NULL slot when the served port matches
+// neither of the site's two allocated slots. That is a measurement — the box
+// looked, and what it found does not fit — so it must not render as the same
+// blank as "the box never looked". Returns "" only when the payload carries
+// neither, which is every static row and every row written before migration
+// 20260902091000.
+func siteServedSlotLine(slot string, port int) string {
+	sl := strings.TrimSpace(slot)
+	switch {
+	case sl != "" && port != 0:
+		return fmt.Sprintf("%s (Caddy upstream localhost:%d)", hzCell(sl), port)
+	case sl != "":
+		return hzCell(sl)
+	case port != 0:
+		return fmt.Sprintf("unknown — Caddy answers on localhost:%d, which matches neither of this site's two allocated slots", port)
+	default:
+		return ""
+	}
+}
+
+// siteHealthGateLine says whether the HEALTH stage RAN, and what it decided.
+//
+// nil is NOT a failure and NOT a pass: it is "never measured" — a build that died
+// before HEALTH, a row written before the health column existed. It gets an
+// explicit dash and a sentence, because the alternative every previous cut of this
+// surface chose was to print nothing, and a missing row reads as "fine".
+//
+// 0 IS THE SUCCESS CODE. It is spelled out rather than left as a number precisely
+// because a reader who skims "health: 0" reads a zero as an absence.
+func siteHealthGateLine(code *int) string {
+	if code == nil {
+		return "— (HEALTH never ran on this deployment, so nothing was measured — not a pass)"
+	}
+	switch *code {
+	case 0:
+		return "passed (HEALTH ran and exited 0)"
+	case 14:
+		return "FAILED (HEALTH ran and exited 14)"
+	default:
+		return fmt.Sprintf("FAILED (HEALTH ran and exited %d, outside the 0/14 convention)", *code)
+	}
+}
+
 // siteDeploymentMap is the structured shape of one deployment, stages included.
 func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	stages := make([]map[string]any, 0, len(d.Stages))
@@ -3333,6 +3502,30 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	}
 	if d.Port != 0 {
 		m["port"] = d.Port
+	}
+	// site-spawner (node slot truth): THE SERVED SLOT AND THE HEALTH GATE'S VERDICT.
+	// `deploy/site-spawner-node-live-proof.sh` reads `deployment.slot` and
+	// `deployment.health_exit_code` off exactly this envelope; before the decoder
+	// declared them (see the SiteDeployment block) `json.Unmarshal` dropped both and
+	// this map could not have emitted them at any price.
+	//
+	// SLOT AND PORT ARE WRITTEN INDEPENDENTLY. The producer can send a port with a
+	// null slot — a served port matching neither of the site's two allocated slots —
+	// and that pair means "we do not know which half", which is a different sentence
+	// from "we did not look". Deriving one from the other, or suppressing the port
+	// when the slot is missing, would delete the signal.
+	if sl := strings.TrimSpace(d.Slot); sl != "" {
+		m["slot"] = sl
+	}
+	// HEALTH IS WRITTEN WHENEVER THE SERVER SENT IT — INCLUDING 0. This is the one
+	// key on this envelope where the usual `!= 0` guard would be a lie in the
+	// dangerous direction: 0 is the code for HEALTH RAN AND PASSED, so gating on
+	// non-zero would erase every passing health check and make success
+	// indistinguishable from "nobody measured". nil (a static row, a build that died
+	// before HEALTH, a pre-migration row) gets NO KEY, which is the honest "not
+	// measured" the deferral pair and the stage timestamps above use.
+	if d.HealthExitCode != nil {
+		m["health_exit_code"] = *d.HealthExitCode
 	}
 	if d.FailureReason != "" {
 		m["failure_reason"] = d.FailureReason
@@ -3435,7 +3628,8 @@ USAGE
   bp cloud site deploy    <site> [--prebuilt <dir> [--deployment <id>]] [--no-follow] [--force] [--wait-for-live <deadline>]  (alias: build)
   bp cloud site rollback  <site>
   bp cloud site delete    <site> [--yes]                            tear the site down  (alias: rm)
-  bp cloud site status    <site>
+  bp cloud site status    <site> [--window <attempts>]
+  bp cloud site doctor    <site>                                   read every substrate this site occupies and name the repair
   bp cloud site open       <site> [--print-only]
   bp cloud site preflight [--dir <path>] [--skip-build]
   bp cloud site settings  <site> [--theme <palette>] [--doc-type <type>] [--prebuilt-enabled true|false]
@@ -3496,6 +3690,13 @@ WHAT IT DOES
   runs the engine's own --self-test harnesses plus a real npm build + marker scan
   of your site. It is offline and needs no login (see 'bp cloud site preflight -h').
 
+  status --window <attempts> widens the deployment window it reads, and with it the
+  attempts-per-live / minutes-to-live COST figures printed beside the outcome. The
+  route hands out at most 200 rows per request, so the window costs
+  ceil(attempts/200) round trips; the default is 20 attempts in ONE trip and the
+  ceiling is 1000 (5 trips). Every cost figure names the window it was taken over, and the
+  rendered line says whether the ledger ended or the budget did.
+
   <site> is a site name or id; needs 'bp login'.
 
 NOT TO BE CONFUSED WITH
@@ -3510,4 +3711,329 @@ OUTPUT + EXIT
   box refused our credential) · 8 the plane or the box failed · 1 anything else,
   each with the plane's own code in the -o json envelope.`
 	out.outf("%s", help)
+}
+
+// ---------------------------------------------------------------------------
+// The COST half of a site's window — dr-w17-bl-per-site-cost-needs-paging.
+//
+// The census above answers "what happened to the attempts I read". This answers
+// the different question an owner actually pays: WHAT DID GETTING THIS CONTENT
+// LIVE COST — how many attempts per live deploy, and how many minutes from the
+// control plane accepting the work to visitors seeing it.
+//
+// IT IS NEVER FOLDED INTO A RELIABILITY RATE, and that is the whole design.
+// "82% of deploys succeed" and "3.6 attempts per live deploy" are computed from
+// the same rows and say opposite things to a reader: the rate makes a box that
+// refuses four rounds and then lands look FINE, because the landing is what the
+// numerator counts. Cost makes the four refusals visible as what they are —
+// round trips and minutes somebody waited. A site whose deferral rate is falling
+// can still be getting more expensive, and only the cost figure can say so.
+// ---------------------------------------------------------------------------
+
+// siteStatusWindowMax is the hard ceiling on --window: five full server pages.
+// A ceiling exists because `bp sites` already pays extra round trips per site and
+// a cost walk on top of that is an N+1 — one bounded ceiling here means the worst
+// case is stated in the help text instead of discovered on someone's rate limit.
+const siteStatusWindowMax = 5 * cloudclient.SiteDeploymentPageMax
+
+// siteStatusWindowDefault is what `status` reads with no --window: ONE round trip
+// of siteStatusLedgerPage rows — byte-for-byte the read this verb has always
+// done. Widening the default would have made every existing `bp cloud site
+// status` slower to pay for a figure nobody asked for.
+const siteStatusWindowDefault = siteStatusLedgerPage
+
+// siteStatusWindowSize reads --window. Absent is the default; a value must be a
+// positive integer inside the ceiling, and both refusals name the bound rather
+// than silently clamping — a clamp would print a cost figure over a window the
+// caller did not ask for and would never learn about.
+func siteStatusWindowSize(a *hzArgs) (int, error) {
+	raw := strings.TrimSpace(a.val("window"))
+	if raw == "" {
+		return siteStatusWindowDefault, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("--window wants a positive number of attempts to read, got %q", raw)
+	}
+	if n > siteStatusWindowMax {
+		return 0, fmt.Errorf("--window %d exceeds the %d-attempt ceiling (%d server pages of %d) — a wider read is a census job, not a status call", n, siteStatusWindowMax, siteStatusWindowMax/cloudclient.SiteDeploymentPageMax, cloudclient.SiteDeploymentPageMax)
+	}
+	return n, nil
+}
+
+// siteWalkWindow measures a bounded WALK the way siteReadWindow measures a single
+// page, and then overwrites the paging fields with what the walk actually did.
+//
+// The override is the point. siteReadWindow's PageFull/PageLimit describe one
+// page of siteStatusLedgerPage rows; after a walk those two are wrong in the most
+// dangerous direction — a 400-row read would report "page full at 20" and a
+// reader would conclude the site has 20 attempts of history. The walk knows
+// whether the server still had a cursor when it stopped, and that fact replaces
+// the guess.
+func siteWalkWindow(walk cloudclient.SiteDeploymentWalk) (siteWindow, bool) {
+	w, ok := siteReadWindow(walk.Deployments)
+	if !ok {
+		return siteWindow{}, false
+	}
+	w.PageLimit = walk.Budget.Rows
+	w.PageFull = walk.Truncated
+	w.Pages = walk.Pages
+	w.PageBudget = walk.Budget.MaxPages
+	w.PageSize = walk.Budget.PageSize
+	w.Truncated = walk.Truncated
+	w.StoppedBy = walk.StoppedBy
+	return w, true
+}
+
+// siteWindowBudgetLine states the round-trip budget the window was read under —
+// the sentence criterion c0 of dr-w17-bl-per-site-cost-needs-paging is about.
+// A cost figure with no window is a page-local number quoted as a site total, and
+// the only structural defence is that the renderer cannot print the figure
+// without printing this beside it.
+func siteWindowBudgetLine(w siteWindow) string {
+	return fmt.Sprintf("window: %d attempts asked for, read in %d of a budgeted %d round trips at %d rows per request", w.PageLimit, w.Pages, w.PageBudget, w.PageSize) + " — " + siteWindowBoundClause(w)
+}
+
+// siteWindowBoundClause is the half of the budget line that says WHICH BOUND
+// ended the read. It is its own function because the cost block needs exactly
+// this clause and not the round-trip arithmetic above it: a cost figure that
+// repeated the whole budget sentence verbatim, two lines under the census that
+// already printed it, would train a reader to skip the one clause that decides
+// whether the figure beside it is a site total or a floor.
+func siteWindowBoundClause(w siteWindow) string {
+	switch w.StoppedBy {
+	case "exhausted":
+		return "the server had no page behind this one, so this IS the site's whole deployment history"
+	case "pages":
+		return "the ROUND-TRIP BUDGET ended this read, not the ledger; older attempts exist and were not counted"
+	case "rows":
+		return "the ROW TARGET ended this read, not the ledger; older attempts exist and were not counted. Widen it with --window"
+	default:
+		return "this is the window that was read, and nothing is claimed beyond it"
+	}
+}
+
+// siteCost is what the window's attempts cost, with every figure carrying the
+// denominator it was taken over.
+//
+// AttemptsPerLive is a POINTER-shaped refusal (`HaveRatio`), never a zero: a
+// window with no live row at all has no cost per live deploy — it has an
+// UNBOUNDED one, and 0.0 is the most flattering possible lie about a site that
+// has never landed a deploy inside the window you read.
+type siteCost struct {
+	Attempts        int
+	Lives           int
+	AttemptsPerLive float64
+	HaveRatio       bool
+	Measured        int
+	Unmeasured      int
+	MedianToLive    time.Duration
+	P90ToLive       time.Duration
+}
+
+// siteWindowCost computes the cost figures from the rows the walk actually read.
+// Nothing is imputed: a live row whose became_live_at / inserted_at pair will not
+// parse (or that runs backwards) is counted as UNMEASURED and stays out of the
+// duration stats, exactly as siteTimeToWeb refuses it.
+func siteWindowCost(ledger []cloudclient.SiteDeployment) (siteCost, bool) {
+	if len(ledger) == 0 {
+		return siteCost{}, false
+	}
+	c := siteCost{Attempts: len(ledger)}
+	var gaps []time.Duration
+	for _, r := range ledger {
+		if !strings.EqualFold(strings.TrimSpace(r.Status), "live") {
+			continue
+		}
+		c.Lives++
+		if g, ok := siteTimeToWeb(r); ok {
+			gaps = append(gaps, g)
+			c.Measured++
+		} else {
+			c.Unmeasured++
+		}
+	}
+	if c.Lives > 0 {
+		c.AttemptsPerLive = float64(c.Attempts) / float64(c.Lives)
+		c.HaveRatio = true
+	}
+	if len(gaps) > 0 {
+		sort.Slice(gaps, func(i, j int) bool { return gaps[i] < gaps[j] })
+		c.MedianToLive = gaps[(len(gaps)-1)/2]
+		c.P90ToLive = gaps[siteQuantileIndex(len(gaps), 0.90)]
+	}
+	return c, true
+}
+
+// siteQuantileIndex is the nearest-rank index for a quantile over n sorted
+// values. Nearest-rank rather than interpolated because these are wall-clock
+// observations of real deploys: the p90 printed is a duration that ACTUALLY
+// HAPPENED to one of them, not a number between two of them that never occurred.
+func siteQuantileIndex(n int, q float64) int {
+	if n <= 0 {
+		return 0
+	}
+	i := int(math.Ceil(q*float64(n))) - 1
+	if i < 0 {
+		i = 0
+	}
+	if i >= n {
+		i = n - 1
+	}
+	return i
+}
+
+// siteAttemptsPerLiveSeries is the 8-day attempts-per-live series measured over
+// the whole fleet on 2026-08-07 (deploy-reliability wave 17, task row
+// dr-w17-bl-per-site-cost-needs-paging), oldest day first.
+//
+// IT IS QUOTED VERBATIM AND DATED, for one reason: the charter's D252 says "~3.2
+// attempts per live deploy", and 3.2 is not reproduced ANYWHERE in this series —
+// the best day in it is 3.71 and the worst is 8.58. A single headline number
+// invites a reader to treat it as the shape; the series shows the shape is a
+// range that has been more than twice as bad as its own best day, and that the
+// best day was the day it was measured.
+var siteAttemptsPerLiveSeries = []float64{8.58, 7.81, 8.17, 7.66, 6.51, 7.02, 3.90, 3.71}
+
+// siteAttemptsPerLiveSeriesLine renders that series as dated context. It NEVER
+// mixes with the live figures above it — a fleet measurement from 2026-08 is not
+// evidence about the site in front of you, and the sentence says whose number it
+// is and when it was taken.
+func siteAttemptsPerLiveSeriesLine() string {
+	parts := make([]string, 0, len(siteAttemptsPerLiveSeries))
+	for _, v := range siteAttemptsPerLiveSeries {
+		parts = append(parts, fmt.Sprintf("%.2f", v))
+	}
+	return "dated context — FLEET-WIDE, 2026-08-07, not this site: the 8-day attempts-per-live series was " +
+		strings.Join(parts, " / ") +
+		" (oldest day first). The charter's \"~3.2\" is not reproduced anywhere in it; the best day in the series is " +
+		fmt.Sprintf("%.2f", siteAttemptsPerLiveSeries[len(siteAttemptsPerLiveSeries)-1]) +
+		" and it was the day of measurement."
+}
+
+// renderSiteCost prints the cost block. It is TABLE-ONLY on purpose (D220): the
+// `-o json` envelope stays a passthrough of the rows and the window census, so a
+// script cannot pick up a prose-qualified figure and re-quote it bare.
+func renderSiteCost(out *writer, w siteWindow, c siteCost) {
+	out.outf("")
+	out.outf("cost of getting content live (a COST, never a reliability rate — a success rate counts the landing and hides what the refusals before it charged):")
+	span := "this window"
+	if w.Oldest != "" {
+		span = fmt.Sprintf("%s → %s", w.Oldest, w.Newest)
+	}
+	if c.HaveRatio {
+		out.outf("  %.2f attempts per live deploy — %d attempts / %d live, over the %d attempts read (%s)", c.AttemptsPerLive, c.Attempts, c.Lives, c.Attempts, span)
+	} else {
+		out.outf("  attempts per live deploy: NO LIVE ROW in the %d attempts read (%s), so this window has no cost per live deploy — not a zero one", c.Attempts, span)
+	}
+	switch {
+	case c.Measured > 0:
+		out.outf("  minutes to live: median %s · p90 %s, over %d of %d live rows in that window", siteShortDur(c.MedianToLive), siteShortDur(c.P90ToLive), c.Measured, c.Lives)
+		out.outf("    (the clock starts at inserted_at — when the CONTROL PLANE picked the work up — not when a human hit publish)")
+	case c.Lives > 0:
+		out.outf("  minutes to live: unmeasurable — all %d live rows in that window carried no usable became_live_at", c.Lives)
+	}
+	if c.Unmeasured > 0 && c.Measured > 0 {
+		out.outf("  %d of %d live rows carried no usable became_live_at and are outside those durations", c.Unmeasured, c.Lives)
+	}
+	out.outf("  both figures are over THAT window and nothing wider — %s", siteWindowBoundClause(w))
+	out.outf("  %s", siteAttemptsPerLiveSeriesLine())
+}
+
+// ---------------------------------------------------------------------------
+// The deferral framing — criterion c2.
+//
+// TERMINAL FOR THE ROW, TRANSIENT FOR THE SITE, and both halves have to be said
+// in one breath or the reader gets a lie either way. Over 2,124 deferred rows
+// measured on 2026-08-07: ZERO ever set became_live_at (a deferred row is
+// terminal in the control plane's transition table and never becomes anything
+// else), while 1,837 of them — 86.5% — were followed by a same-site live within
+// one hour. Saying only the first makes a re-queued publish read as a lost one;
+// saying only the second is "no site is stranded", which 13.5% of that cohort
+// contradicts.
+// ---------------------------------------------------------------------------
+
+// siteDeferralClearanceWindow is how long after a deferral a same-site live
+// counts as that deferral clearing. One hour is the window the 86.5% was measured
+// over — using any other span here would make the live figure incomparable with
+// the dated one printed beside it.
+const siteDeferralClearanceWindow = time.Hour
+
+// siteDeferralClearance counts, inside the rows actually read, how many deferred
+// rows are followed by a same-site live within the clearance window.
+//
+// CENSORED IS ITS OWN BUCKET, and getting this wrong is the easy mistake. A
+// deferred row less than an hour old at the newest edge of the window has not
+// FAILED to clear — its hour has not elapsed inside the data we hold. Counting it
+// as "not cleared" would manufacture pessimism at exactly the edge where a status
+// call always looks, since the newest rows are the ones an operator runs this for.
+// Rows with an unreadable inserted_at are censored too: they cannot be ordered.
+func siteDeferralClearance(ledger []cloudclient.SiteDeployment) (deferred, cleared, censored int, ok bool) {
+	type stamped struct {
+		t    time.Time
+		live bool
+	}
+	rows := make([]stamped, 0, len(ledger))
+	var newest time.Time
+	for _, r := range ledger {
+		t, parsed := siteParseStamp(r.InsertedAt)
+		if !parsed {
+			continue
+		}
+		if newest.IsZero() || t.After(newest) {
+			newest = t
+		}
+		rows = append(rows, stamped{t: t, live: strings.EqualFold(strings.TrimSpace(r.Status), "live")})
+	}
+	for _, r := range ledger {
+		if !siteDeployDeferred(r.Status) {
+			continue
+		}
+		deferred++
+		t, parsed := siteParseStamp(r.InsertedAt)
+		if !parsed {
+			censored++
+			continue
+		}
+		found := false
+		for _, o := range rows {
+			if !o.live {
+				continue
+			}
+			if o.t.After(t) && o.t.Sub(t) <= siteDeferralClearanceWindow {
+				found = true
+				break
+			}
+		}
+		switch {
+		case found:
+			cleared++
+		case newest.Sub(t) < siteDeferralClearanceWindow:
+			// Its hour has not elapsed inside the rows we hold.
+			censored++
+		}
+	}
+	return deferred, cleared, censored, deferred > 0
+}
+
+// renderSiteDeferralFraming prints both halves of the deferral fact — the live
+// measurement from the window that was just read, and the dated fleet measurement
+// it should be compared against. Printed only when the window actually contains a
+// deferral: framing a fact the reader's own data does not exhibit is noise.
+func renderSiteDeferralFraming(out *writer, w siteWindow, ledger []cloudclient.SiteDeployment) {
+	deferred, cleared, censored, ok := siteDeferralClearance(ledger)
+	if !ok {
+		return
+	}
+	out.outf("")
+	out.outf("what a deferral means here (terminal for the ROW, usually transient for the SITE):")
+	out.outf("  a deferred row is TERMINAL — the control plane's transition table gives it no successor and it never sets became_live_at. The PUBLISH is not lost: a rebuild carrying the same content is re-queued as a NEW row.")
+	unresolved := deferred - cleared - censored
+	span := "this window"
+	if w.Oldest != "" {
+		span = fmt.Sprintf("%s → %s", w.Oldest, w.Newest)
+	}
+	out.outf("  in the %d attempts read (%s): %d of %d deferred rows are followed by a same-site live within %s; %d are not; %d are still inside their first %s and cannot be judged from this window",
+		w.Rows, span, cleared, deferred, siteDeferralClearanceWindow, unresolved, censored, siteDeferralClearanceWindow)
+	out.outf("  dated context — FLEET-WIDE, 2026-08-07, not this site: of 2,124 deferred rows, 0 ever set became_live_at (terminal for the row) while 1,837 (86.5%%) were followed by a same-site live within an hour. So the honest sentence is \"deferral costs attempts and minutes, and 13.5%% of deferrals were not observed to clear within an hour\" — never \"no site is stranded\".")
 }

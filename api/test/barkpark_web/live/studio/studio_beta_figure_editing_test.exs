@@ -45,7 +45,7 @@ defmodule BarkparkWeb.Studio.StudioBetaFigureEditingTest do
     {view, path} = mount_beta(conn, doc.doc_id)
 
     assert has_element?(view, "[data-test-id='paper-figure-editor']")
-    assert has_element?(view, "#figure-form-figure input[name='caption'][value='Before caption']")
+    assert has_element?(view, "#figure-form-figure textarea[name='caption']", "Before caption")
     assert has_element?(view, "#paper-ed-figure-child")
     refute has_element?(view, "[data-paper-container-kind='figure']")
     assert socket_of(view).assigns[:paper_doc] == nil
@@ -120,7 +120,7 @@ defmodule BarkparkWeb.Studio.StudioBetaFigureEditingTest do
     {:ok, reloaded, _html} = live(conn, path)
     reloaded |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
     assert has_element?(reloaded, "#paper-ed-figure-child")
-    assert has_element?(reloaded, "input[name='caption'][value='After caption']")
+    assert has_element?(reloaded, "textarea[name='caption']", "After caption")
     render_hook(reloaded, "paper-block-autosave", caption_params)
 
     assert_reply(reloaded, %{

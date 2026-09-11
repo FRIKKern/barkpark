@@ -179,7 +179,17 @@ defmodule BarkparkWeb.SharedMediaTest do
       Application.delete_env(:barkpark, :shares)
 
       conn = get(conn, media_root(ws_a, proj_a))
-      assert conn.status in [401, 403, 404]
+      # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+      # Both it and the permission-tier gates answer 403 with code "forbidden", so
+      # `reason` is the ONLY discriminator: the membership arm carries
+      # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+      # old assertion accepted any of three statuses — unauthorized, forbidden or
+      # not-found — so it was green on a deleted route and on a lost
+      # authentication too.
+      assert conn.status == 403
+      err = Jason.decode!(conn.resp_body)["error"]
+      assert err["code"] == "forbidden"
+      assert err["reason"] == "not_a_member"
       refute conn.status == 200
     end
 
@@ -191,7 +201,17 @@ defmodule BarkparkWeb.SharedMediaTest do
       with_shares("some-other-ws/some-other-proj/#{@dataset}:media:read")
 
       conn = get(conn, media_root(ws_a, proj_a))
-      assert conn.status in [401, 403, 404]
+      # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+      # Both it and the permission-tier gates answer 403 with code "forbidden", so
+      # `reason` is the ONLY discriminator: the membership arm carries
+      # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+      # old assertion accepted any of three statuses — unauthorized, forbidden or
+      # not-found — so it was green on a deleted route and on a lost
+      # authentication too.
+      assert conn.status == 403
+      err = Jason.decode!(conn.resp_body)["error"]
+      assert err["code"] == "forbidden"
+      assert err["reason"] == "not_a_member"
     end
   end
 
@@ -208,7 +228,17 @@ defmodule BarkparkWeb.SharedMediaTest do
       refute Sharing.shared?(ws_a.slug, proj_a.slug, @dataset, :media)
 
       conn = get(conn, media_root(ws_a, proj_a))
-      assert conn.status in [401, 403, 404]
+      # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+      # Both it and the permission-tier gates answer 403 with code "forbidden", so
+      # `reason` is the ONLY discriminator: the membership arm carries
+      # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+      # old assertion accepted any of three statuses — unauthorized, forbidden or
+      # not-found — so it was green on a deleted route and on a lost
+      # authentication too.
+      assert conn.status == 403
+      err = Jason.decode!(conn.resp_body)["error"]
+      assert err["code"] == "forbidden"
+      assert err["reason"] == "not_a_member"
     end
 
     test "a :papers share on this scope leaves media gated", %{
@@ -219,7 +249,17 @@ defmodule BarkparkWeb.SharedMediaTest do
       with_shares(share(ws_a, proj_a, :papers))
 
       conn = get(conn, media_root(ws_a, proj_a))
-      assert conn.status in [401, 403, 404]
+      # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+      # Both it and the permission-tier gates answer 403 with code "forbidden", so
+      # `reason` is the ONLY discriminator: the membership arm carries
+      # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+      # old assertion accepted any of three statuses — unauthorized, forbidden or
+      # not-found — so it was green on a deleted route and on a lost
+      # authentication too.
+      assert conn.status == 403
+      err = Jason.decode!(conn.resp_body)["error"]
+      assert err["code"] == "forbidden"
+      assert err["reason"] == "not_a_member"
     end
   end
 
@@ -461,7 +501,12 @@ defmodule BarkparkWeb.SharedMediaTest do
         |> put_req_header("content-type", "application/octet-stream")
         |> put("/api/workspaces/#{ws_a.slug}/media/blob/uploads/x/y.png", "X")
 
-      assert resp.status in [401, 403]
+      # WHICH GATE: AUTHENTICATION, not authorisation — 401 `unauthorized`. The
+      # old disjunction also accepted 403 (authorisation refused a credential that
+      # was accepted) and 404 (no such route), which are three different states.
+      assert resp.status == 401
+      err = Jason.decode!(resp.resp_body)["error"]
+      assert err["code"] == "unauthorized"
     end
   end
 
@@ -554,8 +599,16 @@ defmodule BarkparkWeb.SharedMediaTest do
              "ws_a's bytes were replaced by a write issued under ws_b's slug " <>
                "(status #{resp.status})"
 
-      assert resp.status in [403, 404],
+      # WHICH GATE: the NOT-FOUND oracle — 404 `not_found`, not a 403. A
+      # cross-tenant caller must not learn the resource exists, so the refusal is
+      # indistinguishable from a route miss BY DESIGN. Pinning it is what stops
+      # the assertion from also passing on a genuine 403 (which would leak
+      # existence) or on an authentication failure.
+      assert resp.status == 404,
              "ws_b's admin addressed ws_a's blob key and got #{resp.status}"
+
+      err = Jason.decode!(resp.resp_body)["error"]
+      assert err["code"] == "not_found"
     end
 
     # (c) The LEGITIMATE arm, end to end: an admin of the workspace writes a key

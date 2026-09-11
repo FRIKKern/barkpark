@@ -71,6 +71,26 @@
 # and only when the producer's own refusal is on record in GEN_EMIT_ERR.
 # Section 25 pins both directions.
 #
+# THE VERIFIER SPEAKS THE SAME DISTINCTION NOW, IN A DIFFERENT NUMBER, AND THE
+# TRANSLATION HAPPENS HERE. scripts/required-checks-verify.sh exits 5 for
+# BLOCKED — an input it could not read, a producer that refused. It is 5 and not
+# 4 on purpose: 4 in THAT file is RE-RUN (every required context rendered, but
+# one concluded `cancelled`), so a shared integer would carry two meanings across
+# one call and a mapping written without noticing would silently convert one into
+# the other. Both directions look plausible, which is what makes it dangerous.
+#
+#   verify 5 (BLOCKED)  -> this suite's `blocked()`  -> this suite exits 4 (HOLD)
+#   verify 4 (RE-RUN)   -> NOT blocked; a verdict about a head, routed on its own
+#   verify 1 (DRIFT)    -> this suite's `bad()`      -> this suite exits 1
+#
+# §11b exercises both of the first two against the real verifier. Before the
+# verifier had a fifth code, §11's live half was `if bash "$VERIFY"` and called
+# `bad` — a MEASURED BREACH — on any nonzero. On 2026-09-07 an E2BIG inside
+# scripts/lib/check-runs.sh made the check-run feed unreadable, verify exited 1,
+# and this line reported "full mode reds on the committed spec — hgw2-s7's slice
+# gate cannot pass" for hours. A cannot-read was filed, triaged and prioritised
+# as a live branch-protection defect.
+#
 # THE INTERPRETER GUARD, AND THE VACUOUS GREEN IT DELETES (wave 53)
 #
 # The shebang above only decides who runs this file when it is EXECUTED. An
@@ -214,7 +234,18 @@ TMP="$(mktemp -d)"
 # so they are unaffected.
 RC_TALLY_REACHED=0
 cleanup() {
-  local rc=$?
+  # THE STATUS MUST BE PASSED IN WHENEVER THIS HANDLER IS CHAINED, and $1 is how.
+  # A bare `$?` here is the status of the PREVIOUS COMMAND. In a chained trap
+  # string — `trap 'other; cleanup' EXIT` — that previous command is `other`, not
+  # the script, so a successful `other` REPLACES the script's status with 0
+  # before this line ever runs. That is not hypothetical: §26 installed exactly
+  # that chain, its `rc26_cleanup` ends in an `rm -f` that always succeeds, and
+  # every `exit 1` this suite raised from its own tally line was rewritten to
+  # `exit 0` on the way out. `Required-check spec gate` rendered GREEN over a red
+  # assertion because of these six characters. §26 now captures $? as the FIRST
+  # command of the trap string and hands it here; §26(f) proves it, in both
+  # directions, against the trap string actually installed.
+  local rc="${1:-$?}"
   rm -rf "$TMP"
   if [ "$RC_TALLY_REACHED" -ne 1 ] && [ "$rc" -eq 0 ]; then
     echo "required-checks.test.sh: the run ended BEFORE its tally line while reporting success — it crashed, and a crash is not a pass. Scroll up for the last assertion that printed." >&2
@@ -808,6 +839,7 @@ cp "$REPO_ROOT"/.github/workflows/*.yml "$RC3C_CA/"
 cat > "$RC3C_CA/aaa-rc3c-catchall.yml" <<'YAML'
 name: rc3c catch-all specimen
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       operation:
@@ -843,6 +875,7 @@ section "3d. a job named after an INPUT is a catch-all — the generator refuses
 cat > "$WF/poison.yml" <<'YAML'
 name: poison
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       operation:
@@ -930,6 +963,7 @@ cp "$REPO_ROOT"/.github/workflows/*.yml "$REALCOPY/"
 cat > "$REALCOPY/aaa-planted-poison.yml" <<'YAML'
 name: planted
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       operation:
@@ -1415,21 +1449,29 @@ fi
 
 section "8. the guard FAILS — never skips — when it cannot see one of the three sides"
 
-if bash "$VERIFY" --spec "$TMP/no-such-spec.json" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe >/dev/null 2>&1; then
-  bad "a missing spec passed"
-else
-  ok "a missing committed spec FAILS"
-fi
-if bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/nope.json" --runs "$TMP/runs.json" --sha probe >/dev/null 2>&1; then
-  bad "an unreadable live config passed"
-else
-  ok "an unreadable live config FAILS"
-fi
-if bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$TMP/nope.json" --sha probe >/dev/null 2>&1; then
-  bad "an unreadable check-run feed passed"
-else
-  ok "an unreadable check-run feed FAILS (no PR to render names against = red, not green)"
-fi
+# NONZERO IS NO LONGER ENOUGH TO ASSERT HERE. These three clauses used to read
+# `if bash "$VERIFY" …; then bad; else ok; fi` — satisfied by ANY refusal,
+# including drift's 1. The whole point of verify's exit 5 is that a no-read has
+# its own word, so the assertion has to name the code or it certifies nothing
+# about the distinction it exists to protect.
+rc8_noread() { # label <verify args…>
+  local label="$1"; shift
+  local rc=0
+  bash "$VERIFY" "$@" >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -eq 5 ]; then
+    ok "$label is BLOCKED (exit 5) — a hold, not drift"
+  elif [ "$rc" -eq 1 ]; then
+    bad "$label exited 1 — drift's code for a no-read, the collapse this section exists to refuse"
+  else
+    bad "$label exited $rc, neither the hold (5) nor a recognised verdict"
+  fi
+}
+rc8_noread "a missing committed spec" \
+  --spec "$TMP/no-such-spec.json" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe
+rc8_noread "an unreadable live config" \
+  --spec "$TMP/enforced.json" --readback "$TMP/nope.json" --runs "$TMP/runs.json" --sha probe
+rc8_noread "an unreadable check-run feed (no PR to render names against)" \
+  --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$TMP/nope.json" --sha probe
 
 # ── AN EMPTY FEED IS NOT A DEADLOCK, AND THE REFUSAL THAT SAYS SO IS THIS
 #    CALLER'S ────────────────────────────────────────────────────────────────
@@ -1444,10 +1486,10 @@ fi
 RC8_EMPTY_RUNS="$TMP/runs-empty.json"
 echo '{ "check_runs": [] }' > "$RC8_EMPTY_RUNS"
 RC8_E_OUT="$(bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$RC8_EMPTY_RUNS" --sha probe 2>&1)" && RC8_E_RC=0 || RC8_E_RC=$?
-if [ "$RC8_E_RC" -eq 1 ] && grep -q "refusing to declare agreement against an empty feed" <<<"$RC8_E_OUT"; then
-  ok "an EMPTY check-run feed FAILS BY NAME (exit 1) — never a green, and never a deadlock verdict against the spec"
+if [ "$RC8_E_RC" -eq 5 ] && grep -q "refusing to declare agreement against an empty feed" <<<"$RC8_E_OUT"; then
+  ok "an EMPTY check-run feed is BLOCKED BY NAME (exit 5) — never a green, never a deadlock verdict against the spec, and never drift's 1"
 else
-  bad "an empty check-run feed did not red with the guard's own refusal (exit $RC8_E_RC): $(grep -m2 -e FAIL -e DEADLOCK <<<"$RC8_E_OUT")"
+  bad "an empty check-run feed did not hold with the guard's own refusal (exit $RC8_E_RC, wanted 5): $(grep -m2 -e BLOCKED -e FAIL -e DEADLOCK <<<"$RC8_E_OUT")"
 fi
 RC8_NOEMPTY="$TMP/verify-no-empty-refusal.sh"
 sed 's%^.*refusing to declare agreement against an empty feed.*$%    || : # EMPTY REFUSAL REMOVED%' "$VERIFY" > "$RC8_NOEMPTY"
@@ -1616,6 +1658,78 @@ else
 fi
 
 
+section "11b. the 4/4 COLLISION across the verify boundary, exercised in both directions"
+
+# THE HAZARD, STATED BEFORE IT IS TESTED. Two files, one call, one integer:
+#
+#   scripts/required-checks-verify.sh   4 = RE-RUN   (every required context
+#                                                     rendered; one concluded
+#                                                     `cancelled`)
+#   scripts/required-checks.test.sh     4 = HOLD     (an input could not be read)
+#
+# Those are not the same claim and they are not even the same KIND of claim: one
+# is a verdict about a specific head that a re-run fixes, the other is this suite
+# saying it has no verdict at all. A mapping written without noticing converts one
+# into the other, and BOTH directions read plausibly in the output — "held" over
+# a cancelled run, or "re-run it" over an outage. That is why the verifier's
+# no-read code is 5 and never 4: the two vocabularies must not be able to touch.
+#
+# This section proves the separation from the actual binary rather than from the
+# header, and it proves it in both directions with the ARM named for each exit.
+
+# (a) THE RE-RUN ARM. A required context whose latest run concluded `cancelled`,
+#     asked through --deadlock (the mode bp-merge.sh's pre-flight uses). Must be
+#     4, and must NOT be a hold: nothing here failed to be read.
+RC11B_CANCEL="$TMP/rc11b-cancelled.json"
+jq -c --arg keep "$KEPT_CTX" '(.check_runs[] | select(.name == $keep)) |= (.conclusion = "cancelled" | .status = "completed")' \
+  "$TMP/runs.json" > "$RC11B_CANCEL"
+RC11B_A_OUT="$(bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$RC11B_CANCEL" --sha probe --deadlock 2>&1)" && RC11B_A=0 || RC11B_A=$?
+if [ "$RC11B_A" -eq 4 ] && ! grep -q '^BLOCKED:' <<<"$RC11B_A_OUT"; then
+  ok "(a) the RE-RUN arm: a cancelled required context exits 4 from verify and prints NO \`BLOCKED:\` line — it is a verdict about a head, and this suite must never route it to blocked()"
+else
+  bad "(a) the cancelled-required-context arm did not produce a clean RE-RUN (exit $RC11B_A, wanted 4; blocked line present: $(grep -c '^BLOCKED:' <<<"$RC11B_A_OUT" || true))"
+fi
+
+# (b) THE BLOCKED ARM. The identical invocation with a feed that cannot be read
+#     at all. Must be 5. Same mode, same spec, same read-back — the ONLY thing
+#     that changed is whether the input could be read, so a matching number here
+#     cannot be borrowed from anything else in the command line.
+RC11B_B_OUT="$(bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$TMP/rc11b-does-not-exist.json" --sha probe --deadlock 2>&1)" && RC11B_B=0 || RC11B_B=$?
+if [ "$RC11B_B" -eq 5 ] && grep -q '^BLOCKED:' <<<"$RC11B_B_OUT"; then
+  ok "(b) the BLOCKED arm: the SAME --deadlock call with an unreadable feed exits 5 and says so in its own word"
+else
+  bad "(b) an unreadable feed through --deadlock did not hold (exit $RC11B_B, wanted 5): $(tail -1 <<<"$RC11B_B_OUT")"
+fi
+
+# (c) THE SEPARATION, asserted from (a) and (b)'s own numbers rather than from
+#     the headers. If a future edit ever unifies them, this reds before any
+#     caller silently starts converting one into the other.
+if [ "$RC11B_A" -ne "$RC11B_B" ] && [ "$RC11B_B" -ne 4 ]; then
+  ok "(c) RE-RUN ($RC11B_A) and BLOCKED ($RC11B_B) are DIFFERENT integers out of verify, and BLOCKED is not 4 — this suite's own HOLD code cannot be produced by a cancelled run"
+else
+  bad "(c) verify's RE-RUN and BLOCKED collided (re-run=$RC11B_A, blocked=$RC11B_B) — a caller mapping 4 to this suite's HOLD would now convert a cancelled run into an outage report"
+fi
+
+# (d) AND THE TRANSLATION THIS FILE PERFORMS, exercised on the tallies rather
+#     than described. The §11 live half routes verify's 5 to blocked() and
+#     everything else nonzero to bad(). Replay both arms through that exact
+#     shape against a scratch pair of counters and check which tally moved.
+RC11B_P0=$PASS; RC11B_F0=$FAIL; RC11B_B0=$BLOCKED
+# The two emitted lines below are §11b(d)'s own instrument, not findings: the
+# counters are restored immediately after and the verdict is (d)'s ok/bad.
+rc11b_route() { local m="§11b(d) ROUTING PROBE — not a finding, the tallies are restored two lines down"
+  case "$1" in 0) ok "$m" ;; 5) blocked "$m" ;; *) bad "$m" ;; esac; }
+rc11b_route "$RC11B_A"
+RC11B_A_F=$((FAIL - RC11B_F0)); RC11B_A_B=$((BLOCKED - RC11B_B0))
+rc11b_route "$RC11B_B"
+RC11B_B_F=$((FAIL - RC11B_F0 - RC11B_A_F)); RC11B_B_B=$((BLOCKED - RC11B_B0 - RC11B_A_B))
+PASS=$RC11B_P0; FAIL=$RC11B_F0; BLOCKED=$RC11B_B0
+if [ "$RC11B_A_F" -eq 1 ] && [ "$RC11B_A_B" -eq 0 ] && [ "$RC11B_B_F" -eq 0 ] && [ "$RC11B_B_B" -eq 1 ]; then
+  ok "(d) the translation holds on the TALLIES: verify's RE-RUN(4) increments failed and not blocked, verify's BLOCKED(5) increments blocked and not failed — so \`0 failed\` can never hide an outage and a hold can never absorb a real verdict"
+else
+  bad "(d) the §11 routing shape mis-tallies (re-run -> failed+$RC11B_A_F blocked+$RC11B_A_B; blocked -> failed+$RC11B_B_F blocked+$RC11B_B_B)"
+fi
+
 # ═══ the API stage — §10 and §11's three live clauses ════════════════════════
 #
 # EVERYTHING ABOVE THIS LINE IS HERMETIC. Everything below reads the live GitHub
@@ -1647,11 +1761,45 @@ api_stage() {
 
   section "11 (live half). full mode tracks the COMMITTED spec against reality"
 
-  if bash "$VERIFY" >/dev/null 2>&1; then
-    ok "full mode is green on the COMMITTED spec (enforced=$(jq -r .enforced "$SPEC")) — hgw2-s7's slice gate passes"
-  else
-    bad "full mode reds on the committed spec — hgw2-s7's slice gate cannot pass"
-  fi
+  # THE SITE THE WHOLE EXIT-5 CONTRACT WAS BUILT FOR. This was
+  # `if bash "$VERIFY" >/dev/null 2>&1` — any nonzero fell into `bad`, a MEASURED
+  # BREACH of branch protection. On 2026-09-07 an E2BIG inside
+  # scripts/lib/check-runs.sh made the feed unreadable, verify exited 1, and this
+  # line reported "hgw2-s7's slice gate cannot pass" for hours over an input
+  # nobody could read. The verdict and the hold now arrive as different integers,
+  # so this routes them to different tallies. stderr is KEPT (it carries verify's
+  # own BLOCKED: line, which is the only text that names what could not be read).
+  #
+  # AND THE REASON IS NEVER ALLOWED TO COME OUT EMPTY (task-244828df076d1138).
+  # `grep -m1` matches nothing when verify dies BEFORE it can label its own
+  # failure — no `gh` on PATH, a shell error, an OOM — and an empty tail after
+  # the colon renders IDENTICALLY to the reason-free verdict this clause was
+  # rewritten to kill. So the labelled line is a PREFERENCE, not a requirement:
+  # with no marker, the last non-empty line of verify's own combined output is
+  # quoted and SAID to be a fallback. And on any non-zero rc the whole of
+  # verify's output is echoed under the verdict, so the operator reads the
+  # verifier's own words, not this clause's summary of them.
+  rc11_reason() {           # $@ = grep -e args, in preference order; reads RC11_OUT
+    local line
+    line="$(grep -m1 "$@" <<<"$RC11_OUT" || true)"
+    if [ -n "$line" ]; then printf '%s' "$line"; return; fi
+    line="$(grep -v '^[[:space:]]*$' <<<"$RC11_OUT" | tail -1 || true)"
+    if [ -n "$line" ]; then printf 'no labelled line; verify last said: %s' "$line"; return; fi
+    printf 'verify printed NOTHING on stdout or stderr'
+  }
+  rc11_dump() {             # verify's OWN output, verbatim, on the failing paths only
+    echo "  ---- required-checks-verify.sh output (exit $RC11_RC) ----" >&2
+    printf '%s\n' "$RC11_OUT" | sed 's/^/  | /' >&2
+    echo "  ---- end required-checks-verify.sh output ----" >&2
+  }
+  RC11_OUT="$(bash "$VERIFY" 2>&1)" && RC11_RC=0 || RC11_RC=$?
+  case "$RC11_RC" in
+    0) ok "full mode is green on the COMMITTED spec (enforced=$(jq -r .enforced "$SPEC")) — hgw2-s7's slice gate passes" ;;
+    5) blocked "full mode could not READ one of its inputs (verify exit 5), so this run has NO verdict about hgw2-s7's slice gate: $(rc11_reason -e '^BLOCKED:')"
+       rc11_dump ;;
+    *) bad "full mode reds on the committed spec (verify exit $RC11_RC) — hgw2-s7's slice gate cannot pass: $(rc11_reason -e '^FAIL:' -e DRIFT)"
+       rc11_dump ;;
+  esac
 
   if jq -e '.enforced == false' "$SPEC" >/dev/null; then
     if bash "$VERIFY" --spec "$FULLMUT" >/dev/null 2>&1; then
@@ -1978,6 +2126,56 @@ else
   bad "the floor implied it checked _readme/enforced against a reference that carries neither: $(head -2 <<<"$FOUT")"
 fi
 
+# (m) A USAGE ERROR IS NOT A VERDICT. Typed with no candidate, the floor used to
+#     answer `FAIL: no candidate spec given` at exit 1 — the same word and the
+#     same code as a LOST required context, i.e. a did-not-run rendered as the
+#     most alarming finding this repo can produce. Both halves are pinned: the
+#     code must not be 1 (or 2, which apply.sh reads as acknowledgeable growth),
+#     and the message must not open with the word this suite's gates use for a
+#     measured breach.
+UOUT="$(bash "$FLOOR" 2>&1)" && URC=0 || URC=$?
+if [ "$URC" -ne 0 ] && [ "$URC" -ne 1 ] && [ "$URC" -ne 2 ]; then
+  ok "the floor with NO candidate exits $URC — not 0, not 1 (LOSS), not 2 (GROWTH): a usage error is its own outcome"
+else
+  bad "the floor's usage error exits $URC, which collides with a measured verdict: $(head -1 <<<"$UOUT")"
+fi
+if ! grep -qE '^FAIL' <<<"$UOUT"; then
+  ok "…and it does not open with FAIL, the word this repo's gates use for a measured breach"
+else
+  bad "the floor still answers a usage error with the word FAIL: $(head -1 <<<"$UOUT")"
+fi
+# An unknown flag and a value-taking flag with no value are the same class. The
+# latter used to die on `set -u` unbound-variable at exit 1 with no usable message.
+for BADARGS in "--bogus-flag" "--reference"; do
+  # shellcheck disable=SC2086
+  UOUT="$(bash "$FLOOR" $BADARGS 2>&1)" && URC=0 || URC=$?
+  if [ "$URC" -eq 64 ]; then
+    ok "\`$BADARGS\` is a usage error too (exit 64), not an unbound-variable death at 1"
+  else
+    bad "\`$BADARGS\` exited $URC: $(head -1 <<<"$UOUT")"
+  fi
+done
+# NON-VACUITY, and it is the arm that matters: the split must not have silenced
+# a real breach. §12(b) already proved the swap reds — re-assert here that the
+# LOSS code is still 1 and distinguishable from the usage code above.
+FOUT="$(floor "$TMP/floor-swap.json")" && FRC=0 || FRC=$?
+if [ "$FRC" -eq 1 ] && [ "$FRC" -ne "$URC" ]; then
+  ok "…and a GENUINE breach still exits 1, distinct from the usage code (the fix did not silence the gate)"
+else
+  bad "the breach exit is now $FRC — the usage split moved a real verdict"
+fi
+# The same split, on the four siblings it was derived onto. Each must answer an
+# unknown flag with 64 rather than the code its own verdicts use.
+for SIB in required-checks-apply.sh required-checks-verify.sh \
+           required-checks-generate.sh registration-deadlock-sweep.sh; do
+  UOUT="$(bash "$REPO_ROOT/scripts/$SIB" --bogus-flag 2>&1)" && URC=0 || URC=$?
+  if [ "$URC" -eq 64 ] && ! grep -qE '^FAIL' <<<"$UOUT"; then
+    ok "$SIB answers an unknown flag with a usage error (exit 64), not its verdict code"
+  else
+    bad "$SIB exited $URC on an unknown flag: $(head -1 <<<"$UOUT")"
+  fi
+done
+
 # ═══ 13. the prose ratchet ═══════════════════════════════════════════════════
 
 section "13. no in-repo prose teaches \`gh pr merge --admin\` any more"
@@ -2169,6 +2367,8 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Format (mix format --check-formatted, advisory) (27.0, 1.18.1)"
         --expect-unrendered "gofmt drift ceiling (blocking)"
         --expect-unrendered "PR task gate self-test"
+        --expect-unrendered "Dependabot PRs carry the standing task trailer"
+        --expect-unrendered "Dependabot trailer injector self-test"
         --expect-unrendered "Prod compile gate (Elixir 1.18.1 / OTP 27.0)"
         --expect-unrendered "Sobelow baseline rows still hash to their own fingerprint (blocking)"
         --expect-unrendered "Test (Elixir 1.18.1 / OTP 27.0)"
@@ -2261,7 +2461,60 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # Landed between this PR's first sample and its rebase; the census clause
         # caught them, which is the whole point of the clause.
         --expect-unrendered "Crown reconcile"
-        --expect-unrendered "Crown reconcile harness")
+        --expect-unrendered "Crown reconcile harness"
+        # ── THE CENSUS PASS, 2026-09-07 (task-6c8a76a6f6196dfd) ─────────────
+        # 21 more exclusion rows: the FULL unaccounted set, derived over 199
+        # merged heads rather than the 4 that one stochastic sample surfaced.
+        # Same three causes as the block above — every one of these ten workflows
+        # is paths-filtered on pull_request, eight of the jobs are additionally
+        # event-fenced off pull_request, and several landed after the frozen pair.
+        # THE SIXTH PLACE, paid: a row added to .exclusions that this frozen
+        # window cannot reproduce must be acknowledged here, ONE NAME AT A TIME,
+        # or required-checks-generate.sh refuses every emit in this file.
+        --expect-unrendered "Build + test + gates"
+        --expect-unrendered "Changeset present (PRs only)"
+        --expect-unrendered "Lighthouse CI — web/"
+        --expect-unrendered "web/ typecheck + unit tests + lint"
+        --expect-unrendered "deploy receipts descend from a measurement (or refuse)"
+        --expect-unrendered "which-gates.sh gate-list deriver"
+        --expect-unrendered "Cron overdue probe"
+        --expect-unrendered "Cron overdue harness"
+        --expect-unrendered "offline-deploy-harnesses"
+        --expect-unrendered "cp-deploy.sh's pull form works on the box's git 2.34 (ubuntu:22.04 container)"
+        --expect-unrendered "Main gate watch"
+        --expect-unrendered "Main verdict presence"
+        --expect-unrendered "Main gate watch harness"
+        --expect-unrendered "Vendored renderer block coverage"
+        --expect-unrendered "Vendored SDK freshness"
+        --expect-unrendered "Starter-template contrast/focus literals"
+        --expect-unrendered "Flagship template bp-command parse"
+        --expect-unrendered "Stale verdict watch"
+        --expect-unrendered "Stale verdict harness"
+        --expect-unrendered "Break-glass harness"
+        --expect-unrendered "Generate reference"
+        # ── 2026-09-09: four rows #17111 (c19d7c7ab) added to .exclusions by hand for
+        # names #17079/#17081 created and landed-mark.yml — all three workflows are
+        # main-push + schedule or event-fenced off pull_request, and every one landed
+        # after the frozen pair (2026-07-31), so this window can never render them.
+        # #17111 paid five of the six places and not this one: its own gate went red
+        # on the PR head (run 34392441135) and on main from c19d7c7ab, and the
+        # required four let it merge anyway.
+        --expect-unrendered "Filebase aesthetics critic (advisory, main + nightly)"
+        --expect-unrendered "pipefail SIGPIPE scan"
+        --expect-unrendered "pipefail scan — did the scanner's inputs move?"
+        --expect-unrendered "Mark the task rows this push landed"
+        # ── 2026-09-11 (task-81e94e76691f2089): the four names
+        # `Required-check spec drift (advisory)` reported `unaccounted` on run
+        # 34551911401 and this PR gave rows in .exclusions. Two are
+        # astro-finder-render-smoke.yml (landed d70c20e98f) and two are new
+        # shell-harnesses.yml jobs — all four postdate the frozen pair
+        # (2026-07-31), so this window can never render them. DERIVED, not
+        # remembered: scripts/required-checks-ack-derive.sh named exactly these
+        # four as MISSING ACK_EX before they were typed here.
+        --expect-unrendered "Does this diff touch the Astro finder surface?"
+        --expect-unrendered "Finder island renders (headless chromium)"
+        --expect-unrendered "bp-curl.sh 429 backoff matrix"
+        --expect-unrendered "console-refusal-capture.mjs controls")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
@@ -2463,8 +2716,16 @@ emit_spec "$TMP/nounion-spec.json" \
   bash "$NOUNION" "${SEEDARGS[@]}" "${ACK[@]}" --expect-unrendered "$SEEDNAME" \
   --expect-unrendered "$PRSEEDNAME" \
   --out "$TMP/nounion-spec.json" || true
-if jq -e --arg c "$SEEDNAME" \
-     '([.exclusions[].context] | index($c) | not) and (.exclusions | length < 20)' \
+# THE SECOND CONJUNCT IS A RELATION, NEVER A TYPED FLOOR. It stood as
+# `length < 20` — the derived count of the day — and S8 (§30) legitimately grew
+# the DERIVED set past it by classifying pull_request-only names the census
+# could not see, reddening a mutation arm that had nothing to say about S8. The
+# claim being made is "the un-merged run emits FEWER rows than the seeded base
+# carries", so it is written against the base rather than against a number
+# somebody has to re-earn every time the derivation gets better.
+if jq -e --arg c "$SEEDNAME" --slurpfile base "$SEEDX" \
+     '([.exclusions[].context] | index($c) | not)
+      and (.exclusions | length) < ($base[0].exclusions | length)' \
      "$TMP/nounion-spec.json" >/dev/null 2>&1; then
   ok "…and without it the IDENTICAL run drops the seeded row and emits $(jq '.exclusions | length' "$TMP/nounion-spec.json") of $(jq '.exclusions | length' "$SEEDX") (mutation-proven able to fail)"
 else
@@ -4459,10 +4720,16 @@ fi
 # The bad references, minus the committed baseline. `comm` over sorted keys, so
 # a baselined entry whose ACTUAL row moves is NOT waved through by its cited
 # number matching.
-# `|| true`: the page is CLEAN now, so `grep -v '^OK'` matches nothing and exits
-# 1. Under `set -euo pipefail` that status is the assignment's status and the
-# whole suite dies here — an empty problem list is the SUCCESS case, not an error.
-RC20_XREF_BAD="$(grep -vE '^OK\t' <<<"$RC20_XREF_ALL" | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort || true)"
+# THE FILTER IS awk's `$1 != "OK"`, NEVER `grep -vE '^OK\t'`. `\t` inside an ERE
+# is not portable: this box resolves `grep` to ugrep, which honours it as a tab,
+# and the clause passed here while the SAME TREE reported three failures on the
+# runner, whose grep matched nothing and let every OK row through as a problem
+# (measured 2026-09-08 on 4d820bf83 vs CI job 101862015284, and on main's own
+# job 101860822447, which carried the identical leak). awk splits on a real tab
+# by -F and compares a whole field, so there is no escape to get wrong.
+# `|| true` is kept deliberately: awk exits 0 on an empty read, but an empty
+# problem list is the SUCCESS case here and the guard costs nothing.
+RC20_XREF_BAD="$(awk -F'\t' '$1 != "OK" { printf "%s|%s|%s\n", $2, $3, $4 }' <<<"$RC20_XREF_ALL" | sort || true)"
 RC20_XREF_BASE_SORTED="$(printf '%s\n' "$RC20_XREF_BASELINE" | sort)"
 RC20_XREF_NEW="$(comm -23 <(printf '%s\n' "$RC20_XREF_BAD") <(printf '%s\n' "$RC20_XREF_BASE_SORTED"))"
 RC20_XREF_FIXED="$(comm -13 <(printf '%s\n' "$RC20_XREF_BAD") <(printf '%s\n' "$RC20_XREF_BASE_SORTED"))"
@@ -4495,7 +4762,7 @@ if [ -n "$RC20_XREF_PATH" ] && [ -n "$RC20_XREF_TRUE" ] \
 else
   bad "the cross-reference mutation did not apply (path='$RC20_XREF_PATH' row='$RC20_XREF_TRUE') — the two arms below are vacuous"
 fi
-RC20_XREF_GOOD="$(rc20_xref_report "$RC20_XREF_SCRATCH" | grep -vE '^OK\t' | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort \
+RC20_XREF_GOOD="$(rc20_xref_report "$RC20_XREF_SCRATCH" | awk -F'\t' '$1 != "OK" { printf "%s|%s|%s\n", $2, $3, $4 }' | sort \
                   | comm -23 - <(printf '%s\n' "$RC20_XREF_BASE_SORTED") || true)"
 if [ -z "$RC20_XREF_GOOD" ]; then
   ok "…and a reference citing the RIGHT row number resolves clean — the clause is reading the table, not reddening on any \`**N · …**\` it has not seen before"
@@ -4504,7 +4771,7 @@ else
 fi
 printf '\n**%s · `%s`** — planted by required-checks.test.sh §20, WRONG arm.\n' \
   "$((RC20_XREF_TRUE + 1))" "$RC20_XREF_PATH" >> "$RC20_XREF_SCRATCH"
-RC20_XREF_RED="$(rc20_xref_report "$RC20_XREF_SCRATCH" | grep -vE '^OK\t' | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort \
+RC20_XREF_RED="$(rc20_xref_report "$RC20_XREF_SCRATCH" | awk -F'\t' '$1 != "OK" { printf "%s|%s|%s\n", $2, $3, $4 }' | sort \
                  | comm -23 - <(printf '%s\n' "$RC20_XREF_BASE_SORTED") || true)"
 if [ "$RC20_XREF_RED" = "$((RC20_XREF_TRUE + 1))|$RC20_XREF_PATH|$RC20_XREF_TRUE" ]; then
   ok "…and moving that ONE number by one makes the clause name it — cited $((RC20_XREF_TRUE + 1)), resolves to row $RC20_XREF_TRUE (mutation-proven able to fail)"
@@ -5352,10 +5619,72 @@ rc26_cleanup() { rm -f "$REPO_ROOT"/scripts/.rc26-mutant-verify.*.sh; }
 # assumed: if the installed handler stops being `cleanup`, say so instead of
 # overwriting whatever replaced it.
 if [ "$(trap -p EXIT | sed -E "s/^trap -- '(.*)' EXIT$/\\1/")" = "cleanup" ]; then
-  trap 'rc26_cleanup; cleanup' EXIT
-  ok "§26 chains the EXIT trap onto \`cleanup\` instead of replacing it (the mutant copy is removed AND the 70-on-crash contract survives)"
+  # CAPTURE $? AS THE FIRST COMMAND OF THE TRAP STRING. `trap 'rc26_cleanup;
+  # cleanup' EXIT` — the shape that stood here — is chained correctly and is
+  # STILL wrong, because `cleanup` reads the status with `$?` and by then `$?`
+  # belongs to `rc26_cleanup`, whose `rm -f` always succeeds. Measured, not
+  # theorised: with that string installed, `exit "$(rc_exit_code 1 0)"` on the
+  # tally line left the process at 0, and `Required-check spec gate` was green
+  # over `289 passed, 1 failed`. Chaining preserved the HANDLER and destroyed the
+  # VERDICT. Same class as workflow-run-shell-check's arm-A clobber (a captured
+  # status destroyed by an intervening command), reached by a different vector.
+  # shellcheck disable=SC2154  # rc26_trap_rc IS assigned — by the first command
+  # of this same trap string, which shellcheck does not read as code. Deliberately
+  # NOT pre-initialised: if that assignment is ever deleted, `set -u` must kill the
+  # trap loudly rather than let a defaulted 0 reinstate the swallowed exit code.
+  trap 'rc26_trap_rc=$?; rc26_cleanup; cleanup "$rc26_trap_rc"' EXIT
+  ok "§26 chains the EXIT trap onto \`cleanup\` and hands it the captured status (the mutant copy is removed AND the script's own exit code survives the chain)"
 else
   bad "the EXIT trap is no longer plain \`cleanup\` ($(trap -p EXIT)) — §26 refuses to overwrite it; chain by hand"
+fi
+
+# ── (f) THE CHAIN PRESERVES A NON-ZERO EXIT — PROVED, NOT ASSERTED ───────────
+# The clause above used to say "the 70-on-crash contract survives" and was
+# believed for as long as it stood there, because nothing ran it. A pin on the
+# SHAPE of a trap string cannot see a status the string throws away. So this
+# clause EXECUTES the trap string that is actually installed, in a sub-bash
+# carrying THIS FILE'S OWN `cleanup` body (extracted, never re-typed — a hand
+# copy would drift and then prove nothing), and watches an `exit 1` come out the
+# other side. The disarmed arm is the pre-fix string: it must come out 0, or the
+# probe is not able to fail and this clause is decoration.
+RC26_CLEAN_BODY="$(awk '/^cleanup\(\) \{$/,/^\}$/' "${BASH_SOURCE[0]}")"
+RC26_TRAP_STR="$(trap -p EXIT | sed -E "s/^trap -- '(.*)' EXIT$/\1/")"
+RC26_PROBE="$TMP/rc26-exit-probe.sh"
+cat > "$RC26_PROBE" <<'RC26PROBE'
+#!/usr/bin/env bash
+set -uo pipefail
+RC_TALLY_REACHED=0
+TMP="$(mktemp -d)"
+rc26_cleanup() { rm -f "$TMP"/.rc26-probe.*.sh; }
+RC26PROBE
+printf '%s\n' "$RC26_CLEAN_BODY" >> "$RC26_PROBE"
+cat >> "$RC26_PROBE" <<'RC26PROBE'
+trap "$1" EXIT
+RC_TALLY_REACHED=1
+exit 1
+RC26PROBE
+if ! grep -q 'RC_TALLY_REACHED' "$RC26_PROBE" || ! grep -q 'local rc=' "$RC26_PROBE"; then
+  bad "§26(f) could not extract this file's \`cleanup\` body (the \`cleanup() {\`…\`}\` block moved) — the exit-code proof below would run against an empty function and pass vacuously"
+else
+  # `cmd; RC=$?` is WRONG here and cost a full 25-minute run to learn: this file
+  # runs under `set -e`, the probe's whole job is to exit NON-ZERO, and a bare
+  # failing simple command kills the suite before the assignment on the next
+  # line — the run died right here with 263 of 290 assertions and no tally line.
+  # `|| RC=$?` is the only form that both survives `set -e` and keeps the code.
+  RC26_ARMED_RC=0
+  bash "$RC26_PROBE" "$RC26_TRAP_STR" >/dev/null 2>&1 || RC26_ARMED_RC=$?
+  RC26_DISARMED_RC=0
+  bash "$RC26_PROBE" 'rc26_cleanup; cleanup' >/dev/null 2>&1 || RC26_DISARMED_RC=$?
+  if [ "$RC26_ARMED_RC" -eq 1 ]; then
+    ok "(f) the EXIT trap string §26 installs carries a non-zero exit THROUGH the chain (probe exited $RC26_ARMED_RC) — the tally line's \`exit \$(rc_exit_code …)\` reaches the caller"
+  else
+    bad "(f) the installed EXIT trap SWALLOWS the exit code: a probe carrying this file's own \`cleanup\` and the string \`$RC26_TRAP_STR\` turned \`exit 1\` into exit $RC26_ARMED_RC — every FAIL this suite prints is invisible to \`Required-check spec gate\`"
+  fi
+  if [ "$RC26_DISARMED_RC" -eq 0 ]; then
+    ok "…and the pre-fix string \`rc26_cleanup; cleanup\` turns the SAME \`exit 1\` into exit $RC26_DISARMED_RC — the probe is mutation-proven able to fail, and that 0 is the defect this section shipped with"
+  else
+    bad "the pre-fix chain did not swallow the code (exit $RC26_DISARMED_RC) — clause (f) is vacuous: it would pass whatever string were installed"
+  fi
 fi
 
 RC26_WF_DENY="$TMP/rc26-wf-deny"        # the violation
@@ -5852,6 +6181,342 @@ else
     ok "…and WITHOUT it the IDENTICAL run writes $RC27_BOTHLIST at exit 0, silently — the shape cgsiw-s2 measured, reproduced on demand (mutation-proven able to fail)"
   else
     bad "the unguarded run did not emit one context on both lists (got $RC27_BOTHLIST) — the refusal clause above is vacuous"
+  fi
+fi
+
+section "29. S4's ABSOLUTE arm: a workflow with NO pull_request trigger is ABSENT on every PR, and the stage derives that from the \`on:\` block"
+
+# The committed spec has carried five "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD"
+# rows with NO stage able to derive them, so each arrived by hand — and the
+# sixth was missed: landed-mark.yml is `on: push: branches: [main]` only, its
+# name `Mark the task rows this push landed` rendered on every main head, and
+# the census clause called it unaccounted (task-2e28697e29983544). Both arms,
+# because a stage that excludes on the wrong evidence is worse than the hole:
+# the SAME job, the SAME name, differing only in the trigger block.
+RC29="$TMP/rc29"; RC29_PUSH="$RC29/push"; RC29_PR="$RC29/pr"
+RC29_PUSHF="$RC29/push-fix"; RC29_PRF="$RC29/pr-fix"
+mkdir -p "$RC29_PUSH" "$RC29_PR" "$RC29_PUSHF" "$RC29_PRF"
+cat > "$RC29_PUSH/w.yml" <<'YML'
+name: Push only
+on:
+  push:
+    branches: [main]
+jobs:
+  mark:
+    name: Push-only gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+sed 's/^on:$/on:/; s/^  push:$/  pull_request:/; s/^    branches: \[main\]$//' "$RC29_PUSH/w.yml" > "$RC29_PR/w.yml"
+# A SECOND, KEPT name in BOTH dirs. Without it the push-only arm leaves the
+# selection EMPTY and the generator's older zero-context refusal ("selection
+# produced ZERO contexts — refusing to emit a spec that protects nothing") exits
+# 1 before any S4 verdict can be read — which is exactly how this section
+# shipped red in #17111 (PR run 34392441135) and stayed red on main: 29a asked
+# for exit 0 from a fixture that can only ever refuse. The kept name is also
+# the control that makes 29a non-vacuous — S4 must exclude ONE name, not all.
+cat > "$RC29_PUSH/kept.yml" <<'YML'
+name: Kept
+on:
+  pull_request:
+jobs:
+  keep:
+    name: Kept gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+cp "$RC29_PUSH/kept.yml" "$RC29_PR/kept.yml"
+RC29_NAMES_SAVE=("${RC27_NAMES[@]}")
+RC27_NAMES=("Push-only gate" "Kept gate")
+rc27_feed "$RC29_PUSHF" p1 p2 mainA; printf 'mainA\n' > "$RC29_PUSHF/main-shas.txt"
+rc27_feed "$RC29_PRF"   r1 r2 mainA; printf 'mainA\n' > "$RC29_PRF/main-shas.txt"
+
+rc27_gen "$GEN" "$RC29_PUSH" "$RC29_PUSHF" p1 p2
+if [ "$RC27_RC" -eq 0 ] && excluded_by "$RC27_OUT" "Push-only gate" "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD" && kept_in "$RC27_OUT" "Kept gate"; then
+  ok "a name published by a workflow with no pull_request trigger is EXCLUDED as structurally absent — an absent required context reports 'expected' forever (D18), and it is derived from the workflow's own \`on:\` block, not from a list"
+else
+  bad "29a the push-only workflow's name was not excluded as structurally absent (exit $RC27_RC): $(grep -E '^  (keep|exclude) ' <<<"$RC27_OUT" | head -2 | tr '\n' '⏎')"
+fi
+
+# THE MIRROR — the identical job under `pull_request:` must be KEPT. Without
+# this arm the stage above could be excluding on the job's name, on its file,
+# or on nothing at all.
+rc27_gen "$GEN" "$RC29_PR" "$RC29_PRF" r1 r2
+if [ "$RC27_RC" -eq 0 ] && kept_in "$RC27_OUT" "Push-only gate"; then
+  ok "…and the IDENTICAL job under \`pull_request:\` is KEPT — the stage keys on the trigger block, not on the job, the file or the name"
+else
+  bad "29b the same job under pull_request was not kept (exit $RC27_RC) — the stage above excludes on the wrong evidence: $(grep -E '^  (keep|exclude) ' <<<"$RC27_OUT" | head -2 | tr '\n' '⏎')"
+fi
+
+# THE MUTATION — disarm the stage in a COPY and watch the push-only name walk
+# into the required set, which is the state this repo was in until today.
+RC29_MUT="$TMP/gen-nopushonly.sh"
+sed 's%^    if \[ -z "\$reason" \] && \[ -n "\$file" \] && ! workflow_has_pr_trigger "\$file"; then$%    if false; then # ABSOLUTE S4 ARM REMOVED%' "$GEN" > "$RC29_MUT"
+RC29_N="$(grep -c 'ABSOLUTE S4 ARM REMOVED' "$RC29_MUT" || true)"
+if [ "$RC29_N" -ne 1 ]; then
+  bad "29c the absolute-S4 mutation applied $RC29_N times, not exactly 1 — its condition moved, so the arms above are vacuous"
+else
+  ok "the absolute-S4 mutation applies exactly once: a copy of the generator no longer asks the trigger question"
+  rc27_gen "$RC29_MUT" "$RC29_PUSH" "$RC29_PUSHF" p1 p2
+  if [ "$RC27_RC" -eq 0 ] && kept_in "$RC27_OUT" "Push-only gate"; then
+    ok "…and WITHOUT it the SAME push-only name is emitted REQUIRED — a context that can never render on a PR, pinned to the merge button (mutation-proven able to fail)"
+  else
+    bad "29d the unguarded run did not keep the push-only name (exit $RC27_RC) — the arms above are vacuous"
+  fi
+fi
+RC27_NAMES=("${RC29_NAMES_SAVE[@]}")
+
+section "30. S8 PULL-REQUEST-ONLY: the census samples BRANCH HEADS, so a pull_request-only name never reached the selection at all"
+
+# WHY THIS SECTION EXISTS (cgsi-bl-pr-task-gate-selftest-unclassified). Stage 2
+# iterates the S1 intersection — names that RENDERED on the sampled shas — and
+# every sha this generator samples is a branch head. A workflow triggered only
+# by `pull_request` publishes against a PR's merge ref and NEVER against a
+# commit on main, so no window, however wide, can put its names in front of the
+# selection. The census was structurally blind to an entire class of check name,
+# and the committed spec is the evidence: `PR task gate self-test` and both
+# dependabot rows arrived BY HAND and had to be re-typed as `--expect-unrendered`
+# on every regeneration. S8 derives those candidates from the workflow source.
+#
+# EVERY MECHANISM ARM BELOW IS SYNTHETIC, for the reason §27 states: a clause
+# built on the real tree goes vacuous the day somebody edits the specimen's
+# trigger block. The ONE real-tree arm is the positive control that the class
+# actually sees pr-task-gate.yml, and it asserts about that workflow BY NAME so
+# a trigger edit there reds it loudly instead of quietly.
+
+RC30="$TMP/rc30"; RC30_PR="$RC30/pr"; RC30_PUSH="$RC30/push"; RC30_BARE="$RC30/bare"
+RC30_REQ="$RC30/req"; RC30_FIX="$RC30/fix"
+mkdir -p "$RC30_PR" "$RC30_PUSH" "$RC30_BARE" "$RC30_REQ" "$RC30_FIX"
+RC30_NAME="Seeded PR-only advisory harness"
+RC30_KEPT="Seeded rendering gate"
+
+# The specimen: pull_request-only, NO paths filter, and a STATIC ground for
+# holding it out (a job-level continue-on-error). Its sibling is an ordinary
+# workflow whose name the fixture feed DOES render, so the selection is never
+# empty — without it the generator's zero-context refusal exits before any S8
+# verdict can be read (the trap §29 shipped red on).
+cat > "$RC30_PR/pronly.yml" <<YML
+name: PR only
+on:
+  pull_request:
+jobs:
+  harness:
+    name: $RC30_NAME
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+cat > "$RC30_PR/kept.yml" <<YML
+name: Kept
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  keep:
+    name: $RC30_KEPT
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+# THE NEGATIVE CONTROL — the IDENTICAL specimen with a push arm added, and
+# nothing else changed. If S8 fires here it is keying on something other than
+# the trigger block.
+sed 's/^  pull_request:$/  pull_request:\
+  push:\
+    branches: [main]/' "$RC30_PR/pronly.yml" > "$RC30_PUSH/pronly.yml"
+cp "$RC30_PR/kept.yml" "$RC30_PUSH/kept.yml"
+# THE NEVER-PROMOTES CONTROL — the identical PR-only specimen with NO static
+# ground (the continue-on-error line removed).
+grep -v '^    continue-on-error: true$' "$RC30_PR/pronly.yml" > "$RC30_BARE/pronly.yml"
+cp "$RC30_PR/kept.yml" "$RC30_BARE/kept.yml"
+cp "$RC30_PR/pronly.yml" "$RC30_REQ/pronly.yml"
+cp "$RC30_PR/kept.yml" "$RC30_REQ/kept.yml"
+
+RC30_NAMES_SAVE=("${RC27_NAMES[@]}")
+# THE NON-VACUITY PREMISE, and it is the whole point: the specimen's name is NOT
+# in the feed. Every arm below is about a name no sha rendered.
+RC27_NAMES=("$RC30_KEPT")
+rc27_feed "$RC30_FIX" s30a s30b mainA; printf 'mainA\n' > "$RC30_FIX/main-shas.txt"
+if ! grep -qF "$RC30_NAME" "$RC30_FIX/checkruns-s30a.json"; then
+  ok "the fixture premise holds: '$RC30_NAME' appears in NO sampled feed — every clause below is about a name the census cannot see"
+else
+  bad "30-premise the specimen name IS in the fixture feed — S8 would be indistinguishable from stage 2 and every arm below is vacuous"
+fi
+
+rc27_gen "$GEN" "$RC30_PR" "$RC30_FIX" s30a s30b
+if [ "$RC27_RC" -eq 0 ] && excluded_by "$RC27_OUT" "$RC30_NAME" "S8 PULL-REQUEST-ONLY" && kept_in "$RC27_OUT" "$RC30_KEPT"; then
+  ok "a name published ONLY by a pull_request-only, unfiltered workflow is CLASSIFIED S8 without ever having rendered — derived from the workflow's own \`on:\` block, and the rendering sibling is still kept"
+else
+  bad "30a the pull_request-only name was not classified S8 (exit $RC27_RC): $(grep -E '^  (keep|exclude|s8) ' <<<"$RC27_OUT" | head -3 | tr '\n' '⏎')"
+fi
+
+rc27_gen "$GEN" "$RC30_PUSH" "$RC30_FIX" s30a s30b
+if [ "$RC27_RC" -eq 0 ] && ! grep -qF "  exclude  $RC30_NAME  " <<<"$RC27_OUT"; then
+  ok "…and the IDENTICAL job under a workflow that ALSO carries \`push:\` is NOT claimed by S8 — the stage keys on the trigger block, not on the job, the file or the name"
+else
+  bad "30b S8 claimed a name whose workflow has a branch-head trigger (exit $RC27_RC) — it is excluding on the wrong evidence: $(grep -E '^  (keep|exclude|s8) ' <<<"$RC27_OUT" | head -3 | tr '\n' '⏎')"
+fi
+
+# NEVER PROMOTES. A required context must be a byte-for-byte copy of a name
+# GitHub was OBSERVED to publish (D21); an S8 candidate's string came out of a
+# `name:` TEMPLATE and was observed by nobody. So a candidate with no static
+# ground is left UNACCOUNTED — never written into the required set.
+rc27_gen "$GEN" "$RC30_BARE" "$RC30_FIX" s30a s30b
+if [ "$RC27_RC" -eq 0 ] && ! kept_in "$RC27_OUT" "$RC30_NAME" \
+   && ! grep -qF "  exclude  $RC30_NAME  " <<<"$RC27_OUT" \
+   && grep -qF "s8 unaccounted  $RC30_NAME" <<<"$RC27_OUT"; then
+  ok "…and a PR-only candidate with NO static ground is left UNACCOUNTED rather than promoted — a template-derived string never becomes branch protection"
+else
+  bad "30c the groundless PR-only candidate was not left unaccounted (exit $RC27_RC): $(grep -E '^  (keep|exclude|s8) ' <<<"$RC27_OUT" | head -3 | tr '\n' '⏎')"
+fi
+
+# …AND IT NEVER CONTRADICTS LIVE PROTECTION. A base that REQUIRES the specimen's
+# name must come back with no S8 exclusion row at all: emitting one would put a
+# single context on both lists, off a string this run never observed.
+RC30_BASE="$TMP/rc30-base.json"
+jq -n --arg c "$RC30_NAME" \
+  '{protection:{required_status_checks:{checks:[{context:$c, app_id:15368}]}}, exclusions:[]}' \
+  > "$RC30_BASE"
+RC30_OUT="$(bash "$GEN" --workflows "$RC30_REQ" --fixture-dir "$RC30_FIX" \
+             --merge-base "$RC30_BASE" --sha s30a --sha s30b --explain \
+             --expect-unrendered "$RC30_NAME" 2>&1)" && RC30_RC=0 || RC30_RC=$?
+if [ "$RC30_RC" -eq 0 ] && grep -qF "s8 skip  $RC30_NAME" <<<"$RC30_OUT" \
+   && ! grep -qF "  exclude  $RC30_NAME  " <<<"$RC30_OUT"; then
+  ok "…and a candidate the COMMITTED spec REQUIRES is SKIPPED outright — a static derivation never demotes an observed, live required context into a self-contradicting spec"
+else
+  bad "30d S8 did not skip the committed-required candidate (exit $RC30_RC): $(grep -E '^  (keep|exclude|s8) ' <<<"$RC30_OUT" | head -3 | tr '\n' '⏎')"
+fi
+
+# THE MERGE PRECEDENCE. Every other stage's reason overwrites a stale committed
+# one; an S8 reason must NOT, because a hand row for the same context carries a
+# dated ground and a retirement trigger the derivation cannot restate.
+RC30_HAND="HAND ROW SEEDED BY THE TEST SUITE: the ground and the retirement trigger no derivation can restate"
+RC30_BASE2="$TMP/rc30-base2.json"
+jq -n --arg c "$RC30_NAME" --arg r "$RC30_HAND" \
+  '{protection:{required_status_checks:{checks:[]}}, exclusions:[{context:$c, reason:$r}]}' \
+  > "$RC30_BASE2"
+emit_spec "$TMP/rc30-spec.json" \
+  bash "$GEN" --workflows "$RC30_REQ" --fixture-dir "$RC30_FIX" \
+    --merge-base "$RC30_BASE2" --sha s30a --sha s30b --out "$TMP/rc30-spec.json" || true
+if jq -e --arg c "$RC30_NAME" --arg r "$RC30_HAND" \
+     '[.exclusions[] | select(.context == $c) | .reason] == [$r]' "$TMP/rc30-spec.json" >/dev/null 2>&1; then
+  ok "…and where a committed HAND row already covers an S8 name the base reason survives BYTE-STABLE — S8 states the census gap, it does not overwrite a decision ledger"
+else
+  fail_emit "$(why_emit "the S8 row overwrote the committed hand reason: $(jq -c --arg c "$RC30_NAME" '[.exclusions[] | select(.context == $c) | .reason[0:60]]' "$TMP/rc30-spec.json" 2>&1)")"
+fi
+if jq -e 'any(.exclusions[]; has("derived_class"))' "$TMP/rc30-spec.json" >/dev/null 2>&1; then
+  bad "30e-marker the \`derived_class\` marker LEAKED into the emitted spec — it is internal bookkeeping and must never reach the file"
+else
+  ok "…and the S8 marker never reaches the emitted file (no \`derived_class\` key anywhere in .exclusions)"
+fi
+
+# THE MUTATION — take the head-trigger question out of a COPY of the generator
+# and watch the S8 row vanish, which is the state this repo was in until today:
+# the name unclassified, and answerable only by a human re-typing
+# --expect-unrendered on every regeneration.
+RC30_MUT="$TMP/gen-nos8.sh"
+sed 's%^    workflow_has_head_trigger "\$WORKFLOW_DIR/\$s8f" && continue$%    true \&\& continue # S8 CANDIDATE SET EMPTIED%' "$GEN" > "$RC30_MUT"
+RC30_N="$(grep -c 'S8 CANDIDATE SET EMPTIED' "$RC30_MUT" || true)"
+if [ "$RC30_N" -ne 1 ]; then
+  bad "30f the S8 mutation applied $RC30_N times, not exactly 1 — its condition moved, so the arms above are vacuous"
+elif diff -q "$GEN" "$RC30_MUT" >/dev/null 2>&1; then
+  bad "30f the S8 mutant is byte-identical to the generator — nothing was reverted"
+else
+  ok "the S8 mutation applies exactly once, with a non-empty diff: a copy of the generator no longer builds a pull_request-only candidate set"
+  rc27_gen "$RC30_MUT" "$RC30_PR" "$RC30_FIX" s30a s30b
+  if [ "$RC27_RC" -eq 0 ] && ! grep -qF "  exclude  $RC30_NAME  " <<<"$RC27_OUT"; then
+    ok "…and WITHOUT it the SAME name is classified by NOTHING — unaccounted, invisible to the census, and carried only by a human retyping --expect-unrendered (mutation-proven able to fail)"
+  else
+    bad "30g the unguarded copy still classified the PR-only name (exit $RC27_RC) — the arms above are vacuous: $(grep -E '^  (keep|exclude|s8) ' <<<"$RC27_OUT" | head -3 | tr '\n' '⏎')"
+  fi
+fi
+RC27_NAMES=("${RC30_NAMES_SAVE[@]}")
+
+# THE REAL-TREE POSITIVE CONTROL. The synthetic arms prove the mechanism; this
+# one proves it is pointed at the workflow the task names. pr-task-gate.yml
+# publishes TWO names and they must land on OPPOSITE sides: the harness is
+# classified (it is advisory by intent, and the generator has said so in a
+# constant since long before this stage existed), while the required gate itself
+# is SKIPPED because the committed spec requires it.
+RC30_REAL="$(bash "$GEN" "${FIXARGS[@]}" "${ACK[@]}" --explain 2>&1)" && RC30_RRC=0 || RC30_RRC=$?
+if grep -qF "exclude  PR task gate self-test  — S8 PULL-REQUEST-ONLY (pr-task-gate.yml" <<<"$RC30_REAL"; then
+  ok "the class SEES pr-task-gate.yml: 'PR task gate self-test' is classified S8 off the real workflow tree, on a window that renders neither of that file's names"
+else
+  bad "30h 'PR task gate self-test' was not classified S8 against the real tree (exit $RC30_RRC) — pr-task-gate.yml's trigger block moved, or the stage did: $(grep -E 's8 |exclude  PR task gate' <<<"$RC30_REAL" | head -3 | tr '\n' '⏎')"
+fi
+if grep -qF "s8 skip  PR references an active task" <<<"$RC30_REAL"; then
+  ok "…and its SIBLING, the required context 'PR references an active task', is skipped by the same stage — the two names of one pull_request-only workflow land on opposite sides, so S8 is not a blanket verdict on a file"
+else
+  bad "30i the required sibling was not skipped by S8 (exit $RC30_RRC): $(grep -E 's8 ' <<<"$RC30_REAL" | head -3 | tr '\n' '⏎')"
+fi
+if grep -qF "LOST  PR task gate self-test" <<<"$RC30_REAL"; then
+  bad "30j 'PR task gate self-test' is STILL reported as an unreproduced exclusion — S8 classified it but the loss check did not see the row"
+else
+  ok "…and the row is no longer an EXCLUSION LOSS: the name that had to be re-acknowledged on every regeneration is now derived, which is the gap this section closes"
+fi
+
+section "28. the spec gate's DISPATCHER lists the workflow tree — the input the census clause actually reads"
+
+# WHY THIS CLAUSE EXISTS (task-2e28697e29983544). The required `Required-check
+# spec gate` sits behind `Dispatch (required-checks inputs)` in
+# .github/workflows/required-checks-drift.yml, and that dispatcher's path
+# predicate used to name exactly three things: the spec file, scripts/
+# required-checks[.-]*, and the drift workflow ITSELF. But the census clause in
+# required-checks-verify.sh reads .github/workflows/ ENTIRE — a rendered
+# check-run name is a job's `name:`, wherever that job lives. So a PR adding a
+# job to any OTHER workflow never fired the gate, and the name landed on main
+# unaccounted: #17079 and #17081 put three in on 2026-09-09 (`Filebase
+# aesthetics critic (advisory, main + nightly)`, `pipefail scan — did the
+# scanner's inputs move?`, `pipefail SIGPIPE scan`) and neither PR was ever
+# asked the question. A gate whose dispatcher omits one of its own inputs
+# cannot see that input change, and nothing in this suite said so.
+#
+# The predicate is LIFTED from the YAML here, never restated: a clause that
+# carries its own copy of the regex passes forever after the workflow's copy
+# moves.
+RC28_WF="$REPO_ROOT/.github/workflows/required-checks-drift.yml"
+RC28_LINE="$(grep -nE "grep -qE '\^\(.*\)\\\$' <<<\"\\\$files\"" "$RC28_WF" | head -1 || true)"
+if [ -z "$RC28_LINE" ]; then
+  bad "28a no dispatcher predicate of the form \`grep -qE '^(…)$' <<<\"\$files\"\` in $RC28_WF — it moved, was renamed, or went back to a pipeline; every clause below would be vacuous"
+else
+  ok "28a the dispatcher predicate is a HERE-STRING (line ${RC28_LINE%%:*}), not \`printf … | grep -q\`: under set -o pipefail that pipeline returns 141 when grep -q closes the pipe on a match, and a TRUE match reported false here means touched=false — the gate skips and publishes a quiet green"
+  RC28_PRED="$(sed "s/^[^:]*://" <<<"$RC28_LINE" | grep -oE "'\^\([^']*\)\\\$'" | sed "s/^'//; s/'\$//")"
+
+  # ARM ONE — a job added to ANY workflow, in either spelling GitHub reads.
+  RC28_HITS=0
+  for probe in ".github/workflows/zz-new-gate.yml" ".github/workflows/zz-new-gate.yaml" ".github/required-checks.json" "scripts/required-checks-verify.sh"; do
+    grep -qE "$RC28_PRED" <<<"$probe" && RC28_HITS=$((RC28_HITS + 1))
+  done
+  if [ "$RC28_HITS" -eq 4 ]; then
+    ok "28b all four inputs dispatch TRUE — a new job in a .yml OR a .yaml workflow, the spec file, and the verifier (both workflow spellings: GitHub reads either out of that directory, and §3c indexes both)"
+  else
+    bad "28b only $RC28_HITS of 4 inputs match the dispatcher predicate — an input of this gate cannot fire it"
+  fi
+
+  # ARM TWO — and it still DISCRIMINATES. A predicate that matched everything
+  # would pass arm one and be worthless: the dispatcher exists to skip.
+  RC28_MISS=0
+  for probe in "docs/ops/merge-gates.md" "api/lib/barkpark/plugin.ex" "web/app/page.tsx"; do
+    grep -qE "$RC28_PRED" <<<"$probe" || RC28_MISS=$((RC28_MISS + 1))
+  done
+  if [ "$RC28_MISS" -eq 3 ]; then
+    ok "…and a docs-only, an Elixir-only and a web-only path all dispatch FALSE — the widening did not turn the dispatcher into a match-everything"
+  else
+    bad "28c $((3 - RC28_MISS)) of 3 unrelated paths dispatch TRUE — this predicate no longer skips anything, which costs a job on every PR"
+  fi
+
+  # THE MUTATION — narrow the alternation back to the drift workflow alone and
+  # watch the same new-gate path go FALSE. This is the hole as it stood on
+  # 2026-09-09, reproduced on demand rather than described.
+  RC28_OLD='^(\.github/required-checks\.json|scripts/required-checks[.-].*|\.github/workflows/required-checks-drift\.yml)$'
+  if grep -qE "$RC28_OLD" <<<".github/workflows/zz-new-gate.yml"; then
+    bad "28d the pre-widening predicate ALSO matches a new workflow — the mutation control is vacuous, so arm one proves nothing"
+  else
+    ok "…and WITHOUT the widening the IDENTICAL path dispatches FALSE — the gate never runs, the name lands on main unaccounted, and main's advisory job reds after the fact (mutation-proven able to fail)"
   fi
 fi
 

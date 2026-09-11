@@ -1,0 +1,345 @@
+{
+  "schema": "barkpark.writing-pilot.v1",
+  "date": "2026-09-08",
+  "task": "task-e9e441734124b5ad",
+  "baseline_commit": "6dcc2b8c35ad58cc554715e683c8adf5dca8cdab",
+  "foundation_commit": "290a7ea7f1d4fac055e18b2a42f95436b1dea473",
+  "coverage": {
+    "inspected": 12,
+    "selected": 12,
+    "groups": 6,
+    "proposed_rewrites": 6,
+    "proposed_retains": 6,
+    "scope": "A bounded first-use pilot, not a repository-wide census.",
+    "excluded": [
+      "vendored code",
+      "generated bundles",
+      "customer content",
+      "historical evidence"
+    ],
+    "uninspected": [
+      "website and broader Cloud onboarding",
+      "other documentation and commands",
+      "stored Paper and Chronicle collections"
+    ],
+    "changed": 6,
+    "retained": 6,
+    "deferred": 0
+  },
+  "items": [
+    {
+      "id": "A1",
+      "group": "agent guidance",
+      "path": "docs/setup/AGENTS-MD.md",
+      "before": "`AGENTS.md` is the tool-agnostic convergence standard (~two dozen agents read it: Codex, Aider, and a growing list). One file at your repo root, and any of them knows the Barkpark claim-first contract before it touches the board. `bp onramp agents-md` emits that block — the ONE canonical teach text — so you never hand-copy it.\n\n**Register the movement** — every unit of work runs under a claimed `bp` task: claim before you work, stamp evidence as you prove it, close on the claim epoch. The full doctrine, and the three ways a registration silently does not happen, is in [Agent Onramps](AGENT-ONRAMPS.md).",
+      "after": "`AGENTS.md` gives coding agents shared instructions for working in a repository.\n`bp onramp agents-md` generates a managed Barkpark block for the repository root.\nThe block tells agents to claim a `bp` task before starting, record evidence as\nthey verify work, and close the task using the claim epoch. The same task body\nalso appears in the Cursor, Claude, and Codex wrappers. See\n[Register the movement](AGENT-ONRAMPS.md) for the full task-tracking instructions.",
+      "proposal": "rewrite",
+      "status": "changed",
+      "reader": "agent guidance",
+      "reason": "Explain the command and its purpose; remove unsupported adoption count and convergence jargon.",
+      "source_evidence": "docs/setup/AGENTS-MD.md",
+      "owner": "codex-unslop-pilot",
+      "consumers": [
+        "agent guidance"
+      ],
+      "invariants": [
+        "Commands, managed markers, task-first requirement, canonical producer remain unchanged."
+      ],
+      "verification": [
+        "doc budgets",
+        "doc anchors",
+        "onramp golden and wrapper-parity tests"
+      ],
+      "review": "pilot_proposal_review approved corrected proposal before source edits"
+    },
+    {
+      "id": "A2",
+      "group": "agent guidance",
+      "path": "internal/cli/onramp_cmd.go",
+      "before": "\"- `bp task close <id> <worker> <epoch>` — complete; epoch comes from your claim. Lapsed? re-claim for a fresh epoch, then close.\",",
+      "after": "\"- `bp task close <id> <worker> <epoch>` — complete; epoch comes from your claim. Lapsed? re-claim for a fresh epoch, then close.\",",
+      "proposal": "retain",
+      "status": "retained",
+      "reader": "agent guidance",
+      "reason": "Retain the operational instruction and its surrounding pulse/epoch contract. Rewriting generated wrappers alone would introduce drift.",
+      "source_evidence": "internal/cli/onramp_cmd.go",
+      "owner": "codex-unslop-pilot",
+      "consumers": [
+        "agent guidance"
+      ],
+      "invariants": [
+        "Epoch behavior and literal command unchanged.",
+        "Derived wrappers and markers unchanged."
+      ],
+      "verification": [
+        "onramp golden, JSON, wrapper parity and doctrine tests"
+      ],
+      "review": "pilot_proposal_review approved corrected proposal before source edits"
+    },
+    {
+      "id": "D1",
+      "group": "documentation",
+      "path": "README.md",
+      "before": "**A lightweight operating system for everything you and your AI make.** One content model —\ntasks, papers, sheets, media, anything you can schema — with an AI agent driving the API while\nyou edit the same documents live in Studio or a terminal.",
+      "after": "Barkpark manages tasks, Papers, spreadsheets, and media through one content model.\nAn AI agent can work through the API while you edit the same documents in Studio\nor a terminal.",
+      "proposal": "rewrite",
+      "status": "changed",
+      "reader": "documentation",
+      "reason": "Replace operating-system metaphor with the existing product description.",
+      "source_evidence": "README.md",
+      "owner": "codex-unslop-pilot",
+      "consumers": [
+        "documentation"
+      ],
+      "invariants": [
+        "Preserve content-model, API, Studio and terminal capabilities; add no metrics."
+      ],
+      "verification": [
+        "doc budgets",
+        "doc anchors",
+        "literal/link comparison"
+      ],
+      "review": "pilot_proposal_review approved corrected proposal before source edits"
+    },
+    {
+      "id": "D2",
+      "group": "documentation",
+      "path": "README.md",
+      "before": "**Barkpark is yours** — open source you run anywhere: a laptop, a VPS, a box at home. You own\nyour content, schema, server and source code; you should never have to rely on us. Or use\n**[Barkpark Cloud](https://barkpark.cloud)** — the official home: one login across your whole\nfleet, and a way to cheer the work on. [The full stance →](docs/PHILOSOPHY.md)",
+      "after": "Barkpark is open source software you can run on a laptop, a VPS, or a server at home.\nYou own your content, schema, server, and source code, and you should never have to\nrely on us. [Barkpark Cloud](https://barkpark.cloud) provides one login across your\ninstances and helps fund continued work on Barkpark. [Read our principles](docs/PHILOSOPHY.md).",
+      "proposal": "rewrite",
+      "status": "changed",
+      "reader": "documentation",
+      "reason": "Keep the ownership commitments while explaining Cloud directly. Leave the philosophy document and numeric claims unchanged.",
+      "source_evidence": "README.md",
+      "owner": "codex-unslop-pilot",
+      "consumers": [
+        "documentation"
+      ],
+      "invariants": [
+        "Preserve self-hosting, ownership and independence commitments.",
+        "Keep link destinations; no price or availability promises."
+      ],
+      "verification": [
+        "doc budgets",
+        "doc anchors",
+        "literal/link comparison"
+      ],
+      "review": "pilot_proposal_review approved corrected proposal before source edits"
+    },
+    {
+      "id": "U1",
+      "group": "web and Studio",
+      "path": "api/lib/barkpark_web/studio_chrome.ex",
+      "before": "Sign in to create a workspace",
+      "after": "Sign in to create a workspace",
+      "proposal": "retain",
+      "status": "retained",
+      "reader": "web and Studio",
+      "reason": "A specific action shown only to an anonymous principal.",
+      "source_evidence": "api/lib/barkpark_web/studio_chrome.ex",
+      "owner": "codex-unslop-pilot",
+      "consumers": [
+        "web and Studio"
+      ],
+      "invariants": [
+        "Do not show sign-in advice to authenticated nonmembers."
+      ],
+      "verification": [
+        "Source and existing test contracts inspected; no fresh LiveView suite or authenticated browser capture."
+      ],
+      "review": "pilot_proposal_review approved corrected proposal before source edits"
+    },
+    {
+      "id": "U2",
+      "group": "web and Studio",
+      "path": "api/lib/barkpark_web/live/bulldocs_live/edit.ex",
+      "before": "|> assign(:save_status, \"Save failed\")",
+      "after": "|> assign(:save_status, \"Save failed\")",
+      "proposal": "retain",
+      "status": "retained",
+      "reader": "web and Studio",
+      "reason": "The failure label is accurate; lifecycle reason is mirrored from the producer.",
+      "source_evidence": "api/lib/barkpark_web/live/bulldocs_live/edit.ex",
+      "owner": "codex-unslop-pilot",
+      "consumers": [
+        "web and Studio"
+      ],
+      "invariants": [
+        "No false saved state; preserve veto cause."
+      ],
+      "verification": [
+        "Source and existing test contracts inspected; no fresh LiveView suite or authenticated browser capture."
+      ],
+      "review": "pilot_proposal_review approved corrected proposal before source edits"
+    },
+    {
+      "id": "C1",
+      "group": "CLI and TUI",
+      "path": "cmd/barkpark/help.go",
+      "before": "{\"R R\", \"discard draft (twice to confirm)\"}",
+      "after": "{\"R R\", \"discard draft (twice to confirm)\"}",
+      "proposal": "retain",
+      "status": "retained",
+      "reader": "CLI and TUI",
+      "reason": "Short help text includes the important confirmation behavior.",
+      "source_evidence": "cmd/barkpark/help.go",
+      "owner": "codex-unslop-pilot",
+      "consumers": [
+        "CLI and TUI"
+      ],
+      "invariants": [
+        "Preserve key binding and twice-confirm semantics."
+      ],
+      "verification": [
+        "focused help/delete/discard Go tests",
+        "rendered help evidence"
+      ],
+      "review": "pilot_proposal_review approved corrected proposal before source edits"
+    },
+    {
+      "id": "C2",
+      "group": "CLI and TUI",
+      "path": "cmd/barkpark/paper.go",
+      "before": "the server refused or is unreachable",
+      "after": "the request failed",
+      "proposal": "rewrite",
+      "status": "changed",
+      "reader": "CLI and TUI",
+      "reason": "Independent verifier found the cause line also renders for HTTP500/503. Use a truthful failure description across all three existing shared notice consumers without guessing the cause.",
+      "source_evidence": "cmd/barkpark/paper.go",
+      "owner": "codex-unslop-pilot",
+      "consumers": [
+        "CLI and TUI"
+      ],
+      "invariants": [
+        "Keep first-line referenced-documents distinction.",
+        "Keep no-refresh-key behavior, read state classification and shared vocabulary.",
+        "Change human wording only; preserve request handling and exit states."
+      ],
+      "verification": [
+        "existing focused Paper HTTP401/403/500/503, honest-miss, resolve, render and vocabulary tests",
+        "existing failed-list rendering tests",
+        "actual rendered TUI notice at narrow/normal widths"
+      ],
+      "review": "pilot_proposal_review approved revised wording before source edits; accurate for refusal, server error and connection failure",
+      "additional_paths": [
+        "cmd/barkpark/tui_render.go",
+        "cmd/barkpark/paper_read_failure_test.go"
+      ]
+    },
+    {
+      "id": "E1",
+      "group": "email",
+      "path": "cloud/lib/barkpark_cloud/notifications/transactional.ex",
+      "before": "Confirm this email address for your Barkpark Cloud account:",
+      "after": "Confirm this email address for your Barkpark Cloud account:",
+      "proposal": "retain",
+      "status": "retained",
+      "reader": "email",
+      "reason": "The action is direct and the caller supplies the verification URL.",
+      "source_evidence": "cloud/lib/barkpark_cloud/notifications/transactional.ex",
+      "owner": "codex-unslop-pilot",
+      "consumers": [
+        "email"
+      ],
+      "invariants": [
+        "Preserve URL, recipient, subject and verification meaning."
+      ],
+      "verification": [
+        "Exact candidate email builder compiled in memory and rendered; subjects, recipients and URLs checked.",
+        "Security producer and existing tests inspected; no fresh Cloud suite or mail-client delivery."
+      ],
+      "review": "pilot_proposal_review approved corrected proposal before source edits"
+    },
+    {
+      "id": "E2",
+      "group": "email",
+      "path": "cloud/lib/barkpark_cloud/notifications/transactional.ex",
+      "before": "If you didn't ask for this, no action is needed — your password is unchanged.",
+      "after": "If you didn't ask for this, no action is needed — your password is unchanged.",
+      "proposal": "retain",
+      "status": "retained",
+      "reader": "email",
+      "reason": "Keep the useful reassurance and distinction between requesting a reset and changing the password.",
+      "source_evidence": "cloud/lib/barkpark_cloud/notifications/transactional.ex",
+      "owner": "codex-unslop-pilot",
+      "consumers": [
+        "email"
+      ],
+      "invariants": [
+        "Preserve reset URL, recipient, subject and unchanged-password meaning."
+      ],
+      "verification": [
+        "Exact candidate email builder compiled in memory and rendered; subjects, recipients and URLs checked.",
+        "Security producer and existing tests inspected; no fresh Cloud suite or mail-client delivery."
+      ],
+      "review": "pilot_proposal_review approved corrected proposal before source edits"
+    },
+    {
+      "id": "P1",
+      "group": "editorial",
+      "path": "scripts/chronicle-paper.py",
+      "before": "You are the editor of Barkpark Chronicle, a premium, friendly product journal.",
+      "after": "You edit Barkpark Chronicle.",
+      "proposal": "rewrite",
+      "status": "changed",
+      "reader": "editorial",
+      "reason": "Remove promotional framing from the producer prompt. Add the silent self-audit immediately before the existing JSON return instruction, preserving every following constraint.",
+      "source_evidence": "scripts/chronicle-paper.py",
+      "owner": "codex-unslop-pilot",
+      "consumers": [
+        "editorial"
+      ],
+      "invariants": [
+        "Keep audience, question, schemas, evidence/numeric limits, citations and period rules verbatim.",
+        "Do not ask for visible reasoning."
+      ],
+      "verification": [
+        "32 Chronicle tests",
+        "prompt contract comparison",
+        "source-backed output inspection"
+      ],
+      "review": "pilot_proposal_review approved corrected proposal before source edits",
+      "additional_instruction": "Before returning JSON, silently check for vague claims and repetition. Revise them using only the supplied evidence. Do not add facts."
+    },
+    {
+      "id": "P2",
+      "group": "editorial",
+      "path": "scripts/chronicle-paper.py",
+      "before": "This was a pause, not a progress claim. The surrounding editions carry the latest substantive work.",
+      "after": "This was a quiet period. The surrounding editions show the latest work.",
+      "proposal": "rewrite",
+      "status": "changed",
+      "reader": "editorial",
+      "reason": "Remove rhetorical contrast while retaining the explicit quiet-period classification.",
+      "source_evidence": "scripts/chronicle-paper.py",
+      "owner": "codex-unslop-pilot",
+      "consumers": [
+        "editorial"
+      ],
+      "invariants": [
+        "Theme, summary, empty work_themes and deterministic mode unchanged."
+      ],
+      "verification": [
+        "32 Chronicle tests",
+        "empty-period reader output"
+      ],
+      "review": "pilot_proposal_review approved corrected proposal before source edits"
+    }
+  ],
+  "proposal_review": {
+    "reviewer": "pilot_proposal_review",
+    "status": "approved before editing, including reviewed A1 doctrine-link, D2 funding wording and C2 cause-line corrections",
+    "corrections": [
+      "A1 now replaces both opening paragraphs and keeps its link.",
+      "D2 explicitly describes Cloud funding.",
+      "P1 avoids repeated explanation and keeps evidence-bounded silent revision."
+    ]
+  },
+  "verification_limits": [
+    "The six retained items remain unchanged. Studio source/test inspection and direct email-builder rendering do not establish fresh end-to-end runtime coverage.",
+    "Local Go checks used CGO_ENABLED=0 because the configured C compiler rejected -E.",
+    "No remote Paper was published; no website, broader Cloud onboarding or stored-content audit was performed."
+  ]
+}

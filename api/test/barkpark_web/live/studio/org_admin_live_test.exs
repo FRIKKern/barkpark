@@ -108,6 +108,110 @@ defmodule BarkparkWeb.Studio.OrgAdminLiveTest do
     end
   end
 
+  describe "allowed-auth-methods admin toggle (era-bl-allowed-auth-methods)" do
+    # `Tenancy.Auth.create_membership/4` makes the user GOVERNED by the org —
+    # without a membership the resolver returns nil for everyone and every
+    # assertion below would pass whatever the toggle wrote (the OIDC-fixture
+    # trap, one layer up). The resolver assertions are the ones that would go
+    # vacuous, so the membership is what makes them real.
+    defp governed_user!(ws) do
+      uid = Ecto.UUID.generate()
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, uid, "member", "user")
+      uid
+    end
+
+    test "checking methods writes the sorted list and narrows the resolver", %{conn: conn} do
+      {org, ws} = org_with_ws("aamco")
+      uid = governed_user!(ws)
+
+      {:ok, view, html} = live(admin_conn(conn), "/studio/org-admin")
+      assert html =~ ~s(data-allowed-auth-methods="")
+      assert Tenancy.auth_method_allowed_for_user?(uid, "password")
+
+      html =
+        view
+        |> form(~s([data-allowed-auth-methods-form="aamco"]), %{"methods" => ["sso", "password"]})
+        |> render_submit()
+
+      # Stored sorted + deduped, so one policy has one byte shape.
+      assert Repo.reload!(org).allowed_auth_methods == ["password", "sso"]
+      assert html =~ ~s(data-allowed-auth-methods="password,sso")
+
+      # And the policy actually BINDS: a method outside the list is refused.
+      assert Tenancy.auth_method_allowed_for_user?(uid, "password")
+      refute Tenancy.auth_method_allowed_for_user?(uid, "magic_link")
+      refute Tenancy.auth_method_allowed_for_user?(uid, "passkey")
+    end
+
+    test "SSO-only is expressible and closes the consumer-social door too", %{conn: conn} do
+      {org, ws} = org_with_ws("ssoonlyco")
+      uid = governed_user!(ws)
+
+      {:ok, view, _html} = live(admin_conn(conn), "/studio/org-admin")
+
+      view
+      |> form(~s([data-allowed-auth-methods-form="ssoonlyco"]), %{"methods" => ["sso"]})
+      |> render_submit()
+
+      assert Repo.reload!(org).allowed_auth_methods == ["sso"]
+      assert Tenancy.auth_method_allowed_for_user?(uid, "sso")
+      refute Tenancy.auth_method_allowed_for_user?(uid, "social")
+      refute Tenancy.auth_method_allowed_for_user?(uid, "password")
+    end
+
+    # THE TRAP. Clearing must write NULL ("no policy, every door open"), never
+    # [] ("an allow-list permitting nothing"), which the intersection resolver
+    # turns into a lockout for every governed member — while the page still
+    # renders like a working feature.
+    test "clearing every box writes NULL, not [], and reopens every door", %{conn: conn} do
+      {org, ws} = org_with_ws("clearco")
+      uid = governed_user!(ws)
+
+      {:ok, view, _html} = live(admin_conn(conn), "/studio/org-admin")
+
+      view
+      |> form(~s([data-allowed-auth-methods-form="clearco"]), %{"methods" => ["sso"]})
+      |> render_submit()
+
+      assert Repo.reload!(org).allowed_auth_methods == ["sso"]
+      refute Tenancy.auth_method_allowed_for_user?(uid, "password")
+
+      # Unchecking every box. NOTE the shape: a browser omits unchecked
+      # checkboxes entirely, so the submit carries NO `methods` key at all.
+      # This is driven through `render_submit/3` rather than `form/2` on
+      # purpose — `form/2` rebuilds params from the RENDERED inputs, so it
+      # would faithfully resubmit the still-checked "sso" box and silently
+      # test the wrong thing (it did, on the first run of this test).
+      html = render_submit(view, "set_allowed_auth_methods", %{"org" => org.id})
+
+      cleared = Repo.reload!(org)
+      assert cleared.allowed_auth_methods == nil
+      refute cleared.allowed_auth_methods == []
+      assert html =~ ~s(data-allowed-auth-methods="")
+
+      # Zero tax restored: every door open again for the governed member.
+      assert Tenancy.org_allowed_auth_methods_for_user(uid) == nil
+      assert Tenancy.auth_method_allowed_for_user?(uid, "password")
+      assert Tenancy.auth_method_allowed_for_user?(uid, "magic_link")
+      assert Tenancy.auth_method_allowed_for_user?(uid, "sso")
+    end
+
+    # The same clear expressed the OTHER way a browser can produce it: an
+    # explicitly empty list. Both shapes reach the handler and both must
+    # become NULL — pinning only the absent-key shape would leave half the
+    # lockout open.
+    test "an explicitly EMPTY methods list also clears to NULL", %{conn: conn} do
+      {org, _ws} = org_with_ws("emptyco")
+      {:ok, _} = Tenancy.set_organization_allowed_auth_methods(org.id, ["sso"])
+
+      {:ok, view, _html} = live(admin_conn(conn), "/studio/org-admin")
+
+      render_submit(view, "set_allowed_auth_methods", %{"org" => org.id, "methods" => []})
+
+      assert Repo.reload!(org).allowed_auth_methods == nil
+    end
+  end
+
   describe "audit activity" do
     test "recent audit events are listed", %{conn: conn} do
       org_with_ws("auditco")

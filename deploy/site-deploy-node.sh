@@ -303,7 +303,17 @@ arm_caddy_node_route() { # <port>
   # DELIMITER-ANCHORED (D345): a bare-substring guard matched a prefix SIBLING's
   # marker and returned "already armed" for a site that was never armed at all.
   if has_site_route_marker "$CADDYFILE"; then
-    ROUTE_DETAIL="already armed: $CADDYFILE already carries this site's own $marker block, so the arm wrote nothing (only the upstream port moves on a re-deploy)"
+    # THE BARE PATH (D79) — the marker guard freezes the FIRST shape forever, so
+    # a block armed before #3382 has no `redir @bare_…` and /sites/<slug> (no
+    # trailing slash) still falls through to the slot reverse_proxy. Upgrade THAT
+    # ONE BLOCK in place, guarded by a predicate read from the block's own bytes:
+    # a basePath-shaped block (its matcher already lists the un-suffixed path) is
+    # deliberately left WITHOUT a redir — the pair would 308 each other forever.
+    if upgrade_caddy_bare_path; then
+      ROUTE_DETAIL="already armed, UPGRADED: $CADDYFILE carried this site's own $marker block without a bare-path route, so this run added the /sites/$SITE_SLUG -> /sites/$SITE_SLUG/ 308 redir to that one block in place"
+    else
+      ROUTE_DETAIL="already armed: $CADDYFILE already carries this site's own $marker block, so the arm wrote nothing (only the upstream port moves on a re-deploy; the bare-path check said ${BARE_UPGRADE_VERDICT:-unknown})"
+    fi
     return 0
   fi
   if ! grep -qE 'reverse_proxy[[:space:]]+localhost:(4000|4001)([[:space:]]|$)' "$CADDYFILE"; then
@@ -387,7 +397,17 @@ flip_caddy_node_port() { # <new-port>
     { print }
   ' "$CADDYFILE" > "$tmp" || { rm -f "$tmp"; return 1; }
   if commit_caddyfile "$tmp"; then
-    ROUTE_DETAIL="already armed: this site's $marker block was already in $CADDYFILE, so this run only moved its upstream to localhost:$port (no route was added)"
+    # THE RE-DEPLOY PATH IS THE ONE THAT RUNS (D79). A site that is already live
+    # never enters arm_caddy_node_route again — it comes through HERE — so the
+    # bare-path upgrade has to hang off the flip or it would never fire on an
+    # existing site. A separate read-modify-write on the same held lock, and an
+    # INSERT ONLY: the reverse_proxy line this function just rewrote is copied
+    # through byte for byte, so the two can never fight over the port.
+    if upgrade_caddy_bare_path; then
+      ROUTE_DETAIL="already armed, UPGRADED: this site's $marker block was already in $CADDYFILE, so this run moved its upstream to localhost:$port AND added the missing /sites/$SITE_SLUG -> /sites/$SITE_SLUG/ 308 redir to that one block in place"
+    else
+      ROUTE_DETAIL="already armed: this site's $marker block was already in $CADDYFILE, so this run only moved its upstream to localhost:$port (no route was added; the bare-path check said ${BARE_UPGRADE_VERDICT:-unknown})"
+    fi
     return 0
   fi
   return 1
@@ -447,6 +467,16 @@ HEALTH_SECONDS=""    # curl %{time_total} of the attempt that answered
 # truncation mutation proof is anchored on this function for that reason.
 clean_200() { # <http_code> <curl_rc> -> 0 when the body was read to the end
   [ "$1" = 200 ] && [ "$2" = 0 ]
+}
+# THE DEEP-PATH ASSERTION, in ONE predicate for the same reason clean_200 is one:
+# one place to get it wrong, one place to mutate. A linked route is certified
+# only when there was no link to take (n/a — a genuinely single-page render) or
+# the route this page LINKS TO answered 200. Reduce the second half to `true` and
+# every deep-path row in --self-test goes red while the engine keeps deploying —
+# which is exactly the pre-fix engine, and exactly what the self-test's mutation
+# block reproduces.
+deep_ok() { # <deep-path> <http_code> -> 0 when the linked route is certified
+  [ -z "$1" ] || [ "$2" = 200 ]
 }
 health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
   HEALTH_DETAIL=""
@@ -565,6 +595,96 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
   # node(s)…"). Read it BEFORE the body is deleted — it is what turns the empty
   # bp-doc-id refusal below from a symptom into a diagnosis.
   got_corpus="$(meta_value "$body" bp-corpus-status)"
+  # DEEP PATH — pick ONE non-root route out of the SERVED html's own links, while
+  # the body is still on disk and the slot is still booted. The fetch itself
+  # happens below, AFTER the marker assertions, so a lying build is still refused
+  # in the marker branch's words rather than in this one's.
+  #
+  # WHY THE TARGET COMES FROM THE HTML AND NEVER FROM THE DISK. This gate curls
+  # exactly one path ("/", the basePath sub-path, or BARKPARK_SITE_HEALTH_PATH)
+  # and asserts three markers on it, so an SSR release whose /d/<slug>/ route
+  # throws at render time — a corpus row the finder page dereferences and the
+  # home page does not, a dynamic segment whose params went empty, a route
+  # handler that 500s — served that 500 to every visitor and STILL switched live.
+  # The static engine closed the same hole (site-deploy.sh's deep-path probe);
+  # the SSR engine kept it. This is that fix, ported.
+  # A disk-derived target could not close it anyway: an SSR route need not
+  # correspond to any file, and enumerating .next/ would ask the app for paths no
+  # visitor's browser ever requests. The page's own href IS the request a browser
+  # will make.
+  #
+  # The extractor hands back a PERCENT-ENCODED, pure-ASCII path, so nothing this
+  # shell or curl touches depends on filename encoding and nothing word-splits.
+  # Root-relative hrefs carry the site base (`/sites/<slug>/`, the bp-site-base
+  # marker the template bakes): strip it — or, failing that, the probe root this
+  # gate already speaks to — and SKIP an href that matches neither rather than
+  # manufacture a refusal out of an off-site link.
+  #
+  # HEALTH_PY is the interpreter the extractor runs on, kept nameable so the
+  # self-test can drive the COULD-NOT-CHECK arm. A probe that could not run has
+  # made no claim, and a gate that made no claim has not gated: refuse, never
+  # "n/a".
+  local HEALTH_PY="${BARKPARK_HEALTH_PY:-python3}"
+  local deep="" deep_code=000 deep_probe_rc=0 site_base="" deep_slow=0 deep_secs=""
+  site_base="$(meta_value "$body" bp-site-base)"
+  if ! command -v "$HEALTH_PY" >/dev/null 2>&1; then
+    deep_probe_rc=127
+  else
+    deep="$("$HEALTH_PY" - "$body" "$site_base" "$path" <<'DEEPPY' 2>/dev/null
+import re, sys, urllib.parse
+html = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+
+
+def norm(b):
+    b = (b or "").strip()
+    if not b:
+        return ""
+    if not b.startswith("/"):
+        b = "/" + b
+    if not b.endswith("/"):
+        b += "/"
+    return b
+
+
+base = norm(sys.argv[2])          # bp-site-base: the prefix the TEMPLATE baked
+root = norm(sys.argv[3]) or "/"   # the path this gate already probes on the raw port
+ATTR = r"(?:href|src)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'>]+))"
+SCHEME = r"^[A-Za-z][A-Za-z0-9+.\-]*:"
+cands = []
+for m in re.finditer(ATTR, html, re.I):
+    raw = (m.group(1) or m.group(2) or m.group(3) or "").strip()
+    if not raw or raw.startswith("//"):
+        continue
+    if re.match(SCHEME, raw):
+        continue
+    p = urllib.parse.unquote(urllib.parse.urlsplit(raw).path)
+    if p.startswith("./"):
+        p = p[2:]
+    if p.startswith("/"):
+        # Strip the prefix this href is expressed in. When the template baked a
+        # site base, that base IS the vocabulary of its own links: an href that
+        # does not start with it points outside this site, and is SKIPPED, never
+        # manufactured into a refusal. With no base marker at all the probe root
+        # is the only prefix there is -- and a root of "/" then matches every
+        # root-relative href, which is correct only BECAUSE there is no base to
+        # contradict it.
+        pre = base or root
+        if not p.startswith(pre):
+            continue
+        p = p[len(pre):]
+    if not p or p in ("index.html", "/"):
+        continue
+    if ".." in p.split("/"):
+        continue
+    cands.append(p)
+if cands:
+    # Non-ASCII first (the encoding cases are the ones that break), then a
+    # page-shaped target, then the shortest — deterministic across runs.
+    cands.sort(key=lambda p: (p.isascii(), not (p.endswith("/") or p.endswith(".html")), len(p), p))
+    print(urllib.parse.quote(cands[0], safe="/"))
+DEEPPY
+)" || deep_probe_rc=$?
+  fi
   rm -f "$body"
   if [ "$got_build" != "$bid" ]; then
     stop_slot "$slot"
@@ -595,6 +715,52 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
     fi
     log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
   fi
+  # ---- THE DEEP-PATH VERDICT --------------------------------------------
+  # Fetched HERE, after the markers, while the slot is still booted: the target
+  # was chosen from the body above. Same two-phase budget as the root probe (D27)
+  # — a deep SSR route renders per request too, so ONE fast attempt at the
+  # ${HEALTH_FAST_MAX}s ceiling and, only if that did not land a clean 200, ONE
+  # patient attempt at the patient ceiling. Slow is a fact about the route, not a
+  # verdict about the release: a deep path that answers 200 late still PASSES and
+  # says SLOW, exactly as the root probe does.
+  if [ "$deep_probe_rc" = 0 ] && [ -n "$deep" ]; then
+    local d_out d_rc=0
+    d_out="$(curl -sL --max-redirs 2 -o /dev/null -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time "$HEALTH_FAST_MAX" "http://127.0.0.1:$port$path$deep" 2>/dev/null)"; d_rc=$?
+    deep_code="${d_out%% *}"; deep_secs="${d_out##* }"; [ -n "$deep_code" ] || deep_code=000
+    if ! clean_200 "$deep_code" "$d_rc"; then
+      log "HEALTH: deep path $path$deep did not clean-200 inside the ${HEALTH_FAST_MAX}s ceiling (got $deep_code, curl exit $d_rc) — one patient probe at ${HEALTH_PATIENT_MAX}s to tell a SLOW route from a BROKEN one"
+      d_out="$(curl -sL --max-redirs 2 -o /dev/null -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time "$HEALTH_PATIENT_MAX" "http://127.0.0.1:$port$path$deep" 2>/dev/null)"; d_rc=$?
+      deep_code="${d_out%% *}"; deep_secs="${d_out##* }"; [ -n "$deep_code" ] || deep_code=000
+      clean_200 "$deep_code" "$d_rc" && deep_slow=1
+    fi
+  fi
+  # THREE-VALUED, never two. An empty $deep means BOTH "no internal link" (n/a,
+  # fine) and "the extractor never ran" (nothing was checked) — and a gate that
+  # prints the n/a prose for the second PASSES every broken release while reading
+  # as a single-page build. Refuse, and name the assertion that was not made.
+  if [ "$deep_probe_rc" != 0 ]; then
+    stop_slot "$slot"
+    HEALTH_DETAIL="deep-path probe COULD-NOT-CHECK: the link extractor ($HEALTH_PY) did not run (exit $deep_probe_rc) — the deep-path assertion was NOT made, so this release is unverified, not healthy; live slot untouched"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+  fi
+  # A REFUSAL, not a warning: a linked route that 404s or 500s is a 404/500 for
+  # visitors, and switching to it ships the hole (charter D116). ACTION FIRST
+  # after the path — emit() clips detail= at 240 chars, so on a pathologically
+  # long path it is the cause hint that degrades, never the "do not retry this
+  # artifact" move. The log line below is unclipped.
+  if ! deep_ok "$deep" "$deep_code"; then
+    stop_slot "$slot"
+    HEALTH_DETAIL="the served page links to $path$deep — the SSR answered HTTP $deep_code there, want 200 (${deep_secs}s). Rebuild; do not retry this artifact. Cause: that route throws at render, or its content row is unreachable while the home page's is; live slot untouched"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+  fi
+  if [ -n "$deep" ] && [ "$deep_slow" = 1 ]; then
+    log "HEALTH: deep path $path$deep serves 200 — SLOW: only on the patient ${HEALTH_PATIENT_MAX}s probe, after ${deep_secs}s (past the ${HEALTH_FAST_MAX}s per-attempt ceiling). Gating it as healthy: it renders."
+  elif [ -n "$deep" ]; then
+    log "HEALTH: deep path $path$deep serves 200 in ${deep_secs}s from the booted slot (site base '${site_base:-/}')"
+  else
+    log "HEALTH: no non-root internal link in the served page — deep-path probe n/a (single-page build)"
+  fi
+  # ------------------------------------------------------------------------
   # The observed latency ALWAYS rides the detail — a stdout-only caller cannot
   # ask the box afterwards, and "how long did it take to render" is the one
   # number that separates a site that is degrading from one that is fine.
@@ -644,17 +810,14 @@ do_retire_node() { # <current-slot>
   [ -d "$RELEASES" ] || return 0
   keepa="$(read_slot_build a)"; keepb="$(read_slot_build b)"
   keepp=""; [ -f "$ROOT/.previous" ] && keepp="$(awk '{print $3}' "$ROOT/.previous" 2>/dev/null || true)"
-  local d id i=0
-  while IFS= read -r d; do
-    [ -n "$d" ] || continue
-    id="$(basename "$d")"
-    i=$((i + 1))
-    [ "$i" -le "$RETAIN" ] && continue
-    [ "$id" = "$keepa" ] && continue
-    [ "$id" = "$keepb" ] && continue
-    [ "$id" = "$keepp" ] && continue
-    if rm -rf "$d"; then RETIRED=$((RETIRED + 1)); log "RETIRE: removed old release $id"; fi
-  done < <(ls -1dt "$RELEASES"/*/ 2>/dev/null)
+  # THE SORT KEY IS THE STAGING TIME, not the release dir mtime (see
+  # releases_newest_first in the common lib). `ls -1dt` sorted by mtime, and
+  # STAGE's `cp -a "$SITE_SRC/.next/standalone/."` PRESERVES the builder's
+  # timestamps — so the old key was the BUILDER's clock, and a re-staged
+  # pre-existing build silently inverted the retire order. On EQUAL mtimes GNU
+  # `ls -t` falls back to NAME ASCENDING, i.e. exactly reverse.
+  prune_release_dirs "$RELEASES" "$RETAIN" "$keepa" "$keepb" "$keepp"
+  RETIRED="$PRUNED"
 }
 
 # Best-effort: materialise /usr/local/bin/barkpark-node -> the asdf node (NEVER
@@ -759,8 +922,20 @@ if [ "$MODE" = selftest ]; then
   # .github/workflows/deploy-harnesses.yml runs ("Site deploy engine (Node)
   # self-test", env BARKPARK_SELFTEST_REQUIRE_E2E: "1", ubuntu-latest).
   # ADD rows -> raise the literal in the SAME commit.
-  SELFTEST_FLOOR_MIN=342
-  SELFTEST_FLOOR_FULL=359
+  # 2026-09-09: +33 (342->375, 359->392) for the bare-path upgrade (D79) and the
+  # staging-time RETIRE key (D80). All 33 sit outside both optional blocks, so
+  # BOTH floors move by the same 33.
+  # 2026-09-09: +21 (375->396, 392->413) for the teardown STOP ORDER — a refused
+  # or unlockable disarm now leaves both slots RUNNING (no armed route over dead
+  # processes), and a successful disarm followed by a stop that does not take
+  # RESTORES the route byte-identically (no dead route over live processes). All
+  # 21 sit outside both optional blocks, so BOTH floors move by the same 21.
+  # 2026-09-10: +38 (396->434, 413->451) for the DEEP-PATH probe — the SSR gate
+  # asserted ONE url, so a release whose LINKED route 404s/500s passed HEALTH and
+  # switched live (ssw11-bl-node-engine-health-one-path). All 38 sit outside both
+  # optional blocks, so BOTH floors move by the same 38.
+  SELFTEST_FLOOR_MIN=434
+  SELFTEST_FLOOR_FULL=451
   TESTS=0; FAILS=0
   check() { local label="$1"; shift; TESTS=$((TESTS + 1)); if "$@"; then echo "  ok   - $label"; else echo "  FAIL - $label"; FAILS=$((FAILS + 1)); fi; }
 
@@ -775,6 +950,7 @@ if [ "$MODE" = selftest ]; then
   T_PORT_E="$(free_port)"; T_PORT_F="$(free_port)"   # basePath site's two slots
   T_PORT_G="$(free_port)"; T_PORT_H="$(free_port)"   # prefix-collision: the LONGER sibling
   T_PORT_I="$(free_port)"; T_PORT_J="$(free_port)"   # prefix-collision: the PREFIX slug
+  T_PORT_K="$(free_port)"; T_PORT_L="$(free_port)"   # the pre-#3382 block's two slots
 
   FAKEBIN="$TD/bin"; SLOTPIDS="$TD/slotpids"; SENV="$TD/slots"; SRC="$TD/src"
   mkdir -p "$FAKEBIN" "$SLOTPIDS" "$SENV" "$SRC"
@@ -926,6 +1102,21 @@ bid="${BARKPARK_BUILD_ID:-}"; rev="${BARKPARK_CONTENT_REV:-}"; doc="doc-42"; cor
 # The legacy shape: empty bp-doc-id and NO status marker (a template built before
 # the corpus-status contract) — the gate must refuse AND say the cause is unknown.
 [ -f ./.no-corpus-legacy ] && { doc=""; corpus=""; }
+# DEEP-PATH fixtures. `.deep-link` holds the href the rendered page carries (the
+# ONLY thing the HEALTH deep probe may derive a target from); `.deep-page` holds
+# a release-relative directory the "SSR" actually answers at. Ship the link
+# WITHOUT the page and the release is exactly the shape this probe exists for: a
+# home page that 200s and a linked route that does not.
+link=""; deeppage=""; sitebase=""
+[ -f ./.deep-link ] && link="$(cat ./.deep-link)"
+[ -f ./.deep-page ] && deeppage="$(cat ./.deep-page)"
+[ -f ./.site-base ] && sitebase="$(cat ./.site-base)"
+# The src tree is REUSED across every e2e case in this file, and `mkdir -p` does
+# not un-make anything: a deep page written for one fixture survived into the
+# next, so a "the linked route is GONE" case still served it and the gate
+# correctly passed a release the test believed was broken. Clear the deep-page
+# roots every build. (Caught by exactly that: two refusal rows went green.)
+rm -rf .next/standalone/d .next/standalone/sites
 mkdir -p .next/standalone .next/static public
 printf '// fake next standalone server\n' > .next/standalone/server.js
 {
@@ -936,8 +1127,15 @@ printf '// fake next standalone server\n' > .next/standalone/server.js
   # Emitted ONLY when there is something to record — same conditional the
   # template uses (a healthy render carries no bp-corpus-status at all).
   [ -n "$corpus" ] && printf '<meta name="bp-corpus-status" content="%s">\n' "$corpus"
-  printf '</head><body><h1>SSR</h1></body></html>\n'
+  [ -n "$sitebase" ] && printf '<meta name="bp-site-base" content="%s">\n' "$sitebase"
+  printf '</head><body><h1>SSR</h1>'
+  [ -n "$link" ] && printf '<a href="%s">deep</a>' "$link"
+  printf '</body></html>\n'
 } > .next/standalone/index.html
+if [ -n "$deeppage" ]; then
+  mkdir -p ".next/standalone/$deeppage"
+  printf '<!doctype html><html><body>deep route</body></html>\n' > ".next/standalone/$deeppage/index.html"
+fi
 printf 'chunk\n' > .next/static/chunk.js
 printf 'robots\n' > public/robots.txt
 # Carry the slot-behaviour sentinels INTO the release (STAGE's `cp -a src/.`
@@ -1002,6 +1200,125 @@ FAKENPM
   # assertion (a diagnosis must not be invented when nothing was recorded).
   no_log_match() { ! grep -q "$1" "$TD/out.log"; }
   cf_port() { awk -v m="BARKPARK_SITE_ROUTE:selftest" 'index($0,m){i=1} i&&match($0,/localhost:[0-9]+/){p=substr($0,RSTART+10,RLENGTH-10);print p;exit}' "$CF"; }
+
+  # -------------------------------------------------------------------------
+  # RETIRE ORDERS BY STAGING TIME, NOT THE BUILDER'S CLOCK (D80).
+  #
+  # STAGE copies with `cp -a "$SITE_SRC/.next/standalone/."`, and `cp -a`
+  # PRESERVES the source timestamps — so a release dir's mtime is "when the
+  # BUILDER last wrote .next/standalone", not "when this release was staged".
+  # Nine releases staged from one unchanging build all carry the SAME mtime, and
+  # on ties `ls -t` falls back to NAME ASCENDING (measured on GNU coreutils 9.4
+  # AND on BSD ls): the pre-fix engine then deletes r6..r9 — the four NEWEST —
+  # and calls r1..r5 the rollback window.
+  #
+  # The remedy is the staging stamp STAGE writes at <releases>/.staged/<build_id>
+  # and prune_release_dirs reads. Revert the key to `ls -1dt` and the rows naming
+  # r9/r8/r1/r2 go red BY NAME.
+  # -------------------------------------------------------------------------
+  echo "[selftest] RETIRE sorts by STAGING time, not the builder's build mtime (TIED mtimes)"
+  nsv_ROOT="${ROOT:-}"; nsv_RELEASES="${RELEASES:-}"; nsv_RETAIN="${RETAIN:-}"
+  nsv_SLUG="${SITE_SLUG:-}"; nsv_SENV="${SLOT_ENV_DIR:-}"
+  NTR="$TD/tied"; NTRR="$NTR/releases"
+  mkdir -p "$NTRR" "$NTR/slots"
+  for n in 1 2 3 4 5 6 7 8 9; do
+    mkdir -p "$NTRR/r$n"
+    printf 'console.log("r%s")\n' "$n" > "$NTRR/r$n/server.js"
+    touch -t 202607130900 "$NTRR/r$n"   # ALL TIED — one builder output, nine stagings
+    stamp_release_staged "$NTRR" "r$n"  # …staged in order r1 (oldest) .. r9 (newest)
+  done
+  n_tied_distinct="$(for n in 1 2 3 4 5 6 7 8 9; do dir_mtime_epoch "$NTRR/r$n"; echo; done | sort -u | wc -l | tr -d ' ')"
+  check "the fixture really is TIED (one distinct mtime across all nine dirs)" \
+    [ "$n_tied_distinct" = 1 ]
+  check "…and every release carries a staging stamp (the fixture is not vacuous)" \
+    sh -c "[ \"\$(ls -1 '$NTRR/.staged' 2>/dev/null | grep -c '^r[1-9]$' | tr -d ' ')\" = 9 ]"
+  # shellcheck disable=SC2012  # the OLD key IS `ls -t` — measuring it is the point
+  n_prefix_order="$(ls -1dt "$NTRR"/*/ 2>/dev/null | sed 's:.*/\([^/]*\)/$:\1:' | tr '\n' ' ')"
+  n_fixed_order="$(releases_newest_first "$NTRR" | sed 's:.*/\([^/]*\)/$:\1:' | tr '\n' ' ')"
+  check "PRE-FIX KEY: 'ls -1dt' on tied mtimes is NAME-ASCENDING, i.e. oldest-staged first" \
+    [ "$n_prefix_order" = "r1 r2 r3 r4 r5 r6 r7 r8 r9 " ]
+  check "THE FIX: releases_newest_first orders them newest-STAGED first" \
+    [ "$n_fixed_order" = "r9 r8 r7 r6 r5 r4 r3 r2 r1 " ]
+  ROOT="$NTR"; RELEASES="$NTRR"; RETAIN=5; SITE_SLUG=tiedslug; SLOT_ENV_DIR="$NTR/slots"
+  # `.previous` names slot b, so other_slot(a) == the warm previous and the stop
+  # branch is skipped entirely — this block is about the ORDER, nothing else.
+  printf 'b 65533 r9\n' > "$ROOT/.previous"
+  do_retire_node a
+  check "tied RETIRE: kept r9 (newest staged)"  [ -d "$NTRR/r9" ]
+  check "tied RETIRE: kept r8 — the SECOND-NEWEST, which the pre-fix engine deleted" \
+    [ -d "$NTRR/r8" ]
+  check "tied RETIRE: kept r5 (still inside the newest five)" [ -d "$NTRR/r5" ]
+  check "tied RETIRE: removed r1 (oldest staged, which the pre-fix engine KEPT)" \
+    [ ! -d "$NTRR/r1" ]
+  check "tied RETIRE: removed r2 (second-oldest, likewise kept by the pre-fix engine)" \
+    [ ! -d "$NTRR/r2" ]
+  check "tied RETIRE: it removed exactly four"  [ "$RETIRED" = 4 ]
+  check "tied RETIRE: a removed release's staging stamp went with it" \
+    [ ! -f "$NTRR/.staged/r1" ]
+  check "tied RETIRE: a KEPT release's staging stamp survives" [ -f "$NTRR/.staged/r9" ]
+  ROOT="$nsv_ROOT"; RELEASES="$nsv_RELEASES"; RETAIN="$nsv_RETAIN"
+  SITE_SLUG="$nsv_SLUG"; SLOT_ENV_DIR="$nsv_SENV"
+
+  # -------------------------------------------------------------------------
+  # THE BARE-PATH UPGRADE, node side (D79). This engine has emitted a bare-path
+  # route since #3382 — but the marker guard freezes the FIRST shape forever, so
+  # a block armed BEFORE that still has none, and /sites/<slug> (no trailing
+  # slash) falls through to the slot reverse_proxy. The upgrade is guarded by a
+  # predicate read from the BLOCK'S OWN BYTES, which is what lets it tell the
+  # pre-#3382 shape apart from the basePath shape THIS engine writes on purpose
+  # without a redir (adding one there would 308-loop against the app).
+  # -------------------------------------------------------------------------
+  echo "[selftest] the bare-path upgrade reads the BLOCK'S OWN BYTES here too (D79)"
+  NBP="$TD/barepath"; mkdir -p "$NBP"
+  nbp_verdict() { # <slug> <src> <dst> -> the rewrite verdict
+    local __save="${SITE_SLUG:-}" __rc=0
+    SITE_SLUG="$1"; caddy_bare_path_rewrite "$2" "$3" || __rc=$?
+    SITE_SLUG="$__save"; echo "$__rc"
+  }
+  { printf 'example.com {\n'
+    printf '\t# BARKPARK_SITE_ROUTE:pre3382 — node SSR site, armed before the bare-path branch.\n'
+    printf '\thandle_path /sites/pre3382/* {\n'
+    printf '\t\treverse_proxy localhost:5137\n'
+    printf '\t}\n'
+    printf '\treverse_proxy localhost:4000\n'
+    printf '}\n'; } > "$NBP/pre.cf"
+  check "the pre-#3382 fixture really has NO bare-path route (non-vacuous)" \
+    sh -c "! grep -qE 'redir @|@bare_' '$NBP/pre.cf'"
+  check "a pre-#3382 node block is UPGRADABLE (verdict 0)" \
+    [ "$(nbp_verdict pre3382 "$NBP/pre.cf" "$NBP/up1.cf")" = 0 ]
+  check "…it gained the EXACT bare-path matcher" \
+    grep -qx "$(printf '\t@bare_pre3382 path /sites/pre3382')" "$NBP/up1.cf"
+  check "…and the 308 to the canonical slashed form" \
+    grep -qx "$(printf '\tredir @bare_pre3382 /sites/pre3382/ 308')" "$NBP/up1.cf"
+  check "…and the upstream PORT LINE came through untouched (an insert, never a rewrite)" \
+    sh -c "[ \"\$(grep -c 'reverse_proxy localhost:5137' '$NBP/up1.cf')\" = 1 ]"
+  check "a SECOND pass reads it as already covered (verdict 10) — idempotent" \
+    [ "$(nbp_verdict pre3382 "$NBP/up1.cf" "$NBP/up2.cf")" = 10 ]
+  check "…and rewrote nothing (byte-identical)" cmp -s "$NBP/up1.cf" "$NBP/up2.cf"
+  # THE TRAP, on the shape THIS engine actually writes for a basePath site.
+  { printf 'example.com {\n'
+    printf '\t# BARKPARK_SITE_ROUTE:bpnode — node SSR site (basePath), reverse-proxied un-stripped.\n'
+    printf '\t@bare_bpnode path /sites/bpnode /sites/bpnode/*\n'
+    printf '\thandle @bare_bpnode {\n'
+    printf '\t\treverse_proxy localhost:5209\n'
+    printf '\t}\n'
+    printf '\treverse_proxy localhost:4000\n'
+    printf '}\n'; } > "$NBP/bp.cf"
+  check "a basePath-shaped block is recognised as covering the bare path itself (verdict 11)" \
+    [ "$(nbp_verdict bpnode "$NBP/bp.cf" "$NBP/bp.out")" = 11 ]
+  check "…and is left byte-identical: NO bare->slash redir (it would 308-loop with the app)" \
+    cmp -s "$NBP/bp.cf" "$NBP/bp.out"
+  # AND AN UNRECOGNISED SHAPE IS LEFT ALONE RATHER THAN GUESSED AT.
+  { printf 'example.com {\n'
+    printf '\t# BARKPARK_SITE_ROUTE:oddnode — hand-edited, non-stripping handle.\n'
+    printf '\thandle /sites/oddnode/* {\n'
+    printf '\t\treverse_proxy localhost:5301\n'
+    printf '\t}\n'
+    printf '\treverse_proxy localhost:4000\n'
+    printf '}\n'; } > "$NBP/odd.cf"
+  check "an UNRECOGNISED block shape is verdict 12" \
+    [ "$(nbp_verdict oddnode "$NBP/odd.cf" "$NBP/odd.out")" = 12 ]
+  check "…and is left byte-identical" cmp -s "$NBP/odd.cf" "$NBP/odd.out"
 
   echo "[selftest] e2e: first deploy boots slot a, gates it, arms Caddy to :A, walks six stages"
   rc="$(e2e_deploy n1)"
@@ -1254,6 +1571,60 @@ FAKENPM
   check "the OTHER site's Caddy block was NOT touched by the warm deploys (D66 per-site isolation)" \
     [ "$(cf_port)" = "$sel_port_before" ]
 
+  # -------------------------------------------------------------------------
+  # A PRE-#3382 BLOCK IS UPGRADED IN PLACE BY A REAL DEPLOY (D79). The unit rows
+  # above pin the predicate; this drives the WHOLE path — arm_caddy_node_route's
+  # already-armed branch, under with_caddy_lock, committed like every other
+  # Caddyfile read-modify-write — over the shape the box actually carries.
+  # -------------------------------------------------------------------------
+  echo "[selftest] e2e: a pre-#3382 node block gains the bare-path 308 on the next deploy, in place (D79)"
+  # Seed the LIVE Caddyfile with the old shape: this slug's marker, a stripping
+  # handle_path, and an upstream port that belongs to NEITHER of its slots — so
+  # active_slot() reads none and the deploy takes the arm path into the
+  # already-armed branch, which is the branch that upgrades.
+  { printf 'example.com {\n'
+    printf '\t# BARKPARK_SITE_ROUTE:preboot — node SSR site, armed before the bare-path branch.\n'
+    printf '\thandle_path /sites/preboot/* {\n'
+    printf '\t\treverse_proxy localhost:65531\n'
+    printf '\t}\n'
+    printf '\treverse_proxy localhost:4000\n'
+    printf '}\n'; } > "$TD/preboot.Caddyfile"
+  check "the seeded pre-#3382 block really has no bare-path route (non-vacuous)" \
+    sh -c "! grep -qE 'redir @|@bare_' '$TD/preboot.Caddyfile'"
+  pb_rc="$(env PATH="$FAKEBIN:$PATH" SITE_SLUG=preboot BUILD_ID=pb1 CONTENT_REV=pb-rev \
+    SITE_SRC="$SRC" SITE_PORT_A="$T_PORT_K" SITE_PORT_B="$T_PORT_L" \
+    BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$TD/preboot.Caddyfile" \
+    BARKPARK_SITE_DEPLOY_LOCK="$TD/preboot.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+    BARKPARK_SITE_HEALTH_PATH=/ BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    bash "$SELF" > "$TD/preboot.out" 2>&1; echo $?)"
+  check "the deploy over the pre-#3382 block exits 0 (the upgrade is never fatal)" \
+    [ "$pb_rc" = 0 ]
+  check "the block gained the EXACT bare-path matcher, in place" \
+    grep -qx "$(printf '\t@bare_preboot path /sites/preboot')" "$TD/preboot.Caddyfile"
+  check "…and the 308 to the canonical slashed form" \
+    grep -qx "$(printf '\tredir @bare_preboot /sites/preboot/ 308')" "$TD/preboot.Caddyfile"
+  check "…NOT by re-arming: this site's marker still appears exactly once" \
+    sh -c "[ \"\$(grep -c 'BARKPARK_SITE_ROUTE:preboot' '$TD/preboot.Caddyfile')\" = 1 ]"
+  check "…and the handle_path is still there exactly once (no duplicate route)" \
+    sh -c "[ \"\$(grep -c 'handle_path /sites/preboot/\\*' '$TD/preboot.Caddyfile')\" = 1 ]"
+  check "…and the upgrade is announced on the DURABLE machine channel" \
+    grep -q '^BPSTAGE name=ROUTE status=ok build_id=pb1 detail="already armed, UPGRADED: ' "$TD/preboot.out"
+  check "the upgrade left no backup file behind on the happy path" \
+    sh -c "! ls '$TD'/preboot.Caddyfile.bak.* >/dev/null 2>&1"
+  cp "$TD/preboot.Caddyfile" "$TD/preboot.after1"
+  env PATH="$FAKEBIN:$PATH" SITE_SLUG=preboot BUILD_ID=pb2 CONTENT_REV=pb-rev2 \
+    SITE_SRC="$SRC" SITE_PORT_A="$T_PORT_K" SITE_PORT_B="$T_PORT_L" \
+    BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$TD/preboot.Caddyfile" \
+    BARKPARK_SITE_DEPLOY_LOCK="$TD/preboot.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+    BARKPARK_SITE_HEALTH_PATH=/ BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    bash "$SELF" > "$TD/preboot2.out" 2>&1 || true
+  check "a SECOND deploy adds no second redir (the upgrade is idempotent)" \
+    sh -c "[ \"\$(grep -c 'redir @bare_preboot' '$TD/preboot.Caddyfile')\" = 1 ]"
+  check "…and it reports the plain already-armed detail, not another upgrade" \
+    grep -q '^BPSTAGE name=ROUTE status=ok build_id=pb2 detail="already armed: ' "$TD/preboot2.out"
+
   echo "[selftest] e2e: a basePath site arms a NON-stripping 'handle' + health-probes the sub-path (D6)"
   # BARKPARK_SITE_BASEPATH=1 + a .basepath sentinel (so the fake npm also emits the
   # marker page under /sites/basepath/) — the health probe must default to the
@@ -1478,6 +1849,157 @@ FAKENPM
     no_log_match 'the body was TRUNCATED'
   echo "  mutation proof: with clean_200 reduced to '[ \"\$1\" = 200 ]', a site whose document IS readable at the patient ceiling exits 14 and reports 'the SSR rendered no content document … predates the corpus-status contract' — the three checks above (fast loop refused the truncated 200 / fell through to the patient probe / never claims no content document) all red"
 
+  # -------------------------------------------------------------------------
+  # ONE PATH IS NOT THE SITE (ssw11-bl-node-engine-health-one-path).
+  #
+  # THE SHAPE. Until this block, every assertion this engine made was about ONE
+  # url: "/" (or the basePath sub-path, or BARKPARK_SITE_HEALTH_PATH). A release
+  # whose home page renders and whose LINKED route 404s or 500s therefore passed
+  # HEALTH and SWITCHed live, and the first report was a visitor's. The static
+  # engine closed the identical hole (site-deploy.sh, "HEALTH certifies a page the
+  # served HTML links to"); the SSR engine — where a route can fail for reasons a
+  # file tree cannot show at all — kept it.
+  #
+  # THE TARGET IS THE PAGE'S OWN href, NEVER THE DISK. On SSR that is not a
+  # preference, it is the only option that means anything: routes need not
+  # correspond to files, so an enumeration would ask the app for paths no browser
+  # ever requests, while the rendered href IS the next request a visitor makes.
+  #
+  # FIXTURES. `.deep-link` puts an href in the rendered page; `.deep-page` makes
+  # the "SSR" actually answer there; `.site-base` emits the bp-site-base marker
+  # the base-stripping reads. Ship the link WITHOUT the page and you have the
+  # exact release this gate exists for.
+  # -------------------------------------------------------------------------
+  echo "[selftest] e2e: FAIL-BEFORE — a release whose LINKED route 404s is REFUSED (14), never switched"
+  printf '/sites/deep1/d/hello/\n' > "$SRC/.deep-link"
+  printf '/sites/deep1/\n'         > "$SRC/.site-base"
+  rc="$(sl_deploy deep1 dp1 deep1 "$(free_port)" "$(free_port)")"
+  check "the home page itself was fine: HEALTH read all three markers" \
+    no_log_match 'bp-doc-id marker is empty'
+  check "deploy exits 14 (HEALTH failed)"          [ "$rc" = 14 ]
+  check "no SWITCH stage line at all"              nosaw SWITCH
+  check "the reason NAMES the link it followed"    grep -q 'links to /d/hello/' "$TD/out.log"
+  check "…and the code it got there"               grep -q 'answered HTTP 404 there, want 200' "$TD/out.log"
+  check "…and the next move, before any cause hint (emit() clips detail= at 240)" \
+    grep -q 'Rebuild; do not retry this artifact' "$TD/out.log"
+  check "the refusal ALSO rides the plain human log (dual-channel)" \
+    grep -q '\[site-deploy-node .*HEALTH: the served page links to /d/hello/' "$TD/out.log"
+  check "it did NOT blame the content markers (they were all present)" \
+    no_log_match 'the SSR rendered no content document'
+  check "the broken release is purged"             [ ! -d "$TD/sites/deep1/releases/dp1" ]
+
+  echo "[selftest] e2e: the SAME release with the linked route PRESENT deploys, and the gate names the path it certified"
+  printf 'd/hello\n' > "$SRC/.deep-page"
+  rc="$(sl_deploy deep2 dp2 deep2 "$(free_port)" "$(free_port)")"
+  check "deploy exit 0"                            [ "$rc" = 0 ]
+  check "HEALTH ok"                                saw HEALTH ok dp2
+  check "SWITCH ok"                                saw SWITCH ok dp2
+  check "the gate names the deep path it certified" \
+    grep -q 'deep path /d/hello/ serves 200' "$TD/out.log"
+  check "it was fetched at the BASE-STRIPPED path (the raw port has no /sites/<slug>/ prefix)" \
+    no_log_match 'deep path /sites/deep1/d/hello/'
+  check "it did not degrade to n/a"                no_log_match 'deep-path probe n/a'
+  rm -f "$SRC/.deep-link" "$SRC/.deep-page" "$SRC/.site-base"
+
+  echo "[selftest] e2e: a single-page render (no internal link) passes — the probe is n/a, never a refusal"
+  rc="$(sl_deploy deep3 dp3 deep3 "$(free_port)" "$(free_port)")"
+  check "deploy exit 0"                            [ "$rc" = 0 ]
+  check "and it SAYS the probe was n/a"            grep -q 'deep-path probe n/a (single-page build)' "$TD/out.log"
+
+  echo "[selftest] e2e: an href pointing OUTSIDE this site's base is SKIPPED, not manufactured into a refusal"
+  printf '/some/other/site/page/\n' > "$SRC/.deep-link"
+  printf '/sites/deep4/\n'          > "$SRC/.site-base"
+  rc="$(sl_deploy deep4 dp4 deep4 "$(free_port)" "$(free_port)")"
+  rm -f "$SRC/.deep-link" "$SRC/.site-base"
+  check "deploy exit 0 (an off-site link is not this release's problem)" [ "$rc" = 0 ]
+  check "and the probe reports n/a"                grep -q 'deep-path probe n/a' "$TD/out.log"
+  check "it never fetched the off-site path"       no_log_match '/some/other/site/page/'
+
+  echo "[selftest] e2e: a probe that COULD NOT RUN is a refusal, never an 'n/a' — an unchecked release is not a healthy one"
+  # THREE-VALUED, not two. An empty $deep means both "no internal link" and "the
+  # extractor never ran". Print the n/a prose for the second and a missing
+  # interpreter silently passes every broken release while reading as a
+  # single-page build — the static engine's own regression, ported here as a row.
+  printf '/sites/deep5/d/hello/\n' > "$SRC/.deep-link"
+  printf '/sites/deep5/\n'         > "$SRC/.site-base"
+  printf 'd/hello\n'               > "$SRC/.deep-page"
+  cnc_rc="$(env PATH="$FAKEBIN:$PATH" SITE_SLUG=deep5 BUILD_ID=dp5 CONTENT_REV=sl-rev \
+      SITE_SRC="$SRC" SITE_PORT_A="$(free_port)" SITE_PORT_B="$(free_port)" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TD/deep5.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      BARKPARK_SITE_HEALTH_ATTEMPTS=2 BARKPARK_SITE_HEALTH_FAST_MAX=1 \
+      BARKPARK_HEALTH_PY="$TD/no-such-interpreter" \
+      bash "$SELF" > "$TD/out.log" 2> "$TD/err.log"; echo $?)"
+  check "a release that would otherwise deploy is REFUSED (14) when the extractor is missing" \
+    [ "$cnc_rc" = 14 ]
+  check "and it says COULD-NOT-CHECK"              grep -q 'deep-path probe COULD-NOT-CHECK' "$TD/out.log"
+  check "…naming the interpreter that did not run" grep -q "did not run (exit 127)" "$TD/out.log"
+  check "and it does NOT read as a single-page build" no_log_match 'deep-path probe n/a'
+  rc="$(sl_deploy deep5b dp5b deep5b "$(free_port)" "$(free_port)")"
+  check "CONTROL: exit 0 and the deep path is CERTIFIED" \
+    sh -c "[ '$rc' = 0 ] && grep -q 'deep path /d/hello/ serves 200' '$TD/out.log'"
+  rm -f "$SRC/.deep-link" "$SRC/.site-base" "$SRC/.deep-page"
+
+  echo "[selftest] e2e: a basePath site probes the linked route UNDER its base (base-aware in the other dialect too)"
+  : > "$SRC/.basepath"
+  printf '/sites/deep6/d/x/\n'  > "$SRC/.deep-link"
+  printf '/sites/deep6/\n'      > "$SRC/.site-base"
+  printf 'sites/deep6/d/x\n'    > "$SRC/.deep-page"
+  bp6_deploy() { # <build_id> <port-a> <port-b>
+    env PATH="$FAKEBIN:$PATH" SITE_SLUG=deep6 BUILD_ID="$1" CONTENT_REV=sl-rev \
+      SITE_SRC="$SRC" SITE_PORT_A="$2" SITE_PORT_B="$3" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TD/deep6.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_SITE_BASEPATH=1 BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      BARKPARK_SITE_HEALTH_ATTEMPTS=2 BARKPARK_SITE_HEALTH_FAST_MAX=1 \
+      bash "$SELF" > "$TD/out.log" 2> "$TD/err.log"; echo $?
+  }
+  rc="$(bp6_deploy dp6 "$(free_port)" "$(free_port)")"
+  check "basePath deploy exit 0"                   [ "$rc" = 0 ]
+  check "the deep path was fetched UNDER the base, not at root" \
+    grep -q 'deep path /sites/deep6/d/x/ serves 200' "$TD/out.log"
+  rm -f "$SRC/.deep-page"
+  rc="$(bp6_deploy dp6b "$(free_port)" "$(free_port)")"
+  check "basePath: the same link with the route GONE is refused (14)"  [ "$rc" = 14 ]
+  check "…naming the base-qualified path"          grep -q 'links to /sites/deep6/d/x/' "$TD/out.log"
+  rm -f "$SRC/.basepath" "$SRC/.deep-link" "$SRC/.site-base"
+
+  echo "[selftest] e2e: a PERCENT-ENCODED accented href is fetched as the browser would ask for it"
+  # No accented byte is ever typed here: the on-disk name comes from a numeric
+  # \xNN escape naming the exact UTF-8 encoding, and the href is the ASCII
+  # percent-encoding of the same codepoint. What crosses the shell is ASCII.
+  printf '/sites/deep7/d/caf%%C3%%A9/\n' > "$SRC/.deep-link"
+  printf '/sites/deep7/\n'               > "$SRC/.site-base"
+  printf 'd/caf\xc3\xa9\n'               > "$SRC/.deep-page"
+  rc="$(sl_deploy deep7 dp7 deep7 "$(free_port)" "$(free_port)")"
+  check "accented deep route present: deploy exit 0"  [ "$rc" = 0 ]
+  check "and the gate reports the PERCENT-ENCODED path (pure ASCII on the wire)" \
+    grep -q 'deep path /d/caf%C3%A9/ serves 200' "$TD/out.log"
+  rm -f "$SRC/.deep-page"
+  rc="$(sl_deploy deep7b dp7b deep7b "$(free_port)" "$(free_port)")"
+  check "accented deep route MANGLED away: refused (14)"  [ "$rc" = 14 ]
+  check "…and the refusal names the encoded path"    grep -q 'links to /d/caf%C3%A9/' "$TD/out.log"
+
+  echo "[selftest] e2e: MUTATION PROOF — disable the deep probe's verdict and the 404-linked release deploys green again"
+  # ONE LINE, and it is the whole gate: `deep_ok` stops consulting the code it was
+  # handed. With it, the release whose linked route 404s walks through HEALTH,
+  # SWITCHes, and goes live — which IS the pre-fix engine, reproduced on demand.
+  DPMUT="$TD/mutant-deep-probe-off.sh"; DPMUTLIB="$TD/lib"
+  mkdir -p "$DPMUTLIB"
+  cp "$(cd "$(dirname "$SELF")" && pwd)/lib/site-deploy-common.sh" "$DPMUTLIB/"  # a mutant sources by its OWN dirname
+  awk '{ if ($0 == "  [ -z \"$1\" ] || [ \"$2\" = 200 ]") print "  [ -z \"$1\" ] || true"; else print }' \
+    "$SELF" > "$DPMUT"
+  check "the mutant differs by exactly ONE line (the mutation APPLIED)" \
+    [ "$(diff "$SELF" "$DPMUT" | grep -c '^[<>]')" = 2 ]
+  mrc="$(SL_ENGINE="$DPMUT" sl_deploy deep8 dp8 deep8 "$(free_port)" "$(free_port)")"
+  check "MUTANT: the identical 404-linked release exits 0"      [ "$mrc" = 0 ]
+  check "MUTANT: and it SWITCHES live"                          saw SWITCH ok dp8
+  check "MUTANT: the refusal sentence is never emitted"         no_log_match 'answered HTTP 404 there'
+  check "MUTANT: nothing at all names the linked route as bad"  no_log_match 'Rebuild; do not retry this artifact'
+  rm -f "$SRC/.deep-link" "$SRC/.site-base"
+  echo "  mutation proof: with deep_ok reduced to '[ -z \"\$1\" ] || true', a release whose LINKED route 404s exits 0 and goes live — every FAIL-BEFORE row above (exit 14 / no SWITCH / names the link / names the code / purged) reds"
+
   echo "[selftest] build_failure_reason resolves from the SHARED lib in THIS engine too"
   # The lift's whole point: one copy, both engines. If it ever gets re-forked into
   # an engine, the Console harness reds; if it goes MISSING from the lib, this
@@ -1640,6 +2162,19 @@ FAKENPM
   # keeps serving. The engine must not print TORN_DOWN= (the only marker the CP
   # reads — its presence alone is exit 0), must exit 25, and must keep the release
   # tree AND the slot env files. On origin/main every one of these fails.
+  # WHICH SLOTS ARE UP, read through the fake systemctl. The teardown's stop
+  # order is only observable against this: a refused disarm must leave the set
+  # UNCHANGED (the route it could not remove still has processes behind it).
+  td_slots_up() { # <slug> -> the running slots, e.g. "a", "ab", "" for none
+    local s out=""
+    for s in a b; do
+      env PATH="$FAKEBIN:$PATH" systemctl is-active --quiet "barkpark-site@$1__$s" && out="$out$s"
+    done
+    printf '%s' "$out"
+  }
+  WARM_UP_PRE="$(td_slots_up warm)"
+  check "reject-case PRECONDITION: warm HAD a running slot before the teardown" \
+    [ -n "$WARM_UP_PRE" ]
   REJBIN="$TD/bin-reject"; mkdir -p "$REJBIN"
   printf '#!/usr/bin/env bash\ncase "$1" in validate) exit 1;; *) exit 0;; esac\n' > "$REJBIN/caddy"
   chmod +x "$REJBIN/caddy"   # everything else still resolves from $FAKEBIN
@@ -1668,6 +2203,16 @@ FAKENPM
     grep -q 'STILL LIVE' "$TD/td-reject.out"
   check "node rejected teardown does NOT hedge — it made the measurement" \
     sh -c "! grep -q 'NEVER CHECKED' '$TD/td-reject.out'"
+  # THE STOP ORDER (D77 residue). On the pre-fix engine both slots were stopped
+  # BEFORE the disarm, so this reverted-still-live route answered 502 over two
+  # dead processes — strictly worse than the static engine's twin, which keeps
+  # serving real bytes. Nothing is stopped until the route is demonstrably down.
+  check "node rejected teardown LEFT the slots RUNNING (the un-removable route still SERVES, it does not 502)" \
+    [ "$(td_slots_up warm)" = "$WARM_UP_PRE" ]
+  check "node rejected teardown says the slots are still running, not stopped" \
+    grep -q 'BOTH SLOTS ARE STILL RUNNING' "$TD/td-reject.out"
+  check "node rejected teardown no longer promises a 502 window" \
+    sh -c "! grep -q 'now answers 502' '$TD/td-reject.out'"
 
   echo "[selftest] --teardown says UNKNOWN, not 'still live', when the Caddyfile lock was never taken (D77)"
   # The OTHER non-zero from with_caddy_lock, and a DIFFERENT claim: nothing read
@@ -1697,6 +2242,63 @@ FAKENPM
   check "node lock-starved teardown KEPT the release tree" [ -d "$TD/sites/warm/releases/w3" ]
   check "node lock-starved teardown left the Caddyfile byte-identical" \
     cmp -s "$TD/cf-before-lockstarve" "$CF"
+  check "node lock-starved teardown LEFT the slots RUNNING (the route's state is UNKNOWN — do not strand it over dead processes)" \
+    [ "$(td_slots_up warm)" = "$WARM_UP_PRE" ]
+  check "node lock-starved teardown says the slots are still running" \
+    grep -q 'BOTH SLOTS ARE STILL RUNNING' "$TD/td-lock.out"
+
+  echo "[selftest] --teardown RESTORES the route when the disarm succeeds and a slot will not stop (no dead route over live slots)"
+  # THE INVERSE HAZARD, and the reason the fix is not a two-line swap. Disarm
+  # first and a stop that does not take strands a DEAD route over a LIVE process
+  # — the mirror of the 502 window above, and invisible to every check that only
+  # asserts the route is gone. $STOPBIN's systemctl reports success for
+  # stop/disable and leaves the unit UP (a stuck ExecStop, a unit that restarts
+  # itself); every other verb delegates to the real fake, so the disarm SUCCEEDS
+  # here. The engine must notice, put the route back byte-identically, and fail.
+  STOPBIN="$TD/bin-nostop"; mkdir -p "$STOPBIN"
+  cat > "$STOPBIN/systemctl" <<NOSTOP
+#!/usr/bin/env bash
+case "\${1:-}" in stop|disable) exit 0;; esac
+exec "$FAKEBIN/systemctl" "\$@"
+NOSTOP
+  chmod +x "$STOPBIN/systemctl"
+  cp "$CF" "$TD/cf-before-nostop"
+  WARM_UP_PRE3="$(td_slots_up warm)"
+  check "no-stop-case PRECONDITION: warm HAD a running slot before the teardown" \
+    [ -n "$WARM_UP_PRE3" ]
+  check "no-stop-case PRECONDITION: warm's route was ARMED before the teardown" \
+    grep -q 'BARKPARK_SITE_ROUTE:warm' "$CF"
+  env PATH="$STOPBIN:$FAKEBIN:$PATH" \
+    SITE_SLUG=warm SITE_PORT_A="$T_PORT_C" SITE_PORT_B="$T_PORT_D" \
+    BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$CF" BARKPARK_SITE_DEPLOY_LOCK="$TD/warm.lock" \
+    BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" BARKPARK_SITE_LOG_FILE="$TD/td-nostop.log" \
+    BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    bash "$SELF" --teardown > "$TD/td-nostop.out" 2>&1; tdrc5=$?
+  check "node no-stop teardown exits 25 (not 0)" [ "$tdrc5" = 25 ]
+  check "node no-stop teardown printed NO TORN_DOWN=" \
+    sh -c "! grep -q 'TORN_DOWN=' '$TD/td-nostop.out'"
+  check "node no-stop teardown logged NO TORN_DOWN= durably" \
+    sh -c "! grep -q 'TORN_DOWN=' '$TD/td-nostop.log'"
+  check "node no-stop teardown printed the typed failure" \
+    grep -q '^TEARDOWN_FAILED=warm detail="' "$TD/td-nostop.out"
+  check "node no-stop teardown names the slot that would not stop" \
+    grep -q 'would NOT stop' "$TD/td-nostop.out"
+  check "node no-stop teardown RESTORED the route (no dead route over a live slot)" \
+    grep -q 'BARKPARK_SITE_ROUTE:warm' "$CF"
+  check "node no-stop teardown left the Caddyfile BYTE-IDENTICAL to the pre-teardown snapshot" \
+    cmp -s "$TD/cf-before-nostop" "$CF"
+  check "node no-stop teardown says it RESTORED the pre-teardown Caddyfile" \
+    grep -q 'RESTORED the pre-teardown Caddyfile' "$TD/td-nostop.out"
+  check "node no-stop teardown left the same slots RUNNING, matching the restored route" \
+    [ "$(td_slots_up warm)" = "$WARM_UP_PRE3" ]
+  check "node no-stop teardown KEPT the release tree" [ -d "$TD/sites/warm/releases/w3" ]
+  check "node no-stop teardown KEPT both slot env files" \
+    sh -c "[ -f '$SENV/warm__a.env' ] && [ -f '$SENV/warm__b.env' ]"
+  check "node no-stop teardown does NOT claim the route is still live (the disarm SUCCEEDED here)" \
+    sh -c "! grep -q 'STILL LIVE' '$TD/td-nostop.out'"
+  check "node no-stop teardown left NO Caddyfile backup litter behind" \
+    sh -c "! ls '$CF'.bak.* >/dev/null 2>&1"
 
   # -------------------------------------------------------------------------
   # THE FLEET BUILD ADMISSION GATE — one box, one build (D95/D104), node side.
@@ -2588,6 +3190,7 @@ disarm_caddy_node_route() {
 # and `systemctl start barkpark-site@<slug>__<slot>` can put it back in service.
 teardown_failed_node() { # <detail>
   local detail="$1" line
+  [ -n "${CF_SNAPSHOT:-}" ] && rm -f "$CF_SNAPSHOT"
   log "TEARDOWN FAILED — $detail"
   printf -v line 'TEARDOWN_FAILED=%s detail="%s"' "$SITE_SLUG" "$detail"
   [ -n "${BARKPARK_SITE_LOG_FILE:-}" ] && printf '%s\n' "$line" >> "$BARKPARK_SITE_LOG_FILE"
@@ -2595,20 +3198,69 @@ teardown_failed_node() { # <detail>
   exit 25
 }
 
+# Put the Caddyfile back EXACTLY as this teardown found it. Used on one path
+# only: the disarm succeeded and a slot then refused to stop. Re-committing the
+# byte-identical pre-teardown snapshot re-arms this site's route over the slots
+# that are still running, so the box lands in the state the teardown started
+# from and never in "dead route over live slots" (the inverse of the hazard
+# disarm-first exists to close). Runs under with_caddy_lock, like every other
+# Caddyfile read-modify-write here. RETURNS: 0 restored (or already identical,
+# i.e. nothing to undo), 1 the restore itself was rejected.
+restore_caddyfile_snapshot() { # <snapshot>
+  local snap="$1" tmp
+  [ -n "$snap" ] && [ -f "$snap" ] && [ -f "$CADDYFILE" ] || return 1
+  cmp -s "$snap" "$CADDYFILE" && return 0
+  tmp="$(mktemp)"
+  cp -a "$snap" "$tmp" || { rm -f "$tmp"; return 1; }
+  commit_caddyfile "$tmp" || { rm -f "$tmp"; return 1; }
+  log "restored the pre-teardown Caddyfile — /sites/$SITE_SLUG is routed again"
+}
+
 if [ "$MODE" = teardown ]; then
-  stop_slot a; stop_slot b
+  # THE STOP ORDER (D77 residue). The route comes down FIRST, under the Caddyfile
+  # lock, and the slots stop only once it is demonstrably gone. Stopping first was
+  # strictly WORSE than the static engine's equivalent failure: a refused disarm
+  # left an ARMED route over two STOPPED slots, i.e. a public 502 on a live route,
+  # where the static engine keeps serving real bytes through its reverted config.
+  #
+  # This is NOT a two-line swap, because disarm-first carries the INVERSE hazard:
+  # a route already removed and a slot that then refuses to stop is a DEAD route
+  # over a LIVE process. So the pre-disarm Caddyfile is snapshotted before the
+  # first write and RESTORED if a stop does not take. The invariant both arms
+  # hold: no post-teardown state has an armed route over stopped slots, and none
+  # has a dead route over running slots.
+  CF_SNAPSHOT=""
+  if [ -f "$CADDYFILE" ]; then
+    CF_SNAPSHOT="$(mktemp)"
+    cp -a "$CADDYFILE" "$CF_SNAPSHOT" 2>/dev/null || CF_SNAPSHOT=""
+  fi
   # TWO different failures, and they are NOT the same claim (see the static engine's
   # twin). 2 = the disarm ran and the route demonstrably survived it. 1 =
   # with_caddy_lock's own guard fired, so nothing ever read the Caddyfile and the
   # route's state is UNKNOWN to this run. Both keep the tree and both slot env
-  # files; only one of them is a measurement.
+  # files AND both slots RUNNING; only one of them is a measurement.
   disarm_rc=0
   with_caddy_lock disarm_caddy_node_route || disarm_rc=$?
   if [ "$disarm_rc" = 1 ]; then
-    teardown_failed_node "the caddy /sites/$SITE_SLUG route was NEVER CHECKED — the shared Caddyfile lock could not be taken, so whether this site is still routed is UNKNOWN to this run. Both slots are stopped; the release tree at $ROOT and both slot env files are kept, so a re-run of --teardown (or \`systemctl start barkpark-site@${SITE_SLUG}__a\`) can finish or undo the job"
+    teardown_failed_node "the caddy /sites/$SITE_SLUG route was NEVER CHECKED — the shared Caddyfile lock could not be taken, so whether this site is still routed is UNKNOWN to this run. Nothing was stopped: BOTH SLOTS ARE STILL RUNNING (this engine stops a slot only after the route is demonstrably down), so if that route is still armed it keeps serving real bytes rather than a 502. The release tree at $ROOT and both slot env files are kept; re-run --teardown once the lock is free"
   elif [ "$disarm_rc" != 0 ]; then
-    teardown_failed_node "the caddy /sites/$SITE_SLUG route is STILL LIVE — this run tried to remove it, the change was rejected, and the Caddyfile was reverted to the serving config. Both slots are stopped, so that route now answers 502 until you either re-run --teardown (after fixing the Caddyfile) or \`systemctl start barkpark-site@${SITE_SLUG}__a\`; the release tree at $ROOT and both slot env files are kept for exactly that"
+    teardown_failed_node "the caddy /sites/$SITE_SLUG route is STILL LIVE — this run tried to remove it, the change was rejected, and the Caddyfile was reverted to the serving config. BOTH SLOTS ARE STILL RUNNING, so that route keeps serving this site's real bytes instead of answering 502; fix the Caddyfile and re-run --teardown (the release tree at $ROOT and both slot env files are kept for exactly that)"
   fi
+  # The route is down and this run measured it. NOW the slots.
+  stop_slot a; stop_slot b
+  # THE INVERSE HAZARD, measured rather than assumed: systemctl can report success
+  # and leave a unit up (a stuck ExecStop, a unit that restarts itself). Ask.
+  still_up=""
+  slot_running a && still_up="a"
+  slot_running b && still_up="${still_up:+$still_up and }b"
+  if [ -n "$still_up" ]; then
+    # teardown_failed_node removes $CF_SNAPSHOT on its way out, on every arm.
+    if with_caddy_lock restore_caddyfile_snapshot "$CF_SNAPSHOT"; then
+      teardown_failed_node "slot(s) $still_up would NOT stop — the caddy /sites/$SITE_SLUG route came down first, so this run RESTORED the pre-teardown Caddyfile: the route is armed again over the slot(s) that are still running, which serves real bytes instead of stranding a dead route over a live process. Nothing was deleted (the release tree at $ROOT and both slot env files are kept); fix the slot unit and re-run --teardown"
+    fi
+    teardown_failed_node "slot(s) $still_up would NOT stop AND the caddy /sites/$SITE_SLUG route could not be put back — the disarm succeeded, the restore was rejected, so this site is now UNROUTED with slot(s) $still_up still running. Nothing was deleted (the release tree at $ROOT and both slot env files are kept); stop the slot unit(s) by hand (\`systemctl stop barkpark-site@${SITE_SLUG}__<slot>\`) and re-run --teardown"
+  fi
+  [ -n "$CF_SNAPSHOT" ] && rm -f "$CF_SNAPSHOT"
   rm -f "$(slot_env a)" "$(slot_env b)" 2>/dev/null || true
   if [ -d "$ROOT" ]; then
     rm -rf "$ROOT" && log "TORE DOWN — stopped slots + removed release tree $ROOT"
@@ -2855,6 +3507,10 @@ if [ "$SKIP_BUILD" = 0 ]; then
     log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
   [ -n "$STAGE_ASIDE" ] && rm -rf "$STAGE_ASIDE"
+  # The release is staged AS OF NOW — stamp it, because its own mtime says when
+  # the BUILDER last wrote .next/standalone (cp -a preserves source timestamps)
+  # and RETIRE must not sort on the builder's clock.
+  stamp_release_staged "$RELEASES" "$BUILD_ID"
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
   log "STAGE: standalone + .next/static + public -> releases/$BUILD_ID/ ($staged_size)"
   emit STAGE ok "standalone(+static+public) -> releases/$BUILD_ID ($staged_size)"

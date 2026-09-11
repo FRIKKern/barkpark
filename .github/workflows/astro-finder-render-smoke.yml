@@ -1,0 +1,192 @@
+name: astro-finder-render-smoke
+
+# The eye on the Astro flagship's finder island (task-3b60cf7c4fc6bd04).
+#
+# WHAT WAS MISSING. The astro-search starter had two gates over its finder and
+# neither could OPEN it:
+#   · templates/astro-search-starter/scripts/parity-check.mjs compares query
+#     RESULT SETS off the HTTP route — it never loads a page.
+#   · astro-search-finder-test.yml runs React-free `node --test` contract specs
+#     and says so in its own header: "Dep-free: no npm ci, no browser."
+# So a CLIENT RENDER CRASH shipped green: the blank-on-keystroke bug
+# (task-9e95a835863d6363) served perfect results into an island that threw the
+# moment a visitor typed. This job builds the site, serves it, opens it in
+# headless chromium, and types.
+#
+# WHY THERE IS NO `on.*.paths:` KEY HERE, AND A JOB-LEVEL `if:` INSTEAD.
+# A workflow-level path filter makes the whole workflow NOT RUN on an unmatched
+# diff. A check that does not run reports no status at all, which is a different
+# thing from a green — and it is invisible to anyone reading the PR's check list
+# for "did the render gate look at this?". With the filter at the JOB level the
+# workflow always starts, the `surface` job always answers, and the smoke job's
+# skip is a VISIBLE, named decision carrying the file list it read. The
+# `render-smoke` check therefore appears on every PR, saying either "ran" or
+# "this diff does not touch the finder surface", never nothing.
+#
+# ADVISORY, NOT REQUIRED. `.github/required-checks.json` holds the required set
+# (Cloud gate / Console gate / Elixir gate / PR references an active task) and
+# this PR does not touch it. A red here reds the PR page and cannot block a
+# merge until a human registers it in branch protection.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: astro-finder-render-smoke-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  # Never cancel main; collapse superseded PR runs.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  surface:
+    name: Does this diff touch the Astro finder surface?
+    runs-on: ubuntu-latest
+    outputs:
+      touched: ${{ steps.decide.outputs.touched }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The full history a three-dot diff against the base needs. A shallow
+          # clone makes `merge-base` unresolvable and the decision below would
+          # silently degrade to "everything changed".
+          fetch-depth: 0
+
+      - name: Decide
+        id: decide
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$BASE_SHA" ]; then
+            # PR: everything this branch changed relative to where it forked.
+            # `fetch-depth: 0` above is what makes the merge-base resolvable.
+            files=$(git diff --name-only "$BASE_SHA...HEAD")
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            files=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")
+          else
+            # workflow_dispatch, or a first push with no `before`: run it.
+            files=""
+          fi
+
+          # The SURFACE. Every path whose change can break what the island
+          # renders: the template's own source and build config, the harness,
+          # and this workflow. `vendor/*.tgz` is in on purpose — the finder's
+          # @barkpark/react PortableDoc renders the document pane, and a
+          # re-vendored tarball is a client-code change wearing a binary's face.
+          pattern='^templates/astro-search-starter/(src/|scripts/|public/|astro\.config\.mjs|package(-lock)?\.json|tsconfig\.json|vendor/)|^\.github/workflows/astro-finder-render-smoke\.yml$'
+
+          if [ -z "$files" ]; then
+            echo "no base to diff against — running the smoke"
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "changed files considered:"
+          echo "$files" | sed 's/^/  /'
+
+          # grep -c through a pipe returns grep's code, not the pipeline's, and
+          # `set -o pipefail` would turn a legitimate no-match into a job
+          # failure. Capture first, test second.
+          hits=$(printf '%s\n' "$files" | grep -E "$pattern" || true)
+          if [ -n "$hits" ]; then
+            echo "finder surface touched:"
+            echo "$hits" | sed 's/^/  /'
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no Astro finder surface path in this diff — the smoke is skipped, deliberately"
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # D377/D378: an aggregator that concludes success having dispatched
+      # nothing must SAY SO on a surface an API can read. A `::notice::` from a
+      # succeeding job is the one thing that reaches the annotations endpoint.
+      - name: Announce a skip
+        if: steps.decide.outputs.touched != 'true'
+        run: echo "::notice title=astro-finder-render-smoke::SKIPPED — this diff touches no Astro finder surface path. Nothing was rendered."
+
+  render-smoke:
+    name: Finder island renders (headless chromium)
+    needs: surface
+    if: needs.surface.outputs.touched == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22: the template's own `engines` field says ">=22.12.0", and Astro 7
+      # refuses below it.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install the template
+        working-directory: templates/astro-search-starter
+        # `npm ci` and not `npm install`: the lockfile is committed and the two
+        # @barkpark/* dependencies are committed tarballs under vendor/, so this
+        # resolves without reaching npm for them and cannot drift the lockfile.
+        run: npm ci
+
+      # Same cache path and shape js-tests.yml already uses for its browser
+      # proofs, keyed on the version pinned in the next step rather than on a
+      # lockfile — this job installs playwright OUTSIDE any package.json (see
+      # below), so the pin IS the dependency declaration.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-1.59.1
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      # Playwright is installed GLOBALLY, deliberately. templates/astro-search-
+      # starter/package.json is the file a user copies to start their own search
+      # site; a browser-automation devDependency in it would hand every one of
+      # them a ~100MB download in order to gate a defect in THIS repo. The
+      # harness resolves playwright over BP_PLAYWRIGHT → js/node_modules →
+      # bare specifier → the global root, so a global install is a supported
+      # route and nothing in the template's tree changes.
+      - name: Install Playwright + chromium
+        run: |
+          set -eu
+          npm install --global playwright@1.59.1
+          npx playwright install --with-deps chromium
+          # The global root is NOT a fixed path under actions/setup-node (it
+          # moves with the toolcache). Ask npm where it put the package instead
+          # of hardcoding a directory that is right on one runner image.
+          echo "BP_PLAYWRIGHT=$(npm root -g)/playwright" >> "$GITHUB_ENV"
+
+      - name: Render smoke
+        working-directory: templates/astro-search-starter
+        # Exit 1 = the finder is broken (the finding). Exit 2 = the harness
+        # could not measure (no chromium, build failed, port taken) — also a
+        # red, because a gate that cannot run must never read as a pass.
+        run: node scripts/render-smoke.mjs
+
+      # The counter-control, in the same job and on the same tree: the
+      # instrument this smoke was added BECAUSE OF must still be green. It runs
+      # against the smoke's own stub corpus (no live instance, no credentials),
+      # which is the honest version of the claim — parity-check's live-corpus
+      # run is a deploy-time instrument, not a PR gate.
+      - name: Query-parity control (same tree, stub corpus)
+        working-directory: templates/astro-search-starter
+        run: |
+          set -eu
+          node scripts/smoke-stub-api.mjs --port 4320 &
+          stub=$!
+          # A bare sleep is honest here: there is nothing to poll that is
+          # cheaper than the poll, and parity-check's own first request would
+          # otherwise race the listener.
+          sleep 2
+          node scripts/parity-check.mjs --base http://127.0.0.1:4320 \
+            --dataset smoke --type entry --write /tmp/parity-baseline.json
+          node scripts/parity-check.mjs --base http://127.0.0.1:4320 \
+            --dataset smoke --type entry --compare /tmp/parity-baseline.json
+          kill "$stub" 2>/dev/null || true
+
+      # The other counter-control: the React-free seed-shape specs. Run through
+      # the floor runner, never bare `node --test` — a bare run whose glob
+      # matches nothing prints "# tests 0" and exits 0.
+      - name: Seed-shape control
+        working-directory: templates/astro-search-starter
+        run: node ../../scripts/node-test-floor.mjs --floor 5 'src/**/*.test.ts'

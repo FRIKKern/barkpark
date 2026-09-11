@@ -93,6 +93,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   def list_topic(dataset, _ws_id), do: "documents:#{dataset}"
 
+  @doc """
+  THE CONSUMER-SIDE TENANT FENCE for the GLOBAL document stream
+  (task-be3b3aa6da5df3a2, instance 6).
+
+  `list_topic/2` above already prefers the workspace-keyed topic
+  `documents:ws:<id>:<dataset>` whenever a workspace is in context — but the
+  fallback clause, and every consumer that joins `documents:<dataset>` directly
+  (`ChatLive.subscribe_hand_tasks/1`), ride the GLOBAL topic, which
+  `Content.Broadcast` fires UNCONDITIONALLY for every tenant while the
+  workspace-keyed twin is conditional on `doc.workspace_id`.
+
+  THE TOPIC STRING IS THE BROADCASTER'S TO CHANGE; THE FILTER IS OURS. The
+  payload already carries `:workspace_id` (`content/broadcast.ex` stamps it on
+  both mutation messages), so a consumer can fence itself without any change to
+  the producer — which is why this is a predicate here rather than a new topic
+  there.
+
+  Fail-closed in the direction that matters, permissive only for the SHARED
+  layer, mirroring `Content.Scope.scope_to_workspace_or_global/3`:
+
+    * a message stamped with ANOTHER workspace  -> refused
+    * a message stamped with OUR workspace      -> admitted
+    * a message with NO workspace (shared layer)-> admitted to any tenant
+    * an UNRESOLVED consumer (`ws_id` nil)      -> shared layer ONLY
+  """
+  @spec own_tenant?(map(), binary() | nil) :: boolean()
+  def own_tenant?(msg, ws_id) when is_map(msg) do
+    case Map.get(msg, :workspace_id) do
+      nil -> true
+      ^ws_id when is_binary(ws_id) -> true
+      _ -> false
+    end
+  end
+
   @doc false
   def ensure_presence_subscription(socket) do
     if connected?(socket) do
@@ -393,6 +427,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     schema = socket.assigns[:editor_schema]
     type = socket.assigns[:editor_type]
 
+    # Storage shape BEFORE the write and before the buffer merge below: the
+    # browser posts `doc[featuredPublications][0]` rows as an index-keyed map
+    # and a nested image as its JSON string (Gyldendal friction 65/66). The
+    # save path coerces its own copy; the buffer must see the same shape or
+    # the next render walks a map where it expects a list.
+    params = Barkpark.Content.Forms.coerce_params(params, schema)
+
+    # Denormalised image metadata (Gyldendal parity E1.7): a freshly picked
+    # asset arrives as {url, assetId, alt, focal…}; the site needs width /
+    # height / lqip on the stored value. Filled from the asset, never
+    # overwriting what is already there, never raising into the save.
+    params =
+      Barkpark.Media.ImageMetadata.backfill_params(
+        params,
+        schema,
+        socket.assigns.dataset,
+        ScopeHelpers.scope_opts(socket)
+      )
+
     if doc && type do
       case Content.upsert_draft(
              doc,
@@ -403,7 +456,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
              hook_opts(socket)
            ) do
         {:ok, saved_doc, errs} ->
-          new_title = Map.get(params, "title", doc.title)
+          # The persisted title, not the posted one: a titleless type's column
+          # is derived on write (Gyldendal parity E1.8), and the desk row must
+          # show what the store holds.
+          new_title = saved_doc.title || Map.get(params, "title", doc.title)
 
           panes =
             PaneBuilder.update_title(
@@ -419,6 +475,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             editor_form: Map.merge(socket.assigns[:editor_form] || %{}, params),
             save_status: "Saved",
             validation_errors: errs,
+            validation_warnings: validation_warnings(schema, new_title, saved_doc.content),
             cross_violations: compute_cross_violations(schema, params)
           )
           |> maybe_refresh_content_preview()
@@ -534,7 +591,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
         # ── the four NON-WALL rejection shapes (ae-nonwall-rejection-render) ──
         #
-        # Wave-11's census (charter D83a) proved these are the only real
+        # Wave-11's census (authoring-excellence charter D83a) proved these are the only real
         # `{:error, reason}` shapes beyond the wall tuples that reach here. Each
         # one degraded to the content-free "Action failed", which tells an author
         # nothing about a situation every one of them can be recovered from.
@@ -1579,7 +1636,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   end
 
   @doc false
-  defdelegate paper_stream_items(blocks, dataset, scope), to: Paper
+  defdelegate paper_stream_items(blocks, dataset, scope, paper_id \\ nil), to: Paper
+
+  @doc false
+  defdelegate paper_doc_id(paper), to: Paper
 
   @doc false
   defdelegate paper_stream_block_id(block, index), to: Paper
@@ -1623,6 +1683,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   def compute_cross_violations(schema, form) do
     Barkpark.Content.CrossValidator.violations(schema, form)
   end
+
+  @doc """
+  Warning-level findings for the open document against the schema the Studio
+  resolved (Gyldendal parity E1.6). `%{}` without a schema.
+  """
+  def validation_warnings(nil, _title, _content), do: %{}
+
+  def validation_warnings(schema, title, content),
+    do: Barkpark.Content.Validation.check(content, title, schema).warnings
 
   @doc false
   def resolve_nav_group(_current, _old, nil), do: nil

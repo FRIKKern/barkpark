@@ -8,6 +8,8 @@ lib/barkpark/media/blobstore/s3.ex	put_file
 lib/barkpark/media/blobstore/s3.ex	warm_cache
 lib/barkpark/media/delivery/search.ex	run_tags_facet_sql
 lib/barkpark/media/image_backend/magick.ex	run_bounded
+lib/barkpark/media/image_metadata.ex	maybe_lqip
+lib/barkpark/media/renditions.ex	delete_for_file
 lib/barkpark/media/renditions.ex	generate
 lib/barkpark/plugins/bulldocs.ex	register_schemas
 lib/barkpark/plugins/frt.ex	load_schema!
@@ -34,6 +36,7 @@ lib/barkpark/release/secrets.ex	write_env
 lib/barkpark/repo.ex	set_local_statement_timeout!
 lib/barkpark/self_update/runner.ex	bounded_preflight
 lib/barkpark/sites/deploy_runner.ex	bounded_cmd
+lib/barkpark/sites/deploy_runner.ex	drop_staged_prebuilt
 lib/barkpark/sites/deploy_runner.ex	ensure_run_state_dir
 lib/barkpark/sites/deploy_runner.ex	entry_mtime
 lib/barkpark/sites/deploy_runner.ex	evict_build_log
@@ -42,6 +45,7 @@ lib/barkpark/sites/deploy_runner.ex	fold_served_file
 lib/barkpark/sites/deploy_runner.ex	fold_status_file
 lib/barkpark/sites/deploy_runner.ex	foreign_build_in_flight?
 lib/barkpark/sites/deploy_runner.ex	fresh_run_files
+lib/barkpark/sites/deploy_runner.ex	lock_triple_status
 lib/barkpark/sites/deploy_runner.ex	log_stat
 lib/barkpark/sites/deploy_runner.ex	prune_build_logs
 lib/barkpark/sites/deploy_runner.ex	prune_orphan_run_files
@@ -50,6 +54,7 @@ lib/barkpark/sites/deploy_runner.ex	prune_terminal_records
 lib/barkpark/sites/deploy_runner.ex	read_log_tail
 lib/barkpark/sites/deploy_runner.ex	read_manifest
 lib/barkpark/sites/deploy_runner.ex	read_terminal_record
+lib/barkpark/sites/deploy_runner.ex	seed_prebuilt_log
 lib/barkpark/sites/deploy_runner.ex	sweep_path
 lib/barkpark/sites/deploy_runner.ex	tombstone
 lib/barkpark/sites/deploy_runner.ex	unlink_env
@@ -74,6 +79,13 @@ lib/barkpark/studio_chat.ex	delete_session_attachments
 lib/barkpark/studio_chat.ex	read_attachment
 lib/barkpark/studio_chat.ex	store_attachment
 lib/barkpark/studio_chat/probe.ex	run
+lib/barkpark/studio_chat/provider/claude.ex	cleanup_mcp
+lib/barkpark/studio_chat/provider/claude.ex	cleanup_mcp_file
+lib/barkpark/studio_chat/provider/claude.ex	cleanup_stderr
+lib/barkpark/studio_chat/provider/claude.ex	init
+lib/barkpark/studio_chat/provider/claude.ex	read_stderr_tail
+lib/barkpark/studio_chat/provider/claude.ex	rewrite_mcp_config
+lib/barkpark/studio_chat/provider/claude.ex	write_mcp_config
 lib/barkpark/studio_chat/runtime/codex/readiness.ex	version
 lib/barkpark/studio_chat/titles.ex	run
 lib/barkpark/tasks/queue_gate.ex	fetch
@@ -122,10 +134,3 @@ lib/barkpark_web/controllers/workspace_controller.ex	with_spilled_body
 lib/barkpark_web/layouts.ex	paper_stylesheet
 lib/barkpark_web/live/studio/chat_live.ex	consume_attachments
 lib/barkpark_web/plugs/idempotency.ex	replay
-lib/barkpark_web/studio/claude_chat.ex	cleanup_mcp
-lib/barkpark_web/studio/claude_chat.ex	cleanup_mcp_file
-lib/barkpark_web/studio/claude_chat.ex	cleanup_stderr
-lib/barkpark_web/studio/claude_chat.ex	init
-lib/barkpark_web/studio/claude_chat.ex	read_stderr_tail
-lib/barkpark_web/studio/claude_chat.ex	rewrite_mcp_config
-lib/barkpark_web/studio/claude_chat.ex	write_mcp_config

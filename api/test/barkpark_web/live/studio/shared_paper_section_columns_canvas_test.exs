@@ -4,6 +4,36 @@ defmodule BarkparkWeb.Studio.SharedPaperSectionColumnsCanvasTest do
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
+  test "explicit-null Card media stays a contextual boundary at root and inside containers" do
+    card = %{
+      "id" => "null-media",
+      "type" => "card",
+      "slots" => %{"media" => [%{"type" => nil, "src" => "/media/cover.jpg"}]}
+    }
+
+    refute PaperCanvas.canvas?(card)
+    assert PaperCanvas.partition_runs([card]) == [{:block, card}]
+
+    for media <- [
+          %{"src" => "/media/cover.jpg"},
+          %{"type" => "image", "src" => "/media/cover.jpg"}
+        ] do
+      assert PaperCanvas.canvas?(put_in(card, ["slots", "media"], [media]))
+    end
+
+    paragraph = %{"id" => "neighbor", "type" => "paragraph", "content" => []}
+
+    for blocks <- [
+          [card, paragraph],
+          [%{"id" => "section", "type" => "section", "blocks" => [card, paragraph]}],
+          [%{"id" => "grid", "type" => "columns", "columns" => [[card, paragraph]]}]
+        ] do
+      runs = Paper.canvas_echo_runs("paper", blocks)
+      assert Enum.any?(runs, &Enum.any?(&1.blocks, fn block -> block["id"] == "neighbor" end))
+      refute Enum.any?(runs, &Enum.any?(&1.blocks, fn block -> block["id"] == "null-media" end))
+    end
+  end
+
   test "echoes projected Section children in a stable namespace without mutating source" do
     section = %{
       "id" => "section",

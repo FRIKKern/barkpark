@@ -116,6 +116,32 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
     end
   end
 
+  # era-bl-allowed-auth-methods: set the org-wide allow-list of sign-in methods.
+  # Checkboxes, so an UNCHECKED box simply does not appear in the params — see
+  # `methods_param/1` for why "none checked" must clear to NULL and never [].
+  @impl true
+  def handle_event("set_allowed_auth_methods", %{"org" => org_id} = params, socket) do
+    case Tenancy.set_organization_allowed_auth_methods(org_id, methods_param(params["methods"])) do
+      {:ok, _org} ->
+        {:noreply, socket |> put_flash(:info, "Allowed sign-in methods updated.") |> load()}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "could not update the allowed sign-in methods")}
+    end
+  end
+
+  # THE TRAP, named: no box checked must mean NULL — "this org expresses no
+  # opinion, every door open, zero tax" — and NEVER []. They are different
+  # policies. [] is an allow-list that permits NOTHING, and because
+  # `Tenancy.org_allowed_auth_methods_for_user/1` INTERSECTS the governing
+  # policies, an [] org locks every one of its members out of every door while
+  # the page still renders like a working feature. Phoenix omits unchecked
+  # boxes entirely, so the absent key and the empty list BOTH arrive here on a
+  # clear and both must map to nil.
+  defp methods_param(nil), do: nil
+  defp methods_param([]), do: nil
+  defp methods_param(methods) when is_list(methods), do: methods
+
   # "" / nil → nil (clear the bound). A positive integer string → {:ok, n}.
   # Anything else (0, negative, non-numeric) → :error, surfaced as a flash.
   defp parse_policy_seconds(nil), do: {:ok, nil}
@@ -135,6 +161,11 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
 
   defp policy_label(nil), do: "no limit"
   defp policy_label(seconds) when is_integer(seconds), do: "#{seconds}s"
+
+  # NULL renders as the zero-tax default, not as an empty list.
+  defp methods_label(nil), do: "every method"
+  defp methods_label([]), do: "none — every member is locked out"
+  defp methods_label(methods) when is_list(methods), do: Enum.join(methods, ", ")
 
   defp load(socket) do
     orgs = Enum.map(Tenancy.list_organizations(), &org_status/1)
@@ -242,6 +273,20 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
               max {policy_label(o.org.session_absolute_lifetime_seconds)}
             </span>
           </div>
+
+          <div class="org-admin-status-group" data-panel="allowed-auth-methods">
+            <span class="org-admin-status-label">Sign-in methods</span>
+            <span
+              class={"badge #{if o.org.allowed_auth_methods, do: "badge-active", else: "badge-muted"}"}
+              data-allowed-auth-methods={
+                if o.org.allowed_auth_methods,
+                  do: Enum.join(o.org.allowed_auth_methods, ","),
+                  else: ""
+              }
+            >
+              {methods_label(o.org.allowed_auth_methods)}
+            </span>
+          </div>
         </div>
 
         <div class="org-admin-actions">
@@ -307,6 +352,38 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
           <p class="text-sm" style="width: 100%; margin: 0; color: var(--fg-muted);">
             Blank = no limit. Governed users are logged out once a session sits idle past the
             idle timeout, or reaches the absolute lifetime — strictest across a user's orgs wins.
+          </p>
+        </form>
+
+        <form
+          phx-submit="set_allowed_auth_methods"
+          data-allowed-auth-methods-form={o.org.slug}
+          class="org-admin-policy-form"
+          style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-top: 12px;"
+        >
+          <input type="hidden" name="org" value={o.org.id} />
+          <label
+            :for={m <- Barkpark.Tenancy.Organization.auth_methods()}
+            class="text-sm"
+            style="display: flex; gap: 6px; align-items: center;"
+          >
+            <input
+              type="checkbox"
+              name="methods[]"
+              value={m}
+              checked={m in (o.org.allowed_auth_methods || [])}
+              data-auth-method={m}
+            />
+            {m}
+          </label>
+          <button type="submit" class="btn btn-sm" data-save-allowed-auth-methods={o.org.slug}>
+            Save sign-in methods
+          </button>
+          <p class="text-sm" style="width: 100%; margin: 0; color: var(--fg-muted);">
+            Nothing checked = no policy: every method stays open. Checking some makes the list
+            exhaustive — a member signing in with anything else is refused. SSO-only is
+            <code>sso</code> alone; <code>social</code> (consumer Google/GitHub/Microsoft) is a
+            SEPARATE door from enterprise <code>sso</code>. Strictest across a user's orgs wins.
           </p>
         </form>
 

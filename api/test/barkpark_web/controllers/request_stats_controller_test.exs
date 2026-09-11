@@ -193,5 +193,45 @@ defmodule BarkparkWeb.RequestStatsControllerTest do
       %{count: 0, classes: classes} = RequestStats.stats(name)
       assert classes == %{}
     end
+
+    # The `lv_connected` blindness the moduledoc names, driven through the REAL
+    # endpoint instead of asserted in prose. `use Phoenix.Endpoint` emits
+    # `plug :socket_dispatch` inside its own quote (phoenix/lib/phoenix/endpoint.ex
+    # — the plug is declared BEFORE any app-declared plug, so it runs first) and
+    # `do_socket_dispatch/2` HALTS the pipeline, so `plug Plug.Telemetry`
+    # (endpoint.ex) never runs and registers no before_send: no stop event, no
+    # sample, on ANY socket path.
+    #
+    # Every path below answers a real HTTP status through the transport (400 /
+    # 200 / 403), so this is not "the request 404'd and nothing happened" — the
+    # endpoint DID serve each one. The 403 on /socket/websocket is the
+    # `check_origin` refusal the moduledoc calls out by name: a handshake-403
+    # storm is structurally invisible to this meter.
+    #
+    # THE CONTROL is in the same test: one ordinary routed request after the
+    # four socket dispatches, which lands exactly one `api` sample. Without it a
+    # green here would be indistinguishable from a meter that was never live.
+    test "EVERY socket path emits ZERO samples — socket_dispatch halts before Plug.Telemetry",
+         %{conn: conn, name: name} do
+      # The four sockets declared on BarkparkWeb.Endpoint.
+      statuses =
+        for path <- ["/live/websocket", "/live/longpoll", "/socket/websocket", "/quiz/websocket"] do
+          scoped_conn() |> get(path) |> Map.fetch!(:status)
+        end
+
+      # Each dispatch produced a real response — the endpoint answered.
+      assert statuses == [400, 200, 403, 400]
+
+      # …and the meter saw none of them.
+      assert %{count: 0, classes: %{}, p95_ms: nil, err_5xx_per_s: nil} = RequestStats.stats(name)
+
+      # CONTROL: the same meter, still attached, still counting.
+      conn
+      |> put_req_header("accept", "application/json")
+      |> get("/v1/capabilities")
+      |> json_response(200)
+
+      assert %{count: 1, classes: %{api: %{count: 1}}} = RequestStats.stats(name)
+    end
   end
 end

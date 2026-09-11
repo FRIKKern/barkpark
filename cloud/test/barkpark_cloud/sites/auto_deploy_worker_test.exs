@@ -843,4 +843,116 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
       assert oban[:shutdown_grace_period] >= :timer.seconds(30)
     end
   end
+
+  describe "a re-queue that FAILS is never reported as a deferral (dr-bl-deferral-requeue-failure-untested)" do
+    # THE BRANCH THAT DECIDES WHETHER A PUBLISH IS LOST, finally reachable.
+    #
+    # A box-busy 409 settles a row `deferred` and PROMISES a re-queued rebuild.
+    # The promise is ONE Oban insert. Both defer paths already report `{:error,
+    # _}` when that insert fails — and until this seam existed neither arm could
+    # be made to fire: under `Oban testing: :manual` an insert ALWAYS succeeds,
+    # so `AutoDeployWorker.enqueue/2` could not be induced to fail from a test at
+    # all. `Process.put(:auto_deploy_enqueue, fun/2)` is that induction, and it
+    # is the CALLING process's dictionary, so `async: true` stays sound.
+    #
+    # The stub MESSAGES ITSELF rather than only returning: a seam that is never
+    # reached would leave both tests green off a `Deploy.run/1` that failed for
+    # some unrelated reason. `assert_received` is what says the arm under test is
+    # the arm that ran.
+
+    # PATH A — `Sites.Deploy.defer/3`, reaching Oban through `requeue_rebuild/2`.
+    # `sites_deploy_test.exs` already covers this arm through the NARROWER
+    # `:site_deploy_requeue` seam, which stubs out `AutoDeployWorker.enqueue`
+    # entirely; this one lets the REAL call travel and fails it at the insert, so
+    # the two hops between `defer/3` and Oban are inside the proof rather than
+    # replaced by it.
+    test "path A (Deploy.defer): a failing AutoDeployWorker.enqueue settles the row FAILED, not deferred" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+      program_busy_box(site)
+
+      me = self()
+
+      Process.put(:auto_deploy_enqueue, fn site_id, schedule_in ->
+        send(me, {:requeue_attempt, site_id, schedule_in})
+        {:error, :oban_unavailable}
+      end)
+
+      # The CALLER reports the failure — this is `defer/3`'s return value.
+      assert {:error, {:deferral_requeue_failed, :oban_unavailable}} = Deploy.run(d.id)
+
+      # …and it really was the re-queue that was asked and refused, at the real
+      # round-1 window rather than some unrelated insert.
+      site_id = site.id
+      assert_received {:requeue_attempt, ^site_id, 60}
+
+      # THE ROW, not merely the return: a lost publish is a FAILURE, and it says
+      # so in the sentence `DeployLedger.classify/2` reads.
+      row = Registry.get_deployment(d.id)
+      assert row.status == "failed"
+      assert row.failure_reason =~ "could NOT be re-queued"
+      assert row.failure_reason =~ "publish again to retry"
+
+      # No promise was made, and none is pretended.
+      assert pending_jobs(site.id) == []
+    end
+
+    # PATH B — `defer_behind_running_build/2`, where the CONTROL PLANE (not the
+    # box) refuses the second build. This arm MINTS NO ROW on purpose: the
+    # active-deployment index refused one, and the build in flight is a real
+    # build that must not be relabelled. So the criterion's "the row carries the
+    # text" cannot transfer here — there is no row to carry it. What must hold
+    # instead is that the job reports an Oban error (so Oban retries it) and that
+    # NOTHING recorded a deferral: no trailing job, no relabelled row, and no
+    # coalesced-attempt bump, which lives in the success arm.
+    test "path B (defer_behind_running_build): a failing enqueue is an Oban error, never {:ok, :deferred}" do
+      {bp, site} = setup_site()
+
+      {:ok, in_flight} = Deploy.enqueue(site, bp, true, "content-auto")
+      {:ok, in_flight} = Registry.claim_deployment(in_flight.id, "worker-1")
+      assert in_flight.status == "building"
+      assert Registry.get_deployment(in_flight.id).coalesced_attempts == 0
+
+      me = self()
+
+      Process.put(:auto_deploy_enqueue, fn site_id, schedule_in ->
+        send(me, {:requeue_attempt, site_id, schedule_in})
+        {:error, :oban_unavailable}
+      end)
+
+      # NOT `{:ok, :deferred}`: the promise could not be made, so the job fails
+      # and Oban retries it inside `max_attempts`.
+      assert {:error, :oban_unavailable} =
+               perform_job(AutoDeployWorker, %{"site_id" => site.id})
+
+      site_id = site.id
+      assert_received {:requeue_attempt, ^site_id, _window}
+
+      # The real build in flight is untouched — this path never relabels it…
+      refreshed = Registry.get_deployment(in_flight.id)
+      assert refreshed.status == "building"
+
+      # …and the deferral's OWN record — the coalesced-attempt bump — did not
+      # happen, because no deferral occurred.
+      assert refreshed.coalesced_attempts == 0
+
+      # Nothing was queued: the trailing rebuild this path exists to promise
+      # does not exist.
+      assert pending_jobs(site.id) == []
+    end
+
+    # THE SEAM IS INERT IN PRODUCTION, as a source fact: nothing outside
+    # `test/` writes the key, so the default arm is the only one a released
+    # node can take. (Process dictionaries also start empty on every spawned
+    # process, which is why this is structural rather than a convention.)
+    test "the enqueue seam is written by no production module" do
+      lib = Path.wildcard("lib/**/*.ex")
+      writers = Enum.filter(lib, &(File.read!(&1) =~ "Process.put(:auto_deploy_enqueue"))
+      assert writers == []
+
+      # And with no override in this process the real insert runs.
+      refute Process.get(:auto_deploy_enqueue)
+      assert {:ok, %Oban.Job{}} = AutoDeployWorker.enqueue(Ecto.UUID.generate())
+    end
+  end
 end

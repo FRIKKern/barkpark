@@ -60,6 +60,46 @@ defmodule Barkpark.Plugins.BulldocsPatchVerbsManifestTest do
     #   * a guard list   — `when kind in ["patch-block", "replace-block"]`
     source = File.read!("lib/barkpark/content/papers/block_ops.ex")
 
+    dispatched = dispatch_verbs(source)
+
+    # Floor: an open scan that matches NOTHING must not silently pass.
+    assert length(dispatched) >= 6,
+           "the dispatch scan found #{inspect(dispatched)} — it stopped matching " <>
+             "BlockOps' clause shapes, so this test is no longer checking anything"
+
+    assert dispatched == Enum.sort(@verbs),
+           "BlockOps dispatches #{inspect(dispatched)} but this test pins #{inspect(Enum.sort(@verbs))} — " <>
+             "reconcile, and update the manifest summary in the same change."
+  end
+
+  test "the open scan discovers new dispatch verbs but ignores internal operation labels" do
+    source = ~S'''
+    defmodule Example do
+      # %{"op" => "comment-only"}
+      defp dispatch(%{"op" => "future-verb"}), do: %{"op" => "canvas-run"}
+      defp dispatch(%{"op" => kind}) when kind in ["another-verb", "third-verb"], do: :ok
+    end
+    '''
+
+    assert dispatch_verbs(source) == ~w(another-verb future-verb third-verb)
+  end
+
+  defp dispatch_verbs(source) do
+    # Only clause heads declare accepted operations. Bodies may construct
+    # internal validation contexts, which are not public dispatch verbs.
+    {_, heads} =
+      source
+      |> Code.string_to_quoted!()
+      |> Macro.prewalk([], fn
+        {definition, _, [head, _body]} = node, heads when definition in [:def, :defp] ->
+          {node, [Macro.to_string(head) | heads]}
+
+        node, heads ->
+          {node, heads}
+      end)
+
+    source = Enum.join(heads, "\n")
+
     literal_verbs =
       ~r/"op" => "([a-z][a-z-]*)"/
       |> Regex.scan(source)
@@ -73,16 +113,6 @@ defmodule Barkpark.Plugins.BulldocsPatchVerbsManifestTest do
         ~r/"([a-z][a-z-]*)"/ |> Regex.scan(list) |> Enum.map(&List.last/1)
       end)
 
-    dispatched = (literal_verbs ++ guarded_verbs) |> Enum.uniq() |> Enum.sort()
-
-    # Floor: an open scan that matches NOTHING would make the comparison a
-    # comparison of two empty-ish lists rather than a real check.
-    assert length(dispatched) >= 6,
-           "the dispatch scan found #{inspect(dispatched)} — it stopped matching " <>
-             "BlockOps' clause shapes, so this test is no longer checking anything"
-
-    assert dispatched == Enum.sort(@verbs),
-           "BlockOps dispatches #{inspect(dispatched)} but this test pins #{inspect(Enum.sort(@verbs))} — " <>
-             "reconcile, and update the manifest summary in the same change."
+    (literal_verbs ++ guarded_verbs) |> Enum.uniq() |> Enum.sort()
   end
 end

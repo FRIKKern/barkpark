@@ -72,6 +72,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   alias Barkpark.Content
   alias Barkpark.Content.{Errors, Warnings}
+  alias Barkpark.Content.Papers.MixedWriteGuard
   alias Barkpark.PortableDoc.Bpml.UnprintableError
   alias Barkpark.Tenancy
 
@@ -736,6 +737,19 @@ defmodule BarkparkWeb.BulldocsIngestController do
       %{
         "slug" => slug,
         "blocks" => blocks,
+        # The caller's own title (task-4b8770c64ccac487). This whitelist used
+        # to carry no "title", so `BlockOps.paper_title/2`'s `content["title"]`
+        # branch was UNREACHABLE from HTTP: a body carrying a top-level title
+        # got the ordinary 200 receipt and stored the first heading's text
+        # instead — honoured and discarded were byte-identical on the wire.
+        # The sibling dry-run `/papers/validate` reads the key (it walls a ref
+        # built with `title: merged["title"]`), so the two doors disagreed
+        # about one field of one body; the JS SDK's `Paper#toJSON` documents
+        # and emits it, and the BPML grammar spells it `<paper title="…">`.
+        # Honouring is the parity-preserving ruling and adds no new semantics:
+        # the derivation ALREADY prefers an explicit title over the heading.
+        # Absent/blank → nil → the heading (then the slug) still wins.
+        "title" => params["title"],
         "style" => params["style"] || "article",
         "source_doc" => params["source_doc"],
         "event_type" => params["event_type"],
@@ -769,6 +783,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
           ok: true,
           slug: paper.doc_id,
           rev: to_string(get_in(paper.content, ["rev"])),
+          # ADDITIVE (task-4b8770c64ccac487) — the EFFECTIVE stored title, so a
+          # producer can tell from the receipt which title it actually
+          # published under: the one it sent, or the derived heading/slug. A
+          # dropped or overridden title is no longer indistinguishable from an
+          # honoured one.
+          title: paper.title,
           liveview_path: "/papers/#{paper.doc_id}",
           # ADDITIVE (P4) — the canonical scoped reader URL when the paper's
           # tenancy resolves; liveview_path stays byte-identical forever
@@ -861,10 +881,34 @@ defmodule BarkparkWeb.BulldocsIngestController do
         # the legacy HTML leg is walled identically.
         "tags" => params["tags"],
         "description" => params["description"],
-        "dedup_bypass" => params["dedup_bypass"]
+        "dedup_bypass" => params["dedup_bypass"],
+        # THE EXPLICIT DEMOTION (pe-w2-verbatim-html-overwrite-hazard, remedy
+        # 2 of the refusal below). Opt-in, never a default: it drops the row's
+        # canonical blocks so this verbatim HTML becomes the real source
+        # instead of a cache the reader overwrites. Absent → nil → the attr is
+        # normalized away and every existing producer is byte-unchanged.
+        "clear_blocks" => params["clear_blocks"]
       }
       |> put_scope(conn, params)
 
+    # THE MIXED-WRITE REFUSAL (pe-w2-verbatim-html-overwrite-hazard, RULED
+    # 2026-09-07: reject at the ingest boundary; blocks stay the source of
+    # truth). A verbatim body_html onto a paper that still carries canonical
+    # blocks used to answer 200 while the bytes were derived-cache-only —
+    # `Papers.reader_source/3` classifies that row `{:stale, rendered}`, serves
+    # the blocks and lets `refresh_html_cache/3` rewrite the cache, so the
+    # producer's hand-authored HTML vanished on the next read with no signal.
+    # It runs BEFORE `Warnings.reset()` so a refused ingest carries no advisory
+    # queue, and the message NAMES both honest paths (see MixedWriteGuard) —
+    # an error that only declines makes the caller guess, and the guess that
+    # appears to work is the destructive one.
+    case MixedWriteGuard.check(attrs) do
+      :ok -> ingest_html_write(conn, attrs)
+      {:refuse, error} -> conn |> put_status(:unprocessable_entity) |> json(%{error: error})
+    end
+  end
+
+  defp ingest_html_write(conn, attrs) do
     # Advisory channel — see the blocks head (authoring-excellence D36/D42).
     Warnings.reset()
 

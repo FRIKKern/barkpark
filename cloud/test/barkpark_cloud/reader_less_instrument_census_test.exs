@@ -496,13 +496,25 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
 
   Two further limits, stated rather than discovered later:
 
-    * DISPATCH. `.github/workflows/cloud.yml` dispatches this suite on
-      `cloud/**` and the paths declared in `scripts/cloud-path-escape-check.sh`.
-      `internal/`, `web/`, `js/` and `api/` are NOT declared there, so a commit
-      that adds a reader ONLY in those trees does not re-run this census; the
-      ROT is caught on the next cloud-touching commit, not on the commit that
-      caused it. That declaration lives in a file dr-w26-s4-census-scores-a-caller-less-producer owns, so it is filed
-      (`dr-w26-followup-reader-corpus-dispatch`), not smuggled into this slice.
+    * DISPATCH — STILL OPEN, and now routed rather than merely filed.
+      `.github/workflows/cloud.yml` dispatches this suite on `cloud/**` and the
+      paths declared in `scripts/cloud-path-escape-check.sh`. `internal/` IS
+      declared there; `web/`, `js/` and `api/` are NOT, so a commit that adds a
+      reader ONLY in those three trees does not re-run this census, and the ROT
+      is caught on the next cloud-touching commit rather than on the commit that
+      caused it. The direction is safe — a LATE red, never a false green.
+
+      THE OBVIOUS FIX WAS MEASURED AND REFUSED, which is why this paragraph is
+      still here. Declaring `api/**`, `web/**` and `js/**` was built and costed
+      on this tree: over 60 days / 5008 commits on main it moves dispatch from
+      1641 to 3874 commits, i.e. 33% -> 77% of all commits running the
+      Postgres-backed Cloud `test` job, with `api/**` alone accounting for 1438.
+      Paying that to re-run ONE census file is the wrong shape: the census does
+      not need the whole Cloud suite dispatched, it needs ITSELF dispatched. So
+      the remedy moved to a job-level path condition on this test plus a
+      census-only tier in the ratchet, re-filed for the gates lane 2026-09-10.
+      The number is recorded here so the next reader does not re-derive it and
+      reach the same dead end.
     * FAILING OPEN. An instrument nobody registered is invisible here, exactly
       as `deploy_signal_audience_census_test.exs` admits of its own registry.
       Nothing syntactic closes that hole. `queued_seconds` WAS the honest
@@ -685,13 +697,50 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
         "REGISTERED AT BIRTH, in the same commit as the key (dr-w34-s1-coverage-envelope-window-and-sites) — the doctrine `coverage_cohorts` established one wave earlier. The count it names shipped ANONYMOUS for two waves: `coverage_cohorts/2` already SELECTED site_id and discarded it in the merge, so the never-covered split could be built by environment and never by site. A naming that shipped without a reader would be the same defect one level down — a list nobody can see is not an improvement on a number nobody can act on.",
       disposition: :has_reader,
       stay: nil
+    },
+    %{
+      key: "claim_leg",
+      what:
+        "WHICH population holds a hostname another tenant just asked for — the leg `Registry.claim_leg/2` returns (`admin_credential`, `recent_usage_sample`, `active_subscription`, `agent_reporting`, `active_job`, `within_grace`), i.e. whether a refusal means `somebody is paying for that name` or `a job is mid-flight, wait a minute`",
+      surface:
+        "POST /v1/barkparks/:id/domain, on the 409 body beside `error: \"taken\"` — merged in by persist_and_enqueue_domain/4 from Registry.provisioning_fqdn_claim_disclosure/2. Its SECOND surface is the one it has always had: the Logger.info line in provisioning_fqdn_taken?/2, which carries the fuller sentence",
+      audience:
+        "the team admin who typed the hostname, in their own browser — POST /v1/barkparks/:id/domain is require_current_team_admin, so the population is the asking team\'s own owners and admins, the only people who can act on the refusal. NOT the holder, who is routinely a different team and is told nothing: the operator sentence that names the holding row stays in the log, and the wire carries a coarse category plus a caller-safe remedy. The console is NOT yet in that audience — cloud/priv/static/app.js attachDomainFailureCopy answers every `taken` with the fixed string `That domain is already in use.` and drops the body\'s other keys, so today the leg reaches a human through the raw API response only",
+      reason:
+        "REGISTERED AT BIRTH, in the same commit as the key (dr-w26-bl-claim-leg-refusal-reaches-no-human), by the doctrine `coverage_cohorts` established. The defect this key closes is the one this whole register exists to name: `claim_leg/2` wrote a careful per-leg sentence and the only path it had to a human was a server log with no UI, no alert and no CLI surface, while the API rendered six distinct refusals as one word. Registering it at birth is also the honest way to record what did NOT ship — the console render — as a register row rather than as a promise in a comment.",
+      disposition: :stay,
+      stay:
+        {:slice, ["dr-w26-bl-console-relays-the-claim-leg"],
+         "READER-LESS ACROSS THE FIVE ROOTS, and the register says exactly where the gap is rather than dressing the API response up as readership. The key is emitted and a person CAN see it (curl, or any direct API client), but no code path in internal/, cloud/priv/static, web, js or api names it: the console\'s attachDomainFailureCopy branches on `error` and returns a fixed sentence for `taken`, so it neither decodes nor renders the leg, and there is no Go cloudclient verb for POST /v1/barkparks/:id/domain at all. The named closer relays the leg in the console the way the already_attached arm one line above it already relays `detail`. That edit is in cloud/priv/static/app.js, outside this slice\'s fence, which is why it is a stay and not a co-merged half."}
     }
   ]
 
   # THE ANTI-VACUITY FLOOR. A deleted register row would otherwise be a silent
   # green — zero instruments examined is zero reader-less instruments found.
-  # Lowered only in the same commit as the instrument that went away.
-  @register_floor 9
+  # Moved only in the same commit as the instrument that arrived or went away.
+  #
+  # RE-DERIVED 2026-09-10 (dr-w27-bl-register-floor-lags-the-register). It stood
+  # at 9 while `@register` carried 10 rows, so the floor had a row of SLACK:
+  # deleting any single row — including `queued_seconds`, the row the wave
+  # before it had just added — still satisfied `>=` and the register shrank
+  # silently. That is precisely the deletion the floor exists to refuse.
+  #
+  # HAND-TYPED, and compared with `==`, for two reasons:
+  #
+  #   * `@register_floor length(@register)` would read the expected value off
+  #     the very thing it guards. That assertion can never fail, in either
+  #     direction, and a guard that cannot lose measures nothing.
+  #   * `>=` is how the slack got here in the first place: it is silent when the
+  #     register GROWS, so the floor lags every addition until somebody notices.
+  #     Under `==` an addition reds too, and the co-edit is forced at the moment
+  #     the row lands rather than a wave later. (Same lesson as the payload
+  #     census's `@go_tag_pinned`, which shipped one tag of slack under `>=`.)
+  #
+  # RAISED 10 -> 11 in the commit that added `claim_leg`
+  # (dr-w26-bl-claim-leg-refusal-reaches-no-human). That co-edit is the `==`
+  # comparison doing the work it was tightened for: under `>=` the addition
+  # would have been silent and the floor would have lagged by one again.
+  @register_floor 11
 
   # The corpus floor, per root. A `find` that silently returns nothing (a moved
   # tree, a refused-dirs change that eats a whole root) reports every instrument
@@ -749,9 +798,12 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
   # ---------------------------------------------------------------------------
 
   test "every row carries a REQUIRED reason and names both its SURFACE and its AUDIENCE" do
-    assert length(@register) >= @register_floor,
-           "the register shrank to #{length(@register)} rows (floor #{@register_floor}). " <>
-             "Lower the floor in the same commit as the instrument that went away, or restore the row."
+    assert length(@register) == @register_floor,
+           "the register carries #{length(@register)} rows, the PIN is EXACTLY " <>
+             "#{@register_floor}. FEWER: an instrument left the register — restore the row, or " <>
+             "lower the pin in the same commit as the instrument that went away. MORE: an " <>
+             "instrument arrived — raise the pin in the same commit, so the floor can never " <>
+             "again lag the register it guards."
 
     for row <- @register do
       for field <- [:key, :what, :surface, :audience, :reason] do

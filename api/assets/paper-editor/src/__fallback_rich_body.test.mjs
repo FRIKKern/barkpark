@@ -72,6 +72,33 @@ function inlineText(nodes) {
 }
 
 try {
+  const heading = document.createElement("bp-paper-editor");
+  heading.block = { id: "empty-heading", type: "heading", level: 1, text: "" };
+  document.body.appendChild(heading);
+  try {
+    assert.equal(heading.querySelector("[data-placeholder]")?.getAttribute("data-placeholder"), "Heading 1");
+    heading.block = { id: "empty-heading", type: "paragraph", content: [] };
+    assert.equal(heading.querySelector("[data-placeholder]")?.getAttribute("data-placeholder"),
+      "Start typing, or press / for blocks…", "a paragraph must not receive the heading formatter function");
+  } finally {
+    heading.remove();
+  }
+  for (const [type, hint] of Object.entries({
+    ingress: "Write the introduction…", pullquote: "Write the highlighted quote…",
+    blockquote: "Write the quote…",
+  })) {
+    const empty = document.createElement("bp-paper-editor");
+    empty.block = { id: `empty-${type}`, type, content: [] };
+    document.body.appendChild(empty);
+    try {
+      assert.equal(empty.querySelector("[data-placeholder]")?.getAttribute("data-placeholder"), hint,
+        `${type}: fallback names the same role as the canvas`);
+      assert.equal(empty._editor.state.doc.textContent, "");
+      assert.equal(empty.flushPendingChanges(), false);
+    } finally {
+      empty.remove();
+    }
+  }
   for (const type of ["callout", "ingress", "pullquote", "blockquote", "list"]) {
     const block = {
       id: `fallback-${type}`,

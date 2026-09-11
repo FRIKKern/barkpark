@@ -833,6 +833,12 @@ if [ "\$mode" = "flaky-page-2" ] && grep -q 'after=' <<<"\$*" && [ ! -f "$TMP/pa
   echo "HTTP 504: We couldn't respond to your request in time. (https://api.github.com/graphql)" >&2
   exit 1
 fi
+# THE SPLIT READ (2026-09-08): the population query no longer carries the status
+# rollup — it is fetched per CONFLICTING row by a SECOND graphql query selecting
+# `pullRequest(number:)`. The stub must tell the two apart, or it answers a
+# rollup request with a population page and the script correctly refuses it
+# ("did not come back as a pull request payload").
+if grep -q 'pullRequest(number:' <<<"\$*"; then cat "$TMP/gql-rollup.json"; exit 0; fi
 if grep -q 'after=' <<<"\$*"; then cat "$TMP/gql-page2.json"; else cat "$TMP/gql-page1.json"; fi
 STUBEOF
   chmod +x "$STUB/gh"
@@ -840,6 +846,19 @@ STUBEOF
 
 # A raw GraphQL page in GitHub's own shape — NOT the normalised shape — so the
 # normaliser is exercised rather than bypassed.
+# The per-PR rollup, in GitHub's own shape so the rollup normaliser is exercised
+# rather than bypassed — the same discipline gql_page follows for the population.
+gql_rollup() { # <path>
+  local roll="[]" c
+  for c in "${CTX[@]}"; do
+    roll="$(jq -c --arg n "$c" --arg t "$OLD" \
+      '. + [{__typename:"CheckRun", name:$n, conclusion:"SUCCESS", completedAt:$t, status:"COMPLETED"}]' <<<"$roll")"
+  done
+  jq -n --argjson roll "$roll" \
+    '{data:{repository:{pullRequest:{number:9101,
+        commits:{nodes:[{commit:{statusCheckRollup:{contexts:{nodes:$roll}}}}]}}}}}' > "$1"
+}
+
 gql_page() { # <path> <number> <hasNext> <cursor>
   local roll="[]" c
   for c in "${CTX[@]}"; do
@@ -856,6 +875,7 @@ gql_page() { # <path> <number> <hasNext> <cursor>
 }
 gql_page "$TMP/gql-page1.json" 9101 true  "CURSOR_ONE"
 gql_page "$TMP/gql-page2.json" 9102 false null
+gql_rollup "$TMP/gql-rollup.json"
 
 STUB_PATH="$STUB:/usr/bin:/bin:/usr/sbin:/sbin"
 run_stubbed() { # <mode> [extra args…]
@@ -877,9 +897,14 @@ grep -q "#9101" <<<"$out" && grep -q "#9102" <<<"$out" \
 grep -q "after=CURSOR_ONE" "$STUB_LOG" \
   && ok "(p-1) …and page 2 was asked for with the cursor page 1 named" \
   || bad "(p-1) no request carried the endCursor from page 1: $(cat "$STUB_LOG")"
-[ "$(grep -c graphql "$STUB_LOG")" = "2" ] \
-  && ok "(p-1) …in exactly 2 page requests, so paging is not re-reading the whole population per row" \
-  || bad "(p-1) expected 2 graphql page requests, saw $(grep -c graphql "$STUB_LOG")"
+# COUNT THE POPULATION PAGES, NOT EVERY GRAPHQL CALL. Since the split read a run
+# also issues one `pullRequest(number:)` rollup request per CONFLICTING row, so a
+# bare `grep -c graphql` conflates two different reads and would grow with the
+# conflicted set. What this arm is about is that PAGING does not re-read the
+# population per row, so it counts population queries specifically.
+[ "$(grep -c 'pullRequests(states:' "$STUB_LOG")" = "2" ] \
+  && ok "(p-1) …in exactly 2 population page requests, so paging is not re-reading the whole population per row" \
+  || bad "(p-1) expected 2 population page requests, saw $(grep -c 'pullRequests(states:' "$STUB_LOG")"
 
 # (p-2) A page that 504s ONCE is retried AS A PAGE — page 1 is not re-fetched.
 out="$(run_stubbed flaky-page-2)"; rc=$?
@@ -977,7 +1002,9 @@ nodes=[{"number":30000+i,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","hea
 page={"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":False,"endCursor":None},"nodes":nodes}}}}
 open(sys.argv[1],"w").write(json.dumps(page))
 PY
-printf '#!/usr/bin/env bash\ncase "$*" in *graphql*) cat "%s" ;; *) echo "{}" ;; esac\n' "$LPAGE" > "$LSTUB/bin/gh"; chmod +x "$LSTUB/bin/gh"
+q_rollup "$LSTUB/rollup.json" 15631
+printf '#!/usr/bin/env bash\ncase "$*" in *"pullRequest(number:"*) cat "%s" ;; *graphql*) cat "%s" ;; *) echo "{}" ;; esac\n' \
+  "$LSTUB/rollup.json" "$LPAGE" > "$LSTUB/bin/gh"; chmod +x "$LSTUB/bin/gh"
 lpage_bytes="$(wc -c < "$LPAGE" | tr -d ' ')"
 [ "${lpage_bytes:-0}" -ge "$SCALE_MIN" ] \
   && ok "the generated live page is ${lpage_bytes}B ≥ ${SCALE_MIN}B" \
@@ -1027,9 +1054,24 @@ q_page() { # <path> <isDraft: true|false>  — one CONFLICTING PR with a full st
     > "$path"
 }
 
+q_rollup() { # <path> <number> — the per-PR rollup the split read fetches separately
+  local path="$1" num="$2" ctxjson="[]" c
+  for c in "${CTX[@]}"; do
+    ctxjson="$(jq -c --arg n "$c" --arg t "$OLD" \
+      '. + [{__typename:"CheckRun", name:$n, status:"COMPLETED", conclusion:"SUCCESS", completedAt:$t}]' <<<"$ctxjson")"
+  done
+  jq -n --argjson num "$num" --argjson ctx "$ctxjson" '
+    { data: { repository: { pullRequest: { number: $num,
+        commits: { nodes: [ { commit: { statusCheckRollup: { contexts: { nodes: $ctx } } } } ] } } } } }' > "$path"
+}
+
 q_run() { # <page json path> — the live read, with only `gh` stubbed
   local page="$1"
-  printf '#!/usr/bin/env bash\ncase "$*" in *graphql*) cat "%s" ;; *) echo "[]" ;; esac\n' "$page" > "$QSTUB/bin/gh"
+  # SPLIT READ: a rollup request selects `pullRequest(number:` and must NOT be
+  # answered with a population page — the script refuses that, correctly.
+  q_rollup "$QSTUB/rollup.json" 15631
+  printf '#!/usr/bin/env bash\ncase "$*" in *"pullRequest(number:"*) cat "%s" ;; *graphql*) cat "%s" ;; *) echo "[]" ;; esac\n' \
+    "$QSTUB/rollup.json" "$page" > "$QSTUB/bin/gh"
   chmod +x "$QSTUB/bin/gh"
   env PATH="$QSTUB/bin:/usr/bin:/bin:/usr/sbin:/sbin" GH_TOKEN=stub \
     bash "$WATCH" --commits "$COMMITS" --spec "$SPEC" --repo FRIKKern/barkpark 2>&1
@@ -1064,6 +1106,234 @@ grep -qE "NOVEL +1 — #15631" <<<"$out" \
 grep -q "DRAFT, not counted: #15631" <<<"$out" \
   && bad "(q2) a non-draft row was printed on the draft line" \
   || ok "(q2) …and it is NOT on the draft line"
+
+# ═══ (r) the HTTP STATUS is the diagnostic, not the first line of the body ═══
+section "(r) a non-JSON error page is reported with its STATUS, not as \`<html>\`"
+
+# THE DEFECT THIS OWNS (task-e47f86df96d7d3ce). All three transport diagnostics
+# in stale-verdict-watch.sh read `head -1` of a capture that is `gh` output with
+# `2>&1`. `gh api` copies the RESPONSE BODY to stdout and writes its own summary
+# to stderr, so under a GitHub resolver timeout — an HTML error page — the first
+# line is the literal `<html>` and the status, the single fact that separates
+# the token from the rate limit from a server-side timeout, is thrown away.
+#
+# THESE PROBES DRIVE THE LIVE PAGE LOOP. No --fixture: `gh` is stubbed on PATH
+# and the script takes exactly the path a scheduled run takes, because a proof
+# on the --fixture path would say nothing about the code that actually failed.
+ERRSTUB="$TMP/errstub"; mkdir -p "$ERRSTUB"
+
+mk_err_stub() { # <http code> <gh summary message> <reason phrase>
+  cat > "$ERRSTUB/gh" <<STUBEOF
+#!/usr/bin/env bash
+# The commits read must still work: these probes are about the PR read.
+case "\$1 \${2:-}" in
+  "api repos/"*) cat "$COMMITS"; exit 0 ;;
+esac
+# gh api's real interleaving: BODY to stdout, its own one-line summary to stderr.
+cat <<'BODY'
+<html>
+<head><title>$1 $3</title></head>
+<body bgcolor="white">
+<center><h1>$1 $3</h1></center>
+<hr><center>GitHub.com</center>
+</body>
+</html>
+BODY
+echo "gh: HTTP $1: $2 (https://api.github.com/graphql)" >&2
+exit 1
+STUBEOF
+  chmod +x "$ERRSTUB/gh"
+}
+
+run_err() { # <code> <message> <reason phrase> [script]
+  local code="$1" msg="$2" phrase="$3" script="${4:-$WATCH}"
+  mk_err_stub "$code" "$msg" "$phrase"
+  env PATH="$ERRSTUB:/usr/bin:/bin:/usr/sbin:/sbin" \
+    SVW_RETRY_SLEEP="0 0 0" SVW_PAGE_SLEEP="0 0 0 0" \
+    bash "$script" --spec "$SPEC" --repo FRIKKern/barkpark --commits "$COMMITS" \
+      --baseline '' --page-size 1 --attempts 2 --page-attempts 2 2>&1
+}
+
+# (r1) A SERVER-SIDE TIMEOUT. The 2026-09-07 case: 30 dependabot PRs created in
+# 13 minutes forced that many uncached mergeability computations into one
+# resolver and it 504'd.
+out="$(run_err 504 "We couldn't respond to your request in time." "Gateway Time-out")"; rc=$?
+grep -q "HTTP 504" <<<"$out" \
+  && ok "(r1) a 504 HTML error page is reported WITH its status" \
+  || bad "(r1) no HTTP 504 anywhere in the output: $out"
+# The exact pre-fix line, anchored: the diagnostic IS the body's first line and
+# nothing else. `: <html>$` alone would also match the digest's own trailing
+# "first line of the body: <html>", which is the part that must SURVIVE.
+grep -qE 'retrying the PAGE in [0-9]+s: <html>$' <<<"$out" \
+  && bad "(r1) \`<html>\` is still the WHOLE diagnostic: $(grep -E 'retrying the PAGE in' <<<"$out" | head -1)" \
+  || ok "(r1) …and \`<html>\` is never the whole diagnostic on its own"
+grep -q "first line of the body: <html>" <<<"$out" \
+  && ok "(r1) …with the old first-line-of-body still printed, so this ADDED and removed nothing" \
+  || bad "(r1) the body's first line was dropped — the digest is quieter than head -1 was: $out"
+
+# (r2) CRITERION 2 — THE REFUSAL IS UNCHANGED. An unreadable population still
+# fails; nothing here bought a better diagnostic with a quieter watch.
+[ "$rc" = "6" ] \
+  && ok "(r2) …and the run STILL exits 6 UNREACHABLE (rc=$rc) — the refusal is unchanged" \
+  || bad "(r2) expected exit 6 on an unreadable population, got $rc: $out"
+grep -q "UNREACHABLE" <<<"$out" \
+  && ok "(r2) …and still says UNREACHABLE" || bad "(r2) no UNREACHABLE sentence: $out"
+grep -q "^ok — no CONFLICTING" <<<"$out" \
+  && bad "(r2) a run that could not read the population printed the clean sentence" \
+  || ok "(r2) …and never prints the clean sentence over a population it never read"
+grep -q "last transport error: HTTP 504" <<<"$out" \
+  && ok "(r2) …and the UNREACHABLE line itself carries the status the workflow's rc=6 text sends the operator to find" \
+  || bad "(r2) the UNREACHABLE sentence carries no status: $(grep UNREACHABLE <<<"$out" | head -1)"
+
+# (r3) THE SECOND EXPLANATION — a secondary rate limit. Same HTML shape, a
+# different status, and the log alone tells them apart.
+out2="$(run_err 403 "You have exceeded a secondary rate limit and have been temporarily blocked." "Forbidden")"; rc2=$?
+grep -q "HTTP 403" <<<"$out2" \
+  && ok "(r3) a 403 rate-limited page is reported as HTTP 403, not as \`<html>\`" \
+  || bad "(r3) no HTTP 403 in the output: $out2"
+[ "$rc2" = "6" ] \
+  && ok "(r3) …and a rate limit is a transport silence (exit 6), not a credential fault" \
+  || bad "(r3) expected exit 6 on a rate-limited read, got $rc2: $out2"
+grep -q "secondary rate limit" <<<"$out2" \
+  && ok "(r3) …and carries gh's own reason, so 'the budget' is readable off the log" \
+  || bad "(r3) gh's summary line was dropped: $out2"
+grep -q "HTTP 504" <<<"$out2" \
+  && bad "(r3) the 504 run's status leaked into the 403 run — the digest is not reading this run's output" \
+  || ok "(r3) …and 504 and 403 are DISTINGUISHABLE from the log alone, with no wall-clock reconstruction"
+
+# (r4) THE THIRD EXPLANATION — the token. Classified as a credential fault (rc
+# 3) rather than a transport silence, and it says which status made it one.
+out3="$(run_err 401 "Bad credentials" "Unauthorized")"; rc3=$?
+[ "$rc3" = "3" ] \
+  && ok "(r4) a 401 page is a CONFIGURATION FAULT (exit 3), not a transport silence" \
+  || bad "(r4) expected exit 3 on a 401, got $rc3: $out3"
+grep -q "HTTP 401" <<<"$out3" \
+  && ok "(r4) …and the status that made it one is printed" || bad "(r4) no HTTP 401 in the output: $out3"
+
+# (r5) THE HAPPY PATH IS UNCHANGED. The same live page loop, a page GitHub
+# answers normally: the verdict is reached and no digest text appears at all.
+gql_page "$TMP/gql-page1.json" 9101 true  "CURSOR_ONE"
+gql_page "$TMP/gql-page2.json" 9102 false null
+gql_rollup "$TMP/gql-rollup.json"
+out4="$(run_stubbed pages)"; rc4=$?
+[ "$rc4" = "1" ] && grep -q "#9101" <<<"$out4" && grep -q "#9102" <<<"$out4" \
+  && ok "(r5) the unchanged happy path still reads both pages and reds at exit 1" \
+  || bad "(r5) the happy path moved: rc=$rc4: $out4"
+grep -qE "no HTTP status in the response|first line of the body" <<<"$out4" \
+  && bad "(r5) a successful read printed a transport digest: $out4" \
+  || ok "(r5) …and prints no transport diagnostic at all, because there was no error to digest"
+
+# (r6) DISARM, MUTATION-PROVEN. Every probe above would pass against a script
+# that printed the status somewhere by accident. This restores the ORIGINAL
+# defect at the two retry diagnostics — `head -1` of the combined capture — and
+# requires (r1)'s assertion to FAIL against it.
+MUTANT="$TMP/mutant-head1.sh"
+sed 's#gh_error_digest "$out"#printf "%s" "$out" | head -1#g' "$WATCH" > "$MUTANT"
+mut_before="$(command grep -c 'gh_error_digest "\$out"' "$WATCH")"
+mut_after="$(command grep -c 'gh_error_digest "\$out"' "$MUTANT")"
+if [ "$mut_before" -ge 2 ] && [ "$mut_after" = "0" ]; then
+  ok "(r6) the mutation APPLIED: $mut_before call site(s) became head -1, 0 remain"
+else
+  bad "(r6) the mutation did not apply ($mut_before → $mut_after) — every disarm below would be vacuous"
+fi
+out5="$(run_err 504 "We couldn't respond to your request in time." "Gateway Time-out" "$MUTANT")"
+grep -qE 'retrying the PAGE in [0-9]+s: <html>$' <<<"$out5" \
+  && ok "(r6) …and against the mutant the retry line reads \`: <html>\` again, so (r1) is a probe and not a decoration" \
+  || bad "(r6) the head -1 mutant did NOT reproduce the defect, so (r1) proves nothing: $out5"
+grep -qE 'retrying the PAGE in [0-9]+s: <html>$' <<<"$out" \
+  && bad "(r6) the real script also prints the bare \`<html>\` retry line" \
+  || ok "(r6) …while the real script never does — both directions"
+
+# ── (r7) A JSON ERROR BODY'S MESSAGE, NOT ITS OPENING BRACE ──────────────────
+# MEASURED ON MAIN 2026-09-08: five consecutive UNREACHABLE runs, and the
+# digest printed `first line of the body: {` for every 403. A JSON body has `{`
+# on line 1 and the message on line 2, so a SECONDARY RATE LIMIT and a
+# PERMISSIONS failure were indistinguishable in the log — which is exactly the
+# discrimination needed to tell whether the retry ladder EARNS the 403 (run
+# 34199179651: one 502 then three 403s in a single ladder) or whether it is
+# upstream and unrelated (run 34199900331: 502 throughout, no 403 at all).
+# Same family as task-e47f86df96d7d3ce: a digest that truncates before the
+# discriminating field cannot settle the question it exists to record.
+#
+# The function is lifted out and probed directly — no stub gh, no network — so
+# these arms test the digest itself rather than a path that happens to reach it.
+( eval "$(awk '/^gh_error_digest\(\) \{/,/^\}$/' "$WATCH")"
+
+  d_rate="$(gh_error_digest 'gh: HTTP 403
+{
+  "message": "You have exceeded a secondary rate limit. Please wait a few minutes before you try again.",
+  "documentation_url": "https://docs.github.com/rest/overview/rate-limits"
+}')"
+  d_perm="$(gh_error_digest 'gh: HTTP 403
+{
+  "message": "Resource not accessible by integration",
+  "documentation_url": "https://docs.github.com/rest"
+}')"
+  d_html="$(gh_error_digest 'HTTP 502
+<html>
+<head><title>502 Bad Gateway</title></head>
+</html>')"
+  d_oneline="$(gh_error_digest 'gh: HTTP 403
+{"message":"You have exceeded a secondary rate limit.","documentation_url":"x"}')"
+  d_nomsg="$(gh_error_digest 'HTTP 500
+{
+  "error": "boom"
+}')"
+
+  case "$d_rate" in
+    *"secondary rate limit"*) echo "  ok   (r7) a JSON 403 names the secondary rate limit instead of printing \`{\`" ;;
+    *) echo "  FAIL (r7) the rate-limit message was not surfaced: $d_rate"; exit 1 ;;
+  esac
+  case "$d_rate" in
+    *"first line of the body: {"*) echo "  FAIL (r7) still printing the opening brace: $d_rate"; exit 1 ;;
+    *) echo "  ok   (r7) …and no longer prints the opening brace as the whole diagnostic" ;;
+  esac
+  # THE DISCRIMINATION ITSELF: the two 403s must not read alike, or the fix
+  # bought a longer sentence and no information.
+  if [ "$d_rate" = "$d_perm" ]; then
+    echo "  FAIL (r7) a rate-limit 403 and a permissions 403 still read identically: $d_rate"; exit 1
+  else
+    echo "  ok   (r7) …and a permissions 403 reads DIFFERENTLY, which is the whole point"
+  fi
+  case "$d_perm" in
+    *"Resource not accessible by integration"*) echo "  ok   (r7) …the permissions 403 names its own cause" ;;
+    *) echo "  FAIL (r7) the permissions message was not surfaced: $d_perm"; exit 1 ;;
+  esac
+  case "$d_oneline" in
+    *"secondary rate limit"*) echo "  ok   (r7) a one-line JSON body works too — gh prints both shapes" ;;
+    *) echo "  FAIL (r7) a one-line JSON body lost its message: $d_oneline"; exit 1 ;;
+  esac
+  # NON-REGRESSION, BOTH DIRECTIONS: HTML still reports its status and first
+  # line, and a JSON body with no message field still falls back.
+  case "$d_html" in
+    *"HTTP 502"*) echo "  ok   (r7) an HTML 502 still reports its status — the fallback is intact" ;;
+    *) echo "  FAIL (r7) the HTML path regressed: $d_html"; exit 1 ;;
+  esac
+  case "$d_nomsg" in
+    *"first line of the body"*) echo "  ok   (r7) a JSON body with NO message field still falls back to the first line" ;;
+    *) echo "  FAIL (r7) the no-message fallback was lost: $d_nomsg"; exit 1 ;;
+  esac ) && PASS=$((PASS+7)) || FAIL=$((FAIL+1))
+
+# (r7b) DISARM. Remove the message extraction and the rate-limit arm must fail —
+# otherwise (r7) is passing on something other than the new code.
+MUT_MSG="$TMP/mutant-nomsg.sh"
+sed 's/if (msg == "" &&/if (0 \&\&/' "$WATCH" > "$MUT_MSG"
+if command grep -q 'if (0 &&' "$MUT_MSG" && ! diff -q "$WATCH" "$MUT_MSG" >/dev/null 2>&1; then
+  ok "(r7b) the mutation APPLIED — the message extraction is disabled in the mutant"
+  ( eval "$(awk '/^gh_error_digest\(\) \{/,/^\}$/' "$MUT_MSG")"
+    d="$(gh_error_digest 'gh: HTTP 403
+{
+  "message": "You have exceeded a secondary rate limit.",
+  "documentation_url": "x"
+}')"
+    case "$d" in
+      *"secondary rate limit"*) echo "  FAIL (r7b) MUTATION SURVIVED: the message appeared without the extraction: $d"; exit 1 ;;
+      *) echo "  ok   (r7b) without the extraction the 403 is back to \`{\` — (r7) measures the new code" ;;
+    esac ) && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+else
+  bad "(r7b) the mutation did not apply — (r7) would prove nothing"
+fi
+
 
 echo "── stale-verdict-watch: $PASS passed, $FAIL failed ──"
 [ "$FAIL" -eq 0 ] || exit 1

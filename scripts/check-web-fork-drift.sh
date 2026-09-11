@@ -78,6 +78,8 @@ INV-6|web|enforced|PR #14006|the Retry-After ceiling is pinned by VALUE — its 
 INV-6|template|enforced|PR #14006|the Retry-After ceiling is pinned by VALUE — its test bounds the constant against a numeric LITERAL, never only against itself
 INV-7|web|enforced|task-2811a42a66c7b649|a TYPE 404 (BarkparkNotFoundError, which only the slug-query leg can raise) lands in the ERROR bucket with a message NAMING the type — never in the absent bucket
 INV-7|template|enforced|task-3771c96a4b554eeb|a TYPE 404 (BarkparkNotFoundError, which only the slug-query leg can raise) lands in the ERROR bucket with a message NAMING the type — never in the absent bucket
+INV-8|web|enforced|task-afcdfd61a067172f|a 429 is RETRYABLE: 429 is in TRANSIENT_STATUS, the rate-limit branch is decided BEFORE the definitive bail, and the hold is read from the envelope BODY as well as the header
+INV-8|template|enforced|task-afcdfd61a067172f|a 429 is RETRYABLE: 429 is in TRANSIENT_STATUS, the rate-limit branch is decided BEFORE the definitive bail, and the hold is read from the envelope BODY as well as the header
 "
 
 # ── INV-1 RATCHET LEDGER ─────────────────────────────────────────────────────
@@ -314,6 +316,29 @@ probe_inv7() {  # <root> <tree>
   return 0
 }
 
+# INV-8: a 429 is a THROTTLE and this pair must both wait it out. Three parts,
+# because two of the three are individually defeatable:
+#   a. 429 is in TRANSIENT_STATUS                      (the visible half)
+#   b. the rate-limit branch precedes the `definitive` bail
+#   c. the hold is read from the envelope BODY, not only the header
+# Part (b) is the load-bearing one and the reason this invariant is not simply
+# "grep for 429". Barkpark's limiters answer with a parseable
+# `{error:{code:"rate_limited",details:{retry_after}}}` envelope, so
+# `errorEnvelope` marks the error `definitive` — and the pre-fix `isTransient`
+# bailed on `definitive` BEFORE it ever consulted TRANSIENT_STATUS. A tree with
+# (a) and without (b) reads as fixed and behaves exactly as it did before.
+# Part (c) keeps the two carriers from silently collapsing to one: a proxy that
+# strips `retry-after` would put both readers back on a guess.
+probe_inv8() {  # <root> <tree>
+  _root="$1"; _f="$(lib_dir "$2")/bp-fetch.ts"
+  has_code_flat "$_root" "$_f" \
+    'TRANSIENT_STATUS = new Set\(\[[^]]*\b429\b' || return 1
+  has_code_flat "$_root" "$_f" \
+    'if \(isRateLimited\(err\)\) return true; if \(err\.definitive\) return false;' || return 1
+  has_code_flat "$_root" "$_f" 'envelopeRetryAfterMs\(detail\)' || return 1
+  return 0
+}
+
 # subject <id> <tree> — the file a finding should NAME.
 subject() {
   case "$1" in
@@ -324,6 +349,7 @@ subject() {
     INV-5) echo "$(lib_dir "$2")/find.ts" ;;
     INV-6) retry_test "$2" ;;
     INV-7) echo "$(lib_dir "$2")/doc-absence.ts" ;;
+    INV-8) echo "$(lib_dir "$2")/bp-fetch.ts" ;;
   esac
 }
 
@@ -336,6 +362,7 @@ run_probe() {  # <root> <id> <tree>
     INV-5) probe_inv5 "$1" "$3" ;;
     INV-6) probe_inv6 "$1" "$3" ;;
     INV-7) probe_inv7 "$1" "$3" ;;
+    INV-8) probe_inv8 "$1" "$3" ;;
     *) return 1 ;;
   esac
 }
@@ -488,6 +515,28 @@ if [ "${1:-}" = "--selftest" ]; then
   expect "INV-7 restored" 0 ""
 
   echo
+  echo "[2d] PLANT INV-8: drop WEB's rate-limit branch, leaving 429 in the SET"
+  echo "     — the mutation that looks fixed and is not: TRANSIENT_STATUS still"
+  echo "       carries 429, but the \`definitive\` bail now runs first and every"
+  echo "       enveloped 429 is hard again."
+  perl -0pi -e 's/^\s*if \(isRateLimited\(err\)\) return true;\n//m' \
+    "$tmp/$WEB_LIB/bp-fetch.ts"
+  mutated "$WEB_LIB/bp-fetch.ts" || true
+  expect "INV-8 web" 1 "FAIL|INV-8|web|$WEB_LIB/bp-fetch.ts"
+  cp "$REPO_ROOT/$WEB_LIB/bp-fetch.ts" "$tmp/$WEB_LIB/bp-fetch.ts"
+  expect "INV-8 restored" 0 ""
+
+  echo
+  echo "[2e] PLANT INV-8 the other way: strip the TEMPLATE's envelope carrier,"
+  echo "     proving the probe is symmetric and that BOTH carriers are pinned"
+  perl -0pi -e 's/^\s*envelopeRetryAfterMs\(detail\) \?\?\n//m' \
+    "$tmp/$TPL_LIB/bp-fetch.ts"
+  mutated "$TPL_LIB/bp-fetch.ts" || true
+  expect "INV-8 template" 1 "FAIL|INV-8|template|$TPL_LIB/bp-fetch.ts"
+  cp "$REPO_ROOT/$TPL_LIB/bp-fetch.ts" "$tmp/$TPL_LIB/bp-fetch.ts"
+  expect "INV-8 restored" 0 ""
+
+  echo
   echo "[3] PLANT INV-1: a NEW unencoded /d/ builder in an unledgered web file"
   printf '\nexport const planted = (t: string, s: string) => `/d/${t}/${s}`;\n' \
     >> "$tmp/$WEB_LIB/mark-href.ts"
@@ -566,7 +615,7 @@ if [ "${1:-}" = "--selftest" ]; then
     echo "SELFTEST FAIL: $fails assertion(s) failed"
     exit 1
   fi
-  echo "SELFTEST PASS: $probes probes; 7 planted violations reported RED and NAMED,"
+  echo "SELFTEST PASS: $probes probes; 9 planted violations reported RED and NAMED,"
   echo "               an exempt file's identical violation stayed green, a paid debt"
   echo "               reported PROMOTABLE (never red), and an empty tree tripped the floor."
   exit 0

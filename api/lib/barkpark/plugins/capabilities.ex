@@ -1028,6 +1028,18 @@ defmodule Barkpark.Plugins.Capabilities do
             "field<op>value where op is = != > >= < <= ^= (starts) $= (ends) *= (contains) (e.g. status=published, slug^=2024-, title*=hello); or 'field in a,b,c' / 'field not in a,b,c'; or 'field is null' / 'field is not null'; or 'field hasStrong tag:min' (weighted-tag strength floor, e.g. tags hasStrong epic:50). Repeatable — every --filter is ANDed (two clauses on one field must use different operators). An unparseable filter is a 400 invalid_filter, never silently ignored.",
             repeatable: true
           ),
+          # Publishing this here is not one venue among several — it IS
+          # the venue. docs/openapi.json's parameter list is DERIVED from
+          # this manifest, so there is no separate spec to regenerate, and
+          # docs/api-v1.md is at 13,987 of a 14,000-byte budget and under a
+          # moratorium. Wording lifted from Content.Query.merge_id_prefix/2,
+          # the single derivation both list doors call, so the manifest and
+          # the code cannot drift into two descriptions of one rule.
+          flag(
+            "id_prefix",
+            "string",
+            "Stable-document-id prefix: exactly filter[_id][startsWith], and a spelling of that already-allowlisted operator rather than new query semantics. LITERAL — % and _ are characters here, not wildcards. Blank, non-string, or colliding with an _id/doc_id filter clause is a 400 invalid_filter NAMING id_prefix; it is never a silent unfiltered 200. Also honoured by GET /api/documents/:type."
+          ),
           flag(
             "fields",
             "string",
@@ -2262,7 +2274,15 @@ defmodule Barkpark.Plugins.Capabilities do
         # admin — the /v1/webhooks route block is pipe_through [:api, :require_admin];
         # a "write" tier offered this to write tokens the server then 403s.
         "admin",
-        args: [arg("url", true, "string", "Delivery URL.")],
+        # `name` is REQUIRED by Webhook.changeset (validate_required([:name, :url])),
+        # so a url-only declaration made the verb IMPOSSIBLE — bp is manifest-driven,
+        # {url} was the only body it could build, and every call 422'd. An ARG, not a
+        # flag: buildBody folds flags into the body for batch writes and cycle.open
+        # only. Locked by internal/cli/webhook_create_required_args_lock_test.go.
+        args: [
+          arg("url", true, "string", "Delivery URL."),
+          arg("name", true, "string", "Subscription name (required by the server).")
+        ],
         writes: true,
         default_output: "minimal"
       ),

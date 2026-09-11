@@ -254,14 +254,14 @@ defmodule BarkparkWeb.Studio.StudioBetaSectionColumnsEditingTest do
 
     render_hook(view, "paper-block-autosave", %{
       "block_id" => ids.outer_section,
-      "title" => "Edited outer section",
+      "title" => "  Edited outer section  ",
       "if_rev" => socket_of(view).assigns.editor_doc.rev,
       "request_id" => title_request
     })
 
     assert_reply(view, %{saved: true, replayed: false, request_id: ^title_request})
     after_title = stored_blocks(doc.doc_id)
-    assert nested_block(after_title, ids.outer_section)["title"] == "Edited outer section"
+    assert nested_block(after_title, ids.outer_section)["title"] == "  Edited outer section  "
     assert_metadata_preserved(after_title)
 
     child_request = Ecto.UUID.generate()
@@ -288,6 +288,7 @@ defmodule BarkparkWeb.Studio.StudioBetaSectionColumnsEditingTest do
 
     assert nested_block(after_child, ids.column_paragraph)["content"] == text("Column prose")
     assert nested_block(after_child, ids.left_paragraph)["content"] == text("Left column")
+    assert nested_block(after_child, ids.outer_section)["title"] == "  Edited outer section  "
     assert_metadata_preserved(after_child)
 
     clear_title_request = Ecto.UUID.generate()
@@ -346,18 +347,13 @@ defmodule BarkparkWeb.Studio.StudioBetaSectionColumnsEditingTest do
     assert has_element?(view, "[data-test-id='paper-columns-editor']")
 
     if is_binary(outer_title) do
-      assert has_element?(view, "#section-title-#{ids.outer_section}[value='#{outer_title}']")
+      assert section_title(view, ids.outer_section) == outer_title
     else
-      assert has_element?(view, "#section-title-#{ids.outer_section}")
-
-      refute has_element?(
-               view,
-               "#section-title-#{ids.outer_section}[value='Edited outer section']"
-             )
+      assert section_title(view, ids.outer_section) == ""
     end
 
-    assert has_element?(view, "#section-title-#{ids.inner_section}[value='Inner section']")
-    assert has_element?(view, "#section-title-#{ids.grid_section}[value='Grid section']")
+    assert section_title(view, ids.inner_section) == "Inner section"
+    assert section_title(view, ids.grid_section) == "Grid section"
 
     for id <- [
           ids.outer_paragraph,
@@ -380,6 +376,13 @@ defmodule BarkparkWeb.Studio.StudioBetaSectionColumnsEditingTest do
              view,
              ".bp-section__cell[style='grid-column:span 2;order:1'] #paper-ed-#{ids.grid_paragraph}"
            )
+  end
+
+  defp section_title(view, id) do
+    dom_id = "section-title-" <> Base.url_encode64(id, padding: false)
+    html = view |> element("##{dom_id}") |> render()
+    tree = LazyHTML.from_fragment(html)
+    LazyHTML.text(LazyHTML.query(tree, "##{dom_id}"))
   end
 
   defp nested_blocks do

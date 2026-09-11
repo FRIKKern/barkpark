@@ -853,7 +853,7 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
            end) == 0
   end
 
-  test "derive/1 on an ADMIN-PERMISSIONED token socket stays at 1.0 q/op — the fix was FREE" do
+  test "derive/1 on an ADMIN-PERMISSIONED token socket is 2.0 q/op — reload + seat" do
     ws = workspace!("w10-cost-admin")
     proj = nil
     {:ok, token} = mint_token(["admin"])
@@ -862,20 +862,36 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
 
     assert Caps.derive(sock) == %{read: true, write: true, admin: true}
 
-    # THE ROW THAT PROVES THE FIX WAS FREE. The seat is read off the row
-    # `load_memberships/2` already holds; `Tenancy.Auth.member?/2` would have
-    # cost a second Repo.one (measured 1.0 → 2.0 q/op) and is forbidden here.
+    # THE ROW THAT PROVES THE arpss-w10 SEAT FIX WAS FREE, AND WHAT IT COSTS
+    # NOW. The seat is still read off the row `load_memberships/2` already holds
+    # — `Tenancy.Auth.member?/2` would have cost an EXTRA Repo.one and is still
+    # forbidden here, which is what keeps this row at 2 and not 3.
+    #
+    # MOVED 1 -> 2 on 2026-09-07 (task-02925b8af783e517, PRINCIPAL FRESHNESS).
+    # The second query is `Caps.fresh_api_token/1`: `derive_from_assigns/1`
+    # reloads the `%ApiToken{}` through `Auth.verify_token/1`'s own liveness
+    # predicate before computing any seat from it, so a token revoked, expired,
+    # disabled or downgraded in the DB denies within one EVENT instead of one
+    # MOUNT. Decomposition: 1 principal reload + 1 membership Repo.one. No grant
+    # load — grants bind to a grantee USER and this socket carries none.
     queries =
       meter("derive/1 — ADMIN-permissioned TOKEN socket", @ops, fn -> Caps.derive(sock) end)
 
-    assert queries == 1 * @ops
+    assert queries == 2 * @ops
   end
 
-  test "admin?/1 cost is 0.0 read-only / 1.0 built-in-role admin / 2.0 custom-role admin" do
+  test "admin?/1 cost is 0.0 read-only / 2.0 built-in-role admin / 3.0 custom-role admin" do
     ws = workspace!("w10-cost-adminfn")
 
-    # (a) read-only token: token_admin?/1 is the FIRST conjunct and
-    #     short-circuits, so the seat is never loaded. 0.0 — UNCHANGED by the fix.
+    # (a) read-only token: `Tenancy.Auth.permits?/2` on the MOUNT-TIME struct is
+    #     the FIRST conjunct and short-circuits, so neither the reload nor the
+    #     seat is ever loaded. 0.0 — UNCHANGED by arpss-w10 AND unchanged by
+    #     principal freshness (2026-09-07), which deliberately left that cheap
+    #     conjunct on the stale struct. Sound because it can only ever DENY MORE
+    #     than the fresh answer: a struct lacking `admin` means the token either
+    #     never had it, or was UPGRADED mid-session — a direction this module has
+    #     never honoured without a remount. Nothing is GRANTED off the stale
+    #     struct; when it says `admin`, the reload below is what decides.
     {:ok, ro} = mint_token(["read"])
     {:ok, _} = TAuth.create_membership(ws.id, ro.id, "admin", "api_token")
     ro_sock = socket(ws, nil, %{api_token: ro})
@@ -886,8 +902,14 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
            end) ==
              0
 
-    # (b) admin perms + BUILT-IN role: 0 → 1 (one membership_role/2 Repo.one;
-    #     role_permits?/3 resolves a built-in name from the compiled-in map).
+    # (b) admin perms + BUILT-IN role: 0 → 2 (one `fresh_api_token/1` reload +
+    #     one membership_role/2 Repo.one; role_permits?/3 resolves a built-in
+    #     name from the compiled-in map, free). MOVED 1 -> 2 on 2026-09-07
+    #     (task-02925b8af783e517): `derive/1`'s `:admin` key and `admin?/1` are
+    #     a FORKED PAIR this module's own docs require to move together, and the
+    #     `forked_pair` axis below asserts they agree cell by cell — so making
+    #     `derive/1` fresh and leaving this arm on mount-time bytes would fork
+    #     them on exactly the axis the fix is about.
     {:ok, builtin} = mint_token(["admin"])
     {:ok, _} = TAuth.create_membership(ws.id, builtin.id, "admin", "api_token")
     builtin_sock = socket(ws, nil, %{api_token: builtin})
@@ -896,10 +918,12 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
     assert meter("admin?/1 — ADMIN token, BUILT-IN role", @ops, fn ->
              Caps.admin?(builtin_sock)
            end) ==
-             1 * @ops
+             2 * @ops
 
-    # (c) admin perms + CUSTOM role: 0 → 2 (membership_role/2, then
-    #     role_permits?/3's role_permissions Repo.all for a non-built-in name).
+    # (c) admin perms + CUSTOM role: 0 → 3 (the `fresh_api_token/1` reload, then
+    #     membership_role/2, then role_permits?/3's role_permissions Repo.all for
+    #     a non-built-in name). MOVED 2 -> 3 on 2026-09-07, same reload, same
+    #     reason as (b).
     ws2 = workspace!("w10-cost-adminfn-custom")
     custom_role!(ws2.id, "tokadmin", ["read", "write", "admin"])
     {:ok, custom} = mint_token(["admin"])
@@ -908,7 +932,7 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
     assert Caps.admin?(custom_sock)
 
     assert meter("admin?/1 — ADMIN token, CUSTOM role", @ops, fn -> Caps.admin?(custom_sock) end) ==
-             2 * @ops
+             3 * @ops
   end
 
   test "PR #12616's state is re-checked and recorded in the @moduledoc" do

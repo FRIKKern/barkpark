@@ -20,7 +20,7 @@ import (
 // sorts — so entries may accrete at the head.
 var usageBuiltins = []string{
 	"agent", "attach", "barkparks", "capabilities", "chat", "cloud", "cmux", "completion", "context", "deploy",
-	"dev", "doctor", "export", "go-live", "help", "instance", "launch", "listen", "login", "logout",
+	"dev", "doctor", "export", "go-live", "help", "instance", "latency", "launch", "listen", "login", "logout",
 	"make", "mcp", "migrate", "onramp", "paper", "provider", "register", "scaffy", "seed", "server",
 	"servers", "setup", "signup", "sites", "style", "subscribe", "task", "tasks", "team", "teams",
 	"tinker", "uninstall", "upgrade", "use", "vercel", "version", "whoami",
@@ -251,6 +251,17 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		out.errf("pagination: --limit <n> · --offset <n> · --all")
 	}
 
+	// The envelope key. Three verbs of this same CLI return their rows under
+	// three DIFFERENT keys (task ready → docs, doc ls → documents, task get →
+	// doc) and no help named any of them, so every parser guessed — and one
+	// keyed on `tasks`/`id` read ZERO rows out of a 310 KB response and printed
+	// a confident EMPTY QUEUE. An empty read and an empty result are
+	// indistinguishable downstream. Registry and drift check:
+	// list_envelope_help.go.
+	for _, line := range listEnvelopeHelpLines(cmd) {
+		out.errf("%s", line)
+	}
+
 	// `--match` is honoured entirely client-side (see tasks_match.go), so the
 	// manifest cannot declare it and the flags block above cannot show it. A
 	// flag nobody can discover is a flag nobody uses — and this one exists
@@ -276,6 +287,37 @@ func usageCommand(out *writer, cmd manifest.Command) {
 	// mutations.ex — which is exactly what was reported (#18). The list and its
 	// derivation live in mutate_shapes.go, guarded against server drift by
 	// TestMutateHelpNamesEveryServerMutationClause.
+	// `--criterion-text-file` is resolved and consumed client-side
+	// (tasks_stamp_criterion_file.go), so the manifest cannot declare it and the
+	// flags block above cannot show it — the same undeclarable shape as `task ls
+	// --match`. Without this block the ONLY documented way to supply the guard
+	// text stays the double-quoted shell argument that executes the criterion's
+	// own backticks.
+	if cmd.ID == taskStampCommandID {
+		// The three outcomes and what each does to `met` come FIRST: the
+		// manifest's own --miss summary is server-owned and says met never
+		// flips without naming the verb that does, which is the whole defect
+		// (tasks_stamp_withdraw_remedy.go).
+		out.errf("")
+		for _, line := range stampOutcomeHelpLines() {
+			out.errf("%s", line)
+		}
+		out.errf("")
+		for _, line := range stampCriterionTextHelpLines() {
+			out.errf("%s", line)
+		}
+	}
+	// `bp task get` documented only its one positional argument — it never
+	// mentioned `-o json` and never described the envelope, so every reader
+	// hand-rolled a path walk against an undocumented shape that actively
+	// teaches the wrong guess. Lines and their guard live in
+	// tasks_get_misread.go, beside the sentinels they describe.
+	if cmd.ID == taskGetCommandID {
+		out.errf("")
+		for _, line := range taskGetEnvelopeHelpLines() {
+			out.errf("%s", line)
+		}
+	}
 	if cmd.ID == docMutateCommandID {
 		out.errf("")
 		for _, line := range mutateShapeLines() {
@@ -425,7 +467,21 @@ func suggestUnknownNoun(out *writer, tree *manifest.Tree, tier, typed string, pr
 			out.errf("run `barkpark login` — or pass `--token <tok>` — with a credential that grants it, then retry.")
 		}, tierHiddenHint(prov), tierHiddenMsg(prov), typed, label, cred)
 	}
-	return usageErrHintf(out, func() { usageSuggestNouns(out, tree, typed) }, nounHint(tree, typed), "unknown command %q", typed)
+	return usageErrHintf(out, func() {
+		usageSuggestNouns(out, tree, typed)
+		// A REFUSAL FROM A CLIENT THAT KNOWS IT IS BEHIND MUST SAY SO
+		// (pds-bl-bp-search-false-negative). `unknown command "search"` is
+		// literally how six independent agents in one wave concluded the verb
+		// did not exist and fell back to grep — dispatch is manifest-driven, so
+		// the server had declared it the whole time and only their bp's copy was
+		// old. staleClientNote reads the already-persisted update-check cache
+		// (no network, no latency, "" whenever staleness is not PROVEN), and it
+		// lives inside this closure, which usageErrHintf runs only on human
+		// output — so -o json/yaml stdout stays byte-identical.
+		if note := staleClientNote(); note != "" {
+			out.errf("%s", note)
+		}
+	}, nounHint(tree, typed), "unknown command %q", typed)
 }
 
 // tierHiddenMsg is the machine-readable refusal for a tier-hidden noun. The

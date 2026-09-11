@@ -109,7 +109,7 @@ the API actually returns for that code.
 | `criteria_unmet` | 409 | `5` | A `done` close over criteria unmet ON THE TASK AS STORED — criteria flipped in the same close do not count. Compound: `criteria_unmet:<i,j>` naming the 0-based indices. | `bp task stamp` each criterion, or close on the record with `--set criteria_override="<why anyway>"`. NOT retryable as sent: the fix is outside the request. |
 | `invalid_lifecycle` | 409 | `5` | The close names a terminal status the transition table disallows (`tasks/close.ex`). Compound: `invalid_lifecycle:<s>`. | Send an allowed status — a different status is a different request, so a verbatim retry never succeeds. |
 | `sentinel_worker_id` | 409 | `5` | The worker id is a placeholder, not an identity — `none`, `null`, `nil`, `-` (`tasks/internal.ex`). Compound: `sentinel_worker_id:<w>`. | Pass the worker id that holds the claim — NOT retryable as sent. |
-| `merge_gated_criterion` | 409 | `5` | A builder `--met` on a criterion the LEAD closes when the PR merges (`tasks/stamp.ex`). Minted BARE, no `:<detail>` suffix. | `--merge-gated` if you are the lead closing the gate, or set `"merge_gate": false` if the match was on its prose. NOT retryable as sent. |
+| `merge_gated_criterion` | 409 | `5` | A builder `--met` on a criterion the LEAD closes on merge (`tasks/stamp.ex`). Minted BARE, no `:<detail>` suffix. | `--merge-gated "<why>"`; bare → `merge_gated_reason_required`, or set `"merge_gate": false` if the match was on its prose. NOT retryable as sent. |
 | `illegal_transition` | 422 | `5` | A lifecycle stage the task cannot make from its current state (`tasks_controller.ex`). Also arrives BARE-STRING as `{"error":"illegal_transition"}` from the cloud router; both bucket to `5`. | `the transition is impossible from this state` — the one member of this family a retry can NEVER satisfy. |
 | `share_expired` | 410 | `4` | Media collection share link expired/gone. | `share expired` — treat as gone. |
 | `rate_limited` | 429 | `7` | Throttled. | `rate limited; retry after <Retry-After>s`. |
@@ -128,7 +128,7 @@ keyed on the resolved output shape, never the verb:
 | `-o` shape | stdout | stderr |
 |---|---|---|
 | `json` / `yaml` | the `{ok:false, error:{code,message,details,hint,request_id}}` envelope — **exactly one document** | silent |
-| `table` / `minimal` | *(empty)* | the human line, `details`, the hint, `code`/`request_id` under `-v` |
+| `table` / `minimal` | *(empty)* | human line, `details`, hint, `  code: <code>`; `request_id` on `-v` |
 
 This holds for EVERY refusal, the publish-wall rows included — even the two
 `bp task create --publish` mints with no server round trip. It is why

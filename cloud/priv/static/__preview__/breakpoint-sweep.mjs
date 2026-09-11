@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  124 scenarios, 24 rendered, 100 in a COMMITTED residue literal.
+//   SCENARIO  125 scenarios, 24 rendered, 101 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -463,8 +463,8 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 120 scenarios · 25 cells over 24 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 96 · 13 families.
+// THE CENSUS THIS RECONCILES AGAINST: 125 scenarios · 25 cells over 24 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 101 · 13 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -605,18 +605,36 @@ export const RESIDUE_FAMILY_REASONS = {
 // breakpoint-sweep.mjs` on this branch, never by adding one — and the family
 // stays at 13 because `hash:#billing` already had seven members.
 //
-// WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527). The old header here read
-// "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed numerals
-// spanning SEVEN lines, and three of the numbers under it were owned by
-// nothing. A COMMENT CANNOT BE DERIVED — it can only be RECOUNTED by an arm
-// that reads these bytes. Every numeral in this block is now named by the arm
-// that reds when it drifts, all in breakpoint-sweep.test.mjs:
-//   * 120 / 25 / 24 / 96 / 13 — "the census reconciles: …", whose TITLE is now
-//     built from `scenarioReport` by template literal rather than typed, so the
-//     printed line has no second copy left to rot.
+// WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527; recut by
+// cch-w48-bl-the-scenario-census-five-numerals-cannot-lose). The old header here
+// read "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed
+// numerals spanning SEVEN lines, and three of the numbers under it were owned
+// by nothing. A COMMENT CANNOT BE DERIVED — it can only be RECOUNTED by an arm
+// that reads these bytes. The wave-47 recut then wrote "Every numeral in this
+// block is now named by the arm that reds when it drifts" over a census five
+// that was named by NOTHING — and those five proved it by rotting: this block
+// and "THE CENSUS THIS RECONCILES AGAINST:" above both drifted from the
+// measured census by five scenarios and five residue entries while this file's
+// OWN `>> scenarios` line printed the true five, and the bare sweep and
+// breakpoint-sweep.test.mjs both exited clean over the gap. An
+// unowned numeral inside the sentence that claims ownership is the whole shape
+// this epic exists to end. So: every LIVE numeral above the HISTORICAL rule
+// below is now recounted, either from `scenarioReport` or from these same
+// committed bytes, by a NAMED arm in breakpoint-sweep.test.mjs:
+//   * 125 / 25 / 24 / 101 / 13 — "the census five in breakpoint-sweep.mjs's
+//     prose are recounted from the derived report", which reads BOTH typed
+//     copies out of the committed bytes (this bullet and "THE CENSUS THIS
+//     RECONCILES AGAINST:" above) and names the drifted numeral by axis and by
+//     site. The census test's own TITLE is built from `scenarioReport` by
+//     template literal rather than typed, so the printed line has no second
+//     copy left to rot.
 //   * 15, and the two ZERO-residue names `hash:#sites` / `hash:#activity` —
 //     "the two ZERO-residue families are named, and 15 families over all
-//     scenarios is not 13".
+//     scenarios is not 13", which owns those numbers as VALUES, plus "the
+//     ownership map's own family numerals are recounted from the literal",
+//     which owns THESE BYTES: the family total this bullet leads with, the
+//     residue-family count it says that total is NOT, and the span the header
+//     arm claims two bullets below — all three recounted from the literal.
 //   * each `// <family> — N` group header below, their SUM against the literal,
 //     and the header COUNT against the family count (the reformat tripwire) —
 //     "every `// <family> — N` header inside SCENARIO_RESIDUE is recounted from
@@ -630,15 +648,35 @@ export const RESIDUE_FAMILY_REASONS = {
 //     in this file and the bare sweep", which reads THESE bytes and reds on a
 //     duplicate landing slot, an out-of-order block, or an ordinal past the
 //     measured census. It cannot recount which fixture landed where — that
-//     stays prose — but a repeat of the 104/79 double-claim now fails by name.
-// THE PRECEDENT THIS EXISTS FOR: the prose here once said 99/74 while the
-// literal below already held 75 — #8849's `sites-on-instance` moved the census
-// and only the TEST literals were updated. A census that two files spell
-// differently is the staleness this file exists to make fatal, and until
-// cch-w47-s4 this file was carrying two of them: `hash:#billing — 3` over four
-// entries, and a `These 9` over ten.
+//     stays prose — but a repeat of the double-claim quoted under HISTORICAL
+//     below now fails by name.
 // STALENESS IS FATAL, NEVER A console.log: an entry naming a scenario that no
-// longer exists, or one that has since gained a cell, exits 2.
+// longer exists, or one that has since gained a cell, exits 2 — and that code
+// is read back out of this file's own `refuse` helper by "the ownership map's
+// `exits N` claim is read from the sweep's refusal helper", so a change of
+// refusal code cannot leave this sentence behind.
+// AND THE COVERAGE CLAIM ITSELF IS COUNTED, NOT ASSERTED. "every numeral in the
+// ownership-map block is owned by a named arm, or sits below the HISTORICAL
+// rule" walks EVERY integer between "WHICH ARM OWNS WHICH NUMERAL" and the
+// SCENARIO_RESIDUE literal's own export line, and reds on any one above that
+// rule which no owning regex consumed — so a new number typed into this block
+// is UNOWNED until an arm claims it, instead of quietly inheriting the coverage
+// this block claims for itself. (That range terminator must never be SPELLED in
+// prose here: two parsers in breakpoint-sweep.test.mjs take the first literal
+// occurrence as their end marker, and a comment copy silently truncates both.)
+// 7 numerals sit below the rule; that count is derived by the same walk, so the
+// uncovered set is stated rather than implied.
+// ── HISTORICAL — FROZEN QUOTES OF PAST STATES, OWNED BY NOTHING BY DESIGN ────
+// The numerals below record what this file ONCE said. They are deliberately not
+// recounted: tracking today's census would destroy the record.
+//   * the 104/79 double-claim — two chronicle blocks claiming one landing slot,
+//     one true and one an ort-resolution artifact, green under every harness.
+//   * THE PRECEDENT THIS EXISTS FOR: the prose here once said 99/74 while the
+//     literal below already held 75 — #8849's `sites-on-instance` moved the
+//     census and only the TEST literals were updated. A census that two files
+//     spell differently is the staleness this file exists to make fatal, and
+//     until cch-w47-s4 this file was carrying two of them: `hash:#billing — 3`
+//     over four entries, and a `These 9` over ten.
 export const SCENARIO_RESIDUE = {
   // hash:#instance — 26
   "sites-on-instance": "hash:#instance",
@@ -734,13 +772,19 @@ export const SCENARIO_RESIDUE = {
   "invite-already-member": "hash:#",
   "invite-invalid": "hash:#",
   "loggedout-reset": "hash:#",
-  // no-deeplink — 6
+  // no-deeplink — 7
   "account-modal": "no-deeplink",
   "account-modal-tall": "no-deeplink",
   "account-modal-revoke": "no-deeplink",
   "account-modal-cruel-identity": "no-deeplink",
   "account-modal-2fa-badcode": "no-deeplink",
   "account-modal-2fa-on": "no-deeplink",
+  // cch-w39-s2-fu — the unknown two-factor arm, over a /v1/me that never lands.
+  // Same residue reason as its six siblings and for the same owner: the state's
+  // whole subject is a MODAL control's reachability (#a2f-retry), and that is
+  // modal-oracle's question, not this sweep's. modal-oracle drives it as a
+  // first-class state, so this is a reason, not a gap.
+  "account-modal-me-unreadable": "no-deeplink",
   // path:/activate — 5
   "activate-entry": "path:/activate",
   "activate-confirm": "path:/activate",

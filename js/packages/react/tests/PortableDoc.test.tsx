@@ -966,6 +966,25 @@ describe('PortableDoc — the type-keyed renderer', () => {
       }
     })
 
+    // The mount point's chrome is TOKENISED, not a bare hex: on a dark
+    // `.bp-paper-surface` a literal #dde7e2 drew a light rule around a black
+    // terminal. Every sibling emitter (evidence figure, paper-link card,
+    // section divider) already reads `var(--paper-rule, …)`; the cast was the
+    // last bare literal in this file, and its Elixir twin
+    // (Figures.asciicast_html/5) carries the identical string — the pd-parity
+    // comparator diffs the style attribute, so the two cannot drift apart.
+    it('the asciicast mount border is var(--paper-rule, …), with the hex only as fallback', () => {
+      const html = renderPortableDocument([
+        { type: 'asciicast', src: 'https://ex.com/c.cast', caption: 'rec' },
+      ])
+      expect(html).toContain('style="border:1px solid var(--paper-rule, #dde7e2);')
+      // The negative leg: no BARE hex survives anywhere in the emitted block —
+      // `:#dde7e2` would match `border:1px solid #dde7e2` but never the
+      // `var(--paper-rule, #dde7e2)` fallback (which is preceded by a space).
+      expect(html).not.toContain(':#dde7e2')
+      expect(html).not.toContain('#55635e')
+    })
+
     // `poster` — the block's optional resting frame. Twin of
     // Figures.asciicast_html/4; the pd-golden fixture freezes the SET leg's
     // bytes, these pin the UNSET leg and the escaping.

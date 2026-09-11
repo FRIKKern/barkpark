@@ -314,9 +314,12 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
       one, so it gets its own bucket instead of being laundered into either.
     * UNREACHABLE — no caller in `cloud/lib` at all. Every row carries a reason
       and, where one exists, the PR or task that will give it a caller. TEST
-      references do NOT count: `classes/0` has NINE of them and zero lib
+      references do NOT count: `classes/0` HAD NINE of them and zero lib
       callers, which is the D245 disease verbatim — a function the suite keeps
-      warm and no operator can reach.
+      warm and no operator can reach. It is not on this list any more:
+      `census/3`'s `vocabulary/0` reads it, and the enum reaches a human on the
+      census envelope (dr-w16-s3-followup-class-vocabulary-unreachable). The
+      shape it names is what the remaining rows are measured against.
 
   ## The limit of the claim
 
@@ -347,7 +350,7 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
   @declared [
     # -- REACHABLE ------------------------------------------------------------
     {:census, 3, :reachable,
-     "GET /v1/cloud/deployments/census — router.ex calls it with the parsed window. THE deploy-reliability headline read."},
+     "GET /v1/operator/deploy-ledger/census (operator tier) and GET /v1/deploy-ledger/census (user tier, team-scoped — the read a non-operator can actually reach) both call it with the parsed window in router.ex. THE deploy-reliability headline read."},
     {:classify, 1, :reachable,
      "router.ex serialises `failure_class` off a row, and sites/deploy.ex classifies a deferral at re-queue time."},
     {:list_page, 2, :reachable,
@@ -362,38 +365,54 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
      "THE PER-BOX DEPLOY VITAL (dr-w10-s1). Its ONE caller is `Web.Router`'s GET /v1/barkparks handler, which prefetches it beside the pmap/dmap/hmap/qmap trio and threads it into `barkpark_json/6` — so the number that says a box is failing 46.28% of its terminal deploys reaches the fleet row instead of sitting one JOIN away in the same database, read by nothing. It is public for that route and for nothing else; its bucket is :reachable from the day it lands, which is the whole D136 point (server key + Go field + rendered column in ONE PR)."},
     {:min_sample, 0, :reachable,
      "THE REFUSAL FLOOR, CALLED AT LAST (dr-bl-rate-notice). Its UNREACHABLE row read \"TWO test references and ZERO lib callers; `census/3` reads the `@min_sample` ATTRIBUTE directly, and `router.ex:3534` names the function only in a COMMENT\" — this is the move that closes it. `Notifications.DeployRateAlert.body/2` interpolates `DeployLedger.min_sample()` into the sentence a human reads (\"A RATE REFUSES ITSELF BELOW n = 200\"), and `deploy_rate_alert_worker_test.exs` asserts the rate node's `min_sample` EQUALS this accessor — so the floor the email quotes and the floor the census enforces are one value, and a change to `@min_sample` cannot leave a stale number in an operator's inbox."},
+    {:content_on_web?, 1, :reachable,
+     "IS ANYTHING OF THIS SITE ANSWERING ON THE WEB (dr-w11-bl-deployment-failed-alarm-fatigue). `delivery/3`'s own `live_marks` clause asked as an existence question, with two deliberate differences stated on its @doc: NO window (a site that went live in January and has not deployed since is still serving), and UNMETERED rows count (a `live` row with a NULL `became_live_at` is still content on the web — jarl-website alone has 55). Its ONE caller is `Notifications.DeploymentFailedPolicy.destroyed_content?/1`, which turns the verdict into \"does this failed attempt earn a customer email\" — the narrowing that took `deployment_failed` off 870 emails a day about attempts that stranded nothing. Public for that caller and no other; it is REACHABLE from the day it lands, and the `?`-trap row above is why its bucket is measured by the AST walker and not by grep."},
     {:refusal_phase, 1, :reachable,
      "start-vs-poll refusal phase, ROUTED AT LAST — the same closer as delivery/3 above, landed by the same PR. `site_deployment_json/3` reads it off the RAW failure_reason, so start-vs-poll is legible over HTTP instead of living only in this suite."},
+    {:no_box_code, 0, :reachable,
+     "THE SENTINEL THAT SAYS \"A CODE-AWARE WRITER LOOKED AND THE ENVELOPE CARRIED NO CODE\" (dr-w4-bl-deferral-raw-column-ambiguous). Public for exactly one reason: `Sites.Deploy.box_refusal_code/1` STAMPS it onto `deployments.box_refusal_code` and `DeployLedger.classify/1` READS it back, and a sentinel spelled out twice in two modules is a sentinel that can drift — one owner, one literal, or the writer and the reader eventually disagree about what \"no code\" looks like and the disagreement is silent. Its three external call sites are the three arms of that extractor. It is REACHABLE from the day it lands (D136's shape: the value, its writer and its reader in ONE PR)."},
+    {:agency, 1, :reachable,
+     "WHO a failure class accuses (D148/D242). WAS :internal_only (`class_rows/3` reads it while building the census class table, so the accusation rides the same row as the count and reaches an operator through `Web.Router.deploy_census_json/2`'s existing whole-map serialisation). dr-w15-bl-failure-copy-has-no-agency gives it an EXTERNAL caller: `FailureCopy.fault_line/1` (failure_copy.ex) derives the CUSTOMER's fault sentence from this function and from nothing else — before that seam, no class token crossed into the copy layer at all and an agency ruling could not reach a customer even in principle. This is the row that says the ONE token crosses: if `fault_line/1` ever grows its own regex over `failure_reason`, this row goes back to :internal_only and the move is visible in the diff."},
+    {:label, 1, :reachable,
+     "class -> human one-liner. WAS :internal_only (used once while building the census class table); dr-w32-bl gives it an external caller: `Notifications.BoxUnreachableEpisodeAlert.body/1` interpolates `DeployLedger.label(@class)` into the episode notice a human reads, so the sentence the alert quotes and the one-liner the census table carries are ONE string and cannot drift."},
 
     # -- INTERNAL_ONLY — over-public, alive ------------------------------------
     {:classify, 2, :internal_only,
      "the (stage, reason) arm. `classify/1` delegates to it; no other module reaches it. `defp` plus a public wrapper would say the same thing more honestly."},
-    {:label, 1, :internal_only,
-     "class -> human one-liner, used once while building the census class table."},
     {:deferred?, 1, :internal_only,
      "the deferral predicate, used inside census/3's fold. THE `?`-TRAP ROW: the grep sweep scored this at zero and would have deleted a live function."},
     {:not_attempted?, 1, :internal_only,
      "the never-attempted predicate that keeps rows out of the rate DENOMINATOR. Same `?`-trap as deferred?/1, same false zero."},
-    {:agency, 1, :internal_only,
-     "WHO a failure class accuses (D148/D242). `class_rows/3` reads it while building the census class table, so the accusation rides the same row as the count and reaches an operator through `Web.Router.deploy_census_json/2`'s existing whole-map serialisation — no new route, and no edit to router.ex, which is a sibling fence. Over-public rather than `defp` because the assertion suite calls it directly on named classes."},
     {:encode_cursor, 1, :internal_only,
      "keyset cursor writer, used by list_page/2 when it hands back a next page."},
     {:decode_cursor, 1, :internal_only,
      "keyset cursor reader, used by list_page/2 on the way in. Public so the cursor SHAPE test can round-trip it."},
+    # THE CLASS VOCABULARY, ROUTED (dr-w16-s3-followup-class-vocabulary-unreachable).
+    # All three stood on the UNREACHABLE allowlist as "wave-16 follow-up": nine,
+    # three and zero test references between them and ZERO callers in cloud/lib
+    # — the D245 disease verbatim. They are read now, by `census/3`'s
+    # `vocabulary/0` helper, which puts all three enums on the census envelope
+    # `Web.Router.deploy_census_json/2` already serialises whole. So the bucket
+    # is :internal_only (the caller is in this module's own file, which is what
+    # this census means by INTERNAL and it says so rather than laundering it
+    # into :reachable) while an OPERATOR reaches the value over HTTP and through
+    # `bp cloud deployments --legend`. They stay `def` rather than `defp`
+    # because the class-taxonomy assertions call them directly, off the ENUMS
+    # rather than a hand-list (D242).
+    {:classes, 0, :internal_only,
+     "the named-class list. `vocabulary/0` reads it into the census envelope's `vocabulary.classes`, and the Go `DeployVocabulary` decodes it — so the legend a CLI renders is DERIVED from the enum instead of re-typed on the far side of the wire."},
+    {:deferred_classes, 0, :internal_only,
+     "the deferral vocabulary. Same reader: `vocabulary.deferred_classes` on the census envelope. `deferred?/1` still answers MEMBERSHIP internally; this ENUMERATES, which is what a legend and the D242 exhaustiveness assertion both need and membership cannot do."},
+    {:not_attempted_classes, 0, :internal_only,
+     "the never-attempted vocabulary. Deleted by dr-w16-s3 when nothing read it, re-added by dr-w31-s3 with the agency-map exhaustiveness assertion named, and given a LIB reader here: `vocabulary.not_attempted_classes`. A legend that lists the failure classes and hides the tombstone class is an incomplete legend."},
 
     # -- UNREACHABLE — the allowlist, reason + closer ---------------------------
-    {:classes, 0, :unreachable,
-     "the named-class list. NINE test references, ZERO lib callers — the D245 disease verbatim: a suite keeps it warm and no operator can reach it. No route exposes the class vocabulary; filed as wave-16 follow-up rather than deleted, because the class list is the thing a CLI needs to render a legend."},
-    {:deferred_classes, 0, :unreachable,
-     "the deferral vocabulary. THREE test references, ZERO lib callers; `deferred?/1` answers the membership question internally, so this accessor exists for no reader. Same follow-up as classes/0."},
-    # ALLOWLISTED WITH A REASON, both of them, and the reason is the same one:
-    # they exist so an ASSERTION can be keyed off the enums instead of a
-    # hand-list. dr-w16-s3 deleted `not_attempted_classes/0` as the one
-    # genuinely dead public and set equality kept it deleted — this is the
-    # commit that re-adds it, and it is re-added WITH a stated reader rather
-    # than smuggled back in.
-    {:not_attempted_classes, 0, :unreachable,
-     "the never-attempted vocabulary. ZERO lib callers; `not_attempted?/1` answers MEMBERSHIP inside census/3 and cannot ENUMERATE. Its reader is the agency-map exhaustiveness assertion (D242), which must cover `classes/0 ++ not_attempted_classes/0` — every value classify/2 can return — off the ENUMS, because a hand-listed set is a second place to forget and reproduces D224 with a green. Deleted by dr-w16-s3 when nothing at all read it; re-added by dr-w31-s3 with that reader named. CLOSER: the class vocabulary reaches an operator only when a route or the CLI renders a legend — the same follow-up as classes/0 and deferred_classes/0."},
+    {:journeys, 3, :unreachable,
+     "ATTEMPTS PER RELEASE, run-segmented (D142/D161, dr-bl-w9-journey-metric-run-based). ZERO lib callers TODAY and the row says so rather than laundering a test reference into a caller — `deploy_ledger_journeys_test.exs` is the only thing that calls it, which is the D245 disease's exact shape and is named here instead of hidden. It is NOT on `census/3`'s envelope by choice: that envelope's key set is paired with the Go `cloudclient.DeployCensus` struct by `payload_key_set_census_test.exs`, and both `router.ex` and `internal/cloudclient` are outside this change's fence, so folding it in would land a server key with no wire type. CLOSER, NAMED AND SINGLE: the follow-up that adds `journeys` to `Web.Router.deploy_census_json/2` beside `delivery` and `coverage_cohorts`, its `DeployJourneys` Go struct, and `renderDeployJourneys` in `cloud_deploy_census_cmd.go` — one PR, server key + Go field + rendered line, the D136 rule. That PR moves this row to :reachable and the move is the proof. Until then the figure reaches a human only through `journey_report/1` and this suite."},
+    {:journey_report, 1, :unreachable,
+     "the RENDERED lines of `journeys/3` — figure, journey count and excluded UNMETERED count on ONE line, joined next to the numbers so no consumer can print the ratio without its population. ZERO lib callers for the same reason `journeys/3` has none, and it is public for the same closer: it exists so the Go renderer's line format is DERIVED from the server rather than re-typed on the far side of the wire, which is how `deployCensusDeferredTotal` became a second drifting definition of a number the server already had. Same single closer PR as `journeys/3`."},
+    {:class_continuity, 3, :unreachable,
+     "THE CLASS-CONTINUITY GAUGE'S SELF-DERIVED BASIS (charter D265, dr-w18-bl-boundary-continuity-gauge). Runs `census/3` twice — over `[from, to)` and over the immediately-prior EQUAL-LENGTH window — and hands both to `ClassContinuity.gauge/2`, which answers whether a cause class DIED or was RENAMED (`:renamed` / `:repaired` / `:new_cause`). ZERO lib callers today, and the row says so rather than laundering `class_continuity_test.exs` into a caller — that is the D245 disease's exact shape and it is named here instead of hidden. It is NOT folded into `census/3`'s envelope by choice: that key set is paired with the Go `cloudclient.DeployCensus` struct by `payload_key_set_census_test.exs`, and both `router.ex` and `internal/cloudclient` are outside this slice's fence, so folding it in would land a server key with no wire type. It is public rather than private because the gauge is the artifact an operator must eventually reach, and a `defp` cannot be routed. CLOSER, NAMED AND SINGLE: the follow-up PR that adds the gauge to `Web.Router.deploy_census_json/2` (or its own route) beside `delivery` and `coverage_cohorts`, its `DeployClassContinuity` Go struct, and the renderer in `cloud_deploy_census_cmd.go` — one PR, server key + Go field + rendered line, the D136 rule. That PR moves this row to :reachable and the move is the proof. Note the SECOND-ORDER reachability this row does not claim: `ClassContinuity.gauge/2` IS reached from `cloud/lib` (by this function), which is what makes the compile-rename witness in D265's acceptance able to fail at all; this row is about `class_continuity/3` itself."},
     {:agency_map, 0, :unreachable,
      "the full class -> agency map. ZERO lib callers by design: `agency/1` is the READ path (census/3 uses it, see its :internal_only row) and answers per class, but it cannot list the map's KEYS, so the second direction of the exhaustiveness assertion — 'a key that is not a class' — is unprovable without this accessor. That direction is the one that catches an agency for a class somebody renamed, which is the failure that let an 18-class taxonomy and a 17-key map merge past each other. Allowlisted rather than deleted because deleting it deletes that direction. CLOSER: it stops being unreachable the day a lib caller needs the whole map (a legend, or an agency roll-up), not before."}
   ]
@@ -405,8 +424,8 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
   # under it, and a legitimate change RAISES them in the same commit — where the
   # set-equality assertions red on that same change anyway, so a floor can never
   # be the only thing a change has to satisfy.
-  @publics_floor 19
-  @call_sites_floor 21
+  @publics_floor 23
+  @call_sites_floor 23
 
   # ---------------------------------------------------------------------------
 

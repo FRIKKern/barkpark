@@ -166,13 +166,20 @@ defmodule Barkpark.Content.Lifecycle do
   # `title` COLUMN is written OUTSIDE that projection — `Content.Mutations`
   # builds `attrs["title"]` from the patch's `set` map while DROPPING `"title"`
   # from the merged content — so `doc patch <type> <id> --set title=X` on a
-  # blocks-bearing document lands the column while the bound title block
-  # overwrites `content["title"]` straight back to its create-time value. The
-  # patch answers 200 with a freshly bumped `_rev`; only a read of the stored row
-  # shows the value was discarded.
+  # blocks-bearing document USED TO land the column while the bound title block
+  # overwrote `content["title"]` straight back to its create-time value. The
+  # patch answered 200 with a freshly bumped `_rev`; only a read of the stored
+  # row showed the value was discarded. `Content.BoundFieldSync` closed that
+  # door (task-d8785cff163c8013) by writing the patched value THROUGH to the
+  # bound block projection re-derives the key from.
   #
-  # This gate does not repair that write. It stops the divergence being COPIED
-  # ONTO THE PUBLISHED ROW, which is where it stops being recoverable:
+  # THE GATE KEEPS ITS TEETH. The patch door is one of several writers that can
+  # move the column and the block list independently: `replace` /
+  # `createOrReplace` take a caller-supplied `title` alongside a caller-supplied
+  # `content["blocks"]` with nothing forcing them to agree, an import or a
+  # migration can write either side, and every row that diverged BEFORE the
+  # write-through is still on disk. This gate is what stops any of them being
+  # COPIED ONTO THE PUBLISHED ROW, which is where it stops being recoverable:
   # `publish_after_gate/5` builds `pub_attrs` with `"title" => draft.title` (the
   # column) and `"content" => pub_content` (carrying the stale block/preview
   # title), the generated `search_vector` then indexes BOTH, `doc get` answers
@@ -215,9 +222,9 @@ defmodule Barkpark.Content.Lifecycle do
           "#{inspect(column)} while the bound title block (and therefore the projected " <>
           "content[\"title\"] and content[\"preview\"]) is #{inspect(block_title)}. " <>
           "Publishing would put both on one row and index both for search, with nothing to say " <>
-          "which was meant. `doc patch --set title=` writes the COLUMN ONLY — the block is what " <>
-          "projection re-derives the content title from — so set the title through the title " <>
-          "block, then publish."}}
+          "which was meant. `doc patch --set title=` now writes the bound title block through " <>
+          "as well as the column (Content.BoundFieldSync), so re-patching this document's title " <>
+          "reconciles both sides — then publish."}}
     else
       _ -> :ok
     end
@@ -316,9 +323,44 @@ defmodule Barkpark.Content.Lifecycle do
             Broadcast.write_atomically(fn ->
               txn =
                 Repo.transaction(fn ->
+                  # ── THE CROSS-doc_id TOCTOU CLOSE (acrc-dedup-toctou-serialize) ──
+                  #
+                  # FIRST STATEMENT IN THE TRANSACTION, and it must stay first.
+                  # `AuthoringWall.enforce/5` above ran E4 BEFORE this
+                  # transaction existed, so its verdict describes a corpus that
+                  # nothing holds still. Two publishes carrying DIFFERENT
+                  # doc_ids and near-duplicate titles both pass it — each is
+                  # excluded from its own candidate scan (`d.doc_id !=
+                  # incumbent`), and neither is committed when the other looks —
+                  # and both then commit the duplicate pair the wall exists to
+                  # refuse. `lock_published_row/2` below cannot see it: that is
+                  # a `FOR UPDATE` on the INCUMBENT row, and in this race
+                  # neither publish has an incumbent at all.
+                  #
+                  # So the scope is locked and E4 is recomputed inside the lock,
+                  # held to commit. The loser blocks on the lock, then scans a
+                  # corpus that now contains the winner, and is refused with the
+                  # ORDINARY `{:duplicate_of, _}` shape — routed below into the
+                  # same `discard_draft_refused_as_duplicate/5` the pre-txn
+                  # refusal takes, so a caller cannot tell which of the two
+                  # gates refused it.
+                  case AuthoringWall.recheck_dedup_under_scope_lock(
+                         %{draft | content: pub_content},
+                         type,
+                         pid,
+                         dataset,
+                         opts
+                       ) do
+                    :ok -> :ok
+                    {:error, reason} -> Repo.rollback(reason)
+                  end
+
                   {pub_result, prev_pub_rev} =
                     case Content.get_document(pid, type, dataset, opts) do
                       {:ok, existing} ->
+                        existing = lock_published_row(existing, type)
+                        :ok = assert_no_criteria_regression!(existing, pub_attrs, type)
+                        pub_attrs = advance_paper_publish_revision(pub_attrs, existing, type)
                         {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
 
                       _ ->
@@ -358,21 +400,18 @@ defmodule Barkpark.Content.Lifecycle do
               end
             end)
 
-          # Publishing a SHEET refreshes its PUBLISHED embedders with the
-          # now-published content (the draft-save path deliberately skips
-          # them — see Sheets.refresh_sheet_embeds). Publish writes the
-          # published row directly (not through Writer's upsert tap), so
-          # the write-through must be invoked here explicitly.
-          Sheets.tap_sheet_writethrough(result)
+          # A `duplicate_of` refused by the IN-TRANSACTION re-check above is
+          # the same verdict as one refused before the transaction opened, and
+          # it must end the same way: the rolled-back transaction left the
+          # draft in place, so the terminal-refusal draft discard runs here.
+          # Nothing else below applies — no row was published.
+          case result do
+            {:error, {:duplicate_of, dup_payload}} ->
+              discard_draft_refused_as_duplicate(draft, dup_payload, type, dataset, opts)
 
-          # Publishing a doc that declares `content.supersedes` stamps the
-          # predecessor with `superseded_by` (the DedupWall exemption's other
-          # half): a correction nobody can find from the row they are reading
-          # is not a correction. Best-effort AFTER the publish committed — a
-          # stamp failure must never fail the publish that carries the fix.
-          tap_supersession_stamp(result, type, dataset, opts)
-
-          WriteScope.fire_after(result, :after_publish, payload)
+            _ ->
+              publish_after_commit(result, payload, type, dataset, opts)
+          end
       end
     else
       # ── THE REFUSAL MUST NOT MANUFACTURE A STRANDED DRAFT ──────────────────
@@ -418,6 +457,27 @@ defmodule Barkpark.Content.Lifecycle do
       {:error, _reason} = error ->
         error
     end
+  end
+
+  # The post-commit tail of a successful publish, unchanged except for being
+  # named: it is now reached only when the transaction actually committed (a
+  # `duplicate_of` refused by the in-transaction re-check routes elsewhere).
+  defp publish_after_commit(result, payload, type, dataset, opts) do
+    # Publishing a SHEET refreshes its PUBLISHED embedders with the
+    # now-published content (the draft-save path deliberately skips
+    # them — see Sheets.refresh_sheet_embeds). Publish writes the
+    # published row directly (not through Writer's upsert tap), so
+    # the write-through must be invoked here explicitly.
+    Sheets.tap_sheet_writethrough(result)
+
+    # Publishing a doc that declares `content.supersedes` stamps the
+    # predecessor with `superseded_by` (the DedupWall exemption's other
+    # half): a correction nobody can find from the row they are reading
+    # is not a correction. Best-effort AFTER the publish committed — a
+    # stamp failure must never fail the publish that carries the fix.
+    tap_supersession_stamp(result, type, dataset, opts)
+
+    WriteScope.fire_after(result, :after_publish, payload)
   end
 
   # Rev-fenced discard of the draft a `duplicate_of` refusal just rejected.
@@ -474,6 +534,85 @@ defmodule Barkpark.Content.Lifecycle do
         {:error, {:duplicate_of, annotate_claimed_survivor(payload, draft, worker)}}
     end
   end
+
+  # A whole-document publish replaces the same content that native Paper ops
+  # fence with content["rev"]. Never copy an old draft's counter onto that row.
+  # Lock before reading the counter so a concurrent op cannot make us reuse its
+  # revision between this read and the published update. Other types are unchanged.
+  #
+  # ── WHY "task" JOINED "paper" (pds-bl-stamp-writeback-reverts-a-stamped-criterion)
+  #
+  # The lock is not paper-specific machinery; it is what makes the in-transaction
+  # re-read of the published row AUTHORITATIVE. Every type whose published row is
+  # ALSO written by a second, non-publish door needs it, and "task" is exactly
+  # that: `Barkpark.Tasks.{Claim,Pulse,Stamp,...}` write the published row in
+  # place through `Internal.fenced_content_write/4` while `publish_after_gate/5`
+  # copies the draft's content over it wholesale. The published-row read at the
+  # top of `do_publish_document/4` — the one `criteria_fence/2` is evaluated
+  # against — happens BEFORE the authoring wall, before the `:before_publish`
+  # hook chain and outside any transaction, so a stamp that lands in that
+  # window answers its caller with a success receipt and is then silently
+  # overwritten by this update.
+  # `FOR UPDATE` here plus `assert_no_criteria_regression!/3` below moves the
+  # verdict onto a row nothing can move until this transaction ends.
+  #
+  # The "paper" arm is byte-identical to what it was: same query, same
+  # `Repo.rollback(:not_found)`, same passthrough for every other type.
+  defp lock_published_row(%Document{id: id}, type) when type in ["paper", "task"] do
+    Repo.one(from(d in Document, where: d.id == ^id, lock: "FOR UPDATE")) ||
+      Repo.rollback(:not_found)
+  end
+
+  defp lock_published_row(existing, _type), do: existing
+
+  # THE CRITERIA FENCE, RE-EVALUATED WHERE THE WRITE ACTUALLY HAPPENS.
+  #
+  # `ensure_task_publish_transition_legal/5` already runs `criteria_fence/2`
+  # at the publish door, and that gate keeps ALL of its teeth — it is what
+  # gives a caller a side-effect-free refusal before the wall and the hooks
+  # run. What it cannot do is speak for the row as it will be at UPDATE time:
+  # it reads the published row outside the transaction, and the window between
+  # that read and this write is real wall-clock time (the exemption read, the
+  # label-spine check, the tag-registry check, the dedup scan, the whole
+  # `:before_publish` hook chain). A `Tasks.Stamp` landing anywhere in there
+  # answered its caller with a success receipt and then lost the flip AND the evidence
+  # to `"content" => pub_content` below — observed during PDS wave 23, and
+  # reproduced deterministically by
+  # `test/barkpark/tasks/stamp_publish_lost_update_test.exs`.
+  #
+  # REFUSAL, NOT MERGE, and deliberately so. Merging the stamped criterion
+  # back into the draft's list would publish content no author ever wrote and
+  # would have to guess how a re-ordered or re-worded draft list lines up with
+  # the proven one. The refusal reuses the SAME `{:invalid_task_content, _}`
+  # shape and the SAME message the door-level fence emits, so a caller cannot
+  # tell which of the two refused it and no new error vocabulary reaches the
+  # HTTP layer, the CLI exit-code table or the sync applier's error classes.
+  # `Repo.rollback/1` from inside the transaction unwinds the published update
+  # and the fenced draft delete together, so the draft survives to be rebased
+  # — the same remedy the door-level refusal names.
+  #
+  # Every publish SOURCE is covered here, `:sync` included, matching the
+  # door-level rule that a stamped proof is erasable by no replication payload.
+  defp assert_no_criteria_regression!(%Document{content: pub_content}, pub_attrs, "task") do
+    case criteria_fence(pub_content || %{}, pub_attrs["content"] || %{}) do
+      :ok -> :ok
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp assert_no_criteria_regression!(_existing, _pub_attrs, _type), do: :ok
+
+  defp advance_paper_publish_revision(attrs, %Document{content: current}, "paper") do
+    Map.update!(attrs, "content", fn content ->
+      rev = max(paper_stream_revision(content), paper_stream_revision(current)) + 1
+      Map.put(content, "rev", rev)
+    end)
+  end
+
+  defp advance_paper_publish_revision(attrs, _existing, _type), do: attrs
+
+  defp paper_stream_revision(%{"rev" => rev}) when is_integer(rev) and rev >= 0, do: rev
+  defp paper_stream_revision(_content), do: 0
 
   # The worker holding this draft's claim, or nil when the draft carries none.
   # Keyed on `claim.worker` (the field `Tasks.Close` CAS's against together with
@@ -720,17 +859,28 @@ defmodule Barkpark.Content.Lifecycle do
   #     Pusher's synthesized publish executes on the REMOTE box through its
   #     MutateController (`source: :api` there), where this same fence already
   #     gates it.
-  #   * COVERED, and this is wider than the slice brief assumed — the GitHub
-  #     automatic publishers thread `source: :github`, NOT `:sync`
-  #     (`plugins/github/link.ex:193` via `mirror_job.ex:560` /
-  #     `inbound_events.ex:172`, and `plugins/github/adopt.ex:178`), so they
-  #     fall through to this gate and the criteria fence applies to them. That
-  #     is the intended direction: `Link.collapse_draft_twin/5` already handles
-  #     a rejected collapse without raising or looping — it logs the reason,
-  #     leaves the draft twin in place and still returns `{:ok, _}`, and the
-  #     next reconcile converges — so a fence refusal degrades to "bookkeeping
-  #     deferred", never to a broken mirror. `pds-bl-github-linkput-auto-publish-erasure`
-  #     stays open for the audit-trail half it does not answer.
+  #   * NOT REACHED by any GitHub caller on main — and an earlier revision of
+  #     this note said the opposite. It claimed the GitHub automatic publishers
+  #     (`plugins/github/link.ex` via `mirror_job.ex` / `inbound_events.ex`,
+  #     and `plugins/github/adopt.ex`) threaded `source: :github` through
+  #     `Content.publish_document/4` and so "fell through to this gate". They
+  #     did once; since #16479 both are PUBLISHED-FIRST fenced writers
+  #     (`Tasks.Internal.fenced_content_write/4` straight onto the published
+  #     row — no `drafts.<id>` twin is minted, so there is no collapse and no
+  #     publish to refuse), and `grep -rn publish_document
+  #     api/lib/barkpark/plugins/github/` matches only the two moduledocs that
+  #     recount the old shape. `source: :github` is still stamped — `Link.put/4`
+  #     threads it into the never-published arm's DRAFT upsert
+  #     (`put_on_draft/5`) and into the fenced write's `mutation_events` row —
+  #     but never into this door. So the coverage claim above was true of
+  #     NOTHING, and this gate has no live `:github` producer to cover.
+  #     The contract a returning GitHub publisher meets is pinned by TEST, not
+  #     by this comment: `publish_door_lifecycle_guard_test.exs` section (h)
+  #     ("source: :github takes the FULL gate, and the producer picks it",
+  #     task-b36741707eabe359 / #17355) — transition + claim checks + the
+  #     criteria fence all apply to `:github`, and only `:sync` is exempt from
+  #     the first two. `pds-bl-github-linkput-auto-publish-erasure` stays open
+  #     for the audit-trail half it does not answer.
   defp ensure_task_publish_transition_legal("task", %Document{} = draft, pid, dataset, opts) do
     case Content.get_document(pid, "task", dataset, opts) do
       {:ok, %Document{content: pub_content}} ->
@@ -793,8 +943,8 @@ defmodule Barkpark.Content.Lifecycle do
   #   * `lifecycle_status`   — claim/close/fence/move/stamp/ttl_sweeper
   #                            (already fenced by `Transitions.legal?/2` above)
   #   * `acceptance_criteria` — stamp (already fenced by `criteria_fence/2`)
-  #   * `close_reason`       — close.ex:1232
-  #   * `close_override`     — close.ex:1310
+  #   * `close_reason`       — close.ex (`apply_close_update/8`)
+  #   * `close_override`     — close.ex (`merge_override_record/2`)
   #   * `disposition`        — close.ex (`advance_disposition_on_close/2`),
   #                            stage.ex (@disposition_key)
   #   * `reopen_trigger`     — stage.ex (@reopen_trigger_key)

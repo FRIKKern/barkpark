@@ -44,8 +44,46 @@
 # committed spec's context names are now also checked against the prose of every
 # workflow: see advisory_prose_check below, including its two stated limits.
 #
-# EXIT CODES   0 = agree · 1 = drift / prose contradicts the spec / cannot read
+# EXIT CODES   0 = agree · 1 = DRIFT (measured: live, spec and rendered names
+#              disagree, or a workflow's prose contradicts the spec)
 #              3 = DEADLOCK · 4 = RE-RUN
+#              5 = BLOCKED — an input could not be READ or a producer refused.
+#              This run reached NO verdict about the required set.
+#              64 = USAGE (the caller typed it wrong — not a measurement,
+#              so it must not borrow drift's word or its code)
+#
+# 5 (BLOCKED) IS WHY EXIT 1 NO LONGER MEANS "cannot read". Until this commit the
+# header's own first line read `1 = drift / prose contradicts the spec / cannot
+# read` — three conditions, one integer, and one of the three is precisely "I
+# could not look". Measured cost, 2026-09-07: an E2BIG inside
+# scripts/lib/check-runs.sh made the check-run feed unreadable, this script
+# exited 1, and required-checks.test.sh §11's live half — `if bash "$VERIFY"` —
+# called `bad` with "full mode reds on the committed spec — hgw2-s7's slice gate
+# cannot pass". A branch-protection BREACH was filed, triaged and prioritised for
+# hours over an unreadable input. The suite already owned the right word
+# (`blocked()`, "BLOCKED is the third tally, and it is NOT a kind of FAIL",
+# #15975) and could not reach it, because the operand never crossed this call.
+#
+# ⚠ 5, NOT 4, AND THE REASON IS A COLLISION. required-checks.test.sh's HOLD
+# code — its own "an input could not be read" — is 4, and 4 in THIS file is
+# RE-RUN. One integer with two meanings across one call boundary is worse than no
+# shared vocabulary: a mapping written without noticing silently converts one
+# into the other and both directions look plausible. So the two never share a
+# number. The CALLERS translate, explicitly and one at a time:
+#
+#   this file 5 (BLOCKED)  -> suite `blocked()`   -> suite exit 4 (HOLD)
+#   this file 4 (RE-RUN)   -> NOT blocked         -> a verdict, routed on its own
+#
+# §11b of required-checks.test.sh exercises both directions against this file.
+#
+# KNOWN LIMIT, NAMED RATHER THAN IMPLIED. Every immediate-exit no-read site in
+# this file routes through `blocked` below. `unapplied_spec_matches_reality`'s
+# "could not look at live protection" arm still `return 1`s into run_full's and
+# run_ci's rc accumulators, so on the enforced=false path a could-not-look is
+# still reported as drift. That path is unreachable while the committed spec says
+# enforced=true, and promoting it needs a third return value threaded through two
+# accumulators plus the two sed mutations in §8b(d)/§23(d) that pin those call
+# sites by their exact text — its own PR, not a rider on this one.
 #
 # 4 is returned by --deadlock, the mode a caller points at a SPECIFIC head (the
 # merge verb's pre-flight). --full and --ci SAMPLE an arbitrary settled head, so
@@ -82,8 +120,8 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # --workflows and --prose.
 CHECK_RUNS_LIB="${BARKPARK_CHECK_RUNS_LIB:-$REPO_ROOT/scripts/lib/check-runs.sh}"
 [ -f "$CHECK_RUNS_LIB" ] || {
-  echo "FAIL: no check-runs reader at $CHECK_RUNS_LIB — refusing to run without the shared primitive" >&2
-  exit 1
+  echo "BLOCKED: no check-runs reader at $CHECK_RUNS_LIB — refusing to run without the shared primitive. This is a HOLD (exit 5), not drift: the reader is missing, so nothing about the required set was measured." >&2
+  exit 5
 }
 # shellcheck source=scripts/lib/check-runs.sh
 . "$CHECK_RUNS_LIB"
@@ -117,13 +155,36 @@ QUIET=0
 WORKFLOWS_DIR="$REPO_ROOT/.github/workflows"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
+
+# THE THIRD WORD. `fail` is a VERDICT about the repo: I read all three sides and
+# they disagree. `blocked` is this script reporting that it could not obtain an
+# input and therefore has no verdict to give. They must never share a code, and
+# they must never share a prefix either — a caller that greps stderr for `FAIL:`
+# must not match a hold. See the EXIT CODES header for the measured cost of the
+# era when they did, and for why this is 5 and not the suite's 4.
+blocked() { echo "BLOCKED: $*" >&2; exit 5; }
+
+# A usage error is not a verdict: this script's nonzero codes describe something
+# it MEASURED, and a caller who typed the command wrong measured nothing. It
+# therefore gets a word and a code of its own (sysexits EX_USAGE) instead of
+# borrowing `fail`'s FAIL/1, which made a did-not-run
+# indistinguishable from a real finding. 64 rather than 2 because 2 is a
+# MEASURED verdict elsewhere in this toolchain (GROWTH in
+# required-checks-floor.sh, "could not be evaluated" in the deadlock sweep), and
+# one usage code across the family beats a per-script guess.
+usage_error() { echo "usage error: $*" >&2; exit 64; }
 say()  { [ "$QUIET" -eq 1 ] || echo "$*"; }
 
 read_spec() {
-  [ -f "$SPEC" ] || fail "no spec at $SPEC — the guard cannot read the committed list (this is a failure, never a skip)"
-  jq -e . "$SPEC" >/dev/null 2>&1 || fail "$SPEC is not valid JSON"
+  [ -f "$SPEC" ] || blocked "no spec at $SPEC — the guard cannot read the committed list (a HOLD, never a skip)"
+  jq -e . "$SPEC" >/dev/null 2>&1 || blocked "$SPEC is not valid JSON"
   jq -e '.protection.required_status_checks.checks | length > 0' "$SPEC" >/dev/null 2>&1 \
     || fail "$SPEC lists zero required contexts — a spec that requires nothing cannot fail"
+  # THE TWO SURVIVING `fail`s IN THIS FILE ARE VERDICTS, NOT HOLDS, and that is
+  # deliberate. Above: the spec IS readable and its content is wrong. Below (in
+  # live_protection): the branch IS readable and it is unprotected while the
+  # spec says enforced. Both are measurements; neither is "I could not look".
+  # Everything that could not look now exits 5 through `blocked`.
 }
 
 spec_repo()   { jq -r '.repo'   "$SPEC"; }
@@ -135,8 +196,8 @@ spec_enforced() { jq -r '.enforced == true' "$SPEC"; }
 # unreadable input into a green tick; this is that clause for this guard.
 live_protection() {
   if [ -n "$READBACK_FILE" ]; then
-    [ -f "$READBACK_FILE" ] || fail "cannot read protection read-back file $READBACK_FILE"
-    jq -e . "$READBACK_FILE" >/dev/null 2>&1 || fail "$READBACK_FILE is not valid JSON"
+    [ -f "$READBACK_FILE" ] || blocked "cannot read protection read-back file $READBACK_FILE"
+    jq -e . "$READBACK_FILE" >/dev/null 2>&1 || blocked "$READBACK_FILE is not valid JSON"
     cat "$READBACK_FILE"
     return
   fi
@@ -145,7 +206,7 @@ live_protection() {
   out="$(gh api "repos/$repo/branches/$branch/protection" 2>&1)" || {
     grep -q "Branch not protected" <<<"$out" \
       && fail "branch $branch of $repo is NOT PROTECTED, while the committed spec says enforced=$(jq -r '.enforced' "$SPEC")"
-    fail "cannot read live protection for $repo/$branch: $out"
+    blocked "cannot read live protection for $repo/$branch: $out"
   }
   printf '%s' "$out"
 }
@@ -362,13 +423,13 @@ rendered_names() {
     # `--runs` names one FILE, not a fixture directory keyed by sha — the one
     # shape difference that used to justify a private copy of the reader.
     rows="$(check_runs_rows_file "$RUNS_FILE" "$sha")" || rc=$?
-    [ "$rc" -eq 0 ] || fail "cannot read check-runs file $RUNS_FILE"
+    [ "$rc" -eq 0 ] || blocked "cannot read check-runs file $RUNS_FILE"
   else
     rows="$(check_runs_rows_ext "$(spec_repo)" "$sha")" || rc=$?
-    [ "$rc" -eq 0 ] || fail "cannot read check runs for $sha — the guard has nothing to render names against (failure, not a skip)"
+    [ "$rc" -eq 0 ] || blocked "cannot read check runs for $sha — the guard has nothing to render names against (a HOLD, not a skip)"
   fi
   [ -n "$rows" ] \
-    || fail "check-runs for $sha is EMPTY — refusing to declare agreement against an empty feed"
+    || blocked "check-runs for $sha is EMPTY — refusing to declare agreement against an empty feed"
   # Four columns, unchanged: name, conclusion ("null" when unsettled), status,
   # started_at. Downstream consumers key on $1/$2 and are untouched by the
   # extra columns; the PENDING clause below is what reads $3/$4. The lib's
@@ -385,17 +446,26 @@ recent_pr_head() {
   sha="$(gh pr list --repo "$(spec_repo)" --state merged --limit 20 \
           --json headRefOid,statusCheckRollup \
           --jq '[.[] | select((.statusCheckRollup // []) | length > 0)][0].headRefOid' 2>/dev/null || true)"
-  [ -n "$sha" ] && [ "$sha" != "null" ] || fail "cannot find a recent PR head with check runs to render names against (failure, not a skip)"
+  [ -n "$sha" ] && [ "$sha" != "null" ] || blocked "cannot find a recent PR head with check runs to render names against (a HOLD, not a skip)"
   printf '%s' "$sha"
 }
 
 deadlock_check() {
   local sha="$1" names missing
-  # `fail` inside rendered_names exits only the command-substitution subshell,
-  # so its status MUST be propagated here — otherwise an unreadable feed yields
-  # an empty name set and every required context reads as "missing", turning a
-  # read failure into a fake DEADLOCK. Wrong state, right-looking red.
-  if ! names="$(rendered_names "$sha")"; then
+  # `blocked`/`fail` inside rendered_names exits only the command-substitution
+  # subshell, so its status MUST be propagated here — otherwise an unreadable
+  # feed yields an empty name set and every required context reads as "missing",
+  # turning a read failure into a fake DEADLOCK. Wrong state, right-looking red.
+  #
+  # AND THE STATUS MUST BE CARRIED, NOT FLATTENED. `return 1` here was correct
+  # while every no-read exited 1; now that a no-read exits 5 it would convert a
+  # HOLD back into drift one frame above the `blocked` that raised it — the exact
+  # collapse this file's EXIT CODES header exists to stop. 5 leaves immediately,
+  # the way `blocked` itself does: nothing downstream has a verdict to add.
+  local rn_rc=0
+  names="$(rendered_names "$sha")" || rn_rc=$?
+  if [ "$rn_rc" -ne 0 ]; then
+    [ "$rn_rc" -eq 5 ] && exit 5
     return 1
   fi
   missing=""
@@ -545,7 +615,12 @@ EOF
 # this clause on old heads.
 census_check() {
   local sha="$1" names accounted unaccounted n_r n_a
-  if ! names="$(rendered_names "$sha")"; then
+  # Same carry as deadlock_check's: a 5 out of the substitution is a HOLD and
+  # must not be flattened into drift's 1 by this frame.
+  local rn_rc=0
+  names="$(rendered_names "$sha")" || rn_rc=$?
+  if [ "$rn_rc" -ne 0 ]; then
+    [ "$rn_rc" -eq 5 ] && exit 5
     return 1
   fi
   accounted="$(jq -r '(.protection.required_status_checks.checks[]?.context),
@@ -624,7 +699,7 @@ PROSE_DISCLAIMERS='advisory|non-?blocking|not blocking|does not block|does not b
 
 advisory_prose_check() {
   [ -d "$WORKFLOWS_DIR" ] \
-    || fail "cannot read $WORKFLOWS_DIR — the advisory-prose clause has nothing to scan (a failure, never a skip)"
+    || blocked "cannot read $WORKFLOWS_DIR — the advisory-prose clause has nothing to scan (a HOLD, never a skip)"
   local files
   # BOTH legal spellings. GitHub runs a workflow written `*.yaml` exactly like a
   # `*.yml` one (never-cancel-main-check.sh:96 already scans both, and cgsiw-s2
@@ -634,7 +709,7 @@ advisory_prose_check() {
   # `*.yaml` workflows exist today.
   files="$(find "$WORKFLOWS_DIR" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) | sort)"
   [ -n "$files" ] \
-    || fail "no *.yml or *.yaml under $WORKFLOWS_DIR — scanning zero files is the vacuous pass this guard exists to refuse"
+    || blocked "no *.yml or *.yaml under $WORKFLOWS_DIR — scanning zero files is the vacuous pass this guard exists to refuse"
 
   local tmp ctxfile nctx nfiles out
   tmp="$(mktemp -d)"
@@ -678,7 +753,7 @@ advisory_prose_check() {
       stream = stream line " "
     }
     END { flushfile() }
-  ' 2>&1)" || { rm -rf "$tmp"; fail "advisory-prose scan could not run: $out"; }
+  ' 2>&1)" || { rm -rf "$tmp"; blocked "advisory-prose scan could not run: $out"; }
   rm -rf "$tmp"
 
   if [ -n "$out" ]; then
@@ -835,7 +910,7 @@ merge_truth_prose_check() {
     # the shape this clause exists to stop repeating.
     files="$(find "$PROSE_ROOT_OVERRIDE" -type f \( -name '*.md' -o -name '*.markdown' -o -name '*.txt' \) 2>/dev/null | sort)"
     [ -n "$files" ] \
-      || fail "no *.md/*.markdown/*.txt under $PROSE_ROOT_OVERRIDE — scanning zero files is a vacuous pass, not a green"
+      || blocked "no *.md/*.markdown/*.txt under $PROSE_ROOT_OVERRIDE — scanning zero files is a vacuous pass, not a green"
   else
     # TRACKED, and the WHOLE repository — deliberately not a root list. This
     # started as `.claude/workflows docs CLAUDE.md` and the measurement killed
@@ -851,7 +926,7 @@ merge_truth_prose_check() {
     files="$(cd "$REPO_ROOT" && git ls-files -- '*.md' '*.markdown' '*.txt' 2>/dev/null \
       | while IFS= read -r f; do [ -f "$f" ] && printf '%s/%s\n' "$REPO_ROOT" "$f"; done | sort)"
     [ -n "$files" ] \
-      || fail "git ls-files listed no tracked *.md/*.markdown/*.txt under $REPO_ROOT — scanning zero files is a vacuous pass, not a green (is this a git checkout?)"
+      || blocked "git ls-files listed no tracked *.md/*.markdown/*.txt under $REPO_ROOT — scanning zero files is a vacuous pass, not a green (is this a git checkout?)"
   fi
 
   local tmp ctxfile nctx nfiles raw
@@ -968,7 +1043,7 @@ merge_truth_prose_check() {
       if (length(buf) > 8192) { stream = stream buf; buf = "" }
     }
     END { flushfile(); printf "FENCED|%d\n", nfenced }
-  ' 2>&1)" || { rm -rf "$tmp"; fail "merge-truth prose scan could not run: $raw"; }
+  ' 2>&1)" || { rm -rf "$tmp"; blocked "merge-truth prose scan could not run: $raw"; }
   fi
   rm -rf "$tmp"
 
@@ -1156,7 +1231,7 @@ wf_tmpl_to_regex() {
 
 blocking_authority_check() {
   [ -d "$WORKFLOWS_DIR" ] \
-    || fail "cannot read $WORKFLOWS_DIR — the blocking-authority clause has nothing to scan (a failure, never a skip)"
+    || blocked "cannot read $WORKFLOWS_DIR — the blocking-authority clause has nothing to scan (a HOLD, never a skip)"
   local files
   # BOTH legal spellings. GitHub runs a workflow written `*.yaml` exactly like a
   # `*.yml` one (never-cancel-main-check.sh:96 already scans both, and cgsiw-s2
@@ -1166,7 +1241,7 @@ blocking_authority_check() {
   # `*.yaml` workflows exist today.
   files="$(find "$WORKFLOWS_DIR" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) | sort)"
   [ -n "$files" ] \
-    || fail "no *.yml or *.yaml under $WORKFLOWS_DIR — scanning zero files is the vacuous pass this guard exists to refuse"
+    || blocked "no *.yml or *.yaml under $WORKFLOWS_DIR — scanning zero files is the vacuous pass this guard exists to refuse"
 
   local tmp idx out
   tmp="$(mktemp -d)"
@@ -1279,14 +1354,14 @@ blocking_authority_check() {
       else if (line !~ /^[ \t]*$/) ncbuf = 0
     }
     END { endfile() }
-  ' 2>&1)" || { rm -rf "$tmp"; fail "blocking-authority scan could not run: $out"; }
+  ' 2>&1)" || { rm -rf "$tmp"; blocked "blocking-authority scan could not run: $out"; }
   printf '%s\n' "$out" > "$idx"
 
   local njobs nfiles
   njobs="$(grep -c '^JOB	' "$idx" || true)"
   nfiles="$(printf '%s\n' "$files" | grep -c . || true)"
   [ "$njobs" -gt 0 ] \
-    || { rm -rf "$tmp"; fail "read zero jobs from $nfiles workflow file(s) — scanning zero jobs is the vacuous pass this guard exists to refuse"; }
+    || { rm -rf "$tmp"; blocked "read zero jobs from $nfiles workflow file(s) — scanning zero jobs is the vacuous pass this guard exists to refuse"; }
 
   # ── UNRESOLVED (a): a file we could read no job out of at all ──────────────
   local unparsed
@@ -1729,14 +1804,20 @@ JSON
   probe "9/31 a spec context no workflow emits is DEADLOCK — a third state, at N=3 where the refusal message names nothing" 3 \
     --spec "$tmp/deadspec.json" --readback "$good_rb" --runs "$good_runs" --sha probe --deadlock || rc=1
 
-  probe "10/31 an unreadable protection read-back FAILS (never skips)" 1 \
+  # 10-12 ARE THE BLOCKED ARM, AND THEY ARE THE PROOF IN BOTH DIRECTIONS
+  # TOGETHER WITH 2-8. Probes 2-8 feed a READABLE but WRONG input (a typo'd
+  # context, a null app_id, an out-of-band key) and must exit 1: genuine drift
+  # keeps drift's code. Probes 10-12 feed an input that cannot be read at all and
+  # must exit 5. Flip either expectation and this selftest reds, so neither
+  # condition can quietly borrow the other's word.
+  probe "10/31 an unreadable protection read-back is BLOCKED — exit 5, not drift's 1 and never a skip" 5 \
     --spec "$good_spec" --readback "$tmp/does-not-exist.json" --runs "$good_runs" --sha probe || rc=1
 
-  probe "11/31 an unreadable check-run feed FAILS (never skips)" 1 \
+  probe "11/31 an unreadable check-run feed is BLOCKED — exit 5 (this is the E2BIG shape that was filed as a protection breach on 2026-09-07)" 5 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/no-runs.json" --sha probe || rc=1
 
   echo '{ "check_runs": [] }' > "$tmp/emptyruns.json"
-  probe "12/31 an EMPTY check-run feed FAILS — agreement against nothing is the vacuous pass this epic exists for" 1 \
+  probe "12/31 an EMPTY check-run feed is BLOCKED — a producer that returned nothing is a refusal to be held on, not a verdict about the spec" 5 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/emptyruns.json" --sha probe || rc=1
 
   # 13 & 14 are the D56 clause: the detector used to match on `cut -f1` and
@@ -1937,7 +2018,7 @@ MD
   # Scanning nothing is the vacuous pass this whole file exists to refuse, and
   # the clause has to make that refusal for its OWN corpus too.
   mkdir -p "$tmp/prose-empty"
-  probe "27/31 a prose root with no readable text file FAILS — scanning zero files is never a green" 1 \
+  probe "27/31 a prose root with no readable text file is BLOCKED — scanning zero files is never a green, and it is a no-read, not a finding" 5 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
     --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose-empty" || rc=1
 
@@ -1999,7 +2080,7 @@ main() {
       --selftest) MODE="selftest"; shift ;;
       --quiet) QUIET=1; shift ;;
       -h|--help) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-      *) fail "unknown argument: $1" ;;
+      *) usage_error "unknown argument: $1 (try --help)" ;;
     esac
   done
 

@@ -223,6 +223,7 @@ CONSOLE_PATHS='cloud/priv/static/**
 internal/taskboard/testdata/styleguide_lifecycle.txt
 internal/pdrender/testdata/styleguide_tokens.txt
 internal/agent/report.go
+internal/cli/cloud_status_cmd.go
 .github/workflows/cloud.yml
 design/emit-fence.test.mjs
 cloud/priv/audit-actions.json
@@ -232,6 +233,7 @@ cloud/test/barkpark_cloud/web/**
 deploy/lib/site-deploy-common.sh
 deploy/site-deploy-node.sh
 internal/builder/builder.go
+internal/cloudclient/client.go
 cloud/lib/barkpark_cloud/sites/auto_deploy_worker.ex
 cloud/lib/**
 api/assets/paper-surface/paper-surface.css

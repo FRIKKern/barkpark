@@ -206,6 +206,108 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
       cleanup(created)
     end
 
+    # FORCE-RELEASE IS ADMIN-ONLY — the conn-level proof of
+    # felix-w28-bl-checkout-tighten-adjudication (ruled 2026-09-09).
+    #
+    # `V1.MediaController.admin?/1` used to answer true for "admin" OR "write",
+    # so `other-editor-token` (read+write, no admin) could release the lock
+    # `governance-dev-token` was holding. These three pin the whole mapping, not
+    # just the refusal: the write token is REFUSED on someone else's lock, still
+    # ALLOWED on its own (the holder-only branch of
+    # `Checkout.ensure_can_release/3`, which the old fold left dead), and the
+    # admin token still force-releases. Reverting `admin?/1` to the write fold
+    # reds the first of the three and only the first — the refusal is the
+    # behaviour that changed.
+    test "a write-only token is REFUSED the release of another editor's lock", %{
+      conn: conn,
+      other_token: other_token
+    } do
+      created = upload_asset(conn)
+      id = created["result"]["id"]
+
+      held =
+        conn
+        |> authed()
+        |> post(~p"/v1/media/production/#{id}/checkout")
+        |> json_response(200)
+
+      # CONTROL on the setup, not just the verdict: the lock must actually be
+      # held by SOMEONE ELSE, or a 200 below would prove nothing (an unheld
+      # asset releases for anybody via the `holder in [nil, ""]` branch).
+      assert held["result"]["asset"]["checkedOutBy"] == "dev"
+
+      refused =
+        conn
+        |> other_editor(other_token)
+        |> post(~p"/v1/media/production/#{id}/undo-checkout")
+
+      assert refused.status == 403,
+             "a write-only token force-released another editor's lock: " <>
+               "#{refused.status} #{refused.resp_body}"
+
+      assert Jason.decode!(refused.resp_body)["error"]["code"] == "forbidden"
+
+      # And the lock SURVIVED the refused attempt.
+      still =
+        conn
+        |> authed()
+        |> get(~p"/v1/media/production/#{id}")
+        |> json_response(200)
+
+      assert still["result"]["asset"]["checkedOutBy"] == "dev"
+
+      cleanup(created)
+    end
+
+    test "a write-only token releases its OWN lock", %{conn: conn, other_token: other_token} do
+      created = upload_asset(conn)
+      id = created["result"]["id"]
+
+      held =
+        conn
+        |> other_editor(other_token)
+        |> post(~p"/v1/media/production/#{id}/checkout")
+        |> json_response(200)
+
+      assert held["result"]["asset"]["checkedOutBy"] == "other-editor"
+
+      released =
+        conn
+        |> other_editor(other_token)
+        |> post(~p"/v1/media/production/#{id}/undo-checkout")
+        |> json_response(200)
+
+      assert released["result"]["asset"]["checkedOutBy"] in [nil, ""]
+
+      cleanup(created)
+    end
+
+    test "an admin token force-releases another editor's lock", %{
+      conn: conn,
+      other_token: other_token
+    } do
+      created = upload_asset(conn)
+      id = created["result"]["id"]
+
+      held =
+        conn
+        |> other_editor(other_token)
+        |> post(~p"/v1/media/production/#{id}/checkout")
+        |> json_response(200)
+
+      assert held["result"]["asset"]["checkedOutBy"] == "other-editor"
+
+      released =
+        conn
+        |> authed()
+        |> post(~p"/v1/media/production/#{id}/undo-checkout")
+        |> json_response(200)
+
+      assert released["result"]["asset"]["checkedOutBy"] in [nil, ""]
+
+      cleanup(created)
+    end
+
     test "checked-out asset blocks metadata edit for other editors", %{
       conn: conn,
       other_token: other_token

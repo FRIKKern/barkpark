@@ -3,12 +3,13 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
 
   alias Barkpark.StudioChat.Runtime.Codex
   alias Barkpark.StudioChat.Runtime.Event
+  alias Barkpark.TestTmp
 
   @fake_app_server Path.expand("../../../fixtures/codex_app_server/fake_app_server.py", __DIR__)
 
   defp fake_app_server(mode \\ :normal) do
     id = System.unique_integer([:positive])
-    log = Path.join(System.tmp_dir!(), "codex_app_server_fake_#{id}.jsonl")
+    log = TestTmp.path("codex_app_server_fake_#{id}.jsonl")
 
     on_exit(fn -> File.rm(log) end)
 
@@ -160,8 +161,8 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
 
   test "session startup rejects an incompatible app-server before initialize" do
     id = System.unique_integer([:positive])
-    binary = Path.join(System.tmp_dir!(), "codex_incompatible_#{id}.sh")
-    marker = Path.join(System.tmp_dir!(), "codex_incompatible_#{id}.started")
+    binary = TestTmp.path("codex_incompatible_#{id}.sh")
+    marker = TestTmp.path("codex_incompatible_#{id}.started")
 
     File.write!(binary, """
     #!/bin/sh
@@ -192,7 +193,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
     # no reassembly cap this pins `state.buffer` and every caller hangs to timeout;
     # with the cap the port is closed and the pending turn fails `:buffer_overflow`.
     id = System.unique_integer([:positive])
-    binary = Path.join(System.tmp_dir!(), "codex_flood_#{id}.sh")
+    binary = TestTmp.path("codex_flood_#{id}.sh")
 
     File.write!(binary, """
     #!/bin/sh

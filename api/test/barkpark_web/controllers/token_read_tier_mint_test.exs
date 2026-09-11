@@ -202,10 +202,21 @@ defmodule BarkparkWeb.TokenReadTierMintTest do
 
     resp = get(bearer(conn, receipt["token"]), query_path(ws_b, proj_b, private_b))
 
-    assert resp.status in [403, 404],
+    # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+    # Both it and the permission-tier gates answer 403 with code "forbidden", so
+    # `reason` is the ONLY discriminator: the membership arm carries
+    # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+    # old assertion accepted any of three statuses — unauthorized, forbidden or
+    # not-found — so it was green on a deleted route and on a lost
+    # authentication too.
+    assert resp.status == 403,
            "a workspace-A [\"read\"] token answered #{resp.status} on workspace B's PRIVATE " <>
              "schema #{private_b} — the read tier is only shippable because it is " <>
              "workspace-bound, and this is the boundary"
+
+    err = Jason.decode!(resp.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    assert err["reason"] == "not_a_member"
   end
 
   test "public-read stays the DEFAULT, and it does NOT read a private schema",

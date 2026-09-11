@@ -238,7 +238,14 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
 
         assert Auth.verify_token(raw) == {:error, :unauthorized}
       else
-        assert conn.status in [401, 422]
+        # WHICH GATE: request VALIDATION — 422 `unprocessable`. Not 401: the caller
+        # is authenticated and the credential was accepted. The old assertion
+        # accepted unauthorized or unprocessable alike, which is the difference
+        # between "the token was rejected" and "the token was accepted and the
+        # body was not".
+        assert conn.status == 422
+        err = Jason.decode!(conn.resp_body)["error"]
+        assert err["code"] == "unprocessable"
       end
     end
 

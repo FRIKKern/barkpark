@@ -470,4 +470,132 @@ defmodule BarkparkCloud.ContentSecretMintTest do
     assert b =~ ~r/\A[A-Za-z0-9_-]+\z/
     refute a == b
   end
+
+  ## 6. A registration that FAILED is retryable, observable, and never duplicates
+
+  describe "a mint whose box write failed" do
+    test "keeps its ciphertext, writes nothing on an unreadable list, and the hourly sweep then arms it with exactly ONE POST" do
+      # THE CRITERION, word for word: "failed registrations remain retryable and
+      # observable without duplicating webhooks or losing the previous encrypted
+      # secret". Three separate claims, and the dangerous one is the THIRD: the
+      # mint's box half runs OUTSIDE the transaction that committed the secret,
+      # so a box that refuses leaves a site whose row says `present` while
+      # nothing is registered. That state must be recoverable by the NEXT actor
+      # without a second credential and without a second webhook row.
+      bp = live_bp()
+      StudioLinkFakeHttpClient.program([])
+      site = secretless_site(bp)
+      operator = operator_fixture()
+
+      # PHASE 1 — the box's webhook list is UNREADABLE (no `webhooks` key). That
+      # is `:unknown`, never `:absent`, so the registration must refuse to write
+      # at all rather than risk a duplicate row it cannot see.
+      StudioLinkFakeHttpClient.program(%{})
+
+      conn = mint_via_route(operator)
+      assert conn.status == 200
+
+      # OBSERVABLE: `registered` (0) is short of `minted` (1). The tally is the
+      # only place this shows — the secret write itself succeeded.
+      assert Jason.decode!(conn.resp_body) == %{
+               "swept" => 1,
+               "minted" => 1,
+               "registered" => 0,
+               "skipped" => 0,
+               "errored" => 0
+             }
+
+      failed = Repo.reload!(site)
+      refute is_nil(failed.content_webhook_secret_encrypted)
+      assert {:ok, secret} = Registry.reveal_site_content_secret(failed)
+
+      # NO WRITE ON A FAILED READ. "I could not look" does not authorize a POST.
+      assert writes(:post) == []
+      assert writes(:put) == []
+
+      ciphertext = failed.content_webhook_secret_encrypted
+
+      # RETRYABLE: the site left the mint population and entered the sweep's,
+      # which is what makes the hourly reconciler — not a second operator call —
+      # the retry path.
+      assert Registry.list_sites_missing_content_secret() == []
+      assert failed.id in Enum.map(Registry.list_content_webhook_sites(), & &1.id)
+
+      # PHASE 2 — the box answers. The sweep registers the row, ONCE, with the
+      # secret the mint already committed.
+      StudioLinkFakeHttpClient.program(box_listing([]))
+
+      assert Registry.reconcile_content_webhooks() ==
+               %{swept: 1, registered: 1, present: 0, skipped: 0, errored: 0}
+
+      posts = writes(:post)
+      assert length(posts) == 1
+      body = Jason.decode!(hd(posts).body)
+      assert body["name"] == "site-autodeploy-#{site.id}"
+
+      # THE SECRET WAS NOT LOST AND NOT ROTATED: the row the box now carries is
+      # signed with the ciphertext phase 1 committed, byte for byte.
+      assert body["secret"] == secret
+      assert Repo.reload!(site).content_webhook_secret_encrypted == ciphertext
+
+      # PHASE 3 — run the retry again against a box that now HAS the row. No
+      # second POST (that is the duplicate this whole path exists to avoid) and
+      # no PUT either: `:reconcile` never re-asserts a row someone may have
+      # disabled on purpose.
+      StudioLinkFakeHttpClient.program(box_listing(["site-autodeploy-#{site.id}"]))
+
+      assert Registry.reconcile_content_webhooks() ==
+               %{swept: 1, registered: 0, present: 1, skipped: 0, errored: 0}
+
+      assert writes(:post) == []
+      assert writes(:put) == []
+      assert Repo.reload!(site).content_webhook_secret_encrypted == ciphertext
+      assert length(audit_rows("site.content_secret_minted")) == 1
+    end
+
+    test "a box answering 500 leaves the secret intact and the operator retry mints nothing" do
+      # The SECOND retry path, and the one that must NOT work: re-running the
+      # operator verb. A retry must never mint a second credential — the box row
+      # (when one did get written) carries the first, so a rotation would kill
+      # the site silently. The guard is the population query, which is keyed on
+      # the SECRET and not on whether registration succeeded, so a site whose
+      # box write failed is permanently out of the mint population.
+      bp = live_bp()
+      StudioLinkFakeHttpClient.program([])
+      site = secretless_site(bp)
+      operator = operator_fixture()
+
+      # The box refuses everything on the webhook path with a 500. The LIST read
+      # of a 500 body carries no `webhooks` key, so this is the `:unknown` arm's
+      # sibling reached from the other side — either way the registration is
+      # `:error` and the committed secret must survive it.
+      StudioLinkFakeHttpClient.program(%{
+        "/v1/webhooks/production" => {:ok, %{status: 500, body: ~s({"error":"boom"})}}
+      })
+
+      conn = mint_via_route(operator)
+      assert conn.status == 200
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "swept" => 1,
+               "minted" => 1,
+               "registered" => 0,
+               "skipped" => 0,
+               "errored" => 0
+             }
+
+      failed = Repo.reload!(site)
+      ciphertext = failed.content_webhook_secret_encrypted
+      refute is_nil(ciphertext)
+      assert Registry.publish_trigger(failed) == :present
+
+      # THE RETRY MINTS NOTHING — the site is out of the mint population for
+      # good, so no second credential can ever be issued for it.
+      StudioLinkFakeHttpClient.program(box_listing([]))
+      assert mint_via_route(operator).status == 200
+      assert Jason.decode!(mint_via_route(operator).resp_body)["swept"] == 0
+      assert Repo.reload!(site).content_webhook_secret_encrypted == ciphertext
+      assert length(audit_rows("site.content_secret_minted")) == 1
+    end
+  end
 end

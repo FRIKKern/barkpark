@@ -320,6 +320,17 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "no console surface uploads artifacts. Flip: a console artifact upload ships."
     },
     %{
+      code: "artifact_quota_exceeded",
+      site: "router.ex start_prebuilt_deploy (POST /v1/sites/:id/deployments/:dep_id/artifact)",
+      reason:
+        "CLI-only: the PER-TEAM ceiling on stored artifact bytes, refused on the same " <>
+          "bp prebuilt upload path as its three siblings above; zero app.js callers of " <>
+          "the artifact route. A 429 here tells a machine to let its in-flight deploys " <>
+          "settle (the reaper frees the bytes) or to raise ARTIFACT_QUOTA_BYTES — both " <>
+          "operator/CI moves, not console ones. Flip: a console artifact upload ships, " <>
+          "or the console grows a storage-usage surface that must name this ceiling."
+    },
+    %{
       code: "artifact_too_large",
       site:
         "router.ex receive_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
@@ -1110,6 +1121,15 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "the not-a-member sentence owed."
     },
     %{
+      code: "resume_failed",
+      site: "router.ex POST /v1/operator/teams/:id/billing/resume",
+      reason:
+        "Operator-tier: the billing-suspension lift is gated on the platform-admin " <>
+          "allowlist (charter D30's permanent human gate); app.js never calls it, and " <>
+          "the 502 relays only the status-keyed billing_reason/1 summary, never the " <>
+          "raw Stripe body. Flip: a console operator billing view ships."
+    },
+    %{
       code: "send_failed",
       site: "router.ex test_email (POST /v1/notifications/test)",
       reason:
@@ -1123,6 +1143,15 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
       reason:
         "CLI-only: the poll pacing answer belongs to bp login's loop; the console " <>
           "never polls the device route. Flip: a console polling flow ships."
+    },
+    %{
+      code: "subscription_unpaid",
+      site: "router.ex POST /v1/operator/teams/:id/billing/resume",
+      reason:
+        "Operator-tier: the refusal half of the billing-suspension lift — the payment " <>
+          "gateway does not report the payer as current. Same platform-admin gate as " <>
+          "resume_failed above; the body carries gateway_status + a remedy for the " <>
+          "human reading it. Flip: a console operator billing view ships."
     },
     %{
       code: "ticket_mint_failed",
@@ -1364,6 +1393,45 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "coded 404 for a deleted webhook, discriminated server-side; the panel " <>
           "caller's fallback renders. Flip: a wave rules the deleted-webhook " <>
           "sentence owed."
+    },
+    # -------------------------------------------------------------- site-rebind arm
+    # site-spawner `site-rebind-content`: PATCH /v1/sites/:id gained a content-
+    # binding arm (workspace+project+dataset together, re-minting the scope-bound
+    # public-read token). It ships SERVER-SIDE ONLY — app.js has no rebind control
+    # on the site settings panel, which posts theme/doc_type/prebuilt_enabled and
+    # nothing else. Every row here flips the moment that control ships.
+    %{
+      code: "content_binding_not_applicable",
+      site: "router.ex rebind_site_content (PATCH /v1/sites/:id, rebind arm)",
+      reason:
+        "UNREACHABLE from the console today: no app.js caller sends workspace/" <>
+          "project/dataset on the settings PATCH, so the rebind arm is never entered, " <>
+          "and this refusal additionally needs a CONTAINER site (which has no binding " <>
+          "to move). CLI/API only. Flip: a console rebind control ships — it must then " <>
+          "hide the control on container sites AND read this code."
+    },
+    %{
+      code: "read_token_inventory_unreadable",
+      site: "router.ex rebind_site_content (PATCH /v1/sites/:id, rebind arm)",
+      reason:
+        "UNREACHABLE from the console today (no app.js rebind caller). A 502 raised " <>
+          "when the box's token inventory cannot be listed, so the incumbent read " <>
+          "credential cannot be NAMED before the replacement is minted; the request " <>
+          "refuses having changed nothing. Operator-facing, retryable. Flip: a console " <>
+          "rebind control ships — this 502 is the one a user WILL hit on a flaky box, " <>
+          "so it owes a sentence then."
+    },
+    %{
+      code: "rebind_ability_required",
+      site: "router.ex PATCH /v1/sites/:id (rebind ability cond arm)",
+      reason:
+        "UNREACHABLE from the console BY CONSTRUCTION, not merely by absence: a " <>
+          "browser session carries [\"root\"], which satisfies the deploy-or-root gate, " <>
+          "so a console caller could never be refused by it even once the control " <>
+          "ships. It exists to refuse a bare `write` PAT, which is a CLI credential. " <>
+          "The sibling deploy_ability_required IS read only because its slug is quoted " <>
+          "in app.js's shared 403 branch. Flip: the console ever authenticates with a " <>
+          "non-root credential."
     }
   ]
 

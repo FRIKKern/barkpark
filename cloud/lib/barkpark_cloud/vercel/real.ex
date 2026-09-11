@@ -22,6 +22,14 @@ defmodule BarkparkCloud.Vercel.Real do
   returned code (24h validity) parameterises the user-facing
   `vercel.com/claim-deployment?code=…` URL.
 
+  `claimed?/1` is the seam's ONE read (cch-w48): `GET /v9/projects/:id` with
+  OUR platform token. While the project is still ours the call answers 200 with
+  the project body; once the user completes the claim the project belongs to
+  their team and our token can no longer see it — Vercel answers 404. So a 404
+  is the transfer-completed signal and nothing else is: any other status (401,
+  403, 5xx, a transport failure) returns `{:error, …}`, which the console must
+  render as "we cannot tell" rather than as either answer.
+
   A team-scoped platform token needs `?teamId=` on every call; `team_id` config
   is optional and appended when present.
 
@@ -67,6 +75,20 @@ defmodule BarkparkCloud.Vercel.Real do
          {:ok, decoded} <- request(transfer_request_request(token, project_id)) do
       case decoded do
         %{"code" => code} when is_binary(code) -> {:ok, code}
+        _ -> {:error, :unexpected_response}
+      end
+    end
+  end
+
+  @impl true
+  def claimed?(project_id) when is_binary(project_id) do
+    with {:ok, token} <- token() do
+      case request(project_request(token, project_id)) do
+        # Still visible to our platform token → the transfer has NOT happened.
+        {:ok, %{"id" => _}} -> {:ok, false}
+        # Gone from our team → the user completed the irreversible claim.
+        {:error, {:vercel_http_error, 404, _}} -> {:ok, true}
+        {:error, _} = err -> err
         _ -> {:error, :unexpected_response}
       end
     end
@@ -124,6 +146,20 @@ defmodule BarkparkCloud.Vercel.Real do
       "/v9/projects/" <> URI.encode(project_id) <> "/transfer-request",
       token,
       Jason.encode!(%{}),
+      "application/json"
+    )
+  end
+
+  @doc """
+  `GET /v9/projects/:id` — the claim-completion read. 200 means the project is
+  still in OUR platform team; 404 means it has been transferred away. PURE.
+  """
+  def project_request(token, project_id) do
+    build_request(
+      :get,
+      "/v9/projects/" <> URI.encode(project_id),
+      token,
+      "",
       "application/json"
     )
   end

@@ -540,6 +540,29 @@ them or from what content. HEALTH is unchanged and still certifies integrity and
 identity only; provenance (`source=prebuilt`, the digest, the uploading
 principal) lives on the deployment record.
 
+**A prebuilt release cannot be rebuilt from the box — keep the artifact.** This
+is a property of the lane, not a bug: the whole point is that no source travels,
+so the release dir holds the OUTPUT and nothing to regenerate it from. Its `src/`
+carries no provenance, and `site-deploy.sh` refuses to rebuild a prebuilt release
+outright — a template rebuild would pass HEALTH on genuine markers and go live
+with the WRONG bytes, so it fails closed instead and says `re-upload required`.
+Practical consequences, for a site with no template binding:
+
+* **The only recovery is RE-UPLOAD.** A failed HEALTH gate, a lost release dir, a
+  restore onto a fresh box — all of them need the artifact again. The box cannot
+  produce it.
+* **A rollback ONTO a prebuilt release still works** (it is a symlink flip over
+  bytes that are already there), but a rollback onto one whose health gate FAILED
+  is refused with `no_previous`, naming re-upload as the move.
+* **So the artifact is the backup.** Keep the `dist/` you shipped — in CI
+  artifacts, an object store, anywhere but only the laptop that built it. If that
+  laptop is the sole copy, the site is one disk failure from unrecoverable.
+
+The box says this too, in the build log the deployment names: a prebuilt deploy
+runs no build, so `DeployRunner` writes the run's provenance there itself —
+the digest, the staged path, and this unreproducible-release warning — instead of
+leaving the deployment pointing at an empty file.
+
 ### The proof script
 
 `deploy/site-spawner-live-proof.sh` drives that whole journey against the live

@@ -21,8 +21,8 @@ import { fileURLToPath } from "node:url";
 
 import {
   runRerun, classifyHttp, classifySafety, classifyScope, mixEnvOf, isBuildWarm, probeHttp,
-  blankQuotedSpans, classifyFamily, classifySilence,
-  admitsPassClaim, admitsAbsenceClaim, assertAbsenceClaim,
+  blankQuotedSpans, classifyFamily, classifySilence, isSilentByDesign,
+  admitsPassClaim, admitsAbsenceClaim, assertAbsenceClaim, classifyToolchainFault,
   VERDICT, SCOPE, FAMILY, GripError,
 } from "../rerun.mjs";
 
@@ -360,6 +360,85 @@ test("the three rc128 semantics are ruled apart by MESSAGE, never by the code", 
   const decayed = [pathGone, refGone, wrongCwd, unknown]
     .filter((r) => admitsAbsenceClaim({ ...r, absenceEligible: r.absenceEligible }));
   assert.equal(decayed.length, 1, "exactly ONE of the four rc128 shapes may be read as decay");
+});
+
+// ── 3c-bis. SILENT BY DESIGN, and git grep's rc128 ───────────────────────────
+
+test("a silent-by-design predicate answers with its exit code — silence is NOT a null read", () => {
+  // DETECTOR for pds-w28. Both spellings were measured on this host: `git
+  // cat-file -e <ref>:<path>` exits 0 present / 128 absent, `grep -q` exits 0
+  // match / 1 no-match, and BOTH print nothing at exit 0 by contract. Before
+  // the rule, the first hit CONTENT-FETCH's "exited 0 but returned no bytes"
+  // and the second hit MATCHER's "grep exited 0 (match) yet produced no output".
+  const exists = classifySilence("git cat-file -e origin/main:README.md", { exit: 0, stdout: "" });
+  assert.equal(exists.verdict, VERDICT.OK);
+  assert.match(exists.reason, /the existence check passed/);
+
+  const quiet = classifySilence("grep -q NEEDLE notes.md", { exit: 0, stdout: "" });
+  assert.equal(quiet.verdict, VERDICT.OK);
+  assert.match(quiet.reason, /exit code alone/);
+  // clustered and long spellings are the same flag
+  assert.equal(classifySilence("grep -rqi NEEDLE lib/", { exit: 0, stdout: "" }).verdict, VERDICT.OK);
+
+  // THE OTHER DIRECTION — the suppression must stay NARROW. Without the flag
+  // that demands silence, an empty rc0 is still the D6 defect.
+  assert.equal(classifySilence("grep -n NEEDLE notes.md", { exit: 0, stdout: "" }).verdict, VERDICT.NULL_READ);
+  // `cat-file -t` PRINTS the type, so its empty rc0 is still a broken read.
+  assert.equal(classifySilence("git cat-file -t origin/main:README.md", { exit: 0, stdout: "" }).verdict, VERDICT.NULL_READ);
+  assert.equal(isSilentByDesign("grep -n NEEDLE notes.md"), false);
+  assert.equal(isSilentByDesign("git cat-file -e origin/main:x"), true);
+
+  // The absent path keeps its PATH-GONE ruling — the fix does not turn a real
+  // decay signal into a pass.
+  const gone = classifySilence("git cat-file -e origin/main:no/such/file.sh", {
+    exit: 128, stdout: "", stderr: "fatal: path 'no/such/file.sh' does not exist in 'origin/main'",
+  });
+  assert.equal(gone.verdict, VERDICT.FAILED);
+  assert.match(gone.reason, /the ref resolved and the path is NOT in it/);
+});
+
+test("git grep is a MATCHER, and its rc128 reaches the git UNAVAILABLE rules", () => {
+  // DETECTOR for pds-w29. `git grep` was in NEITHER MATCHER_HEADS (a bare-head
+  // set) nor GIT_LISTERS, so it fell to FAMILY.UNKNOWN, whose default branch
+  // rules ANY nonzero exit FAILED with absenceEligible:true. rc128 — an
+  // unresolvable ref, a missing repo — was therefore admitted as a PROVEN
+  // ABSENCE: an environment fault laundered into evidence, inside the tool
+  // built to abolish exactly that. census.mjs's own classifier had said MATCHER
+  // all along; rerun.mjs disagreed with it.
+  assert.equal(classifyFamily("git grep -n NEEDLE origin/main -- tooling/grip"), FAMILY.MATCHER);
+  assert.equal(classifyFamily("git -C /tmp grep -n NEEDLE origin/main"), FAMILY.MATCHER);
+
+  const badRef = classifySilence("git grep -n NEEDLE origin/no-such-branch", {
+    exit: 128, stdout: "",
+    stderr: "fatal: ambiguous argument 'origin/no-such-branch': unknown revision or path not in the working tree.",
+  });
+  assert.equal(badRef.verdict, VERDICT.UNAVAILABLE);
+  assert.match(badRef.reason, /the ref could not be resolved here/);
+  assert.equal(admitsAbsenceClaim(badRef), false, "an unresolvable ref may NEVER become a proven absence");
+
+  const noRepo = classifySilence("git grep -n NEEDLE", {
+    exit: 128, stdout: "", stderr: "fatal: not a git repository (or any of the parent directories): .git",
+  });
+  assert.equal(noRepo.verdict, VERDICT.UNAVAILABLE);
+  assert.equal(admitsAbsenceClaim(noRepo), false);
+
+  // NOT OVER-REFUSING: a token genuinely absent at a resolvable ref is rc1 with
+  // no stderr, and that is still an honest, admissible absence.
+  const honest = classifySilence("git grep -n NEEDLE origin/main -- tooling/grip", { exit: 1, stdout: "", stderr: "" });
+  assert.equal(honest.verdict, VERDICT.FAILED);
+  assert.match(honest.reason, /a genuine no-match/);
+  assert.equal(admitsAbsenceClaim(honest), true, "a real no-match at a resolvable ref is still an answer");
+
+  // and a hit is a hit
+  assert.equal(classifySilence("git grep -n NEEDLE origin/main", { exit: 0, stdout: "f:1:NEEDLE" }).verdict, VERDICT.OK);
+});
+
+test("the two rules compose: `git grep -q` needs the family entry AND the silence rule", () => {
+  // Deliberately kept apart from the two detectors above so each of them
+  // isolates one fix under mutation; this one is red if EITHER is reverted.
+  const r = classifySilence("git grep --quiet NEEDLE origin/main -- tooling/grip", { exit: 0, stdout: "" });
+  assert.equal(r.family, FAMILY.MATCHER);
+  assert.equal(r.verdict, VERDICT.OK);
 });
 
 // ── 3d. the family is read from the HEAD TOKEN of the last pipeline stage ────
@@ -979,4 +1058,118 @@ test("an Elixir/Erlang inline program cannot write through its own stdlib", () =
   ]) {
     assert.equal(classifySafety(cmd).safe, false, `MUST REFUSE: ${cmd}`);
   }
+});
+
+// ── A TOOLCHAIN FAULT IS NOT A REFUTATION ────────────────────────────────────
+//
+// THE SPECIMEN, captured verbatim from this host on 2026-09-10 (origin/main
+// bb175f130) by running the recipe the ledger actually carries:
+//
+//   $ go test ./internal/cli -run TestSiteClaimsAreProbedWithResponseTypes
+//   FAIL	github.com/FRIKKern/barkpark/internal/cli [build failed]
+//   FAIL
+//   # runtime/cgo                                    (stderr)
+//   error: unknown option '-E'                       (stderr)
+//   exit 1
+//
+// and its CONTROL, captured the same way in a scratch module, so the two shapes
+// are measured side by side rather than imagined:
+//
+//   $ CGO_ENABLED=0 go test ./...
+//   --- FAIL: TestGenuineFailure (0.00s)
+//       p_test.go:5: boom: assertion did not hold
+//   FAIL	probe	0.152s
+//   exit 1
+//
+// BOTH EXIT 1. Any rule keyed on the exit code alone rules them identically,
+// which is exactly what FAMILY.UNKNOWN's default branch did: FAILED, and FAILED
+// travels to tooling/pds/adjudicate.mjs as REFUTED / "PASS-CONTRADICTED" — *the
+// command ran and REFUTES the claim* — for a binary that was never built.
+
+const GO_BUILD_FAULT = {
+  exit: 1,
+  stdout: "FAIL\tgithub.com/FRIKKern/barkpark/internal/cli [build failed]\nFAIL\n",
+  stderr: "# runtime/cgo\nerror: unknown option '-E'\n",
+};
+
+const GO_GENUINE_FAILURE = {
+  exit: 1,
+  stdout: "--- FAIL: TestGenuineFailure (0.00s)\n    p_test.go:5: boom: assertion did not hold\nFAIL\nFAIL\tprobe\t0.152s\nFAIL\n",
+  stderr: "",
+};
+
+test("a behaviour recipe that failed to BUILD is UNAVAILABLE, never a refutation", () => {
+  const cmd = "go test ./internal/cli -run TestSiteClaimsAreProbedWithResponseTypes";
+  const r = classifySilence(cmd, GO_BUILD_FAULT);
+
+  assert.equal(r.verdict, VERDICT.UNAVAILABLE, "a build fault says NOTHING about the claim");
+  assert.notEqual(r.verdict, VERDICT.FAILED, "FAILED is what adjudicate.mjs turns into PASS-CONTRADICTED");
+  assert.equal(r.absenceEligible, false);
+  assert.match(r.reason, /never reached an assertion/);
+
+  // The admissibility seam is the property that actually matters: this result
+  // may support NEITHER a pass NOR an absence, so PDS's ruleExecuted falls
+  // through to INCONCLUSIVE instead of REFUTED.
+  assert.equal(admitsPassClaim(r), false);
+  assert.equal(admitsAbsenceClaim({ ...r }), false);
+});
+
+test("a genuinely FAILING test still refutes — the discriminator is not the exit code", () => {
+  const cmd = "go test ./internal/cli -run TestGenuineFailure";
+  const r = classifySilence(cmd, GO_GENUINE_FAILURE);
+
+  assert.equal(r.verdict, VERDICT.FAILED, "an assertion that did not hold IS a refutation");
+  assert.equal(GO_BUILD_FAULT.exit, GO_GENUINE_FAILURE.exit,
+    "both specimens exit 1 — if this ever diverges the pair stops proving anything");
+  assert.equal(classifyToolchainFault(cmd, GO_GENUINE_FAILURE), null,
+    "no build marker in a run that reached its assertions");
+});
+
+test("the fault rule is inert at exit 0 and on a non-toolchain head", () => {
+  // It can only ever DEMOTE a nonzero run. It never manufactures a fault.
+  assert.equal(classifyToolchainFault("go test ./...", { exit: 0, stdout: "ok\tprobe\t0.1s\n", stderr: "" }), null);
+  assert.equal(classifyToolchainFault("go test ./...", { exit: null, stdout: "", stderr: "" }), null);
+  // grep is not a toolchain: its rc1 is a genuine no-match and must stay FAILED.
+  assert.equal(classifyToolchainFault("grep -rn '[build failed]' logs/", { exit: 1, stdout: "", stderr: "" }), null);
+  const grep = classifySilence("grep -rn foo lib/", { exit: 1, stdout: "", stderr: "" });
+  assert.equal(grep.verdict, VERDICT.FAILED, "a real no-match is untouched by the toolchain rule");
+  assert.equal(admitsAbsenceClaim(grep), true);
+});
+
+test("the marker table is keyed BY HEAD — one toolchain's banner does not speak for another", () => {
+  // `node --test` prints whatever a FIXTURE contains. A JS suite whose fixture
+  // holds Go's build banner must not be read as a Go build failure, or grip's
+  // own test output becomes an environment fault.
+  const nodePrintingGoBanner = { exit: 1, stdout: "not ok 12 - FAIL\tprobe [build failed]\n", stderr: "" };
+  assert.equal(classifyToolchainFault("node --test tooling/grip/test/rerun.test.mjs", nodePrintingGoBanner), null,
+    "Go's banner is not in node's marker list");
+  // …while node's OWN resolution fault is caught.
+  assert.match(
+    String(classifyToolchainFault("node --test tooling/grip/test/x.test.mjs",
+      { exit: 1, stdout: "", stderr: "Error: Cannot find module '/x/y.mjs'\n" })),
+    /module could not be resolved/,
+  );
+});
+
+test("the fault rule reaches every toolchain family, not just UNKNOWN", () => {
+  // `go build` is a GO_LISTER → FAMILY.QUERY-LISTER, whose nonzero branch is a
+  // flat `exited N` FAILED. A cgo fault there was laundered exactly the same
+  // way, so the rule had to sit ABOVE the family switch rather than inside a
+  // case.
+  const build = classifySilence("go build ./internal/cli", {
+    exit: 1, stdout: "", stderr: "# runtime/cgo\nerror: unknown option '-E'\n",
+  });
+  assert.equal(build.family, FAMILY.QUERY_LISTER);
+  assert.equal(build.verdict, VERDICT.UNAVAILABLE);
+
+  const mix = classifySilence("mix test test/foo_test.exs", {
+    exit: 1, stdout: "", stderr: "== Compilation error in file lib/foo.ex ==\n",
+  });
+  assert.equal(mix.verdict, VERDICT.UNAVAILABLE);
+
+  // …and a mix run that reached its assertions is still a refutation.
+  const mixReal = classifySilence("mix test test/foo_test.exs", {
+    exit: 1, stdout: "  1) test it works (FooTest)\n1 test, 1 failure\n", stderr: "",
+  });
+  assert.equal(mixReal.verdict, VERDICT.FAILED);
 });

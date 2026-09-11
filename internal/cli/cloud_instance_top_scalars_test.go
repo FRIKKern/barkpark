@@ -15,8 +15,9 @@ package cli
 // build is the failure mode this file exists to end.
 //
 // The envelope numbers are guerrilla's calibration state (2026-08-06): swap 93%
-// of 2 GB, load 2.64 per core on 2 cores, disk unread — the state in which the
-// box answered 6,472 HTTP 500s while `bp cloud status` called it ok/healthy.
+// of 2 GB, load 2.64 per core on 2 cores, disk unread. Around that reading the
+// box answered 6,472 HTTP 500s in eight hours while `bp cloud status` called
+// it ok/healthy — an eight-hour journal total, not a level the snapshot holds.
 
 import (
 	"os"

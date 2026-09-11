@@ -137,7 +137,12 @@ defmodule BarkparkWeb.SharedTypedLeafAuthoringTest do
 
     assert studio_html =~ ~s(id="field-number-form-number")
     assert studio_html =~ ~s(value="4.5")
-    assert studio_html =~ ~s(value="Updated author")
+
+    assert has_element?(
+             studio,
+             ~s(#blockquote-form-quote cite textarea[name="cite"][aria-label="Quote attribution"]),
+             "Updated author"
+           )
 
     save_form(studio, "equation", %{"tex" => "x^4"})
     assert by_id(stored_blocks(ctx), "equation")["tex"] == "x^4"
@@ -146,6 +151,12 @@ defmodule BarkparkWeb.SharedTypedLeafAuthoringTest do
     {:ok, reloaded, _html} = live(remount_conn, public_path)
     render_click(reloaded, "paper-toggle-edit", %{})
     assert socket_of(reloaded).assigns.edit_blocks == stored_blocks(ctx)
+
+    assert has_element?(
+             reloaded,
+             ~s(#blockquote-form-quote textarea[name="cite"]),
+             "Updated author"
+           )
   end
 
   test "public and Studio reject malformed numeric edits without advancing revision", ctx do

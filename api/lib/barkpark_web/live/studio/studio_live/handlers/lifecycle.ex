@@ -201,8 +201,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
 
   def document_changed(%{type: type} = msg, socket) do
     viewing_type = socket.assigns[:editor_type] || Enum.at(socket.assigns.nav_path, 0)
+    ws_id = socket.assigns[:current_workspace] && socket.assigns.current_workspace.id
 
     cond do
+      # task-be3b3aa6da5df3a2 (instance 6, the half that is in reach) — THE
+      # CONSUMER-SIDE FENCE on the GLOBAL document stream. `Shared.list_topic/2`
+      # already prefers `documents:ws:<id>:<dataset>` when a workspace is
+      # resolved, but its fallback clause rides `documents:<dataset>`, which
+      # `Content.Broadcast` fires UNCONDITIONALLY for every tenant (the
+      # workspace-keyed twin is conditional on `doc.workspace_id`). The payload
+      # already carries `:workspace_id`, so this socket can refuse a foreign
+      # tenant's frame without any change to the producer.
+      not Shared.own_tenant?(msg, ws_id) ->
+        {:noreply, socket}
+
       # Our OWN write — the handle_event that performed it already refreshed our
       # state, so a broadcast-driven `rebuild_panes` (a fresh DB reload) is both
       # redundant AND, in tests, an in-flight query that outlives the test that

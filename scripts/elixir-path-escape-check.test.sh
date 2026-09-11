@@ -1416,12 +1416,41 @@ emit("agg_needs", ",".join(agg.get("needs", [])))
 coe = [n for n, j in jobs.items() if j.get("continue-on-error") is True]
 emit("coe_jobs", ",".join(sorted(coe)))
 emit("coe_in_needs", ",".join(sorted(set(coe) & set(agg.get("needs", [])))))
+# THE POST-VERDICT CATEGORY, same shape as scripts/cloud-path-escape-check.test.sh
+# and scripts/security-gate-shape.test.sh. Exactly one kind of blocking job
+# legitimately cannot live in `needs`: a reporter that runs AFTER the aggregator
+# concluded, to carry main's own red to a human. Wiring it in is not a trade-off,
+# it is a CYCLE (elixir-gate -> reporter -> elixir-gate) and GitHub refuses to
+# load it.
+#
+# A PREDICATE, NOT A SKIP LIST — a named exemption goes stale the moment a second
+# reporter is added, and would also exempt a job that merely borrowed the name.
+# Post-verdict iff ALL THREE hold: (1) needs == ["elixir-gate"] EXACTLY, so
+# `needs` is really the cycle and not a wiring decision somebody declined to
+# make; (2) the `if:` starts with an ANCHORED failure() — the loose
+# \bfailure\(\) admits `success() || failure()`, a job that runs on EVERY GREEN
+# wearing post-verdict clothes; (3) it is NOT continue-on-error, so it keeps its
+# own exit-1, which is what the exemption is granted in exchange for. A MUTED
+# reporter is named by post_verdict_muted and never exempted.
+POST_VERDICT_IF = re.compile(r"^failure\(\)(\s|&|$)")
+def post_verdict_shape(j):
+    return (list(j.get("needs") or []) == ["elixir-gate"]
+            and bool(POST_VERDICT_IF.match(str(j.get("if", "")).strip())))
+post_verdict = {n for n, j in jobs.items()
+                if post_verdict_shape(j) and j.get("continue-on-error") is not True}
+post_verdict_muted = {n for n, j in jobs.items()
+                      if post_verdict_shape(j) and j.get("continue-on-error") is True}
+emit("post_verdict_jobs", ",".join(sorted(post_verdict)))
+emit("post_verdict_muted", ",".join(sorted(post_verdict_muted)))
 # …and the mirror hazard, which the allow-set cannot see: a BLOCKING job added
 # to elixir.yml but never wired into `needs`. The aggregator cannot judge a job
-# nobody told it about, so it would green while that job is red.
+# nobody told it about, so it would green while that job is red. Post-verdict
+# jobs are subtracted — they cannot be in `needs` without a cycle, and they are
+# held to the three-part predicate above instead, which is STRICTER, not laxer.
 blocking = {n for n, j in jobs.items()
             if j.get("continue-on-error") is not True and n != "elixir-gate"}
-emit("blocking_not_in_needs", ",".join(sorted(blocking - set(agg.get("needs", [])))))
+emit("blocking_not_in_needs",
+     ",".join(sorted(blocking - set(agg.get("needs", [])) - post_verdict)))
 # D36 — THE OTHER HALF OF THAT GUARD. `blocking_not_in_needs` proves a job
 # reached the aggregator's `needs`. Nothing proved the step body actually
 # JUDGES it, and reaching `needs` alone changes nothing: `needs.<job>.result`
@@ -1552,6 +1581,13 @@ PY
   # and the required context stays green while that job reds — the aggregator's
   # one structural blind spot, closed here rather than left to a reviewer's eye.
   assert_fact blocking_not_in_needs ""
+  # The reporter that carries main's post-merge red to a human is the one
+  # blocking job that cannot be in `needs` (it would be a cycle). It must be
+  # PRESENT, and it must not be MUTED: a continue-on-error reporter cannot
+  # report its own non-delivery, which is the failure this arm exists to make
+  # loud. Both directions are mutation-proven below.
+  assert_fact post_verdict_jobs "report-main-failure"
+  assert_fact post_verdict_muted ""
   # …and every job that IS in needs must actually be judged (D36). Empty means
   # every needs entry survives needs -> env -> decide. The three cardinalities
   # are the anti-vacuity companions: without them a detector that matched
@@ -1591,7 +1627,8 @@ wf = yaml.safe_load(open(src))
 agg = wf["jobs"]["elixir-gate"]
 step = next(s for s in agg["steps"] if "run" in s)
 MODES = ("clean", "needs", "env", "wired",
-         "gate-mixtest-never", "gate-escape-compile", "gate-compound-if")
+         "gate-mixtest-never", "gate-escape-compile", "gate-compound-if",
+         "reporter-muted", "reporter-alwaysruns", "reporter-unwired")
 assert mode in MODES, mode   # a typo'd mode is not a pass
 if mode in ("needs", "env", "wired"):
     # a BLOCKING job (no continue-on-error), wired into the aggregator's needs
@@ -1638,8 +1675,50 @@ if mode == "gate-compound-if":
         'decide "changes (dispatcher)"',
         'decide "compound job"           "${R_COMPOUND}" "${O_TEST}"\n'
         'decide "changes (dispatcher)"', 1)
+# ── the three clauses of the post-verdict predicate, each proven withdrawable ──
+if mode == "reporter-muted":
+    # A muted reporter cannot report its own non-delivery: exemption withdrawn.
+    wf["jobs"]["report-main-failure"]["continue-on-error"] = True
+if mode == "reporter-alwaysruns":
+    # `success() || failure()` runs on EVERY GREEN wearing post-verdict clothes.
+    wf["jobs"]["report-main-failure"]["if"] = "success() || failure()"
+if mode == "reporter-unwired":
+    # A blocking job that merely LOOKS post-verdict because someone deleted its
+    # needs is the mirror hazard, not a reporter.
+    wf["jobs"]["report-main-failure"]["needs"] = []
 yaml.safe_dump(wf, open(dst, "w"))
 PY
+  # fact_mutation <mode> <fact key> <expected> — the post-verdict predicate is
+  # three clauses, and each one is shown to WITHDRAW the exemption on its own.
+  fact_mutation() {
+    local mode="$1" key="$2" want="$3" f="$TMPROOT/mut-$1.yml" ff="$TMPROOT/mut-$1.facts" got
+    python3 "$MUT" "$WF" "$f" "$mode"
+    python3 "$EMIT" "$f" "$ff"
+    got="$(sed -n "s|^${key}=||p" "$ff")"
+    if [ "$got" = "$want" ]; then
+      ok "  mutation[$mode]: $key = '${got}'"
+    else
+      no "  mutation[$mode]: $key = '${got}', wanted '${want}'"
+    fi
+  }
+  fact_mutation clean              post_verdict_jobs     "report-main-failure"
+  fact_mutation clean              post_verdict_muted    ""
+  fact_mutation clean              blocking_not_in_needs ""
+  # clause (3): muting withdraws the exemption. Its detector is post_verdict_muted,
+  # NOT blocking_not_in_needs — continue-on-error removes the job from `blocking`
+  # in the first place, so that guard stays silent here and must not be read as
+  # cover.
+  fact_mutation reporter-muted     post_verdict_muted    "report-main-failure"
+  fact_mutation reporter-muted     post_verdict_jobs     ""
+  fact_mutation reporter-muted     blocking_not_in_needs ""
+  # clause (2): an unanchored `if:` is refused, and the job falls back into the
+  # mirror guard.
+  fact_mutation reporter-alwaysruns post_verdict_jobs     ""
+  fact_mutation reporter-alwaysruns blocking_not_in_needs "report-main-failure"
+  # clause (1): empty needs is not the cycle.
+  fact_mutation reporter-unwired   post_verdict_jobs     ""
+  fact_mutation reporter-unwired   blocking_not_in_needs "report-main-failure"
+
   # direction <mode> <expected needs_without_decide>
   direction() {
     local mode="$1" want="$2" f="$TMPROOT/mut-$1.yml" ff="$TMPROOT/mut-$1.facts" got

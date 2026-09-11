@@ -646,7 +646,7 @@ defmodule BarkparkWeb.SearchChannelTest do
           "types" => "session"
         })
 
-      assert_reply ref, :ok, reply
+      assert_reply ref, :ok, reply, @reply_timeout
       assert reply.documents == []
       assert reply.count == 0
 
@@ -654,7 +654,7 @@ defmodule BarkparkWeb.SearchChannelTest do
       # the private type (a documents-only filter would leave it as an
       # existence oracle).
       ref2 = push(joined, "query", %{"q" => "wsleakprobe", "seq" => 2, "engine" => "postgres"})
-      assert_reply ref2, :ok, r2
+      assert_reply ref2, :ok, r2, @reply_timeout
 
       ids = Enum.map(r2.documents, & &1["_id"])
       assert "ws-pub-post" in ids
@@ -692,7 +692,7 @@ defmodule BarkparkWeb.SearchChannelTest do
           "types" => "session"
         })
 
-      assert_reply ref, :ok, reply
+      assert_reply ref, :ok, reply, @reply_timeout
       refute "ws-leak-session" in Enum.map(reply.documents, & &1["_id"])
       assert reply.count == 0
     end
@@ -718,7 +718,7 @@ defmodule BarkparkWeb.SearchChannelTest do
           "types" => "session"
         })
 
-      assert_reply ref, :ok, reply
+      assert_reply ref, :ok, reply, @reply_timeout
       assert "ws-leak-session" in Enum.map(reply.documents, & &1["_id"])
       assert reply.count == 1
     end

@@ -31,6 +31,16 @@
 # `rig/render: FAIL — wrapper drift: … now renders ["bp-paper-shellX", …]`;
 # reverting the mutation made it exit 0 again.
 #
+# Re-proved 2026-09-10 (task-4c1373e0ce7af67c) after the wrapper finder stopped
+# reading `<main class={[` as a byte-prefix: deleting the
+# `@article? && "bp-paper-surface"` entry from that same class list made
+# render.exs exit 1 with `wrapper drift: … resolves to ["bp-paper-shell",
+# "bp-paper-article"] … but the rig hand-adds ["bp-paper-shell",
+# "bp-paper-surface", "bp-paper-article"]`; restoring it (file sha256 identical
+# to before the mutation) exited 0. The attribute the LiveView inserted before
+# `class=` — `data-paper-palette` — is now invisible to the check, which is the
+# point: it had been reddening EVERY run, including the rig's own fixture.
+#
 # §Report check — red-before proof (2026-08-17, worktree wf_b92073cc-802-31):
 # `--check` re-captures under the baseline env (SHOT_FORMAT=jpeg
 # SHOT_QUALITY=72 SHOT_WIDTHS=1280,1920) and diffs the fresh report against the

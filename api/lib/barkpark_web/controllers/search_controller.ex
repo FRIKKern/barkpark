@@ -55,7 +55,9 @@ defmodule BarkparkWeb.SearchController do
             # enum to hold a caller to.
             perspective: AnonPerspective.parse(params["perspective"]),
             limit: parse_int(params["limit"], 50) |> min(200) |> max(1),
-            offset: parse_int(params["offset"], 0) |> max(0) |> min(100_000),
+            # ONE offset parse, shared with the analytics recorder so the
+            # recorded offset is by construction the offset SERVED.
+            offset: SearchIntelligence.parse_offset(params),
             engine: params["engine"] || "postgres",
             # Retrieval column projection (search-latency slice a). The SAME
             # `fields=` allowlist the response is projected to below — threaded
@@ -133,7 +135,9 @@ defmodule BarkparkWeb.SearchController do
             # raw param and leaked unpublished content).
             perspective: AnonPerspective.resolve(conn, params),
             limit: parse_int(params["limit"], 50) |> min(200) |> max(1),
-            offset: parse_int(params["offset"], 0) |> max(0) |> min(100_000),
+            # ONE offset parse, shared with the analytics recorder so the
+            # recorded offset is by construction the offset SERVED.
+            offset: SearchIntelligence.parse_offset(params),
             engine: params["engine"] || "postgres",
             # Retrieval column projection (search-latency slice a) — see
             # search_local/2. Threads the response's `fields=` allowlist to the

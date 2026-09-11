@@ -9,7 +9,7 @@
 // end-to-end SVG render is covered by the media-parity browser suite.
 
 import { describe, it, expect } from 'vitest'
-import { activeMermaidTheme } from '../src/client'
+import { activeAsciicastTheme, activeMermaidTheme } from '../src/client'
 
 function fakeDoc(opts: {
   dataTheme?: string | null
@@ -78,4 +78,69 @@ describe('activeMermaidTheme', () => {
       expect(activeMermaidTheme(c.doc)).toBe(c.expected)
     })
   }
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `activeAsciicastTheme` — the asciinema-player twin. It DELEGATES to
+// `activeMermaidTheme`, so it is driven over the SAME table: any row where the
+// two disagree is the bug this seam exists to make impossible (a page whose
+// diagram went dark while its terminal cast stayed light).
+// ─────────────────────────────────────────────────────────────────────────────
+describe('activeAsciicastTheme rides the same resolution as activeMermaidTheme', () => {
+  const cases: Array<{
+    name: string
+    doc: Document
+    expected: 'asciinema' | 'solarized-light'
+  }> = [
+    {
+      name: 'data-theme="dark" stamp wins → asciinema (the dark built-in)',
+      doc: fakeDoc({ dataTheme: 'dark', prefersDark: false }),
+      expected: 'asciinema',
+    },
+    {
+      name: 'data-theme="light" stamp wins → solarized-light (even when the OS prefers dark)',
+      doc: fakeDoc({ dataTheme: 'light', prefersDark: true }),
+      expected: 'solarized-light',
+    },
+    {
+      name: 'any other explicit stamp is a light surface → solarized-light',
+      doc: fakeDoc({ dataTheme: 'sepia', prefersDark: true }),
+      expected: 'solarized-light',
+    },
+    {
+      name: 'no stamp + OS prefers dark → asciinema',
+      doc: fakeDoc({ dataTheme: null, prefersDark: true }),
+      expected: 'asciinema',
+    },
+    {
+      name: 'no stamp + OS prefers light → solarized-light',
+      doc: fakeDoc({ dataTheme: null, prefersDark: false }),
+      expected: 'solarized-light',
+    },
+    {
+      name: 'an empty-string stamp is no stamp — falls through to prefers-color-scheme',
+      doc: fakeDoc({ dataTheme: '', prefersDark: true }),
+      expected: 'asciinema',
+    },
+    {
+      name: 'no matchMedia available (SSR-ish window) → solarized-light, never a throw',
+      doc: fakeDoc({ dataTheme: null, noMatchMedia: true }),
+      expected: 'solarized-light',
+    },
+  ]
+
+  for (const c of cases) {
+    it(c.name, () => {
+      expect(activeAsciicastTheme(c.doc)).toBe(c.expected)
+    })
+  }
+
+  // The delegation itself, not just its outputs: the two helpers must never
+  // split. This is what a future "just read data-theme here too" edit reds on.
+  it('agrees with activeMermaidTheme on every row of the shared table', () => {
+    for (const c of cases) {
+      const dark = activeMermaidTheme(c.doc) === 'dark'
+      expect(activeAsciicastTheme(c.doc) === 'asciinema', c.name).toBe(dark)
+    }
+  })
 })

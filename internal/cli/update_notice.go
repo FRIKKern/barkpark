@@ -37,6 +37,23 @@ const updateCheckInterval = 24 * time.Hour
 // runtime; this is only the final grace.
 const updateFetchWait = 250 * time.Millisecond
 
+// updateRenotifyInterval re-arms a notice for a release we ALREADY announced,
+// when the operator is STILL running an older bp that many days later.
+//
+// Why this exists (pds-bl-bp-search-false-negative): Notified alone pins a
+// release forever, so the announcement is once-EVER per release. If no newer
+// release lands afterwards, an operator who scrolled past that one line — or
+// whose notice was eaten by a --output json run, a non-TTY wrapper, or a
+// pane that had already scrolled — is silently behind FOREVER. That is the
+// exact state six surveyors were in when their bp's refusal copy told them
+// `bp search` did not exist and they fell back to grep. Staleness that
+// PERSISTS gets restated; staleness that is fixed never prints again, because
+// the version comparison below stops matching.
+//
+// It re-arms off the CACHE only: no extra network, no extra latency — the
+// 24h updateCheckInterval still governs every lookup.
+const updateRenotifyInterval = 7 * 24 * time.Hour
+
 // versionShape is the only thing we will ever compare or print as a version.
 // The cache file is user-writable and Latest ultimately derives from a remote
 // redirect — without this gate a hostile/hand-edited value could inject ANSI
@@ -53,9 +70,10 @@ var isStderrTTY = func() bool {
 // update-check.json next to config.json. Notified remembers the last release
 // we announced so each release prints at most once, ever.
 type updateCheckCache struct {
-	CheckedAt string `json:"checked_at,omitempty"` // RFC3339 of the last network check
-	Latest    string `json:"latest,omitempty"`     // newest cli-v* version seen
-	Notified  string `json:"notified,omitempty"`   // last version announced to the user
+	CheckedAt  string `json:"checked_at,omitempty"`  // RFC3339 of the last network check
+	Latest     string `json:"latest,omitempty"`      // newest cli-v* version seen
+	Notified   string `json:"notified,omitempty"`    // last version announced to the user
+	NotifiedAt string `json:"notified_at,omitempty"` // RFC3339 of that announcement
 }
 
 // pendingUpdateCheck carries the in-flight state from startUpdateCheck to
@@ -213,7 +231,7 @@ func finishUpdateNotice(stderr io.Writer, pending *pendingUpdateCheck) {
 	if cache.Latest == "" || !versionShape.MatchString(cache.Latest) {
 		return
 	}
-	if cache.Notified == cache.Latest {
+	if cache.Notified == cache.Latest && !renotifyDue(cache.NotifiedAt, time.Now()) {
 		return
 	}
 	if compareVersions(cache.Latest, cliVersion) <= 0 {
@@ -224,5 +242,55 @@ func finishUpdateNotice(stderr io.Writer, pending *pendingUpdateCheck) {
 	// persisted by the goroutine after our snapshot.
 	c := loadUpdateCache()
 	c.Notified = cache.Latest
+	c.NotifiedAt = time.Now().UTC().Format(time.RFC3339)
 	saveUpdateCache(c)
+}
+
+// renotifyDue reports whether an already-announced release may be announced
+// again: true once updateRenotifyInterval has elapsed since notifiedAt.
+//
+// An unparseable or EMPTY stamp is due — a cache written before notified_at
+// existed carries a pinned Notified and no timestamp, and treating that as
+// "not due" would keep exactly the operators this row is about permanently
+// silent. A FUTURE stamp (clock skew, hand-edit) is NOT due: the interval has
+// genuinely not elapsed, and re-arming on skew would print every run.
+func renotifyDue(notifiedAt string, now time.Time) bool {
+	t, err := time.Parse(time.RFC3339, notifiedAt)
+	if err != nil {
+		return true
+	}
+	return now.Sub(t) >= updateRenotifyInterval
+}
+
+// staleClientNote returns the ONE line telling a human operator that the bp
+// they are running is behind the newest cli-v* release — or "" when we cannot
+// PROVE it, which is every ambiguous case.
+//
+// This is the refusal-time arm of the same signal finishUpdateNotice prints at
+// exit. The moment a reader is most likely to draw a FALSE conclusion from an
+// old client is the moment that client refuses: `unknown command "search"` is
+// how six independent agents in one wave concluded the verb did not exist and
+// fell back to grep, when in fact dispatch is manifest-driven and the server
+// had declared it all along. A refusal from a client that KNOWS it is behind
+// has to say so.
+//
+// Cost is a single read of the already-persisted update-check.json: no
+// network, no blocking, correct offline. A dev build returns "" (there is no
+// release to compare against — the same verdict `bp whoami` reports as
+// UNREPORTED), as does the BARKPARK_NO_UPDATE_NOTICE kill switch.
+func staleClientNote() string {
+	if cliVersion == "dev" {
+		return ""
+	}
+	if os.Getenv("BARKPARK_NO_UPDATE_NOTICE") != "" {
+		return ""
+	}
+	c := loadUpdateCache()
+	if c.Latest == "" || !versionShape.MatchString(c.Latest) {
+		return ""
+	}
+	if compareVersions(c.Latest, cliVersion) <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("note: you are running bp %s; %s is released. an out-of-date bp can refuse a command the server DOES have — re-check with `bp upgrade` before concluding it does not exist.", cliVersion, c.Latest)
 }

@@ -21,6 +21,12 @@ no trigger, workflow or branch-protection setting was changed by the commit
 that added this file. The required set stays at four contexts until the owner
 rules otherwise.**
 
+**AMENDED 2026-09-09 — that banner is no longer true of every row. See
+"§Moves taken" at the bottom of this file: one verdict has been implemented.
+The paragraph above is preserved verbatim because it is what the 2026-09-06
+measurement was taken under, and a table whose banner is silently edited stops
+being a baseline.**
+
 ## The rule these verdicts apply
 
 > A PR runs only what **can block it**, **or** finishes **under 60 s**, **or**
@@ -257,3 +263,67 @@ Filing and fixing them is out of this document's scope; recording them is not.
   the breaker's own verdict, not a doc-budget overflow. No other red in this
   table was read to the step level, so no claim is made about what any of them
   means.
+
+## Moves taken
+
+One dated line per workflow (or job) whose VENUE actually changed. A row here is
+not a verdict — it is a landed trigger edit, with the owner who reads its red and
+the watcher that reaches them.
+
+### MOVED 2026-09-09 (task-33742276cf0a35b1, PR gates/ci-diet-3)
+
+| what moved | from | to | owner | watcher | measured cost it removed |
+|---|---|---|---|---|---|
+| `pr-meta.yml` — the **filebase aesthetics critic**, now its own `aesthetics` job (`if: ${{ github.event_name != 'pull_request' }}`) | every `pull_request` | `push: main` (unchanged tooling-paths predicate) **+ nightly `schedule: 17 5 * * *`** + `workflow_dispatch` | lead-gates | the `Report main-push failure to a human` job added to `pr-meta.yml` in the same PR → `scripts/file-ci-failure-issue.sh`, issue key `pr-meta-aesthetics` | **~573 s of a 615 s run**, on **61 of 61** sampled PR runs. The `PR meta gates` job's median real compute was **608 s**; the fifteen gates that STAY total ~35 s and clear the under-60 s clause on their own. ≈ **582 estimated job-minutes per 29 h window** (2026-09-08T11:36Z .. 2026-09-09T16:03Z; the 1000-item Actions listing cap is what makes the window 29 h and not 7 days). |
+
+**Why a nightly and not push-only.** On `push: main` the critic was already scoped
+OUT unless `tooling/aesthetics/**` or `pr-meta.yml` itself changed — that predicate is
+preserved character-for-character, so push alone would have been a move to a venue
+that almost never fires, i.e. a delete wearing a trigger's clothes. The nightly arm
+scores main's tip against main as of 24 h earlier, which is a comparison **no PR run
+has ever made** and is the one that reports the day's structural drift.
+
+**What did NOT change, and can be checked rather than believed.**
+`.github/required-checks.json` is untouched (`bash scripts/required-checks-floor.sh` →
+`FLOOR OK … 4 context(s)`). `pr-meta.yml` has no aggregator, so no `needs:` list moved.
+The move is a **job-level `if:`**, never a workflow-level `paths:` key — a
+paths-filtered workflow emits no check run, and an ABSENT context reports `expected`
+forever (`scripts/shim-trigger-filter-check.sh` → OK, floor 6;
+`scripts/absent-context-census.test.sh` → 66 passed, 0 failed).
+
+**What this move does NOT do, said plainly.** It does not reduce the CHECK-RUN COUNT
+on a PR. A job skipped by a job-level `if:` still publishes a check run; the count is
+driven by job NAMES, not by venue. Measured 2026-09-09 across the five newest
+non-dependabot open PR heads: 53 / 53 / 47 / 52 / 82 check runs. This row's criterion
+"under 20" is **not reachable by venue moves at all** — it needs the check-run NAMES
+folded, which changes context names and is an owner ruling. The lever this move pulls
+is COMPUTE and PR wall-clock, and those it pulls hard.
+
+### AMENDED 2026-09-09 (task-33742276cf0a35b1, PR gates/ci-diet-4)
+
+| what changed | from | to | owner | watcher | measured effect |
+|---|---|---|---|---|---|
+| `architecture.yml` — job `boundary-gate` KEEPS its PR arm; the workflow GAINS a main arm | `pull_request` only (no push arm at all) | **+ `push: main`** (same paths) + `workflow_dispatch`; `concurrency.cancel-in-progress` `true` → `${{ github.ref != 'refs/heads/main' }}` | lead-gates | `Report main-push failure to a human` (name reused, not new) → `scripts/file-ci-failure-issue.sh`, key `architecture-main` | The `Restore the api dev build tree` cache (`actions/cache/restore`, key `hashFiles('api/mix.lock')`) had **no main-scoped entry to restore, ever** — a PR-saved cache is scoped to that PR's ref. Every PR compiled the api tree cold on its first run. One main run per `mix.lock` change now writes the entry every PR restores. Inventory row: 171 s median, fires 12/20 heads. |
+
+**This is an ADD, not the `move-to-nightly` the table verdicts.** The row above is
+answered here rather than executed, for a reason that outranks the cost rule:
+**task-6891e8f620c1bdea flipped this gate off `continue-on-error` on 2026-09-05** —
+four days before the verdict — specifically so a NEW boundary regression reds its own
+check-run BEFORE the merge. Moving it to nightly would silently reverse that dated,
+deliberate decision. A verdict computed by a mechanical rule (advisory + >60 s + a
+`paths:` filter that fires on 12/20) measures COST correctly and says nothing about
+what the gate is FOR. The trigger decision was explicitly deferred to this task by the
+workflow's own header; taken here, the honest exercise of it is to warm the cache the
+missing arm was starving, not to delete the pre-merge red.
+
+## Verdicts NOT executed, and the mechanism that blocks each
+
+Recorded so the next taker does not re-derive them. All four were named as movers or
+candidates; none is a safe venue move today.
+
+| workflow | committed verdict | why it did NOT move |
+|---|---|---|
+| `compose-smoke.yml` | **move-to-push** | Its expensive job `green-arm` (214 s median) is a `needs:` of the `compose-gate` aggregator, whose `Decide (fail-closed over every upstream result)` step accepts a `skipped` upstream **only when that job's gate value is the literal string `false`**. A job-level `if:` makes `green-arm` skip with gate `'true'`, which the aggregator reds by design: *"A skip here does NOT mean 'not needed'. It means the job never ran."* Moving it therefore requires teaching `decide()` a third accepted skip reason — surgery on a fail-closed aggregator that is under an open human gate (`shb-bl-register-compose-smoke`) and whose shape is ported verbatim from `cloud.yml`. Not a trigger edit. |
+| `doc-gates.yml` | **move-to-push** | Measured step-level on PR run 34386237923: **118 s total, no dominant step** — 29 s / 19 s (checkout) / 13 s / 10 s (Go) / 8 s, then a long tail. There is no 573 s critic to lift out; it is 34 independent pre-merge gates plus ~33 s of setup. Worse, the **NEW-lineref gate loses its SUBJECT, not just its venue**: `scripts/new-lineref-check.sh` diffs against the PR merge base and `resolve_base` falls back to `origin/main`, so on a main push the diff is empty and it scans nothing. Moving the job wholesale deletes that gate's only reachable input. Preserving it needs a job SPLIT, which introduces a new job name and so a new `.exclusions` row. |
+| `security.yml` | **keep-on-PR** | Committed verdict is keep-on-PR — *"advisory, but real compute 42.5 s is under the 60 s floor"*. It appeared at 324 s in the 29-hour cost table because that sample caught its heavy tail: the inventory's own p90 for this workflow is **304 s against a 42.5 s median**. The median is the floor's subject; both numbers are right and they measure different things. Not movable, and the p90 is the thing to look at if it is ever revisited. |
+| `paper-editor.yml` | **keep-on-PR** | Committed verdict is keep-on-PR — genuinely path-filtered, fires on **0 of 20** sampled PR heads. The 53 runs it shows in the 29-hour table are real but concentrated in that window; on a PR that misses its paths it costs nothing, which is exactly the third clause of the venue rule. |

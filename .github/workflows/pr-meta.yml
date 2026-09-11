@@ -30,6 +30,17 @@ name: pr-meta
 # which existed only to refresh the critic against its own tooling — is preserved
 # below as an in-job early exit, not deleted.
 #
+# AMENDED 2026-09-09 (task-33742276cf0a35b1). Two of the three folded groups are
+# still step groups in the `pr-meta` job. THE THIRD IS NOT: the filebase critic
+# now lives in its own `aesthetics` job further down, carrying
+# `if: github.event_name != 'pull_request'`, and this workflow gained a
+# `schedule:` arm to hold it. The argument above — that no paths predicate covers
+# the critic's subject — is UNCHANGED, and is exactly why the move is a VENUE
+# change and not a `paths:` filter. What changed is the measurement: the critic
+# is 573 s of a 615 s run, the other fifteen gates total ~35 s, and an advisory
+# that cannot block a merge has no claim on ten minutes of every PR. Read the
+# `aesthetics` job's own header for the numbers, the owner and the watcher.
+#
 # WHAT DID **NOT** MOVE, AND WHY (do not "finish the job" without reading this)
 # ----------------------------------------------------------------------------
 #   reland-check.yml           Out-of-fence harnesses parse it BY PATH AND BY JOB
@@ -84,6 +95,7 @@ name: pr-meta
 # BLOCKING vs ADVISORY IS PRESERVED PER STEP, NOT PER JOB
 # ------------------------------------------------------
 # The two gates that could red before still red this job; the advisory critic
+# (since 2026-09-09 in the separate `aesthetics` job below)
 # carries `continue-on-error: true` at the STEP level, so it reports without
 # blocking exactly as its job-level flag used to. Every step keeps the name it had
 # in its own workflow, so a red still names its own reason, and the advisory steps
@@ -98,6 +110,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  # NIGHTLY — the venue the filebase critic moved to on 2026-09-09
+  # (task-33742276cf0a35b1). 05:17 UTC, off the top of the hour so it does not
+  # queue behind every other cron in this repo.
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -127,6 +145,7 @@ jobs:
       # two workflows that needed full history were each paying for it separately
       # before this fold.
       - name: Checkout (merge ref; full history for the pinned worktrees)
+        id: setup
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -153,6 +172,7 @@ jobs:
       # path or a file that registers no tests is a red, and `--floor 1` pins the
       # file count; the tally assert pins the 12 tests the pin was filed with.
       - name: tooling/status tests (node-test-floor, 12-test tally)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           set -euo pipefail
           node scripts/node-test-floor.mjs --floor 1 'tooling/status/test/*.test.mjs' 2>&1 | tee /tmp/status-tests.txt
@@ -171,6 +191,7 @@ jobs:
       # node-test-floor.mjs, never bare `node --test`: a zero-match glob or a
       # file registering no tests exits 0 three separate ways.
       - name: tooling/lib tests (node-test-floor, 9-test tally)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           set -euo pipefail
           node scripts/node-test-floor.mjs --floor 1 'tooling/lib/*.test.mjs' 2>&1 | tee /tmp/lib-tests.txt
@@ -218,6 +239,7 @@ jobs:
       # in .github/required-checks.json, so a red here informs the author and
       # stops nothing. The word `gate-map` above is a FILE NAME, not a claim.
       - name: "gate-map: the derivation is live and non-vacuous (no committed snapshot)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           set -euo pipefail
           # The venue assertion: read this workflow's `on:` block (top-level key
@@ -232,6 +254,7 @@ jobs:
           node --check tooling/gate-map/gate-map.mjs
           node tooling/gate-map/gate-map.mjs --verify
       - name: No symlink is committed to this repo
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/committed-symlink-check.sh
 
       # ── run-level-reader-census ───────────────────────────────────────────────
@@ -242,9 +265,11 @@ jobs:
       # the gate above: the census's steady state is "everything adjudicated",
       # which is also what a broken scan produces.
       - name: Prove the census can fail (--selftest)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-level-reader-census.sh --selftest
 
       - name: Every run-level reader is adjudicated
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-level-reader-census.sh
 
       # ── shim-trigger-filter-check ─────────────────────────────────────────────
@@ -263,9 +288,11 @@ jobs:
       # reason: a clean tree and a broken scanner print the same green, so the
       # mutation matrix runs before the scan and cannot rot unexecuted.
       - name: Prove the shim-trigger ratchet can fail (--selftest)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/shim-trigger-filter-check.sh --selftest
 
       - name: No shimmed workflow filters its own pull_request trigger
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/shim-trigger-filter-check.sh
 
       # The PR-path CI inventory's own derivations — required/feeds-required,
@@ -277,28 +304,67 @@ jobs:
       # harness nobody executes reads as coverage and is silence. It guards
       # scripts/ci-pr-inventory.py, which produces .github/ci-pr-inventory.md.
       - name: Prove the CI inventory's derivations can fail (--selftest)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python3 scripts/ci-pr-inventory.py --selftest
 
-      # ── aesthetics-guard (ADVISORY) ───────────────────────────────────────────
-      # `!cancelled()` and not `success()`: a red from either gate above must not
-      # swallow this advisory. It ran as its own job before the fold and it has to
-      # keep running independently now.
-      #
-      # THE ONE EARLY EXIT IN THIS FILE, and it is the one bounded predicate in the
-      # set. On a pull_request the critic ALWAYS runs — any PR can introduce root
-      # clutter, a dead doc or tracked build-output, and a modification-only PR can
-      # do it too (deleting the last reference to a doc kills it). On `push: main`
-      # the old workflow was paths-filtered to `tooling/aesthetics/**` plus its own
-      # file, because that arm exists only to re-exercise the critic against its own
-      # tooling; that filter is preserved here rather than dropped.
+  # ── VENUE MOVE 2026-09-09 (task-33742276cf0a35b1) ──────────────────────────
+  # The filebase critic used to be five steps inside `pr-meta` above. MEASURED
+  # over 61 pull_request runs of this workflow created 2026-09-08T11:36Z ..
+  # 2026-09-09T16:03Z (the newest 1000 pull_request runs the Actions API will
+  # page, ~29 h; the 7-day request hits GitHub's 1000-item cap and this is the
+  # slice under it): the `PR meta gates` job's median REAL compute — wall time
+  # of jobs that executed at least one step — was 608 s, and .github/ci-pr-inventory.md
+  # read a single step of it, `Run filebase critic on the PR head and the base
+  # tip`, at 573 s of a 615 s run. The other fifteen gates in that job total
+  # ~35 s and clear the under-60 s clause on their own; they STAY on the PR.
+  #
+  # This job is the critic, and only the critic, on its own `if:`. It is the
+  # single largest advisory cost on the PR path outside the four required
+  # workflows: 61 runs x ~9.6 min = ~582 estimated job-minutes per ~29 h window.
+  #
+  # WHY A JOB-LEVEL `if:` AND NOT A WORKFLOW-LEVEL `paths:` — the rule this file
+  # already states three times: a paths-filtered workflow emits NO check run, and
+  # an ABSENT context reports `expected` forever. A job skipped by `if:` still
+  # publishes a check run. Nothing in .github/required-checks.json changes, and
+  # no aggregator `needs:` list is touched (this workflow has no aggregator).
+  #
+  # WHERE IT WENT, and why nightly and not push-only. On `push: main` the critic
+  # was already scoped OUT unless its own tooling changed (the scope step below
+  # preserves that filter verbatim), so push alone would be a move to a venue
+  # that almost never fires — a delete wearing a trigger's clothes. The nightly
+  # arm is the real venue: it scores main's tip against main as of 24 h earlier,
+  # which is the one comparison that reports the day's structural drift, and it
+  # is a comparison no PR run has ever made.
+  #
+  # OWNER: lead-gates. WATCHER: `Report main-push failure to a human` below ->
+  # scripts/file-ci-failure-issue.sh, issue key `pr-meta-aesthetics`. The critic
+  # steps keep `continue-on-error: true`, so this job only reds when the harness
+  # itself breaks (checkout, scope, node, or the reporter) — which is exactly the
+  # failure an unwatched off-PR job would otherwise hide forever.
+  aesthetics:
+    name: Filebase aesthetics critic (advisory, main + nightly)
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for the pinned worktrees)
+        id: setup
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # THE SCOPE PREDICATE, preserved from the folded job and extended by one
+      # arm. `push: main` keeps the exact paths filter aesthetics-guard.yml
+      # carried on its own push arm — that arm exists only to re-exercise the
+      # critic against its own tooling. `schedule` (and a manual dispatch) is
+      # ALWAYS in scope: that is the arm that replaces the per-PR run.
       - name: Aesthetics — is this event in scope?
         id: aesthetics_scope
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          if [ "${{ github.event_name }}" != "push" ]; then
             echo "run=1" >> "$GITHUB_OUTPUT"
-            echo "in scope: pull_request (no paths predicate is sound for this subject)"
+            echo "in scope: ${{ github.event_name }} — the nightly/dispatch arm always scores main."
             exit 0
           fi
           changed="$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)"
@@ -307,7 +373,7 @@ jobs:
             echo "in scope: push to main touched the critic's own tooling"
           else
             echo "run=0" >> "$GITHUB_OUTPUT"
-            echo "SKIPPED on push:main — the critic's own tooling did not change. This mirrors the paths filter aesthetics-guard.yml carried on its push arm; the pull_request arm is never skipped."
+            echo "SKIPPED on push:main — the critic's own tooling did not change. This mirrors the paths filter aesthetics-guard.yml carried on its push arm; the nightly arm is never skipped."
           fi
 
       - name: Setup Node
@@ -316,114 +382,43 @@ jobs:
         with:
           node-version: "20"
 
-      # ── THE BASE HALF OF THE CRITIC IS CACHEABLE; THE HEAD HALF NEVER IS ─────
-      # MEASURED on run 34054415331 (pull_request, 2026-09-06): the step below
-      # cost 390 s, split almost exactly in two — HEAD pass 194 s (worktree add
-      # 2 s + aesthetics.mjs 191 s), BASE pass 196 s (worktree add 1 s +
-      # aesthetics.mjs 195 s). The BASE pass is the same computation for every PR
-      # open against main at that moment, and it is redone on every push of every
-      # PR. The HEAD report is a function of the head sha and is never reused, so
-      # only the base half is cached here.
-      #
-      # THE KEY IS (base sha, hash of tooling/aesthetics/**) AND THERE ARE NO
-      # `restore-keys`. That is the whole safety argument:
-      #   * without `restore-keys`, actions/cache returns ONLY an exact key match
-      #     — there is no prefix fallback, so a NEAR-MISS key can never serve a
-      #     report. A hit on a different base sha is impossible by construction:
-      #     the base sha is a literal segment of the key and nothing but that key
-      #     can be restored.
-      #   * the tooling hash is the second segment for the same reason at the
-      #     other axis — a report produced by a DIFFERENT critic version can
-      #     never be served under this key. (The base report is in fact already
-      #     pinned by the base sha alone, because the base worktree runs its OWN
-      #     tooling/aesthetics/aesthetics.mjs; the hash segment is a strictly
-      #     TIGHTER key, never a looser one.)
-      #   * only what THIS run computed is saved, and only on a miss — see the
-      #     save step below, gated on the critic step's own `base_cache` output.
-      #
-      # SCOPE — read this before crediting the cache with more than it buys. A
-      # cache written by a `pull_request` run is scoped to that PR's ref, so it
-      # is NOT visible to other PRs; what this buys today is every RE-PUSH of a
-      # PR against an unchanged base, which is the common case under this fleet.
-      # Making the key shared across PRs would mean priming it from `push: main`,
-      # and main's runs deliberately SKIP the critic today (27-35 s vs 430-900 s).
-      # Widening the push arm to compute a base report is a separate, deliberate
-      # decision about main's cost and is NOT taken here — see
-      # task-049caae64a475b84.
-      #
-      # The cache is restore/save split, not `actions/cache`, precisely so the
-      # save can be conditional on a miss. `pull_request` only: on `push: main`
-      # the base is HEAD~1, which has no expression form for the key, so that arm
-      # computes exactly as it always did.
-      - name: Restore the BASE tip's filebase report (exact key only, no restore-keys)
-        id: aesthetics_base_cache
-        if: ${{ !cancelled() && steps.aesthetics_scope.outputs.run == '1' && github.event_name == 'pull_request' }}
-        uses: actions/cache/restore@v4
-        with:
-          path: /tmp/base-report-cache
-          # (base sha, tooling hash) — exact match or nothing.
-          key: aesthetics-base-report-v1-${{ github.event.pull_request.base.sha }}-${{ hashFiles('tooling/aesthetics/**') }}
-
       # bp is ABSENT in CI, so the critic's TASK signal is not reliable here; only
       # the STRUCTURAL findings are diffed (compare.mjs excludes the dead-task
-      # signal entirely). Both trees are PINNED worktrees off the one clone above —
-      # never the merge ref — so a PR is scored on its own tree and blamed for
-      # nothing anyone else landed.
-      - name: Run filebase critic on the PR head and the base tip
+      # signal entirely). Both trees are PINNED worktrees off the one clone above.
+      #
+      # THE BASE SHA IS EVENT-SHAPED and it is the whole reason the nightly arm is
+      # worth running: on `push` it is HEAD~1 (the same base the folded job used),
+      # on `schedule`/dispatch it is main's tip as of 24 h ago, so the run reports
+      # the day's drift rather than one commit's. A `rev-list --before` that
+      # resolves to HEAD itself (a quiet day) is named and the comparison is
+      # skipped rather than reported as a clean zero-delta reading.
+      - name: Run filebase critic on main's tip and its comparison base
         id: aesthetics_reports
         if: ${{ !cancelled() && steps.aesthetics_scope.outputs.run == '1' }}
         continue-on-error: true # advisory — report, never block
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          else
-            HEAD_SHA="$(git rev-parse HEAD)"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [ "${{ github.event_name }}" = "push" ]; then
             BASE_SHA="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
+          else
+            BASE_SHA="$(git rev-list -1 --before='24 hours ago' HEAD 2>/dev/null || true)"
+            [ -n "$BASE_SHA" ] || BASE_SHA="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
           fi
           echo "head=$HEAD_SHA base=$BASE_SHA"
-          # Defensive only. `fetch-depth: 0` above already reaches both parents of
-          # the merge commit; if a fetch is somehow still needed it happens here,
-          # and if the worktree add then fails this step FAILS rather than scoring
-          # a tree it never read.
-          git fetch --no-tags --depth=1 origin "$HEAD_SHA" 2>/dev/null || true
-          git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+          if [ "$HEAD_SHA" = "$BASE_SHA" ]; then
+            echo "::warning title=Filebase aesthetics DID NOT RUN::head and base resolved to the same commit (nothing landed in the window). No comparison was made; this is NOT a clean reading."
+            exit 1
+          fi
           for t in head base; do rm -rf "/tmp/${t}-tree"; done
           git worktree add --detach /tmp/head-tree "$HEAD_SHA"
           ( cd /tmp/head-tree && node tooling/aesthetics/aesthetics.mjs )
           cp /tmp/head-tree/tooling/aesthetics/aesthetics-report.json /tmp/head-report.json
           git worktree remove --force /tmp/head-tree
-          # THE BASE HALF, cached by (base sha, tooling hash). The compare step
-          # below still reads exactly /tmp/base-report.json and /tmp/head-report.json
-          # — a restored report and a freshly computed one are the same bytes at
-          # the same path, and compare.mjs cannot tell them apart.
-          mkdir -p /tmp/base-report-cache
-          if [ "${{ steps.aesthetics_base_cache.outputs.cache-hit }}" = "true" ] && [ -s /tmp/base-report-cache/base-report.json ]; then
-            echo "base report: CACHE HIT for $BASE_SHA — restored, not recomputed"
-            cp /tmp/base-report-cache/base-report.json /tmp/base-report.json
-            echo "base_cache=hit" >> "$GITHUB_OUTPUT"
-          else
-            echo "base report: cache MISS for $BASE_SHA — computing it"
-            git worktree add --detach /tmp/base-tree "$BASE_SHA"
-            ( cd /tmp/base-tree && node tooling/aesthetics/aesthetics.mjs )
-            cp /tmp/base-tree/tooling/aesthetics/aesthetics-report.json /tmp/base-report.json
-            git worktree remove --force /tmp/base-tree
-            # save ONLY what this run computed
-            cp /tmp/base-report.json /tmp/base-report-cache/base-report.json
-            echo "base_cache=miss" >> "$GITHUB_OUTPUT"
-          fi
-
-      # Save ONLY on a miss, and only the report this run actually computed. Same
-      # key as the restore above, character for character — a save under any other
-      # key would poison a lookup it was never measured for.
-      - name: Save the BASE tip's filebase report (only on a miss)
-        if: ${{ !cancelled() && steps.aesthetics_scope.outputs.run == '1' && github.event_name == 'pull_request' && steps.aesthetics_reports.outputs.base_cache == 'miss' }}
-        continue-on-error: true # advisory — a cache write must never block either
-        uses: actions/cache/save@v4
-        with:
-          path: /tmp/base-report-cache
-          key: aesthetics-base-report-v1-${{ github.event.pull_request.base.sha }}-${{ hashFiles('tooling/aesthetics/**') }}
+          git worktree add --detach /tmp/base-tree "$BASE_SHA"
+          ( cd /tmp/base-tree && node tooling/aesthetics/aesthetics.mjs )
+          cp /tmp/base-tree/tooling/aesthetics/aesthetics-report.json /tmp/base-report.json
+          git worktree remove --force /tmp/base-tree
 
       - name: Filebase aesthetics gate (advisory) — compare + post summary
         id: aesthetics_compare
@@ -444,8 +439,7 @@ jobs:
 
       # ADVISORY ≠ SILENT. Three states have to be distinguishable and only one of
       # them is "clean": the critic ran and flagged nothing, the critic ran and
-      # flagged something, and the critic DID NOT RUN. The third used to be a red
-      # job; inside a folded job it would otherwise be a skipped step nobody reads.
+      # flagged something, and the critic DID NOT RUN.
       - name: Aesthetics — what this advisory actually did (always)
         if: ${{ !cancelled() }}
         run: |
@@ -453,9 +447,6 @@ jobs:
           scope="${{ steps.aesthetics_scope.outputs.run }}"
           reports="${{ steps.aesthetics_reports.outcome }}"
           flagged="${{ steps.aesthetics_compare.outputs.flagged }}"
-          # THREE different not-run realities, and only the middle one is benign.
-          # An empty `scope` means the scope step itself died — which must never
-          # read as the deliberate push:main skip.
           if [ -z "$scope" ]; then
             echo "::warning title=Filebase aesthetics DID NOT RUN::the scope step failed, so the critic was never dispatched. NOT a clean reading and NOT the deliberate push:main skip. Advisory, non-blocking."
             echo "### Filebase aesthetics: **DID NOT RUN** — the scope step failed" >> "$GITHUB_STEP_SUMMARY"
@@ -471,5 +462,36 @@ jobs:
             exit 0
           fi
           if [ "$flagged" = "1" ]; then
-            echo "::warning title=Filebase aesthetics (advisory)::This PR introduces new structural filebase mess (new root clutter / dead doc / removable build-output, or a Bloat drop) vs the base branch. Advisory only — see the job summary. Does NOT block the merge."
+            echo "::warning title=Filebase aesthetics (advisory)::main gained new structural filebase mess (new root clutter / dead doc / removable build-output, or a Bloat drop) against its comparison base. Advisory only — see the job summary."
           fi
+
+  # THE WATCHER. An off-PR advisory with no reader is a check that stopped
+  # existing. The critic steps above are continue-on-error, so this fires only
+  # when the HARNESS breaks — checkout, scope, node, or the reporter — which is
+  # the failure nobody would otherwise ever see now that no PR runs it.
+  main-failure-issue:
+    name: Report main-push failure to a human
+    needs: [aesthetics]
+    # PUSH/SCHEDULE ONLY, and belt-and-braces: this job FILES GITHUB ISSUES, so
+    # a per-PR arm would be a spam machine.
+    if: failure() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: pr-meta-aesthetics
+          CI_FAILURE_DETAIL: |
+            The filebase aesthetics critic's HARNESS is red on main or nightly.
+            Since 2026-09-09 (task-33742276cf0a35b1) the critic no longer runs on
+            pull requests — it runs on `push: main` when its own tooling changes,
+            and nightly against main's tip vs 24 h earlier. Its findings are
+            continue-on-error, so a red here is NOT a filebase finding: it means
+            the checkout, the scope step, node, or the reporter failed, and NO
+            comparison was made. Owner: lead-gates. Read the failed step's log,
+            fix on main, and close this issue once the next nightly is green.
+        run: bash scripts/file-ci-failure-issue.sh

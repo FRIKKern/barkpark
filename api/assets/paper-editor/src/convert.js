@@ -134,20 +134,22 @@ function inlineToTiptapNodes(node, marks, out) {
   }
 }
 
-// Coerce ONE list item into a canonical inline ARRAY. The canonical `list` block
-// stores each item as an inline array (`items:[ [inline...], ... ]`, see :10), but
-// 7 legacy papers (webhook-*/qstash-*/ga4-* specs) store a flat STRING per item
-// (`items:["text one", ...]`). A flat string reaching `inlineArrayToTiptap` would
-// run `.forEach` on a string and THROW ("forEach is not a function") — crashing
-// BOTH editors (per-block + canvas) the moment such a paper opens. This coerces a
-// string (or any non-array) item to a single text inline node, matching how the
-// VIEW render already tolerates it (compose.ex `compose_inline_children(str) → [str]`
-// renders byte-identically to the inline-text-array form). ADDITIVE: a canonical
-// inline-ARRAY item is returned UNCHANGED (the byte-identical fast path); only a
-// non-array item is coerced.
+// Match the list readers: arrays, encoded arrays, content-first maps, then text.
+// This is list-specific; JSON-looking paragraph strings remain literal prose.
 function listItemToInlineArray(item) {
   if (Array.isArray(item)) return item;
-  if (typeof item === "string") return [{ type: "text", value: item }];
+  if (typeof item === "string") {
+    try {
+      const parsed = JSON.parse(item);
+      if (Array.isArray(parsed) && parsed.length && parsed[0] && typeof parsed[0] === "object" && !Array.isArray(parsed[0])) return parsed;
+    } catch { /* Plain strings remain literal text. */ }
+    return [{ type: "text", value: item }];
+  }
+  if (item && typeof item === "object") {
+    if (Array.isArray(item.content) && item.content.length) return item.content;
+    return typeof item.text === "string" && item.text !== ""
+      ? [{ type: "text", value: item.text }] : [];
+  }
   // Any other non-array scalar (number, etc.) → its string form as one text node;
   // null/undefined → an empty item (an empty `<li>`), never a throw.
   if (item == null) return [];
@@ -166,7 +168,8 @@ function listItemToInlineArray(item) {
 // coerced to a single text inline node instead of throwing on `.forEach`. The
 // canonical inline-ARRAY path is byte-unchanged; only a non-array input is coerced.
 export function inlineArrayToTiptap(inline) {
-  const arr = Array.isArray(inline) ? inline : listItemToInlineArray(inline);
+  const arr = Array.isArray(inline) ? inline
+    : inline == null ? [] : [{ type: "text", value: String(inline) }];
   const out = [];
   arr.forEach((node) => inlineToTiptapNodes(node, [], out));
   return out;
@@ -349,37 +352,26 @@ export function blockToTiptap(block) {
   switch (block.type) {
     case "heading": {
       const level = clampLevel(block.level);
-      const text = block.text || "";
-      const node = { type: "heading", attrs: { level } };
-      if (text.length) node.content = [{ type: "text", text }];
+      const source = {};
+      for (const key of ["content", "text"]) {
+        if (Object.hasOwn(block, key)) source[key] = deepCloneJson(block[key]);
+      }
+      const node = { type: "heading", attrs: { level, bpHeadingSource: source } };
+      const inline = headingInline(source);
+      if (inline.length) node.content = inline;
       return { type: "doc", content: [node] };
     }
     case "list": {
-      const ordered = block.ordered === true;
-      // Coerce each item to a canonical inline ARRAY first (legacy flat-string
-      // items → a single text inline node) so neither editor throws on a string
-      // item. A canonical inline-array item is passed through UNCHANGED.
-      const items = (block.items || []).map((itemInline) => ({
-        type: "listItem",
-        content: [
-          {
-            type: "paragraph",
-            content: inlineArrayToTiptap(listItemToInlineArray(itemInline)),
-          },
-        ],
-      }));
-      const listNode = {
-        type: ordered ? "orderedList" : "bulletList",
-        content: items.length
-          ? items
-          : [{ type: "listItem", content: [{ type: "paragraph" }] }],
-      };
-      return { type: "doc", content: [listNode] };
+      return { type: "doc", content: [listToTiptap(block, String(block.id || "list"))] };
     }
     case "paragraph":
     default: {
-      const node = { type: "paragraph" };
-      const inline = inlineArrayToTiptap(block.content);
+      const source = {};
+      for (const key of ["content", "text"]) {
+        if (Object.hasOwn(block, key)) source[key] = deepCloneJson(block[key]);
+      }
+      const node = { type: "paragraph", attrs: { bpParagraphSource: source } };
+      const inline = inlineArrayToTiptap(listItemToInlineArray(source));
       if (inline.length) node.content = inline;
       return { type: "doc", content: [node] };
     }
@@ -489,9 +481,13 @@ function tableInlineToTiptap(inline) {
   }
 }
 
-function tableRowToTiptap(cells, header) {
+function tableRowToTiptap(cells, header, rowShape) {
   if (!Array.isArray(cells) || cells.length === 0) return null;
-  const projected = cells.map(tableInlineToTiptap);
+  const projected = cells.map((inline, index) => {
+    const descriptor = tableCellDescriptor(rowShape?.cells?.[index]);
+    if (descriptor && !tableProtectedSourceMatches(inline, descriptor)) return null;
+    return tableInlineToTiptap(inline);
+  });
   if (projected.some((inline) => inline == null)) return null;
   return {
     type: "bpTableRow",
@@ -509,25 +505,114 @@ function exactObjectKeys(value, expected) {
   return keys.length === wanted.length && keys.every((key, index) => key === wanted[index]);
 }
 
-function validTableRowShape(shape, width, header = false) {
+const TABLE_CELL_KINDS = new Set(["inline-array", "content-map"]);
+const TABLE_PROTECTED_CHAIN_TYPES = new Set([
+  "link", "wikilink", "strong", "em", "underline", "strikethrough", "text",
+]);
+
+function tableCellDescriptor(cellShape) {
+  return cellShape && typeof cellShape === "object" && !Array.isArray(cellShape)
+    ? cellShape : null;
+}
+
+function validTableCellShape(cellShape, version) {
+  if (typeof cellShape === "string") return TABLE_CELL_KINDS.has(cellShape);
+  if (version !== 2 || !exactObjectKeys(cellShape, ["kind", "inline"]) ||
+      !TABLE_CELL_KINDS.has(cellShape.kind) ||
+      !exactObjectKeys(cellShape.inline, ["v", "anchors", "opaque"]) ||
+      cellShape.inline.v !== 1) return false;
+  const { anchors, opaque } = cellShape.inline;
+  if (!Array.isArray(anchors) || !Array.isArray(opaque) || anchors.length === 0 ||
+      opaque.length === 0 || anchors.at(-1) !== "text" ||
+      anchors.some((type) => !TABLE_PROTECTED_CHAIN_TYPES.has(type)) ||
+      new Set(anchors).size !== anchors.length || new Set(opaque).size !== opaque.length) return false;
+  return jsonEqual(anchors, [...opaque.filter((type) => type !== "text"), "text"]);
+}
+
+function validTableRowShape(shape, width, version, header = false) {
   return exactObjectKeys(shape, ["kind", "cells"]) &&
     (header ? shape.kind === "array" : ["array", "cells-map"].includes(shape.kind)) &&
     Array.isArray(shape.cells) && shape.cells.length === width &&
-    shape.cells.every((kind) => ["inline-array", "content-map"].includes(kind));
+    shape.cells.every((cellShape) => validTableCellShape(cellShape, version));
 }
 
 function validTableShape(shape, head, rows, width) {
-  if (!exactObjectKeys(shape, ["v", "head", "rows"]) || shape.v !== 1 ||
+  if (!exactObjectKeys(shape, ["v", "head", "rows"]) || ![1, 2].includes(shape.v) ||
       !Array.isArray(shape.rows) || shape.rows.length !== rows.length ||
-      !shape.rows.every((row) => validTableRowShape(row, width))) return false;
+      !shape.rows.every((row) => validTableRowShape(row, width, shape.v))) return false;
   const headShape = shape.head;
   if (!headShape || typeof headShape !== "object" || Array.isArray(headShape)) return false;
+  const descriptors = shape.rows.flatMap((row) => row.cells).filter(tableCellDescriptor);
   if (head === null) {
     return exactObjectKeys(headShape, ["state"]) &&
-      ["absent", "null", "empty"].includes(headShape.state);
+      ["absent", "null", "empty"].includes(headShape.state) &&
+      (shape.v === 2 ? descriptors.length > 0 : descriptors.length === 0);
   }
-  return exactObjectKeys(headShape, ["state", "row"]) && headShape.state === "row" &&
-    validTableRowShape(headShape.row, width, true);
+  if (!exactObjectKeys(headShape, ["state", "row"]) || headShape.state !== "row" ||
+      !validTableRowShape(headShape.row, width, shape.v, true)) return false;
+  descriptors.push(...headShape.row.cells.filter(tableCellDescriptor));
+  return shape.v === 2 ? descriptors.length > 0 : descriptors.length === 0;
+}
+
+function tablePdInlineChain(inline) {
+  if (!Array.isArray(inline) || inline.length !== 1) return null;
+  const chain = [];
+  let node = inline[0];
+  while (node && typeof node === "object" && !Array.isArray(node)) {
+    if (!TABLE_PROTECTED_CHAIN_TYPES.has(node.type) ||
+        chain.some((entry) => entry.type === node.type)) return null;
+    if (node.type === "text") {
+      if (!exactObjectKeys(node, ["type", "value"]) ||
+          typeof node.value !== "string" || node.value === "") return null;
+      chain.push({ type: "text", node });
+      return chain;
+    }
+    const allowed = node.type === "link"
+      ? ["type", "href", "children"]
+      : node.type === "wikilink"
+        ? ["type", "target", "children", ...(
+          Object.hasOwn(node, "alias") ? ["alias"] : []),
+        ...(
+          Object.hasOwn(node, "docId") ? ["docId"] : [])]
+        : ["type", "children"];
+    if (!exactObjectKeys(node, allowed) || !Array.isArray(node.children) ||
+        node.children.length !== 1 ||
+        (node.type === "link" && typeof node.href !== "string") ||
+        (node.type === "wikilink" && typeof node.target !== "string")) return null;
+    chain.push({ type: node.type, node });
+    node = node.children[0];
+  }
+  return null;
+}
+
+function tableOpaqueRoleSemanticsMatch(source, current) {
+  if (source.type === "text") return true;
+  if (source.type === "link") return source.node.href === current.node.href;
+  if (source.type === "wikilink") {
+    return source.node.target === current.node.target &&
+      source.node.alias === current.node.alias && source.node.docId === current.node.docId;
+  }
+  return true;
+}
+
+function tableProtectedSourceMatches(inline, descriptor) {
+  const chain = tablePdInlineChain(inline);
+  return chain != null && jsonEqual(
+    chain.map(({ type }) => type).filter((type) =>
+      type === "text" || descriptor.inline.opaque.includes(type)),
+    descriptor.inline.anchors,
+  );
+}
+
+function tableProtectedInlineSupported(inline, sourceInline, descriptor) {
+  const source = tablePdInlineChain(sourceInline);
+  const current = tablePdInlineChain(tiptapInlineToPd(inline));
+  if (!source || !current || !tableProtectedSourceMatches(sourceInline, descriptor)) return false;
+  return descriptor.inline.opaque.every((type) => {
+    const sourceRole = source.find((entry) => entry.type === type);
+    const currentRole = current.find((entry) => entry.type === type);
+    return sourceRole && currentRole && tableOpaqueRoleSemanticsMatch(sourceRole, currentRole);
+  });
 }
 
 const TABLE_MARKS = new Set([
@@ -608,13 +693,17 @@ export function tableProjection(projection) {
       projection.rows.length === 0 || !Object.prototype.hasOwnProperty.call(projection, "head")) {
     return { editable: false, shape: null, head: null, rows: [], doc: emptyDoc };
   }
-  const body = projection.rows.map((row) => tableRowToTiptap(row, false));
   const width = projection.rows[0]?.length;
-  const head = projection.head == null ? null : tableRowToTiptap(projection.head, true);
-  if (!Number.isSafeInteger(width) || width < 1 || body.some((row, index) =>
-    row == null || projection.rows[index].length !== width) ||
-    (projection.head != null && (head == null || projection.head.length !== width)) ||
-    !validTableShape(projection.shape, projection.head, projection.rows, width)) {
+  if (!Number.isSafeInteger(width) || width < 1 ||
+      !validTableShape(projection.shape, projection.head, projection.rows, width)) {
+    return { editable: false, shape: null, head: null, rows: [], doc: emptyDoc };
+  }
+  const body = projection.rows.map((row, index) =>
+    tableRowToTiptap(row, false, projection.shape.rows[index]));
+  const head = projection.head == null ? null
+    : tableRowToTiptap(projection.head, true, projection.shape.head.row);
+  if (body.some((row, index) => row == null || projection.rows[index].length !== width) ||
+      (projection.head != null && (head == null || projection.head.length !== width))) {
     return { editable: false, shape: null, head: null, rows: [], doc: emptyDoc };
   }
   const rows = head ? [head, ...body] : body;
@@ -639,22 +728,32 @@ function tableCellRows(editorJSON, projection) {
   const nodes = editorJSON?.content;
   if (!source.editable || !Array.isArray(nodes) || nodes.length !== 1 ||
       nodes[0]?.type !== "bpTable" || nodes[0]?.attrs?.bpId !== projection.id ||
+      !tableAttrsHaveOnly(nodes[0]?.attrs, ["bpId", "bpType", "bpTableSource"]) ||
+      nodes[0]?.attrs?.bpTableSource != null ||
       !Array.isArray(nodes[0].content)) return null;
   const liveRows = nodes[0].content;
   const hasHead = source.head != null;
   if (liveRows.length !== source.rows.length + (hasHead ? 1 : 0)) return null;
-  const readRow = (row, header) => {
+  const readRow = (row, header, sourceCells, rowShape) => {
     if (row?.type !== "bpTableRow" || !Array.isArray(row.content) ||
         row.content.length !== source.rows[0].length) return null;
     const expectedType = header ? "bpTableHeaderCell" : "bpTableCell";
-    const cells = row.content.map((cell) => {
-      if (cell?.type !== expectedType) return null;
+    const cells = row.content.map((cell, column) => {
+      if (cell?.type !== expectedType ||
+          (cell.attrs != null && (!exactObjectKeys(cell.attrs, ["bpTableCellSource"]) ||
+            cell.attrs.bpTableCellSource != null))) return null;
       const inline = cell.content || [];
       if (!Array.isArray(inline)) return null;
       try {
         if (!tableTiptapInlineEqual(inlineArrayToTiptap(tiptapInlineToPd(inline)), inline)) {
           return null;
         }
+        const descriptor = tableCellDescriptor(rowShape.cells[column]);
+        if (descriptor && !tableProtectedInlineSupported(
+          inline,
+          sourceCells[column],
+          descriptor,
+        )) return null;
       } catch (_error) {
         return null;
       }
@@ -663,8 +762,10 @@ function tableCellRows(editorJSON, projection) {
     return cells.some((cell) => cell == null) ? null : cells;
   };
   let offset = 0;
-  const head = hasHead ? readRow(liveRows[offset++], true) : null;
-  const rows = liveRows.slice(offset).map((row) => readRow(row, false));
+  const head = hasHead
+    ? readRow(liveRows[offset++], true, source.head, projection.shape.head.row) : null;
+  const rows = liveRows.slice(offset).map((row, index) =>
+    readRow(row, false, source.rows[index], projection.shape.rows[index]));
   return (hasHead && head == null) || rows.some((row) => row == null)
     ? null
     : { source, head, rows };
@@ -717,6 +818,7 @@ export function tableProjectionMatchesCells(projection, cells) {
 }
 
 export function tableProjectionMatchesAction(before, after, action) {
+  if (before?.id !== after?.id) return false;
   const source = tableProjection(before);
   const target = tableProjection(after);
   if (!source.editable || !target.editable || typeof action !== "string") return false;
@@ -777,6 +879,11 @@ export function tableProjectionMatchesAction(before, after, action) {
   } else {
     return false;
   }
+  const protectedCells = [
+    ...shapeRows.flatMap((row) => row.cells),
+    ...(expected.head ? shapeHead.row.cells : []),
+  ].filter(tableCellDescriptor);
+  expected.shape.v = protectedCells.length > 0 ? 2 : 1;
   return jsonEqual(expected.shape, target.shape) && jsonEqual(expected.head, target.head) &&
     jsonEqual(expected.rows, target.rows);
 }
@@ -788,6 +895,110 @@ export function tableProjectionMatchesAction(before, after, action) {
 //   heading   → { text, level }
 //   paragraph → { content: [inline...] }
 //   list      → { ordered, items: [[inline...], ...] }
+function comparableListInline(content) {
+  const out = [];
+  for (const node of content || []) {
+    const next = deepCloneJson(node);
+    if (!next.marks?.length) delete next.marks;
+    const previous = out[out.length - 1];
+    if (previous?.type === "text" && next.type === "text" && jsonEqual(previous.marks, next.marks)) {
+      previous.text += next.text;
+    } else out.push(next);
+  }
+  return out;
+}
+
+function supportedListChild(child) {
+  return child && typeof child === "object" && !Array.isArray(child) &&
+    Array.isArray(child.items) && ["list", "bulletList", "bullet_list", "bulleted-list",
+      "bulleted_list", "ordered-list", "numbered_list"].includes(child.type);
+}
+
+function orderedListSource(block) {
+  return block.ordered === true || block.type === "ordered-list" || block.type === "numbered_list";
+}
+
+function listToTiptap(block, path, nested = false) {
+  const items = (Array.isArray(block.items) ? block.items : []).map((item, index) => ({
+    type: "listItem",
+    attrs: { bpListSource: { item: deepCloneJson(item) } },
+    content: [{ type: "paragraph", content: inlineArrayToTiptap(listItemToInlineArray(item)) },
+      ...(Array.isArray(item?.children) ? item.children.flatMap((child, at) =>
+        supportedListChild(child) ? [listToTiptap(child, `${path}/${index}/${at}`, true)] : []) : [])],
+  }));
+  return {
+    type: orderedListSource(block) ? "orderedList" : "bulletList",
+    ...(nested ? { attrs: { bpListFrameSource: { block: deepCloneJson(block), path } } } : {}),
+    content: items.length ? items : [{ type: "listItem", content: [{ type: "paragraph" }] }],
+  };
+}
+
+function nestedListFromTiptap(node, seen) {
+  const source = node.attrs?.bpListFrameSource;
+  const ownsSource = source?.block && !seen.has(source.path);
+  if (ownsSource) seen.add(source.path);
+  const ordered = node.type === "orderedList";
+  const items = (node.content || []).map(li => listItemFromTiptap(li, seen));
+  if (!ownsSource) return { type: "list", ordered, items };
+  const fields = deepCloneJson(source.block);
+  // An empty source list needs a schema placeholder, not a new persisted item.
+  const emptyPlaceholder = fields.items.length === 0 && node.content?.length === 1 &&
+    node.content[0].content?.length === 1 && !(node.content[0].content[0].content || []).length;
+  fields.items = emptyPlaceholder ? [] : items;
+  if (ordered !== orderedListSource(fields)) {
+    fields.type = "list";
+    fields.ordered = ordered;
+  }
+  return fields;
+}
+
+function listItemFromTiptap(li, seen = new Set()) {
+  const content = li.content?.[0]?.content;
+  const source = li.attrs?.bpListSource;
+  const item = source && Object.hasOwn(source, "item")
+    ? inlineCarrierFromTiptap(source.item, content) : tiptapInlineToPd(content);
+  const nested = (li.content || []).slice(1).filter(node =>
+    node.type === "bulletList" || node.type === "orderedList").map(node => nestedListFromTiptap(node, seen));
+  const original = Array.isArray(source?.item?.children) ? source.item.children : [];
+  if (!nested.length && !original.some(supportedListChild)) return item;
+  let index = 0;
+  const children = original.flatMap(child => supportedListChild(child)
+    ? index < nested.length ? [nested[index++]] : [] : [deepCloneJson(child)]);
+  children.push(...nested.slice(index));
+  return item && typeof item === "object" && !Array.isArray(item)
+    ? { ...item, children } : { content: tiptapInlineToPd(content), children };
+}
+
+function inlineCarrierFromTiptap(item, content) {
+  const inline = tiptapInlineToPd(content);
+  if (jsonEqual(comparableListInline(inlineArrayToTiptap(listItemToInlineArray(item))),
+    comparableListInline(content))) return deepCloneJson(item);
+  if (item && typeof item === "object" && !Array.isArray(item)) {
+    const next = deepCloneJson(item);
+    if (!(Array.isArray(item.content) && item.content.length) && typeof item.text === "string" &&
+      inline.every(node => node.type === "text")) next.text = inline.map(node => node.value).join("");
+    else {
+      next.content = inline;
+      // Reader maps fall back to text when content is empty. Clearing the
+      // authored body must not resurrect an old shadow text value.
+      if (!inline.length && typeof next.text === "string") next.text = "";
+    }
+    return next;
+  }
+  if (typeof item === "string") {
+    const decoded = listItemToInlineArray(item);
+    if (!jsonEqual(decoded, [{ type: "text", value: item }])) return JSON.stringify(inline);
+    if (inline.every(node => node.type === "text")) return inline.map(node => node.value).join("");
+  }
+  return inline;
+}
+
+function headingInline(source) {
+  if (Array.isArray(source.content) && source.content.length) return inlineArrayToTiptap(source.content);
+  const text = source.text;
+  return inlineArrayToTiptap(text != null && ["string", "number", "boolean"].includes(typeof text) ? String(text) : "");
+}
+
 export function tiptapToBlock(editorJSON, blockId, blockType) {
   const doc = editorJSON || {};
   const top = (doc.content && doc.content[0]) || {};
@@ -795,19 +1006,35 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
   switch (blockType) {
     case "heading": {
       const level = clampLevel(top.attrs && top.attrs.level);
+      const source = top.attrs?.bpHeadingSource;
+      if (source && typeof source === "object") {
+        const fields = deepCloneJson(source);
+        if (jsonEqual(comparableListInline(headingInline(source)), comparableListInline(top.content))) return { ...fields, level };
+        const content = tiptapInlineToPd(top.content);
+        const rich = content.some(node => node.type !== "text");
+        if ((Array.isArray(source.content) && source.content.length) || rich) {
+          fields.content = content;
+          if (!content.length && fields.text != null && ["string", "number", "boolean"].includes(typeof fields.text)) fields.text = "";
+        } else {
+          fields.text = plainText(top.content);
+        }
+        return { ...fields, level };
+      }
+      const content = tiptapInlineToPd(top.content);
+      if (content.some(node => node.type !== "text")) return { content, level };
       const text = plainText(top.content);
       return { text, level };
     }
     case "list": {
       const ordered = top.type === "orderedList";
-      const items = (top.content || []).map((li) => {
-        const para = (li.content || []).find((c) => c.type === "paragraph") || {};
-        return tiptapInlineToPd(para.content);
-      });
+      const seen = new Set();
+      const items = (top.content || []).map(li => listItemFromTiptap(li, seen));
       return { ordered, items };
     }
     case "paragraph":
     default: {
+      const source = top.attrs?.bpParagraphSource;
+      if (source && typeof source === "object") return inlineCarrierFromTiptap(source, top.content);
       return { content: tiptapInlineToPd(top.content) };
     }
   }

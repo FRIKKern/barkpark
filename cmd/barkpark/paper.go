@@ -254,17 +254,14 @@ func (m model) buildPaperContent(width int) string {
 	return rendered
 }
 
-// paperReadFailedNotice is the paper pane's member of the shared read-failure
-// vocabulary — the same ✕ glyph, dim styling and "the server refused or is
-// unreachable" second line that failedDocListInterior and renderReadFailedState
-// use, so the TUI speaks about a failed read with ONE voice. It says
-// "referenced documents", not "documents": the paper itself rendered, only its
-// references did not resolve. Like its siblings it advertises no key — the TUI
-// binds no refresh.
+// paperReadFailedNotice uses the same glyph, dim styling and second line as the
+// other read-failure states. It names referenced documents because the paper
+// itself rendered; only its references did not resolve. It advertises no key
+// because the TUI binds no refresh for this state.
 func paperReadFailedNotice() []string {
 	return []string{
 		dimStyle.Render("   ✕ Couldn't load referenced documents"),
-		dimStyle.Render("   the server refused or is unreachable"),
+		dimStyle.Render("   the request failed"),
 		"",
 	}
 }

@@ -44,6 +44,52 @@ measuredHeight = 20;
 resizeCallback([{ contentRect: { width: 320 } }]);
 assert.equal(textarea.style.height, "20px", "shrinks after a wider viewport");
 
+textarea.classList.add("bp-paper-inline-text");
+textarea.style.cssText = "line-height:25.92px;padding:0;border:0";
+measuredHeight = 26;
+sizing.updated();
+assert.equal(textarea.style.height, "25.92px", "one citation line retains the reader's fractional line height");
+measuredHeight = 52;
+sizing.updated();
+assert.equal(textarea.style.height, "51.84px", "wrapped inline text retains exact line-box multiples");
+assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [2, 5], "fractional fitting preserves selection");
+textarea.style.padding = "2px";
+measuredHeight = 30;
+sizing.updated();
+assert.equal(textarea.style.height, "30px", "padded fields retain their measured-height fallback");
+textarea.style.padding = "0";
+sizing.updated();
+assert.equal(textarea.style.height, "30px", "unexpected content overflow is not clipped to a line multiple");
+textarea.style.lineHeight = "normal";
+sizing.updated();
+assert.equal(textarea.style.height, "30px", "normal line height retains the measured fallback");
+const cite = window.document.createElement("cite");
+cite.className = "bp-blockquote__cite";
+textarea.before(cite);
+cite.append(textarea);
+const computedStyle = window.getComputedStyle.bind(window);
+let prefixWidth = "20.888px";
+window.getComputedStyle = (element, pseudo) => element === cite && pseudo === "::before"
+  ? { width: prefixWidth }
+  : computedStyle(element);
+sizing.updated();
+assert.equal(textarea.style.textIndent, "20.888px", "only the first citation line reserves the rendered dash width");
+prefixWidth = "24.5px";
+sizing.updated();
+assert.equal(textarea.style.textIndent, "24.5px", "font and layout updates remeasure the actual prefix");
+prefixWidth = "auto";
+sizing.updated();
+assert.equal(textarea.style.textIndent, "24.5px", "an unavailable prefix measurement cannot poison native layout");
+assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [2, 5], "prefix fitting preserves native selection");
+assert.equal(textarea.value, "Original title", "the decorative prefix never enters authored text");
+cite.before(textarea);
+cite.remove();
+window.getComputedStyle = computedStyle;
+textarea.style.cssText = "";
+textarea.classList.remove("bp-paper-inline-text");
+measuredHeight = 20;
+sizing.updated();
+
 const calls = [];
 const toggles = [];
 let reply;
@@ -77,6 +123,73 @@ measuredHeight = 100;
 resizeCallback([{ contentRect: { width: 200 } }]);
 assert.equal(textarea.style.height, "20px", "late observer callbacks do not touch disposed fields");
 assert.equal(disconnected, true);
+// A disclosure label is phrasing content inside <summary>; its form lives
+// outside the disclosure so nested child forms remain valid HTML.
+const summary = window.document.createElement("textarea");
+summary.name = "summary";
+summary.setAttribute("form", "disclosure-settings");
+const settings = window.document.createElement("form");
+settings.id = "disclosure-settings";
+settings.className = "bp-paper-edit-form";
+settings.setAttribute("phx-change", "paper-block-autosave");
+settings.setAttribute("phx-debounce", "500");
+settings.innerHTML = '<input name="block_id" value="disclosure">';
+window.document.querySelector("main").append(summary, settings);
+calls.length = 0;
+toggles.length = 0;
+summary.value = "Direct disclosure title";
+summary.dispatchEvent(new window.Event("input", { bubbles: true }));
+toggle.el.click();
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(calls.length, 1, "View must flush form-associated text outside the form");
+assert.equal(calls[0].payload.summary, "Direct disclosure title");
+assert.equal(calls[0].payload.open, undefined, "summary edits never send default-open settings");
+assert.deepEqual(toggles, [], "external text retains the same acknowledged exit barrier");
+reply([{ status: "fulfilled", value: { reply: {
+  saved: true, request_id: calls[0].payload.request_id, rev: 9,
+} } }]);
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.deepEqual(toggles, ["paper-toggle-edit"]);
+// LiveView preserves a focused native field's value during a remote repaint.
+// A later keystroke must still be authored against the revision the user saw.
+summary.focus();
+const coordinator = toggle._bpPaperExitCoordinator;
+assert.equal(coordinator.hasUnsaved(), false, "focus alone is not an unsaved edit");
+coordinator.observeRevision({ rev: 10, apply: () => {
+  window.document.querySelector("main").dataset.paperRev = "10";
+} });
+summary.blur();
+summary.focus();
+calls.length = 0;
+toggles.length = 0;
+summary.value = "Competing focused title";
+summary.dispatchEvent(new window.Event("input", { bubbles: true }));
+toggle.el.click();
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(calls[0].payload.if_rev, 9, "blur/refocus cannot silently adopt a revision skipped while focused");
+reply([{ status: "fulfilled", value: { reply: {
+  saved: false, conflict: true, request_id: calls[0].payload.request_id, current_rev: 10,
+} } }]);
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.deepEqual(toggles, [], "the native conflict retains the editor");
+const keep = window.document.querySelector('[data-bp-paper-conflict] [data-action="keep"]');
+assert.ok(keep && !keep.disabled, "explicit native text conflict can be reviewed and kept");
+keep.click();
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(calls[1].payload.if_rev, 10);
+assert.notEqual(calls[1].payload.request_id, calls[0].payload.request_id);
+reply([{ status: "fulfilled", value: { reply: {
+  saved: true, request_id: calls[1].payload.request_id, rev: 11,
+} } }]);
+await new Promise(resolve => setTimeout(resolve, 0));
+coordinator.observeRevision({ rev: 12, apply: () => {
+  window.document.querySelector("main").dataset.paperRev = "12";
+} });
+summary.value = "Continuing focused title";
+summary.dispatchEvent(new window.Event("input", { bubbles: true }));
+toggle.el.click();
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(calls[2].payload.if_rev, 11, "own acknowledgement refreshes the still-focused baseline only to its own revision");
 toggle.destroyed();
 dom.window.close();
 console.log("PASS inline text: native selection, grow/shrink, cleanup and acknowledged immediate View");

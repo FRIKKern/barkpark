@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -81,6 +82,17 @@ type manifestRequest struct {
 type dispatchError struct {
 	msg       string
 	withUsage bool
+	// code overrides the envelope error code. Empty means "usage" — the code
+	// every build-stage failure carried before the manifest-drift refusal.
+	code string
+}
+
+// envelopeCode is the error code this failure renders under.
+func (e *dispatchError) envelopeCode() string {
+	if e.code != "" {
+		return e.code
+	}
+	return "usage"
 }
 
 func (e *dispatchError) Error() string { return e.msg }
@@ -95,6 +107,14 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	// Split tail into positional args and command-local flags.
 	posArgs, cmdFlags, err := splitArgs(cmd, tail)
 	if err != nil {
+		// A manifest/parser DRIFT refusal is not a typo: it names the stale
+		// install and the one command that fixes it, so the per-command usage
+		// dump (which would invite retyping the flag away) is suppressed and
+		// the envelope carries its own named code. See manifest_flag_drift.go.
+		var drift *flagDriftError
+		if errors.As(err, &drift) {
+			return nil, &dispatchError{msg: err.Error(), withUsage: false, code: manifestFlagDriftCode}
+		}
 		return nil, &dispatchError{msg: err.Error(), withUsage: true}
 	}
 
@@ -159,6 +179,15 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 
 	// Tier-appropriate credential.
 	headers := authHeaders(cmd, ctx)
+	// THE SESSION DISCRIMINATOR (task-f79e39f4992749a5). Rides EVERY manifest
+	// request, not only the claim: a pulse, a stamp and a close are the writes
+	// a woken predecessor of the same lane makes, and they were the ones the
+	// ledger could not attribute. The server HMACs this and stores the result
+	// on `claim.session`; it never stores the key itself. A caller with no key
+	// sends no header and the row stays byte-identical to a pre-session write.
+	if key := sessionKey(); key != "" {
+		headers[sessionHeader] = key
+	}
 	if needsPerspectiveAuth || needsDraftIDAuth {
 		// doc get/ls/query are public at their default published perspective,
 		// so their manifest tier must remain `none`. Drafts and raw are
@@ -366,6 +395,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		if merr != nil {
 			if !renderErrorEnvelope(out, "usage", merr.Error(), "", "") {
 				out.userErr("%v", merr)
+				humanErrorCode(out, "usage")
 				usageCommand(out, cmd)
 			}
 			return exitUsage
@@ -393,6 +423,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		if serr != nil {
 			if !renderErrorEnvelope(out, "usage", serr.Error(), "", "") {
 				out.userErr("%v", serr)
+				humanErrorCode(out, "usage")
 				usageCommand(out, cmd)
 			}
 			return exitUsage
@@ -422,8 +453,9 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 
 	req, derr := buildManifestRequest(g, ctx, m, cmd, tail, true)
 	if derr != nil {
-		if !renderErrorEnvelope(out, "usage", derr.msg, "", "") {
+		if !renderErrorEnvelope(out, derr.envelopeCode(), derr.msg, "", "") {
 			out.userErr("%v", derr)
+			humanErrorCode(out, derr.envelopeCode())
 			if derr.withUsage {
 				usageCommand(out, cmd)
 			}
@@ -440,6 +472,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		if serr != nil {
 			if !renderErrorEnvelope(out, "usage", serr.Error(), "", "") {
 				out.userErr("%v", serr)
+				humanErrorCode(out, "usage")
 			}
 			return exitUsage
 		}
@@ -542,6 +575,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	if err != nil {
 		if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
 			out.userErr("request failed: %v", err)
+			humanErrorCode(out, "request_failed")
 		}
 		return exitGeneric
 	}
@@ -588,6 +622,22 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// hinter is a CLOSURE, not a precomputed string, so the page walk behind the
 	// prefix suggestion runs only when the refusal actually IS an unannotated
 	// not_found — a 403, a 500, or a server that sent its own hint pays nothing.
+	// `bp task get -o json` only: materialise the two wrong field paths
+	// (.doc.content.claim / .doc.content.criteria) as `_misread` sentinels, so a
+	// parser walking them can no longer read a null as UNCLAIMED or as a row with
+	// NO CRITERIA. No-op for every other command and for the human table
+	// (tasks_get_misread.go).
+	respBody = annotateTaskGetMisreads(cmd, status, out.machineOut(), respBody)
+
+	// The envelope key the --help promised, CHECKED against what the server
+	// actually sent. A documented key nobody verifies is the same unfalsifiable
+	// promise as the refusals this closes: true when written, silently wrong
+	// afterwards. Advisory on stderr only — it never fails the command and
+	// never edits the body (list_envelope_help.go).
+	if note := listEnvelopeDrift(cmd, status, respBody); note != "" {
+		out.errf("bp: %s", note)
+	}
+
 	var hinter func() string
 	if typed := taskGetTypedID(cmd, tail); typed != "" {
 		hinter = func() string { return taskGetNotFoundHint(out, m, ctx, typed) }
@@ -701,6 +751,7 @@ func refuseWithRemedy(out *writer, code, msg, hint string) {
 	if hint != "" {
 		out.errf("  hint: %s", hint)
 	}
+	humanErrorCode(out, code)
 }
 
 // unreadableListPageHint is the one wording both list-page refusals share —
@@ -1398,7 +1449,7 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 			}
 			f, ok := byName[name]
 			if !ok {
-				return nil, nil, fmt.Errorf("unknown flag --%s for %s %s", name, cmd.Noun, cmd.Verb)
+				return nil, nil, unknownFlagError(cmd, "--"+name, name)
 			}
 			if f.Type == "bool" {
 				// `--force=false` must not silently set the flag true: an inline
@@ -1435,11 +1486,11 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 		if len(a) == 2 && a[0] == '-' && a != "-" {
 			long, aliased := shortFlagAliases[a]
 			if !aliased {
-				return nil, nil, fmt.Errorf("unknown flag %s for %s %s", a, cmd.Noun, cmd.Verb)
+				return nil, nil, unknownFlagError(cmd, a, "")
 			}
 			f, ok := byName[long]
 			if !ok {
-				return nil, nil, fmt.Errorf("unknown flag %s for %s %s", a, cmd.Noun, cmd.Verb)
+				return nil, nil, unknownFlagError(cmd, a, long)
 			}
 			if f.Type == "bool" {
 				if err := refuseRepeatedFlag(cmd, f, flags[long], "true"); err != nil {
@@ -1761,7 +1812,22 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 			continue
 		}
 		if values := flags[f.Name]; len(values) > 0 {
-			obj[bodyFlagKey(f.Name)] = values[len(values)-1]
+			// stampBodyKey is bodyFlagKey for every command but task.stamp,
+			// whose `criterion-text` needs the snake_case spelling the server
+			// reads. Routed through one helper so the exception cannot be
+			// applied in one call site and forgotten in another.
+			key := stampBodyKey2(cmd, f.Name)
+			if f.Repeatable {
+				// A REPEATABLE body flag is a list, so it ships as a JSON array —
+				// EVEN AT LENGTH ONE. Last-wins here would send `"files": "a"` for
+				// a single `--files a`, and a server that types the field as a list
+				// refuses a bare string; the caller would then see a flag that works
+				// at two paths and 400s at one. The whole slice is copied so the
+				// body cannot alias the parsed flag map.
+				obj[key] = append([]string{}, values...)
+				continue
+			}
+			obj[key] = values[len(values)-1]
 		}
 	}
 	// --set fields target: nested under SetKey (e.g. patch's `set`) or, by
@@ -2019,6 +2085,69 @@ func commandFlagBelongsInBody(cmd manifest.Command, name string) bool {
 			return true
 		}
 	}
+	// task.stamp's PROSE rides the body, because in the query string it rides the
+	// REQUEST LINE — and that is where the wall is.
+	//
+	// MEASURED, not assumed (task-b71ece4e1a8d1f6d): a stamp whose encoded URI
+	// reaches 9,933 bytes is refused, deterministically, 3/3, as
+	// `stream error: … INTERNAL_ERROR; received from peer`. 9,913 bytes lands.
+	// The refusal names no field, no bound and no unit, is indistinguishable
+	// from a network blip, and is DETERMINISTIC WHILE LOOKING TRANSIENT — so the
+	// response it invites is retry, and the conclusion after two retries is "the
+	// ledger is unreliable tonight".
+	//
+	// WHY THIS IS THE FIX RATHER THAN A LIMIT CHECK: a server cannot describe a
+	// request it never finished parsing. No validation message is reachable from
+	// a request line the peer rejected, so the only repair that can produce a
+	// good error is to stop putting prose there. `close` already posts its
+	// reason in the body and has no such wall (URI 69 bytes against a 9,812-byte
+	// reason); this puts stamp on the same footing.
+	//
+	// THE SERVER ALREADY ACCEPTS BOTH, so this needs no coordinated deploy:
+	// Phoenix merges query and body into conn.params, and TasksController.stamp/2
+	// reads Map.get(params, "evidence") / "note" off that merge. An OLD bp keeps
+	// working against a NEW server and vice versa. The query path is retained for
+	// compatibility, NOT because it is correct.
+	//
+	// `criterion-text` RIDES THE BODY TOO, under the snake_case key the server
+	// reads. The generic bodyFlagKey would camelCase it to "criterionText", which
+	// TasksController reads as NO key at all - so stampBodyKey maps it to
+	// "criterion_text", one of the two spellings stamp_criterion_text/1 accepts
+	// (`Map.get(params, "criterion_text") || Map.get(params, "criterion-text")`).
+	//
+	// It matters because it is the OFF-BY-ONE GUARD: a --met carrying no
+	// criterion-text is refused 409 criterion_text_required. So a silent key
+	// rename here fails CLOSED rather than flipping a neighbouring criterion -
+	// but it would still be a refusal nobody could diagnose, which is why the
+	// key is pinned by a test rather than trusted.
+	if cmd.ID == "task.stamp" {
+		switch name {
+		case "evidence", "note", "criterion-text":
+			return true
+		}
+	}
+	// task.landed's `--files` MANIFEST rides the body, and it is the one flag on
+	// this command that MUST: it is a LIST, and the query string has no honest
+	// spelling for one here.
+	//
+	// The query-string form would be `files[]=a&files[]=b` — the bracket shape
+	// applyQuery gives a repeated flag, and the shape the server's own refusal
+	// sentence offers as an alternative. It breaks in the ONE-path case, which is
+	// the common case: a single occurrence keeps the plain `files=a` spelling,
+	// Plug decodes that to the STRING "a", and Landed.check_files/1 refuses a
+	// non-list outright — so `--files x` would 400 while `--files x --files y`
+	// worked, an arity-dependent failure no caller could guess. Riding the body
+	// as a JSON array (buildBody emits the whole []string for a repeatable body
+	// flag) makes one path and forty the same shape.
+	//
+	// And it keeps a 40-path manifest off the REQUEST LINE, which is where the
+	// measured wall is (see the task.stamp note above: ~9.9KB of encoded URI is
+	// refused as an unattributable stream error). 40 paths is the server's own
+	// verbatim limit, so the largest legal manifest is the one that would have
+	// come closest to it.
+	if cmd.ID == "task.landed" && name == "files" {
+		return true
+	}
 	return false
 }
 
@@ -2039,6 +2168,28 @@ func commandHasSetBodyFlags(cmd manifest.Command, flags map[string][]string) boo
 // reads for it (`if-rev` → `ifRev`). Names without a hyphen — cycle.open's
 // snake_case *_json contract flags, single-word flags — pass through unchanged,
 // so the server-side spelling is preserved exactly.
+// stampBodyKey is bodyFlagKey for task.stamp, where one flag needs a spelling
+// the generic camelCase rule would destroy. `criterion-text` must arrive as
+// "criterion_text": the server reads that or the hyphenated form, never
+// "criterionText". Kept as a named seam rather than an if buried inside
+// bodyFlagKey so the exception is visible from either function.
+func stampBodyKey(name string) string {
+	if name == "criterion-text" {
+		return "criterion_text"
+	}
+	return bodyFlagKey(name)
+}
+
+// stampBodyKey2 applies that exception ONLY to task.stamp. Every other command
+// keeps the generic camelCase rule, so this cannot silently change a body key
+// on some unrelated verb that happens to declare a hyphenated flag.
+func stampBodyKey2(cmd manifest.Command, name string) string {
+	if cmd.ID == "task.stamp" {
+		return stampBodyKey(name)
+	}
+	return bodyFlagKey(name)
+}
+
 func bodyFlagKey(name string) string {
 	if !strings.Contains(name, "-") {
 		return name
@@ -2451,9 +2602,7 @@ func renderError(out *writer, ae apiError) {
 	if h := ae.hint(); h != "" {
 		out.errf("  hint: %s", h)
 	}
-	if ae.code != "" {
-		out.info("  code: %s", ae.code)
-	}
+	humanErrorCode(out, ae.code)
 	if ae.requestID != "" {
 		out.info("  request_id: %s", ae.requestID)
 	}
@@ -3145,6 +3294,7 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 		if err != nil {
 			if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
 				out.userErr("request failed: %v", err)
+				humanErrorCode(out, "request_failed")
 			}
 			return exitGeneric, false
 		}
@@ -3190,6 +3340,7 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 				msg := fmt.Sprintf("pagination stalled at offset %d: full page repeats offset %d", offset, firstOffset)
 				if !renderErrorEnvelope(out, "pagination_stalled", msg, "", "") {
 					out.userErr("%s", msg)
+					humanErrorCode(out, "pagination_stalled")
 				}
 				return exitGeneric, false
 			}

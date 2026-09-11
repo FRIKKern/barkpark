@@ -1188,6 +1188,50 @@
       letter-spacing: 0.06em; color: var(--fg-dim);
     }
 
+    /* Keep native focus inside the visible narrow shell. The desktop grid's
+       intrinsic tab/action widths otherwise overflow the shell, so focusing
+       Theme scrolls the entire Paper sideways. Wrap in DOM order; do not
+       clip the bar, which would also clip the workspace switcher's popover. */
+    html[data-width-bucket="narrow"] .studio-bar,
+    html[data-width-bucket="phone"] .studio-bar {
+      display: flex; flex-wrap: wrap; height: auto; flex-shrink: 0;
+      gap: 8px; padding-block: 8px;
+    }
+    html[data-width-bucket="narrow"] .studio-bar-tabs,
+    html[data-width-bucket="phone"] .studio-bar-tabs,
+    html[data-width-bucket="narrow"] .studio-bar-right,
+    html[data-width-bucket="phone"] .studio-bar-right,
+    html[data-width-bucket="narrow"] .studio-bar-actions,
+    html[data-width-bucket="phone"] .studio-bar-actions {
+      flex-wrap: wrap; max-width: 100%;
+    }
+    html[data-width-bucket="narrow"] .studio-bar-brand,
+    html[data-width-bucket="phone"] .studio-bar-brand {
+      max-width: 100%;
+    }
+    html[data-width-bucket="narrow"] .studio-bar-right,
+    html[data-width-bucket="phone"] .studio-bar-right {
+      margin-left: auto;
+    }
+    html[data-width-bucket="narrow"] .scope-switcher,
+    html[data-width-bucket="phone"] .scope-switcher {
+      min-width: 0;
+    }
+    html[data-width-bucket="narrow"] .scope-title,
+    html[data-width-bucket="phone"] .scope-title {
+      min-width: 0; max-width: 100%;
+    }
+    html[data-width-bucket="narrow"] .scope-menu,
+    html[data-width-bucket="phone"] .scope-menu {
+      /* Wrap columns so partially visible focused items are still usable.
+         The bounded popover, not the shell, owns any remaining overflow. */
+      flex-wrap: wrap; max-height: calc(100vh - 80px); overflow-x: auto;
+    }
+    html[data-width-bucket="narrow"] .scope-menu-col,
+    html[data-width-bucket="phone"] .scope-menu-col {
+      flex: 1 1 160px; max-width: 100%;
+    }
+
     /* ── Self-update bar (isu-w1): slim admin strip pinned above the topbar.
        Server-rendered chrome (admin + :behind only); the `bp-update-bar`
        initialiser in the scripts below wires Update-now / changelog / dismiss.
@@ -1418,6 +1462,55 @@
     }
     @container content (min-width: 720px) {
       .editor-panel .bp-paper-surface { min-inline-size: calc(55ch + 2 * var(--paper-gutter)); }
+    }
+    /* THE MEASURE'S UPPER HALF (spd-b7). The floor above is one end of a
+       55-70ch band; this is the other, and until now the band had no other
+       end — the only thing stopping the Studio surface from widening was the
+       shared `.bp-paper-surface { max-width: 660px }` block far below, a
+       pixel number that says nothing about characters and that the public
+       reader owns.
+
+       STUDIO-SCOPED, for the floor's own reason: the bare `.bp-paper-surface`
+       is shared with the public reader, the chat bubbles (chat_live.ex) and
+       the swatch demo (swatch_live.ex), and neither of the latter two carries
+       a neutraliser for an inline-size constraint.
+
+       WHY `min()` AND NOT A BARE `70ch`. `max-inline-size` here and
+       `max-width` on the shared block are THE SAME PROPERTY in a horizontal
+       writing mode and cascade together, so this (0,2,0) selector REPLACES
+       the 660px cap rather than joining it. A bare
+       `calc(70ch + 2 * var(--paper-gutter))` would therefore WIDEN the Studio
+       surface past the 660px column the public reader renders and break the
+       View/Edit measure-parity contract measure_parity_test.exs pins. The
+       `min()` lets the clamp tighten the measure and never loosen it:
+       whichever term is narrower is the used value. The px term is not a
+       free literal — measure_parity_test.exs asserts it equals the shared
+       block's own `max-width`, read off the sheet, so the two cannot drift.
+
+       WHAT IT CLOSES TODAY: ZERO pixels, measured in Chrome on this branch at
+       viewports 900 / 1280 / 2560 — the surface renders 660px (580px content,
+       58.00ch) at all three both with the declaration and with it disabled,
+       and `max-inline-size` computes to 660px, because on the resolved paper
+       serif (Iowan Old Style at 18px; 1ch = 10.00px by a `width: 1ch` probe
+       inside the surface) 70ch + 80px is 780.75px, above the cap. This ships
+       as the band's missing HALF and never as a measure fix, the same honesty
+       D93/D103 demanded of the floor's token. The ch term is what bites if
+       the type scale ever moves the character advance far enough that 70ch of
+       prose fits inside the cap — and it is not decorative: dropping the
+       `min()` measured the surface at 780.75px / 70.08ch beside the reader's
+       660px, and swapping the px term to 600px measured it at 600px, so this
+       rule genuinely owns the used value.
+
+       UNGATED, unlike the floor. The floor sits behind
+       `@container content (min-width: 720px)` because raising a MINIMUM in a
+       column that cannot honour it manufactures a horizontal scrollbar (D39).
+       A MAXIMUM can only ever remove width, so it needs no gate — and for the
+       same reason it needs no phone neutraliser beside the
+       `html[data-width-bucket="phone"] ... { min-inline-size: 0 }` line at the
+       bottom of this sheet: at phone the column is already narrower than
+       either term. */
+    .editor-panel .bp-paper-surface {
+      max-inline-size: min(calc(70ch + 2 * var(--paper-gutter)), 660px);
     }
     /* Classic-editor measure floor (D40). This lived at the top of this
        section as `.editor-panel .editor-body { min-inline-size: 48ch }` and
@@ -1741,6 +1834,14 @@
        --bg-accent is sub-AA (evergreen-light 4.16), so selected rows use --fg. */
     .pane-doc-title { font-size: var(--text-sm); font-weight: 500; color: var(--fg-muted); display: flex; align-items: center; gap: 8px; }
     .pane-doc-item.selected .pane-doc-title { color: var(--fg); }
+    /* Row media (Gyldendal parity E3.3): a schema's list_preview.media
+       thumbnail before the title — Sanity's list preview `media`. The empty
+       variant keeps the box so titles in one pane stay aligned. */
+    .pane-doc-media {
+      width: 28px; height: 28px; border-radius: 4px; flex-shrink: 0; overflow: hidden;
+      display: inline-flex; background: var(--bg-muted); border: 1px solid var(--border);
+    }
+    .pane-doc-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .pane-doc-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
     .pane-doc-dot.published { background: var(--success); }
     .pane-doc-dot.draft { background: var(--warning); }
@@ -1973,6 +2074,18 @@
        Re-visit if Sheets ever grows a container-queried child. */
     .editor-panel.sheet-editor { container-type: normal; }
     .editor-header { justify-content: space-between; background: var(--bg); }
+    /* Paper actions are direct links/buttons, not the classic overflow menu.
+       Give them their own row when the pane is narrow: flex-end overflow would
+       otherwise paint Open standalone over the title. Desktop stays unchanged. */
+    @container panel (max-width: 720px) {
+      .editor-panel[data-test-id="studio-paper-editor"] > .editor-header {
+        display: grid; grid-template-columns: minmax(0, 1fr);
+        height: auto; flex-shrink: 0; gap: 8px; padding-block: 8px;
+      }
+      .editor-panel[data-test-id="studio-paper-editor"] > .editor-header > div:last-child {
+        flex-wrap: wrap;
+      }
+    }
     .editor-body { flex: 1; overflow-y: auto; padding: 20px 24px; max-width: 720px; }
     .editor-meta { font-size: var(--text-xs); color: var(--fg-dim); margin-bottom: 20px; }
     .editor-field { margin-bottom: 20px; }
@@ -2569,86 +2682,6 @@
     .access-chip { flex-shrink: 0; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: var(--bg-subtle, hsl(var(--bp-neutral-hsl) / 0.12)); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
     .access-chip-expiry[data-expired="true"] { color: var(--destructive); }
 
-    /* bp-asset-browser — native mediaAsset modal */
-    .bp-ab-overlay {
-      position: fixed; inset: 0; z-index: 60;
-      background: hsl(var(--bp-scrim-hsl) / 0.55);
-      display: flex; align-items: center; justify-content: center;
-      padding: 24px;
-    }
-    .bp-ab-overlay[hidden] { display: none !important; }
-    .bp-ab-dialog {
-      width: min(960px, 100%); max-height: min(85vh, 900px);
-      background: var(--bg-elevated); border: 1px solid var(--border-muted);
-      border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
-      display: flex; flex-direction: column; overflow: hidden;
-    }
-    .bp-ab-header {
-      display: flex; align-items: center; gap: 12px;
-      padding: 14px 16px; border-bottom: 1px solid var(--border-muted);
-    }
-    .bp-ab-title { font-size: 15px; font-weight: 600; margin: 0; flex: 0 0 auto; }
-    .bp-ab-search { flex: 1; min-width: 0; }
-    .bp-ab-body { position: relative; flex: 1; overflow-y: auto; padding: 16px; }
-    .bp-ab-loading { position: absolute; inset: 16px; display: flex; align-items: center; justify-content: center; }
-    .bp-ab-grid { min-height: 120px; }
-    .bp-ab-card {
-      display: flex; flex-direction: column; align-items: stretch;
-      padding: 0; border: 2px solid transparent; background: var(--bg-subtle);
-      cursor: pointer; text-align: left;
-      transition: border-color var(--dur-1) ease, transform var(--dur-1) ease;
-    }
-    .bp-ab-card:hover { border-color: var(--primary); transform: translateY(-2px); }
-    .bp-ab-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
-    .bp-ab-file-icon {
-      aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
-      font-size: 11px; text-transform: uppercase; color: var(--fg-muted);
-      background: var(--bg-muted);
-    }
-    .bp-ab-card-title {
-      font-size: 11px; color: var(--fg-muted); padding: 6px 8px;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    /* bp-media-picker — the image-field input. Two states only: a framed
-       preview of the SELECTED image, or ONE dashed drop-target card when
-       empty (click = upload, drag = drop). The library never renders inline
-       under the field — Browse library opens the bp-asset-browser modal. */
-    bp-media-picker { display: block; }
-    .bp-mp-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-    /* Gyldendal parity E1 — image focal point (hotspot) + alt text on the field picker. */
-    .bp-mp-hotspot { position: relative; display: inline-block; cursor: crosshair; }
-    .bp-mp-focal {
-      position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%;
-      border: 2px solid var(--bg); background: var(--primary); box-shadow: 0 0 0 2px var(--primary);
-      pointer-events: none;
-    }
-    .bp-mp-alt-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
-    .bp-mp-alt-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-dim); }
-    .bp-mp-alt { width: 100%; }
-    .bp-mp-preview-img {
-      display: block; max-width: 100%; max-height: 240px;
-      border-radius: var(--radius-sm); border: 1px solid var(--border);
-      background: var(--bg-subtle);
-    }
-    .bp-mp-empty {
-      display: flex; align-items: center; justify-content: center;
-      min-height: 88px; padding: 20px;
-      border: 1px dashed var(--border); border-radius: var(--radius-sm);
-      color: var(--fg-muted); font-size: var(--text-sm); text-align: center;
-      cursor: pointer; user-select: none;
-      transition: border-color var(--dur-1), color var(--dur-1), background var(--dur-1);
-    }
-    .bp-mp-empty:hover, .bp-mp-empty:focus-visible {
-      border-color: var(--primary); color: var(--fg);
-      background: var(--bg-subtle); outline: none;
-    }
-    bp-media-picker.bp-mp-drag-over .bp-mp-empty,
-    bp-media-picker.bp-mp-drag-over .bp-mp-preview-img {
-      border-color: var(--primary); border-style: dashed;
-    }
-    .bp-mp-broken { color: var(--destructive); border-color: var(--destructive); opacity: 0.8; }
-    bp-media-picker.bp-mp-busy { opacity: 0.7; pointer-events: none; }
-    .bp-mp-error { display: none; margin-top: 6px; font-size: var(--text-xs); color: var(--destructive); }
 
     /* bp-asset-explorer — full-page Media tab workspace */
     .media-explorer-panel {
@@ -3149,6 +3182,10 @@
     /* Validation */
     .field-required { color: var(--destructive); margin-left: 2px; }
     .field-errors { font-size: var(--text-xs); color: var(--destructive); margin-top: 4px; }
+    /* Gyldendal parity E1.6 — warning-level validation, inline + publish bar */
+    .field-warnings { font-size: var(--text-xs); color: var(--warning); margin-top: 4px; }
+    .editor-field.has-warning:not(.has-error) .form-input { border-color: var(--warning); }
+    .bp-validation-warnings { font-size: var(--text-xs); color: var(--warning); margin-left: 12px; }
 
     /* Dataset switcher (hoisted from BarkparkWeb.Studio.DatasetSwitcher) */
     .dataset-switcher { display: inline-flex; align-items: center; gap: 8px; margin-left: 12px; font-size: var(--text-xs); }
@@ -3731,6 +3768,42 @@
     .modal-header h3 { margin: 0; font-size: var(--text-base); font-weight: 600; }
     .modal-body { padding: 16px 20px 20px; overflow-y: auto; }
 
+    /* Schema-action confirm modal (spd-w5f). `components/confirm_modal.ex`
+       carried this whole surface in a `style="…"` attribute: `position: fixed;
+       inset: 0; background: rgba(0,0,0,0.4); … z-index: 1000;`. Three costs,
+       all fixed here.
+
+       COLOUR. `rgba(0,0,0,0.4)` is a raw literal — the exact spelling charter
+       D53 proved FAILS design/check.mjs Part E while studio-literal-check.sh
+       reports PASS (it does not scan rgba by design). It survived only because
+       it sat inline in an `.ex` file instead of a ledgered stylesheet. The
+       sanctioned form is `hsl(var(--bp-scrim-hsl) / a)`, Δ0 on BOTH gates, and
+       it is the same ink `.modal-backdrop` (0.45) and `.image-picker-overlay`
+       (0.5) already use, so the confirm scrim now themes with them.
+
+       STACKING. `z-index: 1000` was outside the Studio's own tier system
+       entirely (.image-picker-overlay 50, .delete-modal 51, .bp-ae-modal 60).
+       51 is the tier this modal argues for: it is a confirmation dialog, the
+       same role as `.delete-modal`, and it must sit ABOVE the 50-tier pickers
+       and backdrops it can be opened over.
+
+       POSITION stays `fixed`, deliberately — unlike `.modal-backdrop`, which
+       D52 made absolute. This is a behaviour-preserving hoist, not a
+       repositioning: the element was fixed inline, so it is fixed here, and it
+       is inventoried as `.bp-modal-overlay => :layout_sibling` in
+       @fixed_css_inventory (components.ex renders it AFTER the editor shell
+       closes, so it is a sibling of `.editor-panel`, never a descendant). */
+    .bp-modal-overlay {
+      position: fixed; inset: 0; z-index: 51;
+      display: flex; align-items: center; justify-content: center;
+      background: hsl(var(--bp-scrim-hsl) / 0.45);
+    }
+    .bp-modal {
+      background: var(--bg-card); color: var(--fg);
+      padding: 24px; min-width: 420px; max-width: 720px; max-height: 80vh;
+      display: flex; flex-direction: column; gap: 12px; overflow: auto;
+    }
+
     .bp-secondary-candidates {
       list-style: none; margin: 12px 0 0 0; padding: 0;
       max-height: 320px; overflow-y: auto;
@@ -4157,6 +4230,7 @@
         than the link being hoisted, so every rule keeps its exact cascade
         position relative to the halves above and below. --%>
   <link rel="stylesheet" href="/assets/bp-paper-editor-shell.css" />
+  <link rel="stylesheet" href="/assets/bp-media-picker.css" />
   <style>
 
     /* ── Studio sheet grid editor (Sheets M2) ─────────────────────────────
@@ -5961,12 +6035,13 @@
     // BP-INFLIGHT-GUARD-END
 
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
-      params: {
+      params: () => ({
         _csrf_token: csrfToken,
         user_id: userId,
         user_name: userName,
-        user_color: userColor
-      },
+        user_color: userColor,
+        ...(window.BarkparkPaperEditorConnectParams?.() || {})
+      }),
       hooks: Hooks,
       dom: {
         onBeforeElUpdated: (fromEl, toEl) =>

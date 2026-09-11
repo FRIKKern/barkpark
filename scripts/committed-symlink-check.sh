@@ -58,6 +58,38 @@
 #      guard that reports them identically is the exact defect it exists to
 #      catch.
 
+# INTERPRETER GUARD — MEASURED 2026-09-09 by RUNNING it, not by grepping
+# (task-b896488e115d1eed). `sh scripts/committed-symlink-check.sh` on this Mac's bash 3.2.57 in
+# POSIX mode (which is what /bin/sh is here) exited 0.
+#
+# WHY THAT 0 IS A LIE HERE: the process substitution(s) at line(s) 141, 160 sit
+# inside a command substitution in an arm reached only when there IS something to
+# report, so on a clean tree POSIX-mode bash never parses them and the 0 is
+# honest — TODAY. The 2026-09-09 census recorded no stderr for this script for
+# exactly that reason. The moment the arm fires, the $( ) expansion dies with
+# `syntax error near unexpected token `('`, the capture comes back EMPTY, and the
+# finding formats as nothing. The failure mode is armed, not absent, which is
+# the worse of the two shapes: it is invisible until the day it matters.
+#
+# CI IS NOT EXPOSED: every workflow invokes this with `bash`. This is an agent-
+# and operator-facing trap — someone typing `sh scripts/committed-symlink-check.sh` out of habit —
+# and it is recorded here as one, not overstated as a CI hole.
+#
+# The guard below is copied verbatim (modulo the script name) from
+# scripts/required-checks.test.sh:119-129. It must stay POSIX-parseable and must
+# stay ABOVE the first process substitution: bash reads incrementally, so
+# anything the guard sits after is code a POSIX-mode shell has already run.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "committed-symlink-check.sh: needs bash (this script uses process substitution); run: bash scripts/committed-symlink-check.sh${1:+ $1}" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "committed-symlink-check.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/committed-symlink-check.sh${1:+ $1}" >&2
+    exit 2
+    ;;
+esac
+
 set -u
 
 SELF="$0"

@@ -27,26 +27,28 @@ COMMAND "Remove Docs Card" DESCRIPTION "Retract everything add-docs-card planted
 # --------------------------------------------------------------------------
 # 1. Un-sweep the INDEX Cards: line.
 # The byte-exact inverse of add's REPLACE: swept tail back to the original
-# tail, guarded on the same payload literal (present -> act; absent ->
-# no-op). The mark was never plantable in a brace expansion (no comment
-# syntax survives inside one), so this is MARK VIRTUAL (D24), exactly as in
-# add-docs-card: a nominal handle with zero in-file bytes — the required
-# ASLONG guard on the literal ',{{.card-name}},tui' carries the whole
-# idempotency contract. On this remove-direction op the virtual mark names
-# the handle being CONSUMED.
+# line, guarded on the same payload literal (present -> act; absent ->
+# no-op). RE-ANCHORED 2026-09-11 alongside add-docs-card: #17188 (sha
+# 3766201a5) deleted the Cards: brace-expansion line this command used to
+# un-sweep, so both halves of the pair now work on the reference block's
+# folder line. docs/INDEX.md still has no comment syntax that fits inside its
+# 1200B cap, so this stays MARK VIRTUAL (D24) — a nominal handle with zero
+# in-file bytes — and the required ASLONG guard on the payload-derived link
+# literal carries the whole idempotency contract. On this remove-direction op
+# the virtual mark names the handle being CONSUMED.
 # --------------------------------------------------------------------------
 IN "docs/INDEX.md"
-### Un-sweep the Cards: brace list
+### Un-link {{.card-name}} from the INDEX reference block
 REPLACE
-::: cards list tail swept :::
-search-media,{{.card-name}},tui}.md
-::: cards list tail swept :::
+::: index reference folders swept :::
+[ops/](ops/), [cards/{{.card-name}}.md](cards/{{.card-name}}.md), [cheatsheets/](cheatsheets/), [setup/](setup/).
+::: index reference folders swept :::
 WITH
-::: cards list tail :::
-search-media,tui}.md
-::: cards list tail :::
+::: index reference folders :::
+[ops/](ops/), [cheatsheets/](cheatsheets/), [setup/](setup/).
+::: index reference folders :::
 MARK VIRTUAL "index-cards-{{.card-name}}"
-ASLONG FILE CONTAIN ",{{.card-name}},tui"
+ASLONG FILE CONTAIN "[cards/{{.card-name}}.md](cards/{{.card-name}}.md)"
 
 # --------------------------------------------------------------------------
 # 2. Retract the routing row + its MARK comment.
@@ -73,22 +75,25 @@ DELETE FILE IF PRESENT "docs/cards/{{.card-name}}.md"
 ASLONG FILE CONTAIN "canonical-for: {{.card-name}}-overview"
 
 # ==========================================================================
-# HONESTY BLOCK — the INDEX Cards: line is UN-GATED
+# HONESTY BLOCK — what the INDEX entry IS and IS NOT gated by (2026-09-11)
 # ==========================================================================
-# The Cards: brace line this command un-sweeps is provably covered by NO CI
-# gate: the INDEX gate extracts entries with
+# This block used to say the INDEX entry was covered by NO CI gate, because
+# the entry was a brace-expansion element and the INDEX gate's extractor
 #   grep -oE '[A-Za-z0-9._/-]+\.md'    (scripts/docs-anchors-check.sh:69)
-# and that charset excludes '{', '}' and ',' — a brace-expansion line never
-# yields a resolvable entry, so no gate anywhere parses, resolves, or diffs
-# it (a stale or half-swept Cards: line would sail through CI green). The
-# first DONT CONTAIN assert below is therefore honestly LOCAL — it is the
-# ONLY check of the un-sweep that exists. Do not read CI green as covering
-# it.
+# cannot match past '{', '}' or ','. Since #17188 re-wrote docs/INDEX.md as
+# real links, that sentence is FALSE and is retracted: the entry this pair
+# plants, 'cards/<name>.md', IS extracted and IS resolved, so a DANGLING
+# entry (card file gone, link left behind) now reds docs-anchors-check.
+#
+# What is still ungated is the un-sweep's COMPLETENESS: the gate resolves
+# whatever entries it finds, so a half-removed line whose remaining text
+# still resolves sails through CI green. The first DONT CONTAIN assert below
+# is the only check of that, and it is honestly LOCAL.
 # ==========================================================================
 
 # Post-conditions — after add-docs-card then remove-docs-card, the working
 # tree is byte-clean: git diff is EMPTY and the card file is gone.
-ASSERT FILE "docs/INDEX.md" DONT CONTAIN ",{{.card-name}},tui"
+ASSERT FILE "docs/INDEX.md" DONT CONTAIN "[cards/{{.card-name}}.md](cards/{{.card-name}}.md)"
 ASSERT FILE "CLAUDE.md" DONT CONTAIN "MARK:claude-route-{{.card-name}}"
 ASSERT FILE "CLAUDE.md" DONT CONTAIN "docs/cards/{{.card-name}}.md"
 ASSERT FILE "docs/cards/{{.card-name}}.md" ABSENT

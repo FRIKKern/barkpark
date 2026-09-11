@@ -1,0 +1,25 @@
+{
+  "blocks": [
+    {
+      "id": "nested-list",
+      "type": "list",
+      "ordered": false,
+      "items": [
+        {
+          "id": "plan",
+          "content": [{"type":"strong","children":[{"type":"text","value":"Plan"}]}],
+          "text": "Inactive parent fallback",
+          "audit": {"keep": true},
+          "children": [
+            {"type":"list","ordered":true,"items":[
+              {"id":"build","text":"Build","children":[{"type":"list","items":["Verify"]}]},
+              "Ship"
+            ]}
+          ]
+        },
+        "Flat sibling",
+        {"id":"fallback","content":[],"text":"Fallback parent","children":[{"type":"ordered-list","items":["Alias child"]}]}
+      ]
+    }
+  ]
+}

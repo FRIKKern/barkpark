@@ -941,9 +941,26 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
     assert %{recipient: ["can't be blank"]} = errors_on(cs)
 
     # W2 — an empty team: the fan-out runs zero times and NOTHING is written.
+    #
+    # cch-w52-bl: was `:test`. That event has been deleted from `@always_send`
+    # as producerless, and this assertion would then have stayed GREEN for the
+    # WRONG reason — `should_send?/2` refusing an unknown event writes no rows
+    # either, so the test would prove nothing about the empty fan-out. It is
+    # `:trial_expiring` now: allowlisted, `alerts_enabled` on, `should_send?/2`
+    # SAYS YES, and the empty-recipient loop is the only thing standing between
+    # that yes and a row.
     team = empty_team()
-    assert :ok = Notifications.dispatch_event(team, :test, %{})
+    assert :ok = Notifications.dispatch_event(team, :trial_expiring, %{days: 3, name: "prod"})
     assert Notifications.list_deliveries(team, limit: 50) == []
+
+    # POSITIVE CONTROL for the line above, because "zero rows" is what a REFUSAL
+    # looks like too and the assertion alone cannot tell the two apart. The same
+    # event, the same call, a team that HAS a member: rows appear. So the empty
+    # team's zero is attributable to the empty fan-out — W2 — and not to
+    # `should_send?/2` having quietly said no.
+    {peer, _emails} = team_with_members(1)
+    assert :ok = Notifications.dispatch_event(peer, :trial_expiring, %{days: 3, name: "prod"})
+    assert length(Notifications.list_deliveries(peer, limit: 50)) == 1
 
     # W6 — the fleet digest with no reachable recipient. It writes no row, and
     # it now says so THROUGH THE FUNNEL: `deliver_fleet_digest/1` calls

@@ -314,7 +314,7 @@ is harmless:
   go-format.yml carries a workflow-level `on: pull_request: paths:` filter — it
   is structurally ineligible to be required, since an absent context reports
   `expected` forever. Its `(blocking)` means *blocking inside its own workflow*,
-  the same sense as doc-gates' 22 `(fails this job)` steps below (that label
+  the same sense as doc-gates' 26 `(fails this job)` steps below (that label
   replaced `(blocking)` there in #12631). Until 2026-08-08 it
   appeared in **neither** `.github/required-checks.json` nor this page:
   `grep -c gofmt` was 0 in both. That was not an oversight anyone could have
@@ -568,6 +568,35 @@ Being merely **behind** main is not in this class and is never reported: main is
 permits. Only a conflicted one is stuck. All four behaviours are mutation-proved
 over self-written fixtures in `scripts/stale-verdict-watch.test.sh`.
 
+### SELF-CAMOUFLAGING — the fix that narrates itself in the vocabulary it removed
+
+The four classes above are about a CHECK that reads green. There is a fifth, and
+its victim is the **search** an author uses to re-derive what is left to do: **a
+change that documents itself in the vocabulary of the thing it removes makes its
+own prose indistinguishable from the remaining work.** The codebase's own search
+key stops discriminating, and it stops discriminating in the comforting
+direction — the fix looks like the biggest remaining cluster.
+
+Measured, not inferred: #16888 tightened 32 multi-status refusal assertions and
+gave each site a comment quoting the bracket literal it had just deleted. A
+sweep for that literal over `api/test` then returned 80 hits, of which 20 were
+that PR's own explanations — and all 20 sat in the ten files that were already
+fixed. A sweeper re-deriving the remaining population reads the highest apparent
+density of work precisely where there is none. It produced one false reading
+before it was caught.
+
+When a fix narrates the pattern it deleted, describe that pattern in prose —
+name the statuses, not the numerals — rather than reproducing a greppable
+literal. The durable second layer is to anchor the sweep grep on `status` before
+the bracket, so an assertion and a sentence about an assertion stop matching the
+same expression; that strict form is invariant across the reword, which is how
+you prove the reword removed only phantoms.
+
+The non-vacuity arm is the acceptance criterion that matters. Re-run the loose
+sweep after the reword and confirm it still returns the same number of LIVE-CODE
+sites. A fix that silences false positives by also blinding the search has made
+the artifact worse than the noise it removed.
+
 ## Security gates (Sobelow + mix_audit)
 
 `.github/workflows/security.yml` (filed by `task-a41fc4590b2c2eb1`) adds two
@@ -777,10 +806,10 @@ because `@canonical capability:` markers in source files must be re-checked
 when a code rename rots a marker. The workflow also fires on changes to the
 gate scripts themselves and to the workflow file.
 
-### The doc-gates roster (it is not two scripts — it is twenty-two)
+### The doc-gates roster (it is not two scripts — it is twenty-six)
 
 `doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
-undersells it: it runs **22 steps labelled `(fails this job)`** plus 6
+undersells it: it runs **26 steps labelled `(fails this job)`** plus 8
 `(tripwire)` self-tests that prove a scanner still reds on a planted defect. A
 PR touching one `.ex` file runs all of them.
 
@@ -799,11 +828,12 @@ stops a merge**, and `doc-gates` **cannot block a merge** by itself. That is the
 whole of its authority.
 
 (The count read 17 until 2026-08-07 — `Never-cancel-main concurrency ratchet`
-and `Nil-polarity fail-closed gate` were missing from the table below. The 22 is
+and `Nil-polarity fail-closed gate` were missing from the table below. The 26 is
 derived by running, not transcribed:
 
 ```bash
-grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml   # → 22
+grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml   # → 26
+grep -cE '^[[:space:]]*- name: .*\(tripwire\)'        .github/workflows/doc-gates.yml   # → 8
 ```
 
 §20 CLAUSE
@@ -811,7 +841,7 @@ grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates
 below, and the workflow drift apart, and it counts the UNION of both labels so a
 revert to the old name is still counted rather than read as zero. RESIDUE, named
 rather than left to be tripped over: the unanchored `grep -c '(fails this job)'`
-returns **23**, because `.github/workflows/doc-gates.yml` quotes both labels
+returns **28**, because `.github/workflows/doc-gates.yml` quotes both labels
 inside its own corrective header — anchor on `- name:`, as above. §20 CLAUSE
 11's pass message also still spells the label `(blocking)`; it compares NUMBERS,
 so its verdict is unaffected.) In workflow order:
@@ -840,6 +870,10 @@ so its verdict is unaffected.) In workflow order:
 | 20 | Preview-env isolation | `scripts/preview-env-isolation-check.sh` (+ `--selftest`) |
 | 21 | PortableDoc render parity | `scripts/pd-parity-completeness.sh` |
 | 22 | Scaffy anchor drift | `bp scaffy validate` over `scaffy/commands/` (+ `--selftest`) |
+| 23 | Dependabot root drift | `scripts/dependabot-roots-check.sh` |
+| 24 | Silencer growth ratchet | `scripts/silencer-growth-ratchet.sh` |
+| 25 | repo-papers snapshot freshness | `node scripts/repo-papers-freshness.mjs` (+ its `(tripwire)` self-test step; added by #17151, 2026-09-09) |
+| 26 | Paper dialect ratchet | `scripts/paper-dialect-ratchet.sh` (+ its `(tripwire)` self-test step; shrink-only counts of text-keyed inline leaves and malformed widget items per in-repo paper corpus, with a non-vacuity floor that REFUSES rather than greens) |
 
 Run any of them locally with the same command CI uses — they are ordinary
 scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s

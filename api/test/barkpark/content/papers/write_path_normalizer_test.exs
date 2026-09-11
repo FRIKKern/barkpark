@@ -53,6 +53,7 @@ defmodule Barkpark.Content.Papers.WritePathNormalizerTest do
 
   alias Barkpark.Content.Papers.BlockOps
   alias Barkpark.PortableDoc.Render
+  alias Barkpark.PortableDoc.Render.Inline
 
   # ── notes / cards items + pipeline nodes ────────────────────────────────────
 
@@ -603,5 +604,105 @@ defmodule Barkpark.Content.Papers.WritePathNormalizerTest do
 
     once = BlockOps.normalize_render_shapes(blocks)
     assert BlockOps.normalize_render_shapes(once) == once
+  end
+
+  # A BLOCK-LEVEL NODE INSIDE A LIST ITEM'S INLINE ARRAY.
+  #
+  # #15701 taught the READER to unwrap this (render/inline.ex
+  # `unwrap_block_wrappers/1`). Nothing taught the WRITE path, so every new
+  # paper carrying the shape still lands non-canonical and depends on all three
+  # readers being forgiving. These fixtures are the EXACT stored nodes of two of
+  # the 75 items measured on the live corpus 2026-09-02, wrapper types verified
+  # against the stored documents (the pair is easy to get backwards — the
+  # `paragraph` one lives in felix-pristine-wave-23-2026-07-28, the `list-item`
+  # one in search-template-wave-2026-08-18-audit).
+  describe "a block-level node inside a list item's inline array" do
+    @felix_paragraph_wrapped "The blind window is 8 days 17 hours, not 5."
+    @search_list_item_wrapped "Denominator, re-derived from live L1: 72 done, 38 open, 6 considering, 1 cancelled (NOT child_count 117)."
+
+    defp wrapper(type, text),
+      do: %{"type" => type, "content" => [%{"type" => "text", "value" => text}]}
+
+    defp list_with(items), do: [%{"type" => "list", "ordered" => false, "items" => items}]
+
+    test "a `paragraph` wrapper is unwrapped to the canonical inline array" do
+      [block] =
+        BlockOps.normalize_render_shapes(
+          list_with([[wrapper("paragraph", @felix_paragraph_wrapped)]])
+        )
+
+      assert block["items"] == [[%{"type" => "text", "value" => @felix_paragraph_wrapped}]]
+    end
+
+    test "a `list-item` wrapper is unwrapped to the canonical inline array" do
+      [block] =
+        BlockOps.normalize_render_shapes(
+          list_with([[wrapper("list-item", @search_list_item_wrapped)]])
+        )
+
+      assert block["items"] == [[%{"type" => "text", "value" => @search_list_item_wrapped}]]
+    end
+
+    test "a wrapper sitting BESIDE canonical leaves keeps every sibling, in order" do
+      item = [
+        %{"type" => "text", "value" => "before "},
+        wrapper("paragraph", "middle"),
+        %{"type" => "text", "value" => " after"}
+      ]
+
+      [block] = BlockOps.normalize_render_shapes(list_with([item]))
+
+      assert block["items"] == [
+               [
+                 %{"type" => "text", "value" => "before "},
+                 %{"type" => "text", "value" => "middle"},
+                 %{"type" => "text", "value" => " after"}
+               ]
+             ]
+    end
+
+    # The write rewrite must never change what a reader SHOWS. Same predicate,
+    # same depth as render/inline.ex, so the reader's own unwrap is a no-op on
+    # the normalized document and both compose to identical text.
+    test "the rewrite is RENDER-PRESERVING — the reader composes the same text before and after" do
+      raw = [wrapper("paragraph", @felix_paragraph_wrapped)]
+      [block] = BlockOps.normalize_render_shapes(list_with([raw]))
+      [normalized] = block["items"]
+
+      assert Inline.compose_inline_children(normalized) ==
+               Inline.compose_inline_children(raw)
+
+      assert Inline.compose_inline_children(normalized) == [@felix_paragraph_wrapped]
+    end
+
+    # ONE LEVEL, matching the reader. A deeper nest is a separate finding.
+    test "it unwraps exactly ONE level, never recursing" do
+      doubly = %{
+        "type" => "paragraph",
+        "content" => [wrapper("paragraph", "deep")]
+      }
+
+      [block] = BlockOps.normalize_render_shapes(list_with([[doubly]]))
+
+      assert block["items"] == [[wrapper("paragraph", "deep")]]
+    end
+
+    test "a wrapper with EMPTY content is left exactly as it was" do
+      empty = %{"type" => "paragraph", "content" => []}
+
+      [block] = BlockOps.normalize_render_shapes(list_with([[empty]]))
+
+      assert block["items"] == [[empty]]
+    end
+
+    test "a canonical list is byte-identical, and the normalization is idempotent" do
+      canonical = list_with([[%{"type" => "text", "value" => "plain"}]])
+
+      assert BlockOps.normalize_render_shapes(canonical) == canonical
+
+      wrapped = list_with([[wrapper("list-item", @search_list_item_wrapped)]])
+      once = BlockOps.normalize_render_shapes(wrapped)
+      assert BlockOps.normalize_render_shapes(once) == once
+    end
   end
 end

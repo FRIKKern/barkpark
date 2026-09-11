@@ -184,17 +184,52 @@ const KILL_POLL_CAP = 2000;
 // exhausted runner budget into a dead row FABRICATES A DEFECT, which is the one
 // failure mode this whole epic exists to stop.
 //
-// THE DEFAULT IS 150s, NOT THE 90s THIS SLICE WAS BRIEFED WITH, and the number
-// is measured rather than chosen. 90s was derived from a /rot/ pass of ~41s over
-// a paper-only roster. This roster is four row KINDS plus a decoy and the row it
-// spawns, and an UNANSWERED row costs a measured 16.2s (uniform across four of
-// them: 16.2 / 16.2 / 16.3 / 16.4) against a nominal 2 × 3.0s row cap — the
-// overshoot is in the click and probe round trips, not in the wait loop, which is
-// clock-checked before every evaluate. /rot/ therefore needs ~125s and truncated
-// at 90s with two rows still UNMEASURED, which is honest and useless. Tightening
-// this back makes the expected verdicts load-dependent, which is the failure the
-// brief's own reasoning warns about; LEG_C_BUDGET_MS moves it either way.
-const LEG_C_BUDGET = Number(process.env.LEG_C_BUDGET_MS || 150000);
+// THE DEFAULT IS 90s, AND THE 2.7x IT WAS RAISED FOR DOES NOT EXIST. The 150s
+// default carried this justification: "an UNANSWERED row costs a measured 16.2s
+// (16.2 / 16.2 / 16.3 / 16.4) against a nominal 2 × 3.0s row cap — the overshoot
+// is in the click and probe round trips". That sentence was never attributed to a
+// phase, and when it finally was, it did not survive.
+//
+// MEASURED, WITH A PER-PHASE TIMER (`LEG_C_TRACE=1`, which is still in the code
+// below so this is re-runnable). Measuring host: the author's local macOS desk
+// (Darwin 24.5.0, 10 cores), against the in-process `--self-test-site rot`
+// fixture on loopback, node v22.22.0, 2026-09-10. Three runs at load average
+// 4.55 / 2.98 / 3.24, five unanswered rows each — the breakdown was the same
+// every time:
+//
+//   pane_item#item-sheet :: total 6094ms = locate 1ms + witness-before 0ms
+//     + attempt1[click 2ms (box 0 moved 1 pressed 0 released 1)
+//                + witness-loop 3043ms (21 evaluate(s) = 11ms, 3032ms of ticks)]
+//     + attempt2[click 3ms (box 1 moved 1 pressed 1 released 0)
+//                + witness-loop 3045ms (21 evaluate(s) = 9ms, 3034ms of ticks)]
+//
+// An unanswered row costs 6.09–6.10s, which IS the nominal 2 × 3.0s cap plus
+// ~90ms — not 2.7x it. THE NAMED PHASE IS THE WITNESS LOOP, and 99.6% of the
+// witness loop is its own `pause(POLL_TICK)` sleeps (3032ms of 3043ms): the leg
+// is not waiting on Chrome, it is waiting out its own cap. The two suspects the
+// raise was justified with are BOTH REFUTED by ratio, which is what survives
+// load: `page.click`'s box evaluate plus its three Input.dispatchMouseEvent round
+// trips total 1–3ms of 6094ms (0.03%), and all 42 witness evaluates together
+// total 9–16ms (0.2%).
+//
+// AND THE ATTRIBUTION IS LOAD-PROOF. Re-run with 20 spinners pinned on the 10
+// cores, ending at load average 43.67: every unanswered row still cost
+// 6092–6103ms, click still 1–2ms, 21 evaluates still 10–16ms. A `setTimeout`
+// sleep does not get slower when the host is busy, so the phase that dominates
+// this leg is the one phase host load cannot inflate.
+//
+// WHERE 16.2s CAME FROM: 2 × 8.1s. `censusWitnessProbe` below records that
+// asking the FULL enumeration for one row's aria-current on every poll tick
+// "cost a MEASURED 8.1s for a 3.0s row cap on a loaded host". The 16.2s is that
+// pre-cheap-probe cost, doubled by the two press attempts, carried forward into
+// this comment after the cheap probe had already fixed it. Two comments in one
+// file, one calling the cost fixed and one still budgeting for it.
+//
+// So 90s stands with a 2.8x margin: /rot/ (7 pressed rows, 5 of them dead) spends
+// 32.5s, measured on all four runs above. LEG_C_BUDGET_MS moves it either way,
+// and a host slow enough to need more will say so — the leg reports what it did
+// not reach as UNMEASURED, never FAIL.
+const LEG_C_BUDGET = Number(process.env.LEG_C_BUDGET_MS || 90000);
 const LEG_C_ROW_CAP = Number(process.env.LEG_C_ROW_CAP_MS || 3000); // per-row, SOFT
 // `LEG_C_MAX_ROWS` CAPS EACH KIND, NOT THE ROSTER — and that is the whole fix
 // for spd-w19-census-maxrows-crowds-inventory. Measured on served c81b8e66d
@@ -217,6 +252,8 @@ const LEG_C_ROW_CAP = Number(process.env.LEG_C_ROW_CAP_MS || 3000); // per-row, 
 // the bound; that is not the same fix.
 const LEG_C_MAX_ROWS = Number(process.env.LEG_C_MAX_ROWS || 40);
 const LEG_C_PRESS_ATTEMPTS = 2;
+// LEG_C_TRACE=1 prints the per-phase attribution of every census row to stderr.
+const LEG_C_TRACE = process.env.LEG_C_TRACE === "1";
 
 const POLL_TICK = 150; // the poll loop's interval
 const KEY_GAP = 25; // pacing between synthetic keystrokes
@@ -548,17 +585,29 @@ class Page {
   /** A real mouse press/release at the element's centre — the click path the
    *  user takes, hover and focus handlers included. */
   async click(selector) {
+    // LEG_C_TRACE: `clickTiming` is written on EVERY click so the caller can
+    // attribute a slow press to the box evaluate or to one of the three
+    // Input.dispatchMouseEvent round trips, rather than to "the click".
+    const cs = Date.now();
     const box = await this.evaluate(
       `(function(){var el=document.querySelector(${JSON.stringify(selector)});if(!el)return null;` +
         `el.scrollIntoView({block:"center"});var r=el.getBoundingClientRect();` +
         `if(!r.width||!r.height)return null;` +
         `return {x:r.left+r.width/2,y:r.top+r.height/2};})()`,
     );
-    if (!box || box.__throw) return false;
+    const cBox = Date.now();
+    if (!box || box.__throw) { this.clickTiming = { box: cBox - cs, moved: 0, pressed: 0, released: 0, total: cBox - cs, hit: false }; return false; }
     const common = { x: Math.round(box.x), y: Math.round(box.y), button: "left", clickCount: 1 };
     await this.cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...common }, this.sid);
+    const cMoved = Date.now();
     await this.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...common }, this.sid);
+    const cPressed = Date.now();
     await this.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...common }, this.sid);
+    const cDone = Date.now();
+    this.clickTiming = {
+      box: cBox - cs, moved: cMoved - cBox, pressed: cPressed - cMoved,
+      released: cDone - cPressed, total: cDone - cs, hit: true,
+    };
     return true;
   }
 
@@ -2009,8 +2058,15 @@ async function legC(page, ctx, ledger, run) {
  *  facts. This can rescue a raced control; it can never turn a dead one green. */
 async function pressCensusRow(page, rec, deadline) {
   const t0 = Date.now();
+  // THE PHASE TIMER. `LEG_C_TRACE=1` prints one line per row attributing the
+  // row's wall clock to a NAMED phase — locate / witness-before / each click
+  // (split into its box evaluate and its three Input.dispatchMouseEvent round
+  // trips) / each witness-evaluate loop. It exists because the per-row cost was
+  // 2.7x the nominal cap and the overshoot was ASSUMED to be in the click.
+  const trace = { locate: 0, witnessBefore: 0, attempts: [] };
   const selfId = rec.kind === "collapsed_strip" ? rec.id : null;
   const locate = await page.evaluate(censusProbe(rec.key, selfId));
+  trace.locate = Date.now() - t0;
   if (!locate || locate.__throw || !locate.found) {
     return {
       // `missing` is what the walk loop keys the ONE recovery attempt off. It is
@@ -2021,7 +2077,9 @@ async function pressCensusRow(page, rec, deadline) {
     };
   }
   const witnessExpr = censusWitnessProbe(rec, locate.press_selector);
+  const wbT0 = Date.now();
   const before = await page.evaluate(witnessExpr);
+  trace.witnessBefore = Date.now() - wbT0;
   if (!before || before.__throw) {
     return { status: PENDING, witness: "none", presses: 0, waited: Date.now() - t0,
       detail: `the page would not answer a witness probe for this row — ${UNMEASURED}` };
@@ -2041,15 +2099,21 @@ async function pressCensusRow(page, rec, deadline) {
       sel = loc && !loc.__throw ? loc.press_selector : null;
     }
     if (!sel) break;
+    const at = { n: attempt, click: null, evals: 0, evalMs: 0, pauseMs: 0, loopMs: 0 };
+    trace.attempts.push(at);
     landed = (await page.click(sel)) || landed;
+    at.click = page.clickTiming;
     // THE HARD BOUND, and it is why this does not call `poll()`: poll checks its
     // cap AFTER the predicate has run, so its overshoot is as long as one
     // predicate takes — measured 8.1s against a 3.0s cap on a loaded host, which
     // walked LEG C 5s PAST its 90s budget. Here the clock is checked BEFORE every
     // evaluate, so the budget holds to within one round trip.
+    const loopT0 = Date.now();
     const until = Date.now() + Math.max(400, Math.min(LEG_C_ROW_CAP, deadline - Date.now()));
     for (;;) {
+      const evT0 = Date.now();
       const now = await page.evaluate(witnessExpr);
+      at.evals += 1; at.evalMs += Date.now() - evT0;
       if (now && !now.__throw) {
         after = now;
         const w = identityWitness(rec, before, now);
@@ -2057,8 +2121,22 @@ async function pressCensusRow(page, rec, deadline) {
       }
       if (Date.now() >= deadline) { ranOut = true; break; }
       if (Date.now() >= until) break;
+      const pT0 = Date.now();
       await pause(POLL_TICK); // the poll tick — not a wait for anything in particular
+      at.pauseMs += Date.now() - pT0;
     }
+    at.loopMs = Date.now() - loopT0;
+  }
+  if (LEG_C_TRACE) {
+    const parts = trace.attempts.map((a) => {
+      const c = a.click || {};
+      return `attempt${a.n}[click ${c.total ?? "?"}ms (box ${c.box ?? "?"} moved ${c.moved ?? "?"} pressed ${c.pressed ?? "?"} released ${c.released ?? "?"}) ` +
+        `+ witness-loop ${a.loopMs}ms (${a.evals} evaluate(s) = ${a.evalMs}ms, ${a.pauseMs}ms of ${POLL_TICK}ms ticks)]`;
+    });
+    process.stderr.write(
+      `LEG_C_TRACE ${rec.key} :: total ${Date.now() - t0}ms = locate ${trace.locate}ms + witness-before ${trace.witnessBefore}ms + ` +
+      (parts.length ? parts.join(" + ") : "(no press)") + `\n`,
+    );
   }
   const waited = Date.now() - t0;
   // A PLAIN ANCHOR IS NOT A SOCKET PRESS. `plugin_link` rows navigate by href
@@ -2179,10 +2257,13 @@ function fixtureDeskHtml(site, { paneAtLoad = false } = {}) {
   //
   // /rot/ carries ONE, and that is the same arithmetic the two-Structure-row
   // comment above makes: on /rot/ every row is dead, so each extra one costs a
-  // full 16s of dead-row cap (2 presses × the 3s LEG_C_ROW_CAP, plus probes) and
-  // buys no red that the first row does not already buy. Three of them ran /rot/
-  // to 128.5s of its 150s LEG_C_BUDGET — a fixture that truncates reds this
-  // self-test, so the margin is the point.
+  // full dead-row cap (2 presses × the 3s LEG_C_ROW_CAP, plus probes) and buys no
+  // red that the first row does not already buy. The "128.5s of its 150s
+  // LEG_C_BUDGET" this comment used to quote for three of them was priced at the
+  // unattributed 16.2s/row; the measured cost is 6.09–6.10s/row (see
+  // LEG_C_BUDGET), so three would cost ~44.5s of the 90s budget. The margin is
+  // still the point — a fixture that truncates reds this self-test — but it is a
+  // 2x margin at one doc row, not a fixture pressed against its ceiling.
   const docRows = [
     { id: "doc-fossil-old",   value: "paper-fossil-old",   title: "An older paper", label: "An older paper, published" },
     { id: "doc-fossil-two",   value: "paper-fossil-two",   title: "A second paper", label: "A second paper, published" },

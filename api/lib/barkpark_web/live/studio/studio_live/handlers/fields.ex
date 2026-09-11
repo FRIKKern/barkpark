@@ -32,7 +32,59 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # is the single-truth contract the literal was quietly pre-empting.
   @block_titled_types ["paper"]
 
+  # How long a create press stays "the press you just made". PUSH_TIMEOUT in
+  # phoenix_live_view.js is 30_000ms — after that the client itself has given
+  # up on the reply, so a press beyond this window is a NEW intent, never a
+  # retry of the old one.
+  @create_retry_window_ms 30_000
+
   def new_document(%{"type" => type}, socket) do
+    case retry_of_recent_create(socket, type) do
+      {:ok, %{path: path}} ->
+        # [plus-press-retry-coalesce] THE SECOND PRESS OF "+". spd-w18 measured
+        # the "+" navigating in 6.4s on one build and NEVER within 20s across
+        # three presses on the next — and the desk list still grew "Untitled"
+        # rows, because every one of those presses DID create a document. The
+        # navigation is what went missing, client-side (D242/D265: a push_patch
+        # reply that is dropped in the browser leaves the server believing it
+        # navigated), so no server-side pending assign can be shown for it and
+        # the human, staring at an unmoved screen, presses again.
+        #
+        # So the second press is answered instead of obeyed: re-navigate to the
+        # draft the FIRST press already made, and SAY so. The human ends up
+        # with one Untitled draft and a sentence explaining where it went,
+        # rather than two drafts and silence.
+        #
+        # It cannot eat a genuine second create: `retry_of_recent_create/2`
+        # matches only a document of the SAME type, made by THIS socket, inside
+        # the 30s window, that still exists and whose `rev` has not moved since
+        # birth. Type a single character into it (or come back a minute later)
+        # and this branch is gone.
+        #
+        # THE TRADE, stated rather than hidden: a human who deliberately wants
+        # TWO untouched blank drafts of one type inside 30 seconds gets the
+        # second press answered instead, and has to type in the first one (or
+        # wait) to get another — which is why the sentence below names that
+        # way out rather than only reporting what happened. The marker is NOT
+        # released by answering, so three presses still leave ONE draft; the
+        # alternative (release after one answer) would have turned the
+        # measured three-press run into two orphans instead of none. Two blank
+        # untouched drafts of the same type, seconds apart, is a shape where
+        # one of them is always the orphan.
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           "That “+” already created an untitled #{type} — opening it instead of making a second draft. Type in it, or wait a moment, to start another."
+         )
+         |> push_patch(to: Shared.studio_path(socket, path, socket.assigns.dataset))}
+
+      :none ->
+        create_new_document(type, socket)
+    end
+  end
+
+  defp create_new_document(type, socket) do
     # No hand-rolled `doc_id`: the old `"#{type}-#{:rand.uniform(999_999)}"`
     # drew from a 1M-value space, so on a populated dataset a collision landed
     # in the writer's UPDATE branch and SILENTLY overwrote an unrelated doc (or
@@ -51,13 +103,43 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         new_path = socket.assigns.nav_path ++ [pub_id]
 
         {:noreply,
-         push_patch(socket, to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+         socket
+         |> assign(
+           recent_create: %{
+             type: type,
+             doc_id: doc.doc_id,
+             rev: doc.rev,
+             path: new_path,
+             at: System.monotonic_time(:millisecond)
+           }
+         )
+         |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
       {:error, {:halted, reason}} ->
         {:noreply, put_flash(socket, :error, "Create cancelled: #{reason}")}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to create")}
+    end
+  end
+
+  # See [plus-press-retry-coalesce] above. `{:ok, marker}` means: this press is
+  # indistinguishable from a re-press of one whose answer never reached the
+  # screen, and the document it made is still exactly as it was born.
+  #
+  # `rev` is the untouched test rather than the title or the content, because
+  # both differ per type (a paper is born with a template and NO stored title,
+  # a task with a seeded content map) while `rev` moves on any write of any
+  # type — one predicate, no per-type list to fall out of date.
+  defp retry_of_recent_create(socket, type) do
+    with %{type: ^type, doc_id: doc_id, rev: rev} = marker <-
+           socket.assigns[:recent_create],
+         true <- System.monotonic_time(:millisecond) - marker.at <= @create_retry_window_ms,
+         {:ok, %{rev: ^rev}} <-
+           Content.get_document(doc_id, type, socket.assigns.dataset, Shared.hook_opts(socket)) do
+      {:ok, marker}
+    else
+      _ -> :none
     end
   end
 
@@ -73,7 +155,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   def save(params, socket) when is_map(params) do
     socket = track_touched(socket, params)
 
-    case fold_dot_paths(params, touched_paths(socket)) do
+    case fold_dot_paths(params, socket) do
       %{"doc" => doc} -> do_save(doc, socket)
       _ -> {:noreply, socket}
     end
@@ -115,14 +197,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     {:noreply, socket}
   end
 
+  # Generate derives the slug from the field's declared SOURCE — Sanity's
+  # `options.source` (Gyldendal parity E1.6, task-cd8e10ca44ccb932 criterion
+  # 2): the twin's author slug comes from `name`, everything else from
+  # `title`. Before this the source was hard-coded to `title`, so Generate on
+  # an author did nothing. The form buffer is read first (the value the
+  # author sees), then the stored document (title column for `title`, content
+  # otherwise).
   def slug_generate(%{"field" => field}, socket) do
-    title =
-      case Map.get(socket.assigns[:editor_form] || %{}, "title") do
-        t when is_binary(t) and t != "" -> t
-        _ -> socket.assigns[:editor_doc] && socket.assigns.editor_doc.title
+    source = BarkparkWeb.Components.FieldInputs.slug_source(socket.assigns[:editor_schema], field)
+    form = socket.assigns[:editor_form] || %{}
+    doc = socket.assigns[:editor_doc]
+
+    value =
+      case Map.get(form, source) do
+        t when is_binary(t) and t != "" ->
+          t
+
+        _ ->
+          cond do
+            is_nil(doc) -> nil
+            source == "title" -> doc.title
+            true -> get_in(doc.content || %{}, [source])
+          end
       end
 
-    case title do
+    case value do
       t when is_binary(t) and t != "" ->
         {:noreply,
          mark_dirty(Shared.do_autosave(socket, %{field => Barkpark.Tenancy.slugify(t)}))}
@@ -135,7 +235,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   def autosave(params, socket) when is_map(params) do
     socket = track_touched(socket, params)
 
-    case fold_dot_paths(params, touched_paths(socket)) do
+    case fold_dot_paths(params, socket) do
       %{"doc" => doc} -> {:noreply, mark_dirty(Shared.do_autosave(socket, doc))}
       _ -> {:noreply, socket}
     end
@@ -201,7 +301,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # as cleared. The set is emptied wherever the buffer becomes clean again —
   # explicit save, remote reload, navigation (`Lifecycle.finish_handle_params`)
   # — so a touched path can never leak onto the NEXT document opened.
-  defp fold_dot_paths(params, touched) do
+  defp fold_dot_paths(params, socket) do
+    touched = touched_paths(socket)
+    base_form = base_form(socket)
+
     {dotted, rest} =
       Enum.split_with(params, fn {k, v} ->
         is_binary(k) and String.starts_with?(k, "doc[") and foldable?(k, v, touched)
@@ -216,12 +319,98 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       doc =
         Enum.reduce(dotted, doc, fn {key, value}, acc ->
           case StudioLive.parse_path(key) do
-            [] -> acc
-            path -> StudioLive.put_value_at(acc, path, value)
+            [] ->
+              acc
+
+            path ->
+              acc
+              |> seed_root(path, base_form)
+              |> StudioLive.put_value_at(path, coerce_leaf(socket, path, value))
           end
         end)
 
       Map.put(rest, "doc", doc)
+    end
+  end
+
+  # ── Seed the CONTAINER before writing into it (this task) ──────────────────
+  #
+  # `Plug.Conn.Query.decode/1` gives back only what the dotted names carry, so
+  # the fold's `doc` starts with NO value at the path's root — for
+  # `doc[acceptance_criteria][0].criterion` there is no
+  # `doc["acceptance_criteria"]` at all. `put_value_at/3` refuses to invent an
+  # intermediate: descending an integer segment into a fresh `%{}` matches no
+  # clause and falls through to the no-op, so the folded value came out as
+  # `%{"acceptance_criteria" => %{}}` — the keystrokes gone AND the array
+  # replaced by an empty map. On `task` the kind validator refused the write
+  # ("Save failed"), which is the only reason the criteria survived at all; on
+  # any other type with an `arrayOf`-of-`composite` field the empty map SAVES
+  # and the whole list is destroyed.
+  #
+  # Seeding the root from the editor's own buffer is what makes the write a
+  # PATCH instead of a reconstruction: the existing rows are already there, so
+  # `put_value_at/3` replaces exactly the one leaf the name addresses. That is
+  # also what preserves keys no input renders — a criterion's `merge_gate` is
+  # not in the schema's composite (`criterion`/`met`/`evidence` only), so
+  # nothing posts it back and only the seeded row can carry it through.
+  #
+  # Only the ROOT is seeded, and only when the decoded `doc` has nothing there:
+  # every dotted sibling in the same payload still writes its own leaf on top,
+  # so a value the author changed always wins over the seeded one.
+  defp seed_root(doc, [root | _rest], base_form) when is_binary(root) and is_map(doc) do
+    cond do
+      Map.has_key?(doc, root) -> doc
+      not is_map(base_form) -> doc
+      not Map.has_key?(base_form, root) -> doc
+      true -> Map.put(doc, root, Map.get(base_form, root))
+    end
+  end
+
+  defp seed_root(doc, _path, _base_form), do: doc
+
+  defp base_form(socket), do: socket.assigns[:editor_form] || %{}
+
+  # ── Coerce the leaf the way `build_content/2` coerces a TOP-LEVEL field ────
+  #
+  # A form posts every value as a string. `Forms.build_content/2` already turns
+  # a top-level `boolean` field's "true"/"false" into a real boolean and a
+  # `number` field's digits into an integer — the JSONB type flip found live on
+  # 2026-06-12. Nothing did that for a value arriving through a dotted name,
+  # because until this fold those values never reached storage at all: the
+  # moment a criterion row starts persisting, `met` would land as the STRING
+  # "false" under a `met == true` reader.
+  #
+  # `Shared.find_field_by_path/2` resolves the schema field at the path
+  # (descending composites and arrayOf, skipping row indices), so the leaf is
+  # coerced by its DECLARED type, not by guessing from the value. An
+  # unresolvable path or any other type keeps the string as-is, which is what
+  # the schema validator wants to see and reject.
+  defp coerce_leaf(socket, path, value) when is_binary(value) do
+    case Shared.find_field_by_path(socket, path) do
+      %{"type" => "boolean"} -> coerce_boolean(value)
+      %{"type" => "number"} -> coerce_number(value)
+      _ -> value
+    end
+  end
+
+  defp coerce_leaf(_socket, _path, value), do: value
+
+  defp coerce_boolean("true"), do: true
+  defp coerce_boolean("false"), do: false
+  defp coerce_boolean(other), do: other
+
+  defp coerce_number(value) do
+    trimmed = String.trim(value)
+
+    case Integer.parse(trimmed) do
+      {int, ""} ->
+        int
+
+      _ ->
+        case Float.parse(trimmed) do
+          {float, ""} -> float
+          _ -> value
+        end
     end
   end
 

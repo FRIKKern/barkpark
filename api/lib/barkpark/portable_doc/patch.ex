@@ -151,8 +151,14 @@ defmodule Barkpark.PortableDoc.Patch do
     # Locks are checked FIRST so a displaced locked block keeps its
     # `{:locked_block, …}` error; constraints only ever ADD a rejection class,
     # never mask one.
-    with {:ok, new_blocks} <- apply_to_blocks(blocks, op),
-         {:ok, new_blocks} <- check_locked_placement(blocks, new_blocks, op),
+    with {:ok, new_blocks} <- apply_to_blocks(blocks, op) do
+      validate_result(blocks, new_blocks, op, opts)
+    end
+  end
+
+  @doc false
+  def validate_result(blocks, new_blocks, op, opts) do
+    with {:ok, new_blocks} <- check_locked_placement(blocks, new_blocks, op),
          {:ok, new_blocks} <- check_duplicate_ratchet(blocks, new_blocks, op) do
       check_constraints(blocks, new_blocks, op, opts)
     end

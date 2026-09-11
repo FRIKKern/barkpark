@@ -1,0 +1,155 @@
+{
+  "clean": {
+    "fatal": null,
+    "visible_content_px": 580,
+    "content_px": 580,
+    "unsampled": {
+      "elements_scanned": 2570,
+      "count": 2,
+      "elements": [
+        {
+          "tag": "div",
+          "class_name": "studio-footer",
+          "position": "static",
+          "z_index": "auto",
+          "pointer_events": "auto",
+          "overlap_over_content_px": 580,
+          "overlap_height_px": 43.188
+        },
+        {
+          "tag": "div",
+          "class_name": "phx-connected",
+          "position": "static",
+          "z_index": "auto",
+          "pointer_events": "auto",
+          "overlap_over_content_px": 580,
+          "overlap_height_px": 17.594
+        }
+      ],
+      "truncated": false,
+      "reject_reasons": {
+        "is the surface or in its ancestry": 43,
+        "overlaps the band, paints, hit-testable, and no probed point ever landed on it": 2
+      },
+      "scanline_spacing_px": 150.6,
+      "band_height_px": 753,
+      "sampled_topmost_count": 3,
+      "note": "Elements that PAINT, whose pointer-events are NOT none, whose rect overlaps the measured band, and which were topmost at NONE of the points the natural sample actually probed. The ancestry test would have counted every one of them had a scanline crossed it; the five lines sit scanline_spacing_px apart, so horizontal chrome shorter than that can be stepped over entirely. This is a census, never a correction (D81): a nonzero count is a prompt to look at the row, not a defect by itself. Elements that CONTAIN a sampled winner are excluded — the point landed on their own paint, through a child."
+    },
+    "invisible": {
+      "elements_scanned": 2570,
+      "count": 0,
+      "elements": [],
+      "truncated": false,
+      "note": "ELEMENTS (never pseudo-elements) whose computed pointer-events is none, that paint, and whose rect overlaps the measured band. They are invisible to BOTH hit-test samples, so they are NEVER subtracted from any figure — this is a census, not a correction (D81). A nonzero count is a prompt to look at the row, not a defect. It exists because the alternative was an accepted blind spot with nothing in the artifact saying whether it was occupied."
+    }
+  },
+  "format_bubble_present": {
+    "w": 115.453125,
+    "h": 26,
+    "top": 129,
+    "left": 516,
+    "pe": "auto",
+    "z": "200",
+    "pos": "fixed"
+  },
+  "with_format_bubble": {
+    "fatal": null,
+    "visible_content_px": 580,
+    "content_px": 580,
+    "unsampled": {
+      "elements_scanned": 2579,
+      "count": 8,
+      "elements": [
+        {
+          "tag": "div",
+          "class_name": "studio-footer",
+          "position": "static",
+          "z_index": "auto",
+          "pointer_events": "auto",
+          "overlap_over_content_px": 580,
+          "overlap_height_px": 43.188
+        },
+        {
+          "tag": "div",
+          "class_name": "phx-connected",
+          "position": "static",
+          "z_index": "auto",
+          "pointer_events": "auto",
+          "overlap_over_content_px": 580,
+          "overlap_height_px": 17.594
+        },
+        {
+          "tag": "div",
+          "class_name": "bp-paper-format",
+          "position": "fixed",
+          "z_index": "200",
+          "pointer_events": "auto",
+          "overlap_over_content_px": 115.453,
+          "overlap_height_px": 9
+        },
+        {
+          "tag": "button",
+          "class_name": "bp-paper-format__btn bp-paper-format__btn--bold",
+          "position": "static",
+          "z_index": "auto",
+          "pointer_events": "auto",
+          "overlap_over_content_px": 20,
+          "overlap_height_px": 5
+        },
+        {
+          "tag": "button",
+          "class_name": "bp-paper-format__btn bp-paper-format__btn--italic",
+          "position": "static",
+          "z_index": "auto",
+          "pointer_events": "auto",
+          "overlap_over_content_px": 20,
+          "overlap_height_px": 5
+        },
+        {
+          "tag": "button",
+          "class_name": "bp-paper-format__btn bp-paper-format__btn--code",
+          "position": "static",
+          "z_index": "auto",
+          "pointer_events": "auto",
+          "overlap_over_content_px": 24,
+          "overlap_height_px": 5
+        },
+        {
+          "tag": "span",
+          "class_name": "bp-paper-format__sep",
+          "position": "static",
+          "z_index": "auto",
+          "pointer_events": "auto",
+          "overlap_over_content_px": 1,
+          "overlap_height_px": 3
+        },
+        {
+          "tag": "button",
+          "class_name": "bp-paper-format__btn bp-paper-format__btn--link",
+          "position": "static",
+          "z_index": "auto",
+          "pointer_events": "auto",
+          "overlap_over_content_px": 28.453,
+          "overlap_height_px": 5
+        }
+      ],
+      "truncated": false,
+      "reject_reasons": {
+        "is the surface or in its ancestry": 43,
+        "overlaps the band, paints, hit-testable, and no probed point ever landed on it": 8
+      },
+      "scanline_spacing_px": 150.6,
+      "band_height_px": 753,
+      "sampled_topmost_count": 3,
+      "note": "Elements that PAINT, whose pointer-events are NOT none, whose rect overlaps the measured band, and which were topmost at NONE of the points the natural sample actually probed. The ancestry test would have counted every one of them had a scanline crossed it; the five lines sit scanline_spacing_px apart, so horizontal chrome shorter than that can be stepped over entirely. This is a census, never a correction (D81): a nonzero count is a prompt to look at the row, not a defect by itself. Elements that CONTAIN a sampled winner are excluded — the point landed on their own paint, through a child."
+    },
+    "invisible": {
+      "elements_scanned": 2579,
+      "count": 0,
+      "elements": [],
+      "truncated": false,
+      "note": "ELEMENTS (never pseudo-elements) whose computed pointer-events is none, that paint, and whose rect overlaps the measured band. They are invisible to BOTH hit-test samples, so they are NEVER subtracted from any figure — this is a census, not a correction (D81). A nonzero count is a prompt to look at the row, not a defect. It exists because the alternative was an accepted blind spot with nothing in the artifact saying whether it was occupied."
+    }
+  }
+}

@@ -61,7 +61,17 @@
 //      its skip branch on every state, every run, and the note it printed reads
 //      exactly like a pass. The token-reveal state below drives it for real.
 //
-//   5. REQUIRED-CONTROL REACHABILITY (per state; the token reveal only)
+//   6. THE HONEST-UNKNOWN CONTRACT (per state; account-modal-me-unreadable only)
+//      ✅ DETECTS THE COERCION cch-w39-s2 REMOVED, and detects it in a browser
+//      rather than in markup. Three legs, all on the account modal's two-factor
+//      panel over a /v1/me that never lands: #a2f-retry is REACHABLE (leg 5
+//      below, on the modal's own scroll path and hit-tested), the badge reads
+//      NEITHER "On" NOR "Off", and NO #a2f-start is painted. The last two are
+//      what stop the first from being satisfied by a determinate panel that
+//      merely happens to carry a Retry.
+//
+//   5. REQUIRED-CONTROL REACHABILITY (per state; the token reveal + the unknown
+//      two-factor arm)
 //      A control the state names must be on screen AFTER the modal's own scroll
 //      path is driven to its end, and must hit-test to itself. "It has a box"
 //      is not reachability: on a card taller than the viewport the control is
@@ -87,7 +97,7 @@
 //    SCEN=tokens-reveal node modal-oracle.mjs
 //    ACCENT=iris node modal-oracle.mjs
 //
-//  Env: SCEN (comma-list, default the four account-modal scenarios + the token
+//  Env: SCEN (comma-list, default the five account-modal scenarios + the token
 //  reveal) · THEME (comma-list of light|dark, default both) · ACCENT (optional
 //  single identity) · CHROME (binary override) · PORT (preview port; default =
 //  a free port) · WIDTH/HEIGHT (the ACCOUNT states' viewport only — the token
@@ -95,7 +105,7 @@
 //
 //  A "state" is a scenario × theme × CELL. Every account state has one cell
 //  (1440x900); the token reveal has two of its own, so the default run asserts
-//  4×2×1 + 1×2×2 = 12 states.
+//  5×2×1 + 1×2×2 = 14 states.
 //
 //  Exit codes:  0 = every state asserted clean · 1 = an assertion FAILED (the
 //  mechanism is named on stderr) · 2 = GUARD — refused BEFORE measuring: an
@@ -144,6 +154,7 @@ const DEFAULT_SCEN = [
   "account-modal-tall",
   "account-modal-2fa-on",
   "account-modal-2fa-badcode",
+  "account-modal-me-unreadable",
   "tokens-reveal",
 ];
 
@@ -194,6 +205,40 @@ const TOKEN_REVEAL_CELLS = [
   // measuring nothing.
   { w: 320, h: 300, requireTall: true },
 ];
+
+// ── THE UNKNOWN TWO-FACTOR ARM AS A DRIVEN STATE (cch-w39-s2-fu) ────────────
+// cch-w39-s2 gave the account modal's two-factor panel an explicit UNKNOWN arm
+// — /v1/me never landed, so the panel says so, withholds the setup offer, and
+// paints `#a2f-retry` — and proved it by node test only: the markup plus the
+// loadMe() re-entry SHAPE. That is a composition proof, and composition is not
+// the question this file asks. #4592 is a control that EXISTS in the DOM and
+// cannot be REACHED on screen, and a markup assertion is green through it.
+//
+// So the arm gets a state. `account-modal-me-unreadable` (scenarios.mjs) is the
+// corpus's first account-modal fixture whose /v1/me does not land: `meFault`
+// fails the READ while `me` stays present, so meState() reads "failed" and
+// accountModel's three-valued twoFactorEnabled reads null. The modal opens on
+// mock.js's ?modal=account give-up branch — the `tries >= 40` arm cch-w39-s2
+// fixed in the same commit, which before that fix was unreachable and left a
+// fixture like this one with no modal at all.
+//
+// THREE ASSERTIONS, and the last two exist so the FIRST cannot be satisfied by
+// the wrong screen or bought back through the determinate path:
+//   * #a2f-retry is hit-testable inside the modal card at the shipped viewport
+//     (section 5c, the same reachability leg the token reveal's Done uses).
+//   * the badge reads NEITHER "On" NOR "Off" (section 5d). Either word is a
+//     claim about this account's security folded out of an envelope that never
+//     arrived — the exact coercion cch-w39-s2 removed.
+//   * NO #a2f-start is painted (section 5e). Offering "Set up two-factor
+//     authentication" IS the determinate claim in button form: it asserts by
+//     existing that there is nothing set up. A retry that is reachable on a
+//     panel still offering setup would prove nothing.
+const ME_UNREADABLE_SCEN = "account-modal-me-unreadable";
+
+// The unknown arm's own copy host. Sections 1-4 ask questions about the
+// `.modal-root` rule that ANY open modal answers, so without this the state
+// could go green on the account modal's determinate OFF panel.
+const UNKNOWN_ARM_HOST = "#a2f-unknown-line";
 
 // The landed tokens screen, before a single gesture. `?scen=` alone does not
 // route; the deep link does, and this asserts it arrived.
@@ -594,6 +639,23 @@ function assertJs(cfg) { return `(function () {
     }
   }
 
+  // (a2) IS THIS THE ARM UNDER TEST? The generic twin of (a) above, for a state
+  //      whose subject is one ARM of a dialog rather than a dialog of its own.
+  //      ?modal=account opens the account modal on WHATEVER phase the fixture
+  //      produces, and sections 1-4 would answer identically on all of them, so
+  //      a state about the unknown arm must prove it is looking at the unknown
+  //      arm before it asserts anything about what the arm does or does not show.
+  if (CFG.dialogHost) {
+    if (!card.querySelector(CFG.dialogHost)) {
+      out.failures.push(
+        "ARM: no '" + CFG.dialogHost + "' inside the open .modal-card - " +
+        (CFG.dialogHostWhy || "the dialog opened on a different arm than this state names") +
+        ". Sections 1-4 above would have passed on any modal at all, so treat their green as " +
+        "measuring nothing about this state."
+      );
+    }
+  }
+
   // (b) ANTI-VACUITY. A cell whose whole job is to exercise the tall-card
   //     scroll path and which turns out to FIT measured nothing: assertion 3
   //     took the "N/A" branch, and the note it printed reads like a pass.
@@ -614,6 +676,11 @@ function assertJs(cfg) { return `(function () {
   if (CFG.requiredControl) {
     var ctrl = card.querySelector(CFG.requiredControl);
     var cname = CFG.requiredControlLabel || CFG.requiredControl;
+    // PER-STATE, because the consequence is per-state: on the write-once sheet
+    // the control dismisses a secret you will never see again; on the unknown
+    // two-factor arm it is the only way back out of the unknown. A generic
+    // sentence would report the wrong stake for one of them.
+    var CTRL_WHY = CFG.requiredControlWhy || "the only control that dismisses this dialog";
     if (!ctrl) {
       out.failures.push(
         "REACHABILITY: the state's required control '" + CFG.requiredControl + "' (" + cname +
@@ -638,7 +705,7 @@ function assertJs(cfg) { return `(function () {
           "REACHABILITY: after scrolling #modal-root to its end (scrollTop " + root.scrollTop + " of " +
           out.rootScrollMax + "), '" + cname + "' still sits top " + Math.round(rc.top) + " bottom " +
           Math.round(rc.bottom) + " in a " + window.innerHeight + "px viewport at " + window.innerWidth +
-          "px wide - the only control that dismisses a write-once secret cannot be reached."
+          "px wide - " + CTRL_WHY + " cannot be reached."
         );
       } else {
         var cx = Math.round(rc.left + rc.width / 2);
@@ -648,11 +715,58 @@ function assertJs(cfg) { return `(function () {
         if (!(onTop && (onTop === ctrl || ctrl.contains(onTop)))) {
           out.failures.push(
             "REACHABILITY: '" + cname + "' is on screen but its own centre point (" + cx + "," + cy +
-            ") hit-tests to '" + out.ctrlHit + "' - something is painting over the only control that " +
-            "dismisses this dialog."
+            ") hit-tests to '" + out.ctrlHit + "' - something is painting over " + CTRL_WHY + "."
           );
         }
       }
+    }
+  }
+
+  // (d) THE INDETERMINATE READ. A three-valued fact rendered as a two-valued
+  //     pill is this slice's founding defect: "Off" is a CLAIM about this
+  //     account's security, folded out of an envelope that never arrived. The
+  //     check is stated as FORBIDDEN WORDS rather than an expected one, on
+  //     purpose - the honest word may change ("Unknown", "Not checked"), and
+  //     pinning it would red on a copy edit while staying silent on the only
+  //     thing that matters: a determinate word appearing on an unread fact.
+  if (CFG.indeterminateHost) {
+    var ih = card.querySelector(CFG.indeterminateHost);
+    var iname = CFG.indeterminateLabel || CFG.indeterminateHost;
+    if (!ih) {
+      out.failures.push(
+        "INDETERMINATE: '" + CFG.indeterminateHost + "' (" + iname + ") is not in the dialog at all - " +
+        "a state whose subject is what that element REFUSES to say cannot be measured without it."
+      );
+    } else {
+      var itext = (ih.textContent || "").trim();
+      out.indeterminateText = itext;
+      var forbidden = CFG.indeterminateForbidden || [];
+      for (var q = 0; q < forbidden.length; q++) {
+        if (itext.toLowerCase() === String(forbidden[q]).toLowerCase()) {
+          out.failures.push(
+            "INDETERMINATE: " + iname + " reads '" + itext + "' on a read that never landed. " +
+            "Both '" + forbidden.join("' and '") + "' are determinate claims about this account, and " +
+            "nothing here knows which is true - a three-valued fact was coerced back to two."
+          );
+        }
+      }
+    }
+  }
+
+  // (e) THE OFFER THAT IS ITSELF A CLAIM. Some controls assert by EXISTING:
+  //     "Set up two-factor authentication" states that there is nothing set up.
+  //     On an unread /v1/me that is the same lie one layer down from the badge,
+  //     and it is the one a person would act on. Absence is the assertion.
+  if (CFG.forbiddenControl) {
+    var forb = card.querySelector(CFG.forbiddenControl);
+    out.forbiddenPainted = !!forb;
+    if (forb) {
+      out.failures.push(
+        "FORBIDDEN OFFER: '" + CFG.forbiddenControl + "' (" +
+        (CFG.forbiddenControlLabel || CFG.forbiddenControl) + ") is painted in this dialog. " +
+        "The offer IS the determinate claim - it asserts by existing that there is nothing set up - " +
+        "and this state's whole subject is a read that never landed."
+      );
     }
   }
 
@@ -688,6 +802,33 @@ function planFor(scen) {
         tokenLen: PAT_LEN,
         requiredControl: "#token-done",
         requiredControlLabel: "Done",
+        // Pinned explicitly now that the WHY clause is per-state (cch-w39-s2-fu):
+        // this sentence is this state's whole argument and must not drift.
+        requiredControlWhy: "the only control that dismisses a write-once secret",
+      },
+    };
+  }
+  if (scen === ME_UNREADABLE_SCEN) {
+    return {
+      suffix: "&modal=account",
+      land: null,
+      drive: null,
+      open: MODAL_OPEN_PROBE,
+      cells: [{ w: VIEW_W, h: VIEW_H, requireTall: false }],
+      cfg: {
+        state: "account-2fa-unknown",
+        dialogHost: UNKNOWN_ARM_HOST,
+        dialogHostWhy:
+          "the mock's ?modal=account drive opened the account modal, but not on its UNKNOWN " +
+          "two-factor arm - so /v1/me LANDED and this fixture's meFault did not take",
+        requiredControl: "#a2f-retry",
+        requiredControlLabel: "Retry",
+        requiredControlWhy: "the only way out of an unknown two-factor state",
+        indeterminateHost: "#a2f-badge",
+        indeterminateLabel: "the two-factor badge",
+        indeterminateForbidden: ["On", "Off"],
+        forbiddenControl: "#a2f-start",
+        forbiddenControlLabel: "Set up two-factor authentication",
       },
     };
   }
@@ -986,10 +1127,19 @@ async function main() {
           results.push(r);
 
           const bad = r.failures.length > 0;
-          const extra = r.tokenChars === undefined
+          const ctrlCell = r.ctrlBox
+            ? `${r.ctrlBox.w}x${r.ctrlBox.h}@${r.ctrlBox.top}..${r.ctrlBox.bottom}` : "-";
+          // PRINT WHAT THIS STATE MEASURED, or a reader cannot tell an assertion
+          // that RAN from one that took a skip branch — the exact failure mode
+          // the tall-card "N/A" note taught this file (see the header). The
+          // unknown two-factor arm's three legs each print their own datum.
+          const extra = r.indeterminateText !== undefined
+            ? ` · badge="${r.indeterminateText}" retry=${ctrlCell}` +
+              ` hitRetry=${r.ctrlHit ?? "-"} a2f-start=${r.forbiddenPainted ? "PAINTED" : "absent"}`
+            : r.tokenChars === undefined
             ? ""
             : ` · tok=${r.tokenChars}c/${r.tokenLines}L` +
-              ` done=${r.ctrlBox ? `${r.ctrlBox.w}x${r.ctrlBox.h}@${r.ctrlBox.top}..${r.ctrlBox.bottom}` : "-"}` +
+              ` done=${ctrlCell}` +
               ` scrolled=${r.rootScrollTop ?? "-"}/${r.rootScrollMax ?? "-"}` +
               ` hitDone=${r.ctrlHit ?? "-"}`;
           process.stdout.write(

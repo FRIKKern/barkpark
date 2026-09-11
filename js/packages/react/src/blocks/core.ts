@@ -24,6 +24,7 @@ import {
   textLeafValue,
 } from '../inline'
 import { renderBlock, renderBlocks } from './registry'
+import { listChildren } from '../list-children'
 import { CHAT_DIFF_BUDGET, diffRowsHtml, splitLines, type DiffLine } from './chat'
 
 type Emit = (block: Block) => string
@@ -521,9 +522,12 @@ const pullquote: Emit = (b) =>
 
 const list: Emit = (b) => {
   const tag = b.ordered === true ? 'ol' : 'ul'
-  const items = asList(b.items)
-  const inner = items.map((item) => `<li><span>${renderInlines(itemInlines(item))}</span></li>`).join('')
-  return `<${tag}>${inner}</${tag}>`
+  return `<${tag}>${asList(b.items)
+    .map(
+      (item) =>
+        `<li><span>${renderInlines(itemInlines(item))}</span>${renderBlocks(listChildren(item))}</li>`,
+    )
+    .join('')}</${tag}>`
 }
 
 // The inline content of ONE list item, whatever authored shape it took. The RN
@@ -720,7 +724,7 @@ const asciicast: Emit = (b) => {
   const rowsAttr = rows !== undefined && rows >= 6 && rows <= 40 ? ` data-cast-rows="${rows}"` : ''
   return (
     `<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">` +
-    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr}${rowsAttr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>` +
+    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr}${rowsAttr} style="border:1px solid var(--paper-rule, #dde7e2);border-radius:6px;overflow:hidden"></div>` +
     articleFigcaption(caption) +
     `</figure>`
   )

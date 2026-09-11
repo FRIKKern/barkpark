@@ -113,13 +113,77 @@ jobs:
       - name: Every deploy/*.sh parses and passes shellcheck -S warning (task-6f18e71a351f8081 D)
         # 17 files / 14k lines had ONE bash -n and zero shellcheck in CI. Zero-findings
         # gate: the two warnings that existed (SC2034 x2) were fixed in the same change,
-        # so any NEW finding is a regression, not a baseline. ~1-3 s.
+        # so any NEW finding is a regression, not a baseline. Measured 14 s on run
+        # 34100289398 - the authoring estimate of "~1-3 s" was 5-14x optimistic.
+        #
+        # THE TWO WAYS THIS STEP COULD GREEN WITHOUT MEASURING ANYTHING, both closed
+        # below. A ZERO-FINDINGS gate is the shape that goes vacuous silently: it looks
+        # identical whether it scanned seventeen files or none, and unlike a baselined
+        # gate there is no file here whose growth would give the drift away.
+        #
+        #   1. THE CORPUS EVAPORATES. If deploy/*.sh matched one file - a rename, a
+        #      move, a bad merge - "no shellcheck warning" is still true and this step
+        #      is still green. .go-format-drift-ceiling already refuses that class with
+        #      a MIN_FILES plausibility floor; this step had no floor at all. Lower
+        #      MIN_FILES DELIBERATELY if deploy/ really shrinks - do not let a green be
+        #      how you find out.
+        #
+        #   2. THE INSTRUMENT GOES BLIND. shellcheck present but declawed - a wrapper on
+        #      PATH, a severity default that demotes SC2034 - produces exactly this
+        #      step's green over exactly this step's corpus. So the step now PROVES IT
+        #      CAN FAIL on every run: it plants a deliberate SC2034 in a COPY of a real
+        #      deploy script in a tmpdir and requires shellcheck to red on it. The copy
+        #      is the point - no tracked file is ever touched, so the control cannot
+        #      leak into the tree it guards. If the planted defect does NOT red, this
+        #      step FAILS rather than passing, because at that moment the clean green
+        #      above has stopped meaning anything. Same anti-vacuity grammar the repo
+        #      already uses at scripts/pds-pull-proof.sh (PDS_STEP5_FAILDEMO /
+        #      PDS_STEP6_GUARD_DEMO): it turns "no findings" into "no findings, and I
+        #      would have seen one".
+        #
+        # The control is ON BY DEFAULT and takes no environment variable - a knob that
+        # can disable it re-opens the hole for whoever sets the knob.
         run: |
           set -euo pipefail
+          MIN_FILES=15
+          n="$(ls deploy/*.sh | wc -l | tr -d " ")"
+          if [ "$n" -lt "$MIN_FILES" ]; then
+            echo "::error title=deploy shellcheck corpus below its floor::deploy/*.sh matched only $n file(s); the floor is $MIN_FILES. A zero-findings lint gate over a corpus that shrank is not a pass, it is a gate that stopped looking. Restore the files, or lower MIN_FILES deliberately in this step."
+            exit 1
+          fi
           for f in deploy/*.sh; do bash -n "$f"; done
           shellcheck --version | grep -m1 version:
           shellcheck -S warning deploy/*.sh
-          echo "deploy/*.sh: $(ls deploy/*.sh | wc -l | tr -d " ") files parse and carry no shellcheck warning"
+          echo "deploy/*.sh: $n files parse and carry no shellcheck warning"
+
+          # -- the firing control (task-6f18e71a351f8081 D): prove the step CAN red --
+          ctl="$(mktemp -d)"
+          trap 'rm -rf "$ctl"' EXIT
+          victim="$(ls deploy/*.sh | head -1)"
+          cp "$victim" "$ctl/planted.sh"
+          # SC2034: assigned and never used. -S warning must catch this.
+          printf '\nbp_planted_unused_variable="task-6f18e71a351f8081 D control"\n' >> "$ctl/planted.sh"
+          ctl_out="$(shellcheck -S warning "$ctl/planted.sh" 2>&1)" && ctl_rc=0 || ctl_rc=$?
+          if [ "$ctl_rc" -eq 0 ]; then
+            echo "::error title=shellcheck control DID NOT FIRE::A deliberate SC2034 was planted in a copy of $victim and shellcheck -S warning still returned 0. The clean green printed above therefore proves NOTHING about deploy/*.sh - this instrument is not discriminating. Do not re-run hoping for a different answer: find out why shellcheck stopped reporting SC2034 (a wrapper on PATH, a disable directive inherited from the copied file, a severity default change)."
+            exit 1
+          fi
+          # HERE-STRING, never `printf … | grep -q` (D37, and scripts/pipefail-sigpipe-scan.sh
+          # documents this exact shape). `grep -q` exits on the FIRST match without
+          # draining, the producer takes SIGPIPE and dies 141, `pipefail` propagates 141
+          # as the pipeline's status, and the `!` inverts it — so this control would
+          # report "fired for the WRONG REASON" at precisely the moment it fired
+          # correctly. MEASURED on this shape: correct at 384 bytes (0 inversions in 200
+          # trials, which is today's real $ctl_out), 58 of 60 inverted at ~1 KB, 60 of 60
+          # at ~2 KB. So it is LATENT, not currently firing — and one extra shellcheck
+          # finding, a longer temp path or a chattier shellcheck release carries it over.
+          # A here-string has no producer process to kill.
+          if ! grep -q "SC2034" <<<"$ctl_out"; then
+            echo "::error title=shellcheck control fired for the WRONG REASON::The planted copy was rejected (exit $ctl_rc) but the output names no SC2034, so the control is not measuring what it claims to measure. Output follows."
+            printf '%s\n' "$ctl_out"
+            exit 1
+          fi
+          echo "control: a planted SC2034 in a copy of $victim reds shellcheck -S warning (exit $ctl_rc, SC2034 named) - the clean result above is a measurement, not an absence of one"
       - name: Instance deploy harness
         run: bash deploy/instance-deploy_test.sh
       - name: Control-plane deploy harness
@@ -164,6 +228,45 @@ jobs:
         env:
           BARKPARK_SELFTEST_REQUIRE_E2E: "1"
         run: bash deploy/site-deploy-node.sh --self-test
+      # THE STRANGER'S FIRST RUN, offline half. site-spawner-first-run.sh walks
+      # DISCOVER -> CREATE -> DEPLOY -> VISIT -> UNDO from zero with no ssh and
+      # no fixture; --self-check drives all 15 of its typed reds against
+      # synthetic input, plus one REAL-CORPUS arm that greps every deploy/*.sh
+      # cleanup note for a Caddy marker the engine does not write (the
+      # documented manual recovery named `# barkpark-site:<slug>` for the whole
+      # of wave 8 while site-deploy.sh writes BARKPARK_SITE_ROUTE:<slug>, so a
+      # stranger following our own scripts grepped for a string nothing writes).
+      # That arm is the reason this step is registered rather than left to a
+      # human: it reds when ANY deploy script re-introduces the dead marker.
+      # Offline and ~0.1 s.
+      - name: Stranger first-run journey self-check
+        run: bash deploy/site-spawner-first-run.sh --self-check
+      # Its sibling's failure paths, which were NOT registered anywhere before
+      # this (found while writing the step above: the live proof ships a
+      # --self-check that drives ~60 judges and nothing in CI ran it, so its
+      # named reds were unexercised dead code between live walks). Offline and
+      # ~0.25 s.
+      - name: Site spawner live-proof judges self-check
+        run: bash deploy/site-spawner-live-proof.sh --self-check
+      # Every timer-driven unit in deploy/systemd/ carries an OnFailure= handler,
+      # that handler exists in-tree, and no scheduled service sets a Restart=
+      # that would defer the failed state past it. Before task-0633ab45951a5780
+      # there were ZERO systemd OnFailure= directives in the whole repository and
+      # both scheduled jobs — the nightly warm-image bake and the WEEKLY
+      # public-read token rotation — failed into silence on boxes that are
+      # off-CI by construction. Text-only and offline: it never invokes systemd
+      # (systemd-analyze verify is not available where much of this repo is
+      # authored), and it proves it can fail on every run by stripping an
+      # OnFailure= from a copy in a tmpdir. Sub-second.
+      #
+      # spec-authority: advisory-ok — this step reds `Deploy harnesses`, which is
+      # not in the required set and cannot be (the workflow-level paths: filter
+      # above emits no check run on a non-matching PR, so requiring it would
+      # deadlock every unrelated PR — D18, and this file's own header). The
+      # script's header states that in full so a reader of the guard alone
+      # cannot mistake it for merge protection.
+      - name: systemd OnFailure handler harness
+        run: bash deploy/systemd-onfailure_test.sh
 
   git-2-34-fetch:
     # task-6f18e71a351f8081 B. The control-plane box is Ubuntu 22.04 with the

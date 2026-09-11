@@ -1555,6 +1555,51 @@ async function mintTicket({ base, token }) {
 // typo in here used to be discoverable only after ssh, a minted ticket, a login
 // and a drill, i.e. at the most expensive possible moment. `new Function(...)`
 // over this export parses it in milliseconds and costs nothing.
+
+/**
+ * THE UNSAMPLED-OCCLUDER PREDICATE (spd-b36), pure and shared.
+ *
+ * It runs IN THE PAGE — the census below interpolates this function's own
+ * source into PAGE_MEASURE with ${classifyUnsampledCandidate} — and it runs in
+ * `node --test` from this same export. One text, two callers: a test that
+ * passed while the page ran different logic would be exactly the vacuous green
+ * this instrument exists to abolish.
+ *
+ * Input is PLAIN DATA already read off the element, never a node, so the
+ * verdict is checkable without a browser:
+ *   rect                {left,right,top,bottom,width,height} in viewport px
+ *   band                {contentLeft,contentRight,bandTop,bandBottom}
+ *   pointer_events / visibility / display / opacity   computed strings
+ *   surface_related     true if the element IS the surface, contains it, or
+ *                       is contained by it — never an occluder of it
+ *   sampled             true if it was the topmost element at some probed point
+ *   contains_sampled    true if it CONTAINS a topmost winner; the point landed
+ *                       on its own paint through a child, so it was not
+ *                       stepped over
+ *
+ * Returns { residue, reason, overlap_over_content_px, overlap_height_px }.
+ * `reason` names the FIRST disqualifier, so a zero census can say which test
+ * every candidate died on rather than only that it was empty.
+ */
+export function classifyUnsampledCandidate(c) {
+  const r = c.rect || {};
+  const b = c.band || {};
+  const ox = Math.min(b.contentRight, r.right) - Math.max(b.contentLeft, r.left);
+  const oy = Math.min(b.bandBottom, r.bottom) - Math.max(b.bandTop, r.top);
+  const out = { residue: false, reason: null, overlap_over_content_px: ox, overlap_height_px: oy };
+  if (!(r.width > 0) || !(r.height > 0)) { out.reason = 'zero-area rect'; return out; }
+  if (!(ox > 0) || !(oy > 0)) { out.reason = 'does not overlap the band'; return out; }
+  if (c.surface_related) { out.reason = 'is the surface or in its ancestry'; return out; }
+  if (c.sampled) { out.reason = 'already sampled — the metric saw it'; return out; }
+  if (c.contains_sampled) { out.reason = 'contains a sampled winner — its own paint was probed'; return out; }
+  if (c.pointer_events === 'none') { out.reason = 'pointer-events:none — invisible_occluder_census owns it'; return out; }
+  if (c.visibility === 'hidden' || c.display === 'none') { out.reason = 'not painting'; return out; }
+  if (parseFloat(c.opacity) === 0) { out.reason = 'fully transparent'; return out; }
+  out.residue = true;
+  out.reason = 'overlaps the band, paints, hit-testable, and no probed point ever landed on it';
+  return out;
+}
+
 export const PAGE_MEASURE = /* js */ `
 async (faceOverride) => {
   const px = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
@@ -1863,6 +1908,13 @@ async (faceOverride) => {
   const BISECT_TOL_PX = 0.5;
   const VIS = 0, OCC = 1, OFF = 2;
 
+  // EVERY topmost element the natural sample ever landed on. Collected here,
+  // not re-derived later, because the only honest definition of "the scanlines
+  // stepped over it" is "it was never the topmost element at any point this run
+  // actually sampled" — including the bisection probes, which are sampled
+  // points too. See 'unsampledOccluderCensus' below.
+  const sampledTopmost = new Set();
+
   const describe = (t) => {
     if (!t) return '(nothing — outside the viewport)';
     return t.tagName.toLowerCase() +
@@ -1882,6 +1934,7 @@ async (faceOverride) => {
     if (x < 0 || y < 0 || x > window.innerWidth - 1 || y > window.innerHeight - 1) return OFF;
     const top = document.elementsFromPoint(x, y)[0] || null;
     if (!top) return OFF;
+    sampledTopmost.add(top);
     return (top === surface || surface.contains(top)) ? VIS : OCC;
   };
 
@@ -1961,6 +2014,11 @@ async (faceOverride) => {
 
   const naturalLines = scanYs.map(scanLineAt).filter(Boolean);
 
+  // Snapshot BEFORE the forced pass injects anything. The forced sample is a
+  // page this harness invented; an element that only becomes topmost under an
+  // injected rule was never sampled by the metric that ships.
+  const naturalSampledTopmost = new Set(sampledTopmost);
+
   // ── the forced sample. A pseudo-element has NO inline style, so the two
   //    mutate-measure-restore sites above (which set element.style) cannot
   //    reach it. An injected stylesheet can. This is a real deviation from this
@@ -1973,15 +2031,250 @@ async (faceOverride) => {
   //    (D31/D39). The non-vacuity guard below is what makes the drift loud.
   //    THE LIMIT OF THIS, STATED PLAINLY: the forced sample forces exactly ONE
   //    known pointer-events:none occluder — the scrim. An ELEMENT occluder that
-  //    is also pointer-events:none, and that nobody has written yet, would be
-  //    invisible to BOTH samples and would silently not be subtracted. The
-  //    ancestry test catches every normal overlay automatically; it does not
-  //    catch an invisible-to-hit-testing one. Forcing pointer-events globally
-  //    was considered and rejected: it would make every decorative
-  //    pointer-events:none element (icons, gradients, rules) read as an
-  //    occluder and the metric would collapse to noise. This is a real
-  //    remaining hole and is named here rather than left for a verifier to find.
+  //    is also pointer-events:none is invisible to BOTH samples and would
+  //    silently not be subtracted. The ancestry test catches every normal
+  //    overlay automatically; it does not catch an invisible-to-hit-testing one.
+  //
+  //    THAT HOLE IS FORMALLY ACCEPTED (spd-scrim-guard-real-but-wrong-selector-
+  //    untested, 2026-09-10), NOT CLOSED, AND ITS PREMISE IS CORRECTED. This
+  //    comment used to say such an element "nobody has written yet". That was
+  //    false when it was written: root.html.heex ships at least three today —
+  //    '.bp-ae-toast' (position:fixed, z-index:200, pointer-events:none, bottom
+  //    24px and centred, i.e. squarely over the reading column's lowest
+  //    scanline), '.presence-tooltip' (z-index:60, hover-gated) and
+  //    '.presence-dots'. So the hazard is OCCUPIED, not hypothetical.
+  //
+  //    WHY IT IS ACCEPTED RATHER THAN SUBTRACTED. Forcing pointer-events
+  //    globally was considered and rejected: it would make every decorative
+  //    pointer-events:none element (icons, gradients, rules, presence dots) read
+  //    as an occluder and the metric would collapse to noise — the exact
+  //    hand-maintained-list failure D112 abolished, re-imported as a
+  //    hand-maintained EXCEPTION list. And subtraction would be WRONG for this
+  //    metric anyway: 'visible_content_px' answers CAN THE READER SEE THE GLYPH,
+  //    and a pointer-events:none element that is also transparent (the common
+  //    case) does not stop them.
+  //
+  //    WHAT REPLACES THE SILENCE. Acceptance without a tripwire is just the
+  //    hole with better prose, so the blind spot is MEASURED AND NAMED instead
+  //    of subtracted: 'occlusion.invisible_occluder_census' enumerates, per row,
+  //    every element whose computed pointer-events is 'none', that paints, and
+  //    whose rect overlaps the measured band — and reports its overlap in px.
+  //    The census NEVER changes a number (D81: the instrument has no gate
+  //    authority over the figures); it makes a reader of the artifact able to
+  //    see that the blind spot was empty in this run, rather than assume it.
+  //    A nonzero count is a signal to look, not a defect by itself.
+  //
+  //    AND THE SELECTOR'S IDENTITY IS PINNED, because the guard below does not
+  //    pin it. Mutation-proven 2026-09-10 on served sha 4889e332: replacing this
+  //    constant with the b29 SCRIM SUPPRESSOR from root.html.heex — a REAL,
+  //    verbatim, same-host, same-pseudo rule, '.editor-with-preview:has(
+  //    .bp-doc-sidebar.is-open:not([data-user-opened]))::after' — the run exited
+  //    0, wrote a full 54-row artifact and the positive control still reported
+  //    'guard_passed: true' with byte-identical figures, WHILE the injection
+  //    silently missed the pseudo in 18 user-opened rows (pointer_events_forced
+  //    went 'auto' -> 'none'). The non-vacuity guard certifies EFFECT — "some
+  //    rule moved the hit-test" — never IDENTITY. 'scrim_selector_identity'
+  //    below is the identity half: it reads the SHIPPED stylesheet and asserts
+  //    this constant names a rule that actually GENERATES the scrim box, so a
+  //    selector that names a suppressor ('content: none') or names nothing at
+  //    all is loud instead of silently plausible.
   const SCRIM_SELECTOR = '.editor-with-preview:has(.bp-doc-sidebar.is-open)::after';
+
+  // THE IDENTITY SCAN. Reads the rules the BOX actually served and reports every
+  // rule whose selectorText is byte-equal (whitespace-normalised) to the constant
+  // above, with the declarations that rule makes. Classified in Node by
+  // 'classifyScrimSelectorIdentity', which is pure and therefore testable without
+  // a browser, a box or an admin token. Cross-origin sheets (Google Fonts) throw
+  // on '.cssRules' and are COUNTED as unreadable rather than swallowed: a scan
+  // that could not read anything reports 'scan_readable: false' and is treated as
+  // unknown, never as absent — an empty read is not evidence of absence.
+  const scrimSelectorIdentity = (() => {
+    const norm = (v) => String(v).replace(/\s+/g, ' ').trim();
+    const want = norm(SCRIM_SELECTOR);
+    const props = (st) => Array.from({ length: st.length }, (_, i) => st.item(i));
+    const out = {
+      selector: SCRIM_SELECTOR,
+      sheets_total: 0,
+      sheets_readable: 0,
+      sheets_unreadable: 0,
+      matched_rules: [],
+    };
+    const visit = (rules) => {
+      for (const r of rules) {
+        if (r.cssRules) { try { visit(r.cssRules); } catch (e) { /* nested unreadable */ } }
+        if (!r.selectorText || !r.style) continue;
+        for (const one of String(r.selectorText).split(',')) {
+          if (norm(one) !== want) continue;
+          const declared = props(r.style);
+          out.matched_rules.push({
+            selector_text: norm(one),
+            declared_properties: declared,
+            content_declared: declared.indexOf('content') !== -1,
+            content_value: r.style.getPropertyValue('content'),
+            pointer_events: r.style.getPropertyValue('pointer-events'),
+            position: r.style.getPropertyValue('position'),
+            z_index: r.style.getPropertyValue('z-index'),
+            css_text: r.style.cssText,
+          });
+        }
+      }
+    };
+    for (const sheet of Array.from(document.styleSheets)) {
+      out.sheets_total++;
+      let rules = null;
+      try { rules = sheet.cssRules; } catch (e) { out.sheets_unreadable++; continue; }
+      out.sheets_readable++;
+      try { visit(rules); } catch (e) { /* keep what was already collected */ }
+    }
+    out.scan_readable = out.sheets_readable > 0;
+    out.method =
+      'every rule in every READABLE stylesheet, recursing into @media/@container/@supports, whose ' +
+      'selectorText (split on commas, whitespace-normalised) equals SCRIM_SELECTOR exactly. The ' +
+      'declarations are reported so a rule that SUPPRESSES the scrim (content: none) is ' +
+      'distinguishable from the rule that GENERATES it.';
+    return out;
+  })();
+
+  // THE INVISIBLE-OCCLUDER CENSUS. The named, accepted blind spot, made visible.
+  // Rect first, computed style second, deliberately: getComputedStyle on every
+  // node in a 100-row desk is the expensive half, and the rect test throws away
+  // almost all of them before it is reached.
+  const invisibleOccluderCensus = (() => {
+    const found = [];
+    let scanned = 0;
+    for (const el of document.querySelectorAll('*')) {
+      scanned++;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      const ox = Math.min(contentRight, r.right) - Math.max(contentLeft, r.left);
+      const oy = Math.min(bandBottom, r.bottom) - Math.max(bandTop, r.top);
+      if (ox <= 0 || oy <= 0) continue;
+      if (el.contains(surface) || surface.contains(el) || el === surface) continue;
+      const cs = getComputedStyle(el);
+      if (cs.pointerEvents !== 'none') continue;
+      if (cs.visibility === 'hidden' || cs.display === 'none') continue;
+      if (parseFloat(cs.opacity) === 0) continue;
+      found.push({
+        tag: el.tagName.toLowerCase(),
+        class_name: typeof el.className === 'string' ? el.className.slice(0, 120) : null,
+        position: cs.position,
+        z_index: cs.zIndex,
+        opacity: cs.opacity,
+        overlap_over_content_px: round(ox),
+        overlap_height_px: round(oy),
+      });
+    }
+    return {
+      elements_scanned: scanned,
+      count: found.length,
+      elements: found.slice(0, 12),
+      truncated: found.length > 12,
+      note:
+        'ELEMENTS (never pseudo-elements) whose computed pointer-events is none, that paint, and whose ' +
+        'rect overlaps the measured band. They are invisible to BOTH hit-test samples, so they are ' +
+        'NEVER subtracted from any figure — this is a census, not a correction (D81). A nonzero count ' +
+        'is a prompt to look at the row, not a defect. It exists because the alternative was an ' +
+        'accepted blind spot with nothing in the artifact saying whether it was occupied.',
+    };
+  })();
+
+  // THE UNSAMPLED-OCCLUDER CENSUS (spd-b36). The OTHER way a real occluder
+  // reaches zero in this metric, and the one the invisible census cannot see.
+  //
+  // 'invisible_occluder_census' names the pointer-events:none hole. It is not
+  // the only hole. An occluder with ORDINARY pointer-events is caught by the
+  // ancestry test perfectly — but only where a point is sampled, and the five
+  // scanlines sit at 10/30/50/70/90% of the band, i.e. one fifth of the band
+  // height apart. Horizontal chrome shorter than that spacing can sit squarely
+  // over the reading column and be stepped over by every line.
+  //
+  // MEASURED, not reasoned (2026-09-10, deployed guerrilla, viewport 1280x900,
+  // /studio/paper/epic-paper-beauty-reference-wave-2026-07-31, band 146-899):
+  //   .bp-bulk-action-bar, summoned for real by ticking one list-pane checkbox
+  //   while the paper surface stayed open — position:fixed, z-index 50,
+  //   pointer-events AUTO, rect top 830 h 50, overlapping 422.6px of the
+  //   content width and 50px of the band — was topmost at 0 of 240 sampled
+  //   points, and the row still read visible 240/240. The 0.9 line sits at
+  //   823.7, six pixels above the bar's top edge.
+  //   .bp-paper-format, summoned by a right-click inside the surface, likewise:
+  //   115.5px x 26px over the band, topmost at 0 of 240 points.
+  // Neither appears in 'invisible_occluder_census' — their pointer-events are
+  // auto, so that census correctly excludes them — and neither moves any
+  // figure. Two REAL, concurrent, user-summonable occluders, counted by
+  // nothing.
+  //
+  // THIS CENSUS CHANGES NO NUMBER EITHER (D81). Subtracting it would be the
+  // wrong remedy twice over: the band-overlap rectangle is not the occluded
+  // WIDTH of the reading line (the metric measures a column, not an area), and
+  // raising the scan density to catch a 9px bubble would multiply the cost of
+  // every row for chrome that does not narrow the column. What was missing was
+  // not a subtraction — it was any statement at all that these existed.
+  const unsampledOccluderCensus = (() => {
+    const classify = ${classifyUnsampledCandidate};
+    const band = { contentLeft, contentRight, bandTop, bandBottom };
+    const found = [];
+    const reasons = {};
+    let scanned = 0;
+    for (const el of document.querySelectorAll('*')) {
+      scanned++;
+      const r = el.getBoundingClientRect();
+      // Cheap rejects first, deliberately: getComputedStyle on every node of a
+      // 100-row desk is the expensive half and the rect throws away almost all
+      // of them before it is reached.
+      if (r.width <= 0 || r.height <= 0) continue;
+      const ox = Math.min(contentRight, r.right) - Math.max(contentLeft, r.left);
+      const oy = Math.min(bandBottom, r.bottom) - Math.max(bandTop, r.top);
+      if (ox <= 0 || oy <= 0) continue;
+      const surfaceRelated = el.contains(surface) || surface.contains(el) || el === surface;
+      let containsSampled = false;
+      if (!surfaceRelated && !naturalSampledTopmost.has(el)) {
+        for (const t of naturalSampledTopmost) { if (el.contains(t)) { containsSampled = true; break; } }
+      }
+      const cs = getComputedStyle(el);
+      const v = classify({
+        rect: { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height },
+        band,
+        pointer_events: cs.pointerEvents,
+        visibility: cs.visibility,
+        display: cs.display,
+        opacity: cs.opacity,
+        surface_related: surfaceRelated,
+        sampled: naturalSampledTopmost.has(el),
+        contains_sampled: containsSampled,
+      });
+      reasons[v.reason] = (reasons[v.reason] || 0) + 1;
+      if (!v.residue) continue;
+      found.push({
+        tag: el.tagName.toLowerCase(),
+        class_name: typeof el.className === 'string' ? el.className.slice(0, 120) : null,
+        position: cs.position,
+        z_index: cs.zIndex,
+        pointer_events: cs.pointerEvents,
+        overlap_over_content_px: round(v.overlap_over_content_px),
+        overlap_height_px: round(v.overlap_height_px),
+      });
+    }
+    return {
+      elements_scanned: scanned,
+      count: found.length,
+      elements: found.slice(0, 12),
+      truncated: found.length > 12,
+      // A zero census that cannot say WHY every candidate was rejected is
+      // indistinguishable from a census whose predicate never ran.
+      reject_reasons: reasons,
+      scanline_spacing_px: round(bandHeight > 2 ? bandHeight * 0.2 : 0),
+      band_height_px: round(bandHeight),
+      sampled_topmost_count: naturalSampledTopmost.size,
+      note:
+        'Elements that PAINT, whose pointer-events are NOT none, whose rect overlaps the measured ' +
+        'band, and which were topmost at NONE of the points the natural sample actually probed. The ' +
+        'ancestry test would have counted every one of them had a scanline crossed it; the five lines ' +
+        'sit scanline_spacing_px apart, so horizontal chrome shorter than that can be stepped over ' +
+        'entirely. This is a census, never a correction (D81): a nonzero count is a prompt to look at ' +
+        'the row, not a defect by itself. Elements that CONTAIN a sampled winner are excluded — the ' +
+        'point landed on their own paint, through a child.',
+    };
+  })();
 
   // Snapshot BEFORE injecting, as STRINGS. getComputedStyle returns a LIVE
   // object: holding one and reading it after the restore would compare the page
@@ -2224,6 +2517,9 @@ async (faceOverride) => {
         'full-height overlay moves every line together and must not be diluted. scanline_spread carries ' +
         'the min, the max and the disagreement so nothing is hidden by the choice.',
       non_vacuity: nonVacuity,
+      scrim_selector_identity: scrimSelectorIdentity,
+      invisible_occluder_census: invisibleOccluderCensus,
+      unsampled_occluder_census: unsampledOccluderCensus,
       restore: restoreCheck,
     },
     measure_note:
@@ -2827,11 +3123,70 @@ export const OPEN_CONTROLS = [
   { selector: '[data-test-id="sidebar-dismiss"]',      grammar: 'the SAME button under its Tier-3 destination spelling (#5014, components.ex:425)' },
 ];
 
+// ── did that click LAND? (charter D184's 1440 wide-bucket no-op) ─────────────
+//
+// THE OBSERVATION. Once in four full sweeps against `bc64d869a`, three real
+// clicks at 1440 never produced `[data-user-opened]`: the aside sat at
+// `width_px 41, left_px 1399, user_opened false, bucket "wide"` — the collapsed
+// rail. The filing read that as "click 1 collapsed the 300px default and clicks
+// 2-3 no-opped against an already-collapsed rail", i.e. the desk refusing to
+// re-open from collapsed.
+//
+// THE HANDLER SOURCE REFUTES THAT SECOND HALF, and the refutation is total, not
+// a judgement call. `Handlers.Paper.sidebar_toggle_panel/1`
+// (studio_live/handlers/paper.ex:198-206) is:
+//
+//     open?           = sidebar_open == true
+//     asked?          = sidebar_user_opened == true
+//     wide?           = width_bucket in [nil, "wide"]
+//     painted_closed? = open? and not asked? and not wide?
+//     next_open?      = if painted_closed?, do: true, else: not open?
+//     assign(sidebar_open: next_open?, sidebar_user_opened: next_open?)
+//
+// `sidebar_user_opened` is assigned the SAME value as `sidebar_open` on every
+// pass, and at `wide` the branch is a pure alternator. Enumerate all four entry
+// states and the marker is stamped in at most TWO clicks from every one of
+// them — there is no assign combination in which a collapsed rail declines to
+// re-open. A three-click failure therefore PROVES that at least two of the
+// three clicks never reached the handler at all: they were swallowed (a
+// re-render swapping the button node under the pointer, a socket that had not
+// finished joining), not answered with "no".
+//
+// AND THE OLD LOOP COULD NOT TELL. It captured `after` on every iteration and
+// then read exactly one field of it, `after.user_opened`. A click that
+// transitioned the rail 300px -> 41px and a click that changed NOTHING both
+// counted as one unit of the three-click budget and both produced the identical
+// skip. So a single transient swallow spent a third of the budget, and the
+// failure text could not say which of the two worlds it was in.
+//
+// This is the seam that closes that: a click is LANDED only if the observable
+// sidebar state moved. Landed clicks spend the toggle budget (they are real
+// steps of a state machine that needs at most two). A no-transition click
+// spends a SEPARATE, bounded swallow allowance — D138 permits bounded retries
+// on this named abort by name — and is reported as such.
+//
+// PURE, and exported, so it is testable without a browser
+// (`scripts/studio-desk-open-leg-swallowed-click.test.mjs`).
+export function classifyOpenClick(before, after) {
+  if (!after) return { outcome: 'sidebar-absent', landed: true };
+  if (after.user_opened) return { outcome: 'user-opened', landed: true };
+  if (!before) return { outcome: 'no-baseline', landed: true };
+  const moved =
+    before.user_opened !== after.user_opened ||
+    before.is_open_class !== after.is_open_class ||
+    before.width_px !== after.width_px ||
+    before.left_px !== after.left_px ||
+    before.transform !== after.transform;
+  if (!moved) return { outcome: 'no-transition', landed: false };
+  if (after.width_px < before.width_px) return { outcome: 'collapsed-by-us', landed: true };
+  return { outcome: 'widened', landed: true };
+}
+
 // EXPORTED for the same reason `compareProvenance` is (see its note): a forcing
 // repro must drive this leg directly against a fixture that renames the control
 // between clicks, because a full authenticated sweep is far too heavy to be the
 // only way to see the D178 fix hold. `scripts/measurements/open-leg-repro.mjs`.
-export async function openInspectorByRealClick(page, { maxClicks = 3, fatal = true } = {}) {
+export async function openInspectorByRealClick(page, { maxClicks = 3, maxSwallowed = 2, fatal = true } = {}) {
   const unreachable = (reason) => {
     if (fatal) dieRetryable('user-opened-marker', reason);
     return { reached: false, skip_reason: reason };
@@ -2867,7 +3222,17 @@ export async function openInspectorByRealClick(page, { maxClicks = 3, fatal = tr
   const before = await observe();
   const clicks = [];
   const spellingsUsed = [];
-  for (let i = 1; i <= maxClicks; i++) {
+  // TWO budgets, not one (D184). `landed` counts clicks the desk ANSWERED — the
+  // real steps of a state machine that needs at most two of them. `swallowed`
+  // counts clicks that moved nothing, which are not toggle steps at all and
+  // must not spend the toggle budget; they get their own bounded allowance,
+  // which is the bounded retry D138 permits on this named abort.
+  let landed = 0;
+  let swallowed = 0;
+  let prev = before;
+  let i = 0;
+  while (landed < maxClicks) {
+    i++;
     // RE-RESOLVE EVERY ITERATION (D178). `firstPresent()` is a non-blocking
     // `.count()` probe across BOTH spellings — it never auto-waits, so a control
     // that is gone is answered in milliseconds instead of after a 10s timeout
@@ -2889,11 +3254,14 @@ export async function openInspectorByRealClick(page, { maxClicks = 3, fatal = tr
     await page.waitForTimeout(150);
     await waitForDeskSettled(page);
     const after = await observe();
-    clicks.push({ click: i, control: now.selector, after });
+    const verdict = classifyOpenClick(prev, after);
+    clicks.push({ click: i, control: now.selector, outcome: verdict.outcome, landed: verdict.landed, after });
     if (after?.user_opened) {
       return {
         reached: true,
         clicks_needed: i,
+        clicks_landed: landed + 1,
+        clicks_swallowed: swallowed,
         control: now.selector,
         grammar: now.grammar,
         controls_clicked: spellingsUsed,
@@ -2911,13 +3279,39 @@ export async function openInspectorByRealClick(page, { maxClicks = 3, fatal = tr
           : 'one click: below the wide bucket the panel is painted closed, so a click means OPEN.',
       };
     }
+    if (verdict.landed) {
+      landed++;
+    } else {
+      swallowed++;
+      if (swallowed > maxSwallowed) break;
+      // A swallowed click means the desk was mid-render or mid-join under the
+      // pointer. Give it a settle before spending the allowance again.
+      await page.waitForTimeout(400);
+      await waitForDeskSettled(page);
+    }
+    prev = after;
   }
+  const swallowedVerdict = swallowed > 0
+    ? `${swallowed} of those ${i} click(s) moved NOTHING observable on .bp-doc-sidebar (no change to ` +
+      `data-user-opened, .is-open, width, left or transform), so they never reached ` +
+      `Handlers.Paper.sidebar_toggle_panel/1 — the desk did not answer "no", it did not answer at ` +
+      `all. That is a SWALLOWED click (a re-render swapping the button under the pointer, or a socket ` +
+      `still joining), not the desk refusing to re-open` +
+      (swallowed > maxSwallowed
+        ? `, and the bounded allowance of ${maxSwallowed} was exhausted.`
+        : '.')
+    : `every one of those ${i} click(s) LANDED (the rail moved each time) and the marker still never ` +
+      `appeared. sidebar_toggle_panel/1 assigns sidebar_user_opened the SAME value as sidebar_open on ` +
+      `every pass and alternates at the wide bucket, so the marker is reachable in at most TWO landed ` +
+      `clicks from any entry state — landed clicks that do not stamp it are a DESK finding, not this ` +
+      `harness running out of budget.`;
   return unreachable(
-    `INSTRUMENT FAILURE — ${maxClicks} real clicks on ${[...new Set(spellingsUsed)].join(' then ')} ` +
+    `INSTRUMENT FAILURE — ${i} real clicks on ${[...new Set(spellingsUsed)].join(' then ')} ` +
+    `(${landed} landed, ${swallowed} swallowed; budget ${maxClicks} landed + ${maxSwallowed} swallowed) ` +
     `never produced [data-user-opened] on .bp-doc-sidebar. The harness never reached the user-opened ` +
     `state, so it has NO user-opened measurement to report — this is not a desk fact and must not be ` +
-    `recorded as one (D97).\n\n  What it saw after each click:\n` +
-    clicks.map((c) => `      click ${c.click} (${c.control}): ${JSON.stringify(c.after)}`).join('\n'));
+    `recorded as one (D97).\n\n  VERDICT: ${swallowedVerdict}\n\n  What it saw after each click:\n` +
+    clicks.map((c) => `      click ${c.click} (${c.control}) [${c.outcome}]: ${JSON.stringify(c.after)}`).join('\n'));
 }
 
 // ── dismissal, the destination, and the round trip ───────────────────────────
@@ -3090,14 +3484,113 @@ const ROUND_TRIP_FIELDS = [
  * each width's baseline is the desk as the previous round trip left it. Drift
  * that ACCUMULATES across trips shows up as a widening delta instead of being
  * reset away by a fresh load at every step.
+ *
+ * ...AND THAT SAME NO-RELOAD DESIGN IS EXACTLY WHY THE OPEN LEG NEEDS A GUARD.
+ * See `seededOpenCarryOver` below: a post-dismiss baseline is a CLOSED panel,
+ * and at a wide width a closed panel is not the state this leg claims to be
+ * measuring.
  */
-async function runRoundTrip(page, measureFace, run) {
+
+/**
+ * THE SEEDED-OPEN CARRY-OVER REFUSAL (D97) — one wide-bucket width where the
+ * before-leg measured a panel that was ALREADY CLOSED when the width started.
+ *
+ * THE OBSERVATION THAT FORCED IT. In the committed round-2 artefacts
+ * (`scripts/measurements/spd-bracketed-deployed-run{1,2}-2026-07-22.json`) the
+ * round trip records `open_clicks: 2` at 1440 and `open_clicks: 1` at 1280 —
+ * both wide-bucket widths, in the same descending pass, in BOTH runs. At the
+ * wide bucket the panel is genuinely open in the seeded default, so the first
+ * real click CLOSES it and only the second reaches `[data-user-opened]`; that
+ * is what `open_clicks: 2` means and it is what `openInspectorByRealClick`'s
+ * own note says. Reaching the marker in ONE click at a wide width is therefore
+ * only possible from an ALREADY-CLOSED panel — here, the panel the 1440 leg's
+ * own dismiss left behind, inherited by 1280 because this sweep never reloads.
+ *
+ * WHY IT IS AN INSTRUMENT FAILURE AND NOT A NUMBER. The 1280 `before` in those
+ * artefacts reads `content_px: 640` — the CLOSED-panel column — while the
+ * matrix rows for the same width describe the panel OPEN at 599px. Both figures
+ * are real; they are readings of DIFFERENT STATES, and the round-trip cell
+ * labels the closed one as the width's baseline. A +44px "drift" filed off that
+ * cell (spd-w13-1280-prior-observations-stale, PR #16309) was this carry-over,
+ * not the desk. That is precisely the confound `bucket_precondition` already
+ * refuses on the tier axis, one axis over: a cell whose two legs describe
+ * different states is no evidence about round-trip fidelity.
+ *
+ * WHY REFUSE RATHER THAN RE-SEED. The row that filed this allowed either. A
+ * re-seed (reload per width, or a corrective re-open) changes the PROTOCOL this
+ * pass exists to run — `no reload at any point`, so accumulating drift widens
+ * instead of resetting (D110) — and a corrective click would have to be
+ * distinguished, in the artifact, from the desk's own clicks. Refusing the one
+ * affected width costs one cell, changes no protocol, and states the finding by
+ * name. It is the cheaper and the honest catch.
+ *
+ * WHY IT DOES NOT `die()`. D138: a mid-sweep abort writes ZERO bytes, which is
+ * an instrument failure rather than a desk fact. This reports — a named warning,
+ * a machine-readable record on the run, the width withdrawn from `cells`, and
+ * `returns_bit_identical` forced false because coverage is part of the claim.
+ *
+ * WHY THE LOOP SELF-HEALS. The refusal is taken AFTER the open leg and instead
+ * of the dismiss, so the width leaves the panel OPEN — the seeded default. The
+ * next wide width therefore needs its two clicks again and is measured normally:
+ * one carry-over refuses one width, never a cascade.
+ *
+ * The band is read RAW (`bandNameFor(window.innerWidth)`, via
+ * `preBefore.expected_raw_band`) and not from the requested viewport or the
+ * page's own stamp, for the reason `bucketPrecondition` gives: a stamp mirror
+ * agrees by construction in exactly the dead-band case.
+ */
+export function seededOpenCarryOver({ viewport_px, raw_band, open_clicks }) {
+  if (raw_band !== 'wide') return null;
+  if (open_clicks !== 1) return null;
+  return {
+    id: 'seeded-open-carry-over',
+    instrument_failure: true,
+    viewport_px,
+    raw_band,
+    open_clicks,
+    expected_open_clicks: 2,
+    message:
+      `INSTRUMENT FAILURE (seeded-open carry-over) at viewport ${viewport_px}px — this says NOTHING ` +
+      `about the desk's layout. The open leg reached [data-user-opened] in ONE real click at a ` +
+      `"${raw_band}"-bucket width. At the wide bucket the seeded default is OPEN, so the first ` +
+      `click CLOSES the panel and two clicks are required; one click is only reachable from a panel ` +
+      `that was ALREADY CLOSED when this width started — the state the previous width's dismiss ` +
+      `left behind, inherited because this pass never reloads. The "before" this width captured is ` +
+      `therefore a CLOSED-panel reading labelled as the seeded default, so no round_trip cell is ` +
+      `written for ${viewport_px}px and returns_bit_identical cannot be claimed for this run. ` +
+      `Witnessed in BOTH committed round-2 deployed artefacts under scripts/measurements/ — ` +
+      `open_clicks 2 at 1440 and 1 at 1280, with a 1280 before-leg of content_px 640 (the closed ` +
+      `column) where the matrix for that width reads 599. The block comment on ` +
+      `seededOpenCarryOver names the two files; they are not named here because a dated literal in ` +
+      `live code is a target with an expiry date (studio-desk-default-doc.test.mjs).`,
+  };
+}
+
+/**
+ * Impure edges by injection (same reason `openInspectorByRealClick` is exported
+ * and for the same test): the seeded-open refusal above is a property of THIS
+ * loop's control flow — which width is skipped, which cells are not counted,
+ * what the rollup then refuses to claim — and none of that is provable by
+ * calling a predicate. `scripts/studio-desk-roundtrip-carry-over.test.mjs`
+ * drives this function with the four page-touching edges replaced by replays of
+ * the 2026-07-22 artefacts. A full authenticated sweep against a deployed desk
+ * cannot be the only way to see the guard hold.
+ */
+export async function runRoundTrip(page, measureFace, run, {
+  widths: sweepWidths = WIDTHS,
+  faces: sweepFaces = FACES,
+  settle = waitForDeskSettled,
+  readStamp = readBucketStamp,
+  open = openInspectorByRealClick,
+  dismiss = dismissInspectorByRealClick,
+} = {}) {
   const widths = [];
+  const refusedWidths = [];
   let cells = 0, identicalCells = 0, cellsWithdrawn = 0;
 
-  for (const width of WIDTHS) {
+  for (const width of sweepWidths) {
     await page.setViewportSize({ width, height: 900 });
-    await waitForDeskSettled(page);
+    await settle(page);
 
     // D171/D185 INSIDE THIS LOOP, not only in the two-state sweep — and this is
     // the leg that needs it most. Every observed row until now came from the
@@ -3106,18 +3599,18 @@ async function runRoundTrip(page, measureFace, run) {
     // the shape the widen dead-band ambushes. The baseline is checked before the
     // trip, and again after the dismiss, because a bucket that moved DURING the
     // trip would make the before/after comparison a comparison of two tiers.
-    const stampBefore = await readBucketStamp(page);
+    const stampBefore = await readStamp(page);
     const preBefore = recordBucketPrecondition(
       run, `round-trip baseline at viewport ${width}px`,
       bucketPrecondition(width, stampBefore.real_inner_width, stampBefore.width_bucket_stamped));
 
     const before = {};
-    for (const face of FACES) before[face.id] = await measureFace(face);
+    for (const face of sweepFaces) before[face.id] = await measureFace(face);
 
     // Non-fatal here BY DESIGN — see the note on openInspectorByRealClick. A
     // width whose toggle cannot be reached costs this pass and nothing else;
     // the matrix rows already collected survive and still reach disk.
-    const opened = await openInspectorByRealClick(page, { fatal: false });
+    const opened = await open(page, { fatal: false });
     if (!opened.reached) {
       return {
         ran: false,
@@ -3132,7 +3625,35 @@ async function runRoundTrip(page, measureFace, run) {
       };
     }
 
-    const dismissed = await dismissInspectorByRealClick(page);
+    // THE SEEDED-OPEN CARRY-OVER REFUSAL. Taken here — after the open leg has
+    // told us how many clicks the marker cost, and INSTEAD of the dismiss, so
+    // the width leaves the panel open and the next one self-heals.
+    const carryOver = seededOpenCarryOver({
+      viewport_px: width,
+      raw_band: preBefore.expected_raw_band,
+      open_clicks: opened.clicks_needed,
+    });
+    if (carryOver) {
+      run.warnings.push(carryOver.message);
+      (run.seeded_open_carry_over ??= []).push(carryOver);
+      refusedWidths.push(width);
+      widths.push({
+        viewport_px: width,
+        open_clicks: opened.clicks_needed,
+        refused_for_seeded_open_carry_over: carryOver,
+        bucket_precondition_ok: preBefore.bucket_precondition_ok,
+        expected_raw_band: preBefore.expected_raw_band,
+        real_inner_width: preBefore.real_inner_width,
+        bucket_precondition_before: preBefore,
+        faces: [],
+        before_raw: Object.fromEntries(sweepFaces.map((f) => [
+          f.id, Object.fromEntries(ROUND_TRIP_FIELDS.map(([n, g]) => [n, g(before[f.id])])),
+        ])),
+      });
+      continue;
+    }
+
+    const dismissed = await dismiss(page);
     if (!dismissed.dismissed) {
       return {
         ran: false,
@@ -3143,9 +3664,9 @@ async function runRoundTrip(page, measureFace, run) {
               'matrix and every other pass in this run are unaffected.',
       };
     }
-    await waitForDeskSettled(page);
+    await settle(page);
 
-    const stampAfter = await readBucketStamp(page);
+    const stampAfter = await readStamp(page);
     const preAfter = recordBucketPrecondition(
       run, `round-trip post-dismiss at viewport ${width}px`,
       bucketPrecondition(width, stampAfter.real_inner_width, stampAfter.width_bucket_stamped));
@@ -3165,7 +3686,7 @@ async function runRoundTrip(page, measureFace, run) {
       preBefore.bucket_precondition_ok && preAfter.bucket_precondition_ok;
 
     const faces = [];
-    for (const face of FACES) {
+    for (const face of sweepFaces) {
       const after = await measureFace(face);
       const diffs = [];
       for (const [name, get] of ROUND_TRIP_FIELDS) {
@@ -3214,6 +3735,11 @@ async function runRoundTrip(page, measureFace, run) {
     });
   }
 
+  // The grammar rollups speak only for widths that actually completed a trip: a
+  // refused width has no dismiss leg, and listing it with a null control would
+  // publish a coverage this pass does not have (D183, same rule).
+  const measuredWidths = widths.filter((w) => !w.refused_for_seeded_open_carry_over);
+
   return {
     ran: true,
     protocol: 'default -> open -> dismiss, on the SAME page instance, no reload at any point',
@@ -3224,15 +3750,15 @@ async function runRoundTrip(page, measureFace, run) {
     // toggle, while every destination width (900 and below) dismisses via the
     // purpose-built [data-test-id="sidebar-dismiss"] that #5086 shipped. The
     // per-width data was always here; the defect was a summary that hid it.
-    dismiss_grammar_by_width: widths.map((w) => ({
+    dismiss_grammar_by_width: measuredWidths.map((w) => ({
       viewport_px: w.viewport_px,
       control: w.dismiss_control,
       grammar: w.dismiss_grammar,
     })),
-    dismiss_controls_used: [...new Set(widths.map((w) => w.dismiss_control))].map((control) => ({
+    dismiss_controls_used: [...new Set(measuredWidths.map((w) => w.dismiss_control))].map((control) => ({
       control,
-      grammar: widths.find((w) => w.dismiss_control === control)?.dismiss_grammar ?? null,
-      widths_px: widths.filter((w) => w.dismiss_control === control).map((w) => w.viewport_px),
+      grammar: measuredWidths.find((w) => w.dismiss_control === control)?.dismiss_grammar ?? null,
+      widths_px: measuredWidths.filter((w) => w.dismiss_control === control).map((w) => w.viewport_px),
     })),
     dismiss_grammar_note:
       'BY WIDTH, never one scalar. "Returned bit-identical after a toggle re-click" and "returned ' +
@@ -3252,7 +3778,16 @@ async function runRoundTrip(page, measureFace, run) {
     cells_withdrawn_for_bucket_precondition: cellsWithdrawn,
     widths_withdrawn_for_bucket_precondition:
       widths.filter((w) => !w.bucket_precondition_ok).map((w) => w.viewport_px),
-    returns_bit_identical: cells > 0 && identicalCells === cells && cellsWithdrawn === 0,
+    // COVERAGE IS PART OF THE CLAIM, on this axis too. A width refused for the
+    // seeded-open carry-over wrote no cell at all, so the survivors could agree
+    // perfectly and the headline would read true over a sweep that skipped the
+    // width the finding is about.
+    widths_refused_for_seeded_open_carry_over: refusedWidths,
+    seeded_open_carry_over: widths
+      .filter((w) => w.refused_for_seeded_open_carry_over)
+      .map((w) => w.refused_for_seeded_open_carry_over),
+    returns_bit_identical:
+      cells > 0 && identicalCells === cells && cellsWithdrawn === 0 && refusedWidths.length === 0,
     widths,
     note:
       'Bit-identical means EVERY compared field matched exactly — not "within tolerance". These are ' +
@@ -3787,6 +4322,30 @@ async function main() {
               `and look like good news. Re-sync the selector; do not publish this matrix.`);
         }
 
+        // ── SELECTOR IDENTITY IS FATAL TOO, and for a strictly different
+        //    reason than the guard above. The guard dies when the injected rule
+        //    has NO effect; this dies when the rule names the wrong thing while
+        //    still having one. The wrong-but-real mutation of 2026-09-10 passed
+        //    the guard, the positive control AND the restore check — three
+        //    greens over an injection that missed the pseudo in 18 rows. Only a
+        //    read of the served stylesheet catches that, so it is read.
+        const ident = classifyScrimSelectorIdentity(rec.occlusion?.scrim_selector_identity);
+        if (ident.fatal) {
+          die(`SCRIM SELECTOR IDENTITY FAILED at viewport ${width}px, state "${stateId}", face ${face.id} ` +
+              `— verdict ${ident.verdict}.\n\n  ${ident.reason}\n\n` +
+              `  The injected rule is:\n    ${rec.occlusion.restore.injected_rule}\n\n` +
+              `  This is NOT the non-vacuity guard. That one asks whether the injection moved the ` +
+              `hit-test; a rule naming the WRONG real selector can move it and still measure the wrong ` +
+              `box. Re-sync SCRIM_SELECTOR with root.html.heex's scrim GENERATOR — the rule that ` +
+              `declares content, not one of the four that declare content:none — and do not publish ` +
+              `this matrix.`);
+        }
+        if (ident.verdict === 'unknown') {
+          run.warnings.push(
+            `selector identity UNKNOWN at viewport ${width}px, state "${stateId}", face ${face.id}: ` +
+            ident.reason);
+        }
+
         // ── RESTORE MUST BE BYTE-IDENTICAL. This harness mutates a live page it
         //    then keeps measuring; a mutation it failed to undo is a state THIS
         //    HARNESS INVENTED, silently inherited by every row after it.
@@ -4207,10 +4766,41 @@ export function summariseNonVacuity(run) {
     }
   }
 
+  // ── WHAT THE GUARD CAN EVER COVER, stated as a fraction rather than left to
+  //    be inferred from a green (spd-scrim-guard-real-but-wrong-selector-
+  //    untested). The guard has an opinion ONLY where the scrim RENDERS, and the
+  //    scrim can only render where the inspector overlays the document — i.e.
+  //    never in a `default` row. So the default half of the matrix (27 of 54) is
+  //    UNCOVERED BY CONSTRUCTION, not by accident, and that is exactly where
+  //    D136(ii)'s three failing Georgia cells live. A run that reports
+  //    "21 of 21 passed" is saying something about at most the user-opened half
+  //    and NOTHING about those cells.
+  const defaultRows = hitTested.filter((r) => r.inspector_state === 'default');
+  const defaultApplies = defaultRows.filter((r) => r.occlusion.non_vacuity.guard_applies);
+  const coverage = {
+    hit_tested_rows: hitTested.length,
+    default_state_rows: defaultRows.length,
+    default_state_rows_where_guard_applies: defaultApplies.length,
+    rows_where_guard_applies: applies.length,
+    statement:
+      `The guard applied in ${applies.length} of ${hitTested.length} hit-tested rows and in ` +
+      `${defaultApplies.length} of ${defaultRows.length} default-state rows. A default row has no ` +
+      `scrim to detect, so the guard is structurally incapable of covering it — the default half of ` +
+      `the matrix is uncovered BY CONSTRUCTION. Whatever this run's pass count is, it does NOT ` +
+      `validate D136(ii)'s three failing Georgia cells, which are default-state cells.`,
+    history:
+      'The task that added this block quotes an earlier sweep at 21 of 54 rows covered and ZERO ' +
+      'default-state rows. On served sha 4889e332 (2026-09-10) the measured figure was 0 of 54: ' +
+      'D170/D175 suppressed the scrim in every remaining bucket, so no real row renders one at all ' +
+      'and only --positive-control can exercise the guard. Both numbers make the same point — the ' +
+      'covered fraction is a MINORITY of the matrix and never includes a default row.',
+  };
+
   return {
     applies_in_rows: applies.length,
     passed_in_rows: passed.length,
     hit_tested_rows: hitTested.length,
+    coverage,
     scrim_host_present_in_rows: hostPresent,
     scrim_renders_in_rows: scrimRenders,
     vacuous: applies.length === 0,
@@ -4224,6 +4814,72 @@ export function summariseNonVacuity(run) {
       : 'Where the scrim renders, forcing its pointer-events moved the hit-test; the dimming ' +
         'figures in those rows are derived from a rule that actually matches the deployed CSS.',
   };
+}
+
+/**
+ * SELECTOR IDENTITY, CLASSIFIED — the check the non-vacuity guard is not.
+ *
+ * WHY IT EXISTS. The non-vacuity guard proves the injected rule MOVED THE
+ * HIT-TEST. Mutation-proven 2026-09-10: swap SCRIM_SELECTOR for the b29 scrim
+ * SUPPRESSOR — a real, verbatim, same-host, same-pseudo rule from
+ * root.html.heex — and the run exits 0, writes all 54 rows, and the positive
+ * control still says `guard_passed: true`, while the injection silently misses
+ * the pseudo in every user-opened row. Effect is not identity. This reads the
+ * SHIPPED stylesheet and asks the other question: does this constant name a rule
+ * that GENERATES the scrim box?
+ *
+ * PURE, so all four verdicts can be exercised in milliseconds without a browser,
+ * a box or an admin token — the same reason `compareProvenance` is pure.
+ *
+ * `unknown` IS NOT `absent`. A scan that could read no stylesheet at all has
+ * measured nothing; reporting that as "the selector is gone" would be a false
+ * red manufactured out of an empty read.
+ */
+export function classifyScrimSelectorIdentity(scan) {
+  if (!scan || typeof scan !== 'object') {
+    return { verdict: 'unknown', fatal: false, matched_rules: 0, generator_rules: 0,
+             reason: 'no identity scan in this record — an older artifact, or a row measured before ' +
+                     'the scan existed. Nothing was read, so nothing is claimed.' };
+  }
+  if (!scan.scan_readable) {
+    return { verdict: 'unknown', fatal: false, matched_rules: 0, generator_rules: 0,
+             reason: `no stylesheet was readable (${scan.sheets_unreadable ?? '?'} of ` +
+                     `${scan.sheets_total ?? '?'} threw on .cssRules), so the selector was neither ` +
+                     'confirmed nor refuted. An empty read is not evidence of absence.' };
+  }
+  const rules = Array.isArray(scan.matched_rules) ? scan.matched_rules : [];
+  if (rules.length === 0) {
+    return { verdict: 'absent', fatal: true, matched_rules: 0, generator_rules: 0,
+             reason: `${scan.sheets_readable} readable stylesheet(s) were scanned and NOT ONE rule ` +
+                     `has the selector ${scan.selector}. The constant no longer names anything the ` +
+                     'box serves: the injected pointer-events rule is a no-op and every dimming ' +
+                     'figure derived from it is a silent zero.' };
+  }
+  // A rule GENERATES the box only if it declares `content` to something that
+  // generates one. `content: none` is the suppression idiom root.html.heex uses
+  // in four separate places — a selector that names one of those is a selector
+  // that names the OFF switch, which is precisely the wrong-but-real drift.
+  const generates = (r) => {
+    if (!r.content_declared) return false;
+    const v = String(r.content_value ?? '').trim();
+    return v !== '' && v !== 'none' && v !== 'normal';
+  };
+  const generators = rules.filter(generates);
+  if (generators.length === 0) {
+    return { verdict: 'not-a-generator', fatal: true, matched_rules: rules.length, generator_rules: 0,
+             reason: `${rules.length} rule(s) carry the selector ${scan.selector}, but none of them ` +
+                     'generates a box: ' +
+                     rules.map((r) => r.content_declared ? `content:${r.content_value}` : 'no content declaration')
+                          .join(' | ') +
+                     '. The constant names a SUPPRESSOR (or a rule that only tweaks the pseudo), not ' +
+                     'the scrim generator, so forcing pointer-events on it proves nothing about the ' +
+                     'scrim this instrument claims to be subtracting.' };
+  }
+  return { verdict: 'generator', fatal: false, matched_rules: rules.length,
+           generator_rules: generators.length,
+           reason: `${generators.length} of ${rules.length} rule(s) with this selector declare a ` +
+                   'generated box, so the constant names the shipped scrim generator itself — not ' +
+                   'merely something with a hit-test effect.' };
 }
 
 /** The order the human table walks its states: DERIVED FROM THE ROWS, with the

@@ -27,8 +27,9 @@ defmodule Barkpark.Content.DedupWall do
       lexical near-match is a real duplication signal.
 
   So a document scores purely on **title + tag-name token overlap** (Jaccard over
-  the combined token set), and the trgm `similarity()` idiom
-  (search/documents_retriever.ex) fetches the candidate set cheaply.
+  the combined token set), and a KNN trgm index scan (`title <-> $1` over
+  `documents_title_trgm_gist_idx`) fetches the candidate set in BOUNDED time —
+  exactly `@candidate_limit` rows read, whatever the corpus holds.
 
   ## When the gate cannot run: it SAYS SO (it does not silently pass)
 
@@ -103,10 +104,19 @@ defmodule Barkpark.Content.DedupWall do
   # duplicate shares many words. Below this floor a high score drops to ADVISE.
   @min_refuse_shared 3
 
-  # Coarse trgm pre-filter for the candidate FETCH only (documents_retriever.ex
-  # `similarity()` idiom). A cheap net over the title; the precise token-Jaccard
-  # below is the real decision. Low on purpose — over-fetch, then score down.
+  # Coarse trgm floor for the candidate FETCH only. A cheap net over the title;
+  # the precise token-Jaccard below is the real decision. Low on purpose —
+  # over-fetch, then score down. It is applied to the @candidate_limit rows the
+  # KNN index scan returns, NOT as a scan predicate: as a predicate it bounded
+  # nothing (see `do_fetch_candidates/6`).
   @candidate_trgm_floor 0.1
+
+  # HARD SCAN CAP, not just a result cap. Paired with the `<->` ORDER BY and
+  # `documents_title_trgm_gist_idx` (migration 20260910100000) this is the
+  # number of rows Postgres READS, at every corpus size. Under the old `%` +
+  # `ORDER BY similarity()` shape it capped only the OUTPUT while the sort input
+  # grew linearly with the corpus — the mechanism behind
+  # `pds-bl-dedup-wall-scan-budget-blows-at-corpus-scale`.
   @candidate_limit 500
 
   # The candidate scan's own budget, on the transaction AND every query inside
@@ -137,6 +147,120 @@ defmodule Barkpark.Content.DedupWall do
   @doc "Default thresholds, exposed so callers/tests share one source of truth."
   @spec thresholds() :: %{refuse: float(), advise: float(), min_refuse_shared: non_neg_integer()}
   def thresholds, do: %{refuse: @refuse, advise: @advise, min_refuse_shared: @min_refuse_shared}
+
+  # ── The publish-scope serialization lock (acrc-dedup-toctou-serialize) ──────
+  #
+  # THE RACE THIS EXISTS FOR is NOT the same-row one `Lifecycle.lock_published_row/2`
+  # closes (#17244, `FOR UPDATE` on the INCUMBENT). It is the CROSS-doc_id one:
+  # two publishes carrying DIFFERENT doc_ids and near-duplicate titles, in the
+  # same (type, workspace, dataset) scope. Each excludes its OWN id from the
+  # candidate scan (`where: d.doc_id != ^incumbent`) and neither is committed
+  # when the other looks, so under snapshot isolation BOTH pass E4 and BOTH
+  # commit — a duplicate PAIR that the wall was built to refuse. There is no row
+  # to `FOR UPDATE` (neither exists yet) and no unique index that can express
+  # the predicate (it is a fuzzy trigram+Jaccard verdict; live uniqueness is the
+  # exact `[:doc_id, :type, :dataset_id]` of migration 20260527134000). The only
+  # thing left to serialize on is the SCOPE itself.
+  #
+  # KEY DERIVATION, and why it cannot collide with the task family:
+  #
+  #     hashtext("dedup:" <> type <> ":" <> (workspace_id || "global") <> ":" <> dataset)
+  #
+  # Every other advisory-lock family in this codebase is built by
+  # `Barkpark.Tasks.LockKey` and every one of its strings starts with `task:`,
+  # `task-resources` or `listener:` (`lib/barkpark/tasks/lock_key.ex`), and
+  # `BlockOps.upsert_blocks_doc/3`'s non-paper leg takes `"<type>:<slug>"`
+  # (today `session:…`). A `dedup:`-prefixed string is in NONE of those sets, so
+  # the two lock families are disjoint by prefix: a `Tasks.Internal.fenced_content_write`
+  # holding `task:<uuid>` never blocks a publish, and a publish never blocks it.
+  # `hashtext` collisions are possible in principle (it is a 32-bit hash) and
+  # harmless in kind: the worst case is two unrelated scopes serializing against
+  # each other, i.e. throughput, never correctness.
+  #
+  # The workspace segment is `"global"` for a nil workspace_id because that is
+  # exactly the corpus `Scope.scope_to_workspace_or_global/3` pools: a flat /
+  # Default publish compares against the shared surface, so it must serialize
+  # against the other flat / Default publishes. NOTE THE DELIBERATE ASYMMETRY:
+  # a SCOPED publish reads workspace-OR-global but locks only its own workspace
+  # key, so a scoped publish and a global one do not exclude each other. That is
+  # a residual window, and it is the honest one — locking every scoped publish
+  # against the single global key would serialize the whole corpus.
+  @dedup_lock_prefix "dedup:"
+
+  @doc """
+  The advisory-lock key string for a publish scope. Exposed so tests and the
+  two call sites share ONE derivation — two writers that build the key
+  differently do not exclude each other and NOTHING raises (see
+  `Barkpark.Tasks.LockKey`'s moduledoc for the same failure in the task family).
+  """
+  @spec publish_scope_lock_key(String.t(), String.t(), String.t() | nil) :: String.t()
+  def publish_scope_lock_key(type, dataset, workspace_id) do
+    ws = if is_binary(workspace_id) and workspace_id != "", do: workspace_id, else: "global"
+    @dedup_lock_prefix <> type <> ":" <> ws <> ":" <> to_string(dataset)
+  end
+
+  @doc """
+  Take the publish-scope advisory lock. MUST be called inside an open
+  transaction: `pg_advisory_xact_lock` is released at commit/rollback, so
+  taking it outside one acquires and releases it in the same statement and
+  serializes nothing.
+  """
+  @spec lock_publish_scope!(String.t(), String.t(), keyword()) :: :ok
+  def lock_publish_scope!(type, dataset, opts \\ []) do
+    if scope_lock_enabled?() do
+      key = publish_scope_lock_key(type, dataset, Keyword.get(opts, :workspace_id))
+      _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [key])
+    end
+
+    :ok
+  end
+
+  # THE CONTROL, not a feature flag. A lock is the one kind of fix whose
+  # absence is invisible to every single-process test: with it removed the
+  # suite stays green, because nothing a serial test does can interleave. So
+  # the race harness (`dedup_publish_toctou_test.exs`) needs a way to run its
+  # OWN scenario with the lock off and observe the double-insert — a RED arm
+  # that lives in CI beside the GREEN one instead of in a commit message
+  # nobody can re-run. Default is ON, in every environment; the harness sets
+  # it false for one test and restores it in `on_exit`. It is deliberately NOT
+  # a config knob: no config file sets it, and turning it off in prod would
+  # re-open exactly the TOCTOU this module documents.
+  defp scope_lock_enabled?,
+    do: Application.get_env(:barkpark, :dedup_publish_scope_lock, true) != false
+
+  # TEST-ONLY BARRIER SEAM. The cross-doc_id race needs both publishes to have
+  # PASSED E4 before either commits, and nothing in a serial test can produce
+  # that interleaving on its own. This is where a harness rendezvouses the two:
+  # a `{dataset, phase, fun/0}` triple in the app env, invoked ONLY for the
+  # named dataset (so a concurrently-running async test in another dataset
+  # never touches it) and only in the named PHASE.
+  #
+  # The phase matters, and each arm needs the OTHER one:
+  #
+  #   * `:pre_txn` — the GREEN arm. Both publishes are parked after passing E4
+  #     and before either opens its transaction; releasing them then makes the
+  #     scope lock the only thing standing between two duplicate commits.
+  #   * `:in_txn` — the RED arm, and ONLY valid with the scope lock disabled.
+  #     Both publishes are parked INSIDE their transactions, after the
+  #     re-check, before either commits; releasing them commits both. With the
+  #     lock ENABLED this would deadlock by construction (the parked process
+  #     holds the lock the other is waiting for), which is precisely why it is
+  #     the arm that demonstrates the unserialized double-insert.
+  #
+  # Alternatives rejected: `:erlang.trace` on a private function (binds the
+  # harness to an implementation detail that mix format could rename), and a
+  # `RAISE EXCEPTION` trigger on `documents` (aborts the transaction it is
+  # supposed to pause, so it can never demonstrate a double COMMIT).
+  defp post_check_barrier(result, dataset, opts) do
+    phase = if Keyword.get(opts, :dedup_in_transaction, false), do: :in_txn, else: :pre_txn
+
+    case Application.get_env(:barkpark, :dedup_wall_post_check_barrier) do
+      {^dataset, ^phase, fun} when is_function(fun, 0) -> fun.()
+      _ -> :ok
+    end
+
+    result
+  end
 
   @doc """
   The blocking guard mounted in `Content.Lifecycle.publish_document/4`. Refuses a
@@ -190,7 +314,9 @@ defmodule Barkpark.Content.DedupWall do
         :ok
 
       true ->
-        gate(ref, type, dataset, opts)
+        ref
+        |> gate(type, dataset, opts)
+        |> post_check_barrier(dataset, opts)
     end
   end
 
@@ -383,6 +509,21 @@ defmodule Barkpark.Content.DedupWall do
   # (body, blocks, acceptance criteria …) was pure transfer cost. The trgm
   # predicate and its ordering are untouched — both run on the `title` COLUMN,
   # not on the projection, so the GIN index is still the one doing the work.
+  # THE SCAN'S TRANSACTION IS A BUDGET CARRIER, NOT AN ISOLATION BOUNDARY (see
+  # the comment at its call site). When the caller is ALREADY inside a
+  # transaction — the publish-scope re-check of
+  # `AuthoringWall.recheck_dedup_under_scope_lock/5` — wrapping again would
+  # merely JOIN that transaction (Ecto nests without a savepoint by default),
+  # and a connection death inside it would then escape as an exception rather
+  # than resolving to the `{:degraded, _}` arm. So under `:dedup_in_transaction`
+  # the scan runs bare and the module-level `rescue` (CLIFF B) is what converts
+  # a pool/DB failure into the same fail-LOUD `{:error, {:dedup_unavailable, _}}`
+  # the un-nested path produces.
+  defp run_candidate_scan(query, timeout, false),
+    do: Repo.transaction(fn -> Repo.all(query, timeout: timeout) end, timeout: timeout)
+
+  defp run_candidate_scan(query, timeout, true), do: {:ok, Repo.all(query, timeout: timeout)}
+
   defp fetch_candidates(ref, type, dataset, opts) do
     title = field_str(ref, :title)
     timeout = Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms)
@@ -415,15 +556,30 @@ defmodule Barkpark.Content.DedupWall do
         where: d.status == "published",
         # Same-id republish never trips — the incumbent can't duplicate itself.
         where: d.doc_id != ^incumbent,
-        # Coarse trgm net over the title. The `%` operator engages the GIN
-        # `documents_title_trgm_idx` (unlike `similarity() > x`, which can only
-        # seq-scan) — the precise token-Jaccard in `assess/3` scores below.
-        where: fragment("? % ?", d.title, ^title),
-        # Deterministic keep: the top-500-BY-SIMILARITY survive the @candidate_limit
-        # cap, so a plan change can never reorder which 500 pass to the scorer. `%`
-        # is `>=` (a safe superset of the old strict `>`) — re-scored downstream.
-        order_by: [desc: fragment("similarity(?, ?)", d.title, ^title)],
-        select: %{doc_id: d.doc_id, title: d.title, tags: fragment("?->'tags'", d.content)},
+        # BOUNDED CANDIDATE SCAN. `<->` is pg_trgm's KNN distance (`1 -
+        # similarity`), so ordering ASCENDING by it is the SAME order as the old
+        # `desc: similarity(...)` — but a `gist_trgm_ops` index can RETURN rows
+        # in that order, so the LIMIT stops the scan instead of merely trimming
+        # its output. The old shape paired a `%` net with `ORDER BY
+        # similarity()`: GIN cannot order, so every row surviving the net was
+        # fetched, scored and top-N heapsorted, and the sort input grew LINEARLY
+        # with the corpus (measured on a seeded corpus of real Barkpark task
+        # titles: 3,410 rows / 203 ms at 20k, 6,749 / 466 ms at 40k, 13,566 /
+        # 729-972 ms at 80k — 2,514 ms on a cold cache, half the 5 s budget).
+        # The index scan below reads exactly @candidate_limit rows at every
+        # corpus size: 500 / 25 ms at 20k, 500 / 43 ms at 40k, 500 / 74-85 ms
+        # at 80k. The row count is FLAT; the residual time growth is GiST page
+        # traversal, ~N^0.5, not the linear scan it replaces.
+        order_by: [asc: fragment("? <-> ?", d.title, ^title)],
+        # `sim` rides along so the floor can be applied to the BOUNDED set in
+        # Elixir (see below) instead of as a scan predicate. Reading it off the
+        # same `<->` the index just computed costs nothing extra.
+        select: %{
+          doc_id: d.doc_id,
+          title: d.title,
+          tags: fragment("?->'tags'", d.content),
+          sim: fragment("1 - (? <-> ?)", d.title, ^title)
+        },
         limit: @candidate_limit
       )
       |> maybe_filter_dataset(dataset)
@@ -444,29 +600,30 @@ defmodule Barkpark.Content.DedupWall do
         Keyword.get(opts, :project_id)
       )
 
-    # CLIFF A: `SET LOCAL` only takes effect INSIDE a transaction — outside one it
-    # is a silent no-op, leaving pg_trgm.similarity_threshold at its 0.3 default,
-    # which would tighten `%` and drop every 0.1–0.3 gray-zone near-duplicate. So
-    # wrap the fetch in an explicit txn and set the threshold FIRST. The literal is
-    # interpolated because SET takes no bind params; @candidate_trgm_floor stays the
-    # single source of truth.
-    result =
-      Repo.transaction(
-        fn ->
-          Repo.query!(
-            "SET LOCAL pg_trgm.similarity_threshold = #{@candidate_trgm_floor}",
-            [],
-            timeout: timeout
-          )
-
-          Repo.all(query, timeout: timeout)
-        end,
-        timeout: timeout
-      )
+    # The txn stays even though nothing inside it needs session state any more:
+    # it is what carries ONE budget over the checkout + the scan, and it is what
+    # turns a pool-checkout death into `{:error, reason}` (the degraded arm)
+    # instead of an escaped exit. `SET LOCAL pg_trgm.similarity_threshold` is
+    # GONE with the `%` operator it configured — `<->` is not threshold-gated,
+    # so setting it would be decoration, and decoration in this module has
+    # already cost one incident (CLIFF A: the same SET outside a txn was a
+    # silent no-op that read as protection).
+    result = run_candidate_scan(query, timeout, Keyword.get(opts, :dedup_in_transaction, false))
 
     case result do
       {:ok, rows} ->
-        {:ok, Enum.map(rows, &row_to_ref/1)}
+        # THE FLOOR MOVED, THE SEMANTICS DID NOT. `%` admitted exactly the rows
+        # with `similarity >= @candidate_trgm_floor`; this admits exactly the
+        # same predicate, applied to the 500 rows the index already ranked
+        # highest. It can only ever DROP the tail of an ordered list, so the
+        # candidate set is unchanged wherever the old net returned >= 500 rows,
+        # and a strict superset-by-ordering otherwise. Verified on the seeded
+        # 80k corpus: the two candidate sets were IDENTICAL (0 rows lost, same
+        # 0.1586 minimum similarity, 0 rows admitted below the floor).
+        {:ok,
+         rows
+         |> Enum.filter(&(&1.sim >= @candidate_trgm_floor))
+         |> Enum.map(&row_to_ref/1)}
 
       # A rolled-back txn is a degraded scan, not an empty corpus. Matching
       # `{:ok, _}` alone would have shaped this as a MatchError — the right

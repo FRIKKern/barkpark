@@ -107,6 +107,51 @@ defmodule BarkparkWeb.TasksControllerTest do
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
+  # pds-w27: the byte tripwires must print a REPRODUCIBLE number, and `uniq/1`
+  # cannot give them one. `System.unique_integer([:positive])` climbs through a
+  # run, so its DIGIT COUNT changes — and the tripwires put one id on every one
+  # of 50 cards, so a single extra digit moves the probe by 50 B. Measured on
+  # this file at an unchanged tree: the realistic-mix probe printed 12259 B
+  # twice and then 12209 B on the third run, purely on id width. That is the
+  # same order as the regression the probe exists to catch, so a real +50 B cut
+  # would be indistinguishable from noise.
+  #
+  # `fixed_uniq/2` keeps the uniqueness (the counter is still the id's tail) and
+  # fixes the WIDTH: the card index is zero-padded to 2 and the counter to 9, so
+  # every fixture id is byte-identical run to run. 9 digits is not a guess —
+  # `System.unique_integer/1` is per-VM and a test run does not issue 10^9 of
+  # them; the guard below turns the day it does into a named failure rather than
+  # a silently drifting probe. `assert_fixed_width_ids!/1` pins the property on
+  # the WIRE, so a fixture that quietly reverts to `uniq/1` reds instead of
+  # going back to wobbling.
+  @fixed_uniq_digits 9
+  defp fixed_uniq(prefix, i) do
+    n = System.unique_integer([:positive])
+
+    if n >= 10 ** @fixed_uniq_digits do
+      raise "fixed_uniq/2 counter #{n} exceeds #{@fixed_uniq_digits} digits — " <>
+              "the byte tripwires would start drifting again; widen the pad"
+    end
+
+    pad = &String.pad_leading(Integer.to_string(&1), &2, "0")
+    "#{prefix}-#{pad.(i, 2)}-#{pad.(n, @fixed_uniq_digits)}"
+  end
+
+  # The reproducibility guard the byte probes lean on: every card on the page
+  # carries a doc_id of the SAME byte length, so the printed total cannot move
+  # on id width alone.
+  defp assert_fixed_width_ids!(docs) do
+    widths = docs |> Enum.map(&byte_size(&1["doc_id"])) |> Enum.uniq()
+
+    # `length(widths) == 1` and not `assert [_one] = widths`: a match assertion
+    # raises MatchError and the message below never prints, which is exactly
+    # the diagnosis a future reader of a wobbling probe needs.
+    assert length(widths) == 1,
+           "byte probe is not reproducible: fixture doc_ids have #{length(widths)} " <>
+             "distinct byte lengths (#{inspect(Enum.sort(widths))}) — a ~50 B regression " <>
+             "would be lost in id-length noise; seed ids with fixed_uniq/2"
+  end
+
   # task-e2f5ecca0be9a6d1: bulk fixture for the default-page-size tests. 101
   # rows is one more than the new default, so a bounded page and a complete one
   # are distinguishable by count alone.
@@ -139,6 +184,95 @@ defmodule BarkparkWeb.TasksControllerTest do
       )
 
     doc
+  end
+
+  # ─── The brief card's CONTENT-SOURCE KEY SET, derived from the renderer ──
+  #
+  # task-69ba050120c2c021. A synthetic fixture is frozen at the shape its
+  # author knew; the live card is not. `labels` joined the brief card on
+  # 2026-09-05 and `child_count` before it, and neither rode this fixture —
+  # so the guard below sat at 78% of its budget while the page it exists to
+  # guard sat at 118% of the same budget, and no run could tell.
+  #
+  # The fix is not a longer hand-typed list — that is the same defect with a
+  # later date on it. It is to READ the renderer and ask it which content
+  # keys it consumes. `Params.render_doc/2 :brief` reaches content exactly
+  # twice: `Map.get(content, "<key>")` (eight call sites today) and
+  # `Criteria.progress(content)`. Both are matched here, off the module's own
+  # compile-time source path — not a repo-relative guess, and not a copy.
+  #
+  # WHAT THIS BUYS: a new `put_brief_*/2` that reads a new content key makes
+  # this set GROW, and `assert_brief_keys_covered!/1` below reds by NAME
+  # until the fixture populates it — at which point the measured bytes move.
+  # WHAT IT DOES NOT BUY: keys with no content source. `child_count` and
+  # `dispatch` are computed in `render_brief/3` from batched child counts,
+  # never read off `content`, so they are outside this derivation; the
+  # fixture carries child_count on all 50 cards anyway (it is unconditional,
+  # so it can never ride unmeasured) and `dispatch` on none.
+  defp brief_content_source_keys do
+    source =
+      BarkparkWeb.TasksController.Params.module_info(:compile)
+      |> Keyword.fetch!(:source)
+      |> to_string()
+
+    assert File.exists?(source),
+           "brief renderer source not readable at #{source} — the derivation below " <>
+             "would return an empty set and pass vacuously"
+
+    # From the :brief clause head down to the first shared helper after the
+    # brief block. Symbol-anchored on both ends: line numbers rot, and an
+    # anchor that stopped matching is caught by the non-vacuity floor below.
+    region =
+      source
+      |> File.read!()
+      |> String.split("\n")
+      |> Enum.drop_while(&(not String.contains?(&1, "def render_doc(%Document{} = doc, :brief)")))
+      |> Enum.take_while(
+        &(not String.contains?(&1, "defp put_unless(map, _key, steady, steady)"))
+      )
+      |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#"))
+      |> Enum.join("\n")
+
+    keys =
+      ~r/Map\.get\(content, "([a-z_]+)"\)/
+      |> Regex.scan(region, capture: :all_but_first)
+      |> List.flatten()
+      |> MapSet.new()
+
+    # The one non-`Map.get` content read in the region, pinned to the exact
+    # call: a rename shrinks the set silently otherwise.
+    keys =
+      if String.contains?(region, "Criteria.progress(content)"),
+        do: MapSet.put(keys, "acceptance_criteria"),
+        else: keys
+
+    # NON-VACUITY FLOOR, not a key list. An empty or near-empty set would
+    # make every coverage assertion below trivially true — which is the exact
+    # class of failure this whole derivation exists to end. The floor is the
+    # count measured 2026-09-07 (8 Map.get sites + acceptance_criteria); it
+    # may only ever be RAISED, and it deliberately does not name the keys, so
+    # a rename is caught by the count while an addition is caught by coverage.
+    count = MapSet.size(keys)
+
+    assert count >= 9,
+           "derived brief content-key set collapsed to #{count} key(s) " <>
+             "(#{inspect(Enum.sort(keys))}) — the region anchors in " <>
+             "brief_content_source_keys/0 no longer match the renderer"
+
+    keys
+  end
+
+  # `seeded` is the union of content keys the fixture ACTUALLY wrote, taken
+  # from the maps handed to mk_card_task! — never a second hand-typed list.
+  defp assert_brief_keys_covered!(seeded) do
+    derived = brief_content_source_keys()
+    missing = MapSet.difference(derived, seeded)
+
+    assert MapSet.equal?(missing, MapSet.new()),
+           "the brief card reads content key(s) #{inspect(Enum.sort(missing))} that no " <>
+             "fixture card populates — they ride production unmeasured by the byte " <>
+             "tripwire below. Populate them in the fixture (the bytes will move) or " <>
+             "state in this file why they cannot be reached."
   end
 
   defp authed(conn) do
@@ -378,7 +512,13 @@ defmodule BarkparkWeb.TasksControllerTest do
                "limit" => 100,
                "offset" => 0,
                "returned" => 100,
-               "has_more" => true
+               "has_more" => true,
+               # THE CONTINUATION, not an echo. `offset` says where this page
+               # BEGAN; `next_offset` is the value to send back as the next
+               # request's `?offset=`, and it is present exactly when
+               # `has_more` is true. A `has_more: true` with nothing to page
+               # with is the defect this key exists to close.
+               "next_offset" => 100
              }
     end
 
@@ -427,7 +567,9 @@ defmodule BarkparkWeb.TasksControllerTest do
                "limit" => 2,
                "offset" => 2,
                "returned" => 2,
-               "has_more" => true
+               "has_more" => true,
+               # offset + returned, so the walk advances past what it just read.
+               "next_offset" => 4
              }
     end
 
@@ -447,6 +589,9 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert body["page"]["limit"] == 50
       assert body["page"]["offset"] == 0
       assert body["page"]["has_more"] == true
+      # `Tasks.ready/1` has no keyset axis to seek on, so ready's continuation
+      # is necessarily OFFSET-shaped: 0 + the 50 rows served.
+      assert body["page"]["next_offset"] == 50
     end
   end
 
@@ -602,7 +747,13 @@ defmodule BarkparkWeb.TasksControllerTest do
             "lifecycle_status=open",
             "phase_id=none",
             "label=none",
-            "filter[parent_id]=none"
+            "filter[parent_id]=none",
+            # gr-bl-close-time-audit-vacuous-green: task.ls now DECLARES
+            # `parent`, so run.go ships `?parent=` on every
+            # `bp task ls --parent <epic>`. This line is what the comment above
+            # promises — a new manifest flag whose flat spelling the route did
+            # not accept would red here rather than in prod.
+            "parent=none"
           ] do
         {status, _} = list_ids(conn, qs)
         assert status == 200, "a shipped consumer's param was refused: #{qs}"
@@ -783,6 +934,96 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert message =~ "epoch #{epoch}"
       assert message =~ "bp task close <id> <worker> #{epoch}"
       assert message =~ "Nothing was written"
+    end
+
+    # ── task-07c21ec0d1d43e90: the override is accepted AND RECORDED ────────
+    #
+    # MEASURED on guerrilla in a sandbox row: this exact POST returned
+    # `ok:true, epoch 1` and the raw document read back carried `.claim` keys
+    # exactly [epoch, ts_iso, work_digest, work_field_digests, worker]. The
+    # reason was consumed by the gate and dropped, while two prose surfaces —
+    # the `--set` flag summary and the refusal text — both promised it lands
+    # "on the record".
+    #
+    # This reads the STORED Document through Repo, never the response body: the
+    # response is rendered from the struct the write returned, so it could be
+    # right while the row is wrong.
+    test "the criteria override lands on the STORED claim record and survives the close",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("override-recorded"), scope, %{"acceptance_criteria" => []})
+      reason = "spike: the shape IS the deliverable, criteria would describe not shape it"
+
+      claim_resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/claim",
+          # The `set` shape — what `bp task claim … --set k=v` actually POSTs.
+          # The controller reads the key flat AND under `set`; the bp path is
+          # the one the measurement used, so it is the one under test.
+          Jason.encode!(%{worker_id: "worker-1", set: %{criteria_unstated_override: reason}})
+        )
+
+      assert claim_resp.status == 200
+      epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
+
+      stored_claim = Repo.get_by!(Document, doc_id: task.doc_id).content["claim"]
+
+      assert stored_claim["criteria_unstated_override"] == reason,
+             "the gate accepted the reason and the row must say so"
+
+      # Control on the read: this IS the claim the POST wrote.
+      assert stored_claim["worker"] == "worker-1"
+      assert stored_claim["epoch"] == epoch
+
+      close_resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{
+            worker_id: "worker-1",
+            observed_epoch: epoch,
+            lifecycle_status: "cancelled",
+            reason: "abandoned: the spike answered the question"
+          })
+        )
+
+      assert close_resp.status == 200
+
+      after_close = Repo.get_by!(Document, doc_id: task.doc_id)
+      assert after_close.content["lifecycle_status"] == "cancelled"
+
+      assert after_close.content["claim"]["criteria_unstated_override"] == reason,
+             "a closed claim must still say why it was allowed to start"
+    end
+
+    # The NEGATIVE direction over the same HTTP path: a row that states criteria
+    # never consulted the override, so a reason sent anyway attests nothing and
+    # must not be stored. If the key appeared here it would mean "somebody typed
+    # a flag", not "this row was waved through the criteria gate".
+    test "a claim that did not need the override stores NO override key",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("override-unneeded"), scope, %{})
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/claim",
+          Jason.encode!(%{
+            worker_id: "worker-1",
+            criteria_unstated_override: "sent, but this row states its criteria"
+          })
+        )
+
+      assert resp.status == 200
+
+      stored_claim = Repo.get_by!(Document, doc_id: task.doc_id).content["claim"]
+      assert stored_claim["worker"] == "worker-1"
+
+      refute Map.has_key?(stored_claim, "criteria_unstated_override"),
+             "an exempt row must carry no override key at all, not an empty one"
     end
 
     test "fenced_off and not_holder are distinguishable by reason and BOTH teach a remedy",
@@ -1654,7 +1895,13 @@ defmodule BarkparkWeb.TasksControllerTest do
       payload = Jason.decode!(resp.resp_body)
       assert payload["ok"] == false
       assert payload["reason"] == "criterion_text_required"
-      assert payload["message"] =~ "--criterion-text"
+      # The remedy the refusal hands over must be the NON-EVALUATING one:
+      # --criterion-text-file <path>, never the inline `--criterion-text "…"`
+      # spelling, whose backticked code spans bash/zsh execute before bp sees
+      # them (task-6576859f2c12a8e8). The refute is the mutation arm: restore
+      # the inline recipe and this test reds.
+      assert payload["message"] =~ "--criterion-text-file"
+      refute payload["message"] =~ ~r/--criterion-text\s+"/
       assert payload["message"] =~ "0-BASED"
 
       # Nothing was written: both criteria are still unmet.
@@ -1711,7 +1958,49 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert Enum.all?(criteria, &(&1["met"] == false)), "a refused stamp writes nothing"
     end
 
-    test "--merge-gated=true releases the gate on the wire and the stamp lands",
+    # THE OVERRIDE CARRIES ITS REASON on the wire too
+    # (pds-bl-merge-gated-override-carries-no-reason): `merge-gated=<why>`
+    # releases the gate AND lands the reason on the row, while the legacy bare
+    # `merge-gated=true` is a 400 — a CLI-only reason requirement would be
+    # bypassed by exactly this POST.
+    test "merge-gated=<reason> releases the gate on the wire, and the reason is persisted",
+         %{conn: conn, scope: scope} do
+      {doc_id, epoch} =
+        claim_with_criteria!(conn, scope, [
+          %{
+            "criterion" => "[MERGE-GATED — the lead closes this] PR merged to main",
+            "met" => false
+          }
+        ])
+
+      body = Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&criterion-text=%5BMERGE-GATED+%E2%80%94+the+lead+closes+this%5D+PR+merged+to+main&met=true&evidence=PR+%23123+merged&merge-gated=PR+%23123+merged+as+abc1234%3B+lead+closing",
+          body
+        )
+
+      assert resp.status == 200
+      show = conn |> authed() |> get("/v1/tasks/#{doc_id}")
+      doc = Jason.decode!(show.resp_body)["doc"]
+      [row] = doc["content"]["acceptance_criteria"]
+      assert row["met"] == true
+
+      # THE READ-BACK FROM THE PUBLISHED PERSPECTIVE (criterion 1): the reason
+      # is on the ROW, not in a log line. Delete the persistence and this reds.
+      [record] = doc["content"]["merge_gate_autostamp"]["stamp_overrides"]
+      assert record["reason"] == "PR #123 merged as abc1234; lead closing"
+      assert record["verified"] == false
+      assert record["asserted_worker"] == "worker-1"
+    end
+
+    # THE LEGACY BARE BOOLEAN IS REFUSED ON THE WIRE. This is the arm a CLI-only
+    # guard cannot cover: an old bp, a curl, or an agent posting straight at the
+    # endpoint. It REFUSES MORE than before and permits nothing new.
+    test "a bare merge-gated=true is 400 and writes nothing",
          %{conn: conn, scope: scope} do
       {doc_id, epoch} =
         claim_with_criteria!(conn, scope, [
@@ -1731,10 +2020,14 @@ defmodule BarkparkWeb.TasksControllerTest do
           body
         )
 
-      assert resp.status == 200
+      assert resp.status == 400
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["message"] =~ "REASON"
+      assert payload["message"] =~ "stamp_overrides"
+
       show = conn |> authed() |> get("/v1/tasks/#{doc_id}")
       [row] = Jason.decode!(show.resp_body)["doc"]["content"]["acceptance_criteria"]
-      assert row["met"] == true
+      assert row["met"] == false, "a refused override writes nothing"
     end
 
     # cch-w49 c0 on the wire: a criterion that merely MENTIONS merge-gating,
@@ -2076,11 +2369,21 @@ defmodule BarkparkWeb.TasksControllerTest do
 
     test "garbage met values count as UNMET and never 500 the read",
          %{conn: conn, scope: scope} do
-      task =
-        mk_task!(
-          uniq("crit-garbage"),
-          scope,
-          criteria([crit_entry("yes"), crit_entry(1), crit_entry(true)])
+      # A non-boolean `met` is refused at both write doors now
+      # (cdd-criteria-shape-gate), so the garbage is installed with a raw store
+      # write. The rows this read has to survive were written before that gate
+      # and are still in the store — the READ-side tolerance is what is under
+      # test here, and it is unchanged.
+      task = mk_task!(uniq("crit-garbage"), scope, criteria([crit_entry(true)]))
+      garbage = criteria([crit_entry("yes"), crit_entry(1), crit_entry(true)])
+
+      {1, _} =
+        from(d in Document, where: d.id == ^task.id)
+        |> Repo.update_all(
+          set: [
+            content: Map.merge(task.content, garbage),
+            rev: Internal.generate_rev()
+          ]
         )
 
       resp = conn |> authed() |> get("/v1/tasks/#{task.doc_id}")
@@ -2350,6 +2653,85 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert summary["title"] == first.title
       assert summary["lifecycle_status"] == "open"
       assert Map.has_key?(summary, "inserted_at")
+    end
+
+    # gr-bl-close-time-audit-vacuous-green — THE REGRESSION PIN.
+    #
+    # The rail used to carry `inserted_at` and no close-time field, so the
+    # obvious audit ("which children of this epic closed between T1 and T2?")
+    # filtered on a key that did not exist and returned ZERO rows at HTTP 200 —
+    # indistinguishable from "nothing closed in that window", on the exact
+    # audit that catches false-done closes. This test does the window query
+    # itself, so the silent-zero form cannot come back: with `updated_at`
+    # dropped from `child_summary/1` the window below matches nothing and the
+    # assertion reds.
+    test "C2: the rail carries updated_at — the close-time field a window audit needs",
+         %{conn: conn, scope: scope} do
+      root = mk_task!(uniq("c2-closetime-root"), scope)
+      child = mk_task!(uniq("c2-closetime-child"), scope, %{"parent_id" => root.doc_id})
+
+      before_close = DateTime.utc_now() |> DateTime.add(-1, :second)
+
+      # A real close: claim, then close. This is the transition whose TIME the
+      # audit is asking about, and it is also what proves the point about
+      # `closed_at` — the close RELEASES content.claim, so the row itself
+      # carries no close stamp other than `updated_at`.
+      claim_body = Jason.encode!(%{worker_id: "closetime-worker"})
+      claim_resp = conn |> authed() |> post("/v1/tasks/#{child.doc_id}/claim", claim_body)
+      assert claim_resp.status == 200
+      epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
+
+      close_body = Jason.encode!(%{worker_id: "closetime-worker", observed_epoch: epoch})
+      close_resp = conn |> authed() |> post("/v1/tasks/#{child.doc_id}/close", close_body)
+      assert close_resp.status == 200
+
+      after_close = DateTime.utc_now() |> DateTime.add(1, :second)
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/#{root.doc_id}")
+        |> Map.fetch!(:resp_body)
+        |> Jason.decode!()
+
+      assert [summary] = payload["children"]
+      assert summary["doc_id"] == child.doc_id
+      assert summary["lifecycle_status"] == "done"
+
+      # The close-time signal is present and parseable...
+      assert is_binary(summary["updated_at"]),
+             "the rail carries no close-time field, so a window audit over it " <>
+               "returns zero rows and reads as green"
+
+      {:ok, updated_at, _} = DateTime.from_iso8601(summary["updated_at"])
+
+      # ...and it is a CLOSE time, not the insert time: the row was created
+      # before `before_close` too, so a summary that answered with inserted_at
+      # would still pass a naive "is it in the window" check. This asserts the
+      # field MOVED past the insert.
+      assert DateTime.compare(updated_at, before_close) in [:gt, :eq]
+      assert DateTime.compare(updated_at, after_close) == :lt
+
+      {:ok, inserted_at, _} = DateTime.from_iso8601(summary["inserted_at"])
+      assert DateTime.compare(updated_at, inserted_at) == :gt
+
+      # THE AUDIT ITSELF, run over the payload exactly as an operator would:
+      # "which children of this parent closed in this window?" It answered 0
+      # before this change.
+      closed_in_window =
+        payload["children"]
+        |> Enum.filter(fn c ->
+          with ts when is_binary(ts) <- c["updated_at"],
+               {:ok, at, _} <- DateTime.from_iso8601(ts) do
+            c["lifecycle_status"] == "done" and
+              DateTime.compare(at, before_close) in [:gt, :eq] and
+              DateTime.compare(at, after_close) == :lt
+          else
+            _ -> false
+          end
+        end)
+
+      assert Enum.map(closed_in_window, & &1["doc_id"]) == [child.doc_id]
     end
 
     test "C2: a childless task returns children == [] and child_count == 0",
@@ -3554,12 +3936,18 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert String.ends_with?(card["title"], "…")
       assert String.valid?(card["title"])
 
-      # now.text: capped at 160 graphemes, same marker; ts trimmed to seconds.
-      assert String.length(card["claim"]["now"]["text"]) == 160
-      assert String.ends_with?(card["claim"]["now"]["text"], "…")
-      assert card["claim"]["now"]["ts"] == "2026-07-19T12:00:00Z"
+      # task-7385811ef5120f3a: the worker-less residue no longer rides a READY
+      # card at all, so this page's now-line cannot be the truncation witness.
+      # The now.text cap + seconds-trimmed ts are proven on the surface that
+      # HAS a live claim — "prime inherits the v2 cuts: in_progress now.text
+      # capped + top-level help line" below, whose row is claimed for real.
+      refute Map.has_key?(card, "claim")
 
-      # ONE top-level help line names the escape hatch.
+      # ONE top-level help line names the escape hatch — and here it is carried
+      # by the TITLE alone, which is the point: brief_truncated?/1 must track
+      # what actually got cut ON THE WIRE. A lapsed now-line that never shipped
+      # must not raise the banner (proven in brief_claim_lapsed_test.exs); a
+      # capped title still must.
       assert payload["help"] == [
                "truncated fields end with …; full record via bp task get <doc_id>"
              ]
@@ -3901,61 +4289,259 @@ defmodule BarkparkWeb.TasksControllerTest do
     # Any cut that regresses — a nil key creeping back, a cap widening, a
     # steady-state omission dropped — shows up here as raw bytes.
 
+    # ─── WHAT THIS TRIPWIRE DOES NOT COVER (task-69ba050120c2c021, c1) ──────
+    #
+    # THE GAP, WITH NUMBERS. This fixture is PRESENCE-complete against the
+    # renderer (every content key it reads is populated by at least one card,
+    # enforced above) but DENSITY-LIGHT against the live board. Measured the
+    # same day, three readings of a live `bp task ready --limit 50` envelope:
+    #
+    #     18,113 B  2026-09-07 ~17:29Z
+    #     18,196 B  2026-09-07  17:36Z
+    #     18,871 B  2026-09-07 ~15:5xZ
+    #
+    # — 118% to 123% of the 15,360 B bound asserted below. The spread is row
+    # churn on a live endpoint, not instrument drift. PRODUCTION IS OVER THIS
+    # BOUND AND HAS BEEN SINCE AT LEAST 2026-09-05; this test does not and
+    # cannot show that, and its green must never be read as "the ceiling holds".
+    #
+    # WHY THE FIXTURE IS NOT SIMPLY RAISED TO LIVE DENSITY. It cannot be and
+    # stay green: per-key bytes across those same 50 live cards were title
+    # 4,728 · labels 2,056 · doc_id 1,983 · updated_at 1,750 · parent_id 1,601 ·
+    # claim 936 · criteria_total 865 · criteria_met 768 · child_count 753 ·
+    # assignee 654 · priority 600 · lifecycle_status 252 · dispatch 132 ·
+    # disposition 100 · status 32. Live titles average 84.6 graphemes and live
+    # doc_ids 28.7, against this fixture's ~57 and ~11.
+    #
+    # That variant was BUILT AND MEASURED rather than estimated: this same
+    # fixture rebuilt at the live 2026-09-07 presence ratios (labels 19/50,
+    # assignee 20/50, parent_id 42/50, lifecycle_status 9/50, disposition 5/50)
+    # and live string lengths renders 50 cards in 17,725 B — 115% of the bound,
+    # and within 2.6% of the live 18,196 B reading above. So the honest choices
+    # were: land a red, RAISE 15,360 (hides the breach), or shrink the assertion
+    # to whatever the fixture emits (weakens the gate). All three were refused.
+    # The bound below is left exactly where the epic promised it, the shape is
+    # derived above so no future key can hide, and the live figure is written
+    # down here so the next reader compares against PRODUCTION rather than
+    # against this fixture.
+    #
+    # ALSO NOT COVERED, each measured while writing this:
+    #
+    #   * `claim` — WAS the standing example here and is no longer one
+    #     (task-2df8d2db70e2070d). This block used to say a worker-bearing
+    #     claim "takes the row off the ready queue outright", inferred from
+    #     nine seeds that dropped the page from 50 cards to 41. That mechanism
+    #     does not exist. The gate is the LEASE, not the worker:
+    #     `QueueGate.executable_query/0`, which `Queue.ready_query/1` mounts,
+    #     admits a worker-bearing claim on THREE arms — `claim.closed_at`
+    #     non-blank, `claim.closed_by` non-blank, or `claim.ts_iso` older than
+    #     `QueueGate.lease_ttl_seconds/0` — and fails CLOSED otherwise, which
+    #     is what those nine live-lease seeds hit. Measured live 2026-09-10 on
+    #     `bp task ready --limit 300`: 17 of 300 cards render a worker-bearing
+    #     claim, SIXTEEN on the closed_at arm and ONE on a 66.8 h lapsed lease.
+    #     So the residues below now carry a WORKER in the admitting shapes and
+    #     the key rides this probe instead of being measured as zero. The full
+    #     predicate reading, the live characterisation and the both-direction
+    #     mutation proof live in
+    #     `tasks_controller_ready_claim_worker_test.exs`.
+    #   * `status` — 32 B live (2/50 rows are drafts) against 50/50 here, since
+    #     `mk_card_task!/4` creates drafts. This fixture OVERCOUNTS that key by
+    #     roughly 770 B; it is the one place the fixture is heavier than live.
+    #   * `dispatch` — needs live child counts, absent here (0/50 vs live 6/50).
+    #   * `child_count` — present on all 50 cards but always 0: the fixture
+    #     seeds no children, so the key is measured and its VALUE is not.
+    #   * page-level envelope keys beyond `docs` / `help`.
     test "realistic-mix tripwire: 50 brief ready cards ≤ 15,360 B",
          %{conn: conn, scope: scope} do
       ts = "2026-07-19T12:00:00.123456Z"
       # Pre-computed ids so every card can carry `distinct_from` (the dedup
       # gate's own opt-out) — 50 same-shaped fixture cards are exactly what
-      # the duplicate-task wall exists to refuse.
-      ids = for i <- 1..50, do: uniq("mix#{i}")
+      # the duplicate-task wall exists to refuse. FIXED-WIDTH (pds-w27): with
+      # `uniq("mix#{i}")` the ids grew a digit mid-run and the probe below
+      # printed 12259 B twice then 12209 B on an unchanged tree.
+      ids = for i <- 1..50, do: fixed_uniq("mix", i)
 
-      for {id, i} <- Enum.with_index(ids, 1) do
-        # 11/50 titles past the 96-grapheme cap; the rest typical length.
-        title =
-          if i <= 11 do
-            "Realistic long slice title number #{i} that spills well past the " <>
-              "ninety-six grapheme cap " <> String.duplicate("padding ", 6)
-          else
-            "Fix the ready queue pager step #{i}"
-          end
+      seeded =
+        for {id, i} <- Enum.with_index(ids, 1), reduce: MapSet.new() do
+          acc ->
+            # 11/50 titles past the 96-grapheme cap; the rest typical length.
+            title =
+              if i <= 11 do
+                "Realistic long slice title number #{i} that spills well past the " <>
+                  "ninety-six grapheme cap " <> String.duplicate("padding ", 6)
+              else
+                "Fix the ready queue pager step #{i}"
+              end
 
-        extra = %{"priority" => rem(i, 5), "distinct_from" => ids -- [id]}
-        # ~half carry an assignee, ~half a parent_id (independent halves).
-        extra = if i in 12..36, do: Map.put(extra, "assignee", "builder-#{i}"), else: extra
+            extra = %{"priority" => rem(i, 5), "distinct_from" => ids -- [id]}
+            # ~half carry an assignee, ~half a parent_id (independent halves).
+            extra = if i in 12..36, do: Map.put(extra, "assignee", "builder-#{i}"), else: extra
 
-        extra =
-          if rem(i, 2) == 0,
-            do: Map.put(extra, "parent_id", "phase-mix-#{rem(i, 3)}"),
-            else: extra
+            extra =
+              if rem(i, 2) == 0,
+                do: Map.put(extra, "parent_id", "phase-mix-#{rem(i, 3)}"),
+                else: extra
 
-        # 7/50 claim residues with a now-line (worker-less — a task with a
-        # LIVE claim worker is never ready); 3 of those now-lines past 160.
-        extra =
-          if i >= 44 do
-            now_text =
-              if i >= 48,
-                do: String.duplicate("now-line words that ramble on ", 10),
-                else: "wiring the serializer, tests next (#{i})"
+            # 7/50 claim residues, each NAMING A WORKER and each in a shape the
+            # ready gate admits (task-2df8d2db70e2070d). Live 2026-09-10 is
+            # 17/300 worker-bearing claim cards — 16 on the `closed_at` arm,
+            # 1 on a lapsed lease — so the split here is 6 closed + 1 lapsed,
+            # the live ratio at this page size. `ts` is a 2026-07 stamp, i.e.
+            # already far past the QueueGate.lease_ttl_seconds/0 window, so
+            # card 50 rides arm 3 on its own. 3 of the now-lines run past 160.
+            #
+            # A worker-LESS residue renders no claim block at all
+            # (`Params.brief_claim/1`, task-7385811ef5120f3a) — which is the
+            # shape this fixture used to seed on all seven, so `claim` measured
+            # 0/50 here against 936 B live and no regression in that block could
+            # move this probe. The card-key census printed below is what makes
+            # the count visible rather than inferred, and the explicit
+            # assertion after it is what keeps it from silently returning to 0.
+            extra =
+              if i >= 44 do
+                now_text =
+                  if i >= 48,
+                    do: String.duplicate("now-line words that ramble on ", 10),
+                    else: "wiring the serializer, tests next (#{i})"
 
-            Map.put(extra, "claim", %{
-              "epoch" => 3,
-              "ts_iso" => ts,
-              "work_digest" => "abcd1234deadbeef",
-              "now" => %{"text" => now_text, "ts" => ts}
-            })
-          else
-            extra
-          end
+                claim = %{
+                  "worker" => "builder-#{i}",
+                  "epoch" => 3,
+                  "ts_iso" => ts,
+                  "work_digest" => "abcd1234deadbeef",
+                  "now" => %{"text" => now_text, "ts" => ts}
+                }
 
-        mk_card_task!(id, title, scope, extra)
-      end
+                claim =
+                  if i == 50,
+                    do: claim,
+                    else: Map.put(claim, "closed_at", "2026-07-19T13:00:00.000000Z")
+
+                extra
+                |> Map.put("claim", claim)
+                |> Map.put("lifecycle_status", "blocked")
+              else
+                extra
+              end
+
+            # ── Keys the renderer reads that the 2026-07 fixture never wrote.
+            # Each is held to a SMALL number of cards on purpose: this arm buys
+            # PRESENCE (no key rides the card unmeasured), and the density gap
+            # against live is declared in the block above rather than paid for
+            # in bytes here. Live 2026-09-07 ratios are named per key so the
+            # distance is legible instead of arbitrary.
+
+            # labels — live 19/50, the key that started this row (2,056 B live).
+            extra =
+              if i in [3, 17, 29],
+                do: Map.put(extra, "labels", ["proj:brief-diet", "phase:build", "area:tasks"]),
+                else: extra
+
+            # lifecycle_status — live 9/50 non-"open"; `blocked` is the one
+            # value queue.ex admits besides open, and put_unless/4 emits it.
+            # These two are the claim-less blocked rows; the seven claim
+            # residues above are blocked too (live: 16 of 17 claim-bearing ready
+            # cards are), which lands this key at 9/50 — the live figure named
+            # at the top of this block.
+            extra =
+              if i in [7, 23], do: Map.put(extra, "lifecycle_status", "blocked"), else: extra
+
+            # disposition — 5/50, the ONE key seeded at its full live ratio
+            # rather than at token presence. Derivation: the 2026-09-07 live
+            # census read at the top of this block measured disposition on
+            # 5 of 50 ready cards at 100 B total — i.e. ~20 B a card, the
+            # width of `"disposition":"open"` and of nothing longer in the
+            # vocabulary. That is the ratio reproduced here, on cards
+            # 6/17/28/39/50, at the value the census's own per-card byte
+            # figure implies (Stage.dispositions/0 = ~w(open parked closed);
+            # the longest term, "parked", is the HOSTILE page's job, not this
+            # one).
+            #
+            # Why this key and not the others: pds-w27 shipped the term onto
+            # the brief card, and the typical-page bound this test asserts is
+            # the bound the epic advertises FOR THAT CARD. At 2/50 the probe
+            # moved 50 B on id width alone (see fixed_uniq/2) — more than the
+            # field it was supposed to be measuring. At 5/50 the field is
+            # worth ~100 B, i.e. the live figure, so dropping the key from the
+            # renderer moves this probe by a legible amount instead of a
+            # rounding error. The remaining keys stay presence-only on
+            # purpose; the density gap is declared in the block above.
+            extra =
+              if rem(i, 11) == 6,
+                do:
+                  extra
+                  |> Map.put("disposition", "open")
+                  |> Map.put("reopen_trigger", "n/a — byte-tripwire fixture"),
+                else: extra
+
+            # engagement — 0/50 live on 2026-09-07, but the renderer reads it,
+            # so it rides one card: a key absent from today's board is exactly
+            # the key a future page grows into unmeasured.
+            extra =
+              if i == 19,
+                do:
+                  Map.put(extra, "engagement", %{"object" => "considering", "holder" => "lead"}),
+                else: extra
+
+            mk_card_task!(id, title, scope, extra)
+
+            # The fixture's own writes, mechanically — the coverage check must
+            # never compare the renderer against a SECOND hand-typed list.
+            MapSet.union(acc, MapSet.new(Map.keys(extra)))
+        end
+
+      # mk_card_task!/4 sets these on every card regardless of content_extra.
+      seeded =
+        MapSet.union(seeded, MapSet.new(["kind", "acceptance_criteria", "lifecycle_status"]))
+
+      # c0's teeth: the renderer, not this file, decides what must be covered.
+      assert_brief_keys_covered!(seeded)
 
       resp = conn |> authed() |> get("/v1/tasks/ready?view=brief&limit=50")
       payload = json_response(resp, 200)
       assert length(payload["docs"]) == 50
 
+      # Card-side census, printed with the bytes: a key the fixture SEEDS but
+      # the card never emits (worker-less `claim` is the standing example) is
+      # visible here instead of being inferred from a byte count.
+      census =
+        payload["docs"]
+        |> Enum.flat_map(&Map.keys/1)
+        |> Enum.frequencies()
+        |> Enum.sort_by(fn {k, n} -> {-n, k} end)
+        |> Enum.map_join(" ", fn {k, n} -> "#{k}:#{n}" end)
+
+      # pds-w27: the tripwire must SEE the field the epic shipped. 5 of 50
+      # cards carry it; if the renderer ever drops the key the probe falls by
+      # ~100 B, which is only legible because the id width below is pinned.
+      assert Enum.count(payload["docs"], &Map.has_key?(&1, "disposition")) == 5,
+             "realistic-mix fixture no longer measures `disposition` — the typical-page " <>
+               "bound would be blind to the field pds-w27 put on the card"
+
+      # task-2df8d2db70e2070d: the probe must SEE the key it used to measure as
+      # zero. 7 of 50 cards render a claim and every one names its holder — a
+      # worker-less residue renders nothing, so a fixture that regressed to
+      # that shape would silently take `claim` back out of the bound.
+      claim_cards = Enum.filter(payload["docs"], &Map.has_key?(&1, "claim"))
+
+      assert length(claim_cards) == 7,
+             "realistic-mix fixture renders #{length(claim_cards)} claim blocks, not 7 — " <>
+               "the typical-page bound is blind to the 936 B `claim` carries live"
+
+      assert Enum.all?(claim_cards, &is_binary(&1["claim"]["worker"])),
+             "a rendered claim block with no holder — brief_claim/1 changed under this fixture"
+
+      # pds-w27: reproducibility precondition for the number printed below.
+      assert_fixed_width_ids!(payload["docs"])
+
       bytes = byte_size(resp.resp_body)
-      IO.puts("axi-w2-s2 realistic-mix probe: #{bytes}B for 50 brief ready cards")
+
+      IO.puts(
+        "axi-w2-s2 realistic-mix probe: #{bytes}B for 50 brief ready cards " <>
+          "(#{15_360 - bytes}B headroom under the 15,360B bound)"
+      )
+
+      IO.puts("axi-w2-s2 realistic-mix card keys: #{census}")
       assert bytes <= 15_360, "realistic 50-card brief page blew the 15,360 B bound: #{bytes}B"
     end
 
@@ -3971,7 +4557,9 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       # Pre-computed ids for `distinct_from` — the dedup gate's own opt-out
       # (50 identical hostile cards are the canonical duplicate otherwise).
-      ids = for i <- 1..50, do: uniq("h#{i}")
+      # FIXED-WIDTH (pds-w27): this probe printed 28623 / 28640 / 29740 /
+      # 29790 B across only TWO code states, entirely on id width.
+      ids = for i <- 1..50, do: fixed_uniq("h", i)
 
       for {id, _i} <- Enum.with_index(ids, 1) do
         mk_card_task!(id, title, scope, %{
@@ -4002,7 +4590,10 @@ defmodule BarkparkWeb.TasksControllerTest do
           # detail — the card names the term only" above.
           "reopen_trigger" => "never — this row is a byte-ceiling fixture",
           # Worker-less claim residue (a live worker would exclude the row
-          # from ready) — now-line + epoch survive as the hostile payload.
+          # from ready). Since task-7385811ef5120f3a this residue is DROPPED
+          # from the brief card whole — the assertion below pins that, and the
+          # fixture keeps carrying it so the drop stays measured instead of
+          # becoming an absent input nobody notices.
           "claim" => %{
             "epoch" => 7,
             "ts_iso" => ts,
@@ -4022,14 +4613,29 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert card["criteria_met"] == 2
       assert card["criteria_total"] == 5
       assert String.length(card["title"]) == 96
-      assert String.length(card["claim"]["now"]["text"]) == 160
 
+      # task-7385811ef5120f3a: the lapsed residue is gone from the card. Its
+      # now-line and epoch remain on the record and ride `bp task get`; a READY
+      # row is by construction not live-held, so nothing owned is withheld.
+      refute Map.has_key?(card, "claim")
+
+      # …and the honesty line still fires, from the TITLE cap — which is the
+      # point of keeping it asserted here: the banner must track what actually
+      # got cut on the wire, not what the raw record happened to contain.
       assert payload["help"] == [
                "truncated fields end with …; full record via bp task get <doc_id>"
              ]
 
+      # pds-w27: reproducibility precondition for the number printed below.
+      assert_fixed_width_ids!(payload["docs"])
+
       bytes = byte_size(resp.resp_body)
-      IO.puts("axi-w2-s2 hostile-ceiling probe: #{bytes}B for 50 maxed brief cards")
+
+      IO.puts(
+        "axi-w2-s2 hostile-ceiling probe: #{bytes}B for 50 maxed brief cards " <>
+          "(#{30_720 - bytes}B headroom under the 30,720B ceiling)"
+      )
+
       assert bytes <= 30_720, "hostile 50-card brief page blew the 30,720 B ceiling: #{bytes}B"
     end
   end
@@ -4154,7 +4760,11 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert [pulse_t, stamp_t, close_t] = payload["help"]
       assert pulse_t =~ "bp task pulse #{doc_id} helper-1 --now"
       assert stamp_t =~ "bp task stamp #{doc_id} helper-1 #{epoch} --criterion 0 --met"
-      assert stamp_t =~ "--criterion-text"
+      # The template teaches the NON-EVALUATING door: the wording rides a file,
+      # so a backticked code span in it is never command-substituted by the
+      # operator's shell (task-6576859f2c12a8e8). The refute is the mutation arm.
+      assert stamp_t =~ "--criterion-text-file"
+      refute stamp_t =~ ~r/--criterion-text\s+"/
       assert close_t =~ "bp task close #{doc_id} helper-1 #{epoch} done"
       refute Enum.any?(payload["help"], &(&1 =~ "drafts."))
     end
@@ -4634,6 +5244,114 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       content = Repo.get_by!(Document, doc_id: task.doc_id).content
       assert content["reopen_trigger"] == "when the census ratifies a second case"
+    end
+  end
+
+  # ─── THE TWO CLOSE-PATH REFUSALS THAT HAD TO LEARN TO SPEAK ────────────────
+  #
+  # Both halves of task-8ca0bd7a8ed50f14, ON THE WIRE. The server-side gate and
+  # the server-side hint are the whole fix a caller experiences: the bp CLI
+  # prints a 409's top-level `message` in place of the bare reason token, so a
+  # refusal with no message is a refusal that teaches nothing.
+  describe "POST /v1/tasks/:doc_id/close — refusals that name what actually happened" do
+    defp claimed_for_close!(conn, scope, criteria) do
+      doc_id = uniq("close-refusal")
+      task = mk_task!(doc_id, scope, %{"acceptance_criteria" => criteria})
+
+      payload =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{doc_id}/claim", Jason.encode!(%{worker_id: "worker-1"}))
+        |> json_response(200)
+
+      {task, payload["doc"]["claim"]["epoch"]}
+    end
+
+    # THE RAISE GATE. Measured on the live server before this change: this exact
+    # request returned 200 and left met=true on a cancelled row, with no override
+    # and no trace. It is now a 409 whose message says the ONE thing the caller
+    # is getting wrong — the cancel is fine, the assertion is not.
+    test "a cancelled close that raises a criterion is 409 criteria_raised_on_abandon, and writes nothing",
+         %{conn: conn, scope: scope} do
+      {task, epoch} =
+        claimed_for_close!(conn, scope, [
+          %{"criterion" => "the gate is green", "met" => false, "merge_gate" => true}
+        ])
+
+      body =
+        Jason.encode!(%{
+          worker_id: "worker-1",
+          observed_epoch: epoch,
+          lifecycle_status: "cancelled",
+          reason: "abandoning this row",
+          criteria: [
+            %{index: 0, met: true, evidence: "merged", criterion: "the gate is green"}
+          ]
+        })
+
+      payload =
+        conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", body) |> json_response(409)
+
+      assert payload["ok"] == false
+      assert payload["reason"] == "criteria_raised_on_abandon:0"
+
+      # The message has to teach the HONEST move first. A refusal that leads
+      # with the stamp would just relocate the assertion one command later.
+      assert payload["message"] =~ "may never assert"
+      assert payload["message"] =~ "WITHOUT the met flips"
+      assert payload["message"] =~ "only raising is refused"
+
+      content = Repo.get_by!(Document, doc_id: task.doc_id).content
+      assert content["lifecycle_status"] == "in_progress", "a refused close writes nothing"
+      assert Enum.at(content["acceptance_criteria"], 0)["met"] == false
+    end
+
+    # THE SECOND 409, THE MIS-WORDED ONE. `stale_claim` is minted when the
+    # rev-CAS matches zero rows: the REV moved and the epoch never did. The
+    # token says "claim", so a caller reads a lapsed lease and RE-CLAIMS, which
+    # bumps the epoch and does nothing about the rev — the one wrong move. The
+    # token stays (errors.go and the pr-task gate string-match it); the MESSAGE
+    # now names the rev, supplies its current value, and says not to re-claim.
+    test "a stale observed_rev is 409 stale_claim whose message names the REV, not the epoch",
+         %{conn: conn, scope: scope} do
+      {task, epoch} =
+        claimed_for_close!(conn, scope, [
+          %{"criterion" => "the gate is green", "met" => true, "evidence" => "81 tests green"}
+        ])
+
+      body =
+        Jason.encode!(%{
+          worker_id: "worker-1",
+          observed_epoch: epoch,
+          lifecycle_status: "done",
+          reason: "shipped in PR #16853, sha 81c1ef118b",
+          # An explicit pin bypasses the work-digest fence by design, so this
+          # lands on the rev-CAS itself — the emitter under test.
+          observed_rev: "deadbeefdeadbeefdeadbeefdeadbeef"
+        })
+
+      payload =
+        conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", body) |> json_response(409)
+
+      assert payload["ok"] == false
+      assert payload["reason"] == "stale_claim"
+
+      # THE DISCRIMINATOR, and it is the sentence that makes the fix reviewable:
+      # the two close-path 409s are told apart by whether the message names the
+      # BRIEF (doc_changed_since_claim) or the REV (this one). Neither may name
+      # the EPOCH, because in neither case did the epoch move.
+      assert payload["message"] =~ "your CLAIM is fine"
+      assert payload["message"] =~ "Do NOT re-claim"
+      assert payload["message"] =~ "observed_rev="
+
+      # The current rev rides the refusal so recovery needs no second round
+      # trip — the property `doc_changed_since_claim` already had and this one
+      # did not.
+      current = Repo.get_by!(Document, doc_id: task.doc_id).rev
+      assert payload["message"] =~ current
+
+      assert Repo.get_by!(Document, doc_id: task.doc_id).content["lifecycle_status"] ==
+               "in_progress"
     end
   end
 end

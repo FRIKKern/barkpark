@@ -225,6 +225,17 @@ resolve_pr() {
 # Pre-flight. Never reimplemented here — this shells out to the one detector
 # that already exists, whose exit codes are its contract (D14).
 #   0 = every required context rendered · 3 = DEADLOCK · 4 = RE-RUN (cancelled)
+#   5 = BLOCKED (an input could not be read / a producer refused)
+#
+# 5 IS NAMED HERE RATHER THAN LEFT TO THE `*)` CATCH-ALL, AND IT CHANGES NO
+# BEHAVIOUR ON PURPOSE. The catch-all already refuses, which is the only correct
+# answer: an unreadable pre-flight is a refusal, never a skip, and this is the
+# merge verb — every lane merges through it. What the named arm buys is the
+# OPERATOR'S next move. `exit $rc` in a catch-all sends a human to read code to
+# learn whether the detector found something or could not look; the detector now
+# says which, so this says which too. Note the collision the verifier's header
+# documents: 4 here is RE-RUN, and 4 in scripts/required-checks.test.sh is that
+# suite's HOLD. They are different claims and they stay on different arms.
 preflight() {
   echo "bp-merge: pre-flight — required-checks-verify.sh --deadlock"
   local rc=0
@@ -236,8 +247,13 @@ preflight() {
     4) echo "bp-merge: REFUSED before waiting — a required context concluded CANCELLED (named above)." >&2
        echo "          Nothing will re-report it on its own. Re-run it, then run this again." >&2
        exit 3 ;;
-    *) echo "bp-merge: REFUSED — the deadlock detector could not read its inputs (exit $rc)." >&2
+    5) echo "bp-merge: REFUSED — the pre-flight is BLOCKED: it could not READ an input (named above)." >&2
+       echo "          This is NOT a finding about your PR. Nothing was measured about the required set," >&2
+       echo "          so the refusal carries no claim that this head is missing or red." >&2
        echo "          An unreadable pre-flight is a refusal, never a skip." >&2
+       exit 1 ;;
+    *) echo "bp-merge: REFUSED — the deadlock detector exited $rc, which is not a code it documents." >&2
+       echo "          An unrecognised pre-flight is a refusal, never a skip." >&2
        exit 1 ;;
   esac
 }
@@ -251,7 +267,10 @@ resolve_plural() {
     3) echo "bp-merge: DEADLOCK (named above) — this head can never go green." >&2; exit 3 ;;
     4) echo "bp-merge: RE-RUN (a required context is CANCELLED, named above)." >&2; exit 3 ;;
     0) return 0 ;;
-    *) echo "bp-merge: the detector could not read its inputs (exit $rc) — refusing." >&2; exit 1 ;;
+    5) echo "bp-merge: BLOCKED — the detector could not READ an input (named above), so it never" >&2
+       echo "          got to the set difference and this plural refusal is still unexplained. Refusing." >&2
+       exit 1 ;;
+    *) echo "bp-merge: the detector exited $rc, a code it does not document — refusing." >&2; exit 1 ;;
   esac
 }
 

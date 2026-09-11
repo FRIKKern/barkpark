@@ -72,20 +72,17 @@ For database work, always run bare `mix` commands inside `api/`.
 
 ## Test database partitioning (multi-agent / multi-lane hosts)
 
-Concurrent agents sharing one Postgres each need their own test database, or their runs collide and produce cross-lane failures that look like real bugs. `MIX_TEST_PARTITION=<lane>` (read in `config/test.exs`) makes `mix test` use `barkpark_test<lane>` instead of the shared `barkpark_test` — set a short, unique value per lane/worktree before running tests:
+Concurrent agents sharing one Postgres each need their own test database, or runs collide into cross-lane failures that look like real bugs. `MIX_TEST_PARTITION=<lane>` (read in `config/test.exs`) makes `mix test` use `barkpark_test<lane>` instead of the shared `barkpark_test` — set a short, unique value per lane/worktree:
 
 ```bash
 cd api && MIX_TEST_PARTITION=mylane mix test
 ```
 
-`BARKPARK_TEST_POOL_SIZE` (default 20) caps that lane's Ecto pool; lower it (e.g. `BARKPARK_TEST_POOL_SIZE=6`) on a host running many concurrent lanes to leave headroom under Postgres's `max_connections`.
+`BARKPARK_TEST_POOL_SIZE` (default 20) caps that lane's Ecto pool; lower it (e.g. to 6) on a host running many concurrent lanes to leave headroom under Postgres's `max_connections`.
 
-**The leak this creates, and the fix.** Nothing ever dropped a partitioned database on its own — every lane's `barkpark_test<lane>` accumulated forever (314 of them measured 2026-08-24, `task-1a7e52b811dabc3c`). Two independent, complementary fixes:
+**A WHOLE file red on a pristine tree is residue, not your change** — and a partition is no cure: a sandbox owner killed or timed out (`owner … timed out because it owned the connection for longer than 120000ms`) leaves what it already COMMITTED in `barkpark_test<lane>` forever, and later runs read it as ordinary data — 25 orphaned `oban_jobs` rows red `edge_projector/projector_worker_enqueue_test.exs` (`task-c8d297deb4f36140`, 2026-09-10). Reset the lane, not the file: `make test` drops the lane DB after the run, `psql -d barkpark_test<lane> -c 'TRUNCATE oban_jobs;'` clears one table.
 
-- `make test` (`MIX_TEST_PARTITION=<lane> make test`, or `ARGS="test/some_test.exs" MIX_TEST_PARTITION=<lane> make test` for a subset) runs the suite exactly as `mix test` would, then drops that lane's database afterward in a **detached background process** — it never blocks on or fails the test run itself. Prefer this over bare `mix test` for a partitioned run. (Bare `mix test`/`mix ecto.setup` etc. are still correct for the shared, unpartitioned `barkpark_test` a solo dev iterates against.)
-- `make reap-test-dbs` (dry run; `APPLY=1` to drop, `HOURS=N` to retune the age threshold) is the backstop age-based sweep for lanes that get killed before any teardown runs — it only drops a database with **zero active connections AND** an on-disk age past the threshold, never on either signal alone. `doctor.sh` surfaces the live orphan count at session start.
-
-Both matter: `make test` shrinks the population the sweep has to catch; the sweep is what makes the count converge for a lane that never exits cleanly. Neither raises `max_connections` — that masks the leak rather than fixing it, and is out of scope here (see `scripts/reap-test-databases.sh`'s header for the full incident history).
+**The leak this creates, and the fix.** Nothing drops a partitioned database on its own — every lane's DB accumulates forever (314 on 2026-08-24, `task-1a7e52b811dabc3c`). `MIX_TEST_PARTITION=<lane> make test` runs the suite exactly as `mix test` would (`ARGS="test/some_test.exs" …` for a subset), then drops that lane's DB in a **detached background process** that never blocks or fails the run — prefer it for any partitioned run; bare `mix test` stays correct for the unpartitioned `barkpark_test`. `make reap-test-dbs` (dry run; `APPLY=1` to drop, `HOURS=N` to retune age) is the backstop for lanes killed before any teardown, dropping only a DB with **zero active connections AND** an age past the threshold, never either alone; `doctor.sh` shows the orphan count at session start. Neither raises `max_connections` — that masks the leak (`scripts/reap-test-databases.sh`'s header has the history).
 
 ## What seeding produces
 

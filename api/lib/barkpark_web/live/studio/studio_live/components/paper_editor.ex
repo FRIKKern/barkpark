@@ -28,7 +28,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   alias Barkpark.Content
   alias Barkpark.Content.Papers.Template
   alias Barkpark.PortableDoc.{Projection, Render, Slots, TaskResolver}
-  alias Barkpark.PortableDoc.Render.{Compose, SectionLayout}
+  alias Barkpark.PortableDoc.Render.{Compose, Figures, SectionLayout}
   alias Barkpark.PortableDoc.Render.Components, as: RenderComponents
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
@@ -132,6 +132,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # at its FALSE default, so the canvas never mounts where its ops can't land —
   # the canvas flag stays gated to the one surface whose persist path is wired.
   attr(:canvas_eligible, :boolean, default: false)
+  attr(:canvas_retained, :any, default: nil)
+  attr(:canvas_resume_halt, :boolean, default: false)
+  attr(:canvas_resume_state, :any, default: :none)
 
   # t9 — live task-block previews (block_id ⇒ preview entry from
   # TaskResolver.preview/2), display-only rows the flag-ON boundary widgets
@@ -147,17 +150,64 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:paper_halt, :string, default: nil)
 
   def paper_block_editor(assigns) do
-    assigns =
-      assign(
-        assigns,
-        :table_editor_target_ids,
-        assigns.table_editor_target_ids || table_editor_ids(assigns.blocks)
-      )
+    if assigns.canvas_resume_halt do
+      paper_block_editor_resume_halt(assigns)
+    else
+      assigns =
+        assign(
+          assigns,
+          :table_editor_target_ids,
+          assigns.table_editor_target_ids || table_editor_ids(assigns.blocks)
+        )
 
-    case Content.project_block_ids_safely(assigns.blocks) do
-      {:ok, _projected} -> paper_block_editor_identity_safe(assigns)
-      {:error, {:duplicate_id, _id}} -> paper_block_editor_identity_readonly(assigns)
+      case Content.project_block_ids_safely(assigns.blocks) do
+        {:ok, _projected} -> paper_block_editor_identity_safe(assigns)
+        {:error, {:duplicate_id, _id}} -> paper_block_editor_identity_readonly(assigns)
+      end
     end
+  end
+
+  defp paper_block_editor_resume_halt(assigns) do
+    assigns = assign(assigns, :notice, BarkparkWeb.PaperCanvasLease.halt_notice())
+
+    ~H"""
+    <div
+      id={"paper-canvas-resume-warning-#{@slug}"}
+      class="bp-paper-halt"
+      data-test-id="paper-canvas-resume-warning"
+      role="alert"
+    >
+      <p>{@notice}</p>
+      <p>
+        Download the preserved canvas draft fragments before reloading. This recovery file preserves
+        the affected canvas data; it is not a complete document export.
+      </p>
+      <button
+        type="button"
+        data-paper-canvas-export-draft
+        data-paper-editor-target={"paper-editor-#{@slug}"}
+      >
+        Download preserved canvas draft
+      </button>
+      <details data-test-id="paper-canvas-recovery-controls">
+        <summary>Recovery options</summary>
+        <p>Reload only after reviewing the frozen draft; this permanently discards unsaved local edits.</p>
+        <button type="button" data-test-id="paper-canvas-reload-server">
+          Discard local edits and reload the server version
+        </button>
+      </details>
+    </div>
+    <div
+      id={"paper-editor-#{@slug}"}
+      class="bp-paper-editor"
+      data-test-id="studio-paper-block-editor"
+      data-paper-doc-key={"#{@dataset}:#{@doc_type}:#{@slug}"}
+      data-paper-canvas-resume-halt="true"
+      data-paper-canvas-resume-state={to_string(@canvas_resume_state)}
+      inert
+    >
+    </div>
+    """
   end
 
   defp paper_block_editor_identity_readonly(assigns) do
@@ -209,7 +259,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     # editor, where `paper-ops` (→ paper_doc) is the wrong persist path.
     canvas_on? = PaperCanvas.paper_canvas_enabled?() and assigns.canvas_eligible
 
-    segments = if canvas_on?, do: index_segments(PaperCanvas.partition_runs(free)), else: []
+    retained = PaperCanvas.retained_ids(assigns.canvas_retained, assigns.slug)
+
+    segments =
+      if canvas_on?, do: index_segments(PaperCanvas.partition_runs(free, retained)), else: []
 
     assigns =
       assigns
@@ -363,6 +416,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 canvas_enabled={@canvas_on?}
                 tree_identity_safe={@tree_identity_safe}
                 table_editor_target_ids={@table_editor_target_ids}
+                canvas_retained={@canvas_retained}
               />
             <% {:ghosts, ghosts, anchor_id} -> %>
               <.ghost_slots_group ghosts={ghosts} anchor_id={anchor_id} />
@@ -464,6 +518,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             paper_links={@paper_links}
             tree_identity_safe={@tree_identity_safe}
             table_editor_target_ids={@table_editor_target_ids}
+            canvas_retained={@canvas_retained}
           />
         </div>
       <% end %>
@@ -495,6 +550,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <span><%= @doc_stats.words %> words</span>
         <span class="bp-paper-footer-sep">·</span>
         <span><%= @doc_stats.blocks %> blocks</span>
+        <span
+          :if={@canvas_eligible and @doc_type == "paper"}
+          class="bp-paper-history-controls"
+          role="group"
+          aria-label="Content change history"
+        >
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            data-paper-history-action="undo"
+            aria-label="Undo content change"
+            disabled
+          >Undo</button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            data-paper-history-action="redo"
+            aria-label="Redo content change"
+            disabled
+          >Redo</button>
+          <span data-paper-history-status role="status" aria-live="polite"></span>
+        </span>
         <%!-- sup-w5 — the save affordance now ECHOES the socket-owned
               @save_status instead of a hardcoded "✓ Auto-saved" that lied
               through "Save failed"/plugin halts. role=status + aria-live=polite
@@ -829,7 +906,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-document-rev={@document_rev}
       data-paper-container-id={@container_id}
       data-paper-container-run={@container_id && @run_ordinal}
-      data-paper-container-kind={@container_kind}
+      data-paper-container-kind={if is_nil(@container_id), do: "document", else: @container_kind}
       data-paper-container-row-id={@container_row_id}
       data-paper-container-column-index={@container_column_index}
       data-test-id="paper-canvas-run"
@@ -920,6 +997,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:paper_links, :map, default: %{})
   attr(:tree_identity_safe, :boolean, default: true)
   attr(:table_editor_target_ids, :any, default: nil)
+  attr(:canvas_retained, :any, default: nil)
 
   def edit_block(assigns) do
     ~H"""
@@ -1015,6 +1093,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         paper_links={@paper_links}
         tree_identity_safe={@tree_identity_safe}
         table_editor_target_ids={@table_editor_target_ids}
+        canvas_retained={@canvas_retained}
       />
     </div>
     """
@@ -1409,6 +1488,603 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     """
   end
 
+  defp card_action_present?(%{"slots" => %{"action" => [%{"type" => "action"}]}}),
+    do: true
+
+  defp card_action_present?(_block), do: false
+
+  defp card_image_direct?(%{"slots" => %{"media" => [media]}}) when is_map(media) do
+    is_binary(media["src"]) and media["src"] != "" and
+      (not Map.has_key?(media, "type") or media["type"] == "image")
+  end
+
+  defp card_image_direct?(_block), do: false
+
+  defp card_image_dom_id(block_id),
+    do: "card-image-" <> Base.url_encode64(block_id, padding: false)
+
+  defp card_image_trigger_label(block) do
+    case get_in(block, ["slots", "media"]) do
+      [%{"alt" => alt}] when is_binary(alt) and alt != "" -> "Replace card image: " <> alt
+      _ -> "Replace card image"
+    end
+  end
+
+  defp card_action_label_dom_id(block_id),
+    do: "card-action-label-" <> Base.url_encode64(block_id, padding: false)
+
+  defp card_title_dom_id(block_id),
+    do: "card-title-" <> Base.url_encode64(block_id, padding: false)
+
+  defp card_title_direct_state(%{"slots" => %{"title" => [%{} = title]}}) do
+    with false <- is_struct(title),
+         "heading" <- title["type"],
+         true <- Map.has_key?(title, "text") and is_binary(title["text"]),
+         true <- card_title_plain_content?(title),
+         {:ok, level} <- card_title_direct_level(title) do
+      {:ok, %{text: title["text"], level: level}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp card_title_direct_state(_block), do: :error
+
+  defp card_title_content_readonly?(%{"slots" => %{"title" => [%{"type" => "heading"} = title]}}) do
+    Map.has_key?(title, "content") and title["content"] not in [nil, []]
+  end
+
+  defp card_title_content_readonly?(_block), do: false
+
+  defp card_title_plain_content?(title) do
+    not Map.has_key?(title, "content") or title["content"] in [nil, []]
+  end
+
+  defp card_title_direct_level(title) do
+    case Map.fetch(title, "level") do
+      :error -> {:ok, 2}
+      {:ok, nil} -> {:ok, 2}
+      {:ok, level} when level in [1, 2, 3] -> {:ok, level}
+      {:ok, "1"} -> {:ok, 1}
+      {:ok, "2"} -> {:ok, 2}
+      {:ok, "3"} -> {:ok, 3}
+      _ -> :error
+    end
+  end
+
+  attr(:block, :map, required: true)
+  attr(:title, :map, required: true)
+
+  defp card_title_editor(assigns) do
+    assigns = assign(assigns, :dom_id, card_title_dom_id(assigns.block["id"]))
+
+    ~H"""
+    <form
+      id={@dom_id <> "-form"}
+      class="bp-paper-edit-form bp-paper-card-title-form"
+      phx-submit="paper-edit-block"
+      phx-change="paper-block-autosave"
+      phx-debounce="500"
+      data-test-id="paper-card-title-form"
+    >
+      <input type="hidden" name="block_id" value={@block["id"]} />
+      <.dynamic_tag
+        tag_name={"h#{@title.level}"}
+        class="bp-paper-card-title-heading bp-paper-card-title-owner"
+        data-paper-card-title-owner
+        data-paper-card-title-empty={@title.text == "" && "true"}
+      >
+        <button
+          type="button"
+          class="bp-paper-card-title-paint"
+          phx-click={JS.focus(to: "#" <> @dom_id)}
+          aria-label={if @title.text == "", do: "Edit card title", else: "Edit card title: " <> @title.text}
+          aria-controls={@dom_id}
+          data-paper-card-title-paint
+        ><%= @title.text %></button>
+        <textarea
+          id={@dom_id}
+          name="card-title"
+          rows="1"
+          class="bp-paper-inline-text bp-paper-card-title-input"
+          aria-label="Card title"
+          placeholder="Card title"
+          phx-hook="BarkparkPaperAutoSize"
+        ><%= @title.text %></textarea>
+      </.dynamic_tag>
+    </form>
+    """
+  end
+
+  attr(:block, :map, required: true)
+  attr(:state, :map, required: true)
+
+  defp card_action_label_editor(assigns) do
+    assigns =
+      assigns
+      |> assign(:dom_id, card_action_label_dom_id(assigns.block["id"]))
+      |> assign(
+        :button_class,
+        if(assigns.state.action_priority == "primary",
+          do: "bp-button bp-button--primary",
+          else: "bp-button"
+        )
+      )
+
+    ~H"""
+    <div class="bp-paper-card-action-label-owner" data-paper-card-action-label-owner>
+      <button
+        type="button"
+        class={@button_class}
+        data-paper-card-action-paint
+        aria-label={"Edit card action label: " <> @state.action_label}
+        aria-controls={@dom_id}
+        phx-click={JS.focus(to: "#" <> @dom_id)}
+      ><%= @state.action_label %></button>
+      <form
+        id={@dom_id <> "-form"}
+        class={"bp-paper-edit-form bp-paper-card-action-label-form " <> @button_class}
+        phx-submit="paper-edit-block"
+        phx-change="paper-block-autosave"
+        phx-debounce="500"
+        data-test-id="paper-card-action-label-form"
+      >
+        <input type="hidden" name="block_id" value={@block["id"]} />
+        <label class="sr-only" for={@dom_id}>Card action label</label>
+        <textarea
+          id={@dom_id}
+          name="card-action-label"
+          rows="1"
+          class="bp-paper-inline-text bp-paper-card-action-label-input"
+          aria-label="Card action label"
+          phx-hook="BarkparkPaperAutoSize"
+        ><%= @state.action_label %></textarea>
+      </form>
+    </div>
+    """
+  end
+
+  attr(:block, :map, required: true)
+  attr(:grid, :boolean, default: false)
+
+  defp section_title_editor(assigns) do
+    title = Map.get(assigns.block, "title")
+
+    assigns =
+      assigns
+      |> assign(:title, title || "")
+      |> assign(:title_empty, title in [nil, ""])
+      |> assign(:title_dom_id, section_title_dom_id(assigns.block["id"]))
+
+    ~H"""
+    <div
+      class={[
+        "bp-paper-section-title-editor",
+        @grid && "bp-section__title",
+        !@grid && "bp-paper-section-title-editor--stack"
+      ]}
+      style="font-weight:bold"
+      data-paper-section-title-editor
+      data-paper-section-title-empty={@title_empty && "true"}
+    >
+      <button
+        :if={!@title_empty}
+        type="button"
+        class="bp-paper-section-title-paint"
+        phx-click={JS.focus(to: "#" <> @title_dom_id)}
+        aria-label={"Edit section title: " <> @title}
+        aria-controls={@title_dom_id}
+        data-paper-section-title-paint
+      ><%= @title %></button>
+      <form
+        id={"section-form-" <> @block["id"]}
+        name="section-config"
+        class="bp-paper-edit-form bp-paper-section-title-form"
+        phx-submit="paper-edit-block"
+        phx-change="paper-block-autosave"
+        phx-debounce="500"
+        data-test-id="paper-section-config-editor"
+      >
+        <input type="hidden" name="block_id" value={@block["id"]} />
+        <label class="sr-only" for={@title_dom_id}>Section title</label>
+        <textarea
+          id={@title_dom_id}
+          name="title"
+          rows="1"
+          class="bp-paper-inline-text bp-paper-section-title-input"
+          aria-label="Section title"
+          placeholder="Section title"
+          phx-hook="BarkparkPaperAutoSize"
+          data-test-id="paper-field-title"
+        ><%= @title %></textarea>
+      </form>
+    </div>
+    """
+  end
+
+  defp section_title_dom_id(block_id) do
+    "section-title-" <> Base.url_encode64(block_id, padding: false)
+  end
+
+  attr(:block, :map, required: true)
+  attr(:paper_links, :map, default: %{})
+
+  defp paper_links_preview(assigns) do
+    presentation =
+      assigns.block
+      |> Map.put("_paper_links", assigns.paper_links)
+      |> Compose.paper_links_presentation(:article)
+
+    cards =
+      Enum.map(presentation.cards, fn card ->
+        admission =
+          case Blocks.paper_link_reference_copy_admission(assigns.block, card.index) do
+            {:ok, admitted} -> admitted
+            {:error, _reason} -> nil
+          end
+
+        card
+        |> Map.put(:admission, admission)
+        |> Map.put(
+          :title_admission,
+          paper_link_ref_field_admission(assigns.block, card.index, "title")
+        )
+        |> Map.put(
+          :description_admission,
+          paper_link_ref_field_admission(assigns.block, card.index, "description")
+        )
+      end)
+
+    assigns =
+      assigns
+      |> assign(:presentation, presentation)
+      |> assign(:cards, cards)
+
+    ~H"""
+    <div class="bp-paper-contextual-preview" data-test-id="paper-links-preview">
+      <%= if @presentation.empty? do %>
+        <.paper_links_header_editor block={@block} presentation={@presentation} empty />
+      <% else %>
+        <section
+          data-paper-links
+          data-layout={@presentation.layout}
+          aria-label={@presentation.title}
+          style={@presentation.section_style}
+        >
+          <.paper_links_header_editor block={@block} presentation={@presentation} />
+          <div style={@presentation.grid_style}>
+            <.paper_link_card_editor :for={card <- @cards} block={@block} card={card} />
+          </div>
+        </section>
+      <% end %>
+    </div>
+    """
+  end
+
+  attr(:block, :map, required: true)
+  attr(:presentation, :map, required: true)
+  attr(:empty, :boolean, default: false)
+
+  defp paper_links_header_editor(assigns) do
+    assigns =
+      assigns
+      |> assign(:title_dom_id, paper_links_dom_id("title", assigns.block["id"]))
+      |> assign(:description_dom_id, paper_links_dom_id("description", assigns.block["id"]))
+
+    ~H"""
+    <header
+      class="bp-paper-links-header-editor"
+      style={@presentation.header_style}
+      data-paper-links-header-empty={@empty && "true"}
+    >
+      <div
+        class="bp-paper-links-title-owner"
+        style={@presentation.title_style <> ";font-weight:bold"}
+        data-paper-links-title-default={@presentation.title_default? && "true"}
+      >
+        <h2
+          :if={!@empty}
+          class="bp-paper-links-title-heading"
+          style="margin:0;font:inherit;color:inherit"
+        >
+          <button
+            type="button"
+            phx-click={JS.focus(to: "#" <> @title_dom_id)}
+            aria-label={"Edit related papers heading: " <> @presentation.title}
+            aria-controls={@title_dom_id}
+            data-paper-links-title-paint
+          ><%= @presentation.title %></button>
+        </h2>
+        <form
+          id={"paper-links-title-form-" <> @block["id"]}
+          class="bp-paper-edit-form bp-paper-links-title-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+          data-test-id="paper-links-title-editor"
+        >
+          <input type="hidden" name="block_id" value={@block["id"]} />
+          <label class="sr-only" for={@title_dom_id}>Related papers heading</label>
+          <textarea
+            id={@title_dom_id}
+            name="title"
+            rows="1"
+            class="bp-paper-inline-text bp-paper-links-title-input"
+            aria-label="Related papers heading"
+            placeholder={@presentation.title}
+            phx-hook="BarkparkPaperAutoSize"
+            tabindex={@empty && "-1"}
+          ><%= @presentation.title_source %></textarea>
+        </form>
+      </div>
+
+      <div
+        class="bp-paper-links-description-owner"
+        style={@presentation.description_style}
+        data-paper-links-description-empty={is_nil(@presentation.description) && "true"}
+      >
+        <p
+          :if={!@empty && @presentation.description}
+          class="bp-paper-links-description-paragraph"
+          style="margin:0;font:inherit;color:inherit"
+        >
+          <button
+            type="button"
+            phx-click={JS.focus(to: "#" <> @description_dom_id)}
+            aria-label="Edit related papers description"
+            aria-controls={@description_dom_id}
+            data-paper-links-description-paint
+          ><%= @presentation.description %></button>
+        </p>
+        <form
+          id={"paper-links-description-form-" <> @block["id"]}
+          class="bp-paper-edit-form bp-paper-links-description-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+          data-test-id="paper-links-description-editor"
+        >
+          <input type="hidden" name="block_id" value={@block["id"]} />
+          <label class="sr-only" for={@description_dom_id}>Related papers description</label>
+          <textarea
+            id={@description_dom_id}
+            name="description"
+            rows="1"
+            class="bp-paper-inline-text bp-paper-links-description-input"
+            aria-label="Related papers description"
+            placeholder="Add a description"
+            phx-hook="BarkparkPaperAutoSize"
+            tabindex={@empty && "-1"}
+          ><%= @presentation.description_source %></textarea>
+        </form>
+      </div>
+    </header>
+    """
+  end
+
+  defp paper_links_dom_id(field, block_id) do
+    "paper-links-#{field}-" <> Base.url_encode64(block_id, padding: false)
+  end
+
+  attr(:block, :map, required: true)
+  attr(:card, :map, required: true)
+
+  defp paper_link_card_editor(%{card: %{admission: nil}} = assigns) do
+    ~H"""
+    <%= raw(@card.html) %>
+    """
+  end
+
+  defp paper_link_card_editor(assigns) do
+    assigns =
+      assigns
+      |> assign(
+        :title_dom_id,
+        paper_link_ref_field_dom_id(
+          "title",
+          assigns.block["id"],
+          assigns.card.index,
+          assigns.card.title_admission
+        )
+      )
+      |> assign(
+        :description_dom_id,
+        paper_link_ref_field_dom_id(
+          "description",
+          assigns.block["id"],
+          assigns.card.index,
+          assigns.card.description_admission
+        )
+      )
+
+    ~H"""
+    <div
+      class="bp-paper-link-ref-card"
+      data-paper-link-card
+      data-paper-link-card-editable
+      data-paper-link-ref-index={@card.index}
+      data-chapter={@card.kind == :chapters && ""}
+      data-timeline-stop={@card.kind == :timeline && ""}
+      style={@card.card_style}
+    >
+      <a
+        class="bp-paper-link-ref-open"
+        data-paper-link-open
+        href={@card.href}
+        aria-label={"Open paper: " <> @card.title}
+      ><span class="bp-paper-link-open-label">Open paper</span></a>
+      <%= raw(@card.before_title_html) %>
+      <.paper_link_ref_title block={@block} card={@card} dom_id={@title_dom_id} />
+      <.paper_link_ref_description block={@block} card={@card} dom_id={@description_dom_id} />
+      <%= raw(@card.after_copy_html) %>
+      <span :if={@card.footer_text} style={@card.footer_style}>
+        <%= @card.footer_text %> &nbsp;→
+      </span>
+    </div>
+    """
+  end
+
+  attr(:block, :map, required: true)
+  attr(:card, :map, required: true)
+  attr(:dom_id, :string, required: true)
+
+  defp paper_link_ref_title(assigns) do
+    ~H"""
+    <div
+      class="bp-paper-link-ref-title-owner"
+      data-paper-link-ref-title-empty={!@card.title_authored? && "true"}
+      style={paper_link_ref_title_owner_style(@card)}
+    >
+      <strong class="bp-paper-link-ref-title-heading" style="font:inherit;color:inherit">
+        <button
+          :if={@card.title_authored? && @card.title_admission}
+          type="button"
+          phx-click={JS.focus(to: "#" <> @dom_id)}
+          aria-label={"Edit related paper title: " <> @card.title}
+          aria-controls={@dom_id}
+          data-paper-link-ref-title-paint
+        ><%= @card.title %></button>
+        <span :if={!@card.title_authored? || !@card.title_admission}><%= @card.title %></span>
+      </strong>
+      <.paper_link_ref_form
+        :if={@card.title_admission}
+        block={@block}
+        card={@card}
+        dom_id={@dom_id}
+        field="title"
+        source={@card.title_source}
+        authored={@card.title_authored?}
+        placeholder={@card.title}
+      />
+    </div>
+    """
+  end
+
+  attr(:block, :map, required: true)
+  attr(:card, :map, required: true)
+  attr(:dom_id, :string, required: true)
+
+  defp paper_link_ref_description(assigns) do
+    ~H"""
+    <div
+      class="bp-paper-link-ref-description-owner"
+      data-paper-link-ref-description-empty={is_nil(@card.description) && "true"}
+      style={@card.description_style}
+    >
+      <span :if={@card.description} class="bp-paper-link-ref-description-paint-wrapper">
+        <button
+          :if={@card.description_authored? && @card.description_admission}
+          type="button"
+          phx-click={JS.focus(to: "#" <> @dom_id)}
+          aria-label="Edit related paper description"
+          aria-controls={@dom_id}
+          data-paper-link-ref-description-paint
+        ><%= @card.description %></button>
+        <span :if={!@card.description_authored? || !@card.description_admission}><%= @card.description %></span>
+      </span>
+      <.paper_link_ref_form
+        :if={@card.description_admission}
+        block={@block}
+        card={@card}
+        dom_id={@dom_id}
+        field="description"
+        source={@card.description_source}
+        authored={@card.description_authored?}
+        placeholder={@card.description || "Add a description"}
+      />
+    </div>
+    """
+  end
+
+  attr(:block, :map, required: true)
+  attr(:card, :map, required: true)
+  attr(:dom_id, :string, required: true)
+  attr(:field, :string, required: true)
+  attr(:source, :string, required: true)
+  attr(:authored, :boolean, required: true)
+  attr(:placeholder, :string, required: true)
+
+  defp paper_link_ref_form(assigns) do
+    ~H"""
+    <form
+      id={@dom_id <> "-form"}
+      class={"bp-paper-edit-form bp-paper-link-ref-#{@field}-form"}
+      phx-submit="paper-edit-block"
+      phx-change="paper-block-autosave"
+      phx-debounce="500"
+      data-test-id={"paper-link-ref-#{@field}-editor"}
+    >
+      <input type="hidden" name="block_id" value={@block["id"]} />
+      <input type="hidden" name="paper-link-ref-index" value={@card.index} />
+      <input type="hidden" name="paper-link-ref-slug" value={@card.admission.slug} />
+      <input type="hidden" name="paper-link-ref-field" value={@field} />
+      <input type="hidden" name="paper-link-ref-guard" value={@card.admission.guard} />
+      <label class="sr-only" for={@dom_id}>Related paper <%= @field %></label>
+      <textarea
+        id={@dom_id}
+        name="paper-link-ref-value"
+        rows="1"
+        class={"bp-paper-inline-text bp-paper-link-ref-#{@field}-input"}
+        aria-label={"Related paper #{@field}"}
+        placeholder={@placeholder}
+        phx-hook="BarkparkPaperAutoSize"
+        tabindex={!@authored && "-1"}
+      ><%= @source %></textarea>
+    </form>
+    """
+  end
+
+  defp paper_link_ref_dom_id(field, block_id, index, guard) do
+    identity_digest =
+      :crypto.hash(:sha256, guard)
+      |> Base.url_encode64(padding: false)
+
+    "paper-link-ref-#{field}-" <>
+      Base.url_encode64(block_id, padding: false) <>
+      "-" <> Integer.to_string(index) <> "-" <> identity_digest
+  end
+
+  defp paper_link_ref_field_admission(block, index, field) do
+    case Blocks.paper_link_reference_copy_admission(block, index, field) do
+      {:ok, admission} -> admission
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp paper_link_ref_field_dom_id(field, block_id, index, %{guard: guard}),
+    do: paper_link_ref_dom_id(field, block_id, index, guard)
+
+  defp paper_link_ref_field_dom_id(_field, _block_id, _index, nil), do: nil
+
+  defp contextual_panel_focus(dom_id) do
+    JS.remove_attribute("open", to: {:closest, ".bp-paper-contextual-controls"})
+    |> JS.focus(to: "#" <> dom_id)
+  end
+
+  defp paper_link_ref_title_owner_style(%{kind: :default, title_style: style}),
+    do: style <> ";font-weight:bold"
+
+  defp paper_link_ref_title_owner_style(card), do: card.title_style
+
+  defp paper_links_field_absent?(block, field) do
+    case Map.get(block, field) do
+      value when is_binary(value) -> String.trim(value) == ""
+      value when is_integer(value) -> false
+      _value -> true
+    end
+  end
+
+  defp paper_link_ref_field_representable?(ref, field)
+       when is_map(ref) and not is_struct(ref) do
+    case Map.fetch(ref, field) do
+      :error -> true
+      {:ok, value} -> is_nil(value) or is_binary(value) or is_integer(value)
+    end
+  end
+
+  defp paper_link_ref_field_representable?(ref, _field) when is_binary(ref), do: true
+  defp paper_link_ref_field_representable?(_ref, _field), do: false
+
   # Per-block-type edit fields. Rich bodies use the canonical WC so its
   # PortableDoc conversion preserves marks and links while text changes.
   # Ordinary forms remain for scalar chrome such as callout tone/title/fold.
@@ -1426,6 +2102,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:paper_links, :map, default: %{})
   attr(:tree_identity_safe, :boolean, default: nil)
   attr(:table_editor_target_ids, :any, default: nil)
+  attr(:canvas_retained, :any, default: nil)
 
   def paper_block_fields(assigns) do
     tree_identity_safe =
@@ -1723,6 +2400,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           paper_links={@paper_links}
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
+                          canvas_retained={@canvas_retained}
                         />
                     <% end %>
                   <% end %>
@@ -1794,12 +2472,64 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <%= case Blocks.card_form_state(@block) do %>
             <% {:ok, state} -> %>
               <% parts = RenderComponents.card_article_parts(@block) %>
+              <% direct_image = @picker_browse && card_image_direct?(@block) %>
+              <% direct_title = card_title_direct_state(@block) %>
+              <% title_content_readonly = card_title_content_readonly?(@block) %>
               <div class="bp-paper-contextual-preview" data-test-id="paper-card-preview">
                 <div class={parts.class}>
-                  <%= raw(parts.media_html) %>
-                  <%= raw(parts.title_html) %>
+                  <%= if direct_image do %>
+                    <div
+                      id={card_image_dom_id(@id)}
+                      class="bp-paper-card-image bp-paper-figure-image"
+                      phx-hook="BarkparkFigureImageBridge"
+                      data-image-owner="card"
+                      data-block-id={@id}
+                      data-image-src={state.media_src}
+                      data-test-id="paper-card-image-preview"
+                    >
+                      <%= raw(String.replace(parts.media_html, ~s( data-bp-lightboxable="true"), "")) %>
+                      <button
+                        id={card_image_dom_id(@id) <> "-trigger"}
+                        type="button"
+                        class="bp-paper-figure-image-trigger"
+                        data-paper-figure-image-trigger
+                        aria-label={card_image_trigger_label(@block)}
+                        aria-haspopup="dialog"
+                        data-test-id="paper-card-image-edit-trigger"
+                      ></button>
+                      <details class="bp-paper-figure-image-controls" data-test-id="paper-card-image-picker">
+                        <summary>Image options</summary>
+                        <div
+                          id={card_image_dom_id(@id) <> "-picker"}
+                          class="bp-paper-figure-image-picker"
+                          phx-update="ignore"
+                        >
+                          <bp-media-picker
+                            value={state.media_src}
+                            dataset={@dataset}
+                            scope-prefix={@scope_prefix}
+                            data-token={@api_token_raw}
+                            data-paper-figure-image-picker
+                            data-test-id="paper-block-image-picker"
+                          ></bp-media-picker>
+                        </div>
+                      </details>
+                    </div>
+                  <% else %>
+                    <%= raw(parts.media_html) %>
+                  <% end %>
+                  <%= case direct_title do %>
+                    <% {:ok, title} -> %>
+                      <.card_title_editor block={@block} title={title} />
+                    <% :error -> %>
+                      <%= raw(parts.title_html) %>
+                  <% end %>
                   <.card_body_editor block={@block} />
-                  <%= raw(parts.action_html) %>
+                  <%= if card_action_present?(@block) do %>
+                    <.card_action_label_editor block={@block} state={state} />
+                  <% else %>
+                    <%= raw(parts.action_html) %>
+                  <% end %>
                 </div>
               </div>
               <details
@@ -1826,14 +2556,51 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         selected={value == state.tone}
                       ><%= label %></option>
                     </select>
-                    <label class="bp-paper-edit-fieldlabel" for={"card-title-" <> @id}>Title</label>
-                    <input id={"card-title-" <> @id} type="text" name="card-title" class="bp-paper-edit-text" value={state.title} />
-                    <label class="bp-paper-edit-fieldlabel" for={"card-media-src-" <> @id}>Media source</label>
-                    <input id={"card-media-src-" <> @id} type="text" name="card-media-src" class="bp-paper-edit-text" value={state.media_src} />
+                    <%= case direct_title do %>
+                      <% {:ok, _title} -> %>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm"
+                          data-test-id="paper-card-title-focus"
+                          aria-controls={card_title_dom_id(@id)}
+                          phx-click={contextual_panel_focus(card_title_dom_id(@id))}
+                        >Edit title</button>
+                      <% :error -> %>
+                        <%= if title_content_readonly do %>
+                          <p class="bp-paper-edit-readonly" data-test-id="paper-card-title-readonly">
+                            This Card title uses rich content and remains reader-only here.
+                          </p>
+                        <% else %>
+                          <label class="bp-paper-edit-fieldlabel" for={"card-title-" <> @id}>Title</label>
+                          <input id={"card-title-" <> @id} type="text" name="card-title" class="bp-paper-edit-text" value={state.title} />
+                        <% end %>
+                    <% end %>
+                    <%= if direct_image do %>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-sm"
+                        data-test-id="paper-card-image-focus"
+                        aria-controls={card_image_dom_id(@id) <> "-trigger"}
+                        phx-click={contextual_panel_focus(card_image_dom_id(@id) <> "-trigger")}
+                      >Replace image</button>
+                    <% else %>
+                      <label class="bp-paper-edit-fieldlabel" for={"card-media-src-" <> @id}>Media source</label>
+                      <input id={"card-media-src-" <> @id} type="text" name="card-media-src" class="bp-paper-edit-text" value={state.media_src} />
+                    <% end %>
                     <label class="bp-paper-edit-fieldlabel" for={"card-media-alt-" <> @id}>Media description</label>
                     <input id={"card-media-alt-" <> @id} type="text" name="card-media-alt" class="bp-paper-edit-text" value={state.media_alt} />
-                    <label class="bp-paper-edit-fieldlabel" for={"card-action-label-" <> @id}>Action label</label>
-                    <input id={"card-action-label-" <> @id} type="text" name="card-action-label" class="bp-paper-edit-text" value={state.action_label} />
+                    <%= if card_action_present?(@block) do %>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-sm"
+                        data-test-id="paper-card-action-label-focus"
+                        aria-controls={card_action_label_dom_id(@id)}
+                        phx-click={contextual_panel_focus(card_action_label_dom_id(@id))}
+                      >Edit action label</button>
+                    <% else %>
+                      <label class="bp-paper-edit-fieldlabel" for={"card-action-label-" <> @id}>Action label</label>
+                      <input id={"card-action-label-" <> @id} type="text" name="card-action-label" class="bp-paper-edit-text" value={state.action_label} />
+                    <% end %>
                     <label class="bp-paper-edit-fieldlabel" for={"card-action-href-" <> @id}>Action destination</label>
                     <input id={"card-action-href-" <> @id} type="text" name="card-action-href" class="bp-paper-edit-text" value={state.action_href} />
                     <label class="bp-paper-edit-fieldlabel" for={"card-action-priority-" <> @id}>Action priority</label>
@@ -1861,64 +2628,136 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <%= if editable_figure_child?(@block) do %>
             <figure
               class="bp-paper-figure-editor-frame"
-              style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"
+              style={figure_editor_frame_style(@block)}
             >
               <div class="bp-paper-figure-editor-child" data-test-id="paper-figure-child">
-                <%= case figure_child_segment(@block, @canvas_enabled) do %>
-                  <% {:run, [child], run_ordinal} -> %>
-                    <.canvas_run
-                      slug={PaperCanvas.figure_run_slug(@root_slug, @id)}
-                      run_blocks={[child]}
-                      run_ordinal={run_ordinal}
-                      dataset={@dataset}
-                      api_token_raw={@api_token_raw}
-                      scope_prefix={@scope_prefix}
-                      picker_browse={@picker_browse}
-                      doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
-                      paper_rev={@doc_type == "paper" && @paper_rev}
-                      document_rev={@doc_type != "paper" && @document_rev}
-                      container_id={@id}
-                      container_kind="figure"
-                    />
-                  <% {:block, child} -> %>
-                    <.paper_block_fields
-                      block={child}
-                      dataset={@dataset}
-                      api_token_raw={@api_token_raw}
-                      scope_prefix={@scope_prefix}
-                      picker_browse={@picker_browse}
-                      doc_type={@doc_type}
-                      paper_rev={@paper_rev}
-                      document_rev={@document_rev}
-                      root_slug={@root_slug}
-                      doc_key={@doc_key}
-                      canvas_enabled={@canvas_enabled}
-                      paper_links={@paper_links}
-                      tree_identity_safe={@tree_identity_safe}
-                      table_editor_target_ids={@table_editor_target_ids}
-                    />
+                <%= if image_figure_child?(@block) do %>
+                  <% child = Map.fetch!(@block, "child") %>
+                  <div
+                    id={"paper-figure-image-" <> child["id"]}
+                    class="bp-paper-figure-image"
+                    phx-hook={@picker_browse && "BarkparkFigureImageBridge"}
+                    data-block-id={child["id"]}
+                    data-image-src={image_block_src(child)}
+                    data-test-id="paper-figure-image-preview"
+                    data-figure-id={@id}
+                    data-child-id={child["id"]}
+                  >
+                    <div class="bp-paper-figure-image-paint">
+                      <%= raw(figure_image_editor_html(child, @paper_links, @picker_browse)) %>
+                    </div>
+                    <button
+                      :if={@picker_browse}
+                      type="button"
+                      class="bp-paper-figure-image-trigger"
+                      data-paper-figure-image-trigger
+                      aria-label={figure_image_trigger_label(child)}
+                      aria-haspopup="dialog"
+                      data-test-id="paper-figure-image-edit-trigger"
+                    ></button>
+                    <details
+                      :if={@picker_browse}
+                      class="bp-paper-figure-image-controls"
+                      data-test-id="paper-figure-image-picker"
+                    >
+                      <summary>Image options</summary>
+                      <div
+                        id={"paper-figure-image-picker-" <> child["id"]}
+                        class="bp-paper-figure-image-picker"
+                        phx-update="ignore"
+                      >
+                        <bp-media-picker
+                          value={image_block_src(child)}
+                          dataset={@dataset}
+                          scope-prefix={@scope_prefix}
+                          data-token={@api_token_raw}
+                          data-paper-figure-image-picker
+                          data-test-id="paper-block-image-picker"
+                        ></bp-media-picker>
+                      </div>
+                    </details>
+                  </div>
+                <% else %>
+                  <%= case figure_child_segment(@block, @canvas_enabled) do %>
+                    <% {:run, [child], run_ordinal} -> %>
+                      <.canvas_run
+                        slug={PaperCanvas.figure_run_slug(@root_slug, @id)}
+                        run_blocks={[child]}
+                        run_ordinal={run_ordinal}
+                        dataset={@dataset}
+                        api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix}
+                        picker_browse={@picker_browse}
+                        doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                        paper_rev={@doc_type == "paper" && @paper_rev}
+                        document_rev={@doc_type != "paper" && @document_rev}
+                        container_id={@id}
+                        container_kind="figure"
+                      />
+                    <% {:block, child} -> %>
+                      <.paper_block_fields
+                        block={child}
+                        dataset={@dataset}
+                        api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix}
+                        picker_browse={@picker_browse}
+                        doc_type={@doc_type}
+                        paper_rev={@paper_rev}
+                        document_rev={@document_rev}
+                        root_slug={@root_slug}
+                        doc_key={@doc_key}
+                        canvas_enabled={@canvas_enabled}
+                        paper_links={@paper_links}
+                        tree_identity_safe={@tree_identity_safe}
+                        table_editor_target_ids={@table_editor_target_ids}
+                        canvas_retained={@canvas_retained}
+                      />
+                  <% end %>
                 <% end %>
               </div>
-              <figcaption class="bp-figcaption">
+              <% caption = figure_caption_value(@block) %>
+              <figcaption
+                class="bp-figcaption"
+                data-paper-figure-caption-empty={caption == "" && "true"}
+              >
+                <button
+                  :if={caption == ""}
+                  type="button"
+                  class="bp-paper-figure-caption-add"
+                  phx-click={JS.focus(to: "#figure-caption-" <> @id)}
+                  data-paper-figure-caption-add
+                >Add caption</button>
+                <button
+                  :if={caption != ""}
+                  id={"figure-caption-paint-" <> @id}
+                  type="button"
+                  class="bp-paper-figure-caption-paint"
+                  phx-click={JS.focus(to: "#figure-caption-" <> @id)}
+                  aria-label={"Edit figure caption: " <> caption}
+                  aria-controls={"figure-caption-" <> @id}
+                  data-paper-figure-caption-paint
+                ><%= raw(Figures.figcaption_inner(caption)) %></button>
                 <form
                   id={"figure-form-" <> @id}
-                  class="bp-paper-edit-form"
+                  class="bp-paper-edit-form bp-paper-figure-caption-form"
                   phx-submit="paper-edit-block"
                   phx-change="paper-block-autosave"
                   phx-debounce="500"
                   data-test-id="paper-figure-caption-editor"
                 >
                   <input type="hidden" name="block_id" value={@id} />
-                  <label class="bp-paper-edit-fieldlabel" for={"figure-caption-" <> @id}>
+                  <label class="sr-only" for={"figure-caption-" <> @id}>
                     Caption
                   </label>
-                  <input
+                  <textarea
                     id={"figure-caption-" <> @id}
-                    type="text"
                     name="caption"
-                    class="bp-paper-edit-text"
-                    value={Blocks.form_value(Map.get(@block, "caption"))}
-                  />
+                    rows="1"
+                    class="bp-paper-inline-text bp-paper-figure-caption-input"
+                    aria-label="Figure caption"
+                    placeholder="Add caption…"
+                    phx-hook="BarkparkPaperAutoSize"
+                  ><%= caption %></textarea>
                 </form>
               </figcaption>
             </figure>
@@ -2271,27 +3110,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% "pullquote" -> %>
         <.rich_body_editor block={@block} />
       <% "blockquote" -> %>
-        <form
-          id={"blockquote-form-" <> @id}
-          class="bp-paper-edit-form"
-          phx-submit="paper-edit-block"
-          phx-change="paper-block-autosave"
-          phx-debounce="500"
-          data-test-id="paper-blockquote-editor"
-        >
-          <input type="hidden" name="block_id" value={@id} />
-          <label class="bp-paper-edit-fieldlabel" for={"blockquote-cite-" <> @id}>Attribution</label>
-          <input
-            id={"blockquote-cite-" <> @id}
-            type="text"
-            name="cite"
-            class="bp-paper-edit-text"
-            value={Blocks.form_value(Blocks.blockquote_cite_value(@block))}
-            placeholder="Author or source (optional)"
-            data-test-id="paper-field-blockquote-cite"
-          />
-        </form>
-        <.rich_body_editor block={@block} />
+        <blockquote class="bp-blockquote bp-paper-contextual-preview bp-paper-quote-editor">
+          <.rich_body_editor block={@block} />
+          <form
+            id={"blockquote-form-" <> @id}
+            class="bp-paper-edit-form bp-paper-quote-cite-form"
+            phx-submit="paper-edit-block"
+            phx-change="paper-block-autosave"
+            phx-debounce="500"
+            data-test-id="paper-blockquote-editor"
+          >
+            <input type="hidden" name="block_id" value={@id} />
+            <cite class="bp-blockquote__cite">
+              <textarea
+                id={"blockquote-cite-" <> @id}
+                name="cite"
+                rows="1"
+                class="bp-paper-inline-text"
+                aria-label="Quote attribution"
+                placeholder="Add author or source…"
+                phx-hook="BarkparkPaperAutoSize"
+                data-test-id="paper-field-blockquote-cite"
+              ><%= Blocks.form_value(Blocks.blockquote_cite_value(@block)) %></textarea>
+            </cite>
+          </form>
+        </blockquote>
       <% "section" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-section-editor">
           <%= if editable_section?(@block, @tree_identity_safe) do %>
@@ -2302,7 +3145,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             >
               <%= if grid = SectionLayout.grid(@block) do %>
                 <hr class="bp-hr" />
-                <div :if={not is_nil(@block["title"])} class="bp-section__title" style="font-weight:bold"><%= @block["title"] %></div>
+                <.section_title_editor block={@block} grid />
                 <div class="bp-section__grid" style={grid.style}>
                   <div
                     :for={child <- @block["blocks"]}
@@ -2317,14 +3160,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       paper_links={@paper_links}
                       tree_identity_safe={@tree_identity_safe}
                       table_editor_target_ids={@table_editor_target_ids}
+                      canvas_retained={@canvas_retained}
                     />
                   </div>
                 </div>
                 <hr class="bp-hr" />
               <% else %>
                 <%= if SectionLayout.stack_rules?(@block, :article) do %><hr class="bp-hr" style="border-top-width:1px" /><% end %>
-                <span :if={not is_nil(@block["title"])} style="font-weight:bold"><%= @block["title"] %></span>
-                <%= for segment <- section_segments(@block, @canvas_enabled) do %>
+                <.section_title_editor block={@block} />
+                <%= for segment <- section_segments(@block, @canvas_enabled, @canvas_retained, @root_slug) do %>
                   <%= case segment do %>
                     <% {:run, run_blocks, ordinal} -> %>
                       <.canvas_run
@@ -2345,6 +3189,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         paper_links={@paper_links}
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
+                        canvas_retained={@canvas_retained}
                       />
                   <% end %>
                 <% end %>
@@ -2354,11 +3199,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             <details id={"section-controls-" <> @id} class="bp-paper-contextual-controls bp-paper-contextual-controls--section" phx-mounted={JS.ignore_attributes("open")}>
               <summary class="bp-paper-contextual-toggle">Configure section</summary>
               <div class="bp-paper-contextual-panel">
-                <form id={"section-form-" <> @id} name="section-config" class="bp-paper-edit-form" phx-submit="paper-edit-block" phx-change="paper-block-autosave" phx-debounce="500" data-test-id="paper-section-config-editor">
-                  <input type="hidden" name="block_id" value={@id} />
-                  <label class="bp-paper-edit-fieldlabel" for={"section-title-" <> @id}>Title</label>
-                  <input id={"section-title-" <> @id} type="text" name="title" class="bp-paper-edit-text" placeholder="Section title" value={Map.get(@block, "title", "")} data-test-id="paper-field-title" />
-                </form>
+                <div class="bp-paper-edit-form">
+                  <span class="bp-paper-edit-fieldlabel">Title</span>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm bp-paper-section-title-panel-trigger"
+                    phx-click={JS.focus(to: "#" <> section_title_dom_id(@id))}
+                    aria-controls={section_title_dom_id(@id)}
+                    data-paper-section-title-panel-trigger
+                  ><%= if Map.get(@block, "title") in [nil, ""], do: "Add title", else: "Edit title" %></button>
+                </div>
                 <form id={"section-structure-form-" <> @id} class="bp-paper-edit-form" phx-submit="paper-edit-block" data-test-id="paper-section-structure-editor">
                   <input type="hidden" name="block_id" value={@id} />
                   <input type="hidden" name="section-child-count" value={length(@block["blocks"])} />
@@ -2386,7 +3236,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <%= if editable_columns?(@block, @tree_identity_safe) do %>
             <div class="bp-cols" data-paper-columns-editor-frame style={"--bp-cols:#{max(length(@block["columns"]), 1)}"}>
               <div :for={{column, column_index} <- Enum.with_index(@block["columns"])} class="bp-cols__c" data-column-index={column_index} data-paper-container-column-index={column_index}>
-                <%= for segment <- column_segments(column, @canvas_enabled) do %>
+                <%= for segment <- column_segments(column, column_index, @block, @canvas_enabled, @canvas_retained, @root_slug) do %>
                   <%= case segment do %>
                     <% {:run, run_blocks, ordinal} -> %>
                       <.canvas_run
@@ -2409,6 +3259,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         paper_links={@paper_links}
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
+                        canvas_retained={@canvas_retained}
                       />
                   <% end %>
                 <% end %>
@@ -2428,9 +3279,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <input type="hidden" name="block_id" value={@id} />
                   <input type="hidden" name="column-count" value={length(@block["columns"])} />
                   <input type="hidden" name="column-new-child-id" value={Blocks.new_block_id()} />
-                  <fieldset :for={{column, column_index} <- Enum.with_index(@block["columns"])} class="bp-paper-edit-form">
+                  <button type="submit" name="column-action" value="add-column" class="btn btn-ghost btn-sm">Add column</button>
+                  <fieldset :for={{column, column_index} <- Enum.with_index(@block["columns"])} class="bp-paper-edit-form" data-column-index={column_index}>
                     <legend>Column <%= column_index + 1 %></legend>
                     <input type="hidden" name={"column-#{column_index}-child-count"} value={length(column)} />
+                    <% remove_reason = column_track_remove_reason(@block["columns"], column_index) %>
+                    <% remove_reason_id = column_track_remove_reason_id(@id, column_index) %>
+                    <button type="submit" name="column-action" value={"remove-column:#{column_index}"} disabled={not is_nil(remove_reason)} aria-describedby={remove_reason && remove_reason_id} class="btn btn-destructive btn-sm">Remove column</button>
+                    <span :if={remove_reason} id={remove_reason_id} class="bp-paper-lock-note" data-test-id="paper-column-remove-reason"><%= remove_reason %></span>
                     <div :for={{child, child_index} <- Enum.with_index(column)} class="bp-paper-edit-actions">
                       <span>Child <%= child_index + 1 %> · <%= child["type"] %></span>
                       <input type="hidden" name={"column-#{column_index}-child-#{child_index}-id"} value={child["id"]} />
@@ -2451,9 +3307,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </div>
       <% "paper-links" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-links-contextual-editor">
-          <div class="bp-paper-contextual-preview" data-test-id="paper-links-preview">
-            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
-          </div>
+          <.paper_links_preview block={@block} paper_links={@paper_links} />
           <details id={"paper-links-controls-" <> @id} class="bp-paper-contextual-controls"
                    phx-mounted={JS.ignore_attributes("open")}>
             <summary class="bp-paper-contextual-toggle">Configure related papers</summary>
@@ -2468,15 +3322,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               >
                 <input type="hidden" name="block_id" value={@id} />
                 <input type="hidden" name="ref-count" value={length(Map.get(@block, "refs", []))} />
-                <label class="bp-paper-edit-fieldlabel">
-                  Title
-                  <input type="text" name="title" class="bp-paper-edit-text"
-                         value={Map.get(@block, "title", "")} />
-                </label>
-                <label class="bp-paper-edit-fieldlabel">
-                  Description
-                  <textarea name="description" class="bp-paper-edit-textarea" rows="2"><%= Map.get(@block, "description", "") %></textarea>
-                </label>
+                <div class="bp-paper-edit-form">
+                  <span class="bp-paper-edit-fieldlabel">Heading</span>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm"
+                    phx-click={JS.focus(to: "#" <> paper_links_dom_id("title", @id))}
+                    aria-controls={paper_links_dom_id("title", @id)}
+                    data-paper-links-title-panel-trigger
+                  ><%= if paper_links_field_absent?(@block, "title"), do: "Add heading", else: "Edit heading" %></button>
+                </div>
+                <div class="bp-paper-edit-form">
+                  <span class="bp-paper-edit-fieldlabel">Description</span>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm"
+                    phx-click={JS.focus(to: "#" <> paper_links_dom_id("description", @id))}
+                    aria-controls={paper_links_dom_id("description", @id)}
+                    data-paper-links-description-panel-trigger
+                  ><%= if paper_links_field_absent?(@block, "description"), do: "Add description", else: "Edit description" %></button>
+                </div>
                 <label class="bp-paper-edit-fieldlabel">
                   Layout
                   <input type="text" name="layout" class="bp-paper-edit-text"
@@ -2490,20 +3355,72 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   data-ref-index={index}
                 >
                   <legend>Reference <%= index + 1 %></legend>
+                  <% reference_copy_admission =
+                    Blocks.paper_link_reference_copy_admission(@block, index) %>
                   <label class="bp-paper-edit-fieldlabel">
                     Slug
                     <input type="text" name={"ref-#{index}-slug"} class="bp-paper-edit-text"
                            value={Blocks.paper_link_ref_value(ref, "slug") || ""} />
                   </label>
-                  <label class="bp-paper-edit-fieldlabel">
-                    Authored title
-                    <input type="text" name={"ref-#{index}-title"} class="bp-paper-edit-text"
-                           value={Blocks.paper_link_ref_value(ref, "title") || ""} />
-                  </label>
-                  <label class="bp-paper-edit-fieldlabel">
-                    Authored description
-                    <textarea name={"ref-#{index}-description"} class="bp-paper-edit-textarea" rows="2"><%= Blocks.paper_link_ref_value(ref, "description") || "" %></textarea>
-                  </label>
+                  <%= case reference_copy_admission do %>
+                    <% {:ok, admission} -> %>
+                      <%= case Blocks.paper_link_reference_copy_admission(@block, index, "title") do %>
+                        <% {:ok, _field_admission} -> %>
+                          <div class="bp-paper-edit-form">
+                            <span class="bp-paper-edit-fieldlabel">Authored title</span>
+                            <button
+                              type="button"
+                              class="btn btn-ghost btn-sm"
+                              phx-click={contextual_panel_focus(paper_link_ref_dom_id("title", @id, index, admission.guard))}
+                              aria-controls={paper_link_ref_dom_id("title", @id, index, admission.guard)}
+                              data-paper-link-ref-title-panel-trigger
+                            ><%= if paper_links_field_absent?(ref, "title"), do: "Add title", else: "Edit title" %></button>
+                          </div>
+                        <% {:error, _reason} -> %>
+                          <p class="bp-paper-edit-readonly" data-paper-link-ref-title-readonly>
+                            Authored title has an unsupported shape and is preserved read-only.
+                          </p>
+                      <% end %>
+                      <%= case Blocks.paper_link_reference_copy_admission(@block, index, "description") do %>
+                        <% {:ok, _field_admission} -> %>
+                          <div class="bp-paper-edit-form">
+                            <span class="bp-paper-edit-fieldlabel">Authored description</span>
+                            <button
+                              type="button"
+                              class="btn btn-ghost btn-sm"
+                              phx-click={contextual_panel_focus(paper_link_ref_dom_id("description", @id, index, admission.guard))}
+                              aria-controls={paper_link_ref_dom_id("description", @id, index, admission.guard)}
+                              data-paper-link-ref-description-panel-trigger
+                            ><%= if paper_links_field_absent?(ref, "description"), do: "Add description", else: "Edit description" %></button>
+                          </div>
+                        <% {:error, _reason} -> %>
+                          <p class="bp-paper-edit-readonly" data-paper-link-ref-description-readonly>
+                            Authored description has an unsupported shape and is preserved read-only.
+                          </p>
+                      <% end %>
+                    <% {:error, _reason} -> %>
+                      <%= if paper_link_ref_field_representable?(ref, "title") do %>
+                        <label class="bp-paper-edit-fieldlabel">
+                          Authored title
+                          <input type="text" name={"ref-#{index}-title"} class="bp-paper-edit-text"
+                                 value={Blocks.paper_link_ref_value(ref, "title") || ""} />
+                        </label>
+                      <% else %>
+                        <p class="bp-paper-edit-readonly" data-paper-link-ref-title-readonly>
+                          Authored title has an unsupported shape and is preserved read-only.
+                        </p>
+                      <% end %>
+                      <%= if paper_link_ref_field_representable?(ref, "description") do %>
+                        <label class="bp-paper-edit-fieldlabel">
+                          Authored description
+                          <textarea name={"ref-#{index}-description"} class="bp-paper-edit-textarea" rows="2"><%= Blocks.paper_link_ref_value(ref, "description") || "" %></textarea>
+                        </label>
+                      <% else %>
+                        <p class="bp-paper-edit-readonly" data-paper-link-ref-description-readonly>
+                          Authored description has an unsupported shape and is preserved read-only.
+                        </p>
+                      <% end %>
+                  <% end %>
                   <label class="bp-paper-edit-fieldlabel">
                     Eyebrow
                     <input type="text" name={"ref-#{index}-eyebrow"} class="bp-paper-edit-text"
@@ -2803,6 +3720,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           paper_links={@paper_links}
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
+                          canvas_retained={@canvas_retained}
                         />
                     <% end %>
                   <% end %>
@@ -2915,6 +3833,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         canvas_enabled={@canvas_enabled} paper_links={@paper_links}
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
+                        canvas_retained={@canvas_retained}
                       />
                   <% end %>
                 <% end %>
@@ -2957,14 +3876,35 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </div>
       <% "expandable" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-expandable-editor">
+          <form
+            id={"expandable-summary-form-" <> @id}
+            class="bp-paper-edit-form"
+            hidden
+            phx-submit="paper-edit-block"
+            phx-change="paper-block-autosave"
+            phx-debounce="500"
+          >
+            <input type="hidden" name="block_id" value={@id} />
+          </form>
           <details
             id={"paper-expandable-disclosure-" <> @id}
-            class="bp-expandable"
+            class="bp-expandable bp-paper-contextual-preview"
             open={Map.get(@block, "open") == true}
             phx-mounted={JS.ignore_attributes("open")}
             data-test-id="paper-expandable-preview"
           >
-            <summary><%= Map.get(@block, "summary", "") %></summary>
+            <summary>
+              <textarea
+                id={"expandable-summary-" <> @id}
+                name="summary"
+                form={"expandable-summary-form-" <> @id}
+                rows="1"
+                class="bp-paper-inline-text"
+                aria-label="Expandable title"
+                placeholder="Add a section title…"
+                phx-hook="BarkparkPaperAutoSize"
+              ><%= Map.get(@block, "summary", "") %></textarea>
+            </summary>
             <div class="bp-expandable__body" data-test-id="paper-expandable-children">
               <%= if @canvas_enabled do %>
                 <%= for segment <- @expandable_segments do %>
@@ -3004,6 +3944,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           paper_links={@paper_links}
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
+                          canvas_retained={@canvas_retained}
                         />
                       </div>
                   <% end %>
@@ -3030,6 +3971,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     paper_links={@paper_links}
                     tree_identity_safe={@tree_identity_safe}
                     table_editor_target_ids={@table_editor_target_ids}
+                    canvas_retained={@canvas_retained}
                   />
                 </div>
               <% end %>
@@ -3053,6 +3995,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                          value={Map.get(@block, "summary", "")} />
                 </label>
                 <label class="bp-paper-edit-check">
+                  <input type="hidden" name="open" value="false" />
                   <input type="checkbox" name="open" value="true" checked={Map.get(@block, "open") == true} />
                   Open by default
                 </label>
@@ -3551,6 +4494,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   defp editable_columns?(_block, _tree_identity_safe), do: false
 
+  defp column_track_remove_reason(columns, column_index) do
+    case Blocks.column_track_removal(columns, column_index) do
+      :ok ->
+        nil
+
+      {:error, {:minimum_column_count, 1}} ->
+        "At least one column is required."
+
+      {:error, {:column_not_rightmost, ^column_index}} ->
+        "Only the last column can be removed, so open drafts keep their column index."
+
+      {:error, {:locked_block, _id, "remove-column"}} ->
+        "Locked content must be removed before this column."
+
+      {:error, {:column_not_empty, ^column_index}} ->
+        "Remove this column's children first."
+
+      {:error, _reason} ->
+        "This column cannot be removed."
+    end
+  end
+
+  defp column_track_remove_reason_id(block_id, column_index) do
+    encoded_id = Base.url_encode64(block_id, padding: false)
+    "column-#{encoded_id}-#{column_index}-remove-reason"
+  end
+
   defp section_renderable?(%{"blocks" => blocks} = block) when is_list(blocks),
     do: is_nil(block["title"]) or is_binary(block["title"])
 
@@ -3563,15 +4533,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       length(ids) == length(Enum.uniq(ids))
   end
 
-  defp section_segments(%{"blocks" => blocks}, true),
-    do: blocks |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals()
+  defp section_segments(%{"id" => id, "blocks" => blocks}, true, retained, root_slug),
+    do:
+      blocks
+      |> PaperCanvas.partition_runs(PaperCanvas.retained_ids(retained, root_slug, {:section, id}))
+      |> PaperCanvas.with_run_ordinals()
 
-  defp section_segments(%{"blocks" => blocks}, false), do: Enum.map(blocks, &{:block, &1})
+  defp section_segments(%{"blocks" => blocks}, false, _retained, _root_slug),
+    do: Enum.map(blocks, &{:block, &1})
 
-  defp column_segments(blocks, true),
-    do: blocks |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals()
+  defp column_segments(blocks, index, %{"id" => id}, true, retained, root_slug),
+    do:
+      blocks
+      |> PaperCanvas.partition_runs(
+        PaperCanvas.retained_ids(retained, root_slug, {:columns, id, index})
+      )
+      |> PaperCanvas.with_run_ordinals()
 
-  defp column_segments(blocks, false), do: Enum.map(blocks, &{:block, &1})
+  defp column_segments(blocks, _index, _block, false, _retained, _root_slug),
+    do: Enum.map(blocks, &{:block, &1})
 
   defp empty_step_body?(%{"children" => children}) when is_list(children), do: children == []
   defp empty_step_body?(%{"children" => children}) when children not in [nil, false], do: false
@@ -3762,6 +4742,53 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   defp editable_figure_child?(_block), do: false
 
+  defp image_figure_child?(%{"child" => %{"id" => id, "type" => "image"}})
+       when is_binary(id),
+       do: String.trim(id) != ""
+
+  defp image_figure_child?(_block), do: false
+
+  defp figure_editor_frame_style(block) do
+    overflow = if image_figure_child?(block), do: "visible", else: "auto"
+
+    "margin:var(--bp-air-figure, 1.6rem) 0 0;" <>
+      "margin-inline:var(--bp-evidence-pull, 0px);" <>
+      "width:var(--bp-evidence-width, 100%);" <>
+      "box-sizing:border-box;overflow-x:#{overflow}"
+  end
+
+  # Article images opt into the reader lightbox through this exact marker. In
+  # Edit the image itself is already one keyboard/pointer picker trigger, so
+  # retaining the marker would let the global lightbox enhancer introduce a
+  # second interactive control inside it. Keep the canonical reader-produced
+  # image bytes and geometry; suppress only the competing behavior marker.
+  defp figure_image_editor_html(child, paper_links, picker_browse) do
+    html = Render.render_block(child, %{style: :article, paper_links: paper_links})
+
+    if picker_browse do
+      String.replace(html, ~s( data-bp-lightboxable="true"), "")
+    else
+      html
+    end
+  end
+
+  defp figure_image_trigger_label(child) do
+    case Map.get(child, "alt") do
+      "" -> "Replace figure image"
+      alt when is_binary(alt) -> "Replace figure image: " <> alt
+      _ -> "Replace figure image"
+    end
+  end
+
+  defp figure_caption_value(block) do
+    case Map.get(block, "caption") do
+      caption when is_binary(caption) -> caption
+      nil -> ""
+      caption when is_number(caption) or is_atom(caption) -> to_string(caption)
+      _ -> ""
+    end
+  end
+
   defp figure_child_segment(%{"child" => child}, true) do
     [child]
     |> PaperCanvas.partition_runs()
@@ -3777,7 +4804,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # would raise Phoenix.HTML.Safe in the render and take the whole pane down.
   defp image_block_src(block) do
     case Map.get(block, "src") do
-      src when is_binary(src) -> src
+      src when is_binary(src) -> if(String.trim(src) == "", do: "", else: src)
       _ -> ""
     end
   end

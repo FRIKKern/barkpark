@@ -264,7 +264,7 @@ deployments, 17,171 failed, **65.0% lifetime / 87.3% over 7d**. Four sites — `
 
 - **D29 — `FailureCopy.scrub/1` CANNOT SEE BARKPARK'S OWN TOKEN. D13's evidence sentence is RETIRED;
   D13's conclusion stands.** *Why:* measured against the REAL module on origin/main, 2,000 tokens
-  minted with the production expression (`auth.ex:502`): `BARKPARK_TOKEN=<tok>` leaks **1902/2000 =
+  minted with the production expression (`Barkpark.Auth.create_personal_access_token/3`): `BARKPARK_TOKEN=<tok>` leaks **1902/2000 =
   95.1%**, and so do two shapes nobody asked about — a bare token in prose and a colourised
   `token=`. Three independent holes: the key clause's `\b` cannot fire after the `_` in
   `BARKPARK_TOKEN`; the provider-prefix clause lists sk/pk/ghp/xox/hcloud and **not** `bppat_` or
@@ -4119,7 +4119,7 @@ UP box unavailable.
   customer demand from platform churn — D3's vacuous green in its purest form. The survey's mechanism argument
   (Oban holds zero retryable/available/executing `site_deploy` work, so the re-queue is delivered by the next
   webhook and cutting the amplifier could make time-to-web WORSE) is real but is downgraded by D192 to a
-  hypothesis. **Both stay filed. The label must exist BEFORE the cut, not after.**
+  hypothesis. **Both stay filed. The label must exist BEFORE the cut, not after.** *[AMENDED IN PLACE 2026-09-10 by D606: the "no label" clause is now HISTORICAL — #17489 shipped an operator-assigned `deployments.demand_class` stamped at create; the precondition is the prod `Registry.DemandCensus` BEFORE number in task-b20d6fdf723bf8af c1, not a derived axis. D223's refutation of the DERIVED axis stands. See D606.]*
 - **D207 — TWO CHARTER FACTS ARE NOW FALSE AND ARE CLOSED BY RULING, NOT RE-SURVEYED.** D11's "an EXISTING
   COLUMN nobody sets" is dead: all five `site-autodeploy-*` webhooks carry `types={paper}`. And D169f/D181's
   "the 03:46:11Z delivery-leak stop has no commit and no deploy to explain it — cause NOT established" is
@@ -5245,7 +5245,13 @@ whose output is quoted. Where verification contradicted the wave's own direction
   declare it in the census envelope. `dr-w15-bl-deferral-cause-null-audit` is **SETTLED: residue, not a
   producer bug.** In the trailing 24h 1,259 of 1,510 deferrals (83.4%) are still unstamped, so any cause
   breakdown printed today must name the uncaused remainder as its own cohort and must never renormalise over
-  the caused subset.
+  the caused subset. *[AMENDED IN PLACE 2026-09-11 by D607: the 83.4%-unstamped picture is HISTORICAL — it
+  counted a trailing window that still straddled the 2026-08-07 10:02:23Z recorder boundary. Measured
+  2026-08-09, all **1,019 of 1,019** post-cutoff deferrals carry `BOX_AT_CAPACITY_DEFERRED` and ZERO are NULL.
+  The NULL residue is a fixed pre-boundary tail, not a live producer gap — which is what "SETTLED: residue, not
+  a producer bug" above already ruled, now with the post-cutoff arm measured. Re-derivation: `SELECT
+  deferral_cause, count(*) FROM deployments WHERE status='deferred' AND inserted_at > '2026-08-07 10:02:23'
+  GROUP BY 1;`. `dr-w15-bl-deferral-cause-null-audit` carries the same note on its own row. See D607.]*
 
 - **D268 — #10014 DIED TO MERGE MECHANICS, NOT TO A RULING, AND ITS CENSUS HUNKS ARE LEG 1's MATERIAL.** The
   branch still resolves on origin at `92f96f7ba`; content vs merge-base is 3 files / +402 −17;
@@ -7403,7 +7409,12 @@ successful deploy**; UNCOVERED = 0 on two independent oracles over 790 cp + 1,17
 pushes, 1,373 path-matching, 1,373 with a run, 0 missing. The failure numerator is **FROZEN at 18,622 since
 2026-08-07T10:02:55Z** — the last failed deployment row in the entire table — and the four sites that carried
 89% of all failures all went live on 2026-08-08. **This wave sells on COST, DEGRADATION and BLINDNESS. Never
-on lost deploys.**
+on lost deploys.** *[AMENDED IN PLACE 2026-09-11 by D607: "FROZEN at 18,622 since 2026-08-07T10:02:55Z" is
+FALSE and was false when written — re-measured on `cloud-db-1` at `now() = 2026-08-09 08:05:53Z`, the numerator
+is **18,640** and the last failed row is **2026-08-08 14:55:28.776961**, eighteen rows later, inside a five-site
+outage. Re-derive, never quote: `SELECT count(*) AS failed_total, max(inserted_at) AS last_failed FROM
+deployments WHERE status='failed';`. The "COST, DEGRADATION, BLINDNESS" framing STANDS on its own legs; the
+freeze is struck. See D455, D471, D607.]*
 
 ### Decisions
 
@@ -7412,7 +7423,16 @@ since 2026-08-07T10:02:55Z; 2026-08-08 carries 259 rows and **0 failed**. A rate
 only fall by dilution: it reads "improving" every day regardless of what the platform does, and needs 42,789
 more clean rows (~165 days at today's rate) merely to reach 25%. It is a monument, not an instrument, and it
 fails this epic's own standing test. **Replacement: live-per-row over a PINNED window with volume beside it,
-and the deferral share printed as a co-equal.**
+and the deferral share printed as a co-equal.** *[AMENDED IN PLACE 2026-09-11 by D607: **THE VERDICT STANDS,
+THE REASON IS STRUCK.** Retire the lifetime rate because it is structurally DILUTION-DOMINATED — a lifetime
+denominator that only grows makes any fixed numerator read "improving" every day — NOT because "its numerator
+has not moved" and NOT because "a rate whose numerator is dead". The numerator was never dead: measured
+2026-08-09 08:05:53Z it is 18,640, moved 18 rows on 2026-08-08 (10:00:14Z → 14:55:28Z). "2026-08-08 carries 259
+rows and **0 failed**" is false: it carries **758 rows — 238 live / 502 deferred / 18 failed**; 2026-08-07 also
+carried 18 failed. Re-derivation, per-day so the SHAPE is visible: `SELECT date(inserted_at) AS day, count(*)
+AS rows, count(*) FILTER (WHERE status='failed') AS failed FROM deployments GROUP BY 1 ORDER BY 1 DESC LIMIT
+7;`. Do NOT over-correct by reinstating the lifetime rate — the replacement above is unchanged. See D455,
+D471, D607.]*
 
 **D376 — THE 98.6% HEADLINE IS ILLEGAL UNDER D3 AND MAY NOT BE PRINTED BARE.** Post-door (since
 2026-08-06T22:29:27Z) the population is **2,510 rows — 698 live (27.8%), 1,792 deferred (71.4%), 20 failed
@@ -7805,7 +7825,10 @@ Wave Paper: `deploy-reliability-wave-23-2026-08-08`. Epic task: `task-fb4fb86949
 
 **The wish's word "fail" has expired, and this wave says so in its own first paragraph.** The failure
 numerator moved twice in the last 33 hours and is otherwise flat; 2026-08-08 carried 1 failed row in 327.
-What is left is not lost deploys — it is COST, DEGRADATION and BLINDNESS: 71.1% of every deploy row is now
+*[AMENDED IN PLACE 2026-09-11 by D607: this reading is STALE in the same direction as D375's, and the two
+disagreed with each other in the same file for four waves — a contradiction nothing re-derived. Re-measured
+2026-08-09 08:05:53Z, 2026-08-08 carried **758 rows / 18 failed**, not "1 failed row in 327", and the numerator
+is not flat. Command as in D607.]* What is left is not lost deploys — it is COST, DEGRADATION and BLINDNESS: 71.1% of every deploy row is now
 refused at our own build door, and no surface a human reads says so. Wave 23 sells on that and never on
 failures.
 
@@ -8397,6 +8420,14 @@ Window: the 300 most recent `deploy.yml` runs, 2026-07-31T20:49:47Z → 2026-08-
   per-day it is 23.8–30.4% on quiet days against 48.9% (08-07) and 52.0% (08-08) — **the epic's own wave days**.
   "Measure on a quiet host" at the platform level. Print 36.7% with its window; never print 51.2% without
   saying it is a burst-day slice measured during our own waves.
+  *[AMENDED IN PLACE 2026-09-11 by D607: SUPERSEDED. The burst-free re-derivation measured 2026-08-09 is
+  **50.0% (45 cancelled / 45 success)**, and that is the figure to print. Population: 98 `Deploy (production)`
+  runs since the cutoff — 47 success, 51 cancelled, 0 failed; the EXCLUSION, which must be stated every time
+  the number is, is the lead's own 23:40–23:48Z merge burst, removed entirely. Both 36.7% and 51.2% are
+  retired: each was one denominator of a pair neither of which excluded our own wave load. Re-derivation:
+  `gh run list --repo FRIKKern/barkpark --workflow "Deploy (production)" -L 200 --json
+  conclusion,createdAt,headSha` then drop the 23:40–23:48Z window and take cancelled/success. Half of all
+  merged shas are carried by a LATER run in steady state; that is not a burst artifact. See D455, D607.]*
 - **PICKUP p50 = 4.0s is definition-invariant** across four variants. **p90 = 10.2–11.0s** — the inherited 10s
   reproduces, the survey's 14s does not. p95 diverges wildly (12.8s vs 153.8s); do not print p95.
 
@@ -13715,3 +13746,139 @@ cannot be measured is not met. The deploy path runs the same function ADVISORY w
 content deploy never dies for a site prerequisite. `instance-deploy_test.sh` Case 19 drives every arm: each
 removal demands ITS code, and the OTHER three must still report `ok`, so a check that stops discriminating reds
 instead of greening a box that cannot build.
+
+### Round-3 lead rulings (lead-deploy-r7, 2026-09-10)
+
+- **D605 — `/v1/tls/ask` STAYS NAME-BOUND; BOX-BINDING IS RULED OUT UNTIL A SOURCE-RANGE PERIMETER EXISTS.**
+  Closes `dr-w24-bl-tls-ask-allowlist-is-not-box-bound` by ruling, as its one criterion allows. Re-derived on
+  `origin/main` 2026-09-10: `get "/v1/tls/ask"` (router.ex ~:9654) reads only `?domain=` and answers
+  `Registry.domain_registered?/1` (registry.ex ~:8169: site domains, live preview hosts, custom_host) — the gate
+  is name-only, exactly as filed. It CANNOT be box-bound honestly today, for a structural reason, not a sizing
+  one: Caddy's `on_demand_tls.ask` puts NO caller identity on the wire, so "the asking box" can only ever mean
+  the request's source address, and the control plane rewrites `conn.remote_ip` from `X-Forwarded-For` only
+  for `trusted_peer?/1` peers (router.ex ~:538-546). A box-bound ask is therefore a SOURCE-RANGE assertion —
+  the same mechanism as `INTERNAL_ALLOWED_CIDRS` in #17134 (`dr-w24-bl-internal-write-route-is-publicly-
+  reachable`), which is owner-gated because nobody but the owner can enumerate the ranges. Building the
+  stricter gate before that perimeter exists would refuse legitimate on-demand issuance for any box whose
+  egress address is not the one a row happens to record (a site mid-migration, a preview slot, a NAT change) —
+  a fleet-wide certificate outage, which is a worse failure than the one contested name the wave-24 join found
+  (exactly 1 row fleet-wide). The contested-name defect itself is handled at CLAIM time by the `url`-host leg
+  of `custom_host_taken?/2` (the wave-24 slice), which is where an ownership dispute belongs; the issuance gate's
+  job is only to be a cert-issuance DoS guard, and "SOME row owns this name" is the correct contract for that.
+  **RULING: not built this wave. Successor, filed only AFTER #17134 merges with a real CIDR list: "tls ask
+  binds the answer to the asking box's declared source range", with the allowlist measured, not assumed.**
+
+- **D606 — THE DEMAND-CUT PRECONDITION, RECONCILED: ONE ROW SURVIVES, AND THE CUT WAITS FOR A BEFORE NUMBER.**
+  D206 filed the fan-out cut behind "a label"; D223 then ruled the DERIVED customer/platform axis unbuildable
+  (no team axis: one team owns all 13 sites; AMPLIFIED/UNIQUE does not separate populations). #17489
+  (`a0552783c`) shipped something D223 did not refute: an OPERATOR-ASSIGNED per-site `demand_class`, stamped
+  onto `deployments.demand_class` at create by `Registry.classify_site_demand/2`, read by
+  `Registry.DemandCensus.census/1`, built so it CAN be wrong. Whether that answers D223 or renames the problem
+  is decided by ONE measurement, not by argument: the prod census over a 24h window with the five demo sites
+  classified `platform`. If `by_class` separates populations (unclassified is NOT the largest bucket;
+  platform_share and top5 reproduce the fixture's 98.4%), the precondition D206 wanted exists. If it cannot, the
+  cut has no instrument and stays closed. **RULING: `dr-w14-bl-demand-cut-needs-a-fresh-argument` is CLOSED
+  by this entry — its "replacement precondition" IS that census, and the regression instrument after any cut is
+  `by_class[customer]` flat within noise while `by_class[platform]` falls (task-b20d6fdf723bf8af c3).
+  `task-b20d6fdf723bf8af` is the single surviving row; D206 is annotated in place. The cut is NOT built until
+  c1's BEFORE number is quoted from prod. D180 stands: `@build_slot_capacity` is not raised. Round 3 does not
+  touch a webhook.**
+
+- **D607 — THREE CHARTER SITES QUOTED A NUMBER NOBODY RE-DERIVED, AND THE CORRECTION IS A COMMAND, NOT A
+  NUMBER.** D455 and D471 already ruled D375's supporting figures struck, but they ruled it in NEW entries
+  4,000 lines below the FALSE sentences, which stayed un-annotated: a reader arriving at wave 22 read "FROZEN
+  at 18,622 since 2026-08-07T10:02:55Z" and had no signal that four waves of the same file disagreed. **A
+  ruling that does not touch the sentence it overturns has not landed.** Amended in place this round, each
+  with its re-derivation command beside it: wave 22's preamble, D375's body, wave 23's preamble ("1 failed row
+  in 327"), the D411 carried-sha rendering rule (36.7%/51.2%), and D252's deferral-cause NULL site. The
+  filings' `:6054/:6061/:6818` line numbers had ROTTED to `:7403/:7411/:7807`; find these by CONTENT.
+
+  **(a) THE SHAPE IS A STEP FUNCTION, NOT A FREEZE AT AN INSTANT.** Per-day, measured on `cloud-db-1` at
+  `now() = 2026-08-09 08:05:53Z`: **08-06 = 2,205 rows / 866 failed · 08-07 = 2,008 / 18 · 08-08 = 758 / 18 ·
+  08-09 = 335 / 0**. The collapse happened ACROSS 08-06→08-07 and the platform then ran at a low but NON-ZERO
+  failure rate. Reading that as "the numerator is dead at an instant" is what let a 4h55m five-site outage on
+  08-08 produce zero operator reaction. `SELECT date(inserted_at) AS day, count(*) AS rows, count(*) FILTER
+  (WHERE status='failed') AS failed FROM deployments GROUP BY 1 ORDER BY 1 DESC LIMIT 7;` — and the freeze that
+  IS real is in the WRITER, not the reporter: `deployment_failed` deliveries max at **2026-08-08
+  14:55:43.954614**, 15.2s after the last failed row, 2,313 sent / 4 failed lifetime.
+
+  **(b) THE DILUTION ARGUMENT REPLACES "FROZEN" EVERYWHERE.** The lifetime failure rate is retired because its
+  denominator only grows, so the rate falls by arithmetic whatever the platform does — a property of the
+  formula, true on any day, needing no measurement. "The numerator stopped moving" is a property of a
+  33-hour quiet patch and was already false the day after it was written (18,622 → 18,640). **Do not
+  over-correct: D375's RETIREMENT stands and the lifetime rate is not reinstated.** Where a carried-sha rate is
+  printed, it is **50.0% burst-free (45/45)**, with the 23:40–23:48Z merge-burst exclusion named in the same
+  sentence.
+
+  **(c) IS A BARE CHARTER NUMBER A FINDING? CONVENTION, NOT ENFORCED — stated honestly because the opposite
+  claim is the exact defect this entry exists to end.** `scripts/charter-citation-check.sh` checks that every
+  cited `charter D<n>` RESOLVES to a heading; it reads D-tokens and nothing else, and has no concept of a
+  numeric claim or a re-derivation command. `scripts/check-doc-budgets.sh` measures BYTES and explicitly
+  excludes `.claude/workflows/*-charter.md` from its scope ("carry headers, are not agent-loaded spine"). So
+  today NOTHING mechanically reds on a bare number. **What would enforce it**, in ascending cost: (i) a
+  `charter-number-provenance-check.sh` arm that flags a bolded `**<digits with , or %>**` in a charter whose
+  enclosing D-entry contains no fenced/backticked `SELECT`, `gh ` or `bp ` command, run advisory alongside the
+  citation check — cheap, high false-positive, and its OWN failure mode is going dark, so it needs a FLOOR on
+  the number of sites inspected (D8); (ii) requiring a measurement DATE adjacent to every such number, which
+  is checkable by regex and is the half that actually decays; (iii) nothing at all, and this convention keeps
+  costing a wave every few rounds. This entry buys (ii) by example and leaves (i) unbuilt and unfiled as
+  speculative — **a rule stated in prose is a convention, and calling it a gate would be the D469 defect
+  wearing the uniform of its own remedy.**
+
+  Closes `dr-w27-bl-d375-freeze-date-is-false-on-main` and `dr-w26-bl-d375-frozen-numerator-corrected`.
+  Every figure in this entry is a 2026-08-09 reading; none of it is re-measurable from a developer Mac, which
+  is itself the reason the COMMAND and the DATE travel with the number rather than the number travelling alone.
+### D608 — ROUTE GETS A NAMED SIBLING CHANNEL, NOT A SEAT IN `@stage_names`. THE WHITELIST IS A VERDICT LIST, AND ARMING IS A MEASUREMENT.
+
+**THE PREMISE, RE-DERIVED ON `origin/main` (`72ce16759`), NOT READ OFF THE FILING.** Both engines emit
+`BPSTAGE name=ROUTE status=<ok|failed> build_id=<id> detail="armed: …"` after their Caddy arming attempt
+(`deploy/site-deploy.sh:3982` `emit ROUTE ok` / `:3996` `emit ROUTE failed`, `deploy/site-deploy-node.sh:3572`
+`emit ROUTE ok`, with both engines' own self-tests pinning the wire at `site-deploy.sh:2377`-`:2525`). `emit()` (`deploy/lib/site-deploy-common.sh:55`-`:67`)
+writes that line to stdout and, when the transient unit named one, appends it to `$BARKPARK_SITE_STATUS_FILE` —
+**never** to `$BARKPARK_SITE_LOG_FILE`, which only `log()` writes. So `read_log_tail/1` structurally cannot carry
+it, and the file that DOES carry it is folded by `fold_status_file/2`, which passes every line through
+`parse_stage_line/2`'s `name in @stage_names` guard (`~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE)`). ROUTE is not in
+that list, so the fold drops it. Wave 21's count — 0 of 19,327 console-carrying `deployments` rows mentioning
+ROUTE — is the downstream shadow of exactly that guard. **Premise confirmed; nothing in the tree had already
+routed it.**
+
+**THE RULING: A SIBLING CHANNEL.** ROUTE is NOT admitted to `@stage_names`. It gets `@route_re`,
+`parse_route_line/1`, `fold_route_file/1` and two keys — `route_status` / `route_detail` — on every status shape
+the runner forwards: `reconstruct/2`'s render, the durable terminal record, the record read-back, and `:idle`.
+This is the SERVED shape (`@served_re` + `fold_served_file/1` + `served_port`/`served_slot`) reused for the SERVED
+reason.
+
+**WHY, READ OFF THE CODE AND NOT OFF THE FILING.** `@stage_names` is not a display list; it is the gate into
+`stages`, and `stages` is what decides the run. `deploy_outcome/2`'s FIRST clause is
+`stages |> Enum.reverse() |> Enum.find(&(&1.status == "failed"))` → `{stage_exit_code(failed.name), terminal_reason(…)}`.
+`stage_exit_code/1` has clauses for PLAN/BUILD/STAGE/HEALTH/SWITCH and a catch-all `-1`. So admitting ROUTE would
+mean: a `ROUTE status=failed` line — which both engines DO emit, on a Caddy `validate` rejection, a lock refusal,
+or an unwritable Caddyfile, all of them NON-FATAL by the engines' own `return 1` discipline — sets the run's
+`exit_code` to `-1` ("abnormal end") and writes a `failure_reason`, on a deploy that had already emitted
+`SWITCH ok`. A doctrine change that silently converts a non-fatal arming miss into a failed deployment is not the
+invariant this row asked for: the criterion is *the decision REACHES the plane*, and whether an arming miss is
+FATAL is the open question `dr-w19-bl-arm-route-incidence-then-fatal` has not answered. A channel that forces the
+answer before the ruling is written is the same dishonesty this epic exists to stop.
+
+Three supporting reasons, each checkable:
+
+1. **The precedent is already in the tree and it points the other way.** SERVED is the node engine's slot
+   measurement; `deploy_runner.ex`'s own comment says *"SERVED is not in `@stage_names` above … it is a
+   measurement, never a verdict"*, and `api/test/barkpark_web/controllers/site_deploy_served_slot_test.exs:266`
+   PINS that — with the rationale written as *"the ROUTE precedent, charter D327"*. Admitting ROUTE would make a
+   live pin's stated reasoning false.
+2. **The whitelist buys nothing else.** `@stage_statuses` already contains `ok` and `failed`, and `@stage_re`
+   already matches ROUTE's shape. The ONLY thing a seat in `@stage_names` adds is verdict participation — the one
+   effect ruled out above.
+3. **It would be a doctrine change on a lane that cannot gate it.** `deploy_runner_stage_names_test.exs` is the
+   pin for that attribute and its required lane's path filter is `deploy/**` only; an `api/**`-only PR moving the
+   whitelist does not run it. The sibling channel leaves that pin and its shell half untouched and green — no pin
+   is moved, because none needs to be.
+
+**WHAT THIS ENTRY DOES NOT CLOSE.** The runner now forwards the arm decision; `render_status/1` in
+`api/lib/barkpark_web/controllers/site_deploy_controller.ex` does not yet serialize the two keys onto the
+`/v1/instance/site-deploy` door, and the prod API box is 10 days behind `main`, so no `deployments` row can carry
+a ROUTE outcome yet. `dr-w21-bl-route-decision-reaches-no-plane` c1 (a non-zero ROUTE count on the cloud
+`deployments` table over a stated window) and c3 (the incidence re-taken over a denominator in the hundreds,
+≥24h after the wave-20 marker repair) stay OPEN and are the successor's, in that order: serialize, deploy, then
+count. **D346 stands, un-amended: the arm decision had no durable channel. This entry builds one.**

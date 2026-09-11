@@ -28,8 +28,8 @@ defmodule BarkparkCloud.Cloudflare.Real do
   per-team token in as their first argument (D52): the control plane resolves the
   team's Cloudflare credential at call time and hands it down, so concurrent
   deploys for different teams never race over a shared `Application.put_env`.
-  `create_origin_ca_cert/2` still resolves a config token via the private
-  `token/0` (the TLS slice threads its own credential later). `present_token/1`,
+  `create_origin_ca_cert/2` resolves the SEPARATE Origin CA key via the private
+  `origin_ca_key/0` — never `token/0`, never a threaded API token. `present_token/1`,
   `token/0`, and `request/1` all FAIL CLOSED (`{:error, :not_configured}` /
   `{:error, :http_client_not_configured}`) and NEVER touch the wire unconfigured.
 
@@ -44,14 +44,24 @@ defmodule BarkparkCloud.Cloudflare.Real do
   NEVER silently call Cloudflare. The pure request builders are the assertion
   seam.
 
-  ## NOTE for the live-wiring slice
+  ## TWO AUTH SCHEMES ON ONE CLIENT (cf-origin-ca-wire-and-provision)
 
   `ensure_zone_proxied/3` emits a `:patch` request; the shared
-  `Billing.HttpClient.to_httpc/1` gained its `:patch` clause in this slice (D59)
-  so the proxied flip maps to a real `:httpc` PATCH. One refinement still belongs
-  to a later slice: Cloudflare Origin CA historically authenticates with the
-  Origin CA key (`X-Auth-User-Service-Key`) rather than a Bearer token — this
-  module uses Bearer uniformly and the TLS slice adjusts the header if needed.
+  `Billing.HttpClient.to_httpc/1` gained its `:patch` clause in D59 so the
+  proxied flip maps to a real `:httpc` PATCH.
+
+  The Origin CA endpoint does NOT accept a Bearer API token. `POST /certificates`
+  authenticates with the account's **Origin CA Key** in an
+  `X-Auth-User-Service-Key` header — a SEPARATE credential from the scoped API
+  token every other call here uses, minted on its own Cloudflare page and read
+  from its own config slot (`:origin_ca_key`, env-fed in `runtime.exs`; never a
+  literal in this repo). Sending the API token in that header, or the Origin CA
+  key as a Bearer, authenticates as the wrong authority and fails.
+
+  So `build_request/5`'s third argument is an AUTH TERM, not a token:
+  `{:bearer, token}` (the DNS + verify calls) or `{:origin_ca_key, key}` (the
+  certificate call). A bare binary still means Bearer, so every existing call
+  site and its assertions read unchanged.
   """
   @behaviour BarkparkCloud.Cloudflare.Client
 
@@ -121,8 +131,8 @@ defmodule BarkparkCloud.Cloudflare.Real do
 
   @impl true
   def create_origin_ca_cert(hostnames, csr) when is_list(hostnames) and is_binary(csr) do
-    with {:ok, token} <- token(),
-         {:ok, decoded} <- request(create_origin_ca_cert_request(token, hostnames, csr)) do
+    with {:ok, key} <- origin_ca_key(),
+         {:ok, decoded} <- request(create_origin_ca_cert_request(key, hostnames, csr)) do
       case decoded do
         %{"result" => %{"id" => id, "certificate" => cert}} when is_binary(id) ->
           {:ok, %{id: id, certificate: cert}}
@@ -200,8 +210,12 @@ defmodule BarkparkCloud.Cloudflare.Real do
   @doc """
   Mint an Origin CA cert: `POST /certificates` with the `hostnames`, the PEM
   `csr`, and Cloudflare's RSA/max-validity defaults. PURE.
+
+  The ONLY call here that is not Bearer-authenticated: `origin_ca_key` rides an
+  `X-Auth-User-Service-Key` header (see the moduledoc). Passing the scoped API
+  token to this builder would produce a request Cloudflare rejects.
   """
-  def create_origin_ca_cert_request(token, hostnames, csr) do
+  def create_origin_ca_cert_request(origin_ca_key, hostnames, csr) do
     body =
       Jason.encode!(%{
         "hostnames" => hostnames,
@@ -210,35 +224,56 @@ defmodule BarkparkCloud.Cloudflare.Real do
         "csr" => csr
       })
 
-    build_request(:post, "/certificates", token, body, "application/json")
+    build_request(
+      :post,
+      "/certificates",
+      {:origin_ca_key, origin_ca_key},
+      body,
+      "application/json"
+    )
   end
 
   @doc """
   Assemble one request map for the transport seam: method, `#{@api_base}<path>`,
-  the Bearer-token headers, and `body`. PURE.
+  the auth + UA + content-type headers, and `body`. PURE.
+
+  `auth` is `{:bearer, token}` for the scoped API token (verify + all three DNS
+  calls) or `{:origin_ca_key, key}` for the Origin CA credential (the
+  certificate call ONLY). A bare binary is Bearer, so the older 5-arity call
+  shape keeps working unchanged.
   """
-  def build_request(method, path, token, body, content_type) do
+  def build_request(method, path, auth, body, content_type) do
     %{
       method: method,
       url: @api_base <> path,
-      headers: [
-        {"Authorization", "Bearer " <> token},
-        {"User-Agent", @user_agent},
-        {"Content-Type", content_type}
-      ],
+      headers:
+        auth_headers(auth) ++
+          [
+            {"User-Agent", @user_agent},
+            {"Content-Type", content_type}
+          ],
       body: body
     }
   end
 
+  # The per-call header scheme. Two credentials, two headers, no default that
+  # could quietly send the wrong one: an unrecognised auth term has no clause.
+  defp auth_headers({:bearer, token}) when is_binary(token),
+    do: [{"Authorization", "Bearer " <> token}]
+
+  defp auth_headers({:origin_ca_key, key}) when is_binary(key),
+    do: [{"X-Auth-User-Service-Key", key}]
+
+  defp auth_headers(token) when is_binary(token), do: auth_headers({:bearer, token})
+
   ## Internals ───────────────────────────────────────────────────────────────
 
-  # Fails closed (no raise) when the API token is unset, so an accidental
-  # invocation of a connected-instance callback without credentials returns an
-  # error instead of crashing. `verify_token/1` bypasses this — it authenticates
-  # with the token passed to it. Still used by `create_origin_ca_cert/2` (config
-  # token); the DNS callbacks now thread a per-team token in (D52).
-  defp token do
-    present_token(config()[:token])
+  # The Origin CA credential — a DIFFERENT secret from `:token` above, in its own
+  # config slot, fed from CLOUDFLARE_ORIGIN_CA_KEY in runtime.exs. Fails closed
+  # exactly like `token/0`: unset → `:not_configured` BEFORE any request is
+  # built, so `create_origin_ca_cert/2` can never fall back to the API token.
+  defp origin_ca_key do
+    present_token(config()[:origin_ca_key])
   end
 
   # Fail-closed guard for a THREADED token (D52): a blank/nil token argument is

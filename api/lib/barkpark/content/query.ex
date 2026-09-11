@@ -33,6 +33,14 @@ defmodule Barkpark.Content.Query do
   # The public page bounds, named so `list_documents/3`, `list_documents_page/3`
   # and the HTTP layer that echoes them back cannot drift apart.
   @max_limit 1000
+
+  # Whole-corpus bound for `collect_corpus_documents/3` — the in-memory fold
+  # read behind the drafts graph. Twenty times the `@max_limit` page, matching
+  # the (page_size 1000 x max_pages 20) budget the per-type OFFSET walk it
+  # replaces carried, but applied ONCE to the whole corpus rather than to each
+  # type: peak memory is now bounded by one number instead of by
+  # (types x pages).
+  @corpus_limit 20_000
   @max_offset 100_000
 
   @doc """
@@ -207,6 +215,225 @@ defmodule Barkpark.Content.Query do
   end
 
   defp finish(acc), do: acc |> Enum.reverse() |> Enum.concat()
+
+  @doc """
+  Read a WHOLE dataset corpus for an in-memory fold — every document of every
+  named `types`, drafts-merged, in ONE query per ACL class instead of one
+  OFFSET page per type.
+
+  ## Why this exists and `collect_all_documents/3` does not serve it
+
+  `collect_all_documents/3` pages with `LIMIT/OFFSET` over
+  `list_with_drafts_merged/4`, and that query is a `DISTINCT ON
+  (regexp_replace(doc_id, '^drafts\.', ''))` subquery re-sorted by `updated_at
+  DESC, id`. Neither sort key is indexed, so EVERY page re-sorts the ENTIRE
+  type corpus TWICE, carrying the full `content` jsonb through the sort tuple.
+  Total work is therefore QUADRATIC in the corpus (pages x corpus), and the
+  outer sort spills to disk. Measured on an 8,000-document corpus
+  (`EXPLAIN (ANALYZE, BUFFERS)`, page 6 of 8):
+
+      Limit (actual time=70.158..70.255 rows=1000)
+        Sort (actual time=69.764..70.122 rows=6000)
+          Sort Key: s0.updated_at DESC, s0.id
+          Sort Method: external merge  Disk: 2336kB
+          -> Unique (actual rows=8001)
+             -> Sort (actual rows=8001) Sort Method: quicksort  Memory: 2747kB
+
+  — 8,001 rows sorted to return 1,000, once per page. The whole-request cost
+  of `GET /v1/graph/:id?drafts=true` was 47 such reads (`Content.Graph`'s fold
+  walked every schema in the dataset), 1,046 ms of 1,264 ms.
+
+  A fold does not need ORDER and does not need OFFSET: it needs the set, once.
+  So this reads it as ONE bounded `DISTINCT ON` — a single sort, no outer
+  re-sort, no offset walk, no per-type multiplication.
+
+  ## Options
+
+    * `:limit` — hard bound on documents returned (default #{@corpus_limit}).
+      Unlike `collect_all_documents/3`'s per-TYPE `max_pages` bound this is a
+      WHOLE-CORPUS bound, so the caller's peak memory is bounded by one number
+      rather than by (types x pages).
+    * `:owner_scoped` — when `true`, appends the row-ownership ACL
+      (`scope_to_owner/2`) exactly as `base_query/4` does for an
+      `owner_scoped: true` type. Callers holding the schema list MUST split
+      their types by that flag and make one call per class; a mixed call would
+      apply one type's ACL to another's rows.
+    * `:workspace_id` / `:project_id` / `:caller_context` — as `list_documents/3`.
+
+  ## Identity
+
+  `DISTINCT ON (type, regexp_replace(doc_id, '^drafts\.', ''))` — the `type`
+  leg is LOAD-BEARING. Row identity is `(doc_id, type, dataset_id)`, so two
+  different types may legitimately carry the same `doc_id`; distinct-ing on the
+  slug alone would silently collapse `task/foo` and `paper/foo` into one row.
+  The per-type reads this replaces could not make that mistake; this one must
+  not either.
+
+  Draft-preferred, same as `list_with_drafts_merged/4`: the `CASE WHEN doc_id
+  LIKE 'drafts.%' THEN 0 ELSE 1 END` tiebreaker puts the draft twin first, so
+  `DISTINCT ON` keeps it over its published twin.
+
+  Returns `{documents, nil | :cap}` with the same contract as
+  `collect_all_documents/3`: `nil` means the corpus is exhausted and `docs` is
+  all of it; `:cap` means the bound stopped the read and `docs` is a PREFIX
+  that must not be reported as complete.
+  """
+  @spec collect_corpus_documents([String.t()], String.t(), keyword()) ::
+          {[Document.t()], nil | :cap}
+  def collect_corpus_documents(types, dataset, opts \\ [])
+
+  def collect_corpus_documents([], _dataset, _opts), do: {[], nil}
+
+  def collect_corpus_documents(types, dataset, opts) when is_list(types) do
+    types
+    |> corpus_query(dataset, opts)
+    |> corpus_read(opts)
+  end
+
+  @doc """
+  The LIVE-EXTRACT SET: the documents whose edges cannot be trusted to the
+  materialised `content_edges` table, and therefore must be re-extracted from
+  their `content` on this request.
+
+  Two clauses, and both are PREDICATES rather than lists — a list of "the
+  special documents" is a snapshot that goes wrong the moment the corpus moves.
+
+    1. `doc_id LIKE 'drafts.%'` — a draft twin. `content_edges` is
+       published-only by construction (`EdgeProjector.Lifecycle` projects at
+       `perspective: :published`), so a draft's edges are NOWHERE in it. This
+       is the clause that makes the hybrid correct.
+
+    2. `updated_at > :live_since` — THE PROJECTOR-LAG WINDOW. Projection is
+       asynchronous and debounced: `ProjectorWorker` enqueues with
+       `schedule_in: 5` seconds, dedups on `unique: [period: 30]` across
+       `:available`/`:scheduled`/`:executing` (so a save inside that window
+       rides an already-scheduled job that may predate it), runs on a
+       concurrency-2 queue, and the DEFAULT op is a full per-scope REBUILD
+       under a `timeout: 60_000` transaction. A document saved moments ago can
+       therefore have stale edges, or none, and NOTHING in the schema says so —
+       `content_edges` carries no per-document projection marker and
+       `documents` has no `edges_projected_at`. A `doc.updated_at > max(its
+       edges' updated_at)` detector would not close the hole either: a rebuild
+       is delete-then-insert, so a document that SHOULD have edges and has none
+       yet is indistinguishable from one that genuinely has none. The window is
+       the honest instrument: it needs no marker and no migration, and it is a
+       strict superset of "possibly not yet projected".
+
+  Pass `:live_since` as a `DateTime`; omit it (or pass `nil`) to take clause 1
+  alone. Same `{documents, nil | :cap}` contract, same identity model and same
+  draft-preferred `DISTINCT ON` as `collect_corpus_documents/3`.
+  """
+  @spec collect_live_extract_documents([String.t()], String.t(), keyword()) ::
+          {[Document.t()], nil | :cap}
+  def collect_live_extract_documents(types, dataset, opts \\ [])
+
+  def collect_live_extract_documents([], _dataset, _opts), do: {[], nil}
+
+  def collect_live_extract_documents(types, dataset, opts) when is_list(types) do
+    drafts_prefix = DraftId.drafts_prefix() <> "%"
+
+    base = corpus_query(types, dataset, opts)
+
+    base =
+      case Keyword.get(opts, :live_since) do
+        %DateTime{} = since ->
+          where(base, [d], like(d.doc_id, ^drafts_prefix) or d.updated_at > ^since)
+
+        _ ->
+          where(base, [d], like(d.doc_id, ^drafts_prefix))
+      end
+
+    corpus_read(base, opts)
+  end
+
+  @doc """
+  The corpus SLUG SET — every logical document id in scope, and NOT ONE BYTE OF
+  `content`.
+
+  The drafts graph needs this set to decide whether a plugin edge's target is a
+  real document or a phantom, and that question is answered by MEMBERSHIP
+  alone. Selecting `content` for it cost 810 ms over a 9,646-document corpus
+  (241 MB decoded); selecting `doc_id` and `type` costs 56 ms. Measured, same
+  corpus, same `DISTINCT ON`.
+
+  Returns `{[%{doc_id: String.t(), type: String.t()}], nil | :cap}`.
+  """
+  @spec collect_corpus_slugs([String.t()], String.t(), keyword()) ::
+          {[%{doc_id: String.t(), type: String.t()}], nil | :cap}
+  def collect_corpus_slugs(types, dataset, opts \\ [])
+
+  def collect_corpus_slugs([], _dataset, _opts), do: {[], nil}
+
+  def collect_corpus_slugs(types, dataset, opts) when is_list(types) do
+    types
+    |> corpus_query(dataset, opts)
+    |> select([d], %{doc_id: d.doc_id, type: d.type})
+    |> corpus_read(opts)
+  end
+
+  @doc """
+  The `documents.id` PKs of a scoped corpus, as a QUERY for use in a
+  `subquery/1`.
+
+  `content_edges` carries no tenancy columns — an edge is scoped by its
+  endpoints — so the drafts graph's materialised arm scopes its read by asking
+  "is this edge's SOURCE one of the documents this caller may read". Handing it
+  this query rather than a hand-written `where` keeps ONE scoping pipeline:
+  dataset, workspace/project, grants and (per class) the row-ownership ACL are
+  applied by exactly the code every other corpus read uses.
+  """
+  @spec corpus_scope_ids_query([String.t()], String.t(), keyword()) :: Ecto.Query.t()
+  def corpus_scope_ids_query(types, dataset, opts \\ []) when is_list(types) do
+    types
+    |> corpus_query(dataset, opts)
+    |> select([d], d.id)
+  end
+
+  # The scoped, un-distincted base every corpus read shares. Mirrors
+  # `base_query/4` minus the single-type `where` and the filter map: one type
+  # list, the tenancy scope, the grant scope, and the row-ownership ACL when the
+  # caller says this class of types opts into it.
+  defp corpus_query(types, dataset, opts) do
+    base =
+      Document
+      |> where([d], d.type in ^types)
+      |> scope_to_dataset(dataset, opts)
+      # global-read: corpus_query/3 is the corpus twin of base_query/4 (same module, line ~465, baselined fail-open) and MUST keep that nil-posture. Its three public callers — collect_live_extract_documents/3, collect_corpus_slugs/3 and corpus_scope_ids_query/3 — are reached only from Content.Graph.build_drafts_index/1, which threads :workspace_id straight out of BarkparkWeb.ScopeHelpers.scope_opts/1. Over HTTP that is ALWAYS a binary workspace id or the :shared_only sentinel (never nil), so this arm is unreachable from a request; nil arrives only from an internal caller or a Studio LiveView socket (ScopeHelpers' :legacy arm OMITS the key, and Studio.PaneBuilder then hands Graph.traverse/2 an empty scope keyword). Failing closed here would return zero rows to the Studio GraphView pane while its un-batched sibling base_query/4 kept reading globally over the very same opts.
+      |> scope_to_workspace_or_global(
+        Keyword.get(opts, :workspace_id),
+        Keyword.get(opts, :project_id)
+      )
+      |> maybe_scope_to_grants(opts)
+
+    if Keyword.get(opts, :owner_scoped, false),
+      do: scope_to_owner(base, Keyword.get(opts, :caller_context)),
+      else: base
+  end
+
+  # One read of `limit + 1`: the extra row is the honest truncation probe — it
+  # is present exactly when the set is larger than the bound.
+  defp corpus_read(base, opts) do
+    limit = opts |> Keyword.get(:limit, @corpus_limit) |> max(1)
+
+    rows =
+      from(d in base,
+        distinct: [
+          d.type,
+          fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)
+        ],
+        order_by: [
+          asc: d.type,
+          asc: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
+          asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 0 ELSE 1 END", d.doc_id)
+        ],
+        limit: ^(limit + 1)
+      )
+      |> Repo.all()
+
+    if length(rows) > limit,
+      do: {Enum.take(rows, limit), :cap},
+      else: {rows, nil}
+  end
 
   @doc """
   Count documents matching the same type / scope / filter / perspective as
@@ -407,6 +634,91 @@ defmodule Barkpark.Content.Query do
   """
   @spec valid_filter_ops() :: [String.t()]
   def valid_filter_ops, do: @valid_filter_ops
+
+  # ── `?id_prefix=` — THE ONE DERIVATION OF A STABLE-ID PREFIX FILTER ───────
+  #
+  # `GET /v1/data/query/:dataset/:type?id_prefix=<p>` used to return the
+  # UNFILTERED default page at 200: no door read the parameter, so a sweep that
+  # asked for one id family was answered with ~100 unrelated documents in
+  # default order and had no way to tell. That is the silent-passthrough class
+  # this module already fails closed on for a typo'd operator
+  # (`invalid_filter_op/1`), an unparseable flat filter (`{:invalid_flat_filter,
+  # _}`) and an unrecognised `?order=` — `id_prefix` was the one input still
+  # discarded as noise.
+  #
+  # THE CONTRACT IS THE FILTER, NOT A REFUSAL. `_id startsWith` is already a
+  # documented, per-field-allowlisted operator with an `apply_field_op/4` clause
+  # on the `doc_id` COLUMN (escaped LIKE, so `%`/`_` in the prefix are literal),
+  # so honouring `id_prefix` adds no query semantics — it is exactly
+  # `?filter[_id][startsWith]=<p>`, reachable by a caller that cannot spell
+  # Plug's bracket syntax. A 400 was the alternative, but it would have refused
+  # ONE name while every other unrecognised query key stays ignored, and it
+  # would have left the caller's actual question unanswerable at this door.
+  #
+  # IT STILL FAILS CLOSED, on the two shapes that would rebuild the bug:
+  #   * blank/whitespace — a "prefix" that matches every row is the full-page
+  #     fallback this closes, so it is a 400 rather than a silent no-op;
+  #   * non-binary (`?id_prefix[]=a`, `?id_prefix[k]=v`) — a list/map can never
+  #     be a prefix, and it would reach `escape_like/1`'s `to_string/1` as
+  #     garbage.
+  # A CONFLICT with a caller-supplied `_id`/`doc_id` filter clause is refused
+  # too: silently clobbering one of the two constraints is the same lie in a
+  # smaller box. Both refusals reuse the registered `invalid_filter` envelope
+  # (`{:invalid_filter_clause, message, details}` -> 400), so no new error code
+  # enters `Errors.known_codes/0`, the served OpenAPI `Error.code` enum, or
+  # docs/api-v1.md §9.
+  #
+  # Callers: `BarkparkWeb.QueryController.query_index!/4` and
+  # `BarkparkWeb.LegacyController.index/2` — the two document-LIST doors. It
+  # lives here, not in either controller, because the filing's own note is that
+  # this surface's emitters are duplicated and a fix in one leaves the other
+  # lying.
+  @doc """
+  Merge a caller's `?id_prefix=` into `filter_map` as an `_id startsWith` clause.
+
+  `{:ok, filter_map}` unchanged when `id_prefix` is absent (`nil`), otherwise
+  `{:ok, map}` with the clause added — or `{:error, {:invalid_filter_clause,
+  message, details}}` (a 400 `invalid_filter`) for a blank prefix, a non-string
+  prefix, or a prefix that would collide with an `_id`/`doc_id` filter the
+  caller already sent.
+  """
+  @spec merge_id_prefix(map(), term()) ::
+          {:ok, map()} | {:error, {:invalid_filter_clause, String.t(), map()}}
+  def merge_id_prefix(filter_map, id_prefix)
+
+  def merge_id_prefix(filter_map, nil) when is_map(filter_map), do: {:ok, filter_map}
+
+  def merge_id_prefix(filter_map, prefix) when is_map(filter_map) and is_binary(prefix) do
+    conflict = Enum.find(@id_fields, &Map.has_key?(filter_map, &1))
+
+    cond do
+      String.trim(prefix) == "" ->
+        {:error,
+         {:invalid_filter_clause,
+          "id_prefix must be a non-empty document-id prefix; an empty value would " <>
+            "match every document, which is what an ignored id_prefix already did",
+          %{param: "id_prefix", field: "_id", op: "startsWith"}}}
+
+      is_binary(conflict) ->
+        {:error,
+         {:invalid_filter_clause,
+          "id_prefix conflicts with the #{inspect(conflict)} filter clause in the same " <>
+            "request; send one or the other (id_prefix is filter[_id][startsWith])",
+          %{param: "id_prefix", field: conflict, op: "startsWith"}}}
+
+      true ->
+        {:ok, Map.put(filter_map, "_id", %{"startsWith" => prefix})}
+    end
+  end
+
+  def merge_id_prefix(filter_map, prefix) when is_map(filter_map) do
+    {:error,
+     {:invalid_filter_clause,
+      "id_prefix must be a string document-id prefix; a list or map value " <>
+        "(e.g. ?id_prefix[]=a or ?id_prefix[k]=v) is not a prefix — got " <>
+        inspect(prefix, limit: 5, printable_limit: 100),
+      %{param: "id_prefix", field: "_id", op: "startsWith"}}}
+  end
 
   @doc """
   Check a filter map WITHOUT building a query — `:ok`, or `{:error, {field, op}}`
@@ -1206,6 +1518,46 @@ defmodule Barkpark.Content.Query do
       nil -> {:error, :not_found}
       doc -> {:ok, doc}
     end
+  end
+
+  @doc """
+  BATCHED `get_document/4` EXISTENCE — which of `doc_ids` resolve as `type` in
+  `dataset` under this caller's scope, as a `MapSet` of the ids that do.
+
+  ONE query for the whole list, through the SAME scoping pipeline
+  `get_document/4` runs (`scope_to_dataset` -> `scope_to_workspace_or_global` ->
+  `maybe_scope_to_owner` -> `maybe_scope_to_grants`) with `in` where
+  `get_document/4` has `==`. That identity is the point: it exists so a fold
+  that would otherwise call `get_document/4` once per candidate can ask the same
+  question once for all of them and get the same answers.
+
+  Its caller is `Content.Edges.resolvable_targets/3` (the drafts graph's dangling
+  pass). See `Content.Graph.build_drafts_index/1` for why an un-batched version
+  of this question made `GET /v1/graph/:id?drafts=true` stop returning on
+  guerrilla (task-051a87de9a085e4d).
+  """
+  @spec resolvable_doc_ids([String.t()], String.t() | nil, String.t() | nil, keyword()) ::
+          MapSet.t(String.t())
+  def resolvable_doc_ids([], _type, _dataset, _opts), do: MapSet.new()
+
+  def resolvable_doc_ids(_doc_ids, type, dataset, _opts)
+      when is_nil(type) or is_nil(dataset),
+      do: MapSet.new()
+
+  def resolvable_doc_ids(doc_ids, type, dataset, opts) when is_list(doc_ids) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
+    Document
+    |> where([d], d.doc_id in ^doc_ids and d.type == ^type)
+    |> scope_to_dataset(dataset, opts)
+    # global-read: resolvable_doc_ids/4 is the BATCHED get_document/4 (line ~1512, baselined fail-open) and its whole contract is that the two answer identically — same opts, same scope_to_dataset -> scope_to_workspace_or_global -> maybe_scope_to_owner -> maybe_scope_to_grants pipeline, `in` where the single has `==`. A fail-CLOSED nil arm here would make the batch and the single DISAGREE on exactly the nil-workspace caller, which is the one case the batching was introduced to make cheaper. Tenancy is supplied by the same caller chain as get_document/4: Content.Edges.resolvable_targets/3 <- Content.Graph.build_drafts_index/1 <- ScopeHelpers.scope_opts/1, which over HTTP yields a binary id or :shared_only, never nil; nil is the documented internal / Studio-socket bridge.
+    |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> maybe_scope_to_owner(type, dataset, opts)
+    |> maybe_scope_to_grants(opts)
+    |> select([d], d.doc_id)
+    |> Repo.all()
+    |> MapSet.new()
   end
 
   @doc """
