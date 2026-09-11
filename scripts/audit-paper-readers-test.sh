@@ -42,6 +42,33 @@ if [[ " $* " == *" paper view "* && " $* " == *" --profile none "* ]]; then
     printf '%s\n' '{"error":{"code":"not_found","message":"paper view exploded (fixture)"},"ok":false}' >&2
     exit 3
   fi
+  # The shape EVERY real CLI red since PR #15760 actually had: exit 4 with an
+  # HTTP 500 from the box on stderr, rendered as an HTML page rather than the
+  # JSON internal_error envelope (5 reds on 2026-09-06). _ONCE heals on call 2.
+  if [[ "${BP_FIXTURE_CLI_HTML500:-}" == "1" ]] ||
+    [[ "${BP_FIXTURE_CLI_HTML500_ONCE:-}" == "1" && "$(bp_count cli_html500_once)" -le 1 ]]; then
+    printf '%s\n' 'paper view: source: status 500: <!DOCTYPE html><html><body>Internal</body></html>' >&2
+    exit 4
+  fi
+  # The other real shape: a Go transport error — the client never reached the
+  # box at all (1 red on 2026-09-08). _ONCE heals on call 2.
+  if [[ "${BP_FIXTURE_CLI_TRANSPORT:-}" == "1" ]] ||
+    [[ "${BP_FIXTURE_CLI_TRANSPORT_ONCE:-}" == "1" && "$(bp_count cli_transport_once)" -le 1 ]]; then
+    printf '%s\n' 'Get "https://fixture.invalid/papers/x": dial tcp 10.0.0.1:443: connect: connection refused' >&2
+    exit 4
+  fi
+  # The EXCLUDED transport shape: DNS resolution failure. Persistent by nature
+  # (a broken base URL), so it must be seen on attempt 1 — the Go-string twin
+  # of curl exit 6, which fixture 6 pins for the HTTP legs. Deliberately the
+  # RESOLVER-TIMEOUT wording rather than a bare `no such host`: it carries
+  # `i/o timeout`, so it WOULD match the retryable transport class if the
+  # exclusion were not there. A fixture the exclusion cannot change tests
+  # nothing (measured: with a bare `no such host` string, deleting the
+  # exclusion left this run green).
+  if [[ "${BP_FIXTURE_CLI_DNS:-}" == "1" ]]; then
+    printf '%s\n' 'Get "https://fixture.invalid/papers/x": dial tcp: lookup fixture.invalid on 8.8.8.8:53: read udp 10.0.0.2:53: i/o timeout' >&2
+    exit 4
+  fi
   # The shape the 2026-09-02 red could have been and the witness could not say:
   # a clean exit with nothing on stdout.
   if [[ "${BP_FIXTURE_CLI_EMPTY:-}" == "1" ]]; then
@@ -533,5 +560,113 @@ jq -e '
     (.gui.content.meaningful | not)
   )
 ' "$tmp/hollow-200-retry-result.json" >/dev/null
+
+# ── RULING PIN: an HTTP 500 or a transport error on the CLI leg IS retried ────
+# (2026-09-11, task-afde65c8c359b163.) The ladder used to grep only the JSON
+# `"code":"internal_error"` envelope, so all six real CLI reds since PR #15760
+# — command_failed, exit 4, stderr `… source: status 500: <!DOCTYPE html>` (5,
+# 2026-09-06) or `Get "https://guerrilla.barkpark.cloud/…` (1, 2026-09-08),
+# across runs 33956981205, 34024640087, 34110681290, 34211257256, 34336441737,
+# 34462179731 — got attempts == 1. These four fixtures hold the fix to both
+# halves: the transient heals and says what it cost; the persistent still FAILS
+# after all four attempts; and the excluded DNS shape still gets exactly one.
+
+# 8. A once-HTML-500 CLI red must be retried to GREEN, and the witness must say
+#    it cost more than one attempt.
+mkdir "$tmp/counts-cli-html500-once"
+PATH="$tmp:$PATH" BP_FIXTURE_CLI_HTML500_ONCE=1 \
+  BP_FIXTURE_COUNT_DIR="$tmp/counts-cli-html500-once" \
+  BP_AUDIT_BIN="$tmp/fake-bp" BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/cli-html500-once-result.json" || {
+  printf 'a once-HTML-500 CLI red was not retried to green\n' >&2
+  exit 1
+}
+jq -e '
+  .ok and .failed == 0 and
+  ([.results[] | select(.cli.ok and .cli.arm == "ok" and .cli.attempts >= 2)] | length == 1)
+' "$tmp/cli-html500-once-result.json" >/dev/null
+# Control: the stub was actually called three times — paper 1 failed, paper 1
+# RETRIED (that is the second call, and the whole point), paper 2 rendered — so
+# the green above is a retry and not a stub that never failed. Without the retry
+# this counter reads 2.
+if [[ "$(cat "$tmp/counts-cli-html500-once/bp_cli_html500_once" 2>/dev/null)" != "3" ]]; then
+  printf 'the once-HTML-500 CLI stub was not invoked exactly three times (fail, retry, second paper); the pin measured nothing\n' >&2
+  exit 1
+fi
+
+# 9. A PERSISTENT HTML-500 CLI red must still FAIL, having spent the whole
+#    ladder. Retrying forever would launder an outage into a slow green.
+if PATH="$tmp:$PATH" BP_FIXTURE_CLI_HTML500=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/cli-html500-result.json"; then
+  printf 'a persistent HTML-500 CLI red unexpectedly passed\n' >&2
+  exit 1
+fi
+jq -e '
+  .ok == false and .failed == 2 and
+  all(.failures[];
+    .cli.ok == false and .cli.arm == "command_failed" and
+    .cli.exit == 4 and .cli.attempts == 4 and
+    (.cli.stderr | contains("status 500: <!DOCTYPE html>"))
+  )
+' "$tmp/cli-html500-result.json" >/dev/null
+
+# 10. A once-transport-error CLI red must be retried to GREEN too — the client
+#     never reached the box, so there was no verdict to be loud about.
+mkdir "$tmp/counts-cli-transport-once"
+PATH="$tmp:$PATH" BP_FIXTURE_CLI_TRANSPORT_ONCE=1 \
+  BP_FIXTURE_COUNT_DIR="$tmp/counts-cli-transport-once" \
+  BP_AUDIT_BIN="$tmp/fake-bp" BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/cli-transport-once-result.json" || {
+  printf 'a once-transport-error CLI red was not retried to green\n' >&2
+  exit 1
+}
+jq -e '
+  .ok and .failed == 0 and
+  ([.results[] | select(.cli.ok and .cli.arm == "ok" and .cli.attempts >= 2)] | length == 1)
+' "$tmp/cli-transport-once-result.json" >/dev/null
+# Same control: fail, retry, second paper — 3 calls. 2 would mean no retry.
+if [[ "$(cat "$tmp/counts-cli-transport-once/bp_cli_transport_once" 2>/dev/null)" != "3" ]]; then
+  printf 'the once-transport CLI stub was not invoked exactly three times (fail, retry, second paper); the pin measured nothing\n' >&2
+  exit 1
+fi
+
+# 11. A PERSISTENT transport error must still FAIL after the whole ladder.
+if PATH="$tmp:$PATH" BP_FIXTURE_CLI_TRANSPORT=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/cli-transport-result.json"; then
+  printf 'a persistent transport-error CLI red unexpectedly passed\n' >&2
+  exit 1
+fi
+jq -e '
+  .ok == false and .failed == 2 and
+  all(.failures[];
+    .cli.ok == false and .cli.arm == "command_failed" and
+    .cli.exit == 4 and .cli.attempts == 4 and
+    (.cli.stderr | contains("connection refused"))
+  )
+' "$tmp/cli-transport-result.json" >/dev/null
+
+# 12. DNS resolution failure is EXCLUDED from the CLI transport class, exactly
+#     as curl exit 6 is excluded from the HTTP one (fixture 6). A broken base
+#     URL is a config fault; retrying it only delays the report. One attempt.
+if PATH="$tmp:$PATH" BP_FIXTURE_CLI_DNS=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/cli-dns-result.json"; then
+  printf 'an unresolvable host on the CLI leg unexpectedly passed\n' >&2
+  exit 1
+fi
+jq -e '
+  .ok == false and .failed == 2 and
+  all(.failures[];
+    .cli.ok == false and .cli.arm == "command_failed" and
+    .cli.exit == 4 and .cli.attempts == 1 and
+    (.cli.stderr | contains("lookup fixture.invalid"))
+  )
+' "$tmp/cli-dns-result.json" >/dev/null || {
+  printf 'a DNS resolution failure on the CLI leg was retried (attempts %s) — the resolver exclusion is gone\n' \
+    "$(jq -r '.failures[0].cli.attempts' "$tmp/cli-dns-result.json")" >&2
+  exit 1
+}
 
 printf 'paper reader audit fixture: PASS\n'

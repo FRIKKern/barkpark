@@ -372,11 +372,18 @@ load_scratch_env() {
 
 # ── TRAP 6 — mint an admin token ─────────────────────────────────────────────
 #
-# A fresh box 401s the blob-push route and there is NO mix task that mints a
-# token (33 tasks, none auth). api_tokens stores only sha256(raw) hex
-# (Barkpark.Auth.ApiToken.hash_token/1), and BarkparkWeb.Plugs.RequireAdmin
-# demands the "admin" permission, so insert the row directly and print the raw
-# token. kind='api' is what Auth.verify_token/1 filters on.
+# A fresh box 401s the blob-push route. A FIRST-PARTY MINT DOES EXIST —
+# Barkpark.Seeds.Clean.bootstrap_admin_token/1, reached as `bin/barkpark token`
+# or `BARKPARK_SEED_PROFILE=clean mix run priv/repo/seeds.exs`. What does not
+# exist is a mix TASK that mints one (33 tasks, none auth); the earlier wording
+# here ("there is NO mix task") read as "no path exists" and is the origin of an
+# oversized backlog premise. This harness still inserts the row directly on
+# purpose: it wants a LABELLED, disposable scratch credential ('pds-scratch') it
+# can grep for, minted before the seed path is itself under test. That is a
+# harness choice, not the absence of a path — do not cite it as one.
+# api_tokens stores only sha256(raw) hex (Barkpark.Auth.ApiToken.hash_token/1),
+# and BarkparkWeb.Plugs.RequireAdmin demands the "admin" permission.
+# kind='api' is what Auth.verify_token/1 filters on.
 mint_admin_token() {
   local raw hash
   raw="pds-scratch-$(LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c 40)"

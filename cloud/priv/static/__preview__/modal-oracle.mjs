@@ -144,6 +144,7 @@ import { fileURLToPath } from "node:url";
 import { SCENARIOS } from "./scenarios.mjs";
 import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
 import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
+import { createCrossDocumentNavigator } from "./same-document-nav-census.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -861,6 +862,7 @@ async function main() {
   // dead attempt's directory re-races the same DevToolsActivePort path.
   let profile = null;
   const t0 = Date.now();
+  const crossDoc = createCrossDocumentNavigator("modal-oracle");
 
   let server = null;
   let chrome = null;
@@ -1046,7 +1048,17 @@ async function main() {
             (accent ? `&accent=${accent}` : "") +
             plan.suffix;
 
-          await cdp.send("Page.navigate", { url }, sessionId);
+          // CROSS-DOCUMENT, ALWAYS (cch-w24-bl-hash-only-nav-is-same-document).
+          // Every cell of every state drives THE SAME target, so two cells
+          // whose URLs are equal but for the fragment are a same-document
+          // navigation and the second one measures the first one's DOM. The
+          // token-reveal state is the live case here: its cells share one URL
+          // ending `#settings/tokens`, and an IDENTICAL fragment-bearing URL
+          // does not reload either — so the second geometry would assert a
+          // reveal dialog the first cell minted and never dismissed. The guard
+          // rewrites only what Chrome would have skipped, and reports its count
+          // below whether it fired or not.
+          await cdp.send("Page.navigate", { url: crossDoc.next(url) }, sessionId);
 
           // Poll the page for a boolean expression — the account modal opens on
           // a click that mock.js drives only after /v1/me paints, and the reveal
@@ -1166,6 +1178,7 @@ async function main() {
 
   const failed = results.filter((r) => r.failures.length > 0);
   const wall = Date.now() - t0;
+  process.stdout.write(crossDoc.line());
   process.stdout.write(
     `\n${failed.length ? "ORACLE FAIL" : "ORACLE PASS"} — ${results.length} state(s) asserted, ` +
       `${failed.length} failing · ${(wall / 1000).toFixed(1)}s wall · teardown ${teardownMs}ms\n`,
