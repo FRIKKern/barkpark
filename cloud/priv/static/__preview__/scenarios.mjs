@@ -2865,6 +2865,85 @@ if (cruelName.length !== BARKPARK_NAME_MAX) {
   throw new Error(`cruel fixture: name is ${cruelName.length} chars, the server's cap is ${BARKPARK_NAME_MAX}`);
 }
 
+// ── cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche ────────────────────
+// TWO MORE 255-CAP TEXT HOSTS the corpus had never populated with a maximal
+// value. Both are built the way `CRUEL_SITE_NAME` is — literal concatenation
+// checked by `atLength`, so a corpus edit that quietly shortens either one
+// refuses on LOAD in every consumer of this module instead of passing on a
+// stale literal.
+//
+// 1) `github.account_login` → `.fleet-name` on the GitHub connection card
+//    (app.js `githubCardHtml`, the connected arm: `'GitHub · ' + esc(
+//    g.account_login)`). EFFECTIVE CAP 255, and 255 is the min of the only two
+//    layers that bound it: `validate_length(:account_login, max: 255)`
+//    (github/installation.ex:48) and the `add :account_login, :string` column
+//    (priv/repo/migrations/20260702160000_create_github_installations.exs:18,
+//    i.e. varchar(255)). NOTHING downstream shortens it — app.js `esc()`es and
+//    paints, and the card has no truncation of its own.
+//
+//    REACHABILITY: L2 (a source derivation, no write was run). The value does
+//    NOT come from any Barkpark request field. `POST /v1/github/installations`
+//    (router.ex:5753, `Auth.require_team_admin`) reads only `installation_id`
+//    from the body; `GitHub.record_installation/2` (github.ex:114) then takes
+//    `account_login` from `client().get_installation/1`, which in prod is
+//    `Real.get_installation/1` reading `decoded["account"]["login"]` off
+//    api.github.com (github/real.ex:51-56). So the ledger row below is
+//    INADMISSIBLE-by-derivation and deliberately NOT a reachability claim: it
+//    is an UPPER BOUND on a host whose producer this repo does not bound.
+//    That is precisely why the twin is worth carrying — nothing in Barkpark
+//    would stop a long login if GitHub ever returned one.
+//
+// 2) `barkpark.pinned_release` → `.fleet-meta` (the mono metadata line under a
+//    fleet row's name). EFFECTIVE CAP 255: `validate_length(:pinned_release,
+//    max: 255)` in `autoupdate_changeset/2` (registry/barkpark.ex:981) and the
+//    `add :pinned_release, :string` column (priv/repo/migrations/
+//    20260707110000_add_autoupdate_to_barkparks.exs:20). The changeset's only
+//    other clause is an `update_change` TRIM (barkpark.ex:977-980) — no
+//    format regex, so a length-only cruel string is server-legal here (unlike
+//    `site.domains`, which is FORMAT-LEGAL). The downstream derivation
+//    LENGTHENS rather than shortens: `fleetAutoupdateText` renders
+//    `"pinned " + vRel(pinned_release)` and `vRel` prepends a "v" to anything
+//    that does not already start with one — so the fixture starts with "v" and
+//    the rendered segment is exactly `"pinned " + 255` = 262 characters.
+//
+//    REACHABILITY: L2. `PATCH /v1/barkparks/:id/autoupdate` (router.ex:4271,
+//    `Auth.require_current_team_admin`) casts the body's `pinned_release`
+//    straight into `autoupdate_changeset/2`, and the console writes it from
+//    `#pin-input` (app.js `openPinModal`), an input with NO `maxlength` and no
+//    client-side format check — `value = $("#pin-input").value.trim()`. A team
+//    admin can type 255 characters into that box and have the server keep
+//    them. This one IS a reachability claim.
+//
+//    SINGLE UNBROKEN TOKEN, on purpose: `.fleet-meta` (app.css:1069) declares
+//    font-size/colour/font-family/margin and NOTHING about wrapping, so a
+//    string with a hyphen or a dot in it would wrap by itself and the row
+//    would be BREAKABLE rather than cruel.
+const cruelAccountLogin = atLength("github account_login",
+  "AcmeEngineeringNorthernEuropeanPlatformInfrastructureGroup" +
+  "ContentDeliveryAndPublishingOperationsOrganisationAccount" +
+  "ForTheWholeNordicForlagsgruppenIncludingEverySubsidiary" +
+  "AndItsSharedDeploymentToolingAndReleaseAutomationTeamAccountForEveryRegionAndImprints", 255);
+const cruelPinnedRelease = atLength("barkpark pinned_release",
+  "vAcmePublishingPlatformProductionReleaseCandidateBuild" +
+  "FromTheNordicForlagsgruppenMonorepoPipelineNumber" +
+  "SevenThousandTwoHundredAndEightyOneRebuiltAfterThe" +
+  "ArchiveMigrationOfEighteenNinetyTwoToTwentyTwentySixAcrossEveryImprintAndSubsidiaryFinalTaggedRebuilds", 255);
+// The cruelty is SHAPE as well as length on both: a break opportunity makes the
+// host wrap itself and the cell can no longer fail (the ledger's BREAKABLE
+// refusal). Asserted here, at load, rather than trusted by eye.
+for (const [what, v] of [["github account_login", cruelAccountLogin], ["barkpark pinned_release", cruelPinnedRelease]]) {
+  if (/[\s\-./_]/.test(v)) {
+    throw new Error("cruel fixture " + what + " carries a line-break opportunity (space, hyphen, dot, slash or underscore) — it would wrap by itself, which is BREAKABLE, not cruel");
+  }
+}
+// vRel() prepends "v" to anything that does not start with one, so a pin that
+// lost its leading "v" would render 256 characters and this fixture's own
+// derivation ("pinned " + 255 = 262) would be a sentence about a different
+// string.
+if (cruelPinnedRelease[0] !== "v") {
+  throw new Error("cruel fixture barkpark pinned_release must start with \"v\" — vRel() prepends one otherwise and the rendered length stops matching the cap this fixture cites");
+}
+
 // The cruel row is a LIVE, healthy, up-to-date box: nothing about its state is
 // unusual, and that is the point — the ONLY variable is the length of two
 // strings a person is allowed to type.
@@ -2891,6 +2970,28 @@ const cruelInstance = bpBase({
   provider: "hetzner",
   provision_status: "succeeded",
 });
+
+// cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche — THE PINNED TWIN, and
+// it is a per-SCENARIO override rather than a field on `cruelInstance` itself,
+// because `cruelInstance` is also the subject of `instance-cruel-detail`.
+//
+// MEASURED, NOT GUESSED. With the pin on the shared row, overflow-guard's
+// W21-detail-url-text-page-bound leg went red 24/24 cells: the instance detail
+// page read documentElement.scrollWidth 2054 against a 320 viewport (2294 at
+// 830-1000, 2378 at 1440), in BOTH themes. The host is a DIFFERENT one from
+// this row's `.fleet-meta` — `autoupdatePolicyLabel()` paints the pin into the
+// detail rail's "Autoupdate" row as a `.badge` inside `.rail-row .v`, and while
+// `.rail-row .v` carries `word-break: break-word` + `min-width: 0` the `.badge`
+// inside it does not break. That is a REAL, REACHABLE defect on a second host
+// and it is deliberately OUT of this slice's fence (which is one host, one CSS
+// rule); it is reported with its numbers rather than half-fixed here.
+//
+// A VALUE ON AN EXISTING ROW, never a new row: smoke.mjs pins this fixture's
+// `barkparks.length` at 3 and reads three rows out of it by predicate
+// (custom_host > 200, provision_error > 200, the one other host-bearing row),
+// so an inserted row is the wave-23 defect this corpus already paid for once.
+// A spread keeps all four of those counts identical.
+const cruelPinnedInstance = { ...cruelInstance, pinned_release: cruelPinnedRelease };
 
 // ── cch-w23-s1 — THE CRUEL PROVISION ERROR (the SHAPE axis, not the length) ──
 // The cruel corpus above bites on two strings a PERSON types. This one bites on
@@ -4426,10 +4527,23 @@ export const SCENARIOS = {
     deepLink: "#fleet",
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
-      barkparks: [cruelInstance, cruelProvisionErrorInstance, liveInstance],
+      barkparks: [cruelPinnedInstance, cruelProvisionErrorInstance, liveInstance],
       subscription: activeSub,
       sites: cruelFleetSites,
       audit: [],
+      // cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche — THE GITHUB
+      // HALF. The connection card's `.fleet-name` is a 255-cap text host
+      // (`installation.account_login`) and every populated `github` fixture in
+      // this file carries the same 16-character "acme-engineering", so no
+      // instrument had ever driven it at the cap. Route-gated exactly like the
+      // other three: `route()` answers /v1/github/installation only when the
+      // scenario carries a `github` key, so no other scenario moves by a byte.
+      // `install_url` rides along so a hypothetical disconnect repaints the
+      // honest reconnect arm rather than "aren't configured yet".
+      github: {
+        connected: true, account_login: cruelAccountLogin, configured: true,
+        install_url: "https://github.com/apps/barkpark-cloud/installations/new",
+      },
     },
   },
   // cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts (absorbing

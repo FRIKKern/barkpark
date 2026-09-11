@@ -1065,8 +1065,28 @@ select.form-input {
 .fleet-name { font-size: 14px; font-weight: 600; line-height: 1.3; overflow-wrap: break-word; }
 .fleet-url { font-size: 12px; color: var(--muted-text); font-family: var(--mono); margin-top: 3px; overflow-wrap: break-word; }
 .fleet-url.provisioning { color: var(--dim); font-family: var(--font); font-style: italic; }
-/* The mono metadata line: region · size · version · channel · autoupdate. */
-.fleet-meta { font-size: 12px; color: var(--dim); font-family: var(--mono); margin-top: 3px; }
+/* The mono metadata line: region · size · version · channel · autoupdate.
+
+   cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche — THE THIRD LINE OF
+   THE SAME BLOCK, and it was left out of the W15 remedy above for one reason:
+   no fixture had ever put a long value on it. `pinned_release` is a 255-cap
+   free-text field (registry/barkpark.ex:981, `autoupdate_changeset/2`, trim
+   only — no format regex) written from `#pin-input`, an input with NO
+   `maxlength`; `fleetAutoupdateText` renders it as `"pinned " + vRel(value)`.
+   Driven with a fixture at that cap (scenarios.mjs `cruelPinnedRelease`), the
+   309-character meta line measured scrollWidth 1836 against clientWidth 250 at
+   320 — 86% of it not rendered — and, computing `overflow: visible` like its
+   two siblings, it dragged `documentElement.scrollWidth` to 1871 against a 320
+   viewport at every width in the 320-1000 band: 22 of 22 cruel cells offending,
+   0 of 22 on the KIND corpus. overflow-guard.mjs's W21 leg is the measurement.
+
+   SAME REMEDY, SAME VALUE, FOR THE REASON RECORDED ABOVE: `break-word`, not
+   `anywhere` (`anywhere` lowers min-content and hands the flex contest to the
+   badges — the rejection at :2261 in this file), and wrap, not ellipsis. It is
+   one declaration on the host that reds. `.fleet-infra` below is the same
+   shape and is deliberately NOT touched here: nothing drives it at a cap, and
+   an unmeasured edit is the thing this leg exists to refuse. */
+.fleet-meta { font-size: 12px; color: var(--dim); font-family: var(--mono); margin-top: 3px; overflow-wrap: break-word; }
 /* fleetInfraLine — .fleet-meta's denser twin (region · size only), on the v4
    instance card where the full region·size·version·channel·autoupdate line would
    crowd the stat row. Same mono voice, one step quieter and one step tighter. */
