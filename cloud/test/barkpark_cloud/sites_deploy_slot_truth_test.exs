@@ -307,6 +307,122 @@ defmodule BarkparkCloud.SitesDeploySlotTruthTest do
       assert report.served_port == nil
       assert report.served_slot == nil
       assert report.health_exit_code == nil
+      assert report.route_status == nil
+      assert report.route_detail == nil
+    end
+
+    test "the ROUTE arm decision is read off its own top-level keys" do
+      report =
+        Deploy.normalize_report(%{
+          "state" => "succeeded",
+          "route_status" => "failed",
+          "route_detail" => "caddy validate rejected the block"
+        })
+
+      assert report.route_status == "failed"
+      assert report.route_detail == "caddy validate rejected the block"
+    end
+
+    test "a box that never armed sends no ROUTE keys, and nil is the honest answer" do
+      for body <- [
+            %{},
+            %{"route_status" => nil, "route_detail" => nil},
+            %{"route_status" => "", "route_detail" => "   "}
+          ] do
+        report = Deploy.normalize_report(body)
+
+        refute report.route_status,
+               "#{inspect(body)} must normalize to nil — every box older than the ROUTE " <>
+                 "engines, and every run that died before arming, lands in this shape"
+
+        refute report.route_detail
+      end
+    end
+  end
+
+  # ── THE ARM DECISION REACHES THE CONTROL PLANE (charter D608) ──────────────
+  #
+  # Wave 21's finding was an absence, measured: of 19,327 `deployments` rows
+  # carrying console entries, ZERO contained "ROUTE". The decision was durable on
+  # the box and readable nowhere else. These tests assert the far end of that
+  # pipe — not that a normalizer parses a key, but that a TERMINAL round leaves a
+  # ROUTE outcome on the ROW, where a `count(*)` can find it.
+  #
+  # COLUMNS, NOT CONSOLE, deliberately: `console` is capped and drops its oldest
+  # lines, so a ROUTE entry on a chatty build is droppable and an aggregate over
+  # it is unanswerable.
+  describe "the deployment ROW carries the arm decision" do
+    test "a succeeded run persists route_status/route_detail" do
+      bp = live_barkpark()
+      site = node_site(bp)
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          succeeded(%{
+            "served_port" => @green,
+            "served_slot" => "b",
+            "health_exit_code" => 0,
+            "route_status" => "ok",
+            "route_detail" => "armed: wrote the BARKPARK_SITE_ROUTE handle"
+          })
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+
+      # THE CRITERION, at the only place it can be counted. MUTATION-PROVED:
+      # delete `|> maybe_put(:route_status, report.route_status)` from
+      # `measured/2` and this assertion reds with `left: nil`.
+      assert final.route_status == "ok"
+      assert final.route_detail == "armed: wrote the BARKPARK_SITE_ROUTE handle"
+    end
+
+    test "a FAILED terminal round carries it too — the arm is reported on both exits" do
+      bp = live_barkpark()
+      site = node_site(bp)
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          failed_at_health(%{
+            "route_status" => "failed",
+            "route_detail" => "caddy validate rejected the block"
+          })
+        ]
+      )
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+
+      # The failure arm reaches `measured/2` through `fail/3`, not through
+      # `settle_live_now/1`. Asserted separately because a route arm that only
+      # landed on SUCCESS would answer the least interesting half of the
+      # question: a refused arm is the row an operator wants to count.
+      assert final.status == "failed"
+      assert final.route_status == "failed"
+      assert final.route_detail == "caddy validate rejected the block"
+    end
+
+    test "a box that predates ROUTE leaves the columns NULL, never overwritten" do
+      bp = live_barkpark()
+      site = node_site(bp)
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(polls: [succeeded(%{"served_port" => @green, "served_slot" => "b"})])
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+
+      # `maybe_put/3` OMITS a nil, so a pre-#17569 box writes nothing here. That
+      # omission is what lets this change land before any box is pulled: an
+      # unarmed-because-unmeasured row is honestly null, not honestly "failed".
+      refute final.route_status
+      refute final.route_detail
     end
   end
 end
