@@ -124,6 +124,41 @@ else
 fi
 
 HEALTH_HOST="${BARKPARK_HEALTH_HOST:-guerrilla.barkpark.cloud}"
+# THE LIVENESS PATH every health gate below probes. NOT `/api/schemas`.
+#
+# `/api/schemas` is the LAST surviving legacy route (router.ex, the final
+# `scope "/api"`), and it pipes through `BarkparkWeb.Plugs.LegacyDeprecation`,
+# which stamps every response with
+#
+#     sunset: Wed, 31 Dec 2026 23:59:59 GMT
+#
+# That is a PUBLISHED removal date, not a hint. THE FAILURE MODE ON THAT DATE IS
+# FAIL-CLOSED, NOT QUIET: every probe below captures the status with
+# `-o /dev/null -w '%{http_code}'` (via bp_curl_code) and GATES on `= 200`, and
+# curl's own exit status is deliberately discarded (`|| echo 000`) because the
+# STATUS CODE is the signal. So a 404 from a retired route does not "go quiet" —
+# it disables the freshly-booted slot, resets the checkout to the live sha and
+# exits 24/14, or (post-flip) flips Caddy back. A healthy build on a healthy box
+# would stop deploying everywhere, and the log would blame the slot.
+#
+# `/status.json` (router.ex: `get("/status.json", StatusController, :show_json)`)
+# is the replacement: `pipe_through(:api)` only — no LegacyDeprecation, no
+# deprecation/sunset header, no token (the `:api` pipeline runs `OptionalToken`),
+# and not part of any versioned content contract. It is a STRICTLY STRONGER
+# liveness signal than the route it replaces: `StatusController.show_json/2` ->
+# `Barkpark.Status.health/0` -> `open_incidents/0` and `recent_incidents/1` are
+# bare `Repo.all/1` calls (NOT wrapped in `Status.safe/2`), so an unreachable
+# database raises and the probe sees 500, never 200. 200 means the endpoint is
+# up AND the database answers. `curl -s <box>/status.json | jq -r .commit` is
+# already the documented box smoke (CLAUDE.md).
+#
+# CONSUMERS STILL ON THE SUNSET ROUTE as of 2026-09-11 (out of this script's
+# fence, each fails closed on 2027-01-01 unless repointed): the docker-compose
+# healthcheck, `cloud/support.go`, `scripts/deploy-rebuild.sh` (BP_HEALTH_URL
+# default), `scripts/create-quickstart-smoke.sh`, `scripts/compose-smoke.sh`,
+# `scripts/pds-scratch-target.sh`, and the Uptime Kuma monitor documented in
+# `deploy/uptime-kuma/README.md`. Repoint them too; this script honours $BARKPARK_HEALTH_PATH.
+HEALTH_PATH="${BARKPARK_HEALTH_PATH:-/status.json}"
 BLUE_PORT="${BARKPARK_PORT_BLUE:-4000}"
 GREEN_PORT="${BARKPARK_PORT_GREEN:-4001}"
 # Remote MCP endpoint (viable-everywhere D19). MUST stay outside the blue/green
@@ -464,7 +499,7 @@ if [ "$MODE" != "deploy" ]; then
   systemctl restart "barkpark-slot@$TARGET_SLOT"
   ok=0
   for _ in $(seq 1 40); do
-    code="$(bp_curl_code -s -o /dev/null --max-time 5 "http://localhost:${TARGET_PORT}/api/schemas" || echo 000)"
+    code="$(bp_curl_code -s -o /dev/null --max-time 5 "http://localhost:${TARGET_PORT}${HEALTH_PATH}" || echo 000)"
     if [ "$code" = "200" ]; then ok=1; log "slot $TARGET_SLOT healthy ($code)"; break; fi
     sleep 5
   done
@@ -516,8 +551,8 @@ if [ "$MODE" != "deploy" ]; then
     git reset --hard "$OLD"; exit 24
   fi
   exec 8>&-   # leaf lock: released the moment the file is written + reloaded
-  code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}/api/schemas" || echo 000)"
-  log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
+  code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}${HEALTH_PATH}" || echo 000)"
+  log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}${HEALTH_PATH} = $code)"
 
   # Drain, retire the rolled-away slot, and rewrite STATE to the rolled-back
   # sha (W6 D21) — keeps coalesce, the agent's git_commit, and the next
@@ -1236,7 +1271,7 @@ systemctl restart "barkpark-slot@$TARGET"
 
 ok=0
 for _ in $(seq 1 40); do
-  code="$(bp_curl_code -s -o /dev/null --max-time 5 "http://localhost:${TARGET_PORT}/api/schemas" || echo 000)"
+  code="$(bp_curl_code -s -o /dev/null --max-time 5 "http://localhost:${TARGET_PORT}${HEALTH_PATH}" || echo 000)"
   if [ "$code" = "200" ]; then ok=1; log "slot $TARGET healthy ($code)"; break; fi
   sleep 5
 done
@@ -1274,7 +1309,7 @@ cp -a "$CADDYFILE" "$CADDYFILE.pre-deploy"
 sed -i "s/localhost:${FLIP_FROM}/localhost:${TARGET_PORT}/g" "$CADDYFILE"
 # Did the rewrite actually MOVE the upstream? The post-flip PUBLIC gate below
 # claims to catch "a sed that missed the live upstream line". It cannot: BOTH
-# slots serve /api/schemas, so when the flip is a no-op the OLD slot answers
+# slots serve the health path, so when the flip is a no-op the OLD slot answers
 # that probe 200 through the UNCHANGED Caddyfile, the gate passes, and the
 # script then disables the old slot — leaving Caddy proxying a dead port, exit
 # 0, "healthy" in every log line. A Caddyfile whose upstream is written some
@@ -1305,8 +1340,8 @@ if ! systemctl reload caddy; then
 fi
 exec 8>&-   # leaf lock: released the moment the flip is written + reloaded, so
             # the long non-Caddy tail below (go builds, npm ci) never holds it
-code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}/api/schemas" || echo 000)"
-log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
+code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}${HEALTH_PATH}" || echo 000)"
+log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}${HEALTH_PATH} = $code)"
 # GATE, not just log (pds-bl-w49): the pre-flip loop above only proves the app
 # boots on its OWN port (localhost:$TARGET_PORT) — it cannot catch a flip that
 # landed wrong (a sed that missed the live upstream line, a Caddy reload that
@@ -1318,7 +1353,7 @@ log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
 # flip Caddy back and walk away clean instead of shipping a silently-broken
 # deploy.
 if [ "$code" != "200" ]; then
-  log "post-flip public health check FAILED (https://${HEALTH_HOST}/api/schemas = $code) — flipping back to :$ACTIVE_PORT; it was never retired"
+  log "post-flip public health check FAILED (https://${HEALTH_HOST}${HEALTH_PATH} = $code) — flipping back to :$ACTIVE_PORT; it was never retired"
   revert_post_flip_health_fail() {
     cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"
     if ! caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
