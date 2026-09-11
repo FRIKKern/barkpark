@@ -650,6 +650,7 @@ defmodule BarkparkCloud.Web.Router do
   # across 45 of the 56 top-level GETs would reinstate the 404 lie on four fifths
   # of the API (D34). Out of scope BY DECISION. Do not grow this list to cover
   # them. Full measurement lives on task cch-w2-head-sideeffect-fence.
+  # @boundary capability:cloud-head-sideeffect-fence test:cloud/test/barkpark_cloud/web/router_head_fence_census_test.exs#the side-effecting-GET deny clauses are exactly the committed set, in order
   defp refuse_head_on_side_effecting_gets(%Plug.Conn{method: "HEAD"} = conn, _opts) do
     if side_effecting_get?(conn.path_info) do
       conn
@@ -698,6 +699,7 @@ defmodule BarkparkCloud.Web.Router do
   # the real stream has not yet redeemed, and the user's own connect then 401s.
   # There is exactly ONE ticket-redeeming call site in lib/, so this one clause is
   # SUFFICIENT, not a sample — see `router_sse_ticket_head_burn_test.exs`.
+  # @boundary capability:cloud-sse-ticket-head-burn test:cloud/test/barkpark_cloud/web/router_sse_ticket_head_burn_test.exs#does NOT burn the ticket, and the user's own GET still opens
   defp side_effecting_get?(["v1", "events"]), do: true
 
   defp side_effecting_get?(_path_info), do: false
