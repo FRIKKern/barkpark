@@ -161,18 +161,6 @@ export const ALLOWLIST = [
       "declared on the same line; the box, not the scale, is what bounds it.",
   },
   {
-    selector: ".cmdk-foot kbd",
-    px: 11,
-    where: "command palette footer key caps",
-    reason:
-      "NOT a glyph argument and not a comfortable one: these are key CAPS (esc, Enter) and they SHOULD be " +
-      "on the scale. Raised to 12px and DRIVEN, they push `span.cmdk-hint` to 296.91 inside a card whose " +
-      "own box ends at 296 — overflow-guard's W22 min-content leg goes from a reported 288.8/272 squeeze at " +
-      "320 to a hard `1 of 112 descendants paint OUTSIDE the card` failure. The footer needs to WRAP before " +
-      "its type can grow, and that reflow is a layout change this slice's fence does not cover. Held at 11px " +
-      "with the cost written down rather than shipped as a regression; the follow-up is the `.cmdk-foot` wrap.",
-  },
-  {
     selector: ".toast-ico",
     px: 11,
     where: "toast status badge",

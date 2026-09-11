@@ -78,6 +78,20 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     # editor still open — the #1851 never-unreachable guarantee.
     {tree, segments} = resolve(nav_path, gated, dataset, opts)
 
+    # DEAD-HEAD ALIAS (Gyldendal friction 67, E3.5). A deep link minted while
+    # the DEFAULT desk was showing carries the display group's id as its head —
+    # `/studio/content-types/publication/<id>` — and the row path of a DECLARED
+    # desk carries the declared section's id instead. Once a `deskStructure`
+    # document is published the old head names nothing anywhere, `resolve/4`
+    # hands the raw path back untouched, the walk finds no child for it, and
+    # the shell renders «This desk has no section named content-types» for a
+    # document that is one click away. When the head is dead but the tail is
+    # `<type>/<id>` for a type the desk lists, the link means the same thing
+    # `/studio/<type>/<id>` means (PR 16122): drop the head and normalize the
+    # tail to that type's node path. `aliased?` lets the LiveView rewrite the
+    # URL to the canonical path so the address bar stops lying.
+    {tree, segments, aliased?} = alias_dead_head(nav_path, tree, segments, gated)
+
     {panes, editor} = walk_and_stamp(segments, gated, tree, dataset, opts)
 
     # LAST-CHANCE NORMALIZATION (#35a, S9 crit 1a). `resolve/4` hands the walk
@@ -96,11 +110,51 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     # shadowing group keeps its own address (`/studio/publication` still opens
     # the group) and only the path that opened nothing is rescued. This is the
     # #1851 never-unreachable guarantee applied to a declared desk.
-    case {editor, retry_segments(nav_path, segments, tree)} do
-      {nil, retry} when is_list(retry) -> walk_and_stamp(retry, gated, tree, dataset, opts)
-      _ -> {panes, editor}
+    {panes, editor} =
+      case {editor, retry_segments(nav_path, segments, tree)} do
+        {nil, retry} when is_list(retry) -> walk_and_stamp(retry, gated, tree, dataset, opts)
+        _ -> {panes, editor}
+      end
+
+    # Only an ALIASED walk that actually opened a document earns a canonical
+    # path: every other normalization keeps the URL it was given (the
+    # demoted-type and shadowed-group rescues above are deliberate no-rewrites).
+    editor =
+      if aliased? and is_map(editor),
+        do: Map.put(editor, :canonical_path, segments),
+        else: editor
+
+    {panes, editor}
+  end
+
+  # `{tree, segments, aliased?}` — see the DEAD-HEAD ALIAS note in `build/3`.
+  # The head is dead when `resolve/4` returned the raw path (no root item, no
+  # node anywhere in the tree it chose) — reserved heads and single-segment
+  # paths are never aliased. The alias resolves the tail's TYPE the way
+  # `resolve/4` resolves a head: the gated desk first, then the tree resolve
+  # chose (the ungated fallback), a singleton by type name with the id dropped.
+  defp alias_dead_head([head, type | rest] = nav_path, tree, segments, gated)
+       when segments == nav_path and head not in ["graph", "open"] do
+    if root_has_segment?(tree, head) or find_type_node(tree.items || [], head, []) != nil do
+      {tree, segments, false}
+    else
+      case find_type_node(gated.items || [], type, []) ||
+             find_type_node(tree.items || [], type, []) do
+        {node_path, %{type: :document}} -> {gated_or(tree, gated, node_path), node_path, true}
+        {node_path, _node} -> {gated_or(tree, gated, node_path), node_path ++ rest, true}
+        nil -> {tree, segments, false}
+      end
     end
   end
+
+  defp alias_dead_head(_nav_path, tree, segments, _gated), do: {tree, segments, false}
+
+  # Walk the gated desk when it lists the aliased type (the common case);
+  # otherwise the tree `resolve/4` already chose.
+  defp gated_or(tree, gated, [root_id | _]),
+    do: if(root_has_segment?(gated, root_id), do: gated, else: tree)
+
+  defp gated_or(tree, _gated, _), do: tree
 
   # Walk `segments` against `tree` and stamp every pane with its own address.
   #

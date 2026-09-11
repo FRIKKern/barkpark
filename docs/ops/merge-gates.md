@@ -470,14 +470,21 @@ means that gate does not emit, because it is not path-gated at all.
 | `Security gate` | `.github/workflows/security.yml` | no |
 | `Compose smoke` | `.github/workflows/compose-smoke.yml` | no |
 | `Go gate` | `.github/workflows/go-tests.yml` | no |
+| `Web gate` | `.github/workflows/ci.yml` | no |
 | `PR references an active task` | — | yes |
 
 So three of the four required contexts can go green having dispatched nothing.
 The fourth, `PR references an active task`, is **exempt by construction** in the
 path-gating sense: its workflow carries no `paths:` filter and no `changes`
-dispatcher, so it executes on every PR. `Security gate`, `Compose smoke` and `Go
-gate` emit the same notice but are not required — a red one of the three cannot
-block a merge and never could, so those greens are the weakest on this roster.
+dispatcher, so it executes on every PR. `Security gate`, `Compose smoke`, `Go
+gate` and `Web gate` emit the same notice but are not required — a red one of the
+four cannot block a merge and never could, so those greens are the weakest on
+this roster. `Web gate` is ci.yml's aggregator, added 2026-09-11
+(pds-bl-w48-web-gate-cannot-block-and-greens-vacuously) when that workflow's
+`pull_request` paths filter was deleted: until then its one real job,
+`web/ typecheck + unit tests + lint`, was ABSENT on a non-web head and could not
+be required at all. Registering `Web gate` (the aggregator, never that leaf)
+takes the required set 4 -> 5 and is a separate, deliberate act.
 `Go gate` is step 2
 of the sequence in go-tests.yml's header; step 3 (register `Go gate`, never the
 leaf `go vet + test`) has not landed. If `Compose smoke` or `Go gate` is ever

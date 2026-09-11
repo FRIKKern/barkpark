@@ -32036,3 +32036,42 @@ test("cch-w39-rv D895 · the other three wave-39 arms: each verdict is measured,
   assert.equal(hooks.meState(), "failed", "…and the state really is the unknown band, not cold boot");
   hooks.clearMe();
 });
+
+// ── cchi-w61-bl · A LOCAL GREEN AND THE CI GREEN MUST BE THE SAME STATEMENT ──
+// Everything above this line is a claim about app.js. THIS test is the only
+// claim about the RUNTIME those claims were taken on, and it exists because a
+// local green said nothing about which Node produced it.
+//
+// The console harness DECLARES its runtime in `cloud/priv/static/__node-version`
+// (a bare major, beside the file it describes — deliberately NOT a repo-root
+// .nvmrc, which would overclaim for a mixed fleet; see the reasoning block at
+// the head of scripts/console-runtime-pin-check.sh). Two guards already pin
+// that declaration against CI: console-runtime-pin-check.sh proves the workflow
+// still honours it. NOTHING pinned it against a developer's shell, so a suite
+// run under a different major produced a green indistinguishable from the
+// gate's — the defect this whole wave is named for.
+//
+// This test closes that half. It compares the runtime ACTUALLY EXECUTING to the
+// declaration, and reds BY NAME when they differ. It is its own control: it
+// cannot pass vacuously, because both sides are measured (process.versions.node
+// from the live process, the major from the committed file) and neither is
+// retyped beside the other.
+//
+// The resolving runner `scripts/console-harness.sh` exists so that this test's
+// red is not a papercut on a node-22 host: it locates the declared major and
+// execs it, and prints the RESOLVED binary's measured major.
+test("cchi-w61-bl: the console harness runs on the Node cloud/priv/static/__node-version declares", () => {
+  const declRaw = fs.readFileSync(new URL("./__node-version", import.meta.url), "utf8");
+  const declared = declRaw.trim();
+  assert.match(declared, /^[0-9]+$/,
+    `cloud/priv/static/__node-version must hold a bare Node major, got ${JSON.stringify(declRaw)}`);
+
+  const running = String(process.versions.node).split(".")[0];
+  assert.equal(running, declared,
+    `this harness was run on Node ${process.versions.node} (major ${running}), but ` +
+    `cloud/priv/static/__node-version declares ${declared}. A green taken on an ` +
+    `undeclared runtime is not the green the Console gate publishes — re-run it ` +
+    `through scripts/console-harness.sh, which resolves the declared major, or ` +
+    `change the declaration deliberately (console-runtime-pin-check.sh will then ` +
+    `require console-harness.yml's console-unit job to follow).`);
+});

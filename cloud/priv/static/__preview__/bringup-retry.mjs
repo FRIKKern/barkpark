@@ -108,14 +108,20 @@ export function captureStderr(child, cap = STDERR_TAIL_CAP) {
   return () => tail;
 }
 
-/** One tidy block of an attempt's captured stderr, or an honest statement that
+/** One tidy block of a child's captured stderr, or an honest statement that
  *  there was none — silence is itself a finding (a Chrome that never execed
- *  writes nothing). */
-export function formatStderrTail(tail, { indent = "   " } = {}) {
+ *  writes nothing; a serve.mjs killed by the OS writes nothing either).
+ *
+ *  `who` names the child whose stderr this is. It defaults to "chrome" so the
+ *  bring-up loop below is unchanged byte for byte; the three instruments that
+ *  also spawn a preview server pass "serve.mjs", because a block labelled
+ *  "chrome stderr" holding node's EADDRINUSE is the same false map this
+ *  helper exists to abolish. */
+export function formatStderrTail(tail, { indent = "   ", who = "chrome" } = {}) {
   const text = (tail || "").replace(/\s+$/, "");
-  if (!text) return `${indent}chrome stderr: (empty — the process wrote nothing before it went away)\n`;
+  if (!text) return `${indent}${who} stderr: (empty — the process wrote nothing before it went away)\n`;
   const lines = text.split("\n");
-  return `${indent}chrome stderr (last ${lines.length} line(s)):\n` +
+  return `${indent}${who} stderr (last ${lines.length} line(s)):\n` +
     lines.map((l) => `${indent}  | ${l}\n`).join("");
 }
 

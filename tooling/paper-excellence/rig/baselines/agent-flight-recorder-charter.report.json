@@ -19,7 +19,7 @@
       "cell": "agent-flight-recorder-charter__light__1280",
       "file": "agent-flight-recorder-charter__light__1280.jpeg",
       "scale": 2,
-      "bytes": 1081803,
+      "bytes": 1087033,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -156,8 +156,8 @@
         "heavyRules": [
           {
             "px": 2,
-            "y": 706.1,
-            "width": 580,
+            "y": 702.1,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -166,8 +166,8 @@
           },
           {
             "px": 2,
-            "y": 1490,
-            "width": 580,
+            "y": 1486,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -176,8 +176,8 @@
           },
           {
             "px": 2,
-            "y": 2147.6,
-            "width": 580,
+            "y": 2143.6,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -186,8 +186,8 @@
           },
           {
             "px": 2,
-            "y": 2685.5,
-            "width": 580,
+            "y": 2681.5,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -196,8 +196,8 @@
           },
           {
             "px": 2,
-            "y": 3336.8,
-            "width": 580,
+            "y": 3332.8,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -212,7 +212,7 @@
       "cell": "agent-flight-recorder-charter__light__1920",
       "file": "agent-flight-recorder-charter__light__1920.jpeg",
       "scale": 2,
-      "bytes": 1156482,
+      "bytes": 1164555,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -349,8 +349,8 @@
         "heavyRules": [
           {
             "px": 2,
-            "y": 706.1,
-            "width": 580,
+            "y": 702.1,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -359,8 +359,8 @@
           },
           {
             "px": 2,
-            "y": 1437.8,
-            "width": 580,
+            "y": 1433.8,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -369,8 +369,8 @@
           },
           {
             "px": 2,
-            "y": 2095.4,
-            "width": 580,
+            "y": 2091.4,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -379,8 +379,8 @@
           },
           {
             "px": 2,
-            "y": 2633.3,
-            "width": 580,
+            "y": 2629.3,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -389,8 +389,8 @@
           },
           {
             "px": 2,
-            "y": 3284.7,
-            "width": 580,
+            "y": 3280.7,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -405,7 +405,7 @@
       "cell": "agent-flight-recorder-charter__dark__1280",
       "file": "agent-flight-recorder-charter__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 1070004,
+      "bytes": 1074679,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -542,8 +542,8 @@
         "heavyRules": [
           {
             "px": 2,
-            "y": 706.1,
-            "width": 580,
+            "y": 702.1,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -552,8 +552,8 @@
           },
           {
             "px": 2,
-            "y": 1490,
-            "width": 580,
+            "y": 1486,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -562,8 +562,8 @@
           },
           {
             "px": 2,
-            "y": 2147.6,
-            "width": 580,
+            "y": 2143.6,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -572,8 +572,8 @@
           },
           {
             "px": 2,
-            "y": 2685.5,
-            "width": 580,
+            "y": 2681.5,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -582,8 +582,8 @@
           },
           {
             "px": 2,
-            "y": 3336.8,
-            "width": 580,
+            "y": 3332.8,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -598,7 +598,7 @@
       "cell": "agent-flight-recorder-charter__dark__1920",
       "file": "agent-flight-recorder-charter__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 1144763,
+      "bytes": 1151873,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -735,8 +735,8 @@
         "heavyRules": [
           {
             "px": 2,
-            "y": 706.1,
-            "width": 580,
+            "y": 702.1,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -745,8 +745,8 @@
           },
           {
             "px": 2,
-            "y": 1437.8,
-            "width": 580,
+            "y": 1433.8,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -755,8 +755,8 @@
           },
           {
             "px": 2,
-            "y": 2095.4,
-            "width": 580,
+            "y": 2091.4,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -765,8 +765,8 @@
           },
           {
             "px": 2,
-            "y": 2633.3,
-            "width": 580,
+            "y": 2629.3,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -775,8 +775,8 @@
           },
           {
             "px": 2,
-            "y": 3284.7,
-            "width": 580,
+            "y": 3280.7,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
