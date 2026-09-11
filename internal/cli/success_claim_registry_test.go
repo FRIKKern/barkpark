@@ -779,6 +779,32 @@ func successClaimRegistry() []claimSite {
 			Backed:       map[string]any{"capacity_stdout": `{"size_class":"standard"}`},
 			Contradicted: map[string]any{"capacity_stdout": `{"error":"fleet-run.sh: capacity: no such file"}`},
 		},
+		{
+			// THE OTHER HALF of the supportAddRun.success gap (/max-class closed the
+			// first). stepOnline polls until the MAIN'S ROSTER ROW truthfully reads
+			// online-with-capacity — the strongest post-condition this verb has,
+			// because it is what the MAIN observed and not what the local verb asked
+			// for — and both facts used to die in stepOnline: supportAddRun carried
+			// no field for them, so success() could name them on neither surface and
+			// no row could declare them as its axis.
+			//
+			// The probe is THE ROSTER ROW ITSELF, taken WHOLE (PDS-D431): production's
+			// observeRoster does the status/capacity extraction, so a production edit
+			// that stops carrying either fact reds here rather than leaving the row
+			// probing a sentence the CLI no longer composes. The box is held fixed at
+			// supportSuccessHost — the address is the /success row's axis, not this
+			// one's — and the pair moves only the main's reading.
+			Name: "supportAddRun.success/roster-fact",
+			Render: func(out *writer, resp any) {
+				r := supportAddIdentity
+				r.out = out
+				r.host = supportSuccessHost
+				r.observeRoster(resp.(map[string]any))
+				r.success()
+			},
+			Backed:       map[string]any{"status": "idle", "capacity": map[string]any{"max_class": "medium"}},
+			Contradicted: map[string]any{"status": "working", "capacity": map[string]any{"max_class": "small"}},
+		},
 	}
 }
 
@@ -841,6 +867,36 @@ func TestSupportCapacityNarrationStatesTheDegradedMeasure(t *testing.T) {
 		t.Errorf("supportAddRun.success does not print supportCapacityNarration's degraded sentence (%q) when the "+
 			"box's answer carries no class — the branch is live in production but unreachable from the receipt.\nreceipt: %q",
 			degraded, receipt)
+	}
+}
+
+// TestSupportSuccessPrintsTheUnreadRosterThroughTheEnrolledRow closes the fork
+// the pair property cannot reach on its own. Both halves of
+// supportAddRun.success/roster-fact carry a row the poll DID read, so the
+// composer's unread branch — live the moment any caller reaches success() without
+// a completed poll — would be exercised by nothing and could be mutated to print
+// an empty tail while every arm stayed green.
+//
+// It asserts by CALLING supportRosterFactNarration and requiring the receipt the
+// enrolled row renders to contain what it returned — never by restating the text
+// here (#8688: a test that restates a string proves the string exists, not that
+// production emits it).
+func TestSupportSuccessPrintsTheUnreadRosterThroughTheEnrolledRow(t *testing.T) {
+	unread := supportRosterFactNarration("", nil)
+	site := registryRow(t, "supportAddRun.success/roster-fact")
+	receipt := renderClaim(t, site, map[string]any{})
+	if !strings.Contains(receipt, unread) {
+		t.Errorf("supportAddRun.success does not print supportRosterFactNarration's unread sentence (%q) when "+
+			"the roster row carried neither fact — the branch is live in production but unreachable from the "+
+			"receipt.\nreceipt: %q", unread, receipt)
+	}
+	// The control: the same row DOES print the measured sentence when the main
+	// answered, so the arm above is about the fork and not about the row being
+	// silent everywhere.
+	backed := renderClaim(t, site, site.Backed)
+	if !strings.Contains(backed, supportRosterFactNarration("idle", map[string]any{"max_class": "medium"})) {
+		t.Fatalf("fixture drift: the backed half no longer prints the MEASURED roster sentence, so the unread "+
+			"arm above is not measuring a fork.\nreceipt: %q", backed)
 	}
 }
 

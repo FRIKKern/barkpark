@@ -207,6 +207,15 @@ type supportAddRun struct {
 	tokenID     string
 	cpRowID     string // the CP support row id the register leg returned
 	maxClass    string // measured on the box; "" when the measure degraded
+
+	// What the MAIN observed, captured at the instant stepOnline accepted the
+	// box as online-with-capacity. These are the strongest post-conditions the
+	// add verb has — they are the main's own reading of the listener, not what
+	// this verb asked for — and until now they died inside stepOnline. Both are
+	// zero when the poll never reached a good row, which success() states as
+	// degraded rather than printing as a measured fact.
+	rosterStatus   string         // the roster row's status the poll accepted on
+	rosterCapacity map[string]any // the capacity the main reported for that row
 }
 
 func runCloudSupportAdd(out *writer, g globals, args []string) int {
@@ -445,6 +454,34 @@ func supportCapacityNarration(maxClass string) string {
 		return "not measured (degraded) — the listener measures itself at each beat"
 	}
 	return maxClass + " (measured on the box by fleet-run.sh capacity)"
+}
+
+// supportRosterFactNarration renders the MAIN'S OWN READING of the listener for
+// the final receipt: the roster status the poll accepted on and the capacity the
+// main reported alongside it. It is PURE — it composes from the two measured
+// values and nothing else — so both surfaces print the same fact from one place.
+//
+// A poll that never reached a good row leaves both zero, and that is STATED as
+// unread. success() is only reached on the happy path today, so the degraded
+// branch is defensive rather than live; it exists because the day a caller
+// reaches success() without a poll (a --skip-online, a resumed add) the receipt
+// must not print "reads  with capacity null" and let an operator read it as a
+// measurement the main made.
+func supportRosterFactNarration(status string, capacity map[string]any) string {
+	if strings.TrimSpace(status) == "" && len(capacity) == 0 {
+		return "not read (degraded) — the poll never returned a roster row; `bp fleet roster` is the live reading"
+	}
+	return fmt.Sprintf("reads %s with capacity %s (the MAIN's reading, not this verb's)",
+		supportOr(status, "unknown"), supportCompactJSON(capacity))
+}
+
+// observeRoster records the roster row the online poll accepted, taking the
+// main's answer WHOLE and doing its own status/capacity extraction (PDS-D431) —
+// so a production edit that stops carrying either fact is visible here rather
+// than one frame up in a caller that quietly stops passing an argument.
+func (r *supportAddRun) observeRoster(row map[string]any) {
+	r.rosterStatus, _ = row["status"].(string)
+	r.rosterCapacity, _ = row["capacity"].(map[string]any)
 }
 
 func (r *supportAddRun) state(step, msg string) { r.out.progressf("→ %s: %s", step, msg) }
@@ -853,6 +890,7 @@ func (r *supportAddRun) stepOnline() (int, bool) {
 			lastStatus = st
 			capMap, hasCap := row["capacity"].(map[string]any)
 			if (st == "idle" || st == "working" || st == "blocked") && hasCap && len(capMap) > 0 {
+				r.observeRoster(row)
 				r.done("online", supportOnlineNarration(r.name, row))
 				return exitOK, false
 			}
@@ -883,6 +921,15 @@ func (r *supportAddRun) success() int {
 			"cp_row_id": r.cpRowID,
 			"max_class": r.maxClass,
 			"unit":      "barkpark-fleet-listener",
+			"roster": map[string]any{
+				// `read` is the machine surface's honest degraded state: a status of
+				// "" with a null capacity is indistinguishable from a main that
+				// answered with an empty row, so the receipt says whether the poll
+				// ever got a reading at all.
+				"read":     r.rosterStatus != "" || len(r.rosterCapacity) > 0,
+				"status":   r.rosterStatus,
+				"capacity": r.rosterCapacity,
+			},
 		},
 		"main":    map[string]any{"url": r.base, "workspace": r.ws, "dataset": r.dataset},
 		"key_var": spec.keyVar,
@@ -896,6 +943,7 @@ func (r *supportAddRun) success() int {
 	r.out.outf("  box:    %s at %s (hetzner, label %s=%s)", r.host.Name, r.host.IP, cloud.FleetSupportLabelKey, r.name)
 	r.out.outf("  agent:  %s (hand it %s via the ssh one-liner above)", r.agent, spec.keyVar)
 	r.out.outf("  size:   max class %s", supportCapacityNarration(r.maxClass))
+	r.out.outf("  roster: %s", supportRosterFactNarration(r.rosterStatus, r.rosterCapacity))
 	r.out.outf("  next:   `bp fleet roster` shows it; route an order by naming assignee=%s", r.name)
 	return exitOK
 }
