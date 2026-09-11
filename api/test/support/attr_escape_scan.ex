@@ -34,6 +34,17 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
                   Enum.filter Enum.reject Enum.concat List.wrap List.flatten
                   String.trim String.downcase String.upcase
                   String.slice Integer.to_string Float.to_string List.to_string)
+  # Modules whose ENTIRE surface returns values minted at compile time from
+  # `design/*.json` (StatusVocab from status-manifest.json, TokensGen/Palettes
+  # from tokens.json, Stylesheet from the CSS file). Every one of their
+  # functions LOOKS UP by its argument and returns a table value — none returns
+  # its argument — so no author text can come back out. Adding a module here is
+  # a claim about that module's whole surface; check it before you do.
+  @engine_modules ~w(StatusVocab TokensGen Palettes Stylesheet Util.tone_palette
+                     Barkpark.PortableDoc.Render.StatusVocab
+                     Barkpark.PortableDoc.Render.TokensGen
+                     Barkpark.PortableDoc.Render.Palettes
+                     Barkpark.PortableDoc.Render.Stylesheet)
   @max_depth 8
 
   @doc """
@@ -301,7 +312,8 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
   defp classify_node({{:., _, [{:__aliases__, _, [:Map]}, f]}, _, [subject | _]}, ctx)
        when f in [:get, :fetch, :fetch!, :get_lazy] do
     case classify(subject, bump(ctx)) do
-      v when v in [:engine_call, :engine_table, :palette, :module_attr, :literal_list, :literal] ->
+      v when v in [:engine_call, :engine_module, :engine_table, :palette, :module_attr,
+              :literal_list, :literal] ->
         :engine_table
       _ -> :unproven
     end
@@ -343,6 +355,9 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
     cond do
       fun in @numeric_fns ->
         :numeric
+
+      name |> String.split(".") |> Enum.drop(-1) |> Enum.join(".") |> Kernel.in(@engine_modules) ->
+        :engine_module
 
       name in @passthrough ->
         case args do
