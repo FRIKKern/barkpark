@@ -1513,7 +1513,8 @@ func runSitesLogs(out *writer, args []string) int {
 	}
 	out.outf("deployment %s (%s)", dep.ID, dep.Status)
 	if dep.BuildLogURL == "" {
-		out.outf("  no build log URL yet — the builder writes it once the build starts")
+		out.outf("  no build log URL — that column is stamped only by the off-band builder door,")
+		out.outf("  never by a box build, so for a box-keyed deployment it never arrives")
 	} else {
 		out.outf("  log: %s", dep.BuildLogURL)
 	}
@@ -1524,12 +1525,13 @@ func runSitesLogs(out *writer, args []string) int {
 	return exitOK
 }
 
-// siteBuildLogBytesNotice is the ONE sentence every deployment-keyed render
-// ends on, and it exists to keep this command from over-claiming. The control
-// plane serves the recorder's structured RECORD and cannot serve the recorded
-// bytes — the box refuses them. A surface that printed a record without saying
-// so would read exactly like a log viewer that happened to be empty.
-const siteBuildLogBytesNotice = "this is the recorded build RECORD, not the build log bytes — the control plane does not serve them (they are unscrubbed on the box)"
+// siteBuildLogBytesNotice is the ONE sentence that separates the two reads this
+// command now makes. It used to say the bytes could never be served; #17624
+// folded the recorded log at WRITE and #17752 opened the byte door, so that
+// sentence became false and the honest one names the boundary instead: what is
+// above is the RECORD, what is below is the BYTES read, and the bytes arrive
+// only for a log the box actually scrubbed.
+const siteBuildLogBytesNotice = "the lines above are the recorded build RECORD; the recorded bytes are read separately below, and are served only when the box folded them through the secret scrubber"
 
 // runSitesBuildLogRecord renders GET /v1/sites/:id/deployments/:dep_id/build-log
 // for ONE deployment. The control plane separates its answers BY STATUS CODE on
@@ -1551,6 +1553,24 @@ func runSitesBuildLogRecord(out *writer, client *cloudclient.Client, site cloudc
 		return cloudFail(out, "read build log record", err)
 	}
 
+	// THE SECOND READ. The record and the bytes are two routes on purpose
+	// (#17752): the record route's 404/410/200 are a published contract with no
+	// room for a REFUSAL, and a refusal is exactly what an unscrubbed log needs.
+	// So the bytes are asked for separately, and a failure to get them never
+	// erases the record that was already answered.
+	//
+	// A pre-recorder deployment is not asked at all: no build_id means there was
+	// never a key to record under, so the question has no subject. Asking anyway
+	// would put a 404 about a build that never existed next to a 200 about the
+	// deployment that did.
+	var logBytes cloudclient.SiteBuildLogBytes
+	var logBytesErr error
+	askedForBytes := !rec.PreRecorder()
+	if askedForBytes {
+		logBytes, logBytesErr = client.SiteBuildLogBytes(cloudCtx(), site.ID, deploymentID)
+	}
+	served := askedForBytes && logBytesErr == nil && siteBuildLogBytesServed(logBytes)
+
 	payload := map[string]any{
 		"ok":            rec.HTTPStatus == 200 || rec.HTTPStatus == 410,
 		"http_status":   rec.HTTPStatus,
@@ -1559,22 +1579,41 @@ func runSitesBuildLogRecord(out *writer, client *cloudclient.Client, site cloudc
 		"build_id":      nilIfEmpty(rec.BuildID),
 		"log_state":     nilIfEmpty(rec.LogState),
 		"available":     rec.Available,
-		// The machine-readable half of the negative arm: a script never has to
-		// infer from prose that the bytes are absent.
-		"log_bytes_served": false,
-		"pre_recorder":     rec.PreRecorder(),
-		"error":            nilIfEmpty(rec.Error),
-		"detail":           nilIfEmpty(rec.Detail),
-		"box_log_state":    nilIfEmpty(rec.BoxLogState),
-		"log_path":         nilIfEmpty(rec.LogPath),
-		"log_bytes":        rec.LogBytes,
-		"exit_code":        rec.ExitCode,
-		"failure_reason":   nilIfEmpty(rec.FailureReason),
-		"journal_command":  nilIfEmpty(rec.JournalCommand),
-		"started_at":       nilIfEmpty(rec.StartedAt),
-		"finished_at":      nilIfEmpty(rec.FinishedAt),
-		"evicted_at":       nilIfEmpty(rec.EvictedAt),
-		"stages":           buildLogStagePayload(rec.Stages),
+		// The machine-readable half: a script never has to infer from prose
+		// whether the bytes arrived, and — when they did not — whether that was
+		// an absence or a REFUSAL. `bytes_error` carries the server's own word
+		// ("build_log_unscrubbed", "build_log_evicted", "box_unreachable", …).
+		"log_bytes_served": served,
+		"bytes_http_status": func() any {
+			if !askedForBytes || logBytesErr != nil {
+				return nil
+			}
+			return logBytes.HTTPStatus
+		}(),
+		"bytes_error":  nilIfEmpty(logBytes.Error),
+		"bytes_detail": nilIfEmpty(logBytes.Detail),
+		"log_scrub":    logBytes.LogScrub,
+		"tail_bytes":   logBytes.TailBytes,
+		"truncated":    logBytes.Truncated,
+		"tail": func() any {
+			if !served {
+				return nil
+			}
+			return logBytes.TailText()
+		}(),
+		"pre_recorder":    rec.PreRecorder(),
+		"error":           nilIfEmpty(rec.Error),
+		"detail":          nilIfEmpty(rec.Detail),
+		"box_log_state":   nilIfEmpty(rec.BoxLogState),
+		"log_path":        nilIfEmpty(rec.LogPath),
+		"log_bytes":       rec.LogBytes,
+		"exit_code":       rec.ExitCode,
+		"failure_reason":  nilIfEmpty(rec.FailureReason),
+		"journal_command": nilIfEmpty(rec.JournalCommand),
+		"started_at":      nilIfEmpty(rec.StartedAt),
+		"finished_at":     nilIfEmpty(rec.FinishedAt),
+		"evicted_at":      nilIfEmpty(rec.EvictedAt),
+		"stages":          buildLogStagePayload(rec.Stages),
 	}
 	if out.emitStructured(payload) {
 		if payload["ok"] == true {
@@ -1612,7 +1651,7 @@ func runSitesBuildLogRecord(out *writer, client *cloudclient.Client, site cloudc
 		out.outf("  this deployment predates build-keyed recording — it carries no build_id,")
 		out.outf("  so nothing was ever recorded under it. That is not a missing log and not an error.")
 		out.outf("  log_state: %s", rec.LogState)
-		out.outf("  %s", siteBuildLogBytesNotice)
+		out.outf("  there are no recorded bytes to ask for either, and none were asked for")
 		return exitOK
 	}
 
@@ -1643,7 +1682,112 @@ func runSitesBuildLogRecord(out *writer, client *cloudclient.Client, site cloudc
 		out.outf("  read it there with: %s", rec.JournalCommand)
 	}
 	out.outf("  %s", siteBuildLogBytesNotice)
+	if askedForBytes {
+		renderSiteBuildLogBytes(out, logBytes, logBytesErr, deploymentID)
+	}
 	return exitOK
+}
+
+// siteBuildLogBytesServed reports whether an answer actually CARRIES the
+// recorded bytes. All four conditions are load-bearing and none implies another:
+// a 200 (the only status that can carry them), a `tail` KEY (an old box answers
+// the record instead, with no tail key at all — see the decoder's header), a
+// non-nil `log_scrub` (nil is NEVER FOLDED, the state the 422 exists for), and a
+// non-nil tail (`available` with a null tail is a shape this end cannot report
+// on).
+func siteBuildLogBytesServed(b cloudclient.SiteBuildLogBytes) bool {
+	return b.HTTPStatus == 200 && b.TailPresent && b.Scrubbed() && b.Tail != nil
+}
+
+// renderSiteBuildLogBytes prints the byte read's outcome, and its whole job is
+// to keep SIX different facts from collapsing into "no log":
+//
+//	200 + tail          the bytes, verbatim (truncated ones carry their own
+//	                    "…[truncated: …]" first line, which is IN the bytes)
+//	200 + null tail     the box has none — an honest absence, and the only arm
+//	                    that may say so
+//	200 + no tail key   a box too old to serve bytes; we do not know
+//	422                 THE REFUSAL — the bytes EXIST and are withheld because
+//	                    they were never scrubbed. Never an absence.
+//	410                 retention took them, and the date says when
+//	404 / 409 / 502     we could not ask, or the two routes disagree. We do not
+//	                    know, which is not "there is no log".
+func renderSiteBuildLogBytes(out *writer, b cloudclient.SiteBuildLogBytes, err error, deploymentID string) {
+	if err != nil {
+		out.outf("  the recorded bytes could not be read: %s — so we do not know whether they exist", err.Error())
+		return
+	}
+
+	switch b.HTTPStatus {
+	case 422:
+		// THE CRITERION. `log_bytes` is the size of a log that is SITTING ON THE
+		// BOX; saying nothing about it, or saying "none found", would send an
+		// operator away from a file that is right there.
+		out.outf("  the recorded bytes were NEVER SCRUBBED, so they are withheld — this is a refusal, not an absence")
+		out.outf("  they exist on the box%s (log_state %s) and are not shown because unfolded bytes can carry secrets",
+			logBytesSuffix(b.LogBytes), dashOr(firstNonEmpty(b.LogState, "available")))
+		if b.LogPath != "" {
+			out.outf("  recorded on the box at %s", b.LogPath)
+		}
+		return
+	case 410:
+		out.outf("  the recorded bytes were reclaimed by retention%s — they are not coming back", evictedWhen(b.EvictedAt))
+		return
+	case 404:
+		// The record route answered about this deployment a moment ago, so this
+		// is a disagreement between two routes, NOT "no such deployment".
+		out.outf("  the bytes route does not recognise deployment %s, though the record route did — the two disagree, so we do not know", deploymentID)
+		return
+	case 409:
+		out.outf("  no box is bound to this site, so the recorded bytes could not be asked for — we do not know whether they exist")
+		return
+	case 502:
+		msg := "  the box could not be asked for the recorded bytes, so we do not know whether they exist"
+		if d := firstNonEmpty(b.Detail, b.Reason); d != "" {
+			msg += " — " + d
+		}
+		out.outf("%s", msg)
+		return
+	}
+
+	if !b.TailPresent {
+		// AN OLD BOX IS NOT AN EMPTY LOG. Discriminated on the KEY, never on the
+		// value: an absent `tail` and a null one decode identically.
+		out.outf("  the answer carried no tail field at all — that box is too old to serve bytes, so we do not know whether they exist")
+		return
+	}
+	if !b.Scrubbed() {
+		out.outf("  the answer claims bytes with no scrub stamp — withheld rather than shown, and that is a refusal, not an absence")
+		return
+	}
+	if b.Tail == nil {
+		out.outf("  the box recorded no bytes for this build (log_state %s)", dashOr(b.LogState))
+		return
+	}
+
+	head := fmt.Sprintf("  recorded bytes (%s of%s, scrub pattern-set %d)",
+		tailByteCount(b.TailBytes), dashOrBytes(b.LogBytes), *b.LogScrub)
+	if b.Truncated {
+		head += " — TRUNCATED to the END of a longer log"
+	}
+	out.outf("%s:", head)
+	out.outf("%s", b.TailText())
+}
+
+// tailByteCount / dashOrBytes render the two sizes without inventing a zero for
+// a size the server did not send.
+func tailByteCount(n *int64) string {
+	if n == nil {
+		return "an unstated number of bytes"
+	}
+	return fmt.Sprintf("%d bytes", *n)
+}
+
+func dashOrBytes(n *int64) string {
+	if n == nil {
+		return " an unstated total"
+	}
+	return fmt.Sprintf(" %d recorded", *n)
 }
 
 // buildLogStagePayload renders the stage ladder for the machine envelope. nil
@@ -1880,8 +2024,12 @@ WHAT 'bp sites' PRINTS
   'bp sites logs <site> <deployment-id>' reads the black box recorder's durable
   record for THAT deployment (operator-gated). It prints the RECORD — log_state,
   exit code, stages, the honest failure reason, and the on-box path / journal
-  command naming where the bytes live. IT DOES NOT PRINT THE BUILD LOG BYTES and
-  cannot: the control plane does not serve them (they are unscrubbed on the box).
+  command naming where the bytes live. The recorded BYTES ride a SECOND read
+  (.../build-log/bytes, also operator-gated) and reach you only when the box
+  folded them through the secret scrubber. IT WILL NOT HAND YOU UNSCRUBBED BYTES:
+  when a build's log was never folded, the command REFUSES BY NAME and says the
+  bytes exist and are withheld — which is not the same fact as "there is no log",
+  and never renders as one.
   'log_state' is relayed exactly as the recorder worded it, never mapped onto a
   CLI vocabulary. Five distinguishable answers: the record (log_state
   available/missing/never_recorded), a deployment that predates build-keyed
