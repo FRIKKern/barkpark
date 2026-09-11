@@ -527,6 +527,10 @@ defmodule Barkpark.Tasks.CompactorTest do
       # task and the `Tasks.close/3` task — get this test's connection from the
       # `shared: not tags[:async]` owner `DataCase.setup_sandbox/1` already
       # started for this `async: false` case.
+      #
+      # An in_progress task with a tall history — NOT eligible yet (lifecycle
+      # filter excludes it). Close it; the resulting done state IS eligible,
+      # but the next compaction cycle picks it up.
       phase_id = uniq("phase-race")
       task = mk_task!(uniq("race-close"), scope, %{"parent_id" => phase_id})
 
