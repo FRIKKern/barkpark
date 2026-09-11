@@ -12309,7 +12309,16 @@ defmodule BarkparkCloud.Web.Router do
       update_state: bp.update_state,
       autoupdate_triggered_at: bp.autoupdate_triggered_at,
       apply_arming: bp.apply_arming,
-      apply_arming_checked_at: bp.apply_arming_checked_at
+      apply_arming_checked_at: bp.apply_arming_checked_at,
+      # cch-w63-bl — WHY `update_state` is "unknown", when it is. Written by
+      # `Registry.persist_update_unknown/2` from nine distinct call sites and
+      # already serialized to the member fleet row by `barkpark_json/6`; the
+      # operator roster omitted it, so `operatorRowState`'s unknown arm could
+      # only say "No update state reported yet." about a box that had in fact
+      # answered 401. `nil` means NOT MEASURED and the console whitelists the
+      # nine words rather than testing truthiness, so an unrecognised value
+      # falls through to the bare grey "Unknown".
+      update_unavailable_reason: bp.update_unavailable_reason
     }
   end
 
