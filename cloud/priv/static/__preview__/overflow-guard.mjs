@@ -12250,7 +12250,14 @@ async function main() {
           await setViewport(1000);
           await nav(
             `${BASE}/?scen=${scen}&theme=${theme}#overview`,
-            `document.querySelector('.instance-card-url') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+            // SCOPED (task-995fc7be51dab99e). This readiness used to ask the
+            // WHOLE DOCUMENT for a `.instance-card-url` and, separately, that the
+            // live view be #overview — two true facts that a hidden, already-
+            // visited overview satisfies without the live screen having painted
+            // a single address. Walking the card off `v` asks the one question
+            // this leg needs: has the screen I am about to measure painted yet.
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return !!(v && v.id==='view-overview' && v.querySelector('.instance-card-url'));})()`,
           );
           const row = [];
           for (const width of CARD_WIDTHS) {
