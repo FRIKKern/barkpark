@@ -3471,6 +3471,29 @@ const EXPECTATIONS = {
       assert.ok(!sheet.includes("your own DNS record"),
         "the customer-DNS sentence fired on an instance with no custom host at all");
 
+      // ── cch-w57-bl: THE FLEET-CHILD RESIDUE, BOTH WAYS ───────────────────
+      // barkparks.fleet_parent_id is the one FK referencing barkparks that
+      // NILIFIES instead of cascading (DELIBERATE — migration 20260723000000
+      // L15-17), so a MAIN's teardown leaves every support box standing,
+      // ungrouped and still billed. This fixture's fleet is a SINGLE instance
+      // with no supports at all, so the sentence must be ABSENT here — and the
+      // absence is only evidence while that stays true, so the premise is
+      // asserted first.
+      assert.equal(ctx.state.barkparks.filter((b) => b.fleet_role === "support").length, 0,
+        "this branch assertion is only meaningful while the fixture fleet holds no support box");
+      assert.ok(!sheet.includes("grouped under this main"),
+        "the fleet-orphan sentence fired on a main that has no support boxes at all");
+      // …and the OTHER side, so it is a discriminator rather than dead copy:
+      // one child names itself, its host, and the three facts (survives,
+      // ungrouped, still billed).
+      const orphan = hooks.fleetChildResidueLines(hooks.supportsOf(
+        [{ id: bp.id }, { id: "sup-x", name: "muscle-1", host: "muscle-1.fleet.internal",
+          fleet_role: "support", fleet_parent_id: bp.id }], bp.id));
+      assert.equal(orphan.length, 1, "a main WITH a support box must gain exactly one orphan sentence");
+      assert.ok(orphan[0].includes("muscle-1 (muscle-1.fleet.internal)") &&
+        orphan[0].includes("stays running and keeps billing") && orphan[0].includes("only ungroups it"),
+        "the orphan sentence must NAME the survivor and say it survives, ungrouped and still billed; got: " + orphan[0]);
+
       assertDestroySheetDisarmed(reg, "Decommission");
       reg.get("cm-confirm").click();
       await ctx.settle();

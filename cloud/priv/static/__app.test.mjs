@@ -20539,6 +20539,68 @@ test("supportsOf picks exactly this main's supports — 0, 1 and 2; id types coe
   assert.deepEqual([...hooks.supportsOf([FLEET_MAIN, FLEET_SUPPORT_LIVE], null)], []);
 });
 
+// ── cch-w57-bl: the decommission sheet names the support box it ORPHANS ────
+// PREMISE: barkparks.fleet_parent_id is the ONE of seven FKs referencing
+// barkparks that is `on_delete: :nilify_all` — DELIBERATE (migration
+// 20260723000000 lines 15-17), so a main's DELETE returns 200 and its supports
+// SURVIVE, ungrouped and still billed. confirmDecommission named the DNS,
+// archive and billing residues and never this one. The line is DERIVED from
+// supportsOf(fleetCache, bp.id) — data already on the client — so it must fire
+// EXACTLY when a fleet child exists.
+test("cch-w57-bl: a main WITH a support box gets the orphan sentence, naming the box and its host", () => {
+  const kids = hooks.supportsOf([FLEET_MAIN, FLEET_SUPPORT_LIVE], "main-1");
+  assert.equal(kids.length, 1, "vacuity check: this arm must really have a fleet child");
+  const lines = hooks.fleetChildResidueLines(kids);
+  assert.equal(lines.length, 1, "exactly one orphan sentence");
+  // It NAMES the survivor — name and host, not a blanket "any support boxes".
+  assert.match(lines[0], /muscle-1 \(muscle-1\.fleet\.internal\)/);
+  // …and says the three facts the register pins: it survives, it is ungrouped,
+  // it is still billed.
+  assert.match(lines[0], /stays running and keeps billing/);
+  assert.match(lines[0], /only ungroups it/);
+  assert.match(lines[0], /is not torn down with it/);
+  // Singular grammar on one child.
+  assert.match(lines[0], /^Support box /);
+  assert.doesNotMatch(lines[0], /Support boxes/);
+});
+
+test("cch-w57-bl: a main with NO support box gets NO sentence, and a SUPPORT box itself gets none either", () => {
+  // (a) a main whose fleet holds only itself — and a main whose ONLY sibling
+  // support belongs to a DIFFERENT main, so the absence is the predicate's
+  // doing and not an empty list.
+  const foreign = { id: "sup-9", name: "other-1", fleet_role: "support", fleet_parent_id: "main-2" };
+  assert.equal(hooks.fleetChildResidueLines(hooks.supportsOf([FLEET_MAIN], "main-1")).length, 0);
+  assert.equal(hooks.fleetChildResidueLines(hooks.supportsOf([FLEET_MAIN, foreign], "main-1")).length, 0);
+  // (b) the SUPPORT box's own decommission sheet: nothing is parented to a
+  // support, so its own delete orphans nobody.
+  const all = [FLEET_MAIN, FLEET_SUPPORT_LIVE, FLEET_SUPPORT_PROV];
+  assert.equal(hooks.supportsOf(all, "main-1").length, 2,
+    "vacuity check: the SAME list yields two children for the MAIN, so the empty below is about the support");
+  assert.equal(hooks.fleetChildResidueLines(hooks.supportsOf(all, FLEET_SUPPORT_LIVE.id)).length, 0,
+    "a support box's own teardown sheet must not claim it orphans anything");
+  // (c) the degenerate inputs the call site can hand it (a null fleetCache
+  // yields [] from supportsOf).
+  assert.equal(hooks.fleetChildResidueLines([]).length, 0);
+  assert.equal(hooks.fleetChildResidueLines(undefined).length, 0);
+});
+
+test("cch-w57-bl: TWO support boxes are BOTH named, with plural grammar, and a hostless one still names itself", () => {
+  const kids = hooks.supportsOf([FLEET_MAIN, FLEET_SUPPORT_LIVE, FLEET_SUPPORT_PROV], "main-1");
+  assert.equal(kids.length, 2);
+  const lines = hooks.fleetChildResidueLines(kids);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /muscle-1 \(muscle-1\.fleet\.internal\)/);
+  // muscle-2 is mid-provision with host: null — it is STILL a billed machine
+  // that survives, so it must be named by the identity it does have.
+  assert.match(lines[0], /muscle-2/);
+  assert.doesNotMatch(lines[0], /muscle-2 \(/);
+  assert.match(lines[0], /^Support boxes /);
+  assert.match(lines[0], /They stay running and keep billing/);
+  assert.match(lines[0], /only ungroups them/);
+  // No invented retention window rides in on this sentence.
+  assert.deepEqual(lines[0].match(/\b\d+\s*(day|days|week|weeks|month|months)\b/gi) || [], []);
+});
+
 test("fleetSupportCardHtml renders ONLY on a main — a support row never gets its own card", () => {
   assert.equal(hooks.fleetSupportCardHtml(FLEET_SUPPORT_LIVE, [], Date.now()), "");
   const html = hooks.fleetSupportCardHtml(FLEET_MAIN, [], Date.now());
