@@ -151,13 +151,13 @@ export function objectDatabaseRefusal(root) {
   return null;
 }
 
-// THE REFUSAL ITSELF, before the first `test(` call is even registered — and with
+// THE REFUSAL ITSELF, before the first test is even REGISTERED — and with
 // NO env-var escape hatch, because a precondition anyone can switch off is not one.
 // The controls below drive `objectDatabaseRefusal()` directly instead.
 //
 // `writeSync(2, …)` and not `process.stderr.write(…, cb)`: on a pipe — which is what
 // CI always gives you — stderr is asynchronous, so a callback-drained exit would let
-// the ~101 `test(` registrations below run first, and a plain `write(); exit()` can
+// the hundred-odd registrations below run first, and a plain `write(); exit()` can
 // terminate with the refusal still in the buffer, refusing SILENTLY. `writeSync`
 // returns only once the bytes are out, which is the one shape that is both drained
 // and immediate. Same reasoning __preview__/exit-vocabulary.mjs gives for draining.
