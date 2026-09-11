@@ -9963,12 +9963,16 @@
     // the no-detail fallback: a name held by some OTHER surface (a Site domain,
     // another instance's custom_host, a lost race on the unique index) merges
     // no keys at all, and that body must still say something true.
+    // The fixed sentence stays at RETURN POSITION deliberately: __refusal_copy_census.mjs
+    // pins refusal copy by (enclosing fn, sha1 of the literal) and only sees literals
+    // inside a return expression. Hoisting it into a `var` initializer made the pinned
+    // FN|attachDomainFailureCopy row read as a REMOVE — a live sentence that had fallen
+    // out of the census population. Keep the fallback inside the returned expression.
     if (code === "taken") {
       var takenLeg = typeof data.claim_leg === "string" && data.claim_leg ? data.claim_leg : "";
-      var takenMsg = typeof data.detail === "string" && data.detail
-        ? data.detail
-        : "That domain is already in use.";
-      return takenLeg ? takenMsg + " (" + takenLeg + ")" : takenMsg;
+      var takenDetail = typeof data.detail === "string" && data.detail ? data.detail : "";
+      var takenSuffix = takenLeg ? " (" + takenLeg + ")" : "";
+      return (takenDetail || "That domain is already in use.") + takenSuffix;
     }
     if (code === "already_attaching") return "An attach is already running.";
     // Relay the plane's own sentence — it names the host that is in the way,
