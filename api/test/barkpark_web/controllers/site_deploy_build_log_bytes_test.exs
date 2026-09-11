@@ -122,6 +122,35 @@ defmodule BarkparkWeb.SiteDeployBuildLogBytesTest do
     log
   end
 
+  # Polls `:erlang.memory(:binary)` every millisecond and keeps the maximum. A
+  # 4 MB allocation is three orders of magnitude over the sampler's own footprint,
+  # so it cannot be the thing being measured.
+  defp start_binary_sampler(baseline) do
+    owner = self()
+
+    spawn(fn ->
+      sample_binary(owner, baseline)
+    end)
+  end
+
+  defp sample_binary(owner, peak) do
+    receive do
+      {:stop, from} -> send(from, {:peak, peak})
+    after
+      1 -> sample_binary(owner, max(peak, :erlang.memory(:binary)))
+    end
+  end
+
+  defp stop_binary_sampler(sampler) do
+    send(sampler, {:stop, self()})
+
+    receive do
+      {:peak, peak} -> peak
+    after
+      5_000 -> flunk("the binary-memory sampler never answered")
+    end
+  end
+
   defp get_bytes(conn, slug, build_id) do
     conn
     |> admin_conn()
@@ -355,39 +384,42 @@ defmodule BarkparkWeb.SiteDeployBuildLogBytesTest do
       assert hd(lines) == "this line is filler and must not be served"
     end
 
-    # NEVER THE WHOLE FILE INTO MEMORY, proven by MEASURING the reading process
-    # rather than by reading the implementation. The specific hazard is not
-    # hypothetical: `File.read!/1 |> binary_part/3` is the obvious way to write
-    # this function, and the sub-binary it returns REFERENCES the whole 4 MB
-    # binary, so the file stays resident for as long as the response does. After
-    # a forced GC the process must reference no binary near the file's size.
-    test "the served tail does not hold the whole file in memory — measured, not asserted from source",
+    # NEVER THE WHOLE FILE INTO MEMORY, proven by MEASURING the BEAM while the
+    # read runs rather than by reading the implementation.
+    #
+    # WHY A PEAK AND NOT A RESIDUE. The first version of this test measured the
+    # binaries the reading process still REFERENCED afterwards, and a
+    # `File.read!/1 |> binary_part/3` mutation passed it — because the
+    # implementation concatenates the marker onto the slice, and `<>` COPIES, so
+    # the 4 MB original is unreferenced by the time anyone looks. The residue was
+    # never the property; the PEAK is. So a sampler polls `:erlang.memory(:binary)`
+    # while the read is in flight, and the whole-file read shows up as the 4 MB
+    # spike it is.
+    test "the whole file never enters memory — the PEAK is measured while the read runs",
          %{run_state: rs} do
       put_cfg(max_build_log_tail_bytes: 4_096)
 
       big = String.duplicate("x", 4_000_000) <> "\nthe last line\n"
       record_failure(rs, "mem", "bld-mem", big)
 
-      task =
-        Task.async(fn ->
-          {:ok, served} = DeployRunner.build_log_tail("mem", "bld-mem")
-          :erlang.garbage_collect(self())
-
-          {:binary, refs} = Process.info(self(), :binary)
-          {served.tail, refs |> Enum.map(&elem(&1, 1)) |> Enum.max(fn -> 0 end)}
-        end)
-
-      {tail, biggest_ref} = Task.await(task, 30_000)
-
-      assert tail =~ "the last line"
-
-      # THE CONTROL: the file really is 4 MB, so a passing measurement is a
-      # measurement of something.
+      # THE CONTROL: the file really is 4 MB, so a passing measurement measures
+      # something.
       assert File.stat!(Path.join(rs, "mem-bld-mem.log")).size > 4_000_000
 
-      assert biggest_ref < 1_000_000,
-             "the reading process still references a #{biggest_ref}-byte binary — " <>
-               "that is the whole log, read in and sliced rather than seeked to"
+      :erlang.garbage_collect()
+      baseline = :erlang.memory(:binary)
+      sampler = start_binary_sampler(baseline)
+
+      {:ok, served} = DeployRunner.build_log_tail("mem", "bld-mem")
+
+      peak = stop_binary_sampler(sampler)
+
+      assert served.tail =~ "the last line"
+      assert served.truncated == true
+
+      assert peak - baseline < 2_000_000,
+             "binary memory peaked #{peak - baseline} bytes above baseline while reading a " <>
+               "4 MB log with a 4 KB cap — the file looks to have been read in whole"
     end
 
     test "a log UNDER the cap is served whole and is not marked truncated", %{
