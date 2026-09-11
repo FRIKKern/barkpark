@@ -65,6 +65,8 @@
 # bash 3.2 compatible (macOS system bash).
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 # set -m FIRST (PDF-D28): job control is what gives each backgrounded stub
 # listener its OWN process group, which is what makes the kill straggler-proof.
 set -m
@@ -166,14 +168,14 @@ port4000_snapshot() { lsof -nP -iTCP:4000 -sTCP:LISTEN -t 2>/dev/null | sort | t
 TARGET_BASE=""; TARGET_TOKEN=""
 
 curl_beat() { # worker status ttl_s -> response body on stdout (exit = curl's)
-  curl -sS --max-time 5 -X POST "$TARGET_BASE/v1/fleet/beat" \
+  bp_curl_body -sS --max-time 5 -X POST "$TARGET_BASE/v1/fleet/beat" \
     -H "Authorization: Bearer $TARGET_TOKEN" \
     -H 'Content-Type: application/json' \
     -d "{\"worker\":\"$1\",\"status\":\"$2\",\"ttl_s\":$3}"
 }
 
 curl_roster() { # -> body on stdout
-  curl -sS --max-time 10 -H "Authorization: Bearer $TARGET_TOKEN" \
+  bp_curl_body -sS --max-time 10 -H "Authorization: Bearer $TARGET_TOKEN" \
     "$TARGET_BASE/v1/fleet/roster"
 }
 
@@ -219,7 +221,7 @@ print(((d.get("doc") or {}).get("last_seen")) or "")'
 run_stub_loop() { # worker logfile
   local worker="$1" log="$2"
   while true; do
-    curl -sS --max-time 5 -X POST "$TARGET_BASE/v1/fleet/beat" \
+    bp_curl_body -sS --max-time 5 -X POST "$TARGET_BASE/v1/fleet/beat" \
       -H "Authorization: Bearer $TARGET_TOKEN" \
       -H 'Content-Type: application/json' \
       -d "{\"worker\":\"$worker\",\"status\":\"idle\",\"ttl_s\":$TTL_S}" >>"$log" 2>/dev/null || true
@@ -377,7 +379,7 @@ TARGET_TOKEN="$PDS_SCRATCH_TOKEN"
 info "target $TARGET_BASE (token from scratch.env — never printed)"
 
 ROSTER_TMP="$(mktemp "${TMPDIR:-/tmp}/pdf-roster.XXXXXX")"
-PRECODE="$(curl -sS -o "$ROSTER_TMP" -w '%{http_code}' --max-time 10 \
+PRECODE="$(bp_curl_code -sS -o "$ROSTER_TMP" --max-time 10 \
   -H "Authorization: Bearer $TARGET_TOKEN" "$TARGET_BASE/v1/fleet/roster" 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
 ENVELOPE_OK="$(python3 -c '
 import json, sys

@@ -217,8 +217,6 @@ defmodule Barkpark.Tasks.PulseTest do
   describe "pulse/3 — a lost lease refuses (naming the state), never a silent re-claim" do
     test "REAPED lease: the old holder's pulse is refused and the row stays reaped",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       doc = claimed_task!(scope, "w-crashed")
       _ = age_claim!(doc, 600)
 

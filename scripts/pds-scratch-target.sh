@@ -96,6 +96,8 @@
 # change a verb's output. Filed as a follow-up task.
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -544,7 +546,7 @@ cmd_verify() {
 
   hr "2. the scratch server answers, and it is not on 4000"
   local code
-  code="$(curl -s -o /dev/null -w '%{http_code}' "$PDS_SCRATCH_BASE/api/schemas" || true)"
+  code="$(bp_curl_code -s -o /dev/null "$PDS_SCRATCH_BASE/api/schemas" || true)"
   if [ "$code" = "200" ]; then
     ok "GET $PDS_SCRATCH_BASE/api/schemas -> 200"
   else

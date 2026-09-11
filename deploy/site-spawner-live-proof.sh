@@ -73,6 +73,14 @@
 #   81 BROKEN_BUILD_REACHED_VISITORS— the worst red: a broken build changed what visitors see
 #   90 SELF_CHECK_FAILED            — a named red did NOT fire on input that must trigger it
 set -uo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/lib/bp-curl.sh"   # 429 backoff, shared (task-90059c5c680f6665)
+# 429 backoff, shared (task-90059c5c680f6665). Every probe below reads its status
+# out of a `.code` file. bp_curl_code prints NOTHING and returns curl's rc on a
+# transport failure (curl -w alone printed 000 AND failed), so each site's
+# trailing `|| true` becomes `|| echo 000 >"<the .code file>"` — without it the
+# file would be left EMPTY and every `[ "$hc" = "200" ]` below would compare
+# against the empty string instead of the 000 the old code wrote.
 
 # ---- Config -----------------------------------------------------------------
 
@@ -827,8 +835,8 @@ preflight() {
     # cross-team create does not fail with a permission error: it 404s
     # `barkpark_not_found` (the control plane refuses to leak existence across a
     # team boundary), which reads like a typo and wastes an hour. Name it here.
-    curl -sS -m 30 -o "$TMP/bps.json" -w '%{http_code}' \
-      -H "Authorization: Bearer $CLOUD_TOKEN" "$CLOUD_URL/v1/barkparks" >"$TMP/bps.code" 2>"$TMP/bps.err" || true
+    bp_curl_code -sS -m 30 -o "$TMP/bps.json" \
+      -H "Authorization: Bearer $CLOUD_TOKEN" "$CLOUD_URL/v1/barkparks" >"$TMP/bps.code" 2>"$TMP/bps.err" || echo 000 >"$TMP/bps.code"
     hc="$(cat "$TMP/bps.code" 2>/dev/null || echo 000)"
     if [ "$hc" = "200" ]; then
       ok "cloud session present → $CLOUD_URL (team ${CLOUD_TEAM:-?})"
@@ -865,8 +873,8 @@ PY
   srv="$(cfgval server)"; srv="${srv:-https://$LIVE_HOST}"
   ws="${DATASET%%/*}"; ds="${DATASET##*/}"; proj="$(printf '%s' "$DATASET" | cut -d/ -f2)"
   local scoped="$srv/w/$ws/p/$proj/v1/data/query/$ds/$DOC_TYPE?limit=1"
-  curl -sS -m 30 -o "$TMP/content.json" -w '%{http_code}' \
-    -H "Authorization: Bearer $(cfgval token)" "$scoped" >"$TMP/content.code" 2>/dev/null || true
+  bp_curl_code -sS -m 30 -o "$TMP/content.json" \
+    -H "Authorization: Bearer $(cfgval token)" "$scoped" >"$TMP/content.code" 2>/dev/null || echo 000 >"$TMP/content.code"
   hc="$(cat "$TMP/content.code" 2>/dev/null || echo 000)"
 
   local count first
@@ -951,8 +959,8 @@ live_proof() {
   # true here IS the proof the read token was minted and stored — no DB peek
   # needed, and none is possible from here anyway. The CLI's own JSON map does
   # not carry it, so read the site row straight from the control plane.
-  curl -sS -m 30 -o "$TMP/site.json" -w '%{http_code}' \
-    -H "Authorization: Bearer $CLOUD_TOKEN" "$CLOUD_URL/v1/sites/$site_id" >"$TMP/site.code" 2>/dev/null || true
+  bp_curl_code -sS -m 30 -o "$TMP/site.json" \
+    -H "Authorization: Bearer $CLOUD_TOKEN" "$CLOUD_URL/v1/sites/$site_id" >"$TMP/site.code" 2>/dev/null || echo 000 >"$TMP/site.code"
   local hc; hc="$(cat "$TMP/site.code")"
   [ "$hc" = "200" ] ||
     fail "$E_CREATE_FAILED" "GET /v1/sites/$site_id answered HTTP $hc — the site we just created is not readable."

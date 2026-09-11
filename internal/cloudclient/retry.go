@@ -342,7 +342,7 @@ type retryTransport struct {
 
 // newRetryTransport builds the package's shared 429 policy over base.
 //
-// @canonical capability: cloudclient-backpressure-retry
+// @canonical capability:cloudclient-backpressure-retry
 func newRetryTransport(base http.RoundTripper) http.RoundTripper {
 	return &retryTransport{
 		base:           base,

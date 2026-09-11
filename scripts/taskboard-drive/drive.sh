@@ -87,6 +87,8 @@
 #   BP_DRIVE_BIN=/path/to/bp bash .../drive.sh       # skip the build step
 #   BP_DRIVE_KEEP=1 bash .../drive.sh                # keep tmux server for inspection
 set -u -o pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 
 MODE="${DRIVE_MODE:-live}"
 case "$MODE" in
@@ -336,7 +338,7 @@ if [ "$MODE" = hermetic ]; then
   # byte-determinism proof's transcript diff.
   disown "$FIXTURE_PID"
   tries=0
-  until curl -fsS "http://127.0.0.1:$FIXTURE_PORT/v1/tasks?limit=1" >/dev/null 2>&1; do
+  until bp_curl_body -sS "http://127.0.0.1:$FIXTURE_PORT/v1/tasks?limit=1" >/dev/null 2>&1; do
     tries=$((tries+1))
     if [ "$tries" -ge 50 ]; then
       echo "FATAL: fixture never answered on 127.0.0.1:$FIXTURE_PORT (log: $(cat "$TMPD/fixture.log" 2>/dev/null))" >&2

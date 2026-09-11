@@ -72,6 +72,8 @@
 # bash 3.2 compatible (macOS system bash).
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 # set -m FIRST (PDF-D28): job control gives each backgrounded stub listener its
 # OWN process group — the reap in teardown is group-wide and straggler-proof.
 set -m
@@ -162,14 +164,14 @@ canon_json() { # compact, key-sorted JSON of the argument (for map equality)
 TARGET_BASE=""; TARGET_TOKEN=""
 
 curl_beat() { # worker status ttl_s capacity_json -> response body on stdout
-  curl -sS --max-time 5 -X POST "$TARGET_BASE/v1/fleet/beat" \
+  bp_curl_body -sS --max-time 5 -X POST "$TARGET_BASE/v1/fleet/beat" \
     -H "Authorization: Bearer $TARGET_TOKEN" \
     -H 'Content-Type: application/json' \
     -d "{\"worker\":\"$1\",\"status\":\"$2\",\"ttl_s\":$3,\"capacity\":$4}"
 }
 
 curl_roster() { # -> body on stdout
-  curl -sS --max-time 10 -H "Authorization: Bearer $TARGET_TOKEN" \
+  bp_curl_body -sS --max-time 10 -H "Authorization: Bearer $TARGET_TOKEN" \
     "$TARGET_BASE/v1/fleet/roster"
 }
 
@@ -279,14 +281,14 @@ census_page() { # offset -> raw page body on stdout
   if [ -n "$CENSUS_ID_PREFIX" ]; then
     url="$url&filter%5B_id%5D%5Bcontains%5D=$CENSUS_ID_PREFIX"
   fi
-  curl -sS --max-time 60 -H "Authorization: Bearer $TARGET_TOKEN" "$url"
+  bp_curl_body -sS --max-time 60 -H "Authorization: Bearer $TARGET_TOKEN" "$url"
 }
 
 census_fetch_page() { # offset — sets CENSUS_PARSED/CENSUS_HDR, or refuses
   local off="$1" attempt=0 body
   while :; do
     attempt=$((attempt + 1))
-    body="$(census_page "$off")"
+    body="$(census_page "$off" || true)"   # rc 22 on non-2xx: the guards below decide
     # ONE python pass per page: a header line `OK<TAB>n<TAB>total`, then one
     # `M|X<TAB>id` line per returned row (M = matches the prefix).
     CENSUS_PARSED="$(printf '%s' "$body" | P="$CENSUS_ID_PREFIX" python3 -c '
@@ -345,7 +347,7 @@ census_ours() { # sets CENSUS to the count of raw task rows carrying the prefix
 # <<< CENSUS-WALK END
 
 delete_doc() { # id type — dataset-in-path delete (PDF-D44d); body swallowed
-  curl -sS --max-time 10 -X POST "$TARGET_BASE/v1/data/mutate/production" \
+  bp_curl_body -sS --max-time 10 -X POST "$TARGET_BASE/v1/data/mutate/production" \
     -H "Authorization: Bearer $TARGET_TOKEN" -H 'Content-Type: application/json' \
     -d "{\"mutations\":[{\"delete\":{\"id\":\"$1\",\"type\":\"$2\"}}]}" >/dev/null 2>&1 || true
 }
@@ -394,7 +396,7 @@ show_ledger() {
 }
 
 pull_roster() { # dest — one LIVE roster snapshot for a dispatch run
-  curl_roster > "$1"
+  curl_roster > "$1" || true   # rc 22 on non-2xx: the -s guard below decides
   [ -s "$1" ] || { efail "live roster pull returned an empty body"; return 0; }
 }
 
@@ -424,7 +426,7 @@ run_stub_loop() { # worker profile_file logfile
   local worker="$1" pf="$2" log="$3" cap
   while true; do
     cap="$(cat "$pf" 2>/dev/null || printf 'null')"
-    curl -sS --max-time 5 -X POST "$TARGET_BASE/v1/fleet/beat" \
+    bp_curl_body -sS --max-time 5 -X POST "$TARGET_BASE/v1/fleet/beat" \
       -H "Authorization: Bearer $TARGET_TOKEN" \
       -H 'Content-Type: application/json' \
       -d "{\"worker\":\"$worker\",\"status\":\"idle\",\"ttl_s\":$TTL_S,\"capacity\":$cap}" >>"$log" 2>/dev/null || true
@@ -598,7 +600,7 @@ TARGET_TOKEN="$PDS_SCRATCH_TOKEN"
 info "target $TARGET_BASE (token from scratch.env — never printed)"
 
 ROSTER_TMP="$WORKDIR/roster-r0.json"
-PRECODE="$(curl -sS -o "$ROSTER_TMP" -w '%{http_code}' --max-time 10 \
+PRECODE="$(bp_curl_code -sS -o "$ROSTER_TMP" --max-time 10 \
   -H "Authorization: Bearer $TARGET_TOKEN" "$TARGET_BASE/v1/fleet/roster" 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
 ENVELOPE_OK="$(python3 -c '
 import json, sys
@@ -760,6 +762,8 @@ cat > "$FILER" <<'FILER_EOF'
 # pdf-filer.sh — proof stub for FLEET_FILE_ORDER_BIN (PDF-D54 pin 3).
 # 5 positional args: id title assignee brief criterion. ALWAYS exits 0.
 set -u
+# shellcheck disable=SC1090
+. "$PDF_BP_CURL"   # 429 backoff, shared (task-c2f96f8121c64601)
 ID="${1:?id}"; TITLE="${2:?title}"; WHO="${3:?assignee}"; BRIEF="${4:?brief}"; CRIT="${5:?criterion}"
 BODY=$(python3 - "$ID" "$TITLE" "$WHO" "$BRIEF" "$CRIT" <<'PY'
 import json, sys
@@ -771,7 +775,7 @@ doc = {"_id": i, "_type": "task", "title": t, "kind": "task",
 print(json.dumps({"mutations": [{"createOrReplace": doc}]}))
 PY
 )
-RESP=$(curl -sS --max-time 10 -X POST "$PDF_TARGET_BASE/v1/data/mutate/production" \
+RESP=$(bp_curl_body -sS --max-time 10 -X POST "$PDF_TARGET_BASE/v1/data/mutate/production" \
   -H "Authorization: Bearer $PDF_TARGET_TOKEN" -H 'Content-Type: application/json' \
   -d "$BODY" 2>&1 || true)
 case "$RESP" in
@@ -781,6 +785,7 @@ esac
 exit 0
 FILER_EOF
 chmod +x "$FILER"
+export PDF_BP_CURL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"
 export PDF_TARGET_BASE="$TARGET_BASE"
 export PDF_TARGET_TOKEN="$TARGET_TOKEN"
 export PDF_FILER_LOG="$FILER_LOG"
