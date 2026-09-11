@@ -139,6 +139,14 @@ on:
       - "scripts/console-path-escape-check.sh"
       - "scripts/console-path-escape-check.test.sh"
       - ".github/workflows/console-harness.yml"
+      # THE CLOUD/CONSOLE AGGREGATOR SHAPE RATCHET
+      # (cch-w11-bl-aggregator-decide-shape-ratchet). It reads all THREE
+      # aggregator workflows — cloud.yml and console-harness.yml as subjects,
+      # elixir.yml as the reference `decide()` — so an edit to ANY of the three
+      # must run it. cloud.yml is already an entry above (seal-run-guard);
+      # elixir.yml is not, and is added here.
+      - "scripts/cloud-console-gate-shape.test.sh"
+      - ".github/workflows/elixir.yml"
       # CONSOLE REFUSAL CAPTURE (task-1cea7edd271d588b). The SUBJECT, not the
       # harness: scripts/console-refusal-capture.test.mjs is already reached by
       # the `scripts/*.test.mjs` entry below, but an edit to the capture module
@@ -150,6 +158,9 @@ on:
       - "scripts/pds-record-parity.test.sh"
       - "scripts/pds-scratch-target.sh"
       - "scripts/pds-scratch-target_test.sh"
+      - "scripts/pds-read-preflight-audit.sh"
+      - "scripts/pds-read-preflight-audit_test.sh"
+      - "scripts/pds-crown-stamp.sh"
       - "scripts/file-ci-failure-issue.sh"
       - "scripts/file-ci-failure-issue.test.sh"
       - "scripts/install-cli.sh"
@@ -413,6 +424,19 @@ on:
       # the harness asserts the recorder still calls the tripwire at all.
       - "scripts/merged-at-committer-tripwire.sh"
       - "scripts/merged-at-committer-tripwire.test.sh"
+      # PLACE-DIRECTORY INSTALLER SUCCESS CLAIMS (pds-bl-place-directory-install-
+      # echoes-transport). templates/place-directory/install.sh printed
+      # `✓ schema upserted` / `✓ places written` off `curl -fsS` exiting 0 — a
+      # transport echo that would print unchanged over a 2xx that persisted
+      # nothing (docs/decisions/success-claim-census.md, "Shell"). Each tick now
+      # follows a read-back, and scripts/place-directory-install.test.sh pins
+      # that with a fake-curl shim. The last two entries are INPUTS, not the
+      # harness: the harness derives its expected seed count from
+      # seed-places.json and copies both payloads into its mutation fixture, so
+      # a payload edit can invalidate the matrix without touching either script.
+      - "templates/place-directory/install.sh"
+      - "templates/place-directory/seed-places.json"
+      - "templates/place-directory/schemas/place.json"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -457,6 +481,14 @@ on:
       - "scripts/console-path-escape-check.sh"
       - "scripts/console-path-escape-check.test.sh"
       - ".github/workflows/console-harness.yml"
+      # THE CLOUD/CONSOLE AGGREGATOR SHAPE RATCHET
+      # (cch-w11-bl-aggregator-decide-shape-ratchet). It reads all THREE
+      # aggregator workflows — cloud.yml and console-harness.yml as subjects,
+      # elixir.yml as the reference `decide()` — so an edit to ANY of the three
+      # must run it. cloud.yml is already an entry above (seal-run-guard);
+      # elixir.yml is not, and is added here.
+      - "scripts/cloud-console-gate-shape.test.sh"
+      - ".github/workflows/elixir.yml"
       # CONSOLE REFUSAL CAPTURE (task-1cea7edd271d588b). The SUBJECT, not the
       # harness: scripts/console-refusal-capture.test.mjs is already reached by
       # the `scripts/*.test.mjs` entry below, but an edit to the capture module
@@ -468,6 +500,9 @@ on:
       - "scripts/pds-record-parity.test.sh"
       - "scripts/pds-scratch-target.sh"
       - "scripts/pds-scratch-target_test.sh"
+      - "scripts/pds-read-preflight-audit.sh"
+      - "scripts/pds-read-preflight-audit_test.sh"
+      - "scripts/pds-crown-stamp.sh"
       - "scripts/file-ci-failure-issue.sh"
       - "scripts/file-ci-failure-issue.test.sh"
       - "scripts/install-cli.sh"
@@ -691,6 +726,19 @@ on:
       # merged_at's COMMITTER TRIPWIRE — mirrored from on.pull_request.paths.
       - "scripts/merged-at-committer-tripwire.sh"
       - "scripts/merged-at-committer-tripwire.test.sh"
+      # PLACE-DIRECTORY INSTALLER SUCCESS CLAIMS (pds-bl-place-directory-install-
+      # echoes-transport). templates/place-directory/install.sh printed
+      # `✓ schema upserted` / `✓ places written` off `curl -fsS` exiting 0 — a
+      # transport echo that would print unchanged over a 2xx that persisted
+      # nothing (docs/decisions/success-claim-census.md, "Shell"). Each tick now
+      # follows a read-back, and scripts/place-directory-install.test.sh pins
+      # that with a fake-curl shim. The last two entries are INPUTS, not the
+      # harness: the harness derives its expected seed count from
+      # seed-places.json and copies both payloads into its mutation fixture, so
+      # a payload edit can invalidate the matrix without touching either script.
+      - "templates/place-directory/install.sh"
+      - "templates/place-directory/seed-places.json"
+      - "templates/place-directory/schemas/place.json"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -789,6 +837,7 @@ jobs:
       deploy-receipt-honesty: ${{ steps.sets.outputs.deploy-receipt-honesty }}
       which-gates: ${{ steps.sets.outputs.which-gates }}
       bp-curl: ${{ steps.sets.outputs.bp-curl }}
+      place-directory-install: ${{ steps.sets.outputs.place-directory-install }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -861,6 +910,9 @@ jobs:
           console-path-ratchet scripts/console-path-escape-check.sh
           console-path-ratchet scripts/console-path-escape-check.test.sh
           console-path-ratchet .github/workflows/console-harness.yml
+          console-path-ratchet scripts/cloud-console-gate-shape.test.sh
+          console-path-ratchet .github/workflows/cloud.yml
+          console-path-ratchet .github/workflows/elixir.yml
           console-refusal-capture scripts/console-refusal-capture.mjs
           console-refusal-capture scripts/*.test.mjs
           weekly-changelog-backfill-guard scripts/weekly-changelog-backfill.test.sh
@@ -871,6 +923,9 @@ jobs:
           pds-harnesses scripts/pds-record-parity.test.sh
           pds-harnesses scripts/pds-scratch-target.sh
           pds-harnesses scripts/pds-scratch-target_test.sh
+          pds-harnesses scripts/pds-read-preflight-audit.sh
+          pds-harnesses scripts/pds-read-preflight-audit_test.sh
+          pds-harnesses scripts/pds-crown-stamp.sh
           pds-harnesses scripts/pr-task-gate.sh
           ci-failure-issue-filer scripts/file-ci-failure-issue.sh
           ci-failure-issue-filer scripts/file-ci-failure-issue.test.sh
@@ -1007,6 +1062,10 @@ jobs:
           deploy-receipt-honesty scripts/merged-at-committer-tripwire.sh
           deploy-receipt-honesty scripts/merged-at-committer-tripwire.test.sh
           deploy-receipt-honesty .github/workflows/deploy.yml
+          place-directory-install templates/place-directory/install.sh
+          place-directory-install templates/place-directory/seed-places.json
+          place-directory-install templates/place-directory/schemas/place.json
+          place-directory-install scripts/*.test.sh
           '
           self=".github/workflows/shell-harnesses.yml"
 
@@ -1475,6 +1534,29 @@ jobs:
         # parent's --selftest (cloud.yml:175, elixir.yml:241), and wiring them
         # twice would buy a second runner for the same assertions.
         run: bash scripts/console-path-escape-check.test.sh
+      - name: python3 + PyYAML are present (the shape ratchet yaml-PARSES three workflows)
+        id: pyyaml
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # INSTALL rather than demand, the same idiom as deploy-concurrency
+        # above: whether the runner image ships PyYAML is an image fact, and a
+        # red reading `ModuleNotFoundError: yaml` teaches nothing about this
+        # repo. A missing python3 stays a hard, named failure.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image" >&2
+            exit 1
+          }
+          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
+          python3 -c "import yaml; print('PyYAML', yaml.__version__)"
+      - name: cloud.yml + console-harness.yml aggregator shape (73 assertions, 22 planted mutants)
+        if: ${{ !cancelled() && steps.pyyaml.outcome == 'success' }}
+        # Selftest AND subject in one run, by construction: case 5 re-runs the
+        # very emitter that produced the live verdicts over deliberately-broken
+        # copies of both workflows, so a neutered detector reds here before its
+        # green is read. Both directions the row names are in it — softening
+        # decide()'s skipped arm moves the executed 24-cell grid, and a job
+        # outside the aggregator's needs-set lands in blocking_not_in_needs.
+        run: bash scripts/cloud-console-gate-shape.test.sh
 
   console-refusal-capture:
     needs: [changes]
@@ -1558,6 +1640,11 @@ jobs:
       - name: pds-scratch-target two-root coexistence + teardown
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/pds-scratch-target_test.sh
+      - name: pds-read-preflight-audit census ratchet + crown-stamp refusal pairs (stub bp, no server)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # 4 arms, each a mutation beside a control. pds-crown-stamp.sh is a
+        # subject of arm 3, so an edit to it re-runs this job.
+        run: bash scripts/pds-read-preflight-audit_test.sh
 
   ci-failure-issue-filer:
     needs: [changes]
@@ -2616,3 +2703,34 @@ jobs:
       - name: "bp-curl backoff matrix (48 assertions, fake loopback server, ~12s of measured sleeps)"
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/lib/bp-curl.test.sh
+
+  place-directory-install:
+    needs: [changes]
+    if: needs.changes.outputs.place-directory-install == 'true'
+    # THE TEMPLATE INSTALLER'S SUCCESS CLAIMS (pds-bl-place-directory-install-
+    # echoes-transport). The wave-23 census found exactly three real product
+    # success claims in the whole shell population, all three in this one file,
+    # and ruled that a repo-wide shell guard would green vacuously over 22
+    # occurrences of harness plumbing. So the fix is two named sites and THIS
+    # harness is the only thing that can keep them fixed.
+    #
+    # Hermetic: a fake `curl` on a PATH-only bin dir, no network, no writes
+    # outside mktemp. Its arm D runs the PRE-FIX `post … && printf ✓` shape
+    # against arm A's own empty-state fixture and requires it to exit 0 with
+    # both ticks — the same fixture greens the old shape and reds the new one,
+    # which is what makes arm A a detector rather than a wish.
+    name: place-directory install.sh read-back claims
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+      - name: install.sh syntax check (POSIX sh)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: sh -n templates/place-directory/install.sh
+      - name: harness syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/place-directory-install.test.sh
+      - name: "place-directory-install.test.sh (27 assertions, 4 arms incl. the mutation)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/place-directory-install.test.sh

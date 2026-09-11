@@ -646,7 +646,7 @@
 # "FAIL app.css — baseline mismatch with 0 misses": MISSES 0 is what makes this an
 # unrecorded ADD rather than a parity defect. styleguide.html PASSED unchanged at 84.
 # Bumped in the SAME COMMIT as the CSS hunk (D158).
-1345
+1347
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
 # rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout
@@ -666,3 +666,15 @@
 # to 1342 IN THE SAME COMMIT as the CSS change" — MISSES 0 is what makes this an unrecorded
 # ADD and not a parity defect. The styleguide sheet PASSED unchanged at 84. Bumped by the
 # lead (lead-console-6) on the PR's own branch, the CSS hunk is in the same PR (D158).
+# task-02a521fea7beeb2f 2026-09-11 (console/pinned-release-badge-breaks — the pinned_release
+# pill inside `.rail-row .v` is capped so a 255-char pin stops dragging the instance detail
+# page): 1345 -> 1347, +2 authored rule heads (`.rail-row .v .badge` and
+# `.rail-row .v .badge .dot`, one contiguous hunk beside the existing `.rail-row` block).
+# NOT hand-incremented: cssom-parity.mjs on this branch printed "1347 authored rule heads,
+# sidecar baseline is 1345 (+2)" with "FAIL app.css — baseline mismatch with 0 misses" and
+# told the reader to bump to 1347 in the same commit — MISSES 0 and MULTISET DEFICITS 0 are
+# what make this an unrecorded ADD and not a parity defect. The styleguide sheet PASSED
+# unchanged at 84. CONFLICT EXPECTED, and it is arithmetic, not a defect: PR #17636
+# (console/cruel-corpus-second-tranche) adds ONE head of its own off the same 1345 base, so
+# whichever of the two lands LAST re-runs cssom-parity and writes the tool's number — never
+# the sum of two guesses.

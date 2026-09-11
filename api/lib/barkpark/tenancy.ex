@@ -1038,8 +1038,29 @@ defmodule Barkpark.Tenancy do
   @doc """
   Boolean face of `pulled_schema_row/2`: does a boot-time upsert of
   `name`/`dataset` match a pull-provenance-stamped row?
+
+  TWO first-argument shapes, ONE answer. Handed a NAME it resolves the row the
+  boot-time upsert would match — the DEFAULT-dataset-slot read documented above.
+  Handed a `%Content.SchemaDefinition{}` it answers about THAT row, which is how
+  a SCOPED caller asks the same question: `mix barkpark.workspace.provision_schemas`
+  already holds the target-scope row it is about to overwrite, and re-resolving
+  it by name here would silently answer about the Default slot instead of the
+  target workspace. Both shapes share `provenance_covered?/2`; there is no
+  second copy of the predicate.
   """
   @spec pulled_schema_row?(term(), term()) :: boolean()
+  def pulled_schema_row?(%Content.SchemaDefinition{} = row, dataset) when is_binary(dataset) do
+    provenance_covered?(row, dataset)
+  rescue
+    e ->
+      Logger.warning(
+        "Tenancy.pulled_schema_row?: pull-provenance read failed for row " <>
+          "#{inspect(row.name)}/#{inspect(dataset)} — proceeding unguarded: #{Exception.message(e)}"
+      )
+
+      false
+  end
+
   def pulled_schema_row?(name, dataset), do: not is_nil(pulled_schema_row(name, dataset))
 
   defp provenance_covered?(%Content.SchemaDefinition{workspace_id: nil}, _dataset), do: false
@@ -1071,6 +1092,21 @@ defmodule Barkpark.Tenancy do
   way back. It is pinned by `bootstrap_guard_test.exs` ("CLEARING the stamp is a
   real escape hatch"). There is no CLI/HTTP surface for it yet
   (`pds-bl-clear-pull-provenance`); a remote console is the only front door.
+
+  BOTH DIRECTIONS ARE AUDIT-VISIBLE (`pds-bl-clear-pull-provenance` c2). Every
+  successful write appends one `plugin_settings` row to the tamper-evident
+  `audit_events` chain — `pull_provenance_set` when the map carries keys,
+  `pull_provenance_cleared` when it is empty — carrying the workspace id, the
+  dataset slug, and the provenance key names (never values). A matching
+  `Logger.info` names the same three facts for an operator watching the log.
+  A CLEAR is the mutation that hands local plugin authority back, so it must
+  never be a silent state change.
+
+  Best-effort, same contract as `Webhooks`' audit hook: the emit result is
+  discarded and an infra raise/throw is swallowed, so an audit hiccup can never
+  fail a settings write that already committed. It is emitted AFTER the update,
+  outside any transaction this function opens — callers must not wrap it in one
+  (see `Barkpark.Audit.emit/1`: a failed emit dooms an ENCLOSING transaction).
   """
   @spec set_pull_provenance(Workspace.t() | binary(), binary(), map()) ::
           {:ok, Workspace.t()}
@@ -1101,6 +1137,7 @@ defmodule Barkpark.Tenancy do
     })
     |> Repo.update()
     |> bust_default_scope()
+    |> audit_pull_provenance(workspace, dataset_slug, provenance)
   end
 
   defp do_set_pull_provenance(id, dataset_slug, provenance) when is_binary(id) do
@@ -1112,6 +1149,40 @@ defmodule Barkpark.Tenancy do
 
   defp do_set_pull_provenance(_workspace_or_id, _dataset_slug, _provenance),
     do: {:error, :not_found}
+
+  # One audit row + one log line per SUCCESSFUL provenance write. A failed
+  # update audits nothing — there is no state change to record.
+  defp audit_pull_provenance({:ok, %Workspace{} = updated} = result, workspace, slug, provenance) do
+    cleared? = map_size(provenance) == 0
+    action = if cleared?, do: "pull_provenance_cleared", else: "pull_provenance_set"
+    keys = provenance |> Map.keys() |> Enum.map(&to_string/1) |> Enum.sort()
+
+    Logger.info(
+      "Tenancy.set_pull_provenance: #{action} for workspace #{inspect(workspace.slug)} " <>
+        "(#{updated.id}) dataset #{inspect(slug)}; provenance keys: #{inspect(keys)}"
+    )
+
+    Barkpark.Audit.emit(%{
+      category: "plugin_settings",
+      action: action,
+      subject: updated.id,
+      workspace_id: updated.id,
+      metadata: %{
+        "workspace_slug" => workspace.slug,
+        "dataset" => slug,
+        "cleared" => cleared?,
+        "provenance_keys" => keys
+      }
+    })
+
+    result
+  rescue
+    _ -> result
+  catch
+    _, _ -> result
+  end
+
+  defp audit_pull_provenance(result, _workspace, _slug, _provenance), do: result
 
   @doc "Fetch a Project by its id, or nil. `nil` or malformed id returns nil."
   @spec get_project_by_id(binary() | nil) :: Project.t() | nil
@@ -1917,8 +1988,14 @@ defmodule Barkpark.Tenancy do
   # (`WorkspaceBundle.dataset_slugs_for/1`) needs its projects+datasets still
   # present — both leave only at `Repo.delete(workspace)`.
   #
-  # The predicate shapes are the EXACT keystone extraction shapes
-  # (`WorkspaceBundle.copy_where/4`), so export and teardown agree on membership:
+  # The predicate shapes ARE the keystone extraction shapes — not a copy of them:
+  # every sweep below calls `WorkspaceBundle.tenant_scope_where/4`, the same
+  # function the exporter's `copy_where/3` delegates to, so export and teardown
+  # cannot disagree on membership by construction. They USED to be two
+  # independent constructions with a comment asserting agreement; a prototype
+  # desynchronized `shares` and 98 tests stayed green while a row the bundle
+  # carried survived its own workspace's teardown
+  # (`pds-bl-export-teardown-lockstep-untested`). What each shape means:
   #   * E3 doc-keyed — a `(doc_id, dataset)` semi-join (EXISTS, never a JOIN,
   #     which would fan out on the 2-document case — charter D6), PLUS a
   #     sibling-guard `NOT EXISTS` so a `(doc_id, dataset)` row ALSO owned by a
@@ -1943,32 +2020,39 @@ defmodule Barkpark.Tenancy do
   #     currently matches no table; the shape is retained for any future
   #     bare-`scope` tenant table.
   defp delete_workspace_string_keyed(%Workspace{id: ws_id, slug: ws_slug}) do
-    ws_lit = Catalog.uuid_literal!(ws_id)
-    slugs = WorkspaceBundle.dataset_slugs_for(ws_id)
+    # The one tenant-literal bundle both halves of the lockstep read. Its keys
+    # are exactly `WorkspaceBundle.tenant_scope` — the export ctx is a superset
+    # of the same shape, which is how one predicate builder serves both.
+    scope = %{
+      ws_lit: Catalog.uuid_literal!(ws_id),
+      ws_slug_lit: Catalog.text_literal(ws_slug),
+      slugs: WorkspaceBundle.dataset_slugs_for(ws_id)
+    }
 
-    Enum.each(Catalog.e3_doc_keyed(), &delete_e3_doc_keyed(&1, ws_lit))
-    Enum.each(Catalog.e3_dataset_keyed(), &delete_e3_dataset_keyed(&1, ws_slug, slugs))
-
-    for {table, prefix} <- Catalog.allowlist() do
-      delete_allowlist_scoped(table, prefix, slugs)
-    end
+    Enum.each(Catalog.e3_doc_keyed(), &delete_e3_doc_keyed(&1, scope))
+    Enum.each(Catalog.e3_dataset_keyed(), &delete_e3_dataset_keyed(&1, scope))
+    Enum.each(Map.keys(Catalog.allowlist()), &delete_allowlist_scoped(&1, scope))
 
     :ok
   end
 
-  # E3 doc-keyed sweep: mirrors `WorkspaceBundle.copy_where(_, :e3_doc, …)`
-  # verbatim (the `(doc_id, dataset)` EXISTS semi-join) + the sibling-guard.
+  # E3 doc-keyed sweep: the extraction predicate ITSELF
+  # (`WorkspaceBundle.tenant_scope_where(_, :e3_doc, …)` — the `(doc_id,
+  # dataset)` EXISTS semi-join, with the empty anchor-narrowing the whole-
+  # workspace path uses) EXTENDED by the sibling-guard. The extension is
+  # deliberate and one-directional (charter D7): a `(doc_id, dataset)` row a
+  # DIFFERENT workspace also owns travels in this workspace's bundle but must
+  # SURVIVE its teardown, because an orphan beats a cross-tenant delete.
   # Reachability: both interpolands are closed — `table` comes from
-  # `Catalog.e3_doc_keyed/0` (a pinned literal map) via `qi/1`, `ws_lit` from
-  # `Catalog.uuid_literal!/1`, which raises on anything that is not a UUID.
+  # `Catalog.e3_doc_keyed/0` (a pinned literal map) via `qi/1`, `scope.ws_lit`
+  # from `Catalog.uuid_literal!/1`, which raises on anything that is not a UUID.
   # sobelow_skip ["SQL.Query"]
-  defp delete_e3_doc_keyed(table, ws_lit) do
+  defp delete_e3_doc_keyed(table, scope) do
     Repo.query!(
       "DELETE FROM #{qi(table)} t " <>
-        "WHERE EXISTS (SELECT 1 FROM documents d " <>
-        "WHERE d.workspace_id = #{ws_lit} AND d.doc_id = t.doc_id AND d.dataset = t.dataset) " <>
-        "AND NOT EXISTS (SELECT 1 FROM documents d2 " <>
-        "WHERE d2.doc_id = t.doc_id AND d2.dataset = t.dataset AND d2.workspace_id <> #{ws_lit})",
+        WorkspaceBundle.tenant_scope_where(table, :e3_doc, scope) <>
+        " AND NOT EXISTS (SELECT 1 FROM documents d2 " <>
+        "WHERE d2.doc_id = t.doc_id AND d2.dataset = t.dataset AND d2.workspace_id <> #{scope.ws_lit})",
       []
     )
   end
@@ -1982,41 +2066,39 @@ defmodule Barkpark.Tenancy do
   # rows its own bundle said it owned. That desync passed 98 tests, which is why
   # the binding assertion lives in workspace_bundle_test.exs and not in a comment.
   #
+  # The two arms live in `tenant_scope_where/4` and are described there:
+  #   * a table with its OWN workspace slug column is swept by THAT column
+  #     (`workspaces.slug` is uniquely indexed, so it names ONE tenant), which
+  #     reaches the shared-slug rows the bare predicate cannot — exactly the
+  #     rows the export carries;
+  #   * a table without one keeps the bare, workspace-EXCLUSIVE slug set. An
+  #     empty set yields `ANY(ARRAY[]::text[])`, which matches nothing —
+  #     fail-closed: a row under a shared slug is LEFT (an orphan is
+  #     recoverable; a cross-tenant delete is not), and the export declares that
+  #     same population as loss.
   # Reachability: `table` and `col` are pinned `Catalog` literals via `qi/1`;
-  # `ws_slug` and `slugs` are rendered by `Catalog.text_literal/1` /
+  # the slug literals are rendered by `Catalog.text_literal/1` /
   # `text_array_literal/1`, which single-quote and double every embedded quote.
   # sobelow_skip ["SQL.Query"]
-  defp delete_e3_dataset_keyed(table, ws_slug, slugs) do
-    where =
-      case Map.fetch(Catalog.e3_dataset_workspace_slug_column(), table) do
-        # Safe precisely because `workspaces.slug` is uniquely indexed, so this
-        # names ONE tenant — and it sweeps the shared-slug rows the bare
-        # predicate below cannot touch, exactly the ones the export now carries.
-        {:ok, col} ->
-          "t.#{qi(col)} = #{Catalog.text_literal(ws_slug)}"
-
-        # The bare, workspace-EXCLUSIVE slug set. An empty set yields
-        # `ANY(ARRAY[]::text[])`, which matches nothing — fail-closed: a row
-        # under a shared slug is LEFT (an orphan is recoverable; a cross-tenant
-        # delete is not). The export declares that same population as loss.
-        :error ->
-          "t.dataset = ANY(#{Catalog.text_array_literal(slugs)})"
-      end
-
-    Repo.query!("DELETE FROM #{qi(table)} t WHERE #{where}", [])
+  defp delete_e3_dataset_keyed(table, scope) do
+    Repo.query!(
+      "DELETE FROM #{qi(table)} t " <>
+        WorkspaceBundle.tenant_scope_where(table, :e3_dataset, scope),
+      []
+    )
   end
 
-  # allowlist sweep: mirrors `WorkspaceBundle.copy_where(_, :allowlist, …)` —
-  # the `scope`-column tables prefixed per `Catalog.allowlist/0`.
+  # allowlist sweep: the extraction predicate itself
+  # (`WorkspaceBundle.tenant_scope_where(_, :allowlist, …)`) — the
+  # `scope`-column tables prefixed per `Catalog.allowlist/0`.
   # Reachability: DEAD as of Wave 5 — `Catalog.allowlist/0` is `%{}`, so the
-  # only call site's `for` comprehension never iterates; if it is ever revived,
-  # the interpolands are a pinned table name and a `text_array_literal/1` array.
+  # only call site iterates zero tables; if it is ever revived, the interpolands
+  # are a pinned table name and a `text_array_literal/1` array.
   # sobelow_skip ["SQL.Query"]
-  defp delete_allowlist_scoped(table, prefix, slugs) do
-    scopes = Enum.map(slugs, &(prefix <> &1))
-
+  defp delete_allowlist_scoped(table, scope) do
     Repo.query!(
-      "DELETE FROM #{qi(table)} t WHERE t.scope = ANY(#{Catalog.text_array_literal(scopes)})",
+      "DELETE FROM #{qi(table)} t " <>
+        WorkspaceBundle.tenant_scope_where(table, :allowlist, scope),
       []
     )
   end

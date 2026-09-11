@@ -14146,6 +14146,21 @@ defmodule BarkparkCloud.Web.Router do
       slot: d.slot,
       port: d.port,
       health_exit_code: d.health_exit_code,
+      # deploy-reliability W21 (charter D608): WAS THIS BUILD'S CADDY ROUTE
+      # ACTUALLY ARMED. `route_status` is the box's own ROUTE token ("ok" |
+      # "failed" | nil = never measured), `route_detail` its sentence about it.
+      #
+      # Emitted in the SAME commit that declares the columns, deliberately: the
+      # whole finding behind this wave is that the arm decision was durable and
+      # unreadable, and a column with no wire key would leave it durable and
+      # unreadable one layer further along.
+      #
+      # NIL IS NEVER COERCED. There is no "" default and no invented "ok": every
+      # row written before the engines gained ROUTE, every row from a box that
+      # has not pulled since, and every run that died before arming is honestly
+      # null here.
+      route_status: d.route_status,
+      route_detail: d.route_detail,
       inserted_at: d.inserted_at,
       updated_at: d.updated_at
     }

@@ -15,6 +15,10 @@
 #                      ANSWERING / PROCESS-ALIVE-NOT-ANSWERING / STOPPED /
 #                      UNKNOWN, decided from the port and an HTTP answer,
 #                      never from a pidfile alone.
+#   barkpark token     mint the box's admin credential (idempotent — it refuses
+#                      to mint a second while an unrevoked one is present) and
+#                      print it ONCE. This is the key to /studio and to every
+#                      admin-gated route; `up` never mints on its own.
 #   barkpark psql ...  open a psql shell on the managed Postgres.
 #
 # ── CONFIG-RELOAD FOOTGUN ─────────────────────────────────────────────────────
@@ -165,6 +169,7 @@ start_server() {
         echo "$lpid" >"$SERVER_PID_FILE"
       fi
       log "server already running (pid $lpid) — ANSWERING on http://$PHX_HOST:$PORT/studio"
+      report_credential
       return 0
     fi
     die "port $PORT is held by pid $lpid but http://$PHX_HOST:$PORT/api/schemas does not answer — a wedged server, one still booting, or something else entirely. Run 'barkpark status', then stop it (kill $lpid) or set PORT=<other>; see $SERVER_LOG"
@@ -196,6 +201,41 @@ start_server() {
   fi
   echo "$pid" >"$SERVER_PID_FILE"
   log "server up (pid $pid) — http://$PHX_HOST:$PORT/studio"
+  report_credential
+}
+
+# ── the credential the printed /studio URL needs ─────────────────────────────
+#
+# A boot line naming a URL is a CLAIM that the URL is usable. On a fresh box it
+# is not: users 0, api_tokens 0, and /studio 302s to a /login that offers
+# Email+Password against no users and API token against no tokens (/register and
+# /signup are 404). So say which of the two worlds this box is in, and when it is
+# the empty one, name the command that fixes it.
+#
+# The probe is the managed Postgres, because that is the only place the answer
+# lives — /api/schemas is public and tells us nothing about credentials.
+# `permissions` is a text[] (Barkpark.Auth.ApiToken: {:array, :string}), hence
+# `= ANY(...)`; `kind='api'` is what Auth.verify_token/1 filters on; an unrevoked
+# token is `revoked_at IS NULL` — the same three predicates
+# Seeds.Clean.admin_token_present?/1 applies.
+admin_token_count() {
+  "$PG" psql --quiet --tuples-only --no-align --command \
+    "SELECT count(*) FROM api_tokens WHERE revoked_at IS NULL AND kind = 'api' AND 'admin' = ANY(permissions)" \
+    2>/dev/null | tr -dc '0-9'
+}
+
+# Anything we cannot READ as a positive count is reported as "no credential".
+# The failure directions here are a missing psql, an unmigrated DB and a
+# Postgres that is down, and in every one of them the honest answer is "I cannot
+# show you a key", never a silent claim that one exists.
+report_credential() {
+  local n
+  n="$(admin_token_count || true)"
+  if [ -n "$n" ] && [ "$n" -gt 0 ] 2>/dev/null; then
+    log "admin credential: present ($n) — sign in at http://$PHX_HOST:$PORT/login"
+  else
+    log "admin credential: NONE — http://$PHX_HOST:$PORT/studio has no key yet. Mint one: bin/barkpark token"
+  fi
 }
 
 wait_server() {
@@ -275,6 +315,37 @@ cmd_up() {
   load_env              # pulls DATABASE_URL from the managed instance
   migrate               # apply schema to the managed DB
   start_server          # T5.3 — boot + wait + print URL
+}
+
+# Mint the box's admin credential by reaching the mint that already exists:
+# Barkpark.Seeds.Clean.bootstrap_admin_token/1, via the ordinary seed entrypoint.
+# That function is idempotent at the seed level — it skips when an unrevoked
+# admin token is already present, so this verb is safe to re-run and cannot mint
+# a second key alongside a live one.
+#
+# WHY THIS IS ITS OWN VERB AND NOT A STEP IN `up`. Seeding on every boot changes
+# two things a boot verb must not decide by side effect: it re-mints after a
+# deliberate revoke (admin_token_present?/1 requires revoked_at IS NULL, so the
+# bootstrap gate never closes), and with a FIXED BARKPARK_SEED_ADMIN_TOKEN that
+# was later revoked it hits the unique index on token_hash, MatchErrors inside
+# mint_admin_token!, and takes the boot down with it under `set -euo pipefail`.
+# Both are tracked on pds-bl-up-seed-remint-crash-after-revoke. An explicit verb
+# is the owner asking for a key, not the box deciding to make one.
+#
+# BARKPARK_SEED_PROFILE=clean IS PINNED, and pinned AFTER load_env so a value in
+# ~/.barkpark/.env cannot win. The default profile is `demo`, which installs the
+# SHARED, PLAINTEXT `barkpark-dev-token` with read/write/admin — inheriting that
+# default would turn a missing-credential bug into a shipped-shared-credential
+# bug on every personal box.
+cmd_token() {
+  command -v mix >/dev/null 2>&1 || die "mix not found on PATH — install Elixir"
+  ensure_secrets
+  ensure_bundle_import_flag
+  "$PG" start >/dev/null
+  load_env
+  migrate
+  log "minting the admin credential (seed profile: clean — pinned, never the demo default)"
+  ( cd "$API_DIR" && exec env BARKPARK_SEED_PROFILE=clean mix run priv/repo/seeds.exs )
 }
 
 # T5.6 — restart the server so a changed ~/.barkpark/.env takes effect.
@@ -375,9 +446,10 @@ case "${1:-up}" in
   reload) cmd_reload ;;
   stop)   cmd_stop ;;
   status) cmd_status ;;
+  token)  cmd_token ;;
   psql)   shift || true; exec "$PG" psql "$@" ;;
   *)
-    echo "usage: barkpark {up|reload|stop|status|psql}" >&2
+    echo "usage: barkpark {up|reload|stop|status|token|psql}" >&2
     exit 2
     ;;
 esac

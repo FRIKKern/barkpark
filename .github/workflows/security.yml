@@ -10,10 +10,19 @@ name: security
 # Jobs:
 #   1. sobelow    — Phoenix-aware static analysis. Surfaces NEW insecure
 #                   patterns: the pre-existing findings on main are captured
-#                   in api/.sobelow-skips (the reviewed baseline — 41 rows: 34
-#                   AST-anchored + 6 Config.CSRF + 1 Config.HTTPS. It read "57
-#                   after wave 24 deleted 32 dead waivers", which was true when
-#                   written and has not been true for some time); `--exit Low`
+#                   in api/.sobelow-skips (the reviewed baseline — 35 rows at
+#                   628b88afe on 2026-09-11: 28 AST-anchored (Traversal.FileModule
+#                   18 + DOS.StringToAtom 6 + XSS.Raw 3 + XSS.SendResp 1) + 6
+#                   Config.CSRF + 1 Config.HTTPS. DERIVATION, so the next reader
+#                   re-measures instead of trusting this line:
+#                   `awk 'NF{n++} END{print n}' api/.sobelow-skips` — the file
+#                   carries ONE leading blank line and NO comment rows, so a bare
+#                   `wc -l` under-counts by one (35 rows, 36 lines, no trailing
+#                   newline) and must not be used. Per-class:
+#                   `grep -v '^[[:space:]]*$' api/.sobelow-skips | sed 's/:.*//' |
+#                   sort | uniq -c`. This integer read 41 until 2026-09-11 and 57
+#                   before that; each was true when written and rotted in place,
+#                   which is why the command now travels with the number.); `--exit Low`
 #                   reports any non-baselined finding at Low confidence or above.
 #                   ADVISORY (continue-on-error: true) — Sobelow fingerprints are
 #                   derived from compiled AST and are NOT stable across Elixir

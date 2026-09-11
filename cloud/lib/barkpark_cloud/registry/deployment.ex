@@ -265,6 +265,28 @@ defmodule BarkparkCloud.Registry.Deployment do
     field :port, :integer
     field :health_exit_code, :integer
 
+    # deploy-reliability W21 (charter D608): THE ARM DECISION, AS DATA.
+    #
+    #   * `route_status` — the box's own `BPSTAGE name=ROUTE status=…` token:
+    #     "ok" (Caddy is arming this site's route), "failed" (the arm was
+    #     refused), or NULL — never measured, which is every row written before
+    #     the engines gained ROUTE on 2026-08-08, every row from a box that has
+    #     not pulled since, and every run that died before arming.
+    #   * `route_detail` — the box's own sentence about it ("already armed",
+    #     "caddy validate rejected the block"). BOX-AUTHORED FREE TEXT relayed
+    #     verbatim, the same class as a stage's `detail`.
+    #
+    # COLUMNS, NOT A CONSOLE ENTRY, and that is the point of the wave: `console`
+    # is capped and drops its oldest lines, so a ROUTE entry is droppable and an
+    # aggregate over it is unanswerable. Wave 21 measured exactly that — 0 of
+    # 19,327 console-carrying rows contained "ROUTE". A column can be counted.
+    #
+    # NULLABLE, NEVER DEFAULTED, for the same reason `health_exit_code` is: the
+    # value a default would invent ("ok") is the SUCCESS token, so a defaulted
+    # row would certify an arm nobody attempted.
+    field :route_status, :string
+    field :route_detail, :string
+
     # deploy-reliability W12 (S6): THE CHAIN, AS DATA. Until now a deferral's
     # position in its chain existed only as English inside `failure_reason`
     # ("refusal 3 of 12 in this site's current chain") and the Go CLI read it
@@ -642,6 +664,13 @@ defmodule BarkparkCloud.Registry.Deployment do
       :slot,
       :port,
       :health_exit_code,
+      # deploy-reliability W21 (charter D608): the arm decision, cast HERE and
+      # nowhere else, for exactly the reason `slot` and `health_exit_code` are —
+      # it is something the BOX OBSERVED while driving this build, not something
+      # a caller may declare at create. A create-castable `route_status` would
+      # let a deployment be born claiming a Caddy route nobody armed.
+      :route_status,
+      :route_detail,
       # charter D188: the SERVED digest, cast here for exactly the reason `slot`
       # and `health_exit_code` are — it is something the box MEASURED while
       # driving this build, not something a caller may declare at create. A

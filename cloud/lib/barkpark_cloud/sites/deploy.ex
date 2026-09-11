@@ -1336,6 +1336,17 @@ defmodule BarkparkCloud.Sites.Deploy do
     |> maybe_put(:port, report.served_port)
     |> maybe_put(:slot, slot_name(ctx.site, report.served_port, report.served_slot))
     |> maybe_put(:health_exit_code, report.health_exit_code)
+    # charter D608 — THE ARM DECISION REACHES THE CONTROL PLANE. Written to
+    # COLUMNS, not to a console entry: `console` is capped at @max_console_lines
+    # (300) and drops its oldest lines, so a ROUTE entry on a chatty build is
+    # droppable and therefore uncountable — and "count the rows whose arm
+    # failed" is the whole question this wave could not answer.
+    #
+    # Omitted when nil, like every other measurement here: a box that predates
+    # the ROUTE engines must not overwrite a column with a decision it never
+    # made. That omission is what lets this land BEFORE the boxes are pulled.
+    |> maybe_put(:route_status, report.route_status)
+    |> maybe_put(:route_detail, report.route_detail)
     # charter D188. The SERVED reading, not the staged one: `build_sha256` is
     # the row's claim about the bytes in front of users, so it must be the
     # measurement taken through `current` after SWITCH. Omitted (never nil-ed)
@@ -2811,6 +2822,8 @@ defmodule BarkparkCloud.Sites.Deploy do
           served_port: pos_integer() | nil,
           served_slot: String.t() | nil,
           health_exit_code: non_neg_integer() | nil,
+          route_status: String.t() | nil,
+          route_detail: String.t() | nil,
           built_sha256: String.t() | nil,
           served_sha256: String.t() | nil
         }
@@ -2849,6 +2862,21 @@ defmodule BarkparkCloud.Sites.Deploy do
       served_port: nonneg_int(body["served_port"]),
       served_slot: nonblank(body["served_slot"]),
       health_exit_code: nonneg_int(body["health_exit_code"]),
+      #   * `route_status` / `route_detail` — charter D608, THE ARM DECISION.
+      #     `BPSTAGE name=ROUTE status=<ok|failed> detail="…"` is what both
+      #     engines emit after their Caddy arming attempt; the box lifts it off
+      #     its durable status file and this door is where it enters the control
+      #     plane. A box older than the ROUTE engines sends neither key and nil
+      #     is the honest answer — `nonblank/1`, so a JSON null, a missing key
+      #     and an empty string are the same "not measured".
+      #
+      #     They ride TOP-LEVEL keys rather than a stage-detail token (the way
+      #     the D188 receipts do) because ROUTE is deliberately NOT in the box's
+      #     `@stage_names`: admitting it would make a failed arm reach
+      #     `stage_exit_code/1` and re-decide a run that already emitted SWITCH
+      #     ok. Outside `stages`, the only transport left is a key of its own.
+      route_status: nonblank(body["route_status"]),
+      route_detail: nonblank(body["route_detail"]),
       # charter D188 — THE TWO RECEIPTS, read out of the stage details the box
       # already narrates. They ride the DETAIL rather than a new top-level key
       # on purpose: `served_port` and `health_exit_code` reach this map only
@@ -2872,6 +2900,8 @@ defmodule BarkparkCloud.Sites.Deploy do
       served_port: nil,
       served_slot: nil,
       health_exit_code: nil,
+      route_status: nil,
+      route_detail: nil,
       built_sha256: nil,
       served_sha256: nil
     }

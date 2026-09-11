@@ -654,21 +654,68 @@ func statusExit(status int) int {
 	}
 }
 
+// maxOpaqueRunes is this file's ONE budget for server-controlled opaque bytes
+// printed to a human stderr: an un-decodable error body (capBody) and a single
+// `details` line (capDetailLine). It was already capBody's local `maxRunes`;
+// hoisting it makes the two paths one policy rather than two coincidences.
+const maxOpaqueRunes = 200
+
 // capBody trims an opaque (non-envelope) error body to a short, single-flavour
 // message. A gateway 502/503/504 often returns a multi-KB HTML page or proxy
-// banner; dumping it verbatim to stderr is noise. Keep the first ~200 runes
-// (rune-safe, so a multibyte char is never split) and append an ellipsis. An
-// empty body becomes "request failed".
+// banner; dumping it verbatim to stderr is noise. Keep the first maxOpaqueRunes
+// runes (rune-safe, so a multibyte char is never split) and append an ellipsis.
+// An empty body becomes "request failed".
 func capBody(body []byte) string {
 	msg := strings.TrimSpace(string(body))
 	if msg == "" {
 		return "request failed"
 	}
-	const maxRunes = 200
-	if r := []rune(msg); len(r) > maxRunes {
-		return strings.TrimSpace(string(r[:maxRunes])) + "…"
+	if r := []rune(msg); len(r) > maxOpaqueRunes {
+		return strings.TrimSpace(string(r[:maxOpaqueRunes])) + "…"
 	}
 	return msg
+}
+
+// capDetailLine bounds ONE human `details` line to maxOpaqueRunes runes.
+//
+// WHY, MEASURED — not a number from the air. `details` is server-controlled and
+// two of its emitters are unbounded by construction:
+//
+//   - api/lib/barkpark/content/errors.ex:672 and :701 answer a bad filter with
+//     `details: %{filter: raw}` — the caller's filter string echoed VERBATIM.
+//     Driven against guerrilla.barkpark.cloud on 2026-09-11, a 9,000-byte
+//     filter produced a 9,010-byte `filter: …` line on stderr, while the
+//     message line beside it stopped at 4,271 bytes because Elixir's inspect/1
+//     caps at its 4,096-rune :printable_limit. The server caps its prose and
+//     not its details; the CLI capped neither.
+//   - api/lib/barkpark/content/papers/block_ops.ex structure_refusal_details
+//     answers `invalid_paper_structure` with one message per offending block
+//     under a single "blocks" key — its own comment cites a 105-block Paper —
+//     so the generic renderer prints that whole compact-JSON array on ONE line.
+//
+// Either buries the message the reader actually needs. The elision names the
+// byte count it dropped and the shape that still has all of it, so the cap
+// redirects rather than hides: -o json/-o yaml carry `details` byte-verbatim
+// and never route through here.
+func capDetailLine(line string) string {
+	r := []rune(line)
+	if len(r) <= maxOpaqueRunes {
+		return line
+	}
+	kept := strings.TrimSpace(string(r[:maxOpaqueRunes]))
+	return fmt.Sprintf("%s… (+%d more bytes; -o json for the full details)",
+		kept, len(line)-len(kept))
+}
+
+// capDetailLines applies capDetailLine to every line of a human details
+// rendering. Returns its argument untouched when nothing is over budget, so the
+// overwhelming majority of payloads (a field name, a rule, an id) are
+// byte-identical to before.
+func capDetailLines(lines []string) []string {
+	for i, line := range lines {
+		lines[i] = capDetailLine(line)
+	}
+	return lines
 }
 
 // renderErrorEnvelope emits the canonical {ok:false, error:{code, message,
@@ -834,6 +881,11 @@ func detailLines(raw json.RawMessage) []string {
 // back to the generic sorted key:value lines (detailLines), so no payload is
 // ever silently dropped. The machine channel (-o json/yaml) never routes
 // through here — it carries `details` verbatim.
+//
+// EVERY line this returns is bounded by capDetailLine, whatever produced it:
+// `details` is server-controlled and at least two emitters are unbounded (see
+// capDetailLine for the measurement). This is the LAST stop before the human
+// printer, so capping here is what makes the bound total.
 func detailLinesForCode(code string, raw json.RawMessage) []string {
 	d := normalizeDetails(raw)
 	if d == nil {
@@ -842,22 +894,22 @@ func detailLinesForCode(code string, raw json.RawMessage) []string {
 	switch code {
 	case "unknown_tag":
 		if lines := unknownTagLines(d); lines != nil {
-			return lines
+			return capDetailLines(lines)
 		}
 	case "duplicate_of":
 		if lines := duplicateOfLines(d); lines != nil {
-			return lines
+			return capDetailLines(lines)
 		}
 	case "resource_conflict":
 		if lines := resourceConflictLines(d); lines != nil {
-			return lines
+			return capDetailLines(lines)
 		}
 	case "validation_failed":
 		if lines := validationFailedLines(d); lines != nil {
-			return lines
+			return capDetailLines(lines)
 		}
 	}
-	return detailLines(raw)
+	return capDetailLines(detailLines(raw))
 }
 
 // validationFailedLines renders the CHANGESET shape of a `validation_failed`

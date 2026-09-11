@@ -747,22 +747,39 @@ jobs:
           # wrapper for this, needs node >= 22 (fs.globSync) and this job is
           # pinned to node 20 by cloud/priv/static/__node-version.
           #
-          # FLOOR 101 — derived 2026-09-06 from this file's registrations: 101
-          # top-level `test(` calls, and NO nested or loop-generated ones (an
-          # unanchored grep for `test(` finds the same 101), so 101 is the count
-          # the runner reports. Exact: growth never reds (`-lt`), deletion does.
+          # FLOOR 106 — derived 2026-09-11 at 628b88afe from this file's own
+          # registrations, and the derivation is BOTH counts because they differ:
+          #   grep -c '^test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 106
+          #   grep -c  'test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 119
+          # 106 is the floor. The 13-line gap is NOT nested or loop-generated
+          # registrations: every extra line is a `RegExp.prototype.test(` call
+          # inside an assertion (lines 149, 261, 1030, 1219, 1258, 1562, 1587,
+          # 1590, 1614, 1834, 1836, 1957, 2699 — 2699 carries two, so `grep -o`
+          # counts 120 occurrences against 119 lines). List them with
+          # `grep -n 'test(' <file> | grep -v '^[0-9]*:test('` before trusting
+          # either number.
+          #
+          # THE OLD COMMENT HERE WAS FALSE, and it is corrected rather than
+          # deleted: it read "an unanchored grep for `test(` finds the same 101",
+          # which was never true — at 3cb5f7f18 the anchored count was 101 and
+          # the unanchored count was 112 (`git show
+          # 3cb5f7f18:cloud/priv/static/__preview__/seal-predicate.test.mjs |
+          # grep -c 'test('`). The two counts have always disagreed; the prose
+          # asserted agreement and nothing measured it. Five precondition
+          # controls landed since, taking the anchored count 101 -> 106.
+          # Exact: growth never reds (`-lt`), deletion does.
           # Same self-test as the console harness step above: the parser must still
           # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
           # step's literal, or this floor has gone blind and its green means nothing.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -lt 101 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against floor 101 — this floor can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -lt 106 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against floor 106 — this floor can no longer lose"; exit 1; }
           PATH="$shim:$PATH" node --test cloud/priv/static/__preview__/seal-predicate.test.mjs 2>&1 | tee /tmp/seal-predicate-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/seal-predicate-tests.txt)
-          if [ "${tally:-0}" -lt 101 ]; then
-            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed floor is 101 — a test file that still LOADS but registers nothing exits 0 as one passing test, so this is what a gutted harness looks like. Restore the tests, or lower this literal deliberately."
+          if [ "${tally:-0}" -lt 106 ]; then
+            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed floor is 106 — a test file that still LOADS but registers nothing exits 0 as one passing test, so this is what a gutted harness looks like. Restore the tests, or lower this literal deliberately."
             exit 1
           fi
-          echo "seal predicate tests: ${tally} tests, floor 101 — the pin re-earned"
+          echo "seal predicate tests: ${tally} tests, floor 106 — the pin re-earned"
           if [ -s "$log" ]; then
             echo "::error title=Seal predicate suite reached the NETWORK::The Console gate is a required context; a suite that curls a host this repo does not own is green only while that host is up. Calls recorded:"
             cat "$log"

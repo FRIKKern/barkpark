@@ -147,9 +147,13 @@ func buildTheme(themeID, mode string) Theme {
 	}
 
 	// ── M1 styles ───────────────────────────────────────────────────────────
-	// Code chrome: a terracotta left bar (mirrors doc.css code's 3px accent
-	// border). ChromaStyle picks a built-in chroma style by light/dark — the one
-	// non-adaptive choice, made here at build time.
+	// Code chrome: a terracotta left bar. TUI-ONLY — the web article code block is
+	// a flat --paper-bg-deep slab with `border:0` (Figures.code_block_html/1); its
+	// 3px --bp-codeblock-accent-w left bar retired with task-ddb1e0ab09a62466 (see
+	// the code-BLOCK frame token comment in
+	// api/assets/paper-surface/paper-surface.css). ChromaStyle picks a built-in
+	// chroma style by light/dark — the one non-adaptive choice, made here at build
+	// time.
 	t.CodeBar = lipgloss.NewStyle().Foreground(pal.ReadingAccent)
 	if mode == "light" {
 		t.ChromaStyle = "github"
@@ -173,8 +177,10 @@ func buildTheme(themeID, mode string) Theme {
 	t.FieldLabel = lipgloss.NewStyle().Foreground(pal.ReadingMuted).Bold(true)
 
 	// Ingress: brighter ink (NOT dimmed) so it reads as a standfirst; a left
-	// accent bar substitutes for the larger font size. Pullquote bar is
-	// terracotta (doc.css's 3px left-border).
+	// accent bar substitutes for the larger font size. Pullquote bar is terracotta,
+	// mirroring `.bp-paper-surface .bp-role-pullquote` in
+	// api/assets/paper-surface/paper-surface.css: `border-left: 3px solid
+	// var(--paper-reading-accent)`.
 	t.Ingress = lipgloss.NewStyle().Foreground(pal.ChromeInk)
 	t.IngressBar = lipgloss.NewStyle().Foreground(pal.ChromeAccent)
 	t.PullquoteBar = lipgloss.NewStyle().Foreground(pal.ReadingAccent)

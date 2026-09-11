@@ -1083,6 +1083,19 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — emitted on the box's deploy_payload (sites/deploy.ex:751), never on a deployment row. Decodes to \"\" forever."},
     {"site_deployment_json/3", :unread, "refusal_phase",
      "dr-w15-s3-emit-the-two-corpses emits it; the Go reader is dr-w15-s3-followup-decode-refusal-phase. Start-vs-poll is legible over HTTP now and NOT yet in `bp cloud site status`. Deliberately not decoded in the same PR: this slice is fenced out of internal/cloudclient."},
+    # dr-w21-bl-route-decision-reaches-no-plane (charter D608): the two ROUTE
+    # keys. `deployment_json/1` emits them in the same commit that declares the
+    # columns — the whole finding is that the arm decision was durable and
+    # unreadable, so leaving the columns off the wire would have moved the
+    # silence one layer along rather than ending it. The Go reader is NOT in this
+    # PR: `internal/cloudclient` is a different fence, and `bp cloud site status`
+    # gaining a route line is its own slice. These rows carry that debt, and the
+    # "no longer unread" arm will demand their deletion the day
+    # `SiteDeployment.RouteStatus` is declared.
+    {"site_deployment_json/3", :unread, "route_status",
+     "dr-w21-bl-route-decision-reaches-no-plane emits it (charter D608: ROUTE is a SIBLING channel, never a stage). No Go reader yet — internal/cloudclient is outside this PR's fence; the follow-up declares SiteDeployment.RouteStatus as *string and DELETES this row."},
+    {"site_deployment_json/3", :unread, "route_detail",
+     "dr-w21-bl-route-decision-reaches-no-plane emits it alongside route_status. Box-authored free text (same class as a stage's `detail`). No Go reader yet, same fence, same follow-up."},
     # DELETED (task-62ed247e1dd0b960, the CLI half of task-f156b5e43bfbfe91): the two
     # `:unread` rows for `failure_code` / `failure_message`. `internal/cloudclient.
     # SiteDeployment` now declares both as `*string`, so the "no longer unread" arm
@@ -1513,7 +1526,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # ("@emitted_pinned 171 -> 172"). The pre-merge
   # measurement said 170 -> 171 and is VOID: it was taken against a main that had
   # not yet grown `abandoned_basis` (#17352). Never summed with that delta.
-  @emitted_pinned 172
+  # 172 -> 174 (dr-w21-bl-route-decision-reaches-no-plane, charter D608):
+  # `deployment_json/1` — which `site_deployment_json/3` pipes, so the walker
+  # follows it — gains `route_status` and `route_detail`, the box's ROUTE arm
+  # decision. TWO keys, not one: they are independently nullable (a status with
+  # no sentence is a real shape), exactly as `port` can stand while `slot` is
+  # nil. `@go_tag_pinned` does NOT move — this PR writes no Go at all, which is
+  # why both keys land as new `:unread` allowlist rows above rather than riding
+  # free on the file-global NAME union. MEASURED by the PIN CO-EDIT arm on this
+  # tree ("@emitted_pinned 172 -> 174"), never summed with an earlier delta.
+  @emitted_pinned 174
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -3038,7 +3060,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # MEASURED on this tree with the 999-technique, never derived: both floors set
   # to 999 and the refusals printed `116 schema column(s) collected` and
   # `32 unserialized column(s)`.
-  @schema_field_floor 116
+  # 116 -> 118 (dr-w21-bl-route-decision-reaches-no-plane, charter D608): the
+  # `deployments` schema gains `route_status` and `route_detail`.
+  # `@schema_unserialized_floor` does NOT move, and that is the point of landing
+  # them together — `deployment_json/1` emits both in the SAME commit that
+  # declares them, so neither is ever a hole. A serializer-less version of this
+  # change would have moved that floor 32 -> 34, which is the arm doing its job.
+  # MEASURED on this tree by the PIN CO-EDIT / SCHEMA-SIDE arms, which printed
+  # `118 schema column(s) collected` while the unserialized arm stayed at 32 —
+  # never derived by adding two to the old number.
+  @schema_field_floor 118
   @schema_unserialized_floor 32
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:

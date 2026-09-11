@@ -1560,6 +1560,73 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     end
   end
 
+  @typedoc """
+  The tenant literals a string-keyed member's membership predicate is built
+  from: the workspace UUID literal, its slug literal, and the
+  workspace-EXCLUSIVE dataset slug set (`dataset_slugs_for/1`). The export ctx
+  is a SUPERSET of this shape, so it satisfies the type as-is.
+  """
+  @type tenant_scope :: %{
+          required(:ws_lit) => String.t(),
+          required(:ws_slug_lit) => String.t(),
+          required(:slugs) => [String.t()],
+          optional(any()) => any()
+        }
+
+  @doc """
+  THE ONE SOURCE OF TRUTH for a string-keyed member's tenant-membership
+  predicate: the `WHERE …` clause naming exactly the rows of `table` that belong
+  to the workspace described by `scope`.
+
+  Both halves of the lockstep read it — the exporter's `copy_where/3` (a thin
+  delegation for the `:e3_doc` / `:e3_dataset` / `:allowlist` kinds) and
+  `Tenancy.delete_workspace/1`'s string-keyed sweep. Before this function
+  existed the two built the same SQL independently and a COMMENT asserted they
+  agreed; a prototype desynchronized them for `shares` and 98 tests stayed green
+  while a row the bundle carried survived its own workspace's teardown
+  (`pds-bl-export-teardown-lockstep-untested`). A predicate that exists ONCE
+  cannot desynchronize; `export_teardown_lockstep_test.exs` holds the seam shut
+  for every table in the three catalog classes, including future ones.
+
+  `anchor_narrowing` is appended INSIDE the `:e3_doc` semi-join's `EXISTS`
+  anchor (the profile/dataset narrowing a dataset-scoped export adds). It is
+  `""` on the whole-workspace path BOTH sides take, so the emitted SQL — and
+  therefore every dump byte and every teardown `DELETE` — is unchanged.
+
+  For `:e3_doc` the teardown appends its own sibling-guard `NOT EXISTS` AFTER
+  this clause: extraction and destruction are deliberately asymmetric there
+  (charter D7) because a `(doc_id, dataset)` row a SECOND workspace also owns
+  travels in this workspace's bundle but must SURVIVE its teardown. That
+  asymmetry is a strict EXTENSION of this predicate, never a rewrite of it —
+  which is exactly what the structural test asserts.
+  """
+  @spec tenant_scope_where(
+          String.t(),
+          :e3_doc | :e3_dataset | :allowlist,
+          tenant_scope(),
+          String.t()
+        ) :: String.t()
+  def tenant_scope_where(table, kind, scope, anchor_narrowing \\ "")
+
+  def tenant_scope_where(_table, :e3_doc, scope, anchor_narrowing) do
+    "WHERE EXISTS (SELECT 1 FROM documents d " <>
+      "WHERE d.workspace_id = #{scope.ws_lit} AND d.doc_id = t.doc_id AND d.dataset = t.dataset" <>
+      anchor_narrowing <> ")"
+  end
+
+  def tenant_scope_where(table, :e3_dataset, scope, _anchor_narrowing) do
+    case Map.fetch(Catalog.e3_dataset_workspace_slug_column(), table) do
+      {:ok, col} -> "WHERE t.#{qi(col)} = #{scope.ws_slug_lit}"
+      :error -> "WHERE t.dataset = ANY(#{Catalog.text_array_literal(scope.slugs)})"
+    end
+  end
+
+  def tenant_scope_where(table, :allowlist, scope, _anchor_narrowing) do
+    prefix = Map.fetch!(Catalog.allowlist(), table)
+    scopes = Enum.map(scope.slugs, &(prefix <> &1))
+    "WHERE t.scope = ANY(#{Catalog.text_array_literal(scopes)})"
+  end
+
   defp e3_kind(table) do
     cond do
       table in Catalog.e3_doc_keyed() ->
@@ -1640,11 +1707,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # which would fan out on the (doc_id, dataset) → 2-document case (charter D6).
   # The dataset grain and the dev type-deny both narrow the ANCHOR (the document
   # the row hangs off), because the member itself carries no such column.
-  defp copy_where(_table, :e3_doc, ctx) do
-    "WHERE EXISTS (SELECT 1 FROM documents d " <>
-      "WHERE d.workspace_id = #{ctx.ws_lit} AND d.doc_id = t.doc_id AND d.dataset = t.dataset" <>
-      doc_anchor_narrowing(ctx) <> ")"
-  end
+  defp copy_where(table, :e3_doc, ctx),
+    do: tenant_scope_where(table, :e3_doc, ctx, doc_anchor_narrowing(ctx))
 
   # E3 dataset-keyed, ATTRIBUTED arm (PDS-D74). A table that carries its own
   # workspace slug column is scoped by THAT, never by the bare `dataset` slug:
@@ -1659,20 +1723,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # includes ours. The dataset GRAIN is re-applied separately, in
   # `dataset_predicates/3` — without it this predicate would widen a
   # dataset-scoped pull to every dataset the workspace shares.
-  defp copy_where(table, :e3_dataset, ctx) do
-    case Map.fetch(Catalog.e3_dataset_workspace_slug_column(), table) do
-      {:ok, col} -> "WHERE t.#{qi(col)} = #{ctx.ws_slug_lit}"
-      :error -> "WHERE t.dataset = ANY(#{Catalog.text_array_literal(ctx.slugs)})"
-    end
-  end
+  defp copy_where(table, :e3_dataset, ctx), do: tenant_scope_where(table, :e3_dataset, ctx)
 
   # data_keys.scope = "dataset:" <> slug (search_surface_config left the allowlist
   # in Wave 5 Slice A — it is now a plain E1 workspace_id table, charter D45/D49).
-  defp copy_where(table, :allowlist, ctx) do
-    prefix = Map.fetch!(Catalog.allowlist(), table)
-    scopes = Enum.map(ctx.slugs, &(prefix <> &1))
-    "WHERE t.scope = ANY(#{Catalog.text_array_literal(scopes)})"
-  end
+  defp copy_where(table, :allowlist, ctx), do: tenant_scope_where(table, :allowlist, ctx)
 
   # Both narrowings are "" on the default full/whole-workspace path, so the
   # emitted SQL — and therefore every dump byte — is identical to before.

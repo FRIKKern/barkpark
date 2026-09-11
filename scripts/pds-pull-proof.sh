@@ -59,6 +59,41 @@
 #   scripts/pds-scratch-target.sh   boots/tears down the personal-local target
 #   scripts/pds-secret-scan.sh      the value-based scan and its control
 #
+# IT IS NOT RELOCATABLE, AND THE REHEARSAL RECIPE MUST SAY SO (pds-bl-harness-
+# not-relocatable). Its own location is SEMANTIC: SCRIPT_DIR and REPO_ROOT are
+# derived from the path this file was invoked by, and everything it consumes
+# hangs off them — scripts/lib/bp-curl.sh and scripts/pds-blind-spot.sh are
+# SOURCED at load, before argument parsing, and the two siblings above are
+# resolved as $SCRIPT_DIR/<name>. So a bare copy of THIS ONE FILE cannot run.
+# The failure is not deferred to the step you selected; it happens at load:
+#
+#   $ git show origin/main:scripts/pds-pull-proof.sh > /tmp/x.sh
+#   $ bash /tmp/x.sh --only 1,6
+#   /tmp/x.sh: line 111: /tmp/lib/bp-curl.sh: No such file or directory
+#
+# — reproduced verbatim at blob 9a7618d40 (origin/main, 2026-09-11); line 111 is
+# that revision's `. "$SCRIPT_DIR/lib/bp-curl.sh"`, and the line NUMBER drifts
+# with every edit to this header while the failure does not. The claim is not
+# left to this comment: scripts/pds-pull-proof_test.sh relocates the shipped file
+# to a temp directory on every run and reds if it ever starts working there.
+#
+# A copy that clears THAT first source still dies at the unconditional preflight
+# `[ -x "$SCAN_SCRIPT" ] || die "... missing — this harness consumes it, it does
+# not reimplement it"`, which runs before any --only gating.
+#
+# THE RUNNABLE RECIPE, therefore, is a REAL CHECKOUT — never an extracted file:
+#
+#   git worktree add /tmp/pds-rehearsal <sha-or-ref>     # or a fresh clone
+#   cd /tmp/pds-rehearsal
+#   git rev-parse HEAD:scripts/pds-pull-proof.sh         # the freeze check
+#   scripts/pds-pull-proof.sh --plan
+#
+# THE FREEZE IS VERIFIED WITH `git rev-parse HEAD:scripts/pds-pull-proof.sh`,
+# NEVER WITH `shasum` (PDS-D159). The two answer different questions: shasum
+# proves bytes, `git rev-parse` proves those bytes are the RECORDED BLOB of the
+# frozen instrument. A shasum that matches a number somebody pasted into a
+# runbook proves only that the paste and the file agree.
+#
 # Environment (all optional; every default is printed by --plan):
 #   PDS_SOURCE_BASE      default https://guerrilla.barkpark.cloud
 #   PDS_SOURCE_TOKEN     default: the `token` for PDS_SOURCE_BASE in
@@ -70,7 +105,15 @@
 #   PDS_SOURCE_PG_DB     default barkpark_prod
 #   PDS_NO_SSH_AMMO=1    do not pull scan ammo over SSH (step 4 then ABORTs for
 #                        want of ammo rather than scanning with none)
-#   PDS_CONTROL_PG       maintenance conninfo for `pds-secret-scan.sh control`
+#   PDS_CONTROL_PG       maintenance conninfo for `pds-secret-scan.sh control`.
+#                        OPTIONAL: step 4 now RESOLVES one — the scratch
+#                        target's own server first, then the local libpq
+#                        default — and accepts a candidate only when the
+#                        SERVER says it is unix/loopback, that the role may
+#                        CREATE DATABASE and that it is not the source
+#                        production database. Set this to override that
+#                        discovery; it is then honoured as given, unprobed.
+#   PDS_CONTROL_PG_TIMEOUT  default 5 — PGCONNECT_TIMEOUT for that probe
 #   BARKPARK_HOME        the scratch target's root. PINNED per run (PDS-D54).
 #   PDS_SCRATCH_POINTER  pinned per run — it is ONE global path and two
 #                        concurrent PDS runs clobber each other.
@@ -484,6 +527,166 @@ tgt_psql() { # sql -> rows, tab-separated, no header. Runs through the target's
     --command "$1" 2>/dev/null
 }
 
+# ── the instrument control's maintenance PG, RESOLVED not demanded ──────────
+#
+# Step 4's positive control (`pds-secret-scan.sh control`) is the one leg that
+# proves the scanner CAN fire. It costs no guerrilla export — it seeds its own
+# throwaway local database — and it used to run only when an operator had
+# exported PDS_CONTROL_PG by hand, so the default `--all` transcript printed
+# `instrument control: NOT RUN` and the clean scan beside it stood alone. A
+# clean scan with no firing control is the vacuous green PDS-D20 exists to
+# refuse, so the connection is now DISCOVERED.
+#
+# DISCOVERY IS LOCAL-OR-NOTHING, AND IT ASKS THE SERVER RATHER THAN THE STRING.
+# A conninfo is a claim; `inet_server_addr()`, `current_database()` and the
+# connecting role's `rolcreatedb` are the server's own answers. A candidate is
+# accepted only if the server says it is a unix socket or loopback, that the
+# role may CREATE DATABASE (the control's first act — an unprivileged candidate
+# would turn a passing step into a FAIL), and that the database it landed in is
+# not the source production database. Anything else — including a probe that
+# does not answer in the expected shape — is REFUSED BY NAME, and the step then
+# falls back to NOT RUN carrying the refusals rather than a bare instruction.
+#
+# An operator-supplied PDS_CONTROL_PG is honoured as given, unprobed: it is an
+# explicit opt-in that predates this discovery and must not start refusing.
+CONTROL_PG=""; CONTROL_PG_SRC=""; CONTROL_PG_WHY=""
+
+control_pg_verdict() { # <probe line: "<server-addr|unix> <port> <t|f> <database>">
+  # Pure — it decides over the server's four answers and nothing else, so the
+  # harness's own test can drive every refusal without a PostgreSQL.
+  # Sets CONTROL_PG_WHY on refusal; clears it on acceptance.
+  local line="${1-}" addr port cancreate db n
+  CONTROL_PG_WHY=""
+  # shellcheck disable=SC2086  # deliberate word split: the probe emits 4 fields
+  set -- $line
+  n=$#
+  if [ "$n" -ne 4 ]; then
+    CONTROL_PG_WHY="the probe did not answer in the expected 4-field shape (got $n field(s): '$line') — an answer nobody can parse is not a permission"
+    return 1
+  fi
+  addr="$1"; port="$2"; cancreate="$3"; db="$4"
+  case "$addr" in
+    unix|127.0.0.1|::1|localhost) ;;
+    *) CONTROL_PG_WHY="the server reports its own address as '$addr' (port $port), which is neither a unix socket nor loopback — this control creates and drops a database and is never pointed at a remote server"
+       return 1 ;;
+  esac
+  # `boolean::text` is 'true'/'false' in psql's unaligned output, but `t`/`f` is
+  # what a tuples-only client can hand back and what every fixture in this file's
+  # test harness was first written against — a verdict that knew only one
+  # spelling passed every fixture and refused the real server. Both spellings of
+  # YES are accepted; anything else is not a yes.
+  case "$cancreate" in
+    t|true) ;;
+    *)
+      CONTROL_PG_WHY="the connecting role cannot CREATE DATABASE there (the server answered '$cancreate'), and the control's first act is \`CREATE DATABASE\` — accepting it would convert a skipped control into a FAILED step"
+       return 1 ;;
+  esac
+  case "$db" in
+    "$SOURCE_PG_DB"|*prod*)   # *prod* already covers *production*
+      CONTROL_PG_WHY="it landed in database '$db', which is the source production database or named like one — the control seeds and drops schema objects and is refused anywhere near production"
+      return 1 ;;
+  esac
+  return 0
+}
+
+control_pg_probe() { # <conninfo> -> 0 when the SERVER says it is local, privileged and not production
+  local conninfo="${1-}" out
+  CONTROL_PG_WHY=""
+  if [ -z "$conninfo" ]; then
+    CONTROL_PG_WHY="empty conninfo"
+    return 1
+  fi
+  if ! out="$(PGCONNECT_TIMEOUT="${PDS_CONTROL_PG_TIMEOUT:-5}" psql "$conninfo" -X -Atq \
+      -c "SELECT coalesce(host(inet_server_addr())::text, 'unix') || ' ' || coalesce(current_setting('port', true), '?') || ' ' || (SELECT (rolsuper OR rolcreatedb)::text FROM pg_roles WHERE rolname = current_user) || ' ' || current_database()" 2>/dev/null)"; then
+    CONTROL_PG_WHY="psql could not connect"
+    return 1
+  fi
+  out="$(printf '%s\n' "$out" | head -1)"
+  control_pg_verdict "$out"
+}
+
+control_pg_from_target() { # the scratch target's OWN server, maintenance database
+  local kv h="" pt="" u=""
+  [ -n "${TARGET_DB:-}" ] || return 1
+  for kv in $TARGET_DB; do
+    case "$kv" in
+      host=*) h="${kv#host=}" ;;
+      port=*) pt="${kv#port=}" ;;
+      user=*) u="${kv#user=}" ;;
+    esac
+  done
+  [ -n "$h" ] && [ -n "$pt" ] && [ -n "$u" ] || return 1
+  printf 'host=%s port=%s dbname=postgres user=%s' "$h" "$pt" "$u"
+}
+
+resolve_control_pg() { # 0 = $CONTROL_PG is usable; 1 = NOT RUN, with $CONTROL_PG_WHY saying why
+  CONTROL_PG=""; CONTROL_PG_SRC=""; CONTROL_PG_WHY=""
+  if [ -n "${PDS_CONTROL_PG:-}" ]; then
+    CONTROL_PG="$PDS_CONTROL_PG"
+    CONTROL_PG_SRC="PDS_CONTROL_PG (operator-supplied; honoured as given and not printed)"
+    return 0
+  fi
+  if ! command -v psql >/dev/null 2>&1; then
+    CONTROL_PG_WHY="psql is not on PATH, so no candidate can even be probed"
+    return 1
+  fi
+  local cand why_all="" src
+  for src in target local; do
+    cand=""
+    case "$src" in
+      target) load_target >/dev/null 2>&1 || true
+              cand="$(control_pg_from_target || true)" ;;
+      local)  cand="dbname=postgres" ;;
+    esac
+    if [ -z "$cand" ]; then
+      why_all="$why_all; $src: no candidate conninfo (the scratch target is not booted, or its scratch.env carries no parseable PDS_SCRATCH_DB)"
+      continue
+    fi
+    if control_pg_probe "$cand"; then
+      CONTROL_PG="$cand"
+      CONTROL_PG_SRC="$src"
+      return 0
+    fi
+    why_all="$why_all; $src ($cand): $CONTROL_PG_WHY"
+  done
+  CONTROL_PG_WHY="${why_all#; }"
+  return 1
+}
+
+# ── the target's TASK-LIFECYCLE CHECK, as a PRECONDITION (PDS-D32) ───────────
+#
+# Migrations 20260719030000/20260719030100 widen
+# `documents_task_lifecycle_status_check` from 5 accepted values to 7, adding the
+# two thought states `considering` and `researching`. A scratch target booted
+# from a pre-widening tree accepts the bundle right up until the first task row
+# carrying one of those two, and then the import dies MID-TRANSACTION on a raw
+# Postgrex CHECK violation — which in clean mode compounds with the 25P02
+# cascade and reads, to everyone downstream, like a defect in the import engine.
+#
+# Step 0b's deploy-provenance check (sha implies migration-file set, PDS-D47) is
+# NOT a substitute for two reasons: it is about the SOURCE deploy, not the
+# target's applied schema, and the harness documents legitimate partial `--only`
+# re-runs that never execute it at all. So the constraint is read from the LIVE
+# target, once, before a byte is imported.
+#
+# The list is the migration's list, spelled once.
+LIFECYCLE_VALUES_7="open in_progress blocked done cancelled considering researching"
+
+lifecycle_missing_values() { # <pg_get_constraintdef text> -> the values it does NOT accept
+  # Pure: no database, no globals but the list above — so the harness's own test
+  # can drive it against a real pre-widening `pg_get_constraintdef` string.
+  # Each value is matched WITH its SQL quotes: an unquoted substring search would
+  # find `open` inside `owner_scoped` and call a 5-value constraint widened.
+  local def="${1-}" v out=""
+  for v in $LIFECYCLE_VALUES_7; do
+    case "$def" in
+      *"'$v'"*) ;;
+      *)        out="$out $v" ;;
+    esac
+  done
+  printf '%s' "${out# }"
+}
+
 # ── a bp binary NEW ENOUGH to speak the pull dialect (PDS-D63) ───────────────
 #
 # The installed bp predates --profile/--dataset/--merge/--with-blobs, and an old
@@ -624,7 +827,7 @@ cmd_plan() {
 
   plan_row 1 "THE PULL — export --profile dev + import --yes --merge, both --with-blobs" \
     "a booted scratch target + a bp built FROM THIS WORKTREE (the installed one predates the dialect)" \
-    "RUNNABLE. Runs the PAIR (PDS-D58) with explicit -s/--token on both calls — BARKPARK_TOKEN is read NOWHERE. ASSERTS: (1) the built bp advertises --profile/--merge/--with-blobs in its own --help; (2) the export exits 0 and the tar carries a manifest; (3) the manifest's dataset EQUALS the dataset asked for — a workspace-grain bundle ABORTS naming pds-w4-pull-dataset-flag rather than being imported (PDS-D61/D62) — and that assertion carries a NEGATIVE CONTROL, on by default (PDS_STEP1_GRAIN_DEMO=0 to skip, and the pass then says so), which puts five locally built manifests through the same assertion and FAILs the step unless it refuses every mis-grained one; (4) the import exits 0 and its receipt names tables+rows; (5) blob failures exit non-zero by the CLI's own contract. --merge is MANDATORY: mode=clean answers an opaque 500 (25P02 at workspace_bundle.ex:233) on a populated target. PDS-D9 adoption is reported by diffing the workspaces row across the import — the CLI never says it."
+    "RUNNABLE. Runs the PAIR (PDS-D58) with explicit -s/--token on both calls — BARKPARK_TOKEN is read NOWHERE. ASSERTS: (1) the built bp advertises --profile/--merge/--with-blobs in its own --help; (2) the export exits 0 and the tar carries a manifest; (3) the manifest's dataset EQUALS the dataset asked for — a workspace-grain bundle ABORTS naming pds-w4-pull-dataset-flag rather than being imported (PDS-D61/D62) — and that assertion carries a NEGATIVE CONTROL, on by default (PDS_STEP1_GRAIN_DEMO=0 to skip, and the pass then says so), which puts five locally built manifests through the same assertion and FAILs the step unless it refuses every mis-grained one; (4) the import exits 0 and its receipt names tables+rows; (5) blob failures exit non-zero by the CLI's own contract. --merge is MANDATORY: mode=clean answers an opaque 500 (25P02 at workspace_bundle.ex:233) on a populated target. PDS-D9 adoption is reported by diffing the workspaces row across the import — the CLI never says it. PRECONDITION READ FROM THE LIVE TARGET, not from a migration file: documents_task_lifecycle_status_check must already accept all seven lifecycle values (PDS-D32 migrations 20260719030000 + 20260719030100); a pre-widening target ABORTS by name here instead of dying mid-import on a raw CHECK violation that reads like an engine defect."
 
   plan_row 2 "RAW-PERSPECTIVE CENSUS — per-type ?perspective=raw&count=true, BOTH ends" \
     "source HTTP; for the target half, step 1's import" \
@@ -636,7 +839,7 @@ cmd_plan() {
 
   plan_row 4 "VALUE-BASED SECRET SCAN — consumes scripts/pds-secret-scan.sh" \
     "run-time ammo (the source's webhook secrets) + the dev bundle + the full bundle + the target DB" \
-    "RUNNABLE. Three assertions, none reimplemented here: (1) the dev bundle is CLEAN; (2) the SAME ammo FIRES on the one full bundle (the positive control — a scan that has never fired is not an instrument); (3) the TARGET DB is scanned via \`pds-secret-scan.sh scan --db \$PDS_SCRATCH_DB\` and the step FAILS when UNSCANNED > 0 or when zero tables were scanned — that script's own exit code is driven only by HITS (PDS-D68), so an unreadable table would otherwise print CLEAN with the secret sitting in the database."
+    "RUNNABLE. Three assertions, none reimplemented here: (1) the dev bundle is CLEAN; (2) the SAME ammo FIRES on the one full bundle (the positive control — a scan that has never fired is not an instrument); (3) the TARGET DB is scanned via \`pds-secret-scan.sh scan --db \$PDS_SCRATCH_DB\` and the step FAILS when UNSCANNED > 0 or when zero tables were scanned — that script's own exit code is driven only by HITS (PDS-D68), so an unreadable table would otherwise print CLEAN with the secret sitting in the database. The instrument's OWN control (\`pds-secret-scan.sh control\`, a locally seeded throwaway fixture that spends NO guerrilla export) no longer waits for a hand-set PDS_CONTROL_PG: the maintenance connection is RESOLVED — the scratch target's own server, then the local libpq default — and a candidate is accepted only when the SERVER answers that it is unix/loopback, that the role may CREATE DATABASE and that it is not the source production database. NOT RUN survives only as a named refusal, never as a silent default."
 
   plan_row 5 "SERVED ASSET — every imported asset serves HTTP 200 with a matching content-length" \
     "step 1 imported blobs into the scratch target" \
@@ -1351,6 +1554,37 @@ step_1() {
       "no bp that speaks the pull dialect: $BP_WHY. The INSTALLED bp must not be substituted — it predates --profile/--dataset/--merge/--with-blobs and would send an un-scoped, un-merged request."
     return 0
   fi
+
+  # ── the target's lifecycle CHECK, BEFORE a single row moves (PDS-D32) ─────
+  #
+  # Named here, or discovered later as an opaque engine error. The query is one
+  # catalog read against a target this run is about to write to anyway.
+  # `x="$(cmd | head -1)" || rc=$?` would read HEAD's exit code, never the
+  # query's — the PDS-D99 shape this file documents. The substitution is taken
+  # alone so the `if !` sees tgt_psql's own status, and only then trimmed.
+  local lc_def lc_raw lc_rc lc_missing
+  lc_rc=0; lc_raw=""
+  if ! lc_raw="$(tgt_psql "SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace WHERE c.conname = 'documents_task_lifecycle_status_check' AND t.relname = 'documents' AND n.nspname = 'public'")"; then
+    lc_rc=1
+  fi
+  lc_def="$(printf '%s\n' "$lc_raw" | head -1)"
+  if [ "$lc_rc" -ne 0 ]; then
+    abort 1 "env:target-constraint-unreadable" \
+      "the target's catalog could not be read through \`$TARGET_TREE/bin/barkpark psql\` (the catalog query returned non-zero), so nothing here knows whether documents_task_lifecycle_status_check accepts the 7 lifecycle values this bundle carries. An UNKNOWN precondition is not a met one. FIX: $(target_hint)"
+    return 0
+  fi
+  if [ -z "$lc_def" ]; then
+    abort 1 "env:target-lifecycle-check-absent" \
+      "the target has no public.documents constraint named documents_task_lifecycle_status_check at all. Either the target was never migrated, or the constraint was dropped by hand; in both cases the schema this run would measure is not the schema the proof is about. FIX: re-boot the target from a current worktree ($(target_hint))."
+    return 0
+  fi
+  lc_missing="$(lifecycle_missing_values "$lc_def")"
+  if [ -n "$lc_missing" ]; then
+    abort 1 "env:target-lifecycle-check-stale" \
+      "the target's documents_task_lifecycle_status_check does NOT accept: $lc_missing. That is a PRE-WIDENING target (PDS-D32 migrations 20260719030000 + 20260719030100 take it from 5 values to 7). Importing this bundle would die mid-transaction on a raw CHECK violation the moment a task row carries one of those values — an environmental failure that reads like an import-engine defect. Live constraint: $lc_def   FIX: bring the target's schema up (\`cd \"$TARGET_TREE\" && bin/barkpark eval 'Barkpark.Release.migrate()'\`, or re-boot it: $(target_hint))."
+    return 0
+  fi
+  info "lifecycle CHECK documents_task_lifecycle_status_check accepts all 7 values (open in_progress blocked done cancelled considering researching) — read from the LIVE target, not inferred from a migration file"
   info "bp binary       $BP_BIN (built from $REPO_ROOT this run; its own \`cloud workspace --help\` advertises --profile, --dataset, --merge and --with-blobs)"
   info "target          $TARGET_BASE  (media dir $TARGET_MEDIA)"
 
@@ -2460,12 +2694,33 @@ step_4() {
   fi
 
   # The instrument's OWN control: a local throwaway fixture, no guerrilla export.
-  if [ -n "${PDS_CONTROL_PG:-}" ]; then
-    local crc cout
+  # The maintenance connection is RESOLVED (see resolve_control_pg), so the
+  # default run no longer reports a clean scan next to a control that never ran.
+  if resolve_control_pg; then
+    local crc cout leftovers
     cout="$(mktmp)"
     crc=0
-    "$SCAN_SCRIPT" control --pg "$PDS_CONTROL_PG" >"$cout" 2>&1 || crc=$?
+    info "instrument control: maintenance PG resolved from $CONTROL_PG_SRC — no guerrilla export is spent by this leg"
+    "$SCAN_SCRIPT" control --pg "$CONTROL_PG" >"$cout" 2>&1 || crc=$?
     sed 's/^/      /' "$cout"
+    # THE FIXTURE MUST BE GONE, whichever way the control went. The drop is the
+    # sibling's own EXIT trap (pds-secret-scan.sh's cleanup, which runs on
+    # success and on failure) — so this does not reimplement the cleanup, it
+    # JUDGES it, the same way the UNSCANNED gate below judges coverage rather
+    # than re-scanning. Leftovers are named with the exact command that removes
+    # them; a stray throwaway database does not invalidate the scan above, so it
+    # is reported rather than promoted to a FAIL.
+    leftovers=""
+    if command -v psql >/dev/null 2>&1; then
+      leftovers="$(PGCONNECT_TIMEOUT="${PDS_CONTROL_PG_TIMEOUT:-5}" psql "$CONTROL_PG" -X -Atq \
+        -c "SELECT datname FROM pg_database WHERE datname LIKE 'pds!_secret!_scan!_ctl!_%' ESCAPE '!'" 2>/dev/null | tr '\n' ' ' || true)"
+      leftovers="$(printf '%s' "$leftovers" | sed 's/ *$//')"
+    fi
+    if [ -n "$leftovers" ]; then
+      info "control fixture: NOT fully cleaned — throwaway database(s) still present: $leftovers (drop with: psql <maintenance conninfo> -c 'DROP DATABASE \"<name>\"')"
+    else
+      info "control fixture: cleaned — no pds_secret_scan_ctl_* database remains on the maintenance server"
+    fi
     if [ "$crc" -eq 0 ]; then
       info "instrument control: PASSED — the scan FIRES on a full-shaped fixture and comes back clean on a deny-shaped one"
     else
@@ -2473,7 +2728,8 @@ step_4() {
       return 0
     fi
   else
-    info "instrument control: NOT RUN (set PDS_CONTROL_PG=<maintenance conninfo> to run \`$SCAN_SCRIPT control\` — it builds its own throwaway fixture and spends no guerrilla export)"
+    info "instrument control: NOT RUN — no maintenance PostgreSQL this harness could PROVE is local, privileged and non-production: $CONTROL_PG_WHY"
+    info "                    (set PDS_CONTROL_PG=<maintenance conninfo> to name one; \`$SCAN_SCRIPT control\` builds its own throwaway fixture and spends no guerrilla export)"
   fi
 
   # ── (b) THE TARGET DB — and a HARD gate on UNSCANNED (PDS-D68) ────────────
