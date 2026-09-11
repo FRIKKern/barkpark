@@ -23947,20 +23947,54 @@
         : "");
   }
 
+  // cch-w48: the claim is IRREVERSIBLE and happens entirely inside Vercel's UI,
+  // so the card may never infer "still unclaimed" from its own state. The
+  // payload's `claimed` fact is the control plane's READ of the platform
+  // (Vercel.Client.claimed?/1) and is three-valued: true / false / null-or-
+  // absent = we could not tell. These two arms render the two non-`false`
+  // answers, neither of which offers a transfer.
+
+  // Already transferred: the deployment is theirs. Nothing left to claim — and
+  // a claim code we happen to still hold is meaningless, so it is NOT rendered.
+  function vercelClaimedHtml(vercel) {
+    return '<p class="new-fineprint dim" id="new-vercel-claimed">This deployment is already in your Vercel account' +
+      (vercel.deployment_url
+        ? ' — <a class="mono" href="' + esc(vercel.deployment_url) + '" target="_blank" rel="noopener">' + esc(vercel.deployment_url) + "</a>"
+        : "") +
+      ". Claiming moved it once and for good, so there is nothing left to claim here.</p>";
+  }
+
+  // We could not read the platform. Say exactly that: re-offering a claim link
+  // for a deployment they may ALREADY own is the failure this arm exists to
+  // prevent, so no button is rendered at all.
+  function vercelClaimUnknownHtml(vercel) {
+    return '<p class="new-fineprint dim" id="new-vercel-claim-unknown">We couldn\u2019t check with Vercel whether this deployment has already been claimed' +
+      (vercel.deployment_url
+        ? ' (<a class="mono" href="' + esc(vercel.deployment_url) + '" target="_blank" rel="noopener">' + esc(vercel.deployment_url) + "</a>)"
+        : "") +
+      ". Claiming is one-way, so we won\u2019t offer a new claim link until we can tell \u2014 reload once Vercel answers again.</p>";
+  }
+
   // The whole one-click area: "" when the feature is off (caller falls back to
-  // the clone-URL flow); a claim link when a fresh code exists; else the deploy
-  // button (which also RE-MINTS a stale code — same POST).
+  // the clone-URL flow). Then, in order: an already-claimed deployment (no CTA
+  // — the copy is true both before and after the transfer because the fact is
+  // read, not assumed); a claim link when a fresh code exists AND the platform
+  // says the project is still ours; an honest "cannot tell" when the read
+  // failed on a deployed project; else the deploy button (which also RE-MINTS
+  // a stale code — same POST).
+  function vercelClaimInnerHtml(vercel, bp) {
+    if (vercel.claimed === true) return vercelClaimedHtml(vercel);
+    // deployed + unknown: never a claim link, never a re-mint button.
+    if (vercel.deployed && vercel.claimed !== false) return vercelClaimUnknownHtml(vercel);
+    if (vercel.claim_url) return vercelClaimLinkHtml(vercel, bp);
+    var label = vercel.deployed ? "Get your Vercel claim link" : "Deploy your site to Vercel";
+    return '<button class="btn btn-block btn-vercel" id="new-vercel-claim" type="button">' + esc(label) + "</button>" +
+      '<p class="new-fineprint dim">One click — we deploy it with every environment variable already set; you just claim it into your Vercel account.</p>';
+  }
+
   function vercelClaimHtml(vercel, bp) {
     if (!vercel || !vercel.configured) return "";
-    var inner;
-    if (vercel.claim_url) {
-      inner = vercelClaimLinkHtml(vercel, bp);
-    } else {
-      var label = vercel.deployed ? "Get your Vercel claim link" : "Deploy your site to Vercel";
-      inner = '<button class="btn btn-block btn-vercel" id="new-vercel-claim" type="button">' + esc(label) + "</button>" +
-        '<p class="new-fineprint dim">One click — we deploy it with every environment variable already set; you just claim it into your Vercel account.</p>';
-    }
-    return '<div id="new-vercel-area">' + inner + "</div>";
+    return '<div id="new-vercel-area">' + vercelClaimInnerHtml(vercel, bp) + "</div>";
   }
 
   // cch-w67-s4: the two optional fault arguments are the FAILED reads kept
@@ -24053,7 +24087,10 @@
     api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/vercel-deploy", {}).then(function (r) {
       if (r.ok && r.data && r.data.vercel && r.data.vercel.claim_url) {
         var area = $("#new-vercel-area");
-        if (area) area.innerHTML = vercelClaimLinkHtml(r.data.vercel, bp);
+        // Through the SAME ladder as the first render (cch-w48): if the read
+        // says the project already left our team, the swap says so instead of
+        // painting a claim link over a transfer that already happened.
+        if (area) area.innerHTML = vercelClaimInnerHtml(r.data.vercel, bp);
         toast({ kind: "success", title: "Deployed to Vercel", body: "Claim it to move it into your account." });
         return;
       }
@@ -28018,6 +28055,8 @@
       overallSummaryText: overallSummaryText, patchProvisionOverall: patchProvisionOverall,
       // Zero-paste Vercel handoff (task-4e4a53b101a97051): the claim-area builders.
       vercelClaimHtml: vercelClaimHtml, vercelClaimLinkHtml: vercelClaimLinkHtml,
+      vercelClaimedHtml: vercelClaimedHtml, vercelClaimUnknownHtml: vercelClaimUnknownHtml,
+      vercelClaimInnerHtml: vercelClaimInnerHtml,
       vercelCloneUrl: vercelCloneUrl,
       // Guided fallback (no platform token): per-field copy + Deploy.
       vercelFallbackHtml: vercelFallbackHtml, vercelEnvRows: vercelEnvRows,

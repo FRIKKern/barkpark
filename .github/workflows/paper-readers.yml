@@ -22,17 +22,72 @@ jobs:
   full-corpus:
     name: Full production Paper reader audit
     runs-on: ubuntu-latest
-    # SIZED, NOT GUESSED. 14 consecutive scheduled runs were CANCELLED, which
-    # reads like a hang and is not one: the audit is linear in corpus size and
-    # the corpus outgrew a fixed cap. The 08-03 artifact audited 651 papers in
-    # 1627 s = 2.50 s/paper; the corpus is 774 papers today, so 774 x 2.50 s =
-    # 1935 s = 32.3 min — already past 30. Growth is ~8.8 papers/day, i.e.
-    # ~22 s/day of extra runtime, so 75 min buys headroom to roughly 1800
-    # papers (~2.5 years at that rate) instead of the ~3 weeks a 35-minute cap
-    # would have bought. Raise this again when the arithmetic says so; a cap
-    # that cancels the job converts a red into silence, and the failure-report
-    # step below routes a cancelled() run to a human too.
-    timeout-minutes: 75
+    # SIZED FROM MEASUREMENT, RE-DERIVED 2026-09-11. Every figure below has a
+    # producer: the 20 scheduled main runs of this workflow from 2026-08-22 to
+    # 2026-09-10 and the `paper-reader-audit-<run_id>` artifact each one kept
+    # (`.inventory` is the audited corpus size). Job wall-clock is the
+    # `full-corpus` job's started_at..completed_at from the runs/<id>/jobs API.
+    #
+    #   run           date        job min  inventory  s/paper  conclusion
+    #   32555027932   2026-08-22     48.4        871     3.33  failure
+    #   32621089912   2026-08-23     49.9        871     3.44  failure
+    #   32695095572   2026-08-24     71.1       1014     4.21  failure
+    #   32814218073   2026-08-25     49.5       1015     2.93  failure
+    #   32935590076   2026-08-26     49.6       1040     2.86  success
+    #   33093533269   2026-08-27     69.9       1042     4.03  success
+    #   33194662611   2026-08-28     64.0       1043     3.68  failure
+    #   33250643939   2026-08-29     55.8       1044     3.21  success
+    #   33306561060   2026-08-30     56.9       1045     3.27  success
+    #   33387688754   2026-08-31     50.3       1048     2.88  success
+    #   33495607824   2026-09-01     54.9       1050     3.14  success
+    #   33615074664   2026-09-02     55.6       1050     3.18  failure
+    #   33740962470   2026-09-03     71.7       1037     4.15  failure
+    #   33859360054   2026-09-04     70.5       1038     4.07  success
+    #   33956981205   2026-09-05     60.3       1039     3.48  failure
+    #   34024640087   2026-09-06     65.5       1046     3.76  failure
+    #   34110681290   2026-09-07     64.0       1046     3.67  failure
+    #   34211257256   2026-09-08     59.4       1047     3.40  failure
+    #   34336441737   2026-09-09     71.0       1048     4.06  failure
+    #   34462179731   2026-09-10     74.6       1048     4.27  failure
+    #
+    # The audit STEP alone (job total minus the 33-45 s of checkout + setup-go
+    # + build + artifact upload + failure report) costs, per paper, p50 3.42 s,
+    # p90 4.11 s, p95 4.17 s, max 4.23 s. NOT the 2.50 s/paper this comment
+    # used to assume from a single 2026-08-03 artifact.
+    #
+    # What the old 75-minute cap actually bought: 75 min = 4500 s, minus the
+    # 45 s worst-case non-audit overhead = 4455 s of audit; 4455 / 4.17 = 1068
+    # papers at p95, 4455 / 4.23 = 1053 at the worst run observed. The corpus
+    # is 1048 papers, so the headroom was 5 to 20 papers, not the "roughly 1800
+    # papers (~2.5 years)" this comment used to claim. Run 34462179731 finished
+    # in 74.6 min against a 75-minute cap: 0.4 min of margin, inside the noise.
+    #
+    # Corpus growth is NOT the linear ~8.8 papers/day this comment assumed, and
+    # it is not even monotonic. Measured `.inventory` per run: 871 (08-22 and
+    # 08-23) -> 1014 (08-24) -> 1015 -> 1040 (08-26) -> 1042 -> 1043 -> 1044
+    # -> 1045 -> 1048 (08-31) -> 1050 (09-01 and 09-02) -> 1037 (09-03, a DROP
+    # of 13) -> 1038 -> 1039 -> 1046 -> 1046 -> 1047 -> 1048 (09-09 and 09-10).
+    # The only honest summary is the shape: long flat stretches punctuated by
+    # lumps, the largest a single-day +143 (871 on 08-23 -> 1014 on 08-24), and
+    # occasional net shrinkage when Papers are unpublished. So the cap is sized
+    # against a CORPUS horizon, never against a date.
+    #
+    # Corpus horizon: 1048 (today) + 2 x 143 (twice the largest single-day jump
+    # observed above) = 1334 papers.
+    # Audit elapsed budget: 1334 x 4.17 s (p95) = 5562.8 s -> 5563 s = 92.7 min.
+    #   That is BP_AUDIT_ELAPSED_BUDGET_SECONDS on the audit step below.
+    # Job cap: 5563 s budget + 45 s worst-case non-audit overhead + 30 s of
+    #   `timeout --kill-after` grace = 5638 s = 93.97 min -> 94 minutes.
+    #
+    # The job cap is now the BACKSTOP, not the mechanism. A cap that cancels
+    # converts a red into silence; `cancelled()` on the failure-report step
+    # below catches that, but a cancellation cannot say WHY. So the audit runs
+    # under `timeout` at the 5563 s budget, 75 s below the job cap: a corpus
+    # that outgrows the budget exits 124 (or 137 after the kill-after grace),
+    # the step goes RED with a named ::error, and `failure()` routes a real,
+    # self-describing failure to a human. Re-derive BOTH numbers from the table
+    # above when the corpus or the runner changes; never round either one.
+    timeout-minutes: 94
     steps:
       - uses: actions/checkout@v4
 
@@ -52,9 +107,23 @@ jobs:
           BP_AUDIT_WORKSPACE: default
           BP_AUDIT_PROJECT: default
           BP_AUDIT_DATASET: production
+          # 1334 papers (1048 today + 2 x the largest observed single-day jump
+          # of 143) x 4.17 s/paper (p95 over the 20 runs tabulated above)
+          # = 5562.8 s -> 5563 s. 75 s below the 94-minute job cap, so the
+          # BUDGET fires first and produces a reportable red, instead of the
+          # cap firing and producing an unexplained cancellation.
+          BP_AUDIT_ELAPSED_BUDGET_SECONDS: "5563"
         run: |
           set -o pipefail
-          scripts/audit-paper-readers.sh | tee "$RUNNER_TEMP/paper-reader-audit.json"
+          rc=0
+          timeout --signal=TERM --kill-after=30s \
+            "${BP_AUDIT_ELAPSED_BUDGET_SECONDS}s" \
+            scripts/audit-paper-readers.sh \
+            | tee "$RUNNER_TEMP/paper-reader-audit.json" || rc=$?
+          if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+            echo "::error title=Paper reader audit exceeded its elapsed budget::The audit did not finish within ${BP_AUDIT_ELAPSED_BUDGET_SECONDS}s (exit $rc). The corpus has outgrown the budget, or the runner or server slowed down. Re-derive the budget and timeout-minutes from the measured s/paper table in this workflow before raising either."
+          fi
+          exit "$rc"
 
       - name: Upload exact reader evidence
         if: always()
@@ -86,4 +155,9 @@ jobs:
             exact per-Paper JSON witness is attached to the run as
             the `paper-reader-audit-<run_id>` artifact — read `.failures[]`
             for reader failures and `.structure` for block-shape failures.
+            Exit code 124 or 137 instead means the audit blew its elapsed
+            budget (BP_AUDIT_ELAPSED_BUDGET_SECONDS in the workflow); the run
+            log carries an explicit ::error saying so, and the fix is to
+            re-derive that budget and timeout-minutes from the measured
+            s/paper table in .github/workflows/paper-readers.yml.
         run: bash scripts/file-ci-failure-issue.sh

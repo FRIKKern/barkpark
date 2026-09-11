@@ -294,8 +294,10 @@ jobs:
         # empty, which the recorder records as `transition: unknown` rather than
         # inventing a range.
         run: |
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
           sha=""
-          if body="$(curl -s --max-time 15 https://barkpark.cloud/health)"; then
+          if body="$(bp_curl_body -s --max-time 15 https://barkpark.cloud/health)"; then
             sha="$(printf '%s' "$body" | jq -r '.git_sha // empty')"
           fi
           echo "control plane was serving: ${sha:-<unknown>}"
@@ -348,13 +350,15 @@ jobs:
         # scripts/check-deploy-smoke.sh is the tripwire that stops either
         # invariant regressing.
         run: |
-          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://barkpark.cloud/")"
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
+          code="$(bp_curl_code -s -o /dev/null --max-time 15 "https://barkpark.cloud/")"
           echo "https://barkpark.cloud/ = $code"
           echo "$code" | grep -qE '^(200|301|302)$'
-          dbcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+          dbcode="$(bp_curl_code -s -o /dev/null --max-time 15 \
             -X POST -H 'content-type: application/json' \
             -d '{"email":"deploy-smoke-probe@invalid.example","password":"x"}' \
-            "https://barkpark.cloud/v1/auth/login" || true)"
+            "https://barkpark.cloud/v1/auth/login" || echo 000)"
           echo "https://barkpark.cloud/v1/auth/login (bad creds) = $dbcode"
           test "$dbcode" = "401"
       - name: Assert the control plane serves this commit or a descendant
@@ -387,6 +391,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
           # The settle window exists ONLY for transport. It EXPIRES INTO A FAILURE,
           # and it is never spent on a clean verdict: a `behind` or `diverged`
           # answer is retried ZERO times, because retrying a real regression only
@@ -400,8 +406,11 @@ jobs:
             attempt=$((attempt + 1))
             served=""
             body=""
-            if ! body="$(curl -sS --max-time 15 https://barkpark.cloud/health 2>&1)"; then
-              reason="/health was unreachable: $(printf '%s' "$body" | head -c 200)"
+            # stderr to a FILE, not 2>&1: bp_curl_body narrates a 429 backoff on
+            # stderr, and a merged stream would put that prose in front of the JSON
+            # and make jq read a box that answered as a box with no git_sha.
+            if ! body="$(bp_curl_body -sS --max-time 15 https://barkpark.cloud/health 2>"${RUNNER_TEMP:-/tmp}/cp-health.err")"; then
+              reason="/health was unreachable: $(head -c 200 "${RUNNER_TEMP:-/tmp}/cp-health.err" 2>/dev/null)"
             else
               # `-e` plus `// empty` is the NULL ARM: `jq -r '.git_sha'` prints the
               # four-character string `null` for a null value, and that string would
@@ -555,16 +564,18 @@ jobs:
         # secret repointed at one box certify another. The deploy steps above own
         # that secret; this step asserts about the public name, and says so.
         run: |
-          code="$(curl -s -o /tmp/instance-schemas.json -w '%{http_code}' --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
+          code="$(bp_curl_code -s -o /tmp/instance-schemas.json --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
           echo "guerrilla /api/schemas = $code"
           test "$code" = "200"
           count="$(jq -e 'if type == "array" then length else error("not a JSON array") end' /tmp/instance-schemas.json)"
           echo "guerrilla /api/schemas catalog entries = $count"
           test "$count" -gt 0
-          dbcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+          dbcode="$(bp_curl_code -s -o /dev/null --max-time 15 \
             -X POST -H 'content-type: application/json' \
             -d '{"email":"deploy-smoke-probe@invalid.example","password":"x"}' \
-            "https://guerrilla.barkpark.cloud/v1/auth/login" || true)"
+            "https://guerrilla.barkpark.cloud/v1/auth/login" || echo 000)"
           echo "https://guerrilla.barkpark.cloud/v1/auth/login (bad creds) = $dbcode"
           test "$dbcode" = "401"
       - name: Assert the content instance serves this commit or a descendant
@@ -587,6 +598,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
           # Same contract as the control-plane assertion: the window is for
           # transport only, it EXPIRES INTO A FAILURE, and a clean `behind` or
           # `diverged` verdict is never retried.
@@ -599,8 +612,9 @@ jobs:
             attempt=$((attempt + 1))
             served=""
             body=""
-            if ! body="$(curl -sS --max-time 15 https://guerrilla.barkpark.cloud/status.json 2>&1)"; then
-              reason="/status.json was unreachable: $(printf '%s' "$body" | head -c 200)"
+            # stderr to a FILE, not 2>&1 — see the control-plane twin above.
+            if ! body="$(bp_curl_body -sS --max-time 15 https://guerrilla.barkpark.cloud/status.json 2>"${RUNNER_TEMP:-/tmp}/inst-status.err")"; then
+              reason="/status.json was unreachable: $(head -c 200 "${RUNNER_TEMP:-/tmp}/inst-status.err" 2>/dev/null)"
             else
               # NULL ARM, as above: `jq -r '.commit'` would print the literal
               # four-character string `null` and hand it to the oracle.
@@ -1005,6 +1019,8 @@ jobs:
           INSTANCE_SERVED_SHA: ${{ needs.instance.outputs.served_sha }}
           INSTANCE_SERVING_SINCE: ${{ needs.instance.outputs.serving_since }}
         run: |
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
           # Same law as the clocks step: read every rc, exit 0, and set
           # `delivered=false` so report-recorder-failure below can be the red.
           set +e
@@ -1110,8 +1126,8 @@ jobs:
           # process-start upper bound from a flip instant.
           CP_SERVING_SINCE_BASIS="process_start"
           if [ "$CP_RESULT" = "success" ]; then
-            health="$(curl -s --max-time 15 https://barkpark.cloud/health)"
-            health_rc=$?
+            health_rc=0
+            health="$(bp_curl_body -s --max-time 15 https://barkpark.cloud/health)" || health_rc=$?
             if [ "$health_rc" -ne 0 ]; then
               echo "::error::/health did not answer (rc=$health_rc) — the control plane cannot say what it is serving, so the cp leg of run ${RUN_ID} records NOTHING"
               delivered=false
@@ -1778,6 +1794,8 @@ jobs:
           INSTANCE_RESULT: ${{ needs.instance.result }}
           INSTANCE_SERVED_SHA: ${{ needs.instance.outputs.served_sha }}
         run: |
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
           set +e
           converged=true
           detail=""
@@ -1816,7 +1834,7 @@ jobs:
           # ── THE CONTROL PLANE: always, because /health is public ──────────
           echo "::group::control plane"
           cp_sha=""
-          if body="$(curl -s --max-time 15 https://barkpark.cloud/health)"; then
+          if body="$(bp_curl_body -s --max-time 15 https://barkpark.cloud/health)"; then
             cp_sha="$(printf '%s' "$body" | jq -r '.git_sha // empty')"
           fi
           if [ -z "$cp_sha" ]; then

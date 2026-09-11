@@ -602,8 +602,8 @@ census_head() { # <sha> <label> <pr-updated-at> <mergeable>
           # `needs:`-gated job,
           # and renders no check run for it, until every one of its `needs:`
           # has concluded. All three gates here are terminal aggregators
-          # (`Cloud gate` needs [changes, compile, test, path-escape]; Console
-          # and Elixir the same shape), so for the whole first phase of every
+          # (`Cloud gate` needs [changes, compile, test, census, path-escape];
+          # Console and Elixir the same shape), so for the whole first phase of every
           # pull request's CI those names render NOWHERE while their producing
           # run is perfectly healthy.
           #

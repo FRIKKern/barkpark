@@ -3,6 +3,7 @@ audit-emit	emit
 chat-stable-boundary	advance
 chat-stable-segments	advance
 cloud-provider-seam	DetectCapabilities
+cloudclient-backpressure-retry	newRetryTransport
 codelist-lookup	lookup
 concept-token-fold	conceptTokenRe
 connector-credential-sealing	createCredentialCipher

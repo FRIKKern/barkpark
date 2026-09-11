@@ -94,6 +94,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "app_token_unsupported",
              "artifact_conflict",
              "artifact_digest_mismatch",
+             "artifact_quota_exceeded",
              "artifact_too_large",
              "bad_action",
              "bad_signature",
