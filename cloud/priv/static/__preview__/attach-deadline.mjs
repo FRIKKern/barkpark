@@ -6,7 +6,7 @@
 //
 //   SERVER_CAP    15000ms   the static-server poll          bounded
 //   DEVTOOLS_CAP  15000ms   the DevToolsActivePort poll     bounded
-//   BRINGUP_ATTEMPTS  2     the launch loop                 bounded
+//   BRINGUP_ATTEMPTS  3     the launch loop                 bounded
 //   RENDER/EVAL caps       every leg                        bounded
 //   ─────────────────────  the attach                       NOTHING
 //

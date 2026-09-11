@@ -68,12 +68,28 @@ test("a first-attempt refusal followed by a success RETURNS success", async () =
   assert.equal(r.attempt, 2, "the winning attempt is reported, not hidden");
 });
 
+// task-6011ad2747b65b7b: the DEFAULT bound is 3, read off 188 real bring-up
+// episodes (10.6% attempt-1 refusal, 75% attempt-2 conversion, 2.7% double
+// refusal). The two tests below pin BOTH halves of that number: a run that
+// refuses twice and comes up on the third attempt is a bring-up, and three
+// refusals are the refusal. With the bound at 2 the first reds (BringUpRefusal
+// where a devPort was scripted) and the second reds on `attempts`.
+test("two refusals followed by a THIRD-attempt success RETURNS success — the default bound is 3", async () => {
+  assert.equal(BRINGUP_ATTEMPTS, 3, "the default bound is the measured one, not the pre-measurement 2");
+  const h = harness([null, null, 9222]);
+  const r = await h.run();
+  assert.equal(r.devPort, 9222);
+  assert.equal(r.attempt, 3, "the winning attempt is reported, not hidden");
+  assert.equal(h.profiles.length, 3, "three attempts, three fresh profiles");
+});
+
 test("N consecutive refusals still REFUSE — the helper can never green an unmeasured run", async () => {
-  const h = harness([null, null]);
+  const h = harness([null, null, null]);
   await assert.rejects(h.run(), (err) => {
     assert.ok(err instanceof BringUpRefusal);
     assert.equal(err.refused, true, "the class is carried on the object, never sniffed from the message");
-    assert.equal(err.attempts, 2);
+    assert.equal(err.attempts, 3);
+    assert.equal(err.attempts, BRINGUP_ATTEMPTS, "the refusal reports the bound it actually ran to");
     assert.match(err.message, /DevToolsActivePort/);
     assert.match(err.message, /bounded bring-up attempts/);
     return true;
@@ -104,10 +120,12 @@ test("a FAILED attempt's chrome stderr is PRINTED — the fix stays auditable", 
   });
   await h.run();
   const log = h.log();
-  assert.match(log, /attempt 1\/2 REFUSED/);
+  // The bound is read from the module, never retyped: these lines say "1/N".
+  const N = BRINGUP_ATTEMPTS;
+  assert.match(log, new RegExp(`attempt 1/${N} REFUSED`));
   assert.match(log, /chrome stderr/);
   assert.match(log, /bind\(\) failed: Address already in use/);
-  assert.match(log, /attempt 2\/2 SUCCEEDED after 1 refusal/);
+  assert.match(log, new RegExp(`attempt 2/${N} SUCCEEDED after 1 refusal`));
   assert.match(log, /never a claim about the page/);
 });
 
@@ -122,16 +140,17 @@ test("a synchronous spawn throw is a REFUSAL, not a measured defect, and is retr
   const h = harness([enoexec, 9222]);
   const r = await h.run();
   assert.equal(r.attempt, 2);
-  assert.match(h.log(), /attempt 1\/2 REFUSED — spawn ENOEXEC/);
+  assert.match(h.log(), new RegExp(`attempt 1/${BRINGUP_ATTEMPTS} REFUSED — spawn ENOEXEC`));
 });
 
 test("a spawn that throws on EVERY attempt refuses, naming the errno", async () => {
   const enoexec = Object.assign(new Error("spawn ENOEXEC"), { code: "ENOEXEC" });
-  const h = harness([enoexec, enoexec]);
+  // One throw per bounded attempt, however many the bound is.
+  const h = harness(Array.from({ length: BRINGUP_ATTEMPTS }, () => enoexec));
   await assert.rejects(h.run(), (err) => {
     assert.ok(err instanceof BringUpRefusal);
     assert.match(err.message, /ENOEXEC/);
-    assert.deepEqual(err.reasons, ["spawn ENOEXEC", "spawn ENOEXEC"]);
+    assert.deepEqual(err.reasons, Array.from({ length: BRINGUP_ATTEMPTS }, () => "spawn ENOEXEC"));
     return true;
   });
 });
