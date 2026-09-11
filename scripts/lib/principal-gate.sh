@@ -97,3 +97,17 @@ print(t or "")
   rm -f "$tmp"
   printf '%s' "$out"
 }
+
+# pg_host_in_set "h1 h2 …" URL — 0 when URL's parsed host is EXACTLY one of the
+# whitespace-separated hosts the caller declares. A SET rather than a single
+# host because a loopback target legitimately answers to two spellings
+# (localhost / 127.0.0.1) and naming both is honest; naming a WILDCARD is not.
+pg_host_in_set() {  # MUT: host-compare-set
+  local declared="$1" got d
+  got="$(pg_url_host "$2")"
+  [ -n "$got" ] || return 1
+  for d in $declared; do
+    if [ "$got" = "$d" ]; then return 0; fi
+  done
+  return 1
+}
