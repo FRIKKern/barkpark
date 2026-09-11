@@ -55,6 +55,14 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeGuardTest do
     {"components.ex", "style", "pad"} =>
       "pad = 14 + depth * 18 and row_html/1 int-guards depth (is_integer, 0 < d < 6, else 0)",
 
+    # ── cards_email.ex / figures.ex / fleet_email.ex ──────────────────────────
+    {"cards_email.ex", "style", "border"} =>
+      "pnode_source/2 returns a skin hex (accent for an origin node, border otherwise) — the author's `source` string goes to the escaped provenance line",
+    {"figures.ex", "data-cast-rows", "rows"} =>
+      "emitted only under `is_integer(rows) and rows in 6..40`",
+    {"fleet_email.ex", "style", "6 + pad"} =>
+      "pad = depth * 16 and row_email/2 int-guards depth (is_integer, 0 < d < 6, else 0)",
+
     # ── compose.ex ────────────────────────────────────────────────────────────
     {"compose.ex", "data-level", "rel"} =>
       "the TOC relative level — an integer (it is used as an Enum.slice/2 range bound)",
@@ -69,6 +77,8 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeGuardTest do
     {"data_viz.ex", "cx", "fx"} => "route coordinate — a float off the computed coords list",
     {"data_viz.ex", "cy", "fy"} => "route coordinate — a float off the computed coords list",
     {"data_viz.ex", "points", "pts"} => "a space-joined list of fmt/1-formatted floats",
+    {"data_viz.ex", "d", "d"} =>
+      "the SVG path — \"M\"/\"L\" literals joined with the computed float coords",
 
     # ── fleet_email.ex ────────────────────────────────────────────────────────
     {"fleet_email.ex", "width", "remaining"} =>
@@ -89,6 +99,12 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeGuardTest do
       "sheet_cell_style/3: literal b/i fragments, a bg validated against ~r/^#[0-9a-f]{6}\\z/ (sheet_bg_valid?/1), and an al allowlisted to left|center|right",
     {"walk.ex", "style", "style"} =>
       "sheet_inline_style/1's subject is w_style <> extra <> err — each validated at its own site (see the two entries around this one)",
+    {"walk.ex", "colspan", "cs"} =>
+      "sheet_merge_lookup/1 admits a span only under is_integer(cs) and cs >= 1 (and an area cap)",
+    {"walk.ex", "rowspan", "rs"} =>
+      "sheet_merge_lookup/1 admits a span only under is_integer(rs) and rs >= 1 (and an area cap)",
+    {"walk.ex", "style", "Enum.join(out, \";\")"} =>
+      "the inline-style accumulator: literal declarations, a literal-joined text-decoration, and the author colour — which escape_attr/1 now owns (walk.ex text/3 and paragraph_html/4)",
     {"walk.ex", "style", "w_style"} =>
       "col_width_style/2 emits width:<n>px only when the stored width is a positive INTEGER, else \"\""
   }

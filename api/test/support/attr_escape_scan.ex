@@ -284,6 +284,11 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
   # string concatenation — safe iff both halves are
   defp classify_node({:<>, _, [l, r]}, ctx), do: all([l, r], ctx, :concat)
 
+  # list cons / append — safe iff every part is. A style list built by
+  # `out = ["font-weight:bold" | out]` is the tree's dominant accumulator shape.
+  defp classify_node({:|, _, [h, t]}, ctx), do: all([h, t], ctx, :literal_list)
+  defp classify_node({:++, _, [l, r]}, ctx), do: all([l, r], ctx, :literal_list)
+
   # blocks: the value is the last expression
   defp classify_node({:__block__, _, exprs}, ctx) when exprs != [],
     do: classify(List.last(exprs), bump(ctx))
