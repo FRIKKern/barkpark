@@ -204,25 +204,38 @@ The published case matters because the crown is published and boards read the
 published ledger. `GET /v1/data/query/production/task` returned the new evidence
 with `_draft: false` and **no re-publish step**. Stamping writes through.
 
-### But the read-back does not prove it. Diff the evidence yourself.
+### The read-back now proves it. Do NOT diff the evidence by hand.
 
-The script confirms on `met == true` (`pds-crown-stamp.sh:408`). On a `met → met`
-re-stamp that was **already true before the write**, so `CONFIRMED: criterion N
-reads met` would print identically whether the evidence landed or was dropped on
-the floor. It is a true statement that answers the wrong question.
+This section used to end with a manual instruction: read the evidence string
+before the re-stamp, read it after, and compare the two yourself. **That step is
+gone, and running it is now the worse option** — PDS-D226 exists to remove
+exactly this kind of eyeball judgement, and a step the operator can skip at
+maximum fatigue is a step that gets skipped.
 
-For any criterion already reading `met`, verify the **string**, not the flag:
+`pds-crown-stamp.sh` does it instead, mechanically, on every stamp:
 
-```sh
-N=0   # the criterion you just re-stamped
-bp task get pds-w1-crown-proof -o json 2>/dev/null | python3 -c '
-import json,sys
-print(repr(json.load(sys.stdin)["doc"]["content"]["acceptance_criteria"][int(sys.argv[1])]["evidence"]))' "$N"
+* it captures the STORED evidence **before** the write (`criterion_evidence_to_file`
+  against the same `task get` the criterion text comes from),
+* it writes the exact bytes it sent to a file,
+* after the stamp it re-reads the stored evidence and `cmp`s the two **byte for
+  byte**, and
+* on any mismatch it prints `READ-BACK FAILED: … the STORED EVIDENCE is not the
+  text this run sent`, says whether the row is unchanged (an acked write that did
+  not apply) or was moved by another writer, and exits 2.
+
+The old `met == true` assertion is still there, but it is no longer the
+confirmation — it could never be, because on a `met → met` re-stamp it was
+already satisfied before the write. The success line now names what actually
+changed, and says so out loud when the stamp moved nothing:
+
+```
+CONFIRMED: criterion 0 reads met and its stored evidence CHANGED to the exact 214 bytes this run sent — pds-w1-crown-proof is now at 10/12.
 ```
 
-Run it **before** the re-stamp too, and compare the two strings. A single after-read
-tells you what is stored, not that your write is what put it there — and on a
-`met → met` re-stamp those are exactly the two things worth separating.
+Guarded by `scripts/pds-read-preflight-audit_test.sh` arm 5: a stub `bp` that
+ACKS a stamp and drops the evidence must make the read-back red, while the honest
+stub stays green. Against origin/main's script the dropping stub printed
+`CONFIRMED: criterion 0 reads met` at exit 0 — which is the whole defect, run.
 
 (The document `rev` changing is a second, weaker signal — weaker because a
 concurrent pulse also moves it.)
