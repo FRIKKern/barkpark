@@ -365,12 +365,12 @@ test('defect 3b: a successor that exists but is UNPUBLISHED does not resolve', (
 // register entry, so it tracks whatever the register actually contains.
 test('defect 4: an empty KNOWN_DEFECTS register cannot seal (sentinel derived, not hardcoded)', () => {
   const src = readFileSync(PREDICATE, 'utf8');
-  const firstId = (src.match(/const KNOWN_DEFECTS = \[\s*\{\s*\n\s*id: '([^']+)'/) || [])[1];
-  assert.ok(firstId, 'the emptiness sentinel must be derivable from KNOWN_DEFECTS[0].id');
+  const firstId = (src.match(/const CCH_KNOWN_DEFECTS = \[\s*\{\s*\n\s*id: '([^']+)'/) || [])[1];
+  assert.ok(firstId, 'the emptiness sentinel must be derivable from CCH_KNOWN_DEFECTS[0].id');
   assert.match(src, new RegExp(firstId), 'sanity: the derived sentinel is present BEFORE the mutation');
 
-  const mutated = src.replace(/const KNOWN_DEFECTS = \[[\s\S]*?\n\];/, 'const KNOWN_DEFECTS = [];');
-  assert.notEqual(mutated, src, 'the KNOWN_DEFECTS mutation must actually apply');
+  const mutated = src.replace(/const CCH_KNOWN_DEFECTS = \[[\s\S]*?\n\];/, 'const CCH_KNOWN_DEFECTS = [];');
+  assert.notEqual(mutated, src, 'the CCH_KNOWN_DEFECTS mutation must actually apply');
   assert.doesNotMatch(mutated, new RegExp(firstId), 'the register must really be empty');
   const path = join(mkdtempSync(join(tmpdir(), 'seal-pred-')), 'empty-register.mjs');
   writeFileSync(path, mutated);
@@ -516,13 +516,28 @@ test('wave 7: the predicate names the epic it is judging, in the header and the 
 
 test('wave 7: --epic retargets the subject of every clause, including the refusal path', () => {
   const OTHER = 'some-other-epic-entirely';
-  const { out } = fixtureRun('sealable.json', ['--epic', OTHER]);
+  // RETARGETED AT WAVE 25, and the retarget IS the finding. What wave 7 pinned here is
+  // that the epic under judgement is named in the HEADER and in the MACHINE TOKEN, on
+  // the verdict path and on the refusal path alike — every line below still asserts
+  // exactly that. What is GONE is this invocation reaching `VERDICT: SEAL`: an epic
+  // with no entry in EPIC_REGISTERS is now REFUSED before R0/R1, because clause (b)
+  // and bucket (c) are scored ENTIRELY off the epic-keyed registers and this program
+  // holds none for OTHER. Before that fence, this same call sealed `some-other-epic-
+  // entirely` over Cloud Console's six CCH-D* defects and three human gates.
+  const { status, out } = fixtureRun('sealable.json', ['--epic', OTHER]);
+  assert.equal(status, REFUSED, 'an unregistered epic gets no verdict at all');
   assert.match(out, new RegExp(`^=== SEAL PREDICATE — epic ${OTHER} ===$`, 'm'));
   assert.match(out, new RegExp(`epic=${OTHER}`));
+  assert.match(out, new RegExp(`REFUSED reason=UNREGISTERED-EPIC .*epic=${OTHER}`));
   // A refusal must carry the epic too — a verdict about an unnamed epic is unreadable.
   const refused = fixtureRun('zero-live-null-successor.json', ['--epic', OTHER]);
   assert.match(refused.out, new RegExp(`^=== SEAL PREDICATE — epic ${OTHER} ===$`, 'm'));
-  assert.match(refused.out, new RegExp(`REFUSED reason=NO-SUCCESSOR .*epic=${OTHER}`));
+  assert.match(refused.out, new RegExp(`REFUSED reason=UNREGISTERED-EPIC .*epic=${OTHER}`));
+  // …and the REGISTERED epic still reaches its verdict on the same fixture, so the two
+  // lines above are a fence and not a blanket refusal that would pass for any reason.
+  const registered = fixtureRun('sealable.json');
+  assert.equal(registered.status, SEAL, 'control: the fixture itself still seals for the epic that HAS a register');
+  assert.match(registered.out, new RegExp(`^=== SEAL PREDICATE — epic ${EPIC} ===$`, 'm'));
 });
 
 // ── R4 — FORWARDING TO YOURSELF IS NOT FORWARDING ───────────────────────────
@@ -1503,7 +1518,7 @@ test('wave 11: --ladder-only is still bound by R0 and R1 — no stub, no empty r
   assert.match(token(stub.out), /REFUSED reason=GUARD-OVERRIDE-WITHOUT-FIXTURE/);
 
   const emptied = mutatedRun(
-    (s) => s.replace(/^const KNOWN_DEFECTS = \[[\s\S]*?^\];$/m, 'const KNOWN_DEFECTS = [];'),
+    (s) => s.replace(/^const CCH_KNOWN_DEFECTS = \[[\s\S]*?^\];$/m, 'const CCH_KNOWN_DEFECTS = [];'),
     ['--ladder-only', '--repo', REPO]);
   assert.equal(emptied.status, REFUSED, 'R1 still refuses an empty register on the reading path too');
   assert.match(token(emptied.out), /REFUSED reason=EMPTY-DEFECT-REGISTER/);
@@ -2218,7 +2233,7 @@ test('wave 64: the roster request actually CARRIES offset, order and count — r
 
 test('wave 29: bucket (c) REFUSES an empty gate table instead of certifying c=PASS over zero gates', () => {
   const empty = (s) => {
-    const out = s.replace(/^const PERMANENT_HUMAN_GATES = \{[\s\S]*?^\};$/m, 'const PERMANENT_HUMAN_GATES = {};');
+    const out = s.replace(/^const CCH_PERMANENT_HUMAN_GATES = \{[\s\S]*?^\};$/m, 'const CCH_PERMANENT_HUMAN_GATES = {};');
     assert.notEqual(out, s, 'the gate-table mutation must actually apply');
     return out;
   };
@@ -2914,4 +2929,144 @@ test('wave 28: all four specimens are absent from the committed cloud.yml', () =
   assert.match(block, /^ {2}cloud-gate:$/m, 'control: the jobs: block really was read');
   assert.match(src, /^#/m, 'control: the file DOES carry column-0 comments — above jobs:, where they are legal to this parser');
   assert.match(src, /^ {4}if: always\(\)$/m, 'control: the bare always() this suite rewraps really is there');
+});
+
+// ── WAVE 25 — THE TWO FROZEN REGISTERS ARE KEYED BY EPIC ────────────────────
+//
+// THE DEFECT, MEASURED AT a333e4b58 BEFORE THE FENCE:
+//
+//   node seal-predicate.mjs --ledger <sealable> --repo <root> --guard-cmd true \
+//        --epic task-fb4fb869490b4213            # the deploy-reliability GOAL
+//   -> exit 0
+//   -> VERDICT: SEAL
+//   -> VERDICT-TOKEN: SEAL-PREDICATE SEAL a=PASS b=PASS c=PASS … epic=task-fb4fb869490b4213
+//   -> and in its body, Cloud Console's own rows, printed as that epic's:
+//        ✓ gr-ops-platform-admin-emails  status=open
+//          parent=cloud-console-hardening-epic in-epic-roster=false
+//        ✓ CCH-D1-overview-refetch-storm  (rung 1)
+//
+// `PERMANENT_HUMAN_GATES` and `KNOWN_DEFECTS` were FLAT module constants and `--epic`
+// parameterized clause (a) ONLY, so clauses b and c scored one epic's registers for
+// every epic. The run even printed `in-epic-roster=false` on all three gates and passed
+// them anyway.
+//
+// The registers are now selected by `--epic` out of `EPIC_REGISTERS`, an epic with no
+// entry is REFUSED (`UNREGISTERED-EPIC`) before any clause, and every token carries
+// `registers=` so a reader of the machine line knows which population produced b and c.
+const DR_EPIC = 'task-fb4fb869490b4213';   // the deploy-reliability goal, unregistered here
+const CCH_DEFECT_IDS = [
+  'CCH-D1-overview-refetch-storm',
+  'CCH-D2-session-peer-ip-is-the-docker-bridge',
+  'CCH-D3-bearer-token-in-the-access-log',
+  'CCH-D4-head-prober-gets-a-session-token',
+  'CCH-D5-rate-limiter-sees-every-user-as-one',
+  'CCH-D6-css-check-passes-on-deleted-code',
+];
+const CCH_GATE_IDS = [
+  'gr-ops-platform-admin-emails',
+  'gr-backlog-qr-live-scan-proof',
+  'cch-hg-compose-network-recreation',
+];
+
+// c3 — THE FENCE IS ADDED, NO REGISTER CONTENT IS LOST. The six defect rows and the
+// three gate ids must still be exactly the register this epic is judged on: same six,
+// same three, same cardinalities on the disclosure line.
+test('wave 25: the Cloud Console register survives the move to EPIC_REGISTERS intact', () => {
+  const { status, out } = fixtureRun('sealable.json');
+  assert.equal(status, SEAL, 'the registered epic still reaches a verdict');
+  assert.match(out, /^CLAUSE \(b\) known user-facing defects — 6 registered$/m);
+  for (const id of CCH_DEFECT_IDS) assert.match(out, new RegExp(`^  [✓◐] ${id}  \\(rung [12]`, 'm'), `${id} is still registered`);
+  for (const id of CCH_GATE_IDS) assert.match(out, new RegExp(`^  ✓ ${id}  status=`, 'm'), `${id} is still disclosed`);
+  // Cardinality, so a SEVENTH row silently added to the register reds here too.
+  assert.equal(out.split('\n').filter((l) => /^  [✓✗] [a-z]/.test(l)).length, 3, 'exactly three human gates, no more');
+  // And the disclosure line states the population b and c were scored over.
+  assert.match(out, /^registers: clause \(b\) and bucket \(c\) are scored off the cloud-console-hardening-epic register — 6 registered defect\(s\), 3 permanent human gate\(s\)$/m);
+});
+
+// c0 — THE TOKEN STATES WHICH EPIC'S REGISTERS PRODUCED b AND c.
+test('wave 25: every verdict token names the register that produced b and c', () => {
+  assert.match(token(fixtureRun('sealable.json').out), / registers=cloud-console-hardening-epic /);
+  assert.match(token(fixtureRun('sealable.json', ['--epic', DR_EPIC]).out), / registers=NONE /);
+  // The ladder-only reading is clause (b) and nothing else, so it must name its register too.
+  const ladder = run(['--ledger', withRequired('ladder-no-waiver.json'), '--repo', REPO, '--ladder-only']);
+  assert.match(token(ladder.out), / registers=cloud-console-hardening-epic /);
+  assert.match(ladder.out, /^registers: the ladder below is the cloud-console-hardening-epic register — 6 registered defect\(s\)$/m);
+});
+
+// c4 — THE REFUSAL IS RUN, AND ITS STDOUT IS READ.
+test('wave 25: --epic naming an epic with NO register is REFUSED, and says why', () => {
+  const { status, out } = fixtureRun('sealable.json', ['--epic', DR_EPIC]);
+  assert.equal(status, REFUSED, 'nothing was measured, so this is exit 3 and never a verdict');
+  assert.match(out, /^VERDICT: NO SEAL — REFUSED$/m);
+  assert.doesNotMatch(out, /^VERDICT: SEAL$/m);
+  assert.match(out, new RegExp(`REFUSED at .*, before any clause was evaluated: ${DR_EPIC} has no entry in EPIC_REGISTERS`));
+  assert.match(out, /Registered epics: cloud-console-hardening-epic\./, 'the refusal names what IS registered');
+  assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=UNREGISTERED-EPIC a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED/);
+  // THE PIN THE ROW ASKED FOR, IN ITS OWN WORDS: a deploy-reliability run made before
+  // DR's register is filed cannot print b=PASS. Not "does not today" — cannot: b is
+  // UNEVALUATED on the only line that carries it.
+  assert.doesNotMatch(out, /b=PASS/, 'a DR run before DR has a register must never print b=PASS');
+  assert.doesNotMatch(out, /c=PASS/);
+  // And it never got as far as another epic's rows.
+  for (const id of CCH_DEFECT_IDS) assert.doesNotMatch(out, new RegExp(id), `${id} belongs to another epic and must not appear`);
+  for (const id of CCH_GATE_IDS) assert.doesNotMatch(out, new RegExp(id), `${id} belongs to another epic and must not appear`);
+  // The refusal fires BEFORE R1/R7 rather than letting an empty register wear their
+  // sentence — "this epic was never registered" and "somebody gutted the register" are
+  // different diagnoses, and the diagnosis is the whole value of a refusal.
+  assert.doesNotMatch(out, /KNOWN_DEFECTS is empty/);
+  assert.doesNotMatch(out, /PERMANENT_HUMAN_GATES is empty/);
+});
+
+// c1 — TWO EPICS, AND THE DEFECT/GATE SETS DIFFER. The same fixture, the same flags,
+// one flag value apart: the registered epic is scored over six defects and three gates,
+// the unregistered one over NOTHING. A register that answered the same for both is the
+// defect this row was filed for.
+test('wave 25: MUTATION — two epics, two different register populations', () => {
+  const cch = fixtureRun('sealable.json');
+  const dr = fixtureRun('sealable.json', ['--epic', DR_EPIC]);
+  const idsIn = (out) => [...CCH_DEFECT_IDS, ...CCH_GATE_IDS].filter((id) => out.includes(id));
+  assert.deepEqual(idsIn(cch.out), [...CCH_DEFECT_IDS, ...CCH_GATE_IDS], 'the registered epic sees all nine rows');
+  assert.deepEqual(idsIn(dr.out), [], 'the unregistered epic sees none of them');
+  assert.notEqual(cch.status, dr.status, `the two runs must not reach the same outcome (${cch.status} vs ${dr.status})`);
+  assert.equal(cch.status, SEAL);
+  assert.equal(dr.status, REFUSED);
+});
+
+// c5 — THE GUARD CAN LOSE. The mutation re-flattens the registers exactly as they stood
+// at a333e4b58 — `REGISTER` resolved to the Cloud Console entry whatever `--epic` said,
+// and `REGISTERED` was unconditionally true so no refusal could fire — and the run that
+// this suite now asserts is a refusal becomes, verbatim, the contaminated SEAL.
+test('wave 25: the contamination REPRODUCES on the old flat-register shape', () => {
+  const flatten = (src) => src
+    .replace('const REGISTERED = Object.prototype.hasOwnProperty.call(EPIC_REGISTERS, EPIC);',
+             'const REGISTERED = true;')
+    .replace('const REGISTER = REGISTERED ? EPIC_REGISTERS[EPIC] : null;',
+             "const REGISTER = EPIC_REGISTERS['cloud-console-hardening-epic'];");
+  const pre = mutatedRun(flatten,
+    ['--ledger', withRequired('sealable.json'), '--repo', REPO, '--guard-cmd', 'true', '--epic', DR_EPIC]);
+  // The old shape: exit 0, VERDICT: SEAL, b=PASS c=PASS, over an epic whose registers
+  // this program has never held.
+  assert.equal(pre.status, SEAL, `the mutation must reproduce the defect, or this proves nothing: ${pre.out}`);
+  assert.match(pre.out, /^VERDICT: SEAL$/m);
+  assert.match(token(pre.out), new RegExp(`SEAL a=PASS b=PASS c=PASS .*epic=${DR_EPIC}`));
+  assert.match(pre.out, /CCH-D1-overview-refetch-storm/, 'another epic\'s defect, printed as this one\'s');
+  assert.match(pre.out, /gr-ops-platform-admin-emails  status=\w+ parent=cloud-console-hardening-epic in-epic-roster=false/,
+    'the run even prints the gate is not in this epic\'s roster and passes it anyway');
+  // The SAME invocation against the committed file: refused, nothing certified.
+  const now = fixtureRun('sealable.json', ['--epic', DR_EPIC]);
+  assert.equal(now.status, REFUSED);
+  assert.match(token(now.out), /REFUSED reason=UNREGISTERED-EPIC/);
+});
+
+// …AND THE FENCE IS A KEY LOOKUP ON THIS TABLE, NOT A PROTOTYPE WALK. `--epic
+// constructor` resolves on Object.prototype to a truthy FUNCTION; a bare
+// `EPIC_REGISTERS[EPIC]` would take it for a register, read `undefined` off it, and
+// refuse with the WRONG code (EMPTY-DEFECT-REGISTER) — or, with a different downstream,
+// throw. Two inherited names are driven because one could pass by accident.
+test('wave 25: an inherited property name is NOT a registered epic', () => {
+  for (const name of ['constructor', 'toString', '__proto__']) {
+    const { status, out } = fixtureRun('sealable.json', ['--epic', name]);
+    assert.equal(status, REFUSED, `--epic ${name} must be refused, not resolved off the prototype`);
+    assert.match(out, /reason=UNREGISTERED-EPIC/, `--epic ${name} refuses with the register code, not a downstream one`);
+  }
 });

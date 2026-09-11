@@ -11,7 +11,7 @@
 # in-container `wget`. A container that died between the last health probe and
 # the exec was therefore reported as:
 #
-#     FAIL  green arm: in-container wget /api/schemas failed
+#     FAIL  green arm: in-container wget /status.json failed
 #
 # an HTTP probe failure, when the truth was "the container is no longer cleanly
 # running" — a message the script already knew how to write. Measured twice
@@ -87,9 +87,9 @@ if [ "${1:-}" = "compose" ]; then
         death_login:*/login)
           echo "wget: can't connect to remote host: Connection refused" >&2; exit 1 ;;
         death_login:*)
-          # /api/schemas still serves; the container dies right after it.
+          # /status.json still serves; the container dies right after it.
           touch "$st/dead"; exit 0 ;;
-        http500:*/api/schemas)
+        http500:*/status.json)
           echo "wget: server returned error: HTTP/1.1 500 Internal Server Error" >&2; exit 1 ;;
         *) exit 0 ;;
       esac ;;
@@ -152,7 +152,7 @@ run() { # run <variant real|mutant> <scenario> -> writes $TMP/out, echoes rc
 }
 
 STATE_MSG='api container is not cleanly running'
-WGET_MSG='in-container wget /api/schemas failed'
+WGET_MSG='in-container wget /status.json failed'
 LOGIN_MSG='in-container wget /login failed'
 
 echo ""
@@ -184,7 +184,7 @@ check "mutant: a death before /login blames the /login wget" 1 "$(has "$TMP/out"
 check "mutant: never names the container state"          0 "$(has "$TMP/out" "$STATE_MSG")"
 rc="$(run real death_login)"
 sed -n '1,40p' "$TMP/out"
-check "real: /api/schemas still passed"                  1 "$(has "$TMP/out" '/api/schemas serves in-container')"
+check "real: /status.json still passed"                   1 "$(has "$TMP/out" '/status.json serves in-container')"
 check "real: names the container state at /login"        1 "$(has "$TMP/out" "$STATE_MSG")"
 check "real: does NOT blame the /login wget"             0 "$(has "$TMP/out" "$LOGIN_MSG")"
 check "real: says where it re-inspected"                 1 "$(has "$TMP/out" 'the failed /login probe')"

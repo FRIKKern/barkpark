@@ -368,7 +368,18 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
-    plug(BarkparkWeb.Plugs.OptionalToken)
+    # The SAME soft credential :scoped_api runs (Gyldendal E1.9): bearer always,
+    # the browser session cookie on GET/HEAD. Every route on this pipeline is a
+    # GET, and the Studio's own Web Components (bp-reference-picker resolving a
+    # pill title through /v1/data/doc/…) fetch it same-origin with the cookie
+    # and no Bearer header. With plain OptionalToken those conns were ANONYMOUS
+    # and ResolveWorkspace 403'd `not_a_member` for a signed-in member of the
+    # very workspace whose Studio page issued the fetch — while the scoped
+    # /v1/media and /v1/data/search reads next door (on :scoped_api) admitted
+    # the same cookie. Measured live on gyl 0.2.26.2579, 2026-09-10. The share
+    # arm below is unchanged: an anonymous conn still passes through untouched
+    # for RequireShareScope to admit or ResolveWorkspace to refuse.
+    plug(:scoped_api_optional_credential)
     plug(BarkparkWeb.Plugs.RequireShareScope, surface: :docs)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
