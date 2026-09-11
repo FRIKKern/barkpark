@@ -138,6 +138,52 @@ usage() {
   sed -n '/^# USAGE/,/^# EXIT STATUS/p' "$0" | sed 's/^# \{0,1\}//'
 }
 
+# ── the credential probe that can actually refuse ────────────────────────────
+# WHY THIS EXISTS, AND WHY `bp task get` IS NOT ENOUGH (pds-w30-anonymous-read-
+# preflight-audit). guerrilla answers PUBLISHED READS to a caller carrying no
+# Authorization header at all — measured 2026-09-11: an anonymous
+# GET /v1/data/query/production/task?limit=1 returns HTTP 200 with documents,
+# while an anonymous POST /v1/data/mutate/production returns 401. Worse, `bp`
+# manufactures that anonymous state out of a WRONG credential: traced through a
+# logging proxy with BARKPARK_TOKEN=not-a-real-token, `bp doc ls task --limit 1`
+# sent the bearer to /v1/capabilities and sent NO Authorization header at all on
+# the data read — so it exited 0 with a full listing. No read receipt can
+# distinguish "authenticated" from "not authenticated".
+#
+# This script's own preflight, `bp task get`, does NOT ride that door — the task
+# layer is gated (anonymous GET /v1/tasks/<id> -> 401, and bp exits 2 with
+# `command "task" ... is hidden at your auth tier (tier=none)`). But it still
+# cannot tell a READ-only principal from a WRITING one, and the next line after
+# it is `bp task stamp`. So the tier is asserted, not inferred.
+#
+# `bp whoami` EXITS 0 for an anonymous caller too (auth_tier "none",
+# token_present true, token_source "default"). The exit code carries no
+# information; the tier carries all of it. Same law as
+# scripts/pds-live-bp-write-receipt.sh, which is the reference implementation.
+require_writing_principal() {
+  need_python
+  local who rc tier
+  who="$(scratch_dir)/whoami.json"
+  "$BP_BIN" whoami -o json >"$who" 2>/dev/null
+  rc=$?
+  [ "$rc" -eq 0 ] || die "\`bp whoami\` exited $rc — bp cannot describe its own credential, so this script cannot know whether the stamp it is about to send would be authorised. Nothing was written."
+  tier="$(python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+if isinstance(d, dict) and isinstance(d.get("result"), dict):
+    d = d["result"]
+print(d.get("auth_tier", "") if isinstance(d, dict) else "")
+' "$who" 2>/dev/null)" || die "bp whoami returned something this script could not parse — refusing to stamp behind an unreadable credential receipt. Nothing was written."
+  case "$tier" in
+    write|admin|root) ;;
+    *) refuse "bp resolved NO writing principal (auth_tier=\"${tier:-<absent>}\"). \`bp whoami\` still EXITED 0 — it does that for an anonymous caller too — so the refusal is made on the receipt's SHAPE, not on an exit code. Nothing was written. Run \`bp login\`, or set BARKPARK_TOKEN to a token that can write." ;;
+  esac
+  say "credential: bp reports auth_tier=$tier — a writing principal"
+}
+
 # ── fetch the task JSON once, to a file ──────────────────────────────────────
 # Read-only. Never mutates the task.
 task_json() {
@@ -349,6 +395,11 @@ cmd_stamp() {
   [ -n "$evidence" ] || refuse "--evidence is required and must be non-empty (a met flip without proof is rejected server-side anyway)"
 
   local tmp; tmp=$(scratch_dir)
+
+  # THE CREDENTIAL PROBE COMES FIRST — before the read, before the budget, before
+  # anything that could be mistaken for progress. A run with no writing principal
+  # must refuse here, not at the mutation.
+  require_writing_principal
 
   task_json "$task_id" "$tmp/task.json"
   criterion_to_file "$tmp/task.json" "$idx" "$tmp/criterion.txt" || exit "$EX_REFUSED"
