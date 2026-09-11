@@ -21,7 +21,7 @@ defmodule BarkparkCloud.Notifications.FleetDigestSiteOwningAudienceTest do
 
   `sites.barkpark_id` cascades on delete, so deleting a box takes its sites with
   it — that is NOT the path. The path is tenancy drift: `Registry.create_site/2`
-  stamps `team_id` from the box AT CREATE TIME (registry.ex:5689) and never
+  stamps `team_id` from the box AT CREATE TIME (registry.ex, `create_site/2`) and never
   again, so moving a box to another team leaves its sites' `team_id` pointing at
   the old one. The old team then owns rows in `sites` and no row in `barkparks`.
   §1 builds exactly that state and drives the real rail over

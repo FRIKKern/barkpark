@@ -18,7 +18,7 @@ defmodule BarkparkCloud.Notifications.SitePublishWaitingAlert do
 
   ## Where the cohort comes from — ONE call site, and it is not ours
 
-  `DeployLedger.delivery/3` (`deploy_ledger.ex:2189`) already computes the
+  `DeployLedger.delivery/3` (`deploy_ledger.ex`, `delivery/3`) already computes the
   STILL-WAITING cohort: every site node it returns carries `still_waiting` and
   `oldest_waiting_seconds`, folded from the same censored observations its
   percentiles are taken over. This module writes NO query. That is the

@@ -165,10 +165,11 @@ defmodule Barkpark.Tasks.QueueGate do
       # CALENDAR semantics. '2026-13-45T99:99:99Z' and '2026-02-30T12:00:00Z'
       # both match a fully anchored pattern and both still raise. So the shape
       # guard and the comparison each do the job the other cannot: the anchored
-      # pattern (T and Z REQUIRED, which is what every writer emits — claim.ex
-      # :446 and :527 and pulse.ex:177 are all `DateTime.utc_now() |>
-      # DateTime.to_iso8601()`) makes LEXICOGRAPHIC ordering well-defined, and
-      # the text comparison cannot raise whatever the tail says.
+      # pattern (T and Z REQUIRED, which is what every writer emits —
+      # `Claim.do_claim_resolved`, `Claim.do_renew` and `Pulse.pulse/3` are all
+      # `DateTime.utc_now() |> DateTime.to_iso8601()`) makes LEXICOGRAPHIC
+      # ordering well-defined, and the text comparison cannot raise whatever
+      # the tail says.
       #
       # Requiring `T` and `Z` is load-bearing, not tidiness: a space separator
       # sorts BELOW 'T', and a '-05:00' offset compares by its literal local

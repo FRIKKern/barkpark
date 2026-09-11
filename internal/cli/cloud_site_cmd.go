@@ -205,7 +205,7 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	// being non-empty. Reading it unconditionally cannot tell an operator-typed
 	// triple from a value some other layer supplied: the resolved content context
 	// carries an ambient dataset from ~/.config/barkpark/config.json /
-	// BARKPARK_DATASET, and paper_cmd.go:169 already REWRITES g.dataset mid-run
+	// BARKPARK_DATASET, and paper_cmd.go's `g.dataset = target.dataset` already REWRITES g.dataset mid-run
 	// from a pasted Paper URL. Either one reaching here would spawn a site — a
 	// durable, tenant-scoped, billable object — against a workspace/project/
 	// dataset the operator never named, with exit 0. Creation is the one place

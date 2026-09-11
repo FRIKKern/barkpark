@@ -309,7 +309,7 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   # shipped the credential to an operator's inbox in cleartext. Only the ORDER
   # changes here: the capture itself is still rendered in full and unreordered.
   #
-  # dr-w23-bl: that hand-rolled pipe IS `FailureCopy.raw/1` (`failure_copy.ex:548`
+  # dr-w23-bl: that hand-rolled pipe IS `FailureCopy.raw/1` (`failure_copy.ex`, `raw/1`
   # — `value |> strip_ansi() |> scrub()`), so this boundary NAMES the entry point
   # instead of re-deriving the order in line. Same two functions, same order,
   # byte-identical output; what changes is that the order is no longer a thing a

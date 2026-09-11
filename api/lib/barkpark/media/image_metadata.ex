@@ -162,7 +162,7 @@ defmodule Barkpark.Media.ImageMetadata do
   # unset rather than fabricated.
   # Reachability: `rel` is never caller data — it is `Renditions.ensure/2`'s
   # return value (lib/barkpark/media/renditions.ex:93), which is always
-  # `cache_relative/4`'s output (lib/barkpark/media/renditions.ex:186):
+  # `cache_relative/4`'s output (`cache_relative/4` in lib/barkpark/media/renditions.ex):
   # `Path.join(["_renditions", id, "<preset><suffix>.<ext>"])` over a fixed
   # literal prefix, the `MediaFile` `:binary_id` UUID
   # (lib/barkpark/media/storage/media_file.ex:5), the `@presets` key
