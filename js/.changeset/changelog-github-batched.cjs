@@ -24,9 +24,19 @@
 // let a batch of 265 through (measured with a probe on the DataLoader). Gating
 // `getInfo` bounds every load regardless of which generator function issued it.
 //
+// Bounding the batch turns one huge request into ~47 sequential ones, which
+// exposes a second, independent failure: there is no retry anywhere in this
+// stack, so ONE transient GitHub 5xx aborts the whole `changeset version`. Seen
+// in a clean run that had already survived the batch problem:
+//   FetchError: invalid json response body ... Unexpected token 'u', "upstream c"...
+// (an edge "upstream connect error" page). So `getInfo` is also retried with
+// backoff, and only for transport-shaped failures — a GraphQL `errors` payload
+// or a bad token still fails immediately rather than being hammered.
+//
 // This does NOT change CHANGELOG content. Every line is still produced by the
 // configured `@changesets/changelog-github` calling the real `getInfo`; we only
-// bound how many of those calls are in flight, which bounds the query size.
+// bound how many of those calls are in flight, which bounds the query size, and
+// retry the ones that fail for transport reasons.
 
 const path = require("path");
 
@@ -63,6 +73,52 @@ function createGate(limit) {
   };
 }
 
+const DEFAULT_MAX_ATTEMPTS = 5;
+
+function readAttempts() {
+  const raw = process.env.CHANGESET_GITHUB_MAX_ATTEMPTS;
+  if (!raw) return DEFAULT_MAX_ATTEMPTS;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(
+      `CHANGESET_GITHUB_MAX_ATTEMPTS must be a positive integer, got ${JSON.stringify(raw)}`
+    );
+  }
+  return parsed;
+}
+
+// Transport-shaped: the response was not JSON at all (an HTML 502, an
+// "upstream connect error" page), or GitHub said it ran out of time. A GraphQL
+// `errors` payload, a bad token, or a bad repo name is NOT retried.
+function isTransient(error) {
+  if (!error) return false;
+  if (error.type === "invalid-json") return true;
+  if (error.name === "FetchError") return true;
+  const message = typeof error.message === "string" ? error.message : "";
+  return message.includes("We couldn't respond to your request in time");
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function withRetry(fn, maxAttempts) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt === maxAttempts || !isTransient(error)) throw error;
+      const delayMs = 500 * 2 ** (attempt - 1);
+      process.stderr.write(
+        `changelog-github-batched: transient GitHub failure (${error.message.split("\n")[0]}); ` +
+          `retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxAttempts})\n`
+      );
+      await sleep(delayMs);
+    }
+  }
+  throw lastError;
+}
+
 // `@changesets/get-github-info` is a transitive dependency (changelog-github
 // depends on it, this workspace does not), so under pnpm's strict layout it is
 // not resolvable from `.changeset/`. Resolve it from changelog-github's own
@@ -74,14 +130,16 @@ const getGithubInfoPath = require.resolve("@changesets/get-github-info", {
 const getGithubInfo = require(getGithubInfoPath);
 
 const gate = createGate(readCap());
+const maxAttempts = readAttempts();
 
 // changelog-github calls `getGithubInfo.getInfo(...)` as a property lookup at
 // call time, so replacing the property is enough to gate it.
 const realGetInfo = getGithubInfo.getInfo;
 const realGetInfoFromPullRequest = getGithubInfo.getInfoFromPullRequest;
-getGithubInfo.getInfo = (...args) => gate(() => realGetInfo(...args));
+getGithubInfo.getInfo = (...args) =>
+  gate(() => withRetry(() => realGetInfo(...args), maxAttempts));
 getGithubInfo.getInfoFromPullRequest = (...args) =>
-  gate(() => realGetInfoFromPullRequest(...args));
+  gate(() => withRetry(() => realGetInfoFromPullRequest(...args), maxAttempts));
 
 // Required only AFTER the patch is installed.
 const upstream = require("@changesets/changelog-github").default;
