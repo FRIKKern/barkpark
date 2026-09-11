@@ -1,30 +1,34 @@
 // Why this file exists.
 //
-// `@changesets/changelog-github` looks each changeset's commit up on GitHub's
-// GraphQL API through `@changesets/get-github-info`, which uses a module-level
-// DataLoader. DataLoader batches every `.load()` issued in one tick into a
-// SINGLE GraphQL query, and changesets calls `getReleaseLine` for all pending
-// changesets concurrently. With a large backlog that becomes one query with
-// hundreds of `repository { object(expression: <sha>) { associatedPullRequests(first: 50) } }`
-// aliases, and GitHub refuses to execute it.
+// `@changesets/changelog-github` resolves each changeset's commit through
+// `@changesets/get-github-info`, which uses ONE module-level DataLoader.
+// DataLoader collapses every `.load()` issued in the same tick into a SINGLE
+// GraphQL query, and changesets asks for all pending release lines at once. With
+// a large backlog that becomes one query carrying an alias per changeset, each
+// with `associatedPullRequests(first: 50)`, and GitHub refuses to execute it.
 //
 // Measured against this repo (440 pending changesets, token valid for GraphQL):
 //   N=1   rc 0
-//   N=50  rc 0
-//   N=100 rc 1 — {"message":"We couldn't respond to your request in time. ..."}
-//   N=150 rc 1 — FetchError: invalid json response body ... Unexpected token '<', "<html>
-//   N=440 rc 1 — same HTML error page
-// i.e. GitHub's GraphQL server-side execution budget, degrading to an HTML 502
-// page once it is exceeded badly enough. It is a TIME budget, not a fixed node
-// count, so the boundary is not a hard number — hence the conservative cap.
+//   N=50  rc 0  (8s)
+//   N=100 rc 1  {"message":"We couldn't respond to your request in time. ..."}
+//   N=150 rc 1  FetchError: invalid json response body ... Unexpected token '<', "<html>
+//   N=440 rc 1  same HTML error page
+// So it is GitHub's server-side execution budget, degrading to an HTML 502 page
+// once exceeded badly enough. That budget is TIME, not a fixed node count, so
+// the boundary is not a hard number — hence a conservative cap.
 //
-// The fix is a concurrency gate, not a different generator: we delegate to the
-// real `@changesets/changelog-github` for every line, so CHANGELOG content is
-// byte-for-byte what the configured generator produces. We only bound how many
-// of its calls are in flight at once, which bounds the DataLoader batch and so
-// the size of each GraphQL query.
+// The gate has to sit on `getInfo`, not on the generator's two exported
+// functions. `getDependencyReleaseLine` takes an ARRAY of changesets and does
+// `Promise.all(changesets.map(...))` internally, so a single call to it fans out
+// to as many lookups as there are changesets: gating the outer function still
+// let a batch of 265 through (measured with a probe on the DataLoader). Gating
+// `getInfo` bounds every load regardless of which generator function issued it.
+//
+// This does NOT change CHANGELOG content. Every line is still produced by the
+// configured `@changesets/changelog-github` calling the real `getInfo`; we only
+// bound how many of those calls are in flight, which bounds the query size.
 
-const upstream = require("@changesets/changelog-github");
+const path = require("path");
 
 const DEFAULT_MAX_CONCURRENT_LOOKUPS = 25;
 
@@ -44,12 +48,6 @@ function createGate(limit) {
   let active = 0;
   const waiting = [];
 
-  const release = () => {
-    active -= 1;
-    const next = waiting.shift();
-    if (next) next();
-  };
-
   return async function run(fn) {
     if (active >= limit) {
       await new Promise((resolve) => waiting.push(resolve));
@@ -58,15 +56,37 @@ function createGate(limit) {
     try {
       return await fn();
     } finally {
-      release();
+      active -= 1;
+      const next = waiting.shift();
+      if (next) next();
     }
   };
 }
 
+// `@changesets/get-github-info` is a transitive dependency (changelog-github
+// depends on it, this workspace does not), so under pnpm's strict layout it is
+// not resolvable from `.changeset/`. Resolve it from changelog-github's own
+// directory to be sure we patch the SAME module instance changelog-github uses.
+const changelogGithubEntry = require.resolve("@changesets/changelog-github");
+const getGithubInfoPath = require.resolve("@changesets/get-github-info", {
+  paths: [path.dirname(changelogGithubEntry)],
+});
+const getGithubInfo = require(getGithubInfoPath);
+
 const gate = createGate(readCap());
 
-const getReleaseLine = (...args) => gate(() => upstream.default.getReleaseLine(...args));
-const getDependencyReleaseLine = (...args) =>
-  gate(() => upstream.default.getDependencyReleaseLine(...args));
+// changelog-github calls `getGithubInfo.getInfo(...)` as a property lookup at
+// call time, so replacing the property is enough to gate it.
+const realGetInfo = getGithubInfo.getInfo;
+const realGetInfoFromPullRequest = getGithubInfo.getInfoFromPullRequest;
+getGithubInfo.getInfo = (...args) => gate(() => realGetInfo(...args));
+getGithubInfo.getInfoFromPullRequest = (...args) =>
+  gate(() => realGetInfoFromPullRequest(...args));
 
-module.exports = { getReleaseLine, getDependencyReleaseLine };
+// Required only AFTER the patch is installed.
+const upstream = require("@changesets/changelog-github").default;
+
+module.exports = {
+  getReleaseLine: upstream.getReleaseLine,
+  getDependencyReleaseLine: upstream.getDependencyReleaseLine,
+};
