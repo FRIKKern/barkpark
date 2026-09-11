@@ -480,6 +480,23 @@ const byline: Emit = (b) => {
 
 const ingress: Emit = (b) => `<p class="bp-role-ingress">${renderInlines(paragraphInline(b))}</p>`
 
+// The reader-synthesised pre-gate badge (#17199). It is NEVER stored: Elixir's
+// `Content.Papers.PreGateRegister.annotate/3` mints it into the block stream a
+// reader receives, so the JS renderer meets it in `value` like any other block
+// and must emit the same mark as compose.ex's `pre-gate-badge` clause +
+// walk.ex's `pre_gate_class/1`: one `<p>`, the `bp-pregate` family root, a tone
+// modifier from a two-value WHITELIST (anything but "warning" is "neutral", so a
+// stray value can never mint a class), the `--tucked` modifier only under a
+// byline anchor, and the register's reader_behaviour as `title=` — omitted
+// entirely when empty, matching walk.ex's title_attr.
+const preGateBadge: Emit = (b) => {
+  const tone = str(b.tone) === 'warning' ? 'warning' : 'neutral'
+  const tucked = str(b.anchor) === 'byline' ? ' bp-pregate--tucked' : ''
+  const title = str(b.title)
+  const titleAttr = title === '' ? '' : ` title="${escapeAttr(title)}"`
+  return `<p class="bp-pregate bp-pregate--${tone}${tucked}"${titleAttr}>${escapeHtml(str(b.label))}</p>`
+}
+
 // Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped
 // 2026-07-31): published readers emit only visible semantic groups — an empty
 // paragraph scaffold (Enter, Enter) is editable authoring state, NEVER published
@@ -1353,6 +1370,7 @@ export const coreEmitters: Record<string, Emit> = {
   h3: headingAtLevel(3),
   eyebrow,
   byline,
+  'pre-gate-badge': preGateBadge,
   ingress,
   paragraph,
   pullquote,

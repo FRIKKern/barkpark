@@ -89,9 +89,12 @@ func TestSearchQueryNonPublishedPerspectiveIsAuthenticated(t *testing.T) {
 		})
 	}
 
-	// The public path must stay byte-for-byte public: asking for the default
-	// perspective attaches nothing, so nothing that works today changes shape.
-	t.Run("published_stays_public", func(t *testing.T) {
+	// The default perspective now carries the configured bearer too
+	// (task-621bcf889e730f4c): the "byte-for-byte public" rule applied to a
+	// caller HOLDING a token is what laundered a refused credential into an
+	// anonymous 200 at rc=0. It still applies to a caller holding none — the
+	// tokenless arms below.
+	t.Run("published_carries_the_configured_bearer", func(t *testing.T) {
 		req, derr := buildManifestRequest(
 			globals{}, ctx, m, cmd,
 			[]string{"hello", "--perspective", "published"},
@@ -100,19 +103,37 @@ func TestSearchQueryNonPublishedPerspectiveIsAuthenticated(t *testing.T) {
 		if derr != nil {
 			t.Fatalf("buildManifestRequest: %v", derr)
 		}
-		if got := req.headers["Authorization"]; got != "" {
-			t.Errorf("published Authorization = %q, want an unchanged public request", got)
+		if got := req.headers["Authorization"]; got != "Bearer draft-reader-token" {
+			t.Errorf("published Authorization = %q, want the configured bearer", got)
 		}
 	})
 
-	// No --perspective at all: also unchanged.
-	t.Run("absent_stays_public", func(t *testing.T) {
+	// No --perspective at all: same.
+	t.Run("absent_carries_the_configured_bearer", func(t *testing.T) {
 		req, derr := buildManifestRequest(globals{}, ctx, m, cmd, []string{"hello"}, false)
 		if derr != nil {
 			t.Fatalf("buildManifestRequest: %v", derr)
 		}
-		if got := req.headers["Authorization"]; got != "" {
-			t.Errorf("no-perspective Authorization = %q, want an unchanged public request", got)
+		if got := req.headers["Authorization"]; got != "Bearer draft-reader-token" {
+			t.Errorf("no-perspective Authorization = %q, want the configured bearer", got)
+		}
+	})
+
+	// THE CONTROL: with no token configured, the public search stays public in
+	// both shapes. Without this arm the two assertions above would also be
+	// satisfied by "tier none always authenticates", which has no anonymous
+	// caller left.
+	t.Run("tokenless_stays_public", func(t *testing.T) {
+		anon := ctx
+		anon.Token = ""
+		for _, tail := range [][]string{{"hello"}, {"hello", "--perspective", "published"}} {
+			req, derr := buildManifestRequest(globals{}, anon, m, cmd, tail, false)
+			if derr != nil {
+				t.Fatalf("buildManifestRequest(%v): %v", tail, derr)
+			}
+			if got := req.headers["Authorization"]; got != "" {
+				t.Errorf("tokenless Authorization = %q for %v, want no header at all", got, tail)
+			}
 		}
 	})
 }
