@@ -227,6 +227,10 @@ export const RESIDUE_REGISTER = [
   { selector: ".instances-grid .instance-card", views: ["view-overview"], legs: "W12-narrow-viewport-truth", status: "latent" },
   { selector: ".site-name", views: ["view-sites", "view-instance"], legs: "W26-instance-track-min-content", status: "latent" },
   { selector: ".site-row", views: ["view-sites", "view-instance"], legs: "W50-site-row-three-hosts-cruel-by-fixture", status: "latent" },
+  // task-02a521fea7beeb2f: the pin-badge walk in the W21 detail leg is document-wide by
+  // the same full-load entry as its siblings above; a hidden view-instance keeps one
+  // Autoupdate badge painted after the tour. Latent for the same reason as .detail-url-text.
+  { selector: ".update-panel-body .rail-row .v .badge", views: ["view-instance"], legs: "W21-detail-url-text-page-bound", status: "latent" },
 ];
 
 /**
