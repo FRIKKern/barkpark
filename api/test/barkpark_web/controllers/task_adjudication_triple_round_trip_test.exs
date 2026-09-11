@@ -7,8 +7,15 @@ defmodule BarkparkWeb.TaskAdjudicationTripleRoundTripTest do
   survive the doors a producer uses. This drives the real HTTP surface end to
   end — `POST /v1/data/mutate/:dataset` create → patch → publish, then
   `GET /v1/data/doc/:dataset/task/:id?perspective=published` — and asserts that
-  `disposition`, `reopen_trigger` and `disposition_rerun` are all three present
-  and byte-identical on the published row.
+  `disposition`, `reopen_trigger`, `disposition_rerun` and `disposition_reason`
+  are all four present and byte-identical on the published row.
+
+  THE FOURTH KEY joins the three for the reason the schema now declares it:
+  `Stage.durable_reason_key/0` is the durable WHY, written by the same verb in
+  the same CAS update, and it was invisible to every schema-derived surface
+  until this slice. It rides the SAME doors as the other three here, so the
+  proof is the same proof — a declaration nobody proved survives create → patch
+  → publish is a declaration about nothing.
 
   THE PUBLISHED PERSPECTIVE IS THE POINT, not an incidental read. A create
   lands on `drafts.<id>`; a consumer reading the published perspective sees a
@@ -20,9 +27,10 @@ defmodule BarkparkWeb.TaskAdjudicationTripleRoundTripTest do
   The patch deliberately carries a NON-adjudication field: the raw mutate door
   refuses a direct change of `disposition`/`disposition_rerun` on a live task
   (`Mutations.ensure_disposition_via_verb/4` — that is a different slice's
-  fence and this test must not route around it). What is proven here is that an
-  unrelated patch does not silently drop the triple on its way through the
-  merge.
+  fence and this test must not route around it). `disposition_reason` is NOT in
+  that refusal set, but the patch still leaves it alone: what is proven here is
+  that an unrelated patch does not silently drop these keys on its way through
+  the merge, and changing one of them would measure the fence instead.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -66,12 +74,14 @@ defmodule BarkparkWeb.TaskAdjudicationTripleRoundTripTest do
     id = "adjudication-round-trip-#{System.unique_integer([:positive])}"
     trigger = "when the Bokbasen contract is renegotiated"
     rerun = "git grep -n disposition origin/main -- api/lib/barkpark/tasks/schema.ex"
+    reason = "the Bokbasen contract blocks this until Q3 — parked, not abandoned"
 
     # The three keys under test are the ones the schema now DECLARES — read
     # from Stage so this test cannot drift from the declaration either.
     disposition_key = Stage.disposition_key()
     trigger_key = Stage.reopen_trigger_key()
     rerun_key = Stage.disposition_rerun_key()
+    reason_key = Stage.durable_reason_key()
 
     # A born-adjudicated park: a complete adjudication, so the birth fence
     # accepts it (a hollow park would be 422 — task_birth_fence_test.exs).
@@ -88,7 +98,8 @@ defmodule BarkparkWeb.TaskAdjudicationTripleRoundTripTest do
                 "lifecycle_status" => "open",
                 disposition_key => "parked",
                 trigger_key => trigger,
-                rerun_key => rerun
+                rerun_key => rerun,
+                reason_key => reason
               })
           }
         }
@@ -137,16 +148,19 @@ defmodule BarkparkWeb.TaskAdjudicationTripleRoundTripTest do
     assert content[disposition_key] == "parked"
     assert content[trigger_key] == trigger
     assert content[rerun_key] == rerun
+    assert content[reason_key] == reason
 
-    # And what the schema declares is what came back — no declared key of the
-    # triple is missing from the published read.
+    # And what the schema declares is what came back — no declared
+    # adjudication key is missing from the published read.
+    keys = [disposition_key, trigger_key, rerun_key, reason_key]
+
     declared =
       Tasks.task_schema(@dataset).fields
       |> Enum.map(& &1["name"])
-      |> Enum.filter(&(&1 in [disposition_key, trigger_key, rerun_key]))
+      |> Enum.filter(&(&1 in keys))
 
-    assert Enum.sort(declared) == Enum.sort([disposition_key, trigger_key, rerun_key]),
-           "the schema stopped declaring part of the triple"
+    assert Enum.sort(declared) == Enum.sort(keys),
+           "the schema stopped declaring part of the adjudication set"
 
     for key <- declared do
       assert Map.has_key?(content, key),

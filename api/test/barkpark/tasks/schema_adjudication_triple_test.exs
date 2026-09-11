@@ -20,6 +20,15 @@ defmodule Barkpark.Tasks.SchemaAdjudicationTripleTest do
   and assert that identity, so replacing either call with a literal — or
   changing one word on one side — fails here.
 
+  WAVE 29 FOLLOW-UP — THE FOURTH KEY. `Stage.durable_reason_key/0`
+  (`disposition_reason`) is the durable WHY, written by the same verb in the
+  same CAS update and deliberately spared by `TtlSweeper.apply_lapse/1`. It was
+  the fourth undeclared key: measured before the declaration landed,
+  `task_schema/1` returned 33 field names and none of them was
+  `disposition_reason`, while a create carrying it read it straight back. It is
+  now locked here by the same rule — the NAME is read from `Stage`, never
+  retyped, so removing the declaration or diverging the string reds below.
+
   What this file deliberately does NOT assert: that the declaration ENFORCES
   anything. `select` is a v1 leaf, the write contract is still
   `Writer.ensure_task_born_adjudicated/5`, and its three refusal branches are
@@ -35,15 +44,22 @@ defmodule Barkpark.Tasks.SchemaAdjudicationTripleTest do
     Tasks.task_schema().fields |> Map.new(&{&1["name"], &1})
   end
 
-  describe "the triple is declared" do
-    test "all three keys appear as task schema fields, named by Stage's own key accessors" do
+  # The four durable adjudication keys, each named by Stage's own accessor so
+  # this list cannot drift from the declaration it checks.
+  defp adjudication_keys do
+    [
+      Stage.disposition_key(),
+      Stage.reopen_trigger_key(),
+      Stage.disposition_rerun_key(),
+      Stage.durable_reason_key()
+    ]
+  end
+
+  describe "the adjudication keys are declared" do
+    test "all four keys appear as task schema fields, named by Stage's own key accessors" do
       names = Tasks.task_schema().fields |> Enum.map(& &1["name"])
 
-      for key <- [
-            Stage.disposition_key(),
-            Stage.reopen_trigger_key(),
-            Stage.disposition_rerun_key()
-          ] do
+      for key <- adjudication_keys() do
         assert key in names,
                "#{key} is undeclared — a schema-derived surface cannot see it (#{inspect(names)})"
       end
@@ -53,26 +69,18 @@ defmodule Barkpark.Tasks.SchemaAdjudicationTripleTest do
       group_names = Tasks.task_schema().groups |> Enum.map(& &1["name"])
       fields = fields_by_name()
 
-      for key <- [
-            Stage.disposition_key(),
-            Stage.reopen_trigger_key(),
-            Stage.disposition_rerun_key()
-          ] do
+      for key <- adjudication_keys() do
         assert fields[key]["group"] in group_names
       end
     end
 
-    test "the triple sits in `work`, not `close` — a parked row is NOT terminal" do
+    test "the keys sit in `work`, not `close` — a parked row is NOT terminal" do
       # The close group hides behind `lifecycle_status in [done, cancelled]`.
       # Seating the adjudication there would hide it on exactly the rows that
       # carry it: a parked task is open-lifecycle by construction.
       fields = fields_by_name()
 
-      for key <- [
-            Stage.disposition_key(),
-            Stage.reopen_trigger_key(),
-            Stage.disposition_rerun_key()
-          ] do
+      for key <- adjudication_keys() do
         assert fields[key]["group"] == "work"
       end
     end
@@ -136,6 +144,54 @@ defmodule Barkpark.Tasks.SchemaAdjudicationTripleTest do
         assert term in options,
                "the birth fence accepts #{inspect(term)}, which the schema never offers"
       end
+    end
+  end
+
+  describe "the durable reason is declared and is NOT gated on a disposition term" do
+    test "disposition_reason is declared under the name Stage owns" do
+      # THE MUTATION THIS CATCHES, direction 1: delete the declaration from
+      # schema.ex. THE MUTATION IT CATCHES, direction 2: retype the name as a
+      # literal that diverges from `Stage.durable_reason_key/0` (e.g.
+      # "disposition_note") — the schema then declares a key nothing writes,
+      # and the key Stage DOES write stays invisible.
+      names = Tasks.task_schema().fields |> Enum.map(& &1["name"])
+
+      assert Stage.durable_reason_key() in names,
+             "#{Stage.durable_reason_key()} is undeclared — a schema-derived surface cannot " <>
+               "see the durable WHY, though Stage persists it (#{inspect(names)})"
+    end
+
+    test "it is free text, not a select — a reason is prose, not a vocabulary" do
+      field = fields_by_name()[Stage.durable_reason_key()]
+
+      assert field["type"] == "text"
+      refute Map.has_key?(field, "options")
+    end
+
+    test "it carries NO visibleWhen, unlike the rerun one field over" do
+      # `Stage.stage/3` routes `:note` on EVERY stageable target, including
+      # `-> open`, so a row can carry a reason with no `disposition` term at
+      # all. Copying `disposition_rerun`'s `visibleWhen` onto this field would
+      # hide it on exactly those rows — so the ASYMMETRY is asserted, not the
+      # presence of one more `visibleWhen`.
+      fields = fields_by_name()
+
+      refute Map.has_key?(fields[Stage.durable_reason_key()], "visibleWhen"),
+             "the durable reason must not be gated on a disposition term — Stage writes it " <>
+               "on stages that set no term"
+
+      assert fields[Stage.disposition_rerun_key()]["visibleWhen"] == %{
+               "field" => Stage.disposition_key(),
+               "operator" => "non_empty"
+             }
+    end
+
+    test "the four keys are four DISTINCT declarations, not one field counted twice" do
+      names = Tasks.task_schema().fields |> Enum.map(& &1["name"])
+      declared = Enum.filter(names, &(&1 in adjudication_keys()))
+
+      assert Enum.sort(declared) == Enum.sort(adjudication_keys())
+      assert length(Enum.uniq(declared)) == 4
     end
   end
 end
